@@ -1,0 +1,25 @@
+/target/
+**/*.rs.bk
+*.pdb
+
+# Local configuration and reports (may contain credentials)
+/run/
+/logs/
+/cache/
+/reports/
+/uploads/
+/packages/
+/dist/
+.env
+
+# Reference environment data
+/fixtures/snapshots/*.sql.gz
+/.reference-env/
+
+.DS_Store
+.idea/
+.vscode/
+
+# Private private notes clone and scratch files
+/tmp/
+CLAUDE.local.md

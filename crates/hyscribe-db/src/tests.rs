@@ -86,18 +86,135 @@ async fn reads_the_default_install() {
     assert_eq!(hello.guid, b"http://default-install.test/?p=1");
     assert_eq!(db.post(999).await.unwrap(), None);
 
-    let titles =
-        |posts: Vec<Post>| -> Vec<Vec<u8>> { posts.into_iter().map(|p| p.title).collect() };
     assert_eq!(
-        titles(db.published("post", 10, 0).await.unwrap()),
-        [b"Hello world!".to_vec()]
+        db.category_name(1).await.unwrap(),
+        Some(b"Uncategorized".to_vec())
     );
+    assert_eq!(db.category_name(999).await.unwrap(), None);
+}
+
+/// Titles of the posts `query` (with defaults for the rest) selects.
+async fn titles(db: &Db, query: PostQuery) -> Vec<String> {
+    let query = PostQuery {
+        post_types: if query.post_types.is_empty() {
+            vec!["post"]
+        } else {
+            query.post_types
+        },
+        limit: if query.limit == 0 { 10 } else { query.limit },
+        ..query
+    };
+    db.posts(&query)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|p| String::from_utf8(p.title).unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn post_lists() {
+    let db = fixture().await;
+    let all = || PostQuery::default();
+    assert_eq!(titles(&db, all()).await, ["Hello world!"]);
     // The privacy policy page is a draft.
     assert_eq!(
-        titles(db.published("page", 10, 0).await.unwrap()),
-        [b"Sample Page".to_vec()]
+        titles(
+            &db,
+            PostQuery {
+                post_types: vec!["page"],
+                ..all()
+            }
+        )
+        .await,
+        ["Sample Page"]
     );
-    assert!(db.published("post", 10, 1).await.unwrap().is_empty());
+    assert!(
+        titles(&db, PostQuery { offset: 1, ..all() })
+            .await
+            .is_empty()
+    );
+
+    let both = || PostQuery {
+        post_types: vec!["post", "page"],
+        ..all()
+    };
+    let search = |terms: &[&str]| PostQuery {
+        search: terms.iter().map(|t| t.to_string()).collect(),
+        ..both()
+    };
+    assert_eq!(titles(&db, search(&["hello"])).await, ["Hello world!"]);
+    // Case-insensitive, in content too, and title matches first.
+    assert_eq!(
+        titles(&db, search(&["WORDPRESS"])).await,
+        ["Hello world!", "Sample Page"]
+    );
+    assert_eq!(
+        titles(&db, search(&["sample", "page"])).await,
+        ["Sample Page"]
+    );
+    assert!(titles(&db, search(&["nothingmatches"])).await.is_empty());
+    // Wildcards are searched for literally.
+    assert!(titles(&db, search(&["%"])).await.is_empty());
+    assert!(titles(&db, search(&["_ello"])).await.is_empty());
+
+    assert_eq!(
+        titles(
+            &db,
+            PostQuery {
+                category: Some(1),
+                ..all()
+            }
+        )
+        .await,
+        ["Hello world!"]
+    );
+    assert!(
+        titles(
+            &db,
+            PostQuery {
+                category: Some(999),
+                ..all()
+            }
+        )
+        .await
+        .is_empty()
+    );
+
+    let hello = db.post(1).await.unwrap().unwrap();
+    let part =
+        |range: std::ops::Range<usize>| hello.date.get(range).unwrap().parse::<u64>().unwrap();
+    let (year, month, day) = (part(0..4), part(5..7), part(8..10));
+    let dated = |year, month, day| PostQuery {
+        year,
+        month,
+        day,
+        ..all()
+    };
+    assert_eq!(
+        titles(&db, dated(Some(year), Some(month), Some(day))).await,
+        ["Hello world!"]
+    );
+    assert_eq!(
+        titles(&db, dated(Some(year), None, None)).await,
+        ["Hello world!"]
+    );
+    assert!(titles(&db, dated(Some(1999), None, None)).await.is_empty());
+    assert!(
+        titles(&db, dated(Some(year), Some(month % 12 + 1), None))
+            .await
+            .is_empty()
+    );
+    assert!(
+        titles(&db, dated(Some(year), Some(month), Some(day % 28 + 1)))
+            .await
+            .is_empty()
+    );
+}
+
+#[test]
+fn like_patterns_escape_wildcards() {
+    assert_eq!(like("a%b_c\\d"), "%a\\%b\\_c\\\\d%");
 }
 
 #[tokio::test]
@@ -121,11 +238,19 @@ async fn errors_are_reported() {
         db.autoload_options().await.unwrap_err(),
         db.option("blogname").await.unwrap_err(),
         db.post(1).await.unwrap_err(),
-        db.published("post", 1, 0).await.unwrap_err(),
+        db.posts(&PostQuery {
+            post_types: vec!["post"],
+            limit: 1,
+            ..PostQuery::default()
+        })
+        .await
+        .unwrap_err(),
+        db.category_name(1).await.unwrap_err(),
     ] {
         assert!(
-            err.to_string().contains("missing_options")
-                || err.to_string().contains("missing_posts"),
+            ["missing_options", "missing_posts", "missing_terms"]
+                .iter()
+                .any(|table| err.to_string().contains(table)),
             "{err}"
         );
     }

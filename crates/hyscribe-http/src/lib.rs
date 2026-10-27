@@ -16,7 +16,7 @@ use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use hyscribe_db::{Db, DbError, Post};
+use hyscribe_db::{Db, DbError, Post, PostQuery};
 use hyscribe_render::blocks::{parse_blocks, render};
 use tokio::net::TcpListener;
 
@@ -214,25 +214,141 @@ async fn route(
                 },
             )
         }
-        None => {
-            let per_page = absint(&site.option("posts_per_page")).clamp(1, 100);
-            let posts = site
-                .db
-                .published("post", u32::try_from(per_page).unwrap_or(10), 0)
-                .await?;
-            let tagline = site.option("blogdescription");
-            let title = if tagline.is_empty() {
-                site.name()
-            } else {
-                format!("{} &#8211; {}", site.name(), esc_html(&tagline))
-            };
-            Ok(Outcome::Page(Page {
-                status: StatusCode::OK,
-                title,
-                main: posts.iter().map(|post| article(site, post)).collect(),
-            }))
+        None => list(site, query).await.map(Outcome::Page),
+    }
+}
+
+/// The `m` query var's date parts, as `WP_Query` reads them: digits only,
+/// `YYYY`, then `MM`, then `DD`.
+fn date_parts(m: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
+    let digits: String = m.chars().filter(char::is_ascii_digit).collect();
+    let part = |range: std::ops::Range<usize>| digits.get(range).and_then(|d| d.parse().ok());
+    if digits.is_empty() {
+        return (None, None, None);
+    }
+    let year = part(0..4).or_else(|| digits.parse().ok());
+    (year, part(4..6), part(6..8))
+}
+
+/// A list page: the home page, a search, a category or a date archive.
+async fn list(site: &Site, query: &HashMap<String, String>) -> Result<Page, DbError> {
+    let search = query.get("s");
+    let category = query.get("cat").map(|c| absint(c)).filter(|&id| id > 0);
+    let (year, month, day) = query.get("m").map_or((None, None, None), |m| date_parts(m));
+    let per_page = absint(&site.option("posts_per_page")).clamp(1, 100);
+    let post_query = PostQuery {
+        // Searches cover posts and pages.
+        post_types: if search.is_some() {
+            vec!["post", "page"]
+        } else {
+            vec!["post"]
+        },
+        search: search.map_or_else(Vec::new, |s| search_terms(s)),
+        category,
+        year,
+        month,
+        day,
+        limit: u32::try_from(per_page).unwrap_or(10),
+        offset: 0,
+    };
+    let category_name = match category {
+        Some(id) => match site.db.category_name(id).await? {
+            Some(name) => Some(lossy(&name)),
+            // A category that does not exist.
+            None => return Ok(not_found(site)),
+        },
+        None => None,
+    };
+    let posts = site.db.posts(&post_query).await?;
+    // A date archive with nothing in it is a 404; a search never is.
+    if year.is_some() && search.is_none() && category_name.is_none() && posts.is_empty() {
+        return Ok(not_found(site));
+    }
+    let first_date = posts.first().map_or("", |post| post.date.as_str());
+    let heading = if let Some(s) = search {
+        Some(format!("Search Results for &#8220;{}&#8221;", esc_attr(s)))
+    } else if let Some(name) = category_name {
+        Some(esc_html(&name))
+    } else if year.is_some() {
+        let format = if day.is_some() {
+            site.option("date_format")
+        } else if month.is_some() {
+            "F Y".to_string()
+        } else {
+            "Y".to_string()
+        };
+        Some(php_date(&format, first_date))
+    } else {
+        None
+    };
+    let tagline = site.option("blogdescription");
+    let title = match heading {
+        Some(heading) => format!("{heading} &#8211; {}", site.name()),
+        None if tagline.is_empty() => site.name(),
+        None => format!("{} &#8211; {}", site.name(), esc_html(&tagline)),
+    };
+    Ok(Page {
+        status: StatusCode::OK,
+        title,
+        main: posts.iter().map(|post| article(site, post)).collect(),
+    })
+}
+
+/// Search terms as WordPress splits them: on spaces, tabs, commas and plus
+/// signs. Stopword removal comes with i18n (M9.4).
+fn search_terms(search: &str) -> Vec<String> {
+    search
+        .split([' ', '\t', ',', '+'])
+        .filter(|term| !term.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+/// PHP's `date()` for the formats archive titles use, applied to a stored
+/// `YYYY-MM-DD HH:MM:SS` value. Other format characters pass through.
+fn php_date(format: &str, stored: &str) -> String {
+    let number = |range: std::ops::Range<usize>| -> u64 {
+        stored.get(range).and_then(|d| d.parse().ok()).unwrap_or(0)
+    };
+    let (year, month, day) = (number(0..4), number(5..7), number(8..10));
+    let month_name = month
+        .checked_sub(1)
+        .and_then(|m| usize::try_from(m).ok())
+        .and_then(|m| MONTHS.get(m))
+        .copied()
+        .unwrap_or("");
+    let mut out = String::new();
+    let mut chars = format.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            'Y' => out.push_str(&format!("{year:04}")),
+            'y' => out.push_str(&format!("{:02}", year % 100)),
+            'F' => out.push_str(month_name),
+            'M' => out.push_str(month_name.get(..3).unwrap_or("")),
+            'm' => out.push_str(&format!("{month:02}")),
+            'n' => out.push_str(&month.to_string()),
+            'd' => out.push_str(&format!("{day:02}")),
+            'j' => out.push_str(&day.to_string()),
+            '\\' => out.extend(chars.next()),
+            c => out.push(c),
         }
     }
+    out
 }
 
 fn not_found(site: &Site) -> Page {

@@ -178,7 +178,7 @@ async fn database_errors_show_no_details() {
         options: HashMap::new(),
         home: String::new(),
     });
-    for uri in ["/", "/?p=1"] {
+    for uri in ["/", "/?p=1", "/?cat=1"] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(
@@ -273,4 +273,96 @@ async fn canonical_redirects_match_wordpress() {
     assert_eq!(title(&reply.body), "HyScribe Default Install");
     let reply = request(&site, "GET", "/xindex.php/").await;
     assert_eq!(reply.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn archives_and_searches_match_wordpress_titles() {
+    let site = fixture_site(None).await;
+    let name = "HyScribe Default Install";
+    // Titles recorded from PHP WordPress on the same database.
+    for (uri, expected) in [
+        ("/?s=hello", "Search Results for &#8220;hello&#8221;"),
+        ("/?s=", "Search Results for &#8220;&#8221;"),
+        (
+            "/?s=sample+page",
+            "Search Results for &#8220;sample page&#8221;",
+        ),
+        (
+            "/?s=nothingmatches",
+            "Search Results for &#8220;nothingmatches&#8221;",
+        ),
+        ("/?s=%3Cb%3E", "Search Results for &#8220;&lt;b&gt;&#8221;"),
+        ("/?cat=1", "Uncategorized"),
+        ("/?s=hello&cat=1", "Search Results for &#8220;hello&#8221;"),
+        ("/?cat=1&m=2026", "Uncategorized"),
+    ] {
+        let reply = request(&site, "GET", uri).await;
+        assert_eq!(reply.status, StatusCode::OK, "{uri}");
+        assert_eq!(
+            title(&reply.body),
+            format!("{expected} &#8211; {name}"),
+            "{uri}"
+        );
+    }
+    let hello = site.db.post(1).await.unwrap().unwrap();
+    let year = hello.date.get(0..4).unwrap();
+    let month = hello.date.get(5..7).unwrap();
+    let day = hello.date.get(8..10).unwrap();
+    for (m, format) in [
+        (year.to_string(), "Y"),
+        (format!("{year}{month}"), "F Y"),
+        (format!("{year}-{month}-{day}"), "F j, Y"),
+    ] {
+        let reply = request(&site, "GET", &format!("/?m={m}")).await;
+        assert_eq!(reply.status, StatusCode::OK, "{m}");
+        assert_eq!(
+            title(&reply.body),
+            format!("{} &#8211; {name}", php_date(format, &hello.date))
+        );
+    }
+    // The search results list pages too; the home page does not.
+    let reply = request(&site, "GET", "/?s=").await;
+    assert!(reply.body.contains("Sample Page") && reply.body.contains("Hello world!"));
+    for uri in ["/?cat=999", "/?m=1999", "/?m=12"] {
+        assert_eq!(
+            request(&site, "GET", uri).await.status,
+            StatusCode::NOT_FOUND,
+            "{uri}"
+        );
+    }
+    // Digits only: `abc` is no date at all.
+    assert_eq!(title(&request(&site, "GET", "/?m=abc").await.body), name);
+    assert_eq!(
+        request(&site, "GET", "/?cat=0").await.status,
+        StatusCode::OK
+    );
+}
+
+#[test]
+fn date_parts_follow_wp_query() {
+    assert_eq!(date_parts("2026"), (Some(2026), None, None));
+    assert_eq!(date_parts("2026-10"), (Some(2026), Some(10), None));
+    assert_eq!(date_parts("20261027"), (Some(2026), Some(10), Some(27)));
+    assert_eq!(date_parts("202610271200"), (Some(2026), Some(10), Some(27)));
+    assert_eq!(date_parts("12"), (Some(12), None, None));
+    assert_eq!(date_parts("abc"), (None, None, None));
+    assert_eq!(date_parts("20261"), (Some(2026), None, None));
+}
+
+#[test]
+fn php_date_formats() {
+    let stored = "2026-03-07 08:09:10";
+    assert_eq!(php_date("F j, Y", stored), "March 7, 2026");
+    assert_eq!(php_date("M d y, n/m", stored), "Mar 07 26, 3/03");
+    assert_eq!(php_date("\\Y\\e\\a\\r Y", stored), "Year 2026");
+    assert_eq!(php_date("F", "2026-12-01"), "December");
+    assert_eq!(php_date("F|M|j", ""), "||0");
+    // `n` is a format character, as in PHP.
+    assert_eq!(php_date("trailing\\", stored), "traili3g");
+}
+
+#[test]
+fn search_terms_split_like_wordpress() {
+    assert_eq!(search_terms("a b,c+d\te"), ["a", "b", "c", "d", "e"]);
+    assert!(search_terms("  ,+ ").is_empty());
 }

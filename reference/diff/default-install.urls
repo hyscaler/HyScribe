@@ -19,3 +19,13 @@
 /?page_id=1
 /index.php
 /no/such/path/
+/?s=
+/?s=nothingmatches
+/?s=sample+page
+/?cat=999
+/?m=1999
+/?m=202610
+/?m=20261027
+/?m=abc
+/?s=hello&cat=1
+/?cat=1&m=2026

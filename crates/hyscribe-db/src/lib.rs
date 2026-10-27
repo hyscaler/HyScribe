@@ -33,6 +33,11 @@ impl Prefix {
     /// this crate builds. `query` is a literal and the prefix cannot hold
     /// SQL syntax, so the result is safe.
     fn sql(&self, query: &'static str) -> sqlx::AssertSqlSafe<String> {
+        self.sql_from_fragments(query.to_string())
+    }
+
+    /// The same for SQL that [`Sql`] joined from fixed fragments only.
+    fn sql_from_fragments(&self, query: String) -> sqlx::AssertSqlSafe<String> {
         sqlx::AssertSqlSafe(query.replace("{prefix}", &self.0))
     }
 }
@@ -256,28 +261,158 @@ impl Db {
         row.as_ref().map(post).transpose()
     }
 
-    /// Published posts of `post_type`, newest first, as the main query of a
-    /// plain blog home page selects them.
-    pub async fn published(
-        &self,
-        post_type: &str,
-        limit: u32,
-        offset: u32,
-    ) -> Result<Vec<Post>, DbError> {
-        let sql = self.prefix.sql(concat!(
+    /// Published posts matching `query`, as the main query of a list page
+    /// (home, search, category or date archive) selects them.
+    pub async fn posts(&self, query: &PostQuery) -> Result<Vec<Post>, DbError> {
+        let mut sql = Sql::new(concat!(
             "SELECT ",
             post_columns!(),
-            " FROM {prefix}posts WHERE post_type = ? AND post_status = 'publish' \
-             ORDER BY post_date DESC, ID DESC LIMIT ? OFFSET ?"
+            " FROM {prefix}posts WHERE post_status = 'publish' AND post_type IN ("
         ));
-        let rows = sqlx::query(sql)
-            .bind(post_type)
-            .bind(limit)
-            .bind(offset)
+        for (i, post_type) in query.post_types.iter().enumerate() {
+            sql.push(if i == 0 { "?" } else { ", ?" });
+            sql.bind(Bind::Text(post_type.to_string()));
+        }
+        sql.push(")");
+        for term in &query.search {
+            sql.push(" AND (post_title LIKE ? OR post_excerpt LIKE ? OR post_content LIKE ?)");
+            for _ in 0..3 {
+                sql.bind(Bind::Text(like(term)));
+            }
+        }
+        if let Some(category) = query.category {
+            sql.push(
+                " AND ID IN (SELECT tr.object_id FROM {prefix}term_relationships tr \
+                 JOIN {prefix}term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id \
+                 WHERE tt.taxonomy = 'category' AND tt.term_id = ?)",
+            );
+            sql.bind(Bind::Int(category));
+        }
+        let date = [
+            (" AND YEAR(post_date) = ?", query.year),
+            (" AND MONTH(post_date) = ?", query.month),
+            (" AND DAYOFMONTH(post_date) = ?", query.day),
+        ];
+        for (fragment, value) in date {
+            if let Some(value) = value {
+                sql.push(fragment);
+                sql.bind(Bind::Int(value));
+            }
+        }
+        // WordPress's own ordering, ties included: title matches of the
+        // whole search phrase first, then newest first.
+        if query.search.is_empty() {
+            sql.push(" ORDER BY post_date DESC");
+        } else {
+            sql.push(" ORDER BY post_title LIKE ? DESC, post_date DESC");
+            sql.bind(Bind::Text(like(&query.search.join(" "))));
+        }
+        sql.push(" LIMIT ? OFFSET ?");
+        sql.bind(Bind::Int(query.limit.into()));
+        sql.bind(Bind::Int(query.offset.into()));
+        let rows = sql
+            .query(&self.prefix)
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
         rows.iter().map(post).collect()
+    }
+
+    /// A category's name, if the category exists.
+    pub async fn category_name(&self, term_id: u64) -> Result<Option<Vec<u8>>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT t.name FROM {prefix}terms t JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
+             WHERE tt.taxonomy = 'category' AND t.term_id = ? LIMIT 1",
+        );
+        let row = sqlx::query(sql)
+            .bind(term_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.map(|row| {
+            let mut c = Columns::new(&row);
+            let name = c.bytes("name");
+            c.finish(name)
+        })
+        .transpose()
+    }
+}
+
+/// What a list of posts is filtered by.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PostQuery {
+    /// Post types to include, such as `post`, or `post` and `page` for a
+    /// search.
+    pub post_types: Vec<&'static str>,
+    /// Search terms; every term must appear in the title, excerpt or content.
+    pub search: Vec<String>,
+    /// A category's `term_id`.
+    pub category: Option<u64>,
+    /// `YEAR(post_date)`.
+    pub year: Option<u64>,
+    /// `MONTH(post_date)`.
+    pub month: Option<u64>,
+    /// `DAYOFMONTH(post_date)`.
+    pub day: Option<u64>,
+    /// How many posts.
+    pub limit: u32,
+    /// How many to skip.
+    pub offset: u32,
+}
+
+/// A `LIKE` pattern matching `text` anywhere, with `%`, `_` and `\\`
+/// escaped as `$wpdb->esc_like()` does.
+fn like(text: &str) -> String {
+    let mut pattern = String::from("%");
+    for c in text.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            pattern.push('\\');
+        }
+        pattern.push(c);
+    }
+    pattern.push('%');
+    pattern
+}
+
+enum Bind {
+    Text(String),
+    Int(u64),
+}
+
+/// SQL assembled only from fixed fragments, with bound values.
+struct Sql {
+    text: String,
+    binds: Vec<Bind>,
+}
+
+impl Sql {
+    fn new(fragment: &'static str) -> Sql {
+        Sql {
+            text: fragment.to_string(),
+            binds: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, fragment: &'static str) {
+        self.text.push_str(fragment);
+    }
+
+    fn bind(&mut self, value: Bind) {
+        self.binds.push(value);
+    }
+
+    fn query(
+        self,
+        prefix: &Prefix,
+    ) -> sqlx::query::Query<'static, sqlx::MySql, sqlx::mysql::MySqlArguments> {
+        let mut query = sqlx::query(prefix.sql_from_fragments(self.text));
+        for value in self.binds {
+            query = match value {
+                Bind::Text(text) => query.bind(text),
+                Bind::Int(n) => query.bind(n),
+            };
+        }
+        query
     }
 }
 

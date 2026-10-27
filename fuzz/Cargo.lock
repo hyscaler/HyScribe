@@ -499,11 +499,16 @@ name = "hyscribe-fuzz"
 version = "0.0.0"
 dependencies = [
  "hyscribe-config",
+ "hyscribe-html",
  "hyscribe-http",
  "hyscribe-phpser",
  "hyscribe-render",
  "libfuzzer-sys",
 ]
+
+[[package]]
+name = "hyscribe-html"
+version = "0.1.0"
 
 [[package]]
 name = "hyscribe-http"

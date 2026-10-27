@@ -17,6 +17,7 @@ hyscribe-phpser = { path = "../crates/hyscribe-phpser" }
 hyscribe-config = { path = "../crates/hyscribe-config" }
 hyscribe-render = { path = "../crates/hyscribe-render" }
 hyscribe-http = { path = "../crates/hyscribe-http" }
+hyscribe-html = { path = "../crates/hyscribe-html" }
 
 [[bin]]
 name = "phpser_decode"
@@ -63,6 +64,13 @@ bench = false
 [[bin]]
 name = "wptexturize"
 path = "fuzz_targets/wptexturize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "html_tag_processor"
+path = "fuzz_targets/html_tag_processor.rs"
 test = false
 doc = false
 bench = false

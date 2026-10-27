@@ -19,7 +19,7 @@ mkdir -p "$out"
 
 title() { grep -o '<title>[^<]*</title>' "$1" | head -n 1 | sed 's/<[^>]*>//g'; }
 
-printf '%-28s %-5s %-5s %-6s %s\n' URL PHP OURS TITLE "BYTES (php/ours)"
+printf '%-28s %-5s %-5s %-6s %-5s %s\n' URL PHP OURS TITLE BODY "BYTES (php/ours)"
 failed=0
 n=0
 while read -r path intended _; do
@@ -44,7 +44,8 @@ while read -r path intended _; do
   elif [ "$pc" != "$oc" ] || [ "$same_title" = no ]; then
     failed=1
   fi
-  printf '%-28s %-5s %-5s %-6s %s/%s\n' "$path" "$pc" "$oc" "$same_title" \
+  body=$(python3 -I "$(dirname "$0")/similarity.py" "$out/$n.php.html" "$out/$n.ours.html")
+  printf '%-28s %-5s %-5s %-6s %-5s %s/%s\n' "$path" "$pc" "$oc" "$same_title" "$body%" \
     "$(wc -c < "$out/$n.php.html")" "$(wc -c < "$out/$n.ours.html")"
   [ "$same_title" != no ] || printf '    php:  %s\n    ours: %s\n' "$pt" "$ot"
 done < "$urls"

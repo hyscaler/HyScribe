@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Query var parsing accepts any request input without panicking.
+
+#![no_main]
+
+use hyscribe_http::query;
+use libfuzzer_sys::fuzz_target;
+
+fuzz_target!(|data: &[u8]| {
+    let text = String::from_utf8_lossy(data);
+    let _ = query::absint(&text);
+    let _ = query::date_parts(&text);
+    let _ = query::search_terms(&text);
+    let _ = query::other_args(Some(&text), "p");
+    let middle = (0..=text.len() / 2)
+        .rev()
+        .find(|&i| text.is_char_boundary(i))
+        .unwrap_or(0);
+    let (format, stored) = text.split_at(middle);
+    let _ = query::php_date(format, stored);
+});

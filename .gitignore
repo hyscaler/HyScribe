@@ -12,10 +12,6 @@
 /dist/
 .env
 
-# Reference environment data
-/fixtures/snapshots/*.sql.gz
-/.reference-env/
-
 .DS_Store
 .idea/
 .vscode/

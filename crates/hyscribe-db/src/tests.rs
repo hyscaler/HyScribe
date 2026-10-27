@@ -6,51 +6,33 @@
 use super::*;
 use hyscribe_config::Secret;
 
-/// The database `reference/default-install/db.sh` starts.
 fn fixture_config() -> Database {
-    let env = |key: &str, default: &str| std::env::var(key).unwrap_or_else(|_| default.to_string());
-    Database {
-        host: env("HYSCRIBE_TEST_DB_HOST", "127.0.0.1"),
-        port: env("HYSCRIBE_TEST_DB_PORT", "33061").parse().unwrap(),
-        name: "wordpress".into(),
-        user: "wordpress".into(),
-        password: Secret::new("reference-only"),
-        prefix: "wp_".into(),
-        charset: "utf8mb4".into(),
-    }
+    hyscribe_testkit::fixture_database()
 }
 
 async fn fixture() -> Db {
     Db::connect(&fixture_config())
         .await
-        .expect("no fixture database: run reference/default-install/db.sh up")
+        .expect(hyscribe_testkit::NO_FIXTURE_DATABASE)
 }
 
 #[test]
-fn prefixes_are_validated() {
+fn the_prefix_goes_into_sql() {
     assert_eq!(
-        Prefix::new("wp_")
-            .unwrap()
-            .sql("SELECT * FROM {prefix}posts")
-            .0,
+        Prefix::default().sql("SELECT * FROM {prefix}posts").0,
         "SELECT * FROM wp_posts"
     );
-    assert!(Prefix::new("hs2_").is_some());
-    for bad in ["wp-", "wp_;", "wp `x`", "é"] {
-        assert_eq!(Prefix::new(bad), None, "{bad:?}");
-    }
 }
 
 #[tokio::test]
 async fn reads_the_default_install() {
     let db = fixture().await;
-    assert_eq!(db.prefix(), &Prefix("wp_".into()));
-    assert_eq!(
-        db.option("blogname").await.unwrap(),
-        Some(b"HyScribe Default Install".to_vec())
-    );
-    assert_eq!(db.option("no_such_option").await.unwrap(), None);
     let options = db.autoload_options().await.unwrap();
+    assert!(
+        options
+            .iter()
+            .any(|(name, value)| name == "blogname" && value == b"HyScribe Default Install")
+    );
     assert!(
         options
             .iter()
@@ -232,11 +214,10 @@ async fn connections_are_read_only() {
 async fn errors_are_reported() {
     // Every query fails against tables that do not exist.
     let mut config = fixture_config();
-    config.prefix = "missing_".into();
+    config.prefix = Prefix::new("missing_").unwrap();
     let db = Db::connect(&config).await.unwrap();
     for err in [
         db.autoload_options().await.unwrap_err(),
-        db.option("blogname").await.unwrap_err(),
         db.post(1).await.unwrap_err(),
         db.posts(&PostQuery {
             post_types: vec!["post"],
@@ -254,13 +235,6 @@ async fn errors_are_reported() {
             "{err}"
         );
     }
-
-    config.prefix = "bad-".into();
-    let err = Db::connect(&config).await.unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        "the table prefix may only hold letters, digits and underscores"
-    );
 
     let mut config = fixture_config();
     config.password = Secret::new("hunter2-wrong");

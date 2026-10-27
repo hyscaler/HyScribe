@@ -232,15 +232,15 @@ fn site_port(home: &std::path::Path) -> u16 {
     port
 }
 
-/// The default install fixture from `reference/default-install/db.sh`.
+/// The default install fixture as environment variables.
 fn fixture_db() -> Vec<(&'static str, String)> {
-    let env = |key: &str, default: &str| std::env::var(key).unwrap_or_else(|_| default.to_string());
+    let db = hyscribe_testkit::fixture_database();
     vec![
-        ("DB_HOST", env("HYSCRIBE_TEST_DB_HOST", "127.0.0.1")),
-        ("DB_PORT", env("HYSCRIBE_TEST_DB_PORT", "33061")),
-        ("DB_NAME", "wordpress".to_string()),
-        ("DB_USER", "wordpress".to_string()),
-        ("DB_PASSWORD", "reference-only".to_string()),
+        ("DB_HOST", db.host),
+        ("DB_PORT", db.port.to_string()),
+        ("DB_NAME", db.name),
+        ("DB_USER", db.user),
+        ("DB_PASSWORD", db.password.expose().to_string()),
     ]
 }
 

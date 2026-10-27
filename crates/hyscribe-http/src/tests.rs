@@ -6,26 +6,17 @@
 use super::*;
 use axum::body::Body;
 use axum::http::Request;
-use hyscribe_config::{Database, Secret};
+use hyscribe_config::Database;
 use tower::ServiceExt;
 
 fn fixture_config() -> Database {
-    let env = |key: &str, default: &str| std::env::var(key).unwrap_or_else(|_| default.to_string());
-    Database {
-        host: env("HYSCRIBE_TEST_DB_HOST", "127.0.0.1"),
-        port: env("HYSCRIBE_TEST_DB_PORT", "33061").parse().unwrap(),
-        name: "wordpress".into(),
-        user: "wordpress".into(),
-        password: Secret::new("reference-only"),
-        prefix: "wp_".into(),
-        charset: "utf8mb4".into(),
-    }
+    hyscribe_testkit::fixture_database()
 }
 
 async fn fixture_site(home: Option<&str>) -> Arc<Site> {
     let db = Db::connect(&fixture_config())
         .await
-        .expect("no fixture database: run reference/default-install/db.sh up");
+        .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
     Arc::new(Site::load(db, home.map(String::from)).await.unwrap())
 }
 
@@ -170,7 +161,7 @@ async fn the_tagline_joins_the_home_title() {
 #[tokio::test]
 async fn database_errors_show_no_details() {
     let mut config = fixture_config();
-    config.prefix = "missing_".into();
+    config.prefix = hyscribe_config::Prefix::new("missing_").unwrap();
     let db = Db::connect(&config).await.unwrap();
     assert!(Site::load(db.clone(), None).await.is_err());
     let site = Arc::new(Site {

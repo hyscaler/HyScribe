@@ -24,7 +24,7 @@ mod value;
 mod wp;
 
 pub use decode::{MAX_DEPTH, decode};
-pub use encode::{encode, encode_into};
+pub use encode::encode;
 pub use error::{Error, ErrorKind};
 pub use float::Float;
 pub use json::{JSON_MAX_DEPTH, json_decode};

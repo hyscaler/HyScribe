@@ -5,40 +5,34 @@
 //! - **Read only.** Every connection is put in a read only transaction mode,
 //!   and this crate has no write methods: shadow mode cannot write.
 //! - **No string-built SQL.** Queries are fixed text; only the table prefix
-//!   is inserted, and [`Prefix`] admits nothing but `[A-Za-z0-9_]`. Values
+//!   is inserted, and `Prefix` admits nothing but `[A-Za-z0-9_]`. Values
 //!   are always bound parameters.
 //! - **Bytes, not text.** Text columns are read as bytes, so content is
 //!   never re-encoded whatever the site's charset.
 
 use std::fmt;
 
-use hyscribe_config::Database;
+use hyscribe_config::{Database, Prefix};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
 
-/// A validated `$table_prefix`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Prefix(String);
+/// Puts the table prefix into SQL: the only SQL this crate builds.
+trait PrefixSql {
+    /// `query` with every `{prefix}` replaced. `query` is a literal and the
+    /// prefix cannot hold SQL syntax, so the result is safe.
+    fn sql(&self, query: &'static str) -> sqlx::AssertSqlSafe<String>;
 
-impl Prefix {
-    /// The same rule `wp-settings.php` applies to `$table_prefix`.
-    pub fn new(prefix: &str) -> Option<Prefix> {
-        prefix
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
-            .then(|| Prefix(prefix.to_string()))
-    }
+    /// The same for SQL that [`Sql`] joined from fixed fragments only.
+    fn sql_from_fragments(&self, query: String) -> sqlx::AssertSqlSafe<String>;
+}
 
-    /// `query` with every `{prefix}` replaced by the prefix: the only SQL
-    /// this crate builds. `query` is a literal and the prefix cannot hold
-    /// SQL syntax, so the result is safe.
+impl PrefixSql for Prefix {
     fn sql(&self, query: &'static str) -> sqlx::AssertSqlSafe<String> {
         self.sql_from_fragments(query.to_string())
     }
 
-    /// The same for SQL that [`Sql`] joined from fixed fragments only.
     fn sql_from_fragments(&self, query: String) -> sqlx::AssertSqlSafe<String> {
-        sqlx::AssertSqlSafe(query.replace("{prefix}", &self.0))
+        sqlx::AssertSqlSafe(query.replace("{prefix}", self.as_str()))
     }
 }
 
@@ -176,9 +170,7 @@ pub struct Db {
 impl Db {
     /// Connects with `config`, read only.
     pub async fn connect(config: &Database) -> Result<Db, DbError> {
-        let prefix = Prefix::new(&config.prefix).ok_or_else(|| {
-            DbError("the table prefix may only hold letters, digits and underscores".into())
-        })?;
+        let prefix = config.prefix.clone();
         let options = MySqlConnectOptions::new()
             .host(&config.host)
             .port(config.port)
@@ -203,11 +195,6 @@ impl Db {
         Ok(Db { pool, prefix })
     }
 
-    /// The table prefix.
-    pub fn prefix(&self) -> &Prefix {
-        &self.prefix
-    }
-
     /// Every option WordPress loads on each request, in table order.
     pub async fn autoload_options(&self) -> Result<Vec<(String, Vec<u8>)>, DbError> {
         // WordPress 6.6 and later write on/auto/auto-on; older rows say yes.
@@ -226,24 +213,6 @@ impl Db {
                 c.finish(option)
             })
             .collect()
-    }
-
-    /// One option's raw value.
-    pub async fn option(&self, name: &str) -> Result<Option<Vec<u8>>, DbError> {
-        let sql = self
-            .prefix
-            .sql("SELECT option_value FROM {prefix}options WHERE option_name = ? LIMIT 1");
-        let row = sqlx::query(sql)
-            .bind(name)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(db_error)?;
-        row.map(|row| {
-            let mut c = Columns::new(&row);
-            let value = c.bytes("option_value");
-            c.finish(value)
-        })
-        .transpose()
     }
 
     /// One post by ID, whatever its type and status.

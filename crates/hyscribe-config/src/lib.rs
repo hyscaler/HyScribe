@@ -29,6 +29,34 @@ pub const SALT_KEYS: [&str; 8] = [
     "NONCE_SALT",
 ];
 
+/// A validated `$table_prefix`: letters, digits and underscores only, the
+/// rule `wp-settings.php` applies. Nothing else can be built, so the prefix
+/// is safe to put into SQL.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Prefix(String);
+
+impl Prefix {
+    /// Checks `prefix`; `None` if it has any other character.
+    pub fn new(prefix: &str) -> Option<Prefix> {
+        prefix
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            .then(|| Prefix(prefix.to_string()))
+    }
+
+    /// The prefix itself.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for Prefix {
+    /// `wp_`, WordPress's default.
+    fn default() -> Prefix {
+        Prefix("wp_".into())
+    }
+}
+
 /// A value that must never be printed or logged.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Secret(String);
@@ -74,7 +102,7 @@ pub struct Database {
     /// `DB_PASSWORD`, default empty.
     pub password: Secret,
     /// `DB_PREFIX`, WordPress's `$table_prefix`, default `wp_`.
-    pub prefix: String,
+    pub prefix: Prefix,
     /// `DB_CHARSET`, default `utf8mb4`.
     pub charset: String,
 }
@@ -188,14 +216,8 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
     };
     let required = |key: &'static str| get(key).map(String::from).ok_or(ConfigError::Missing(key));
 
-    let prefix = get("DB_PREFIX").unwrap_or("wp_").to_string();
-    // The same rule wp-settings.php applies to $table_prefix.
-    if !prefix
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
-    {
-        return Err(invalid("DB_PREFIX", "only letters, digits and underscores"));
-    }
+    let prefix = Prefix::new(get("DB_PREFIX").unwrap_or("wp_"))
+        .ok_or_else(|| invalid("DB_PREFIX", "only letters, digits and underscores"))?;
 
     let database = Database {
         host: get("DB_HOST").unwrap_or("localhost").to_string(),

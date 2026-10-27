@@ -126,7 +126,6 @@ pub fn run(ctx: Context<'_>) -> u8 {
     };
     let site = Site {
         paths: Paths::new(&home),
-        home: &home,
         env: &env,
         euid,
         server: &server,
@@ -156,7 +155,6 @@ pub fn run(ctx: Context<'_>) -> u8 {
 /// The parts of the context the server commands use.
 struct Site<'a> {
     paths: Paths,
-    home: &'a Path,
     env: &'a HashMap<String, String>,
     euid: u32,
     server: &'a (PathBuf, Vec<OsString>),
@@ -211,7 +209,7 @@ fn server_config(home: &Path, env: &HashMap<String, String>, euid: u32) -> Resul
 
 /// `hyscribe start`: serves the site until SIGTERM or SIGINT.
 fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
-    let config = server_config(site.home, site.env, site.euid)?;
+    let config = server_config(site.paths.home(), site.env, site.euid)?;
     let (mut shutdown, lock) =
         hyscribe_service::claim(&site.paths).map_err(|err| err.to_string())?;
     // The blocking signal wait runs on its own thread and wakes the server.
@@ -276,7 +274,7 @@ fn service(command: ServiceCommand, site: &Site<'_>, out: &mut dyn Write) -> Res
     let paths = &site.paths;
     let error = |err: hyscribe_service::Error| err.to_string();
     let start = || -> Result<String, String> {
-        server_config(site.home, site.env, site.euid)?;
+        server_config(site.paths.home(), site.env, site.euid)?;
         let spawn = Spawn {
             program: site.server.0.clone(),
             args: site.server.1.clone(),
@@ -361,7 +359,7 @@ fn describe(config: &Config) -> String {
         host = db.host,
         port = db.port,
         name = db.name,
-        prefix = db.prefix,
+        prefix = db.prefix.as_str(),
         charset = db.charset,
         bind = config.server.bind_host,
         http_port = config.server.port,

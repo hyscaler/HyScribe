@@ -173,6 +173,27 @@ pub fn default_install(version: &str) -> Result<Dump, String> {
     Dump::parse(&sql)
 }
 
+/// The default install fixture database that
+/// `reference/default-install/db.sh up` starts. `HYSCRIBE_TEST_DB_HOST` and
+/// `HYSCRIBE_TEST_DB_PORT` move it.
+pub fn fixture_database() -> hyscribe_config::Database {
+    let env = |key: &str, default: &str| std::env::var(key).unwrap_or_else(|_| default.to_string());
+    hyscribe_config::Database {
+        host: env("HYSCRIBE_TEST_DB_HOST", "127.0.0.1"),
+        port: env("HYSCRIBE_TEST_DB_PORT", "33061")
+            .parse()
+            .unwrap_or(33061),
+        name: "wordpress".into(),
+        user: "wordpress".into(),
+        password: hyscribe_config::Secret::new("reference-only"),
+        prefix: hyscribe_config::Prefix::default(),
+        charset: "utf8mb4".into(),
+    }
+}
+
+/// What a test prints when the fixture database is not running.
+pub const NO_FIXTURE_DATABASE: &str = "no fixture database: run reference/default-install/db.sh up";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,5 +256,17 @@ INSERT INTO `u` VALUES (3,'x');\n";
             assert!(dump.table("wp_options").count() > 100);
         }
         assert!(default_install("0.0.0").unwrap_err().contains("0.0.0"));
+    }
+
+    #[test]
+    fn fixture_database_matches_db_sh() {
+        let db = fixture_database();
+        assert_eq!(
+            (db.name.as_str(), db.user.as_str()),
+            ("wordpress", "wordpress")
+        );
+        assert_eq!(db.password.expose(), "reference-only");
+        assert_eq!(db.prefix.as_str(), "wp_");
+        assert!(NO_FIXTURE_DATABASE.contains("db.sh up"));
     }
 }

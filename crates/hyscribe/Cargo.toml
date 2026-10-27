@@ -24,6 +24,7 @@ hyscribe-service.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync"] }
 
 [dev-dependencies]
+hyscribe-testkit.workspace = true
 tempfile = "3"
 
 [lints]

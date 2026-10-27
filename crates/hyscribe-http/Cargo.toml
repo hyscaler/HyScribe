@@ -16,6 +16,7 @@ hyscribe-render.workspace = true
 tokio = { version = "1", features = ["net"] }
 
 [dev-dependencies]
+hyscribe-testkit.workspace = true
 hyscribe-config.workspace = true
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", default-features = false, features = ["util"] }

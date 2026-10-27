@@ -16,6 +16,7 @@ libfuzzer-sys = "0.4"
 hyscribe-phpser = { path = "../crates/hyscribe-phpser" }
 hyscribe-config = { path = "../crates/hyscribe-config" }
 hyscribe-render = { path = "../crates/hyscribe-render" }
+hyscribe-http = { path = "../crates/hyscribe-http" }
 
 [[bin]]
 name = "phpser_decode"
@@ -48,6 +49,13 @@ bench = false
 [[bin]]
 name = "phpser_json_decode"
 path = "fuzz_targets/phpser_json_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http_query"
+path = "fuzz_targets/http_query.rs"
 test = false
 doc = false
 bench = false

@@ -10,7 +10,7 @@ pub fn encode(value: &Value) -> Vec<u8> {
 }
 
 /// Appends the encoding of `value` to `out`.
-pub fn encode_into(value: &Value, out: &mut Vec<u8>) {
+fn encode_into(value: &Value, out: &mut Vec<u8>) {
     match value {
         Value::Null => out.extend_from_slice(b"N;"),
         Value::Bool(b) => out.extend_from_slice(if *b { b"b:1;" } else { b"b:0;" }),

@@ -39,7 +39,7 @@ fn defaults_are_safe() {
                 name: "wordpress".into(),
                 user: "wp".into(),
                 password: Secret::new(""),
-                prefix: "wp_".into(),
+                prefix: Prefix("wp_".into()),
                 charset: "utf8mb4".into(),
             },
             server: Server {
@@ -76,7 +76,7 @@ fn reads_every_key() {
     assert_eq!(config.database.host, "db.internal");
     assert_eq!(config.database.port, 3307);
     assert_eq!(config.database.password.expose(), "hunter2");
-    assert_eq!(config.database.prefix, "site2_");
+    assert_eq!(config.database.prefix.as_str(), "site2_");
     assert_eq!(config.database.charset, "utf8");
     assert_eq!(config.server.bind_host, "::".parse::<IpAddr>().unwrap());
     assert_eq!(config.server.port, 80);
@@ -99,7 +99,7 @@ fn reads_every_key() {
 #[test]
 fn empty_values_count_as_unset() {
     let config = from_map(&with(&[("DB_PREFIX", ""), ("MODE", "")])).unwrap();
-    assert_eq!(config.database.prefix, "wp_");
+    assert_eq!(config.database.prefix.as_str(), "wp_");
     assert_eq!(config.mode, Mode::Shadow);
     assert_eq!(
         from_map(&map(&[("DB_NAME", ""), ("DB_USER", "wp")])),
@@ -219,4 +219,13 @@ fn secrets_are_redacted() {
     );
     let err: Box<dyn std::error::Error> = Box::new(ConfigError::Missing("DB_NAME"));
     assert!(err.source().is_none());
+}
+
+#[test]
+fn prefixes_are_validated() {
+    assert_eq!(Prefix::new("hs2_").unwrap().as_str(), "hs2_");
+    assert_eq!(Prefix::default().as_str(), "wp_");
+    for bad in ["wp-", "wp_;", "wp `x`", "\u{e9}"] {
+        assert_eq!(Prefix::new(bad), None, "{bad:?}");
+    }
 }

@@ -209,30 +209,67 @@ fn server_config(home: &Path, env: &HashMap<String, String>, euid: u32) -> Resul
         .ok_or_else(|| NO_CONFIG.to_string())
 }
 
-/// `hyscribe start`: holds the service slot until SIGTERM or SIGINT. The
-/// HTTP server joins in M2.
+/// `hyscribe start`: serves the site until SIGTERM or SIGINT.
 fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
     let config = server_config(site.home, site.env, site.euid)?;
     let (mut shutdown, lock) =
         hyscribe_service::claim(&site.paths).map_err(|err| err.to_string())?;
-    // Log lines are best effort: a lost log must not stop the server.
-    let _ = writeln!(
-        out,
-        "hyscribe {} running (pid {}) in {} mode, configured for http://{}:{}",
-        env!("CARGO_PKG_VERSION"),
-        std::process::id(),
-        mode_name(config.mode),
-        config.server.bind_host,
-        config.server.port
-    );
-    let _ = out.flush();
-    let signal = shutdown.wait();
+    // The blocking signal wait runs on its own thread and wakes the server.
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = stop.send(shutdown.wait());
+    });
+    let signal = std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0));
+    let seen = signal.clone();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(failed("cannot start the runtime".into()));
+    runtime.and_then(|runtime| {
+        runtime.block_on(async {
+            let db = hyscribe_db::Db::connect(&config.database)
+                .await
+                .map_err(|err| format!("cannot connect to the database: {err}"))?;
+            let site = hyscribe_http::Site::load(db, config.home_url.clone())
+                .await
+                .map_err(|err| format!("cannot read the site options: {err}"))?;
+            let address = std::net::SocketAddr::new(config.server.bind_host, config.server.port);
+            let listener = tokio::net::TcpListener::bind(address)
+                .await
+                .map_err(failed(format!("cannot listen on {address}")))?;
+            // Log lines are best effort: a lost log must not stop the server.
+            let _ = writeln!(
+                out,
+                "hyscribe {} running (pid {}) in {} mode, listening on http://{address}",
+                env!("CARGO_PKG_VERSION"),
+                std::process::id(),
+                mode_name(config.mode),
+            );
+            let _ = out.flush();
+            hyscribe_http::serve(listener, std::sync::Arc::new(site), async move {
+                // The sender only goes away after sending.
+                let number = stopped.await.unwrap_or(0);
+                seen.store(number, std::sync::atomic::Ordering::SeqCst);
+            })
+            .await
+            .map_err(failed("the server failed".into()))
+        })
+    })?;
     // The last line is written before the lock is released, so whoever sees
     // the server stopped also sees the whole log.
-    let _ = writeln!(out, "stopped on signal {signal}");
+    let _ = writeln!(
+        out,
+        "stopped on signal {}",
+        signal.load(std::sync::atomic::Ordering::SeqCst)
+    );
     let _ = out.flush();
     drop(lock);
     Ok(Reply::text(String::new()))
+}
+
+/// Formats an I/O failure with what was being done.
+fn failed(context: String) -> impl FnOnce(std::io::Error) -> String {
+    move |err| format!("{context}: {err}")
 }
 
 fn service(command: ServiceCommand, site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {

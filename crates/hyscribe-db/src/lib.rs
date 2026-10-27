@@ -183,6 +183,8 @@ impl Db {
             .charset(&config.charset);
         let pool = MySqlPoolOptions::new()
             .max_connections(8)
+            // Report an unreachable database soon instead of retrying for 30s.
+            .acquire_timeout(std::time::Duration::from_secs(5))
             .after_connect(|conn, _| {
                 Box::pin(async move {
                     conn.execute("SET SESSION TRANSACTION READ ONLY")

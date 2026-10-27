@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "hyscribe-http"
+description = "The HTTP server: routing, pages and security headers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "query"] }
+hyscribe-db.workspace = true
+hyscribe-render.workspace = true
+tokio = { version = "1", features = ["net"] }
+
+[dev-dependencies]
+hyscribe-config.workspace = true
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", default-features = false, features = ["util"] }
+
+[lints]
+workspace = true

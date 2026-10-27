@@ -91,6 +91,34 @@ pub fn list(blocks: &[Block]) -> Value {
     )
 }
 
+/// The HTML of `blocks` with every inner block put back in its place: what
+/// `do_blocks()` outputs for static blocks. Dynamic blocks come later.
+pub fn render(blocks: &[Block]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for block in blocks {
+        render_into(block, &mut out);
+    }
+    out
+}
+
+fn render_into(block: &Block, out: &mut Vec<u8>) {
+    if block.name.is_none() {
+        out.extend_from_slice(&block.inner_html);
+        return;
+    }
+    let mut inner = block.inner_blocks.iter();
+    for chunk in &block.inner_content {
+        match chunk {
+            Some(html) => out.extend_from_slice(html),
+            None => {
+                if let Some(child) = inner.next() {
+                    render_into(child, out);
+                }
+            }
+        }
+    }
+}
+
 /// Splits `document` into blocks, as WordPress's `parse_blocks()` does.
 pub fn parse_blocks(document: &[u8]) -> Vec<Block> {
     let mut parser = Parser {

@@ -49,6 +49,7 @@ fn defaults_are_safe() {
             },
             mode: Mode::Shadow,
             uploads_dir: None,
+            home_url: None,
             salts: Vec::new(),
         }
     );
@@ -67,6 +68,7 @@ fn reads_every_key() {
         ("BEHIND_PROXY", "TRUE"),
         ("MODE", "primary"),
         ("UPLOADS_DIR", "/srv/wp/wp-content/uploads"),
+        ("WP_HOME", "https://example.test"),
         ("AUTH_KEY", "a"),
         ("NONCE_SALT", "z"),
     ]))
@@ -84,6 +86,7 @@ fn reads_every_key() {
         config.uploads_dir,
         Some(PathBuf::from("/srv/wp/wp-content/uploads"))
     );
+    assert_eq!(config.home_url.as_deref(), Some("https://example.test"));
     assert_eq!(
         config.salts,
         vec![

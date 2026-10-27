@@ -217,16 +217,43 @@ fn child_server() -> (PathBuf, Vec<OsString>) {
     )
 }
 
+/// The port the test site in `home` listens on: a free one, picked once.
+fn site_port(home: &std::path::Path) -> u16 {
+    let file = home.join("test-port");
+    if let Ok(port) = std::fs::read_to_string(&file) {
+        return port.parse().unwrap();
+    }
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    std::fs::write(&file, port.to_string()).unwrap();
+    port
+}
+
+/// The default install fixture from `reference/default-install/db.sh`.
+fn fixture_db() -> Vec<(&'static str, String)> {
+    let env = |key: &str, default: &str| std::env::var(key).unwrap_or_else(|_| default.to_string());
+    vec![
+        ("DB_HOST", env("HYSCRIBE_TEST_DB_HOST", "127.0.0.1")),
+        ("DB_PORT", env("HYSCRIBE_TEST_DB_PORT", "33061")),
+        ("DB_NAME", "wordpress".to_string()),
+        ("DB_USER", "wordpress".to_string()),
+        ("DB_PASSWORD", "reference-only".to_string()),
+    ]
+}
+
 /// A site configured through the environment, for `home`.
 fn site_env(home: &std::path::Path) -> HashMap<String, String> {
-    let mut env: HashMap<String, String> = [
-        ("DB_NAME", "wordpress"),
-        ("DB_USER", "wp"),
-        (CHILD_HOME, home.to_str().unwrap()),
-    ]
-    .iter()
-    .map(|(k, v)| (k.to_string(), v.to_string()))
-    .collect();
+    let mut env: HashMap<String, String> = fixture_db()
+        .into_iter()
+        .chain([
+            ("PORT", site_port(home).to_string()),
+            (CHILD_HOME, home.to_str().unwrap().to_string()),
+        ])
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
     if let Ok(profile) = std::env::var("LLVM_PROFILE_FILE") {
         env.insert("LLVM_PROFILE_FILE".to_string(), profile);
     }
@@ -271,14 +298,19 @@ fn service_lifecycle() {
 
     // The server's first line reaches the log once it is up.
     let running = format!(
-        "hyscribe {} running (pid {pid}) in shadow (read only) mode, configured for http://127.0.0.1:8080",
-        env!("CARGO_PKG_VERSION")
+        "hyscribe {} running (pid {pid}) in shadow (read only) mode, listening on http://127.0.0.1:{}",
+        env!("CARGO_PKG_VERSION"),
+        site_port(home)
     );
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     while !std::fs::read_to_string(&log).unwrap().contains(&running) {
         assert!(std::time::Instant::now() < deadline, "server never logged");
         std::thread::sleep(hyscribe_service::POLL);
     }
+    // The default install is served from the fixture database.
+    let page = http_get(site_port(home), "/?p=1");
+    assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
+    assert!(page.contains("Hello world!"), "{page}");
     let status = service(&["status"], home);
     assert_eq!(status.code, 0);
     assert!(
@@ -444,5 +476,55 @@ fn log_follow_reports_problems() {
     assert_eq!(
         String::from_utf8(err).unwrap(),
         "error: cannot write the log: closed\n"
+    );
+}
+
+/// A plain HTTP/1.1 GET to the local server, returning the raw response.
+fn http_get(port: u16, path: &str) -> String {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response
+}
+
+#[test]
+fn start_reports_what_stops_it_serving() {
+    let start = |extra: &[(&str, &str)], home: &std::path::Path| {
+        let mut env = site_env(home);
+        env.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        run_as(&["start"], env, home, USER, child_server())
+    };
+    let home = tempfile::tempdir().unwrap();
+    let output = start(&[("DB_PORT", "1")], home.path());
+    assert!(
+        output
+            .err
+            .starts_with("error: cannot connect to the database: "),
+        "{}",
+        output.err
+    );
+    let output = start(&[("DB_PREFIX", "missing_")], home.path());
+    assert!(
+        output
+            .err
+            .starts_with("error: cannot read the site options: "),
+        "{}",
+        output.err
+    );
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = taken.local_addr().unwrap().port().to_string();
+    let output = start(&[("PORT", &port)], home.path());
+    assert!(
+        output
+            .err
+            .starts_with(&format!("error: cannot listen on 127.0.0.1:{port}: ")),
+        "{}",
+        output.err
     );
 }

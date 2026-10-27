@@ -206,3 +206,17 @@ fn a_failed_attribute_scan_is_not_repeated() {
     let hostile = "<!-- wp:a {\"x\":".repeat(500);
     assert_eq!(parse_blocks(hostile.as_bytes()).len(), 1);
 }
+
+#[test]
+fn render_puts_inner_blocks_back() {
+    let document =
+        "before<!-- wp:a -->1<!-- wp:b -->2<!-- wp:c /-->3<!-- /wp:b -->4<!-- /wp:a -->after";
+    assert_eq!(
+        render(&parse_blocks(document.as_bytes())),
+        b"before1234after"
+    );
+    // More placeholders than inner blocks cannot happen, but must not panic.
+    let mut odd = Block::named("core/a".into(), Some(Vec::new()));
+    odd.inner_content = vec![None, Some(b"x".to_vec())];
+    assert_eq!(render(&[odd]), b"x");
+}

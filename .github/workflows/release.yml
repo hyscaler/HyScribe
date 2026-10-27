@@ -37,7 +37,9 @@ jobs:
           sha256sum -c first.txt
       - name: Smoke test
         if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
+        run: |
+          reference/default-install/db.sh up
+          scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
       - name: Runs under emulation
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: |

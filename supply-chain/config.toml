@@ -30,6 +30,14 @@ criteria = "safe-to-deploy"
 version = "1.5.1"
 criteria = "safe-to-run"
 
+[[exemptions.axum]]
+version = "0.8.9"
+criteria = "safe-to-deploy"
+
+[[exemptions.axum-core]]
+version = "0.5.6"
+criteria = "safe-to-deploy"
+
 [[exemptions.bitflags]]
 version = "2.13.2"
 criteria = "safe-to-deploy"
@@ -158,8 +166,32 @@ criteria = "safe-to-deploy"
 version = "0.11.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.http]]
+version = "1.5.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.http-body]]
+version = "1.1.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.http-body-util]]
+version = "0.1.5"
+criteria = "safe-to-deploy"
+
+[[exemptions.httparse]]
+version = "1.10.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.hybrid-array]]
 version = "0.4.15"
+criteria = "safe-to-deploy"
+
+[[exemptions.hyper]]
+version = "1.12.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.hyper-util]]
+version = "0.1.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.icu_collections]]
@@ -222,8 +254,16 @@ criteria = "safe-to-deploy"
 version = "0.4.34"
 criteria = "safe-to-deploy"
 
+[[exemptions.matchit]]
+version = "0.8.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.memchr]]
 version = "2.8.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.mime]]
+version = "0.3.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.mio]]
@@ -286,6 +326,10 @@ criteria = "safe-to-deploy"
 version = "0.3.1"
 criteria = "safe-to-run"
 
+[[exemptions.ryu]]
+version = "1.0.23"
+criteria = "safe-to-deploy"
+
 [[exemptions.scopeguard]]
 version = "1.1.0"
 criteria = "safe-to-deploy"
@@ -304,6 +348,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.serde_json]]
 version = "1.0.154"
+criteria = "safe-to-deploy"
+
+[[exemptions.serde_path_to_error]]
+version = "0.1.20"
+criteria = "safe-to-deploy"
+
+[[exemptions.serde_urlencoded]]
+version = "0.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.sha1]]
@@ -405,6 +457,18 @@ criteria = "safe-to-run"
 [[exemptions.toml_parser]]
 version = "1.1.5+spec-1.1.0"
 criteria = "safe-to-run"
+
+[[exemptions.tower]]
+version = "0.5.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.tower-layer]]
+version = "0.1.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.tower-service]]
+version = "0.3.1"
+criteria = "safe-to-deploy"
 
 [[exemptions.tracing]]
 version = "0.1.44"

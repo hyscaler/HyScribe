@@ -90,7 +90,21 @@ fn service_runs_from_an_extracted_folder() {
     let binary = home.join("hyscribe");
     std::fs::copy(env!("CARGO_BIN_EXE_hyscribe"), &binary).unwrap();
     let env_file = home.join(".env");
-    std::fs::write(&env_file, "DB_NAME=wordpress\nDB_USER=wp\n").unwrap();
+    // The default install fixture from reference/default-install/db.sh.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let db_port = std::env::var("HYSCRIBE_TEST_DB_PORT").unwrap_or_else(|_| "33061".into());
+    std::fs::write(
+        &env_file,
+        format!(
+            "DB_HOST=127.0.0.1\nDB_PORT={db_port}\nDB_NAME=wordpress\nDB_USER=wordpress\n\
+             DB_PASSWORD=reference-only\nPORT={port}\n"
+        ),
+    )
+    .unwrap();
     std::fs::set_permissions(&env_file, std::fs::Permissions::from_mode(0o600)).unwrap();
 
     let hyscribe = |args: &[&str]| {

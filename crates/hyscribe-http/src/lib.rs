@@ -101,6 +101,13 @@ async fn security_headers(mut response: Response) -> Response {
     response
 }
 
+/// What a request gets: a page, or a permanent redirect to its canonical
+/// URL.
+enum Outcome {
+    Page(Page),
+    Redirect(String),
+}
+
 /// One HTML page: the status, the document title and the main content.
 struct Page {
     status: StatusCode,
@@ -117,8 +124,15 @@ async fn page(
     if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
-    let page = match route(&site, uri.path(), &query).await {
-        Ok(page) => page,
+    let page = match route(&site, uri.path(), uri.query(), &query).await {
+        Ok(Outcome::Redirect(location)) => {
+            return (
+                StatusCode::MOVED_PERMANENTLY,
+                [(header::LOCATION, location)],
+            )
+                .into_response();
+        }
+        Ok(Outcome::Page(page)) => page,
         Err(err) => {
             // Details go to the log, never to the visitor.
             eprintln!("database error: {err}");
@@ -138,24 +152,65 @@ async fn page(
         .into_response()
 }
 
-async fn route(site: &Site, path: &str, query: &HashMap<String, String>) -> Result<Page, DbError> {
-    if path != "/" {
-        return Ok(not_found(site));
+/// The canonical form of `path` with plain permalinks, as
+/// `redirect_canonical()` gives it: `/index.php` goes to `/`, and other
+/// paths gain a trailing slash. `None` when `path` is canonical.
+fn canonical_path(site: &Site, path: &str, raw_query: Option<&str>) -> Option<String> {
+    let query = raw_query.map(|q| format!("?{q}")).unwrap_or_default();
+    if let Some(folder) = path.strip_suffix("index.php").filter(|f| f.ends_with('/')) {
+        return Some(format!("{}{folder}{query}", site.home));
     }
-    let single = |name: &str, post_type: &'static str| {
-        query.get(name).map(|value| (absint(value), post_type))
+    (!path.ends_with('/')).then(|| format!("{}{path}/{query}", site.home))
+}
+
+/// `raw_query` without the `name` argument, as `&`-joined pairs.
+fn other_args(raw_query: Option<&str>, name: &str) -> String {
+    raw_query
+        .unwrap_or_default()
+        .split('&')
+        .filter(|pair| !pair.is_empty() && pair.split('=').next() != Some(name))
+        .map(|pair| format!("&{pair}"))
+        .collect()
+}
+
+async fn route(
+    site: &Site,
+    path: &str,
+    raw_query: Option<&str>,
+    query: &HashMap<String, String>,
+) -> Result<Outcome, DbError> {
+    if let Some(location) = canonical_path(site, path, raw_query) {
+        return Ok(Outcome::Redirect(location));
+    }
+    // With plain permalinks the path is ignored. Author archives give away
+    // login names, so they are off by default (docs/SECURITY_MODEL.md).
+    if query.contains_key("author") {
+        return Ok(Outcome::Page(not_found(site)));
+    }
+    let single = |name: &'static str, post_type: &'static str| {
+        query
+            .get(name)
+            .map(|value| (name, absint(value), post_type))
     };
     match single("p", "post").or_else(|| single("page_id", "page")) {
-        Some((id, post_type)) => {
+        Some((name, id, post_type)) => {
             let post = site.db.post(id).await?;
             Ok(
-                match post.filter(|p| p.post_type == post_type && p.status == "publish") {
-                    Some(post) => Page {
+                match post.filter(|p| {
+                    p.status == "publish" && (p.post_type == "post" || p.post_type == "page")
+                }) {
+                    Some(post) if post.post_type == post_type => Outcome::Page(Page {
                         status: StatusCode::OK,
                         title: format!("{} &#8211; {}", esc_html(&lossy(&post.title)), site.name()),
                         main: article(site, &post),
-                    },
-                    None => not_found(site),
+                    }),
+                    // `?p=` for a page or `?page_id=` for a post.
+                    Some(post) => Outcome::Redirect(format!(
+                        "{}{}",
+                        site.permalink(&post),
+                        other_args(raw_query, name)
+                    )),
+                    None => Outcome::Page(not_found(site)),
                 },
             )
         }
@@ -171,11 +226,11 @@ async fn route(site: &Site, path: &str, query: &HashMap<String, String>) -> Resu
             } else {
                 format!("{} &#8211; {}", site.name(), esc_html(&tagline))
             };
-            Ok(Page {
+            Ok(Outcome::Page(Page {
                 status: StatusCode::OK,
                 title,
                 main: posts.iter().map(|post| article(site, post)).collect(),
-            })
+            }))
         }
     }
 }

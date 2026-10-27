@@ -132,13 +132,14 @@ async fn single_posts_and_pages() {
 #[tokio::test]
 async fn missing_drafts_and_unknown_paths_are_not_found() {
     let site = fixture_site(None).await;
+    // Drafts, missing IDs, and author archives (off for privacy).
     for uri in [
         "/?page_id=3",
-        "/?p=2",
+        "/?p=3",
         "/?p=999",
         "/?p=abc",
-        "/wp-admin/",
-        "/no/such/path",
+        "/?author=1",
+        "/?p=1&author=1",
     ] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "{uri}");
@@ -234,4 +235,42 @@ fn absint_takes_leading_digits() {
     assert_eq!(absint("-3"), 0);
     assert_eq!(absint(""), 0);
     assert_eq!(absint("99999999999999999999999"), i64::MAX.unsigned_abs());
+}
+
+async fn location(site: &Arc<Site>, uri: &str) -> String {
+    let reply = request(site, "GET", uri).await;
+    assert_eq!(reply.status, StatusCode::MOVED_PERMANENTLY, "{uri}");
+    assert!(reply.body.is_empty());
+    reply.headers["location"].to_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn canonical_redirects_match_wordpress() {
+    let site = fixture_site(Some("http://127.0.0.1:8081")).await;
+    let home = "http://127.0.0.1:8081";
+    // Locations recorded from PHP WordPress on the same database.
+    for (uri, expected) in [
+        ("/?p=2", "/?page_id=2"),
+        ("/?p=2&x=1", "/?page_id=2&x=1"),
+        ("/?x=1&p=2&&y", "/?page_id=2&x=1&y"),
+        ("/?page_id=1", "/?p=1"),
+        ("/no/such/path", "/no/such/path/"),
+        ("/robots.txt", "/robots.txt/"),
+        ("/robots.txt?a=b", "/robots.txt/?a=b"),
+        ("/index.php", "/"),
+        ("/index.php?p=1", "/?p=1"),
+        ("/blog/index.php", "/blog/"),
+    ] {
+        assert_eq!(
+            location(&site, uri).await,
+            format!("{home}{expected}"),
+            "{uri}"
+        );
+    }
+    // A trailing slash makes any path the home page.
+    let reply = request(&site, "GET", "/no/such/path/").await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(title(&reply.body), "HyScribe Default Install");
+    let reply = request(&site, "GET", "/xindex.php/").await;
+    assert_eq!(reply.status, StatusCode::OK);
 }

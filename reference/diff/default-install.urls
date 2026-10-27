@@ -1,0 +1,21 @@
+# URLs of the default install, plain permalinks. One path per line,
+# optionally with the status HyScribe gives instead, for intended differences.
+/
+/?p=1
+/?page_id=2
+/?page_id=3
+/?p=2
+/?p=999
+/no/such/path
+/?s=hello
+/?cat=1
+/?author=1 404  # intended: author archives give away login names
+/?m=2026
+/?feed=rss2
+/?p=1&replytocom=1
+/robots.txt
+/wp-login.php
+/?p=2
+/?page_id=1
+/index.php
+/no/such/path/

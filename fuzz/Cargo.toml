@@ -60,4 +60,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "wptexturize"
+path = "fuzz_targets/wptexturize.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

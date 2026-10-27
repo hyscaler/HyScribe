@@ -4,6 +4,7 @@
 //! templates.
 
 pub mod blocks;
+pub mod formatting;
 pub mod style;
 pub mod template;
 pub mod theme;

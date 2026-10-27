@@ -1,0 +1,733 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Ports of WordPress's `wptexturize()` and `convert_smilies()` from
+//! `wp-includes/formatting.php`, byte for byte, for locale en_US and the
+//! default filters.
+//!
+//! Every regex is matched by hand with PCRE's semantics (leftmost match,
+//! lookarounds against the subject of that one replacement, ASCII `\d`,
+//! `\s` and `\b`). Each pass is linear in the input: no scan restarts from
+//! a position an earlier failed scan already covered.
+
+/// A match: its length and what replaces it.
+type Match = Option<(usize, Vec<u8>)>;
+
+/// A pattern tried at one position of the subject.
+type Pattern = fn(&[u8], usize) -> Match;
+
+/// `wp_spaces_regexp()`: `[\r\n\t ]|\xC2\xA0|&nbsp;`.
+const SPACES: [&[u8]; 6] = [b"\r", b"\n", b"\t", b" ", b"\xC2\xA0", b"&nbsp;"];
+
+const NO_TEXTURIZE_TAGS: [&[u8]; 6] = [b"pre", b"code", b"kbd", b"style", b"script", b"tt"];
+const NO_TEXTURIZE_SHORTCODES: [&[u8]; 1] = [b"code"];
+
+const OPEN_Q_FLAG: &[u8] = b"<!--oq-->";
+const OPEN_SQ_FLAG: &[u8] = b"<!--osq-->";
+const APOS_FLAG: &[u8] = b"<!--apos-->";
+const PRIME_FLAG: &[u8] = b"<!--wp-prime-or-quote-->";
+const CLOSE_Q: &[u8] = b"&#8221;";
+const CLOSE_SQ: &[u8] = b"&#8217;";
+
+/// `$static_characters` and `$static_replacements`, applied in order.
+const STATIC: [(&[u8], &[u8]); 15] = [
+    (b"...", b"&#8230;"),
+    (b"``", b"&#8220;"),
+    (b"''", CLOSE_Q),
+    (b" (tm)", b" &#8482;"),
+    (b"'tain't", b"&#8217;tain&#8217;t"),
+    (b"'twere", b"&#8217;twere"),
+    (b"'twas", b"&#8217;twas"),
+    (b"'tis", b"&#8217;tis"),
+    (b"'twill", b"&#8217;twill"),
+    (b"'til", b"&#8217;til"),
+    (b"'bout", b"&#8217;bout"),
+    (b"'nuff", b"&#8217;nuff"),
+    (b"'round", b"&#8217;round"),
+    (b"'cause", b"&#8217;cause"),
+    (b"'em", b"&#8217;em"),
+];
+
+/// `$dynamic_characters['apos']`, applied in order.
+const APOSTROPHES: [Pattern; 6] = [
+    |s, i| year_quoted(s, i, b'\'', CLOSE_SQ),
+    |s, i| year_quoted(s, i, b'"', CLOSE_Q),
+    abbreviated_year,
+    |s, i| quoted_number(s, i, b'\'', OPEN_SQ_FLAG, CLOSE_SQ),
+    opening_single,
+    apostrophe_in_word,
+];
+
+/// `$dynamic_characters['quote']`, applied in order.
+const QUOTES: [Pattern; 2] = [
+    |s, i| quoted_number(s, i, b'"', OPEN_Q_FLAG, CLOSE_Q),
+    opening_double,
+];
+
+/// `$dynamic_characters['dash']`, applied in order.
+const DASHES: [Pattern; 4] = [
+    |s, i| has(s, i, b"---").then(|| (3, b"&#8212;".to_vec())),
+    |s, i| {
+        (has(s, i, b"--") && start_or_space(s, i) && end_or_space(s, i + 2))
+            .then(|| (2, b"&#8212;".to_vec()))
+    },
+    |s, i| (has(s, i, b"--") && !ends(s, i, b"xn")).then(|| (2, b"&#8211;".to_vec())),
+    |s, i| {
+        (byte(s, i) == Some(b'-') && start_or_space(s, i) && end_or_space(s, i + 1))
+            .then(|| (1, b"&#8211;".to_vec()))
+    },
+];
+
+/// `$wpsmiliestrans` after `smilies_init()`: the code and the emoji, or
+/// the image file under `wp-includes/images/smilies/`.
+const SMILIES: [(&[u8], &[u8]); 43] = [
+    (b":mrgreen:", b"mrgreen.png"),
+    (b":neutral:", "\u{1f610}".as_bytes()),
+    (b":twisted:", "\u{1f608}".as_bytes()),
+    (b":arrow:", "\u{27a1}".as_bytes()),
+    (b":shock:", "\u{1f62f}".as_bytes()),
+    (b":smile:", "\u{1f642}".as_bytes()),
+    (b":???:", "\u{1f615}".as_bytes()),
+    (b":cool:", "\u{1f60e}".as_bytes()),
+    (b":evil:", "\u{1f47f}".as_bytes()),
+    (b":grin:", "\u{1f600}".as_bytes()),
+    (b":idea:", "\u{1f4a1}".as_bytes()),
+    (b":oops:", "\u{1f633}".as_bytes()),
+    (b":razz:", "\u{1f61b}".as_bytes()),
+    (b":roll:", "\u{1f644}".as_bytes()),
+    (b":wink:", "\u{1f609}".as_bytes()),
+    (b":cry:", "\u{1f625}".as_bytes()),
+    (b":eek:", "\u{1f62e}".as_bytes()),
+    (b":lol:", "\u{1f606}".as_bytes()),
+    (b":mad:", "\u{1f621}".as_bytes()),
+    (b":sad:", "\u{1f641}".as_bytes()),
+    (b"8-)", "\u{1f60e}".as_bytes()),
+    (b"8-O", "\u{1f62f}".as_bytes()),
+    (b":-(", "\u{1f641}".as_bytes()),
+    (b":-)", "\u{1f642}".as_bytes()),
+    (b":-?", "\u{1f615}".as_bytes()),
+    (b":-D", "\u{1f600}".as_bytes()),
+    (b":-P", "\u{1f61b}".as_bytes()),
+    (b":-o", "\u{1f62e}".as_bytes()),
+    (b":-x", "\u{1f621}".as_bytes()),
+    (b":-|", "\u{1f610}".as_bytes()),
+    (b";-)", "\u{1f609}".as_bytes()),
+    (b"8O", "\u{1f62f}".as_bytes()),
+    (b":(", "\u{1f641}".as_bytes()),
+    (b":)", "\u{1f642}".as_bytes()),
+    (b":?", "\u{1f615}".as_bytes()),
+    (b":D", "\u{1f600}".as_bytes()),
+    (b":P", "\u{1f61b}".as_bytes()),
+    (b":o", "\u{1f62e}".as_bytes()),
+    (b":x", "\u{1f621}".as_bytes()),
+    (b":|", "\u{1f610}".as_bytes()),
+    (b";)", "\u{1f609}".as_bytes()),
+    (b":!:", "\u{2757}".as_bytes()),
+    (b":?:", "\u{2753}".as_bytes()),
+];
+
+/// `convert_smilies()` leaves the content of these elements alone.
+const SMILIES_IGNORED: [&[u8]; 5] = [b"code", b"pre", b"style", b"script", b"textarea"];
+
+/// Replaces quotes, apostrophes, dashes, ellipses, primes and `x` between
+/// numbers with their typographic entities, outside HTML tags, comments,
+/// shortcodes and the content of `<pre>`, `<code>`, `<kbd>`, `<style>`,
+/// `<script>`, `<tt>` and `[code]`, as WordPress's `wptexturize()` does.
+/// `shortcode_tags` are the registered shortcode names, in registration
+/// order (`array_keys( $shortcode_tags )`).
+pub fn wptexturize(text: &[u8], shortcode_tags: &[&[u8]]) -> Vec<u8> {
+    let found = shortcode_names(text);
+    let names: Vec<&[u8]> = shortcode_tags
+        .iter()
+        .copied()
+        .filter(|name| found.contains(name))
+        .collect();
+    let mut tags = Vec::new();
+    let mut shortcodes = Vec::new();
+    let mut out = Vec::with_capacity(text.len());
+    for (piece, kind) in split(text, &names) {
+        match kind {
+            Piece::Html if piece.starts_with(b"<!--") => out.extend_from_slice(piece),
+            Piece::Html => {
+                let element = replace_matches(piece, ampersand).0;
+                pushpop(&element, &mut tags, &NO_TEXTURIZE_TAGS);
+                out.extend(element);
+            }
+            Piece::Shortcode => {
+                if !piece.starts_with(b"[[") && !piece.ends_with(b"]]") {
+                    pushpop(piece, &mut shortcodes, &NO_TEXTURIZE_SHORTCODES);
+                }
+                out.extend_from_slice(piece);
+            }
+            Piece::Text if tags.is_empty() && shortcodes.is_empty() => out.extend(texturize(piece)),
+            Piece::Text => out.extend_from_slice(piece),
+        }
+    }
+    out
+}
+
+/// Replaces text smilies such as `:)` with emoji, or for `:mrgreen:` with
+/// an image, outside tags and the content of `<code>`, `<pre>`, `<style>`,
+/// `<script>` and `<textarea>`, as WordPress's `convert_smilies()` does
+/// with `use_smilies` on. `smilies_url` is the escaped
+/// `includes_url( 'images/smilies/' )`.
+pub fn convert_smilies(text: &[u8], smilies_url: &[u8]) -> Vec<u8> {
+    let mut ignored: Option<&[u8]> = None;
+    let mut out = Vec::with_capacity(text.len());
+    for piece in split_tags(text) {
+        if ignored.is_none() {
+            ignored = SMILIES_IGNORED.into_iter().find(|name| {
+                piece
+                    .strip_prefix(b"<")
+                    .and_then(|rest| rest.strip_prefix(*name))
+                    .is_some_and(|rest| rest.contains(&b'>'))
+            });
+        }
+        if ignored.is_none() && piece.first().is_some_and(|&first| first != b'<') {
+            out.extend(replace_matches(piece, |s, i| smiley(s, i, smilies_url)).0);
+        } else {
+            out.extend_from_slice(piece);
+        }
+        if ignored.is_some_and(|name| piece == [b"</", name, b">"].concat()) {
+            ignored = None;
+        }
+    }
+    out
+}
+
+fn byte(s: &[u8], i: usize) -> Option<u8> {
+    s.get(i).copied()
+}
+
+fn before(s: &[u8], i: usize) -> Option<u8> {
+    i.checked_sub(1).and_then(|j| byte(s, j))
+}
+
+fn digit(s: &[u8], i: usize) -> bool {
+    byte(s, i).is_some_and(|c| c.is_ascii_digit())
+}
+
+fn digit_before(s: &[u8], i: usize) -> bool {
+    before(s, i).is_some_and(|c| c.is_ascii_digit())
+}
+
+fn is_word(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_'
+}
+
+/// `s[i..]` starts with `literal`.
+fn has(s: &[u8], i: usize, literal: &[u8]) -> bool {
+    s.get(i..i + literal.len()) == Some(literal)
+}
+
+/// `s[..i]` ends with `literal`.
+fn ends(s: &[u8], i: usize, literal: &[u8]) -> bool {
+    s.get(..i).is_some_and(|head| head.ends_with(literal))
+}
+
+/// `(?<=spaces)`.
+fn space_before(s: &[u8], i: usize) -> bool {
+    SPACES.iter().any(|space| ends(s, i, space))
+}
+
+/// `(?=spaces)`.
+fn space_at(s: &[u8], i: usize) -> bool {
+    SPACES.iter().any(|space| has(s, i, space))
+}
+
+/// `(?<=\A|spaces)`.
+fn start_or_space(s: &[u8], i: usize) -> bool {
+    i == 0 || space_before(s, i)
+}
+
+/// `(?=\z|spaces)`; `\Z` and `$` only differ before a final newline, which
+/// is a space too.
+fn end_or_space(s: &[u8], i: usize) -> bool {
+    i == s.len() || space_at(s, i)
+}
+
+/// `(?=\Z|[.,:;!?)}\-\]]|&gt;|spaces)`: what may follow a closing quote.
+fn closer(s: &[u8], i: usize) -> bool {
+    end_or_space(s, i)
+        || matches!(
+            byte(s, i),
+            Some(b'.' | b',' | b':' | b';' | b'!' | b'?' | b')' | b'}' | b'-' | b']')
+        )
+        || has(s, i, b"&gt;")
+}
+
+/// Where the run of `[\d.,]` starting at `i` ends.
+fn number(s: &[u8], i: usize) -> usize {
+    i + s
+        .get(i..)
+        .unwrap_or_default()
+        .iter()
+        .take_while(|c| matches!(c, b'0'..=b'9' | b'.' | b','))
+        .count()
+}
+
+fn find(s: &[u8], from: usize, literal: &[u8]) -> Option<usize> {
+    s.get(from..)
+        .unwrap_or_default()
+        .windows(literal.len())
+        .position(|window| window == literal)
+        .map(|at| at + from)
+}
+
+/// `preg_replace()` of one pattern, with the number of replacements.
+fn replace_matches(s: &[u8], mut pattern: impl FnMut(&[u8], usize) -> Match) -> (Vec<u8>, usize) {
+    let mut out = Vec::with_capacity(s.len());
+    let mut count = 0;
+    let mut next = 0;
+    for (i, &c) in s.iter().enumerate() {
+        if i < next {
+            continue;
+        }
+        match pattern(s, i) {
+            Some((length, with)) => {
+                out.extend(with);
+                count += 1;
+                next = i + length;
+            }
+            None => out.push(c),
+        }
+    }
+    (out, count)
+}
+
+/// `str_replace()` of one string.
+fn replace(s: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
+    replace_matches(s, |s, i| has(s, i, from).then(|| (from.len(), to.to_vec()))).0
+}
+
+/// `explode()`.
+fn explode<'a>(s: &'a [u8], separator: &[u8]) -> Vec<&'a [u8]> {
+    let mut parts = Vec::new();
+    let mut from = 0;
+    // Every round but the last consumes a separator.
+    for _ in 0..=s.len() {
+        let Some(at) = find(s, from, separator) else {
+            break;
+        };
+        parts.push(s.get(from..at).unwrap_or_default());
+        from = at + separator.len();
+    }
+    parts.push(s.get(from..).unwrap_or_default());
+    parts
+}
+
+#[derive(Clone, Copy)]
+enum Piece {
+    Html,
+    Shortcode,
+    Text,
+}
+
+/// The names `[name` or `[/name` mention, as
+/// `preg_match_all( '@\[/?([^<>&/\[\]\x00-\x20=]++)@' )` finds them.
+fn shortcode_names(text: &[u8]) -> Vec<&[u8]> {
+    let mut names = Vec::new();
+    for (i, &c) in text.iter().enumerate() {
+        if c == b'[' {
+            let from = i + 1 + usize::from(byte(text, i + 1) == Some(b'/'));
+            let rest = text.get(from..).unwrap_or_default();
+            let length = rest
+                .iter()
+                .take_while(|&&c| c > b' ' && !b"<>&/[]=".contains(&c))
+                .count();
+            if length > 0 {
+                names.push(rest.get(..length).unwrap_or_default());
+            }
+        }
+    }
+    names
+}
+
+/// `preg_split()` with `_get_wptexturize_split_regex()`: HTML elements,
+/// comments and shortcodes of `names`, and the text between them.
+fn split<'a>(text: &'a [u8], names: &[&[u8]]) -> Vec<(&'a [u8], Piece)> {
+    let mut pieces = Vec::new();
+    let mut from = 0;
+    for (i, &c) in text.iter().enumerate() {
+        if i < from {
+            continue;
+        }
+        let delimiter = match c {
+            b'<' => Some((html_end(text, i), Piece::Html)),
+            b'[' => shortcode_end(text, i, names).map(|end| (end, Piece::Shortcode)),
+            _ => None,
+        };
+        if let Some((end, kind)) = delimiter {
+            pieces.push((text.get(from..i).unwrap_or_default(), Piece::Text));
+            pieces.push((text.get(i..end).unwrap_or_default(), kind));
+            from = end;
+        }
+    }
+    pieces.push((text.get(from..).unwrap_or_default(), Piece::Text));
+    pieces
+}
+
+/// The end of the element or comment starting at `<` at `i`: up to `-->`
+/// or `>`, or the end of the text when there is none.
+fn html_end(s: &[u8], i: usize) -> usize {
+    if has(s, i + 1, b"!--") {
+        find(s, i + 2, b"-->").map_or(s.len(), |at| at + 3)
+    } else {
+        find(s, i, b">").map_or(s.len(), |at| at + 1)
+    }
+}
+
+/// `_get_wptexturize_shortcode_regex()` at `[` at `i`.
+fn shortcode_end(s: &[u8], i: usize, names: &[&[u8]]) -> Option<usize> {
+    let prefix = usize::from(matches!(byte(s, i + 1), Some(b'/' | b'[')));
+    (0..=prefix).rev().find_map(|skip| {
+        let start = i + 1 + skip;
+        names.iter().find_map(|name| {
+            let after = start + name.len();
+            if !has(s, start, name)
+                || !matches!(
+                    byte(s, after),
+                    Some(b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r' | b']' | b'/')
+                )
+            {
+                return None;
+            }
+            let end = shortcode_body_end(s, after);
+            (byte(s, end) == Some(b']'))
+                .then(|| end + 1 + usize::from(byte(s, end + 1) == Some(b']')))
+        })
+    })
+}
+
+/// `(?:[^\[\]<>]+|<[^\[\]>]*>)*+` from `from`.
+fn shortcode_body_end(s: &[u8], from: usize) -> usize {
+    let mut end = from;
+    for (k, &c) in s.iter().enumerate().skip(from) {
+        if k < end {
+            continue;
+        }
+        match c {
+            b'[' | b']' | b'>' => break,
+            b'<' => {
+                let stop = s
+                    .get(k + 1..)
+                    .unwrap_or_default()
+                    .iter()
+                    .position(|c| matches!(c, b'[' | b']' | b'>'))
+                    .map(|at| at + k + 1);
+                match stop {
+                    Some(close) if byte(s, close) == Some(b'>') => end = close + 1,
+                    _ => break,
+                }
+            }
+            _ => end = k + 1,
+        }
+    }
+    end
+}
+
+/// `_wptexturize_pushpop_element()`.
+fn pushpop(text: &[u8], stack: &mut Vec<&'static [u8]>, disabled: &[&'static [u8]]) {
+    let opening = byte(text, 1).is_some_and(|c| c != b'/');
+    let offset = if opening { 1 } else { 2 };
+    let end = text
+        .iter()
+        .position(|&c| c == b' ')
+        .unwrap_or(text.len().saturating_sub(1));
+    let tag = text.get(offset..end).unwrap_or_default();
+    if let Some(&name) = disabled.iter().find(|&&name| name == tag) {
+        if opening {
+            stack.push(name);
+        } else if stack.last() == Some(&name) {
+            stack.pop();
+        }
+    }
+}
+
+/// The texturizing of text outside tags and shortcodes.
+fn texturize(text: &[u8]) -> Vec<u8> {
+    let mut text = text.to_vec();
+    for (from, to) in STATIC {
+        text = replace(&text, from, to);
+    }
+    if text.contains(&b'\'') {
+        for pattern in APOSTROPHES {
+            text = replace_matches(&text, pattern).0;
+        }
+        text = primes(&text, b'\'', b"&#8242;", OPEN_SQ_FLAG, CLOSE_SQ);
+        text = replace(&text, APOS_FLAG, CLOSE_SQ);
+        text = replace(&text, OPEN_SQ_FLAG, b"&#8216;");
+    }
+    if text.contains(&b'"') {
+        for pattern in QUOTES {
+            text = replace_matches(&text, pattern).0;
+        }
+        text = primes(&text, b'"', b"&#8243;", OPEN_Q_FLAG, CLOSE_Q);
+        text = replace(&text, OPEN_Q_FLAG, b"&#8220;");
+    }
+    if text.contains(&b'-') {
+        for pattern in DASHES {
+            text = replace_matches(&text, pattern).0;
+        }
+    }
+    if text
+        .windows(3)
+        .any(|w| matches!(w, [b'0'..=b'9', b'x', b'0'..=b'9']))
+    {
+        text = replace_matches(&text, times).0;
+    }
+    replace_matches(&text, ampersand).0
+}
+
+/// `'(\d\d)'` or `'(\d\d)"` before a closer: a year at the end of a quote.
+fn year_quoted(s: &[u8], i: usize, quote: u8, close: &[u8]) -> Match {
+    (byte(s, i) == Some(b'\'')
+        && digit(s, i + 1)
+        && digit(s, i + 2)
+        && byte(s, i + 3) == Some(quote)
+        && closer(s, i + 4))
+    .then(|| {
+        let year = s.get(i + 1..i + 3).unwrap_or_default();
+        (4, [APOS_FLAG, year, close].concat())
+    })
+}
+
+/// `'(?=\d\d(?:\Z|(?![%\d]|[.,]\d)))`: `'99`, but not `'999`, `'99%`
+/// or `'99.0`.
+fn abbreviated_year(s: &[u8], i: usize) -> Match {
+    (byte(s, i) == Some(b'\'')
+        && digit(s, i + 1)
+        && digit(s, i + 2)
+        && !matches!(byte(s, i + 3), Some(b'%' | b'0'..=b'9'))
+        && !(matches!(byte(s, i + 3), Some(b'.' | b',')) && digit(s, i + 4)))
+    .then(|| (1, APOS_FLAG.to_vec()))
+}
+
+/// `(?<=\A|spaces)Q(\d[.,\d]*)Q`: a quoted number.
+fn quoted_number(s: &[u8], i: usize, quote: u8, flag: &[u8], close: &[u8]) -> Match {
+    if byte(s, i) != Some(quote) || !start_or_space(s, i) || !digit(s, i + 1) {
+        return None;
+    }
+    let end = number(s, i + 1);
+    (byte(s, end) == Some(quote)).then(|| {
+        let number = s.get(i + 1..end).unwrap_or_default();
+        (end + 1 - i, [flag, number, close].concat())
+    })
+}
+
+/// `(?<=\A|[([{"\-]|&lt;|spaces)'`.
+fn opening_single(s: &[u8], i: usize) -> Match {
+    (byte(s, i) == Some(b'\'')
+        && (start_or_space(s, i)
+            || matches!(before(s, i), Some(b'(' | b'[' | b'{' | b'"' | b'-'))
+            || ends(s, i, b"&lt;")))
+    .then(|| (1, OPEN_SQ_FLAG.to_vec()))
+}
+
+/// `(?<!spaces)'(?!\Z|[.,:;!?"'(){}[\]\-]|&[lg]t;|spaces)`.
+fn apostrophe_in_word(s: &[u8], i: usize) -> Match {
+    (byte(s, i) == Some(b'\'')
+        && !space_before(s, i)
+        && !end_or_space(s, i + 1)
+        && !matches!(
+            byte(s, i + 1),
+            Some(
+                b'.' | b','
+                    | b':'
+                    | b';'
+                    | b'!'
+                    | b'?'
+                    | b'"'
+                    | b'\''
+                    | b'('
+                    | b')'
+                    | b'{'
+                    | b'}'
+                    | b'['
+                    | b']'
+                    | b'-'
+            )
+        )
+        && !has(s, i + 1, b"&lt;")
+        && !has(s, i + 1, b"&gt;"))
+    .then(|| (1, APOS_FLAG.to_vec()))
+}
+
+/// `(?<=\A|[([{\-]|&lt;|spaces)"(?!spaces)`.
+fn opening_double(s: &[u8], i: usize) -> Match {
+    (byte(s, i) == Some(b'"')
+        && (start_or_space(s, i)
+            || matches!(before(s, i), Some(b'(' | b'[' | b'{' | b'-'))
+            || ends(s, i, b"&lt;"))
+        && !space_at(s, i + 1))
+    .then(|| (1, OPEN_Q_FLAG.to_vec()))
+}
+
+/// `wptexturize_primes()`: closing quotes and primes after the opening
+/// quotes are flagged.
+fn primes(text: &[u8], needle: u8, prime: &[u8], open: &[u8], close: &[u8]) -> Vec<u8> {
+    let quote = |s: &[u8], i| {
+        (byte(s, i) == Some(needle) && closer(s, i + 1)).then(|| (1, PRIME_FLAG.to_vec()))
+    };
+    let prime_at = |s: &[u8], i| {
+        (byte(s, i) == Some(needle) && digit_before(s, i)).then(|| (1, prime.to_vec()))
+    };
+    let flag = |after_digit: bool, with: &[u8]| {
+        let with = with.to_vec();
+        move |s: &[u8], i: usize| {
+            (has(s, i, PRIME_FLAG) && digit_before(s, i) == after_digit)
+                .then(|| (PRIME_FLAG.len(), with.clone()))
+        }
+    };
+    let sentences: Vec<Vec<u8>> = explode(text, open)
+        .into_iter()
+        .enumerate()
+        .map(|(key, sentence)| {
+            if !sentence.contains(&needle) {
+                return sentence.to_vec();
+            }
+            let mut sentence = if key > 0 && find(sentence, 0, close).is_none() {
+                // The closing quote candidates: the first ones not after a
+                // digit close, else the rightmost before a period, else the
+                // rightmost. WordPress only does this for several
+                // candidates, but for one it comes to the same.
+                let flagged = replace_matches(sentence, quote).0;
+                let (mut closed, closes) = replace_matches(&flagged, flag(false, close));
+                if closes == 0 {
+                    let period = [PRIME_FLAG, b"."].concat();
+                    if let Some(at) = rfind(&closed, &period).or_else(|| rfind(&closed, PRIME_FLAG))
+                    {
+                        closed = [
+                            closed.get(..at).unwrap_or_default(),
+                            close,
+                            closed.get(at + PRIME_FLAG.len()..).unwrap_or_default(),
+                        ]
+                        .concat();
+                    }
+                }
+                let primed = replace_matches(&closed, prime_at).0;
+                let primed = replace_matches(&primed, flag(true, prime)).0;
+                replace(&primed, PRIME_FLAG, close)
+            } else {
+                let primed = replace_matches(sentence, prime_at).0;
+                replace_matches(&primed, |s, i| {
+                    quote(s, i).map(|(length, _)| (length, close.to_vec()))
+                })
+                .0
+            };
+            if needle == b'"' {
+                sentence = replace(&sentence, b"\"", close);
+            }
+            sentence
+        })
+        .collect();
+    sentences.join(open)
+}
+
+fn rfind(s: &[u8], literal: &[u8]) -> Option<usize> {
+    s.windows(literal.len())
+        .rposition(|window| window == literal)
+}
+
+/// `/\b(\d(?(?<=0)[\d\.,]+|[\d\.,]*))x(\d[\d\.,]*)\b/` to `$1&#215;$2`.
+fn times(s: &[u8], i: usize) -> Match {
+    if !digit(s, i) || before(s, i).is_some_and(is_word) {
+        return None;
+    }
+    let x = number(s, i);
+    if byte(s, i) == Some(b'0') && x == i + 1 {
+        return None;
+    }
+    let word = |k: usize| byte(s, k).is_some_and(is_word);
+    let end = if byte(s, x) == Some(b'x') && digit(s, x + 1) {
+        (x + 2..=number(s, x + 1))
+            .rev()
+            .find(|&k| word(k - 1) != word(k))
+    } else {
+        None
+    };
+    Some(match end {
+        Some(end) => {
+            let left = s.get(i..x).unwrap_or_default();
+            let right = s.get(x + 1..end).unwrap_or_default();
+            (end - i, [left, b"&#215;", right].concat())
+        }
+        // Every later start in this run fails the same way: skip it.
+        None => (x - i, s.get(i..x).unwrap_or_default().to_vec()),
+    })
+}
+
+/// `&(?!#(?:\d+|x[a-f0-9]+);|[a-z1-4]{1,8};)` (case-insensitive) to
+/// `&#038;`.
+fn ampersand(s: &[u8], i: usize) -> Match {
+    if byte(s, i) != Some(b'&') {
+        return None;
+    }
+    let run = |from: usize, keep: fn(&u8) -> bool| {
+        s.get(from..)
+            .unwrap_or_default()
+            .iter()
+            .take_while(|c| keep(c))
+            .count()
+    };
+    let terminated =
+        |from: usize, length: usize| length > 0 && byte(s, from + length) == Some(b';');
+    let entity = match (byte(s, i + 1), byte(s, i + 2)) {
+        (Some(b'#'), Some(b'x' | b'X')) => terminated(i + 3, run(i + 3, u8::is_ascii_hexdigit)),
+        (Some(b'#'), _) => terminated(i + 2, run(i + 2, u8::is_ascii_digit)),
+        _ => {
+            let length = run(i + 1, |c| {
+                c.is_ascii_alphabetic() || (b'1'..=b'4').contains(c)
+            });
+            length <= 8 && terminated(i + 1, length)
+        }
+    };
+    (!entity).then(|| (1, b"&#038;".to_vec()))
+}
+
+/// `preg_split( '/(<[^>]*>)/U' )` with the delimiters.
+fn split_tags(text: &[u8]) -> Vec<&[u8]> {
+    let mut pieces = Vec::new();
+    let mut from = 0;
+    for (i, &c) in text.iter().enumerate() {
+        if i < from || c != b'<' {
+            continue;
+        }
+        let Some(close) = find(text, i, b">") else {
+            break;
+        };
+        pieces.push(text.get(from..i).unwrap_or_default());
+        pieces.push(text.get(i..=close).unwrap_or_default());
+        from = close + 1;
+    }
+    pieces.push(text.get(from..).unwrap_or_default());
+    pieces
+}
+
+/// `$wp_smiliessearch` and `translate_smiley()` at `i`.
+fn smiley(s: &[u8], i: usize, smilies_url: &[u8]) -> Match {
+    if !start_or_space(s, i) {
+        return None;
+    }
+    SMILIES
+        .iter()
+        .find(|(code, _)| has(s, i, code) && end_or_space(s, i + code.len()))
+        .map(|&(code, file)| {
+            let with = if file.ends_with(b".png") {
+                [
+                    b"<img src=\"",
+                    smilies_url,
+                    file,
+                    b"\" alt=\"",
+                    code,
+                    b"\" class=\"wp-smiley\" style=\"height: 1em; max-height: 1em;\" />",
+                ]
+                .concat()
+            } else {
+                file.to_vec()
+            };
+            (code.len(), with)
+        })
+}
+
+#[cfg(test)]
+mod tests;

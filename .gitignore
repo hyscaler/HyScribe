@@ -23,3 +23,8 @@
 # Private private notes clone and scratch files
 /tmp/
 CLAUDE.local.md
+
+# Coverage and mutation testing output
+*.profraw
+lcov.info
+/mutants.out*/

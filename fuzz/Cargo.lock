@@ -62,12 +62,20 @@ version = "0.0.0"
 dependencies = [
  "hyscribe-config",
  "hyscribe-phpser",
+ "hyscribe-render",
  "libfuzzer-sys",
 ]
 
 [[package]]
 name = "hyscribe-phpser"
 version = "0.1.0"
+
+[[package]]
+name = "hyscribe-render"
+version = "0.1.0"
+dependencies = [
+ "hyscribe-phpser",
+]
 
 [[package]]
 name = "jobserver"

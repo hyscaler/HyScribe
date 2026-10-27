@@ -12,8 +12,6 @@ publish.workspace = true
 [dependencies]
 hyscribe-phpser.workspace = true
 
-[dev-dependencies]
-hyscribe-testkit.workspace = true
 
 [lints]
 workspace = true

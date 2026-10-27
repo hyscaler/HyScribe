@@ -95,6 +95,11 @@ function block_cases( $wordpress ) {
 		'<!-- wp: a /-->',
 		'<!-- wp:a  /-->',
 		"<!-- wp:a {\"long\":\"" . str_repeat( 'x', 5000 ) . "\"} /-->",
+		// PCRE's \s includes \v and \f, which end up in the attributes JSON.
+		"<!-- wp:a {\"x\":1}\x0c/-->",
+		"<!-- wp:a {\"x\":1}\x0b -->y<!-- /wp:a -->",
+		"<!-- wp:a {\"x\":1}\r\n -->y<!-- /wp:a -->",
+		str_repeat( '<!-- wp:a {"x":', 50 ) . 'tail',
 	);
 	// The default theme's templates, parts and patterns: real block markup.
 	foreach ( array( 'templates', 'parts', 'patterns' ) as $folder ) {

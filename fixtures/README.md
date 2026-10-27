@@ -18,5 +18,6 @@ The first test target ([docs/TESTING.md](../docs/TESTING.md#first-test-target-de
 
 | WordPress | `db_version` |
 | --- | --- |
+| 7.0.0 | 61833 |
 | 7.0.7 | 61833 |
 | 7.1.3 | 61833 |

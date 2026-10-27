@@ -13,7 +13,7 @@ MARIADB_IMAGE="${MARIADB_IMAGE:-mariadb:11.8}"
 CLI_IMAGE="${CLI_IMAGE:-wordpress:cli-php8.4}"
 VERSIONS=("$@")
 if [ ${#VERSIONS[@]} -eq 0 ]; then
-  VERSIONS=(7.0.7 7.1.3)
+  VERSIONS=(7.0.0 7.0.7 7.1.3)
 fi
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

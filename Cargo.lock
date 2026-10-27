@@ -603,6 +603,7 @@ dependencies = [
  "hyscribe-db",
  "hyscribe-http",
  "hyscribe-service",
+ "hyscribe-testkit",
  "tempfile",
  "tokio",
 ]
@@ -620,6 +621,7 @@ name = "hyscribe-db"
 version = "0.1.0"
 dependencies = [
  "hyscribe-config",
+ "hyscribe-testkit",
  "sqlx",
  "tokio",
 ]
@@ -632,6 +634,7 @@ dependencies = [
  "hyscribe-config",
  "hyscribe-db",
  "hyscribe-render",
+ "hyscribe-testkit",
  "tokio",
  "tower",
 ]
@@ -663,6 +666,9 @@ dependencies = [
 [[package]]
 name = "hyscribe-testkit"
 version = "0.1.0"
+dependencies = [
+ "hyscribe-config",
+]
 
 [[package]]
 name = "icu_collections"

@@ -12,6 +12,8 @@ use std::fmt;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
+pub mod wpconfig;
+
 /// The file name looked up next to the binary.
 pub const ENV_FILE: &str = ".env";
 

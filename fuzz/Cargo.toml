@@ -14,6 +14,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 hyscribe-phpser = { path = "../crates/hyscribe-phpser" }
+hyscribe-config = { path = "../crates/hyscribe-config" }
 
 [[bin]]
 name = "phpser_decode"
@@ -25,6 +26,13 @@ bench = false
 [[bin]]
 name = "phpser_is_serialized"
 path = "fuzz_targets/phpser_is_serialized.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wpconfig_parse"
+path = "fuzz_targets/wpconfig_parse.rs"
 test = false
 doc = false
 bench = false

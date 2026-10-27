@@ -29,7 +29,8 @@ jobs:
       - run: cargo clippy --workspace --all-targets
       - name: SPDX header in every source file
         run: |
-          missing=$(git ls-files '*.rs' '*.toml' '*.php' '*.sh' \
+          # Test corpora copied from WordPress keep their own license.
+          missing=$(git ls-files '*.rs' '*.toml' '*.php' '*.sh' ':!crates/*/tests/corpus/*' \
             | xargs grep -L 'SPDX-License-Identifier: AGPL-3.0-or-later' || true)
           if [ -n "$missing" ]; then echo "Missing SPDX header:"; echo "$missing"; exit 1; fi
 

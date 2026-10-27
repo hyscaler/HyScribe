@@ -79,3 +79,44 @@ fn errors_set_the_exit_code() {
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
 }
+
+#[test]
+fn service_runs_from_an_extracted_folder() {
+    use std::os::unix::fs::PermissionsExt;
+    // An installation as the release archive lays it out.
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("hyscribe");
+    std::fs::create_dir(&home).unwrap();
+    let binary = home.join("hyscribe");
+    std::fs::copy(env!("CARGO_BIN_EXE_hyscribe"), &binary).unwrap();
+    let env_file = home.join(".env");
+    std::fs::write(&env_file, "DB_NAME=wordpress\nDB_USER=wp\n").unwrap();
+    std::fs::set_permissions(&env_file, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+    let hyscribe = |args: &[&str]| {
+        let mut command = Command::new(&binary);
+        command.env_clear().args(args);
+        if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+            command.env("LLVM_PROFILE_FILE", profile);
+        }
+        let output = command.output().unwrap();
+        (
+            output.status.code(),
+            String::from_utf8(output.stdout).unwrap(),
+        )
+    };
+
+    let (code, out) = hyscribe(&["service", "start"]);
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.starts_with("started (pid "), "{out}");
+    let (code, out) = hyscribe(&["service", "status"]);
+    assert_eq!(code, Some(0));
+    assert!(out.starts_with("running (pid "), "{out}");
+    let (code, out) = hyscribe(&["service", "stop"]);
+    assert_eq!(code, Some(0));
+    assert!(out.starts_with("stopped (pid "), "{out}");
+    let (code, out) = hyscribe(&["service", "status"]);
+    assert_eq!(code, Some(3));
+    assert_eq!(out, "not running\nlast log line: stopped on signal 15\n");
+    assert!(home.join("run/hyscribe.pid").exists());
+}

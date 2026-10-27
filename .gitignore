@@ -28,3 +28,4 @@ CLAUDE.local.md
 *.profraw
 lcov.info
 /mutants.out*/
+*.cdx.json

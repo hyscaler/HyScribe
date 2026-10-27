@@ -75,6 +75,20 @@ jobs:
           git diff origin/${{ github.base_ref }}...HEAD > pr.diff
           cargo mutants --workspace --in-diff pr.diff --no-shuffle
 
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Release archive installs and runs (ADR 0005)
+        run: |
+          scripts/package.sh x86_64-unknown-linux-musl dist
+          scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
+
   supply-chain:
     runs-on: ubuntu-24.04
     steps:

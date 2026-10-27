@@ -5,9 +5,12 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let home = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+    let exe = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .unwrap_or_default();
+    let home = exe
+        .parent()
+        .map(std::path::Path::to_path_buf)
         .unwrap_or_default();
     let env = std::env::vars_os()
         .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
@@ -16,6 +19,8 @@ fn main() -> ExitCode {
         args: std::env::args_os().collect(),
         env,
         home,
+        euid: hyscribe_service::effective_uid(),
+        server: (exe, vec!["start".into()]),
         out: &mut std::io::stdout(),
         err: &mut std::io::stderr(),
     }))

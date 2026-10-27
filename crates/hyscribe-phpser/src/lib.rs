@@ -19,6 +19,7 @@ mod decode;
 mod encode;
 mod error;
 mod float;
+mod json;
 mod value;
 mod wp;
 
@@ -26,5 +27,6 @@ pub use decode::{MAX_DEPTH, decode};
 pub use encode::{encode, encode_into};
 pub use error::{Error, ErrorKind};
 pub use float::Float;
+pub use json::{JSON_MAX_DEPTH, json_decode};
 pub use value::{Key, Value};
 pub use wp::{Maybe, is_serialized, maybe_unserialize};

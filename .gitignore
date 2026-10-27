@@ -25,3 +25,4 @@ CLAUDE.local.md
 lcov.info
 /mutants.out*/
 *.cdx.json
+/.claude/worktrees/

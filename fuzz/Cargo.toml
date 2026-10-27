@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Fuzz targets, one per parser (docs/SECURITY_MODEL.md). Needs nightly:
+#   cargo +nightly fuzz run phpser_decode
+[package]
+name = "hyscribe-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hyscribe-phpser = { path = "../crates/hyscribe-phpser" }
+
+[[bin]]
+name = "phpser_decode"
+path = "fuzz_targets/phpser_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "phpser_is_serialized"
+path = "fuzz_targets/phpser_is_serialized.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

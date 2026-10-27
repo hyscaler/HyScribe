@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "hyscribe"
+description = "Rust drop-in replacement for WordPress"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# main.rs has no unit tests; it is covered by running the binary.
+[[bin]]
+name = "hyscribe"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+clap.workspace = true
+hyscribe-config.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -122,8 +122,13 @@ fn users(rows: &Value) -> Vec<User> {
 fn matches_php() {
     let theme = twentytwentyfive();
     let golden = include_str!("../../tests/golden/comments.tsv");
+    let (shared, cases) = golden.split_once('\n').unwrap();
+    let shared = json_decode(&unhex(shared)).unwrap();
+    let comments = approved(shared.get_str("comments").unwrap());
+    let users = users(shared.get_str("users").unwrap());
+    let siteurl = shared.get_str("siteurl").unwrap().to_php_string();
     let mut failures = Vec::new();
-    for line in golden.lines() {
+    for line in cases.lines() {
         let mut fields = line.split('\t').map(unhex);
         let mut field = || fields.next().unwrap();
         let (markup, state, php) = (field(), json_decode(&field()).unwrap(), field());
@@ -132,11 +137,11 @@ fn matches_php() {
                 home: b"http://127.0.0.1:8081".to_vec(),
             },
             options: state.get_str("options").unwrap().clone(),
-            comments: approved(state.get_str("comments").unwrap()),
-            users: users(state.get_str("users").unwrap()),
+            comments: comments.clone(),
+            users: users.clone(),
             password: state.get_str("password") == Some(&Value::Bool(true)),
             closed: state.get_str("closed") == Some(&Value::Bool(true)),
-            siteurl: state.get_str("siteurl").unwrap().to_php_string(),
+            siteurl: siteurl.clone(),
         };
         let uri = state
             .get_str("uri")

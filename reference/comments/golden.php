@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Prints the comment blocks over comments inserted into the fixture
-// database inside a transaction that is rolled back. Lines are
+// database inside a transaction that is rolled back. The first line is
+// hex(json) of every comment row, the users and the site URL; then lines are
 //   hex(markup)<TAB>hex(json state)<TAB>hex(html)
-// where the state has the options set, the post and every comment row.
+// where the state has the options set, the post and the request.
 
 require '/var/www/html/wp-load.php';
 
@@ -103,6 +104,8 @@ unset( $user );
 $wpdb->update( $wpdb->posts, array( 'comment_status' => 'open' ), array( 'ID' => 2 ) );
 clean_post_cache( 2 );
 $rows = $wpdb->get_results( "SELECT * FROM {$wpdb->comments} ORDER BY comment_ID", ARRAY_A );
+// The first line has what every case shares.
+echo bin2hex( wp_json_encode( array( 'comments' => $rows, 'users' => $users, 'siteurl' => site_url() ) ) ), "\n";
 
 $option_sets = array(
 	array(),
@@ -163,8 +166,8 @@ foreach ( $option_sets as $options ) {
 			$html    = ( new WP_Block( parse_blocks( $markup )[0], $context ) )->render();
 			// Twice in one request, as the counters carry on.
 			$html   .= ( new WP_Block( parse_blocks( $markup )[0], $context ) )->render();
-			$state   = array( 'options' => $options, 'post' => $post_id, 'comments' => $rows, 'users' => $users, 'password' => false, 'closed' => false, 'now' => time() );
-			echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html ), "\n";
+			$state   = array( 'options' => $options, 'post' => $post_id, 'password' => false, 'closed' => false, 'now' => time() );
+			echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
 		}
 	}
 }
@@ -181,8 +184,8 @@ foreach ( array( current( preg_grep( '/^<!-- wp:comment-template --><!-- wp:avat
 	$reset();
 	$html  = ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
 	$html .= ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
-	$state = array( 'options' => array(), 'post' => 1, 'comments' => $rows, 'users' => $users, 'password' => false, 'closed' => false, 'now' => time(), 'loop' => true );
-	echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html ), "\n";
+	$state = array( 'options' => array(), 'post' => 1, 'password' => false, 'closed' => false, 'now' => time(), 'loop' => true );
+	echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
 }
 $GLOBALS['wp_query']->in_the_loop = false;
 
@@ -191,7 +194,7 @@ $form_markups = array(
 	'<!-- wp:post-comments-form /-->',
 	'<!-- wp:post-comments-form {"textAlign":"center","style":{"elements":{"link":{"color":{"text":"red"}}}}} /-->',
 );
-$form = function ( $options, $post_id, $markup, $uri, $global = 0 ) use ( $option_names, $rows, $users ) {
+$form = function ( $options, $post_id, $markup, $uri, $global = 0 ) use ( $option_names ) {
 	foreach ( $option_names as $name ) {
 		remove_all_filters( "pre_option_$name" );
 	}
@@ -205,9 +208,9 @@ $form = function ( $options, $post_id, $markup, $uri, $global = 0 ) use ( $optio
 	$context         = $post_id ? array( 'postId' => $post_id ) : array();
 	$html            = ( new WP_Block( parse_blocks( $markup )[0], $context ) )->render();
 	$html           .= ( new WP_Block( parse_blocks( $markup )[0], $context ) )->render();
-	$state           = array( 'options' => $options, 'post' => $post_id, 'comments' => $rows, 'users' => $users, 'password' => false, 'closed' => false, 'now' => time(), 'uri' => $uri ) + ( $global ? array( 'global' => $global ) : array() );
+	$state           = array( 'options' => $options, 'post' => $post_id, 'password' => false, 'closed' => false, 'now' => time(), 'uri' => $uri ) + ( $global ? array( 'global' => $global ) : array() );
 	$GLOBALS['post'] = null;
-	echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html ), "\n";
+	echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
 };
 foreach ( array(
 	array(),
@@ -255,38 +258,38 @@ add_filter( 'pre_option_comment_registration', static fn() => '1' );
 $GLOBALS['post'] = get_post( 1 );
 $reset();
 $markup = end( $markups );
-$state  = array( 'options' => array( 'comment_registration' => '1' ), 'post' => 1, 'comments' => $rows, 'users' => $users, 'password' => false, 'closed' => false, 'now' => time(), 'global' => 1 );
+$state  = array( 'options' => array( 'comment_registration' => '1' ), 'post' => 1, 'password' => false, 'closed' => false, 'now' => time(), 'global' => 1 );
 $html   = ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
 $html  .= ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
-echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html ), "\n";
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
 remove_all_filters( 'pre_option_comment_registration' );
 $GLOBALS['post'] = null;
 $wpdb->update( $wpdb->posts, array( 'comment_status' => 'closed' ), array( 'ID' => 1 ) );
 clean_post_cache( 1 );
 $reset();
 $markup = end( $markups );
-$state  = array( 'options' => array(), 'post' => 1, 'comments' => $rows, 'users' => $users, 'password' => false, 'closed' => true, 'now' => time() );
+$state  = array( 'options' => array(), 'post' => 1, 'password' => false, 'closed' => true, 'now' => time() );
 $html  = ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
 $html .= ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
-echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html ), "\n";
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
 
 // A password protected post shows no comments.
 $wpdb->update( $wpdb->posts, array( 'post_password' => 'pw' ), array( 'ID' => 1 ) );
 clean_post_cache( 1 );
 $markup = $markups[0];
 $reset();
-$state = array( 'options' => array(), 'post' => 1, 'comments' => $rows, 'users' => $users, 'password' => true, 'closed' => true, 'now' => time() );
+$state = array( 'options' => array(), 'post' => 1, 'password' => true, 'closed' => true, 'now' => time() );
 $html  = ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
 $html .= ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
-echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html ), "\n";
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
 
 // Nor a comment form, though comments are open.
 $wpdb->update( $wpdb->posts, array( 'comment_status' => 'open' ), array( 'ID' => 1 ) );
 clean_post_cache( 1 );
 $markup = $form_markups[0];
-$state  = array( 'options' => array(), 'post' => 1, 'comments' => $rows, 'users' => $users, 'password' => true, 'closed' => false, 'now' => time() );
+$state  = array( 'options' => array(), 'post' => 1, 'password' => true, 'closed' => false, 'now' => time() );
 $html   = ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
-echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html . $html ), "\n";
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html . $html ), "\n";
 $wpdb->update( $wpdb->posts, array( 'comment_status' => 'closed' ), array( 'ID' => 1 ) );
 clean_post_cache( 1 );
 
@@ -300,7 +303,7 @@ wp_high_priority_element_flag( true );
 $markup = '<!-- wp:group --><div class="wp-block-group"><!-- wp:query {"query":{"inherit":true}} --><div class="wp-block-query"><!-- wp:post-template --><!-- wp:avatar /--><!-- wp:avatar /--><!-- /wp:post-template --></div><!-- /wp:query --><!-- wp:avatar {"userId":1} /--><!-- wp:query {"query":{"inherit":false,"postType":"page","perPage":1}} --><div class="wp-block-query"><!-- wp:post-template --><!-- wp:avatar /--><!-- /wp:post-template --></div><!-- /wp:query --></div><!-- /wp:group -->';
 $html  = ( new WP_Block( parse_blocks( $markup )[0] ) )->render();
 $html .= ( new WP_Block( parse_blocks( $markup )[0] ) )->render();
-$state = array( 'options' => array(), 'post' => 0, 'comments' => $rows, 'users' => $users, 'password' => false, 'closed' => true, 'now' => time(), 'main' => wp_list_pluck( $GLOBALS['wp_query']->posts, 'ID' ) );
-echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html ), "\n";
+$state = array( 'options' => array(), 'post' => 0, 'password' => false, 'closed' => true, 'now' => time(), 'main' => wp_list_pluck( $GLOBALS['wp_query']->posts, 'ID' ) );
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
 
 $wpdb->query( 'ROLLBACK' );

@@ -7,5 +7,6 @@ pub mod blocks;
 pub mod formatting;
 pub mod registry;
 pub mod style;
+pub mod supports;
 pub mod template;
 pub mod theme;

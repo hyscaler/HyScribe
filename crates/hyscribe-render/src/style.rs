@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The style engine's parsing step, `WP_Style_Engine::parse_block_styles()`:
-//! a block's `style` attribute to class names and CSS declarations, by the
-//! same definitions table. Compiling the declarations to a filtered CSS
-//! string needs kses and joins once `hyscribe-kses` lands.
+//! The style engine for block supports: `WP_Style_Engine::parse_block_styles()`
+//! turns a block's `style` attribute into class names and CSS declarations,
+//! by the same definitions table, and `wp_style_engine_get_styles()`
+//! compiles the declarations to a filtered CSS string.
 
-use hyscribe_phpser::{Key, Value};
+use hyscribe_kses::{safecss_filter_attr, sanitize_key, wp_strip_all_tags};
+use hyscribe_phpser::{Key, Value, php_trim};
 use hyscribe_theme_json::kebab_case;
 
 /// How a value becomes CSS.
@@ -369,15 +370,15 @@ fn text(value: &Value) -> Option<&str> {
     }
 }
 
-/// `get_slug_from_preset_value()`: the kebab-cased slug of
-/// `var:preset|<property_key>|<slug>`, or empty.
+/// The kebab-cased slug of a `var:preset|<property_key>|<slug>` value.
+pub(crate) fn preset_value_slug(value: &Value, property_key: &str) -> Option<String> {
+    let value = text(value).filter(|v| v.contains(&format!("var:preset|{property_key}|")))?;
+    Some(kebab_case(value.rsplit('|').next().unwrap_or_default()))
+}
+
+/// `get_slug_from_preset_value()`: the slug, or empty.
 fn preset_slug(value: &Value, property_key: &str) -> String {
-    let Some(value) = text(value).filter(|v| v.contains(&format!("var:preset|{property_key}|")))
-    else {
-        return String::new();
-    };
-    let slug = value.rsplit('|').next().unwrap_or_default();
-    kebab_case(slug)
+    preset_value_slug(value, property_key).unwrap_or_default()
 }
 
 /// `get_css_var_value()`.
@@ -485,6 +486,67 @@ fn declarations(value: &Value, definition: &Definition, skip_vars: bool) -> Vec<
             }
         }
     }
+}
+
+/// What `wp_style_engine_get_styles()` returns without a selector or
+/// context; each part is empty where PHP leaves its key out.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Styles {
+    /// The declarations as one `style` attribute value.
+    pub css: Vec<u8>,
+    /// The class names, without duplicates, joined by spaces.
+    pub classnames: String,
+}
+
+/// `wp_style_engine_get_styles()`.
+pub fn get_styles(styles: &Value, convert_vars_to_classnames: bool) -> Styles {
+    let parsed = parse_block_styles(styles, convert_vars_to_classnames);
+    let mut classnames: Vec<&str> = Vec::new();
+    for class in &parsed.classnames {
+        if !classnames.contains(&class.as_str()) {
+            classnames.push(class);
+        }
+    }
+    Styles {
+        css: declarations_string(&parsed.declarations),
+        classnames: classnames.join(" "),
+    }
+}
+
+/// `WP_Style_Engine_CSS_Declarations`: `add_declarations()` keeps string
+/// values that are not blank, under their `sanitize_key()`ed property, and
+/// `get_declarations_string()` joins them, each through
+/// `wp_strip_all_tags()` and `safecss_filter_attr()`.
+fn declarations_string(declarations: &[(String, Value)]) -> Vec<u8> {
+    let mut kept: Vec<(String, &[u8])> = Vec::new();
+    for (property, value) in declarations {
+        let property = sanitize_key(property.as_bytes());
+        let Value::String(value) = value else {
+            continue;
+        };
+        let value = php_trim(value);
+        // Properties come from the definitions, so none sanitizes to empty.
+        if value.is_empty() {
+            continue;
+        }
+        match kept.iter_mut().find(|(p, _)| *p == property) {
+            Some(entry) => entry.1 = value,
+            None => kept.push((property, value)),
+        }
+    }
+    let mut css = Vec::new();
+    for (property, value) in kept {
+        let value = wp_strip_all_tags(value, true);
+        if value.is_empty() {
+            continue;
+        }
+        let declaration = safecss_filter_attr(&[property.as_bytes(), b":", &value].concat());
+        if !declaration.is_empty() {
+            css.extend_from_slice(&declaration);
+            css.push(b';');
+        }
+    }
+    css
 }
 
 #[cfg(test)]

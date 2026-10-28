@@ -28,7 +28,7 @@ pub fn block_type(name: &str) -> Option<&'static BlockType> {
     TYPES.get_or_init(|| load(REGISTRY)).get(name.as_bytes())
 }
 
-fn load(json: &[u8]) -> HashMap<Vec<u8>, BlockType> {
+pub(crate) fn load(json: &[u8]) -> HashMap<Vec<u8>, BlockType> {
     let Some(Value::Array(types)) = json_decode(json) else {
         return HashMap::new();
     };

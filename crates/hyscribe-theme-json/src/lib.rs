@@ -143,6 +143,13 @@ impl GlobalStyles {
             .collect()
     }
 
+    /// `wp_get_typography_font_size_value( $preset )`: the preset's `size`,
+    /// made fluid when the global settings ask for it; `None` without a
+    /// size.
+    pub fn font_size_value(&self, preset: &Value) -> Option<Value> {
+        typography::font_size_value(preset, &php::array(), self.settings())
+    }
+
     /// The responsive style states and their media queries, from
     /// `settings.viewport` (`@mobile`, `@tablet`).
     pub fn viewport_media_queries(&self) -> Vec<(String, String)> {

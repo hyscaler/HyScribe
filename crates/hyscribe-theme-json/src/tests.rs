@@ -212,6 +212,15 @@ fn lookups() {
     let origins: Vec<_> = sizes.iter().map(|(o, list)| (*o, list.len())).collect();
     assert_eq!(origins, [("default", 4), ("theme", 5)]);
     assert_eq!(styles.presets(&["nothing"]), []);
+    let size = |size: &str| json_decode(format!(r#"{{"size":{size}}}"#).as_bytes()).unwrap();
+    // Twenty Twenty-Five turns fluid typography on.
+    assert_eq!(
+        styles.font_size_value(&size(r#""2rem""#)),
+        Some(text(
+            "clamp(1.25rem, 1.25rem + ((1vw - 0.2rem) * 1.176), 2rem)"
+        ))
+    );
+    assert_eq!(styles.font_size_value(&size("null")), None);
     let odd = GlobalStyles {
         data: json_decode(br#"{"settings": {"color": {"palette": {"theme": "x", "custom": []}}}}"#)
             .unwrap(),

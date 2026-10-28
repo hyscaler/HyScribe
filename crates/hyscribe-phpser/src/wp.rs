@@ -85,7 +85,7 @@ fn digits_then_colon(bytes: &[u8]) -> bool {
 }
 
 /// PHP `trim()` with its default character set.
-fn php_trim(data: &[u8]) -> &[u8] {
+pub fn php_trim(data: &[u8]) -> &[u8] {
     let is_space = |b: &u8| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b'\0' | b'\x0B');
     let start = data.iter().position(|b| !is_space(b)).unwrap_or(data.len());
     let end = data

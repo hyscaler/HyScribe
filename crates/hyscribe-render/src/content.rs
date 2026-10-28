@@ -71,7 +71,11 @@ impl Renderer<'_> {
     fn the_content(&mut self, post: &Post) -> Vec<u8> {
         let site = self.context.site;
         let content = replace(&get_the_content(self, post), b"]]>", b"]]&gt;");
-        let content = wptexturize(&self.render_top_level(&content), &CORE_SHORTCODE_TAGS);
+        let outer = self.context.loading.in_the_content;
+        self.context.loading.in_the_content = true;
+        let rendered = self.render_top_level(&content);
+        self.context.loading.in_the_content = outer;
+        let content = wptexturize(&rendered, &CORE_SHORTCODE_TAGS);
         site_smilies(
             site,
             &capital_p_dangit(&replace_insecure_home_url(&site.home_url(), &content)),

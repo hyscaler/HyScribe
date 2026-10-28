@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use crate::media::Loading;
 use hyscribe_model::{Post, PostQuery, Term, User};
 use hyscribe_phpser::json_decode;
 use hyscribe_testkit::unhex;
@@ -104,6 +105,10 @@ fn users(rows: &Value) -> Vec<User> {
             id: row.get_str("ID").unwrap().to_int() as u64,
             display_name: text(row, "display_name"),
             nicename: text(row, "user_nicename"),
+            login: text(row, "user_login"),
+            email: text(row, "user_email"),
+            first_name: text(row, "first_name"),
+            last_name: text(row, "last_name"),
         })
         .collect()
 }
@@ -132,9 +137,19 @@ fn matches_php() {
         let request = Request {
             now: state.get_str("now").unwrap().to_int(),
             post: state.get_str("global").map(|id| id.to_int() as u64),
+            posts: state.get_str("main").map_or(Vec::new(), |ids| {
+                ids.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|(_, id)| site.post(id.to_int() as u64).unwrap())
+                    .collect()
+            }),
             ..Request::default()
         };
         let mut renderer = Renderer::new(&theme, &site, &request);
+        if state.get_str("loop") == Some(&Value::Bool(true)) {
+            renderer.context.loading = Loading::in_the_loop(true);
+        }
         let post = state.get_str("post").unwrap().to_int() as u64;
         renderer.context.post_id = (post != 0).then_some(post);
         let block = &crate::blocks::parse_blocks(&markup)[0];

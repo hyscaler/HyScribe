@@ -341,7 +341,21 @@ async fn options_meta_and_terms() {
     );
     assert_eq!(db.option("no_such_option").await.unwrap(), None);
     let admin = db.user(1).await.unwrap().unwrap();
-    assert_eq!((admin.id, admin.display_name), (1, b"admin".to_vec()));
+    assert_eq!((admin.id, &admin.display_name[..]), (1, &b"admin"[..]));
+    assert_eq!(
+        (
+            &admin.login[..],
+            &admin.email[..],
+            &admin.first_name[..],
+            &admin.last_name[..]
+        ),
+        (
+            &b"admin"[..],
+            &b"admin@default-install.test"[..],
+            &b""[..],
+            &b""[..]
+        )
+    );
     assert_eq!(db.user(99).await.unwrap(), None);
     let comments = db.comments(1).await.unwrap();
     assert_eq!(comments.len(), 1);

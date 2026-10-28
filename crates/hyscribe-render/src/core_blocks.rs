@@ -15,6 +15,7 @@ use crate::date::{self, Zone};
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, convert_chars, wptexturize};
 use crate::kses::wp_kses_post;
 use crate::link;
+use crate::media::Loading;
 use crate::post::{the_title, title_filters};
 use crate::query_loop::query_posts;
 use crate::registry::block_type;
@@ -36,6 +37,8 @@ pub(crate) struct Context<'a> {
     pub(crate) query: Option<QueryContext>,
     /// The comment the comment template is rendering, its `commentId`.
     pub(crate) comment: Option<Comment>,
+    /// The loop and image counts images' loading attributes depend on.
+    pub(crate) loading: Loading,
 }
 
 /// The block context of a query block's descendants: `query`,
@@ -75,6 +78,7 @@ pub(crate) fn render(
     content: &[u8],
 ) -> Option<Vec<u8>> {
     let callback = match name {
+        "core/avatar" => avatar::avatar,
         "core/comment-author-name" => comment_author_name,
         "core/comment-content" => comment_content,
         "core/comment-date" => comment_date,
@@ -413,11 +417,21 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 
 /// PHP's `urlencode()`: letters, digits and `-_.` kept, spaces as `+`.
 pub(crate) fn urlencode(text: &[u8]) -> Vec<u8> {
+    percent_encode(text, false)
+}
+
+/// PHP's `rawurlencode()`: letters, digits and `-_.~` kept.
+fn rawurlencode(text: &[u8]) -> Vec<u8> {
+    percent_encode(text, true)
+}
+
+fn percent_encode(text: &[u8], raw: bool) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     for &b in text {
         match b {
             b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' => out.push(b),
-            b' ' => out.push(b'+'),
+            b'~' if raw => out.push(b),
+            b' ' if !raw => out.push(b'+'),
             _ => out.extend(format!("%{b:02X}").into_bytes()),
         }
     }
@@ -532,10 +546,10 @@ fn post_author_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         .map(|user| user.display_name)
         .unwrap_or_default();
     if block.attribute("isLink").is_some_and(|v| !v.is_empty()) {
-        let home = context.site.home_url();
-        let url = esc_url(
-            format!("{}/?author={}", String::from_utf8_lossy(&home), post.author).as_bytes(),
-        );
+        let url = esc_url(&link::author_posts_url(
+            &context.site.home_url(),
+            post.author,
+        ));
         let target = block
             .attribute("linkTarget")
             .map(Value::to_php_string)
@@ -1206,6 +1220,8 @@ fn site_tagline(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let tag = tag(block.attribute("level"), b"p");
     element(&tag, &wrapper, &tagline)
 }
+
+mod avatar;
 
 #[cfg(test)]
 mod tests;

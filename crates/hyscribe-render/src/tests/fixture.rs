@@ -247,10 +247,23 @@ impl Site for DefaultInstall {
         dump()
             .table("wp_users")
             .find(|row| number(&row[0]) == id)
-            .map(|row| User {
-                id,
-                display_name: text(&row[9]),
-                nicename: text(&row[3]),
+            .map(|row| {
+                let meta = |key: &[u8]| {
+                    dump()
+                        .table("wp_usermeta")
+                        .find(|meta| number(&meta[1]) == id && text(&meta[2]) == key)
+                        .map(|meta| text(&meta[3]))
+                        .unwrap_or_default()
+                };
+                User {
+                    id,
+                    display_name: text(&row[9]),
+                    nicename: text(&row[3]),
+                    login: text(&row[1]),
+                    email: text(&row[4]),
+                    first_name: meta(b"first_name"),
+                    last_name: meta(b"last_name"),
+                }
             })
     }
 

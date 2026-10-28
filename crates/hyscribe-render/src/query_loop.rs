@@ -109,6 +109,11 @@ impl Renderer<'_> {
             &self.context.theme.global,
         );
         let outer = self.context.post_id;
+        let outer_loop = self.context.loading.in_the_loop;
+        self.context.loading.in_the_loop |= query
+            .query
+            .get_str("inherit")
+            .is_some_and(|v| !v.is_empty());
         let mut items = Vec::new();
         for post in &posts {
             self.context.post_id = Some(post.id);
@@ -128,6 +133,7 @@ impl Renderer<'_> {
             items.extend_from_slice(b"</li>");
         }
         self.context.post_id = outer;
+        self.context.loading.in_the_loop = outer_loop;
         [
             b"<ul ".as_slice(),
             wrapper.as_bytes(),

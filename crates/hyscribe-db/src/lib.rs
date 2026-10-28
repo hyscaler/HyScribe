@@ -124,6 +124,10 @@ fn user(row: &MySqlRow) -> Result<User, DbError> {
         id: c.unsigned("ID"),
         display_name: c.bytes("display_name"),
         nicename: c.bytes("user_nicename"),
+        login: c.bytes("user_login"),
+        email: c.bytes("user_email"),
+        first_name: c.bytes("first_name"),
+        last_name: c.bytes("last_name"),
     };
     c.finish(user)
 }
@@ -341,11 +345,17 @@ impl Db {
         rows.iter().map(comment).collect()
     }
 
-    /// One user by ID.
+    /// One user by ID, with the first value of each name meta as
+    /// `get_user_meta( $id, $key, true )` reads it.
     pub async fn user(&self, id: u64) -> Result<Option<User>, DbError> {
-        let sql = self
-            .prefix
-            .sql("SELECT ID, display_name, user_nicename FROM {prefix}users WHERE ID = ?");
+        let sql = self.prefix.sql(
+            "SELECT ID, display_name, user_nicename, user_login, user_email, \
+             COALESCE((SELECT meta_value FROM {prefix}usermeta WHERE user_id = u.ID \
+             AND meta_key = 'first_name' ORDER BY umeta_id LIMIT 1), '') AS first_name, \
+             COALESCE((SELECT meta_value FROM {prefix}usermeta WHERE user_id = u.ID \
+             AND meta_key = 'last_name' ORDER BY umeta_id LIMIT 1), '') AS last_name \
+             FROM {prefix}users u WHERE ID = ?",
+        );
         let row = sqlx::query(sql)
             .bind(id)
             .fetch_optional(&self.pool)

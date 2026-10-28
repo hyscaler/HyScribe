@@ -19,6 +19,7 @@ mod interactivity;
 pub mod kses;
 mod layout;
 pub mod link;
+mod media;
 mod navigation;
 pub mod post;
 mod query_loop;

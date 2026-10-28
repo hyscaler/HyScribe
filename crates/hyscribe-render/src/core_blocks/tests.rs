@@ -49,6 +49,7 @@ impl Site for Fixture {
             id,
             display_name: b"admin".to_vec(),
             nicename: b"admin".to_vec(),
+            ..Default::default()
         })
     }
 }
@@ -165,6 +166,7 @@ fn matches_php() {
             post_id,
             query: None,
             comment: None,
+            loading: Default::default(),
         };
         let ours = render_markup(&context, &markup);
         if ours != php {
@@ -214,6 +216,7 @@ fn relative_dates() {
         post_id: Some(7),
         query: None,
         comment: None,
+        loading: Default::default(),
     };
     let markup = br#"<!-- wp:post-date {"format":"human-diff"} /-->"#;
     let posted = date::stored_unix("2026-10-27 10:00:00", Zone::Utc);
@@ -237,6 +240,7 @@ fn blocks_without_a_callback_render_their_saved_markup() {
         post_id: None,
         query: None,
         comment: None,
+        loading: Default::default(),
     };
     assert_eq!(render(&context, "core/paragraph", &[], b""), None);
     assert_eq!(
@@ -271,6 +275,7 @@ fn bindings_and_the_front_page() {
         post_id: Some(9),
         query: None,
         comment: None,
+        loading: Default::default(),
     };
     let html =
         |markup: &str| String::from_utf8(render_markup(&context, markup.as_bytes())).unwrap();
@@ -347,6 +352,7 @@ fn post_terms_match_php() {
             post_id: (state.get_str("context") == Some(&Value::Bool(true))).then_some(1001),
             query: None,
             comment: None,
+            loading: Default::default(),
         };
         assert_eq!(
             String::from_utf8_lossy(&render_markup(&context, &markup)),
@@ -451,6 +457,7 @@ fn post_navigation_links_match_php() {
             post_id: Some(site.post.as_ref().map_or(9999, |post| post.id)),
             query: None,
             comment: None,
+            loading: Default::default(),
         };
         assert_eq!(
             String::from_utf8_lossy(&render_markup(&context, &markup)),
@@ -486,6 +493,7 @@ fn comments_match_php() {
             post_id: site.post.as_ref().map(|post| post.id),
             query: None,
             comment: None,
+            loading: Default::default(),
         };
         assert_eq!(
             String::from_utf8_lossy(&render_markup(&context, &markup)),
@@ -520,6 +528,7 @@ fn legacy_comments_are_not_ported() {
         post_id: Some(1),
         query: None,
         comment: None,
+        loading: Default::default(),
     };
     for markup in [
         &b"<!-- wp:comments {\"legacy\":true} /-->"[..],
@@ -527,4 +536,46 @@ fn legacy_comments_are_not_ported() {
     ] {
         assert_eq!(render_markup(&context, markup), b"");
     }
+}
+
+/// Without an `avatar_default` option `get_option()` falls back to
+/// `mystery`, and without `avatar_rating` there is no rating.
+#[test]
+fn avatar_defaults_without_options() {
+    let theme = twentytwentyfive();
+    let site = Fixture {
+        options: HashMap::from([("show_avatars".to_owned(), b"1".to_vec())]),
+        ..Fixture::default()
+    };
+    let request = Request::default();
+    let context = Context {
+        theme: &theme,
+        site: &site,
+        request: &request,
+        post_id: None,
+        query: None,
+        comment: None,
+        loading: Default::default(),
+    };
+    assert_eq!(
+        String::from_utf8(render_markup(
+            &context,
+            br#"<!-- wp:avatar {"userId":1} /-->"#
+        ))
+        .unwrap(),
+        "<div class=\"wp-block-avatar\"><img alt='admin Avatar' \
+         src='https://secure.gravatar.com/avatar/?s=96&#038;d=mm' \
+         srcset='https://secure.gravatar.com/avatar/?s=192&#038;d=mm 2x' \
+         class='avatar avatar-96 photo avatar-default wp-block-avatar__image' height='96' \
+         width='96' loading='lazy' decoding='async'/></div>"
+    );
+}
+
+/// PHP's `rawurlencode()` of the same string.
+#[test]
+fn rawurlencode_like_php() {
+    assert_eq!(
+        rawurlencode(b"http://Example.test/?p=1&x=a b~*"),
+        b"http%3A%2F%2FExample.test%2F%3Fp%3D1%26x%3Da%20b~%2A"
+    );
 }

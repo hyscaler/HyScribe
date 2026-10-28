@@ -550,6 +550,7 @@ dependencies = [
  "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-theme-json",
+ "sha2 0.11.1",
 ]
 
 [[package]]

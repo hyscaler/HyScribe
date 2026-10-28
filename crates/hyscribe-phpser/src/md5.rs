@@ -55,11 +55,13 @@ pub fn md5(data: &[u8]) -> String {
             *value = value.wrapping_add(added);
         }
     }
-    state
-        .iter()
-        .flat_map(|word| word.to_le_bytes())
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    let digest: Vec<u8> = state.iter().flat_map(|word| word.to_le_bytes()).collect();
+    bin2hex(&digest)
+}
+
+/// `bin2hex( $bytes )`.
+pub fn bin2hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]

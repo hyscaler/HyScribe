@@ -16,6 +16,7 @@ use crate::core_blocks::{self, Context};
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_smilies, wptexturize};
 use crate::interactivity::process_directives;
 use crate::layout::{LayoutBlock, render_layout};
+use crate::media::Loading;
 use crate::registry::block_type;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
@@ -173,6 +174,7 @@ impl<'a> Renderer<'a> {
                 post_id: request.post,
                 query: None,
                 comment: None,
+                loading: Loading::in_the_loop(request.singular),
             },
             open_parts: Vec::new(),
             open_patterns: Vec::new(),

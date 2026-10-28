@@ -44,6 +44,11 @@ pub fn permalink(home: &[u8], front_page: Option<u64>, post: &Post) -> Vec<u8> {
     [home, b"/", query.as_bytes()].concat()
 }
 
+/// `get_author_posts_url( $id )` with plain permalinks.
+pub fn author_posts_url(home: &[u8], id: impl std::fmt::Display) -> Vec<u8> {
+    [home, format!("/?author={id}").as_bytes()].concat()
+}
+
 /// `get_term_link( $term, $taxonomy )` for the taxonomies the default
 /// install shows: `?cat=<ID>` for a category, `?tag=<slug>` for a tag,
 /// and for a post format its slug without `post-format-`.

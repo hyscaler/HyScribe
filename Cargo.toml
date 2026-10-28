@@ -26,6 +26,7 @@ hyscribe-testkit = { path = "crates/hyscribe-testkit" }
 clap = { version = "4.5", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 dotenvy = "0.15"
 proptest = "1.7"
+sha2 = { version = "0.11", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

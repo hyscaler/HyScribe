@@ -348,6 +348,36 @@ foreach ( array( 0, 1, 59, 60, 61, 119, 120, 3599, 3600, 3601, 5399, 5400, 7200,
 
 add_filter( 'pre_option_gmt_offset', static fn() => 0 );
 
+// The comments wrapper and title over in-memory posts: comment count,
+// comment status and password.
+$comments_blocks = array(
+	'<!-- wp:comments --><div class="wp-block-comments">saved</div><!-- /wp:comments -->',
+	'<!-- wp:comments-title /-->',
+	'<!-- wp:comments-title {"showPostTitle":false} /-->',
+	'<!-- wp:comments-title {"showCommentsCount":false} /-->',
+	'<!-- wp:comments-title {"showPostTitle":false,"showCommentsCount":false,"level":4,"textAlign":"center"} /-->',
+	'<!-- wp:comments-title {"level":3,"fontSize":"large"} /-->',
+);
+foreach ( array( array( 0, 'open', '' ), array( 0, 'closed', '' ), array( 1, 'closed', '' ), array( 2, 'open', '' ), array( 1234, 'open', '' ), array( 1000000, 'open', '' ), array( 100, 'open', '' ), array( -5, 'open', '' ), array( 1, 'open', 'pw' ) ) as $n => list( $count, $status, $password ) ) {
+	$id   = 1100 + $n;
+	$copy = clone get_post( 1001 );
+	$copy->ID             = $id;
+	$copy->comment_count  = (string) $count;
+	$copy->comment_status = $status;
+	$copy->post_password  = $password;
+	wp_cache_set( $id, $copy, 'posts' );
+	$GLOBALS['post'] = get_post( $id );
+	foreach ( $comments_blocks as $markup ) {
+		$block = new WP_Block( parse_blocks( $markup )[0], array( 'postId' => $id, 'postType' => 'post' ) );
+		echo 'comments', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( get_post( $id, ARRAY_A ) ) ), "\t", bin2hex( $block->render() ), "\n";
+	}
+}
+foreach ( array( '<!-- wp:comments --><div>x</div><!-- /wp:comments -->', '<!-- wp:comments-title /-->' ) as $markup ) {
+	$GLOBALS['post'] = null;
+	$block           = new WP_Block( parse_blocks( $markup )[0], array() );
+	echo 'comments', "\t", bin2hex( $markup ), "\t", bin2hex( 'null' ), "\t", bin2hex( $block->render() ), "\n";
+}
+
 // The post navigation link on single views. Adjacent posts come from the
 // database; the in-memory posts sit before and after its one post.
 $navigation_blocks = array(

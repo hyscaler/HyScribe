@@ -65,6 +65,8 @@ fn post(row: &Value) -> Post {
     Post {
         id: row.get_str("ID").unwrap().to_float() as u64,
         author: row.get_str("post_author").unwrap().to_int() as u64,
+        comment_count: row.get_str("comment_count").unwrap().to_int(),
+        comment_status: text(row, "comment_status"),
         title: row.get_str("post_title").unwrap().to_php_string(),
         status: text(row, "post_status"),
         password: row.get_str("post_password").unwrap().to_php_string(),
@@ -81,7 +83,7 @@ fn render_markup(context: &Context<'_>, markup: &[u8]) -> Vec<u8> {
         context,
         block.name.as_deref().unwrap(),
         block.attrs.as_deref().unwrap(),
-        b"",
+        &block.inner_html,
     )
     .unwrap()
 }
@@ -139,6 +141,7 @@ fn matches_php() {
             || kind == "teaser"
             || kind == "terms"
             || kind == "adjacent"
+            || kind == "comments"
         {
             continue;
         }
@@ -452,4 +455,67 @@ fn post_navigation_links_match_php() {
         count += 1;
     }
     assert!(count > 200);
+}
+
+/// The `comments` cases: the comments wrapper and title.
+#[test]
+fn comments_match_php() {
+    let golden = include_str!("../../tests/golden/core-blocks.tsv");
+    let theme = twentytwentyfive();
+    let mut count = 0;
+    for line in golden.lines().filter(|line| line.starts_with("comments\t")) {
+        let mut fields = line.split('\t').skip(1).map(unhex);
+        let mut field = || fields.next().unwrap();
+        let (markup, row, php) = (field(), object(&field()), field());
+        let site = Fixture {
+            post: (row != Value::Null).then(|| post(&row)),
+            ..Fixture::default()
+        };
+        let request = Request::default();
+        let context = Context {
+            theme: &theme,
+            site: &site,
+            request: &request,
+            post_id: site.post.as_ref().map(|post| post.id),
+            query: None,
+        };
+        assert_eq!(
+            String::from_utf8_lossy(&render_markup(&context, &markup)),
+            String::from_utf8_lossy(&php),
+            "{} {:?}",
+            String::from_utf8_lossy(&markup),
+            site.post.as_ref().map(|post| post.id)
+        );
+        count += 1;
+    }
+    assert_eq!(count, 56);
+}
+
+/// The legacy comments block runs `comments_template()`, which is not
+/// ported; it renders nothing.
+#[test]
+fn legacy_comments_are_not_ported() {
+    let theme = twentytwentyfive();
+    let site = Fixture {
+        post: Some(Post {
+            id: 1,
+            comment_status: "open".into(),
+            ..Post::default()
+        }),
+        ..Fixture::default()
+    };
+    let request = Request::default();
+    let context = Context {
+        theme: &theme,
+        site: &site,
+        request: &request,
+        post_id: Some(1),
+        query: None,
+    };
+    for markup in [
+        &b"<!-- wp:comments {\"legacy\":true} /-->"[..],
+        b"<!-- wp:post-comments --><div>saved</div><!-- /wp:post-comments -->",
+    ] {
+        assert_eq!(render_markup(&context, markup), b"");
+    }
 }

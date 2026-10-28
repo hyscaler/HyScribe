@@ -51,6 +51,7 @@ fn post(row: &[SqlValue]) -> Post {
         menu_order: Value::String(text(&row[19])).to_int(),
         post_type: string(&row[20]),
         comment_count: Value::String(text(&row[22])).to_int(),
+        comment_status: string(&row[8]),
     }
 }
 

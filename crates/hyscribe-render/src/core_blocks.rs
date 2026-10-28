@@ -69,6 +69,8 @@ pub(crate) fn render(
     content: &[u8],
 ) -> Option<Vec<u8>> {
     let callback = match name {
+        "core/comments" | "core/post-comments" => comments,
+        "core/comments-title" => comments_title,
         "core/post-author-name" => post_author_name,
         "core/post-date" => post_date,
         "core/post-navigation-link" => post_navigation_link,
@@ -151,6 +153,95 @@ impl Context<'_> {
         let option = |name| self.site.option(name).unwrap_or_default();
         date::site_zone(&option("timezone_string"), &option("gmt_offset"))
     }
+}
+
+/// `render_block_core_comments()`: the saved markup, where the post takes
+/// comments or has some. The legacy form, which runs `comments_template()`,
+/// is not ported and renders nothing.
+fn comments(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let Some(post) = context.post_id.map(|id| context.site.post(id)) else {
+        return Vec::new();
+    };
+    // comments_open() and get_comments_number()
+    let open = post
+        .as_ref()
+        .is_some_and(|post| post.comment_status == "open");
+    let count = post.as_ref().map_or(0, |post| post.comment_count);
+    if !open && count == 0 {
+        return Vec::new();
+    }
+    let legacy = block.name == "core/post-comments"
+        || block.attribute("legacy").is_some_and(|v| !v.is_empty());
+    if legacy {
+        return Vec::new();
+    }
+    block.content.to_vec()
+}
+
+/// `render_block_core_comments_title()`: how many responses the post has,
+/// with its title.
+fn comments_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let post = context.post();
+    // post_password_required() for a visitor without the cookie
+    if post.as_ref().is_some_and(|post| !post.password.is_empty()) {
+        return Vec::new();
+    }
+    // Without a post the count is the integer 0, which PHP's `'0' ===`
+    // check lets through.
+    let count = post.as_ref().map_or(0, |post| post.comment_count);
+    if post.is_some() && count == 0 {
+        return Vec::new();
+    }
+    let flag = |name| block.attribute(name).is_some_and(|v| !v.is_empty());
+    let title =
+        String::from_utf8_lossy(&post.as_ref().map(the_title).unwrap_or_default()).into_owned();
+    let number = number_format(count);
+    let text = match (flag("showCommentsCount"), flag("showPostTitle"), count == 1) {
+        (true, true, true) => format!("One response to &#8220;{title}&#8221;"),
+        (true, true, false) => format!("{number} responses to &#8220;{title}&#8221;"),
+        (true, false, true) => "One response".to_string(),
+        (true, false, false) => format!("{number} responses"),
+        (false, true, true) => format!("Response to &#8220;{title}&#8221;"),
+        (false, true, false) => format!("Responses to &#8220;{title}&#8221;"),
+        (false, false, true) => "Response".to_string(),
+        (false, false, false) => "Responses".to_string(),
+    };
+    // `level` always has its default of 2.
+    let level = block
+        .attribute("level")
+        .map(Value::to_php_string)
+        .unwrap_or_default();
+    let tag = [&b"h"[..], &level].concat();
+    let class = match block.attribute("textAlign").filter(|v| !v.is_empty()) {
+        Some(align) => [&b"has-text-align-"[..], &align.to_php_string()].concat(),
+        None => Vec::new(),
+    };
+    [
+        &b"<"[..],
+        &tag,
+        b" id=\"comments\" ",
+        block.wrapper(context, &class).as_bytes(),
+        b">",
+        text.as_bytes(),
+        b"</",
+        &tag,
+        b">",
+    ]
+    .concat()
+}
+
+/// `number_format_i18n( $number )` in English: thousands separated by
+/// commas.
+fn number_format(number: i64) -> String {
+    let digits = number.unsigned_abs().to_string();
+    let mut out = String::new();
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    if number < 0 { format!("-{out}") } else { out }
 }
 
 /// `render_block_core_post_author_name()`: the author's display name, as

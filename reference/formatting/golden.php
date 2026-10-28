@@ -132,6 +132,40 @@ function smilies_cases() {
 	return array_merge( $cases, random_cases( $atoms, 400, 10 ) );
 }
 
+function autop_cases() {
+	$cases = array(
+		'', ' ', "\n\n", 'one line', "one\ntwo", "one\n\ntwo", "a\r\nb\r\rc", "  lead\n\n\ntrail  \n",
+		"<p>already</p>", "<div>block</div>text\n\nmore", "<div>x\ny</div>", "<p>x</p>\n<p>y</p>",
+		"<pre>keep\n\n  this</pre>\nafter", "a<pre>one</pre>b<pre class=\"x\">two\n</pre>c</pre>", "no pre end <pre>open",
+		"<br><br>x<br/>  <br />y", "line<br>\nnext", "line <br />\nnext", "line<br /> \nnext",
+		"<select>\n<option>a</option>\n <option>b</option>\n</select>",
+		"<object data=\"x\">\n<param name=\"a\">\n<embed src=\"y\">\n</object>",
+		"<audio>\n<source src=\"a\">\n<track src=\"b\">\n</audio>\n[video]\n<source>\n[/video]",
+		"<figure><img src=x>\n<figcaption>cap\n</figcaption>\n</figure>",
+		"<ul>\n<li>a</li>\n<li>b\nc</li>\n</ul>", "<li>loose</li>", "<p><li>x</li></p>",
+		"<blockquote>quote\n\nmore</blockquote>", "<BLOCKQUOTE cite='a>b' class=\"q\">x</BLOCKQUOTE>", "<blockquote class=\"open>",
+		"<script>a\nb</script>\n\n<style>\nc{}</style><svg>\n</svg><math>\n</math>",
+		"<!-- a\ncomment -->\ntext", "<![CDATA[x\ny]]>\nz", "<a href=\"x\ny\">link</a>", "<!-- unterminated\n",
+		"<hr>\n<hr/>text<hr  />", "<h1>t</h1>\n<h6 class=x>s</h6>", "<table><tr><td>c\nd</td></tr></table>",
+		"<address>a\nb</address>", "<form>f</form>", "<p>x</div>", "<span>\n\n</span>", "<path d=\"x\">\n</path>",
+		"text \x0b\n\x0c\n end", "\t\n\t\nx", "<p>\n</p>", "<br />\n\n<br />",
+		"<blockquote class=\"open>x", "<pre>a</pre>literal <pre wp-pre-tag-0></pre> end", "<pre wp-pre-tag-1></pre><pre>a</pre><pre>b</pre>", "<pre>a</pre><pre>b<pre wp-pre-tag-0></pre>c</pre><pre wp-pre-tag-1></pre>", "<pre>x <pre wp-pre-tag-1></pre></pre><pre>y</pre>", "<pre wp-pre-tag-01></pre><pre>x</pre><pre wp-pre-tag-9></pre><pre wp-pre-tag-0>", "<pre wp-pre-tag-x></pre><pre>z</pre>", "<pre>a<pre wp-pre-tag-0></pre>", "<p><li>x</p>\ny", "<li>x\ny", "<br /><p<br /><div>", "<script</script>\nx", "[audio [video]x<source>", "<source>\n</object><param name", "<source>[audio src", "a<br /> <p", "<track>\n</audiox>\n[/videoy]\n[/audio]",
+	);
+	foreach ( post_contents() as $content ) {
+		$cases[] = $content;
+	}
+	$atoms = array( "\n", "\n\n", "\r\n", "\r", ' ', "\t", 'text', '<p>', '</p>', '<div>', '</div>', '<br>', '<br />', '<br/>', '<pre>', '</pre>', '<option>', '</option>', '<object>', '</object>', '<param>', '<embed>', '<audio>', '</audio>', '[video]', '[/video]', '<source>', '<track>', '<figcaption>', '</figcaption>', '<li>', '</li>', '<ul>', '</ul>', '<blockquote>', "<blockquote class='a>b'>", '</blockquote>', '<script>', '</script>', '<style>', '</style>', '<svg>', '</svg>', '<!-- c -->', '<!--', '-->', '<![CDATA[', ']]>', '<hr>', '<hr />', '<h2>', '</h2>', '<td>', '<span>', '</span>', '<a href="x">', '<address>', '</address>', '<form>', '</form>', '<path>', '<', '>', '"', "'" );
+	return array_merge( $cases, random_cases( $atoms, 3000, 16 ) );
+}
+
+if ( 'autop' === $argv[1] ) {
+	foreach ( autop_cases() as $case ) {
+		foreach ( array( true, false ) as $br ) {
+			echo bin2hex( $case ), "\t", $br ? '1' : '0', "\t", bin2hex( wpautop( $case, $br ) ), "\n";
+		}
+	}
+	exit;
+}
 if ( 'texturize' === $argv[1] ) {
 	foreach ( texturize_cases() as $case ) {
 		emit( $case, wptexturize( $case ) );

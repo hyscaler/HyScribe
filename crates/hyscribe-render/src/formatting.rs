@@ -277,6 +277,35 @@ fn number(s: &[u8], i: usize) -> usize {
         .count()
 }
 
+/// The next `needle` at or after an offset that only grows, remembered so
+/// that the searches stay linear.
+pub(crate) struct Next<'a> {
+    haystack: &'a [u8],
+    needle: &'a [u8],
+    found: Option<Option<usize>>,
+}
+
+impl<'a> Next<'a> {
+    pub(crate) fn new(haystack: &'a [u8], needle: &'a [u8]) -> Next<'a> {
+        Next {
+            haystack,
+            needle,
+            found: None,
+        }
+    }
+
+    pub(crate) fn from(&mut self, from: usize) -> Option<usize> {
+        if let Some(found) = self.found
+            && found.is_none_or(|at| at >= from)
+        {
+            return found;
+        }
+        let found = find(self.haystack, from, self.needle);
+        self.found = Some(found);
+        found
+    }
+}
+
 pub(crate) fn find(s: &[u8], from: usize, literal: &[u8]) -> Option<usize> {
     s.get(from..)
         .unwrap_or_default()

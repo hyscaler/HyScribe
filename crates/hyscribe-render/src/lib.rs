@@ -3,6 +3,7 @@
 //! WordPress content rendering: the block parser, block themes,
 //! templates and the dynamic core blocks.
 
+pub mod autop;
 pub mod blocks;
 mod comments;
 mod content;

@@ -126,4 +126,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "wpautop"
+path = "fuzz_targets/wpautop.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

@@ -21,7 +21,7 @@ use hyscribe_kses::{
 use hyscribe_phpser::{Key, Value, is_empty_string, json_decode};
 
 use crate::blocks::{Block, is_pcre_space, parse_blocks, serialize_blocks};
-use crate::formatting::find;
+use crate::formatting::{Next, find};
 use crate::template::replace;
 
 /// Nested comments and declarations deeper than this are dropped.
@@ -462,35 +462,6 @@ fn token_end(content: &[u8], start: usize, closers: &mut Next, newlines: &mut Ne
     }
     // `<[^>]*(>|$)`
     next_gt(start).unwrap_or(len)
-}
-
-/// The next `needle` at or after an offset that only grows, remembered so
-/// that the searches stay linear.
-struct Next<'a> {
-    haystack: &'a [u8],
-    needle: &'a [u8],
-    found: Option<Option<usize>>,
-}
-
-impl<'a> Next<'a> {
-    fn new(haystack: &'a [u8], needle: &'a [u8]) -> Next<'a> {
-        Next {
-            haystack,
-            needle,
-            found: None,
-        }
-    }
-
-    fn from(&mut self, from: usize) -> Option<usize> {
-        if let Some(found) = self.found
-            && found.is_none_or(|at| at >= from)
-        {
-            return found;
-        }
-        let found = find(self.haystack, from, self.needle);
-        self.found = Some(found);
-        found
-    }
 }
 
 /// The opener of a `wp_kses_split2()` token that matches

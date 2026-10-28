@@ -63,7 +63,7 @@ fn comment_form(context: &Context<'_>, post: &Post) -> Vec<u8> {
             &context.request.uri,
         );
         // It reads the global post, not the form's.
-        let global = context.request.post.and_then(|id| context.site.post(id));
+        let global = context.global_post();
         let style = if global.is_some_and(|post| reply_to(context, &post).is_some()) {
             ""
         } else {

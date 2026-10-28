@@ -355,6 +355,19 @@ $html   = ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )
 $html  .= ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
 $state  = array( 'options' => $options, 'post' => 1, 'password' => false, 'closed' => true, 'now' => time(), 'uri' => '/?p=1&cpage=2', 'global' => 1 );
 echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+// Nor for a password protected post.
+$GLOBALS['wp_query']->is_singular = true;
+$wpdb->update( $wpdb->posts, array( 'post_password' => 'pw' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$GLOBALS['post'] = get_post( 1 );
+$reset();
+$html   = ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
+$html  .= ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
+$state  = array( 'options' => $options, 'post' => 1, 'password' => true, 'closed' => true, 'now' => time(), 'uri' => '/?p=1&cpage=2', 'global' => 1, 'singular' => true );
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+$wpdb->update( $wpdb->posts, array( 'post_password' => '' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$GLOBALS['wp_query']->is_singular = false;
 $GLOBALS['wp_query']->set( 'cpage', '' );
 $GLOBALS['post'] = null;
 foreach ( $option_names as $name ) {

@@ -85,6 +85,7 @@ pub(crate) fn render(
         "core/comment-edit-link" => comment_edit_link,
         "core/comment-reply-link" => comment_reply_link,
         "core/comments" | "core/post-comments" => comments,
+        "core/comments-pagination" => comments_pagination,
         "core/comments-title" => comments_title,
         "core/post-author-name" => post_author_name,
         "core/post-comments-form" => comment_form::post_comments_form,
@@ -140,6 +141,11 @@ impl Context<'_> {
     /// The post in the `postId` context.
     fn post(&self) -> Option<Post> {
         self.post_id.and_then(|id| self.site.post(id))
+    }
+
+    /// The global post: the main query's.
+    pub(crate) fn global_post(&self) -> Option<Post> {
+        self.request.post.and_then(|id| self.site.post(id))
     }
 
     /// `get_permalink( $post )`.
@@ -392,7 +398,7 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         .concat()
     } else {
         // wp_login_url( get_permalink() ), for the global post: the main query's
-        let current = context.request.post.and_then(|id| context.site.post(id));
+        let current = context.global_post();
         let login = wp_login_url(
             context,
             &current
@@ -1037,11 +1043,29 @@ fn query_no_results(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 
 /// `render_block_core_query_pagination()`.
 fn query_pagination(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    pagination_nav(context, block, b"Pagination")
+}
+
+/// `render_block_core_comments_pagination()`.
+fn comments_pagination(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    // post_password_required() for the global post
+    if context
+        .global_post()
+        .is_some_and(|post| !post.password.is_empty())
+    {
+        return Vec::new();
+    }
+    pagination_nav(context, block, b"Comments pagination")
+}
+
+/// A pagination block's content in a `<nav>` labelled `label`; nothing
+/// when the content is blank.
+fn pagination_nav(context: &Context<'_>, block: &Block<'_>, label: &[u8]) -> Vec<u8> {
     if php_trim(block.content).is_empty() {
         return Vec::new();
     }
     let extra = [
-        ("aria-label", Value::String(b"Pagination".to_vec())),
+        ("aria-label", Value::String(label.to_vec())),
         ("class", Value::String(link_color_class(block).to_vec())),
     ];
     let wrapper =

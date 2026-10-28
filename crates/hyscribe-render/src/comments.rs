@@ -32,7 +32,6 @@ impl Renderer<'_> {
         let option = |name| site.option(name).unwrap_or_default();
         let threaded = !is_empty_string(&option("thread_comments"));
         let all = site.comments(post_id);
-        // A threaded query lists the top level; replies come with their parents.
         let mut listed = listed(site, &all);
         if let Some(paging) = paging(site, self.context.request, listed.len()) {
             // Pages below the first list the first.

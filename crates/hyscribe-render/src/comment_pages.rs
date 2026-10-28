@@ -8,10 +8,10 @@
 
 use hyscribe_kses::esc_url;
 use hyscribe_model::Comment;
-use hyscribe_phpser::{Value, add_query_arg, is_empty_string, php_trim};
+use hyscribe_phpser::{Value, add_query_arg, is_empty_string};
 
 use crate::blocks::Block;
-use crate::core_blocks::{Context, prepared};
+use crate::core_blocks::{Context, prepared, render};
 use crate::formatting::encode_ampersands;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
@@ -61,45 +61,16 @@ pub(crate) fn paging(site: &dyn Site, request: &Request, found: usize) -> Option
 }
 
 impl Renderer<'_> {
-    /// `render_block_core_comments_pagination()`; its inner blocks get
+    /// The comments pagination block; its inner blocks get
     /// `paginationArrow` as `comments/paginationArrow`.
     pub(crate) fn comments_pagination(&mut self, block: &Block) -> Vec<u8> {
         let name = "core/comments-pagination";
         let parsed = block.attrs.as_deref().unwrap_or_default();
-        let attributes = prepared(name, parsed);
-        let arrow = attributes.get_str("paginationArrow").cloned();
+        let arrow = prepared(name, parsed).get_str("paginationArrow").cloned();
         let outer = std::mem::replace(&mut self.pagination_arrow, arrow);
         let content = self.saved_markup(block);
         self.pagination_arrow = outer;
-        // post_password_required() for the global post
-        let site = self.context.site;
-        let protected = self
-            .context
-            .request
-            .post
-            .and_then(|id| site.post(id))
-            .is_some_and(|post| !post.password.is_empty());
-        if php_trim(&content).is_empty() || protected {
-            return Vec::new();
-        }
-        let link_color = attributes
-            .get_path(&["style", "elements", "link", "color", "text"])
-            .is_some_and(|v| !matches!(v, Value::Null));
-        let class: &[u8] = if link_color { b"has-link-color" } else { b"" };
-        let extra = [
-            ("aria-label", Value::String(b"Comments pagination".to_vec())),
-            ("class", Value::String(class.to_vec())),
-        ];
-        let wrapper =
-            get_block_wrapper_attributes(name, parsed, &extra, &self.context.theme.global);
-        [
-            b"<nav ".as_slice(),
-            wrapper.as_bytes(),
-            b">",
-            &content,
-            b"</nav>",
-        ]
-        .concat()
+        render(&self.context, name, parsed, &content).unwrap_or_default()
     }
 
     /// `render_block_core_comments_pagination_previous()`.
@@ -174,14 +145,13 @@ impl Renderer<'_> {
     /// `get_comments_pagination_arrow()`.
     fn arrow(&self, direction: &str) -> Vec<u8> {
         let arrow = self.pagination_arrow.as_ref().map(Value::to_php_string);
-        let symbol = match (arrow.as_deref(), direction) {
-            (Some(b"arrow"), "next") => "→",
-            (Some(b"arrow"), _) => "←",
-            (Some(b"chevron"), "next") => "»",
-            (Some(b"chevron"), _) => "«",
+        let (symbol, kind) = match (arrow.as_deref(), direction) {
+            (Some(b"arrow"), "next") => ("→", "arrow"),
+            (Some(b"arrow"), _) => ("←", "arrow"),
+            (Some(b"chevron"), "next") => ("»", "chevron"),
+            (Some(b"chevron"), _) => ("«", "chevron"),
             _ => return Vec::new(),
         };
-        let kind = String::from_utf8_lossy(arrow.as_deref().unwrap_or_default()).into_owned();
         format!(
             "<span class='wp-block-comments-pagination-{direction}-arrow is-arrow-{kind}' aria-hidden='true'>{symbol}</span>"
         )
@@ -217,14 +187,15 @@ impl Renderer<'_> {
 /// `get_comments_pagenum_link()` with plain permalinks, for the global
 /// post.
 pub(crate) fn comments_pagenum_link(context: &Context<'_>, page: i64, max_page: i64) -> Vec<u8> {
-    let site = context.site;
     let permalink = context
-        .request
-        .post
-        .and_then(|id| site.post(id))
+        .global_post()
         .map(|post| context.permalink(&post))
         .unwrap_or_default();
-    let newest = site.option("default_comments_page").unwrap_or_default() == b"newest";
+    let newest = context
+        .site
+        .option("default_comments_page")
+        .unwrap_or_default()
+        == b"newest";
     let paged = if newest { page != max_page } else { page > 1 };
     let mut url = if paged {
         add_query_arg(&[(b"cpage", Some(page.to_string().as_bytes()))], &permalink)

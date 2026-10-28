@@ -43,4 +43,21 @@ pub struct Request {
     pub now: i64,
     /// The main query's posts, which query blocks that inherit it list.
     pub posts: Vec<Post>,
+    /// `is_archive()`: which archive, if any.
+    pub archive: Option<Archive>,
+    /// `is_search()`: the raw search query, `get_query_var( 's' )`.
+    pub search: Option<Vec<u8>>,
+}
+
+/// The archives the default install has.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Archive {
+    /// A category, by name as stored.
+    Category(Vec<u8>),
+    /// `?m=YYYY`.
+    Year,
+    /// `?m=YYYYMM`.
+    Month,
+    /// `?m=YYYYMMDD`.
+    Day,
 }

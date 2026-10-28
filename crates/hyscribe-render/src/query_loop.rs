@@ -11,11 +11,11 @@
 
 use hyscribe_html::TagProcessor;
 use hyscribe_kses::esc_attr;
-use hyscribe_model::PostQuery;
+use hyscribe_model::{Post, PostQuery};
 use hyscribe_phpser::{Value, absint, decode, isset, php_trim};
 
 use crate::blocks::Block;
-use crate::core_blocks::{QueryContext, prepared};
+use crate::core_blocks::{Context, QueryContext, prepared};
 use crate::post::post_class;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
@@ -59,15 +59,7 @@ impl Renderer<'_> {
     /// `render_block_core_post_template()` on the first page.
     pub(crate) fn post_template(&mut self, block: &Block) -> Vec<u8> {
         let query = self.context.query.clone().unwrap_or_default();
-        let inherit = query
-            .query
-            .get_str("inherit")
-            .is_some_and(|v| !v.is_empty());
-        let posts = if inherit {
-            self.context.request.posts.clone()
-        } else {
-            self.context.site.query(&self.query_vars(&query.query))
-        };
+        let posts = query_posts(&self.context);
         if posts.is_empty() {
             return Vec::new();
         }
@@ -142,52 +134,61 @@ impl Renderer<'_> {
         ]
         .concat()
     }
+}
 
-    /// `build_query_vars_from_query_block( $block, 1 )`, for the arguments
-    /// listed in the module documentation.
-    fn query_vars(&self, query: &Value) -> PostQuery {
-        let site = self.context.site;
-        let field = |name| query.get_str(name).filter(|v| **v != Value::Null);
-        let post_type = field("postType")
-            .filter(|v| !v.is_empty())
-            .map(|v| String::from_utf8_lossy(&v.to_php_string()).into_owned())
-            .filter(|t| matches!(t.as_str(), "post" | "page" | "attachment"));
-        let mut vars = PostQuery {
-            post_types: vec![post_type.unwrap_or_else(|| "post".into())],
-            limit: absint(&Value::String(
-                site.option("posts_per_page").unwrap_or_default(),
-            )) as u32,
-            ..PostQuery::default()
-        };
-        let sticky = || {
-            let stored = site.option("sticky_posts").unwrap_or_default();
-            ids(&decode(&stored).unwrap_or(Value::Null))
-        };
-        match field("sticky")
-            .filter(|v| !v.is_empty())
-            .map(Value::to_php_string)
-            .as_deref()
-        {
-            Some(b"only") => vars.include = Some(sticky()),
-            Some(b"exclude") => vars.exclude.extend(sticky()),
-            _ => {}
-        }
-        if let Some(exclude) = field("exclude").filter(|v| !v.is_empty()) {
-            vars.exclude.extend(ids(exclude));
-        }
-        let current = self
-            .context
-            .post_id
-            .filter(|_| field("excludeCurrent").is_some_and(|v| !v.is_empty()));
-        vars.exclude.extend(current);
-        if let Some(per_page) = field("perPage").filter(|v| v.is_numeric()) {
-            vars.limit = absint(per_page) as u32;
-            vars.offset = field("offset").filter(|v| v.is_numeric()).map_or(0, absint) as u32;
-        }
-        vars.ascending =
-            field("order").is_some_and(|v| v.to_php_string().eq_ignore_ascii_case(b"asc"));
-        vars
+/// The posts a query block's descendants list: the main query's when the
+/// query inherits it, else those its own arguments find.
+pub(crate) fn query_posts(context: &Context<'_>) -> Vec<Post> {
+    let query = context.query.as_ref().map_or(&Value::Null, |q| &q.query);
+    if query.get_str("inherit").is_some_and(|v| !v.is_empty()) {
+        context.request.posts.clone()
+    } else {
+        context.site.query(&query_vars(context, query))
     }
+}
+
+/// `build_query_vars_from_query_block( $block, 1 )`, for the arguments
+/// listed in the module documentation.
+fn query_vars(context: &Context<'_>, query: &Value) -> PostQuery {
+    let site = context.site;
+    let field = |name| query.get_str(name).filter(|v| **v != Value::Null);
+    let post_type = field("postType")
+        .filter(|v| !v.is_empty())
+        .map(|v| String::from_utf8_lossy(&v.to_php_string()).into_owned())
+        .filter(|t| matches!(t.as_str(), "post" | "page" | "attachment"));
+    let mut vars = PostQuery {
+        post_types: vec![post_type.unwrap_or_else(|| "post".into())],
+        limit: absint(&Value::String(
+            site.option("posts_per_page").unwrap_or_default(),
+        )) as u32,
+        ..PostQuery::default()
+    };
+    let sticky = || {
+        let stored = site.option("sticky_posts").unwrap_or_default();
+        ids(&decode(&stored).unwrap_or(Value::Null))
+    };
+    match field("sticky")
+        .filter(|v| !v.is_empty())
+        .map(Value::to_php_string)
+        .as_deref()
+    {
+        Some(b"only") => vars.include = Some(sticky()),
+        Some(b"exclude") => vars.exclude.extend(sticky()),
+        _ => {}
+    }
+    if let Some(exclude) = field("exclude").filter(|v| !v.is_empty()) {
+        vars.exclude.extend(ids(exclude));
+    }
+    let current = context
+        .post_id
+        .filter(|_| field("excludeCurrent").is_some_and(|v| !v.is_empty()));
+    vars.exclude.extend(current);
+    if let Some(per_page) = field("perPage").filter(|v| v.is_numeric()) {
+        vars.limit = absint(per_page) as u32;
+        vars.offset = field("offset").filter(|v| v.is_numeric()).map_or(0, absint) as u32;
+    }
+    vars.ascending = field("order").is_some_and(|v| v.to_php_string().eq_ignore_ascii_case(b"asc"));
+    vars
 }
 
 /// `array_filter( array_map( 'intval', $ids ) )`.

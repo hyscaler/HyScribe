@@ -61,7 +61,7 @@ fn toggle(in_quote: &mut u8, quote: u8) {
 
 /// PHP's `strip_tags()` without allowed tags: `php_strip_tags_ex()` from
 /// PHP 8.4's `ext/standard/string.c`, state for state.
-fn strip_tags(text: &[u8]) -> Vec<u8> {
+pub fn strip_tags(text: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut state = State::Text;
     let mut depth = 0usize;

@@ -19,3 +19,4 @@ pub mod style;
 pub mod supports;
 pub mod template;
 pub mod theme;
+mod title;

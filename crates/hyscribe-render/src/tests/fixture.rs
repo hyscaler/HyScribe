@@ -9,7 +9,7 @@ use hyscribe_model::{Post, PostQuery, Term};
 use hyscribe_phpser::Value;
 use hyscribe_testkit::{Dump, SqlValue, default_install};
 
-use crate::site::Site;
+use crate::site::{Archive, Request, Site};
 
 fn dump() -> &'static Dump {
     static DUMP: OnceLock<Dump> = OnceLock::new();
@@ -60,6 +60,24 @@ pub(crate) struct DefaultInstall {
 }
 
 impl DefaultInstall {
+    /// The request state PHP gives the query strings the golden scripts use.
+    pub(crate) fn request(&self, query: &str) -> Request {
+        let posts = self.main_query(query);
+        Request {
+            post: posts.first().map(|post| post.id),
+            posts,
+            archive: match query {
+                "cat=1" => Some(Archive::Category(b"Uncategorized".to_vec())),
+                "m=2026" => Some(Archive::Year),
+                "m=202610" => Some(Archive::Month),
+                "m=20261027" => Some(Archive::Day),
+                _ => None,
+            },
+            search: query.strip_prefix("s=").map(|s| s.as_bytes().to_vec()),
+            ..Request::default()
+        }
+    }
+
     /// The posts of the main query for a request the golden scripts use.
     pub(crate) fn main_query(&self, request: &str) -> Vec<Post> {
         match request {
@@ -68,7 +86,9 @@ impl DefaultInstall {
                 limit: 10,
                 ..PostQuery::default()
             }),
-            "p=1" => self.post(1).into_iter().collect(),
+            "p=1" | "cat=1" | "m=2026" | "m=202610" | "m=20261027" => {
+                self.post(1).into_iter().collect()
+            }
             _ => Vec::new(),
         }
     }

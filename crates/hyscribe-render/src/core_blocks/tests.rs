@@ -71,6 +71,7 @@ fn render_markup(context: &Context<'_>, markup: &[u8]) -> Vec<u8> {
         context,
         block.name.as_deref().unwrap(),
         block.attrs.as_deref().unwrap(),
+        b"",
     )
     .unwrap()
 }
@@ -213,8 +214,11 @@ fn blocks_without_a_callback_render_their_saved_markup() {
         post_id: None,
         query: None,
     };
-    assert_eq!(render(&context, "core/paragraph", &[]), None);
-    assert_eq!(render(&context, "core/site-title", &[]), Some(Vec::new()));
+    assert_eq!(render(&context, "core/paragraph", &[], b""), None);
+    assert_eq!(
+        render(&context, "core/site-title", &[], b""),
+        Some(Vec::new())
+    );
 }
 
 #[test]

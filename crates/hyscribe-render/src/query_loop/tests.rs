@@ -20,12 +20,7 @@ fn query_loops_match_php() {
         let (markup, request, home, php) = (field(), field(), field(), field());
         let site = DefaultInstall { home };
         let request = String::from_utf8(request).unwrap();
-        let posts = site.main_query(&request);
-        let request = Request {
-            post: posts.first().map(|post| post.id),
-            posts,
-            ..Request::default()
-        };
+        let request = site.request(&request);
         let ours = render_content(&theme, &site, &request, &markup);
         assert_eq!(
             String::from_utf8_lossy(&ours),

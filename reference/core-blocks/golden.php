@@ -200,8 +200,25 @@ $query_blocks = array(
 	$loop( '{"perPage":3,"inherit":false}', '', ',"displayLayout":{"type":"flex","columns":2}' ),
 	$loop( '{"perPage":3,"inherit":false}', '', ',"enhancedPagination":true' ),
 	'<!-- wp:post-template --><!-- wp:post-title /--><!-- /wp:post-template -->',
+	$loop( '{"perPage":3,"inherit":true}', '', '} --><!-- wp:query-no-results --><p>None found.</p><!-- /wp:query-no-results --><!-- wp:query {"query":{"inherit":true}' ),
+	'<!-- wp:query {"query":{"perPage":3,"postType":"page","offset":5,"inherit":false}} --><div><!-- wp:query-no-results {"style":{"elements":{"link":{"color":{"text":"#f00"}}}}} --><p>None.</p><!-- /wp:query-no-results --></div><!-- /wp:query -->',
+	'<!-- wp:query {"query":{"inherit":true}} --><div><!-- wp:query-no-results --><p>None.</p><!-- /wp:query-no-results --><!-- wp:query-no-results --> <!-- /wp:query-no-results --></div><!-- /wp:query -->',
+	'<!-- wp:query-pagination --><b>pages</b><!-- /wp:query-pagination -->',
+	'<!-- wp:query-pagination {"style":{"elements":{"link":{"color":{"text":"#f00"}}}}} --><b>pages</b><!-- /wp:query-pagination -->',
+	'<!-- wp:query-pagination --> <!-- /wp:query-pagination -->',
+	'<!-- wp:query-title {"type":"archive"} /-->',
+	'<!-- wp:query-title {"type":"archive","showPrefix":false,"level":0,"textAlign":"center"} /-->',
+	'<!-- wp:query-title {"type":"search"} /-->',
+	'<!-- wp:query-title {"type":"search","showSearchTerm":false,"level":3} /-->',
+	'<!-- wp:query-title {"type":"post-type"} /-->',
+	'<!-- wp:query-title {"type":"post-type","showPrefix":false} /-->',
+	'<!-- wp:query {"query":{"postType":"page"}} --><div><!-- wp:query-title {"type":"post-type"} /--></div><!-- /wp:query -->',
+	'<!-- wp:query {"query":{"postType":"wp_block"}} --><div><!-- wp:query-title {"type":"post-type"} /--></div><!-- /wp:query -->',
+	'<!-- wp:query {"query":{"postType":"book"}} --><div><!-- wp:query-title {"type":"post-type"} /--></div><!-- /wp:query -->',
+	'<!-- wp:query-title /-->',
+	'<!-- wp:query-title {"type":"other"} /-->',
 );
-foreach ( array( '', 'p=1', 's=nothingmatches' ) as $case_query ) {
+foreach ( array( '', 'p=1', 's=nothingmatches', 's=hello <b>"x"</b>', 'cat=1', 'm=2026', 'm=202610', 'm=20261027' ) as $case_query ) {
 	$GLOBALS['wp'] = new WP();
 	wp( $case_query );
 	foreach ( $query_blocks as $markup ) {

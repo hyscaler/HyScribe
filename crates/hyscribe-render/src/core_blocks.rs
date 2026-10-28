@@ -11,10 +11,12 @@ use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim};
 use crate::date::{self, Zone};
 use crate::link;
 use crate::post::the_title;
+use crate::query_loop::query_posts;
 use crate::registry::block_type;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
 use crate::theme::Theme;
+use crate::title::archive_title;
 
 /// What a render callback reads besides its block.
 #[derive(Clone)]
@@ -37,11 +39,13 @@ pub(crate) struct QueryContext {
     pub(crate) enhanced_pagination: bool,
 }
 
-/// One block being rendered: its name, parsed and prepared attributes.
+/// One block being rendered: its name, parsed and prepared attributes, and
+/// its inner blocks rendered, as `WP_Block::render()` passes `$content`.
 struct Block<'a> {
     name: &'a str,
     parsed: &'a [(Key, Value)],
     attributes: Value,
+    content: &'a [u8],
 }
 
 /// The attributes of `name` as `prepare_attributes_for_render()` leaves
@@ -60,10 +64,14 @@ pub(crate) fn render(
     context: &Context<'_>,
     name: &str,
     parsed: &[(Key, Value)],
+    content: &[u8],
 ) -> Option<Vec<u8>> {
     let callback = match name {
         "core/post-date" => post_date,
         "core/post-title" => post_title,
+        "core/query-no-results" => query_no_results,
+        "core/query-pagination" => query_pagination,
+        "core/query-title" => query_title,
         "core/site-tagline" => site_tagline,
         "core/site-title" => site_title,
         _ => return None,
@@ -71,11 +79,8 @@ pub(crate) fn render(
     let block = Block {
         name,
         parsed,
-        attributes: Value::Array(
-            block_type(name)
-                .map(|t| t.prepare(parsed))
-                .unwrap_or_default(),
-        ),
+        attributes: prepared(name, parsed),
+        content,
     };
     Some(callback(context, &block))
 }
@@ -298,6 +303,138 @@ fn post_date(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         b"</div>",
     ]
     .concat()
+}
+
+/// `has-link-color` when the block's link has a color, else empty.
+fn link_color_class(block: &Block<'_>) -> &'static [u8] {
+    if block.has_link_color() {
+        b"has-link-color"
+    } else {
+        b""
+    }
+}
+
+/// `render_block_core_query_no_results()`: the content, when the query
+/// finds nothing.
+fn query_no_results(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    if php_trim(block.content).is_empty() || !query_posts(context).is_empty() {
+        return Vec::new();
+    }
+    let wrapper = block.wrapper(context, link_color_class(block));
+    [
+        b"<div ".as_slice(),
+        wrapper.as_bytes(),
+        b">",
+        block.content,
+        b"</div>",
+    ]
+    .concat()
+}
+
+/// `render_block_core_query_pagination()`.
+fn query_pagination(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    if php_trim(block.content).is_empty() {
+        return Vec::new();
+    }
+    let extra = [
+        ("aria-label", Value::String(b"Pagination".to_vec())),
+        ("class", Value::String(link_color_class(block).to_vec())),
+    ];
+    let wrapper =
+        get_block_wrapper_attributes(block.name, block.parsed, &extra, &context.theme.global);
+    [
+        b"<nav ".as_slice(),
+        wrapper.as_bytes(),
+        b">",
+        block.content,
+        b"</nav>",
+    ]
+    .concat()
+}
+
+/// `get_post_type_object( $type )->labels->singular_name` for the core
+/// post types.
+const POST_TYPE_NAMES: [(&[u8], &[u8]); 16] = [
+    (b"post", b"Post"),
+    (b"page", b"Page"),
+    (b"attachment", b"Media"),
+    (b"revision", b"Revision"),
+    (b"nav_menu_item", b"Navigation Menu Item"),
+    (b"custom_css", b"Custom CSS"),
+    (b"customize_changeset", b"Changeset"),
+    (b"oembed_cache", b"oEmbed Response"),
+    (b"user_request", b"User Request"),
+    (b"wp_block", b"Pattern"),
+    (b"wp_template", b"Template"),
+    (b"wp_template_part", b"Template Part"),
+    (b"wp_global_styles", b"Global Styles"),
+    (b"wp_navigation", b"Navigation Menu"),
+    (b"wp_font_family", b"Font Family"),
+    (b"wp_font_face", b"Font Face"),
+];
+
+/// `render_block_core_query_title()`.
+fn query_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let request = context.request;
+    let kind = block.attribute("type").map(Value::to_php_string);
+    let post_type = context
+        .query
+        .as_ref()
+        .and_then(|q| q.query.get_str("postType"))
+        .filter(|v| **v != Value::Null)
+        .map(Value::to_php_string)
+        .or_else(|| context.post().map(|post| post.post_type.into_bytes()));
+    let shown = match kind.as_deref() {
+        None => false,
+        Some(b"archive") => request.archive.is_some(),
+        Some(b"search") => request.search.is_some(),
+        Some(b"post-type") => post_type.as_deref().is_some_and(|t| !is_empty_string(t)),
+        Some(_) => true,
+    };
+    if !shown {
+        return Vec::new();
+    }
+    let show_prefix = block.attribute("showPrefix").is_none_or(|v| !v.is_empty());
+    let mut title = Vec::new();
+    if let Some(archive) = &request.archive {
+        let date_format = context.site.option("date_format").unwrap_or_default();
+        let posted = request.posts.first().map_or("", |post| post.date.as_str());
+        title = archive_title(archive, posted, context.zone(), &date_format, show_prefix);
+    }
+    if let Some(search) = &request.search {
+        title = b"Search results".to_vec();
+        if block
+            .attribute("showSearchTerm")
+            .is_some_and(|v| !v.is_empty())
+        {
+            title = [
+                b"Search results for: &#8220;".as_slice(),
+                esc_attr(search).as_bytes(),
+                b"&#8221;",
+            ]
+            .concat();
+        }
+    }
+    if kind.as_deref() == Some(b"post-type") {
+        let Some((_, name)) = POST_TYPE_NAMES
+            .iter()
+            .find(|(slug, _)| Some(*slug) == post_type.as_deref())
+        else {
+            return Vec::new();
+        };
+        let name = *name;
+        title = if show_prefix {
+            [b"Post Type: &#8220;", name, b"&#8221;"].concat()
+        } else {
+            name.to_vec()
+        };
+    }
+    let tag = tag(block.attribute("level"), b"h1");
+    element(
+        &tag,
+        &block.wrapper(context, &block.text_align_class()),
+        &title,
+    )
 }
 
 /// The tag for a `level` attribute: `p` for 0, else `'h' . (int) $level`,

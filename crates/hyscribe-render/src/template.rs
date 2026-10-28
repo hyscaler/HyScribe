@@ -79,12 +79,11 @@ impl Renderer<'_> {
             Some("core/pattern") => self.pattern(block),
             Some("core/query") => self.query(block),
             Some("core/post-template") => self.post_template(block),
-            Some(name) => core_blocks::render(
-                &self.context,
-                name,
-                block.attrs.as_deref().unwrap_or_default(),
-            )
-            .unwrap_or_else(|| self.saved_markup(block)),
+            Some(name) => {
+                let content = self.saved_markup(block);
+                let parsed = block.attrs.as_deref().unwrap_or_default();
+                core_blocks::render(&self.context, name, parsed, &content).unwrap_or(content)
+            }
             None => self.saved_markup(block),
         }
     }

@@ -36,10 +36,7 @@ function stylesheet_of( $tree ) {
 
 $kinds = array(
 	'kebab'         => static fn( $a ) => _wp_to_kebab_case( $a[0] ),
-	'float_string'  => static fn( $a ) => (string) $a[0],
 	'round'         => static fn( $a ) => round( $a[0], $a[1] ),
-	'to_float'      => static fn( $a ) => (float) $a[0],
-	'is_numeric'    => static fn( $a ) => is_numeric( $a[0] ),
 	'append'        => static fn( $a ) => call( 'append_to_selector', $a[0], $a[1] ),
 	'prepend'       => static fn( $a ) => call( 'prepend_to_selector', $a[0], $a[1] ),
 	'split'         => static fn( $a ) => call( 'split_selector_list', $a[0] ),

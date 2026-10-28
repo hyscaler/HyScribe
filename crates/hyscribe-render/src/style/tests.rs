@@ -48,9 +48,3 @@ fn every_golden_case() {
     }
     assert!(golden.lines().count() > 300);
 }
-
-#[test]
-fn php_strings() {
-    assert_eq!(php_string(&Value::Null), b"");
-    assert_eq!(php_string(&Value::Array(Vec::new())), b"Array");
-}

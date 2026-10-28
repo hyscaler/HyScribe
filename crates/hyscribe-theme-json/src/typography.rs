@@ -6,7 +6,9 @@
 
 use hyscribe_phpser::Value;
 
-use crate::php::{self, float_string, round, string};
+use hyscribe_phpser::float_to_string;
+
+use crate::php::{self, round, string};
 
 /// `wp_get_typography_value_and_unit( $raw, array( 'coerce_to' => ... ) )`.
 fn value_and_unit(raw: &Value, coerce_to: &str) -> Option<(f64, String)> {
@@ -14,7 +16,7 @@ fn value_and_unit(raw: &Value, coerce_to: &str) -> Option<(f64, String)> {
         return None;
     }
     let mut text = php::php_string(raw);
-    if php::is_numeric(raw) {
+    if raw.is_numeric() {
         text.push_str("px");
     }
     // `$` also matches before a final newline.
@@ -30,7 +32,7 @@ fn value_and_unit(raw: &Value, coerce_to: &str) -> Option<(f64, String)> {
     if !["rem", "px", "em"].contains(&unit) {
         return None;
     }
-    let mut value = php::to_float(number);
+    let mut value = hyscribe_phpser::string_to_float(number.as_bytes());
     let mut unit = unit.to_owned();
     let relative = |u: &str| u == "em" || u == "rem";
     if coerce_to == "px" && relative(&unit) {
@@ -70,18 +72,21 @@ fn computed_fluid(
     if denominator == 0.0 {
         return None;
     }
-    let offset = format!("{}{unit}", float_string(round(min_viewport.0 / 100.0, 3)));
+    let offset = format!(
+        "{}{unit}",
+        float_to_string(round(min_viewport.0 / 100.0, 3))
+    );
     let linear = 100.0 * ((maximum.0 - minimum.0) / denominator);
     let scaled = round(linear, 3);
     let scaled = if scaled == 0.0 {
         "1".to_owned()
     } else {
-        float_string(scaled)
+        float_to_string(scaled)
     };
     Some(format!(
         "clamp({}, {}{} + ((1vw - {offset}) * {scaled}), {})",
         php::php_string(min_size),
-        float_string(minimum_rem.0),
+        float_to_string(minimum_rem.0),
         minimum_rem.1,
         php::php_string(max_size),
     ))
@@ -139,16 +144,16 @@ pub(crate) fn font_size_value(preset: &Value, settings: &Value, global: &Value) 
         return Some(size.clone());
     }
     let max_size =
-        max_size.get_or_insert_with(|| string(&format!("{}{unit}", float_string(value))));
+        max_size.get_or_insert_with(|| string(&format!("{}{unit}", float_to_string(value))));
     let min_size = min_size.get_or_insert_with(|| {
         let px = if unit == "px" { value } else { value * 16.0 };
         let factor = (1.0 - 0.075 * px.log2()).clamp(0.25, 0.75);
         let calculated = round(value * factor, 3);
         match &limit {
             Some((limit_value, limit_unit)) if calculated <= *limit_value => {
-                string(&format!("{}{limit_unit}", float_string(*limit_value)))
+                string(&format!("{}{limit_unit}", float_to_string(*limit_value)))
             }
-            _ => string(&format!("{}{unit}", float_string(calculated))),
+            _ => string(&format!("{}{unit}", float_to_string(calculated))),
         }
     });
     Some(

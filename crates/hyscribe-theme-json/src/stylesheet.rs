@@ -8,7 +8,7 @@
 //! `root_selector` options, and the `disable-layout-styles` theme
 //! support.
 
-use hyscribe_phpser::Value;
+use hyscribe_phpser::{Value, float_to_string, string_to_float};
 
 use crate::blocks::{Blocks, ELEMENTS, element_selector};
 use crate::css::{Declaration, is_safe, nest_custom, ruleset};
@@ -550,8 +550,7 @@ impl Tree<'_> {
                     };
                 }
             }
-            if (php::empty(Some(&value)) && !php::is_numeric(&value))
-                || matches!(value, Value::Array(_))
+            if (php::empty(Some(&value)) && !value.is_numeric()) || matches!(value, Value::Array(_))
             {
                 continue;
             }
@@ -667,7 +666,7 @@ impl Tree<'_> {
                 continue;
             };
             let percentage = if value.ends_with('%') {
-                Some(php::to_float(value))
+                Some(string_to_float(value.as_bytes()))
             } else {
                 value.strip_prefix(prefix).and_then(|rest| {
                     let slug = rest.get(..rest.len().saturating_sub(1)).unwrap_or_default();
@@ -680,11 +679,12 @@ impl Tree<'_> {
                         })
                         .and_then(|(_, p)| php::get(p, &["size"]))
                         .and_then(as_str)?;
-                    size.ends_with('%').then(|| php::to_float(size))
+                    size.ends_with('%')
+                        .then(|| string_to_float(size.as_bytes()))
                 })
             };
             if let Some(p) = percentage {
-                let p = php::float_string(p);
+                let p = float_to_string(p);
                 declaration.value = string(&format!(
                     "calc({p} * 1% - (var(--wp--style--block-gap, 0.5em) * (1 - {p} / 100)))"
                 ));

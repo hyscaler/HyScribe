@@ -15,6 +15,7 @@
 //! [`is_serialized`] and [`maybe_unserialize`] reproduce the WordPress
 //! functions of the same name.
 
+mod cast;
 mod decode;
 mod encode;
 mod error;
@@ -23,6 +24,7 @@ mod json;
 mod value;
 mod wp;
 
+pub use cast::{float_to_string, string_to_float};
 pub use decode::{MAX_DEPTH, decode};
 pub use encode::encode;
 pub use error::{Error, ErrorKind};

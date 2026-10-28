@@ -324,7 +324,7 @@ impl Parsed {
 pub fn parse_block_styles(styles: &Value, convert_vars_to_classnames: bool) -> Parsed {
     let mut parsed = Parsed::default();
     for (group, definitions) in DEFINITIONS {
-        if php_empty(styles.get_path(&[group])) {
+        if styles.get_path(&[group]).is_none_or(Value::is_empty) {
             continue;
         }
         for definition in *definitions {
@@ -357,38 +357,15 @@ fn existing<'p>(parsed: &'p Parsed, property: &str) -> Option<&'p Value> {
         .map(|(_, v)| v)
 }
 
-/// PHP's `empty()`.
-fn php_empty(value: Option<&Value>) -> bool {
-    match value {
-        None | Some(Value::Null | Value::Bool(false) | Value::Int(0)) => true,
-        Some(Value::String(text)) => text.is_empty() || text == b"0",
-        Some(Value::Float(f)) => f.to_f64() == 0.0,
-        Some(Value::Array(entries)) => entries.is_empty(),
-        Some(_) => false,
-    }
-}
-
 /// `is_valid_style_value()`: `'0' === $value || ! empty( $value )`.
 fn is_valid(value: &Value) -> bool {
-    matches!(value, Value::String(text) if text == b"0") || !php_empty(Some(value))
+    matches!(value, Value::String(text) if text == b"0") || !value.is_empty()
 }
 
 fn text(value: &Value) -> Option<&str> {
     match value {
         Value::String(bytes) => std::str::from_utf8(bytes).ok(),
         _ => None,
-    }
-}
-
-/// PHP's string cast of a scalar, as string concatenation does it.
-fn php_string(value: &Value) -> Vec<u8> {
-    match value {
-        Value::String(text) => text.clone(),
-        Value::Int(n) => n.to_string().into_bytes(),
-        Value::Bool(true) => b"1".to_vec(),
-        Value::Float(f) => f.as_str().as_bytes().to_vec(),
-        Value::Array(_) => b"Array".to_vec(),
-        _ => Vec::new(),
     }
 }
 
@@ -413,7 +390,7 @@ fn css_var(value: &Value, css_vars: &[(&str, &str)]) -> Option<String> {
 }
 
 fn classnames(value: &Value, definition: &Definition) -> Vec<String> {
-    if php_empty(Some(value)) {
+    if value.is_empty() {
         return Vec::new();
     }
     definition
@@ -443,10 +420,10 @@ fn declarations(value: &Value, definition: &Definition, skip_vars: bool) -> Vec<
     };
     match definition.kind {
         UrlOrValue(property) => {
-            let url = value.get_str("url").filter(|u| !php_empty(Some(u)));
+            let url = value.get_str("url").filter(|u| !u.is_empty());
             let css = match (url, value) {
                 (Some(url), _) => Some(Value::String(
-                    [b"url('".as_slice(), &php_string(url), b"')"].concat(),
+                    [b"url('".as_slice(), &url.to_php_string(), b"')"].concat(),
                 )),
                 (None, Value::String(s)) => Some(Value::String(s.clone())),
                 (None, _) => None,
@@ -460,7 +437,7 @@ fn declarations(value: &Value, definition: &Definition, skip_vars: bool) -> Vec<
             };
             entries
                 .iter()
-                .filter(|(_, v)| !php_empty(Some(v)))
+                .filter(|(_, v)| !v.is_empty())
                 .filter_map(|(key, v)| {
                     // Only named entries can match a border definition.
                     let Key::String(name) = key else { return None };

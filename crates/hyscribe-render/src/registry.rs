@@ -94,7 +94,7 @@ fn schema_type(value: &Value, schema: &Value) -> Option<String> {
             // A non-string entry is an unknown type, like any other.
             let names: Vec<String> = types
                 .iter()
-                .map(|(_, t)| String::from_utf8_lossy(&to_string(t)).into_owned())
+                .map(|(_, t)| String::from_utf8_lossy(&t.to_php_string()).into_owned())
                 .collect();
             if *value == Value::String(Vec::new()) && names.iter().any(|n| n == "string") {
                 return Some("string".into());
@@ -115,7 +115,7 @@ fn fits(value: &Value, name: &str) -> bool {
         "array" => is_array(value),
         "object" => is_object(value),
         "integer" => is_integer(value),
-        "number" => is_numeric(value),
+        "number" => value.is_numeric(),
         "boolean" => is_boolean(value),
         "string" => matches!(value, Value::String(_)),
         "null" => *value == Value::Null,
@@ -139,7 +139,7 @@ pub(crate) fn is_valid(value: &Value, schema: &Value) -> bool {
                     .get_str("items")
                     .is_none_or(|items| list(value).iter().all(|item| is_valid(item, items)))
         }
-        "number" => is_numeric(value) && in_bounds(value, schema),
+        "number" => value.is_numeric() && in_bounds(value, schema),
         "integer" => is_integer(value) && in_bounds(value, schema),
         "string" => matches!(value, Value::String(_)),
         // Other types are not checked, as in WordPress.
@@ -164,8 +164,8 @@ fn enum_allows(value: &Value, schema: &Value, kind: &str) -> bool {
 /// check: null and string values stay as they are.
 fn sanitize(value: &Value, kind: &str) -> Value {
     match kind {
-        "integer" => Value::Int(to_float(value) as i64),
-        "number" => Value::Float(Float::from_f64(to_float(value))),
+        "integer" => Value::Int(value.to_float() as i64),
+        "number" => Value::Float(Float::from_f64(value.to_float())),
         // `rest_sanitize_boolean()`, for what passed `rest_is_boolean()`.
         "boolean" => Value::Bool(match value {
             Value::String(text) => !matches!(text.to_ascii_lowercase().as_slice(), b"false" | b"0"),
@@ -200,8 +200,8 @@ fn equal(a: &Value, b: &Value) -> bool {
 
 /// `minimum` and `maximum`, inclusive (core blocks set no exclusive bounds).
 fn in_bounds(value: &Value, schema: &Value) -> bool {
-    let number = to_float(value);
-    let bound = |name: &str| schema.get_str(name).map(to_float);
+    let number = value.to_float();
+    let bound = |name: &str| schema.get_str(name).map(Value::to_float);
     bound("minimum").is_none_or(|min| number >= min)
         && bound("maximum").is_none_or(|max| number <= max)
 }
@@ -239,7 +239,8 @@ fn list(value: &Value) -> Vec<Value> {
     match value {
         Value::Array(entries) => entries.iter().map(|(_, v)| v.clone()).collect(),
         // `wp_parse_list()`: split on whitespace and commas.
-        other => to_string(other)
+        other => other
+            .to_php_string()
             .split(|b| b.is_ascii_whitespace() || *b == b',')
             .filter(|part| !part.is_empty())
             .map(|part| Value::String(part.to_vec()))
@@ -256,80 +257,10 @@ fn is_integer(value: &Value) -> bool {
             let trimmed = trimmed.trim();
             let digits = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
             (!digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
-                || (is_numeric(value) && to_float(value).fract() == 0.0)
+                || (value.is_numeric() && value.to_float().fract() == 0.0)
         }
         Value::Float(f) => f.to_f64().fract() == 0.0,
         _ => false,
-    }
-}
-
-/// PHP's `is_numeric()`.
-fn is_numeric(value: &Value) -> bool {
-    match value {
-        Value::Int(_) | Value::Float(_) => true,
-        Value::String(text) => numeric_prefix(text).is_some_and(|(_, len)| {
-            text.get(len..)
-                .is_some_and(|rest| rest.iter().all(u8::is_ascii_whitespace))
-        }),
-        _ => false,
-    }
-}
-
-/// The number at the start of `text` (after whitespace) and how many bytes
-/// it takes, as PHP's numeric string rules read it.
-fn numeric_prefix(text: &[u8]) -> Option<(f64, usize)> {
-    let lead = text.iter().take_while(|b| b.is_ascii_whitespace()).count();
-    let rest = text.get(lead..).unwrap_or_default();
-    let mut len = usize::from(matches!(rest.first(), Some(b'+' | b'-')));
-    let digits = |from: usize| {
-        rest.get(from..)
-            .unwrap_or_default()
-            .iter()
-            .take_while(|b| b.is_ascii_digit())
-            .count()
-    };
-    let whole = digits(len);
-    len += whole;
-    let mut fraction = 0;
-    if rest.get(len) == Some(&b'.') {
-        fraction = digits(len + 1);
-        // A lone "." fails the digit check below either way.
-        len += 1 + fraction;
-    }
-    if whole + fraction == 0 {
-        return None;
-    }
-    if matches!(rest.get(len), Some(b'e' | b'E')) {
-        let sign = usize::from(matches!(rest.get(len + 1), Some(b'+' | b'-')));
-        let exponent = digits(len + 1 + sign);
-        if exponent > 0 {
-            len += 1 + sign + exponent;
-        }
-    }
-    // A validated numeral always parses.
-    let number = String::from_utf8_lossy(rest.get(..len).unwrap_or_default())
-        .parse()
-        .unwrap_or(0.0);
-    Some((number, lead + len))
-}
-
-/// `(float) $value` for what reaches it: numbers and numeric strings.
-fn to_float(value: &Value) -> f64 {
-    match value {
-        Value::Int(n) => *n as f64,
-        Value::Float(f) => f.to_f64(),
-        other => numeric_prefix(&to_string(other)).map_or(0.0, |(n, _)| n),
-    }
-}
-
-/// `(string) $value` for scalars.
-fn to_string(value: &Value) -> Vec<u8> {
-    match value {
-        Value::String(text) => text.clone(),
-        Value::Int(n) => n.to_string().into_bytes(),
-        Value::Float(f) => Float::from_f64(f.to_f64()).as_str().as_bytes().to_vec(),
-        Value::Bool(true) => b"1".to_vec(),
-        _ => Vec::new(),
     }
 }
 

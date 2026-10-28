@@ -3,7 +3,7 @@
 use hyscribe_phpser::Float;
 
 use super::*;
-use crate::tests::{arg, check, text};
+use crate::tests::{check, text};
 
 fn float(value: &Value) -> f64 {
     number(value).unwrap()
@@ -18,18 +18,10 @@ fn matches_php_numbers() {
         };
         Value::Float(Float::from_f64(round(float(&a[0]), places)))
     });
-    check("float_string", |a| text(&float_string(float(&a[0]))));
-    check("to_float", |a| {
-        Value::Float(Float::from_f64(to_float(arg(a, 0))))
-    });
-    check("is_numeric", |a| Value::Bool(is_numeric(&a[0])));
 }
 
 #[test]
 fn special_floats() {
-    assert_eq!(float_string(f64::NAN), "NAN");
-    assert_eq!(float_string(f64::INFINITY), "INF");
-    assert_eq!(float_string(f64::NEG_INFINITY), "-INF");
     assert!(round(f64::NAN, 2).is_nan());
     assert_eq!(round(f64::INFINITY, 2), f64::INFINITY);
 }

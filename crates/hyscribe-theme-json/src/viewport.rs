@@ -25,7 +25,8 @@ fn breakpoint(value: &Value) -> Option<(&str, f64)> {
         } else {
             !int.is_empty()
         };
-    let px = php::to_float(number) * if unit == "px" { 1.0 } else { 16.0 };
+    let px =
+        hyscribe_phpser::string_to_float(number.as_bytes()) * if unit == "px" { 1.0 } else { 16.0 };
     valid.then_some((value, px))
 }
 

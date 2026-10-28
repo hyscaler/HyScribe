@@ -149,6 +149,7 @@ mod tests {
     fn accessors_reject_other_types() {
         assert_eq!(Value::Null.as_array(), None);
         assert_eq!(Value::Null.get_str("a"), None);
+        assert_eq!(Value::Null.get(&Key::Int(0)), None);
         assert_eq!(Value::Int(1).as_bytes(), None);
         assert_eq!(Value::String(b"x".to_vec()).as_bytes(), Some(&b"x"[..]));
         assert_eq!(array().as_array().map(<[_]>::len), Some(3));

@@ -6,7 +6,9 @@
 
 use hyscribe_phpser::{Key, Value};
 
-use crate::php::{self, float_string, round, string};
+use hyscribe_phpser::{float_to_string, string_to_float};
+
+use crate::php::{self, round, string};
 
 /// More steps than any scale needs; PHP has no bound, which would let a
 /// hostile theme.json loop for ever.
@@ -91,7 +93,7 @@ pub(crate) fn compute_sizes(scale: &Value) -> Vec<Value> {
         below.push(preset(
             &name,
             slug,
-            format!("{}{unit}", float_string(round(current, 2))),
+            format!("{}{unit}", float_to_string(round(current, 2))),
         ));
         if count == mid - 2.0 {
             x_small = Some(2);
@@ -126,7 +128,7 @@ pub(crate) fn compute_sizes(scale: &Value) -> Vec<Value> {
         below.push(preset(
             &name,
             slug,
-            format!("{}{unit}", float_string(round(current, 2))),
+            format!("{}{unit}", float_to_string(round(current, 2))),
         ));
         if count == 1 {
             x_large = Some(2);
@@ -166,7 +168,7 @@ pub(crate) fn merge_sizes(base: Vec<Value>, incoming: &Value) -> Value {
     let mut merged = merged.into_vec();
     let number = |k: &Key| match k {
         Key::Int(n) => *n as f64,
-        Key::String(_) => php::to_float(&php::key_str(k)),
+        Key::String(_) => string_to_float(php::key_str(k).as_bytes()),
     };
     merged.sort_by(|(a, _), (b, _)| number(a).total_cmp(&number(b)));
     Value::Array(

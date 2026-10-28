@@ -277,7 +277,7 @@ pub fn format(format: &str, stored: &str, zone: Zone) -> String {
 }
 
 /// `wp_date( $format, $unix )` in `zone`.
-pub(crate) fn format_unix(format: &str, unix: i64, zone: Zone) -> String {
+pub fn format_unix(format: &str, unix: i64, zone: Zone) -> String {
     format_time(format, &Time::from_unix(unix, zone))
 }
 

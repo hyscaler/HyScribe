@@ -11,6 +11,7 @@ use hyscribe_phpser::{Value, add_query_arg, is_empty_string, json_decode, urlenc
 
 use crate::comment_pages::{comments_pagenum_link, cpage};
 use crate::core_blocks::comments_open;
+use crate::feed::post_comments_feed_link;
 use crate::layout::{Rule, stylesheet};
 use crate::post::the_title;
 use crate::site::{Archive, Request, Site};
@@ -228,15 +229,7 @@ impl Head<'_> {
             .contains(&true);
             open.then(|| {
                 let title = esc_attr(&strip_tags(&the_title(post)));
-                let key: &[u8] = match post.post_type.as_str() {
-                    "page" => b"page_id",
-                    _ => b"p",
-                };
-                let id = post.id.to_string();
-                let href = add_query_arg(
-                    &[(b"feed", Some(b"rss2")), (key, Some(id.as_bytes()))],
-                    &self.home_url(b"/"),
-                );
+                let href = post_comments_feed_link(self.site, post);
                 (format!("{name} &raquo; {title} Comments Feed"), href)
             })
         } else if let Some(Archive::Category(term)) = &self.request.archive {

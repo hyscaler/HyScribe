@@ -452,3 +452,12 @@ async fn adjacent_posts() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn last_post_modified() {
+    let db = fixture().await;
+    assert_eq!(
+        db.last_post_modified().await.unwrap().as_deref(),
+        Some("2026-10-27 08:08:15")
+    );
+}

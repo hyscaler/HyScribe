@@ -46,6 +46,7 @@ fn post(row: &[SqlValue]) -> Post {
         password: text(&row[10]),
         name: text(&row[11]),
         modified: string(&row[14]),
+        modified_gmt: string(&row[15]),
         parent: number(&row[17]),
         guid: text(&row[18]),
         menu_order: Value::String(text(&row[19])).to_int(),

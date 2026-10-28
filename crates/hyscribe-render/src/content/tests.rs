@@ -158,14 +158,17 @@ fn post_content_needs_a_post() {
             r#"<!-- wp:post-content {"tagName":"section"} /-->"#
         ),
         r#"<section class="entry-content wp-block-post-content is-layout-flow wp-block-post-content-is-layout-flow">"#.to_string()
-            + "<p>\u{1f642}</p></section>"
+            + "<p>\u{1f642}</p>\n</section>"
     );
     site.smilies = false;
     assert!(html(&site, &request, "<!-- wp:post-content /-->").contains("<p>:)</p>"));
     site.smilies = true;
-    // Unterminated more tags and delimiters are left as they are.
+    // Unterminated more tags and delimiters are left as they are; without
+    // blocks, wpautop() gives the tag a paragraph of its own.
     site.post.content = b"<p>a</p><!--more".to_vec();
-    assert!(html(&site, &request, "<!-- wp:post-content /-->").contains("<p>a</p><!--more"));
+    assert!(
+        html(&site, &request, "<!-- wp:post-content /-->").contains("<p>a</p>\n<p><!--more\n</p>")
+    );
     site.post.content = b"<p>a</p><!--more--><!-- wp:more".to_vec();
     assert!(
         html(&site, &request, "<!-- wp:post-content /-->")

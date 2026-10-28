@@ -813,6 +813,83 @@ pub(crate) fn encode_ampersands(text: &[u8], digits: bool) -> Vec<u8> {
     out
 }
 
+/// `ent2ncr()`: named entities become numeric ones, and `|` becomes
+/// `&#124;`, as WordPress's table has it.
+pub fn ent2ncr(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut rest = text;
+    while let Some((&first, tail)) = rest.split_first() {
+        let name = tail.split(|&b| b == b';').next().unwrap_or_default();
+        let named = (first == b'&' && name.len() < tail.len())
+            .then(|| entities::NAMED.iter().find(|(n, _)| *n == name))
+            .flatten();
+        rest = match named {
+            Some((name, code)) => {
+                out.extend_from_slice(format!("&#{code};").as_bytes());
+                tail.get(name.len() + 1..).unwrap_or_default()
+            }
+            None if first == b'|' => {
+                out.extend_from_slice(b"&#124;");
+                tail
+            }
+            None => {
+                out.push(first);
+                tail
+            }
+        };
+    }
+    out
+}
+
+/// `html_entity_decode( $text, ENT_COMPAT )`: HTML 4.01's named entities
+/// and numeric references become characters, a single quote's excepted.
+pub fn html_entity_decode(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut rest = text;
+    while let Some((&first, tail)) = rest.split_first() {
+        let reference = tail.split(|&b| b == b';').next().unwrap_or_default();
+        let decoded = (first == b'&' && reference.len() < tail.len())
+            .then(|| entity(reference))
+            .flatten();
+        rest = match decoded {
+            Some(character) => {
+                let mut buffer = [0; 4];
+                out.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
+                tail.get(reference.len() + 1..).unwrap_or_default()
+            }
+            None => {
+                out.push(first);
+                tail
+            }
+        };
+    }
+    out
+}
+
+/// The value of one or more digits in `radix`, if it fits.
+fn reference_number(digits: &[u8], radix: u32) -> Option<u32> {
+    let value = digits.iter().try_fold(0_u64, |n, &b| {
+        let digit = char::from(b).to_digit(radix)?;
+        Some(
+            n.saturating_mul(u64::from(radix))
+                .saturating_add(u64::from(digit)),
+        )
+    })?;
+    u32::try_from(value).ok().filter(|_| !digits.is_empty())
+}
+
+/// The character `&reference;` stands for under `ENT_COMPAT`: HTML 4.01
+/// has `ent2ncr()`'s names but its three older ones.
+fn entity(reference: &[u8]) -> Option<char> {
+    let code = match reference {
+        b"brkbar" | b"die" | b"hibar" => return None,
+        [b'#', b'x' | b'X', hex @ ..] => reference_number(hex, 16)?,
+        [b'#', decimal @ ..] => reference_number(decimal, 10)?,
+        name => entities::NAMED.iter().find(|(n, _)| *n == name)?.1,
+    };
+    char::from_u32(code).filter(|&c| c != '\'')
+}
+
 /// `sanitize_title()`'s replacements in the save context, in order: what
 /// becomes a hyphen, what is removed, what becomes a hyphen again, and
 /// `&times`.
@@ -1026,6 +1103,8 @@ pub fn capital_p_dangit_title(text: &[u8]) -> Vec<u8> {
     }
     out
 }
+
+mod entities;
 
 #[cfg(test)]
 mod tests;

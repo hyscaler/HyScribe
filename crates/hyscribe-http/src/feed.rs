@@ -1,0 +1,126 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! The posts feed (`?feed=rss2`) of a list query, with the caching headers
+//! `WP::send_headers()` gives a feed.
+
+use std::sync::Arc;
+
+use axum::http::{HeaderMap, HeaderName, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use hyscribe_phpser::md5;
+use hyscribe_render::date::{self, Zone};
+use hyscribe_render::feed::rss2;
+use hyscribe_render::site::Request;
+
+use crate::reads::Reads;
+use crate::{Page, Rendered, Site, finished, html};
+
+/// The months of an HTTP date.
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/// The feed of `page`'s posts, or 304 when the client's copy is current.
+pub(crate) async fn respond(
+    site: Arc<Site>,
+    page: Page,
+    last: Option<String>,
+    headers: &HeaderMap,
+) -> Response {
+    let last_modified = last_modified(last.as_deref(), page.request.now);
+    let etag = format!("\"{}\"", md5(last_modified.as_bytes()));
+    let charset = site.option("blog_charset");
+    let cache = [
+        (header::LAST_MODIFIED, last_modified.clone()),
+        (header::ETAG, etag.clone()),
+    ];
+    if not_modified(headers, &last_modified, &etag) {
+        return (StatusCode::NOT_MODIFIED, cache).into_response();
+    }
+    let rendering = Arc::clone(&site);
+    let request: Request = page.request.clone();
+    let title = page.title.clone();
+    let body = tokio::task::spawn_blocking(move || {
+        let reads = Reads::new(&rendering, tokio::runtime::Handle::current());
+        let feed = rss2(
+            &rendering.theme,
+            &reads,
+            &request,
+            title.as_bytes(),
+            last.as_deref(),
+        );
+        reads.finish().map(|()| feed)
+    })
+    .await;
+    response(finished(&site, body), &charset, cache)
+}
+
+/// The feed as the response, or the 500 page when rendering failed.
+fn response(
+    made: Result<Vec<u8>, Rendered>,
+    charset: &str,
+    cache: [(HeaderName, String); 2],
+) -> Response {
+    match made {
+        Ok(feed) => (
+            StatusCode::OK,
+            [(
+                header::CONTENT_TYPE,
+                format!("application/rss+xml; charset={charset}"),
+            )],
+            cache,
+            feed,
+        )
+            .into_response(),
+        Err(error) => html(&error),
+    }
+}
+
+/// The `Last-Modified` of a feed: the latest post's time, or `now` on a
+/// site without posts.
+fn last_modified(last: Option<&str>, now: i64) -> String {
+    let format = "D, d M Y H:i:s";
+    let time = match last {
+        Some(last) => date::format(format, last, Zone::Utc),
+        None => date::format_unix(format, now, Zone::Utc),
+    };
+    format!("{time} GMT")
+}
+
+/// Whether the client's `If-Modified-Since` and `If-None-Match` show it
+/// has this version, as `WP::send_headers()` decides: both must agree when
+/// both are sent, either will do otherwise.
+fn not_modified(headers: &HeaderMap, last_modified: &str, etag: &str) -> bool {
+    let header = |name| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map_or("", str::trim)
+    };
+    let (client_modified, client_etag) = (
+        header(header::IF_MODIFIED_SINCE),
+        header(header::IF_NONE_MATCH),
+    );
+    let since = http_date(client_modified).unwrap_or(0);
+    let fresh = http_date(last_modified).is_some_and(|ours| since >= ours);
+    let same = client_etag == etag;
+    if !client_modified.is_empty() && !client_etag.is_empty() {
+        fresh && same
+    } else {
+        fresh || same
+    }
+}
+
+/// `strtotime()` for an RFC 1123 date (`Tue, 27 Oct 2026 08:08:15 GMT`),
+/// the form WordPress sends and clients echo.
+fn http_date(text: &str) -> Option<i64> {
+    let parts: Vec<&str> = text.split(' ').collect();
+    let [_, day, month, year, time, "GMT"] = parts.as_slice() else {
+        return None;
+    };
+    let month = MONTHS.iter().position(|m| m == month)? + 1;
+    date::strtotime(&format!("{year}-{month:02}-{day:0>2} {time}"))
+}
+
+#[cfg(test)]
+mod tests;

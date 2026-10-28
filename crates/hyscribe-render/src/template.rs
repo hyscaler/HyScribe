@@ -285,6 +285,15 @@ impl Renderer<'_> {
             self.assets.enqueue_style(handle);
         }
         let html = self.layout(block, html);
+        // The block visibility support hides a block set not to show.
+        let hidden = block.name.as_deref().and_then(block_type).is_some()
+            && block
+                .attrs
+                .as_deref()
+                .and_then(|attrs| lookup(attrs, "metadata"))
+                .and_then(|metadata| metadata.get_str("blockVisibility"))
+                == Some(&Value::Bool(false));
+        let html = if hidden { Vec::new() } else { html };
         let html = variation_class(html, block);
         let html = match block.name.as_deref() {
             Some("core/paragraph") => paragraph_class(&html),

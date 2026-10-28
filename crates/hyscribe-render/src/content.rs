@@ -3,14 +3,14 @@
 //! `core/post-content`: the post's content through `get_the_content()` and
 //! the `the_content` filters.
 //!
-//! Not ported yet: `wpautop()` for content without blocks, shortcodes,
-//! `wp_link_pages()`, `force_balance_tags()` on a teaser, attachments and
-//! `wp_filter_content_tags()`.
+//! Not ported yet: shortcodes, `wp_link_pages()`, `force_balance_tags()` on
+//! a teaser, attachments and `wp_filter_content_tags()`.
 
 use hyscribe_kses::{esc_attr, esc_url};
 use hyscribe_model::Post;
 use hyscribe_phpser::{Value, is_empty_string};
 
+use crate::autop::wpautop;
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, contains, wptexturize};
@@ -68,14 +68,26 @@ impl Renderer<'_> {
 
     /// `apply_filters( 'the_content', get_the_content() )`, with the `]]>`
     /// escape between them.
-    fn the_content(&mut self, post: &Post) -> Vec<u8> {
-        let site = self.context.site;
+    pub(crate) fn the_content(&mut self, post: &Post) -> Vec<u8> {
         let content = replace(&get_the_content(self, post), b"]]>", b"]]&gt;");
         let outer = self.context.loading.in_the_content;
         self.context.loading.in_the_content = true;
         let rendered = self.render_top_level(&content);
         self.context.loading.in_the_content = outer;
-        let content = wptexturize(&rendered, &CORE_SHORTCODE_TAGS);
+        // do_blocks() takes wpautop() off for content with blocks.
+        self.content_filters(&rendered, !contains(&content, b"<!-- wp:"))
+    }
+
+    /// The `the_content` filters after `do_blocks()`; `wpautop()` only with
+    /// `autop`.
+    pub(crate) fn content_filters(&self, content: &[u8], autop: bool) -> Vec<u8> {
+        let site = self.context.site;
+        let content = wptexturize(content, &CORE_SHORTCODE_TAGS);
+        let content = if autop {
+            wpautop(&content, true)
+        } else {
+            content
+        };
         site_smilies(
             site,
             &capital_p_dangit(&replace_insecure_home_url(&site.home_url(), &content)),
@@ -85,17 +97,17 @@ impl Renderer<'_> {
 
 /// `get_the_content()` for the main loop's post: the password form for a
 /// protected post, else the requested page of the content, whole on a
-/// singular request and up to its more tag elsewhere.
-fn get_the_content(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
+/// singular request or in a feed and up to its more tag elsewhere.
+pub(crate) fn get_the_content(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
     let context = &renderer.context;
     if !post.password.is_empty() {
         return password_form(renderer, post);
     }
-    let pages: Vec<&[u8]> = split_pages(&post.content);
+    let pages = split_pages(&post.content);
     let page = usize::try_from(context.request.page)
         .unwrap_or(1)
         .clamp(1, pages.len());
-    let content = pages.get(page - 1).copied().unwrap_or_default();
+    let content = pages.get(page - 1).map_or(&[][..], Vec::as_slice);
     let Some((start, end)) = more_tag(content) else {
         return content.to_vec();
     };
@@ -109,7 +121,7 @@ fn get_the_content(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
     );
     let without_delimiters = |part: &[u8]| remove_more_delimiters(content, part);
     let (teaser, rest) = (without_delimiters(teaser), without_delimiters(rest));
-    if context.request.singular {
+    if context.request.singular || context.request.feed {
         let teaser = if contains(&post.content, b"<!--noteaser-->") && page == 1 {
             Vec::new()
         } else {
@@ -181,20 +193,36 @@ fn renderer_permalink(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
 
 /// The pages of a post's content, split at `<!--nextpage-->` as
 /// `generate_postdata()` splits them.
-fn split_pages(content: &[u8]) -> Vec<&[u8]> {
+fn split_pages(content: &[u8]) -> Vec<Vec<u8>> {
     const BREAK: &[u8] = b"<!--nextpage-->";
+    if !contains(content, BREAK) {
+        return vec![content.to_vec()];
+    }
+    // generate_postdata() takes the newlines and block delimiters around
+    // each break away first.
+    let mut content = content.to_vec();
+    for (from, to) in [
+        (&b"\n<!--nextpage-->\n"[..], BREAK),
+        (b"\n<!--nextpage-->", BREAK),
+        (b"<!--nextpage-->\n", BREAK),
+        (b"<!-- wp:nextpage -->", b""),
+        (b"<!-- /wp:nextpage -->", b""),
+    ] {
+        content = replace(&content, from, to);
+    }
+    let content = content.strip_prefix(BREAK).unwrap_or(&content);
     let mut pages = Vec::new();
     let mut rest = content;
     for _ in 0..=content.len() {
         match rest.windows(BREAK.len()).position(|w| w == BREAK) {
             Some(at) => {
-                pages.push(rest.get(..at).unwrap_or_default());
+                pages.push(rest.get(..at).unwrap_or_default().to_vec());
                 rest = rest.get(at + BREAK.len()..).unwrap_or_default();
             }
             None => break,
         }
     }
-    pages.push(rest);
+    pages.push(rest.to_vec());
     pages
 }
 

@@ -162,3 +162,10 @@ doc = false
 bench = false
 
 [workspace]
+
+[[bin]]
+name = "entities"
+path = "fuzz_targets/entities.rs"
+test = false
+doc = false
+bench = false

@@ -28,6 +28,8 @@ pub struct Post {
     pub name: Vec<u8>,
     /// `post_modified`, as stored.
     pub modified: String,
+    /// `post_modified_gmt`, as stored.
+    pub modified_gmt: String,
     /// `post_parent`.
     pub parent: u64,
     /// `guid`.

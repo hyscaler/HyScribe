@@ -70,7 +70,7 @@ macro_rules! post_columns {
         "ID, post_author, CAST(post_date AS CHAR) AS post_date, \
          CAST(post_date_gmt AS CHAR) AS post_date_gmt, post_content, post_title, post_excerpt, \
          post_status, post_password, post_name, CAST(post_modified AS CHAR) AS post_modified, \
-         post_parent, guid, CAST(menu_order AS SIGNED) AS menu_order, post_type, comment_count, \
+         CAST(post_modified_gmt AS CHAR) AS post_modified_gmt, post_parent, guid, CAST(menu_order AS SIGNED) AS menu_order, post_type, comment_count, \
          comment_status, ping_status"
     };
 }
@@ -175,6 +175,7 @@ fn post(row: &MySqlRow) -> Result<Post, DbError> {
         password: c.bytes("post_password"),
         name: c.bytes("post_name"),
         modified: c.text("post_modified"),
+        modified_gmt: c.text("post_modified_gmt"),
         parent: c.unsigned("post_parent"),
         guid: c.bytes("guid"),
         menu_order: c.signed("menu_order"),
@@ -403,6 +404,21 @@ impl Db {
             .await
             .map_err(db_error)?;
         row.as_ref().map(term).transpose()
+    }
+
+    /// `get_lastpostmodified( 'GMT' )`: the latest modified or published
+    /// time of a published post of a public type, `None` without one.
+    pub async fn last_post_modified(&self) -> Result<Option<String>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT CAST(GREATEST(MAX(post_modified_gmt), MAX(post_date_gmt)) AS CHAR) AS latest \
+             FROM {prefix}posts WHERE post_status = 'publish' \
+             AND post_type IN ('post', 'page', 'attachment')",
+        );
+        let row = sqlx::query(sql)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.try_get("latest").map_err(db_error)
     }
 }
 

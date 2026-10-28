@@ -235,7 +235,7 @@ async fn database_errors_show_no_details() {
         theme: hyscribe_render::theme::twentytwentyfive(),
     });
     // The 404 page fails while rendering, reading an option it has not loaded.
-    for uri in ["/", "/?p=1", "/?cat=1", "/?author=1"] {
+    for uri in ["/", "/?p=1", "/?cat=1", "/?author=1", "/?feed=rss2"] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(
@@ -589,7 +589,7 @@ async fn routes_give_the_request_state() {
         .unwrap()
         .as_secs() as i64
         - 60;
-    let home = list(&site, &HashMap::new()).await.unwrap();
+    let home = list(&site, &HashMap::new(), false).await.unwrap();
     assert!(home.request.front_page && home.request.home && home.request.now > recent);
     assert_eq!(home.request.post, Some(1));
     let post = site.db.post(1).await.unwrap().unwrap();
@@ -599,7 +599,7 @@ async fn routes_give_the_request_state() {
         (1, Some(1))
     );
     assert!(single.request.singular && single.request.now > recent);
-    let missing = not_found(&site);
+    let missing = not_found(&site, false);
     assert!(missing.request.not_found && missing.request.now > recent);
 }
 
@@ -663,6 +663,77 @@ async fn list_filters_narrow_the_query() {
         request(&site, "GET", "/?m=20261001").await.status,
         StatusCode::NOT_FOUND
     );
+}
+
+/// The posts feeds and their caching headers against PHP's, from
+/// `reference/feed/golden.sh`, with HyScribe as the generator.
+#[tokio::test]
+async fn feeds_match_php() {
+    let site = oracle_site().await;
+    let golden = include_str!("../../hyscribe-render/tests/golden/feeds-http.tsv");
+    for line in golden.lines() {
+        let fields: Vec<String> = line
+            .split('\t')
+            .map(|f| String::from_utf8(hyscribe_testkit::unhex(f)).unwrap())
+            .collect();
+        let (path, sent, kept, body) = (&fields[0], &fields[1], &fields[2], &fields[3]);
+        let mut request = axum::http::Request::get(path.as_str());
+        for header in sent.lines() {
+            let (name, value) = header.split_once(": ").unwrap();
+            request = request.header(name, value);
+        }
+        let response = router(site.clone())
+            .oneshot(request.body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let header = |name| {
+            response
+                .headers()
+                .get(name)
+                .map_or("", |v| v.to_str().unwrap())
+                .to_string()
+        };
+        let ours = [
+            response.status().as_u16().to_string(),
+            header(header::CONTENT_TYPE),
+            header(header::LAST_MODIFIED),
+            header(header::ETAG),
+        ]
+        .join("\n");
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let php = body.replace(
+            "https://wordpress.org/?v=7.1.3",
+            &format!(
+                "{}?v={}",
+                env!("CARGO_PKG_REPOSITORY"),
+                env!("CARGO_PKG_VERSION")
+            ),
+        );
+        assert_eq!(&ours, kept, "{path} {sent:?}");
+        assert_eq!(
+            String::from_utf8(bytes.to_vec()).unwrap(),
+            php,
+            "{path} {sent:?}"
+        );
+    }
+    assert_eq!(golden.lines().count(), 20);
+}
+
+/// A post's or page's comment feed is not served yet: those requests get
+/// the post or page.
+#[tokio::test]
+async fn comment_feeds_are_not_served_yet() {
+    let site = oracle_site().await;
+    for uri in ["/?feed=rss2&p=1", "/?feed=rss2&page_id=2"] {
+        let reply = request(&site, "GET", uri).await;
+        assert_eq!(
+            reply.headers[header::CONTENT_TYPE],
+            "text/html; charset=UTF-8",
+            "{uri}"
+        );
+    }
 }
 
 /// What every page prints after the theme's footer (`wp_footer()`)

@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::{Query, State};
-use axum::http::{HeaderName, HeaderValue, StatusCode, Uri, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html};
@@ -29,6 +29,7 @@ use hyscribe_render::template::render_template;
 use hyscribe_render::theme::{Theme, twentytwentyfive};
 use tokio::net::TcpListener;
 
+mod feed;
 pub mod query;
 mod reads;
 
@@ -139,6 +140,8 @@ async fn security_headers(mut response: Response) -> Response {
 /// URL.
 enum Outcome {
     Page(Box<Page>),
+    /// The feed of the page's posts, with `get_lastpostmodified( 'GMT' )`.
+    Feed(Box<Page>, Option<String>),
     Redirect(String),
 }
 
@@ -162,6 +165,7 @@ async fn page(
     State(site): State<Arc<Site>>,
     method: axum::http::Method,
     uri: Uri,
+    headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
     // Before the method check, so a login form's POST is redirected too.
@@ -179,15 +183,21 @@ async fn page(
             )
                 .into_response();
         }
+        Ok(Outcome::Feed(page, last)) => {
+            let page = Page {
+                request: Request {
+                    uri: request_uri(&uri),
+                    ..page.request
+                },
+                ..*page
+            };
+            return feed::respond(site, page, last, &headers).await;
+        }
         Ok(Outcome::Page(page)) => {
             let rendering = Arc::clone(&site);
             let candidates = page.candidates.clone();
             let request = Request {
-                uri: uri
-                    .path_and_query()
-                    .map_or(uri.path(), |p| p.as_str())
-                    .as_bytes()
-                    .to_vec(),
+                uri: request_uri(&uri),
                 get: parse_str(uri.query().unwrap_or_default().as_bytes()),
                 ..page.request.clone()
             };
@@ -200,6 +210,11 @@ async fn page(
         }
         Err(err) => database_error(&site, &err),
     };
+    html(&page)
+}
+
+/// A rendered page as the response.
+fn html(page: &Rendered) -> Response {
     (
         page.status,
         [(header::CONTENT_TYPE, "text/html; charset=UTF-8")],
@@ -215,14 +230,26 @@ fn rendered(
     page: Page,
     body: Result<Result<(String, String), DbError>, tokio::task::JoinError>,
 ) -> Rendered {
-    match body {
-        Ok(Ok((head, body))) => Rendered {
+    match finished(site, body) {
+        Ok((head, body)) => Rendered {
             status: page.status,
             head,
             body,
         },
-        Ok(Err(err)) => database_error(site, &err),
-        Err(err) => database_error(site, &err),
+        Err(error) => error,
+    }
+}
+
+/// What a rendering task made, or the 500 page when it met a database
+/// error or panicked.
+fn finished<T>(
+    site: &Site,
+    body: Result<Result<T, DbError>, tokio::task::JoinError>,
+) -> Result<T, Rendered> {
+    match body {
+        Ok(Ok(made)) => Ok(made),
+        Ok(Err(err)) => Err(database_error(site, &err)),
+        Err(err) => Err(database_error(site, &err)),
     }
 }
 
@@ -344,7 +371,7 @@ async fn route(
         || path == "/hs-admin"
         || path.starts_with("/hs-admin/")
     {
-        return Ok(Outcome::Page(Box::new(not_found(site))));
+        return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
     if let Some(location) = canonical_path(site, path, raw_query) {
         return Ok(Outcome::Redirect(location));
@@ -352,7 +379,17 @@ async fn route(
     // With plain permalinks the path is ignored. Author archives give away
     // login names, so they are off by default (docs/SECURITY_MODEL.md).
     if query.contains_key("author") {
-        return Ok(Outcome::Page(Box::new(not_found(site))));
+        return Ok(Outcome::Page(Box::new(not_found(site, false))));
+    }
+    // The posts feed; comment feeds and other formats are not served yet.
+    let single_requested = query.contains_key("p") || query.contains_key("page_id");
+    if query
+        .get("feed")
+        .is_some_and(|feed| feed == "rss2" || feed == "feed")
+        && !single_requested
+    {
+        let (page, last) = tokio::join!(list(site, query, true), site.db.last_post_modified());
+        return page.and_then(|page| last.map(|last| Outcome::Feed(Box::new(page), last)));
     }
     let single = |name: &'static str, post_type: &'static str| {
         query
@@ -375,11 +412,11 @@ async fn route(
                         site.permalink(&post),
                         other_args(raw_query, name)
                     )),
-                    None => Outcome::Page(Box::new(not_found(site))),
+                    None => Outcome::Page(Box::new(not_found(site, false))),
                 },
             )
         }
-        None => list(site, query)
+        None => list(site, query, false)
             .await
             .map(|page| Outcome::Page(Box::new(page))),
     }
@@ -424,12 +461,18 @@ fn single_page(site: &Site, post: Post) -> Page {
     }
 }
 
-/// A list page: the home page, a search, a category or a date archive.
-async fn list(site: &Site, query: &HashMap<String, String>) -> Result<Page, DbError> {
+/// A list page: the home page, a search, a category or a date archive; for
+/// a feed, its posts, and no 404.
+async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Result<Page, DbError> {
     let search = query.get("s");
     let category = query.get("cat").map(|c| absint(c)).filter(|&id| id > 0);
     let (year, month, day) = query.get("m").map_or((None, None, None), |m| date_parts(m));
-    let per_page = absint(&site.option("posts_per_page")).clamp(1, 100);
+    let per_page = if feed {
+        absint(&site.option("posts_per_rss"))
+    } else {
+        absint(&site.option("posts_per_page"))
+    }
+    .clamp(1, 100);
     let post_query = PostQuery {
         // Searches cover posts and pages.
         post_types: if search.is_some() {
@@ -449,14 +492,14 @@ async fn list(site: &Site, query: &HashMap<String, String>) -> Result<Page, DbEr
         Some(id) => match site.db.category(id).await? {
             Some(term) => Some(term),
             // A category that does not exist.
-            None => return Ok(not_found(site)),
+            None => return Ok(not_found(site, feed)),
         },
         None => None,
     };
     let posts = site.db.posts(&post_query).await?;
     // A date archive with nothing in it is a 404; a search never is.
     if year.is_some() && search.is_none() && category.is_none() && posts.is_empty() {
-        return Ok(not_found(site));
+        return Ok(not_found(site, feed));
     }
     let first_date = posts.first().map_or("", |post| post.date.as_str());
     let heading = if let Some(s) = search {
@@ -524,7 +567,8 @@ async fn list(site: &Site, query: &HashMap<String, String>) -> Result<Page, DbEr
     })
 }
 
-fn not_found(site: &Site) -> Page {
+/// The 404 page; for a feed, an empty one titled with the site's name.
+fn not_found(site: &Site, feed: bool) -> Page {
     let request = Request {
         not_found: true,
         now: now(),
@@ -532,10 +576,22 @@ fn not_found(site: &Site) -> Page {
     };
     Page {
         status: StatusCode::NOT_FOUND,
-        title: format!("Page not found &#8211; {}", site.name()),
+        title: if feed {
+            site.name()
+        } else {
+            format!("Page not found &#8211; {}", site.name())
+        },
         candidates: vec!["404".into(), "index".into()],
         request,
     }
+}
+
+/// `$_SERVER['REQUEST_URI']`.
+fn request_uri(uri: &Uri) -> Vec<u8> {
+    uri.path_and_query()
+        .map_or(uri.path(), |p| p.as_str())
+        .as_bytes()
+        .to_vec()
 }
 
 fn lossy(bytes: &[u8]) -> String {

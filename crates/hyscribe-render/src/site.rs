@@ -84,6 +84,8 @@ pub struct Request {
     pub singular: bool,
     /// `is_404()`
     pub not_found: bool,
+    /// `is_feed()`: posts show in full, as a singular post does.
+    pub feed: bool,
     /// The `page` or `paged` query var, 0 or 1 on the first page.
     pub page: u64,
     /// `$_SERVER['REQUEST_URI']`: the path and query as requested.

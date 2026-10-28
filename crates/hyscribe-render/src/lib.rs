@@ -12,6 +12,8 @@ mod comments;
 mod content;
 mod core_blocks;
 pub mod date;
+mod excerpt;
+pub mod feed;
 #[cfg(test)]
 #[path = "tests/fixture.rs"]
 mod fixture;

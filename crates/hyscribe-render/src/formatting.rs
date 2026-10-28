@@ -277,7 +277,7 @@ fn number(s: &[u8], i: usize) -> usize {
         .count()
 }
 
-fn find(s: &[u8], from: usize, literal: &[u8]) -> Option<usize> {
+pub(crate) fn find(s: &[u8], from: usize, literal: &[u8]) -> Option<usize> {
     s.get(from..)
         .unwrap_or_default()
         .windows(literal.len())

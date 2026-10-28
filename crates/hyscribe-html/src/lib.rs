@@ -15,4 +15,5 @@ mod decoder;
 mod entities;
 mod tag_processor;
 
+pub use decoder::decode_attribute;
 pub use tag_processor::{Attribute, TagProcessor};

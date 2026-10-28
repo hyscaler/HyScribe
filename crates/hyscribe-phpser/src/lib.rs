@@ -30,7 +30,7 @@ pub use decode::{MAX_DEPTH, decode};
 pub use encode::encode;
 pub use error::{Error, ErrorKind};
 pub use float::Float;
-pub use json::{JSON_MAX_DEPTH, json_decode, json_encode};
+pub use json::{JSON_MAX_DEPTH, json_decode, json_encode, json_encode_unescaped};
 pub use md5::md5;
 pub use value::{Key, Value, lookup};
 pub use wp::{Maybe, is_serialized, maybe_unserialize, php_trim};

@@ -119,4 +119,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "kses_post"
+path = "fuzz_targets/kses_post.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

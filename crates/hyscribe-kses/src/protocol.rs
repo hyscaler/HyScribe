@@ -15,11 +15,7 @@ pub const ALLOWED_PROTOCOLS: [&str; 22] = [
 /// feed and carriage return, and every run of backslashes followed by
 /// zeros (`\\+0+`).
 pub fn wp_kses_no_null(content: &[u8]) -> Vec<u8> {
-    let content: Vec<u8> = content
-        .iter()
-        .copied()
-        .filter(|&b| !matches!(b, 0..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F))
-        .collect();
+    let content = wp_kses_no_null_keep_slash_zero(content);
     replace_each(&content, |text| {
         let slashes = text.iter().take_while(|&&b| b == b'\\').count();
         if slashes == 0 {
@@ -36,6 +32,16 @@ pub fn wp_kses_no_null(content: &[u8]) -> Vec<u8> {
             _ => Some((slashes + zeros, Vec::new())),
         }
     })
+}
+
+/// `wp_kses_no_null( $content, array( 'slash_zero' => 'keep' ) )`, as
+/// `wp_kses()` calls it: only the control characters go.
+pub fn wp_kses_no_null_keep_slash_zero(content: &[u8]) -> Vec<u8> {
+    content
+        .iter()
+        .copied()
+        .filter(|&b| !matches!(b, 0..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F))
+        .collect()
 }
 
 /// `&#0*58` or `&#x0*3a` (case-insensitively) at the start of `text`: its
@@ -169,6 +175,10 @@ mod tests {
         assert_eq!(wp_kses_no_null(b"a\\0b\\\\00c\\0\\0d"), b"abcd");
         assert_eq!(wp_kses_no_null(b"\\a\\\\b\\"), b"\\a\\\\b\\");
         assert_eq!(wp_kses_no_null(b"0\\\x000"), b"0");
+        assert_eq!(
+            wp_kses_no_null_keep_slash_zero(b"\x00a\\0\x1f\n"),
+            b"a\\0\n"
+        );
     }
 
     #[test]

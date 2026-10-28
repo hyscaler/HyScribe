@@ -8,7 +8,7 @@
 //! PCRE's semantics, in linear time: a scan for attributes that finds no
 //! terminator is remembered, so hostile input cannot make it quadratic.
 
-use hyscribe_phpser::{Key, Value, is_empty_string, json_decode};
+use hyscribe_phpser::{Key, Value, is_empty_string, json_decode, json_encode_unescaped};
 
 /// One block, as `parse_blocks()` returns it.
 #[derive(Clone, Debug, PartialEq)]
@@ -117,6 +117,74 @@ fn render_into(block: &Block, out: &mut Vec<u8>) {
             }
         }
     }
+}
+
+/// `serialize_blocks()`: the block markup `parse_blocks()` reads back as
+/// `blocks`.
+pub fn serialize_blocks(blocks: &[Block]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for block in blocks {
+        serialize_into(block, &mut out);
+    }
+    out
+}
+
+/// `serialize_block()` and `get_comment_delimited_block_content()`.
+fn serialize_into(block: &Block, out: &mut Vec<u8>) {
+    let mut content = Vec::new();
+    let mut inner = block.inner_blocks.iter();
+    for chunk in &block.inner_content {
+        match chunk {
+            Some(html) => content.extend_from_slice(html),
+            None => inner
+                .next()
+                .into_iter()
+                .for_each(|child| serialize_into(child, &mut content)),
+        }
+    }
+    let Some(name) = &block.name else {
+        out.extend_from_slice(&content);
+        return;
+    };
+    let name = name.strip_prefix("core/").unwrap_or(name).as_bytes();
+    out.extend_from_slice(b"<!-- wp:");
+    out.extend_from_slice(name);
+    out.push(b' ');
+    if let Some(attrs) = block.attrs.as_ref().filter(|a| !a.is_empty()) {
+        out.extend_from_slice(&serialize_block_attributes(attrs));
+        out.push(b' ');
+    }
+    if is_empty_string(&content) {
+        out.extend_from_slice(b"/-->");
+        return;
+    }
+    out.extend_from_slice(b"-->");
+    out.extend_from_slice(&content);
+    out.extend_from_slice(b"<!-- /wp:");
+    out.extend_from_slice(name);
+    out.extend_from_slice(b" -->");
+}
+
+/// `serialize_block_attributes()`: JSON that cannot close the comment or
+/// open a tag. Attributes JSON cannot encode (an infinite float) give `''`.
+fn serialize_block_attributes(attrs: &[(Key, Value)]) -> Vec<u8> {
+    let json = json_encode_unescaped(&Value::Array(attrs.to_vec())).unwrap_or_default();
+    let mut out = Vec::with_capacity(json.len());
+    let mut rest = json.as_slice();
+    while let Some(&byte) = rest.first() {
+        let (with, used): (&[u8], usize) = match (byte, rest.get(..2).unwrap_or_default()) {
+            (_, b"\\\\") => (b"\\u005c", 2),
+            (_, b"--") => (b"\\u002d\\u002d", 2),
+            (_, b"\\\"") => (b"\\u0022", 2),
+            (b'<', _) => (b"\\u003c", 1),
+            (b'>', _) => (b"\\u003e", 1),
+            (b'&', _) => (b"\\u0026", 1),
+            _ => (rest.get(..1).unwrap_or_default(), 1),
+        };
+        out.extend_from_slice(with);
+        rest = rest.get(used..).unwrap_or_default();
+    }
+    out
 }
 
 /// Blocks nested deeper give no blocks at all: rendering recurses once per
@@ -428,7 +496,7 @@ fn after_space(doc: &[u8], i: usize) -> Option<usize> {
 
 /// PCRE's `\s` without Unicode: space, tab, line feed, vertical tab, form
 /// feed and carriage return.
-fn is_pcre_space(b: u8) -> bool {
+pub(crate) fn is_pcre_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
 }
 

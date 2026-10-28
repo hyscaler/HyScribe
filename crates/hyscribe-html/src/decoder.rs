@@ -15,8 +15,9 @@ const WINDOWS_1252: [u32; 32] = [
 /// U+FFFD REPLACEMENT CHARACTER.
 pub(crate) const REPLACEMENT: &[u8] = "\u{FFFD}".as_bytes();
 
-/// Decodes the character references in an attribute value.
-pub(crate) fn decode_attribute(text: &[u8]) -> Vec<u8> {
+/// `WP_HTML_Decoder::decode_attribute()`: decodes the character references
+/// in an attribute value.
+pub fn decode_attribute(text: &[u8]) -> Vec<u8> {
     let mut decoded = Vec::with_capacity(text.len());
     let mut was_at = 0;
     let mut at = 0;

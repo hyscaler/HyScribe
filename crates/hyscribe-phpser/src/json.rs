@@ -290,11 +290,20 @@ fn utf8_sequence(bytes: &[u8]) -> Option<&[u8]> {
 /// array.
 pub fn json_encode(value: &Value) -> Option<Vec<u8>> {
     let mut out = Vec::new();
-    encode_value(value, &mut out)?;
+    encode_value(value, false, &mut out)?;
     Some(out)
 }
 
-fn encode_value(value: &Value, out: &mut Vec<u8>) -> Option<()> {
+/// `json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE )`,
+/// as `serialize_block_attributes()` calls it. U+2028 and U+2029 stay
+/// escaped, as PHP keeps them without `JSON_UNESCAPED_LINE_TERMINATORS`.
+pub fn json_encode_unescaped(value: &Value) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    encode_value(value, true, &mut out)?;
+    Some(out)
+}
+
+fn encode_value(value: &Value, unescaped: bool, out: &mut Vec<u8>) -> Option<()> {
     match value {
         Value::Null => out.extend_from_slice(b"null"),
         Value::Bool(true) => out.extend_from_slice(b"true"),
@@ -311,7 +320,7 @@ fn encode_value(value: &Value, out: &mut Vec<u8>) -> Option<()> {
                     .as_bytes(),
             );
         }
-        Value::String(text) => encode_string(text, out)?,
+        Value::String(text) => encode_string(text, unescaped, out)?,
         Value::Array(entries) => {
             let list = entries
                 .iter()
@@ -327,10 +336,10 @@ fn encode_value(value: &Value, out: &mut Vec<u8>) -> Option<()> {
                         Key::Int(n) => n.to_string().into_bytes(),
                         Key::String(name) => name.clone(),
                     };
-                    encode_string(&name, out)?;
+                    encode_string(&name, unescaped, out)?;
                     out.push(b':');
                 }
-                encode_value(item, out)?;
+                encode_value(item, unescaped, out)?;
             }
             out.push(if list { b']' } else { b'}' });
         }
@@ -339,20 +348,23 @@ fn encode_value(value: &Value, out: &mut Vec<u8>) -> Option<()> {
     Some(())
 }
 
-fn encode_string(text: &[u8], out: &mut Vec<u8>) -> Option<()> {
+fn encode_string(text: &[u8], unescaped: bool, out: &mut Vec<u8>) -> Option<()> {
     let text = std::str::from_utf8(text).ok()?;
     out.push(b'"');
     for c in text.chars() {
         match c {
             '"' => out.extend_from_slice(b"\\\""),
             '\\' => out.extend_from_slice(b"\\\\"),
-            '/' => out.extend_from_slice(b"\\/"),
+            '/' if !unescaped => out.extend_from_slice(b"\\/"),
             '\u{8}' => out.extend_from_slice(b"\\b"),
             '\u{c}' => out.extend_from_slice(b"\\f"),
             '\n' => out.extend_from_slice(b"\\n"),
             '\r' => out.extend_from_slice(b"\\r"),
             '\t' => out.extend_from_slice(b"\\t"),
             ' '..='~' | '\u{7f}' => out.push(c as u8),
+            '\u{80}'.. if unescaped && !matches!(c, '\u{2028}' | '\u{2029}') => {
+                out.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+            }
             _ => {
                 let mut units = [0u16; 2];
                 for unit in c.encode_utf16(&mut units) {
@@ -538,13 +550,12 @@ mod tests {
     fn json_encode_matches_php() {
         let golden = include_str!("../tests/golden/json-encode.tsv");
         for line in golden.lines() {
-            let (value, php) = line.split_once('\t').unwrap();
-            let value = crate::decode(&hyscribe_testkit::unhex(value)).unwrap();
-            assert_eq!(
-                json_encode(&value),
-                Some(hyscribe_testkit::unhex(php)),
-                "{value:?}"
-            );
+            let mut fields = line.split('\t').map(hyscribe_testkit::unhex);
+            let mut field = || fields.next().unwrap();
+            let (value, php, unescaped) = (field(), field(), field());
+            let value = crate::decode(&value).unwrap();
+            assert_eq!(json_encode(&value), Some(php), "{value:?}");
+            assert_eq!(json_encode_unescaped(&value), Some(unescaped), "{value:?}");
         }
         assert!(golden.lines().count() > 30);
     }

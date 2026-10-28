@@ -501,6 +501,7 @@ dependencies = [
  "hyscribe-config",
  "hyscribe-html",
  "hyscribe-http",
+ "hyscribe-kses",
  "hyscribe-phpser",
  "hyscribe-render",
  "libfuzzer-sys",
@@ -519,6 +520,10 @@ dependencies = [
  "hyscribe-render",
  "tokio",
 ]
+
+[[package]]
+name = "hyscribe-kses"
+version = "0.1.0"
 
 [[package]]
 name = "hyscribe-phpser"

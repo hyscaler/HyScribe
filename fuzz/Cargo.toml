@@ -18,6 +18,7 @@ hyscribe-config = { path = "../crates/hyscribe-config" }
 hyscribe-render = { path = "../crates/hyscribe-render" }
 hyscribe-http = { path = "../crates/hyscribe-http" }
 hyscribe-html = { path = "../crates/hyscribe-html" }
+hyscribe-kses = { path = "../crates/hyscribe-kses" }
 
 [[bin]]
 name = "phpser_decode"
@@ -69,8 +70,36 @@ doc = false
 bench = false
 
 [[bin]]
+name = "kses_escape"
+path = "fuzz_targets/kses_escape.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "html_tag_processor"
 path = "fuzz_targets/html_tag_processor.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "kses_css"
+path = "fuzz_targets/kses_css.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "kses_protocol"
+path = "fuzz_targets/kses_protocol.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "kses_strip"
+path = "fuzz_targets/kses_strip.rs"
 test = false
 doc = false
 bench = false

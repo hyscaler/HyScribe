@@ -644,6 +644,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyscribe-kses"
+version = "0.1.0"
+
+[[package]]
 name = "hyscribe-phpser"
 version = "0.1.0"
 dependencies = [

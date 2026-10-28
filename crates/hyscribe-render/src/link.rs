@@ -30,6 +30,22 @@ const BUILTIN_TYPES: [&str; 14] = [
     "wp_font_face",
 ];
 
+/// The host of `url`, with `:port`: `parse_url()`'s `host` and `port`.
+pub(crate) fn host(url: &[u8]) -> Vec<u8> {
+    let after_scheme = crate::formatting::find(url, 0, b"://")
+        .and_then(|at| url.get(at + 3..))
+        .unwrap_or_default();
+    let authority = after_scheme
+        .split(|&b| matches!(b, b'/' | b'?' | b'#'))
+        .next()
+        .unwrap_or_default();
+    authority
+        .rsplit(|&b| b == b'@')
+        .next()
+        .unwrap_or_default()
+        .to_vec()
+}
+
 /// `get_permalink( $post )`: `home` is `home_url()`, `front_page` as
 /// [`front_page`] gives it.
 pub fn permalink(home: &[u8], front_page: Option<u64>, post: &Post) -> Vec<u8> {

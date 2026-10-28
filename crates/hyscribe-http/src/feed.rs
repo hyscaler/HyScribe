@@ -10,7 +10,6 @@ use axum::response::{IntoResponse, Response};
 use hyscribe_phpser::md5;
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::feed::rss2;
-use hyscribe_render::site::Request;
 
 use crate::reads::Reads;
 use crate::{Page, Rendered, Site, finished, html};
@@ -38,8 +37,7 @@ pub(crate) async fn respond(
         return (StatusCode::NOT_MODIFIED, cache).into_response();
     }
     let rendering = Arc::clone(&site);
-    let request: Request = page.request.clone();
-    let title = page.title.clone();
+    let Page { request, title, .. } = page;
     let body = tokio::task::spawn_blocking(move || {
         let reads = Reads::new(&rendering, tokio::runtime::Handle::current());
         let feed = rss2(

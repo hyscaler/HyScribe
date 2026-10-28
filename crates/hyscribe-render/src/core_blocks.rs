@@ -163,16 +163,7 @@ impl Context<'_> {
     /// The host, with `:port`, of `wp_upload_dir()`'s URL, which lives
     /// under `siteurl`: where `wp_kses_post()` lets embedded PDFs come from.
     pub(crate) fn upload_host(&self) -> Vec<u8> {
-        let siteurl = self.site.option("siteurl").unwrap_or_default();
-        let after_scheme = crate::formatting::find(&siteurl, 0, b"://")
-            .and_then(|at| siteurl.get(at + 3..))
-            .unwrap_or_default();
-        let authority = after_scheme
-            .split(|&b| matches!(b, b'/' | b'?' | b'#'))
-            .next()
-            .unwrap_or_default();
-        let host = authority.rsplit(|&b| b == b'@').next().unwrap_or_default();
-        host.to_vec()
+        link::host(&self.site.option("siteurl").unwrap_or_default())
     }
 
     /// `wp_timezone()`.

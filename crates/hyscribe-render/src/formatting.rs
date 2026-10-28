@@ -816,45 +816,33 @@ pub(crate) fn encode_ampersands(text: &[u8], digits: bool) -> Vec<u8> {
 /// `ent2ncr()`: named entities become numeric ones, and `|` becomes
 /// `&#124;`, as WordPress's table has it.
 pub fn ent2ncr(text: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(text.len());
-    let mut rest = text;
-    while let Some((&first, tail)) = rest.split_first() {
-        let name = tail.split(|&b| b == b';').next().unwrap_or_default();
-        let named = (first == b'&' && name.len() < tail.len())
-            .then(|| entities::NAMED.iter().find(|(n, _)| *n == name))
-            .flatten();
-        rest = match named {
-            Some((name, code)) => {
-                out.extend_from_slice(format!("&#{code};").as_bytes());
-                tail.get(name.len() + 1..).unwrap_or_default()
-            }
-            None if first == b'|' => {
-                out.extend_from_slice(b"&#124;");
-                tail
-            }
-            None => {
-                out.push(first);
-                tail
-            }
-        };
-    }
-    out
+    let named = |name: &[u8]| {
+        let (_, code) = entities::NAMED.iter().find(|(n, _)| *n == name)?;
+        Some(format!("&#{code};").into_bytes())
+    };
+    references(&crate::template::replace(text, b"|", b"&#124;"), named)
 }
 
 /// `html_entity_decode( $text, ENT_COMPAT )`: HTML 4.01's named entities
 /// and numeric references become characters, a single quote's excepted.
 pub fn html_entity_decode(text: &[u8]) -> Vec<u8> {
+    references(text, |reference| {
+        entity(reference).map(|c| c.to_string().into_bytes())
+    })
+}
+
+/// `text` with each `&reference;` that `replace` knows replaced.
+fn references(text: &[u8], replace: impl Fn(&[u8]) -> Option<Vec<u8>>) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut rest = text;
     while let Some((&first, tail)) = rest.split_first() {
         let reference = tail.split(|&b| b == b';').next().unwrap_or_default();
-        let decoded = (first == b'&' && reference.len() < tail.len())
-            .then(|| entity(reference))
+        let replaced = (first == b'&' && reference.len() < tail.len())
+            .then(|| replace(reference))
             .flatten();
-        rest = match decoded {
-            Some(character) => {
-                let mut buffer = [0; 4];
-                out.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
+        rest = match replaced {
+            Some(replaced) => {
+                out.extend_from_slice(&replaced);
                 tail.get(reference.len() + 1..).unwrap_or_default()
             }
             None => {

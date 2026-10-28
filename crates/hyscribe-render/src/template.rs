@@ -13,6 +13,7 @@ use hyscribe_phpser::{Value, is_empty_string, lookup, php_trim};
 
 use crate::blocks::{Block, parse_blocks};
 use crate::core_blocks::{self, Context};
+use crate::excerpt::visible;
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_smilies, wptexturize};
 use crate::head::Assets;
 use crate::interactivity::process_directives;
@@ -286,13 +287,7 @@ impl Renderer<'_> {
         }
         let html = self.layout(block, html);
         // The block visibility support hides a block set not to show.
-        let hidden = block.name.as_deref().and_then(block_type).is_some()
-            && block
-                .attrs
-                .as_deref()
-                .and_then(|attrs| lookup(attrs, "metadata"))
-                .and_then(|metadata| metadata.get_str("blockVisibility"))
-                == Some(&Value::Bool(false));
+        let hidden = block.name.as_deref().and_then(block_type).is_some() && !visible(block);
         let html = if hidden { Vec::new() } else { html };
         let html = variation_class(html, block);
         let html = match block.name.as_deref() {

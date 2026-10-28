@@ -14,6 +14,7 @@ use hyscribe_phpser::{Value, add_query_arg, is_empty_string, php_trim};
 use crate::core_blocks::comments_open;
 use crate::date::{self, Zone};
 use crate::formatting::{convert_chars, ent2ncr, html_entity_decode};
+use crate::link::host;
 use crate::post::the_title;
 use crate::site::{Request, Site};
 use crate::template::{Renderer, replace};
@@ -242,14 +243,7 @@ fn enclosure(site: &dyn Site, post: &Post) -> Vec<u8> {
 
 /// `get_self_link()`: the requested URI on the home URL's host.
 fn self_link(site: &dyn Site, request: &Request) -> Vec<u8> {
-    let home = site.home_url();
-    let host = home
-        .splitn(2, |&b| b == b':')
-        .nth(1)
-        .and_then(|rest| rest.strip_prefix(b"//"))
-        .map(|rest| rest.split(|&b| b == b'/').next().unwrap_or_default())
-        .unwrap_or_default();
-    [b"http://".as_slice(), host, &request.uri].concat()
+    [b"http://".as_slice(), &host(&site.home_url()), &request.uri].concat()
 }
 
 /// `get_post_comments_feed_link( $post, 'rss2' )` with plain permalinks.

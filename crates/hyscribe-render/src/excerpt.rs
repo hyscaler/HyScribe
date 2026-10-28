@@ -100,7 +100,7 @@ fn allowed(name: Option<&str>) -> bool {
 }
 
 /// Not hidden with `metadata.blockVisibility` set to `false`.
-fn visible(block: &Block) -> bool {
+pub(crate) fn visible(block: &Block) -> bool {
     let visibility = block
         .attrs
         .as_deref()

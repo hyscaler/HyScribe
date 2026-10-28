@@ -155,9 +155,8 @@ impl Directives {
             },
             _ => None,
         };
-        let valid = namespace.filter(|ns| {
-            !is_empty_string(ns) && ns.first().is_some_and(|&b| is_namespace_byte(b))
-        });
+        let valid = namespace
+            .filter(|ns| !is_empty_string(ns) && ns.first().is_some_and(|&b| is_namespace_byte(b)));
         let pushed = match valid {
             Some(ns) => Some(ns),
             None => self.namespaces.last().cloned().flatten(),

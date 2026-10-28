@@ -21,6 +21,7 @@ mod encode;
 mod error;
 mod float;
 mod json;
+mod md5;
 mod value;
 mod wp;
 
@@ -29,6 +30,7 @@ pub use decode::{MAX_DEPTH, decode};
 pub use encode::encode;
 pub use error::{Error, ErrorKind};
 pub use float::Float;
-pub use json::{JSON_MAX_DEPTH, json_decode};
+pub use json::{JSON_MAX_DEPTH, json_decode, json_encode};
+pub use md5::md5;
 pub use value::{Key, Value, lookup};
 pub use wp::{Maybe, is_serialized, maybe_unserialize, php_trim};

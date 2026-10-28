@@ -92,7 +92,7 @@ fn leading_digits(bytes: &[u8]) -> usize {
 /// PHP's `serialize_precision = -1` output: the shortest digits that round
 /// trip, in fixed notation when the decimal exponent is in `-4..17`,
 /// otherwise as `d.dddE+x` with at least one fractional digit.
-fn php_format(value: f64) -> String {
+pub(crate) fn php_format(value: f64) -> String {
     if value.is_nan() {
         return "NAN".into();
     }

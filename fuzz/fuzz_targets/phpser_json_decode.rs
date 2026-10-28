@@ -14,5 +14,9 @@ fuzz_target!(|data: &[u8]| {
         if let Ok(decoded) = hyscribe_phpser::decode(&encoded) {
             assert_eq!(decoded, value);
         }
+        // What decodes encodes back to JSON that decodes the same.
+        if let Some(json) = hyscribe_phpser::json_encode(&value) {
+            assert_eq!(hyscribe_phpser::json_decode(&json), Some(value));
+        }
     }
 });

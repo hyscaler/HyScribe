@@ -283,6 +283,88 @@ fn utf8_sequence(bytes: &[u8]) -> Option<&[u8]> {
     std::str::from_utf8(sequence).ok().map(|_| sequence)
 }
 
+/// `json_encode( $value )` with no flags, as `wp_json_encode()` calls it:
+/// lists as arrays and other arrays as objects, `/` and every non-ASCII
+/// character escaped. `None` where PHP fails: a string that is not UTF-8,
+/// an infinite or NaN float, or a value other than null, a scalar or an
+/// array.
+pub fn json_encode(value: &Value) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    encode_value(value, &mut out)?;
+    Some(out)
+}
+
+fn encode_value(value: &Value, out: &mut Vec<u8>) -> Option<()> {
+    match value {
+        Value::Null => out.extend_from_slice(b"null"),
+        Value::Bool(true) => out.extend_from_slice(b"true"),
+        Value::Bool(false) => out.extend_from_slice(b"false"),
+        Value::Int(n) => out.extend_from_slice(n.to_string().as_bytes()),
+        Value::Float(f) => {
+            let number = f.to_f64();
+            if !number.is_finite() {
+                return None;
+            }
+            out.extend_from_slice(
+                crate::float::php_format(number)
+                    .replace('E', "e")
+                    .as_bytes(),
+            );
+        }
+        Value::String(text) => encode_string(text, out)?,
+        Value::Array(entries) => {
+            let list = entries
+                .iter()
+                .zip(0..)
+                .all(|((key, _), i)| *key == Key::Int(i));
+            out.push(if list { b'[' } else { b'{' });
+            for (i, (key, item)) in entries.iter().enumerate() {
+                if i > 0 {
+                    out.push(b',');
+                }
+                if !list {
+                    let name = match key {
+                        Key::Int(n) => n.to_string().into_bytes(),
+                        Key::String(name) => name.clone(),
+                    };
+                    encode_string(&name, out)?;
+                    out.push(b':');
+                }
+                encode_value(item, out)?;
+            }
+            out.push(if list { b']' } else { b'}' });
+        }
+        _ => return None,
+    }
+    Some(())
+}
+
+fn encode_string(text: &[u8], out: &mut Vec<u8>) -> Option<()> {
+    let text = std::str::from_utf8(text).ok()?;
+    out.push(b'"');
+    for c in text.chars() {
+        match c {
+            '"' => out.extend_from_slice(b"\\\""),
+            '\\' => out.extend_from_slice(b"\\\\"),
+            '/' => out.extend_from_slice(b"\\/"),
+            '\u{8}' => out.extend_from_slice(b"\\b"),
+            '\u{c}' => out.extend_from_slice(b"\\f"),
+            '\n' => out.extend_from_slice(b"\\n"),
+            '\r' => out.extend_from_slice(b"\\r"),
+            '\t' => out.extend_from_slice(b"\\t"),
+            ' '..='~' | '\u{7f}' => out.push(c as u8),
+            _ => {
+                let mut units = [0u16; 2];
+                for unit in c.encode_utf16(&mut units) {
+                    out.extend_from_slice(format!("\\u{unit:04x}").as_bytes());
+                }
+            }
+        }
+    }
+    out.push(b'"');
+    Some(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,5 +531,42 @@ mod tests {
         };
         assert!(decode(&objects(JSON_MAX_DEPTH - 1)).is_some());
         assert_eq!(decode(&objects(JSON_MAX_DEPTH)), None);
+    }
+
+    /// Every case of `reference/phpser/json-golden.php`.
+    #[test]
+    fn json_encode_matches_php() {
+        let golden = include_str!("../tests/golden/json-encode.tsv");
+        for line in golden.lines() {
+            let (value, php) = line.split_once('\t').unwrap();
+            let value = crate::decode(&hyscribe_testkit::unhex(value)).unwrap();
+            assert_eq!(
+                json_encode(&value),
+                Some(hyscribe_testkit::unhex(php)),
+                "{value:?}"
+            );
+        }
+        assert!(golden.lines().count() > 30);
+    }
+
+    #[test]
+    fn json_encode_fails_where_php_does() {
+        assert_eq!(json_encode(&Value::String(vec![0xff])), None);
+        assert_eq!(
+            json_encode(&Value::Float(crate::Float::from_f64(f64::NAN))),
+            None
+        );
+        assert_eq!(json_encode(&Value::Enum(b"Suit:Hearts".to_vec())), None);
+        let nested = Value::Array(vec![(Key::String(vec![0xff]), Value::Null)]);
+        assert_eq!(json_encode(&nested), None);
+        assert_eq!(
+            json_encode(&Value::Array(vec![(Key::Int(0), Value::Ref(1))])),
+            None
+        );
+        // Form feeds and backspaces have short escapes.
+        assert_eq!(
+            json_encode(&Value::String(b"\x08\x0c".to_vec())),
+            Some(br#""\b\f""#.to_vec())
+        );
     }
 }

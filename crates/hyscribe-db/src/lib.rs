@@ -13,7 +13,7 @@
 use std::fmt;
 
 use hyscribe_config::{Database, Prefix};
-use hyscribe_model::{Post, PostQuery};
+use hyscribe_model::{Post, PostQuery, Term};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
 
@@ -105,6 +105,16 @@ impl<'r> Columns<'r> {
     fn finish<T>(self, value: T) -> Result<T, DbError> {
         self.error.map_or(Ok(value), |err| Err(db_error(err)))
     }
+}
+
+fn term(row: &MySqlRow) -> Result<Term, DbError> {
+    let mut c = Columns::new(row);
+    let term = Term {
+        id: c.unsigned("term_id"),
+        name: c.bytes("name"),
+        slug: c.bytes("slug"),
+    };
+    c.finish(term)
 }
 
 fn post(row: &MySqlRow) -> Result<Post, DbError> {
@@ -212,10 +222,66 @@ impl Db {
         rows.iter().map(post).collect()
     }
 
-    /// A category's name, if the category exists.
-    pub async fn category_name(&self, term_id: u64) -> Result<Option<Vec<u8>>, DbError> {
+    /// One option by name, autoloaded or not.
+    pub async fn option(&self, name: &str) -> Result<Option<Vec<u8>>, DbError> {
+        let sql = self
+            .prefix
+            .sql("SELECT option_value FROM {prefix}options WHERE option_name = ? LIMIT 1");
+        let row = sqlx::query(sql)
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.map(|row| {
+            let mut c = Columns::new(&row);
+            let value = c.bytes("option_value");
+            c.finish(value)
+        })
+        .transpose()
+    }
+
+    /// `get_post_meta( $post_id, $key, true )`: the first value stored.
+    pub async fn post_meta(&self, post_id: u64, key: &str) -> Result<Option<Vec<u8>>, DbError> {
         let sql = self.prefix.sql(
-            "SELECT t.name FROM {prefix}terms t JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
+            "SELECT meta_value FROM {prefix}postmeta WHERE post_id = ? AND meta_key = ? ORDER BY meta_id LIMIT 1",
+        );
+        let row = sqlx::query(sql)
+            .bind(post_id)
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.map(|row| {
+            let mut c = Columns::new(&row);
+            let value = c.bytes("meta_value");
+            c.finish(value)
+        })
+        .transpose()
+    }
+
+    /// `get_the_terms( $post_id, $taxonomy )`: ordered by name, as
+    /// `wp_get_object_terms()` orders them.
+    pub async fn post_terms(&self, post_id: u64, taxonomy: &str) -> Result<Vec<Term>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT t.term_id, t.name, t.slug FROM {prefix}terms t \
+             JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
+             JOIN {prefix}term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id \
+             WHERE tr.object_id = ? AND tt.taxonomy = ? ORDER BY t.name ASC",
+        );
+        let rows = sqlx::query(sql)
+            .bind(post_id)
+            .bind(taxonomy)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(term).collect()
+    }
+
+    /// A category, if it exists.
+    pub async fn category(&self, term_id: u64) -> Result<Option<Term>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT t.term_id, t.name, t.slug FROM {prefix}terms t \
+             JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
              WHERE tt.taxonomy = 'category' AND t.term_id = ? LIMIT 1",
         );
         let row = sqlx::query(sql)
@@ -223,12 +289,7 @@ impl Db {
             .fetch_optional(&self.pool)
             .await
             .map_err(db_error)?;
-        row.map(|row| {
-            let mut c = Columns::new(&row);
-            let name = c.bytes("name");
-            c.finish(name)
-        })
-        .transpose()
+        row.as_ref().map(term).transpose()
     }
 }
 

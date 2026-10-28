@@ -69,10 +69,10 @@ async fn reads_the_default_install() {
     assert_eq!(db.post(999).await.unwrap(), None);
 
     assert_eq!(
-        db.category_name(1).await.unwrap(),
-        Some(b"Uncategorized".to_vec())
+        db.category(1).await.unwrap().map(|term| term.slug),
+        Some(b"uncategorized".to_vec())
     );
-    assert_eq!(db.category_name(999).await.unwrap(), None);
+    assert_eq!(db.category(999).await.unwrap(), None);
 }
 
 /// Titles of the posts `query` (with defaults for the rest) selects.
@@ -259,12 +259,20 @@ async fn errors_are_reported() {
         })
         .await
         .unwrap_err(),
-        db.category_name(1).await.unwrap_err(),
+        db.category(1).await.unwrap_err(),
+        db.option("blogname").await.unwrap_err(),
+        db.post_meta(1, "x").await.unwrap_err(),
+        db.post_terms(1, "category").await.unwrap_err(),
     ] {
         assert!(
-            ["missing_options", "missing_posts", "missing_terms"]
-                .iter()
-                .any(|table| err.to_string().contains(table)),
+            [
+                "missing_options",
+                "missing_posts",
+                "missing_terms",
+                "missing_postmeta"
+            ]
+            .iter()
+            .any(|table| err.to_string().contains(table)),
             "{err}"
         );
     }
@@ -303,4 +311,29 @@ fn order_follows_the_query() {
     };
     assert!(text(true).ends_with("ORDER BY post_date ASC LIMIT ? OFFSET ?"));
     assert!(text(false).ends_with("ORDER BY post_date DESC LIMIT ? OFFSET ?"));
+}
+
+#[tokio::test]
+async fn options_meta_and_terms() {
+    let db = fixture().await;
+    assert_eq!(
+        db.option("blogname").await.unwrap(),
+        Some(b"HyScribe Default Install".to_vec())
+    );
+    assert_eq!(db.option("no_such_option").await.unwrap(), None);
+    assert_eq!(
+        db.post_meta(2, "_wp_page_template").await.unwrap(),
+        Some(b"default".to_vec())
+    );
+    assert_eq!(db.post_meta(1, "_thumbnail_id").await.unwrap(), None);
+    let terms = db.post_terms(1, "category").await.unwrap();
+    assert_eq!(
+        terms,
+        [Term {
+            id: 1,
+            name: b"Uncategorized".to_vec(),
+            slug: b"uncategorized".to_vec()
+        }]
+    );
+    assert!(db.post_terms(1, "post_tag").await.unwrap().is_empty());
 }

@@ -9,6 +9,8 @@
 //   class<TAB>hex(case JSON)<TAB>hex(post JSON)<TAB>hex(get_post_class( 'wp-block-post' ))
 //   query<TAB>hex(markup)<TAB>hex(request)<TAB>hex(home_url())<TAB>hex(output)
 //   body<TAB>hex(request)<TAB>hex(implode( ' ', get_body_class() ))
+//   content<TAB>hex(markup)<TAB>hex(state JSON)<TAB>hex(post JSON)<TAB>hex(output)
+//   teaser<TAB>hex(state JSON)<TAB>hex(post JSON)<TAB>hex(get_the_content())
 // The request JSON holds the conditionals the blocks check. Run through
 // golden.sh inside the PHP WordPress oracle; nothing is written.
 
@@ -251,6 +253,49 @@ foreach ( array( '', 'page_id=2', 'cat=1', 'm=2026', 's=hello', 'page_id=2&child
 		$label = "$case_query&forced=3";
 	}
 	echo 'body', "\t", bin2hex( $label ), "\t", bin2hex( implode( ' ', get_body_class() ) ), "\n";
+}
+
+// core/post-content on posts built in memory, in a singular request and
+// in a list.
+$contents = array(
+	3001 => array( '', '<!-- wp:paragraph --><p>Hello "world" -- Wordpress (Wordpress) and Wordpress ]]> :)</p><!-- /wp:paragraph -->' ),
+	3002 => array( '', '<!-- wp:paragraph --><p>Teaser</p><!-- /wp:paragraph --><!-- wp:more --><!--more--><!-- /wp:more --><!-- wp:paragraph --><p>Rest</p><!-- /wp:paragraph -->' ),
+	3003 => array( '', '<p>Short</p><!--more Read <b>on</b> --><p>Long</p>' ),
+	3004 => array( 'secret', '<!-- wp:paragraph --><p>Hidden</p><!-- /wp:paragraph -->' ),
+	3005 => array( '', '<!-- wp:paragraph --><p>One</p><!-- /wp:paragraph --><!--nextpage--><!-- wp:paragraph --><p>Two</p><!-- /wp:paragraph -->' ),
+	3006 => array( '', '' ),
+	3008 => array( '', '<!-- wp:post-content /--><p>Nested</p>' ),
+	3007 => array( '', '<!--noteaser--><p>Lead</p><!--more--><p>Body</p>' ),
+);
+// Classic content and the password form also go through wpautop(), not
+// ported yet, so for those only get_the_content() is recorded.
+$needs_autop = array( 3003, 3004, 3007 );
+foreach ( $contents as $id => list( $password, $content ) ) {
+	wp_cache_set( $id, (object) array( 'ID' => $id, 'post_author' => '1', 'post_date' => '2026-01-02 03:04:05', 'post_date_gmt' => '2026-01-02 03:04:05', 'post_content' => $content, 'post_title' => "Post $id", 'post_excerpt' => '', 'post_status' => 'publish', 'comment_status' => 'open', 'ping_status' => 'open', 'post_password' => $password, 'post_name' => "post-$id", 'to_ping' => '', 'pinged' => '', 'post_modified' => '2026-01-02 03:04:05', 'post_modified_gmt' => '2026-01-02 03:04:05', 'post_content_filtered' => '', 'post_parent' => 0, 'guid' => '', 'menu_order' => 0, 'post_type' => 'post', 'post_mime_type' => '', 'comment_count' => '0', 'filter' => 'raw' ), 'posts' );
+}
+$content_blocks = array(
+	'<!-- wp:post-content /-->',
+	'<!-- wp:post-content {"tagName":"MAIN","align":"wide"} /-->',
+	'<!-- wp:post-content {"tagName":"span"} /-->',
+);
+foreach ( array( true, false ) as $singular ) {
+	$GLOBALS['wp'] = new WP();
+	wp( $singular ? 'p=1' : '' );
+	foreach ( array_keys( $contents ) as $id ) {
+		$post            = get_post( $id );
+		$GLOBALS['post'] = $post;
+		setup_postdata( $post );
+		$GLOBALS['more'] = $singular ? 1 : 0;
+		$state           = array( 'singular' => $singular, 'home' => home_url(), 'siteurl' => site_url() );
+		echo 'teaser', "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( wp_json_encode( get_post( $id, ARRAY_A ) ) ), "\t", bin2hex( get_the_content() ), "\n";
+		if ( in_array( $id, $needs_autop, true ) ) {
+			continue;
+		}
+		foreach ( $content_blocks as $markup ) {
+			$block = new WP_Block( parse_blocks( $markup )[0], array( 'postId' => $id, 'postType' => 'post' ) );
+			echo 'content', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( wp_json_encode( get_post( $id, ARRAY_A ) ) ), "\t", bin2hex( $block->render() ), "\n";
+		}
+	}
 }
 
 // human_time_diff() itself, since the block measures from the real time().

@@ -4,6 +4,7 @@
 //! templates and the dynamic core blocks.
 
 pub mod blocks;
+mod content;
 mod core_blocks;
 pub mod date;
 #[cfg(test)]

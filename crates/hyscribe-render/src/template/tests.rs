@@ -202,6 +202,7 @@ fn saved_markup_keeps_inner_blocks_in_place() {
         },
         open_parts: Vec::new(),
         open_patterns: Vec::new(),
+        open_posts: Vec::new(),
     };
     assert_eq!(renderer.block(&odd), b"x");
     odd.attrs = None;

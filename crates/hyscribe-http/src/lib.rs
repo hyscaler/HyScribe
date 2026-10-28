@@ -5,8 +5,8 @@
 //!
 //! This first slice covers what the default install needs with plain
 //! permalinks: the home page with the latest posts, `?p=ID` for posts and
-//! `?page_id=ID` for pages, and a 404 for everything else. Pages use a
-//! minimal layout, not the active theme yet (M3.10).
+//! `?page_id=ID` for pages, search, category and date archives, and a 404
+//! for everything else, rendered through the theme's block templates.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -17,13 +17,20 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_db::{Db, DbError};
+use hyscribe_kses::{esc_attr, esc_html};
 use hyscribe_model::{Post, PostQuery};
-use hyscribe_render::blocks::{parse_blocks, render};
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::link;
+use hyscribe_render::post::body_class;
+use hyscribe_render::site::{Archive, Request};
+use hyscribe_render::template::render_template;
+use hyscribe_render::theme::{Theme, twentytwentyfive};
 use tokio::net::TcpListener;
 
 pub mod query;
+mod reads;
+
+use reads::Reads;
 
 use query::{absint, date_parts, other_args, search_terms};
 
@@ -41,6 +48,7 @@ pub struct Site {
     db: Db,
     options: HashMap<String, Vec<u8>>,
     home: String,
+    theme: Theme,
 }
 
 impl Site {
@@ -55,6 +63,7 @@ impl Site {
             db,
             options,
             home: home.trim_end_matches('/').to_string(),
+            theme: twentytwentyfive(),
         })
     }
 
@@ -70,7 +79,7 @@ impl Site {
 
     /// The site title, as `wp_get_document_title()` prints it.
     fn name(&self) -> String {
-        esc_html(&self.option("blogname"))
+        esc_html(self.option("blogname").as_bytes())
     }
 
     fn permalink(&self, post: &Post) -> String {
@@ -119,11 +128,20 @@ enum Outcome {
     Redirect(String),
 }
 
-/// One HTML page: the status, the document title and the main content.
+/// One page to render: the status, the document title, and the request
+/// rendered with the first of the template slugs the theme has.
 struct Page {
     status: StatusCode,
     title: String,
-    main: String,
+    candidates: Vec<String>,
+    request: Request,
+}
+
+/// A page as sent: the status, the document title and the `<body>`.
+struct Rendered {
+    status: StatusCode,
+    title: String,
+    body: String,
 }
 
 async fn page(
@@ -147,24 +165,76 @@ async fn page(
             )
                 .into_response();
         }
-        Ok(Outcome::Page(page)) => page,
-        Err(err) => {
-            // Details go to the log, never to the visitor.
-            eprintln!("database error: {err}");
-            Page {
-                status: StatusCode::INTERNAL_SERVER_ERROR,
-                title: format!("Error &#8211; {}", site.name()),
-                main: "<p>Error establishing a database connection</p>".to_string(),
-            }
+        Ok(Outcome::Page(page)) => {
+            let rendering = Arc::clone(&site);
+            let (candidates, request) = (page.candidates.clone(), page.request.clone());
+            let body =
+                tokio::task::spawn_blocking(move || render_body(&rendering, &candidates, &request))
+                    .await;
+            rendered(&site, page, body)
         }
+        Err(err) => database_error(&site, &err),
     };
-    let html = layout(&site, &page);
     (
         page.status,
         [(header::CONTENT_TYPE, "text/html; charset=UTF-8")],
-        html,
+        layout(&page.title, &page.body),
     )
         .into_response()
+}
+
+/// `page` with its rendered body, or the 500 page when rendering met a
+/// database error or panicked.
+fn rendered(
+    site: &Site,
+    page: Page,
+    body: Result<Result<String, DbError>, tokio::task::JoinError>,
+) -> Rendered {
+    match body {
+        Ok(Ok(body)) => Rendered {
+            status: page.status,
+            title: page.title,
+            body,
+        },
+        Ok(Err(err)) => database_error(site, &err),
+        Err(err) => database_error(site, &err),
+    }
+}
+
+/// The 500 page, with the details in the log and never shown to visitors.
+fn database_error(site: &Site, err: &dyn std::fmt::Display) -> Rendered {
+    eprintln!("database error: {err}");
+    Rendered {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        title: format!("Error &#8211; {}", site.name()),
+        body: "<body>\n<p>Error establishing a database connection</p>\n</body>".to_string(),
+    }
+}
+
+/// The `<body>` element: the first template in `candidates` the theme has,
+/// rendered for `request` with the database read on this thread.
+fn render_body(site: &Site, candidates: &[String], request: &Request) -> Result<String, DbError> {
+    let reads = Reads::new(site, tokio::runtime::Handle::current());
+    // Every block theme has an index template.
+    let template = site
+        .theme
+        .template(candidates)
+        .map_or(&[][..], |(_, template)| template);
+    let html = render_template(&site.theme, &reads, request, template);
+    let classes = body_class(&reads, request, site.theme.slug());
+    reads.finish()?;
+    Ok(format!(
+        "<body class=\"{}\">\n\n{}\n</body>",
+        String::from_utf8_lossy(&classes),
+        String::from_utf8_lossy(&html)
+    ))
+}
+
+/// The time relative dates are measured from.
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 /// The canonical form of `path` with plain permalinks, as
@@ -256,11 +326,9 @@ async fn route(
                 match post.filter(|p| {
                     p.status == "publish" && (p.post_type == "post" || p.post_type == "page")
                 }) {
-                    Some(post) if post.post_type == post_type => Outcome::Page(Page {
-                        status: StatusCode::OK,
-                        title: format!("{} &#8211; {}", esc_html(&lossy(&post.title)), site.name()),
-                        main: article(site, &post),
-                    }),
+                    Some(post) if post.post_type == post_type => {
+                        Outcome::Page(single_page(site, post))
+                    }
                     // `?p=` for a page or `?page_id=` for a post.
                     Some(post) => Outcome::Redirect(format!(
                         "{}{}",
@@ -272,6 +340,45 @@ async fn route(
             )
         }
         None => list(site, query).await.map(Outcome::Page),
+    }
+}
+
+/// A post or page on its own, with its type's template hierarchy.
+fn single_page(site: &Site, post: Post) -> Page {
+    let name = lossy(&post.name);
+    let candidates = if post.post_type == "page" {
+        vec![
+            format!("page-{name}"),
+            format!("page-{}", post.id),
+            "page".into(),
+            "singular".into(),
+            "index".into(),
+        ]
+    } else {
+        let kind = &post.post_type;
+        vec![
+            format!("single-{kind}-{name}"),
+            format!("single-{kind}"),
+            "single".into(),
+            "singular".into(),
+            "index".into(),
+        ]
+    };
+    let request = Request {
+        singular: true,
+        queried_object_id: post.id,
+        post: Some(post.id),
+        now: now(),
+        ..Request::default()
+    };
+    Page {
+        status: StatusCode::OK,
+        title: format!("{} &#8211; {}", esc_html(&post.title), site.name()),
+        candidates,
+        request: Request {
+            posts: vec![post],
+            ..request
+        },
     }
 }
 
@@ -296,9 +403,9 @@ async fn list(site: &Site, query: &HashMap<String, String>) -> Result<Page, DbEr
         limit: u32::try_from(per_page).unwrap_or(10),
         ..PostQuery::default()
     };
-    let category_name = match category {
-        Some(id) => match site.db.category_name(id).await? {
-            Some(name) => Some(lossy(&name)),
+    let category = match category {
+        Some(id) => match site.db.category(id).await? {
+            Some(term) => Some(term),
             // A category that does not exist.
             None => return Ok(not_found(site)),
         },
@@ -306,14 +413,17 @@ async fn list(site: &Site, query: &HashMap<String, String>) -> Result<Page, DbEr
     };
     let posts = site.db.posts(&post_query).await?;
     // A date archive with nothing in it is a 404; a search never is.
-    if year.is_some() && search.is_none() && category_name.is_none() && posts.is_empty() {
+    if year.is_some() && search.is_none() && category.is_none() && posts.is_empty() {
         return Ok(not_found(site));
     }
     let first_date = posts.first().map_or("", |post| post.date.as_str());
     let heading = if let Some(s) = search {
-        Some(format!("Search Results for &#8220;{}&#8221;", esc_attr(s)))
-    } else if let Some(name) = category_name {
-        Some(esc_html(&name))
+        Some(format!(
+            "Search Results for &#8220;{}&#8221;",
+            esc_attr(s.as_bytes())
+        ))
+    } else if let Some(term) = &category {
+        Some(esc_html(&term.name))
     } else if year.is_some() {
         let format = if day.is_some() {
             site.option("date_format")
@@ -330,20 +440,58 @@ async fn list(site: &Site, query: &HashMap<String, String>) -> Result<Page, DbEr
     let title = match heading {
         Some(heading) => format!("{heading} &#8211; {}", site.name()),
         None if tagline.is_empty() => site.name(),
-        None => format!("{} &#8211; {}", site.name(), esc_html(&tagline)),
+        None => format!("{} &#8211; {}", site.name(), esc_html(tagline.as_bytes())),
+    };
+    let archive = match (&category, year, month, day) {
+        (Some(term), ..) => Some(Archive::Category(term.clone())),
+        (None, Some(_), None, _) => Some(Archive::Year),
+        (None, Some(_), Some(_), None) => Some(Archive::Month),
+        (None, Some(_), Some(_), Some(_)) => Some(Archive::Day),
+        (None, None, ..) => None,
+    };
+    let candidates: Vec<String> = match (&archive, search) {
+        (_, Some(_)) => vec!["search".into(), "index".into()],
+        (Some(Archive::Category(term)), None) => vec![
+            format!("category-{}", lossy(&term.slug)),
+            format!("category-{}", term.id),
+            "category".into(),
+            "archive".into(),
+            "index".into(),
+        ],
+        (Some(_), None) => vec!["date".into(), "archive".into(), "index".into()],
+        (None, None) => vec!["front-page".into(), "home".into(), "index".into()],
+    };
+    // The home page lists the latest posts, the default install's setting.
+    let home = archive.is_none() && search.is_none();
+    let request = Request {
+        front_page: home,
+        home,
+        post: posts.first().map(|post| post.id),
+        archive,
+        search: search.map(|s| s.as_bytes().to_vec()),
+        now: now(),
+        posts,
+        ..Request::default()
     };
     Ok(Page {
         status: StatusCode::OK,
         title,
-        main: posts.iter().map(|post| article(site, post)).collect(),
+        candidates,
+        request,
     })
 }
 
 fn not_found(site: &Site) -> Page {
+    let request = Request {
+        not_found: true,
+        now: now(),
+        ..Request::default()
+    };
     Page {
         status: StatusCode::NOT_FOUND,
         title: format!("Page not found &#8211; {}", site.name()),
-        main: "<p>It looks like nothing was found at this location.</p>".to_string(),
+        candidates: vec!["404".into(), "index".into()],
+        request,
     }
 }
 
@@ -351,63 +499,14 @@ fn lossy(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-/// A post or page. Titles and content are printed as stored, as
-/// `the_title()` and `the_content()` do: WordPress filtered them on save.
-fn article(site: &Site, post: &Post) -> String {
-    let content = lossy(&render(&parse_blocks(&post.content)));
+/// The document around the body. The head is a minimal one until
+/// `wp_head()` is ported.
+fn layout(title: &str, body: &str) -> String {
     format!(
-        "<article id=\"post-{id}\" class=\"post-{id} {kind} type-{kind} status-{status}\">\
-         <h2 class=\"wp-block-post-title\"><a href=\"{link}\">{title}</a></h2>\
-         <div class=\"entry-content wp-block-post-content\">{content}</div></article>",
-        id = post.id,
-        kind = post.post_type,
-        status = post.status,
-        link = esc_attr(&site.permalink(post)),
-        title = lossy(&post.title),
+        "<!DOCTYPE html>\n<html lang=\"en-US\">\n<head>\n<meta charset=\"UTF-8\" />\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n\
+         <title>{title}</title>\n</head>\n\n{body}\n</html>\n"
     )
-}
-
-fn layout(site: &Site, page: &Page) -> String {
-    format!(
-        "<!DOCTYPE html>\n<html lang=\"en-US\">\n<head>\n<meta charset=\"UTF-8\">\n\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>{title}</title>\n</head>\n<body>\n<div class=\"wp-site-blocks\">\n\
-         <header><p class=\"wp-block-site-title\"><a href=\"{home}/\">{name}</a></p></header>\n\
-         <main>{main}</main>\n<footer><p>Served by HyScribe, read only.</p></footer>\n</div>\n</body>\n</html>\n",
-        title = page.title,
-        home = esc_attr(&site.home),
-        name = site.name(),
-        main = page.main,
-    )
-}
-
-/// Escapes text for HTML, leaving existing character references alone as
-/// `esc_html()` does. Exact kses entity rules come with M3.6.
-fn esc_html(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for (i, c) in text.char_indices() {
-        match c {
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#039;"),
-            '&' if !is_reference(text.get(i + 1..).unwrap_or_default()) => out.push_str("&amp;"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// `esc_attr()` escapes the same characters.
-fn esc_attr(text: &str) -> String {
-    esc_html(text)
-}
-
-/// Whether `rest` (after a `&`) starts a character reference.
-fn is_reference(rest: &str) -> bool {
-    let body = rest.strip_prefix('#').unwrap_or(rest);
-    let len = body.chars().take_while(char::is_ascii_alphanumeric).count();
-    len > 0 && body.get(len..).is_some_and(|after| after.starts_with(';'))
 }
 
 #[cfg(test)]

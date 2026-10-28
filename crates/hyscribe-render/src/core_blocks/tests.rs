@@ -122,7 +122,12 @@ fn matches_php() {
         let mut fields = line.split('\t');
         let kind = fields.next().unwrap();
         let mut field = || unhex(fields.next().unwrap());
-        if kind == "class" || kind == "query" || kind == "body" {
+        if kind == "class"
+            || kind == "query"
+            || kind == "body"
+            || kind == "content"
+            || kind == "teaser"
+        {
             continue;
         }
         if kind == "diff" {

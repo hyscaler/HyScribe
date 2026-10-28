@@ -61,16 +61,12 @@ async fn home_page_lists_the_posts() {
     let reply = request(&site, "GET", "/").await;
     assert_eq!(reply.status, StatusCode::OK);
     assert_eq!(title(&reply.body), "HyScribe Default Install");
-    assert!(
-        reply
-            .body
-            .contains("<a href=\"http://default-install.test/?p=1\">Hello world!</a>")
-    );
-    assert!(
-        reply
-            .body
-            .contains("<p>Welcome to WordPress. This is your first post.")
-    );
+    assert!(reply.body.contains(
+        "<a href=\"http://default-install.test/?p=1\" target=\"_self\" >Hello world!</a>"
+    ));
+    assert!(reply.body.contains(
+        "<p class=\"wp-block-paragraph\">Welcome to WordPress. This is your first post."
+    ));
     // Pages and drafts are not on the blog home page.
     assert!(!reply.body.contains("Sample Page"));
     assert_eq!(reply.headers["content-type"], "text/html; charset=UTF-8");
@@ -91,12 +87,17 @@ async fn single_posts_and_pages() {
     assert!(
         reply
             .body
-            .contains("<a href=\"http://127.0.0.1:8080/?p=1\">")
+            .contains("<h1 class=\"wp-block-post-title\">Hello world!</h1>")
     );
     assert!(
         reply
             .body
-            .contains("<a href=\"http://127.0.0.1:8080/\">HyScribe Default Install</a>")
+            .contains("<a href=\"http://127.0.0.1:8080\" target=\"_self\" rel=\"home\">HyScribe Default Install</a>")
+    );
+    assert!(
+        reply.body.contains(
+            "<body class=\"wp-singular post-template-default single single-post postid-1"
+        )
     );
 
     let reply = request(&site, "GET", "/?page_id=2").await;
@@ -109,7 +110,7 @@ async fn single_posts_and_pages() {
     assert!(
         reply
             .body
-            .contains("href=\"http://127.0.0.1:8080/?page_id=2\"")
+            .contains("<body class=\"wp-singular page-template-default page page-id-2 ")
     );
 
     // Like (int) in PHP, leading digits count.
@@ -168,8 +169,10 @@ async fn database_errors_show_no_details() {
         db,
         options: HashMap::new(),
         home: String::new(),
+        theme: hyscribe_render::theme::twentytwentyfive(),
     });
-    for uri in ["/", "/?p=1", "/?cat=1"] {
+    // The 404 page fails while rendering, reading an option it has not loaded.
+    for uri in ["/", "/?p=1", "/?cat=1", "/?author=1"] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(
@@ -202,21 +205,6 @@ async fn serves_until_shutdown() {
     assert!(response.contains("Hello world!"));
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();
-}
-
-#[test]
-fn escaping() {
-    assert_eq!(
-        esc_html("a < b > c \" ' &"),
-        "a &lt; b &gt; c &quot; &#039; &amp;"
-    );
-    assert_eq!(
-        esc_html("&amp; &#8211; &#x2014; &copy; & ;"),
-        "&amp; &#8211; &#x2014; &copy; &amp; ;"
-    );
-    assert_eq!(esc_html("&;"), "&amp;;");
-    assert_eq!(esc_html("&nbsp"), "&amp;nbsp");
-    assert_eq!(esc_attr("\"x\""), "&quot;x&quot;");
 }
 
 #[test]
@@ -453,13 +441,145 @@ async fn the_front_page_links_to_home() {
         db: base.db.clone(),
         options,
         home: base.home.clone(),
+        theme: hyscribe_render::theme::twentytwentyfive(),
     });
-    let reply = request(&site, "GET", "/?page_id=2").await;
+    // Search results list the front page with a link to it.
+    let reply = request(&site, "GET", "/?s=sample").await;
     assert!(
         reply
             .body
-            .contains(r#"<h2 class="wp-block-post-title"><a href="http://example.test/">"#),
+            .contains(r#"<a href="http://example.test/" target="_self" >Sample Page</a>"#),
         "{}",
         reply.body
+    );
+}
+
+#[tokio::test]
+async fn a_render_that_panics_is_a_server_error() {
+    let site = fixture_site(None).await;
+    let panicked = tokio::spawn(async { panic!("render bug") })
+        .await
+        .unwrap_err();
+    let page = Page {
+        status: StatusCode::OK,
+        title: "x".into(),
+        candidates: Vec::new(),
+        request: hyscribe_render::site::Request::default(),
+    };
+    let rendered = rendered(&site, page, Err(panicked));
+    assert_eq!(rendered.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(!rendered.body.contains("render bug"));
+}
+
+#[tokio::test]
+async fn templates_follow_the_hierarchy() {
+    let site = fixture_site(None).await;
+    // The single template shows the post date; the page template does not.
+    assert!(
+        request(&site, "GET", "/?p=1")
+            .await
+            .body
+            .contains("wp-block-post-date")
+    );
+    assert!(
+        !request(&site, "GET", "/?page_id=2")
+            .await
+            .body
+            .contains("wp-block-post-date")
+    );
+    let search = request(&site, "GET", "/?s=hello").await;
+    assert!(
+        search
+            .body
+            .contains("<body class=\"search search-results wp-embed-responsive")
+    );
+    assert!(
+        search
+            .body
+            .contains("Search results for: &#8220;hello&#8221;")
+    );
+    let category = request(&site, "GET", "/?cat=1").await;
+    assert!(
+        category
+            .body
+            .contains("Category: <span>Uncategorized</span>")
+    );
+    // Post classes come from the post's terms.
+    assert!(category.body.contains("hentry category-uncategorized"));
+    let missing = request(&site, "GET", "/?p=999").await;
+    assert!(missing.body.contains("<body class=\"error404 "));
+}
+
+#[tokio::test]
+async fn routes_give_the_request_state() {
+    let site = fixture_site(None).await;
+    let recent = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        - 60;
+    let home = list(&site, &HashMap::new()).await.unwrap();
+    assert!(home.request.front_page && home.request.home && home.request.now > recent);
+    assert_eq!(home.request.post, Some(1));
+    let post = site.db.post(1).await.unwrap().unwrap();
+    let single = single_page(&site, post);
+    assert_eq!(
+        (single.request.queried_object_id, single.request.post),
+        (1, Some(1))
+    );
+    assert!(single.request.singular && single.request.now > recent);
+    let missing = not_found(&site);
+    assert!(missing.request.not_found && missing.request.now > recent);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reads_come_from_the_database_once() {
+    use hyscribe_render::site::Site as _;
+    let site = fixture_site(None).await;
+    let handle = tokio::runtime::Handle::current();
+    let reading = Arc::clone(&site);
+    tokio::task::spawn_blocking(move || {
+        let reads = Reads::new(&reading, handle);
+        assert_eq!(
+            reads.post_meta(2, "_wp_page_template"),
+            Some(b"default".to_vec())
+        );
+        assert_eq!(
+            reads.post_meta(2, "_wp_page_template"),
+            Some(b"default".to_vec())
+        );
+        assert_eq!(reads.post_terms(1, "category")[0].slug, b"uncategorized");
+        let query = PostQuery {
+            post_types: vec!["page".into()],
+            limit: 5,
+            ..PostQuery::default()
+        };
+        assert_eq!(
+            reads.query(&query).iter().map(|p| p.id).collect::<Vec<_>>(),
+            [2]
+        );
+        reads.finish().unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn list_filters_narrow_the_query() {
+    let site = fixture_site(None).await;
+    let nothing = request(&site, "GET", "/?s=nothingmatches").await;
+    assert!(
+        nothing
+            .body
+            .contains("<body class=\"search search-no-results ")
+    );
+    // The one post is from October 27, 2026.
+    assert_eq!(
+        request(&site, "GET", "/?m=202601").await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        request(&site, "GET", "/?m=20261001").await.status,
+        StatusCode::NOT_FOUND
     );
 }

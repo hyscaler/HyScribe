@@ -46,6 +46,16 @@ pub fn render_template(
     add_skip_link(html)
 }
 
+/// `block_core_paragraph_add_class()`: the first `<p>` gets the class
+/// `wp-block-paragraph`.
+fn paragraph_class(html: &[u8]) -> Vec<u8> {
+    let mut tags = TagProcessor::new(html);
+    if tags.next_tag(Some(b"p"), None) {
+        tags.add_class(b"wp-block-paragraph");
+    }
+    tags.get_updated_html().to_vec()
+}
+
 /// `_block_template_add_skip_link()`: the first `<main>` gets an id if it
 /// has none, and a link to it goes before `.wp-site-blocks`.
 fn add_skip_link(html: Vec<u8>) -> Vec<u8> {
@@ -70,7 +80,7 @@ fn add_skip_link(html: Vec<u8>) -> Vec<u8> {
 }
 
 /// `str_replace( $search, $with, $subject )`.
-fn replace(subject: &[u8], search: &[u8], with: &[u8]) -> Vec<u8> {
+pub(crate) fn replace(subject: &[u8], search: &[u8], with: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(subject.len());
     let mut rest = subject;
     for _ in 0..=subject.len() {
@@ -104,6 +114,7 @@ pub fn render_content(
         },
         open_parts: Vec::new(),
         open_patterns: Vec::new(),
+        open_posts: Vec::new(),
     }
     .render(content)
 }
@@ -112,8 +123,10 @@ pub(crate) struct Renderer<'a> {
     pub(crate) context: Context<'a>,
     /// Template parts and patterns being rendered, so one that includes
     /// itself stops instead of recursing forever.
-    open_parts: Vec<Vec<u8>>,
-    open_patterns: Vec<Vec<u8>>,
+    pub(crate) open_parts: Vec<Vec<u8>>,
+    pub(crate) open_patterns: Vec<Vec<u8>>,
+    /// Posts whose content is being rendered, as `$seen_ids` tracks them.
+    pub(crate) open_posts: Vec<u64>,
 }
 
 /// A string attribute.
@@ -123,7 +136,7 @@ fn attr<'b>(block: &'b Block, name: &str) -> Option<&'b [u8]> {
 
 impl Renderer<'_> {
     /// `do_blocks()`.
-    fn render(&mut self, markup: &[u8]) -> Vec<u8> {
+    pub(crate) fn render(&mut self, markup: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         for block in parse_blocks(markup) {
             out.extend(self.block(&block));
@@ -138,6 +151,8 @@ impl Renderer<'_> {
             Some("core/pattern") => self.pattern(block),
             Some("core/query") => self.query(block),
             Some("core/post-template") => self.post_template(block),
+            Some("core/post-content") => self.post_content(block),
+            Some("core/paragraph") => paragraph_class(&self.saved_markup(block)),
             Some(name) => {
                 let content = self.saved_markup(block);
                 let parsed = block.attrs.as_deref().unwrap_or_default();

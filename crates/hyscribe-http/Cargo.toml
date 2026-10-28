@@ -12,10 +12,11 @@ publish.workspace = true
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "query"] }
 hyscribe-db.workspace = true
+hyscribe-kses.workspace = true
 hyscribe-model.workspace = true
 hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true
-tokio = { version = "1", features = ["net"] }
+tokio = { version = "1", features = ["net", "rt"] }
 
 [dev-dependencies]
 hyscribe-testkit.workspace = true

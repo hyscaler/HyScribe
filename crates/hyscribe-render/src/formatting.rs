@@ -773,6 +773,37 @@ pub fn convert_chars(text: &[u8]) -> Vec<u8> {
     out
 }
 
+/// `capital_P_dangit()` as the `the_content` filter runs it: only after a
+/// space, an opening quote, `>` or `(`.
+pub fn capital_p_dangit(text: &[u8]) -> Vec<u8> {
+    const AFTER: [&[u8]; 5] = [b" ", b"&#8216;", b"&#8220;", b">", b"("];
+    let mut out = Vec::with_capacity(text.len());
+    let mut rest = text;
+    for _ in 0..=text.len() {
+        let Some((first, after)) = rest.split_first() else {
+            break;
+        };
+        let lead = AFTER.iter().find(|lead| {
+            rest.starts_with(lead)
+                && rest
+                    .get(lead.len()..)
+                    .is_some_and(|r| r.starts_with(b"Wordpress"))
+        });
+        match lead {
+            Some(lead) => {
+                out.extend_from_slice(lead);
+                out.extend_from_slice(b"WordPress");
+                rest = rest.get(lead.len() + 9..).unwrap_or_default();
+            }
+            None => {
+                out.push(*first);
+                rest = after;
+            }
+        }
+    }
+    out
+}
+
 /// `capital_P_dangit()` as the `the_title` and `wp_title` filters run it.
 pub fn capital_p_dangit_title(text: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());

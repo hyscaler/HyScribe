@@ -642,6 +642,7 @@ dependencies = [
  "axum",
  "hyscribe-config",
  "hyscribe-db",
+ "hyscribe-kses",
  "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-render",

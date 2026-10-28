@@ -407,9 +407,16 @@ async fn route(
                 match post.filter(|p| {
                     p.status == "publish" && (p.post_type == "post" || p.post_type == "page")
                 }) {
-                    Some(post) if post.post_type == post_type && feed.is_some() => {
+                    found
+                        if feed.is_some()
+                            && found.as_ref().is_none_or(|p| p.post_type == post_type) =>
+                    {
                         let comments = comment_feed.then_some((Some(id), name == "p"));
-                        let page = async { Ok(single_page(site, post)) };
+                        let page =
+                            async {
+                                Ok(found
+                                    .map_or_else(|| missing_single(site), |p| single_page(site, p)))
+                            };
                         return feed::outcome(site, page, comments).await;
                     }
                     Some(post) if post.post_type == post_type => {
@@ -421,11 +428,6 @@ async fn route(
                         site.permalink(&post),
                         other_args(raw_query, name)
                     )),
-                    None if feed.is_some() => {
-                        let comments = comment_feed.then_some((Some(id), name == "p"));
-                        let page = async { Ok(missing_single(site)) };
-                        return feed::outcome(site, page, comments).await;
-                    }
                     None => Outcome::Page(Box::new(not_found(site, false))),
                 },
             )
@@ -583,13 +585,9 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
 
 /// A feed's missing post or page: a singular query with nothing in it.
 fn missing_single(site: &Site) -> Page {
-    Page {
-        request: Request {
-            singular: true,
-            ..not_found(site, true).request
-        },
-        ..not_found(site, true)
-    }
+    let mut page = not_found(site, true);
+    page.request.singular = true;
+    page
 }
 
 /// The 404 page; for a feed, an empty one titled with the site's name.

@@ -50,32 +50,28 @@ pub(crate) async fn outcome(
 ) -> Result<Outcome, DbError> {
     let limit = absint(&site.option("posts_per_rss"));
     let listed = async {
-        match comments {
-            Some((post, _)) => site.db.feed_comments(post, limit).await.map(Some),
-            None => Ok(None),
-        }
-    };
-    let (page, last_post, listed, last_comment) = tokio::join!(
-        page,
-        site.db.last_post_modified(),
-        listed,
-        site.db.last_comment_modified()
-    );
-    page.and_then(|page| {
-        let feed = |last_post, listed: Option<Vec<Comment>>, last| Feed {
-            last_post,
-            comments: listed.map(|list| Comments {
-                list,
-                last,
-                single: comments.is_some_and(|(_, single)| single),
-            }),
+        let Some((post, single)) = comments else {
+            return Ok(None);
         };
-        last_post.and_then(|last_post| {
-            listed.and_then(|listed| {
-                last_comment
-                    .map(|last| Outcome::Feed(Box::new(page), feed(last_post, listed, last)))
-            })
-        })
+        let (list, last) = tokio::join!(
+            site.db.feed_comments(post, limit),
+            site.db.last_comment_modified()
+        );
+        list.and_then(|list| last.map(|last| Some(Comments { list, last, single })))
+    };
+    let (page, last_post, comments) = tokio::join!(page, site.db.last_post_modified(), listed);
+    // Each read's error, if any, as `?` would give it.
+    page.and_then(|page| {
+        let feed = |last_post, comments| {
+            Outcome::Feed(
+                Box::new(page),
+                Feed {
+                    last_post,
+                    comments,
+                },
+            )
+        };
+        last_post.and_then(|last_post| comments.map(|comments| feed(last_post, comments)))
     })
 }
 
@@ -86,7 +82,6 @@ pub(crate) async fn respond(
     feed: Feed,
     headers: &HeaderMap,
 ) -> Response {
-    // A comment feed changes with its comments too.
     let changed = match &feed.comments {
         Some(comments) => feed.last_post.clone().max(comments.last.clone()),
         None => feed.last_post.clone(),

@@ -269,7 +269,7 @@ fn comment_link(context: &Context<'_>, comment: &Comment) -> Vec<u8> {
 
 /// `get_comment_author( $comment )`: the author, else the commenting
 /// user's display name, else "Anonymous".
-fn comment_author(context: &Context<'_>, comment: &Comment) -> Vec<u8> {
+pub(crate) fn comment_author(context: &Context<'_>, comment: &Comment) -> Vec<u8> {
     if !is_empty_string(&comment.author) {
         return comment.author.clone();
     }

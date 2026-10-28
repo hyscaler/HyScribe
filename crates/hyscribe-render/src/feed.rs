@@ -14,7 +14,7 @@ use hyscribe_model::{Comment, Post};
 use hyscribe_phpser::{Value, add_query_arg, is_empty_string, php_trim};
 
 use crate::content::password_form;
-use crate::core_blocks::{comment_text, comments_open};
+use crate::core_blocks::{comment_author, comment_text, comments_open};
 use crate::date::{self, Zone};
 use crate::formatting::{convert_chars, ent2ncr, html_entity_decode};
 use crate::link::host;
@@ -36,15 +36,7 @@ pub fn rss2(
 ) -> Vec<u8> {
     let option = |name| site.option(name).unwrap_or_default();
     let charset = option("blog_charset");
-    let bloginfo = |text: &[u8]| convert_chars(&strip_tags(text));
-    let built = request
-        .posts
-        .iter()
-        .map(|post| post.modified_gmt.as_str())
-        .max()
-        .or(last_modified)
-        .map(|stored| date::format("r", stored, Zone::Utc))
-        .unwrap_or_default();
+    let built = build_date(request, &[], last_modified);
     let mut out = [
         b"<?xml version=\"1.0\" encoding=\"".as_slice(),
         &charset,
@@ -101,7 +93,6 @@ pub fn rss2_comments(
     last_modified: Option<&str>,
 ) -> Vec<u8> {
     let option = |name| site.option(name).unwrap_or_default();
-    let bloginfo = |text: &[u8]| convert_chars(&strip_tags(text));
     let post = request.posts.first();
     let channel_title = if request.singular {
         [
@@ -112,21 +103,14 @@ pub fn rss2_comments(
     } else {
         [b"Comments for ".as_slice(), title].concat()
     };
+    let renderer = Renderer::new(theme, site, request);
     let link = if single {
-        post.map(|post| esc_url(&context_permalink(theme, site, request, post)))
+        post.map(|post| esc_url(&renderer.context.permalink(post)))
             .unwrap_or_default()
     } else {
         bloginfo(&site.home_url())
     };
-    let built = request
-        .posts
-        .iter()
-        .map(|post| post.modified_gmt.as_str())
-        .chain(comments.iter().map(|c| c.date_gmt.as_str()))
-        .max()
-        .or(last_modified)
-        .map(|stored| date::format("r", stored, Zone::Utc))
-        .unwrap_or_default();
+    let built = build_date(request, comments, last_modified);
     let mut out = [
         b"<?xml version=\"1.0\" encoding=\"".as_slice(),
         &option("blog_charset"),
@@ -152,7 +136,6 @@ pub fn rss2_comments(
         b"\n",
     ]
     .concat();
-    let renderer = Renderer::new(theme, site, request);
     for comment in comments {
         out.extend(comment_item(&renderer, comment));
     }
@@ -165,7 +148,7 @@ fn comment_item(renderer: &Renderer<'_>, comment: &Comment) -> Vec<u8> {
     let context = &renderer.context;
     let site = context.site;
     let post = site.post(comment.post_id).unwrap_or_default();
-    let author = ent2ncr(&comment_author(site, comment));
+    let author = ent2ncr(&comment_author(context, comment));
     let title = if context.request.singular {
         [b"By: ".as_slice(), &author].concat()
     } else {
@@ -213,25 +196,28 @@ fn comment_item(renderer: &Renderer<'_>, comment: &Comment) -> Vec<u8> {
     .concat()
 }
 
-/// `get_comment_author()`: the name given, else the user's, else
-/// `Anonymous`.
-fn comment_author(site: &dyn Site, comment: &Comment) -> Vec<u8> {
-    if !is_empty_string(&comment.author) {
-        return comment.author.clone();
-    }
-    site.user(comment.user_id)
-        .filter(|_| comment.user_id != 0)
-        .map_or_else(|| b"Anonymous".to_vec(), |user| user.display_name)
+/// `get_feed_build_date( 'r' )`: the latest change among the main query's
+/// posts and a comment feed's `comments`, else `last_modified`.
+fn build_date(request: &Request, comments: &[Comment], last_modified: Option<&str>) -> String {
+    request
+        .posts
+        .iter()
+        .map(|post| post.modified_gmt.as_str())
+        .chain(comments.iter().map(|c| c.date_gmt.as_str()))
+        .max()
+        .or(last_modified)
+        .map(|stored| date::format("r", stored, Zone::Utc))
+        .unwrap_or_default()
+}
+
+/// `get_bloginfo_rss()` of a value.
+fn bloginfo(text: &[u8]) -> Vec<u8> {
+    convert_chars(&strip_tags(text))
 }
 
 /// `get_the_title_rss()`.
 fn title_rss(post: &Post) -> Vec<u8> {
     esc_html(&strip_tags(&ent2ncr(&the_title(post)))).into_bytes()
-}
-
-/// `get_permalink()` of the main query's post.
-fn context_permalink(theme: &Theme, site: &dyn Site, request: &Request, post: &Post) -> Vec<u8> {
-    Renderer::new(theme, site, request).context.permalink(post)
 }
 
 /// `get_the_generator( 'rss2' )`, naming HyScribe and its version.

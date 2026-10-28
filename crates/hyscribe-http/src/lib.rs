@@ -492,6 +492,7 @@ async fn list(site: &Site, query: &HashMap<String, String>) -> Result<Page, DbEr
         home,
         post: posts.first().map(|post| post.id),
         archive,
+        date: year.is_some(),
         search: search.map(|s| s.as_bytes().to_vec()),
         now: now(),
         posts,

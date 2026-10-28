@@ -135,6 +135,7 @@ impl DefaultInstall {
                 "m=20261027" => Some(Archive::Day),
                 _ => None,
             },
+            date: query.starts_with("m="),
             search: query.strip_prefix("s=").map(|s| s.as_bytes().to_vec()),
             ..Request::default()
         }

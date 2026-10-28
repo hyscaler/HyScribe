@@ -76,6 +76,8 @@ pub struct Request {
     pub posts: Vec<Post>,
     /// `is_archive()`: which archive, if any.
     pub archive: Option<Archive>,
+    /// `is_date()`, which a category archive with a date can be as well.
+    pub date: bool,
     /// `is_search()`: the raw search query, `get_query_var( 's' )`.
     pub search: Option<Vec<u8>>,
     /// `is_singular()`: the main query's one post is the queried object.

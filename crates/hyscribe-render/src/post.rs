@@ -157,15 +157,11 @@ pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8>
     let mut classes: Vec<Vec<u8>> = Vec::new();
     let mut push = |class: &[u8]| classes.push(class.to_vec());
     let singular = request.posts.first().filter(|_| request.singular);
-    let date = matches!(
-        request.archive,
-        Some(Archive::Year | Archive::Month | Archive::Day)
-    );
     for (on, class) in [
         (request.front_page, &b"home"[..]),
         (request.home, b"blog"),
         (request.archive.is_some(), b"archive"),
-        (date, b"date"),
+        (request.date, b"date"),
     ] {
         if on {
             push(class);

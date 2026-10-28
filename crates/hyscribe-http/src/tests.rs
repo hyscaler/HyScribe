@@ -556,6 +556,14 @@ async fn templates_follow_the_hierarchy() {
     );
     // Post classes come from the post's terms.
     assert!(category.body.contains("hentry category-uncategorized"));
+    // A category with a date is both archives, as PHP's body_class() says.
+    let dated = request(&site, "GET", "/?cat=1&m=2026").await;
+    assert!(
+        dated
+            .body
+            .contains("<body class=\"archive date category category-uncategorized ")
+    );
+    assert!(!category.body.contains("<body class=\"archive date"));
     let missing = request(&site, "GET", "/?p=999").await;
     assert!(missing.body.contains("<body class=\"error404 "));
 }

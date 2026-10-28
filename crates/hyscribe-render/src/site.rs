@@ -2,7 +2,7 @@
 
 //! What dynamic blocks read from the site and the request (ADR 0009).
 
-use hyscribe_model::Post;
+use hyscribe_model::{Post, PostQuery, Term};
 
 /// The site's data, as blocks read it while rendering.
 pub trait Site {
@@ -14,10 +14,19 @@ pub trait Site {
 
     /// `get_post( $id )`, whatever its type and status.
     fn post(&self, id: u64) -> Option<Post>;
+
+    /// `get_the_terms( $post_id, $taxonomy )`, in WordPress's order.
+    fn post_terms(&self, post_id: u64, taxonomy: &str) -> Vec<Term>;
+
+    /// `get_post_meta( $post_id, $key, true )`, `None` when unset.
+    fn post_meta(&self, post_id: u64, key: &str) -> Option<Vec<u8>>;
+
+    /// The published posts a `WP_Query` with `query`'s arguments finds.
+    fn query(&self, query: &PostQuery) -> Vec<Post>;
 }
 
 /// The main query's conditionals that blocks check.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Request {
     /// `is_front_page()`
     pub front_page: bool,
@@ -32,4 +41,6 @@ pub struct Request {
     pub post: Option<u64>,
     /// `time()`, which relative dates are measured from.
     pub now: i64,
+    /// The main query's posts, which query blocks that inherit it list.
+    pub posts: Vec<Post>,
 }

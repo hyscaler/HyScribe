@@ -13,7 +13,7 @@
 use std::fmt;
 
 use hyscribe_config::{Database, Prefix};
-use hyscribe_model::Post;
+use hyscribe_model::{Post, PostQuery};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
 
@@ -203,52 +203,7 @@ impl Db {
     /// Published posts matching `query`, as the main query of a list page
     /// (home, search, category or date archive) selects them.
     pub async fn posts(&self, query: &PostQuery) -> Result<Vec<Post>, DbError> {
-        let mut sql = Sql::new(concat!(
-            "SELECT ",
-            post_columns!(),
-            " FROM {prefix}posts WHERE post_status = 'publish' AND post_type IN ("
-        ));
-        for (i, post_type) in query.post_types.iter().enumerate() {
-            sql.push(if i == 0 { "?" } else { ", ?" });
-            sql.bind(Bind::Text(post_type.to_string()));
-        }
-        sql.push(")");
-        for term in &query.search {
-            sql.push(" AND (post_title LIKE ? OR post_excerpt LIKE ? OR post_content LIKE ?)");
-            for _ in 0..3 {
-                sql.bind(Bind::Text(like(term)));
-            }
-        }
-        if let Some(category) = query.category {
-            sql.push(
-                " AND ID IN (SELECT tr.object_id FROM {prefix}term_relationships tr \
-                 JOIN {prefix}term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id \
-                 WHERE tt.taxonomy = 'category' AND tt.term_id = ?)",
-            );
-            sql.bind(Bind::Int(category));
-        }
-        let date = [
-            (" AND YEAR(post_date) = ?", query.year),
-            (" AND MONTH(post_date) = ?", query.month),
-            (" AND DAYOFMONTH(post_date) = ?", query.day),
-        ];
-        for (fragment, value) in date {
-            if let Some(value) = value {
-                sql.push(fragment);
-                sql.bind(Bind::Int(value));
-            }
-        }
-        // WordPress's own ordering, ties included: title matches of the
-        // whole search phrase first, then newest first.
-        if query.search.is_empty() {
-            sql.push(" ORDER BY post_date DESC");
-        } else {
-            sql.push(" ORDER BY post_title LIKE ? DESC, post_date DESC");
-            sql.bind(Bind::Text(like(&query.search.join(" "))));
-        }
-        sql.push(" LIMIT ? OFFSET ?");
-        sql.bind(Bind::Int(query.limit.into()));
-        sql.bind(Bind::Int(query.offset.into()));
+        let sql = posts_sql(query);
         let rows = sql
             .query(&self.prefix)
             .fetch_all(&self.pool)
@@ -277,26 +232,74 @@ impl Db {
     }
 }
 
-/// What a list of posts is filtered by.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct PostQuery {
-    /// Post types to include, such as `post`, or `post` and `page` for a
-    /// search.
-    pub post_types: Vec<&'static str>,
-    /// Search terms; every term must appear in the title, excerpt or content.
-    pub search: Vec<String>,
-    /// A category's `term_id`.
-    pub category: Option<u64>,
-    /// `YEAR(post_date)`.
-    pub year: Option<u64>,
-    /// `MONTH(post_date)`.
-    pub month: Option<u64>,
-    /// `DAYOFMONTH(post_date)`.
-    pub day: Option<u64>,
-    /// How many posts.
-    pub limit: u32,
-    /// How many to skip.
-    pub offset: u32,
+/// The statement [`Db::posts`] runs for `query`.
+fn posts_sql(query: &PostQuery) -> Sql {
+    let mut sql = Sql::new(concat!(
+        "SELECT ",
+        post_columns!(),
+        " FROM {prefix}posts WHERE post_status = 'publish' AND post_type IN ("
+    ));
+    for (i, post_type) in query.post_types.iter().enumerate() {
+        sql.push(if i == 0 { "?" } else { ", ?" });
+        sql.bind(Bind::Text(post_type.clone()));
+    }
+    sql.push(")");
+    if let Some(include) = &query.include {
+        // An empty `post__in` matches nothing, as WordPress's `array( 0 )`.
+        sql.push(" AND ID IN (0");
+        for id in include {
+            sql.push(", ?");
+            sql.bind(Bind::Int(*id));
+        }
+        sql.push(")");
+    }
+    for id in &query.exclude {
+        sql.push(" AND ID <> ?");
+        sql.bind(Bind::Int(*id));
+    }
+    for term in &query.search {
+        sql.push(" AND (post_title LIKE ? OR post_excerpt LIKE ? OR post_content LIKE ?)");
+        for _ in 0..3 {
+            sql.bind(Bind::Text(like(term)));
+        }
+    }
+    if let Some(category) = query.category {
+        sql.push(
+            " AND ID IN (SELECT tr.object_id FROM {prefix}term_relationships tr \
+             JOIN {prefix}term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id \
+             WHERE tt.taxonomy = 'category' AND tt.term_id = ?)",
+        );
+        sql.bind(Bind::Int(category));
+    }
+    let date = [
+        (" AND YEAR(post_date) = ?", query.year),
+        (" AND MONTH(post_date) = ?", query.month),
+        (" AND DAYOFMONTH(post_date) = ?", query.day),
+    ];
+    for (fragment, value) in date {
+        if let Some(value) = value {
+            sql.push(fragment);
+            sql.bind(Bind::Int(value));
+        }
+    }
+    // WordPress's own ordering, ties included: title matches of the
+    // whole search phrase first, then newest first.
+    let date = if query.ascending {
+        "post_date ASC"
+    } else {
+        "post_date DESC"
+    };
+    if query.search.is_empty() {
+        sql.push(" ORDER BY ");
+    } else {
+        sql.push(" ORDER BY post_title LIKE ? DESC, ");
+        sql.bind(Bind::Text(like(&query.search.join(" "))));
+    }
+    sql.push(date);
+    sql.push(" LIMIT ? OFFSET ?");
+    sql.bind(Bind::Int(query.limit.into()));
+    sql.bind(Bind::Int(query.offset.into()));
+    sql
 }
 
 /// A `LIKE` pattern matching `text` anywhere, with `%`, `_` and `\\`

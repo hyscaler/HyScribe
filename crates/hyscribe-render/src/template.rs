@@ -17,7 +17,7 @@ use crate::theme::Theme;
 pub fn render_template(
     theme: &Theme,
     site: &dyn Site,
-    request: Request,
+    request: &Request,
     template: &[u8],
 ) -> Vec<u8> {
     [
@@ -29,13 +29,19 @@ pub fn render_template(
 }
 
 /// Renders post content: `do_blocks()` on `post_content`.
-pub fn render_content(theme: &Theme, site: &dyn Site, request: Request, content: &[u8]) -> Vec<u8> {
+pub fn render_content(
+    theme: &Theme,
+    site: &dyn Site,
+    request: &Request,
+    content: &[u8],
+) -> Vec<u8> {
     Renderer {
         context: Context {
             theme,
             site,
             request,
             post_id: request.post,
+            query: None,
         },
         open_parts: Vec::new(),
         open_patterns: Vec::new(),
@@ -43,8 +49,8 @@ pub fn render_content(theme: &Theme, site: &dyn Site, request: Request, content:
     .render(content)
 }
 
-struct Renderer<'a> {
-    context: Context<'a>,
+pub(crate) struct Renderer<'a> {
+    pub(crate) context: Context<'a>,
     /// Template parts and patterns being rendered, so one that includes
     /// itself stops instead of recursing forever.
     open_parts: Vec<Vec<u8>>,
@@ -71,6 +77,8 @@ impl Renderer<'_> {
         match block.name.as_deref() {
             Some("core/template-part") => self.template_part(block),
             Some("core/pattern") => self.pattern(block),
+            Some("core/query") => self.query(block),
+            Some("core/post-template") => self.post_template(block),
             Some(name) => core_blocks::render(
                 &self.context,
                 name,
@@ -82,7 +90,7 @@ impl Renderer<'_> {
     }
 
     /// The block's own markup with its inner blocks rendered in place.
-    fn saved_markup(&mut self, block: &Block) -> Vec<u8> {
+    pub(crate) fn saved_markup(&mut self, block: &Block) -> Vec<u8> {
         let mut out = Vec::new();
         let mut inner = block.inner_blocks.iter();
         for chunk in &block.inner_content {

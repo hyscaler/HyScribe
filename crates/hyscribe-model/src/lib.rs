@@ -39,3 +39,42 @@ pub struct Post {
     /// `comment_count`.
     pub comment_count: i64,
 }
+
+/// A term of a taxonomy, as `get_the_terms()` returns it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Term {
+    /// `term_id`.
+    pub id: u64,
+    /// `name`.
+    pub name: Vec<u8>,
+    /// `slug`.
+    pub slug: Vec<u8>,
+}
+
+/// What a list of posts is filtered by.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PostQuery {
+    /// Post types to include, such as `post`, or `post` and `page` for a
+    /// search.
+    pub post_types: Vec<String>,
+    /// Search terms; every term must appear in the title, excerpt or content.
+    pub search: Vec<String>,
+    /// A category's `term_id`.
+    pub category: Option<u64>,
+    /// `YEAR(post_date)`.
+    pub year: Option<u64>,
+    /// `MONTH(post_date)`.
+    pub month: Option<u64>,
+    /// `DAYOFMONTH(post_date)`.
+    pub day: Option<u64>,
+    /// `post__in`: only these posts, when set.
+    pub include: Option<Vec<u64>>,
+    /// `post__not_in`.
+    pub exclude: Vec<u64>,
+    /// Oldest first, where WordPress defaults to newest first.
+    pub ascending: bool,
+    /// How many posts.
+    pub limit: u32,
+    /// How many to skip.
+    pub offset: u32,
+}

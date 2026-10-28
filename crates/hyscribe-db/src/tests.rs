@@ -79,7 +79,7 @@ async fn reads_the_default_install() {
 async fn titles(db: &Db, query: PostQuery) -> Vec<String> {
     let query = PostQuery {
         post_types: if query.post_types.is_empty() {
-            vec!["post"]
+            vec!["post".into()]
         } else {
             query.post_types
         },
@@ -104,7 +104,7 @@ async fn post_lists() {
         titles(
             &db,
             PostQuery {
-                post_types: vec!["page"],
+                post_types: vec!["page".into()],
                 ..all()
             }
         )
@@ -118,7 +118,7 @@ async fn post_lists() {
     );
 
     let both = || PostQuery {
-        post_types: vec!["post", "page"],
+        post_types: vec!["post".into(), "page".into()],
         ..all()
     };
     let search = |terms: &[&str]| PostQuery {
@@ -136,6 +136,39 @@ async fn post_lists() {
         ["Sample Page"]
     );
     assert!(titles(&db, search(&["nothingmatches"])).await.is_empty());
+    assert_eq!(
+        titles(
+            &db,
+            PostQuery {
+                exclude: vec![1],
+                ..both()
+            }
+        )
+        .await,
+        ["Sample Page"]
+    );
+    assert_eq!(
+        titles(
+            &db,
+            PostQuery {
+                include: Some(vec![2]),
+                ..both()
+            }
+        )
+        .await,
+        ["Sample Page"]
+    );
+    assert!(
+        titles(
+            &db,
+            PostQuery {
+                include: Some(Vec::new()),
+                ..both()
+            }
+        )
+        .await
+        .is_empty()
+    );
     // Wildcards are searched for literally.
     assert!(titles(&db, search(&["%"])).await.is_empty());
     assert!(titles(&db, search(&["_ello"])).await.is_empty());
@@ -220,7 +253,7 @@ async fn errors_are_reported() {
         db.autoload_options().await.unwrap_err(),
         db.post(1).await.unwrap_err(),
         db.posts(&PostQuery {
-            post_types: vec!["post"],
+            post_types: vec!["post".into()],
             limit: 1,
             ..PostQuery::default()
         })
@@ -257,4 +290,17 @@ async fn a_row_without_the_columns_fails_to_decode() {
     let mut c = Columns::new(&row);
     let _ = (c.text("option_name"), c.bytes("option_value"));
     assert!(c.finish(()).is_err());
+}
+
+#[test]
+fn order_follows_the_query() {
+    let text = |ascending| {
+        posts_sql(&PostQuery {
+            ascending,
+            ..PostQuery::default()
+        })
+        .text
+    };
+    assert!(text(true).ends_with("ORDER BY post_date ASC LIMIT ? OFFSET ?"));
+    assert!(text(false).ends_with("ORDER BY post_date DESC LIMIT ? OFFSET ?"));
 }

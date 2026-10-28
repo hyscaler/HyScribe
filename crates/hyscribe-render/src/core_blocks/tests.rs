@@ -29,6 +29,18 @@ impl Site for Fixture {
     fn post(&self, id: u64) -> Option<Post> {
         self.post.clone().filter(|post| post.id == id)
     }
+
+    fn post_terms(&self, _: u64, _: &str) -> Vec<hyscribe_model::Term> {
+        Vec::new()
+    }
+
+    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn query(&self, _: &hyscribe_model::PostQuery) -> Vec<Post> {
+        Vec::new()
+    }
 }
 
 fn object(json: &[u8]) -> Value {
@@ -109,6 +121,9 @@ fn matches_php() {
         let mut fields = line.split('\t');
         let kind = fields.next().unwrap();
         let mut field = || unhex(fields.next().unwrap());
+        if kind == "class" || kind == "query" {
+            continue;
+        }
         if kind == "diff" {
             let number = |bytes: Vec<u8>| String::from_utf8(bytes).unwrap().parse::<i64>().unwrap();
             let (from, to, php) = (number(field()), number(field()), field());
@@ -124,8 +139,9 @@ fn matches_php() {
         let context = Context {
             theme: &theme,
             site: &site,
-            request,
+            request: &request,
             post_id,
+            query: None,
         };
         let ours = render_markup(&context, &markup);
         if ours != php {
@@ -162,14 +178,18 @@ fn relative_dates() {
         }),
         ..Fixture::default()
     };
+    let requests: Vec<Request> = [7200, -120, 0]
+        .map(|delta| Request {
+            now: date::stored_unix("2026-10-27 10:00:00", Zone::Utc) + delta,
+            ..Request::default()
+        })
+        .into();
     let at = |now: i64| Context {
         theme: &theme,
         site: &site,
-        request: Request {
-            now,
-            ..Request::default()
-        },
+        request: requests.iter().find(|r| r.now == now).unwrap(),
         post_id: Some(7),
+        query: None,
     };
     let markup = br#"<!-- wp:post-date {"format":"human-diff"} /-->"#;
     let posted = date::stored_unix("2026-10-27 10:00:00", Zone::Utc);
@@ -189,8 +209,9 @@ fn blocks_without_a_callback_render_their_saved_markup() {
     let context = Context {
         theme: &theme,
         site: &site,
-        request: Request::default(),
+        request: &Request::default(),
         post_id: None,
+        query: None,
     };
     assert_eq!(render(&context, "core/paragraph", &[]), None);
     assert_eq!(render(&context, "core/site-title", &[]), Some(Vec::new()));
@@ -218,8 +239,9 @@ fn bindings_and_the_front_page() {
     let context = Context {
         theme: &theme,
         site: &site,
-        request: Request::default(),
+        request: &Request::default(),
         post_id: Some(9),
+        query: None,
     };
     let html =
         |markup: &str| String::from_utf8(render_markup(&context, markup.as_bytes())).unwrap();

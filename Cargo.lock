@@ -673,6 +673,7 @@ dependencies = [
 name = "hyscribe-render"
 version = "0.1.0"
 dependencies = [
+ "hyscribe-html",
  "hyscribe-kses",
  "hyscribe-model",
  "hyscribe-phpser",

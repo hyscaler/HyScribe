@@ -9,20 +9,32 @@ use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim};
 
 use crate::date::{self, Zone};
-use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit_title, convert_chars, wptexturize};
 use crate::link;
+use crate::post::the_title;
 use crate::registry::block_type;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
 use crate::theme::Theme;
 
 /// What a render callback reads besides its block.
+#[derive(Clone)]
 pub(crate) struct Context<'a> {
     pub(crate) theme: &'a Theme,
     pub(crate) site: &'a dyn Site,
-    pub(crate) request: Request,
+    pub(crate) request: &'a Request,
     /// The `postId` block context.
     pub(crate) post_id: Option<u64>,
+    /// The context `core/query` provides.
+    pub(crate) query: Option<QueryContext>,
+}
+
+/// The block context of a query block's descendants: `query`,
+/// `displayLayout` and `enhancedPagination`.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct QueryContext {
+    pub(crate) query: Value,
+    pub(crate) display_layout: Option<Value>,
+    pub(crate) enhanced_pagination: bool,
 }
 
 /// One block being rendered: its name, parsed and prepared attributes.
@@ -30,6 +42,16 @@ struct Block<'a> {
     name: &'a str,
     parsed: &'a [(Key, Value)],
     attributes: Value,
+}
+
+/// The attributes of `name` as `prepare_attributes_for_render()` leaves
+/// them.
+pub(crate) fn prepared(name: &str, parsed: &[(Key, Value)]) -> Value {
+    Value::Array(
+        block_type(name)
+            .map(|t| t.prepare(parsed))
+            .unwrap_or_default(),
+    )
 }
 
 /// The output of `name`'s render callback, `None` for a block that renders
@@ -104,19 +126,6 @@ impl Context<'_> {
         let option = |name| self.site.option(name).unwrap_or_default();
         date::site_zone(&option("timezone_string"), &option("gmt_offset"))
     }
-}
-
-/// `get_the_title( $post )` with the `the_title` filters.
-fn the_title(post: &Post) -> Vec<u8> {
-    let title = if !post.password.is_empty() {
-        [b"Protected: ", &post.title[..]].concat()
-    } else if post.status == "private" {
-        [b"Private: ", &post.title[..]].concat()
-    } else {
-        post.title.clone()
-    };
-    let title = convert_chars(&wptexturize(&title, &CORE_SHORTCODE_TAGS));
-    capital_p_dangit_title(php_trim(&title))
 }
 
 /// The classes post blocks share: `has-text-align-*` when `textAlign` is

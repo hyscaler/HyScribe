@@ -6,15 +6,18 @@
 //   site<TAB>hex(markup)<TAB>hex(request JSON)<TAB>hex(options JSON)<TAB>hex(output)
 //   post<TAB>hex(markup)<TAB>hex(state JSON)<TAB>hex(post JSON)<TAB>hex(output)
 //   diff<TAB>hex(from)<TAB>hex(to)<TAB>hex(human_time_diff( from, to ))
+//   class<TAB>hex(case JSON)<TAB>hex(post JSON)<TAB>hex(get_post_class( 'wp-block-post' ))
+//   query<TAB>hex(markup)<TAB>hex(request)<TAB>hex(home_url())<TAB>hex(output)
 // The request JSON holds the conditionals the blocks check. Run through
 // golden.sh inside the PHP WordPress oracle; nothing is written.
 
 require '/var/www/html/wp-load.php';
 
-// The elements support (wp-elements-* classes and styles) is checked on
-// its own; here the callbacks are.
+// The elements and layout supports (wp-elements-* and is-layout-* classes
+// and styles) are checked on their own; here the callbacks are.
 remove_filter( 'render_block', 'wp_render_elements_class_name', 10 );
 remove_filter( 'render_block_data', 'wp_render_elements_support_styles', 10 );
+remove_filter( 'render_block', 'wp_render_layout_support_flag', 10 );
 
 $blocks = array(
 	'<!-- wp:site-title /-->',
@@ -126,6 +129,86 @@ $post_blocks = array(
 	'<!-- wp:post-date {"datetime":""} /-->',
 	'<!-- wp:post-date {"style":{"elements":{"link":{"color":{"text":"var:preset|color|contrast"}}}},"textColor":"contrast"} /-->',
 );
+// get_post_class(), with terms, thumbnails and sticky posts given through
+// the filters WordPress offers for them.
+$term_sets = array(
+	array(),
+	array( 'category' => array( array( 1, 'uncategorized' ) ) ),
+	array(
+		'category'    => array( array( 5, 'news' ), array( 6, '%e2%9c%93' ), array( 7, '123' ), array( 8, '---' ), array( 11, '' ), array( 12, 'a b!' ) ),
+		'post_tag'    => array( array( 9, 'tag-a' ), array( 13, '42' ) ),
+		'post_format' => array( array( 10, 'post-format-gallery' ) ),
+	),
+	array( 'post_format' => array( array( 14, 'post-format-a%20side' ) ), 'category' => array( array( 5, 'news' ), array( 5, 'news' ) ) ),
+);
+foreach ( array( 1001, 1002, 1003, 1004 ) as $id ) {
+	foreach ( $term_sets as $terms ) {
+		foreach ( array( array( 0, array(), 'home' ), array( 55, array( $id ), 'home' ), array( 55, array( "$id" ), 'paged' ), array( 0, array( $id ), 'single' ) ) as list( $thumbnail, $sticky, $where ) ) {
+			$GLOBALS['wp'] = new WP();
+			wp( 'single' === $where ? 'p=1' : '' );
+			$GLOBALS['wp_query']->is_paged = 'paged' === $where;
+			remove_all_filters( 'get_the_terms' );
+			remove_all_filters( 'pre_option_sticky_posts' );
+			remove_all_filters( 'post_thumbnail_id' );
+			add_filter(
+				'get_the_terms',
+				static function ( $found, $post_id, $taxonomy ) use ( $terms ) {
+					if ( empty( $terms[ $taxonomy ] ) ) {
+						return false;
+					}
+					return array_map( static fn( $t ) => new WP_Term( (object) array( 'term_id' => $t[0], 'slug' => $t[1], 'name' => $t[1], 'taxonomy' => $taxonomy ) ), $terms[ $taxonomy ] );
+				},
+				10,
+				3
+			);
+			add_filter( 'pre_option_sticky_posts', static fn() => $sticky );
+			add_filter( 'post_thumbnail_id', static fn() => $thumbnail );
+			$case = array(
+				'terms'     => $terms,
+				'thumbnail' => $thumbnail,
+				'sticky'    => serialize( $sticky ),
+				'home'      => is_home(),
+				'paged'     => is_paged(),
+			);
+			echo 'class', "\t", bin2hex( wp_json_encode( $case ) ), "\t", bin2hex( wp_json_encode( get_post( $id, ARRAY_A ) ) ), "\t", bin2hex( implode( ' ', get_post_class( 'wp-block-post', $id ) ) ), "\n";
+		}
+	}
+}
+remove_all_filters( 'get_the_terms' );
+remove_all_filters( 'pre_option_sticky_posts' );
+remove_all_filters( 'post_thumbnail_id' );
+
+// The query loop, on the fixture's own posts through WP_Query.
+$inner = '<!-- wp:post-title {"isLink":true} /--><!-- wp:post-date /-->';
+$loop  = static fn( $query, $template = '', $extra = '' ) => '<!-- wp:query {"queryId":7,"query":' . $query . $extra . '} --><div class="wp-block-query"><!-- wp:post-template' . $template . ' -->' . $inner . '<!-- /wp:post-template --></div><!-- /wp:query -->';
+$query_blocks = array(
+	$loop( '{"perPage":10,"pages":0,"offset":0,"postType":"post","order":"desc","orderBy":"date","inherit":true}' ),
+	$loop( '{"perPage":4,"offset":0,"postType":"post","inherit":false}' ),
+	$loop( '{"perPage":4,"postType":"page","inherit":false}' ),
+	$loop( '{"perPage":4,"postType":"wp_navigation","inherit":false}' ),
+	$loop( '{"perPage":1,"offset":"1","postType":"post","sticky":"ignore","inherit":false}' ),
+	$loop( '{"perPage":3,"exclude":[1],"postType":"post","inherit":false}' ),
+	$loop( '{"perPage":3,"exclude":["1","x"],"postType":"post","inherit":false}' ),
+	$loop( '{"perPage":3,"sticky":"only","inherit":false}' ),
+	$loop( '{"perPage":3,"sticky":"exclude","inherit":false}' ),
+	$loop( '{"perPage":"abc","order":"ASC","inherit":false}' ),
+	$loop( '{"inherit":false}' ),
+	$loop( '{"perPage":3,"excludeCurrent":true,"inherit":false}' ),
+	$loop( '{"perPage":3,"inherit":false}', ' {"layout":{"type":"grid","columnCount":3,"minimumColumnWidth":"12rem"}}' ),
+	$loop( '{"perPage":3,"inherit":false}', ' {"layout":{"type":"grid","columnCount":2}}' ),
+	$loop( '{"perPage":3,"inherit":false}', ' {"style":{"elements":{"link":{"color":{"text":"#f00"}}}},"fontSize":"small"}' ),
+	$loop( '{"perPage":3,"inherit":false}', '', ',"displayLayout":{"type":"flex","columns":2}' ),
+	$loop( '{"perPage":3,"inherit":false}', '', ',"enhancedPagination":true' ),
+	'<!-- wp:post-template --><!-- wp:post-title /--><!-- /wp:post-template -->',
+);
+foreach ( array( '', 'p=1', 's=nothingmatches' ) as $case_query ) {
+	$GLOBALS['wp'] = new WP();
+	wp( $case_query );
+	foreach ( $query_blocks as $markup ) {
+		echo 'query', "\t", bin2hex( $markup ), "\t", bin2hex( $case_query ), "\t", bin2hex( home_url() ), "\t", bin2hex( do_blocks( $markup ) ), "\n";
+	}
+}
+
 // human_time_diff() itself, since the block measures from the real time().
 foreach ( array( 0, 1, 59, 60, 61, 119, 120, 3599, 3600, 3601, 5399, 5400, 7200, 86399, 86400, 129600, 172800, 604799, 604800, 1209600, 2591999, 2592000, 2629799, 2629800, 5259600, 31535999, 31536000, 31557600, 63115200, 315576000 ) as $seconds ) {
 	foreach ( array( 1, -1 ) as $sign ) {

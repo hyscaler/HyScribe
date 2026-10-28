@@ -16,8 +16,8 @@ use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use hyscribe_db::{Db, DbError, PostQuery};
-use hyscribe_model::Post;
+use hyscribe_db::{Db, DbError};
+use hyscribe_model::{Post, PostQuery};
 use hyscribe_render::blocks::{parse_blocks, render};
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::link;
@@ -284,9 +284,9 @@ async fn list(site: &Site, query: &HashMap<String, String>) -> Result<Page, DbEr
     let post_query = PostQuery {
         // Searches cover posts and pages.
         post_types: if search.is_some() {
-            vec!["post", "page"]
+            vec!["post".into(), "page".into()]
         } else {
-            vec!["post"]
+            vec!["post".into()]
         },
         search: search.map_or_else(Vec::new, |s| search_terms(s)),
         category,
@@ -294,7 +294,7 @@ async fn list(site: &Site, query: &HashMap<String, String>) -> Result<Page, DbEr
         month,
         day,
         limit: u32::try_from(per_page).unwrap_or(10),
-        offset: 0,
+        ..PostQuery::default()
     };
     let category_name = match category {
         Some(id) => match site.db.category_name(id).await? {

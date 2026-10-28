@@ -40,13 +40,25 @@ impl Site for DefaultInstall {
     fn post(&self, _: u64) -> Option<hyscribe_model::Post> {
         None
     }
+
+    fn post_terms(&self, _: u64, _: &str) -> Vec<hyscribe_model::Term> {
+        Vec::new()
+    }
+
+    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn query(&self, _: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
+        Vec::new()
+    }
 }
 
 fn render(theme: &Theme, markup: &str) -> String {
     String::from_utf8(render_content(
         theme,
         &DefaultInstall,
-        Request::default(),
+        &Request::default(),
         markup.as_bytes(),
     ))
     .unwrap()
@@ -59,7 +71,7 @@ fn the_home_template_expands_parts_and_patterns() {
     let html = String::from_utf8(render_template(
         &theme,
         &DefaultInstall,
-        Request::default(),
+        &Request::default(),
         template,
     ))
     .unwrap();
@@ -184,8 +196,9 @@ fn saved_markup_keeps_inner_blocks_in_place() {
         context: Context {
             theme: &theme,
             site: &DefaultInstall,
-            request: Request::default(),
+            request: &Request::default(),
             post_id: None,
+            query: None,
         },
         open_parts: Vec::new(),
         open_patterns: Vec::new(),

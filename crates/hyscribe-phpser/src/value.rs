@@ -16,9 +16,10 @@ pub enum Key {
 /// Strings are bytes because WordPress databases hold any encoding. Arrays and
 /// objects keep their entries in order, including duplicate keys, so encoding
 /// reproduces the input.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Value {
     /// `N;`
+    #[default]
     Null,
     /// `b:0;` or `b:1;`
     Bool(bool),

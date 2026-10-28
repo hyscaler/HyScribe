@@ -325,3 +325,8 @@ fn the_deepest_blocks_fit_a_worker_stack() {
         .unwrap();
     assert_eq!(html.matches("<div class=\"wp-block-group").count(), depth);
 }
+
+#[test]
+fn replacing_nothing_keeps_the_subject() {
+    assert_eq!(replace(b"abc", b"", b"x"), b"abc");
+}

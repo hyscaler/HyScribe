@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
-use hyscribe_html::{Attribute, TagProcessor, decode_attribute};
+use hyscribe_html::{Attribute, TagProcessor, decode_attribute, escape};
 use hyscribe_kses::{
     ALLOWED_PROTOCOLS, esc_attr, esc_html, safecss_filter_attr, wp_kses_bad_protocol,
     wp_kses_no_null_keep_slash_zero, wp_kses_normalize_entities,
@@ -571,17 +571,7 @@ fn wp_kses_hair(attributes: &[u8]) -> Vec<Hair> {
                 } else {
                     value
                 };
-                let mut recoded = Vec::with_capacity(value.len());
-                for b in value {
-                    match b {
-                        b'&' => recoded.extend_from_slice(b"&amp;"),
-                        b'<' => recoded.extend_from_slice(b"&lt;"),
-                        b'>' => recoded.extend_from_slice(b"&gt;"),
-                        b'\'' => recoded.extend_from_slice(b"&apos;"),
-                        b'"' => recoded.extend_from_slice(b"&quot;"),
-                        _ => recoded.push(b),
-                    }
-                }
+                let recoded = escape(&value);
                 Hair {
                     whole: [&name[..], b"=\"", &recoded, b"\""].concat(),
                     name,

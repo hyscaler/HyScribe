@@ -10,6 +10,8 @@
 
 use hyscribe_phpser::{Key, Value, is_empty_string, json_decode, json_encode_unescaped};
 
+use crate::formatting::find;
+
 /// One block, as `parse_blocks()` returns it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Block {
@@ -121,7 +123,7 @@ fn render_into(block: &Block, out: &mut Vec<u8>) {
 
 /// `serialize_blocks()`: the block markup `parse_blocks()` reads back as
 /// `blocks`.
-pub fn serialize_blocks(blocks: &[Block]) -> Vec<u8> {
+pub(crate) fn serialize_blocks(blocks: &[Block]) -> Vec<u8> {
     let mut out = Vec::new();
     for block in blocks {
         serialize_into(block, &mut out);
@@ -189,7 +191,7 @@ fn serialize_block_attributes(attrs: &[(Key, Value)]) -> Vec<u8> {
 
 /// Blocks nested deeper give no blocks at all: rendering recurses once per
 /// level, and no real post comes near this.
-pub const MAX_BLOCK_DEPTH: usize = 128;
+pub(crate) const MAX_BLOCK_DEPTH: usize = 128;
 
 /// Each unclosed block takes the rest of the document, a quadratic copy;
 /// past this many bytes PHP has run out of memory, and the parse gives up.
@@ -359,10 +361,9 @@ impl Parser<'_> {
     fn next_token(&mut self) -> Token {
         let mut from = self.offset;
         for _ in 0..=self.doc.len() {
-            let Some(at) = find(self.rest(from), b"<!--") else {
+            let Some(start) = find(self.doc, from, b"<!--") else {
                 break;
             };
-            let start = from + at;
             if let Some(token) = self.delimiter(start) {
                 return token;
             }
@@ -511,10 +512,6 @@ fn run(doc: &[u8], i: usize, keep: impl Fn(u8) -> bool) -> usize {
         .iter()
         .take_while(|&&b| keep(b))
         .count()
-}
-
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 #[cfg(test)]

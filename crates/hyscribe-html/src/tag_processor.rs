@@ -216,8 +216,9 @@ fn has_noncharacters(text: &[u8]) -> bool {
     three || four
 }
 
-/// `set_attribute()`'s escaping of values outside URL attributes.
-fn escape(value: &[u8]) -> Vec<u8> {
+/// `set_attribute()`'s escaping of values outside URL attributes, the same
+/// `strtr()` `wp_kses_hair()` applies.
+pub fn escape(value: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(value.len());
     for &b in value {
         match b {

@@ -6,6 +6,7 @@
 //! filters (layout, position, duotone, background, block style variations,
 //! custom CSS and elements) are not part of the wrapper attributes.
 
+use crate::blocks::is_pcre_space;
 use hyscribe_kses::{esc_attr, safecss_filter_attr};
 use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim};
 use hyscribe_theme_json::GlobalStyles;
@@ -133,12 +134,7 @@ fn merge_styles(new: &[u8], extra: &[u8]) -> Vec<u8> {
 fn merge_classes(new: &[u8], extra: &[u8]) -> Vec<u8> {
     let mut classes: Vec<&[u8]> = Vec::new();
     // `preg_split( '/\s+/' )`: PCRE's `\s` without UTF mode.
-    let split = |text| {
-        <[u8]>::split(text, |b: &u8| {
-            matches!(b, b' ' | b'\t' | b'\n' | 0x0B | 0x0C | b'\r')
-        })
-        .filter(|class| !class.is_empty())
-    };
+    let split = |text| <[u8]>::split(text, |&b| is_pcre_space(b)).filter(|class| !class.is_empty());
     for class in split(extra).chain(split(new)) {
         if !classes.contains(&class) {
             classes.push(class);

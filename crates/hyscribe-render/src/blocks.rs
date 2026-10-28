@@ -119,7 +119,16 @@ fn render_into(block: &Block, out: &mut Vec<u8>) {
     }
 }
 
-/// Splits `document` into blocks, as WordPress's `parse_blocks()` does.
+/// Blocks nested deeper give no blocks at all: rendering recurses once per
+/// level, and no real post comes near this.
+pub const MAX_BLOCK_DEPTH: usize = 128;
+
+/// Each unclosed block takes the rest of the document, a quadratic copy;
+/// past this many bytes PHP has run out of memory, and the parse gives up.
+const MAX_UNCLOSED_BYTES: usize = 64 << 20;
+
+/// Splits `document` into blocks, as WordPress's `parse_blocks()` does,
+/// within [`MAX_BLOCK_DEPTH`] and PHP's memory limit.
 pub fn parse_blocks(document: &[u8]) -> Vec<Block> {
     let mut parser = Parser {
         doc: document,
@@ -177,6 +186,14 @@ impl Parser<'_> {
         let leading = |start: usize, offset: usize| (start > offset).then_some(offset);
         match token {
             Token::NoMore => {
+                let copied: usize = self
+                    .stack
+                    .iter()
+                    .map(|frame| self.doc.len() - frame.prev_offset)
+                    .sum();
+                if copied > MAX_UNCLOSED_BYTES {
+                    return self.give_up();
+                }
                 if depth == 0 {
                     self.add_freeform();
                 }
@@ -203,6 +220,7 @@ impl Parser<'_> {
                 self.offset = start + len;
                 true
             }
+            Token::Opener(..) if depth == MAX_BLOCK_DEPTH => self.give_up(),
             Token::Opener(name, attrs, start, len) => {
                 self.stack.push(Frame {
                     block: Block::named(name, attrs),
@@ -236,6 +254,11 @@ impl Parser<'_> {
         }
         self.offset = end;
         true
+    }
+
+    fn give_up(&mut self) -> bool {
+        self.output.clear();
+        false
     }
 
     fn add_freeform(&mut self) {

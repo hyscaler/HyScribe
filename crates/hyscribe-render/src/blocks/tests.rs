@@ -220,3 +220,26 @@ fn render_puts_inner_blocks_back() {
     odd.inner_content = vec![None, Some(b"x".to_vec())];
     assert_eq!(render(&[odd]), b"x");
 }
+
+fn nested_groups(depth: usize) -> Vec<u8> {
+    [
+        b"<!-- wp:group -->".repeat(depth),
+        b"<!-- /wp:group -->".repeat(depth),
+    ]
+    .concat()
+}
+
+#[test]
+fn nesting_past_the_limit_gives_no_blocks() {
+    assert_eq!(parse_blocks(&nested_groups(MAX_BLOCK_DEPTH)).len(), 1);
+    let past = [&b"<!-- wp:a /-->"[..], &nested_groups(MAX_BLOCK_DEPTH + 1)].concat();
+    assert!(parse_blocks(&past).is_empty());
+}
+
+#[test]
+fn unclosed_blocks_past_the_memory_limit_give_no_blocks() {
+    // An unclosed opener copies all the text after it.
+    let unclosed = |text| [&b"<!-- wp:a /--><!-- wp:p -->"[..], &vec![b'x'; text]].concat();
+    assert_eq!(parse_blocks(&unclosed(MAX_UNCLOSED_BYTES)).len(), 2);
+    assert!(parse_blocks(&unclosed(MAX_UNCLOSED_BYTES + 1)).is_empty());
+}

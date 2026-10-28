@@ -306,3 +306,22 @@ fn layout_classes_go_on_the_inner_wrapper() {
     );
     assert!(html.starts_with(r#"<div class="wp-block-group"><div class="wp-block-group__inner-container is-layout-flex "#), "{html}");
 }
+
+/// HTTP requests render on 2 MiB worker stacks.
+#[test]
+fn the_deepest_blocks_fit_a_worker_stack() {
+    let depth = crate::blocks::MAX_BLOCK_DEPTH;
+    let markup = [
+        r#"<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">"#
+            .repeat(depth),
+        "</div><!-- /wp:group -->".repeat(depth),
+    ]
+    .concat();
+    let html = std::thread::Builder::new()
+        .stack_size(2 << 20)
+        .spawn(move || render(&twentytwentyfive(), &markup))
+        .unwrap()
+        .join()
+        .unwrap();
+    assert_eq!(html.matches("<div class=\"wp-block-group").count(), depth);
+}

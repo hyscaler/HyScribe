@@ -75,10 +75,10 @@ fn the_home_template_expands_parts_and_patterns() {
         template,
     ))
     .unwrap();
-    assert!(
-        html.starts_with("<div class=\"wp-site-blocks\"><header class=\"wp-block-template-part\">")
-    );
-    assert!(html.contains("<main class=\"wp-block-group\""));
+    assert!(html.starts_with(
+        r##"<a class="skip-link screen-reader-text" id="wp-skip-link" href="#wp--skip-link--target">Skip to content</a><div class="wp-site-blocks"><header class="wp-block-template-part">"##
+    ));
+    assert!(html.contains(r#"<main id="wp--skip-link--target" class="wp-block-group""#));
     assert!(html.contains("<footer class=\"wp-block-template-part\">"));
     assert!(html.ends_with("</footer>\n</div>"));
     assert!(!html.contains("wp:pattern"));
@@ -217,4 +217,66 @@ fn tag_names() {
     }
     assert_eq!(area_tag(b"footer"), b"footer");
     assert_eq!(area_tag(b"menu"), b"div");
+}
+
+#[test]
+fn skip_links_follow_the_main_element() {
+    assert_eq!(
+        add_skip_link(b"<div>no main</div>".to_vec()),
+        b"<div>no main</div>"
+    );
+    let linked = |html: &str| String::from_utf8(add_skip_link(html.as_bytes().to_vec())).unwrap();
+    assert_eq!(
+        linked(r#"<div><main id="top">x</main></div>"#),
+        r##"<a class="skip-link screen-reader-text" id="wp-skip-link" href="#top">Skip to content</a><div><main id="top">x</main></div>"##
+    );
+    assert!(linked(r#"<main id="">x</main>"#).contains(r#"<main id="wp--skip-link--target">"#));
+    assert!(linked(r#"<main id>x</main>"#).contains(r#"<main id="wp--skip-link--target">"#));
+}
+
+#[test]
+fn template_filters_run_on_the_rendered_template() {
+    struct Smiling;
+    impl Site for Smiling {
+        fn option(&self, name: &str) -> Option<Vec<u8>> {
+            match name {
+                "use_smilies" => Some(b"1".to_vec()),
+                "siteurl" => Some(b"http://example.test".to_vec()),
+                _ => None,
+            }
+        }
+        fn home_url(&self) -> Vec<u8> {
+            Vec::new()
+        }
+        fn post(&self, _: u64) -> Option<hyscribe_model::Post> {
+            None
+        }
+        fn post_terms(&self, _: u64, _: &str) -> Vec<hyscribe_model::Term> {
+            Vec::new()
+        }
+        fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+            None
+        }
+        fn query(&self, _: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
+            Vec::new()
+        }
+    }
+    let theme = twentytwentyfive();
+    let html = |site: &dyn Site| {
+        String::from_utf8(render_template(
+            &theme,
+            site,
+            &Request::default(),
+            b"<p>\"Hi\" :mrgreen: ]]></p>",
+        ))
+        .unwrap()
+    };
+    assert_eq!(
+        html(&Smiling),
+        r#"<div class="wp-site-blocks"><p>&#8220;Hi&#8221; <img src="http://example.test/wp-includes/images/smilies/mrgreen.png" alt=":mrgreen:" class="wp-smiley" style="height: 1em; max-height: 1em;" /> ]]&gt;</p></div>"#
+    );
+    assert_eq!(
+        html(&DefaultInstall),
+        r#"<div class="wp-site-blocks"><p>&#8220;Hi&#8221; :mrgreen: ]]&gt;</p></div>"#
+    );
 }

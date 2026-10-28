@@ -5,27 +5,86 @@
 //! blocks run their render callbacks, and the others render their saved
 //! markup with their inner blocks put back in place.
 
+use hyscribe_html::{Attribute, TagProcessor};
+use hyscribe_kses::esc_url;
 use hyscribe_phpser::{Value, lookup};
 
 use crate::blocks::{Block, parse_blocks};
 use crate::core_blocks::{self, Context};
+use crate::formatting::{CORE_SHORTCODE_TAGS, convert_smilies, wptexturize};
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
 use crate::theme::Theme;
 
-/// Renders a template's block markup inside `.wp-site-blocks`.
+/// `get_the_block_template_html()`: the template's blocks rendered, the
+/// template filters run, inside `.wp-site-blocks`, with the skip link.
+/// Images are not yet given `wp_filter_content_tags()`' attributes.
 pub fn render_template(
     theme: &Theme,
     site: &dyn Site,
     request: &Request,
     template: &[u8],
 ) -> Vec<u8> {
-    [
-        b"<div class=\"wp-site-blocks\">".as_slice(),
+    let mut content = wptexturize(
         &render_content(theme, site, request, template),
+        &CORE_SHORTCODE_TAGS,
+    );
+    if site
+        .option("use_smilies")
+        .is_some_and(|v| !Value::String(v).is_empty())
+    {
+        let siteurl = site.option("siteurl").unwrap_or_default();
+        let smilies = esc_url(&[&siteurl[..], b"/wp-includes/images/smilies/"].concat());
+        content = convert_smilies(&content, &smilies);
+    }
+    let html = [
+        b"<div class=\"wp-site-blocks\">".as_slice(),
+        &replace(&content, b"]]>", b"]]&gt;"),
         b"</div>",
     ]
+    .concat();
+    add_skip_link(html)
+}
+
+/// `_block_template_add_skip_link()`: the first `<main>` gets an id if it
+/// has none, and a link to it goes before `.wp-site-blocks`.
+fn add_skip_link(html: Vec<u8>) -> Vec<u8> {
+    let mut tags = TagProcessor::new(&html);
+    if !tags.next_tag(Some(b"main"), None) {
+        return html;
+    }
+    let id = match tags.get_attribute(b"id") {
+        Some(Attribute::Value(id)) if !id.is_empty() => id,
+        _ => {
+            tags.set_attribute(b"id", b"wp--skip-link--target");
+            b"wp--skip-link--target".to_vec()
+        }
+    };
+    [
+        b"<a class=\"skip-link screen-reader-text\" id=\"wp-skip-link\" href=\"".as_slice(),
+        &esc_url(&[b"#", &id[..]].concat()),
+        b"\">Skip to content</a>",
+        tags.get_updated_html(),
+    ]
     .concat()
+}
+
+/// `str_replace( $search, $with, $subject )`.
+fn replace(subject: &[u8], search: &[u8], with: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(subject.len());
+    let mut rest = subject;
+    for _ in 0..=subject.len() {
+        match rest.windows(search.len()).position(|w| w == search) {
+            Some(at) => {
+                out.extend_from_slice(rest.get(..at).unwrap_or_default());
+                out.extend_from_slice(with);
+                rest = rest.get(at + search.len()..).unwrap_or_default();
+            }
+            None => break,
+        }
+    }
+    out.extend_from_slice(rest);
+    out
 }
 
 /// Renders post content: `do_blocks()` on `post_content`.

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use hyscribe_html::{Attribute, TagProcessor};
 use hyscribe_kses::esc_url;
-use hyscribe_phpser::{Value, lookup};
+use hyscribe_phpser::{Value, is_empty_string, lookup};
 
 use crate::blocks::{Block, parse_blocks};
 use crate::core_blocks::{self, Context};
@@ -36,7 +36,7 @@ pub fn render_template(
     );
     if site
         .option("use_smilies")
-        .is_some_and(|v| !Value::String(v).is_empty())
+        .is_some_and(|v| !is_empty_string(&v))
     {
         let siteurl = site.option("siteurl").unwrap_or_default();
         let smilies = esc_url(&[&siteurl[..], b"/wp-includes/images/smilies/"].concat());
@@ -138,7 +138,7 @@ pub(crate) struct Renderer<'a> {
     pub(crate) has_submenus: bool,
     /// An interactive block is rendering; its directives are processed
     /// when it ends, with every interactive block inside it.
-    pub(crate) in_interactive: bool,
+    in_interactive: bool,
 }
 
 /// A string attribute.

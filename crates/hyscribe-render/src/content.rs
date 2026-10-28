@@ -9,7 +9,7 @@
 
 use hyscribe_kses::{esc_attr, esc_url};
 use hyscribe_model::Post;
-use hyscribe_phpser::Value;
+use hyscribe_phpser::{Value, is_empty_string};
 
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
@@ -34,7 +34,7 @@ impl Renderer<'_> {
         self.open_posts.push(id);
         let content = self.the_content(&post);
         self.open_posts.pop();
-        if Value::String(content.clone()).is_empty() {
+        if is_empty_string(&content) {
             return Vec::new();
         }
         let parsed = block.attrs.as_deref().unwrap_or_default();
@@ -75,7 +75,7 @@ impl Renderer<'_> {
         let content = capital_p_dangit(&replace_insecure_home_url(&site.home_url(), &content));
         if site
             .option("use_smilies")
-            .is_some_and(|v| !Value::String(v).is_empty())
+            .is_some_and(|v| !is_empty_string(&v))
         {
             let siteurl = site.option("siteurl").unwrap_or_default();
             return convert_smilies(

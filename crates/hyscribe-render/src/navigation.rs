@@ -3,12 +3,12 @@
 //! The navigation block (`WP_Navigation_Block_Renderer`) and the navigation
 //! link block.
 //!
-//! Ported: menus from inner blocks, the responsive overlay with its
-//! Interactivity API directives, and unique `aria-label`s. Not yet: menus
-//! from a `wp_navigation` post (`ref`), the fallback menu, submenus and
-//! their directives, custom overlay template parts and the viewport layout
-//! classes; a navigation block that needs a menu post or the fallback
-//! renders with no items.
+//! Ported: menus from inner blocks, the fallback (the latest published
+//! `wp_navigation` post, else a page list), the page list block with its
+//! submenu directives, the responsive overlay and unique `aria-label`s.
+//! Not yet: menus from a `ref` post, creating the fallback's post,
+//! navigation submenu blocks, custom overlay template parts and the
+//! viewport layout classes.
 
 use hyscribe_html::TagProcessor;
 use hyscribe_kses::{esc_attr, esc_url, safecss_filter_attr, wp_strip_all_tags};
@@ -375,7 +375,7 @@ impl Renderer<'_> {
                 format!(" title=\"{}\"", esc_attr(&title.to_php_string())).as_bytes(),
             );
         }
-        let upload_host = upload_host(&self.context.site.option("siteurl").unwrap_or_default());
+        let upload_host = self.context.upload_host();
         html.extend_from_slice(b"><span class=\"wp-block-navigation-item__label\">");
         html.extend(wp_kses_post(&label.to_php_string(), &upload_host));
         html.extend_from_slice(b"</span>");
@@ -506,7 +506,7 @@ impl Renderer<'_> {
             }
         }
         let context = self.navigation.clone().unwrap_or_default();
-        let colors = page_list_colors(&context);
+        let colors = build_colors(&context, true);
         let parent_id = attributes.get_str("parentPageID").map_or(0, Value::to_int);
         let pages = if parent_id == 0 {
             top_level
@@ -534,7 +534,7 @@ impl Renderer<'_> {
             front_page: site
                 .option("page_on_front")
                 .map_or(0, |id| Value::String(id).to_int()),
-            upload_host: upload_host(&site.option("siteurl").unwrap_or_default()),
+            upload_host: self.context.upload_host(),
         };
         let items = list.render(&pages, 0);
         let extra = [
@@ -634,7 +634,7 @@ impl PageList<'_> {
             if i64::try_from(page.id) == Ok(self.front_page) {
                 class.extend_from_slice(b" menu-item-home");
             }
-            let title: &[u8] = if Value::String(page.title.clone()).is_empty() {
+            let title: &[u8] = if is_empty_string(&page.title) {
                 b"(no title)"
             } else {
                 &page.title
@@ -744,78 +744,6 @@ fn submenu_visibility(context: &Value) -> Vec<u8> {
     }
 }
 
-/// `block_core_page_list_build_css_colors()`, from the block context.
-fn page_list_colors(context: &Value) -> Colors {
-    let mut colors = Colors {
-        classes: Vec::new(),
-        styles: Vec::new(),
-        overlay_classes: Vec::new(),
-        overlay_styles: Vec::new(),
-    };
-    let value = |name| context.get_str(name).map(Value::to_php_string);
-    let kebab = |name: Vec<u8>| kebab_case(&String::from_utf8_lossy(&name)).into_bytes();
-    for (named, picked, custom, flag, class, property, overlay) in [
-        (
-            "textColor",
-            "customTextColor",
-            Some("text"),
-            "has-text-color",
-            "color",
-            "color",
-            false,
-        ),
-        (
-            "backgroundColor",
-            "customBackgroundColor",
-            Some("background"),
-            "has-background",
-            "background-color",
-            "background-color",
-            false,
-        ),
-        (
-            "overlayTextColor",
-            "customOverlayTextColor",
-            None,
-            "has-text-color",
-            "color",
-            "color",
-            true,
-        ),
-        (
-            "overlayBackgroundColor",
-            "customOverlayBackgroundColor",
-            None,
-            "has-background",
-            "background-color",
-            "background-color",
-            true,
-        ),
-    ] {
-        let (classes, styles) = if overlay {
-            (&mut colors.overlay_classes, &mut colors.overlay_styles)
-        } else {
-            (&mut colors.classes, &mut colors.styles)
-        };
-        let custom = custom
-            .and_then(|key| context.get_path(&["style", "color", key]))
-            .filter(|v| isset(Some(v)))
-            .map(Value::to_php_string);
-        let (named, picked) = (value(named), value(picked));
-        if named.is_some() || picked.is_some() || custom.is_some() {
-            classes.push(flag.as_bytes().to_vec());
-        }
-        if let Some(named) = named {
-            classes.push([&b"has-"[..], &kebab(named), b"-", class.as_bytes()].concat());
-        } else if let Some(color) = picked.or(custom) {
-            styles.extend_from_slice(format!("{property}: ").as_bytes());
-            styles.extend(color);
-            styles.push(b';');
-        }
-    }
-    colors
-}
-
 /// `block_core_navigation_typographic_presets_backcompatibility()`, the
 /// `render_block_data` filter: preset references in typography styles
 /// become plain values.
@@ -865,7 +793,8 @@ fn has_block_type(blocks: &[Block], name: &str) -> bool {
     })
 }
 
-/// `block_core_navigation_build_css_colors()` and its font size twin.
+/// Color classes and inline styles, for the block and for its overlay.
+#[derive(Default)]
 struct Colors {
     classes: Vec<Vec<u8>>,
     styles: Vec<u8>,
@@ -873,44 +802,41 @@ struct Colors {
     overlay_styles: Vec<u8>,
 }
 
-fn colors(attributes: &Value) -> Colors {
-    let mut colors = Colors {
-        classes: Vec::new(),
-        styles: Vec::new(),
-        overlay_classes: Vec::new(),
-        overlay_styles: Vec::new(),
-    };
-    let value = |name| attributes.get_str(name).map(Value::to_php_string);
-    for (named, custom, flag, class, property, overlay) in [
+/// `block_core_navigation_build_css_colors()`, or with `page_list` its page
+/// list twin, which also reads `style.color` and kebab-cases named colors.
+fn build_colors(source: &Value, page_list: bool) -> Colors {
+    let mut colors = Colors::default();
+    let value = |name| source.get_str(name).map(Value::to_php_string);
+    for (named, picked, custom, flag, property, overlay) in [
         (
             "textColor",
             "customTextColor",
+            "text",
             "has-text-color",
-            "color",
             "color",
             false,
         ),
         (
             "backgroundColor",
             "customBackgroundColor",
+            "background",
             "has-background",
-            "background-color",
             "background-color",
             false,
         ),
         (
             "overlayTextColor",
             "customOverlayTextColor",
+            "",
             "has-text-color",
-            "color",
             "color",
             true,
         ),
         (
             "overlayBackgroundColor",
             "customOverlayBackgroundColor",
+            "",
             "has-background",
-            "background-color",
             "background-color",
             true,
         ),
@@ -920,18 +846,34 @@ fn colors(attributes: &Value) -> Colors {
         } else {
             (&mut colors.classes, &mut colors.styles)
         };
-        let (named, custom) = (value(named), value(custom));
-        if named.is_some() || custom.is_some() {
+        let custom = source
+            .get_path(&["style", "color", custom])
+            .filter(|v| page_list && !overlay && isset(Some(v)))
+            .map(Value::to_php_string);
+        let (named, picked) = (value(named), value(picked));
+        if named.is_some() || picked.is_some() || custom.is_some() {
             classes.push(flag.as_bytes().to_vec());
         }
         if let Some(named) = named {
-            classes.push([&b"has-"[..], &named, b"-", class.as_bytes()].concat());
-        } else if let Some(custom) = custom {
+            let named = if page_list {
+                kebab_case(&String::from_utf8_lossy(&named)).into_bytes()
+            } else {
+                named
+            };
+            classes.push([&b"has-"[..], &named, b"-", property.as_bytes()].concat());
+        } else if let Some(color) = picked.or(custom) {
             styles.extend_from_slice(format!("{property}: ").as_bytes());
-            styles.extend(custom);
+            styles.extend(color);
             styles.push(b';');
         }
     }
+    colors
+}
+
+/// The navigation block's colors, then its font size class or style.
+fn colors(attributes: &Value) -> Colors {
+    let mut colors = build_colors(attributes, false);
+    let value = |name| attributes.get_str(name).map(Value::to_php_string);
     if let Some(size) = value("fontSize") {
         colors
             .classes
@@ -1078,22 +1020,6 @@ fn urldecode(text: &[u8]) -> Vec<u8> {
         .map(|&b| if b == b'+' { b' ' } else { b })
         .collect();
     rawurldecode(&spaced)
-}
-
-/// The host, with `:port`, of `wp_upload_dir()`'s URL, which lives under
-/// `siteurl`.
-fn upload_host(siteurl: &[u8]) -> Vec<u8> {
-    let after_scheme = siteurl
-        .windows(3)
-        .position(|w| w == b"://")
-        .and_then(|at| siteurl.get(at + 3..))
-        .unwrap_or_default();
-    let authority = after_scheme
-        .split(|&b| matches!(b, b'/' | b'?' | b'#'))
-        .next()
-        .unwrap_or_default();
-    let host = authority.rsplit(|&b| b == b'@').next().unwrap_or_default();
-    host.to_vec()
 }
 
 fn string(text: &str) -> Value {

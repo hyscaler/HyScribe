@@ -9,11 +9,13 @@
 //! `text`, `each` and `router-region` are not ported yet, so markup that
 //! mentions them is left as rendered.
 
+use crate::formatting::find;
+use crate::layout::is_void;
 use hyscribe_html::{Attribute, TagProcessor};
-use hyscribe_phpser::{Key, Value, json_decode, json_encode, php_trim};
+use hyscribe_phpser::{Key, Value, is_empty_string, json_decode, json_encode, php_trim};
 
 /// The directive processors, in the order WordPress registers them.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 enum Directive {
     Interactive,
     Context,
@@ -30,26 +32,9 @@ const DIRECTIVES: [(&[u8], Directive); 5] = [
     (b"style", Directive::Style),
 ];
 
-/// Elements whose closing tag the tag processor never visits.
-const NO_CLOSER: [&[u8]; 26] = [
-    b"AREA",
-    b"BASE",
-    b"BASEFONT",
-    b"BGSOUND",
-    b"BR",
-    b"COL",
-    b"EMBED",
-    b"FRAME",
-    b"HR",
-    b"IMG",
-    b"INPUT",
-    b"KEYGEN",
-    b"LINK",
-    b"META",
-    b"PARAM",
-    b"SOURCE",
-    b"TRACK",
-    b"WBR",
+/// Elements the tag processor reads as text up to their closer, which it
+/// never visits; void elements have none either.
+const SPECIAL: [&[u8]; 8] = [
     b"SCRIPT",
     b"IFRAME",
     b"NOEMBED",
@@ -76,7 +61,9 @@ pub(crate) fn process_directives(html: &[u8]) -> Vec<u8> {
         b"data-wp-each",
         b"data-wp-router-region",
     ];
-    if find(html, b"data-wp-").is_none() || unported.iter().any(|name| find(html, name).is_some()) {
+    if find(html, 0, b"data-wp-").is_none()
+        || unported.iter().any(|name| find(html, 0, name).is_some())
+    {
         return html.to_vec();
     }
     let mut state = Directives {
@@ -104,7 +91,8 @@ impl Directives {
                 continue;
             }
             let closer = p.is_tag_closer();
-            let visits_closer = !NO_CLOSER.contains(&tag.as_slice());
+            // has_and_visits_its_closer_tag()
+            let visits_closer = !is_void(&tag) && !SPECIAL.contains(&tag.as_slice());
             let directives = if closer {
                 match tag_stack.pop() {
                     Some((opener, directives)) if opener == tag => directives,
@@ -168,8 +156,7 @@ impl Directives {
             _ => None,
         };
         let valid = namespace.filter(|ns| {
-            !Value::String(ns.clone()).is_empty()
-                && ns.first().is_some_and(|&b| is_namespace_byte(b))
+            !is_empty_string(ns) && ns.first().is_some_and(|&b| is_namespace_byte(b))
         });
         let pushed = match valid {
             Some(ns) => Some(ns),
@@ -240,11 +227,7 @@ impl Directives {
     /// `data_wp_class_processor()`.
     fn class(&self, p: &mut TagProcessor) {
         for entry in self.entries(p, b"class") {
-            let Some(suffix) = entry
-                .suffix
-                .clone()
-                .filter(|s| !Value::String(s.clone()).is_empty())
-            else {
+            let Some(suffix) = entry.suffix.clone().filter(|s| !is_empty_string(s)) else {
                 continue;
             };
             let class_name = match &entry.unique_id {
@@ -262,11 +245,7 @@ impl Directives {
     /// `data_wp_style_processor()`.
     fn style(&self, p: &mut TagProcessor) {
         for entry in self.entries(p, b"style") {
-            let Some(property) = entry
-                .suffix
-                .clone()
-                .filter(|s| !Value::String(s.clone()).is_empty())
-            else {
+            let Some(property) = entry.suffix.clone().filter(|s| !is_empty_string(s)) else {
                 continue;
             };
             if entry.unique_id.is_some() {
@@ -277,11 +256,11 @@ impl Directives {
                 Some(Attribute::Value(style)) => style,
                 _ => Vec::new(),
             };
-            if value.is_empty() && Value::String(current.clone()).is_empty() {
+            if value.is_empty() && is_empty_string(&current) {
                 continue;
             }
             let merged = merge_style_property(&current, &property, &value);
-            if Value::String(merged.clone()).is_empty() {
+            if is_empty_string(&merged) {
                 p.remove_attribute(b"style");
             } else {
                 p.set_attribute(b"style", &merged);
@@ -320,11 +299,7 @@ impl Directives {
     /// `evaluate()`: the value at the entry's path, in the server state
     /// (always empty here) or the context.
     fn evaluate(&self, entry: &Entry) -> Value {
-        let Some(namespace) = entry
-            .namespace
-            .as_ref()
-            .filter(|ns| !Value::String((*ns).clone()).is_empty())
-        else {
+        let Some(namespace) = entry.namespace.as_ref().filter(|ns| !is_empty_string(ns)) else {
             return Value::Null;
         };
         if entry.value.is_empty() {
@@ -421,7 +396,7 @@ fn parse_directive_name(name: &[u8]) -> Option<(Vec<u8>, Option<Vec<u8>>, Option
     {
         return None;
     }
-    let Some(at) = find(name, b"--") else {
+    let Some(at) = find(name, 0, b"--") else {
         return Some((name.to_vec(), None, None));
     };
     let prefix = name.get(..at).unwrap_or_default().to_vec();
@@ -435,7 +410,7 @@ fn parse_directive_name(name: &[u8]) -> Option<(Vec<u8>, Option<Vec<u8>>, Option
         ));
     }
     let suffix = remaining.get(2..).unwrap_or_default();
-    if let Some(id_at) = find(suffix, b"---")
+    if let Some(id_at) = find(suffix, 0, b"---")
         && suffix.get(id_at + 3) != Some(&b'-')
     {
         let id = suffix.get(id_at + 3..).unwrap_or_default();
@@ -497,7 +472,7 @@ fn merge_style_property(style: &[u8], property: &[u8], value: &Value) -> Vec<u8>
     });
     let mut out = Vec::new();
     for assignment in style.split(|&b| b == b';') {
-        if Value::String(php_trim(assignment).to_vec()).is_empty() {
+        if is_empty_string(php_trim(assignment)) {
             continue;
         }
         let mut parts = assignment.split(|&b| b == b':');
@@ -510,7 +485,7 @@ fn merge_style_property(style: &[u8], property: &[u8], value: &Value) -> Vec<u8>
             out.push(b';');
         }
     }
-    if let Some(value) = value.filter(|v| !Value::String(v.clone()).is_empty()) {
+    if let Some(value) = value.filter(|v| !is_empty_string(v)) {
         out.extend_from_slice(property);
         out.push(b':');
         out.extend(value);
@@ -542,10 +517,6 @@ fn is_list(entries: &[(Key, Value)]) -> bool {
         .iter()
         .zip(0..)
         .all(|((key, _), i)| *key == Key::Int(i))
-}
-
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    crate::formatting::find(haystack, 0, needle)
 }
 
 #[cfg(test)]

@@ -73,8 +73,8 @@ pub struct PostQuery {
     pub exclude: Vec<u64>,
     /// Oldest first, where WordPress defaults to newest first.
     pub ascending: bool,
-    /// By `menu_order` then title, as `get_pages()` sorts, instead of by
-    /// date.
+    /// By `menu_order` then title, as `get_pages()` sorts, in place of the
+    /// date and search relevance orders; `ascending` is then ignored.
     pub by_menu_order: bool,
     /// How many posts.
     pub limit: u32,

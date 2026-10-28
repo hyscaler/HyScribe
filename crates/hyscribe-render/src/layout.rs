@@ -8,7 +8,7 @@
 //! style variations.
 
 use hyscribe_html::TagProcessor;
-use hyscribe_phpser::{Key, Value, json_encode, md5};
+use hyscribe_phpser::{Key, Value, is_empty_string, json_encode, md5};
 use hyscribe_theme_json::{GlobalStyles, kebab_case};
 
 use crate::formatting::sanitize_title;
@@ -251,9 +251,9 @@ fn layout_style(selector: &str, layout: &Value, gap: &Gap<'_>) -> Vec<Rule> {
             let (content, wide) = (text("contentSize"), text("wideSize"));
             let justify = field("justifyContent").map_or(b"center".to_vec(), Value::to_php_string);
             let width = |own: &[u8], other: &[u8], global: &str| -> Value {
-                let value = if !Value::String(own.to_vec()).is_empty() {
+                let value = if !is_empty_string(own) {
                     own.to_vec()
-                } else if !Value::String(other.to_vec()).is_empty() {
+                } else if !is_empty_string(other) {
                     other.to_vec()
                 } else {
                     format!("var(--wp--style--global--{global}-size, none)").into_bytes()
@@ -275,8 +275,7 @@ fn layout_style(selector: &str, layout: &Value, gap: &Gap<'_>) -> Vec<Rule> {
             };
             let main =
                 format!("{selector} > :where(:not(.alignleft):not(.alignright):not(.alignfull))");
-            if !Value::String(content.clone()).is_empty() || !Value::String(wide.clone()).is_empty()
-            {
+            if !is_empty_string(&content) || !is_empty_string(&wide) {
                 rules.push(rule(
                     main.clone(),
                     &[
@@ -556,7 +555,7 @@ fn layout_class(kind: Option<&Value>) -> Vec<u8> {
 }
 
 /// `WP_HTML_Processor::is_void()`.
-fn is_void(tag: &[u8]) -> bool {
+pub(crate) fn is_void(tag: &[u8]) -> bool {
     const VOID: [&[u8]; 18] = [
         b"AREA",
         b"BASE",

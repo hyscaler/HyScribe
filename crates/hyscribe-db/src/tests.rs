@@ -264,6 +264,7 @@ async fn errors_are_reported() {
         db.post_meta(1, "x").await.unwrap_err(),
         db.post_terms(1, "category").await.unwrap_err(),
         db.user(1).await.unwrap_err(),
+        db.comments(1).await.unwrap_err(),
         db.adjacent_post(&Post::default(), true, None)
             .await
             .unwrap_err(),
@@ -274,7 +275,8 @@ async fn errors_are_reported() {
                 "missing_posts",
                 "missing_terms",
                 "missing_postmeta",
-                "missing_users"
+                "missing_users",
+                "missing_comments"
             ]
             .iter()
             .any(|table| err.to_string().contains(table)),
@@ -341,6 +343,14 @@ async fn options_meta_and_terms() {
     let admin = db.user(1).await.unwrap().unwrap();
     assert_eq!((admin.id, admin.display_name), (1, b"admin".to_vec()));
     assert_eq!(db.user(99).await.unwrap(), None);
+    let comments = db.comments(1).await.unwrap();
+    assert_eq!(comments.len(), 1);
+    assert_eq!(
+        (comments[0].id, comments[0].parent, &comments[0].author[..]),
+        (1, 0, &b"A WordPress Commenter"[..])
+    );
+    assert!(comments[0].content.starts_with(b"Hi, this is a comment."));
+    assert!(db.comments(2).await.unwrap().is_empty());
     assert_eq!(
         db.post_meta(2, "_wp_page_template").await.unwrap(),
         Some(b"default".to_vec())

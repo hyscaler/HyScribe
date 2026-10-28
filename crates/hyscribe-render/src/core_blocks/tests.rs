@@ -48,6 +48,7 @@ impl Site for Fixture {
         (id == 1).then(|| hyscribe_model::User {
             id,
             display_name: b"admin".to_vec(),
+            nicename: b"admin".to_vec(),
         })
     }
 }
@@ -163,6 +164,7 @@ fn matches_php() {
             request: &request,
             post_id,
             query: None,
+            comment: None,
         };
         let ours = render_markup(&context, &markup);
         if ours != php {
@@ -211,6 +213,7 @@ fn relative_dates() {
         request: requests.iter().find(|r| r.now == now).unwrap(),
         post_id: Some(7),
         query: None,
+        comment: None,
     };
     let markup = br#"<!-- wp:post-date {"format":"human-diff"} /-->"#;
     let posted = date::stored_unix("2026-10-27 10:00:00", Zone::Utc);
@@ -233,6 +236,7 @@ fn blocks_without_a_callback_render_their_saved_markup() {
         request: &Request::default(),
         post_id: None,
         query: None,
+        comment: None,
     };
     assert_eq!(render(&context, "core/paragraph", &[], b""), None);
     assert_eq!(
@@ -266,6 +270,7 @@ fn bindings_and_the_front_page() {
         request: &Request::default(),
         post_id: Some(9),
         query: None,
+        comment: None,
     };
     let html =
         |markup: &str| String::from_utf8(render_markup(&context, markup.as_bytes())).unwrap();
@@ -341,6 +346,7 @@ fn post_terms_match_php() {
             request: &request,
             post_id: (state.get_str("context") == Some(&Value::Bool(true))).then_some(1001),
             query: None,
+            comment: None,
         };
         assert_eq!(
             String::from_utf8_lossy(&render_markup(&context, &markup)),
@@ -444,6 +450,7 @@ fn post_navigation_links_match_php() {
             request: &request,
             post_id: Some(site.post.as_ref().map_or(9999, |post| post.id)),
             query: None,
+            comment: None,
         };
         assert_eq!(
             String::from_utf8_lossy(&render_markup(&context, &markup)),
@@ -478,6 +485,7 @@ fn comments_match_php() {
             request: &request,
             post_id: site.post.as_ref().map(|post| post.id),
             query: None,
+            comment: None,
         };
         assert_eq!(
             String::from_utf8_lossy(&render_markup(&context, &markup)),
@@ -511,6 +519,7 @@ fn legacy_comments_are_not_ported() {
         request: &request,
         post_id: Some(1),
         query: None,
+        comment: None,
     };
     for markup in [
         &b"<!-- wp:comments {\"legacy\":true} /-->"[..],

@@ -13,7 +13,7 @@
 use std::fmt;
 
 use hyscribe_config::{Database, Prefix};
-use hyscribe_model::{Post, PostQuery, Term, User};
+use hyscribe_model::{Comment, Post, PostQuery, Term, User};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
 
@@ -123,8 +123,27 @@ fn user(row: &MySqlRow) -> Result<User, DbError> {
     let user = User {
         id: c.unsigned("ID"),
         display_name: c.bytes("display_name"),
+        nicename: c.bytes("user_nicename"),
     };
     c.finish(user)
+}
+
+fn comment(row: &MySqlRow) -> Result<Comment, DbError> {
+    let mut c = Columns::new(row);
+    let comment = Comment {
+        id: c.unsigned("comment_ID"),
+        post_id: c.unsigned("comment_post_ID"),
+        author: c.bytes("comment_author"),
+        author_email: c.bytes("comment_author_email"),
+        author_url: c.bytes("comment_author_url"),
+        date: c.text("comment_date"),
+        date_gmt: c.text("comment_date_gmt"),
+        content: c.bytes("comment_content"),
+        comment_type: c.bytes("comment_type"),
+        parent: c.unsigned("comment_parent"),
+        user_id: c.unsigned("user_id"),
+    };
+    c.finish(comment)
 }
 
 fn post(row: &MySqlRow) -> Result<Post, DbError> {
@@ -303,11 +322,30 @@ impl Db {
         row.as_ref().map(crate::post).transpose()
     }
 
+    /// A post's approved comments, as `WP_Comment_Query` orders them for
+    /// the comment template: oldest first, then by ID.
+    pub async fn comments(&self, post_id: u64) -> Result<Vec<Comment>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT comment_ID, comment_post_ID, comment_author, comment_author_email, \
+             comment_author_url, CAST(comment_date AS CHAR) AS comment_date, \
+             CAST(comment_date_gmt AS CHAR) AS comment_date_gmt, comment_content, comment_type, \
+             comment_parent, user_id FROM {prefix}comments \
+             WHERE comment_post_ID = ? AND comment_approved = '1' AND comment_type != 'note' \
+             ORDER BY comment_date_gmt ASC, comment_ID ASC",
+        );
+        let rows = sqlx::query(sql)
+            .bind(post_id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(comment).collect()
+    }
+
     /// One user by ID.
     pub async fn user(&self, id: u64) -> Result<Option<User>, DbError> {
         let sql = self
             .prefix
-            .sql("SELECT ID, display_name FROM {prefix}users WHERE ID = ?");
+            .sql("SELECT ID, display_name, user_nicename FROM {prefix}users WHERE ID = ?");
         let row = sqlx::query(sql)
             .bind(id)
             .fetch_optional(&self.pool)

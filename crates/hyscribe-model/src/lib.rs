@@ -60,6 +60,36 @@ pub struct User {
     pub id: u64,
     /// `display_name`.
     pub display_name: Vec<u8>,
+    /// `user_nicename`.
+    pub nicename: Vec<u8>,
+}
+
+/// A row of `{prefix}comments`, with the columns rendering needs.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Comment {
+    /// `comment_ID`.
+    pub id: u64,
+    /// `comment_post_ID`.
+    pub post_id: u64,
+    /// `comment_author`.
+    pub author: Vec<u8>,
+    /// `comment_author_email`.
+    pub author_email: Vec<u8>,
+    /// `comment_author_url`.
+    pub author_url: Vec<u8>,
+    /// `comment_date`, local time.
+    pub date: String,
+    /// `comment_date_gmt`.
+    pub date_gmt: String,
+    /// `comment_content`.
+    pub content: Vec<u8>,
+    /// `comment_type`: empty or `comment` for a comment, or `pingback`,
+    /// `trackback` and the like.
+    pub comment_type: Vec<u8>,
+    /// `comment_parent`.
+    pub parent: u64,
+    /// `user_id`.
+    pub user_id: u64,
 }
 
 /// What a list of posts is filtered by.

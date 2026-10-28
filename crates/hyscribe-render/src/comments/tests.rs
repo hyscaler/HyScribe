@@ -1,0 +1,143 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+use hyscribe_model::{Post, PostQuery, Term, User};
+use hyscribe_phpser::json_decode;
+use hyscribe_testkit::unhex;
+
+use super::*;
+use crate::fixture::DefaultInstall;
+use crate::site::{Request, Site};
+use crate::theme::twentytwentyfive;
+
+/// The fixture database with `golden.php`'s comments and options.
+struct WithComments {
+    base: DefaultInstall,
+    options: Value,
+    comments: Vec<Comment>,
+    users: Vec<User>,
+    password: bool,
+}
+
+impl Site for WithComments {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        match self.options.get_str(name) {
+            Some(value) => Some(value.to_php_string()),
+            None => self.base.option(name),
+        }
+    }
+    fn home_url(&self) -> Vec<u8> {
+        self.base.home_url()
+    }
+    fn post(&self, id: u64) -> Option<Post> {
+        let password = if self.password {
+            b"pw".to_vec()
+        } else {
+            Vec::new()
+        };
+        self.base.post(id).map(|post| Post { password, ..post })
+    }
+    fn post_terms(&self, post_id: u64, taxonomy: &str) -> Vec<Term> {
+        self.base.post_terms(post_id, taxonomy)
+    }
+    fn post_meta(&self, post_id: u64, key: &str) -> Option<Vec<u8>> {
+        self.base.post_meta(post_id, key)
+    }
+    fn query(&self, query: &PostQuery) -> Vec<Post> {
+        self.base.query(query)
+    }
+    fn comments(&self, post_id: u64) -> Vec<Comment> {
+        self.comments
+            .iter()
+            .filter(|c| c.post_id == post_id)
+            .cloned()
+            .collect()
+    }
+    fn user(&self, id: u64) -> Option<User> {
+        self.users.iter().find(|user| user.id == id).cloned()
+    }
+}
+
+/// The approved comments among a golden's rows, in the database's order.
+fn approved(rows: &Value) -> Vec<Comment> {
+    let text = |row: &Value, name| row.get_str(name).unwrap().to_php_string();
+    let number = |row: &Value, name| row.get_str(name).unwrap().to_int() as u64;
+    let mut comments: Vec<Comment> = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|(_, row)| row)
+        .filter(|row| text(row, "comment_approved") == b"1" && text(row, "comment_type") != b"note")
+        .map(|row| Comment {
+            id: number(row, "comment_ID"),
+            post_id: number(row, "comment_post_ID"),
+            author: text(row, "comment_author"),
+            author_email: text(row, "comment_author_email"),
+            author_url: text(row, "comment_author_url"),
+            date: String::from_utf8(text(row, "comment_date")).unwrap(),
+            date_gmt: String::from_utf8(text(row, "comment_date_gmt")).unwrap(),
+            content: text(row, "comment_content"),
+            comment_type: text(row, "comment_type"),
+            parent: number(row, "comment_parent"),
+            user_id: number(row, "user_id"),
+        })
+        .collect();
+    comments.sort_by(|a, b| (&a.date_gmt, a.id).cmp(&(&b.date_gmt, b.id)));
+    comments
+}
+
+fn users(rows: &Value) -> Vec<User> {
+    let text = |row: &Value, name| row.get_str(name).unwrap().to_php_string();
+    rows.as_array()
+        .unwrap()
+        .iter()
+        .map(|(_, row)| User {
+            id: row.get_str("ID").unwrap().to_int() as u64,
+            display_name: text(row, "display_name"),
+            nicename: text(row, "user_nicename"),
+        })
+        .collect()
+}
+
+/// Every case of `reference/comments/golden.sh`.
+#[test]
+fn matches_php() {
+    let theme = twentytwentyfive();
+    let golden = include_str!("../../tests/golden/comments.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let mut fields = line.split('\t').map(unhex);
+        let mut field = || fields.next().unwrap();
+        let (markup, state, php) = (field(), json_decode(&field()).unwrap(), field());
+        let site = WithComments {
+            base: DefaultInstall {
+                home: b"http://127.0.0.1:8081".to_vec(),
+            },
+            options: state.get_str("options").unwrap().clone(),
+            comments: approved(state.get_str("comments").unwrap()),
+            users: users(state.get_str("users").unwrap()),
+            password: state.get_str("password") == Some(&Value::Bool(true)),
+        };
+        let request = Request::default();
+        let mut renderer = Renderer::new(&theme, &site, &request);
+        let post = state.get_str("post").unwrap().to_int() as u64;
+        renderer.context.post_id = (post != 0).then_some(post);
+        let block = &crate::blocks::parse_blocks(&markup)[0];
+        let ours = [renderer.block(block), renderer.block(block)].concat();
+        if ours != php {
+            failures.push(format!(
+                "{} {:?}\n  php:  {}\n  ours: {}",
+                String::from_utf8_lossy(&markup),
+                state.get_str("options"),
+                String::from_utf8_lossy(&php),
+                String::from_utf8_lossy(&ours)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures[..failures.len().min(3)].join("\n")
+    );
+    assert_eq!(golden.lines().count(), 37);
+}

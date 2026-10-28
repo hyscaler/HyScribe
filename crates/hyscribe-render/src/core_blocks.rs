@@ -5,7 +5,7 @@
 //! `prepare_attributes_for_render()` leaves them.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
-use hyscribe_model::Post;
+use hyscribe_model::{Comment, Post};
 use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim};
 
 use crate::date::{self, Zone};
@@ -30,6 +30,8 @@ pub(crate) struct Context<'a> {
     pub(crate) post_id: Option<u64>,
     /// The context `core/query` provides.
     pub(crate) query: Option<QueryContext>,
+    /// The comment the comment template is rendering, its `commentId`.
+    pub(crate) comment: Option<Comment>,
 }
 
 /// The block context of a query block's descendants: `query`,

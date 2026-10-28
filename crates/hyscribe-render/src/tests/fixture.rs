@@ -5,7 +5,7 @@
 
 use std::sync::OnceLock;
 
-use hyscribe_model::{Post, PostQuery, Term, User};
+use hyscribe_model::{Comment, Post, PostQuery, Term, User};
 use hyscribe_phpser::Value;
 use hyscribe_testkit::{Dump, SqlValue, default_install};
 
@@ -219,6 +219,30 @@ impl Site for DefaultInstall {
         }
     }
 
+    fn comments(&self, post_id: u64) -> Vec<Comment> {
+        let mut comments: Vec<Comment> = dump()
+            .table("wp_comments")
+            .filter(|row| {
+                number(&row[1]) == post_id && text(&row[10]) == b"1" && text(&row[12]) != b"note"
+            })
+            .map(|row| Comment {
+                id: number(&row[0]),
+                post_id,
+                author: text(&row[2]),
+                author_email: text(&row[3]),
+                author_url: text(&row[4]),
+                date: string(&row[6]),
+                date_gmt: string(&row[7]),
+                content: text(&row[8]),
+                comment_type: text(&row[12]),
+                parent: number(&row[13]),
+                user_id: number(&row[14]),
+            })
+            .collect();
+        comments.sort_by(|a, b| (&a.date_gmt, a.id).cmp(&(&b.date_gmt, b.id)));
+        comments
+    }
+
     fn user(&self, id: u64) -> Option<User> {
         dump()
             .table("wp_users")
@@ -226,6 +250,7 @@ impl Site for DefaultInstall {
             .map(|row| User {
                 id,
                 display_name: text(&row[9]),
+                nicename: text(&row[3]),
             })
     }
 

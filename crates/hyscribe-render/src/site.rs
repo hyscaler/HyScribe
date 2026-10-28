@@ -2,7 +2,7 @@
 
 //! What dynamic blocks read from the site and the request (ADR 0009).
 
-use hyscribe_model::{Post, PostQuery, Term, User};
+use hyscribe_model::{Comment, Post, PostQuery, Term, User};
 
 /// The site's data, as blocks read it while rendering.
 pub trait Site {
@@ -23,6 +23,12 @@ pub trait Site {
 
     /// The published posts a `WP_Query` with `query`'s arguments finds.
     fn query(&self, query: &PostQuery) -> Vec<Post>;
+
+    /// A post's approved comments, oldest first, then by ID. Sites without
+    /// comment data have none.
+    fn comments(&self, _post_id: u64) -> Vec<Comment> {
+        vec![]
+    }
 
     /// `get_userdata( $id )`. Sites without user data have none.
     fn user(&self, _id: u64) -> Option<User> {

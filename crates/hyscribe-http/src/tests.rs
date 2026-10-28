@@ -92,6 +92,12 @@ async fn single_posts_and_pages() {
             .body
             .contains("<h1 class=\"wp-block-post-title\">Hello world!</h1>")
     );
+    // The fixture's one comment, threaded at the top level.
+    assert!(
+        reply
+            .body
+            .contains("<li id=\"comment-1\" class=\"comment even thread-even depth-1\">")
+    );
     // The author's display name, read from the users table.
     assert!(reply.body.contains(
         "<a href=\"http://127.0.0.1:8080/?author=1\" target=\"_self\" class=\"wp-block-post-author-name__link\">admin</a>"

@@ -139,6 +139,11 @@ pub(crate) struct Renderer<'a> {
     /// An interactive block is rendering; its directives are processed
     /// when it ends, with every interactive block inside it.
     in_interactive: bool,
+    /// `comment_class()`'s globals: comments and top-level comments seen,
+    /// and the depth being rendered.
+    pub(crate) comment_alt: u64,
+    pub(crate) comment_thread_alt: u64,
+    pub(crate) comment_depth: u64,
 }
 
 /// A string attribute.
@@ -156,6 +161,7 @@ impl<'a> Renderer<'a> {
                 request,
                 post_id: request.post,
                 query: None,
+                comment: None,
             },
             open_parts: Vec::new(),
             open_patterns: Vec::new(),
@@ -166,6 +172,9 @@ impl<'a> Renderer<'a> {
             navigation: None,
             has_submenus: false,
             in_interactive: false,
+            comment_alt: 0,
+            comment_thread_alt: 0,
+            comment_depth: 0,
         }
     }
 
@@ -213,6 +222,7 @@ impl Renderer<'_> {
             Some("core/navigation") => self.navigation(block),
             Some("core/navigation-link") => self.navigation_link(block),
             Some("core/page-list") => self.page_list(block),
+            Some("core/comment-template") => self.comment_template(block),
             Some(name) => {
                 let content = self.saved_markup(block);
                 let parsed = block.attrs.as_deref().unwrap_or_default();

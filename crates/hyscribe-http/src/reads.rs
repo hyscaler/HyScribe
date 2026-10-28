@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::future::Future;
 
 use hyscribe_db::DbError;
-use hyscribe_model::{Post, PostQuery, Term, User};
+use hyscribe_model::{Comment, Post, PostQuery, Term, User};
 use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
@@ -27,6 +27,7 @@ pub(crate) struct Reads<'a> {
     options: RefCell<HashMap<String, Option<Vec<u8>>>>,
     posts: RefCell<HashMap<u64, Option<Post>>>,
     users: RefCell<HashMap<u64, Option<User>>>,
+    comments: RefCell<HashMap<u64, Vec<Comment>>>,
     terms: ByPost<Vec<Term>>,
     meta: ByPost<Option<Vec<u8>>>,
 }
@@ -40,6 +41,7 @@ impl<'a> Reads<'a> {
             options: RefCell::default(),
             posts: RefCell::default(),
             users: RefCell::default(),
+            comments: RefCell::default(),
             terms: RefCell::default(),
             meta: RefCell::default(),
         }
@@ -115,6 +117,12 @@ impl RenderSite for Reads<'_> {
         terms: Option<(&str, &[u64])>,
     ) -> Option<Post> {
         self.wait(self.site.db.adjacent_post(post, previous, terms))
+    }
+
+    fn comments(&self, post_id: u64) -> Vec<Comment> {
+        self.memo(&self.comments, post_id, || {
+            self.wait(self.site.db.comments(post_id))
+        })
     }
 
     fn user(&self, id: u64) -> Option<User> {

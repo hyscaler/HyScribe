@@ -1,32 +1,97 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The posts feed (`?feed=rss2`) of a list query, with the caching headers
-//! `WP::send_headers()` gives a feed.
+//! The RSS2 feeds: a list query's posts (`?feed=rss2`), and comments, the
+//! site's (`?feed=comments-rss2`) or a post's (`?feed=rss2&p=1`), with
+//! the caching headers `WP::send_headers()` gives a feed.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use axum::http::{HeaderMap, HeaderName, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use hyscribe_db::DbError;
+use hyscribe_model::Comment;
 use hyscribe_phpser::md5;
 use hyscribe_render::date::{self, Zone};
-use hyscribe_render::feed::rss2;
+use hyscribe_render::feed::{rss2, rss2_comments};
 
+use crate::query::absint;
 use crate::reads::Reads;
-use crate::{Page, Rendered, Site, finished, html};
+use crate::{Outcome, Page, Rendered, Site, finished, html};
 
 /// The months of an HTTP date.
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-/// The feed of `page`'s posts, or 304 when the client's copy is current.
+/// What a feed lists besides its page's posts.
+pub(crate) struct Feed {
+    /// `get_lastpostmodified( 'GMT' )`.
+    last_post: Option<String>,
+    /// For a comment feed, its comments.
+    comments: Option<Comments>,
+}
+
+/// A comment feed's comments, newest first.
+pub(crate) struct Comments {
+    list: Vec<Comment>,
+    /// `get_lastcommentmodified( 'GMT' )`.
+    last: Option<String>,
+    /// `is_single()`: a post, not a page, was asked for.
+    single: bool,
+}
+
+/// The feed of `page`, with `comments` its comment feed: of the post given,
+/// or the site's, and whether a post (not a page) was asked for.
+pub(crate) async fn outcome(
+    site: &Site,
+    page: impl Future<Output = Result<Page, DbError>>,
+    comments: Option<(Option<u64>, bool)>,
+) -> Result<Outcome, DbError> {
+    let limit = absint(&site.option("posts_per_rss"));
+    let listed = async {
+        match comments {
+            Some((post, _)) => site.db.feed_comments(post, limit).await.map(Some),
+            None => Ok(None),
+        }
+    };
+    let (page, last_post, listed, last_comment) = tokio::join!(
+        page,
+        site.db.last_post_modified(),
+        listed,
+        site.db.last_comment_modified()
+    );
+    page.and_then(|page| {
+        let feed = |last_post, listed: Option<Vec<Comment>>, last| Feed {
+            last_post,
+            comments: listed.map(|list| Comments {
+                list,
+                last,
+                single: comments.is_some_and(|(_, single)| single),
+            }),
+        };
+        last_post.and_then(|last_post| {
+            listed.and_then(|listed| {
+                last_comment
+                    .map(|last| Outcome::Feed(Box::new(page), feed(last_post, listed, last)))
+            })
+        })
+    })
+}
+
+/// The feed of `page`, or 304 when the client's copy is current.
 pub(crate) async fn respond(
     site: Arc<Site>,
     page: Page,
-    last: Option<String>,
+    feed: Feed,
     headers: &HeaderMap,
 ) -> Response {
-    let last_modified = last_modified(last.as_deref(), page.request.now);
+    // A comment feed changes with its comments too.
+    let changed = match &feed.comments {
+        Some(comments) => feed.last_post.clone().max(comments.last.clone()),
+        None => feed.last_post.clone(),
+    };
+    let last_modified = last_modified(changed.as_deref(), page.request.now);
     let etag = format!("\"{}\"", md5(last_modified.as_bytes()));
     let charset = site.option("blog_charset");
     let cache = [
@@ -40,14 +105,20 @@ pub(crate) async fn respond(
     let Page { request, title, .. } = page;
     let body = tokio::task::spawn_blocking(move || {
         let reads = Reads::new(&rendering, tokio::runtime::Handle::current());
-        let feed = rss2(
-            &rendering.theme,
-            &reads,
-            &request,
-            title.as_bytes(),
-            last.as_deref(),
-        );
-        reads.finish().map(|()| feed)
+        let last = feed.last_post.as_deref();
+        let made = match &feed.comments {
+            Some(comments) => rss2_comments(
+                &rendering.theme,
+                &reads,
+                &request,
+                title.as_bytes(),
+                comments.single,
+                &comments.list,
+                last,
+            ),
+            None => rss2(&rendering.theme, &reads, &request, title.as_bytes(), last),
+        };
+        reads.finish().map(|()| made)
     })
     .await;
     response(finished(&site, body), &charset, cache)

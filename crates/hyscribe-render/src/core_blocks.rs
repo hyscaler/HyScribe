@@ -183,11 +183,7 @@ fn comment_content(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     if is_empty_string(&comment.content) {
         return Vec::new();
     }
-    let site = context.site;
-    let text = make_clickable(&comment.content, &site.home_url(), true);
-    let text = convert_chars(&wptexturize(&text, &CORE_SHORTCODE_TAGS));
-    let text = force_balance_tags(&site_smilies(site, &text));
-    let text = capital_p_dangit(&wpautop(&text, true));
+    let text = comment_text(context.site, &comment.content);
     [
         format!(
             "<div {}>",
@@ -198,6 +194,14 @@ fn comment_content(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         b"</div>",
     ]
     .concat()
+}
+
+/// The `comment_text` filters over a comment's content.
+pub(crate) fn comment_text(site: &dyn Site, content: &[u8]) -> Vec<u8> {
+    let text = make_clickable(content, &site.home_url(), true);
+    let text = convert_chars(&wptexturize(&text, &CORE_SHORTCODE_TAGS));
+    let text = force_balance_tags(&site_smilies(site, &text));
+    capital_p_dangit(&wpautop(&text, true))
 }
 
 /// `render_block_core_comment_date()`: the comment's date in `format`,

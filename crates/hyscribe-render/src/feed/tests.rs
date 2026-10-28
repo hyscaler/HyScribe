@@ -174,3 +174,111 @@ fn feed_without_posts() {
     assert!(feed(None).contains("<lastBuildDate></lastBuildDate>"));
     assert!(feed(None).ends_with("</generator>\n</channel>\n</rss>\n"));
 }
+
+/// The comments of a case, as the oracle's feed query found them.
+fn feed_comments(state: &Value) -> Vec<Comment> {
+    let text = |row: &Value, name| row.get_str(name).unwrap().to_php_string();
+    let number = |row: &Value, name| row.get_str(name).unwrap().to_int() as u64;
+    state
+        .get_str("comments")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .map(|(_, row)| Comment {
+            id: number(row, "comment_ID"),
+            post_id: number(row, "comment_post_ID"),
+            author: text(row, "comment_author"),
+            author_email: text(row, "comment_author_email"),
+            author_url: text(row, "comment_author_url"),
+            date: String::from_utf8(text(row, "comment_date")).unwrap(),
+            date_gmt: String::from_utf8(text(row, "comment_date_gmt")).unwrap(),
+            content: text(row, "comment_content"),
+            comment_type: text(row, "comment_type"),
+            parent: number(row, "comment_parent"),
+            user_id: number(row, "user_id"),
+        })
+        .collect()
+}
+
+/// Every comment feed case of `reference/feed/golden.sh`.
+#[test]
+fn comment_feeds_match_php() {
+    let theme = twentytwentyfive();
+    let golden = include_str!("../../tests/golden/comment-feeds.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let (state, php) = line.split_once('\t').unwrap();
+        let site = Changed {
+            base: DefaultInstall {
+                home: b"http://127.0.0.1:8081".to_vec(),
+            },
+            state: json_decode(&unhex(state)).unwrap(),
+        };
+        let php = String::from_utf8(unhex(php)).unwrap().replace(
+            "https://wordpress.org/?v=7.1.3",
+            &format!(
+                "{}?v={}",
+                env!("CARGO_PKG_REPOSITORY"),
+                env!("CARGO_PKG_VERSION")
+            ),
+        );
+        let query = site.state.get_str("query").unwrap();
+        let id = |name| query.get_str(name).map(|id| id.to_int() as u64);
+        let (single, page) = (id("p"), id("page_id"));
+        let post = single.or(page).unwrap_or(1);
+        let uri = format!(
+            "/?{}",
+            query
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| format!(
+                    "{}={}",
+                    String::from_utf8(k.to_php_string()).unwrap(),
+                    String::from_utf8(v.to_php_string()).unwrap()
+                ))
+                .collect::<Vec<_>>()
+                .join("&")
+        );
+        let request = Request {
+            singular: single.or(page).is_some(),
+            uri: uri.into_bytes(),
+            posts: vec![site.post(post).unwrap()],
+            ..site.base.request("")
+        };
+        let title = php
+            .get(php.find("Comments for ").map_or(0, |at| at + 13)..php.find("\t</title>").unwrap())
+            .unwrap();
+        let ours = rss2_comments(
+            &theme,
+            &site,
+            &request,
+            title.as_bytes(),
+            single.is_some(),
+            &feed_comments(&site.state),
+            Some("2026-10-27 08:08:15"),
+        );
+        if ours != php.as_bytes() {
+            let ours = String::from_utf8_lossy(&ours);
+            let at = ours
+                .bytes()
+                .zip(php.bytes())
+                .take_while(|(a, b)| a == b)
+                .count();
+            failures.push(format!(
+                "{state}\n  php:  {:?}\n  ours: {:?}",
+                php.get(at.saturating_sub(60)..php.len().min(at + 160))
+                    .unwrap_or_default(),
+                ours.get(at.saturating_sub(60)..ours.len().min(at + 160))
+                    .unwrap_or_default(),
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert_eq!(golden.lines().count(), 10);
+}

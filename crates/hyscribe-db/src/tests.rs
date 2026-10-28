@@ -461,3 +461,18 @@ async fn last_post_modified() {
         Some("2026-10-27 08:08:15")
     );
 }
+
+#[tokio::test]
+async fn feed_comments() {
+    let db = fixture().await;
+    let ids =
+        |comments: Vec<hyscribe_model::Comment>| comments.iter().map(|c| c.id).collect::<Vec<_>>();
+    assert_eq!(ids(db.feed_comments(None, 10).await.unwrap()), [1]);
+    assert_eq!(ids(db.feed_comments(Some(1), 10).await.unwrap()), [1]);
+    assert!(db.feed_comments(Some(2), 10).await.unwrap().is_empty());
+    assert!(db.feed_comments(None, 0).await.unwrap().is_empty());
+    assert_eq!(
+        db.last_comment_modified().await.unwrap().as_deref(),
+        Some("2026-10-27 08:08:15")
+    );
+}

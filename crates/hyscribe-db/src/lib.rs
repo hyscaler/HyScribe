@@ -357,6 +357,46 @@ impl Db {
         rows.iter().map(comment).collect()
     }
 
+    /// The comments a comment feed lists, newest first: `post`'s, or
+    /// those on published posts and attachments.
+    pub async fn feed_comments(
+        &self,
+        post: Option<u64>,
+        limit: u64,
+    ) -> Result<Vec<Comment>, DbError> {
+        let sql = self.prefix.sql(concat!(
+            "SELECT ",
+            comment_columns!(),
+            " FROM {prefix}comments JOIN {prefix}posts ON comment_post_ID = ID \
+             WHERE (? IS NULL AND (post_status = 'publish' \
+             OR (post_status = 'inherit' AND post_type = 'attachment')) OR comment_post_ID = ?) \
+             AND comment_approved = '1' AND comment_type != 'note' \
+             ORDER BY comment_date_gmt DESC LIMIT ?"
+        ));
+        let rows = sqlx::query(sql)
+            .bind(post)
+            .bind(post)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(comment).collect()
+    }
+
+    /// `get_lastcommentmodified( 'GMT' )`: the latest approved comment's
+    /// time, `None` without one.
+    pub async fn last_comment_modified(&self) -> Result<Option<String>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT CAST(MAX(comment_date_gmt) AS CHAR) AS latest FROM {prefix}comments \
+             WHERE comment_approved = '1'",
+        );
+        let row = sqlx::query(sql)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.try_get("latest").map_err(db_error)
+    }
+
     /// One approved comment by ID, of any type.
     pub async fn comment(&self, id: u64) -> Result<Option<Comment>, DbError> {
         let sql = self.prefix.sql(concat!(

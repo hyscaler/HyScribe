@@ -21,7 +21,8 @@ FEED="$ROOT/crates/hyscribe-render/tests/golden/feed.tsv"
 "$DOCKER" exec -i "$NAME" php < "$ROOT/reference/feed/feed-golden.php" > "$FEED"
 wc -l "$FEED"
 
-# The posts feeds over HTTP, then conditional requests for the home feed:
+# The posts and comment feeds over HTTP, then conditional requests for the
+# home feed:
 #   hex(path)<TAB>hex(request headers)<TAB>hex(status, content type, last modified and etag)<TAB>hex(body)
 BASE="${HYSCRIBE_PHP_BASE:-http://127.0.0.1:8081}"
 HTTP="$ROOT/crates/hyscribe-render/tests/golden/feeds-http.tsv"
@@ -46,7 +47,10 @@ print("\t".join(x.hex() for x in (path, sent, kept, body)))
 ' "$path" "$sent" >> "$HTTP"
 }
 for path in '/?feed=rss2' '/?feed=feed' '/?feed=rss2&cat=1' '/?s=hello&feed=rss2' '/?s&feed=rss2' '/?feed=rss2&m=2026' \
-  '/?feed=rss2&cat=999' '/?feed=rss2&m=1999' '/?s=nothingmatches&feed=rss2'; do
+  '/?feed=rss2&cat=999' '/?feed=rss2&m=1999' '/?s=nothingmatches&feed=rss2' \
+  '/?feed=comments-rss2' '/?feed=rss2&withcomments=1' '/?feed=rss2&p=1' '/?feed=comments-rss2&p=1' '/?feed=feed&p=1' \
+  '/?feed=rss2&page_id=2' '/?feed=rss2&p=999' '/?feed=rss2&page_id=999' '/?feed=rss2&p=1&withoutcomments=1' \
+  '/?feed=rss2&p=999&withoutcomments=1' '/?feed=rss2&p=1&withoutcomments=0'; do
   fetch "$path" ''
 done
 etag=$(curl -s -D - -o /dev/null "$BASE/?feed=rss2" | tr -d '\r' | sed -n 's/^ETag: //p')
@@ -58,3 +62,7 @@ for sent in "If-None-Match: $etag" 'If-None-Match: "other"' "If-Modified-Since: 
   fetch '/?feed=rss2' "$sent"
 done
 wc -l "$HTTP"
+
+COMMENTS="$ROOT/crates/hyscribe-render/tests/golden/comment-feeds.tsv"
+"$DOCKER" exec -i "$NAME" php < "$ROOT/reference/feed/comments-golden.php" > "$COMMENTS"
+wc -l "$COMMENTS"

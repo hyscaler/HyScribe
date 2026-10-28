@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The RSS2 feed of the main query's posts, as `feed-rss2.php` prints it,
-//! with the template's whitespace.
+//! The RSS2 feeds of the main query's posts and of comments, as
+//! `feed-rss2.php` and `feed-rss2-comments.php` print them, with the
+//! templates' whitespace.
 //!
 //! The generator names HyScribe, as the page head does. Not ported
-//! yet: the Atom, RDF and RSS 0.92 feeds, comment feeds, a post's second
-//! and later enclosures, `wp_staticize_emoji()` and oEmbed in feed content.
+//! yet: the Atom, RDF and RSS 0.92 feeds, comment feeds of searches and
+//! archives, comment links to a later comment page, a post's second and
+//! later enclosures, `wp_staticize_emoji()` and oEmbed in feed content.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url, strip_tags};
-use hyscribe_model::Post;
+use hyscribe_model::{Comment, Post};
 use hyscribe_phpser::{Value, add_query_arg, is_empty_string, php_trim};
 
-use crate::core_blocks::comments_open;
+use crate::content::password_form;
+use crate::core_blocks::{comment_text, comments_open};
 use crate::date::{self, Zone};
 use crate::formatting::{convert_chars, ent2ncr, html_entity_decode};
 use crate::link::host;
@@ -81,6 +84,154 @@ pub fn rss2(
     }
     out.extend_from_slice(b"</channel>\n</rss>\n");
     out
+}
+
+/// `feed-rss2-comments.php` for `comments`, newest first: a singular
+/// request's, with its post (if any) as the main query's, or the site's.
+/// `title` is `wp_get_document_title()` for the site's feed; `single` is
+/// `is_single()`, a post (not a page) asked for; `last_modified` is
+/// `get_lastpostmodified( 'GMT' )`.
+pub fn rss2_comments(
+    theme: &Theme,
+    site: &dyn Site,
+    request: &Request,
+    title: &[u8],
+    single: bool,
+    comments: &[Comment],
+    last_modified: Option<&str>,
+) -> Vec<u8> {
+    let option = |name| site.option(name).unwrap_or_default();
+    let bloginfo = |text: &[u8]| convert_chars(&strip_tags(text));
+    let post = request.posts.first();
+    let channel_title = if request.singular {
+        [
+            b"Comments on: ".as_slice(),
+            &post.map(title_rss).unwrap_or_default(),
+        ]
+        .concat()
+    } else {
+        [b"Comments for ".as_slice(), title].concat()
+    };
+    let link = if single {
+        post.map(|post| esc_url(&context_permalink(theme, site, request, post)))
+            .unwrap_or_default()
+    } else {
+        bloginfo(&site.home_url())
+    };
+    let built = request
+        .posts
+        .iter()
+        .map(|post| post.modified_gmt.as_str())
+        .chain(comments.iter().map(|c| c.date_gmt.as_str()))
+        .max()
+        .or(last_modified)
+        .map(|stored| date::format("r", stored, Zone::Utc))
+        .unwrap_or_default();
+    let mut out = [
+        b"<?xml version=\"1.0\" encoding=\"".as_slice(),
+        &option("blog_charset"),
+        b"\"?><rss version=\"2.0\"\n\
+          \txmlns:content=\"http://purl.org/rss/1.0/modules/content/\"\n\
+          \txmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n\
+          \txmlns:atom=\"http://www.w3.org/2005/Atom\"\n\
+          \txmlns:sy=\"http://purl.org/rss/1.0/modules/syndication/\"\n\
+          \t\n\t>\n<channel>\n\t<title>\n\t",
+        &channel_title,
+        b"\t</title>\n\t<atom:link href=\"",
+        &esc_url(&self_link(site, request)),
+        b"\" rel=\"self\" type=\"application/rss+xml\" />\n\t<link>",
+        &link,
+        b"</link>\n\t<description>",
+        &bloginfo(&option("blogdescription")),
+        b"</description>\n\t<lastBuildDate>",
+        built.as_bytes(),
+        b"</lastBuildDate>\n\
+          \t<sy:updatePeriod>\n\thourly\t</sy:updatePeriod>\n\
+          \t<sy:updateFrequency>\n\t1\t</sy:updateFrequency>\n\t",
+        &generator(),
+        b"\n",
+    ]
+    .concat();
+    let renderer = Renderer::new(theme, site, request);
+    for comment in comments {
+        out.extend(comment_item(&renderer, comment));
+    }
+    out.extend_from_slice(b"</channel>\n</rss>\n");
+    out
+}
+
+/// One `<item>` of the comment loop, with the template's whitespace.
+fn comment_item(renderer: &Renderer<'_>, comment: &Comment) -> Vec<u8> {
+    let context = &renderer.context;
+    let site = context.site;
+    let post = site.post(comment.post_id).unwrap_or_default();
+    let author = ent2ncr(&comment_author(site, comment));
+    let title = if context.request.singular {
+        [b"By: ".as_slice(), &author].concat()
+    } else {
+        [
+            b"Comment on ".as_slice(),
+            &title_rss(&post),
+            b" by ",
+            &author,
+        ]
+        .concat()
+    };
+    let anchor = format!("#comment-{}", comment.id);
+    let body = if post.password.is_empty() {
+        [
+            b"\t\t\t<description><![CDATA[".as_slice(),
+            esc_html(&ent2ncr(&comment.content)).as_bytes(),
+            b"]]></description>\n\t\t\t<content:encoded><![CDATA[",
+            &comment_text(site, &comment.content),
+            b"]]></content:encoded>\n\t\t",
+        ]
+        .concat()
+    } else {
+        [
+            b"\t\t\t<description>Protected Comments: Please enter your password to view comments.</description>\n\t\t\t<content:encoded><![CDATA[".as_slice(),
+            &password_form(renderer, &post),
+            b"]]></content:encoded>\n\t\t",
+        ]
+        .concat()
+    };
+    [
+        b"\t<item>\n\t\t<title>\n\t\t".as_slice(),
+        &title,
+        b"\t\t</title>\n\t\t<link>",
+        &esc_url(&[&context.permalink(&post)[..], anchor.as_bytes()].concat()),
+        b"</link>\n\n\t\t<dc:creator><![CDATA[",
+        &author,
+        b"]]></dc:creator>\n\t\t<pubDate>",
+        date::format("D, d M Y H:i:s +0000", &comment.date_gmt, Zone::Utc).as_bytes(),
+        b"</pubDate>\n\t\t<guid isPermaLink=\"false\">",
+        &esc_url(&[&post.guid[..], anchor.as_bytes()].concat()),
+        b"</guid>\n\n\t\t",
+        &body,
+        b"\n\t\t\t</item>\n\t",
+    ]
+    .concat()
+}
+
+/// `get_comment_author()`: the name given, else the user's, else
+/// `Anonymous`.
+fn comment_author(site: &dyn Site, comment: &Comment) -> Vec<u8> {
+    if !is_empty_string(&comment.author) {
+        return comment.author.clone();
+    }
+    site.user(comment.user_id)
+        .filter(|_| comment.user_id != 0)
+        .map_or_else(|| b"Anonymous".to_vec(), |user| user.display_name)
+}
+
+/// `get_the_title_rss()`.
+fn title_rss(post: &Post) -> Vec<u8> {
+    esc_html(&strip_tags(&ent2ncr(&the_title(post)))).into_bytes()
+}
+
+/// `get_permalink()` of the main query's post.
+fn context_permalink(theme: &Theme, site: &dyn Site, request: &Request, post: &Post) -> Vec<u8> {
+    Renderer::new(theme, site, request).context.permalink(post)
 }
 
 /// `get_the_generator( 'rss2' )`, naming HyScribe and its version.
@@ -159,7 +310,7 @@ fn item(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
     };
     [
         b"\t<item>\n\t\t<title>".as_slice(),
-        esc_html(&strip_tags(&ent2ncr(&the_title(post)))).as_bytes(),
+        &title_rss(post),
         b"</title>\n\t\t<link>",
         &esc_url(&permalink),
         b"</link>\n\t\t",

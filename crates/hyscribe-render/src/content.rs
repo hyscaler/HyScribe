@@ -241,7 +241,7 @@ fn more_tag(content: &[u8]) -> Option<(usize, usize)> {
 
 /// `get_the_password_form()` in a block theme, for a visitor without the
 /// password cookie.
-fn password_form(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
+pub(crate) fn password_form(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
     let site = renderer.context.site;
     let action = esc_url(
         &[

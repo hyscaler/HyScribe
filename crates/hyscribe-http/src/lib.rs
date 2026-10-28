@@ -140,8 +140,8 @@ async fn security_headers(mut response: Response) -> Response {
 /// URL.
 enum Outcome {
     Page(Box<Page>),
-    /// The feed of the page's posts, with `get_lastpostmodified( 'GMT' )`.
-    Feed(Box<Page>, Option<String>),
+    /// The feed of the page's posts or of comments.
+    Feed(Box<Page>, feed::Feed),
     Redirect(String),
 }
 
@@ -183,7 +183,7 @@ async fn page(
             )
                 .into_response();
         }
-        Ok(Outcome::Feed(page, last)) => {
+        Ok(Outcome::Feed(page, feed)) => {
             let page = Page {
                 request: Request {
                     uri: request_uri(&uri),
@@ -191,7 +191,7 @@ async fn page(
                 },
                 ..*page
             };
-            return feed::respond(site, page, last, &headers).await;
+            return feed::respond(site, page, feed, &headers).await;
         }
         Ok(Outcome::Page(page)) => {
             let rendering = Arc::clone(&site);
@@ -381,15 +381,19 @@ async fn route(
     if query.contains_key("author") {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
-    // The posts feed; comment feeds and other formats are not served yet.
+    // RSS2 feeds. Comment feeds of searches and archives, and other
+    // formats, are not served yet.
     let single_requested = query.contains_key("p") || query.contains_key("page_id");
-    if query
+    let flag = |name| query.get(name).is_some_and(|v| !v.is_empty() && v != "0");
+    let feed = query
         .get("feed")
-        .is_some_and(|feed| feed == "rss2" || feed == "feed")
-        && !single_requested
-    {
-        let (page, last) = tokio::join!(list(site, query, true), site.db.last_post_modified());
-        return page.and_then(|page| last.map(|last| Outcome::Feed(Box::new(page), last)));
+        .filter(|f| matches!(f.replace("comments-", "").as_str(), "rss2" | "feed"));
+    let with_comments = feed.is_some_and(|f| f.contains("comments-")) || flag("withcomments");
+    let comment_feed = with_comments || (single_requested && !flag("withoutcomments"));
+    let archive = ["s", "cat", "m"].iter().any(|k| query.contains_key(*k));
+    if feed.is_some() && !single_requested && !(comment_feed && archive) {
+        let comments = comment_feed.then_some((None, false));
+        return feed::outcome(site, list(site, query, true), comments).await;
     }
     let single = |name: &'static str, post_type: &'static str| {
         query
@@ -403,6 +407,11 @@ async fn route(
                 match post.filter(|p| {
                     p.status == "publish" && (p.post_type == "post" || p.post_type == "page")
                 }) {
+                    Some(post) if post.post_type == post_type && feed.is_some() => {
+                        let comments = comment_feed.then_some((Some(id), name == "p"));
+                        let page = async { Ok(single_page(site, post)) };
+                        return feed::outcome(site, page, comments).await;
+                    }
                     Some(post) if post.post_type == post_type => {
                         Outcome::Page(Box::new(single_page(site, post)))
                     }
@@ -412,6 +421,11 @@ async fn route(
                         site.permalink(&post),
                         other_args(raw_query, name)
                     )),
+                    None if feed.is_some() => {
+                        let comments = comment_feed.then_some((Some(id), name == "p"));
+                        let page = async { Ok(missing_single(site)) };
+                        return feed::outcome(site, page, comments).await;
+                    }
                     None => Outcome::Page(Box::new(not_found(site, false))),
                 },
             )
@@ -565,6 +579,17 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
         candidates,
         request,
     })
+}
+
+/// A feed's missing post or page: a singular query with nothing in it.
+fn missing_single(site: &Site) -> Page {
+    Page {
+        request: Request {
+            singular: true,
+            ..not_found(site, true).request
+        },
+        ..not_found(site, true)
+    }
 }
 
 /// The 404 page; for a feed, an empty one titled with the site's name.

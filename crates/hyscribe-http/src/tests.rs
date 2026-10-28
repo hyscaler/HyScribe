@@ -235,7 +235,14 @@ async fn database_errors_show_no_details() {
         theme: hyscribe_render::theme::twentytwentyfive(),
     });
     // The 404 page fails while rendering, reading an option it has not loaded.
-    for uri in ["/", "/?p=1", "/?cat=1", "/?author=1", "/?feed=rss2"] {
+    for uri in [
+        "/",
+        "/?p=1",
+        "/?cat=1",
+        "/?author=1",
+        "/?feed=rss2",
+        "/?feed=comments-rss2",
+    ] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(
@@ -718,22 +725,7 @@ async fn feeds_match_php() {
             "{path} {sent:?}"
         );
     }
-    assert_eq!(golden.lines().count(), 20);
-}
-
-/// A post's or page's comment feed is not served yet: those requests get
-/// the post or page.
-#[tokio::test]
-async fn comment_feeds_are_not_served_yet() {
-    let site = oracle_site().await;
-    for uri in ["/?feed=rss2&p=1", "/?feed=rss2&page_id=2"] {
-        let reply = request(&site, "GET", uri).await;
-        assert_eq!(
-            reply.headers[header::CONTENT_TYPE],
-            "text/html; charset=UTF-8",
-            "{uri}"
-        );
-    }
+    assert_eq!(golden.lines().count(), 31);
 }
 
 /// What every page prints after the theme's footer (`wp_footer()`)

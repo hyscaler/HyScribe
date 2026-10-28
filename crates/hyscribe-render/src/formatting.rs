@@ -306,6 +306,11 @@ impl<'a> Next<'a> {
     }
 }
 
+/// `str_contains( $text, $needle )`.
+pub(crate) fn contains(text: &[u8], needle: &[u8]) -> bool {
+    find(text, 0, needle).is_some()
+}
+
 pub(crate) fn find(s: &[u8], from: usize, literal: &[u8]) -> Option<usize> {
     s.get(from..)
         .unwrap_or_default()

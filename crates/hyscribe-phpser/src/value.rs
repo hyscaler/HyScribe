@@ -95,6 +95,14 @@ impl Value {
 }
 
 impl Key {
+    /// The key as the string PHP prints for it.
+    pub fn to_php_string(&self) -> Vec<u8> {
+        match self {
+            Key::Int(n) => n.to_string().into_bytes(),
+            Key::String(key) => key.clone(),
+        }
+    }
+
     /// The key PHP makes of a string: an integer key when the string spells
     /// a canonical integer (`"7"`, `"-3"`, not `"07"`, `"-0"` or `"+1"`).
     pub fn from_php_string(key: Vec<u8>) -> Key {
@@ -225,6 +233,12 @@ mod tests {
             );
         }
         assert_eq!(Key::from_php_string(vec![0xff]), Key::String(vec![0xff]));
+    }
+
+    #[test]
+    fn keys_print_as_php_strings() {
+        assert_eq!(Key::Int(-7).to_php_string(), b"-7");
+        assert_eq!(Key::String(b"07".to_vec()).to_php_string(), b"07");
     }
 
     #[test]

@@ -17,10 +17,7 @@ pub(crate) fn key(name: &str) -> Key {
 
 /// A key as the string PHP would print for it.
 pub(crate) fn key_str(key: &Key) -> String {
-    match key {
-        Key::Int(n) => n.to_string(),
-        Key::String(bytes) => String::from_utf8_lossy(bytes).into_owned(),
-    }
+    String::from_utf8_lossy(&key.to_php_string()).into_owned()
 }
 
 /// A PHP string value.

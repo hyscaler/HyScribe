@@ -233,6 +233,7 @@ impl Renderer<'_> {
             Some("core/post-template") => self.post_template(block),
             Some("core/post-content") => self.post_content(block),
             Some("core/navigation") => self.navigation(block),
+            Some("core/search") => self.search(block),
             Some("core/navigation-link") => self.navigation_link(block),
             Some("core/page-list") => self.page_list(block),
             Some("core/comment-template") => self.comment_template(block),

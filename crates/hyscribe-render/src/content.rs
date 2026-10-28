@@ -13,7 +13,7 @@ use hyscribe_phpser::{Value, is_empty_string};
 
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
-use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, wptexturize};
+use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, contains, wptexturize};
 use crate::link::{front_page, permalink};
 use crate::post::the_title;
 use crate::supports::get_block_wrapper_attributes;
@@ -139,10 +139,6 @@ fn get_the_content(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
         b"</a>",
     ]
     .concat()
-}
-
-fn contains(text: &[u8], needle: &[u8]) -> bool {
-    text.windows(needle.len()).any(|w| w == needle)
 }
 
 /// A part of `content` without `core/more` block delimiters, which

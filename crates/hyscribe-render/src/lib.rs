@@ -24,6 +24,7 @@ mod navigation;
 pub mod post;
 mod query_loop;
 pub mod registry;
+mod search;
 pub mod site;
 pub mod style;
 pub mod supports;

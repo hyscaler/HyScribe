@@ -83,22 +83,15 @@ impl AllowedHtml {
         let attributes = |spec: Value| match spec {
             Value::Array(attributes) => attributes
                 .into_iter()
-                .map(|(name, spec)| (key_bytes(name), checks(spec)))
+                .map(|(name, spec)| (name.to_php_string(), checks(spec)))
                 .collect(),
             _ => BTreeMap::new(),
         };
         AllowedHtml(
             tags.into_iter()
-                .map(|(tag, spec)| (key_bytes(tag), attributes(spec)))
+                .map(|(tag, spec)| (tag.to_php_string(), attributes(spec)))
                 .collect(),
         )
-    }
-}
-
-fn key_bytes(key: Key) -> Vec<u8> {
-    match key {
-        Key::String(name) => name,
-        Key::Int(n) => n.to_string().into_bytes(),
     }
 }
 
@@ -110,7 +103,7 @@ fn checks(spec: Value) -> Vec<Check> {
     limits
         .into_iter()
         .filter_map(|(name, limit)| {
-            let name = key_bytes(name);
+            let name = name.to_php_string();
             // `wp_kses_attr()` looks `required` up exactly; the other
             // limits match any case.
             if name == b"required" {

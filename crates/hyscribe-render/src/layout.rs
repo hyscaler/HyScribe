@@ -11,7 +11,7 @@ use hyscribe_html::TagProcessor;
 use hyscribe_phpser::{Key, Value, is_empty_string, json_encode, md5};
 use hyscribe_theme_json::{GlobalStyles, kebab_case};
 
-use crate::formatting::sanitize_title;
+use crate::formatting::{contains, sanitize_title};
 use crate::registry::BlockType;
 use crate::style::{declarations_string, parse_block_styles};
 
@@ -161,11 +161,8 @@ fn sanitize_gap(gap: Option<&Value>) -> Value {
 /// A `var:preset|spacing|<slug>` gap as its CSS variable.
 fn gap_css(value: &Value) -> Value {
     let text = value.to_php_string();
-    match (
-        value,
-        text.windows(19).position(|w| w == b"var:preset|spacing|"),
-    ) {
-        (Value::String(_), Some(_)) => {
+    match (value, contains(&text, b"var:preset|spacing|")) {
+        (Value::String(_), true) => {
             let slug = text.rsplit(|&b| b == b'|').next().unwrap_or_default();
             string(format!(
                 "var(--wp--preset--spacing--{})",

@@ -6,11 +6,11 @@
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
 use hyscribe_model::Post;
-use hyscribe_phpser::{Key, Value, php_trim};
+use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim};
 
 use crate::date::{self, Zone};
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit_title, convert_chars, wptexturize};
-use crate::link::permalink;
+use crate::link;
 use crate::registry::block_type;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
@@ -71,9 +71,10 @@ impl Block<'_> {
 
     /// `isset( $attributes['style']['elements']['link']['color']['text'] )`.
     fn has_link_color(&self) -> bool {
-        self.attributes
-            .get_path(&["style", "elements", "link", "color", "text"])
-            .is_some_and(|v| *v != Value::Null)
+        isset(
+            self.attributes
+                .get_path(&["style", "elements", "link", "color", "text"]),
+        )
     }
 
     /// `has-text-align-<textAlign>`, or empty without an alignment.
@@ -94,16 +95,14 @@ impl Context<'_> {
     /// `get_permalink( $post )`.
     fn permalink(&self, post: &Post) -> Vec<u8> {
         let option = |name| self.site.option(name).unwrap_or_default();
-        let front_page = (option("show_on_front") == b"page")
-            .then(|| Value::String(option("page_on_front")).to_float() as u64);
-        permalink(&self.site.home_url(), front_page, post)
+        let front_page = link::front_page(&option("show_on_front"), &option("page_on_front"));
+        link::permalink(&self.site.home_url(), front_page, post)
     }
 
-    /// `wp_timezone()`. Named zones format as UTC until a time zone
-    /// database lands.
+    /// `wp_timezone()`.
     fn zone(&self) -> Zone {
         let option = |name| self.site.option(name).unwrap_or_default();
-        date::site_zone(&option("timezone_string"), &option("gmt_offset")).unwrap_or(Zone::Utc)
+        date::site_zone(&option("timezone_string"), &option("gmt_offset"))
     }
 }
 
@@ -120,7 +119,8 @@ fn the_title(post: &Post) -> Vec<u8> {
     capital_p_dangit_title(php_trim(&title))
 }
 
-/// The classes post blocks share: `has-text-align-*` when set, and
+/// The classes post blocks share: `has-text-align-*` when `textAlign` is
+/// set (`isset()`, where the site blocks test `empty()`), and
 /// `has-link-color` when the link has a color.
 fn post_classes(block: &Block<'_>, mut classes: Vec<Vec<u8>>) -> Vec<u8> {
     if let Some(align) = block.attribute("textAlign") {
@@ -138,14 +138,10 @@ fn post_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         return Vec::new();
     };
     let mut title = the_title(&post);
-    if Value::String(title.clone()).is_empty() {
+    if is_empty_string(&title) {
         return Vec::new();
     }
-    let level = block.attribute("level");
-    let tag = match level {
-        Some(Value::Int(0)) => b"p".to_vec(),
-        _ => level.map_or(b"h2".to_vec(), heading),
-    };
+    let tag = tag(block.attribute("level"), b"h2");
     if block.attribute("isLink").is_some_and(|v| !v.is_empty()) {
         let rel = match block.attribute("rel").filter(|v| !v.is_empty()) {
             Some(rel) => format!("rel=\"{}\"", esc_attr(&rel.to_php_string())),
@@ -205,10 +201,7 @@ fn post_date(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let binding = block
         .attributes
         .get_path(&["metadata", "bindings", "datetime"])
-        .filter(|b| {
-            b.get_str("source").is_some_and(|v| *v != Value::Null)
-                && b.get_str("args").is_some_and(|v| *v != Value::Null)
-        });
+        .filter(|b| isset(b.get_str("source")) && isset(b.get_str("args")));
     let datetime = match (binding, block.attribute("datetime")) {
         (Some(binding), _) => match binding
             .get_str("source")
@@ -237,7 +230,7 @@ fn post_date(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
             post_data(context, if modified { b"modified" } else { b"date" })
         }
     };
-    let Some(datetime) = datetime.filter(|d| !Value::String(d.clone()).is_empty()) else {
+    let Some(datetime) = datetime.filter(|d| !is_empty_string(d)) else {
         return Vec::new();
     };
     let text = String::from_utf8_lossy(&datetime).into_owned();
@@ -298,9 +291,16 @@ fn post_date(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     .concat()
 }
 
-/// `'h' . (int) $level`.
-fn heading(level: &Value) -> Vec<u8> {
-    format!("h{}", level.to_float() as i64).into_bytes()
+/// The tag for a `level` attribute: `p` for 0, else `'h' . (int) $level`,
+/// and `default` without one.
+fn tag(level: Option<&Value>, default: &[u8]) -> Vec<u8> {
+    match level {
+        Some(Value::Int(0)) => b"p".to_vec(),
+        // Every caller registers a default level, so `default` is a backstop.
+        _ => level.map_or(default.to_vec(), |level| {
+            format!("h{}", level.to_int()).into_bytes()
+        }),
+    }
 }
 
 /// `sprintf( '<%1$s %2$s>%3$s</%1$s>', $tag, $wrapper, $content )`.
@@ -322,26 +322,24 @@ fn element(tag: &[u8], wrapper: &str, content: &[u8]) -> Vec<u8> {
 /// `render_block_core_site_title()`.
 fn site_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let title = context.site.option("blogname").unwrap_or_default();
-    if Value::String(php_trim(&title).to_vec()).is_empty() {
+    if is_empty_string(php_trim(&title)) {
         return Vec::new();
     }
     let mut classes = block.text_align_class();
     if block.has_link_color() {
         classes.extend_from_slice(b" has-link-color");
     }
-    let level = block.attribute("level");
-    let tag = match level {
-        Some(Value::Int(0)) => b"p".to_vec(),
-        _ => level.map_or(b"h1".to_vec(), heading),
-    };
+    let tag = tag(block.attribute("level"), b"h1");
     let content = if block.attribute("isLink").is_some_and(|v| !v.is_empty()) {
         let request = context.request;
         let page_for_posts = context
             .site
             .option("page_for_posts")
-            .map_or(0, |v| Value::String(v).to_float() as u64);
+            .map_or(0, |v| Value::String(v).to_int());
         let current = !request.paged
-            && (request.front_page || request.home && page_for_posts != request.queried_object_id);
+            && (request.front_page
+                || request.home
+                    && u64::try_from(page_for_posts).ok() != Some(request.queried_object_id));
         let target = block
             .attribute("linkTarget")
             .filter(|v| !v.is_empty())
@@ -371,14 +369,11 @@ fn site_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 /// `render_block_core_site_tagline()`. The tagline prints as stored.
 fn site_tagline(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let tagline = context.site.option("blogdescription").unwrap_or_default();
-    if Value::String(tagline.clone()).is_empty() {
+    if is_empty_string(&tagline) {
         return Vec::new();
     }
     let wrapper = block.wrapper(context, &block.text_align_class());
-    let tag = match block.attribute("level") {
-        Some(level) if *level != Value::Int(0) => heading(level),
-        _ => b"p".to_vec(),
-    };
+    let tag = tag(block.attribute("level"), b"p");
     element(&tag, &wrapper, &tagline)
 }
 

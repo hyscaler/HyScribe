@@ -523,6 +523,7 @@ dependencies = [
  "axum",
  "hyscribe-db",
  "hyscribe-model",
+ "hyscribe-phpser",
  "hyscribe-render",
  "tokio",
 ]

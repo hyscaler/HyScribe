@@ -643,6 +643,7 @@ dependencies = [
  "hyscribe-config",
  "hyscribe-db",
  "hyscribe-model",
+ "hyscribe-phpser",
  "hyscribe-render",
  "hyscribe-testkit",
  "tokio",

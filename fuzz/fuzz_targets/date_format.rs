@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Date formatting accepts any format and stored time without panicking.
+//! Date formatting and `strtotime()` accept any input without panicking.
 
 #![no_main]
 
@@ -16,4 +16,5 @@ fuzz_target!(|data: &[u8]| {
     let (format, stored) = text.split_at(middle);
     let _ = date::format(format, stored, Zone::Offset(-34_200));
     let _ = date::site_zone(format.as_bytes(), stored.as_bytes());
+    let _ = date::strtotime(&text);
 });

@@ -24,7 +24,7 @@ mod json;
 mod value;
 mod wp;
 
-pub use cast::{float_to_string, string_to_float};
+pub use cast::{absint, float_to_string, is_empty_string, isset, string_to_float};
 pub use decode::{MAX_DEPTH, decode};
 pub use encode::encode;
 pub use error::{Error, ErrorKind};

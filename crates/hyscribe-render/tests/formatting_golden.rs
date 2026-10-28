@@ -7,20 +7,16 @@
 // Tests fail by panicking.
 #![allow(clippy::unwrap_used, clippy::panic)]
 
-use hyscribe_render::formatting::{convert_smilies, wptexturize};
+use hyscribe_render::formatting::{CORE_SHORTCODE_TAGS, convert_smilies, wptexturize};
 use hyscribe_testkit::unhex;
 
-/// The fixture's shortcodes, plus the `code` one the generator adds.
-const SHORTCODES: [&[u8]; 8] = [
-    b"wp_caption",
-    b"caption",
-    b"gallery",
-    b"playlist",
-    b"audio",
-    b"video",
-    b"embed",
-    b"code",
-];
+/// Core's shortcodes, plus the `code` one the PHP generator adds.
+fn shortcode_tags() -> Vec<&'static [u8]> {
+    CORE_SHORTCODE_TAGS
+        .into_iter()
+        .chain([&b"code"[..]])
+        .collect()
+}
 
 /// `includes_url( 'images/smilies/' )` of the fixture's PHP container.
 const SMILIES_URL: &[u8] = b"http://127.0.0.1:8081/wp-includes/images/smilies/";
@@ -59,7 +55,7 @@ fn check(golden: &str, expected_count: usize, ours: impl Fn(&[u8]) -> Vec<u8>) {
 #[test]
 fn matches_wptexturize() {
     check(include_str!("golden/wptexturize.tsv"), 859, |text| {
-        wptexturize(text, &SHORTCODES)
+        wptexturize(text, &shortcode_tags())
     });
 }
 

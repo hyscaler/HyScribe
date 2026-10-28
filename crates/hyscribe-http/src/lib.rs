@@ -62,11 +62,10 @@ impl Site {
         String::from_utf8_lossy(self.options.get(name).map_or(&[][..], Vec::as_slice)).into_owned()
     }
 
-    /// The site's time zone. Named zones other than UTC need a time zone
-    /// database; until then their dates format as UTC.
+    /// The site's time zone, `wp_timezone()`.
     fn zone(&self) -> Zone {
         let option = |name| self.options.get(name).map_or(&[][..], Vec::as_slice);
-        date::site_zone(option("timezone_string"), option("gmt_offset")).unwrap_or(Zone::Utc)
+        date::site_zone(option("timezone_string"), option("gmt_offset"))
     }
 
     /// The site title, as `wp_get_document_title()` prints it.
@@ -75,8 +74,8 @@ impl Site {
     }
 
     fn permalink(&self, post: &Post) -> String {
-        let front_page =
-            (self.option("show_on_front") == "page").then(|| absint(&self.option("page_on_front")));
+        let option = |name| self.options.get(name).map_or(&[][..], Vec::as_slice);
+        let front_page = link::front_page(option("show_on_front"), option("page_on_front"));
         String::from_utf8_lossy(&link::permalink(self.home.as_bytes(), front_page, post))
             .into_owned()
     }

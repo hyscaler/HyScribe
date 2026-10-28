@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+pub(crate) use hyscribe_phpser::isset;
 use hyscribe_phpser::{Key, Value, float_to_string};
 
 /// An array key as PHP stores it: canonical decimal integers become integer
@@ -176,11 +177,6 @@ pub(crate) fn trim(text: &str) -> &str {
 /// PHP's `empty()` of a value that may be missing.
 pub(crate) fn empty(value: Option<&Value>) -> bool {
     value.is_none_or(Value::is_empty)
-}
-
-/// PHP's `isset()` of a value that may be missing.
-pub(crate) fn isset(value: Option<&Value>) -> bool {
-    !matches!(value, None | Some(Value::Null))
 }
 
 /// The numeric value of a number or numeric string.

@@ -6,8 +6,8 @@
 
 use hyscribe_phpser::Value;
 
-/// The site's time zone, as `wp_timezone()` builds it. Named zones need a
-/// time zone database and are not supported yet.
+/// The site's time zone, as `wp_timezone()` builds it. Named zones other
+/// than UTC need a time zone database; until one lands they format as UTC.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Zone {
     /// `UTC` as the `timezone_string`.
@@ -258,18 +258,16 @@ fn format_time(format: &str, time: &Time) -> String {
     out
 }
 
-/// `wp_timezone()` from the `timezone_string` and `gmt_offset` options;
-/// `None` for a named zone other than UTC.
-pub fn site_zone(timezone_string: &[u8], gmt_offset: &[u8]) -> Option<Zone> {
+/// `wp_timezone()` from the `timezone_string` and `gmt_offset` options.
+pub fn site_zone(timezone_string: &[u8], gmt_offset: &[u8]) -> Zone {
     match timezone_string {
         b"" => {
             // `wp_timezone_string()` prints whole hours and minutes.
             let offset = Value::String(gmt_offset.to_vec()).to_float();
             let minutes = (offset.fract() * 60.0) as i32;
-            Some(Zone::Offset(offset.trunc() as i32 * 3600 + minutes * 60))
+            Zone::Offset(offset.trunc() as i32 * 3600 + minutes * 60)
         }
-        b"UTC" => Some(Zone::Utc),
-        _ => None,
+        _ => Zone::Utc,
     }
 }
 
@@ -279,12 +277,12 @@ pub fn format(format: &str, stored: &str, zone: Zone) -> String {
 }
 
 /// `wp_date( $format, $unix )` in `zone`.
-pub fn format_unix(format: &str, unix: i64, zone: Zone) -> String {
+pub(crate) fn format_unix(format: &str, unix: i64, zone: Zone) -> String {
     format_time(format, &Time::from_unix(unix, zone))
 }
 
 /// The Unix time of a stored local time in `zone`.
-pub fn stored_unix(stored: &str, zone: Zone) -> i64 {
+pub(crate) fn stored_unix(stored: &str, zone: Zone) -> i64 {
     Time::parse(stored, zone).unix()
 }
 
@@ -344,7 +342,7 @@ pub fn strtotime(text: &str) -> Option<i64> {
 }
 
 /// `human_time_diff( $from, $to )`.
-pub fn human_time_diff(from: i64, to: i64) -> String {
+pub(crate) fn human_time_diff(from: i64, to: i64) -> String {
     const UNITS: [(i64, &str); 6] = [
         (60, "minute"),
         (3600, "hour"),

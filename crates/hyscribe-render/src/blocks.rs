@@ -8,7 +8,7 @@
 //! PCRE's semantics, in linear time: a scan for attributes that finds no
 //! terminator is remembered, so hostile input cannot make it quadratic.
 
-use hyscribe_phpser::{Key, Value, json_decode};
+use hyscribe_phpser::{Key, Value, is_empty_string, json_decode};
 
 /// One block, as `parse_blocks()` returns it.
 #[derive(Clone, Debug, PartialEq)]
@@ -161,11 +161,6 @@ struct Parser<'a> {
     no_terminator_from: Option<usize>,
 }
 
-/// PHP's `empty()` for a string.
-fn empty(html: &[u8]) -> bool {
-    html.is_empty() || html == b"0"
-}
-
 impl Parser<'_> {
     fn slice(&self, from: usize, to: usize) -> &[u8] {
         self.doc.get(from..to).unwrap_or_default()
@@ -258,7 +253,7 @@ impl Parser<'_> {
             None => self.rest(top.prev_offset),
         }
         .to_vec();
-        if !empty(&html) {
+        if !is_empty_string(&html) {
             top.block.inner_html.extend_from_slice(&html);
             top.block.inner_content.push(Some(html));
         }
@@ -387,7 +382,7 @@ fn add_inner_block(
 ) {
     let html = doc.get(parent.prev_offset..token_start).unwrap_or_default();
     parent.block.inner_blocks.push(block);
-    if !empty(html) {
+    if !is_empty_string(html) {
         parent.block.inner_html.extend_from_slice(html);
         parent.block.inner_content.push(Some(html.to_vec()));
     }

@@ -13,6 +13,7 @@ publish.workspace = true
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "query"] }
 hyscribe-db.workspace = true
 hyscribe-model.workspace = true
+hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true
 tokio = { version = "1", features = ["net"] }
 

@@ -7,7 +7,7 @@
 //! custom CSS and elements) are not part of the wrapper attributes.
 
 use hyscribe_kses::{esc_attr, safecss_filter_attr};
-use hyscribe_phpser::{Key, Value, php_trim};
+use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim};
 use hyscribe_theme_json::GlobalStyles;
 
 use crate::registry::{BlockType, block_type};
@@ -58,8 +58,7 @@ pub fn get_block_wrapper_attributes(
     wrapper_attributes(name, block_type(name), attributes, extra, global)
 }
 
-/// [`get_block_wrapper_attributes`] for a given block type, `None` when
-/// the block is not registered.
+/// [`get_block_wrapper_attributes`] for a given block type.
 fn wrapper_attributes(
     name: &str,
     block_type: Option<&BlockType>,
@@ -125,7 +124,7 @@ fn merge_styles(new: &[u8], extra: &[u8]) -> Vec<u8> {
             let end = css.iter().rposition(|&b| b != b';').map_or(0, |i| i + 1);
             css.get(..end).unwrap_or_default()
         })
-        .filter(|css| !css.is_empty() && *css != b"0")
+        .filter(|css| !is_empty_string(css))
         .collect();
     safecss_filter_attr(&parts.join(&b';'))
 }
@@ -242,9 +241,7 @@ impl Block<'_> {
 
     /// `isset( $block_attributes[...] )`.
     fn isset(&self, path: &[&str]) -> bool {
-        self.attributes
-            .get_path(path)
-            .is_some_and(|v| *v != Value::Null)
+        isset(self.attributes.get_path(path))
     }
 
     /// `"var:preset|$kind|{$block_attributes[$name]}"`, when the attribute

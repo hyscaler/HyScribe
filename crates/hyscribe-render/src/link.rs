@@ -3,10 +3,16 @@
 //! `get_permalink()` with plain permalinks, the default install's setting.
 
 use hyscribe_model::Post;
+use hyscribe_phpser::{Value, absint};
 
-/// `get_permalink( $post )`: `home` is `home_url()`, `front_page` the page
-/// shown on the front page (`page_on_front` when `show_on_front` is
-/// `page`).
+/// The page on the front page: `page_on_front` when `show_on_front` is
+/// `page`.
+pub fn front_page(show_on_front: &[u8], page_on_front: &[u8]) -> Option<u64> {
+    (show_on_front == b"page").then(|| absint(&Value::String(page_on_front.to_vec())))
+}
+
+/// `get_permalink( $post )`: `home` is `home_url()`, `front_page` as
+/// [`front_page`] gives it.
 pub fn permalink(home: &[u8], front_page: Option<u64>, post: &Post) -> Vec<u8> {
     let query = match post.post_type.as_str() {
         "page" if front_page == Some(post.id) => String::new(),

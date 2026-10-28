@@ -36,17 +36,7 @@ pub fn search_terms(search: &str) -> Vec<String> {
         .collect()
 }
 
-/// PHP's `absint()`: the leading digits as a number, else 0.
+/// WordPress's `absint()` on request input.
 pub fn absint(value: &str) -> u64 {
-    let digits: String = value
-        .trim_start()
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect();
-    // (int) saturates at PHP_INT_MAX.
-    match digits.parse() {
-        Ok(n) => n,
-        Err(_) if digits.is_empty() => 0,
-        Err(_) => i64::MAX.unsigned_abs(),
-    }
+    hyscribe_phpser::absint(&hyscribe_phpser::Value::String(value.as_bytes().to_vec()))
 }

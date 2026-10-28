@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! PHP 8's `empty()`, `is_numeric()`, `(float)` and `(string)` over
-//! [`Value`], for code ported from WordPress that leans on them.
+//! PHP 8's `empty()`, `isset()`, `is_numeric()`, `(float)`, `(int)` and
+//! `(string)` over [`Value`], for code ported from WordPress that leans on
+//! them.
 
 use crate::Value;
 
@@ -11,7 +12,7 @@ impl Value {
         match self {
             Value::Null | Value::Bool(false) | Value::Int(0) => true,
             Value::Float(f) => f.to_f64() == 0.0,
-            Value::String(text) => text.is_empty() || text == b"0",
+            Value::String(text) => is_empty_string(text),
             Value::Array(entries) => entries.is_empty(),
             _ => false,
         }
@@ -42,6 +43,18 @@ impl Value {
         }
     }
 
+    /// `(int) $value`. Objects give `1`, as PHP does with a warning.
+    pub fn to_int(&self) -> i64 {
+        match self {
+            Value::Null | Value::Bool(false) => 0,
+            Value::Int(n) => *n,
+            Value::Float(f) => float_to_int(f.to_f64()),
+            Value::String(text) => string_to_int(text),
+            Value::Array(entries) => i64::from(!entries.is_empty()),
+            _ => 1,
+        }
+    }
+
     /// `(string) $value`. Arrays give `"Array"`, as PHP does with a
     /// warning; objects, which PHP refuses, give nothing.
     pub fn to_php_string(&self) -> Vec<u8> {
@@ -54,6 +67,64 @@ impl Value {
             _ => Vec::new(),
         }
     }
+}
+
+/// `empty( $text )` for a string: `''` and `'0'`.
+pub fn is_empty_string(text: &[u8]) -> bool {
+    text.is_empty() || text == b"0"
+}
+
+/// `isset( $value )` of a value that may be missing.
+pub fn isset(value: Option<&Value>) -> bool {
+    !matches!(value, None | Some(Value::Null))
+}
+
+/// WordPress's `absint( $value )`.
+pub fn absint(value: &Value) -> u64 {
+    value.to_int().unsigned_abs()
+}
+
+/// `(int) $float`: truncated, wrapping modulo 2^64 when out of range, and
+/// 0 for infinities and NaN.
+fn float_to_int(value: f64) -> i64 {
+    const TWO_64: f64 = 18_446_744_073_709_551_616.0;
+    if !value.is_finite() {
+        return 0;
+    }
+    let truncated = value.trunc();
+    if truncated.abs() < TWO_64 / 2.0 {
+        return truncated as i64;
+    }
+    let wrapped = truncated.rem_euclid(TWO_64);
+    if wrapped >= TWO_64 / 2.0 {
+        (wrapped - TWO_64) as i64
+    } else {
+        wrapped as i64
+    }
+}
+
+/// `(int) $text`: the number at the start of `text`, saturating at the
+/// integer limits; 0 without one, or for an infinite float.
+fn string_to_int(text: &[u8]) -> i64 {
+    let Some((number, len)) = numeric_prefix(text) else {
+        return 0;
+    };
+    let prefix = text.get(..len).unwrap_or_default();
+    if prefix.iter().any(|b| matches!(b, b'.' | b'e' | b'E')) {
+        // Float syntax: capped, as `zend_dval_to_lval_cap()` does.
+        return if number.is_finite() { number as i64 } else { 0 };
+    }
+    let lead = prefix.iter().take_while(|&&b| is_space(b)).count();
+    let digits = prefix.get(lead..).unwrap_or_default();
+    // Only an overflow fails to parse: it saturates toward its sign.
+    std::str::from_utf8(digits)
+        .ok()
+        .and_then(|digits| digits.parse().ok())
+        .unwrap_or(if digits.first() == Some(&b'-') {
+            i64::MIN
+        } else {
+            i64::MAX
+        })
 }
 
 /// `(float) $text`: the number at the start of `text`, `0` without one.
@@ -150,13 +221,7 @@ fn numeric_prefix(text: &[u8]) -> Option<(f64, usize)> {
 mod tests {
     use super::*;
     use crate::decode;
-
-    fn unhex(hex: &str) -> Vec<u8> {
-        hex.as_bytes()
-            .chunks(2)
-            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
-            .collect()
-    }
+    use hyscribe_testkit::unhex;
 
     /// Every case of `reference/phpser/cast-golden.php`.
     #[test]
@@ -172,6 +237,7 @@ mod tests {
                 "empty" => Value::Bool(value.is_empty()),
                 "is_numeric" => Value::Bool(value.is_numeric()),
                 "float" => Value::Float(crate::Float::from_f64(value.to_float())),
+                "int" => Value::Int(value.to_int()),
                 _ => Value::String(value.to_php_string()),
             };
             assert_eq!(ours, expected, "{kind} {value:?}");
@@ -188,6 +254,11 @@ mod tests {
         assert!(!object.is_empty());
         assert!(!object.is_numeric());
         assert_eq!(object.to_float(), 1.0);
+        assert_eq!(object.to_int(), 1);
+        assert_eq!(absint(&Value::String(b"-7".to_vec())), 7);
+        assert!(isset(Some(&Value::Bool(false))));
+        assert!(!isset(Some(&Value::Null)));
+        assert!(!isset(None));
         assert_eq!(object.to_php_string(), b"");
         assert_eq!(Value::Null.to_php_string(), b"");
         assert_eq!(Value::Bool(false).to_php_string(), b"");

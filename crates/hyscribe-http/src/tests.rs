@@ -220,10 +220,12 @@ fn escaping() {
 }
 
 #[test]
-fn absint_takes_leading_digits() {
+fn absint_casts_like_php() {
     assert_eq!(absint("42"), 42);
     assert_eq!(absint(" 7up"), 7);
-    assert_eq!(absint("-3"), 0);
+    // absint() in PHP WordPress: the absolute value of the (int) cast.
+    assert_eq!(absint("-3"), 3);
+    assert_eq!(absint("1e3"), 1000);
     assert_eq!(absint(""), 0);
     assert_eq!(absint("99999999999999999999999"), i64::MAX.unsigned_abs());
 }

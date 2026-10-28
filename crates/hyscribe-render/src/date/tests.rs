@@ -65,12 +65,12 @@ fn site_zones_like_wp_timezone() {
     ] {
         assert_eq!(
             site_zone(b"", gmt_offset.as_bytes()),
-            Some(Zone::Offset(seconds)),
+            Zone::Offset(seconds),
             "{gmt_offset}"
         );
     }
-    assert_eq!(site_zone(b"UTC", b"5"), Some(Zone::Utc));
-    assert_eq!(site_zone(b"Europe/Berlin", b"1"), None);
+    assert_eq!(site_zone(b"UTC", b"5"), Zone::Utc);
+    assert_eq!(site_zone(b"Europe/Berlin", b"1"), Zone::Utc);
 }
 
 #[test]

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Writes crates/hyscribe-phpser/tests/golden/cast.tsv: PHP's empty(),
-// is_numeric(), (float) and (string) of each value, the oracle for
+// is_numeric(), (float), (int) and (string) of each value, the oracle for
 // hyscribe-phpser's cast module. Each line is
 //   kind<TAB>hex(serialize(value))<TAB>hex(serialize(result))
 //
@@ -23,11 +23,12 @@ $values = array(
 	'1.5e+3', '-1.5e3x', '1.e5', '-.5e-2', '1e400', '-1e400', '0x1A', '1 1',
 	'1.5.6', 'inf', 'NAN', '1.2rem', '  3px', " \t\n42", '12abc', "\xff", "1\xff",
 	'9223372036854775808', '-9223372036854775809', '0.30000000000000004',
-	'007', '1_000', '١',
+	'007', '1_000', '١', '-5', ' -12abc', '1e3', '1.9', '-1.9', '9.9e18', '-9.9e18',
+	9.9e18, -9.9e18, 1.9, -1.9, 1e300, 9223372036854775808.0, -9223372036854775808.0, 2.5e19, -2.5e19, '9223372036854775807.5', '+7', '  +3e2x', '.5e1', '9223372036854775808x',
 	array(), array( 0 ), array( 'a' => 1 ), array( array() ),
 );
 
-foreach ( array( 'empty', 'is_numeric', 'float', 'string' ) as $kind ) {
+foreach ( array( 'empty', 'is_numeric', 'float', 'int', 'string' ) as $kind ) {
 	foreach ( $values as $value ) {
 		switch ( $kind ) {
 			case 'empty':
@@ -38,6 +39,9 @@ foreach ( array( 'empty', 'is_numeric', 'float', 'string' ) as $kind ) {
 				break;
 			case 'float':
 				$result = (float) $value;
+				break;
+			case 'int':
+				$result = (int) $value;
 				break;
 			default:
 				// Arrays print "Array" with a warning.

@@ -5,22 +5,19 @@
 
 use super::*;
 
-const SHORTCODES: [&[u8]; 8] = [
-    b"wp_caption",
-    b"caption",
-    b"gallery",
-    b"playlist",
-    b"audio",
-    b"video",
-    b"embed",
-    b"code",
-];
+/// Core's shortcodes, plus the `code` one the PHP generator adds.
+fn shortcode_tags() -> Vec<&'static [u8]> {
+    CORE_SHORTCODE_TAGS
+        .into_iter()
+        .chain([&b"code"[..]])
+        .collect()
+}
 
 const SMILIES_URL: &[u8] = b"http://127.0.0.1:8081/wp-includes/images/smilies/";
 
 fn texturizes(cases: &[(&str, &str)]) {
     for &(input, expected) in cases {
-        let ours = wptexturize(input.as_bytes(), &SHORTCODES);
+        let ours = wptexturize(input.as_bytes(), &shortcode_tags());
         assert_eq!(String::from_utf8_lossy(&ours), expected, "{input:?}");
     }
 }

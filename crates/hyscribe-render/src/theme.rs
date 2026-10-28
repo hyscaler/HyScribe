@@ -108,7 +108,20 @@ pub struct Theme {
 
 /// Twenty Twenty-Five, as bundled with WordPress 7.1.3.
 pub fn twentytwentyfive() -> Theme {
+    with_user_styles(None, &[])
+}
+
+/// Twenty Twenty-Five with `user` as the site's global styles and `styles`
+/// registered after its own block styles.
+#[cfg(test)]
+pub(crate) fn twentytwentyfive_with(user: &[u8], styles: &[(String, String)]) -> Theme {
+    with_user_styles(Some(user), styles)
+}
+
+fn with_user_styles(user: Option<&[u8]>, styles: &[(String, String)]) -> Theme {
     let blocks = registered_blocks(REGISTERED_BLOCKS);
+    let mut block_styles = block_styles(BLOCK_STYLES);
+    block_styles.extend_from_slice(styles);
     Theme {
         slug: "twentytwentyfive",
         templates: TEMPLATES.into_iter().collect(),
@@ -118,10 +131,10 @@ pub fn twentytwentyfive() -> Theme {
         global: GlobalStyles::resolve(&Sources {
             core: CORE_THEME_JSON,
             blocks: &blocks,
-            block_styles: &block_styles(BLOCK_STYLES),
+            block_styles: &block_styles,
             theme: Some(THEME_JSON),
             theme_styles: &style_partials(STYLE_PARTIALS),
-            user: None,
+            user,
         }),
         style_handles: blocks
             .iter()

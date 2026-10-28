@@ -26,14 +26,16 @@ mod spacing;
 mod stylesheet;
 mod theme_json;
 mod typography;
+mod variations;
 mod viewport;
 
 use hyscribe_phpser::Value;
 
 pub use blocks::BlockType;
 pub use kebab::kebab_case;
+pub use variations::instance_class;
 
-use stylesheet::{Tree, Types};
+use stylesheet::{Options, Tree, Types};
 
 /// Everything the engine reads, for one site and theme.
 #[derive(Clone, Copy, Debug)]
@@ -176,8 +178,12 @@ impl GlobalStyles {
             presets: true,
             custom_css: false,
         };
-        let mut css = tree.stylesheet(variables, &STYLESHEET_ORIGINS, blocks);
-        css.push_str(&tree.stylesheet(rest, &STYLESHEET_ORIGINS, blocks));
+        let options = Options {
+            blocks,
+            ..Options::default()
+        };
+        let mut css = tree.stylesheet(variables, &STYLESHEET_ORIGINS, options);
+        css.push_str(&tree.stylesheet(rest, &STYLESHEET_ORIGINS, options));
         css
     }
 
@@ -185,7 +191,7 @@ impl GlobalStyles {
     /// `get_styles_for_block()`): `(block name, css)`, possibly empty.
     pub fn block_css(&self) -> Vec<(String, String)> {
         let tree = self.tree();
-        tree.block_nodes()
+        tree.block_nodes(false)
             .iter()
             .map(|node| {
                 let name = node
@@ -211,7 +217,11 @@ impl GlobalStyles {
             presets: false,
             custom_css: true,
         };
-        stylesheet.push_str(&self.tree().stylesheet(custom, &STYLESHEET_ORIGINS, false));
+        stylesheet.push_str(&self.tree().stylesheet(
+            custom,
+            &STYLESHEET_ORIGINS,
+            Options::default(),
+        ));
         if stylesheet.is_empty() {
             return stylesheet;
         }

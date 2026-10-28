@@ -164,6 +164,15 @@ impl Site for Options {
     fn query(&self, query: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
         self.base.query(query)
     }
+    fn comments(&self, post_id: u64) -> Vec<hyscribe_model::Comment> {
+        self.base.comments(post_id)
+    }
+    fn comment(&self, id: u64) -> Option<hyscribe_model::Comment> {
+        self.base.comment(id)
+    }
+    fn user(&self, id: u64) -> Option<hyscribe_model::User> {
+        self.base.user(id)
+    }
 }
 
 fn head_for(site: &Options, request: &Request) -> String {
@@ -266,6 +275,7 @@ fn page_heads_match_php() {
         let template = match query {
             "" if path == "/" => "home",
             "page_id=2" => "page",
+            "p=1" => "single",
             // The fixture's empty search lists nothing; the HTTP test has it.
             "s=hello" => "search",
             "cat=1" | "m=2026" | "m=202610" | "m=20261027" => "archive",
@@ -308,7 +318,7 @@ fn page_heads_match_php() {
         assert_eq!(ours, php, "{path}");
         checked += 1;
     }
-    assert_eq!(checked, 9);
+    assert_eq!(checked, 10);
 }
 
 /// `wp_maybe_inline_styles()` inlines up to the limit itself: two halves

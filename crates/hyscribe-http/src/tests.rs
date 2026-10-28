@@ -653,9 +653,7 @@ async fn list_filters_narrow_the_query() {
 }
 
 /// Every page's `<head>` against PHP's, from `reference/head/golden.sh`,
-/// with HyScribe as the generator and without the tags an open question holds back. The single post is left out until
-/// block style variations are ported: its empty tags block still adds
-/// `block-style-variation-styles`.
+/// with HyScribe as the generator and without the tags an open question holds back.
 #[tokio::test]
 #[allow(clippy::string_slice)]
 async fn heads_match_php() {
@@ -671,9 +669,6 @@ async fn heads_match_php() {
     for line in golden.lines() {
         let (path, php) = line.split_once('\t').unwrap();
         let path = String::from_utf8(hyscribe_testkit::unhex(path)).unwrap();
-        if path.starts_with("/?p=1") {
-            continue;
-        }
         let mut php = String::from_utf8(hyscribe_testkit::unhex(php)).unwrap();
         for prefix in [
             "<link rel=\"https://api.w.org/\"",

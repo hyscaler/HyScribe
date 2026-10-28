@@ -22,6 +22,7 @@ use crate::registry::block_type;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
 use crate::theme::Theme;
+use crate::variations::variation_class;
 
 /// `convert_smilies()`, which does nothing unless the site's
 /// `use_smilies` option is set.
@@ -223,6 +224,8 @@ impl Renderer<'_> {
     }
 
     fn render_block(&mut self, block: &Block) -> Vec<u8> {
+        let varied = self.style_variation(block);
+        let block = varied.as_ref().unwrap_or(block);
         let root_interactive = !self.in_interactive
             && block.name.as_deref().and_then(block_type).is_some_and(|t| {
                 t.supports.get_str("interactivity") == Some(&Value::Bool(true))
@@ -269,6 +272,7 @@ impl Renderer<'_> {
             self.assets.enqueue_style(handle);
         }
         let html = self.layout(block, html);
+        let html = variation_class(html, block);
         let html = match block.name.as_deref() {
             Some("core/paragraph") => paragraph_class(&html),
             _ => html,

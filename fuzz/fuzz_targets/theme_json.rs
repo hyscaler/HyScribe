@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! An arbitrary theme.json, as core, theme, block style partial and user
-//! global styles at once, resolves and prints its stylesheet without
-//! panicking or hanging.
+//! global styles at once, resolves and prints its stylesheet, and the
+//! stylesheet of the style variation the input as a class name picks,
+//! without panicking or hanging.
 
 #![no_main]
 
@@ -61,4 +62,9 @@ fuzz_target!(|data: &[u8]| {
     let _ = hyscribe_phpser::encode(styles.settings());
     let _ = styles.stylesheet();
     let _ = styles.inline_css(&|_| true);
+    for block in blocks() {
+        if let Some(variation) = styles.style_variation(&block.name, data) {
+            let _ = styles.style_variation_css(&block.name, &variation, &format!("{variation}--1"));
+        }
+    }
 });

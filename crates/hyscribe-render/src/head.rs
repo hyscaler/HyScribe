@@ -53,6 +53,8 @@ pub struct Assets {
     pub(crate) rules: Vec<Rule>,
     /// Script module IDs, in the order they were enqueued.
     pub(crate) modules: Vec<String>,
+    /// The inline CSS of `block-style-variation-styles`.
+    pub(crate) variations: Vec<String>,
 }
 
 impl Assets {
@@ -274,19 +276,30 @@ impl Head<'_> {
                 None => Style::inline(handle, ""),
             });
         }
-        queue.push(Style::inline("wp-emoji-styles", EMOJI_CSS));
-        queue.push(Style::file(
-            "wp-block-library",
-            "/wp-includes/css/dist/block-library/common.min.css",
-            COMMON_CSS,
-            None,
-        ));
         let on_page = |name: &str| {
             let handle = format!("wp-block-{}", name.trim_start_matches("core/"));
             queue.iter().any(|style| style.handle == handle)
         };
         let global = self.theme.global.inline_css(&on_page);
-        queue.push(Style::inline("global-styles", &global));
+        let library = Style::file(
+            "wp-block-library",
+            "/wp-includes/css/dist/block-library/common.min.css",
+            COMMON_CSS,
+            None,
+        );
+        let global = Style::inline("global-styles", &global);
+        let emoji = Style::inline("wp-emoji-styles", EMOJI_CSS);
+        if assets.variations.is_empty() {
+            queue.extend([emoji, library, global]);
+        } else {
+            // The variation styles, enqueued before emoji styles, print
+            // after what they depend on.
+            let variations = Style {
+                after: assets.variations.clone(),
+                ..Style::inline("block-style-variation-styles", "")
+            };
+            queue.extend([library, global, variations, emoji]);
+        }
         queue.push(Style::inline(
             "core-block-supports",
             &stylesheet(&assets.rules),

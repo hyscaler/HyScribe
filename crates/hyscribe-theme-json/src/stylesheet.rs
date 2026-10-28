@@ -3,10 +3,10 @@
 //! `WP_Theme_JSON`'s CSS side: `get_stylesheet()` (variables, root layout
 //! rules, styles, preset classes, custom CSS) and `get_styles_for_block()`.
 //!
-//! Not ported, as nothing in a default install reaches them: block style
-//! variations (`include_block_style_variations`), the `scope` and
-//! `root_selector` options, and the `disable-layout-styles` theme
-//! support.
+//! Not ported, as nothing in a default install reaches them: the
+//! `root_selector` option and the `disable-layout-styles` theme support.
+//! The `scope` option scopes style nodes only, as no caller asks it for
+//! variables or presets.
 
 use hyscribe_phpser::{Value, float_to_string, string_to_float};
 
@@ -233,6 +233,17 @@ pub(crate) struct StyleNode {
     pub(crate) selectors: Option<Value>,
     pub(crate) duotone: Option<String>,
     pub(crate) media_query: Option<String>,
+    /// The selector before scoping (`css`); only scoped nodes have it.
+    pub(crate) css: Option<String>,
+    pub(crate) variations: Vec<Variation>,
+}
+
+/// A block style variation of a block node.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Variation {
+    name: String,
+    path: Vec<String>,
+    selector: String,
 }
 
 impl StyleNode {
@@ -278,7 +289,7 @@ impl Tree<'_> {
     }
 
     /// `get_style_nodes()`; block nodes only with `blocks`.
-    pub(crate) fn style_nodes(&self, blocks: bool) -> Vec<StyleNode> {
+    pub(crate) fn style_nodes(&self, blocks: bool, variations: bool) -> Vec<StyleNode> {
         let Some(styles) = php::get(self.data, &["styles"]).filter(|s| php::isset(Some(s))) else {
             return Vec::new();
         };
@@ -299,13 +310,13 @@ impl Tree<'_> {
             }
         }
         if blocks {
-            nodes.extend(self.block_nodes());
+            nodes.extend(self.block_nodes(variations));
         }
         nodes
     }
 
-    /// `get_block_nodes()`, without style variations.
-    pub(crate) fn block_nodes(&self) -> Vec<StyleNode> {
+    /// `get_block_nodes()`; style variations only with `variations`.
+    pub(crate) fn block_nodes(&self, variations: bool) -> Vec<StyleNode> {
         let breakpoints = self.media_queries();
         let mut nodes = Vec::new();
         for (name, node) in
@@ -320,6 +331,25 @@ impl Tree<'_> {
                     .map(|s| (*s).to_owned())
                     .collect()
             };
+            let variations = php::entries(
+                php::get(node, &["variations"])
+                    .filter(|_| variations)
+                    .unwrap_or(&Value::Null),
+            )
+            .iter()
+            .map(|(variation, _)| {
+                let name = php::key_str(variation);
+                let selector = meta
+                    .and_then(|m| m.style_variations.iter().find(|(n, _)| *n == name))
+                    .map(|(_, selector)| selector.clone())
+                    .unwrap_or_default();
+                Variation {
+                    path: base(&["variations", &name]),
+                    name,
+                    selector,
+                }
+            })
+            .collect();
             let block = StyleNode {
                 name: Some(name.clone()),
                 path: base(&[]),
@@ -327,6 +357,8 @@ impl Tree<'_> {
                 selectors: meta.map(|m| m.selectors.clone()),
                 duotone: meta.and_then(|m| m.duotone.clone()),
                 media_query: None,
+                variations,
+                css: None,
             };
             let selector = block.selector.clone().unwrap_or_default();
             nodes.push(block.clone());
@@ -472,6 +504,16 @@ struct SettingNode {
     path: Vec<String>,
     selector: String,
     selectors: Value,
+}
+
+/// The `get_stylesheet()` options HyScribe uses.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Options<'s> {
+    /// Block nodes are kept (`wp_filter_out_block_nodes` is off).
+    pub(crate) blocks: bool,
+    /// A scoped stylesheet is a style variation's, so it also sets
+    /// `include_block_style_variations` and `skip_root_layout_styles`.
+    pub(crate) scope: Option<&'s str>,
 }
 
 /// Which parts of `get_stylesheet()` to build.
@@ -700,10 +742,8 @@ impl Tree<'_> {
             .unwrap_or_else(php::array);
         let use_root_padding = self.use_root_padding();
         let selector = meta.selector.clone().unwrap_or_default();
-        let groups = self.feature_declarations(meta.selectors.as_ref(), &mut node);
+        let groups = self.features(meta, &mut node);
         let is_root = selector == "body";
-        let groups = self.paragraph_indent(groups, meta.name.as_deref());
-        let groups = self.button_width(groups);
 
         // The last path item names the element of element nodes; for other
         // nodes it is never an element name (block names have a slash).
@@ -763,13 +803,16 @@ impl Tree<'_> {
             rules.push_str(&ruleset(duotone_selector, &duotone));
         }
         if !is_root && meta.name.as_deref().is_some_and(|n| !n.is_empty()) {
-            rules.push_str(&self.layout_styles(meta));
+            rules.push_str(&self.layout_styles(meta, None));
         }
         for (feature_selector, declarations) in &groups {
             rules.push_str(&ruleset(
                 &format!(":root :where({feature_selector})"),
                 declarations,
             ));
+        }
+        if meta.media_query.is_none() {
+            rules.push_str(&self.variation_rules(meta));
         }
         if let Some(css) = php::get(&node, &["css"]).filter(|c| php::isset(Some(c)) && !is_root) {
             let custom = meta.selectors.as_ref().and_then(|s| php::get(s, &["css"]));
@@ -788,8 +831,185 @@ impl Tree<'_> {
         }
     }
 
-    /// `get_layout_styles( $block_metadata )`.
-    fn layout_styles(&self, meta: &StyleNode) -> String {
+    /// The style variation rules of `get_styles_for_block()`.
+    fn variation_rules(&self, meta: &StyleNode) -> String {
+        let mut declarations = php::Ordered::new();
+        let mut after = Vec::new();
+        let mut pseudo_css = String::new();
+        for variation in &meta.variations {
+            let mut node = php::get(self.data, &refs(&variation.path))
+                .cloned()
+                .unwrap_or_else(php::array);
+            for (feature_selector, list) in self.features(meta, &mut node) {
+                declarations.put(
+                    variation_feature_selector(variation, &feature_selector),
+                    list,
+                );
+            }
+            declarations.put(variation.selector.clone(), self.compute(&node, None, false));
+            for (pseudo_selector, list) in self.variation_pseudo(&node, meta, variation) {
+                declarations.put(pseudo_selector, list);
+            }
+            let mut css = self.variation_layout(meta, variation, &node);
+            if let Some(custom) = php::get(&node, &["css"]).filter(|c| php::isset(Some(c))) {
+                css.push_str(&nest_custom(&php_string(custom), &variation.selector));
+            }
+            for (state, media) in &self.media_queries() {
+                let Some(state_node) = php::get(&node, &[state]).filter(|n| php::isset(Some(n)))
+                else {
+                    continue;
+                };
+                let (state_css, state_pseudo) =
+                    self.variation_state(meta, variation, &mut state_node.clone());
+                let wrap = |rules: Vec<String>| -> String {
+                    rules.iter().map(|r| format!("{media}{{{r}}}")).collect()
+                };
+                css.push_str(&wrap(state_css));
+                pseudo_css.push_str(&wrap(state_pseudo));
+            }
+            after.push((variation.selector.clone(), css));
+        }
+        let mut rules = String::new();
+        for (selector, list) in declarations.into_vec() {
+            rules.push_str(&ruleset(&format!(":root :where({selector})"), &list));
+            if let Some((_, css)) = after.iter().find(|(s, _)| *s == selector) {
+                rules.push_str(css);
+            }
+        }
+        rules.push_str(&pseudo_css);
+        rules
+    }
+
+    /// The rules of one responsive state of a variation, each to go in the
+    /// state's media query: those in place, and those of pseudo-classes,
+    /// which follow every variation.
+    fn variation_state(
+        &self,
+        meta: &StyleNode,
+        variation: &Variation,
+        node: &mut Value,
+    ) -> (Vec<String>, Vec<String>) {
+        let mut rules = Vec::new();
+        let mut pseudo_rules = Vec::new();
+        let rule = |selector: &str, declarations: &[Declaration]| {
+            ruleset(&format!(":root :where({selector})"), declarations)
+        };
+        for (feature_selector, list) in self.features(meta, node) {
+            rules.push(rule(
+                &variation_feature_selector(variation, &feature_selector),
+                &list,
+            ));
+        }
+        let base = self.compute(node, None, false);
+        if !base.is_empty() {
+            rules.push(rule(&variation.selector, &base));
+        }
+        for (pseudo_selector, list) in self.variation_pseudo(node, meta, variation) {
+            pseudo_rules.push(rule(&pseudo_selector, &list));
+        }
+        if let Some(custom) = php::get(node, &["css"]).filter(|c| php::isset(Some(c))) {
+            rules.push(nest_custom(&php_string(custom), &variation.selector));
+        }
+        let layout = self.variation_layout(meta, variation, node);
+        if !layout.is_empty() {
+            rules.push(layout);
+        }
+        let elements = meta
+            .name
+            .as_deref()
+            .and_then(|name| self.blocks.get(name))
+            .map(|m| m.elements.as_slice())
+            .unwrap_or_default();
+        let styled = php::entries(php::get(node, &["elements"]).unwrap_or(&Value::Null))
+            .iter()
+            .flat_map(|(element, element_node)| {
+                let element = php::key_str(element);
+                elements
+                    .iter()
+                    .filter(move |(e, _)| *e == element)
+                    .map(move |(name, selector)| {
+                        (
+                            *name,
+                            variation_feature_selector(variation, selector),
+                            element_node,
+                        )
+                    })
+            });
+        for (element, selector, element_node) in styled {
+            let declarations = self.compute(element_node, None, false);
+            if !declarations.is_empty() {
+                rules.push(rule(&selector, &declarations));
+            }
+            if let Some(custom) = php::get(element_node, &["css"]).filter(|c| php::isset(Some(c))) {
+                rules.push(nest_custom(&php_string(custom), &selector));
+            }
+            for pseudo in lookup(&ELEMENT_PSEUDO, element) {
+                let declarations = php::get(element_node, &[pseudo])
+                    .filter(|n| php::isset(Some(n)))
+                    .map(|n| self.compute(n, None, false))
+                    .unwrap_or_default();
+                if !declarations.is_empty() {
+                    pseudo_rules.push(rule(&selector::append(&selector, pseudo), &declarations));
+                }
+            }
+        }
+        (rules, pseudo_rules)
+    }
+
+    /// Feature declarations of `node`, taken out of it, as every caller of
+    /// `get_feature_declarations_for_node()` updates them.
+    fn features(&self, meta: &StyleNode, node: &mut Value) -> Grouped {
+        let groups = self.feature_declarations(meta.selectors.as_ref(), node);
+        self.button_width(self.paragraph_indent(groups, meta.name.as_deref()))
+    }
+
+    /// The block gap rules of a variation node: `get_layout_styles()` on the
+    /// variation selector followed by the block's.
+    fn variation_layout(&self, meta: &StyleNode, variation: &Variation, node: &Value) -> String {
+        if !php::isset(php::get(node, &["spacing", "blockGap"])) {
+            return String::new();
+        }
+        let layout = StyleNode {
+            name: meta.name.clone(),
+            selector: Some(format!(
+                "{}{}",
+                variation.selector,
+                meta.css.as_deref().unwrap_or_default()
+            )),
+            ..StyleNode::default()
+        };
+        self.layout_styles(&layout, Some(node))
+    }
+
+    /// `process_pseudo_selectors()` for the node of a style variation.
+    fn variation_pseudo(&self, node: &Value, meta: &StyleNode, variation: &Variation) -> Grouped {
+        let mut groups = Grouped::new();
+        let mut add = |selector: String, declarations: Vec<Declaration>| {
+            if !declarations.is_empty() {
+                group(&mut groups, &selector, declarations);
+            }
+        };
+        for pseudo in lookup(&BLOCK_PSEUDO, meta.name.as_deref().unwrap_or_default()) {
+            let Some(pseudo_node) = php::get(node, &[pseudo]).filter(|n| php::isset(Some(n)))
+            else {
+                continue;
+            };
+            let mut pseudo_node = pseudo_node.clone();
+            for (feature_selector, list) in self.features(meta, &mut pseudo_node) {
+                let target = variation_feature_selector(variation, &feature_selector);
+                add(selector::append(&target, pseudo), list);
+            }
+            add(
+                selector::append(&variation.selector, pseudo),
+                self.compute(&pseudo_node, None, false),
+            );
+        }
+        groups
+    }
+
+    /// `get_layout_styles( $block_metadata, $options )`; `node` stands in
+    /// for the node at the metadata's path.
+    fn layout_styles(&self, meta: &StyleNode, node: Option<&Value>) -> String {
         let mut rules = String::new();
         let block = meta.name.as_deref().map(|name| self.blocks.get(name));
         if let Some(block) = block {
@@ -805,7 +1025,8 @@ impl Tree<'_> {
         let selector = meta.selector.clone().unwrap_or_default();
         let is_root = selector == "body";
         let has_gap_support = php::isset(php::get(self.data, &["settings", "spacing", "blockGap"]));
-        let node = php::get(self.data, &refs(&meta.path))
+        let node = node
+            .or_else(|| php::get(self.data, &refs(&meta.path)))
             .cloned()
             .unwrap_or_else(php::array);
 
@@ -942,7 +1163,7 @@ impl Tree<'_> {
             css.push_str(":where(.wp-site-blocks) > :last-child { margin-block-end: 0; }");
             css.push_str(&format!(":root {{ --wp--style--block-gap: {gap}; }}"));
         }
-        css.push_str(&self.layout_styles(meta));
+        css.push_str(&self.layout_styles(meta, None));
         css
     }
 
@@ -1052,16 +1273,31 @@ impl Tree<'_> {
         css
     }
 
-    /// `get_stylesheet( $types, $origins )`; block nodes only with
-    /// `blocks`, as `wp_filter_out_block_nodes` removes them otherwise.
-    pub(crate) fn stylesheet(&self, types: Types, origins: &[&str], blocks: bool) -> String {
-        let nodes = self.style_nodes(blocks);
+    /// `get_stylesheet( $types, $origins, $options )`.
+    pub(crate) fn stylesheet(
+        &self,
+        types: Types,
+        origins: &[&str],
+        options: Options<'_>,
+    ) -> String {
+        let mut nodes = self.style_nodes(options.blocks, options.scope.is_some());
+        let root = nodes
+            .iter()
+            .position(|n| n.selector.as_deref() == Some("body"));
+        if let Some(scope) = options.scope {
+            for node in &mut nodes {
+                scope_node(scope, node);
+            }
+        }
         let mut css = String::new();
         if types.variables {
             css.push_str(&self.css_variables(origins));
         }
         if types.styles {
-            if let Some(root) = nodes.iter().find(|n| n.selector.as_deref() == Some("body")) {
+            let root = root
+                .filter(|_| options.scope.is_none())
+                .and_then(|r| nodes.get(r));
+            if let Some(root) = root {
                 css.push_str(&self.root_layout_rules(root));
             }
             for node in nodes.iter().filter(|n| n.selector.is_some()) {
@@ -1116,6 +1352,36 @@ fn preset_classes(settings: &Value, selector: &str, origins: &[&str]) -> String 
         }
     }
     css
+}
+
+/// `scope_style_node_selectors( $scope, $node )`.
+fn scope_node(scope: &str, node: &mut StyleNode) {
+    let scoped = |selector: &Value| string(&selector::scope(scope, &php_string(selector)));
+    node.css = node.selector.clone();
+    node.selector = node.selector.as_deref().map(|s| selector::scope(scope, s));
+    if let Some(Value::Array(features)) = &mut node.selectors {
+        for (_, feature) in features.iter_mut() {
+            match feature {
+                Value::Array(subs) => {
+                    for (_, sub) in subs.iter_mut() {
+                        *sub = scoped(sub);
+                    }
+                }
+                _ => *feature = scoped(feature),
+            }
+        }
+    }
+}
+
+/// `get_block_style_variation_feature_selector()`: a feature selector of
+/// the scoped block with the scope taken off, made a variation selector.
+fn variation_feature_selector(variation: &Variation, feature_selector: &str) -> String {
+    let prefix = format!(".is-style-{} ", variation.name);
+    let parts: Vec<String> = selector::split(feature_selector)
+        .iter()
+        .map(|part| part.strip_prefix(&prefix).unwrap_or(part).to_owned())
+        .collect();
+    selector::variation(&variation.name, &parts.join(", "))
 }
 
 /// `flatten_tree( $tree )`: `custom` settings as kebab-case variable names.

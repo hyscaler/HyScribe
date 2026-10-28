@@ -6,6 +6,11 @@ use super::*;
 use crate::tests::{blocks, check, resolved};
 use crate::theme_json::{ORIGINS, Origin, new};
 
+const BLOCKS: Options = Options {
+    blocks: true,
+    scope: None,
+};
+
 const ALL: Types = Types {
     variables: true,
     styles: true,
@@ -23,7 +28,7 @@ const CUSTOM: Types = Types {
 /// custom CSS, and the CSS of each block node.
 pub(crate) fn stylesheet_of(tree: &Tree<'_>) -> Value {
     let blocks = tree
-        .block_nodes()
+        .block_nodes(false)
         .iter()
         .enumerate()
         .map(|(i, node)| {
@@ -41,11 +46,11 @@ pub(crate) fn stylesheet_of(tree: &Tree<'_>) -> Value {
     Value::Array(vec![
         (
             php::key("sheet"),
-            string(&tree.stylesheet(ALL, &ORIGINS, true)),
+            string(&tree.stylesheet(ALL, &ORIGINS, BLOCKS)),
         ),
         (
             php::key("custom"),
-            string(&tree.stylesheet(CUSTOM, &ORIGINS, true)),
+            string(&tree.stylesheet(CUSTOM, &ORIGINS, BLOCKS)),
         ),
         (php::key("blocks"), Value::Array(blocks)),
     ])
@@ -70,7 +75,7 @@ fn block_css(block: &str, metadata: &str, theme_json: &str) -> Vec<String> {
         blocks: &blocks,
         global: &Value::Null,
     };
-    tree.block_nodes()
+    tree.block_nodes(false)
         .iter()
         .map(|n| tree.styles_for_block(n))
         .collect()

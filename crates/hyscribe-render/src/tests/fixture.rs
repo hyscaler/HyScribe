@@ -113,6 +113,12 @@ impl DefaultInstall {
             }
             return request;
         }
+        if let Some((base, _)) = query.split_once("&cpage=") {
+            return Request {
+                get: hyscribe_phpser::parse_str(query.as_bytes()),
+                ..self.request(base)
+            };
+        }
         if query == "paged=1" {
             return Request {
                 page: 1,

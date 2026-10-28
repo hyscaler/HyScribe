@@ -19,7 +19,7 @@ FOOTER="$ROOT/crates/hyscribe-render/tests/golden/footer.tsv"
 mkdir -p "$(dirname "$OUT")"
 : > "$OUT"
 : > "$FOOTER"
-for path in / '/?p=1' '/?page_id=2' '/?p=1&replytocom=1' '/?s=hello' '/?s=' '/?cat=1' '/?m=2026' '/?m=202610' \
+for path in / '/?p=1' '/?page_id=2' '/?p=1&replytocom=1' '/?p=1&cpage=2' '/?p=1&cpage=abc' '/?s=hello' '/?s=' '/?cat=1' '/?m=2026' '/?m=202610' \
   '/?m=20261027' '/?cat=1&m=2026' '/?p=999' '/?cat=999' '/no/such/path/'; do
   page=$(curl -s "$BASE$path" | xxd -p | tr -d '\n')
   head=$(printf '%s' "$page" | python3 -I -c 'import sys; s=bytes.fromhex(sys.stdin.read()); i=s.find(b"<head>"); j=s.find(b"</head>"); sys.stdout.write((s[i:j+7]).hex())')

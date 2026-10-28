@@ -3,13 +3,14 @@
 //! The comment template block: the post's approved comments, threaded, each
 //! rendering the template's inner blocks with the comment as context.
 //!
-//! Comment paging (`page_comments`) and the unapproved comments a visitor's
-//! cookie would show are not ported yet.
+//! The unapproved comments a visitor's cookie would show are not ported
+//! yet.
 
 use hyscribe_model::Comment;
 use hyscribe_phpser::{Value, is_empty_string};
 
 use crate::blocks::Block;
+use crate::comment_pages::{listed, paging};
 use crate::post::sanitize_html_class;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
@@ -32,7 +33,16 @@ impl Renderer<'_> {
         let threaded = !is_empty_string(&option("thread_comments"));
         let all = site.comments(post_id);
         // A threaded query lists the top level; replies come with their parents.
-        let mut listed: Vec<&Comment> = all.iter().filter(|c| !threaded || c.parent == 0).collect();
+        let mut listed = listed(site, &all);
+        if let Some(paging) = paging(site, self.context.request, listed.len()) {
+            // Pages below the first list the first.
+            let offset = paging.paged.map_or(0, |p| (p.max(1) - 1) * paging.number);
+            listed = listed
+                .into_iter()
+                .skip(usize::try_from(offset).unwrap_or(usize::MAX))
+                .take(usize::try_from(paging.number).unwrap_or(usize::MAX))
+                .collect();
+        }
         if listed.is_empty() {
             return Vec::new();
         }

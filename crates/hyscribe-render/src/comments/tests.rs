@@ -147,6 +147,7 @@ fn matches_php() {
             .get_str("uri")
             .map_or(b"/".to_vec(), Value::to_php_string);
         let request = Request {
+            singular: state.get_str("singular") == Some(&Value::Bool(true)),
             now: state.get_str("now").unwrap().to_int(),
             post: state.get_str("global").map(|id| id.to_int() as u64),
             uri: uri.clone(),
@@ -169,12 +170,22 @@ fn matches_php() {
         let block = &crate::blocks::parse_blocks(&markup)[0];
         let ours = [renderer.block(block), renderer.block(block)].concat();
         if ours != php {
+            // Where they part, with some context.
+            let at = ours.iter().zip(&php).take_while(|(a, b)| a == b).count();
+            let from = at.saturating_sub(80);
+            let around = |html: &[u8]| {
+                String::from_utf8_lossy(
+                    html.get(from..html.len().min(at + 200)).unwrap_or_default(),
+                )
+                .into_owned()
+            };
             failures.push(format!(
-                "{} {:?}\n  php:  {}\n  ours: {}",
+                "{} {:?} {}\n  php:  {}\n  ours: {}",
                 String::from_utf8_lossy(&markup),
                 state.get_str("options"),
-                String::from_utf8_lossy(&php),
-                String::from_utf8_lossy(&ours)
+                String::from_utf8_lossy(&uri),
+                around(&php),
+                around(&ours)
             ));
         }
     }

@@ -684,7 +684,7 @@ async fn footers_match_php() {
             "{path}"
         );
     }
-    assert_eq!(golden.lines().count(), 14);
+    assert_eq!(golden.lines().count(), 16);
 }
 
 /// Every page's `<head>` against PHP's, from `reference/head/golden.sh`,

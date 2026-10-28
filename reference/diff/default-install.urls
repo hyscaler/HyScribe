@@ -13,6 +13,8 @@
 /?m=2026
 /?feed=rss2
 /?p=1&replytocom=1
+/?p=1&cpage=2
+/?p=1&cpage=abc
 /robots.txt
 /wp-login.php 307  # intended: redirects to /hs-login (ADR 0008)
 /wp-admin/ 307  # intended: redirects to /hs-admin/ (ADR 0008)

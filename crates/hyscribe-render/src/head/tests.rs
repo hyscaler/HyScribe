@@ -271,7 +271,7 @@ fn rendered(theme: &Theme, site: &Options, path: &str) -> Option<(Request, Asset
     let template = match query {
         "" if path == "/" => "home",
         "page_id=2" => "page",
-        "p=1" => "single",
+        "p=1" | "p=1&cpage=2" | "p=1&cpage=abc" => "single",
         // The fixture's empty search lists nothing; the HTTP test has it.
         "s=hello" => "search",
         "cat=1" | "m=2026" | "m=202610" | "m=20261027" => "archive",
@@ -332,7 +332,7 @@ fn page_heads_match_php() {
         assert_eq!(ours, php, "{path}");
         checked += 1;
     }
-    assert_eq!(checked, 10);
+    assert_eq!(checked, 12);
 }
 
 /// The footers of `reference/head/golden.sh` the fixture can render.
@@ -352,7 +352,7 @@ fn page_footers_match_php() {
         assert_eq!(ours, String::from_utf8(unhex(php)).unwrap(), "{path}");
         checked += 1;
     }
-    assert_eq!(checked, 10);
+    assert_eq!(checked, 12);
 }
 
 /// `wp_maybe_inline_styles()` inlines up to the limit itself: two halves

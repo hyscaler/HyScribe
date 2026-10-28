@@ -778,11 +778,17 @@ fn smiley(s: &[u8], i: usize, smilies_url: &[u8]) -> Match {
 /// `convert_chars()`: `/&([^#])(?![a-z1-4]{1,8};)/i` becomes `&#038;$1`,
 /// so a bare `&` is encoded and named references stay.
 pub fn convert_chars(text: &[u8]) -> Vec<u8> {
-    // `[a-z1-4]{1,8};` at the start of `text`.
+    encode_ampersands(text, true)
+}
+
+/// `/&([^#])(?![a-z]{1,8};)/i` becoming `&#038;$1`, with `1-4` among the
+/// letters when `digits` is set.
+pub(crate) fn encode_ampersands(text: &[u8], digits: bool) -> Vec<u8> {
+    // `[a-z]{1,8};` at the start of `text`.
     let reference = |text: &[u8]| {
         let name = text
             .iter()
-            .take_while(|b| b.is_ascii_alphabetic() || (b'1'..=b'4').contains(b))
+            .take_while(|b| b.is_ascii_alphabetic() || (digits && (b'1'..=b'4').contains(b)))
             .count();
         (1..=8).contains(&name) && text.get(name) == Some(&b';')
     };

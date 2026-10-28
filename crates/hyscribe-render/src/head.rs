@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 use hyscribe_kses::{esc_attr, esc_url, esc_url_raw, strip_tags, wp_strip_all_tags};
 use hyscribe_phpser::{Value, add_query_arg, is_empty_string, json_decode, urlencode};
 
+use crate::comment_pages::{comments_pagenum_link, cpage};
 use crate::core_blocks::comments_open;
 use crate::layout::{Rule, stylesheet};
 use crate::post::the_title;
@@ -346,6 +347,10 @@ impl Head<'_> {
                     &[(b"page", Some(self.request.page.to_string().as_bytes()))],
                     &url,
                 );
+            }
+            let cpage = cpage(self.request);
+            if !cpage.is_empty() {
+                url = comments_pagenum_link(self.context, cpage.to_int(), 0);
             }
             out.extend(
                 [

@@ -7,6 +7,7 @@ pub mod autop;
 pub mod balance;
 pub mod blocks;
 pub mod clickable;
+mod comment_pages;
 mod comments;
 mod content;
 mod core_blocks;

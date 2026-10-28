@@ -146,7 +146,7 @@ $markups = array(
 	'<!-- wp:comment-template --><!-- wp:comment-content /--><!-- wp:comment-content {"textAlign":"right","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- /wp:comment-template -->',
 	'<!-- wp:comment-template --><!-- wp:comment-date /--><!-- wp:comment-date {"format":"Y-m-d H:i","isLink":true} /--><!-- wp:comment-date {"format":"human-diff","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- wp:comment-author-name /--><!-- wp:comment-author-name {"isLink":true,"linkTarget":"_blank","textAlign":"right"} /--><!-- wp:comment-author-name {"isLink":true,"linkTarget":""} /--><!-- wp:comment-edit-link /--><!-- wp:comment-reply-link /--><!-- wp:comment-reply-link {"textAlign":"center","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- /wp:comment-template -->',
 );
-$option_names = array( 'thread_comments', 'thread_comments_depth', 'comment_order', 'comment_registration', 'date_format', 'show_on_front', 'page_on_front', 'use_smilies', 'avatar_default', 'avatar_rating', 'show_avatars', 'close_comments_for_old_posts', 'close_comments_days_old', 'require_name_email', 'show_comments_cookies_opt_in' );
+$option_names = array( 'thread_comments', 'thread_comments_depth', 'comment_order', 'comment_registration', 'date_format', 'show_on_front', 'page_on_front', 'use_smilies', 'avatar_default', 'avatar_rating', 'show_avatars', 'close_comments_for_old_posts', 'close_comments_days_old', 'require_name_email', 'show_comments_cookies_opt_in', 'page_comments', 'comments_per_page', 'default_comments_page' );
 $reset = function () {
 	$GLOBALS['comment_alt']        = 0;
 	$GLOBALS['comment_depth']      = 0;
@@ -297,6 +297,69 @@ clean_post_cache( 1 );
 // there are images counted; a query of its own runs after it has ended.
 $wpdb->update( $wpdb->posts, array( 'post_password' => '' ), array( 'ID' => 1 ) );
 clean_post_cache( 1 );
+
+// Comment pages, on the single post: the template lists one page, and the
+// pagination links move between pages as cpage asks.
+$pagination_markups = array(
+	'<!-- wp:comments --><div class="wp-block-comments"><!-- wp:comment-template --><!-- wp:comment-author-name /--><!-- /wp:comment-template -->' .
+		'<!-- wp:comments-pagination {"layout":{"type":"flex","justifyContent":"space-between"}} -->' . "\n\t" . '<!-- wp:comments-pagination-previous /-->' . "\n\t" . '<!-- wp:comments-pagination-next /-->' . "\n\t" . '<!-- /wp:comments-pagination --></div><!-- /wp:comments -->',
+	'<!-- wp:comments-pagination {"paginationArrow":"arrow","style":{"elements":{"link":{"color":{"text":"red"}}}}} --><!-- wp:comments-pagination-previous {"label":"Back & <b>forth</b> &amp; on &b2c;"} /--><!-- wp:comments-pagination-next {"label":"On &#8211; up","fontSize":"small"} /--><!-- /wp:comments-pagination -->',
+	'<!-- wp:comments-pagination {"paginationArrow":"chevron"} --><!-- wp:comments-pagination-previous /--><!-- wp:comments-pagination-next /--><!-- /wp:comments-pagination -->',
+	'<!-- wp:comments-pagination {"paginationArrow":"none"} --><!-- wp:comments-pagination-next /--><!-- /wp:comments-pagination -->',
+	'<!-- wp:comments-pagination-previous /-->',
+	'<!-- wp:comments-pagination-next /-->',
+);
+$GLOBALS['wp_query']->is_singular = true;
+$GLOBALS['post']                  = get_post( 1 );
+foreach ( array(
+	array(),
+	array( 'page_comments' => '1', 'comments_per_page' => '5' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '5', 'default_comments_page' => 'oldest' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '5', 'default_comments_page' => 'other' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '0' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '7', 'thread_comments' => '0' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '5', 'comment_order' => 'desc' ),
+	array( 'page_comments' => 'yes', 'comments_per_page' => '5' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '1' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '20' ),
+) as $options ) {
+	foreach ( $option_names as $name ) {
+		remove_all_filters( "pre_option_$name" );
+	}
+	foreach ( $options as $name => $value ) {
+		add_filter( "pre_option_$name", static fn() => $value );
+	}
+	foreach ( array( '', '1', '2', '3', '99', '0', 'abc', '-1' ) as $cpage ) {
+		$GLOBALS['wp_query']->set( 'cpage', $cpage );
+		$uri = '' === $cpage ? '/?p=1' : "/?p=1&cpage=$cpage";
+		foreach ( array( 1, 0 ) as $post_id ) {
+			// Without a post the previous link counts every post's comments,
+			// which HyScribe does not port.
+			foreach ( $post_id ? $pagination_markups : array( $pagination_markups[0], $pagination_markups[5] ) as $markup ) {
+				$reset();
+				$context = $post_id ? array( 'postId' => $post_id ) : array();
+				$html    = ( new WP_Block( parse_blocks( $markup )[0], $context ) )->render();
+				$html   .= ( new WP_Block( parse_blocks( $markup )[0], $context ) )->render();
+				$state   = array( 'options' => $options, 'post' => $post_id, 'password' => false, 'closed' => true, 'now' => time(), 'uri' => $uri, 'global' => 1, 'singular' => true );
+				echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+			}
+		}
+	}
+}
+// Outside a singular page there are no links.
+$GLOBALS['wp_query']->is_singular = false;
+$GLOBALS['wp_query']->set( 'cpage', '2' );
+$reset();
+$markup = $pagination_markups[2];
+$html   = ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
+$html  .= ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
+$state  = array( 'options' => $options, 'post' => 1, 'password' => false, 'closed' => true, 'now' => time(), 'uri' => '/?p=1&cpage=2', 'global' => 1 );
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+$GLOBALS['wp_query']->set( 'cpage', '' );
+$GLOBALS['post'] = null;
+foreach ( $option_names as $name ) {
+	remove_all_filters( "pre_option_$name" );
+}
 $GLOBALS['wp_query']->query( array( 'post_type' => array( 'post', 'page' ), 'orderby' => 'ID', 'order' => 'ASC' ) );
 wp_increase_content_media_count( -wp_increase_content_media_count( 0 ) );
 wp_high_priority_element_flag( true );

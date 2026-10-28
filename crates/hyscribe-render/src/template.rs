@@ -157,6 +157,8 @@ pub(crate) struct Renderer<'a> {
     pub(crate) comment_alt: u64,
     pub(crate) comment_thread_alt: u64,
     pub(crate) comment_depth: u64,
+    /// The `comments/paginationArrow` context of comments pagination links.
+    pub(crate) pagination_arrow: Option<Value>,
 }
 
 /// A string attribute.
@@ -190,6 +192,7 @@ impl<'a> Renderer<'a> {
             comment_alt: 0,
             comment_thread_alt: 0,
             comment_depth: 0,
+            pagination_arrow: None,
         }
     }
 
@@ -256,6 +259,9 @@ impl Renderer<'_> {
             Some("core/navigation-link") => self.navigation_link(block),
             Some("core/page-list") => self.page_list(block),
             Some("core/comment-template") => self.comment_template(block),
+            Some("core/comments-pagination") => self.comments_pagination(block),
+            Some("core/comments-pagination-previous") => self.comments_pagination_previous(block),
+            Some("core/comments-pagination-next") => self.comments_pagination_next(block),
             Some(name) => {
                 let content = self.saved_markup(block);
                 // The form's reply links move it with comment-reply.js.

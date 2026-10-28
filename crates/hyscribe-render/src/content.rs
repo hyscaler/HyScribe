@@ -13,11 +13,11 @@ use hyscribe_phpser::{Value, is_empty_string};
 
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
-use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, convert_smilies, wptexturize};
+use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, wptexturize};
 use crate::link::{front_page, permalink};
 use crate::post::the_title;
 use crate::supports::get_block_wrapper_attributes;
-use crate::template::{Renderer, replace};
+use crate::template::{Renderer, replace, site_smilies};
 
 impl Renderer<'_> {
     /// `render_block_core_post_content()`.
@@ -72,18 +72,10 @@ impl Renderer<'_> {
         let site = self.context.site;
         let content = replace(&get_the_content(self, post), b"]]>", b"]]&gt;");
         let content = wptexturize(&self.render_top_level(&content), &CORE_SHORTCODE_TAGS);
-        let content = capital_p_dangit(&replace_insecure_home_url(&site.home_url(), &content));
-        if site
-            .option("use_smilies")
-            .is_some_and(|v| !is_empty_string(&v))
-        {
-            let siteurl = site.option("siteurl").unwrap_or_default();
-            return convert_smilies(
-                &content,
-                &esc_url(&[&siteurl[..], b"/wp-includes/images/smilies/"].concat()),
-            );
-        }
-        content
+        site_smilies(
+            site,
+            &capital_p_dangit(&replace_insecure_home_url(&site.home_url(), &content)),
+        )
     }
 }
 

@@ -222,7 +222,7 @@ fn digit_before(s: &[u8], i: usize) -> bool {
     before(s, i).is_some_and(|c| c.is_ascii_digit())
 }
 
-fn is_word(c: u8) -> bool {
+pub(crate) fn is_word(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
 }
 

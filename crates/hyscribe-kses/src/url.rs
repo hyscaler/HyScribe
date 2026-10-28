@@ -118,6 +118,16 @@ fn escape_brackets(url: &[u8]) -> Vec<u8> {
     str_replace(url, &end_dirty, &end_clean)
 }
 
+/// `wp_parse_url( $url, PHP_URL_SCHEME )`.
+pub fn url_scheme(url: &[u8]) -> Option<Vec<u8>> {
+    wp_parse_url(url).and_then(|parts| parts.scheme)
+}
+
+/// `wp_parse_url( $url, PHP_URL_HOST )`.
+pub fn url_host(url: &[u8]) -> Option<Vec<u8>> {
+    wp_parse_url(url).and_then(|parts| parts.host)
+}
+
 /// `wp_parse_url( $url )`; `None` where it returns `false`.
 fn wp_parse_url(url: &[u8]) -> Option<Parts> {
     if url.starts_with(b"//") {
@@ -282,6 +292,24 @@ mod tests {
 
     fn esc(url: &str) -> String {
         String::from_utf8(esc_url(url.as_bytes())).unwrap()
+    }
+
+    /// `wp_parse_url( $url, PHP_URL_SCHEME )` and `PHP_URL_HOST` in PHP,
+    /// where `false` and `null` are both `None`.
+    #[test]
+    fn parses_scheme_and_host() {
+        let cases: [(&str, Option<&str>, Option<&str>); 5] = [
+            ("HTTP://Example.COM:8/x", Some("HTTP"), Some("Example.COM")),
+            ("mailto:a@b.c", Some("mailto"), None),
+            ("//h.test/x", None, Some("h.test")),
+            ("/path", None, None),
+            ("http:///x", None, None),
+        ];
+        for (url, scheme, host) in cases {
+            let bytes = |part: Option<&str>| part.map(|p| p.as_bytes().to_vec());
+            assert_eq!(url_scheme(url.as_bytes()), bytes(scheme), "{url}");
+            assert_eq!(url_host(url.as_bytes()), bytes(host), "{url}");
+        }
     }
 
     #[test]

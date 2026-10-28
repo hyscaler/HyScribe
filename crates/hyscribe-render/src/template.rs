@@ -21,6 +21,22 @@ use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
 use crate::theme::Theme;
 
+/// `convert_smilies()`, which does nothing unless the site's
+/// `use_smilies` option is set.
+pub(crate) fn site_smilies(site: &dyn Site, text: &[u8]) -> Vec<u8> {
+    if site
+        .option("use_smilies")
+        .is_some_and(|v| !is_empty_string(&v))
+    {
+        let siteurl = site.option("siteurl").unwrap_or_default();
+        return convert_smilies(
+            text,
+            &esc_url(&[&siteurl[..], b"/wp-includes/images/smilies/"].concat()),
+        );
+    }
+    text.to_vec()
+}
+
 /// `get_the_block_template_html()`: the template's blocks rendered, the
 /// template filters run, inside `.wp-site-blocks`, with the skip link.
 /// Images are not yet given `wp_filter_content_tags()`' attributes.
@@ -30,18 +46,13 @@ pub fn render_template(
     request: &Request,
     template: &[u8],
 ) -> Vec<u8> {
-    let mut content = wptexturize(
-        &render_content(theme, site, request, template),
-        &CORE_SHORTCODE_TAGS,
+    let content = site_smilies(
+        site,
+        &wptexturize(
+            &render_content(theme, site, request, template),
+            &CORE_SHORTCODE_TAGS,
+        ),
     );
-    if site
-        .option("use_smilies")
-        .is_some_and(|v| !is_empty_string(&v))
-    {
-        let siteurl = site.option("siteurl").unwrap_or_default();
-        let smilies = esc_url(&[&siteurl[..], b"/wp-includes/images/smilies/"].concat());
-        content = convert_smilies(&content, &smilies);
-    }
     let html = [
         b"<div class=\"wp-site-blocks\">".as_slice(),
         &replace(&content, b"]]>", b"]]&gt;"),

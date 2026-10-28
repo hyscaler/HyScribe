@@ -140,4 +140,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "make_clickable"
+path = "fuzz_targets/make_clickable.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

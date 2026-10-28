@@ -506,7 +506,7 @@ fn is_name_byte(b: u8) -> bool {
 }
 
 /// How many bytes from `i` satisfy `keep`.
-fn run(doc: &[u8], i: usize, keep: impl Fn(u8) -> bool) -> usize {
+pub(crate) fn run(doc: &[u8], i: usize, keep: impl Fn(u8) -> bool) -> usize {
     doc.get(i..)
         .unwrap_or_default()
         .iter()

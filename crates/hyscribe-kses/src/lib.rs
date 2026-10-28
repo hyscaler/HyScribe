@@ -25,4 +25,4 @@ pub use protocol::{
     ALLOWED_PROTOCOLS, wp_kses_bad_protocol, wp_kses_no_null, wp_kses_no_null_keep_slash_zero,
 };
 pub use strip::{strip_tags, wp_strip_all_tags};
-pub use url::{esc_url, esc_url_protocols};
+pub use url::{esc_url, esc_url_protocols, url_host, url_scheme};

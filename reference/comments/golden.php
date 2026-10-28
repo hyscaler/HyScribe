@@ -58,6 +58,15 @@ foreach ( array(
 	$insert( array( 'comment_author' => $author, 'user_id' => $user_id, 'comment_author_url' => $url, 'comment_date' => "2026-10-2$n 1$n:3$n:00", 'comment_date_gmt' => "2026-10-27 13:0$n:00" ) );
 }
 $insert( array( 'comment_post_ID' => 2, 'comment_author' => 'On the front page' ) );
+foreach ( array(
+	"See http://example.test/a_(b) and www.example.org, or mail me@example.test :) \"quoted\" -- wordpress\n\nSecond <b>para\nline",
+	'0',
+	'',
+	home_url( '/inside' ) . ' <code>http://example.test</code> <a href="http://example.test">http://example.test</a> 8-)',
+	"<p>Already</p>\n<blockquote>q</blockquote>",
+) as $n => $content ) {
+	$insert( array( 'comment_author' => "S$n content", 'comment_content' => $content, 'comment_date_gmt' => "2026-10-27 14:0$n:00" ) );
+}
 $users = $wpdb->get_results( "SELECT ID, display_name, user_nicename FROM {$wpdb->users}", ARRAY_A );
 
 // The front page takes comments, so its reply links show.
@@ -75,6 +84,7 @@ $option_sets = array(
 	array( 'comment_registration' => '1' ),
 	array( 'date_format' => 'Y/m/d', 'thread_comments_depth' => '4' ),
 	array( 'show_on_front' => 'page', 'page_on_front' => '2' ),
+	array( 'use_smilies' => '0' ),
 );
 $markups = array(
 	'<!-- wp:comment-template --><p>c</p><!-- /wp:comment-template -->',
@@ -84,6 +94,8 @@ $markups = array(
 	'<!-- wp:comment-date /-->',
 	'<!-- wp:comment-author-name /-->',
 	'<!-- wp:comment-reply-link /-->',
+	'<!-- wp:comment-content /-->',
+	'<!-- wp:comment-template --><!-- wp:comment-content /--><!-- wp:comment-content {"textAlign":"right","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- /wp:comment-template -->',
 	'<!-- wp:comment-template --><!-- wp:comment-date /--><!-- wp:comment-date {"format":"Y-m-d H:i","isLink":true} /--><!-- wp:comment-date {"format":"human-diff","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- wp:comment-author-name /--><!-- wp:comment-author-name {"isLink":true,"linkTarget":"_blank","textAlign":"right"} /--><!-- wp:comment-author-name {"isLink":true,"linkTarget":""} /--><!-- wp:comment-edit-link /--><!-- wp:comment-reply-link /--><!-- wp:comment-reply-link {"textAlign":"center","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- /wp:comment-template -->',
 );
 $reset = function () {
@@ -92,7 +104,7 @@ $reset = function () {
 	$GLOBALS['comment_thread_alt'] = 0;
 };
 foreach ( $option_sets as $options ) {
-	foreach ( array( 'thread_comments', 'thread_comments_depth', 'comment_order', 'comment_registration', 'date_format', 'show_on_front', 'page_on_front' ) as $name ) {
+	foreach ( array( 'thread_comments', 'thread_comments_depth', 'comment_order', 'comment_registration', 'date_format', 'show_on_front', 'page_on_front', 'use_smilies' ) as $name ) {
 		remove_all_filters( "pre_option_$name" );
 	}
 	foreach ( $options as $name => $value ) {
@@ -112,7 +124,7 @@ foreach ( $option_sets as $options ) {
 }
 
 // With comments closed there is no reply link.
-foreach ( array( 'thread_comments', 'thread_comments_depth', 'comment_order', 'comment_registration', 'date_format', 'show_on_front', 'page_on_front' ) as $name ) {
+foreach ( array( 'thread_comments', 'thread_comments_depth', 'comment_order', 'comment_registration', 'date_format', 'show_on_front', 'page_on_front', 'use_smilies' ) as $name ) {
 	remove_all_filters( "pre_option_$name" );
 }
 // Logged-out reply links go to the login page, back to the global post.

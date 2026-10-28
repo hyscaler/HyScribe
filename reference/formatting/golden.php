@@ -5,6 +5,7 @@
 // "hex(input)<TAB>hex(output)" lines:
 //   php golden.php texturize > crates/hyscribe-render/tests/golden/wptexturize.tsv
 //   php golden.php smilies   > crates/hyscribe-render/tests/golden/convert-smilies.tsv
+// and likewise balance, autop and clickable (golden.sh lists the files).
 // Runs inside the default install's PHP container (reference/formatting/golden.sh),
 // so the shortcodes, options and post contents are the fixture's. Only pure
 // functions run and the database is only read. Random cases use a fixed seed,
@@ -174,6 +175,58 @@ function balance_cases() {
 	return array_merge( $cases, random_cases( $atoms, 3000, 14 ) );
 }
 
+function clickable_cases() {
+	$home  = home_url();
+	$host  = wp_parse_url( $home, PHP_URL_HOST );
+	$cases = array(
+		'', '0', ' ', 'plain text', 'http://example.com', 'see http://example.com.', 'x https://example.com/a?b=c&d=e#f y',
+		"$home/about", 'go ' . strtoupper( $home ) . '/x', "http://$host:9/y", "https://$host/z", "ftp://$host/f", 'HTTP://Example.COM/',
+		'(http://example.com)', '(http://example.com/a_(b))', 'http://example.com/a_(b)c)', 'http://example.com/a))', '((http://example.com/(a)))',
+		'http://example.com/x).html', 'http://example.com).html', 'http://example.com/a.b.c.d', 'http://example.com/p.html.', 'http://e.com/f.abcdefgh',
+		'http://e.com/x.y z', 'http://e.com/a,b;c:d!e?f', "http://e.com/it's", 'http://e.com/?q=1!', 'http://e.com/a?', 'http://e.com/a..b',
+		',http://e.com', ';http://e.com', ':http://e.com', '!http://e.com', '?http://e.com', '.http://e.com', '<http://e.com>', '<http://e.com x',
+		'xhttp://e.com', '_http://e.com', 'a://b', 'abcdefghijklmnopqrst://e.com', 'abcdefghijklmnopqrstu://e.com', 'http:/e.com', 'http://',
+		'http:// e.com', 'javascript://e.com/x', 'data://x', 'irc://irc.example.com/c', 'ssh://h', 'feed://e.com', 'news://n', 'tel://1',
+		'http://e.com/' . str_repeat( 'a', 1990 ), 'http://e.com/' . str_repeat( 'a', 1993 ) . ' x', 'http://e.com/' . str_repeat( 'a', 1994 ) . ' x', 'http://e.com/' . str_repeat( 'a', 1995 ) . ' x', 'http://e.com/' . str_repeat( 'a', 2100 ) . ' x',
+		'http://e.com/a))(', 'http://e.com/a)b)c(d', 'xxxxxx<a bc><a c>d</a></a>', '<a><a >z</a></a>', '<a><a z', 'x <a href="q"><a y', 'xyzw <a\tb><a c>d</a></a>',
+		str_repeat( 'a', 2200 ) . '(http://e.com ' . str_repeat( 'b ', 3893 ), str_repeat( 'a', 2200 ) . '(http://e.com ' . str_repeat( 'b ', 3893 ) . 'c',
+		"http://e.com/\xC3\xA9t\xC3\xA9", "http://e.com/\x80\xff", 'http://e.com/<b>', 'http://e.com/"q"', 'http://e.com/[1]*+=&$-~%#@/',
+		'www.example.com', 'see www.example.com.', 'WWW.Example.com/a', 'ftp.example.com,', 'www.', 'www.e.com)', 'xwww.e.com', '>www.e.com',
+		"www.$host/a", 'www.e.com/a;b:c', 'ftp.e.com/a?b=c', 'www.e.com/"x', 'www.e.com/(x)',
+		'me@example.com', 'mail me@example.com.', 'a.b+c-d_e@sub.example.co.uk', 'me@localhost', 'me@e.c', 'me@e.co', 'me@a.b.c',
+		'me@a-b.c-d.ef', 'me@a.b-c', 'me@.com', '@e.com', 'x@e.com@f.com', 'ME@EXAMPLE.COM', 'me@e.com1', 'me@e.c1-d.ab', 'x me@e..com',
+		'<p>http://e.com</p>', '<a href="http://e.com">http://e.com</a>', '<a href="x">www.e.com</a>', '<a>me@e.com</a>',
+		'<code>http://e.com</code> http://f.com', '<pre class="x">www.e.com</pre>', '<CODE>http://e.com</CODE>', '<code>x<code>y</code>http://e.com</code>http://f.com',
+		'<script>http://e.com</script>', '<style>a{}</style>www.e.com', '<codex>http://e.com</codex>', '<code\n>http://e.com</code>', '</code>http://e.com',
+		'<pre>a</PRE>http://e.com', '<img src="http://e.com/i.png"> http://e.com', '<http://e.com/a b>', '< http://e.com>', '<b>http://e.com</b>',
+		"a\nhttp://e.com\nb", "a\thttp://e.com\tb", "a\x0bhttp://e.com\x0cb", "a\rwww.e.com\rb", "x\x00http://e.com", '<<http://e.com', '<>http://e.com',
+		'<a href="x"><a href="y">z</a></a>', '<A HREF="x"><a href="y">z</a></A>', '<a><a href="y">z</a></a>', "<a\thref='x'><a href='y'>z</a></a>",
+		'<a x><a y></a></a>', '<a ><a y>z</a></a>', '<a href="x"><a  y>z</a></a>', '<ab><a y>z</a></a>', '<a href="x"><a y>z</a></a></a>',
+		str_repeat( 'word http://e.com ', 700 ), str_repeat( 'x', 10001 ), str_repeat( 'x', 2200 ) . ' http://e.com ' . str_repeat( 'y', 9000 ),
+		str_repeat( 'a ', 5001 ) . 'http://e.com', str_repeat( "a\x00", 5001 ) . 'www.e.com', str_repeat( 'http://e.com/' . str_repeat( 'q', 2090 ) . ' ', 6 ),
+		str_repeat( 'a', 2101 ) . ' ' . str_repeat( 'b', 9000 ) . ' me@e.com', str_repeat( 'a', 9999 ) . ' 0', str_repeat( ' ', 10001 ) . '0',
+		'<b>' . str_repeat( 'me@e.com ', 1200 ) . '</b>',
+	);
+	foreach ( post_contents() as $content ) {
+		$cases[] = $content;
+	}
+	$atoms = array(
+		'http://e.com', 'https://', "$home/", 'www.', 'ftp.', 'e', '.com', '.', ',', ';', ':', '!', '?', ')', '(', "'", '"', '/', '@', '-', '_',
+		' ', "\n", '<a href="x">', '</a>', '<a>', '<code>', '</code>', '<pre>', '</pre>', '<b>', '<', '>', 'me@', 'x', '1', '#', '&', "\xC3\xA9",
+	);
+	return array_merge( $cases, random_cases( $atoms, 3000, 12 ) );
+}
+
+if ( 'clickable' === $argv[1] ) {
+	echo home_url(), "\n";
+	remove_all_filters( 'comment_text' );
+	add_filter( 'comment_text', 'make_clickable' );
+	foreach ( clickable_cases() as $case ) {
+		echo bin2hex( $case ), "\t0\t", bin2hex( make_clickable( $case ) ), "\n";
+		echo bin2hex( $case ), "\t1\t", bin2hex( apply_filters( 'comment_text', $case ) ), "\n";
+	}
+	exit;
+}
 if ( 'balance' === $argv[1] ) {
 	foreach ( balance_cases() as $case ) {
 		emit( $case, force_balance_tags( $case ) );

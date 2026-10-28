@@ -8,7 +8,11 @@ use hyscribe_kses::{esc_attr, esc_html, esc_url, esc_url_protocols};
 use hyscribe_model::{Comment, Post};
 use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim};
 
+use crate::autop::wpautop;
+use crate::balance::force_balance_tags;
+use crate::clickable::make_clickable;
 use crate::date::{self, Zone};
+use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, convert_chars, wptexturize};
 use crate::kses::wp_kses_post;
 use crate::link;
 use crate::post::{the_title, title_filters};
@@ -16,7 +20,7 @@ use crate::query_loop::query_posts;
 use crate::registry::block_type;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
-use crate::template::replace;
+use crate::template::{replace, site_smilies};
 use crate::theme::Theme;
 use crate::title::archive_title;
 
@@ -72,6 +76,7 @@ pub(crate) fn render(
 ) -> Option<Vec<u8>> {
     let callback = match name {
         "core/comment-author-name" => comment_author_name,
+        "core/comment-content" => comment_content,
         "core/comment-date" => comment_date,
         "core/comment-edit-link" => comment_edit_link,
         "core/comment-reply-link" => comment_reply_link,
@@ -159,6 +164,33 @@ impl Context<'_> {
         let option = |name| self.site.option(name).unwrap_or_default();
         date::site_zone(&option("timezone_string"), &option("gmt_offset"))
     }
+}
+
+/// `render_block_core_comment_content()`: the comment's text through the
+/// `comment_text` filters. Only approved comments are read, so there is
+/// never a moderation note.
+fn comment_content(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let Some(comment) = &context.comment else {
+        return Vec::new();
+    };
+    if is_empty_string(&comment.content) {
+        return Vec::new();
+    }
+    let site = context.site;
+    let text = make_clickable(&comment.content, &site.home_url(), true);
+    let text = convert_chars(&wptexturize(&text, &CORE_SHORTCODE_TAGS));
+    let text = force_balance_tags(&site_smilies(site, &text));
+    let text = capital_p_dangit(&wpautop(&text, true));
+    [
+        format!(
+            "<div {}>",
+            block.wrapper(context, &align_link_classes(block, Vec::new()))
+        )
+        .as_bytes(),
+        &text,
+        b"</div>",
+    ]
+    .concat()
 }
 
 /// `render_block_core_comment_date()`: the comment's date in `format`,
@@ -267,15 +299,12 @@ fn comment_author_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         ]
         .concat();
     }
-    let mut classes = Vec::new();
-    if let Some(align) = block.attribute("textAlign") {
-        classes.push([&b"has-text-align-"[..], &align.to_php_string()].concat());
-    }
-    if block.has_link_color() {
-        classes.push(b"has-link-color".to_vec());
-    }
     [
-        format!("<div {}>", block.wrapper(context, &classes.join(&b' '))).as_bytes(),
+        format!(
+            "<div {}>",
+            block.wrapper(context, &align_link_classes(block, Vec::new()))
+        )
+        .as_bytes(),
         &name,
         b"</div>",
     ]
@@ -370,15 +399,12 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         ]
         .concat()
     };
-    let mut classes = Vec::new();
-    if let Some(align) = block.attribute("textAlign") {
-        classes.push([&b"has-text-align-"[..], &align.to_php_string()].concat());
-    }
-    if block.has_link_color() {
-        classes.push(b"has-link-color".to_vec());
-    }
     [
-        format!("<div {}>", block.wrapper(context, &classes.join(&b' '))).as_bytes(),
+        format!(
+            "<div {}>",
+            block.wrapper(context, &align_link_classes(block, Vec::new()))
+        )
+        .as_bytes(),
         &link,
         b"</div>",
     ]
@@ -525,15 +551,12 @@ fn post_author_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         ]
         .concat();
     }
-    let mut classes = Vec::new();
-    if let Some(align) = block.attribute("textAlign") {
-        classes.push([&b"has-text-align-"[..], &align.to_php_string()].concat());
-    }
-    if block.has_link_color() {
-        classes.push(b"has-link-color".to_vec());
-    }
     [
-        format!("<div {}>", block.wrapper(context, &classes.join(&b' '))).as_bytes(),
+        format!(
+            "<div {}>",
+            block.wrapper(context, &align_link_classes(block, Vec::new()))
+        )
+        .as_bytes(),
         &name,
         b"</div>",
     ]
@@ -740,13 +763,10 @@ fn post_terms(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     if terms.is_empty() {
         return Vec::new();
     }
-    let mut classes = vec![[&b"taxonomy-"[..], taxonomy.as_bytes()].concat()];
-    if let Some(align) = block.attribute("textAlign") {
-        classes.push([&b"has-text-align-"[..], &align.to_php_string()].concat());
-    }
-    if block.has_link_color() {
-        classes.push(b"has-link-color".to_vec());
-    }
+    let classes = align_link_classes(
+        block,
+        vec![[&b"taxonomy-"[..], taxonomy.as_bytes()].concat()],
+    );
     let separator = match block.attribute("separator").filter(|v| !v.is_empty()) {
         Some(separator) => separator.to_php_string(),
         None => b" ".to_vec(),
@@ -763,7 +783,7 @@ fn post_terms(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let upload_host = context.upload_host();
     let before = wp_kses_post(
         &[
-            format!("<div {}>", block.wrapper(context, &classes.join(&b' '))).as_bytes(),
+            format!("<div {}>", block.wrapper(context, &classes)).as_bytes(),
             &affix("prefix", "prefix"),
         ]
         .concat(),
@@ -797,10 +817,10 @@ fn post_terms(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     [before, links.join(&separator[..]), after].concat()
 }
 
-/// The classes post blocks share: `has-text-align-*` when `textAlign` is
+/// The classes post and comment blocks share: `has-text-align-*` when `textAlign` is
 /// set (`isset()`, where the site blocks test `empty()`), and
 /// `has-link-color` when the link has a color.
-fn post_classes(block: &Block<'_>, mut classes: Vec<Vec<u8>>) -> Vec<u8> {
+fn align_link_classes(block: &Block<'_>, mut classes: Vec<Vec<u8>>) -> Vec<u8> {
     if let Some(align) = block.attribute("textAlign") {
         classes.push([b"has-text-align-", &align.to_php_string()[..]].concat());
     }
@@ -844,7 +864,7 @@ fn post_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     }
     element(
         &tag,
-        &block.wrapper(context, &post_classes(block, Vec::new())),
+        &block.wrapper(context, &align_link_classes(block, Vec::new())),
         &title,
     )
 }
@@ -958,7 +978,7 @@ fn post_date(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         ]
         .concat();
     }
-    let wrapper = block.wrapper(context, &post_classes(block, classes));
+    let wrapper = block.wrapper(context, &align_link_classes(block, classes));
     [
         b"<div ".as_slice(),
         wrapper.as_bytes(),

@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Records WordPress's wptexturize() and convert_smilies() as goldens:
-#   crates/hyscribe-render/tests/golden/wptexturize.tsv
-#   crates/hyscribe-render/tests/golden/convert-smilies.tsv
+# Records WordPress's wptexturize(), convert_smilies(), force_balance_tags(),
+# wpautop() and make_clickable() as goldens in crates/hyscribe-render/tests/golden.
 # Needs the default install oracle running (reference/default-install/db.sh up,
 # then php.sh up). Only reads from it.
 set -euo pipefail
@@ -17,5 +16,6 @@ mkdir -p "$OUT"
 "$DOCKER" exec -i "$NAME" php -- texturize < "$ROOT/reference/formatting/golden.php" > "$OUT/wptexturize.tsv"
 "$DOCKER" exec -i "$NAME" php -- smilies < "$ROOT/reference/formatting/golden.php" > "$OUT/convert-smilies.tsv"
 "$DOCKER" exec -i "$NAME" php -- balance < "$ROOT/reference/formatting/golden.php" > "$OUT/force-balance-tags.tsv"
-"$DOCKER" exec -i "$NAME" php -- autop < "$ROOT/reference/formatting/golden.php" > "$OUT/wpautop.tsv" "$OUT/force-balance-tags.tsv"
-wc -l "$OUT/wptexturize.tsv" "$OUT/convert-smilies.tsv" "$OUT/wpautop.tsv"
+"$DOCKER" exec -i "$NAME" php -- autop < "$ROOT/reference/formatting/golden.php" > "$OUT/wpautop.tsv"
+"$DOCKER" exec -i "$NAME" php -- clickable < "$ROOT/reference/formatting/golden.php" > "$OUT/make-clickable.tsv"
+wc -l "$OUT/wptexturize.tsv" "$OUT/convert-smilies.tsv" "$OUT/force-balance-tags.tsv" "$OUT/wpautop.tsv" "$OUT/make-clickable.tsv"

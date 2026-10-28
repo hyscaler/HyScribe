@@ -19,7 +19,7 @@ SRC="/var/www/html/wp-content/themes/$SLUG"
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
-for item in templates parts theme.json style.css; do
+for item in templates parts theme.json style.css style.min.css; do
   "$DOCKER" cp "$NAME:$SRC/$item" "$OUT/$item"
 done
 "$DOCKER" cp "$ROOT/reference/themes/export.php" "$NAME:/tmp/export.php"

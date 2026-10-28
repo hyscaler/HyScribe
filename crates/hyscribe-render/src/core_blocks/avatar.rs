@@ -5,10 +5,10 @@
 
 use hyscribe_kses::{esc_attr, esc_url};
 use hyscribe_model::{Comment, User};
-use hyscribe_phpser::{Key, Value, bin2hex, is_empty_string, isset, php_trim};
+use hyscribe_phpser::{Key, Value, bin2hex, is_empty_string, isset, php_trim, rawurlencode};
 use sha2::{Digest, Sha256};
 
-use super::{Block, Context, rawurlencode};
+use super::{Block, Context};
 use crate::link::author_posts_url;
 use crate::style::get_styles;
 

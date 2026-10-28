@@ -147,4 +147,18 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "phpser_parse_str"
+path = "fuzz_targets/phpser_parse_str.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "phpser_add_query_arg"
+path = "fuzz_targets/phpser_add_query_arg.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

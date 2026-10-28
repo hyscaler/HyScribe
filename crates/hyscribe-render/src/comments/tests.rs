@@ -172,16 +172,3 @@ fn matches_php() {
     );
     assert!(golden.lines().count() > 60);
 }
-
-/// PHP's `urlencode()` of the same strings.
-#[test]
-fn urlencode_like_php() {
-    assert_eq!(
-        crate::core_blocks::urlencode(b"http://Example.test/?p=1&x=a b~*"),
-        b"http%3A%2F%2FExample.test%2F%3Fp%3D1%26x%3Da+b%7E%2A"
-    );
-    assert_eq!(
-        crate::core_blocks::urlencode(b"AZaz09-_.!"),
-        b"AZaz09-_.%21"
-    );
-}

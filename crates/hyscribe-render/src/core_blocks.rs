@@ -6,7 +6,7 @@
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url, esc_url_protocols};
 use hyscribe_model::{Comment, Post};
-use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim};
+use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim, urlencode};
 
 use crate::autop::wpautop;
 use crate::balance::force_balance_tags;
@@ -413,29 +413,6 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         b"</div>",
     ]
     .concat()
-}
-
-/// PHP's `urlencode()`: letters, digits and `-_.` kept, spaces as `+`.
-pub(crate) fn urlencode(text: &[u8]) -> Vec<u8> {
-    percent_encode(text, false)
-}
-
-/// PHP's `rawurlencode()`: letters, digits and `-_.~` kept.
-fn rawurlencode(text: &[u8]) -> Vec<u8> {
-    percent_encode(text, true)
-}
-
-fn percent_encode(text: &[u8], raw: bool) -> Vec<u8> {
-    let mut out = Vec::with_capacity(text.len());
-    for &b in text {
-        match b {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' => out.push(b),
-            b'~' if raw => out.push(b),
-            b' ' if !raw => out.push(b'+'),
-            _ => out.extend(format!("%{b:02X}").into_bytes()),
-        }
-    }
-    out
 }
 
 /// `render_block_core_comments()`: the saved markup, where the post takes

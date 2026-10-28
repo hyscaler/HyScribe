@@ -570,12 +570,3 @@ fn avatar_defaults_without_options() {
          width='96' loading='lazy' decoding='async'/></div>"
     );
 }
-
-/// PHP's `rawurlencode()` of the same string.
-#[test]
-fn rawurlencode_like_php() {
-    assert_eq!(
-        rawurlencode(b"http://Example.test/?p=1&x=a b~*"),
-        b"http%3A%2F%2FExample.test%2F%3Fp%3D1%26x%3Da%20b~%2A"
-    );
-}

@@ -491,6 +491,7 @@ name = "hyscribe-db"
 version = "0.1.0"
 dependencies = [
  "hyscribe-config",
+ "hyscribe-model",
  "sqlx",
 ]
 
@@ -521,12 +522,17 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "hyscribe-db",
+ "hyscribe-model",
  "hyscribe-render",
  "tokio",
 ]
 
 [[package]]
 name = "hyscribe-kses"
+version = "0.1.0"
+
+[[package]]
+name = "hyscribe-model"
 version = "0.1.0"
 
 [[package]]
@@ -537,6 +543,8 @@ version = "0.1.0"
 name = "hyscribe-render"
 version = "0.1.0"
 dependencies = [
+ "hyscribe-kses",
+ "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-theme-json",
 ]

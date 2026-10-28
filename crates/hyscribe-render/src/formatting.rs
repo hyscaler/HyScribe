@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Ports of WordPress's `wptexturize()` and `convert_smilies()` from
+//! Ports of WordPress's `wptexturize()`, `convert_smilies()`,
+//! `convert_chars()` and `capital_P_dangit()` from
 //! `wp-includes/formatting.php`, byte for byte, for locale en_US and the
 //! default filters.
 //!
@@ -8,6 +9,17 @@
 //! lookarounds against the subject of that one replacement, ASCII `\d`,
 //! `\s` and `\b`). Each pass is linear in the input: no scan restarts from
 //! a position an earlier failed scan already covered.
+
+/// The shortcodes WordPress core registers, in registration order.
+pub const CORE_SHORTCODE_TAGS: [&[u8]; 7] = [
+    b"wp_caption",
+    b"caption",
+    b"gallery",
+    b"playlist",
+    b"audio",
+    b"video",
+    b"embed",
+];
 
 /// A match: its length and what replaces it.
 type Match = Option<(usize, Vec<u8>)>;
@@ -727,6 +739,60 @@ fn smiley(s: &[u8], i: usize, smilies_url: &[u8]) -> Match {
             };
             (code.len(), with)
         })
+}
+
+/// `convert_chars()`: `/&([^#])(?![a-z1-4]{1,8};)/i` becomes `&#038;$1`,
+/// so a bare `&` is encoded and named references stay.
+pub fn convert_chars(text: &[u8]) -> Vec<u8> {
+    // `[a-z1-4]{1,8};` at the start of `text`.
+    let reference = |text: &[u8]| {
+        let name = text
+            .iter()
+            .take_while(|b| b.is_ascii_alphabetic() || (b'1'..=b'4').contains(b))
+            .count();
+        (1..=8).contains(&name) && text.get(name) == Some(&b';')
+    };
+    let mut out = Vec::with_capacity(text.len());
+    let mut at = 0;
+    for _ in 0..=text.len() {
+        let Some((&first, after)) = text.get(at..).and_then(<[u8]>::split_first) else {
+            break;
+        };
+        match after.split_first() {
+            Some((&next, tail)) if first == b'&' && next != b'#' && !reference(tail) => {
+                out.extend_from_slice(b"&#038;");
+                out.push(next);
+                at += 2;
+            }
+            _ => {
+                out.push(first);
+                at += 1;
+            }
+        }
+    }
+    out
+}
+
+/// `capital_P_dangit()` as the `the_title` and `wp_title` filters run it.
+pub fn capital_p_dangit_title(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut rest = text;
+    for _ in 0..=text.len() {
+        match rest.strip_prefix(b"Wordpress") {
+            Some(after) => {
+                out.extend_from_slice(b"WordPress");
+                rest = after;
+            }
+            None => match rest.split_first() {
+                Some((first, after)) => {
+                    out.push(*first);
+                    rest = after;
+                }
+                None => break,
+            },
+        }
+    }
+    out
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@
 //! `hyscribe-render` renders (ADR 0009).
 
 /// A row of `{prefix}posts`, with the columns rendering needs.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Post {
     /// `ID`.
     pub id: u64,
@@ -22,8 +22,12 @@ pub struct Post {
     pub excerpt: Vec<u8>,
     /// `post_status`.
     pub status: String,
+    /// `post_password`.
+    pub password: Vec<u8>,
     /// `post_name`.
     pub name: Vec<u8>,
+    /// `post_modified`, as stored.
+    pub modified: String,
     /// `post_parent`.
     pub parent: u64,
     /// `guid`.

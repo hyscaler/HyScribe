@@ -35,6 +35,7 @@ pub fn render_content(theme: &Theme, site: &dyn Site, request: Request, content:
             theme,
             site,
             request,
+            post_id: request.post,
         },
         open_parts: Vec::new(),
         open_patterns: Vec::new(),

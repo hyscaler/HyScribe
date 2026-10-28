@@ -2,6 +2,8 @@
 
 //! What dynamic blocks read from the site and the request (ADR 0009).
 
+use hyscribe_model::Post;
+
 /// The site's data, as blocks read it while rendering.
 pub trait Site {
     /// `get_option( $name )` as stored, `None` when the option is missing.
@@ -9,6 +11,9 @@ pub trait Site {
 
     /// `home_url()`: the `home` option, or what `WP_HOME` sets.
     fn home_url(&self) -> Vec<u8>;
+
+    /// `get_post( $id )`, whatever its type and status.
+    fn post(&self, id: u64) -> Option<Post>;
 }
 
 /// The main query's conditionals that blocks check.
@@ -22,4 +27,9 @@ pub struct Request {
     pub paged: bool,
     /// `get_queried_object_id()`
     pub queried_object_id: u64,
+    /// The global `$post`: the main query's first post, which top-level
+    /// blocks get as their `postId` context.
+    pub post: Option<u64>,
+    /// `time()`, which relative dates are measured from.
+    pub now: i64,
 }

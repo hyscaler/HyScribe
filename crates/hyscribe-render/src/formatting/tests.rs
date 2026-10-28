@@ -425,3 +425,38 @@ fn smilies_ignored_elements() {
         ("<code :)", "<code :)"),
     ]);
 }
+
+#[test]
+fn convert_chars_encodes_bare_ampersands() {
+    // convert_chars() in PHP WordPress 7.1.3.
+    for (text, php) in [
+        ("a & b", "a &#038; b"),
+        ("&amp;", "&amp;"),
+        ("&x;", "&#038;x;"),
+        ("&#1;", "&#1;"),
+        ("&abcdefghi;", "&abcdefghi;"),
+        ("&&amp;", "&&amp;"),
+        ("&", "&"),
+        ("&AMP;x", "&AMP;x"),
+        ("&a5;", "&#038;a5;"),
+        ("x&\n", "x&#038;\n"),
+    ] {
+        assert_eq!(convert_chars(text.as_bytes()), php.as_bytes(), "{text:?}");
+    }
+}
+
+#[test]
+fn capital_p_dangit_in_titles() {
+    for (text, php) in [
+        ("Wordpress", "WordPress"),
+        ("wordpress Wordpress!", "wordpress WordPress!"),
+        ("WordPress", "WordPress"),
+        ("Wordpres", "Wordpres"),
+    ] {
+        assert_eq!(
+            capital_p_dangit_title(text.as_bytes()),
+            php.as_bytes(),
+            "{text:?}"
+        );
+    }
+}

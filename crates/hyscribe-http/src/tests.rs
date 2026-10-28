@@ -440,3 +440,24 @@ async fn static_paths_keep_their_urls() {
         assert!(!reply.headers.contains_key("location"), "{uri}");
     }
 }
+
+#[tokio::test]
+async fn the_front_page_links_to_home() {
+    let base = fixture_site(Some("http://example.test")).await;
+    let mut options = base.options.clone();
+    options.insert("show_on_front".into(), b"page".to_vec());
+    options.insert("page_on_front".into(), b"2".to_vec());
+    let site = Arc::new(Site {
+        db: base.db.clone(),
+        options,
+        home: base.home.clone(),
+    });
+    let reply = request(&site, "GET", "/?page_id=2").await;
+    assert!(
+        reply
+            .body
+            .contains(r#"<h2 class="wp-block-post-title"><a href="http://example.test/">"#),
+        "{}",
+        reply.body
+    );
+}

@@ -58,8 +58,8 @@ macro_rules! post_columns {
     () => {
         "ID, post_author, CAST(post_date AS CHAR) AS post_date, \
          CAST(post_date_gmt AS CHAR) AS post_date_gmt, post_content, post_title, post_excerpt, \
-         post_status, post_name, post_parent, guid, CAST(menu_order AS SIGNED) AS menu_order, \
-         post_type, comment_count"
+         post_status, post_password, post_name, CAST(post_modified AS CHAR) AS post_modified, \
+         post_parent, guid, CAST(menu_order AS SIGNED) AS menu_order, post_type, comment_count"
     };
 }
 
@@ -118,7 +118,9 @@ fn post(row: &MySqlRow) -> Result<Post, DbError> {
         title: c.bytes("post_title"),
         excerpt: c.bytes("post_excerpt"),
         status: c.text("post_status"),
+        password: c.bytes("post_password"),
         name: c.bytes("post_name"),
+        modified: c.text("post_modified"),
         parent: c.unsigned("post_parent"),
         guid: c.bytes("guid"),
         menu_order: c.signed("menu_order"),

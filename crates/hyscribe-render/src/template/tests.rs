@@ -36,6 +36,10 @@ impl Site for DefaultInstall {
     fn home_url(&self) -> Vec<u8> {
         b"http://example.test".to_vec()
     }
+
+    fn post(&self, _: u64) -> Option<hyscribe_model::Post> {
+        None
+    }
 }
 
 fn render(theme: &Theme, markup: &str) -> String {
@@ -181,6 +185,7 @@ fn saved_markup_keeps_inner_blocks_in_place() {
             theme: &theme,
             site: &DefaultInstall,
             request: Request::default(),
+            post_id: None,
         },
         open_parts: Vec::new(),
         open_patterns: Vec::new(),

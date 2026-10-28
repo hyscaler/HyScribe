@@ -41,6 +41,13 @@ const MONTHS: [&str; 12] = [
     "December",
 ];
 
+fn offset(zone: Zone) -> i64 {
+    match zone {
+        Zone::Utc => 0,
+        Zone::Offset(seconds) => i64::from(seconds),
+    }
+}
+
 /// A stored time, resolved.
 struct Time {
     year: i64,
@@ -97,6 +104,11 @@ impl Time {
             + number(8..10)
             - 1;
         let seconds = number(11..13) * 3600 + number(14..16) * 60 + number(17..19);
+        Time::at(days, seconds, zone)
+    }
+
+    /// The local time `seconds` into day `days`.
+    fn at(days: i64, seconds: i64, zone: Zone) -> Time {
         let (year, month, day) = civil_from_days(days);
         Time {
             year,
@@ -106,12 +118,14 @@ impl Time {
             minute: seconds / 60 % 60,
             second: seconds % 60,
             days,
-            offset: match zone {
-                Zone::Utc => 0,
-                Zone::Offset(seconds) => i64::from(seconds),
-            },
+            offset: offset(zone),
             zone,
         }
+    }
+
+    fn from_unix(unix: i64, zone: Zone) -> Time {
+        let local = unix + offset(zone);
+        Time::at(local.div_euclid(86_400), local.rem_euclid(86_400), zone)
     }
 
     /// 0 for Sunday.
@@ -262,6 +276,95 @@ pub fn site_zone(timezone_string: &[u8], gmt_offset: &[u8]) -> Option<Zone> {
 /// `wp_date( $format, strtotime( $stored ) )` for a time stored in `zone`.
 pub fn format(format: &str, stored: &str, zone: Zone) -> String {
     format_time(format, &Time::parse(stored, zone))
+}
+
+/// `wp_date( $format, $unix )` in `zone`.
+pub fn format_unix(format: &str, unix: i64, zone: Zone) -> String {
+    format_time(format, &Time::from_unix(unix, zone))
+}
+
+/// The Unix time of a stored local time in `zone`.
+pub fn stored_unix(stored: &str, zone: Zone) -> i64 {
+    Time::parse(stored, zone).unix()
+}
+
+/// `strtotime()` for the ISO 8601 forms the editor and the post data
+/// binding write: `YYYY-MM-DD`, optionally followed by `T` or a space and
+/// `HH:MM` with optional `:SS`, then `Z` or an offset (`+02:00`, `+0200`).
+/// Without an offset the time is UTC, PHP's default zone under WordPress.
+/// Other forms PHP reads (relative times, other separators) give `None`.
+pub fn strtotime(text: &str) -> Option<i64> {
+    let bytes = text.as_bytes();
+    let two = |at: usize| -> Option<i64> {
+        match bytes.get(at..at + 2)? {
+            [a @ b'0'..=b'9', b @ b'0'..=b'9'] => {
+                Some(i64::from(a - b'0') * 10 + i64::from(b - b'0'))
+            }
+            _ => None,
+        }
+    };
+    let (year, month, day) = match bytes.get(..10)? {
+        [y1, y2, y3, y4, b'-', _, _, b'-', _, _]
+            if [y1, y2, y3, y4].iter().all(|b| b.is_ascii_digit()) =>
+        {
+            let year = [y1, y2, y3, y4]
+                .iter()
+                .fold(0, |n, b| n * 10 + i64::from(**b - b'0'));
+            (year, two(5)?, two(8)?)
+        }
+        _ => return None,
+    };
+    let (seconds, rest) = match bytes.get(10..).unwrap_or_default() {
+        [] => (0, &[][..]),
+        [b'T' | b' ', ..] if bytes.get(13) == Some(&b':') => {
+            let (hour, minute) = (two(11)?, two(14)?);
+            let (second, rest) = match bytes.get(16) {
+                Some(b':') => (two(17)?, bytes.get(19..).unwrap_or_default()),
+                _ => (0, bytes.get(16..).unwrap_or_default()),
+            };
+            // PHP rolls a leap second over, and reads `24:00:00` as midnight.
+            let valid =
+                minute < 60 && second <= 60 && (hour < 24 || (hour, minute, second) == (24, 0, 0));
+            (valid.then_some(hour * 3600 + minute * 60 + second)?, rest)
+        }
+        _ => return None,
+    };
+    let offset = match rest {
+        [] | [b'Z'] => 0,
+        [sign @ (b'+' | b'-'), h1, h2, b':', m1, m2] | [sign @ (b'+' | b'-'), h1, h2, m1, m2] => {
+            let digit = |b: &u8| b.is_ascii_digit().then(|| i64::from(b - b'0'));
+            let seconds =
+                (digit(h1)? * 10 + digit(h2)?) * 3600 + (digit(m1)? * 10 + digit(m2)?) * 60;
+            if *sign == b'-' { -seconds } else { seconds }
+        }
+        _ => return None,
+    };
+    let valid = (1..=12).contains(&month) && (1..=31).contains(&day);
+    valid.then(|| days_from_civil(year, month, day) * 86_400 + seconds - offset)
+}
+
+/// `human_time_diff( $from, $to )`.
+pub fn human_time_diff(from: i64, to: i64) -> String {
+    const UNITS: [(i64, &str); 6] = [
+        (60, "minute"),
+        (3600, "hour"),
+        (86_400, "day"),
+        (604_800, "week"),
+        (2_592_000, "month"),
+        (31_536_000, "year"),
+    ];
+    let diff = (to - from).abs();
+    // Each unit runs until the next one starts.
+    let (size, unit) = UNITS
+        .iter()
+        .rev()
+        .find(|(size, _)| diff >= *size)
+        .copied()
+        .unwrap_or((1, "second"));
+    // `round()` halves away from zero; `diff` is never negative.
+    let count = ((diff + size / 2) / size).max(1);
+    let plural = if count == 1 { "" } else { "s" };
+    format!("{count} {unit}{plural}")
 }
 
 #[cfg(test)]

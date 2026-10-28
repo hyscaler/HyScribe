@@ -20,6 +20,7 @@ use hyscribe_db::{Db, DbError, PostQuery};
 use hyscribe_model::Post;
 use hyscribe_render::blocks::{parse_blocks, render};
 use hyscribe_render::date::{self, Zone};
+use hyscribe_render::link;
 use tokio::net::TcpListener;
 
 pub mod query;
@@ -74,12 +75,10 @@ impl Site {
     }
 
     fn permalink(&self, post: &Post) -> String {
-        let query = if post.post_type == "page" {
-            "page_id"
-        } else {
-            "p"
-        };
-        format!("{}/?{query}={}", self.home, post.id)
+        let front_page =
+            (self.option("show_on_front") == "page").then(|| absint(&self.option("page_on_front")));
+        String::from_utf8_lossy(&link::permalink(self.home.as_bytes(), front_page, post))
+            .into_owned()
     }
 }
 

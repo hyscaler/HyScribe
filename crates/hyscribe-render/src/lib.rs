@@ -7,6 +7,7 @@ pub mod blocks;
 mod core_blocks;
 pub mod date;
 pub mod formatting;
+pub mod link;
 pub mod registry;
 pub mod site;
 pub mod style;

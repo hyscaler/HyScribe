@@ -5,8 +5,12 @@
 //! `prepare_attributes_for_render()` leaves them.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
+use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, php_trim};
 
+use crate::date::{self, Zone};
+use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit_title, convert_chars, wptexturize};
+use crate::link::permalink;
 use crate::registry::block_type;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
@@ -17,6 +21,8 @@ pub(crate) struct Context<'a> {
     pub(crate) theme: &'a Theme,
     pub(crate) site: &'a dyn Site,
     pub(crate) request: Request,
+    /// The `postId` block context.
+    pub(crate) post_id: Option<u64>,
 }
 
 /// One block being rendered: its name, parsed and prepared attributes.
@@ -34,6 +40,8 @@ pub(crate) fn render(
     parsed: &[(Key, Value)],
 ) -> Option<Vec<u8>> {
     let callback = match name {
+        "core/post-date" => post_date,
+        "core/post-title" => post_title,
         "core/site-tagline" => site_tagline,
         "core/site-title" => site_title,
         _ => return None,
@@ -61,6 +69,13 @@ impl Block<'_> {
         get_block_wrapper_attributes(self.name, self.parsed, &extra, &context.theme.global)
     }
 
+    /// `isset( $attributes['style']['elements']['link']['color']['text'] )`.
+    fn has_link_color(&self) -> bool {
+        self.attributes
+            .get_path(&["style", "elements", "link", "color", "text"])
+            .is_some_and(|v| *v != Value::Null)
+    }
+
     /// `has-text-align-<textAlign>`, or empty without an alignment.
     fn text_align_class(&self) -> Vec<u8> {
         match self.attribute("textAlign").filter(|v| !v.is_empty()) {
@@ -68,6 +83,219 @@ impl Block<'_> {
             None => Vec::new(),
         }
     }
+}
+
+impl Context<'_> {
+    /// The post in the `postId` context.
+    fn post(&self) -> Option<Post> {
+        self.post_id.and_then(|id| self.site.post(id))
+    }
+
+    /// `get_permalink( $post )`.
+    fn permalink(&self, post: &Post) -> Vec<u8> {
+        let option = |name| self.site.option(name).unwrap_or_default();
+        let front_page = (option("show_on_front") == b"page")
+            .then(|| Value::String(option("page_on_front")).to_float() as u64);
+        permalink(&self.site.home_url(), front_page, post)
+    }
+
+    /// `wp_timezone()`. Named zones format as UTC until a time zone
+    /// database lands.
+    fn zone(&self) -> Zone {
+        let option = |name| self.site.option(name).unwrap_or_default();
+        date::site_zone(&option("timezone_string"), &option("gmt_offset")).unwrap_or(Zone::Utc)
+    }
+}
+
+/// `get_the_title( $post )` with the `the_title` filters.
+fn the_title(post: &Post) -> Vec<u8> {
+    let title = if !post.password.is_empty() {
+        [b"Protected: ", &post.title[..]].concat()
+    } else if post.status == "private" {
+        [b"Private: ", &post.title[..]].concat()
+    } else {
+        post.title.clone()
+    };
+    let title = convert_chars(&wptexturize(&title, &CORE_SHORTCODE_TAGS));
+    capital_p_dangit_title(php_trim(&title))
+}
+
+/// The classes post blocks share: `has-text-align-*` when set, and
+/// `has-link-color` when the link has a color.
+fn post_classes(block: &Block<'_>, mut classes: Vec<Vec<u8>>) -> Vec<u8> {
+    if let Some(align) = block.attribute("textAlign") {
+        classes.push([b"has-text-align-", &align.to_php_string()[..]].concat());
+    }
+    if block.has_link_color() {
+        classes.push(b"has-link-color".to_vec());
+    }
+    classes.join(&b' ')
+}
+
+/// `render_block_core_post_title()`.
+fn post_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let Some(post) = context.post() else {
+        return Vec::new();
+    };
+    let mut title = the_title(&post);
+    if Value::String(title.clone()).is_empty() {
+        return Vec::new();
+    }
+    let level = block.attribute("level");
+    let tag = match level {
+        Some(Value::Int(0)) => b"p".to_vec(),
+        _ => level.map_or(b"h2".to_vec(), heading),
+    };
+    if block.attribute("isLink").is_some_and(|v| !v.is_empty()) {
+        let rel = match block.attribute("rel").filter(|v| !v.is_empty()) {
+            Some(rel) => format!("rel=\"{}\"", esc_attr(&rel.to_php_string())),
+            None => String::new(),
+        };
+        let target = block
+            .attribute("linkTarget")
+            .map(Value::to_php_string)
+            .unwrap_or_default();
+        title = [
+            b"<a href=\"".as_slice(),
+            &esc_url(&context.permalink(&post)),
+            b"\" target=\"",
+            esc_attr(&target).as_bytes(),
+            b"\" ",
+            rel.as_bytes(),
+            b">",
+            &title,
+            b"</a>",
+        ]
+        .concat();
+    }
+    element(
+        &tag,
+        &block.wrapper(context, &post_classes(block, Vec::new())),
+        &title,
+    )
+}
+
+/// `_block_bindings_post_data_get_value()`: `None` unless the post is
+/// public and has no password.
+fn post_data(context: &Context<'_>, field: &[u8]) -> Option<Vec<u8>> {
+    let post = context
+        .post()
+        .filter(|post| post.status == "publish" && post.password.is_empty())?;
+    let zone = context.zone();
+    let iso = |stored: &str| esc_attr(date::format("c", stored, zone).as_bytes()).into_bytes();
+    match field {
+        b"date" => Some(iso(&post.date)),
+        // Only a modified date later than the publish date shows.
+        b"modified" => Some(
+            if date::stored_unix(&post.modified, zone) > date::stored_unix(&post.date, zone) {
+                iso(&post.modified)
+            } else {
+                Vec::new()
+            },
+        ),
+        b"link" => Some(esc_url(&context.permalink(&post))),
+        _ => None,
+    }
+}
+
+/// `render_block_core_post_date()`, with the post data binding resolved as
+/// `WP_Block` resolves it before rendering.
+fn post_date(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let mut classes = Vec::new();
+    let binding = block
+        .attributes
+        .get_path(&["metadata", "bindings", "datetime"])
+        .filter(|b| {
+            b.get_str("source").is_some_and(|v| *v != Value::Null)
+                && b.get_str("args").is_some_and(|v| *v != Value::Null)
+        });
+    let datetime = match (binding, block.attribute("datetime")) {
+        (Some(binding), _) => match binding
+            .get_str("source")
+            .map(Value::to_php_string)
+            .as_deref()
+        {
+            Some(b"core/post-data") => post_data(
+                context,
+                &binding
+                    .get_path(&["args", "field"])
+                    .map(Value::to_php_string)
+                    .unwrap_or_default(),
+            ),
+            _ => None,
+        },
+        (None, Some(datetime)) => Some(datetime.to_php_string()),
+        (None, None) => {
+            let modified = block
+                .attribute("displayType")
+                .map(Value::to_php_string)
+                .as_deref()
+                == Some(b"modified");
+            if modified {
+                classes.push(b"wp-block-post-date__modified-date".to_vec());
+            }
+            post_data(context, if modified { b"modified" } else { b"date" })
+        }
+    };
+    let Some(datetime) = datetime.filter(|d| !Value::String(d.clone()).is_empty()) else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&datetime).into_owned();
+    let timestamp = date::strtotime(&text);
+    let format = block
+        .attribute("format")
+        .filter(|v| !v.is_empty())
+        .map(Value::to_php_string);
+    let formatted = match format.as_deref() {
+        Some(b"human-diff") => {
+            // A time `strtotime()` cannot read counts as 0, as PHP's false.
+            let timestamp = timestamp.unwrap_or(0);
+            let diff = date::human_time_diff(timestamp, context.request.now);
+            if timestamp > context.request.now {
+                format!("{diff} from now")
+            } else {
+                format!("{diff} ago")
+            }
+        }
+        _ => {
+            let format =
+                format.unwrap_or_else(|| context.site.option("date_format").unwrap_or_default());
+            timestamp
+                .map(|t| date::format_unix(&String::from_utf8_lossy(&format), t, context.zone()))
+                .unwrap_or_default()
+        }
+    };
+    let mut time = [
+        b"<time datetime=\"".as_slice(),
+        esc_attr(&datetime).as_bytes(),
+        b"\">",
+        esc_html(formatted.as_bytes()).as_bytes(),
+        b"</time>",
+    ]
+    .concat();
+    if block.attribute("isLink").is_some_and(|v| !v.is_empty()) && context.post_id.is_some() {
+        let link = context
+            .post()
+            .map(|post| context.permalink(&post))
+            .unwrap_or_default();
+        time = [
+            b"<a href=\"".as_slice(),
+            &esc_url(&link),
+            b"\">",
+            &time,
+            b"</a>",
+        ]
+        .concat();
+    }
+    let wrapper = block.wrapper(context, &post_classes(block, classes));
+    [
+        b"<div ".as_slice(),
+        wrapper.as_bytes(),
+        b">",
+        &time,
+        b"</div>",
+    ]
+    .concat()
 }
 
 /// `'h' . (int) $level`.
@@ -98,11 +326,7 @@ fn site_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         return Vec::new();
     }
     let mut classes = block.text_align_class();
-    if block
-        .attributes
-        .get_path(&["style", "elements", "link", "color", "text"])
-        .is_some_and(|v| *v != Value::Null)
-    {
+    if block.has_link_color() {
         classes.extend_from_slice(b" has-link-color");
     }
     let level = block.attribute("level");

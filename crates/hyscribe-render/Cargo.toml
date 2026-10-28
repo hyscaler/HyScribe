@@ -11,6 +11,7 @@ publish.workspace = true
 
 [dependencies]
 hyscribe-kses.workspace = true
+hyscribe-model.workspace = true
 hyscribe-phpser.workspace = true
 hyscribe-theme-json.workspace = true
 

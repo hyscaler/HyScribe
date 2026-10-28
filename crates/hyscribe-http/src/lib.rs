@@ -193,7 +193,7 @@ async fn page(
             };
             let title = page.title.clone();
             let body = tokio::task::spawn_blocking(move || {
-                render_body(&rendering, &candidates, &request, &title)
+                render_page(&rendering, &candidates, &request, &title)
             })
             .await;
             rendered(&site, *page, body)
@@ -242,7 +242,7 @@ fn database_error(site: &Site, err: &dyn std::fmt::Display) -> Rendered {
 /// The `<head>` and `<body>` elements: the first template in `candidates`
 /// the theme has, rendered for `request` with the database read on this
 /// thread, and the head its blocks enqueued styles for.
-fn render_body(
+fn render_page(
     site: &Site,
     candidates: &[String],
     request: &Request,
@@ -259,7 +259,7 @@ fn render_body(
     let head = wp_head(&site.theme, &reads, request, &assets, title.as_bytes());
     reads.finish()?;
     Ok((
-        String::from_utf8_lossy(&head).into_owned(),
+        lossy(&head),
         format!(
             "<body class=\"{}\">\n\n{}\n</body>",
             String::from_utf8_lossy(&classes),
@@ -540,8 +540,7 @@ fn lossy(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-/// The document around the body. The head is a minimal one until
-/// `wp_head()` is ported.
+/// The document around the head and body.
 fn layout(head: &str, body: &str) -> String {
     format!("<!DOCTYPE html>\n<html lang=\"en-US\">\n{head}\n\n{body}\n</html>\n")
 }

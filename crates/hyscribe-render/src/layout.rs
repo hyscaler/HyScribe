@@ -16,7 +16,7 @@ use crate::registry::BlockType;
 use crate::style::{declarations_string, parse_block_styles};
 
 /// A CSS rule as the style engine takes it.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct Rule {
     selector: String,
     declarations: Vec<(String, Value)>,

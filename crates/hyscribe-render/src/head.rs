@@ -111,8 +111,7 @@ pub fn wp_head(
         .into_bytes(),
     );
     out.extend(head.canonical());
-    let siteurl = String::from_utf8_lossy(&site.option("siteurl").unwrap_or_default()).into_owned();
-    let registry = registered_modules(&siteurl);
+    let registry = registered_modules(&head.siteurl());
     out.extend(
         Modules {
             registry: &registry,
@@ -137,6 +136,10 @@ impl Head<'_> {
         self.site.option(name).unwrap_or_default()
     }
 
+    fn siteurl(&self) -> String {
+        String::from_utf8_lossy(&self.option("siteurl")).into_owned()
+    }
+
     fn truthy(&self, name: &str) -> bool {
         !is_empty_string(&self.option(name))
     }
@@ -155,13 +158,6 @@ impl Head<'_> {
     fn robots(&self) -> Vec<u8> {
         let public = self.truthy("blog_public");
         let mut robots: Vec<(&str, Option<&str>)> = Vec::new();
-        let set = |robots: &mut Vec<(&str, Option<&str>)>, name, value| match robots
-            .iter_mut()
-            .find(|(n, _)| *n == name)
-        {
-            Some(entry) => entry.1 = value,
-            None => robots.push((name, value)),
-        };
         // wp_robots_no_robots()
         let no_robots = |robots: &mut Vec<(&str, Option<&str>)>| {
             set(robots, "noindex", None);
@@ -259,7 +255,7 @@ impl Head<'_> {
     /// The styles `wp_print_styles()` prints: the queue as the head's
     /// actions build it, after `wp_maybe_inline_styles()`.
     fn styles(&self, assets: &Assets) -> Vec<Style> {
-        let siteurl = String::from_utf8_lossy(&self.option("siteurl")).into_owned();
+        let siteurl = self.siteurl();
         let mut queue = vec![Style::inline(
             "wp-img-auto-sizes-contain",
             "img:is([sizes=auto i],[sizes^=\"auto,\" i]){contain-intrinsic-size:3000px 1500px}",
@@ -360,7 +356,7 @@ impl Head<'_> {
 
     /// `wp_print_font_faces()`: the theme's font faces from `theme.json`.
     fn font_faces(&self) -> Vec<u8> {
-        let siteurl = String::from_utf8_lossy(&self.option("siteurl")).into_owned();
+        let siteurl = self.siteurl();
         font_faces(
             self.theme.global.setting(&["typography", "fontFamilies"]),
             &format!("{siteurl}/wp-content/themes/{}", self.theme.slug),
@@ -425,21 +421,18 @@ fn font_face(face: &Value, family: &[u8], theme_uri: &str) -> Option<Vec<u8>> {
         .collect();
     set(
         &mut properties,
-        "font-family",
+        "font-family".to_owned(),
         Value::String(family.to_vec()),
     );
     for (key, value) in properties.clone() {
         let kebab = hyscribe_theme_json::kebab_case(&key);
-        set(&mut properties, &kebab, value);
+        set(&mut properties, kebab.clone(), value);
         if kebab != key {
             properties.retain(|(k, _)| *k != key);
         }
     }
-    if let Some((_, src)) = properties
-        .iter_mut()
-        // An empty source fails validation converted or not.
-        .find(|(k, _)| k == "src")
-    {
+    // An empty source fails validation converted or not.
+    if let Some((_, src)) = properties.iter_mut().find(|(k, _)| k == "src") {
         *src = theme_file_uris(src, theme_uri);
     }
     // validate_font_face_declarations(), after wp_parse_args().
@@ -450,7 +443,7 @@ fn font_face(face: &Value, family: &[u8], theme_uri: &str) -> Option<Vec<u8>> {
             .map(|(key, default)| (key.to_string(), Value::String(default.as_bytes().to_vec())))
             .collect();
     for (key, value) in properties {
-        set(&mut face, &key, value);
+        set(&mut face, key, value);
     }
     let get = |face: &[(String, Value)], key: &str| {
         face.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
@@ -484,7 +477,7 @@ fn font_face(face: &Value, family: &[u8], theme_uri: &str) -> Option<Vec<u8>> {
     {
         set(
             &mut face,
-            "font-display",
+            "font-display".to_owned(),
             Value::String(b"fallback".to_vec()),
         );
     }
@@ -548,10 +541,10 @@ const VALID_FONT_PROPERTIES: [&str; 14] = [
 ];
 
 /// `$array[ $key ] = $value`: in place, or appended.
-fn set(entries: &mut Vec<(String, Value)>, key: &str, value: Value) {
-    match entries.iter_mut().find(|(k, _)| k == key) {
+fn set<K: PartialEq, V>(entries: &mut Vec<(K, V)>, key: K, value: V) {
+    match entries.iter_mut().find(|(k, _)| *k == key) {
         Some(entry) => entry.1 = value,
-        None => entries.push((key.to_owned(), value)),
+        None => entries.push((key, value)),
     }
 }
 
@@ -570,10 +563,7 @@ fn compile_src(sources: &[Vec<u8>]) -> Vec<u8> {
             .iter()
             .rposition(|&b| b == b'.')
             .map_or(&b""[..], |at| base.get(at + 1..).unwrap_or_default());
-        match by_format.iter_mut().find(|(f, _)| f == extension) {
-            Some(entry) => entry.1 = url,
-            None => by_format.push((extension.to_vec(), url)),
-        }
+        set(&mut by_format, extension.to_vec(), url);
     }
     for (extension, format) in [
         ("woff2", "woff2"),
@@ -846,16 +836,16 @@ fn style_text(css: &[u8]) -> Vec<u8> {
 
 /// A registered script module.
 #[derive(Debug)]
-pub(crate) struct Module {
-    pub(crate) id: String,
+struct Module {
+    id: String,
     /// The source as registered, empty for none.
-    pub(crate) src: String,
+    src: String,
     /// A version string, `false` for the WordPress version, or `null`.
-    pub(crate) version: Value,
+    version: Value,
     /// Each dependency's ID and import type, `static` or `dynamic`.
-    pub(crate) dependencies: Vec<(String, String)>,
-    pub(crate) in_footer: bool,
-    pub(crate) fetchpriority: String,
+    dependencies: Vec<(String, String)>,
+    in_footer: bool,
+    fetchpriority: String,
 }
 
 /// The script modules `wp_default_script_modules()` registers, with
@@ -887,9 +877,9 @@ fn registered_modules(siteurl: &str) -> Vec<Module> {
 }
 
 /// `WP_Script_Modules` over a registry and its queue.
-pub(crate) struct Modules<'a> {
-    pub(crate) registry: &'a [Module],
-    pub(crate) queue: &'a [String],
+struct Modules<'a> {
+    registry: &'a [Module],
+    queue: &'a [String],
 }
 
 /// `$priorities`, lowest first.
@@ -1017,7 +1007,7 @@ impl Modules<'_> {
 
     /// `print_import_map()`, `print_head_enqueued_script_modules()` and
     /// `print_script_module_preloads()`.
-    pub(crate) fn head(&self) -> Vec<u8> {
+    fn head(&self) -> Vec<u8> {
         let mut out = Vec::new();
         let imports: Vec<(hyscribe_phpser::Key, Value)> = self
             .dependencies(self.queue, false)

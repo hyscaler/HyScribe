@@ -419,7 +419,7 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 }
 
 /// `comments_open( $post )`, with `_close_comments_for_old_post()`.
-fn comments_open(context: &Context<'_>, post: &Post) -> bool {
+pub(crate) fn comments_open(context: &Context<'_>, post: &Post) -> bool {
     let option = |name| context.site.option(name).unwrap_or_default();
     if post.comment_status != "open" {
         return false;

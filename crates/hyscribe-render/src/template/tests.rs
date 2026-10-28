@@ -19,6 +19,9 @@ fn theme(parts: &[(&'static str, &'static [u8])], patterns: &[(&str, &str)]) -> 
             .map(|(slug, content)| (slug.as_bytes().to_vec(), content.as_bytes().to_vec()))
             .collect(),
         global: twentytwentyfive().global,
+        style_handles: HashMap::new(),
+        stylesheet: "",
+        version: String::new(),
     }
 }
 
@@ -68,12 +71,9 @@ fn render(theme: &Theme, markup: &str) -> String {
 fn the_home_template_expands_parts_and_patterns() {
     let theme = twentytwentyfive();
     let (_, template) = theme.template(&["home".to_string()]).unwrap();
-    let html = String::from_utf8(render_template(
-        &theme,
-        &DefaultInstall,
-        &Request::default(),
-        template,
-    ))
+    let html = String::from_utf8(
+        render_template(&theme, &DefaultInstall, &Request::default(), template).0,
+    )
     .unwrap();
     assert!(html.starts_with(
         r##"<a class="skip-link screen-reader-text" id="wp-skip-link" href="#wp--skip-link--target">Skip to content</a><div class="wp-site-blocks"><header class="wp-block-template-part">"##
@@ -256,12 +256,15 @@ fn template_filters_run_on_the_rendered_template() {
     }
     let theme = twentytwentyfive();
     let html = |site: &dyn Site| {
-        String::from_utf8(render_template(
-            &theme,
-            site,
-            &Request::default(),
-            b"<p>\"Hi\" :mrgreen: ]]></p>",
-        ))
+        String::from_utf8(
+            render_template(
+                &theme,
+                site,
+                &Request::default(),
+                b"<p>\"Hi\" :mrgreen: ]]></p>",
+            )
+            .0,
+        )
         .unwrap()
     };
     assert_eq!(

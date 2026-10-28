@@ -40,6 +40,8 @@ pub struct Post {
     pub comment_count: i64,
     /// `comment_status`: `open` or `closed`.
     pub comment_status: String,
+    /// `ping_status`: `open` or `closed`.
+    pub ping_status: String,
 }
 
 /// A term of a taxonomy, as `get_the_terms()` returns it.

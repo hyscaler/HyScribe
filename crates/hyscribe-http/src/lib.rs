@@ -21,6 +21,7 @@ use hyscribe_kses::{esc_attr, esc_html};
 use hyscribe_model::{Post, PostQuery};
 use hyscribe_phpser::parse_str;
 use hyscribe_render::date::{self, Zone};
+use hyscribe_render::head::wp_head;
 use hyscribe_render::link;
 use hyscribe_render::post::body_class;
 use hyscribe_render::site::{Archive, Request};
@@ -150,10 +151,10 @@ struct Page {
     request: Request,
 }
 
-/// A page as sent: the status, the document title and the `<body>`.
+/// A page as sent: the status, the `<head>` and the `<body>`.
 struct Rendered {
     status: StatusCode,
-    title: String,
+    head: String,
     body: String,
 }
 
@@ -190,9 +191,11 @@ async fn page(
                 get: parse_str(uri.query().unwrap_or_default().as_bytes()),
                 ..page.request.clone()
             };
-            let body =
-                tokio::task::spawn_blocking(move || render_body(&rendering, &candidates, &request))
-                    .await;
+            let title = page.title.clone();
+            let body = tokio::task::spawn_blocking(move || {
+                render_body(&rendering, &candidates, &request, &title)
+            })
+            .await;
             rendered(&site, *page, body)
         }
         Err(err) => database_error(&site, &err),
@@ -200,7 +203,7 @@ async fn page(
     (
         page.status,
         [(header::CONTENT_TYPE, "text/html; charset=UTF-8")],
-        layout(&page.title, &page.body),
+        layout(&page.head, &page.body),
     )
         .into_response()
 }
@@ -210,12 +213,12 @@ async fn page(
 fn rendered(
     site: &Site,
     page: Page,
-    body: Result<Result<String, DbError>, tokio::task::JoinError>,
+    body: Result<Result<(String, String), DbError>, tokio::task::JoinError>,
 ) -> Rendered {
     match body {
-        Ok(Ok(body)) => Rendered {
+        Ok(Ok((head, body))) => Rendered {
             status: page.status,
-            title: page.title,
+            head,
             body,
         },
         Ok(Err(err)) => database_error(site, &err),
@@ -228,27 +231,40 @@ fn database_error(site: &Site, err: &dyn std::fmt::Display) -> Rendered {
     eprintln!("database error: {err}");
     Rendered {
         status: StatusCode::INTERNAL_SERVER_ERROR,
-        title: format!("Error &#8211; {}", site.name()),
+        head: format!(
+            "<head>\n<meta charset=\"UTF-8\" />\n<title>Error &#8211; {}</title>\n</head>",
+            site.name()
+        ),
         body: "<body>\n<p>Error establishing a database connection</p>\n</body>".to_string(),
     }
 }
 
-/// The `<body>` element: the first template in `candidates` the theme has,
-/// rendered for `request` with the database read on this thread.
-fn render_body(site: &Site, candidates: &[String], request: &Request) -> Result<String, DbError> {
+/// The `<head>` and `<body>` elements: the first template in `candidates`
+/// the theme has, rendered for `request` with the database read on this
+/// thread, and the head its blocks enqueued styles for.
+fn render_body(
+    site: &Site,
+    candidates: &[String],
+    request: &Request,
+    title: &str,
+) -> Result<(String, String), DbError> {
     let reads = Reads::new(site, tokio::runtime::Handle::current());
     // Every block theme has an index template.
     let template = site
         .theme
         .template(candidates)
         .map_or(&[][..], |(_, template)| template);
-    let html = render_template(&site.theme, &reads, request, template);
+    let (html, assets) = render_template(&site.theme, &reads, request, template);
     let classes = body_class(&reads, request, site.theme.slug());
+    let head = wp_head(&site.theme, &reads, request, &assets, title.as_bytes());
     reads.finish()?;
-    Ok(format!(
-        "<body class=\"{}\">\n\n{}\n</body>",
-        String::from_utf8_lossy(&classes),
-        String::from_utf8_lossy(&html)
+    Ok((
+        String::from_utf8_lossy(&head).into_owned(),
+        format!(
+            "<body class=\"{}\">\n\n{}\n</body>",
+            String::from_utf8_lossy(&classes),
+            String::from_utf8_lossy(&html)
+        ),
     ))
 }
 
@@ -526,12 +542,8 @@ fn lossy(bytes: &[u8]) -> String {
 
 /// The document around the body. The head is a minimal one until
 /// `wp_head()` is ported.
-fn layout(title: &str, body: &str) -> String {
-    format!(
-        "<!DOCTYPE html>\n<html lang=\"en-US\">\n<head>\n<meta charset=\"UTF-8\" />\n\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n\
-         <title>{title}</title>\n</head>\n\n{body}\n</html>\n"
-    )
+fn layout(head: &str, body: &str) -> String {
+    format!("<!DOCTYPE html>\n<html lang=\"en-US\">\n{head}\n\n{body}\n</html>\n")
 }
 
 #[cfg(test)]

@@ -52,6 +52,7 @@ fn post(row: &[SqlValue]) -> Post {
         post_type: string(&row[20]),
         comment_count: Value::String(text(&row[22])).to_int(),
         comment_status: string(&row[8]),
+        ping_status: string(&row[9]),
     }
 }
 

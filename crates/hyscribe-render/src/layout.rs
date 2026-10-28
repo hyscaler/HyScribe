@@ -16,6 +16,7 @@ use crate::registry::BlockType;
 use crate::style::{declarations_string, parse_block_styles};
 
 /// A CSS rule as the style engine takes it.
+#[derive(Clone, Debug)]
 pub(crate) struct Rule {
     selector: String,
     declarations: Vec<(String, Value)>,
@@ -616,7 +617,7 @@ pub(crate) fn render_layout(
     block: &LayoutBlock<'_>,
     global: &GlobalStyles,
     content: Vec<u8>,
-) -> (Vec<u8>, String) {
+) -> (Vec<u8>, Vec<Rule>) {
     let block_type = block.block_type;
     let supports_layout =
         has_support(block_type, &["layout"]) || has_support(block_type, &["__experimentalLayout"]);
@@ -627,9 +628,9 @@ pub(crate) fn render_layout(
         .unwrap_or_default();
     let child_layout = style.get_str("layout").filter(|v| !v.is_empty());
     if !supports_layout && child_layout.is_none() {
-        return (content, String::new());
+        return (content, Vec::new());
     }
-    let mut css = String::new();
+    let mut rules = Vec::new();
     let mut outer_classes = Vec::new();
     if let Some(child) = child_layout {
         let base = child_values(Some(child));
@@ -650,25 +651,21 @@ pub(crate) fn render_layout(
             ),
         ]);
         let class = unique_id(&input, "wp-container-content-");
-        let child_css = stylesheet(&child_layout_style(
-            &format!(".{class}"),
-            &base,
-            block.parent_layout,
-        ));
-        if !child_css.is_empty() {
+        let child_rules = child_layout_style(&format!(".{class}"), &base, block.parent_layout);
+        if !stylesheet(&child_rules).is_empty() {
             outer_classes.push(class.into_bytes());
-            css.push_str(&child_css);
+            rules.extend(child_rules);
         }
     }
     let mut tags = TagProcessor::new(&content);
     if !tags.next_tag(None, None) {
-        return (content, css);
+        return (content, rules);
     }
     if !supports_layout {
         for class in &outer_classes {
             tags.add_class(class);
         }
-        return (tags.get_updated_html().to_vec(), css);
+        return (tags.get_updated_html().to_vec(), rules);
     }
     let fallback = block_type
         .supports
@@ -783,10 +780,10 @@ pub(crate) fn render_layout(
         fallback: &fallback_gap,
         spacing,
     };
-    let container_css = stylesheet(&layout_style(&format!(".{container}"), &used, &gap));
-    if !container_css.is_empty() {
+    let container_rules = layout_style(&format!(".{container}"), &used, &gap);
+    if !stylesheet(&container_rules).is_empty() {
         classes.push(container.into_bytes());
-        css.push_str(&container_css);
+        rules.extend(container_rules);
     }
     let short_name = match block.name.split_once('/') {
         Some(("core", name)) => name.to_string(),
@@ -821,7 +818,7 @@ pub(crate) fn render_layout(
     for class in &classes {
         tags.add_class(class);
     }
-    (tags.get_updated_html().to_vec(), css)
+    (tags.get_updated_html().to_vec(), rules)
 }
 
 #[cfg(test)]

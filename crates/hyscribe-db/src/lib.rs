@@ -71,7 +71,7 @@ macro_rules! post_columns {
          CAST(post_date_gmt AS CHAR) AS post_date_gmt, post_content, post_title, post_excerpt, \
          post_status, post_password, post_name, CAST(post_modified AS CHAR) AS post_modified, \
          post_parent, guid, CAST(menu_order AS SIGNED) AS menu_order, post_type, comment_count, \
-         comment_status"
+         comment_status, ping_status"
     };
 }
 
@@ -181,6 +181,7 @@ fn post(row: &MySqlRow) -> Result<Post, DbError> {
         post_type: c.text("post_type"),
         comment_count: c.signed("comment_count"),
         comment_status: c.text("comment_status"),
+        ping_status: c.text("ping_status"),
     };
     c.finish(post)
 }

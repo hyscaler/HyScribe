@@ -13,9 +13,20 @@ pub fn esc_url(url: &[u8]) -> Vec<u8> {
     esc_url_protocols(url, &ALLOWED_PROTOCOLS)
 }
 
+/// `esc_url_raw( $url )`: the database context, which leaves `&` and `'`
+/// as they are.
+pub fn esc_url_raw(url: &[u8]) -> Vec<u8> {
+    clean_url(url, &ALLOWED_PROTOCOLS, false)
+}
+
 /// `esc_url( $url, $protocols )`: [`esc_url`] with only `protocols`
 /// allowed.
 pub fn esc_url_protocols(url: &[u8], protocols: &[&str]) -> Vec<u8> {
+    clean_url(url, protocols, true)
+}
+
+/// `esc_url()`, in the display context or not.
+fn clean_url(url: &[u8], protocols: &[&str], display: bool) -> Vec<u8> {
     let url: Vec<u8> = str_replace(ltrim(url), b" ", b"%20")
         .into_iter()
         .filter(|&b| allowed(b))
@@ -32,9 +43,11 @@ pub fn esc_url_protocols(url: &[u8], protocols: &[&str]) -> Vec<u8> {
     if !url.contains(&b':') && !matches!(url.first(), Some(b'/' | b'#' | b'?')) && !php_file(&url) {
         url = [b"http://", url.as_slice()].concat();
     }
-    url = wp_kses_normalize_entities(&url);
-    url = str_replace(&url, b"&amp;", b"&#038;");
-    url = str_replace(&url, b"'", b"&#039;");
+    if display {
+        url = wp_kses_normalize_entities(&url);
+        url = str_replace(&url, b"&amp;", b"&#038;");
+        url = str_replace(&url, b"'", b"&#039;");
+    }
     if url.contains(&b'[') || url.contains(&b']') {
         url = escape_brackets(&url);
     }
@@ -309,6 +322,24 @@ mod tests {
             let bytes = |part: Option<&str>| part.map(|p| p.as_bytes().to_vec());
             assert_eq!(url_scheme(url.as_bytes()), bytes(scheme), "{url}");
             assert_eq!(url_host(url.as_bytes()), bytes(host), "{url}");
+        }
+    }
+
+    /// `esc_url_raw()` in PHP keeps `&` and `'`, and still drops bad
+    /// protocols.
+    #[test]
+    fn raw_urls_keep_ampersands() {
+        for (url, raw) in [
+            ("http://a.test/x?a=1&b=2'c", "http://a.test/x?a=1&b=2'c"),
+            ("/rel?x=&amp;y", "/rel?x=&amp;y"),
+            ("javascript:alert(1)", ""),
+            ("a b[c]", "http://a%20b[c]"),
+        ] {
+            assert_eq!(
+                String::from_utf8(esc_url_raw(url.as_bytes())).unwrap(),
+                raw,
+                "{url}"
+            );
         }
     }
 

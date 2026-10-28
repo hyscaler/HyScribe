@@ -651,3 +651,73 @@ async fn list_filters_narrow_the_query() {
         StatusCode::NOT_FOUND
     );
 }
+
+/// Every page's `<head>` against PHP's, from `reference/head/golden.sh`,
+/// with HyScribe as the generator and without the tags an open question holds back. The single post is left out until
+/// block style variations are ported: its empty tags block still adds
+/// `block-style-variation-styles`.
+#[tokio::test]
+#[allow(clippy::string_slice)]
+async fn heads_match_php() {
+    let db = Db::connect(&fixture_config()).await.unwrap();
+    let address = "http://127.0.0.1:8081".to_string();
+    let site = Arc::new(
+        Site::load(db, Some(address.clone()), Some(address))
+            .await
+            .unwrap(),
+    );
+    let golden = include_str!("../../hyscribe-render/tests/golden/head.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let (path, php) = line.split_once('\t').unwrap();
+        let path = String::from_utf8(hyscribe_testkit::unhex(path)).unwrap();
+        if path.starts_with("/?p=1") {
+            continue;
+        }
+        let mut php = String::from_utf8(hyscribe_testkit::unhex(php)).unwrap();
+        for prefix in [
+            "<link rel=\"https://api.w.org/\"",
+            "<link rel=\"alternate\" title=\"JSON\"",
+            "<link rel=\"EditURI\"",
+            "<link rel=\"alternate\" title=\"oEmbed",
+        ] {
+            while let Some(start) = php.find(prefix) {
+                let end = start + php[start..].find("/>").unwrap() + 2;
+                let end = if php[end..].starts_with('\n') {
+                    end + 1
+                } else {
+                    end
+                };
+                php.replace_range(start..end, "");
+            }
+        }
+        let php = php.replace(
+            "<meta name=\"generator\" content=\"WordPress 7.1.3\" />",
+            &format!(
+                "<meta name=\"generator\" content=\"HyScribe {}\" />",
+                env!("CARGO_PKG_VERSION")
+            ),
+        );
+        let body = request(&site, "GET", &path).await.body;
+        let ours = &body[body.find("<head>").unwrap()..body.find("</head>").unwrap() + 7];
+        if ours != php {
+            let at = ours
+                .bytes()
+                .zip(php.bytes())
+                .position(|(a, b)| a != b)
+                .unwrap_or(ours.len().min(php.len()));
+            let from = at.saturating_sub(200);
+            failures.push(format!(
+                "{path}\n  php:  {}\n  ours: {}",
+                &php[from.min(php.len())..(at + 300).min(php.len())],
+                &ours[from.min(ours.len())..(at + 300).min(ours.len())]
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}

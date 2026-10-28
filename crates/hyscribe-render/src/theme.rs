@@ -82,6 +82,8 @@ const REGISTERED_BLOCKS: &[u8] =
     include_bytes!("../../../wordpress/wp-includes/blocks/registered.json");
 const BLOCK_STYLES: &str = include_str!("../../../themes/twentytwentyfive/block-styles.tsv");
 const STYLE_PARTIALS: &[u8] = include_bytes!("../../../themes/twentytwentyfive/styles.json");
+const STYLE_CSS: &str = include_str!("../../../themes/twentytwentyfive/style.css");
+const STYLE_MIN_CSS: &str = include_str!("../../../themes/twentytwentyfive/style.min.css");
 
 /// A block theme.
 #[derive(Debug)]
@@ -95,10 +97,18 @@ pub struct Theme {
     /// Core and theme `theme.json` merged, as `wp_get_global_settings()`
     /// and `wp_get_global_styles()` read them.
     pub(crate) global: GlobalStyles,
+    /// The style handles each core block's `block.json` names, which
+    /// rendering the block enqueues.
+    pub(crate) style_handles: HashMap<String, Vec<String>>,
+    /// `style.min.css`, which the theme enqueues.
+    pub(crate) stylesheet: &'static str,
+    /// The `Version` header of `style.css`.
+    pub(crate) version: String,
 }
 
 /// Twenty Twenty-Five, as bundled with WordPress 7.1.3.
 pub fn twentytwentyfive() -> Theme {
+    let blocks = registered_blocks(REGISTERED_BLOCKS);
     Theme {
         slug: "twentytwentyfive",
         templates: TEMPLATES.into_iter().collect(),
@@ -107,13 +117,48 @@ pub fn twentytwentyfive() -> Theme {
         patterns: patterns(PATTERNS),
         global: GlobalStyles::resolve(&Sources {
             core: CORE_THEME_JSON,
-            blocks: &registered_blocks(REGISTERED_BLOCKS),
+            blocks: &blocks,
             block_styles: &block_styles(BLOCK_STYLES),
             theme: Some(THEME_JSON),
             theme_styles: &style_partials(STYLE_PARTIALS),
             user: None,
         }),
+        style_handles: blocks
+            .iter()
+            .map(|block| {
+                (
+                    block.name.clone(),
+                    style_handles(&block.name, &block.metadata),
+                )
+            })
+            .collect(),
+        stylesheet: STYLE_MIN_CSS,
+        version: header(STYLE_CSS, "Version"),
     }
+}
+
+/// A `style.css` header field, as `get_file_data()` reads it.
+fn header(css: &str, name: &str) -> String {
+    css.lines()
+        .find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.trim_start_matches([' ', '\t', '*', '/', '#', '@'])
+                .eq_ignore_ascii_case(name)
+                .then(|| value.trim().to_owned())
+        })
+        .unwrap_or_default()
+}
+
+/// The style handles a core block registers, as
+/// `register_block_type_from_metadata()` does: `wp-block-<name>` first,
+/// whatever `block.json` names there, then the other handles it lists.
+fn style_handles(name: &str, metadata: &Value) -> Vec<String> {
+    let text = |handle: &Value| String::from_utf8_lossy(&handle.to_php_string()).into_owned();
+    let mut handles = vec![format!("wp-block-{}", name.trim_start_matches("core/"))];
+    if let Some(Value::Array(listed)) = metadata.get_str("style") {
+        handles.extend(listed.iter().skip(1).map(|(_, handle)| text(handle)));
+    }
+    handles
 }
 
 impl Theme {

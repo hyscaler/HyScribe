@@ -83,6 +83,10 @@ impl Renderer<'_> {
         if has_block_type(inner_blocks, "core/navigation") {
             return Vec::new();
         }
+        if self.is_interactive(&attributes, inner_blocks) {
+            self.assets
+                .enqueue_module("@wordpress/block-library/navigation/view");
+        }
         let within_overlay = attributes
             .get_str("_isWithinOverlayTemplatePart")
             .is_some_and(|v| !v.is_empty());
@@ -203,17 +207,20 @@ impl Renderer<'_> {
         if list_open {
             html.extend_from_slice(b"</ul>");
         }
-        let visibility = submenu_visibility(attributes);
-        let interactive = (has_submenus
-            && (visibility == b"click"
-                || attributes
-                    .get_str("showSubmenuIcon")
-                    .is_some_and(|v| !v.is_empty())))
-            || is_responsive(attributes);
-        if has_submenus && interactive {
-            html = add_directives_to_submenu(&html, &visibility);
+        if has_submenus && self.is_interactive(attributes, inner_blocks) {
+            html = add_directives_to_submenu(&html, &submenu_visibility(attributes));
         }
         html
+    }
+
+    /// `is_interactive()`: submenus that open on click or show an icon, or
+    /// a responsive menu.
+    fn is_interactive(&mut self, attributes: &Value, inner_blocks: &[Block]) -> bool {
+        let open_on_click = submenu_visibility(attributes) == b"click";
+        let icon = attributes
+            .get_str("showSubmenuIcon")
+            .is_some_and(|v| !v.is_empty());
+        (self.has_submenus(inner_blocks) && (open_on_click || icon)) || is_responsive(attributes)
     }
 
     /// `has_submenus()`: a page list with child pages. Submenu blocks are

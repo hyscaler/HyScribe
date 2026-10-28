@@ -60,7 +60,8 @@ fn matches_php() {
             parent_layout: parent.as_ref(),
             first_chunk: (!first.is_empty()).then_some(first.as_slice()),
         };
-        let (html, css) = render_layout(&block, &global, content.clone());
+        let (html, rules) = render_layout(&block, &global, content.clone());
+        let css = stylesheet(&rules);
         if html != php || css.as_bytes() != php_css {
             failures.push(format!(
                 "{name} {}\n  parent {:?}\n  php:  {}\n  ours: {}\n  php css:  {}\n  ours css: {css}",

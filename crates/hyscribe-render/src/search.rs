@@ -111,6 +111,8 @@ impl Renderer<'_> {
         );
         input.set_attribute(b"placeholder", &a.text(&["placeholder"]));
         if expandable {
+            self.assets
+                .enqueue_module("@wordpress/block-library/search/view");
             input.set_attribute(
                 b"data-wp-bind--aria-hidden",
                 b"!context.isSearchInputVisible",

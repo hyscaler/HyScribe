@@ -9,11 +9,12 @@ use std::collections::HashMap;
 
 use hyscribe_html::{Attribute, TagProcessor};
 use hyscribe_kses::esc_url;
-use hyscribe_phpser::{Value, is_empty_string, lookup};
+use hyscribe_phpser::{Value, is_empty_string, lookup, php_trim};
 
 use crate::blocks::{Block, parse_blocks};
 use crate::core_blocks::{self, Context};
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_smilies, wptexturize};
+use crate::head::Assets;
 use crate::interactivity::process_directives;
 use crate::layout::{LayoutBlock, render_layout};
 use crate::media::Loading;
@@ -46,21 +47,17 @@ pub fn render_template(
     site: &dyn Site,
     request: &Request,
     template: &[u8],
-) -> Vec<u8> {
-    let content = site_smilies(
-        site,
-        &wptexturize(
-            &render_content(theme, site, request, template),
-            &CORE_SHORTCODE_TAGS,
-        ),
-    );
+) -> (Vec<u8>, Assets) {
+    let mut renderer = Renderer::new(theme, site, request);
+    let rendered = renderer.render(template);
+    let content = site_smilies(site, &wptexturize(&rendered, &CORE_SHORTCODE_TAGS));
     let html = [
         b"<div class=\"wp-site-blocks\">".as_slice(),
         &replace(&content, b"]]>", b"]]&gt;"),
         b"</div>",
     ]
     .concat();
-    add_skip_link(html)
+    (add_skip_link(html), renderer.assets)
 }
 
 /// `block_core_paragraph_add_class()`: the first `<p>` gets the class
@@ -129,6 +126,9 @@ pub fn render_content(
 
 pub(crate) struct Renderer<'a> {
     pub(crate) context: Context<'a>,
+    /// The styles, block supports CSS and script modules rendering
+    /// enqueued.
+    pub(crate) assets: Assets,
     /// Template parts and patterns being rendered, so one that includes
     /// itself stops instead of recursing forever.
     pub(crate) open_parts: Vec<Vec<u8>>,
@@ -176,6 +176,7 @@ impl<'a> Renderer<'a> {
                 comment: None,
                 loading: Loading::in_the_loop(request.singular),
             },
+            assets: Assets::default(),
             open_parts: Vec::new(),
             open_patterns: Vec::new(),
             open_posts: Vec::new(),
@@ -210,6 +211,18 @@ impl Renderer<'_> {
 
     /// `render_block()` for one block.
     pub(crate) fn block(&mut self, block: &Block) -> Vec<u8> {
+        let (styles, modules) = (self.assets.styles.len(), self.assets.modules.len());
+        let html = self.render_block(block);
+        // A block that renders nothing dequeues what it and its inner
+        // blocks enqueued.
+        if php_trim(&html).is_empty() {
+            self.assets.styles.truncate(styles);
+            self.assets.modules.truncate(modules);
+        }
+        html
+    }
+
+    fn render_block(&mut self, block: &Block) -> Vec<u8> {
         let root_interactive = !self.in_interactive
             && block.name.as_deref().and_then(block_type).is_some_and(|t| {
                 t.supports.get_str("interactivity") == Some(&Value::Bool(true))
@@ -245,6 +258,16 @@ impl Renderer<'_> {
             None => self.saved_markup(block),
         };
         self.parent_layout = parent;
+        let theme = self.context.theme;
+        for handle in block
+            .name
+            .as_deref()
+            .and_then(|name| theme.style_handles.get(name))
+            .into_iter()
+            .flatten()
+        {
+            self.assets.enqueue_style(handle);
+        }
         let html = self.layout(block, html);
         let html = match block.name.as_deref() {
             Some("core/paragraph") => paragraph_class(&html),
@@ -265,9 +288,9 @@ impl Renderer<'_> {
         html
     }
 
-    /// The layout support's `render_block` filter. Its CSS is for the block
-    /// supports stylesheet in the head, which is not printed yet.
-    fn layout(&self, block: &Block, html: Vec<u8>) -> Vec<u8> {
+    /// The layout support's `render_block` filter, whose rules go to the
+    /// block supports store.
+    fn layout(&mut self, block: &Block, html: Vec<u8>) -> Vec<u8> {
         let Some((name, block_type)) = block
             .name
             .as_deref()
@@ -287,7 +310,9 @@ impl Renderer<'_> {
             parent_layout: self.parent_layout.as_ref(),
             first_chunk,
         };
-        render_layout(&layout_block, &self.context.theme.global, html).0
+        let (html, rules) = render_layout(&layout_block, &self.context.theme.global, html);
+        self.assets.rules.extend(rules);
+        html
     }
 
     /// The block's own markup with its inner blocks rendered in place.

@@ -85,3 +85,15 @@ fn style_partials_reach_the_global_styles() {
             .is_some()
     );
 }
+
+/// `get_file_data()` reads `Version` from `style.css`, case-insensitively
+/// and after comment markers.
+#[test]
+fn reads_the_style_header() {
+    assert_eq!(twentytwentyfive().version, "1.5");
+    assert_eq!(
+        header("/*\n * version:  2.0 \nText: x\n*/", "Version"),
+        "2.0"
+    );
+    assert_eq!(header("Theme Name: x", "Version"), "");
+}

@@ -15,6 +15,7 @@ pub mod date;
 #[path = "tests/fixture.rs"]
 mod fixture;
 pub mod formatting;
+pub mod head;
 mod interactivity;
 pub mod kses;
 mod layout;

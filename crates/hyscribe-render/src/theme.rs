@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use hyscribe_phpser::{Key, Value, json_decode};
+use hyscribe_theme_json::{GlobalStyles, Sources};
 
 const TEMPLATES: [(&str, &[u8]); 8] = [
     (
@@ -76,6 +77,7 @@ const PARTS: [(&str, &[u8]); 7] = [
 
 const PATTERNS: &[u8] = include_bytes!("../../../themes/twentytwentyfive/patterns.json");
 const THEME_JSON: &[u8] = include_bytes!("../../../themes/twentytwentyfive/theme.json");
+const CORE_THEME_JSON: &[u8] = include_bytes!("../../../wordpress/wp-includes/theme.json");
 
 /// A block theme.
 #[derive(Debug)]
@@ -86,6 +88,9 @@ pub struct Theme {
     /// The area of each template part, from `theme.json`.
     pub(crate) areas: HashMap<Vec<u8>, Vec<u8>>,
     pub(crate) patterns: HashMap<Vec<u8>, Vec<u8>>,
+    /// Core and theme `theme.json` merged, as `wp_get_global_settings()`
+    /// and `wp_get_global_styles()` read them.
+    pub(crate) global: GlobalStyles,
 }
 
 /// Twenty Twenty-Five, as bundled with WordPress 7.1.3.
@@ -96,6 +101,14 @@ pub fn twentytwentyfive() -> Theme {
         parts: PARTS.into_iter().collect(),
         areas: part_areas(THEME_JSON),
         patterns: patterns(PATTERNS),
+        global: GlobalStyles::resolve(&Sources {
+            core: CORE_THEME_JSON,
+            blocks: &[],
+            block_styles: &[],
+            theme: Some(THEME_JSON),
+            theme_styles: &[],
+            user: None,
+        }),
     }
 }
 

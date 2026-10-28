@@ -1,29 +1,41 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Rendering a block template, as `get_the_block_template_html()` and
-//! `do_blocks()` do: template parts and patterns are expanded, and every
-//! block renders its saved markup with its inner blocks put back in place.
-//! Other dynamic blocks and block supports join this module one by one.
+//! `do_blocks()` do: template parts and patterns are expanded, dynamic
+//! blocks run their render callbacks, and the others render their saved
+//! markup with their inner blocks put back in place.
 
 use hyscribe_phpser::{Value, lookup};
 
 use crate::blocks::{Block, parse_blocks};
+use crate::core_blocks::{self, Context};
+use crate::site::{Request, Site};
+use crate::supports::get_block_wrapper_attributes;
 use crate::theme::Theme;
 
 /// Renders a template's block markup inside `.wp-site-blocks`.
-pub fn render_template(theme: &Theme, template: &[u8]) -> Vec<u8> {
+pub fn render_template(
+    theme: &Theme,
+    site: &dyn Site,
+    request: Request,
+    template: &[u8],
+) -> Vec<u8> {
     [
         b"<div class=\"wp-site-blocks\">".as_slice(),
-        &render_content(theme, template),
+        &render_content(theme, site, request, template),
         b"</div>",
     ]
     .concat()
 }
 
 /// Renders post content: `do_blocks()` on `post_content`.
-pub fn render_content(theme: &Theme, content: &[u8]) -> Vec<u8> {
+pub fn render_content(theme: &Theme, site: &dyn Site, request: Request, content: &[u8]) -> Vec<u8> {
     Renderer {
-        theme,
+        context: Context {
+            theme,
+            site,
+            request,
+        },
         open_parts: Vec::new(),
         open_patterns: Vec::new(),
     }
@@ -31,7 +43,7 @@ pub fn render_content(theme: &Theme, content: &[u8]) -> Vec<u8> {
 }
 
 struct Renderer<'a> {
-    theme: &'a Theme,
+    context: Context<'a>,
     /// Template parts and patterns being rendered, so one that includes
     /// itself stops instead of recursing forever.
     open_parts: Vec<Vec<u8>>,
@@ -58,7 +70,13 @@ impl Renderer<'_> {
         match block.name.as_deref() {
             Some("core/template-part") => self.template_part(block),
             Some("core/pattern") => self.pattern(block),
-            _ => self.saved_markup(block),
+            Some(name) => core_blocks::render(
+                &self.context,
+                name,
+                block.attrs.as_deref().unwrap_or_default(),
+            )
+            .unwrap_or_else(|| self.saved_markup(block)),
+            None => self.saved_markup(block),
         }
     }
 
@@ -81,7 +99,7 @@ impl Renderer<'_> {
 
     /// `render_block_core_template_part()`.
     fn template_part(&mut self, block: &Block) -> Vec<u8> {
-        let theme = self.theme;
+        let theme = self.context.theme;
         let other_theme = attr(block, "theme").is_some_and(|t| t != theme.slug().as_bytes());
         let found = attr(block, "slug")
             .filter(|_| !other_theme)
@@ -100,10 +118,18 @@ impl Renderer<'_> {
             Some(tag) => tag,
             None => area_tag(area),
         };
+        let wrapper = get_block_wrapper_attributes(
+            "core/template-part",
+            block.attrs.as_deref().unwrap_or_default(),
+            &[],
+            &theme.global,
+        );
         [
             b"<",
             tag,
-            b" class=\"wp-block-template-part\">",
+            b" ",
+            wrapper.as_bytes(),
+            b">",
             &html,
             b"</",
             tag,
@@ -114,7 +140,7 @@ impl Renderer<'_> {
 
     /// `render_block_core_pattern()`.
     fn pattern(&mut self, block: &Block) -> Vec<u8> {
-        let theme = self.theme;
+        let theme = self.context.theme;
         let Some((slug, content)) =
             attr(block, "slug").and_then(|slug| Some((slug, theme.pattern(slug)?)))
         else {

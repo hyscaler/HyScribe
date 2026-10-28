@@ -18,18 +18,47 @@ fn theme(parts: &[(&'static str, &'static [u8])], patterns: &[(&str, &str)]) -> 
             .iter()
             .map(|(slug, content)| (slug.as_bytes().to_vec(), content.as_bytes().to_vec()))
             .collect(),
+        global: twentytwentyfive().global,
+    }
+}
+
+/// The default install's title and tagline, nothing else.
+struct DefaultInstall;
+
+impl Site for DefaultInstall {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        match name {
+            "blogname" => Some(b"HyScribe Default Install".to_vec()),
+            _ => None,
+        }
+    }
+
+    fn home_url(&self) -> Vec<u8> {
+        b"http://example.test".to_vec()
     }
 }
 
 fn render(theme: &Theme, markup: &str) -> String {
-    String::from_utf8(render_content(theme, markup.as_bytes())).unwrap()
+    String::from_utf8(render_content(
+        theme,
+        &DefaultInstall,
+        Request::default(),
+        markup.as_bytes(),
+    ))
+    .unwrap()
 }
 
 #[test]
 fn the_home_template_expands_parts_and_patterns() {
     let theme = twentytwentyfive();
     let (_, template) = theme.template(&["home".to_string()]).unwrap();
-    let html = String::from_utf8(render_template(&theme, template)).unwrap();
+    let html = String::from_utf8(render_template(
+        &theme,
+        &DefaultInstall,
+        Request::default(),
+        template,
+    ))
+    .unwrap();
     assert!(
         html.starts_with("<div class=\"wp-site-blocks\"><header class=\"wp-block-template-part\">")
     );
@@ -37,6 +66,9 @@ fn the_home_template_expands_parts_and_patterns() {
     assert!(html.contains("<footer class=\"wp-block-template-part\">"));
     assert!(html.ends_with("</footer>\n</div>"));
     assert!(!html.contains("wp:pattern"));
+    assert!(html.contains(
+        r#"<p class="wp-block-site-title"><a href="http://example.test" target="_self" rel="home">HyScribe Default Install</a></p>"#
+    ));
 }
 
 #[test]
@@ -145,7 +177,11 @@ fn saved_markup_keeps_inner_blocks_in_place() {
         inner_content: vec![None, Some(b"x".to_vec())],
     };
     let mut renderer = Renderer {
-        theme: &theme,
+        context: Context {
+            theme: &theme,
+            site: &DefaultInstall,
+            request: Request::default(),
+        },
         open_parts: Vec::new(),
         open_patterns: Vec::new(),
     };

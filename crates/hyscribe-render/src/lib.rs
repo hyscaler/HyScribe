@@ -4,6 +4,7 @@
 //! templates and the dynamic core blocks.
 
 pub mod autop;
+pub mod balance;
 pub mod blocks;
 mod comments;
 mod content;

@@ -133,4 +133,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "force_balance_tags"
+path = "fuzz_targets/force_balance_tags.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

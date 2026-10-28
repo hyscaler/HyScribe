@@ -158,6 +158,28 @@ function autop_cases() {
 	return array_merge( $cases, random_cases( $atoms, 3000, 16 ) );
 }
 
+function balance_cases() {
+	$cases = array(
+		'', 'plain', '<b>open', '</b>stray', '<b><i>x</b>', '<p>a<p>b', '<div><div>nested</div>', '<span><span>x',
+		'<br>', '<br/>', '<BR >', '<img src="x">', '<img src="x"/>', '<img src="x" / >', '<hr  >', '<input type=text>',
+		'<p/>', '<div / >', '<x-custom attr>y', '<my-el.v2>z</my-el.v2>', '<my-elX>', '<a-1>b', '<ns:tag>c</ns:tag>', '<_u>d',
+		'<B>Upper</b>', '<b >sp</b >', "<b\n>nl</b>", '<b class="x">y', '< !-- not a comment -->', '<!-- c --><b>', '<3 love <3',
+		'<1>', '<a href="x>y">z</a>', '<a <b>', '<<b>>', '<b', '</', '</>', '<b/c>', '<table><tr><td>x</table>', '<ul><li>a<li>b</ul>',
+		'<q><q>x</q></q>', '<p class="x"/>', '<div id=a / >', '<my.el-x>a', '<a1_b-c>d', '<a.b-c_d.e>f</a.b-c_d.e>', '<my->', '<my-->', '<a-->', '<blockquote><blockquote>q', '<em><strong>x</em></strong>', '</div></div><div>', "<p>\x0bv</p>",
+	);
+	foreach ( post_contents() as $content ) {
+		$cases[] = $content;
+	}
+	$atoms = array( '<b>', '</b>', '<i>', '</i>', '<p>', '</p>', '<div>', '</div>', '<span>', '</span>', '<br>', '<br />', '<img src=x>', '<x-el>', '</x-el>', '<a href="q">', '</a>', '<ul>', '<li>', '</li>', '<q>', '</q>', 'text', ' ', "\n", '<', '>', '/', '"', '< !--', '<!--', '-->', '<3', '<B>', '</B>', '<b class="c">', '<hr/>', '<p/>', '<em>', '</em>' );
+	return array_merge( $cases, random_cases( $atoms, 3000, 14 ) );
+}
+
+if ( 'balance' === $argv[1] ) {
+	foreach ( balance_cases() as $case ) {
+		emit( $case, force_balance_tags( $case ) );
+	}
+	exit;
+}
 if ( 'autop' === $argv[1] ) {
 	foreach ( autop_cases() as $case ) {
 		foreach ( array( true, false ) as $br ) {

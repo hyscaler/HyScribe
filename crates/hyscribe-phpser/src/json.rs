@@ -118,7 +118,7 @@ impl Parser<'_> {
             if self.peek() != Some(b'"') {
                 return None;
             }
-            let key = array_key(self.string()?);
+            let key = Key::from_php_string(self.string()?);
             self.whitespace();
             if !self.eat(b':') {
                 return None;
@@ -283,22 +283,6 @@ fn utf8_sequence(bytes: &[u8]) -> Option<&[u8]> {
     std::str::from_utf8(sequence).ok().map(|_| sequence)
 }
 
-/// PHP turns string keys that spell a canonical integer into integer keys.
-fn array_key(key: Vec<u8>) -> Key {
-    let canonical = match key.as_slice() {
-        [b'0'] => true,
-        [b'-', b'0', ..] | [b'0', ..] => false,
-        [b'-', rest @ ..] | rest => !rest.is_empty() && rest.iter().all(u8::is_ascii_digit),
-    };
-    let int = canonical
-        .then(|| String::from_utf8_lossy(&key).parse::<i64>().ok())
-        .flatten();
-    match int {
-        Some(n) => Key::Int(n),
-        None => Key::String(key),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,7 +410,7 @@ mod tests {
 
     #[test]
     fn integer_like_keys_become_integers() {
-        let key = |text: &str| array_key(text.as_bytes().to_vec());
+        let key = |text: &str| Key::from_php_string(text.as_bytes().to_vec());
         let string = |text: &str| Key::String(text.as_bytes().to_vec());
         assert_eq!(key("0"), Key::Int(0));
         assert_eq!(key("7"), Key::Int(7));

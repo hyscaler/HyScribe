@@ -36,11 +36,11 @@ fn load(json: &[u8]) -> HashMap<Vec<u8>, BlockType> {
         .into_iter()
         .filter_map(|(key, fields)| {
             let Key::String(name) = key else { return None };
-            let attributes = match get(&fields, "attributes") {
+            let attributes = match fields.get_str("attributes") {
                 Some(Value::Array(attributes)) => attributes.clone(),
                 _ => Vec::new(),
             };
-            let supports = get(&fields, "supports").cloned().unwrap_or(Value::Null);
+            let supports = fields.get_str("supports").cloned().unwrap_or(Value::Null);
             Some((
                 name,
                 BlockType {
@@ -50,16 +50,6 @@ fn load(json: &[u8]) -> HashMap<Vec<u8>, BlockType> {
             ))
         })
         .collect()
-}
-
-/// `$array[$key]` for a string key.
-pub(crate) fn get<'v>(value: &'v Value, key: &str) -> Option<&'v Value> {
-    match value {
-        Value::Array(entries) => entries.iter().find_map(|(k, v)| {
-            matches!(k, Key::String(name) if name == key.as_bytes()).then_some(v)
-        }),
-        _ => None,
-    }
 }
 
 impl BlockType {
@@ -79,7 +69,7 @@ impl BlockType {
             .collect();
         for (key, schema) in &self.attributes {
             let missing = !prepared.iter().any(|(k, _)| k == key);
-            if let (true, Some(default)) = (missing, get(schema, "default")) {
+            if let (true, Some(default)) = (missing, schema.get_str("default")) {
                 // `isset()`: a null default counts as none.
                 if *default != Value::Null {
                     prepared.push((key.clone(), default.clone()));
@@ -98,7 +88,7 @@ const TYPES: [&str; 7] = [
 /// `rest_handle_multi_type_schema()` picks it. `None` when no listed type
 /// fits.
 fn schema_type(value: &Value, schema: &Value) -> Option<String> {
-    match get(schema, "type") {
+    match schema.get_str("type") {
         Some(Value::String(name)) => Some(String::from_utf8_lossy(name).into_owned()),
         Some(Value::Array(types)) => {
             // A non-string entry is an unknown type, like any other.
@@ -145,7 +135,8 @@ pub(crate) fn is_valid(value: &Value, schema: &Value) -> bool {
         "object" => is_object(value),
         "array" => {
             is_array(value)
-                && get(schema, "items")
+                && schema
+                    .get_str("items")
                     .is_none_or(|items| list(value).iter().all(|item| is_valid(item, items)))
         }
         "number" => is_numeric(value) && in_bounds(value, schema),
@@ -160,7 +151,7 @@ pub(crate) fn is_valid(value: &Value, schema: &Value) -> bool {
 /// `rest_validate_enum()`: the value, sanitized for its type, must equal
 /// one of the listed values.
 fn enum_allows(value: &Value, schema: &Value, kind: &str) -> bool {
-    match get(schema, "enum") {
+    match schema.get_str("enum") {
         Some(Value::Array(options)) if !options.is_empty() => {
             let sanitized = sanitize(value, kind);
             options.iter().any(|(_, option)| equal(&sanitized, option))
@@ -210,7 +201,7 @@ fn equal(a: &Value, b: &Value) -> bool {
 /// `minimum` and `maximum`, inclusive (core blocks set no exclusive bounds).
 fn in_bounds(value: &Value, schema: &Value) -> bool {
     let number = to_float(value);
-    let bound = |name: &str| get(schema, name).map(to_float);
+    let bound = |name: &str| schema.get_str(name).map(to_float);
     bound("minimum").is_none_or(|min| number >= min)
         && bound("maximum").is_none_or(|max| number <= max)
 }

@@ -81,10 +81,46 @@ impl Value {
             .map(|(_, v)| v)
     }
 
-    /// Shorthand for [`Value::get`] with a string key.
+    /// `$array[$key]` for a string key, which PHP reads as an integer key
+    /// when it spells one (`"7"`). The last of duplicate keys wins.
     pub fn get_str(&self, key: &str) -> Option<&Value> {
-        self.get(&Key::String(key.as_bytes().to_vec()))
+        lookup(self.as_array()?, key)
     }
+
+    /// `$array[$a][$b]...`: [`Value::get_str`] along `path`.
+    pub fn get_path(&self, path: &[&str]) -> Option<&Value> {
+        path.iter().try_fold(self, |value, key| value.get_str(key))
+    }
+}
+
+impl Key {
+    /// The key PHP makes of a string: an integer key when the string spells
+    /// a canonical integer (`"7"`, `"-3"`, not `"07"`, `"-0"` or `"+1"`).
+    pub fn from_php_string(key: Vec<u8>) -> Key {
+        match canonical_int(&key) {
+            Some(n) => Key::Int(n),
+            None => Key::String(key),
+        }
+    }
+}
+
+fn canonical_int(key: &[u8]) -> Option<i64> {
+    let text = std::str::from_utf8(key).ok()?;
+    text.parse::<i64>().ok().filter(|n| n.to_string() == text)
+}
+
+/// [`Value::get_str`] over an array's entries.
+pub fn lookup<'a>(entries: &'a [(Key, Value)], key: &str) -> Option<&'a Value> {
+    let int = canonical_int(key.as_bytes());
+    entries
+        .iter()
+        .rev()
+        .find(|(k, _)| match (k, int) {
+            (Key::Int(n), Some(wanted)) => *n == wanted,
+            (Key::String(name), None) => name == key.as_bytes(),
+            _ => false,
+        })
+        .map(|(_, v)| v)
 }
 
 #[cfg(test)]
@@ -116,5 +152,35 @@ mod tests {
         assert_eq!(Value::Int(1).as_bytes(), None);
         assert_eq!(Value::String(b"x".to_vec()).as_bytes(), Some(&b"x"[..]));
         assert_eq!(array().as_array().map(<[_]>::len), Some(3));
+    }
+
+    #[test]
+    fn string_keys_that_spell_integers_read_integer_keys() {
+        assert_eq!(array().get_str("0"), Some(&Value::String(b"zero".to_vec())));
+        assert_eq!(array().get_str("00"), None);
+        for (text, key) in [
+            ("7", Key::Int(7)),
+            ("-3", Key::Int(-3)),
+            ("07", Key::String(b"07".to_vec())),
+            ("-0", Key::String(b"-0".to_vec())),
+            ("+1", Key::String(b"+1".to_vec())),
+            ("x", Key::String(b"x".to_vec())),
+        ] {
+            assert_eq!(
+                Key::from_php_string(text.as_bytes().to_vec()),
+                key,
+                "{text}"
+            );
+        }
+        assert_eq!(Key::from_php_string(vec![0xff]), Key::String(vec![0xff]));
+    }
+
+    #[test]
+    fn get_path_walks_nested_arrays() {
+        let nested = Value::Array(vec![(Key::String(b"outer".to_vec()), array())]);
+        assert_eq!(nested.get_path(&["outer", "a"]), Some(&Value::Int(2)));
+        assert_eq!(nested.get_path(&[]), Some(&nested));
+        assert_eq!(nested.get_path(&["outer", "a", "b"]), None);
+        assert_eq!(nested.get_path(&["none", "a"]), None);
     }
 }

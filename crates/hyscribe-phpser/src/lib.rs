@@ -28,5 +28,5 @@ pub use encode::encode;
 pub use error::{Error, ErrorKind};
 pub use float::Float;
 pub use json::{JSON_MAX_DEPTH, json_decode};
-pub use value::{Key, Value};
+pub use value::{Key, Value, lookup};
 pub use wp::{Maybe, is_serialized, maybe_unserialize};

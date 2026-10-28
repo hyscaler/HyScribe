@@ -135,47 +135,37 @@ impl Theme {
 }
 
 /// The string at `key` of a decoded JSON object.
-fn string<'v>(entries: &'v [(Key, Value)], key: &str) -> Option<&'v [u8]> {
-    entries.iter().find_map(|(k, v)| match (k, v) {
-        (Key::String(name), Value::String(text)) if name == key.as_bytes() => Some(text.as_slice()),
-        _ => None,
-    })
+fn string<'v>(value: &'v Value, key: &str) -> Option<&'v [u8]> {
+    value.get_str(key).and_then(Value::as_bytes)
 }
 
 /// `templateParts` in `theme.json`: part name to area.
 fn part_areas(theme_json: &[u8]) -> HashMap<Vec<u8>, Vec<u8>> {
-    let Some(Value::Array(root)) = json_decode(theme_json) else {
-        return HashMap::new();
-    };
-    let parts = root.iter().find_map(|(key, value)| match (key, value) {
-        (Key::String(name), Value::Array(parts)) if name == b"templateParts" => Some(parts),
-        _ => None,
-    });
+    let root = json_decode(theme_json).unwrap_or(Value::Null);
+    let parts = root
+        .get_str("templateParts")
+        .and_then(Value::as_array)
+        .unwrap_or_default();
     parts
-        .into_iter()
-        .flatten()
-        .filter_map(|(_, part)| match part {
-            Value::Array(fields) => Some((
-                string(fields, "name")?.to_vec(),
-                string(fields, "area")?.to_vec(),
-            )),
-            _ => None,
+        .iter()
+        .filter_map(|(_, part)| {
+            Some((
+                string(part, "name")?.to_vec(),
+                string(part, "area")?.to_vec(),
+            ))
         })
         .collect()
 }
 
 /// `patterns.json` from the theme export: slug to content.
 fn patterns(json: &[u8]) -> HashMap<Vec<u8>, Vec<u8>> {
-    let Some(Value::Array(entries)) = json_decode(json) else {
-        return HashMap::new();
-    };
-    entries
-        .into_iter()
-        .filter_map(|(key, value)| match (key, value) {
-            (Key::String(slug), Value::Array(fields)) => {
-                Some((slug, string(&fields, "content")?.to_vec()))
-            }
-            _ => None,
+    let root = json_decode(json).unwrap_or(Value::Null);
+    root.as_array()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|(key, pattern)| match key {
+            Key::String(slug) => Some((slug.clone(), string(pattern, "content")?.to_vec())),
+            Key::Int(_) => None,
         })
         .collect()
 }

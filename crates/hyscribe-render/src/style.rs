@@ -323,11 +323,11 @@ impl Parsed {
 pub fn parse_block_styles(styles: &Value, convert_vars_to_classnames: bool) -> Parsed {
     let mut parsed = Parsed::default();
     for (group, definitions) in DEFINITIONS {
-        if php_empty(get(styles, &[group])) {
+        if php_empty(styles.get_path(&[group])) {
             continue;
         }
         for definition in *definitions {
-            let Some(value) = get(styles, definition.path).filter(|v| is_valid(v)) else {
+            let Some(value) = styles.get_path(definition.path).filter(|v| is_valid(v)) else {
                 continue;
             };
             parsed.classnames.extend(classnames(value, definition));
@@ -354,17 +354,6 @@ fn existing<'p>(parsed: &'p Parsed, property: &str) -> Option<&'p Value> {
         .iter()
         .find(|(p, _)| p == property)
         .map(|(_, v)| v)
-}
-
-/// `_wp_array_get()`: the value at `path`, if every step is an array key.
-fn get<'v>(value: &'v Value, path: &[&str]) -> Option<&'v Value> {
-    path.iter().try_fold(value, |current, step| match current {
-        // Paths only hold names, so integer keys never match.
-        Value::Array(entries) => entries.iter().find_map(|(key, v)| {
-            matches!(key, Key::String(name) if name == step.as_bytes()).then_some(v)
-        }),
-        _ => None,
-    })
 }
 
 /// PHP's `empty()`.
@@ -453,7 +442,7 @@ fn declarations(value: &Value, definition: &Definition, skip_vars: bool) -> Vec<
     };
     match definition.kind {
         UrlOrValue(property) => {
-            let url = get(value, &["url"]).filter(|u| !php_empty(Some(u)));
+            let url = value.get_str("url").filter(|u| !php_empty(Some(u)));
             let css = match (url, value) {
                 (Some(url), _) => Some(Value::String(
                     [b"url('".as_slice(), &php_string(url), b"')"].concat(),

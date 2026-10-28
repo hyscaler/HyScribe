@@ -5,7 +5,7 @@
 //! block renders its saved markup with its inner blocks put back in place.
 //! Other dynamic blocks and block supports join this module one by one.
 
-use hyscribe_phpser::{Key, Value};
+use hyscribe_phpser::{Value, lookup};
 
 use crate::blocks::{Block, parse_blocks};
 use crate::theme::Theme;
@@ -46,16 +46,7 @@ struct Renderer<'a> {
 
 /// A string attribute.
 fn attr<'b>(block: &'b Block, name: &str) -> Option<&'b [u8]> {
-    block
-        .attrs
-        .as_deref()?
-        .iter()
-        .find_map(|(key, value)| match (key, value) {
-            (Key::String(key), Value::String(text)) if key == name.as_bytes() => {
-                Some(text.as_slice())
-            }
-            _ => None,
-        })
+    lookup(block.attrs.as_deref()?, name).and_then(Value::as_bytes)
 }
 
 impl Renderer<'_> {

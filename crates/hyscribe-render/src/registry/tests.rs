@@ -66,7 +66,6 @@ fn malformed_registry_data_is_skipped() {
     assert_eq!(types.len(), 2);
     assert!(types[&b"core/x".to_vec()].attributes.is_empty());
     assert_eq!(types[&b"core/y".to_vec()].supports, Value::Null);
-    assert_eq!(get(&Value::Int(1), "x"), None);
     assert!(block_type("core/paragraph").is_some());
     // `core/missing` is a real block: the stand-in for unsupported ones.
     assert!(block_type("core/missing").is_some());

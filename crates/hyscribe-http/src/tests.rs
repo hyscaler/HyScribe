@@ -14,10 +14,23 @@ fn fixture_config() -> Database {
 }
 
 async fn fixture_site(home: Option<&str>) -> Arc<Site> {
+    site_at(home, None).await
+}
+
+async fn site_at(home: Option<&str>, siteurl: Option<&str>) -> Arc<Site> {
     let db = Db::connect(&fixture_config())
         .await
         .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
-    Arc::new(Site::load(db, home.map(String::from), None).await.unwrap())
+    Arc::new(
+        Site::load(db, home.map(String::from), siteurl.map(String::from))
+            .await
+            .unwrap(),
+    )
+}
+
+/// The fixture seen from the PHP oracle's address, as its goldens are.
+async fn oracle_site() -> Arc<Site> {
+    site_at(Some("http://127.0.0.1:8081"), Some("http://127.0.0.1:8081")).await
 }
 
 struct Reply {
@@ -656,13 +669,7 @@ async fn list_filters_narrow_the_query() {
 /// against PHP's, from `reference/head/golden.sh`.
 #[tokio::test]
 async fn footers_match_php() {
-    let db = Db::connect(&fixture_config()).await.unwrap();
-    let address = "http://127.0.0.1:8081".to_string();
-    let site = Arc::new(
-        Site::load(db, Some(address.clone()), Some(address))
-            .await
-            .unwrap(),
-    );
+    let site = oracle_site().await;
     let golden = include_str!("../../hyscribe-render/tests/golden/footer.tsv");
     for line in golden.lines() {
         let (path, php) = line.split_once('\t').unwrap();
@@ -685,13 +692,7 @@ async fn footers_match_php() {
 #[tokio::test]
 #[allow(clippy::string_slice)]
 async fn heads_match_php() {
-    let db = Db::connect(&fixture_config()).await.unwrap();
-    let address = "http://127.0.0.1:8081".to_string();
-    let site = Arc::new(
-        Site::load(db, Some(address.clone()), Some(address))
-            .await
-            .unwrap(),
-    );
+    let site = oracle_site().await;
     let golden = include_str!("../../hyscribe-render/tests/golden/head.tsv");
     let mut failures = Vec::new();
     for line in golden.lines() {

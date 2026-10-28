@@ -1097,13 +1097,12 @@ impl Modules<'_> {
     /// Whether `print_head_enqueued_script_modules()` prints `id`: a
     /// queued module for the head with no queued footer dependency.
     fn in_head(&self, id: &String) -> bool {
-        let footer = |d: &String| self.module(d).is_some_and(|m| m.in_footer);
         self.queue.contains(id)
             && self.module(id).is_some_and(|m| !m.in_footer)
             && !self
                 .dependencies(std::slice::from_ref(id), false)
                 .iter()
-                .any(|d| self.queue.contains(d) && footer(d))
+                .any(|d| self.queue.contains(d) && self.module(d).is_some_and(|m| m.in_footer))
     }
 
     /// `print_enqueued_script_modules()` in the footer: the queued modules

@@ -264,11 +264,11 @@ fn oracle_site() -> Options {
     }
 }
 
-/// The template the hierarchy picks for a golden URL the fixture can
-/// render.
-fn fixture_template(path: &str) -> Option<&'static str> {
+/// What rendering the template the hierarchy picks for a golden URL the
+/// fixture can render enqueued, and its request.
+fn rendered(theme: &Theme, site: &Options, path: &str) -> Option<(Request, Assets)> {
     let query = path.strip_prefix("/?").unwrap_or_default();
-    Some(match query {
+    let template = match query {
         "" if path == "/" => "home",
         "page_id=2" => "page",
         "p=1" => "single",
@@ -277,15 +277,8 @@ fn fixture_template(path: &str) -> Option<&'static str> {
         "cat=1" | "m=2026" | "m=202610" | "m=20261027" => "archive",
         "p=999" | "cat=999" => "404",
         _ => return None,
-    })
-}
-
-/// What rendering the template of `path` enqueued, and its request.
-fn rendered(theme: &Theme, site: &Options, path: &str) -> Option<(Request, Assets)> {
-    let template = fixture_template(path)?;
-    let request = site
-        .base
-        .request(path.strip_prefix("/?").unwrap_or_default());
+    };
+    let request = site.base.request(query);
     let (_, markup) = theme.template(&[template.to_string()]).unwrap();
     let (_, assets) = crate::template::render_template(theme, site, &request, markup);
     Some((request, assets))

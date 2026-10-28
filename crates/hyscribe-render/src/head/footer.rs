@@ -12,14 +12,9 @@ use crate::site::Site;
 const EMOJI_LOADER: &str =
     include_str!("../../../../wordpress/wp-includes/js/wp-emoji-loader.min.js");
 
-/// The classic scripts blocks enqueue, as `wp_default_scripts()` registers
-/// them: handle, path, loading strategy and fetch priority.
-const SCRIPTS: [(&str, &str, &str, &str); 1] = [(
-    "comment-reply",
-    "/wp-includes/js/comment-reply.min.js",
-    "async",
-    "low",
-)];
+/// `comment-reply`, the one classic script blocks enqueue, as
+/// `wp_default_scripts()` registers it: async, at low priority.
+const COMMENT_REPLY: &str = "/wp-includes/js/comment-reply.min.js";
 
 /// What `wp_footer()` prints after the template.
 pub fn wp_footer(site: &dyn Site, assets: &Assets) -> Vec<u8> {
@@ -31,22 +26,20 @@ pub fn wp_footer(site: &dyn Site, assets: &Assets) -> Vec<u8> {
     }
     .footer();
     // wp_print_footer_scripts()
-    for handle in &assets.scripts {
-        for (name, path, strategy, fetchpriority) in SCRIPTS.iter().filter(|s| s.0 == handle) {
-            let src = esc_url_raw(format!("{siteurl}{path}?ver={}", WP_VERSION.trim()).as_bytes());
-            let id = format!("{name}-js");
-            out.extend(tag(
-                b"script",
-                &[
-                    (b"src", Some(&src)),
-                    (b"id", Some(id.as_bytes())),
-                    (strategy.as_bytes(), None),
-                    (b"data-wp-strategy", Some(strategy.as_bytes())),
-                    (b"fetchpriority", Some(fetchpriority.as_bytes())),
-                ],
-                None,
-            ));
-        }
+    if assets.scripts.iter().any(|h| h == "comment-reply") {
+        let src =
+            esc_url_raw(format!("{siteurl}{COMMENT_REPLY}?ver={}", WP_VERSION.trim()).as_bytes());
+        out.extend(tag(
+            b"script",
+            &[
+                (b"src", Some(&src)),
+                (b"id", Some(b"comment-reply-js")),
+                (b"async", None),
+                (b"data-wp-strategy", Some(b"async")),
+                (b"fetchpriority", Some(b"low")),
+            ],
+            None,
+        ));
     }
     out.extend(emoji_detection_script(&siteurl));
     out
@@ -78,14 +71,8 @@ fn emoji_detection_script(siteurl: &str) -> Vec<u8> {
     ]);
     let loader_url =
         esc_url_raw(format!("{siteurl}/wp-includes/js/wp-emoji-loader.min.js").as_bytes());
-    let loader = [
-        EMOJI_LOADER
-            .trim_end_matches([' ', '\t', '\n', '\r', '\0', '\x0b'])
-            .as_bytes(),
-        b"\n//# sourceURL=",
-        &loader_url,
-    ]
-    .concat();
+    // The file ends without the whitespace PHP's rtrim() would take off.
+    let loader = [EMOJI_LOADER.as_bytes(), b"\n//# sourceURL=", &loader_url].concat();
     let mut out = tag(
         b"script",
         &[

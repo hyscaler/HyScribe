@@ -212,12 +212,9 @@ impl Renderer<'_> {
 
     /// `render_block()` for one block.
     pub(crate) fn block(&mut self, block: &Block) -> Vec<u8> {
-        let assets = &self.assets;
-        let (styles, scripts, modules) = (
-            assets.styles.len(),
-            assets.scripts.len(),
-            assets.modules.len(),
-        );
+        let styles = self.assets.styles.len();
+        let scripts = self.assets.scripts.len();
+        let modules = self.assets.modules.len();
         let html = self.render_block(block);
         // A block that renders nothing dequeues what it and its inner
         // blocks enqueued.

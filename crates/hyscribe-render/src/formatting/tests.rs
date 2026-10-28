@@ -457,3 +457,32 @@ fn capital_p_dangit_in_titles() {
         );
     }
 }
+
+#[test]
+fn sanitize_title_like_php() {
+    // sanitize_title() in PHP WordPress 7.1.3.
+    for (title, php) in [
+        ("core/group", "core-group"),
+        ("is-layout-flow", "is-layout-flow"),
+        ("Space Between", "space-between"),
+        ("  A.b--c  ", "a-b-c"),
+        ("x&amp;y", "xy"),
+        ("<b>t</b>%41%zz", "t%41zz"),
+        ("columns-3", "columns-3"),
+        ("a_b", "a_b"),
+        ("t\tab\nc", "tabc"),
+        ("a & b;c", "a-c"),
+        ("&\n;x", "x"),
+        ("100%", "100"),
+        ("a%c2%a0b%c2%adc%e2%80%80d%c3%97e", "a-bc-dxe"),
+        ("-x-", "x"),
+        ("x&;y", "xy"),
+        ("&#8212;z", "z"),
+    ] {
+        assert_eq!(
+            String::from_utf8(sanitize_title(title.as_bytes())).unwrap(),
+            php,
+            "{title:?}"
+        );
+    }
+}

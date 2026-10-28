@@ -16,6 +16,7 @@ use hyscribe_phpser::{Value, absint, decode, isset, php_trim};
 
 use crate::blocks::Block;
 use crate::core_blocks::{Context, QueryContext, prepared};
+use crate::formatting::sanitize_title;
 use crate::post::post_class;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
@@ -89,8 +90,8 @@ impl Renderer<'_> {
             .get_path(&["layout", "columnCount"])
             .filter(|v| !v.is_empty());
         if let (true, Some(columns)) = (grid, columns) {
-            classes.extend_from_slice(b" columns-");
-            classes.extend_from_slice(&sanitize_title(&columns.to_php_string()));
+            classes.push(b' ');
+            classes.extend(sanitize_title(&[b"columns-", &columns.to_php_string()[..]].concat()));
             if attributes
                 .get_path(&["layout", "minimumColumnWidth"])
                 .is_some_and(|v| !v.is_empty())
@@ -197,14 +198,6 @@ fn ids(list: &Value) -> Vec<u64> {
         .unwrap_or_default()
         .iter()
         .filter_map(|(_, id)| u64::try_from(id.to_int()).ok().filter(|&id| id != 0))
-        .collect()
-}
-
-/// `sanitize_title()` for the integer column counts the editor saves.
-fn sanitize_title(text: &[u8]) -> Vec<u8> {
-    text.iter()
-        .filter(|b| b.is_ascii_alphanumeric())
-        .map(u8::to_ascii_lowercase)
         .collect()
 }
 

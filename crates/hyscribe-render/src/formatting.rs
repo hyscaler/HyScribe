@@ -773,6 +773,167 @@ pub fn convert_chars(text: &[u8]) -> Vec<u8> {
     out
 }
 
+/// `sanitize_title()`'s replacements in the save context, in order: what
+/// becomes a hyphen, what is removed, what becomes a hyphen again, and
+/// `&times`.
+const TITLE_REPLACEMENTS: [(&[&[u8]], &[u8]); 6] = [
+    (&[b"%c2%a0", b"%e2%80%91", b"%e2%80%93", b"%e2%80%94"], b"-"),
+    (
+        &[
+            b"&nbsp;", b"&#8209;", b"&#160;", b"&ndash;", b"&#8211;", b"&mdash;", b"&#8212;",
+        ],
+        b"-",
+    ),
+    (&[b"/"], b"-"),
+    (
+        &[
+            b"%c2%ad",
+            b"%c2%a1",
+            b"%c2%bf",
+            b"%c2%ab",
+            b"%c2%bb",
+            b"%e2%80%b9",
+            b"%e2%80%ba",
+            b"%e2%80%98",
+            b"%e2%80%99",
+            b"%e2%80%9c",
+            b"%e2%80%9d",
+            b"%e2%80%9a",
+            b"%e2%80%9b",
+            b"%e2%80%9e",
+            b"%e2%80%9f",
+            b"%e2%80%a2",
+            b"%c2%a9",
+            b"%c2%ae",
+            b"%c2%b0",
+            b"%e2%80%a6",
+            b"%e2%84%a2",
+            b"%c2%b4",
+            b"%cb%8a",
+            b"%cc%81",
+            b"%cd%81",
+            b"%cc%80",
+            b"%cc%84",
+            b"%cc%8c",
+            b"%e2%80%8b",
+            b"%e2%80%8c",
+            b"%e2%80%8d",
+            b"%e2%80%8e",
+            b"%e2%80%8f",
+            b"%e2%80%aa",
+            b"%e2%80%ab",
+            b"%e2%80%ac",
+            b"%e2%80%ad",
+            b"%e2%80%ae",
+            b"%ef%bb%bf",
+            b"%ef%bf%bc",
+        ],
+        b"",
+    ),
+    (
+        &[
+            b"%e2%80%80",
+            b"%e2%80%81",
+            b"%e2%80%82",
+            b"%e2%80%83",
+            b"%e2%80%84",
+            b"%e2%80%85",
+            b"%e2%80%86",
+            b"%e2%80%87",
+            b"%e2%80%88",
+            b"%e2%80%89",
+            b"%e2%80%8a",
+            b"%e2%80%a8",
+            b"%e2%80%a9",
+            b"%e2%80%af",
+        ],
+        b"-",
+    ),
+    (&[b"%c3%97"], b"x"),
+];
+
+/// `sanitize_title( $title )` for ASCII titles, such as the block names and
+/// layout values the layout support passes: `remove_accents()` and the
+/// UTF-8 encoding steps do nothing to those.
+pub fn sanitize_title(title: &[u8]) -> Vec<u8> {
+    let stripped = hyscribe_kses::strip_tags(title);
+    // A `%` that does not start an escaped octet goes.
+    let mut text = Vec::with_capacity(stripped.len());
+    for (i, &b) in stripped.iter().enumerate() {
+        let octet = stripped
+            .get(i + 1..i + 3)
+            .is_some_and(|hex| hex.iter().all(u8::is_ascii_hexdigit));
+        if b != b'%' || octet {
+            text.push(b.to_ascii_lowercase());
+        }
+    }
+    for (searches, with) in TITLE_REPLACEMENTS {
+        for search in searches {
+            text = replace_all(&text, search, with);
+        }
+    }
+    let mut kept = Vec::with_capacity(text.len());
+    let mut rest = &text[..];
+    for _ in 0..=text.len() {
+        let Some((&first, after)) = rest.split_first() else {
+            break;
+        };
+        // `/&.+?;/`: an entity goes, from its `&` to the next `;` on the line.
+        let entity = match after.split_first() {
+            Some((&next, tail)) if first == b'&' && next != b'\n' => tail
+                .iter()
+                .take_while(|&&b| b != b'\n')
+                .position(|&b| b == b';')
+                .map(|at| at + 3),
+            _ => None,
+        };
+        match entity {
+            Some(length) => rest = rest.get(length..).unwrap_or_default(),
+            None => {
+                match first {
+                    b'.' | b' ' => kept.push(b'-'),
+                    b'%' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' => kept.push(first),
+                    _ => {}
+                }
+                rest = after;
+            }
+        }
+    }
+    let mut collapsed: Vec<u8> = Vec::with_capacity(kept.len());
+    for b in kept {
+        if !(b == b'-' && collapsed.last() == Some(&b'-')) {
+            collapsed.push(b);
+        }
+    }
+    let start = collapsed
+        .iter()
+        .position(|&b| b != b'-')
+        .unwrap_or(collapsed.len());
+    let end = collapsed
+        .iter()
+        .rposition(|&b| b != b'-')
+        .map_or(start, |at| at + 1);
+    collapsed.get(start..end).unwrap_or_default().to_vec()
+}
+
+/// `str_replace( $search, $with, $subject )` for one search string.
+fn replace_all(subject: &[u8], search: &[u8], with: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(subject.len());
+    let mut rest = subject;
+    for _ in 0..=subject.len() {
+        match rest.windows(search.len()).position(|w| w == search) {
+            Some(at) => {
+                out.extend_from_slice(rest.get(..at).unwrap_or_default());
+                out.extend_from_slice(with);
+                rest = rest.get(at + search.len()..).unwrap_or_default();
+            }
+            None => break,
+        }
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
 /// `capital_P_dangit()` as the `the_content` filter runs it: only after a
 /// space, an opening quote, `>` or `(`.
 pub fn capital_p_dangit(text: &[u8]) -> Vec<u8> {

@@ -37,27 +37,22 @@ fn php(parsed: Parsed) -> Vec<u8> {
     ]))
 }
 
-/// The PHP oracle's cases (also run by `tests/style_golden.rs`), here so
-/// the crate's own tests cover the module.
+/// The PHP style engine on every style attribute in the theme and
+/// synthetic ones (`reference/supports/style-golden.sh`).
 #[test]
 fn every_golden_case() {
-    for line in include_str!("../../tests/golden/style-engine.tsv").lines() {
+    let golden = include_str!("../../tests/golden/style-engine.tsv");
+    for line in golden.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
-        if fields[0] == "k" {
-            let input = String::from_utf8(unhex(fields[1])).unwrap();
-            assert_eq!(
-                kebab_case(&input).into_bytes(),
-                unhex(fields[2]),
-                "{input:?}"
-            );
-        } else {
-            let style = json_decode(&unhex(fields[2])).unwrap();
-            assert_eq!(
-                php(parse_block_styles(&style, fields[1] == "1")),
-                unhex(fields[3])
-            );
-        }
+        let style = json_decode(&unhex(fields[2])).unwrap();
+        assert_eq!(
+            php(parse_block_styles(&style, fields[1] == "1")),
+            unhex(fields[3]),
+            "{}",
+            String::from_utf8_lossy(&unhex(fields[2]))
+        );
     }
+    assert!(golden.lines().count() > 300);
 }
 
 #[test]

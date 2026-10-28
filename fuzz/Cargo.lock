@@ -535,6 +535,7 @@ name = "hyscribe-render"
 version = "0.1.0"
 dependencies = [
  "hyscribe-phpser",
+ "hyscribe-theme-json",
 ]
 
 [[package]]

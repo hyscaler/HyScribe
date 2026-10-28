@@ -12,15 +12,9 @@ use crate::theme::Theme;
 
 /// Renders a template's block markup inside `.wp-site-blocks`.
 pub fn render_template(theme: &Theme, template: &[u8]) -> Vec<u8> {
-    let mut renderer = Renderer {
-        theme,
-        open_parts: Vec::new(),
-        open_patterns: Vec::new(),
-    };
-    let content = renderer.render(template);
     [
         b"<div class=\"wp-site-blocks\">".as_slice(),
-        &content,
+        &render_content(theme, template),
         b"</div>",
     ]
     .concat()

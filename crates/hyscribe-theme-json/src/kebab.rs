@@ -7,7 +7,7 @@
 //! without case), except general punctuation and spaces, which break words.
 
 /// `_wp_to_kebab_case( $text )`.
-pub(crate) fn kebab_case(text: &str) -> String {
+pub fn kebab_case(text: &str) -> String {
     let chars: Vec<char> = text.chars().filter(|&c| c != '\'').collect();
     let mut words: Vec<String> = Vec::new();
     let mut at = 0;

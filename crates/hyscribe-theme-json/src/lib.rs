@@ -31,6 +31,7 @@ mod viewport;
 use hyscribe_phpser::Value;
 
 pub use blocks::BlockType;
+pub use kebab::kebab_case;
 
 use stylesheet::{Tree, Types};
 

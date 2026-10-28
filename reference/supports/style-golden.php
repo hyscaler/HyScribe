@@ -1,28 +1,12 @@
 <?php
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Oracle for hyscribe-render's style module. Prints two kinds of lines:
-//   k<TAB>hex(input)<TAB>hex(_wp_to_kebab_case(input))
+// Oracle for hyscribe-render's style module. Prints one line per style:
 //   p<TAB>0|1<TAB>hex(style JSON)<TAB>hex(serialize(parse_block_styles()))
 // (the second field is convert_vars_to_classnames). Run through
 // style-golden.sh inside the PHP WordPress oracle.
 
 require '/var/www/html/wp-load.php';
-
-mt_srand( 20261028 );
-
-$words = array( 'accent-1', 'x-large', 'fooBar', 'FOOBar', '2nd', '1st place', '11th', '3rd4th', 'Weird Name', 'foo_bar', '--wp', 'a1b2', "\xc3\x84\xc3\x96\xc3\xbc", 'fontSize', 'XMLHttp', 'h1Title', "x\xe2\x80\x83y", "\xc3\xa9clair", '12abc', 'abc12', 'ABC12def', '', "it's", 'ABCdef', 'aBC', 'a-B-c', '__', '1ST2ND', 'x2ND', 'Ab1', '🙂ok', 'ok🙂', 'paddingTop', 'blockGap', 'minHeight', '1stA', '2NDb', '3rd_x', '4thZ', '1st_', 'aB', 'Ab', 'aBc' );
-$atoms = array( 'a', 'B', '1', '2nd', 'TH', ' ', '-', '_', "\xc3\xa9", "\xc3\x84", '🙂', 'Xy', 'z9' );
-for ( $i = 0; $i < 500; $i++ ) {
-	$w = '';
-	for ( $j = mt_rand( 1, 6 ); $j > 0; $j-- ) {
-		$w .= $atoms[ mt_rand( 0, count( $atoms ) - 1 ) ];
-	}
-	$words[] = $w;
-}
-foreach ( array_unique( $words ) as $word ) {
-	echo "k\t", bin2hex( $word ), "\t", bin2hex( _wp_to_kebab_case( $word ) ), "\n";
-}
 
 // Every style attribute in the theme, plus synthetic ones.
 $styles = array();

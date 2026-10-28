@@ -1,10 +1,10 @@
 <?php
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Oracle for the RSS2 posts feed: the home feed through feed-rss2.php, with
-// options and post 1 changed inside a transaction that is rolled back.
-// Lines are
-//   hex(json state)<TAB>hex(feed)
+// Oracle for the posts feeds: the home feed through feed-rss2.php and
+// feed-atom.php, with options and post 1 changed inside a transaction that
+// is rolled back. Lines are
+//   hex(json state)<TAB>hex(RSS2 feed)<TAB>hex(Atom feed)
 // where the state has the options, post 1's changed fields, its enclosure
 // field, its tags and its category's name.
 
@@ -29,7 +29,11 @@ $cases = array(
 	array( 'enclosure' => "http://example.test/a b.mp3\n 123 \naudio/mpeg extra" ),
 	array( 'enclosure' => "http://example.test/a.mp3\n123" ),
 	array( 'enclosure' => "javascript:alert(1)\n-5\n<b>x</b>" ),
+	array( 'enclosure' => "http://example.test/b.ogg\naudio/ogg\n 1e3" ),
+	array( 'enclosure' => "http://example.test/c.exe\n12\napplication/x-msdownload" ),
 	array( 'tags' => array( 'Feed tag', 'Uncategorized', 'Cats &amp; Dogs' ) ),
+	array( 'options' => array( 'html_type' => 'application/xhtml+xml' ) ),
+	array( 'user_url' => '' ),
 	array( 'category' => 'Cats & Dogs "quoted" &#039;single&#039; &#38; &eacute; &#x26; &#X41; &#x27; &#xZZ; &#; &#x; &#99999999999; &#xD800; &brkbar; &nosuch; lamp; &amp' ),
 );
 foreach ( $cases as $case ) {
@@ -46,6 +50,9 @@ foreach ( $cases as $case ) {
 	if ( isset( $case['tags'] ) ) {
 		wp_set_post_tags( 1, $case['tags'] );
 	}
+	if ( isset( $case['user_url'] ) ) {
+		$wpdb->update( $wpdb->users, array( 'user_url' => $case['user_url'] ), array( 'ID' => 1 ) );
+	}
 	if ( isset( $case['category'] ) ) {
 		$wpdb->update( $wpdb->terms, array( 'name' => $case['category'] ), array( 'term_id' => 1 ) );
 	}
@@ -54,12 +61,17 @@ foreach ( $cases as $case ) {
 	$GLOBALS['wp']->main( array( 'feed' => 'rss2' ) );
 	ob_start();
 	load_template( ABSPATH . WPINC . '/feed-rss2.php', false );
-	$feed = ob_get_clean();
+	$rss = ob_get_clean();
+	$_SERVER['REQUEST_URI'] = '/?feed=atom';
+	$GLOBALS['wp']->main( array( 'feed' => 'atom' ) );
+	ob_start();
+	load_template( ABSPATH . WPINC . '/feed-atom.php', false );
+	$atom = ob_get_clean();
 	$state = $case + array( 'options' => array() );
 	if ( isset( $case['tags'] ) ) {
 		$state['tags'] = wp_list_pluck( get_the_tags( 1 ), 'name' );
 	}
-	echo bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $feed ), "\n";
+	echo bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $rss ), "\t", bin2hex( $atom ), "\n";
 	foreach ( $case['options'] ?? array() as $name => $value ) {
 		remove_all_filters( "pre_option_$name" );
 	}

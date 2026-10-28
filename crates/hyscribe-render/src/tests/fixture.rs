@@ -278,6 +278,7 @@ impl Site for DefaultInstall {
                     nicename: text(&row[3]),
                     login: text(&row[1]),
                     email: text(&row[4]),
+                    url: text(&row[5]),
                     first_name: meta(b"first_name"),
                     last_name: meta(b"last_name"),
                 }

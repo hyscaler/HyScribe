@@ -111,6 +111,7 @@ fn users(rows: &Value) -> Vec<User> {
             nicename: text(row, "user_nicename"),
             login: text(row, "user_login"),
             email: text(row, "user_email"),
+            url: Vec::new(),
             first_name: text(row, "first_name"),
             last_name: text(row, "last_name"),
         })

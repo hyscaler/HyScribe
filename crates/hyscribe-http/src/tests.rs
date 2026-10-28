@@ -710,14 +710,18 @@ async fn feeds_match_php() {
         let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        let php = body.replace(
-            "https://wordpress.org/?v=7.1.3",
-            &format!(
-                "{}?v={}",
-                env!("CARGO_PKG_REPOSITORY"),
-                env!("CARGO_PKG_VERSION")
-            ),
-        );
+        let (repository, version) = (env!("CARGO_PKG_REPOSITORY"), env!("CARGO_PKG_VERSION"));
+        let php = body
+            .replace(
+                "https://wordpress.org/?v=7.1.3",
+                &format!("{repository}?v={version}"),
+            )
+            .replace(
+                "<generator uri=\"https://wordpress.org/\" version=\"7.1.3\">WordPress</generator>",
+                &format!(
+                    "<generator uri=\"{repository}\" version=\"{version}\">HyScribe</generator>"
+                ),
+            );
         assert_eq!(&ours, kept, "{path} {sent:?}");
         assert_eq!(
             String::from_utf8(bytes.to_vec()).unwrap(),
@@ -725,7 +729,26 @@ async fn feeds_match_php() {
             "{path} {sent:?}"
         );
     }
-    assert_eq!(golden.lines().count(), 31);
+    assert_eq!(golden.lines().count(), 36);
+}
+
+/// Comment feeds of searches and archives, and Atom comment feeds, are not
+/// served yet: those requests get the page.
+#[tokio::test]
+async fn some_comment_feeds_are_not_served_yet() {
+    let site = oracle_site().await;
+    for uri in [
+        "/?feed=comments-rss2&s=hello",
+        "/?feed=comments-atom",
+        "/?feed=atom&p=1",
+    ] {
+        let reply = request(&site, "GET", uri).await;
+        assert_eq!(
+            reply.headers[header::CONTENT_TYPE],
+            "text/html; charset=UTF-8",
+            "{uri}"
+        );
+    }
 }
 
 /// What every page prints after the theme's footer (`wp_footer()`)

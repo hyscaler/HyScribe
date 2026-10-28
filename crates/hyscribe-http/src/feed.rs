@@ -13,7 +13,7 @@ use hyscribe_db::DbError;
 use hyscribe_model::Comment;
 use hyscribe_phpser::md5;
 use hyscribe_render::date::{self, Zone};
-use hyscribe_render::feed::{rss2, rss2_comments};
+use hyscribe_render::feed::{atom, rss2, rss2_comments};
 
 use crate::query::absint;
 use crate::reads::Reads;
@@ -30,6 +30,8 @@ pub(crate) struct Feed {
     last_post: Option<String>,
     /// For a comment feed, its comments.
     comments: Option<Comments>,
+    /// An Atom feed rather than RSS2.
+    atom: bool,
 }
 
 /// A comment feed's comments, newest first.
@@ -47,6 +49,7 @@ pub(crate) async fn outcome(
     site: &Site,
     page: impl Future<Output = Result<Page, DbError>>,
     comments: Option<(Option<u64>, bool)>,
+    atom: bool,
 ) -> Result<Outcome, DbError> {
     let limit = absint(&site.option("posts_per_rss"));
     let listed = async {
@@ -68,6 +71,7 @@ pub(crate) async fn outcome(
                 Feed {
                     last_post,
                     comments,
+                    atom,
                 },
             )
         };
@@ -96,6 +100,7 @@ pub(crate) async fn respond(
     if not_modified(headers, &last_modified, &etag) {
         return (StatusCode::NOT_MODIFIED, cache).into_response();
     }
+    let kind = if feed.atom { "atom" } else { "rss" };
     let rendering = Arc::clone(&site);
     let Page { request, title, .. } = page;
     let body = tokio::task::spawn_blocking(move || {
@@ -111,17 +116,19 @@ pub(crate) async fn respond(
                 &comments.list,
                 last,
             ),
+            None if feed.atom => atom(&rendering.theme, &reads, &request, title.as_bytes(), last),
             None => rss2(&rendering.theme, &reads, &request, title.as_bytes(), last),
         };
         reads.finish().map(|()| made)
     })
     .await;
-    response(finished(&site, body), &charset, cache)
+    response(finished(&site, body), kind, &charset, cache)
 }
 
 /// The feed as the response, or the 500 page when rendering failed.
 fn response(
     made: Result<Vec<u8>, Rendered>,
+    kind: &str,
     charset: &str,
     cache: [(HeaderName, String); 2],
 ) -> Response {
@@ -130,7 +137,7 @@ fn response(
             StatusCode::OK,
             [(
                 header::CONTENT_TYPE,
-                format!("application/rss+xml; charset={charset}"),
+                format!("application/{kind}+xml; charset={charset}"),
             )],
             cache,
             feed,

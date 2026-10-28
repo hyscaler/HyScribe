@@ -381,19 +381,22 @@ async fn route(
     if query.contains_key("author") {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
-    // RSS2 feeds. Comment feeds of searches and archives, and other
-    // formats, are not served yet.
+    // RSS2 and Atom feeds. Atom comment feeds, comment feeds of searches
+    // and archives, and other formats are not served yet.
     let single_requested = query.contains_key("p") || query.contains_key("page_id");
     let flag = |name| query.get(name).is_some_and(|v| !v.is_empty() && v != "0");
-    let feed = query
-        .get("feed")
-        .filter(|f| matches!(f.replace("comments-", "").as_str(), "rss2" | "feed"));
-    let with_comments = feed.is_some_and(|f| f.contains("comments-")) || flag("withcomments");
+    let format = query.get("feed").map(|f| f.replace("comments-", ""));
+    let atom = format.as_deref() == Some("atom");
+    let with_comments =
+        query.get("feed").is_some_and(|f| f.contains("comments-")) || flag("withcomments");
     let comment_feed = with_comments || (single_requested && !flag("withoutcomments"));
     let archive = ["s", "cat", "m"].iter().any(|k| query.contains_key(*k));
-    if feed.is_some() && !single_requested && !(comment_feed && archive) {
+    let feed = format
+        .filter(|f| matches!(f.as_str(), "rss2" | "feed" | "atom"))
+        .filter(|_| !(comment_feed && (archive || atom)));
+    if feed.is_some() && !single_requested {
         let comments = comment_feed.then_some((None, false));
-        return feed::outcome(site, list(site, query, true), comments).await;
+        return feed::outcome(site, list(site, query, true), comments, atom).await;
     }
     let single = |name: &'static str, post_type: &'static str| {
         query
@@ -417,7 +420,7 @@ async fn route(
                                 Ok(found
                                     .map_or_else(|| missing_single(site), |p| single_page(site, p)))
                             };
-                        return feed::outcome(site, page, comments).await;
+                        return feed::outcome(site, page, comments, atom).await;
                     }
                     Some(post) if post.post_type == post_type => {
                         Outcome::Page(Box::new(single_page(site, post)))

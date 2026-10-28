@@ -137,6 +137,7 @@ fn user(row: &MySqlRow) -> Result<User, DbError> {
         nicename: c.bytes("user_nicename"),
         login: c.bytes("user_login"),
         email: c.bytes("user_email"),
+        url: c.bytes("user_url"),
         first_name: c.bytes("first_name"),
         last_name: c.bytes("last_name"),
     };
@@ -416,7 +417,7 @@ impl Db {
     /// `get_user_meta( $id, $key, true )` reads it.
     pub async fn user(&self, id: u64) -> Result<Option<User>, DbError> {
         let sql = self.prefix.sql(
-            "SELECT ID, display_name, user_nicename, user_login, user_email, \
+            "SELECT ID, display_name, user_nicename, user_login, user_email, user_url, \
              COALESCE((SELECT meta_value FROM {prefix}usermeta WHERE user_id = u.ID \
              AND meta_key = 'first_name' ORDER BY umeta_id LIMIT 1), '') AS first_name, \
              COALESCE((SELECT meta_value FROM {prefix}usermeta WHERE user_id = u.ID \

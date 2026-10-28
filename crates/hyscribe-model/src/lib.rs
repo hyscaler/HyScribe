@@ -70,6 +70,8 @@ pub struct User {
     pub login: Vec<u8>,
     /// `user_email`, read only to hash for the avatar.
     pub email: Vec<u8>,
+    /// `user_url`.
+    pub url: Vec<u8>,
     /// The `first_name` user meta, or empty.
     pub first_name: Vec<u8>,
     /// The `last_name` user meta, or empty.

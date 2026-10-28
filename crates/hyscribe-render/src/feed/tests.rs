@@ -88,33 +88,61 @@ impl Site for Changed {
         self.base.comments(post_id)
     }
     fn user(&self, id: u64) -> Option<User> {
-        self.base.user(id)
+        self.base.user(id).map(|user| User {
+            url: self.text(&["user_url"]).unwrap_or(user.url.clone()),
+            ..user
+        })
     }
 }
 
+/// The PHP feed with HyScribe's generator, as ours prints it.
+fn with_hyscribe(feed: &[u8]) -> String {
+    let (repository, version) = (env!("CARGO_PKG_REPOSITORY"), env!("CARGO_PKG_VERSION"));
+    String::from_utf8(feed.to_vec())
+        .unwrap()
+        .replace(
+            "https://wordpress.org/?v=7.1.3",
+            &format!("{repository}?v={version}"),
+        )
+        .replace(
+            "<generator uri=\"https://wordpress.org/\" version=\"7.1.3\">WordPress</generator>",
+            &format!("<generator uri=\"{repository}\" version=\"{version}\">HyScribe</generator>"),
+        )
+}
+
+/// Where `ours` parts from `php`, with some context.
+fn difference(php: &str, ours: &[u8]) -> String {
+    let ours = String::from_utf8_lossy(ours);
+    let at = ours
+        .bytes()
+        .zip(php.bytes())
+        .take_while(|(a, b)| a == b)
+        .count();
+    format!(
+        "\n  php:  {:?}\n  ours: {:?}",
+        php.get(at.saturating_sub(60)..php.len().min(at + 160))
+            .unwrap_or_default(),
+        ours.get(at.saturating_sub(60)..ours.len().min(at + 160))
+            .unwrap_or_default(),
+    )
+}
+
 /// Every case of `reference/feed/golden.sh`: the home feed with options
-/// and post 1 changed.
+/// and post 1 changed, in RSS2 and Atom.
 #[test]
 fn matches_php() {
     let theme = twentytwentyfive();
     let golden = include_str!("../../tests/golden/feed.tsv");
     let mut failures = Vec::new();
     for line in golden.lines() {
-        let (state, php) = line.split_once('\t').unwrap();
+        let fields: Vec<Vec<u8>> = line.split('\t').map(unhex).collect();
         let site = Changed {
             base: DefaultInstall {
                 home: b"http://127.0.0.1:8081".to_vec(),
             },
-            state: json_decode(&unhex(state)).unwrap(),
+            state: json_decode(&fields[0]).unwrap(),
         };
-        let php = String::from_utf8(unhex(php)).unwrap().replace(
-            "https://wordpress.org/?v=7.1.3",
-            &format!(
-                "{}?v={}",
-                env!("CARGO_PKG_REPOSITORY"),
-                env!("CARGO_PKG_VERSION")
-            ),
-        );
+        let (php, php_atom) = (with_hyscribe(&fields[1]), with_hyscribe(&fields[2]));
         let title = php
             .get(php.find("<title>").unwrap() + 7..php.find("</title>").unwrap())
             .unwrap();
@@ -123,26 +151,21 @@ fn matches_php() {
             posts: vec![site.post(1).unwrap()],
             ..site.base.request("")
         };
-        let ours = rss2(
-            &theme,
-            &site,
-            &request,
-            title.as_bytes(),
-            Some("2026-10-27 08:08:15"),
-        );
+        let last = Some("2026-10-27 08:08:15");
+        let ours = rss2(&theme, &site, &request, title.as_bytes(), last);
         if ours != php.as_bytes() {
-            let ours = String::from_utf8_lossy(&ours);
-            let at = ours
-                .bytes()
-                .zip(php.bytes())
-                .take_while(|(a, b)| a == b)
-                .count();
+            failures.push(format!("rss2 {}{}", line.len(), difference(&php, &ours)));
+        }
+        let request = Request {
+            uri: b"/?feed=atom".to_vec(),
+            ..request
+        };
+        let ours = atom(&theme, &site, &request, title.as_bytes(), last);
+        if ours != php_atom.as_bytes() {
             failures.push(format!(
-                "{state}\n  php:  {:?}\n  ours: {:?}",
-                php.get(at.saturating_sub(60)..php.len().min(at + 120))
-                    .unwrap_or_default(),
-                ours.get(at.saturating_sub(60)..ours.len().min(at + 120))
-                    .unwrap_or_default(),
+                "atom {:?}{}",
+                site.state,
+                difference(&php_atom, &ours)
             ));
         }
     }
@@ -152,7 +175,7 @@ fn matches_php() {
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(golden.lines().count(), 14);
+    assert_eq!(golden.lines().count(), 18);
 }
 
 /// A feed of no posts is built at the site's last change, if any.
@@ -214,14 +237,7 @@ fn comment_feeds_match_php() {
             },
             state: json_decode(&unhex(state)).unwrap(),
         };
-        let php = String::from_utf8(unhex(php)).unwrap().replace(
-            "https://wordpress.org/?v=7.1.3",
-            &format!(
-                "{}?v={}",
-                env!("CARGO_PKG_REPOSITORY"),
-                env!("CARGO_PKG_VERSION")
-            ),
-        );
+        let php = with_hyscribe(&unhex(php));
         let query = site.state.get_str("query").unwrap();
         let id = |name| query.get_str(name).map(|id| id.to_int() as u64);
         let (single, page) = (id("p"), id("page_id"));
@@ -259,19 +275,7 @@ fn comment_feeds_match_php() {
             Some("2026-10-27 08:08:15"),
         );
         if ours != php.as_bytes() {
-            let ours = String::from_utf8_lossy(&ours);
-            let at = ours
-                .bytes()
-                .zip(php.bytes())
-                .take_while(|(a, b)| a == b)
-                .count();
-            failures.push(format!(
-                "{state}\n  php:  {:?}\n  ours: {:?}",
-                php.get(at.saturating_sub(60)..php.len().min(at + 160))
-                    .unwrap_or_default(),
-                ours.get(at.saturating_sub(60)..ours.len().min(at + 160))
-                    .unwrap_or_default(),
-            ));
+            failures.push(format!("{state}{}", difference(&php, &ours)));
         }
     }
     assert!(

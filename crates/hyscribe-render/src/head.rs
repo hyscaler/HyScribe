@@ -229,7 +229,7 @@ impl Head<'_> {
             .contains(&true);
             open.then(|| {
                 let title = esc_attr(&strip_tags(&the_title(post)));
-                let href = post_comments_feed_link(self.site, post);
+                let href = post_comments_feed_link(self.site, post, b"rss2");
                 (format!("{name} &raquo; {title} Comments Feed"), href)
             })
         } else if let Some(Archive::Category(term)) = &self.request.archive {

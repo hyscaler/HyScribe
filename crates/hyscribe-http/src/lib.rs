@@ -21,7 +21,7 @@ use hyscribe_kses::{esc_attr, esc_html};
 use hyscribe_model::{Post, PostQuery};
 use hyscribe_phpser::parse_str;
 use hyscribe_render::date::{self, Zone};
-use hyscribe_render::head::wp_head;
+use hyscribe_render::head::{wp_footer, wp_head};
 use hyscribe_render::link;
 use hyscribe_render::post::body_class;
 use hyscribe_render::site::{Archive, Request};
@@ -257,13 +257,15 @@ fn render_page(
     let (html, assets) = render_template(&site.theme, &reads, request, template);
     let classes = body_class(&reads, request, site.theme.slug());
     let head = wp_head(&site.theme, &reads, request, &assets, title.as_bytes());
+    let footer = wp_footer(&reads, &assets);
     reads.finish()?;
     Ok((
         lossy(&head),
         format!(
-            "<body class=\"{}\">\n\n{}\n</body>",
+            "<body class=\"{}\">\n\n{}\n{}</body>",
             String::from_utf8_lossy(&classes),
-            String::from_utf8_lossy(&html)
+            String::from_utf8_lossy(&html),
+            String::from_utf8_lossy(&footer)
         ),
     ))
 }

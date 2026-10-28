@@ -11,6 +11,7 @@
 #   wordpress/wp-includes/blocks/<name>/*.min.css   core block styles (LTR)
 #   wordpress/wp-includes/css/dist/block-library/*.min.css
 #   wordpress/wp-includes/css/wp-block-template-skip-link.min.css
+#   wordpress/wp-includes/js/wp-emoji-loader.min.js the emoji detection script
 #   wordpress/wp-includes/script-modules.json      the registered script modules
 #   wordpress/VERSION
 # All GPL-2.0-or-later (ADR 0004). Re-run when the pinned version changes.
@@ -28,7 +29,8 @@ mkdir -p "$OUT"
   $(find wp-includes/blocks -name block.json) \
   $(find wp-includes/blocks -name "*.min.css" ! -name "*-rtl.min.css") \
   $(find wp-includes/css/dist/block-library -name "*.min.css" ! -name "*-rtl.min.css") \
-  wp-includes/css/wp-block-template-skip-link.min.css' | tar -xf - -C "$OUT"
+  wp-includes/css/wp-block-template-skip-link.min.css \
+  wp-includes/js/wp-emoji-loader.min.js' | tar -xf - -C "$OUT"
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-includes/version.php"; echo $wp_version, "\n";' > "$OUT/VERSION"
 # The block type registry as WordPress builds it: each core block's final
 # attributes (block.json plus those block supports register) and supports.
@@ -44,7 +46,7 @@ mkdir -p "$OUT"
 cat > "$OUT/README.md" <<'README'
 # WordPress core data
 
-Files from WordPress core that HyScribe uses as data: the core `theme.json`, every core block's `block.json`, the block types as WordPress registers them (`blocks/registry.json`) and their `block.json` in registration order (`blocks/registered.json`), the tags and attributes `wp_kses_post()` allows (`kses-post.json`), the registered script modules (`script-modules.json`), and the block library and skip link styles. Exported by `reference/wordpress/export.sh` from the pinned version in `VERSION`. Never edit by hand.
+Files from WordPress core that HyScribe uses as data: the core `theme.json`, every core block's `block.json`, the block types as WordPress registers them (`blocks/registry.json`) and their `block.json` in registration order (`blocks/registered.json`), the tags and attributes `wp_kses_post()` allows (`kses-post.json`), the registered script modules (`script-modules.json`), the block library and skip link styles, and the emoji detection script. Exported by `reference/wordpress/export.sh` from the pinned version in `VERSION`. Never edit by hand.
 
 License: GPL-2.0-or-later, as WordPress (ADR 0004).
 README

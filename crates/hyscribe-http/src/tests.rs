@@ -652,6 +652,34 @@ async fn list_filters_narrow_the_query() {
     );
 }
 
+/// What every page prints after the theme's footer (`wp_footer()`)
+/// against PHP's, from `reference/head/golden.sh`.
+#[tokio::test]
+async fn footers_match_php() {
+    let db = Db::connect(&fixture_config()).await.unwrap();
+    let address = "http://127.0.0.1:8081".to_string();
+    let site = Arc::new(
+        Site::load(db, Some(address.clone()), Some(address))
+            .await
+            .unwrap(),
+    );
+    let golden = include_str!("../../hyscribe-render/tests/golden/footer.tsv");
+    for line in golden.lines() {
+        let (path, php) = line.split_once('\t').unwrap();
+        let path = String::from_utf8(hyscribe_testkit::unhex(path)).unwrap();
+        let php = String::from_utf8(hyscribe_testkit::unhex(php)).unwrap();
+        let body = request(&site, "GET", &path).await.body;
+        let marker = "</footer>\n</div>\n";
+        let start = body.rfind(marker).unwrap() + marker.len();
+        assert_eq!(
+            body.get(start..body.rfind("</body>").unwrap()),
+            Some(php.as_str()),
+            "{path}"
+        );
+    }
+    assert_eq!(golden.lines().count(), 14);
+}
+
 /// Every page's `<head>` against PHP's, from `reference/head/golden.sh`,
 /// with HyScribe as the generator and without the tags an open question holds back.
 #[tokio::test]

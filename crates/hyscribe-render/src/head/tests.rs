@@ -253,34 +253,58 @@ fn head_links_match_php() {
     assert!(head.contains("<link rel=\"canonical\" href=\"http://127.0.0.1:8081/\" />\n<link rel='shortlink' href='http://127.0.0.1:8081/' />\n"), "{head}");
 }
 
+/// The default install seen from the oracle's address.
+fn oracle_site() -> Options {
+    Options {
+        base: crate::fixture::DefaultInstall {
+            home: b"http://127.0.0.1:8081".to_vec(),
+        },
+        options: vec![("siteurl", b"http://127.0.0.1:8081")],
+        closed: false,
+    }
+}
+
+/// The template the hierarchy picks for a golden URL the fixture can
+/// render.
+fn fixture_template(path: &str) -> Option<&'static str> {
+    let query = path.strip_prefix("/?").unwrap_or_default();
+    Some(match query {
+        "" if path == "/" => "home",
+        "page_id=2" => "page",
+        "p=1" => "single",
+        // The fixture's empty search lists nothing; the HTTP test has it.
+        "s=hello" => "search",
+        "cat=1" | "m=2026" | "m=202610" | "m=20261027" => "archive",
+        "p=999" | "cat=999" => "404",
+        _ => return None,
+    })
+}
+
+/// What rendering the template of `path` enqueued, and its request.
+fn rendered(theme: &Theme, site: &Options, path: &str) -> Option<(Request, Assets)> {
+    let template = fixture_template(path)?;
+    let request = site
+        .base
+        .request(path.strip_prefix("/?").unwrap_or_default());
+    let (_, markup) = theme.template(&[template.to_string()]).unwrap();
+    let (_, assets) = crate::template::render_template(theme, site, &request, markup);
+    Some((request, assets))
+}
+
 /// The page heads of `reference/head/golden.sh` the fixture can render,
 /// rendered here with the template the hierarchy picks; HyScribe is the
 /// generator and the tags an open question holds back are left out.
 #[test]
 fn page_heads_match_php() {
     let theme = crate::theme::twentytwentyfive();
-    let site = Options {
-        base: crate::fixture::DefaultInstall {
-            home: b"http://127.0.0.1:8081".to_vec(),
-        },
-        options: vec![("siteurl", b"http://127.0.0.1:8081")],
-        closed: false,
-    };
+    let site = oracle_site();
     let golden = include_str!("../../tests/golden/head.tsv");
     let mut checked = 0;
     for line in golden.lines() {
         let (path, php) = line.split_once('\t').unwrap();
         let path = String::from_utf8(unhex(path)).unwrap();
-        let query = path.strip_prefix("/?").unwrap_or_default();
-        let template = match query {
-            "" if path == "/" => "home",
-            "page_id=2" => "page",
-            "p=1" => "single",
-            // The fixture's empty search lists nothing; the HTTP test has it.
-            "s=hello" => "search",
-            "cat=1" | "m=2026" | "m=202610" | "m=20261027" => "archive",
-            "p=999" | "cat=999" => "404",
-            _ => continue,
+        let Some((request, assets)) = rendered(&theme, &site, &path) else {
+            continue;
         };
         let mut php = String::from_utf8(unhex(php)).unwrap();
         for prefix in [
@@ -310,12 +334,29 @@ fn page_heads_match_php() {
                     ..title_start + php.get(title_start..).unwrap().find("</title>").unwrap(),
             )
             .unwrap();
-        let request = site.base.request(query);
-        let (_, markup) = theme.template(&[template.to_string()]).unwrap();
-        let (_, assets) = crate::template::render_template(&theme, &site, &request, markup);
         let ours =
             String::from_utf8(wp_head(&theme, &site, &request, &assets, title.as_bytes())).unwrap();
         assert_eq!(ours, php, "{path}");
+        checked += 1;
+    }
+    assert_eq!(checked, 10);
+}
+
+/// The footers of `reference/head/golden.sh` the fixture can render.
+#[test]
+fn page_footers_match_php() {
+    let theme = crate::theme::twentytwentyfive();
+    let site = oracle_site();
+    let golden = include_str!("../../tests/golden/footer.tsv");
+    let mut checked = 0;
+    for line in golden.lines() {
+        let (path, php) = line.split_once('\t').unwrap();
+        let path = String::from_utf8(unhex(path)).unwrap();
+        let Some((_, assets)) = rendered(&theme, &site, &path) else {
+            continue;
+        };
+        let ours = String::from_utf8(wp_footer(&site, &assets)).unwrap();
+        assert_eq!(ours, String::from_utf8(unhex(php)).unwrap(), "{path}");
         checked += 1;
     }
     assert_eq!(checked, 10);

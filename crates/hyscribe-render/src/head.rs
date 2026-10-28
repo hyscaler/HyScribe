@@ -17,8 +17,10 @@ use crate::template::Renderer;
 use crate::theme::Theme;
 
 mod block_styles;
+mod footer;
 
 use block_styles::BLOCK_STYLES;
+pub use footer::wp_footer;
 
 /// The WordPress version the bundled assets come from.
 const WP_VERSION: &str = include_str!("../../../wordpress/VERSION");
@@ -55,12 +57,19 @@ pub struct Assets {
     pub(crate) modules: Vec<String>,
     /// The inline CSS of `block-style-variation-styles`.
     pub(crate) variations: Vec<String>,
+    /// Script handles, in the order they were enqueued.
+    pub(crate) scripts: Vec<String>,
 }
 
 impl Assets {
     /// `wp_enqueue_style( $handle )`.
     pub(crate) fn enqueue_style(&mut self, handle: &str) {
         enqueue(&mut self.styles, handle);
+    }
+
+    /// `wp_enqueue_script( $handle )`.
+    pub(crate) fn enqueue_script(&mut self, handle: &str) {
+        enqueue(&mut self.scripts, handle);
     }
 
     /// `wp_enqueue_script_module( $id )`.
@@ -1040,23 +1049,15 @@ impl Modules<'_> {
             )]);
             out.extend(tag(
                 b"script",
-                &[(b"type", b"importmap"), (b"id", b"wp-importmap")],
+                &[
+                    (b"type", Some(b"importmap")),
+                    (b"id", Some(b"wp-importmap")),
+                ],
                 Some(&[&b"\n"[..], &json_hex_tag(&map), b"\n"].concat()),
             ));
         }
         for id in self.sorted(self.queue, false) {
-            // print_script_module() prints only queued modules.
-            let Some(module) = self
-                .module(&id)
-                .filter(|m| !m.in_footer && self.queue.contains(&m.id))
-            else {
-                continue;
-            };
-            let footer_dependency = self
-                .dependencies(std::slice::from_ref(&id), false)
-                .iter()
-                .any(|d| self.queue.contains(d) && self.module(d).is_some_and(|m| m.in_footer));
-            if !footer_dependency {
+            if let Some(module) = self.module(&id).filter(|_| self.in_head(&id)) {
                 out.extend(self.script(module));
             }
         }
@@ -1093,7 +1094,35 @@ impl Modules<'_> {
         out
     }
 
-    /// `print_script_module()`, once per module.
+    /// Whether `print_head_enqueued_script_modules()` prints `id`: a
+    /// queued module for the head with no queued footer dependency.
+    fn in_head(&self, id: &String) -> bool {
+        let footer = |d: &String| self.module(d).is_some_and(|m| m.in_footer);
+        self.queue.contains(id)
+            && self.module(id).is_some_and(|m| !m.in_footer)
+            && !self
+                .dependencies(std::slice::from_ref(id), false)
+                .iter()
+                .any(|d| self.queue.contains(d) && footer(d))
+    }
+
+    /// `print_enqueued_script_modules()` in the footer: the queued modules
+    /// the head left out.
+    fn footer(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        for id in self.sorted(self.queue, false) {
+            if let Some(module) = self
+                .module(&id)
+                .filter(|_| self.queue.contains(&id) && !self.in_head(&id))
+            {
+                out.extend(self.script(module));
+            }
+        }
+        out
+    }
+
+    /// `print_script_module()`, once per module. Core block modules support
+    /// client-side navigation, which the Interactivity API marks.
     fn script(&self, module: &Module) -> Vec<u8> {
         let src = self.src(&module.id);
         if src.is_empty() {
@@ -1103,21 +1132,34 @@ impl Modules<'_> {
         let mut dependents = self.queued_dependents(&module.id);
         dependents.push(&module.id);
         let fetchpriority = self.highest(&dependents);
-        let mut attributes: Vec<(&[u8], &[u8])> =
-            vec![(b"type", b"module"), (b"src", &src), (b"id", id.as_bytes())];
+        let mut attributes: Vec<(&[u8], Option<&[u8]>)> = vec![
+            (b"type", Some(b"module")),
+            (b"src", Some(&src)),
+            (b"id", Some(id.as_bytes())),
+        ];
         if fetchpriority != "auto" {
-            attributes.push((b"fetchpriority", fetchpriority.as_bytes()));
+            attributes.push((b"fetchpriority", Some(fetchpriority.as_bytes())));
         }
         if fetchpriority != module.fetchpriority {
-            attributes.push((b"data-wp-fetchpriority", module.fetchpriority.as_bytes()));
+            attributes.push((
+                b"data-wp-fetchpriority",
+                Some(module.fetchpriority.as_bytes()),
+            ));
+        }
+        if module.id.starts_with("@wordpress/block-library") {
+            attributes.push((
+                b"data-wp-router-options",
+                Some(br#"{"loadOnClientNavigation":true}"#),
+            ));
         }
         tag(b"script", &attributes, None)
     }
 }
 
 /// A tag as `WP_HTML_Tag_Processor` builds it from `<name></name>`, with
-/// `attributes` set and, given, its text; and a newline after it.
-fn tag(name: &[u8], attributes: &[(&[u8], &[u8])], text: Option<&[u8]>) -> Vec<u8> {
+/// `attributes` set (`None` for a boolean one) and, given, its text; and a
+/// newline after it.
+fn tag(name: &[u8], attributes: &[(&[u8], Option<&[u8]>)], text: Option<&[u8]>) -> Vec<u8> {
     let markup = [
         &b"<"[..],
         name,
@@ -1131,7 +1173,10 @@ fn tag(name: &[u8], attributes: &[(&[u8], &[u8])], text: Option<&[u8]>) -> Vec<u
     let mut tags = hyscribe_html::TagProcessor::new(&markup);
     tags.next_tag(None, None);
     for (attribute, value) in attributes {
-        tags.set_attribute(attribute, value);
+        match value {
+            Some(value) => tags.set_attribute(attribute, value),
+            None => tags.set_boolean_attribute(attribute),
+        };
     }
     [tags.get_updated_html(), b"\n"].concat()
 }

@@ -212,12 +212,18 @@ impl Renderer<'_> {
 
     /// `render_block()` for one block.
     pub(crate) fn block(&mut self, block: &Block) -> Vec<u8> {
-        let (styles, modules) = (self.assets.styles.len(), self.assets.modules.len());
+        let assets = &self.assets;
+        let (styles, scripts, modules) = (
+            assets.styles.len(),
+            assets.scripts.len(),
+            assets.modules.len(),
+        );
         let html = self.render_block(block);
         // A block that renders nothing dequeues what it and its inner
         // blocks enqueued.
         if php_trim(&html).is_empty() {
             self.assets.styles.truncate(styles);
+            self.assets.scripts.truncate(scripts);
             self.assets.modules.truncate(modules);
         }
         html
@@ -255,6 +261,10 @@ impl Renderer<'_> {
             Some("core/comment-template") => self.comment_template(block),
             Some(name) => {
                 let content = self.saved_markup(block);
+                // The form's reply links move it with comment-reply.js.
+                if name == "core/post-comments-form" {
+                    self.assets.enqueue_script("comment-reply");
+                }
                 let parsed = block.attrs.as_deref().unwrap_or_default();
                 core_blocks::render(&self.context, name, parsed, &content).unwrap_or(content)
             }

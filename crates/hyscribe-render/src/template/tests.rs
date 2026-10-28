@@ -194,19 +194,8 @@ fn saved_markup_keeps_inner_blocks_in_place() {
         inner_html: Vec::new(),
         inner_content: vec![None, Some(b"x".to_vec())],
     };
-    let mut renderer = Renderer {
-        context: Context {
-            theme: &theme,
-            site: &DefaultInstall,
-            request: &Request::default(),
-            post_id: None,
-            query: None,
-        },
-        open_parts: Vec::new(),
-        open_patterns: Vec::new(),
-        open_posts: Vec::new(),
-        parent_layout: None,
-    };
+    let request = Request::default();
+    let mut renderer = Renderer::new(&theme, &DefaultInstall, &request);
     assert_eq!(renderer.block(&odd), b"x");
     odd.attrs = None;
     assert_eq!(attr(&odd, "slug"), None);

@@ -124,9 +124,59 @@ pub fn lookup<'a>(entries: &'a [(Key, Value)], key: &str) -> Option<&'a Value> {
         .map(|(_, v)| v)
 }
 
+/// `_wp_array_set( $value, $path, $new )`: missing or scalar steps become
+/// arrays; does nothing unless `value` is an array.
+pub fn wp_array_set(value: &mut Value, path: &[&str], new: Value) {
+    let (Value::Array(entries), Some((first, rest))) = (value, path.split_first()) else {
+        return;
+    };
+    let wanted = Key::from_php_string(first.as_bytes().to_vec());
+    let place = |child: &mut Value, new: Value| {
+        if rest.is_empty() {
+            *child = new;
+        } else {
+            if !matches!(child, Value::Array(_)) {
+                *child = Value::Array(Vec::new());
+            }
+            wp_array_set(child, rest, new);
+        }
+    };
+    match entries.iter_mut().find(|(k, _)| *k == wanted) {
+        Some((_, child)) => place(child, new),
+        None => {
+            let mut child = Value::Array(Vec::new());
+            place(&mut child, new);
+            entries.push((wanted, child));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wp_array_set_like_php() {
+        let key = |name: &str| Key::String(name.as_bytes().to_vec());
+        let mut value = Value::Array(vec![(key("a"), Value::Int(1))]);
+        wp_array_set(&mut value, &["a"], Value::Int(2));
+        wp_array_set(&mut value, &["b", "c"], Value::Int(3));
+        wp_array_set(&mut value, &["a", "d"], Value::Int(4));
+        wp_array_set(&mut value, &["5"], Value::Null);
+        wp_array_set(&mut value, &[], Value::Null);
+        let nested = |name, item| Value::Array(vec![(key(name), Value::Int(item))]);
+        assert_eq!(
+            value,
+            Value::Array(vec![
+                (key("a"), nested("d", 4)),
+                (key("b"), nested("c", 3)),
+                (Key::Int(5), Value::Null),
+            ])
+        );
+        let mut scalar = Value::Int(1);
+        wp_array_set(&mut scalar, &["a"], Value::Null);
+        assert_eq!(scalar, Value::Int(1));
+    }
 
     fn array() -> Value {
         Value::Array(vec![

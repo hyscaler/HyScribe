@@ -5,7 +5,6 @@ use hyscribe_phpser::json_decode;
 use hyscribe_testkit::unhex;
 
 use super::*;
-use crate::core_blocks::Context;
 use crate::site::{Request, Site};
 use crate::template::render_content;
 use crate::theme::twentytwentyfive;
@@ -103,19 +102,7 @@ fn post_content_matches_php() {
             "teaser" => {
                 let (state, row, php) = (field(), field(), field());
                 let (site, request) = case(&state, &row);
-                let renderer = Renderer {
-                    context: Context {
-                        theme: &theme,
-                        site: &site,
-                        request: &request,
-                        post_id: request.post,
-                        query: None,
-                    },
-                    open_parts: Vec::new(),
-                    open_patterns: Vec::new(),
-                    open_posts: Vec::new(),
-                    parent_layout: None,
-                };
+                let renderer = Renderer::new(&theme, &site, &request);
                 (get_the_content(&renderer, &site.post), php, row)
             }
             _ => continue,

@@ -14,6 +14,7 @@ pub mod formatting;
 pub mod kses;
 mod layout;
 pub mod link;
+mod navigation;
 pub mod post;
 mod query_loop;
 pub mod registry;

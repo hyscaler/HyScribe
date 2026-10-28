@@ -63,32 +63,7 @@ pub(crate) fn get_mut<'a>(value: &'a mut Value, path: &[&str]) -> Option<&'a mut
     })
 }
 
-/// `_wp_array_set( $value, $path, $new )`: missing or scalar steps become
-/// arrays; does nothing unless `value` is an array.
-pub(crate) fn set(value: &mut Value, path: &[&str], new: Value) {
-    let (Value::Array(entries), Some((first, rest))) = (value, path.split_first()) else {
-        return;
-    };
-    let wanted = key(first);
-    let place = |child: &mut Value, new: Value| {
-        if rest.is_empty() {
-            *child = new;
-        } else {
-            if !matches!(child, Value::Array(_)) {
-                *child = array();
-            }
-            set(child, rest, new);
-        }
-    };
-    match entries.iter_mut().find(|(k, _)| *k == wanted) {
-        Some((_, child)) => place(child, new),
-        None => {
-            let mut child = array();
-            place(&mut child, new);
-            entries.push((wanted, child));
-        }
-    }
-}
+pub(crate) use hyscribe_phpser::wp_array_set as set;
 
 /// `unset( $value[a][b]... )`.
 pub(crate) fn unset(value: &mut Value, path: &[&str]) {

@@ -5,6 +5,8 @@
 //! blocks run their render callbacks, and the others render their saved
 //! markup with their inner blocks put back in place.
 
+use std::collections::HashMap;
+
 use hyscribe_html::{Attribute, TagProcessor};
 use hyscribe_kses::esc_url;
 use hyscribe_phpser::{Value, lookup};
@@ -109,20 +111,7 @@ pub fn render_content(
     request: &Request,
     content: &[u8],
 ) -> Vec<u8> {
-    Renderer {
-        context: Context {
-            theme,
-            site,
-            request,
-            post_id: request.post,
-            query: None,
-        },
-        open_parts: Vec::new(),
-        open_patterns: Vec::new(),
-        open_posts: Vec::new(),
-        parent_layout: None,
-    }
-    .render(content)
+    Renderer::new(theme, site, request).render(content)
 }
 
 pub(crate) struct Renderer<'a> {
@@ -136,11 +125,46 @@ pub(crate) struct Renderer<'a> {
     /// The `layout` attribute of the block being rendered, `parentLayout`
     /// to its inner blocks.
     pub(crate) parent_layout: Option<Value>,
+    /// The last number `wp_unique_id()` gave out.
+    pub(crate) unique_id: u64,
+    /// How often each navigation name has been seen, for unique labels.
+    pub(crate) navigation_names: HashMap<Vec<u8>, u64>,
+    /// The attributes of the navigation block being rendered, its inner
+    /// blocks' context.
+    pub(crate) navigation: Option<Value>,
 }
 
 /// A string attribute.
 fn attr<'b>(block: &'b Block, name: &str) -> Option<&'b [u8]> {
     lookup(block.attrs.as_deref()?, name).and_then(Value::as_bytes)
+}
+
+impl<'a> Renderer<'a> {
+    /// A renderer for one request, with the main query's post as context.
+    pub(crate) fn new(theme: &'a Theme, site: &'a dyn Site, request: &'a Request) -> Renderer<'a> {
+        Renderer {
+            context: Context {
+                theme,
+                site,
+                request,
+                post_id: request.post,
+                query: None,
+            },
+            open_parts: Vec::new(),
+            open_patterns: Vec::new(),
+            open_posts: Vec::new(),
+            parent_layout: None,
+            unique_id: 0,
+            navigation_names: HashMap::new(),
+            navigation: None,
+        }
+    }
+
+    /// `wp_unique_id( $prefix )`.
+    pub(crate) fn unique_id(&mut self, prefix: &str) -> Vec<u8> {
+        self.unique_id += 1;
+        format!("{prefix}{}", self.unique_id).into_bytes()
+    }
 }
 
 impl Renderer<'_> {
@@ -154,7 +178,7 @@ impl Renderer<'_> {
     }
 
     /// `render_block()` for one block.
-    fn block(&mut self, block: &Block) -> Vec<u8> {
+    pub(crate) fn block(&mut self, block: &Block) -> Vec<u8> {
         // Inner blocks get this block's layout as `parentLayout`.
         let own = block
             .attrs
@@ -168,6 +192,8 @@ impl Renderer<'_> {
             Some("core/query") => self.query(block),
             Some("core/post-template") => self.post_template(block),
             Some("core/post-content") => self.post_content(block),
+            Some("core/navigation") => self.navigation(block),
+            Some("core/navigation-link") => self.navigation_link(block),
             Some(name) => {
                 let content = self.saved_markup(block);
                 let parsed = block.attrs.as_deref().unwrap_or_default();

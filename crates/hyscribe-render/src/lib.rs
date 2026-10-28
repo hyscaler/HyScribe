@@ -5,6 +5,7 @@
 
 pub mod blocks;
 mod core_blocks;
+pub mod date;
 pub mod formatting;
 pub mod registry;
 pub mod site;

@@ -112,4 +112,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "date_format"
+path = "fuzz_targets/date_format.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

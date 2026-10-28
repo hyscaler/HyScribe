@@ -19,11 +19,12 @@ use axum::response::{IntoResponse, Response};
 use hyscribe_db::{Db, DbError, PostQuery};
 use hyscribe_model::Post;
 use hyscribe_render::blocks::{parse_blocks, render};
+use hyscribe_render::date::{self, Zone};
 use tokio::net::TcpListener;
 
 pub mod query;
 
-use query::{absint, date_parts, other_args, php_date, search_terms};
+use query::{absint, date_parts, other_args, search_terms};
 
 /// Headers on every response (docs/SECURITY_MODEL.md, Web).
 const SECURITY_HEADERS: [(&str, &str); 3] = [
@@ -58,6 +59,13 @@ impl Site {
 
     fn option(&self, name: &str) -> String {
         String::from_utf8_lossy(self.options.get(name).map_or(&[][..], Vec::as_slice)).into_owned()
+    }
+
+    /// The site's time zone. Named zones other than UTC need a time zone
+    /// database; until then their dates format as UTC.
+    fn zone(&self) -> Zone {
+        let option = |name| self.options.get(name).map_or(&[][..], Vec::as_slice);
+        date::site_zone(option("timezone_string"), option("gmt_offset")).unwrap_or(Zone::Utc)
     }
 
     /// The site title, as `wp_get_document_title()` prints it.
@@ -316,7 +324,7 @@ async fn list(site: &Site, query: &HashMap<String, String>) -> Result<Page, DbEr
         } else {
             "Y".to_string()
         };
-        Some(php_date(&format, first_date))
+        Some(date::format(&format, first_date, site.zone()))
     } else {
         None
     };

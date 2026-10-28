@@ -308,7 +308,14 @@ async fn archives_and_searches_match_wordpress_titles() {
         assert_eq!(reply.status, StatusCode::OK, "{m}");
         assert_eq!(
             title(&reply.body),
-            format!("{} &#8211; {name}", php_date(format, &hello.date))
+            format!(
+                "{} &#8211; {name}",
+                hyscribe_render::date::format(
+                    format,
+                    &hello.date,
+                    hyscribe_render::date::Zone::Utc
+                )
+            )
         );
     }
     // The search results list pages too; the home page does not.
@@ -338,18 +345,6 @@ fn date_parts_follow_wp_query() {
     assert_eq!(date_parts("12"), (Some(12), None, None));
     assert_eq!(date_parts("abc"), (None, None, None));
     assert_eq!(date_parts("20261"), (Some(2026), None, None));
-}
-
-#[test]
-fn php_date_formats() {
-    let stored = "2026-03-07 08:09:10";
-    assert_eq!(php_date("F j, Y", stored), "March 7, 2026");
-    assert_eq!(php_date("M d y, n/m", stored), "Mar 07 26, 3/03");
-    assert_eq!(php_date("\\Y\\e\\a\\r Y", stored), "Year 2026");
-    assert_eq!(php_date("F", "2026-12-01"), "December");
-    assert_eq!(php_date("F|M|j", ""), "||0");
-    // `n` is a format character, as in PHP.
-    assert_eq!(php_date("trailing\\", stored), "traili3g");
 }
 
 #[test]

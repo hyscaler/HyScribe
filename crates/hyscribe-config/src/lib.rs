@@ -131,6 +131,8 @@ pub struct Config {
     pub uploads_dir: Option<PathBuf>,
     /// `WP_HOME`: overrides the `home` option, as the constant does.
     pub home_url: Option<String>,
+    /// `WP_SITEURL`: overrides the `siteurl` option, as the constant does.
+    pub site_url: Option<String>,
     /// Keys and salts by name, as far as they are set.
     pub salts: Vec<(&'static str, Secret)>,
 }
@@ -258,6 +260,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         mode,
         uploads_dir: get("UPLOADS_DIR").map(PathBuf::from),
         home_url: get("WP_HOME").map(String::from),
+        site_url: get("WP_SITEURL").map(String::from),
         salts,
     })
 }

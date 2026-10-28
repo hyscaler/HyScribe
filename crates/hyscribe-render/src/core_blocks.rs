@@ -6,7 +6,7 @@
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url, esc_url_protocols};
 use hyscribe_model::{Comment, Post};
-use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim, urlencode};
+use hyscribe_phpser::{Key, Value, add_query_arg, is_empty_string, isset, php_trim, urlencode};
 
 use crate::autop::wpautop;
 use crate::balance::force_balance_tags;
@@ -87,6 +87,7 @@ pub(crate) fn render(
         "core/comments" | "core/post-comments" => comments,
         "core/comments-title" => comments_title,
         "core/post-author-name" => post_author_name,
+        "core/post-comments-form" => comment_form::post_comments_form,
         "core/post-date" => post_date,
         "core/post-navigation-link" => post_navigation_link,
         "core/post-terms" => post_terms,
@@ -146,6 +147,11 @@ impl Context<'_> {
         let option = |name| self.site.option(name).unwrap_or_default();
         let front_page = link::front_page(&option("show_on_front"), &option("page_on_front"));
         link::permalink(&self.site.home_url(), front_page, post)
+    }
+
+    /// `site_url( $path )`.
+    fn site_url(&self, path: &[u8]) -> Vec<u8> {
+        [&self.site.option("siteurl").unwrap_or_default()[..], path].concat()
     }
 
     /// The host, with `:port`, of `wp_upload_dir()`'s URL, which lives
@@ -346,7 +352,7 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let Some(post) = context
         .site
         .post(comment.post_id)
-        .filter(|post| post.comment_status == "open")
+        .filter(|post| comments_open(context, post))
     else {
         return Vec::new();
     };
@@ -387,15 +393,12 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     } else {
         // wp_login_url( get_permalink() ), for the global post: the main query's
         let current = context.request.post.and_then(|id| context.site.post(id));
-        let mut login = [&option("siteurl")[..], b"/wp-login.php"].concat();
-        if let Some(post) = current {
-            login = [
-                &login[..],
-                b"?redirect_to=",
-                &urlencode(&context.permalink(&post)),
-            ]
-            .concat();
-        }
+        let login = wp_login_url(
+            context,
+            &current
+                .map(|post| context.permalink(&post))
+                .unwrap_or_default(),
+        );
         [
             &b"<a rel=\"nofollow\" class=\"comment-reply-login\" href=\""[..],
             &esc_url(&login),
@@ -415,6 +418,32 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     .concat()
 }
 
+/// `comments_open( $post )`, with `_close_comments_for_old_post()`.
+fn comments_open(context: &Context<'_>, post: &Post) -> bool {
+    let option = |name| context.site.option(name).unwrap_or_default();
+    if post.comment_status != "open" {
+        return false;
+    }
+    if is_empty_string(&option("close_comments_for_old_posts")) {
+        return true;
+    }
+    let days = Value::String(option("close_comments_days_old")).to_int();
+    if days == 0 || post.post_type != "post" || post.date_gmt == "0000-00-00 00:00:00" {
+        return true;
+    }
+    let age = context.request.now - date::stored_unix(&post.date_gmt, Zone::Utc);
+    age <= days.saturating_mul(86_400)
+}
+
+/// `wp_login_url( $redirect )`.
+fn wp_login_url(context: &Context<'_>, redirect: &[u8]) -> Vec<u8> {
+    let login = context.site_url(b"/wp-login.php");
+    if is_empty_string(redirect) {
+        return login;
+    }
+    add_query_arg(&[(b"redirect_to", Some(&urlencode(redirect)))], &login)
+}
+
 /// `render_block_core_comments()`: the saved markup, where the post takes
 /// comments or has some. The legacy form, which runs `comments_template()`,
 /// is not ported and renders nothing.
@@ -425,7 +454,7 @@ fn comments(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     // comments_open() and get_comments_number()
     let open = post
         .as_ref()
-        .is_some_and(|post| post.comment_status == "open");
+        .is_some_and(|post| comments_open(context, post));
     let count = post.as_ref().map_or(0, |post| post.comment_count);
     if !open && count == 0 {
         return Vec::new();
@@ -1199,6 +1228,7 @@ fn site_tagline(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 }
 
 mod avatar;
+mod comment_form;
 
 #[cfg(test)]
 mod tests;

@@ -3,6 +3,7 @@
 //! What dynamic blocks read from the site and the request (ADR 0009).
 
 use hyscribe_model::{Comment, Post, PostQuery, Term, User};
+use hyscribe_phpser::Value;
 
 /// The site's data, as blocks read it while rendering.
 pub trait Site {
@@ -28,6 +29,12 @@ pub trait Site {
     /// comment data have none.
     fn comments(&self, _post_id: u64) -> Vec<Comment> {
         vec![]
+    }
+
+    /// `get_comment( $id )` when that comment is approved, of any type.
+    /// Sites without comment data have none.
+    fn comment(&self, _id: u64) -> Option<Comment> {
+        None
     }
 
     /// `get_userdata( $id )`. Sites without user data have none.
@@ -77,6 +84,10 @@ pub struct Request {
     pub not_found: bool,
     /// The `page` or `paged` query var, 0 or 1 on the first page.
     pub page: u64,
+    /// `$_SERVER['REQUEST_URI']`: the path and query as requested.
+    pub uri: Vec<u8>,
+    /// `$_GET`: the query as `parse_str()` reads it.
+    pub get: Value,
 }
 
 /// The archives the default install has.

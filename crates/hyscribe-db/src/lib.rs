@@ -53,6 +53,17 @@ fn db_error(err: sqlx::Error) -> DbError {
     DbError(err.to_string())
 }
 
+/// The `{prefix}comments` columns [`Comment`] reads, as a literal for
+/// `concat!`.
+macro_rules! comment_columns {
+    () => {
+        "comment_ID, comment_post_ID, comment_author, comment_author_email, comment_author_url, \
+         CAST(comment_date AS CHAR) AS comment_date, \
+         CAST(comment_date_gmt AS CHAR) AS comment_date_gmt, comment_content, comment_type, \
+         comment_parent, user_id"
+    };
+}
+
 /// The `{prefix}posts` columns [`Post`] reads, as a literal for `concat!`.
 macro_rules! post_columns {
     () => {
@@ -329,20 +340,34 @@ impl Db {
     /// A post's approved comments, as `WP_Comment_Query` orders them for
     /// the comment template: oldest first, then by ID.
     pub async fn comments(&self, post_id: u64) -> Result<Vec<Comment>, DbError> {
-        let sql = self.prefix.sql(
-            "SELECT comment_ID, comment_post_ID, comment_author, comment_author_email, \
-             comment_author_url, CAST(comment_date AS CHAR) AS comment_date, \
-             CAST(comment_date_gmt AS CHAR) AS comment_date_gmt, comment_content, comment_type, \
-             comment_parent, user_id FROM {prefix}comments \
+        let sql = self.prefix.sql(concat!(
+            "SELECT ",
+            comment_columns!(),
+            " FROM {prefix}comments \
              WHERE comment_post_ID = ? AND comment_approved = '1' AND comment_type != 'note' \
-             ORDER BY comment_date_gmt ASC, comment_ID ASC",
-        );
+             ORDER BY comment_date_gmt ASC, comment_ID ASC"
+        ));
         let rows = sqlx::query(sql)
             .bind(post_id)
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
         rows.iter().map(comment).collect()
+    }
+
+    /// One approved comment by ID, of any type.
+    pub async fn comment(&self, id: u64) -> Result<Option<Comment>, DbError> {
+        let sql = self.prefix.sql(concat!(
+            "SELECT ",
+            comment_columns!(),
+            " FROM {prefix}comments WHERE comment_ID = ? AND comment_approved = '1'"
+        ));
+        let row = sqlx::query(sql)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.as_ref().map(comment).transpose()
     }
 
     /// One user by ID, with the first value of each name meta as

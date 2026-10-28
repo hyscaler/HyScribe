@@ -14,6 +14,8 @@ remove_filter( 'render_block_data', 'wp_render_elements_support_styles', 10 );
 
 global $wpdb;
 $wpdb->query( 'START TRANSACTION' );
+$_SERVER['REQUEST_URI'] = '/';
+$_GET                   = array();
 
 $insert = function ( $fields ) {
 	return wp_insert_comment(
@@ -36,11 +38,11 @@ foreach ( array( 'B', 'C', 'D', 'E', 'F', 'G' ) as $n => $name ) {
 }
 $insert( array( 'comment_author' => 'H same date' ) );
 $i = $insert( array( 'comment_author' => 'I unapproved', 'comment_approved' => 0, 'comment_date_gmt' => '2026-10-27 08:30:00' ) );
-$insert( array( 'comment_author' => 'J spam', 'comment_approved' => 'spam', 'comment_parent' => $a ) );
+$spam = $insert( array( 'comment_author' => 'J spam', 'comment_approved' => 'spam', 'comment_parent' => $a ) );
 $insert( array( 'comment_author' => 'K orphan', 'comment_parent' => $i ) );
 $insert( array( 'comment_author' => 'L pingback', 'comment_type' => 'pingback', 'comment_date_gmt' => '2026-10-27 07:00:00' ) );
 $insert( array( 'comment_author' => 'M author', 'user_id' => 1, 'comment_date_gmt' => '2026-10-27 10:00:00' ) );
-$insert( array( 'comment_author' => 'N note', 'comment_type' => 'note' ) );
+$note = $insert( array( 'comment_author' => 'N note', 'comment_type' => 'note' ) );
 $insert( array( 'comment_author' => 'O trash', 'comment_approved' => 'trash' ) );
 $insert( array( 'comment_author' => 'P second reply', 'comment_parent' => $a, 'comment_date_gmt' => '2026-10-27 09:05:00' ) );
 $reader = wp_insert_user( array( 'user_login' => 'reader', 'user_pass' => 'x', 'user_nicename' => 'Reader Two!', 'display_name' => 'Reader' ) );
@@ -57,7 +59,7 @@ foreach ( array(
 ) as $n => list( $author, $user_id, $url ) ) {
 	$insert( array( 'comment_author' => $author, 'user_id' => $user_id, 'comment_author_url' => $url, 'comment_date' => "2026-10-2$n 1$n:3$n:00", 'comment_date_gmt' => "2026-10-27 13:0$n:00" ) );
 }
-$insert( array( 'comment_post_ID' => 2, 'comment_author' => 'On the front page' ) );
+$front = $insert( array( 'comment_post_ID' => 2, 'comment_author' => 'On the front page' ) );
 foreach ( array(
 	"See http://example.test/a_(b) and www.example.org, or mail me@example.test :) \"quoted\" -- wordpress\n\nSecond <b>para\nline",
 	'0',
@@ -118,6 +120,7 @@ $option_sets = array(
 	array( 'avatar_default' => 'https://example.test/a b.png?x=1', 'avatar_rating' => 'X' ),
 	array( 'avatar_default' => 'mysteryman', 'show_avatars' => '' ),
 	array( 'avatar_default' => '', 'avatar_rating' => '0' ),
+	array( 'close_comments_for_old_posts' => '1', 'close_comments_days_old' => '1' ),
 );
 $markups = array(
 	'<!-- wp:comment-template --><p>c</p><!-- /wp:comment-template -->',
@@ -140,13 +143,14 @@ $markups = array(
 	'<!-- wp:comment-template --><!-- wp:comment-content /--><!-- wp:comment-content {"textAlign":"right","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- /wp:comment-template -->',
 	'<!-- wp:comment-template --><!-- wp:comment-date /--><!-- wp:comment-date {"format":"Y-m-d H:i","isLink":true} /--><!-- wp:comment-date {"format":"human-diff","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- wp:comment-author-name /--><!-- wp:comment-author-name {"isLink":true,"linkTarget":"_blank","textAlign":"right"} /--><!-- wp:comment-author-name {"isLink":true,"linkTarget":""} /--><!-- wp:comment-edit-link /--><!-- wp:comment-reply-link /--><!-- wp:comment-reply-link {"textAlign":"center","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- /wp:comment-template -->',
 );
+$option_names = array( 'thread_comments', 'thread_comments_depth', 'comment_order', 'comment_registration', 'date_format', 'show_on_front', 'page_on_front', 'use_smilies', 'avatar_default', 'avatar_rating', 'show_avatars', 'close_comments_for_old_posts', 'close_comments_days_old', 'require_name_email', 'show_comments_cookies_opt_in' );
 $reset = function () {
 	$GLOBALS['comment_alt']        = 0;
 	$GLOBALS['comment_depth']      = 0;
 	$GLOBALS['comment_thread_alt'] = 0;
 };
 foreach ( $option_sets as $options ) {
-	foreach ( array( 'thread_comments', 'thread_comments_depth', 'comment_order', 'comment_registration', 'date_format', 'show_on_front', 'page_on_front', 'use_smilies', 'avatar_default', 'avatar_rating', 'show_avatars' ) as $name ) {
+	foreach ( $option_names as $name ) {
 		remove_all_filters( "pre_option_$name" );
 	}
 	foreach ( $options as $name => $value ) {
@@ -167,7 +171,7 @@ foreach ( $option_sets as $options ) {
 
 // In a singular template's loop the first three images are not lazy, and
 // the first large one takes the high priority.
-foreach ( array( 'thread_comments', 'thread_comments_depth', 'comment_order', 'comment_registration', 'date_format', 'show_on_front', 'page_on_front', 'use_smilies', 'avatar_default', 'avatar_rating', 'show_avatars' ) as $name ) {
+foreach ( $option_names as $name ) {
 	remove_all_filters( "pre_option_$name" );
 }
 $GLOBALS['wp_query']->in_the_loop = true;
@@ -182,8 +186,68 @@ foreach ( array( current( preg_grep( '/^<!-- wp:comment-template --><!-- wp:avat
 }
 $GLOBALS['wp_query']->in_the_loop = false;
 
+// The comment form, by options and by the request's replytocom.
+$form_markups = array(
+	'<!-- wp:post-comments-form /-->',
+	'<!-- wp:post-comments-form {"textAlign":"center","style":{"elements":{"link":{"color":{"text":"red"}}}}} /-->',
+);
+$form = function ( $options, $post_id, $markup, $uri, $global = 0 ) use ( $option_names, $rows, $users ) {
+	foreach ( $option_names as $name ) {
+		remove_all_filters( "pre_option_$name" );
+	}
+	foreach ( $options as $name => $value ) {
+		add_filter( "pre_option_$name", static fn() => $value );
+	}
+	$_SERVER['REQUEST_URI'] = $uri;
+	$_GET                   = array();
+	parse_str( (string) parse_url( $uri, PHP_URL_QUERY ), $_GET );
+	$GLOBALS['post'] = $global ? get_post( $global ) : null;
+	$context         = $post_id ? array( 'postId' => $post_id ) : array();
+	$html            = ( new WP_Block( parse_blocks( $markup )[0], $context ) )->render();
+	$html           .= ( new WP_Block( parse_blocks( $markup )[0], $context ) )->render();
+	$state           = array( 'options' => $options, 'post' => $post_id, 'comments' => $rows, 'users' => $users, 'password' => false, 'closed' => false, 'now' => time(), 'uri' => $uri ) + ( $global ? array( 'global' => $global ) : array() );
+	$GLOBALS['post'] = null;
+	echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html ), "\n";
+};
+foreach ( array(
+	array(),
+	array( 'require_name_email' => '0' ),
+	array( 'show_comments_cookies_opt_in' => '0' ),
+	array( 'comment_registration' => '1' ),
+	array( 'thread_comments' => '0' ),
+	array( 'close_comments_for_old_posts' => '1', 'close_comments_days_old' => '1' ),
+	array( 'close_comments_for_old_posts' => '1', 'close_comments_days_old' => '0' ),
+	array( 'close_comments_for_old_posts' => '1', 'close_comments_days_old' => '100000' ),
+	array( 'close_comments_for_old_posts' => '1', 'close_comments_days_old' => '20000' ),
+	array( 'close_comments_for_old_posts' => '', 'close_comments_days_old' => '1' ),
+) as $options ) {
+	foreach ( $form_markups as $markup ) {
+		foreach ( array( 1, 2, 0, 999 ) as $post_id ) {
+			$form( $options, $post_id, $markup, '/?p=1&replytocom=1' );
+		}
+	}
+}
+foreach ( array(
+	'/?p=1', "/?p=1&replytocom=$front", "/?p=1&replytocom=$i", "/?p=1&replytocom=$spam", "/?p=1&replytocom=$note", '/?p=1&replytocom=abc',
+	'/?p=1&replytocom[]=1', '/?p=1&replytocom=1&unapproved=3&moderation-hash=x', '/?p=1&replytocom=+1', '/?p=1&replytocom=1e0', '/x/?a=b%20c&replytocom=1&a[]=1',
+	'/?replytocom=1', '/', '', '/?p=1&replytocom=0', '/?p=1&replytocom=-1',
+) as $uri ) {
+	foreach ( array( array(), array( 'thread_comments' => '0' ) ) as $options ) {
+		$form( $options, 1, $form_markups[0], $uri );
+	}
+}
+// The cancel link shows when the global post has the reply.
+foreach ( array( 1, 2 ) as $global ) {
+	$form( array(), 1, $form_markups[0], '/?p=1&replytocom=1', $global );
+}
+foreach ( $option_names as $name ) {
+	remove_all_filters( "pre_option_$name" );
+}
+$_SERVER['REQUEST_URI'] = '/';
+$_GET                   = array();
+
 // With comments closed there is no reply link.
-foreach ( array( 'thread_comments', 'thread_comments_depth', 'comment_order', 'comment_registration', 'date_format', 'show_on_front', 'page_on_front', 'use_smilies', 'avatar_default', 'avatar_rating', 'show_avatars' ) as $name ) {
+foreach ( $option_names as $name ) {
 	remove_all_filters( "pre_option_$name" );
 }
 // Logged-out reply links go to the login page, back to the global post.
@@ -215,6 +279,16 @@ $state = array( 'options' => array(), 'post' => 1, 'comments' => $rows, 'users' 
 $html  = ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
 $html .= ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
 echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html ), "\n";
+
+// Nor a comment form, though comments are open.
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'open' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$markup = $form_markups[0];
+$state  = array( 'options' => array(), 'post' => 1, 'comments' => $rows, 'users' => $users, 'password' => true, 'closed' => false, 'now' => time() );
+$html   = ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html . $html ), "\n";
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'closed' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
 
 // A post template that inherits the main query runs its loop, and only
 // there are images counted; a query of its own runs after it has ended.

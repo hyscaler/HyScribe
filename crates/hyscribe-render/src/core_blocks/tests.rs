@@ -570,3 +570,40 @@ fn avatar_defaults_without_options() {
          width='96' loading='lazy' decoding='async'/></div>"
     );
 }
+
+/// A site without comment data has no comment to reply to, even for a
+/// post numbered 0, so the form keeps its plain title and a zero parent.
+#[test]
+fn comment_form_without_comment_data() {
+    let theme = twentytwentyfive();
+    let site = Fixture {
+        post: Some(Post {
+            id: 0,
+            status: "publish".into(),
+            post_type: "post".into(),
+            comment_status: "open".into(),
+            ..Post::default()
+        }),
+        ..Fixture::default()
+    };
+    let request = Request {
+        get: hyscribe_phpser::parse_str(b"replytocom=1"),
+        ..Request::default()
+    };
+    let context = Context {
+        theme: &theme,
+        site: &site,
+        request: &request,
+        post_id: Some(0),
+        query: None,
+        comment: None,
+        loading: Default::default(),
+    };
+    let html =
+        String::from_utf8(render_markup(&context, b"<!-- wp:post-comments-form /-->")).unwrap();
+    assert!(html.contains(">Leave a Reply</h3>"), "{html}");
+    assert!(
+        html.contains("name='comment_parent' id='comment_parent' value='0'"),
+        "{html}"
+    );
+}

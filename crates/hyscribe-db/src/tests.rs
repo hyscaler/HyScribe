@@ -265,6 +265,7 @@ async fn errors_are_reported() {
         db.post_terms(1, "category").await.unwrap_err(),
         db.user(1).await.unwrap_err(),
         db.comments(1).await.unwrap_err(),
+        db.comment(1).await.unwrap_err(),
         db.adjacent_post(&Post::default(), true, None)
             .await
             .unwrap_err(),
@@ -359,6 +360,8 @@ async fn options_meta_and_terms() {
     assert_eq!(db.user(99).await.unwrap(), None);
     let comments = db.comments(1).await.unwrap();
     assert_eq!(comments.len(), 1);
+    assert_eq!(db.comment(1).await.unwrap().as_ref(), comments.first());
+    assert_eq!(db.comment(99).await.unwrap(), None);
     assert_eq!(
         (comments[0].id, comments[0].parent, &comments[0].author[..]),
         (1, 0, &b"A WordPress Commenter"[..])

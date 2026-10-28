@@ -19,6 +19,7 @@ use axum::response::{IntoResponse, Response};
 use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html};
 use hyscribe_model::{Post, PostQuery};
+use hyscribe_phpser::parse_str;
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::link;
 use hyscribe_render::post::body_class;
@@ -52,17 +53,29 @@ pub struct Site {
 }
 
 impl Site {
-    /// Loads the autoloaded options. `home` overrides the `home` option, as
-    /// the `WP_HOME` constant does.
-    pub async fn load(db: Db, home: Option<String>) -> Result<Site, DbError> {
-        let options: HashMap<String, Vec<u8>> = db.autoload_options().await?.into_iter().collect();
-        let home = home.unwrap_or_else(|| {
-            String::from_utf8_lossy(options.get("home").map_or(&[][..], Vec::as_slice)).into_owned()
-        });
+    /// Loads the autoloaded options. `home` and `siteurl` override those
+    /// options, untrailingslashed, as the `WP_HOME` and `WP_SITEURL`
+    /// constants do.
+    pub async fn load(
+        db: Db,
+        home: Option<String>,
+        siteurl: Option<String>,
+    ) -> Result<Site, DbError> {
+        let mut options: HashMap<String, Vec<u8>> =
+            db.autoload_options().await?.into_iter().collect();
+        for (name, url) in [("home", home), ("siteurl", siteurl)] {
+            if let Some(url) = url {
+                let url = url.trim_end_matches(['/', '\\']).as_bytes().to_vec();
+                options.insert(name.to_string(), url);
+            }
+        }
+        let home = String::from_utf8_lossy(options.get("home").map_or(&[][..], Vec::as_slice))
+            .trim_end_matches('/')
+            .to_string();
         Ok(Site {
             db,
             options,
-            home: home.trim_end_matches('/').to_string(),
+            home,
             theme: twentytwentyfive(),
         })
     }
@@ -124,7 +137,7 @@ async fn security_headers(mut response: Response) -> Response {
 /// What a request gets: a page, or a permanent redirect to its canonical
 /// URL.
 enum Outcome {
-    Page(Page),
+    Page(Box<Page>),
     Redirect(String),
 }
 
@@ -167,11 +180,20 @@ async fn page(
         }
         Ok(Outcome::Page(page)) => {
             let rendering = Arc::clone(&site);
-            let (candidates, request) = (page.candidates.clone(), page.request.clone());
+            let candidates = page.candidates.clone();
+            let request = Request {
+                uri: uri
+                    .path_and_query()
+                    .map_or(uri.path(), |p| p.as_str())
+                    .as_bytes()
+                    .to_vec(),
+                get: parse_str(uri.query().unwrap_or_default().as_bytes()),
+                ..page.request.clone()
+            };
             let body =
                 tokio::task::spawn_blocking(move || render_body(&rendering, &candidates, &request))
                     .await;
-            rendered(&site, page, body)
+            rendered(&site, *page, body)
         }
         Err(err) => database_error(&site, &err),
     };
@@ -304,7 +326,7 @@ async fn route(
         || path == "/hs-admin"
         || path.starts_with("/hs-admin/")
     {
-        return Ok(Outcome::Page(not_found(site)));
+        return Ok(Outcome::Page(Box::new(not_found(site))));
     }
     if let Some(location) = canonical_path(site, path, raw_query) {
         return Ok(Outcome::Redirect(location));
@@ -312,7 +334,7 @@ async fn route(
     // With plain permalinks the path is ignored. Author archives give away
     // login names, so they are off by default (docs/SECURITY_MODEL.md).
     if query.contains_key("author") {
-        return Ok(Outcome::Page(not_found(site)));
+        return Ok(Outcome::Page(Box::new(not_found(site))));
     }
     let single = |name: &'static str, post_type: &'static str| {
         query
@@ -327,7 +349,7 @@ async fn route(
                     p.status == "publish" && (p.post_type == "post" || p.post_type == "page")
                 }) {
                     Some(post) if post.post_type == post_type => {
-                        Outcome::Page(single_page(site, post))
+                        Outcome::Page(Box::new(single_page(site, post)))
                     }
                     // `?p=` for a page or `?page_id=` for a post.
                     Some(post) => Outcome::Redirect(format!(
@@ -335,11 +357,13 @@ async fn route(
                         site.permalink(&post),
                         other_args(raw_query, name)
                     )),
-                    None => Outcome::Page(not_found(site)),
+                    None => Outcome::Page(Box::new(not_found(site))),
                 },
             )
         }
-        None => list(site, query).await.map(Outcome::Page),
+        None => list(site, query)
+            .await
+            .map(|page| Outcome::Page(Box::new(page))),
     }
 }
 

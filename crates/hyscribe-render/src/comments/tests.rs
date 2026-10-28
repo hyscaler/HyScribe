@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use crate::media::Loading;
 use hyscribe_model::{Post, PostQuery, Term, User};
-use hyscribe_phpser::json_decode;
+use hyscribe_phpser::{json_decode, parse_str};
 use hyscribe_testkit::unhex;
 
 use super::*;
 use crate::fixture::DefaultInstall;
+use crate::media::Loading;
 use crate::site::{Request, Site};
 use crate::theme::twentytwentyfive;
 
@@ -59,16 +59,20 @@ impl Site for WithComments {
     fn comments(&self, post_id: u64) -> Vec<Comment> {
         self.comments
             .iter()
-            .filter(|c| c.post_id == post_id)
+            .filter(|c| c.post_id == post_id && c.comment_type != b"note")
             .cloned()
             .collect()
+    }
+    fn comment(&self, id: u64) -> Option<Comment> {
+        self.comments.iter().find(|c| c.id == id).cloned()
     }
     fn user(&self, id: u64) -> Option<User> {
         self.users.iter().find(|user| user.id == id).cloned()
     }
 }
 
-/// The approved comments among a golden's rows, in the database's order.
+/// The approved comments among a golden's rows, notes included, in the
+/// order the comment template lists them.
 fn approved(rows: &Value) -> Vec<Comment> {
     let text = |row: &Value, name| row.get_str(name).unwrap().to_php_string();
     let number = |row: &Value, name| row.get_str(name).unwrap().to_int() as u64;
@@ -77,7 +81,7 @@ fn approved(rows: &Value) -> Vec<Comment> {
         .unwrap()
         .iter()
         .map(|(_, row)| row)
-        .filter(|row| text(row, "comment_approved") == b"1" && text(row, "comment_type") != b"note")
+        .filter(|row| text(row, "comment_approved") == b"1")
         .map(|row| Comment {
             id: number(row, "comment_ID"),
             post_id: number(row, "comment_post_ID"),
@@ -134,9 +138,14 @@ fn matches_php() {
             closed: state.get_str("closed") == Some(&Value::Bool(true)),
             siteurl: state.get_str("siteurl").unwrap().to_php_string(),
         };
+        let uri = state
+            .get_str("uri")
+            .map_or(b"/".to_vec(), Value::to_php_string);
         let request = Request {
             now: state.get_str("now").unwrap().to_int(),
             post: state.get_str("global").map(|id| id.to_int() as u64),
+            uri: uri.clone(),
+            get: parse_str(uri.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default()),
             posts: state.get_str("main").map_or(Vec::new(), |ids| {
                 ids.as_array()
                     .unwrap()

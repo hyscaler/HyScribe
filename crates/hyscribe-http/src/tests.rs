@@ -17,7 +17,7 @@ async fn fixture_site(home: Option<&str>) -> Arc<Site> {
     let db = Db::connect(&fixture_config())
         .await
         .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
-    Arc::new(Site::load(db, home.map(String::from)).await.unwrap())
+    Arc::new(Site::load(db, home.map(String::from), None).await.unwrap())
 }
 
 struct Reply {
@@ -161,10 +161,45 @@ async fn missing_drafts_and_unknown_paths_are_not_found() {
     );
 }
 
+/// `WP_HOME` and `WP_SITEURL` replace their options, untrailingslashed, so
+/// the comment form posts to the configured site address.
+#[tokio::test]
+async fn configured_addresses_replace_their_options() {
+    let db = Db::connect(&fixture_config()).await.unwrap();
+    let site = Site::load(
+        db,
+        Some("http://home.test//".into()),
+        Some("http://site.test/wp\\/".into()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(site.options["home"], b"http://home.test");
+    assert_eq!(site.home, "http://home.test");
+    let reply = request(&Arc::new(site), "GET", "/?p=1&replytocom=1").await;
+    assert!(
+        reply
+            .body
+            .contains("<form action=\"http://site.test/wp/wp-comments-post.php\""),
+        "{}",
+        reply.body
+    );
+    assert!(
+        reply
+            .body
+            .contains("Leave a Reply to <a href=\"#comment-1\">")
+    );
+    // The cancel link is the request URI without the reply.
+    assert!(
+        reply
+            .body
+            .contains("id=\"cancel-comment-reply-link\" href=\"/?p=1#respond\">")
+    );
+}
+
 #[tokio::test]
 async fn the_tagline_joins_the_home_title() {
     let db = Db::connect(&fixture_config()).await.unwrap();
-    let mut site = Site::load(db, None).await.unwrap();
+    let mut site = Site::load(db, None, None).await.unwrap();
     site.options
         .insert("blogdescription".into(), b"Just <another> site".to_vec());
     let reply = request(&Arc::new(site), "GET", "/").await;
@@ -179,7 +214,7 @@ async fn database_errors_show_no_details() {
     let mut config = fixture_config();
     config.prefix = hyscribe_config::Prefix::new("missing_").unwrap();
     let db = Db::connect(&config).await.unwrap();
-    assert!(Site::load(db.clone(), None).await.is_err());
+    assert!(Site::load(db.clone(), None, None).await.is_err());
     let site = Arc::new(Site {
         db,
         options: HashMap::new(),

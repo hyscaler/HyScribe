@@ -228,9 +228,10 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
             let db = hyscribe_db::Db::connect(&config.database)
                 .await
                 .map_err(|err| format!("cannot connect to the database: {err}"))?;
-            let site = hyscribe_http::Site::load(db, config.home_url.clone())
-                .await
-                .map_err(|err| format!("cannot read the site options: {err}"))?;
+            let site =
+                hyscribe_http::Site::load(db, config.home_url.clone(), config.site_url.clone())
+                    .await
+                    .map_err(|err| format!("cannot read the site options: {err}"))?;
             let address = std::net::SocketAddr::new(config.server.bind_host, config.server.port);
             let listener = tokio::net::TcpListener::bind(address)
                 .await

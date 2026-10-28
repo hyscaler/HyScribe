@@ -11,11 +11,12 @@ use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim};
 use crate::date::{self, Zone};
 use crate::kses::wp_kses_post;
 use crate::link;
-use crate::post::the_title;
+use crate::post::{the_title, title_filters};
 use crate::query_loop::query_posts;
 use crate::registry::block_type;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
+use crate::template::replace;
 use crate::theme::Theme;
 use crate::title::archive_title;
 
@@ -70,6 +71,7 @@ pub(crate) fn render(
     let callback = match name {
         "core/post-author-name" => post_author_name,
         "core/post-date" => post_date,
+        "core/post-navigation-link" => post_navigation_link,
         "core/post-terms" => post_terms,
         "core/post-title" => post_title,
         "core/query-no-results" => query_no_results,
@@ -202,6 +204,191 @@ fn post_author_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         b"</div>",
     ]
     .concat()
+}
+
+/// `render_block_core_post_navigation_link()`: on a single post, a link to
+/// the previous or next post, labelled, titled and with an arrow as set.
+fn post_navigation_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    if !context.request.singular {
+        return Vec::new();
+    }
+    let kind = block
+        .attribute("type")
+        .map_or(b"next".to_vec(), Value::to_php_string);
+    let previous = match kind.as_slice() {
+        b"next" => false,
+        b"previous" => true,
+        _ => return Vec::new(),
+    };
+    let mut classes = [&b"post-navigation-link-"[..], &kind].concat();
+    if let Some(align) = block.attribute("textAlign") {
+        classes.extend_from_slice(b" has-text-align-");
+        classes.extend(align.to_php_string());
+    }
+    let upload_host = context.upload_host();
+    let span = |class: &str, text: &[u8]| {
+        [
+            format!("<span class=\"post-navigation-link__{class}\">").as_bytes(),
+            text,
+            b"</span>",
+        ]
+        .concat()
+    };
+    let mut format = b"%link".to_vec();
+    let mut link: Vec<u8> = if previous {
+        b"Previous".to_vec()
+    } else {
+        b"Next".to_vec()
+    };
+    let mut label = Vec::new();
+    if let Some(given) = block.attribute("label").filter(|v| !v.is_empty()) {
+        label = given.to_php_string();
+        link = label.clone();
+    }
+    if block.attribute("showTitle").is_some_and(|v| !v.is_empty()) {
+        if block.attribute("linkLabel").is_none_or(Value::is_empty) {
+            if !is_empty_string(&label) {
+                format = [
+                    &span("label", &wp_kses_post(&label, &upload_host))[..],
+                    b" %link",
+                ]
+                .concat();
+            }
+            link = b"%title".to_vec();
+        } else {
+            if is_empty_string(&label) {
+                label = if previous {
+                    b"Previous:".to_vec()
+                } else {
+                    b"Next:".to_vec()
+                };
+            }
+            link = [
+                &span("label", &wp_kses_post(&label, &upload_host))[..],
+                b" ",
+                &span("title", b"%title"),
+            ]
+            .concat();
+        }
+    }
+    let arrow = block.attribute("arrow").map(Value::to_php_string);
+    let arrow_text: Option<&str> = match (arrow.as_deref(), previous) {
+        (Some(b"arrow"), false) => Some("→"),
+        (Some(b"arrow"), true) => Some("←"),
+        (Some(b"chevron"), false) => Some("»"),
+        (Some(b"chevron"), true) => Some("«"),
+        _ => None,
+    };
+    if let (Some(text), Some(arrow)) = (arrow_text, &arrow) {
+        let arrow = String::from_utf8_lossy(arrow);
+        format = if previous {
+            format!("<span class=\"wp-block-post-navigation-link__arrow-previous is-arrow-{arrow}\" aria-hidden=\"true\">{text}</span>%link").into_bytes()
+        } else {
+            format!("%link<span class=\"wp-block-post-navigation-link__arrow-next is-arrow-{arrow}\" aria-hidden=\"true\">{text}</span>").into_bytes()
+        };
+    }
+    let taxonomy = block
+        .attribute("taxonomy")
+        .filter(|v| !v.is_empty())
+        .map(Value::to_php_string);
+    let content = adjacent_post_link(context, &format, &link, previous, taxonomy.as_deref());
+    [
+        format!("<div {}>", block.wrapper(context, &classes)).as_bytes(),
+        &content,
+        b"</div>",
+    ]
+    .concat()
+}
+
+/// `get_adjacent_post_link()`: `format` with `%link` as the linked `link`,
+/// whose `%title` and `%date` are the adjacent post's.
+fn adjacent_post_link(
+    context: &Context<'_>,
+    format: &[u8],
+    link: &[u8],
+    previous: bool,
+    taxonomy: Option<&[u8]>,
+) -> Vec<u8> {
+    let Some(current) = context.post() else {
+        return Vec::new();
+    };
+    // The previous link of an attachment page goes to its parent, but
+    // attachment pages are not routed yet, so is_attachment() is false.
+    let Some(post) = adjacent_post(context, &current, previous, taxonomy) else {
+        return Vec::new();
+    };
+    let title: &[u8] = match (is_empty_string(&post.title), previous) {
+        (false, _) => &post.title,
+        (true, true) => b"Previous Post",
+        (true, false) => b"Next Post",
+    };
+    let title = title_filters(title);
+    let date_format = context.site.option("date_format").unwrap_or_default();
+    let date = date::format(
+        &String::from_utf8_lossy(&date_format),
+        &post.date,
+        context.zone(),
+    );
+    let rel = if previous { "prev" } else { "next" };
+    let anchor = [
+        &b"<a href=\""[..],
+        &context.permalink(&post),
+        format!("\" rel=\"{rel}\">").as_bytes(),
+    ]
+    .concat();
+    let inlink = replace(&replace(link, b"%title", &title), b"%date", date.as_bytes());
+    replace(format, b"%link", &[&anchor[..], &inlink, b"</a>"].concat())
+}
+
+/// `get_adjacent_post()`: nothing for a taxonomy that does not exist, or,
+/// within the same terms, one the post is not in.
+fn adjacent_post(
+    context: &Context<'_>,
+    post: &Post,
+    previous: bool,
+    taxonomy: Option<&[u8]>,
+) -> Option<Post> {
+    let Some(taxonomy) = taxonomy else {
+        return context.site.adjacent_post(post, previous, None);
+    };
+    let taxonomy = String::from_utf8_lossy(taxonomy);
+    // taxonomy_exists() and is_object_in_taxonomy()
+    let object_type = match taxonomy.as_ref() {
+        "category" | "post_tag" | "post_format" => "post",
+        "nav_menu" => "nav_menu_item",
+        "link_category" => "link",
+        "wp_template_part_area" => "wp_template_part",
+        "wp_pattern_category" => "wp_block",
+        "wp_theme" => {
+            return matches!(
+                post.post_type.as_str(),
+                "wp_template" | "wp_template_part" | "wp_global_styles"
+            )
+            .then(|| same_terms(context, post, previous, &taxonomy))
+            .flatten();
+        }
+        _ => return None,
+    };
+    if post.post_type != object_type {
+        return None;
+    }
+    same_terms(context, post, previous, &taxonomy)
+}
+
+/// The adjacent post sharing one of `post`'s terms in `taxonomy`.
+fn same_terms(context: &Context<'_>, post: &Post, previous: bool, taxonomy: &str) -> Option<Post> {
+    let ids: Vec<u64> = context
+        .site
+        .post_terms(post.id, taxonomy)
+        .iter()
+        .map(|term| term.id)
+        .collect();
+    if ids.is_empty() {
+        return None;
+    }
+    context
+        .site
+        .adjacent_post(post, previous, Some((taxonomy, &ids)))
 }
 
 /// `render_block_core_post_terms()`: the post's terms in a taxonomy that

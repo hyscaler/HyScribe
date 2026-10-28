@@ -18,7 +18,13 @@ pub(crate) fn the_title(post: &Post) -> Vec<u8> {
     } else {
         post.title.clone()
     };
-    let title = convert_chars(&wptexturize(&title, &CORE_SHORTCODE_TAGS));
+    title_filters(&title)
+}
+
+/// The `the_title` filters: `wptexturize`, `convert_chars`, `trim` and
+/// `capital_P_dangit`.
+pub(crate) fn title_filters(title: &[u8]) -> Vec<u8> {
+    let title = convert_chars(&wptexturize(title, &CORE_SHORTCODE_TAGS));
     capital_p_dangit_title(php_trim(&title))
 }
 

@@ -138,6 +138,7 @@ fn matches_php() {
             || kind == "content"
             || kind == "teaser"
             || kind == "terms"
+            || kind == "adjacent"
         {
             continue;
         }
@@ -348,4 +349,107 @@ fn post_terms_match_php() {
         count += 1;
     }
     assert!(count > 70);
+}
+
+/// The fixture database, with one more post from the golden in memory.
+struct WithPost {
+    base: crate::fixture::DefaultInstall,
+    post: Option<Post>,
+    date_format: Vec<u8>,
+    /// What the adjacent query is rewritten to give, when it is.
+    forced: Option<Post>,
+}
+
+impl Site for WithPost {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        match name {
+            "date_format" => Some(self.date_format.clone()),
+            _ => self.base.option(name),
+        }
+    }
+    fn home_url(&self) -> Vec<u8> {
+        self.base.home_url()
+    }
+    fn post(&self, id: u64) -> Option<Post> {
+        let own = self
+            .post
+            .iter()
+            .chain(&self.forced)
+            .find(|post| post.id == id);
+        own.cloned().or_else(|| self.base.post(id))
+    }
+    fn post_terms(&self, post_id: u64, taxonomy: &str) -> Vec<hyscribe_model::Term> {
+        match &self.forced {
+            Some(_) => vec![hyscribe_model::Term {
+                id: 1,
+                ..hyscribe_model::Term::default()
+            }],
+            None => self.base.post_terms(post_id, taxonomy),
+        }
+    }
+    fn post_meta(&self, post_id: u64, key: &str) -> Option<Vec<u8>> {
+        self.base.post_meta(post_id, key)
+    }
+    fn query(&self, query: &hyscribe_model::PostQuery) -> Vec<Post> {
+        self.base.query(query)
+    }
+    fn adjacent_post(
+        &self,
+        post: &Post,
+        previous: bool,
+        terms: Option<(&str, &[u64])>,
+    ) -> Option<Post> {
+        match &self.forced {
+            Some(forced) => Some(forced.clone()),
+            None => self.base.adjacent_post(post, previous, terms),
+        }
+    }
+}
+
+/// The `adjacent` cases: the post navigation link around the fixture's post.
+#[test]
+fn post_navigation_links_match_php() {
+    let golden = include_str!("../../tests/golden/core-blocks.tsv");
+    let theme = twentytwentyfive();
+    let mut count = 0;
+    for line in golden.lines().filter(|line| line.starts_with("adjacent\t")) {
+        let mut fields = line.split('\t').skip(1).map(unhex);
+        let mut field = || fields.next().unwrap();
+        let (markup, state, row, php) = (field(), object(&field()), object(&field()), field());
+        let full = |row: &Value| Post {
+            date: text(row, "post_date"),
+            ..post(row)
+        };
+        let site = WithPost {
+            base: crate::fixture::DefaultInstall {
+                home: state.get_str("home").unwrap().to_php_string(),
+            },
+            post: (row != Value::Null).then(|| full(&row)),
+            date_format: state.get_str("date_format").unwrap().to_php_string(),
+            forced: state
+                .get_str("forced")
+                .filter(|v| **v != Value::Null)
+                .map(full),
+        };
+        let request = Request {
+            singular: state.get_str("singular") == Some(&Value::Bool(true)),
+            ..Request::default()
+        };
+        let context = Context {
+            theme: &theme,
+            site: &site,
+            request: &request,
+            post_id: Some(site.post.as_ref().map_or(9999, |post| post.id)),
+            query: None,
+        };
+        assert_eq!(
+            String::from_utf8_lossy(&render_markup(&context, &markup)),
+            String::from_utf8_lossy(&php),
+            "{} {:?}",
+            String::from_utf8_lossy(&markup),
+            site.post.as_ref().map(|post| post.id)
+        );
+        count += 1;
+    }
+    assert!(count > 200);
 }

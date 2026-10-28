@@ -286,6 +286,21 @@ impl Db {
         rows.iter().map(term).collect()
     }
 
+    /// `get_adjacent_post()` for a visitor; see [`adjacent_sql`].
+    pub async fn adjacent_post(
+        &self,
+        post: &Post,
+        previous: bool,
+        terms: Option<(&str, &[u64])>,
+    ) -> Result<Option<Post>, DbError> {
+        let row = adjacent_sql(post, previous, terms)
+            .query(&self.prefix)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.as_ref().map(crate::post).transpose()
+    }
+
     /// One user by ID.
     pub async fn user(&self, id: u64) -> Result<Option<User>, DbError> {
         let sql = self
@@ -313,6 +328,46 @@ impl Db {
             .map_err(db_error)?;
         row.as_ref().map(term).transpose()
     }
+}
+
+/// The statement [`Db::adjacent_post`] runs: `get_adjacent_post()`'s, for
+/// a visitor, selecting the whole row.
+fn adjacent_sql(post: &Post, previous: bool, terms: Option<(&str, &[u64])>) -> Sql {
+    let mut sql = Sql::new(concat!(
+        "SELECT ",
+        post_columns!(),
+        " FROM {prefix}posts AS p"
+    ));
+    if terms.is_some() {
+        sql.push(
+            " INNER JOIN {prefix}term_relationships AS tr ON p.ID = tr.object_id \
+             INNER JOIN {prefix}term_taxonomy AS tt ON tr.term_taxonomy_id = tt.term_taxonomy_id",
+        );
+    }
+    sql.push(if previous {
+        " WHERE (p.post_date < ? OR (p.post_date = ? AND p.ID < ?)) AND p.post_type = ?"
+    } else {
+        " WHERE (p.post_date > ? OR (p.post_date = ? AND p.ID > ?)) AND p.post_type = ?"
+    });
+    sql.bind(Bind::Text(post.date.clone()));
+    sql.bind(Bind::Text(post.date.clone()));
+    sql.bind(Bind::Int(post.id));
+    sql.bind(Bind::Text(post.post_type.clone()));
+    if let Some((taxonomy, ids)) = terms {
+        sql.push(" AND tt.taxonomy = ? AND tt.term_id IN (0");
+        sql.bind(Bind::Text(taxonomy.to_string()));
+        for id in ids {
+            sql.push(", ?");
+            sql.bind(Bind::Int(*id));
+        }
+        sql.push(")");
+    }
+    sql.push(if previous {
+        " AND p.post_status = 'publish' ORDER BY p.post_date DESC, p.ID DESC LIMIT 1"
+    } else {
+        " AND p.post_status = 'publish' ORDER BY p.post_date ASC, p.ID ASC LIMIT 1"
+    });
+    sql
 }
 
 /// The statement [`Db::posts`] runs for `query`.

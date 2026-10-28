@@ -567,6 +567,16 @@ async fn reads_come_from_the_database_once() {
             reads.query(&query).iter().map(|p| p.id).collect::<Vec<_>>(),
             [2]
         );
+        let later = hyscribe_model::Post {
+            id: 999,
+            date: "2099-01-01 00:00:00".into(),
+            post_type: "post".into(),
+            ..hyscribe_model::Post::default()
+        };
+        assert_eq!(
+            reads.adjacent_post(&later, true, None).map(|p| p.id),
+            Some(1)
+        );
         reads.finish().unwrap();
     })
     .await

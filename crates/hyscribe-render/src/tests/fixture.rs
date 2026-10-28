@@ -183,6 +183,41 @@ impl Site for DefaultInstall {
     }
 
     /// Ties keep table order, as the fixture's posts share one date.
+    /// Over the dump's posts, as `get_adjacent_post()` orders them.
+    fn adjacent_post(
+        &self,
+        post: &Post,
+        previous: bool,
+        terms: Option<(&str, &[u64])>,
+    ) -> Option<Post> {
+        let key = |p: &Post| (p.date.clone(), p.id);
+        let mut found: Vec<Post> = dump()
+            .table("wp_posts")
+            .map(crate::fixture::post)
+            .filter(|p| p.status == "publish" && p.post_type == post.post_type)
+            .filter(|p| {
+                if previous {
+                    key(p) < key(post)
+                } else {
+                    key(p) > key(post)
+                }
+            })
+            .filter(|p| {
+                terms.is_none_or(|(taxonomy, ids)| {
+                    self.post_terms(p.id, taxonomy)
+                        .iter()
+                        .any(|term| ids.contains(&term.id))
+                })
+            })
+            .collect();
+        found.sort_by_key(key);
+        if previous {
+            found.pop()
+        } else {
+            found.into_iter().next()
+        }
+    }
+
     fn user(&self, id: u64) -> Option<User> {
         dump()
             .table("wp_users")

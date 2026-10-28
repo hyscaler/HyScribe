@@ -108,6 +108,15 @@ impl RenderSite for Reads<'_> {
         self.wait(self.site.db.posts(query))
     }
 
+    fn adjacent_post(
+        &self,
+        post: &Post,
+        previous: bool,
+        terms: Option<(&str, &[u64])>,
+    ) -> Option<Post> {
+        self.wait(self.site.db.adjacent_post(post, previous, terms))
+    }
+
     fn user(&self, id: u64) -> Option<User> {
         self.memo(&self.users, id, || self.wait(self.site.db.user(id)))
     }

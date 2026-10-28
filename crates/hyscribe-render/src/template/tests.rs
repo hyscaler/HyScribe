@@ -323,4 +323,6 @@ fn replacing_nothing_keeps_the_subject() {
 #[test]
 fn sites_without_user_data_have_no_users() {
     assert_eq!(DefaultInstall.user(1), None);
+    let post = hyscribe_model::Post::default();
+    assert_eq!(DefaultInstall.adjacent_post(&post, true, None), None);
 }

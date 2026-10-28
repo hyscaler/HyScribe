@@ -347,6 +347,64 @@ foreach ( array( 0, 1, 59, 60, 61, 119, 120, 3599, 3600, 3601, 5399, 5400, 7200,
 }
 
 add_filter( 'pre_option_gmt_offset', static fn() => 0 );
+
+// The post navigation link on single views. Adjacent posts come from the
+// database; the in-memory posts sit before and after its one post.
+$navigation_blocks = array(
+	'<!-- wp:post-navigation-link /-->',
+	'<!-- wp:post-navigation-link {"type":"previous"} /-->',
+	'<!-- wp:post-navigation-link {"type":"previous","showTitle":true} /-->',
+	'<!-- wp:post-navigation-link {"showTitle":true,"linkLabel":true} /-->',
+	'<!-- wp:post-navigation-link {"type":"previous","showTitle":true,"linkLabel":true} /-->',
+	'<!-- wp:post-navigation-link {"type":"previous","label":"Older <b>post</b> %date","showTitle":true} /-->',
+	'<!-- wp:post-navigation-link {"label":"Newer","showTitle":true,"linkLabel":true,"arrow":"arrow","textAlign":"right"} /-->',
+	'<!-- wp:post-navigation-link {"type":"previous","arrow":"chevron"} /-->',
+	'<!-- wp:post-navigation-link {"type":"previous","arrow":"arrow"} /-->',
+	'<!-- wp:post-navigation-link {"arrow":"chevron","label":"0"} /-->',
+	'<!-- wp:post-navigation-link {"arrow":"none","label":"%title by %date"} /-->',
+	'<!-- wp:post-navigation-link {"type":"sideways"} /-->',
+	'<!-- wp:post-navigation-link {"type":"previous","taxonomy":"category"} /-->',
+	'<!-- wp:post-navigation-link {"taxonomy":"post_tag"} /-->',
+	'<!-- wp:post-navigation-link {"taxonomy":"no_such_taxonomy"} /-->',
+	'<!-- wp:post-navigation-link {"taxonomy":"wp_theme"} /-->',
+	'<!-- wp:post-navigation-link {"taxonomy":"nav_menu"} /-->',
+	'<!-- wp:post-navigation-link {"taxonomy":"link_category"} /-->',
+	'<!-- wp:post-navigation-link {"taxonomy":"wp_template_part_area"} /-->',
+	'<!-- wp:post-navigation-link {"taxonomy":"wp_pattern_category"} /-->',
+);
+wp_cache_set( 1010, (object) array( 'ID' => 1010, 'post_author' => '1', 'post_date' => '2026-01-01 00:00:00', 'post_date_gmt' => '2026-01-01 00:00:00', 'post_content' => '', 'post_title' => 'Template', 'post_excerpt' => '', 'post_status' => 'publish', 'comment_status' => 'closed', 'ping_status' => 'closed', 'post_password' => '', 'post_name' => 'template', 'to_ping' => '', 'pinged' => '', 'post_modified' => '2026-01-01 00:00:00', 'post_modified_gmt' => '2026-01-01 00:00:00', 'post_content_filtered' => '', 'post_parent' => 0, 'guid' => '', 'menu_order' => 0, 'post_type' => 'wp_template', 'post_mime_type' => '', 'comment_count' => '0', 'filter' => 'raw' ), 'posts' );
+foreach ( array( 1011 => 'nav_menu_item', 1012 => 'link', 1013 => 'wp_template_part' ) as $id => $type ) {
+	$copy            = clone get_post( 1010 );
+	$copy->ID        = $id;
+	$copy->post_type = $type;
+	wp_cache_set( $id, $copy, 'posts' );
+}
+// 'forced' rewrites the adjacent query to give 1006, whose title is empty,
+// and gives every post term 1 in every taxonomy.
+$force_empty = static fn( $sql ) => str_starts_with( $sql, 'SELECT p.ID FROM' ) ? 'SELECT 1006' : $sql;
+$force_terms = static fn() => array( 1 );
+foreach ( array( array( 1, '' ), array( 2, '' ), array( 1001, '' ), array( 1004, '' ), array( 1005, '' ), array( 1006, '' ), array( 1008, '' ), array( 1010, '' ), array( 9999, '' ), array( 1001, 'forced' ), array( 1, 'forced' ), array( 1005, 'forced' ), array( 1010, 'forced' ), array( 1011, 'forced' ), array( 1012, 'forced' ), array( 1013, 'forced' ) ) as list( $id, $mode ) ) {
+	foreach ( array( true, false ) as $singular ) {
+		wp_cache_flush_group( 'post-queries' );
+		if ( 'forced' === $mode ) {
+			add_filter( 'query', $force_empty );
+			add_filter( 'wp_get_object_terms', $force_terms );
+		}
+		$GLOBALS['wp_query']              = new WP_Query();
+		$GLOBALS['wp_query']->is_singular = $singular;
+		$GLOBALS['post']                  = get_post( $id );
+		foreach ( $navigation_blocks as $markup ) {
+			$block = new WP_Block( parse_blocks( $markup )[0], array( 'postId' => $id, 'postType' => get_post_type( $id ) ) );
+			$state = array( 'singular' => $singular, 'home' => home_url(), 'date_format' => get_option( 'date_format' ), 'forced' => 'forced' === $mode ? get_post( 1006, ARRAY_A ) : null );
+			echo 'adjacent', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( wp_json_encode( get_post( $id, ARRAY_A ) ) ), "\t", bin2hex( $block->render() ), "\n";
+		}
+		remove_filter( 'query', $force_empty );
+		remove_filter( 'wp_get_object_terms', $force_terms );
+	}
+}
+wp_cache_flush_group( 'post-queries' );
+// wp() works on $wp_the_query, which $wp_query must point at again.
+$GLOBALS['wp_query'] = $GLOBALS['wp_the_query'];
 foreach ( array( 0, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008 ) as $id ) {
 	$GLOBALS['post'] = $id ? get_post( $id ) : null;
 	$context         = $id ? array( 'postId' => $id, 'postType' => get_post_type( $id ) ) : array();

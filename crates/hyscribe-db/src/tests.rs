@@ -264,6 +264,9 @@ async fn errors_are_reported() {
         db.post_meta(1, "x").await.unwrap_err(),
         db.post_terms(1, "category").await.unwrap_err(),
         db.user(1).await.unwrap_err(),
+        db.adjacent_post(&Post::default(), true, None)
+            .await
+            .unwrap_err(),
     ] {
         assert!(
             [
@@ -353,4 +356,72 @@ async fn options_meta_and_terms() {
         }]
     );
     assert!(db.post_terms(1, "post_tag").await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn adjacent_posts() {
+    let db = fixture().await;
+    let hello = db.post(1).await.unwrap().unwrap();
+    let at = |date: &str, id, post_type: &str| Post {
+        id,
+        date: date.into(),
+        post_type: post_type.into(),
+        ..Post::default()
+    };
+    let title = |found: Option<Post>| found.map(|p| String::from_utf8(p.title).unwrap());
+    let later = at("2099-01-01 00:00:00", 999, "post");
+    let earlier = at("2000-01-01 00:00:00", 999, "post");
+    assert_eq!(
+        title(db.adjacent_post(&later, true, None).await.unwrap()).as_deref(),
+        Some("Hello world!")
+    );
+    assert_eq!(
+        title(db.adjacent_post(&later, false, None).await.unwrap()),
+        None
+    );
+    assert_eq!(
+        title(db.adjacent_post(&earlier, false, None).await.unwrap()).as_deref(),
+        Some("Hello world!")
+    );
+    assert_eq!(
+        title(db.adjacent_post(&earlier, true, None).await.unwrap()),
+        None
+    );
+    // The same date breaks ties by ID.
+    let same_date = |id| at(&hello.date, id, "post");
+    assert!(
+        db.adjacent_post(&same_date(2), true, None)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        db.adjacent_post(&same_date(1), true, None)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        db.adjacent_post(&same_date(0), false, None)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    // Only the post's type, published, sharing a term when asked.
+    assert_eq!(
+        db.adjacent_post(&at("2099-01-01 00:00:00", 999, "page"), true, None)
+            .await
+            .unwrap()
+            .map(|p| p.id),
+        Some(2)
+    );
+    let in_terms = |ids: &'static [u64]| db.adjacent_post(&later, true, Some(("category", ids)));
+    assert!(in_terms(&[1]).await.unwrap().is_some());
+    assert!(in_terms(&[99]).await.unwrap().is_none());
+    assert!(
+        db.adjacent_post(&later, true, Some(("post_tag", &[1])))
+            .await
+            .unwrap()
+            .is_none()
+    );
 }

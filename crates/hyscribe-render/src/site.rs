@@ -28,6 +28,19 @@ pub trait Site {
     fn user(&self, _id: u64) -> Option<User> {
         None
     }
+
+    /// `get_adjacent_post()` for a visitor: the published post of `post`'s
+    /// type just before (`previous`) or after it by date, then ID, sharing
+    /// one of `terms` in their taxonomy when given. Sites without other
+    /// posts have none.
+    fn adjacent_post(
+        &self,
+        _post: &Post,
+        _previous: bool,
+        _terms: Option<(&str, &[u64])>,
+    ) -> Option<Post> {
+        None
+    }
 }
 
 /// The main query's conditionals that blocks check.

@@ -11,7 +11,7 @@ pub mod date;
 mod fixture;
 pub mod formatting;
 pub mod link;
-mod post;
+pub mod post;
 mod query_loop;
 pub mod registry;
 pub mod site;

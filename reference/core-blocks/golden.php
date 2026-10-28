@@ -8,6 +8,7 @@
 //   diff<TAB>hex(from)<TAB>hex(to)<TAB>hex(human_time_diff( from, to ))
 //   class<TAB>hex(case JSON)<TAB>hex(post JSON)<TAB>hex(get_post_class( 'wp-block-post' ))
 //   query<TAB>hex(markup)<TAB>hex(request)<TAB>hex(home_url())<TAB>hex(output)
+//   body<TAB>hex(request)<TAB>hex(implode( ' ', get_body_class() ))
 // The request JSON holds the conditionals the blocks check. Run through
 // golden.sh inside the PHP WordPress oracle; nothing is written.
 
@@ -224,6 +225,32 @@ foreach ( array( '', 'p=1', 's=nothingmatches', 's=hello <b>"x"</b>', 'cat=1', '
 	foreach ( $query_blocks as $markup ) {
 		echo 'query', "\t", bin2hex( $markup ), "\t", bin2hex( $case_query ), "\t", bin2hex( home_url() ), "\t", bin2hex( do_blocks( $markup ) ), "\n";
 	}
+}
+
+// get_body_class() for the requests the query cases use, and a paged one.
+foreach ( array( '', 'p=1', 'page_id=2', 'p=999', 's=hello', 's=nothingmatches', 'cat=1', 'cat=999', 'm=2026', 'm=202610', 'm=20261027', 'paged=1', 'paged=2', 'p=1&paged=2', 'cat=1&paged=3' ) as $case_query ) {
+	$GLOBALS['wp'] = new WP();
+	wp( $case_query );
+	echo 'body', "\t", bin2hex( $case_query ), "\t", bin2hex( implode( ' ', get_body_class() ) ), "\n";
+}
+// Page 3 of lists, and a child page: one post fills no second page, so
+// both are set on the query in memory.
+foreach ( array( '', 'page_id=2', 'cat=1', 'm=2026', 's=hello', 'page_id=2&child', 'cat=1&slug', 'p=1&book' ) as $case_query ) {
+	$GLOBALS['wp'] = new WP();
+	wp( preg_replace( '/&(child|slug|book)$/', '', $case_query ) );
+	$label = $case_query;
+	if ( str_ends_with( $case_query, '&child' ) ) {
+		$GLOBALS['wp_query']->get_queried_object()->post_parent = 7;
+	} elseif ( str_ends_with( $case_query, '&slug' ) ) {
+		$GLOBALS['wp_query']->get_queried_object()->slug = '1';
+	} elseif ( str_ends_with( $case_query, '&book' ) ) {
+		$GLOBALS['wp_query']->get_queried_object()->post_type = 'book';
+	} else {
+		$GLOBALS['wp_query']->set( 'paged', 3 );
+		$GLOBALS['wp_query']->is_paged = true;
+		$label = "$case_query&forced=3";
+	}
+	echo 'body', "\t", bin2hex( $label ), "\t", bin2hex( implode( ' ', get_body_class() ) ), "\n";
 }
 
 // human_time_diff() itself, since the block measures from the real time().

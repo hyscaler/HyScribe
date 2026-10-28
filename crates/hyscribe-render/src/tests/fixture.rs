@@ -62,12 +62,53 @@ pub(crate) struct DefaultInstall {
 impl DefaultInstall {
     /// The request state PHP gives the query strings the golden scripts use.
     pub(crate) fn request(&self, query: &str) -> Request {
+        // `&forced=3` marks page 3 and `&child` a parent, both set by the
+        // golden script in memory.
+        if let Some(base) = query.strip_suffix("&forced=3") {
+            return Request {
+                paged: true,
+                page: 3,
+                ..self.request(base)
+            };
+        }
+        if let Some(base) = query.strip_suffix("&child") {
+            let mut request = self.request(base);
+            request.posts.iter_mut().for_each(|post| post.parent = 7);
+            return request;
+        }
+        if let Some(base) = query.strip_suffix("&book") {
+            let mut request = self.request(base);
+            request
+                .posts
+                .iter_mut()
+                .for_each(|post| post.post_type = "book".into());
+            return request;
+        }
+        if let Some(base) = query.strip_suffix("&slug") {
+            let mut request = self.request(base);
+            if let Some(Archive::Category(term)) = &mut request.archive {
+                term.slug = b"1".to_vec();
+            }
+            return request;
+        }
+        if query == "paged=1" {
+            return Request {
+                page: 1,
+                ..self.request("")
+            };
+        }
         let posts = self.main_query(query);
         Request {
+            front_page: query.is_empty(),
+            home: query.is_empty(),
+            paged: query == "p=1&paged=2",
+            singular: matches!(query, "p=1" | "page_id=2" | "p=1&paged=2"),
+            not_found: matches!(query, "p=999" | "cat=999" | "paged=2" | "cat=1&paged=3"),
+            page: if query == "p=1&paged=2" { 2 } else { 0 },
             post: posts.first().map(|post| post.id),
             posts,
             archive: match query {
-                "cat=1" => Some(Archive::Category(b"Uncategorized".to_vec())),
+                "cat=1" => Some(Archive::Category(self.post_terms(1, "category").remove(0))),
                 "m=2026" => Some(Archive::Year),
                 "m=202610" => Some(Archive::Month),
                 "m=20261027" => Some(Archive::Day),
@@ -86,9 +127,10 @@ impl DefaultInstall {
                 limit: 10,
                 ..PostQuery::default()
             }),
-            "p=1" | "cat=1" | "m=2026" | "m=202610" | "m=20261027" => {
+            "p=1" | "p=1&paged=2" | "cat=1" | "m=2026" | "m=202610" | "m=20261027" | "s=hello" => {
                 self.post(1).into_iter().collect()
             }
+            "page_id=2" => self.post(2).into_iter().collect(),
             _ => Vec::new(),
         }
     }

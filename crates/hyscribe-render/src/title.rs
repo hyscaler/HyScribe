@@ -22,9 +22,9 @@ pub fn archive_title(
     let date = |format: &str| date::format(format, posted, zone).into_bytes();
     let (prefix, title): (&[u8], Vec<u8>) = match archive {
         // `single_cat_title()`: the `single_cat_title` filters.
-        Archive::Category(name) => (
+        Archive::Category(term) => (
             b"Category:",
-            strip_tags(&wptexturize(name, &CORE_SHORTCODE_TAGS)),
+            strip_tags(&wptexturize(&term.name, &CORE_SHORTCODE_TAGS)),
         ),
         Archive::Year => (b"Year:", date("Y")),
         Archive::Month => (b"Month:", date("F Y")),

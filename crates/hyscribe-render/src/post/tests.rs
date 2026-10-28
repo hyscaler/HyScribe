@@ -125,3 +125,24 @@ fn sanitize_html_class_like_php() {
         );
     }
 }
+
+/// The `body` cases of `reference/core-blocks/golden.sh`.
+#[test]
+fn body_classes_match_php() {
+    let golden = include_str!("../../tests/golden/core-blocks.tsv");
+    let site = crate::fixture::DefaultInstall { home: Vec::new() };
+    let mut count = 0;
+    for line in golden.lines().filter(|line| line.starts_with("body\t")) {
+        let mut fields = line.split('\t').skip(1).map(unhex);
+        let request = String::from_utf8(fields.next().unwrap()).unwrap();
+        let php = fields.next().unwrap();
+        let ours = body_class(&site, &site.request(&request), "twentytwentyfive");
+        assert_eq!(
+            String::from_utf8_lossy(&ours),
+            String::from_utf8_lossy(&php),
+            "{request}"
+        );
+        count += 1;
+    }
+    assert!(count >= 14);
+}

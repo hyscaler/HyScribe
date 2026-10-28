@@ -47,13 +47,19 @@ pub struct Request {
     pub archive: Option<Archive>,
     /// `is_search()`: the raw search query, `get_query_var( 's' )`.
     pub search: Option<Vec<u8>>,
+    /// `is_singular()`: the main query's one post is the queried object.
+    pub singular: bool,
+    /// `is_404()`
+    pub not_found: bool,
+    /// The `page` or `paged` query var, 0 or 1 on the first page.
+    pub page: u64,
 }
 
 /// The archives the default install has.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Archive {
-    /// A category, by name as stored.
-    Category(Vec<u8>),
+    /// A category.
+    Category(Term),
     /// `?m=YYYY`.
     Year,
     /// `?m=YYYYMM`.

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Post template tags from `wp-includes/post-template.php`: the title and
-//! the classes of a post.
+//! Post template tags from `wp-includes/post-template.php`: the title, and
+//! the classes of a post and of the page body.
 
 use hyscribe_model::Post;
 use hyscribe_phpser::{Value, decode, php_trim};
 
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit_title, convert_chars, wptexturize};
-use crate::site::{Request, Site};
+use crate::site::{Archive, Request, Site};
 
 /// `get_the_title( $post )` with the `the_title` filters.
 pub(crate) fn the_title(post: &Post) -> Vec<u8> {
@@ -46,6 +46,22 @@ fn sanitize_html_class(class: &[u8], fallback: &[u8]) -> Vec<u8> {
     kept
 }
 
+/// `get_post_format()` as a class: the format's slug, or `standard`.
+fn post_format(site: &dyn Site, id: u64) -> Vec<u8> {
+    site.post_terms(id, "post_format")
+        .first()
+        .map(|term| {
+            sanitize_html_class(
+                term.slug
+                    .strip_prefix(b"post-format-")
+                    .unwrap_or(&term.slug),
+                b"",
+            )
+        })
+        .filter(|format| !format.is_empty())
+        .unwrap_or_else(|| b"standard".to_vec())
+}
+
 /// The taxonomies of a post type `get_post_class()` reads, public ones only.
 fn taxonomies(post_type: &str) -> &'static [&'static str] {
     match post_type {
@@ -67,18 +83,7 @@ pub(crate) fn post_class(site: &dyn Site, request: &Request, class: &str, post: 
     classes.push(format!("type-{}", post.post_type).into_bytes());
     classes.push(format!("status-{}", post.status).into_bytes());
     if post.post_type == "post" {
-        let format = site
-            .post_terms(id, "post_format")
-            .first()
-            .map(|term| {
-                term.slug
-                    .strip_prefix(b"post-format-")
-                    .unwrap_or(&term.slug)
-                    .to_vec()
-            })
-            .map(|format| sanitize_html_class(&format, b""))
-            .filter(|format| !format.is_empty());
-        classes.push([b"format-", format.as_deref().unwrap_or(b"standard")].concat());
+        classes.push([b"format-", &post_format(site, id)[..]].concat());
     }
     // A visitor never has the password cookie.
     let password_required = !post.password.is_empty();
@@ -107,11 +112,7 @@ pub(crate) fn post_class(site: &dyn Site, request: &Request, class: &str, post: 
             if term.slug.is_empty() {
                 continue;
             }
-            let mut term_class = sanitize_html_class(&term.slug, term.id.to_string().as_bytes());
-            let trimmed = term_class.iter().all(|&b| b == b'-');
-            if Value::String(term_class.clone()).is_numeric() || trimmed {
-                term_class = term.id.to_string().into_bytes();
-            }
+            let term_class = term_class(&term.slug, term.id);
             classes.push(if *taxonomy == "post_tag" {
                 [b"tag-", &term_class[..]].concat()
             } else {
@@ -123,6 +124,115 @@ pub(crate) fn post_class(site: &dyn Site, request: &Request, class: &str, post: 
             });
         }
     }
+    let mut unique: Vec<Vec<u8>> = Vec::with_capacity(classes.len());
+    for class in classes {
+        if !unique.contains(&class) {
+            unique.push(class);
+        }
+    }
+    unique.join(&b' ')
+}
+
+/// The class a term gives: its sanitized slug, or its id when that is
+/// numeric or only dashes.
+fn term_class(slug: &[u8], id: u64) -> Vec<u8> {
+    let class = sanitize_html_class(slug, id.to_string().as_bytes());
+    if Value::String(class.clone()).is_numeric() || class.iter().all(|&b| b == b'-') {
+        id.to_string().into_bytes()
+    } else {
+        class
+    }
+}
+
+/// `get_body_class()` for a visitor, with `template` as `get_template()`.
+/// Pages with child pages and page templates other than the default are
+/// not told apart yet.
+pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8> {
+    let mut classes: Vec<Vec<u8>> = Vec::new();
+    let mut push = |class: &[u8]| classes.push(class.to_vec());
+    let singular = request.posts.first().filter(|_| request.singular);
+    let date = matches!(
+        request.archive,
+        Some(Archive::Year | Archive::Month | Archive::Day)
+    );
+    for (on, class) in [
+        (request.front_page, &b"home"[..]),
+        (request.home, b"blog"),
+        (request.archive.is_some(), b"archive"),
+        (date, b"date"),
+    ] {
+        if on {
+            push(class);
+        }
+    }
+    if request.search.is_some() {
+        push(b"search");
+        push(if request.posts.is_empty() {
+            b"search-no-results"
+        } else {
+            b"search-results"
+        });
+    }
+    if request.paged {
+        push(b"paged");
+    }
+    if request.not_found {
+        push(b"error404");
+    }
+    if let Some(post) = singular {
+        let kind = &post.post_type;
+        push(b"wp-singular");
+        push(format!("{kind}-template-default").as_bytes());
+        if kind != "page" {
+            push(b"single");
+            push(
+                &[
+                    b"single-",
+                    &sanitize_html_class(kind.as_bytes(), post.id.to_string().as_bytes())[..],
+                ]
+                .concat(),
+            );
+            push(format!("postid-{}", post.id).as_bytes());
+            if kind == "post" {
+                push(&[b"single-format-", &post_format(site, post.id)[..]].concat());
+            }
+        } else {
+            push(b"page");
+            push(format!("page-id-{}", post.id).as_bytes());
+            if post.parent != 0 {
+                push(b"page-child");
+                push(format!("parent-pageid-{}", post.parent).as_bytes());
+            }
+        }
+    } else if let Some(Archive::Category(term)) = &request.archive {
+        push(b"category");
+        push(&[b"category-", &term_class(&term.slug, term.id)[..]].concat());
+        push(format!("category-{}", term.id).as_bytes());
+    }
+    // Block themes support responsive embeds.
+    push(b"wp-embed-responsive");
+    if request.page > 1 && !request.not_found {
+        let page = request.page;
+        push(format!("paged-{page}").as_bytes());
+        let kind = match (singular.map(|p| p.post_type.as_str()), &request.archive) {
+            (Some("page"), _) => "page",
+            (Some(_), _) => "single",
+            (None, Some(Archive::Category(_))) => "category",
+            (None, Some(_)) => "date",
+            (None, None) if request.search.is_some() => "search",
+            (None, None) => "",
+        };
+        if !kind.is_empty() {
+            push(format!("{kind}-paged-{page}").as_bytes());
+        }
+    }
+    push(
+        &[
+            b"wp-theme-",
+            &sanitize_html_class(template.as_bytes(), b"")[..],
+        ]
+        .concat(),
+    );
     let mut unique: Vec<Vec<u8>> = Vec::with_capacity(classes.len());
     for class in classes {
         if !unique.contains(&class) {

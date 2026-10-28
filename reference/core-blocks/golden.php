@@ -176,8 +176,42 @@ foreach ( array( 1001, 1002, 1003, 1004 ) as $id ) {
 		}
 	}
 }
-remove_all_filters( 'get_the_terms' );
 remove_all_filters( 'pre_option_sticky_posts' );
+remove_all_filters( 'post_thumbnail_id' );
+
+// The post terms block over each term set, given by the get_the_terms filter.
+$terms_blocks = array(
+	'<!-- wp:post-terms {"term":"category"} /-->',
+	'<!-- wp:post-terms {"term":"post_tag"} /-->',
+	'<!-- wp:post-terms {"term":"post_format"} /-->',
+	'<!-- wp:post-terms {"term":"nav_menu"} /-->',
+	'<!-- wp:post-terms {"term":"no_such_taxonomy"} /-->',
+	'<!-- wp:post-terms /-->',
+	'<!-- wp:post-terms {"term":"category","separator":" | ","prefix":"In <b>cats</b><script>x</script>: ","suffix":" <i>ok</i>","textAlign":"center"} /-->',
+	'<!-- wp:post-terms {"term":"post_tag","separator":"","prefix":"0","style":{"elements":{"link":{"color":{"text":"red"}}},"typography":{"fontWeight":"300"}}} /-->',
+	'<!-- wp:post-terms {"term":"category","separator":"<&>","className":"x y"} /-->',
+);
+foreach ( $term_sets as $terms ) {
+	remove_all_filters( 'get_the_terms' );
+	add_filter(
+		'get_the_terms',
+		static function ( $found, $post_id, $taxonomy ) use ( $terms ) {
+			if ( empty( $terms[ $taxonomy ] ) ) {
+				return false;
+			}
+			return array_map( static fn( $t ) => new WP_Term( (object) array( 'term_id' => $t[0], 'slug' => $t[1], 'name' => $t[1], 'taxonomy' => $taxonomy ) ), $terms[ $taxonomy ] );
+		},
+		10,
+		3
+	);
+	foreach ( $terms_blocks as $markup ) {
+		foreach ( array( array( 'postId' => 1001, 'postType' => 'post' ), array() ) as $context ) {
+			$block = new WP_Block( parse_blocks( $markup )[0], $context );
+			echo 'terms', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( array( 'terms' => $terms, 'context' => (bool) $context, 'home' => home_url() ) ) ), "\t", bin2hex( $block->render() ), "\n";
+		}
+	}
+}
+remove_all_filters( 'get_the_terms' );
 remove_all_filters( 'post_thumbnail_id' );
 
 // The query loop, on the fixture's own posts through WP_Query.

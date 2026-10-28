@@ -15,6 +15,7 @@ struct Fixture {
     options: HashMap<String, Vec<u8>>,
     home: Vec<u8>,
     post: Option<Post>,
+    terms: HashMap<String, Vec<hyscribe_model::Term>>,
 }
 
 impl Site for Fixture {
@@ -30,8 +31,8 @@ impl Site for Fixture {
         self.post.clone().filter(|post| post.id == id)
     }
 
-    fn post_terms(&self, _: u64, _: &str) -> Vec<hyscribe_model::Term> {
-        Vec::new()
+    fn post_terms(&self, _: u64, taxonomy: &str) -> Vec<hyscribe_model::Term> {
+        self.terms.get(taxonomy).cloned().unwrap_or_default()
     }
 
     fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
@@ -127,6 +128,7 @@ fn matches_php() {
             || kind == "body"
             || kind == "content"
             || kind == "teaser"
+            || kind == "terms"
         {
             continue;
         }
@@ -278,4 +280,63 @@ fn bindings_and_the_front_page() {
         bound("core/post-data", "link")
             .contains(r#"<time datetime="http://example.test/"></time>"#)
     );
+}
+
+/// The `terms` cases: the post terms block over `golden.php`'s term sets.
+#[test]
+fn post_terms_match_php() {
+    let golden = include_str!("../../tests/golden/core-blocks.tsv");
+    let theme = twentytwentyfive();
+    let mut count = 0;
+    for line in golden.lines().filter(|line| line.starts_with("terms\t")) {
+        let mut fields = line.split('\t').skip(1).map(unhex);
+        let mut field = || fields.next().unwrap();
+        let (markup, state, php) = (field(), object(&field()), field());
+        let mut site = Fixture {
+            home: state.get_str("home").unwrap().to_php_string(),
+            ..Fixture::default()
+        };
+        for (taxonomy, terms) in state
+            .get_str("terms")
+            .unwrap()
+            .as_array()
+            .unwrap_or_default()
+        {
+            let terms = terms
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|(_, term)| {
+                    let slug = term.get(&Key::Int(1)).unwrap().to_php_string();
+                    hyscribe_model::Term {
+                        id: term.get(&Key::Int(0)).unwrap().to_int() as u64,
+                        name: slug.clone(),
+                        slug,
+                    }
+                })
+                .collect();
+            let Key::String(taxonomy) = taxonomy else {
+                panic!()
+            };
+            site.terms
+                .insert(String::from_utf8(taxonomy.clone()).unwrap(), terms);
+        }
+        let request = Request::default();
+        let context = Context {
+            theme: &theme,
+            site: &site,
+            request: &request,
+            post_id: (state.get_str("context") == Some(&Value::Bool(true))).then_some(1001),
+            query: None,
+        };
+        assert_eq!(
+            String::from_utf8_lossy(&render_markup(&context, &markup)),
+            String::from_utf8_lossy(&php),
+            "{} {:?}",
+            String::from_utf8_lossy(&markup),
+            state
+        );
+        count += 1;
+    }
+    assert!(count > 70);
 }

@@ -9,6 +9,7 @@ use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim};
 
 use crate::date::{self, Zone};
+use crate::kses::wp_kses_post;
 use crate::link;
 use crate::post::the_title;
 use crate::query_loop::query_posts;
@@ -68,6 +69,7 @@ pub(crate) fn render(
 ) -> Option<Vec<u8>> {
     let callback = match name {
         "core/post-date" => post_date,
+        "core/post-terms" => post_terms,
         "core/post-title" => post_title,
         "core/query-no-results" => query_no_results,
         "core/query-pagination" => query_pagination,
@@ -146,6 +148,78 @@ impl Context<'_> {
         let option = |name| self.site.option(name).unwrap_or_default();
         date::site_zone(&option("timezone_string"), &option("gmt_offset"))
     }
+}
+
+/// `render_block_core_post_terms()`: the post's terms in a taxonomy that
+/// is publicly viewable, linked, between the prefix and suffix.
+fn post_terms(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let (Some(post_id), Some(taxonomy)) = (context.post_id, block.attribute("term")) else {
+        return Vec::new();
+    };
+    let taxonomy = String::from_utf8_lossy(&taxonomy.to_php_string()).into_owned();
+    // is_taxonomy_viewable()
+    if !matches!(taxonomy.as_str(), "category" | "post_tag" | "post_format") {
+        return Vec::new();
+    }
+    let terms = context.site.post_terms(post_id, &taxonomy);
+    if terms.is_empty() {
+        return Vec::new();
+    }
+    let mut classes = vec![[&b"taxonomy-"[..], taxonomy.as_bytes()].concat()];
+    if let Some(align) = block.attribute("textAlign") {
+        classes.push([&b"has-text-align-"[..], &align.to_php_string()].concat());
+    }
+    if block.has_link_color() {
+        classes.push(b"has-link-color".to_vec());
+    }
+    let separator = match block.attribute("separator").filter(|v| !v.is_empty()) {
+        Some(separator) => separator.to_php_string(),
+        None => b" ".to_vec(),
+    };
+    let affix = |name, class: &str| match block.attribute(name).filter(|v| !v.is_empty()) {
+        Some(text) => [
+            format!("<span class=\"wp-block-post-terms__{class}\">").as_bytes(),
+            &text.to_php_string(),
+            b"</span>",
+        ]
+        .concat(),
+        None => Vec::new(),
+    };
+    let upload_host = context.upload_host();
+    let before = wp_kses_post(
+        &[
+            format!("<div {}>", block.wrapper(context, &classes.join(&b' '))).as_bytes(),
+            &affix("prefix", "prefix"),
+        ]
+        .concat(),
+        &upload_host,
+    );
+    let after = wp_kses_post(
+        &[&affix("suffix", "suffix")[..], b"</div>"].concat(),
+        &upload_host,
+    );
+    let separator = [
+        &b"<span class=\"wp-block-post-terms__separator\">"[..],
+        esc_html(&separator).as_bytes(),
+        b"</span>",
+    ]
+    .concat();
+    let home = context.site.home_url();
+    let links: Vec<Vec<u8>> = terms
+        .iter()
+        .map(|term| {
+            let link = esc_url(&link::term_link(&home, &taxonomy, term));
+            [
+                &b"<a href=\""[..],
+                &link,
+                b"\" rel=\"tag\">",
+                &term.name,
+                b"</a>",
+            ]
+            .concat()
+        })
+        .collect();
+    [before, links.join(&separator[..]), after].concat()
 }
 
 /// The classes post blocks share: `has-text-align-*` when `textAlign` is

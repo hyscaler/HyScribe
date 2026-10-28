@@ -2,7 +2,7 @@
 
 //! `get_permalink()` with plain permalinks, the default install's setting.
 
-use hyscribe_model::Post;
+use hyscribe_model::{Post, Term};
 use hyscribe_phpser::{Value, absint};
 
 /// The page on the front page: `page_on_front` when `show_on_front` is
@@ -22,6 +22,21 @@ pub fn permalink(home: &[u8], front_page: Option<u64>, post: &Post) -> Vec<u8> {
         other => format!("?post_type={other}&p={}", post.id),
     };
     [home, b"/", query.as_bytes()].concat()
+}
+
+/// `get_term_link( $term, $taxonomy )` for the taxonomies the default
+/// install shows: `?cat=<ID>` for a category, `?tag=<slug>` for a tag,
+/// and for a post format its slug without `post-format-`.
+pub fn term_link(home: &[u8], taxonomy: &str, term: &Term) -> Vec<u8> {
+    let query = match taxonomy {
+        "category" => format!("?cat={}", term.id).into_bytes(),
+        "post_format" => {
+            let slug = crate::template::replace(&term.slug, b"post-format-", b"");
+            [&b"?post_format="[..], &slug].concat()
+        }
+        _ => [&b"?tag="[..], &term.slug].concat(),
+    };
+    [home, b"/", &query].concat()
 }
 
 #[cfg(test)]

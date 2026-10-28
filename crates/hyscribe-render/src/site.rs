@@ -2,7 +2,7 @@
 
 //! What dynamic blocks read from the site and the request (ADR 0009).
 
-use hyscribe_model::{Post, PostQuery, Term};
+use hyscribe_model::{Post, PostQuery, Term, User};
 
 /// The site's data, as blocks read it while rendering.
 pub trait Site {
@@ -23,6 +23,11 @@ pub trait Site {
 
     /// The published posts a `WP_Query` with `query`'s arguments finds.
     fn query(&self, query: &PostQuery) -> Vec<Post>;
+
+    /// `get_userdata( $id )`. Sites without user data have none.
+    fn user(&self, _id: u64) -> Option<User> {
+        None
+    }
 }
 
 /// The main query's conditionals that blocks check.

@@ -70,17 +70,19 @@ $posts = array(
 	array( 1002, 'page', 'publish', '', '  Sample Page  ', '2025-12-31 23:59:59', '2025-12-31 23:59:59' ),
 	array( 1003, 'post', 'private', '', 'Secret & things', '2024-02-29 12:00:00', '2024-03-01 00:00:00' ),
 	array( 1004, 'post', 'publish', 'pw', 'Locked', '2021-01-03 13:05:09', '2022-01-03 13:05:09' ),
-	array( 1005, 'post', 'draft', '', 'Draft &copy; &#169; &x &AMP; &abcdefghij; & ', '2020-02-02 02:02:02', '2019-01-01 00:00:00' ),
+	array( 1005, 'wp_block', 'draft', '', 'Draft &copy; &#169; &x &AMP; &abcdefghij; & ', '2020-02-02 02:02:02', '2019-01-01 00:00:00' ),
 	array( 1006, 'post', 'publish', '', '', '2026-01-01 00:00:00', '2026-01-01 00:00:00' ),
 	array( 1007, 'post', 'publish', '', '0', '2026-06-15 18:30:00', '2026-06-15 18:30:00' ),
 	array( 1008, 'post', 'publish', '', '<em>Tagged</em> title&nbsp;x&;y&#038;z', '1999-12-31 12:00:00', '2000-01-01 12:00:00' ),
 );
+// Authors: 1006 has a user that does not exist, 1007 none.
+$authors = array( 1006 => '2', 1007 => '0' );
 foreach ( $posts as list( $id, $type, $status, $password, $title, $date, $modified ) ) {
 	wp_cache_set(
 		$id,
 		(object) array(
 			'ID'                => $id,
-			'post_author'       => '1',
+			'post_author'       => $authors[ $id ] ?? '1',
 			'post_date'         => $date,
 			'post_date_gmt'     => $date,
 			'post_content'      => '',
@@ -116,6 +118,10 @@ $post_blocks = array(
 	'<!-- wp:post-title {"textAlign":"center","level":1,"isLink":true,"fontSize":"xx-large"} /-->',
 	'<!-- wp:post-title {"level":1,"align":"wide","fontSize":"x-large"} /-->',
 	'<!-- wp:post-title {"style":{"elements":{"link":{"color":{"text":"#f00"}}}}} /-->',
+	'<!-- wp:post-author-name /-->',
+	'<!-- wp:post-author-name {"isLink":true} /-->',
+	'<!-- wp:post-author-name {"isLink":true,"linkTarget":"_blank","textAlign":"right","style":{"elements":{"link":{"color":{"text":"red"}}}}} /-->',
+	'<!-- wp:post-author-name {"isLink":true,"linkTarget":"a\\"b"} /-->',
 	'<!-- wp:post-date /-->',
 	'<!-- wp:post-date {"isLink":true} /-->',
 	'<!-- wp:post-date {"textAlign":"right","isLink":true,"fontSize":"small"} /-->',

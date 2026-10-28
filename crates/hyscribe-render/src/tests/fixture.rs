@@ -5,7 +5,7 @@
 
 use std::sync::OnceLock;
 
-use hyscribe_model::{Post, PostQuery, Term};
+use hyscribe_model::{Post, PostQuery, Term, User};
 use hyscribe_phpser::Value;
 use hyscribe_testkit::{Dump, SqlValue, default_install};
 
@@ -183,6 +183,16 @@ impl Site for DefaultInstall {
     }
 
     /// Ties keep table order, as the fixture's posts share one date.
+    fn user(&self, id: u64) -> Option<User> {
+        dump()
+            .table("wp_users")
+            .find(|row| number(&row[0]) == id)
+            .map(|row| User {
+                id,
+                display_name: text(&row[9]),
+            })
+    }
+
     fn query(&self, query: &PostQuery) -> Vec<Post> {
         let mut posts: Vec<Post> = dump()
             .table("wp_posts")

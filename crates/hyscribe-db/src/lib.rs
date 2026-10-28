@@ -13,7 +13,7 @@
 use std::fmt;
 
 use hyscribe_config::{Database, Prefix};
-use hyscribe_model::{Post, PostQuery, Term};
+use hyscribe_model::{Post, PostQuery, Term, User};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
 
@@ -115,6 +115,15 @@ fn term(row: &MySqlRow) -> Result<Term, DbError> {
         slug: c.bytes("slug"),
     };
     c.finish(term)
+}
+
+fn user(row: &MySqlRow) -> Result<User, DbError> {
+    let mut c = Columns::new(row);
+    let user = User {
+        id: c.unsigned("ID"),
+        display_name: c.bytes("display_name"),
+    };
+    c.finish(user)
 }
 
 fn post(row: &MySqlRow) -> Result<Post, DbError> {
@@ -275,6 +284,19 @@ impl Db {
             .await
             .map_err(db_error)?;
         rows.iter().map(term).collect()
+    }
+
+    /// One user by ID.
+    pub async fn user(&self, id: u64) -> Result<Option<User>, DbError> {
+        let sql = self
+            .prefix
+            .sql("SELECT ID, display_name FROM {prefix}users WHERE ID = ?");
+        let row = sqlx::query(sql)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.as_ref().map(user).transpose()
     }
 
     /// A category, if it exists.

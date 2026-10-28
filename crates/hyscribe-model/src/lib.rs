@@ -51,6 +51,15 @@ pub struct Term {
     pub slug: Vec<u8>,
 }
 
+/// A row of `{prefix}users`, with the columns rendering needs.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct User {
+    /// `ID`.
+    pub id: u64,
+    /// `display_name`.
+    pub display_name: Vec<u8>,
+}
+
 /// What a list of posts is filtered by.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PostQuery {

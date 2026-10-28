@@ -68,6 +68,7 @@ pub(crate) fn render(
     content: &[u8],
 ) -> Option<Vec<u8>> {
     let callback = match name {
+        "core/post-author-name" => post_author_name,
         "core/post-date" => post_date,
         "core/post-terms" => post_terms,
         "core/post-title" => post_title,
@@ -148,6 +149,59 @@ impl Context<'_> {
         let option = |name| self.site.option(name).unwrap_or_default();
         date::site_zone(&option("timezone_string"), &option("gmt_offset"))
     }
+}
+
+/// `render_block_core_post_author_name()`: the author's display name, as
+/// stored, linked to their posts when `isLink` is set.
+fn post_author_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let Some(post) = context.post().filter(|post| post.author != 0) else {
+        return Vec::new();
+    };
+    // post_type_supports( $post_type, 'author' )
+    if !matches!(
+        post.post_type.as_str(),
+        "post" | "page" | "attachment" | "revision"
+    ) {
+        return Vec::new();
+    }
+    let mut name = context
+        .site
+        .user(post.author)
+        .map(|user| user.display_name)
+        .unwrap_or_default();
+    if block.attribute("isLink").is_some_and(|v| !v.is_empty()) {
+        let home = context.site.home_url();
+        let url = esc_url(
+            format!("{}/?author={}", String::from_utf8_lossy(&home), post.author).as_bytes(),
+        );
+        let target = block
+            .attribute("linkTarget")
+            .map(Value::to_php_string)
+            .unwrap_or_default();
+        name = [
+            &b"<a href=\""[..],
+            &url,
+            b"\" target=\"",
+            esc_attr(&target).as_bytes(),
+            b"\" class=\"wp-block-post-author-name__link\">",
+            &name,
+            b"</a>",
+        ]
+        .concat();
+    }
+    let mut classes = Vec::new();
+    if let Some(align) = block.attribute("textAlign") {
+        classes.push([&b"has-text-align-"[..], &align.to_php_string()].concat());
+    }
+    if block.has_link_color() {
+        classes.push(b"has-link-color".to_vec());
+    }
+    [
+        format!("<div {}>", block.wrapper(context, &classes.join(&b' '))).as_bytes(),
+        &name,
+        b"</div>",
+    ]
+    .concat()
 }
 
 /// `render_block_core_post_terms()`: the post's terms in a taxonomy that

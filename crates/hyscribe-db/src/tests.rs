@@ -263,13 +263,15 @@ async fn errors_are_reported() {
         db.option("blogname").await.unwrap_err(),
         db.post_meta(1, "x").await.unwrap_err(),
         db.post_terms(1, "category").await.unwrap_err(),
+        db.user(1).await.unwrap_err(),
     ] {
         assert!(
             [
                 "missing_options",
                 "missing_posts",
                 "missing_terms",
-                "missing_postmeta"
+                "missing_postmeta",
+                "missing_users"
             ]
             .iter()
             .any(|table| err.to_string().contains(table)),
@@ -333,6 +335,9 @@ async fn options_meta_and_terms() {
         Some(b"HyScribe Default Install".to_vec())
     );
     assert_eq!(db.option("no_such_option").await.unwrap(), None);
+    let admin = db.user(1).await.unwrap().unwrap();
+    assert_eq!((admin.id, admin.display_name), (1, b"admin".to_vec()));
+    assert_eq!(db.user(99).await.unwrap(), None);
     assert_eq!(
         db.post_meta(2, "_wp_page_template").await.unwrap(),
         Some(b"default".to_vec())

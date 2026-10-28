@@ -319,3 +319,8 @@ fn the_deepest_blocks_fit_a_worker_stack() {
 fn replacing_nothing_keeps_the_subject() {
     assert_eq!(replace(b"abc", b"", b"x"), b"abc");
 }
+
+#[test]
+fn sites_without_user_data_have_no_users() {
+    assert_eq!(DefaultInstall.user(1), None);
+}

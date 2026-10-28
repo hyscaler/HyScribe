@@ -11,14 +11,34 @@ pub fn front_page(show_on_front: &[u8], page_on_front: &[u8]) -> Option<u64> {
     (show_on_front == b"page").then(|| absint(&Value::String(page_on_front.to_vec())))
 }
 
+/// The post types WordPress registers itself (`_builtin`), other than pages
+/// and attachments.
+const BUILTIN_TYPES: [&str; 14] = [
+    "post",
+    "revision",
+    "nav_menu_item",
+    "custom_css",
+    "customize_changeset",
+    "oembed_cache",
+    "user_request",
+    "wp_block",
+    "wp_template",
+    "wp_template_part",
+    "wp_global_styles",
+    "wp_navigation",
+    "wp_font_family",
+    "wp_font_face",
+];
+
 /// `get_permalink( $post )`: `home` is `home_url()`, `front_page` as
 /// [`front_page`] gives it.
 pub fn permalink(home: &[u8], front_page: Option<u64>, post: &Post) -> Vec<u8> {
     let query = match post.post_type.as_str() {
         "page" if front_page == Some(post.id) => String::new(),
-        "post" => format!("?p={}", post.id),
         "page" => format!("?page_id={}", post.id),
         "attachment" => format!("?attachment_id={}", post.id),
+        // Core's other types take the post branch of get_permalink().
+        builtin if BUILTIN_TYPES.contains(&builtin) => format!("?p={}", post.id),
         other => format!("?post_type={other}&p={}", post.id),
     };
     [home, b"/", query.as_bytes()].concat()
@@ -69,6 +89,10 @@ mod tests {
         assert_eq!(
             link(&post(4, "book"), None),
             "http://example.test/?post_type=book&p=4"
+        );
+        assert_eq!(
+            link(&post(5, "wp_navigation"), None),
+            "http://example.test/?p=5"
         );
     }
 }

@@ -42,6 +42,14 @@ impl Site for Fixture {
     fn query(&self, _: &hyscribe_model::PostQuery) -> Vec<Post> {
         Vec::new()
     }
+
+    /// The fixture database's one user.
+    fn user(&self, id: u64) -> Option<hyscribe_model::User> {
+        (id == 1).then(|| hyscribe_model::User {
+            id,
+            display_name: b"admin".to_vec(),
+        })
+    }
 }
 
 fn object(json: &[u8]) -> Value {
@@ -56,6 +64,7 @@ fn text(value: &Value, name: &str) -> String {
 fn post(row: &Value) -> Post {
     Post {
         id: row.get_str("ID").unwrap().to_float() as u64,
+        author: row.get_str("post_author").unwrap().to_int() as u64,
         title: row.get_str("post_title").unwrap().to_php_string(),
         status: text(row, "post_status"),
         password: row.get_str("post_password").unwrap().to_php_string(),

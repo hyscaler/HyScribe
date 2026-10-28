@@ -16,10 +16,15 @@ struct WithComments {
     comments: Vec<Comment>,
     users: Vec<User>,
     password: bool,
+    closed: bool,
+    siteurl: Vec<u8>,
 }
 
 impl Site for WithComments {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
+        if name == "siteurl" {
+            return Some(self.siteurl.clone());
+        }
         match self.options.get_str(name) {
             Some(value) => Some(value.to_php_string()),
             None => self.base.option(name),
@@ -34,7 +39,12 @@ impl Site for WithComments {
         } else {
             Vec::new()
         };
-        self.base.post(id).map(|post| Post { password, ..post })
+        self.base.post(id).map(|post| Post {
+            password,
+            // The golden opens comments on every post, or closes them all.
+            comment_status: if self.closed { "closed" } else { "open" }.into(),
+            ..post
+        })
     }
     fn post_terms(&self, post_id: u64, taxonomy: &str) -> Vec<Term> {
         self.base.post_terms(post_id, taxonomy)
@@ -116,8 +126,14 @@ fn matches_php() {
             comments: approved(state.get_str("comments").unwrap()),
             users: users(state.get_str("users").unwrap()),
             password: state.get_str("password") == Some(&Value::Bool(true)),
+            closed: state.get_str("closed") == Some(&Value::Bool(true)),
+            siteurl: state.get_str("siteurl").unwrap().to_php_string(),
         };
-        let request = Request::default();
+        let request = Request {
+            now: state.get_str("now").unwrap().to_int(),
+            post: state.get_str("global").map(|id| id.to_int() as u64),
+            ..Request::default()
+        };
         let mut renderer = Renderer::new(&theme, &site, &request);
         let post = state.get_str("post").unwrap().to_int() as u64;
         renderer.context.post_id = (post != 0).then_some(post);
@@ -139,5 +155,18 @@ fn matches_php() {
         failures.len(),
         failures[..failures.len().min(3)].join("\n")
     );
-    assert_eq!(golden.lines().count(), 37);
+    assert!(golden.lines().count() > 60);
+}
+
+/// PHP's `urlencode()` of the same strings.
+#[test]
+fn urlencode_like_php() {
+    assert_eq!(
+        crate::core_blocks::urlencode(b"http://Example.test/?p=1&x=a b~*"),
+        b"http%3A%2F%2FExample.test%2F%3Fp%3D1%26x%3Da+b%7E%2A"
+    );
+    assert_eq!(
+        crate::core_blocks::urlencode(b"AZaz09-_.!"),
+        b"AZaz09-_.%21"
+    );
 }

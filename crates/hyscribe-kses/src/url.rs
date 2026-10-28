@@ -10,6 +10,12 @@ use crate::protocol::{ALLOWED_PROTOCOLS, wp_kses_bad_protocol};
 /// `WP_HTML_Tag_Processor::set_attribute()` calls it. Empty for a URL
 /// whose scheme is not allowed.
 pub fn esc_url(url: &[u8]) -> Vec<u8> {
+    esc_url_protocols(url, &ALLOWED_PROTOCOLS)
+}
+
+/// `esc_url( $url, $protocols )`: [`esc_url`] with only `protocols`
+/// allowed.
+pub fn esc_url_protocols(url: &[u8], protocols: &[&str]) -> Vec<u8> {
     let url: Vec<u8> = str_replace(ltrim(url), b" ", b"%20")
         .into_iter()
         .filter(|&b| allowed(b))
@@ -35,7 +41,7 @@ pub fn esc_url(url: &[u8]) -> Vec<u8> {
     if url.first() == Some(&b'/') {
         return url;
     }
-    let good = wp_kses_bad_protocol(&url, &ALLOWED_PROTOCOLS);
+    let good = wp_kses_bad_protocol(&url, protocols);
     if good.eq_ignore_ascii_case(&url) {
         good
     } else {

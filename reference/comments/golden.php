@@ -8,6 +8,10 @@
 
 require '/var/www/html/wp-load.php';
 
+// The elements support (wp-elements-* classes) is not ported yet.
+remove_filter( 'render_block', 'wp_render_elements_class_name', 10 );
+remove_filter( 'render_block_data', 'wp_render_elements_support_styles', 10 );
+
 global $wpdb;
 $wpdb->query( 'START TRANSACTION' );
 
@@ -44,8 +48,22 @@ $insert( array( 'comment_author' => 'Q other user', 'user_id' => $reader, 'comme
 $legacy = $insert( array( 'comment_author' => 'R untyped', 'comment_date_gmt' => '2026-10-27 12:00:00' ) );
 $wpdb->update( $wpdb->comments, array( 'comment_type' => '' ), array( 'comment_ID' => $legacy ) );
 clean_comment_cache( $legacy );
+foreach ( array(
+	array( '', 0, '' ),
+	array( '', 1, 'http://' ),
+	array( '<b>Bold</b> & co', 0, 'javascript:alert(1)' ),
+	array( 'Linked', 0, 'https://example.test/a b?x=1&y=2' ),
+	array( 'Plain http', 0, 'http://example.test' ),
+) as $n => list( $author, $user_id, $url ) ) {
+	$insert( array( 'comment_author' => $author, 'user_id' => $user_id, 'comment_author_url' => $url, 'comment_date' => "2026-10-2$n 1$n:3$n:00", 'comment_date_gmt' => "2026-10-27 13:0$n:00" ) );
+}
+$insert( array( 'comment_post_ID' => 2, 'comment_author' => 'On the front page' ) );
 $users = $wpdb->get_results( "SELECT ID, display_name, user_nicename FROM {$wpdb->users}", ARRAY_A );
-$rows = $wpdb->get_results( "SELECT * FROM {$wpdb->comments} WHERE comment_post_ID = 1 ORDER BY comment_ID", ARRAY_A );
+
+// The front page takes comments, so its reply links show.
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'open' ), array( 'ID' => 2 ) );
+clean_post_cache( 2 );
+$rows = $wpdb->get_results( "SELECT * FROM {$wpdb->comments} ORDER BY comment_ID", ARRAY_A );
 
 $option_sets = array(
 	array(),
@@ -54,10 +72,19 @@ $option_sets = array(
 	array( 'thread_comments_depth' => '1' ),
 	array( 'comment_order' => 'desc' ),
 	array( 'comment_order' => 'desc', 'thread_comments_depth' => '3' ),
+	array( 'comment_registration' => '1' ),
+	array( 'date_format' => 'Y/m/d', 'thread_comments_depth' => '4' ),
+	array( 'show_on_front' => 'page', 'page_on_front' => '2' ),
 );
 $markups = array(
 	'<!-- wp:comment-template --><p>c</p><!-- /wp:comment-template -->',
 	'<!-- wp:comment-template {"className":"listed"} --><p>c</p><!-- /wp:comment-template -->',
+	'<!-- wp:comment-template --><!-- wp:comment-date {"isLink":false} /--><!-- wp:comment-author-name {"style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- /wp:comment-template -->',
+	'<!-- wp:comment-template --><!-- wp:comment-edit-link --><a>saved</a><!-- /wp:comment-edit-link --><!-- /wp:comment-template -->',
+	'<!-- wp:comment-date /-->',
+	'<!-- wp:comment-author-name /-->',
+	'<!-- wp:comment-reply-link /-->',
+	'<!-- wp:comment-template --><!-- wp:comment-date /--><!-- wp:comment-date {"format":"Y-m-d H:i","isLink":true} /--><!-- wp:comment-date {"format":"human-diff","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- wp:comment-author-name /--><!-- wp:comment-author-name {"isLink":true,"linkTarget":"_blank","textAlign":"right"} /--><!-- wp:comment-author-name {"isLink":true,"linkTarget":""} /--><!-- wp:comment-edit-link /--><!-- wp:comment-reply-link /--><!-- wp:comment-reply-link {"textAlign":"center","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- /wp:comment-template -->',
 );
 $reset = function () {
 	$GLOBALS['comment_alt']        = 0;
@@ -65,31 +92,57 @@ $reset = function () {
 	$GLOBALS['comment_thread_alt'] = 0;
 };
 foreach ( $option_sets as $options ) {
-	foreach ( array( 'thread_comments', 'thread_comments_depth', 'comment_order' ) as $name ) {
+	foreach ( array( 'thread_comments', 'thread_comments_depth', 'comment_order', 'comment_registration', 'date_format', 'show_on_front', 'page_on_front' ) as $name ) {
 		remove_all_filters( "pre_option_$name" );
 	}
 	foreach ( $options as $name => $value ) {
 		add_filter( "pre_option_$name", static fn() => $value );
 	}
-	foreach ( array( 1, 2, 0 ) as $post_id ) {
+	foreach ( array( 1, 2, 3, 0 ) as $post_id ) {
 		foreach ( $markups as $markup ) {
 			$reset();
 			$context = $post_id ? array( 'postId' => $post_id ) : array();
 			$html    = ( new WP_Block( parse_blocks( $markup )[0], $context ) )->render();
 			// Twice in one request, as the counters carry on.
 			$html   .= ( new WP_Block( parse_blocks( $markup )[0], $context ) )->render();
-			$state   = array( 'options' => $options, 'post' => $post_id, 'comments' => $rows, 'users' => $users, 'password' => false );
-			echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+			$state   = array( 'options' => $options, 'post' => $post_id, 'comments' => $rows, 'users' => $users, 'password' => false, 'closed' => false, 'now' => time() );
+			echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html ), "\n";
 		}
 	}
 }
+
+// With comments closed there is no reply link.
+foreach ( array( 'thread_comments', 'thread_comments_depth', 'comment_order', 'comment_registration', 'date_format', 'show_on_front', 'page_on_front' ) as $name ) {
+	remove_all_filters( "pre_option_$name" );
+}
+// Logged-out reply links go to the login page, back to the global post.
+add_filter( 'pre_option_comment_registration', static fn() => '1' );
+$GLOBALS['post'] = get_post( 1 );
+$reset();
+$markup = end( $markups );
+$state  = array( 'options' => array( 'comment_registration' => '1' ), 'post' => 1, 'comments' => $rows, 'users' => $users, 'password' => false, 'closed' => false, 'now' => time(), 'global' => 1 );
+$html   = ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
+$html  .= ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html ), "\n";
+remove_all_filters( 'pre_option_comment_registration' );
+$GLOBALS['post'] = null;
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'closed' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$reset();
+$markup = end( $markups );
+$state  = array( 'options' => array(), 'post' => 1, 'comments' => $rows, 'users' => $users, 'password' => false, 'closed' => true, 'now' => time() );
+$html  = ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
+$html .= ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html ), "\n";
 
 // A password protected post shows no comments.
 $wpdb->update( $wpdb->posts, array( 'post_password' => 'pw' ), array( 'ID' => 1 ) );
 clean_post_cache( 1 );
 $markup = $markups[0];
 $reset();
-$state = array( 'options' => array(), 'post' => 1, 'comments' => $rows, 'users' => $users, 'password' => true );
-echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render() ), "\n";
+$state = array( 'options' => array(), 'post' => 1, 'comments' => $rows, 'users' => $users, 'password' => true, 'closed' => true, 'now' => time() );
+$html  = ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
+$html .= ( new WP_Block( parse_blocks( $markup )[0], array( 'postId' => 1 ) ) )->render();
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state + array( 'siteurl' => site_url() ) ) ), "\t", bin2hex( $html ), "\n";
 
 $wpdb->query( 'ROLLBACK' );

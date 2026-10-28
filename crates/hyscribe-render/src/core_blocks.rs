@@ -4,7 +4,7 @@
 //! `wp-includes/blocks/`, run on the attributes as
 //! `prepare_attributes_for_render()` leaves them.
 
-use hyscribe_kses::{esc_attr, esc_html, esc_url};
+use hyscribe_kses::{esc_attr, esc_html, esc_url, esc_url_protocols};
 use hyscribe_model::{Comment, Post};
 use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim};
 
@@ -71,6 +71,10 @@ pub(crate) fn render(
     content: &[u8],
 ) -> Option<Vec<u8>> {
     let callback = match name {
+        "core/comment-author-name" => comment_author_name,
+        "core/comment-date" => comment_date,
+        "core/comment-edit-link" => comment_edit_link,
+        "core/comment-reply-link" => comment_reply_link,
         "core/comments" | "core/post-comments" => comments,
         "core/comments-title" => comments_title,
         "core/post-author-name" => post_author_name,
@@ -155,6 +159,243 @@ impl Context<'_> {
         let option = |name| self.site.option(name).unwrap_or_default();
         date::site_zone(&option("timezone_string"), &option("gmt_offset"))
     }
+}
+
+/// `render_block_core_comment_date()`: the comment's date in `format`,
+/// or the site's, or how long ago, linked to the comment if `isLink`.
+fn comment_date(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let Some(comment) = &context.comment else {
+        return Vec::new();
+    };
+    let class: &[u8] = if block.has_link_color() {
+        b"has-link-color"
+    } else {
+        b""
+    };
+    let zone = context.zone();
+    let format = block
+        .attribute("format")
+        .filter(|v| !v.is_empty())
+        .map(Value::to_php_string);
+    let mut date = match format.as_deref() {
+        Some(b"human-diff") => {
+            let from = date::stored_unix(&comment.date, zone);
+            format!("{} ago", date::human_time_diff(from, context.request.now)).into_bytes()
+        }
+        Some(format) => {
+            date::format(&String::from_utf8_lossy(format), &comment.date, zone).into_bytes()
+        }
+        None => {
+            let site_format = context.site.option("date_format").unwrap_or_default();
+            date::format(&String::from_utf8_lossy(&site_format), &comment.date, zone).into_bytes()
+        }
+    };
+    if block.attribute("isLink").is_some_and(|v| !v.is_empty()) {
+        date = [
+            &b"<a href=\""[..],
+            &esc_url(&comment_link(context, comment)),
+            b"\">",
+            &date,
+            b"</a>",
+        ]
+        .concat();
+    }
+    let datetime = esc_attr(date::format("c", &comment.date, zone).as_bytes());
+    [
+        format!(
+            "<div {}><time datetime=\"{datetime}\">",
+            block.wrapper(context, class)
+        )
+        .as_bytes(),
+        &date,
+        b"</time></div>",
+    ]
+    .concat()
+}
+
+/// `get_comment_link( $comment )` with comment paging off: the post's
+/// permalink and the comment's anchor.
+fn comment_link(context: &Context<'_>, comment: &Comment) -> Vec<u8> {
+    let permalink = context
+        .site
+        .post(comment.post_id)
+        .map(|post| context.permalink(&post))
+        .unwrap_or_default();
+    [permalink, format!("#comment-{}", comment.id).into_bytes()].concat()
+}
+
+/// `get_comment_author( $comment )`: the author, else the commenting
+/// user's display name, else "Anonymous".
+fn comment_author(context: &Context<'_>, comment: &Comment) -> Vec<u8> {
+    if !is_empty_string(&comment.author) {
+        return comment.author.clone();
+    }
+    let user = (comment.user_id != 0)
+        .then(|| context.site.user(comment.user_id))
+        .flatten();
+    user.map_or(b"Anonymous".to_vec(), |user| user.display_name)
+}
+
+/// `render_block_core_comment_author_name()`: the author, linked to their
+/// site when `isLink` and `linkTarget` are set.
+fn comment_author_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let Some(comment) = &context.comment else {
+        return Vec::new();
+    };
+    let mut name = comment_author(context, comment);
+    // get_comment_author_url()
+    let url = if comment.author_url == b"http://" {
+        Vec::new()
+    } else {
+        comment.author_url.clone()
+    };
+    let url = esc_url_protocols(&url, &["http", "https"]);
+    let target = block.attribute("linkTarget").filter(|v| !v.is_empty());
+    if let (false, true, Some(target)) = (
+        url.is_empty(),
+        block.attribute("isLink").is_some_and(|v| !v.is_empty()),
+        target,
+    ) {
+        name = [
+            &b"<a rel=\"external nofollow ugc\" href=\""[..],
+            &esc_url(&url),
+            b"\" target=\"",
+            esc_attr(&target.to_php_string()).as_bytes(),
+            b"\" >",
+            &name,
+            b"</a>",
+        ]
+        .concat();
+    }
+    let mut classes = Vec::new();
+    if let Some(align) = block.attribute("textAlign") {
+        classes.push([&b"has-text-align-"[..], &align.to_php_string()].concat());
+    }
+    if block.has_link_color() {
+        classes.push(b"has-link-color".to_vec());
+    }
+    [
+        format!("<div {}>", block.wrapper(context, &classes.join(&b' '))).as_bytes(),
+        &name,
+        b"</div>",
+    ]
+    .concat()
+}
+
+/// `render_block_core_comment_edit_link()`: only for those who may edit the
+/// comment, and visitors may not.
+fn comment_edit_link(_context: &Context<'_>, _block: &Block<'_>) -> Vec<u8> {
+    vec![]
+}
+
+/// `render_block_core_comment_reply_link()` with
+/// `get_comment_reply_link()`: a reply link while the thread can go deeper
+/// and the post takes comments.
+fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let Some(comment) = &context.comment else {
+        return Vec::new();
+    };
+    let option = |name| context.site.option(name).unwrap_or_default();
+    if is_empty_string(&option("thread_comments")) {
+        return Vec::new();
+    }
+    let all = context.site.comments(comment.post_id);
+    let mut depth = 1;
+    let mut parent = comment.parent;
+    while parent != 0 && depth <= all.len() {
+        depth += 1;
+        parent = all.iter().find(|c| c.id == parent).map_or(0, |c| c.parent);
+    }
+    let max_depth = Value::String(option("thread_comments_depth")).to_int();
+    if max_depth <= i64::try_from(depth).unwrap_or(i64::MAX) {
+        return Vec::new();
+    }
+    let Some(post) = context
+        .site
+        .post(comment.post_id)
+        .filter(|post| post.comment_status == "open")
+    else {
+        return Vec::new();
+    };
+    let permalink = context.permalink(&post);
+    let author = comment_author(context, comment);
+    let reply_to = [&b"Reply to "[..], &author].concat();
+    let link = if Value::String(option("comment_registration")).is_empty() {
+        let separator: &[u8] = if permalink.contains(&b'?') {
+            b"&"
+        } else {
+            b"?"
+        };
+        let href = esc_url(
+            &[
+                &permalink[..],
+                separator,
+                format!("replytocom={}", comment.id).as_bytes(),
+            ]
+            .concat(),
+        );
+        let data = format!(
+            "data-commentid=\"{}\" data-postid=\"{}\" data-belowelement=\"comment-{}\" data-respondelement=\"respond\" data-replyto=\"{}\"",
+            comment.id,
+            post.id,
+            comment.id,
+            esc_attr(&reply_to)
+        );
+        [
+            &b"<a rel=\"nofollow\" class=\"comment-reply-link\" href=\""[..],
+            &href,
+            b"#respond\" ",
+            data.as_bytes(),
+            b" aria-label=\"",
+            esc_attr(&reply_to).as_bytes(),
+            b"\">Reply</a>",
+        ]
+        .concat()
+    } else {
+        // wp_login_url( get_permalink() ), for the global post: the main query's
+        let current = context.request.post.and_then(|id| context.site.post(id));
+        let mut login = [&option("siteurl")[..], b"/wp-login.php"].concat();
+        if let Some(post) = current {
+            login = [
+                &login[..],
+                b"?redirect_to=",
+                &urlencode(&context.permalink(&post)),
+            ]
+            .concat();
+        }
+        [
+            &b"<a rel=\"nofollow\" class=\"comment-reply-login\" href=\""[..],
+            &esc_url(&login),
+            b"\">Log in to Reply</a>",
+        ]
+        .concat()
+    };
+    let mut classes = Vec::new();
+    if let Some(align) = block.attribute("textAlign") {
+        classes.push([&b"has-text-align-"[..], &align.to_php_string()].concat());
+    }
+    if block.has_link_color() {
+        classes.push(b"has-link-color".to_vec());
+    }
+    [
+        format!("<div {}>", block.wrapper(context, &classes.join(&b' '))).as_bytes(),
+        &link,
+        b"</div>",
+    ]
+    .concat()
+}
+
+/// PHP's `urlencode()`: letters, digits and `-_.` kept, spaces as `+`.
+pub(crate) fn urlencode(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    for &b in text {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' => out.push(b),
+            b' ' => out.push(b'+'),
+            _ => out.extend(format!("%{b:02X}").into_bytes()),
+        }
+    }
+    out
 }
 
 /// `render_block_core_comments()`: the saved markup, where the post takes

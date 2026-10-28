@@ -357,3 +357,91 @@ fn search_terms_split_like_wordpress() {
     assert_eq!(search_terms("a b,c+d\te"), ["a", "b", "c", "d", "e"]);
     assert!(search_terms("  ,+ ").is_empty());
 }
+
+#[tokio::test]
+async fn admin_and_login_urls_are_clean() {
+    let site = fixture_site(Some("http://127.0.0.1:8080")).await;
+    let (temporary, permanent) = (
+        StatusCode::TEMPORARY_REDIRECT,
+        StatusCode::PERMANENT_REDIRECT,
+    );
+    for (method, uri, status, expected) in [
+        ("GET", "/wp-login.php", temporary, "/hs-login"),
+        (
+            "GET",
+            "/wp-login.php?action=lostpassword",
+            temporary,
+            "/hs-login?action=lostpassword",
+        ),
+        ("POST", "/wp-login.php", temporary, "/hs-login"),
+        ("GET", "/wp-admin", temporary, "/hs-admin/"),
+        ("GET", "/wp-admin/", temporary, "/hs-admin/"),
+        ("GET", "/wp-admin/index.php", temporary, "/hs-admin/"),
+        (
+            "GET",
+            "/wp-admin/edit.php?post_type=page",
+            temporary,
+            "/hs-admin/edit?post_type=page",
+        ),
+        (
+            "GET",
+            "/wp-admin/admin.php?page=x&y=1",
+            temporary,
+            "/hs-admin/admin?page=x&y=1",
+        ),
+        (
+            "POST",
+            "/wp-admin/admin-ajax.php",
+            temporary,
+            "/hs-admin/admin-ajax",
+        ),
+        (
+            "GET",
+            "/wp-admin/css/forms.css",
+            temporary,
+            "/hs-admin/css/forms.css",
+        ),
+        ("GET", "/hs-login.php", permanent, "/hs-login"),
+        (
+            "GET",
+            "/hs-admin/edit.php?post_type=page",
+            permanent,
+            "/hs-admin/edit?post_type=page",
+        ),
+        ("GET", "/hs-admin/index.php", permanent, "/hs-admin/"),
+    ] {
+        let reply = request(&site, method, uri).await;
+        assert_eq!(reply.status, status, "{method} {uri}");
+        assert_eq!(
+            reply.headers["location"],
+            format!("http://127.0.0.1:8080{expected}"),
+            "{uri}"
+        );
+    }
+    // Clean URLs are reserved (no login or admin yet), never redirected.
+    for uri in ["/hs-login", "/hs-admin", "/hs-admin/", "/hs-admin/edit"] {
+        let reply = request(&site, "GET", uri).await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{uri}");
+    }
+    // Look-alikes are ordinary paths.
+    for uri in ["/wp-adminx", "/wp-login.phpx", "/x/wp-admin/", "/hs-loginx"] {
+        let status = request(&site, "GET", uri).await.status;
+        assert!(status != temporary && status != permanent, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn static_paths_keep_their_urls() {
+    let site = fixture_site(None).await;
+    for uri in [
+        "/wp-content/uploads/2026/10/photo.jpg",
+        "/wp-content/themes/twentytwentyfive/style.css",
+        "/wp-includes/js/wp-emoji-release.min.js",
+        "/wp-content/plugins/x/",
+    ] {
+        // Never redirected; 404 until static files are served.
+        let reply = request(&site, "GET", uri).await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{uri}");
+        assert!(!reply.headers.contains_key("location"), "{uri}");
+    }
+}

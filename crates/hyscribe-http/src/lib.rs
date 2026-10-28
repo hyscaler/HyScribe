@@ -125,6 +125,10 @@ async fn page(
     uri: Uri,
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
+    // Before the method check, so a login form's POST is redirected too.
+    if let Some((status, location)) = admin_redirect(&site, uri.path(), uri.query()) {
+        return (status, [(header::LOCATION, location)]).into_response();
+    }
     if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
@@ -167,12 +171,64 @@ fn canonical_path(site: &Site, path: &str, raw_query: Option<&str>) -> Option<St
     (!path.ends_with('/')).then(|| format!("{}{path}/{query}", site.home))
 }
 
+/// HyScribe's admin and login URLs have no `.php` (ADR 0008):
+/// `/hs-login` and `/hs-admin/<screen>`. The WordPress forms redirect there
+/// with the query kept: `/wp-login.php`, and `/wp-admin/<screen>.php` with
+/// `index.php` as `/hs-admin/`.
+///
+/// Those redirects are 307: browsers do not cache them, so a site switched
+/// back to PHP WordPress gets its own admin back, and a POST stays a POST.
+/// HyScribe's own URLs with `.php` get a permanent 308 to the clean form.
+fn admin_redirect(
+    site: &Site,
+    path: &str,
+    raw_query: Option<&str>,
+) -> Option<(StatusCode, String)> {
+    let (status, target) = match path {
+        "/wp-login.php" => (StatusCode::TEMPORARY_REDIRECT, "/hs-login".to_string()),
+        "/hs-login.php" => (StatusCode::PERMANENT_REDIRECT, "/hs-login".to_string()),
+        "/wp-admin" => (StatusCode::TEMPORARY_REDIRECT, "/hs-admin/".to_string()),
+        _ => {
+            let (status, screen) = match (
+                path.strip_prefix("/wp-admin/"),
+                path.strip_prefix("/hs-admin/"),
+            ) {
+                (Some(screen), _) => (StatusCode::TEMPORARY_REDIRECT, screen),
+                (None, Some(screen)) if screen.ends_with(".php") => {
+                    (StatusCode::PERMANENT_REDIRECT, screen)
+                }
+                _ => return None,
+            };
+            let screen = screen.strip_suffix(".php").unwrap_or(screen);
+            let screen = if screen == "index" { "" } else { screen };
+            (status, format!("/hs-admin/{screen}"))
+        }
+    };
+    let query = raw_query.map(|q| format!("?{q}")).unwrap_or_default();
+    Some((status, format!("{}{target}{query}", site.home)))
+}
+
+/// Static file trees: never redirected or rewritten, so their public URLs
+/// stay as they are. Served as files once static serving lands (M3.9).
+fn is_static(path: &str) -> bool {
+    path.starts_with("/wp-content/") || path.starts_with("/wp-includes/")
+}
+
 async fn route(
     site: &Site,
     path: &str,
     raw_query: Option<&str>,
     query: &HashMap<String, String>,
 ) -> Result<Outcome, DbError> {
+    // hs-login and hs-admin come with M4 and M5; until then their URLs are
+    // reserved, so no canonical redirect touches them either.
+    if is_static(path)
+        || path == "/hs-login"
+        || path == "/hs-admin"
+        || path.starts_with("/hs-admin/")
+    {
+        return Ok(Outcome::Page(not_found(site)));
+    }
     if let Some(location) = canonical_path(site, path, raw_query) {
         return Ok(Outcome::Redirect(location));
     }

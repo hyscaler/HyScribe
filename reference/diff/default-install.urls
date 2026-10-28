@@ -14,7 +14,9 @@
 /?feed=rss2
 /?p=1&replytocom=1
 /robots.txt
-/wp-login.php
+/wp-login.php 307  # intended: redirects to /hs-login (ADR 0008)
+/wp-admin/ 307  # intended: redirects to /hs-admin/ (ADR 0008)
+/wp-content/themes/twentytwentyfive/style.css 200  # static files: served with M3.9
 /?p=2
 /?page_id=1
 /index.php

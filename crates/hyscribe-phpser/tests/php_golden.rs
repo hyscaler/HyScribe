@@ -13,18 +13,12 @@
 )]
 
 use hyscribe_phpser::{Float, Value, decode, encode};
+use hyscribe_testkit::unhex;
 
 fn golden() -> Vec<Vec<String>> {
     include_str!("golden/php-serialize.tsv")
         .lines()
         .map(|line| line.split('\t').map(String::from).collect())
-        .collect()
-}
-
-fn unhex(hex: &str) -> Vec<u8> {
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
         .collect()
 }
 

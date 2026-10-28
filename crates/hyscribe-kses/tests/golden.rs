@@ -10,13 +10,7 @@ use hyscribe_kses::{
     ALLOWED_PROTOCOLS, esc_attr, esc_html, safecss_filter_attr, sanitize_key, wp_kses_bad_protocol,
     wp_kses_decode_entities, wp_kses_no_null, wp_kses_normalize_entities, wp_strip_all_tags,
 };
-
-fn unhex(text: &str) -> Vec<u8> {
-    text.as_bytes()
-        .chunks(2)
-        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
-        .collect()
-}
+use hyscribe_testkit::unhex;
 
 /// Compares `ours` with every line of a golden; "throws" stands for an
 /// empty result, as the port returns where PHP throws.

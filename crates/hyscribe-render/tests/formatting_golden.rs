@@ -8,6 +8,7 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use hyscribe_render::formatting::{convert_smilies, wptexturize};
+use hyscribe_testkit::unhex;
 
 /// The fixture's shortcodes, plus the `code` one the generator adds.
 const SHORTCODES: [&[u8]; 8] = [
@@ -23,13 +24,6 @@ const SHORTCODES: [&[u8]; 8] = [
 
 /// `includes_url( 'images/smilies/' )` of the fixture's PHP container.
 const SMILIES_URL: &[u8] = b"http://127.0.0.1:8081/wp-includes/images/smilies/";
-
-fn unhex(text: &str) -> Vec<u8> {
-    text.as_bytes()
-        .chunks(2)
-        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
-        .collect()
-}
 
 fn check(golden: &str, expected_count: usize, ours: impl Fn(&[u8]) -> Vec<u8>) {
     let mut failures = Vec::new();

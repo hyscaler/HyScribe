@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use hyscribe_phpser::{encode, json_decode};
 
 use super::*;
+use hyscribe_testkit::unhex;
 
 /// The inputs of the default install, owned.
 pub(crate) struct Fixture {
@@ -90,13 +91,6 @@ pub(crate) fn fixture() -> Fixture {
         theme: fs::read(root().join("themes/twentytwentyfive/theme.json")).unwrap(),
         theme_styles,
     }
-}
-
-fn unhex(text: &str) -> Vec<u8> {
-    text.as_bytes()
-        .chunks(2)
-        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
-        .collect()
 }
 
 /// The default install, resolved once.

@@ -9,13 +9,7 @@
 #![allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)]
 
 use hyscribe_html::{Attribute, TagProcessor};
-
-fn unhex(text: &str) -> Vec<u8> {
-    text.as_bytes()
-        .chunks(2)
-        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
-        .collect()
-}
+use hyscribe_testkit::unhex;
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()

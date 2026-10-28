@@ -2,13 +2,7 @@
 
 use super::*;
 use hyscribe_phpser::encode;
-
-fn unhex(text: &str) -> Vec<u8> {
-    text.as_bytes()
-        .chunks(2)
-        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
-        .collect()
-}
+use hyscribe_testkit::unhex;
 
 /// The PHP oracle's cases (`reference/supports/registry-golden.sh`).
 #[test]

@@ -11,5 +11,8 @@ publish.workspace = true
 
 [dependencies]
 
+[dev-dependencies]
+hyscribe-testkit.workspace = true
+
 [lints]
 workspace = true

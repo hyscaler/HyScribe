@@ -629,6 +629,9 @@ dependencies = [
 [[package]]
 name = "hyscribe-html"
 version = "0.1.0"
+dependencies = [
+ "hyscribe-testkit",
+]
 
 [[package]]
 name = "hyscribe-http"
@@ -646,6 +649,9 @@ dependencies = [
 [[package]]
 name = "hyscribe-kses"
 version = "0.1.0"
+dependencies = [
+ "hyscribe-testkit",
+]
 
 [[package]]
 name = "hyscribe-phpser"
@@ -660,6 +666,7 @@ name = "hyscribe-render"
 version = "0.1.0"
 dependencies = [
  "hyscribe-phpser",
+ "hyscribe-testkit",
  "hyscribe-theme-json",
 ]
 
@@ -684,6 +691,7 @@ name = "hyscribe-theme-json"
 version = "0.1.0"
 dependencies = [
  "hyscribe-phpser",
+ "hyscribe-testkit",
 ]
 
 [[package]]

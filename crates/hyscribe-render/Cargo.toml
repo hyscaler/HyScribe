@@ -14,5 +14,8 @@ hyscribe-phpser.workspace = true
 hyscribe-theme-json.workspace = true
 
 
+[dev-dependencies]
+hyscribe-testkit.workspace = true
+
 [lints]
 workspace = true

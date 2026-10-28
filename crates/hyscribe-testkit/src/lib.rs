@@ -191,12 +191,31 @@ pub fn fixture_database() -> hyscribe_config::Database {
     }
 }
 
+/// The bytes a golden file's hex field spells. Golden files hex encode
+/// their fields so any bytes survive a TSV line; a malformed pair is
+/// skipped, which the comparison against PHP's output then reports.
+pub fn unhex(hex: &str) -> Vec<u8> {
+    hex.as_bytes()
+        .chunks(2)
+        .filter_map(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok())
+        .collect()
+}
+
 /// What a test prints when the fixture database is not running.
 pub const NO_FIXTURE_DATABASE: &str = "no fixture database: run reference/default-install/db.sh up";
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unhex_reads_pairs_and_skips_malformed_ones() {
+        assert_eq!(unhex("00ff7A"), vec![0, 255, 122]);
+        assert_eq!(unhex("zz41"), b"A");
+        assert_eq!(unhex("\u{e9}41"), b"A");
+        assert_eq!(unhex("a\u{e9}"), b"");
+        assert_eq!(unhex(""), b"");
+    }
 
     #[test]
     fn parses_rows_and_escapes() {

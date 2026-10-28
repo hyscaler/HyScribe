@@ -197,7 +197,9 @@ impl Site for DefaultInstall {
             .filter(|post| !query.exclude.contains(&post.id))
             .collect();
         posts.sort_by(|a, b| {
-            if query.ascending {
+            if query.by_menu_order {
+                (a.menu_order, &a.title).cmp(&(b.menu_order, &b.title))
+            } else if query.ascending {
                 a.date.cmp(&b.date)
             } else {
                 b.date.cmp(&a.date)

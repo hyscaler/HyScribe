@@ -67,8 +67,11 @@ async fn home_page_lists_the_posts() {
     assert!(reply.body.contains(
         "<p class=\"wp-block-paragraph\">Welcome to WordPress. This is your first post."
     ));
-    // Pages and drafts are not on the blog home page.
-    assert!(!reply.body.contains("Sample Page"));
+    // Pages are not among the posts; the header's fallback menu lists them.
+    assert_eq!(reply.body.matches("Sample Page").count(), 1);
+    assert!(reply.body.contains(
+        "<a class=\"wp-block-pages-list__item__link wp-block-navigation-item__content\" href=\"http://default-install.test/?page_id=2\">Sample Page</a>"
+    ));
     assert_eq!(reply.headers["content-type"], "text/html; charset=UTF-8");
     for (name, value) in SECURITY_HEADERS {
         assert_eq!(reply.headers[name], value);

@@ -11,10 +11,12 @@
 //! renders with no items.
 
 use hyscribe_html::TagProcessor;
-use hyscribe_kses::{esc_attr, esc_url, safecss_filter_attr};
+use hyscribe_kses::{esc_attr, esc_url, safecss_filter_attr, wp_strip_all_tags};
+use hyscribe_model::{Post, PostQuery};
 use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim, wp_array_set};
+use hyscribe_theme_json::kebab_case;
 
-use crate::blocks::Block;
+use crate::blocks::{Block, parse_blocks, serialize_blocks};
 use crate::core_blocks::prepared;
 use crate::kses::wp_kses_post;
 use crate::site::Archive;
@@ -43,7 +45,8 @@ impl Renderer<'_> {
     pub(crate) fn navigation(&mut self, block: &Block) -> Vec<u8> {
         let parsed =
             typographic_presets_backcompatibility(block.attrs.as_deref().unwrap_or_default());
-        let mut attributes = prepared("core/navigation", &parsed);
+        let block_attributes = prepared("core/navigation", &parsed);
+        let mut attributes = block_attributes.clone();
         for (rgb, named, custom) in [
             ("rgbTextColor", "textColor", "customTextColor"),
             (
@@ -65,12 +68,17 @@ impl Renderer<'_> {
                 .filter(|(k, _)| *k != key);
             attributes = Value::Array(kept.cloned().collect());
         }
-        // The `ref` menu post and the fallback are not ported: both give
-        // no items here.
-        let inner_blocks: &[Block] = if attributes.get_str("ref").is_some() {
-            &[]
+        // Inner blocks get the block's own attributes as context, the
+        // fallback the attributes as render() changed them.
+        let fallback;
+        let (inner_blocks, context): (&[Block], &Value) = if attributes.get_str("ref").is_some() {
+            // Menus from a `wp_navigation` post are not ported yet.
+            (&[], &attributes)
+        } else if block.inner_blocks.is_empty() {
+            fallback = self.fallback_blocks();
+            (&fallback, &attributes)
         } else {
-            &block.inner_blocks
+            (&block.inner_blocks, &block_attributes)
         };
         if has_block_type(inner_blocks, "core/navigation") {
             return Vec::new();
@@ -80,7 +88,7 @@ impl Renderer<'_> {
             .is_some_and(|v| !v.is_empty());
         let tag: &[u8] = if within_overlay { b"div" } else { b"nav" };
         let nav_attributes = self.nav_attributes(&attributes, &parsed, within_overlay);
-        let outer = self.navigation.replace(attributes.clone());
+        let outer = self.navigation.replace(context.clone());
         let mut inner = self.inner_blocks_html(&attributes, &parsed, inner_blocks);
         self.navigation = outer;
         if is_responsive(&attributes) {
@@ -151,6 +159,7 @@ impl Renderer<'_> {
         parsed: &[(Key, Value)],
         inner_blocks: &[Block],
     ) -> Vec<u8> {
+        let has_submenus = self.has_submenus(inner_blocks);
         let container_class = [
             &b"wp-block-navigation__container "[..],
             &classes(attributes),
@@ -194,7 +203,42 @@ impl Renderer<'_> {
         if list_open {
             html.extend_from_slice(b"</ul>");
         }
+        let visibility = submenu_visibility(attributes);
+        let interactive = (has_submenus
+            && (visibility == b"click"
+                || attributes
+                    .get_str("showSubmenuIcon")
+                    .is_some_and(|v| !v.is_empty())))
+            || is_responsive(attributes);
+        if has_submenus && interactive {
+            html = add_directives_to_submenu(&html, &visibility);
+        }
         html
+    }
+
+    /// `has_submenus()`: a page list with child pages. Submenu blocks are
+    /// not ported yet.
+    fn has_submenus(&mut self, inner_blocks: &[Block]) -> bool {
+        if self.has_submenus {
+            return true;
+        }
+        if inner_blocks
+            .iter()
+            .any(|inner| inner.name.as_deref() == Some("core/page-list"))
+        {
+            self.has_submenus = self.pages().iter().any(|page| page.parent != 0);
+        }
+        self.has_submenus
+    }
+
+    /// `get_pages()` sorted by menu order and title.
+    fn pages(&self) -> Vec<Post> {
+        get_page_children(self.context.site.query(&PostQuery {
+            post_types: vec!["page".to_string()],
+            by_menu_order: true,
+            limit: u32::MAX,
+            ..PostQuery::default()
+        }))
     }
 
     /// `get_responsive_container_markup()`, without custom overlays.
@@ -396,6 +440,380 @@ impl Renderer<'_> {
             && i64::try_from(request.queried_object_id) == Ok(id.to_int())
             && kind_matches
     }
+
+    /// `block_core_navigation_get_fallback_blocks()`: the blocks of the most
+    /// recently published menu, or a page list.
+    fn fallback_blocks(&self) -> Vec<Block> {
+        let page_list = vec![Block {
+            name: Some("core/page-list".to_string()),
+            attrs: Some(Vec::new()),
+            inner_blocks: Vec::new(),
+            inner_html: Vec::new(),
+            inner_content: Vec::new(),
+        }];
+        let latest = self.context.site.query(&PostQuery {
+            post_types: vec!["wp_navigation".to_string()],
+            limit: 1,
+            ..PostQuery::default()
+        });
+        let Some(menu) = latest.first() else {
+            return page_list;
+        };
+        let blocks: Vec<Block> = parse_blocks(&menu.content)
+            .into_iter()
+            .filter(|block| block.name.is_some())
+            .collect();
+        if blocks.is_empty() {
+            return page_list;
+        }
+        parse_blocks(&serialize_blocks(&blocks))
+    }
+
+    /// `render_block_core_page_list()`.
+    pub(crate) fn page_list(&mut self, block: &Block) -> Vec<u8> {
+        let parsed = block.attrs.as_deref().unwrap_or_default();
+        let attributes = prepared("core/page-list", parsed);
+        let site = self.context.site;
+        let all_pages = self.pages();
+        if all_pages.is_empty() {
+            return Vec::new();
+        }
+        let queried = self.context.request.queried_object_id;
+        let mut active_ancestors = Vec::new();
+        let mut top_level = Vec::new();
+        let mut children: Vec<(u64, Vec<ListedPage>)> = Vec::new();
+        for page in &all_pages {
+            let is_active = page.id != 0 && page.id == queried;
+            if is_active {
+                active_ancestors = self.ancestors(page);
+            }
+            let listed = ListedPage {
+                id: page.id,
+                title: page.title.clone(),
+                link: self.context.permalink(page),
+                is_active,
+            };
+            if page.parent == 0 {
+                top_level.push(listed);
+            } else {
+                match children
+                    .iter_mut()
+                    .find(|(parent, _)| *parent == page.parent)
+                {
+                    Some((_, siblings)) => siblings.push(listed),
+                    None => children.push((page.parent, vec![listed])),
+                }
+            }
+        }
+        let context = self.navigation.clone().unwrap_or_default();
+        let colors = page_list_colors(&context);
+        let parent_id = attributes.get_str("parentPageID").map_or(0, Value::to_int);
+        let pages = if parent_id == 0 {
+            top_level
+        } else {
+            match children
+                .iter()
+                .find(|(parent, _)| i64::try_from(*parent) == Ok(parent_id))
+            {
+                Some((_, pages)) => pages.clone(),
+                None => return Vec::new(),
+            }
+        };
+        let showing = context.get_str("showSubmenuIcon");
+        let list = PageList {
+            visibility: match showing {
+                Some(_) => submenu_visibility(&context),
+                None => b"hover".to_vec(),
+            },
+            show_icons: showing.is_some_and(|v| !v.is_empty()),
+            in_navigation: showing.is_some(),
+            children: &children,
+            active_ancestors: &active_ancestors,
+            overlay_classes: colors.overlay_classes.join(&b' '),
+            overlay_styles: colors.overlay_styles,
+            front_page: site
+                .option("page_on_front")
+                .map_or(0, |id| Value::String(id).to_int()),
+            upload_host: upload_host(&site.option("siteurl").unwrap_or_default()),
+        };
+        let items = list.render(&pages, 0);
+        let extra = [
+            (
+                "class",
+                Value::String(php_trim(&colors.classes.join(&b' ')).to_vec()),
+            ),
+            ("style", Value::String(colors.styles)),
+        ];
+        let wrapper = get_block_wrapper_attributes(
+            "core/page-list",
+            parsed,
+            &extra,
+            &self.context.theme.global,
+        );
+        [b"<ul ", wrapper.as_bytes(), b">", &items, b"</ul>"].concat()
+    }
+
+    /// `get_post_ancestors()`: parents up the tree, stopping at a loop.
+    fn ancestors(&self, page: &Post) -> Vec<u64> {
+        let mut ancestors = Vec::new();
+        let mut parent = page.parent;
+        while parent != 0 && parent != page.id && !ancestors.contains(&parent) {
+            ancestors.push(parent);
+            parent = self.context.site.post(parent).map_or(0, |post| post.parent);
+        }
+        ancestors
+    }
+}
+
+/// A page as `render_block_core_page_list()` lists it.
+#[derive(Clone)]
+struct ListedPage {
+    id: u64,
+    title: Vec<u8>,
+    link: Vec<u8>,
+    is_active: bool,
+}
+
+/// What `block_core_page_list_render_nested_page_list()` renders with.
+struct PageList<'a> {
+    visibility: Vec<u8>,
+    show_icons: bool,
+    in_navigation: bool,
+    children: &'a [(u64, Vec<ListedPage>)],
+    active_ancestors: &'a [u64],
+    overlay_classes: Vec<u8>,
+    overlay_styles: Vec<u8>,
+    front_page: i64,
+    upload_host: Vec<u8>,
+}
+
+impl PageList<'_> {
+    /// `block_core_page_list_render_nested_page_list()`.
+    fn render(&self, pages: &[ListedPage], depth: usize) -> Vec<u8> {
+        let on_click = self.visibility == b"click";
+        let mut markup = Vec::new();
+        for page in pages {
+            let children = self
+                .children
+                .iter()
+                .find(|(parent, _)| *parent == page.id)
+                .map(|(_, pages)| pages);
+            let mut class = Vec::new();
+            if page.is_active {
+                class.extend_from_slice(b" current-menu-item");
+            }
+            if self.active_ancestors.contains(&page.id) {
+                class.extend_from_slice(b" current-menu-ancestor");
+            }
+            if children.is_some() {
+                class.extend_from_slice(b" has-child");
+            }
+            if self.in_navigation {
+                class.extend_from_slice(b" wp-block-navigation-item");
+                if on_click {
+                    class.extend_from_slice(b" open-on-click");
+                } else if self.visibility == b"hover" && self.show_icons {
+                    class.extend_from_slice(b" open-on-hover-click");
+                } else if self.visibility == b"always" {
+                    class.extend_from_slice(b" open-always");
+                }
+            }
+            let content_class: &[u8] = if self.in_navigation {
+                b" wp-block-navigation-item__content"
+            } else {
+                b""
+            };
+            let mut style = Vec::new();
+            if depth > 0 {
+                class.push(b' ');
+                class.extend_from_slice(php_trim(&self.overlay_classes));
+                if !self.overlay_styles.is_empty() {
+                    style = format!(" style=\"{}\"", esc_attr(&self.overlay_styles)).into_bytes();
+                }
+            }
+            if i64::try_from(page.id) == Ok(self.front_page) {
+                class.extend_from_slice(b" menu-item-home");
+            }
+            let title: &[u8] = if Value::String(page.title.clone()).is_empty() {
+                b"(no title)"
+            } else {
+                &page.title
+            };
+            let aria_label = [&wp_strip_all_tags(title, false)[..], b" submenu"].concat();
+            let title = wp_kses_post(title, &self.upload_host);
+            markup.extend_from_slice(b"<li class=\"wp-block-pages-list__item");
+            markup.extend(esc_attr(&class).into_bytes());
+            markup.push(b'"');
+            markup.extend(style);
+            markup.push(b'>');
+            if children.is_some() && self.in_navigation && on_click {
+                markup.extend(format!("<button aria-label=\"{}\" class=\"{} wp-block-navigation-submenu__toggle\" aria-expanded=\"false\">", esc_attr(&aria_label), esc_attr(content_class)).into_bytes());
+                markup.extend(title);
+                markup.extend_from_slice(b"</button><span class=\"wp-block-page-list__submenu-icon wp-block-navigation__submenu-icon\">");
+                markup.extend_from_slice(SUBMENU_ICON);
+                markup.extend_from_slice(b"</span>");
+            } else {
+                markup.extend(
+                    format!(
+                        "<a class=\"wp-block-pages-list__item__link{}\" href=\"",
+                        esc_attr(content_class)
+                    )
+                    .into_bytes(),
+                );
+                markup.extend(esc_url(&page.link));
+                markup.push(b'"');
+                if page.is_active {
+                    markup.extend_from_slice(b" aria-current=\"page\"");
+                }
+                markup.push(b'>');
+                markup.extend(title);
+                markup.extend_from_slice(b"</a>");
+            }
+            if let Some(children) = children {
+                if self.in_navigation && self.show_icons && !on_click {
+                    markup.extend(format!("<button aria-label=\"{}\" class=\"wp-block-navigation__submenu-icon wp-block-navigation-submenu__toggle\" aria-expanded=\"false\">", esc_attr(&aria_label)).into_bytes());
+                    markup.extend_from_slice(SUBMENU_ICON);
+                    markup.extend_from_slice(b"</button>");
+                }
+                markup.extend_from_slice(b"<ul class=\"wp-block-navigation__submenu-container\">");
+                markup.extend(self.render(children, depth + 1));
+                markup.extend_from_slice(b"</ul>");
+            }
+            markup.extend_from_slice(b"</li>");
+        }
+        markup
+    }
+}
+
+/// `block_core_navigation_add_directives_to_submenu()`. PHP recurses with
+/// one tag processor, so every later item is handled in document order.
+fn add_directives_to_submenu(html: &[u8], visibility: &[u8]) -> Vec<u8> {
+    let mut tags = TagProcessor::new(html);
+    while tags.next_tag(Some(b"LI"), Some(b"has-child")) {
+        tags.set_attribute(b"data-wp-interactive", b"core/navigation");
+        tags.set_attribute(
+            b"data-wp-context",
+            br#"{ "submenuOpenedBy": { "click": false, "hover": false, "focus": false }, "type": "submenu", "modal": null, "previousFocus": null }"#,
+        );
+        tags.set_attribute(b"data-wp-watch", b"callbacks.initMenu");
+        tags.set_attribute(b"data-wp-on--focusout", b"actions.handleMenuFocusout");
+        tags.set_attribute(b"data-wp-on--keydown", b"actions.handleMenuKeydown");
+        tags.set_attribute(b"tabindex", b"-1");
+        if visibility == b"hover" {
+            tags.set_attribute(b"data-wp-on--pointerenter", b"actions.openMenuOnHover");
+            tags.set_attribute(b"data-wp-on--pointerleave", b"actions.closeMenuOnHover");
+        }
+        if tags.next_tag(
+            Some(b"BUTTON"),
+            Some(b"wp-block-navigation-submenu__toggle"),
+        ) {
+            tags.set_attribute(b"data-wp-on--click", b"actions.toggleMenuOnClick");
+            tags.set_attribute(b"data-wp-bind--aria-expanded", b"state.isSubmenuOpen");
+        }
+        if tags.next_tag(Some(b"UL"), Some(b"wp-block-navigation__submenu-container")) {
+            tags.set_attribute(b"data-wp-on--focus", b"actions.openMenuOnFocus");
+        }
+    }
+    tags.get_updated_html().to_vec()
+}
+
+/// `get_page_children( 0, $pages )`: the pages that reach the top level
+/// through their parents, each followed by its descendants.
+fn get_page_children(pages: Vec<Post>) -> Vec<Post> {
+    let mut found = Vec::with_capacity(pages.len());
+    let mut to_look: Vec<&Post> = pages.iter().filter(|page| page.parent == 0).rev().collect();
+    while let Some(page) = to_look.pop() {
+        found.push(page.clone());
+        to_look.extend(pages.iter().filter(|child| child.parent == page.id).rev());
+    }
+    found
+}
+
+/// `block_core_page_list_get_submenu_visibility()`.
+fn submenu_visibility(context: &Value) -> Vec<u8> {
+    match context
+        .get_str("openSubmenusOnClick")
+        .filter(|v| **v != Value::Null)
+    {
+        Some(on_click) if !on_click.is_empty() => b"click".to_vec(),
+        Some(_) => b"hover".to_vec(),
+        None => context
+            .get_str("submenuVisibility")
+            .filter(|v| **v != Value::Null)
+            .map_or(b"hover".to_vec(), Value::to_php_string),
+    }
+}
+
+/// `block_core_page_list_build_css_colors()`, from the block context.
+fn page_list_colors(context: &Value) -> Colors {
+    let mut colors = Colors {
+        classes: Vec::new(),
+        styles: Vec::new(),
+        overlay_classes: Vec::new(),
+        overlay_styles: Vec::new(),
+    };
+    let value = |name| context.get_str(name).map(Value::to_php_string);
+    let kebab = |name: Vec<u8>| kebab_case(&String::from_utf8_lossy(&name)).into_bytes();
+    for (named, picked, custom, flag, class, property, overlay) in [
+        (
+            "textColor",
+            "customTextColor",
+            Some("text"),
+            "has-text-color",
+            "color",
+            "color",
+            false,
+        ),
+        (
+            "backgroundColor",
+            "customBackgroundColor",
+            Some("background"),
+            "has-background",
+            "background-color",
+            "background-color",
+            false,
+        ),
+        (
+            "overlayTextColor",
+            "customOverlayTextColor",
+            None,
+            "has-text-color",
+            "color",
+            "color",
+            true,
+        ),
+        (
+            "overlayBackgroundColor",
+            "customOverlayBackgroundColor",
+            None,
+            "has-background",
+            "background-color",
+            "background-color",
+            true,
+        ),
+    ] {
+        let (classes, styles) = if overlay {
+            (&mut colors.overlay_classes, &mut colors.overlay_styles)
+        } else {
+            (&mut colors.classes, &mut colors.styles)
+        };
+        let custom = custom
+            .and_then(|key| context.get_path(&["style", "color", key]))
+            .filter(|v| isset(Some(v)))
+            .map(Value::to_php_string);
+        let (named, picked) = (value(named), value(picked));
+        if named.is_some() || picked.is_some() || custom.is_some() {
+            classes.push(flag.as_bytes().to_vec());
+        }
+        if let Some(named) = named {
+            classes.push([&b"has-"[..], &kebab(named), b"-", class.as_bytes()].concat());
+        } else if let Some(color) = picked.or(custom) {
+            styles.extend_from_slice(format!("{property}: ").as_bytes());
+            styles.extend(color);
+            styles.push(b';');
+        }
+    }
+    colors
 }
 
 /// `block_core_navigation_typographic_presets_backcompatibility()`, the

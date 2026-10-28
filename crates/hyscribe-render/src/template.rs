@@ -14,6 +14,7 @@ use hyscribe_phpser::{Value, lookup};
 use crate::blocks::{Block, parse_blocks};
 use crate::core_blocks::{self, Context};
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_smilies, wptexturize};
+use crate::interactivity::process_directives;
 use crate::layout::{LayoutBlock, render_layout};
 use crate::registry::block_type;
 use crate::site::{Request, Site};
@@ -132,6 +133,12 @@ pub(crate) struct Renderer<'a> {
     /// The attributes of the navigation block being rendered, its inner
     /// blocks' context.
     pub(crate) navigation: Option<Value>,
+    /// Whether a navigation block has had submenus; once set, it stays for
+    /// the request, as PHP's static does.
+    pub(crate) has_submenus: bool,
+    /// An interactive block is rendering; its directives are processed
+    /// when it ends, with every interactive block inside it.
+    pub(crate) in_interactive: bool,
 }
 
 /// A string attribute.
@@ -157,6 +164,8 @@ impl<'a> Renderer<'a> {
             unique_id: 0,
             navigation_names: HashMap::new(),
             navigation: None,
+            has_submenus: false,
+            in_interactive: false,
         }
     }
 
@@ -179,6 +188,15 @@ impl Renderer<'_> {
 
     /// `render_block()` for one block.
     pub(crate) fn block(&mut self, block: &Block) -> Vec<u8> {
+        let root_interactive = !self.in_interactive
+            && block.name.as_deref().and_then(block_type).is_some_and(|t| {
+                t.supports.get_str("interactivity") == Some(&Value::Bool(true))
+                    || t.supports
+                        .get_path(&["interactivity", "interactive"])
+                        .map(Value::is_empty)
+                        == Some(false)
+            });
+        self.in_interactive |= root_interactive;
         // Inner blocks get this block's layout as `parentLayout`.
         let own = block
             .attrs
@@ -194,6 +212,7 @@ impl Renderer<'_> {
             Some("core/post-content") => self.post_content(block),
             Some("core/navigation") => self.navigation(block),
             Some("core/navigation-link") => self.navigation_link(block),
+            Some("core/page-list") => self.page_list(block),
             Some(name) => {
                 let content = self.saved_markup(block);
                 let parsed = block.attrs.as_deref().unwrap_or_default();
@@ -203,10 +222,15 @@ impl Renderer<'_> {
         };
         self.parent_layout = parent;
         let html = self.layout(block, html);
-        match block.name.as_deref() {
+        let html = match block.name.as_deref() {
             Some("core/paragraph") => paragraph_class(&html),
             _ => html,
+        };
+        if root_interactive {
+            self.in_interactive = false;
+            return process_directives(&html);
         }
+        html
     }
 
     /// `do_blocks()` on content of its own, whose blocks have no parent.

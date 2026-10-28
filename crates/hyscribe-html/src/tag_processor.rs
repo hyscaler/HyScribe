@@ -243,6 +243,7 @@ pub struct TagProcessor {
     tag_name_starts_at: usize,
     tag_name_length: usize,
     is_closing_tag: bool,
+    has_self_closing_flag: bool,
     attributes: HashMap<Vec<u8>, AttributeToken>,
     /// The attribute names in the order they first appear.
     attribute_order: Vec<Vec<u8>>,
@@ -263,6 +264,7 @@ impl TagProcessor {
             tag_name_starts_at: 0,
             tag_name_length: 0,
             is_closing_tag: false,
+            has_self_closing_flag: false,
             attributes: HashMap::new(),
             attribute_order: Vec::new(),
             duplicate_attributes: HashMap::new(),
@@ -321,6 +323,12 @@ impl TagProcessor {
                 .cloned()
                 .collect(),
         )
+    }
+
+    /// `has_self_closing_flag()`: the current tag ends in `/>`, which only
+    /// foreign elements honour.
+    pub fn has_self_closing_flag(&self) -> bool {
+        self.state == State::MatchedTag && self.has_self_closing_flag
     }
 
     /// `is_tag_closer()`: the current tag is a closing tag.
@@ -416,6 +424,7 @@ impl TagProcessor {
         // own.
         let attributes = mem::take(&mut self.attributes);
         let duplicates = mem::take(&mut self.duplicate_attributes);
+        let self_closing = self.has_self_closing_flag;
         let found_closer = if script {
             self.skip_script_data()
         } else {
@@ -423,6 +432,7 @@ impl TagProcessor {
         };
         self.attributes = attributes;
         self.duplicate_attributes = duplicates;
+        self.has_self_closing_flag = self_closing;
         if !found_closer {
             self.state = State::Incomplete;
             self.bytes_already_parsed = was_at;
@@ -555,12 +565,15 @@ impl TagProcessor {
     /// input, where the offset is left at or past the end.
     fn parse_next_attribute(&mut self) -> bool {
         let length = self.html.len();
-        self.bytes_already_parsed +=
-            span_of(&self.html, self.bytes_already_parsed, b" \t\x0c\r\n/");
+        let skipped = span_of(&self.html, self.bytes_already_parsed, b" \t\x0c\r\n/");
+        self.bytes_already_parsed += skipped;
         let Some(first) = self.byte(self.bytes_already_parsed) else {
             return false;
         };
         if first == b'>' {
+            if skipped > 0 && self.byte(self.bytes_already_parsed - 1) == Some(b'/') {
+                self.has_self_closing_flag = true;
+            }
             return false;
         }
         // A leading `=` is part of the name.
@@ -776,6 +789,7 @@ impl TagProcessor {
         self.lexical_updates.rekey();
         self.token_starts_at = None;
         self.is_closing_tag = false;
+        self.has_self_closing_flag = false;
         self.attributes.clear();
         self.attribute_order.clear();
         self.duplicate_attributes.clear();
@@ -1097,6 +1111,27 @@ impl TagProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// PHP's `has_self_closing_flag()` on each first tag.
+    #[test]
+    fn self_closing_flag_like_php() {
+        for (html, flag) in [
+            ("<br/>", true),
+            ("<br />", true),
+            ("<div>", false),
+            ("<a href=x/>", false),
+            ("<a href=\"x\"/>", true),
+            ("<textarea/>x</textarea>", true),
+            ("<svg><path/></svg>", false),
+            ("<p / >", false),
+            ("<p/ >", false),
+        ] {
+            let mut p = TagProcessor::new(html.as_bytes());
+            p.next_tag(None, None);
+            assert_eq!(p.has_self_closing_flag(), flag, "{html}");
+        }
+        assert!(!TagProcessor::new(b"<br/>").has_self_closing_flag());
+    }
 
     fn text(bytes: &[u8]) -> String {
         String::from_utf8_lossy(bytes).into_owned()

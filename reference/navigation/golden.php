@@ -3,8 +3,11 @@
 //
 // Prints do_blocks() for navigation markup. Each case starts with the
 // renderer's static state reset. Lines are
-//   hex(markup)<TAB>wp_unique_id() counter<TAB>queried object<TAB>hex(html)
-// where the queried object is empty, post:<ID> or term:<ID>. Read only.
+//   hex(markup)<TAB>wp_unique_id() counter<TAB>queried object<TAB>pages<TAB>hex(html)
+// where the queried object is empty, post:<ID> or term:<ID>, and pages is
+// "tree" where get_pages() gives the in-memory page tree below. The
+// navigation fallback creates the wp_navigation post PHP creates on a page
+// view, so run on a fresh fixture database.
 
 require '/var/www/html/wp-load.php';
 
@@ -30,8 +33,30 @@ function link_block( $attrs, $inner = '' ) {
 $links  = link_block( array( 'label' => 'Blog', 'url' => '#' ) ) . link_block( array( 'label' => 'About', 'url' => '#' ) );
 $never  = array( 'overlayMenu' => 'never' );
 $cases  = array();
-$add    = function ( $markup, $queried = '' ) use ( &$cases ) {
-	$cases[] = array( $markup, $queried );
+$add    = function ( $markup, $queried = '', $pages = '' ) use ( &$cases ) {
+	$cases[] = array( $markup, $queried, $pages );
+};
+
+// ID, parent, menu order, title; 105's parent does not exist.
+$tree = array();
+foreach ( array( array( 101, 0, 0, 'Alpha' ), array( 102, 101, 0, 'Child' ), array( 103, 102, 0, 'Grandchild' ), array( 104, 0, 1, '0' ), array( 105, 999, 0, 'Orphan' ), array( 106, 0, 2, '<b>Bold</b> & co' ), array( 107, 101, 1, 'Second child' ) ) as list( $id, $parent, $order, $title ) ) {
+	$page = new WP_Post(
+		(object) array(
+			'ID'          => $id,
+			'post_parent' => $parent,
+			'menu_order'  => $order,
+			'post_title'  => $title,
+			'post_type'   => 'page',
+			'post_status' => 'publish',
+			'post_name'   => "page-$id",
+			'filter'      => 'raw',
+		)
+	);
+	wp_cache_set( $id, $page, 'posts' );
+	$tree[] = $page;
+}
+$tree_pages = function () use ( $tree ) {
+	return get_page_children( 0, $tree );
 };
 
 $add( nav( array( 'overlayMenu' => 'never', 'layout' => array( 'type' => 'flex', 'orientation' => 'vertical' ) ), $links ) );
@@ -105,8 +130,74 @@ $add( nav( $never, link_block( array( 'label' => 'Other', 'url' => '#', 'kind' =
 $add( nav( $never, link_block( array( 'label' => 'Category', 'url' => '#', 'kind' => 'taxonomy', 'type' => 'category', 'id' => 1 ) ) ), 'term:1' );
 $add( nav( $never, link_block( array( 'label' => 'Category', 'url' => '#', 'kind' => 'post-type', 'id' => 1 ) ) ), 'term:1' );
 
+$fallback = '<!-- wp:navigation /-->';
+$add( $fallback );
+$add( $fallback . $fallback );
+$add( nav( $never, '<!-- wp:page-list /-->' ) );
+$add( '<!-- wp:page-list /-->' );
+$add( '<!-- wp:page-list /-->', '', 'tree' );
+$add( '<!-- wp:page-list {"parentPageID":101} /-->', '', 'tree' );
+$add( '<!-- wp:page-list {"parentPageID":999} /-->', '', 'tree' );
+$add( '<!-- wp:page-list {"parentPageID":104} /-->', '', 'tree' );
+$add( nav( $never, '<!-- wp:page-list /-->' ), 'post:103', 'tree' );
+$add( nav( $never, '<!-- wp:page-list /-->' ), 'post:101', 'tree' );
+$add( nav( $never + array( 'submenuVisibility' => 'click' ), '<!-- wp:page-list /-->' ), '', 'tree' );
+$add( nav( $never + array( 'submenuVisibility' => 'always' ), '<!-- wp:page-list /-->' ), '', 'tree' );
+$add( nav( $never + array( 'openSubmenusOnClick' => true ), '<!-- wp:page-list /-->' ), '', 'tree' );
+$add( nav( $never + array( 'openSubmenusOnClick' => false, 'submenuVisibility' => 'click' ), '<!-- wp:page-list /-->' ), '', 'tree' );
+$add( nav( $never + array( 'showSubmenuIcon' => false ), '<!-- wp:page-list /-->' ), '', 'tree' );
+$add( nav( $never, '<!-- wp:page-list /-->' ) . nav( $never, '<!-- wp:page-list /-->' ), '', 'tree' );
+$add( nav( $never, '<!-- wp:page-list /--><!-- wp:html --><li class="has-child">raw</li><!-- /wp:html -->' ), '', 'tree' );
+$add( nav( $never + array( 'submenuVisibility' => 'click' ), '<!-- wp:page-list /--><!-- wp:html --><li class="has-child">raw</li><!-- /wp:html -->' ) );
+// Directives outside interactive blocks stay as written; inside an
+// unbalanced root, a nested interactive block is not processed either.
+$add( '<!-- wp:html --><b data-wp-interactive="test" data-wp-bind--title="!state.x">h</b><!-- /wp:html -->' );
+$add( nav( $never, '<!-- wp:html --></span><!-- /wp:html --><!-- wp:query {"query":{"perPage":1,"postType":"post","inherit":false}} --><div class="wp-block-query"><!-- wp:html --><b data-wp-interactive="test" data-wp-bind--title="!state.x">q</b><!-- /wp:html --></div><!-- /wp:query -->' ) );
+$add( nav( $never + array( 'textColor' => 'accent-1', 'backgroundColor' => 'base', 'overlayTextColor' => 'contrast', 'overlayBackgroundColor' => 'accent-2' ), '<!-- wp:page-list /-->' ), '', 'tree' );
+$add( nav( $never + array( 'customTextColor' => '#111', 'customBackgroundColor' => '#222', 'customOverlayTextColor' => '#333', 'customOverlayBackgroundColor' => '#444' ), '<!-- wp:page-list /-->' ), '', 'tree' );
+$add( nav( $never + array( 'style' => array( 'color' => array( 'text' => '#555', 'background' => '#666' ) ) ), '<!-- wp:page-list /-->' ), '', 'tree' );
+$add( nav( $never + array( 'rgbTextColor' => '#777' ) ), '', 'tree' );
+$add( nav( array( 'overlayMenu' => 'never', 'rgbTextColor' => '#777' ), '<!-- wp:page-list /-->' ), '', 'tree' );
+
+// Menu posts the fallback finds, given in memory through posts_pre_query.
+$menus = array(
+	'menu-links' => "\n\n" . link_block( array( 'label' => 'Menu link', 'url' => '/m' ) ) . "\n\n",
+	'menu-blank' => "\n\n",
+);
+foreach ( array_keys( $menus ) as $menu ) {
+	$add( $fallback, '', $menu );
+}
+
 $renderer = new ReflectionClass( 'WP_Navigation_Block_Renderer' );
-foreach ( $cases as list( $markup, $queried ) ) {
+foreach ( $cases as list( $markup, $queried, $pages ) ) {
+	remove_all_filters( 'get_pages' );
+	remove_all_filters( 'posts_pre_query' );
+	if ( isset( $menus[ $pages ] ) ) {
+		$menu_post = new WP_Post(
+			(object) array(
+				'ID'           => 900,
+				'post_type'    => 'wp_navigation',
+				'post_status'  => 'publish',
+				'post_title'   => 'Menu',
+				'post_content' => $menus[ $pages ],
+				'filter'       => 'raw',
+			)
+		);
+		wp_cache_set( 900, $menu_post, 'posts' );
+		add_filter(
+			'posts_pre_query',
+			function ( $posts, $query ) use ( $menu_post ) {
+				return 'wp_navigation' === $query->get( 'post_type' ) ? array( $menu_post ) : $posts;
+			},
+			10,
+			2
+		);
+	}
+	remove_all_filters( 'pre_option_page_on_front' );
+	if ( 'tree' === $pages ) {
+		add_filter( 'get_pages', $tree_pages );
+		add_filter( 'pre_option_page_on_front', fn() => '101' );
+	}
 	$renderer->getProperty( 'seen_menu_names' )->setValue( null, array() );
 	$renderer->getProperty( 'has_submenus' )->setValue( null, false );
 	$GLOBALS['wp_query'] = new WP_Query();
@@ -116,5 +207,5 @@ foreach ( $cases as list( $markup, $queried ) ) {
 		$GLOBALS['wp_query']->queried_object_id = (int) $id;
 	}
 	$counter = (int) wp_unique_id();
-	echo bin2hex( $markup ), "\t", $counter, "\t", $queried, "\t", bin2hex( do_blocks( $markup ) ), "\n";
+	echo bin2hex( $markup ), "\t", $counter, "\t", $queried, "\t", $pages, "\t", bin2hex( do_blocks( $markup ) ), "\n";
 }

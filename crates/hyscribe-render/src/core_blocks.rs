@@ -120,7 +120,7 @@ impl Context<'_> {
     }
 
     /// `get_permalink( $post )`.
-    fn permalink(&self, post: &Post) -> Vec<u8> {
+    pub(crate) fn permalink(&self, post: &Post) -> Vec<u8> {
         let option = |name| self.site.option(name).unwrap_or_default();
         let front_page = link::front_page(&option("show_on_front"), &option("page_on_front"));
         link::permalink(&self.site.home_url(), front_page, post)

@@ -311,6 +311,18 @@ fn order_follows_the_query() {
     };
     assert!(text(true).ends_with("ORDER BY post_date ASC LIMIT ? OFFSET ?"));
     assert!(text(false).ends_with("ORDER BY post_date DESC LIMIT ? OFFSET ?"));
+    // get_pages() order; a search adds no title ordering of its own.
+    let pages = posts_sql(&PostQuery {
+        by_menu_order: true,
+        search: vec!["x".into()],
+        ..PostQuery::default()
+    });
+    assert!(
+        pages
+            .text
+            .ends_with("ORDER BY menu_order ASC, post_title ASC LIMIT ? OFFSET ?")
+    );
+    assert_eq!(pages.binds.len(), 5);
 }
 
 #[tokio::test]

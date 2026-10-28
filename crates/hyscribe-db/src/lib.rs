@@ -350,13 +350,17 @@ fn posts_sql(query: &PostQuery) -> Sql {
     } else {
         "post_date DESC"
     };
-    if query.search.is_empty() {
-        sql.push(" ORDER BY ");
+    if query.by_menu_order {
+        sql.push(" ORDER BY menu_order ASC, post_title ASC");
     } else {
-        sql.push(" ORDER BY post_title LIKE ? DESC, ");
-        sql.bind(Bind::Text(like(&query.search.join(" "))));
+        if query.search.is_empty() {
+            sql.push(" ORDER BY ");
+        } else {
+            sql.push(" ORDER BY post_title LIKE ? DESC, ");
+            sql.bind(Bind::Text(like(&query.search.join(" "))));
+        }
+        sql.push(date);
     }
-    sql.push(date);
     sql.push(" LIMIT ? OFFSET ?");
     sql.bind(Bind::Int(query.limit.into()));
     sql.bind(Bind::Int(query.offset.into()));

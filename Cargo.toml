@@ -17,6 +17,7 @@ hyscribe-db = { path = "crates/hyscribe-db" }
 hyscribe-html = { path = "crates/hyscribe-html" }
 hyscribe-http = { path = "crates/hyscribe-http" }
 hyscribe-kses = { path = "crates/hyscribe-kses" }
+hyscribe-model = { path = "crates/hyscribe-model" }
 hyscribe-service = { path = "crates/hyscribe-service" }
 hyscribe-phpser = { path = "crates/hyscribe-phpser" }
 hyscribe-render = { path = "crates/hyscribe-render" }

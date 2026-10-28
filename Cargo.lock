@@ -621,6 +621,7 @@ name = "hyscribe-db"
 version = "0.1.0"
 dependencies = [
  "hyscribe-config",
+ "hyscribe-model",
  "hyscribe-testkit",
  "sqlx",
  "tokio",
@@ -641,6 +642,7 @@ dependencies = [
  "axum",
  "hyscribe-config",
  "hyscribe-db",
+ "hyscribe-model",
  "hyscribe-render",
  "hyscribe-testkit",
  "tokio",
@@ -653,6 +655,10 @@ version = "0.1.0"
 dependencies = [
  "hyscribe-testkit",
 ]
+
+[[package]]
+name = "hyscribe-model"
+version = "0.1.0"
 
 [[package]]
 name = "hyscribe-phpser"

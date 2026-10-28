@@ -16,7 +16,8 @@ use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use hyscribe_db::{Db, DbError, Post, PostQuery};
+use hyscribe_db::{Db, DbError, PostQuery};
+use hyscribe_model::Post;
 use hyscribe_render::blocks::{parse_blocks, render};
 use tokio::net::TcpListener;
 

@@ -13,6 +13,7 @@
 use std::fmt;
 
 use hyscribe_config::{Database, Prefix};
+use hyscribe_model::Post;
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
 
@@ -50,39 +51,6 @@ impl std::error::Error for DbError {}
 
 fn db_error(err: sqlx::Error) -> DbError {
     DbError(err.to_string())
-}
-
-/// A row of `{prefix}posts`, with the columns rendering needs.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Post {
-    /// `ID`.
-    pub id: u64,
-    /// `post_author`.
-    pub author: u64,
-    /// `post_date`, as stored.
-    pub date: String,
-    /// `post_date_gmt`, as stored.
-    pub date_gmt: String,
-    /// `post_content`.
-    pub content: Vec<u8>,
-    /// `post_title`.
-    pub title: Vec<u8>,
-    /// `post_excerpt`.
-    pub excerpt: Vec<u8>,
-    /// `post_status`.
-    pub status: String,
-    /// `post_name`.
-    pub name: Vec<u8>,
-    /// `post_parent`.
-    pub parent: u64,
-    /// `guid`.
-    pub guid: Vec<u8>,
-    /// `menu_order`.
-    pub menu_order: i64,
-    /// `post_type`.
-    pub post_type: String,
-    /// `comment_count`.
-    pub comment_count: i64,
 }
 
 /// The `{prefix}posts` columns [`Post`] reads, as a literal for `concat!`.

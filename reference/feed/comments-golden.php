@@ -1,10 +1,10 @@
 <?php
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Oracle for the RSS2 comment feeds through feed-rss2-comments.php, with
-// comments inserted and posts changed inside a transaction that is rolled
-// back. Lines are
-//   hex(json state)<TAB>hex(feed)
+// Oracle for the comment feeds through feed-rss2-comments.php and
+// feed-atom-comments.php, with comments inserted and posts changed inside a
+// transaction that is rolled back. Lines are
+//   hex(json state)<TAB>hex(RSS2 feed)<TAB>hex(Atom feed)
 // where the state has the query, the options, post 1's changed fields and
 // the comment rows the feed lists, in its order.
 
@@ -27,6 +27,8 @@ $insert = static function ( $fields ) {
 	);
 };
 $setup = static function () use ( $insert ) {
+	$parent = $insert( array( 'comment_author' => 'Parent', 'comment_author_url' => 'https://example.test/me', 'comment_date_gmt' => '2026-10-28 09:30:00' ) );
+	$insert( array( 'comment_author' => 'Replier', 'comment_parent' => $parent, 'comment_author_url' => 'http://', 'comment_date_gmt' => '2026-10-28 09:45:00' ) );
 	$insert( array( 'comment_author' => 'Linker', 'comment_content' => "See http://example.test/a?b=1&c=2 :) \"quoted\" -- dash\n\nSecond <b>bold & more</b> &amp; <script>x</script>", 'comment_date_gmt' => '2026-10-28 10:00:00' ) );
 	$insert( array( 'comment_author' => '', 'user_id' => 1, 'comment_date_gmt' => '2026-10-28 11:00:00' ) );
 	$insert( array( 'comment_author' => '', 'comment_date_gmt' => '2026-10-28 12:00:00' ) );
@@ -65,15 +67,23 @@ foreach ( $cases as $case ) {
 	$GLOBALS['wp']->main( $case['query'] );
 	ob_start();
 	load_template( ABSPATH . WPINC . '/feed-rss2-comments.php', false );
-	$feed  = ob_get_clean();
+	$rss   = ob_get_clean();
+	$listed = $GLOBALS['wp_query']->comments;
+	$atom_query = array_merge( $case['query'], array( 'feed' => str_replace( 'rss2', 'atom', $case['query']['feed'] ) ) );
+	$_SERVER['REQUEST_URI'] = '/?' . http_build_query( $atom_query );
+	$GLOBALS['wp']->main( $atom_query );
+	ob_start();
+	load_template( ABSPATH . WPINC . '/feed-atom-comments.php', false );
+	$atom = ob_get_clean();
 	$state = array(
 		'query'    => $case['query'],
 		'options'  => $case['options'] ?? array(),
 		'post'     => $case['post'] ?? array(),
-		'comments' => array_map( 'get_object_vars', $GLOBALS['wp_query']->comments ),
+		'comments' => array_map( 'get_object_vars', $listed ),
 		'users'    => array( 1 => get_userdata( 1 )->display_name ),
+		'counts'   => array( 1 => get_post( 1 )->comment_count, 2 => get_post( 2 )->comment_count ),
 	);
-	echo bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $feed ), "\n";
+	echo bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $rss ), "\t", bin2hex( $atom ), "\n";
 	foreach ( $case['options'] ?? array() as $name => $value ) {
 		remove_all_filters( "pre_option_$name" );
 	}

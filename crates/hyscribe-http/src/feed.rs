@@ -13,7 +13,7 @@ use hyscribe_db::DbError;
 use hyscribe_model::Comment;
 use hyscribe_phpser::md5;
 use hyscribe_render::date::{self, Zone};
-use hyscribe_render::feed::{atom, rss2, rss2_comments};
+use hyscribe_render::feed::{atom, atom_comments, rss2, rss2_comments};
 
 use crate::query::absint;
 use crate::reads::Reads;
@@ -107,6 +107,14 @@ pub(crate) async fn respond(
         let reads = Reads::new(&rendering, tokio::runtime::Handle::current());
         let last = feed.last_post.as_deref();
         let made = match &feed.comments {
+            Some(comments) if feed.atom => atom_comments(
+                &rendering.theme,
+                &reads,
+                &request,
+                title.as_bytes(),
+                &comments.list,
+                last,
+            ),
             Some(comments) => rss2_comments(
                 &rendering.theme,
                 &reads,

@@ -381,8 +381,8 @@ async fn route(
     if query.contains_key("author") {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
-    // RSS2 and Atom feeds. Atom comment feeds, comment feeds of searches
-    // and archives, and other formats are not served yet.
+    // RSS2 and Atom feeds. Comment feeds of searches and archives, and
+    // other formats, are not served yet.
     let single_requested = query.contains_key("p") || query.contains_key("page_id");
     let flag = |name| query.get(name).is_some_and(|v| !v.is_empty() && v != "0");
     let format = query.get("feed").map(|f| f.replace("comments-", ""));
@@ -393,7 +393,7 @@ async fn route(
     let archive = ["s", "cat", "m"].iter().any(|k| query.contains_key(*k));
     let feed = format
         .filter(|f| matches!(f.as_str(), "rss2" | "feed" | "atom"))
-        .filter(|_| !(comment_feed && (archive || atom)));
+        .filter(|_| !(comment_feed && archive));
     if feed.is_some() && !single_requested {
         let comments = comment_feed.then_some((None, false));
         return feed::outcome(site, list(site, query, true), comments, atom).await;

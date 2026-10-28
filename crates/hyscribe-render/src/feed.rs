@@ -16,7 +16,9 @@ use hyscribe_model::{Comment, Post};
 use hyscribe_phpser::{Value, add_query_arg, is_empty_string, php_trim};
 
 use crate::content::password_form;
-use crate::core_blocks::{comment_author, comment_text, comments_open};
+use crate::core_blocks::{
+    Context, comment_author, comment_author_url, comment_link, comment_text, comments_open,
+};
 use crate::date::{self, Zone};
 use crate::formatting::{contains, convert_chars, ent2ncr, html_entity_decode};
 use crate::link::host;
@@ -166,9 +168,9 @@ fn comment_item(renderer: &Renderer<'_>, comment: &Comment) -> Vec<u8> {
     let body = if post.password.is_empty() {
         [
             b"\t\t\t<description><![CDATA[".as_slice(),
-            esc_html(&ent2ncr(&comment.content)).as_bytes(),
+            esc_html(&ent2ncr(&feed_comment_text(context, comment))).as_bytes(),
             b"]]></description>\n\t\t\t<content:encoded><![CDATA[",
-            &comment_text(site, &comment.content),
+            &comment_text(site, &feed_comment_text(context, comment)),
             b"]]></content:encoded>\n\t\t",
         ]
         .concat()
@@ -184,7 +186,7 @@ fn comment_item(renderer: &Renderer<'_>, comment: &Comment) -> Vec<u8> {
         b"\t<item>\n\t\t<title>\n\t\t".as_slice(),
         &title,
         b"\t\t</title>\n\t\t<link>",
-        &esc_url(&[&context.permalink(&post)[..], anchor.as_bytes()].concat()),
+        &esc_url(&comment_link(context, comment)),
         b"</link>\n\n\t\t<dc:creator><![CDATA[",
         &author,
         b"]]></dc:creator>\n\t\t<pubDate>",
@@ -227,6 +229,195 @@ fn title_rss(post: &Post) -> Vec<u8> {
     esc_html(&strip_tags(&ent2ncr(&the_title(post)))).into_bytes()
 }
 
+/// `feed-atom-comments.php` for `comments`, newest first; the arguments
+/// are [`rss2_comments`]'s.
+pub fn atom_comments(
+    theme: &Theme,
+    site: &dyn Site,
+    request: &Request,
+    title: &[u8],
+    comments: &[Comment],
+    last_modified: Option<&str>,
+) -> Vec<u8> {
+    let option = |name| site.option(name).unwrap_or_default();
+    let html_type = bloginfo(&option("html_type"));
+    let renderer = Renderer::new(theme, site, request);
+    let context = &renderer.context;
+    let post = request.posts.first();
+    let (channel_title, links) = if request.singular {
+        // Without the post, its permalink and feed link are empty.
+        let hash: &[u8] = match post {
+            Some(post) if post.comment_count != 0 => b"#comments",
+            _ => b"#respond",
+        };
+        let permalink = post.map(|post| context.permalink(post)).unwrap_or_default();
+        let alternate = esc_url(&[&permalink[..], hash].concat());
+        let feed = post
+            .map(|post| esc_url(&post_comments_feed_link(site, post, b"atom")))
+            .unwrap_or_default();
+        let links = [
+            b"\t<link rel=\"alternate\" type=\"".as_slice(),
+            &html_type,
+            b"\" href=\"",
+            &alternate,
+            b"\" />\n\t<link rel=\"self\" type=\"application/atom+xml\" href=\"",
+            &feed,
+            b"\" />\n\t<id>",
+            &feed,
+            b"</id>\n",
+        ]
+        .concat();
+        let title = post.map(title_rss).unwrap_or_default();
+        ([b"Comments on ".as_slice(), &title].concat(), links)
+    } else {
+        let feed = bloginfo(&[&site.home_url()[..], b"/?feed=comments-atom"].concat());
+        let links = [
+            b"\t<link rel=\"alternate\" type=\"".as_slice(),
+            &html_type,
+            b"\" href=\"",
+            &bloginfo(&site.home_url()),
+            b"\" />\n\t<link rel=\"self\" type=\"application/atom+xml\" href=\"",
+            &feed,
+            b"\" />\n\t<id>",
+            &feed,
+            b"</id>\n",
+        ]
+        .concat();
+        ([b"Comments for ".as_slice(), title].concat(), links)
+    };
+    let mut out = [
+        b"<?xml version=\"1.0\" encoding=\"".as_slice(),
+        &option("blog_charset"),
+        b"\" ?><feed\n\txmlns=\"http://www.w3.org/2005/Atom\"\n\txml:lang=\"en-US\"\n\
+          \txmlns:thr=\"http://purl.org/syndication/thread/1.0\"\n\t>\n\t<title type=\"text\">\n\t",
+        &channel_title,
+        b"\t</title>\n\t<subtitle type=\"text\">",
+        &bloginfo(&option("blogdescription")),
+        b"</subtitle>\n\n\t<updated>",
+        build_date(request, comments, last_modified, ATOM_DATE).as_bytes(),
+        b"</updated>\n\n",
+        &links,
+        &atom_generator(),
+        b"\n",
+    ]
+    .concat();
+    for comment in comments {
+        out.extend(atom_comment_entry(&renderer, comment, &html_type));
+    }
+    out.extend_from_slice(b"</feed>\n");
+    out
+}
+
+/// One `<entry>` of the Atom comment loop, with the template's whitespace.
+fn atom_comment_entry(renderer: &Renderer<'_>, comment: &Comment, html_type: &[u8]) -> Vec<u8> {
+    let context = &renderer.context;
+    let site = context.site;
+    let post = site.post(comment.post_id).unwrap_or_default();
+    let author = ent2ncr(&comment_author(context, comment));
+    let title = if context.request.singular {
+        [b"By: ".as_slice(), &author].concat()
+    } else {
+        [
+            b"Comment on ".as_slice(),
+            &title_rss(&post),
+            b" by ",
+            &author,
+        ]
+        .concat()
+    };
+    let link = esc_url(&comment_link(context, comment));
+    let url = comment_author_url(comment);
+    let uri = if url.is_empty() {
+        Vec::new()
+    } else {
+        [b"<uri>".as_slice(), &url, b"</uri>"].concat()
+    };
+    let date = date::format(ATOM_DATE, &comment.date_gmt, Zone::Utc);
+    let text = if post.password.is_empty() {
+        comment_text(site, &feed_comment_text(context, comment))
+    } else {
+        password_form(renderer, &post)
+    };
+    let (reference, href) = match site.comment(comment.parent).filter(|_| comment.parent != 0) {
+        Some(parent) => {
+            let parent_post = site.post(parent.post_id).unwrap_or_default();
+            let guid = format!("#comment-{}", parent.id);
+            (
+                esc_url(&[&parent_post.guid[..], guid.as_bytes()].concat()),
+                comment_link(context, &parent),
+            )
+        }
+        None => (esc_url(&post.guid), esc_url(&context.permalink(&post))),
+    };
+    [
+        b"\t<entry>\n\t\t<title>\n\t\t".as_slice(),
+        &title,
+        b"\t\t</title>\n\t\t<link rel=\"alternate\" href=\"",
+        &link,
+        b"\" type=\"",
+        html_type,
+        b"\" />\n\n\t\t<author>\n\t\t\t<name>",
+        &author,
+        b"</name>\n\t\t\t",
+        &uri,
+        b"\n\t\t</author>\n\n\t\t<id>",
+        &esc_url(
+            &[
+                &post.guid[..],
+                format!("#comment-{}", comment.id).as_bytes(),
+            ]
+            .concat(),
+        ),
+        b"</id>\n\t\t<updated>",
+        date.as_bytes(),
+        b"</updated>\n\t\t<published>",
+        date.as_bytes(),
+        b"</published>\n\n\t\t\t\t\t<content type=\"html\" xml:base=\"",
+        &link,
+        b"\"><![CDATA[",
+        &text,
+        b"]]></content>\n\t\t\n\t\t\t\t\t<thr:in-reply-to ref=\"",
+        &reference,
+        b"\" href=\"",
+        &href,
+        b"\" type=\"",
+        html_type,
+        b"\" />\n\t\t\t\t</entry>\n\t",
+    ]
+    .concat()
+}
+
+/// `get_comment_text()` in a comment feed: a reply starts with a link to
+/// the comment it answers.
+fn feed_comment_text(context: &Context<'_>, comment: &Comment) -> Vec<u8> {
+    let parent = context
+        .site
+        .comment(comment.parent)
+        .filter(|_| comment.parent != 0);
+    let Some(parent) = parent else {
+        return comment.content.clone();
+    };
+    [
+        b"In reply to <a href=\"".as_slice(),
+        &esc_url(&comment_link(context, &parent)),
+        b"\">",
+        &comment_author(context, &parent),
+        b"</a>.\n\n",
+        &comment.content,
+    ]
+    .concat()
+}
+
+/// `get_the_generator( 'atom' )`, naming HyScribe and its version.
+fn atom_generator() -> Vec<u8> {
+    format!(
+        "<generator uri=\"{}\" version=\"{}\">HyScribe</generator>",
+        env!("CARGO_PKG_REPOSITORY"),
+        env!("CARGO_PKG_VERSION")
+    )
+    .into_bytes()
+}
+
 /// Atom's date format.
 const ATOM_DATE: &str = "Y-m-d\\TH:i:s\\Z";
 
@@ -266,12 +457,7 @@ pub fn atom(
         b"</id>\n\t<link rel=\"self\" type=\"application/atom+xml\" href=\"",
         &esc_url(&self_link(site, request)),
         b"\" />\n\n\t",
-        format!(
-            "<generator uri=\"{}\" version=\"{}\">HyScribe</generator>",
-            env!("CARGO_PKG_REPOSITORY"),
-            env!("CARGO_PKG_VERSION")
-        )
-        .as_bytes(),
+        &atom_generator(),
         b"\n",
     ]
     .concat();

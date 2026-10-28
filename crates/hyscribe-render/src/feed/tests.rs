@@ -34,15 +34,14 @@ impl Site for Changed {
     }
     fn post(&self, id: u64) -> Option<Post> {
         let post = self.base.post(id)?;
-        if id != 1 {
-            return Some(post);
-        }
-        let field = |name| self.text(&["post", name]);
+        // The oracle's changes are to post 1; its counts are of every post.
+        let field = |name| self.text(&["post", name]).filter(|_| id == 1);
         Some(Post {
             comment_status: field("comment_status").map_or(post.comment_status.clone(), |s| {
                 String::from_utf8(s).unwrap()
             }),
             comment_count: field("comment_count")
+                .or_else(|| self.text(&["counts", &id.to_string()]))
                 .map_or(post.comment_count, |n| Value::String(n).to_int()),
             content: field("post_content").unwrap_or(post.content.clone()),
             excerpt: field("post_excerpt").unwrap_or(post.excerpt.clone()),
@@ -86,6 +85,12 @@ impl Site for Changed {
     }
     fn comments(&self, post_id: u64) -> Vec<Comment> {
         self.base.comments(post_id)
+    }
+    fn comment(&self, id: u64) -> Option<Comment> {
+        feed_comments(&self.state)
+            .into_iter()
+            .find(|comment| comment.id == id)
+            .or_else(|| self.base.comment(id))
     }
     fn user(&self, id: u64) -> Option<User> {
         self.base.user(id).map(|user| User {
@@ -230,14 +235,15 @@ fn comment_feeds_match_php() {
     let golden = include_str!("../../tests/golden/comment-feeds.tsv");
     let mut failures = Vec::new();
     for line in golden.lines() {
-        let (state, php) = line.split_once('\t').unwrap();
+        let fields: Vec<Vec<u8>> = line.split('\t').map(unhex).collect();
+        let state = String::from_utf8_lossy(&fields[0]).into_owned();
         let site = Changed {
             base: DefaultInstall {
                 home: b"http://127.0.0.1:8081".to_vec(),
             },
-            state: json_decode(&unhex(state)).unwrap(),
+            state: json_decode(&fields[0]).unwrap(),
         };
-        let php = with_hyscribe(&unhex(php));
+        let (php, php_atom) = (with_hyscribe(&fields[1]), with_hyscribe(&fields[2]));
         let query = site.state.get_str("query").unwrap();
         let id = |name| query.get_str(name).map(|id| id.to_int() as u64);
         let (single, page) = (id("p"), id("page_id"));
@@ -275,7 +281,25 @@ fn comment_feeds_match_php() {
             Some("2026-10-27 08:08:15"),
         );
         if ours != php.as_bytes() {
-            failures.push(format!("{state}{}", difference(&php, &ours)));
+            failures.push(format!("rss2 {state}{}", difference(&php, &ours)));
+        }
+        let atom_uri = String::from_utf8(request.uri.clone())
+            .unwrap()
+            .replace("rss2", "atom");
+        let request = Request {
+            uri: atom_uri.into_bytes(),
+            ..request
+        };
+        let ours = atom_comments(
+            &theme,
+            &site,
+            &request,
+            title.as_bytes(),
+            &feed_comments(&site.state),
+            Some("2026-10-27 08:08:15"),
+        );
+        if ours != php_atom.as_bytes() {
+            failures.push(format!("atom {state}{}", difference(&php_atom, &ours)));
         }
     }
     assert!(

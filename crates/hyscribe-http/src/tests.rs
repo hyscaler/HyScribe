@@ -729,19 +729,15 @@ async fn feeds_match_php() {
             "{path} {sent:?}"
         );
     }
-    assert_eq!(golden.lines().count(), 36);
+    assert_eq!(golden.lines().count(), 41);
 }
 
-/// Comment feeds of searches and archives, and Atom comment feeds, are not
-/// served yet: those requests get the page.
+/// Comment feeds of searches and archives are not served yet: those
+/// requests get the page.
 #[tokio::test]
 async fn some_comment_feeds_are_not_served_yet() {
     let site = oracle_site().await;
-    for uri in [
-        "/?feed=comments-rss2&s=hello",
-        "/?feed=comments-atom",
-        "/?feed=atom&p=1",
-    ] {
+    for uri in ["/?feed=comments-rss2&s=hello", "/?feed=comments-atom&cat=1"] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(
             reply.headers[header::CONTENT_TYPE],

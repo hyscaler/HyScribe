@@ -258,7 +258,7 @@ fn comment_date(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 
 /// `get_comment_link( $comment )` with comment paging off: the post's
 /// permalink and the comment's anchor.
-fn comment_link(context: &Context<'_>, comment: &Comment) -> Vec<u8> {
+pub(crate) fn comment_link(context: &Context<'_>, comment: &Comment) -> Vec<u8> {
     let permalink = context
         .site
         .post(comment.post_id)
@@ -279,6 +279,17 @@ pub(crate) fn comment_author(context: &Context<'_>, comment: &Comment) -> Vec<u8
     user.map_or(b"Anonymous".to_vec(), |user| user.display_name)
 }
 
+/// `get_comment_author_url( $comment )`: the author's site, with `http://`
+/// alone counting as none.
+pub(crate) fn comment_author_url(comment: &Comment) -> Vec<u8> {
+    let url: &[u8] = if comment.author_url == b"http://" {
+        b""
+    } else {
+        &comment.author_url
+    };
+    esc_url_protocols(url, &["http", "https"])
+}
+
 /// `render_block_core_comment_author_name()`: the author, linked to their
 /// site when `isLink` and `linkTarget` are set.
 fn comment_author_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
@@ -286,13 +297,7 @@ fn comment_author_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         return Vec::new();
     };
     let mut name = comment_author(context, comment);
-    // get_comment_author_url()
-    let url = if comment.author_url == b"http://" {
-        Vec::new()
-    } else {
-        comment.author_url.clone()
-    };
-    let url = esc_url_protocols(&url, &["http", "https"]);
+    let url = comment_author_url(comment);
     let target = block.attribute("linkTarget").filter(|v| !v.is_empty());
     if let (false, true, Some(target)) = (
         url.is_empty(),

@@ -243,6 +243,8 @@ pub struct TagProcessor {
     tag_name_length: usize,
     is_closing_tag: bool,
     attributes: HashMap<Vec<u8>, AttributeToken>,
+    /// The attribute names in the order they first appear.
+    attribute_order: Vec<Vec<u8>>,
     duplicate_attributes: HashMap<Vec<u8>, Vec<Span>>,
     /// Class name to add (`true`) or remove, in the order first named.
     classname_updates: Vec<(Key, bool)>,
@@ -261,6 +263,7 @@ impl TagProcessor {
             tag_name_length: 0,
             is_closing_tag: false,
             attributes: HashMap::new(),
+            attribute_order: Vec::new(),
             duplicate_attributes: HashMap::new(),
             classname_updates: Vec::new(),
             lexical_updates: Updates::default(),
@@ -300,6 +303,23 @@ impl TagProcessor {
             }
         }
         found
+    }
+
+    /// `get_attribute_names_with_prefix( $prefix )`: the current opening
+    /// tag's attribute names that start with `prefix` (any case), lower case
+    /// and in source order; `None` when not at an opening tag.
+    pub fn get_attribute_names_with_prefix(&self, prefix: &[u8]) -> Option<Vec<Vec<u8>>> {
+        if self.state != State::MatchedTag || self.is_closing_tag {
+            return None;
+        }
+        let prefix = prefix.to_ascii_lowercase();
+        Some(
+            self.attribute_order
+                .iter()
+                .filter(|name| name.starts_with(&prefix))
+                .cloned()
+                .collect(),
+        )
     }
 
     /// `is_tag_closer()`: the current tag is a closing tag.
@@ -603,6 +623,7 @@ impl TagProcessor {
                 .or_default()
                 .push(span),
             Entry::Vacant(slot) => {
+                self.attribute_order.push(slot.key().clone());
                 slot.insert(AttributeToken {
                     value_starts_at: value_start,
                     value_length,
@@ -755,6 +776,7 @@ impl TagProcessor {
         self.token_starts_at = None;
         self.is_closing_tag = false;
         self.attributes.clear();
+        self.attribute_order.clear();
         self.duplicate_attributes.clear();
     }
 
@@ -1755,5 +1777,24 @@ mod tests {
         }
         assert_eq!(seen, ["DIV", "P", "P/", "BR", "IMG", "DIV/", "SPAN"]);
         assert!(!TagProcessor::new(b"x").is_tag_closer());
+    }
+
+    /// `get_attribute_names_with_prefix()` in PHP WordPress 7.1.3.
+    #[test]
+    fn attribute_names_in_source_order() {
+        let mut tags = TagProcessor::new(b"<wp B=1 a data-x=2 b=3 DATA-y>");
+        assert!(tags.next_tag(None, None));
+        let names = |tags: &TagProcessor, prefix: &[u8]| {
+            tags.get_attribute_names_with_prefix(prefix).unwrap()
+        };
+        assert_eq!(names(&tags, b""), [&b"b"[..], b"a", b"data-x", b"data-y"]);
+        assert_eq!(names(&tags, b"DATA-"), [&b"data-x"[..], b"data-y"]);
+        let mut closer = TagProcessor::new(b"</wp a>");
+        assert!(closer.next_tag_visiting_closers());
+        assert_eq!(closer.get_attribute_names_with_prefix(b""), None);
+        assert_eq!(
+            TagProcessor::new(b"<p>").get_attribute_names_with_prefix(b""),
+            None
+        );
     }
 }

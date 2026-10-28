@@ -1,0 +1,294 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use hyscribe_phpser::{encode, json_decode};
+
+use super::*;
+
+/// The inputs of the default install, owned.
+pub(crate) struct Fixture {
+    pub(crate) core: Vec<u8>,
+    pub(crate) blocks: Vec<BlockType>,
+    pub(crate) styles: Vec<(String, String)>,
+    pub(crate) theme: Vec<u8>,
+    pub(crate) theme_styles: Vec<(String, Vec<u8>)>,
+}
+
+impl Fixture {
+    pub(crate) fn sources(&self) -> Sources<'_> {
+        Sources {
+            core: &self.core,
+            blocks: &self.blocks,
+            block_styles: &self.styles,
+            theme: Some(&self.theme),
+            theme_styles: &self.theme_styles,
+            user: None,
+        }
+    }
+}
+
+fn root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// A golden file of `reference/theme-json/golden.sh`.
+pub(crate) fn golden(name: &str) -> Vec<u8> {
+    fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/golden")
+            .join(name),
+    )
+    .unwrap()
+}
+
+fn lines(name: &str) -> Vec<String> {
+    String::from_utf8(golden(name))
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Twenty Twenty-Five on WordPress 7.1.3, as the oracle has it.
+pub(crate) fn fixture() -> Fixture {
+    let blocks = lines("registry.txt")
+        .into_iter()
+        .map(|name| {
+            let dir = root()
+                .join("wordpress/wp-includes/blocks")
+                .join(name.trim_start_matches("core/"));
+            let json =
+                fs::read(dir.join("block.json")).unwrap_or_else(|_| golden("post-comments.json"));
+            BlockType {
+                name,
+                metadata: json_decode(&json).unwrap(),
+            }
+        })
+        .collect();
+    let styles = lines("registered-styles.tsv")
+        .iter()
+        .map(|l| {
+            let (block, style) = l.split_once('\t').unwrap();
+            (block.to_owned(), style.to_owned())
+        })
+        .collect();
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/theme-styles");
+    let mut theme_styles = Vec::new();
+    for dir in ["blocks", "sections"] {
+        for file in fs::read_dir(base.join(dir)).unwrap() {
+            let file = file.unwrap().path();
+            let name = format!("{dir}/{}", file.file_name().unwrap().to_string_lossy());
+            theme_styles.push((name, fs::read(&file).unwrap()));
+        }
+    }
+    Fixture {
+        core: fs::read(root().join("wordpress/wp-includes/theme.json")).unwrap(),
+        blocks,
+        styles,
+        theme: fs::read(root().join("themes/twentytwentyfive/theme.json")).unwrap(),
+        theme_styles,
+    }
+}
+
+fn unhex(text: &str) -> Vec<u8> {
+    text.as_bytes()
+        .chunks(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect()
+}
+
+/// The default install, resolved once.
+pub(crate) fn resolved() -> &'static GlobalStyles {
+    static RESOLVED: std::sync::OnceLock<GlobalStyles> = std::sync::OnceLock::new();
+    RESOLVED.get_or_init(|| GlobalStyles::resolve(&fixture().sources()))
+}
+
+/// The default install's block metadata.
+pub(crate) fn blocks() -> &'static blocks::Blocks {
+    &resolved().blocks
+}
+
+/// Checks `ours` against every case of `kind` in `cases.tsv`: PHP's
+/// `serialize()` of its result for the same JSON arguments.
+pub(crate) fn check(kind: &str, ours: impl Fn(&[Value]) -> Value) {
+    let golden = String::from_utf8(golden("cases.tsv")).unwrap();
+    let mut count = 0;
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let mut fields = line.split('\t');
+        if fields.next() != Some(kind) {
+            continue;
+        }
+        let json = unhex(fields.next().unwrap());
+        let expected = unhex(fields.next().unwrap());
+        let args: Vec<Value> = php::entries(&json_decode(&json).unwrap())
+            .iter()
+            .map(|(_, v)| v.clone())
+            .collect();
+        let got = encode(&ours(&args));
+        if got != expected {
+            failures.push(format!(
+                "{}\n  php:  {}\n  ours: {}",
+                String::from_utf8_lossy(&json),
+                String::from_utf8_lossy(&expected),
+                String::from_utf8_lossy(&got)
+            ));
+        }
+        count += 1;
+    }
+    assert!(count > 0, "no {kind} cases");
+    assert!(
+        failures.is_empty(),
+        "{} of {count} {kind} cases differ:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// A string result as PHP has it.
+pub(crate) fn text(s: &str) -> Value {
+    php::string(s)
+}
+
+/// A string argument.
+pub(crate) fn arg(args: &[Value], i: usize) -> &str {
+    php::as_str(&args[i]).unwrap()
+}
+
+/// The front page's blocks.
+const ON_PAGE: [&str; 13] = [
+    "core/site-title",
+    "core/page-list",
+    "core/navigation",
+    "core/group",
+    "core/heading",
+    "core/post-title",
+    "core/paragraph",
+    "core/post-content",
+    "core/post-date",
+    "core/post-template",
+    "core/spacer",
+    "core/columns",
+    "core/navigation-link",
+];
+
+#[test]
+fn default_install_matches_php() {
+    let fixture = fixture();
+    let styles = GlobalStyles::resolve(&fixture.sources());
+    assert!(encode(styles.settings()) == golden("settings.ser"));
+    assert!(encode(styles.styles()) == golden("styles.ser"));
+    assert!(styles.stylesheet().into_bytes() == golden("stylesheet-all.css"));
+    let blocks: String = styles
+        .block_css()
+        .iter()
+        .map(|(n, c)| format!("{n}\t{c}\n"))
+        .collect();
+    assert!(blocks.into_bytes() == golden("blocks.tsv"));
+    let mut page = styles.inline_css(&|b| ON_PAGE.contains(&b)).into_bytes();
+    page.push(b'\n');
+    assert!(page == golden("page.css"));
+}
+
+#[test]
+fn lookups() {
+    let fixture = fixture();
+    let styles = GlobalStyles::resolve(&fixture.sources());
+    assert!(styles.use_root_padding_aware_alignments());
+    assert_eq!(styles.content_size(), Some("645px"));
+    assert_eq!(styles.wide_size(), Some("1340px"));
+    assert!(styles.has_block_gap_support());
+    assert_eq!(
+        styles.style(&["spacing", "blockGap"]),
+        Some(&php::string("1.2rem"))
+    );
+    assert_eq!(
+        styles.block_style("core/columns", &["spacing", "blockGap"]),
+        Some(&php::string("var(--wp--preset--spacing--50)"))
+    );
+    assert_eq!(styles.block_style("core/nothing", &["x"]), None);
+    assert_eq!(
+        styles.block_setting("core/button", &["border", "radius"]),
+        Some(&Value::Bool(true))
+    );
+    assert_eq!(styles.block_setting("core/nothing", &["x"]), None);
+    let sizes = styles.presets(&["typography", "fontSizes"]);
+    let origins: Vec<_> = sizes.iter().map(|(o, list)| (*o, list.len())).collect();
+    assert_eq!(origins, [("default", 4), ("theme", 5)]);
+    assert_eq!(styles.presets(&["nothing"]), []);
+    let odd = GlobalStyles {
+        data: json_decode(br#"{"settings": {"color": {"palette": {"theme": "x", "custom": []}}}}"#)
+            .unwrap(),
+        blocks: blocks::Blocks::default(),
+    };
+    assert_eq!(odd.presets(&["color", "palette"]), [("custom", &[][..])]);
+    assert_eq!(
+        styles.viewport_media_queries(),
+        [
+            ("@mobile".to_owned(), "@media (width <= 480px)".to_owned()),
+            (
+                "@tablet".to_owned(),
+                "@media (480px < width <= 782px)".to_owned()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn empty_sources() {
+    let styles = GlobalStyles::resolve(&Sources {
+        core: b"",
+        blocks: &[],
+        block_styles: &[],
+        theme: None,
+        theme_styles: &[],
+        user: None,
+    });
+    assert!(!styles.use_root_padding_aware_alignments());
+    assert_eq!(styles.content_size(), None);
+    assert!(!styles.has_block_gap_support());
+    // Theme supports give settings, but nothing to print.
+    assert_eq!(
+        styles.setting(&["color", "custom"]),
+        Some(&Value::Bool(true))
+    );
+    assert_eq!(styles.styles(), &Value::Null);
+    assert_eq!(styles.inline_css(&|_| true), "");
+    assert_eq!(styles.block_css(), []);
+    let empty = GlobalStyles {
+        data: php::array(),
+        blocks: blocks::Blocks::default(),
+    };
+    assert_eq!(empty.settings(), &Value::Null);
+}
+
+#[test]
+fn inline_css_picks_blocks() {
+    let fixture = fixture();
+    let styles = GlobalStyles::resolve(&fixture.sources());
+    let none = styles.inline_css(&|_| false);
+    assert_eq!(none.lines().count(), 1);
+    let all = styles.inline_css(&|_| true);
+    assert!(all.lines().count() > 13);
+}
+
+#[test]
+fn block_names_from_paths() {
+    let path = |p: &[&str]| p.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+    assert_eq!(
+        block_name_from_path(&path(&["styles", "blocks", "a/b", "x"])),
+        "a/b"
+    );
+    assert_eq!(block_name_from_path(&path(&["styles", "blocks", "ab"])), "");
+    assert_eq!(
+        block_name_from_path(&path(&["x", "core/quote"])),
+        "core/quote"
+    );
+    assert_eq!(
+        block_name_from_path(&path(&["styles", "elements", "a/b"])),
+        ""
+    );
+    assert_eq!(block_name_from_path(&path(&["styles", "x", "a/b"])), "");
+}

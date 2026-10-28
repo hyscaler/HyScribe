@@ -19,6 +19,7 @@ hyscribe-render = { path = "../crates/hyscribe-render" }
 hyscribe-http = { path = "../crates/hyscribe-http" }
 hyscribe-html = { path = "../crates/hyscribe-html" }
 hyscribe-kses = { path = "../crates/hyscribe-kses" }
+hyscribe-theme-json = { path = "../crates/hyscribe-theme-json" }
 
 [[bin]]
 name = "phpser_decode"
@@ -100,6 +101,13 @@ bench = false
 [[bin]]
 name = "kses_strip"
 path = "fuzz_targets/kses_strip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "theme_json"
+path = "fuzz_targets/theme_json.rs"
 test = false
 doc = false
 bench = false

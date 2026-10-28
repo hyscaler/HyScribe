@@ -20,6 +20,7 @@ hyscribe-kses = { path = "crates/hyscribe-kses" }
 hyscribe-service = { path = "crates/hyscribe-service" }
 hyscribe-phpser = { path = "crates/hyscribe-phpser" }
 hyscribe-render = { path = "crates/hyscribe-render" }
+hyscribe-theme-json = { path = "crates/hyscribe-theme-json" }
 hyscribe-testkit = { path = "crates/hyscribe-testkit" }
 clap = { version = "4.5", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 dotenvy = "0.15"

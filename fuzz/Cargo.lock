@@ -504,6 +504,7 @@ dependencies = [
  "hyscribe-kses",
  "hyscribe-phpser",
  "hyscribe-render",
+ "hyscribe-theme-json",
  "libfuzzer-sys",
 ]
 
@@ -531,6 +532,13 @@ version = "0.1.0"
 
 [[package]]
 name = "hyscribe-render"
+version = "0.1.0"
+dependencies = [
+ "hyscribe-phpser",
+]
+
+[[package]]
+name = "hyscribe-theme-json"
 version = "0.1.0"
 dependencies = [
  "hyscribe-phpser",

@@ -630,6 +630,7 @@ dependencies = [
 name = "hyscribe-html"
 version = "0.1.0"
 dependencies = [
+ "hyscribe-kses",
  "hyscribe-testkit",
 ]
 

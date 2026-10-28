@@ -3,7 +3,7 @@
 //! `safecss_filter_attr()` with the default `safe_style_css` list.
 
 use crate::php::{
-    contains, empty, first_from, is_space, positions, remove_all, rest, scan, splice, trim,
+    contains, empty, first_from, is_space, positions, rest, scan, splice, str_replace, trim,
 };
 use crate::protocol::{ALLOWED_PROTOCOLS, wp_kses_bad_protocol, wp_kses_no_null};
 
@@ -322,7 +322,7 @@ fn urls_allowed(value: &[u8], test: &mut Vec<u8>) -> bool {
         if empty(body) || empty(url) || wp_kses_bad_protocol(url, &ALLOWED_PROTOCOLS) != url {
             return false;
         }
-        *test = remove_all(test, found);
+        *test = str_replace(test, found, b"");
     }
     true
 }
@@ -442,7 +442,7 @@ fn allowed(declaration: &[u8]) -> bool {
                 .map(|&(start, end, _)| test.get(start..end).unwrap_or_default().to_vec())
                 .collect();
             for gradient in found {
-                test = remove_all(&test, &gradient);
+                test = str_replace(&test, &gradient, b"");
             }
         }
     }

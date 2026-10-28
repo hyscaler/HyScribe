@@ -9,6 +9,9 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dependencies]
+hyscribe-kses.workspace = true
+
 [dev-dependencies]
 hyscribe-testkit.workspace = true
 

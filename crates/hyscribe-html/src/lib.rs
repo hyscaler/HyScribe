@@ -2,7 +2,8 @@
 
 //! The part of WordPress's HTML API that block rendering uses: a port of
 //! `WP_HTML_Tag_Processor` (WordPress 7.1.3), byte for byte, with the
-//! attribute decoder and the `esc_url()` it relies on.
+//! attribute decoder it relies on. URL attributes go through
+//! `hyscribe_kses::esc_url()`.
 //!
 //! The tokenizer reproduces PHP's handling of comments, doctypes, CDATA
 //! lookalikes, processing instructions, the special text elements
@@ -13,6 +14,5 @@
 mod decoder;
 mod entities;
 mod tag_processor;
-mod url;
 
 pub use tag_processor::{Attribute, TagProcessor};

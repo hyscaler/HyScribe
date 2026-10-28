@@ -2,11 +2,13 @@
 
 //! `wp_kses_bad_protocol()` is stable: its output comes back unchanged,
 //! and a scheme it leaves in front (before the first `:`, without `/?`
-//! or an entity) is an allowed one, spelled as in the list.
+//! or an entity) is an allowed one, spelled as in the list. `esc_url()`
+//! output has no quote, angle bracket, space or control byte, and unless
+//! it is a path it passes `wp_kses_bad_protocol()` unchanged.
 
 #![no_main]
 
-use hyscribe_kses::{ALLOWED_PROTOCOLS, wp_kses_bad_protocol, wp_kses_decode_entities};
+use hyscribe_kses::{ALLOWED_PROTOCOLS, esc_url, wp_kses_bad_protocol, wp_kses_decode_entities};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
@@ -24,4 +26,14 @@ fuzz_target!(|data: &[u8]| {
         }
     }
     let _ = wp_kses_decode_entities(data);
+
+    let escaped = esc_url(data);
+    assert!(
+        !escaped
+            .iter()
+            .any(|&b| b <= b' ' || b == 0x7F || b"\"'<>\\".contains(&b))
+    );
+    if escaped.first() != Some(&b'/') {
+        assert_eq!(wp_kses_bad_protocol(&escaped, &ALLOWED_PROTOCOLS), escaped);
+    }
 });

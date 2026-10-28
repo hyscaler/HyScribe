@@ -7,8 +7,9 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use hyscribe_kses::{
-    ALLOWED_PROTOCOLS, esc_attr, esc_html, safecss_filter_attr, sanitize_key, wp_kses_bad_protocol,
-    wp_kses_decode_entities, wp_kses_no_null, wp_kses_normalize_entities, wp_strip_all_tags,
+    ALLOWED_PROTOCOLS, esc_attr, esc_html, esc_url, safecss_filter_attr, sanitize_key,
+    wp_kses_bad_protocol, wp_kses_decode_entities, wp_kses_no_null, wp_kses_normalize_entities,
+    wp_strip_all_tags,
 };
 use hyscribe_testkit::unhex;
 
@@ -92,6 +93,11 @@ fn bad_protocol_matches() {
     check(include_str!("golden/bad-protocol.tsv"), 1614, |t| {
         wp_kses_bad_protocol(t, &ALLOWED_PROTOCOLS)
     });
+}
+
+#[test]
+fn esc_url_matches() {
+    check(include_str!("golden/esc-url.tsv"), 1312, esc_url);
 }
 
 #[test]

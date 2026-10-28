@@ -7,17 +7,23 @@ fn is_trimmed(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0 | 0x0B)
 }
 
-/// PHP's `trim()` with its default characters.
-pub(crate) fn trim(text: &[u8]) -> &[u8] {
+/// PHP's `ltrim()` with its default characters.
+pub(crate) fn ltrim(text: &[u8]) -> &[u8] {
     let start = text
         .iter()
         .position(|&b| !is_trimmed(b))
         .unwrap_or(text.len());
+    rest(text, start)
+}
+
+/// PHP's `trim()` with its default characters.
+pub(crate) fn trim(text: &[u8]) -> &[u8] {
+    let text = ltrim(text);
     let end = text
         .iter()
         .rposition(|&b| !is_trimmed(b))
         .map_or(0, |i| i + 1);
-    text.get(start..end).unwrap_or_default()
+    text.get(..end).unwrap_or_default()
 }
 
 /// PCRE's `\s` without UTF mode: the C locale's `isspace()`.
@@ -39,6 +45,21 @@ pub(crate) fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 pub(crate) fn starts_with_ci(text: &[u8], prefix: &[u8]) -> bool {
     text.get(..prefix.len())
         .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+}
+
+/// The leading run of `text` that `class` accepts.
+pub(crate) fn run(text: &[u8], class: fn(&u8) -> bool) -> &[u8] {
+    let len = text.iter().take_while(|b| class(b)).count();
+    text.get(..len).unwrap_or_default()
+}
+
+/// The value of hexadecimal or decimal digits in `radix`, saturating far
+/// above anything the callers accept.
+pub(crate) fn value(digits: &[u8], radix: u64) -> u64 {
+    digits.iter().fold(0, |value: u64, &digit| {
+        let digit = char::from(digit).to_digit(16).map_or(0, u64::from);
+        value.saturating_mul(radix).saturating_add(digit)
+    })
 }
 
 /// `text` from `offset` on; empty past the end.
@@ -107,11 +128,14 @@ pub(crate) fn replace_each(
     splice(subject, &scan(subject.len(), |i| at(rest(subject, i))))
 }
 
-/// PHP's `str_replace()` with an empty replacement.
-pub(crate) fn remove_all(subject: &[u8], needle: &[u8]) -> Vec<u8> {
+/// PHP's `str_replace()` for one string; an empty `needle` finds nothing.
+pub(crate) fn str_replace(subject: &[u8], needle: &[u8], with: &[u8]) -> Vec<u8> {
+    if needle.is_empty() {
+        return subject.to_vec();
+    }
     replace_each(subject, |rest| {
         rest.starts_with(needle)
-            .then_some((needle.len(), Vec::new()))
+            .then(|| (needle.len(), with.to_vec()))
     })
 }
 
@@ -154,11 +178,25 @@ mod tests {
     }
 
     #[test]
-    fn removes_every_occurrence() {
-        assert_eq!(remove_all(b"abcabxab", b"ab"), b"cx");
-        assert_eq!(remove_all(b"aaa", b"aa"), b"a");
-        assert_eq!(remove_all(b"xyz", b"q"), b"xyz");
-        assert_eq!(remove_all(b"xy", b""), b"xy");
+    fn ltrims_the_start_only() {
+        assert_eq!(ltrim(b" \t\0a \n"), b"a \n");
+        assert_eq!(ltrim(b" \x0B"), b"");
+    }
+
+    #[test]
+    fn replaces_every_occurrence() {
+        assert_eq!(str_replace(b"abcabxab", b"ab", b""), b"cx");
+        assert_eq!(str_replace(b"aaa", b"aa", b"b"), b"ba");
+        assert_eq!(str_replace(b"xyz", b"q", b"r"), b"xyz");
+        assert_eq!(str_replace(b"xy", b"", b"z"), b"xy");
+    }
+
+    #[test]
+    fn values_saturate() {
+        assert_eq!(value(b"0129", 10), 129);
+        assert_eq!(value(b"aF", 16), 0xAF);
+        assert_eq!(value(b"99999999999999999999999", 10), u64::MAX);
+        assert_eq!(value(b"18446744073709551616", 10), u64::MAX);
     }
 
     #[test]

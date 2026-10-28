@@ -2,7 +2,7 @@
 
 //! `wp_kses_normalize_entities()` and `wp_kses_decode_entities()`.
 
-use crate::php::{replace_each, rest, starts_with_ci};
+use crate::php::{replace_each, rest, run, starts_with_ci, value};
 
 /// `$allowedentitynames`: the named references WordPress keeps.
 const ENTITY_NAMES: [&str; 253] = [
@@ -35,21 +35,6 @@ const ENTITY_NAMES: [&str; 253] = [
 /// `valid_unicode()`: the code points XML allows.
 fn valid_unicode(code: u64) -> bool {
     matches!(code, 0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF)
-}
-
-/// The leading run of `text` that `class` accepts.
-fn run(text: &[u8], class: fn(&u8) -> bool) -> &[u8] {
-    let len = text.iter().take_while(|b| class(b)).count();
-    text.get(..len).unwrap_or_default()
-}
-
-/// The value of hexadecimal or decimal digits in `radix`, saturating far
-/// above anything the callers accept.
-fn value(digits: &[u8], radix: u64) -> u64 {
-    digits.iter().fold(0, |value: u64, &digit| {
-        let digit = char::from(digit).to_digit(16).map_or(0, u64::from);
-        value.saturating_mul(radix).saturating_add(digit)
-    })
 }
 
 /// `&amp;#(0*[1-9][0-9]{0,6});` for a valid code point, padded to three
@@ -161,14 +146,6 @@ mod tests {
         ];
         assert!(valid.iter().all(|&c| valid_unicode(c)));
         assert!(!invalid.iter().any(|&c| valid_unicode(c)));
-    }
-
-    #[test]
-    fn values_saturate() {
-        assert_eq!(value(b"0129", 10), 129);
-        assert_eq!(value(b"aF", 16), 0xAF);
-        assert_eq!(value(b"99999999999999999999999", 10), u64::MAX);
-        assert_eq!(value(b"18446744073709551616", 10), u64::MAX);
     }
 
     #[test]

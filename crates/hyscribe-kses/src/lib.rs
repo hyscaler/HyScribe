@@ -16,9 +16,11 @@ mod escape;
 mod php;
 mod protocol;
 mod strip;
+mod url;
 
 pub use css::safecss_filter_attr;
 pub use entities::{wp_kses_decode_entities, wp_kses_normalize_entities};
 pub use escape::{esc_attr, esc_html, sanitize_key};
 pub use protocol::{ALLOWED_PROTOCOLS, wp_kses_bad_protocol, wp_kses_no_null};
 pub use strip::wp_strip_all_tags;
+pub use url::esc_url;

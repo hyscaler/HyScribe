@@ -14,8 +14,9 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::mem;
 
+use hyscribe_kses::esc_url;
+
 use crate::decoder::{REPLACEMENT, decode_attribute};
-use crate::url::esc_url;
 
 /// HTML whitespace.
 const WHITESPACE: &[u8] = b" \t\x0c\r\n";

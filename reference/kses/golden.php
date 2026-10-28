@@ -172,6 +172,38 @@ $css = array(
 	'color:var(--wp--preset--color--base)', 'margin:var(--a,var(--b,1px))', 'width:var(--a,calc(1px + var(--b)))',
 );
 
+$urls = array(
+	'', ' ', 'http://example.com/', 'https://example.com/a?b=c&d=e', ' http://x', "\t\n http://x", " \t\0http://a b", 'example.com',
+	'example.com/path', 'index.php', 'wp-login.php?x', 'a-b.PHP', 'a-b.PHP?x', '.php', 'a.phpx', 'a_b.php', '/relative', '/rel',
+	'//proto.rel/x', '#frag', '#f', '?query', '?q', 'javascript:alert(1)', 'javascript:x', 'JavaScript:x', 'java script:x',
+	'jav&#x09;ascript:x', '&#106;avascript:x', 'mailto:a@b.c', 'mailto:a%0a@b', 'MAILTO:a%0a@b', 'MAILTO:%0D', 'mailto:x%0D%0A',
+	'http://x/%0a%0A%0d%0D', 'http://x/%%0a0a', '%0a', '%0a%0D', 'http://x/a b', 'http://x/<b>', 'http://x/<"q">', 'http://x/"q"',
+	"http://x/'q'", "http://x/'", 'HTTP:x', 'tel:1', 'x:y', 'http://x/?a[1]=2', 'http://x/?a[]=1&b[]=2', 'http://[::1]/a[b]',
+	'http://[::1]:8080/a', 'http://[::1]:8080/a[b]', 'http://u:p@h:80/[x]', 'http://u:p@host:80/a[1]', 'http://u@host/[x]',
+	'http://@h/[x]', 'http://@host/[x]', '//h:80/[x]', '//host:80/[x]', '/[x]', '[x]', '/a[b]/c', 'x:/[y]', 'http://h:99999/[x]',
+	'http://h:-1/[x]', 'a[1]:8/', 'http://host:65536/[x]', 'http://host:65535/[x]', 'http://host:0/[x]', 'http://host:+8/[x]',
+	'http://host:-0/[x]', 'http://host:-1/[x]', 'http://host:8a/[x]', 'http://host:123456/[x]', 'http://host:/[x]',
+	'http://:80/[x]', 'a:80/[x]', 'a:65536/[x]', ':80/[x]', 'x://[y]', 'file:///[c]', 'file:///c:/[d]', 'FILE:///[c]',
+	'a+b.c-d:x[1]', 'a_b:x[1]', 'a_b:[1]', 'a_b?:x[1]', '//[x]', '//', 'a:', 'a:[', 'http:[x]', 'http:/[x]', 'h[t]tp://x',
+	'[]:80', 'x]y', 'tel:+1-555', 'sms:1', 'feed:http://x', 'feed:feed:http://x', 'feed:feed:feed:http://x', 'feed:javascript:x',
+	'feed:0', 'feed:', 'urn:x', 'svn+ssh://x', 'ftp://x', 'data:text/html,x', 'x&#58y', 'x&#058;y', 'x&#x3a;y', 'x&#X3A;y',
+	'x&#x03ay', 'x&#58;y', 'x&colon;y', 'x&COLON;y', 'x&#5;8', 'x&#58', 'x&#x3a', 'x&#x3aa:y', 'x&#585:y', 'x/?a:b', 'a/?:b',
+	'&#x6a;avascript:x', '&#0000106;avascript:x', 'h&#116;tp:x', 'h&#116;tp://x', '&#9223372036854775807;:x',
+	'&#9223372036854775808;:x', '&#99999999999999999999;:x', '&#x7fffffffffffffff;:x', '&#x8000000000000000;:x',
+	'http://x/&amp;', 'http://x/&nbsp;', 'http://x/&nosuch;', 'http://x/&#39;', 'http://x/&#039;', 'http://x/&#0;',
+	'http://x/&#1;', 'http://x/&#9;', 'http://x/&#65;', 'http://x/&#00065;', 'http://x/&#1234567;', 'http://x/&#12345678;',
+	'http://x/&#55296;', 'http://x/&#x41;', 'http://x/&#X41;', 'http://x/&#x0041;', 'http://x/&#X0041;', 'http://x/&#xD800;',
+	'http://x/&#x110000;', 'http://x/&#x10FFFF;', 'http://x/&#xFFFFFFF;', 'http://x/&ab;', 'http://x/&abcdefgh;',
+	'http://x/&abcdefghi;', 'http://x/&sup2;', 'http://x/&sup23;', 'http://x/&a12;', 'http://x/&a123;', 'http://x/&;',
+	'http://x/&#;', 'http://x/&#x;', 'http://x/&amp;&nbsp;&nosuch;&ab;&abcdefghi;&sup2;&sup23;&a123;',
+	'http://x/&#9;&#00065;&#1234567;&#12345678;&#55296;&#1;&#0;', 'http://x/&#x41;&#X0041;&#xD800;&#x110000;&#xFFFFFFF;&#x;',
+	'http://x/é', "http://x/\x80\xff", "http://x/\x80\xff\x7f", 'http://x/\\0', "a\\0:b", "&#92;0x:y", 'h&#0;ttp:x',
+	'ht&#32;tp:x', 'ht&#10;tp:x', "http\x00://x", 'http;//x', 'x;//y', 'mailto;//x', '\\\\x', 'a|b', '$x', '!x', '*x', '(x)',
+	',x', '~x', '+x', '@x', '%', 'http://x?a#b[c]', 'https:[x]', 'https://x[1]', 'HTTP://X/[1]', 'irc6://[x]', 'webcal:x',
+	'xmpp:x', 'gopher:x', 'http://user:pass@[2001:db8::1]:8443/p[1]?q[]=1#f[2]', '//[::1]:80/[x]', 'http://[::1/[x]',
+	'http://h:80:90/[x]', '0', '00', '/', '#', '?', ':', ' 0', 'a:0', 'feed:feed:0', 'mailto: x ',
+);
+
 /** Inputs for the functions on byte strings. */
 $real    = real_values( $theme );
 $sets    = array(
@@ -185,6 +217,7 @@ $sets    = array(
 	'strip-all-tags-breaks' => array( 'strip_breaks', array_merge( $tags, $real ), array( '<', '>', '<b>', 'a', ' ', "\n", "\r", "\t", "\0", '<script>', '</script>' ) ),
 	'sanitize-key'       => array( 'sanitize_key', array_merge( $keys, $real ), array( 'A', 'z', '_', '-', ' ', "\xc3\xa9", '0', '.', 'Z' ) ),
 	'safecss-filter-attr' => array( 'safecss_filter_attr', array_merge( $css, $real ), array( 'color', 'background', 'width', '--x', ':', ';', ' ', 'red', 'url(', ')', '(', 'javascript:', 'http://a', '"', "'", 'calc(', 'var(', 'linear-gradient(', 'repeating-', ',', '1px', '\\', '&', '=', '}', '/*', '*/', '0', 'data:', 'rgb(', "\n", "\0", 'expression(', '-gradient(', 'url( ', 'URL(' ) ),
+	'esc-url'            => array( 'esc_url', $urls, array( 'http', 'https', 'HTTP', 'ftp', 'feed', 'feed:', 'javascript', 'javascript:', 'mailto', 'mailto:', 'data', 'tel', 'x', 'host', 'example.com', ':', '://', ';//', '//', '/', '?', '#', '&#58', '&#58;', '&#x3A;', '&#x3a', '&colon;', '&#106;', '[', ']', '[::1]', '[2001:db8::1]', ':80', ':8080', ':65536', ':0', ':-1', 'u:p@', 'user@', '@', ' ', "\t", "\n", "\0", "\x01", "\x7f", '%', '%0a', '%0D', '%5B', '&', '&amp;', '&nbsp;', '&#039;', '&#', ';', "'", '"', '<', '>', '\\', '.php', 'index', 'a-b', '0', '1', '=', 'é', "\xff" ) ),
 );
 
 function bad_protocol( $text ) {

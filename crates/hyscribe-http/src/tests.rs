@@ -106,7 +106,9 @@ async fn single_posts_and_pages() {
         title(&reply.body),
         "Sample Page &#8211; HyScribe Default Install"
     );
-    assert!(reply.body.contains("<blockquote class=\"wp-block-quote\">"));
+    assert!(reply.body.contains(
+        "<blockquote class=\"wp-block-quote is-layout-flow wp-block-quote-is-layout-flow\">"
+    ));
     assert!(
         reply
             .body

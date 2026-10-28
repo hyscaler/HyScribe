@@ -522,6 +522,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "hyscribe-db",
+ "hyscribe-kses",
  "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-render",

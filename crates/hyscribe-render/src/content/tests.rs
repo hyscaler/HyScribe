@@ -114,6 +114,7 @@ fn post_content_matches_php() {
                     open_parts: Vec::new(),
                     open_patterns: Vec::new(),
                     open_posts: Vec::new(),
+                    parent_layout: None,
                 };
                 (get_the_content(&renderer, &site.post), php, row)
             }
@@ -169,7 +170,7 @@ fn post_content_needs_a_post() {
             &request,
             r#"<!-- wp:post-content {"tagName":"section"} /-->"#
         ),
-        r#"<section class="entry-content wp-block-post-content">"#.to_string()
+        r#"<section class="entry-content wp-block-post-content is-layout-flow wp-block-post-content-is-layout-flow">"#.to_string()
             + "<p>\u{1f642}</p></section>"
     );
     site.smilies = false;

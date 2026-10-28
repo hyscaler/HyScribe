@@ -16,11 +16,10 @@
 
 require '/var/www/html/wp-load.php';
 
-// The elements and layout supports (wp-elements-* and is-layout-* classes
-// and styles) are checked on their own; here the callbacks are.
+// The elements support (wp-elements-* classes and styles) is checked on
+// its own; here the callbacks are.
 remove_filter( 'render_block', 'wp_render_elements_class_name', 10 );
 remove_filter( 'render_block_data', 'wp_render_elements_support_styles', 10 );
-remove_filter( 'render_block', 'wp_render_layout_support_flag', 10 );
 
 $blocks = array(
 	'<!-- wp:site-title /-->',

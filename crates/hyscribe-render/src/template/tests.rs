@@ -78,7 +78,9 @@ fn the_home_template_expands_parts_and_patterns() {
     assert!(html.starts_with(
         r##"<a class="skip-link screen-reader-text" id="wp-skip-link" href="#wp--skip-link--target">Skip to content</a><div class="wp-site-blocks"><header class="wp-block-template-part">"##
     ));
-    assert!(html.contains(r#"<main id="wp--skip-link--target" class="wp-block-group""#));
+    assert!(html.contains(
+        r#"<main id="wp--skip-link--target" class="wp-block-group has-global-padding is-layout-constrained wp-block-group-is-layout-constrained""#
+    ));
     assert!(html.contains("<footer class=\"wp-block-template-part\">"));
     assert!(html.ends_with("</footer>\n</div>"));
     assert!(!html.contains("wp:pattern"));
@@ -181,7 +183,7 @@ fn saved_markup_keeps_inner_blocks_in_place() {
             &theme,
             "a<!-- wp:group --><div>1<!-- wp:pattern {\"slug\":\"p\"} /-->2</div><!-- /wp:group -->b"
         ),
-        "a<div>1P2</div>b"
+        "a<div class=\"is-layout-flow wp-block-group-is-layout-flow\">1P2</div>b"
     );
     // More placeholders than inner blocks cannot come from the parser, but
     // must not panic.
@@ -203,6 +205,7 @@ fn saved_markup_keeps_inner_blocks_in_place() {
         open_parts: Vec::new(),
         open_patterns: Vec::new(),
         open_posts: Vec::new(),
+        parent_layout: None,
     };
     assert_eq!(renderer.block(&odd), b"x");
     odd.attrs = None;
@@ -280,4 +283,26 @@ fn template_filters_run_on_the_rendered_template() {
         html(&DefaultInstall),
         r#"<div class="wp-site-blocks"><p>&#8220;Hi&#8221; :mrgreen: ]]&gt;</p></div>"#
     );
+}
+
+#[test]
+fn unregistered_blocks_render_their_markup() {
+    let theme = twentytwentyfive();
+    assert_eq!(
+        render(
+            &theme,
+            "<!-- wp:my/block --><div>x</div><!-- /wp:my/block -->"
+        ),
+        "<div>x</div>"
+    );
+}
+
+#[test]
+fn layout_classes_go_on_the_inner_wrapper() {
+    let theme = twentytwentyfive();
+    let html = render(
+        &theme,
+        r#"<!-- wp:group {"layout":{"type":"flex"}} --><div class="wp-block-group"><div class="wp-block-group__inner-container"><!-- wp:paragraph --><p>x</p><!-- /wp:paragraph --></div></div><!-- /wp:group -->"#,
+    );
+    assert!(html.starts_with(r#"<div class="wp-block-group"><div class="wp-block-group__inner-container is-layout-flex "#), "{html}");
 }

@@ -12,6 +12,8 @@ use hyscribe_phpser::{Value, lookup};
 use crate::blocks::{Block, parse_blocks};
 use crate::core_blocks::{self, Context};
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_smilies, wptexturize};
+use crate::layout::{LayoutBlock, render_layout};
+use crate::registry::block_type;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
 use crate::theme::Theme;
@@ -115,6 +117,7 @@ pub fn render_content(
         open_parts: Vec::new(),
         open_patterns: Vec::new(),
         open_posts: Vec::new(),
+        parent_layout: None,
     }
     .render(content)
 }
@@ -127,6 +130,9 @@ pub(crate) struct Renderer<'a> {
     pub(crate) open_patterns: Vec<Vec<u8>>,
     /// Posts whose content is being rendered, as `$seen_ids` tracks them.
     pub(crate) open_posts: Vec<u64>,
+    /// The `layout` attribute of the block being rendered, `parentLayout`
+    /// to its inner blocks.
+    pub(crate) parent_layout: Option<Value>,
 }
 
 /// A string attribute.
@@ -146,20 +152,65 @@ impl Renderer<'_> {
 
     /// `render_block()` for one block.
     fn block(&mut self, block: &Block) -> Vec<u8> {
-        match block.name.as_deref() {
+        // Inner blocks get this block's layout as `parentLayout`.
+        let own = block
+            .attrs
+            .as_deref()
+            .and_then(|attrs| lookup(attrs, "layout"))
+            .cloned();
+        let parent = std::mem::replace(&mut self.parent_layout, own);
+        let html = match block.name.as_deref() {
             Some("core/template-part") => self.template_part(block),
             Some("core/pattern") => self.pattern(block),
             Some("core/query") => self.query(block),
             Some("core/post-template") => self.post_template(block),
             Some("core/post-content") => self.post_content(block),
-            Some("core/paragraph") => paragraph_class(&self.saved_markup(block)),
             Some(name) => {
                 let content = self.saved_markup(block);
                 let parsed = block.attrs.as_deref().unwrap_or_default();
                 core_blocks::render(&self.context, name, parsed, &content).unwrap_or(content)
             }
             None => self.saved_markup(block),
+        };
+        self.parent_layout = parent;
+        let html = self.layout(block, html);
+        match block.name.as_deref() {
+            Some("core/paragraph") => paragraph_class(&html),
+            _ => html,
         }
+    }
+
+    /// `do_blocks()` on content of its own, whose blocks have no parent.
+    pub(crate) fn render_top_level(&mut self, markup: &[u8]) -> Vec<u8> {
+        let outer = self.parent_layout.take();
+        let html = self.render(markup);
+        self.parent_layout = outer;
+        html
+    }
+
+    /// The layout support's `render_block` filter. Its CSS is for the block
+    /// supports stylesheet in the head, which is not printed yet.
+    fn layout(&self, block: &Block, html: Vec<u8>) -> Vec<u8> {
+        let Some((name, block_type)) = block
+            .name
+            .as_deref()
+            .and_then(|name| Some((name, block_type(name)?)))
+        else {
+            return html;
+        };
+        let attributes = Value::Array(block.attrs.clone().unwrap_or_default());
+        let first_chunk = match block.inner_content.as_slice() {
+            [Some(first), _, ..] => Some(first.as_slice()),
+            _ => None,
+        };
+        let layout_block = LayoutBlock {
+            name,
+            block_type,
+            attributes: &attributes,
+            parent_layout: self.parent_layout.as_ref(),
+            first_chunk,
+        };
+        render_layout(&layout_block, &self.context.theme.global, html).0
     }
 
     /// The block's own markup with its inner blocks rendered in place.
@@ -193,7 +244,7 @@ impl Renderer<'_> {
             return Vec::new();
         }
         self.open_parts.push(slug.to_vec());
-        let html = self.render(content);
+        let html = self.render_top_level(content);
         self.open_parts.pop();
         // A valid `tagName` wins; otherwise the area's tag.
         let tag = match attr(block, "tagName").filter(|t| is_tag_name(t)) {
@@ -232,7 +283,7 @@ impl Renderer<'_> {
             return Vec::new();
         }
         self.open_patterns.push(slug.to_vec());
-        let html = self.render(content);
+        let html = self.render_top_level(content);
         self.open_patterns.pop();
         html
     }

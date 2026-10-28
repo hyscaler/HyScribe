@@ -71,7 +71,7 @@ impl Renderer<'_> {
     fn the_content(&mut self, post: &Post) -> Vec<u8> {
         let site = self.context.site;
         let content = replace(&get_the_content(self, post), b"]]>", b"]]&gt;");
-        let content = wptexturize(&self.render(&content), &CORE_SHORTCODE_TAGS);
+        let content = wptexturize(&self.render_top_level(&content), &CORE_SHORTCODE_TAGS);
         let content = capital_p_dangit(&replace_insecure_home_url(&site.home_url(), &content));
         if site
             .option("use_smilies")

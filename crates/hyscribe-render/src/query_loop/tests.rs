@@ -79,5 +79,8 @@ fn sticky_posts_are_selected_or_left_out() {
         String::from_utf8(render_content(&theme, &site, &request, markup.as_bytes())).unwrap()
     };
     assert!(html("only").contains("Hello world!"));
-    assert_eq!(html("exclude"), "<div></div>");
+    assert_eq!(
+        html("exclude"),
+        r#"<div class="is-layout-flow wp-block-query-is-layout-flow"></div>"#
+    );
 }

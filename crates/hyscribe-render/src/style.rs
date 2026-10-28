@@ -517,7 +517,7 @@ pub fn get_styles(styles: &Value, convert_vars_to_classnames: bool) -> Styles {
 /// values that are not blank, under their `sanitize_key()`ed property, and
 /// `get_declarations_string()` joins them, each through
 /// `wp_strip_all_tags()` and `safecss_filter_attr()`.
-fn declarations_string(declarations: &[(String, Value)]) -> Vec<u8> {
+pub(crate) fn declarations_string(declarations: &[(String, Value)]) -> Vec<u8> {
     let mut kept: Vec<(String, &[u8])> = Vec::new();
     for (property, value) in declarations {
         let property = sanitize_key(property.as_bytes());

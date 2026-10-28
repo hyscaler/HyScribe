@@ -11,6 +11,7 @@ pub mod date;
 #[path = "tests/fixture.rs"]
 mod fixture;
 pub mod formatting;
+mod layout;
 pub mod link;
 pub mod post;
 mod query_loop;

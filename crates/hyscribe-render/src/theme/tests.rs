@@ -63,3 +63,25 @@ fn every_part_has_a_known_area() {
         );
     }
 }
+
+#[test]
+fn malformed_theme_data_is_skipped() {
+    assert!(registered_blocks(b"[[1, 2], [\"core/x\", \"no json\"]]").is_empty());
+    assert!(registered_blocks(b"[[\"core/x\"]]").is_empty());
+    assert_eq!(style_partials(b"{\"0\": \"x\", \"a.json\": 3}"), []);
+    assert_eq!(
+        block_styles("no tab\ncore/list\tcheckmark-list"),
+        [("core/list".to_string(), "checkmark-list".to_string())]
+    );
+}
+
+#[test]
+fn style_partials_reach_the_global_styles() {
+    // The theme's section styles register block style variations.
+    let global = twentytwentyfive().global;
+    assert!(
+        global
+            .block_style("core/columns", &["variations", "section-1"])
+            .is_some()
+    );
+}

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use hyscribe_phpser::{Key, Value, json_decode};
-use hyscribe_theme_json::{GlobalStyles, Sources};
+use hyscribe_theme_json::{BlockType as Metadata, GlobalStyles, Sources};
 
 const TEMPLATES: [(&str, &[u8]); 8] = [
     (
@@ -78,6 +78,10 @@ const PARTS: [(&str, &[u8]); 7] = [
 const PATTERNS: &[u8] = include_bytes!("../../../themes/twentytwentyfive/patterns.json");
 const THEME_JSON: &[u8] = include_bytes!("../../../themes/twentytwentyfive/theme.json");
 const CORE_THEME_JSON: &[u8] = include_bytes!("../../../wordpress/wp-includes/theme.json");
+const REGISTERED_BLOCKS: &[u8] =
+    include_bytes!("../../../wordpress/wp-includes/blocks/registered.json");
+const BLOCK_STYLES: &str = include_str!("../../../themes/twentytwentyfive/block-styles.tsv");
+const STYLE_PARTIALS: &[u8] = include_bytes!("../../../themes/twentytwentyfive/styles.json");
 
 /// A block theme.
 #[derive(Debug)]
@@ -103,10 +107,10 @@ pub fn twentytwentyfive() -> Theme {
         patterns: patterns(PATTERNS),
         global: GlobalStyles::resolve(&Sources {
             core: CORE_THEME_JSON,
-            blocks: &[],
-            block_styles: &[],
+            blocks: &registered_blocks(REGISTERED_BLOCKS),
+            block_styles: &block_styles(BLOCK_STYLES),
             theme: Some(THEME_JSON),
-            theme_styles: &[],
+            theme_styles: &style_partials(STYLE_PARTIALS),
             user: None,
         }),
     }
@@ -145,6 +149,50 @@ impl Theme {
     pub fn pattern(&self, slug: &[u8]) -> Option<&[u8]> {
         self.patterns.get(slug).map(Vec::as_slice)
     }
+}
+
+/// `registered.json`: each registered core block's `block.json`, in
+/// registration order.
+fn registered_blocks(json: &[u8]) -> Vec<Metadata> {
+    let root = json_decode(json).unwrap_or_default();
+    root.as_array()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|(_, entry)| {
+            let name = entry.get(&Key::Int(0)).and_then(Value::as_bytes)?;
+            let metadata = json_decode(entry.get(&Key::Int(1)).and_then(Value::as_bytes)?)?;
+            Some(Metadata {
+                name: String::from_utf8_lossy(name).into_owned(),
+                metadata,
+            })
+        })
+        .collect()
+}
+
+/// `block-styles.tsv`: the block styles registered with the theme, block
+/// and style name per line.
+fn block_styles(tsv: &str) -> Vec<(String, String)> {
+    tsv.lines()
+        .filter_map(|line| line.split_once('\t'))
+        .map(|(block, style)| (block.to_string(), style.to_string()))
+        .collect()
+}
+
+/// `styles.json`: the theme's style partials that name block types, file
+/// name to contents.
+fn style_partials(json: &[u8]) -> Vec<(String, Vec<u8>)> {
+    let root = json_decode(json).unwrap_or_default();
+    root.as_array()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|(key, contents)| match key {
+            Key::String(name) => Some((
+                String::from_utf8_lossy(name).into_owned(),
+                contents.as_bytes()?.to_vec(),
+            )),
+            Key::Int(_) => None,
+        })
+        .collect()
 }
 
 /// The string at `key` of a decoded JSON object.

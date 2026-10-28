@@ -91,7 +91,9 @@ impl Renderer<'_> {
             .filter(|v| !v.is_empty());
         if let (true, Some(columns)) = (grid, columns) {
             classes.push(b' ');
-            classes.extend(sanitize_title(&[b"columns-", &columns.to_php_string()[..]].concat()));
+            classes.extend(sanitize_title(
+                &[b"columns-", &columns.to_php_string()[..]].concat(),
+            ));
             if attributes
                 .get_path(&["layout", "minimumColumnWidth"])
                 .is_some_and(|v| !v.is_empty())

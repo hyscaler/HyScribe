@@ -6,6 +6,7 @@
 #   wordpress/wp-includes/theme.json                core theme.json defaults
 #   wordpress/wp-includes/blocks/<name>/block.json  core block metadata
 #   wordpress/wp-includes/blocks/registry.json      the registered block types
+#   wordpress/wp-includes/blocks/registered.json    their block.json, in registration order
 #   wordpress/wp-includes/blocks/<name>/*.min.css   core block styles (LTR)
 #   wordpress/wp-includes/css/dist/block-library/*.min.css
 #   wordpress/VERSION
@@ -28,10 +29,13 @@ mkdir -p "$OUT"
 # The block type registry as WordPress builds it: each core block's final
 # attributes (block.json plus those block supports register) and supports.
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; $out = array(); foreach ( WP_Block_Type_Registry::get_instance()->get_all_registered() as $name => $type ) { if ( str_starts_with( $name, "core/" ) ) { $out[ $name ] = array( "attributes" => $type->attributes, "supports" => $type->supports, "uses_context" => $type->uses_context, "provides_context" => $type->provides_context ); } } ksort( $out ); echo wp_json_encode( $out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );' > "$OUT/wp-includes/blocks/registry.json"
+# Each registered core block's block.json as written, in registration
+# order; a block registered without one gets its name and supports.
+"$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; $out = array(); foreach ( WP_Block_Type_Registry::get_instance()->get_all_registered() as $name => $type ) { if ( ! str_starts_with( $name, "core/" ) ) { continue; } $file = ABSPATH . WPINC . "/blocks/" . substr( $name, 5 ) . "/block.json"; $out[] = array( $name, is_file( $file ) ? file_get_contents( $file ) : wp_json_encode( array( "name" => $name, "supports" => $type->supports ), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) . "\n" ); } echo wp_json_encode( $out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );' > "$OUT/wp-includes/blocks/registered.json"
 cat > "$OUT/README.md" <<'README'
 # WordPress core data
 
-Files from WordPress core that HyScribe uses as data: the core `theme.json`, every core block's `block.json`, the block types as WordPress registers them (`blocks/registry.json`), and the block library styles. Exported by `reference/wordpress/export.sh` from the pinned version in `VERSION`. Never edit by hand.
+Files from WordPress core that HyScribe uses as data: the core `theme.json`, every core block's `block.json`, the block types as WordPress registers them (`blocks/registry.json`) and their `block.json` in registration order (`blocks/registered.json`), and the block library styles. Exported by `reference/wordpress/export.sh` from the pinned version in `VERSION`. Never edit by hand.
 
 License: GPL-2.0-or-later, as WordPress (ADR 0004).
 README

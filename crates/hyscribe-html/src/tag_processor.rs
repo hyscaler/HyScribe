@@ -285,6 +285,28 @@ impl TagProcessor {
         found
     }
 
+    /// Moves to the next tag, opening or closing: `next_tag( array(
+    /// 'tag_closers' => 'visit' ) )`. `false` when there is none.
+    pub fn next_tag_visiting_closers(&mut self) -> bool {
+        let mut found = false;
+        // Every token takes at least one byte.
+        for _ in 0..=self.html.len() {
+            if !self.next_token() {
+                break;
+            }
+            if self.state == State::MatchedTag {
+                found = true;
+                break;
+            }
+        }
+        found
+    }
+
+    /// `is_tag_closer()`: the current tag is a closing tag.
+    pub fn is_tag_closer(&self) -> bool {
+        self.state == State::MatchedTag && self.is_closing_tag
+    }
+
     fn matches(&mut self, tag_name: Option<&[u8]>, class_name: Option<&[u8]>) -> bool {
         if self.is_closing_tag {
             return false;
@@ -1715,5 +1737,23 @@ mod tests {
         assert_eq!(php_substr(b"abcdef", 1, -2), b"bcd");
         assert_eq!(php_substr(b"abcdef", 4, -3), b"");
         assert_eq!(php_substr(b"abcdef", 1, -9), b"");
+    }
+
+    /// The order PHP's `next_tag( array( 'tag_closers' => 'visit' ) )`
+    /// visits tags in.
+    #[test]
+    fn visits_closing_tags() {
+        let mut tags = TagProcessor::new(br#"<div class="a"><p>x</p><br><img src=x></div><span>"#);
+        let mut seen = Vec::new();
+        while tags.next_tag_visiting_closers() {
+            let name = String::from_utf8(tags.get_tag().unwrap()).unwrap();
+            seen.push(if tags.is_tag_closer() {
+                format!("{name}/")
+            } else {
+                name
+            });
+        }
+        assert_eq!(seen, ["DIV", "P", "P/", "BR", "IMG", "DIV/", "SPAN"]);
+        assert!(!TagProcessor::new(b"x").is_tag_closer());
     }
 }

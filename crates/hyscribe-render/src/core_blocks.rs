@@ -18,7 +18,7 @@ use crate::kses::wp_kses_post;
 use crate::link;
 use crate::media::Loading;
 use crate::post::{the_title, title_filters};
-use crate::query_loop::{inherits, own_query, query_posts, query_vars};
+use crate::query_loop::{inherits, own_counts, own_page, query_posts};
 use crate::registry::block_type;
 use crate::site::{Archive, Request, Site};
 use crate::supports::get_block_wrapper_attributes;
@@ -46,6 +46,8 @@ pub(crate) struct Context<'a> {
 /// `displayLayout` and `enhancedPagination`.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct QueryContext {
+    /// `queryId`, which names the query's page in the request.
+    pub(crate) id: Option<Value>,
     pub(crate) query: Value,
     pub(crate) display_layout: Option<Value>,
     pub(crate) enhanced_pagination: bool,
@@ -1181,7 +1183,7 @@ fn query_no_results(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 }
 
 /// `render_block_core_query_total()`: the main query's count, or that of a
-/// query of its own on its first page, the only one served yet.
+/// query of its own at its page.
 fn query_total(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let request = context.request;
     // PHP's integers: `(int) get( 'posts_per_page' )` may be -1.
@@ -1190,14 +1192,12 @@ fn query_total(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         let page = i64::try_from(request.paged.max(1)).unwrap_or(i64::MAX);
         (request.found_posts, Value::String(option).to_int(), page)
     } else {
-        let vars = query_vars(context, own_query(context));
-        // set_found_posts() leaves 0 when the page has no posts.
-        let found = if context.site.query(&vars).is_empty() {
-            0
-        } else {
-            context.site.count_posts(&vars)
-        };
-        (found, i64::from(vars.limit), 1)
+        // `(int) ( $_GET[ $key ] ?? 1 )`: an empty page is page 0 here.
+        let (key, _) = own_page(context);
+        let key = String::from_utf8_lossy(&key).into_owned();
+        let page = request.get.get_str(&key).map_or(1, Value::to_int);
+        let (found, per_page, _) = own_counts(context, page);
+        (found, per_page, page)
     };
     let found = i64::try_from(found).unwrap_or(i64::MAX);
     let start = if found == 0 {

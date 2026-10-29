@@ -293,7 +293,7 @@ $pagination_markups = array(
 foreach ( array( '{"inherit":true}', '{"pages":3,"inherit":true}', '{"inherit":false}', '{"pages":-1,"inherit":true}', '{"perPage":1,"offset":5,"inherit":false}', '{"perPage":"0","inherit":false}' ) as $case_query_attr ) {
 	foreach ( $pagination_markups as $inner ) {
 		$markup = '<!-- wp:query {"query":' . $case_query_attr . '} --><div class="wp-block-query">' . $inner . '</div><!-- /wp:query -->';
-		foreach ( array( array( '/', 0, 1 ), array( '/', 1, 2 ), array( '/?paged=2', 2, 2 ), array( '/?s=a+b%20c&paged=3', 3, 5 ), array( '/?cat=1', 1, 10 ), array( '/?paged=6&x=%26', 6, 10 ), array( '/?paged=10', 10, 10 ), array( '/?paged=999', 999, 1200 ), array( '/?p=1&paged=2', 2, 3 ), array( '/BLOG/?s=x&paged=3', 3, 4, 'http://127.0.0.1:8081/blog' ), array( '/x/y?paged=2', 2, 3 ), array( '/', 0, 0, null, 0 ), array( '/?paged=1', 1, 1, null, 1 ), array( '/?paged=2', 2, 2, null, 11 ) ) as $case ) {
+		foreach ( array( array( '/', 0, 1 ), array( '/', 1, 2 ), array( '/?paged=2', 2, 2 ), array( '/?s=a+b%20c&paged=3', 3, 5 ), array( '/?cat=1', 1, 10 ), array( '/?paged=6&x=%26', 6, 10 ), array( '/?paged=10', 10, 10 ), array( '/?paged=999', 999, 1200 ), array( '/?p=1&paged=2', 2, 3 ), array( '/BLOG/?s=x&paged=3', 3, 4, 'http://127.0.0.1:8081/blog' ), array( '/x/y?paged=2', 2, 3 ), array( '/', 0, 0, null, 0 ), array( '/?paged=1', 1, 1, null, 1 ), array( '/?paged=2', 2, 2, null, 11 ), array( '/?paged=3&7=q', 3, 5 ) ) as $case ) {
 			list( $case_uri, $case_paged, $case_max ) = $case;
 			$case_home   = $case[3] ?? 'http://127.0.0.1:8081';
 			$case_found  = $case[4] ?? $case_max * 10 - 7;
@@ -314,6 +314,35 @@ foreach ( array( '{"inherit":true}', '{"pages":3,"inherit":true}', '{"inherit":f
 	}
 }
 $_SERVER['REQUEST_URI'] = '/';
+
+// The same blocks in queries of their own, which page by `query-<id>-page`,
+// with four more posts inserted for them and rolled back after. Lines are
+//   ownpage<TAB>hex(markup)<TAB>hex(state JSON)<TAB>hex(output)
+global $wpdb;
+$wpdb->query( 'START TRANSACTION' );
+$extra = array();
+foreach ( range( 1, 4 ) as $n ) {
+	$extra_id = wp_insert_post( array( 'post_title' => "Extra $n", 'post_status' => 'publish', 'post_date' => "2026-0$n-01 00:00:00", 'post_content' => '' ) );
+	$extra[]  = array_intersect_key( get_post( $extra_id, ARRAY_A ), array_flip( array( 'ID', 'post_title', 'post_date', 'post_date_gmt', 'post_name', 'post_type', 'post_status' ) ) );
+}
+$own_markups = array_merge( $pagination_markups, array( '<!-- wp:post-template --><!-- wp:post-title /--><!-- /wp:post-template -->' ) );
+foreach ( array( '{"query":{"perPage":2,"inherit":false}}', '{"queryId":7,"query":{"perPage":2,"inherit":false}}', '{"query":{"perPage":2,"offset":1,"inherit":false}}', '{"query":{"perPage":1,"pages":2,"inherit":false}}' ) as $own_attrs ) {
+	foreach ( $own_markups as $inner ) {
+		$markup = '<!-- wp:query ' . $own_attrs . ' --><div class="wp-block-query">' . $inner . '</div><!-- /wp:query -->';
+		foreach ( array( '/', '/?query-page=2', '/?query-page=3', '/?query-page=9', '/?query-7-page=2&paged=3', '/?query-page=-1', '/?query-page=abc&s=x', '/?query-page=2&a=%26', '/?query-page=2&cst=x', '/?query-page=0', '/?query-page=', '/?query-page=2&paged=abc', '/?query-page=2&5=z&9=y' ) as $own_uri ) {
+			$GLOBALS['wp'] = new WP();
+			wp( '' );
+			$_SERVER['REQUEST_URI'] = $own_uri;
+			$_GET                   = array();
+			parse_str( (string) parse_url( $own_uri, PHP_URL_QUERY ), $_GET );
+			$state = array( 'uri' => $own_uri, 'home' => home_url(), 'posts' => $extra );
+			echo 'ownpage', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( do_blocks( $markup ) ), "\n";
+		}
+	}
+}
+$wpdb->query( 'ROLLBACK' );
+$_SERVER['REQUEST_URI'] = '/';
+$_GET                   = array();
 
 // Page 3 of lists, and a child page: one post fills no second page, so
 // both are set on the query in memory.

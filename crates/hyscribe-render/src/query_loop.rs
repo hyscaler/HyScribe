@@ -35,6 +35,7 @@ impl Renderer<'_> {
         let enhanced_pagination =
             attributes.get_str("enhancedPagination") == Some(&Value::Bool(true));
         let context = QueryContext {
+            id: id.clone(),
             query: attributes.get_str("query").cloned().unwrap_or(Value::Null),
             display_layout: attributes.get_str("displayLayout").cloned(),
             enhanced_pagination,
@@ -155,8 +156,46 @@ pub(crate) fn query_posts(context: &Context<'_>) -> Vec<Post> {
     if inherits(context) {
         context.request.posts.clone()
     } else {
-        context.site.query(&query_vars(context, own_query(context)))
+        let (_, page) = own_page(context);
+        context
+            .site
+            .query(&query_vars(context, own_query(context), page))
     }
+}
+
+/// The page of a query of its own: the `query-<queryId>-page` request
+/// argument (`query-page` without an ID), 1 when it is empty.
+pub(crate) fn own_page(context: &Context<'_>) -> (Vec<u8>, i64) {
+    let id = context.query.as_ref().and_then(|q| q.id.as_ref());
+    let key = id.map_or_else(
+        || b"query-page".to_vec(),
+        |id| [b"query-", &id.to_php_string()[..], b"-page"].concat(),
+    );
+    let name = String::from_utf8_lossy(&key).into_owned();
+    let page = context
+        .request
+        .get
+        .get_str(&name)
+        .filter(|v| !v.is_empty())
+        .map_or(1, Value::to_int);
+    (key, page)
+}
+
+/// A query of its own at `page`: `found_posts`, `posts_per_page` and
+/// `max_num_pages`, with `found_posts` 0 when the page has no posts.
+pub(crate) fn own_counts(context: &Context<'_>, page: i64) -> (u64, i64, i64) {
+    let vars = query_vars(context, own_query(context), page);
+    let found = if context.site.query(&vars).is_empty() {
+        0
+    } else {
+        context.site.count_posts(&vars)
+    };
+    let max = found.div_ceil(u64::from(vars.limit).max(1));
+    (
+        found,
+        i64::from(vars.limit),
+        i64::try_from(max).unwrap_or(i64::MAX),
+    )
 }
 
 /// The `query.inherit` context: the query block lists the main query's posts.
@@ -173,7 +212,7 @@ pub(crate) fn own_query<'a>(context: &'a Context<'_>) -> &'a Value {
 
 /// `build_query_vars_from_query_block( $block, 1 )`, for the arguments
 /// listed in the module documentation.
-pub(crate) fn query_vars(context: &Context<'_>, query: &Value) -> PostQuery {
+pub(crate) fn query_vars(context: &Context<'_>, query: &Value, page: i64) -> PostQuery {
     let site = context.site;
     let field = |name| query.get_str(name).filter(|v| **v != Value::Null);
     let post_type = field("postType")
@@ -208,11 +247,16 @@ pub(crate) fn query_vars(context: &Context<'_>, query: &Value) -> PostQuery {
         .filter(|_| field("excludeCurrent").is_some_and(|v| !v.is_empty()));
     vars.exclude.extend(current);
     if let Some(per_page) = field("perPage").filter(|v| v.is_numeric()) {
+        let count = absint(per_page);
         // A count of 0 is empty(), and WP_Query takes the option's.
-        vars.limit = Some(absint(per_page) as u32)
-            .filter(|&n| n != 0)
-            .unwrap_or(vars.limit);
-        vars.offset = field("offset").filter(|v| v.is_numeric()).map_or(0, absint) as u32;
+        vars.limit = Some(count as u32).filter(|&n| n != 0).unwrap_or(vars.limit);
+        let offset = field("offset").filter(|v| v.is_numeric()).map_or(0, absint);
+        // The page's offset, of which WP_Query takes absint().
+        let skipped = i64::try_from(count)
+            .unwrap_or(i64::MAX)
+            .saturating_mul(page - 1);
+        let start = skipped.saturating_add(i64::try_from(offset).unwrap_or(i64::MAX));
+        vars.offset = u32::try_from(start.unsigned_abs()).unwrap_or(u32::MAX);
     }
     vars.ascending = field("order").is_some_and(|v| v.to_php_string().eq_ignore_ascii_case(b"asc"));
     vars

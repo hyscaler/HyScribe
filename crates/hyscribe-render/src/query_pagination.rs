@@ -11,7 +11,7 @@ use hyscribe_phpser::{
 use crate::blocks::Block;
 use crate::core_blocks::{number_format, prepared, render};
 use crate::formatting::{encode_ampersands, html_entity_decode};
-use crate::query_loop::inherits;
+use crate::query_loop::{inherits, own_counts, own_page, own_query};
 use crate::site::Request;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
@@ -31,43 +31,96 @@ impl Renderer<'_> {
     /// `render_block_core_query_pagination_previous()`.
     pub(crate) fn query_pagination_previous(&self, block: &Block) -> Vec<u8> {
         let request = self.context.request;
-        // get_previous_posts_link()
-        if !inherits(&self.context) || is_single(request) || request.paged <= 1 {
-            return Vec::new();
-        }
         let name = "core/query-pagination-previous";
         let (wrapper, label) = self.link_parts(name, block, b"Previous Page");
         let label = [self.query_arrow("previous"), label].concat();
-        let href = esc_url(&pagenum_link(request, &self.home(), request.paged - 1));
-        link(&href, &wrapper, &label)
+        if inherits(&self.context) {
+            // get_previous_posts_link()
+            if is_single(request) || request.paged <= 1 {
+                return Vec::new();
+            }
+            let href = esc_url(&pagenum_link(request, &self.home(), request.paged - 1));
+            return link(&href, &wrapper, &encode_ampersands(&label, false));
+        }
+        let (key, page) = own_page(&self.context);
+        let total = self.total(own_counts(&self.context, page).2);
+        if page <= 1 || page > total {
+            return Vec::new();
+        }
+        link(&own_link(request, &key, page - 1), &wrapper, &label)
     }
 
     /// `render_block_core_query_pagination_next()`.
     pub(crate) fn query_pagination_next(&self, block: &Block) -> Vec<u8> {
         let request = self.context.request;
-        // get_next_posts_link(), up to the query's `pages` if fewer
-        let next = request.paged.max(1) + 1;
-        if !inherits(&self.context) || is_single(request) || next > self.total() {
-            return Vec::new();
-        }
         let name = "core/query-pagination-next";
         let (wrapper, label) = self.link_parts(name, block, b"Next Page");
         let label = [label, self.query_arrow("next")].concat();
-        let href = esc_url(&pagenum_link(request, &self.home(), next));
-        link(&href, &wrapper, &label)
+        if inherits(&self.context) {
+            // get_next_posts_link(), up to the query's `pages` if fewer
+            let next = request.paged.max(1) + 1;
+            let max = i64::try_from(request.max_pages).unwrap_or(i64::MAX);
+            if is_single(request) || i64::try_from(next).unwrap_or(i64::MAX) > self.total(max) {
+                return Vec::new();
+            }
+            let href = esc_url(&pagenum_link(request, &self.home(), next));
+            return link(&href, &wrapper, &encode_ampersands(&label, false));
+        }
+        // Past the query's `pages`, or on its last page, there is no next.
+        let (key, page) = own_page(&self.context);
+        let pages = self.query_pages();
+        let max = own_counts(&self.context, page).2;
+        if pages != 0 && pages <= page || max == 0 || max == page {
+            return Vec::new();
+        }
+        link(&own_link(request, &key, page + 1), &wrapper, &label)
     }
 
     /// `render_block_core_query_pagination_numbers()`.
     pub(crate) fn query_pagination_numbers(&self, block: &Block) -> Vec<u8> {
-        if !inherits(&self.context) {
-            return Vec::new();
-        }
         let name = "core/query-pagination-numbers";
         let parsed = block.attrs.as_deref().unwrap_or_default();
         let mid_size = prepared(name, parsed)
             .get_str("midSize")
             .map_or(2, Value::to_int);
-        let numbers = paginate_links(self.context.request, &self.home(), self.total(), mid_size);
+        let request = self.context.request;
+        let home = self.home();
+        let numbers = if inherits(&self.context) {
+            let max = i64::try_from(request.max_pages).unwrap_or(i64::MAX);
+            let numbers = Numbers {
+                base: None,
+                key: b"paged".to_vec(),
+                args: Vec::new(),
+                current: request.paged.max(1),
+                total: self.total(max),
+                mid_size,
+            };
+            numbers.links(request, &home)
+        } else {
+            let (key, page) = own_page(&self.context);
+            let total = self.total(own_counts(&self.context, page).2);
+            // `paged`, which a query that inherits reads, stays on the links.
+            let paged = request
+                .get
+                .get_str("paged")
+                .map(Value::to_int)
+                .filter(|&n| n != 0);
+            let args = match paged {
+                Some(paged) => vec![(string_key(b"paged"), Value::Int(paged))],
+                None if page != 1 => vec![(string_key(b"cst"), Value::String(Vec::new()))],
+                None => Vec::new(),
+            };
+            let current = u64::try_from(page.max(1)).unwrap_or(1);
+            let numbers = Numbers {
+                base: Some(Vec::new()),
+                key,
+                args,
+                current,
+                total,
+                mid_size,
+            };
+            numbers.links(request, &home)
+        };
         if numbers.is_empty() {
             return Vec::new();
         }
@@ -82,22 +135,18 @@ impl Renderer<'_> {
         .concat()
     }
 
-    /// The pages there are: `max_num_pages`, or the query's `pages` when
-    /// that is set and fewer.
-    fn total(&self) -> u64 {
-        let pages = self
-            .context
-            .query
-            .as_ref()
-            .and_then(|q| q.query.get_str("pages"))
-            .map_or(0, Value::to_int);
-        let max = self.context.request.max_pages;
-        // A negative count is no fallback, and leaves no pages.
-        match u64::try_from(pages) {
-            Ok(0) => max,
-            Ok(pages) => pages.min(max),
-            Err(_) => 0,
-        }
+    /// The query's `pages`, as `(int)` casts it.
+    fn query_pages(&self) -> i64 {
+        own_query(&self.context)
+            .get_str("pages")
+            .map_or(0, Value::to_int)
+    }
+
+    /// The pages there are: `max`, or the query's `pages` when that is set
+    /// and fewer; a negative `pages` leaves none.
+    fn total(&self, max: i64) -> i64 {
+        let pages = self.query_pages();
+        if pages == 0 { max } else { pages.min(max) }
     }
 
     fn home(&self) -> Vec<u8> {
@@ -171,10 +220,23 @@ fn link(href: &[u8], wrapper: &[u8], label: &[u8]) -> Vec<u8> {
         b"\" ",
         wrapper,
         b">",
-        &encode_ampersands(label, false),
+        label,
         b"</a>",
     ]
     .concat()
+}
+
+/// A page of a query of its own: `add_query_arg( $key, $page )` on the
+/// request, escaped.
+fn own_link(request: &Request, key: &[u8], page: i64) -> Vec<u8> {
+    esc_url(&add_query_arg(
+        &[(key, Some(page.to_string().as_bytes()))],
+        &request.uri,
+    ))
+}
+
+fn string_key(key: &[u8]) -> Key {
+    Key::String(key.to_vec())
 }
 
 /// `get_pagenum_link( $page )` with plain permalinks: the request without
@@ -207,68 +269,97 @@ fn home_path(home: &[u8]) -> Vec<u8> {
         .map_or_else(Vec::new, |path| [b"/", path].concat())
 }
 
-/// `paginate_links()` without previous and next links: the page numbers,
-/// current and ends shown, `mid_size` either side of the current page.
-fn paginate_links(request: &Request, home: &[u8], total: u64, mid_size: i64) -> Vec<u8> {
-    if total < 2 {
-        return Vec::new();
-    }
-    let first = html_entity_decode(&pagenum_link(request, home, 1));
-    let mut parts = first.split(|&b| b == b'?');
-    let mut base = parts.next().unwrap_or_default().to_vec();
-    if base.last() != Some(&b'/') {
-        base.push(b'/');
-    }
-    // The current query, without `paged`, goes on every link.
-    let query = urlencode_deep(parse_str(parts.next().unwrap_or_default()));
-    let args: Vec<(Key, Value)> = query
-        .as_array()
-        .unwrap_or_default()
-        .iter()
-        .filter(|(key, _)| *key != Key::String(b"paged".to_vec()))
-        .cloned()
-        .collect();
-    let current = request.paged.max(1);
-    let mid = u64::try_from(mid_size).unwrap_or(2);
-    let mut links: Vec<Vec<u8>> = Vec::new();
-    let mut dots = false;
-    for n in 1..=total {
-        if n == current {
-            links.push(
-                format!(
-                    "<span aria-current=\"page\" class=\"page-numbers current\">{}</span>",
-                    number_format(n)
-                )
-                .into_bytes(),
-            );
-            dots = true;
-        } else if n <= 1 || (n + mid >= current && n <= current + mid) || n > total - 1 {
-            let mut link = base.clone();
-            if n > 1 {
-                link.extend_from_slice(format!("?paged={n}").as_bytes());
-            }
-            let link = if args.is_empty() {
-                link
-            } else {
-                add_query_values(&args, &link)
-            };
-            links.push(
-                [
-                    b"<a class=\"page-numbers\" href=\"".as_slice(),
-                    &esc_url(&link),
-                    b"\">",
-                    number_format(n).as_bytes(),
-                    b"</a>",
-                ]
-                .concat(),
-            );
-            dots = true;
-        } else if dots {
-            links.push(b"<span class=\"page-numbers dots\">&hellip;</span>".to_vec());
-            dots = false;
+/// `paginate_links()` without previous and next links: `base` (the request's
+/// path when `None`), with `?<key>=<n>` past the first page, then `args` and
+/// the request's query without `key`, on every link.
+struct Numbers {
+    base: Option<Vec<u8>>,
+    key: Vec<u8>,
+    args: Vec<(Key, Value)>,
+    current: u64,
+    total: i64,
+    mid_size: i64,
+}
+
+impl Numbers {
+    /// The page numbers, current and ends shown, `mid_size` either side of
+    /// the current page.
+    fn links(mut self, request: &Request, home: &[u8]) -> Vec<u8> {
+        let total = u64::try_from(self.total).unwrap_or(0);
+        if total < 2 {
+            return Vec::new();
         }
+        let first = html_entity_decode(&pagenum_link(request, home, 1));
+        let mut parts = first.splitn(2, |&b| b == b'?');
+        let mut path = parts.next().unwrap_or_default().to_vec();
+        if path.last() != Some(&b'/') {
+            path.push(b'/');
+        }
+        let base = self.base.take().unwrap_or(path);
+        let query = urlencode_deep(parse_str(parts.next().unwrap_or_default()));
+        // array_merge(): a later string key replaces an earlier one in
+        // place; integer keys are appended, numbered from 0.
+        let key = string_key(&self.key);
+        let mut index = 0;
+        for (name, value) in query
+            .as_array()
+            .unwrap_or_default()
+            .iter()
+            .filter(|(k, _)| *k != key)
+        {
+            match (name, self.args.iter_mut().find(|(k, _)| k == name)) {
+                (Key::Int(_), _) => {
+                    self.args.push((Key::Int(index), value.clone()));
+                    index += 1;
+                }
+                (_, Some(arg)) => arg.1 = value.clone(),
+                (_, None) => self.args.push((name.clone(), value.clone())),
+            }
+        }
+        let current = self.current;
+        let mid = u64::try_from(self.mid_size).unwrap_or(2);
+        let mut links: Vec<Vec<u8>> = Vec::new();
+        let mut dots = false;
+        for n in 1..=total {
+            if n == current {
+                let number = number_format(n);
+                links.push(
+                    format!(
+                        "<span aria-current=\"page\" class=\"page-numbers current\">{number}</span>"
+                    )
+                    .into_bytes(),
+                );
+                dots = true;
+            } else if n <= 1 || (n + mid >= current && n <= current + mid) || n > total - 1 {
+                let mut link = base.clone();
+                if n > 1 {
+                    link.extend_from_slice(
+                        &[b"?", &self.key[..], b"=", n.to_string().as_bytes()].concat(),
+                    );
+                }
+                let link = if self.args.is_empty() {
+                    link
+                } else {
+                    add_query_values(&self.args, &link)
+                };
+                links.push(
+                    [
+                        b"<a class=\"page-numbers\" href=\"".as_slice(),
+                        &esc_url(&link),
+                        b"\">",
+                        number_format(n).as_bytes(),
+                        b"</a>",
+                    ]
+                    .concat(),
+                );
+                dots = true;
+            } else if dots {
+                links.push(b"<span class=\"page-numbers dots\">&hellip;</span>".to_vec());
+                dots = false;
+            }
+        }
+        links.join(&b'\n')
     }
-    links.join(&b'\n')
 }
 
 #[cfg(test)]

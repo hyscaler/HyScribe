@@ -155,6 +155,7 @@ fn matches_php() {
             || kind == "adjacent"
             || kind == "comments"
             || kind == "pagination"
+            || kind == "ownpage"
             || kind == "excerpt"
         {
             continue;

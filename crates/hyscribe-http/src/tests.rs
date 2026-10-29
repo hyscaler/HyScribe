@@ -911,3 +911,49 @@ async fn the_home_list_puts_sticky_posts_first() {
     }
     assert!(sticky(&[], true).is_empty());
 }
+
+/// Every case of `reference/category-query/golden.sh`: the categories in and
+/// out, children included, and whether the list stays the home list.
+#[test]
+fn category_lists_match_php() {
+    let golden = include_str!("../tests/golden/category-query.tsv");
+    for line in golden.lines() {
+        let mut fields = line.split('\t').map(hyscribe_testkit::unhex);
+        let (cat, state) = (fields.next().unwrap(), fields.next().unwrap());
+        let cat = String::from_utf8(cat).unwrap();
+        let state = hyscribe_phpser::json_decode(&state).unwrap();
+        let filters = category_filters(&cat, &state.get_str("hierarchy").unwrap().to_php_string());
+        let ids = |exclude: bool| {
+            let mut ids: Vec<u64> = filters
+                .iter()
+                .filter(|f| f.exclude == exclude)
+                .flat_map(|f| f.terms.clone())
+                .collect();
+            ids.sort_unstable();
+            ids.dedup();
+            ids
+        };
+        let php = |name| {
+            state
+                .get_str(name)
+                .and_then(hyscribe_phpser::Value::as_array)
+                .unwrap()
+                .iter()
+                .map(|(_, id)| id.to_int().unsigned_abs())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            (ids(false), ids(true)),
+            (php("in"), php("not_in")),
+            "{cat:?}"
+        );
+        let flag = |name| state.get_str(name) == Some(&hyscribe_phpser::Value::Bool(true));
+        assert_eq!(filters.iter().all(|f| f.exclude), flag("home"), "{cat:?}");
+        assert_eq!(
+            filters.iter().any(|f| !f.exclude),
+            flag("category"),
+            "{cat:?}"
+        );
+    }
+    assert_eq!(golden.lines().count(), 28);
+}

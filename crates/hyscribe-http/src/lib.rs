@@ -18,7 +18,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html};
-use hyscribe_model::{OrderBy, Post, PostQuery, TermFilter};
+use hyscribe_model::{OrderBy, Post, PostQuery};
 use hyscribe_phpser::parse_str;
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::head::{wp_footer, wp_head};
@@ -36,7 +36,7 @@ mod reads;
 
 use reads::Reads;
 
-use query::{absint, date_parts, other_args};
+use query::{absint, category_filters, date_parts, other_args};
 
 /// Headers on every response (docs/SECURITY_MODEL.md, Web).
 const SECURITY_HEADERS: [(&str, &str); 3] = [
@@ -598,19 +598,19 @@ fn post_query(site: &Site, query: &HashMap<String, String>, feed: bool) -> PostQ
         absint(&site.option("posts_per_page"))
     }
     .clamp(1, 100);
-    let terms: Vec<TermFilter> = query
+    let terms = query
         .get("cat")
-        .map(|c| absint(c))
-        .filter(|&id| id > 0)
-        .map(|id| TermFilter {
-            taxonomy: "category".into(),
-            terms: vec![id],
-            exclude: false,
+        .map(|cat| {
+            category_filters(
+                cat,
+                site.options
+                    .get("category_children")
+                    .map_or(&[][..], Vec::as_slice),
+            )
         })
-        .into_iter()
-        .collect();
+        .unwrap_or_default();
     // The home list's first page puts sticky posts first.
-    let home = search.is_none() && !feed && year.is_none() && terms.is_empty();
+    let home = search.is_none() && !feed && year.is_none() && terms.iter().all(|f| f.exclude);
     let paged = Paging::of(query).paged;
     let sticky = if home && paged <= 1 {
         sticky_posts(
@@ -663,10 +663,12 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
     let search = query.get("s");
     let post_query = post_query(site, query, feed);
     let (year, month, day) = (post_query.year, post_query.month, post_query.day);
-    // The only term filter of a main query is its category.
+    // A main query's included categories make it a category archive of the
+    // first.
     let category = match post_query
         .terms
-        .first()
+        .iter()
+        .find(|filter| !filter.exclude)
         .and_then(|filter| filter.terms.first().copied())
     {
         Some(id) => match site.db.category(id).await? {

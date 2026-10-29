@@ -6,14 +6,17 @@
 
 use hyscribe_model::TermFilter;
 use hyscribe_phpser::{Key, Value, decode, is_empty_string};
+use hyscribe_render::site::Archive;
 
-/// `raw_query` without the `names` arguments, as `&`-joined pairs.
+/// `raw_query` without the `names` arguments, as `&`-joined pairs; an array
+/// argument such as `p[]` goes with its name.
 pub fn other_args(raw_query: Option<&str>, names: &[&str]) -> String {
     raw_query
         .unwrap_or_default()
         .split('&')
         .filter(|pair| {
-            !pair.is_empty() && !names.contains(&pair.split('=').next().unwrap_or_default())
+            let key = pair.split(['=', '[']).next().unwrap_or_default();
+            !pair.is_empty() && !names.contains(&key)
         })
         .map(|pair| format!("&{pair}"))
         .collect()
@@ -159,4 +162,108 @@ pub fn clean_query(query: &str) -> String {
         at_start = false;
     }
     out.trim_matches('&').to_string()
+}
+
+/// The date part of a list's query, as `WP_Query` reads `m`, `year`,
+/// `monthnum` and `day`.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct DateQuery {
+    /// `YEAR(post_date)`.
+    pub year: Option<u64>,
+    /// `MONTH(post_date)`.
+    pub month: Option<u64>,
+    /// `DAYOFMONTH(post_date)`.
+    pub day: Option<u64>,
+    /// `m` and the other vars ask for different dates, which nothing has.
+    pub conflicting: bool,
+    /// The archive the title names: the year, then the month, then the
+    /// day, the first of them asked for.
+    pub kind: Option<Archive>,
+    /// `error=404`: a month past 12, or a day not in its month, which the
+    /// 404 page answers with a 200.
+    pub invalid: bool,
+    /// Where `redirect_canonical()` sends an invalid date: its month's
+    /// `m=YYYYMM`, or for a month past 12 its year's `m=YYYY`.
+    pub canonical: Option<String>,
+}
+
+/// `m`, `year`, `monthnum` and `day` as `WP_Query::parse_query()` reads
+/// them: `day`, then `monthnum`, then `year` each make a date archive
+/// unless one before did, and `m` adds its own.
+pub fn date_query(
+    m: Option<&str>,
+    year: Option<&str>,
+    monthnum: Option<&str>,
+    day: Option<&str>,
+) -> DateQuery {
+    let (m_year, m_month, m_day) = m.map_or((None, None, None), date_parts);
+    let var = |value: Option<&str>| value.map_or(0, absint);
+    let (year, month, day) = (var(year), var(monthnum), var(day));
+    let (mut is_day, mut is_month, mut is_year, mut invalid) = (false, false, false, false);
+    if day > 0 {
+        if month > 0 && year > 0 && !checkdate(month, day, year) {
+            invalid = true;
+        } else {
+            is_day = true;
+        }
+    }
+    if month > 0 && !is_day {
+        if month > 12 {
+            invalid = true;
+        } else {
+            is_month = true;
+        }
+    }
+    is_year |= year > 0 && !is_day && !is_month;
+    match (m_year, m_month, m_day) {
+        (_, _, Some(_)) => is_day = true,
+        (_, Some(_), None) => is_month = true,
+        (Some(_), None, None) => is_year = true,
+        (None, None, None) => {}
+    }
+    let kind = [
+        (is_year, Archive::Year),
+        (is_month, Archive::Month),
+        (is_day, Archive::Day),
+    ]
+    .into_iter()
+    .find_map(|(is, kind)| is.then_some(kind))
+    .filter(|_| !invalid);
+    let canonical = match (year, month, day) {
+        (1.., 1.., 1..) if invalid => Some(format!("m={year}{month:02}")),
+        (1.., 13.., _) => Some(format!("m={year}")),
+        _ => None,
+    };
+    let merge = |from_m: Option<u64>, var: u64| match (from_m, (var > 0).then_some(var)) {
+        (Some(a), Some(b)) => (Some(a), a != b),
+        (a, b) => (a.or(b), false),
+    };
+    let ((year, a), (month, b), (day, c)) = (
+        merge(m_year, year),
+        merge(m_month, month),
+        merge(m_day, day),
+    );
+    DateQuery {
+        year,
+        month,
+        day,
+        conflicting: a || b || c,
+        kind,
+        invalid,
+        canonical,
+    }
+}
+
+/// PHP's `checkdate()`: a month of the year and a day of that month, in
+/// years 1 to 32767.
+fn checkdate(month: u64, day: u64, year: u64) -> bool {
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let days = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        1..=12 => 31,
+        _ => 0,
+    };
+    (1..=days).contains(&day) && (1..=32767).contains(&year)
 }

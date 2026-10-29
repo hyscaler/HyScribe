@@ -241,6 +241,7 @@ async fn database_errors_show_no_details() {
         "/?author=1",
         "/?feed=rss2",
         "/?feed=comments-rss2",
+        "/?p=-1&page_id=2",
     ] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
@@ -358,6 +359,27 @@ async fn canonical_redirects_match_wordpress() {
         ("/?cat=&feed=rss2", "/?feed=rss2"),
         ("/?p=1&s=x&cat=", "/?p=1&s=x"),
         ("/?page_id=2&s=x&tag=", "/?page_id=2&s=x"),
+        // Invalid dates go to their year or month, a negative `p` to the
+        // `page_id` with it.
+        ("/?year=2026&monthnum=13", "/?m=2026"),
+        ("/?year=2026&monthnum=13&x=1", "/?m=2026&x=1"),
+        ("/?year=2026&monthnum=2&day=30", "/?m=202602"),
+        ("/?x=1&year=2026&monthnum=2&day=30", "/?m=202602&x=1"),
+        ("/?p=-1&page_id=2", "/?page_id=2"),
+        ("/?year=2026&monthnum=13&day=5", "/?m=202613"),
+        ("/?year=2026&monthnum=4&day=31", "/?m=202604"),
+        ("/?year=40000&monthnum=1&day=1", "/?m=4000001"),
+        ("/?year=2026&monthnum=2&day=29", "/?m=202602"),
+        ("/?year=1900&monthnum=2&day=29", "/?m=190002"),
+        // The other arguments parsed and encoded again, the link's own in
+        // place, an array `p` among them.
+        ("/?p=2&x[]=1", "/?page_id=2&x%5B0%5D=1"),
+        ("/?page_id=1&p[]=3", "/?p%5B0%5D=3"),
+        ("/?p[x]=1&page_id=2", "/?page_id=2"),
+        ("/?p=2&preview=1", "/?page_id=2"),
+        ("/?year=2026&monthnum=2&day=30&m=2026", "/?m=2026"),
+        ("/?x[]=1&year=2026&monthnum=13", "/?m=2026&x%5B0%5D=1"),
+        ("/?p=-1&year=2026&monthnum=2&day=30", "/?m=202602&p=-1"),
     ] {
         assert_eq!(
             location(&site, uri).await,
@@ -384,6 +406,9 @@ async fn canonical_redirects_match_wordpress() {
         ("/?feed=rss&cat=1.&page_id=", StatusCode::OK),
         ("/wp-content/x?cat=", StatusCode::NOT_FOUND),
         ("/hs-admin/?p=", StatusCode::NOT_FOUND),
+        ("/?year=2026&monthnum=4&day=30", StatusCode::NOT_FOUND),
+        ("/?p=-1&page_id=999", StatusCode::OK),
+        ("/?p[]=1", StatusCode::OK),
     ] {
         assert_eq!(request(&site, "GET", uri).await.status, status, "{uri}");
     }
@@ -467,15 +492,21 @@ async fn archives_and_searches_match_wordpress_titles() {
 
 #[test]
 fn date_parts_follow_wp_query() {
-    assert_eq!(date_parts("2026"), (Some(2026), None, None));
-    assert_eq!(date_parts("0"), (None, None, None));
-    assert_eq!(date_parts("00"), (Some(0), None, None));
-    assert_eq!(date_parts("2026-10"), (Some(2026), Some(10), None));
-    assert_eq!(date_parts("20261027"), (Some(2026), Some(10), Some(27)));
-    assert_eq!(date_parts("202610271200"), (Some(2026), Some(10), Some(27)));
-    assert_eq!(date_parts("12"), (Some(12), None, None));
-    assert_eq!(date_parts("abc"), (None, None, None));
-    assert_eq!(date_parts("20261"), (Some(2026), None, None));
+    assert_eq!(query::date_parts("2026"), (Some(2026), None, None));
+    assert_eq!(query::date_parts("0"), (None, None, None));
+    assert_eq!(query::date_parts("00"), (Some(0), None, None));
+    assert_eq!(query::date_parts("2026-10"), (Some(2026), Some(10), None));
+    assert_eq!(
+        query::date_parts("20261027"),
+        (Some(2026), Some(10), Some(27))
+    );
+    assert_eq!(
+        query::date_parts("202610271200"),
+        (Some(2026), Some(10), Some(27))
+    );
+    assert_eq!(query::date_parts("12"), (Some(12), None, None));
+    assert_eq!(query::date_parts("abc"), (None, None, None));
+    assert_eq!(query::date_parts("20261"), (Some(2026), None, None));
 }
 
 #[tokio::test]
@@ -822,7 +853,7 @@ async fn feeds_match_php() {
 async fn pages_match_php() {
     let golden = include_str!("../../hyscribe-render/tests/golden/pages.tsv");
     assert_pages(&oracle_site().await, golden).await;
-    assert_eq!(golden.lines().count(), 50);
+    assert_eq!(golden.lines().count(), 77);
 }
 
 /// Pages past the first, with one post a page, from the same script.

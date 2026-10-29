@@ -38,7 +38,7 @@ mod reads;
 
 use reads::Reads;
 
-use query::{absint, category_filters, clean_query, date_parts, other_args};
+use query::{DateQuery, absint, category_filters, clean_query, date_query, other_args};
 
 /// Headers on every response (docs/SECURITY_MODEL.md, Web).
 const SECURITY_HEADERS: [(&str, &str); 3] = [
@@ -457,6 +457,29 @@ async fn route(
     if query.contains_key("author") {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
+    // A negative or array `p` is `error=404`: the 404 page with a 200, or
+    // where an invalid date or a `page_id` sends it.
+    let negative = query
+        .get("p")
+        .is_some_and(|p| Value::String(p.as_bytes().to_vec()).to_int() < 0);
+    let array = parse_str(raw_query.unwrap_or_default().as_bytes())
+        .get_str("p")
+        .is_some_and(|p| p.as_array().is_some());
+    if (negative || array) && !query.contains_key("feed") {
+        if let Some(location) = date_redirect(site, raw_query, query) {
+            return Ok(Outcome::Redirect(location));
+        }
+        let page_id = query.get("page_id").map_or(0, |v| absint(v));
+        // No post has the ID 0.
+        let post =
+            site.db.post(page_id).await?.filter(|p| {
+                p.status == "publish" && (p.post_type == "post" || p.post_type == "page")
+            });
+        return Ok(match post {
+            Some(post) => Outcome::Redirect(post_location(site, &post, raw_query)),
+            None => Outcome::Page(Box::new(error_404(site, false))),
+        });
+    }
     let single = single_post(query);
     let single_requested = single.is_some();
     // RSS2, Atom, RDF and RSS 0.92 feeds. `feed=rss` alone redirects to
@@ -478,7 +501,9 @@ async fn route(
     let with_comments =
         query.get("feed").is_some_and(|f| f.contains("comments-")) || flag("withcomments");
     let comment_feed = with_comments || (single_requested && !flag("withoutcomments"));
-    let archive = ["s", "cat", "m"].iter().any(|k| query.contains_key(*k));
+    let archive = ["s", "cat", "m", "year", "monthnum", "day"]
+        .iter()
+        .any(|k| query.contains_key(*k));
     if let Some(format) = format.filter(|_| !single_requested) {
         // A search's or archive's comment feed lists the comments on the
         // posts it matches.
@@ -502,17 +527,7 @@ async fn route(
             let post = site.db.post(id).await?;
             // `?p=` for a page or `?page_id=` for a post.
             let elsewhere = |post: &Post| {
-                (post.post_type != post_type).then(|| {
-                    let args = [
-                        "p",
-                        "page_id",
-                        "attachment_id",
-                        "pagename",
-                        "name",
-                        "post_type",
-                    ];
-                    format!("{}{}", site.permalink(post), other_args(raw_query, &args))
-                })
+                (post.post_type != post_type).then(|| post_location(site, post, raw_query))
             };
             Ok(
                 match (
@@ -553,9 +568,12 @@ async fn route(
                 },
             )
         }
-        None => list(site, query, false)
-            .await
-            .map(|page| Outcome::Page(Box::new(page))),
+        None => match date_redirect(site, raw_query, query) {
+            Some(location) => Ok(Outcome::Redirect(location)),
+            None => list(site, query, false)
+                .await
+                .map(|page| Outcome::Page(Box::new(page))),
+        },
     }
 }
 
@@ -677,7 +695,7 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
 /// `posts_per_rss` posts.
 fn post_query(site: &Site, query: &HashMap<String, String>, feed: bool) -> PostQuery {
     let search = query.get("s");
-    let (year, month, day) = query.get("m").map_or((None, None, None), |m| date_parts(m));
+    let date = dates(query);
     let per_page = if feed {
         absint(&site.option("posts_per_rss"))
     } else {
@@ -696,7 +714,7 @@ fn post_query(site: &Site, query: &HashMap<String, String>, feed: bool) -> PostQ
         })
         .unwrap_or_default();
     // The home list's first page puts sticky posts first.
-    let home = search.is_none() && !feed && year.is_none() && terms.iter().all(|f| f.exclude);
+    let home = search.is_none() && !feed && date.kind.is_none() && terms.iter().all(|f| f.exclude);
     let paged = Paging::of(query).paged;
     let sticky = if home && paged <= 1 {
         sticky_posts(
@@ -722,13 +740,40 @@ fn post_query(site: &Site, query: &HashMap<String, String>, feed: bool) -> PostQ
         },
         terms,
         sticky,
-        year,
-        month,
-        day,
+        year: date.year,
+        month: date.month,
+        day: date.day,
+        // Two dates for one part match nothing.
+        include: date.conflicting.then(Vec::new),
         limit: u32::try_from(per_page).unwrap_or(10),
         offset: u32::try_from(offset(paged, per_page)).unwrap_or(u32::MAX),
         ..PostQuery::default()
     }
+}
+
+/// Where `redirect_canonical()` sends an invalid date: its month's or
+/// year's `m`, with the request's own `m` in its place, then the other
+/// arguments.
+fn date_redirect(
+    site: &Site,
+    raw_query: Option<&str>,
+    query: &HashMap<String, String>,
+) -> Option<String> {
+    let link = format!("{}/?{}", site.home, dates(query).canonical?);
+    Some(tack(&link, raw_query, &["year", "monthnum", "day"]))
+}
+
+/// `error=404`: the 404 page, which `handle_404()` sends with a 200.
+fn error_404(site: &Site, feed: bool) -> Page {
+    let mut page = not_found(site, feed);
+    page.status = StatusCode::OK;
+    page
+}
+
+/// The request's date query.
+fn dates(query: &HashMap<String, String>) -> DateQuery {
+    let var = |name| query.get(name).map(String::as_str);
+    date_query(var("m"), var("year"), var("monthnum"), var("day"))
 }
 
 /// `WP_Query`'s offset of page `paged`: past the integers, PHP's product is
@@ -748,7 +793,11 @@ fn offset(paged: u64, per_page: u64) -> u64 {
 async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Result<Page, DbError> {
     let search = query.get("s");
     let post_query = post_query(site, query, feed);
-    let (year, month, day) = (post_query.year, post_query.month, post_query.day);
+    let date = dates(query);
+    // `error=404`: the 404 page, but `handle_404()` sends no 404 for it.
+    if date.invalid {
+        return Ok(error_404(site, feed));
+    }
     // A main query's included categories make it a category archive of the
     // first.
     let category = match post_query
@@ -768,7 +817,8 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
     let (posts, found) = posts.and_then(|posts| found.map(|found| (posts, found)))?;
     let paging = Paging::of(query);
     // A date archive with nothing in it is a 404, a search only when paged.
-    let empty_404 = paging.is_paged() || year.is_some() && search.is_none() && category.is_none();
+    let empty_404 =
+        paging.is_paged() || date.kind.is_some() && search.is_none() && category.is_none();
     if empty_404 && posts.is_empty() {
         let mut page = not_found(site, feed && !paging.is_paged());
         page.request.search_query = search.map_or_else(Vec::new, |s| s.as_bytes().to_vec());
@@ -782,17 +832,15 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
         ))
     } else if let Some(term) = &category {
         Some(esc_html(&term.name))
-    } else if year.is_some() {
-        let format = if day.is_some() {
-            site.option("date_format")
-        } else if month.is_some() {
-            "F Y".to_string()
-        } else {
-            "Y".to_string()
-        };
-        Some(date::format(&format, first_date, site.zone()))
     } else {
-        None
+        date.kind.as_ref().map(|kind| {
+            let format = match kind {
+                Archive::Day => site.option("date_format"),
+                Archive::Month => "F Y".to_string(),
+                _ => "Y".to_string(),
+            };
+            date::format(&format, first_date, site.zone())
+        })
     };
     let tagline = site.option("blogdescription");
     let title = match heading {
@@ -803,13 +851,10 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
             Some(esc_html(tagline.as_bytes())).filter(|t| !t.is_empty()),
         ]),
     };
-    let archive = match (&category, year, month, day) {
-        (Some(term), ..) => Some(Archive::Category(term.clone())),
-        (None, Some(_), None, _) => Some(Archive::Year),
-        (None, Some(_), Some(_), None) => Some(Archive::Month),
-        (None, Some(_), Some(_), Some(_)) => Some(Archive::Day),
-        (None, None, ..) => None,
-    };
+    let archive = category
+        .clone()
+        .map(Archive::Category)
+        .or(date.kind.clone());
     let candidates: Vec<String> = match (&archive, search) {
         (_, Some(_)) => vec!["search".into(), "index".into()],
         (Some(Archive::Category(term)), None) => vec![
@@ -829,7 +874,7 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
         home,
         post: posts.first().map(|post| post.id),
         archive,
-        date: year.is_some(),
+        date: date.kind.is_some(),
         search: search.map(|s| s.as_bytes().to_vec()),
         search_query: search.map_or_else(Vec::new, |s| s.as_bytes().to_vec()),
         paged: paging.paged,
@@ -869,22 +914,54 @@ fn rss2_query(raw_query: Option<&str>) -> String {
         .join("&")
 }
 
+/// The arguments `redirect_canonical()` drops when it sends a request for
+/// one post to that post's link.
+const SINGULAR_ARGS: [&str; 6] = [
+    "p",
+    "page_id",
+    "attachment_id",
+    "pagename",
+    "name",
+    "post_type",
+];
+
 /// The comments feed link a post's feed redirects to, as
 /// `redirect_canonical()` builds it: `?feed=` and the post's `name` (`p` or
 /// `page_id`) first, then the request's other arguments, encoded again.
 fn single_feed_location(site: &Site, raw_query: Option<&str>, name: &str, id: u64) -> String {
-    let other = if name == "p" { "page_id" } else { "p" };
-    let query = remove_query_arg(
-        &[
-            b"attachment_id",
-            b"pagename",
-            b"name",
-            b"post_type",
-            b"preview",
-            other.as_bytes(),
-        ],
-        rss2_query(raw_query).as_bytes(),
-    );
+    // The request's own `feed` takes the place of the empty one.
+    let link = format!("{}/?feed=&{name}={id}", site.home);
+    tack(&link, raw_query, &singular_args_but(name))
+}
+
+/// A post's link, where `redirect_canonical()` sends a request for it.
+fn post_location(site: &Site, post: &Post, raw_query: Option<&str>) -> String {
+    let name = if post.post_type == "page" {
+        "page_id"
+    } else {
+        "p"
+    };
+    tack(&site.permalink(post), raw_query, &singular_args_but(name))
+}
+
+/// [`SINGULAR_ARGS`] but `name`, the one a post's link has.
+fn singular_args_but(name: &str) -> Vec<&'static str> {
+    SINGULAR_ARGS
+        .into_iter()
+        .filter(|arg| *arg != name)
+        .collect()
+}
+
+/// `redirect_canonical()`'s tacking of the request's arguments onto `link`:
+/// `drop` and `preview` removed, the rest parsed and encoded again, those
+/// `link` has taking its values in place, the others after it.
+fn tack(link: &str, raw_query: Option<&str>, drop: &[&str]) -> String {
+    let drop: Vec<&[u8]> = drop
+        .iter()
+        .chain(&["preview"])
+        .map(|arg| arg.as_bytes())
+        .collect();
+    let query = remove_query_arg(&drop, rss2_query(raw_query).as_bytes());
     let args: Vec<(Key, Value)> = rawurlencode_deep(parse_str(&query))
         .as_array()
         .unwrap_or_default()
@@ -896,8 +973,6 @@ fn single_feed_location(site: &Site, raw_query: Option<&str>, name: &str, id: u6
             )
         })
         .collect();
-    // The request's own `feed` takes the place of the empty one.
-    let link = format!("{}/?feed=&{name}={id}", site.home);
     String::from_utf8_lossy(&add_query_values(&args, link.as_bytes())).into_owned()
 }
 

@@ -9,7 +9,7 @@ use hyscribe_phpser::{
 };
 
 use crate::blocks::Block;
-use crate::core_blocks::{prepared, render};
+use crate::core_blocks::{number_format, prepared, render};
 use crate::formatting::{encode_ampersands, html_entity_decode};
 use crate::site::Request;
 use crate::supports::get_block_wrapper_attributes;
@@ -245,7 +245,7 @@ fn paginate_links(request: &Request, home: &[u8], total: u64, mid_size: i64) -> 
             links.push(
                 format!(
                     "<span aria-current=\"page\" class=\"page-numbers current\">{}</span>",
-                    thousands(n)
+                    number_format(n)
                 )
                 .into_bytes(),
             );
@@ -265,7 +265,7 @@ fn paginate_links(request: &Request, home: &[u8], total: u64, mid_size: i64) -> 
                     b"<a class=\"page-numbers\" href=\"".as_slice(),
                     &esc_url(&link),
                     b"\">",
-                    thousands(n).as_bytes(),
+                    number_format(n).as_bytes(),
                     b"</a>",
                 ]
                 .concat(),
@@ -277,19 +277,6 @@ fn paginate_links(request: &Request, home: &[u8], total: u64, mid_size: i64) -> 
         }
     }
     links.join(&b'\n')
-}
-
-/// `number_format_i18n( $n )` for en_US: thousands separated by commas.
-fn thousands(n: u64) -> String {
-    let digits = n.to_string();
-    let mut out = String::new();
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
 }
 
 #[cfg(test)]

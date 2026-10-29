@@ -90,6 +90,8 @@ pub(crate) fn render(
         "core/comments-title" => comments_title,
         "core/post-author-name" => post_author_name,
         "core/post-comments-form" => comment_form::post_comments_form,
+        "core/post-comments-count" => post_comments_count,
+        "core/post-comments-link" => post_comments_link,
         "core/post-date" => post_date,
         "core/post-excerpt" => post_excerpt,
         "core/post-navigation-link" => post_navigation_link,
@@ -98,6 +100,7 @@ pub(crate) fn render(
         "core/query-no-results" => query_no_results,
         "core/query-pagination" => query_pagination,
         "core/query-title" => query_title,
+        "core/read-more" => read_more,
         "core/site-tagline" => site_tagline,
         "core/term-description" => term_description,
         "core/site-title" => site_title,
@@ -530,7 +533,8 @@ fn comments_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 
 /// `number_format_i18n( $number )` in English: thousands separated by
 /// commas.
-fn number_format(number: i64) -> String {
+pub(crate) fn number_format(number: impl Into<i128>) -> String {
+    let number = number.into();
     let digits = number.unsigned_abs().to_string();
     let mut out = String::new();
     for (i, digit) in digits.chars().enumerate() {
@@ -850,9 +854,7 @@ fn post_terms(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 /// set (`isset()`, where the site blocks test `empty()`), and
 /// `has-link-color` when the link has a color.
 fn align_link_classes(block: &Block<'_>, mut classes: Vec<Vec<u8>>) -> Vec<u8> {
-    if let Some(align) = block.attribute("textAlign") {
-        classes.push([b"has-text-align-", &align.to_php_string()[..]].concat());
-    }
+    classes.extend(align_class(block));
     if block.has_link_color() {
         classes.push(b"has-link-color".to_vec());
     }
@@ -903,6 +905,93 @@ fn post_excerpt(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     ]
     .concat();
     element(b"div", &wrapper, &content)
+}
+
+/// `render_block_core_read_more()`: a link to the `postId` context's post.
+fn read_more(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let Some(id) = context.post_id else {
+        return Vec::new();
+    };
+    let post = context.post();
+    // get_the_title() is empty for a post there is not.
+    let mut title = post.as_ref().map(the_title).unwrap_or_default();
+    if title.is_empty() {
+        title = format!("untitled post {id}").into_bytes();
+    }
+    let justify = block
+        .attribute("justifyContent")
+        .filter(|v| !v.is_empty())
+        .map(|v| [b"is-justified-", &v.to_php_string()[..]].concat())
+        .unwrap_or_default();
+    let text = block
+        .attribute("content")
+        .filter(|v| !v.is_empty())
+        .map_or_else(
+            || b"Read more".to_vec(),
+            |v| wp_kses_post(&v.to_php_string(), &context.upload_host()),
+        );
+    let href = post.map(|post| esc_url(&context.permalink(&post)));
+    let target = block.attribute("linkTarget").map(Value::to_php_string);
+    [
+        b"<a ".as_slice(),
+        block.wrapper(context, &justify).as_bytes(),
+        b" href=\"",
+        &href.unwrap_or_default(),
+        b"\" target=\"",
+        esc_attr(&target.unwrap_or_default()).as_bytes(),
+        b"\">",
+        &text,
+        b"<span class=\"screen-reader-text\">: ",
+        &title,
+        b"</span></a>",
+    ]
+    .concat()
+}
+
+/// `render_block_core_post_comments_count()`.
+fn post_comments_count(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    if context.post_id.is_none() {
+        return Vec::new();
+    }
+    let wrapper = block.wrapper(context, &align_class(block).unwrap_or_default());
+    // get_comments_number() is 0 for a post there is not.
+    let count = context
+        .post()
+        .map_or(0, |post| post.comment_count)
+        .to_string();
+    element(b"div", &wrapper, count.as_bytes())
+}
+
+/// `render_block_core_post_comments_link()`: the comment count, linked to
+/// the comments, while comments are open.
+fn post_comments_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let Some(post) = context.post().filter(|post| comments_open(context, post)) else {
+        return Vec::new();
+    };
+    let (count, anchor) = match post.comment_count {
+        0 => ("No comments".to_string(), "#respond"),
+        1 => ("1 comment".to_string(), "#comments"),
+        n => (format!("{} comments", number_format(n)), "#comments"),
+    };
+    let link = [&context.permalink(&post)[..], anchor.as_bytes()].concat();
+    let wrapper = block.wrapper(context, &align_link_classes(block, Vec::new()));
+    let content = [
+        b"<a href=".as_slice(),
+        &esc_url(&link),
+        b">",
+        count.as_bytes(),
+        b"<span class=\"screen-reader-text\"> on ",
+        &the_title(&post),
+        b"</span></a>",
+    ]
+    .concat();
+    element(b"div", &wrapper, &content)
+}
+
+/// `has-text-align-<textAlign>` when `textAlign` is set (`isset()`).
+fn align_class(block: &Block<'_>) -> Option<Vec<u8>> {
+    let align = block.attribute("textAlign")?;
+    Some([b"has-text-align-", &align.to_php_string()[..]].concat())
 }
 
 /// `render_block_core_post_title()`.

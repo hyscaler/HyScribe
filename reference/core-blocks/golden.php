@@ -529,6 +529,34 @@ foreach ( array( array( 1, '' ), array( 2, '' ), array( 1001, '' ), array( 1004,
 wp_cache_flush_group( 'post-queries' );
 // wp() works on $wp_the_query, which $wp_query must point at again.
 $GLOBALS['wp_query'] = $GLOBALS['wp_the_query'];
+// Read more and comment count blocks on posts of their own: 1021 to 1023
+// with comments, 1024 with comments closed.
+foreach ( array( 1021 => '1', 1022 => '2', 1023 => '1234', 1024 => '0' ) as $id => $count ) {
+	$copy                 = clone get_post( 1001 );
+	$copy->ID             = $id;
+	$copy->post_title     = 1022 === $id ? '' : "Counted $id";
+	$copy->comment_count  = $count;
+	$copy->comment_status = 1024 === $id ? 'closed' : 'open';
+	wp_cache_set( $id, $copy, 'posts' );
+}
+$comment_count_blocks = array(
+	'<!-- wp:read-more /-->',
+	'<!-- wp:read-more {"content":"Go <b>on</b> <script>x</script>","linkTarget":"_blank","justifyContent":"center"} /-->',
+	'<!-- wp:read-more {"linkTarget":"a\"b","content":""} /-->',
+	'<!-- wp:post-comments-count /-->',
+	'<!-- wp:post-comments-count {"textAlign":"right","style":{"elements":{"link":{"color":{"text":"red"}}}}} /-->',
+	'<!-- wp:post-comments-link /-->',
+	'<!-- wp:post-comments-link {"textAlign":"center","style":{"elements":{"link":{"color":{"text":"red"}}}}} /-->',
+);
+foreach ( array( 0, 1001, 1003, 1004, 1021, 1022, 1023, 1024 ) as $id ) {
+	$GLOBALS['post'] = $id ? get_post( $id ) : null;
+	$context         = $id ? array( 'postId' => $id, 'postType' => 'post' ) : array();
+	$state           = array( 'post' => $id, 'home' => home_url(), 'date_format' => get_option( 'date_format' ) );
+	foreach ( $comment_count_blocks as $markup ) {
+		$block = new WP_Block( parse_blocks( $markup )[0], $context );
+		echo 'post', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( wp_json_encode( $id ? get_post( $id, ARRAY_A ) : null ) ), "\t", bin2hex( $block->render() ), "\n";
+	}
+}
 foreach ( array( 0, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008 ) as $id ) {
 	$GLOBALS['post'] = $id ? get_post( $id ) : null;
 	$context         = $id ? array( 'postId' => $id, 'postType' => get_post_type( $id ) ) : array();

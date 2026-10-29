@@ -753,7 +753,7 @@ async fn feeds_match_php() {
 async fn pages_match_php() {
     let golden = include_str!("../../hyscribe-render/tests/golden/pages.tsv");
     assert_pages(&oracle_site().await, golden).await;
-    assert_eq!(golden.lines().count(), 41);
+    assert_eq!(golden.lines().count(), 50);
 }
 
 /// Pages past the first, with one post a page, from the same script.

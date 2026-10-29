@@ -31,7 +31,8 @@ for path in / '/?p=1' '/?page_id=2' '/?p=1&replytocom=1' '/?p=1&cpage=2' '/?p=1&
   '/?paged=2' '/?paged=1' '/?paged=0' '/?paged=-1' '/?paged=1x' '/?page=2' '/page/2/' '/?s=hello&paged=1' '/?s=a&paged=2' \
   '/?m=2026&paged=2' '/?cat=1&paged=1' '/?cat=1&paged=2' '/?p=1&paged=2' '/?page_id=2&page=2' \
   '/?p=1&page=1' '/?p=1&page=abc' '/?p=1&page=0' '/?p=1&cpage=2&page=2' '/?page=2&paged=3' '/?s=hello&page=2' '/?cat=1&page=3' \
-  '/?s=nothingmatches&paged=1' '/?m=2026&s=nothingmatches' '/?paged=9223372036854775807' '/?paged=99999999999999999999'; do
+  '/?s=nothingmatches&paged=1' '/?m=2026&s=nothingmatches' '/?paged=9223372036854775807' '/?paged=99999999999999999999' \
+  '/?cat=5,1' '/?cat=,1' '/?cat=-5,1' '/?cat=1,-1' '/?cat=-1' '/?cat=5,6' '/?cat=1%2C5' '/?cat=abc' '/?cat=-1&paged=2'; do
   status=$(curl -s -o "$TMP" -w '%{http_code}' "$BASE$path")
   page=$(xxd -p "$TMP" | tr -d '\n')
   head=$(printf '%s' "$page" | python3 -I -c 'import sys; s=bytes.fromhex(sys.stdin.read()); i=s.find(b"<head>"); j=s.find(b"</head>"); sys.stdout.write((s[i:j+7]).hex())')

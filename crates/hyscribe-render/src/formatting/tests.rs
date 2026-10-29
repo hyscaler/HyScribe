@@ -486,3 +486,25 @@ fn sanitize_title_like_php() {
         );
     }
 }
+
+/// Every case of `reference/formatting/sanitize-query-golden.php`.
+#[test]
+fn sanitize_title_for_query_matches_php() {
+    let golden = include_str!("../../tests/golden/sanitize-title-query.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let mut fields = line.split('\t').map(hyscribe_testkit::unhex);
+        let (title, php) = (fields.next().unwrap(), fields.next().unwrap());
+        let ours = sanitize_title_for_query(&title);
+        if ours != php {
+            failures.push(format!(
+                "{:?}: php {:?} ours {:?}",
+                String::from_utf8_lossy(&title),
+                String::from_utf8_lossy(&php),
+                String::from_utf8_lossy(&ours)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(golden.lines().count(), 58);
+}

@@ -957,10 +957,22 @@ const TITLE_REPLACEMENTS: [(&[&[u8]], &[u8]); 6] = [
     (&[b"%c3%97"], b"x"),
 ];
 
-/// `sanitize_title( $title )` for ASCII titles, such as the block names and
-/// layout values the layout support passes: `remove_accents()` and the
-/// UTF-8 encoding steps do nothing to those.
+/// `sanitize_title( $title )`, in the save context, without
+/// `remove_accents()`: the titles passed are ASCII, such as the block names
+/// and layout values the layout support passes.
 pub fn sanitize_title(title: &[u8]) -> Vec<u8> {
+    sanitize_title_with_dashes(title, true)
+}
+
+/// `sanitize_title_for_query( $title )`, as WordPress reads a slug from a
+/// request.
+pub fn sanitize_title_for_query(title: &[u8]) -> Vec<u8> {
+    sanitize_title_with_dashes(title, false)
+}
+
+/// `sanitize_title_with_dashes( $title, '', $context )`, in the save
+/// context when `save` is set, else in the query context.
+fn sanitize_title_with_dashes(title: &[u8], save: bool) -> Vec<u8> {
     let stripped = hyscribe_kses::strip_tags(title);
     // A `%` that does not start an escaped octet goes.
     let mut text = Vec::with_capacity(stripped.len());
@@ -969,12 +981,20 @@ pub fn sanitize_title(title: &[u8]) -> Vec<u8> {
             .get(i + 1..i + 3)
             .is_some_and(|hex| hex.iter().all(u8::is_ascii_hexdigit));
         if b != b'%' || octet {
-            text.push(b.to_ascii_lowercase());
+            text.push(b);
         }
     }
-    for (searches, with) in TITLE_REPLACEMENTS {
-        for search in searches {
-            text = replace_all(&text, search, with);
+    // The octets come back from `---XX---`, those the title had too.
+    let mut text = restore_octets(&text);
+    if let Ok(utf8) = std::str::from_utf8(&text) {
+        text = utf8_uri_encode(&utf8.to_lowercase(), 200);
+    }
+    text.make_ascii_lowercase();
+    if save {
+        for (searches, with) in TITLE_REPLACEMENTS {
+            for search in searches {
+                text = replace_all(&text, search, with);
+            }
         }
     }
     let mut kept = Vec::with_capacity(text.len());
@@ -1019,6 +1039,54 @@ pub fn sanitize_title(title: &[u8]) -> Vec<u8> {
         .rposition(|&b| b != b'-')
         .map_or(start, |at| at + 1);
     collapsed.get(start..end).unwrap_or_default().to_vec()
+}
+
+/// `preg_replace( '|---([a-fA-F0-9][a-fA-F0-9])---|', '%$1', $text )`.
+fn restore_octets(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut rest = text;
+    while let Some((&first, after)) = rest.split_first() {
+        match rest.get(..8) {
+            Some([b'-', b'-', b'-', a, b, b'-', b'-', b'-'])
+                if a.is_ascii_hexdigit() && b.is_ascii_hexdigit() =>
+            {
+                out.extend([b'%', *a, *b]);
+                rest = rest.get(8..).unwrap_or_default();
+            }
+            _ => {
+                out.push(first);
+                rest = after;
+            }
+        }
+    }
+    out
+}
+
+/// `utf8_uri_encode( $text, $length )`: each byte of a multibyte
+/// character as `%xx`, stopping before the character that would take the
+/// result past `length` bytes.
+fn utf8_uri_encode(text: &str, length: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    for c in text.chars() {
+        let mut bytes = [0; 4];
+        let bytes = c.encode_utf8(&mut bytes).as_bytes();
+        let encoded = if c.is_ascii() {
+            bytes.len()
+        } else {
+            bytes.len() * 3
+        };
+        if out.len() + encoded > length {
+            break;
+        }
+        if c.is_ascii() {
+            out.extend_from_slice(bytes);
+        } else {
+            for b in bytes {
+                out.extend(format!("%{b:x}").into_bytes());
+            }
+        }
+    }
+    out
 }
 
 /// `str_replace( $search, $with, $subject )` for one search string.

@@ -60,13 +60,19 @@ fn case(state: &[u8], row: &[u8]) -> (Fixture, Request) {
         id: row.get_str("ID").unwrap().to_int() as u64,
         title: text("post_title"),
         content: text("post_content"),
+        excerpt: row
+            .get_str("post_excerpt")
+            .map_or_else(Vec::new, Value::to_php_string),
         password: text("post_password"),
         status: "publish".into(),
         post_type: "post".into(),
         ..Post::default()
     };
+    // The script sets `$more` in a singular request, as for the post asked for.
+    let singular = state.get_str("singular") == Some(&Value::Bool(true));
     let request = Request {
-        singular: state.get_str("singular") == Some(&Value::Bool(true)),
+        singular,
+        queried_object_id: if singular { post.id } else { 0 },
         post: Some(post.id),
         ..Request::default()
     };
@@ -99,11 +105,26 @@ fn post_content_matches_php() {
                     markup,
                 )
             }
+            "excerpt" => {
+                let (markup, state, row, php) = (field(), field(), field(), field());
+                let (site, mut request) = case(&state, &row);
+                let state = json_decode(&state).unwrap();
+                // get_the_excerpt() sets up its post itself: the request's is post 1.
+                if request.singular {
+                    request.queried_object_id = 1;
+                }
+                if state.get_str("post") != Some(&Value::Bool(true)) {
+                    request.post = None;
+                }
+                let mut renderer = Renderer::new(&theme, &site, &request);
+                renderer.elements_id = state.get_str("elements").unwrap().to_int() as u64;
+                (renderer.render(&markup), php, markup)
+            }
             "teaser" => {
                 let (state, row, php) = (field(), field(), field());
                 let (site, request) = case(&state, &row);
                 let renderer = Renderer::new(&theme, &site, &request);
-                (get_the_content(&renderer, &site.post), php, row)
+                (get_the_content(&renderer, &site.post, true), php, row)
             }
             _ => continue,
         };
@@ -115,7 +136,7 @@ fn post_content_matches_php() {
         );
         count += 1;
     }
-    assert!(count >= 46);
+    assert!(count >= 146);
 }
 
 #[test]

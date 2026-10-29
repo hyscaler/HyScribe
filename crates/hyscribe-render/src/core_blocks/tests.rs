@@ -95,6 +95,16 @@ fn render_markup(context: &Context<'_>, markup: &[u8]) -> Vec<u8> {
 fn case(kind: &str, state: &Value, data: &Value) -> (Fixture, Request, Option<u64>) {
     let mut site = Fixture::default();
     let mut request = Request::default();
+    if kind == "term" {
+        if state.get_str("query").unwrap().to_php_string() == b"cat=1" {
+            request.archive = Some(Archive::Category(hyscribe_model::Term {
+                id: 1,
+                description: state.get_str("description").unwrap().to_php_string(),
+                ..Default::default()
+            }));
+        }
+        return (site, request, None);
+    }
     if kind == "site" {
         for name in ["blogname", "blogdescription"] {
             site.options
@@ -145,6 +155,7 @@ fn matches_php() {
             || kind == "adjacent"
             || kind == "comments"
             || kind == "pagination"
+            || kind == "excerpt"
         {
             continue;
         }
@@ -336,6 +347,7 @@ fn post_terms_match_php() {
                         id: term.get(&Key::Int(0)).unwrap().to_int() as u64,
                         name: slug.clone(),
                         slug,
+                        description: Vec::new(),
                     }
                 })
                 .collect();

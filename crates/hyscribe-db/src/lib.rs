@@ -125,6 +125,7 @@ fn term(row: &MySqlRow) -> Result<Term, DbError> {
         id: c.unsigned("term_id"),
         name: c.bytes("name"),
         slug: c.bytes("slug"),
+        description: c.bytes("description"),
     };
     c.finish(term)
 }
@@ -325,7 +326,7 @@ impl Db {
     /// `wp_get_object_terms()` orders them.
     pub async fn post_terms(&self, post_id: u64, taxonomy: &str) -> Result<Vec<Term>, DbError> {
         let sql = self.prefix.sql(
-            "SELECT t.term_id, t.name, t.slug FROM {prefix}terms t \
+            "SELECT t.term_id, t.name, t.slug, tt.description FROM {prefix}terms t \
              JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
              JOIN {prefix}term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id \
              WHERE tr.object_id = ? AND tt.taxonomy = ? ORDER BY t.name ASC",
@@ -473,7 +474,7 @@ impl Db {
     /// A category, if it exists.
     pub async fn category(&self, term_id: u64) -> Result<Option<Term>, DbError> {
         let sql = self.prefix.sql(
-            "SELECT t.term_id, t.name, t.slug FROM {prefix}terms t \
+            "SELECT t.term_id, t.name, t.slug, tt.description FROM {prefix}terms t \
              JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
              WHERE tt.taxonomy = 'category' AND t.term_id = ? LIMIT 1",
         );

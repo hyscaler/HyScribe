@@ -12,6 +12,7 @@ use hyscribe_phpser::{Value, php_trim};
 
 use crate::blocks::{Block, parse_blocks};
 use crate::content::get_the_content;
+use crate::core_blocks::{prepared, render};
 use crate::formatting::contains;
 use crate::template::{Renderer, replace};
 
@@ -34,12 +35,36 @@ const INNER_BLOCKS: [Option<&str>; 12] = [
 const WRAPPER_BLOCKS: [&str; 3] = ["core/columns", "core/column", "core/group"];
 
 /// `excerpt_length` and `excerpt_more`.
-const EXCERPT_LENGTH: usize = 55;
+const EXCERPT_LENGTH: i64 = 55;
 const EXCERPT_MORE: &[u8] = b" [&hellip;]";
 
 impl Renderer<'_> {
     /// `get_the_excerpt()` for `post`, the loop's post.
     pub(crate) fn get_the_excerpt(&mut self, post: &Post) -> Vec<u8> {
+        self.excerpt(post, EXCERPT_LENGTH, EXCERPT_MORE)
+    }
+
+    /// `render_block_core_post_excerpt()`: the excerpt, which the block's
+    /// own more link and length rule, made here for the block callback.
+    pub(crate) fn post_excerpt(&mut self, block: &Block) -> Vec<u8> {
+        let context = &self.context;
+        let Some(post) = context.post_id.and_then(|id| context.site.post(id)) else {
+            return Vec::new();
+        };
+        let name = "core/post-excerpt";
+        let parsed = block.attrs.as_deref().unwrap_or_default();
+        let has_more = prepared(name, parsed)
+            .get_str("moreText")
+            .is_some_and(|text| !text.is_empty());
+        // The more link replaces `excerpt_more`; 101 words leave the block's
+        // length to trim.
+        let more = if has_more { &b""[..] } else { EXCERPT_MORE };
+        let excerpt = self.excerpt(&post, 101, more);
+        render(&self.context, name, parsed, &excerpt).unwrap_or_default()
+    }
+
+    /// `get_the_excerpt()` with `excerpt_length` and `excerpt_more` as given.
+    fn excerpt(&mut self, post: &Post, length: i64, more: &[u8]) -> Vec<u8> {
         if !post.password.is_empty() {
             return b"There is no excerpt because this is a protected post.".to_vec();
         }
@@ -47,11 +72,11 @@ impl Renderer<'_> {
         if !php_trim(&post.excerpt).is_empty() {
             return post.excerpt.clone();
         }
-        let content = get_the_content(self, post);
+        let content = get_the_content(self, post, false);
         let content = self.excerpt_remove_blocks(&content);
         let content = excerpt_remove_footnotes(&content);
         let content = replace(&self.content_filters(&content, true), b"]]>", b"]]&gt;");
-        wp_trim_words(&content, EXCERPT_LENGTH, EXCERPT_MORE)
+        wp_trim_words(&content, length, more)
     }
 
     /// `excerpt_remove_blocks()`: the rendered blocks an excerpt can show.
@@ -174,13 +199,18 @@ fn footnote(text: &[u8]) -> Option<usize> {
 
 /// `wp_trim_words( $text, $num_words, $more )` for a language that counts
 /// words.
-pub(crate) fn wp_trim_words(text: &[u8], num_words: usize, more: &[u8]) -> Vec<u8> {
+pub(crate) fn wp_trim_words(text: &[u8], num_words: i64, more: &[u8]) -> Vec<u8> {
     let text = wp_strip_all_tags(text, false);
     let words: Vec<&[u8]> = text
         .split(|b| matches!(b, b'\n' | b'\r' | b'\t' | b' '))
         .filter(|word| !word.is_empty())
         .collect();
-    match words.get(..num_words).filter(|_| words.len() > num_words) {
+    // A negative count splits everything, then always drops the last word.
+    let kept = match usize::try_from(num_words) {
+        Ok(n) => words.get(..n).filter(|_| words.len() > n),
+        Err(_) => words.get(..words.len().saturating_sub(1)),
+    };
+    match kept {
         Some(kept) => [&kept.join(&b' ')[..], more].concat(),
         None => words.join(&b' '),
     }

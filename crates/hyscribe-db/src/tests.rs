@@ -412,7 +412,8 @@ async fn options_meta_and_terms() {
         [Term {
             id: 1,
             name: b"Uncategorized".to_vec(),
-            slug: b"uncategorized".to_vec()
+            slug: b"uncategorized".to_vec(),
+            description: Vec::new(),
         }]
     );
     assert!(db.post_terms(1, "post_tag").await.unwrap().is_empty());

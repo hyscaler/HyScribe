@@ -211,6 +211,7 @@ impl Site for DefaultInstall {
                     id: number(&term[0]),
                     name: text(&term[1]),
                     slug: text(&term[2]),
+                    description: Vec::new(),
                 })
             })
             .collect()

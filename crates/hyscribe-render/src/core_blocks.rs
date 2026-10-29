@@ -12,6 +12,7 @@ use crate::autop::wpautop;
 use crate::balance::force_balance_tags;
 use crate::clickable::make_clickable;
 use crate::date::{self, Zone};
+use crate::excerpt::wp_trim_words;
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, convert_chars, wptexturize};
 use crate::kses::wp_kses_post;
 use crate::link;
@@ -19,7 +20,7 @@ use crate::media::Loading;
 use crate::post::{the_title, title_filters};
 use crate::query_loop::query_posts;
 use crate::registry::block_type;
-use crate::site::{Request, Site};
+use crate::site::{Archive, Request, Site};
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::{replace, site_smilies};
 use crate::theme::Theme;
@@ -90,6 +91,7 @@ pub(crate) fn render(
         "core/post-author-name" => post_author_name,
         "core/post-comments-form" => comment_form::post_comments_form,
         "core/post-date" => post_date,
+        "core/post-excerpt" => post_excerpt,
         "core/post-navigation-link" => post_navigation_link,
         "core/post-terms" => post_terms,
         "core/post-title" => post_title,
@@ -97,6 +99,7 @@ pub(crate) fn render(
         "core/query-pagination" => query_pagination,
         "core/query-title" => query_title,
         "core/site-tagline" => site_tagline,
+        "core/term-description" => term_description,
         "core/site-title" => site_title,
         _ => return None,
     };
@@ -856,6 +859,52 @@ fn align_link_classes(block: &Block<'_>, mut classes: Vec<Vec<u8>>) -> Vec<u8> {
     classes.join(&b' ')
 }
 
+/// `render_block_core_post_excerpt()` around `block.content`, the excerpt
+/// `get_the_excerpt()` gave.
+fn post_excerpt(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let more_text = block
+        .attribute("moreText")
+        .filter(|text| !text.is_empty())
+        .map(|text| {
+            let href = context
+                .post()
+                .map(|post| esc_url(&context.permalink(&post)));
+            let label = wp_kses_post(&text.to_php_string(), &context.upload_host());
+            [
+                b"<a class=\"wp-block-post-excerpt__more-link\" href=\"".as_slice(),
+                &href.unwrap_or_default(),
+                b"\">",
+                &label,
+                b"</a>",
+            ]
+            .concat()
+        })
+        .unwrap_or_default();
+    let length = block.attribute("excerptLength").map_or(0, Value::to_int);
+    let excerpt = wp_trim_words(block.content, length, b"&hellip;");
+    let wrapper = block.wrapper(context, &align_link_classes(block, Vec::new()));
+    let new_line = block
+        .attribute("showMoreOnNewLine")
+        .is_none_or(|v| !v.is_empty());
+    let end = if new_line && !more_text.is_empty() {
+        [
+            b"</p><p class=\"wp-block-post-excerpt__more-text\">".as_slice(),
+            &more_text,
+            b"</p>",
+        ]
+        .concat()
+    } else {
+        [b" ".as_slice(), &more_text, b"</p>"].concat()
+    };
+    let content = [
+        b"<p class=\"wp-block-post-excerpt__excerpt\">".as_slice(),
+        &excerpt,
+        &end,
+    ]
+    .concat();
+    element(b"div", &wrapper, &content)
+}
+
 /// `render_block_core_post_title()`.
 fn post_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let Some(post) = context.post() else {
@@ -1249,6 +1298,22 @@ fn site_tagline(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let wrapper = block.wrapper(context, &block.text_align_class());
     let tag = tag(block.attribute("level"), b"p");
     element(&tag, &wrapper, &tagline)
+}
+
+/// `render_block_core_term_description()` on a category archive, its
+/// description through the `term_description` display filters. The
+/// `termId` context comes with the term template, not ported yet.
+fn term_description(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let Some(Archive::Category(term)) = &context.request.archive else {
+        return Vec::new();
+    };
+    let text = wptexturize(&term.description, &CORE_SHORTCODE_TAGS);
+    let description = wpautop(&convert_chars(&text), true);
+    if is_empty_string(&description) {
+        return Vec::new();
+    }
+    let wrapper = block.wrapper(context, &align_link_classes(block, Vec::new()));
+    element(b"div", &wrapper, &description)
 }
 
 mod avatar;

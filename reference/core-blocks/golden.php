@@ -343,13 +343,27 @@ $contents = array(
 	3006 => array( '', '' ),
 	3008 => array( '', '<!-- wp:post-content /--><p>Nested</p>' ),
 	3007 => array( '', '<!--noteaser--><p>Lead</p><!--more--><p>Body</p>' ),
+	3009 => array( '', '<!-- wp:paragraph --><p>Content</p><!-- /wp:paragraph -->' ),
+	3010 => array( '', '<!-- wp:paragraph --><p>w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13 w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31 w32 w33 w34 w35 w36 w37 w38 w39 w40 w41 w42 w43 w44 w45 w46 w47 w48 w49 w50 w51 w52 w53 w54 w55 w56 w57 w58 w59 w60 w61 w62 w63 w64 w65 w66 w67 w68 w69 w70 w71 w72 w73 w74 w75 w76 w77 w78 w79 w80 w81 w82 w83 w84 w85 w86 w87 w88 w89 w90 w91 w92 w93 w94 w95 w96 w97 w98 w99 w100 w101 w102 w103 w104 w105 w106 w107 w108 w109 w110 w111 w112 w113 w114 w115 w116 w117 w118 w119 w120</p><!-- /wp:paragraph -->' ),
 );
+// Hand-written excerpts, for the post excerpt block.
+$excerpts = array( 3009 => 'Hand <b>made</b> & "quoted"' );
 // Classic content and the password form also go through wpautop(), not
 // ported yet, so for those only get_the_content() is recorded.
 $needs_autop = array( 3003, 3004, 3007 );
 foreach ( $contents as $id => list( $password, $content ) ) {
-	wp_cache_set( $id, (object) array( 'ID' => $id, 'post_author' => '1', 'post_date' => '2026-01-02 03:04:05', 'post_date_gmt' => '2026-01-02 03:04:05', 'post_content' => $content, 'post_title' => "Post $id", 'post_excerpt' => '', 'post_status' => 'publish', 'comment_status' => 'open', 'ping_status' => 'open', 'post_password' => $password, 'post_name' => "post-$id", 'to_ping' => '', 'pinged' => '', 'post_modified' => '2026-01-02 03:04:05', 'post_modified_gmt' => '2026-01-02 03:04:05', 'post_content_filtered' => '', 'post_parent' => 0, 'guid' => '', 'menu_order' => 0, 'post_type' => 'post', 'post_mime_type' => '', 'comment_count' => '0', 'filter' => 'raw' ), 'posts' );
+	wp_cache_set( $id, (object) array( 'ID' => $id, 'post_author' => '1', 'post_date' => '2026-01-02 03:04:05', 'post_date_gmt' => '2026-01-02 03:04:05', 'post_content' => $content, 'post_title' => "Post $id", 'post_excerpt' => $excerpts[ $id ] ?? '', 'post_status' => 'publish', 'comment_status' => 'open', 'ping_status' => 'open', 'post_password' => $password, 'post_name' => "post-$id", 'to_ping' => '', 'pinged' => '', 'post_modified' => '2026-01-02 03:04:05', 'post_modified_gmt' => '2026-01-02 03:04:05', 'post_content_filtered' => '', 'post_parent' => 0, 'guid' => '', 'menu_order' => 0, 'post_type' => 'post', 'post_mime_type' => '', 'comment_count' => '0', 'filter' => 'raw' ), 'posts' );
 }
+$excerpt_blocks = array(
+	'<!-- wp:post-excerpt /-->',
+	'<!-- wp:post-excerpt {"moreText":"Read <em>more</em> <script>x</script>","excerptLength":10} /-->',
+	'<!-- wp:post-excerpt {"moreText":"More","showMoreOnNewLine":false,"textAlign":"center"} /-->',
+	'<!-- wp:post-excerpt {"excerptLength":3} /-->',
+	'<!-- wp:post-excerpt {"excerptLength":-1} /-->',
+	'<!-- wp:post-excerpt {"excerptLength":-2} /-->',
+	'<!-- wp:post-excerpt {"moreText":"","excerptLength":200} /-->',
+	'<!-- wp:post-excerpt {"excerptLength":101,"fontSize":"small","style":{"elements":{"link":{"color":{"text":"red"}}}}} /-->',
+);
 $content_blocks = array(
 	'<!-- wp:post-content /-->',
 	'<!-- wp:post-content {"tagName":"MAIN","align":"wide"} /-->',
@@ -365,6 +379,21 @@ foreach ( array( true, false ) as $singular ) {
 		$GLOBALS['more'] = $singular ? 1 : 0;
 		$state           = array( 'singular' => $singular, 'home' => home_url(), 'siteurl' => site_url() );
 		echo 'teaser', "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( wp_json_encode( get_post( $id, ARRAY_A ) ) ), "\t", bin2hex( get_the_content() ), "\n";
+		// With the elements support, through render_block_data as in
+		// render_block(), and the elements counter recorded.
+		add_filter( 'render_block', 'wp_render_elements_class_name', 10, 2 );
+		add_filter( 'render_block_data', 'wp_render_elements_support_styles', 10, 1 );
+		foreach ( $excerpt_blocks as $markup ) {
+			foreach ( array( true, false ) as $with_post ) {
+				$parsed  = parse_blocks( $markup )[0];
+				$counter = (int) substr( wp_unique_prefixed_id( 'wp-elements-' ), 12 );
+				$block   = new WP_Block( apply_filters( 'render_block_data', $parsed, $parsed, null ), $with_post ? array( 'postId' => $id, 'postType' => 'post' ) : array() );
+				$excerpt = array( 'elements' => $counter, 'post' => $with_post ) + $state;
+				echo 'excerpt', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $excerpt ) ), "\t", bin2hex( wp_json_encode( get_post( $id, ARRAY_A ) ) ), "\t", bin2hex( $block->render() ), "\n";
+			}
+		}
+		remove_filter( 'render_block', 'wp_render_elements_class_name', 10 );
+		remove_filter( 'render_block_data', 'wp_render_elements_support_styles', 10 );
 		if ( in_array( $id, $needs_autop, true ) ) {
 			continue;
 		}
@@ -373,6 +402,33 @@ foreach ( array( true, false ) as $singular ) {
 			echo 'content', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( wp_json_encode( get_post( $id, ARRAY_A ) ) ), "\t", bin2hex( $block->render() ), "\n";
 		}
 	}
+}
+
+// core/term-description on a category archive and the home page, with the
+// description set on the term in memory. Lines are
+//   term<TAB>hex(markup)<TAB>hex(state JSON)<TAB>hex(null)<TAB>hex(output)
+$term_blocks = array(
+	'<!-- wp:term-description /-->',
+	'<!-- wp:term-description {"textAlign":"center","style":{"elements":{"link":{"color":{"text":"red"}}}}} /-->',
+	'<!-- wp:term-description {"fontSize":"small"} /-->',
+	'<!-- wp:term-description {"textAlign":"0"} /-->',
+);
+foreach ( array( '', '   ', 'Plain', "Line one\n\nLine \"two\" -- x", '<b>bold</b> & co (c)' ) as $description ) {
+	$set_description = static function ( $term ) use ( $description ) {
+		$term->description = $description;
+		return $term;
+	};
+	add_filter( 'get_term', $set_description );
+	foreach ( array( 'cat=1', '' ) as $case_query ) {
+		$GLOBALS['wp'] = new WP();
+		wp( $case_query );
+		$state = array( 'description' => $description, 'query' => $case_query );
+		foreach ( $term_blocks as $markup ) {
+			$block = new WP_Block( parse_blocks( $markup )[0] );
+			echo 'term', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( 'null' ), "\t", bin2hex( $block->render() ), "\n";
+		}
+	}
+	remove_filter( 'get_term', $set_description );
 }
 
 // human_time_diff() itself, since the block measures from the real time().

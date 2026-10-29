@@ -69,7 +69,7 @@ impl Renderer<'_> {
     /// `apply_filters( 'the_content', get_the_content() )`, with the `]]>`
     /// escape between them.
     pub(crate) fn the_content(&mut self, post: &Post) -> Vec<u8> {
-        let content = replace(&get_the_content(self, post), b"]]>", b"]]&gt;");
+        let content = replace(&get_the_content(self, post, true), b"]]>", b"]]&gt;");
         let outer = self.context.loading.in_the_content;
         self.context.loading.in_the_content = true;
         let rendered = self.render_top_level(&content);
@@ -97,8 +97,9 @@ impl Renderer<'_> {
 
 /// `get_the_content()` for the main loop's post: the password form for a
 /// protected post, else the requested page of the content, whole on a
-/// singular request or in a feed and up to its more tag elsewhere.
-pub(crate) fn get_the_content(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
+/// singular request or in a feed and up to its more tag elsewhere, with a
+/// more link unless `more_link` is false (an empty `$more_link_text`).
+pub(crate) fn get_the_content(renderer: &Renderer<'_>, post: &Post, more_link: bool) -> Vec<u8> {
     let context = &renderer.context;
     if !post.password.is_empty() {
         return password_form(renderer, post);
@@ -121,7 +122,10 @@ pub(crate) fn get_the_content(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
     );
     let without_delimiters = |part: &[u8]| remove_more_delimiters(content, part);
     let (teaser, rest) = (without_delimiters(teaser), without_delimiters(rest));
-    if context.request.singular || context.request.feed {
+    // generate_postdata(): the whole post when it is the one asked for, and
+    // in feeds.
+    let request = context.request;
+    if request.singular && request.queried_object_id == post.id || request.feed {
         let teaser = if contains(&post.content, b"<!--noteaser-->") && page == 1 {
             Vec::new()
         } else {
@@ -133,6 +137,9 @@ pub(crate) fn get_the_content(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
             &rest,
         ]
         .concat();
+    }
+    if !more_link {
+        return teaser;
     }
     let link_text = if label.is_empty() {
         // `the_title_attribute()`.

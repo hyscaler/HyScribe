@@ -57,7 +57,8 @@ for path in '/?feed=rss2' '/?feed=feed' '/?feed=rss2&cat=1' '/?s=hello&feed=rss2
   '/?feed=comments-rss' '/?feed=comments-rdf&p=1' '/?feed=comments-rss2&s=hello' '/?feed=comments-rss2&cat=1' \
   '/?feed=comments-rss2&m=2026' '/?feed=comments-rss2&cat=999' '/?feed=comments-atom&s=hello' \
   '/?feed=comments-atom&s=a%22b%3Cc' '/?feed=comments-atom&cat=1' '/?p=2&feed=rss2' '/?page_id=1&feed=atom' \
-  '/?feed=comments-rss&s=sample' '/?feed=comments-rdf&s=sample' '/?feed=comments-rss2&s=sample' '/?feed=comments-atom&s=sample'; do
+  '/?feed=comments-rss&s=sample' '/?feed=comments-rdf&s=sample' '/?feed=comments-rss2&s=sample' '/?feed=comments-atom&s=sample' \
+  '/?feed=rss2&paged=2' '/?feed=rss2&paged=1' '/?feed=comments-rss2&paged=2' '/?feed=atom&cat=999&paged=2' '/?feed=rss2&cat=999&paged=2'; do
   fetch "$path" ''
 done
 etag=$(curl -s -D - -o /dev/null "$BASE/?feed=rss2" | tr -d '\r' | sed -n 's/^ETag: //p')

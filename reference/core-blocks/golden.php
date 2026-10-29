@@ -274,14 +274,47 @@ remove_filter( 'render_block', 'wp_render_elements_class_name', 10 );
 remove_filter( 'render_block_data', 'wp_render_elements_support_styles', 10 );
 
 // get_body_class() for the requests the query cases use, and a paged one.
-foreach ( array( '', 'p=1', 'page_id=2', 'p=999', 's=hello', 's=nothingmatches', 'cat=1', 'cat=999', 'm=2026', 'm=202610', 'm=20261027', 'paged=1', 'paged=2', 'p=1&paged=2', 'cat=1&paged=3' ) as $case_query ) {
+foreach ( array( '', 'p=1', 'page_id=2', 'p=999', 's=hello', 's=nothingmatches', 'cat=1', 'cat=999', 'm=2026', 'm=202610', 'm=20261027', 'paged=1', 'paged=2', 'p=1&paged=2', 'cat=1&paged=3', 'page=2', 's=hello&page=2' ) as $case_query ) {
 	$GLOBALS['wp'] = new WP();
 	wp( $case_query );
 	echo 'body', "\t", bin2hex( $case_query ), "\t", bin2hex( implode( ' ', get_body_class() ) ), "\n";
 }
+// The query pagination blocks of a query that inherits the main one, by
+// request, page and page count; one post fills no second page, so the page
+// and the count are set on the query in memory. Lines are
+//   pagination<TAB>hex(markup)<TAB>hex(state JSON)<TAB>hex(output)
+$pagination_markups = array(
+	'<!-- wp:query-pagination {"paginationArrow":"arrow","layout":{"type":"flex","justifyContent":"space-between"}} --><!-- wp:query-pagination-previous /--><!-- wp:query-pagination-numbers /--><!-- wp:query-pagination-next /--><!-- /wp:query-pagination -->',
+	'<!-- wp:query-pagination {"paginationArrow":"chevron","showLabel":false} --><!-- wp:query-pagination-previous {"label":"Back & <b>forth</b>"} /--><!-- wp:query-pagination-next {"label":"On"} /--><!-- /wp:query-pagination -->',
+	'<!-- wp:query-pagination --><!-- wp:query-pagination-numbers {"midSize":0} /--><!-- wp:query-pagination-next {"label":"&amp; more"} /--><!-- /wp:query-pagination -->',
+	'<!-- wp:query-pagination-previous /--><!-- wp:query-pagination-numbers {"midSize":-1} /--><!-- wp:query-pagination-next /-->',
+);
+foreach ( array( '{"inherit":true}', '{"pages":3,"inherit":true}', '{"inherit":false}', '{"pages":-1,"inherit":true}' ) as $case_query_attr ) {
+	foreach ( $pagination_markups as $inner ) {
+		$markup = '<!-- wp:query {"query":' . $case_query_attr . '} --><div class="wp-block-query">' . $inner . '</div><!-- /wp:query -->';
+		foreach ( array( array( '/', 0, 1 ), array( '/', 1, 2 ), array( '/?paged=2', 2, 2 ), array( '/?s=a+b%20c&paged=3', 3, 5 ), array( '/?cat=1', 1, 10 ), array( '/?paged=6&x=%26', 6, 10 ), array( '/?paged=10', 10, 10 ), array( '/?paged=999', 999, 1200 ), array( '/?p=1&paged=2', 2, 3 ), array( '/BLOG/?s=x&paged=3', 3, 4, 'http://127.0.0.1:8081/blog' ), array( '/x/y?paged=2', 2, 3 ) ) as $case ) {
+			list( $case_uri, $case_paged, $case_max ) = $case;
+			$case_home   = $case[3] ?? 'http://127.0.0.1:8081';
+			$home_filter = static fn( $url ) => str_replace( 'http://127.0.0.1:8081', $case_home, $url );
+			add_filter( 'home_url', $home_filter );
+			$GLOBALS['wp'] = new WP();
+			wp( str_starts_with( $case_uri, '/?p=1' ) ? 'p=1' : '' );
+			$_SERVER['REQUEST_URI'] = $case_uri;
+			$GLOBALS['wp_query']->set( 'paged', $case_paged );
+			$GLOBALS['wp_query']->max_num_pages = $case_max;
+			// The global WP::register_globals() sets.
+			$GLOBALS['paged'] = $case_paged;
+			$state            = array( 'uri' => $case_uri, 'paged' => $case_paged, 'max' => $case_max, 'single' => is_single(), 'home' => home_url() );
+			echo 'pagination', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( do_blocks( $markup ) ), "\n";
+			remove_filter( 'home_url', $home_filter );
+		}
+	}
+}
+$_SERVER['REQUEST_URI'] = '/';
+
 // Page 3 of lists, and a child page: one post fills no second page, so
 // both are set on the query in memory.
-foreach ( array( '', 'page_id=2', 'cat=1', 'm=2026', 's=hello', 'page_id=2&child', 'cat=1&slug', 'p=1&book' ) as $case_query ) {
+foreach ( array( '', 'page_id=2', 'cat=1', 'm=2026', 's=hello', 'cat=1&page=1', 'page_id=2&child', 'cat=1&slug', 'p=1&book' ) as $case_query ) {
 	$GLOBALS['wp'] = new WP();
 	wp( preg_replace( '/&(child|slug|book)$/', '', $case_query ) );
 	$label = $case_query;

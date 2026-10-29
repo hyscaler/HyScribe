@@ -87,7 +87,11 @@ fn post_classes_match_php() {
         };
         let request = Request {
             home: case.get_str("home") == Some(&Value::Bool(true)),
-            paged: case.get_str("paged") == Some(&Value::Bool(true)),
+            paged: if case.get_str("paged") == Some(&Value::Bool(true)) {
+                2
+            } else {
+                0
+            },
             ..Request::default()
         };
         let post = Post {

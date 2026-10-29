@@ -161,6 +161,19 @@ fn next_index(array: &[(Key, Value)]) -> Option<i64> {
 /// `add_query_arg( $args, $uri )`: each `(key, value)` set in the
 /// query, `None` removing the key, and the existing pairs re-encoded.
 pub fn add_query_arg(args: &[(&[u8], Option<&[u8]>)], uri: &[u8]) -> Vec<u8> {
+    let args: Vec<(Key, Value)> = args
+        .iter()
+        .map(|&(key, value)| {
+            let value = value.map_or(Value::Bool(false), |v| Value::String(v.to_vec()));
+            (Key::from_php_string(key.to_vec()), value)
+        })
+        .collect();
+    add_query_values(&args, uri)
+}
+
+/// `add_query_arg( $args, $uri )` with PHP values, arrays among them;
+/// `false` removes a key.
+pub fn add_query_values(args: &[(Key, Value)], uri: &[u8]) -> Vec<u8> {
     let (uri, fragment) = match uri.iter().position(|&b| b == b'#') {
         Some(at) => (
             uri.get(..at).unwrap_or_default(),
@@ -193,9 +206,8 @@ pub fn add_query_arg(args: &[(&[u8], Option<&[u8]>)], uri: &[u8]) -> Vec<u8> {
         .map(|(key, value)| (key, urlencode_deep(value)))
         .collect();
     // A removed key is set to `false` and unset after the others are set.
-    for &(key, value) in args {
-        let value = value.map_or(Value::Bool(false), |v| Value::String(v.to_vec()));
-        set(&mut pairs, Key::from_php_string(key.to_vec()), |_| value);
+    for (key, value) in args {
+        set(&mut pairs, key.clone(), |_| value.clone());
     }
     pairs.retain(|(_, value)| *value != Value::Bool(false));
     let query = build_query(&pairs);
@@ -240,7 +252,7 @@ fn http_build_query(pairs: &[(Key, Value)], parent: &[u8]) -> Vec<u8> {
 }
 
 /// `map_deep( $value, 'urlencode' )`.
-fn urlencode_deep(value: Value) -> Value {
+pub fn urlencode_deep(value: Value) -> Value {
     match value {
         Value::Array(pairs) => Value::Array(
             pairs

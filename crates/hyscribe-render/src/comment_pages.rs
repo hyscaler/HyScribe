@@ -13,6 +13,7 @@ use hyscribe_phpser::{Value, add_query_arg, is_empty_string};
 use crate::blocks::Block;
 use crate::core_blocks::{Context, prepared, render};
 use crate::formatting::encode_ampersands;
+use crate::query_pagination::arrow_span;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
@@ -144,18 +145,7 @@ impl Renderer<'_> {
 
     /// `get_comments_pagination_arrow()`.
     fn arrow(&self, direction: &str) -> Vec<u8> {
-        let arrow = self.pagination_arrow.as_ref().map(Value::to_php_string);
-        let (symbol, kind) = match (arrow.as_deref(), direction) {
-            (Some(b"arrow"), "next") => ("→", "arrow"),
-            (Some(b"arrow"), _) => ("←", "arrow"),
-            (Some(b"chevron"), "next") => ("»", "chevron"),
-            (Some(b"chevron"), _) => ("«", "chevron"),
-            _ => return Vec::new(),
-        };
-        format!(
-            "<span class='wp-block-comments-pagination-{direction}-arrow is-arrow-{kind}' aria-hidden='true'>{symbol}</span>"
-        )
-        .into_bytes()
+        arrow_span("comments", self.pagination_arrow.as_ref(), direction)
     }
 
     /// The link of `get_previous_comments_link()` and

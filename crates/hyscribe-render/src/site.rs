@@ -63,8 +63,10 @@ pub struct Request {
     pub front_page: bool,
     /// `is_home()`
     pub home: bool,
-    /// `is_paged()`
-    pub paged: bool,
+    /// The `paged` query var, as `absint()` casts it.
+    pub paged: u64,
+    /// `$wp_query->max_num_pages`.
+    pub max_pages: u64,
     /// `get_queried_object_id()`
     pub queried_object_id: u64,
     /// The global `$post`: the main query's first post, which top-level
@@ -80,18 +82,27 @@ pub struct Request {
     pub date: bool,
     /// `is_search()`: the raw search query, `get_query_var( 's' )`.
     pub search: Option<Vec<u8>>,
+    /// `get_query_var( 's' )`, which a 404 keeps where `search` is gone.
+    pub search_query: Vec<u8>,
     /// `is_singular()`: the main query's one post is the queried object.
     pub singular: bool,
     /// `is_404()`
     pub not_found: bool,
     /// `is_feed()`: posts show in full, as a singular post does.
     pub feed: bool,
-    /// The `page` or `paged` query var, 0 or 1 on the first page.
+    /// The `page` query var, 0 or 1 on the first page.
     pub page: u64,
     /// `$_SERVER['REQUEST_URI']`: the path and query as requested.
     pub uri: Vec<u8>,
     /// `$_GET`: the query as `parse_str()` reads it.
     pub get: Value,
+}
+
+impl Request {
+    /// `is_paged()`
+    pub fn is_paged(&self) -> bool {
+        self.paged > 1
+    }
 }
 
 /// The archives the default install has.

@@ -109,7 +109,7 @@ pub(crate) fn post_class(site: &dyn Site, request: &Request, class: &str, post: 
         .as_ref()
         .and_then(Value::as_array)
         .is_some_and(|ids| ids.iter().any(|(_, v)| v.to_int() == id as i64));
-    if is_sticky && request.home && !request.paged {
+    if is_sticky && request.home && !request.is_paged() {
         classes.push(b"sticky".to_vec());
     }
     classes.push(b"hentry".to_vec());
@@ -175,7 +175,7 @@ pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8>
             b"search-results"
         });
     }
-    if request.paged {
+    if request.is_paged() {
         push(b"paged");
     }
     if request.not_found {
@@ -213,8 +213,13 @@ pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8>
     }
     // Block themes support responsive embeds.
     push(b"wp-embed-responsive");
-    if request.page > 1 && !request.not_found {
-        let page = request.page;
+    // `page`, or `paged` when `page` is not past the first page.
+    let page = if request.page > 1 {
+        request.page
+    } else {
+        request.paged
+    };
+    if page > 1 && !request.not_found {
         push(format!("paged-{page}").as_bytes());
         let kind = match (singular.map(|p| p.post_type.as_str()), &request.archive) {
             (Some("page"), _) => "page",

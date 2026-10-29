@@ -184,33 +184,38 @@ async fn page(
                 .into_response();
         }
         Ok(Outcome::Feed(page, feed)) => {
-            let page = Page {
-                request: Request {
-                    uri: request_uri(&uri),
-                    ..page.request
-                },
-                ..*page
-            };
-            return feed::respond(site, page, feed, &headers).await;
+            return feed::respond(site, requested(*page, &uri), feed, &headers).await;
         }
-        Ok(Outcome::Page(page)) => {
-            let rendering = Arc::clone(&site);
-            let candidates = page.candidates.clone();
-            let request = Request {
-                uri: request_uri(&uri),
-                get: parse_str(uri.query().unwrap_or_default().as_bytes()),
-                ..page.request.clone()
-            };
-            let title = page.title.clone();
-            let body = tokio::task::spawn_blocking(move || {
-                render_page(&rendering, &candidates, &request, &title)
-            })
-            .await;
-            rendered(&site, *page, body)
-        }
+        Ok(Outcome::Page(page)) => render(&site, requested(*page, &uri)).await,
         Err(err) => database_error(&site, &err),
     };
     html(&page)
+}
+
+/// `page` with the request's URI and query.
+fn requested(page: Page, uri: &Uri) -> Page {
+    Page {
+        request: Request {
+            uri: request_uri(uri),
+            get: parse_str(uri.query().unwrap_or_default().as_bytes()),
+            ..page.request
+        },
+        ..page
+    }
+}
+
+/// `page` rendered through its template.
+async fn render(site: &Arc<Site>, page: Page) -> Rendered {
+    let rendering = Arc::clone(site);
+    let (candidates, request, title) = (
+        page.candidates.clone(),
+        page.request.clone(),
+        page.title.clone(),
+    );
+    let body =
+        tokio::task::spawn_blocking(move || render_page(&rendering, &candidates, &request, &title))
+            .await;
+    rendered(site, page, body)
 }
 
 /// A rendered page as the response.
@@ -412,7 +417,13 @@ async fn route(
                 feed::CommentsOf::Site
             }
         });
-        return feed::outcome(site, list(site, query, true), comments, format, redirect).await;
+        let page = list(site, query, true).await?;
+        // A paged query with nothing in it is a 404: a feed of no posts,
+        // never of comments, titled as the 404 page.
+        let missing = page.request.not_found && Paging::of(query).is_paged();
+        let comments = comments.filter(|_| !missing);
+        let page = std::future::ready(Ok(page));
+        return feed::outcome(site, page, comments, format, redirect, missing).await;
     }
     let single = |name: &'static str, post_type: &'static str| {
         query
@@ -425,7 +436,7 @@ async fn route(
             // `?p=` for a page or `?page_id=` for a post.
             let elsewhere = |post: &Post| {
                 (post.post_type != post_type)
-                    .then(|| format!("{}{}", site.permalink(post), other_args(raw_query, name)))
+                    .then(|| format!("{}{}", site.permalink(post), other_args(raw_query, &[name])))
             };
             Ok(
                 match (
@@ -439,17 +450,18 @@ async fn route(
                         let redirect = found.as_ref().and_then(elsewhere).or(redirect);
                         let comments =
                             comment_feed.then_some(feed::CommentsOf::Post(id, name == "p"));
-                        let page =
-                            async {
-                                Ok(found
-                                    .map_or_else(|| missing_single(site), |p| single_page(site, p)))
-                            };
-                        return feed::outcome(site, page, comments, format, redirect).await;
+                        let page = async {
+                            Ok(found.map_or_else(
+                                || missing_single(site),
+                                |p| single_page(site, p, Paging::default()),
+                            ))
+                        };
+                        return feed::outcome(site, page, comments, format, redirect, false).await;
                     }
-                    (None, Some(post)) => elsewhere(&post).map_or_else(
-                        || Outcome::Page(Box::new(single_page(site, post))),
-                        Outcome::Redirect,
-                    ),
+                    (None, Some(post)) => match elsewhere(&post) {
+                        Some(location) => Outcome::Redirect(location),
+                        None => paged_single(site, query, raw_query, name, post),
+                    },
                     (None, None) => Outcome::Page(Box::new(not_found(site, false))),
                 },
             )
@@ -460,8 +472,64 @@ async fn route(
     }
 }
 
+/// The `paged` and `page` query vars, as `WP_Query` casts them.
+#[derive(Clone, Copy, Default)]
+struct Paging {
+    paged: u64,
+    page: u64,
+}
+
+impl Paging {
+    fn of(query: &HashMap<String, String>) -> Paging {
+        let var = |name, trim: &[char]| query.get(name).map_or(0, |v| absint(v.trim_matches(trim)));
+        Paging {
+            paged: var("paged", &[]),
+            page: var("page", &['/']),
+        }
+    }
+
+    fn is_paged(self) -> bool {
+        self.paged > 1
+    }
+
+    /// `wp_get_document_title()`'s page part.
+    fn title(self) -> Option<String> {
+        let page = self.paged.max(self.page);
+        (page >= 2).then(|| format!("Page {page}"))
+    }
+}
+
+/// `wp_get_document_title()`: the parts there are, joined by dashes.
+fn document_title(parts: [Option<String>; 3]) -> String {
+    parts
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" &#8211; ")
+}
+
+/// A singular page with the `page` var: the page itself, or a 404 when the
+/// var is no number. Posts split by `<!--nextpage-->` are not paged yet.
+fn paged_single(
+    site: &Site,
+    query: &HashMap<String, String>,
+    raw_query: Option<&str>,
+    name: &str,
+    post: Post,
+) -> Outcome {
+    let page = query.get("page").filter(|v| !v.is_empty() && *v != "0");
+    match page {
+        Some(_) if Paging::of(query).page >= 1 => {
+            let args = other_args(raw_query, &[name, "page"]);
+            Outcome::Redirect(format!("{}{args}", site.permalink(&post)))
+        }
+        Some(_) => Outcome::Page(Box::new(not_found(site, false))),
+        None => Outcome::Page(Box::new(single_page(site, post, Paging::of(query)))),
+    }
+}
+
 /// A post or page on its own, with its type's template hierarchy.
-fn single_page(site: &Site, post: Post) -> Page {
+fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
     let name = lossy(&post.name);
     let candidates = if post.post_type == "page" {
         vec![
@@ -485,12 +553,17 @@ fn single_page(site: &Site, post: Post) -> Page {
         singular: true,
         queried_object_id: post.id,
         post: Some(post.id),
+        paged: paging.paged,
         now: now(),
         ..Request::default()
     };
     Page {
         status: StatusCode::OK,
-        title: format!("{} &#8211; {}", esc_html(&post.title), site.name()),
+        title: document_title([
+            Some(esc_html(&post.title)),
+            paging.title(),
+            Some(site.name()),
+        ]),
         candidates,
         request: Request {
             posts: vec![post],
@@ -522,8 +595,21 @@ fn post_query(site: &Site, query: &HashMap<String, String>, feed: bool) -> PostQ
         month,
         day,
         limit: u32::try_from(per_page).unwrap_or(10),
+        offset: u32::try_from(offset(Paging::of(query).paged, per_page)).unwrap_or(u32::MAX),
         ..PostQuery::default()
     }
+}
+
+/// `WP_Query`'s offset of page `paged`: past the integers, PHP's product is
+/// a float, which `absint()` wraps.
+fn offset(paged: u64, per_page: u64) -> u64 {
+    let skipped = paged.max(1) - 1;
+    skipped.checked_mul(per_page).unwrap_or_else(|| {
+        let product = skipped as f64 * per_page as f64;
+        hyscribe_phpser::absint(&hyscribe_phpser::Value::Float(
+            hyscribe_phpser::Float::from_f64(product),
+        ))
+    })
 }
 
 /// A list page: the home page, a search, a category or a date archive; for
@@ -536,14 +622,19 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
         Some(id) => match site.db.category(id).await? {
             Some(term) => Some(term),
             // A category that does not exist.
-            None => return Ok(not_found(site, feed)),
+            None => return Ok(not_found(site, feed && !Paging::of(query).is_paged())),
         },
         None => None,
     };
-    let posts = site.db.posts(&post_query).await?;
-    // A date archive with nothing in it is a 404; a search never is.
-    if year.is_some() && search.is_none() && category.is_none() && posts.is_empty() {
-        return Ok(not_found(site, feed));
+    let (posts, found) = tokio::join!(site.db.posts(&post_query), site.db.count_posts(&post_query));
+    let (posts, found) = posts.and_then(|posts| found.map(|found| (posts, found)))?;
+    let paging = Paging::of(query);
+    // A date archive with nothing in it is a 404, a search only when paged.
+    let empty_404 = paging.is_paged() || year.is_some() && search.is_none() && category.is_none();
+    if empty_404 && posts.is_empty() {
+        let mut page = not_found(site, feed && !paging.is_paged());
+        page.request.search_query = search.map_or_else(Vec::new, |s| s.as_bytes().to_vec());
+        return Ok(page);
     }
     let first_date = posts.first().map_or("", |post| post.date.as_str());
     let heading = if let Some(s) = search {
@@ -567,9 +658,12 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
     };
     let tagline = site.option("blogdescription");
     let title = match heading {
-        Some(heading) => format!("{heading} &#8211; {}", site.name()),
-        None if tagline.is_empty() => site.name(),
-        None => format!("{} &#8211; {}", site.name(), esc_html(tagline.as_bytes())),
+        Some(heading) => document_title([Some(heading), paging.title(), Some(site.name())]),
+        None => document_title([
+            Some(site.name()),
+            paging.title(),
+            Some(esc_html(tagline.as_bytes())).filter(|t| !t.is_empty()),
+        ]),
     };
     let archive = match (&category, year, month, day) {
         (Some(term), ..) => Some(Archive::Category(term.clone())),
@@ -599,6 +693,10 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
         archive,
         date: year.is_some(),
         search: search.map(|s| s.as_bytes().to_vec()),
+        search_query: search.map_or_else(Vec::new, |s| s.as_bytes().to_vec()),
+        paged: paging.paged,
+        page: paging.page,
+        max_pages: found.div_ceil(u64::from(post_query.limit)),
         now: now(),
         posts,
         ..Request::default()

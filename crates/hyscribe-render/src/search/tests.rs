@@ -25,7 +25,8 @@ fn matches_php() {
             unhex(fields[3]),
         );
         let request = Request {
-            search: (!query.is_empty()).then_some(query),
+            search: (!query.is_empty()).then(|| query.clone()),
+            search_query: query,
             ..Request::default()
         };
         let mut renderer = Renderer::new(&theme, &site, &request);

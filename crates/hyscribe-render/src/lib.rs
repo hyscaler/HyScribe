@@ -28,6 +28,7 @@ mod media;
 mod navigation;
 pub mod post;
 mod query_loop;
+mod query_pagination;
 pub mod registry;
 mod search;
 pub mod site;

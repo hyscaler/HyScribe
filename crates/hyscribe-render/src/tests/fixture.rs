@@ -89,8 +89,7 @@ impl DefaultInstall {
         // golden script in memory.
         if let Some(base) = query.strip_suffix("&forced=3") {
             return Request {
-                paged: true,
-                page: 3,
+                paged: 3,
                 ..self.request(base)
             };
         }
@@ -120,9 +119,17 @@ impl DefaultInstall {
                 ..self.request(base)
             };
         }
+        // The `page` var only numbers a list page, which shows page 1.
+        let (base, page) = query.rsplit_once("page=").unwrap_or((query, ""));
+        if let (Ok(page), true) = (page.parse(), base.is_empty() || base.ends_with('&')) {
+            return Request {
+                page,
+                ..self.request(base.trim_end_matches('&'))
+            };
+        }
         if query == "paged=1" {
             return Request {
-                page: 1,
+                paged: 1,
                 ..self.request("")
             };
         }
@@ -130,10 +137,9 @@ impl DefaultInstall {
         Request {
             front_page: query.is_empty(),
             home: query.is_empty(),
-            paged: query == "p=1&paged=2",
+            paged: if query == "p=1&paged=2" { 2 } else { 0 },
             singular: matches!(query, "p=1" | "page_id=2" | "p=1&paged=2"),
             not_found: matches!(query, "p=999" | "cat=999" | "paged=2" | "cat=1&paged=3"),
-            page: if query == "p=1&paged=2" { 2 } else { 0 },
             post: posts.first().map(|post| post.id),
             posts,
             archive: match query {
@@ -145,6 +151,11 @@ impl DefaultInstall {
             },
             date: query.starts_with("m="),
             search: query.strip_prefix("s=").map(|s| s.as_bytes().to_vec()),
+            search_query: query
+                .strip_prefix("s=")
+                .unwrap_or_default()
+                .as_bytes()
+                .to_vec(),
             ..Request::default()
         }
     }

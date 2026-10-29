@@ -600,7 +600,7 @@ async fn routes_give_the_request_state() {
     assert!(home.request.front_page && home.request.home && home.request.now > recent);
     assert_eq!(home.request.post, Some(1));
     let post = site.db.post(1).await.unwrap().unwrap();
-    let single = single_page(&site, post);
+    let single = single_page(&site, post, Paging::default());
     assert_eq!(
         (single.request.queried_object_id, single.request.post),
         (1, Some(1))
@@ -734,43 +734,38 @@ async fn feeds_match_php() {
             "{path} {sent:?}"
         );
     }
-    assert_eq!(golden.lines().count(), 62);
+    assert_eq!(golden.lines().count(), 67);
 }
 
-/// What every page prints after the theme's footer (`wp_footer()`)
-/// against PHP's, from `reference/head/golden.sh`.
+/// Every page of `reference/head/golden.sh`, status and HTML, against
+/// PHP's, with HyScribe as the generator and without the tags an open question holds
+/// back.
 #[tokio::test]
-async fn footers_match_php() {
-    let site = oracle_site().await;
-    let golden = include_str!("../../hyscribe-render/tests/golden/footer.tsv");
-    for line in golden.lines() {
-        let (path, php) = line.split_once('\t').unwrap();
-        let path = String::from_utf8(hyscribe_testkit::unhex(path)).unwrap();
-        let php = String::from_utf8(hyscribe_testkit::unhex(php)).unwrap();
-        let body = request(&site, "GET", &path).await.body;
-        let marker = "</footer>\n</div>\n";
-        let start = body.rfind(marker).unwrap() + marker.len();
-        assert_eq!(
-            body.get(start..body.rfind("</body>").unwrap()),
-            Some(php.as_str()),
-            "{path}"
-        );
-    }
-    assert_eq!(golden.lines().count(), 16);
+async fn pages_match_php() {
+    let golden = include_str!("../../hyscribe-render/tests/golden/pages.tsv");
+    assert_pages(&oracle_site().await, golden).await;
+    assert_eq!(golden.lines().count(), 41);
 }
 
-/// Every page's `<head>` against PHP's, from `reference/head/golden.sh`,
-/// with HyScribe as the generator and without the tags an open question holds back.
+/// Pages past the first, with one post a page, from the same script.
 #[tokio::test]
+async fn paged_pages_match_php() {
+    let mut site = Arc::into_inner(oracle_site().await).unwrap();
+    site.options.insert("posts_per_page".into(), b"1".to_vec());
+    let golden = include_str!("../../hyscribe-render/tests/golden/paged.tsv");
+    assert_pages(&Arc::new(site), golden).await;
+    assert_eq!(golden.lines().count(), 6);
+}
+
+/// Each line of `golden`, a path, PHP's status and its page, against ours.
 #[allow(clippy::string_slice)]
-async fn heads_match_php() {
-    let site = oracle_site().await;
-    let golden = include_str!("../../hyscribe-render/tests/golden/head.tsv");
+async fn assert_pages(site: &Arc<Site>, golden: &str) {
     let mut failures = Vec::new();
     for line in golden.lines() {
-        let (path, php) = line.split_once('\t').unwrap();
-        let path = String::from_utf8(hyscribe_testkit::unhex(path)).unwrap();
-        let mut php = String::from_utf8(hyscribe_testkit::unhex(php)).unwrap();
+        let mut fields = line.split('\t');
+        let path = String::from_utf8(hyscribe_testkit::unhex(fields.next().unwrap())).unwrap();
+        let status: u16 = fields.next().unwrap().parse().unwrap();
+        let mut php = String::from_utf8(hyscribe_testkit::unhex(fields.next().unwrap())).unwrap();
         for prefix in [
             "<link rel=\"https://api.w.org/\"",
             "<link rel=\"alternate\" title=\"JSON\"",
@@ -794,9 +789,9 @@ async fn heads_match_php() {
                 env!("CARGO_PKG_VERSION")
             ),
         );
-        let body = request(&site, "GET", &path).await.body;
-        let ours = &body[body.find("<head>").unwrap()..body.find("</head>").unwrap() + 7];
-        if ours != php {
+        let reply = request(site, "GET", &path).await;
+        let ours = reply.body;
+        if reply.status.as_u16() != status || ours != php {
             let at = ours
                 .bytes()
                 .zip(php.bytes())
@@ -804,7 +799,8 @@ async fn heads_match_php() {
                 .unwrap_or(ours.len().min(php.len()));
             let from = at.saturating_sub(200);
             failures.push(format!(
-                "{path}\n  php:  {}\n  ours: {}",
+                "{path} {status}/{}\n  php:  {:?}\n  ours: {:?}",
+                reply.status,
                 &php[from.min(php.len())..(at + 300).min(php.len())],
                 &ours[from.min(ours.len())..(at + 300).min(ours.len())]
             ));

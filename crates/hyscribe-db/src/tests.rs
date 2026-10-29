@@ -169,6 +169,11 @@ async fn post_lists() {
         .await
         .is_empty()
     );
+    // Every page's posts, however many a page lists.
+    let one = PostQuery { limit: 1, ..both() };
+    assert_eq!(db.count_posts(&one).await.unwrap(), 2);
+    let none = search(&["nothingmatches"]);
+    assert_eq!(db.count_posts(&none).await.unwrap(), 0);
     // No types: any type.
     let any = db
         .posts(&PostQuery {
@@ -279,6 +284,15 @@ async fn errors_are_reported() {
         db.adjacent_post(&Post::default(), true, None)
             .await
             .unwrap_err(),
+        db.feed_comments(None, 1).await.unwrap_err(),
+        db.count_posts(&PostQuery {
+            post_types: vec!["post".into()],
+            ..PostQuery::default()
+        })
+        .await
+        .unwrap_err(),
+        db.last_comment_modified().await.unwrap_err(),
+        db.last_post_modified().await.unwrap_err(),
         db.archive_feed_comments(
             &PostQuery {
                 post_types: vec!["post".into()],

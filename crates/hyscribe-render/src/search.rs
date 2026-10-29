@@ -105,10 +105,7 @@ impl Renderer<'_> {
         input.next_tag(None, None);
         input.add_class(input_classes.join(" ").as_bytes());
         input.set_attribute(b"id", &input_id);
-        input.set_attribute(
-            b"value",
-            self.context.request.search.as_deref().unwrap_or_default(),
-        );
+        input.set_attribute(b"value", &self.context.request.search_query);
         input.set_attribute(b"placeholder", &a.text(&["placeholder"]));
         if expandable {
             self.assets

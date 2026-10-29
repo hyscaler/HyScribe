@@ -12,5 +12,5 @@ fuzz_target!(|data: &[u8]| {
     let _ = query::absint(&text);
     let _ = query::date_parts(&text);
     let _ = query::search_terms(&text);
-    let _ = query::other_args(Some(&text), "p");
+    let _ = query::other_args(Some(&text), &["p", "page"]);
 });

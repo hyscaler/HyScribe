@@ -1210,7 +1210,7 @@ fn site_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
             .site
             .option("page_for_posts")
             .map_or(0, |v| Value::String(v).to_int());
-        let current = !request.paged
+        let current = !request.is_paged()
             && (request.front_page
                 || request.home
                     && u64::try_from(page_for_posts).ok() != Some(request.queried_object_id));

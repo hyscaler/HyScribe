@@ -33,6 +33,9 @@ pub(crate) struct Feed {
     format: Format,
     /// Where `redirect_canonical()` sends the feed, if elsewhere.
     redirect: Option<String>,
+    /// The query found nothing past its first page: an empty feed of the
+    /// 404 page, sent as a 404.
+    not_found: bool,
 }
 
 /// A feed's format.
@@ -83,6 +86,7 @@ pub(crate) async fn outcome(
     comments: Option<CommentsOf>,
     format: Format,
     redirect: Option<String>,
+    not_found: bool,
 ) -> Result<Outcome, DbError> {
     let (page, last_post, comments) =
         tokio::join!(page, site.db.last_post_modified(), listed(site, comments));
@@ -95,6 +99,7 @@ pub(crate) async fn outcome(
                     comments,
                     format,
                     redirect,
+                    not_found,
                 };
                 feed_outcome(page, feed)
             })
@@ -217,23 +222,23 @@ pub(crate) async fn respond(
         reads.finish().map(|()| made)
     })
     .await;
-    response(finished(&site, body), content_type, cache)
+    let status = if feed.not_found {
+        StatusCode::NOT_FOUND
+    } else {
+        StatusCode::OK
+    };
+    response(finished(&site, body), status, content_type, cache)
 }
 
 /// The feed as the response, or the 500 page when rendering failed.
 fn response(
     made: Result<Vec<u8>, Rendered>,
+    status: StatusCode,
     content_type: String,
     cache: [(HeaderName, String); 2],
 ) -> Response {
     match made {
-        Ok(feed) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, content_type)],
-            cache,
-            feed,
-        )
-            .into_response(),
+        Ok(feed) => (status, [(header::CONTENT_TYPE, content_type)], cache, feed).into_response(),
         Err(error) => html(&error),
     }
 }

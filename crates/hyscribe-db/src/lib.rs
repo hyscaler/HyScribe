@@ -270,6 +270,20 @@ impl Db {
         rows.iter().map(post).collect()
     }
 
+    /// `found_posts`: how many posts `query` matches on every page.
+    pub async fn count_posts(&self, query: &PostQuery) -> Result<u64, DbError> {
+        let mut sql = Sql::new("SELECT COUNT(*) AS found FROM {prefix}posts WHERE ");
+        post_criteria(&mut sql, query);
+        let row = sql
+            .query(&self.prefix)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.try_get::<i64, _>("found")
+            .map(i64::unsigned_abs)
+            .map_err(db_error)
+    }
+
     /// One option by name, autoloaded or not.
     pub async fn option(&self, name: &str) -> Result<Option<Vec<u8>>, DbError> {
         let sql = self

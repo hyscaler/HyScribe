@@ -24,6 +24,7 @@ fn a_feed_that_fails_is_the_server_error_page() {
     ];
     let response = response(
         Err(failed),
+        StatusCode::OK,
         "application/rss+xml; charset=UTF-8".into(),
         cache,
     );

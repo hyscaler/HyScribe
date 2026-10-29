@@ -109,7 +109,7 @@ fn case(kind: &str, state: &Value, data: &Value) -> (Fixture, Request, Option<u6
         request = Request {
             front_page: flag("front_page"),
             home: flag("home"),
-            paged: flag("paged"),
+            paged: if flag("paged") { 2 } else { 0 },
             queried_object_id: state.get_str("queried_object_id").unwrap().to_float() as u64,
             ..Request::default()
         };
@@ -144,6 +144,7 @@ fn matches_php() {
             || kind == "terms"
             || kind == "adjacent"
             || kind == "comments"
+            || kind == "pagination"
         {
             continue;
         }

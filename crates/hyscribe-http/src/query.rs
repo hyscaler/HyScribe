@@ -4,12 +4,14 @@
 //! function here takes untrusted input, so the fuzz target
 //! `http_query` covers them all.
 
-/// `raw_query` without the `name` argument, as `&`-joined pairs.
-pub fn other_args(raw_query: Option<&str>, name: &str) -> String {
+/// `raw_query` without the `names` arguments, as `&`-joined pairs.
+pub fn other_args(raw_query: Option<&str>, names: &[&str]) -> String {
     raw_query
         .unwrap_or_default()
         .split('&')
-        .filter(|pair| !pair.is_empty() && pair.split('=').next() != Some(name))
+        .filter(|pair| {
+            !pair.is_empty() && !names.contains(&pair.split('=').next().unwrap_or_default())
+        })
         .map(|pair| format!("&{pair}"))
         .collect()
 }

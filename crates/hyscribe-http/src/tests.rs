@@ -705,6 +705,7 @@ async fn feeds_match_php() {
             header(header::CONTENT_TYPE),
             header(header::LAST_MODIFIED),
             header(header::ETAG),
+            header(header::LOCATION),
         ]
         .join("\n");
         let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -729,7 +730,7 @@ async fn feeds_match_php() {
             "{path} {sent:?}"
         );
     }
-    assert_eq!(golden.lines().count(), 41);
+    assert_eq!(golden.lines().count(), 47);
 }
 
 /// Comment feeds of searches and archives are not served yet: those

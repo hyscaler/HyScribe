@@ -23,7 +23,7 @@ wc -l "$FEED"
 
 # The posts and comment feeds over HTTP, then conditional requests for the
 # home feed:
-#   hex(path)<TAB>hex(request headers)<TAB>hex(status, content type, last modified and etag)<TAB>hex(body)
+#   hex(path)<TAB>hex(request headers)<TAB>hex(status, content type, last modified, etag and location)<TAB>hex(body)
 BASE="${HYSCRIBE_PHP_BASE:-http://127.0.0.1:8081}"
 HTTP="$ROOT/crates/hyscribe-render/tests/golden/feeds-http.tsv"
 : > "$HTTP"
@@ -42,7 +42,7 @@ head, _, body = r.partition(b"\r\n\r\n")
 lines = head.split(b"\r\n")
 status = lines[0].split(b" ")[1]
 fields = {l.split(b":", 1)[0].lower(): l.split(b":", 1)[1].strip() for l in lines[1:] if b":" in l}
-kept = b"\n".join([status] + [fields.get(k, b"") for k in (b"content-type", b"last-modified", b"etag")])
+kept = b"\n".join([status] + [fields.get(k, b"") for k in (b"content-type", b"last-modified", b"etag", b"location")])
 print("\t".join(x.hex() for x in (path, sent, kept, body)))
 ' "$path" "$sent" >> "$HTTP"
 }
@@ -52,7 +52,8 @@ for path in '/?feed=rss2' '/?feed=feed' '/?feed=rss2&cat=1' '/?s=hello&feed=rss2
   '/?feed=rss2&page_id=2' '/?feed=rss2&p=999' '/?feed=rss2&page_id=999' '/?feed=rss2&p=1&withoutcomments=1' \
   '/?feed=rss2&p=999&withoutcomments=1' '/?feed=rss2&p=1&withoutcomments=0' \
   '/?feed=atom' '/?feed=atom&cat=1' '/?s=hello&feed=atom' '/?feed=atom&m=1999' '/?feed=atom&p=1&withoutcomments=1' \
-  '/?feed=comments-atom' '/?feed=atom&p=1' '/?feed=atom&page_id=2' '/?feed=atom&p=999' '/?feed=comments-atom&p=1'; do
+  '/?feed=comments-atom' '/?feed=atom&p=1' '/?feed=atom&page_id=2' '/?feed=atom&p=999' '/?feed=comments-atom&p=1' \
+  '/?feed=rdf' '/?feed=rdf&cat=1' '/?feed=rdf&m=1999' '/?feed=rdf&p=1' '/?feed=rss' '/?feed=rss&cat=1'; do
   fetch "$path" ''
 done
 etag=$(curl -s -D - -o /dev/null "$BASE/?feed=rss2" | tr -d '\r' | sed -n 's/^ETag: //p')

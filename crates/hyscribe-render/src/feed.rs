@@ -219,6 +219,134 @@ fn title_rss(post: &Post) -> Vec<u8> {
     esc_html(&strip_tags(&ent2ncr(&the_title(post)))).into_bytes()
 }
 
+/// `get_the_generator( 'rdf' )`, naming HyScribe and its version.
+const RDF_GENERATOR: &[u8] = concat!(
+    "<admin:generatorAgent rdf:resource=\"",
+    env!("CARGO_PKG_REPOSITORY"),
+    "?v=",
+    env!("CARGO_PKG_VERSION"),
+    "\" />"
+)
+.as_bytes();
+
+/// `feed-rdf.php` for the main query's posts; the arguments are
+/// [`rss2`]'s.
+pub fn rdf(
+    theme: &Theme,
+    site: &dyn Site,
+    request: &Request,
+    title: &[u8],
+    last_modified: Option<&str>,
+) -> Vec<u8> {
+    let option = |name| site.option(name).unwrap_or_default();
+    let home = bloginfo(&site.home_url());
+    let request = &Request {
+        feed: true,
+        ..request.clone()
+    };
+    let mut renderer = Renderer::new(theme, site, request);
+    let permalinks: Vec<Vec<u8>> = request
+        .posts
+        .iter()
+        .map(|post| esc_url(&renderer.context.permalink(post)))
+        .collect();
+    let mut out = [
+        b"<?xml version=\"1.0\" encoding=\"".as_slice(),
+        &option("blog_charset"),
+        b"\"?><rdf:RDF\n\txmlns=\"http://purl.org/rss/1.0/\"\n\
+          \txmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"\n\
+          \txmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n\
+          \txmlns:sy=\"http://purl.org/rss/1.0/modules/syndication/\"\n\
+          \txmlns:admin=\"http://webns.net/mvcb/\"\n\
+          \txmlns:content=\"http://purl.org/rss/1.0/modules/content/\"\n\t>\n<channel rdf:about=\"",
+        &home,
+        b"\">\n\t<title>",
+        title,
+        b"</title>\n\t<link>",
+        &home,
+        b"</link>\n\t<description>",
+        &bloginfo(&option("blogdescription")),
+        b"</description>\n\t<dc:date>",
+        build_date(request, &[], last_modified, ATOM_DATE).as_bytes(),
+        b"\t</dc:date>\n\t<sy:updatePeriod>\n\thourly\t</sy:updatePeriod>\n\
+          \t<sy:updateFrequency>\n\t1\t</sy:updateFrequency>\n\
+          \t<sy:updateBase>2000-01-01T12:00+00:00</sy:updateBase>\n\t",
+        RDF_GENERATOR,
+        b"\n\t<items>\n\t\t<rdf:Seq>\n\t\t",
+    ]
+    .concat();
+    for permalink in &permalinks {
+        out.extend(
+            [
+                b"\t\t\t<rdf:li rdf:resource=\"".as_slice(),
+                permalink,
+                b"\"/>\n\t\t",
+            ]
+            .concat(),
+        );
+    }
+    out.extend_from_slice(b"\t\t</rdf:Seq>\n\t</items>\n</channel>\n");
+    let use_excerpt = !is_empty_string(&option("rss_use_excerpt"));
+    for (post, permalink) in request.posts.iter().zip(&permalinks) {
+        renderer.context.post_id = Some(post.id);
+        let author = site
+            .user(post.author)
+            .map(|user| user.display_name)
+            .unwrap_or_default();
+        let subjects: Vec<u8> = category_names(site, post, convert_chars)
+            .iter()
+            .flat_map(|name| {
+                [
+                    b"\t\t<dc:subject><![CDATA[".as_slice(),
+                    name,
+                    b"]]></dc:subject>\n",
+                ]
+                .concat()
+            })
+            .collect();
+        let excerpt = excerpt_rss(&mut renderer, post);
+        let description = [
+            b"\t\t<description><![CDATA[".as_slice(),
+            &excerpt,
+            b"]]></description>\n\t",
+        ]
+        .concat();
+        let content = if use_excerpt {
+            Vec::new()
+        } else {
+            [
+                b"\t<content:encoded><![CDATA[".as_slice(),
+                &content_feed(&mut renderer, post),
+                b"]]></content:encoded>\n\t",
+            ]
+            .concat()
+        };
+        out.extend(
+            [
+                b"<item rdf:about=\"".as_slice(),
+                permalink,
+                b"\">\n\t<title>",
+                &title_rss(post),
+                b"</title>\n\t<link>",
+                permalink,
+                b"</link>\n\n\t<dc:creator><![CDATA[",
+                &author,
+                b"]]></dc:creator>\n\t<dc:date>",
+                date::format(ATOM_DATE, &post.date_gmt, Zone::Utc).as_bytes(),
+                b"</dc:date>\n\t",
+                &subjects,
+                b"\n\t",
+                &description,
+                &content,
+                b"\n\t</item>\n",
+            ]
+            .concat(),
+        );
+    }
+    out.extend_from_slice(b"</rdf:RDF>\n");
+    out
+}
+
 /// `feed-atom-comments.php` for `comments`, newest first; the arguments
 /// are [`rss2_comments`]'s.
 pub fn atom_comments(

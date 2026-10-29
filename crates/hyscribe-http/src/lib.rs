@@ -381,22 +381,31 @@ async fn route(
     if query.contains_key("author") {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
-    // RSS2 and Atom feeds. Comment feeds of searches and archives, and
-    // other formats, are not served yet.
+    // RSS2, Atom and RDF feeds; RSS 0.92 redirects to RSS2. Comment feeds
+    // of searches and archives are not served yet.
     let single_requested = query.contains_key("p") || query.contains_key("page_id");
     let flag = |name| query.get(name).is_some_and(|v| !v.is_empty() && v != "0");
     let format = query.get("feed").map(|f| f.replace("comments-", ""));
-    let atom = format.as_deref() == Some("atom");
+    let (format, redirect) = match format.as_deref() {
+        Some("rss2" | "feed") => (Some(feed::Format::Rss2), None),
+        Some("atom") => (Some(feed::Format::Atom), None),
+        Some("rdf") => (Some(feed::Format::Rdf), None),
+        Some("rss") => (
+            Some(feed::Format::Rss2),
+            Some(rss2_location(site, path, raw_query)),
+        ),
+        _ => (None, None),
+    };
     let with_comments =
         query.get("feed").is_some_and(|f| f.contains("comments-")) || flag("withcomments");
-    let comment_feed = with_comments || (single_requested && !flag("withoutcomments"));
+    // The RDF template has no comment feed: it lists the query's posts.
+    let comment_feed = (with_comments || (single_requested && !flag("withoutcomments")))
+        && format != Some(feed::Format::Rdf);
     let archive = ["s", "cat", "m"].iter().any(|k| query.contains_key(*k));
-    let feed = format
-        .filter(|f| matches!(f.as_str(), "rss2" | "feed" | "atom"))
-        .filter(|_| !(comment_feed && archive));
-    if feed.is_some() && !single_requested {
+    let feed = format.filter(|_| !(comment_feed && archive));
+    if let Some(format) = feed.filter(|_| !single_requested) {
         let comments = comment_feed.then_some((None, false));
-        return feed::outcome(site, list(site, query, true), comments, atom).await;
+        return feed::outcome(site, list(site, query, true), comments, format, redirect).await;
     }
     let single = |name: &'static str, post_type: &'static str| {
         query
@@ -420,7 +429,8 @@ async fn route(
                                 Ok(found
                                     .map_or_else(|| missing_single(site), |p| single_page(site, p)))
                             };
-                        return feed::outcome(site, page, comments, atom).await;
+                        let format = feed.unwrap_or(feed::Format::Rss2);
+                        return feed::outcome(site, page, comments, format, redirect).await;
                     }
                     Some(post) if post.post_type == post_type => {
                         Outcome::Page(Box::new(single_page(site, post)))
@@ -584,6 +594,23 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
         candidates,
         request,
     })
+}
+
+/// `redirect_canonical()` for `feed=rss`: the same request with `feed=rss2`.
+fn rss2_location(site: &Site, path: &str, raw_query: Option<&str>) -> String {
+    let query = raw_query
+        .unwrap_or_default()
+        .split('&')
+        .map(|pair| {
+            if pair == "feed=rss" {
+                "feed=rss2"
+            } else {
+                pair
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    format!("{}{path}?{query}", site.home)
 }
 
 /// A feed's missing post or page: a singular query with nothing in it.

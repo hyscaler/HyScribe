@@ -13,7 +13,7 @@ use hyscribe_db::DbError;
 use hyscribe_model::Comment;
 use hyscribe_phpser::md5;
 use hyscribe_render::date::{self, Zone};
-use hyscribe_render::feed::{atom, atom_comments, rss2, rss2_comments};
+use hyscribe_render::feed::{atom, atom_comments, rdf, rss2, rss2_comments};
 
 use crate::query::absint;
 use crate::reads::Reads;
@@ -30,8 +30,28 @@ pub(crate) struct Feed {
     last_post: Option<String>,
     /// For a comment feed, its comments.
     comments: Option<Comments>,
-    /// An Atom feed rather than RSS2.
-    atom: bool,
+    format: Format,
+    /// Where `redirect_canonical()` sends the feed, if elsewhere.
+    redirect: Option<String>,
+}
+
+/// A feed's format.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Format {
+    Rss2,
+    Atom,
+    Rdf,
+}
+
+impl Format {
+    /// `feed_content_type()`'s subtype.
+    fn kind(self) -> &'static str {
+        match self {
+            Format::Rss2 => "rss",
+            Format::Atom => "atom",
+            Format::Rdf => "rdf",
+        }
+    }
 }
 
 /// A comment feed's comments, newest first.
@@ -49,7 +69,8 @@ pub(crate) async fn outcome(
     site: &Site,
     page: impl Future<Output = Result<Page, DbError>>,
     comments: Option<(Option<u64>, bool)>,
-    atom: bool,
+    format: Format,
+    redirect: Option<String>,
 ) -> Result<Outcome, DbError> {
     let limit = absint(&site.option("posts_per_rss"));
     let listed = async {
@@ -71,7 +92,8 @@ pub(crate) async fn outcome(
                 Feed {
                     last_post,
                     comments,
-                    atom,
+                    format,
+                    redirect,
                 },
             )
         };
@@ -100,14 +122,22 @@ pub(crate) async fn respond(
     if not_modified(headers, &last_modified, &etag) {
         return (StatusCode::NOT_MODIFIED, cache).into_response();
     }
-    let kind = if feed.atom { "atom" } else { "rss" };
+    let kind = feed.format.kind();
+    let content_type = format!("application/{kind}+xml; charset={charset}");
+    if let Some(location) = feed.redirect {
+        let headers = [
+            (header::CONTENT_TYPE, content_type),
+            (header::LOCATION, location),
+        ];
+        return (StatusCode::MOVED_PERMANENTLY, headers, cache).into_response();
+    }
     let rendering = Arc::clone(&site);
     let Page { request, title, .. } = page;
     let body = tokio::task::spawn_blocking(move || {
         let reads = Reads::new(&rendering, tokio::runtime::Handle::current());
         let last = feed.last_post.as_deref();
         let made = match &feed.comments {
-            Some(comments) if feed.atom => atom_comments(
+            Some(comments) if feed.format == Format::Atom => atom_comments(
                 &rendering.theme,
                 &reads,
                 &request,
@@ -124,29 +154,30 @@ pub(crate) async fn respond(
                 &comments.list,
                 last,
             ),
-            None if feed.atom => atom(&rendering.theme, &reads, &request, title.as_bytes(), last),
+            None if feed.format == Format::Atom => {
+                atom(&rendering.theme, &reads, &request, title.as_bytes(), last)
+            }
+            None if feed.format == Format::Rdf => {
+                rdf(&rendering.theme, &reads, &request, title.as_bytes(), last)
+            }
             None => rss2(&rendering.theme, &reads, &request, title.as_bytes(), last),
         };
         reads.finish().map(|()| made)
     })
     .await;
-    response(finished(&site, body), kind, &charset, cache)
+    response(finished(&site, body), content_type, cache)
 }
 
 /// The feed as the response, or the 500 page when rendering failed.
 fn response(
     made: Result<Vec<u8>, Rendered>,
-    kind: &str,
-    charset: &str,
+    content_type: String,
     cache: [(HeaderName, String); 2],
 ) -> Response {
     match made {
         Ok(feed) => (
             StatusCode::OK,
-            [(
-                header::CONTENT_TYPE,
-                format!("application/{kind}+xml; charset={charset}"),
-            )],
+            [(header::CONTENT_TYPE, content_type)],
             cache,
             feed,
         )

@@ -148,6 +148,7 @@ fn matches_php() {
             state: json_decode(&fields[0]).unwrap(),
         };
         let (php, php_atom) = (with_hyscribe(&fields[1]), with_hyscribe(&fields[2]));
+        let php_rdf = with_hyscribe(&fields[3]);
         let title = php
             .get(php.find("<title>").unwrap() + 7..php.find("</title>").unwrap())
             .unwrap();
@@ -171,6 +172,18 @@ fn matches_php() {
                 "atom {:?}{}",
                 site.state,
                 difference(&php_atom, &ours)
+            ));
+        }
+        let request = Request {
+            uri: b"/?feed=rdf".to_vec(),
+            ..request
+        };
+        let ours = rdf(&theme, &site, &request, title.as_bytes(), last);
+        if ours != php_rdf.as_bytes() {
+            failures.push(format!(
+                "rdf {:?}{}",
+                site.state,
+                difference(&php_rdf, &ours)
             ));
         }
     }

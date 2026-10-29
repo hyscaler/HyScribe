@@ -22,7 +22,11 @@ fn a_feed_that_fails_is_the_server_error_page() {
         (header::LAST_MODIFIED, String::new()),
         (header::ETAG, String::new()),
     ];
-    let response = response(Err(failed), "rss", "UTF-8", cache);
+    let response = response(
+        Err(failed),
+        "application/rss+xml; charset=UTF-8".into(),
+        cache,
+    );
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(
         response.headers()[header::CONTENT_TYPE],

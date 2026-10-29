@@ -64,7 +64,7 @@ pub fn rss2(
         b"</lastBuildDate>\n\t<language>en-US</language>\n\
           \t<sy:updatePeriod>\n\thourly\t</sy:updatePeriod>\n\
           \t<sy:updateFrequency>\n\t1\t</sy:updateFrequency>\n\t",
-        &generator(),
+        GENERATOR,
         b"\n",
     ]
     .concat();
@@ -136,7 +136,7 @@ pub fn rss2_comments(
         b"</lastBuildDate>\n\
           \t<sy:updatePeriod>\n\thourly\t</sy:updatePeriod>\n\
           \t<sy:updateFrequency>\n\t1\t</sy:updateFrequency>\n\t",
-        &generator(),
+        GENERATOR,
         b"\n",
     ]
     .concat();
@@ -153,24 +153,14 @@ fn comment_item(renderer: &Renderer<'_>, comment: &Comment) -> Vec<u8> {
     let site = context.site;
     let post = site.post(comment.post_id).unwrap_or_default();
     let author = ent2ncr(&comment_author(context, comment));
-    let title = if context.request.singular {
-        [b"By: ".as_slice(), &author].concat()
-    } else {
-        [
-            b"Comment on ".as_slice(),
-            &title_rss(&post),
-            b" by ",
-            &author,
-        ]
-        .concat()
-    };
-    let anchor = format!("#comment-{}", comment.id);
+    let title = comment_title(context, &post, &author);
     let body = if post.password.is_empty() {
+        let text = feed_comment_text(context, comment);
         [
             b"\t\t\t<description><![CDATA[".as_slice(),
-            esc_html(&ent2ncr(&feed_comment_text(context, comment))).as_bytes(),
+            esc_html(&ent2ncr(&text)).as_bytes(),
             b"]]></description>\n\t\t\t<content:encoded><![CDATA[",
-            &comment_text(site, &feed_comment_text(context, comment)),
+            &comment_text(site, &text),
             b"]]></content:encoded>\n\t\t",
         ]
         .concat()
@@ -192,7 +182,7 @@ fn comment_item(renderer: &Renderer<'_>, comment: &Comment) -> Vec<u8> {
         b"]]></dc:creator>\n\t\t<pubDate>",
         date::format("D, d M Y H:i:s +0000", &comment.date_gmt, Zone::Utc).as_bytes(),
         b"</pubDate>\n\t\t<guid isPermaLink=\"false\">",
-        &esc_url(&[&post.guid[..], anchor.as_bytes()].concat()),
+        &comment_guid(&post, comment.id),
         b"</guid>\n\n\t\t",
         &body,
         b"\n\t\t\t</item>\n\t",
@@ -244,47 +234,41 @@ pub fn atom_comments(
     let renderer = Renderer::new(theme, site, request);
     let context = &renderer.context;
     let post = request.posts.first();
-    let (channel_title, links) = if request.singular {
+    let (channel_title, alternate, feed) = if request.singular {
         // Without the post, its permalink and feed link are empty.
         let hash: &[u8] = match post {
             Some(post) if post.comment_count != 0 => b"#comments",
             _ => b"#respond",
         };
         let permalink = post.map(|post| context.permalink(post)).unwrap_or_default();
-        let alternate = esc_url(&[&permalink[..], hash].concat());
         let feed = post
             .map(|post| esc_url(&post_comments_feed_link(site, post, b"atom")))
             .unwrap_or_default();
-        let links = [
-            b"\t<link rel=\"alternate\" type=\"".as_slice(),
-            &html_type,
-            b"\" href=\"",
-            &alternate,
-            b"\" />\n\t<link rel=\"self\" type=\"application/atom+xml\" href=\"",
-            &feed,
-            b"\" />\n\t<id>",
-            &feed,
-            b"</id>\n",
-        ]
-        .concat();
         let title = post.map(title_rss).unwrap_or_default();
-        ([b"Comments on ".as_slice(), &title].concat(), links)
+        (
+            [b"Comments on ".as_slice(), &title].concat(),
+            esc_url(&[&permalink[..], hash].concat()),
+            feed,
+        )
     } else {
-        let feed = bloginfo(&[&site.home_url()[..], b"/?feed=comments-atom"].concat());
-        let links = [
-            b"\t<link rel=\"alternate\" type=\"".as_slice(),
-            &html_type,
-            b"\" href=\"",
-            &bloginfo(&site.home_url()),
-            b"\" />\n\t<link rel=\"self\" type=\"application/atom+xml\" href=\"",
-            &feed,
-            b"\" />\n\t<id>",
-            &feed,
-            b"</id>\n",
-        ]
-        .concat();
-        ([b"Comments for ".as_slice(), title].concat(), links)
+        (
+            [b"Comments for ".as_slice(), title].concat(),
+            bloginfo(&site.home_url()),
+            bloginfo(&[&site.home_url()[..], b"/?feed=comments-atom"].concat()),
+        )
     };
+    let links = [
+        b"\t<link rel=\"alternate\" type=\"".as_slice(),
+        &html_type,
+        b"\" href=\"",
+        &alternate,
+        b"\" />\n\t<link rel=\"self\" type=\"application/atom+xml\" href=\"",
+        &feed,
+        b"\" />\n\t<id>",
+        &feed,
+        b"</id>\n",
+    ]
+    .concat();
     let mut out = [
         b"<?xml version=\"1.0\" encoding=\"".as_slice(),
         &option("blog_charset"),
@@ -297,7 +281,7 @@ pub fn atom_comments(
         build_date(request, comments, last_modified, ATOM_DATE).as_bytes(),
         b"</updated>\n\n",
         &links,
-        &atom_generator(),
+        ATOM_GENERATOR,
         b"\n",
     ]
     .concat();
@@ -314,17 +298,7 @@ fn atom_comment_entry(renderer: &Renderer<'_>, comment: &Comment, html_type: &[u
     let site = context.site;
     let post = site.post(comment.post_id).unwrap_or_default();
     let author = ent2ncr(&comment_author(context, comment));
-    let title = if context.request.singular {
-        [b"By: ".as_slice(), &author].concat()
-    } else {
-        [
-            b"Comment on ".as_slice(),
-            &title_rss(&post),
-            b" by ",
-            &author,
-        ]
-        .concat()
-    };
+    let title = comment_title(context, &post, &author);
     let link = esc_url(&comment_link(context, comment));
     let url = comment_author_url(comment);
     let uri = if url.is_empty() {
@@ -338,12 +312,11 @@ fn atom_comment_entry(renderer: &Renderer<'_>, comment: &Comment, html_type: &[u
     } else {
         password_form(renderer, &post)
     };
-    let (reference, href) = match site.comment(comment.parent).filter(|_| comment.parent != 0) {
+    let (reference, href) = match parent(site, comment) {
         Some(parent) => {
             let parent_post = site.post(parent.post_id).unwrap_or_default();
-            let guid = format!("#comment-{}", parent.id);
             (
-                esc_url(&[&parent_post.guid[..], guid.as_bytes()].concat()),
+                comment_guid(&parent_post, parent.id),
                 comment_link(context, &parent),
             )
         }
@@ -361,13 +334,7 @@ fn atom_comment_entry(renderer: &Renderer<'_>, comment: &Comment, html_type: &[u
         b"</name>\n\t\t\t",
         &uri,
         b"\n\t\t</author>\n\n\t\t<id>",
-        &esc_url(
-            &[
-                &post.guid[..],
-                format!("#comment-{}", comment.id).as_bytes(),
-            ]
-            .concat(),
-        ),
+        &comment_guid(&post, comment.id),
         b"</id>\n\t\t<updated>",
         date.as_bytes(),
         b"</updated>\n\t\t<published>",
@@ -387,14 +354,46 @@ fn atom_comment_entry(renderer: &Renderer<'_>, comment: &Comment, html_type: &[u
     .concat()
 }
 
+/// `get_comments_number() || comments_open()`: whether a feed links to the
+/// post's comments.
+fn discussed(context: &Context<'_>, post: &Post) -> bool {
+    post.comment_count != 0 || comments_open(context, post)
+}
+
+/// `the_excerpt_rss()` for the loop's post.
+fn excerpt_rss(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
+    convert_chars(&ent2ncr(&renderer.get_the_excerpt(post)))
+}
+
+/// `get_the_content_feed()` for the loop's post.
+fn content_feed(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
+    replace(&renderer.the_content(post), b"]]>", b"]]&gt;")
+}
+
+/// A comment item's title: who wrote it, and on which post outside a
+/// singular feed.
+fn comment_title(context: &Context<'_>, post: &Post, author: &[u8]) -> Vec<u8> {
+    if context.request.singular {
+        [b"By: ".as_slice(), author].concat()
+    } else {
+        [b"Comment on ".as_slice(), &title_rss(post), b" by ", author].concat()
+    }
+}
+
+/// `get_comment_guid()`: the post's GUID and the comment's anchor.
+fn comment_guid(post: &Post, id: u64) -> Vec<u8> {
+    esc_url(&[&post.guid[..], format!("#comment-{id}").as_bytes()].concat())
+}
+
+/// The comment `comment` answers, if any.
+fn parent(site: &dyn Site, comment: &Comment) -> Option<Comment> {
+    site.comment(comment.parent).filter(|_| comment.parent != 0)
+}
+
 /// `get_comment_text()` in a comment feed: a reply starts with a link to
 /// the comment it answers.
 fn feed_comment_text(context: &Context<'_>, comment: &Comment) -> Vec<u8> {
-    let parent = context
-        .site
-        .comment(comment.parent)
-        .filter(|_| comment.parent != 0);
-    let Some(parent) = parent else {
+    let Some(parent) = parent(context.site, comment) else {
         return comment.content.clone();
     };
     [
@@ -409,14 +408,14 @@ fn feed_comment_text(context: &Context<'_>, comment: &Comment) -> Vec<u8> {
 }
 
 /// `get_the_generator( 'atom' )`, naming HyScribe and its version.
-fn atom_generator() -> Vec<u8> {
-    format!(
-        "<generator uri=\"{}\" version=\"{}\">HyScribe</generator>",
-        env!("CARGO_PKG_REPOSITORY"),
-        env!("CARGO_PKG_VERSION")
-    )
-    .into_bytes()
-}
+const ATOM_GENERATOR: &[u8] = concat!(
+    "<generator uri=\"",
+    env!("CARGO_PKG_REPOSITORY"),
+    "\" version=\"",
+    env!("CARGO_PKG_VERSION"),
+    "\">HyScribe</generator>"
+)
+.as_bytes();
 
 /// Atom's date format.
 const ATOM_DATE: &str = "Y-m-d\\TH:i:s\\Z";
@@ -457,7 +456,7 @@ pub fn atom(
         b"</id>\n\t<link rel=\"self\" type=\"application/atom+xml\" href=\"",
         &esc_url(&self_link(site, request)),
         b"\" />\n\n\t",
-        &atom_generator(),
+        ATOM_GENERATOR,
         b"\n",
     ]
     .concat();
@@ -479,13 +478,14 @@ fn entry(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
     let context = &renderer.context;
     let site = context.site;
     let option = |name| site.option(name).unwrap_or_default();
-    let html_type = bloginfo(&option("html_type"));
+    let raw_type = option("html_type");
     // html_type_rss()
-    let kind: &[u8] = if contains(&option("html_type"), b"xhtml") {
+    let kind: &[u8] = if contains(&raw_type, b"xhtml") {
         b"xhtml"
     } else {
         b"html"
     };
+    let html_type = bloginfo(&raw_type);
     let permalink = esc_url(&context.permalink(post));
     let user = site.user(post.author).unwrap_or_default();
     let uri = if user.url.is_empty() {
@@ -505,7 +505,7 @@ fn entry(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
         })
         .collect();
     let count = post.comment_count;
-    let replies = if count != 0 || comments_open(context, post) {
+    let replies = if discussed(context, post) {
         let feed = esc_url(&post_comments_feed_link(site, post, b"atom"));
         [
             b"\t\t\t<link rel=\"replies\" type=\"".as_slice(),
@@ -522,11 +522,11 @@ fn entry(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
     };
     let enclosure = atom_enclosure(site, post);
     let use_excerpt = !is_empty_string(&option("rss_use_excerpt"));
-    let excerpt = convert_chars(&ent2ncr(&renderer.get_the_excerpt(post)));
+    let excerpt = excerpt_rss(renderer, post);
     let content = if use_excerpt {
         Vec::new()
     } else {
-        let content = replace(&renderer.the_content(post), b"]]>", b"]]&gt;");
+        let content = content_feed(renderer, post);
         [
             b"\t\t\t<content type=\"".as_slice(),
             kind,
@@ -611,14 +611,14 @@ fn atom_enclosure(site: &dyn Site, post: &Post) -> Vec<u8> {
 }
 
 /// `get_the_generator( 'rss2' )`, naming HyScribe and its version.
-fn generator() -> Vec<u8> {
-    format!(
-        "<generator>{}?v={}</generator>",
-        env!("CARGO_PKG_REPOSITORY"),
-        env!("CARGO_PKG_VERSION")
-    )
-    .into_bytes()
-}
+const GENERATOR: &[u8] = concat!(
+    "<generator>",
+    env!("CARGO_PKG_REPOSITORY"),
+    "?v=",
+    env!("CARGO_PKG_VERSION"),
+    "</generator>"
+)
+.as_bytes();
 
 /// One `<item>` of the loop, with the template's whitespace.
 fn item(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
@@ -626,7 +626,7 @@ fn item(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
     let site = context.site;
     let permalink = context.permalink(post);
     let count = post.comment_count;
-    let discussed = count != 0 || comments_open(context, post);
+    let discussed = discussed(context, post);
     let comments = if discussed {
         let hash: &[u8] = if count != 0 {
             b"#comments"
@@ -647,8 +647,7 @@ fn item(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
         .map(|user| user.display_name)
         .unwrap_or_default();
     let use_excerpt = !is_empty_string(&site.option("rss_use_excerpt").unwrap_or_default());
-    let excerpt = renderer.get_the_excerpt(post);
-    let excerpt = convert_chars(&ent2ncr(&excerpt));
+    let excerpt = excerpt_rss(renderer, post);
     let description = [
         b"\t\t\t<description><![CDATA[".as_slice(),
         &excerpt,
@@ -658,7 +657,7 @@ fn item(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
     let body = if use_excerpt {
         [&description[..], b"\t\t"].concat()
     } else {
-        let content = replace(&renderer.the_content(post), b"]]>", b"]]&gt;");
+        let content = content_feed(renderer, post);
         let encoded = if content.is_empty() {
             &excerpt
         } else {

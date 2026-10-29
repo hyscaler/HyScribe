@@ -826,3 +826,51 @@ async fn assert_pages(site: &Arc<Site>, golden: &str) {
         failures.join("\n")
     );
 }
+
+/// A post in pages, by the page asked for, from `reference/head/golden.sh`,
+/// which inserts the post in PHP for these requests.
+#[tokio::test]
+async fn pages_of_a_post_match_php() {
+    let site = oracle_site().await;
+    let golden = include_str!("../../hyscribe-render/tests/golden/singular-pages.tsv");
+    let mut lines = golden.lines();
+    let (id, content) = lines.next().unwrap().split_once('\t').unwrap();
+    let post = Post {
+        id: id.parse().unwrap(),
+        title: b"Paged".to_vec(),
+        name: b"paged".to_vec(),
+        content: hyscribe_testkit::unhex(content),
+        status: "publish".into(),
+        post_type: "post".into(),
+        ..Post::default()
+    };
+    let mut count = 0;
+    for line in lines {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let raw = String::from_utf8(hyscribe_testkit::unhex(fields[0])).unwrap();
+        let query: HashMap<String, String> = raw
+            .split('&')
+            .filter_map(|pair| pair.split_once('='))
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let title = String::from_utf8(hyscribe_testkit::unhex(fields[3])).unwrap();
+        let ours = match paged_single(&site, &query, Some(&raw), "p", post.clone()) {
+            Outcome::Page(page) => {
+                // The page shown, which the title names past the first;
+                // `paged` names one in the title only.
+                let second = title.contains("Page 2") && !raw.contains("&paged=");
+                assert_eq!(page.request.page == 2, second, "{raw}");
+                (page.status.as_u16(), String::new(), page.title)
+            }
+            Outcome::Redirect(location) => (301, location, String::new()),
+            Outcome::Feed(..) => unreachable!(),
+        };
+        assert_eq!(
+            ours,
+            (fields[1].parse().unwrap(), fields[2].to_string(), title),
+            "{raw}"
+        );
+        count += 1;
+    }
+    assert_eq!(count, 11);
+}

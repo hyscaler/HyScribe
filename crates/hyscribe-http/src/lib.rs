@@ -508,8 +508,8 @@ fn document_title(parts: [Option<String>; 3]) -> String {
         .join(" &#8211; ")
 }
 
-/// A singular page with the `page` var: the page itself, or a 404 when the
-/// var is no number. Posts split by `<!--nextpage-->` are not paged yet.
+/// A singular page with the `page` var: the page if `(int)` of it is within
+/// the post's pages, else a redirect dropping it, or a 404 for no number.
 fn paged_single(
     site: &Site,
     query: &HashMap<String, String>,
@@ -518,7 +518,18 @@ fn paged_single(
     post: Post,
 ) -> Outcome {
     let page = query.get("page").filter(|v| !v.is_empty() && *v != "0");
+    // handle_404(): the page must be one of the post's.
+    let breaks = post
+        .content
+        .windows(15)
+        .filter(|w| *w == b"<!--nextpage-->")
+        .count();
+    let found = page.is_some_and(|page| {
+        let number = hyscribe_phpser::Value::String(page.trim_matches('/').into()).to_int();
+        breaks > 0 && number <= i64::try_from(breaks).unwrap_or(i64::MAX) + 1
+    });
     match page {
+        Some(_) if found => Outcome::Page(Box::new(single_page(site, post, Paging::of(query)))),
         Some(_) if Paging::of(query).page >= 1 => {
             let args = other_args(raw_query, &[name, "page"]);
             Outcome::Redirect(format!("{}{args}", site.permalink(&post)))
@@ -556,6 +567,7 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
         paged: paging.paged,
         // A singular query has no limit: it found its one post.
         found_posts: 1,
+        page: paging.page,
         now: now(),
         ..Request::default()
     };

@@ -8,6 +8,7 @@
 #   hex(path and query)<TAB>hex(head or footer)
 # and the whole page as pages.tsv,
 #   hex(path and query)<TAB>status<TAB>hex(page)
+# then paged.tsv and singular-pages.tsv, described where they are made.
 # Needs the default install oracle running (reference/default-install/db.sh
 # up, then php.sh up). Page views write to the database, so start
 # from a fresh db.sh up.
@@ -58,4 +59,22 @@ for path in '/?s=a' '/?s=a&paged=2' '/?s=a&paged=3' '/?s=a&page=2' '/?s=a&paged=
   key=$(printf '%s' "$path" | xxd -p | tr -d '\n')
   printf '%s\t%s\t%s\n' "$key" "$status" "$(xxd -p "$TMP" | tr -d '\n')" >> "$PAGED"
 done
-wc -l "$OUT" "$FOOTER" "$PAGES" "$PAGED"
+
+# A post in pages, by the page asked for, inserted for these requests and
+# deleted after: hex(query)<TAB>status<TAB>location<TAB>hex(title), the
+# post's ID and content first.
+SINGULAR="$ROOT/crates/hyscribe-render/tests/golden/singular-pages.tsv"
+CONTENT='<!-- wp:paragraph --><p>One</p><!-- /wp:paragraph --><!-- wp:nextpage --><!--nextpage--><!-- /wp:nextpage --><!-- wp:paragraph --><p>Two</p><!-- /wp:paragraph -->'
+php_run() { "$DOCKER" exec -i "${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}" php; }
+# The content has no single quotes, so it goes in a PHP string as it is.
+id=$(printf '<?php require "/var/www/html/wp-load.php"; echo wp_insert_post( array( "post_title" => "Paged", "post_status" => "publish", "post_content" => '"'"'%s'"'"' ) );' "$CONTENT" | php_run)
+delete_post() { printf '<?php require "/var/www/html/wp-load.php"; wp_delete_post( %s, true );' "$id" | php_run >/dev/null; }
+trap 'per_page 10; delete_post; rm -f "$TMP"' EXIT
+printf '%s\t%s\n' "$id" "$(printf '%s' "$CONTENT" | xxd -p | tr -d '\n')" > "$SINGULAR"
+for q in '' '&page=1' '&page=2' '&page=3' '&page=abc' '&page=0' '&page=2/' '&page=02' '&page=-2' '&paged=2' '&page=3&x=1'; do
+  query="p=$id$q"
+  out=$(curl -s -o "$TMP" -w '%{http_code}\t%{redirect_url}' "$BASE/?$query")
+  title=$( (grep -o '<title>[^<]*</title>' "$TMP" || true) | head -n 1 | sed 's/<[^>]*>//g' | tr -d '\n' | xxd -p | tr -d '\n')
+  printf '%s\t%s\t%s\n' "$(printf '%s' "$query" | xxd -p | tr -d '\n')" "$out" "$title" >> "$SINGULAR"
+done
+wc -l "$OUT" "$FOOTER" "$PAGES" "$PAGED" "$SINGULAR"

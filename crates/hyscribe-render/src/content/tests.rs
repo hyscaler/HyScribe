@@ -73,6 +73,7 @@ fn case(state: &[u8], row: &[u8]) -> (Fixture, Request) {
     let request = Request {
         singular,
         queried_object_id: if singular { post.id } else { 0 },
+        page: state.get_str("page").map_or(0, |p| p.to_int() as u64),
         post: Some(post.id),
         ..Request::default()
     };

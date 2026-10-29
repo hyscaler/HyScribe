@@ -8,7 +8,7 @@
 
 use hyscribe_kses::{esc_attr, esc_url};
 use hyscribe_model::Post;
-use hyscribe_phpser::{Value, is_empty_string};
+use hyscribe_phpser::{Value, add_query_arg, is_empty_string};
 
 use crate::autop::wpautop;
 use crate::blocks::Block;
@@ -16,6 +16,7 @@ use crate::core_blocks::prepared;
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, contains, wptexturize};
 use crate::link::{front_page, permalink};
 use crate::post::the_title;
+use crate::site::Request;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::{Renderer, replace, site_smilies};
 
@@ -32,7 +33,12 @@ impl Renderer<'_> {
             return Vec::new();
         };
         self.open_posts.push(id);
-        let content = self.the_content(&post);
+        let mut content = get_the_content(self, &post, true);
+        // has_block( 'core/nextpage' ): page links for a post in pages.
+        if contains(&post.content, b"<!-- wp:nextpage ") {
+            content.extend(wp_link_pages(self, &post));
+        }
+        let content = self.content_filtered(&content);
         self.open_posts.pop();
         if is_empty_string(&content) {
             return Vec::new();
@@ -69,7 +75,13 @@ impl Renderer<'_> {
     /// `apply_filters( 'the_content', get_the_content() )`, with the `]]>`
     /// escape between them.
     pub(crate) fn the_content(&mut self, post: &Post) -> Vec<u8> {
-        let content = replace(&get_the_content(self, post, true), b"]]>", b"]]&gt;");
+        let content = get_the_content(self, post, true);
+        self.content_filtered(&content)
+    }
+
+    /// The `the_content` filters on `content`, `]]>` escaped first.
+    fn content_filtered(&mut self, content: &[u8]) -> Vec<u8> {
+        let content = replace(content, b"]]>", b"]]&gt;");
         let outer = self.context.loading.in_the_content;
         self.context.loading.in_the_content = true;
         let rendered = self.render_top_level(&content);
@@ -122,10 +134,7 @@ pub(crate) fn get_the_content(renderer: &Renderer<'_>, post: &Post, more_link: b
     );
     let without_delimiters = |part: &[u8]| remove_more_delimiters(content, part);
     let (teaser, rest) = (without_delimiters(teaser), without_delimiters(rest));
-    // generate_postdata(): the whole post when it is the one asked for, and
-    // in feeds.
-    let request = context.request;
-    if request.singular && request.queried_object_id == post.id || request.feed {
+    if shows_more(context.request, post) {
         let teaser = if contains(&post.content, b"<!--noteaser-->") && page == 1 {
             Vec::new()
         } else {
@@ -185,6 +194,52 @@ fn remove_more_delimiters(content: &[u8], part: &[u8]) -> Vec<u8> {
         rest = after.get(close + 4..).unwrap_or_default();
     }
     out.extend_from_slice(rest);
+    out
+}
+
+/// generate_postdata()'s `$more`: the whole post when it is the one asked
+/// for, and in feeds.
+fn shows_more(request: &Request, post: &Post) -> bool {
+    request.singular && request.queried_object_id == post.id || request.feed
+}
+
+/// `wp_link_pages()` for `post`: a link to each of its pages, the one shown
+/// marked current unless only its teaser shows.
+fn wp_link_pages(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
+    let count = split_pages(&post.content).len();
+    if count < 2 {
+        return Vec::new();
+    }
+    let request = renderer.context.request;
+    // The global `$page`, which only get_the_content() clamps.
+    let page = usize::try_from(request.page).unwrap_or(1).max(1);
+    let more = shows_more(request, post);
+    let permalink = renderer_permalink(renderer, post);
+    let mut out = b"<p class=\"post-nav-links\">Pages:".to_vec();
+    for i in 1..=count {
+        let number = i.to_string();
+        out.push(b' ');
+        if i != page || !more && page == 1 {
+            let url = if i == 1 {
+                permalink.clone()
+            } else {
+                add_query_arg(&[(b"page", Some(number.as_bytes()))], &permalink)
+            };
+            out.extend_from_slice(
+                &[
+                    b"<a href=\"",
+                    &esc_url(&url)[..],
+                    b"\" class=\"post-page-numbers\">",
+                    number.as_bytes(),
+                    b"</a>",
+                ]
+                .concat(),
+            );
+        } else {
+            out.extend_from_slice(format!("<span class=\"post-page-numbers current\" aria-current=\"page\">{number}</span>").as_bytes());
+        }
+    }
+    out.extend_from_slice(b"</p>");
     out
 }
 

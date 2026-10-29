@@ -32,7 +32,7 @@ pub(crate) struct Feed {
     comments: Option<Comments>,
     format: Format,
     /// Where `redirect_canonical()` sends the feed, if elsewhere.
-    redirect: Option<String>,
+    pub(crate) redirect: Option<String>,
     /// The query found nothing past its first page: an empty feed of the
     /// 404 page, sent as a 404.
     not_found: bool,

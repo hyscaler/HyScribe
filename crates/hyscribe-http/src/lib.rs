@@ -38,7 +38,7 @@ mod reads;
 
 use reads::Reads;
 
-use query::{absint, category_filters, date_parts, other_args};
+use query::{absint, category_filters, clean_query, date_parts, other_args};
 
 /// Headers on every response (docs/SECURITY_MODEL.md, Web).
 const SECURITY_HEADERS: [(&str, &str); 3] = [
@@ -178,7 +178,8 @@ async fn page(
     if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
-    let page = match route(&site, uri.path(), uri.query(), &query).await {
+    let outcome = route(&site, uri.path(), uri.query(), &query).await;
+    let page = match outcome.map(|o| cleaned(&site, uri.path(), uri.query(), &query, o)) {
         Ok(Outcome::Redirect(location)) => {
             return (
                 StatusCode::MOVED_PERMANENTLY,
@@ -193,6 +194,61 @@ async fn page(
         Err(err) => database_error(&site, &err),
     };
     html(&page)
+}
+
+/// `outcome` with the query cleaned up as `redirect_canonical()` ends: a
+/// redirect's location cleaned, and a page or feed sent where its query
+/// cleans up to, unless cleaning that again would change it, which
+/// `redirect_canonical()` takes for a chain of redirects. A search is left
+/// alone.
+fn cleaned(
+    site: &Site,
+    path: &str,
+    raw_query: Option<&str>,
+    query: &HashMap<String, String>,
+    outcome: Outcome,
+) -> Outcome {
+    let raw = raw_query.unwrap_or_default();
+    let clean = clean_query(raw);
+    // Any `s` makes a search, unless a post is asked for.
+    let search = query.contains_key("s") && single_post(query).is_none();
+    let redirect = (!search && !reserved(path) && clean != raw && stays_clean(&clean))
+        .then(|| with_query(&format!("{}{path}", site.home), &clean));
+    match outcome {
+        Outcome::Redirect(location) => Outcome::Redirect(clean_location(&location)),
+        Outcome::Feed(page, mut feed) => {
+            feed.redirect = feed
+                .redirect
+                .map(|l| clean_location(&l))
+                .filter(|l| stays_clean(l.split_once('?').map_or("", |(_, q)| q)))
+                .or(redirect);
+            Outcome::Feed(page, feed)
+        }
+        Outcome::Page(page) => redirect.map_or(Outcome::Page(page), Outcome::Redirect),
+    }
+}
+
+/// Whether cleaning `query` again leaves it as it is, without which
+/// `redirect_canonical()` takes a redirect for the first of a chain.
+fn stays_clean(query: &str) -> bool {
+    clean_query(query) == query
+}
+
+/// `location` with its query cleaned up.
+fn clean_location(location: &str) -> String {
+    location.split_once('?').map_or_else(
+        || location.to_string(),
+        |(base, query)| with_query(base, &clean_query(query)),
+    )
+}
+
+/// `base`, then `?query` unless the query is empty.
+fn with_query(base: &str, query: &str) -> String {
+    if query.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}?{query}")
+    }
 }
 
 /// `page` with the request's URI and query.
@@ -360,6 +416,24 @@ fn admin_redirect(
     Some((status, format!("{}{target}{query}", site.home)))
 }
 
+/// Paths no canonical redirect touches: the static trees, and hs-login and
+/// hs-admin, which come with M4 and M5.
+fn reserved(path: &str) -> bool {
+    is_static(path) || path == "/hs-login" || path == "/hs-admin" || path.starts_with("/hs-admin/")
+}
+
+/// The post a request asks for, as `(query var, ID, post type)`: a non-zero
+/// `page_id` takes the place of `p`'s ID, but `p` keeps the post type, and
+/// an ID of 0 asks for no post.
+fn single_post(query: &HashMap<String, String>) -> Option<(&'static str, u64, &'static str)> {
+    let id = |name| query.get(name).map_or(0, |value| absint(value));
+    match (id("p"), id("page_id")) {
+        (0, 0) => None,
+        (0, page_id) => Some(("page_id", page_id, "page")),
+        (p, page_id) => Some(("p", if page_id > 0 { page_id } else { p }, "post")),
+    }
+}
+
 /// Static file trees: never redirected or rewritten, so their public URLs
 /// stay as they are. Served as files once static serving lands (M3.9).
 fn is_static(path: &str) -> bool {
@@ -372,13 +446,7 @@ async fn route(
     raw_query: Option<&str>,
     query: &HashMap<String, String>,
 ) -> Result<Outcome, DbError> {
-    // hs-login and hs-admin come with M4 and M5; until then their URLs are
-    // reserved, so no canonical redirect touches them either.
-    if is_static(path)
-        || path == "/hs-login"
-        || path == "/hs-admin"
-        || path.starts_with("/hs-admin/")
-    {
+    if reserved(path) {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
     if let Some(location) = canonical_path(site, path, raw_query) {
@@ -389,9 +457,10 @@ async fn route(
     if query.contains_key("author") {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
+    let single = single_post(query);
+    let single_requested = single.is_some();
     // RSS2, Atom, RDF and RSS 0.92 feeds. `feed=rss` alone redirects to
     // RSS2, as `redirect_canonical()` rewrites only that pair.
-    let single_requested = query.contains_key("p") || query.contains_key("page_id");
     let flag = |name| query.get(name).is_some_and(|v| !v.is_empty() && v != "0");
     let redirect = (query.get("feed").map(String::as_str) == Some("rss"))
         .then(|| rss2_location(site, path, raw_query));
@@ -428,18 +497,22 @@ async fn route(
         let page = std::future::ready(Ok(page));
         return feed::outcome(site, page, comments, format, redirect, missing).await;
     }
-    let single = |name: &'static str, post_type: &'static str| {
-        query
-            .get(name)
-            .map(|value| (name, absint(value), post_type))
-    };
-    match single("p", "post").or_else(|| single("page_id", "page")) {
+    match single {
         Some((name, id, post_type)) => {
             let post = site.db.post(id).await?;
             // `?p=` for a page or `?page_id=` for a post.
             let elsewhere = |post: &Post| {
-                (post.post_type != post_type)
-                    .then(|| format!("{}{}", site.permalink(post), other_args(raw_query, &[name])))
+                (post.post_type != post_type).then(|| {
+                    let args = [
+                        "p",
+                        "page_id",
+                        "attachment_id",
+                        "pagename",
+                        "name",
+                        "post_type",
+                    ];
+                    format!("{}{}", site.permalink(post), other_args(raw_query, &args))
+                })
             };
             Ok(
                 match (

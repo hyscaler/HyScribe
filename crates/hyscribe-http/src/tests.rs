@@ -157,7 +157,6 @@ async fn missing_drafts_and_unknown_paths_are_not_found() {
         "/?page_id=3",
         "/?p=3",
         "/?p=999",
-        "/?p=abc",
         "/?author=1",
         "/?p=1&author=1",
     ] {
@@ -338,6 +337,27 @@ async fn canonical_redirects_match_wordpress() {
         ("/?p=1&feed=rss2&x=%7E", "/?feed=rss2&p=1&x=~"),
         ("/?p=1&page_id=0&feed=rss2", "/?feed=rss2&p=1"),
         ("/?p=1&feed=rss2&preview=1", "/?feed=rss2&p=1"),
+        // The last clean up of the query, and `page_id` over `p`.
+        ("/?p=1.", "/?p=1"),
+        ("/?p=1%20", "/?p=1"),
+        ("/?cat=1%2E", "/?cat=1"),
+        ("/?page_id=2)", "/?page_id=2"),
+        ("/?p=1%E2%80%9D", "/?p=1"),
+        ("/?x=1&p=1.", "/?x=1&p=1"),
+        ("/?cat=&p=1", "/?p=1"),
+        ("/?x=1&tag=", "/?x=1"),
+        ("/?p=", "/"),
+        ("/?page_id=&x=1", "/?x=1"),
+        ("/?p=&p=1", "/?p=1"),
+        ("/?p=1&page_id=2", "/?page_id=2"),
+        ("/?p=2&page_id=2", "/?page_id=2"),
+        ("/?p=999&page_id=2", "/?page_id=2"),
+        ("/?p=2&cat=", "/?page_id=2"),
+        ("/?feed=rss2&p=1.", "/?feed=rss2&p=1"),
+        ("/?p=1.&feed=rss2", "/?feed=rss2&p=1"),
+        ("/?cat=&feed=rss2", "/?feed=rss2"),
+        ("/?p=1&s=x&cat=", "/?p=1&s=x"),
+        ("/?page_id=2&s=x&tag=", "/?page_id=2&s=x"),
     ] {
         assert_eq!(
             location(&site, uri).await,
@@ -345,17 +365,27 @@ async fn canonical_redirects_match_wordpress() {
             "{uri}"
         );
     }
-    // At its link, or with no such post, a feed is served.
-    for uri in [
-        "/?feed=rss2&p=1",
-        "/?feed=rss2&p=1&x=1",
-        "/?p=999&feed=rss2",
+    // At its link, or with no such post, a feed is served; a clean up that
+    // would clean up again, an ID of 0 and a search are not redirected.
+    for (uri, status) in [
+        ("/?feed=rss2&p=1", StatusCode::OK),
+        ("/?feed=rss2&p=1&x=1", StatusCode::OK),
+        ("/?p=999&feed=rss2", StatusCode::OK),
+        ("/?p=&cat=", StatusCode::OK),
+        ("/?p=&cat=&x=1", StatusCode::OK),
+        ("/?p=0", StatusCode::OK),
+        ("/?p=abc", StatusCode::OK),
+        ("/?page_id=2&p=0", StatusCode::OK),
+        ("/?p=1&page_id=1", StatusCode::OK),
+        ("/?p=1.&x=1", StatusCode::OK),
+        ("/?s=&cat=", StatusCode::OK),
+        ("/?s=a&cat=1,", StatusCode::OK),
+        ("/?p=1&page_id=999", StatusCode::NOT_FOUND),
+        ("/?feed=rss&cat=1.&page_id=", StatusCode::OK),
+        ("/wp-content/x?cat=", StatusCode::NOT_FOUND),
+        ("/hs-admin/?p=", StatusCode::NOT_FOUND),
     ] {
-        assert_eq!(
-            request(&site, "GET", uri).await.status,
-            StatusCode::OK,
-            "{uri}"
-        );
+        assert_eq!(request(&site, "GET", uri).await.status, status, "{uri}");
     }
     // A trailing slash makes any path the home page.
     let reply = request(&site, "GET", "/no/such/path/").await;
@@ -995,4 +1025,17 @@ fn category_lists_match_php() {
         );
     }
     assert_eq!(golden.lines().count(), 28);
+}
+
+/// Every case of `reference/canonical/clean-golden.php`.
+#[test]
+fn query_clean_up_matches_php() {
+    let golden = include_str!("../tests/golden/clean-query.tsv");
+    for line in golden.lines() {
+        let mut fields = line.split('\t').map(hyscribe_testkit::unhex);
+        let query = String::from_utf8(fields.next().unwrap()).unwrap();
+        let php = String::from_utf8(fields.next().unwrap()).unwrap();
+        assert_eq!(query::clean_query(&query), php, "{query:?}");
+    }
+    assert_eq!(golden.lines().count(), 48);
 }

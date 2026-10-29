@@ -86,3 +86,77 @@ fn with_children(tree: &Value, mut ids: Vec<u64>) -> Vec<u64> {
     }
     ids
 }
+
+/// `redirect_canonical()`'s last clean up of a query string: spaces and end
+/// punctuation dropped after a final `p`, `page_id`, `cat` or `tag`, then
+/// those arguments dropped where empty.
+pub fn clean_query(query: &str) -> String {
+    const PUNCTUATION: [&str; 24] = [
+        " ",
+        "%20",
+        "!",
+        "%21",
+        "\"",
+        "%22",
+        "'",
+        "%27",
+        "(",
+        "%28",
+        ")",
+        "%29",
+        ",",
+        "%2C",
+        ".",
+        "%2E",
+        ";",
+        "%3B",
+        "{",
+        "%7B",
+        "}",
+        "%7D",
+        "%E2%80%9C",
+        "%E2%80%9D",
+    ];
+    let names = ["p", "page_id", "cat", "tag"];
+    let mut query = query.to_string();
+    let last = query.rfind('&').map_or(0, |at| at + 1);
+    let named = query
+        .get(last..)
+        .and_then(|arg| arg.split_once('='))
+        .is_some_and(|(name, _)| names.contains(&name));
+    // Neither `=` nor the names hold punctuation, so this stops at the value.
+    while let Some(p) = PUNCTUATION.iter().find(|p| named && query.ends_with(*p)) {
+        query.truncate(query.len() - p.len());
+    }
+    // `#(^|&)(p|page_id|cat|tag)=?(&|$)#` to `&`, matches never overlapping.
+    let mut out = String::with_capacity(query.len());
+    let mut rest = query.as_str();
+    let mut at_start = true;
+    while !rest.is_empty() {
+        let lead = if rest.starts_with('&') { 1 } else { 0 };
+        let empty = (at_start || lead == 1)
+            .then(|| {
+                names.iter().find_map(|name| {
+                    let tail = rest.get(lead..).unwrap_or_default().strip_prefix(name)?;
+                    let tail = tail.strip_prefix('=').unwrap_or(tail);
+                    // The match takes the `&` after it too.
+                    (tail.is_empty() || tail.starts_with('&'))
+                        .then(|| rest.len() - tail.len() + usize::from(!tail.is_empty()))
+                })
+            })
+            .flatten();
+        match empty {
+            Some(len) => {
+                out.push('&');
+                rest = rest.get(len..).unwrap_or_default();
+            }
+            None => {
+                let c = rest.chars().next().unwrap_or_default();
+                out.push(c);
+                rest = rest.get(c.len_utf8()..).unwrap_or_default();
+            }
+        }
+        at_start = false;
+    }
+    out.trim_matches('&').to_string()
+}

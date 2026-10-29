@@ -10,10 +10,10 @@ use std::sync::Arc;
 use axum::http::{HeaderMap, HeaderName, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_db::DbError;
-use hyscribe_model::Comment;
+use hyscribe_model::{Comment, Post, PostQuery};
 use hyscribe_phpser::md5;
 use hyscribe_render::date::{self, Zone};
-use hyscribe_render::feed::{atom, atom_comments, rdf, rss2, rss2_comments};
+use hyscribe_render::feed::{atom, atom_comments, rdf, rss2, rss2_comments, rss092};
 
 use crate::query::absint;
 use crate::reads::Reads;
@@ -36,18 +36,19 @@ pub(crate) struct Feed {
 }
 
 /// A feed's format.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub(crate) enum Format {
     Rss2,
     Atom,
     Rdf,
+    Rss092,
 }
 
 impl Format {
     /// `feed_content_type()`'s subtype.
     fn kind(self) -> &'static str {
         match self {
-            Format::Rss2 => "rss",
+            Format::Rss2 | Format::Rss092 => "rss",
             Format::Atom => "atom",
             Format::Rdf => "rdf",
         }
@@ -61,43 +62,100 @@ pub(crate) struct Comments {
     last: Option<String>,
     /// `is_single()`: a post, not a page, was asked for.
     single: bool,
+    /// The posts of the comments, for a feed of many posts' comments.
+    posts: Option<Vec<Post>>,
 }
 
-/// The feed of `page`, with `comments` its comment feed: of the post given,
-/// or the site's, and whether a post (not a page) was asked for.
+/// Whose comments a comment feed lists.
+pub(crate) enum CommentsOf {
+    /// The site's.
+    Site,
+    /// A post's or page's, and whether a post (not a page) was asked for.
+    Post(u64, bool),
+    /// Those on the posts a search or archive matches.
+    Posts(PostQuery),
+}
+
+/// The feed of `page`, with `comments` for a comment feed.
 pub(crate) async fn outcome(
     site: &Site,
     page: impl Future<Output = Result<Page, DbError>>,
-    comments: Option<(Option<u64>, bool)>,
+    comments: Option<CommentsOf>,
     format: Format,
     redirect: Option<String>,
 ) -> Result<Outcome, DbError> {
-    let limit = absint(&site.option("posts_per_rss"));
-    let listed = async {
-        let Some((post, single)) = comments else {
-            return Ok(None);
-        };
-        let (list, last) = tokio::join!(
-            site.db.feed_comments(post, limit),
-            site.db.last_comment_modified()
-        );
-        list.and_then(|list| last.map(|last| Some(Comments { list, last, single })))
-    };
-    let (page, last_post, comments) = tokio::join!(page, site.db.last_post_modified(), listed);
+    let (page, last_post, comments) =
+        tokio::join!(page, site.db.last_post_modified(), listed(site, comments));
     // Each read's error, if any, as `?` would give it.
     page.and_then(|page| {
-        let feed = |last_post, comments| {
-            Outcome::Feed(
-                Box::new(page),
-                Feed {
+        last_post.and_then(|last_post| {
+            comments.map(|comments| {
+                let feed = Feed {
                     last_post,
                     comments,
                     format,
                     redirect,
-                },
-            )
-        };
-        last_post.and_then(|last_post| comments.map(|comments| feed(last_post, comments)))
+                };
+                feed_outcome(page, feed)
+            })
+        })
+    })
+}
+
+/// `page`'s feed. A feed of many posts' comments lists the posts of those
+/// comments, as `WP_Query::get_posts()` does.
+fn feed_outcome(mut page: Page, mut feed: Feed) -> Outcome {
+    if let Some(posts) = feed.comments.as_mut().and_then(|c| c.posts.take()) {
+        page.request.posts = posts;
+    }
+    Outcome::Feed(Box::new(page), feed)
+}
+
+/// The comments `of` lists, none for a feed of posts. Not generic, unlike
+/// [`outcome`], so its branches are counted once.
+async fn listed(site: &Site, of: Option<CommentsOf>) -> Result<Option<Comments>, DbError> {
+    let Some(of) = of else {
+        return Ok(None);
+    };
+    let limit = absint(&site.option("posts_per_rss"));
+    let single = matches!(of, CommentsOf::Post(_, true));
+    let list = async {
+        match &of {
+            CommentsOf::Site => site.db.feed_comments(None, limit).await,
+            CommentsOf::Post(post, _) => site.db.feed_comments(Some(*post), limit).await,
+            CommentsOf::Posts(query) => site.db.archive_feed_comments(query, limit).await,
+        }
+    };
+    let (list, last) = tokio::join!(list, site.db.last_comment_modified());
+    let query = match of {
+        CommentsOf::Site => Some(PostQuery {
+            limit: u32::try_from(limit).unwrap_or(u32::MAX),
+            ..PostQuery::default()
+        }),
+        CommentsOf::Post(..) => None,
+        CommentsOf::Posts(query) => Some(query),
+    };
+    let posts = match (query, &list) {
+        (Some(query), Ok(list)) => {
+            let include = Some(list.iter().map(|c| c.post_id).collect());
+            site.db
+                .posts(&PostQuery { include, ..query })
+                .await
+                .map(Some)
+        }
+        _ => Ok(None),
+    };
+    list.and_then(|list| {
+        last.and_then(|last| {
+            posts.map(|posts| {
+                Some(Comments {
+                    list,
+                    last,
+                    single,
+                    posts,
+                })
+            })
+        })
     })
 }
 
@@ -136,31 +194,25 @@ pub(crate) async fn respond(
     let body = tokio::task::spawn_blocking(move || {
         let reads = Reads::new(&rendering, tokio::runtime::Handle::current());
         let last = feed.last_post.as_deref();
-        let made = match &feed.comments {
-            Some(comments) if feed.format == Format::Atom => atom_comments(
-                &rendering.theme,
+        let (theme, title) = (&rendering.theme, title.as_bytes());
+        // RDF and RSS 0.92 list the query's posts, comment feed or not.
+        let made = match (feed.format, &feed.comments) {
+            (Format::Atom, Some(comments)) => {
+                atom_comments(theme, &reads, &request, title, &comments.list, last)
+            }
+            (Format::Rss2, Some(comments)) => rss2_comments(
+                theme,
                 &reads,
                 &request,
-                title.as_bytes(),
-                &comments.list,
-                last,
-            ),
-            Some(comments) => rss2_comments(
-                &rendering.theme,
-                &reads,
-                &request,
-                title.as_bytes(),
+                title,
                 comments.single,
                 &comments.list,
                 last,
             ),
-            None if feed.format == Format::Atom => {
-                atom(&rendering.theme, &reads, &request, title.as_bytes(), last)
-            }
-            None if feed.format == Format::Rdf => {
-                rdf(&rendering.theme, &reads, &request, title.as_bytes(), last)
-            }
-            None => rss2(&rendering.theme, &reads, &request, title.as_bytes(), last),
+            (Format::Atom, None) => atom(theme, &reads, &request, title, last),
+            (Format::Rss2, None) => rss2(theme, &reads, &request, title, last),
+            (Format::Rdf, _) => rdf(theme, &reads, &request, title, last),
+            (Format::Rss092, _) => rss092(theme, &reads, &request, title, last),
         };
         reads.finish().map(|()| made)
     })

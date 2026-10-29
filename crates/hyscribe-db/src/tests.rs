@@ -169,6 +169,16 @@ async fn post_lists() {
         .await
         .is_empty()
     );
+    // No types: any type.
+    let any = db
+        .posts(&PostQuery {
+            include: Some(vec![1, 2]),
+            limit: 10,
+            ..PostQuery::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(any.len(), 2);
     // Wildcards are searched for literally.
     assert!(titles(&db, search(&["%"])).await.is_empty());
     assert!(titles(&db, search(&["_ello"])).await.is_empty());
@@ -269,6 +279,15 @@ async fn errors_are_reported() {
         db.adjacent_post(&Post::default(), true, None)
             .await
             .unwrap_err(),
+        db.archive_feed_comments(
+            &PostQuery {
+                post_types: vec!["post".into()],
+                ..PostQuery::default()
+            },
+            1,
+        )
+        .await
+        .unwrap_err(),
     ] {
         assert!(
             [
@@ -474,5 +493,44 @@ async fn feed_comments() {
     assert_eq!(
         db.last_comment_modified().await.unwrap().as_deref(),
         Some("2026-10-27 08:08:15")
+    );
+}
+
+#[tokio::test]
+async fn archive_feed_comments() {
+    let db = fixture().await;
+    let ids =
+        |comments: Vec<hyscribe_model::Comment>| comments.iter().map(|c| c.id).collect::<Vec<_>>();
+    let query = |search: &[&str], category| PostQuery {
+        post_types: vec!["post".into(), "page".into()],
+        search: search.iter().map(|s| (*s).to_owned()).collect(),
+        category,
+        ..PostQuery::default()
+    };
+    assert_eq!(
+        ids(db
+            .archive_feed_comments(&query(&["hello"], None), 10)
+            .await
+            .unwrap()),
+        [1]
+    );
+    assert_eq!(
+        ids(db
+            .archive_feed_comments(&query(&[], Some(1)), 10)
+            .await
+            .unwrap()),
+        [1]
+    );
+    assert!(
+        db.archive_feed_comments(&query(&["nothingmatches"], None), 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        db.archive_feed_comments(&query(&[], Some(1)), 0)
+            .await
+            .unwrap()
+            .is_empty()
     );
 }

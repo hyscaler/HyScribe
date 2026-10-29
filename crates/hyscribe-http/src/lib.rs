@@ -381,30 +381,37 @@ async fn route(
     if query.contains_key("author") {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
-    // RSS2, Atom and RDF feeds; RSS 0.92 redirects to RSS2. Comment feeds
-    // of searches and archives are not served yet.
+    // RSS2, Atom, RDF and RSS 0.92 feeds. `feed=rss` alone redirects to
+    // RSS2, as `redirect_canonical()` rewrites only that pair.
     let single_requested = query.contains_key("p") || query.contains_key("page_id");
     let flag = |name| query.get(name).is_some_and(|v| !v.is_empty() && v != "0");
-    let format = query.get("feed").map(|f| f.replace("comments-", ""));
-    let (format, redirect) = match format.as_deref() {
-        Some("rss2" | "feed") => (Some(feed::Format::Rss2), None),
-        Some("atom") => (Some(feed::Format::Atom), None),
-        Some("rdf") => (Some(feed::Format::Rdf), None),
-        Some("rss") => (
-            Some(feed::Format::Rss2),
-            Some(rss2_location(site, path, raw_query)),
-        ),
-        _ => (None, None),
+    let redirect = (query.get("feed").map(String::as_str) == Some("rss"))
+        .then(|| rss2_location(site, path, raw_query));
+    let format = match query
+        .get("feed")
+        .map(|f| f.replace("comments-", ""))
+        .as_deref()
+    {
+        Some("rss2" | "feed") => Some(feed::Format::Rss2),
+        Some("atom") => Some(feed::Format::Atom),
+        Some("rdf") => Some(feed::Format::Rdf),
+        Some("rss") => Some(feed::Format::Rss092),
+        _ => None,
     };
     let with_comments =
         query.get("feed").is_some_and(|f| f.contains("comments-")) || flag("withcomments");
-    // The RDF template has no comment feed: it lists the query's posts.
-    let comment_feed = (with_comments || (single_requested && !flag("withoutcomments")))
-        && format != Some(feed::Format::Rdf);
+    let comment_feed = with_comments || (single_requested && !flag("withoutcomments"));
     let archive = ["s", "cat", "m"].iter().any(|k| query.contains_key(*k));
-    let feed = format.filter(|_| !(comment_feed && archive));
-    if let Some(format) = feed.filter(|_| !single_requested) {
-        let comments = comment_feed.then_some((None, false));
+    if let Some(format) = format.filter(|_| !single_requested) {
+        // A search's or archive's comment feed lists the comments on the
+        // posts it matches.
+        let comments = comment_feed.then(|| {
+            if archive {
+                feed::CommentsOf::Posts(post_query(site, query, true))
+            } else {
+                feed::CommentsOf::Site
+            }
+        });
         return feed::outcome(site, list(site, query, true), comments, format, redirect).await;
     }
     let single = |name: &'static str, post_type: &'static str| {
@@ -415,33 +422,35 @@ async fn route(
     match single("p", "post").or_else(|| single("page_id", "page")) {
         Some((name, id, post_type)) => {
             let post = site.db.post(id).await?;
+            // `?p=` for a page or `?page_id=` for a post.
+            let elsewhere = |post: &Post| {
+                (post.post_type != post_type)
+                    .then(|| format!("{}{}", site.permalink(post), other_args(raw_query, name)))
+            };
             Ok(
-                match post.filter(|p| {
-                    p.status == "publish" && (p.post_type == "post" || p.post_type == "page")
-                }) {
-                    found
-                        if feed.is_some()
-                            && found.as_ref().is_none_or(|p| p.post_type == post_type) =>
-                    {
-                        let comments = comment_feed.then_some((Some(id), name == "p"));
+                match (
+                    format,
+                    post.filter(|p| {
+                        p.status == "publish" && (p.post_type == "post" || p.post_type == "page")
+                    }),
+                ) {
+                    // A feed's redirect keeps the feed's headers.
+                    (Some(format), found) => {
+                        let redirect = found.as_ref().and_then(elsewhere).or(redirect);
+                        let comments =
+                            comment_feed.then_some(feed::CommentsOf::Post(id, name == "p"));
                         let page =
                             async {
                                 Ok(found
                                     .map_or_else(|| missing_single(site), |p| single_page(site, p)))
                             };
-                        let format = feed.unwrap_or(feed::Format::Rss2);
                         return feed::outcome(site, page, comments, format, redirect).await;
                     }
-                    Some(post) if post.post_type == post_type => {
-                        Outcome::Page(Box::new(single_page(site, post)))
-                    }
-                    // `?p=` for a page or `?page_id=` for a post.
-                    Some(post) => Outcome::Redirect(format!(
-                        "{}{}",
-                        site.permalink(&post),
-                        other_args(raw_query, name)
-                    )),
-                    None => Outcome::Page(Box::new(not_found(site, false))),
+                    (None, Some(post)) => elsewhere(&post).map_or_else(
+                        || Outcome::Page(Box::new(single_page(site, post))),
+                        Outcome::Redirect,
+                    ),
+                    (None, None) => Outcome::Page(Box::new(not_found(site, false))),
                 },
             )
         }
@@ -490,11 +499,10 @@ fn single_page(site: &Site, post: Post) -> Page {
     }
 }
 
-/// A list page: the home page, a search, a category or a date archive; for
-/// a feed, its posts, and no 404.
-async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Result<Page, DbError> {
+/// The query of a list page: a search covers posts and pages, a feed lists
+/// `posts_per_rss` posts.
+fn post_query(site: &Site, query: &HashMap<String, String>, feed: bool) -> PostQuery {
     let search = query.get("s");
-    let category = query.get("cat").map(|c| absint(c)).filter(|&id| id > 0);
     let (year, month, day) = query.get("m").map_or((None, None, None), |m| date_parts(m));
     let per_page = if feed {
         absint(&site.option("posts_per_rss"))
@@ -502,22 +510,29 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
         absint(&site.option("posts_per_page"))
     }
     .clamp(1, 100);
-    let post_query = PostQuery {
-        // Searches cover posts and pages.
+    PostQuery {
         post_types: if search.is_some() {
             vec!["post".into(), "page".into()]
         } else {
             vec!["post".into()]
         },
         search: search.map_or_else(Vec::new, |s| search_terms(s)),
-        category,
+        category: query.get("cat").map(|c| absint(c)).filter(|&id| id > 0),
         year,
         month,
         day,
         limit: u32::try_from(per_page).unwrap_or(10),
         ..PostQuery::default()
-    };
-    let category = match category {
+    }
+}
+
+/// A list page: the home page, a search, a category or a date archive; for
+/// a feed, its posts, and no 404.
+async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Result<Page, DbError> {
+    let search = query.get("s");
+    let post_query = post_query(site, query, feed);
+    let (year, month, day) = (post_query.year, post_query.month, post_query.day);
+    let category = match post_query.category {
         Some(id) => match site.db.category(id).await? {
             Some(term) => Some(term),
             // A category that does not exist.

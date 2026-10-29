@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Oracle for the posts feeds: the home feed through feed-rss2.php,
-// feed-atom.php and feed-rdf.php, with options and post 1 changed inside a
+// feed-atom.php, feed-rdf.php and feed-rss.php, with options and post 1 changed inside a
 // transaction that is rolled back. Lines are
-//   hex(json state)<TAB>hex(RSS2 feed)<TAB>hex(Atom feed)<TAB>hex(RDF feed)
+//   hex(json state)<TAB>hex(RSS2 feed)<TAB>hex(Atom feed)<TAB>hex(RDF feed)<TAB>hex(RSS 0.92 feed)
 // where the state has the options, post 1's changed fields, its enclosure
 // field, its tags and its category's name.
 
@@ -72,11 +72,16 @@ foreach ( $cases as $case ) {
 	ob_start();
 	load_template( ABSPATH . WPINC . '/feed-rdf.php', false );
 	$rdf = ob_get_clean();
+	$_SERVER['REQUEST_URI'] = '/?feed=comments-rss';
+	$GLOBALS['wp']->main( array( 'feed' => 'comments-rss' ) );
+	ob_start();
+	load_template( ABSPATH . WPINC . '/feed-rss.php', false );
+	$rss092 = ob_get_clean();
 	$state = $case + array( 'options' => array() );
 	if ( isset( $case['tags'] ) ) {
 		$state['tags'] = wp_list_pluck( get_the_tags( 1 ), 'name' );
 	}
-	echo bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $rss ), "\t", bin2hex( $atom ), "\t", bin2hex( $rdf ), "\n";
+	echo bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $rss ), "\t", bin2hex( $atom ), "\t", bin2hex( $rdf ), "\t", bin2hex( $rss092 ), "\n";
 	foreach ( $case['options'] ?? array() as $name => $value ) {
 		remove_all_filters( "pre_option_$name" );
 	}

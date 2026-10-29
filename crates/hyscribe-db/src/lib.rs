@@ -384,6 +384,30 @@ impl Db {
         rows.iter().map(comment).collect()
     }
 
+    /// The comments an archive's or search's comment feed lists, newest
+    /// first: those on the posts `query` matches, however many.
+    pub async fn archive_feed_comments(
+        &self,
+        query: &PostQuery,
+        limit: u64,
+    ) -> Result<Vec<Comment>, DbError> {
+        let mut sql = Sql::new(concat!(
+            "SELECT ",
+            comment_columns!(),
+            " FROM {prefix}comments WHERE comment_approved = '1' AND comment_type != 'note' \
+             AND comment_post_ID IN (SELECT ID FROM {prefix}posts WHERE "
+        ));
+        post_criteria(&mut sql, query);
+        sql.push(") ORDER BY comment_date_gmt DESC LIMIT ?");
+        sql.bind(Bind::Int(limit));
+        let rows = sql
+            .query(&self.prefix)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(comment).collect()
+    }
+
     /// `get_lastcommentmodified( 'GMT' )`: the latest approved comment's
     /// time, `None` without one.
     pub async fn last_comment_modified(&self) -> Result<Option<String>, DbError> {
@@ -508,13 +532,45 @@ fn posts_sql(query: &PostQuery) -> Sql {
     let mut sql = Sql::new(concat!(
         "SELECT ",
         post_columns!(),
-        " FROM {prefix}posts WHERE post_status = 'publish' AND post_type IN ("
+        " FROM {prefix}posts WHERE "
     ));
-    for (i, post_type) in query.post_types.iter().enumerate() {
-        sql.push(if i == 0 { "?" } else { ", ?" });
-        sql.bind(Bind::Text(post_type.clone()));
+    post_criteria(&mut sql, query);
+    // WordPress's own ordering, ties included: title matches of the
+    // whole search phrase first, then newest first.
+    let date = if query.ascending {
+        "post_date ASC"
+    } else {
+        "post_date DESC"
+    };
+    if query.by_menu_order {
+        sql.push(" ORDER BY menu_order ASC, post_title ASC");
+    } else {
+        if query.search.is_empty() {
+            sql.push(" ORDER BY ");
+        } else {
+            sql.push(" ORDER BY post_title LIKE ? DESC, ");
+            sql.bind(Bind::Text(like(&query.search.join(" "))));
+        }
+        sql.push(date);
     }
-    sql.push(")");
+    sql.push(" LIMIT ? OFFSET ?");
+    sql.bind(Bind::Int(query.limit.into()));
+    sql.bind(Bind::Int(query.offset.into()));
+    sql
+}
+
+/// The `WHERE` criteria of [`posts_sql`]: published posts of the query's
+/// types (any, if none), matching its inclusions, search, category and date.
+fn post_criteria(sql: &mut Sql, query: &PostQuery) {
+    sql.push("post_status = 'publish'");
+    if !query.post_types.is_empty() {
+        sql.push(" AND post_type IN (");
+        for (i, post_type) in query.post_types.iter().enumerate() {
+            sql.push(if i == 0 { "?" } else { ", ?" });
+            sql.bind(Bind::Text(post_type.clone()));
+        }
+        sql.push(")");
+    }
     if let Some(include) = &query.include {
         // An empty `post__in` matches nothing, as WordPress's `array( 0 )`.
         sql.push(" AND ID IN (0");
@@ -553,28 +609,6 @@ fn posts_sql(query: &PostQuery) -> Sql {
             sql.bind(Bind::Int(value));
         }
     }
-    // WordPress's own ordering, ties included: title matches of the
-    // whole search phrase first, then newest first.
-    let date = if query.ascending {
-        "post_date ASC"
-    } else {
-        "post_date DESC"
-    };
-    if query.by_menu_order {
-        sql.push(" ORDER BY menu_order ASC, post_title ASC");
-    } else {
-        if query.search.is_empty() {
-            sql.push(" ORDER BY ");
-        } else {
-            sql.push(" ORDER BY post_title LIKE ? DESC, ");
-            sql.bind(Bind::Text(like(&query.search.join(" "))));
-        }
-        sql.push(date);
-    }
-    sql.push(" LIMIT ? OFFSET ?");
-    sql.bind(Bind::Int(query.limit.into()));
-    sql.bind(Bind::Int(query.offset.into()));
-    sql
 }
 
 /// A `LIKE` pattern matching `text` anywhere, with `%`, `_` and `\\`

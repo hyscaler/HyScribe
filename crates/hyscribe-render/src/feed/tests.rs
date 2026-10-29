@@ -113,6 +113,10 @@ fn with_hyscribe(feed: &[u8]) -> String {
             "<generator uri=\"https://wordpress.org/\" version=\"7.1.3\">WordPress</generator>",
             &format!("<generator uri=\"{repository}\" version=\"{version}\">HyScribe</generator>"),
         )
+        .replace(
+            "<!-- generator=\"WordPress/7.1.3\" -->",
+            &format!("<!-- generator=\"HyScribe/{version}\" -->"),
+        )
 }
 
 /// Where `ours` parts from `php`, with some context.
@@ -148,7 +152,7 @@ fn matches_php() {
             state: json_decode(&fields[0]).unwrap(),
         };
         let (php, php_atom) = (with_hyscribe(&fields[1]), with_hyscribe(&fields[2]));
-        let php_rdf = with_hyscribe(&fields[3]);
+        let (php_rdf, php_rss) = (with_hyscribe(&fields[3]), with_hyscribe(&fields[4]));
         let title = php
             .get(php.find("<title>").unwrap() + 7..php.find("</title>").unwrap())
             .unwrap();
@@ -184,6 +188,18 @@ fn matches_php() {
                 "rdf {:?}{}",
                 site.state,
                 difference(&php_rdf, &ours)
+            ));
+        }
+        let request = Request {
+            uri: b"/?feed=comments-rss".to_vec(),
+            ..request
+        };
+        let ours = rss092(&theme, &site, &request, title.as_bytes(), last);
+        if ours != php_rss.as_bytes() {
+            failures.push(format!(
+                "rss {:?}{}",
+                site.state,
+                difference(&php_rss, &ours)
             ));
         }
     }
@@ -260,6 +276,7 @@ fn comment_feeds_match_php() {
         let query = site.state.get_str("query").unwrap();
         let id = |name| query.get_str(name).map(|id| id.to_int() as u64);
         let (single, page) = (id("p"), id("page_id"));
+        let search = query.get_str("s").map(Value::to_php_string);
         let post = single.or(page).unwrap_or(1);
         let uri = format!(
             "/?{}",
@@ -270,13 +287,14 @@ fn comment_feeds_match_php() {
                 .map(|(k, v)| format!(
                     "{}={}",
                     String::from_utf8(k.to_php_string()).unwrap(),
-                    String::from_utf8(v.to_php_string()).unwrap()
+                    String::from_utf8(urlencode(&v.to_php_string())).unwrap()
                 ))
                 .collect::<Vec<_>>()
                 .join("&")
         );
         let request = Request {
             singular: single.or(page).is_some(),
+            search,
             uri: uri.into_bytes(),
             posts: vec![site.post(post).unwrap()],
             ..site.base.request("")
@@ -321,5 +339,5 @@ fn comment_feeds_match_php() {
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(golden.lines().count(), 10);
+    assert_eq!(golden.lines().count(), 12);
 }

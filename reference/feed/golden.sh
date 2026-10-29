@@ -53,7 +53,11 @@ for path in '/?feed=rss2' '/?feed=feed' '/?feed=rss2&cat=1' '/?s=hello&feed=rss2
   '/?feed=rss2&p=999&withoutcomments=1' '/?feed=rss2&p=1&withoutcomments=0' \
   '/?feed=atom' '/?feed=atom&cat=1' '/?s=hello&feed=atom' '/?feed=atom&m=1999' '/?feed=atom&p=1&withoutcomments=1' \
   '/?feed=comments-atom' '/?feed=atom&p=1' '/?feed=atom&page_id=2' '/?feed=atom&p=999' '/?feed=comments-atom&p=1' \
-  '/?feed=rdf' '/?feed=rdf&cat=1' '/?feed=rdf&m=1999' '/?feed=rdf&p=1' '/?feed=rss' '/?feed=rss&cat=1'; do
+  '/?feed=rdf' '/?feed=rdf&cat=1' '/?feed=rdf&m=1999' '/?feed=rdf&p=1' '/?feed=rss' '/?feed=rss&cat=1' \
+  '/?feed=comments-rss' '/?feed=comments-rdf&p=1' '/?feed=comments-rss2&s=hello' '/?feed=comments-rss2&cat=1' \
+  '/?feed=comments-rss2&m=2026' '/?feed=comments-rss2&cat=999' '/?feed=comments-atom&s=hello' \
+  '/?feed=comments-atom&s=a%22b%3Cc' '/?feed=comments-atom&cat=1' '/?p=2&feed=rss2' '/?page_id=1&feed=atom' \
+  '/?feed=comments-rss&s=sample' '/?feed=comments-rdf&s=sample' '/?feed=comments-rss2&s=sample' '/?feed=comments-atom&s=sample'; do
   fetch "$path" ''
 done
 etag=$(curl -s -D - -o /dev/null "$BASE/?feed=rss2" | tr -d '\r' | sed -n 's/^ETag: //p')

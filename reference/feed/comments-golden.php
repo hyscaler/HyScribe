@@ -50,6 +50,8 @@ $cases = array(
 	array( 'query' => array( 'p' => 1, 'feed' => 'rss2' ), 'setup' => true, 'post' => array( 'post_title' => 'Title &amp; <b>bold</b> | pipe' ) ),
 	array( 'query' => array( 'page_id' => 2, 'feed' => 'rss2' ), 'setup' => true ),
 	array( 'query' => array( 'page_id' => 2, 'feed' => 'rss2' ) ),
+	array( 'query' => array( 's' => 'Text "q" <b>', 'feed' => 'comments-rss2' ), 'setup' => true ),
+	array( 'query' => array( 'cat' => 1, 'feed' => 'comments-rss2' ), 'setup' => true ),
 );
 foreach ( $cases as $case ) {
 	$wpdb->query( 'START TRANSACTION' );

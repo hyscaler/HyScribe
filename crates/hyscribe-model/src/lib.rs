@@ -110,7 +110,7 @@ pub struct Comment {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PostQuery {
     /// Post types to include, such as `post`, or `post` and `page` for a
-    /// search.
+    /// search; none means any.
     pub post_types: Vec<String>,
     /// Search terms; every term must appear in the title, excerpt or content.
     pub search: Vec<String>,

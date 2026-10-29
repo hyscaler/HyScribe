@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url, strip_tags};
 use hyscribe_model::{Comment, Post};
-use hyscribe_phpser::{Value, add_query_arg, is_empty_string, php_trim};
+use hyscribe_phpser::{Value, add_query_arg, is_empty_string, php_trim, urlencode};
 
 use crate::content::password_form;
 use crate::core_blocks::{
@@ -68,11 +68,7 @@ pub fn rss2(
         b"\n",
     ]
     .concat();
-    // is_feed(): posts show in full.
-    let request = &Request {
-        feed: true,
-        ..request.clone()
-    };
+    let request = &in_feed(request);
     let mut renderer = Renderer::new(theme, site, request);
     for post in &request.posts {
         renderer.context.post_id = Some(post.id);
@@ -82,9 +78,18 @@ pub fn rss2(
     out
 }
 
+/// The request as `is_feed()`, in which posts show in full.
+fn in_feed(request: &Request) -> Request {
+    Request {
+        feed: true,
+        ..request.clone()
+    }
+}
+
 /// `feed-rss2-comments.php` for `comments`, newest first: a singular
-/// request's, with its post (if any) as the main query's, or the site's.
-/// `title` is `wp_get_document_title()` for the site's feed; `single` is
+/// request's, with its post (if any) as the main query's, a search's or
+/// archive's, or the site's. `title` is `wp_get_document_title()` for the
+/// site's or an archive's feed; `single` is
 /// `is_single()`, a post (not a page) asked for; `last_modified` is
 /// `get_lastpostmodified( 'GMT' )`.
 pub fn rss2_comments(
@@ -104,6 +109,8 @@ pub fn rss2_comments(
             &post.map(title_rss).unwrap_or_default(),
         ]
         .concat()
+    } else if let Some(search) = &request.search {
+        search_comments_title(site, search)
     } else {
         [b"Comments for ".as_slice(), title].concat()
     };
@@ -240,10 +247,7 @@ pub fn rdf(
 ) -> Vec<u8> {
     let option = |name| site.option(name).unwrap_or_default();
     let home = bloginfo(&site.home_url());
-    let request = &Request {
-        feed: true,
-        ..request.clone()
-    };
+    let request = &in_feed(request);
     let mut renderer = Renderer::new(theme, site, request);
     let permalinks: Vec<Vec<u8>> = request
         .posts
@@ -289,10 +293,6 @@ pub fn rdf(
     let use_excerpt = !is_empty_string(&option("rss_use_excerpt"));
     for (post, permalink) in request.posts.iter().zip(&permalinks) {
         renderer.context.post_id = Some(post.id);
-        let author = site
-            .user(post.author)
-            .map(|user| user.display_name)
-            .unwrap_or_default();
         let subjects: Vec<u8> = category_names(site, post, convert_chars)
             .iter()
             .flat_map(|name| {
@@ -305,12 +305,6 @@ pub fn rdf(
             })
             .collect();
         let excerpt = excerpt_rss(&mut renderer, post);
-        let description = [
-            b"\t\t<description><![CDATA[".as_slice(),
-            &excerpt,
-            b"]]></description>\n\t",
-        ]
-        .concat();
         let content = if use_excerpt {
             Vec::new()
         } else {
@@ -330,13 +324,14 @@ pub fn rdf(
                 b"</title>\n\t<link>",
                 permalink,
                 b"</link>\n\n\t<dc:creator><![CDATA[",
-                &author,
+                &display_name(site, post),
                 b"]]></dc:creator>\n\t<dc:date>",
                 date::format(ATOM_DATE, &post.date_gmt, Zone::Utc).as_bytes(),
                 b"</dc:date>\n\t",
                 &subjects,
-                b"\n\t",
-                &description,
+                b"\n\t\t\t<description><![CDATA[",
+                &excerpt,
+                b"]]></description>\n\t",
                 &content,
                 b"\n\t</item>\n",
             ]
@@ -344,6 +339,63 @@ pub fn rdf(
         );
     }
     out.extend_from_slice(b"</rdf:RDF>\n");
+    out
+}
+
+/// `get_the_generator( 'comment' )`, naming HyScribe and its version.
+const COMMENT_GENERATOR: &[u8] = concat!(
+    "<!-- generator=\"HyScribe/",
+    env!("CARGO_PKG_VERSION"),
+    "\" -->"
+)
+.as_bytes();
+
+/// `feed-rss.php`, RSS 0.92, for the main query's posts; the arguments are
+/// [`rss2`]'s.
+pub fn rss092(
+    theme: &Theme,
+    site: &dyn Site,
+    request: &Request,
+    title: &[u8],
+    last_modified: Option<&str>,
+) -> Vec<u8> {
+    let option = |name| site.option(name).unwrap_or_default();
+    let request = &in_feed(request);
+    let mut out = [
+        b"<?xml version=\"1.0\" encoding=\"".as_slice(),
+        &option("blog_charset"),
+        b"\"?><rss version=\"0.92\">\n<channel>\n\t<title>",
+        title,
+        b"</title>\n\t<link>",
+        &bloginfo(&site.home_url()),
+        b"</link>\n\t<description>",
+        &bloginfo(&option("blogdescription")),
+        b"</description>\n\t<lastBuildDate>",
+        build_date(request, &[], last_modified, "D, d M Y H:i:s +0000").as_bytes(),
+        b"</lastBuildDate>\n\t<docs>http://backend.userland.com/rss092</docs>\n\
+          \t<language>en-US</language>\n\t",
+        COMMENT_GENERATOR,
+        b"\n\n",
+    ]
+    .concat();
+    let mut renderer = Renderer::new(theme, site, request);
+    for post in &request.posts {
+        renderer.context.post_id = Some(post.id);
+        let link = esc_url(&renderer.context.permalink(post));
+        out.extend(
+            [
+                b"\t<item>\n\t\t<title>".as_slice(),
+                &title_rss(post),
+                b"</title>\n\t\t<description><![CDATA[",
+                &excerpt_rss(&mut renderer, post),
+                b"]]></description>\n\t\t<link>",
+                &link,
+                b"</link>\n\t\t\t</item>\n",
+            ]
+            .concat(),
+        );
+    }
+    out.extend_from_slice(b"</channel>\n</rss>\n");
     out
 }
 
@@ -377,6 +429,17 @@ pub fn atom_comments(
             [b"Comments on ".as_slice(), &title].concat(),
             esc_url(&[&permalink[..], hash].concat()),
             feed,
+        )
+    } else if let Some(search) = &request.search {
+        let query = esc_attr(search);
+        let link = add_query_arg(
+            &[(b"feed", Some(b"comments-atom"))],
+            &[&site.home_url()[..], b"/?s=", &urlencode(search)].concat(),
+        );
+        (
+            search_comments_title(site, search),
+            [&site.home_url()[..], b"?s=", query.as_bytes()].concat(),
+            link,
         )
     } else {
         (
@@ -498,6 +561,26 @@ fn content_feed(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
     replace(&renderer.the_content(post), b"]]>", b"]]&gt;")
 }
 
+/// The title of a search's comment feed: the site's name and the search,
+/// escaped as `get_search_query()` gives it.
+fn search_comments_title(site: &dyn Site, search: &[u8]) -> Vec<u8> {
+    let name = bloginfo(&site.option("blogname").unwrap_or_default());
+    [
+        b"Comments for ".as_slice(),
+        &name,
+        b" searching on ",
+        esc_attr(search).as_bytes(),
+    ]
+    .concat()
+}
+
+/// `get_the_author()` for the post: its author's display name.
+fn display_name(site: &dyn Site, post: &Post) -> Vec<u8> {
+    site.user(post.author)
+        .map(|user| user.display_name)
+        .unwrap_or_default()
+}
+
 /// A comment item's title: who wrote it, and on which post outside a
 /// singular feed.
 fn comment_title(context: &Context<'_>, post: &Post, author: &[u8]) -> Vec<u8> {
@@ -588,10 +671,7 @@ pub fn atom(
         b"\n",
     ]
     .concat();
-    let request = &Request {
-        feed: true,
-        ..request.clone()
-    };
+    let request = &in_feed(request);
     let mut renderer = Renderer::new(theme, site, request);
     for post in &request.posts {
         renderer.context.post_id = Some(post.id);
@@ -770,10 +850,7 @@ fn item(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
     } else {
         Vec::new()
     };
-    let author = site
-        .user(post.author)
-        .map(|user| user.display_name)
-        .unwrap_or_default();
+    let author = display_name(site, post);
     let use_excerpt = !is_empty_string(&site.option("rss_use_excerpt").unwrap_or_default());
     let excerpt = excerpt_rss(renderer, post);
     let description = [

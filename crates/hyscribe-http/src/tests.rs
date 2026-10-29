@@ -722,6 +722,10 @@ async fn feeds_match_php() {
                 &format!(
                     "<generator uri=\"{repository}\" version=\"{version}\">HyScribe</generator>"
                 ),
+            )
+            .replace(
+                "<!-- generator=\"WordPress/7.1.3\" -->",
+                &format!("<!-- generator=\"HyScribe/{version}\" -->"),
             );
         assert_eq!(&ours, kept, "{path} {sent:?}");
         assert_eq!(
@@ -730,22 +734,7 @@ async fn feeds_match_php() {
             "{path} {sent:?}"
         );
     }
-    assert_eq!(golden.lines().count(), 47);
-}
-
-/// Comment feeds of searches and archives are not served yet: those
-/// requests get the page.
-#[tokio::test]
-async fn some_comment_feeds_are_not_served_yet() {
-    let site = oracle_site().await;
-    for uri in ["/?feed=comments-rss2&s=hello", "/?feed=comments-atom&cat=1"] {
-        let reply = request(&site, "GET", uri).await;
-        assert_eq!(
-            reply.headers[header::CONTENT_TYPE],
-            "text/html; charset=UTF-8",
-            "{uri}"
-        );
-    }
+    assert_eq!(golden.lines().count(), 62);
 }
 
 /// What every page prints after the theme's footer (`wp_footer()`)

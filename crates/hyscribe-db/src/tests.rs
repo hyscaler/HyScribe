@@ -786,3 +786,59 @@ async fn sticky_posts_come_first_and_formats_filter() {
     });
     assert_eq!(db.count_posts(&one).await.unwrap(), 2);
 }
+
+#[tokio::test]
+async fn posts_by_name_path_and_guess() {
+    let db = fixture().await;
+    let id = |post: Option<Post>| post.map(|p| p.id);
+    assert_eq!(id(db.post_by_name("hello-world").await.unwrap()), Some(1));
+    // A page is no post, and a name must match whole.
+    assert_eq!(id(db.post_by_name("sample-page").await.unwrap()), None);
+    assert_eq!(id(db.post_by_name("hello").await.unwrap()), None);
+    // Pages of any status, the draft privacy policy among them.
+    let names = [
+        b"sample-page".to_vec(),
+        b"privacy-policy".to_vec(),
+        b"hello-world".to_vec(),
+    ];
+    let mut pages: Vec<_> = db
+        .named_pages(&names)
+        .await
+        .unwrap()
+        .iter()
+        .map(|p| (p.id, p.status.clone()))
+        .collect();
+    pages.sort();
+    assert_eq!(
+        pages,
+        [(2, "publish".to_string()), (3, "draft".to_string())]
+    );
+    assert!(db.named_pages(&[]).await.unwrap().is_empty());
+    let guess = |name, types: &'static [&'static str], year| {
+        let db = db.clone();
+        async move {
+            id(db
+                .guess_post(name, types, (year, None, None))
+                .await
+                .unwrap())
+        }
+    };
+    assert_eq!(guess("hel", &["post", "page"], None).await, Some(1));
+    assert_eq!(guess("sam", &["post", "page"], None).await, Some(2));
+    assert_eq!(guess("sam", &["post"], None).await, None);
+    assert_eq!(guess("hel", &["post"], Some(2026)).await, Some(1));
+    assert_eq!(guess("hel", &["post"], Some(1999)).await, None);
+    // Drafts are not guessed, and `%` is no wildcard.
+    assert_eq!(guess("privacy", &["page"], None).await, None);
+    assert_eq!(guess("%", &["post", "page"], None).await, None);
+    let date = db
+        .guess_post("hel", &["post"], (Some(2026), Some(10), Some(27)))
+        .await
+        .unwrap();
+    assert_eq!(id(date), Some(1));
+    let date = db
+        .guess_post("hel", &["post"], (None, Some(10), Some(28)))
+        .await
+        .unwrap();
+    assert_eq!(id(date), None);
+}

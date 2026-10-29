@@ -36,7 +36,10 @@ for path in / '/?p=1' '/?page_id=2' '/?p=1&replytocom=1' '/?p=1&cpage=2' '/?p=1&
   '/?year=2026' '/?monthnum=10' '/?year=2026&monthnum=10&day=27' '/?day=27' '/?year=2025' '/?year=2025&m=2026' '/?monthnum=13' \
   '/?m=202610&day=27' '/?year=abc' '/?day=40' '/?year=2024&monthnum=2&day=29' '/?year=2026&monthnum=10&day=27&m=2026' '/?year=2026&paged=2' \
   '/?p=-1' '/?p=-1&cat=1' '/?p=0' '/?p=abc' '/?page_id=0' '/?p=-1&page_id=3' '/?year=2026&day=27' '/?monthnum=10&day=27' \
-  '/?monthnum=12' '/?m=2026&monthnum=11' '/?m=202610&monthnum=11' '/?m=20261027&day=26' '/?m=202610&monthnum=10' '/?year=2000&monthnum=2&day=29'; do
+  '/?monthnum=12' '/?m=2026&monthnum=11' '/?m=202610&monthnum=11' '/?m=20261027&day=26' '/?m=202610&monthnum=10' '/?year=2000&monthnum=2&day=29' \
+  '/?name=hello-world' '/?name=Hello-World' '/?name=hello%20world' '/?name=nope' '/?pagename=sample-page' '/?pagename=Sample-Page' \
+  '/?pagename=/sample-page/' '/?pagename=nope' '/?name=hello-world&cpage=2' '/?name=%20' '/?name=hello-world&post_type=page' \
+  '/?name=sample&page=2' '/?name=sam&post_type=attachment' '/?name=hello-world&post_type=attachment'; do
   status=$(curl -s -o "$TMP" -w '%{http_code}' "$BASE$path")
   page=$(xxd -p "$TMP" | tr -d '\n')
   head=$(printf '%s' "$page" | python3 -I -c 'import sys; s=bytes.fromhex(sys.stdin.read()); i=s.find(b"<head>"); j=s.find(b"</head>"); sys.stdout.write((s[i:j+7]).hex())')

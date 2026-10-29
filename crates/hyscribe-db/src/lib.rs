@@ -259,6 +259,74 @@ impl Db {
         row.as_ref().map(post).transpose()
     }
 
+    /// The published post (of type `post`) named `name`.
+    pub async fn post_by_name(&self, name: &str) -> Result<Option<Post>, DbError> {
+        let mut sql = Sql::new(concat!(
+            "SELECT ",
+            post_columns!(),
+            " FROM {prefix}posts WHERE "
+        ));
+        sql.push("post_name = ? AND post_type = 'post' AND post_status = 'publish' LIMIT 1");
+        sql.bind(Bind::Text(name.to_string()));
+        self.select(sql).await.map(|posts| posts.into_iter().next())
+    }
+
+    /// `get_page_by_path()`'s candidates: the pages and attachments of any
+    /// status named one of `names`.
+    pub async fn named_pages(&self, names: &[Vec<u8>]) -> Result<Vec<Post>, DbError> {
+        let mut sql = Sql::new(concat!(
+            "SELECT ",
+            post_columns!(),
+            " FROM {prefix}posts WHERE "
+        ));
+        sql.push("post_type IN ('page', 'attachment') AND post_name IN (");
+        list(
+            &mut sql,
+            std::iter::once(Bind::Text(String::new())).chain(
+                names
+                    .iter()
+                    .map(|n| Bind::Text(String::from_utf8_lossy(n).into_owned())),
+            ),
+        );
+        self.select(sql).await
+    }
+
+    /// `redirect_guess_404_permalink()`'s guess: the first published post
+    /// of `post_types` whose name starts with `name`, on the date parts
+    /// given.
+    pub async fn guess_post(
+        &self,
+        name: &str,
+        post_types: &[&str],
+        (year, month, day): (Option<u64>, Option<u64>, Option<u64>),
+    ) -> Result<Option<Post>, DbError> {
+        let mut sql = Sql::new(concat!(
+            "SELECT ",
+            post_columns!(),
+            " FROM {prefix}posts WHERE "
+        ));
+        sql.push("post_name LIKE ? AND post_status = 'publish' AND post_type IN (");
+        let mut prefix = like(name);
+        prefix.remove(0);
+        sql.bind(Bind::Text(prefix));
+        list(
+            &mut sql,
+            post_types.iter().map(|t| Bind::Text((*t).to_string())),
+        );
+        for (fragment, value) in [
+            (" AND YEAR(post_date) = ?", year),
+            (" AND MONTH(post_date) = ?", month),
+            (" AND DAYOFMONTH(post_date) = ?", day),
+        ] {
+            if let Some(value) = value {
+                sql.push(fragment);
+                sql.bind(Bind::Int(value));
+            }
+        }
+        sql.push(" LIMIT 1");
+        self.select(sql).await.map(|posts| posts.into_iter().next())
+    }
+
     /// Published posts matching `query`, as the main query of a list page
     /// (home, search, category or date archive) selects them, sticky posts
     /// first.

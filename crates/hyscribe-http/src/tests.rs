@@ -242,6 +242,8 @@ async fn database_errors_show_no_details() {
         "/?feed=rss2",
         "/?feed=comments-rss2",
         "/?p=-1&page_id=2",
+        "/?name=x",
+        "/?pagename=x",
     ] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
@@ -371,6 +373,27 @@ async fn canonical_redirects_match_wordpress() {
         ("/?year=40000&monthnum=1&day=1", "/?m=4000001"),
         ("/?year=2026&monthnum=2&day=29", "/?m=202602"),
         ("/?year=1900&monthnum=2&day=29", "/?m=190002"),
+        // A `name` or `pagename` that finds nothing goes where
+        // `redirect_guess_404_permalink()` guesses.
+        ("/?name=sample-page", "/?page_id=2"),
+        ("/?pagename=hello-world", "/?p=1"),
+        ("/?name=hel", "/?p=1"),
+        ("/?pagename=sam", "/?page_id=2"),
+        ("/?pagename=a/sample-page", "/?page_id=2"),
+        ("/?name=sam&post_type=nope", "/?page_id=2"),
+        ("/?name=hel&post_type=page", "/?p=1"),
+        ("/?name=hello&year=2026&x[]=1", "/?p=1&year=2026&x%5B0%5D=1"),
+        ("/?name=hello-world&page=2", "/?p=1"),
+        ("/?name=hel&year=0", "/?p=1&year=0"),
+        ("/?name=hel&page=1", "/?p=1"),
+        ("/?name=hel&page_id=0", "/?p=1"),
+        ("/?pagename=sam&page_id=0", "/?page_id=0"),
+        (
+            "/?year=2026&monthnum=2&day=31&name=&x=1",
+            "/?m=202602&name&x=1",
+        ),
+        ("/?feed=&name=hello", "/?p=1"),
+        ("/?page=&name=hello", "/?p=1"),
         // The other arguments parsed and encoded again, the link's own in
         // place, an array `p` among them.
         ("/?p=2&x[]=1", "/?page_id=2&x%5B0%5D=1"),
@@ -409,6 +432,13 @@ async fn canonical_redirects_match_wordpress() {
         ("/?year=2026&monthnum=4&day=30", StatusCode::NOT_FOUND),
         ("/?p=-1&page_id=999", StatusCode::OK),
         ("/?p[]=1", StatusCode::OK),
+        ("/?name=sam&feed=rss2", StatusCode::OK),
+        ("/?pagename=privacy-policy", StatusCode::NOT_FOUND),
+        (
+            "/?pagename=sample-page&post_type=post",
+            StatusCode::NOT_FOUND,
+        ),
+        ("/?name=hello-world&feed=rss2", StatusCode::OK),
     ] {
         assert_eq!(request(&site, "GET", uri).await.status, status, "{uri}");
     }
@@ -853,7 +883,7 @@ async fn feeds_match_php() {
 async fn pages_match_php() {
     let golden = include_str!("../../hyscribe-render/tests/golden/pages.tsv");
     assert_pages(&oracle_site().await, golden).await;
-    assert_eq!(golden.lines().count(), 77);
+    assert_eq!(golden.lines().count(), 91);
 }
 
 /// Pages past the first, with one post a page, from the same script.
@@ -1069,4 +1099,50 @@ fn query_clean_up_matches_php() {
         assert_eq!(query::clean_query(&query), php, "{query:?}");
     }
     assert_eq!(golden.lines().count(), 48);
+}
+
+/// Every case of `reference/page-path/golden.php`: the page
+/// `get_page_by_path()` picks from the rows it selects.
+#[test]
+fn page_paths_match_php() {
+    let golden = include_str!("../tests/golden/page-path.tsv");
+    for line in golden.lines() {
+        let mut fields = line.split('\t').map(hyscribe_testkit::unhex);
+        let path = String::from_utf8(fields.next().unwrap()).unwrap();
+        let state = hyscribe_phpser::json_decode(&fields.next().unwrap()).unwrap();
+        let text = |row: &hyscribe_phpser::Value, name| row.get_str(name).unwrap().to_php_string();
+        let rows: Vec<Post> = state
+            .get_str("rows")
+            .and_then(hyscribe_phpser::Value::as_array)
+            .unwrap()
+            .iter()
+            .map(|(_, row)| {
+                let number = |name| row.get_str(name).unwrap().to_int().unsigned_abs();
+                Post {
+                    id: number("ID"),
+                    name: text(row, "post_name"),
+                    parent: number("post_parent"),
+                    post_type: String::from_utf8(text(row, "post_type")).unwrap(),
+                    ..Post::default()
+                }
+            })
+            .collect();
+        let php = state.get_str("id").unwrap().to_int().unsigned_abs();
+        let ours = page_by_path(&page_path(&path), &rows).map_or(0, |page| page.id);
+        assert_eq!(ours, php, "{path:?}");
+    }
+    assert_eq!(golden.lines().count(), 26);
+    assert_eq!(basename("a/b\\c//"), "c");
+}
+
+#[test]
+fn visitors_see_published_posts_of_the_types_served() {
+    let post = |status: &str, post_type: &str| Post {
+        status: status.into(),
+        post_type: post_type.into(),
+        ..Post::default()
+    };
+    assert!(viewable(&post("publish", "page"), &["page"]));
+    assert!(!viewable(&post("draft", "page"), &["page"]));
+    assert!(!viewable(&post("publish", "attachment"), &["post", "page"]));
 }

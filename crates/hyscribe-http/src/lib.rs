@@ -21,8 +21,10 @@ use hyscribe_kses::{esc_attr, esc_html};
 use hyscribe_model::{OrderBy, Post, PostQuery};
 use hyscribe_phpser::{
     Key, Value, add_query_values, parse_str, rawurlencode, rawurlencode_deep, remove_query_arg,
+    urldecode,
 };
 use hyscribe_render::date::{self, Zone};
+use hyscribe_render::formatting::sanitize_title_for_query;
 use hyscribe_render::head::{wp_footer, wp_head};
 use hyscribe_render::link;
 use hyscribe_render::post::body_class;
@@ -471,16 +473,24 @@ async fn route(
         }
         let page_id = query.get("page_id").map_or(0, |v| absint(v));
         // No post has the ID 0.
-        let post =
-            site.db.post(page_id).await?.filter(|p| {
-                p.status == "publish" && (p.post_type == "post" || p.post_type == "page")
-            });
+        let post = site
+            .db
+            .post(page_id)
+            .await?
+            .filter(|p| viewable(p, &["post", "page"]));
         return Ok(match post {
             Some(post) => Outcome::Redirect(post_location(site, &post, raw_query)),
             None => Outcome::Page(Box::new(error_404(site, false))),
         });
     }
-    let single = single_post(query);
+    let single = match single_post(query) {
+        Some(single) => Some(single),
+        None => match by_slug(site, raw_query, query).await? {
+            Some(Slug::Moved(location)) => return Ok(Outcome::Redirect(location)),
+            Some(Slug::Post(single)) => Some(single),
+            None => None,
+        },
+    };
     let single_requested = single.is_some();
     // RSS2, Atom, RDF and RSS 0.92 feeds. `feed=rss` alone redirects to
     // RSS2, as `redirect_canonical()` rewrites only that pair.
@@ -530,12 +540,7 @@ async fn route(
                 (post.post_type != post_type).then(|| post_location(site, post, raw_query))
             };
             Ok(
-                match (
-                    format,
-                    post.filter(|p| {
-                        p.status == "publish" && (p.post_type == "post" || p.post_type == "page")
-                    }),
-                ) {
+                match (format, post.filter(|p| viewable(p, &["post", "page"]))) {
                     // A feed's redirect keeps the feed's headers.
                     (Some(format), found) => {
                         let current =
@@ -543,15 +548,17 @@ async fn route(
                         let redirect = found
                             .as_ref()
                             .and_then(elsewhere)
+                            // Only `p` and `page_id` have a feed link to go to.
                             .or_else(|| {
                                 found
                                     .as_ref()
+                                    .filter(|_| name == "p" || name == "page_id")
                                     .map(|_| single_feed_location(site, raw_query, name, id))
                             })
                             .filter(|location| *location != current)
                             .or(redirect);
                         let comments =
-                            comment_feed.then_some(feed::CommentsOf::Post(id, name == "p"));
+                            comment_feed.then_some(feed::CommentsOf::Post(id, post_type == "post"));
                         let page = async {
                             Ok(found.map_or_else(
                                 || missing_single(site),
@@ -914,6 +921,144 @@ fn rss2_query(raw_query: Option<&str>) -> String {
         .join("&")
 }
 
+/// Whether a visitor sees `post`: published, and of one of `post_types`.
+fn viewable(post: &Post, post_types: &[&str]) -> bool {
+    post.status == "publish" && post_types.contains(&post.post_type.as_str())
+}
+
+/// What `name` or `pagename` asks for.
+enum Slug {
+    /// The post found, as `(query var, ID, post type)`, ID 0 when none is.
+    Post((&'static str, u64, &'static str)),
+    /// Where `redirect_guess_404_permalink()` sends a miss.
+    Moved(String),
+}
+
+/// The post a `name` (a post) or a `pagename` (a page, by its path of
+/// names) asks for, as `WP_Query` finds it, or for a miss the guess of
+/// `redirect_guess_404_permalink()`: the first published post or page
+/// whose name starts with the one asked for.
+async fn by_slug(
+    site: &Site,
+    raw_query: Option<&str>,
+    query: &HashMap<String, String>,
+) -> Result<Option<Slug>, DbError> {
+    let var = |name| query.get(name).map(|v| v.trim()).filter(|v| !v.is_empty());
+    // `WP::parse_request()` keeps only a publicly queryable post type.
+    let queryable = query
+        .get("post_type")
+        .map(String::as_str)
+        .filter(|t| matches!(*t, "post" | "attachment"));
+    let (key, post_type, found, name) = if let Some(name) = var("name") {
+        let name = sanitize_title_for_query(name.as_bytes());
+        // Attachment pages are not served yet: none is found.
+        let post = match queryable {
+            Some("attachment") => None,
+            _ => {
+                site.db
+                    .post_by_name(&String::from_utf8_lossy(&name))
+                    .await?
+            }
+        };
+        ("name", "post", post, name)
+    } else if let Some(path) = var("pagename") {
+        let parts = page_path(path);
+        // A queryable post type is not hierarchical: no page is found.
+        let pages = match queryable {
+            Some(_) => Vec::new(),
+            None => site.db.named_pages(&parts).await?,
+        };
+        let post = page_by_path(&parts, &pages)
+            .filter(|p| viewable(p, &["page"]))
+            .cloned();
+        let name = sanitize_title_for_query(basename(path).as_bytes());
+        ("pagename", "page", post, name)
+    } else {
+        return Ok(None);
+    };
+    if let Some(post) = found {
+        return Ok(Some(Slug::Post((key, post.id, post_type))));
+    }
+    let post_types = queryable.map_or(vec!["post", "page", "attachment"], |t| vec![t]);
+    let date = |name| query.get(name).map(|v| absint(v)).filter(|&v| v > 0);
+    // A feed is never a 404, so it is not guessed for; a guess past page 1
+    // would only redirect again.
+    let feed = query.get("feed").is_some_and(|f| !f.is_empty());
+    let guess = if feed || date("page").is_some_and(|page| page > 1) {
+        Ok(None)
+    } else {
+        let name = String::from_utf8_lossy(&name);
+        let parts = (date("year"), date("monthnum"), date("day"));
+        site.db.guess_post(&name, &post_types, parts).await
+    };
+    guess.map(|guess| {
+        Some(match guess {
+            Some(post) => {
+                let id_name = if post.post_type == "page" {
+                    "page_id"
+                } else {
+                    "p"
+                };
+                // `page` and `feed` go first, as `redirect_canonical()` drops them.
+                let mut drop = vec!["page", "feed"];
+                drop.extend(singular_args_but(id_name));
+                Slug::Moved(tack(&site.permalink(&post), raw_query, &drop))
+            }
+            None => Slug::Post((key, 0, post_type)),
+        })
+    })
+}
+
+/// `get_page_by_path()`'s parts of `path`: its names between slashes, each
+/// through `sanitize_title_for_query()`.
+fn page_path(path: &str) -> Vec<Vec<u8>> {
+    let path = rawurlencode(&urldecode(path.as_bytes()));
+    let path = String::from_utf8_lossy(&path)
+        .replace("%2F", "/")
+        .replace("%20", " ");
+    path.trim_matches('/')
+        .split('/')
+        .map(|part| sanitize_title_for_query(part.as_bytes()))
+        .collect()
+}
+
+/// `get_page_by_path()`'s choice among `pages`: one named the last of
+/// `parts` whose parents are named the parts before it, up to a top level
+/// one, a page before an attachment.
+fn page_by_path<'a>(parts: &[Vec<u8>], pages: &'a [Post]) -> Option<&'a Post> {
+    let by_id = |id: u64| pages.iter().find(|page| page.id == id);
+    let mut found = None;
+    for page in pages.iter().filter(|page| Some(&page.name) == parts.last()) {
+        let mut count = 0;
+        let mut at = page;
+        while let Some(parent) = (at.parent != 0).then(|| by_id(at.parent)).flatten() {
+            count += 1;
+            match parts
+                .len()
+                .checked_sub(count + 1)
+                .and_then(|i| parts.get(i))
+            {
+                Some(name) if *name == parent.name => at = parent,
+                _ => break,
+            }
+        }
+        // Every name on the way up matched, the last name included.
+        if at.parent == 0 && parts.len() == count + 1 {
+            found = Some(page);
+            if page.post_type == "page" {
+                break;
+            }
+        }
+    }
+    found
+}
+
+/// `wp_basename()`: the last part of `path`, `/` or `\\` before it.
+fn basename(path: &str) -> &str {
+    let path = path.trim_end_matches(['/', '\\']);
+    path.rsplit(['/', '\\']).next().unwrap_or_default()
+}
+
 /// The arguments `redirect_canonical()` drops when it sends a request for
 /// one post to that post's link.
 const SINGULAR_ARGS: [&str; 6] = [
@@ -956,9 +1101,15 @@ fn singular_args_but(name: &str) -> Vec<&'static str> {
 /// `drop` and `preview` removed, the rest parsed and encoded again, those
 /// `link` has taking its values in place, the others after it.
 fn tack(link: &str, raw_query: Option<&str>, drop: &[&str]) -> String {
+    // A `name` goes unless empty or in the link, where a plain permalink
+    // never has one.
+    let named = parse_str(raw_query.unwrap_or_default().as_bytes())
+        .get_str("name")
+        .is_some_and(|name| !name.is_empty());
     let drop: Vec<&[u8]> = drop
         .iter()
         .chain(&["preview"])
+        .chain(named.then_some(&"name"))
         .map(|arg| arg.as_bytes())
         .collect();
     let query = remove_query_arg(&drop, rss2_query(raw_query).as_bytes());

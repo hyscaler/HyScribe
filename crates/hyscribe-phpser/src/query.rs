@@ -253,14 +253,24 @@ fn http_build_query(pairs: &[(Key, Value)], parent: &[u8]) -> Vec<u8> {
 
 /// `map_deep( $value, 'urlencode' )`.
 pub fn urlencode_deep(value: Value) -> Value {
+    map_deep(value, urlencode)
+}
+
+/// `map_deep( $value, 'rawurlencode' )`.
+pub fn rawurlencode_deep(value: Value) -> Value {
+    map_deep(value, rawurlencode)
+}
+
+/// `map_deep()`: `encode` applied to every value, array keys left as they are.
+fn map_deep(value: Value, encode: fn(&[u8]) -> Vec<u8>) -> Value {
     match value {
         Value::Array(pairs) => Value::Array(
             pairs
                 .into_iter()
-                .map(|(k, v)| (k, urlencode_deep(v)))
+                .map(|(k, v)| (k, map_deep(v, encode)))
                 .collect(),
         ),
-        value => Value::String(urlencode(&value.to_php_string())),
+        value => Value::String(encode(&value.to_php_string())),
     }
 }
 

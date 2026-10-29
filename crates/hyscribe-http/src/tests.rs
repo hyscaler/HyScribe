@@ -311,10 +311,49 @@ async fn canonical_redirects_match_wordpress() {
         ("/index.php", "/"),
         ("/index.php?p=1", "/?p=1"),
         ("/blog/index.php", "/blog/"),
+        // A post's feed goes to its comments feed link.
+        ("/?p=1&feed=rss2", "/?feed=rss2&p=1"),
+        ("/?page_id=2&feed=rss2", "/?feed=rss2&page_id=2"),
+        ("/?p=1&feed=atom", "/?feed=atom&p=1"),
+        ("/?x=1&p=1&feed=rss2", "/?feed=rss2&p=1&x=1"),
+        ("/?p=1&feed=rss", "/?feed=rss2&p=1"),
+        ("/?feed=rss&p=1", "/?feed=rss2&p=1"),
+        (
+            "/?page_id=2&feed=rss2&cpage=2",
+            "/?feed=rss2&page_id=2&cpage=2",
+        ),
+        ("/?p=1&feed=rdf", "/?feed=rdf&p=1"),
+        ("/?p=2&feed=rss2", "/?page_id=2&feed=rss2"),
+        ("/?page_id=1&feed=rss2", "/?p=1&feed=rss2"),
+        ("/?p=1&feed=rss2&x=a+b", "/?feed=rss2&p=1&x=a%20b"),
+        ("/?p=1&feed=comments-rss2", "/?feed=comments-rss2&p=1"),
+        ("/?p=01&feed=rss2", "/?feed=rss2&p=01"),
+        ("/?p=1&feed=rss2&x[]=1", "/?feed=rss2&p=1&x%5B0%5D=1"),
+        (
+            "/?p=1&withoutcomments=1&feed=rss2",
+            "/?feed=rss2&p=1&withoutcomments=1",
+        ),
+        ("/?p=1&feed=feed", "/?feed=feed&p=1"),
+        ("/?p=1&&feed=rss2", "/?feed=rss2&p=1"),
+        ("/?p=1&feed=rss2&x=%7E", "/?feed=rss2&p=1&x=~"),
+        ("/?p=1&page_id=0&feed=rss2", "/?feed=rss2&p=1"),
+        ("/?p=1&feed=rss2&preview=1", "/?feed=rss2&p=1"),
     ] {
         assert_eq!(
             location(&site, uri).await,
             format!("{home}{expected}"),
+            "{uri}"
+        );
+    }
+    // At its link, or with no such post, a feed is served.
+    for uri in [
+        "/?feed=rss2&p=1",
+        "/?feed=rss2&p=1&x=1",
+        "/?p=999&feed=rss2",
+    ] {
+        assert_eq!(
+            request(&site, "GET", uri).await.status,
+            StatusCode::OK,
             "{uri}"
         );
     }

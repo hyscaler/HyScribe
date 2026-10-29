@@ -19,7 +19,9 @@ use axum::response::{IntoResponse, Response};
 use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html};
 use hyscribe_model::{OrderBy, Post, PostQuery};
-use hyscribe_phpser::parse_str;
+use hyscribe_phpser::{
+    Key, Value, add_query_values, parse_str, rawurlencode, rawurlencode_deep, remove_query_arg,
+};
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::head::{wp_footer, wp_head};
 use hyscribe_render::link;
@@ -448,7 +450,18 @@ async fn route(
                 ) {
                     // A feed's redirect keeps the feed's headers.
                     (Some(format), found) => {
-                        let redirect = found.as_ref().and_then(elsewhere).or(redirect);
+                        let current =
+                            format!("{}{path}?{}", site.home, raw_query.unwrap_or_default());
+                        let redirect = found
+                            .as_ref()
+                            .and_then(elsewhere)
+                            .or_else(|| {
+                                found
+                                    .as_ref()
+                                    .map(|_| single_feed_location(site, raw_query, name, id))
+                            })
+                            .filter(|location| *location != current)
+                            .or(redirect);
                         let comments =
                             comment_feed.then_some(feed::CommentsOf::Post(id, name == "p"));
                         let page = async {
@@ -764,7 +777,12 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
 
 /// `redirect_canonical()` for `feed=rss`: the same request with `feed=rss2`.
 fn rss2_location(site: &Site, path: &str, raw_query: Option<&str>) -> String {
-    let query = raw_query
+    format!("{}{path}?{}", site.home, rss2_query(raw_query))
+}
+
+/// `raw_query` with `feed=rss` as `feed=rss2`.
+fn rss2_query(raw_query: Option<&str>) -> String {
+    raw_query
         .unwrap_or_default()
         .split('&')
         .map(|pair| {
@@ -775,8 +793,39 @@ fn rss2_location(site: &Site, path: &str, raw_query: Option<&str>) -> String {
             }
         })
         .collect::<Vec<_>>()
-        .join("&");
-    format!("{}{path}?{query}", site.home)
+        .join("&")
+}
+
+/// The comments feed link a post's feed redirects to, as
+/// `redirect_canonical()` builds it: `?feed=` and the post's `name` (`p` or
+/// `page_id`) first, then the request's other arguments, encoded again.
+fn single_feed_location(site: &Site, raw_query: Option<&str>, name: &str, id: u64) -> String {
+    let other = if name == "p" { "page_id" } else { "p" };
+    let query = remove_query_arg(
+        &[
+            b"attachment_id",
+            b"pagename",
+            b"name",
+            b"post_type",
+            b"preview",
+            other.as_bytes(),
+        ],
+        rss2_query(raw_query).as_bytes(),
+    );
+    let args: Vec<(Key, Value)> = rawurlencode_deep(parse_str(&query))
+        .as_array()
+        .unwrap_or_default()
+        .iter()
+        .map(|(key, value)| {
+            (
+                Key::from_php_string(rawurlencode(&key.to_php_string())),
+                value.clone(),
+            )
+        })
+        .collect();
+    // The request's own `feed` takes the place of the empty one.
+    let link = format!("{}/?feed=&{name}={id}", site.home);
+    String::from_utf8_lossy(&add_query_values(&args, link.as_bytes())).into_owned()
 }
 
 /// A feed's missing post or page: a singular query with nothing in it.

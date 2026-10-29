@@ -407,12 +407,6 @@ fn date_parts_follow_wp_query() {
     assert_eq!(date_parts("20261"), (Some(2026), None, None));
 }
 
-#[test]
-fn search_terms_split_like_wordpress() {
-    assert_eq!(search_terms("a b,c+d\te"), ["a", "b", "c", "d", "e"]);
-    assert!(search_terms("  ,+ ").is_empty());
-}
-
 #[tokio::test]
 async fn admin_and_login_urls_are_clean() {
     let site = fixture_site(Some("http://127.0.0.1:8080")).await;
@@ -873,4 +867,17 @@ async fn pages_of_a_post_match_php() {
         count += 1;
     }
     assert_eq!(count, 11);
+}
+
+/// WordPress sorts a search by relevance only outside feeds.
+#[tokio::test]
+async fn search_feeds_are_not_sorted_by_relevance() {
+    let site = fixture_site(None).await;
+    let query = HashMap::from([("s".to_string(), "hello".to_string())]);
+    assert_eq!(
+        post_query(&site, &query, false).order,
+        [(OrderBy::Relevance, false), (OrderBy::Date, false)]
+    );
+    assert!(post_query(&site, &query, true).order.is_empty());
+    assert!(post_query(&site, &HashMap::new(), false).order.is_empty());
 }

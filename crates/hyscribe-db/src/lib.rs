@@ -13,7 +13,7 @@
 use std::fmt;
 
 use hyscribe_config::{Database, Prefix};
-use hyscribe_model::{Comment, Post, PostQuery, Term, User};
+use hyscribe_model::{Comment, OrderBy, Post, PostQuery, Term, User};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
 
@@ -526,13 +526,9 @@ fn adjacent_sql(post: &Post, previous: bool, terms: Option<(&str, &[u64])>) -> S
     sql.bind(Bind::Int(post.id));
     sql.bind(Bind::Text(post.post_type.clone()));
     if let Some((taxonomy, ids)) = terms {
-        sql.push(" AND tt.taxonomy = ? AND tt.term_id IN (0");
+        sql.push(" AND tt.taxonomy = ? AND tt.term_id IN (");
         sql.bind(Bind::Text(taxonomy.to_string()));
-        for id in ids {
-            sql.push(", ?");
-            sql.bind(Bind::Int(*id));
-        }
-        sql.push(")");
+        list(&mut sql, ids_or_none(ids));
     }
     sql.push(if previous {
         " AND p.post_status = 'publish' ORDER BY p.post_date DESC, p.ID DESC LIMIT 1"
@@ -550,23 +546,19 @@ fn posts_sql(query: &PostQuery) -> Sql {
         " FROM {prefix}posts WHERE "
     ));
     post_criteria(&mut sql, query);
-    // WordPress's own ordering, ties included: title matches of the
-    // whole search phrase first, then newest first.
-    let date = if query.ascending {
-        "post_date ASC"
-    } else {
-        "post_date DESC"
-    };
-    if query.by_menu_order {
-        sql.push(" ORDER BY menu_order ASC, post_title ASC");
-    } else {
-        if query.search.is_empty() {
-            sql.push(" ORDER BY ");
-        } else {
-            sql.push(" ORDER BY post_title LIKE ? DESC, ");
+    sql.push(" ORDER BY ");
+    if query.order.is_empty() {
+        sql.push("post_date DESC");
+    }
+    for (i, &(column, ascending)) in query.order.iter().enumerate() {
+        if i > 0 {
+            sql.push(", ");
+        }
+        sql.push(order_column(column));
+        if column == OrderBy::Relevance {
             sql.bind(Bind::Text(like(&query.search.join(" "))));
         }
-        sql.push(date);
+        sql.push(if ascending { " ASC" } else { " DESC" });
     }
     sql.push(" LIMIT ? OFFSET ?");
     sql.bind(Bind::Int(query.limit.into()));
@@ -575,25 +567,40 @@ fn posts_sql(query: &PostQuery) -> Sql {
 }
 
 /// The `WHERE` criteria of [`posts_sql`]: published posts of the query's
-/// types (any, if none), matching its inclusions, search, category and date.
+/// types (any, if none), authors, parents, terms, inclusions, search and
+/// date.
 fn post_criteria(sql: &mut Sql, query: &PostQuery) {
     sql.push("post_status = 'publish'");
     if !query.post_types.is_empty() {
         sql.push(" AND post_type IN (");
-        for (i, post_type) in query.post_types.iter().enumerate() {
-            sql.push(if i == 0 { "?" } else { ", ?" });
-            sql.bind(Bind::Text(post_type.clone()));
-        }
+        list(sql, query.post_types.iter().map(|t| Bind::Text(t.clone())));
+    }
+    if !query.authors.is_empty() {
+        sql.push(" AND post_author IN (");
+        list(sql, query.authors.iter().map(|&id| Bind::Int(id)));
+    }
+    if !query.parents.is_empty() {
+        sql.push(" AND post_parent IN (");
+        list(sql, query.parents.iter().map(|&id| Bind::Int(id)));
+    }
+    for filter in &query.terms {
+        sql.push(if filter.exclude {
+            " AND ID NOT IN ("
+        } else {
+            " AND ID IN ("
+        });
+        sql.push(
+            "SELECT tr.object_id FROM {prefix}term_relationships tr \
+             JOIN {prefix}term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id \
+             WHERE tt.taxonomy = ? AND tt.term_id IN (",
+        );
+        sql.bind(Bind::Text(filter.taxonomy.clone()));
+        list(sql, ids_or_none(&filter.terms));
         sql.push(")");
     }
     if let Some(include) = &query.include {
-        // An empty `post__in` matches nothing, as WordPress's `array( 0 )`.
-        sql.push(" AND ID IN (0");
-        for id in include {
-            sql.push(", ?");
-            sql.bind(Bind::Int(*id));
-        }
-        sql.push(")");
+        sql.push(" AND ID IN (");
+        list(sql, ids_or_none(include));
     }
     for id in &query.exclude {
         sql.push(" AND ID <> ?");
@@ -605,14 +612,6 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
             sql.bind(Bind::Text(like(term)));
         }
     }
-    if let Some(category) = query.category {
-        sql.push(
-            " AND ID IN (SELECT tr.object_id FROM {prefix}term_relationships tr \
-             JOIN {prefix}term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id \
-             WHERE tt.taxonomy = 'category' AND tt.term_id = ?)",
-        );
-        sql.bind(Bind::Int(category));
-    }
     let date = [
         (" AND YEAR(post_date) = ?", query.year),
         (" AND MONTH(post_date) = ?", query.month),
@@ -623,6 +622,38 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
             sql.push(fragment);
             sql.bind(Bind::Int(value));
         }
+    }
+}
+
+/// `ids` led by 0, which no row has, so an empty list matches nothing, as
+/// WordPress's `array( 0 )`.
+fn ids_or_none(ids: &[u64]) -> impl Iterator<Item = Bind> + '_ {
+    std::iter::once(0).chain(ids.iter().copied()).map(Bind::Int)
+}
+
+/// `values` bound as a comma separated list, closing the parenthesis.
+fn list(sql: &mut Sql, values: impl Iterator<Item = Bind>) {
+    for (i, value) in values.enumerate() {
+        sql.push(if i == 0 { "?" } else { ", ?" });
+        sql.bind(value);
+    }
+    sql.push(")");
+}
+
+/// The `ORDER BY` term of `column`; relevance binds the search phrase.
+fn order_column(column: OrderBy) -> &'static str {
+    match column {
+        OrderBy::Date => "post_date",
+        OrderBy::Title => "post_title",
+        OrderBy::Modified => "post_modified",
+        OrderBy::Name => "post_name",
+        OrderBy::Author => "post_author",
+        OrderBy::Parent => "post_parent",
+        OrderBy::Type => "post_type",
+        OrderBy::Id => "ID",
+        OrderBy::MenuOrder => "menu_order",
+        OrderBy::CommentCount => "comment_count",
+        OrderBy::Relevance => "post_title LIKE ?",
     }
 }
 

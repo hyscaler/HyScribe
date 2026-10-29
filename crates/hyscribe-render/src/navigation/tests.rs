@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use hyscribe_model::{Post, PostQuery, Term};
+use hyscribe_model::{OrderBy, Post, PostQuery, Term};
 use hyscribe_testkit::unhex;
 
 use super::*;
@@ -81,7 +81,10 @@ impl Site for Tree<'_> {
         self.base.post_meta(post_id, key)
     }
     fn query(&self, query: &PostQuery) -> Vec<Post> {
-        match (&self.menu, query.by_menu_order) {
+        match (
+            &self.menu,
+            query.order.first() == Some(&(OrderBy::MenuOrder, true)),
+        ) {
             (Some(menu), _) if query.post_types == ["wp_navigation"] => vec![menu.clone()]
                 .into_iter()
                 .take(query.limit as usize)

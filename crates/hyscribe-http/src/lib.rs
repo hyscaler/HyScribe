@@ -18,12 +18,13 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html};
-use hyscribe_model::{Post, PostQuery};
+use hyscribe_model::{OrderBy, Post, PostQuery, TermFilter};
 use hyscribe_phpser::parse_str;
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::head::{wp_footer, wp_head};
 use hyscribe_render::link;
 use hyscribe_render::post::body_class;
+use hyscribe_render::search_terms;
 use hyscribe_render::site::{Archive, Request};
 use hyscribe_render::template::render_template;
 use hyscribe_render::theme::{Theme, twentytwentyfive};
@@ -35,7 +36,7 @@ mod reads;
 
 use reads::Reads;
 
-use query::{absint, date_parts, other_args, search_terms};
+use query::{absint, date_parts, other_args};
 
 /// Headers on every response (docs/SECURITY_MODEL.md, Web).
 const SECURITY_HEADERS: [(&str, &str); 3] = [
@@ -412,7 +413,7 @@ async fn route(
         // posts it matches.
         let comments = comment_feed.then(|| {
             if archive {
-                feed::CommentsOf::Posts(post_query(site, query, true))
+                feed::CommentsOf::Posts(Box::new(post_query(site, query, true)))
             } else {
                 feed::CommentsOf::Site
             }
@@ -604,7 +605,23 @@ fn post_query(site: &Site, query: &HashMap<String, String>, feed: bool) -> PostQ
             vec!["post".into()]
         },
         search: search.map_or_else(Vec::new, |s| search_terms(s)),
-        category: query.get("cat").map(|c| absint(c)).filter(|&id| id > 0),
+        // WordPress sorts a search by relevance, then date, except in feeds.
+        order: if search.is_some() && !feed {
+            vec![(OrderBy::Relevance, false), (OrderBy::Date, false)]
+        } else {
+            vec![]
+        },
+        terms: query
+            .get("cat")
+            .map(|c| absint(c))
+            .filter(|&id| id > 0)
+            .map(|id| TermFilter {
+                taxonomy: "category".into(),
+                terms: vec![id],
+                exclude: false,
+            })
+            .into_iter()
+            .collect(),
         year,
         month,
         day,
@@ -632,7 +649,12 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
     let search = query.get("s");
     let post_query = post_query(site, query, feed);
     let (year, month, day) = (post_query.year, post_query.month, post_query.day);
-    let category = match post_query.category {
+    // The only term filter of a main query is its category.
+    let category = match post_query
+        .terms
+        .first()
+        .and_then(|filter| filter.terms.first().copied())
+    {
         Some(id) => match site.db.category(id).await? {
             Some(term) => Some(term),
             // A category that does not exist.

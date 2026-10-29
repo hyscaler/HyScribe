@@ -4,15 +4,15 @@
 //! block context, and `core/post-template`, which renders its inner blocks
 //! once for each post the query finds.
 //!
-//! Of `build_query_vars_from_query_block()`, the post type, paging, sticky
-//! posts, exclusions and the date order are ported; taxonomy, author,
-//! search, parent and format filters, other orders and sticky posts at the
-//! top of the list are not yet.
+//! Of `build_query_vars_from_query_block()`, everything but the post format
+//! filter is ported; of the `WP_Query` it builds, sticky posts at the top of
+//! the list, random order, the `post__in` orders and the unsorted order of an
+//! `orderBy` array without an allowed key are not yet.
 
 use hyscribe_html::TagProcessor;
 use hyscribe_kses::esc_attr;
-use hyscribe_model::{Post, PostQuery};
-use hyscribe_phpser::{Value, absint, decode, isset, php_trim};
+use hyscribe_model::{OrderBy, Post, PostQuery, TermFilter};
+use hyscribe_phpser::{Key, Value, absint, decode, isset, php_trim, urldecode};
 
 use crate::blocks::Block;
 use crate::core_blocks::{Context, QueryContext, prepared};
@@ -258,16 +258,182 @@ pub(crate) fn query_vars(context: &Context<'_>, query: &Value, page: i64) -> Pos
         let start = skipped.saturating_add(i64::try_from(offset).unwrap_or(i64::MAX));
         vars.offset = u32::try_from(start.unsigned_abs()).unwrap_or(u32::MAX);
     }
-    vars.ascending = field("order").is_some_and(|v| v.to_php_string().eq_ignore_ascii_case(b"asc"));
+    vars.terms = term_filters(query);
+    let ascending = field("order").is_some_and(|v| v.to_php_string().eq_ignore_ascii_case(b"asc"));
+    vars.order = field("orderBy").map_or_else(
+        || vec![(OrderBy::Date, ascending)],
+        |by| order_by(by, ascending),
+    );
+    vars.authors = field("author").map(authors).unwrap_or_default();
+    if let Some(search) = field("search").filter(|v| !v.is_empty()) {
+        // parse_search(): stripslashes(), then line breaks removed.
+        let mut text = stripslashes(&search.to_php_string());
+        text.retain(|&b| b != b'\r' && b != b'\n');
+        vars.search = search_terms(&String::from_utf8_lossy(&text));
+        // Relevance first for `relevance`, or for an empty `orderBy`.
+        if field("orderBy")
+            .is_some_and(|by| by.is_empty() || urldecode(&by.to_php_string()) == b"relevance")
+        {
+            vars.order.insert(0, (OrderBy::Relevance, false));
+        }
+    }
+    if vars.post_types == ["page"] {
+        // `array_unique( array_map( 'intval', $parents ) )`, then absint().
+        vars.parents = field("parents")
+            .filter(|v| !v.is_empty())
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .map(|(_, id)| id.to_int().unsigned_abs())
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
     vars
 }
 
-/// `array_filter( array_map( 'intval', $ids ) )`.
+/// Search terms as WordPress splits them: on spaces, tabs, commas and plus
+/// signs. Stopword removal comes with i18n (M9.4).
+pub fn search_terms(search: &str) -> Vec<String> {
+    search
+        .split([' ', '\t', ',', '+'])
+        .filter(|term| !term.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// The `orderby` of `WP_Query` for `orderBy`: each allowed key of a
+/// space separated list in `ascending` order, or of an array in its own.
+fn order_by(by: &Value, ascending: bool) -> Vec<(OrderBy, bool)> {
+    let order = if let Some(list) = by.as_array() {
+        // parse_order(): only the string `ASC`, in any case, is ascending.
+        list.iter()
+            .filter_map(|(key, order)| {
+                let asc = matches!(order, Value::String(o) if o.eq_ignore_ascii_case(b"asc"));
+                order_column(&urldecode(&key.to_php_string())).map(|c| (c, asc))
+            })
+            .collect()
+    } else {
+        urldecode(&by.to_php_string())
+            .split(|&b| b == b' ')
+            .filter_map(order_column)
+            .map(|column| (column, ascending))
+            .collect::<Vec<_>>()
+    };
+    // With no allowed key, a string sorts by date; an array leaves the
+    // database's order, which this takes as the date order too.
+    if order.is_empty() {
+        return vec![(OrderBy::Date, ascending)];
+    }
+    order
+}
+
+/// PHP's `stripslashes()`: a backslash escapes the next byte, `\0` is NUL.
+fn stripslashes(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut bytes = text.iter();
+    while let Some(&b) = bytes.next() {
+        match (b == b'\\').then(|| bytes.next()) {
+            None => out.push(b),
+            Some(Some(b'0')) => out.push(0),
+            Some(Some(&next)) => out.push(next),
+            Some(None) => {}
+        }
+    }
+    out
+}
+
+/// `WP_Query::parse_orderby()` for the post columns.
+fn order_column(key: &[u8]) -> Option<OrderBy> {
+    Some(match key {
+        b"post_date" | b"date" => OrderBy::Date,
+        b"post_title" | b"title" => OrderBy::Title,
+        b"post_modified" | b"modified" => OrderBy::Modified,
+        b"post_name" | b"name" => OrderBy::Name,
+        b"post_author" | b"author" => OrderBy::Author,
+        b"post_parent" | b"parent" => OrderBy::Parent,
+        b"post_type" | b"type" => OrderBy::Type,
+        b"ID" => OrderBy::Id,
+        b"menu_order" => OrderBy::MenuOrder,
+        b"comment_count" => OrderBy::CommentCount,
+        _ => return None,
+    })
+}
+
+/// `author__in` from the `author` context: a list, a comma separated
+/// string, or one positive integer.
+fn authors(author: &Value) -> Vec<u64> {
+    match author {
+        Value::Array(_) => ids(author),
+        Value::String(text) => text
+            .split(|&b| b == b',')
+            .map(|id| Value::String(id.to_vec()).to_int().unsigned_abs())
+            .filter(|&id| id != 0)
+            .collect(),
+        &Value::Int(id) if id > 0 => vec![id.unsigned_abs()],
+        _ => vec![],
+    }
+}
+
+/// The taxonomies a default install registers as viewable.
+const VIEWABLE_TAXONOMIES: [&[u8]; 3] = [b"category", b"post_tag", b"post_format"];
+
+/// The `tax_query` of `categoryIds`, `tagIds` and `taxQuery`, in either
+/// format of `taxQuery`: `{"category":[4]}`, or `{"include":{...},
+/// "exclude":{...}}`.
+fn term_filters(query: &Value) -> Vec<TermFilter> {
+    let filled = |name| query.get_str(name).filter(|v| !v.is_empty());
+    let clause = |taxonomy: &[u8], terms: &Value, exclude| TermFilter {
+        taxonomy: String::from_utf8_lossy(taxonomy).into_owned(),
+        terms: ids(terms),
+        exclude,
+    };
+    let mut filters: Vec<TermFilter> = [
+        ("categoryIds", b"category".as_slice()),
+        ("tagIds", b"post_tag"),
+    ]
+    .into_iter()
+    .filter_map(|(name, taxonomy)| filled(name).map(|terms| clause(taxonomy, terms, false)))
+    .collect();
+    let Some(tax_query) = filled("taxQuery").and_then(Value::as_array) else {
+        return filters;
+    };
+    let conditions = |terms: &[(Key, Value)], exclude| {
+        terms
+            .iter()
+            .filter(|(taxonomy, terms)| {
+                !terms.is_empty() && VIEWABLE_TAXONOMIES.contains(&&taxonomy.to_php_string()[..])
+            })
+            .map(|(taxonomy, terms)| clause(&taxonomy.to_php_string(), terms, exclude))
+            .collect::<Vec<_>>()
+    };
+    let part = |name: &[u8]| {
+        tax_query
+            .iter()
+            .find(|(key, _)| *key == Key::String(name.to_vec()))
+            .and_then(|(_, terms)| terms.as_array())
+            .unwrap_or_default()
+    };
+    let old_format = tax_query
+        .iter()
+        .any(|(key, _)| !matches!(key, Key::String(k) if k == b"include" || k == b"exclude"));
+    if old_format {
+        filters.extend(conditions(tax_query, false));
+    } else {
+        filters.extend(conditions(part(b"include"), false));
+        filters.extend(conditions(part(b"exclude"), true));
+    }
+    filters
+}
+
+/// `array_filter( array_map( 'intval', $ids ) )`, as `WP_Query` then reads
+/// them with absint().
 fn ids(list: &Value) -> Vec<u64> {
     list.as_array()
         .unwrap_or_default()
         .iter()
-        .filter_map(|(_, id)| u64::try_from(id.to_int()).ok().filter(|&id| id != 0))
+        .map(|(_, id)| id.to_int().unsigned_abs())
+        .filter(|&id| id != 0)
         .collect()
 }
 

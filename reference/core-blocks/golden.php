@@ -344,6 +344,72 @@ $wpdb->query( 'ROLLBACK' );
 $_SERVER['REQUEST_URI'] = '/';
 $_GET                   = array();
 
+// Query filters and orders, on posts and pages inserted for them and rolled
+// back after. Lines are
+//   filter<TAB>hex(markup)<TAB>hex(state JSON)<TAB>hex(output)
+$wpdb->query( 'START TRANSACTION' );
+$fruit   = wp_insert_term( 'Fruit', 'category' )['term_id'];
+$red     = wp_insert_term( 'Red', 'post_tag' )['term_id'];
+$inserts = array(
+	array( 'post_title' => 'Banana', 'post_date' => '2026-01-01 00:00:00', 'post_author' => 1 ),
+	array( 'post_title' => 'Apple', 'post_date' => '2026-02-01 00:00:00', 'post_author' => 2, 'post_category' => array( $fruit ), 'tags_input' => array( 'red' ), 'post_content' => 'Banana bread' ),
+	array( 'post_title' => 'Cherry', 'post_date' => '2026-03-01 00:00:00', 'post_author' => 2, 'post_category' => array( $fruit, 1 ) ),
+	array( 'post_title' => 'Top', 'post_type' => 'page', 'post_date' => '2026-01-02 00:00:00', 'menu_order' => 3 ),
+	array( 'post_title' => 'Child B', 'post_type' => 'page', 'post_parent' => 2, 'post_date' => '2026-01-03 00:00:00', 'menu_order' => 1 ),
+	array( 'post_title' => 'Child A', 'post_type' => 'page', 'post_parent' => 2, 'post_date' => '2026-01-04 00:00:00', 'menu_order' => 2 ),
+);
+$columns = array_flip( array( 'ID', 'post_author', 'post_title', 'post_date', 'post_date_gmt', 'post_modified', 'post_name', 'post_type', 'post_status', 'post_parent', 'menu_order', 'post_content' ) );
+$filter_posts = array();
+foreach ( $inserts as $insert ) {
+	$id             = wp_insert_post( $insert + array( 'post_status' => 'publish', 'post_content' => '' ) );
+	$row            = array_intersect_key( get_post( $id, ARRAY_A ), $columns );
+	$row['terms']   = array();
+	foreach ( array( 'category', 'post_tag' ) as $taxonomy ) {
+		foreach ( wp_get_object_terms( $id, $taxonomy ) as $term ) {
+			$row['terms'][] = array( 'taxonomy' => $taxonomy, 'term_id' => $term->term_id, 'name' => $term->name, 'slug' => $term->slug );
+		}
+	}
+	$filter_posts[] = $row;
+}
+$post_args = array(
+	'"orderBy":"title","order":"asc"', '"orderBy":"title"', '"orderBy":"date","order":"asc"', '"orderBy":"title date","order":"ASC"',
+	'"orderBy":"nonsense"', '"orderBy":"","order":"asc"', '"orderBy":"ID","order":"asc"', '"orderBy":"author title","order":"asc"',
+	'"orderBy":"post_title%20post_date"', '"orderBy":{"author":"asc","title":"desc"}', '"order":"sideways"',
+	'"author":2', '"author":"2"', '"author":"1,2"', '"author":"-2"', '"author":[2]', '"author":[0,"2"]', '"author":0', '"author":""', '"author":-1',
+	'"search":"an"', '"search":"zzz"', '"search":"an","orderBy":"relevance"', '"search":""',
+	'"search":"banana"', '"search":"banana","orderBy":"relevance"', '"search":"banana","orderBy":"relev%61nce"', '"search":"banana","orderBy":""',
+	'"search":"banana","orderBy":"0"', '"search":"banana","orderBy":false', '"search":"banana","orderBy":[]', '"search":"banana","orderBy":"title"', '"search":"banana","orderBy":{"title":"asc"}',
+	'"search":"ban\\\\ana"', '"search":"ban\\nana"', '"search":"banana\\\\"', '"search":"\\\\0"',
+	'"taxQuery":{"category":[' . $fruit . ']}', '"taxQuery":{"post_tag":[' . $red . ']}', '"taxQuery":{"category":[999]}', '"taxQuery":{"category":[]}',
+	'"taxQuery":{"nav_menu":[1]}', '"taxQuery":{"category":[' . $fruit . '],"post_tag":[' . $red . ']}', '"taxQuery":{"category":[-' . $fruit . ']}',
+	'"taxQuery":{"include":{"category":[' . $fruit . ']}}', '"taxQuery":{"exclude":{"post_tag":[' . $red . ']}}',
+	'"taxQuery":{"include":{"category":[1]},"exclude":{"category":[' . $fruit . ']}}', '"taxQuery":{"include":{}}', '"taxQuery":{"exclude":{"category":[999]}}',
+	'"taxQuery":{"include":{"category":[' . $fruit . ']},"post_tag":[' . $red . ']}', '"taxQuery":null',
+	'"categoryIds":[' . $fruit . ']', '"tagIds":[' . $red . ']', '"categoryIds":[1],"tagIds":[' . $red . ']', '"categoryIds":[]', '"categoryIds":["abc"]',
+	'"categoryIds":[' . $fruit . '],"taxQuery":{"exclude":{"post_tag":[' . $red . ']}}', '"parents":[2]',
+);
+$page_args = array( '"parents":[2]', '"parents":[0]', '"parents":[2,0]', '"parents":["-2"]', '"parents":[]', '"orderBy":"menu_order","order":"asc"', '"orderBy":"menu_order title"', '"orderBy":"parent menu_order","order":"asc"' );
+$filter_cases = array();
+foreach ( $post_args as $args ) {
+	$filter_cases[] = '"postType":"post",' . $args;
+}
+foreach ( $page_args as $args ) {
+	$filter_cases[] = '"postType":"page",' . $args;
+}
+$GLOBALS['wp'] = new WP();
+wp( '' );
+foreach ( $filter_cases as $args ) {
+	$markup = '<!-- wp:query {"query":{' . $args . ',"perPage":20,"inherit":false}} --><div class="wp-block-query"><!-- wp:post-template --><!-- wp:post-title /--><!-- /wp:post-template --></div><!-- /wp:query -->';
+	$state  = array( 'home' => home_url(), 'posts' => $filter_posts );
+	echo 'filter', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( do_blocks( $markup ) ), "\n";
+}
+$wpdb->query( 'ROLLBACK' );
+foreach ( $filter_posts as $row ) {
+	clean_post_cache( $row['ID'] );
+}
+clean_term_cache( array( 1, $fruit ), 'category' );
+clean_term_cache( array( $red ), 'post_tag' );
+
 // Page 3 of lists, and a child page: one post fills no second page, so
 // both are set on the query in memory.
 foreach ( array( '', 'page_id=2', 'cat=1', 'm=2026', 's=hello', 'cat=1&page=1', 'page_id=2&child', 'cat=1&slug', 'p=1&book' ) as $case_query ) {

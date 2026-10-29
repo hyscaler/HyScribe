@@ -3,9 +3,10 @@
 //! A [`Site`] over the default install fixture dump, for block goldens
 //! rendered by PHP WordPress on the same database (ADR 0009).
 
+use std::cmp::Ordering;
 use std::sync::OnceLock;
 
-use hyscribe_model::{Comment, Post, PostQuery, Term, User};
+use hyscribe_model::{Comment, OrderBy, Post, PostQuery, Term, TermFilter, User};
 use hyscribe_phpser::Value;
 use hyscribe_testkit::{Dump, SqlValue, default_install};
 
@@ -298,31 +299,94 @@ impl Site for DefaultInstall {
     }
 
     fn query(&self, query: &PostQuery) -> Vec<Post> {
-        let mut posts: Vec<Post> = dump()
-            .table("wp_posts")
-            .map(post)
-            .filter(|post| post.status == "publish" && query.post_types.contains(&post.post_type))
-            .filter(|post| {
-                query
-                    .include
-                    .as_ref()
-                    .is_none_or(|ids| ids.contains(&post.id))
+        let dump = dump();
+        let has_term = |post: &Post, filter: &TermFilter| {
+            dump.table("wp_term_relationships")
+                .filter(|row| number(&row[0]) == post.id)
+                .any(|row| {
+                    dump.table("wp_term_taxonomy").any(|t| {
+                        number(&t[0]) == number(&row[1])
+                            && text(&t[2]) == filter.taxonomy.as_bytes()
+                            && filter.terms.contains(&number(&t[1]))
+                    })
+                })
+        };
+        select(dump.table("wp_posts").map(post), query, has_term)
+    }
+}
+
+/// What `WP_Query` finds of `posts` for `query`, where `has_term` tells
+/// whether a post has one of a filter's terms. Searches ignore ASCII case;
+/// sorts compare bytes, not in the database's case-insensitive collation.
+pub fn select(
+    posts: impl Iterator<Item = Post>,
+    query: &PostQuery,
+    has_term: impl Fn(&Post, &TermFilter) -> bool,
+) -> Vec<Post> {
+    let mut posts: Vec<Post> = posts
+        .filter(|post| post.status == "publish" && query.post_types.contains(&post.post_type))
+        .filter(|post| {
+            query
+                .include
+                .as_ref()
+                .is_none_or(|ids| ids.contains(&post.id))
+        })
+        .filter(|post| !query.exclude.contains(&post.id))
+        .filter(|post| query.authors.is_empty() || query.authors.contains(&post.author))
+        .filter(|post| query.parents.is_empty() || query.parents.contains(&post.parent))
+        .filter(|post| query.terms.iter().all(|f| has_term(post, f) != f.exclude))
+        .filter(|post| {
+            query.search.iter().all(|term| {
+                [&post.title, &post.excerpt, &post.content]
+                    .iter()
+                    .any(|text| contains(text, term))
             })
-            .filter(|post| !query.exclude.contains(&post.id))
-            .collect();
-        posts.sort_by(|a, b| {
-            if query.by_menu_order {
-                (a.menu_order, &a.title).cmp(&(b.menu_order, &b.title))
-            } else if query.ascending {
-                a.date.cmp(&b.date)
-            } else {
-                b.date.cmp(&a.date)
-            }
-        });
-        posts
-            .into_iter()
-            .skip(query.offset as usize)
-            .take(query.limit as usize)
-            .collect()
+        })
+        .collect();
+    let order = if query.order.is_empty() {
+        &[(OrderBy::Date, false)][..]
+    } else {
+        &query.order[..]
+    };
+    let phrase = query.search.join(" ");
+    posts.sort_by(|a, b| {
+        order
+            .iter()
+            .fold(Ordering::Equal, |done, &(column, ascending)| {
+                done.then_with(|| {
+                    let by = column_order(a, b, column, &phrase);
+                    if ascending { by } else { by.reverse() }
+                })
+            })
+    });
+    posts
+        .into_iter()
+        .skip(query.offset as usize)
+        .take(query.limit as usize)
+        .collect()
+}
+
+/// Whether `text` contains `term`, in any ASCII case.
+fn contains(text: &[u8], term: &str) -> bool {
+    let term = term.to_ascii_lowercase();
+    text.to_ascii_lowercase()
+        .windows(term.len().max(1))
+        .any(|w| w == term.as_bytes())
+}
+
+/// `a` against `b` by `column`, relevance to the search `phrase` included.
+fn column_order(a: &Post, b: &Post, column: OrderBy, phrase: &str) -> Ordering {
+    match column {
+        OrderBy::Date => a.date.cmp(&b.date),
+        OrderBy::Title => a.title.cmp(&b.title),
+        OrderBy::Modified => a.modified.cmp(&b.modified),
+        OrderBy::Name => a.name.cmp(&b.name),
+        OrderBy::Author => a.author.cmp(&b.author),
+        OrderBy::Parent => a.parent.cmp(&b.parent),
+        OrderBy::Type => a.post_type.cmp(&b.post_type),
+        OrderBy::Id => a.id.cmp(&b.id),
+        OrderBy::MenuOrder => a.menu_order.cmp(&b.menu_order),
+        OrderBy::CommentCount => a.comment_count.cmp(&b.comment_count),
+        OrderBy::Relevance => contains(&a.title, phrase).cmp(&contains(&b.title, phrase)),
     }
 }

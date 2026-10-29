@@ -5,6 +5,7 @@
 
 use super::*;
 use hyscribe_config::Secret;
+use hyscribe_model::TermFilter;
 
 fn fixture_config() -> Database {
     hyscribe_testkit::fixture_database()
@@ -123,6 +124,7 @@ async fn post_lists() {
     };
     let search = |terms: &[&str]| PostQuery {
         search: terms.iter().map(|t| t.to_string()).collect(),
+        order: vec![(OrderBy::Relevance, false), (OrderBy::Date, false)],
         ..both()
     };
     assert_eq!(titles(&db, search(&["hello"])).await, ["Hello world!"]);
@@ -192,7 +194,11 @@ async fn post_lists() {
         titles(
             &db,
             PostQuery {
-                category: Some(1),
+                terms: vec![TermFilter {
+                    taxonomy: "category".into(),
+                    terms: vec![1],
+                    exclude: false,
+                }],
                 ..all()
             }
         )
@@ -203,7 +209,11 @@ async fn post_lists() {
         titles(
             &db,
             PostQuery {
-                category: Some(999),
+                terms: vec![TermFilter {
+                    taxonomy: "category".into(),
+                    terms: vec![999],
+                    exclude: false,
+                }],
                 ..all()
             }
         )
@@ -343,27 +353,137 @@ async fn a_row_without_the_columns_fails_to_decode() {
 
 #[test]
 fn order_follows_the_query() {
-    let text = |ascending| {
+    let text = |order| {
         posts_sql(&PostQuery {
-            ascending,
+            order,
+            search: vec!["x".into()],
             ..PostQuery::default()
         })
-        .text
     };
-    assert!(text(true).ends_with("ORDER BY post_date ASC LIMIT ? OFFSET ?"));
-    assert!(text(false).ends_with("ORDER BY post_date DESC LIMIT ? OFFSET ?"));
-    // get_pages() order; a search adds no title ordering of its own.
-    let pages = posts_sql(&PostQuery {
-        by_menu_order: true,
-        search: vec!["x".into()],
-        ..PostQuery::default()
-    });
+    assert!(
+        text(vec![])
+            .text
+            .ends_with("ORDER BY post_date DESC LIMIT ? OFFSET ?")
+    );
+    let pages = text(vec![(OrderBy::MenuOrder, true), (OrderBy::Title, true)]);
     assert!(
         pages
             .text
             .ends_with("ORDER BY menu_order ASC, post_title ASC LIMIT ? OFFSET ?")
     );
+    // The three search columns, then the limit and offset.
     assert_eq!(pages.binds.len(), 5);
+    let relevance = text(vec![(OrderBy::Relevance, false), (OrderBy::Date, true)]);
+    assert!(
+        relevance
+            .text
+            .ends_with("ORDER BY post_title LIKE ? DESC, post_date ASC LIMIT ? OFFSET ?")
+    );
+    assert_eq!(relevance.binds.len(), 6);
+    let columns = [
+        (OrderBy::Modified, "post_modified"),
+        (OrderBy::Name, "post_name"),
+        (OrderBy::Author, "post_author"),
+        (OrderBy::Parent, "post_parent"),
+        (OrderBy::Type, "post_type"),
+        (OrderBy::Id, "ID"),
+        (OrderBy::CommentCount, "comment_count"),
+    ];
+    for (column, name) in columns {
+        assert_eq!(order_column(column), name);
+    }
+}
+
+#[tokio::test]
+async fn author_parent_and_term_filters() {
+    let db = fixture().await;
+    let query = |query: PostQuery| PostQuery {
+        post_types: vec!["post".into(), "page".into()],
+        order: vec![(OrderBy::Title, true)],
+        limit: 10,
+        ..query
+    };
+    let filter = |taxonomy: &str, terms: &[u64], exclude| TermFilter {
+        taxonomy: taxonomy.into(),
+        terms: terms.to_vec(),
+        exclude,
+    };
+    let cases = [
+        (PostQuery::default(), &["Hello world!", "Sample Page"][..]),
+        (
+            PostQuery {
+                authors: vec![1],
+                ..PostQuery::default()
+            },
+            &["Hello world!", "Sample Page"],
+        ),
+        (
+            PostQuery {
+                authors: vec![2, 3],
+                ..PostQuery::default()
+            },
+            &[],
+        ),
+        (
+            PostQuery {
+                parents: vec![0],
+                ..PostQuery::default()
+            },
+            &["Hello world!", "Sample Page"],
+        ),
+        (
+            PostQuery {
+                parents: vec![1],
+                ..PostQuery::default()
+            },
+            &[],
+        ),
+        (
+            PostQuery {
+                terms: vec![filter("category", &[1], false)],
+                ..PostQuery::default()
+            },
+            &["Hello world!"],
+        ),
+        (
+            PostQuery {
+                terms: vec![filter("category", &[1], true)],
+                ..PostQuery::default()
+            },
+            &["Sample Page"],
+        ),
+        // Term 1 is no tag: IN finds nothing, NOT IN leaves everything.
+        (
+            PostQuery {
+                terms: vec![filter("post_tag", &[1], false)],
+                ..PostQuery::default()
+            },
+            &[],
+        ),
+        (
+            PostQuery {
+                terms: vec![filter("post_tag", &[], true)],
+                ..PostQuery::default()
+            },
+            &["Hello world!", "Sample Page"],
+        ),
+    ];
+    for (case, expected) in cases {
+        let posts = db.posts(&query(case.clone())).await.unwrap();
+        let titles: Vec<_> = posts
+            .iter()
+            .map(|p| String::from_utf8_lossy(&p.title).into_owned())
+            .collect();
+        assert_eq!(titles, expected, "{case:?}");
+    }
+    let descending = db
+        .posts(&PostQuery {
+            order: vec![(OrderBy::Title, false)],
+            ..query(PostQuery::default())
+        })
+        .await
+        .unwrap();
+    assert_eq!(descending[0].title, b"Sample Page");
 }
 
 #[tokio::test]
@@ -516,10 +636,17 @@ async fn archive_feed_comments() {
     let db = fixture().await;
     let ids =
         |comments: Vec<hyscribe_model::Comment>| comments.iter().map(|c| c.id).collect::<Vec<_>>();
-    let query = |search: &[&str], category| PostQuery {
+    let query = |search: &[&str], category: Option<u64>| PostQuery {
         post_types: vec!["post".into(), "page".into()],
         search: search.iter().map(|s| (*s).to_owned()).collect(),
-        category,
+        terms: category
+            .map(|id| TermFilter {
+                taxonomy: "category".into(),
+                terms: vec![id],
+                exclude: false,
+            })
+            .into_iter()
+            .collect(),
         ..PostQuery::default()
     };
     assert_eq!(

@@ -12,7 +12,7 @@
 
 use hyscribe_html::TagProcessor;
 use hyscribe_kses::{esc_attr, esc_url, safecss_filter_attr, wp_strip_all_tags};
-use hyscribe_model::{Post, PostQuery};
+use hyscribe_model::{OrderBy, Post, PostQuery};
 use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim, wp_array_set};
 use hyscribe_theme_json::kebab_case;
 
@@ -242,7 +242,7 @@ impl Renderer<'_> {
     fn pages(&self) -> Vec<Post> {
         get_page_children(self.context.site.query(&PostQuery {
             post_types: vec!["page".to_string()],
-            by_menu_order: true,
+            order: vec![(OrderBy::MenuOrder, true), (OrderBy::Title, true)],
             limit: u32::MAX,
             ..PostQuery::default()
         }))

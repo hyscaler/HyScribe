@@ -76,7 +76,7 @@ pub(crate) enum CommentsOf {
     /// A post's or page's, and whether a post (not a page) was asked for.
     Post(u64, bool),
     /// Those on the posts a search or archive matches.
-    Posts(PostQuery),
+    Posts(Box<PostQuery>),
 }
 
 /// The feed of `page`, with `comments` for a comment feed.
@@ -138,7 +138,7 @@ async fn listed(site: &Site, of: Option<CommentsOf>) -> Result<Option<Comments>,
             ..PostQuery::default()
         }),
         CommentsOf::Post(..) => None,
-        CommentsOf::Posts(query) => Some(query),
+        CommentsOf::Posts(query) => Some(*query),
     };
     let posts = match (query, &list) {
         (Some(query), Ok(list)) => {

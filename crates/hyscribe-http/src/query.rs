@@ -28,16 +28,6 @@ pub fn date_parts(m: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
     (year, part(4..6), part(6..8))
 }
 
-/// Search terms as WordPress splits them: on spaces, tabs, commas and plus
-/// signs. Stopword removal comes with i18n (M9.4).
-pub fn search_terms(search: &str) -> Vec<String> {
-    search
-        .split([' ', '\t', ',', '+'])
-        .filter(|term| !term.is_empty())
-        .map(String::from)
-        .collect()
-}
-
 /// WordPress's `absint()` on request input.
 pub fn absint(value: &str) -> u64 {
     hyscribe_phpser::absint(&hyscribe_phpser::Value::String(value.as_bytes().to_vec()))

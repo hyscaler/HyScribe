@@ -116,8 +116,6 @@ pub struct PostQuery {
     pub post_types: Vec<String>,
     /// Search terms; every term must appear in the title, excerpt or content.
     pub search: Vec<String>,
-    /// A category's `term_id`.
-    pub category: Option<u64>,
     /// `YEAR(post_date)`.
     pub year: Option<u64>,
     /// `MONTH(post_date)`.
@@ -128,13 +126,56 @@ pub struct PostQuery {
     pub include: Option<Vec<u64>>,
     /// `post__not_in`.
     pub exclude: Vec<u64>,
-    /// Oldest first, where WordPress defaults to newest first.
-    pub ascending: bool,
-    /// By `menu_order` then title, as `get_pages()` sorts, in place of the
-    /// date and search relevance orders; `ascending` is then ignored.
-    pub by_menu_order: bool,
+    /// `author__in`: posts by any of these users; none means any author.
+    pub authors: Vec<u64>,
+    /// `post_parent__in`: children of any of these posts; none means any
+    /// parent.
+    pub parents: Vec<u64>,
+    /// `tax_query` clauses, all of which a post must meet.
+    pub terms: Vec<TermFilter>,
+    /// The sort, each column ascending when its flag is set; none means
+    /// newest first.
+    pub order: Vec<(OrderBy, bool)>,
     /// How many posts.
     pub limit: u32,
     /// How many to skip.
     pub offset: u32,
+}
+
+/// A `tax_query` clause on term IDs, without children.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TermFilter {
+    /// The taxonomy, such as `category`.
+    pub taxonomy: String,
+    /// `term_id`s; IDs not in the taxonomy are ignored.
+    pub terms: Vec<u64>,
+    /// `NOT IN`: posts with none of the terms, where `IN` wants one.
+    pub exclude: bool,
+}
+
+/// A column `WP_Query` sorts by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OrderBy {
+    /// `post_date`.
+    Date,
+    /// `post_title`.
+    Title,
+    /// `post_modified`.
+    Modified,
+    /// `post_name`.
+    Name,
+    /// `post_author`.
+    Author,
+    /// `post_parent`.
+    Parent,
+    /// `post_type`.
+    Type,
+    /// `ID`.
+    Id,
+    /// `menu_order`.
+    MenuOrder,
+    /// `comment_count`.
+    CommentCount,
+    /// A search's relevance: titles containing the whole search first.
+    Relevance,
 }

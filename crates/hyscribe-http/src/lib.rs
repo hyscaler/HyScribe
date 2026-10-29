@@ -554,6 +554,8 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
         queried_object_id: post.id,
         post: Some(post.id),
         paged: paging.paged,
+        // A singular query has no limit: it found its one post.
+        found_posts: 1,
         now: now(),
         ..Request::default()
     };
@@ -697,6 +699,7 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
         paged: paging.paged,
         page: paging.page,
         max_pages: found.div_ceil(u64::from(post_query.limit)),
+        found_posts: found,
         now: now(),
         posts,
         ..Request::default()

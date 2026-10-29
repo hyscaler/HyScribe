@@ -599,6 +599,12 @@ async fn routes_give_the_request_state() {
     let home = list(&site, &HashMap::new(), false).await.unwrap();
     assert!(home.request.front_page && home.request.home && home.request.now > recent);
     assert_eq!(home.request.post, Some(1));
+    let search = HashMap::from([("s".to_string(), "a".to_string())]);
+    let search = list(&site, &search, false).await.unwrap();
+    assert_eq!(
+        (search.request.found_posts, search.request.max_pages),
+        (2, 1)
+    );
     let post = site.db.post(1).await.unwrap().unwrap();
     let single = single_page(&site, post, Paging::default());
     assert_eq!(
@@ -606,6 +612,7 @@ async fn routes_give_the_request_state() {
         (1, Some(1))
     );
     assert!(single.request.singular && single.request.now > recent);
+    assert_eq!(single.request.found_posts, 1);
     let missing = not_found(&site, false);
     assert!(missing.request.not_found && missing.request.now > recent);
 }
@@ -636,6 +643,12 @@ async fn reads_come_from_the_database_once() {
             reads.query(&query).iter().map(|p| p.id).collect::<Vec<_>>(),
             [2]
         );
+        let both = PostQuery {
+            post_types: vec!["post".into(), "page".into()],
+            limit: 1,
+            ..PostQuery::default()
+        };
+        assert_eq!(reads.count_posts(&both), 2);
         let later = hyscribe_model::Post {
             id: 999,
             date: "2099-01-01 00:00:00".into(),

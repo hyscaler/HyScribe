@@ -18,7 +18,7 @@ use crate::kses::wp_kses_post;
 use crate::link;
 use crate::media::Loading;
 use crate::post::{the_title, title_filters};
-use crate::query_loop::query_posts;
+use crate::query_loop::{inherits, own_query, query_posts, query_vars};
 use crate::registry::block_type;
 use crate::site::{Archive, Request, Site};
 use crate::supports::get_block_wrapper_attributes;
@@ -100,6 +100,7 @@ pub(crate) fn render(
         "core/query-no-results" => query_no_results,
         "core/query-pagination" => query_pagination,
         "core/query-title" => query_title,
+        "core/query-total" => query_total,
         "core/read-more" => read_more,
         "core/site-tagline" => site_tagline,
         "core/term-description" => term_description,
@@ -1177,6 +1178,45 @@ fn query_no_results(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         b"</div>",
     ]
     .concat()
+}
+
+/// `render_block_core_query_total()`: the main query's count, or that of a
+/// query of its own on its first page, the only one served yet.
+fn query_total(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let request = context.request;
+    // PHP's integers: `(int) get( 'posts_per_page' )` may be -1.
+    let (found, per_page, page) = if inherits(context) {
+        let option = context.site.option("posts_per_page").unwrap_or_default();
+        let page = i64::try_from(request.paged.max(1)).unwrap_or(i64::MAX);
+        (request.found_posts, Value::String(option).to_int(), page)
+    } else {
+        let vars = query_vars(context, own_query(context));
+        // set_found_posts() leaves 0 when the page has no posts.
+        let found = if context.site.query(&vars).is_empty() {
+            0
+        } else {
+            context.site.count_posts(&vars)
+        };
+        (found, i64::from(vars.limit), 1)
+    };
+    let found = i64::try_from(found).unwrap_or(i64::MAX);
+    let start = if found == 0 {
+        0
+    } else {
+        (page - 1) * per_page + 1
+    };
+    let end = (start + per_page - 1).min(found);
+    let text = match block
+        .attribute("displayType")
+        .map(Value::to_php_string)
+        .as_deref()
+    {
+        Some(b"range-display") if start == end => format!("Displaying {start} of {found}"),
+        Some(b"range-display") => format!("Displaying {start} – {end} of {found}"),
+        _ if found == 1 => "1 result found".to_string(),
+        _ => format!("{found} results found"),
+    };
+    element(b"div", &block.wrapper(context, b""), text.as_bytes())
 }
 
 /// `render_block_core_query_pagination()`.

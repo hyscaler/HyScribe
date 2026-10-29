@@ -11,6 +11,7 @@ use hyscribe_phpser::{
 use crate::blocks::Block;
 use crate::core_blocks::{number_format, prepared, render};
 use crate::formatting::{encode_ampersands, html_entity_decode};
+use crate::query_loop::inherits;
 use crate::site::Request;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
@@ -31,7 +32,7 @@ impl Renderer<'_> {
     pub(crate) fn query_pagination_previous(&self, block: &Block) -> Vec<u8> {
         let request = self.context.request;
         // get_previous_posts_link()
-        if !self.inherits() || is_single(request) || request.paged <= 1 {
+        if !inherits(&self.context) || is_single(request) || request.paged <= 1 {
             return Vec::new();
         }
         let name = "core/query-pagination-previous";
@@ -46,7 +47,7 @@ impl Renderer<'_> {
         let request = self.context.request;
         // get_next_posts_link(), up to the query's `pages` if fewer
         let next = request.paged.max(1) + 1;
-        if !self.inherits() || is_single(request) || next > self.total() {
+        if !inherits(&self.context) || is_single(request) || next > self.total() {
             return Vec::new();
         }
         let name = "core/query-pagination-next";
@@ -58,7 +59,7 @@ impl Renderer<'_> {
 
     /// `render_block_core_query_pagination_numbers()`.
     pub(crate) fn query_pagination_numbers(&self, block: &Block) -> Vec<u8> {
-        if !self.inherits() {
+        if !inherits(&self.context) {
             return Vec::new();
         }
         let name = "core/query-pagination-numbers";
@@ -79,15 +80,6 @@ impl Renderer<'_> {
             b"</div>",
         ]
         .concat()
-    }
-
-    /// The `query.inherit` context.
-    fn inherits(&self) -> bool {
-        self.context
-            .query
-            .as_ref()
-            .and_then(|q| q.query.get_str("inherit"))
-            .is_some_and(|v| !v.is_empty())
     }
 
     /// The pages there are: `max_num_pages`, or the query's `pages` when

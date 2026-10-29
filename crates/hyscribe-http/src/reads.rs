@@ -112,6 +112,10 @@ impl RenderSite for Reads<'_> {
         self.wait(self.site.db.posts(query))
     }
 
+    fn count_posts(&self, query: &PostQuery) -> u64 {
+        self.wait(self.site.db.count_posts(query))
+    }
+
     fn adjacent_post(
         &self,
         post: &Post,

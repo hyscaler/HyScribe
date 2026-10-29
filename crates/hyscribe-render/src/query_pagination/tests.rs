@@ -41,6 +41,7 @@ fn matches_php() {
             uri: state.get_str("uri").unwrap().to_php_string(),
             paged: number("paged"),
             max_pages: number("max"),
+            found_posts: number("found"),
             ..base
         };
         let ours = render_content(&theme, &site, &request, &markup);
@@ -61,5 +62,19 @@ fn matches_php() {
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(count, 176);
+    assert_eq!(count, 420);
+}
+
+/// `found_posts` counts every page's posts, whatever page the query asks for.
+#[test]
+fn count_posts_counts_every_page() {
+    use crate::site::Site;
+    let site = DefaultInstall { home: Vec::new() };
+    let query = hyscribe_model::PostQuery {
+        post_types: vec!["post".into(), "page".into()],
+        limit: 1,
+        offset: 1,
+        ..Default::default()
+    };
+    assert_eq!(site.count_posts(&query), 2);
 }

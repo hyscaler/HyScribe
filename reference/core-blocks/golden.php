@@ -288,13 +288,15 @@ $pagination_markups = array(
 	'<!-- wp:query-pagination {"paginationArrow":"chevron","showLabel":false} --><!-- wp:query-pagination-previous {"label":"Back & <b>forth</b>"} /--><!-- wp:query-pagination-next {"label":"On"} /--><!-- /wp:query-pagination -->',
 	'<!-- wp:query-pagination --><!-- wp:query-pagination-numbers {"midSize":0} /--><!-- wp:query-pagination-next {"label":"&amp; more"} /--><!-- /wp:query-pagination -->',
 	'<!-- wp:query-pagination-previous /--><!-- wp:query-pagination-numbers {"midSize":-1} /--><!-- wp:query-pagination-next /-->',
+	'<!-- wp:query-total /--><!-- wp:query-total {"displayType":"range-display","fontSize":"small"} /-->',
 );
-foreach ( array( '{"inherit":true}', '{"pages":3,"inherit":true}', '{"inherit":false}', '{"pages":-1,"inherit":true}' ) as $case_query_attr ) {
+foreach ( array( '{"inherit":true}', '{"pages":3,"inherit":true}', '{"inherit":false}', '{"pages":-1,"inherit":true}', '{"perPage":1,"offset":5,"inherit":false}', '{"perPage":"0","inherit":false}' ) as $case_query_attr ) {
 	foreach ( $pagination_markups as $inner ) {
 		$markup = '<!-- wp:query {"query":' . $case_query_attr . '} --><div class="wp-block-query">' . $inner . '</div><!-- /wp:query -->';
-		foreach ( array( array( '/', 0, 1 ), array( '/', 1, 2 ), array( '/?paged=2', 2, 2 ), array( '/?s=a+b%20c&paged=3', 3, 5 ), array( '/?cat=1', 1, 10 ), array( '/?paged=6&x=%26', 6, 10 ), array( '/?paged=10', 10, 10 ), array( '/?paged=999', 999, 1200 ), array( '/?p=1&paged=2', 2, 3 ), array( '/BLOG/?s=x&paged=3', 3, 4, 'http://127.0.0.1:8081/blog' ), array( '/x/y?paged=2', 2, 3 ) ) as $case ) {
+		foreach ( array( array( '/', 0, 1 ), array( '/', 1, 2 ), array( '/?paged=2', 2, 2 ), array( '/?s=a+b%20c&paged=3', 3, 5 ), array( '/?cat=1', 1, 10 ), array( '/?paged=6&x=%26', 6, 10 ), array( '/?paged=10', 10, 10 ), array( '/?paged=999', 999, 1200 ), array( '/?p=1&paged=2', 2, 3 ), array( '/BLOG/?s=x&paged=3', 3, 4, 'http://127.0.0.1:8081/blog' ), array( '/x/y?paged=2', 2, 3 ), array( '/', 0, 0, null, 0 ), array( '/?paged=1', 1, 1, null, 1 ), array( '/?paged=2', 2, 2, null, 11 ) ) as $case ) {
 			list( $case_uri, $case_paged, $case_max ) = $case;
 			$case_home   = $case[3] ?? 'http://127.0.0.1:8081';
+			$case_found  = $case[4] ?? $case_max * 10 - 7;
 			$home_filter = static fn( $url ) => str_replace( 'http://127.0.0.1:8081', $case_home, $url );
 			add_filter( 'home_url', $home_filter );
 			$GLOBALS['wp'] = new WP();
@@ -302,9 +304,10 @@ foreach ( array( '{"inherit":true}', '{"pages":3,"inherit":true}', '{"inherit":f
 			$_SERVER['REQUEST_URI'] = $case_uri;
 			$GLOBALS['wp_query']->set( 'paged', $case_paged );
 			$GLOBALS['wp_query']->max_num_pages = $case_max;
+			$GLOBALS['wp_query']->found_posts   = $case_found;
 			// The global WP::register_globals() sets.
 			$GLOBALS['paged'] = $case_paged;
-			$state            = array( 'uri' => $case_uri, 'paged' => $case_paged, 'max' => $case_max, 'single' => is_single(), 'home' => home_url() );
+			$state            = array( 'uri' => $case_uri, 'paged' => $case_paged, 'max' => $case_max, 'single' => is_single(), 'home' => home_url(), 'found' => $case_found );
 			echo 'pagination', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( do_blocks( $markup ) ), "\n";
 			remove_filter( 'home_url', $home_filter );
 		}

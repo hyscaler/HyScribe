@@ -152,17 +152,28 @@ impl Renderer<'_> {
 /// The posts a query block's descendants list: the main query's when the
 /// query inherits it, else those its own arguments find.
 pub(crate) fn query_posts(context: &Context<'_>) -> Vec<Post> {
-    let query = context.query.as_ref().map_or(&Value::Null, |q| &q.query);
-    if query.get_str("inherit").is_some_and(|v| !v.is_empty()) {
+    if inherits(context) {
         context.request.posts.clone()
     } else {
-        context.site.query(&query_vars(context, query))
+        context.site.query(&query_vars(context, own_query(context)))
     }
+}
+
+/// The `query.inherit` context: the query block lists the main query's posts.
+pub(crate) fn inherits(context: &Context<'_>) -> bool {
+    own_query(context)
+        .get_str("inherit")
+        .is_some_and(|v| !v.is_empty())
+}
+
+/// The `query` context, the query block's arguments.
+pub(crate) fn own_query<'a>(context: &'a Context<'_>) -> &'a Value {
+    context.query.as_ref().map_or(&Value::Null, |q| &q.query)
 }
 
 /// `build_query_vars_from_query_block( $block, 1 )`, for the arguments
 /// listed in the module documentation.
-fn query_vars(context: &Context<'_>, query: &Value) -> PostQuery {
+pub(crate) fn query_vars(context: &Context<'_>, query: &Value) -> PostQuery {
     let site = context.site;
     let field = |name| query.get_str(name).filter(|v| **v != Value::Null);
     let post_type = field("postType")
@@ -197,7 +208,10 @@ fn query_vars(context: &Context<'_>, query: &Value) -> PostQuery {
         .filter(|_| field("excludeCurrent").is_some_and(|v| !v.is_empty()));
     vars.exclude.extend(current);
     if let Some(per_page) = field("perPage").filter(|v| v.is_numeric()) {
-        vars.limit = absint(per_page) as u32;
+        // A count of 0 is empty(), and WP_Query takes the option's.
+        vars.limit = Some(absint(per_page) as u32)
+            .filter(|&n| n != 0)
+            .unwrap_or(vars.limit);
         vars.offset = field("offset").filter(|v| v.is_numeric()).map_or(0, absint) as u32;
     }
     vars.ascending = field("order").is_some_and(|v| v.to_php_string().eq_ignore_ascii_case(b"asc"));

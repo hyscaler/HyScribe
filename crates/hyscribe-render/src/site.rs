@@ -25,6 +25,16 @@ pub trait Site {
     /// The published posts a `WP_Query` with `query`'s arguments finds.
     fn query(&self, query: &PostQuery) -> Vec<Post>;
 
+    /// `found_posts` of that query: its posts on every page.
+    fn count_posts(&self, query: &PostQuery) -> u64 {
+        let all = PostQuery {
+            limit: u32::MAX,
+            offset: 0,
+            ..query.clone()
+        };
+        self.query(&all).len() as u64
+    }
+
     /// A post's approved comments, oldest first, then by ID. Sites without
     /// comment data have none.
     fn comments(&self, _post_id: u64) -> Vec<Comment> {
@@ -67,6 +77,8 @@ pub struct Request {
     pub paged: u64,
     /// `$wp_query->max_num_pages`.
     pub max_pages: u64,
+    /// `$wp_query->found_posts`.
+    pub found_posts: u64,
     /// `get_queried_object_id()`
     pub queried_object_id: u64,
     /// The global `$post`: the main query's first post, which top-level

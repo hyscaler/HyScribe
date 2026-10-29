@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! json_decode accepts any bytes, and whatever it decodes serializes and
-//! reads back.
+//! json_decode accepts any bytes, whatever it decodes serializes and reads
+//! back, and its JSON encoding is stable.
 
 #![no_main]
 
@@ -14,9 +14,15 @@ fuzz_target!(|data: &[u8]| {
         if let Ok(decoded) = hyscribe_phpser::decode(&encoded) {
             assert_eq!(decoded, value);
         }
-        // What decodes encodes back to JSON that decodes the same.
-        if let Some(json) = hyscribe_phpser::json_encode(&value) {
-            assert_eq!(hyscribe_phpser::json_decode(&json), Some(value));
+        // What decodes encodes to JSON that decodes, and the encoding
+        // settles after one more round. Not at once: as in PHP, `-0.0`
+        // encodes as `-0`, which decodes as the int 0 and encodes as `0`.
+        let round = |json: &[u8]| {
+            let decoded = hyscribe_phpser::json_decode(json).expect("encoded JSON decodes");
+            hyscribe_phpser::json_encode(&decoded)
+        };
+        if let Some(once) = hyscribe_phpser::json_encode(&value).and_then(|json| round(&json)) {
+            assert_eq!(round(&once), Some(once));
         }
     }
 });

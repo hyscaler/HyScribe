@@ -133,9 +133,15 @@ pub struct PostQuery {
     pub parents: Vec<u64>,
     /// `tax_query` clauses, all of which a post must meet.
     pub terms: Vec<TermFilter>,
+    /// The post format filter, when set.
+    pub formats: Option<FormatFilter>,
     /// The sort, each column ascending when its flag is set; none means
     /// newest first.
     pub order: Vec<(OrderBy, bool)>,
+    /// Sticky posts to put first, as `WP_Query` does on the first page of a
+    /// home list: those the query found, in its order, then the others not
+    /// excluded, newest first.
+    pub sticky: Vec<u64>,
     /// How many posts.
     pub limit: u32,
     /// How many to skip.
@@ -151,6 +157,15 @@ pub struct TermFilter {
     pub terms: Vec<u64>,
     /// `NOT IN`: posts with none of the terms, where `IN` wants one.
     pub exclude: bool,
+}
+
+/// Posts with any of these post formats.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FormatFilter {
+    /// `standard`: posts without a format.
+    pub standard: bool,
+    /// Format term slugs, such as `post-format-aside`.
+    pub slugs: Vec<String>,
 }
 
 /// A column `WP_Query` sorts by.

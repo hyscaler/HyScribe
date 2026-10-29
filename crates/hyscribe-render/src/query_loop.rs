@@ -4,14 +4,13 @@
 //! block context, and `core/post-template`, which renders its inner blocks
 //! once for each post the query finds.
 //!
-//! Of `build_query_vars_from_query_block()`, everything but the post format
-//! filter is ported; of the `WP_Query` it builds, sticky posts at the top of
-//! the list, random order, the `post__in` orders and the unsorted order of an
+//! `build_query_vars_from_query_block()` is ported; of the `WP_Query` it
+//! builds, random order, the `post__in` orders and the unsorted order of an
 //! `orderBy` array without an allowed key are not yet.
 
 use hyscribe_html::TagProcessor;
 use hyscribe_kses::esc_attr;
-use hyscribe_model::{OrderBy, Post, PostQuery, TermFilter};
+use hyscribe_model::{FormatFilter, OrderBy, Post, PostQuery, TermFilter};
 use hyscribe_phpser::{Key, Value, absint, decode, isset, php_trim, urldecode};
 
 use crate::blocks::Block;
@@ -185,10 +184,15 @@ pub(crate) fn own_page(context: &Context<'_>) -> (Vec<u8>, i64) {
 /// `max_num_pages`, with `found_posts` 0 when the page has no posts.
 pub(crate) fn own_counts(context: &Context<'_>, page: i64) -> (u64, i64, i64) {
     let vars = query_vars(context, own_query(context), page);
-    let found = if context.site.query(&vars).is_empty() {
+    // `found_posts` is set before the sticky posts are added.
+    let unstuck = PostQuery {
+        sticky: vec![],
+        ..vars.clone()
+    };
+    let found = if context.site.query(&unstuck).is_empty() {
         0
     } else {
-        context.site.count_posts(&vars)
+        context.site.count_posts(&unstuck)
     };
     let max = found.div_ceil(u64::from(vars.limit).max(1));
     (
@@ -210,8 +214,7 @@ pub(crate) fn own_query<'a>(context: &'a Context<'_>) -> &'a Value {
     context.query.as_ref().map_or(&Value::Null, |q| &q.query)
 }
 
-/// `build_query_vars_from_query_block( $block, 1 )`, for the arguments
-/// listed in the module documentation.
+/// `build_query_vars_from_query_block( $block, $page )`.
 pub(crate) fn query_vars(context: &Context<'_>, query: &Value, page: i64) -> PostQuery {
     let site = context.site;
     let field = |name| query.get_str(name).filter(|v| **v != Value::Null);
@@ -226,19 +229,23 @@ pub(crate) fn query_vars(context: &Context<'_>, query: &Value, page: i64) -> Pos
         )) as u32,
         ..PostQuery::default()
     };
-    let sticky = || {
-        let stored = site.option("sticky_posts").unwrap_or_default();
-        ids(&decode(&stored).unwrap_or(Value::Null))
-    };
-    match field("sticky")
+    let sticky = || sticky_posts(&site.option("sticky_posts").unwrap_or_default());
+    let ignore_sticky = match field("sticky")
         .filter(|v| !v.is_empty())
         .map(Value::to_php_string)
         .as_deref()
     {
-        Some(b"only") => vars.include = Some(sticky()),
-        Some(b"exclude") => vars.exclude.extend(sticky()),
-        _ => {}
-    }
+        Some(b"only") => {
+            vars.include = Some(sticky());
+            true
+        }
+        Some(b"exclude") => {
+            vars.exclude.extend(sticky());
+            false
+        }
+        Some(b"ignore") => true,
+        _ => false,
+    };
     if let Some(exclude) = field("exclude").filter(|v| !v.is_empty()) {
         vars.exclude.extend(ids(exclude));
     }
@@ -259,6 +266,7 @@ pub(crate) fn query_vars(context: &Context<'_>, query: &Value, page: i64) -> Pos
         vars.offset = u32::try_from(start.unsigned_abs()).unwrap_or(u32::MAX);
     }
     vars.terms = term_filters(query);
+    vars.formats = field("format").and_then(format_filter);
     let ascending = field("order").is_some_and(|v| v.to_php_string().eq_ignore_ascii_case(b"asc"));
     vars.order = field("orderBy").map_or_else(
         || vec![(OrderBy::Date, ascending)],
@@ -266,9 +274,7 @@ pub(crate) fn query_vars(context: &Context<'_>, query: &Value, page: i64) -> Pos
     );
     vars.authors = field("author").map(authors).unwrap_or_default();
     if let Some(search) = field("search").filter(|v| !v.is_empty()) {
-        // parse_search(): stripslashes(), then line breaks removed.
-        let mut text = stripslashes(&search.to_php_string());
-        text.retain(|&b| b != b'\r' && b != b'\n');
+        let text = stripslashes(&search.to_php_string());
         vars.search = search_terms(&String::from_utf8_lossy(&text));
         // Relevance first for `relevance`, or for an empty `orderBy`.
         if field("orderBy")
@@ -289,17 +295,122 @@ pub(crate) fn query_vars(context: &Context<'_>, query: &Value, page: i64) -> Pos
             })
             .unwrap_or_default();
     }
+    // A home list, which WP_Query puts sticky posts first in: no search, no
+    // single author, and no top level taxonomy clause but `NOT IN`; formats
+    // and other clauses together nest, so neither is top level.
+    let home = field("search").is_none_or(Value::is_empty)
+        && !matches!(field("author"), Some(&Value::Int(id)) if id > 0)
+        && vars.formats.as_ref().map_or_else(
+            || vars.terms.iter().all(|filter| filter.exclude),
+            |_| !vars.terms.is_empty(),
+        );
+    if home && !ignore_sticky {
+        vars.sticky = sticky();
+    }
     vars
 }
 
-/// Search terms as WordPress splits them: on spaces, tabs, commas and plus
-/// signs. Stopword removal comes with i18n (M9.4).
+/// The post format filter of `format`: `standard`, then the formats of
+/// `get_post_format_slugs()`, others left out.
+fn format_filter(format: &Value) -> Option<FormatFilter> {
+    const FORMATS: [&[u8]; 10] = [
+        b"standard",
+        b"aside",
+        b"chat",
+        b"gallery",
+        b"link",
+        b"image",
+        b"quote",
+        b"status",
+        b"video",
+        b"audio",
+    ];
+    let mut formats: Vec<Vec<u8>> = format
+        .as_array()?
+        .iter()
+        .map(|(_, format)| format.to_php_string())
+        .filter(|format| FORMATS.contains(&&format[..]))
+        .collect();
+    // Only the first `standard` is taken out of the list.
+    let standard = formats
+        .iter()
+        .position(|format| format == b"standard")
+        .map(|i| formats.remove(i))
+        .is_some();
+    let slugs: Vec<String> = formats
+        .iter()
+        .map(|format| format!("post-format-{}", String::from_utf8_lossy(format)))
+        .collect();
+    (standard || !slugs.is_empty()).then_some(FormatFilter { standard, slugs })
+}
+
+/// The post IDs of a stored `sticky_posts` option.
+pub fn sticky_posts(stored: &[u8]) -> Vec<u64> {
+    ids(&decode(stored).unwrap_or(Value::Null))
+}
+
+/// `WP_Query::parse_search()`'s terms: quoted phrases and words split on
+/// spaces, tabs, commas and plus signs, less single letters, dashes and the
+/// English stopwords; the whole search when that leaves none or more than
+/// nine.
 pub fn search_terms(search: &str) -> Vec<String> {
-    search
-        .split([' ', '\t', ',', '+'])
-        .filter(|term| !term.is_empty())
-        .map(String::from)
-        .collect()
+    const STOPWORDS: [&str; 29] = [
+        "about", "an", "are", "as", "at", "be", "by", "com", "for", "from", "how", "in", "is",
+        "it", "of", "on", "or", "that", "the", "this", "to", "was", "what", "when", "where", "who",
+        "will", "with", "www",
+    ];
+    let asked = !search.is_empty();
+    // There are no line breaks in a search field.
+    let search: String = search.chars().filter(|&c| c != '\r' && c != '\n').collect();
+    let terms: Vec<String> = search_matches(&search)
+        .into_iter()
+        .map(|term| {
+            // A closed quoted phrase keeps its spaces; only one ends in a quote.
+            let quoted = term.ends_with('"');
+            let strip: &[char] = if quoted {
+                &['"', '\'']
+            } else {
+                &['"', '\'', ' ']
+            };
+            term.trim_matches(strip).to_string()
+        })
+        .filter(|term| {
+            let single =
+                term.len() == 1 && term.bytes().all(|b| b.is_ascii_alphabetic() || b == b'-');
+            !term.is_empty()
+                && term != "0"
+                && !single
+                && !STOPWORDS.contains(&term.to_lowercase().as_str())
+        })
+        .collect();
+    if (terms.is_empty() && asked) || terms.len() > 9 {
+        return vec![search];
+    }
+    terms
+}
+
+/// The matches of `/".*?("|$)|((?<=[\t ",+])|^)[^\t ",+]+/` in `search`.
+fn search_matches(search: &str) -> Vec<&str> {
+    let delimiter = |c: char| matches!(c, '\t' | ' ' | '"' | ',' | '+');
+    let mut matches = Vec::new();
+    let mut rest = search;
+    // A word always follows a delimiter or the start, as the lookbehind wants.
+    while let Some(c) = rest.chars().next() {
+        let len = if c == '"' {
+            let close = rest.char_indices().skip(1).find(|&(_, c)| c == '"');
+            close.map_or(rest.len(), |(i, _)| i + 1)
+        } else {
+            rest.find(delimiter).unwrap_or(rest.len())
+        };
+        let (taken, left) = rest
+            .split_at_checked(len.max(c.len_utf8()))
+            .unwrap_or((rest, ""));
+        if len > 0 {
+            matches.push(taken);
+        }
+        rest = left;
+    }
+    matches
 }
 
 /// The `orderby` of `WP_Query` for `orderBy`: each allowed key of a
@@ -329,7 +440,7 @@ fn order_by(by: &Value, ascending: bool) -> Vec<(OrderBy, bool)> {
 }
 
 /// PHP's `stripslashes()`: a backslash escapes the next byte, `\0` is NUL.
-fn stripslashes(text: &[u8]) -> Vec<u8> {
+pub(crate) fn stripslashes(text: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut bytes = text.iter();
     while let Some(&b) = bytes.next() {

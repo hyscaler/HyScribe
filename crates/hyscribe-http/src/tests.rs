@@ -399,6 +399,8 @@ async fn archives_and_searches_match_wordpress_titles() {
 #[test]
 fn date_parts_follow_wp_query() {
     assert_eq!(date_parts("2026"), (Some(2026), None, None));
+    assert_eq!(date_parts("0"), (None, None, None));
+    assert_eq!(date_parts("00"), (Some(0), None, None));
     assert_eq!(date_parts("2026-10"), (Some(2026), Some(10), None));
     assert_eq!(date_parts("20261027"), (Some(2026), Some(10), Some(27)));
     assert_eq!(date_parts("202610271200"), (Some(2026), Some(10), Some(27)));
@@ -880,4 +882,32 @@ async fn search_feeds_are_not_sorted_by_relevance() {
     );
     assert!(post_query(&site, &query, true).order.is_empty());
     assert!(post_query(&site, &HashMap::new(), false).order.is_empty());
+}
+
+/// Sticky posts lead the home list's first page only.
+#[tokio::test]
+async fn the_home_list_puts_sticky_posts_first() {
+    let mut site = fixture_site(None).await;
+    Arc::get_mut(&mut site)
+        .unwrap()
+        .options
+        .insert("sticky_posts".into(), b"a:1:{i:0;i:1;}".to_vec());
+    let sticky = |pairs: &[(&str, &str)], feed| {
+        let query = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        post_query(&site, &query, feed).sticky
+    };
+    assert_eq!(sticky(&[], false), [1]);
+    assert_eq!(sticky(&[("paged", "1")], false), [1]);
+    for pairs in [
+        &[("paged", "2")][..],
+        &[("s", "x")],
+        &[("cat", "1")],
+        &[("m", "2026")],
+    ] {
+        assert!(sticky(pairs, false).is_empty(), "{pairs:?}");
+    }
+    assert!(sticky(&[], true).is_empty());
 }

@@ -360,11 +360,15 @@ $inserts = array(
 );
 $columns = array_flip( array( 'ID', 'post_author', 'post_title', 'post_date', 'post_date_gmt', 'post_modified', 'post_name', 'post_type', 'post_status', 'post_parent', 'menu_order', 'post_content' ) );
 $filter_posts = array();
+$formats_of   = array( 'Banana' => 'aside', 'Cherry' => 'quote' );
 foreach ( $inserts as $insert ) {
 	$id             = wp_insert_post( $insert + array( 'post_status' => 'publish', 'post_content' => '' ) );
+	if ( isset( $formats_of[ $insert['post_title'] ] ) ) {
+		set_post_format( $id, $formats_of[ $insert['post_title'] ] );
+	}
 	$row            = array_intersect_key( get_post( $id, ARRAY_A ), $columns );
 	$row['terms']   = array();
-	foreach ( array( 'category', 'post_tag' ) as $taxonomy ) {
+	foreach ( array( 'category', 'post_tag', 'post_format' ) as $taxonomy ) {
 		foreach ( wp_get_object_terms( $id, $taxonomy ) as $term ) {
 			$row['terms'][] = array( 'taxonomy' => $taxonomy, 'term_id' => $term->term_id, 'name' => $term->name, 'slug' => $term->slug );
 		}
@@ -387,6 +391,8 @@ $post_args = array(
 	'"taxQuery":{"include":{"category":[' . $fruit . ']},"post_tag":[' . $red . ']}', '"taxQuery":null',
 	'"categoryIds":[' . $fruit . ']', '"tagIds":[' . $red . ']', '"categoryIds":[1],"tagIds":[' . $red . ']', '"categoryIds":[]', '"categoryIds":["abc"]',
 	'"categoryIds":[' . $fruit . '],"taxQuery":{"exclude":{"post_tag":[' . $red . ']}}', '"parents":[2]',
+	'"format":["aside"]', '"format":["standard"]', '"format":["standard","quote"]', '"format":["nonsense"]', '"format":[]', '"format":"aside"',
+	'"format":["standard","standard"]', '"format":["quote","aside"]', '"format":["standard"],"categoryIds":[1]', '"format":["aside"],"taxQuery":{"exclude":{"category":[1]}}',
 );
 $page_args = array( '"parents":[2]', '"parents":[0]', '"parents":[2,0]', '"parents":["-2"]', '"parents":[]', '"orderBy":"menu_order","order":"asc"', '"orderBy":"menu_order title"', '"orderBy":"parent menu_order","order":"asc"' );
 $filter_cases = array();
@@ -400,15 +406,32 @@ $GLOBALS['wp'] = new WP();
 wp( '' );
 foreach ( $filter_cases as $args ) {
 	$markup = '<!-- wp:query {"query":{' . $args . ',"perPage":20,"inherit":false}} --><div class="wp-block-query"><!-- wp:post-template --><!-- wp:post-title /--><!-- /wp:post-template --></div><!-- /wp:query -->';
-	$state  = array( 'home' => home_url(), 'posts' => $filter_posts );
+	$state  = array( 'home' => home_url(), 'posts' => $filter_posts, 'sticky' => maybe_serialize( get_option( 'sticky_posts' ) ) );
 	echo 'filter', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( do_blocks( $markup ) ), "\n";
 }
+// The same posts with Apple and Hello world sticky.
+update_option( 'sticky_posts', array( $filter_posts[1]['ID'], 1 ) );
+$sticky_args = array(
+	'', '"perPage":1', '"perPage":2,"offset":2', '"sticky":"ignore"', '"sticky":"only"', '"sticky":"exclude"', '"exclude":[1]', '"search":"a"', '"search":" "',
+	'"author":1', '"author":[1]', '"author":"1"', '"taxQuery":{"exclude":{"post_tag":[' . $red . ']}}', '"taxQuery":{"include":{"category":[1]}}', '"categoryIds":[]',
+	'"format":["aside"]', '"order":"asc"', '"orderBy":"title","order":"asc"', '"postType":"page"', '"parents":[0]',
+	'"format":["aside"],"categoryIds":[1]', '"format":["aside"],"taxQuery":{"exclude":{"post_tag":[' . $red . ']}}', '"perPage":2,"offset":10',
+);
+foreach ( $sticky_args as $args ) {
+	$args   = '"postType":"post"' . ( '' === $args ? '' : ',' ) . $args;
+	$per    = str_contains( $args, 'perPage' ) ? '' : ',"perPage":20';
+	$markup = '<!-- wp:query {"query":{' . $args . $per . ',"inherit":false}} --><div class="wp-block-query"><!-- wp:post-template --><!-- wp:post-title /--><!-- /wp:post-template --><!-- wp:query-total /--></div><!-- /wp:query -->';
+	$state  = array( 'home' => home_url(), 'posts' => $filter_posts, 'sticky' => maybe_serialize( get_option( 'sticky_posts' ) ) );
+	echo 'filter', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( do_blocks( $markup ) ), "\n";
+}
+update_option( 'sticky_posts', array() );
 $wpdb->query( 'ROLLBACK' );
 foreach ( $filter_posts as $row ) {
 	clean_post_cache( $row['ID'] );
 }
 clean_term_cache( array( 1, $fruit ), 'category' );
 clean_term_cache( array( $red ), 'post_tag' );
+clean_taxonomy_cache( 'post_format' );
 
 // Page 3 of lists, and a child page: one post fills no second page, so
 // both are set on the query in memory.

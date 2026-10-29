@@ -17,11 +17,11 @@ pub fn other_args(raw_query: Option<&str>, names: &[&str]) -> String {
 }
 
 /// The `m` query var's date parts, as `WP_Query` reads them: digits only,
-/// `YYYY`, then `MM`, then `DD`.
+/// `YYYY`, then `MM`, then `DD`, none for `0`, which PHP takes as false.
 pub fn date_parts(m: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
     let digits: String = m.chars().filter(char::is_ascii_digit).collect();
     let part = |range: std::ops::Range<usize>| digits.get(range).and_then(|d| d.parse().ok());
-    if digits.is_empty() {
+    if digits.is_empty() || digits == "0" {
         return (None, None, None);
     }
     let year = part(0..4).or_else(|| digits.parse().ok());

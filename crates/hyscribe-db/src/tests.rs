@@ -5,7 +5,7 @@
 
 use super::*;
 use hyscribe_config::Secret;
-use hyscribe_model::TermFilter;
+use hyscribe_model::{FormatFilter, TermFilter};
 
 fn fixture_config() -> Database {
     hyscribe_testkit::fixture_database()
@@ -675,4 +675,114 @@ async fn archive_feed_comments() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn sticky_posts_come_first_and_formats_filter() {
+    let db = fixture().await;
+    let titles = |posts: Vec<Post>| {
+        posts
+            .iter()
+            .map(|p| String::from_utf8_lossy(&p.title).into_owned())
+            .collect::<Vec<_>>()
+    };
+    let query = |query: PostQuery| PostQuery {
+        post_types: vec!["post".into(), "page".into()],
+        order: vec![(OrderBy::Title, true)],
+        ..query
+    };
+    let cases = [
+        (
+            PostQuery {
+                limit: 10,
+                sticky: vec![2],
+                ..PostQuery::default()
+            },
+            &["Sample Page", "Hello world!"][..],
+        ),
+        // Missing from the page, so fetched.
+        (
+            PostQuery {
+                limit: 1,
+                sticky: vec![2],
+                ..PostQuery::default()
+            },
+            &["Sample Page", "Hello world!"],
+        ),
+        (
+            PostQuery {
+                limit: 1,
+                sticky: vec![2],
+                exclude: vec![2],
+                ..PostQuery::default()
+            },
+            &["Hello world!"],
+        ),
+        (
+            PostQuery {
+                limit: 10,
+                sticky: vec![999],
+                ..PostQuery::default()
+            },
+            &["Hello world!", "Sample Page"],
+        ),
+        (
+            PostQuery {
+                limit: 10,
+                formats: Some(FormatFilter {
+                    standard: true,
+                    slugs: vec![],
+                }),
+                ..PostQuery::default()
+            },
+            &["Hello world!", "Sample Page"],
+        ),
+        (
+            PostQuery {
+                limit: 10,
+                formats: Some(FormatFilter {
+                    standard: false,
+                    slugs: vec!["post-format-aside".into()],
+                }),
+                ..PostQuery::default()
+            },
+            &[],
+        ),
+        (
+            PostQuery {
+                limit: 10,
+                formats: Some(FormatFilter {
+                    standard: true,
+                    slugs: vec!["post-format-aside".into()],
+                }),
+                ..PostQuery::default()
+            },
+            &["Hello world!", "Sample Page"],
+        ),
+    ];
+    for (case, expected) in cases {
+        assert_eq!(
+            titles(db.posts(&query(case.clone())).await.unwrap()),
+            expected,
+            "{case:?}"
+        );
+    }
+    // A sticky page is not fetched for a list of posts.
+    let posts_only = PostQuery {
+        post_types: vec!["post".into()],
+        limit: 10,
+        sticky: vec![2],
+        ..PostQuery::default()
+    };
+    assert_eq!(
+        titles(db.posts(&posts_only).await.unwrap()),
+        ["Hello world!"]
+    );
+    // Sticky posts do not count toward `found_posts`.
+    let one = query(PostQuery {
+        limit: 1,
+        sticky: vec![2],
+        ..PostQuery::default()
+    });
+    assert_eq!(db.count_posts(&one).await.unwrap(), 2);
 }

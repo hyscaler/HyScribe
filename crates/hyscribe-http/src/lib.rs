@@ -24,10 +24,10 @@ use hyscribe_render::date::{self, Zone};
 use hyscribe_render::head::{wp_footer, wp_head};
 use hyscribe_render::link;
 use hyscribe_render::post::body_class;
-use hyscribe_render::search_terms;
 use hyscribe_render::site::{Archive, Request};
 use hyscribe_render::template::render_template;
 use hyscribe_render::theme::{Theme, twentytwentyfive};
+use hyscribe_render::{search_terms, sticky_posts};
 use tokio::net::TcpListener;
 
 mod feed;
@@ -598,6 +598,29 @@ fn post_query(site: &Site, query: &HashMap<String, String>, feed: bool) -> PostQ
         absint(&site.option("posts_per_page"))
     }
     .clamp(1, 100);
+    let terms: Vec<TermFilter> = query
+        .get("cat")
+        .map(|c| absint(c))
+        .filter(|&id| id > 0)
+        .map(|id| TermFilter {
+            taxonomy: "category".into(),
+            terms: vec![id],
+            exclude: false,
+        })
+        .into_iter()
+        .collect();
+    // The home list's first page puts sticky posts first.
+    let home = search.is_none() && !feed && year.is_none() && terms.is_empty();
+    let paged = Paging::of(query).paged;
+    let sticky = if home && paged <= 1 {
+        sticky_posts(
+            site.options
+                .get("sticky_posts")
+                .map_or(&[][..], Vec::as_slice),
+        )
+    } else {
+        vec![]
+    };
     PostQuery {
         post_types: if search.is_some() {
             vec!["post".into(), "page".into()]
@@ -611,22 +634,13 @@ fn post_query(site: &Site, query: &HashMap<String, String>, feed: bool) -> PostQ
         } else {
             vec![]
         },
-        terms: query
-            .get("cat")
-            .map(|c| absint(c))
-            .filter(|&id| id > 0)
-            .map(|id| TermFilter {
-                taxonomy: "category".into(),
-                terms: vec![id],
-                exclude: false,
-            })
-            .into_iter()
-            .collect(),
+        terms,
+        sticky,
         year,
         month,
         day,
         limit: u32::try_from(per_page).unwrap_or(10),
-        offset: u32::try_from(offset(Paging::of(query).paged, per_page)).unwrap_or(u32::MAX),
+        offset: u32::try_from(offset(paged, per_page)).unwrap_or(u32::MAX),
         ..PostQuery::default()
     }
 }

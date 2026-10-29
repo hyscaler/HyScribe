@@ -260,9 +260,35 @@ impl Db {
     }
 
     /// Published posts matching `query`, as the main query of a list page
-    /// (home, search, category or date archive) selects them.
+    /// (home, search, category or date archive) selects them, sticky posts
+    /// first.
     pub async fn posts(&self, query: &PostQuery) -> Result<Vec<Post>, DbError> {
-        let sql = posts_sql(query);
+        let found = self.select(posts_sql(query)).await?;
+        let (posts, rest): (Vec<Post>, Vec<Post>) = found
+            .into_iter()
+            .partition(|post| query.sticky.contains(&post.id));
+        let missing: Vec<u64> = query
+            .sticky
+            .iter()
+            .copied()
+            .filter(|id| !posts.iter().any(|post| post.id == *id) && !query.exclude.contains(id))
+            .collect();
+        let stickies = if missing.is_empty() {
+            Ok(Vec::new())
+        } else {
+            let stickies = PostQuery {
+                post_types: query.post_types.clone(),
+                limit: u32::MAX,
+                include: Some(missing),
+                ..PostQuery::default()
+            };
+            self.select(posts_sql(&stickies)).await
+        };
+        stickies.map(|stickies| posts.into_iter().chain(stickies).chain(rest).collect())
+    }
+
+    /// The posts `sql` selects.
+    async fn select(&self, sql: Sql) -> Result<Vec<Post>, DbError> {
         let rows = sql
             .query(&self.prefix)
             .fetch_all(&self.pool)
@@ -567,8 +593,8 @@ fn posts_sql(query: &PostQuery) -> Sql {
 }
 
 /// The `WHERE` criteria of [`posts_sql`]: published posts of the query's
-/// types (any, if none), authors, parents, terms, inclusions, search and
-/// date.
+/// types (any, if none), authors, parents, terms, formats, inclusions,
+/// search and date.
 fn post_criteria(sql: &mut Sql, query: &PostQuery) {
     sql.push("post_status = 'publish'");
     if !query.post_types.is_empty() {
@@ -596,6 +622,35 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
         );
         sql.bind(Bind::Text(filter.taxonomy.clone()));
         list(sql, ids_or_none(&filter.terms));
+        sql.push(")");
+    }
+    if let Some(formats) = &query.formats {
+        sql.push(" AND (");
+        if formats.standard {
+            sql.push(
+                "NOT EXISTS (SELECT 1 FROM {prefix}term_relationships tr \
+                 JOIN {prefix}term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id \
+                 WHERE tt.taxonomy = 'post_format' AND tr.object_id = {prefix}posts.ID)",
+            );
+        }
+        if !formats.slugs.is_empty() {
+            sql.push(if formats.standard {
+                " OR ID IN ("
+            } else {
+                "ID IN ("
+            });
+            sql.push(
+                "SELECT tr.object_id FROM {prefix}term_relationships tr \
+                 JOIN {prefix}term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id \
+                 JOIN {prefix}terms t ON t.term_id = tt.term_id \
+                 WHERE tt.taxonomy = 'post_format' AND t.slug IN (",
+            );
+            list(
+                sql,
+                formats.slugs.iter().map(|slug| Bind::Text(slug.clone())),
+            );
+            sql.push(")");
+        }
         sql.push(")");
     }
     if let Some(include) = &query.include {

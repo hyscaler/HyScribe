@@ -39,4 +39,4 @@ pub mod theme;
 mod title;
 mod variations;
 
-pub use query_loop::search_terms;
+pub use query_loop::{search_terms, sticky_posts};

@@ -92,12 +92,16 @@ fn sticky_posts_are_selected_or_left_out() {
 /// golden.sh` inserts for its `filter` cases, with their terms.
 struct Filtered {
     base: DefaultInstall,
+    sticky: Vec<u8>,
     posts: Vec<(hyscribe_model::Post, Vec<(String, hyscribe_model::Term)>)>,
 }
 
 impl crate::site::Site for Filtered {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
-        self.base.option(name)
+        match name {
+            "sticky_posts" => Some(self.sticky.clone()),
+            _ => self.base.option(name),
+        }
     }
     fn home_url(&self) -> Vec<u8> {
         self.base.home_url()
@@ -123,19 +127,14 @@ impl crate::site::Site for Filtered {
         let posts = self
             .base
             .query(&hyscribe_model::PostQuery {
+                post_types: vec!["post".into(), "page".into()],
                 limit: u32::MAX,
-                offset: 0,
-                terms: vec![],
-                ..query.clone()
+                ..Default::default()
             })
             .into_iter()
-            .chain(self.posts.iter().map(|(post, _)| post.clone()));
-        let has_term = |post: &hyscribe_model::Post, filter: &hyscribe_model::TermFilter| {
-            self.post_terms(post.id, &filter.taxonomy)
-                .iter()
-                .any(|term| filter.terms.contains(&term.id))
-        };
-        crate::fixture::select(posts, query, has_term)
+            .chain(self.posts.iter().map(|(post, _)| post.clone()))
+            .collect();
+        crate::fixture::select(posts, query, &|id, taxonomy| self.post_terms(id, taxonomy))
     }
 }
 
@@ -204,6 +203,7 @@ fn query_filters_match_php() {
             base: DefaultInstall {
                 home: state.get_str("home").unwrap().to_php_string(),
             },
+            sticky: state.get_str("sticky").unwrap().to_php_string(),
             posts,
         };
         let request = site.base.request("");
@@ -224,14 +224,33 @@ fn query_filters_match_php() {
         failures.len(),
         failures[..failures.len().min(4)].join("\n")
     );
-    assert_eq!(count, 66);
+    assert_eq!(count, 99);
 }
 
+/// Every case of `reference/search-terms/golden.sh`, through the query
+/// block's `stripslashes()`.
 #[test]
-fn search_terms_split_like_wordpress() {
-    use crate::query_loop::search_terms;
-    assert_eq!(search_terms("a b,c+d\te"), ["a", "b", "c", "d", "e"]);
-    assert!(search_terms("  ,+ ").is_empty());
+fn search_terms_match_php() {
+    use crate::query_loop::{search_terms, stripslashes};
+    use hyscribe_phpser::{Key, Value, json_encode};
+    let golden = include_str!("../../tests/golden/search-terms.tsv");
+    for line in golden.lines() {
+        let mut fields = line.split('\t').map(unhex);
+        let (search, php) = (fields.next().unwrap(), fields.next().unwrap());
+        let search = String::from_utf8(stripslashes(&search)).unwrap();
+        let terms = search_terms(&search)
+            .into_iter()
+            .enumerate()
+            .map(|(i, term)| (Key::Int(i as i64), Value::String(term.into_bytes())))
+            .collect();
+        assert_eq!(
+            json_encode(&Value::Array(terms)).unwrap(),
+            php,
+            "{search:?}"
+        );
+    }
+    assert_eq!(golden.lines().count(), 54);
+    assert!(search_terms("").is_empty());
 }
 
 /// `WP_Query::parse_orderby()`'s post columns, under both of their names.

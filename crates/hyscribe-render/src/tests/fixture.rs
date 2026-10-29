@@ -6,7 +6,7 @@
 use std::cmp::Ordering;
 use std::sync::OnceLock;
 
-use hyscribe_model::{Comment, OrderBy, Post, PostQuery, Term, TermFilter, User};
+use hyscribe_model::{Comment, FormatFilter, OrderBy, Post, PostQuery, Term, TermFilter, User};
 use hyscribe_phpser::Value;
 use hyscribe_testkit::{Dump, SqlValue, default_install};
 
@@ -299,31 +299,39 @@ impl Site for DefaultInstall {
     }
 
     fn query(&self, query: &PostQuery) -> Vec<Post> {
-        let dump = dump();
-        let has_term = |post: &Post, filter: &TermFilter| {
-            dump.table("wp_term_relationships")
-                .filter(|row| number(&row[0]) == post.id)
-                .any(|row| {
-                    dump.table("wp_term_taxonomy").any(|t| {
-                        number(&t[0]) == number(&row[1])
-                            && text(&t[2]) == filter.taxonomy.as_bytes()
-                            && filter.terms.contains(&number(&t[1]))
-                    })
-                })
-        };
-        select(dump.table("wp_posts").map(post), query, has_term)
+        select(
+            dump().table("wp_posts").map(post).collect(),
+            query,
+            &|id, taxonomy| self.post_terms(id, taxonomy),
+        )
     }
 }
 
-/// What `WP_Query` finds of `posts` for `query`, where `has_term` tells
-/// whether a post has one of a filter's terms. Searches ignore ASCII case;
-/// sorts compare bytes, not in the database's case-insensitive collation.
+/// What `WP_Query` finds of `posts` for `query`, with `terms_of` giving a
+/// post's terms in a taxonomy. Searches ignore ASCII case; sorts compare
+/// bytes, not in the database's case-insensitive collation.
 pub fn select(
-    posts: impl Iterator<Item = Post>,
+    posts: Vec<Post>,
     query: &PostQuery,
-    has_term: impl Fn(&Post, &TermFilter) -> bool,
+    terms_of: &dyn Fn(u64, &str) -> Vec<Term>,
 ) -> Vec<Post> {
-    let mut posts: Vec<Post> = posts
+    let has_term = |post: &Post, filter: &TermFilter| {
+        terms_of(post.id, &filter.taxonomy)
+            .iter()
+            .any(|term| filter.terms.contains(&term.id))
+    };
+    let has_format = |post: &Post, formats: &FormatFilter| {
+        let terms = terms_of(post.id, "post_format");
+        (formats.standard && terms.is_empty())
+            || terms.iter().any(|term| {
+                formats
+                    .slugs
+                    .iter()
+                    .any(|slug| slug.as_bytes() == term.slug)
+            })
+    };
+    let mut found: Vec<Post> = posts
+        .iter()
         .filter(|post| post.status == "publish" && query.post_types.contains(&post.post_type))
         .filter(|post| {
             query
@@ -335,6 +343,7 @@ pub fn select(
         .filter(|post| query.authors.is_empty() || query.authors.contains(&post.author))
         .filter(|post| query.parents.is_empty() || query.parents.contains(&post.parent))
         .filter(|post| query.terms.iter().all(|f| has_term(post, f) != f.exclude))
+        .filter(|post| query.formats.as_ref().is_none_or(|f| has_format(post, f)))
         .filter(|post| {
             query.search.iter().all(|term| {
                 [&post.title, &post.excerpt, &post.content]
@@ -342,6 +351,7 @@ pub fn select(
                     .any(|text| contains(text, term))
             })
         })
+        .cloned()
         .collect();
     let order = if query.order.is_empty() {
         &[(OrderBy::Date, false)][..]
@@ -349,7 +359,7 @@ pub fn select(
         &query.order[..]
     };
     let phrase = query.search.join(" ");
-    posts.sort_by(|a, b| {
+    found.sort_by(|a, b| {
         order
             .iter()
             .fold(Ordering::Equal, |done, &(column, ascending)| {
@@ -359,11 +369,32 @@ pub fn select(
                 })
             })
     });
-    posts
+    let page: Vec<Post> = found
         .into_iter()
         .skip(query.offset as usize)
         .take(query.limit as usize)
-        .collect()
+        .collect();
+    // Sticky posts first: those found, then the others not excluded.
+    let (mut stuck, rest): (Vec<Post>, Vec<Post>) = page
+        .into_iter()
+        .partition(|post| query.sticky.contains(&post.id));
+    let missing: Vec<u64> = query
+        .sticky
+        .iter()
+        .copied()
+        .filter(|id| !stuck.iter().any(|post| post.id == *id) && !query.exclude.contains(id))
+        .collect();
+    if !missing.is_empty() {
+        let stickies = PostQuery {
+            post_types: query.post_types.clone(),
+            limit: u32::MAX,
+            include: Some(missing),
+            ..PostQuery::default()
+        };
+        stuck.extend(select(posts, &stickies, terms_of));
+    }
+    stuck.extend(rest);
+    stuck
 }
 
 /// Whether `text` contains `term`, in any ASCII case.

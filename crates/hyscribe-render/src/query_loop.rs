@@ -16,6 +16,7 @@ use hyscribe_phpser::{Value, absint, decode, isset, php_trim};
 
 use crate::blocks::Block;
 use crate::core_blocks::{Context, QueryContext, prepared};
+use crate::elements::elements_class;
 use crate::formatting::sanitize_title;
 use crate::post::post_class;
 use crate::supports::get_block_wrapper_attributes;
@@ -129,7 +130,10 @@ impl Renderer<'_> {
                 String::new()
             };
             items.extend_from_slice(format!("<li{key} class=\"{}\">", esc_attr(&class)).as_bytes());
-            items.extend(self.saved_markup(block));
+            // Each post renders as a `core/null` block with the template's
+            // attributes, whose `render_block` filters see its class.
+            let content = self.saved_markup(block);
+            items.extend(elements_class(content, block));
             items.extend_from_slice(b"</li>");
         }
         self.context.post_id = outer;

@@ -163,6 +163,7 @@ fn matches_php() {
             ..Request::default()
         };
         let mut renderer = Renderer::new(&theme, &site, &request);
+        renderer.elements_id = state.get_str("elements").unwrap().to_int() as u64;
         if state.get_str("loop") == Some(&Value::Bool(true)) {
             renderer.context.loading = Loading::in_the_loop(true);
         }
@@ -196,5 +197,5 @@ fn matches_php() {
         failures.len(),
         failures[..failures.len().min(3)].join("\n")
     );
-    assert!(golden.lines().count() > 60);
+    assert_eq!(golden.lines().count(), 2045);
 }

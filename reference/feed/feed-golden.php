@@ -11,10 +11,6 @@
 define( 'DISABLE_WP_CRON', true );
 require '/var/www/html/wp-load.php';
 
-// The elements support (wp-elements-* classes) is not ported yet.
-remove_filter( 'render_block', 'wp_render_elements_class_name', 10 );
-remove_filter( 'render_block_data', 'wp_render_elements_support_styles', 10 );
-
 global $wpdb;
 $cases = array(
 	array(),

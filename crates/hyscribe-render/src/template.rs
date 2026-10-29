@@ -13,6 +13,7 @@ use hyscribe_phpser::{Value, is_empty_string, lookup, php_trim};
 
 use crate::blocks::{Block, parse_blocks};
 use crate::core_blocks::{self, Context};
+use crate::elements::elements_class;
 use crate::excerpt::visible;
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_smilies, wptexturize};
 use crate::head::Assets;
@@ -142,6 +143,8 @@ pub(crate) struct Renderer<'a> {
     pub(crate) parent_layout: Option<Value>,
     /// The last number `wp_unique_id()` gave out.
     pub(crate) unique_id: u64,
+    /// `wp_unique_prefixed_id( 'wp-elements-' )`'s counter.
+    pub(crate) elements_id: u64,
     /// How often each navigation name has been seen, for unique labels.
     pub(crate) navigation_names: HashMap<Vec<u8>, u64>,
     /// The attributes of the navigation block being rendered, its inner
@@ -186,6 +189,7 @@ impl<'a> Renderer<'a> {
             open_posts: Vec::new(),
             parent_layout: None,
             unique_id: 0,
+            elements_id: 0,
             navigation_names: HashMap::new(),
             navigation: None,
             has_submenus: false,
@@ -231,6 +235,8 @@ impl Renderer<'_> {
     }
 
     fn render_block(&mut self, block: &Block) -> Vec<u8> {
+        let styled = self.elements(block);
+        let block = styled.as_ref().unwrap_or(block);
         let varied = self.style_variation(block);
         let block = varied.as_ref().unwrap_or(block);
         let root_interactive = !self.in_interactive
@@ -285,6 +291,7 @@ impl Renderer<'_> {
         {
             self.assets.enqueue_style(handle);
         }
+        let html = elements_class(html, block);
         let html = self.layout(block, html);
         // The block visibility support hides a block set not to show.
         let hidden = block.name.as_deref().and_then(block_type).is_some() && !visible(block);

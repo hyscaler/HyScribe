@@ -4,7 +4,7 @@ use hyscribe_testkit::unhex;
 
 use crate::fixture::DefaultInstall;
 use crate::site::Request;
-use crate::template::render_content;
+use crate::template::{Renderer, render_content};
 use crate::theme::twentytwentyfive;
 
 /// The `query` cases of `reference/core-blocks/golden.sh`, on the fixture's
@@ -18,10 +18,13 @@ fn query_loops_match_php() {
         let mut fields = line.split('\t').skip(1).map(unhex);
         let mut field = || fields.next().unwrap();
         let (markup, request, home, php) = (field(), field(), field(), field());
+        let counter = String::from_utf8(field()).unwrap();
         let site = DefaultInstall { home };
         let request = String::from_utf8(request).unwrap();
         let request = site.request(&request);
-        let ours = render_content(&theme, &site, &request, &markup);
+        let mut renderer = Renderer::new(&theme, &site, &request);
+        renderer.elements_id = counter.parse().unwrap();
+        let ours = renderer.render(&markup);
         assert_eq!(
             String::from_utf8_lossy(&ours),
             String::from_utf8_lossy(&php),

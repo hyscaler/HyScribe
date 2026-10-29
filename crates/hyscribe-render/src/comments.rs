@@ -11,6 +11,7 @@ use hyscribe_phpser::{Value, is_empty_string};
 
 use crate::blocks::Block;
 use crate::comment_pages::{listed, paging};
+use crate::elements::elements_class;
 use crate::post::sanitize_html_class;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
@@ -78,7 +79,9 @@ impl Renderer<'_> {
         let mut content = Vec::new();
         for comment in comments {
             let outer = self.context.comment.replace((*comment).clone());
-            let mut html = self.saved_markup(block);
+            // Each comment renders as the template block again, whose
+            // `render_block` filters see its class.
+            let mut html = elements_class(self.saved_markup(block), block);
             self.context.comment = outer;
             let children: Vec<&Comment> = threads
                 .all

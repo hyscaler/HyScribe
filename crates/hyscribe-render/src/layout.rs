@@ -18,10 +18,10 @@ use crate::style::{declarations_string, parse_block_styles};
 /// A CSS rule as the style engine takes it.
 #[derive(Debug)]
 pub(crate) struct Rule {
-    selector: String,
-    declarations: Vec<(String, Value)>,
+    pub(crate) selector: String,
+    pub(crate) declarations: Vec<(String, Value)>,
     /// An at-rule the rule sits in, such as a container query.
-    group: Option<String>,
+    pub(crate) group: Option<String>,
 }
 
 fn rule(selector: String, declarations: &[(&str, Value)]) -> Rule {

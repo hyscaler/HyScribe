@@ -23,6 +23,21 @@ struct Block<'a> {
     global: &'a GlobalStyles,
 }
 
+/// `wp_should_skip_block_supports_serialization()`, as a condition.
+pub(crate) fn skips_serialization(
+    block_type: &BlockType,
+    feature_set: &str,
+    feature: Option<&str>,
+) -> bool {
+    match block_type.supports.get_path(&[feature_set, SKIP]) {
+        Some(Value::Array(features)) => {
+            let wanted = feature.map_or(Value::Null, string);
+            features.iter().any(|(_, f)| *f == wanted)
+        }
+        skip => truthy(skip),
+    }
+}
+
 /// What one support adds: attribute names and values.
 type Attributes = Vec<(&'static str, Value)>;
 
@@ -216,15 +231,8 @@ impl Block<'_> {
         })
     }
 
-    /// `wp_should_skip_block_supports_serialization()`, as a condition.
     fn skips(&self, feature_set: &str, feature: Option<&str>) -> bool {
-        match self.block_type.supports.get_path(&[feature_set, SKIP]) {
-            Some(Value::Array(features)) => {
-                let wanted = feature.map_or(Value::Null, string);
-                features.iter().any(|(_, f)| *f == wanted)
-            }
-            skip => truthy(skip),
-        }
+        skips_serialization(self.block_type, feature_set, feature)
     }
 
     /// `$block_attributes[...] ?? null`.

@@ -12,6 +12,7 @@ mod comments;
 mod content;
 mod core_blocks;
 pub mod date;
+mod elements;
 mod excerpt;
 pub mod feed;
 #[cfg(test)]

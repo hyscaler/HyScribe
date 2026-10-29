@@ -17,7 +17,7 @@
 require '/var/www/html/wp-load.php';
 
 // The elements support (wp-elements-* classes and styles) is checked on
-// its own; here the callbacks are.
+// its own; here the callbacks are, except in the query loops' do_blocks().
 remove_filter( 'render_block', 'wp_render_elements_class_name', 10 );
 remove_filter( 'render_block_data', 'wp_render_elements_support_styles', 10 );
 
@@ -260,13 +260,18 @@ $query_blocks = array(
 	'<!-- wp:query-title /-->',
 	'<!-- wp:query-title {"type":"other"} /-->',
 );
+add_filter( 'render_block', 'wp_render_elements_class_name', 10, 2 );
+add_filter( 'render_block_data', 'wp_render_elements_support_styles', 10, 1 );
 foreach ( array( '', 'p=1', 's=nothingmatches', 's=hello <b>"x"</b>', 'cat=1', 'm=2026', 'm=202610', 'm=20261027' ) as $case_query ) {
 	$GLOBALS['wp'] = new WP();
 	wp( $case_query );
 	foreach ( $query_blocks as $markup ) {
-		echo 'query', "\t", bin2hex( $markup ), "\t", bin2hex( $case_query ), "\t", bin2hex( home_url() ), "\t", bin2hex( do_blocks( $markup ) ), "\n";
+		$counter = substr( wp_unique_prefixed_id( 'wp-elements-' ), 12 );
+		echo 'query', "\t", bin2hex( $markup ), "\t", bin2hex( $case_query ), "\t", bin2hex( home_url() ), "\t", bin2hex( do_blocks( $markup ) ), "\t", bin2hex( $counter ), "\n";
 	}
 }
+remove_filter( 'render_block', 'wp_render_elements_class_name', 10 );
+remove_filter( 'render_block_data', 'wp_render_elements_support_styles', 10 );
 
 // get_body_class() for the requests the query cases use, and a paged one.
 foreach ( array( '', 'p=1', 'page_id=2', 'p=999', 's=hello', 's=nothingmatches', 'cat=1', 'cat=999', 'm=2026', 'm=202610', 'm=20261027', 'paged=1', 'paged=2', 'p=1&paged=2', 'cat=1&paged=3' ) as $case_query ) {

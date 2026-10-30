@@ -117,11 +117,23 @@ impl Request {
     }
 }
 
+/// The taxonomies a visitor can query.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Taxonomy {
+    /// `category`.
+    Category,
+    /// `post_tag`.
+    Tag,
+    /// `post_format`.
+    Format,
+}
+
 /// The archives the default install has.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Archive {
-    /// A category.
-    Category(Term),
+    /// A category, tag or post format archive, and its term, which a query
+    /// naming no term that exists lacks.
+    Term(Taxonomy, Option<Term>),
     /// `?m=YYYY`.
     Year,
     /// `?m=YYYYMM`.

@@ -7,7 +7,7 @@ use hyscribe_model::Post;
 use hyscribe_phpser::{Value, decode, php_trim};
 
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit_title, convert_chars, wptexturize};
-use crate::site::{Archive, Request, Site};
+use crate::site::{Archive, Request, Site, Taxonomy};
 
 /// `get_the_title( $post )` with the `the_title` filters.
 pub(crate) fn the_title(post: &Post) -> Vec<u8> {
@@ -150,6 +150,15 @@ fn term_class(slug: &[u8], id: u64) -> Vec<u8> {
     }
 }
 
+/// The body classes' name for an archive of `taxonomy`.
+fn archive_class(taxonomy: Taxonomy) -> &'static str {
+    match taxonomy {
+        Taxonomy::Category => "category",
+        Taxonomy::Tag => "tag",
+        Taxonomy::Format => "term",
+    }
+}
+
 /// `get_body_class()` for a visitor, with `template` as `get_template()`.
 /// Pages with child pages and page templates other than the default are
 /// not told apart yet.
@@ -206,10 +215,25 @@ pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8>
                 push(format!("parent-pageid-{}", post.parent).as_bytes());
             }
         }
-    } else if let Some(Archive::Category(term)) = &request.archive {
-        push(b"category");
-        push(&[b"category-", &term_class(&term.slug, term.id)[..]].concat());
-        push(format!("category-{}", term.id).as_bytes());
+    } else if let Some(Archive::Term(taxonomy, term)) = &request.archive {
+        let prefix = archive_class(*taxonomy);
+        if *taxonomy != Taxonomy::Format {
+            push(prefix.as_bytes());
+        }
+        if let Some(term) = term {
+            if *taxonomy == Taxonomy::Format {
+                push(b"tax-post_format");
+            }
+            push(
+                &[
+                    prefix.as_bytes(),
+                    b"-",
+                    &term_class(&term.slug, term.id)[..],
+                ]
+                .concat(),
+            );
+            push(format!("{prefix}-{}", term.id).as_bytes());
+        }
     }
     // Block themes support responsive embeds.
     push(b"wp-embed-responsive");
@@ -224,10 +248,12 @@ pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8>
         let kind = match (singular.map(|p| p.post_type.as_str()), &request.archive) {
             (Some("page"), _) => "page",
             (Some(_), _) => "single",
-            (None, Some(Archive::Category(_))) => "category",
-            (None, Some(_)) => "date",
-            (None, None) if request.search.is_some() => "search",
-            (None, None) => "",
+            (None, Some(Archive::Term(taxonomy, _))) if *taxonomy != Taxonomy::Format => {
+                archive_class(*taxonomy)
+            }
+            _ if request.date => "date",
+            _ if request.search.is_some() => "search",
+            _ => "",
         };
         if !kind.is_empty() {
             push(format!("{kind}-paged-{page}").as_bytes());

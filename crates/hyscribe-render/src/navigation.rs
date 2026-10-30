@@ -437,7 +437,7 @@ impl Renderer<'_> {
             Some(kind) => kind.to_php_string(),
             None => b"post_type".to_vec(),
         };
-        let queried_is_term = matches!(request.archive, Some(Archive::Category(_)));
+        let queried_is_term = matches!(request.archive, Some(Archive::Term(_, Some(_))));
         let kind_matches = match kind.as_slice() {
             b"post-type" | b"post_type" => !queried_is_term,
             b"taxonomy" => queried_is_term,

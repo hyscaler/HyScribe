@@ -1429,11 +1429,11 @@ fn site_tagline(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     element(&tag, &wrapper, &tagline)
 }
 
-/// `render_block_core_term_description()` on a category archive, its
+/// `render_block_core_term_description()` on a term archive, its
 /// description through the `term_description` display filters. The
 /// `termId` context comes with the term template, not ported yet.
 fn term_description(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
-    let Some(Archive::Category(term)) = &context.request.archive else {
+    let Some(Archive::Term(_, Some(term))) = &context.request.archive else {
         return Vec::new();
     };
     let text = wptexturize(&term.description, &CORE_SHORTCODE_TAGS);

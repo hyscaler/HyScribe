@@ -565,19 +565,38 @@ impl Db {
         row.as_ref().map(user).transpose()
     }
 
-    /// A category, if it exists.
-    pub async fn category(&self, term_id: u64) -> Result<Option<Term>, DbError> {
-        let sql = self.prefix.sql(
-            "SELECT t.term_id, t.name, t.slug, tt.description FROM {prefix}terms t \
+    /// The terms of `slugs`, `(taxonomy, slug)` pairs, and the categories
+    /// with `category_ids`, each with its taxonomy.
+    pub async fn find_terms(
+        &self,
+        slugs: &[(String, Vec<u8>)],
+        category_ids: &[u64],
+    ) -> Result<Vec<(String, Term)>, DbError> {
+        let mut sql = Sql::new(
+            "SELECT tt.taxonomy, t.term_id, t.name, t.slug, tt.description FROM {prefix}terms t \
              JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
-             WHERE tt.taxonomy = 'category' AND t.term_id = ? LIMIT 1",
+             WHERE (tt.taxonomy = 'category' AND t.term_id IN (",
         );
-        let row = sqlx::query(sql)
-            .bind(term_id)
-            .fetch_optional(&self.pool)
+        list(&mut sql, ids_or_none(category_ids));
+        sql.push(")");
+        for (taxonomy, slug) in slugs {
+            sql.push(" OR (tt.taxonomy = ? AND t.slug = ?)");
+            sql.bind(Bind::Text(taxonomy.clone()));
+            sql.bind(Bind::Text(String::from_utf8_lossy(slug).into_owned()));
+        }
+        let rows = sql
+            .query(&self.prefix)
+            .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
-        row.as_ref().map(term).transpose()
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let taxonomy = c.text("taxonomy");
+                c.finish(taxonomy)
+                    .and_then(|taxonomy| term(row).map(|term| (taxonomy, term)))
+            })
+            .collect()
     }
 
     /// `get_lastpostmodified( 'GMT' )`: the latest modified or published

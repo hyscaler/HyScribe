@@ -130,6 +130,75 @@ fn sanitize_html_class_like_php() {
     }
 }
 
+/// The body classes of term archives in `terms.tsv` from
+/// `reference/head/golden.sh`, over the terms of
+/// `reference/default-install/terms.sql`.
+#[test]
+fn term_archive_body_classes_match_php() {
+    let golden = include_str!("../../tests/golden/terms.tsv");
+    let site = crate::fixture::DefaultInstall { home: Vec::new() };
+    let term = |id, slug: &str| Term {
+        id,
+        slug: slug.into(),
+        ..Term::default()
+    };
+    let cases = [
+        (
+            "/?tag=foo",
+            Archive::Term(Taxonomy::Tag, Some(term(2, "foo"))),
+        ),
+        (
+            "/?m=2026&tag=foo",
+            Archive::Term(Taxonomy::Tag, Some(term(2, "foo"))),
+        ),
+        (
+            "/?post_format=aside",
+            Archive::Term(Taxonomy::Format, Some(term(3, "post-format-aside"))),
+        ),
+        (
+            "/?post_format=,post-format-aside",
+            Archive::Term(Taxonomy::Format, None),
+        ),
+        (
+            "/?s=hello&taxonomy=foo&term=x",
+            Archive::Term(Taxonomy::Format, None),
+        ),
+        (
+            "/?post_format=aside&page=2",
+            Archive::Term(Taxonomy::Format, Some(term(3, "post-format-aside"))),
+        ),
+        (
+            "/?tag=foo&page=2",
+            Archive::Term(Taxonomy::Tag, Some(term(2, "foo"))),
+        ),
+    ];
+    for (path, archive) in cases {
+        let line = golden
+            .lines()
+            .find(|line| {
+                line.starts_with(&format!("{}\t", hyscribe_phpser::bin2hex(path.as_bytes())))
+            })
+            .unwrap();
+        let page = String::from_utf8(unhex(line.rsplit('\t').next().unwrap())).unwrap();
+        let php = page
+            .split("<body class=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        let request = Request {
+            archive: Some(archive),
+            date: path.contains("m=2026"),
+            search: path.contains("s=hello").then(|| b"hello".to_vec()),
+            page: if path.ends_with("&page=2") { 2 } else { 0 },
+            ..Request::default()
+        };
+        let ours = body_class(&site, &request, "twentytwentyfive");
+        assert_eq!(String::from_utf8_lossy(&ours), php, "{path}");
+    }
+}
+
 /// The `body` cases of `reference/core-blocks/golden.sh`.
 #[test]
 fn body_classes_match_php() {

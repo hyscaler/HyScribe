@@ -5,7 +5,7 @@
 
 use super::*;
 use hyscribe_config::Secret;
-use hyscribe_model::{FormatFilter, TermFilter};
+use hyscribe_model::{FormatFilter, Term, TermFilter};
 
 fn fixture_config() -> Database {
     hyscribe_testkit::fixture_database()
@@ -69,11 +69,23 @@ async fn reads_the_default_install() {
     assert_eq!(hello.guid, b"http://default-install.test/?p=1");
     assert_eq!(db.post(999).await.unwrap(), None);
 
+    let found = |terms: Vec<(String, Term)>| -> Vec<(String, Vec<u8>)> {
+        terms
+            .into_iter()
+            .map(|(tax, term)| (tax, term.slug))
+            .collect()
+    };
+    let uncategorized = vec![("category".to_string(), b"uncategorized".to_vec())];
     assert_eq!(
-        db.category(1).await.unwrap().map(|term| term.slug),
-        Some(b"uncategorized".to_vec())
+        found(db.find_terms(&[], &[1, 999]).await.unwrap()),
+        uncategorized
     );
-    assert_eq!(db.category(999).await.unwrap(), None);
+    assert_eq!(
+        found(db.find_terms(&uncategorized, &[]).await.unwrap()),
+        uncategorized
+    );
+    let tag = [("post_tag".to_string(), b"uncategorized".to_vec())];
+    assert!(db.find_terms(&tag, &[]).await.unwrap().is_empty());
 }
 
 /// Titles of the posts `query` (with defaults for the rest) selects.
@@ -284,7 +296,7 @@ async fn errors_are_reported() {
         })
         .await
         .unwrap_err(),
-        db.category(1).await.unwrap_err(),
+        db.find_terms(&[], &[1]).await.unwrap_err(),
         db.option("blogname").await.unwrap_err(),
         db.post_meta(1, "x").await.unwrap_err(),
         db.post_terms(1, "category").await.unwrap_err(),

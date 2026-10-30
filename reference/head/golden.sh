@@ -8,7 +8,8 @@
 #   hex(path and query)<TAB>hex(head or footer)
 # and the whole page as pages.tsv,
 #   hex(path and query)<TAB>status<TAB>hex(page)
-# then paged.tsv and singular-pages.tsv, described where they are made.
+# then terms.tsv, paged.tsv and singular-pages.tsv, described where they
+# are made.
 # Needs the default install oracle running (reference/default-install/db.sh
 # up, then php.sh up). Page views write to the database, so start
 # from a fresh db.sh up.
@@ -39,7 +40,9 @@ for path in / '/?p=1' '/?page_id=2' '/?p=1&replytocom=1' '/?p=1&cpage=2' '/?p=1&
   '/?monthnum=12' '/?m=2026&monthnum=11' '/?m=202610&monthnum=11' '/?m=20261027&day=26' '/?m=202610&monthnum=10' '/?year=2000&monthnum=2&day=29' \
   '/?name=hello-world' '/?name=Hello-World' '/?name=hello%20world' '/?name=nope' '/?pagename=sample-page' '/?pagename=Sample-Page' \
   '/?pagename=/sample-page/' '/?pagename=nope' '/?name=hello-world&cpage=2' '/?name=%20' '/?name=hello-world&post_type=page' \
-  '/?name=sample&page=2' '/?name=sam&post_type=attachment' '/?name=hello-world&post_type=attachment'; do
+  '/?name=sample&page=2' '/?name=sam&post_type=attachment' '/?name=hello-world&post_type=attachment' \
+  '/?category_name=uncategorized' '/?taxonomy=category&term=uncategorized' '/?category_name=nope' '/?category_name=uncategorized,nope' \
+  '/?tag=foo' '/?post_format=aside' '/?taxonomy=foo&term=x' '/?category_name=/' '/?taxonomy=category&term=nope&cat=1,,2' '/?feed=comments-rss2&cat=-1'; do
   status=$(curl -s -o "$TMP" -w '%{http_code}' "$BASE$path")
   page=$(xxd -p "$TMP" | tr -d '\n')
   head=$(printf '%s' "$page" | python3 -I -c 'import sys; s=bytes.fromhex(sys.stdin.read()); i=s.find(b"<head>"); j=s.find(b"</head>"); sys.stdout.write((s[i:j+7]).hex())')
@@ -51,10 +54,33 @@ for path in / '/?p=1' '/?page_id=2' '/?p=1&replytocom=1' '/?p=1&cpage=2' '/?p=1&
   printf '%s\t%s\t%s\n' "$key" "$status" "$page" >> "$PAGES"
 done
 
-# Pages past the first, with one post a page; the option goes back after.
-PAGED="$ROOT/crates/hyscribe-render/tests/golden/paged.tsv"
+# Term archives, with reference/default-install/terms.sql added for these
+# requests and taken out after, as terms.tsv in the format of pages.tsv.
+TERMS="$ROOT/crates/hyscribe-render/tests/golden/terms.tsv"
 DOCKER="${DOCKER:-docker}"
 DB="${HYSCRIBE_DB_CONTAINER:-hyscribe-default-install-db}"
+sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress; }
+remove_terms() {
+  echo 'DELETE FROM wp_term_relationships WHERE term_taxonomy_id IN (2, 3, 4);
+    DELETE FROM wp_term_taxonomy WHERE term_taxonomy_id IN (2, 3, 4); DELETE FROM wp_terms WHERE term_id IN (2, 3, 4);' | sql
+}
+sql < "$ROOT/reference/default-install/terms.sql"
+trap 'remove_terms; rm -f "$TMP"' EXIT
+: > "$TERMS"
+for path in '/?tag=foo' '/?tag=Foo' '/?tag=empty' '/?tag=nope' '/?tag=foo&paged=2' '/?tag=empty&paged=2' '/?tag=foo&paged=1' \
+  '/?tag=foo,nope' '/?tag=foo+nope' '/?tag=%20' '/?tag=foo&cat=1' '/?s=hello&tag=foo' '/?m=2026&tag=foo' '/?tag=foo&feed=rss2' \
+  '/?post_format=aside' '/?post_format=post-format-aside' '/?post_format=chat' '/?post_format=,post-format-aside' \
+  '/?post_format=aside&feed=rss2' '/?taxonomy=post_tag&term=foo' '/?taxonomy=foo&term=x' '/?s=hello&taxonomy=foo&term=x' \
+  '/?category_name=uncategorized,nope' '/?p=1' '/?feed=rss2' '/' '/?post_format=aside&page=2' '/?tag=foo&page=2'; do
+  status=$(curl -s -o "$TMP" -w '%{http_code}' "$BASE$path")
+  key=$(printf '%s' "$path" | xxd -p | tr -d '\n')
+  printf '%s\t%s\t%s\n' "$key" "$status" "$(xxd -p "$TMP" | tr -d '\n')" >> "$TERMS"
+done
+remove_terms
+trap 'rm -f "$TMP"' EXIT
+
+# Pages past the first, with one post a page; the option goes back after.
+PAGED="$ROOT/crates/hyscribe-render/tests/golden/paged.tsv"
 per_page() {
   "$DOCKER" exec "$DB" mariadb -uroot -preference-only wordpress \
     -e "UPDATE wp_options SET option_value = '$1' WHERE option_name = 'posts_per_page'"
@@ -85,4 +111,4 @@ for q in '' '&page=1' '&page=2' '&page=3' '&page=abc' '&page=0' '&page=2/' '&pag
   title=$( (grep -o '<title>[^<]*</title>' "$TMP" || true) | head -n 1 | sed 's/<[^>]*>//g' | tr -d '\n' | xxd -p | tr -d '\n')
   printf '%s\t%s\t%s\n' "$(printf '%s' "$query" | xxd -p | tr -d '\n')" "$out" "$title" >> "$SINGULAR"
 done
-wc -l "$OUT" "$FOOTER" "$PAGES" "$PAGED" "$SINGULAR"
+wc -l "$OUT" "$FOOTER" "$PAGES" "$TERMS" "$PAGED" "$SINGULAR"

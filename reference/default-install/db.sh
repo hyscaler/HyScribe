@@ -7,6 +7,7 @@
 #   reference/default-install/db.sh down
 # Then: DB_HOST=127.0.0.1 DB_PORT=33061 DB_NAME=wordpress DB_USER=wordpress
 #       DB_PASSWORD=reference-only
+# The wordpress_terms database holds the same install with terms.sql added.
 # Needs docker (or podman with DOCKER=podman).
 set -euo pipefail
 
@@ -32,7 +33,11 @@ case "${1:-}" in
       sleep 1
     done
     "$DOCKER" exec -i "$NAME" mariadb -uroot -preference-only wordpress < "$dump"
-    echo "default install $version on 127.0.0.1:$PORT (database wordpress, user wordpress)"
+    "$DOCKER" exec "$NAME" mariadb -uroot -preference-only \
+      -e "CREATE DATABASE wordpress_terms; GRANT ALL ON wordpress_terms.* TO 'wordpress'@'%'"
+    cat "$dump" "$ROOT/reference/default-install/terms.sql" |
+      "$DOCKER" exec -i "$NAME" mariadb -uroot -preference-only wordpress_terms
+    echo "default install $version on 127.0.0.1:$PORT (databases wordpress and wordpress_terms, user wordpress)"
     ;;
   down)
     "$DOCKER" rm -f "$NAME" >/dev/null

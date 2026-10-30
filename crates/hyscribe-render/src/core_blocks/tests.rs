@@ -7,6 +7,7 @@ use hyscribe_testkit::unhex;
 
 use super::*;
 use crate::blocks::parse_blocks;
+use crate::site::Taxonomy;
 use crate::theme::twentytwentyfive;
 
 /// The options, home URL and post one golden case rendered with.
@@ -97,11 +98,14 @@ fn case(kind: &str, state: &Value, data: &Value) -> (Fixture, Request, Option<u6
     let mut request = Request::default();
     if kind == "term" {
         if state.get_str("query").unwrap().to_php_string() == b"cat=1" {
-            request.archive = Some(Archive::Category(hyscribe_model::Term {
-                id: 1,
-                description: state.get_str("description").unwrap().to_php_string(),
-                ..Default::default()
-            }));
+            request.archive = Some(Archive::Term(
+                Taxonomy::Category,
+                Some(hyscribe_model::Term {
+                    id: 1,
+                    description: state.get_str("description").unwrap().to_php_string(),
+                    ..Default::default()
+                }),
+            ));
         }
         return (site, request, None);
     }

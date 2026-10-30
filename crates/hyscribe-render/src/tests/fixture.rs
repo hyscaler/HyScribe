@@ -10,7 +10,7 @@ use hyscribe_model::{Comment, FormatFilter, OrderBy, Post, PostQuery, Term, Term
 use hyscribe_phpser::Value;
 use hyscribe_testkit::{Dump, SqlValue, default_install};
 
-use crate::site::{Archive, Request, Site};
+use crate::site::{Archive, Request, Site, Taxonomy};
 
 fn dump() -> &'static Dump {
     static DUMP: OnceLock<Dump> = OnceLock::new();
@@ -109,7 +109,7 @@ impl DefaultInstall {
         }
         if let Some(base) = query.strip_suffix("&slug") {
             let mut request = self.request(base);
-            if let Some(Archive::Category(term)) = &mut request.archive {
+            if let Some(Archive::Term(_, Some(term))) = &mut request.archive {
                 term.slug = b"1".to_vec();
             }
             return request;
@@ -144,7 +144,10 @@ impl DefaultInstall {
             post: posts.first().map(|post| post.id),
             posts,
             archive: match query {
-                "cat=1" => Some(Archive::Category(self.post_terms(1, "category").remove(0))),
+                "cat=1" => Some(Archive::Term(
+                    Taxonomy::Category,
+                    self.post_terms(1, "category").into_iter().next(),
+                )),
                 "m=2026" => Some(Archive::Year),
                 "m=202610" => Some(Archive::Month),
                 "m=20261027" => Some(Archive::Day),

@@ -7,6 +7,8 @@ use super::*;
 use axum::body::Body;
 use axum::http::Request;
 use hyscribe_config::Database;
+use hyscribe_model::Term;
+use hyscribe_phpser::{Key, Value};
 use tower::ServiceExt;
 
 fn fixture_config() -> Database {
@@ -240,6 +242,7 @@ async fn database_errors_show_no_details() {
         "/?cat=1",
         "/?author=1",
         "/?feed=rss2",
+        "/?feed=rss2&cat=1",
         "/?feed=comments-rss2",
         "/?p=-1&page_id=2",
         "/?name=x",
@@ -714,6 +717,12 @@ async fn templates_follow_the_hierarchy() {
     assert!(missing.body.contains("<body class=\"error404 "));
 }
 
+/// The list page of `query`.
+async fn listed(site: &Site, query: &HashMap<String, String>) -> Page {
+    let main = main_query(site, query, false).await.unwrap();
+    list(site, query, false, main).await.unwrap()
+}
+
 #[tokio::test]
 async fn routes_give_the_request_state() {
     let site = fixture_site(None).await;
@@ -722,11 +731,11 @@ async fn routes_give_the_request_state() {
         .unwrap()
         .as_secs() as i64
         - 60;
-    let home = list(&site, &HashMap::new(), false).await.unwrap();
+    let home = listed(&site, &HashMap::new()).await;
     assert!(home.request.front_page && home.request.home && home.request.now > recent);
     assert_eq!(home.request.post, Some(1));
     let search = HashMap::from([("s".to_string(), "a".to_string())]);
-    let search = list(&site, &search, false).await.unwrap();
+    let search = listed(&site, &search).await;
     assert_eq!(
         (search.request.found_posts, search.request.max_pages),
         (2, 1)
@@ -883,7 +892,26 @@ async fn feeds_match_php() {
 async fn pages_match_php() {
     let golden = include_str!("../../hyscribe-render/tests/golden/pages.tsv");
     assert_pages(&oracle_site().await, golden).await;
-    assert_eq!(golden.lines().count(), 91);
+    assert_eq!(golden.lines().count(), 101);
+}
+
+/// Term archives from the same script, over the fixture with
+/// `reference/default-install/terms.sql`, which `db.sh` loads as the
+/// `wordpress_terms` database.
+#[tokio::test]
+async fn term_archives_match_php() {
+    let config = Database {
+        name: "wordpress_terms".into(),
+        ..fixture_config()
+    };
+    let db = Db::connect(&config)
+        .await
+        .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
+    let oracle = Some("http://127.0.0.1:8081".to_string());
+    let site = Site::load(db, oracle.clone(), oracle).await.unwrap();
+    let golden = include_str!("../../hyscribe-render/tests/golden/terms.tsv");
+    assert_pages(&Arc::new(site), golden).await;
+    assert_eq!(golden.lines().count(), 28);
 }
 
 /// Pages past the first, with one post a page, from the same script.
@@ -921,13 +949,16 @@ async fn assert_pages(site: &Arc<Site>, golden: &str) {
                 php.replace_range(start..end, "");
             }
         }
-        let php = php.replace(
-            "<meta name=\"generator\" content=\"WordPress 7.1.3\" />",
-            &format!(
-                "<meta name=\"generator\" content=\"HyScribe {}\" />",
-                env!("CARGO_PKG_VERSION")
-            ),
-        );
+        let version = env!("CARGO_PKG_VERSION");
+        let php = php
+            .replace(
+                "<meta name=\"generator\" content=\"WordPress 7.1.3\" />",
+                &format!("<meta name=\"generator\" content=\"HyScribe {version}\" />"),
+            )
+            .replace(
+                "<generator>https://wordpress.org/?v=7.1.3</generator>",
+                &format!("<generator>https://github.com/hyscaler/HyScribe?v={version}</generator>"),
+            );
         let reply = request(site, "GET", &path).await;
         let ours = reply.body;
         if reply.status.as_u16() != status || ours != php {
@@ -1007,11 +1038,19 @@ async fn search_feeds_are_not_sorted_by_relevance() {
     let site = fixture_site(None).await;
     let query = HashMap::from([("s".to_string(), "hello".to_string())]);
     assert_eq!(
-        post_query(&site, &query, false).order,
+        post_query(&site, &query, false, vec![], false).order,
         [(OrderBy::Relevance, false), (OrderBy::Date, false)]
     );
-    assert!(post_query(&site, &query, true).order.is_empty());
-    assert!(post_query(&site, &HashMap::new(), false).order.is_empty());
+    assert!(
+        post_query(&site, &query, true, vec![], false)
+            .order
+            .is_empty()
+    );
+    assert!(
+        post_query(&site, &HashMap::new(), false, vec![], false)
+            .order
+            .is_empty()
+    );
 }
 
 /// Sticky posts lead the home list's first page only.
@@ -1022,24 +1061,171 @@ async fn the_home_list_puts_sticky_posts_first() {
         .unwrap()
         .options
         .insert("sticky_posts".into(), b"a:1:{i:0;i:1;}".to_vec());
-    let sticky = |pairs: &[(&str, &str)], feed| {
+    let sticky = async |pairs: &[(&str, &str)], feed| {
         let query = pairs
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        post_query(&site, &query, feed).sticky
+        main_query(&site, &query, feed).await.unwrap().0.sticky
     };
-    assert_eq!(sticky(&[], false), [1]);
-    assert_eq!(sticky(&[("paged", "1")], false), [1]);
+    assert_eq!(sticky(&[], false).await, [1]);
+    assert_eq!(sticky(&[("paged", "1")], false).await, [1]);
     for pairs in [
         &[("paged", "2")][..],
         &[("s", "x")],
         &[("cat", "1")],
+        &[("tag", "x")],
         &[("m", "2026")],
     ] {
-        assert!(sticky(pairs, false).is_empty(), "{pairs:?}");
+        assert!(sticky(pairs, false).await.is_empty(), "{pairs:?}");
     }
-    assert!(sticky(&[], true).is_empty());
+    assert!(sticky(&[], true).await.is_empty());
+}
+
+/// Every case of `reference/tax-query/golden.sh`: the archive, its term
+/// and the posts the filters match, over the terms and posts it inserts.
+/// Singular requests leave the tax vars alone, and searches' posts are
+/// left to the search tests.
+#[test]
+fn tax_queries_match_php() {
+    let golden = include_str!("../tests/golden/tax-query.tsv");
+    let mut lines = golden.lines();
+    let data = lines.next().unwrap().split_once('\t').unwrap().1;
+    let data = hyscribe_phpser::json_decode(&hyscribe_testkit::unhex(data)).unwrap();
+    let hierarchy = data.get_str("hierarchy").unwrap().to_php_string();
+    let terms: Vec<(String, Term)> = data
+        .get_str("terms")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .map(|(_, row)| {
+            let field = |i: i64| row.get(&Key::Int(i)).unwrap().to_php_string();
+            let taxonomy = String::from_utf8(field(0)).unwrap();
+            let term = Term {
+                id: row.get(&Key::Int(1)).unwrap().to_int().unsigned_abs(),
+                slug: field(2),
+                ..Term::default()
+            };
+            (taxonomy, term)
+        })
+        .collect();
+    let posts: Vec<(u64, Vec<u64>)> = data
+        .get_str("posts")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .map(|(id, ids)| {
+            let id = match id {
+                Key::Int(id) => id.unsigned_abs(),
+                Key::String(id) => String::from_utf8_lossy(id).parse().unwrap(),
+            };
+            let ids = ids
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|(_, t)| t.to_int().unsigned_abs());
+            (id, ids.collect())
+        })
+        .collect();
+    let mut count = 0;
+    for line in lines {
+        let (case, state) = line.split_once('\t').unwrap();
+        let case = String::from_utf8(hyscribe_testkit::unhex(case)).unwrap();
+        let state = hyscribe_phpser::json_decode(&hyscribe_testkit::unhex(state)).unwrap();
+        let uri: axum::http::Uri = format!("/?{case}").parse().unwrap();
+        let query = axum::extract::Query::<HashMap<String, String>>::try_from_uri(&uri)
+            .unwrap()
+            .0;
+        if query.contains_key("p") {
+            continue;
+        }
+        let tax = query::tax_query(&query);
+        let (slugs, ids) = tax.lookups();
+        // What find_terms() selects.
+        let found: Vec<(String, Term)> = terms
+            .iter()
+            .filter(|(taxonomy, term)| {
+                slugs.contains(&(taxonomy.clone(), term.slug.clone()))
+                    || taxonomy == "category" && ids.contains(&term.id)
+            })
+            .cloned()
+            .collect();
+        let resolved = tax.resolve(&found, &hierarchy);
+        let flag = |name| state.get_str(name) == Some(&Value::Bool(true));
+        let kind = if flag("category") {
+            Some(Taxonomy::Category)
+        } else if flag("tag") {
+            Some(Taxonomy::Tag)
+        } else if flag("tax") {
+            Some(Taxonomy::Format)
+        } else {
+            None
+        };
+        let queried = state
+            .get_str("queried")
+            .and_then(Value::as_array)
+            .map(|q| q[1].1.to_int().unsigned_abs());
+        let ours = resolved.archive.as_ref().map(|archive| match archive {
+            Archive::Term(kind, term) => (*kind, term.as_ref().map(|t| t.id)),
+            _ => unreachable!(),
+        });
+        assert_eq!(ours, kind.map(|kind| (kind, queried)), "{case}");
+        // The templates tried up to the first Twenty Twenty-Five has.
+        let php: Vec<String> = state
+            .get_str("templates")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .map(|(_, t)| String::from_utf8(t.to_php_string()).unwrap())
+            .collect();
+        if !php.is_empty() {
+            let mut templates = list_templates(
+                &resolved.kinds,
+                resolved.archive.as_ref(),
+                query.contains_key("s"),
+                query.contains_key("m"),
+                query.contains_key("post_format"),
+            );
+            let end = templates
+                .iter()
+                .position(|t| t == "search" || t == "archive");
+            templates.truncate(end.unwrap() + 1);
+            assert_eq!(templates, php, "{case}");
+        }
+        if !query.contains_key("s") {
+            let taxonomy_of = |id: &u64| {
+                terms
+                    .iter()
+                    .find(|(_, t)| t.id == *id)
+                    .map(|(tax, _)| tax.clone())
+            };
+            let mut matched: Vec<u64> = posts
+                .iter()
+                .filter(|(_, post_terms)| {
+                    resolved.filters.iter().all(|filter| {
+                        let has = post_terms.iter().any(|id| {
+                            filter.terms.contains(id)
+                                && taxonomy_of(id).as_deref() == Some(&filter.taxonomy)
+                        });
+                        has != filter.exclude
+                    })
+                })
+                .map(|(id, _)| *id)
+                .collect();
+            let mut php: Vec<u64> = state
+                .get_str("posts")
+                .and_then(Value::as_array)
+                .unwrap()
+                .iter()
+                .map(|(_, id)| id.to_int().unsigned_abs())
+                .collect();
+            matched.sort_unstable();
+            php.sort_unstable();
+            assert_eq!(matched, php, "{case}");
+        }
+        count += 1;
+    }
+    assert_eq!(count, 97);
 }
 
 /// Every case of `reference/category-query/golden.sh`: the categories in and
@@ -1052,7 +1238,9 @@ fn category_lists_match_php() {
         let (cat, state) = (fields.next().unwrap(), fields.next().unwrap());
         let cat = String::from_utf8(cat).unwrap();
         let state = hyscribe_phpser::json_decode(&state).unwrap();
-        let filters = category_filters(&cat, &state.get_str("hierarchy").unwrap().to_php_string());
+        let hierarchy = state.get_str("hierarchy").unwrap().to_php_string();
+        let query = HashMap::from([("cat".to_string(), cat.clone())]);
+        let filters = query::tax_query(&query).resolve(&[], &hierarchy).filters;
         let ids = |exclude: bool| {
             let mut ids: Vec<u64> = filters
                 .iter()
@@ -1132,7 +1320,7 @@ fn page_paths_match_php() {
         assert_eq!(ours, php, "{path:?}");
     }
     assert_eq!(golden.lines().count(), 26);
-    assert_eq!(basename("a/b\\c//"), "c");
+    assert_eq!(query::basename(b"a/b\\c//"), b"c");
 }
 
 #[test]

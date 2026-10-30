@@ -18,7 +18,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html};
-use hyscribe_model::{OrderBy, Post, PostQuery};
+use hyscribe_model::{OrderBy, Post, PostQuery, TermFilter};
 use hyscribe_phpser::{
     Key, Value, add_query_values, parse_str, rawurlencode, rawurlencode_deep, remove_query_arg,
     urldecode,
@@ -28,7 +28,7 @@ use hyscribe_render::formatting::sanitize_title_for_query;
 use hyscribe_render::head::{wp_footer, wp_head};
 use hyscribe_render::link;
 use hyscribe_render::post::body_class;
-use hyscribe_render::site::{Archive, Request};
+use hyscribe_render::site::{Archive, Request, Taxonomy};
 use hyscribe_render::template::render_template;
 use hyscribe_render::theme::{Theme, twentytwentyfive};
 use hyscribe_render::{search_terms, sticky_posts};
@@ -40,7 +40,7 @@ mod reads;
 
 use reads::Reads;
 
-use query::{DateQuery, absint, category_filters, clean_query, date_query, other_args};
+use query::{DateQuery, Resolved, absint, clean_query, date_query, other_args, tax_query};
 
 /// Headers on every response (docs/SECURITY_MODEL.md, Web).
 const SECURITY_HEADERS: [(&str, &str); 3] = [
@@ -511,20 +511,23 @@ async fn route(
     let with_comments =
         query.get("feed").is_some_and(|f| f.contains("comments-")) || flag("withcomments");
     let comment_feed = with_comments || (single_requested && !flag("withoutcomments"));
-    let archive = ["s", "cat", "m", "year", "monthnum", "day"]
+    // A `cat` that only excludes makes no archive; one that includes is a
+    // term archive.
+    let archive = ["s", "m", "year", "monthnum", "day"]
         .iter()
         .any(|k| query.contains_key(*k));
     if let Some(format) = format.filter(|_| !single_requested) {
         // A search's or archive's comment feed lists the comments on the
         // posts it matches.
+        let (post_query, terms) = main_query(site, query, true).await?;
         let comments = comment_feed.then(|| {
-            if archive {
-                feed::CommentsOf::Posts(Box::new(post_query(site, query, true)))
+            if archive || terms.archive.is_some() {
+                feed::CommentsOf::Posts(Box::new(post_query.clone()))
             } else {
                 feed::CommentsOf::Site
             }
         });
-        let page = list(site, query, true).await?;
+        let page = list(site, query, true, (post_query, terms)).await?;
         // A paged query with nothing in it is a 404: a feed of no posts,
         // never of comments, titled as the 404 page.
         let missing = page.request.not_found && Paging::of(query).is_paged();
@@ -577,9 +580,11 @@ async fn route(
         }
         None => match date_redirect(site, raw_query, query) {
             Some(location) => Ok(Outcome::Redirect(location)),
-            None => list(site, query, false)
-                .await
-                .map(|page| Outcome::Page(Box::new(page))),
+            None => {
+                let main = main_query(site, query, false).await?;
+                let page = list(site, query, false, main).await?;
+                Ok(Outcome::Page(Box::new(page)))
+            }
         },
     }
 }
@@ -698,9 +703,36 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
     }
 }
 
-/// The query of a list page: a search covers posts and pages, a feed lists
+/// The query of a list page and the term archive its tax query makes.
+async fn main_query(
+    site: &Site,
+    query: &HashMap<String, String>,
+    feed: bool,
+) -> Result<(PostQuery, Resolved), DbError> {
+    let tax = tax_query(query);
+    let (slugs, ids) = tax.lookups();
+    let terms = if slugs.is_empty() && ids.is_empty() {
+        Vec::new()
+    } else {
+        site.db.find_terms(&slugs, &ids).await?
+    };
+    let hierarchy = site.options.get("category_children");
+    let resolved = tax.resolve(&terms, hierarchy.map_or(&[][..], Vec::as_slice));
+    let term_archive = resolved.archive.is_some();
+    let post_query = post_query(site, query, feed, resolved.filters.clone(), term_archive);
+    Ok((post_query, resolved))
+}
+
+/// The query of a list page with the tax query's `terms`: a search covers
+/// posts and pages unless a post format is asked for, and a feed lists
 /// `posts_per_rss` posts.
-fn post_query(site: &Site, query: &HashMap<String, String>, feed: bool) -> PostQuery {
+fn post_query(
+    site: &Site,
+    query: &HashMap<String, String>,
+    feed: bool,
+    terms: Vec<TermFilter>,
+    term_archive: bool,
+) -> PostQuery {
     let search = query.get("s");
     let date = dates(query);
     let per_page = if feed {
@@ -709,19 +741,8 @@ fn post_query(site: &Site, query: &HashMap<String, String>, feed: bool) -> PostQ
         absint(&site.option("posts_per_page"))
     }
     .clamp(1, 100);
-    let terms = query
-        .get("cat")
-        .map(|cat| {
-            category_filters(
-                cat,
-                site.options
-                    .get("category_children")
-                    .map_or(&[][..], Vec::as_slice),
-            )
-        })
-        .unwrap_or_default();
     // The home list's first page puts sticky posts first.
-    let home = search.is_none() && !feed && date.kind.is_none() && terms.iter().all(|f| f.exclude);
+    let home = search.is_none() && !feed && date.kind.is_none() && !term_archive;
     let paged = Paging::of(query).paged;
     let sticky = if home && paged <= 1 {
         sticky_posts(
@@ -733,7 +754,8 @@ fn post_query(site: &Site, query: &HashMap<String, String>, feed: bool) -> PostQ
         vec![]
     };
     PostQuery {
-        post_types: if search.is_some() {
+        // _post_format_request() sets the post format's post types.
+        post_types: if search.is_some() && !query.contains_key("post_format") {
             vec!["post".into(), "page".into()]
         } else {
             vec!["post".into()]
@@ -795,37 +817,32 @@ fn offset(paged: u64, per_page: u64) -> u64 {
     })
 }
 
-/// A list page: the home page, a search, a category or a date archive; for
+/// A list page: the home page, a search, a term or a date archive; for
 /// a feed, its posts, and no 404.
-async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Result<Page, DbError> {
+async fn list(
+    site: &Site,
+    query: &HashMap<String, String>,
+    feed: bool,
+    (post_query, terms): (PostQuery, Resolved),
+) -> Result<Page, DbError> {
+    let term_archive = terms.archive;
     let search = query.get("s");
-    let post_query = post_query(site, query, feed);
     let date = dates(query);
     // `error=404`: the 404 page, but `handle_404()` sends no 404 for it.
     if date.invalid {
         return Ok(error_404(site, feed));
     }
-    // A main query's included categories make it a category archive of the
-    // first.
-    let category = match post_query
-        .terms
-        .iter()
-        .find(|filter| !filter.exclude)
-        .and_then(|filter| filter.terms.first().copied())
-    {
-        Some(id) => match site.db.category(id).await? {
-            Some(term) => Some(term),
-            // A category that does not exist.
-            None => return Ok(not_found(site, feed && !Paging::of(query).is_paged())),
-        },
-        None => None,
-    };
     let (posts, found) = tokio::join!(site.db.posts(&post_query), site.db.count_posts(&post_query));
     let (posts, found) = posts.and_then(|posts| found.map(|found| (posts, found)))?;
     let paging = Paging::of(query);
-    // A date archive with nothing in it is a 404, a search only when paged.
-    let empty_404 =
-        paging.is_paged() || date.kind.is_some() && search.is_none() && category.is_none();
+    let term = match &term_archive {
+        Some(Archive::Term(_, term)) => term.as_ref(),
+        _ => None,
+    };
+    // An archive with nothing in it is a 404 unless it is of a term that
+    // exists, a search only when paged.
+    let is_archive = date.kind.is_some() || term_archive.is_some();
+    let empty_404 = paging.is_paged() || is_archive && search.is_none() && term.is_none();
     if empty_404 && posts.is_empty() {
         let mut page = not_found(site, feed && !paging.is_paged());
         page.request.search_query = search.map_or_else(Vec::new, |s| s.as_bytes().to_vec());
@@ -837,8 +854,8 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
             "Search Results for &#8220;{}&#8221;",
             esc_attr(s.as_bytes())
         ))
-    } else if let Some(term) = &category {
-        Some(esc_html(&term.name))
+    } else if term_archive.is_some() {
+        Some(term.map_or_else(String::new, |term| esc_html(&term.name)))
     } else {
         date.kind.as_ref().map(|kind| {
             let format = match kind {
@@ -851,35 +868,34 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
     };
     let tagline = site.option("blogdescription");
     let title = match heading {
-        Some(heading) => document_title([Some(heading), paging.title(), Some(site.name())]),
+        // A term archive without its term has the site's name alone.
+        Some(heading) => document_title([
+            Some(heading).filter(|h| !h.is_empty()),
+            paging.title(),
+            Some(site.name()),
+        ]),
         None => document_title([
             Some(site.name()),
             paging.title(),
             Some(esc_html(tagline.as_bytes())).filter(|t| !t.is_empty()),
         ]),
     };
-    let archive = category
-        .clone()
-        .map(Archive::Category)
-        .or(date.kind.clone());
-    let candidates: Vec<String> = match (&archive, search) {
-        (_, Some(_)) => vec!["search".into(), "index".into()],
-        (Some(Archive::Category(term)), None) => vec![
-            format!("category-{}", lossy(&term.slug)),
-            format!("category-{}", term.id),
-            "category".into(),
-            "archive".into(),
-            "index".into(),
-        ],
-        (Some(_), None) => vec!["date".into(), "archive".into(), "index".into()],
-        (None, None) => vec!["front-page".into(), "home".into(), "index".into()],
-    };
+    let candidates = list_templates(
+        &terms.kinds,
+        term_archive.as_ref(),
+        search.is_some(),
+        date.kind.is_some(),
+        query.contains_key("post_format"),
+    );
+    let queried_object_id = term.map_or(0, |term| term.id);
+    let archive = term_archive.or(date.kind.clone());
     // The home page lists the latest posts, the default install's setting.
     let home = archive.is_none() && search.is_none();
     let request = Request {
         front_page: home,
         home,
         post: posts.first().map(|post| post.id),
+        queried_object_id,
         archive,
         date: date.kind.is_some(),
         search: search.map(|s| s.as_bytes().to_vec()),
@@ -898,6 +914,69 @@ async fn list(site: &Site, query: &HashMap<String, String>, feed: bool) -> Resul
         candidates,
         request,
     })
+}
+
+/// The templates the template loader tries for a list page, in its order:
+/// a search's; those of the taxonomies in `kinds`, each from the queried
+/// term of `term_archive`; a date archive's; then the archive's, of posts
+/// first where a post format sets the `post` post type, or the home page's.
+fn list_templates(
+    kinds: &[Taxonomy],
+    term_archive: Option<&Archive>,
+    search: bool,
+    date: bool,
+    post_format: bool,
+) -> Vec<String> {
+    let mut templates: Vec<String> = Vec::new();
+    if search {
+        templates.push("search".into());
+    } else {
+        let queried = match term_archive {
+            Some(Archive::Term(taxonomy, Some(term))) => Some((*taxonomy, term)),
+            _ => None,
+        };
+        for kind in kinds {
+            // get_taxonomy_template() names the queried term's taxonomy.
+            let prefix = match (kind, queried) {
+                (Taxonomy::Category, _) => "category".to_string(),
+                (Taxonomy::Tag, _) => "tag".to_string(),
+                (Taxonomy::Format, Some((taxonomy, _))) => format!(
+                    "taxonomy-{}",
+                    match taxonomy {
+                        Taxonomy::Category => "category",
+                        Taxonomy::Tag => "post_tag",
+                        Taxonomy::Format => "post_format",
+                    }
+                ),
+                (Taxonomy::Format, None) => String::new(),
+            };
+            if let Some((_, term)) = queried {
+                templates.push(format!("{prefix}-{}", lossy(&term.slug)));
+                templates.push(format!("{prefix}-{}", term.id));
+                if *kind == Taxonomy::Format {
+                    templates.push(prefix.clone());
+                }
+            }
+            if *kind == Taxonomy::Format {
+                templates.push("taxonomy".into());
+            } else {
+                templates.push(prefix);
+            }
+        }
+        if date {
+            templates.push("date".into());
+        }
+        if term_archive.is_some() || date {
+            if post_format {
+                templates.push("archive-post".into());
+            }
+            templates.push("archive".into());
+        } else {
+            templates.extend(["front-page".into(), "home".into()]);
+        }
+    }
+    templates.push("index".into());
+    templates
 }
 
 /// `redirect_canonical()` for `feed=rss`: the same request with `feed=rss2`.
@@ -971,7 +1050,7 @@ async fn by_slug(
         let post = page_by_path(&parts, &pages)
             .filter(|p| viewable(p, &["page"]))
             .cloned();
-        let name = sanitize_title_for_query(basename(path).as_bytes());
+        let name = sanitize_title_for_query(&query::basename(path.as_bytes()));
         ("pagename", "page", post, name)
     } else {
         return Ok(None);
@@ -1051,12 +1130,6 @@ fn page_by_path<'a>(parts: &[Vec<u8>], pages: &'a [Post]) -> Option<&'a Post> {
         }
     }
     found
-}
-
-/// `wp_basename()`: the last part of `path`, `/` or `\\` before it.
-fn basename(path: &str) -> &str {
-    let path = path.trim_end_matches(['/', '\\']);
-    path.rsplit(['/', '\\']).next().unwrap_or_default()
 }
 
 /// The arguments `redirect_canonical()` drops when it sends a request for

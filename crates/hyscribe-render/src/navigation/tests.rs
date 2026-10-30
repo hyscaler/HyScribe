@@ -5,7 +5,7 @@ use hyscribe_testkit::unhex;
 
 use super::*;
 use crate::fixture::DefaultInstall;
-use crate::site::{Request, Site};
+use crate::site::{Request, Site, Taxonomy};
 use crate::theme::twentytwentyfive;
 
 /// The fixture with `golden.php`'s in-memory state: its page tree as the
@@ -117,12 +117,15 @@ fn matches_php() {
         if let Some((kind, id)) = queried.split_once(':') {
             request.queried_object_id = id.parse().unwrap();
             if kind == "term" {
-                request.archive = Some(Archive::Category(Term {
-                    id: request.queried_object_id,
-                    name: "Uncategorized".into(),
-                    slug: "uncategorized".into(),
-                    description: Vec::new(),
-                }));
+                request.archive = Some(Archive::Term(
+                    Taxonomy::Category,
+                    Some(Term {
+                        id: request.queried_object_id,
+                        name: "Uncategorized".into(),
+                        slug: "uncategorized".into(),
+                        description: Vec::new(),
+                    }),
+                ));
             }
         }
         let tree = match pages {

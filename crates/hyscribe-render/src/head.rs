@@ -7,6 +7,7 @@
 use std::sync::OnceLock;
 
 use hyscribe_kses::{esc_attr, esc_url, esc_url_raw, strip_tags, wp_strip_all_tags};
+use hyscribe_model::Term;
 use hyscribe_phpser::{Value, add_query_arg, is_empty_string, json_decode, urlencode};
 
 use crate::comment_pages::{comments_pagenum_link, cpage};
@@ -14,7 +15,7 @@ use crate::core_blocks::comments_open;
 use crate::feed::post_comments_feed_link;
 use crate::layout::{Rule, stylesheet};
 use crate::post::the_title;
-use crate::site::{Archive, Request, Site};
+use crate::site::{Archive, Request, Site, Taxonomy};
 use crate::template::Renderer;
 use crate::theme::Theme;
 
@@ -232,15 +233,11 @@ impl Head<'_> {
                 let href = post_comments_feed_link(self.site, post, b"rss2");
                 (format!("{name} &raquo; {title} Comments Feed"), href)
             })
-        } else if let Some(Archive::Category(term)) = &self.request.archive {
-            let href = self.home_url(format!("?feed=rss2&amp;cat={}", term.id).as_bytes());
-            Some((
-                format!(
-                    "{name} &raquo; {} Category Feed",
-                    String::from_utf8_lossy(&term.name)
-                ),
-                href,
-            ))
+        } else if let Some(Archive::Term(taxonomy, term)) = &self.request.archive {
+            // A term archive without its term has no feed of its own, and
+            // no search feed either.
+            term.as_ref()
+                .map(|term| self.term_feed_link(&name, *taxonomy, term))
         } else {
             self.request.search.as_ref().map(|search| {
                 let link = self.home_url(&[&b"?s="[..], &urlencode(search)].concat());
@@ -255,6 +252,24 @@ impl Head<'_> {
             out.push_str(&link(&title, &href));
         }
         out.into_bytes()
+    }
+
+    /// `feed_links_extra()` of a term archive: the feed's name and
+    /// get_term_feed_link().
+    fn term_feed_link(&self, name: &str, taxonomy: Taxonomy, term: &Term) -> (String, Vec<u8>) {
+        let (query, kind) = match taxonomy {
+            Taxonomy::Category => (format!("cat={}", term.id).into_bytes(), "Category"),
+            Taxonomy::Tag => ([&b"tag="[..], &term.slug].concat(), "Tag"),
+            Taxonomy::Format => ([&b"post_format="[..], &term.slug].concat(), "Format"),
+        };
+        let title = format!(
+            "{name} &raquo; {} {kind} Feed",
+            String::from_utf8_lossy(&term.name)
+        );
+        (
+            title,
+            self.home_url(&[&b"?feed=rss2&amp;"[..], &query].concat()),
+        )
     }
 
     /// The styles `wp_print_styles()` prints: the queue as the head's

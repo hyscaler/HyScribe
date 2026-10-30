@@ -247,6 +247,7 @@ async fn database_errors_show_no_details() {
         "/?p=-1&page_id=2",
         "/?name=x",
         "/?pagename=x",
+        "/?attachment_id=1",
     ] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
@@ -308,6 +309,31 @@ async fn canonical_redirects_match_wordpress() {
     for (uri, expected) in [
         ("/?p=2", "/?page_id=2"),
         ("/?p=2&x=1", "/?page_id=2&x=1"),
+        // An attachment ID or name that is a post's or a page's.
+        ("/?attachment_id=1", "/?p=1"),
+        ("/?attachment_id=2", "/?page_id=2"),
+        ("/?attachment_id=-1", "/?p=1"),
+        ("/?attachment_id=1x", "/?p=1"),
+        ("/?attachment_id=1&x=y", "/?p=1&x=y"),
+        ("/?attachment_id=1&cpage=2", "/?p=1&cpage=2"),
+        ("/?attachment_id=1&s=x", "/?p=1&s=x"),
+        ("/?attachment_id=1&cat=1", "/?p=1&cat=1"),
+        ("/?attachment_id=1&paged=2", "/?p=1&paged=2"),
+        ("/?attachment_id=1&page=2", "/?p=1&page=2"),
+        ("/?subpost_id=1", "/?p=1&subpost_id=1"),
+        ("/?subpost_id=2", "/?page_id=2&subpost_id=2"),
+        ("/?subpost_id=1&attachment_id=2", "/?p=1&subpost_id=1"),
+        ("/?attachment=hello-world", "/?p=1&attachment=hello-world"),
+        (
+            "/?attachment=sample-page",
+            "/?page_id=2&attachment=sample-page",
+        ),
+        ("/?attachment=sam", "/?page_id=2&attachment=sam"),
+        ("/?subpost=hello-world", "/?p=1&subpost=hello-world"),
+        (
+            "/?attachment=a/hello-world",
+            "/?p=1&attachment=a%2Fhello-world",
+        ),
         ("/?x=1&p=2&&y", "/?page_id=2&x=1&y"),
         ("/?page_id=1", "/?p=1"),
         ("/no/such/path", "/no/such/path/"),
@@ -894,7 +920,7 @@ async fn feeds_match_php() {
 async fn pages_match_php() {
     let golden = include_str!("../../hyscribe-render/tests/golden/pages.tsv");
     assert_pages(&oracle_site().await, golden).await;
-    assert_eq!(golden.lines().count(), 148);
+    assert_eq!(golden.lines().count(), 161);
 }
 
 /// Term archives from the same script, over the fixture with

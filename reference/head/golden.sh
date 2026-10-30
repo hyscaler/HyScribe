@@ -51,7 +51,9 @@ for path in / '/?p=1' '/?page_id=2' '/?p=1&replytocom=1' '/?p=1&cpage=2' '/?p=1&
   '/?hour=8&year=2026&monthnum=2&day=30&category_name=uncategorized' '/?hour=9&year=2026&monthnum=13' \
   '/?exact=1&s=hello' '/?exact=1&s=Hello+world!' '/?exact=0&s=hello' '/?sentence=1&s=hello+world' '/?sentence=1&s=world+hello' \
   '/?sentence=1&exact=1&s=Hello+world!' '/?exact=1&s=%22Hello+world!%22' '/?sentence=1&s=a' '/?exact=1&s=hello&feed=rss2' \
-  '/?sentence=1&s=hello%0Aworld' '/?sentence=1&s=sample' '/?sentence=1&exact=1&s='; do
+  '/?sentence=1&s=hello%0Aworld' '/?sentence=1&s=sample' '/?sentence=1&exact=1&s=' \
+  '/?attachment_id=999' '/?attachment_id=0' '/?attachment_id=abc' '/?attachment_id=3' '/?subpost_id=999' '/?subpost=foo' '/?attachment=foo' \
+  '/?name=!!' '/?attachment=%20' '/?attachment=!!' '/?subpost_id=0&attachment_id=1' '/?subpost_id=abc&attachment_id=1' '/?attachment_id=1'; do
   status=$(curl -s -o "$TMP" -w '%{http_code}' "$BASE$path")
   page=$(xxd -p "$TMP" | tr -d '\n')
   head=$(printf '%s' "$page" | python3 -I -c 'import sys; s=bytes.fromhex(sys.stdin.read()); i=s.find(b"<head>"); j=s.find(b"</head>"); sys.stdout.write((s[i:j+7]).hex())')

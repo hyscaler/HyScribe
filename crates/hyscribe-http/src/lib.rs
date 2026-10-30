@@ -473,15 +473,19 @@ async fn route(
         }
         let page_id = query.get("page_id").map_or(0, |v| absint(v));
         // No post has the ID 0.
-        let post = site
-            .db
-            .post(page_id)
-            .await?
-            .filter(|p| viewable(p, &["post", "page"]));
-        return Ok(match post {
-            Some(post) => Outcome::Redirect(post_location(site, &post, raw_query)),
-            None => Outcome::Page(Box::new(error_404(site, false))),
-        });
+        return redirect_to(site, page_id, raw_query, error_404(site, false)).await;
+    }
+    // `attachment_id`, or `subpost_id` over it, is get_posts()'s `p`: a post
+    // or page redirects to its link; attachment pages are not served yet.
+    let alone = ["p", "page_id", "name", "pagename", "feed"]
+        .iter()
+        .all(|k| !query.contains_key(*k));
+    let attachment = ["subpost_id", "attachment_id"]
+        .iter()
+        .find_map(|k| query.get(*k).filter(|v| !v.is_empty()))
+        .map_or(0, |id| absint(id));
+    if alone && attachment > 0 {
+        return redirect_to(site, attachment, raw_query, not_found(site, false)).await;
     }
     let single = match single_post(query) {
         Some(single) => Some(single),
@@ -1034,6 +1038,20 @@ fn viewable(post: &Post, post_types: &[&str]) -> bool {
     post.status == "publish" && post_types.contains(&post.post_type.as_str())
 }
 
+/// A redirect to the published post or page with `id`'s link, else `missing`.
+async fn redirect_to(
+    site: &Site,
+    id: u64,
+    raw_query: Option<&str>,
+    missing: Page,
+) -> Result<Outcome, DbError> {
+    let post = site.db.post(id).await?;
+    Ok(match post.filter(|p| viewable(p, &["post", "page"])) {
+        Some(post) => Outcome::Redirect(post_location(site, &post, raw_query)),
+        None => Outcome::Page(Box::new(missing)),
+    })
+}
+
 /// What `name` or `pagename` asks for.
 enum Slug {
     /// The post found, as `(query var, ID, post type)`, ID 0 when none is.
@@ -1081,6 +1099,13 @@ async fn by_slug(
             .cloned();
         let name = sanitize_title_for_query(&query::basename(path.as_bytes()));
         ("pagename", "page", post, name)
+    } else if let Some(attachment) = ["subpost", "attachment"]
+        .iter()
+        .find_map(|k| query.get(*k).filter(|v| !v.is_empty()))
+    {
+        // get_posts() names the query after the attachment; none is served.
+        let name = sanitize_title_for_query(&query::basename(attachment.as_bytes()));
+        ("attachment", "attachment", None, name)
     } else {
         return Ok(None);
     };
@@ -1092,7 +1117,7 @@ async fn by_slug(
     // A feed is never a 404, so it is not guessed for; a guess past page 1
     // would only redirect again.
     let feed = query.get("feed").is_some_and(|f| !f.is_empty());
-    let guess = if feed || date("page").is_some_and(|page| page > 1) {
+    let guess = if feed || name.is_empty() || date("page").is_some_and(|page| page > 1) {
         Ok(None)
     } else {
         let name = String::from_utf8_lossy(&name);

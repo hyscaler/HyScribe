@@ -306,9 +306,7 @@ impl Db {
             " FROM {prefix}posts WHERE "
         ));
         sql.push("post_name LIKE ? AND post_status = 'publish' AND post_type IN (");
-        let mut prefix = like(name);
-        prefix.remove(0);
-        sql.bind(Bind::Text(prefix));
+        sql.bind(Bind::Text(format!("{}%", esc_like(name))));
         list(
             &mut sql,
             post_types.iter().map(|t| Bind::Text((*t).to_string())),
@@ -750,8 +748,13 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
     }
     for term in &query.search {
         sql.push(" AND (post_title LIKE ? OR post_excerpt LIKE ? OR post_content LIKE ?)");
+        let pattern = if query.exact {
+            esc_like(term)
+        } else {
+            like(term)
+        };
         for _ in 0..3 {
-            sql.bind(Bind::Text(like(term)));
+            sql.bind(Bind::Text(pattern.clone()));
         }
     }
     let date = [
@@ -836,17 +839,20 @@ fn order_column(column: OrderBy) -> &'static str {
     }
 }
 
-/// A `LIKE` pattern matching `text` anywhere, with `%`, `_` and `\\`
-/// escaped as `$wpdb->esc_like()` does.
+/// A `LIKE` pattern matching `text` anywhere.
 fn like(text: &str) -> String {
-    let mut pattern = String::from("%");
+    format!("%{}%", esc_like(text))
+}
+
+/// `$wpdb->esc_like()`: `text` with `%`, `_` and backslashes escaped.
+fn esc_like(text: &str) -> String {
+    let mut pattern = String::new();
     for c in text.chars() {
         if matches!(c, '%' | '_' | '\\') {
             pattern.push('\\');
         }
         pattern.push(c);
     }
-    pattern.push('%');
     pattern
 }
 

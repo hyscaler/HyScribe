@@ -894,7 +894,7 @@ async fn feeds_match_php() {
 async fn pages_match_php() {
     let golden = include_str!("../../hyscribe-render/tests/golden/pages.tsv");
     assert_pages(&oracle_site().await, golden).await;
-    assert_eq!(golden.lines().count(), 136);
+    assert_eq!(golden.lines().count(), 148);
 }
 
 /// Term archives from the same script, over the fixture with
@@ -1069,6 +1069,28 @@ async fn search_feeds_are_not_sorted_by_relevance() {
         post_query(&site, &HashMap::new(), false, vec![], false)
             .order
             .is_empty()
+    );
+}
+
+/// parse_search() runs only for a search with something in it, so an
+/// empty `sentence` search asks for no term.
+#[tokio::test]
+async fn an_empty_sentence_search_has_no_terms() {
+    let site = fixture_site(None).await;
+    let query = |s: &str| {
+        HashMap::from([
+            ("s".to_string(), s.to_string()),
+            ("sentence".to_string(), "1".to_string()),
+        ])
+    };
+    assert!(
+        post_query(&site, &query(""), false, vec![], false)
+            .search
+            .is_empty()
+    );
+    assert_eq!(
+        post_query(&site, &query("a\r\nb"), false, vec![], false).search,
+        ["ab"]
     );
 }
 

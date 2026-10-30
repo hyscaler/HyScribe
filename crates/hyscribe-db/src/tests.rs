@@ -177,6 +177,13 @@ async fn post_lists() {
         ..both()
     };
     assert_eq!(titles(&db, search(&["hello"])).await, ["Hello world!"]);
+    // An exact search matches whole titles only, case aside.
+    let exact = |term: &str| PostQuery {
+        exact: true,
+        ..search(&[term])
+    };
+    assert!(titles(&db, exact("hello")).await.is_empty());
+    assert_eq!(titles(&db, exact("hello WORLD!")).await, ["Hello world!"]);
     // Case-insensitive, in content too, and title matches first.
     assert_eq!(
         titles(&db, search(&["WORDPRESS"])).await,

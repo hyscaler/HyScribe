@@ -116,6 +116,8 @@ pub struct PostQuery {
     pub post_types: Vec<String>,
     /// Search terms; every term must appear in the title, excerpt or content.
     pub search: Vec<String>,
+    /// `exact`: a term must be a whole title, excerpt or content.
+    pub exact: bool,
     /// `YEAR(post_date)`.
     pub year: Option<u64>,
     /// `MONTH(post_date)`.

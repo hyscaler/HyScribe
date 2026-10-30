@@ -20,8 +20,8 @@ use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html};
 use hyscribe_model::{OrderBy, Post, PostQuery, TermFilter, TimeCondition};
 use hyscribe_phpser::{
-    Key, Value, add_query_values, parse_str, rawurlencode, rawurlencode_deep, remove_query_arg,
-    urldecode,
+    Key, Value, add_query_values, is_empty_string, parse_str, rawurlencode, rawurlencode_deep,
+    remove_query_arg, urldecode,
 };
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::sanitize_title_for_query;
@@ -726,6 +726,11 @@ async fn main_query(
     Ok((post_query, resolved))
 }
 
+/// The search, as parse_search() leaves it: without line breaks.
+fn shown_search(query: &HashMap<String, String>) -> Option<String> {
+    query.get("s").map(|s| s.replace(['\r', '\n'], ""))
+}
+
 /// The query of a list page with the tax query's `terms`: a search covers
 /// posts and pages unless a post format is asked for, and a feed lists
 /// `posts_per_rss` posts.
@@ -736,7 +741,13 @@ fn post_query(
     terms: Vec<TermFilter>,
     term_archive: bool,
 ) -> PostQuery {
-    let search = query.get("s");
+    let search = shown_search(query);
+    let flag = |name| {
+        query
+            .get(name)
+            .is_some_and(|v| !is_empty_string(v.as_bytes()))
+    };
+    let exact = flag("exact");
     let date = date_query(query);
     let per_page = if feed {
         absint(&site.option("posts_per_rss"))
@@ -763,9 +774,16 @@ fn post_query(
         } else {
             vec!["post".into()]
         },
-        search: search.map_or_else(Vec::new, |s| search_terms(s)),
-        // WordPress sorts a search by relevance, then date, except in feeds.
-        order: if search.is_some() && !feed {
+        // `sentence` makes the whole search one term.
+        search: match &search {
+            Some(s) if flag("sentence") && !s.is_empty() => vec![s.clone()],
+            Some(s) => search_terms(s),
+            None => Vec::new(),
+        },
+        exact,
+        // WordPress sorts a search by relevance, then date, except in feeds
+        // and exact searches.
+        order: if search.is_some() && !feed && !exact {
             vec![(OrderBy::Relevance, false), (OrderBy::Date, false)]
         } else {
             vec![]
@@ -831,7 +849,8 @@ async fn list(
     (post_query, terms): (PostQuery, Resolved),
 ) -> Result<Page, DbError> {
     let term_archive = terms.archive;
-    let search = query.get("s");
+    let search = shown_search(query);
+    let search = search.as_ref();
     let date = date_query(query);
     // `error=404`: the 404 page, but `handle_404()` sends no 404 for it.
     if date.invalid {

@@ -48,7 +48,10 @@ for path in / '/?p=1' '/?page_id=2' '/?p=1&replytocom=1' '/?p=1&cpage=2' '/?p=1&
   '/?hour=8&m=2026' '/?w=44&m=2026' '/?m=2026102708' '/?m=202610270808' '/?m=20261027080815' '/?m=2026102709' '/?hour=24' '/?hour=abc' \
   '/?hour=' '/?hour=8&paged=2' '/?hour=8&year=2026&monthnum=2&day=30' '/?hour=8&year=2026&monthnum=13' '/?hour=8&feed=rss2' '/?w=44&feed=rss2' \
   '/?hour=8&minute=8&second=14999' '/?minute=8&second=14999' '/?hour=8&year=2026&monthnum=2&day=30&s=hello' \
-  '/?hour=8&year=2026&monthnum=2&day=30&category_name=uncategorized' '/?hour=9&year=2026&monthnum=13'; do
+  '/?hour=8&year=2026&monthnum=2&day=30&category_name=uncategorized' '/?hour=9&year=2026&monthnum=13' \
+  '/?exact=1&s=hello' '/?exact=1&s=Hello+world!' '/?exact=0&s=hello' '/?sentence=1&s=hello+world' '/?sentence=1&s=world+hello' \
+  '/?sentence=1&exact=1&s=Hello+world!' '/?exact=1&s=%22Hello+world!%22' '/?sentence=1&s=a' '/?exact=1&s=hello&feed=rss2' \
+  '/?sentence=1&s=hello%0Aworld' '/?sentence=1&s=sample' '/?sentence=1&exact=1&s='; do
   status=$(curl -s -o "$TMP" -w '%{http_code}' "$BASE$path")
   page=$(xxd -p "$TMP" | tr -d '\n')
   head=$(printf '%s' "$page" | python3 -I -c 'import sys; s=bytes.fromhex(sys.stdin.read()); i=s.find(b"<head>"); j=s.find(b"</head>"); sys.stdout.write((s[i:j+7]).hex())')

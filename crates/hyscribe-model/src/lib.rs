@@ -122,6 +122,8 @@ pub struct PostQuery {
     pub month: Option<u64>,
     /// `DAYOFMONTH(post_date)`.
     pub day: Option<u64>,
+    /// Conditions on the time and week of `post_date`.
+    pub time: Vec<TimeCondition>,
     /// `post__in`: only these posts, when set.
     pub include: Option<Vec<u64>>,
     /// `post__not_in`.
@@ -157,6 +159,32 @@ pub struct TermFilter {
     pub terms: Vec<u64>,
     /// `NOT IN`: posts with none of the terms, where `IN` wants one.
     pub exclude: bool,
+}
+
+/// A condition on `post_date` as `WP_Query` and `WP_Date_Query` write it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TimeCondition {
+    /// `HOUR(post_date) = n`.
+    Hour(u64),
+    /// `MINUTE(post_date) = n`.
+    Minute(u64),
+    /// `SECOND(post_date) = n`.
+    Second(u64),
+    /// `DATE_FORMAT(post_date, format) = time`, compared as numbers, which
+    /// `build_time_query()` writes for a minute with an hour or a second.
+    Formatted {
+        /// Such as `%H.%i`.
+        format: String,
+        /// Such as `8.080000`.
+        time: String,
+    },
+    /// `_wp_mysql_week( post_date ) = week`, its mode from `start_of_week`.
+    Week {
+        /// The week number.
+        week: u64,
+        /// `(int) get_option( 'start_of_week' )`.
+        start_of_week: i64,
+    },
 }
 
 /// Posts with any of these post formats.

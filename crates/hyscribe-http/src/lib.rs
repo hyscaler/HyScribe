@@ -18,7 +18,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html};
-use hyscribe_model::{OrderBy, Post, PostQuery, TermFilter};
+use hyscribe_model::{OrderBy, Post, PostQuery, TermFilter, TimeCondition};
 use hyscribe_phpser::{
     Key, Value, add_query_values, parse_str, rawurlencode, rawurlencode_deep, remove_query_arg,
     urldecode,
@@ -40,7 +40,7 @@ mod reads;
 
 use reads::Reads;
 
-use query::{DateQuery, Resolved, absint, clean_query, date_query, other_args, tax_query};
+use query::{Resolved, absint, clean_query, date_query, other_args, tax_query};
 
 /// Headers on every response (docs/SECURITY_MODEL.md, Web).
 const SECURITY_HEADERS: [(&str, &str); 3] = [
@@ -578,14 +578,17 @@ async fn route(
                 },
             )
         }
-        None => match date_redirect(site, raw_query, query) {
-            Some(location) => Ok(Outcome::Redirect(location)),
-            None => {
-                let main = main_query(site, query, false).await?;
-                let page = list(site, query, false, main).await?;
-                Ok(Outcome::Page(Box::new(page)))
-            }
-        },
+        None => {
+            let main = main_query(site, query, false).await?;
+            let page = list(site, query, false, main).await?;
+            // redirect_canonical() sends an invalid date on only from a 404.
+            Ok(
+                match date_redirect(site, raw_query, query).filter(|_| page.request.not_found) {
+                    Some(location) => Outcome::Redirect(location),
+                    None => Outcome::Page(Box::new(page)),
+                },
+            )
+        }
     }
 }
 
@@ -734,7 +737,7 @@ fn post_query(
     term_archive: bool,
 ) -> PostQuery {
     let search = query.get("s");
-    let date = dates(query);
+    let date = date_query(query);
     let per_page = if feed {
         absint(&site.option("posts_per_rss"))
     } else {
@@ -742,7 +745,7 @@ fn post_query(
     }
     .clamp(1, 100);
     // The home list's first page puts sticky posts first.
-    let home = search.is_none() && !feed && date.kind.is_none() && !term_archive;
+    let home = search.is_none() && !feed && !date.archive && !term_archive;
     let paged = Paging::of(query).paged;
     let sticky = if home && paged <= 1 {
         sticky_posts(
@@ -772,6 +775,14 @@ fn post_query(
         year: date.year,
         month: date.month,
         day: date.day,
+        time: date
+            .time
+            .into_iter()
+            .chain(date.week.map(|week| TimeCondition::Week {
+                week,
+                start_of_week: Value::String(site.option("start_of_week").into()).to_int(),
+            }))
+            .collect(),
         // Two dates for one part match nothing.
         include: date.conflicting.then(Vec::new),
         limit: u32::try_from(per_page).unwrap_or(10),
@@ -788,7 +799,7 @@ fn date_redirect(
     raw_query: Option<&str>,
     query: &HashMap<String, String>,
 ) -> Option<String> {
-    let link = format!("{}/?{}", site.home, dates(query).canonical?);
+    let link = format!("{}/?{}", site.home, date_query(query).canonical?);
     Some(tack(&link, raw_query, &["year", "monthnum", "day"]))
 }
 
@@ -797,12 +808,6 @@ fn error_404(site: &Site, feed: bool) -> Page {
     let mut page = not_found(site, feed);
     page.status = StatusCode::OK;
     page
-}
-
-/// The request's date query.
-fn dates(query: &HashMap<String, String>) -> DateQuery {
-    let var = |name| query.get(name).map(String::as_str);
-    date_query(var("m"), var("year"), var("monthnum"), var("day"))
 }
 
 /// `WP_Query`'s offset of page `paged`: past the integers, PHP's product is
@@ -827,7 +832,7 @@ async fn list(
 ) -> Result<Page, DbError> {
     let term_archive = terms.archive;
     let search = query.get("s");
-    let date = dates(query);
+    let date = date_query(query);
     // `error=404`: the 404 page, but `handle_404()` sends no 404 for it.
     if date.invalid {
         return Ok(error_404(site, feed));
@@ -841,7 +846,7 @@ async fn list(
     };
     // An archive with nothing in it is a 404 unless it is of a term that
     // exists, a search only when paged.
-    let is_archive = date.kind.is_some() || term_archive.is_some();
+    let is_archive = date.archive || term_archive.is_some();
     let empty_404 = paging.is_paged() || is_archive && search.is_none() && term.is_none();
     if empty_404 && posts.is_empty() {
         let mut page = not_found(site, feed && !paging.is_paged());
@@ -857,18 +862,21 @@ async fn list(
     } else if term_archive.is_some() {
         Some(term.map_or_else(String::new, |term| esc_html(&term.name)))
     } else {
-        date.kind.as_ref().map(|kind| {
-            let format = match kind {
-                Archive::Day => site.option("date_format"),
-                Archive::Month => "F Y".to_string(),
-                _ => "Y".to_string(),
-            };
-            date::format(&format, first_date, site.zone())
+        // A week's or a time's archive has no title of its own.
+        date.archive.then(|| {
+            date.kind.as_ref().map_or_else(String::new, |kind| {
+                let format = match kind {
+                    Archive::Day => site.option("date_format"),
+                    Archive::Month => "F Y".to_string(),
+                    _ => "Y".to_string(),
+                };
+                date::format(&format, first_date, site.zone())
+            })
         })
     };
     let tagline = site.option("blogdescription");
     let title = match heading {
-        // A term archive without its term has the site's name alone.
+        // A term or date archive without a title has the site's name alone.
         Some(heading) => document_title([
             Some(heading).filter(|h| !h.is_empty()),
             paging.title(),
@@ -884,11 +892,13 @@ async fn list(
         &terms.kinds,
         term_archive.as_ref(),
         search.is_some(),
-        date.kind.is_some(),
+        date.archive,
         query.contains_key("post_format"),
     );
     let queried_object_id = term.map_or(0, |term| term.id);
-    let archive = term_archive.or(date.kind.clone());
+    let archive = term_archive
+        .or(date.kind.clone())
+        .or(date.archive.then_some(Archive::Date));
     // The home page lists the latest posts, the default install's setting.
     let home = archive.is_none() && search.is_none();
     let request = Request {
@@ -897,7 +907,7 @@ async fn list(
         post: posts.first().map(|post| post.id),
         queried_object_id,
         archive,
-        date: date.kind.is_some(),
+        date: date.archive,
         search: search.map(|s| s.as_bytes().to_vec()),
         search_query: search.map_or_else(Vec::new, |s| s.as_bytes().to_vec()),
         paged: paging.paged,

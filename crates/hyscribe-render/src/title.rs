@@ -38,6 +38,7 @@ pub fn archive_title(
                 title.map_or("Archives", |(_, t)| t).as_bytes().to_vec(),
             )
         }
+        Archive::Date => (b"", b"Archives".to_vec()),
         Archive::Year => (b"Year:", date("Y")),
         Archive::Month => (b"Month:", date("F Y")),
         Archive::Day => (b"Day:", date(&String::from_utf8_lossy(date_format))),

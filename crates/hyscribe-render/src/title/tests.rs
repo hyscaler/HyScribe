@@ -4,7 +4,8 @@ use hyscribe_testkit::unhex;
 
 use super::*;
 
-/// The query titles of term archives in `terms.tsv` from
+/// The query titles of term archives in `terms.tsv` and of a time's
+/// archive in `pages.tsv`, from
 /// `reference/head/golden.sh`, over the terms of
 /// `reference/default-install/terms.sql`.
 #[test]
@@ -33,9 +34,16 @@ fn term_archive_titles_match_php() {
             Archive::Term(Taxonomy::Format, None),
         ),
     ];
-    for (path, archive) in cases {
+    // A time's archive, from the default install's pages.
+    let pages = include_str!("../../tests/golden/pages.tsv");
+    let time = ("/?hour=8", Archive::Date);
+    for (path, archive) in cases.into_iter().chain([time]) {
         let key = format!("{}\t", hyscribe_phpser::bin2hex(path.as_bytes()));
-        let line = golden.lines().find(|line| line.starts_with(&key)).unwrap();
+        let line = golden
+            .lines()
+            .chain(pages.lines())
+            .find(|line| line.starts_with(&key))
+            .unwrap();
         let page = String::from_utf8(unhex(line.rsplit('\t').next().unwrap())).unwrap();
         let php = page
             .split("<h1 class=\"wp-block-query-title\">")

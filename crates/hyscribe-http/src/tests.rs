@@ -525,21 +525,23 @@ async fn archives_and_searches_match_wordpress_titles() {
 
 #[test]
 fn date_parts_follow_wp_query() {
-    assert_eq!(query::date_parts("2026"), (Some(2026), None, None));
-    assert_eq!(query::date_parts("0"), (None, None, None));
-    assert_eq!(query::date_parts("00"), (Some(0), None, None));
-    assert_eq!(query::date_parts("2026-10"), (Some(2026), Some(10), None));
+    let parts = |m| query::date_parts(m);
+    assert_eq!(parts("2026"), [Some(2026), None, None, None, None, None]);
+    assert_eq!(parts("0"), [None; 6]);
+    assert_eq!(parts("00")[0], Some(0));
+    assert_eq!(parts("2026-10")[..3], [Some(2026), Some(10), None]);
     assert_eq!(
-        query::date_parts("20261027"),
-        (Some(2026), Some(10), Some(27))
+        parts("20261027")[..4],
+        [Some(2026), Some(10), Some(27), None]
     );
     assert_eq!(
-        query::date_parts("202610271200"),
-        (Some(2026), Some(10), Some(27))
+        parts("202610271200"),
+        [Some(2026), Some(10), Some(27), Some(12), Some(0), None]
     );
-    assert_eq!(query::date_parts("12"), (Some(12), None, None));
-    assert_eq!(query::date_parts("abc"), (None, None, None));
-    assert_eq!(query::date_parts("20261"), (Some(2026), None, None));
+    assert_eq!(parts("20261027080815")[5], Some(15));
+    assert_eq!(parts("12")[..2], [Some(12), None]);
+    assert_eq!(parts("abc"), [None; 6]);
+    assert_eq!(parts("20261")[..2], [Some(2026), None]);
 }
 
 #[tokio::test]
@@ -892,7 +894,7 @@ async fn feeds_match_php() {
 async fn pages_match_php() {
     let golden = include_str!("../../hyscribe-render/tests/golden/pages.tsv");
     assert_pages(&oracle_site().await, golden).await;
-    assert_eq!(golden.lines().count(), 101);
+    assert_eq!(golden.lines().count(), 136);
 }
 
 /// Term archives from the same script, over the fixture with
@@ -912,6 +914,23 @@ async fn term_archives_match_php() {
     let golden = include_str!("../../hyscribe-render/tests/golden/terms.tsv");
     assert_pages(&Arc::new(site), golden).await;
     assert_eq!(golden.lines().count(), 28);
+}
+
+/// Week archives under other first days of the week, from the same script.
+#[tokio::test]
+async fn week_archives_follow_the_start_of_the_week() {
+    let golden = include_str!("../../hyscribe-render/tests/golden/weeks.tsv");
+    for day in ["0", "3"] {
+        let mut site = Arc::into_inner(oracle_site().await).unwrap();
+        site.options
+            .insert("start_of_week".into(), day.as_bytes().to_vec());
+        let lines: Vec<&str> = golden
+            .lines()
+            .filter_map(|line| line.strip_prefix(&format!("{day}\t")))
+            .collect();
+        assert_eq!(lines.len(), 3);
+        assert_pages(&Arc::new(site), &lines.join("\n")).await;
+    }
 }
 
 /// Pages past the first, with one post a page, from the same script.

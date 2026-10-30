@@ -5,7 +5,7 @@
 
 use super::*;
 use hyscribe_config::Secret;
-use hyscribe_model::{FormatFilter, Term, TermFilter};
+use hyscribe_model::{FormatFilter, Term, TermFilter, TimeCondition};
 
 fn fixture_config() -> Database {
     hyscribe_testkit::fixture_database()
@@ -86,6 +86,43 @@ async fn reads_the_default_install() {
     );
     let tag = [("post_tag".to_string(), b"uncategorized".to_vec())];
     assert!(db.find_terms(&tag, &[]).await.unwrap().is_empty());
+}
+
+/// The time conditions over the fixture's post, written at 2026-10-27
+/// 08:08:15, a Tuesday: week 43 counted from Sunday, 44 from Monday and 42
+/// from Wednesday, as `reference/head/golden.sh` records them.
+#[tokio::test]
+async fn posts_match_time_conditions() {
+    let db = fixture().await;
+    let formatted = |format: &str, time: &str| TimeCondition::Formatted {
+        format: format.into(),
+        time: time.into(),
+    };
+    let week = |week, start_of_week| TimeCondition::Week {
+        week,
+        start_of_week,
+    };
+    for (condition, found) in [
+        (TimeCondition::Hour(8), true),
+        (TimeCondition::Hour(9), false),
+        (TimeCondition::Minute(8), true),
+        (TimeCondition::Second(15), true),
+        (TimeCondition::Second(16), false),
+        (formatted("%H.%i", "8.080000"), true),
+        (formatted("0.%i%s", "0.081500"), true),
+        (formatted("%H.%i", "8.090000"), false),
+        (week(43, 0), true),
+        (week(44, 1), true),
+        (week(43, 1), false),
+        (week(42, 3), true),
+        (week(43, 3), false),
+    ] {
+        let query = PostQuery {
+            time: vec![condition.clone()],
+            ..PostQuery::default()
+        };
+        assert_eq!(!titles(&db, query).await.is_empty(), found, "{condition:?}");
+    }
 }
 
 /// Titles of the posts `query` (with defaults for the rest) selects.

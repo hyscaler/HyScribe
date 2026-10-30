@@ -140,4 +140,6 @@ pub enum Archive {
     Month,
     /// `?m=YYYYMMDD`.
     Day,
+    /// A week's or a time's: no year, month or day.
+    Date,
 }

@@ -8,8 +8,8 @@
 #   hex(path and query)<TAB>hex(head or footer)
 # and the whole page as pages.tsv,
 #   hex(path and query)<TAB>status<TAB>hex(page)
-# then terms.tsv, paged.tsv and singular-pages.tsv, described where they
-# are made.
+# then terms.tsv, weeks.tsv, paged.tsv and singular-pages.tsv, described
+# where they are made.
 # Needs the default install oracle running (reference/default-install/db.sh
 # up, then php.sh up). Page views write to the database, so start
 # from a fresh db.sh up.
@@ -42,7 +42,13 @@ for path in / '/?p=1' '/?page_id=2' '/?p=1&replytocom=1' '/?p=1&cpage=2' '/?p=1&
   '/?pagename=/sample-page/' '/?pagename=nope' '/?name=hello-world&cpage=2' '/?name=%20' '/?name=hello-world&post_type=page' \
   '/?name=sample&page=2' '/?name=sam&post_type=attachment' '/?name=hello-world&post_type=attachment' \
   '/?category_name=uncategorized' '/?taxonomy=category&term=uncategorized' '/?category_name=nope' '/?category_name=uncategorized,nope' \
-  '/?tag=foo' '/?post_format=aside' '/?taxonomy=foo&term=x' '/?category_name=/' '/?taxonomy=category&term=nope&cat=1,,2' '/?feed=comments-rss2&cat=-1'; do
+  '/?tag=foo' '/?post_format=aside' '/?taxonomy=foo&term=x' '/?category_name=/' '/?taxonomy=category&term=nope&cat=1,,2' '/?feed=comments-rss2&cat=-1' \
+  '/?hour=8' '/?hour=9' '/?minute=8' '/?second=15' '/?hour=8&minute=8' '/?hour=8&second=99' '/?hour=8&minute=9' '/?minute=8&hour=100' \
+  '/?hour=8&minute=8&second=15' '/?minute=08&second=15' '/?w=44' '/?w=43' '/?w=0' '/?w=abc' '/?hour=8&day=40' '/?hour=8&year=2026' \
+  '/?hour=8&m=2026' '/?w=44&m=2026' '/?m=2026102708' '/?m=202610270808' '/?m=20261027080815' '/?m=2026102709' '/?hour=24' '/?hour=abc' \
+  '/?hour=' '/?hour=8&paged=2' '/?hour=8&year=2026&monthnum=2&day=30' '/?hour=8&year=2026&monthnum=13' '/?hour=8&feed=rss2' '/?w=44&feed=rss2' \
+  '/?hour=8&minute=8&second=14999' '/?minute=8&second=14999' '/?hour=8&year=2026&monthnum=2&day=30&s=hello' \
+  '/?hour=8&year=2026&monthnum=2&day=30&category_name=uncategorized' '/?hour=9&year=2026&monthnum=13'; do
   status=$(curl -s -o "$TMP" -w '%{http_code}' "$BASE$path")
   page=$(xxd -p "$TMP" | tr -d '\n')
   head=$(printf '%s' "$page" | python3 -I -c 'import sys; s=bytes.fromhex(sys.stdin.read()); i=s.find(b"<head>"); j=s.find(b"</head>"); sys.stdout.write((s[i:j+7]).hex())')
@@ -79,6 +85,27 @@ done
 remove_terms
 trap 'rm -f "$TMP"' EXIT
 
+# Week archives under other first days of the week, as weeks.tsv:
+# start_of_week<TAB>hex(path)<TAB>status<TAB>hex(page); the option goes
+# back to 1 after.
+WEEKS="$ROOT/crates/hyscribe-render/tests/golden/weeks.tsv"
+start_of_week() {
+  "$DOCKER" exec "$DB" mariadb -uroot -preference-only wordpress \
+    -e "UPDATE wp_options SET option_value = '$1' WHERE option_name = 'start_of_week'"
+}
+trap 'start_of_week 1; rm -f "$TMP"' EXIT
+: > "$WEEKS"
+for day in 0 3; do
+  start_of_week "$day"
+  for path in '/?w=42' '/?w=43' '/?w=44'; do
+    status=$(curl -s -o "$TMP" -w '%{http_code}' "$BASE$path")
+    key=$(printf '%s' "$path" | xxd -p | tr -d '\n')
+    printf '%s\t%s\t%s\t%s\n' "$day" "$key" "$status" "$(xxd -p "$TMP" | tr -d '\n')" >> "$WEEKS"
+  done
+done
+start_of_week 1
+trap 'rm -f "$TMP"' EXIT
+
 # Pages past the first, with one post a page; the option goes back after.
 PAGED="$ROOT/crates/hyscribe-render/tests/golden/paged.tsv"
 per_page() {
@@ -111,4 +138,4 @@ for q in '' '&page=1' '&page=2' '&page=3' '&page=abc' '&page=0' '&page=2/' '&pag
   title=$( (grep -o '<title>[^<]*</title>' "$TMP" || true) | head -n 1 | sed 's/<[^>]*>//g' | tr -d '\n' | xxd -p | tr -d '\n')
   printf '%s\t%s\t%s\n' "$(printf '%s' "$query" | xxd -p | tr -d '\n')" "$out" "$title" >> "$SINGULAR"
 done
-wc -l "$OUT" "$FOOTER" "$PAGES" "$TERMS" "$PAGED" "$SINGULAR"
+wc -l "$OUT" "$FOOTER" "$PAGES" "$TERMS" "$WEEKS" "$PAGED" "$SINGULAR"

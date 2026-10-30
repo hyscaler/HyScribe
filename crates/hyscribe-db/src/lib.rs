@@ -13,7 +13,7 @@
 use std::fmt;
 
 use hyscribe_config::{Database, Prefix};
-use hyscribe_model::{Comment, OrderBy, Post, PostQuery, Term, User};
+use hyscribe_model::{Comment, OrderBy, Post, PostQuery, Term, TimeCondition, User};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
 
@@ -764,6 +764,43 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
             sql.push(fragment);
             sql.bind(Bind::Int(value));
         }
+    }
+    for condition in &query.time {
+        let value = match condition {
+            TimeCondition::Hour(n) => {
+                sql.push(" AND HOUR(post_date) = ?");
+                *n
+            }
+            TimeCondition::Minute(n) => {
+                sql.push(" AND MINUTE(post_date) = ?");
+                *n
+            }
+            TimeCondition::Second(n) => {
+                sql.push(" AND SECOND(post_date) = ?");
+                *n
+            }
+            TimeCondition::Formatted { format, time } => {
+                sql.push(" AND DATE_FORMAT(post_date, ?) = CAST(? AS DECIMAL(65, 6))");
+                sql.bind(Bind::Text(format.clone()));
+                sql.bind(Bind::Text(time.clone()));
+                continue;
+            }
+            TimeCondition::Week {
+                week,
+                start_of_week,
+            } => {
+                match start_of_week {
+                    1 => sql.push(" AND WEEK(post_date, 1) = ?"),
+                    2..=6 => {
+                        sql.push(" AND WEEK(DATE_SUB(post_date, INTERVAL ? DAY), 0) = ?");
+                        sql.bind(Bind::Int(start_of_week.unsigned_abs()));
+                    }
+                    _ => sql.push(" AND WEEK(post_date, 0) = ?"),
+                }
+                *week
+            }
+        };
+        sql.bind(Bind::Int(value));
     }
 }
 

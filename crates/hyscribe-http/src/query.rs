@@ -7,7 +7,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use hyscribe_model::{Term, TermFilter};
+use hyscribe_model::{Term, TermFilter, TimeCondition};
 use hyscribe_phpser::{Key, Value, decode, is_empty_string, php_trim};
 use hyscribe_render::formatting::{sanitize_title, sanitize_title_for_query};
 use hyscribe_render::site::{Archive, Taxonomy};
@@ -26,16 +26,24 @@ pub fn other_args(raw_query: Option<&str>, names: &[&str]) -> String {
         .collect()
 }
 
-/// The `m` query var's date parts, as `WP_Query` reads them: digits only,
-/// `YYYY`, then `MM`, then `DD`, none for `0`, which PHP takes as false.
-pub fn date_parts(m: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
+/// The `m` query var's parts, as `WP_Query` reads them: digits only,
+/// `YYYY`, then `MM`, `DD`, `HH`, `MM` and `SS`, none for `0`, which PHP
+/// takes as false.
+pub fn date_parts(m: &str) -> [Option<u64>; 6] {
     let digits: String = m.chars().filter(char::is_ascii_digit).collect();
     let part = |range: std::ops::Range<usize>| digits.get(range).and_then(|d| d.parse().ok());
     if digits.is_empty() || digits == "0" {
-        return (None, None, None);
+        return [None; 6];
     }
     let year = part(0..4).or_else(|| digits.parse().ok());
-    (year, part(4..6), part(6..8))
+    [
+        year,
+        part(4..6),
+        part(6..8),
+        part(8..10),
+        part(10..12),
+        part(12..14),
+    ]
 }
 
 /// WordPress's `absint()` on request input.
@@ -537,7 +545,7 @@ pub fn clean_query(query: &str) -> String {
 }
 
 /// The date part of a list's query, as `WP_Query` reads `m`, `year`,
-/// `monthnum` and `day`.
+/// `monthnum`, `day`, `hour`, `minute`, `second` and `w`.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct DateQuery {
     /// `YEAR(post_date)`.
@@ -546,8 +554,14 @@ pub struct DateQuery {
     pub month: Option<u64>,
     /// `DAYOFMONTH(post_date)`.
     pub day: Option<u64>,
+    /// The time conditions, `m`'s and then `WP_Date_Query`'s.
+    pub time: Vec<TimeCondition>,
+    /// The week of `w`.
+    pub week: Option<u64>,
     /// `m` and the other vars ask for different dates, which nothing has.
     pub conflicting: bool,
+    /// `is_date()`.
+    pub archive: bool,
     /// The archive the title names: the year, then the month, then the
     /// day, the first of them asked for.
     pub kind: Option<Archive>,
@@ -559,50 +573,56 @@ pub struct DateQuery {
     pub canonical: Option<String>,
 }
 
-/// `m`, `year`, `monthnum` and `day` as `WP_Query::parse_query()` reads
-/// them: `day`, then `monthnum`, then `year` each make a date archive
-/// unless one before did, and `m` adds its own.
-pub fn date_query(
-    m: Option<&str>,
-    year: Option<&str>,
-    monthnum: Option<&str>,
-    day: Option<&str>,
-) -> DateQuery {
-    let (m_year, m_month, m_day) = m.map_or((None, None, None), date_parts);
-    let var = |value: Option<&str>| value.map_or(0, absint);
-    let (year, month, day) = (var(year), var(monthnum), var(day));
+/// The date vars of `query` as `WP_Query::parse_query()` reads them: a
+/// time var makes a date archive of no year, month or day; then `day`,
+/// `monthnum` and `year` each make one unless one before did, and `m` and
+/// `w` add their own.
+pub fn date_query(query: &HashMap<String, String>) -> DateQuery {
+    let var = |name: &str| query.get(name).map(String::as_str);
+    let [m_year, m_month, m_day, m_hour, m_minute, m_second] =
+        var("m").map_or([None; 6], date_parts);
+    let number = |name| var(name).map_or(0, absint);
+    let (year, month, day) = (number("year"), number("monthnum"), number("day"));
+    // A time var counts unless it is empty.
+    let clock = |name| var(name).filter(|v| !v.is_empty()).map(absint);
+    let (hour, minute, second) = (clock("hour"), clock("minute"), clock("second"));
+    let mut is_date = hour.is_some() || minute.is_some() || second.is_some();
     let (mut is_day, mut is_month, mut is_year, mut invalid) = (false, false, false, false);
-    if day > 0 {
+    if day > 0 && !is_date {
         if month > 0 && year > 0 && !checkdate(month, day, year) {
             invalid = true;
         } else {
-            is_day = true;
+            (is_day, is_date) = (true, true);
         }
     }
-    if month > 0 && !is_day {
+    if month > 0 && !is_date {
         if month > 12 {
             invalid = true;
         } else {
-            is_month = true;
+            (is_month, is_date) = (true, true);
         }
     }
-    is_year |= year > 0 && !is_day && !is_month;
-    match (m_year, m_month, m_day) {
-        (_, _, Some(_)) => is_day = true,
-        (_, Some(_), None) => is_month = true,
-        (Some(_), None, None) => is_year = true,
-        (None, None, None) => {}
+    if year > 0 && !is_date {
+        (is_year, is_date) = (true, true);
     }
+    match (m_year, m_month, m_day, m_hour) {
+        (_, _, _, Some(_)) => {}
+        (_, _, Some(_), None) => is_day = true,
+        (_, Some(_), None, None) => is_month = true,
+        (Some(_), None, None, None) => is_year = true,
+        (None, None, None, None) => {}
+    }
+    let week = Some(number("w")).filter(|&w| w > 0);
+    is_date |= m_year.is_some() || week.is_some();
     let kind = [
         (is_year, Archive::Year),
         (is_month, Archive::Month),
         (is_day, Archive::Day),
     ]
     .into_iter()
-    .find_map(|(is, kind)| is.then_some(kind))
-    .filter(|_| !invalid);
+    .find_map(|(is, kind)| is.then_some(kind));
     let canonical = match (year, month, day) {
-        (1.., 1.., 1..) if invalid => Some(format!("m={year}{month:02}")),
+        (1.., 1.., 1..) if !checkdate(month, day, year) => Some(format!("m={year}{month:02}")),
         (1.., 13.., _) => Some(format!("m={year}")),
         _ => None,
     };
@@ -615,11 +635,45 @@ pub fn date_query(
         merge(m_month, month),
         merge(m_day, day),
     );
+    let mut time: Vec<TimeCondition> = [
+        m_hour.map(TimeCondition::Hour),
+        m_minute.map(TimeCondition::Minute),
+        m_second.map(TimeCondition::Second),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    // WP_Date_Query::build_time_query(): one unit alone, or a minute with
+    // the others; an hour and a second without a minute add no condition.
+    time.extend(match (hour, minute, second) {
+        (Some(h), None, None) => Some(TimeCondition::Hour(h)),
+        (None, Some(m), None) => Some(TimeCondition::Minute(m)),
+        (None, None, Some(s)) => Some(TimeCondition::Second(s)),
+        (_, None, _) => None,
+        (h, Some(m), s) => Some(TimeCondition::Formatted {
+            format: [h.map_or("0.", |_| "%H."), "%i", s.map_or("", |_| "%s")].concat(),
+            // `%f`: rounded to six places.
+            time: format!(
+                "{:.6}",
+                [
+                    h.map_or_else(|| "0.".to_string(), |h| format!("{h:02}.")),
+                    format!("{m:02}"),
+                    s.map_or_else(String::new, |s| format!("{s:02}")),
+                ]
+                .concat()
+                .parse::<f64>()
+                .unwrap_or_default()
+            ),
+        }),
+    });
     DateQuery {
         year,
         month,
         day,
+        time,
+        week,
         conflicting: a || b || c,
+        archive: is_date,
         kind,
         invalid,
         canonical,

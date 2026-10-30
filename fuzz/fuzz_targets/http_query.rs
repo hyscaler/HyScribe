@@ -10,7 +10,9 @@ use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data);
     let _ = query::absint(&text);
-    let _ = query::date_query(Some(&text), Some(&text), Some(&text), Some(&text));
+    let dates = ["m", "year", "monthnum", "day", "hour", "minute", "second", "w"]
+        .map(|name| (name.to_string(), text.to_string()));
+    let _ = query::date_query(&dates.into_iter().collect());
     let _ = query::clean_query(&text);
     let vars = ["cat", "category_name", "tag", "post_format", "taxonomy", "term"]
         .map(|name| (name.to_string(), text.to_string()));

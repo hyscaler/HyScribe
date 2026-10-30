@@ -32,6 +32,7 @@ mod query_pagination;
 pub mod registry;
 mod search;
 pub mod site;
+pub mod sitemap;
 pub mod style;
 pub mod supports;
 pub mod template;

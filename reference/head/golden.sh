@@ -53,7 +53,15 @@ for path in / '/?p=1' '/?page_id=2' '/?p=1&replytocom=1' '/?p=1&cpage=2' '/?p=1&
   '/?sentence=1&exact=1&s=Hello+world!' '/?exact=1&s=%22Hello+world!%22' '/?sentence=1&s=a' '/?exact=1&s=hello&feed=rss2' \
   '/?sentence=1&s=hello%0Aworld' '/?sentence=1&s=sample' '/?sentence=1&exact=1&s=' \
   '/?attachment_id=999' '/?attachment_id=0' '/?attachment_id=abc' '/?attachment_id=3' '/?subpost_id=999' '/?subpost=foo' '/?attachment=foo' \
-  '/?name=!!' '/?attachment=%20' '/?attachment=!!' '/?subpost_id=0&attachment_id=1' '/?subpost_id=abc&attachment_id=1' '/?attachment_id=1'; do
+  '/?name=!!' '/?attachment=%20' '/?attachment=!!' '/?subpost_id=0&attachment_id=1' '/?subpost_id=abc&attachment_id=1' '/?attachment_id=1' \
+  '/?sitemap=index' '/?sitemap=posts&sitemap-subtype=post&paged=1' '/?sitemap=posts&sitemap-subtype=page&paged=1' \
+  '/?sitemap=taxonomies&sitemap-subtype=category&paged=1' '/?sitemap-stylesheet=index' '/?sitemap-stylesheet=sitemap' \
+  '/?sitemap=posts&sitemap-subtype=post' '/?sitemap=posts&sitemap-subtype=post&paged=2' '/?sitemap=posts&sitemap-subtype=page&paged=2' \
+  '/?sitemap=nope' '/?sitemap=posts&sitemap-subtype=attachment' '/?sitemap=posts' '/?sitemap=taxonomies&sitemap-subtype=post_tag&paged=1' \
+  '/?sitemap-stylesheet=nope' '/?sitemap=%20' '/?sitemap=index&sitemap-stylesheet=sitemap' '/?sitemap=posts&sitemap-subtype=post&paged=0' \
+  '/?sitemap=wp_block' '/?sitemap=' '/?robots=1' '/?robots=abc' '/?robots=0' '/?robots=' '/?robots=1&feed=rss2' '/?robots=1&sitemap=index' \
+  '/?robots=1&p=1' '/?robots=1&p=2' '/?robots=1&p=1.' '/?sitemap=0' '/?sitemap-stylesheet=0' '/?sitemap=index&sitemap-stylesheet=+0+' \
+  '/?sitemap=%3Cb%3Eindex%3C/b%3E' '/?sitemap=ind%2525ex' '/?sitemap=index&p=999' '/?sitemap=posts&sitemap-subtype=%20post%20'; do
   status=$(curl -s -o "$TMP" -w '%{http_code}' "$BASE$path")
   page=$(xxd -p "$TMP" | tr -d '\n')
   head=$(printf '%s' "$page" | python3 -I -c 'import sys; s=bytes.fromhex(sys.stdin.read()); i=s.find(b"<head>"); j=s.find(b"</head>"); sys.stdout.write((s[i:j+7]).hex())')
@@ -72,8 +80,9 @@ DOCKER="${DOCKER:-docker}"
 DB="${HYSCRIBE_DB_CONTAINER:-hyscribe-default-install-db}"
 sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress; }
 remove_terms() {
-  echo 'DELETE FROM wp_term_relationships WHERE term_taxonomy_id IN (2, 3, 4);
-    DELETE FROM wp_term_taxonomy WHERE term_taxonomy_id IN (2, 3, 4); DELETE FROM wp_terms WHERE term_id IN (2, 3, 4);' | sql
+  echo 'DELETE FROM wp_term_relationships WHERE term_taxonomy_id IN (2, 3, 4, 5);
+    DELETE FROM wp_term_taxonomy WHERE term_taxonomy_id IN (2, 3, 4, 5); DELETE FROM wp_terms WHERE term_id IN (2, 3, 4, 5);
+    DELETE FROM wp_posts WHERE ID IN (101, 102);' | sql
 }
 sql < "$ROOT/reference/default-install/terms.sql"
 trap 'remove_terms; rm -f "$TMP"' EXIT
@@ -82,7 +91,10 @@ for path in '/?tag=foo' '/?tag=Foo' '/?tag=empty' '/?tag=nope' '/?tag=foo&paged=
   '/?tag=foo,nope' '/?tag=foo+nope' '/?tag=%20' '/?tag=foo&cat=1' '/?s=hello&tag=foo' '/?m=2026&tag=foo' '/?tag=foo&feed=rss2' \
   '/?post_format=aside' '/?post_format=post-format-aside' '/?post_format=chat' '/?post_format=,post-format-aside' \
   '/?post_format=aside&feed=rss2' '/?taxonomy=post_tag&term=foo' '/?taxonomy=foo&term=x' '/?s=hello&taxonomy=foo&term=x' \
-  '/?category_name=uncategorized,nope' '/?p=1' '/?feed=rss2' '/' '/?post_format=aside&page=2' '/?tag=foo&page=2'; do
+  '/?category_name=uncategorized,nope' '/?p=1' '/?feed=rss2' '/' '/?post_format=aside&page=2' '/?tag=foo&page=2' \
+  '/?sitemap=index' '/?sitemap=taxonomies&sitemap-subtype=post_tag&paged=1' '/?sitemap=taxonomies&sitemap-subtype=post_format&paged=1' \
+  '/?sitemap=posts&sitemap-subtype=post&paged=1' '/?sitemap=posts&sitemap-subtype=wp_block&paged=1' \
+  '/?sitemap=taxonomies&sitemap-subtype=link_category&paged=1'; do
   status=$(curl -s -o "$TMP" -w '%{http_code}' "$BASE$path")
   key=$(printf '%s' "$path" | xxd -p | tr -d '\n')
   printf '%s\t%s\t%s\n' "$key" "$status" "$(xxd -p "$TMP" | tr -d '\n')" >> "$TERMS"

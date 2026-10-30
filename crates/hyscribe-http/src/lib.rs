@@ -37,6 +37,7 @@ use tokio::net::TcpListener;
 mod feed;
 pub mod query;
 mod reads;
+mod sitemaps;
 
 use reads::Reads;
 
@@ -148,6 +149,10 @@ enum Outcome {
     /// The feed of the page's posts or of comments.
     Feed(Box<Page>, feed::Feed),
     Redirect(String),
+    /// A sitemap or its stylesheet.
+    Xml(Vec<u8>),
+    /// `robots.txt`.
+    Robots(Vec<u8>),
 }
 
 /// One page to render: the status, the document title, and the request
@@ -181,7 +186,11 @@ async fn page(
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
     let outcome = route(&site, uri.path(), uri.query(), &query).await;
-    let page = match outcome.map(|o| cleaned(&site, uri.path(), uri.query(), &query, o)) {
+    let outcome = match outcome.map(|o| cleaned(&site, uri.path(), uri.query(), &query, o)) {
+        Ok(outcome) => sitemaps::serve(&site, &query, outcome).await,
+        Err(err) => Err(err),
+    };
+    let page = match outcome.map(|o| robots(&site, &query, o)) {
         Ok(Outcome::Redirect(location)) => {
             return (
                 StatusCode::MOVED_PERMANENTLY,
@@ -191,6 +200,14 @@ async fn page(
         }
         Ok(Outcome::Feed(page, feed)) => {
             return feed::respond(site, requested(*page, &uri), feed, &headers).await;
+        }
+        Ok(Outcome::Xml(body)) => {
+            let content_type = [(header::CONTENT_TYPE, "application/xml; charset=UTF-8")];
+            return (content_type, body).into_response();
+        }
+        Ok(Outcome::Robots(body)) => {
+            let content_type = [(header::CONTENT_TYPE, "text/plain; charset=utf-8")];
+            return (content_type, body).into_response();
         }
         Ok(Outcome::Page(page)) => render(&site, requested(*page, &uri)).await,
         Err(err) => database_error(&site, &err),
@@ -226,7 +243,21 @@ fn cleaned(
                 .or(redirect);
             Outcome::Feed(page, feed)
         }
-        Outcome::Page(page) => redirect.map_or(Outcome::Page(page), Outcome::Redirect),
+        outcome => redirect.map_or(outcome, Outcome::Redirect),
+    }
+}
+
+/// `outcome`, or for `robots`, robots.txt: the template loader serves it
+/// in place of any page or feed that does not redirect, after sitemaps.
+fn robots(site: &Site, query: &HashMap<String, String>, outcome: Outcome) -> Outcome {
+    let asked = query
+        .get("robots")
+        .is_some_and(|v| !is_empty_string(v.as_bytes()));
+    match outcome {
+        Outcome::Page(_) | Outcome::Feed(..) if asked && !sitemaps::redirects(&outcome) => {
+            Outcome::Robots(sitemaps::robots(site))
+        }
+        outcome => outcome,
     }
 }
 

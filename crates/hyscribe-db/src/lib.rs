@@ -597,6 +597,45 @@ impl Db {
             .collect()
     }
 
+    /// A page of the terms of `taxonomy` with posts, by ID, as the sitemap
+    /// of a taxonomy lists them.
+    pub async fn terms_with_posts(
+        &self,
+        taxonomy: &str,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<Term>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT t.term_id, t.name, t.slug, tt.description FROM {prefix}terms t \
+             JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
+             WHERE tt.taxonomy = ? AND tt.count > 0 ORDER BY t.term_id LIMIT ? OFFSET ?",
+        );
+        let rows = sqlx::query(sql)
+            .bind(taxonomy)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(term).collect()
+    }
+
+    /// How many terms of `taxonomy` have posts.
+    pub async fn count_terms_with_posts(&self, taxonomy: &str) -> Result<u64, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT COUNT(*) AS found FROM {prefix}term_taxonomy \
+             WHERE taxonomy = ? AND count > 0",
+        );
+        let row = sqlx::query(sql)
+            .bind(taxonomy)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.try_get::<i64, _>("found")
+            .map(i64::unsigned_abs)
+            .map_err(db_error)
+    }
+
     /// `get_lastpostmodified( 'GMT' )`: the latest modified or published
     /// time of a published post of a public type, `None` without one.
     pub async fn last_post_modified(&self) -> Result<Option<String>, DbError> {

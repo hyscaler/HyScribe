@@ -86,6 +86,17 @@ async fn reads_the_default_install() {
     );
     let tag = [("post_tag".to_string(), b"uncategorized".to_vec())];
     assert!(db.find_terms(&tag, &[]).await.unwrap().is_empty());
+    // The terms with posts, as a taxonomy's sitemap pages them.
+    let listed = db.terms_with_posts("category", 10, 0).await.unwrap();
+    assert_eq!(listed.iter().map(|t| t.id).collect::<Vec<_>>(), [1]);
+    assert!(
+        db.terms_with_posts("category", 10, 1)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(db.count_terms_with_posts("category").await.unwrap(), 1);
+    assert_eq!(db.count_terms_with_posts("post_tag").await.unwrap(), 0);
 }
 
 /// The time conditions over the fixture's post, written at 2026-10-27
@@ -341,6 +352,8 @@ async fn errors_are_reported() {
         .await
         .unwrap_err(),
         db.find_terms(&[], &[1]).await.unwrap_err(),
+        db.terms_with_posts("category", 1, 0).await.unwrap_err(),
+        db.count_terms_with_posts("category").await.unwrap_err(),
         db.option("blogname").await.unwrap_err(),
         db.post_meta(1, "x").await.unwrap_err(),
         db.post_terms(1, "category").await.unwrap_err(),
@@ -374,6 +387,7 @@ async fn errors_are_reported() {
                 "missing_options",
                 "missing_posts",
                 "missing_terms",
+                "missing_term_taxonomy",
                 "missing_postmeta",
                 "missing_users",
                 "missing_comments"

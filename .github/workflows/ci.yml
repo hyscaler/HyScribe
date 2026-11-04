@@ -2,14 +2,15 @@
 # Gates from docs/TESTING.md and docs/SECURITY_MODEL.md. Actions are pinned
 # to commit SHAs.
 #
-# A push to development runs the checks and the coverage gate. Fuzzing and
-# the release archive run on pull requests, pushes to main, nightly against
-# development, and on demand; mutation testing on pull requests.
+# Every job runs on pull requests, pushes to main, nightly against
+# development and on demand; mutation testing only on pull requests. The org
+# shares GitHub's free 2,000 minutes a month, so pushes to development start
+# nothing and a nightly run is skipped when development has not moved.
 name: CI
 
 on:
   push:
-    branches: [main, development]
+    branches: [main]
     paths-ignore: ["**.md", "docs/**"]
   pull_request:
     paths-ignore: ["**.md", "docs/**"]
@@ -19,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # A newer push supersedes the run in progress for the same branch.
 concurrency:
@@ -30,15 +32,34 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  checks:
+  changed:
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=""
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            last=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=schedule&status=success&per_page=1" \
+              -q '.workflow_runs[0].head_sha // ""')
+          fi
+          if [ "$last" = "$GITHUB_SHA" ]; then echo run=false; else echo run=true; fi >> "$GITHUB_OUTPUT"
+
+  checks:
+    needs: changed
+    if: needs.changed.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     env:
       GITLEAKS_VERSION: 8.30.1
       GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'schedule' && 'development' || '' }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -71,11 +92,12 @@ jobs:
         run: ./gitleaks git --no-banner --redact --verbose --exit-code 1 .
 
   coverage:
+    needs: changed
+    if: needs.changed.outputs.run == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event_name == 'schedule' && 'development' || '' }}
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
@@ -100,6 +122,7 @@ jobs:
   mutants:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -119,12 +142,12 @@ jobs:
           cargo mutants --workspace --in-diff pr.diff --no-shuffle
 
   package:
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    needs: changed
+    if: needs.changed.outputs.run == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event_name == 'schedule' && 'development' || '' }}
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
@@ -137,12 +160,12 @@ jobs:
           scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
 
   fuzz:
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    needs: changed
+    if: needs.changed.outputs.run == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event_name == 'schedule' && 'development' || '' }}
       - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
         with:
           toolchain: nightly

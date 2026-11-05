@@ -111,6 +111,9 @@ pub fn wp_head(
         b"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n",
     );
     out.extend(head.robots());
+    if let Some(post) = request.posts.first().filter(|_| request.preview) {
+        out.extend(post_preview_js(post.id));
+    }
     out.extend([&b"<title>"[..], title, b"</title>\n"].concat());
     out.extend(head.feed_links());
     for style in head.styles(assets) {
@@ -136,6 +139,14 @@ pub fn wp_head(
     out.extend(head.font_faces());
     out.extend_from_slice(b"</head>");
     out
+}
+
+/// `wp_post_preview_js()` for the global post `id`.
+fn post_preview_js(id: u64) -> Vec<u8> {
+    format!(
+        "<script>\n\t( function() {{\n\t\tvar query = document.location.search;\n\n\t\tif ( query && query.indexOf( 'preview=true' ) !== -1 ) {{\n\t\t\twindow.name = 'wp-preview-{id}';\n\t\t}}\n\n\t\tif ( window.addEventListener ) {{\n\t\t\twindow.addEventListener( 'pagehide', function() {{ window.name = ''; }} );\n\t\t}}\n\t}}());\n\t//# sourceURL=wp_post_preview_js\t\n</script>\n"
+    )
+    .into_bytes()
 }
 
 struct Head<'a> {

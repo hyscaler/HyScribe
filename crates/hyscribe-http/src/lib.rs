@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use axum::Router;
@@ -166,6 +167,9 @@ struct Page {
     title: String,
     candidates: Vec<String>,
     request: Request,
+    /// It asks for a post visitors cannot see, whose redirects
+    /// `redirect_canonical()` cancels.
+    hidden: bool,
 }
 
 /// A page as sent: the status, the `<head>` and the `<body>`.
@@ -234,15 +238,60 @@ async fn outcome(
     query: &HashMap<String, String>,
 ) -> Result<Outcome, DbError> {
     let outcome = route(site, uri.path(), uri.query(), query).await?;
+    let get = parse_str(uri.query().unwrap_or_default().as_bytes());
     let outcome = match quiet(query, uri.query()) {
         Some(kind) => uncanonical(kind, uri, query, outcome),
-        None => cleaned(site, uri.path(), uri.query(), query, outcome),
+        None => match preview(query, &get, outcome) {
+            ControlFlow::Break(outcome) => outcome,
+            ControlFlow::Continue(outcome) => {
+                // A preview a visitor is not shown drops `preview` from redirects.
+                let strip = get.get_str("preview").is_some_and(|v| !v.is_empty());
+                cleaned(site, uri.path(), uri.query(), query, outcome, strip)
+            }
+        },
     };
     Ok(robots(
         site,
         query,
         sitemaps::serve(site, query, outcome).await?,
     ))
+}
+
+/// Whether `$value` is set as `'' != $value` takes it, which an array is.
+fn php_set(get: &Value, name: &str) -> bool {
+    get.get_str(name)
+        .is_some_and(|v| v.as_array().is_some() || !v.to_php_string().is_empty())
+}
+
+/// A preview, for which `redirect_canonical()` does nothing and the page
+/// prints `wp_post_preview_js()`, or the outcome as it was to go on with.
+/// `is_preview()` is a set `preview` that a visitor, who never previews,
+/// keeps unless the query is a 404 or finds the published post its `p`
+/// or `page_id` asks for.
+fn preview(
+    query: &HashMap<String, String>,
+    get: &Value,
+    outcome: Outcome,
+) -> ControlFlow<Outcome, Outcome> {
+    let set = php_set(get, "preview");
+    let asked = ["p", "page_id"]
+        .iter()
+        .any(|k| query.get(*k).is_some_and(|v| absint(v) > 0));
+    let shown = |page: &Page| set && !page.request.not_found && !(asked && page.request.singular);
+    match outcome {
+        Outcome::Page(mut page) if shown(&page) => {
+            page.request.preview = true;
+            ControlFlow::Break(Outcome::Page(page))
+        }
+        // A feed is never a 404 unless it is paged.
+        Outcome::Feed(page, mut feed)
+            if shown(&page) || set && page.request.not_found && !Paging::of(query).is_paged() =>
+        {
+            feed.redirect = None;
+            ControlFlow::Break(Outcome::Feed(page, feed))
+        }
+        outcome => ControlFlow::Continue(outcome),
+    }
 }
 
 /// A negative or array `p`.
@@ -276,10 +325,7 @@ fn quiet(query: &HashMap<String, String>, raw_query: Option<&str>) -> Option<Qui
     if set("favicon") && !set("robots") {
         Some(Quiet::Favicon)
     } else {
-        // `'' != $tb`, which an array is too.
-        get.get_str("tb")
-            .is_some_and(|v| v.as_array().is_some() || !v.to_php_string().is_empty())
-            .then_some(Quiet::Trackback)
+        php_set(&get, "tb").then_some(Quiet::Trackback)
     }
 }
 
@@ -358,19 +404,32 @@ fn cleaned(
     raw_query: Option<&str>,
     query: &HashMap<String, String>,
     outcome: Outcome,
+    strip_preview: bool,
 ) -> Outcome {
+    let tidy = |query: &str| {
+        if strip_preview {
+            clean_query(&lossy(&remove_query_arg(&[b"preview"], query.as_bytes())))
+        } else {
+            clean_query(query)
+        }
+    };
+    if let Outcome::Page(page) | Outcome::Feed(page, _) = &outcome
+        && page.hidden
+    {
+        return outcome;
+    }
     let raw = raw_query.unwrap_or_default();
-    let clean = clean_query(raw);
+    let clean = tidy(raw);
     // Any `s` makes a search, unless a post is asked for.
     let search = query.contains_key("s") && single_post(query).is_none();
     let redirect = (!search && !reserved(path) && clean != raw && stays_clean(&clean))
         .then(|| with_query(&format!("{}{path}", site.home), &clean));
     match outcome {
-        Outcome::Redirect(location) => Outcome::Redirect(clean_location(&location)),
+        Outcome::Redirect(location) => Outcome::Redirect(clean_location(&location, tidy)),
         Outcome::Feed(page, mut feed) => {
             feed.redirect = feed
                 .redirect
-                .map(|l| clean_location(&l))
+                .map(|l| clean_location(&l, tidy))
                 .filter(|l| stays_clean(l.split_once('?').map_or("", |(_, q)| q)))
                 .or(redirect);
             Outcome::Feed(page, feed)
@@ -402,10 +461,10 @@ fn stays_clean(query: &str) -> bool {
 }
 
 /// `location` with its query cleaned up.
-fn clean_location(location: &str) -> String {
+fn clean_location(location: &str, tidy: impl Fn(&str) -> String) -> String {
     location.split_once('?').map_or_else(
         || location.to_string(),
-        |(base, query)| with_query(base, &clean_query(query)),
+        |(base, query)| with_query(base, &tidy(query)),
     )
 }
 
@@ -703,6 +762,7 @@ async fn route(
     match single {
         Some((name, id, post_type)) => {
             let post = site.db.post(id).await?;
+            let hidden = post.as_ref().is_some_and(|p| hides(p, format.is_some()));
             // `?p=` for a page or `?page_id=` for a post.
             let elsewhere = |post: &Post| {
                 (post.post_type != post_type).then(|| post_location(site, post, raw_query))
@@ -724,12 +784,15 @@ async fn route(
                                     .map(|_| single_feed_location(site, raw_query, name, id))
                             })
                             .filter(|location| *location != current)
-                            .or(redirect);
+                            .or(redirect.filter(|_| !hidden));
                         let comments =
                             comment_feed.then_some(feed::CommentsOf::Post(id, post_type == "post"));
                         let page = async {
                             Ok(found.map_or_else(
-                                || missing_single(site),
+                                || Page {
+                                    hidden,
+                                    ..missing_single(site)
+                                },
                                 |p| single_page(site, p, Paging::default()),
                             ))
                         };
@@ -739,7 +802,10 @@ async fn route(
                         Some(location) => Outcome::Redirect(location),
                         None => paged_single(site, query, raw_query, name, post),
                     },
-                    (None, None) => Outcome::Page(Box::new(not_found(site, false))),
+                    (None, None) => Outcome::Page(Box::new(Page {
+                        hidden,
+                        ..not_found(site, false)
+                    })),
                 },
             )
         }
@@ -868,6 +934,7 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
             posts: vec![post],
             ..request
         },
+        hidden: false,
     }
 }
 
@@ -1107,6 +1174,7 @@ async fn list(
         title,
         candidates,
         request,
+        hidden: false,
     })
 }
 
@@ -1199,6 +1267,15 @@ fn viewable(post: &Post, post_types: &[&str]) -> bool {
     post.status == "publish" && post_types.contains(&post.post_type.as_str())
 }
 
+/// Whether `redirect_canonical()` cancels its redirects for `post`, one
+/// visitors cannot see: always for a feed's `p`, and for a 404's ID unless
+/// its type is not public or it is an auto-draft.
+fn hides(post: &Post, feed: bool) -> bool {
+    !viewable(post, &["post", "page"])
+        && (feed
+            || matches!(post.post_type.as_str(), "post" | "page") && post.status != "auto-draft")
+}
+
 /// A redirect to the published post or page with `id`'s link, else `missing`.
 async fn redirect_to(
     site: &Site,
@@ -1207,9 +1284,14 @@ async fn redirect_to(
     missing: Page,
 ) -> Result<Outcome, DbError> {
     let post = site.db.post(id).await?;
-    Ok(match post.filter(|p| viewable(p, &["post", "page"])) {
-        Some(post) => Outcome::Redirect(post_location(site, &post, raw_query)),
-        None => Outcome::Page(Box::new(missing)),
+    Ok(match post {
+        Some(post) if viewable(&post, &["post", "page"]) => {
+            Outcome::Redirect(post_location(site, &post, raw_query))
+        }
+        post => Outcome::Page(Box::new(Page {
+            hidden: post.is_some_and(|p| hides(&p, false)),
+            ..missing
+        })),
     })
 }
 
@@ -1438,6 +1520,7 @@ fn not_found(site: &Site, feed: bool) -> Page {
         },
         candidates: vec!["404".into(), "index".into()],
         request,
+        hidden: false,
     }
 }
 

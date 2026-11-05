@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Records how the template loader answers the favicon and trackback query
+# Records how WordPress answers the favicon, trackback and preview query
 # vars as crates/hyscribe-http/tests/golden/loader.tsv:
 #   hex(path and query)<TAB>status<TAB>location<TAB>content type<TAB>hex(body)
-# where an HTML body is reduced to its <title>. Needs the default install
+# where an HTML body is reduced to its robots meta tag through its <title>,
+# which holds the preview script. Needs the default install
 # oracle running (reference/default-install/db.sh up, then php.sh up).
 set -euo pipefail
 
@@ -27,13 +28,23 @@ for path in '/?favicon=1' '/?favicon=0' '/?favicon=' '/?favicon=abc' '/?favicon=
   '/?favicon=1&robots=1&p=2' '/?favicon=1&robots=0&p=2' '/?favicon=1&robots=1&x=' '/?favicon=1&p=-1&page_id=2' \
   '/?favicon=1&year=2026&monthnum=13' '/?favicon%5B%5D=1' '/?favicon=1&p%5B%5D=1' \
   '/?tb=1&feed=rss&paged=99' '/?tb=1&p=999&feed=rss2' '/?tb=1&p=-1&page_id=2' '/?tb%5B%5D=1&p=1' \
-  '/x/1?tb=1&tb_id%5B%5D=1' '/?tb=1&year=2026&monthnum=13' '/?tb=1&p=1&feed=rss' '/?tb=1&p=999&feed=rss'; do
+  '/x/1?tb=1&tb_id%5B%5D=1' '/?tb=1&year=2026&monthnum=13' '/?tb=1&p=1&feed=rss' '/?tb=1&p=999&feed=rss' \
+  '/?preview=true' '/?preview=1&p=1' '/?preview=false&p=1' '/?preview=0&p=1' '/?preview=0' '/?preview=' '/?preview=true&page_id=2' \
+  '/?preview=true&p=1&x=y' '/?preview=true&p=999' '/?preview=true&name=hello-world' '/?preview=true&cat=1' '/?preview=true&s=hello' \
+  '/?preview=true&s=zzzz' '/?preview=true&m=2026' '/?preview=true&name=nope' '/?preview=true&pagename=sample-page' \
+  '/?preview=true&p=1&feed=rss2' '/?preview=true&feed=rss' '/?preview=true&p=1&page=2' '/?preview=true&x=' '/?preview=true&page_id=2&x=' \
+  '/?preview%5B%5D=1&p=1' '/?preview%5B%5D=1' '/?preview=true&attachment_id=1' '/?preview=true&p=2' '/?preview=true&paged=2' \
+  '/?preview=true&p=999&feed=rss' '/?preview=true&feed=rss&paged=99' '/?preview=true&page_id=3' '/?preview=true&name=sam' \
+  '/?preview=true&cat=1&x=' '/?x=&preview=true&p=1' '/?preview=true&p=-1' '/?preview=true&year=2026&monthnum=13' \
+  '/?page_id=3&feed=rss' '/?p=3&feed=rss' '/?page_id=3&x=' '/?preview=true&p=3&x=y' '/?preview=true&name=hello-world&p=0' '/?page_id=3&feed=rss2&x=' '/?p=3&feed=rss2&x=' '/?page_id=3&feed=rss2&cat=' '/?page_id=3&cat=' \
+  '/?attachment_id=3&cat=' '/?subpost_id=3&cat=' '/?attachment_id=3&preview=true&cat=' '/?p=-1&page_id=3&cat=' '/?p=4&feed=rss' \
+  '/?page_id=4&feed=rss' '/?p=4&feed=rss2&cat=' '/?p=4&cat=' '/?p=3&feed=rss'; do
   curl -s -D "$HEADERS" -o "$TMP" "$BASE$path" > /dev/null
   status=$(head -n 1 "$HEADERS" | cut -d ' ' -f 2)
   location=$(grep -i '^location:' "$HEADERS" | cut -d ' ' -f 2 | tr -d '\r' || true)
   type=$(grep -i '^content-type:' "$HEADERS" | cut -d ' ' -f 2- | tr -d '\r' || true)
   if [[ "$type" == text/html* ]]; then
-    body=$(grep -o '<title>[^<]*</title>' "$TMP" | head -n 1 | tr -d '\n' | xxd -p | tr -d '\n' || true)
+    body=$(python3 -I -c 'import sys; s=open(sys.argv[1],"rb").read(); i=s.find(b"<meta name=\x27robots\x27"); j=s.find(b"</title>"); sys.stdout.write(s[i:j+8].hex() if i >= 0 else "")' "$TMP")
   else
     body=$(xxd -p "$TMP" | tr -d '\n')
   fi

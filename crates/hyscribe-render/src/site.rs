@@ -100,6 +100,8 @@ pub struct Request {
     pub singular: bool,
     /// `is_404()`
     pub not_found: bool,
+    /// `is_preview()`
+    pub preview: bool,
     /// `is_feed()`: posts show in full, as a singular post does.
     pub feed: bool,
     /// The `page` query var, 0 or 1 on the first page.

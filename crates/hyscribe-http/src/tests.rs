@@ -726,6 +726,7 @@ async fn a_render_that_panics_is_a_server_error() {
         title: "x".into(),
         candidates: Vec::new(),
         request: hyscribe_render::site::Request::default(),
+        hidden: false,
     };
     let rendered = rendered(&site, page, Err(panicked));
     assert_eq!(rendered.status, StatusCode::INTERNAL_SERVER_ERROR);
@@ -957,10 +958,11 @@ async fn pages_match_php() {
     assert_eq!(golden.lines().count(), 196);
 }
 
-/// Every case of `reference/loader/golden.sh`: the favicon and trackback
-/// query vars, with an HTML body reduced to its title.
+/// Every case of `reference/loader/golden.sh`: the favicon, trackback and
+/// preview query vars, with an HTML body reduced to its robots meta tag
+/// through its title.
 #[tokio::test]
-async fn favicons_and_trackbacks_match_php() {
+async fn loader_vars_match_php() {
     let site = oracle_site().await;
     let golden = include_str!("../tests/golden/loader.tsv");
     let mut failures = Vec::new();
@@ -972,11 +974,10 @@ async fn favicons_and_trackbacks_match_php() {
         let header = |name| reply.headers.get(name).map_or("", |v| v.to_str().unwrap());
         let html = header("content-type").starts_with("text/html");
         let body = if html {
-            reply
-                .body
-                .lines()
-                .find(|l| l.starts_with("<title>"))
-                .unwrap_or_default()
+            let from = reply.body.find("<meta name='robots'");
+            let to = reply.body.find("</title>").map(|at| at + "</title>".len());
+            from.zip(to)
+                .map_or("", |(from, to)| reply.body.get(from..to).unwrap())
                 .to_string()
         } else {
             reply.body.clone()
@@ -1000,7 +1001,7 @@ async fn favicons_and_trackbacks_match_php() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(golden.lines().count(), 65);
+    assert_eq!(golden.lines().count(), 117);
     // Recorded from PHP: a HEAD request ends before the favicon or the
     // trackback. PHP links the draft page 3, which HyScribe keeps hidden.
     for (method, path) in [

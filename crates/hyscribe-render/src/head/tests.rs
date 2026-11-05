@@ -374,3 +374,45 @@ fn inline_budget_is_inclusive() {
     inline_styles(&mut queue);
     assert_eq!(queue.iter().filter(|style| style.src.is_some()).count(), 1);
 }
+
+/// `wp_post_preview_js()` names the global post, as PHP prints it for
+/// `?preview=true&pagename=sample-page` in `reference/loader/golden.sh`,
+/// and a preview of nothing prints none.
+#[test]
+fn preview_script_matches_php() {
+    let golden = include_str!("../../../hyscribe-http/tests/golden/loader.tsv");
+    let key: String = "/?preview=true&pagename=sample-page"
+        .bytes()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let line = golden
+        .lines()
+        .find(|l| l.starts_with(&format!("{key}\t")))
+        .unwrap();
+    let php = String::from_utf8(unhex(line.rsplit('\t').next().unwrap())).unwrap();
+    let script = php
+        .get(php.find("<script>").unwrap()..php.find("<title>").unwrap())
+        .unwrap();
+    let site = Options {
+        base: crate::fixture::DefaultInstall {
+            home: b"http://127.0.0.1:8081".to_vec(),
+        },
+        options: Vec::new(),
+        closed: false,
+    };
+    let page = hyscribe_model::Post {
+        id: 2,
+        ..hyscribe_model::Post::default()
+    };
+    let preview = Request {
+        preview: true,
+        posts: vec![page],
+        ..Request::default()
+    };
+    assert!(head_for(&site, &preview).contains(script));
+    let nothing = Request {
+        preview: true,
+        ..Request::default()
+    };
+    assert!(!head_for(&site, &nothing).contains("<script>\n\t( function"));
+}

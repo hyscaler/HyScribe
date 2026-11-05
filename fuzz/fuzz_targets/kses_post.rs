@@ -9,13 +9,13 @@ use hyscribe_html::TagProcessor;
 use hyscribe_render::kses::wp_kses_post;
 use libfuzzer_sys::fuzz_target;
 
-const FORBIDDEN: [&[u8]; 14] = [
+// MathML is allowed: WordPress 7 lists it in `$allowedposttags` for the math block.
+const FORBIDDEN: [&[u8]; 13] = [
     b"SCRIPT",
     b"STYLE",
     b"IFRAME",
     b"FRAME",
     b"SVG",
-    b"MATH",
     b"EMBED",
     b"BASE",
     b"LINK",

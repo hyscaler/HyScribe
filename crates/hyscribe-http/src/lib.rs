@@ -1049,11 +1049,15 @@ fn post_query(
         vec![]
     };
     PostQuery {
-        // _post_format_request() sets the post format's post types.
-        post_types: if search.is_some() && !query.contains_key("post_format") {
-            vec!["post".into(), "page".into()]
-        } else {
-            vec!["post".into()]
+        // `WP::parse_request()` keeps a publicly queryable post type, which
+        // lists only its published posts; _post_format_request() sets the
+        // post format's post types.
+        post_types: match queryable(query) {
+            Some(post_type) => vec![post_type.into()],
+            None if search.is_some() && !query.contains_key("post_format") => {
+                vec!["post".into(), "page".into()]
+            }
+            None => vec!["post".into()],
         },
         // `sentence` makes the whole search one term.
         search: match &search {
@@ -1182,6 +1186,8 @@ async fn list(
             paging.title(),
             Some(site.name()),
         ]),
+        // A feed is never `is_home()`, so it has no title of its own.
+        None if feed => document_title([None, paging.title(), Some(site.name())]),
         None => document_title([
             Some(site.name()),
             paging.title(),
@@ -1344,6 +1350,14 @@ async fn redirect_to(
     })
 }
 
+/// The `post_type` `WP::parse_request()` keeps: a publicly queryable one.
+fn queryable(query: &HashMap<String, String>) -> Option<&str> {
+    query
+        .get("post_type")
+        .map(String::as_str)
+        .filter(|t| matches!(*t, "post" | "attachment"))
+}
+
 /// What `name` or `pagename` asks for.
 enum Slug {
     /// The post found, as `(query var, ID, post type)`, ID 0 when none is.
@@ -1362,11 +1376,7 @@ async fn by_slug(
     query: &HashMap<String, String>,
 ) -> Result<Option<Slug>, DbError> {
     let var = |name| query.get(name).map(|v| v.trim()).filter(|v| !v.is_empty());
-    // `WP::parse_request()` keeps only a publicly queryable post type.
-    let queryable = query
-        .get("post_type")
-        .map(String::as_str)
-        .filter(|t| matches!(*t, "post" | "attachment"));
+    let queryable = queryable(query);
     let (key, post_type, found, name) = if let Some(name) = var("name") {
         let name = sanitize_title_for_query(name.as_bytes());
         // Attachment pages are not served yet: none is found.

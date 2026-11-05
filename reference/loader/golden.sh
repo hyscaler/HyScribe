@@ -5,7 +5,7 @@
 # comment and error query vars as crates/hyscribe-http/tests/golden/loader.tsv:
 #   hex(path and query)<TAB>status<TAB>location<TAB>content type<TAB>hex(body)
 # where an HTML body is reduced to its robots meta tag through its <title>,
-# which holds the preview script. Needs the default install
+# which holds the preview script, and the IDs of the posts it lists. Needs the default install
 # oracle running (reference/default-install/db.sh up, then php.sh up).
 set -euo pipefail
 
@@ -47,13 +47,16 @@ for path in '/?favicon=1' '/?favicon=0' '/?favicon=' '/?favicon=abc' '/?favicon=
   '/?error=404&paged=2' '/?error=403.5' '/?error=500x' '/?error=404&p=-1' '/?error=404&page_id=2' '/?page_id=2&error=404' \
   '/?error=404&attachment_id=1' '/?error=404&favicon=1' '/?error=404&tb=1&p=1' '/?error=404&preview=true' '/?error=404&cat=1' \
   '/?error=404&p=999' '/?error=404&p=1&page_id=2' '/?error=404&x=' '/?error=404&p=1&x=' '/?error=404&year=2026&monthnum=13' \
-  '/?subpost_id=1&error=404' '/?subpost_id=2&attachment_id=1&error=404'; do
+  '/?subpost_id=1&error=404' '/?subpost_id=2&attachment_id=1&error=404' \
+  '/?post_type=attachment' '/?m=2026&post_type=attachment' '/?s=hello&post_type=attachment' '/?cat=1&post_type=attachment' \
+  '/?post_type=post' '/?post_type=page' '/?s=sample&post_type=post' '/?s=sample&post_type=page' '/?s=sample' '/?post_type=nope' \
+  '/?feed=rss2&post_type=attachment' '/?post_type=attachment&paged=2' '/?year=2026&post_type=attachment'; do
   curl -s -D "$HEADERS" -o "$TMP" "$BASE$path" > /dev/null
   status=$(head -n 1 "$HEADERS" | cut -d ' ' -f 2)
   location=$(grep -i '^location:' "$HEADERS" | cut -d ' ' -f 2 | tr -d '\r' || true)
   type=$(grep -i '^content-type:' "$HEADERS" | cut -d ' ' -f 2- | tr -d '\r' || true)
   if [[ "$type" == text/html* ]]; then
-    body=$(python3 -I -c 'import sys; s=open(sys.argv[1],"rb").read(); i=s.find(b"<meta name=\x27robots\x27"); j=s.find(b"</title>"); sys.stdout.write(s[i:j+8].hex() if i >= 0 else "")' "$TMP")
+    body=$(python3 -I -c 'import re, sys; s=open(sys.argv[1],"rb").read(); i=s.find(b"<meta name=\x27robots\x27"); j=s.find(b"</title>"); ids=b",".join(re.findall(rb"wp-block-post post-(\d+)", s)); sys.stdout.write((s[i:j+8] + b"\nposts: " + ids).hex() if i >= 0 else "")' "$TMP")
   else
     body=$(xxd -p "$TMP" | tr -d '\n')
   fi

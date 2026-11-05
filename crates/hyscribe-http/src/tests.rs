@@ -945,7 +945,7 @@ async fn feeds_match_php() {
             "{path} {sent:?}"
         );
     }
-    assert_eq!(golden.lines().count(), 67);
+    assert_eq!(golden.lines().count(), 71);
 }
 
 /// Every page of `reference/head/golden.sh`, status and HTML, against
@@ -960,7 +960,7 @@ async fn pages_match_php() {
 
 /// Every case of `reference/loader/golden.sh`: the favicon, trackback and
 /// preview query vars, with an HTML body reduced to its robots meta tag
-/// through its title.
+/// through its title and the IDs of the posts it lists.
 #[tokio::test]
 async fn loader_vars_match_php() {
     let site = oracle_site().await;
@@ -976,9 +976,19 @@ async fn loader_vars_match_php() {
         let body = if html {
             let from = reply.body.find("<meta name='robots'");
             let to = reply.body.find("</title>").map(|at| at + "</title>".len());
-            from.zip(to)
-                .map_or("", |(from, to)| reply.body.get(from..to).unwrap())
-                .to_string()
+            let ids: Vec<&str> = reply
+                .body
+                .split("wp-block-post post-")
+                .skip(1)
+                .map(|rest| rest.split(|c: char| !c.is_ascii_digit()).next().unwrap())
+                .collect();
+            from.zip(to).map_or(String::new(), |(from, to)| {
+                format!(
+                    "{}\nposts: {}",
+                    reply.body.get(from..to).unwrap(),
+                    ids.join(",")
+                )
+            })
         } else {
             reply.body.clone()
         };
@@ -1001,7 +1011,7 @@ async fn loader_vars_match_php() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(golden.lines().count(), 173);
+    assert_eq!(golden.lines().count(), 186);
     // Recorded from PHP: a HEAD request ends before the favicon or the
     // trackback. PHP links the draft page 3, which HyScribe keeps hidden.
     for (method, path) in [

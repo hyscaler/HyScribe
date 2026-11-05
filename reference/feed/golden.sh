@@ -46,7 +46,7 @@ kept = b"\n".join([status] + [fields.get(k, b"") for k in (b"content-type", b"la
 print("\t".join(x.hex() for x in (path, sent, kept, body)))
 ' "$path" "$sent" >> "$HTTP"
 }
-for path in '/?feed=rss2' '/?feed=feed' '/?feed=rss2&cat=1' '/?s=hello&feed=rss2' '/?s&feed=rss2' '/?feed=rss2&m=2026' \
+for path in '/?feed=rss2' '/?feed=rss2&page=2' '/?feed=atom&page=2' '/?feed=rdf&page=3' '/?feed=rss2&cat=1&page=2' '/?feed=feed' '/?feed=rss2&cat=1' '/?s=hello&feed=rss2' '/?s&feed=rss2' '/?feed=rss2&m=2026' \
   '/?feed=rss2&cat=999' '/?feed=rss2&m=1999' '/?s=nothingmatches&feed=rss2' \
   '/?feed=comments-rss2' '/?feed=rss2&withcomments=1' '/?feed=rss2&p=1' '/?feed=comments-rss2&p=1' '/?feed=feed&p=1' \
   '/?feed=rss2&page_id=2' '/?feed=rss2&p=999' '/?feed=rss2&page_id=999' '/?feed=rss2&p=1&withoutcomments=1' \

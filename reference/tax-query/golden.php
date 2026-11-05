@@ -35,6 +35,9 @@ set_post_format( 1, 'aside' );
 $second = $insert( 'Second', array( $child ), array( 'Foo', '10' ) );
 $third  = $insert( 'Third', array( $parent ), array( '9' ) );
 set_post_format( $third, 'chat' );
+// Slugs that remove_accents() made.
+wp_set_post_tags( $second, array( 'Café' ), true );
+wp_insert_term( 'Été', 'category' );
 // A tag sharing a category's slug, and a term of a taxonomy WordPress does
 // not have, as a removed plugin leaves behind.
 wp_set_post_tags( $third, array( 'Child' ), true );
@@ -83,6 +86,8 @@ $cases = array(
 	's=sample&post_format=', 's=hello&tag=foo', 'm=2026&tag=foo', 'p=1&tag=nope', 'cat=1&category_name=nope',
 	'cat=1&category_name=child', 'cat=-1&category_name=parent', 'cat=1&taxonomy=category&term=child', "cat=$gone,$parent",
 	'taxonomy=category&term=nope&cat=1,,2', 'taxonomy=genre&term=fiction', 'tag=child&category_name=child', 'tag=child', 'post_format=chat&tag=child',
+	'tag=Caf%C3%A9', 'tag=cafe%CC%81', 'tag=caf%C3%A9,foo', 'tag=caf%C3%A9+foo', 'category_name=%C3%89t%C3%A9',
+	'taxonomy=post_tag&term=caf%C3%A9', 'taxonomy=category&term=%C3%A9t%C3%A9', 'tag=%C3%A9t%C3%A9&category_name=caf%C3%A9',
 );
 foreach ( $cases as $case ) {
 	$_GET = array();

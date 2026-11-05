@@ -1365,7 +1365,7 @@ fn tax_queries_match_php() {
         }
         count += 1;
     }
-    assert_eq!(count, 97);
+    assert_eq!(count, 105);
 }
 
 /// Every case of `reference/category-query/golden.sh`: the categories in and

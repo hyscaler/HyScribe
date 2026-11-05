@@ -487,6 +487,37 @@ fn sanitize_title_like_php() {
     }
 }
 
+/// `reference/formatting/golden.php accents`: every code point up to U+20FF
+/// that `remove_accents()` changes, the rest unchanged, and mixed, decomposed,
+/// Latin-1 and invalid UTF-8 cases, with `sanitize_title()` of each.
+#[test]
+fn remove_accents_matches_php() {
+    let golden = include_str!("../../tests/golden/remove-accents.tsv");
+    let mut changed = std::collections::HashSet::new();
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let mut fields = line.split('\t').map(hyscribe_testkit::unhex);
+        let (text, php, title) = (
+            fields.next().unwrap(),
+            fields.next().unwrap(),
+            fields.next().unwrap(),
+        );
+        changed.insert(text.clone());
+        let ours = (remove_accents(&text).into_owned(), sanitize_title(&text));
+        if ours != (php.clone(), title.clone()) {
+            failures.push(format!("{text:x?}: php {php:x?} {title:x?} ours {ours:x?}"));
+        }
+    }
+    for c in (0x80..=0x20ff).filter_map(char::from_u32) {
+        let text = c.to_string().into_bytes();
+        if !changed.contains(&text) && *remove_accents(&text) != *text {
+            failures.push(format!("{c:?} changed"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(golden.lines().count(), 403);
+}
+
 /// Every case of `reference/formatting/sanitize-query-golden.php`.
 #[test]
 fn sanitize_title_for_query_matches_php() {

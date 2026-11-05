@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Records WordPress's wptexturize(), convert_smilies(), force_balance_tags(),
-# wpautop() and make_clickable() as goldens in crates/hyscribe-render/tests/golden.
+# wpautop(), make_clickable() and remove_accents() as goldens in crates/hyscribe-render/tests/golden.
 # Needs the default install oracle running (reference/default-install/db.sh up,
 # then php.sh up). Only reads from it.
 set -euo pipefail
@@ -18,4 +18,5 @@ mkdir -p "$OUT"
 "$DOCKER" exec -i "$NAME" php -- balance < "$ROOT/reference/formatting/golden.php" > "$OUT/force-balance-tags.tsv"
 "$DOCKER" exec -i "$NAME" php -- autop < "$ROOT/reference/formatting/golden.php" > "$OUT/wpautop.tsv"
 "$DOCKER" exec -i "$NAME" php -- clickable < "$ROOT/reference/formatting/golden.php" > "$OUT/make-clickable.tsv"
-wc -l "$OUT/wptexturize.tsv" "$OUT/convert-smilies.tsv" "$OUT/force-balance-tags.tsv" "$OUT/wpautop.tsv" "$OUT/make-clickable.tsv"
+"$DOCKER" exec -i "$NAME" php -- accents < "$ROOT/reference/formatting/golden.php" > "$OUT/remove-accents.tsv"
+wc -l "$OUT/wptexturize.tsv" "$OUT/convert-smilies.tsv" "$OUT/force-balance-tags.tsv" "$OUT/wpautop.tsv" "$OUT/make-clickable.tsv" "$OUT/remove-accents.tsv"

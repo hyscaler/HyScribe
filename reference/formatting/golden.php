@@ -5,7 +5,10 @@
 // "hex(input)<TAB>hex(output)" lines:
 //   php golden.php texturize > crates/hyscribe-render/tests/golden/wptexturize.tsv
 //   php golden.php smilies   > crates/hyscribe-render/tests/golden/convert-smilies.tsv
-// and likewise balance, autop and clickable (golden.sh lists the files).
+// and likewise balance, autop, clickable and accents (golden.sh lists the
+// files). The accents lines are "hex(input)<TAB>hex(remove_accents)<TAB>
+// hex(sanitize_title)": every code point up to U+20FF that remove_accents()
+// changes, then mixed, decomposed, Latin-1 and invalid UTF-8 cases.
 // Runs inside the default install's PHP container (reference/formatting/golden.sh),
 // so the shortcodes, options and post contents are the fixture's. Only pure
 // functions run and the database is only read. Random cases use a fixed seed,
@@ -217,6 +220,27 @@ function clickable_cases() {
 	return array_merge( $cases, random_cases( $atoms, 3000, 12 ) );
 }
 
+if ( 'accents' === $argv[1] ) {
+	$cases = array();
+	for ( $cp = 0x80; $cp <= 0x20ff; $cp++ ) {
+		$char = mb_chr( $cp, 'UTF-8' );
+		if ( false !== $char && remove_accents( $char ) !== $char ) {
+			$cases[] = $char;
+		}
+	}
+	$cases = array_merge(
+		$cases,
+		array(
+			'', 'abc', 'café', "cafe\xcc\x81", "A\xcc\x8angstro\xcc\x88m", "\xe2\x84\xab", 'naïve résumé', 'Tiếng Việt', 'Привет мир',
+			'日本語', 'ﬁ', 'ǅ', '€ and £', 'x&eacute;y', '<b>é</b>', "\xe9t\xe9", "\x80\x8c\x9c\xc6\xd0\xde\xdf\xe6\xf0\xfe\xff\x81", "a\xc3",
+			"\xc3\xa9\xe9", "e\xcc\x81\xcc\x81", "\xcc\x81a", 'Ærøskøbing', 'ẞtraße', 'Đorđe', 'l·l', 'Œuvre', '😀 é',
+		)
+	);
+	foreach ( $cases as $case ) {
+		echo bin2hex( $case ), "\t", bin2hex( remove_accents( $case ) ), "\t", bin2hex( sanitize_title( $case ) ), "\n";
+	}
+	exit;
+}
 if ( 'clickable' === $argv[1] ) {
 	echo home_url(), "\n";
 	remove_all_filters( 'comment_text' );

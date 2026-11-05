@@ -957,11 +957,9 @@ const TITLE_REPLACEMENTS: [(&[&[u8]], &[u8]); 6] = [
     (&[b"%c3%97"], b"x"),
 ];
 
-/// `sanitize_title( $title )`, in the save context, without
-/// `remove_accents()`: the titles passed are ASCII, such as the block names
-/// and layout values the layout support passes.
+/// `sanitize_title( $title )`, in the save context.
 pub fn sanitize_title(title: &[u8]) -> Vec<u8> {
-    sanitize_title_with_dashes(title, true)
+    sanitize_title_with_dashes(&remove_accents(title), true)
 }
 
 /// `sanitize_title_for_query( $title )`, as WordPress reads a slug from a
@@ -1160,7 +1158,10 @@ pub fn capital_p_dangit_title(text: &[u8]) -> Vec<u8> {
     out
 }
 
+mod accents;
 mod entities;
+
+pub use accents::remove_accents;
 
 #[cfg(test)]
 mod tests;

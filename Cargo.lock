@@ -680,6 +680,7 @@ dependencies = [
  "hyscribe-phpser",
  "hyscribe-testkit",
  "hyscribe-theme-json",
+ "icu_normalizer",
  "sha2 0.11.1",
 ]
 

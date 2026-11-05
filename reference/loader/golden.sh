@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Records how WordPress answers the favicon, trackback and preview query
-# vars as crates/hyscribe-http/tests/golden/loader.tsv:
+# Records how WordPress answers the favicon, trackback, preview and
+# unapproved comment query vars as crates/hyscribe-http/tests/golden/loader.tsv:
 #   hex(path and query)<TAB>status<TAB>location<TAB>content type<TAB>hex(body)
 # where an HTML body is reduced to its robots meta tag through its <title>,
 # which holds the preview script. Needs the default install
@@ -38,7 +38,8 @@ for path in '/?favicon=1' '/?favicon=0' '/?favicon=' '/?favicon=abc' '/?favicon=
   '/?preview=true&cat=1&x=' '/?x=&preview=true&p=1' '/?preview=true&p=-1' '/?preview=true&year=2026&monthnum=13' \
   '/?page_id=3&feed=rss' '/?p=3&feed=rss' '/?page_id=3&x=' '/?preview=true&p=3&x=y' '/?preview=true&name=hello-world&p=0' '/?page_id=3&feed=rss2&x=' '/?p=3&feed=rss2&x=' '/?page_id=3&feed=rss2&cat=' '/?page_id=3&cat=' \
   '/?attachment_id=3&cat=' '/?subpost_id=3&cat=' '/?attachment_id=3&preview=true&cat=' '/?p=-1&page_id=3&cat=' '/?p=4&feed=rss' \
-  '/?page_id=4&feed=rss' '/?p=4&feed=rss2&cat=' '/?p=4&cat=' '/?p=3&feed=rss'; do
+  '/?page_id=4&feed=rss' '/?p=4&feed=rss2&cat=' '/?p=4&cat=' '/?p=3&feed=rss' \
+  '/?p=1&unapproved=1&moderation-hash=x' '/?p=1&unapproved=1' '/?p=1&moderation-hash=x' '/?unapproved=&moderation-hash=' '/?s=a&unapproved=1&moderation-hash=x'; do
   curl -s -D "$HEADERS" -o "$TMP" "$BASE$path" > /dev/null
   status=$(head -n 1 "$HEADERS" | cut -d ' ' -f 2)
   location=$(grep -i '^location:' "$HEADERS" | cut -d ' ' -f 2 | tr -d '\r' || true)

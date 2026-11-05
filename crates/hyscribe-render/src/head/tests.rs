@@ -375,31 +375,37 @@ fn inline_budget_is_inclusive() {
     assert_eq!(queue.iter().filter(|style| style.src.is_some()).count(), 1);
 }
 
-/// `wp_post_preview_js()` names the global post, as PHP prints it for
-/// `?preview=true&pagename=sample-page` in `reference/loader/golden.sh`,
-/// and a preview of nothing prints none.
-#[test]
-fn preview_script_matches_php() {
+/// PHP's robots tag through its title for `path`, from
+/// `reference/loader/golden.sh`.
+fn loader_head(path: &str) -> String {
     let golden = include_str!("../../../hyscribe-http/tests/golden/loader.tsv");
-    let key: String = "/?preview=true&pagename=sample-page"
-        .bytes()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+    let key: String = path.bytes().map(|b| format!("{b:02x}")).collect();
     let line = golden
         .lines()
         .find(|l| l.starts_with(&format!("{key}\t")))
         .unwrap();
-    let php = String::from_utf8(unhex(line.rsplit('\t').next().unwrap())).unwrap();
-    let script = php
-        .get(php.find("<script>").unwrap()..php.find("<title>").unwrap())
-        .unwrap();
-    let site = Options {
+    String::from_utf8(unhex(line.rsplit('\t').next().unwrap())).unwrap()
+}
+
+fn loader_site() -> Options {
+    Options {
         base: crate::fixture::DefaultInstall {
             home: b"http://127.0.0.1:8081".to_vec(),
         },
         options: Vec::new(),
         closed: false,
-    };
+    }
+}
+
+/// `wp_post_preview_js()` names the global post, as PHP prints it for
+/// `?preview=true&pagename=sample-page`, and a preview of nothing prints
+/// none.
+#[test]
+fn preview_script_matches_php() {
+    let php = loader_head("/?preview=true&pagename=sample-page");
+    let script = php
+        .get(php.find("<script>").unwrap()..php.find("<title>").unwrap())
+        .unwrap();
     let page = hyscribe_model::Post {
         id: 2,
         ..hyscribe_model::Post::default()
@@ -409,10 +415,32 @@ fn preview_script_matches_php() {
         posts: vec![page],
         ..Request::default()
     };
-    assert!(head_for(&site, &preview).contains(script));
+    assert!(head_for(&loader_site(), &preview).contains(script));
     let nothing = Request {
         preview: true,
         ..Request::default()
     };
-    assert!(!head_for(&site, &nothing).contains("<script>\n\t( function"));
+    assert!(!head_for(&loader_site(), &nothing).contains("<script>\n\t( function"));
+}
+
+/// An unapproved comment's preview link is not indexed; either var alone
+/// changes nothing.
+#[test]
+fn unapproved_comment_robots_match_php() {
+    for query in [
+        "p=1&unapproved=1&moderation-hash=x",
+        "p=1&unapproved=1",
+        "p=1&moderation-hash=x",
+    ] {
+        let php = loader_head(&format!("/?{query}"));
+        let robots = php.lines().next().unwrap();
+        let request = Request {
+            get: hyscribe_phpser::parse_str(query.as_bytes()),
+            ..Request::default()
+        };
+        assert!(
+            head_for(&loader_site(), &request).contains(robots),
+            "{query}"
+        );
+    }
 }

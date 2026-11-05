@@ -197,7 +197,9 @@ impl Head<'_> {
         if public {
             set(&mut robots, "max-image-preview", Some("large"));
         }
-        if self.request.get.get_str("replytocom").is_some() {
+        // A comment reply link, or an unapproved comment's preview.
+        let get = |name| self.request.get.get_str(name).is_some();
+        if get("replytocom") || get("unapproved") && get("moderation-hash") {
             no_robots(&mut robots);
         }
         let content: Vec<String> = robots

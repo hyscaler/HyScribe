@@ -1012,8 +1012,7 @@ fn shown_search(query: &HashMap<String, String>) -> Option<String> {
     query.get("s").map(|s| s.replace(['\r', '\n'], ""))
 }
 
-/// The query of a list page with the tax query's `terms`: a search covers
-/// posts and pages unless a post format is asked for, and a feed lists
+/// The query of a list page with the tax query's `terms`; a feed lists
 /// `posts_per_rss` posts.
 fn post_query(
     site: &Site,
@@ -1049,14 +1048,13 @@ fn post_query(
         vec![]
     };
     PostQuery {
-        // `WP::parse_request()` keeps a publicly queryable post type, which
-        // lists only its published posts; _post_format_request() sets the
-        // post format's post types.
-        post_types: match queryable(query) {
+        // _post_format_request() sets the post format's post types over any
+        // other; `WP::parse_request()` keeps a publicly queryable one, which
+        // lists only its published posts; a search covers posts and pages.
+        post_types: match queryable_post_type(query) {
+            _ if query.contains_key("post_format") => vec!["post".into()],
             Some(post_type) => vec![post_type.into()],
-            None if search.is_some() && !query.contains_key("post_format") => {
-                vec!["post".into(), "page".into()]
-            }
+            None if search.is_some() => vec!["post".into(), "page".into()],
             None => vec!["post".into()],
         },
         // `sentence` makes the whole search one term.
@@ -1351,7 +1349,7 @@ async fn redirect_to(
 }
 
 /// The `post_type` `WP::parse_request()` keeps: a publicly queryable one.
-fn queryable(query: &HashMap<String, String>) -> Option<&str> {
+fn queryable_post_type(query: &HashMap<String, String>) -> Option<&str> {
     query
         .get("post_type")
         .map(String::as_str)
@@ -1376,7 +1374,7 @@ async fn by_slug(
     query: &HashMap<String, String>,
 ) -> Result<Option<Slug>, DbError> {
     let var = |name| query.get(name).map(|v| v.trim()).filter(|v| !v.is_empty());
-    let queryable = queryable(query);
+    let queryable = queryable_post_type(query);
     let (key, post_type, found, name) = if let Some(name) = var("name") {
         let name = sanitize_title_for_query(name.as_bytes());
         // Attachment pages are not served yet: none is found.

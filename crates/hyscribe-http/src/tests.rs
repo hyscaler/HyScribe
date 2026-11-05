@@ -1044,7 +1044,7 @@ async fn term_archives_match_php() {
     let site = Site::load(db, oracle.clone(), oracle).await.unwrap();
     let golden = include_str!("../../hyscribe-render/tests/golden/terms.tsv");
     assert_pages(&Arc::new(site), golden).await;
-    assert_eq!(golden.lines().count(), 34);
+    assert_eq!(golden.lines().count(), 36);
 }
 
 /// Week archives under other first days of the week, from the same script.

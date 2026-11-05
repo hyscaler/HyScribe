@@ -94,7 +94,7 @@ for path in '/?tag=foo' '/?tag=Foo' '/?tag=empty' '/?tag=nope' '/?tag=foo&paged=
   '/?category_name=uncategorized,nope' '/?p=1' '/?feed=rss2' '/' '/?post_format=aside&page=2' '/?tag=foo&page=2' \
   '/?sitemap=index' '/?sitemap=taxonomies&sitemap-subtype=post_tag&paged=1' '/?sitemap=taxonomies&sitemap-subtype=post_format&paged=1' \
   '/?sitemap=posts&sitemap-subtype=post&paged=1' '/?sitemap=posts&sitemap-subtype=wp_block&paged=1' \
-  '/?sitemap=taxonomies&sitemap-subtype=link_category&paged=1'; do
+  '/?sitemap=taxonomies&sitemap-subtype=link_category&paged=1' '/?post_format=aside&post_type=attachment' '/?post_format=aside&s=hello&post_type=attachment'; do
   status=$(curl -s -o "$TMP" -w '%{http_code}' "$BASE$path")
   key=$(printf '%s' "$path" | xxd -p | tr -d '\n')
   printf '%s\t%s\t%s\n' "$key" "$status" "$(xxd -p "$TMP" | tr -d '\n')" >> "$TERMS"

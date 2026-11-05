@@ -193,41 +193,78 @@ async fn page(
     if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
-    let page = match outcome(&site, &uri, &query).await {
-        Ok(Outcome::Redirect(location)) => {
-            return (
-                StatusCode::MOVED_PERMANENTLY,
-                [(header::LOCATION, location)],
-            )
-                .into_response();
-        }
+    // `WP::send_headers()` sends the status `error` asks for; these end the
+    // request before any redirect.
+    let status = error_status(&query);
+    if let Some(status) = status.filter(|s| matches!(s.as_u16(), 403 | 500 | 502 | 503)) {
+        return (status, [(header::CONTENT_TYPE, "text/html; charset=UTF-8")]).into_response();
+    }
+    let mut response = match outcome(&site, &uri, &query).await {
+        Ok(Outcome::Redirect(location)) => (
+            StatusCode::MOVED_PERMANENTLY,
+            [(header::LOCATION, location)],
+        )
+            .into_response(),
         Ok(Outcome::Feed(page, feed)) => {
-            return feed::respond(site, requested(*page, &uri), feed, &headers).await;
+            feed::respond(site.clone(), requested(*page, &uri), feed, &headers).await
         }
         Ok(Outcome::Xml(body)) => {
             let content_type = [(header::CONTENT_TYPE, "application/xml; charset=UTF-8")];
-            return (content_type, body).into_response();
+            (content_type, body).into_response()
         }
         Ok(Outcome::Robots(body)) => {
             let content_type = [(header::CONTENT_TYPE, "text/plain; charset=utf-8")];
-            return (content_type, body).into_response();
+            (content_type, body).into_response()
         }
         // The template loader ends a HEAD request before either.
         Ok(Outcome::Favicon | Outcome::Trackback(_)) if method == axum::http::Method::HEAD => {
-            return [(header::CONTENT_TYPE, "text/html; charset=UTF-8")].into_response();
+            [(header::CONTENT_TYPE, "text/html; charset=UTF-8")].into_response()
         }
         Ok(Outcome::Favicon) => {
             let icon = format!(
                 "{}/wp-includes/images/w-logo-gray-white-bg.png",
                 site.option("siteurl")
             );
-            return (StatusCode::FOUND, [(header::LOCATION, icon)]).into_response();
+            (StatusCode::FOUND, [(header::LOCATION, icon)]).into_response()
         }
-        Ok(Outcome::Trackback(id)) => return trackback(&site, id).await,
-        Ok(Outcome::Page(page)) => render(&site, requested(*page, &uri)).await,
-        Err(err) => database_error(&site, &err),
+        Ok(Outcome::Trackback(id)) => trackback(&site, id).await,
+        Ok(Outcome::Page(page)) => html(&render(&site, requested(*page, &uri)).await),
+        Err(err) => html(&database_error(&site, &err)),
     };
-    html(&page)
+    // Redirects and failures keep their own.
+    let own = response.status().is_redirection() || response.status().is_server_error();
+    if let Some(status) = status.filter(|_| !own) {
+        *response.status_mut() = status;
+    }
+    response
+}
+
+/// The status `WP::send_headers()` sends for a set `error`: its integer,
+/// when `status_header()` knows it. Informational codes, which cannot end
+/// a response, are left out.
+fn error_status(query: &HashMap<String, String>) -> Option<StatusCode> {
+    const KNOWN: [u16; 57] = [
+        200, 201, 202, 203, 204, 205, 206, 207, 226, 300, 301, 302, 303, 304, 305, 306, 307, 308,
+        400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417,
+        418, 421, 422, 423, 424, 425, 426, 428, 429, 431, 451, 500, 501, 502, 503, 504, 505, 506,
+        507, 510, 511,
+    ];
+    let code = query
+        .get("error")
+        .filter(|v| !is_empty_string(v.as_bytes()))
+        .map(|v| Value::String(v.as_bytes().to_vec()).to_int())?;
+    u16::try_from(code)
+        .ok()
+        .filter(|code| KNOWN.contains(code))
+        .and_then(|code| StatusCode::from_u16(code).ok())
+}
+
+/// `'404' == $error`, for which `WP_Query` is a 404 whatever it finds.
+fn asks_404(query: &HashMap<String, String>) -> bool {
+    query.get("error").is_some_and(|v| {
+        let v = Value::String(v.as_bytes().to_vec());
+        v.is_numeric() && v.to_float() == 404.0
+    })
 }
 
 /// What a request gets, from the route through `redirect_canonical()`,
@@ -315,9 +352,9 @@ enum Quiet {
 
 /// Which of [`Quiet`] the request is, as `WP_Query` sets its flags: the
 /// favicon only without robots.txt, and neither when the query itself is
-/// `error=404` (a negative or array `p`, or an invalid date).
+/// `error=404` (that var, a negative or array `p`, or an invalid date).
 fn quiet(query: &HashMap<String, String>, raw_query: Option<&str>) -> Option<Quiet> {
-    if bad_p(query, raw_query) || query::date_query(query).invalid {
+    if bad_p(query, raw_query) || query::date_query(query).invalid || asks_404(query) {
         return None;
     }
     let get = parse_str(raw_query.unwrap_or_default().as_bytes());
@@ -443,7 +480,8 @@ fn cleaned(
 fn robots(site: &Site, query: &HashMap<String, String>, outcome: Outcome) -> Outcome {
     let asked = query
         .get("robots")
-        .is_some_and(|v| !is_empty_string(v.as_bytes()));
+        .is_some_and(|v| !is_empty_string(v.as_bytes()))
+        && !asks_404(query);
     match outcome {
         Outcome::Page(_) | Outcome::Feed(..) | Outcome::Favicon | Outcome::Trackback(_)
             if asked && !sitemaps::redirects(&outcome) =>
@@ -685,25 +723,38 @@ async fn route(
     if query.contains_key("author") {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
-    // A negative or array `p` is `error=404`: the 404 page with a 200, or
-    // where an invalid date or a `page_id` sends it.
-    if bad_p(query, raw_query) && !query.contains_key("feed") {
+    // A negative or array `p` is `error=404` too: the 404 page with a 200
+    // (where `WP::send_headers()` sends the var's own status), or where an
+    // invalid date or the post of `p`, `page_id` or `attachment_id` sends it.
+    let current = format!("{}{path}?{}", site.home, raw_query.unwrap_or_default());
+    // `subpost_id`, when set, is `attachment_id`.
+    let attachment = ["subpost_id", "attachment_id"]
+        .iter()
+        .find_map(|k| query.get(*k).filter(|v| !v.is_empty()))
+        .map_or(0, |id| absint(id));
+    let bad = bad_p(query, raw_query);
+    if (bad || asks_404(query)) && !query.contains_key("feed") {
         if let Some(location) = date_redirect(site, raw_query, query) {
             return Ok(Outcome::Redirect(location));
         }
-        let page_id = query.get("page_id").map_or(0, |v| absint(v));
-        // No post has the ID 0.
-        return redirect_to(site, page_id, raw_query, error_404(site, false)).await;
+        let id = |name| query.get(name).map_or(0, |v| absint(v));
+        let p = if bad { 0 } else { id("p") };
+        // ID 0 is no post's.
+        let target = p.max(id("page_id")).max(attachment);
+        return Ok(
+            match redirect_to(site, target, raw_query, error_404(site, false)).await? {
+                Outcome::Redirect(location) if location == current => {
+                    Outcome::Page(Box::new(error_404(site, false)))
+                }
+                outcome => outcome,
+            },
+        );
     }
     // `attachment_id`, or `subpost_id` over it, is get_posts()'s `p`: a post
     // or page redirects to its link; attachment pages are not served yet.
     let alone = ["p", "page_id", "name", "pagename", "feed"]
         .iter()
         .all(|k| !query.contains_key(*k));
-    let attachment = ["subpost_id", "attachment_id"]
-        .iter()
-        .find_map(|k| query.get(*k).filter(|v| !v.is_empty()))
-        .map_or(0, |id| absint(id));
     if alone && attachment > 0 {
         return redirect_to(site, attachment, raw_query, not_found(site, false)).await;
     }
@@ -771,8 +822,6 @@ async fn route(
                 match (format, post.filter(|p| viewable(p, &["post", "page"]))) {
                     // A feed's redirect keeps the feed's headers.
                     (Some(format), found) => {
-                        let current =
-                            format!("{}{path}?{}", site.home, raw_query.unwrap_or_default());
                         let redirect = found
                             .as_ref()
                             .and_then(elsewhere)

@@ -31,7 +31,9 @@ pub(crate) async fn serve(
     outcome: Outcome,
 ) -> Result<Outcome, DbError> {
     match outcome {
-        Outcome::Page(_) | Outcome::Feed(..) if !redirects(&outcome) => {
+        Outcome::Page(_) | Outcome::Feed(..) | Outcome::Favicon | Outcome::Trackback(_)
+            if !redirects(&outcome) =>
+        {
             Ok(route(site, query).await?.unwrap_or(outcome))
         }
         outcome => Ok(outcome),

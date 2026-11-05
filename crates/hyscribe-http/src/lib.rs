@@ -153,6 +153,10 @@ enum Outcome {
     Xml(Vec<u8>),
     /// `robots.txt`.
     Robots(Vec<u8>),
+    /// `do_favicon()`.
+    Favicon,
+    /// `wp-trackback.php` for a GET: the post's ID, 0 for none.
+    Trackback(i64),
 }
 
 /// One page to render: the status, the document title, and the request
@@ -185,12 +189,7 @@ async fn page(
     if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
-    let outcome = route(&site, uri.path(), uri.query(), &query).await;
-    let outcome = match outcome.map(|o| cleaned(&site, uri.path(), uri.query(), &query, o)) {
-        Ok(outcome) => sitemaps::serve(&site, &query, outcome).await,
-        Err(err) => Err(err),
-    };
-    let page = match outcome.map(|o| robots(&site, &query, o)) {
+    let page = match outcome(&site, &uri, &query).await {
         Ok(Outcome::Redirect(location)) => {
             return (
                 StatusCode::MOVED_PERMANENTLY,
@@ -209,10 +208,143 @@ async fn page(
             let content_type = [(header::CONTENT_TYPE, "text/plain; charset=utf-8")];
             return (content_type, body).into_response();
         }
+        // The template loader ends a HEAD request before either.
+        Ok(Outcome::Favicon | Outcome::Trackback(_)) if method == axum::http::Method::HEAD => {
+            return [(header::CONTENT_TYPE, "text/html; charset=UTF-8")].into_response();
+        }
+        Ok(Outcome::Favicon) => {
+            let icon = format!(
+                "{}/wp-includes/images/w-logo-gray-white-bg.png",
+                site.option("siteurl")
+            );
+            return (StatusCode::FOUND, [(header::LOCATION, icon)]).into_response();
+        }
+        Ok(Outcome::Trackback(id)) => return trackback(&site, id).await,
         Ok(Outcome::Page(page)) => render(&site, requested(*page, &uri)).await,
         Err(err) => database_error(&site, &err),
     };
     html(&page)
+}
+
+/// What a request gets, from the route through `redirect_canonical()`,
+/// sitemaps and robots.txt.
+async fn outcome(
+    site: &Site,
+    uri: &Uri,
+    query: &HashMap<String, String>,
+) -> Result<Outcome, DbError> {
+    let outcome = route(site, uri.path(), uri.query(), query).await?;
+    let outcome = match quiet(query, uri.query()) {
+        Some(kind) => uncanonical(kind, uri, query, outcome),
+        None => cleaned(site, uri.path(), uri.query(), query, outcome),
+    };
+    Ok(robots(
+        site,
+        query,
+        sitemaps::serve(site, query, outcome).await?,
+    ))
+}
+
+/// A negative or array `p`.
+fn bad_p(query: &HashMap<String, String>, raw_query: Option<&str>) -> bool {
+    let negative = query
+        .get("p")
+        .is_some_and(|p| Value::String(p.as_bytes().to_vec()).to_int() < 0);
+    negative
+        || parse_str(raw_query.unwrap_or_default().as_bytes())
+            .get_str("p")
+            .is_some_and(|p| p.as_array().is_some())
+}
+
+/// The template loader's favicon and trackback, for which
+/// `redirect_canonical()` does nothing.
+#[derive(Clone, Copy)]
+enum Quiet {
+    Favicon,
+    Trackback,
+}
+
+/// Which of [`Quiet`] the request is, as `WP_Query` sets its flags: the
+/// favicon only without robots.txt, and neither when the query itself is
+/// `error=404` (a negative or array `p`, or an invalid date).
+fn quiet(query: &HashMap<String, String>, raw_query: Option<&str>) -> Option<Quiet> {
+    if bad_p(query, raw_query) || query::date_query(query).invalid {
+        return None;
+    }
+    let get = parse_str(raw_query.unwrap_or_default().as_bytes());
+    let set = |name| get.get_str(name).is_some_and(|v: &Value| !v.is_empty());
+    if set("favicon") && !set("robots") {
+        Some(Quiet::Favicon)
+    } else {
+        // `'' != $tb`, which an array is too.
+        get.get_str("tb")
+            .is_some_and(|v| v.as_array().is_some() || !v.to_php_string().is_empty())
+            .then_some(Quiet::Trackback)
+    }
+}
+
+/// `outcome` without `redirect_canonical()`'s redirects, as the template
+/// loader sends a favicon (after robots.txt) or a trackback (after feeds).
+/// `handle_404()` never sends a favicon's 404; a trackback's, or a paged
+/// feed's, clears the flag, so its page and redirects stand.
+fn uncanonical(
+    kind: Quiet,
+    uri: &Uri,
+    query: &HashMap<String, String>,
+    outcome: Outcome,
+) -> Outcome {
+    let get = || parse_str(uri.query().unwrap_or_default().as_bytes());
+    let id = match (kind, outcome) {
+        (Quiet::Favicon, _) => return Outcome::Favicon,
+        (_, Outcome::Page(page)) if page.request.not_found => return Outcome::Page(page),
+        (_, Outcome::Feed(page, feed))
+            if page.request.not_found && Paging::of(query).is_paged() =>
+        {
+            return Outcome::Feed(page, feed);
+        }
+        (_, Outcome::Feed(page, mut feed)) => {
+            feed.redirect = None;
+            return Outcome::Feed(page, feed);
+        }
+        (_, Outcome::Page(page)) if page.request.singular => {
+            page.request.post.map_or(0, u64::cast_signed)
+        }
+        (_, Outcome::Page(_)) if get().get_str("tb_id").is_some_and(|v| !v.is_empty()) => 0,
+        // Off a singular page the ID is the request URI's last segment's.
+        (_, Outcome::Page(_)) => {
+            let uri = request_uri(uri);
+            let last = uri.rsplit(|&b| b == b'/').next().unwrap_or_default();
+            Value::String(last.to_vec()).to_int()
+        }
+        (_, outcome) => return outcome,
+    };
+    Outcome::Trackback(id)
+}
+
+/// A GET of `wp-trackback.php`: no trackback, so the post's link, or for
+/// no ID its error. Only a published post or page is linked, where
+/// WordPress links any post, telling drafts and private posts apart from
+/// IDs with none (docs/SECURITY_MODEL.md).
+async fn trackback(site: &Site, id: i64) -> Response {
+    if id == 0 {
+        let body = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<response>\n<error>1</error>\n<message>I really need an ID for this to work.</message>\n</response>";
+        let content_type = [(header::CONTENT_TYPE, "text/xml; charset=UTF-8")];
+        return (content_type, body).into_response();
+    }
+    let post = match u64::try_from(id) {
+        Ok(id) => site.db.post(id).await,
+        Err(_) => Ok(None),
+    };
+    match post {
+        Ok(Some(post)) if viewable(&post, &["post", "page"]) => (
+            StatusCode::FOUND,
+            [(header::LOCATION, site.permalink(&post))],
+        )
+            .into_response(),
+        // `wp_redirect()` of no link sends nothing.
+        Ok(_) => [(header::CONTENT_TYPE, "text/html; charset=UTF-8")].into_response(),
+        Err(err) => html(&database_error(site, &err)),
+    }
 }
 
 /// `outcome` with the query cleaned up as `redirect_canonical()` ends: a
@@ -254,7 +386,9 @@ fn robots(site: &Site, query: &HashMap<String, String>, outcome: Outcome) -> Out
         .get("robots")
         .is_some_and(|v| !is_empty_string(v.as_bytes()));
     match outcome {
-        Outcome::Page(_) | Outcome::Feed(..) if asked && !sitemaps::redirects(&outcome) => {
+        Outcome::Page(_) | Outcome::Feed(..) | Outcome::Favicon | Outcome::Trackback(_)
+            if asked && !sitemaps::redirects(&outcome) =>
+        {
             Outcome::Robots(sitemaps::robots(site))
         }
         outcome => outcome,
@@ -482,7 +616,9 @@ async fn route(
     if reserved(path) {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
-    if let Some(location) = canonical_path(site, path, raw_query) {
+    if let Some(location) =
+        canonical_path(site, path, raw_query).filter(|_| quiet(query, raw_query).is_none())
+    {
         return Ok(Outcome::Redirect(location));
     }
     // With plain permalinks the path is ignored. Author archives give away
@@ -492,13 +628,7 @@ async fn route(
     }
     // A negative or array `p` is `error=404`: the 404 page with a 200, or
     // where an invalid date or a `page_id` sends it.
-    let negative = query
-        .get("p")
-        .is_some_and(|p| Value::String(p.as_bytes().to_vec()).to_int() < 0);
-    let array = parse_str(raw_query.unwrap_or_default().as_bytes())
-        .get_str("p")
-        .is_some_and(|p| p.as_array().is_some());
-    if (negative || array) && !query.contains_key("feed") {
+    if bad_p(query, raw_query) && !query.contains_key("feed") {
         if let Some(location) = date_redirect(site, raw_query, query) {
             return Ok(Outcome::Redirect(location));
         }

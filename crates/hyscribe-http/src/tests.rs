@@ -252,6 +252,8 @@ async fn database_errors_show_no_details() {
         "/?name=x",
         "/?pagename=x",
         "/?attachment_id=1",
+        // Past a route that reads nothing, sitemaps fail.
+        "/?author=1&sitemap=index",
     ] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
@@ -278,6 +280,9 @@ async fn database_errors_show_no_details() {
         let page = Outcome::Page(Box::new(not_found(&site, false)));
         assert!(sitemaps::serve(&site, &query, page).await.is_err());
     }
+    // A trackback's post is read after the page's own queries.
+    let reply = trackback(&site, 1).await;
+    assert_eq!(reply.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[tokio::test]
@@ -952,6 +957,66 @@ async fn pages_match_php() {
     assert_eq!(golden.lines().count(), 196);
 }
 
+/// Every case of `reference/loader/golden.sh`: the favicon and trackback
+/// query vars, with an HTML body reduced to its title.
+#[tokio::test]
+async fn favicons_and_trackbacks_match_php() {
+    let site = oracle_site().await;
+    let golden = include_str!("../tests/golden/loader.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let path = String::from_utf8(hyscribe_testkit::unhex(fields[0])).unwrap();
+        let php_body = as_hyscribe(String::from_utf8(hyscribe_testkit::unhex(fields[4])).unwrap());
+        let reply = request(&site, "GET", &path).await;
+        let header = |name| reply.headers.get(name).map_or("", |v| v.to_str().unwrap());
+        let html = header("content-type").starts_with("text/html");
+        let body = if html {
+            reply
+                .body
+                .lines()
+                .find(|l| l.starts_with("<title>"))
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            reply.body.clone()
+        };
+        // A redirect's or empty page's content type is not compared.
+        let typed = !php_body.is_empty();
+        let ours = (
+            reply.status.as_u16().to_string(),
+            header("location"),
+            typed.then(|| header("content-type")),
+            body,
+        );
+        let php = (
+            fields[1].to_string(),
+            fields[2],
+            typed.then_some(fields[3]),
+            php_body,
+        );
+        if ours != php {
+            failures.push(format!("{path}\n  php:  {php:?}\n  ours: {ours:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(golden.lines().count(), 65);
+    // Recorded from PHP: a HEAD request ends before the favicon or the
+    // trackback. PHP links the draft page 3, which HyScribe keeps hidden.
+    for (method, path) in [
+        ("HEAD", "/?favicon=1"),
+        ("HEAD", "/?tb=1&p=1"),
+        ("GET", "/3?tb=1"),
+    ] {
+        let reply = request(&site, method, path).await;
+        assert_eq!(reply.status, StatusCode::OK, "{path}");
+        assert!(
+            reply.headers.get("location").is_none() && reply.body.is_empty(),
+            "{path}"
+        );
+    }
+}
+
 /// Term archives from the same script, over the fixture with
 /// `reference/default-install/terms.sql`, which `db.sh` loads as the
 /// `wordpress_terms` database.
@@ -998,6 +1063,47 @@ async fn paged_pages_match_php() {
     assert_eq!(golden.lines().count(), 6);
 }
 
+/// PHP's page, feed or sitemap as HyScribe sends it: HyScribe as the
+/// generator and without the tags an open question holds back.
+#[allow(clippy::string_slice)]
+fn as_hyscribe(mut php: String) -> String {
+    for prefix in [
+        "<link rel=\"https://api.w.org/\"",
+        "<link rel=\"alternate\" title=\"JSON\"",
+        "<link rel=\"EditURI\"",
+        "<link rel=\"alternate\" title=\"oEmbed",
+    ] {
+        while let Some(start) = php.find(prefix) {
+            let end = start + php[start..].find("/>").unwrap() + 2;
+            let end = if php[end..].starts_with('\n') {
+                end + 1
+            } else {
+                end
+            };
+            php.replace_range(start..end, "");
+        }
+    }
+    let version = env!("CARGO_PKG_VERSION");
+    php.replace(
+        "<meta name=\"generator\" content=\"WordPress 7.1.3\" />",
+        &format!("<meta name=\"generator\" content=\"HyScribe {version}\" />"),
+    )
+    .replace(
+        "<generator>https://wordpress.org/?v=7.1.3</generator>",
+        &format!("<generator>https://github.com/hyscaler/HyScribe?v={version}</generator>"),
+    )
+    // No users sitemap: author archives are off (docs/SECURITY_MODEL.md).
+    .replace(
+        "<sitemap><loc>http://127.0.0.1:8081/?sitemap=users&amp;paged=1</loc></sitemap>",
+        "",
+    )
+    .replace(
+        "<!-- generator=\"WordPress/7.1.3\" -->",
+        &format!("<!-- generator=\"HyScribe/{version}\" -->"),
+    )
+    .replace("generated by WordPress", "generated by HyScribe")
+}
+
 /// Each line of `golden`, a path, PHP's status and its page, against ours.
 #[allow(clippy::string_slice)]
 async fn assert_pages(site: &Arc<Site>, golden: &str) {
@@ -1006,39 +1112,9 @@ async fn assert_pages(site: &Arc<Site>, golden: &str) {
         let mut fields = line.split('\t');
         let path = String::from_utf8(hyscribe_testkit::unhex(fields.next().unwrap())).unwrap();
         let status: u16 = fields.next().unwrap().parse().unwrap();
-        let mut php = String::from_utf8(hyscribe_testkit::unhex(fields.next().unwrap())).unwrap();
-        for prefix in [
-            "<link rel=\"https://api.w.org/\"",
-            "<link rel=\"alternate\" title=\"JSON\"",
-            "<link rel=\"EditURI\"",
-            "<link rel=\"alternate\" title=\"oEmbed",
-        ] {
-            while let Some(start) = php.find(prefix) {
-                let end = start + php[start..].find("/>").unwrap() + 2;
-                let end = if php[end..].starts_with('\n') {
-                    end + 1
-                } else {
-                    end
-                };
-                php.replace_range(start..end, "");
-            }
-        }
-        let version = env!("CARGO_PKG_VERSION");
-        let php = php
-            .replace(
-                "<meta name=\"generator\" content=\"WordPress 7.1.3\" />",
-                &format!("<meta name=\"generator\" content=\"HyScribe {version}\" />"),
-            )
-            .replace(
-                "<generator>https://wordpress.org/?v=7.1.3</generator>",
-                &format!("<generator>https://github.com/hyscaler/HyScribe?v={version}</generator>"),
-            )
-            // No users sitemap: author archives are off (docs/SECURITY_MODEL.md).
-            .replace(
-                "<sitemap><loc>http://127.0.0.1:8081/?sitemap=users&amp;paged=1</loc></sitemap>",
-                "",
-            )
-            .replace("generated by WordPress", "generated by HyScribe");
+        let php = as_hyscribe(
+            String::from_utf8(hyscribe_testkit::unhex(fields.next().unwrap())).unwrap(),
+        );
         let reply = request(site, "GET", &path).await;
         let ours = reply.body;
         if reply.status.as_u16() != status || ours != php {
@@ -1100,7 +1176,7 @@ async fn pages_of_a_post_match_php() {
                 (page.status.as_u16(), String::new(), page.title)
             }
             Outcome::Redirect(location) => (301, location, String::new()),
-            Outcome::Feed(..) | Outcome::Xml(_) | Outcome::Robots(_) => unreachable!(),
+            _ => unreachable!(),
         };
         assert_eq!(
             ours,

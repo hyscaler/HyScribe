@@ -1,14 +1,55 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `get_permalink()` with plain permalinks, the default install's setting.
+//! `get_permalink()` and the other links WordPress builds, with plain
+//! permalinks, the default install's setting.
 
 use hyscribe_model::{Post, Term};
 use hyscribe_phpser::{Value, absint};
+
+use crate::site::{Archive, Request, Taxonomy};
 
 /// The page on the front page: `page_on_front` when `show_on_front` is
 /// `page`.
 pub fn front_page(show_on_front: &[u8], page_on_front: &[u8]) -> Option<u64> {
     (show_on_front == b"page").then(|| absint(&Value::String(page_on_front.to_vec())))
+}
+
+/// `wp_get_shortlink()` of `post`: the home page for the page on the
+/// front, else `?p=`.
+pub fn shortlink(home: &[u8], show_on_front: &[u8], page_on_front: &[u8], post: &Post) -> Vec<u8> {
+    let front = show_on_front == b"page"
+        && u64::try_from(Value::String(page_on_front.to_vec()).to_int()).ok() == Some(post.id);
+    if post.post_type == "page" && front {
+        [home, b"/"].concat()
+    } else {
+        format!("{}/?p={}", String::from_utf8_lossy(home), post.id).into_bytes()
+    }
+}
+
+/// `get_rest_url()` of `route` with plain permalinks.
+pub fn rest_url(home: &[u8], route: &str) -> Vec<u8> {
+    [home, b"/index.php?rest_route=", route.as_bytes()].concat()
+}
+
+/// `rest_get_queried_resource_route()`: the route of a singular request's
+/// post, which is a post or a page, or of a category or tag archive's
+/// term. Post formats have none.
+pub fn queried_resource_route(request: &Request) -> Option<String> {
+    if let Some(post) = request.posts.first().filter(|_| request.singular) {
+        let base = if post.post_type == "page" {
+            "pages"
+        } else {
+            "posts"
+        };
+        return Some(format!("/wp/v2/{base}/{}", post.id));
+    }
+    match &request.archive {
+        Some(Archive::Term(Taxonomy::Category, Some(term))) => {
+            Some(format!("/wp/v2/categories/{}", term.id))
+        }
+        Some(Archive::Term(Taxonomy::Tag, Some(term))) => Some(format!("/wp/v2/tags/{}", term.id)),
+        _ => None,
+    }
 }
 
 /// The post types WordPress registers itself (`_builtin`), other than pages
@@ -115,5 +156,27 @@ mod tests {
             link(&post(5, "wp_navigation"), None),
             "http://example.test/?p=5"
         );
+    }
+
+    /// Recorded from PHP: the `/wp/v2/` route a tag archive links, and none
+    /// for a post format's or a missing term's.
+    #[test]
+    fn term_archives_link_their_rest_routes() {
+        let term = Term {
+            id: 5,
+            ..Term::default()
+        };
+        let route = |taxonomy, term| {
+            queried_resource_route(&Request {
+                archive: Some(Archive::Term(taxonomy, term)),
+                ..Request::default()
+            })
+        };
+        assert_eq!(
+            route(Taxonomy::Tag, Some(term.clone())).as_deref(),
+            Some("/wp/v2/tags/5")
+        );
+        assert_eq!(route(Taxonomy::Format, Some(term)), None);
+        assert_eq!(route(Taxonomy::Category, None), None);
     }
 }

@@ -286,7 +286,7 @@ fn rendered(theme: &Theme, site: &Options, path: &str) -> Option<(Request, Asset
 
 /// The page heads of `reference/head/golden.sh` the fixture can render,
 /// rendered here with the template the hierarchy picks; HyScribe is the
-/// generator and the tags an open question holds back are left out.
+/// generator and the RSD tag is left out.
 #[test]
 fn page_heads_match_php() {
     let theme = crate::theme::twentytwentyfive();
@@ -300,21 +300,9 @@ fn page_heads_match_php() {
             continue;
         };
         let mut php = String::from_utf8(unhex(php)).unwrap();
-        for prefix in [
-            "<link rel=\"https://api.w.org/\"",
-            "<link rel=\"alternate\" title=\"JSON\"",
-            "<link rel=\"EditURI\"",
-            "<link rel=\"alternate\" title=\"oEmbed",
-        ] {
-            while let Some(start) = php.find(prefix) {
-                let end = start + php.get(start..).unwrap().find("/>").unwrap() + 2;
-                let end = if php.get(end..).unwrap().starts_with('\n') {
-                    end + 1
-                } else {
-                    end
-                };
-                php.replace_range(start..end, "");
-            }
+        if let Some(start) = php.find("<link rel=\"EditURI\"") {
+            let end = start + php.get(start..).unwrap().find("/>\n").unwrap() + 3;
+            php.replace_range(start..end, "");
         }
         let php = php.replace(
             "WordPress 7.1.3",

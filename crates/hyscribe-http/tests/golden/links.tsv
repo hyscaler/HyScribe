@@ -1,0 +1,69 @@
+GET	2f	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f703d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink
+GET	2f3f706167655f69643d32	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/pages/2>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=2>; rel=shortlink
+GET	2f3f703d312663706167653d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink
+GET	2f3f703d3126706167653d32	301	
+GET	2f3f703d393939	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f706167655f69643d33	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f703d32	301	
+GET	2f3f6361743d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/categories/1>; rel="alternate"; title="JSON"; type="application/json"
+GET	2f3f6361743d393939	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f6361743d312670616765643d39	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f7461673d78	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f706f73745f666f726d61743d6173696465	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f733d78	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f733d68656c6c6f	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f6d3d32303236	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f6d3d323032363131	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f796561723d32303236266d6f6e74686e756d3d3133	301	
+GET	2f3f70616765643d32	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f70616765643d3939	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f703d2d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f666565643d72737332	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f666565643d727373	301	
+GET	2f3f666565643d61746f6d	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f666565643d636f6d6d656e74732d72737332	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f666565643d7273733226703d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink
+GET	2f3f666565643d7273733226706167655f69643d32	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/pages/2>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=2>; rel=shortlink
+GET	2f3f666565643d7273733226703d393939	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f666565643d72737332266361743d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/categories/1>; rel="alternate"; title="JSON"; type="application/json"
+GET	2f3f666565643d727373322670616765643d3939	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f666565643d7273733226733d68656c6c6f	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f703d3126666565643d72737332	301	
+GET	2f3f66617669636f6e3d31	302	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f66617669636f6e3d3126703d31	302	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink
+GET	2f3f66617669636f6e3d3126703d32	302	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f726f626f74733d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f726f626f74733d3126703d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink
+GET	2f3f726f626f74733d3126703d32	301	
+GET	2f3f726f626f74733d31266361743d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/categories/1>; rel="alternate"; title="JSON"; type="application/json"
+GET	2f3f74623d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f74623d3126703d31	302	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink
+GET	2f3f74623d3126706167655f69643d32	302	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/pages/2>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=2>; rel=shortlink
+GET	2f3f74623d3126703d393939	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f74623d3126703d32	301	
+GET	2f782f313f74623d31	302	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f736974656d61703d696e646578	200	
+GET	2f3f736974656d61703d706f73747326736974656d61702d737562747970653d706f7374	200	
+GET	2f3f736974656d61702d7374796c6573686565743d696e646578	200	
+GET	2f77702d747261636b6261636b2e7068703f703d31	302	
+GET	2f77702d747261636b6261636b2e706870	200	
+GET	2f3f6572726f723d343033	403	
+GET	2f3f6572726f723d343034	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f6572726f723d34313026703d31	410	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink
+GET	2f3f6572726f723d34303426703d31	301	
+GET	2f3f707265766965773d7472756526703d31	301	
+GET	2f3f707265766965773d74727565	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f707265766965773d7472756526706167655f69643d33	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f6174746163686d656e745f69643d31	301	
+GET	2f3f6e616d653d68656c6c6f2d776f726c64	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink
+GET	2f3f706167656e616d653d73616d706c652d70616765	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/pages/2>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=2>; rel=shortlink
+GET	2f3f6e616d653d6e6f7065	404	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f703d31267265706c79746f636f6d3d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink
+GET	2f3f703d3126756e617070726f7665643d31266d6f6465726174696f6e2d686173683d78	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink
+GET	2f3f706f73745f747970653d6174746163686d656e74	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/"
+GET	2f3f706167655f69643d3226783d	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/pages/2>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=2>; rel=shortlink
+GET	2f3f703d3126783d	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink
+HEAD	2f3f703d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink
+HEAD	2f3f74623d3126703d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink
+HEAD	2f3f66617669636f6e3d3126703d31	200	<http://127.0.0.1:8081/index.php?rest_route=/>; rel="https://api.w.org/" | <http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1>; rel="alternate"; title="JSON"; type="application/json" | <http://127.0.0.1:8081/?p=1>; rel=shortlink

@@ -1095,6 +1095,39 @@ async fn trackbacks_match_php() {
     assert!(reply.headers.get("location").is_none() && reply.body.is_empty());
 }
 
+/// Every case of `reference/links/golden.sh`: the REST API and shortlink
+/// `Link` headers.
+#[tokio::test]
+async fn link_headers_match_php() {
+    let site = oracle_site().await;
+    let golden = include_str!("../tests/golden/links.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let path = String::from_utf8(hyscribe_testkit::unhex(fields[1])).unwrap();
+        let reply = request(&site, fields[0], &path).await;
+        let links: Vec<&str> = reply
+            .headers
+            .get_all("link")
+            .iter()
+            .map(|v| v.to_str().unwrap())
+            .collect();
+        let ours = (reply.status.as_u16().to_string(), links.join(" | "));
+        if ours != (fields[2].to_string(), fields[3].to_string()) {
+            failures.push(format!(
+                "{} {path}\n  php:  {:?}\n  ours: {ours:?}",
+                fields[0],
+                &fields[2..]
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(golden.lines().count(), 69);
+    // Author archives are off, so no user's route is linked.
+    let reply = request(&site, "GET", "/?author=1").await;
+    assert_eq!(reply.headers.get_all("link").iter().count(), 1);
+}
+
 /// Term archives from the same script, over the fixture with
 /// `reference/default-install/terms.sql`, which `db.sh` loads as the
 /// `wordpress_terms` database.
@@ -1142,25 +1175,12 @@ async fn paged_pages_match_php() {
 }
 
 /// PHP's page, feed or sitemap as HyScribe sends it: HyScribe as the
-/// generator and in the footer credit, and without the tags an open question holds
-/// back.
+/// generator and in the footer credit, and without the RSD tag.
 #[allow(clippy::string_slice)]
 fn as_hyscribe(mut php: String) -> String {
-    for prefix in [
-        "<link rel=\"https://api.w.org/\"",
-        "<link rel=\"alternate\" title=\"JSON\"",
-        "<link rel=\"EditURI\"",
-        "<link rel=\"alternate\" title=\"oEmbed",
-    ] {
-        while let Some(start) = php.find(prefix) {
-            let end = start + php[start..].find("/>").unwrap() + 2;
-            let end = if php[end..].starts_with('\n') {
-                end + 1
-            } else {
-                end
-            };
-            php.replace_range(start..end, "");
-        }
+    while let Some(start) = php.find("<link rel=\"EditURI\"") {
+        let end = start + php[start..].find("/>\n").unwrap() + 3;
+        php.replace_range(start..end, "");
     }
     let version = env!("CARGO_PKG_VERSION");
     php.replace(

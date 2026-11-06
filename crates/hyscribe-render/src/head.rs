@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `wp_head()`: what a page's `<head>` prints, from the styles and script
-//! modules the rendered blocks enqueued. The generator names HyScribe;
-//! the REST, RSD and oEmbed tags are left out until an open question is decided.
+//! modules the rendered blocks enqueued. The generator names HyScribe, and
+//! the RSD tag is left out while XML-RPC is off.
 
 use std::sync::OnceLock;
 
@@ -14,6 +14,7 @@ use crate::comment_pages::{comments_pagenum_link, cpage};
 use crate::core_blocks::comments_open;
 use crate::feed::post_comments_feed_link;
 use crate::layout::{Rule, stylesheet};
+use crate::link;
 use crate::post::the_title;
 use crate::site::{Archive, Request, Site, Taxonomy};
 use crate::template::Renderer;
@@ -116,9 +117,11 @@ pub fn wp_head(
     }
     out.extend([&b"<title>"[..], title, b"</title>\n"].concat());
     out.extend(head.feed_links());
+    out.extend(head.oembed_links());
     for style in head.styles(assets) {
         out.extend(style.print());
     }
+    out.extend(head.rest_links());
     // wp_generator(), with HyScribe's name and version.
     out.extend(
         format!(
@@ -382,15 +385,12 @@ impl Head<'_> {
                 .concat(),
             );
         }
-        // wp_get_shortlink()
-        let front = self.option("show_on_front") == b"page"
-            && u64::try_from(Value::String(self.option("page_on_front")).to_int()).ok()
-                == Some(post.id);
-        let shortlink = if post.post_type == "page" && front {
-            self.home_url(b"/")
-        } else {
-            self.home_url(format!("?p={}", post.id).as_bytes())
-        };
+        let shortlink = link::shortlink(
+            &self.site.home_url(),
+            &self.option("show_on_front"),
+            &self.option("page_on_front"),
+            post,
+        );
         out.extend(
             [
                 &b"<link rel='shortlink' href='"[..],
@@ -400,6 +400,50 @@ impl Head<'_> {
             .concat(),
         );
         out
+    }
+
+    /// `wp_oembed_add_discovery_links()`: a singular request's oEmbed
+    /// endpoints for its post's permalink.
+    fn oembed_links(&self) -> Vec<u8> {
+        let Some(post) = self.queried_post() else {
+            return Vec::new();
+        };
+        let endpoint = [
+            &self.home_url(b"index.php")[..],
+            b"?rest_route=%2Foembed%2F1.0%2Fembed&url=",
+            &urlencode(&self.context.permalink(post)),
+        ]
+        .concat();
+        let link = |title: &str, kind: &str, href: &[u8]| {
+            format!(
+                "<link rel=\"alternate\" title=\"{title}\" type=\"{kind}\" href=\"{}\" />\n",
+                String::from_utf8_lossy(&esc_url(href))
+            )
+        };
+        let xml = [&endpoint[..], b"&format=xml"].concat();
+        [
+            link("oEmbed (JSON)", "application/json+oembed", &endpoint),
+            link("oEmbed (XML)", "text/xml+oembed", &xml),
+        ]
+        .concat()
+        .into_bytes()
+    }
+
+    /// `rest_output_link_wp_head()`, which ends no line, as `rsd_link()`,
+    /// left out, would.
+    fn rest_links(&self) -> Vec<u8> {
+        let home = self.site.home_url();
+        let mut out = format!(
+            "<link rel=\"https://api.w.org/\" href=\"{}\" />",
+            String::from_utf8_lossy(&esc_url(&link::rest_url(&home, "/")))
+        );
+        if let Some(route) = link::queried_resource_route(self.request) {
+            out.push_str(&format!(
+                "<link rel=\"alternate\" title=\"JSON\" type=\"application/json\" href=\"{}\" />",
+                String::from_utf8_lossy(&esc_url(&link::rest_url(&home, &route)))
+            ));
+        }
+        out.into_bytes()
     }
 
     /// `wp_print_font_faces()`: the theme's font faces from `theme.json`.

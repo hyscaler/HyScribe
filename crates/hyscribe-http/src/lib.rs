@@ -18,7 +18,7 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_db::{Db, DbError};
-use hyscribe_kses::{esc_attr, esc_html};
+use hyscribe_kses::{esc_attr, esc_html, esc_url_raw};
 use hyscribe_model::{OrderBy, Post, PostQuery, TermFilter, TimeCondition};
 use hyscribe_phpser::{
     Key, Value, add_query_values, is_empty_string, parse_str, rawurlencode, rawurlencode_deep,
@@ -203,10 +203,16 @@ async fn page(
         return (status, [(header::CONTENT_TYPE, "text/html; charset=UTF-8")]).into_response();
     }
     let file = trackback::is_file(uri.path());
-    let outcome = if file {
-        trackback::outcome(&site, &uri, &query).await
+    let routed = if file {
+        trackback::outcome(&site, &uri, &query)
+            .await
+            .map(|outcome| (outcome, Vec::new()))
     } else {
         outcome(&site, &uri, &query).await
+    };
+    let (outcome, links) = match routed {
+        Ok((outcome, links)) => (Ok(outcome), links),
+        Err(err) => (Err(err), Vec::new()),
     };
     let mut response = match outcome {
         // The template loader ends a HEAD request before either.
@@ -254,6 +260,12 @@ async fn page(
     if let Some(status) = status.filter(|_| !own) {
         *response.status_mut() = status;
     }
+    for link in links
+        .into_iter()
+        .filter_map(|l| HeaderValue::try_from(l).ok())
+    {
+        response.headers_mut().append(header::LINK, link);
+    }
     response
 }
 
@@ -286,13 +298,21 @@ fn asks_404(query: &HashMap<String, String>) -> bool {
 }
 
 /// What a request gets, from the route through `redirect_canonical()`,
-/// sitemaps and robots.txt.
+/// sitemaps and robots.txt, and the `Link` headers `template_redirect`
+/// sends after `redirect_canonical()`, which a sitemap never reaches.
 async fn outcome(
     site: &Site,
     uri: &Uri,
     query: &HashMap<String, String>,
-) -> Result<Outcome, DbError> {
+) -> Result<(Outcome, Vec<String>), DbError> {
     let outcome = route(site, uri.path(), uri.query(), query).await?;
+    let links = link_headers(
+        site,
+        match &outcome {
+            Outcome::Page(page) | Outcome::Feed(page, _) => Some(&page.request),
+            _ => None,
+        },
+    );
     let get = parse_str(uri.query().unwrap_or_default().as_bytes());
     let outcome = match quiet(query, uri.query()) {
         Some(kind) => uncanonical(kind, uri, query, outcome),
@@ -305,11 +325,42 @@ async fn outcome(
             }
         },
     };
-    Ok(robots(
-        site,
-        query,
-        sitemaps::serve(site, query, outcome).await?,
-    ))
+    let outcome = robots(site, query, sitemaps::serve(site, query, outcome).await?);
+    let sent = match &outcome {
+        Outcome::Redirect(_) | Outcome::Xml(_) => false,
+        Outcome::Feed(_, feed) => feed.redirect.is_none(),
+        _ => true,
+    };
+    Ok((outcome, if sent { links } else { Vec::new() }))
+}
+
+/// `rest_output_link_header()` and `wp_shortlink_header()`: the REST API
+/// root, and for a page's request the REST route of what it found and a
+/// singular post's shortlink.
+fn link_headers(site: &Site, request: Option<&Request>) -> Vec<String> {
+    let home = site.home.as_bytes();
+    let rest = |route: &str| lossy(&esc_url_raw(&link::rest_url(home, route)));
+    let mut links = vec![format!("<{}>; rel=\"https://api.w.org/\"", rest("/"))];
+    let Some(request) = request else {
+        return links;
+    };
+    if let Some(route) = link::queried_resource_route(request) {
+        links.push(format!(
+            "<{}>; rel=\"alternate\"; title=\"JSON\"; type=\"application/json\"",
+            rest(&route)
+        ));
+    }
+    if let Some(post) = request
+        .posts
+        .first()
+        .filter(|p| request.singular && p.id != 0)
+    {
+        let option = |name| site.options.get(name).map_or(&[][..], Vec::as_slice);
+        let shortlink =
+            link::shortlink(home, option("show_on_front"), option("page_on_front"), post);
+        links.push(format!("<{}>; rel=shortlink", lossy(&shortlink)));
+    }
+    links
 }
 
 /// Whether `$value` is set as `'' != $value` takes it, which an array is.

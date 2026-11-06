@@ -66,7 +66,8 @@ pub(crate) fn post_id(uri: &Uri, singular: Option<i64>) -> i64 {
     Value::String(last.to_vec()).to_int()
 }
 
-/// `$_POST`, which PHP fills from a URL-encoded form body only.
+/// `$_POST` from a URL-encoded form body; a multipart one is read as
+/// empty, where PHP parses it.
 pub(crate) fn form(headers: &HeaderMap, body: &[u8]) -> Value {
     let urlencoded = headers
         .get(header::CONTENT_TYPE)
@@ -79,17 +80,15 @@ pub(crate) fn form(headers: &HeaderMap, body: &[u8]) -> Value {
     parse_str(if urlencoded { body } else { b"" })
 }
 
-/// The reply to a trackback request with `form` as `$_POST`. A UTF-7
-/// charset ends it with nothing, no post ID gets an error, no trackback
-/// fields the post's link, a URL and a title that trackbacks are closed,
-/// and anything else nothing. Only a published post or page is linked,
-/// where WordPress links any post, telling drafts and private posts apart
-/// from IDs with none.
+/// The reply to a trackback request with `form` as `$_POST`. Only a
+/// published post or page is linked, where WordPress links any post,
+/// telling drafts and private posts apart from IDs with none.
 pub(crate) async fn respond(site: &Site, id: i64, status: StatusCode, form: &Value) -> Response {
-    let field = |name| {
-        form.get_str(name)
-            .map(Value::to_php_string)
-            .unwrap_or_default()
+    // `sanitize_text_field()` makes an array empty; `sanitize_url()` of one
+    // is a fatal error in PHP, and empty here.
+    let field = |name| match form.get_str(name) {
+        Some(Value::String(text)) => text.clone(),
+        _ => Vec::new(),
     };
     let nothing = (status, [(header::CONTENT_TYPE, "text/html; charset=UTF-8")]);
     let charset: Vec<u8> = sanitize_text_field(&field("charset"))
@@ -104,7 +103,13 @@ pub(crate) async fn respond(site: &Site, id: i64, status: StatusCode, form: &Val
         return error(status, "I really need an ID for this to work.");
     }
     let given = |text: Vec<u8>| !is_empty_string(&text);
-    let url = given(esc_url_raw(&field("url")));
+    // The URL keeps the slashes `wp_magic_quotes()` adds; of them only a
+    // NUL's, `\0`, can decide whether it is empty.
+    let url: Vec<u8> = field("url")
+        .iter()
+        .flat_map(|&b| if b == 0 { b"\\0".to_vec() } else { vec![b] })
+        .collect();
+    let url = given(esc_url_raw(&url));
     let title = given(sanitize_text_field(&field("title")));
     if url && title {
         return error(status, "Sorry, trackbacks are closed for this item.");

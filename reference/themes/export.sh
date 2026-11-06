@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Exports the active theme of the PHP WordPress oracle (php.sh) as a theme
-# port: its templates, parts, theme.json and style.css as they are, its
-# PHP patterns run once into block markup (patterns.json), the style
+# port: every file but its PHP as it is, its PHP patterns run
+# once into block markup (patterns.json), the style
 # partials that name block types (styles.json, file name to contents), and
 # the block styles registered with the theme active (block-styles.tsv).
 #   reference/themes/export.sh [slug]   (default twentytwentyfive)
@@ -19,9 +19,9 @@ SRC="/var/www/html/wp-content/themes/$SLUG"
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
-for item in templates parts theme.json style.css style.min.css; do
-  "$DOCKER" cp "$NAME:$SRC/$item" "$OUT/$item"
-done
+"$DOCKER" cp "$NAME:$SRC/." "$OUT/"
+find "$OUT" -name '*.php' -delete
+find "$OUT" -type d -empty -delete
 "$DOCKER" cp "$ROOT/reference/themes/export.php" "$NAME:/tmp/export.php"
 "$DOCKER" exec "$NAME" php /tmp/export.php > "$OUT/patterns.json"
 # shellcheck disable=SC2016

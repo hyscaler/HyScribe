@@ -689,11 +689,11 @@ async fn static_paths_keep_their_urls() {
     let site = fixture_site(None).await;
     for uri in [
         "/wp-content/uploads/2026/10/photo.jpg",
-        "/wp-content/themes/twentytwentyfive/style.css",
+        "/wp-content/themes/twentytwentyfive/",
         "/wp-includes/js/wp-emoji-release.min.js",
         "/wp-content/plugins/x/",
     ] {
-        // Never redirected; 404 until static files are served.
+        // Never redirected; 404 where no file is served.
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "{uri}");
         assert!(!reply.headers.contains_key("location"), "{uri}");
@@ -1088,7 +1088,7 @@ async fn trackbacks_match_php() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(golden.lines().count(), 102);
+    assert_eq!(golden.lines().count(), 107);
     // PHP links the draft page 3, which HyScribe keeps hidden.
     let reply = request(&site, "GET", "/wp-trackback.php/3").await;
     assert_eq!(reply.status, StatusCode::OK);
@@ -1126,6 +1126,77 @@ async fn link_headers_match_php() {
     // Author archives are off, so no user's route is linked.
     let reply = request(&site, "GET", "/?author=1").await;
     assert_eq!(reply.headers.get_all("link").iter().count(), 1);
+}
+
+/// Every file of `reference/themes/files-golden.sh`: the default theme's
+/// files as the web server sends them.
+#[tokio::test]
+async fn theme_files_match_php() {
+    use sha2::Digest;
+    let site = fixture_site(None).await;
+    let golden = include_str!("../tests/golden/theme-files.tsv");
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let response = router(site.clone())
+            .oneshot(Request::get(fields[0]).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = response.status().as_u16().to_string();
+        let content_type = response.headers()[header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .to_string();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let sha: String = sha2::Sha256::digest(&body)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(
+            (status.as_str(), content_type.as_str(), sha.as_str()),
+            (fields[1], fields[2], fields[3]),
+            "{}",
+            fields[0]
+        );
+    }
+    assert_eq!(golden.lines().count(), 136);
+    // No PHP, no data files of the port's own, and only GET and HEAD.
+    for (method, path) in [
+        ("GET", "/wp-content/themes/twentytwentyfive/functions.php"),
+        (
+            "GET",
+            "/wp-content/themes/twentytwentyfive/patterns/footer.php",
+        ),
+        ("GET", "/wp-content/themes/twentytwentyfive/patterns.json"),
+        ("GET", "/wp-content/themes/twentytwentyfive/nope.css"),
+        ("GET", "/wp-content/themes/twentytwentyfour/style.css"),
+    ] {
+        assert_eq!(
+            request(&site, method, path).await.status,
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
+    let path = "/wp-content/themes/twentytwentyfive/style.css";
+    assert_eq!(request(&site, "HEAD", path).await.status, StatusCode::OK);
+    assert_eq!(
+        request(&site, "POST", path).await.status,
+        StatusCode::METHOD_NOT_ALLOWED
+    );
+}
+
+/// With a page on the front, its link and shortlink are the home page.
+#[tokio::test]
+async fn the_front_page_links_to_the_home_page() {
+    let mut site = Arc::into_inner(oracle_site().await).unwrap();
+    site.options
+        .insert("show_on_front".into(), b"page".to_vec());
+    site.options.insert("page_on_front".into(), b"2".to_vec());
+    let reply = request(&Arc::new(site), "GET", "/?tb=1&page_id=2").await;
+    assert_eq!(reply.headers["location"], "http://127.0.0.1:8081/");
+    let links: Vec<_> = reply.headers.get_all("link").iter().collect();
+    assert_eq!(links[2], "<http://127.0.0.1:8081/>; rel=shortlink");
 }
 
 /// Term archives from the same script, over the fixture with

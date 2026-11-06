@@ -31,7 +31,7 @@ use hyscribe_render::link;
 use hyscribe_render::post::body_class;
 use hyscribe_render::site::{Archive, Request, Taxonomy};
 use hyscribe_render::template::render_template;
-use hyscribe_render::theme::{Theme, twentytwentyfive};
+use hyscribe_render::theme::{Theme, twentytwentyfive, twentytwentyfive_file};
 use hyscribe_render::{search_terms, sticky_posts};
 use tokio::net::TcpListener;
 
@@ -91,13 +91,27 @@ impl Site {
     }
 
     fn option(&self, name: &str) -> String {
-        String::from_utf8_lossy(self.options.get(name).map_or(&[][..], Vec::as_slice)).into_owned()
+        String::from_utf8_lossy(self.raw_option(name)).into_owned()
+    }
+
+    fn raw_option(&self, name: &str) -> &[u8] {
+        self.options.get(name).map_or(&[][..], Vec::as_slice)
     }
 
     /// The site's time zone, `wp_timezone()`.
     fn zone(&self) -> Zone {
-        let option = |name| self.options.get(name).map_or(&[][..], Vec::as_slice);
-        date::site_zone(option("timezone_string"), option("gmt_offset"))
+        date::site_zone(
+            self.raw_option("timezone_string"),
+            self.raw_option("gmt_offset"),
+        )
+    }
+
+    /// The page on the front page, if any.
+    fn front_page(&self) -> Option<u64> {
+        link::front_page(
+            self.raw_option("show_on_front"),
+            self.raw_option("page_on_front"),
+        )
     }
 
     /// The site title, as `wp_get_document_title()` prints it.
@@ -106,10 +120,12 @@ impl Site {
     }
 
     fn permalink(&self, post: &Post) -> String {
-        let option = |name| self.options.get(name).map_or(&[][..], Vec::as_slice);
-        let front_page = link::front_page(option("show_on_front"), option("page_on_front"));
-        String::from_utf8_lossy(&link::permalink(self.home.as_bytes(), front_page, post))
-            .into_owned()
+        String::from_utf8_lossy(&link::permalink(
+            self.home.as_bytes(),
+            self.front_page(),
+            post,
+        ))
+        .into_owned()
     }
 }
 
@@ -196,6 +212,9 @@ async fn page(
     if method != Method::GET && !head && !post {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
+    if let Some(response) = theme_file(uri.path()).filter(|_| !post) {
+        return response;
+    }
     // `WP::send_headers()` sends the status `error` asks for; these end the
     // request before any redirect.
     let status = error_status(&query);
@@ -211,15 +230,15 @@ async fn page(
         outcome(&site, &uri, &query).await
     };
     let (outcome, links) = match routed {
-        Ok((outcome, links)) => (Ok(outcome), links),
-        Err(err) => (Err(err), Vec::new()),
+        Ok(routed) => routed,
+        Err(err) => return html(&database_error(&site, &err)),
     };
     let mut response = match outcome {
         // The template loader ends a HEAD request before either.
-        Ok(Outcome::Favicon | Outcome::Trackback(..)) if head && !file => {
+        Outcome::Favicon | Outcome::Trackback(..) if head && !file => {
             [(header::CONTENT_TYPE, "text/html; charset=UTF-8")].into_response()
         }
-        Ok(Outcome::Trackback(id, status)) => {
+        Outcome::Trackback(id, status) => {
             let form = if post {
                 trackback::form(&headers, &body)
             } else {
@@ -228,32 +247,31 @@ async fn page(
             trackback::respond(&site, id, status, &form).await
         }
         // Other forms are not handled yet.
-        Ok(_) if post => StatusCode::METHOD_NOT_ALLOWED.into_response(),
-        Ok(Outcome::Redirect(location)) => (
+        _ if post => StatusCode::METHOD_NOT_ALLOWED.into_response(),
+        Outcome::Redirect(location) => (
             StatusCode::MOVED_PERMANENTLY,
             [(header::LOCATION, location)],
         )
             .into_response(),
-        Ok(Outcome::Feed(page, feed)) => {
+        Outcome::Feed(page, feed) => {
             feed::respond(site.clone(), requested(*page, &uri), feed, &headers).await
         }
-        Ok(Outcome::Xml(body)) => {
+        Outcome::Xml(body) => {
             let content_type = [(header::CONTENT_TYPE, "application/xml; charset=UTF-8")];
             (content_type, body).into_response()
         }
-        Ok(Outcome::Robots(body)) => {
+        Outcome::Robots(body) => {
             let content_type = [(header::CONTENT_TYPE, "text/plain; charset=utf-8")];
             (content_type, body).into_response()
         }
-        Ok(Outcome::Favicon) => {
+        Outcome::Favicon => {
             let icon = format!(
                 "{}/wp-includes/images/w-logo-gray-white-bg.png",
                 site.option("siteurl")
             );
             (StatusCode::FOUND, [(header::LOCATION, icon)]).into_response()
         }
-        Ok(Outcome::Page(page)) => html(&render(&site, requested(*page, &uri)).await),
-        Err(err) => html(&database_error(&site, &err)),
+        Outcome::Page(page) => html(&render(&site, requested(*page, &uri)).await),
     };
     // Redirects and failures keep their own.
     let own = response.status().is_redirection() || response.status().is_server_error();
@@ -339,25 +357,20 @@ async fn outcome(
 /// singular post's shortlink.
 fn link_headers(site: &Site, request: Option<&Request>) -> Vec<String> {
     let home = site.home.as_bytes();
-    let rest = |route: &str| lossy(&esc_url_raw(&link::rest_url(home, route)));
-    let mut links = vec![format!("<{}>; rel=\"https://api.w.org/\"", rest("/"))];
-    let Some(request) = request else {
-        return links;
-    };
-    if let Some(route) = link::queried_resource_route(request) {
+    let (root, route) = request.map_or((link::rest_url(home, "/"), None), |request| {
+        link::rest_links(home, request)
+    });
+    let mut links = vec![format!(
+        "<{}>; rel=\"https://api.w.org/\"",
+        lossy(&esc_url_raw(&root))
+    )];
+    if let Some(route) = route {
         links.push(format!(
             "<{}>; rel=\"alternate\"; title=\"JSON\"; type=\"application/json\"",
-            rest(&route)
+            lossy(&esc_url_raw(&route))
         ));
     }
-    if let Some(post) = request
-        .posts
-        .first()
-        .filter(|p| request.singular && p.id != 0)
-    {
-        let option = |name| site.options.get(name).map_or(&[][..], Vec::as_slice);
-        let shortlink =
-            link::shortlink(home, option("show_on_front"), option("page_on_front"), post);
+    if let Some(shortlink) = request.and_then(|r| link::shortlink(home, site.front_page(), r)) {
         links.push(format!("<{}>; rel=shortlink", lossy(&shortlink)));
     }
     links
@@ -731,8 +744,15 @@ fn single_post(query: &HashMap<String, String>) -> Option<(&'static str, u64, &'
     }
 }
 
+/// One of the default theme's files, which pages link to.
+fn theme_file(path: &str) -> Option<Response> {
+    let file = path.strip_prefix("/wp-content/themes/twentytwentyfive/")?;
+    let (content_type, bytes) = twentytwentyfive_file(file)?;
+    Some(([(header::CONTENT_TYPE, content_type)], bytes).into_response())
+}
+
 /// Static file trees: never redirected or rewritten, so their public URLs
-/// stay as they are. Served as files once static serving lands (M3.9).
+/// stay as they are. Of them, only the default theme's files are served.
 fn is_static(path: &str) -> bool {
     path.starts_with("/wp-content/") || path.starts_with("/wp-includes/")
 }

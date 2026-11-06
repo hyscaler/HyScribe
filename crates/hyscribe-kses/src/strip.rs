@@ -168,7 +168,7 @@ pub fn strip_tags(text: &[u8]) -> Vec<u8> {
 }
 
 /// `preg_replace('/[\r\n\t ]+/', ' ', $text)`.
-fn collapse_breaks(text: &[u8]) -> Vec<u8> {
+pub fn collapse_breaks(text: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     for &byte in text {
         if !matches!(byte, b'\r' | b'\n' | b'\t' | b' ') {

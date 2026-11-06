@@ -385,12 +385,10 @@ impl Head<'_> {
                 .concat(),
             );
         }
-        let shortlink = link::shortlink(
-            &self.site.home_url(),
-            &self.option("show_on_front"),
-            &self.option("page_on_front"),
-            post,
-        );
+        let front_page =
+            link::front_page(&self.option("show_on_front"), &self.option("page_on_front"));
+        let shortlink =
+            link::shortlink(&self.site.home_url(), front_page, self.request).unwrap_or_default();
         out.extend(
             [
                 &b"<link rel='shortlink' href='"[..],
@@ -409,8 +407,8 @@ impl Head<'_> {
             return Vec::new();
         };
         let endpoint = [
-            &self.home_url(b"index.php")[..],
-            b"?rest_route=%2Foembed%2F1.0%2Fembed&url=",
+            &link::rest_url(&self.site.home_url(), "%2Foembed%2F1.0%2Fembed")[..],
+            b"&url=",
             &urlencode(&self.context.permalink(post)),
         ]
         .concat();
@@ -429,18 +427,18 @@ impl Head<'_> {
         .into_bytes()
     }
 
-    /// `rest_output_link_wp_head()`, which ends no line, as `rsd_link()`,
-    /// left out, would.
+    /// `rest_output_link_wp_head()`, printed without a trailing newline,
+    /// as PHP prints it.
     fn rest_links(&self) -> Vec<u8> {
-        let home = self.site.home_url();
+        let (root, route) = link::rest_links(&self.site.home_url(), self.request);
         let mut out = format!(
             "<link rel=\"https://api.w.org/\" href=\"{}\" />",
-            String::from_utf8_lossy(&esc_url(&link::rest_url(&home, "/")))
+            String::from_utf8_lossy(&esc_url(&root))
         );
-        if let Some(route) = link::queried_resource_route(self.request) {
+        if let Some(route) = route {
             out.push_str(&format!(
                 "<link rel=\"alternate\" title=\"JSON\" type=\"application/json\" href=\"{}\" />",
-                String::from_utf8_lossy(&esc_url(&link::rest_url(&home, &route)))
+                String::from_utf8_lossy(&esc_url(&route))
             ));
         }
         out.into_bytes()

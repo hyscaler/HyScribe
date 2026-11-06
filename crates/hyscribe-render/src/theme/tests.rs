@@ -97,3 +97,29 @@ fn reads_the_style_header() {
     );
     assert_eq!(header("Theme Name: x", "Version"), "");
 }
+
+/// The theme's files as exported, and none of the port's own data.
+#[test]
+fn twentytwentyfive_files_are_built_in() {
+    assert_eq!(
+        twentytwentyfive_file("style.css"),
+        Some((
+            "text/css",
+            &include_bytes!("../../../../themes/twentytwentyfive/style.css")[..]
+        ))
+    );
+    assert_eq!(
+        twentytwentyfive_file("assets/fonts/manrope/Manrope-VariableFont_wght.woff2")
+            .map(|(content_type, bytes)| (content_type, bytes.len())),
+        Some(("font/woff2", 53600))
+    );
+    for path in [
+        "patterns.json",
+        "styles.json",
+        "block-styles.tsv",
+        "functions.php",
+        "nope.css",
+    ] {
+        assert_eq!(twentytwentyfive_file(path), None, "{path}");
+    }
+}

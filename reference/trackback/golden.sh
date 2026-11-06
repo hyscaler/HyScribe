@@ -65,7 +65,8 @@ for form in 'url=x&title=T' 'url=javascript:alert(1)&title=T' 'url=http://exampl
   'url=http://example.com/&title=0' 'url=http://example.com/&title=%2541' 'url=http://example.com/&title=%5C' \
   'url=http://example.com/&title=%20%09' 'blog_name=%3Ci%3E' 'title=%5C%5C' 'charset=utf-7' 'charset=UTF-7&url=http://example.com/&title=T' \
   'charset=utf,-7&url=http://example.com/&title=T' 'charset=nope&url=http://example.com/&title=T' \
-  'url=%20&title=T' 'url=http://example.com/&title=T&p=1'; do
+  'url=%20&title=T' 'url=http://example.com/&title=T&p=1' 'url=http://example.com/&title%5B%5D=T' 'blog_name%5B%5D=x' \
+  'url=%00&title=T' 'url=%00' 'url=%27&title=T'; do
   record POST '/wp-trackback.php?p=1' "$form"
 done
 record POST '/wp-trackback.php?p=1' 'url=http://example.com/&title=T' 'text/plain'

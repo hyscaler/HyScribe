@@ -980,7 +980,7 @@ pub fn sanitize_text_field(text: &[u8]) -> Vec<u8> {
         text = hyscribe_kses::wp_strip_all_tags(&pre_kses_less_than(&text), false);
         text = replace(&text, b"<\n", b"&lt;\n");
     }
-    let mut text = hyscribe_phpser::php_trim(&squeeze(&text, b"\r\n\t ")).to_vec();
+    let mut text = hyscribe_phpser::php_trim(&hyscribe_kses::collapse_breaks(&text)).to_vec();
     let octet = |t: &[u8]| {
         t.windows(3)
             .find(|w| matches!(w, [b'%', a, b] if a.is_ascii_hexdigit() && b.is_ascii_hexdigit()))
@@ -991,8 +991,9 @@ pub fn sanitize_text_field(text: &[u8]) -> Vec<u8> {
         text = replace(&text, &octet, b"");
         found = true;
     }
+    // Its spaces collapse as `/ +/` would: no other whitespace is left.
     if found {
-        text = hyscribe_phpser::php_trim(&squeeze(&text, b" ")).to_vec();
+        text = hyscribe_phpser::php_trim(&hyscribe_kses::collapse_breaks(&text)).to_vec();
     }
     text
 }
@@ -1024,22 +1025,6 @@ fn pre_kses_less_than(text: &[u8]) -> Vec<u8> {
         }
     }
     out.extend_from_slice(rest);
-    out
-}
-
-/// Runs of the bytes in `set` made one space.
-fn squeeze(text: &[u8], set: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(text.len());
-    let mut run = false;
-    for &b in text {
-        let blank = set.contains(&b);
-        if !blank {
-            out.push(b);
-        } else if !run {
-            out.push(b' ');
-        }
-        run = blank;
-    }
     out
 }
 

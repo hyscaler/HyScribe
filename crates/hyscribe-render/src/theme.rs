@@ -75,6 +75,19 @@ const PARTS: [(&str, &[u8]); 7] = [
     ),
 ];
 
+/// Twenty Twenty-Five's own files, every one but its PHP, by path, with
+/// their content types.
+const FILES: &[(&str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/theme_files.rs"));
+
+/// One of Twenty Twenty-Five's files, as the web server sends it from the
+/// theme's folder: its content type and bytes.
+pub fn twentytwentyfive_file(path: &str) -> Option<(&'static str, &'static [u8])> {
+    FILES
+        .iter()
+        .find(|(name, _, _)| *name == path)
+        .map(|(_, content_type, bytes)| (*content_type, *bytes))
+}
+
 const PATTERNS: &[u8] = include_bytes!("../../../themes/twentytwentyfive/patterns.json");
 const THEME_JSON: &[u8] = include_bytes!("../../../themes/twentytwentyfive/theme.json");
 const CORE_THEME_JSON: &[u8] = include_bytes!("../../../wordpress/wp-includes/theme.json");

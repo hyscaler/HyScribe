@@ -14,16 +14,18 @@ pub fn front_page(show_on_front: &[u8], page_on_front: &[u8]) -> Option<u64> {
     (show_on_front == b"page").then(|| absint(&Value::String(page_on_front.to_vec())))
 }
 
-/// `wp_get_shortlink()` of `post`: the home page for the page on the
-/// front, else `?p=`.
-pub fn shortlink(home: &[u8], show_on_front: &[u8], page_on_front: &[u8], post: &Post) -> Vec<u8> {
-    let front = show_on_front == b"page"
-        && u64::try_from(Value::String(page_on_front.to_vec()).to_int()).ok() == Some(post.id);
-    if post.post_type == "page" && front {
+/// `wp_get_shortlink( 0, 'query' )`: a singular request's post's, the
+/// home page for the page on the front.
+pub fn shortlink(home: &[u8], front_page: Option<u64>, request: &Request) -> Option<Vec<u8>> {
+    let post = request
+        .posts
+        .first()
+        .filter(|post| request.singular && post.id != 0)?;
+    Some(if post.post_type == "page" && front_page == Some(post.id) {
         [home, b"/"].concat()
     } else {
         format!("{}/?p={}", String::from_utf8_lossy(home), post.id).into_bytes()
-    }
+    })
 }
 
 /// `get_rest_url()` of `route` with plain permalinks.
@@ -31,15 +33,22 @@ pub fn rest_url(home: &[u8], route: &str) -> Vec<u8> {
     [home, b"/index.php?rest_route=", route.as_bytes()].concat()
 }
 
+/// The REST API root and the URL of what the request found, as
+/// `rest_output_link_wp_head()` and `rest_output_link_header()` link them.
+pub fn rest_links(home: &[u8], request: &Request) -> (Vec<u8>, Option<Vec<u8>>) {
+    let route = queried_resource_route(request).map(|route| rest_url(home, &route));
+    (rest_url(home, "/"), route)
+}
+
 /// `rest_get_queried_resource_route()`: the route of a singular request's
-/// post, which is a post or a page, or of a category or tag archive's
-/// term. Post formats have none.
-pub fn queried_resource_route(request: &Request) -> Option<String> {
+/// post, or of a category or tag archive's term. Post formats have none.
+fn queried_resource_route(request: &Request) -> Option<String> {
     if let Some(post) = request.posts.first().filter(|_| request.singular) {
-        let base = if post.post_type == "page" {
-            "pages"
-        } else {
-            "posts"
+        let base = match post.post_type.as_str() {
+            "post" => "posts",
+            "page" => "pages",
+            "attachment" => "media",
+            _ => return None,
         };
         return Some(format!("/wp/v2/{base}/{}", post.id));
     }
@@ -178,5 +187,36 @@ mod tests {
         );
         assert_eq!(route(Taxonomy::Format, Some(term)), None);
         assert_eq!(route(Taxonomy::Category, None), None);
+        // `rest_get_route_for_post()`: attachments are media, and a post
+        // type outside the REST API has no route.
+        let single = |post_type| {
+            queried_resource_route(&Request {
+                singular: true,
+                posts: vec![post(7, post_type)],
+                ..Request::default()
+            })
+        };
+        assert_eq!(single("attachment").as_deref(), Some("/wp/v2/media/7"));
+        assert_eq!(single("revision"), None);
+    }
+
+    /// Only a singular request's post has a shortlink, the home page's for
+    /// the page on the front.
+    #[test]
+    fn shortlinks() {
+        let home = b"http://example.test";
+        let request = |singular| Request {
+            singular,
+            posts: vec![post(2, "page")],
+            ..Request::default()
+        };
+        let link =
+            |front, singular| shortlink(home, front, &request(singular)).map(String::from_utf8);
+        assert_eq!(link(Some(2), true), Some(Ok("http://example.test/".into())));
+        assert_eq!(
+            link(Some(3), true),
+            Some(Ok("http://example.test/?p=2".into()))
+        );
+        assert_eq!(link(Some(2), false), None);
     }
 }

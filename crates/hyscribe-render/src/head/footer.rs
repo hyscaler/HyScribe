@@ -6,7 +6,10 @@
 use hyscribe_kses::esc_url_raw;
 use hyscribe_phpser::{Key, Value};
 
-use super::{Assets, Modules, WP_VERSION, json_hex_tag, registered_modules, tag};
+use super::{
+    Assets, Modules, WP_VERSION, inline_script, json_hex_tag, registered_modules, script_source,
+    tag,
+};
 use crate::site::Site;
 
 const EMOJI_LOADER: &str =
@@ -69,10 +72,7 @@ pub(super) fn emoji_detection_script(siteurl: &str) -> Vec<u8> {
             Value::Array(vec![entry("concatemoji", text(&concatemoji))]),
         ),
     ]);
-    let loader_url =
-        esc_url_raw(format!("{siteurl}/wp-includes/js/wp-emoji-loader.min.js").as_bytes());
-    // The file ends without the whitespace PHP's rtrim() would take off.
-    let loader = [EMOJI_LOADER.as_bytes(), b"\n//# sourceURL=", &loader_url].concat();
+    let loader = script_source(siteurl, "wp-emoji-loader", EMOJI_LOADER);
     let mut out = tag(
         b"script",
         &[
@@ -87,11 +87,4 @@ pub(super) fn emoji_detection_script(siteurl: &str) -> Vec<u8> {
         Some(&inline_script(&loader)),
     ));
     out
-}
-
-/// The text `wp_get_inline_script_tag()` gives a script: between
-/// newlines, after trimming newlines and spaces, which these scripts have
-/// none of at their ends.
-fn inline_script(data: &[u8]) -> Vec<u8> {
-    [&b"\n"[..], data, b"\n"].concat()
 }

@@ -239,7 +239,7 @@ fn response(
 ) -> Response {
     match made {
         Ok(feed) => (status, [(header::CONTENT_TYPE, content_type)], cache, feed).into_response(),
-        Err(error) => html(&error),
+        Err(error) => html(error),
     }
 }
 

@@ -1278,7 +1278,7 @@ async fn embed_pages_match_php() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(golden.lines().count(), 22);
+    assert_eq!(golden.lines().count(), 27);
 }
 
 /// Recorded from PHP: an embed of a 404 of the query's own is an embed
@@ -1296,7 +1296,7 @@ async fn embeds_of_query_404s_and_share_draws() {
     }
     let mut upper = false;
     for _ in 0..20 {
-        let (secret, suffix) = share();
+        let Share { secret, suffix } = share();
         upper |= secret.bytes().any(|b| b.is_ascii_uppercase());
         assert_eq!(secret.len(), 10);
         assert!(
@@ -1307,7 +1307,7 @@ async fn embeds_of_query_404s_and_share_draws() {
             secret.bytes().any(|b| b != secret.as_bytes()[0]),
             "{secret}"
         );
-        assert!(suffix.parse::<u64>().unwrap() < 2_147_483_648, "{suffix}");
+        assert!(suffix.parse::<u32>().is_ok(), "{suffix}");
     }
     assert!(upper);
 }

@@ -22,7 +22,8 @@ for path in '/?p=1&embed=true' '/?page_id=2&embed=true' '/?p=999&embed=true' '/?
   '/?p=2&embed=true' '/?embed=true' '/?cat=1&embed=true' '/?s=hello&embed=true' '/?p=1&embed=true&feed=rss2' \
   '/?p=1&embed=true&x=' '/?p=1&embed=true&cpage=1' '/?p=1&embed=true&page=2' '/?name=nope&embed=true' \
   '/?p=1&embed=true&preview=true' '/?p=1&embed=true&tb=1' '/?paged=99&embed=true' \
-  '/?attachment_id=1&embed=true'; do
+  '/?attachment_id=1&embed=true' '/?p=0&embed=true' '/?p=abc&embed=true' '/?page_id=0&embed=true' \
+  '/?pagename=%20&embed=true' '/?name=%20&embed=true'; do
   curl -s -D "$HEADERS" -o "$TMP" "$BASE$path" > /dev/null
   status=$(head -n 1 "$HEADERS" | cut -d ' ' -f 2)
   location=$(grep -i '^location:' "$HEADERS" | cut -d ' ' -f 2 | tr -d '\r' || true)

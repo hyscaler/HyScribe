@@ -129,7 +129,7 @@ pub(crate) async fn respond(site: &Site, id: i64, status: StatusCode, form: &Val
             .into_response(),
         // `wp_redirect()` of no link sends nothing.
         Ok(_) => nothing.into_response(),
-        Err(err) => html(&database_error(site, &err)),
+        Err(err) => html(database_error(site, &err)),
     }
 }
 

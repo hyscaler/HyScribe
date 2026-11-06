@@ -193,13 +193,7 @@ impl Head<'_> {
             set(robots, "noindex", None);
             set(robots, if public { "follow" } else { "nofollow" }, None);
         };
-        if !public {
-            no_robots(&mut robots);
-        }
-        if self.request.embed {
-            no_robots(&mut robots);
-        }
-        if self.request.search.is_some() {
+        if !public || self.request.embed || self.request.search.is_some() {
             no_robots(&mut robots);
         }
         if public {
@@ -686,7 +680,6 @@ fn trim_slashes(path: &[u8]) -> &[u8] {
     path.get(start..).unwrap_or_default()
 }
 
-/// A registered style as `WP_Styles` prints it.
 /// A style a rendered block enqueued, by its handle: a core block's
 /// stylesheet, or nothing for a block without one.
 fn block_style(handle: &str, siteurl: &str) -> Style {
@@ -704,6 +697,7 @@ fn block_style(handle: &str, siteurl: &str) -> Style {
     }
 }
 
+/// A registered style as `WP_Styles` prints it.
 struct Style {
     handle: String,
     /// The stylesheet URL, `None` once inlined or for inline-only styles.
@@ -1235,6 +1229,20 @@ impl Modules<'_> {
         }
         tag(b"script", &attributes, None)
     }
+}
+
+/// A `wp-includes/js` script file as WordPress prints it inline: trimmed,
+/// with its source URL.
+fn script_source(siteurl: &str, name: &str, js: &str) -> Vec<u8> {
+    let url = esc_url_raw(format!("{siteurl}/wp-includes/js/{name}.min.js").as_bytes());
+    [js.trim().as_bytes(), b"\n//# sourceURL=", &url].concat()
+}
+
+/// The text `wp_get_inline_script_tag()` gives a script: between
+/// newlines, after trimming newlines and spaces, which these scripts have
+/// none of at their ends.
+fn inline_script(data: &[u8]) -> Vec<u8> {
+    [&b"\n"[..], data, b"\n"].concat()
 }
 
 /// A tag as `WP_HTML_Tag_Processor` builds it from `<name></name>`, with

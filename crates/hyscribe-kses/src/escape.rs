@@ -1,9 +1,29 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `esc_html()`, `esc_attr()` and `sanitize_key()`.
+//! `esc_html()`, `esc_attr()`, `esc_textarea()` and `sanitize_key()`.
 
 use crate::entities::wp_kses_normalize_entities;
 use crate::php::rest;
+
+/// `esc_textarea()`: `htmlspecialchars()` with `ENT_QUOTES`, which encodes
+/// entities again, and gives an empty string for invalid UTF-8.
+pub fn esc_textarea(text: &[u8]) -> Vec<u8> {
+    if std::str::from_utf8(text).is_err() {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(text.len());
+    for &byte in text {
+        match byte {
+            b'&' => out.extend_from_slice(b"&amp;"),
+            b'<' => out.extend_from_slice(b"&lt;"),
+            b'>' => out.extend_from_slice(b"&gt;"),
+            b'"' => out.extend_from_slice(b"&quot;"),
+            b'\'' => out.extend_from_slice(b"&#039;"),
+            _ => out.push(byte),
+        }
+    }
+    out
+}
 
 /// `esc_html()`: `wp_check_invalid_utf8()`, so invalid UTF-8 gives an
 /// empty string, then `_wp_specialchars()` with `ENT_QUOTES` and no
@@ -47,6 +67,20 @@ pub fn sanitize_key(key: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Recorded from PHP's `esc_textarea()`.
+    #[test]
+    fn esc_textarea_encodes_entities_again() {
+        assert_eq!(
+            esc_textarea(b"<a href=\"x\">'&amp;</a>"),
+            b"&lt;a href=&quot;x&quot;&gt;&#039;&amp;amp;&lt;/a&gt;"
+        );
+        assert_eq!(
+            esc_textarea("&#038; \u{e9}".as_bytes()),
+            "&amp;#038; \u{e9}".as_bytes()
+        );
+        assert_eq!(esc_textarea(b"\xff"), b"");
+    }
 
     #[test]
     fn escapes_markup_and_quotes() {

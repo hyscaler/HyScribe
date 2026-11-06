@@ -21,8 +21,8 @@ use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html, esc_url_raw};
 use hyscribe_model::{OrderBy, Post, PostQuery, TermFilter, TimeCondition};
 use hyscribe_phpser::{
-    Key, Value, add_query_values, is_empty_string, parse_str, rawurlencode, rawurlencode_deep,
-    remove_query_arg, urldecode,
+    Key, Value, add_query_values, is_empty_string, parse_str, php_trim, rawurlencode,
+    rawurlencode_deep, remove_query_arg, urldecode,
 };
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::sanitize_title_for_query;
@@ -230,7 +230,7 @@ async fn page(
     };
     let (outcome, links) = match routed {
         Ok(routed) => routed,
-        Err(err) => return html(&database_error(&site, &err)),
+        Err(err) => return html(database_error(&site, &err)),
     };
     let mut response = match outcome {
         // The template loader ends a HEAD request before either.
@@ -271,9 +271,9 @@ async fn page(
             (StatusCode::FOUND, [(header::LOCATION, icon)]).into_response()
         }
         Outcome::Page(mut page) => {
-            page.request.embed = embeds(&query, &uri);
-            let embed = page.request.embed;
-            let mut response = html(&render(&site, requested(*page, &uri)).await);
+            let embed = embeds(&query, &uri, page.request.singular);
+            page.request.embed = embed;
+            let mut response = html(render(&site, requested(*page, &uri)).await);
             if embed {
                 response
                     .headers_mut()
@@ -385,22 +385,24 @@ fn link_headers(site: &Site, request: Option<&Request>) -> Vec<String> {
     links
 }
 
-/// `is_embed()`: a set `embed` on a query `WP_Query` parses as singular,
-/// or as a 404 of its own.
-fn embeds(query: &HashMap<String, String>, uri: &Uri) -> bool {
+/// `is_embed()`: a set `embed` on a query `WP_Query` parses as singular
+/// (or that is the page on the front), or as a 404 of its own. The
+/// `attachment` var is not routed, so it is left out.
+fn embeds(query: &HashMap<String, String>, uri: &Uri, singular: bool) -> bool {
     let get = parse_str(uri.query().unwrap_or_default().as_bytes());
-    let set = |name| php_set(&get, name);
-    let singular = [
-        "p",
-        "page_id",
-        "name",
-        "pagename",
-        "attachment_id",
-        "subpost_id",
-    ]
-    .into_iter()
-    .any(set);
-    set("embed") && (singular || bad_p(query, uri.query()) || asks_404(query))
+    let text = |name| match get.get_str(name) {
+        Some(Value::String(text)) => text.clone(),
+        _ => Vec::new(),
+    };
+    let int = |name| Value::String(text(name)).to_int();
+    let parsed = int("p") > 0
+        || ["page_id", "attachment_id", "subpost_id"]
+            .iter()
+            .any(|name| int(name) != 0)
+        || ["name", "pagename"]
+            .iter()
+            .any(|name| !php_trim(&text(name)).is_empty());
+    php_set(&get, "embed") && (singular || parsed || bad_p(query, uri.query()) || asks_404(query))
 }
 
 /// Whether `$value` is set as `'' != $value` takes it, which an array is.
@@ -615,11 +617,11 @@ async fn render(site: &Arc<Site>, page: Page) -> Rendered {
 }
 
 /// A rendered page as the response.
-fn html(page: &Rendered) -> Response {
+fn html(page: Rendered) -> Response {
     (
         page.status,
         [(header::CONTENT_TYPE, "text/html; charset=UTF-8")],
-        page.document.clone(),
+        page.document,
     )
         .into_response()
 }
@@ -679,17 +681,12 @@ fn render_page(
 ) -> Result<String, DbError> {
     let reads = Reads::new(site, tokio::runtime::Handle::current());
     let document = if request.embed {
-        let (secret, suffix) = share();
-        let share = Share {
-            secret: &secret,
-            suffix: &suffix,
-        };
         lossy(&embed_page(
             &site.theme,
             &reads,
             request,
             title.as_bytes(),
-            &share,
+            &share(),
         ))
     } else {
         // Every block theme has an index template.
@@ -716,9 +713,9 @@ fn render_page(
 }
 
 /// The embed sharing dialog's secret, ten letters and digits, and ID
-/// suffix: drawn from the standard library's randomly keyed hasher, as
-/// they guard nothing.
-fn share() -> (String, String) {
+/// suffix, as large as `wp_rand()`'s: drawn from the standard library's
+/// randomly keyed hasher, as they guard nothing.
+fn share() -> Share {
     use std::hash::{BuildHasher, RandomState};
     let mut draw = RandomState::new().hash_one(0_u8);
     let mut secret = String::new();
@@ -732,10 +729,11 @@ fn share() -> (String, String) {
         }));
         draw /= 62;
     }
-    (
+    Share {
         secret,
-        (RandomState::new().hash_one(1_u8) % 2_147_483_648).to_string(),
-    )
+        // Truncated to `wp_rand()`'s 32 bits.
+        suffix: (RandomState::new().hash_one(1_u8) as u32).to_string(),
+    }
 }
 
 /// The time relative dates are measured from.

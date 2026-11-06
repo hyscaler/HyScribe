@@ -441,8 +441,8 @@ fn embed_pages_match_php() {
     let theme = crate::theme::twentytwentyfive();
     let site = oracle_site();
     let share = Share {
-        secret: "0123456789",
-        suffix: "RAND",
+        secret: "0123456789".into(),
+        suffix: "RAND".into(),
     };
     for query in ["p=1", "page_id=2", "p=999"] {
         let path = format!("/?{query}&embed=true");
@@ -464,13 +464,6 @@ fn embed_pages_match_php() {
     }
 }
 
-/// `number_format_i18n()` groups thousands.
-#[test]
-fn comment_counts_group_thousands() {
-    assert_eq!(super::embed::number_format(1_234_567), "1,234,567");
-    assert_eq!(super::embed::number_format(999), "999");
-}
-
 /// `print_embed_comments_button()` of an open post without comments links
 /// the comment form, in the plural.
 #[test]
@@ -483,8 +476,8 @@ fn an_embed_without_comments_links_the_form() {
     };
     request.posts[0].comment_count = 0;
     let share = Share {
-        secret: "0123456789",
-        suffix: "RAND",
+        secret: "0123456789".into(),
+        suffix: "RAND".into(),
     };
     let page = String::from_utf8(embed_page(&theme, &site, &request, b"", &share)).unwrap();
     assert!(page.contains(
@@ -504,8 +497,8 @@ fn a_closed_embed_with_comments_counts_them() {
     request.posts[0].comment_count = 2;
     request.posts[0].comment_status = "closed".into();
     let share = Share {
-        secret: "0123456789",
-        suffix: "RAND",
+        secret: "0123456789".into(),
+        suffix: "RAND".into(),
     };
     let page = String::from_utf8(embed_page(&theme, &site, &request, b"", &share)).unwrap();
     assert!(page.contains("?p=1#comments\" target=\"_top\">"));

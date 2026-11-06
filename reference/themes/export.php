@@ -4,7 +4,8 @@
 // Run by export.sh inside the PHP WordPress container: prints the block
 // patterns the active theme registers, as JSON {slug: {title, content}},
 // with their PHP already run (en_US). Theme ports store this output, so
-// HyScribe never needs PHP for patterns.
+// HyScribe never needs PHP for patterns. The footer credit names HyScribe
+//.
 
 require '/var/www/html/wp-load.php';
 
@@ -16,7 +17,11 @@ foreach ( WP_Block_Patterns_Registry::get_instance()->get_all_registered() as $p
 	}
 	$patterns[ $pattern['name'] ] = array(
 		'title'   => $pattern['title'],
-		'content' => $pattern['content'],
+		'content' => str_replace(
+			'Designed with <a href="https://wordpress.org" rel="nofollow">WordPress</a>',
+			'Designed with <a href="https://github.com/hyscaler/HyScribe" rel="nofollow">HyScribe</a>',
+			$pattern['content']
+		),
 	);
 }
 ksort( $patterns );

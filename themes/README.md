@@ -1,6 +1,6 @@
 # Themes
 
-First-party theme ports, one folder per WordPress theme slug (docs/EXTENSIONS.md). A block theme port is mostly data: the theme's own templates, parts, `theme.json` and `style.css`, plus its PHP patterns run once into block markup (`patterns.json`), so HyScribe never runs PHP.
+First-party theme ports, one folder per WordPress theme slug (docs/EXTENSIONS.md). A block theme port is mostly data: the theme's own templates, parts, `theme.json` and `style.css`, plus its PHP patterns run once into block markup (`patterns.json`), so HyScribe never runs PHP. The export names HyScribe in the footer credit.
 
 | Folder | Source | License |
 | --- | --- | --- |

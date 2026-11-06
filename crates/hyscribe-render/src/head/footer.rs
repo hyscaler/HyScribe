@@ -46,7 +46,7 @@ pub fn wp_footer(site: &dyn Site, assets: &Assets) -> Vec<u8> {
 }
 
 /// `_print_emoji_detection_script()`.
-fn emoji_detection_script(siteurl: &str) -> Vec<u8> {
+pub(super) fn emoji_detection_script(siteurl: &str) -> Vec<u8> {
     let text = |s: &str| Value::String(s.as_bytes().to_vec());
     let entry = |k: &str, v: Value| (Key::String(k.as_bytes().to_vec()), v);
     let concatemoji = format!(

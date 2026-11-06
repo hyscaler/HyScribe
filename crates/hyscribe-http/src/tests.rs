@@ -738,7 +738,7 @@ async fn a_render_that_panics_is_a_server_error() {
     };
     let rendered = rendered(&site, page, Err(panicked));
     assert_eq!(rendered.status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(!rendered.body.contains("render bug"));
+    assert!(!rendered.document.contains("render bug"));
 }
 
 #[tokio::test]
@@ -1197,6 +1197,119 @@ async fn the_front_page_links_to_the_home_page() {
     assert_eq!(reply.headers["location"], "http://127.0.0.1:8081/");
     let links: Vec<_> = reply.headers.get_all("link").iter().collect();
     assert_eq!(links[2], "<http://127.0.0.1:8081/>; rel=shortlink");
+}
+
+/// Every case of `reference/embed/golden.sh`: embed pages, with the
+/// sharing dialog's random secret and ID suffix made the golden's.
+#[tokio::test]
+#[allow(clippy::string_slice)]
+async fn embed_pages_match_php() {
+    let site = oracle_site().await;
+    let golden = include_str!("../tests/golden/embed.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let path = String::from_utf8(hyscribe_testkit::unhex(fields[0])).unwrap();
+        let reply = request(&site, "GET", &path).await;
+        let header = |name| reply.headers.get(name).map_or("", |v| v.to_str().unwrap());
+        let mut body = String::new();
+        if !fields[3].is_empty() {
+            body = reply.body.clone();
+            if let Some(at) = body.find("data-secret=&quot;") {
+                let secret = body[at + 18..at + 28].to_string();
+                assert!(
+                    secret.bytes().all(|b| b.is_ascii_alphanumeric()),
+                    "{secret}"
+                );
+                body = body.replace(&secret, "0123456789");
+            }
+            for kind in [
+                "tab-wordpress",
+                "tab-html",
+                "description-wordpress",
+                "description-html",
+            ] {
+                let prefix = format!("wp-embed-share-{kind}-");
+                let mut out = String::new();
+                let mut rest = body.as_str();
+                while let Some(at) = rest.find(&prefix) {
+                    let after = &rest[at + prefix.len()..];
+                    let id = after.split('-').next().unwrap();
+                    let digits = after[id.len() + 1..]
+                        .bytes()
+                        .take_while(u8::is_ascii_digit)
+                        .count();
+                    out.push_str(&rest[..at + prefix.len()]);
+                    out.push_str(&format!("{id}-RAND"));
+                    rest = &after[id.len() + 1 + digits..];
+                }
+                out.push_str(rest);
+                body = out;
+            }
+        }
+        let ours = (
+            reply.status.as_u16().to_string(),
+            header("location"),
+            header("x-wp-embed"),
+            body,
+        );
+        let php_body = as_hyscribe(String::from_utf8(hyscribe_testkit::unhex(fields[4])).unwrap());
+        let php = (fields[1].to_string(), fields[2], fields[3], php_body);
+        if ours != php {
+            failures.push(format!(
+                "{path}\n  php:  {:?}\n  ours: {:?}",
+                (&php.0, php.1, php.2),
+                (&ours.0, ours.1, ours.2)
+            ));
+            if ours.3 != php.3 {
+                let common = ours
+                    .3
+                    .bytes()
+                    .zip(php.3.bytes())
+                    .take_while(|(a, b)| a == b)
+                    .count();
+                let from = common.saturating_sub(80);
+                failures.push(format!(
+                    "  at {common}: php {:?}\n  ours {:?}",
+                    php.3.get(from..common + 200),
+                    ours.3.get(from..common + 200)
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(golden.lines().count(), 22);
+}
+
+/// Recorded from PHP: an embed of a 404 of the query's own is an embed
+/// page, whose card is not ported; and the dialog's random draws.
+#[tokio::test]
+async fn embeds_of_query_404s_and_share_draws() {
+    let site = oracle_site().await;
+    for (path, status) in [
+        ("/?error=404&embed=true", StatusCode::NOT_FOUND),
+        ("/?p=-1&embed=true", StatusCode::OK),
+    ] {
+        let reply = request(&site, "GET", path).await;
+        assert_eq!(reply.status, status, "{path}");
+        assert_eq!(reply.headers["x-wp-embed"], "true", "{path}");
+    }
+    let mut upper = false;
+    for _ in 0..20 {
+        let (secret, suffix) = share();
+        upper |= secret.bytes().any(|b| b.is_ascii_uppercase());
+        assert_eq!(secret.len(), 10);
+        assert!(
+            secret.bytes().all(|b| b.is_ascii_alphanumeric()),
+            "{secret}"
+        );
+        assert!(
+            secret.bytes().any(|b| b != secret.as_bytes()[0]),
+            "{secret}"
+        );
+        assert!(suffix.parse::<u64>().unwrap() < 2_147_483_648, "{suffix}");
+    }
+    assert!(upper);
 }
 
 /// Term archives from the same script, over the fixture with

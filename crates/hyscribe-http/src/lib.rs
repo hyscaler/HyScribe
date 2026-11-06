@@ -26,7 +26,7 @@ use hyscribe_phpser::{
 };
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::sanitize_title_for_query;
-use hyscribe_render::head::{wp_footer, wp_head};
+use hyscribe_render::head::{Share, embed_page, wp_footer, wp_head};
 use hyscribe_render::link;
 use hyscribe_render::post::body_class;
 use hyscribe_render::site::{Archive, Request, Taxonomy};
@@ -189,11 +189,10 @@ struct Page {
     hidden: bool,
 }
 
-/// A page as sent: the status, the `<head>` and the `<body>`.
+/// A page as sent: the status and the document.
 struct Rendered {
     status: StatusCode,
-    head: String,
-    body: String,
+    document: String,
 }
 
 async fn page(
@@ -271,7 +270,17 @@ async fn page(
             );
             (StatusCode::FOUND, [(header::LOCATION, icon)]).into_response()
         }
-        Outcome::Page(page) => html(&render(&site, requested(*page, &uri)).await),
+        Outcome::Page(mut page) => {
+            page.request.embed = embeds(&query, &uri);
+            let embed = page.request.embed;
+            let mut response = html(&render(&site, requested(*page, &uri)).await);
+            if embed {
+                response
+                    .headers_mut()
+                    .insert("x-wp-embed", HeaderValue::from_static("true"));
+            }
+            response
+        }
     };
     // Redirects and failures keep their own.
     let own = response.status().is_redirection() || response.status().is_server_error();
@@ -374,6 +383,24 @@ fn link_headers(site: &Site, request: Option<&Request>) -> Vec<String> {
         links.push(format!("<{}>; rel=shortlink", lossy(&shortlink)));
     }
     links
+}
+
+/// `is_embed()`: a set `embed` on a query `WP_Query` parses as singular,
+/// or as a 404 of its own.
+fn embeds(query: &HashMap<String, String>, uri: &Uri) -> bool {
+    let get = parse_str(uri.query().unwrap_or_default().as_bytes());
+    let set = |name| php_set(&get, name);
+    let singular = [
+        "p",
+        "page_id",
+        "name",
+        "pagename",
+        "attachment_id",
+        "subpost_id",
+    ]
+    .into_iter()
+    .any(set);
+    set("embed") && (singular || bad_p(query, uri.query()) || asks_404(query))
 }
 
 /// Whether `$value` is set as `'' != $value` takes it, which an array is.
@@ -592,7 +619,7 @@ fn html(page: &Rendered) -> Response {
     (
         page.status,
         [(header::CONTENT_TYPE, "text/html; charset=UTF-8")],
-        layout(&page.head, &page.body),
+        page.document.clone(),
     )
         .into_response()
 }
@@ -602,13 +629,12 @@ fn html(page: &Rendered) -> Response {
 fn rendered(
     site: &Site,
     page: Page,
-    body: Result<Result<(String, String), DbError>, tokio::task::JoinError>,
+    body: Result<Result<String, DbError>, tokio::task::JoinError>,
 ) -> Rendered {
     match finished(site, body) {
-        Ok((head, body)) => Rendered {
+        Ok(document) => Rendered {
             status: page.status,
-            head,
-            body,
+            document,
         },
         Err(error) => error,
     }
@@ -632,43 +658,84 @@ fn database_error(site: &Site, err: &dyn std::fmt::Display) -> Rendered {
     eprintln!("database error: {err}");
     Rendered {
         status: StatusCode::INTERNAL_SERVER_ERROR,
-        head: format!(
-            "<head>\n<meta charset=\"UTF-8\" />\n<title>Error &#8211; {}</title>\n</head>",
-            site.name()
+        document: layout(
+            &format!(
+                "<head>\n<meta charset=\"UTF-8\" />\n<title>Error &#8211; {}</title>\n</head>",
+                site.name()
+            ),
+            "<body>\n<p>Error establishing a database connection</p>\n</body>",
         ),
-        body: "<body>\n<p>Error establishing a database connection</p>\n</body>".to_string(),
     }
 }
 
-/// The `<head>` and `<body>` elements: the first template in `candidates`
-/// the theme has, rendered for `request` with the database read on this
-/// thread, and the head its blocks enqueued styles for.
+/// The document: the first template in `candidates` the theme has,
+/// rendered for `request` with the database read on this thread, and the
+/// head its blocks enqueued styles for; or for an embed, the embed page.
 fn render_page(
     site: &Site,
     candidates: &[String],
     request: &Request,
     title: &str,
-) -> Result<(String, String), DbError> {
+) -> Result<String, DbError> {
     let reads = Reads::new(site, tokio::runtime::Handle::current());
-    // Every block theme has an index template.
-    let template = site
-        .theme
-        .template(candidates)
-        .map_or(&[][..], |(_, template)| template);
-    let (html, assets) = render_template(&site.theme, &reads, request, template);
-    let classes = body_class(&reads, request, site.theme.slug());
-    let head = wp_head(&site.theme, &reads, request, &assets, title.as_bytes());
-    let footer = wp_footer(&reads, &assets);
+    let document = if request.embed {
+        let (secret, suffix) = share();
+        let share = Share {
+            secret: &secret,
+            suffix: &suffix,
+        };
+        lossy(&embed_page(
+            &site.theme,
+            &reads,
+            request,
+            title.as_bytes(),
+            &share,
+        ))
+    } else {
+        // Every block theme has an index template.
+        let template = site
+            .theme
+            .template(candidates)
+            .map_or(&[][..], |(_, template)| template);
+        let (html, assets) = render_template(&site.theme, &reads, request, template);
+        let classes = body_class(&reads, request, site.theme.slug());
+        let head = wp_head(&site.theme, &reads, request, &assets, title.as_bytes());
+        let footer = wp_footer(&reads, &assets);
+        layout(
+            &lossy(&head),
+            &format!(
+                "<body class=\"{}\">\n\n{}\n{}</body>",
+                String::from_utf8_lossy(&classes),
+                String::from_utf8_lossy(&html),
+                String::from_utf8_lossy(&footer)
+            ),
+        )
+    };
     reads.finish()?;
-    Ok((
-        lossy(&head),
-        format!(
-            "<body class=\"{}\">\n\n{}\n{}</body>",
-            String::from_utf8_lossy(&classes),
-            String::from_utf8_lossy(&html),
-            String::from_utf8_lossy(&footer)
-        ),
-    ))
+    Ok(document)
+}
+
+/// The embed sharing dialog's secret, ten letters and digits, and ID
+/// suffix: drawn from the standard library's randomly keyed hasher, as
+/// they guard nothing.
+fn share() -> (String, String) {
+    use std::hash::{BuildHasher, RandomState};
+    let mut draw = RandomState::new().hash_one(0_u8);
+    let mut secret = String::new();
+    for _ in 0..10 {
+        // Base 62: digits and lower case letters, then upper case ones.
+        let digit = u32::try_from(draw % 62).unwrap_or_default();
+        secret.push(char::from_digit(digit, 36).unwrap_or_else(|| {
+            char::from_digit(digit - 26, 36)
+                .unwrap_or_default()
+                .to_ascii_uppercase()
+        }));
+        draw /= 62;
+    }
+    (
+        secret,
+        (RandomState::new().hash_one(1_u8) % 2_147_483_648).to_string(),
+    )
 }
 
 /// The time relative dates are measured from.

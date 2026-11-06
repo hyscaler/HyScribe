@@ -432,3 +432,82 @@ fn unapproved_comment_robots_match_php() {
         );
     }
 }
+
+/// Embed pages of `reference/embed/golden.sh`: a post's card, with and
+/// without comments, and the 404 one, with the golden's secret and suffix.
+#[test]
+fn embed_pages_match_php() {
+    let golden = include_str!("../../../hyscribe-http/tests/golden/embed.tsv");
+    let theme = crate::theme::twentytwentyfive();
+    let site = oracle_site();
+    let share = Share {
+        secret: "0123456789",
+        suffix: "RAND",
+    };
+    for query in ["p=1", "page_id=2", "p=999"] {
+        let path = format!("/?{query}&embed=true");
+        let key: String = path.bytes().map(|b| format!("{b:02x}")).collect();
+        let line = golden
+            .lines()
+            .find(|l| l.starts_with(&format!("{key}\t")))
+            .unwrap();
+        let php = String::from_utf8(unhex(line.rsplit('\t').next().unwrap())).unwrap();
+        let title = php
+            .get(php.find("<title>").unwrap() + 7..php.find("</title>").unwrap())
+            .unwrap();
+        let request = Request {
+            embed: true,
+            ..site.base.request(query)
+        };
+        let ours = embed_page(&theme, &site, &request, title.as_bytes(), &share);
+        assert_eq!(String::from_utf8(ours).unwrap(), php, "{path}");
+    }
+}
+
+/// `number_format_i18n()` groups thousands.
+#[test]
+fn comment_counts_group_thousands() {
+    assert_eq!(super::embed::number_format(1_234_567), "1,234,567");
+    assert_eq!(super::embed::number_format(999), "999");
+}
+
+/// `print_embed_comments_button()` of an open post without comments links
+/// the comment form, in the plural.
+#[test]
+fn an_embed_without_comments_links_the_form() {
+    let theme = crate::theme::twentytwentyfive();
+    let site = oracle_site();
+    let mut request = Request {
+        embed: true,
+        ..site.base.request("p=1")
+    };
+    request.posts[0].comment_count = 0;
+    let share = Share {
+        secret: "0123456789",
+        suffix: "RAND",
+    };
+    let page = String::from_utf8(embed_page(&theme, &site, &request, b"", &share)).unwrap();
+    assert!(page.contains(
+        "<a href=\"http://127.0.0.1:8081/?p=1#respond\" target=\"_top\">\n\t\t\t<span class=\"dashicons dashicons-admin-comments\"></span>\n\t\t\t0 <span class=\"screen-reader-text\">Comments</span>"
+    ));
+}
+
+/// A closed post with comments still shows their count, linked to them.
+#[test]
+fn a_closed_embed_with_comments_counts_them() {
+    let theme = crate::theme::twentytwentyfive();
+    let site = oracle_site();
+    let mut request = Request {
+        embed: true,
+        ..site.base.request("p=1")
+    };
+    request.posts[0].comment_count = 2;
+    request.posts[0].comment_status = "closed".into();
+    let share = Share {
+        secret: "0123456789",
+        suffix: "RAND",
+    };
+    let page = String::from_utf8(embed_page(&theme, &site, &request, b"", &share)).unwrap();
+    assert!(page.contains("?p=1#comments\" target=\"_top\">"));
+    assert!(page.contains("2 <span class=\"screen-reader-text\">Comments</span>"));
+}

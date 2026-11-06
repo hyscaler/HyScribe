@@ -13,6 +13,8 @@
 #   wordpress/wp-includes/css/dist/block-library/*.min.css
 #   wordpress/wp-includes/css/wp-block-template-skip-link.min.css
 #   wordpress/wp-includes/js/wp-emoji-loader.min.js the emoji detection script
+#   wordpress/wp-includes/css/wp-embed-template.min.css, js/wp-embed-template.min.js
+#     and js/wp-embed.min.js                         the embed template's style and scripts
 #   wordpress/wp-includes/script-modules.json      the registered script modules
 #   wordpress/VERSION
 # All GPL-2.0-or-later (ADR 0004). Re-run when the pinned version changes.
@@ -31,6 +33,9 @@ mkdir -p "$OUT"
   $(find wp-includes/blocks -name "*.min.css" ! -name "*-rtl.min.css") \
   $(find wp-includes/css/dist/block-library -name "*.min.css" ! -name "*-rtl.min.css") \
   wp-includes/css/wp-block-template-skip-link.min.css \
+  wp-includes/css/wp-embed-template.min.css \
+  wp-includes/js/wp-embed-template.min.js \
+  wp-includes/js/wp-embed.min.js \
   wp-includes/js/wp-emoji-loader.min.js' | tar -xf - -C "$OUT"
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-includes/version.php"; echo $wp_version, "\n";' > "$OUT/VERSION"
 # The block type registry as WordPress builds it: each core block's final

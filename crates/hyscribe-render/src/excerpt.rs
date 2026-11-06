@@ -64,7 +64,7 @@ impl Renderer<'_> {
     }
 
     /// `get_the_excerpt()` with `excerpt_length` and `excerpt_more` as given.
-    fn excerpt(&mut self, post: &Post, length: i64, more: &[u8]) -> Vec<u8> {
+    pub(crate) fn excerpt(&mut self, post: &Post, length: i64, more: &[u8]) -> Vec<u8> {
         if !post.password.is_empty() {
             return b"There is no excerpt because this is a protected post.".to_vec();
         }

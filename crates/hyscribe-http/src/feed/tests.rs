@@ -15,8 +15,7 @@ fn last_modified_without_posts_is_now() {
 fn a_feed_that_fails_is_the_server_error_page() {
     let failed = Rendered {
         status: StatusCode::INTERNAL_SERVER_ERROR,
-        head: String::new(),
-        body: "<body></body>".into(),
+        document: "<body></body>".into(),
     };
     let cache = [
         (header::LAST_MODIFIED, String::new()),

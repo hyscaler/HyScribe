@@ -21,9 +21,11 @@ use crate::template::Renderer;
 use crate::theme::Theme;
 
 mod block_styles;
+mod embed;
 mod footer;
 
 use block_styles::BLOCK_STYLES;
+pub use embed::{Share, embed_page};
 pub use footer::wp_footer;
 
 /// The WordPress version the bundled assets come from.
@@ -130,7 +132,7 @@ pub fn wp_head(
         )
         .into_bytes(),
     );
-    out.extend(head.canonical());
+    out.extend(head.canonical(true));
     let registry = registered_modules(&head.siteurl());
     out.extend(
         Modules {
@@ -192,6 +194,9 @@ impl Head<'_> {
             set(robots, if public { "follow" } else { "nofollow" }, None);
         };
         if !public {
+            no_robots(&mut robots);
+        }
+        if self.request.embed {
             no_robots(&mut robots);
         }
         if self.request.search.is_some() {
@@ -297,18 +302,7 @@ impl Head<'_> {
             "img:is([sizes=auto i],[sizes^=\"auto,\" i]){contain-intrinsic-size:3000px 1500px}",
         )];
         for handle in &assets.styles {
-            let css = handle
-                .strip_prefix("wp-block-")
-                .and_then(|name| BLOCK_STYLES.iter().find(|(folder, _)| *folder == name));
-            queue.push(match css {
-                Some((folder, css)) => Style::file(
-                    handle,
-                    &format!("{siteurl}/wp-includes/blocks/{folder}/style.min.css"),
-                    css,
-                    None,
-                ),
-                None => Style::inline(handle, ""),
-            });
+            queue.push(block_style(handle, &siteurl));
         }
         let on_page = |name: &str| {
             let handle = format!("wp-block-{}", name.trim_start_matches("core/"));
@@ -357,8 +351,8 @@ impl Head<'_> {
         queue
     }
 
-    /// `rel_canonical()` and `wp_shortlink_wp_head()`.
-    fn canonical(&self) -> Vec<u8> {
+    /// `rel_canonical()`, and with `shortlink`, `wp_shortlink_wp_head()`.
+    fn canonical(&self, shortlink: bool) -> Vec<u8> {
         let Some(post) = self.queried_post().filter(|post| post.id != 0) else {
             return Vec::new();
         };
@@ -384,6 +378,9 @@ impl Head<'_> {
                 ]
                 .concat(),
             );
+        }
+        if !shortlink {
+            return out;
         }
         let front_page =
             link::front_page(&self.option("show_on_front"), &self.option("page_on_front"));
@@ -690,6 +687,23 @@ fn trim_slashes(path: &[u8]) -> &[u8] {
 }
 
 /// A registered style as `WP_Styles` prints it.
+/// A style a rendered block enqueued, by its handle: a core block's
+/// stylesheet, or nothing for a block without one.
+fn block_style(handle: &str, siteurl: &str) -> Style {
+    let css = handle
+        .strip_prefix("wp-block-")
+        .and_then(|name| BLOCK_STYLES.iter().find(|(folder, _)| *folder == name));
+    match css {
+        Some((folder, css)) => Style::file(
+            handle,
+            &format!("{siteurl}/wp-includes/blocks/{folder}/style.min.css"),
+            css,
+            None,
+        ),
+        None => Style::inline(handle, ""),
+    }
+}
+
 struct Style {
     handle: String,
     /// The stylesheet URL, `None` once inlined or for inline-only styles.

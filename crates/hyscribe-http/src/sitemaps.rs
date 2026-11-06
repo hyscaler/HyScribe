@@ -7,10 +7,11 @@
 use std::collections::HashMap;
 
 use hyscribe_db::DbError;
-use hyscribe_kses::{esc_url, wp_strip_all_tags};
+use hyscribe_kses::esc_url;
 use hyscribe_model::{OrderBy, PostQuery};
 use hyscribe_phpser::is_empty_string;
 use hyscribe_render::date::{self, Zone};
+use hyscribe_render::formatting;
 use hyscribe_render::sitemap::{self, Entry};
 
 use crate::query::absint;
@@ -31,7 +32,7 @@ pub(crate) async fn serve(
     outcome: Outcome,
 ) -> Result<Outcome, DbError> {
     match outcome {
-        Outcome::Page(_) | Outcome::Feed(..) | Outcome::Favicon | Outcome::Trackback(_)
+        Outcome::Page(_) | Outcome::Feed(..) | Outcome::Favicon | Outcome::Trackback(..)
             if !redirects(&outcome) =>
         {
             Ok(route(site, query).await?.unwrap_or(outcome))
@@ -94,22 +95,9 @@ async fn route(site: &Site, query: &HashMap<String, String>) -> Result<Option<Ou
     })
 }
 
-/// `sanitize_text_field()`: tags stripped, then the ends' whitespace and
-/// percent-encoded octets.
+/// `sanitize_text_field()` of a query var.
 fn sanitize_text_field(text: &str) -> String {
-    let mut text = String::from_utf8_lossy(&wp_strip_all_tags(text.as_bytes(), false))
-        .trim()
-        .to_string();
-    let octet = |t: &str| {
-        t.as_bytes().windows(3).position(
-            |w| matches!(w, [b'%', a, b] if a.is_ascii_hexdigit() && b.is_ascii_hexdigit()),
-        )
-    };
-    while let Some(at) = octet(&text) {
-        let found = text.get(at..at + 3).unwrap_or_default().to_string();
-        text = text.replace(&found, "");
-    }
-    text.trim().to_string()
+    String::from_utf8_lossy(&formatting::sanitize_text_field(text.as_bytes())).into_owned()
 }
 
 /// `do_robots()`: the admin's paths under the site URL's, which redirect

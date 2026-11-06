@@ -968,6 +968,81 @@ pub fn sanitize_title_for_query(title: &[u8]) -> Vec<u8> {
     sanitize_title_with_dashes(title, false)
 }
 
+/// `sanitize_text_field( $text )`: invalid UTF-8 is dropped, tags are
+/// stripped after `wp_pre_kses_less_than()` escapes each `<` opening none,
+/// whitespace runs become one space, and percent-encoded octets go.
+pub fn sanitize_text_field(text: &[u8]) -> Vec<u8> {
+    if std::str::from_utf8(text).is_err() {
+        return Vec::new();
+    }
+    let mut text = text.to_vec();
+    if text.contains(&b'<') {
+        text = hyscribe_kses::wp_strip_all_tags(&pre_kses_less_than(&text), false);
+        text = replace(&text, b"<\n", b"&lt;\n");
+    }
+    let mut text = hyscribe_phpser::php_trim(&squeeze(&text, b"\r\n\t ")).to_vec();
+    let octet = |t: &[u8]| {
+        t.windows(3)
+            .find(|w| matches!(w, [b'%', a, b] if a.is_ascii_hexdigit() && b.is_ascii_hexdigit()))
+            .map(<[u8]>::to_vec)
+    };
+    let mut found = false;
+    while let Some(octet) = octet(&text) {
+        text = replace(&text, &octet, b"");
+        found = true;
+    }
+    if found {
+        text = hyscribe_phpser::php_trim(&squeeze(&text, b" ")).to_vec();
+    }
+    text
+}
+
+/// `wp_pre_kses_less_than()`: a `<` whose run up to the next `<` or the
+/// end holds no `>` is HTML-escaped with that run.
+fn pre_kses_less_than(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.iter().position(|&b| b == b'<') {
+        let (before, run) = rest.split_at(at);
+        out.extend_from_slice(before);
+        let end = run
+            .iter()
+            .skip(1)
+            .position(|&b| b == b'<' || b == b'>')
+            .map_or(run.len(), |i| i + 1);
+        let (tag, after) = run.split_at(end);
+        match after.split_first() {
+            Some((b'>', after)) => {
+                out.extend_from_slice(tag);
+                out.push(b'>');
+                rest = after;
+            }
+            _ => {
+                out.extend_from_slice(hyscribe_kses::esc_html(tag).as_bytes());
+                rest = after;
+            }
+        }
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
+/// Runs of the bytes in `set` made one space.
+fn squeeze(text: &[u8], set: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut run = false;
+    for &b in text {
+        let blank = set.contains(&b);
+        if !blank {
+            out.push(b);
+        } else if !run {
+            out.push(b' ');
+        }
+        run = blank;
+    }
+    out
+}
+
 /// `sanitize_title_with_dashes( $title, '', $context )`, in the save
 /// context when `save` is set, else in the query context.
 fn sanitize_title_with_dashes(title: &[u8], save: bool) -> Vec<u8> {

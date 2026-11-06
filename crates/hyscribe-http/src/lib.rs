@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::{Query, State};
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html};
@@ -39,6 +39,7 @@ mod feed;
 pub mod query;
 mod reads;
 mod sitemaps;
+mod trackback;
 
 use reads::Reads;
 
@@ -156,8 +157,8 @@ enum Outcome {
     Robots(Vec<u8>),
     /// `do_favicon()`.
     Favicon,
-    /// `wp-trackback.php` for a GET: the post's ID, 0 for none.
-    Trackback(i64),
+    /// `wp-trackback.php`: the post's ID, 0 for none, and the query's status.
+    Trackback(i64, StatusCode),
 }
 
 /// One page to render: the status, the document title, and the request
@@ -185,12 +186,14 @@ async fn page(
     uri: Uri,
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
+    body: axum::body::Bytes,
 ) -> Response {
     // Before the method check, so a login form's POST is redirected too.
     if let Some((status, location)) = admin_redirect(&site, uri.path(), uri.query()) {
         return (status, [(header::LOCATION, location)]).into_response();
     }
-    if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
+    let (head, post) = (method == Method::HEAD, method == Method::POST);
+    if method != Method::GET && !head && !post {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
     // `WP::send_headers()` sends the status `error` asks for; these end the
@@ -199,7 +202,27 @@ async fn page(
     if let Some(status) = status.filter(|s| matches!(s.as_u16(), 403 | 500 | 502 | 503)) {
         return (status, [(header::CONTENT_TYPE, "text/html; charset=UTF-8")]).into_response();
     }
-    let mut response = match outcome(&site, &uri, &query).await {
+    let file = trackback::is_file(uri.path());
+    let outcome = if file {
+        trackback::outcome(&site, &uri, &query).await
+    } else {
+        outcome(&site, &uri, &query).await
+    };
+    let mut response = match outcome {
+        // The template loader ends a HEAD request before either.
+        Ok(Outcome::Favicon | Outcome::Trackback(..)) if head && !file => {
+            [(header::CONTENT_TYPE, "text/html; charset=UTF-8")].into_response()
+        }
+        Ok(Outcome::Trackback(id, status)) => {
+            let form = if post {
+                trackback::form(&headers, &body)
+            } else {
+                Value::Array(Vec::new())
+            };
+            trackback::respond(&site, id, status, &form).await
+        }
+        // Other forms are not handled yet.
+        Ok(_) if post => StatusCode::METHOD_NOT_ALLOWED.into_response(),
         Ok(Outcome::Redirect(location)) => (
             StatusCode::MOVED_PERMANENTLY,
             [(header::LOCATION, location)],
@@ -216,10 +239,6 @@ async fn page(
             let content_type = [(header::CONTENT_TYPE, "text/plain; charset=utf-8")];
             (content_type, body).into_response()
         }
-        // The template loader ends a HEAD request before either.
-        Ok(Outcome::Favicon | Outcome::Trackback(_)) if method == axum::http::Method::HEAD => {
-            [(header::CONTENT_TYPE, "text/html; charset=UTF-8")].into_response()
-        }
         Ok(Outcome::Favicon) => {
             let icon = format!(
                 "{}/wp-includes/images/w-logo-gray-white-bg.png",
@@ -227,7 +246,6 @@ async fn page(
             );
             (StatusCode::FOUND, [(header::LOCATION, icon)]).into_response()
         }
-        Ok(Outcome::Trackback(id)) => trackback(&site, id).await,
         Ok(Outcome::Page(page)) => html(&render(&site, requested(*page, &uri)).await),
         Err(err) => html(&database_error(&site, &err)),
     };
@@ -376,7 +394,6 @@ fn uncanonical(
     query: &HashMap<String, String>,
     outcome: Outcome,
 ) -> Outcome {
-    let get = || parse_str(uri.query().unwrap_or_default().as_bytes());
     let id = match (kind, outcome) {
         (Quiet::Favicon, _) => return Outcome::Favicon,
         (_, Outcome::Page(page)) if page.request.not_found => return Outcome::Page(page),
@@ -389,45 +406,10 @@ fn uncanonical(
             feed.redirect = None;
             return Outcome::Feed(page, feed);
         }
-        (_, Outcome::Page(page)) if page.request.singular => {
-            page.request.post.map_or(0, u64::cast_signed)
-        }
-        (_, Outcome::Page(_)) if get().get_str("tb_id").is_some_and(|v| !v.is_empty()) => 0,
-        // Off a singular page the ID is the request URI's last segment's.
-        (_, Outcome::Page(_)) => {
-            let uri = request_uri(uri);
-            let last = uri.rsplit(|&b| b == b'/').next().unwrap_or_default();
-            Value::String(last.to_vec()).to_int()
-        }
+        (_, Outcome::Page(page)) => trackback::post_id(uri, trackback::singular(&page.request)),
         (_, outcome) => return outcome,
     };
-    Outcome::Trackback(id)
-}
-
-/// A GET of `wp-trackback.php`: no trackback, so the post's link, or for
-/// no ID its error. Only a published post or page is linked, where
-/// WordPress links any post, telling drafts and private posts apart from
-/// IDs with none (docs/SECURITY_MODEL.md).
-async fn trackback(site: &Site, id: i64) -> Response {
-    if id == 0 {
-        let body = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<response>\n<error>1</error>\n<message>I really need an ID for this to work.</message>\n</response>";
-        let content_type = [(header::CONTENT_TYPE, "text/xml; charset=UTF-8")];
-        return (content_type, body).into_response();
-    }
-    let post = match u64::try_from(id) {
-        Ok(id) => site.db.post(id).await,
-        Err(_) => Ok(None),
-    };
-    match post {
-        Ok(Some(post)) if viewable(&post, &["post", "page"]) => (
-            StatusCode::FOUND,
-            [(header::LOCATION, site.permalink(&post))],
-        )
-            .into_response(),
-        // `wp_redirect()` of no link sends nothing.
-        Ok(_) => [(header::CONTENT_TYPE, "text/html; charset=UTF-8")].into_response(),
-        Err(err) => html(&database_error(site, &err)),
-    }
+    Outcome::Trackback(id, StatusCode::OK)
 }
 
 /// `outcome` with the query cleaned up as `redirect_canonical()` ends: a
@@ -483,7 +465,7 @@ fn robots(site: &Site, query: &HashMap<String, String>, outcome: Outcome) -> Out
         .is_some_and(|v| !is_empty_string(v.as_bytes()))
         && !asks_404(query);
     match outcome {
-        Outcome::Page(_) | Outcome::Feed(..) | Outcome::Favicon | Outcome::Trackback(_)
+        Outcome::Page(_) | Outcome::Feed(..) | Outcome::Favicon | Outcome::Trackback(..)
             if asked && !sitemaps::redirects(&outcome) =>
         {
             Outcome::Robots(sitemaps::robots(site))

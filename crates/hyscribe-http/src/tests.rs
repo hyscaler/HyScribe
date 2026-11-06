@@ -169,10 +169,12 @@ async fn missing_drafts_and_unknown_paths_are_not_found() {
             "Page not found &#8211; HyScribe Default Install"
         );
     }
-    assert_eq!(
-        request(&site, "POST", "/").await.status,
-        StatusCode::METHOD_NOT_ALLOWED
-    );
+    for method in ["POST", "PUT"] {
+        assert_eq!(
+            request(&site, method, "/").await.status,
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+    }
 }
 
 /// `WP_HOME` and `WP_SITEURL` replace their options, untrailingslashed, so
@@ -281,8 +283,14 @@ async fn database_errors_show_no_details() {
         assert!(sitemaps::serve(&site, &query, page).await.is_err());
     }
     // A trackback's post is read after the page's own queries.
-    let reply = trackback(&site, 1).await;
+    let reply = trackback::respond(&site, 1, StatusCode::OK, &Value::Array(Vec::new())).await;
     assert_eq!(reply.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let uri = Uri::from_static("/wp-trackback.php");
+    assert!(
+        trackback::outcome(&site, &uri, &HashMap::new())
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -1026,6 +1034,65 @@ async fn loader_vars_match_php() {
             "{path}"
         );
     }
+}
+
+/// Every case of `reference/trackback/golden.sh`: `wp-trackback.php` and
+/// trackback POSTs, with trackbacks closed.
+#[tokio::test]
+async fn trackbacks_match_php() {
+    let site = oracle_site().await;
+    let golden = include_str!("../tests/golden/trackback.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let path = String::from_utf8(hyscribe_testkit::unhex(fields[1])).unwrap();
+        let form = hyscribe_testkit::unhex(fields[3]);
+        let mut builder = Request::builder().method(fields[0]).uri(&path);
+        if !fields[2].is_empty() {
+            builder = builder.header("content-type", fields[2]);
+        }
+        let response = router(site.clone())
+            .oneshot(builder.body(Body::from(form.clone())).unwrap())
+            .await
+            .unwrap();
+        let header = |name| {
+            response
+                .headers()
+                .get(name)
+                .map_or(String::new(), |v| v.to_str().unwrap().to_string())
+        };
+        let redirect = response.status().is_redirection();
+        let ours = (
+            response.status().as_u16().to_string(),
+            header("location"),
+            (!redirect).then(|| header("content-type")),
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let php = (
+            fields[4].to_string(),
+            fields[5].to_string(),
+            (!redirect).then(|| fields[6].to_string()),
+        );
+        let php_body = hyscribe_testkit::unhex(fields[7]);
+        // HEAD bodies are dropped by the server.
+        let bodies = fields[0] == "HEAD" || *body == *php_body;
+        if ours != php || !bodies {
+            failures.push(format!(
+                "{} {path} {:?}\n  php:  {php:?}\n  ours: {ours:?} {:?}",
+                fields[0],
+                String::from_utf8_lossy(&form),
+                String::from_utf8_lossy(&body)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(golden.lines().count(), 102);
+    // PHP links the draft page 3, which HyScribe keeps hidden.
+    let reply = request(&site, "GET", "/wp-trackback.php/3").await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert!(reply.headers.get("location").is_none() && reply.body.is_empty());
 }
 
 /// Term archives from the same script, over the fixture with

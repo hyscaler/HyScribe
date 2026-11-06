@@ -241,6 +241,18 @@ if ( 'accents' === $argv[1] ) {
 	}
 	exit;
 }
+if ( 'text-field' === $argv[1] ) {
+	$cases = array(
+		'', '0', ' 0 ', 'plain', "a\tb\r\nc  d", " \x00x\x00 ", "\xc2\xa0x\xc2\xa0", "\x0bx\x0b", "a\xc3", '%41', '%4', '%%41', 'a %41 b',
+		'%2541', '%41%41b', '%4A%4a', '<b>x</b>', '<', 'a < b', 'a <b', '<<b>>', "<\n>", "a <\nb", '<a href="x">y', '<script>x</script>y',
+		'<style>p{}</style>', '< b>', 'x<', '1 < 2 > 0', '<b', '&lt;', '"\'&', "\\", '<?php x ?>', '<!-- c -->x',
+	);
+	$atoms = array( '<', '>', '<b>', '</b>', ' ', "\t", "\n", "\r", '%', '4', '1', 'a', 'G', '%41', "\x00", "\xc2\xa0", '"', '&', 'x', '<script>', '</script>', '!' );
+	foreach ( array_merge( $cases, random_cases( $atoms, 1500, 10 ) ) as $case ) {
+		echo bin2hex( $case ), "\t", bin2hex( sanitize_text_field( $case ) ), "\n";
+	}
+	exit;
+}
 if ( 'clickable' === $argv[1] ) {
 	echo home_url(), "\n";
 	remove_all_filters( 'comment_text' );

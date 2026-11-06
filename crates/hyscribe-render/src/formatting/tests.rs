@@ -539,3 +539,19 @@ fn sanitize_title_for_query_matches_php() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert_eq!(golden.lines().count(), 58);
 }
+
+#[test]
+fn sanitize_text_field_matches_php() {
+    let golden = include_str!("../../tests/golden/sanitize-text-field.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let mut fields = line.split('\t').map(hyscribe_testkit::unhex);
+        let (text, php) = (fields.next().unwrap(), fields.next().unwrap());
+        let ours = sanitize_text_field(&text);
+        if ours != php {
+            failures.push(format!("{text:x?}: php {php:x?} ours {ours:x?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(golden.lines().count(), 1535);
+}

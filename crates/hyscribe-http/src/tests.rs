@@ -2214,8 +2214,9 @@ async fn pretty_pages_match_php() {
             .get("location")
             .map_or("", |v| v.to_str().unwrap());
         // A page on the front is not handled in full yet: its head's comments
-        // feed, its paging and its canonical redirects, `pagename` naming it,
-        // and a feed's empty channel link.
+        // feed, its paging and canonical redirects, and `pagename` naming
+        // it. Under a category base, the old category path's feed is an
+        // attachment's, and attachments are not routed.
         let front = [
             "/",
             "/page/2/",

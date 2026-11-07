@@ -1064,7 +1064,40 @@ async fn route(
         .iter()
         .find_map(|k| query.get(*k).filter(|v| !v.is_empty()))
         .map_or(0, |id| absint(id));
+    // RSS2, Atom, RDF and RSS 0.92 feeds. `feed=rss` alone redirects to
+    // RSS2, as `redirect_canonical()` rewrites only that pair.
+    let flag = |name| query.get(name).is_some_and(|v| !v.is_empty() && v != "0");
+    let redirect = (query.get("feed").map(String::as_str) == Some("rss"))
+        .then(|| rss2_location(site, path, raw_query));
+    let format = match query
+        .get("feed")
+        .map(|f| f.replace("comments-", ""))
+        .as_deref()
+    {
+        Some("rss2" | "feed") => Some(feed::Format::Rss2),
+        Some("atom") => Some(feed::Format::Atom),
+        Some("rdf") => Some(feed::Format::Rdf),
+        Some("rss") => Some(feed::Format::Rss092),
+        _ => None,
+    };
     let bad = bad_p(query, raw_query);
+    // A feed of the 404 page, with no var naming a post but a bad `p`, is
+    // the posts feed of the query without that `p`, under the 404 page's
+    // title; only `error=404` sends a 404.
+    let named = ["page_id", "name", "pagename", "attachment_id", "subpost_id"]
+        .iter()
+        .chain((!bad).then_some(&"p"))
+        .any(|name| query.get(*name).is_some_and(|v| !v.is_empty()));
+    let feed_404 = (bad || asks_404(query)) && format.is_some() && !named;
+    let without_p;
+    let query = if feed_404 {
+        let mut query = query.clone();
+        query.remove("p");
+        without_p = query;
+        &without_p
+    } else {
+        query
+    };
     if (bad || asks_404(query)) && !query.contains_key("feed") {
         if let Some(location) = date_redirect(site, raw_query, query) {
             return Ok(Outcome::Redirect(location));
@@ -1115,22 +1148,6 @@ async fn route(
         None => (single, query),
     };
     let single_requested = single.is_some();
-    // RSS2, Atom, RDF and RSS 0.92 feeds. `feed=rss` alone redirects to
-    // RSS2, as `redirect_canonical()` rewrites only that pair.
-    let flag = |name| query.get(name).is_some_and(|v| !v.is_empty() && v != "0");
-    let redirect = (query.get("feed").map(String::as_str) == Some("rss"))
-        .then(|| rss2_location(site, path, raw_query));
-    let format = match query
-        .get("feed")
-        .map(|f| f.replace("comments-", ""))
-        .as_deref()
-    {
-        Some("rss2" | "feed") => Some(feed::Format::Rss2),
-        Some("atom") => Some(feed::Format::Atom),
-        Some("rdf") => Some(feed::Format::Rdf),
-        Some("rss") => Some(feed::Format::Rss092),
-        _ => None,
-    };
     let with_comments =
         query.get("feed").is_some_and(|f| f.contains("comments-")) || flag("withcomments");
     let comment_feed = with_comments || (single_requested && !flag("withoutcomments"));
@@ -1152,11 +1169,15 @@ async fn route(
         });
         let ids = posts_page.map(|(_, id)| id);
         let (page, found) = list(site, query, true, (post_query, terms), ids).await?;
-        let page = posts_page_titled(site, page, posts_page, found.as_ref(), Paging::of(query));
+        let mut page = posts_page_titled(site, page, posts_page, found.as_ref(), Paging::of(query));
+        if feed_404 {
+            page.title = not_found(site, false).title;
+        }
         // A paged query with nothing in it is a 404: a feed of no posts,
         // never of comments, titled as the 404 page.
         let missing = page.request.not_found && Paging::of(query).is_paged();
-        let comments = comments.filter(|_| !missing);
+        let comments = comments.filter(|_| !missing && !feed_404);
+        let missing = missing || feed_404 && asks_404(query);
         let page = std::future::ready(Ok(page));
         return feed::outcome(site, page, comments, format, redirect, missing).await;
     }
@@ -1179,6 +1200,14 @@ async fn route(
                         let redirect = found
                             .as_ref()
                             .and_then(elsewhere)
+                            .or_else(|| {
+                                found
+                                    .as_ref()
+                                    .filter(|p| past_pages(asked, p))
+                                    .and_then(|_| {
+                                        past_pages_location(query, &link, raw_query, name)
+                                    })
+                            })
                             // Only `p` and `page_id` have a feed link to go to.
                             .or_else(|| {
                                 found
@@ -1346,25 +1375,49 @@ fn paged_single(
     name: &str,
     post: Post,
 ) -> Outcome {
-    let page = asked.get("page").filter(|v| !v.is_empty() && *v != "0");
-    // handle_404(): the page must be one of the post's.
+    if !past_pages(asked, &post) {
+        Outcome::Page(Box::new(single_page(site, post, Paging::of(query))))
+    } else if let Some(location) = past_pages_location(query, link, raw_query, name) {
+        Outcome::Redirect(location)
+    } else {
+        Outcome::Page(Box::new(not_found(site, false)))
+    }
+}
+
+/// `handle_404()` for a singular post: a `page` asked for that is not one
+/// of its `<!--nextpage-->` pages.
+fn past_pages(asked: &HashMap<String, String>, post: &Post) -> bool {
+    let Some(page) = asked.get("page").filter(|v| !v.is_empty() && *v != "0") else {
+        return false;
+    };
     let breaks = post
         .content
         .windows(15)
         .filter(|w| *w == b"<!--nextpage-->")
         .count();
-    let found = page.is_some_and(|page| {
-        let number = hyscribe_phpser::Value::String(page.trim_matches('/').into()).to_int();
-        breaks > 0 && number <= i64::try_from(breaks).unwrap_or(i64::MAX) + 1
-    });
-    match page {
-        Some(_) if found => Outcome::Page(Box::new(single_page(site, post, Paging::of(query)))),
-        Some(_) if Paging::of(query).page >= 1 => {
-            Outcome::Redirect(tack(link, raw_query, &[name, "page"]))
-        }
-        Some(_) => Outcome::Page(Box::new(not_found(site, false))),
-        None => Outcome::Page(Box::new(single_page(site, post, Paging::of(query)))),
+    let number = hyscribe_phpser::Value::String(page.trim_matches('/').into()).to_int();
+    !(breaks > 0 && number <= i64::try_from(breaks).unwrap_or(i64::MAX) + 1)
+}
+
+/// Where `redirect_canonical()` sends a post's 404 for a page past its
+/// last, a number: the post's `link` without `page`. Asked for by `p` or
+/// `page_id` (`name`), the singular vars `link` has no value for go too
+/// (`_remove_qs_args_if_not_in_url()`).
+fn past_pages_location(
+    query: &HashMap<String, String>,
+    link: &str,
+    raw_query: Option<&str>,
+    name: &str,
+) -> Option<String> {
+    if Paging::of(query).page == 0 {
+        return None;
     }
+    let in_link = parse_str(link.split_once('?').map_or("", |(_, q)| q).as_bytes());
+    let absent = SINGULAR_ARGS
+        .into_iter()
+        .filter(|arg| matches!(name, "p" | "page_id") && in_link.get_str(arg).is_none());
+    let drop: Vec<&str> = ["page"].into_iter().chain(absent).collect();
+    Some(tack(link, raw_query, &drop))
 }
 
 /// A post or page on its own, with its type's template hierarchy.

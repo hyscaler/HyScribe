@@ -47,6 +47,9 @@ for path in '/?favicon=1' '/?favicon=0' '/?favicon=' '/?favicon=abc' '/?favicon=
   '/?error=404&attachment_id=1' '/?error=404&favicon=1' '/?error=404&tb=1&p=1' '/?error=404&preview=true' '/?error=404&cat=1' \
   '/?error=404&p=999' '/?error=404&p=1&page_id=2' '/?error=404&x=' '/?error=404&p=1&x=' '/?error=404&year=2026&monthnum=13' \
   '/?subpost_id=1&error=404' '/?subpost_id=2&attachment_id=1&error=404' \
+  '/?p=-1&feed=rss2' '/?p=-1&feed=atom' '/?p=-1&page_id=2&feed=rss2' '/?error=404&feed=rss2' '/?p=-1&feed=rss' '/?p=-1&feed=comments-rss2' '/?p=-2&feed=rss2&cat=1' '/?name=hello-world&p=2' '/?pagename=sample-page&page_id=1' \
+  '/?name=hello-world&m=2026' '/?p=1&page=x' '/?p=1&page=2&feed=rss2' \
+  '/?pagename=sample-page&page=2' '/?name=nope&year=2026&monthnum=10' '/?p=999&post_type=post' '/?name=nope&post_type=post' \
   '/?post_type=attachment' '/?m=2026&post_type=attachment' '/?s=hello&post_type=attachment' '/?cat=1&post_type=attachment' \
   '/?post_type=post' '/?post_type=page' '/?s=sample&post_type=post' '/?s=sample&post_type=page' '/?s=sample' '/?post_type=nope' \
   '/?feed=rss2&post_type=attachment' '/?post_type=attachment&paged=2' '/?year=2026&post_type=attachment'; do

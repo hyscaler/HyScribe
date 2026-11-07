@@ -354,6 +354,10 @@ fn links_walk_up_their_parents() {
         link(&site(vec![1], ""), &entry),
         format!("{HOME}/top//entry/")
     );
+    assert_eq!(
+        category_paths(&site(vec![3, 1], ""), 10),
+        ["top/mid/leaf", "top"]
+    );
     // Pages: names from the top, an empty one skipped, a loop ended.
     let nested = site(vec![], "");
     let page = nested.post(7).unwrap();

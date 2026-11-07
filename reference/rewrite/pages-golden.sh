@@ -33,8 +33,13 @@ PATHS=(
   '/?p=1' '/?page_id=2' '/?cat=1' '/?m=2026' '/?m=202610' '/?m=20261027' '/?feed=rss2' '/?feed=comments-rss2' '/?s=hello'
   '/?paged=2' '/?p=1&cpage=2' '/?p=1&page=2' '/?p=1&feed=rss2' '/?cat=1&feed=rss2' '/?p=1&embed=true' '/?p=1&tb=1'
   /hello-world /2026/10/27/hello-world /sample-page /wp-sitemap.xml /wp-sitemap-posts-post-1.xml '/?sitemap=index' /robots.txt
+  /hello-world/comment-page-2/ /topics/uncategorized/ '/?year=2026&monthnum=10' '/?year=2026' '/?name=hello-world'
+  '/?pagename=sample-page' /sample-page/2/ /hello-world/2/ '/?cat=1&paged=2' /page/1/ '/hello-world/?replytocom=1' '/?p=999'
+  /wp-sitemap-taxonomies-category-1.xml /feed/rss/ /hello-world/feed/rss2/ '/?feed=rss' '/?p=1&preview=true' '/?p=1.'
+  '/hello-world/?x=1' '/?page_id=2&x=y'
 )
-SETUPS=('/%year%/%monthnum%/%day%/%postname%/|||' '/%postname%/|||' '/archives/%post_id%|||' '/index.php/%postname%/|||' '/%category%/%postname%/|||')
+SETUPS=('/%year%/%monthnum%/%day%/%postname%/|||' '/%postname%/|||' '/archives/%post_id%|||' '/index.php/%postname%/|||' '/%category%/%postname%/|||'
+  '/%postname%/|topics|labels|2')
 : > "$OUT"
 for setup in "${SETUPS[@]}"; do
   for path in "${PATHS[@]}"; do

@@ -527,6 +527,14 @@ fn term_slugs(site: &dyn Site, taxonomy: &str, term: &Term) -> Vec<String> {
     slugs
 }
 
+/// The path of slugs, from the top, of each of the post's categories.
+pub fn category_paths(site: &dyn Site, post_id: u64) -> Vec<String> {
+    site.post_terms(post_id, "category")
+        .iter()
+        .map(|term| term_slugs(site, "category", term).join("/"))
+        .collect()
+}
+
 /// `%category%`: the path of slugs of the post's category with the lowest
 /// ID, or the default category's slug alone.
 fn category_path(site: &dyn Site, post: &Post) -> String {
@@ -588,7 +596,7 @@ fn trailingslashit(url: &str) -> String {
 }
 
 /// `preg_replace( '#/+#', '/' )`.
-fn collapse_slashes(path: &str) -> String {
+pub fn collapse_slashes(path: &str) -> String {
     let mut out = String::new();
     for c in path.chars() {
         if !(c == '/' && out.ends_with('/')) {

@@ -37,6 +37,7 @@ use hyscribe_render::theme::{Theme, twentytwentyfive, twentytwentyfive_file};
 use hyscribe_render::{search_terms, sticky_posts};
 use tokio::net::TcpListener;
 
+mod canonical;
 mod feed;
 pub mod query;
 mod reads;
@@ -307,7 +308,7 @@ async fn page(
     }
     // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.
     let original = uri.clone();
-    let (uri, query, pretty) = match pretty_request(&site, uri, query).await {
+    let (uri, query) = match pretty_request(&site, uri, query).await {
         Ok(request) => request,
         Err(err) => return html(database_error(&site, &err)),
     };
@@ -323,7 +324,7 @@ async fn page(
             .await
             .map(|outcome| (outcome, Vec::new()))
     } else {
-        outcome(&site, &uri, &query, pretty).await
+        outcome(&site, (&uri, &original), &query).await
     };
     let (outcome, links) = match routed {
         Ok(routed) => routed,
@@ -447,18 +448,16 @@ const PHP_FILES: [&str; 13] = [
 
 /// A request under pretty permalinks as the query it stands for
 /// (`WP::parse_request()`): the path's query vars join the request's own,
-/// which win, and the path becomes the home page's. True when the path was
-/// parsed. Links and canonical redirects are still those of plain
-/// permalinks, so a parsed path is not redirected.
+/// which win, and the path becomes the home page's.
 async fn pretty_request(
     site: &Site,
     uri: Uri,
     mut query: HashMap<String, String>,
-) -> Result<(Uri, HashMap<String, String>, bool), DbError> {
+) -> Result<(Uri, HashMap<String, String>), DbError> {
     let home_path = home_path(&site.home);
     let local = uri.path().strip_prefix(home_path).unwrap_or(uri.path());
     if site.rewriter.is_empty() || reserved(uri.path()) || PHP_FILES.contains(&local) {
-        return Ok((uri, query, false));
+        return Ok((uri, query));
     }
     let parsed = rewrite::parse_request(site, &site.rewriter, home_path, uri.path()).await?;
     // The request's own `error` is dropped: a matched or empty path clears
@@ -484,7 +483,7 @@ async fn pretty_request(
     } else {
         format!("{path}?{raw}")
     };
-    Ok((uri.parse().unwrap_or_default(), query, true))
+    Ok((uri.parse().unwrap_or_default(), query))
 }
 
 /// What a request gets, from the route through `redirect_canonical()`,
@@ -492,9 +491,8 @@ async fn pretty_request(
 /// sends after `redirect_canonical()`, which a sitemap never reaches.
 async fn outcome(
     site: &Arc<Site>,
-    uri: &Uri,
+    (uri, original): (&Uri, &Uri),
     query: &HashMap<String, String>,
-    pretty: bool,
 ) -> Result<(Outcome, Vec<String>), DbError> {
     let outcome = route(site, uri.path(), uri.query(), query).await?;
     let links = link_headers(
@@ -509,7 +507,9 @@ async fn outcome(
         Some(kind) => uncanonical(kind, uri, query, outcome),
         None => match preview(query, &get, outcome) {
             ControlFlow::Break(outcome) => outcome,
-            ControlFlow::Continue(outcome) if pretty => outcome,
+            ControlFlow::Continue(outcome) if site.permalinks().pretty() => {
+                canonical::pretty(site, original, query, outcome).await
+            }
             ControlFlow::Continue(outcome) => {
                 // A preview a visitor is not shown drops `preview` from redirects.
                 let strip = get.get_str("preview").is_some_and(|v| !v.is_empty());
@@ -1723,17 +1723,21 @@ async fn by_slug(
     let post_types = queryable.map_or(vec!["post", "page", "attachment"], |t| vec![t]);
     let date = |name| query.get(name).map(|v| absint(v)).filter(|&v| v > 0);
     // A feed is never a 404, so it is not guessed for; a guess past page 1
-    // would only redirect again.
+    // would only redirect again where a plain link cannot name the page.
     let feed = query.get("feed").is_some_and(|f| !f.is_empty());
-    let guess = if feed || name.is_empty() || date("page").is_some_and(|page| page > 1) {
+    let links = site.permalinks();
+    let paged = date("page").filter(|&page| page > 1);
+    let guess = if feed || name.is_empty() || paged.is_some() && !links.pretty() {
         Ok(None)
     } else {
         let name = String::from_utf8_lossy(&name);
         let parts = (date("year"), date("monthnum"), date("day"));
         site.db.guess_post(&name, &post_types, parts).await
     };
-    let link = match &guess {
-        Ok(Some(post)) => site.permalink(post).await,
+    let link = match (&guess, paged) {
+        // `redirect_guess_404_permalink()` keeps the page asked for.
+        (Ok(Some(post)), Some(page)) => links.under(&site.permalink(post).await, &page.to_string()),
+        (Ok(Some(post)), None) => site.permalink(post).await,
         _ => String::new(),
     };
     guess.map(|guess| {

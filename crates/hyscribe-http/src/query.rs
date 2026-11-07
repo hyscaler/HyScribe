@@ -470,50 +470,63 @@ fn with_children(tree: &Value, mut ids: Vec<u64>) -> Vec<u64> {
     ids
 }
 
+/// What `redirect_canonical()` drops from the end of a path, and of a
+/// final `p`, `page_id`, `cat` or `tag`.
+const PUNCTUATION: [&str; 24] = [
+    " ",
+    "%20",
+    "!",
+    "%21",
+    "\"",
+    "%22",
+    "'",
+    "%27",
+    "(",
+    "%28",
+    ")",
+    "%29",
+    ",",
+    "%2C",
+    ".",
+    "%2E",
+    ";",
+    "%3B",
+    "{",
+    "%7B",
+    "}",
+    "%7D",
+    "%E2%80%9C",
+    "%E2%80%9D",
+];
+
+/// `text` without the punctuation at its end.
+pub fn strip_punctuation(text: &str) -> &str {
+    let mut text = text;
+    while let Some(rest) = PUNCTUATION.iter().find_map(|p| text.strip_suffix(p)) {
+        text = rest;
+    }
+    text
+}
+
 /// `redirect_canonical()`'s last clean up of a query string: spaces and end
 /// punctuation dropped after a final `p`, `page_id`, `cat` or `tag`, then
 /// those arguments dropped where empty.
 pub fn clean_query(query: &str) -> String {
-    const PUNCTUATION: [&str; 24] = [
-        " ",
-        "%20",
-        "!",
-        "%21",
-        "\"",
-        "%22",
-        "'",
-        "%27",
-        "(",
-        "%28",
-        ")",
-        "%29",
-        ",",
-        "%2C",
-        ".",
-        "%2E",
-        ";",
-        "%3B",
-        "{",
-        "%7B",
-        "}",
-        "%7D",
-        "%E2%80%9C",
-        "%E2%80%9D",
-    ];
     let names = ["p", "page_id", "cat", "tag"];
-    let mut query = query.to_string();
     let last = query.rfind('&').map_or(0, |at| at + 1);
     let named = query
         .get(last..)
         .and_then(|arg| arg.split_once('='))
         .is_some_and(|(name, _)| names.contains(&name));
     // Neither `=` nor the names hold punctuation, so this stops at the value.
-    while let Some(p) = PUNCTUATION.iter().find(|p| named && query.ends_with(*p)) {
-        query.truncate(query.len() - p.len());
-    }
+    let query = if named {
+        strip_punctuation(query)
+    } else {
+        query
+    };
     // `#(^|&)(p|page_id|cat|tag)=?(&|$)#` to `&`, matches never overlapping.
     let mut out = String::with_capacity(query.len());
-    let mut rest = query.as_str();
+    let mut rest = query;
     let mut at_start = true;
     while !rest.is_empty() {
         let lead = if rest.starts_with('&') { 1 } else { 0 };

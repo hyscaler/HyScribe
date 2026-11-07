@@ -126,6 +126,7 @@ fn term(row: &MySqlRow) -> Result<Term, DbError> {
         name: c.bytes("name"),
         slug: c.bytes("slug"),
         description: c.bytes("description"),
+        parent: c.unsigned("parent"),
     };
     c.finish(term)
 }
@@ -414,11 +415,27 @@ impl Db {
         .transpose()
     }
 
+    /// `get_term( $id, $taxonomy )`.
+    pub async fn term(&self, id: u64, taxonomy: &str) -> Result<Option<Term>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT t.term_id, t.name, t.slug, tt.description, tt.parent FROM {prefix}terms t \
+             JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
+             WHERE t.term_id = ? AND tt.taxonomy = ?",
+        );
+        let row = sqlx::query(sql)
+            .bind(id)
+            .bind(taxonomy)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.as_ref().map(term).transpose()
+    }
+
     /// `get_the_terms( $post_id, $taxonomy )`: ordered by name, as
     /// `wp_get_object_terms()` orders them.
     pub async fn post_terms(&self, post_id: u64, taxonomy: &str) -> Result<Vec<Term>, DbError> {
         let sql = self.prefix.sql(
-            "SELECT t.term_id, t.name, t.slug, tt.description FROM {prefix}terms t \
+            "SELECT t.term_id, t.name, t.slug, tt.description, tt.parent FROM {prefix}terms t \
              JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
              JOIN {prefix}term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id \
              WHERE tr.object_id = ? AND tt.taxonomy = ? ORDER BY t.name ASC",
@@ -571,7 +588,7 @@ impl Db {
         category_ids: &[u64],
     ) -> Result<Vec<(String, Term)>, DbError> {
         let mut sql = Sql::new(
-            "SELECT tt.taxonomy, t.term_id, t.name, t.slug, tt.description FROM {prefix}terms t \
+            "SELECT tt.taxonomy, t.term_id, t.name, t.slug, tt.description, tt.parent FROM {prefix}terms t \
              JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
              WHERE (tt.taxonomy = 'category' AND t.term_id IN (",
         );
@@ -606,7 +623,7 @@ impl Db {
         offset: u64,
     ) -> Result<Vec<Term>, DbError> {
         let sql = self.prefix.sql(
-            "SELECT t.term_id, t.name, t.slug, tt.description FROM {prefix}terms t \
+            "SELECT t.term_id, t.name, t.slug, tt.description, tt.parent FROM {prefix}terms t \
              JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
              WHERE tt.taxonomy = ? AND tt.count > 0 ORDER BY t.term_id LIMIT ? OFFSET ?",
         );

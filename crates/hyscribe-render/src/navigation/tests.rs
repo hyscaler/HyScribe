@@ -124,6 +124,7 @@ fn matches_php() {
                         name: "Uncategorized".into(),
                         slug: "uncategorized".into(),
                         description: Vec::new(),
+                        parent: 0,
                     }),
                 ));
             }

@@ -67,6 +67,7 @@ foreach ( array( 'hello', 'a b/c', 'é&x' ) as $search ) {
 	out( "search_link $search", get_search_link( $search ) );
 	out( "search_feed_link $search", get_search_feed_link( $search ) );
 	out( "search_feed_link $search atom", get_search_feed_link( $search, 'atom' ) );
+	out( "search_comments_feed_link $search atom", get_search_comments_feed_link( $search, 'atom' ) );
 }
 out( 'author_posts_url 1', get_author_posts_url( 1 ) );
 out( 'author_feed_link 1', get_author_feed_link( 1 ) );

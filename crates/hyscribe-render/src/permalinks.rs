@@ -7,8 +7,11 @@
 //! scheme, `esc_url()`, and `get_post_embed_url()`'s fallback for a path a
 //! page already takes.
 
-use hyscribe_model::Post;
-use hyscribe_phpser::{remove_query_arg, urlencode};
+use hyscribe_model::{Post, Term};
+use hyscribe_phpser::{Value, absint, remove_query_arg, urlencode};
+
+use crate::link;
+use crate::site::Site;
 
 /// The permalink options, as `WP_Rewrite::init()` reads them.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -41,6 +44,22 @@ impl Permalinks {
             category_base: category_base.to_string(),
             tag_base: tag_base.to_string(),
         }
+    }
+
+    /// The site's options.
+    pub fn of(site: &dyn Site) -> Permalinks {
+        let option =
+            |name| String::from_utf8_lossy(&site.option(name).unwrap_or_default()).into_owned();
+        Permalinks::new(
+            &option("permalink_structure"),
+            &option("category_base"),
+            &option("tag_base"),
+        )
+    }
+
+    /// Whether the structure has `tag`, such as `%category%`.
+    pub fn uses(&self, tag: &str) -> bool {
+        self.structure.contains(tag)
     }
 
     /// `using_permalinks()`.
@@ -245,6 +264,17 @@ impl Permalinks {
         Some(format!("{}feed/{feed}/", trailingslashit(&link)))
     }
 
+    /// `get_search_comments_feed_link( $search, $feed )`.
+    pub fn search_comments_feed_link(
+        &self,
+        home: &str,
+        search: &[u8],
+        feed: &str,
+    ) -> Option<String> {
+        let link = self.search_feed_link(home, search, feed)?;
+        Some(format!("{link}?withcomments=1"))
+    }
+
     /// `get_author_posts_url()` of the author with `nicename`.
     pub fn author_link(&self, home: &str, nicename: &str) -> Option<String> {
         if !self.pretty() {
@@ -312,6 +342,227 @@ impl Permalinks {
         parts.retain(|p| !p.is_empty() && p != "0");
         Some(format!("{}{query}", self.trailing(&parts.join("/"))))
     }
+}
+
+/// `get_permalink( $post )` on `site`, pretty or plain.
+pub fn permalink(site: &dyn Site, post: &Post) -> Vec<u8> {
+    let option = |name| site.option(name).unwrap_or_default();
+    let front_page = link::front_page(&option("show_on_front"), &option("page_on_front"));
+    link_with_front(site, post, front_page)
+}
+
+/// A post's link with `front_page` as the page on the front.
+fn link_with_front(site: &dyn Site, post: &Post, front_page: Option<u64>) -> Vec<u8> {
+    let links = Permalinks::of(site);
+    let home = site.home_url();
+    if !links.pretty() {
+        return link::permalink(&home, front_page, post);
+    }
+    let parts = PostParts {
+        category: if links.uses("%category%") {
+            category_path(site, post)
+        } else {
+            String::new()
+        },
+        author: if links.uses("%author%") {
+            site.user(post.author)
+                .map(|user| String::from_utf8_lossy(&user.nicename).into_owned())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        },
+        page_uri: if post.post_type == "page" {
+            page_uri(site, post)
+        } else {
+            String::new()
+        },
+    };
+    links
+        .post_link(&String::from_utf8_lossy(&home), front_page, post, &parts)
+        .map_or_else(
+            || link::permalink(&home, front_page, post),
+            String::into_bytes,
+        )
+}
+
+/// `get_term_link( $term, $taxonomy )` on `site`, pretty or plain.
+pub fn term_link(site: &dyn Site, taxonomy: &str, term: &Term) -> Vec<u8> {
+    let home = site.home_url();
+    let slugs = term_slugs(site, taxonomy, term);
+    let slugs: Vec<&str> = slugs.iter().map(String::as_str).collect();
+    Permalinks::of(site)
+        .term_link(&String::from_utf8_lossy(&home), taxonomy, &slugs)
+        .map_or_else(
+            || link::term_link(&home, taxonomy, term),
+            String::into_bytes,
+        )
+}
+
+/// `get_feed_link( $feed )` on `site`.
+pub fn feed_link(site: &dyn Site, feed: &str) -> Vec<u8> {
+    let home = site.home_url();
+    Permalinks::of(site)
+        .feed_link(&String::from_utf8_lossy(&home), feed)
+        .map_or_else(
+            || {
+                let feed = feed.replace("comments_", "comments-");
+                [&home[..], b"/?feed=", feed.as_bytes()].concat()
+            },
+            String::into_bytes,
+        )
+}
+
+/// `get_post_comments_feed_link( $post, $feed )` on `site`.
+pub fn post_comments_feed_link(site: &dyn Site, post: &Post, feed: &str) -> Vec<u8> {
+    let links = Permalinks::of(site);
+    if !links.pretty() {
+        let key: &[u8] = if post.post_type == "page" {
+            b"page_id"
+        } else {
+            b"p"
+        };
+        let id = post.id.to_string();
+        return hyscribe_phpser::add_query_arg(
+            &[(b"feed", Some(feed.as_bytes())), (key, Some(id.as_bytes()))],
+            &[&site.home_url()[..], b"/"].concat(),
+        );
+    }
+    // `_get_page_link()` gives the page on the front its own link here.
+    let link = link_with_front(site, post, None);
+    links
+        .feed_under(&String::from_utf8_lossy(&link), feed)
+        .into_bytes()
+}
+
+/// `get_term_feed_link( $term, $taxonomy, $feed )` on `site`.
+pub fn term_feed_link(site: &dyn Site, taxonomy: &str, term: &Term, feed: &str) -> Vec<u8> {
+    let links = Permalinks::of(site);
+    if !links.pretty() {
+        let query = match taxonomy {
+            "category" => format!("cat={}", term.id).into_bytes(),
+            "post_tag" => [&b"tag="[..], &term.slug].concat(),
+            _ => [format!("{taxonomy}=").as_bytes(), &term.slug].concat(),
+        };
+        return [
+            &site.home_url()[..],
+            b"/?feed=",
+            feed.as_bytes(),
+            b"&amp;",
+            &query,
+        ]
+        .concat();
+    }
+    let link = term_link(site, taxonomy, term);
+    links
+        .feed_under(&String::from_utf8_lossy(&link), feed)
+        .into_bytes()
+}
+
+/// `get_search_feed_link( $search, $feed )` on `site`.
+pub fn search_feed_link(site: &dyn Site, search: &[u8], feed: &str) -> Vec<u8> {
+    let home = site.home_url();
+    Permalinks::of(site)
+        .search_feed_link(&String::from_utf8_lossy(&home), search, feed)
+        .map_or_else(
+            || {
+                let link = [&home[..], b"/?s=", &urlencode(search)].concat();
+                hyscribe_phpser::add_query_arg(&[(b"feed", Some(feed.as_bytes()))], &link)
+            },
+            String::into_bytes,
+        )
+}
+
+/// `get_search_comments_feed_link( $search, $feed )` on `site`.
+pub fn search_comments_feed_link(site: &dyn Site, search: &[u8], feed: &str) -> Vec<u8> {
+    let home = site.home_url();
+    Permalinks::of(site)
+        .search_comments_feed_link(&String::from_utf8_lossy(&home), search, feed)
+        .map_or_else(
+            || {
+                let link = [&home[..], b"/?s=", &urlencode(search)].concat();
+                let feed = format!("comments-{feed}");
+                hyscribe_phpser::add_query_arg(&[(b"feed", Some(feed.as_bytes()))], &link)
+            },
+            String::into_bytes,
+        )
+}
+
+/// `get_author_posts_url( $id )` on `site`: the author's nicename, which a
+/// missing user leaves empty, under pretty permalinks.
+pub fn author_posts_url(site: &dyn Site, id: i64) -> Vec<u8> {
+    let home = site.home_url();
+    let nicename = || {
+        u64::try_from(id)
+            .ok()
+            .and_then(|id| site.user(id))
+            .map(|user| String::from_utf8_lossy(&user.nicename).into_owned())
+            .unwrap_or_default()
+    };
+    let links = Permalinks::of(site);
+    if links.pretty() {
+        links
+            .author_link(&String::from_utf8_lossy(&home), &nicename())
+            .unwrap_or_default()
+            .into_bytes()
+    } else {
+        link::author_posts_url(&home, id)
+    }
+}
+
+/// The slugs of `term` and the terms above it, from the top. A loop in
+/// the parents ends the walk.
+fn term_slugs(site: &dyn Site, taxonomy: &str, term: &Term) -> Vec<String> {
+    let mut slugs = vec![String::from_utf8_lossy(&term.slug).into_owned()];
+    let mut seen = vec![term.id];
+    let mut parent = term.parent;
+    while parent != 0
+        && let Some(term) = site
+            .term(parent, taxonomy)
+            .filter(|t| !seen.contains(&t.id))
+    {
+        slugs.insert(0, String::from_utf8_lossy(&term.slug).into_owned());
+        seen.push(term.id);
+        parent = term.parent;
+    }
+    slugs
+}
+
+/// `%category%`: the path of slugs of the post's category with the lowest
+/// ID, or the default category's slug alone.
+fn category_path(site: &dyn Site, post: &Post) -> String {
+    match site
+        .post_terms(post.id, "category")
+        .into_iter()
+        .min_by_key(|term| term.id)
+    {
+        Some(term) => term_slugs(site, "category", &term).join("/"),
+        None => {
+            let id = absint(&Value::String(
+                site.option("default_category").unwrap_or_default(),
+            ));
+            site.term(id, "category").map_or_else(String::new, |term| {
+                String::from_utf8_lossy(&term.slug).into_owned()
+            })
+        }
+    }
+}
+
+/// `get_page_uri()`: the page's name after those of its ancestors that
+/// have one. A loop in the parents ends the walk.
+fn page_uri(site: &dyn Site, post: &Post) -> String {
+    let mut uri = String::from_utf8_lossy(&post.name).into_owned();
+    let mut seen = vec![post.id];
+    let mut parent = post.parent;
+    while parent != 0
+        && let Some(page) = site.post(parent).filter(|p| !seen.contains(&p.id))
+    {
+        if !page.name.is_empty() {
+            uri = format!("{}/{uri}", String::from_utf8_lossy(&page.name));
+        }
+        seen.push(page.id);
+        parent = page.parent;
+    }
+    uri
 }
 
 /// `home_url( $path )`, for a path.

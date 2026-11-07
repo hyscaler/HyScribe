@@ -174,8 +174,7 @@ impl Renderer<'_> {
     }
 }
 
-/// `get_comments_pagenum_link()` with plain permalinks, for the global
-/// post.
+/// `get_comments_pagenum_link()` for the global post.
 pub(crate) fn comments_pagenum_link(context: &Context<'_>, page: i64, max_page: i64) -> Vec<u8> {
     let permalink = context
         .global_post()
@@ -187,10 +186,16 @@ pub(crate) fn comments_pagenum_link(context: &Context<'_>, page: i64, max_page: 
         .unwrap_or_default()
         == b"newest";
     let paged = if newest { page != max_page } else { page > 1 };
-    let mut url = if paged {
-        add_query_arg(&[(b"cpage", Some(page.to_string().as_bytes()))], &permalink)
-    } else {
+    let links = crate::permalinks::Permalinks::of(context.site);
+    let part = format!("comment-page-{page}");
+    let mut url = if !paged {
         permalink
+    } else if links.pretty() {
+        links
+            .under(&String::from_utf8_lossy(&permalink), &part)
+            .into_bytes()
+    } else {
+        add_query_arg(&[(b"cpage", Some(page.to_string().as_bytes()))], &permalink)
     };
     url.extend_from_slice(b"#comments");
     url
@@ -198,5 +203,5 @@ pub(crate) fn comments_pagenum_link(context: &Context<'_>, page: i64, max_page: 
 
 /// `get_query_var( 'cpage' )`.
 pub(crate) fn cpage(request: &Request) -> Value {
-    request.get.get_str("cpage").cloned().unwrap_or_default()
+    request.vars.get_str("cpage").cloned().unwrap_or_default()
 }

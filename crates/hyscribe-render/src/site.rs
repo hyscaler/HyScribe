@@ -52,6 +52,11 @@ pub trait Site {
         None
     }
 
+    /// `get_term( $id, $taxonomy )`. Sites without term data have none.
+    fn term(&self, _id: u64, _taxonomy: &str) -> Option<Term> {
+        None
+    }
+
     /// `get_adjacent_post()` for a visitor: the published post of `post`'s
     /// type just before (`previous`) or after it by date, then ID, sharing
     /// one of `terms` in their taxonomy when given. Sites without other
@@ -112,6 +117,9 @@ pub struct Request {
     pub uri: Vec<u8>,
     /// `$_GET`: the query as `parse_str()` reads it.
     pub get: Value,
+    /// The query vars: `$_GET` with what the path gives under pretty
+    /// permalinks.
+    pub vars: Value,
 }
 
 impl Request {

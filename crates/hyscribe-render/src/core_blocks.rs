@@ -159,9 +159,7 @@ impl Context<'_> {
 
     /// `get_permalink( $post )`.
     pub(crate) fn permalink(&self, post: &Post) -> Vec<u8> {
-        let option = |name| self.site.option(name).unwrap_or_default();
-        let front_page = link::front_page(&option("show_on_front"), &option("page_on_front"));
-        link::permalink(&self.site.home_url(), front_page, post)
+        crate::permalinks::permalink(self.site, post)
     }
 
     /// `site_url( $path )`.
@@ -568,10 +566,8 @@ fn post_author_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         .map(|user| user.display_name)
         .unwrap_or_default();
     if block.attribute("isLink").is_some_and(|v| !v.is_empty()) {
-        let url = esc_url(&link::author_posts_url(
-            &context.site.home_url(),
-            post.author,
-        ));
+        let author = i64::try_from(post.author).unwrap_or_default();
+        let url = esc_url(&crate::permalinks::author_posts_url(context.site, author));
         let target = block
             .attribute("linkTarget")
             .map(Value::to_php_string)
@@ -835,11 +831,10 @@ fn post_terms(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         b"</span>",
     ]
     .concat();
-    let home = context.site.home_url();
     let links: Vec<Vec<u8>> = terms
         .iter()
         .map(|term| {
-            let link = esc_url(&link::term_link(&home, &taxonomy, term));
+            let link = esc_url(&crate::permalinks::term_link(context.site, &taxonomy, term));
             [
                 &b"<a href=\""[..],
                 &link,

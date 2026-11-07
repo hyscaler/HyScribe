@@ -30,6 +30,7 @@ pub(crate) struct Reads<'a> {
     comments: RefCell<HashMap<u64, Vec<Comment>>>,
     comment: RefCell<HashMap<u64, Option<Comment>>>,
     terms: ByPost<Vec<Term>>,
+    term: ByPost<Option<Term>>,
     meta: ByPost<Option<Vec<u8>>>,
 }
 
@@ -45,6 +46,7 @@ impl<'a> Reads<'a> {
             comments: RefCell::default(),
             comment: RefCell::default(),
             terms: RefCell::default(),
+            term: RefCell::default(),
             meta: RefCell::default(),
         }
     }
@@ -137,5 +139,11 @@ impl RenderSite for Reads<'_> {
 
     fn user(&self, id: u64) -> Option<User> {
         self.memo(&self.users, id, || self.wait(self.site.db.user(id)))
+    }
+
+    fn term(&self, id: u64, taxonomy: &str) -> Option<Term> {
+        self.memo(&self.term, (id, taxonomy.to_string()), || {
+            self.wait(self.site.db.term(id, taxonomy))
+        })
     }
 }

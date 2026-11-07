@@ -169,6 +169,7 @@ fn own_pages_match_php() {
         let uri = state.get_str("uri").unwrap().to_php_string();
         let request = Request {
             get: parse_str(uri.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default()),
+            vars: parse_str(uri.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default()),
             uri,
             ..site.base.request("")
         };

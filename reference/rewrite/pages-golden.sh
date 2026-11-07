@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Records whole pages and redirects under pretty permalinks, as
+# crates/hyscribe-http/tests/golden/pretty-pages.tsv:
+#   structure|category base|tag base|page on front<TAB>hex(path and query)<TAB>status<TAB>location<TAB>hex(body)
+# reference/rewrite/permalinks.php is installed as a must-use plugin for the
+# run and removed after; it sets the permalink options by filter. Page views
+# write to the database, so start from a fresh db.sh up, then
+# php.sh up.
+set -euo pipefail
+
+DOCKER="${DOCKER:-docker}"
+NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
+BASE="${HYSCRIBE_PHP_URL:-http://127.0.0.1:8081}"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+OUT="$ROOT/crates/hyscribe-http/tests/golden/pretty-pages.tsv"
+MU=/var/www/html/wp-content/mu-plugins
+TMP=$(mktemp)
+HEADERS=$(mktemp)
+cleanup() {
+  rm -f "$TMP" "$HEADERS"
+  "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-permalinks.php"
+}
+trap cleanup EXIT
+"$DOCKER" exec "$NAME" mkdir -p "$MU"
+"$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-permalinks.php" < "$ROOT/reference/rewrite/permalinks.php"
+
+PATHS=(
+  / /hello-world/ /2026/10/27/hello-world/ /sample-page/ /category/uncategorized/ /2026/ /2026/10/ /2026/10/27/
+  /page/2/ /feed/ /feed/atom/ /comments/feed/ /hello-world/feed/ /2026/10/27/hello-world/feed/ /category/uncategorized/feed/
+  /search/hello/ /archives/1 /index.php/hello-world/ /uncategorized/hello-world/ /nope/
+  '/?p=1' '/?page_id=2' '/?cat=1' '/?m=2026' '/?m=202610' '/?m=20261027' '/?feed=rss2' '/?feed=comments-rss2' '/?s=hello'
+  '/?paged=2' '/?p=1&cpage=2' '/?p=1&page=2' '/?p=1&feed=rss2' '/?cat=1&feed=rss2' '/?p=1&embed=true' '/?p=1&tb=1'
+  /hello-world /2026/10/27/hello-world /sample-page /wp-sitemap.xml /wp-sitemap-posts-post-1.xml '/?sitemap=index' /robots.txt
+)
+SETUPS=('/%year%/%monthnum%/%day%/%postname%/|||' '/%postname%/|||' '/archives/%post_id%|||' '/index.php/%postname%/|||' '/%category%/%postname%/|||')
+: > "$OUT"
+for setup in "${SETUPS[@]}"; do
+  for path in "${PATHS[@]}"; do
+    curl -s -D "$HEADERS" -o "$TMP" -H "X-HyScribe-Permalinks: $setup" "$BASE$path" > /dev/null
+    status=$(head -n 1 "$HEADERS" | cut -d ' ' -f 2)
+    location=$(grep -i '^location:' "$HEADERS" | cut -d ' ' -f 2 | tr -d '\r' || true)
+    printf '%s\t%s\t%s\t%s\t%s\n' "$setup" "$(printf '%s' "$path" | xxd -p | tr -d '\n')" "$status" "$location" "$(xxd -p "$TMP" | tr -d '\n')" >> "$OUT"
+  done
+done
+wc -l "$OUT"

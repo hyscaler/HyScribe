@@ -192,6 +192,7 @@ fn query_filters_match_php() {
                                 name: text(term, "name"),
                                 slug: text(term, "slug"),
                                 description: Vec::new(),
+                                parent: 0,
                             },
                         )
                     })

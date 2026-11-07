@@ -357,6 +357,7 @@ async fn errors_are_reported() {
         db.option("blogname").await.unwrap_err(),
         db.post_meta(1, "x").await.unwrap_err(),
         db.post_terms(1, "category").await.unwrap_err(),
+        db.term(1, "category").await.unwrap_err(),
         db.user(1).await.unwrap_err(),
         db.comments(1).await.unwrap_err(),
         db.comment(1).await.unwrap_err(),
@@ -604,9 +605,15 @@ async fn options_meta_and_terms() {
             name: b"Uncategorized".to_vec(),
             slug: b"uncategorized".to_vec(),
             description: Vec::new(),
+            parent: 0,
         }]
     );
     assert!(db.post_terms(1, "post_tag").await.unwrap().is_empty());
+    assert_eq!(
+        db.term(1, "category").await.unwrap(),
+        terms.into_iter().next()
+    );
+    assert_eq!(db.term(1, "post_tag").await.unwrap(), None);
 }
 
 #[tokio::test]

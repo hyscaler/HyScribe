@@ -9,7 +9,6 @@ use hyscribe_phpser::{Key, Value, bin2hex, is_empty_string, isset, php_trim, raw
 use sha2::{Digest, Sha256};
 
 use super::{Block, Context};
-use crate::link::author_posts_url;
 use crate::style::get_styles;
 
 /// Whose avatar to show.
@@ -69,7 +68,7 @@ pub(super) fn avatar(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
             let alt = [&name[..], b" Avatar"].concat();
             image = get_avatar(context, &Subject::User(user), size, &alt, &class, &style);
             if link {
-                let url = author_posts_url(&context.site.home_url(), id);
+                let url = crate::permalinks::author_posts_url(context.site, id);
                 let label = blank
                     .then(|| [&b"("[..], &name, b" author archive, opens in a new tab)"].concat());
                 image = link_to(&esc_url(&url), &target, label, &image);

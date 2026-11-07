@@ -6,6 +6,7 @@
 use hyscribe_model::{Post, Term};
 use hyscribe_phpser::{Value, absint};
 
+use crate::permalinks::Permalinks;
 use crate::site::{Archive, Request, Taxonomy};
 
 /// The page on the front page: `page_on_front` when `show_on_front` is
@@ -28,16 +29,26 @@ pub fn shortlink(home: &[u8], front_page: Option<u64>, request: &Request) -> Opt
     })
 }
 
-/// `get_rest_url()` of `route` with plain permalinks.
-pub fn rest_url(home: &[u8], route: &str) -> Vec<u8> {
-    [home, b"/index.php?rest_route=", route.as_bytes()].concat()
+/// `get_rest_url()` of `route`; with plain permalinks `route` goes in the
+/// query as given.
+pub fn rest_url(home: &[u8], links: &Permalinks, route: &str) -> Vec<u8> {
+    links
+        .rest_url(&String::from_utf8_lossy(home), route)
+        .map_or_else(
+            || [home, b"/index.php?rest_route=", route.as_bytes()].concat(),
+            String::into_bytes,
+        )
 }
 
 /// The REST API root and the URL of what the request found, as
 /// `rest_output_link_wp_head()` and `rest_output_link_header()` link them.
-pub fn rest_links(home: &[u8], request: &Request) -> (Vec<u8>, Option<Vec<u8>>) {
-    let route = queried_resource_route(request).map(|route| rest_url(home, &route));
-    (rest_url(home, "/"), route)
+pub fn rest_links(
+    home: &[u8],
+    links: &Permalinks,
+    request: &Request,
+) -> (Vec<u8>, Option<Vec<u8>>) {
+    let route = queried_resource_route(request).map(|route| rest_url(home, links, &route));
+    (rest_url(home, links, "/"), route)
 }
 
 /// `rest_get_queried_resource_route()`: the route of a singular request's

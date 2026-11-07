@@ -117,6 +117,7 @@ impl DefaultInstall {
         if let Some((base, _)) = query.split_once("&cpage=") {
             return Request {
                 get: hyscribe_phpser::parse_str(query.as_bytes()),
+                vars: hyscribe_phpser::parse_str(query.as_bytes()),
                 ..self.request(base)
             };
         }
@@ -216,6 +217,7 @@ impl Site for DefaultInstall {
                     name: text(&term[1]),
                     slug: text(&term[2]),
                     description: Vec::new(),
+                    parent: 0,
                 })
             })
             .collect()

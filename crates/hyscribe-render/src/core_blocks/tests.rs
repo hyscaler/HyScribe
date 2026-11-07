@@ -354,6 +354,7 @@ fn post_terms_match_php() {
                         name: slug.clone(),
                         slug,
                         description: Vec::new(),
+                        parent: 0,
                     }
                 })
                 .collect();

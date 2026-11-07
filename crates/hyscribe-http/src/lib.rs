@@ -20,7 +20,7 @@ use axum::response::{IntoResponse, Response};
 use hyscribe_assets::wp_includes;
 use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html, esc_url_raw};
-use hyscribe_model::{OrderBy, Post, PostQuery, TermFilter, TimeCondition};
+use hyscribe_model::{OrderBy, Post, PostQuery, Term, TermFilter, TimeCondition};
 use hyscribe_phpser::{
     Key, Value, add_query_values, is_empty_string, parse_str, php_trim, rawurlencode,
     rawurlencode_deep, remove_query_arg, urldecode, urlencode,
@@ -29,7 +29,7 @@ use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::sanitize_title_for_query;
 use hyscribe_render::head::{Share, embed_page, wp_footer, wp_head};
 use hyscribe_render::link;
-use hyscribe_render::permalinks::home_path;
+use hyscribe_render::permalinks::{self, Permalinks, home_path};
 use hyscribe_render::post::body_class;
 use hyscribe_render::site::{Archive, Request, Taxonomy};
 use hyscribe_render::template::render_template;
@@ -98,6 +98,15 @@ impl Site {
         Ok(site)
     }
 
+    /// The permalink options.
+    fn permalinks(&self) -> Permalinks {
+        Permalinks::new(
+            &self.option("permalink_structure"),
+            &self.option("category_base"),
+            &self.option("tag_base"),
+        )
+    }
+
     /// The rewrite rules for the permalink options as they are now.
     fn build_rewriter(&mut self) {
         self.rewriter = rewrite::Rewriter::new(&rewrite::Settings {
@@ -138,13 +147,70 @@ impl Site {
         esc_html(self.option("blogname").as_bytes())
     }
 
-    fn permalink(&self, post: &Post) -> String {
-        String::from_utf8_lossy(&link::permalink(
-            self.home.as_bytes(),
-            self.front_page(),
-            post,
-        ))
-        .into_owned()
+    /// `get_permalink( $post )`; see [`Site::links`].
+    async fn permalink(self: &Arc<Self>, post: &Post) -> String {
+        let links = self.links(vec![post.clone()]).await;
+        links.into_iter().next().unwrap_or_default()
+    }
+
+    /// `get_permalink()` of each of `posts`. Pretty links read what they
+    /// name on one blocking task, as rendering reads; when a read fails,
+    /// or under plain permalinks, they are the plain links, which always
+    /// resolve.
+    async fn links(self: &Arc<Self>, posts: Vec<Post>) -> Vec<String> {
+        let plain: Vec<String> = posts
+            .iter()
+            .map(|post| {
+                lossy(&link::permalink(
+                    self.home.as_bytes(),
+                    self.front_page(),
+                    post,
+                ))
+            })
+            .collect();
+        self.read(plain, move |reads| {
+            posts
+                .iter()
+                .map(|post| lossy(&permalinks::permalink(reads, post)))
+                .collect()
+        })
+        .await
+    }
+
+    /// `get_term_link()` of each of `terms` of `taxonomy`; see [`Site::links`].
+    async fn term_links(self: &Arc<Self>, taxonomy: &str, terms: Vec<Term>) -> Vec<String> {
+        let plain: Vec<String> = terms
+            .iter()
+            .map(|term| lossy(&link::term_link(self.home.as_bytes(), taxonomy, term)))
+            .collect();
+        let taxonomy = taxonomy.to_string();
+        self.read(plain, move |reads| {
+            terms
+                .iter()
+                .map(|term| lossy(&permalinks::term_link(reads, &taxonomy, term)))
+                .collect()
+        })
+        .await
+    }
+
+    /// `read`'s result under pretty permalinks, or `plain` without them or
+    /// when a read fails.
+    async fn read<T: Clone + Send + 'static>(
+        self: &Arc<Self>,
+        plain: T,
+        read: impl FnOnce(&Reads) -> T + Send + 'static,
+    ) -> T {
+        if !self.permalinks().pretty() {
+            return plain;
+        }
+        let (site, fallback) = (Arc::clone(self), plain.clone());
+        tokio::task::spawn_blocking(move || {
+            let reads = Reads::new(&site, tokio::runtime::Handle::current());
+            let value = read(&reads);
+            reads.finish().map_or(fallback, |()| value)
+        })
+        .await
+        .unwrap_or(plain)
     }
 }
 
@@ -239,6 +305,8 @@ async fn page(
     if let Some(response) = static_file(uri.path()).filter(|_| !post) {
         return response;
     }
+    // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.
+    let original = uri.clone();
     let (uri, query, pretty) = match pretty_request(&site, uri, query).await {
         Ok(request) => request,
         Err(err) => return html(database_error(&site, &err)),
@@ -282,7 +350,13 @@ async fn page(
         )
             .into_response(),
         Outcome::Feed(page, feed) => {
-            feed::respond(site.clone(), requested(*page, &uri), feed, &headers).await
+            feed::respond(
+                site.clone(),
+                requested(*page, &original, &uri),
+                feed,
+                &headers,
+            )
+            .await
         }
         Outcome::Xml(body) => {
             let content_type = [(header::CONTENT_TYPE, "application/xml; charset=UTF-8")];
@@ -302,7 +376,7 @@ async fn page(
         Outcome::Page(mut page) => {
             let embed = embeds(&query, &uri, page.request.singular);
             page.request.embed = embed;
-            let mut response = html(render(&site, requested(*page, &uri)).await);
+            let mut response = html(render(&site, requested(*page, &original, &uri)).await);
             if embed {
                 response
                     .headers_mut()
@@ -417,7 +491,7 @@ async fn pretty_request(
 /// sitemaps and robots.txt, and the `Link` headers `template_redirect`
 /// sends after `redirect_canonical()`, which a sitemap never reaches.
 async fn outcome(
-    site: &Site,
+    site: &Arc<Site>,
     uri: &Uri,
     query: &HashMap<String, String>,
     pretty: bool,
@@ -457,8 +531,9 @@ async fn outcome(
 /// singular post's shortlink.
 fn link_headers(site: &Site, request: Option<&Request>) -> Vec<String> {
     let home = site.home.as_bytes();
-    let (root, route) = request.map_or((link::rest_url(home, "/"), None), |request| {
-        link::rest_links(home, request)
+    let links = site.permalinks();
+    let (root, route) = request.map_or((link::rest_url(home, &links, "/"), None), |request| {
+        link::rest_links(home, &links, request)
     });
     let mut links = vec![format!(
         "<{}>; rel=\"https://api.w.org/\"",
@@ -681,12 +756,14 @@ fn with_query(base: &str, query: &str) -> String {
     }
 }
 
-/// `page` with the request's URI and query.
-fn requested(page: Page, uri: &Uri) -> Page {
+/// `page` with the request as made, `uri`, and `vars`, the query it stands
+/// for with what its path gives.
+fn requested(page: Page, uri: &Uri, vars: &Uri) -> Page {
     Page {
         request: Request {
             uri: request_uri(uri),
             get: parse_str(uri.query().unwrap_or_default().as_bytes()),
+            vars: parse_str(vars.query().unwrap_or_default().as_bytes()),
             ..page.request
         },
         ..page
@@ -925,7 +1002,7 @@ fn is_static(path: &str) -> bool {
 }
 
 async fn route(
-    site: &Site,
+    site: &Arc<Site>,
     path: &str,
     raw_query: Option<&str>,
     query: &HashMap<String, String>,
@@ -1039,9 +1116,13 @@ async fn route(
         Some((name, id, post_type)) => {
             let post = site.db.post(id).await?;
             let hidden = post.as_ref().is_some_and(|p| hides(p, format.is_some()));
+            let link = match &post {
+                Some(post) => site.permalink(post).await,
+                None => String::new(),
+            };
             // `?p=` for a page or `?page_id=` for a post.
             let elsewhere = |post: &Post| {
-                (post.post_type != post_type).then(|| post_location(site, post, raw_query))
+                (post.post_type != post_type).then(|| post_location(&link, post, raw_query))
             };
             Ok(
                 match (format, post.filter(|p| viewable(p, &["post", "page"]))) {
@@ -1074,7 +1155,7 @@ async fn route(
                     }
                     (None, Some(post)) => match elsewhere(&post) {
                         Some(location) => Outcome::Redirect(location),
-                        None => paged_single(site, query, raw_query, name, post),
+                        None => paged_single(site, query, raw_query, &link, name, post),
                     },
                     (None, None) => Outcome::Page(Box::new(Page {
                         hidden,
@@ -1139,6 +1220,7 @@ fn paged_single(
     site: &Site,
     query: &HashMap<String, String>,
     raw_query: Option<&str>,
+    link: &str,
     name: &str,
     post: Post,
 ) -> Outcome {
@@ -1157,7 +1239,7 @@ fn paged_single(
         Some(_) if found => Outcome::Page(Box::new(single_page(site, post, Paging::of(query)))),
         Some(_) if Paging::of(query).page >= 1 => {
             let args = other_args(raw_query, &[name, "page"]);
-            Outcome::Redirect(format!("{}{args}", site.permalink(&post)))
+            Outcome::Redirect(format!("{link}{args}"))
         }
         Some(_) => Outcome::Page(Box::new(not_found(site, false))),
         None => Outcome::Page(Box::new(single_page(site, post, Paging::of(query)))),
@@ -1556,7 +1638,7 @@ fn hides(post: &Post, feed: bool) -> bool {
 
 /// A redirect to the published post or page with `id`'s link, else `missing`.
 async fn redirect_to(
-    site: &Site,
+    site: &Arc<Site>,
     id: u64,
     raw_query: Option<&str>,
     missing: Page,
@@ -1564,7 +1646,8 @@ async fn redirect_to(
     let post = site.db.post(id).await?;
     Ok(match post {
         Some(post) if viewable(&post, &["post", "page"]) => {
-            Outcome::Redirect(post_location(site, &post, raw_query))
+            let link = site.permalink(&post).await;
+            Outcome::Redirect(post_location(&link, &post, raw_query))
         }
         post => Outcome::Page(Box::new(Page {
             hidden: post.is_some_and(|p| hides(&p, false)),
@@ -1594,7 +1677,7 @@ enum Slug {
 /// `redirect_guess_404_permalink()`: the first published post or page
 /// whose name starts with the one asked for.
 async fn by_slug(
-    site: &Site,
+    site: &Arc<Site>,
     raw_query: Option<&str>,
     query: &HashMap<String, String>,
 ) -> Result<Option<Slug>, DbError> {
@@ -1649,6 +1732,10 @@ async fn by_slug(
         let parts = (date("year"), date("monthnum"), date("day"));
         site.db.guess_post(&name, &post_types, parts).await
     };
+    let link = match &guess {
+        Ok(Some(post)) => site.permalink(post).await,
+        _ => String::new(),
+    };
     guess.map(|guess| {
         Some(match guess {
             Some(post) => {
@@ -1660,7 +1747,7 @@ async fn by_slug(
                 // `page` and `feed` go first, as `redirect_canonical()` drops them.
                 let mut drop = vec!["page", "feed"];
                 drop.extend(singular_args_but(id_name));
-                Slug::Moved(tack(&site.permalink(&post), raw_query, &drop))
+                Slug::Moved(tack(&link, raw_query, &drop))
             }
             None => Slug::Post((key, 0, post_type)),
         })
@@ -1757,13 +1844,13 @@ fn single_feed_location(site: &Site, raw_query: Option<&str>, name: &str, id: u6
 }
 
 /// A post's link, where `redirect_canonical()` sends a request for it.
-fn post_location(site: &Site, post: &Post, raw_query: Option<&str>) -> String {
+fn post_location(link: &str, post: &Post, raw_query: Option<&str>) -> String {
     let name = if post.post_type == "page" {
         "page_id"
     } else {
         "p"
     };
-    tack(&site.permalink(post), raw_query, &singular_args_but(name))
+    tack(link, raw_query, &singular_args_but(name))
 }
 
 /// [`SINGULAR_ARGS`] but `name`, the one a post's link has.

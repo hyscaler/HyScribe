@@ -153,6 +153,7 @@ fn matches_php() {
             post: state.get_str("global").map(|id| id.to_int() as u64),
             uri: uri.clone(),
             get: parse_str(uri.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default()),
+            vars: parse_str(uri.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default()),
             posts: state.get_str("main").map_or(Vec::new(), |ids| {
                 ids.as_array()
                     .unwrap()

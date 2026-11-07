@@ -5,6 +5,7 @@
 //! POST that carries one is told so and nothing is stored.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
@@ -28,7 +29,7 @@ pub(crate) fn is_file(path: &str) -> bool {
 /// from a 404, which the query's own (a negative or array `p`, or an
 /// invalid date) sends with a 200.
 pub(crate) async fn outcome(
-    site: &Site,
+    site: &Arc<Site>,
     uri: &Uri,
     query: &HashMap<String, String>,
 ) -> Result<Outcome, DbError> {
@@ -83,7 +84,12 @@ pub(crate) fn form(headers: &HeaderMap, body: &[u8]) -> Value {
 /// The reply to a trackback request with `form` as `$_POST`. Only a
 /// published post or page is linked, where WordPress links any post,
 /// telling drafts and private posts apart from IDs with none.
-pub(crate) async fn respond(site: &Site, id: i64, status: StatusCode, form: &Value) -> Response {
+pub(crate) async fn respond(
+    site: &Arc<Site>,
+    id: i64,
+    status: StatusCode,
+    form: &Value,
+) -> Response {
     // `sanitize_text_field()` makes an array empty; `sanitize_url()` of one
     // is a fatal error in PHP, and empty here.
     let field = |name| match form.get_str(name) {
@@ -124,7 +130,7 @@ pub(crate) async fn respond(site: &Site, id: i64, status: StatusCode, form: &Val
     match post {
         Ok(Some(post)) if viewable(&post, &["post", "page"]) => (
             StatusCode::FOUND,
-            [(header::LOCATION, site.permalink(&post))],
+            [(header::LOCATION, site.permalink(&post).await)],
         )
             .into_response(),
         // `wp_redirect()` of no link sends nothing.

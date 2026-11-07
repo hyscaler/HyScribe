@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use super::*;
+use crate::site::Site;
 
 const HOME: &str = "http://127.0.0.1:8081";
 
@@ -143,6 +144,12 @@ fn links_match_php() {
                         .search_feed_link(HOME, search.as_bytes(), feed)
                         .unwrap()
                 }
+                "search_comments_feed_link" => {
+                    let search = rest.strip_suffix(" atom").unwrap();
+                    links
+                        .search_comments_feed_link(HOME, search.as_bytes(), "atom")
+                        .unwrap()
+                }
                 "author_posts_url" => links.author_link(HOME, "admin").unwrap(),
                 "author_feed_link" => {
                     links.feed_under(&links.author_link(HOME, "admin").unwrap(), "rss2")
@@ -167,7 +174,7 @@ fn links_match_php() {
         }
         assert_eq!(ours, expected, "{head}");
     }
-    assert_eq!(lines, 976);
+    assert_eq!(lines, 1024);
 }
 
 #[test]
@@ -222,4 +229,206 @@ fn plain_permalinks_have_no_pretty_links() {
         "http://example.test/blog/page/2/?a=1"
     );
     assert_eq!(collapse_slashes("//a///b"), "/a/b");
+}
+
+/// A site with nested categories and pages, for the walks up their parents.
+struct Nested {
+    structure: &'static str,
+    default_category: &'static str,
+    categories: Vec<u64>,
+    /// Reads of users and post terms, which only `%author%` and
+    /// `%category%` need.
+    reads: std::cell::Cell<u32>,
+}
+
+fn term(id: u64, slug: &str, parent: u64) -> Term {
+    Term {
+        id,
+        slug: slug.as_bytes().to_vec(),
+        parent,
+        ..Term::default()
+    }
+}
+
+impl Site for Nested {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        let value = match name {
+            "permalink_structure" => self.structure,
+            "default_category" => self.default_category,
+            _ => return None,
+        };
+        Some(value.as_bytes().to_vec())
+    }
+
+    fn home_url(&self) -> Vec<u8> {
+        HOME.as_bytes().to_vec()
+    }
+
+    fn post(&self, id: u64) -> Option<Post> {
+        let page = |id, name: &str, parent| Post {
+            parent,
+            ..post(id, "page", "publish", name, "")
+        };
+        // A loop: "a" sits under "c".
+        [
+            page(4, "a", 7),
+            page(5, "", 4),
+            page(6, "b", 5),
+            page(7, "c", 6),
+        ]
+        .into_iter()
+        .find(|p| p.id == id)
+    }
+
+    fn post_terms(&self, _post_id: u64, _taxonomy: &str) -> Vec<Term> {
+        self.reads.set(self.reads.get() + 1);
+        self.categories
+            .iter()
+            .filter_map(|id| self.term(*id, "category"))
+            .collect()
+    }
+
+    fn post_meta(&self, _post_id: u64, _key: &str) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn query(&self, _query: &hyscribe_model::PostQuery) -> Vec<Post> {
+        Vec::new()
+    }
+
+    fn term(&self, id: u64, _taxonomy: &str) -> Option<Term> {
+        // A loop: 8 is its own parent's parent.
+        [
+            term(1, "top", 0),
+            term(2, "mid", 1),
+            term(3, "leaf", 2),
+            term(8, "x", 9),
+            term(9, "y", 8),
+        ]
+        .into_iter()
+        .find(|t| t.id == id)
+    }
+
+    fn user(&self, id: u64) -> Option<hyscribe_model::User> {
+        self.reads.set(self.reads.get() + 1);
+        (id == 1).then(|| hyscribe_model::User {
+            nicename: b"jo".to_vec(),
+            ..hyscribe_model::User::default()
+        })
+    }
+}
+
+#[test]
+fn links_walk_up_their_parents() {
+    let site = |categories: Vec<u64>, default_category| Nested {
+        structure: "/%category%/%author%/%postname%/",
+        default_category,
+        categories,
+        reads: Default::default(),
+    };
+    let mut entry = post(10, "post", "publish", "entry", "2026-01-02 03:04:05");
+    entry.author = 1;
+    let link = |site: &Nested, post: &Post| String::from_utf8(permalink(site, post)).unwrap();
+    // The category with the lowest ID, with those above it.
+    assert_eq!(
+        link(&site(vec![9, 3], ""), &entry),
+        format!("{HOME}/top/mid/leaf/jo/entry/")
+    );
+    // A loop in the parents ends the walk; no category takes the default.
+    assert_eq!(
+        link(&site(vec![8], ""), &entry),
+        format!("{HOME}/y/x/jo/entry/")
+    );
+    // The default category goes by its own slug alone.
+    assert_eq!(
+        link(&site(vec![], "2"), &entry),
+        format!("{HOME}/mid/jo/entry/")
+    );
+    // `home_url()` drops the empty category's leading slash.
+    assert_eq!(
+        link(&site(vec![], "99"), &entry),
+        format!("{HOME}/jo/entry/")
+    );
+    entry.author = 2;
+    assert_eq!(
+        link(&site(vec![1], ""), &entry),
+        format!("{HOME}/top//entry/")
+    );
+    // Pages: names from the top, an empty one skipped, a loop ended.
+    let nested = site(vec![], "");
+    let page = nested.post(7).unwrap();
+    assert_eq!(link(&nested, &page), format!("{HOME}/a/b/c/"));
+    let leaf = term(3, "leaf", 2);
+    assert_eq!(
+        String::from_utf8(term_link(&nested, "category", &leaf)).unwrap(),
+        format!("{HOME}/category/top/mid/leaf/")
+    );
+    // Plain permalinks for the post types and taxonomies pretty ones skip.
+    let book = post(11, "book", "publish", "b", "");
+    assert_eq!(link(&nested, &book), format!("{HOME}/?post_type=book&p=11"));
+    assert_eq!(
+        String::from_utf8(author_posts_url(&nested, 1)).unwrap(),
+        format!("{HOME}/author/jo/")
+    );
+    assert_eq!(
+        String::from_utf8(author_posts_url(&nested, -1)).unwrap(),
+        format!("{HOME}/author/")
+    );
+}
+
+#[test]
+fn comment_pages_under_pretty_permalinks() {
+    let site = Nested {
+        structure: "/%postname%/",
+        default_category: "",
+        categories: Vec::new(),
+        reads: Default::default(),
+    };
+    let theme = crate::theme::twentytwentyfive();
+    let request = crate::site::Request {
+        post: Some(7),
+        ..crate::site::Request::default()
+    };
+    let context = crate::core_blocks::Context {
+        theme: &theme,
+        site: &site,
+        request: &request,
+        post_id: None,
+        query: None,
+        comment: None,
+        loading: Default::default(),
+    };
+    let entry = post(10, "post", "publish", "entry", "2026-01-02 03:04:05");
+    assert_eq!(
+        String::from_utf8(permalink(&site, &entry)).unwrap(),
+        format!("{HOME}/entry/")
+    );
+    // Neither the author nor the categories are read for this structure.
+    assert_eq!(site.reads.get(), 0);
+    let link = crate::comment_pages::comments_pagenum_link(&context, 2, 2);
+    assert_eq!(
+        String::from_utf8(link).unwrap(),
+        format!("{HOME}/a/b/c/comment-page-2/#comments")
+    );
+}
+
+#[test]
+fn plain_term_feed_links() {
+    let site = Nested {
+        structure: "",
+        default_category: "",
+        categories: Vec::new(),
+        reads: Default::default(),
+    };
+    let feed = |taxonomy, slug| {
+        String::from_utf8(term_feed_link(&site, taxonomy, &term(5, slug, 0), "rss2")).unwrap()
+    };
+    assert_eq!(
+        feed("post_tag", "a"),
+        format!("{HOME}/?feed=rss2&amp;tag=a")
+    );
+    assert_eq!(
+        feed("post_format", "post-format-aside"),
+        format!("{HOME}/?feed=rss2&amp;post_format=post-format-aside")
+    );
 }

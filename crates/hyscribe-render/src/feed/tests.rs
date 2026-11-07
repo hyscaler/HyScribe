@@ -287,7 +287,7 @@ fn comment_feeds_match_php() {
                 .map(|(k, v)| format!(
                     "{}={}",
                     String::from_utf8(k.to_php_string()).unwrap(),
-                    String::from_utf8(urlencode(&v.to_php_string())).unwrap()
+                    String::from_utf8(hyscribe_phpser::urlencode(&v.to_php_string())).unwrap()
                 ))
                 .collect::<Vec<_>>()
                 .join("&")

@@ -57,6 +57,8 @@ pub struct Term {
     pub slug: Vec<u8>,
     /// `description`, of the term in its taxonomy.
     pub description: Vec<u8>,
+    /// `parent`: the term above it in its taxonomy, 0 for none.
+    pub parent: u64,
 }
 
 /// A row of `{prefix}users`, with the columns rendering needs.

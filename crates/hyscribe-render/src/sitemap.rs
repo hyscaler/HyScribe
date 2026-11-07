@@ -13,9 +13,10 @@ pub struct Entry {
     pub lastmod: Option<String>,
 }
 
-/// The sitemap index listing `locs`, with the index stylesheet of `home`.
-pub fn index(home: &[u8], locs: &[Vec<u8>]) -> Vec<u8> {
-    let mut xml = document(home, b"index", b"sitemapindex");
+/// The sitemap index listing `locs`, with the index stylesheet of `home`,
+/// at its pretty URL when `pretty`.
+pub fn index(home: &[u8], pretty: bool, locs: &[Vec<u8>]) -> Vec<u8> {
+    let mut xml = document(home, pretty, "index", b"sitemapindex");
     for loc in locs {
         xml.extend_from_slice(b"<sitemap><loc>");
         xml.extend(text(&esc_url(loc)));
@@ -25,9 +26,10 @@ pub fn index(home: &[u8], locs: &[Vec<u8>]) -> Vec<u8> {
     xml
 }
 
-/// The sitemap of `entries`, with the sitemap stylesheet of `home`.
-pub fn urlset(home: &[u8], entries: &[Entry]) -> Vec<u8> {
-    let mut xml = document(home, b"sitemap", b"urlset");
+/// The sitemap of `entries`, with the sitemap stylesheet of `home`, at its
+/// pretty URL when `pretty`.
+pub fn urlset(home: &[u8], pretty: bool, entries: &[Entry]) -> Vec<u8> {
+    let mut xml = document(home, pretty, "sitemap", b"urlset");
     for entry in entries {
         xml.extend_from_slice(b"<url><loc>");
         xml.extend(text(&esc_url(&entry.loc)));
@@ -45,8 +47,14 @@ pub fn urlset(home: &[u8], entries: &[Entry]) -> Vec<u8> {
 
 /// The declaration, the stylesheet instruction and the open root element,
 /// as `SimpleXMLElement::asXML()` prints them.
-fn document(home: &[u8], stylesheet: &[u8], root: &[u8]) -> Vec<u8> {
-    let href = esc_url(&[home, b"/?sitemap-stylesheet=", stylesheet].concat());
+fn document(home: &[u8], pretty: bool, stylesheet: &str, root: &[u8]) -> Vec<u8> {
+    // `get_sitemap_stylesheet_url()` and `get_sitemap_index_stylesheet_url()`.
+    let path = match (pretty, stylesheet) {
+        (false, _) => format!("/?sitemap-stylesheet={stylesheet}"),
+        (true, "index") => "/wp-sitemap-index.xsl".into(),
+        (true, _) => "/wp-sitemap.xsl".into(),
+    };
+    let href = esc_url(&[home, path.as_bytes()].concat());
     [
         &b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<?xml-stylesheet type=\"text/xsl\" href=\""
             [..],

@@ -14,7 +14,6 @@ use crate::autop::wpautop;
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, contains, wptexturize};
-use crate::link::{front_page, permalink};
 use crate::post::the_title;
 use crate::site::Request;
 use crate::supports::get_block_wrapper_attributes;
@@ -244,13 +243,7 @@ fn wp_link_pages(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
 }
 
 fn renderer_permalink(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
-    let site = renderer.context.site;
-    let option = |name| site.option(name).unwrap_or_default();
-    permalink(
-        &site.home_url(),
-        front_page(&option("show_on_front"), &option("page_on_front")),
-        post,
-    )
+    crate::permalinks::permalink(renderer.context.site, post)
 }
 
 /// The pages of a post's content, split at `<!--nextpage-->` as

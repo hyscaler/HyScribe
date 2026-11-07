@@ -28,7 +28,7 @@ fn the_index_matches_php_without_users() {
         "<sitemap><loc>http://127.0.0.1:8081/?sitemap=users&amp;paged=1</loc></sitemap>",
         "",
     );
-    assert_eq!(String::from_utf8(index(HOME, &locs)).unwrap(), php);
+    assert_eq!(String::from_utf8(index(HOME, false, &locs)).unwrap(), php);
 }
 
 #[test]
@@ -40,11 +40,11 @@ fn url_sets_match_php() {
     let modified = Some("2026-10-27T08:08:15+00:00");
     let pages = [page("/", modified), page("/?page_id=2", modified)];
     assert_eq!(
-        String::from_utf8(urlset(HOME, &pages)).unwrap(),
+        String::from_utf8(urlset(HOME, false, &pages)).unwrap(),
         recorded("/?sitemap=posts&sitemap-subtype=page&paged=1")
     );
     assert_eq!(
-        String::from_utf8(urlset(HOME, &[page("/?cat=1", None)])).unwrap(),
+        String::from_utf8(urlset(HOME, false, &[page("/?cat=1", None)])).unwrap(),
         recorded("/?sitemap=taxonomies&sitemap-subtype=category&paged=1")
     );
     // Entity references read, then escaped for XML.

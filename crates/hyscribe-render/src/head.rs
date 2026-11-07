@@ -12,9 +12,9 @@ use hyscribe_phpser::{Value, add_query_arg, is_empty_string, json_decode, urlenc
 
 use crate::comment_pages::{comments_pagenum_link, cpage};
 use crate::core_blocks::comments_open;
-use crate::feed::post_comments_feed_link;
 use crate::layout::{Rule, stylesheet};
 use crate::link;
+use crate::permalinks;
 use crate::post::the_title;
 use crate::site::{Archive, Request, Site, Taxonomy};
 use crate::template::Renderer;
@@ -174,11 +174,6 @@ impl Head<'_> {
         !is_empty_string(&self.option(name))
     }
 
-    /// `home_url( $path )`.
-    fn home_url(&self, path: &[u8]) -> Vec<u8> {
-        [&self.site.home_url()[..], b"/", trim_slashes(path)].concat()
-    }
-
     /// The main query's post on a singular request.
     fn queried_post(&self) -> Option<&hyscribe_model::Post> {
         self.request.posts.first().filter(|_| self.request.singular)
@@ -229,11 +224,11 @@ impl Head<'_> {
         };
         let mut out = link(
             &format!("{name} &raquo; Feed"),
-            &self.home_url(b"?feed=rss2"),
+            &permalinks::feed_link(self.site, "rss2"),
         );
         out.push_str(&link(
             &format!("{name} &raquo; Comments Feed"),
-            &self.home_url(b"?feed=comments-rss2"),
+            &permalinks::feed_link(self.site, "comments_rss2"),
         ));
         let extra = if let Some(post) = self.queried_post() {
             // comments_open(), pings_open() or comments: none has a side effect.
@@ -245,7 +240,7 @@ impl Head<'_> {
             .contains(&true);
             open.then(|| {
                 let title = esc_attr(&strip_tags(&the_title(post)));
-                let href = post_comments_feed_link(self.site, post, b"rss2");
+                let href = permalinks::post_comments_feed_link(self.site, post, "rss2");
                 (format!("{name} &raquo; {title} Comments Feed"), href)
             })
         } else if let Some(Archive::Term(taxonomy, term)) = &self.request.archive {
@@ -255,12 +250,14 @@ impl Head<'_> {
                 .map(|term| self.term_feed_link(&name, *taxonomy, term))
         } else {
             self.request.search.as_ref().map(|search| {
-                let link = self.home_url(&[&b"?s="[..], &urlencode(search)].concat());
                 let title = format!(
                     "{name} &raquo; Search Results for &#8220;{}&#8221; Feed",
                     String::from_utf8_lossy(search)
                 );
-                (title, add_query_arg(&[(b"feed", Some(b"rss2"))], &link))
+                (
+                    title,
+                    permalinks::search_feed_link(self.site, search, "rss2"),
+                )
             })
         };
         if let Some((title, href)) = extra {
@@ -272,10 +269,10 @@ impl Head<'_> {
     /// `feed_links_extra()` of a term archive: the feed's name and
     /// get_term_feed_link().
     fn term_feed_link(&self, name: &str, taxonomy: Taxonomy, term: &Term) -> (String, Vec<u8>) {
-        let (query, kind) = match taxonomy {
-            Taxonomy::Category => (format!("cat={}", term.id).into_bytes(), "Category"),
-            Taxonomy::Tag => ([&b"tag="[..], &term.slug].concat(), "Tag"),
-            Taxonomy::Format => ([&b"post_format="[..], &term.slug].concat(), "Format"),
+        let (slug, kind) = match taxonomy {
+            Taxonomy::Category => ("category", "Category"),
+            Taxonomy::Tag => ("post_tag", "Tag"),
+            Taxonomy::Format => ("post_format", "Format"),
         };
         let title = format!(
             "{name} &raquo; {} {kind} Feed",
@@ -283,7 +280,7 @@ impl Head<'_> {
         );
         (
             title,
-            self.home_url(&[&b"?feed=rss2&amp;"[..], &query].concat()),
+            permalinks::term_feed_link(self.site, slug, term, "rss2"),
         )
     }
 
@@ -397,9 +394,17 @@ impl Head<'_> {
         let Some(post) = self.queried_post() else {
             return Vec::new();
         };
+        // `get_oembed_endpoint_url()`: `add_query_arg()` encodes the plain
+        // route.
+        let links = permalinks::Permalinks::of(self.site);
+        let (route, separator): (&str, &[u8]) = if links.pretty() {
+            ("/oembed/1.0/embed", b"?url=")
+        } else {
+            ("%2Foembed%2F1.0%2Fembed", b"&url=")
+        };
         let endpoint = [
-            &link::rest_url(&self.site.home_url(), "%2Foembed%2F1.0%2Fembed")[..],
-            b"&url=",
+            &link::rest_url(&self.site.home_url(), &links, route)[..],
+            separator,
             &urlencode(&self.context.permalink(post)),
         ]
         .concat();
@@ -421,7 +426,8 @@ impl Head<'_> {
     /// `rest_output_link_wp_head()`, printed without a trailing newline,
     /// as PHP prints it.
     fn rest_links(&self) -> Vec<u8> {
-        let (root, route) = link::rest_links(&self.site.home_url(), self.request);
+        let links = permalinks::Permalinks::of(self.site);
+        let (root, route) = link::rest_links(&self.site.home_url(), &links, self.request);
         let mut out = format!(
             "<link rel=\"https://api.w.org/\" href=\"{}\" />",
             String::from_utf8_lossy(&esc_url(&root))
@@ -673,11 +679,6 @@ fn trim_quotes(text: &[u8]) -> &[u8] {
         .rposition(|&b| b != b'"' && b != b'\'')
         .map_or(start, |at| at + 1);
     text.get(start..end).unwrap_or_default()
-}
-
-fn trim_slashes(path: &[u8]) -> &[u8] {
-    let start = path.iter().position(|&b| b != b'/').unwrap_or(path.len());
-    path.get(start..).unwrap_or_default()
 }
 
 /// A style a rendered block enqueued, by its handle: a core block's

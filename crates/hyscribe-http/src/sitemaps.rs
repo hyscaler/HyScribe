@@ -5,6 +5,7 @@
 //! which give away login names (docs/SECURITY_MODEL.md).
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use hyscribe_db::DbError;
 use hyscribe_kses::esc_url;
@@ -27,7 +28,7 @@ const TAXONOMIES: [&str; 3] = ["category", "post_tag", "post_format"];
 /// `outcome`, or the sitemap, stylesheet or 404 of the sitemap query vars,
 /// which `render_sitemaps()` serves after redirect_canonical()'s redirects.
 pub(crate) async fn serve(
-    site: &Site,
+    site: &Arc<Site>,
     query: &HashMap<String, String>,
     outcome: Outcome,
 ) -> Result<Outcome, DbError> {
@@ -48,7 +49,10 @@ pub(crate) fn redirects(outcome: &Outcome) -> bool {
 
 /// The sitemap, stylesheet or 404 of the sitemap query vars; `None`
 /// without them, `0` being none, as PHP takes it.
-async fn route(site: &Site, query: &HashMap<String, String>) -> Result<Option<Outcome>, DbError> {
+async fn route(
+    site: &Arc<Site>,
+    query: &HashMap<String, String>,
+) -> Result<Option<Outcome>, DbError> {
     let var = |name: &str| query.get(name).map_or("", String::as_str);
     if ["sitemap", "sitemap-stylesheet"]
         .iter()
@@ -74,9 +78,11 @@ async fn route(site: &Site, query: &HashMap<String, String>) -> Result<Option<Ou
             .or_else(missing));
     }
     let home = site.home.as_bytes();
+    let pretty = site.permalinks().pretty();
     if map == "index" {
         return Ok(Some(Outcome::Xml(sitemap::index(
             home,
+            pretty,
             &index(site).await?,
         ))));
     }
@@ -91,7 +97,7 @@ async fn route(site: &Site, query: &HashMap<String, String>) -> Result<Option<Ou
     Ok(if entries.is_empty() {
         missing()
     } else {
-        Some(Outcome::Xml(sitemap::urlset(home, &entries)))
+        Some(Outcome::Xml(sitemap::urlset(home, pretty, &entries)))
     })
 }
 
@@ -112,7 +118,7 @@ pub(crate) fn robots(site: &Site) -> Vec<u8> {
         "User-agent: *\nDisallow: {path}/wp-admin/\nAllow: {path}/wp-admin/admin-ajax.php\n"
     );
     if !is_empty_string(site.option("blog_public").as_bytes()) {
-        let index = esc_url(format!("{}/?sitemap=index", site.home).as_bytes());
+        let index = esc_url(sitemap_url(site, "index", "", 1).as_bytes());
         text.push_str(&format!("\nSitemap: {}\n", String::from_utf8_lossy(&index)));
     }
     text.into_bytes()
@@ -132,15 +138,22 @@ async fn index(site: &Site) -> Result<Vec<Vec<u8>>, DbError> {
         }?;
         let least = u64::from(lists_home(site, subtype));
         let pages = found.div_ceil(u64::from(MAX_URLS)).max(least);
-        locs.extend((1..=pages).map(|page| {
-            format!(
-                "{}/?sitemap={map}&sitemap-subtype={subtype}&paged={page}",
-                site.home
-            )
-            .into_bytes()
-        }));
+        locs.extend((1..=pages).map(|page| sitemap_url(site, map, subtype, page).into_bytes()));
     }
     Ok(locs)
+}
+
+/// `get_sitemap_url()`.
+fn sitemap_url(site: &Site, map: &str, subtype: &str, page: u64) -> String {
+    site.permalinks()
+        .sitemap_url(&site.home, map, subtype, page)
+        .unwrap_or_else(|| match map {
+            "index" => format!("{}/?sitemap=index", site.home),
+            _ => format!(
+                "{}/?sitemap={map}&sitemap-subtype={subtype}&paged={page}",
+                site.home
+            ),
+        })
 }
 
 /// Whether the sitemap of `post_type` starts with the home page: the page
@@ -167,7 +180,7 @@ fn w3c(gmt: &str, zone: Zone) -> Option<String> {
 
 /// `WP_Sitemaps_Posts::get_url_list()`: the home page first in the page
 /// sitemap, dated by the latest change among the latest posts.
-async fn posts(site: &Site, post_type: &str, paged: u64) -> Result<Vec<Entry>, DbError> {
+async fn posts(site: &Arc<Site>, post_type: &str, paged: u64) -> Result<Vec<Entry>, DbError> {
     let mut entries = Vec::new();
     if paged == 1 && lists_home(site, post_type) {
         // The home list's query: `posts_per_page` posts, sticky ones first.
@@ -179,10 +192,15 @@ async fn posts(site: &Site, post_type: &str, paged: u64) -> Result<Vec<Entry>, D
             lastmod: modified.and_then(|gmt| w3c(gmt, site.zone())),
         });
     }
-    for post in site.db.posts(&of_type(post_type, paged)).await? {
+    let posts = site.db.posts(&of_type(post_type, paged)).await?;
+    let dates: Vec<Option<String>> = posts
+        .iter()
+        .map(|p| w3c(&p.modified_gmt, site.zone()))
+        .collect();
+    for (link, lastmod) in site.links(posts).await.into_iter().zip(dates) {
         entries.push(Entry {
-            lastmod: w3c(&post.modified_gmt, site.zone()),
-            loc: site.permalink(&post).into_bytes(),
+            lastmod,
+            loc: link.into_bytes(),
         });
     }
     Ok(entries)
@@ -190,26 +208,19 @@ async fn posts(site: &Site, post_type: &str, paged: u64) -> Result<Vec<Entry>, D
 
 /// `WP_Sitemaps_Taxonomies::get_url_list()`: the terms with posts, linked
 /// as get_term_link() links them.
-async fn terms(site: &Site, taxonomy: &str, paged: u64) -> Result<Vec<Entry>, DbError> {
+async fn terms(site: &Arc<Site>, taxonomy: &str, paged: u64) -> Result<Vec<Entry>, DbError> {
     let offset = (paged - 1).saturating_mul(u64::from(MAX_URLS));
     let terms = site
         .db
         .terms_with_posts(taxonomy, MAX_URLS.into(), offset)
         .await?;
-    Ok(terms
+    Ok(site
+        .term_links(taxonomy, terms)
+        .await
         .into_iter()
-        .map(|term| {
-            let slug = String::from_utf8_lossy(&term.slug);
-            let query = match taxonomy {
-                "category" => format!("cat={}", term.id),
-                "post_tag" => format!("tag={slug}"),
-                // _post_format_link() links the format, not its term.
-                _ => format!("post_format={}", slug.replace("post-format-", "")),
-            };
-            Entry {
-                loc: format!("{}/?{query}", site.home).into_bytes(),
-                lastmod: None,
-            }
+        .map(|link| Entry {
+            loc: link.into_bytes(),
+            lastmod: None,
         })
         .collect())
 }

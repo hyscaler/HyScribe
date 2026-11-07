@@ -424,6 +424,7 @@ fn unapproved_comment_robots_match_php() {
         let robots = php.lines().next().unwrap();
         let request = Request {
             get: hyscribe_phpser::parse_str(query.as_bytes()),
+            vars: hyscribe_phpser::parse_str(query.as_bytes()),
             ..Request::default()
         };
         assert!(

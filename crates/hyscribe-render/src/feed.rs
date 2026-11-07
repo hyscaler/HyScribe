@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url, strip_tags};
 use hyscribe_model::{Comment, Post};
-use hyscribe_phpser::{Value, add_query_arg, is_empty_string, php_trim, urlencode};
+use hyscribe_phpser::{Value, is_empty_string, php_trim};
 
 use crate::content::password_form;
 use crate::core_blocks::{
@@ -22,6 +22,7 @@ use crate::core_blocks::{
 use crate::date::{self, Zone};
 use crate::formatting::{contains, convert_chars, ent2ncr, html_entity_decode};
 use crate::link::host;
+use crate::permalinks;
 use crate::post::the_title;
 use crate::site::{Request, Site};
 use crate::template::{Renderer, replace};
@@ -422,7 +423,7 @@ pub fn atom_comments(
         };
         let permalink = post.map(|post| context.permalink(post)).unwrap_or_default();
         let feed = post
-            .map(|post| esc_url(&post_comments_feed_link(site, post, b"atom")))
+            .map(|post| esc_url(&permalinks::post_comments_feed_link(site, post, "atom")))
             .unwrap_or_default();
         let title = post.map(title_rss).unwrap_or_default();
         (
@@ -431,21 +432,17 @@ pub fn atom_comments(
             feed,
         )
     } else if let Some(search) = &request.search {
-        let query = esc_attr(search);
-        let link = add_query_arg(
-            &[(b"feed", Some(b"comments-atom"))],
-            &[&site.home_url()[..], b"/?s=", &urlencode(search)].concat(),
-        );
+        let link = permalinks::search_comments_feed_link(site, search, "atom");
         (
             search_comments_title(site, search),
-            [&site.home_url()[..], b"?s=", query.as_bytes()].concat(),
+            [&site.home_url()[..], b"?s=", esc_attr(search).as_bytes()].concat(),
             link,
         )
     } else {
         (
             [b"Comments for ".as_slice(), title].concat(),
             bloginfo(&site.home_url()),
-            bloginfo(&[&site.home_url()[..], b"/?feed=comments-atom"].concat()),
+            bloginfo(&permalinks::feed_link(site, "comments_atom")),
         )
     };
     let links = [
@@ -663,7 +660,7 @@ pub fn atom(
         b"\" href=\"",
         &bloginfo(&site.home_url()),
         b"\" />\n\t<id>",
-        &[&site.home_url()[..], b"/?feed=atom"].concat(),
+        &permalinks::feed_link(site, "atom"),
         b"</id>\n\t<link rel=\"self\" type=\"application/atom+xml\" href=\"",
         &esc_url(&self_link(site, request)),
         b"\" />\n\n\t",
@@ -714,7 +711,7 @@ fn entry(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
         .collect();
     let count = post.comment_count;
     let replies = if discussed(context, post) {
-        let feed = esc_url(&post_comments_feed_link(site, post, b"atom"));
+        let feed = esc_url(&permalinks::post_comments_feed_link(site, post, "atom"));
         [
             b"\t\t\t<link rel=\"replies\" type=\"".as_slice(),
             &html_type,
@@ -879,7 +876,7 @@ fn item(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
     let comment_feed = if discussed {
         [
             b"\t\t\t<wfw:commentRss>".as_slice(),
-            &esc_url(&post_comments_feed_link(site, post, b"rss2")),
+            &esc_url(&permalinks::post_comments_feed_link(site, post, "rss2")),
             b"</wfw:commentRss>\n\t\t\t<slash:comments>",
             count.to_string().as_bytes(),
             b"</slash:comments>\n\t\t",
@@ -981,19 +978,6 @@ fn enclosure(site: &dyn Site, post: &Post) -> Vec<u8> {
 /// `get_self_link()`: the requested URI on the home URL's host.
 fn self_link(site: &dyn Site, request: &Request) -> Vec<u8> {
     [b"http://".as_slice(), &host(&site.home_url()), &request.uri].concat()
-}
-
-/// `get_post_comments_feed_link( $post, $feed )` with plain permalinks.
-pub(crate) fn post_comments_feed_link(site: &dyn Site, post: &Post, feed: &[u8]) -> Vec<u8> {
-    let key: &[u8] = match post.post_type.as_str() {
-        "page" => b"page_id",
-        _ => b"p",
-    };
-    let id = post.id.to_string();
-    add_query_arg(
-        &[(b"feed", Some(feed)), (key, Some(id.as_bytes()))],
-        &[&site.home_url()[..], b"/"].concat(),
-    )
 }
 
 #[cfg(test)]

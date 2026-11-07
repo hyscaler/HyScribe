@@ -31,7 +31,7 @@ async fn site_at(home: Option<&str>, siteurl: Option<&str>) -> Arc<Site> {
 }
 
 /// The fixture seen from the PHP oracle's address, as its goldens are.
-async fn oracle_site() -> Arc<Site> {
+pub(crate) async fn oracle_site() -> Arc<Site> {
     site_at(Some("http://127.0.0.1:8081"), Some("http://127.0.0.1:8081")).await
 }
 
@@ -240,6 +240,7 @@ async fn database_errors_show_no_details() {
         ]),
         home: String::new(),
         theme: hyscribe_render::theme::twentytwentyfive(),
+        rewriter: rewrite::Rewriter::default(),
     });
     // The 404 page fails while rendering, reading an option it has not loaded.
     for uri in [
@@ -711,6 +712,7 @@ async fn the_front_page_links_to_home() {
         options,
         home: base.home.clone(),
         theme: hyscribe_render::theme::twentytwentyfive(),
+        rewriter: rewrite::Rewriter::default(),
     });
     // Search results list the front page with a link to it.
     let reply = request(&site, "GET", "/?s=sample").await;
@@ -1891,4 +1893,144 @@ fn visitors_see_published_posts_of_the_types_served() {
     assert!(viewable(&post("publish", "page"), &["page"]));
     assert!(!viewable(&post("draft", "page"), &["page"]));
     assert!(!viewable(&post("publish", "attachment"), &["post", "page"]));
+}
+
+/// The fixture with a pretty permalink structure.
+async fn pretty_site(structure: &str, home: Option<&str>) -> Arc<Site> {
+    let mut site = Arc::into_inner(fixture_site(home).await).unwrap();
+    site.options
+        .insert("permalink_structure".into(), structure.as_bytes().to_vec());
+    site.build_rewriter();
+    Arc::new(site)
+}
+
+#[tokio::test]
+async fn pretty_permalinks_route_requests() {
+    let site = pretty_site("/%postname%/", None).await;
+    for (path, status, title_text) in [
+        (
+            "/hello-world/",
+            StatusCode::OK,
+            "Hello world! &#8211; HyScribe Default Install",
+        ),
+        (
+            "/sample-page/",
+            StatusCode::OK,
+            "Sample Page &#8211; HyScribe Default Install",
+        ),
+        (
+            "/category/uncategorized/",
+            StatusCode::OK,
+            "Uncategorized &#8211; HyScribe Default Install",
+        ),
+        (
+            "/nope/deeper/",
+            StatusCode::NOT_FOUND,
+            "Page not found &#8211; HyScribe Default Install",
+        ),
+        // Author archives stay off.
+        (
+            "/author/admin/",
+            StatusCode::NOT_FOUND,
+            "Page not found &#8211; HyScribe Default Install",
+        ),
+    ] {
+        let reply = request(&site, "GET", path).await;
+        assert_eq!(reply.status, status, "{path}");
+        assert_eq!(title(&reply.body), title_text, "{path}");
+        assert!(!reply.headers.contains_key("location"), "{path}");
+    }
+    // The request's own query wins over the path's.
+    let reply = request(&site, "GET", "/hello-world/?name=nope").await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    // The request's `error` goes, as `WP::parse_request()` drops it.
+    let reply = request(&site, "GET", "/hello-world/?error=403").await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let reply = request(&site, "GET", "/nope/deeper/?error=500").await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    // A parsed path is not sent to plain permalinks' canonical URL.
+    let reply = request(&site, "GET", "/tag/foo./").await;
+    assert!(!reply.headers.contains_key("location"));
+    // Empty path vars stay out of the query a redirect keeps.
+    let ids = pretty_site("/archives/%post_id%", None).await;
+    let reply = request(&ids, "GET", "/archives/2?x=1").await;
+    assert_eq!(
+        reply.headers["location"],
+        "http://default-install.test/?page_id=2&x=1"
+    );
+    // An author in the structure names a post's author, not an archive.
+    let site = pretty_site("/%author%/%postname%/", None).await;
+    let reply = request(&site, "GET", "/admin/hello-world/").await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(
+        request(&site, "GET", "/author/admin/").await.status,
+        StatusCode::NOT_FOUND
+    );
+    let feed = request(&site, "GET", "/feed/").await;
+    assert!(
+        feed.headers["content-type"]
+            .to_str()
+            .unwrap()
+            .starts_with("application/rss+xml")
+    );
+    let robots = request(&site, "GET", "/robots.txt").await;
+    assert_eq!(robots.headers["content-type"], "text/plain; charset=utf-8");
+    let sitemap = request(&site, "GET", "/wp-sitemap.xml").await;
+    assert!(sitemap.body.contains("<sitemapindex"), "{}", sitemap.body);
+    // PHP files and reserved paths keep their own handling.
+    let file = request(&site, "GET", "/wp-trackback.php?p=1").await;
+    assert_eq!(file.status, StatusCode::FOUND);
+    assert_eq!(
+        request(&site, "GET", "/hs-admin/").await.status,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn pretty_permalinks_edge_cases() {
+    let site = pretty_site("/%postname%/", None).await;
+    // The home page has no path to parse.
+    let reply = request(&site, "GET", "/").await;
+    assert_eq!(title(&reply.body), "HyScribe Default Install");
+    for (status, matchable) in [
+        ("publish", true),
+        ("draft", true),
+        ("inherit", true),
+        ("trash", false),
+        ("auto-draft", false),
+        ("request-pending", false),
+        ("request-other", true),
+    ] {
+        assert_eq!(matchable_status(status), matchable, "{status}");
+    }
+    // A database failure while matching shows the error page.
+    let mut config = fixture_config();
+    config.prefix = hyscribe_config::Prefix::new("missing_").unwrap();
+    let db = Db::connect(&config).await.unwrap();
+    let mut broken = Arc::into_inner(pretty_site("/%postname%/", None).await).unwrap();
+    broken.db = db;
+    let reply = request(&Arc::new(broken), "GET", "/sample-page/").await;
+    assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn pretty_permalinks_under_a_folder() {
+    let site = pretty_site("/%postname%/", Some("http://example.test/blog")).await;
+    let reply = request(&site, "GET", "/blog/hello-world/").await;
+    assert_eq!(
+        title(&reply.body),
+        "Hello world! &#8211; HyScribe Default Install"
+    );
+    let site = pretty_site("/index.php/%postname%/", Some("http://example.test/blog")).await;
+    let reply = request(&site, "GET", "/blog/index.php/hello-world/").await;
+    assert_eq!(
+        title(&reply.body),
+        "Hello world! &#8211; HyScribe Default Install"
+    );
+    // PHP files under the folder are not rewritten, which would make them
+    // a post name and a 404.
+    let reply = request(&site, "GET", "/blog/wp-cron.php").await;
+    assert_eq!(reply.status, StatusCode::MOVED_PERMANENTLY);
+    assert_eq!(home_path("http://example.test"), "");
+    assert_eq!(home_path("http://example.test/blog"), "/blog");
 }

@@ -23,7 +23,7 @@ use hyscribe_kses::{esc_attr, esc_html, esc_url_raw};
 use hyscribe_model::{OrderBy, Post, PostQuery, TermFilter, TimeCondition};
 use hyscribe_phpser::{
     Key, Value, add_query_values, is_empty_string, parse_str, php_trim, rawurlencode,
-    rawurlencode_deep, remove_query_arg, urldecode,
+    rawurlencode_deep, remove_query_arg, urldecode, urlencode,
 };
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::sanitize_title_for_query;
@@ -39,6 +39,7 @@ use tokio::net::TcpListener;
 mod feed;
 pub mod query;
 mod reads;
+mod rewrite;
 mod sitemaps;
 mod trackback;
 
@@ -61,6 +62,8 @@ pub struct Site {
     options: HashMap<String, Vec<u8>>,
     home: String,
     theme: Theme,
+    /// The rewrite rules of the permalink options, built once.
+    rewriter: rewrite::Rewriter,
 }
 
 impl Site {
@@ -83,12 +86,26 @@ impl Site {
         let home = String::from_utf8_lossy(options.get("home").map_or(&[][..], Vec::as_slice))
             .trim_end_matches('/')
             .to_string();
-        Ok(Site {
+        let mut site = Site {
             db,
             options,
             home,
             theme: twentytwentyfive(),
-        })
+            rewriter: rewrite::Rewriter::default(),
+        };
+        site.build_rewriter();
+        Ok(site)
+    }
+
+    /// The rewrite rules for the permalink options as they are now.
+    fn build_rewriter(&mut self) {
+        self.rewriter = rewrite::Rewriter::new(&rewrite::Settings {
+            structure: &self.option("permalink_structure"),
+            category_base: &self.option("category_base"),
+            tag_base: &self.option("tag_base"),
+            page_on_front: &self.option("page_on_front"),
+            home_path: home_path(&self.home),
+        });
     }
 
     fn option(&self, name: &str) -> String {
@@ -221,6 +238,10 @@ async fn page(
     if let Some(response) = static_file(uri.path()).filter(|_| !post) {
         return response;
     }
+    let (uri, query, pretty) = match pretty_request(&site, uri, query).await {
+        Ok(request) => request,
+        Err(err) => return html(database_error(&site, &err)),
+    };
     // `WP::send_headers()` sends the status `error` asks for; these end the
     // request before any redirect.
     let status = error_status(&query);
@@ -233,7 +254,7 @@ async fn page(
             .await
             .map(|outcome| (outcome, Vec::new()))
     } else {
-        outcome(&site, &uri, &query).await
+        outcome(&site, &uri, &query, pretty).await
     };
     let (outcome, links) = match routed {
         Ok(routed) => routed,
@@ -331,6 +352,73 @@ fn asks_404(query: &HashMap<String, String>) -> bool {
     })
 }
 
+/// WordPress's own PHP files, which the web server runs without the
+/// rewrite rules.
+const PHP_FILES: [&str; 13] = [
+    "/wp-activate.php",
+    "/wp-blog-header.php",
+    "/wp-comments-post.php",
+    "/wp-config-sample.php",
+    "/wp-config.php",
+    "/wp-cron.php",
+    "/wp-links-opml.php",
+    "/wp-load.php",
+    "/wp-mail.php",
+    "/wp-settings.php",
+    "/wp-signup.php",
+    "/wp-trackback.php",
+    "/xmlrpc.php",
+];
+
+/// A request under pretty permalinks as the query it stands for
+/// (`WP::parse_request()`): the path's query vars join the request's own,
+/// which win, and the path becomes the home page's. True when the path was
+/// parsed. Links and canonical redirects are still those of plain
+/// permalinks, so a parsed path is not redirected.
+async fn pretty_request(
+    site: &Site,
+    uri: Uri,
+    mut query: HashMap<String, String>,
+) -> Result<(Uri, HashMap<String, String>, bool), DbError> {
+    let home_path = home_path(&site.home);
+    let local = uri.path().strip_prefix(home_path).unwrap_or(uri.path());
+    if site.rewriter.is_empty() || reserved(uri.path()) || PHP_FILES.contains(&local) {
+        return Ok((uri, query, false));
+    }
+    let parsed = rewrite::parse_request(site, &site.rewriter, home_path, uri.path()).await?;
+    // The request's own `error` is dropped: a matched or empty path clears
+    // it, and an unmatched one sets 404.
+    query.remove("error");
+    let mut raw = lossy(&remove_query_arg(
+        &[b"error"],
+        uri.query().unwrap_or_default().as_bytes(),
+    ));
+    for (name, value) in parsed.query_vars() {
+        if query.contains_key(&name) {
+            continue;
+        }
+        if !value.is_empty() {
+            let sep = if raw.is_empty() { "" } else { "&" };
+            raw.push_str(&format!("{sep}{name}={}", lossy(&urlencode(&value))));
+        }
+        query.insert(name, lossy(&value));
+    }
+    let path = format!("{home_path}/");
+    let uri = if raw.is_empty() {
+        path
+    } else {
+        format!("{path}?{raw}")
+    };
+    Ok((uri.parse().unwrap_or_default(), query, true))
+}
+
+/// The path of the home URL, without its trailing slash.
+fn home_path(home: &str) -> &str {
+    home.split_once("://")
+        .and_then(|(_, rest)| rest.find('/').and_then(|at| rest.get(at..)))
+        .unwrap_or_default()
+}
+
 /// What a request gets, from the route through `redirect_canonical()`,
 /// sitemaps and robots.txt, and the `Link` headers `template_redirect`
 /// sends after `redirect_canonical()`, which a sitemap never reaches.
@@ -338,6 +426,7 @@ async fn outcome(
     site: &Site,
     uri: &Uri,
     query: &HashMap<String, String>,
+    pretty: bool,
 ) -> Result<(Outcome, Vec<String>), DbError> {
     let outcome = route(site, uri.path(), uri.query(), query).await?;
     let links = link_headers(
@@ -352,6 +441,7 @@ async fn outcome(
         Some(kind) => uncanonical(kind, uri, query, outcome),
         None => match preview(query, &get, outcome) {
             ControlFlow::Break(outcome) => outcome,
+            ControlFlow::Continue(outcome) if pretty => outcome,
             ControlFlow::Continue(outcome) => {
                 // A preview a visitor is not shown drops `preview` from redirects.
                 let strip = get.get_str("preview").is_some_and(|v| !v.is_empty());
@@ -854,9 +944,14 @@ async fn route(
     {
         return Ok(Outcome::Redirect(location));
     }
-    // With plain permalinks the path is ignored. Author archives give away
+    // The path has been parsed or is ignored. Author archives give away
     // login names, so they are off by default (docs/SECURITY_MODEL.md).
-    if query.contains_key("author") {
+    // A structure with `%author%` names the author of a post's link, which
+    // is no archive.
+    let post_asked = ["p", "page_id", "name", "pagename"]
+        .iter()
+        .any(|name| query.get(*name).is_some_and(|v| !v.is_empty()));
+    if query.contains_key("author") || (query.contains_key("author_name") && !post_asked) {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
     // A negative or array `p` is `error=404` too: the 404 page with a 200
@@ -1576,6 +1671,31 @@ async fn by_slug(
             None => Slug::Post((key, 0, post_type)),
         })
     })
+}
+
+/// The verbose page rules' check: `get_page_by_path()` finds a page or
+/// attachment at `path` in a status other than the hidden internal ones.
+async fn page_exists(site: &Site, path: &[u8]) -> Result<bool, DbError> {
+    let parts = page_path(&String::from_utf8_lossy(path));
+    let mut names = parts.clone();
+    names.sort();
+    names.dedup();
+    let pages = site.db.named_pages(&names).await?;
+    Ok(page_by_path(&parts, &pages).is_some_and(|page| matchable_status(&page.status)))
+}
+
+/// A status other than the internal ones hidden from searches, which
+/// verbose page rules pass over.
+fn matchable_status(status: &str) -> bool {
+    !matches!(
+        status,
+        "trash"
+            | "auto-draft"
+            | "request-pending"
+            | "request-confirmed"
+            | "request-failed"
+            | "request-completed"
+    )
 }
 
 /// `get_page_by_path()`'s parts of `path`: its names between slashes, each

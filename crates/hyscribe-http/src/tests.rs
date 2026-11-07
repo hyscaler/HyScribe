@@ -1293,6 +1293,8 @@ async fn embeds_of_query_404s_and_share_draws() {
         let reply = request(&site, "GET", path).await;
         assert_eq!(reply.status, status, "{path}");
         assert_eq!(reply.headers["x-wp-embed"], "true", "{path}");
+        assert!(!reply.headers.contains_key("content-security-policy"));
+        assert_eq!(reply.headers["x-content-type-options"], "nosniff");
     }
     let mut upper = false;
     for _ in 0..20 {

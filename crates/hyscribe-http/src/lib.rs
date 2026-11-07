@@ -149,9 +149,15 @@ pub async fn serve(
         .await
 }
 
+/// Embed pages are made to be framed by other sites, so they go without
+/// `frame-ancestors`, as WordPress sends them.
 async fn security_headers(mut response: Response) -> Response {
     let headers = response.headers_mut();
+    let embed = headers.contains_key("x-wp-embed");
     for (name, value) in SECURITY_HEADERS {
+        if embed && name == "content-security-policy" {
+            continue;
+        }
         headers.insert(
             HeaderName::from_static(name),
             HeaderValue::from_static(value),

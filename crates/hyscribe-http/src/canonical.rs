@@ -87,6 +87,14 @@ pub(crate) async fn pretty(
         } else {
             home
         });
+    } else if let Some(id) = site.posts_page().filter(|&id| {
+        request.home && given("page_id") && vars.get("page_id").map(|v| absint(v)) == Some(id)
+    }) {
+        // The page for posts asked for by `page_id`, when it exists.
+        if let Some(post) = site.db.post(id).await.ok().flatten() {
+            target = Some(site.permalink(&post).await);
+            strip.push("page_id");
+        }
     } else if let Some(post) = post {
         // `is_page()` by `page_id`; `is_single()` by `p` or `name`, or under
         // a category it is not in.

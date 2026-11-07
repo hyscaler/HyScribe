@@ -12,20 +12,6 @@ use hyscribe_phpser::{Key, Value, decode, is_empty_string, php_trim};
 use hyscribe_render::formatting::{sanitize_title, sanitize_title_for_query};
 use hyscribe_render::site::{Archive, Taxonomy};
 
-/// `raw_query` without the `names` arguments, as `&`-joined pairs; an array
-/// argument such as `p[]` goes with its name.
-pub fn other_args(raw_query: Option<&str>, names: &[&str]) -> String {
-    raw_query
-        .unwrap_or_default()
-        .split('&')
-        .filter(|pair| {
-            let key = pair.split(['=', '[']).next().unwrap_or_default();
-            !pair.is_empty() && !names.contains(&key)
-        })
-        .map(|pair| format!("&{pair}"))
-        .collect()
-}
-
 /// The `m` query var's parts, as `WP_Query` reads them: digits only,
 /// `YYYY`, then `MM`, `DD`, `HH`, `MM` and `SS`, none for `0`, which PHP
 /// takes as false.

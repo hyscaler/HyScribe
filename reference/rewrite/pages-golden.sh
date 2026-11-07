@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Records whole pages and redirects under pretty permalinks, and under
-# plain ones with a page on the front, as
+# plain ones with a page on the front or for posts, as
 # crates/hyscribe-http/tests/golden/pretty-pages.tsv:
-#   structure|category base|tag base|page on front<TAB>hex(path and query)<TAB>status<TAB>location<TAB>hex(body)
+#   structure|category base|tag base|page on front|page for posts<TAB>hex(path and query)<TAB>status<TAB>location<TAB>hex(body)
 # reference/rewrite/permalinks.php is installed as a must-use plugin for the
 # run and removed after; it sets the permalink options by filter. Page views
 # write to the database, so start from a fresh db.sh up, then
@@ -37,13 +37,24 @@ PATHS=(
   /hello-world/comment-page-2/ /topics/uncategorized/ '/?year=2026&monthnum=10' '/?year=2026' '/?name=hello-world'
   '/?pagename=sample-page' /sample-page/2/ /hello-world/2/ '/?cat=1&paged=2' /page/1/ '/hello-world/?replytocom=1' '/?p=999'
   /wp-sitemap-taxonomies-category-1.xml /feed/rss/ /hello-world/feed/rss2/ '/?feed=rss' '/?p=1&preview=true' '/?p=1.'
-  '/hello-world/?x=1' '/?page_id=2&x=y' '/?page=2&paged=0' '/?page=2' '/?pagename=' '/?x=1' '/?cat=' '/?year='
+  '/hello-world/?x=1' '/?page_id=2&x=y' '/?page=2&paged=0' '/?page=2' '/?pagename=' '/?x=1' '/?cat=' '/?year=' /sample-page/feed/ '/?page_id=2&feed=rss2'
 )
+# Under a page for posts only: elsewhere `paged` on a page is redirected
+# by a URL rebuilt without the port, which the chained-redirect guard then
+# turns down, so the oracle's port decides it.
+POSTS_PATHS=(/sample-page/page/2/ '/?page_id=2&paged=2' '/?page_id=2&page=2' '/?pagename=sample-page&page=2' '/?page_id=2&cpage=2' '/?page_id=x')
+# The draft privacy policy page as the page for posts.
+DRAFT_PATHS=('/?pagename=privacy-policy' '/?page_id=3' /privacy-policy/)
 SETUPS=('/%year%/%monthnum%/%day%/%postname%/|||' '/%postname%/|||' '/archives/%post_id%|||' '/index.php/%postname%/|||' '/%category%/%postname%/|||'
-  '/%postname%/|topics|labels|2' '|||2')
+  '/%postname%/|topics|labels|2' '|||2' '/%postname%/|||0|2' '||||2' '/%postname%/|||0|3')
 : > "$OUT"
 for setup in "${SETUPS[@]}"; do
-  for path in "${PATHS[@]}"; do
+  paths=("${PATHS[@]}")
+  case $setup in
+    *'|'*'|'*'|'*'|2') paths+=("${POSTS_PATHS[@]}") ;;
+    *'|'*'|'*'|'*'|3') paths+=("${DRAFT_PATHS[@]}") ;;
+  esac
+  for path in "${paths[@]}"; do
     curl -s -D "$HEADERS" -o "$TMP" -H "X-HyScribe-Permalinks: $setup" "$BASE$path" > /dev/null
     status=$(head -n 1 "$HEADERS" | cut -d ' ' -f 2)
     location=$(grep -i '^location:' "$HEADERS" | cut -d ' ' -f 2 | tr -d '\r' || true)

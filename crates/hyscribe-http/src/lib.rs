@@ -47,7 +47,7 @@ mod trackback;
 
 use reads::Reads;
 
-use query::{Resolved, absint, clean_query, date_query, other_args, tax_query};
+use query::{Resolved, absint, clean_query, date_query, tax_query};
 
 /// Headers on every response (docs/SECURITY_MODEL.md, Web).
 const SECURITY_HEADERS: [(&str, &str); 3] = [
@@ -141,6 +141,21 @@ impl Site {
             self.raw_option("show_on_front"),
             self.raw_option("page_on_front"),
         )
+    }
+
+    /// `is_front_page()` for the posts listed on the home page.
+    fn posts_on_front(&self) -> bool {
+        self.raw_option("show_on_front") == b"posts"
+    }
+
+    /// `page_for_posts` when the front shows a page: the page that lists
+    /// the posts.
+    fn posts_page(&self) -> Option<u64> {
+        link::front_page(
+            self.raw_option("show_on_front"),
+            self.raw_option("page_for_posts"),
+        )
+        .filter(|&id| id != 0)
     }
 
     /// The site title, as `wp_get_document_title()` prints it.
@@ -913,8 +928,8 @@ fn now() -> i64 {
 
 /// The canonical form of `path` with plain permalinks, as
 /// `redirect_canonical()` gives it: `/index.php` goes to `/`, a
-/// `/index.php/` inside it to `/`, and other paths gain a trailing slash.
-/// `None` when `path` is canonical.
+/// `/index.php/` inside it to `/`, and other paths gain a trailing slash
+/// on the front page. `None` when `path` is canonical.
 fn canonical_path(site: &Site, path: &str, raw_query: Option<&str>) -> Option<String> {
     let query = raw_query.map(|q| format!("?{q}")).unwrap_or_default();
     if path.contains("/index.php/") {
@@ -927,7 +942,9 @@ fn canonical_path(site: &Site, path: &str, raw_query: Option<&str>) -> Option<St
     if let Some(folder) = path.strip_suffix("index.php").filter(|f| f.ends_with('/')) {
         return Some(format!("{}{folder}{query}", site.home));
     }
-    (!path.ends_with('/')).then(|| format!("{}{path}/{query}", site.home))
+    // The home page these paths show takes it only as `is_front_page()`.
+    let front = site.posts_on_front() || site.front_page().is_some_and(|id| id != 0);
+    (front && !path.ends_with('/')).then(|| format!("{}{path}/{query}", site.home))
 }
 
 /// HyScribe's admin and login URLs have no `.php` (ADR 0008):
@@ -1081,6 +1098,22 @@ async fn route(
             None => None,
         },
     };
+    // `is_posts_page`: the page for posts, by `page_id` or `pagename`, is
+    // the posts listed under its title.
+    let posts_page = single
+        .filter(|&(name, id, _)| name != "p" && site.posts_page() == Some(id))
+        .map(|(name, id, _)| (name, id));
+    let listed;
+    let (single, query) = match posts_page {
+        Some(_) => {
+            let mut query = query.clone();
+            query.remove("page_id");
+            query.remove("pagename");
+            listed = query;
+            (None, &listed)
+        }
+        None => (single, query),
+    };
     let single_requested = single.is_some();
     // RSS2, Atom, RDF and RSS 0.92 feeds. `feed=rss` alone redirects to
     // RSS2, as `redirect_canonical()` rewrites only that pair.
@@ -1117,7 +1150,9 @@ async fn route(
                 feed::CommentsOf::Site
             }
         });
-        let page = list(site, query, true, (post_query, terms)).await?;
+        let ids = posts_page.map(|(_, id)| id);
+        let (page, found) = list(site, query, true, (post_query, terms), ids).await?;
+        let page = posts_page_titled(site, page, posts_page, found.as_ref(), Paging::of(query));
         // A paged query with nothing in it is a 404: a feed of no posts,
         // never of comments, titled as the 404 page.
         let missing = page.request.not_found && Paging::of(query).is_paged();
@@ -1179,7 +1214,14 @@ async fn route(
         }
         None => {
             let main = main_query(site, query, false).await?;
-            let page = list(site, query, false, main).await?;
+            let ids = posts_page.map(|(_, id)| id);
+            let (page, found) = list(site, query, false, main, ids).await?;
+            let redirect =
+                posts_page_redirect(site, posts_page, &page, found.as_ref(), query, raw_query);
+            if let Some(location) = redirect.await.filter(|location| *location != current) {
+                return Ok(Outcome::Redirect(location));
+            }
+            let page = posts_page_titled(site, page, posts_page, found.as_ref(), Paging::of(query));
             // redirect_canonical() sends an invalid date on only from a 404.
             Ok(
                 match date_redirect(site, raw_query, query).filter(|_| page.request.not_found) {
@@ -1189,6 +1231,72 @@ async fn route(
             )
         }
     }
+}
+
+/// `redirect_canonical()` for the page for posts, `found` when it exists,
+/// asked for by `page_id` or `pagename`. With posts listed, a `page` is a
+/// 404 (it has no `<!--nextpage-->` pages) sent to the page found by
+/// `pagename`, else to the first post. Another 404 by `page_id` goes to the
+/// page; `page_id` stays when the page's link names it.
+async fn posts_page_redirect(
+    site: &Arc<Site>,
+    asked: Option<(&str, u64)>,
+    page: &Page,
+    found: Option<&Post>,
+    query: &HashMap<String, String>,
+    raw_query: Option<&str>,
+) -> Option<String> {
+    let (by, _) = asked?;
+    let paged = !page.request.posts.is_empty()
+        && query
+            .get("page")
+            .is_some_and(|v| !is_empty_string(v.as_bytes()));
+    let post = match by {
+        "page_id" if paged => page.request.posts.first(),
+        _ if paged || by == "page_id" && page.request.not_found => found,
+        _ => None,
+    }
+    // Only to a post a visitor is shown.
+    .filter(|post| viewable(post, &["post", "page"]))?;
+    let link = site.permalink(post).await;
+    let drop: Vec<&str> = [
+        ("page", paged),
+        ("page_id", by == "page_id" && site.permalinks().pretty()),
+    ]
+    .into_iter()
+    .filter_map(|(arg, dropped)| dropped.then_some(arg))
+    .collect();
+    Some(tack(&link, raw_query, &drop))
+}
+
+/// `page` as the page for posts, `found` when it exists, lists the posts:
+/// that page queried and its title first in the document's. A 404 keeps
+/// its title, and the page only as `pagename` (`by`) found it.
+fn posts_page_titled(
+    site: &Site,
+    mut page: Page,
+    asked: Option<(&str, u64)>,
+    found: Option<&Post>,
+    paging: Paging,
+) -> Page {
+    let Some((by, id)) = asked else {
+        return page;
+    };
+    if page.request.not_found {
+        if by == "pagename" {
+            page.request.queried_object_id = id;
+        }
+        return page;
+    }
+    if let Some(post) = found {
+        page.request.queried_object_id = id;
+        page.title = document_title([
+            Some(esc_html(&post.title)),
+            paging.title(),
+            Some(site.name()),
+        ]);
+    }
+    page
 }
 
 /// The `paged` and `page` query vars, as `WP_Query` casts them.
@@ -1252,14 +1360,7 @@ fn paged_single(
     match page {
         Some(_) if found => Outcome::Page(Box::new(single_page(site, post, Paging::of(query)))),
         Some(_) if Paging::of(query).page >= 1 => {
-            let args = other_args(raw_query, &[name, "page"]);
-            // A pretty link, or the home page's, has no query to add to.
-            let args = if link.contains('?') {
-                args
-            } else {
-                args.replacen('&', "?", 1)
-            };
-            Outcome::Redirect(format!("{link}{args}"))
+            Outcome::Redirect(tack(link, raw_query, &[name, "page"]))
         }
         Some(_) => Outcome::Page(Box::new(not_found(site, false))),
         None => Outcome::Page(Box::new(single_page(site, post, Paging::of(query)))),
@@ -1495,17 +1596,29 @@ async fn list(
     query: &HashMap<String, String>,
     feed: bool,
     (post_query, terms): (PostQuery, Resolved),
-) -> Result<Page, DbError> {
+    posts_page: Option<u64>,
+) -> Result<(Page, Option<Post>), DbError> {
     let term_archive = terms.archive;
     let search = shown_search(query);
     let search = search.as_ref();
     let date = date_query(query);
     // `error=404`: the 404 page, but `handle_404()` sends no 404 for it.
     if date.invalid {
-        return Ok(error_404(site, feed));
+        return Ok((error_404(site, feed), None));
     }
-    let (posts, found) = tokio::join!(site.db.posts(&post_query), site.db.count_posts(&post_query));
-    let (posts, found) = posts.and_then(|posts| found.map(|found| (posts, found)))?;
+    let posts_page = async {
+        match posts_page {
+            Some(id) => site.db.post(id).await,
+            None => Ok(None),
+        }
+    };
+    let (posts, found, posts_page) = tokio::join!(
+        site.db.posts(&post_query),
+        site.db.count_posts(&post_query),
+        posts_page
+    );
+    let (posts, found, posts_page) = posts
+        .and_then(|posts| found.and_then(|found| posts_page.map(|page| (posts, found, page))))?;
     let paging = Paging::of(query);
     let term = match &term_archive {
         Some(Archive::Term(_, term)) => term.as_ref(),
@@ -1518,7 +1631,7 @@ async fn list(
     if empty_404 && posts.is_empty() {
         let mut page = not_found(site, feed && !paging.is_paged());
         page.request.search_query = search.map_or_else(Vec::new, |s| s.as_bytes().to_vec());
-        return Ok(page);
+        return Ok((page, posts_page));
     }
     let first_date = posts.first().map_or("", |post| post.date.as_str());
     let heading = if let Some(s) = search {
@@ -1542,8 +1655,7 @@ async fn list(
         })
     };
     let tagline = site.option("blogdescription");
-    // `is_front_page()` for the posts: only when they are the front.
-    let front = site.option("show_on_front") == "posts";
+    let front = site.posts_on_front();
     let title = match heading {
         // A term or date archive without a title has the site's name alone.
         Some(heading) => document_title([
@@ -1551,8 +1663,8 @@ async fn list(
             paging.title(),
             Some(site.name()),
         ]),
-        // A feed is never `is_home()`, and the posts away from the front
-        // take the posts page's title, which is not ported.
+        // A feed is never `is_home()`, and posts away from the front have
+        // no title of their own but the posts page's.
         None if feed || !front => document_title([None, paging.title(), Some(site.name())]),
         None => document_title([
             Some(site.name()),
@@ -1591,13 +1703,14 @@ async fn list(
         posts,
         ..Request::default()
     };
-    Ok(Page {
+    let page = Page {
         status: StatusCode::OK,
         title,
         candidates,
         request,
         hidden: false,
-    })
+    };
+    Ok((page, posts_page))
 }
 
 /// The templates the template loader tries for a list page, in its order:
@@ -1764,8 +1877,9 @@ async fn by_slug(
             Some(_) => Vec::new(),
             None => site.db.named_pages(&parts).await?,
         };
+        // The page for posts lists the posts whatever its status.
         let post = page_by_path(&parts, &pages)
-            .filter(|p| viewable(p, &["page"]))
+            .filter(|p| viewable(p, &["page"]) || site.posts_page() == Some(p.id))
             .cloned();
         let name = sanitize_title_for_query(&query::basename(path.as_bytes()));
         ("pagename", "page", post, name)

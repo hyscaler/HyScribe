@@ -793,7 +793,7 @@ async fn templates_follow_the_hierarchy() {
 /// The list page of `query`.
 async fn listed(site: &Site, query: &HashMap<String, String>) -> Page {
     let main = main_query(site, query, false).await.unwrap();
-    list(site, query, false, main).await.unwrap()
+    list(site, query, false, main, None).await.unwrap().0
 }
 
 #[tokio::test]
@@ -1519,6 +1519,27 @@ async fn the_page_on_the_front_takes_the_home_title() {
     assert!(reply.body.contains("Hello world!"));
 }
 
+/// A page for posts that does not exist still lists the posts, under the
+/// site's name alone and with no redirect (checked against PHP).
+#[tokio::test]
+async fn a_missing_page_for_posts_lists_the_posts() {
+    for structure in ["", "/%postname%/"] {
+        let mut site = Arc::into_inner(fixture_site(None).await).unwrap();
+        for (name, value) in [
+            ("show_on_front", "page"),
+            ("page_for_posts", "999"),
+            ("permalink_structure", structure),
+        ] {
+            site.options.insert(name.into(), value.as_bytes().to_vec());
+        }
+        site.build_rewriter();
+        let reply = request(&Arc::new(site), "GET", "/?page_id=999").await;
+        assert_eq!(reply.status, StatusCode::OK, "{structure}");
+        assert_eq!(title(&reply.body), "HyScribe Default Install");
+        assert!(reply.body.contains("Hello world!"));
+    }
+}
+
 /// A post with no category takes the default one's slug in its link.
 #[tokio::test]
 async fn links_name_the_default_category() {
@@ -2230,11 +2251,15 @@ async fn pretty_pages_match_php() {
             ] {
                 site.options.insert(name.into(), value.as_bytes().to_vec());
             }
-            if !setup[3].is_empty() {
-                site.options
-                    .insert("page_on_front".into(), setup[3].as_bytes().to_vec());
-                site.options
-                    .insert("show_on_front".into(), b"page".to_vec());
+            let posts = setup.get(4).copied().unwrap_or_default();
+            if !setup[3].is_empty() || !posts.is_empty() {
+                for (name, value) in [
+                    ("page_on_front", setup[3]),
+                    ("page_for_posts", posts),
+                    ("show_on_front", "page"),
+                ] {
+                    site.options.insert(name.into(), value.as_bytes().to_vec());
+                }
             }
             site.build_rewriter();
             sites.insert(fields[0], Arc::new(site));
@@ -2296,5 +2321,5 @@ async fn pretty_pages_match_php() {
     );
     assert_eq!(redirects.len(), 0, "{}", redirects.join("\n"));
     assert_eq!(attachments, 1);
-    assert_eq!(golden.lines().count(), 483);
+    assert_eq!(golden.lines().count(), 725);
 }

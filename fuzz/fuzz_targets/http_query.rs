@@ -20,5 +20,4 @@ fuzz_target!(|data: &[u8]| {
     let _ = tax.lookups();
     let _ = tax.resolve(&[], data);
     let _ = hyscribe_render::search_terms(&text);
-    let _ = query::other_args(Some(&text), &["p", "page"]);
 });

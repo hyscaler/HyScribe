@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! PHP's `md5()` (RFC 1321), for the identifiers WordPress derives from
-//! content, such as `wp_unique_id_from_values()`. Not for security.
+//! content, such as `wp_unique_id_from_values()`, and the old password
+//! hashes sites still hold.
 
 const SHIFTS: [u32; 64] = [
     7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9,
@@ -23,6 +24,11 @@ const SINES: [u32; 64] = [
 
 /// `md5( $data )`: the digest as 32 lower case hex digits.
 pub fn md5(data: &[u8]) -> String {
+    bin2hex(&md5_raw(data))
+}
+
+/// `md5( $data, true )`: the 16 byte digest.
+pub fn md5_raw(data: &[u8]) -> [u8; 16] {
     let mut message = data.to_vec();
     message.push(0x80);
     // Zeros up to 8 bytes short of a 64 byte block.
@@ -55,8 +61,11 @@ pub fn md5(data: &[u8]) -> String {
             *value = value.wrapping_add(added);
         }
     }
-    let digest: Vec<u8> = state.iter().flat_map(|word| word.to_le_bytes()).collect();
-    bin2hex(&digest)
+    let mut digest = [0; 16];
+    for (bytes, word) in digest.as_chunks_mut::<4>().0.iter_mut().zip(state) {
+        *bytes = word.to_le_bytes();
+    }
+    digest
 }
 
 /// `bin2hex( $bytes )`.

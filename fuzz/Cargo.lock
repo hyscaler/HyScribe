@@ -103,6 +103,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "blowfish"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62ce3946557b35e71d1bbe07ec385073ce9eda05043f95de134eb578fcf1a298"
+dependencies = [
+ "byteorder",
+ "cipher",
+]
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -131,6 +141,16 @@ name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
+
+[[package]]
+name = "cipher"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8cf2a2c93cd704877c0858356ed03480ff301ee950b43f1cbe4573b088bfa6c"
+dependencies = [
+ "crypto-common 0.2.2",
+ "inout",
+]
 
 [[package]]
 name = "cpufeatures"
@@ -480,6 +500,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyscribe-assets"
+version = "0.1.0"
+dependencies = [
+ "sha2 0.11.1",
+]
+
+[[package]]
+name = "hyscribe-auth"
+version = "0.1.0"
+dependencies = [
+ "blowfish",
+ "md-5",
+ "sha2 0.11.1",
+]
+
+[[package]]
 name = "hyscribe-config"
 version = "0.1.0"
 dependencies = [
@@ -499,6 +535,7 @@ dependencies = [
 name = "hyscribe-fuzz"
 version = "0.0.0"
 dependencies = [
+ "hyscribe-auth",
  "hyscribe-config",
  "hyscribe-html",
  "hyscribe-http",
@@ -521,6 +558,7 @@ name = "hyscribe-http"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "hyscribe-assets",
  "hyscribe-db",
  "hyscribe-kses",
  "hyscribe-model",
@@ -550,6 +588,7 @@ dependencies = [
  "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-theme-json",
+ "icu_normalizer",
  "sha2 0.11.1",
 ]
 
@@ -675,6 +714,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "inout"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b5cf4372d022092674a83b8febf5865f7a573cc0c5baec5e49c879b6a20978f"
+dependencies = [
+ "hybrid-array",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -732,6 +780,16 @@ name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
+
+[[package]]
+name = "md-5"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
+dependencies = [
+ "cfg-if",
+ "digest 0.11.3",
+]
 
 [[package]]
 name = "memchr"

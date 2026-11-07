@@ -1,4 +1,20 @@
 
 # cargo-vet audits file
 
-[audits]
+[[audits.blowfish]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.10.0"
+notes = "Pure Rust Blowfish with #![deny(unsafe_code)] and no unsafe blocks. No build script, proc macros, or filesystem, network, process or environment access. The P and S tables are the standard Blowfish constants, and the bcrypt key schedule helpers use bounds checked indexing only."
+
+[[audits.cipher]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.4 -> 0.5.2"
+notes = "Trait restructuring for 0.5 (block and mode backends, tweakable ciphers, stream wrapper behind a feature). The crate now declares #![forbid(unsafe_code)], removing the two unsafe blocks 0.4.4 had. No build script, proc macros, or I/O; include_bytes appears only in feature gated test macros."
+
+[[audits.inout]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.2 -> 0.2.5"
+notes = "Lint fixes (as casts replaced by ptr::from_ref, ptr::from_mut and cast) and a rework of PaddedInOutBuf to hold raw pointers, fixing a Stacked Borrows violation. The reworked unsafe code checks that the output buffer holds every block it writes and returns PadError instead of trusting the padding implementation. No build script, new dependencies or I/O."

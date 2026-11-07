@@ -13,6 +13,7 @@ publish = false
 
 [workspace.dependencies]
 hyscribe-assets = { path = "crates/hyscribe-assets" }
+hyscribe-auth = { path = "crates/hyscribe-auth" }
 hyscribe-config = { path = "crates/hyscribe-config" }
 hyscribe-db = { path = "crates/hyscribe-db" }
 hyscribe-html = { path = "crates/hyscribe-html" }
@@ -51,3 +52,7 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# bcrypt at cost 12 takes seconds unoptimized.
+[profile.dev.package.blowfish]
+opt-level = 3

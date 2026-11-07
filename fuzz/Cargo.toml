@@ -13,6 +13,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+hyscribe-auth = { path = "../crates/hyscribe-auth" }
 hyscribe-phpser = { path = "../crates/hyscribe-phpser" }
 hyscribe-config = { path = "../crates/hyscribe-config" }
 hyscribe-render = { path = "../crates/hyscribe-render" }
@@ -166,6 +167,13 @@ bench = false
 [[bin]]
 name = "entities"
 path = "fuzz_targets/entities.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "auth_check_password"
+path = "fuzz_targets/auth_check_password.rs"
 test = false
 doc = false
 bench = false

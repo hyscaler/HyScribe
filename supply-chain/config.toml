@@ -138,14 +138,6 @@ criteria = "safe-to-run"
 version = "0.5.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.futures-io]]
-version = "0.3.34"
-criteria = "safe-to-deploy"
-
-[[exemptions.futures-sink]]
-version = "0.3.34"
-criteria = "safe-to-deploy"
-
 [[exemptions.futures-task]]
 version = "0.3.21"
 criteria = "safe-to-deploy"

@@ -32,7 +32,7 @@ pub use encode::encode;
 pub use error::{Error, ErrorKind};
 pub use float::Float;
 pub use json::{JSON_MAX_DEPTH, json_decode, json_encode, json_encode_unescaped};
-pub use md5::{bin2hex, md5};
+pub use md5::{bin2hex, md5, md5_raw};
 pub use query::{
     add_query_arg, add_query_values, build_query, parse_str, rawurlencode, rawurlencode_deep,
     remove_query_arg, urldecode, urlencode, urlencode_deep,

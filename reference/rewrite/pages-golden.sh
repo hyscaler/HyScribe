@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Records whole pages and redirects under pretty permalinks, as
+# Records whole pages and redirects under pretty permalinks, and under
+# plain ones with a page on the front, as
 # crates/hyscribe-http/tests/golden/pretty-pages.tsv:
 #   structure|category base|tag base|page on front<TAB>hex(path and query)<TAB>status<TAB>location<TAB>hex(body)
 # reference/rewrite/permalinks.php is installed as a must-use plugin for the
@@ -36,10 +37,10 @@ PATHS=(
   /hello-world/comment-page-2/ /topics/uncategorized/ '/?year=2026&monthnum=10' '/?year=2026' '/?name=hello-world'
   '/?pagename=sample-page' /sample-page/2/ /hello-world/2/ '/?cat=1&paged=2' /page/1/ '/hello-world/?replytocom=1' '/?p=999'
   /wp-sitemap-taxonomies-category-1.xml /feed/rss/ /hello-world/feed/rss2/ '/?feed=rss' '/?p=1&preview=true' '/?p=1.'
-  '/hello-world/?x=1' '/?page_id=2&x=y'
+  '/hello-world/?x=1' '/?page_id=2&x=y' '/?page=2&paged=0' '/?page=2' '/?pagename=' '/?x=1' '/?cat=' '/?year='
 )
 SETUPS=('/%year%/%monthnum%/%day%/%postname%/|||' '/%postname%/|||' '/archives/%post_id%|||' '/index.php/%postname%/|||' '/%category%/%postname%/|||'
-  '/%postname%/|topics|labels|2')
+  '/%postname%/|topics|labels|2' '|||2')
 : > "$OUT"
 for setup in "${SETUPS[@]}"; do
   for path in "${PATHS[@]}"; do

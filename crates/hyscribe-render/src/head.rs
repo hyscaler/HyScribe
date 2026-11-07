@@ -352,10 +352,7 @@ impl Head<'_> {
         if post.status == "publish" {
             let mut url = self.context.permalink(post);
             if self.request.page >= 2 {
-                url = add_query_arg(
-                    &[(b"page", Some(self.request.page.to_string().as_bytes()))],
-                    &url,
-                );
+                url = permalinks::paged(self.site, &url, self.request.page);
             }
             let cpage = cpage(self.request);
             if !cpage.is_empty() {

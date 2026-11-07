@@ -912,10 +912,18 @@ fn now() -> i64 {
 }
 
 /// The canonical form of `path` with plain permalinks, as
-/// `redirect_canonical()` gives it: `/index.php` goes to `/`, and other
-/// paths gain a trailing slash. `None` when `path` is canonical.
+/// `redirect_canonical()` gives it: `/index.php` goes to `/`, a
+/// `/index.php/` inside it to `/`, and other paths gain a trailing slash.
+/// `None` when `path` is canonical.
 fn canonical_path(site: &Site, path: &str, raw_query: Option<&str>) -> Option<String> {
     let query = raw_query.map(|q| format!("?{q}")).unwrap_or_default();
+    if path.contains("/index.php/") {
+        return Some(format!(
+            "{}{}{query}",
+            site.home,
+            path.replace("/index.php/", "/")
+        ));
+    }
     if let Some(folder) = path.strip_suffix("index.php").filter(|f| f.ends_with('/')) {
         return Some(format!("{}{folder}{query}", site.home));
     }
@@ -1015,6 +1023,11 @@ async fn route(
     {
         return Ok(Outcome::Redirect(location));
     }
+    // `WP::query_vars`, which `handle_404()` reads, before the page on the
+    // front takes its place.
+    let asked = query;
+    let front = front_query(site, query);
+    let query = front.as_ref().unwrap_or(query);
     // The path has been parsed or is ignored. Author archives give away
     // login names, so they are off by default (docs/SECURITY_MODEL.md).
     // A structure with `%author%` names the author of a post's link, which
@@ -1155,7 +1168,7 @@ async fn route(
                     }
                     (None, Some(post)) => match elsewhere(&post) {
                         Some(location) => Outcome::Redirect(location),
-                        None => paged_single(site, query, raw_query, &link, name, post),
+                        None => paged_single(site, asked, query, raw_query, &link, name, post),
                     },
                     (None, None) => Outcome::Page(Box::new(Page {
                         hidden,
@@ -1218,13 +1231,14 @@ fn document_title(parts: [Option<String>; 3]) -> String {
 /// the post's pages, else a redirect dropping it, or a 404 for no number.
 fn paged_single(
     site: &Site,
+    asked: &HashMap<String, String>,
     query: &HashMap<String, String>,
     raw_query: Option<&str>,
     link: &str,
     name: &str,
     post: Post,
 ) -> Outcome {
-    let page = query.get("page").filter(|v| !v.is_empty() && *v != "0");
+    let page = asked.get("page").filter(|v| !v.is_empty() && *v != "0");
     // handle_404(): the page must be one of the post's.
     let breaks = post
         .content
@@ -1239,6 +1253,12 @@ fn paged_single(
         Some(_) if found => Outcome::Page(Box::new(single_page(site, post, Paging::of(query)))),
         Some(_) if Paging::of(query).page >= 1 => {
             let args = other_args(raw_query, &[name, "page"]);
+            // A pretty link, or the home page's, has no query to add to.
+            let args = if link.contains('?') {
+                args
+            } else {
+                args.replacen('&', "?", 1)
+            };
             Outcome::Redirect(format!("{link}{args}"))
         }
         Some(_) => Outcome::Page(Box::new(not_found(site, false))),
@@ -1249,7 +1269,9 @@ fn paged_single(
 /// A post or page on its own, with its type's template hierarchy.
 fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
     let name = lossy(&post.name);
-    let candidates = if post.post_type == "page" {
+    // `is_front_page()`: the page on the front, which `front-page` shows.
+    let front = post.post_type == "page" && site.front_page() == Some(post.id);
+    let mut candidates = if post.post_type == "page" {
         vec![
             format!("page-{name}"),
             format!("page-{}", post.id),
@@ -1267,8 +1289,12 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
             "index".into(),
         ]
     };
+    if front {
+        candidates.insert(0, "front-page".into());
+    }
     let request = Request {
         singular: true,
+        front_page: front,
         queried_object_id: post.id,
         post: Some(post.id),
         paged: paging.paged,
@@ -1280,11 +1306,17 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
     };
     Page {
         status: StatusCode::OK,
-        title: document_title([
-            Some(esc_html(&post.title)),
-            paging.title(),
-            Some(site.name()),
-        ]),
+        title: if front {
+            let tagline = site.option("blogdescription");
+            let tagline = Some(esc_html(tagline.as_bytes())).filter(|t| !t.is_empty());
+            document_title([Some(site.name()), paging.title(), tagline])
+        } else {
+            document_title([
+                Some(esc_html(&post.title)),
+                paging.title(),
+                Some(site.name()),
+            ])
+        },
         candidates,
         request: Request {
             posts: vec![post],
@@ -1292,6 +1324,32 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
         },
         hidden: false,
     }
+}
+
+/// `WP_Query::parse_query()` with a page on the front: a query of nothing
+/// but `preview`, `page`, `paged` and `cpage` (an `embed` and an empty
+/// `pagename` aside) asks for that page, with `paged` as its `page`. The
+/// request stays `is_paged()`.
+fn front_query(site: &Site, query: &HashMap<String, String>) -> Option<HashMap<String, String>> {
+    let front = site.front_page().filter(|&id| id != 0)?;
+    let paging = ["preview", "page", "paged", "cpage", "embed"];
+    if query.iter().any(|(name, value)| {
+        rewrite::is_query_var(name)
+            && !paging.contains(&name.as_str())
+            && !(name == "pagename" && value.is_empty())
+    }) {
+        return None;
+    }
+    let mut query = query.clone();
+    query.insert("page_id".into(), front.to_string());
+    if let Some(paged) = query
+        .get("paged")
+        .filter(|p| !is_empty_string(p.as_bytes()))
+        .cloned()
+    {
+        query.insert("page".into(), paged);
+    }
+    Some(query)
 }
 
 /// The query of a list page and the term archive its tax query makes.
@@ -1484,6 +1542,8 @@ async fn list(
         })
     };
     let tagline = site.option("blogdescription");
+    // `is_front_page()` for the posts: only when they are the front.
+    let front = site.option("show_on_front") == "posts";
     let title = match heading {
         // A term or date archive without a title has the site's name alone.
         Some(heading) => document_title([
@@ -1491,21 +1551,23 @@ async fn list(
             paging.title(),
             Some(site.name()),
         ]),
-        // A feed is never `is_home()`, so it has no title of its own.
-        None if feed => document_title([None, paging.title(), Some(site.name())]),
+        // A feed is never `is_home()`, and the posts away from the front
+        // take the posts page's title, which is not ported.
+        None if feed || !front => document_title([None, paging.title(), Some(site.name())]),
         None => document_title([
             Some(site.name()),
             paging.title(),
             Some(esc_html(tagline.as_bytes())).filter(|t| !t.is_empty()),
         ]),
     };
-    let candidates = list_templates(
+    let mut candidates = list_templates(
         &terms.kinds,
         term_archive.as_ref(),
         search.is_some(),
         date.archive,
         query.contains_key("post_format"),
     );
+    candidates.retain(|name| front || name != "front-page");
     let queried_object_id = term.map_or(0, |term| term.id);
     let archive = term_archive
         .or(date.kind.clone())
@@ -1513,7 +1575,7 @@ async fn list(
     // The home page lists the latest posts, the default install's setting.
     let home = archive.is_none() && search.is_none();
     let request = Request {
-        front_page: home,
+        front_page: home && front,
         home,
         post: posts.first().map(|post| post.id),
         queried_object_id,

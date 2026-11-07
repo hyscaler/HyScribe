@@ -1269,38 +1269,7 @@ async fn embed_pages_match_php() {
         let header = |name| reply.headers.get(name).map_or("", |v| v.to_str().unwrap());
         let mut body = String::new();
         if !fields[3].is_empty() {
-            body = reply.body.clone();
-            if let Some(at) = body.find("data-secret=&quot;") {
-                let secret = body[at + 18..at + 28].to_string();
-                assert!(
-                    secret.bytes().all(|b| b.is_ascii_alphanumeric()),
-                    "{secret}"
-                );
-                body = body.replace(&secret, "0123456789");
-            }
-            for kind in [
-                "tab-wordpress",
-                "tab-html",
-                "description-wordpress",
-                "description-html",
-            ] {
-                let prefix = format!("wp-embed-share-{kind}-");
-                let mut out = String::new();
-                let mut rest = body.as_str();
-                while let Some(at) = rest.find(&prefix) {
-                    let after = &rest[at + prefix.len()..];
-                    let id = after.split('-').next().unwrap();
-                    let digits = after[id.len() + 1..]
-                        .bytes()
-                        .take_while(u8::is_ascii_digit)
-                        .count();
-                    out.push_str(&rest[..at + prefix.len()]);
-                    out.push_str(&format!("{id}-RAND"));
-                    rest = &after[id.len() + 1 + digits..];
-                }
-                out.push_str(rest);
-                body = out;
-            }
+            body = without_share_draws(reply.body.clone());
         }
         let ours = (
             reply.status.as_u16().to_string(),
@@ -1334,6 +1303,45 @@ async fn embed_pages_match_php() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert_eq!(golden.lines().count(), 27);
+}
+
+/// An embed page's sharing dialog with its random draws as the embed
+/// golden records them: the secret as `0123456789`, the ID suffixes as
+/// `RAND`.
+#[allow(clippy::string_slice)]
+fn without_share_draws(mut body: String) -> String {
+    if let Some(at) = body.find("data-secret=&quot;") {
+        let secret = body[at + 18..at + 28].to_string();
+        assert!(
+            secret.bytes().all(|b| b.is_ascii_alphanumeric()),
+            "{secret}"
+        );
+        body = body.replace(&secret, "0123456789");
+    }
+    for kind in [
+        "tab-wordpress",
+        "tab-html",
+        "description-wordpress",
+        "description-html",
+    ] {
+        let prefix = format!("wp-embed-share-{kind}-");
+        let mut out = String::new();
+        let mut rest = body.as_str();
+        while let Some(at) = rest.find(&prefix) {
+            let after = &rest[at + prefix.len()..];
+            let id = after.split('-').next().unwrap();
+            let digits = after[id.len() + 1..]
+                .bytes()
+                .take_while(u8::is_ascii_digit)
+                .count();
+            out.push_str(&rest[..at + prefix.len()]);
+            out.push_str(&format!("{id}-RAND"));
+            rest = &after[id.len() + 1 + digits..];
+        }
+        out.push_str(rest);
+        body = out;
+    }
+    body
 }
 
 /// Recorded from PHP: an embed of a 404 of the query's own is an embed
@@ -1483,6 +1491,32 @@ async fn pretty_canonical_redirects() {
             "{path}"
         );
     }
+}
+
+/// The page on the front is titled as the home page, tagline and all.
+#[tokio::test]
+async fn the_page_on_the_front_takes_the_home_title() {
+    let mut site = Arc::into_inner(fixture_site(None).await).unwrap();
+    for (name, value) in [
+        ("show_on_front", "page"),
+        ("page_on_front", "2"),
+        ("blogdescription", "Tag"),
+    ] {
+        site.options.insert(name.into(), value.as_bytes().to_vec());
+    }
+    let site = Arc::new(site);
+    let reply = request(&site, "GET", "/").await;
+    assert_eq!(title(&reply.body), "HyScribe Default Install &#8211; Tag");
+    let reply = request(&site, "GET", "/?paged=2").await;
+    assert_eq!(
+        title(&reply.body),
+        "HyScribe Default Install &#8211; Page 2 &#8211; Tag"
+    );
+    // No page to show: the posts are the home page.
+    let mut site = Arc::into_inner(site).unwrap();
+    site.options.insert("page_on_front".into(), b"0".to_vec());
+    let reply = request(&Arc::new(site), "GET", "/").await;
+    assert!(reply.body.contains("Hello world!"));
 }
 
 /// A post with no category takes the default one's slug in its link.
@@ -1644,7 +1678,7 @@ async fn pages_of_a_post_match_php() {
             .collect();
         let title = String::from_utf8(hyscribe_testkit::unhex(fields[3])).unwrap();
         let link = site.permalink(&post).await;
-        let ours = match paged_single(&site, &query, Some(&raw), &link, "p", post.clone()) {
+        let ours = match paged_single(&site, &query, &query, Some(&raw), &link, "p", post.clone()) {
             Outcome::Page(page) => {
                 // The page shown, which the title names past the first;
                 // `paged` names one in the title only.
@@ -2182,7 +2216,7 @@ async fn pretty_pages_match_php() {
     let golden = include_str!("../tests/golden/pretty-pages.tsv");
     let mut failures = Vec::new();
     let mut redirects = Vec::new();
-    let mut front_gaps = 0;
+    let mut attachments = 0;
     let mut sites: HashMap<&str, Arc<Site>> = HashMap::new();
     for line in golden.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
@@ -2209,24 +2243,23 @@ async fn pretty_pages_match_php() {
         let path = String::from_utf8(hyscribe_testkit::unhex(fields[1])).unwrap();
         let php = as_hyscribe(String::from_utf8(hyscribe_testkit::unhex(fields[4])).unwrap());
         let reply = request(site, "GET", &path).await;
+        // An embed page's random draws.
+        let (php, body) = if path.contains("embed=true") {
+            (
+                without_share_draws(php),
+                without_share_draws(reply.body.clone()),
+            )
+        } else {
+            (php, reply.body.clone())
+        };
         let location = reply
             .headers
             .get("location")
             .map_or("", |v| v.to_str().unwrap());
-        // A page on the front is not handled in full yet: its head's comments
-        // feed, its paging and canonical redirects, and `pagename` naming
-        // it. Under a category base, the old category path's feed is an
+        // Under a category base the old category path's feed is an
         // attachment's, and attachments are not routed.
-        let front = [
-            "/",
-            "/page/2/",
-            "/page/1/",
-            "/?paged=2",
-            "/category/uncategorized/feed/",
-            "/?pagename=sample-page",
-        ];
-        if fields[0].ends_with("|2") && front.contains(&path.as_str()) {
-            front_gaps += 1;
+        if fields[0].contains("|topics|") && path == "/category/uncategorized/feed/" {
+            attachments += 1;
             continue;
         }
         let redirected = fields[2].starts_with('3') || reply.status.is_redirection();
@@ -2234,8 +2267,8 @@ async fn pretty_pages_match_php() {
             redirects.push(format!("{} {path} {}/{location}", fields[0], fields[3]));
             continue;
         }
-        if reply.status.as_str() != fields[2] || location != fields[3] || reply.body != php {
-            let ours = &reply.body;
+        if reply.status.as_str() != fields[2] || location != fields[3] || body != php {
+            let ours = &body;
             let at = ours
                 .bytes()
                 .zip(php.bytes())
@@ -2262,6 +2295,6 @@ async fn pretty_pages_match_php() {
         failures.join("\n")
     );
     assert_eq!(redirects.len(), 0, "{}", redirects.join("\n"));
-    assert_eq!(front_gaps, 6);
-    assert_eq!(golden.lines().count(), 378);
+    assert_eq!(attachments, 1);
+    assert_eq!(golden.lines().count(), 483);
 }

@@ -8,7 +8,7 @@
 
 use hyscribe_kses::{esc_attr, esc_url};
 use hyscribe_model::Post;
-use hyscribe_phpser::{Value, add_query_arg, is_empty_string};
+use hyscribe_phpser::{Value, is_empty_string};
 
 use crate::autop::wpautop;
 use crate::blocks::Block;
@@ -222,7 +222,7 @@ fn wp_link_pages(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
             let url = if i == 1 {
                 permalink.clone()
             } else {
-                add_query_arg(&[(b"page", Some(number.as_bytes()))], &permalink)
+                crate::permalinks::post_page(renderer.context.site, post, &permalink, i)
             };
             out.extend_from_slice(
                 &[

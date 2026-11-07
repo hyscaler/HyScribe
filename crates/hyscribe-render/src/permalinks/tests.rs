@@ -255,6 +255,8 @@ impl Site for Nested {
         let value = match name {
             "permalink_structure" => self.structure,
             "default_category" => self.default_category,
+            "show_on_front" => "page",
+            "page_on_front" => "4",
             _ => return None,
         };
         Some(value.as_bytes().to_vec())
@@ -413,6 +415,40 @@ fn comment_pages_under_pretty_permalinks() {
     assert_eq!(
         String::from_utf8(link).unwrap(),
         format!("{HOME}/a/b/c/comment-page-2/#comments")
+    );
+}
+
+#[test]
+fn pages_of_a_link() {
+    let site = |structure| Nested {
+        structure,
+        default_category: "",
+        categories: Vec::new(),
+        reads: Default::default(),
+    };
+    let link = format!("{HOME}/entry/");
+    let paged = |structure| String::from_utf8(paged(&site(structure), link.as_bytes(), 2)).unwrap();
+    assert_eq!(paged("/%postname%/"), format!("{HOME}/entry/2/"));
+    assert_eq!(paged(""), format!("{HOME}/entry/?page=2"));
+    // `_wp_link_page()`: a draft's in the query, the page on the front's
+    // after `page/`.
+    let page = |structure, post: &Post| {
+        String::from_utf8(post_page(&site(structure), post, link.as_bytes(), 2)).unwrap()
+    };
+    let entry = post(10, "post", "publish", "entry", "");
+    assert_eq!(page("/%postname%/", &entry), format!("{HOME}/entry/2/"));
+    assert_eq!(page("", &entry), format!("{HOME}/entry/?page=2"));
+    for status in ["draft", "pending"] {
+        let draft = post(10, "post", status, "entry", "");
+        assert_eq!(
+            page("/%postname%/", &draft),
+            format!("{HOME}/entry/?page=2")
+        );
+    }
+    let front = post(4, "page", "publish", "a", "");
+    assert_eq!(
+        page("/%postname%/", &front),
+        format!("{HOME}/entry/page/2/")
     );
 }
 

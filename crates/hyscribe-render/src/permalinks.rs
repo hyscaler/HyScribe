@@ -385,6 +385,40 @@ fn link_with_front(site: &dyn Site, post: &Post, front_page: Option<u64>) -> Vec
         )
 }
 
+/// Page `page` of a post's `link`, as `wp_get_canonical_url()` gives it.
+pub fn paged(site: &dyn Site, link: &[u8], page: u64) -> Vec<u8> {
+    let links = Permalinks::of(site);
+    let page = page.to_string();
+    if links.pretty() {
+        links
+            .under(&String::from_utf8_lossy(link), &page)
+            .into_bytes()
+    } else {
+        hyscribe_phpser::add_query_arg(&[(b"page", Some(page.as_bytes()))], link)
+    }
+}
+
+/// `_wp_link_page( $i )`'s link to page `page` (from 2) of `post`, whose
+/// link is `link`: in the query for plain permalinks or a draft, after
+/// `page/` for the page on the front.
+pub fn post_page(site: &dyn Site, post: &Post, link: &[u8], page: usize) -> Vec<u8> {
+    let links = Permalinks::of(site);
+    let number = page.to_string();
+    let option = |name| site.option(name).unwrap_or_default();
+    let front = link::front_page(&option("show_on_front"), &option("page_on_front"));
+    if !links.pretty() || matches!(post.status.as_str(), "draft" | "pending") {
+        hyscribe_phpser::add_query_arg(&[(b"page", Some(number.as_bytes()))], link)
+    } else if front == Some(post.id) {
+        links
+            .under(&String::from_utf8_lossy(link), &format!("page/{number}"))
+            .into_bytes()
+    } else {
+        links
+            .under(&String::from_utf8_lossy(link), &number)
+            .into_bytes()
+    }
+}
+
 /// `get_term_link( $term, $taxonomy )` on `site`, pretty or plain.
 pub fn term_link(site: &dyn Site, taxonomy: &str, term: &Term) -> Vec<u8> {
     let home = site.home_url();

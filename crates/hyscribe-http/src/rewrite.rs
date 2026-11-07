@@ -550,6 +550,11 @@ const PUBLIC_QUERY_VARS: [&str; 51] = [
     "sitemap-stylesheet",
 ];
 
+/// Whether `name` is a public query var, which `WP::parse_request()` reads.
+pub(crate) fn is_query_var(name: &str) -> bool {
+    PUBLIC_QUERY_VARS.contains(&name)
+}
+
 impl Parsed {
     /// The query vars the path gives, where the request's query does not
     /// set them: the rule's public ones, term names with their spaces back

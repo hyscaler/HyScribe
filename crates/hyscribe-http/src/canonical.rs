@@ -73,8 +73,20 @@ pub(crate) async fn pretty(
         target = links.sitemap_url(&site.home, var("sitemap"), var("sitemap-subtype"), page);
         strip.extend(["sitemap", "sitemap-subtype", "paged"]);
     } else if post.is_some_and(|p| site.front_page() == Some(p.id) && !given("page_id")) {
-        // The page on the front is the home page.
-        target = Some(format!("{}/", site.home));
+        // The page on the front is the home page; its pages, `paged` before
+        // `page` as `WP_Query` takes them, are the home page's.
+        let var = |name: &str| {
+            vars.get(name)
+                .filter(|v| !hyscribe_phpser::is_empty_string(v.as_bytes()))
+        };
+        let page = absint(var("paged").or(var("page")).map_or("", String::as_str));
+        let home = format!("{}/", site.home);
+        target = Some(if page > 1 {
+            strip.push("page");
+            links.under(&home, &format!("page/{page}"))
+        } else {
+            home
+        });
     } else if let Some(post) = post {
         // `is_page()` by `page_id`; `is_single()` by `p` or `name`, or under
         // a category it is not in.
@@ -183,6 +195,16 @@ pub(crate) async fn pretty(
             }
             if found && !request.front_page {
                 path = links.trailing(&path);
+            }
+            // `robots.txt` and sitemaps end without one.
+            if ["robots", "sitemap", "sitemap-stylesheet"]
+                .iter()
+                .any(|name| {
+                    vars.get(*name)
+                        .is_some_and(|v| !hyscribe_phpser::is_empty_string(v.as_bytes()))
+                })
+            {
+                path = path.trim_end_matches(['/', '\\']).to_string();
             }
             let mut path = permalinks::collapse_slashes(&path);
             // The home page keeps its slash.

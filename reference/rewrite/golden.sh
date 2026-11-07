@@ -4,7 +4,9 @@
 # Records the rewrite rules WordPress generates for a range of permalink
 # settings, as crates/hyscribe-http/tests/golden/rewrite-rules.tsv:
 #   setup<TAB>structure<TAB>category base<TAB>tag base<TAB>page on front
-# followed by that setup's rules, one regex<TAB>query per line.
+# followed by that setup's rules, one regex<TAB>query per line; and the
+# links it builds, from links-golden.php, the same way as
+# crates/hyscribe-render/tests/golden/pretty-links.tsv.
 # Needs the default install oracle running (db.sh up, then php.sh up). Only
 # reads from it: the settings come from option filters.
 set -euo pipefail
@@ -13,11 +15,16 @@ DOCKER="${DOCKER:-docker}"
 NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/crates/hyscribe-http/tests/golden/rewrite-rules.tsv"
+LINKS="$ROOT/crates/hyscribe-render/tests/golden/pretty-links.tsv"
 
 : > "$OUT"
+: > "$LINKS"
 while IFS='|' read -r structure category tag front; do
-  printf 'setup\t%s\t%s\t%s\t%s\n' "$structure" "$category" "$tag" "$front" >> "$OUT"
+  for out in "$OUT" "$LINKS"; do
+    printf 'setup\t%s\t%s\t%s\t%s\n' "$structure" "$category" "$tag" "$front" >> "$out"
+  done
   "$DOCKER" exec -i "$NAME" php /dev/stdin "$structure" "$category" "$tag" "$front" < "$ROOT/reference/rewrite/rules-golden.php" >> "$OUT"
+  "$DOCKER" exec -i "$NAME" php /dev/stdin "$structure" "$category" "$tag" "$front" < "$ROOT/reference/rewrite/links-golden.php" >> "$LINKS"
 done <<'SETUPS'
 /%year%/%monthnum%/%day%/%postname%/|||
 /%year%/%monthnum%/%postname%/|||
@@ -36,4 +43,4 @@ done <<'SETUPS'
 /%year%/%monthnum%/%day%/%hour%/%minute%/%second%/|||
 /%pagename%/|||
 SETUPS
-wc -l "$OUT"
+wc -l "$OUT" "$LINKS"

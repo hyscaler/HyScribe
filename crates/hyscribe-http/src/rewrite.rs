@@ -73,6 +73,7 @@ mod pattern;
 use crate::{Site, lossy, page_exists};
 use hyscribe_db::DbError;
 use hyscribe_phpser::{Value, parse_str, urldecode, urlencode};
+use hyscribe_render::permalinks::{Permalinks, tokens};
 use pattern::Pattern;
 
 /// A site's rules, compiled once: each regex with its pattern and query,
@@ -106,17 +107,13 @@ fn compile(rules: Vec<(String, String)>, verbose: bool) -> Rewriter {
 }
 
 /// The rules, in order.
-pub(crate) fn rules<'a>(settings: &Settings<'a>) -> Vec<(String, String)> {
+pub(crate) fn rules(settings: &Settings) -> Vec<(String, String)> {
     let structure = settings.structure;
     if structure.is_empty() {
         return Vec::new();
     }
-    let front = structure
-        .get(..structure.find('%').unwrap_or(0))
-        .unwrap_or_default();
-    // `using_index_permalinks()`.
-    let index = Pattern::new("^/*index.php").and_then(|p| p.captures(structure.as_bytes()));
-    let root = if index.is_some() { "index.php/" } else { "" };
+    let links = Permalinks::new(structure, settings.category_base, settings.tag_base);
+    let (front, root) = (links.front(), links.root());
     let mut rewrite = Rewrite {
         tags: vec![
             ("%year%", "([0-9]{4})", "year="),
@@ -136,21 +133,10 @@ pub(crate) fn rules<'a>(settings: &Settings<'a>) -> Vec<(String, String)> {
         ],
         page_on_front: settings.page_on_front,
     };
-    // Taxonomy permastructs: `create_initial_taxonomies()`.
-    let base = |option: &'a str, default: &'a str| {
-        if option.is_empty() {
-            (front, default)
-        } else {
-            (if root.is_empty() { "" } else { front }, option)
-        }
-    };
-    let extra = [
-        (base(settings.category_base, "category"), "%category%"),
-        (base(settings.tag_base, "tag"), "%post_tag%"),
-        ((front, "type"), "%post_format%"),
-    ]
-    .map(|((front, slug), tag)| format!("{front}{slug}/{tag}"))
-    .map(|struct_: String| rewrite.generate(&struct_, Mask::None));
+    let extra = ["category", "post_tag", "post_format"]
+        .iter()
+        .filter_map(|taxonomy| links.term_structure(taxonomy))
+        .map(|structure| rewrite.generate(&structure, Mask::None));
 
     let mut top = Rules::from(
         [
@@ -204,7 +190,7 @@ pub(crate) fn rules<'a>(settings: &Settings<'a>) -> Vec<(String, String)> {
     ));
 
     let post = rewrite.generate(structure, Mask::Permalink);
-    let date = rewrite.generate(&date_structure(structure, front), Mask::None);
+    let date = rewrite.generate(&links.date_structure(), Mask::None);
     let root_rules = rewrite.generate(&format!("{root}/"), Mask::Root);
     let comments = rewrite.generate(&format!("{root}comments"), Mask::Comments);
     let search = rewrite.generate(&format!("{root}search/%search%"), Mask::None);
@@ -233,48 +219,6 @@ fn verbose_page_rules(structure: &str) -> bool {
         .and_then(|(_, rest)| rest.split_once('%'))
         .map(|(token, _)| token);
     matches!(first, Some("postname" | "category" | "tag" | "author"))
-}
-
-/// `get_date_permastruct()`.
-fn date_structure(structure: &str, front: &str) -> String {
-    let endian = [
-        "%year%/%monthnum%/%day%",
-        "%day%/%monthnum%/%year%",
-        "%monthnum%/%day%/%year%",
-    ]
-    .into_iter()
-    .find(|e| structure.contains(e))
-    .unwrap_or("%year%/%monthnum%/%day%");
-    let date = if tokens(structure).iter().take(3).any(|t| *t == "%post_id%") {
-        "date/"
-    } else {
-        ""
-    };
-    format!("{front}{date}{endian}")
-}
-
-/// `preg_match_all( '/%.+?%/' )`.
-fn tokens(structure: &str) -> Vec<&str> {
-    let mut found = Vec::new();
-    let mut at = 0;
-    while let Some(start) = structure
-        .get(at..)
-        .and_then(|s| s.find('%'))
-        .map(|i| i + at)
-    {
-        let end = structure
-            .get(start + 2..)
-            .and_then(|s| s.find('%'))
-            .map(|i| i + start + 3);
-        match end {
-            Some(end) => {
-                found.extend(structure.get(start..end));
-                at = end;
-            }
-            None => break,
-        }
-    }
-    found
 }
 
 fn preg_index(n: usize) -> String {
@@ -795,8 +739,6 @@ mod tests {
         for query in ["x", "pagename=$matches[2", "pagename=$matches[]"] {
             assert_eq!(page_capture(query), None, "{query}");
         }
-        assert_eq!(tokens("/%year"), Vec::<&str>::new());
-        assert_eq!(tokens("%%y%/%a%"), ["%%y%", "%a%"]);
         let parsed = Parsed {
             vars: vec![
                 ("category_name".into(), b"a b".to_vec()),

@@ -29,6 +29,7 @@ use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::sanitize_title_for_query;
 use hyscribe_render::head::{Share, embed_page, wp_footer, wp_head};
 use hyscribe_render::link;
+use hyscribe_render::permalinks::home_path;
 use hyscribe_render::post::body_class;
 use hyscribe_render::site::{Archive, Request, Taxonomy};
 use hyscribe_render::template::render_template;
@@ -410,13 +411,6 @@ async fn pretty_request(
         format!("{path}?{raw}")
     };
     Ok((uri.parse().unwrap_or_default(), query, true))
-}
-
-/// The path of the home URL, without its trailing slash.
-fn home_path(home: &str) -> &str {
-    home.split_once("://")
-        .and_then(|(_, rest)| rest.find('/').and_then(|at| rest.get(at..)))
-        .unwrap_or_default()
 }
 
 /// What a request gets, from the route through `redirect_canonical()`,

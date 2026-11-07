@@ -26,6 +26,7 @@ mod layout;
 pub mod link;
 mod media;
 mod navigation;
+pub mod permalinks;
 pub mod post;
 mod query_loop;
 mod query_pagination;

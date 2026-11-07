@@ -63,7 +63,7 @@ fn queried_resource_route(request: &Request) -> Option<String> {
 
 /// The post types WordPress registers itself (`_builtin`), other than pages
 /// and attachments.
-const BUILTIN_TYPES: [&str; 14] = [
+pub(crate) const BUILTIN_TYPES: [&str; 14] = [
     "post",
     "revision",
     "nav_menu_item",

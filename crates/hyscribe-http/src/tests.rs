@@ -2031,6 +2031,4 @@ async fn pretty_permalinks_under_a_folder() {
     // a post name and a 404.
     let reply = request(&site, "GET", "/blog/wp-cron.php").await;
     assert_eq!(reply.status, StatusCode::MOVED_PERMANENTLY);
-    assert_eq!(home_path("http://example.test"), "");
-    assert_eq!(home_path("http://example.test/blog"), "/blog");
 }

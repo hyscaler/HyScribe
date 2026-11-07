@@ -281,8 +281,8 @@ impl<'a> Run<'a> {
             || (!item.lazy && count >= item.min && next(self, at))
     }
 
-    /// One more time through the item, unless it is at its most; an empty
-    /// pass ends the repeat.
+    /// One more time through the item, unless it is at its most, which
+    /// `quantified()` keeps finite for groups.
     fn again(
         &mut self,
         node: &Node,
@@ -295,11 +295,7 @@ impl<'a> Run<'a> {
             return false;
         }
         self.once(node, at, &mut |run, end| {
-            if end == at {
-                next(run, end)
-            } else {
-                run.repeat(node, item, count + 1, end, next)
-            }
+            run.repeat(node, item, count + 1, end, next)
         })
     }
 

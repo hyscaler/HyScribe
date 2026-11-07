@@ -17,6 +17,7 @@ use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
+use hyscribe_assets::wp_includes;
 use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html, esc_url_raw};
 use hyscribe_model::{OrderBy, Post, PostQuery, TermFilter, TimeCondition};
@@ -217,7 +218,7 @@ async fn page(
     if method != Method::GET && !head && !post {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
-    if let Some(response) = theme_file(uri.path()).filter(|_| !post) {
+    if let Some(response) = static_file(uri.path()).filter(|_| !post) {
         return response;
     }
     // `WP::send_headers()` sends the status `error` asks for; these end the
@@ -816,14 +817,25 @@ fn single_post(query: &HashMap<String, String>) -> Option<(&'static str, u64, &'
 }
 
 /// One of the default theme's files, which pages link to.
-fn theme_file(path: &str) -> Option<Response> {
-    let file = path.strip_prefix("/wp-content/themes/twentytwentyfive/")?;
-    let (content_type, bytes) = twentytwentyfive_file(file)?;
-    Some(([(header::CONTENT_TYPE, content_type)], bytes).into_response())
+fn static_file(path: &str) -> Option<Response> {
+    let (content_type, bytes) = path
+        .strip_prefix("/wp-content/themes/twentytwentyfive/")
+        .and_then(twentytwentyfive_file)
+        .or_else(|| wp_includes(path.strip_prefix("/wp-includes/")?))?;
+    let mut response = bytes.into_response();
+    if content_type.is_empty() {
+        response.headers_mut().remove(header::CONTENT_TYPE);
+    } else {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    }
+    Some(response)
 }
 
 /// Static file trees: never redirected or rewritten, so their public URLs
-/// stay as they are. Of them, only the default theme's files are served.
+/// stay as they are. Of them, the default theme's and `wp-includes` files
+/// are served.
 fn is_static(path: &str) -> bool {
     path.starts_with("/wp-content/") || path.starts_with("/wp-includes/")
 }

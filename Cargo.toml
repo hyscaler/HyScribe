@@ -12,6 +12,7 @@ repository = "https://github.com/hyscaler/HyScribe"
 publish = false
 
 [workspace.dependencies]
+hyscribe-assets = { path = "crates/hyscribe-assets" }
 hyscribe-config = { path = "crates/hyscribe-config" }
 hyscribe-db = { path = "crates/hyscribe-db" }
 hyscribe-html = { path = "crates/hyscribe-html" }

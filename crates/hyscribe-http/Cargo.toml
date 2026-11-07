@@ -11,6 +11,7 @@ publish.workspace = true
 
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "query"] }
+hyscribe-assets.workspace = true
 hyscribe-db.workspace = true
 hyscribe-kses.workspace = true
 hyscribe-model.workspace = true

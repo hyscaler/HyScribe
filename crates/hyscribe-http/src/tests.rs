@@ -690,7 +690,7 @@ async fn static_paths_keep_their_urls() {
     for uri in [
         "/wp-content/uploads/2026/10/photo.jpg",
         "/wp-content/themes/twentytwentyfive/",
-        "/wp-includes/js/wp-emoji-release.min.js",
+        "/wp-includes/js/nope.min.js",
         "/wp-content/plugins/x/",
     ] {
         // Never redirected; 404 where no file is served.
@@ -1128,31 +1128,39 @@ async fn link_headers_match_php() {
     assert_eq!(reply.headers.get_all("link").iter().count(), 1);
 }
 
+/// A static file as served: status, content type (empty for none) and
+/// the SHA-256 of the body.
+async fn served(site: &Arc<Site>, path: &str) -> (String, String, String) {
+    use sha2::Digest;
+    let response = router(site.clone())
+        .oneshot(Request::get(path).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = response.status().as_u16().to_string();
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .map_or("", |v| v.to_str().unwrap())
+        .to_string();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let sha = sha2::Sha256::digest(&body)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    (status, content_type, sha)
+}
+
 /// Every file of `reference/themes/files-golden.sh`: the default theme's
 /// files as the web server sends them.
 #[tokio::test]
 async fn theme_files_match_php() {
-    use sha2::Digest;
     let site = fixture_site(None).await;
     let golden = include_str!("../tests/golden/theme-files.tsv");
     for line in golden.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
-        let response = router(site.clone())
-            .oneshot(Request::get(fields[0]).body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        let status = response.status().as_u16().to_string();
-        let content_type = response.headers()[header::CONTENT_TYPE]
-            .to_str()
-            .unwrap()
-            .to_string();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let sha: String = sha2::Sha256::digest(&body)
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let (status, content_type, sha) = served(&site, fields[0]).await;
         assert_eq!(
             (status.as_str(), content_type.as_str(), sha.as_str()),
             (fields[1], fields[2], fields[3]),
@@ -1184,6 +1192,51 @@ async fn theme_files_match_php() {
         request(&site, "POST", path).await.status,
         StatusCode::METHOD_NOT_ALLOWED
     );
+}
+
+/// Every file of `reference/wordpress/files-golden.sh`: `wp-includes` as
+/// the web server sends it, skipping PHP and the unminified files with a
+/// `.min` twin, which are not bundled.
+#[tokio::test]
+async fn wp_includes_files_match_php() {
+    let site = fixture_site(None).await;
+    let golden = include_str!("../tests/golden/wp-includes-files.tsv");
+    let paths: Vec<&str> = golden
+        .lines()
+        .filter_map(|l| l.split('\t').next())
+        .collect();
+    let mut unminified = 0;
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let path = fields[0];
+        let (status, content_type, sha) = served(&site, path).await;
+        let twin = [".js", ".css"].iter().find_map(|ext| {
+            let stem = path.strip_suffix(ext)?;
+            (!stem.ends_with(".min")).then(|| format!("{stem}.min{ext}"))
+        });
+        if twin.is_some_and(|twin| paths.contains(&twin.as_str())) {
+            unminified += 1;
+            assert_eq!(status, "404", "{path}");
+            continue;
+        }
+        assert_eq!(
+            (status.as_str(), content_type.as_str(), sha.as_str()),
+            (fields[1], fields[2], fields[3]),
+            "{path}"
+        );
+    }
+    assert_eq!((golden.lines().count(), unminified), (1670, 643));
+    for path in [
+        "/wp-includes/version.php",
+        "/wp-includes/nope.js",
+        "/wp-includes/",
+    ] {
+        assert_eq!(
+            request(&site, "GET", path).await.status,
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
 }
 
 /// With a page on the front, its link and shortlink are the home page.

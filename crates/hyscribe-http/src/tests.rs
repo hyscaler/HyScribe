@@ -1021,7 +1021,7 @@ async fn loader_vars_match_php() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(golden.lines().count(), 186);
+    assert_eq!(golden.lines().count(), 181);
     // Recorded from PHP: a HEAD request ends before the favicon or the
     // trackback. PHP links the draft page 3, which HyScribe keeps hidden.
     for (method, path) in [
@@ -1517,6 +1517,24 @@ async fn the_page_on_the_front_takes_the_home_title() {
     site.options.insert("page_on_front".into(), b"0".to_vec());
     let reply = request(&Arc::new(site), "GET", "/").await;
     assert!(reply.body.contains("Hello world!"));
+}
+
+/// The posts whose canonical redirect is cancelled, as PHP answered in the
+/// loader golden of da35edd for the draft page and for the `wp_navigation`
+/// post its first page view writes, which the fixture lacks. A feed hides
+/// any post a visitor is not shown.
+#[test]
+fn hidden_posts_are_the_ones_visitors_are_not_shown() {
+    let post = |post_type: &str, status: &str| Post {
+        post_type: post_type.into(),
+        status: status.into(),
+        ..Post::default()
+    };
+    assert!(hides(&post("page", "draft"), false));
+    assert!(!hides(&post("page", "publish"), false));
+    assert!(!hides(&post("post", "auto-draft"), false));
+    assert!(!hides(&post("wp_navigation", "publish"), false));
+    assert!(hides(&post("wp_navigation", "publish"), true));
 }
 
 /// A page for posts that does not exist still lists the posts, under the

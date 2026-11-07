@@ -37,8 +37,7 @@ for path in '/?favicon=1' '/?favicon=0' '/?favicon=' '/?favicon=abc' '/?favicon=
   '/?preview=true&p=999&feed=rss' '/?preview=true&feed=rss&paged=99' '/?preview=true&page_id=3' '/?preview=true&name=sam' \
   '/?preview=true&cat=1&x=' '/?x=&preview=true&p=1' '/?preview=true&p=-1' '/?preview=true&year=2026&monthnum=13' \
   '/?page_id=3&feed=rss' '/?p=3&feed=rss' '/?page_id=3&x=' '/?preview=true&p=3&x=y' '/?preview=true&name=hello-world&p=0' '/?page_id=3&feed=rss2&x=' '/?p=3&feed=rss2&x=' '/?page_id=3&feed=rss2&cat=' '/?page_id=3&cat=' \
-  '/?attachment_id=3&cat=' '/?subpost_id=3&cat=' '/?attachment_id=3&preview=true&cat=' '/?p=-1&page_id=3&cat=' '/?p=4&feed=rss' \
-  '/?page_id=4&feed=rss' '/?p=4&feed=rss2&cat=' '/?p=4&cat=' '/?p=3&feed=rss' \
+  '/?attachment_id=3&cat=' '/?subpost_id=3&cat=' '/?attachment_id=3&preview=true&cat=' '/?p=-1&page_id=3&cat=' \
   '/?p=1&unapproved=1&moderation-hash=x' '/?p=1&unapproved=1' '/?p=1&moderation-hash=x' '/?unapproved=&moderation-hash=' '/?s=a&unapproved=1&moderation-hash=x' \
   '/?error=404' '/?error=403' '/?error=500' '/?error=502' '/?error=503' '/?error=410' '/?error=abc' '/?error=404&p=1' '/?p=1&error=404' \
   '/?error=403&p=1' '/?error=' '/?error=0' '/?error=404x' '/?error=+404' '/?error=404&sitemap=index' '/?error=403&robots=1' '/?error=404&p=2' \

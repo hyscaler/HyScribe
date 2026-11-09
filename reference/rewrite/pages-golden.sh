@@ -44,7 +44,7 @@ PATHS=(
 # turns down, so the oracle's port decides it.
 POSTS_PATHS=(/sample-page/page/2/ '/?page_id=2&paged=2' '/?page_id=2&page=2' '/?pagename=sample-page&page=2' '/?page_id=2&cpage=2' '/?page_id=x')
 # The draft privacy policy page as the page for posts.
-DRAFT_PATHS=('/?pagename=privacy-policy' '/?page_id=3' /privacy-policy/)
+DRAFT_PATHS=('/?pagename=privacy-policy' '/?page_id=3' /privacy-policy/ '/?pagename=privacy-policy&year=2025' '/?pagename=privacy-policy&s=zzz')
 SETUPS=('/%year%/%monthnum%/%day%/%postname%/|||' '/%postname%/|||' '/archives/%post_id%|||' '/index.php/%postname%/|||' '/%category%/%postname%/|||'
   '/%postname%/|topics|labels|2' '|||2' '/%postname%/|||0|2' '||||2' '/%postname%/|||0|3')
 : > "$OUT"

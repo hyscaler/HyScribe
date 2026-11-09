@@ -1661,13 +1661,17 @@ async fn list(
     posts_page: Option<u64>,
 ) -> Result<(Page, Option<Post>), DbError> {
     let term_archive = terms.archive;
-    let search = shown_search(query);
+    // The page for posts is the blog: a search or the date vars only
+    // filter its posts.
+    let blog = posts_page.is_some();
+    let search = shown_search(query).filter(|_| !blog);
     let search = search.as_ref();
     let date = date_query(query);
     // `error=404`: the 404 page, but `handle_404()` sends no 404 for it.
     if date.invalid {
         return Ok((error_404(site, feed), None));
     }
+    let dated = date.archive && !blog;
     let posts_page = async {
         match posts_page {
             Some(id) => site.db.post(id).await,
@@ -1688,7 +1692,7 @@ async fn list(
     };
     // An archive with nothing in it is a 404 unless it is of a term that
     // exists, a search only when paged.
-    let is_archive = date.archive || term_archive.is_some();
+    let is_archive = dated || term_archive.is_some();
     let empty_404 = paging.is_paged() || is_archive && search.is_none() && term.is_none();
     if empty_404 && posts.is_empty() {
         let mut page = not_found(site, feed && !paging.is_paged());
@@ -1705,7 +1709,7 @@ async fn list(
         Some(term.map_or_else(String::new, |term| esc_html(&term.name)))
     } else {
         // A week's or a time's archive has no title of its own.
-        date.archive.then(|| {
+        dated.then(|| {
             date.kind.as_ref().map_or_else(String::new, |kind| {
                 let format = match kind {
                     Archive::Day => site.option("date_format"),
@@ -1738,14 +1742,14 @@ async fn list(
         &terms.kinds,
         term_archive.as_ref(),
         search.is_some(),
-        date.archive,
+        dated,
         query.contains_key("post_format"),
     );
     candidates.retain(|name| front || name != "front-page");
     let queried_object_id = term.map_or(0, |term| term.id);
     let archive = term_archive
-        .or(date.kind.clone())
-        .or(date.archive.then_some(Archive::Date));
+        .or(date.kind.clone().filter(|_| !blog))
+        .or(dated.then_some(Archive::Date));
     // The home page lists the latest posts, the default install's setting.
     let home = archive.is_none() && search.is_none();
     let request = Request {
@@ -1754,7 +1758,7 @@ async fn list(
         post: posts.first().map(|post| post.id),
         queried_object_id,
         archive,
-        date: date.archive,
+        date: dated,
         search: search.map(|s| s.as_bytes().to_vec()),
         search_query: search.map_or_else(Vec::new, |s| s.as_bytes().to_vec()),
         paged: paging.paged,
@@ -1923,26 +1927,31 @@ async fn by_slug(
     let (key, post_type, found, name) = if let Some(name) = var("name") {
         let name = sanitize_title_for_query(name.as_bytes());
         // Attachment pages are not served yet: none is found.
-        let post = match queryable {
-            Some("attachment") => None,
-            _ => {
-                site.db
-                    .post_by_name(&String::from_utf8_lossy(&name))
-                    .await?
+        let post = async {
+            match queryable {
+                Some("attachment") => Ok(None),
+                _ => {
+                    let name = String::from_utf8_lossy(&name);
+                    narrowed(site, query, site.db.post_by_name(&name).await?).await
+                }
             }
         };
-        ("name", "post", post, name)
+        ("name", "post", post.await?, name)
     } else if let Some(path) = var("pagename") {
         let parts = page_path(path);
-        // A queryable post type is not hierarchical: no page is found.
-        let pages = match queryable {
-            Some(_) => Vec::new(),
-            None => site.db.named_pages(&parts).await?,
+        let post = async {
+            // A queryable post type is not hierarchical: no page is found.
+            let pages = match queryable {
+                Some(_) => Vec::new(),
+                None => site.db.named_pages(&parts).await?,
+            };
+            // The page for posts lists the posts whatever its status.
+            let post = page_by_path(&parts, &pages)
+                .filter(|p| viewable(p, &["page"]) || site.posts_page() == Some(p.id))
+                .cloned();
+            narrowed(site, query, post).await
         };
-        // The page for posts lists the posts whatever its status.
-        let post = page_by_path(&parts, &pages)
-            .filter(|p| viewable(p, &["page"]) || site.posts_page() == Some(p.id))
-            .cloned();
+        let post = post.await?;
         let name = sanitize_title_for_query(&query::basename(path.as_bytes()));
         ("pagename", "page", post, name)
     } else if let Some(attachment) = ["subpost", "attachment"]
@@ -1994,6 +2003,32 @@ async fn by_slug(
             None => Slug::Post((key, 0, post_type)),
         })
     })
+}
+
+/// `post` if it is one the query's date vars and search also match, as
+/// `WP_Query` adds them to a slug's query; its taxonomy vars are ignored.
+async fn narrowed(
+    site: &Site,
+    query: &HashMap<String, String>,
+    post: Option<Post>,
+) -> Result<Option<Post>, DbError> {
+    let date = date_query(query);
+    // An invalid date still adds its conditions, which nothing meets.
+    let dated = date.archive || date.invalid;
+    match post {
+        Some(post) if post.status == "publish" && (query.contains_key("s") || dated) => {
+            let all = post_query(site, query, false, Vec::new(), false);
+            let only = PostQuery {
+                post_types: vec![post.post_type.clone()],
+                // Conflicting dates already include nothing.
+                include: all.include.or(Some(vec![post.id])),
+                ..all
+            };
+            let count = site.db.count_posts(&only).await;
+            count.map(|count| (count > 0).then_some(post))
+        }
+        post => Ok(post),
+    }
 }
 
 /// The verbose page rules' check: `get_page_by_path()` finds a page or

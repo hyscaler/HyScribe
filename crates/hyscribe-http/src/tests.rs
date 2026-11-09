@@ -1021,7 +1021,7 @@ async fn loader_vars_match_php() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(golden.lines().count(), 215);
+    assert_eq!(golden.lines().count(), 238);
     // Recorded from PHP: a HEAD request ends before the favicon or the
     // trackback. PHP links the draft page 3, which HyScribe keeps hidden.
     for (method, path) in [
@@ -1556,6 +1556,23 @@ async fn a_missing_page_for_posts_lists_the_posts() {
         assert_eq!(title(&reply.body), "HyScribe Default Install");
         assert!(reply.body.contains("Hello world!"));
     }
+}
+
+/// A name's date vars must match the post it names, not another post
+/// (the `later` post of `terms.sql` is from the 28th, `hello-world` from
+/// the 27th); checked against PHP on the default install.
+#[tokio::test]
+async fn a_name_and_date_must_match_the_same_post() {
+    let config = Database {
+        name: "wordpress_terms".into(),
+        ..fixture_config()
+    };
+    let db = Db::connect(&config).await.unwrap();
+    let site = Arc::new(Site::load(db, None, None).await.unwrap());
+    let reply = request(&site, "GET", "/?name=hello-world&day=28").await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    let reply = request(&site, "GET", "/?name=later&day=28").await;
+    assert_eq!(reply.status, StatusCode::OK);
 }
 
 /// A post with no category takes the default one's slug in its link.
@@ -2339,5 +2356,5 @@ async fn pretty_pages_match_php() {
     );
     assert_eq!(redirects.len(), 0, "{}", redirects.join("\n"));
     assert_eq!(attachments, 1);
-    assert_eq!(golden.lines().count(), 725);
+    assert_eq!(golden.lines().count(), 727);
 }

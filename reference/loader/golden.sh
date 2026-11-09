@@ -53,6 +53,11 @@ for path in '/?favicon=1' '/?favicon=0' '/?favicon=' '/?favicon=abc' '/?favicon=
   '/?name=hello-world&page=x&feed=atom' '/?pagename=sample-page&page=x&feed=rss2' '/?p=2&page=x&feed=rss2' '/?page_id=3&page=x&feed=rss2' \
   '/?name=hello-world&page=2&feed=rss2' '/?name=hello-world&page=-1&feed=rss2' '/?name=hello-world&page=x&feed=rss2&cat=1' '/?name=hello-world&page=%20&feed=rss2' \
   '/?p=1&page=x&feed=comments-rss2' '/?page_id=2&page=x&feed=comments-atom' '/?p=1&page=x&feed=rss2&x=y' '/?p=1&page=x&feed=rss' '/?pagename=sample-page&page=x&feed=rss' \
+  '/?name=hello-world&year=2026' '/?name=hello-world&year=2025' '/?name=hello-world&m=2025' '/?name=hello-world&s=hello' '/?name=hello-world&s=zzz' \
+  '/?name=hello-world&monthnum=1' '/?pagename=sample-page&year=2025' '/?pagename=sample-page&s=zzz' '/?name=hello-world&year=2025&feed=rss2' \
+  '/?name=hello-world&day=28' '/?name=hello-world&cat=2' '/?name=hello-world&monthnum=13' '/?name=hello-world&w=1' '/?name=hello-world&hour=9' \
+  '/?name=hello-world&hour=8' '/?name=hello-world&s=hello&exact=1' '/?name=hello-world&s=Hello+world%21&exact=1' '/?pagename=sample-page&s=sample' \
+  '/?name=hello-world&m=2026&year=2025' '/?pagename=privacy-policy&year=2025' '/?pagename=sample-page&s=zzz&feed=rss2' '/?name=hello-world&s=' '/?pagename=sample-page&year=2026' \
   '/?pagename=sample-page&page=2' '/?name=nope&year=2026&monthnum=10' '/?p=999&post_type=post' '/?name=nope&post_type=post' \
   '/?post_type=attachment' '/?m=2026&post_type=attachment' '/?s=hello&post_type=attachment' '/?cat=1&post_type=attachment' \
   '/?post_type=post' '/?post_type=page' '/?s=sample&post_type=post' '/?s=sample&post_type=page' '/?s=sample' '/?post_type=nope' \

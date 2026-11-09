@@ -844,6 +844,10 @@ async fn reads_come_from_the_database_once() {
         );
         assert_eq!(reads.post_terms(1, "category")[0].slug, b"uncategorized");
         assert_eq!(reads.recent_comments(5)[0].id, 1);
+        let (uncategorized, _) = &reads.taxonomy_terms("category")[0];
+        assert_eq!(uncategorized.slug, b"uncategorized");
+        assert_eq!(reads.term_posts("category"), [(1, 1)]);
+        assert!(reads.term_posts("post_tag").is_empty());
         let (category, count) = &reads.cloud_terms("category", 45)[0];
         assert_eq!((&category.slug[..], *count), (&b"uncategorized"[..], 1));
         for _ in 0..2 {

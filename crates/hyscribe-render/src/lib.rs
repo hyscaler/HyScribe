@@ -7,6 +7,7 @@ mod archives;
 pub mod autop;
 pub mod balance;
 pub mod blocks;
+mod categories;
 pub mod clickable;
 mod comment_pages;
 mod comments;

@@ -376,6 +376,8 @@ async fn errors_are_reported() {
         db.date_counts(Period::Year).await.unwrap_err(),
         db.recent_comments(1).await.unwrap_err(),
         db.cloud_terms("post_tag", 1).await.unwrap_err(),
+        db.taxonomy_terms("category").await.unwrap_err(),
+        db.term_posts("category").await.unwrap_err(),
         db.archive_feed_comments(
             &PostQuery {
                 post_types: vec!["post".into()],
@@ -392,6 +394,7 @@ async fn errors_are_reported() {
                 "missing_posts",
                 "missing_terms",
                 "missing_term_taxonomy",
+                "missing_term_relationships",
                 "missing_postmeta",
                 "missing_users",
                 "missing_comments"
@@ -726,6 +729,15 @@ async fn date_counts_group_published_posts() {
         [(&b"foo"[..], 1)]
     );
     assert!(db.cloud_terms("post_tag", 0).await.unwrap().is_empty());
+    // Every tag by name, the empty one too, and the posts in them.
+    let tags = db.taxonomy_terms("post_tag").await.unwrap();
+    assert_eq!(
+        tags.iter()
+            .map(|(t, n)| (&t.slug[..], *n))
+            .collect::<Vec<_>>(),
+        [(&b"empty"[..], 0), (&b"foo"[..], 1)]
+    );
+    assert_eq!(db.term_posts("post_tag").await.unwrap(), [(2, 1)]);
     assert_eq!(
         db.date_counts(Period::Day).await.unwrap(),
         [count(2026, 10, 28, 1), count(2026, 10, 27, 1)]

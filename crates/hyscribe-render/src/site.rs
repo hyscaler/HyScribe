@@ -70,6 +70,18 @@ pub trait Site {
         vec![]
     }
 
+    /// Every term of `taxonomy` with its post count, by name. Sites
+    /// without term data have none.
+    fn taxonomy_terms(&self, _taxonomy: &str) -> Vec<(Term, u64)> {
+        vec![]
+    }
+
+    /// The published posts in each term of `taxonomy`, as `(term ID, post
+    /// ID)`. Sites without term data have none.
+    fn term_posts(&self, _taxonomy: &str) -> Vec<(u64, u64)> {
+        vec![]
+    }
+
     /// `wp_get_archives()`'s periods of published posts, newest first.
     /// Sites without post data have none.
     fn date_counts(&self, _period: Period) -> Vec<DateCount> {

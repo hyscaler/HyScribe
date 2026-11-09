@@ -141,6 +141,8 @@ pub(crate) struct Renderer<'a> {
     /// Posts the latest posts block is rendering in full, its own
     /// `$rendering_stack`.
     pub(crate) latest_posts_open: Vec<u64>,
+    /// The categories blocks rendered, which number their dropdowns.
+    pub(crate) categories_blocks: u64,
     /// The `layout` attribute of the block being rendered, `parentLayout`
     /// to its inner blocks.
     pub(crate) parent_layout: Option<Value>,
@@ -193,6 +195,7 @@ impl<'a> Renderer<'a> {
             open_patterns: Vec::new(),
             open_posts: Vec::new(),
             latest_posts_open: Vec::new(),
+            categories_blocks: 0,
             parent_layout: None,
             unique_id: 0,
             elements_id: 0,
@@ -272,6 +275,7 @@ impl Renderer<'_> {
             Some("core/search") => self.search(block),
             Some("core/archives") => self.archives(block),
             Some("core/latest-posts") => self.latest_posts(block),
+            Some("core/categories") => self.categories(block),
             Some("core/navigation-link") => self.navigation_link(block),
             Some("core/home-link") => self.home_link(block),
             Some("core/page-list") => self.page_list(block),

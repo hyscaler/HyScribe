@@ -133,6 +133,12 @@ fn term(row: &MySqlRow) -> Result<Term, DbError> {
     c.finish(term)
 }
 
+/// A term row with its taxonomy's post count.
+fn counted_term(row: &MySqlRow) -> Result<(Term, u64), DbError> {
+    let count = Columns::new(row).signed("count").unsigned_abs();
+    term(row).map(|term| (term, count))
+}
+
 fn date_count(row: &MySqlRow) -> Result<DateCount, DbError> {
     let mut c = Columns::new(row);
     let count = DateCount {
@@ -691,10 +697,44 @@ impl Db {
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
+        rows.iter().map(counted_term).collect()
+    }
+
+    /// Every term of `taxonomy` with its post count, by name, as
+    /// `get_terms()` orders them for `wp_list_categories()`.
+    pub async fn taxonomy_terms(&self, taxonomy: &str) -> Result<Vec<(Term, u64)>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT t.term_id, t.name, t.slug, tt.description, tt.parent, tt.count FROM {prefix}terms t \
+             JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
+             WHERE tt.taxonomy = ? ORDER BY t.name ASC",
+        );
+        let rows = sqlx::query(sql)
+            .bind(taxonomy)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(counted_term).collect()
+    }
+
+    /// The published posts in each term of `taxonomy`, as `(term ID, post
+    /// ID)`: what `_pad_term_counts()` reads.
+    pub async fn term_posts(&self, taxonomy: &str) -> Result<Vec<(u64, u64)>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT tt.term_id, tr.object_id FROM {prefix}term_relationships tr \
+             JOIN {prefix}term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id \
+             JOIN {prefix}posts p ON tr.object_id = p.ID \
+             WHERE tt.taxonomy = ? AND p.post_type = 'post' AND p.post_status = 'publish'",
+        );
+        let rows = sqlx::query(sql)
+            .bind(taxonomy)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
         rows.iter()
             .map(|row| {
-                let count = Columns::new(row).signed("count").unsigned_abs();
-                term(row).map(|term| (term, count))
+                let mut c = Columns::new(row);
+                let pair = (c.unsigned("term_id"), c.unsigned("object_id"));
+                c.finish(pair)
             })
             .collect()
     }

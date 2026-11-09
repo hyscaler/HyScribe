@@ -1098,14 +1098,18 @@ async fn route(
     } else {
         query
     };
+    let id = |name| query.get(name).map_or(0, |v| absint(v));
+    let p = if bad { 0 } else { id("p") };
+    // The post `p`, `page_id` or `attachment_id` names; ID 0 is no post's.
+    let target = p.max(id("page_id")).max(attachment);
+    if let Some(format) = format.filter(|_| asks_404(query) && target > 0) {
+        let post = site.db.post(target).await?;
+        return error_404_feed(site, post, raw_query, &current, format).await;
+    }
     if (bad || asks_404(query)) && !query.contains_key("feed") {
         if let Some(location) = date_redirect(site, raw_query, query) {
             return Ok(Outcome::Redirect(location));
         }
-        let id = |name| query.get(name).map_or(0, |v| absint(v));
-        let p = if bad { 0 } else { id("p") };
-        // ID 0 is no post's.
-        let target = p.max(id("page_id")).max(attachment);
         return Ok(
             match redirect_to(site, target, raw_query, error_404(site, false)).await? {
                 Outcome::Redirect(location) if location == current => {
@@ -1131,6 +1135,10 @@ async fn route(
             None => None,
         },
     };
+    // A slug's `error=404` feed that the guess found nothing for.
+    if let Some(format) = format.filter(|_| asks_404(query) && single.is_some()) {
+        return error_404_feed(site, None, raw_query, &current, format).await;
+    }
     // `is_posts_page`: the page for posts, by `page_id` or `pagename`, is
     // the posts listed under its title.
     let posts_page = single
@@ -1875,6 +1883,33 @@ fn hides(post: &Post, feed: bool) -> bool {
             || matches!(post.post_type.as_str(), "post" | "page") && post.status != "auto-draft")
 }
 
+/// `error=404` on a feed of the post asked for by ID: a published post or
+/// page goes to its link, the other arguments kept and `feed=rss` as
+/// `feed=rss2`; at that link, or with no post, the 404 posts feed, which
+/// lists the post if it is a post.
+async fn error_404_feed(
+    site: &Arc<Site>,
+    found: Option<Post>,
+    raw_query: Option<&str>,
+    current: &str,
+    format: feed::Format,
+) -> Result<Outcome, DbError> {
+    let found = found.filter(|post| viewable(post, &["post", "page"]));
+    if let Some(post) = &found {
+        let query = rss2_query(raw_query);
+        let location = post_location(&site.permalink(post).await, post, Some(&query));
+        if location != current {
+            return Ok(Outcome::Redirect(location));
+        }
+    }
+    let mut page = match found.filter(|post| post.post_type == "post") {
+        Some(post) => single_page(site, post, Paging::default()),
+        None => missing_single(site),
+    };
+    page.title = not_found(site, false).title;
+    feed::outcome(site, std::future::ready(Ok(page)), None, format, None, true).await
+}
+
 /// A redirect to the published post or page with `id`'s link, else `missing`.
 async fn redirect_to(
     site: &Arc<Site>,
@@ -1962,17 +1997,20 @@ async fn by_slug(
     } else {
         return Ok(None);
     };
-    if let Some(post) = found {
+    // A feed is a 404 only by `error=404`, which guesses even for a post
+    // found, and goes to the guess's feed.
+    let feed = query.get("feed").is_some_and(|f| !f.is_empty());
+    let feed_404 = feed && asks_404(query);
+    if let Some(post) = found.filter(|_| !feed_404) {
         return Ok(Some(Slug::Post((key, post.id, post_type))));
     }
     let post_types = queryable.map_or(vec!["post", "page", "attachment"], |t| vec![t]);
     let date = |name| query.get(name).map(|v| absint(v)).filter(|&v| v > 0);
-    // A feed is never a 404, so it is not guessed for; a guess past page 1
-    // would only redirect again where a plain link cannot name the page.
-    let feed = query.get("feed").is_some_and(|f| !f.is_empty());
+    // A guess past page 1 would only redirect again where a plain link
+    // cannot name the page.
     let links = site.permalinks();
     let paged = date("page").filter(|&page| page > 1);
-    let guess = if feed || name.is_empty() || paged.is_some() && !links.pretty() {
+    let guess = if feed && !feed_404 || name.is_empty() || paged.is_some() && !links.pretty() {
         Ok(None)
     } else {
         let name = String::from_utf8_lossy(&name);
@@ -1987,6 +2025,9 @@ async fn by_slug(
     };
     guess.map(|guess| {
         Some(match guess {
+            Some(post) if feed_404 => {
+                Slug::Moved(single_feed_location(site, raw_query, &post, true))
+            }
             Some(post) => {
                 // `page` and `feed` go first, as `redirect_canonical()` drops them.
                 let mut drop = vec!["page", "feed"];

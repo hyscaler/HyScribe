@@ -673,27 +673,29 @@ impl Db {
     /// `wp_get_archives()`'s periods of published posts, newest first.
     pub async fn date_counts(&self, period: Period) -> Result<Vec<DateCount>, DbError> {
         let mut sql = Sql::new("SELECT CAST(YEAR(post_date) AS SIGNED) AS y, ");
-        sql.push(match period {
-            Period::Year => "0 AS m, 0 AS d, 0 AS w",
-            Period::Month => "CAST(MONTH(post_date) AS SIGNED) AS m, 0 AS d, 0 AS w",
-            Period::Day => {
+        match period {
+            Period::Year => sql.push("0 AS m, 0 AS d, 0 AS w"),
+            Period::Month => sql.push("CAST(MONTH(post_date) AS SIGNED) AS m, 0 AS d, 0 AS w"),
+            Period::Day => sql.push(
                 "CAST(MONTH(post_date) AS SIGNED) AS m, \
-                 CAST(DAYOFMONTH(post_date) AS SIGNED) AS d, 0 AS w"
-            }
-            Period::Week(_) => {
-                "CAST(MONTH(MAX(post_date)) AS SIGNED) AS m, \
-                 CAST(DAYOFMONTH(MAX(post_date)) AS SIGNED) AS d, "
-            }
-        });
-        // `_wp_mysql_week()`.
-        if let Period::Week(start) = period {
-            sql.push(match start {
-                1 => "CAST(WEEK(post_date, 1) AS SIGNED) AS w",
-                2..=6 => "CAST(WEEK(DATE_SUB(post_date, INTERVAL ? DAY), 0) AS SIGNED) AS w",
-                _ => "CAST(WEEK(post_date, 0) AS SIGNED) AS w",
-            });
-            if (2..=6).contains(&start) {
-                sql.bind(Bind::Int(start.unsigned_abs()));
+                 CAST(DAYOFMONTH(post_date) AS SIGNED) AS d, 0 AS w",
+            ),
+            // `_wp_mysql_week()`, the month and day of the week's latest post.
+            Period::Week(start) => {
+                sql.push(
+                    "CAST(MONTH(MAX(post_date)) AS SIGNED) AS m, \
+                     CAST(DAYOFMONTH(MAX(post_date)) AS SIGNED) AS d, ",
+                );
+                match start {
+                    1 => sql.push("CAST(WEEK(post_date, 1) AS SIGNED) AS w"),
+                    2..=6 => {
+                        sql.push(
+                            "CAST(WEEK(DATE_SUB(post_date, INTERVAL ? DAY), 0) AS SIGNED) AS w",
+                        );
+                        sql.bind(Bind::Int(start.unsigned_abs()));
+                    }
+                    _ => sql.push("CAST(WEEK(post_date, 0) AS SIGNED) AS w"),
+                }
             }
         }
         sql.push(

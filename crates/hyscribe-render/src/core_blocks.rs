@@ -92,7 +92,7 @@ pub(crate) fn render(
         "core/comments-title" => comments_title,
         "core/post-author" => author::post_author,
         "core/post-author-biography" => author::post_author_biography,
-        "core/post-author-name" => post_author_name,
+        "core/post-author-name" => author::post_author_name,
         "core/post-comments-form" => comment_form::post_comments_form,
         "core/post-comments-count" => post_comments_count,
         "core/post-comments-link" => post_comments_link,
@@ -547,54 +547,6 @@ pub(crate) fn number_format(number: impl Into<i128>) -> String {
         out.push(digit);
     }
     if number < 0 { format!("-{out}") } else { out }
-}
-
-/// `render_block_core_post_author_name()`: the author's display name, as
-/// stored, linked to their posts when `isLink` is set.
-fn post_author_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
-    let Some(post) = context.post().filter(|post| post.author != 0) else {
-        return Vec::new();
-    };
-    // post_type_supports( $post_type, 'author' )
-    if !matches!(
-        post.post_type.as_str(),
-        "post" | "page" | "attachment" | "revision"
-    ) {
-        return Vec::new();
-    }
-    let mut name = context
-        .site
-        .user(post.author)
-        .map(|user| user.display_name)
-        .unwrap_or_default();
-    if block.attribute("isLink").is_some_and(|v| !v.is_empty()) {
-        let author = i64::try_from(post.author).unwrap_or_default();
-        let url = esc_url(&crate::permalinks::author_posts_url(context.site, author));
-        let target = block
-            .attribute("linkTarget")
-            .map(Value::to_php_string)
-            .unwrap_or_default();
-        name = [
-            &b"<a href=\""[..],
-            &url,
-            b"\" target=\"",
-            esc_attr(&target).as_bytes(),
-            b"\" class=\"wp-block-post-author-name__link\">",
-            &name,
-            b"</a>",
-        ]
-        .concat();
-    }
-    [
-        format!(
-            "<div {}>",
-            block.wrapper(context, &align_link_classes(block, Vec::new()))
-        )
-        .as_bytes(),
-        &name,
-        b"</div>",
-    ]
-    .concat()
 }
 
 /// `render_block_core_post_navigation_link()`: on a single post, a link to

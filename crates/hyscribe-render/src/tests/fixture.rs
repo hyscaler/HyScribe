@@ -240,36 +240,28 @@ impl Site for DefaultInstall {
         for p in posts.filter(|p| p.status == "publish" && p.post_type == "post") {
             let part = |at: std::ops::Range<usize>| p.date.get(at).unwrap().parse().unwrap();
             let (year, month, day) = (part(0..4), part(5..7), part(8..10));
-            let key = match period {
-                Period::Year => DateCount {
-                    year,
-                    ..DateCount::default()
-                },
-                Period::Month => DateCount {
-                    year,
-                    month,
-                    ..DateCount::default()
-                },
-                Period::Day => DateCount {
-                    year,
-                    month,
-                    day,
-                    ..DateCount::default()
-                },
-                Period::Week(start) => DateCount {
-                    year,
-                    month,
-                    day,
-                    week: mysql_week(year, month, day, start),
-                    posts: 0,
-                },
+            let (month, day) = match period {
+                Period::Year => (0, 0),
+                Period::Month => (month, 0),
+                Period::Day | Period::Week(_) => (month, day),
+            };
+            let week = match period {
+                Period::Week(start) => mysql_week(year, month, day, start),
+                _ => 0,
+            };
+            let key = DateCount {
+                year,
+                month,
+                day,
+                week,
+                posts: 1,
             };
             let same = |c: &&mut DateCount| {
                 (c.year, c.month, c.day, c.week) == (key.year, key.month, key.day, key.week)
             };
             match counts.iter_mut().find(same) {
                 Some(count) => count.posts += 1,
-                None => counts.push(DateCount { posts: 1, ..key }),
+                None => counts.push(key),
             }
         }
         counts.sort_by_key(|c| std::cmp::Reverse((c.year, c.month, c.day)));
@@ -478,23 +470,24 @@ fn column_order(a: &Post, b: &Post, column: OrderBy, phrase: &str) -> Ordering {
 /// from Monday, `WEEK( d - start days, 0 )` from Tuesday to Saturday,
 /// else `WEEK( d, 0 )`.
 fn mysql_week(year: u64, month: u64, day: u64, start: i64) -> u64 {
-    let days = |y: u64, m: u64, d: u64| {
-        let stored = format!("{y:04}-{m:02}-{d:02} 00:00:00");
-        crate::date::stored_unix(&stored, crate::date::Zone::Utc).div_euclid(86_400)
-    };
-    let mut date = days(year, month, day);
+    use crate::date::{days_from_civil, weekday};
+    let year = i64::try_from(year).unwrap();
+    let mut date = days_from_civil(year, month as i64, day as i64);
     if (2..=6).contains(&start) {
         date -= start;
     }
     let mut y = year;
-    while days(y, 1, 1) > date {
+    while days_from_civil(y, 1, 1) > date {
         y -= 1;
     }
-    let first = days(y, 1, 1);
+    let first = days_from_civil(y, 1, 1);
     let monday = start == 1;
-    // 1 January's weekday from Monday (mode 1) or Sunday (mode 0); 1970
-    // began on a Thursday.
-    let weekday = (first + if monday { 3 } else { 4 }).rem_euclid(7);
+    // 1 January's weekday from Monday (mode 1) or Sunday (mode 0).
+    let weekday = if monday {
+        (weekday(first) + 6) % 7
+    } else {
+        weekday(first)
+    };
     let week_one = if monday && weekday <= 3 {
         first - weekday
     } else {

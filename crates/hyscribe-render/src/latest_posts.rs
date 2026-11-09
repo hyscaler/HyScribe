@@ -6,7 +6,7 @@
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
 use hyscribe_model::{Post, PostQuery, TermFilter};
-use hyscribe_phpser::{Value, absint, is_empty_string};
+use hyscribe_phpser::{Key, Value, absint, is_empty_string, isset};
 
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
@@ -26,8 +26,8 @@ impl Renderer<'_> {
     pub(crate) fn latest_posts(&mut self, block: &Block) -> Vec<u8> {
         let parsed = block.attrs.as_deref().unwrap_or_default();
         let attributes = prepared("core/latest-posts", &migrate_categories(parsed));
-        let get = |name| attributes.get_str(name).filter(|v| **v != Value::Null);
-        let on = |name| get(name).is_some_and(|v| !v.is_empty());
+        let get = |name| attribute(&attributes, name);
+        let on = |name| on(&attributes, name);
         let site = self.context.site;
         let posts = site.query(&self.latest_posts_query(&attributes));
         let content = get("displayPostContentRadio").and_then(Value::as_bytes);
@@ -41,7 +41,7 @@ impl Renderer<'_> {
         for post in posts {
             let link = esc_url(&permalink(site, &post));
             let mut title = the_title(&post);
-            if is_empty_string(&title) || title == b"0" {
+            if is_empty_string(&title) {
                 title = b"(no title)".to_vec();
             }
             items.extend_from_slice(b"<li><a class=\"wp-block-latest-posts__post-title\" href=\"");
@@ -54,7 +54,7 @@ impl Renderer<'_> {
                     .user(post.author)
                     .map(|u| u.display_name)
                     .unwrap_or_default();
-                if !name.is_empty() && name != b"0" {
+                if !is_empty_string(&name) {
                     items.extend_from_slice(
                         b"<div class=\"wp-block-latest-posts__post-author\">by ",
                     );
@@ -181,22 +181,30 @@ impl Renderer<'_> {
     }
 }
 
+/// The attribute `name`, unless it is null.
+fn attribute<'a>(attributes: &'a Value, name: &str) -> Option<&'a Value> {
+    attributes.get_str(name).filter(|v| **v != Value::Null)
+}
+
+/// Whether the attribute `name` is set and not PHP `empty()`.
+fn on(attributes: &Value, name: &str) -> bool {
+    attribute(attributes, name).is_some_and(|v| !v.is_empty())
+}
+
 /// `block_core_latest_posts_migrate_categories()`: a category ID given as
 /// a string becomes the one category in the list.
-fn migrate_categories(
-    parsed: &[(hyscribe_phpser::Key, Value)],
-) -> Vec<(hyscribe_phpser::Key, Value)> {
+fn migrate_categories(parsed: &[(Key, Value)]) -> Vec<(Key, Value)> {
     parsed
         .iter()
         .map(|(key, value)| match value {
             Value::String(id) if key.to_php_string() == b"categories" && !is_empty_string(id) => {
                 let entry = vec![(
-                    hyscribe_phpser::Key::String(b"id".to_vec()),
+                    Key::String(b"id".to_vec()),
                     Value::Int(i64::try_from(absint(value)).unwrap_or(i64::MAX)),
                 )];
                 (
                     key.clone(),
-                    Value::Array(vec![(hyscribe_phpser::Key::Int(0), Value::Array(entry))]),
+                    Value::Array(vec![(Key::Int(0), Value::Array(entry))]),
                 )
             }
             _ => (key.clone(), value.clone()),
@@ -207,8 +215,8 @@ fn migrate_categories(
 /// The list's classes: a grid's, with its columns, and those for dates,
 /// authors and a link color.
 fn list_classes(attributes: &Value) -> Vec<u8> {
-    let get = |name| attributes.get_str(name).filter(|v| **v != Value::Null);
-    let on = |name| get(name).is_some_and(|v| !v.is_empty());
+    let get = |name| attribute(attributes, name);
+    let on = |name| on(attributes, name);
     let layout = get("layout");
     let legacy = matches!(get("postLayout"), Some(Value::String(l)) if l == b"grid");
     let grid = match layout.and_then(|l| l.get_str("type")) {
@@ -239,10 +247,7 @@ fn list_classes(attributes: &Value) -> Vec<u8> {
     if on("displayAuthor") {
         classes.push(b"has-author".to_vec());
     }
-    let link_color = ["style", "elements", "link", "color", "text"]
-        .iter()
-        .try_fold(attributes, |value, key| value.get_str(key))
-        .is_some_and(|v| *v != Value::Null);
+    let link_color = isset(attributes.get_path(&["style", "elements", "link", "color", "text"]));
     if link_color {
         classes.push(b"has-link-color".to_vec());
     }

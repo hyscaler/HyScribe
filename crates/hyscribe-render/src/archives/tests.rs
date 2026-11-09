@@ -105,7 +105,8 @@ fn matches_php() {
     assert_eq!(golden.lines().count(), 1848);
 }
 
-/// A site with no posts, as `Site` answers by default.
+/// A site with no posts, as `Site` answers by default, which it keeps
+/// for `date_counts`.
 struct Empty;
 
 impl Site for Empty {

@@ -64,13 +64,18 @@ struct Time {
 
 /// Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's
 /// `days_from_civil`).
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let year = if month <= 2 { year - 1 } else { year };
     let era = year.div_euclid(400);
     let year_of_era = year - era * 400;
     let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
     era * 146_097 + day_of_era - 719_468
+}
+
+/// The weekday of a day count from 1970-01-01, a Thursday: 0 for Sunday.
+pub(crate) fn weekday(days: i64) -> i64 {
+    (days + 4).rem_euclid(7)
 }
 
 /// The date of a day count from 1970-01-01.
@@ -130,7 +135,7 @@ impl Time {
 
     /// 0 for Sunday.
     fn weekday(&self) -> usize {
-        (self.days + 4).rem_euclid(7) as usize
+        weekday(self.days) as usize
     }
 
     /// The ISO 8601 year and week.

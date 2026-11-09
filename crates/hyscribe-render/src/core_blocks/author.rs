@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The post author blocks: `render_block_core_post_author()` and
-//! `render_block_core_post_author_biography()`.
+//! The post author blocks: `render_block_core_post_author()`, its name and
+//! its biography.
 
 use hyscribe_kses::{esc_attr, esc_url};
 use hyscribe_model::Post;
-use hyscribe_phpser::Value;
+use hyscribe_phpser::{Value, is_empty_string};
 
 use super::avatar::{Subject, get_avatar};
-use super::{Block, Context};
+use super::{Block, Context, align_link_classes};
 use crate::kses::wp_kses_post;
 
 /// The post in context with an author, which a template without one (an
@@ -17,18 +17,80 @@ fn authored(context: &Context<'_>) -> Option<Post> {
     context.post().filter(|post| post.author != 0)
 }
 
-/// `render_block_core_post_author()`.
-pub(super) fn post_author(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
-    let Some(post) = authored(context) else {
+/// The authored post in context, if its type has authors:
+/// `post_type_supports( $post_type, 'author' )`.
+fn supported(context: &Context<'_>) -> Option<Post> {
+    authored(context).filter(|post| {
+        matches!(
+            post.post_type.as_str(),
+            "post" | "page" | "attachment" | "revision"
+        )
+    })
+}
+
+/// `name` linked to the author's posts in `target`, with `class` when
+/// given.
+fn author_link(
+    context: &Context<'_>,
+    post: &Post,
+    target: &[u8],
+    class: &str,
+    name: &[u8],
+) -> Vec<u8> {
+    let author = i64::try_from(post.author).unwrap_or_default();
+    let url = esc_url(&crate::permalinks::author_posts_url(context.site, author));
+    let class = if class.is_empty() {
+        String::new()
+    } else {
+        format!(" class=\"{class}\"")
+    };
+    [
+        &b"<a href=\""[..],
+        &url,
+        b"\" target=\"",
+        esc_attr(target).as_bytes(),
+        b"\"",
+        class.as_bytes(),
+        b">",
+        name,
+        b"</a>",
+    ]
+    .concat()
+}
+
+/// `render_block_core_post_author_name()`: the author's display name, as
+/// stored, linked to their posts when `isLink` is set.
+pub(super) fn post_author_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let Some(post) = supported(context) else {
         return Vec::new();
     };
-    // post_type_supports( $post_type, 'author' )
-    if !matches!(
-        post.post_type.as_str(),
-        "post" | "page" | "attachment" | "revision"
-    ) {
-        return Vec::new();
+    let mut name = context
+        .site
+        .user(post.author)
+        .map(|user| user.display_name)
+        .unwrap_or_default();
+    if block.attribute("isLink").is_some_and(|v| !v.is_empty()) {
+        let target = block
+            .attribute("linkTarget")
+            .map(Value::to_php_string)
+            .unwrap_or_default();
+        name = author_link(
+            context,
+            &post,
+            &target,
+            "wp-block-post-author-name__link",
+            &name,
+        );
     }
+    let wrapper = block.wrapper(context, &align_link_classes(block, Vec::new()));
+    [format!("<div {wrapper}>").as_bytes(), &name, b"</div>"].concat()
+}
+
+/// `render_block_core_post_author()`.
+pub(super) fn post_author(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let Some(post) = supported(context) else {
+        return Vec::new();
+    };
     let on = |name| block.attribute(name).is_some_and(|v| !v.is_empty());
     let text = |name| block.attribute(name).map(Value::to_php_string);
     let user = context.site.user(post.author);
@@ -37,30 +99,12 @@ pub(super) fn post_author(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         .map(|user| user.display_name.clone())
         .unwrap_or_default();
     if on("isLink") && on("linkTarget") {
-        let author = i64::try_from(post.author).unwrap_or_default();
-        let url = esc_url(&crate::permalinks::author_posts_url(context.site, author));
-        name = [
-            &b"<a href=\""[..],
-            &url,
-            b"\" target=\"",
-            esc_attr(&text("linkTarget").unwrap_or_default()).as_bytes(),
-            b"\">",
-            &name,
-            b"</a>",
-        ]
-        .concat();
+        let target = text("linkTarget").unwrap_or_default();
+        name = author_link(context, &post, &target, "", &name);
     }
-    let mut classes = Vec::new();
-    if let Some(justify) = text("itemsJustification") {
-        classes.push([&b"items-justified-"[..], &justify].concat());
-    }
-    if let Some(align) = text("textAlign") {
-        classes.push([&b"has-text-align-"[..], &align].concat());
-    }
-    if block.has_link_color() {
-        classes.push(b"has-link-color".to_vec());
-    }
-    let mut out = format!("<div {}>", block.wrapper(context, &classes.join(&b' '))).into_bytes();
+    let justify = text("itemsJustification").map(|j| [&b"items-justified-"[..], &j].concat());
+    let classes = align_link_classes(block, justify.into_iter().collect());
+    let mut out = format!("<div {}>", block.wrapper(context, &classes)).into_bytes();
     if on("showAvatar") {
         out.extend_from_slice(b"<div class=\"wp-block-post-author__avatar\">");
         if on("avatarSize") {
@@ -100,20 +144,11 @@ pub(super) fn post_author_biography(context: &Context<'_>, block: &Block<'_>) ->
         .user(post.author)
         .map(|user| user.description)
         .unwrap_or_default();
-    if Value::String(biography.clone()).is_empty() {
+    if is_empty_string(&biography) {
         return Vec::new();
     }
-    let align = block
-        .attribute("textAlign")
-        .filter(|align| !align.is_empty())
-        .map(|align| [&b"has-text-align-"[..], &align.to_php_string()].concat())
-        .unwrap_or_default();
-    [
-        format!("<div {}>", block.wrapper(context, &align)).as_bytes(),
-        &biography,
-        b"</div>",
-    ]
-    .concat()
+    let wrapper = block.wrapper(context, &block.text_align_class());
+    [format!("<div {wrapper}>").as_bytes(), &biography, b"</div>"].concat()
 }
 
 #[cfg(test)]

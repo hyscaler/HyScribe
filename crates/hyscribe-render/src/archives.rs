@@ -125,6 +125,7 @@ impl Renderer<'_> {
         let (year, month, day, week) = (var("year"), var("monthnum"), var("day"), var("w"));
         let date_format = String::from_utf8_lossy(&option("date_format")).into_owned();
         let zone = self.context.zone();
+        let home = site.home_url();
         let mut last_week = None;
         let mut out = Vec::new();
         for count in site.date_counts(period) {
@@ -165,7 +166,6 @@ impl Renderer<'_> {
                         let stored = date::format_unix("Y-m-d H:i:s", unix, Zone::Utc);
                         date::format(&date_format, &stored, zone)
                     };
-                    let home = site.home_url();
                     (
                         [&home[..], format!("/?m={y}&w={w}").as_bytes()].concat(),
                         format!("{}&#8211;{}", local(start), local(end)),
@@ -210,18 +210,15 @@ impl Renderer<'_> {
 /// `get_weekstartend()` of the day `year`-`month`-`day`: the Unix times
 /// the week from the `start` day around it begins and ends, in UTC.
 fn week_start_end(year: u64, month: u64, day: u64, start: i64) -> (i64, i64) {
-    let day = date::stored_unix(
-        &format!("{year:04}-{month:02}-{day:02} 00:00:00"),
-        Zone::Utc,
-    );
-    // 1 January 1970 was a Thursday.
-    let weekday = (day.div_euclid(86_400) + 4).rem_euclid(7);
+    let number = |n: u64| i64::try_from(n).unwrap_or_default();
+    let day = date::days_from_civil(number(year), number(month), number(day));
+    let weekday = date::weekday(day);
     let weekday = if weekday < start {
         weekday + 7
     } else {
         weekday
     };
-    let begins = day - 86_400 * (weekday - start);
+    let begins = (day - (weekday - start)) * 86_400;
     (begins, begins + 604_800 - 1)
 }
 
@@ -244,7 +241,7 @@ fn post_links(site: &dyn Site, current: Option<u64>, alpha: bool, format: Format
         .iter()
         .filter(|post| post.date != "0000-00-00 00:00:00")
         .flat_map(|post| {
-            let text = if is_empty_string(&post.title) || post.title == b"0" {
+            let text = if is_empty_string(&post.title) {
                 post.id.to_string().into_bytes()
             } else {
                 strip_tags(&title_filters(&post.title))

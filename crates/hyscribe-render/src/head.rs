@@ -269,10 +269,11 @@ impl Head<'_> {
     /// `feed_links_extra()` of a term archive: the feed's name and
     /// get_term_feed_link().
     fn term_feed_link(&self, name: &str, taxonomy: Taxonomy, term: &Term) -> (String, Vec<u8>) {
-        let (slug, kind) = match taxonomy {
-            Taxonomy::Category => ("category", "Category"),
-            Taxonomy::Tag => ("post_tag", "Tag"),
-            Taxonomy::Format => ("post_format", "Format"),
+        let slug = taxonomy.name();
+        let kind = match taxonomy {
+            Taxonomy::Category => "Category",
+            Taxonomy::Tag => "Tag",
+            Taxonomy::Format => "Format",
         };
         let title = format!(
             "{name} &raquo; {} {kind} Feed",
@@ -1271,7 +1272,7 @@ fn tag(name: &[u8], attributes: &[(&[u8], Option<&[u8]>)], text: Option<&[u8]>) 
 /// `wp_json_encode( $value, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES )`:
 /// PHP's default encoding with slashes left alone and `<` and `>` as
 /// escapes, which only strings hold.
-fn json_hex_tag(value: &Value) -> Vec<u8> {
+pub(crate) fn json_hex_tag(value: &Value) -> Vec<u8> {
     let json = hyscribe_phpser::json_encode(value).unwrap_or_default();
     let mut out = Vec::with_capacity(json.len());
     let mut bytes = json.iter();

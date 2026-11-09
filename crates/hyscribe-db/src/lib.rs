@@ -77,6 +77,15 @@ macro_rules! post_columns {
     };
 }
 
+/// The columns of a term in its taxonomy, with its post count, and the
+/// tables they come from, `t` and `tt`.
+macro_rules! terms_from {
+    () => {
+        "t.term_id, t.name, t.slug, tt.description, tt.parent, tt.count FROM {prefix}terms t \
+         JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id "
+    };
+}
+
 /// Reads columns from a row, keeping the first error, so a row decodes in
 /// one step.
 struct Columns<'r> {
@@ -438,11 +447,11 @@ impl Db {
 
     /// `get_term( $id, $taxonomy )`.
     pub async fn term(&self, id: u64, taxonomy: &str) -> Result<Option<Term>, DbError> {
-        let sql = self.prefix.sql(
-            "SELECT t.term_id, t.name, t.slug, tt.description, tt.parent FROM {prefix}terms t \
-             JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
-             WHERE t.term_id = ? AND tt.taxonomy = ?",
-        );
+        let sql = self.prefix.sql(concat!(
+            "SELECT ",
+            terms_from!(),
+            "WHERE t.term_id = ? AND tt.taxonomy = ?"
+        ));
         let row = sqlx::query(sql)
             .bind(id)
             .bind(taxonomy)
@@ -455,12 +464,12 @@ impl Db {
     /// `get_the_terms( $post_id, $taxonomy )`: ordered by name, as
     /// `wp_get_object_terms()` orders them.
     pub async fn post_terms(&self, post_id: u64, taxonomy: &str) -> Result<Vec<Term>, DbError> {
-        let sql = self.prefix.sql(
-            "SELECT t.term_id, t.name, t.slug, tt.description, tt.parent FROM {prefix}terms t \
-             JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
-             JOIN {prefix}term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id \
-             WHERE tr.object_id = ? AND tt.taxonomy = ? ORDER BY t.name ASC",
-        );
+        let sql = self.prefix.sql(concat!(
+            "SELECT ",
+            terms_from!(),
+            "JOIN {prefix}term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id \
+             WHERE tr.object_id = ? AND tt.taxonomy = ? ORDER BY t.name ASC"
+        ));
         let rows = sqlx::query(sql)
             .bind(post_id)
             .bind(taxonomy)
@@ -629,11 +638,11 @@ impl Db {
         slugs: &[(String, Vec<u8>)],
         category_ids: &[u64],
     ) -> Result<Vec<(String, Term)>, DbError> {
-        let mut sql = Sql::new(
-            "SELECT tt.taxonomy, t.term_id, t.name, t.slug, tt.description, tt.parent FROM {prefix}terms t \
-             JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
-             WHERE (tt.taxonomy = 'category' AND t.term_id IN (",
-        );
+        let mut sql = Sql::new(concat!(
+            "SELECT tt.taxonomy, ",
+            terms_from!(),
+            "WHERE (tt.taxonomy = 'category' AND t.term_id IN ("
+        ));
         list(&mut sql, ids_or_none(category_ids));
         sql.push(")");
         for (taxonomy, slug) in slugs {
@@ -664,11 +673,11 @@ impl Db {
         limit: u64,
         offset: u64,
     ) -> Result<Vec<Term>, DbError> {
-        let sql = self.prefix.sql(
-            "SELECT t.term_id, t.name, t.slug, tt.description, tt.parent FROM {prefix}terms t \
-             JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
-             WHERE tt.taxonomy = ? AND tt.count > 0 ORDER BY t.term_id LIMIT ? OFFSET ?",
-        );
+        let sql = self.prefix.sql(concat!(
+            "SELECT ",
+            terms_from!(),
+            "WHERE tt.taxonomy = ? AND tt.count > 0 ORDER BY t.term_id LIMIT ? OFFSET ?"
+        ));
         let rows = sqlx::query(sql)
             .bind(taxonomy)
             .bind(limit)
@@ -686,11 +695,11 @@ impl Db {
         taxonomy: &str,
         limit: u64,
     ) -> Result<Vec<(Term, u64)>, DbError> {
-        let sql = self.prefix.sql(
-            "SELECT t.term_id, t.name, t.slug, tt.description, tt.parent, tt.count FROM {prefix}terms t \
-             JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
-             WHERE tt.taxonomy = ? AND tt.count > 0 ORDER BY tt.count DESC LIMIT ?",
-        );
+        let sql = self.prefix.sql(concat!(
+            "SELECT ",
+            terms_from!(),
+            "WHERE tt.taxonomy = ? AND tt.count > 0 ORDER BY tt.count DESC LIMIT ?"
+        ));
         let rows = sqlx::query(sql)
             .bind(taxonomy)
             .bind(limit)
@@ -703,11 +712,11 @@ impl Db {
     /// Every term of `taxonomy` with its post count, by name, as
     /// `get_terms()` orders them for `wp_list_categories()`.
     pub async fn taxonomy_terms(&self, taxonomy: &str) -> Result<Vec<(Term, u64)>, DbError> {
-        let sql = self.prefix.sql(
-            "SELECT t.term_id, t.name, t.slug, tt.description, tt.parent, tt.count FROM {prefix}terms t \
-             JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
-             WHERE tt.taxonomy = ? ORDER BY t.name ASC",
-        );
+        let sql = self.prefix.sql(concat!(
+            "SELECT ",
+            terms_from!(),
+            "WHERE tt.taxonomy = ? ORDER BY t.name ASC"
+        ));
         let rows = sqlx::query(sql)
             .bind(taxonomy)
             .fetch_all(&self.pool)

@@ -4,7 +4,7 @@ use hyscribe_model::{Post, PostQuery, Term};
 use hyscribe_phpser::{Key, Value, json_decode, parse_str};
 use hyscribe_testkit::unhex;
 
-use crate::fixture::DefaultInstall;
+use crate::fixture::{DefaultInstall, NoData};
 use crate::site::{Archive, Request, Site, Taxonomy};
 use crate::template::Renderer;
 use crate::theme::twentytwentyfive;
@@ -280,38 +280,9 @@ fn unregistered_taxonomy_dropdown() {
     );
 }
 
-/// A site with no term data, as `Site` answers by default.
-struct Bare;
-
-impl Site for Bare {
-    fn option(&self, _: &str) -> Option<Vec<u8>> {
-        None
-    }
-
-    fn home_url(&self) -> Vec<u8> {
-        Vec::new()
-    }
-
-    fn post(&self, _: u64) -> Option<Post> {
-        None
-    }
-
-    fn post_terms(&self, _: u64, _: &str) -> Vec<Term> {
-        Vec::new()
-    }
-
-    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        None
-    }
-
-    fn query(&self, _: &PostQuery) -> Vec<Post> {
-        Vec::new()
-    }
-}
-
 #[test]
 fn no_term_data_lists_nothing() {
-    let html = render(&Bare, r#"{"showHierarchy":true,"showPostCounts":true}"#);
+    let html = render(&NoData, r#"{"showHierarchy":true,"showPostCounts":true}"#);
     assert!(
         html.contains("<li class=\"cat-item-none\">No categories</li>"),
         "{html}"
@@ -322,7 +293,7 @@ fn no_term_data_lists_nothing() {
 /// post format archive, its format is the current term.
 #[test]
 fn empty_dropdowns_and_format_archives() {
-    let html = render(&Bare, r#"{"displayAsDropdown":true}"#);
+    let html = render(&NoData, r#"{"displayAsDropdown":true}"#);
     assert!(
         html.contains("<option value='-1' selected='selected'>Select Category</option>"),
         "{html}"
@@ -411,5 +382,5 @@ fn other_taxonomies_archives() {
     );
     assert_eq!(html.matches("</a> (0)").count(), 2, "{html}");
     // Without term data, nothing to show even with the empty ones.
-    assert!(render(&Bare, r#"{"showEmpty":true}"#).contains("No categories"));
+    assert!(render(&NoData, r#"{"showEmpty":true}"#).contains("No categories"));
 }

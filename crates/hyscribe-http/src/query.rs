@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use hyscribe_model::{Term, TermFilter, TimeCondition};
 use hyscribe_phpser::{Key, Value, decode, is_empty_string, php_trim};
 use hyscribe_render::formatting::{sanitize_title, sanitize_title_for_query};
+use hyscribe_render::post::{POST_FORMATS, post_format_string};
 use hyscribe_render::site::{Archive, Taxonomy};
 
 /// The `m` query var's parts, as `WP_Query` reads them: digits only,
@@ -46,31 +47,6 @@ const PRIVATE_TAXONOMIES: [&str; 5] = [
     "wp_template_part_area",
     "wp_pattern_category",
 ];
-
-/// `get_post_format_strings()`: each format's slug, which
-/// `_post_format_request()` prefixes, and its name.
-const POST_FORMATS: [(&str, &str); 10] = [
-    ("standard", "Standard"),
-    ("aside", "Aside"),
-    ("chat", "Chat"),
-    ("gallery", "Gallery"),
-    ("link", "Link"),
-    ("image", "Image"),
-    ("quote", "Quote"),
-    ("status", "Status"),
-    ("video", "Video"),
-    ("audio", "Audio"),
-];
-
-/// `get_post_format_string()` of a format term's slug: the name
-/// `_post_format_get_term()` gives the term.
-fn format_name(slug: &[u8]) -> &'static str {
-    let format = String::from_utf8_lossy(slug).replace("post-format-", "");
-    POST_FORMATS
-        .iter()
-        .find(|(slug, _)| *slug == format)
-        .map_or("", |(_, name)| name)
-}
 
 /// The terms of a [`TaxClause`]: slugs as the request gave them, or
 /// category IDs.
@@ -406,7 +382,7 @@ impl TaxQuery {
         } else {
             first(None).map(|clause| {
                 let term = first_term(clause).map(|term| Term {
-                    name: format_name(&term.slug).into(),
+                    name: post_format_string(&term.slug).into(),
                     ..term.clone()
                 });
                 Archive::Term(Taxonomy::Format, term)

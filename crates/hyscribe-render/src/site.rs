@@ -158,6 +158,16 @@ impl Request {
     pub fn is_paged(&self) -> bool {
         self.paged > 1
     }
+
+    /// The site's home: the front page, or a home that is not the page for
+    /// posts, as the site title and home link blocks check it.
+    pub(crate) fn is_site_home(&self, site: &dyn Site) -> bool {
+        let page_for_posts = site
+            .option("page_for_posts")
+            .map_or(0, |v| Value::String(v).to_int());
+        self.front_page
+            || self.home && u64::try_from(page_for_posts).ok() != Some(self.queried_object_id)
+    }
 }
 
 /// The taxonomies a visitor can query.
@@ -169,6 +179,17 @@ pub enum Taxonomy {
     Tag,
     /// `post_format`.
     Format,
+}
+
+impl Taxonomy {
+    /// The taxonomy's name, such as `post_tag`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Taxonomy::Category => "category",
+            Taxonomy::Tag => "post_tag",
+            Taxonomy::Format => "post_format",
+        }
+    }
 }
 
 /// The archives the default install has.

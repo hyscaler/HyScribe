@@ -8,8 +8,9 @@ use std::collections::{HashMap, HashSet};
 use hyscribe_html::TagProcessor;
 use hyscribe_kses::{esc_attr, esc_url};
 use hyscribe_model::Term;
-use hyscribe_phpser::{Value, json_encode};
+use hyscribe_phpser::Value;
 
+use crate::archives::dropdown_script;
 use crate::blocks::Block;
 use crate::core_blocks::{number_format, prepared};
 use crate::kses::wp_kses_post;
@@ -18,8 +19,8 @@ use crate::site::{Archive, Site, Taxonomy};
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
 
-/// The dropdown's script between `( ( [ dropdownId, homeUrl ] ) => {` and
-/// its arguments, as the block's PHP template prints it.
+/// The dropdown's script up to its arguments, as the block's PHP template
+/// prints it.
 const SCRIPT: &str = "( ( [ dropdownId, homeUrl ] ) => {
 \t\tconst dropdown = document.getElementById( dropdownId );
 \t\tfunction onSelectChange() {
@@ -104,17 +105,20 @@ impl Renderer<'_> {
             .map(Value::to_php_string)
             .unwrap_or_default();
         let taxonomy = String::from_utf8_lossy(&taxonomy).into_owned();
-        let labels = labels(&taxonomy);
         let site = self.context.site;
-        let listing = labels.as_ref().map(|_| {
-            terms(
+        let show_count = on("showPostCounts");
+        let listed = labels(&taxonomy).map(|labels| {
+            let hierarchical = on("showHierarchy");
+            let (hide_empty, top_only) = (!on("showEmpty"), on("showOnlyTopLevel"));
+            let listing = terms(
                 site,
                 &taxonomy,
-                on("showHierarchy"),
-                !on("showEmpty"),
-                on("showOnlyTopLevel"),
-                on("showPostCounts"),
-            )
+                hierarchical,
+                hide_empty,
+                top_only,
+                show_count,
+            );
+            (labels, listing)
         });
         let dropdown = on("displayAsDropdown");
         let class = format!(
@@ -124,7 +128,6 @@ impl Renderer<'_> {
         let extra = [("class", Value::String(class.into_bytes()))];
         let theme = &self.context.theme.global;
         let wrapper = get_block_wrapper_attributes("core/categories", parsed, &extra, theme);
-        let show_count = on("showPostCounts");
         if dropdown {
             let id = format!("wp-block-categories-{}", self.categories_blocks);
             let hidden = if on("showLabel") {
@@ -134,18 +137,22 @@ impl Renderer<'_> {
             };
             let label = match attributes.get_str("label").filter(|v| !v.is_empty()) {
                 Some(label) => wp_kses_post(&label.to_php_string(), &self.context.upload_host()),
-                None => labels.as_ref().map_or("", |l| l.name).as_bytes().to_vec(),
+                None => listed
+                    .as_ref()
+                    .map_or("", |(l, _)| l.name)
+                    .as_bytes()
+                    .to_vec(),
             };
-            let select = match (&labels, &listing) {
-                (Some(labels), Some(listing)) => {
-                    let selected = self.selected_term(&taxonomy, labels.query_var);
-                    let select = dropdown_select(&id, labels, listing, show_count, &selected);
-                    // The script goes right after `</select>`, before its newline.
-                    let select = select.strip_suffix(b"\n").unwrap_or(&select);
-                    [select, self.categories_script(&id).as_bytes(), b"\n"].concat()
-                }
-                _ => Vec::new(),
-            };
+            let select = listed.as_ref().map_or_else(Vec::new, |(labels, listing)| {
+                let selected = self.selected_term(&taxonomy, labels.query_var);
+                let source = "build_dropdown_script_block_core_categories";
+                [
+                    dropdown_select(&id, labels, listing, show_count, &selected),
+                    dropdown_script(site, SCRIPT, source, &id).into_bytes(),
+                    b"\n".to_vec(),
+                ]
+                .concat()
+            });
             return [
                 format!("<div {wrapper}><label class=\"wp-block-categories__label{hidden}\" for=\"{}\">", esc_attr(id.as_bytes())).as_bytes(),
                 &label,
@@ -155,12 +162,9 @@ impl Renderer<'_> {
             ]
             .concat();
         }
-        let items = match (&labels, &listing) {
-            (Some(labels), Some(listing)) => {
-                self.category_list(&taxonomy, labels, listing, show_count)
-            }
-            _ => Vec::new(),
-        };
+        let items = listed.as_ref().map_or_else(Vec::new, |(labels, listing)| {
+            self.category_list(&taxonomy, labels, listing, show_count)
+        });
         let enhanced = self
             .context
             .query
@@ -191,9 +195,7 @@ impl Renderer<'_> {
             return format!("<li class=\"cat-item-none\">{}</li>", labels.no_terms).into_bytes();
         }
         let current = match &self.context.request.archive {
-            Some(Archive::Term(kind, Some(term))) if taxonomy_name(*kind) == taxonomy => {
-                Some(term.id)
-            }
+            Some(Archive::Term(kind, Some(term))) if kind.name() == taxonomy => Some(term.id),
             _ => None,
         };
         let parents = &listing.parents;
@@ -205,8 +207,13 @@ impl Renderer<'_> {
                 Walk::Start(term, count) => {
                     let name = esc_attr(&term.name);
                     let mut classes = format!("cat-item cat-item-{}", term.id);
+                    let aria = if current == Some(term.id) {
+                        " aria-current=\"page\""
+                    } else {
+                        ""
+                    };
                     let mut link = format!(
-                        "<a href=\"{}\">{name}</a>",
+                        "<a{aria} href=\"{}\">{name}</a>",
                         String::from_utf8_lossy(&esc_url(&term_link(
                             self.context.site,
                             taxonomy,
@@ -216,7 +223,6 @@ impl Renderer<'_> {
                     if let Some(current) = current {
                         if term.id == current {
                             classes.push_str(" current-cat");
-                            link = link.replace("<a", "<a aria-current=\"page\"");
                         } else if parents.get(&current) == Some(&term.id) {
                             classes.push_str(" current-cat-parent");
                         }
@@ -268,34 +274,6 @@ impl Renderer<'_> {
                 .map(Value::to_php_string)
                 .unwrap_or_default(),
         }
-    }
-
-    /// `build_dropdown_script_block_core_categories()`, inline.
-    fn categories_script(&self, id: &str) -> String {
-        let exports = Value::Array(vec![
-            (hyscribe_phpser::Key::Int(0), Value::String(id.into())),
-            (
-                hyscribe_phpser::Key::Int(1),
-                Value::String(self.context.site.home_url()),
-            ),
-        ]);
-        // JSON_HEX_TAG | JSON_UNESCAPED_SLASHES.
-        let json = String::from_utf8_lossy(&json_encode(&exports).unwrap_or_default())
-            .replace("\\/", "/")
-            .replace('<', "\\u003C")
-            .replace('>', "\\u003E");
-        format!(
-            "<script>\n{SCRIPT}{json} );\n//# sourceURL=build_dropdown_script_block_core_categories\n</script>\n"
-        )
-    }
-}
-
-/// The name of a taxonomy the request can archive.
-fn taxonomy_name(kind: Taxonomy) -> &'static str {
-    match kind {
-        Taxonomy::Category => "category",
-        Taxonomy::Tag => "post_tag",
-        Taxonomy::Format => "post_format",
     }
 }
 
@@ -444,7 +422,8 @@ fn display<'a>(
     visit(Walk::End);
 }
 
-/// `wp_dropdown_categories()`: the select, with the "none" option when
+/// `wp_dropdown_categories()` up to `</select>`, where the block puts its
+/// script: the select, with the "none" option when
 /// there are terms, each term's slug as its value, padded by depth.
 fn dropdown_select(
     id: &str,
@@ -507,7 +486,7 @@ fn dropdown_select(
             },
         );
     }
-    out.extend_from_slice(b"</select>\n");
+    out.extend_from_slice(b"</select>");
     out
 }
 

@@ -1336,14 +1336,7 @@ fn site_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let tag = tag(block.attribute("level"), b"h1");
     let content = if block.attribute("isLink").is_some_and(|v| !v.is_empty()) {
         let request = context.request;
-        let page_for_posts = context
-            .site
-            .option("page_for_posts")
-            .map_or(0, |v| Value::String(v).to_int());
-        let current = !request.is_paged()
-            && (request.front_page
-                || request.home
-                    && u64::try_from(page_for_posts).ok() != Some(request.queried_object_id));
+        let current = !request.is_paged() && request.is_site_home(context.site);
         let target = block
             .attribute("linkTarget")
             .filter(|v| !v.is_empty())

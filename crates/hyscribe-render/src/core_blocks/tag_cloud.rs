@@ -8,6 +8,7 @@ use hyscribe_phpser::{Value, absint, float_to_string, string_to_float, strnatcas
 
 use super::{Block, Context, number_format};
 use crate::permalinks::term_link;
+use crate::post::post_format_string;
 
 /// `render_block_core_tag_cloud()`: nothing without tags.
 pub(super) fn tag_cloud(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
@@ -59,7 +60,7 @@ pub(super) fn tag_cloud(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
             let label = if *count == 1 { "item" } else { "items" };
             let formatted = format!("{} {label}", number_format(*count));
             let size = smallest + (scaled - min) as f64 * step;
-            let size = format!("{}{unit}", float_to_string(size).replace(',', "."));
+            let size = format!("{}{unit}", float_to_string(size));
             let shown = if show_count {
                 format!("<span class=\"tag-link-count\"> ({count})</span>")
             } else {
@@ -111,24 +112,6 @@ fn font_unit(size: &[u8]) -> String {
         String::from_utf8_lossy(unit).into_owned()
     } else {
         "pt".into()
-    }
-}
-
-/// `get_post_format_string()` of a format term's slug without
-/// `post-format-`: its label, `Standard` for none, empty for an unknown one.
-fn post_format_string(slug: &[u8]) -> &'static str {
-    match crate::template::replace(slug, b"post-format-", b"").as_slice() {
-        b"" | b"standard" => "Standard",
-        b"aside" => "Aside",
-        b"chat" => "Chat",
-        b"gallery" => "Gallery",
-        b"link" => "Link",
-        b"image" => "Image",
-        b"quote" => "Quote",
-        b"status" => "Status",
-        b"video" => "Video",
-        b"audio" => "Audio",
-        _ => "",
     }
 }
 

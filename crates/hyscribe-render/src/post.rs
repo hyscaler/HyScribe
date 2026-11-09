@@ -9,6 +9,35 @@ use hyscribe_phpser::{Value, decode, php_trim};
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit_title, convert_chars, wptexturize};
 use crate::site::{Archive, Request, Site, Taxonomy};
 
+/// `get_post_format_strings()`: each format's slug, which
+/// `_post_format_request()` prefixes, and its name.
+pub const POST_FORMATS: [(&str, &str); 10] = [
+    ("standard", "Standard"),
+    ("aside", "Aside"),
+    ("chat", "Chat"),
+    ("gallery", "Gallery"),
+    ("link", "Link"),
+    ("image", "Image"),
+    ("quote", "Quote"),
+    ("status", "Status"),
+    ("video", "Video"),
+    ("audio", "Audio"),
+];
+
+/// `get_post_format_string()` of a format term's slug without
+/// `post-format-`: the name `_post_format_get_term()` gives the term,
+/// `Standard` for none, empty for an unknown one.
+pub fn post_format_string(slug: &[u8]) -> &'static str {
+    let format = crate::template::replace(slug, b"post-format-", b"");
+    if format.is_empty() {
+        return "Standard";
+    }
+    POST_FORMATS
+        .iter()
+        .find(|(slug, _)| slug.as_bytes() == format)
+        .map_or("", |(_, name)| name)
+}
+
 /// `get_the_title( $post )` with the `the_title` filters.
 pub(crate) fn the_title(post: &Post) -> Vec<u8> {
     let title = if !post.password.is_empty() {

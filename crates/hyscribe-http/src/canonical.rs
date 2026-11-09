@@ -165,10 +165,11 @@ pub(crate) async fn pretty(
         && !raw.is_empty()
     {
         // A term archive whose vars all come from the query.
-        let (name, vars): (&str, &[&str]) = match taxonomy {
-            Taxonomy::Category => ("category", &["category_name", "cat"]),
-            Taxonomy::Tag => ("post_tag", &["tag", "tag_id"]),
-            Taxonomy::Format => ("post_format", &["post_format"]),
+        let name = taxonomy.name();
+        let vars: &[&str] = match taxonomy {
+            Taxonomy::Category => &["category_name", "cat"],
+            Taxonomy::Tag => &["tag", "tag_id"],
+            Taxonomy::Format => &["post_format"],
         };
         target = site
             .term_links(name, vec![term.clone()])

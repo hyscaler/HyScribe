@@ -5,20 +5,21 @@
 
 use hyscribe_kses::{esc_attr, esc_url, strip_tags};
 use hyscribe_model::{DateCount, OrderBy, Period, PostQuery};
-use hyscribe_phpser::{Key, Value, is_empty_string, json_encode};
+use hyscribe_phpser::{Key, Value, is_empty_string};
 
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
 use crate::date::{self, Zone};
 use crate::formatting::{CORE_SHORTCODE_TAGS, wptexturize};
+use crate::head::json_hex_tag;
 use crate::permalinks::{date_archive_link, permalink};
 use crate::post::title_filters;
 use crate::site::Site;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
 
-/// The dropdown's script between `( ( [ dropdownId, homeUrl ] ) => {` and
-/// its arguments, as the block's PHP template prints it.
+/// The dropdown's script up to its arguments, as the block's PHP template
+/// prints it.
 const SCRIPT: &str = "( ( [ dropdownId, homeUrl ] ) => {
 \t\tconst dropdown = document.getElementById( dropdownId );
 \t\tfunction onSelectChange() {
@@ -90,7 +91,12 @@ impl Renderer<'_> {
                 "<label for=\"{id}\" class=\"wp-block-archives__label{hidden}\">Archives</label>\n\t\t<select id=\"{}\" name=\"archive-dropdown\">\n\t\t<option value=\"\">{label}</option>{}</select>{}",
                 esc_attr(id.as_bytes()),
                 String::from_utf8_lossy(&archives),
-                self.dropdown_script(&id),
+                dropdown_script(
+                    self.context.site,
+                    SCRIPT,
+                    "block_core_archives_build_dropdown_script",
+                    &id
+                ),
             );
             return format!("<div {wrapper}>{content}</div>").into_bytes();
         }
@@ -189,22 +195,6 @@ impl Renderer<'_> {
         }
         out
     }
-
-    /// `block_core_archives_build_dropdown_script()`, inline.
-    fn dropdown_script(&self, id: &str) -> String {
-        let exports = Value::Array(vec![
-            (Key::Int(0), Value::String(id.into())),
-            (Key::Int(1), Value::String(self.context.site.home_url())),
-        ]);
-        // JSON_HEX_TAG | JSON_UNESCAPED_SLASHES.
-        let json = String::from_utf8_lossy(&json_encode(&exports).unwrap_or_default())
-            .replace("\\/", "/")
-            .replace('<', "\\u003C")
-            .replace('>', "\\u003E");
-        format!(
-            "<script>\n{SCRIPT}{json} );\n//# sourceURL=block_core_archives_build_dropdown_script\n</script>\n"
-        )
-    }
 }
 
 /// `get_weekstartend()` of the day `year`-`month`-`day`: the Unix times
@@ -250,6 +240,18 @@ fn post_links(site: &dyn Site, current: Option<u64>, alpha: bool, format: Format
             archives_link(&permalink(site, post), &text, format, "", selected)
         })
         .collect()
+}
+
+/// A block's inline dropdown script, `script` called with the select's
+/// `id` and the home URL, as `wp_get_inline_script_tag()` prints it with
+/// the PHP function `source` as its source URL.
+pub(crate) fn dropdown_script(site: &dyn Site, script: &str, source: &str, id: &str) -> String {
+    let exports = Value::Array(vec![
+        (Key::Int(0), Value::String(id.into())),
+        (Key::Int(1), Value::String(site.home_url())),
+    ]);
+    let json = String::from_utf8_lossy(&json_hex_tag(&exports)).into_owned();
+    format!("<script>\n{script}{json} );\n//# sourceURL={source}\n</script>\n")
 }
 
 /// The formats of [`archives_link`].

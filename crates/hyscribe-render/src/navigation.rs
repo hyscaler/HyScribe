@@ -422,11 +422,8 @@ impl Renderer<'_> {
                 .filter(|v| !v.is_empty())
                 .map(Value::to_php_string)
         };
-        let request = self.context.request;
         let site = self.context.site;
-        let posts_page = Value::String(site.option("page_for_posts").unwrap_or_default()).to_int();
-        let current = request.front_page
-            || request.home && u64::try_from(posts_page).ok() != Some(request.queried_object_id);
+        let current = self.context.request.is_site_home(site);
         let (mut classes, style) = home_link_colors(self.navigation.as_ref());
         classes.push(b"wp-block-navigation-item".to_vec());
         if current {

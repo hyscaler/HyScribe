@@ -509,3 +509,32 @@ fn mysql_week(year: u64, month: u64, day: u64, start: i64) -> u64 {
         u64::try_from((date - week_one) / 7 + 1).unwrap()
     }
 }
+
+/// A site with no data, as `Site` answers by default.
+pub(crate) struct NoData;
+
+impl Site for NoData {
+    fn option(&self, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn home_url(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    fn post(&self, _: u64) -> Option<Post> {
+        None
+    }
+
+    fn post_terms(&self, _: u64, _: &str) -> Vec<Term> {
+        Vec::new()
+    }
+
+    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn query(&self, _: &PostQuery) -> Vec<Post> {
+        Vec::new()
+    }
+}

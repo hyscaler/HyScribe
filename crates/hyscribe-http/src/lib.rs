@@ -1809,14 +1809,7 @@ fn list_templates(
             let prefix = match (kind, queried) {
                 (Taxonomy::Category, _) => "category".to_string(),
                 (Taxonomy::Tag, _) => "tag".to_string(),
-                (Taxonomy::Format, Some((taxonomy, _))) => format!(
-                    "taxonomy-{}",
-                    match taxonomy {
-                        Taxonomy::Category => "category",
-                        Taxonomy::Tag => "post_tag",
-                        Taxonomy::Format => "post_format",
-                    }
-                ),
+                (Taxonomy::Format, Some((taxonomy, _))) => format!("taxonomy-{}", taxonomy.name()),
                 (Taxonomy::Format, None) => String::new(),
             };
             if let Some((_, term)) = queried {

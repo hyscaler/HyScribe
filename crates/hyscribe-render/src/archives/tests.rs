@@ -4,7 +4,7 @@ use hyscribe_model::{DateCount, OrderBy, Period, Post, PostQuery, Term};
 use hyscribe_phpser::parse_str;
 use hyscribe_testkit::unhex;
 
-use crate::fixture::DefaultInstall;
+use crate::fixture::{DefaultInstall, NoData};
 use crate::site::{Archive, Request, Site};
 use crate::template::Renderer;
 use crate::theme::twentytwentyfive;
@@ -105,42 +105,12 @@ fn matches_php() {
     assert_eq!(golden.lines().count(), 1848);
 }
 
-/// A site with no posts, as `Site` answers by default, which it keeps
-/// for `date_counts`.
-struct Empty;
-
-impl Site for Empty {
-    fn option(&self, _: &str) -> Option<Vec<u8>> {
-        None
-    }
-
-    fn home_url(&self) -> Vec<u8> {
-        Vec::new()
-    }
-
-    fn post(&self, _: u64) -> Option<Post> {
-        None
-    }
-
-    fn post_terms(&self, _: u64, _: &str) -> Vec<Term> {
-        Vec::new()
-    }
-
-    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        None
-    }
-
-    fn query(&self, _: &PostQuery) -> Vec<Post> {
-        Vec::new()
-    }
-}
-
 /// `render_block_core_archives()` with nothing for `wp_get_archives()` to list.
 #[test]
 fn no_posts_have_no_archives() {
     let theme = twentytwentyfive();
     let request = Request::default();
-    let mut renderer = Renderer::new(&theme, &Empty, &request);
+    let mut renderer = Renderer::new(&theme, &NoData, &request);
     assert_eq!(
         renderer.render(b"<!-- wp:archives /-->"),
         b"<div class=\"wp-block-archives-list wp-block-archives\">No archives to show.</div>"

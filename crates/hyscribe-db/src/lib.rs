@@ -13,7 +13,9 @@
 use std::fmt;
 
 use hyscribe_config::{Database, Prefix};
-use hyscribe_model::{Comment, OrderBy, Post, PostQuery, Term, TimeCondition, User};
+use hyscribe_model::{
+    Comment, DateCount, OrderBy, Period, Post, PostQuery, Term, TimeCondition, User,
+};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
 
@@ -129,6 +131,17 @@ fn term(row: &MySqlRow) -> Result<Term, DbError> {
         parent: c.unsigned("parent"),
     };
     c.finish(term)
+}
+
+fn date_count(row: &MySqlRow) -> Result<DateCount, DbError> {
+    let mut c = Columns::new(row);
+    let count = DateCount {
+        year: c.signed("y").unsigned_abs(),
+        month: c.signed("m").unsigned_abs(),
+        day: c.signed("d").unsigned_abs(),
+        posts: c.signed("posts").unsigned_abs(),
+    };
+    c.finish(count)
 }
 
 fn user(row: &MySqlRow) -> Result<User, DbError> {
@@ -651,6 +664,35 @@ impl Db {
         row.try_get::<i64, _>("found")
             .map(i64::unsigned_abs)
             .map_err(db_error)
+    }
+
+    /// `wp_get_archives()`'s periods of published posts, newest first.
+    pub async fn date_counts(&self, period: Period) -> Result<Vec<DateCount>, DbError> {
+        let sql = self.prefix.sql(match period {
+            Period::Year => {
+                "SELECT CAST(YEAR(post_date) AS SIGNED) AS y, 0 AS m, 0 AS d, COUNT(ID) AS posts \
+                 FROM {prefix}posts WHERE post_type = 'post' AND post_status = 'publish' \
+                 GROUP BY YEAR(post_date) ORDER BY y DESC"
+            }
+            Period::Month => {
+                "SELECT CAST(YEAR(post_date) AS SIGNED) AS y, CAST(MONTH(post_date) AS SIGNED) AS m, \
+                 0 AS d, COUNT(ID) AS posts \
+                 FROM {prefix}posts WHERE post_type = 'post' AND post_status = 'publish' \
+                 GROUP BY YEAR(post_date), MONTH(post_date) ORDER BY y DESC, m DESC"
+            }
+            Period::Day => {
+                "SELECT CAST(YEAR(post_date) AS SIGNED) AS y, CAST(MONTH(post_date) AS SIGNED) AS m, \
+                 CAST(DAYOFMONTH(post_date) AS SIGNED) AS d, COUNT(ID) AS posts \
+                 FROM {prefix}posts WHERE post_type = 'post' AND post_status = 'publish' \
+                 GROUP BY YEAR(post_date), MONTH(post_date), DAYOFMONTH(post_date) \
+                 ORDER BY y DESC, m DESC, d DESC"
+            }
+        });
+        let rows = sqlx::query(sql)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(date_count).collect()
     }
 
     /// `get_lastpostmodified( 'GMT' )`: the latest modified or published

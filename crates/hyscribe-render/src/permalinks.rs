@@ -385,6 +385,26 @@ fn link_with_front(site: &dyn Site, post: &Post, front_page: Option<u64>) -> Vec
         )
 }
 
+/// `get_year_link()`, `get_month_link()` and `get_day_link()` on `site`:
+/// under plain permalinks, `?m=` with the year and the month and day given.
+pub fn date_archive_link(site: &dyn Site, year: u64, month: Option<(u64, Option<u64>)>) -> Vec<u8> {
+    let home = site.home_url();
+    let links = Permalinks::of(site);
+    links
+        .date_link(&String::from_utf8_lossy(&home), year, month)
+        .map_or_else(
+            || {
+                let mut m = year.to_string();
+                if let Some((month, day)) = month {
+                    m.push_str(&format!("{month:02}"));
+                    m.extend(day.map(|day| format!("{day:02}")));
+                }
+                [&home[..], b"/?m=", m.as_bytes()].concat()
+            },
+            String::into_bytes,
+        )
+}
+
 /// Page `page` of a post's `link`, as `wp_get_canonical_url()` gives it.
 pub fn paged(site: &dyn Site, link: &[u8], page: u64) -> Vec<u8> {
     let links = Permalinks::of(site);

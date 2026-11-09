@@ -226,3 +226,27 @@ pub enum OrderBy {
     /// A search's relevance: titles containing the whole search first.
     Relevance,
 }
+
+/// A period `wp_get_archives()` groups published posts by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Period {
+    /// `yearly`.
+    Year,
+    /// `monthly`.
+    Month,
+    /// `daily`.
+    Day,
+}
+
+/// A period with published posts.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DateCount {
+    /// `YEAR(post_date)`.
+    pub year: u64,
+    /// `MONTH(post_date)`, 0 for a year.
+    pub month: u64,
+    /// `DAYOFMONTH(post_date)`, 0 for a year or month.
+    pub day: u64,
+    /// How many posts.
+    pub posts: u64,
+}

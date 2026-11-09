@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::future::Future;
 
 use hyscribe_db::DbError;
-use hyscribe_model::{Comment, Post, PostQuery, Term, User};
+use hyscribe_model::{Comment, DateCount, Period, Post, PostQuery, Term, User};
 use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
@@ -32,6 +32,7 @@ pub(crate) struct Reads<'a> {
     terms: ByPost<Vec<Term>>,
     term: ByPost<Option<Term>>,
     meta: ByPost<Option<Vec<u8>>>,
+    date_counts: RefCell<HashMap<Period, Vec<DateCount>>>,
 }
 
 impl<'a> Reads<'a> {
@@ -48,6 +49,7 @@ impl<'a> Reads<'a> {
             terms: RefCell::default(),
             term: RefCell::default(),
             meta: RefCell::default(),
+            date_counts: RefCell::default(),
         }
     }
 
@@ -139,6 +141,12 @@ impl RenderSite for Reads<'_> {
 
     fn user(&self, id: u64) -> Option<User> {
         self.memo(&self.users, id, || self.wait(self.site.db.user(id)))
+    }
+
+    fn date_counts(&self, period: Period) -> Vec<DateCount> {
+        self.memo(&self.date_counts, period, || {
+            self.wait(self.site.db.date_counts(period))
+        })
     }
 
     fn term(&self, id: u64, taxonomy: &str) -> Option<Term> {

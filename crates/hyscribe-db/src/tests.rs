@@ -373,6 +373,7 @@ async fn errors_are_reported() {
         .unwrap_err(),
         db.last_comment_modified().await.unwrap_err(),
         db.last_post_modified().await.unwrap_err(),
+        db.date_counts(Period::Year).await.unwrap_err(),
         db.archive_feed_comments(
             &PostQuery {
                 post_types: vec!["post".into()],
@@ -417,6 +418,7 @@ async fn a_row_without_the_columns_fails_to_decode() {
         .await
         .unwrap();
     assert!(post(&row).is_err());
+    assert!(date_count(&row).is_err());
     let mut c = Columns::new(&row);
     let _ = (c.text("option_name"), c.bytes("option_value"));
     assert!(c.finish(()).is_err());
@@ -681,6 +683,36 @@ async fn adjacent_posts() {
             .await
             .unwrap()
             .is_none()
+    );
+}
+
+/// The terms fixture adds a post a day after the default install's.
+#[tokio::test]
+async fn date_counts_group_published_posts() {
+    let count = |year, month, day, posts| DateCount {
+        year,
+        month,
+        day,
+        posts,
+    };
+    let db = fixture().await;
+    assert_eq!(
+        db.date_counts(Period::Month).await.unwrap(),
+        [count(2026, 10, 0, 1)]
+    );
+    let db = Db::connect(&Database {
+        name: "wordpress_terms".into(),
+        ..fixture_config()
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        db.date_counts(Period::Year).await.unwrap(),
+        [count(2026, 0, 0, 2)]
+    );
+    assert_eq!(
+        db.date_counts(Period::Day).await.unwrap(),
+        [count(2026, 10, 28, 1), count(2026, 10, 27, 1)]
     );
 }
 

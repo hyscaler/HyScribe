@@ -843,6 +843,13 @@ async fn reads_come_from_the_database_once() {
             Some(b"default".to_vec())
         );
         assert_eq!(reads.post_terms(1, "category")[0].slug, b"uncategorized");
+        for _ in 0..2 {
+            let months = reads.date_counts(hyscribe_model::Period::Month);
+            assert_eq!(
+                (months[0].year, months[0].month, months[0].posts),
+                (2026, 10, 1)
+            );
+        }
         let query = PostQuery {
             post_types: vec!["page".into()],
             limit: 5,

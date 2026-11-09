@@ -2,7 +2,7 @@
 
 //! What dynamic blocks read from the site and the request (ADR 0009).
 
-use hyscribe_model::{Comment, Post, PostQuery, Term, User};
+use hyscribe_model::{Comment, DateCount, Period, Post, PostQuery, Term, User};
 use hyscribe_phpser::Value;
 
 /// The site's data, as blocks read it while rendering.
@@ -55,6 +55,12 @@ pub trait Site {
     /// `get_term( $id, $taxonomy )`. Sites without term data have none.
     fn term(&self, _id: u64, _taxonomy: &str) -> Option<Term> {
         None
+    }
+
+    /// `wp_get_archives()`'s periods of published posts, newest first.
+    /// Sites without post data have none.
+    fn date_counts(&self, _period: Period) -> Vec<DateCount> {
+        vec![]
     }
 
     /// `get_adjacent_post()` for a visitor: the published post of `post`'s

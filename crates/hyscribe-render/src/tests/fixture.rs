@@ -6,7 +6,9 @@
 use std::cmp::Ordering;
 use std::sync::OnceLock;
 
-use hyscribe_model::{Comment, FormatFilter, OrderBy, Post, PostQuery, Term, TermFilter, User};
+use hyscribe_model::{
+    Comment, DateCount, FormatFilter, OrderBy, Period, Post, PostQuery, Term, TermFilter, User,
+};
 use hyscribe_phpser::Value;
 use hyscribe_testkit::{Dump, SqlValue, default_install};
 
@@ -228,6 +230,37 @@ impl Site for DefaultInstall {
             .table("wp_postmeta")
             .find(|row| number(&row[1]) == post_id && text(&row[2]) == key.as_bytes())
             .map(|row| text(&row[3]))
+    }
+
+    /// The dump's published posts grouped as `wp_get_archives()` groups them.
+    fn date_counts(&self, period: Period) -> Vec<DateCount> {
+        let mut counts: Vec<DateCount> = Vec::new();
+        let posts = dump().table("wp_posts").map(post);
+        for p in posts.filter(|p| p.status == "publish" && p.post_type == "post") {
+            let part = |at: std::ops::Range<usize>| p.date.get(at).unwrap().parse().unwrap();
+            let key = DateCount {
+                year: part(0..4),
+                month: if period == Period::Year {
+                    0
+                } else {
+                    part(5..7)
+                },
+                day: if period == Period::Day {
+                    part(8..10)
+                } else {
+                    0
+                },
+                posts: 1,
+            };
+            let same =
+                |c: &&mut DateCount| (c.year, c.month, c.day) == (key.year, key.month, key.day);
+            match counts.iter_mut().find(same) {
+                Some(count) => count.posts += 1,
+                None => counts.push(key),
+            }
+        }
+        counts.sort_by_key(|c| std::cmp::Reverse((c.year, c.month, c.day)));
+        counts
     }
 
     /// Ties keep table order, as the fixture's posts share one date.

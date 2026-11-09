@@ -174,7 +174,7 @@ impl Context<'_> {
     }
 
     /// `wp_timezone()`.
-    fn zone(&self) -> Zone {
+    pub(crate) fn zone(&self) -> Zone {
         let option = |name| self.site.option(name).unwrap_or_default();
         date::site_zone(&option("timezone_string"), &option("gmt_offset"))
     }

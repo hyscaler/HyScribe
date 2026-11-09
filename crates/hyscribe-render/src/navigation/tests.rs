@@ -192,3 +192,87 @@ fn ancestors_stop_at_a_loop() {
     assert!(renderer.ancestors(&page(206, 0)).is_empty());
     assert_eq!(renderer.ancestors(&page(207, 999)), [999]);
 }
+
+/// Every case of `reference/home-link/golden.sh`, in its order: the count
+/// of navigation names carries over from case to case, as PHP's static
+/// does for the request.
+#[test]
+fn home_links_match_php() {
+    let theme = crate::theme::twentytwentyfive();
+    let golden = include_str!("../../tests/golden/home-link.tsv");
+    let mut names = std::collections::HashMap::new();
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let flag = |i: usize| fields[i] == "1";
+        let site = PostsPage {
+            site: crate::fixture::DefaultInstall {
+                home: b"http://127.0.0.1:8081".to_vec(),
+            },
+            posts_page: fields[5].as_bytes().to_vec(),
+        };
+        let request = crate::site::Request {
+            front_page: flag(2),
+            home: flag(3),
+            queried_object_id: fields[4].parse().unwrap(),
+            ..crate::site::Request::default()
+        };
+        let markup = hyscribe_testkit::unhex(fields[0]);
+        let mut renderer = crate::template::Renderer::new(&theme, &site, &request);
+        renderer.navigation_names = std::mem::take(&mut names);
+        let ours = renderer.render(&markup);
+        names = std::mem::take(&mut renderer.navigation_names);
+        let php = hyscribe_testkit::unhex(fields[6]);
+        if ours != php {
+            failures.push(format!(
+                "{} {}\n  php:  {}\n  ours: {}",
+                String::from_utf8_lossy(&markup),
+                fields[1],
+                String::from_utf8_lossy(&php),
+                String::from_utf8_lossy(&ours)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures[..failures.len().min(4)].join("\n")
+    );
+    assert_eq!(golden.lines().count(), 90);
+}
+
+/// The default install with `page_for_posts` set.
+struct PostsPage {
+    site: crate::fixture::DefaultInstall,
+    posts_page: Vec<u8>,
+}
+
+impl crate::site::Site for PostsPage {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        match name {
+            "page_for_posts" => Some(self.posts_page.clone()),
+            _ => self.site.option(name),
+        }
+    }
+
+    fn home_url(&self) -> Vec<u8> {
+        self.site.home_url()
+    }
+
+    fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        self.site.post(id)
+    }
+
+    fn post_terms(&self, post_id: u64, taxonomy: &str) -> Vec<hyscribe_model::Term> {
+        self.site.post_terms(post_id, taxonomy)
+    }
+
+    fn post_meta(&self, post_id: u64, key: &str) -> Option<Vec<u8>> {
+        self.site.post_meta(post_id, key)
+    }
+
+    fn query(&self, query: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
+        self.site.query(query)
+    }
+}

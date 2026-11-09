@@ -411,6 +411,62 @@ impl Renderer<'_> {
         html
     }
 
+    /// `render_block_core_home_link()`: a link to the home page, current on
+    /// the front page or on a home that is not the page for posts.
+    pub(crate) fn home_link(&mut self, block: &Block) -> Vec<u8> {
+        let parsed = block.attrs.as_deref().unwrap_or_default();
+        let attributes = prepared("core/home-link", parsed);
+        let text = |name| {
+            attributes
+                .get_str(name)
+                .filter(|v| !v.is_empty())
+                .map(Value::to_php_string)
+        };
+        let request = self.context.request;
+        let site = self.context.site;
+        let posts_page = Value::String(site.option("page_for_posts").unwrap_or_default()).to_int();
+        let current = request.front_page
+            || request.home && u64::try_from(posts_page).ok() != Some(request.queried_object_id);
+        let (mut classes, style) = home_link_colors(self.navigation.as_ref());
+        classes.push(b"wp-block-navigation-item".to_vec());
+        if current {
+            classes.push(b"current-menu-item".to_vec());
+        }
+        let extra = [
+            ("class", Value::String(classes.join(&b' '))),
+            ("style", Value::String(style)),
+        ];
+        let wrapper = get_block_wrapper_attributes(
+            "core/home-link",
+            parsed,
+            &extra,
+            &self.context.theme.global,
+        );
+        let upload_host = self.context.upload_host();
+        let mut html = format!(
+            "<li {wrapper}><a class=\"wp-block-home-link__content wp-block-navigation-item__content\" href=\""
+        )
+        .into_bytes();
+        html.extend(esc_url(&site.home_url()));
+        html.extend_from_slice(b"\" rel=\"home\" ");
+        if attributes.get_str("opensInNewTab") == Some(&Value::Bool(true)) {
+            html.extend_from_slice(b" target=\"_blank\"");
+        }
+        if current {
+            html.extend_from_slice(b" aria-current=\"page\"");
+        }
+        html.push(b'>');
+        let label = text("label").unwrap_or_else(|| b"Home".to_vec());
+        html.extend(wp_kses_post(&label, &upload_host));
+        if let Some(description) = text("description") {
+            html.extend_from_slice(b"<span class=\"wp-block-navigation-item__description\">");
+            html.extend(wp_kses_post(&description, &upload_host));
+            html.extend_from_slice(b"</span>");
+        }
+        html.extend_from_slice(b"</a></li>");
+        html
+    }
+
     /// `block_core_shared_navigation_item_should_render()`: a link to a
     /// post or page needs that post, published.
     fn item_should_render(&self, attributes: &Value) -> bool {
@@ -875,6 +931,38 @@ fn build_colors(source: &Value, page_list: bool) -> Colors {
         }
     }
     colors
+}
+
+/// `block_core_home_link_build_css_colors()` of the navigation block's
+/// context: its named colors, else those of `style.color`.
+fn home_link_colors(context: Option<&Value>) -> (Vec<Vec<u8>>, Vec<u8>) {
+    let (mut classes, mut style) = (Vec::new(), Vec::new());
+    for (named, custom, flag, property) in [
+        ("textColor", "text", "has-text-color", "color"),
+        (
+            "backgroundColor",
+            "background",
+            "has-background",
+            "background-color",
+        ),
+    ] {
+        let named = context
+            .and_then(|c| c.get_str(named))
+            .map(Value::to_php_string);
+        let custom = context
+            .and_then(|c| c.get_path(&["style", "color", custom]))
+            .filter(|v| isset(Some(v)))
+            .map(Value::to_php_string);
+        if named.is_some() || custom.is_some() {
+            classes.push(flag.as_bytes().to_vec());
+        }
+        if let Some(named) = named {
+            classes.push([&b"has-"[..], &named, b"-", property.as_bytes()].concat());
+        } else if let Some(color) = custom {
+            style.extend([format!("{property}: ").as_bytes(), &color, b";"].concat());
+        }
+    }
+    (classes, style)
 }
 
 /// The navigation block's colors, then its font size class or style.

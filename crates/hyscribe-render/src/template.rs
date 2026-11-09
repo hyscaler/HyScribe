@@ -273,6 +273,7 @@ impl Renderer<'_> {
             Some("core/archives") => self.archives(block),
             Some("core/latest-posts") => self.latest_posts(block),
             Some("core/navigation-link") => self.navigation_link(block),
+            Some("core/home-link") => self.home_link(block),
             Some("core/page-list") => self.page_list(block),
             Some("core/comment-template") => self.comment_template(block),
             Some("core/comments-pagination") => self.comments_pagination(block),

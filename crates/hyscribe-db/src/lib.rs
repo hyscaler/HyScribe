@@ -1058,8 +1058,19 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
         sql.push(" AND ID <> ?");
         sql.bind(Bind::Int(*id));
     }
+    // A term after `-` excludes the posts with it in any column.
     for term in &query.search {
-        sql.push(" AND (post_title LIKE ? OR post_excerpt LIKE ? OR post_content LIKE ?)");
+        let (term, columns) = match term.strip_prefix('-') {
+            Some(rest) => (
+                rest,
+                " AND (post_title NOT LIKE ? AND post_excerpt NOT LIKE ? AND post_content NOT LIKE ?)",
+            ),
+            None => (
+                term.as_str(),
+                " AND (post_title LIKE ? OR post_excerpt LIKE ? OR post_content LIKE ?)",
+            ),
+        };
+        sql.push(columns);
         let pattern = if query.exact {
             esc_like(term)
         } else {
@@ -1068,6 +1079,10 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
         for _ in 0..3 {
             sql.bind(Bind::Text(pattern.clone()));
         }
+    }
+    // A visitor's search leaves out protected posts.
+    if !query.search.is_empty() {
+        sql.push(" AND post_password = ''");
     }
     let date = [
         (" AND YEAR(post_date) = ?", query.year),

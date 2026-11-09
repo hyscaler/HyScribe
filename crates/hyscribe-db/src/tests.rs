@@ -205,6 +205,9 @@ async fn post_lists() {
         ["Sample Page"]
     );
     assert!(titles(&db, search(&["nothingmatches"])).await.is_empty());
+    // A term after `-` excludes.
+    assert!(titles(&db, search(&["hello", "-world"])).await.is_empty());
+    assert_eq!(titles(&db, search(&["-world"])).await, ["Sample Page"]);
     assert_eq!(
         titles(
             &db,
@@ -444,6 +447,12 @@ fn order_follows_the_query() {
         text(vec![])
             .text
             .ends_with("ORDER BY post_date DESC LIMIT ? OFFSET ?")
+    );
+    assert!(text(vec![]).text.contains(" AND post_password = ''"));
+    assert!(
+        !posts_sql(&PostQuery::default())
+            .text
+            .contains("post_password = ''")
     );
     let pages = text(vec![(OrderBy::MenuOrder, true), (OrderBy::Title, true)]);
     assert!(

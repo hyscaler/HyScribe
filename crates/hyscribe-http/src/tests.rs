@@ -1061,7 +1061,7 @@ async fn loader_vars_match_php() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(golden.lines().count(), 261);
+    assert_eq!(golden.lines().count(), 270);
     // Recorded from PHP: a HEAD request ends before the favicon or the
     // trackback. PHP links the draft page 3, which HyScribe keeps hidden.
     for (method, path) in [

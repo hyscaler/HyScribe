@@ -12,7 +12,7 @@ use super::{Block, Context};
 use crate::style::get_styles;
 
 /// Whose avatar to show.
-enum Subject<'a> {
+pub(super) enum Subject<'a> {
     User(Option<User>),
     Comment(&'a Comment),
 }
@@ -159,7 +159,7 @@ fn border_attributes(block: &Block<'_>) -> (String, Vec<u8>) {
 
 /// `get_avatar( $id_or_email, $size, '', $alt, array( 'extra_attr' =>
 /// $extra, 'class' => $class ) )`, or empty where it returns `false`.
-fn get_avatar(
+pub(super) fn get_avatar(
     context: &Context<'_>,
     subject: &Subject<'_>,
     size: i64,
@@ -190,7 +190,9 @@ fn get_avatar(
     if !found {
         classes.push("avatar-default".to_owned());
     }
-    classes.push(class.to_owned());
+    if !class.is_empty() {
+        classes.push(class.to_owned());
+    }
     // get_avatar() adds these unless the extra attributes have them, and
     // the style, through safecss_filter_attr(), never holds an `=`.
     let mut extra = extra.to_owned();

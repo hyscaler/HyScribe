@@ -345,6 +345,7 @@ impl Site for DefaultInstall {
                     url: text(&row[5]),
                     first_name: meta(b"first_name"),
                     last_name: meta(b"last_name"),
+                    description: meta(b"description"),
                 }
             })
     }

@@ -90,6 +90,8 @@ pub(crate) fn render(
         "core/comments" | "core/post-comments" => comments,
         "core/comments-pagination" => comments_pagination,
         "core/comments-title" => comments_title,
+        "core/post-author" => author::post_author,
+        "core/post-author-biography" => author::post_author_biography,
         "core/post-author-name" => post_author_name,
         "core/post-comments-form" => comment_form::post_comments_form,
         "core/post-comments-count" => post_comments_count,
@@ -1440,6 +1442,7 @@ fn term_description(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     element(b"div", &wrapper, &description)
 }
 
+mod author;
 mod avatar;
 mod comment_form;
 

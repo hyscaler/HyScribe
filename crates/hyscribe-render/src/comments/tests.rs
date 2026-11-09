@@ -114,6 +114,7 @@ fn users(rows: &Value) -> Vec<User> {
             url: Vec::new(),
             first_name: text(row, "first_name"),
             last_name: text(row, "last_name"),
+            description: Vec::new(),
         })
         .collect()
 }

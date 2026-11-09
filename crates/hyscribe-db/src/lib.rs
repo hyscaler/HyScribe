@@ -156,6 +156,7 @@ fn user(row: &MySqlRow) -> Result<User, DbError> {
         url: c.bytes("user_url"),
         first_name: c.bytes("first_name"),
         last_name: c.bytes("last_name"),
+        description: c.bytes("description"),
     };
     c.finish(user)
 }
@@ -583,7 +584,9 @@ impl Db {
              COALESCE((SELECT meta_value FROM {prefix}usermeta WHERE user_id = u.ID \
              AND meta_key = 'first_name' ORDER BY umeta_id LIMIT 1), '') AS first_name, \
              COALESCE((SELECT meta_value FROM {prefix}usermeta WHERE user_id = u.ID \
-             AND meta_key = 'last_name' ORDER BY umeta_id LIMIT 1), '') AS last_name \
+             AND meta_key = 'last_name' ORDER BY umeta_id LIMIT 1), '') AS last_name, \
+             COALESCE((SELECT meta_value FROM {prefix}usermeta WHERE user_id = u.ID \
+             AND meta_key = 'description' ORDER BY umeta_id LIMIT 1), '') AS description \
              FROM {prefix}users u WHERE ID = ?",
         );
         let row = sqlx::query(sql)

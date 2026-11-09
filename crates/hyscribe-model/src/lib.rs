@@ -80,6 +80,8 @@ pub struct User {
     pub first_name: Vec<u8>,
     /// The `last_name` user meta, or empty.
     pub last_name: Vec<u8>,
+    /// The `description` user meta, the biography, or empty.
+    pub description: Vec<u8>,
 }
 
 /// A row of `{prefix}comments`, with the columns rendering needs.

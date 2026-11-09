@@ -1211,15 +1211,15 @@ async fn route(
                             // Asked for by ID, a garbled `page` is a 404
                             // feed; by name, it goes to the feed by ID.
                             .or_else(|| {
-                                let post = found.as_ref().filter(|_| by_id != garbled)?;
-                                let var = id_var(post);
-                                Some(single_feed_location(site, raw_query, var, id, garbled))
+                                found.as_ref().filter(|_| by_id != garbled).map(|post| {
+                                    single_feed_location(site, raw_query, post, garbled)
+                                })
                             })
                             .filter(|location| *location != current)
                             .or(redirect.filter(|_| !hidden));
                         // The 404 feed lists the post, never its comments.
-                        let garbled = garbled && by_id;
-                        let comments = (comment_feed && !garbled)
+                        let feed_404 = garbled && by_id;
+                        let comments = (comment_feed && !feed_404)
                             .then_some(feed::CommentsOf::Post(id, post_type == "post"));
                         let page = async {
                             Ok(found.map_or_else(
@@ -1229,14 +1229,14 @@ async fn route(
                                 },
                                 |p| {
                                     let mut page = single_page(site, p, Paging::default());
-                                    if garbled {
+                                    if feed_404 {
                                         page.title = not_found(site, false).title;
                                     }
                                     page
                                 },
                             ))
                         };
-                        return feed::outcome(site, page, comments, format, redirect, garbled)
+                        return feed::outcome(site, page, comments, format, redirect, feed_404)
                             .await;
                     }
                     (None, Some(post)) => match elsewhere(&post) {
@@ -1747,9 +1747,7 @@ async fn list(
     );
     candidates.retain(|name| front || name != "front-page");
     let queried_object_id = term.map_or(0, |term| term.id);
-    let archive = term_archive
-        .or(date.kind.clone().filter(|_| !blog))
-        .or(dated.then_some(Archive::Date));
+    let archive = term_archive.or(dated.then(|| date.kind.clone().unwrap_or(Archive::Date)));
     // The home page lists the latest posts, the default install's setting.
     let home = archive.is_none() && search.is_none();
     let request = Request {
@@ -1990,14 +1988,9 @@ async fn by_slug(
     guess.map(|guess| {
         Some(match guess {
             Some(post) => {
-                let id_name = if post.post_type == "page" {
-                    "page_id"
-                } else {
-                    "p"
-                };
                 // `page` and `feed` go first, as `redirect_canonical()` drops them.
                 let mut drop = vec!["page", "feed"];
-                drop.extend(singular_args_but(id_name));
+                drop.extend(singular_args_but(id_var(&post)));
                 Slug::Moved(tack(&link, raw_query, &drop))
             }
             None => Slug::Post((key, 0, post_type)),
@@ -2112,18 +2105,18 @@ const SINGULAR_ARGS: [&str; 6] = [
 ];
 
 /// The comments feed link a post's feed redirects to, as
-/// `redirect_canonical()` builds it: `?feed=` and the post's `name` (`p` or
-/// `page_id`) first, then the request's other arguments, encoded again,
+/// `redirect_canonical()` builds it: `?feed=` and the var that asks for the
+/// post by ID first, then the request's other arguments, encoded again,
 /// `page` among them unless it is dropped.
 fn single_feed_location(
     site: &Site,
     raw_query: Option<&str>,
-    name: &str,
-    id: u64,
+    post: &Post,
     drop_page: bool,
 ) -> String {
+    let name = id_var(post);
     // The request's own `feed` takes the place of the empty one.
-    let link = format!("{}/?feed=&{name}={id}", site.home);
+    let link = format!("{}/?feed=&{name}={}", site.home, post.id);
     let mut drop = singular_args_but(name);
     drop.extend(drop_page.then_some("page"));
     tack(&link, raw_query, &drop)

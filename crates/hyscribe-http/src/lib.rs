@@ -1197,38 +1197,47 @@ async fn route(
                 match (format, post.filter(|p| viewable(p, &["post", "page"]))) {
                     // A feed's redirect keeps the feed's headers.
                     (Some(format), found) => {
+                        let past = found
+                            .as_ref()
+                            .filter(|p| past_pages(asked, p))
+                            .map(|_| past_pages_location(query, &link, raw_query, name));
+                        // A `page` past the last that is no number.
+                        let garbled = matches!(past, Some(None));
+                        let by_id = name == "p" || name == "page_id";
                         let redirect = found
                             .as_ref()
                             .and_then(elsewhere)
+                            .or(past.flatten())
+                            // Asked for by ID, a garbled `page` is a 404
+                            // feed; by name, it goes to the feed by ID.
                             .or_else(|| {
-                                found
-                                    .as_ref()
-                                    .filter(|p| past_pages(asked, p))
-                                    .and_then(|_| {
-                                        past_pages_location(query, &link, raw_query, name)
-                                    })
-                            })
-                            // Only `p` and `page_id` have a feed link to go to.
-                            .or_else(|| {
-                                found
-                                    .as_ref()
-                                    .filter(|_| name == "p" || name == "page_id")
-                                    .map(|_| single_feed_location(site, raw_query, name, id))
+                                let post = found.as_ref().filter(|_| by_id != garbled)?;
+                                let var = id_var(post);
+                                Some(single_feed_location(site, raw_query, var, id, garbled))
                             })
                             .filter(|location| *location != current)
                             .or(redirect.filter(|_| !hidden));
-                        let comments =
-                            comment_feed.then_some(feed::CommentsOf::Post(id, post_type == "post"));
+                        // The 404 feed lists the post, never its comments.
+                        let garbled = garbled && by_id;
+                        let comments = (comment_feed && !garbled)
+                            .then_some(feed::CommentsOf::Post(id, post_type == "post"));
                         let page = async {
                             Ok(found.map_or_else(
                                 || Page {
                                     hidden,
                                     ..missing_single(site)
                                 },
-                                |p| single_page(site, p, Paging::default()),
+                                |p| {
+                                    let mut page = single_page(site, p, Paging::default());
+                                    if garbled {
+                                        page.title = not_found(site, false).title;
+                                    }
+                                    page
+                                },
                             ))
                         };
-                        return feed::outcome(site, page, comments, format, redirect, false).await;
+                        return feed::outcome(site, page, comments, format, redirect, garbled)
+                            .await;
                     }
                     (None, Some(post)) => match elsewhere(&post) {
                         Some(location) => Outcome::Redirect(location),
@@ -2069,21 +2078,34 @@ const SINGULAR_ARGS: [&str; 6] = [
 
 /// The comments feed link a post's feed redirects to, as
 /// `redirect_canonical()` builds it: `?feed=` and the post's `name` (`p` or
-/// `page_id`) first, then the request's other arguments, encoded again.
-fn single_feed_location(site: &Site, raw_query: Option<&str>, name: &str, id: u64) -> String {
+/// `page_id`) first, then the request's other arguments, encoded again,
+/// `page` among them unless it is dropped.
+fn single_feed_location(
+    site: &Site,
+    raw_query: Option<&str>,
+    name: &str,
+    id: u64,
+    drop_page: bool,
+) -> String {
     // The request's own `feed` takes the place of the empty one.
     let link = format!("{}/?feed=&{name}={id}", site.home);
-    tack(&link, raw_query, &singular_args_but(name))
+    let mut drop = singular_args_but(name);
+    drop.extend(drop_page.then_some("page"));
+    tack(&link, raw_query, &drop)
 }
 
 /// A post's link, where `redirect_canonical()` sends a request for it.
 fn post_location(link: &str, post: &Post, raw_query: Option<&str>) -> String {
-    let name = if post.post_type == "page" {
+    tack(link, raw_query, &singular_args_but(id_var(post)))
+}
+
+/// The query var that asks for `post` by ID.
+fn id_var(post: &Post) -> &'static str {
+    if post.post_type == "page" {
         "page_id"
     } else {
         "p"
-    };
-    tack(link, raw_query, &singular_args_but(name))
+    }
 }
 
 /// [`SINGULAR_ARGS`] but `name`, the one a post's link has.

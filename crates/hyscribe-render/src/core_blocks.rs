@@ -90,6 +90,7 @@ pub(crate) fn render(
         "core/comments" | "core/post-comments" => comments,
         "core/comments-pagination" => comments_pagination,
         "core/comments-title" => comments_title,
+        "core/latest-comments" => latest_comments::latest_comments,
         "core/post-author" => author::post_author,
         "core/post-author-biography" => author::post_author_biography,
         "core/post-author-name" => author::post_author_name,
@@ -1397,6 +1398,7 @@ fn term_description(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 mod author;
 mod avatar;
 mod comment_form;
+mod latest_comments;
 
 #[cfg(test)]
 mod tests;

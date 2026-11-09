@@ -316,6 +316,16 @@ impl Site for DefaultInstall {
         approved_comments().find(|comment| comment.id == id)
     }
 
+    fn recent_comments(&self, limit: u64) -> Vec<Comment> {
+        let published = |c: &Comment| self.post(c.post_id).is_some_and(|p| p.status == "publish");
+        let mut comments: Vec<Comment> = approved_comments()
+            .filter(|c| c.comment_type != b"note" && published(c))
+            .collect();
+        comments.sort_by(|a, b| (&b.date_gmt, b.id).cmp(&(&a.date_gmt, a.id)));
+        comments.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+        comments
+    }
+
     fn user(&self, id: u64) -> Option<User> {
         dump()
             .table("wp_users")

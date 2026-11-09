@@ -265,6 +265,13 @@ fn blocks_without_a_callback_render_their_saved_markup() {
         render(&context, "core/site-title", &[], b""),
         Some(Vec::new())
     );
+    // Without comment data, `Site` has no recent comments.
+    let latest = render(&context, "core/latest-comments", &[], b"").unwrap();
+    assert!(
+        String::from_utf8(latest)
+            .unwrap()
+            .ends_with(">No comments to show.</div>")
+    );
 }
 
 #[test]

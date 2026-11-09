@@ -843,6 +843,7 @@ async fn reads_come_from_the_database_once() {
             Some(b"default".to_vec())
         );
         assert_eq!(reads.post_terms(1, "category")[0].slug, b"uncategorized");
+        assert_eq!(reads.recent_comments(5)[0].id, 1);
         for _ in 0..2 {
             let months = reads.date_counts(hyscribe_model::Period::Month);
             assert_eq!(

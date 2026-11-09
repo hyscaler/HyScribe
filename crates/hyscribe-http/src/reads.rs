@@ -135,6 +135,10 @@ impl RenderSite for Reads<'_> {
         })
     }
 
+    fn recent_comments(&self, limit: u64) -> Vec<Comment> {
+        self.wait(self.site.db.recent_comments(limit))
+    }
+
     fn comment(&self, id: u64) -> Option<Comment> {
         self.memo(&self.comment, id, || self.wait(self.site.db.comment(id)))
     }

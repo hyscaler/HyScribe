@@ -523,6 +523,25 @@ impl Db {
         rows.iter().map(comment).collect()
     }
 
+    /// `get_comments()` of the latest comments block: the approved
+    /// comments on published posts, newest first, `limit` of them.
+    pub async fn recent_comments(&self, limit: u64) -> Result<Vec<Comment>, DbError> {
+        let sql = self.prefix.sql(concat!(
+            "SELECT ",
+            comment_columns!(),
+            " FROM {prefix}comments JOIN {prefix}posts ON comment_post_ID = ID \
+             WHERE post_status = 'publish' AND comment_approved = '1' \
+             AND comment_type != 'note' \
+             ORDER BY comment_date_gmt DESC, comment_ID DESC LIMIT ?"
+        ));
+        let rows = sqlx::query(sql)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(comment).collect()
+    }
+
     /// The comments an archive's or search's comment feed lists, newest
     /// first: those on the posts `query` matches, however many.
     pub async fn archive_feed_comments(

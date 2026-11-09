@@ -374,6 +374,7 @@ async fn errors_are_reported() {
         db.last_comment_modified().await.unwrap_err(),
         db.last_post_modified().await.unwrap_err(),
         db.date_counts(Period::Year).await.unwrap_err(),
+        db.recent_comments(1).await.unwrap_err(),
         db.archive_feed_comments(
             &PostQuery {
                 post_types: vec!["post".into()],
@@ -756,6 +757,8 @@ async fn feed_comments() {
     assert_eq!(ids(db.feed_comments(Some(1), 10).await.unwrap()), [1]);
     assert!(db.feed_comments(Some(2), 10).await.unwrap().is_empty());
     assert!(db.feed_comments(None, 0).await.unwrap().is_empty());
+    assert_eq!(ids(db.recent_comments(5).await.unwrap()), [1]);
+    assert!(db.recent_comments(0).await.unwrap().is_empty());
     assert_eq!(
         db.last_comment_modified().await.unwrap().as_deref(),
         Some("2026-10-27 08:08:15")

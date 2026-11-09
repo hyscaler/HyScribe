@@ -41,6 +41,12 @@ pub trait Site {
         vec![]
     }
 
+    /// The approved comments on published posts, newest first, `limit` of
+    /// them. Sites without comment data have none.
+    fn recent_comments(&self, _limit: u64) -> Vec<Comment> {
+        vec![]
+    }
+
     /// `get_comment( $id )` when that comment is approved, of any type.
     /// Sites without comment data have none.
     fn comment(&self, _id: u64) -> Option<Comment> {

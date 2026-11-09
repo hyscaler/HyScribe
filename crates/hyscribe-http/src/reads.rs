@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::future::Future;
 
 use hyscribe_db::DbError;
-use hyscribe_model::{Comment, DateCount, Period, Post, PostQuery, Term, User};
+use hyscribe_model::{CalendarMonth, Comment, DateCount, Period, Post, PostQuery, Term, User};
 use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
@@ -145,6 +145,14 @@ impl RenderSite for Reads<'_> {
 
     fn term_posts(&self, taxonomy: &str) -> Vec<(u64, u64)> {
         self.wait(self.site.db.term_posts(taxonomy))
+    }
+
+    fn has_published_posts(&self) -> bool {
+        self.wait(self.site.db.has_published_posts("post"))
+    }
+
+    fn calendar_month(&self, year: i64, month: u64, last_day: u64) -> CalendarMonth {
+        self.wait(self.site.db.calendar_month(year, month, last_day))
     }
 
     fn recent_comments(&self, limit: u64) -> Vec<Comment> {

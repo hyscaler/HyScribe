@@ -2,7 +2,7 @@
 
 //! What dynamic blocks read from the site and the request (ADR 0009).
 
-use hyscribe_model::{Comment, DateCount, Period, Post, PostQuery, Term, User};
+use hyscribe_model::{CalendarMonth, Comment, DateCount, Period, Post, PostQuery, Term, User};
 use hyscribe_phpser::Value;
 
 /// The site's data, as blocks read it while rendering.
@@ -80,6 +80,17 @@ pub trait Site {
     /// ID)`. Sites without term data have none.
     fn term_posts(&self, _taxonomy: &str) -> Vec<(u64, u64)> {
         vec![]
+    }
+
+    /// Whether a post is published. Sites without post data have none.
+    fn has_published_posts(&self) -> bool {
+        false
+    }
+
+    /// `get_calendar()`'s reads of a month with `last_day` days. Sites
+    /// without post data have no posts in it or around it.
+    fn calendar_month(&self, _year: i64, _month: u64, _last_day: u64) -> CalendarMonth {
+        Default::default()
     }
 
     /// `wp_get_archives()`'s periods of published posts, newest first.

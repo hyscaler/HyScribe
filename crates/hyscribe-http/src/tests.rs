@@ -826,6 +826,29 @@ async fn routes_give_the_request_state() {
     assert!(missing.request.not_found && missing.request.now > recent);
 }
 
+/// A read that fails answers its type's default and keeps the error.
+#[tokio::test(flavor = "multi_thread")]
+async fn failed_reads_answer_defaults() {
+    use hyscribe_render::site::Site as _;
+    let mut config = fixture_config();
+    config.prefix = hyscribe_config::Prefix::new("missing_").unwrap();
+    let site = Arc::new(Site {
+        db: Db::connect(&config).await.unwrap(),
+        options: HashMap::new(),
+        home: String::new(),
+        theme: hyscribe_render::theme::twentytwentyfive(),
+        rewriter: rewrite::Rewriter::default(),
+    });
+    let handle = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let reads = Reads::new(&site, handle);
+        assert!(!reads.has_published_posts());
+        assert!(reads.finish().is_err());
+    })
+    .await
+    .unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn reads_come_from_the_database_once() {
     use hyscribe_render::site::Site as _;
@@ -848,6 +871,8 @@ async fn reads_come_from_the_database_once() {
         assert_eq!(uncategorized.slug, b"uncategorized");
         assert_eq!(reads.term_posts("category"), [(1, 1)]);
         assert!(reads.term_posts("post_tag").is_empty());
+        assert!(reads.has_published_posts());
+        assert_eq!(reads.calendar_month(2026, 10, 31).days, [27]);
         let (category, count) = &reads.cloud_terms("category", 45)[0];
         assert_eq!((&category.slug[..], *count), (&b"uncategorized"[..], 1));
         for _ in 0..2 {

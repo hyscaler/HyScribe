@@ -377,6 +377,8 @@ async fn errors_are_reported() {
         db.recent_comments(1).await.unwrap_err(),
         db.cloud_terms("post_tag", 1).await.unwrap_err(),
         db.taxonomy_terms("category").await.unwrap_err(),
+        db.has_published_posts("post").await.unwrap_err(),
+        db.calendar_month(2026, 10, 31).await.unwrap_err(),
         db.term_posts("category").await.unwrap_err(),
         db.archive_feed_comments(
             &PostQuery {
@@ -719,6 +721,28 @@ async fn date_counts_group_published_posts() {
     assert_eq!(
         db.date_counts(Period::Year).await.unwrap(),
         [count(2026, 0, 0, 2)]
+    );
+    // October has the two posts; November follows it, before nothing.
+    assert!(db.has_published_posts("post").await.unwrap());
+    assert!(!db.has_published_posts("attachment").await.unwrap());
+    let october = db.calendar_month(2026, 10, 31).await.unwrap();
+    assert_eq!(
+        (october.previous, october.next, &october.days[..]),
+        (None, None, &[27, 28][..])
+    );
+    let november = db.calendar_month(2026, 11, 30).await.unwrap();
+    assert_eq!((november.previous, november.next), (Some((2026, 10)), None));
+    // A month past 12 makes MariaDB's dates the zero date, as get_calendar()'s
+    // literals do in PHP: nothing before, the first post after.
+    let thirteenth = db.calendar_month(2026, 13, 31).await.unwrap();
+    assert_eq!(
+        (thirteenth.previous, thirteenth.next, thirteenth.days.len()),
+        (None, Some((2026, 10)), 0)
+    );
+    let september = db.calendar_month(2026, 9, 30).await.unwrap();
+    assert_eq!(
+        (september.next, september.days.is_empty()),
+        (Some((2026, 10)), true)
     );
     // The tag `foo` has a post, `empty` none.
     let tags = db.cloud_terms("post_tag", 45).await.unwrap();

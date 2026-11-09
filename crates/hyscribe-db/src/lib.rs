@@ -14,7 +14,7 @@ use std::fmt;
 
 use hyscribe_config::{Database, Prefix};
 use hyscribe_model::{
-    Comment, DateCount, OrderBy, Period, Post, PostQuery, Term, TimeCondition, User,
+    CalendarMonth, Comment, DateCount, OrderBy, Period, Post, PostQuery, Term, TimeCondition, User,
 };
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
@@ -808,6 +808,105 @@ impl Db {
             .await
             .map_err(db_error)?;
         rows.iter().map(date_count).collect()
+    }
+
+    /// Whether a post of `post_type` is published, as `wp_count_posts()`
+    /// tells the calendar block.
+    pub async fn has_published_posts(&self, post_type: &str) -> Result<bool, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT COUNT(*) AS found FROM {prefix}posts \
+             WHERE post_type = ? AND post_status = 'publish' LIMIT 1",
+        );
+        let row = sqlx::query(sql)
+            .bind(post_type)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        let mut c = Columns::new(&row);
+        let found = c.signed("found") > 0;
+        c.finish(found)
+    }
+
+    /// `get_calendar()`'s reads of the month `month` of `year`, which has
+    /// `last_day` days: the published posts' months around it and its days.
+    pub async fn calendar_month(
+        &self,
+        year: i64,
+        month: u64,
+        last_day: u64,
+    ) -> Result<CalendarMonth, DbError> {
+        // The dates as get_calendar() writes them into its SQL.
+        let first = format!("{year}-{month:02}-01");
+        let last = format!("{year}-{month:02}-{last_day} 23:59:59");
+        let previous = self
+            .month_with_posts(
+                "SELECT CAST(YEAR(post_date) AS SIGNED) AS y, CAST(MONTH(post_date) AS SIGNED) AS m \
+                 FROM {prefix}posts WHERE post_date < ? AND post_type = 'post' \
+                 AND post_status = 'publish' ORDER BY post_date DESC LIMIT 1",
+                &first,
+            )
+            .await;
+        let next = self
+            .month_with_posts(
+                "SELECT CAST(YEAR(post_date) AS SIGNED) AS y, CAST(MONTH(post_date) AS SIGNED) AS m \
+                 FROM {prefix}posts WHERE post_date > ? AND post_type = 'post' \
+                 AND post_status = 'publish' ORDER BY post_date ASC LIMIT 1",
+                &last,
+            )
+            .await;
+        let days = self
+            .days_with_posts(&format!("{first} 00:00:00"), &last)
+            .await;
+        previous.and_then(|previous| {
+            next.and_then(|next| {
+                days.map(|days| CalendarMonth {
+                    previous,
+                    next,
+                    days,
+                })
+            })
+        })
+    }
+
+    /// The `(year, month)` of the post `sql` finds by `date`, if any.
+    async fn month_with_posts(
+        &self,
+        sql: &'static str,
+        date: &str,
+    ) -> Result<Option<(u64, u64)>, DbError> {
+        let row = sqlx::query(self.prefix.sql(sql))
+            .bind(date)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.map(|row| {
+            let mut c = Columns::new(&row);
+            let month = (c.signed("y").unsigned_abs(), c.signed("m").unsigned_abs());
+            c.finish(month)
+        })
+        .transpose()
+    }
+
+    /// The days of published posts from `from` to `to`.
+    async fn days_with_posts(&self, from: &str, to: &str) -> Result<Vec<u64>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT DISTINCT CAST(DAYOFMONTH(post_date) AS SIGNED) AS d FROM {prefix}posts \
+             WHERE post_date >= ? AND post_type = 'post' AND post_status = 'publish' \
+             AND post_date <= ?",
+        );
+        let rows = sqlx::query(sql)
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let day = c.signed("d").unsigned_abs();
+                c.finish(day)
+            })
+            .collect()
     }
 
     /// `get_lastpostmodified( 'GMT' )`: the latest modified or published

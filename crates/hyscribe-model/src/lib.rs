@@ -257,3 +257,15 @@ pub struct DateCount {
     /// How many posts.
     pub posts: u64,
 }
+
+/// What `get_calendar()` reads of a month: the months with posts before
+/// and after it, as `(year, month)`, and its days with posts.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CalendarMonth {
+    /// The month of the latest post before the month.
+    pub previous: Option<(u64, u64)>,
+    /// The month of the earliest post after the month.
+    pub next: Option<(u64, u64)>,
+    /// The days of the month with posts.
+    pub days: Vec<u64>,
+}

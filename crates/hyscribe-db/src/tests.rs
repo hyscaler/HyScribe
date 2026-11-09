@@ -375,6 +375,7 @@ async fn errors_are_reported() {
         db.last_post_modified().await.unwrap_err(),
         db.date_counts(Period::Year).await.unwrap_err(),
         db.recent_comments(1).await.unwrap_err(),
+        db.cloud_terms("post_tag", 1).await.unwrap_err(),
         db.archive_feed_comments(
             &PostQuery {
                 post_types: vec!["post".into()],
@@ -716,6 +717,15 @@ async fn date_counts_group_published_posts() {
         db.date_counts(Period::Year).await.unwrap(),
         [count(2026, 0, 0, 2)]
     );
+    // The tag `foo` has a post, `empty` none.
+    let tags = db.cloud_terms("post_tag", 45).await.unwrap();
+    assert_eq!(
+        tags.iter()
+            .map(|(t, n)| (&t.slug[..], *n))
+            .collect::<Vec<_>>(),
+        [(&b"foo"[..], 1)]
+    );
+    assert!(db.cloud_terms("post_tag", 0).await.unwrap().is_empty());
     assert_eq!(
         db.date_counts(Period::Day).await.unwrap(),
         [count(2026, 10, 28, 1), count(2026, 10, 27, 1)]

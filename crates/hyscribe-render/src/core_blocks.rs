@@ -108,6 +108,7 @@ pub(crate) fn render(
         "core/query-total" => query_total,
         "core/read-more" => read_more,
         "core/site-tagline" => site_tagline,
+        "core/tag-cloud" => tag_cloud::tag_cloud,
         "core/term-description" => term_description,
         "core/site-title" => site_title,
         _ => return None,
@@ -1399,6 +1400,7 @@ mod author;
 mod avatar;
 mod comment_form;
 mod latest_comments;
+mod tag_cloud;
 
 #[cfg(test)]
 mod tests;

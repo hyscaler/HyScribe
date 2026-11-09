@@ -130,15 +130,17 @@ pub fn author_posts_url(home: &[u8], id: impl std::fmt::Display) -> Vec<u8> {
 /// install shows: `?cat=<ID>` for a category, `?tag=<slug>` for a tag,
 /// and for a post format its slug without `post-format-`.
 pub fn term_link(home: &[u8], taxonomy: &str, term: &Term) -> Vec<u8> {
-    let query = match taxonomy {
-        "category" => format!("?cat={}", term.id).into_bytes(),
+    let base = [home, b"/"].concat();
+    match taxonomy {
+        "category" => [base, format!("?cat={}", term.id).into_bytes()].concat(),
+        // _post_format_link() sets the slug again with add_query_arg(),
+        // which leaves an empty one without `=`.
         "post_format" => {
             let slug = crate::template::replace(&term.slug, b"post-format-", b"");
-            [&b"?post_format="[..], &slug].concat()
+            hyscribe_phpser::add_query_arg(&[(b"post_format", Some(&slug))], &base)
         }
-        _ => [&b"?tag="[..], &term.slug].concat(),
-    };
-    [home, b"/", &query].concat()
+        _ => [&base[..], b"?tag=", &term.slug].concat(),
+    }
 }
 
 #[cfg(test)]

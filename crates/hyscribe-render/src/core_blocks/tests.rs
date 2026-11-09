@@ -265,6 +265,11 @@ fn blocks_without_a_callback_render_their_saved_markup() {
         render(&context, "core/site-title", &[], b""),
         Some(Vec::new())
     );
+    // Without term data, `Site` has no tags to show.
+    assert_eq!(
+        render(&context, "core/tag-cloud", &[], b""),
+        Some(Vec::new())
+    );
     // Without comment data, `Site` has no recent comments.
     let latest = render(&context, "core/latest-comments", &[], b"").unwrap();
     assert!(

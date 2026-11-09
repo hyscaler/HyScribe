@@ -673,6 +673,32 @@ impl Db {
         rows.iter().map(term).collect()
     }
 
+    /// `get_terms()` for a tag cloud: the terms of `taxonomy` with posts,
+    /// the most used first, `limit` of them, each with its post count.
+    pub async fn cloud_terms(
+        &self,
+        taxonomy: &str,
+        limit: u64,
+    ) -> Result<Vec<(Term, u64)>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT t.term_id, t.name, t.slug, tt.description, tt.parent, tt.count FROM {prefix}terms t \
+             JOIN {prefix}term_taxonomy tt ON tt.term_id = t.term_id \
+             WHERE tt.taxonomy = ? AND tt.count > 0 ORDER BY tt.count DESC LIMIT ?",
+        );
+        let rows = sqlx::query(sql)
+            .bind(taxonomy)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let count = Columns::new(row).signed("count").unsigned_abs();
+                term(row).map(|term| (term, count))
+            })
+            .collect()
+    }
+
     /// How many terms of `taxonomy` have posts.
     pub async fn count_terms_with_posts(&self, taxonomy: &str) -> Result<u64, DbError> {
         let sql = self.prefix.sql(

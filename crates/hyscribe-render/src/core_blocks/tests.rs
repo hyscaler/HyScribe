@@ -265,6 +265,11 @@ fn blocks_without_a_callback_render_their_saved_markup() {
         render(&context, "core/site-title", &[], b""),
         Some(Vec::new())
     );
+    // Without a post, no footnotes.
+    assert_eq!(
+        render(&context, "core/footnotes", &[], b""),
+        Some(Vec::new())
+    );
     // Without term data, `Site` has no tags to show.
     assert_eq!(
         render(&context, "core/tag-cloud", &[], b""),
@@ -638,4 +643,82 @@ fn comment_form_without_comment_data() {
         html.contains("name='comment_parent' id='comment_parent' value='0'"),
         "{html}"
     );
+}
+
+/// The default install's post with a footnotes meta, protected or not.
+struct Footnoted {
+    site: crate::fixture::DefaultInstall,
+    meta: Vec<u8>,
+    protected: bool,
+}
+
+impl Site for Footnoted {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        self.site.option(name)
+    }
+
+    fn home_url(&self) -> Vec<u8> {
+        self.site.home_url()
+    }
+
+    fn post(&self, id: u64) -> Option<Post> {
+        let post = self.site.post(id)?;
+        let password = if self.protected {
+            b"pw".to_vec()
+        } else {
+            Vec::new()
+        };
+        Some(Post { password, ..post })
+    }
+
+    fn post_terms(&self, _: u64, _: &str) -> Vec<hyscribe_model::Term> {
+        Vec::new()
+    }
+
+    fn post_meta(&self, _: u64, key: &str) -> Option<Vec<u8>> {
+        (key == "footnotes").then(|| self.meta.clone())
+    }
+
+    fn query(&self, _: &hyscribe_model::PostQuery) -> Vec<Post> {
+        Vec::new()
+    }
+}
+
+/// Every case of `reference/footnotes/golden.sh`.
+#[test]
+fn footnotes_match_php() {
+    let theme = twentytwentyfive();
+    let golden = include_str!("../../tests/golden/footnotes.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let site = Footnoted {
+            site: crate::fixture::DefaultInstall {
+                home: b"http://127.0.0.1:8081".to_vec(),
+            },
+            meta: unhex(fields[1]),
+            protected: fields[2] == "1",
+        };
+        let request = Request::default();
+        let context = Context {
+            theme: &theme,
+            site: &site,
+            request: &request,
+            post_id: Some(1),
+            query: None,
+            comment: None,
+            loading: Default::default(),
+        };
+        let ours = render_markup(&context, &unhex(fields[0]));
+        if ours != unhex(fields[3]) {
+            failures.push(format!(
+                "{:?}\n  php:  {}\n  ours: {}",
+                String::from_utf8_lossy(&unhex(fields[1])),
+                String::from_utf8_lossy(&unhex(fields[3])),
+                String::from_utf8_lossy(&ours)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(golden.lines().count(), 44);
 }

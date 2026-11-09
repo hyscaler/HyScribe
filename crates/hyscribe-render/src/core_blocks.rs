@@ -90,6 +90,7 @@ pub(crate) fn render(
         "core/comments" | "core/post-comments" => comments,
         "core/comments-pagination" => comments_pagination,
         "core/comments-title" => comments_title,
+        "core/footnotes" => footnotes,
         "core/latest-comments" => latest_comments::latest_comments,
         "core/post-author" => author::post_author,
         "core/post-author-biography" => author::post_author_biography,
@@ -1378,6 +1379,55 @@ fn site_tagline(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let wrapper = block.wrapper(context, &block.text_align_class());
     let tag = tag(block.attribute("level"), b"p");
     element(&tag, &wrapper, &tagline)
+}
+
+/// `render_block_core_footnotes()`: the post's `footnotes` meta, a JSON
+/// list of notes, each with a link back to its reference.
+fn footnotes(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let Some(post) = context.post().filter(|post| post.password.is_empty()) else {
+        return Vec::new();
+    };
+    let meta = context
+        .site
+        .post_meta(post.id, "footnotes")
+        .unwrap_or_default();
+    if is_empty_string(&meta) {
+        return Vec::new();
+    }
+    // An array with entries, as json_decode( $meta, true ) gives it.
+    let decoded = hyscribe_phpser::json_decode(&meta);
+    let Some(notes) = decoded
+        .as_ref()
+        .and_then(Value::as_array)
+        .filter(|n| !n.is_empty())
+    else {
+        return Vec::new();
+    };
+    let upload_host = context.upload_host();
+    let mut items = Vec::new();
+    for (index, (_, note)) in notes.iter().enumerate() {
+        let field = |name| {
+            note.get_str(name)
+                .map(Value::to_php_string)
+                .unwrap_or_default()
+        };
+        let id = esc_attr(&field("id"));
+        items.extend(format!("<li id=\"{id}\">").into_bytes());
+        items.extend(wp_kses_post(&field("content"), &upload_host));
+        items.extend(
+            format!(
+                " <a href=\"#{id}-link\" aria-label=\"Jump to footnote reference {}\">↩︎</a></li>",
+                index + 1
+            )
+            .into_bytes(),
+        );
+    }
+    [
+        format!("<ol {}>", block.wrapper(context, b"")).as_bytes(),
+        &items,
+        b"</ol>",
+    ]
+    .concat()
 }
 
 /// `render_block_core_term_description()` on a term archive, its

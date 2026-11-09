@@ -415,7 +415,7 @@ fn search_matches(search: &str) -> Vec<&str> {
 
 /// The `orderby` of `WP_Query` for `orderBy`: each allowed key of a
 /// space separated list in `ascending` order, or of an array in its own.
-fn order_by(by: &Value, ascending: bool) -> Vec<(OrderBy, bool)> {
+pub(crate) fn order_by(by: &Value, ascending: bool) -> Vec<(OrderBy, bool)> {
     let order = if let Some(list) = by.as_array() {
         // parse_order(): only the string `ASC`, in any case, is ascending.
         list.iter()

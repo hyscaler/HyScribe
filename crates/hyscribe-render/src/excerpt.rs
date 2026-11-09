@@ -36,7 +36,7 @@ const WRAPPER_BLOCKS: [&str; 3] = ["core/columns", "core/column", "core/group"];
 
 /// `excerpt_length` and `excerpt_more`.
 const EXCERPT_LENGTH: i64 = 55;
-const EXCERPT_MORE: &[u8] = b" [&hellip;]";
+pub(crate) const EXCERPT_MORE: &[u8] = b" [&hellip;]";
 
 impl Renderer<'_> {
     /// `get_the_excerpt()` for `post`, the loop's post.

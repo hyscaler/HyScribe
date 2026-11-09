@@ -23,6 +23,7 @@ pub mod formatting;
 pub mod head;
 mod interactivity;
 pub mod kses;
+mod latest_posts;
 mod layout;
 pub mod link;
 mod media;

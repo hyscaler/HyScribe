@@ -232,31 +232,44 @@ impl Site for DefaultInstall {
             .map(|row| text(&row[3]))
     }
 
-    /// The dump's published posts grouped as `wp_get_archives()` groups them.
+    /// The dump's published posts grouped as `wp_get_archives()` groups
+    /// them. Its one post makes a week the same group as its day.
     fn date_counts(&self, period: Period) -> Vec<DateCount> {
         let mut counts: Vec<DateCount> = Vec::new();
         let posts = dump().table("wp_posts").map(post);
         for p in posts.filter(|p| p.status == "publish" && p.post_type == "post") {
             let part = |at: std::ops::Range<usize>| p.date.get(at).unwrap().parse().unwrap();
-            let key = DateCount {
-                year: part(0..4),
-                month: if period == Period::Year {
-                    0
-                } else {
-                    part(5..7)
+            let (year, month, day) = (part(0..4), part(5..7), part(8..10));
+            let key = match period {
+                Period::Year => DateCount {
+                    year,
+                    ..DateCount::default()
                 },
-                day: if period == Period::Day {
-                    part(8..10)
-                } else {
-                    0
+                Period::Month => DateCount {
+                    year,
+                    month,
+                    ..DateCount::default()
                 },
-                posts: 1,
+                Period::Day => DateCount {
+                    year,
+                    month,
+                    day,
+                    ..DateCount::default()
+                },
+                Period::Week(start) => DateCount {
+                    year,
+                    month,
+                    day,
+                    week: mysql_week(year, month, day, start),
+                    posts: 0,
+                },
             };
-            let same =
-                |c: &&mut DateCount| (c.year, c.month, c.day) == (key.year, key.month, key.day);
+            let same = |c: &&mut DateCount| {
+                (c.year, c.month, c.day, c.week) == (key.year, key.month, key.day, key.week)
+            };
             match counts.iter_mut().find(same) {
                 Some(count) => count.posts += 1,
-                None => counts.push(key),
+                None => counts.push(DateCount { posts: 1, ..key }),
             }
         }
         counts.sort_by_key(|c| std::cmp::Reverse((c.year, c.month, c.day)));
@@ -457,5 +470,38 @@ fn column_order(a: &Post, b: &Post, column: OrderBy, phrase: &str) -> Ordering {
         OrderBy::MenuOrder => a.menu_order.cmp(&b.menu_order),
         OrderBy::CommentCount => a.comment_count.cmp(&b.comment_count),
         OrderBy::Relevance => contains(&a.title, phrase).cmp(&contains(&b.title, phrase)),
+    }
+}
+
+/// `_wp_mysql_week()`'s week of a day as MySQL numbers it: `WEEK( d, 1 )`
+/// from Monday, `WEEK( d - start days, 0 )` from Tuesday to Saturday,
+/// else `WEEK( d, 0 )`.
+fn mysql_week(year: u64, month: u64, day: u64, start: i64) -> u64 {
+    let days = |y: u64, m: u64, d: u64| {
+        let stored = format!("{y:04}-{m:02}-{d:02} 00:00:00");
+        crate::date::stored_unix(&stored, crate::date::Zone::Utc).div_euclid(86_400)
+    };
+    let mut date = days(year, month, day);
+    if (2..=6).contains(&start) {
+        date -= start;
+    }
+    let mut y = year;
+    while days(y, 1, 1) > date {
+        y -= 1;
+    }
+    let first = days(y, 1, 1);
+    let monday = start == 1;
+    // 1 January's weekday from Monday (mode 1) or Sunday (mode 0); 1970
+    // began on a Thursday.
+    let weekday = (first + if monday { 3 } else { 4 }).rem_euclid(7);
+    let week_one = if monday && weekday <= 3 {
+        first - weekday
+    } else {
+        first + (7 - weekday) % 7
+    };
+    if date < week_one {
+        0
+    } else {
+        u64::try_from((date - week_one) / 7 + 1).unwrap()
     }
 }

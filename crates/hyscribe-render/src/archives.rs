@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The archives block, `render_block_core_archives()`, over
-//! `wp_get_archives()`'s yearly, monthly and daily lists.
+//! `wp_get_archives()`.
 
-use hyscribe_kses::{esc_attr, esc_url};
-use hyscribe_model::{DateCount, Period};
-use hyscribe_phpser::{Key, Value, json_encode};
+use hyscribe_kses::{esc_attr, esc_url, strip_tags};
+use hyscribe_model::{DateCount, OrderBy, Period, PostQuery};
+use hyscribe_phpser::{Key, Value, is_empty_string, json_encode};
 
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
-use crate::date;
+use crate::date::{self, Zone};
 use crate::formatting::{CORE_SHORTCODE_TAGS, wptexturize};
-use crate::permalinks::date_archive_link;
+use crate::permalinks::{date_archive_link, permalink};
+use crate::post::title_filters;
+use crate::site::Site;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
 
@@ -75,6 +77,7 @@ impl Renderer<'_> {
                 b"yearly" => "Select Year",
                 b"monthly" => "Select Month",
                 b"daily" => "Select Day",
+                b"weekly" => "Select Week",
                 _ => "Select Post",
             };
             let hidden = if flag("showLabel") {
@@ -99,13 +102,19 @@ impl Renderer<'_> {
 
     /// `wp_get_archives()` of `kind` in `format`, `''` as monthly.
     fn archive_links(&self, kind: &[u8], format: Format, show_post_count: bool) -> Vec<u8> {
+        let site = self.context.site;
+        let option = |name| site.option(name).unwrap_or_default();
         let period = match kind {
             b"yearly" => Period::Year,
             b"monthly" | b"" => Period::Month,
             b"daily" => Period::Day,
+            b"weekly" => Period::Week(Value::String(option("start_of_week")).to_int()),
+            b"postbypost" | b"alpha" => {
+                let current = self.context.request.post;
+                return post_links(site, current, kind == b"alpha", format);
+            }
             _ => return Vec::new(),
         };
-        let site = self.context.site;
         let request = self.context.request;
         let var = |name| {
             request
@@ -113,18 +122,19 @@ impl Renderer<'_> {
                 .get_str(name)
                 .map_or(0, hyscribe_phpser::absint)
         };
-        let (year, month, day) = (var("year"), var("monthnum"), var("day"));
-        let date_format =
-            String::from_utf8_lossy(&site.option("date_format").unwrap_or_default()).into_owned();
+        let (year, month, day, week) = (var("year"), var("monthnum"), var("day"), var("w"));
+        let date_format = String::from_utf8_lossy(&option("date_format")).into_owned();
         let zone = self.context.zone();
+        let mut last_week = None;
         let mut out = Vec::new();
-        for DateCount {
-            year: y,
-            month: m,
-            day: d,
-            posts,
-        } in site.date_counts(period)
-        {
+        for count in site.date_counts(period) {
+            let DateCount {
+                year: y,
+                month: m,
+                day: d,
+                week: w,
+                posts,
+            } = count;
             let (link, text, selected) = match period {
                 Period::Year => (date_archive_link(site, y, None), y.to_string(), year == y),
                 Period::Month => {
@@ -142,6 +152,24 @@ impl Renderer<'_> {
                         date_archive_link(site, y, Some((m, Some(d)))),
                         date::format(&date_format, &stored, zone),
                         year == y && month == m && day == d,
+                    )
+                }
+                Period::Week(start) => {
+                    // A week number that follows itself is listed once.
+                    if last_week.replace(w) == Some(w) {
+                        continue;
+                    }
+                    let (start, end) = week_start_end(y, m, d, start);
+                    // date_i18n(): a timestamp's UTC time, as the site's.
+                    let local = |unix| {
+                        let stored = date::format_unix("Y-m-d H:i:s", unix, Zone::Utc);
+                        date::format(&date_format, &stored, zone)
+                    };
+                    let home = site.home_url();
+                    (
+                        [&home[..], format!("/?m={y}&w={w}").as_bytes()].concat(),
+                        format!("{}&#8211;{}", local(start), local(end)),
+                        year == y && week == w,
                     )
                 }
             };
@@ -177,6 +205,54 @@ impl Renderer<'_> {
             "<script>\n{SCRIPT}{json} );\n//# sourceURL=block_core_archives_build_dropdown_script\n</script>\n"
         )
     }
+}
+
+/// `get_weekstartend()` of the day `year`-`month`-`day`: the Unix times
+/// the week from the `start` day around it begins and ends, in UTC.
+fn week_start_end(year: u64, month: u64, day: u64, start: i64) -> (i64, i64) {
+    let day = date::stored_unix(
+        &format!("{year:04}-{month:02}-{day:02} 00:00:00"),
+        Zone::Utc,
+    );
+    // 1 January 1970 was a Thursday.
+    let weekday = (day.div_euclid(86_400) + 4).rem_euclid(7);
+    let weekday = if weekday < start {
+        weekday + 7
+    } else {
+        weekday
+    };
+    let begins = day - 86_400 * (weekday - start);
+    (begins, begins + 604_800 - 1)
+}
+
+/// The `postbypost` and `alpha` lists: published posts newest first, or
+/// by title, the global post's marked current.
+fn post_links(site: &dyn Site, current: Option<u64>, alpha: bool, format: Format) -> Vec<u8> {
+    let order = if alpha {
+        vec![(OrderBy::Title, true)]
+    } else {
+        vec![(OrderBy::Date, false), (OrderBy::Id, false)]
+    };
+    let query = PostQuery {
+        post_types: vec!["post".into()],
+        order,
+        limit: u32::MAX,
+        ..PostQuery::default()
+    };
+    let posts = site.query(&query);
+    posts
+        .iter()
+        .filter(|post| post.date != "0000-00-00 00:00:00")
+        .flat_map(|post| {
+            let text = if is_empty_string(&post.title) || post.title == b"0" {
+                post.id.to_string().into_bytes()
+            } else {
+                strip_tags(&title_filters(&post.title))
+            };
+            let selected = current == Some(post.id);
+            archives_link(&permalink(site, post), &text, format, "", selected)
+        })
+        .collect()
 }
 
 /// The formats of [`archives_link`].

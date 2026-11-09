@@ -139,6 +139,7 @@ fn date_count(row: &MySqlRow) -> Result<DateCount, DbError> {
         year: c.signed("y").unsigned_abs(),
         month: c.signed("m").unsigned_abs(),
         day: c.signed("d").unsigned_abs(),
+        week: c.signed("w").unsigned_abs(),
         posts: c.signed("posts").unsigned_abs(),
     };
     c.finish(count)
@@ -668,27 +669,42 @@ impl Db {
 
     /// `wp_get_archives()`'s periods of published posts, newest first.
     pub async fn date_counts(&self, period: Period) -> Result<Vec<DateCount>, DbError> {
-        let sql = self.prefix.sql(match period {
-            Period::Year => {
-                "SELECT CAST(YEAR(post_date) AS SIGNED) AS y, 0 AS m, 0 AS d, COUNT(ID) AS posts \
-                 FROM {prefix}posts WHERE post_type = 'post' AND post_status = 'publish' \
-                 GROUP BY YEAR(post_date) ORDER BY y DESC"
-            }
-            Period::Month => {
-                "SELECT CAST(YEAR(post_date) AS SIGNED) AS y, CAST(MONTH(post_date) AS SIGNED) AS m, \
-                 0 AS d, COUNT(ID) AS posts \
-                 FROM {prefix}posts WHERE post_type = 'post' AND post_status = 'publish' \
-                 GROUP BY YEAR(post_date), MONTH(post_date) ORDER BY y DESC, m DESC"
-            }
+        let mut sql = Sql::new("SELECT CAST(YEAR(post_date) AS SIGNED) AS y, ");
+        sql.push(match period {
+            Period::Year => "0 AS m, 0 AS d, 0 AS w",
+            Period::Month => "CAST(MONTH(post_date) AS SIGNED) AS m, 0 AS d, 0 AS w",
             Period::Day => {
-                "SELECT CAST(YEAR(post_date) AS SIGNED) AS y, CAST(MONTH(post_date) AS SIGNED) AS m, \
-                 CAST(DAYOFMONTH(post_date) AS SIGNED) AS d, COUNT(ID) AS posts \
-                 FROM {prefix}posts WHERE post_type = 'post' AND post_status = 'publish' \
-                 GROUP BY YEAR(post_date), MONTH(post_date), DAYOFMONTH(post_date) \
-                 ORDER BY y DESC, m DESC, d DESC"
+                "CAST(MONTH(post_date) AS SIGNED) AS m, \
+                 CAST(DAYOFMONTH(post_date) AS SIGNED) AS d, 0 AS w"
+            }
+            Period::Week(_) => {
+                "CAST(MONTH(MAX(post_date)) AS SIGNED) AS m, \
+                 CAST(DAYOFMONTH(MAX(post_date)) AS SIGNED) AS d, "
             }
         });
-        let rows = sqlx::query(sql)
+        // `_wp_mysql_week()`.
+        if let Period::Week(start) = period {
+            sql.push(match start {
+                1 => "CAST(WEEK(post_date, 1) AS SIGNED) AS w",
+                2..=6 => "CAST(WEEK(DATE_SUB(post_date, INTERVAL ? DAY), 0) AS SIGNED) AS w",
+                _ => "CAST(WEEK(post_date, 0) AS SIGNED) AS w",
+            });
+            if (2..=6).contains(&start) {
+                sql.bind(Bind::Int(start.unsigned_abs()));
+            }
+        }
+        sql.push(
+            ", COUNT(ID) AS posts FROM {prefix}posts \
+             WHERE post_type = 'post' AND post_status = 'publish' GROUP BY ",
+        );
+        sql.push(match period {
+            Period::Year => "y ORDER BY y DESC",
+            Period::Month => "y, m ORDER BY y DESC, m DESC",
+            Period::Day => "y, m, d ORDER BY y DESC, m DESC, d DESC",
+            Period::Week(_) => "w, y ORDER BY MAX(post_date) DESC",
+        });
+        let rows = sql
+            .query(&self.prefix)
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;

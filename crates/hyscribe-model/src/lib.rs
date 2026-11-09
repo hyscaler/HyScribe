@@ -236,6 +236,8 @@ pub enum Period {
     Month,
     /// `daily`.
     Day,
+    /// `weekly`, with weeks from the `start_of_week` day.
+    Week(i64),
 }
 
 /// A period with published posts.
@@ -247,6 +249,9 @@ pub struct DateCount {
     pub month: u64,
     /// `DAYOFMONTH(post_date)`, 0 for a year or month.
     pub day: u64,
+    /// The week of the year, as `_wp_mysql_week()` numbers it; 0 but for
+    /// a week, whose month and day are those of its latest post.
+    pub week: u64,
     /// How many posts.
     pub posts: u64,
 }

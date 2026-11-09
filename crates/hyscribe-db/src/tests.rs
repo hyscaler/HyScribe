@@ -694,6 +694,11 @@ async fn date_counts_group_published_posts() {
         month,
         day,
         posts,
+        week: 0,
+    };
+    let week = |week, day, posts| DateCount {
+        week,
+        ..count(2026, 10, day, posts)
     };
     let db = fixture().await;
     assert_eq!(
@@ -713,6 +718,23 @@ async fn date_counts_group_published_posts() {
     assert_eq!(
         db.date_counts(Period::Day).await.unwrap(),
         [count(2026, 10, 28, 1), count(2026, 10, 27, 1)]
+    );
+    // Tuesday the 27th and Wednesday the 28th: weeks from Sunday (and
+    // from 7, which MySQL numbers as Sunday's), from Monday, and from
+    // Wednesday, which splits them.
+    for start in [0, 7] {
+        assert_eq!(
+            db.date_counts(Period::Week(start)).await.unwrap(),
+            [week(43, 28, 2)]
+        );
+    }
+    assert_eq!(
+        db.date_counts(Period::Week(1)).await.unwrap(),
+        [week(44, 28, 2)]
+    );
+    assert_eq!(
+        db.date_counts(Period::Week(3)).await.unwrap(),
+        [week(43, 28, 1), week(42, 27, 1)]
     );
 }
 

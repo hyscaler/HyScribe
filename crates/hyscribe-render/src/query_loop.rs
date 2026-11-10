@@ -418,7 +418,7 @@ fn search_matches(search: &str) -> Vec<&str> {
 /// `post__in` and `post_parent__in` count only when `query` has the list.
 pub(crate) fn order_by(by: &Value, ascending: bool, query: &PostQuery) -> Vec<(OrderBy, bool)> {
     let column = |key: &[u8]| {
-        order_column(&urldecode(key)).filter(|c| match c {
+        order_column(key).filter(|c| match c {
             OrderBy::Included => query.include.is_some(),
             OrderBy::Parents => !query.parents.is_empty(),
             _ => true,
@@ -432,7 +432,7 @@ pub(crate) fn order_by(by: &Value, ascending: bool, query: &PostQuery) -> Vec<(O
         list.iter()
             .filter_map(|(key, order)| {
                 let asc = matches!(order, Value::String(o) if o.eq_ignore_ascii_case(b"asc"));
-                column(&key.to_php_string()).map(|c| (c, asc))
+                column(&urldecode(&key.to_php_string())).map(|c| (c, asc))
             })
             .collect()
     } else {
@@ -492,24 +492,14 @@ fn order_column(key: &[u8]) -> Option<OrderBy> {
 /// The seed of the first `RAND(digits)` in `key`, in any case, as PHP's
 /// `(int)` reads the digits: at most `PHP_INT_MAX`.
 fn rand_seed(key: &[u8]) -> Option<u64> {
-    let lower = key.to_ascii_lowercase();
-    lower.windows(5).enumerate().find_map(|(i, w)| {
-        let digits: Vec<u8> = (w == b"rand(")
-            .then(|| lower.get(i + 5..))
-            .flatten()?
-            .iter()
-            .copied()
-            .take_while(u8::is_ascii_digit)
-            .collect();
-        let close = lower.get(i + 5 + digits.len()) == Some(&b')');
-        (close && !digits.is_empty()).then(|| {
-            digits
-                .iter()
-                .fold(0_u64, |n, d| {
-                    n.saturating_mul(10).saturating_add(u64::from(d - b'0'))
-                })
-                .min(i64::MAX as u64)
-        })
+    key.windows(5).enumerate().find_map(|(i, w)| {
+        let rest = key
+            .get(i + 5..)
+            .filter(|_| w.eq_ignore_ascii_case(b"rand("))?;
+        let len = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+        let digits = rest.get(..len).filter(|d| !d.is_empty())?;
+        (rest.get(len) == Some(&b')'))
+            .then(|| Value::String(digits.to_vec()).to_int().unsigned_abs())
     })
 }
 

@@ -8,14 +8,13 @@
 
 use hyscribe_kses::esc_url;
 use hyscribe_model::Comment;
-use hyscribe_phpser::{
-    Value, add_query_arg, add_query_values, is_empty_string, parse_str, urlencode_deep,
-};
+use hyscribe_phpser::{Value, add_query_arg, is_empty_string};
 
 use crate::blocks::Block;
 use crate::core_blocks::{Context, prepared, render};
-use crate::formatting::{encode_ampersands, html_entity_decode};
-use crate::query_pagination::{arrow_span, page_numbers, pagenum_link};
+use crate::formatting::encode_ampersands;
+use crate::permalinks::Permalinks;
+use crate::query_pagination::{arrow_span, current_url, page_numbers, with_args};
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::{Renderer, replace};
@@ -143,7 +142,7 @@ impl Renderer<'_> {
             .map_or(0, |p| p.max_pages);
         let current = paging.and_then(|p| p.paged).unwrap_or(0);
         let request = self.context.request;
-        let links = crate::permalinks::Permalinks::of(self.context.site);
+        let links = Permalinks::of(self.context.site);
         // paginate_links() adds the current URL's arguments the base lacks:
         // none to the request itself, all to a post's pretty link.
         let (base, args) = if links.pretty() {
@@ -152,10 +151,7 @@ impl Renderer<'_> {
                 .global_post()
                 .map(|post| self.context.permalink(&post))
                 .unwrap_or_default();
-            let pagenum =
-                html_entity_decode(&pagenum_link(request, &self.context.site.home_url(), 1));
-            let query = pagenum.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default();
-            let args = urlencode_deep(parse_str(query));
+            let (_, args) = current_url(request, &self.context.site.home_url());
             (
                 links
                     .under(&String::from_utf8_lossy(&permalink), "comment-page-%#%")
@@ -174,11 +170,7 @@ impl Renderer<'_> {
             2,
             |n| {
                 let link = replace(&base, b"%#%", n.to_string().as_bytes());
-                let mut link = if args.is_empty() {
-                    link
-                } else {
-                    add_query_values(&args, &link)
-                };
+                let mut link = with_args(&args, link);
                 link.extend_from_slice(b"#comments");
                 link
             },
@@ -262,7 +254,7 @@ pub(crate) fn comments_pagenum_link(context: &Context<'_>, page: i64, max_page: 
         .unwrap_or_default()
         == b"newest";
     let paged = if newest { page != max_page } else { page > 1 };
-    let links = crate::permalinks::Permalinks::of(context.site);
+    let links = Permalinks::of(context.site);
     let part = format!("comment-page-{page}");
     let mut url = if !paged {
         permalink

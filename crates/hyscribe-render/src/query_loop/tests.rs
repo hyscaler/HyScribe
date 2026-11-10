@@ -225,7 +225,7 @@ fn query_filters_match_php() {
         failures.len(),
         failures[..failures.len().min(4)].join("\n")
     );
-    assert_eq!(count, 121);
+    assert_eq!(count, 123);
 }
 
 /// Every case of `reference/search-terms/golden.sh`, through the query

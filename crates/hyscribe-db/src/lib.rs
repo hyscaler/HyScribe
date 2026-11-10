@@ -1177,7 +1177,7 @@ fn field_ids(ids: &[u64]) -> impl Iterator<Item = Bind> + '_ {
     ids.iter().copied().chain(std::iter::once(0)).map(Bind::Int)
 }
 
-/// The `ORDER BY` term of a column without binds.
+/// The `ORDER BY` term of an order without binds: a column or `RAND()`.
 fn order_column(column: OrderBy) -> &'static str {
     match column {
         OrderBy::Date => "post_date",

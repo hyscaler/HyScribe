@@ -241,7 +241,7 @@ fn string_key(key: &[u8]) -> Key {
 
 /// `get_pagenum_link( $page )` with plain permalinks: the request without
 /// `paged`, on the home URL, with `paged` set past the first page.
-pub(crate) fn pagenum_link(request: &Request, home: &[u8], page: u64) -> Vec<u8> {
+fn pagenum_link(request: &Request, home: &[u8], page: u64) -> Vec<u8> {
     let uri = remove_query_arg(&[b"paged"], &request.uri);
     let path = home_path(home);
     let uri = uri
@@ -289,14 +289,11 @@ impl Numbers {
         if total < 2 {
             return Vec::new();
         }
-        let first = html_entity_decode(&pagenum_link(request, home, 1));
-        let mut parts = first.splitn(2, |&b| b == b'?');
-        let mut path = parts.next().unwrap_or_default().to_vec();
+        let (mut path, query) = current_url(request, home);
         if path.last() != Some(&b'/') {
             path.push(b'/');
         }
         let base = self.base.take().unwrap_or(path);
-        let query = urlencode_deep(parse_str(parts.next().unwrap_or_default()));
         // array_merge(): a later string key replaces an earlier one in
         // place; integer keys are appended, numbered from 0.
         let key = string_key(&self.key);
@@ -324,12 +321,30 @@ impl Numbers {
                     &[b"?", &self.key[..], b"=", n.to_string().as_bytes()].concat(),
                 );
             }
-            if self.args.is_empty() {
-                link
-            } else {
-                add_query_values(&self.args, &link)
-            }
+            with_args(&self.args, link)
         })
+    }
+}
+
+/// `paginate_links()`'s current URL, `get_pagenum_link()`: its path and
+/// its query args, URL encoded.
+pub(crate) fn current_url(request: &Request, home: &[u8]) -> (Vec<u8>, Value) {
+    let first = html_entity_decode(&pagenum_link(request, home, 1));
+    let mut parts = first.splitn(2, |&b| b == b'?');
+    let path = parts.next().unwrap_or_default().to_vec();
+    (
+        path,
+        urlencode_deep(parse_str(parts.next().unwrap_or_default())),
+    )
+}
+
+/// `link` with `args` added, unchanged without any (where adding none would
+/// still append a `?`).
+pub(crate) fn with_args(args: &[(Key, Value)], link: Vec<u8>) -> Vec<u8> {
+    if args.is_empty() {
+        link
+    } else {
+        add_query_values(args, &link)
     }
 }
 

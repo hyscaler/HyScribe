@@ -394,7 +394,7 @@ $post_args = array(
 	'"format":["aside"]', '"format":["standard"]', '"format":["standard","quote"]', '"format":["nonsense"]', '"format":[]', '"format":"aside"',
 	'"format":["standard","standard"]', '"format":["quote","aside"]', '"format":["standard"],"categoryIds":[1]', '"format":["aside"],"taxQuery":{"exclude":{"category":[1]}}',
 	'"orderBy":"rand","tagIds":[' . $red . ']', '"orderBy":{"rand":"asc"},"tagIds":[' . $red . ']', '"orderBy":"RAND(3)","tagIds":[' . $red . ']', '"orderBy":"xRaNd(12)y","tagIds":[' . $red . ']',
-	'"orderBy":"post__in"', '"orderBy":"post%5F%5Fin"', '"orderBy":"post__in title"', '"orderBy":"post_name__in"', '"orderBy":"post__in","order":"desc"', '"orderBy":"rand(x)"', '"orderBy":"RAND"',
+	'"orderBy":"post__in"', '"orderBy":"post%5F%5Fin"', '"orderBy":"post__in title"', '"orderBy":"post_name__in"', '"orderBy":"post__in","order":"desc"', '"orderBy":"rand(x)"', '"orderBy":"RAND"', '"orderBy":"%2574itle","order":"asc"', '"orderBy":"%74itle","order":"asc"',
 );
 $page_args = array( '"parents":[2]', '"parents":[0]', '"parents":[2,0]', '"parents":["-2"]', '"parents":[]', '"orderBy":"menu_order","order":"asc"', '"orderBy":"menu_order title"', '"orderBy":"parent menu_order","order":"asc"',
 	'"parents":[2,0],"orderBy":"post_parent__in menu_order","order":"asc"', '"parents":[0,2],"orderBy":"post_parent__in menu_order","order":"asc"', '"parents":[0,2],"orderBy":"post_parent__in title"', '"orderBy":"post_parent__in"',

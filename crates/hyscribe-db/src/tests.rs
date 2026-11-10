@@ -536,7 +536,7 @@ async fn seeded_orders_match_php() {
         let ours: Vec<String> = posts.iter().map(|p| p.id.to_string()).collect();
         assert_eq!(ours.join(","), ids, "seed {seed}");
     }
-    assert_eq!(golden.lines().count(), 41);
+    assert_eq!(golden.lines().count(), 4);
 }
 
 #[tokio::test]

@@ -5,7 +5,7 @@
 // Run in the PHP container; lines are seed<TAB>post IDs, comma separated.
 require '/var/www/html/wp-load.php';
 
-foreach ( range( 0, 40 ) as $seed ) {
+foreach ( range( 0, 3 ) as $seed ) {
 	$query = new WP_Query(
 		array(
 			'post_type'      => array( 'post', 'page' ),

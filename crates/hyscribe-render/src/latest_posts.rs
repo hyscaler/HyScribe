@@ -144,7 +144,7 @@ impl Renderer<'_> {
         let author = get("selectedAuthor").to_int();
         PostQuery {
             post_types: vec!["post".into()],
-            order: order_by(&get("orderBy"), ascending),
+            order: order_by(&get("orderBy"), ascending, &PostQuery::default()),
             terms: (!categories.is_empty())
                 .then(|| TermFilter {
                     taxonomy: "category".into(),

@@ -227,6 +227,14 @@ pub enum OrderBy {
     CommentCount,
     /// A search's relevance: titles containing the whole search first.
     Relevance,
+    /// `RAND()`.
+    Random,
+    /// `RAND(seed)`, an order the seed repeats.
+    Seeded(u64),
+    /// `post__in`: the order of the query's `include`.
+    Included,
+    /// `post_parent__in`: the order of the query's `parents`.
+    Parents,
 }
 
 /// A period `wp_get_archives()` groups published posts by.

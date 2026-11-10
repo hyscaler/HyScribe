@@ -977,9 +977,27 @@ fn posts_sql(query: &PostQuery) -> Sql {
         if i > 0 {
             sql.push(", ");
         }
-        sql.push(order_column(column));
-        if column == OrderBy::Relevance {
-            sql.bind(Bind::Text(like(&query.search.join(" "))));
+        match column {
+            OrderBy::Relevance => {
+                sql.push("post_title LIKE ?");
+                sql.bind(Bind::Text(like(&query.search.join(" "))));
+            }
+            OrderBy::Seeded(seed) => {
+                sql.push("RAND(?)");
+                sql.bind(Bind::Int(seed));
+            }
+            OrderBy::Included => {
+                sql.push("FIELD(ID, ");
+                list(
+                    &mut sql,
+                    field_ids(query.include.as_deref().unwrap_or_default()),
+                );
+            }
+            OrderBy::Parents => {
+                sql.push("FIELD(post_parent, ");
+                list(&mut sql, field_ids(&query.parents));
+            }
+            column => sql.push(order_column(column)),
         }
         sql.push(if ascending { " ASC" } else { " DESC" });
     }
@@ -1149,7 +1167,13 @@ fn list(sql: &mut Sql, values: impl Iterator<Item = Bind>) {
     sql.push(")");
 }
 
-/// The `ORDER BY` term of `column`; relevance binds the search phrase.
+/// The list of a `FIELD()` order: `ids` and a 0 after them, which keeps the
+/// list valid when empty and, matching nothing earlier, changes no order.
+fn field_ids(ids: &[u64]) -> impl Iterator<Item = Bind> + '_ {
+    ids.iter().copied().chain(std::iter::once(0)).map(Bind::Int)
+}
+
+/// The `ORDER BY` term of a column without binds.
 fn order_column(column: OrderBy) -> &'static str {
     match column {
         OrderBy::Date => "post_date",
@@ -1162,7 +1186,7 @@ fn order_column(column: OrderBy) -> &'static str {
         OrderBy::Id => "ID",
         OrderBy::MenuOrder => "menu_order",
         OrderBy::CommentCount => "comment_count",
-        OrderBy::Relevance => "post_title LIKE ?",
+        _ => "RAND()",
     }
 }
 

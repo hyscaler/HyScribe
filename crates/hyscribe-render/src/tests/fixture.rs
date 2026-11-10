@@ -418,7 +418,7 @@ pub fn select(
             .iter()
             .fold(Ordering::Equal, |done, &(column, ascending)| {
                 done.then_with(|| {
-                    let by = column_order(a, b, column, &phrase);
+                    let by = column_order(a, b, column, &phrase, query);
                     if ascending { by } else { by.reverse() }
                 })
             })
@@ -460,7 +460,9 @@ fn contains(text: &[u8], term: &str) -> bool {
 }
 
 /// `a` against `b` by `column`, relevance to the search `phrase` included.
-fn column_order(a: &Post, b: &Post, column: OrderBy, phrase: &str) -> Ordering {
+fn column_order(a: &Post, b: &Post, column: OrderBy, phrase: &str, query: &PostQuery) -> Ordering {
+    // `FIELD()`: the place in the list, 0 for none.
+    let field = |list: &[u64], id: u64| list.iter().position(|&i| i == id).map_or(0, |p| p + 1);
     match column {
         OrderBy::Date => a.date.cmp(&b.date),
         OrderBy::Title => a.title.cmp(&b.title),
@@ -473,6 +475,12 @@ fn column_order(a: &Post, b: &Post, column: OrderBy, phrase: &str) -> Ordering {
         OrderBy::MenuOrder => a.menu_order.cmp(&b.menu_order),
         OrderBy::CommentCount => a.comment_count.cmp(&b.comment_count),
         OrderBy::Relevance => contains(&a.title, phrase).cmp(&contains(&b.title, phrase)),
+        OrderBy::Included => {
+            let include = query.include.as_deref().unwrap_or_default();
+            field(include, a.id).cmp(&field(include, b.id))
+        }
+        OrderBy::Parents => field(&query.parents, a.parent).cmp(&field(&query.parents, b.parent)),
+        OrderBy::Random | OrderBy::Seeded(_) => Ordering::Equal,
     }
 }
 

@@ -5,8 +5,8 @@
 //! once for each post the query finds.
 //!
 //! `build_query_vars_from_query_block()` is ported; of the `WP_Query` it
-//! builds, random order, the `post__in` orders and the unsorted order of an
-//! `orderBy` array without an allowed key are not yet.
+//! builds, the unsorted order of an `orderBy` array without an allowed key
+//! is not yet.
 
 use hyscribe_html::TagProcessor;
 use hyscribe_kses::esc_attr;
@@ -267,22 +267,6 @@ pub(crate) fn query_vars(context: &Context<'_>, query: &Value, page: i64) -> Pos
     }
     vars.terms = term_filters(query);
     vars.formats = field("format").and_then(format_filter);
-    let ascending = field("order").is_some_and(|v| v.to_php_string().eq_ignore_ascii_case(b"asc"));
-    vars.order = field("orderBy").map_or_else(
-        || vec![(OrderBy::Date, ascending)],
-        |by| order_by(by, ascending),
-    );
-    vars.authors = field("author").map(authors).unwrap_or_default();
-    if let Some(search) = field("search").filter(|v| !v.is_empty()) {
-        let text = stripslashes(&search.to_php_string());
-        vars.search = search_terms(&String::from_utf8_lossy(&text));
-        // Relevance first for `relevance`, or for an empty `orderBy`.
-        if field("orderBy")
-            .is_some_and(|by| by.is_empty() || urldecode(&by.to_php_string()) == b"relevance")
-        {
-            vars.order.insert(0, (OrderBy::Relevance, false));
-        }
-    }
     if vars.post_types == ["page"] {
         // `array_unique( array_map( 'intval', $parents ) )`, then absint().
         vars.parents = field("parents")
@@ -294,6 +278,22 @@ pub(crate) fn query_vars(context: &Context<'_>, query: &Value, page: i64) -> Pos
                     .collect()
             })
             .unwrap_or_default();
+    }
+    let ascending = field("order").is_some_and(|v| v.to_php_string().eq_ignore_ascii_case(b"asc"));
+    vars.order = field("orderBy").map_or_else(
+        || vec![(OrderBy::Date, ascending)],
+        |by| order_by(by, ascending, &vars),
+    );
+    vars.authors = field("author").map(authors).unwrap_or_default();
+    if let Some(search) = field("search").filter(|v| !v.is_empty()) {
+        let text = stripslashes(&search.to_php_string());
+        vars.search = search_terms(&String::from_utf8_lossy(&text));
+        // Relevance first for `relevance`, or for an empty `orderBy`.
+        if field("orderBy")
+            .is_some_and(|by| by.is_empty() || urldecode(&by.to_php_string()) == b"relevance")
+        {
+            vars.order.insert(0, (OrderBy::Relevance, false));
+        }
     }
     // A home list, which WP_Query puts sticky posts first in: no search, no
     // single author, and no top level taxonomy clause but `NOT IN`; formats
@@ -415,19 +415,30 @@ fn search_matches(search: &str) -> Vec<&str> {
 
 /// The `orderby` of `WP_Query` for `orderBy`: each allowed key of a
 /// space separated list in `ascending` order, or of an array in its own.
-pub(crate) fn order_by(by: &Value, ascending: bool) -> Vec<(OrderBy, bool)> {
+/// `post__in` and `post_parent__in` count only when `query` has the list.
+pub(crate) fn order_by(by: &Value, ascending: bool, query: &PostQuery) -> Vec<(OrderBy, bool)> {
+    let column = |key: &[u8]| {
+        order_column(&urldecode(key)).filter(|c| match c {
+            OrderBy::Included => query.include.is_some(),
+            OrderBy::Parents => !query.parents.is_empty(),
+            _ => true,
+        })
+    };
+    // `rand` and the `__in` keys alone take no order, which sorts ascending.
+    let ascending = ascending
+        || matches!(by, Value::String(key) if [&b"rand"[..], b"post__in", b"post_parent__in", b"post_name__in"].contains(&key.as_slice()));
     let order = if let Some(list) = by.as_array() {
         // parse_order(): only the string `ASC`, in any case, is ascending.
         list.iter()
             .filter_map(|(key, order)| {
                 let asc = matches!(order, Value::String(o) if o.eq_ignore_ascii_case(b"asc"));
-                order_column(&urldecode(&key.to_php_string())).map(|c| (c, asc))
+                column(&key.to_php_string()).map(|c| (c, asc))
             })
             .collect()
     } else {
         urldecode(&by.to_php_string())
             .split(|&b| b == b' ')
-            .filter_map(order_column)
+            .filter_map(&column)
             .map(|column| (column, ascending))
             .collect::<Vec<_>>()
     };
@@ -454,8 +465,12 @@ pub(crate) fn stripslashes(text: &[u8]) -> Vec<u8> {
     out
 }
 
-/// `WP_Query::parse_orderby()` for the post columns.
+/// `WP_Query::parse_orderby()`'s key: a post column, a random order, or
+/// the order of a list. `RAND(n)` anywhere in the key seeds the order.
 fn order_column(key: &[u8]) -> Option<OrderBy> {
+    if let Some(seed) = rand_seed(key) {
+        return Some(OrderBy::Seeded(seed));
+    }
     Some(match key {
         b"post_date" | b"date" => OrderBy::Date,
         b"post_title" | b"title" => OrderBy::Title,
@@ -467,7 +482,34 @@ fn order_column(key: &[u8]) -> Option<OrderBy> {
         b"ID" => OrderBy::Id,
         b"menu_order" => OrderBy::MenuOrder,
         b"comment_count" => OrderBy::CommentCount,
+        b"rand" => OrderBy::Random,
+        b"post__in" => OrderBy::Included,
+        b"post_parent__in" => OrderBy::Parents,
         _ => return None,
+    })
+}
+
+/// The seed of the first `RAND(digits)` in `key`, in any case, as PHP's
+/// `(int)` reads the digits: at most `PHP_INT_MAX`.
+fn rand_seed(key: &[u8]) -> Option<u64> {
+    let lower = key.to_ascii_lowercase();
+    lower.windows(5).enumerate().find_map(|(i, w)| {
+        let digits: Vec<u8> = (w == b"rand(")
+            .then(|| lower.get(i + 5..))
+            .flatten()?
+            .iter()
+            .copied()
+            .take_while(u8::is_ascii_digit)
+            .collect();
+        let close = lower.get(i + 5 + digits.len()) == Some(&b')');
+        (close && !digits.is_empty()).then(|| {
+            digits
+                .iter()
+                .fold(0_u64, |n, d| {
+                    n.saturating_mul(10).saturating_add(u64::from(d - b'0'))
+                })
+                .min(i64::MAX as u64)
+        })
     })
 }
 

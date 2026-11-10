@@ -393,8 +393,12 @@ $post_args = array(
 	'"categoryIds":[' . $fruit . '],"taxQuery":{"exclude":{"post_tag":[' . $red . ']}}', '"parents":[2]',
 	'"format":["aside"]', '"format":["standard"]', '"format":["standard","quote"]', '"format":["nonsense"]', '"format":[]', '"format":"aside"',
 	'"format":["standard","standard"]', '"format":["quote","aside"]', '"format":["standard"],"categoryIds":[1]', '"format":["aside"],"taxQuery":{"exclude":{"category":[1]}}',
+	'"orderBy":"rand","tagIds":[' . $red . ']', '"orderBy":{"rand":"asc"},"tagIds":[' . $red . ']', '"orderBy":"RAND(3)","tagIds":[' . $red . ']', '"orderBy":"xRaNd(12)y","tagIds":[' . $red . ']',
+	'"orderBy":"post__in"', '"orderBy":"post%5F%5Fin"', '"orderBy":"post__in title"', '"orderBy":"post_name__in"', '"orderBy":"post__in","order":"desc"', '"orderBy":"rand(x)"', '"orderBy":"RAND"',
 );
-$page_args = array( '"parents":[2]', '"parents":[0]', '"parents":[2,0]', '"parents":["-2"]', '"parents":[]', '"orderBy":"menu_order","order":"asc"', '"orderBy":"menu_order title"', '"orderBy":"parent menu_order","order":"asc"' );
+$page_args = array( '"parents":[2]', '"parents":[0]', '"parents":[2,0]', '"parents":["-2"]', '"parents":[]', '"orderBy":"menu_order","order":"asc"', '"orderBy":"menu_order title"', '"orderBy":"parent menu_order","order":"asc"',
+	'"parents":[2,0],"orderBy":"post_parent__in menu_order","order":"asc"', '"parents":[0,2],"orderBy":"post_parent__in menu_order","order":"asc"', '"parents":[0,2],"orderBy":"post_parent__in title"', '"orderBy":"post_parent__in"',
+	'"parents":[2,0],"orderBy":{"post_parent__in":"desc","title":"asc"}', '"parents":[2,0],"orderBy":"post_parent%5F%5Fin menu_order"' );
 $filter_cases = array();
 foreach ( $post_args as $args ) {
 	$filter_cases[] = '"postType":"post",' . $args;
@@ -416,6 +420,8 @@ $sticky_args = array(
 	'"author":1', '"author":[1]', '"author":"1"', '"taxQuery":{"exclude":{"post_tag":[' . $red . ']}}', '"taxQuery":{"include":{"category":[1]}}', '"categoryIds":[]',
 	'"format":["aside"]', '"order":"asc"', '"orderBy":"title","order":"asc"', '"postType":"page"', '"parents":[0]',
 	'"format":["aside"],"categoryIds":[1]', '"format":["aside"],"taxQuery":{"exclude":{"post_tag":[' . $red . ']}}', '"perPage":2,"offset":10',
+	'"sticky":"only","orderBy":"post__in"', '"sticky":"only","orderBy":"post__in","order":"desc"', '"sticky":"only","orderBy":"post__in title"', '"sticky":"only","orderBy":{"post__in":"desc"}',
+	'"sticky":"only","orderBy":"ID post__in","order":"asc"',
 );
 foreach ( $sticky_args as $args ) {
 	$args   = '"postType":"post"' . ( '' === $args ? '' : ',' ) . $args;

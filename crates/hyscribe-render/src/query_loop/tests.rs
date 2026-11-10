@@ -225,7 +225,7 @@ fn query_filters_match_php() {
         failures.len(),
         failures[..failures.len().min(4)].join("\n")
     );
-    assert_eq!(count, 99);
+    assert_eq!(count, 121);
 }
 
 /// Every case of `reference/search-terms/golden.sh`, through the query
@@ -265,10 +265,36 @@ fn order_keys_name_post_columns() {
         (&[b"comment_count"], OrderBy::CommentCount),
         (&[b"post_date", b"date"], OrderBy::Date),
         (&[b"post_modified", b"modified"], OrderBy::Modified),
+        (&[b"rand"], OrderBy::Random),
+        (&[b"post__in"], OrderBy::Included),
+        (&[b"post_parent__in"], OrderBy::Parents),
     ] {
         for key in keys {
             assert_eq!(order_column(key), Some(column));
         }
     }
     assert_eq!(order_column(b"id"), None);
+}
+
+/// `RAND(n)` as `parse_orderby()` reads it: the first match anywhere, its
+/// digits cast as `(int)` casts them.
+#[test]
+fn rand_seeds_read_as_php_does() {
+    use crate::query_loop::order_column;
+    use hyscribe_model::OrderBy;
+    for (key, seed) in [
+        (&b"RAND(42)"[..], Some(42)),
+        (b"rand(x)Rand(007)", Some(7)),
+        (b"RAND(99999999999999999999)", Some(i64::MAX as u64)),
+        (b"RAND(9223372036854775808)", Some(i64::MAX as u64)),
+        (b"RAND(12", None),
+        (b"RAND()", None),
+    ] {
+        assert_eq!(
+            order_column(key).filter(|c| matches!(c, OrderBy::Seeded(_))),
+            seed.map(OrderBy::Seeded),
+            "{}",
+            String::from_utf8_lossy(key)
+        );
+    }
 }

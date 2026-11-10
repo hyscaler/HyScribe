@@ -481,6 +481,62 @@ fn order_follows_the_query() {
     for (column, name) in columns {
         assert_eq!(order_column(column), name);
     }
+    let lists = posts_sql(&PostQuery {
+        include: Some(vec![5, 3]),
+        parents: vec![2],
+        order: vec![
+            (OrderBy::Included, true),
+            (OrderBy::Parents, false),
+            (OrderBy::Random, true),
+            (OrderBy::Seeded(7), false),
+        ],
+        ..PostQuery::default()
+    });
+    assert!(lists.text.ends_with(
+        "ORDER BY FIELD(ID, ?, ?, ?) ASC, FIELD(post_parent, ?, ?) DESC, RAND() ASC, RAND(?) DESC LIMIT ? OFFSET ?"
+    ));
+    let ints: Vec<u64> = lists
+        .binds
+        .iter()
+        .filter_map(|b| match b {
+            Bind::Int(n) => Some(*n),
+            Bind::Text(_) => None,
+        })
+        .collect();
+    // The WHERE parents and IDs (0 first), then the FIELD lists ending in 0.
+    assert_eq!(ints, [2, 0, 5, 3, 5, 3, 0, 2, 0, 7, 0, 0]);
+    let empty = posts_sql(&PostQuery {
+        order: vec![(OrderBy::Included, true), (OrderBy::Parents, true)],
+        ..PostQuery::default()
+    });
+    assert!(
+        empty
+            .text
+            .contains("ORDER BY FIELD(ID, ?) ASC, FIELD(post_parent, ?) ASC")
+    );
+}
+
+/// `WP_Query`'s `RAND(n)` order of the published posts and pages, as
+/// `reference/query-order/golden.sh` records it.
+#[tokio::test]
+async fn seeded_orders_match_php() {
+    let db = fixture().await;
+    let golden = include_str!("../tests/golden/rand.tsv");
+    for line in golden.lines() {
+        let (seed, ids) = line.split_once('\t').unwrap();
+        let posts = db
+            .posts(&PostQuery {
+                post_types: vec!["post".into(), "page".into()],
+                order: vec![(OrderBy::Seeded(seed.parse().unwrap()), false)],
+                limit: 10,
+                ..PostQuery::default()
+            })
+            .await
+            .unwrap();
+        let ours: Vec<String> = posts.iter().map(|p| p.id.to_string()).collect();
+        assert_eq!(ours.join(","), ids, "seed {seed}");
+    }
+    assert_eq!(golden.lines().count(), 41);
 }
 
 #[tokio::test]

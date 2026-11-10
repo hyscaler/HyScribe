@@ -351,6 +351,11 @@ impl TagProcessor {
         class_name.is_none_or(|wanted| self.has_class(wanted) == Some(true))
     }
 
+    /// Where parsing stopped: just after the current token.
+    pub fn parsed_up_to(&self) -> usize {
+        self.bytes_already_parsed
+    }
+
     /// The current tag's name in upper case, `None` when not at a tag.
     pub fn get_tag(&self) -> Option<Vec<u8>> {
         if self.state != State::MatchedTag {
@@ -1111,6 +1116,15 @@ impl TagProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Parsing stops just after the tag found.
+    #[test]
+    fn parsed_up_to_the_tag_end() {
+        let mut tags = TagProcessor::new(b"ab<p class=x>cd<i>");
+        assert_eq!(tags.parsed_up_to(), 0);
+        tags.next_tag(None, None);
+        assert_eq!(tags.parsed_up_to(), 13);
+    }
 
     /// PHP's `has_self_closing_flag()` on each first tag.
     #[test]

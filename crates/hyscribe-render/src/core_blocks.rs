@@ -90,6 +90,7 @@ pub(crate) fn render(
         "core/comments" | "core/post-comments" => comments,
         "core/comments-pagination" => comments_pagination,
         "core/comments-title" => comments_title,
+        "core/button" => button::button,
         "core/calendar" => calendar::calendar,
         "core/footnotes" => footnotes,
         "core/latest-comments" => latest_comments::latest_comments,
@@ -1443,6 +1444,7 @@ fn term_description(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 
 mod author;
 mod avatar;
+mod button;
 mod calendar;
 mod comment_form;
 mod latest_comments;

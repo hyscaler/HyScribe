@@ -8,6 +8,7 @@ use hyscribe_phpser::{Value, float_to_string, string_to_float};
 use hyscribe_theme_json::kebab_case;
 
 use super::{Block, Context};
+use crate::formatting::find;
 
 const PRESET: &str = "var:preset|dimension|";
 
@@ -16,7 +17,7 @@ pub(super) fn button(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let content = block.content;
     let mut tags = TagProcessor::new(content);
     // The last tag seen, a link or button if there is one; without one,
-    // nothing is left after it and the button counts as empty.
+    // nothing is left after it, so the button counts as empty.
     let mut tag = None;
     let mut found = false;
     while !found && tags.next_tag(None, None) {
@@ -27,12 +28,7 @@ pub(super) fn button(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let Some(tag) = tag else {
         return content.to_vec();
     };
-    let rest = if found {
-        content.get(tags.parsed_up_to()..).unwrap_or_default()
-    } else {
-        &[]
-    };
-    if is_empty(rest, &tag) {
+    if !found || is_empty(content.get(tags.parsed_up_to()..).unwrap_or_default(), &tag) {
         return Vec::new();
     }
     let width = block
@@ -44,9 +40,8 @@ pub(super) fn button(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         return content.to_vec();
     };
     let slug = width.strip_prefix(PRESET);
-    let resolved = slug
-        .and_then(|slug| preset_size(context, slug))
-        .unwrap_or_else(|| width.clone());
+    let preset = slug.and_then(|slug| preset_size(context, slug));
+    let resolved = preset.as_deref().unwrap_or(&width);
     let mut tags = TagProcessor::new(content);
     if !tags.next_tag(None, Some(b"wp-block-button")) {
         return content.to_vec();
@@ -58,16 +53,17 @@ pub(super) fn button(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     };
     let declaration = if resolved.ends_with('%') {
         tags.add_class(b"wp-block-button__width");
-        if ["25%", "50%", "75%", "100%"].contains(&resolved.as_str()) {
+        if ["25%", "50%", "75%", "100%"].contains(&resolved) {
             let legacy = format!("wp-block-button__width-{}", resolved.trim_end_matches('%'));
             tags.add_class(legacy.as_bytes());
         }
         let number = float_to_string(string_to_float(resolved.as_bytes()));
         format!("--wp--block-button--width: {number};")
     } else {
-        let value = slug.map_or(width.clone(), |slug| {
-            format!("var(--wp--preset--dimension--{})", kebab_case(slug))
-        });
+        let value = slug.map_or_else(
+            || width.clone(),
+            |slug| format!("var(--wp--preset--dimension--{})", kebab_case(slug)),
+        );
         format!("width: {value};")
     };
     let style = if existing.is_empty() {
@@ -87,7 +83,7 @@ fn is_empty(mut rest: &[u8], tag: &[u8]) -> bool {
             return true;
         }
         if let Some(comment) = rest.strip_prefix(b"<!--") {
-            let Some(end) = comment.windows(3).position(|w| w == b"-->") else {
+            let Some(end) = find(comment, 0, b"-->") else {
                 return true;
             };
             rest = comment.get(end + 3..).unwrap_or_default();

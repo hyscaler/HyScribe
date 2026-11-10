@@ -79,35 +79,29 @@ impl Renderer<'_> {
         if url_scheme(&url).is_none() && !url.starts_with(b"//") && !url.starts_with(b"#") {
             url = [b"https://".as_slice(), &url].concat();
         }
-        let mut class = [b"wp-social-link wp-social-link-".as_slice(), &service, b" "].concat();
-        let mut colors = Vec::new();
-        if let Some(color) = from_context("iconColor") {
-            colors.push([b"has-".as_slice(), &color.to_php_string(), b"-color"].concat());
+        let mut class = [b"wp-social-link wp-social-link-".as_slice(), &service].concat();
+        let classes = [
+            ("iconColor", "-color"),
+            ("iconBackgroundColor", "-background-color"),
+        ];
+        // The wrapper's class list takes the spaces as separators only.
+        for (key, suffix) in classes {
+            if let Some(color) = from_context(key) {
+                class.extend_from_slice(b" has-");
+                class.extend_from_slice(&color.to_php_string());
+                class.extend_from_slice(suffix.as_bytes());
+            }
         }
-        if let Some(color) = from_context("iconBackgroundColor") {
-            colors.push(
-                [
-                    b"has-".as_slice(),
-                    &color.to_php_string(),
-                    b"-background-color",
-                ]
-                .concat(),
-            );
-        }
-        class.extend_from_slice(&colors.join(&b' '));
         let mut style = Vec::new();
-        if let Some(color) = from_context("iconColorValue") {
-            style.extend_from_slice(&[b"color:".as_slice(), &color.to_php_string(), b";"].concat());
-        }
-        if let Some(color) = from_context("iconBackgroundColorValue") {
-            style.extend_from_slice(
-                &[
-                    b"background-color:".as_slice(),
-                    &color.to_php_string(),
-                    b";",
-                ]
-                .concat(),
-            );
+        for (key, property) in [
+            ("iconColorValue", "color:"),
+            ("iconBackgroundColorValue", "background-color:"),
+        ] {
+            if let Some(color) = from_context(key) {
+                style.extend_from_slice(property.as_bytes());
+                style.extend_from_slice(&color.to_php_string());
+                style.push(b';');
+            }
         }
         let extra = [
             ("class", Value::String(class)),

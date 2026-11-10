@@ -6,12 +6,12 @@
 use hyscribe_phpser::{Value, php_trim};
 
 use super::{Block, Context, number_format, render};
+use crate::formatting::find;
 use crate::template::Renderer;
 
 impl Renderer<'_> {
     /// The block over `get_the_content()` of the `postId` context's post.
     pub(crate) fn post_time_to_read(&self, block: &crate::blocks::Block) -> Vec<u8> {
-        let name = "core/post-time-to-read";
         let Some(id) = self.context.post_id else {
             return Vec::new();
         };
@@ -22,7 +22,7 @@ impl Renderer<'_> {
             .map(|post| crate::content::get_the_content(self, &post, true))
             .unwrap_or_default();
         let parsed = block.attrs.as_deref().unwrap_or_default();
-        render(&self.context, name, parsed, &content).unwrap_or_default()
+        render(&self.context, "core/post-time-to-read", parsed, &content).unwrap_or_default()
     }
 }
 
@@ -128,9 +128,9 @@ fn strip_tags(text: &[u8]) -> Vec<u8> {
 fn strip_comments(text: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut rest = text;
-    while let Some(start) = find(rest, b"<!--") {
+    while let Some(start) = find(rest, 0, b"<!--") {
         let after = rest.get(start + 4..).unwrap_or_default();
-        let Some(end) = find(after, b"-->") else {
+        let Some(end) = find(after, 0, b"-->") else {
             break;
         };
         out.extend_from_slice(rest.get(..start).unwrap_or_default());
@@ -204,10 +204,6 @@ fn removed(c: char) -> bool {
         | '\u{F7}'
         | '\u{2000}'..='\u{2BFF}'
         | '\u{2E00}'..='\u{2E7F}')
-}
-
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 #[cfg(test)]

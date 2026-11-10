@@ -1242,28 +1242,20 @@ pub(crate) fn is_email(email: &[u8]) -> bool {
         && local
             .iter()
             .all(|&b| b.is_ascii_alphanumeric() || b"!#$%&'*+/=?^_`{|}~.-".contains(&b));
-    if !local_ok || contains(domain, b"..") || trim_bytes(domain, b" \t\n\r\0\x0B.") != domain {
+    if !local_ok || contains(domain, b"..") || !untrimmed(domain, b" \t\n\r\0\x0B.") {
         return false;
     }
     let subs: Vec<&[u8]> = domain.split(|&b| b == b'.').collect();
     subs.len() >= 2
         && subs.iter().all(|sub| {
-            trim_bytes(sub, b" \t\n\r\0\x0B-") == *sub
+            untrimmed(sub, b" \t\n\r\0\x0B-")
                 && sub.iter().all(|&b| b.is_ascii_alphanumeric() || b == b'-')
         })
 }
 
-/// PHP's `trim()` with its own character list.
-fn trim_bytes<'a>(text: &'a [u8], list: &[u8]) -> &'a [u8] {
-    let start = text
-        .iter()
-        .position(|b| !list.contains(b))
-        .unwrap_or(text.len());
-    let end = text
-        .iter()
-        .rposition(|b| !list.contains(b))
-        .map_or(start, |i| i + 1);
-    text.get(start..end).unwrap_or_default()
+/// Whether PHP's `trim( $text, $list )` would leave `text` as it is.
+fn untrimmed(text: &[u8], list: &[u8]) -> bool {
+    text.first().is_none_or(|b| !list.contains(b)) && text.last().is_none_or(|b| !list.contains(b))
 }
 
 /// `antispambot()` on an address `is_email()` accepts: each character as

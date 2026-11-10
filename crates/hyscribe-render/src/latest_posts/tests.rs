@@ -41,7 +41,7 @@ fn matches_php() {
         failures.len(),
         failures[..failures.len().min(4)].join("\n")
     );
-    assert_eq!(golden.lines().count(), 34);
+    assert_eq!(golden.lines().count(), 40);
 }
 
 /// Posts the default install has none like, and the queries asked for.
@@ -114,8 +114,12 @@ fn untitled_protected_and_nested_posts() {
     // No user, so no byline.
     let authors = renderer.render(br#"<!-- wp:latest-posts {"displayAuthor":true} /-->"#);
     assert!(!String::from_utf8(authors).unwrap().contains("post-author"));
+    renderer.render(br#"<!-- wp:latest-posts {"selectedAuthor":0} /-->"#);
     renderer.render(br#"<!-- wp:latest-posts {"order":"asc","orderBy":"title"} /-->"#);
     let queries = site.queries.borrow();
+    // Author 0 is no author, neither in nor out.
+    let none = &queries[queries.len() - 2];
+    assert!(none.authors.is_empty() && none.excluded_authors.is_empty());
     assert_eq!(queries[0].limit, 1);
     let title = (hyscribe_model::OrderBy::Title, true);
     assert_eq!(queries.last().unwrap().order, [title]);

@@ -395,6 +395,7 @@ pub fn select(
         })
         .filter(|post| !query.exclude.contains(&post.id))
         .filter(|post| query.authors.is_empty() || query.authors.contains(&post.author))
+        .filter(|post| !query.excluded_authors.contains(&post.author))
         .filter(|post| query.parents.is_empty() || query.parents.contains(&post.parent))
         .filter(|post| query.terms.iter().all(|f| has_term(post, f) != f.exclude))
         .filter(|post| query.formats.as_ref().is_none_or(|f| has_format(post, f)))

@@ -1008,7 +1008,7 @@ fn posts_sql(query: &PostQuery) -> Sql {
 }
 
 /// The `WHERE` criteria of [`posts_sql`]: published posts of the query's
-/// types (any, if none), authors, parents, terms, formats, inclusions,
+/// types (any, if none), authors in or out, parents, terms, formats, inclusions,
 /// search and date.
 fn post_criteria(sql: &mut Sql, query: &PostQuery) {
     sql.push("post_status = 'publish'");
@@ -1019,6 +1019,10 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
     if !query.authors.is_empty() {
         sql.push(" AND post_author IN (");
         list(sql, query.authors.iter().map(|&id| Bind::Int(id)));
+    }
+    if !query.excluded_authors.is_empty() {
+        sql.push(" AND post_author NOT IN (");
+        list(sql, query.excluded_authors.iter().map(|&id| Bind::Int(id)));
     }
     if !query.parents.is_empty() {
         sql.push(" AND post_parent IN (");

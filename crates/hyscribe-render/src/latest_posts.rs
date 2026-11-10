@@ -141,7 +141,14 @@ impl Renderer<'_> {
             .collect();
         categories.sort_unstable();
         categories.dedup();
-        let author = get("selectedAuthor").to_int();
+        // WP_Query keeps only digits and `-` of `author`, so 1.5 is user 15;
+        // a negative ID excludes that user.
+        let author: Vec<u8> = get("selectedAuthor")
+            .to_php_string()
+            .into_iter()
+            .filter(|b| b.is_ascii_digit() || *b == b'-')
+            .collect();
+        let author = Value::String(author).to_int();
         PostQuery {
             post_types: vec!["post".into()],
             order: order_by(&get("orderBy"), ascending, &PostQuery::default()),
@@ -154,6 +161,10 @@ impl Renderer<'_> {
                 .into_iter()
                 .collect(),
             authors: (author > 0)
+                .then_some(author.unsigned_abs())
+                .into_iter()
+                .collect(),
+            excluded_authors: (author < 0)
                 .then_some(author.unsigned_abs())
                 .into_iter()
                 .collect(),

@@ -1087,3 +1087,17 @@ async fn posts_by_name_path_and_guess() {
         .unwrap();
     assert_eq!(id(date), None);
 }
+
+/// `author__not_in`: the default install's posts are all by user 1.
+#[tokio::test]
+async fn excluded_authors_leave_their_posts_out() {
+    let db = fixture().await;
+    let query = |excluded_authors: Vec<u64>| PostQuery {
+        post_types: vec!["post".into(), "page".into()],
+        excluded_authors,
+        limit: 10,
+        ..PostQuery::default()
+    };
+    assert!(db.posts(&query(vec![1])).await.unwrap().is_empty());
+    assert_eq!(db.posts(&query(vec![2, 3])).await.unwrap().len(), 2);
+}

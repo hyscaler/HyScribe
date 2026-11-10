@@ -136,6 +136,8 @@ pub struct PostQuery {
     pub exclude: Vec<u64>,
     /// `author__in`: posts by any of these users; none means any author.
     pub authors: Vec<u64>,
+    /// `author__not_in`: posts by none of these users.
+    pub excluded_authors: Vec<u64>,
     /// `post_parent__in`: children of any of these posts; none means any
     /// parent.
     pub parents: Vec<u64>,

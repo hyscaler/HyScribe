@@ -285,6 +285,7 @@ impl Renderer<'_> {
             Some("core/comments-pagination-numbers") => self.comments_pagination_numbers(block),
             Some("core/comments-pagination-next") => self.comments_pagination_next(block),
             Some("core/post-excerpt") => self.post_excerpt(block),
+            Some("core/post-time-to-read") => self.post_time_to_read(block),
             Some("core/query-pagination") => self.query_pagination(block),
             Some("core/query-pagination-previous") => self.query_pagination_previous(block),
             Some("core/query-pagination-next") => self.query_pagination_next(block),

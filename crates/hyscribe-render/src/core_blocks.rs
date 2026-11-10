@@ -103,6 +103,7 @@ pub(crate) fn render(
         "core/post-excerpt" => post_excerpt,
         "core/post-navigation-link" => post_navigation_link,
         "core/post-terms" => post_terms,
+        "core/post-time-to-read" => time_to_read::post_time_to_read,
         "core/post-title" => post_title,
         "core/query-no-results" => query_no_results,
         "core/query-pagination" => query_pagination,
@@ -1446,6 +1447,7 @@ mod calendar;
 mod comment_form;
 mod latest_comments;
 mod tag_cloud;
+mod time_to_read;
 
 #[cfg(test)]
 mod tests;

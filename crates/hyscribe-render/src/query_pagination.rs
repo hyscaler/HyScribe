@@ -241,7 +241,7 @@ fn string_key(key: &[u8]) -> Key {
 
 /// `get_pagenum_link( $page )` with plain permalinks: the request without
 /// `paged`, on the home URL, with `paged` set past the first page.
-fn pagenum_link(request: &Request, home: &[u8], page: u64) -> Vec<u8> {
+pub(crate) fn pagenum_link(request: &Request, home: &[u8], page: u64) -> Vec<u8> {
     let uri = remove_query_arg(&[b"paged"], &request.uri);
     let path = home_path(home);
     let uri = uri

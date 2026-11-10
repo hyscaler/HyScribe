@@ -73,6 +73,24 @@ fn paragraph_class(html: &[u8]) -> Vec<u8> {
     tags.get_updated_html().to_vec()
 }
 
+/// `block_core_details_set_img_fetchpriority_low()`: a details block shown
+/// closed loads its images with low priority.
+fn details_images(html: &[u8], block: &Block) -> Vec<u8> {
+    let open = block
+        .attrs
+        .as_deref()
+        .and_then(|attrs| lookup(attrs, "showContent"))
+        .is_some_and(|v| !v.is_empty());
+    if open {
+        return html.to_vec();
+    }
+    let mut tags = TagProcessor::new(html);
+    while tags.next_tag(Some(b"img"), None) {
+        tags.set_attribute(b"fetchpriority", b"low");
+    }
+    tags.get_updated_html().to_vec()
+}
+
 /// `_block_template_add_skip_link()`: the first `<main>` gets an id if it
 /// has none, and a link to it goes before `.wp-site-blocks`.
 fn add_skip_link(html: Vec<u8>) -> Vec<u8> {
@@ -325,6 +343,7 @@ impl Renderer<'_> {
         let html = variation_class(html, block);
         let html = match block.name.as_deref() {
             Some("core/paragraph") => paragraph_class(&html),
+            Some("core/details") => details_images(&html, block),
             _ => html,
         };
         if root_interactive {

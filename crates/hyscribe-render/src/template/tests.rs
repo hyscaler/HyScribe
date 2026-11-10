@@ -330,3 +330,30 @@ fn sites_without_user_data_have_no_users() {
     assert_eq!(DefaultInstall.adjacent_post(&post, true, None), None);
     assert!(DefaultInstall.comments(1).is_empty());
 }
+
+/// Every case of `reference/details/golden.sh`: images of a details block
+/// shown closed load with low priority.
+#[test]
+fn details_images_match_php() {
+    let theme = crate::theme::twentytwentyfive();
+    let request = crate::site::Request::default();
+    let site = crate::fixture::DefaultInstall {
+        home: b"http://127.0.0.1:8081".to_vec(),
+    };
+    let golden = include_str!("../../tests/golden/details.tsv");
+    for line in golden.lines() {
+        let (markup, php) = line.split_once('\t').unwrap();
+        let (markup, php) = (
+            hyscribe_testkit::unhex(markup),
+            hyscribe_testkit::unhex(php),
+        );
+        let ours = Renderer::new(&theme, &site, &request).render(&markup);
+        assert_eq!(
+            String::from_utf8_lossy(&ours),
+            String::from_utf8_lossy(&php),
+            "{}",
+            String::from_utf8_lossy(&markup)
+        );
+    }
+    assert_eq!(golden.lines().count(), 7);
+}

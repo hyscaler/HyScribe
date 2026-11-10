@@ -298,6 +298,7 @@ impl Renderer<'_> {
             Some("core/latest-posts") => self.latest_posts(block),
             Some("core/categories") => self.categories(block),
             Some("core/navigation-link") => self.navigation_link(block),
+            Some("core/navigation-submenu") => self.navigation_submenu(block),
             Some("core/home-link") => self.home_link(block),
             Some("core/page-list") => self.page_list(block),
             Some("core/comment-template") => self.comment_template(block),

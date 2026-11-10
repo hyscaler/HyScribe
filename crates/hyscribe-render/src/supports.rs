@@ -360,6 +360,25 @@ fn colors(block: &Block<'_>) -> Attributes {
     styled(&array([("color", array(styles))]), true)
 }
 
+/// `wp_apply_colors_support()` on `attributes` with the color support set
+/// to `true`, as the navigation submenu block forces it: its class and
+/// style, empty for none.
+pub(crate) fn forced_colors(attributes: Value) -> (Vec<u8>, Vec<u8>) {
+    let preset_or = |name: &str, custom: &[&str]| match attributes.get_str(name) {
+        Some(slug) => string([b"var:preset|color|".as_slice(), &slug.to_php_string()].concat()),
+        None => attributes.get_path(custom).cloned().unwrap_or(Value::Null),
+    };
+    let styles = array([
+        ("text", preset_or("textColor", &["style", "color", "text"])),
+        (
+            "background",
+            preset_or("backgroundColor", &["style", "color", "background"]),
+        ),
+    ]);
+    let styles = get_styles(&array([("color", styles)]), true);
+    (styles.classnames.into_bytes(), styles.css)
+}
+
 /// The typography features `wp_apply_typography_support()` copies from
 /// `style.typography` when set: the support flag, the feature and, for
 /// those that may hold a preset, the CSS property of its variable.

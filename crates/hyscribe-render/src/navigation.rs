@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The navigation block (`WP_Navigation_Block_Renderer`) and the navigation
-//! link block.
+//! link and submenu blocks.
 //!
 //! Ported: menus from inner blocks, the fallback (the latest published
-//! `wp_navigation` post, else a page list), the page list block with its
-//! submenu directives, the responsive overlay and unique `aria-label`s.
-//! Not yet: menus from a `ref` post, creating the fallback's post,
-//! navigation submenu blocks, custom overlay template parts and the
-//! viewport layout classes.
+//! `wp_navigation` post, else a page list), the page list block and
+//! submenus with their directives, the responsive overlay and unique
+//! `aria-label`s. Not yet: menus from a `ref` post, creating the fallback's
+//! post, custom overlay template parts and the viewport layout classes.
 
 use hyscribe_html::TagProcessor;
 use hyscribe_kses::{esc_attr, esc_url, safecss_filter_attr, wp_strip_all_tags};
@@ -18,8 +17,10 @@ use hyscribe_theme_json::kebab_case;
 
 use crate::blocks::{Block, parse_blocks, serialize_blocks};
 use crate::core_blocks::prepared;
+use crate::formatting::find;
 use crate::kses::wp_kses_post;
 use crate::site::Archive;
+use crate::supports::forced_colors;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
 
@@ -223,17 +224,22 @@ impl Renderer<'_> {
         (self.has_submenus(inner_blocks) && (open_on_click || icon)) || is_responsive(attributes)
     }
 
-    /// `has_submenus()`: a page list with child pages. Submenu blocks are
-    /// not ported yet.
+    /// `has_submenus()`: a submenu block, or a page list with child pages.
     fn has_submenus(&mut self, inner_blocks: &[Block]) -> bool {
         if self.has_submenus {
             return true;
         }
-        if inner_blocks
-            .iter()
-            .any(|inner| inner.name.as_deref() == Some("core/page-list"))
-        {
-            self.has_submenus = self.pages().iter().any(|page| page.parent != 0);
+        for inner in inner_blocks {
+            match inner.name.as_deref() {
+                Some("core/page-list") => {
+                    self.has_submenus = self.pages().iter().any(|page| page.parent != 0);
+                }
+                Some("core/navigation-submenu") => {
+                    self.has_submenus = true;
+                    break;
+                }
+                _ => {}
+            }
         }
         self.has_submenus
     }
@@ -404,6 +410,150 @@ impl Renderer<'_> {
         }
         if has_submenu {
             html.extend_from_slice(b"<ul class=\"wp-block-navigation__submenu-container\">");
+            html.extend(inner_html);
+            html.extend_from_slice(b"</ul>");
+        }
+        html.extend_from_slice(b"</li>");
+        html
+    }
+
+    /// `render_block_core_navigation_submenu()`.
+    pub(crate) fn navigation_submenu(&mut self, block: &Block) -> Vec<u8> {
+        let name = "core/navigation-submenu";
+        let parsed = block.attrs.as_deref().unwrap_or_default();
+        let mut attributes = prepared(name, parsed);
+        if !self.item_should_render(&attributes) {
+            return Vec::new();
+        }
+        let attribute = |name| attributes.get_str(name).filter(|v| isset(Some(v))).cloned();
+        let Some(label) = attribute("label").filter(|v| !v.is_empty()) else {
+            return Vec::new();
+        };
+        let mut inner_html = Vec::new();
+        for inner in &block.inner_blocks {
+            inner_html.extend(self.block(inner));
+        }
+        let has_submenu = !is_empty_string(php_trim(&inner_html));
+        let is_active = self.is_active(&attributes);
+        let context = self.navigation.clone().unwrap_or_default();
+        let show_icon = context
+            .get_str("showSubmenuIcon")
+            .is_some_and(|v| !v.is_empty());
+        let visibility = submenu_visibility(&context);
+        let open_on_click = visibility == b"click";
+        let mut classes = b"wp-block-navigation-item".to_vec();
+        for (on, class) in [
+            (has_submenu, &b" has-child"[..]),
+            (open_on_click, b" open-on-click"),
+            (visibility == b"hover" && show_icon, b" open-on-hover-click"),
+            (visibility == b"always", b" open-always"),
+            (is_active, b" current-menu-item"),
+        ] {
+            if on {
+                classes.extend_from_slice(class);
+            }
+        }
+        let global = &self.context.theme.global;
+        let wrapper = get_block_wrapper_attributes(
+            name,
+            parsed,
+            &[("class", Value::String(classes))],
+            global,
+        );
+        let upload_host = self.context.upload_host();
+        let label = wp_kses_post(&label.to_php_string(), &upload_host);
+        let aria_label = esc_attr(&[&wp_strip_all_tags(&label, false)[..], b" submenu"].concat());
+        let description = attribute("description").filter(|v| !v.is_empty()).map(|d| {
+            [
+                b"<span class=\"wp-block-navigation-item__description\">".as_slice(),
+                &wp_kses_post(&d.to_php_string(), &upload_host),
+                b"</span>",
+            ]
+            .concat()
+        });
+        let mut html = format!("<li {wrapper}>").into_bytes();
+        if open_on_click {
+            html.extend_from_slice(format!("<button aria-label=\"{aria_label}\" class=\"wp-block-navigation-item__content wp-block-navigation-submenu__toggle\" aria-expanded=\"false\"><span class=\"wp-block-navigation-item__label\">").as_bytes());
+            html.extend_from_slice(&label);
+            html.extend_from_slice(b"</span>");
+            html.extend(description.unwrap_or_default());
+            html.extend_from_slice(b"</button>");
+            if has_submenu {
+                html.extend_from_slice(b"<span class=\"wp-block-navigation__submenu-icon\">");
+                html.extend_from_slice(SUBMENU_ICON);
+                html.extend_from_slice(b"</span>");
+            }
+        } else {
+            html.extend_from_slice(b"<a class=\"wp-block-navigation-item__content\"");
+            if let Some(url) = attribute("url").filter(|v| !v.is_empty()) {
+                html.extend_from_slice(b" href=\"");
+                html.extend(esc_url(&url.to_php_string()));
+                html.push(b'"');
+            }
+            if is_active {
+                html.extend_from_slice(b" aria-current=\"page\"");
+            }
+            if attribute("opensInNewTab") == Some(Value::Bool(true)) {
+                html.extend_from_slice(b" target=\"_blank\"  ");
+            }
+            if let Some(rel) = attribute("rel") {
+                html.extend_from_slice(
+                    format!(" rel=\"{}\"", esc_attr(&rel.to_php_string())).as_bytes(),
+                );
+            } else if attribute("nofollow").is_some_and(|v| !v.is_empty()) {
+                html.extend_from_slice(b" rel=\"nofollow\"");
+            }
+            if let Some(title) = attribute("title") {
+                html.extend_from_slice(
+                    format!(" title=\"{}\"", esc_attr(&title.to_php_string())).as_bytes(),
+                );
+            }
+            html.extend_from_slice(b"><span class=\"wp-block-navigation-item__label\">");
+            html.extend_from_slice(&label);
+            html.extend_from_slice(b"</span>");
+            html.extend(description.unwrap_or_default());
+            html.extend_from_slice(b"</a>");
+            if show_icon && has_submenu {
+                html.extend_from_slice(format!("<button aria-label=\"{aria_label}\" class=\"wp-block-navigation__submenu-icon wp-block-navigation-submenu__toggle\" aria-expanded=\"false\">").as_bytes());
+                html.extend_from_slice(SUBMENU_ICON);
+                html.extend_from_slice(b"</button>");
+            }
+        }
+        if has_submenu {
+            // The overlay's colors, copied from the navigation block.
+            for (key, path) in [
+                ("overlayTextColor", &["textColor"][..]),
+                ("overlayBackgroundColor", &["backgroundColor"]),
+                ("customOverlayTextColor", &["style", "color", "text"]),
+                (
+                    "customOverlayBackgroundColor",
+                    &["style", "color", "background"],
+                ),
+            ] {
+                if let Some(color) = context.get_str(key) {
+                    wp_array_set(&mut attributes, path, color.clone());
+                }
+            }
+            let (class, style) = forced_colors(attributes);
+            let mut container = b"wp-block-navigation__submenu-container".to_vec();
+            if !class.is_empty() {
+                container.push(b' ');
+                container.extend_from_slice(&class);
+            }
+            // strpos(): a match at 0 is falsy.
+            if find(&inner_html, 1, b"current-menu-item").is_some() {
+                let mut tags = TagProcessor::new(&html);
+                while tags.next_tag(None, Some(b"wp-block-navigation-item")) {
+                    tags.add_class(b"current-menu-ancestor");
+                }
+                html = tags.get_updated_html().to_vec();
+            }
+            let extra = [
+                ("class", Value::String(container)),
+                ("style", Value::String(style)),
+            ];
+            let wrapper = get_block_wrapper_attributes(name, parsed, &extra, global);
+            html.extend_from_slice(format!("<ul {wrapper}>").as_bytes());
             html.extend(inner_html);
             html.extend_from_slice(b"</ul>");
         }

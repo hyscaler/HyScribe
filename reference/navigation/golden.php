@@ -30,6 +30,11 @@ function link_block( $attrs, $inner = '' ) {
 	return '' === $inner ? "<!-- wp:navigation-link$json /-->" : "<!-- wp:navigation-link$json -->$inner<!-- /wp:navigation-link -->";
 }
 
+function submenu( $attrs, $inner = '' ) {
+	$json = ' ' . wp_json_encode( $attrs, JSON_UNESCAPED_SLASHES );
+	return '' === $inner ? "<!-- wp:navigation-submenu$json /-->" : "<!-- wp:navigation-submenu$json -->$inner<!-- /wp:navigation-submenu -->";
+}
+
 $links  = link_block( array( 'label' => 'Blog', 'url' => '#' ) ) . link_block( array( 'label' => 'About', 'url' => '#' ) );
 $never  = array( 'overlayMenu' => 'never' );
 $cases  = array();
@@ -129,6 +134,27 @@ $add( nav( $never, link_block( array( 'label' => 'Page', 'url' => '#', 'kind' =>
 $add( nav( $never, link_block( array( 'label' => 'Other', 'url' => '#', 'kind' => 'post-type', 'id' => 1 ) ) ), 'post:2' );
 $add( nav( $never, link_block( array( 'label' => 'Category', 'url' => '#', 'kind' => 'taxonomy', 'type' => 'category', 'id' => 1 ) ) ), 'term:1' );
 $add( nav( $never, link_block( array( 'label' => 'Category', 'url' => '#', 'kind' => 'post-type', 'id' => 1 ) ) ), 'term:1' );
+
+// Submenus.
+$more = submenu( array( 'label' => 'More', 'url' => '/m' ), $links );
+$add( nav( $never, $more ) );
+$add( nav( array(), $more ) );
+$add( nav( $never + array( 'submenuVisibility' => 'click' ), $more ) );
+$add( nav( $never + array( 'submenuVisibility' => 'always' ), $more ) );
+$add( nav( $never + array( 'showSubmenuIcon' => false ), $more ) );
+$add( nav( $never + array( 'openSubmenusOnClick' => true ), $more ) );
+$add( nav( $never + array( 'openSubmenusOnClick' => false, 'submenuVisibility' => 'click' ), $more ) );
+$add( nav( $never + array( 'overlayTextColor' => 'contrast', 'overlayBackgroundColor' => 'base' ), $more ) );
+$add( nav( $never + array( 'customOverlayTextColor' => '#123456', 'customOverlayBackgroundColor' => '#abcdef' ), $more ) );
+$add( nav( $never, submenu( array( 'label' => '' ), $links ) ) );
+$add( nav( $never, submenu( array( 'label' => '<em>Em</em> & x', 'description' => 'D <b>b</b>', 'opensInNewTab' => true, 'rel' => 'me', 'title' => 'T "q"', 'kind' => 'post-type', 'type' => 'page', 'id' => 2, 'url' => '/p' ), $links ) ), 'post:2' );
+$add( nav( $never, submenu( array( 'label' => 'Ancestor', 'nofollow' => true ), link_block( array( 'label' => 'Page', 'url' => '#', 'type' => 'page', 'id' => 2 ) ) ) ), 'post:2' );
+$add( nav( $never + array( 'submenuVisibility' => 'click' ), submenu( array( 'label' => 'Ancestor' ), link_block( array( 'label' => 'Page', 'url' => '#', 'type' => 'page', 'id' => 2 ) ) ) ), 'post:2' );
+$add( nav( $never, submenu( array( 'label' => 'Missing', 'type' => 'page', 'id' => 999 ), $links ) ) );
+$add( nav( $never, submenu( array( 'label' => 'Childless', 'url' => '/c' ) ) ) );
+$add( nav( $never + array( 'submenuVisibility' => 'click' ), submenu( array( 'label' => 'Childless' ) ) ) );
+$add( nav( $never, submenu( array( 'label' => 'Outer' ), submenu( array( 'label' => 'Inner', 'url' => '/i' ), $links ) ) ) );
+$add( submenu( array( 'label' => 'Alone', 'url' => '/a' ), $links ) );
 
 $fallback = '<!-- wp:navigation /-->';
 $add( $fallback );

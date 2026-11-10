@@ -168,6 +168,8 @@ pub(crate) struct Renderer<'a> {
     pub(crate) comment_depth: u64,
     /// The `comments/paginationArrow` context of comments pagination links.
     pub(crate) pagination_arrow: Option<Value>,
+    /// The prepared attributes of the social links block being rendered.
+    pub(crate) social_links: Option<Value>,
     /// The query pagination block's attributes, its links' context.
     pub(crate) query_pagination: Option<Value>,
 }
@@ -207,6 +209,7 @@ impl<'a> Renderer<'a> {
             comment_thread_alt: 0,
             comment_depth: 0,
             pagination_arrow: None,
+            social_links: None,
             query_pagination: None,
         }
     }
@@ -286,6 +289,8 @@ impl Renderer<'_> {
             Some("core/comments-pagination-next") => self.comments_pagination_next(block),
             Some("core/post-excerpt") => self.post_excerpt(block),
             Some("core/post-time-to-read") => self.post_time_to_read(block),
+            Some("core/social-links") => self.social_links(block),
+            Some("core/social-link") => self.social_link(block),
             Some("core/query-pagination") => self.query_pagination(block),
             Some("core/query-pagination-previous") => self.query_pagination_previous(block),
             Some("core/query-pagination-next") => self.query_pagination_next(block),

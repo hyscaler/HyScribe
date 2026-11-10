@@ -37,6 +37,7 @@ pub mod registry;
 mod search;
 pub mod site;
 pub mod sitemap;
+mod social_link;
 pub mod style;
 pub mod supports;
 pub mod template;

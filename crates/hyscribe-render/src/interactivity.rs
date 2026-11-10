@@ -5,7 +5,8 @@
 //! of each root interactive block.
 //!
 //! The `interactive`, `context`, `bind`, `class` and `style` directives are
-//! processed, against an empty server state: no ported block registers any.
+//! processed, against the server state ported blocks register: the
+//! accordion's `isOpen`, derived from its item's context.
 //! `text`, `each` and `router-region` are not ported yet, so markup that
 //! mentions them is left as rendered.
 
@@ -13,6 +14,20 @@ use crate::formatting::find;
 use crate::layout::is_void;
 use hyscribe_html::{Attribute, TagProcessor};
 use hyscribe_phpser::{Key, Value, is_empty_string, json_decode, json_encode, php_trim};
+
+/// The server state of `namespace` as `wp_interactivity_state()` holds it,
+/// closures evaluated against the namespace's `context`: the accordion
+/// item's `isOpen` is its `openByDefault`.
+fn derived_state(namespace: &[u8], context: &Value) -> Value {
+    if namespace != b"core/accordion" {
+        return Value::Array(Vec::new());
+    }
+    let open = context
+        .get_str("openByDefault")
+        .cloned()
+        .unwrap_or(Value::Null);
+    Value::Array(vec![(Key::String(b"isOpen".to_vec()), open)])
+}
 
 /// The directive processors, in the order WordPress registers them.
 #[derive(Clone, Copy)]
@@ -295,8 +310,8 @@ impl Directives {
         entries
     }
 
-    /// `evaluate()`: the value at the entry's path, in the server state
-    /// (always empty here) or the context.
+    /// `evaluate()`: the value at the entry's path, in the server state or
+    /// the context.
     fn evaluate(&self, entry: &Entry) -> Value {
         let Some(namespace) = entry.namespace.as_ref().filter(|ns| !is_empty_string(ns)) else {
             return Value::Null;
@@ -317,7 +332,10 @@ impl Directives {
             .cloned()
             .unwrap_or(Value::Array(Vec::new()));
         let mut current = Value::Array(vec![
-            (Key::String(b"state".to_vec()), Value::Array(Vec::new())),
+            (
+                Key::String(b"state".to_vec()),
+                derived_state(namespace, &context),
+            ),
             (Key::String(b"context".to_vec()), context),
         ]);
         for segment in path.split(|&b| b == b'.') {

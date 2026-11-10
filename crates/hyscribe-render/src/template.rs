@@ -299,6 +299,8 @@ impl Renderer<'_> {
             Some("core/categories") => self.categories(block),
             Some("core/navigation-link") => self.navigation_link(block),
             Some("core/navigation-submenu") => self.navigation_submenu(block),
+            Some("core/accordion") => self.accordion(block),
+            Some("core/accordion-item") => self.accordion_item(block),
             Some("core/home-link") => self.home_link(block),
             Some("core/page-list") => self.page_list(block),
             Some("core/comment-template") => self.comment_template(block),

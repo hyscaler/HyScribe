@@ -46,6 +46,12 @@ impl Site for Tagged {
         let limit = usize::try_from(limit).unwrap();
         self.terms.iter().take(limit).cloned().collect()
     }
+
+    /// The same terms for a category cloud: `terms_pre_query` skips the
+    /// tree's handling, and the sets are already most used first.
+    fn taxonomy_terms(&self, _: &str) -> Vec<(Term, u64)> {
+        self.terms.clone()
+    }
 }
 
 /// Every case of `reference/tag-cloud/golden.sh`, through the render

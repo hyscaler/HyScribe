@@ -50,6 +50,10 @@ $cases = array(
 	block( array( 'taxonomy' => 'nope' ) ),
 	block( array( 'className' => 'extra', 'fontSize' => 'small', 'showHierarchy' => true, 'showEmpty' => true, 'showPostCounts' => true ) ),
 	'<!-- wp:query {"queryId":7,"enhancedPagination":true,"query":{"inherit":false}} -->' . block( array() ) . '<!-- /wp:query -->',
+	// The tag cloud of a tree keeps empty parents of used terms.
+	'<!-- wp:tag-cloud {"taxonomy":"category"} /-->',
+	'<!-- wp:tag-cloud {"taxonomy":"category","showTagCounts":true} /-->',
+	'<!-- wp:tag-cloud {"taxonomy":"category","numberOfTags":3} /-->',
 );
 
 $state = array();

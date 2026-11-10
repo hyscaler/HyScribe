@@ -142,7 +142,7 @@ fn matches_php() {
         failures.len(),
         failures[..failures.len().min(3)].join("\n")
     );
-    assert_eq!(golden.lines().count(), 144);
+    assert_eq!(golden.lines().count(), 168);
 }
 
 /// Terms whose parents are missing or loop, as only inconsistent data

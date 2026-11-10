@@ -7,6 +7,7 @@ use hyscribe_kses::{esc_attr, esc_html, esc_url};
 use hyscribe_phpser::{Value, absint, float_to_string, string_to_float, strnatcasecmp};
 
 use super::{Block, Context, number_format};
+use crate::categories::keep_used;
 use crate::permalinks::term_link;
 use crate::post::post_format_string;
 
@@ -33,7 +34,18 @@ pub(super) fn tag_cloud(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let show_count = block
         .attribute("showTagCounts")
         .is_some_and(|v| !v.is_empty());
-    let mut tags = context.site.cloud_terms(&taxonomy, number);
+    let mut tags = if taxonomy == "category" {
+        // A tree's query is not limited: empty terms with a used one below
+        // stay, then the most used are kept.
+        let all = context.site.taxonomy_terms(&taxonomy);
+        let mut used = all.clone();
+        keep_used(&all, &mut used);
+        used.sort_by(|(_, a), (_, b)| b.cmp(a));
+        used.truncate(usize::try_from(number).unwrap_or(usize::MAX));
+        used
+    } else {
+        context.site.cloud_terms(&taxonomy, number)
+    };
     if tags.is_empty() {
         return Vec::new();
     }

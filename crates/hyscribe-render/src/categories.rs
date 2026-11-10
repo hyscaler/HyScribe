@@ -301,13 +301,7 @@ fn terms(
         pad_counts(&mut terms, &site.term_posts(taxonomy));
     }
     if hierarchical && hide_empty {
-        let counts: HashMap<u64, u64> = all.iter().map(|(t, c)| (t.id, *c)).collect();
-        let used_below = |id: u64| {
-            descendants(&all, id)
-                .iter()
-                .any(|d| counts.get(d).is_some_and(|c| *c > 0))
-        };
-        terms.retain(|(term, count)| *count > 0 || used_below(term.id));
+        keep_used(&all, &mut terms);
     }
     let parents = all.iter().map(|(t, _)| (t.id, t.parent)).collect();
     Listing {
@@ -315,6 +309,18 @@ fn terms(
         hierarchical,
         parents,
     }
+}
+
+/// `get_terms()`'s `hide_empty` on a tree: `terms` keeps those used, or
+/// with a used term of `all` below them.
+pub(crate) fn keep_used(all: &[(Term, u64)], terms: &mut Vec<(Term, u64)>) {
+    let counts: HashMap<u64, u64> = all.iter().map(|(t, c)| (t.id, *c)).collect();
+    let used_below = |id: u64| {
+        descendants(all, id)
+            .iter()
+            .any(|d| counts.get(d).is_some_and(|c| *c > 0))
+    };
+    terms.retain(|(term, count)| *count > 0 || used_below(term.id));
 }
 
 /// The IDs of every term below `id`, as `get_term_children()` gives them;

@@ -8,11 +8,11 @@
 use std::collections::HashMap;
 
 use hyscribe_html::{Attribute, TagProcessor};
-use hyscribe_kses::esc_url;
+use hyscribe_kses::{esc_html, esc_url};
 use hyscribe_phpser::{Value, is_empty_string, lookup, php_trim};
 
 use crate::blocks::{Block, parse_blocks};
-use crate::core_blocks::{self, Context};
+use crate::core_blocks::{self, Context, prepared};
 use crate::elements::elements_class;
 use crate::excerpt::visible;
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_smilies, wptexturize};
@@ -232,6 +232,29 @@ impl<'a> Renderer<'a> {
         }
     }
 
+    /// `render_block_core_widget_group()` outside a classic sidebar, which a
+    /// block theme has none of: the title, then the inner blocks alone.
+    fn widget_group(&mut self, block: &Block) -> Vec<u8> {
+        let parsed = block.attrs.as_deref().unwrap_or_default();
+        let mut html = prepared("core/widget-group", parsed)
+            .get_str("title")
+            .filter(|title| !title.is_empty())
+            .map(|title| {
+                format!(
+                    "<h2 class=\"widget-title\">{}</h2>",
+                    esc_html(&title.to_php_string())
+                )
+                .into_bytes()
+            })
+            .unwrap_or_default();
+        html.extend_from_slice(b"<div class=\"wp-widget-group__inner-blocks\">");
+        for inner in &block.inner_blocks {
+            html.extend(self.block(inner));
+        }
+        html.extend_from_slice(b"</div>");
+        html
+    }
+
     /// `wp_unique_id( $prefix )`.
     pub(crate) fn unique_id(&mut self, prefix: &str) -> Vec<u8> {
         self.unique_id += 1;
@@ -300,6 +323,7 @@ impl Renderer<'_> {
             Some("core/navigation-link") => self.navigation_link(block),
             Some("core/navigation-submenu") => self.navigation_submenu(block),
             Some("core/accordion") => self.accordion(block),
+            Some("core/widget-group") => self.widget_group(block),
             Some("core/accordion-item") => self.accordion_item(block),
             Some("core/home-link") => self.home_link(block),
             Some("core/page-list") => self.page_list(block),

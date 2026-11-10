@@ -357,3 +357,30 @@ fn details_images_match_php() {
     }
     assert_eq!(golden.lines().count(), 7);
 }
+
+/// Every case of `reference/widget-group/golden.sh`: the title, then the
+/// inner blocks without the group's own markup.
+#[test]
+fn widget_groups_match_php() {
+    let theme = crate::theme::twentytwentyfive();
+    let request = crate::site::Request::default();
+    let site = crate::fixture::DefaultInstall {
+        home: b"http://127.0.0.1:8081".to_vec(),
+    };
+    let golden = include_str!("../../tests/golden/widget-group.tsv");
+    for line in golden.lines() {
+        let (markup, php) = line.split_once('\t').unwrap();
+        let (markup, php) = (
+            hyscribe_testkit::unhex(markup),
+            hyscribe_testkit::unhex(php),
+        );
+        let ours = Renderer::new(&theme, &site, &request).render(&markup);
+        assert_eq!(
+            String::from_utf8_lossy(&ours),
+            String::from_utf8_lossy(&php),
+            "{}",
+            String::from_utf8_lossy(&markup)
+        );
+    }
+    assert_eq!(golden.lines().count(), 6);
+}

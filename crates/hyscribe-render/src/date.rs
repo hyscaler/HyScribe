@@ -26,7 +26,7 @@ const DAYS: [&str; 7] = [
     "Saturday",
 ];
 
-const MONTHS: [&str; 12] = [
+pub(crate) const MONTHS: [&str; 12] = [
     "January",
     "February",
     "March",

@@ -9,7 +9,7 @@ use hyscribe_phpser::Value;
 
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
-use crate::template::Renderer;
+use crate::template::{Renderer, low_priority_images};
 
 impl Renderer<'_> {
     /// `render_block_core_accordion()`: the store and its `autoclose`.
@@ -62,14 +62,11 @@ impl Renderer<'_> {
                 }
             }
         }
-        if !open {
-            let mut images = TagProcessor::new(&content);
-            while images.next_tag(Some(b"img"), None) {
-                images.set_attribute(b"fetchpriority", b"low");
-            }
-            content = images.get_updated_html().to_vec();
+        if open {
+            content
+        } else {
+            low_priority_images(&content)
         }
-        content
     }
 }
 

@@ -9,28 +9,15 @@ use hyscribe_model::{Post, Term};
 use hyscribe_phpser::Value;
 
 use super::{Block, Context, number_format};
+use crate::date::MONTHS;
 use crate::excerpt::wp_trim_words;
 use crate::kses::wp_kses_post;
+use crate::navigation::post_ancestors;
 use crate::permalinks::{date_archive_link, term_link};
 use crate::post::the_title;
 use crate::query_pagination::pagenum_link;
 use crate::site::{Archive, Site};
 use crate::supports::get_block_wrapper_attributes;
-
-const MONTHS: [&str; 12] = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-];
 
 /// One crumb: its label, its link, and whether the label may hold markup.
 struct Item {
@@ -67,28 +54,28 @@ pub(super) fn breadcrumbs(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     }
     let var = |name: &str| request.vars.get_str(name).map_or(0, Value::to_int);
     let page_for_posts = option_id(site, "page_for_posts");
-    let paged = request.paged > 1;
+    let paged = request.is_paged();
+    let page_on_front = site.option("show_on_front").as_deref() == Some(b"page");
     // `block_core_breadcrumbs_create_item()`: a link to the first page when paged.
-    let first_page = |label: Vec<u8>, paged: bool| Item {
+    let first_page = |label: Vec<u8>| Item {
         url: paged.then(|| pagenum_link(request, &site.home_url(), 1)),
         ..Item::text(label)
     };
+    // `block_core_breadcrumbs_create_page_number_item()` for a paged list.
+    let paged_item = || paged.then(|| page_number("Page", request.paged));
     let mut items = Vec::new();
     if on("showHomeItem") {
-        let page_on_front = site.option("show_on_front").as_deref() == Some(b"page");
         if !request.front_page || page_on_front && var("page") > 1 {
             items.push(Item::link("Home", [&site.home_url()[..], b"/"].concat()));
         } else {
-            items.push(first_page(b"Home".to_vec(), paged));
+            items.push(first_page(b"Home".to_vec()));
         }
     }
     if request.home {
         if let Some(page) = page_for_posts.and_then(|id| site.post(id)) {
-            items.push(first_page(title(&page), paged));
+            items.push(first_page(title(&page)));
         }
-        if paged {
-            items.push(page_number("Page", request.paged));
-        }
+        items.extend(paged_item());
     } else if request.front_page {
         if var("page") > 1 {
             items.push(page_number("Page", var("page").unsigned_abs()));
@@ -96,10 +83,8 @@ pub(super) fn breadcrumbs(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     } else if let Some(search) = &request.search {
         let query = wp_trim_words(esc_attr(search).as_bytes(), 10, b"&hellip;");
         let label = [b"Search results for: \"".as_slice(), &query, b"\""].concat();
-        items.push(first_page(label, paged));
-        if paged {
-            items.push(page_number("Page", request.paged));
-        }
+        items.push(first_page(label));
+        items.extend(paged_item());
     } else if request.not_found {
         items.push(Item::text("Page not found"));
     } else if request.date {
@@ -121,7 +106,7 @@ pub(super) fn breadcrumbs(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         if year != 0 {
             let label = year.to_string().into_bytes();
             match u64::try_from(month).unwrap_or(0) {
-                0 => items.push(first_page(label, paged)),
+                0 => items.push(first_page(label)),
                 month => {
                     items.push(Item::link(label, date_archive_link(site, year, None)));
                     // mktime() carries a month past December into the next year.
@@ -130,27 +115,23 @@ pub(super) fn breadcrumbs(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
                         .copied()
                         .unwrap_or_default();
                     if day == 0 {
-                        items.push(first_page(name.into(), paged));
+                        items.push(first_page(name.into()));
                     } else {
                         items.push(Item::link(
                             name,
                             date_archive_link(site, year, Some((month, None))),
                         ));
-                        items.push(first_page(day.to_string().into_bytes(), paged));
+                        items.push(first_page(day.to_string().into_bytes()));
                     }
                 }
             }
         }
-        if paged {
-            items.push(page_number("Page", request.paged));
-        }
+        items.extend(paged_item());
     } else if let Some(Archive::Term(taxonomy, Some(term))) = &request.archive {
         // Other archives are dates, and a term archive without its term a 404.
         items.extend(term_ancestors(site, taxonomy.name(), term));
-        items.push(first_page(term.name.clone(), paged));
-        if paged {
-            items.push(page_number("Page", request.paged));
-        }
+        items.push(first_page(term.name.clone()));
+        items.extend(paged_item());
     } else {
         let Some(post) = context.post_id.and_then(|id| site.post(id)) else {
             return Vec::new();
@@ -159,14 +140,14 @@ pub(super) fn breadcrumbs(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
             // get_post_type_archive_link( 'post' ): the page for posts, when
             // the front page is a page, else the home URL, which is left out.
             if let Some(page) = page_for_posts
-                .filter(|_| site.option("show_on_front").as_deref() == Some(b"page"))
+                .filter(|_| page_on_front)
                 .and_then(|id| site.post(id))
             {
                 items.push(Item::link(title(&page), context.permalink(&page)));
             }
             items.extend(post_terms(context, &post));
         } else {
-            for id in ancestors(site, &post).into_iter().rev() {
+            for id in post_ancestors(site, &post).into_iter().rev() {
                 // A missing parent shows `(no title)`, unlinked.
                 let page = site.post(id);
                 items.push(Item {
@@ -270,18 +251,6 @@ fn title(post: &Post) -> Vec<u8> {
 fn option_id(site: &dyn Site, name: &str) -> Option<u64> {
     let id = Value::String(site.option(name).unwrap_or_default()).to_int();
     u64::try_from(id).ok().filter(|&id| id != 0)
-}
-
-/// `get_post_ancestors()`: the IDs above `post`, nearest first, a missing
-/// parent's included, stopping at a loop back to `post` or to one listed.
-fn ancestors(site: &dyn Site, post: &Post) -> Vec<u64> {
-    let mut found = Vec::new();
-    let mut parent = post.parent;
-    while parent != 0 && parent != post.id && !found.contains(&parent) {
-        found.push(parent);
-        parent = site.post(parent).map_or(0, |p| p.parent);
-    }
-    found
 }
 
 /// `block_core_breadcrumbs_get_term_ancestors_items()`: links to the

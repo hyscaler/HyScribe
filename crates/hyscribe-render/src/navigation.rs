@@ -19,7 +19,7 @@ use crate::blocks::{Block, parse_blocks, serialize_blocks};
 use crate::core_blocks::prepared;
 use crate::formatting::find;
 use crate::kses::wp_kses_post;
-use crate::site::Archive;
+use crate::site::{Archive, Site};
 use crate::supports::forced_colors;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
@@ -364,8 +364,40 @@ impl Renderer<'_> {
         );
         let mut html =
             format!("<li {wrapper}><a class=\"wp-block-navigation-item__content\" ").into_bytes();
-        if let Some(url) = attribute("url") {
-            let url = maybe_urldecode(&url.to_php_string());
+        let url = attribute("url").map(|url| maybe_urldecode(&url.to_php_string()));
+        let label = wp_kses_post(&label.to_php_string(), &self.context.upload_host());
+        html.extend(self.anchor_rest(&attributes, url, &label, is_active));
+        let show_icon = self
+            .navigation
+            .as_ref()
+            .and_then(|context| context.get_str("showSubmenuIcon"))
+            .is_some_and(|v| !v.is_empty());
+        if show_icon && has_submenu {
+            html.extend_from_slice(b"<span class=\"wp-block-navigation__submenu-icon\">");
+            html.extend_from_slice(SUBMENU_ICON);
+            html.extend_from_slice(b"</span>");
+        }
+        if has_submenu {
+            html.extend_from_slice(b"<ul class=\"wp-block-navigation__submenu-container\">");
+            html.extend(inner_html);
+            html.extend_from_slice(b"</ul>");
+        }
+        html.extend_from_slice(b"</li>");
+        html
+    }
+
+    /// A navigation item's link from its `href` on: `aria-current`, a new
+    /// tab, `rel` and `title`, then the label and description and the closer.
+    fn anchor_rest(
+        &self,
+        attributes: &Value,
+        url: Option<Vec<u8>>,
+        label: &[u8],
+        is_active: bool,
+    ) -> Vec<u8> {
+        let attribute = |name| attributes.get_str(name).filter(|v| isset(Some(v)));
+        let mut html = Vec::new();
+        if let Some(url) = url {
             html.extend_from_slice(b" href=\"");
             html.extend(esc_url(&url));
             html.push(b'"');
@@ -388,33 +420,28 @@ impl Renderer<'_> {
                 format!(" title=\"{}\"", esc_attr(&title.to_php_string())).as_bytes(),
             );
         }
-        let upload_host = self.context.upload_host();
         html.extend_from_slice(b"><span class=\"wp-block-navigation-item__label\">");
-        html.extend(wp_kses_post(&label.to_php_string(), &upload_host));
+        html.extend_from_slice(label);
         html.extend_from_slice(b"</span>");
-        if let Some(description) = attribute("description").filter(|v| !v.is_empty()) {
-            html.extend_from_slice(b"<span class=\"wp-block-navigation-item__description\">");
-            html.extend(wp_kses_post(&description.to_php_string(), &upload_host));
-            html.extend_from_slice(b"</span>");
-        }
+        html.extend(self.description(attributes));
         html.extend_from_slice(b"</a>");
-        let show_icon = self
-            .navigation
-            .as_ref()
-            .and_then(|context| context.get_str("showSubmenuIcon"))
-            .is_some_and(|v| !v.is_empty());
-        if show_icon && has_submenu {
-            html.extend_from_slice(b"<span class=\"wp-block-navigation__submenu-icon\">");
-            html.extend_from_slice(SUBMENU_ICON);
-            html.extend_from_slice(b"</span>");
-        }
-        if has_submenu {
-            html.extend_from_slice(b"<ul class=\"wp-block-navigation__submenu-container\">");
-            html.extend(inner_html);
-            html.extend_from_slice(b"</ul>");
-        }
-        html.extend_from_slice(b"</li>");
         html
+    }
+
+    /// A navigation item's description in its span, empty for none.
+    fn description(&self, attributes: &Value) -> Vec<u8> {
+        attributes
+            .get_str("description")
+            .filter(|v| !v.is_empty())
+            .map(|d| {
+                [
+                    b"<span class=\"wp-block-navigation-item__description\">".as_slice(),
+                    &wp_kses_post(&d.to_php_string(), &self.context.upload_host()),
+                    b"</span>",
+                ]
+                .concat()
+            })
+            .unwrap_or_default()
     }
 
     /// `render_block_core_navigation_submenu()`.
@@ -435,11 +462,12 @@ impl Renderer<'_> {
         }
         let has_submenu = !is_empty_string(php_trim(&inner_html));
         let is_active = self.is_active(&attributes);
-        let context = self.navigation.clone().unwrap_or_default();
+        let none = Value::Null;
+        let context = self.navigation.as_ref().unwrap_or(&none);
         let show_icon = context
             .get_str("showSubmenuIcon")
             .is_some_and(|v| !v.is_empty());
-        let visibility = submenu_visibility(&context);
+        let visibility = submenu_visibility(context);
         let open_on_click = visibility == b"click";
         let mut classes = b"wp-block-navigation-item".to_vec();
         for (on, class) in [
@@ -463,20 +491,12 @@ impl Renderer<'_> {
         let upload_host = self.context.upload_host();
         let label = wp_kses_post(&label.to_php_string(), &upload_host);
         let aria_label = esc_attr(&[&wp_strip_all_tags(&label, false)[..], b" submenu"].concat());
-        let description = attribute("description").filter(|v| !v.is_empty()).map(|d| {
-            [
-                b"<span class=\"wp-block-navigation-item__description\">".as_slice(),
-                &wp_kses_post(&d.to_php_string(), &upload_host),
-                b"</span>",
-            ]
-            .concat()
-        });
         let mut html = format!("<li {wrapper}>").into_bytes();
         if open_on_click {
             html.extend_from_slice(format!("<button aria-label=\"{aria_label}\" class=\"wp-block-navigation-item__content wp-block-navigation-submenu__toggle\" aria-expanded=\"false\"><span class=\"wp-block-navigation-item__label\">").as_bytes());
             html.extend_from_slice(&label);
             html.extend_from_slice(b"</span>");
-            html.extend(description.unwrap_or_default());
+            html.extend(self.description(&attributes));
             html.extend_from_slice(b"</button>");
             if has_submenu {
                 html.extend_from_slice(b"<span class=\"wp-block-navigation__submenu-icon\">");
@@ -485,34 +505,10 @@ impl Renderer<'_> {
             }
         } else {
             html.extend_from_slice(b"<a class=\"wp-block-navigation-item__content\"");
-            if let Some(url) = attribute("url").filter(|v| !v.is_empty()) {
-                html.extend_from_slice(b" href=\"");
-                html.extend(esc_url(&url.to_php_string()));
-                html.push(b'"');
-            }
-            if is_active {
-                html.extend_from_slice(b" aria-current=\"page\"");
-            }
-            if attribute("opensInNewTab") == Some(Value::Bool(true)) {
-                html.extend_from_slice(b" target=\"_blank\"  ");
-            }
-            if let Some(rel) = attribute("rel") {
-                html.extend_from_slice(
-                    format!(" rel=\"{}\"", esc_attr(&rel.to_php_string())).as_bytes(),
-                );
-            } else if attribute("nofollow").is_some_and(|v| !v.is_empty()) {
-                html.extend_from_slice(b" rel=\"nofollow\"");
-            }
-            if let Some(title) = attribute("title") {
-                html.extend_from_slice(
-                    format!(" title=\"{}\"", esc_attr(&title.to_php_string())).as_bytes(),
-                );
-            }
-            html.extend_from_slice(b"><span class=\"wp-block-navigation-item__label\">");
-            html.extend_from_slice(&label);
-            html.extend_from_slice(b"</span>");
-            html.extend(description.unwrap_or_default());
-            html.extend_from_slice(b"</a>");
+            let url = attribute("url")
+                .filter(|v| !v.is_empty())
+                .map(|url| url.to_php_string());
+            html.extend(self.anchor_rest(&attributes, url, &label, is_active));
             if show_icon && has_submenu {
                 html.extend_from_slice(format!("<button aria-label=\"{aria_label}\" class=\"wp-block-navigation__submenu-icon wp-block-navigation-submenu__toggle\" aria-expanded=\"false\">").as_bytes());
                 html.extend_from_slice(SUBMENU_ICON);
@@ -534,7 +530,7 @@ impl Renderer<'_> {
                     wp_array_set(&mut attributes, path, color.clone());
                 }
             }
-            let (class, style) = forced_colors(attributes);
+            let (class, style) = forced_colors(&attributes);
             let mut container = b"wp-block-navigation__submenu-container".to_vec();
             if !class.is_empty() {
                 container.push(b' ');
@@ -695,7 +691,7 @@ impl Renderer<'_> {
         for page in &all_pages {
             let is_active = page.id != 0 && page.id == queried;
             if is_active {
-                active_ancestors = self.ancestors(page);
+                active_ancestors = post_ancestors(self.context.site, page);
             }
             let listed = ListedPage {
                 id: page.id,
@@ -715,8 +711,9 @@ impl Renderer<'_> {
                 }
             }
         }
-        let context = self.navigation.clone().unwrap_or_default();
-        let colors = build_colors(&context, true);
+        let none = Value::Null;
+        let context = self.navigation.as_ref().unwrap_or(&none);
+        let colors = build_colors(context, true);
         let parent_id = attributes.get_str("parentPageID").map_or(0, Value::to_int);
         let pages = if parent_id == 0 {
             top_level
@@ -732,7 +729,7 @@ impl Renderer<'_> {
         let showing = context.get_str("showSubmenuIcon");
         let list = PageList {
             visibility: match showing {
-                Some(_) => submenu_visibility(&context),
+                Some(_) => submenu_visibility(context),
                 None => b"hover".to_vec(),
             },
             show_icons: showing.is_some_and(|v| !v.is_empty()),
@@ -761,17 +758,6 @@ impl Renderer<'_> {
             &self.context.theme.global,
         );
         [b"<ul ", wrapper.as_bytes(), b">", &items, b"</ul>"].concat()
-    }
-
-    /// `get_post_ancestors()`: parents up the tree, stopping at a loop.
-    fn ancestors(&self, page: &Post) -> Vec<u64> {
-        let mut ancestors = Vec::new();
-        let mut parent = page.parent;
-        while parent != 0 && parent != page.id && !ancestors.contains(&parent) {
-            ancestors.push(parent);
-            parent = self.context.site.post(parent).map_or(0, |post| post.parent);
-        }
-        ancestors
     }
 }
 
@@ -1266,6 +1252,18 @@ fn urldecode(text: &[u8]) -> Vec<u8> {
 
 fn string(text: &str) -> Value {
     Value::String(text.as_bytes().to_vec())
+}
+
+/// `get_post_ancestors()`: the IDs above `post`, nearest first, a missing
+/// parent's included, stopping at a loop back to `post` or to one listed.
+pub(crate) fn post_ancestors(site: &dyn Site, post: &Post) -> Vec<u64> {
+    let mut ancestors = Vec::new();
+    let mut parent = post.parent;
+    while parent != 0 && parent != post.id && !ancestors.contains(&parent) {
+        ancestors.push(parent);
+        parent = site.post(parent).map_or(0, |post| post.parent);
+    }
+    ancestors
 }
 
 #[cfg(test)]

@@ -363,7 +363,7 @@ fn colors(block: &Block<'_>) -> Attributes {
 /// `wp_apply_colors_support()` on `attributes` with the color support set
 /// to `true`, as the navigation submenu block forces it: its class and
 /// style, empty for none.
-pub(crate) fn forced_colors(attributes: Value) -> (Vec<u8>, Vec<u8>) {
+pub(crate) fn forced_colors(attributes: &Value) -> (Vec<u8>, Vec<u8>) {
     let preset_or = |name: &str, custom: &[&str]| match attributes.get_str(name) {
         Some(slug) => string([b"var:preset|color|".as_slice(), &slug.to_php_string()].concat()),
         None => attributes.get_path(custom).cloned().unwrap_or(Value::Null),

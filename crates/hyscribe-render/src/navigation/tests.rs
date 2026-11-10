@@ -166,7 +166,6 @@ fn matches_php() {
 /// `get_post_ancestors()` stops where the parents loop back.
 #[test]
 fn ancestors_stop_at_a_loop() {
-    let theme = twentytwentyfive();
     let base = DefaultInstall { home: Vec::new() };
     let page = |id, parent| Post {
         id,
@@ -185,12 +184,10 @@ fn ancestors_stop_at_a_loop() {
         ],
         menu: None,
     };
-    let request = Request::default();
-    let renderer = Renderer::new(&theme, &site, &request);
-    assert_eq!(renderer.ancestors(&page(201, 202)), [202]);
-    assert_eq!(renderer.ancestors(&page(203, 204)), [204, 205]);
-    assert!(renderer.ancestors(&page(206, 0)).is_empty());
-    assert_eq!(renderer.ancestors(&page(207, 999)), [999]);
+    assert_eq!(post_ancestors(&site, &page(201, 202)), [202]);
+    assert_eq!(post_ancestors(&site, &page(203, 204)), [204, 205]);
+    assert!(post_ancestors(&site, &page(206, 0)).is_empty());
+    assert_eq!(post_ancestors(&site, &page(207, 999)), [999]);
 }
 
 /// Every case of `reference/home-link/golden.sh`, in its order: the count

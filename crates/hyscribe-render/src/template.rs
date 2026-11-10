@@ -84,6 +84,11 @@ fn details_images(html: &[u8], block: &Block) -> Vec<u8> {
     if open {
         return html.to_vec();
     }
+    low_priority_images(html)
+}
+
+/// Every `img` with `fetchpriority="low"`.
+pub(crate) fn low_priority_images(html: &[u8]) -> Vec<u8> {
     let mut tags = TagProcessor::new(html);
     while tags.next_tag(Some(b"img"), None) {
         tags.set_attribute(b"fetchpriority", b"low");

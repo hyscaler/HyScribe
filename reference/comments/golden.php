@@ -319,6 +319,8 @@ $pagination_markups = array(
 	'<!-- wp:comments-pagination {"paginationArrow":"none"} --><!-- wp:comments-pagination-next /--><!-- /wp:comments-pagination -->',
 	'<!-- wp:comments-pagination-previous /-->',
 	'<!-- wp:comments-pagination-next /-->',
+	'<!-- wp:comments-pagination --><!-- wp:comments-pagination-numbers /--><!-- /wp:comments-pagination -->',
+	'<!-- wp:comments-pagination-numbers {"fontSize":"small"} /-->',
 );
 $GLOBALS['wp_query']->is_singular = true;
 $GLOBALS['post']                  = get_post( 1 );
@@ -343,10 +345,13 @@ foreach ( array(
 	foreach ( array( '', '1', '2', '3', '99', '0', 'abc', '-1' ) as $cpage ) {
 		$GLOBALS['wp_query']->set( 'cpage', $cpage );
 		$uri = '' === $cpage ? '/?p=1' : "/?p=1&cpage=$cpage";
+		// The page numbers keep the request's other arguments.
+		$uri                    = '3' === $cpage ? "$uri&x=a+b%26c&y[]=1" : $uri;
+		$_SERVER['REQUEST_URI'] = $uri;
 		foreach ( array( 1, 0 ) as $post_id ) {
 			// Without a post the previous link counts every post's comments,
 			// which HyScribe does not port.
-			foreach ( $post_id ? $pagination_markups : array( $pagination_markups[0], $pagination_markups[5] ) as $markup ) {
+			foreach ( $post_id ? $pagination_markups : array( $pagination_markups[0], $pagination_markups[5], $pagination_markups[7] ) as $markup ) {
 				$reset();
 				$context = $post_id ? array( 'postId' => $post_id ) : array();
 				$counter = $elements();
@@ -358,16 +363,45 @@ foreach ( array(
 		}
 	}
 }
+// Page numbers under pretty permalinks link to comment-page-N.
+foreach ( array( '/%postname%/', '/%year%/%postname%' ) as $structure ) {
+	foreach ( $option_names as $name ) {
+		remove_all_filters( "pre_option_$name" );
+	}
+	$options = array( 'page_comments' => '1', 'comments_per_page' => '5', 'permalink_structure' => $structure );
+	foreach ( $options as $name => $value ) {
+		add_filter( "pre_option_$name", static fn() => $value );
+	}
+	$GLOBALS['wp_rewrite']->init();
+	foreach ( array( '', '2', '3' ) as $cpage ) {
+		$GLOBALS['wp_query']->set( 'cpage', $cpage );
+		$uri                    = '/hello-world/' . ( '' === $cpage ? '' : "comment-page-$cpage/" ) . '?x=1';
+		$_SERVER['REQUEST_URI'] = $uri;
+		$markup                 = $pagination_markups[7];
+		$reset();
+		$counter = $elements();
+		$html    = $render( $markup, array( 'postId' => 1 ) );
+		$html   .= $render( $markup, array( 'postId' => 1 ) );
+		$state   = array( 'options' => $options, 'elements' => $counter, 'post' => 1, 'password' => false, 'closed' => true, 'now' => time(), 'uri' => $uri, 'global' => 1, 'singular' => true, 'vars' => array( 'x' => '1', 'cpage' => $cpage ) );
+		echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+	}
+	remove_all_filters( 'pre_option_permalink_structure' );
+	unset( $options['permalink_structure'] );
+	$GLOBALS['wp_rewrite']->init();
+}
 // Outside a singular page there are no links.
 $GLOBALS['wp_query']->is_singular = false;
 $GLOBALS['wp_query']->set( 'cpage', '2' );
-$reset();
+$_SERVER['REQUEST_URI']           = '/?p=1&cpage=2';
+foreach ( array( $pagination_markups[2], $pagination_markups[7] ) as $markup ) {
+	$reset();
+	$counter = $elements();
+	$html    = $render( $markup, array( 'postId' => 1 ) );
+	$html   .= $render( $markup, array( 'postId' => 1 ) );
+	$state   = array( 'options' => $options, 'elements' => $counter, 'post' => 1, 'password' => false, 'closed' => true, 'now' => time(), 'uri' => '/?p=1&cpage=2', 'global' => 1 );
+	echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+}
 $markup = $pagination_markups[2];
-$counter = $elements();
-$html   = $render( $markup, array( 'postId' => 1 ) );
-$html  .= $render( $markup, array( 'postId' => 1 ) );
-$state  = array( 'options' => $options, 'elements' => $counter, 'post' => 1, 'password' => false, 'closed' => true, 'now' => time(), 'uri' => '/?p=1&cpage=2', 'global' => 1 );
-echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
 // Nor for a password protected post.
 $GLOBALS['wp_query']->is_singular = true;
 $wpdb->update( $wpdb->posts, array( 'post_password' => 'pw' ), array( 'ID' => 1 ) );
@@ -381,6 +415,7 @@ $state  = array( 'options' => $options, 'elements' => $counter, 'post' => 1, 'pa
 echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
 $wpdb->update( $wpdb->posts, array( 'post_password' => '' ), array( 'ID' => 1 ) );
 clean_post_cache( 1 );
+$_SERVER['REQUEST_URI'] = '/';
 $GLOBALS['wp_query']->is_singular = false;
 $GLOBALS['wp_query']->set( 'cpage', '' );
 $GLOBALS['post'] = null;

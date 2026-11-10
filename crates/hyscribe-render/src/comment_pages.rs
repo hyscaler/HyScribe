@@ -3,20 +3,22 @@
 //! Comment pages: the paging of `build_comment_query_vars_from_block()`
 //! and the comments pagination blocks.
 //!
-//! Not ported: the page numbers block (`paginate_comments_links()`), and
-//! the previous link outside a post, which counts every post's comments.
+//! Not ported: the previous link outside a post, which counts every post's
+//! comments.
 
 use hyscribe_kses::esc_url;
 use hyscribe_model::Comment;
-use hyscribe_phpser::{Value, add_query_arg, is_empty_string};
+use hyscribe_phpser::{
+    Value, add_query_arg, add_query_values, is_empty_string, parse_str, urlencode_deep,
+};
 
 use crate::blocks::Block;
 use crate::core_blocks::{Context, prepared, render};
-use crate::formatting::encode_ampersands;
-use crate::query_pagination::arrow_span;
+use crate::formatting::{encode_ampersands, html_entity_decode};
+use crate::query_pagination::{arrow_span, page_numbers, pagenum_link};
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
-use crate::template::Renderer;
+use crate::template::{Renderer, replace};
 
 /// The comments a comment query counts and pages: the top level of a
 /// threaded list, every comment of a flat one.
@@ -121,6 +123,80 @@ impl Renderer<'_> {
         ]
         .concat();
         self.comments_link(name, block, &label, next, max_page)
+    }
+
+    /// `render_block_core_comments_pagination_numbers()` over
+    /// `paginate_comments_links()`.
+    pub(crate) fn comments_pagination_numbers(&self, block: &Block) -> Vec<u8> {
+        let name = "core/comments-pagination-numbers";
+        if self.context.post_id.is_none_or(|id| id == 0) || !self.context.request.singular {
+            return Vec::new();
+        }
+        let paging = self.comment_paging();
+        // WP_Comment_Query counts pages only for a paged query whose page,
+        // as absint() reads it, has comments.
+        let total = paging
+            .as_ref()
+            .filter(|p| {
+                (1..=p.max_pages.unsigned_abs()).contains(&p.paged.unwrap_or(1).unsigned_abs())
+            })
+            .map_or(0, |p| p.max_pages);
+        let current = paging.and_then(|p| p.paged).unwrap_or(0);
+        let request = self.context.request;
+        let links = crate::permalinks::Permalinks::of(self.context.site);
+        // paginate_links() adds the current URL's arguments the base lacks:
+        // none to the request itself, all to a post's pretty link.
+        let (base, args) = if links.pretty() {
+            let permalink = self
+                .context
+                .global_post()
+                .map(|post| self.context.permalink(&post))
+                .unwrap_or_default();
+            let pagenum =
+                html_entity_decode(&pagenum_link(request, &self.context.site.home_url(), 1));
+            let query = pagenum.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default();
+            let args = urlencode_deep(parse_str(query));
+            (
+                links
+                    .under(&String::from_utf8_lossy(&permalink), "comment-page-%#%")
+                    .into_bytes(),
+                args.as_array().unwrap_or_default().to_vec(),
+            )
+        } else {
+            (
+                add_query_arg(&[(b"cpage", Some(b"%#%"))], &request.uri),
+                Vec::new(),
+            )
+        };
+        let numbers = page_numbers(
+            u64::try_from(total).unwrap_or(0),
+            u64::try_from(current).unwrap_or(0),
+            2,
+            |n| {
+                let link = replace(&base, b"%#%", n.to_string().as_bytes());
+                let mut link = if args.is_empty() {
+                    link
+                } else {
+                    add_query_values(&args, &link)
+                };
+                link.extend_from_slice(b"#comments");
+                link
+            },
+        );
+        if numbers.is_empty() {
+            return Vec::new();
+        }
+        let parsed = block.attrs.as_deref().unwrap_or_default();
+        let attributes =
+            get_block_wrapper_attributes(name, parsed, &[], &self.context.theme.global);
+        [
+            b"<div ".as_slice(),
+            attributes.as_bytes(),
+            b">",
+            &numbers,
+            b"</div>",
+        ]
+        .concat()
     }
 
     /// The paging of the comments of the `postId` context.

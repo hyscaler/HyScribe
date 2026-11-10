@@ -282,6 +282,7 @@ impl Renderer<'_> {
             Some("core/comment-template") => self.comment_template(block),
             Some("core/comments-pagination") => self.comments_pagination(block),
             Some("core/comments-pagination-previous") => self.comments_pagination_previous(block),
+            Some("core/comments-pagination-numbers") => self.comments_pagination_numbers(block),
             Some("core/comments-pagination-next") => self.comments_pagination_next(block),
             Some("core/post-excerpt") => self.post_excerpt(block),
             Some("core/query-pagination") => self.query_pagination(block),

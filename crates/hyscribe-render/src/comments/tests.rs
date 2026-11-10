@@ -154,7 +154,10 @@ fn matches_php() {
             post: state.get_str("global").map(|id| id.to_int() as u64),
             uri: uri.clone(),
             get: parse_str(uri.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default()),
-            vars: parse_str(uri.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default()),
+            // `cpage` from a pretty path is recorded on its own.
+            vars: state.get_str("vars").cloned().unwrap_or_else(|| {
+                parse_str(uri.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default())
+            }),
             posts: state.get_str("main").map_or(Vec::new(), |ids| {
                 ids.as_array()
                     .unwrap()
@@ -199,5 +202,5 @@ fn matches_php() {
         failures.len(),
         failures[..failures.len().min(3)].join("\n")
     );
-    assert_eq!(golden.lines().count(), 2045);
+    assert_eq!(golden.lines().count(), 2292);
 }

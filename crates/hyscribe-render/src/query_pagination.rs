@@ -241,7 +241,7 @@ fn string_key(key: &[u8]) -> Key {
 
 /// `get_pagenum_link( $page )` with plain permalinks: the request without
 /// `paged`, on the home URL, with `paged` set past the first page.
-fn pagenum_link(request: &Request, home: &[u8], page: u64) -> Vec<u8> {
+pub(crate) fn pagenum_link(request: &Request, home: &[u8], page: u64) -> Vec<u8> {
     let uri = remove_query_arg(&[b"paged"], &request.uri);
     let path = home_path(home);
     let uri = uri
@@ -316,50 +316,65 @@ impl Numbers {
                 (_, None) => self.args.push((name.clone(), value.clone())),
             }
         }
-        let current = self.current;
         let mid = u64::try_from(self.mid_size).unwrap_or(2);
-        let mut links: Vec<Vec<u8>> = Vec::new();
-        let mut dots = false;
-        for n in 1..=total {
-            if n == current {
-                let number = number_format(n);
-                links.push(
-                    format!(
-                        "<span aria-current=\"page\" class=\"page-numbers current\">{number}</span>"
-                    )
-                    .into_bytes(),
+        page_numbers(total, self.current, mid, |n| {
+            let mut link = base.clone();
+            if n > 1 {
+                link.extend_from_slice(
+                    &[b"?", &self.key[..], b"=", n.to_string().as_bytes()].concat(),
                 );
-                dots = true;
-            } else if n <= 1 || (n + mid >= current && n <= current + mid) || n > total - 1 {
-                let mut link = base.clone();
-                if n > 1 {
-                    link.extend_from_slice(
-                        &[b"?", &self.key[..], b"=", n.to_string().as_bytes()].concat(),
-                    );
-                }
-                let link = if self.args.is_empty() {
-                    link
-                } else {
-                    add_query_values(&self.args, &link)
-                };
-                links.push(
-                    [
-                        b"<a class=\"page-numbers\" href=\"".as_slice(),
-                        &esc_url(&link),
-                        b"\">",
-                        number_format(n).as_bytes(),
-                        b"</a>",
-                    ]
-                    .concat(),
-                );
-                dots = true;
-            } else if dots {
-                links.push(b"<span class=\"page-numbers dots\">&hellip;</span>".to_vec());
-                dots = false;
             }
-        }
-        links.join(&b'\n')
+            if self.args.is_empty() {
+                link
+            } else {
+                add_query_values(&self.args, &link)
+            }
+        })
     }
+}
+
+/// `paginate_links()`'s page numbers, joined by new lines: page `current`
+/// marked, the first and last pages and `mid` either side of `current`
+/// linked to `href( n )`, dots for the gaps.
+pub(crate) fn page_numbers(
+    total: u64,
+    current: u64,
+    mid: u64,
+    href: impl Fn(u64) -> Vec<u8>,
+) -> Vec<u8> {
+    let mut links: Vec<Vec<u8>> = Vec::new();
+    let mut dots = false;
+    for n in 1..=total {
+        if n == current {
+            let number = number_format(n);
+            links.push(
+                format!(
+                    "<span aria-current=\"page\" class=\"page-numbers current\">{number}</span>"
+                )
+                .into_bytes(),
+            );
+            dots = true;
+        } else if n <= 1
+            || (current > 0 && n + mid >= current && n <= current + mid)
+            || n > total - 1
+        {
+            links.push(
+                [
+                    b"<a class=\"page-numbers\" href=\"".as_slice(),
+                    &esc_url(&href(n)),
+                    b"\">",
+                    number_format(n).as_bytes(),
+                    b"</a>",
+                ]
+                .concat(),
+            );
+            dots = true;
+        } else if dots {
+            links.push(b"<span class=\"page-numbers dots\">&hellip;</span>".to_vec());
+            dots = false;
+        }
+    }
+    links.join(&b'\n')
 }
 
 #[cfg(test)]

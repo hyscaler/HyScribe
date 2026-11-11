@@ -41,3 +41,21 @@ fn matches_php() {
     );
     assert_eq!(golden.lines().count(), 12);
 }
+
+/// `WP_Block::render()` enqueues the accordion's view module.
+#[test]
+fn enqueues_the_view() {
+    let theme = twentytwentyfive();
+    let request = Request::default();
+    let site = DefaultInstall {
+        home: b"http://127.0.0.1:8081".to_vec(),
+    };
+    let mut renderer = Renderer::new(&theme, &site, &request);
+    renderer.render(
+        b"<!-- wp:accordion --><div class=\"wp-block-accordion\"></div><!-- /wp:accordion -->",
+    );
+    assert_eq!(
+        renderer.assets.modules,
+        ["@wordpress/block-library/accordion/view"]
+    );
+}

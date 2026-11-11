@@ -76,6 +76,7 @@ fn a_null_default_counts_as_none() {
     let block = BlockType {
         attributes,
         supports: Value::Null,
+        view_script_modules: Vec::new(),
     };
     assert_eq!(
         block.prepare(&[]),

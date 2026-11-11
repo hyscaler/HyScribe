@@ -195,6 +195,10 @@ pub(crate) struct Renderer<'a> {
     pub(crate) social_links: Option<Value>,
     /// The query pagination block's attributes, its links' context.
     pub(crate) query_pagination: Option<Value>,
+    /// The tabs block's context for its tab list and panels.
+    pub(crate) tabs: Option<crate::tabs::TabsContext>,
+    /// The tab panels counted so far, by tabs ID.
+    pub(crate) tab_counters: crate::tabs::TabCounters,
 }
 
 /// A string attribute.
@@ -235,6 +239,8 @@ impl<'a> Renderer<'a> {
             pagination_arrow: None,
             social_links: None,
             query_pagination: None,
+            tabs: None,
+            tab_counters: HashMap::new(),
         }
     }
 
@@ -320,6 +326,9 @@ impl Renderer<'_> {
             Some("core/pattern") => self.pattern(block),
             Some("core/query") => self.query(block),
             Some("core/post-template") => self.post_template(block),
+            Some("core/tabs") => self.tabs(block),
+            Some("core/tab-list") => self.tab_list(block),
+            Some("core/tab-panel") => self.tab_panel(block),
             Some("core/terms-query") => self.terms_query(block),
             Some("core/term-template") => self.term_template(block),
             Some("core/post-content") => self.post_content(block),
@@ -372,6 +381,10 @@ impl Renderer<'_> {
             .flatten()
         {
             self.assets.enqueue_style(handle);
+        }
+        let types = block.name.as_deref().and_then(block_type);
+        for id in types.map_or(&[][..], |t| &t.view_script_modules) {
+            self.assets.enqueue_module(id);
         }
         let html = elements_class(html, block);
         let html = self.layout(block, html);

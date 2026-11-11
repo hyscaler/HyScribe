@@ -20,6 +20,8 @@ pub struct BlockType {
     pub attributes: Vec<(Key, Value)>,
     /// `supports`, as registered.
     pub supports: Value,
+    /// `view_script_module_ids`, which `WP_Block::render()` enqueues.
+    pub view_script_modules: Vec<String>,
 }
 
 /// The core block types.
@@ -41,11 +43,19 @@ pub(crate) fn load(json: &[u8]) -> HashMap<Vec<u8>, BlockType> {
                 _ => Vec::new(),
             };
             let supports = fields.get_str("supports").cloned().unwrap_or(Value::Null);
+            let view_script_modules = fields
+                .get_str("view_script_module_ids")
+                .and_then(Value::as_array)
+                .unwrap_or_default()
+                .iter()
+                .map(|(_, id)| String::from_utf8_lossy(&id.to_php_string()).into_owned())
+                .collect();
             Some((
                 name,
                 BlockType {
                     attributes,
                     supports,
+                    view_script_modules,
                 },
             ))
         })

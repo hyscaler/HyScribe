@@ -106,6 +106,8 @@ jobs:
       - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-llvm-cov
+      - name: Theme Test Data fixture, downloaded pinned, never committed
+        run: reference/theme-test-data/build.sh
       - name: Default install fixture in MariaDB (hyscribe-db tests)
         run: reference/default-install/db.sh up
       - name: Tests with the 100% gate (ADR 0007)
@@ -134,12 +136,14 @@ jobs:
       - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-mutants
+      - name: Theme Test Data fixture, downloaded pinned, never committed
+        run: reference/theme-test-data/build.sh
       - name: Default install fixture in MariaDB (hyscribe-db tests)
         run: reference/default-install/db.sh up
       - name: No surviving mutants in changed code
         run: |
           git diff origin/${{ github.base_ref }}...HEAD > pr.diff
-          cargo mutants --workspace --in-diff pr.diff --no-shuffle
+          cargo mutants --workspace --in-place --in-diff pr.diff --no-shuffle
 
   package:
     needs: changed

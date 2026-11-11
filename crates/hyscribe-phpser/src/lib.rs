@@ -40,4 +40,4 @@ pub use query::{
     remove_query_arg, urldecode, urlencode, urlencode_deep,
 };
 pub use value::{Key, Value, lookup, wp_array_set};
-pub use wp::{Maybe, is_serialized, maybe_unserialize, php_trim};
+pub use wp::{Maybe, is_serialized, maybe_unserialize, php_trim, wp_basename};

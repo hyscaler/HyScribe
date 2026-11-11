@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `wp_get_loading_optimization_attributes()` for images rendered outside
-//! post content, with the request's content media count and high priority
-//! flag, which every image of the request shares.
+//! `wp_get_loading_optimization_attributes()`, with the request's content
+//! media count and high priority flag, which every image of the request
+//! shares.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -37,7 +37,7 @@ pub(crate) struct Optimization {
 
 /// The attributes an element has already, as `wp_get_loading_optimization_attributes()`
 /// reads them: a width or height only counts when both are known.
-#[derive(Clone, Copy, Default)]
+#[derive(Default)]
 pub(crate) struct Given<'a> {
     pub(crate) width: Option<i64>,
     pub(crate) height: Option<i64>,

@@ -10,7 +10,7 @@ use hyscribe_render::content_tags::filter;
 use hyscribe_render::site::Site;
 use libfuzzer_sys::fuzz_target;
 
-/// Every `wp-image-N` names an attachment with the input's metadata.
+/// Every attachment's stored metadata is the input's.
 struct Fuzzed<'a> {
     meta: &'a [u8],
 }
@@ -22,13 +22,8 @@ impl Site for Fuzzed<'_> {
     fn home_url(&self) -> Vec<u8> {
         Vec::new()
     }
-    fn post(&self, id: u64) -> Option<Post> {
-        Some(Post {
-            id,
-            post_type: "attachment".into(),
-            mime_type: "image/jpeg".into(),
-            ..Post::default()
-        })
+    fn post(&self, _: u64) -> Option<Post> {
+        None
     }
     fn post_terms(&self, _: u64, _: &str) -> Vec<Term> {
         Vec::new()

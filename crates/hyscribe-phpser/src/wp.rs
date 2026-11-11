@@ -95,6 +95,20 @@ pub fn php_trim(data: &[u8]) -> &[u8] {
     data.get(start..end).unwrap_or_default()
 }
 
+/// `wp_basename()`: the last part of `path`, `/` or `\\` before it.
+pub fn wp_basename(path: &[u8]) -> Vec<u8> {
+    let end = path
+        .iter()
+        .rposition(|b| !b"/\\".contains(b))
+        .map_or(0, |i| i + 1);
+    let path = path.get(..end).unwrap_or_default();
+    let start = path
+        .iter()
+        .rposition(|b| b"/\\".contains(b))
+        .map_or(0, |i| i + 1);
+    path.get(start..).unwrap_or_default().to_vec()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,5 +197,18 @@ mod tests {
         assert_eq!(php_trim(b"\0\x0B a \t\r\n"), b"a");
         assert_eq!(php_trim(b"   "), b"");
         assert_eq!(php_trim(b""), b"");
+    }
+
+    #[test]
+    fn wp_basename_takes_the_last_part() {
+        for (path, name) in [
+            (&b"a/b\\c//"[..], &b"c"[..]),
+            (b"a\\b.jpg", b"b.jpg"),
+            (b"a/b//", b"b"),
+            (b"plain", b"plain"),
+            (b"//", b""),
+        ] {
+            assert_eq!(wp_basename(path), name);
+        }
     }
 }

@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use hyscribe_model::{Term, TermFilter, TimeCondition};
-use hyscribe_phpser::{Key, Value, decode, is_empty_string, php_trim};
+use hyscribe_phpser::{Key, Value, decode, is_empty_string, php_trim, wp_basename};
 use hyscribe_render::formatting::{sanitize_title, sanitize_title_for_query};
 use hyscribe_render::post::{POST_FORMATS, post_format_string};
 use hyscribe_render::site::{Archive, Taxonomy};
@@ -132,7 +132,7 @@ pub fn tax_query(query: &HashMap<String, String>) -> TaxQuery {
             operator: Operator::In,
         });
     }
-    let category_name = basename(&plus("category_name"));
+    let category_name = wp_basename(&plus("category_name"));
     let emptied_category =
         !is_empty_string(var("category_name")) && is_empty_string(&category_name);
     clauses.extend(slug_clauses("category", &category_name));
@@ -251,20 +251,6 @@ fn php_compare(a: &[u8], b: &[u8]) -> Ordering {
     } else {
         a.cmp(b)
     }
-}
-
-/// `wp_basename()`: the last part of `path`, `/` or `\\` before it.
-pub(crate) fn basename(path: &[u8]) -> Vec<u8> {
-    let end = path
-        .iter()
-        .rposition(|b| !b"/\\".contains(b))
-        .map_or(0, |i| i + 1);
-    let path = path.get(..end).unwrap_or_default();
-    let start = path
-        .iter()
-        .rposition(|b| b"/\\".contains(b))
-        .map_or(0, |i| i + 1);
-    path.get(start..).unwrap_or_default().to_vec()
 }
 
 /// Whether a visitor can query the taxonomy `name`.

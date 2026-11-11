@@ -87,12 +87,13 @@ impl Renderer<'_> {
         let rendered = self.render_top_level(&content);
         self.context.loading.in_the_content = outer;
         // do_blocks() takes wpautop() off for content with blocks.
-        self.content_filters(&rendered, !contains(&content, b"<!-- wp:"))
+        self.content_filters(&rendered, !contains(&content, b"<!-- wp:"), true)
     }
 
     /// The `the_content` filters after `do_blocks()`; `wpautop()` only with
-    /// `autop`.
-    pub(crate) fn content_filters(&self, content: &[u8], autop: bool) -> Vec<u8> {
+    /// `autop`, `wp_filter_content_tags()` only with `tags` (excerpts unhook
+    /// it).
+    pub(crate) fn content_filters(&self, content: &[u8], autop: bool, tags: bool) -> Vec<u8> {
         let site = self.context.site;
         let content = wptexturize(content, &CORE_SHORTCODE_TAGS);
         let content = if autop {
@@ -101,7 +102,11 @@ impl Renderer<'_> {
             content
         };
         let content = capital_p_dangit(&replace_insecure_home_url(&site.home_url(), &content));
-        let content = wp_filter_content_tags(site, &self.context.loading, &content);
+        let content = if tags {
+            wp_filter_content_tags(site, &self.context.loading, &content)
+        } else {
+            content
+        };
         site_smilies(site, &content)
     }
 }

@@ -11,6 +11,9 @@ DOCKER="${DOCKER:-docker}"
 NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/crates/hyscribe-render/tests/golden/attachment-image.tsv"
+# RAW=1 prints the fixture's HTML for comparing by eye: never into the
+# committed golden.
+[ -n "${RAW:-}" ] && OUT=/dev/stdout
 
 "$DOCKER" exec -i -e RAW="${RAW:-}" "$NAME" php < "$ROOT/reference/attachment-image/golden.php" > "$OUT"
-wc -l "$OUT"
+[ -n "${RAW:-}" ] || wc -l "$OUT"

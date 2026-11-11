@@ -4,15 +4,18 @@
 //! iframes of post content get their dimensions, `srcset` and `sizes` from
 //! the attachment a `wp-image-N` class names, and the loading attributes.
 
+use std::collections::HashSet;
 use std::num::NonZeroU64;
 
 use hyscribe_html::{Attribute, TagProcessor};
 use hyscribe_kses::esc_attr;
-use hyscribe_phpser::Value;
+use hyscribe_phpser::{Value, isset, wp_basename};
 
-use crate::attachment::{basename, find, metadata, replace, srcset, upload_baseurl};
+use crate::attachment::{edit_hash, metadata, srcset, upload_baseurl};
+use crate::formatting::find;
 use crate::media::{Given, Loading};
 use crate::site::Site;
+use crate::template::replace;
 
 /// [`wp_filter_content_tags`] in or outside the main loop, on its own: the
 /// entry point for fuzzing.
@@ -28,13 +31,12 @@ pub(crate) fn wp_filter_content_tags(
 ) -> Vec<u8> {
     let matches = tags(content);
     let mut content = content.to_vec();
-    let mut done: Vec<&[u8]> = Vec::new();
+    let mut done: HashSet<&[u8]> = HashSet::new();
     for (tag, img) in matches {
         // Each distinct tag once; `str_replace()` covers its repeats.
-        if done.contains(&tag) {
+        if !done.insert(tag) {
             continue;
         }
-        done.push(tag);
         let filtered = if img {
             image(site, loading, tag)
         } else {
@@ -52,7 +54,7 @@ pub(crate) fn wp_filter_content_tags(
 fn tags(content: &[u8]) -> Vec<(&[u8], bool)> {
     let mut found = Vec::new();
     let mut at = 0;
-    while let Some(start) = find(content.get(at..).unwrap_or_default(), b"<").map(|i| at + i) {
+    while let Some(start) = find(content.get(at..).unwrap_or_default(), 0, b"<").map(|i| at + i) {
         let rest = content.get(start + 1..).unwrap_or_default();
         let name = [&b"img"[..], b"iframe"]
             .into_iter()
@@ -86,7 +88,7 @@ fn attribute<'a>(
     allowed: fn(&u8) -> bool,
 ) -> Option<&'a [u8]> {
     let mut at = 0;
-    while let Some(start) = find(tag.get(at..).unwrap_or_default(), prefix).map(|i| at + i) {
+    while let Some(start) = find(tag.get(at..).unwrap_or_default(), 0, prefix).map(|i| at + i) {
         let after = start + prefix.len();
         let quote = tag.get(after).filter(|q| quotes.contains(q));
         // Either quote may close what either opened, as the patterns allow.
@@ -116,10 +118,10 @@ fn source(tag: &[u8]) -> &[u8] {
 fn image(site: &dyn Site, loading: &Loading, tag: &[u8]) -> Vec<u8> {
     let mut image = tag.to_vec();
     if let Some(id) = image_id(tag).map(NonZeroU64::get) {
-        if find(&image, b" width=").is_none() && find(&image, b" height=").is_none() {
+        if find(&image, 0, b" width=").is_none() && find(&image, 0, b" height=").is_none() {
             image = add_width_and_height(site, &image, id);
         }
-        if find(&image, b" srcset=").is_none() {
+        if find(&image, 0, b" srcset=").is_none() {
             image = add_srcset_and_sizes(site, &image, id);
         }
     }
@@ -131,7 +133,8 @@ fn image(site: &dyn Site, loading: &Loading, tag: &[u8]) -> Vec<u8> {
 fn image_id(tag: &[u8]) -> Option<NonZeroU64> {
     let lower = tag.to_ascii_lowercase();
     let mut at = 0;
-    while let Some(start) = find(lower.get(at..).unwrap_or_default(), b"wp-image-").map(|i| at + i)
+    while let Some(start) =
+        find(lower.get(at..).unwrap_or_default(), 0, b"wp-image-").map(|i| at + i)
     {
         let digits: Vec<u8> = lower
             .iter()
@@ -152,15 +155,16 @@ fn image_id(tag: &[u8]) -> Option<NonZeroU64> {
 /// `wp_image_src_get_dimensions()`.
 fn dimensions(src: &[u8], meta: &Value) -> Option<(i64, i64)> {
     let int = |v: &Value, key| v.get_str(key).map_or(0, Value::to_int);
-    let file = meta.get_str("file").map(Value::to_php_string);
-    if file.is_some_and(|file| find(src, basename(&file)).is_some()) {
+    let file = meta.get_str("file").filter(|file| isset(Some(file)));
+    let file = file.map(|file| wp_basename(&file.to_php_string()));
+    if file.is_some_and(|file| find(src, 0, &file).is_some()) {
         return Some((int(meta, "width"), int(meta, "height")));
     }
-    let name = basename(src);
+    let name = wp_basename(src);
     let sizes = meta.get_str("sizes").and_then(Value::as_array)?;
     sizes
         .iter()
-        .find(|(_, size)| size.get_str("file").map(Value::to_php_string).as_deref() == Some(name))
+        .find(|(_, size)| size.get_str("file").map(Value::to_php_string).as_ref() == Some(&name))
         .map(|(_, size)| (int(size, "width"), int(size, "height")))
 }
 
@@ -188,7 +192,7 @@ fn add_width_and_height(site: &dyn Site, image: &[u8], id: u64) -> Vec<u8> {
 fn styled_width(image: &[u8]) -> Option<i64> {
     let mut at = 0;
     while let Some(start) =
-        find(image.get(at..).unwrap_or_default(), b"style=\"width:").map(|i| at + i)
+        find(image.get(at..).unwrap_or_default(), 0, b"style=\"width:").map(|i| at + i)
     {
         let rest = image.get(start + 13..).unwrap_or_default();
         let rest = rest
@@ -219,8 +223,7 @@ fn add_srcset_and_sizes(site: &dyn Site, image: &[u8], id: u64) -> Vec<u8> {
         .get_str("file")
         .map(Value::to_php_string)
         .unwrap_or_default();
-    let edited =
-        crate::attachment::edit_hash(&file).is_some_and(|hash| find(basename(src), hash).is_none());
+    let edited = edit_hash(&file).is_some_and(|hash| find(&wp_basename(src), 0, hash).is_none());
     if src.is_empty() || edited {
         return image.to_vec();
     }
@@ -235,13 +238,8 @@ fn add_srcset_and_sizes(site: &dyn Site, image: &[u8], id: u64) -> Vec<u8> {
     let Some((width, height)) = size else {
         return image.to_vec();
     };
-    let made = srcset(
-        (width.unsigned_abs(), height.unsigned_abs()),
-        src,
-        &meta,
-        &upload_baseurl(site),
-    );
-    let has_sizes = find(image, b" sizes=").is_some();
+    let made = srcset((width, height), src, &meta, &upload_baseurl(site));
+    let has_sizes = find(image, 0, b" sizes=").is_some();
     let attr = match made {
         Some(srcset) if has_sizes => format!(" srcset=\"{}\"", esc_attr(srcset.as_bytes())),
         // A `srcset` means a width, so `sizes` has one.
@@ -253,7 +251,7 @@ fn add_srcset_and_sizes(site: &dyn Site, image: &[u8], id: u64) -> Vec<u8> {
         _ => return image.to_vec(),
     };
     // `/<img ([^>]+?)[\/ ]*>/`
-    let Some(start) = find(image, b"<img ") else {
+    let Some(start) = find(image, 0, b"<img ") else {
         return image.to_vec();
     };
     let inner = image.get(start + 5..).unwrap_or_default();
@@ -291,7 +289,7 @@ fn add_loading(loading: &Loading, image: &[u8]) -> Vec<u8> {
         fetchpriority,
     };
     let optimization = loading.optimization(true, &given, true);
-    if find(image, b" src=\"").is_none() {
+    if find(image, 0, b" src=\"").is_none() {
         return image.to_vec();
     }
     let insert = |image: Vec<u8>, name: &str, value: Option<&str>| match value {
@@ -306,7 +304,7 @@ fn add_loading(loading: &Loading, image: &[u8]) -> Vec<u8> {
     if decoding.is_none() {
         image = insert(image, "decoding", optimization.decoding);
     }
-    if find(&image, b" width=\"").is_none() || find(&image, b" height=\"").is_none() {
+    if find(&image, 0, b" width=\"").is_none() || find(&image, 0, b" height=\"").is_none() {
         return image;
     }
     if loading_value.is_none() {
@@ -345,11 +343,11 @@ fn auto_sizes(image: &[u8]) -> Vec<u8> {
 
 /// `wp_iframe_tag_add_loading_attr()` for an iframe without `loading`.
 fn iframe(loading: &Loading, tag: &[u8]) -> Vec<u8> {
-    if find(tag, b" loading=").is_some() {
+    if find(tag, 0, b" loading=").is_some() {
         return tag.to_vec();
     }
     // Sizes only matter for being known, not for their values.
-    let known = |name: &[u8]| find(tag, name).map(|_| 100);
+    let known = |name: &[u8]| find(tag, 0, name).map(|_| 100);
     let given = Given {
         width: known(b" width=\""),
         height: known(b" height=\""),
@@ -358,7 +356,7 @@ fn iframe(loading: &Loading, tag: &[u8]) -> Vec<u8> {
     let optimization = loading.optimization(false, &given, true);
     let complete = [&b" src=\""[..], b" width=\"", b" height=\""]
         .iter()
-        .all(|n| find(tag, n).is_some());
+        .all(|n| find(tag, 0, n).is_some());
     match optimization.loading.filter(|_| complete) {
         Some(value) => replace(
             tag,

@@ -1962,14 +1962,14 @@ async fn by_slug(
             narrowed(site, query, post).await
         };
         let post = post.await?;
-        let name = sanitize_title_for_query(&query::basename(path.as_bytes()));
+        let name = sanitize_title_for_query(&hyscribe_phpser::wp_basename(path.as_bytes()));
         ("pagename", "page", post, name)
     } else if let Some(attachment) = ["subpost", "attachment"]
         .iter()
         .find_map(|k| query.get(*k).filter(|v| !v.is_empty()))
     {
         // get_posts() names the query after the attachment; none is served.
-        let name = sanitize_title_for_query(&query::basename(attachment.as_bytes()));
+        let name = sanitize_title_for_query(&hyscribe_phpser::wp_basename(attachment.as_bytes()));
         ("attachment", "attachment", None, name)
     } else {
         return Ok(None);

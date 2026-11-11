@@ -813,7 +813,7 @@ fn inline_styles(queue: &mut [Style]) {
 /// `_wp_normalize_relative_css_links()`: relative `url()`s made relative
 /// to the site root instead.
 fn normalize_relative_css_links(css: &str, src: &str) -> String {
-    let dir = dirname(src);
+    let dir = std::str::from_utf8(crate::formatting::dirname(src.as_bytes())).unwrap_or_default();
     let bytes = css.as_bytes();
     let space = |b: &u8| b.is_ascii_whitespace() || *b == 0x0b;
     let skip = |at: usize| {
@@ -873,24 +873,6 @@ fn normalize_relative_css_links(css: &str, src: &str) -> String {
     }
     out.extend_from_slice(bytes.get(at..).unwrap_or_default());
     String::from_utf8_lossy(&out).into_owned()
-}
-
-/// PHP's `dirname()`: trailing slashes, the last component, then the
-/// slashes before it removed; `.` with no directory, `/` at the root, and
-/// empty for an empty path.
-fn dirname(path: &str) -> &str {
-    let trimmed = path.trim_end_matches('/');
-    if trimmed.is_empty() {
-        return if path.is_empty() { "" } else { "/" };
-    }
-    let Some(slash) = trimmed.rfind('/') else {
-        return ".";
-    };
-    let parent = trimmed
-        .get(..slash)
-        .unwrap_or_default()
-        .trim_end_matches('/');
-    if parent.is_empty() { "/" } else { parent }
 }
 
 /// `wp_make_link_relative()`.

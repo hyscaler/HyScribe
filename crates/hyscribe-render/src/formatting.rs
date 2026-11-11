@@ -311,12 +311,43 @@ pub(crate) fn contains(text: &[u8], needle: &[u8]) -> bool {
     find(text, 0, needle).is_some()
 }
 
+/// `strpos( $s, $literal, $from )`; an empty literal is found where the
+/// search starts, as `str_contains()` finds it.
 pub(crate) fn find(s: &[u8], from: usize, literal: &[u8]) -> Option<usize> {
-    s.get(from..)
-        .unwrap_or_default()
-        .windows(literal.len())
+    let rest = s.get(from..).unwrap_or_default();
+    if literal.is_empty() {
+        return Some(from);
+    }
+    rest.windows(literal.len())
         .position(|window| window == literal)
         .map(|at| at + from)
+}
+
+/// `untrailingslashit()`.
+pub(crate) fn untrailingslashit(url: &[u8]) -> &[u8] {
+    let slashes = url
+        .iter()
+        .rev()
+        .take_while(|b| matches!(b, b'/' | b'\\'))
+        .count();
+    url.get(..url.len() - slashes).unwrap_or_default()
+}
+
+/// PHP's `dirname()`: trailing slashes, the last component, then the
+/// slashes before it removed; `.` with no directory, `/` at the root, and
+/// empty for an empty path.
+pub(crate) fn dirname(path: &[u8]) -> &[u8] {
+    let trim = |p: &[u8]| -> usize { p.len() - p.iter().rev().take_while(|b| **b == b'/').count() };
+    let trimmed = path.get(..trim(path)).unwrap_or_default();
+    if trimmed.is_empty() {
+        return if path.is_empty() { b"" } else { b"/" };
+    }
+    let Some(slash) = trimmed.iter().rposition(|b| *b == b'/') else {
+        return b".";
+    };
+    let parent = trimmed.get(..slash).unwrap_or_default();
+    let parent = parent.get(..trim(parent)).unwrap_or_default();
+    if parent.is_empty() { b"/" } else { parent }
 }
 
 /// `preg_replace()` of one pattern, with the number of replacements.

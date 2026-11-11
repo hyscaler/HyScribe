@@ -75,7 +75,11 @@ impl Renderer<'_> {
         let content = get_the_content(self, post, false);
         let content = self.excerpt_remove_blocks(&content);
         let content = excerpt_remove_footnotes(&content);
-        let content = replace(&self.content_filters(&content, true), b"]]>", b"]]&gt;");
+        let content = replace(
+            &self.content_filters(&content, true, false),
+            b"]]>",
+            b"]]&gt;",
+        );
         wp_trim_words(&content, length, more)
     }
 

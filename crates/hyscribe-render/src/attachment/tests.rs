@@ -40,12 +40,9 @@ fn matches_php() {
             .map(|b| format!("{b:02x}"))
             .collect();
         if hash != fields[3] {
-            failures.push(format!(
-                "{id} {} {}: ours {}",
-                fields[1],
-                fields[2],
-                String::from_utf8_lossy(&ours)
-            ));
+            // Only names and hashes: the fixture's content must not reach logs; `RAW=1`
+            // on the golden script shows PHP's HTML locally.
+            failures.push(format!("{id} {} {}: ours {hash}", fields[1], fields[2]));
         }
     }
     assert!(
@@ -108,7 +105,7 @@ fn attachment_urls() {
     );
     assert_eq!(relative_path(b"a.jpg"), b"");
     assert_eq!(replace(b"x/a.jpg/a.jpg", b"a.jpg", b"b"), b"x/b/b");
-    assert_eq!(find(b"", b""), Some(0));
+    assert_eq!(find(b"", 0, b""), Some(0));
     assert_eq!(image_downsize(&site, 6, "full"), None);
 }
 
@@ -239,6 +236,11 @@ fn srcsets() {
         made((1, 1), "http://s.test/u/q-1x1.jpg", square).as_deref(),
         Some("http://s.test/u/q-1x1.jpg 1w, http://s.test/u/q.jpg 2w")
     );
+    let four = r#"{"file":"q.jp","width":2,"height":2,"sizes":{"t":{"file":"q-1x1.jp","width":1,"height":1}}}"#;
+    assert_eq!(
+        made((1, 1), "http://s.test/u/q-1x1.jp", four).as_deref(),
+        Some("http://s.test/u/q-1x1.jp 1w, http://s.test/u/q.jp 2w")
+    );
     // Only the first file the source contains is the source.
     let later = r#"{"file":"a.jpg","width":1000,"height":500,"sizes":{"m":{"file":"a-300x150.jpg","width":300,"height":150},"big":{"file":"x150.jpg","width":600,"height":300},"wide":{"file":"a-2048.jpg","width":2048,"height":1024}}}"#;
     assert_eq!(
@@ -287,17 +289,6 @@ fn given_attributes() {
     let u = "http://s.test/wp-content/uploads/2020";
     let srcset = format!("{u}/a-300x150.jpg 300w, {u}/a.jpg 1000w");
     assert_eq!(
-        image(&[("width", b"50".to_vec()), ("height", b"x".to_vec())]),
-        format!(
-            "<img width=\"50\" height=\"150\" src=\"{u}/a-300x150.jpg\" class=\"attachment-medium size-medium\" alt=\"Alt\" decoding=\"async\" loading=\"lazy\" srcset=\"{srcset}\" sizes=\"auto, (max-width: 300px) 100vw, 300px\" />"
-        )
-    );
-    let tall = image(&[("height", b"70".to_vec())]);
-    assert!(
-        tall.starts_with("<img width=\"300\" height=\"70\" "),
-        "{tall}"
-    );
-    assert_eq!(
         image(&[("sizes", b"AUTO, 50vw".to_vec())]),
         format!(
             "<img width=\"300\" height=\"150\" src=\"{u}/a-300x150.jpg\" class=\"attachment-medium size-medium\" alt=\"Alt\" sizes=\"AUTO, 50vw\" decoding=\"async\" loading=\"lazy\" srcset=\"{srcset}\" />"
@@ -321,4 +312,63 @@ fn stored_sizes_over_their_limits_shrink() {
     // A size without a width keeps its height, not the original's; no
     // side shrinks below 1.
     assert_eq!(size("odd"), Some((1, 50)));
+}
+
+/// Negative stored sizes print as their `absint()`; `"0"` options and files
+/// are PHP's empty.
+#[test]
+fn falsy_and_negative_values() {
+    let mut site = site(vec![
+        ("medium_size_w", "0"),
+        ("medium_size_h", "0"),
+        ("upload_url_path", "0"),
+    ]);
+    site.posts = vec![
+        attachment(50, "image/jpeg", "http://g.test/n.jpg"),
+        attachment(51, "image/jpeg", "http://g.test/zero.jpg"),
+    ];
+    site.meta = vec![
+        (50, "_wp_attached_file", b"n.jpg".to_vec()),
+        (
+            50,
+            "_wp_attachment_metadata",
+            meta(r#"{"file":"n.jpg","width":-5,"height":-7}"#),
+        ),
+        (51, "_wp_attached_file", b"0".to_vec()),
+    ];
+    let html = String::from_utf8(wp_get_attachment_image(
+        &site,
+        &Loading::default(),
+        50,
+        "medium",
+        &[],
+        false,
+    ))
+    .unwrap();
+    assert!(
+        html.starts_with(
+            r#"<img width="5" height="7" src="http://s.test/wp-content/uploads/n.jpg""#
+        ),
+        "{html}"
+    );
+    assert_eq!(
+        attachment_url(&site, 51).as_deref(),
+        Some(&b"http://g.test/zero.jpg"[..])
+    );
+}
+
+#[test]
+fn php_paths() {
+    // `dirname()` keeps a root and squeezes doubled slashes.
+    assert_eq!(relative_path(b"/a.jpg"), b"/");
+    assert_eq!(relative_path(b"2020//a.jpg"), b"2020");
+    // An imported file is an image by a lower case extension after a dot.
+    assert!(image_extension(b"a.png"));
+    assert!(!image_extension(b"a.PNG"));
+    assert!(!image_extension(b"png"));
+    let base = |options| String::from_utf8(upload_baseurl(&site(options))).unwrap();
+    let mut slashed = vec![("upload_path", " files ")];
+    slashed.push(("siteurl", "http://t.test/"));
+    // The fixture site's own siteurl comes later, so this one is found first.
+    assert_eq!(base(slashed), "http://t.test/files");
 }

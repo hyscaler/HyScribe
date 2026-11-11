@@ -21,7 +21,7 @@ DB_NAME="${HYSCRIBE_PHP_DB:-wordpress}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 UPLOADS=()
 if [ "$DB_NAME" = wordpress_ttd ]; then
-  UPLOADS=(-v "$ROOT/target/fixtures/theme-test-data/7.1.3/uploads:/var/www/html/wp-content/uploads:ro")
+  UPLOADS=(-v "$ROOT/target/fixtures/theme-test-data/${HYSCRIBE_WP_VERSION:-7.1.3}/uploads:/var/www/html/wp-content/uploads:ro")
 fi
 
 case "${1:-}" in

@@ -2179,7 +2179,7 @@ fn page_paths_match_php() {
         assert_eq!(ours, php, "{path:?}");
     }
     assert_eq!(golden.lines().count(), 26);
-    assert_eq!(query::basename(b"a/b\\c//"), b"c");
+    assert_eq!(hyscribe_phpser::wp_basename(b"a/b\\c//"), b"c");
 }
 
 #[test]

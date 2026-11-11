@@ -641,7 +641,7 @@ pub fn home_path(home: &str) -> &str {
 
 /// `untrailingslashit()`.
 fn untrailingslashit(url: &str) -> &str {
-    url.trim_end_matches(['/', '\\'])
+    std::str::from_utf8(crate::formatting::untrailingslashit(url.as_bytes())).unwrap_or_default()
 }
 
 /// `trailingslashit()`.

@@ -29,15 +29,9 @@ fn matches_php() {
             .map(|b| format!("{b:02x}"))
             .collect();
         if hash != fields[2] {
-            let case = String::from_utf8_lossy(&content)
-                .chars()
-                .take(200)
-                .collect::<String>();
-            failures.push(format!(
-                "{case} {}:\n{}",
-                fields[1],
-                String::from_utf8_lossy(&ours)
-            ));
+            // Only names and hashes: the fixture's content must not reach logs; `RAW=1`
+            // on the golden script shows PHP's HTML locally.
+            failures.push(format!("{} loop {}: ours {hash}", fields[0], fields[1]));
         }
     }
     assert!(
@@ -291,5 +285,49 @@ fn given_priorities() {
     assert_eq!(
         filter(&site, br#"<img src="a.jpg" width="9" height='9'>"#, false),
         br#"<img decoding="async" src="a.jpg" width="9" height='9'>"#
+    );
+}
+
+/// Negative stored sizes give no `srcset`; a null `file` is not set.
+#[test]
+fn negative_and_null_metadata() {
+    use crate::fixture::{attachment, meta, site};
+    let mut site = site(vec![]);
+    site.posts = vec![
+        attachment(60, "image/jpeg", ""),
+        attachment(61, "image/jpeg", ""),
+    ];
+    site.meta = vec![
+        (
+            60,
+            "_wp_attachment_metadata",
+            meta(
+                r#"{"file":"a.jpg","width":-300,"height":-150,"sizes":{"s":{"file":"a-150x75.jpg","width":150,"height":75},"m":{"file":"a-200x100.jpg","width":200,"height":100}}}"#,
+            ),
+        ),
+        (
+            61,
+            "_wp_attachment_metadata",
+            meta(r#"{"file":null,"width":640,"height":480}"#),
+        ),
+    ];
+    let filtered = |content: &str| {
+        String::from_utf8(wp_filter_content_tags(
+            &site,
+            &Loading::default(),
+            content.as_bytes(),
+        ))
+        .unwrap()
+    };
+    let u = "http://s.test/wp-content/uploads";
+    assert_eq!(
+        filtered(&format!(r#"<img src="{u}/a.jpg" class="wp-image-60">"#)),
+        format!(
+            r#"<img decoding="async" width="-300" height="-150" src="{u}/a.jpg" class="wp-image-60">"#
+        )
+    );
+    assert_eq!(
+        filtered(r#"<img src="x.jpg" class="wp-image-61">"#),
+        r#"<img decoding="async" src="x.jpg" class="wp-image-61">"#
     );
 }

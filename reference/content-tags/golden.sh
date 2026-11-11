@@ -13,6 +13,9 @@ NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
 DB="${HYSCRIBE_DB_CONTAINER:-hyscribe-default-install-db}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/crates/hyscribe-render/tests/golden/content-tags.tsv"
+# RAW=1 prints the fixture's HTML for comparing by eye: never into the
+# committed golden.
+[ -n "${RAW:-}" ] && OUT=/dev/stdout
 
 ids=$("$DOCKER" exec "$DB" mariadb -uwordpress -preference-only wordpress_ttd -N -e \
   "SELECT ID FROM wp_posts WHERE post_type IN ('post','page') AND (post_content LIKE '%<img%' OR post_content LIKE '%<iframe%') ORDER BY ID")
@@ -53,4 +56,4 @@ for content in "${cases[@]}"; do
     "$DOCKER" exec -i -e POST=1177 -e CONTENT="$hex" -e LOOP="$loop" -e RAW="${RAW:-}" "$NAME" php < "$ROOT/reference/content-tags/golden.php" >> "$OUT"
   done
 done
-wc -l "$OUT"
+[ -n "${RAW:-}" ] || wc -l "$OUT"

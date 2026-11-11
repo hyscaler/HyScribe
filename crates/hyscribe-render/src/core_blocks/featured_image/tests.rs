@@ -30,11 +30,12 @@ fn matches_php() {
             .map(|b| format!("{b:02x}"))
             .collect();
         if hash != fields[2] {
+            // Only names and hashes: the fixture's content must not reach logs; `RAW=1`
+            // on the golden script shows PHP's HTML locally.
             failures.push(format!(
-                "{} {}\n  ours: {}",
+                "{} {}: ours {hash}",
                 fields[0],
-                String::from_utf8_lossy(&markup),
-                String::from_utf8_lossy(&ours)
+                String::from_utf8_lossy(&markup)
             ));
         }
     }

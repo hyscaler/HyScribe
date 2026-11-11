@@ -18,6 +18,9 @@ DOCKER="${DOCKER:-docker}"
 MARIADB_IMAGE="${MARIADB_IMAGE:-mariadb:11.8}"
 CLI_IMAGE="${CLI_IMAGE:-wordpress:cli-php8.4}"
 VERSION="${1:-7.1.3}"
+case "$VERSION" in
+  *[!0-9.]* | "") echo "not a WordPress version: $VERSION" >&2; exit 2 ;;
+esac
 DATA_COMMIT="b47acf980696897936265182cb684dca648476c7"
 DATA_SHA256="457aace6ec93cf77369bbcc6158996e52da8798bd5e39c83d58dfab9b50d64fa"
 IMPORTER_VERSION="0.9.7"

@@ -6,7 +6,7 @@
 
 use hyscribe_html::{Attribute, TagProcessor};
 use hyscribe_kses::{esc_attr, esc_url, safecss_filter_attr, strip_tags};
-use hyscribe_phpser::{Key, Value, php_trim};
+use hyscribe_phpser::{Key, Value, is_empty_string, php_trim};
 
 use super::avatar::border_attributes;
 use super::{Block, Context};
@@ -42,7 +42,7 @@ pub(super) fn post_featured_image(context: &Context<'_>, block: &Block<'_>) -> V
     let post = context.site.post(id);
     if is_link {
         let title = post.as_ref().map(the_title).unwrap_or_default();
-        let alt = if title.is_empty() {
+        let alt = if is_empty_string(&title) {
             format!("Untitled post {id}").into_bytes()
         } else {
             php_trim(&strip_tags(&title)).to_vec()
@@ -92,11 +92,9 @@ pub(super) fn post_featured_image(context: &Context<'_>, block: &Block<'_>) -> V
             .as_ref()
             .map(|p| context.permalink(p))
             .unwrap_or_default();
-        let rel = text("rel");
-        let rel = if rel.is_empty() {
-            String::new()
-        } else {
-            format!("rel=\"{}\"", esc_attr(&rel))
+        let rel = match block.attribute("rel").filter(|rel| !rel.is_empty()) {
+            Some(rel) => format!("rel=\"{}\"", esc_attr(&rel.to_php_string())),
+            None => String::new(),
         };
         [
             format!(

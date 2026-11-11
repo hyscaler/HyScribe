@@ -159,7 +159,7 @@ pub(crate) fn metadata(site: &dyn Site, id: u64) -> Option<Value> {
 }
 
 /// `image_downsize()` for a named size: the URL, width and height.
-fn image_downsize(site: &dyn Site, id: u64, size: &str) -> Option<(Vec<u8>, i64, i64)> {
+pub(crate) fn image_downsize(site: &dyn Site, id: u64, size: &str) -> Option<(Vec<u8>, i64, i64)> {
     let post = site
         .post(id)
         .filter(|post| post.post_type == "attachment")?;

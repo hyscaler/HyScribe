@@ -90,6 +90,7 @@ pub(crate) fn render(
         "core/comments" | "core/post-comments" => comments,
         "core/comments-pagination" => comments_pagination,
         "core/comments-title" => comments_title,
+        "core/cover" => cover::cover,
         "core/breadcrumbs" => breadcrumbs::breadcrumbs,
         "core/button" => button::button,
         "core/calendar" => calendar::calendar,
@@ -1452,6 +1453,7 @@ mod breadcrumbs;
 mod button;
 mod calendar;
 mod comment_form;
+mod cover;
 mod featured_image;
 mod image;
 mod latest_comments;

@@ -5,7 +5,7 @@ use hyscribe_testkit::unhex;
 use sha2::{Digest, Sha256};
 
 use super::*;
-use crate::fixture::ThemeTestData;
+use crate::fixture::{ThemeTestData, attachment, meta, site};
 
 /// Every case of `reference/attachment-image/golden.sh`, by hash: the
 /// fixture's content is not ours to commit.
@@ -55,70 +55,6 @@ fn matches_php() {
         failures[..failures.len().min(10)].join("\n")
     );
     assert_eq!(golden.lines().count(), 1053);
-}
-
-/// An in-memory site: options, attachments and their meta.
-struct Fake {
-    options: Vec<(&'static str, &'static str)>,
-    posts: Vec<hyscribe_model::Post>,
-    meta: Vec<(u64, &'static str, Vec<u8>)>,
-}
-
-impl Site for Fake {
-    fn option(&self, name: &str) -> Option<Vec<u8>> {
-        self.options
-            .iter()
-            .find(|(n, _)| *n == name)
-            .map(|(_, v)| v.as_bytes().to_vec())
-    }
-
-    fn home_url(&self) -> Vec<u8> {
-        Vec::new()
-    }
-
-    fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
-        self.posts.iter().find(|p| p.id == id).cloned()
-    }
-
-    fn post_terms(&self, _: u64, _: &str) -> Vec<hyscribe_model::Term> {
-        Vec::new()
-    }
-
-    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
-        self.meta
-            .iter()
-            .find(|(i, k, _)| *i == id && *k == key)
-            .map(|(_, _, v)| v.clone())
-    }
-
-    fn query(&self, _: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
-        Vec::new()
-    }
-}
-
-fn attachment(id: u64, mime_type: &str, guid: &str) -> hyscribe_model::Post {
-    hyscribe_model::Post {
-        id,
-        post_type: "attachment".into(),
-        mime_type: mime_type.into(),
-        guid: guid.as_bytes().to_vec(),
-        ..Default::default()
-    }
-}
-
-/// Serialized metadata from JSON.
-fn meta(json: &str) -> Vec<u8> {
-    hyscribe_phpser::encode(&json_decode(json.as_bytes()).unwrap())
-}
-
-fn site(options: Vec<(&'static str, &'static str)>) -> Fake {
-    let mut options = options;
-    options.push(("siteurl", "http://s.test"));
-    Fake {
-        options,
-        posts: Vec::new(),
-        meta: Vec::new(),
-    }
 }
 
 #[test]
@@ -172,6 +108,7 @@ fn attachment_urls() {
     );
     assert_eq!(relative_path(b"a.jpg"), b"");
     assert_eq!(replace(b"x/a.jpg/a.jpg", b"a.jpg", b"b"), b"x/b/b");
+    assert_eq!(find(b"", b""), Some(0));
     assert_eq!(image_downsize(&site, 6, "full"), None);
 }
 

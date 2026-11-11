@@ -14,6 +14,7 @@ pub mod clickable;
 mod comment_pages;
 mod comments;
 mod content;
+pub mod content_tags;
 mod core_blocks;
 pub mod date;
 mod elements;

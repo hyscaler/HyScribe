@@ -540,6 +540,7 @@ dependencies = [
  "hyscribe-html",
  "hyscribe-http",
  "hyscribe-kses",
+ "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-render",
  "hyscribe-theme-json",

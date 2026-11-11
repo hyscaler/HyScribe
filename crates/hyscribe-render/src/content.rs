@@ -12,6 +12,7 @@ use hyscribe_phpser::{Value, is_empty_string};
 
 use crate::autop::wpautop;
 use crate::blocks::Block;
+use crate::content_tags::wp_filter_content_tags;
 use crate::core_blocks::prepared;
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, contains, wptexturize};
 use crate::post::the_title;
@@ -99,10 +100,9 @@ impl Renderer<'_> {
         } else {
             content
         };
-        site_smilies(
-            site,
-            &capital_p_dangit(&replace_insecure_home_url(&site.home_url(), &content)),
-        )
+        let content = capital_p_dangit(&replace_insecure_home_url(&site.home_url(), &content));
+        let content = wp_filter_content_tags(site, &self.context.loading, &content);
+        site_smilies(site, &content)
     }
 }
 

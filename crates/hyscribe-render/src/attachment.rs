@@ -115,7 +115,7 @@ fn set(attrs: &mut Vec<(String, Vec<u8>)>, name: &str, value: Vec<u8>) {
 }
 
 /// `wp_get_upload_dir()['baseurl']`.
-fn upload_baseurl(site: &dyn Site) -> Vec<u8> {
+pub(crate) fn upload_baseurl(site: &dyn Site) -> Vec<u8> {
     let option = |name| site.option(name).unwrap_or_default();
     let url_path = option("upload_url_path");
     if !url_path.is_empty() {
@@ -150,7 +150,7 @@ fn attachment_url(site: &dyn Site, id: u64) -> Option<Vec<u8>> {
 
 /// `wp_get_attachment_metadata()`: the stored value. One that is not an
 /// array, which PHP turns down, has no keys for the callers to find.
-fn metadata(site: &dyn Site, id: u64) -> Option<Value> {
+pub(crate) fn metadata(site: &dyn Site, id: u64) -> Option<Value> {
     let stored = site.post_meta(id, "_wp_attachment_metadata")?;
     match maybe_unserialize(&stored) {
         Maybe::Value(value) => Some(value),
@@ -267,7 +267,7 @@ fn matches_ratio(width: i64, height: i64, other_width: i64, other_height: i64) -
 }
 
 /// `wp_calculate_image_srcset()`, with the default 2048 pixel limit.
-fn srcset(size: (u64, u64), src: &[u8], meta: &Value, baseurl: &[u8]) -> Option<String> {
+pub(crate) fn srcset(size: (u64, u64), src: &[u8], meta: &Value, baseurl: &[u8]) -> Option<String> {
     let file = meta
         .get_str("file")
         .map(Value::to_php_string)
@@ -369,7 +369,7 @@ fn srcset(size: (u64, u64), src: &[u8], meta: &Value, baseurl: &[u8]) -> Option<
 }
 
 /// The `-e` and thirteen digits an edited image's file name carries.
-fn edit_hash(name: &[u8]) -> Option<&[u8]> {
+pub(crate) fn edit_hash(name: &[u8]) -> Option<&[u8]> {
     name.windows(15)
         .find(|w| w.starts_with(b"-e") && w.iter().skip(2).all(u8::is_ascii_digit))
 }
@@ -391,7 +391,7 @@ fn relative_path(file: &[u8]) -> &[u8] {
 }
 
 /// `wp_basename()`.
-fn basename(path: &[u8]) -> &[u8] {
+pub(crate) fn basename(path: &[u8]) -> &[u8] {
     let path = path.strip_suffix(b"/").unwrap_or(path);
     path.rsplit(|b| *b == b'/').next().unwrap_or_default()
 }
@@ -405,7 +405,12 @@ fn image_extension(file: &[u8]) -> bool {
         .any(|e| extension.eq_ignore_ascii_case(e.as_bytes()))
 }
 
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+/// `strpos()`: an empty needle is found at the start, as `str_contains()`
+/// finds it.
+pub(crate) fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
     haystack.windows(needle.len()).position(|w| w == needle)
 }
 
@@ -414,7 +419,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 /// `str_replace()` of every `from` in `text`.
-fn replace(text: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
+pub(crate) fn replace(text: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut rest = text;
     while let Some(at) = find(rest, from).filter(|_| !from.is_empty()) {

@@ -17,6 +17,7 @@ hyscribe-auth = { path = "../crates/hyscribe-auth" }
 hyscribe-phpser = { path = "../crates/hyscribe-phpser" }
 hyscribe-config = { path = "../crates/hyscribe-config" }
 hyscribe-render = { path = "../crates/hyscribe-render" }
+hyscribe-model = { path = "../crates/hyscribe-model" }
 hyscribe-http = { path = "../crates/hyscribe-http" }
 hyscribe-html = { path = "../crates/hyscribe-html" }
 hyscribe-kses = { path = "../crates/hyscribe-kses" }
@@ -123,6 +124,13 @@ bench = false
 [[bin]]
 name = "date_zone"
 path = "fuzz_targets/date_zone.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "content_tags"
+path = "fuzz_targets/content_tags.rs"
 test = false
 doc = false
 bench = false

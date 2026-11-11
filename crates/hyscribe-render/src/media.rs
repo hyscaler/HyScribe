@@ -35,6 +35,16 @@ pub(crate) struct Optimization {
     pub(crate) decoding: Option<&'static str>,
 }
 
+/// The attributes an element has already, as `wp_get_loading_optimization_attributes()`
+/// reads them: a width or height only counts when both are known.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Given<'a> {
+    pub(crate) width: Option<i64>,
+    pub(crate) height: Option<i64>,
+    pub(crate) loading: Option<&'a [u8]>,
+    pub(crate) fetchpriority: Option<&'a [u8]>,
+}
+
 impl Loading {
     pub(crate) fn in_the_loop(in_the_loop: bool) -> Loading {
         Loading {
@@ -48,26 +58,64 @@ impl Loading {
     /// `fetchpriority` or `decoding` given, in a context that is neither
     /// the header nor post content.
     pub(crate) fn img(&self, width: i64, height: i64) -> Optimization {
-        if self.in_the_content {
-            return Optimization::default();
-        }
-        let mut attributes = Optimization {
-            decoding: Some("async"),
-            ..Optimization::default()
+        let given = Given {
+            width: Some(width),
+            height: Some(height),
+            ..Given::default()
         };
-        // wp_omit_loading_attr_threshold()
-        let in_viewport = self.in_the_loop && self.shared.media_count.get() < 3;
-        if !in_viewport {
-            attributes.loading = Some("lazy");
-        } else if !self.shared.high_priority_taken.get() && width.saturating_mul(height) >= 50_000 {
-            // wp_maybe_add_fetchpriority_high_attr()
-            attributes.fetchpriority = Some("high");
-            self.shared.high_priority_taken.set(true);
+        self.optimization(true, &given, false)
+    }
+
+    /// `wp_get_loading_optimization_attributes()` for an `img` or, when
+    /// `img` is false, an `iframe`; `content` is the `the_content` context,
+    /// which other images inside that filter are not.
+    pub(crate) fn optimization(&self, img: bool, given: &Given<'_>, content: bool) -> Optimization {
+        let mut attributes = Optimization::default();
+        if self.in_the_content && !content {
+            return attributes;
         }
-        if self.in_the_loop {
-            self.shared
-                .media_count
-                .set(self.shared.media_count.get() + 1);
+        if img {
+            attributes.decoding = Some("async");
+        }
+        let (Some(width), Some(height)) = (given.width, given.height) else {
+            return attributes;
+        };
+        let mut in_viewport = given.loading.map(|loading| loading != b"lazy");
+        let low = given.fetchpriority == Some(b"low");
+        // A given priority stays as given; only its effect is ported.
+        match given.fetchpriority {
+            Some(b"high") if in_viewport != Some(false) => in_viewport = Some(true),
+            Some(b"low") => in_viewport = Some(false),
+            _ => {}
+        }
+        let mut counted = false;
+        if in_viewport.is_none() && self.in_the_loop {
+            // wp_omit_loading_attr_threshold()
+            in_viewport = Some(self.shared.media_count.get() < 3);
+            counted = true;
+        }
+        if in_viewport == Some(true) {
+            // wp_maybe_add_fetchpriority_high_attr()
+            // Iframes, sized 100 by 100 here, never reach the threshold.
+            match given.fetchpriority {
+                Some(b"auto") | None => {
+                    let flag = &self.shared.high_priority_taken;
+                    if !flag.get() && width.saturating_mul(height) >= 50_000 {
+                        if given.fetchpriority.is_none() {
+                            attributes.fetchpriority = Some("high");
+                        }
+                        flag.set(true);
+                    }
+                }
+                Some(b"high") => self.shared.high_priority_taken.set(true),
+                _ => {}
+            }
+        } else if !low {
+            attributes.loading = Some("lazy");
+        }
+        if counted && given.fetchpriority != Some(b"auto") {
+            let count = &self.shared.media_count;
+            count.set(count.get() + 1);
         }
         attributes
     }

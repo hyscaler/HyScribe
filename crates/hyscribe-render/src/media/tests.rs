@@ -44,3 +44,27 @@ fn counts_images_in_the_loop() {
     assert_eq!(clone.img(50, 50).loading, None);
     assert_eq!(fresh.img(50, 50).loading, Some("lazy"));
 }
+
+/// In the viewport, a `fetchpriority` other than `high` or `auto` stays as
+/// given and still counts.
+#[test]
+fn unknown_priorities_count() {
+    let looped = Loading::in_the_loop(true);
+    let given = Given {
+        width: Some(500),
+        height: Some(500),
+        fetchpriority: Some(b"bogus"),
+        ..Given::default()
+    };
+    let expected = Optimization {
+        decoding: Some("async"),
+        ..Optimization::default()
+    };
+    for _ in 0..3 {
+        assert_eq!(looped.optimization(true, &given, true), expected);
+    }
+    assert_eq!(
+        looped.optimization(true, &given, true).loading,
+        Some("lazy")
+    );
+}

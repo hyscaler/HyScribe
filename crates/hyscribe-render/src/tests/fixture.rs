@@ -601,3 +601,67 @@ impl Site for NoData {
         Vec::new()
     }
 }
+
+/// An in-memory site: options, attachments and their meta.
+pub(crate) struct Fake {
+    pub(crate) options: Vec<(&'static str, &'static str)>,
+    pub(crate) posts: Vec<hyscribe_model::Post>,
+    pub(crate) meta: Vec<(u64, &'static str, Vec<u8>)>,
+}
+
+impl Site for Fake {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        self.options
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, v)| v.as_bytes().to_vec())
+    }
+
+    fn home_url(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        self.posts.iter().find(|p| p.id == id).cloned()
+    }
+
+    fn post_terms(&self, _: u64, _: &str) -> Vec<hyscribe_model::Term> {
+        Vec::new()
+    }
+
+    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        self.meta
+            .iter()
+            .find(|(i, k, _)| *i == id && *k == key)
+            .map(|(_, _, v)| v.clone())
+    }
+
+    fn query(&self, _: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
+        Vec::new()
+    }
+}
+
+pub(crate) fn attachment(id: u64, mime_type: &str, guid: &str) -> hyscribe_model::Post {
+    hyscribe_model::Post {
+        id,
+        post_type: "attachment".into(),
+        mime_type: mime_type.into(),
+        guid: guid.as_bytes().to_vec(),
+        ..Default::default()
+    }
+}
+
+/// Serialized metadata from JSON.
+pub(crate) fn meta(json: &str) -> Vec<u8> {
+    hyscribe_phpser::encode(&hyscribe_phpser::json_decode(json.as_bytes()).unwrap())
+}
+
+pub(crate) fn site(options: Vec<(&'static str, &'static str)>) -> Fake {
+    let mut options = options;
+    options.push(("siteurl", "http://s.test"));
+    Fake {
+        options,
+        posts: Vec::new(),
+        meta: Vec::new(),
+    }
+}

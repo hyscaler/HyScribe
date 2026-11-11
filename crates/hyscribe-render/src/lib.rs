@@ -20,6 +20,7 @@ pub mod date;
 mod elements;
 mod excerpt;
 pub mod feed;
+mod file_block;
 #[cfg(test)]
 #[path = "tests/fixture.rs"]
 mod fixture;

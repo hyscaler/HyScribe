@@ -119,6 +119,7 @@ pub(crate) fn render(
         "core/site-tagline" => site_tagline,
         "core/tag-cloud" => tag_cloud::tag_cloud,
         "core/term-description" => term_description,
+        "core/video" => video::video,
         "core/site-title" => site_title,
         _ => return None,
     };
@@ -1460,6 +1461,7 @@ mod latest_comments;
 mod loginout;
 mod tag_cloud;
 mod time_to_read;
+mod video;
 
 #[cfg(test)]
 mod tests;

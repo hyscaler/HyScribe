@@ -10,24 +10,38 @@ use hyscribe_phpser::{
 };
 
 use crate::formatting::{contains, dirname, find, untrailingslashit};
-use crate::media::Loading;
+use crate::media::{Given, Loading};
 use crate::site::Site;
 use crate::template::replace;
+use hyscribe_model::Post;
+
+/// What callers add around `wp_get_attachment_image()` with filters.
+#[derive(Default)]
+pub(crate) struct ImageOptions<'a> {
+    /// `get_the_post_thumbnail()`'s `wp-post-image` class.
+    pub(crate) post_thumbnail: bool,
+    /// A `wp_get_attachment_image_src` filter on the width and height.
+    pub(crate) resize: Option<&'a dyn Fn(i64, i64) -> (i64, i64)>,
+}
 
 /// `wp_get_attachment_image( $id, $size, false, $attr )`: `attr` overrides
-/// or adds attributes, in order; a width, height or loading attribute in it
-/// is not ported, as no caller gives one. A `post_thumbnail` gets the class
-/// `get_the_post_thumbnail()` adds.
+/// or adds attributes, in order; a `loading` or `fetchpriority` in it is
+/// read as given, and an empty one left out. A `width`, `height` or
+/// `decoding` in it is not ported, as no caller gives one.
 pub(crate) fn wp_get_attachment_image(
     site: &dyn Site,
     loading: &Loading,
     id: u64,
     size: &str,
     attr: &[(&str, Vec<u8>)],
-    post_thumbnail: bool,
+    options: &ImageOptions<'_>,
 ) -> Vec<u8> {
     let Some((src, width, height)) = image_downsize(site, id, size) else {
         return Vec::new();
+    };
+    let (width, height) = match options.resize {
+        Some(resize) if width != 0 && height != 0 => resize(width, height),
+        _ => (width, height),
     };
     let mut attrs: Vec<(String, Vec<u8>)> = vec![
         ("src".into(), src.clone()),
@@ -40,7 +54,13 @@ pub(crate) fn wp_get_attachment_image(
     for (name, value) in attr {
         set(&mut attrs, name, value.clone());
     }
-    let optimization = loading.img(width, height);
+    let given = Given {
+        width: Some(width),
+        height: Some(height),
+        loading: get(&attrs, "loading"),
+        fetchpriority: get(&attrs, "fetchpriority"),
+    };
+    let optimization = loading.optimization(true, &given, false);
     let extra = [
         ("decoding", optimization.decoding),
         ("fetchpriority", optimization.fetchpriority),
@@ -51,6 +71,10 @@ pub(crate) fn wp_get_attachment_image(
             set(&mut attrs, name, value.as_bytes().to_vec());
         }
     }
+    // A `loading` or `fetchpriority` given as false is left out.
+    attrs.retain(|(name, value)| {
+        !(matches!(name.as_str(), "loading" | "fetchpriority") && is_empty_string(value))
+    });
     if get(&attrs, "srcset").is_none_or(<[u8]>::is_empty) {
         let size = (
             i64::try_from(width.unsigned_abs()).unwrap_or(i64::MAX),
@@ -77,7 +101,7 @@ pub(crate) fn wp_get_attachment_image(
             set(&mut attrs, "sizes", sizes);
         }
     }
-    if post_thumbnail {
+    if options.post_thumbnail {
         let class = [get(&attrs, "class").unwrap_or_default(), b" wp-post-image"].concat();
         set(&mut attrs, "class", class);
     }
@@ -180,6 +204,17 @@ pub(crate) fn metadata(site: &dyn Site, id: u64) -> Option<Value> {
     }
 }
 
+/// `wp_attachment_is( 'image', $post )`: an attached file, and an image
+/// type, or an image extension for an imported one.
+pub(crate) fn attachment_is_image(site: &dyn Site, post: &Post) -> bool {
+    let file = site
+        .post_meta(post.id, "_wp_attached_file")
+        .unwrap_or_default();
+    !is_empty_string(&file)
+        && (post.mime_type.starts_with("image/")
+            || post.mime_type == "import" && image_extension(&file))
+}
+
 /// `image_downsize()` for a named size: the URL, width and height.
 pub(crate) fn image_downsize(site: &dyn Site, id: u64, size: &str) -> Option<(Vec<u8>, i64, i64)> {
     let post = site
@@ -187,10 +222,7 @@ pub(crate) fn image_downsize(site: &dyn Site, id: u64, size: &str) -> Option<(Ve
         .filter(|post| post.post_type == "attachment")?;
     let mut url = attachment_url(site, id)?;
     let meta = metadata(site, id).unwrap_or_default();
-    let file = site.post_meta(id, "_wp_attached_file").unwrap_or_default();
-    let is_image = !is_empty_string(&file)
-        && (post.mime_type.starts_with("image/")
-            || post.mime_type == "import" && image_extension(&file));
+    let is_image = attachment_is_image(site, &post);
     let mut name = wp_basename(&url);
     let (mut width, mut height) = (0, 0);
     let use_size = |sized: &Value, url: &mut Vec<u8>, name: &mut Vec<u8>| {

@@ -118,6 +118,7 @@ pub(crate) fn render(
         "core/query-title" => query_title,
         "core/query-total" => query_total,
         "core/read-more" => read_more,
+        "core/site-logo" => site_logo::site_logo,
         "core/site-tagline" => site_tagline,
         "core/tag-cloud" => tag_cloud::tag_cloud,
         "core/term-description" => term_description,
@@ -1462,6 +1463,7 @@ mod heading_list;
 mod image;
 mod latest_comments;
 mod loginout;
+mod site_logo;
 mod tag_cloud;
 mod time_to_read;
 mod video;

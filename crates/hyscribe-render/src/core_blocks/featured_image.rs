@@ -10,7 +10,7 @@ use hyscribe_phpser::{Key, Value, is_empty_string, php_trim};
 
 use super::avatar::border_attributes;
 use super::{Block, Context};
-use crate::attachment::{post_thumbnail_id, wp_get_attachment_image};
+use crate::attachment::{ImageOptions, post_thumbnail_id, wp_get_attachment_image};
 use crate::post::the_title;
 use crate::style::get_styles;
 
@@ -64,7 +64,10 @@ pub(super) fn post_featured_image(context: &Context<'_>, block: &Block<'_>) -> V
             thumbnail,
             &size,
             &attr,
-            true,
+            &ImageOptions {
+                post_thumbnail: true,
+                ..ImageOptions::default()
+            },
         ),
         None => Vec::new(),
     };

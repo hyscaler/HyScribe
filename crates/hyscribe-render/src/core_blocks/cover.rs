@@ -12,7 +12,8 @@ use hyscribe_phpser::Value;
 
 use super::{Block, Context};
 use crate::attachment::{
-    attachment_alt, focal_position, image_downsize, post_thumbnail_id, wp_get_attachment_image,
+    ImageOptions, attachment_alt, focal_position, image_downsize, post_thumbnail_id,
+    wp_get_attachment_image,
 };
 use crate::blocks::is_pcre_space;
 use crate::formatting::is_word;
@@ -47,7 +48,10 @@ pub(super) fn cover(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
             thumbnail,
             &size,
             &attr,
-            true,
+            &ImageOptions {
+                post_thumbnail: true,
+                ..ImageOptions::default()
+            },
         )
     } else {
         let size = text("sizeSlug").unwrap_or_else(|| b"full".to_vec());

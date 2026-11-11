@@ -33,8 +33,14 @@ fn matches_php() {
             .collect();
         let attrs: Vec<(&str, Vec<u8>)> =
             attrs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-        let ours =
-            wp_get_attachment_image(&site, &Loading::default(), id, fields[1], &attrs, false);
+        let ours = wp_get_attachment_image(
+            &site,
+            &Loading::default(),
+            id,
+            fields[1],
+            &attrs,
+            &ImageOptions::default(),
+        );
         let hash: String = Sha256::digest(&ours)
             .iter()
             .map(|b| format!("{b:02x}"))
@@ -163,7 +169,14 @@ fn downsizes_files_that_are_not_images() {
         Some((format!("{uploads}/2020/p.png"), 10, 20))
     );
     assert_eq!(down(13, "full"), None);
-    let html = wp_get_attachment_image(&site, &Loading::default(), 14, "full", &[], false);
+    let html = wp_get_attachment_image(
+        &site,
+        &Loading::default(),
+        14,
+        "full",
+        &[],
+        &ImageOptions::default(),
+    );
     assert_eq!(
         String::from_utf8(html).unwrap(),
         format!(
@@ -282,7 +295,7 @@ fn given_attributes() {
             20,
             "medium",
             attr,
-            false,
+            &ImageOptions::default(),
         ))
         .unwrap()
     };
@@ -293,6 +306,34 @@ fn given_attributes() {
         format!(
             "<img width=\"300\" height=\"150\" src=\"{u}/a-300x150.jpg\" class=\"attachment-medium size-medium\" alt=\"Alt\" sizes=\"AUTO, 50vw\" decoding=\"async\" loading=\"lazy\" srcset=\"{srcset}\" />"
         )
+    );
+}
+
+/// The site logo's size filter leaves an image with a side of 0 alone, as
+/// a stored size with no height and no size limits gives.
+#[test]
+fn resize_needs_both_sides() {
+    let mut site = site(vec![]);
+    site.posts = vec![attachment(30, "image/jpeg", "")];
+    let stored = r#"{"file":"b.jpg","sizes":{"medium":{"file":"b-w.jpg","width":80}}}"#;
+    site.meta = vec![
+        (30, "_wp_attached_file", b"b.jpg".to_vec()),
+        (30, "_wp_attachment_metadata", meta(stored)),
+    ];
+    assert_eq!(
+        image_downsize(&site, 30, "medium").map(|(_, w, h)| (w, h)),
+        Some((80, 0))
+    );
+    let resize = |_, _| (7, 7);
+    let options = ImageOptions {
+        resize: Some(&resize),
+        ..ImageOptions::default()
+    };
+    let html = wp_get_attachment_image(&site, &Loading::default(), 30, "medium", &[], &options);
+    assert!(
+        String::from_utf8(html)
+            .unwrap()
+            .starts_with("<img width=\"80\" src=")
     );
 }
 
@@ -342,7 +383,7 @@ fn falsy_and_negative_values() {
         50,
         "medium",
         &[],
-        false,
+        &ImageOptions::default(),
     ))
     .unwrap();
     assert!(

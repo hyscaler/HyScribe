@@ -2,7 +2,9 @@
 
 //! What dynamic blocks read from the site and the request (ADR 0009).
 
-use hyscribe_model::{CalendarMonth, Comment, DateCount, Period, Post, PostQuery, Term, User};
+use hyscribe_model::{
+    CalendarMonth, Comment, DateCount, Period, Post, PostQuery, Term, TermQuery, User,
+};
 use hyscribe_phpser::Value;
 
 /// The site's data, as blocks read it while rendering.
@@ -67,6 +69,12 @@ pub trait Site {
     /// the most used first, `limit` of them, with their post counts.
     /// Sites without term data have none.
     fn cloud_terms(&self, _taxonomy: &str, _limit: u64) -> Vec<Term> {
+        vec![]
+    }
+
+    /// The terms `WP_Term_Query`'s SQL selects, in its order. Sites
+    /// without term data have none.
+    fn term_query(&self, _query: &TermQuery) -> Vec<Term> {
         vec![]
     }
 

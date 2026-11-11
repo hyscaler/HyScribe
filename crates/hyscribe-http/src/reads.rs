@@ -11,7 +11,9 @@ use std::collections::HashMap;
 use std::future::Future;
 
 use hyscribe_db::DbError;
-use hyscribe_model::{CalendarMonth, Comment, DateCount, Period, Post, PostQuery, Term, User};
+use hyscribe_model::{
+    CalendarMonth, Comment, DateCount, Period, Post, PostQuery, Term, TermQuery, User,
+};
 use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
@@ -137,6 +139,10 @@ impl RenderSite for Reads<'_> {
 
     fn cloud_terms(&self, taxonomy: &str, limit: u64) -> Vec<Term> {
         self.wait(self.site.db.cloud_terms(taxonomy, limit))
+    }
+
+    fn term_query(&self, query: &TermQuery) -> Vec<Term> {
+        self.wait(self.site.db.term_query(query))
     }
 
     fn taxonomy_terms(&self, taxonomy: &str) -> Vec<Term> {

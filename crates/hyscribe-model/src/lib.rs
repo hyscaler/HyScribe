@@ -162,6 +162,49 @@ pub struct PostQuery {
     pub offset: u32,
 }
 
+/// The SQL part of a `WP_Term_Query` for one taxonomy: what its `WHERE`,
+/// `ORDER BY` and `LIMIT` clauses say.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TermQuery {
+    /// `tt.taxonomy`.
+    pub taxonomy: String,
+    /// `include`: `t.term_id IN (...)` when not empty.
+    pub include: Vec<u64>,
+    /// `tt.parent = n`.
+    pub parent: Option<u64>,
+    /// `tt.count > 0`.
+    pub nonempty: bool,
+    /// The order and whether it descends; none for `orderby=none`.
+    pub order: Option<(TermOrder, bool)>,
+    /// `LIMIT n`.
+    pub limit: Option<u64>,
+}
+
+/// What `WP_Term_Query::parse_orderby()` orders terms by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TermOrder {
+    /// `t.term_id`.
+    TermId,
+    /// `t.name`.
+    Name,
+    /// `t.slug`.
+    Slug,
+    /// `t.term_group`.
+    TermGroup,
+    /// `tt.count`.
+    Count,
+    /// `tt.parent`.
+    Parent,
+    /// `tt.taxonomy`.
+    Taxonomy,
+    /// `tt.term_taxonomy_id`.
+    TermTaxonomyId,
+    /// `tt.description`.
+    Description,
+    /// `FIELD( t.term_id, include )`.
+    Include,
+}
+
 /// A `tax_query` clause on term IDs, without children.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TermFilter {

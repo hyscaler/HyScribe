@@ -402,6 +402,7 @@ fn comment_pages_under_pretty_permalinks() {
         post_id: None,
         query: None,
         comment: None,
+        terms: Default::default(),
         loading: Default::default(),
     };
     let entry = post(10, "post", "publish", "entry", "2026-01-02 03:04:05");

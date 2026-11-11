@@ -14,7 +14,8 @@ use std::fmt;
 
 use hyscribe_config::{Database, Prefix};
 use hyscribe_model::{
-    CalendarMonth, Comment, DateCount, OrderBy, Period, Post, PostQuery, Term, TimeCondition, User,
+    CalendarMonth, Comment, DateCount, OrderBy, Period, Post, PostQuery, Term, TermOrder,
+    TermQuery, TimeCondition, User,
 };
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
@@ -141,6 +142,12 @@ fn term(row: &MySqlRow) -> Result<Term, DbError> {
         count: c.signed("count").unsigned_abs(),
     };
     c.finish(term)
+}
+
+fn term_id(row: &MySqlRow) -> Result<u64, DbError> {
+    let mut c = Columns::new(row);
+    let id = c.unsigned("term_id");
+    c.finish(id)
 }
 
 fn date_count(row: &MySqlRow) -> Result<DateCount, DbError> {
@@ -717,6 +724,69 @@ impl Db {
         rows.iter().map(term).collect()
     }
 
+    /// The terms `WP_Term_Query` selects with `query`, in its order: its
+    /// query for IDs as written, whose plan orders ties, then those terms.
+    pub async fn term_query(&self, query: &TermQuery) -> Result<Vec<Term>, DbError> {
+        let mut sql = Sql::new(
+            "SELECT t.term_id FROM {prefix}terms AS t \
+             INNER JOIN {prefix}term_taxonomy AS tt ON t.term_id = tt.term_id \
+             WHERE tt.taxonomy IN (?)",
+        );
+        sql.bind(Bind::Text(query.taxonomy.clone()));
+        if !query.include.is_empty() {
+            sql.push(" AND t.term_id IN (");
+            list(&mut sql, query.include.iter().copied().map(Bind::Int));
+        }
+        if let Some(parent) = query.parent {
+            sql.push(" AND tt.parent = ?");
+            sql.bind(Bind::Int(parent));
+        }
+        if query.nonempty {
+            sql.push(" AND tt.count > 0");
+        }
+        if let Some((order, descending)) = query.order {
+            sql.push(" ORDER BY ");
+            match term_order_column(order) {
+                Some(column) => sql.push(column),
+                None => {
+                    sql.push("FIELD( t.term_id, ");
+                    list(&mut sql, query.include.iter().copied().map(Bind::Int));
+                }
+            }
+            sql.push(if descending { " DESC" } else { " ASC" });
+        }
+        if let Some(limit) = query.limit {
+            sql.push(" LIMIT ?");
+            sql.bind(Bind::Int(limit));
+        }
+        let rows = sql
+            .query(&self.prefix)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        let ids: Result<Vec<u64>, DbError> = rows.iter().map(term_id).collect();
+        let mut sql = Sql::new(concat!(
+            "SELECT ",
+            terms_from!(),
+            "WHERE tt.taxonomy = ? AND t.term_id IN ("
+        ));
+        sql.bind(Bind::Text(query.taxonomy.clone()));
+        list(&mut sql, ids_or_none(ids.as_deref().unwrap_or_default()));
+        let rows = sql
+            .query(&self.prefix)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error);
+        ids.and_then(|ids| {
+            let terms: Result<Vec<Term>, DbError> =
+                rows.and_then(|rows| rows.iter().map(term).collect());
+            terms.map(|mut terms| {
+                terms.sort_by_key(|term| ids.iter().position(|id| *id == term.id));
+                terms
+            })
+        })
+    }
+
     /// The published posts in each term of `taxonomy`, as `(term ID, post
     /// ID)`: what `_pad_term_counts()` reads.
     pub async fn term_posts(&self, taxonomy: &str) -> Result<Vec<(u64, u64)>, DbError> {
@@ -1167,6 +1237,22 @@ fn list(sql: &mut Sql, values: impl Iterator<Item = Bind>) {
 /// list valid when empty and, matching nothing earlier, changes no order.
 fn field_ids(ids: &[u64]) -> impl Iterator<Item = Bind> + '_ {
     ids.iter().copied().chain(std::iter::once(0)).map(Bind::Int)
+}
+
+/// The column a term order sorts by; none for the `FIELD()` of `include`.
+fn term_order_column(order: TermOrder) -> Option<&'static str> {
+    Some(match order {
+        TermOrder::TermId => "t.term_id",
+        TermOrder::Name => "t.name",
+        TermOrder::Slug => "t.slug",
+        TermOrder::TermGroup => "t.term_group",
+        TermOrder::Count => "tt.count",
+        TermOrder::Parent => "tt.parent",
+        TermOrder::Taxonomy => "tt.taxonomy",
+        TermOrder::TermTaxonomyId => "tt.term_taxonomy_id",
+        TermOrder::Description => "tt.description",
+        TermOrder::Include => return None,
+    })
 }
 
 /// The `ORDER BY` term of an order without binds: a column or `RAND()`.

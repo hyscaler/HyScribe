@@ -2437,3 +2437,113 @@ async fn pretty_pages_match_php() {
     assert_eq!(attachments, 1);
     assert_eq!(golden.lines().count(), 727);
 }
+
+/// Every case of `reference/term-template/golden.sh` over the Theme Test
+/// Data fixture's database: `WP_Term_Query`'s terms and whole terms query
+/// blocks, by hash, as the fixture's content is not ours to commit.
+#[tokio::test(flavor = "multi_thread")]
+async fn term_template_matches_php() {
+    use hyscribe_render::site::{Archive, Site as _, Taxonomy};
+    use hyscribe_render::term_template::{TermArgs, get_terms};
+    use sha2::{Digest, Sha256};
+    let mut config = fixture_config();
+    config.name = "wordpress_ttd".into();
+    let db = Db::connect(&config)
+        .await
+        .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
+    let home = Some("http://127.0.0.1:8081".to_string());
+    let site = Arc::new(Site::load(db, home.clone(), home).await.unwrap());
+    let handle = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let reads = Reads::new(&site, handle);
+        let hash = |bytes: &[u8]| -> String {
+            Sha256::digest(bytes)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect()
+        };
+        let golden = include_str!("../tests/golden/term-template.tsv");
+        let mut failures = Vec::new();
+        for line in golden.lines() {
+            let fields: Vec<&str> = line.split('\t').collect();
+            let (name, ours) = if fields[0] == "query" {
+                let json = hyscribe_testkit::unhex(fields[1]);
+                let args = hyscribe_phpser::json_decode(&json).unwrap();
+                let get = |key| args.get_str(key).cloned().unwrap_or(Value::Null);
+                let args = TermArgs {
+                    taxonomy: String::from_utf8(get("taxonomy").to_php_string()).unwrap(),
+                    number: get("number").to_int().unsigned_abs(),
+                    order: get("order"),
+                    orderby: get("orderby").to_php_string(),
+                    hide_empty: !get("hide_empty").is_empty(),
+                    parent: args.get_str("parent").map(Value::to_int),
+                    child_of: get("child_of").to_int(),
+                    include: get("include")
+                        .as_array()
+                        .unwrap_or_default()
+                        .iter()
+                        .map(|(_, id)| id.to_int().unsigned_abs())
+                        .collect(),
+                };
+                let ids: Vec<String> = get_terms(&reads, &args)
+                    .iter()
+                    .map(|term| term.id.to_string())
+                    .collect();
+                (json, ids.join(",").into_bytes())
+            } else {
+                let query = String::from_utf8(hyscribe_testkit::unhex(fields[1])).unwrap();
+                let mut request = hyscribe_render::site::Request::default();
+                if let Some((key, id)) = query.split_once('=') {
+                    let (taxonomy, name) = match key {
+                        "cat" => (Taxonomy::Category, "category"),
+                        _ => (Taxonomy::Tag, "post_tag"),
+                    };
+                    let term = reads.term(id.parse().unwrap(), name);
+                    request.archive = Some(Archive::Term(taxonomy, term));
+                }
+                let markup = hyscribe_testkit::unhex(fields[2]);
+                let html = hyscribe_render::template::render_content(
+                    &site.theme,
+                    &reads,
+                    &request,
+                    &markup,
+                );
+                ([query.as_bytes(), b" ", &markup].concat(), html)
+            };
+            if hash(&ours) != fields[fields.len() - 1] {
+                // Only names and hashes: `RAW=1` on the golden script shows PHP's.
+                failures.push(String::from_utf8_lossy(&name).into_owned());
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "{} differ:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+        assert_eq!(golden.lines().count(), 355);
+        // Beyond PHP, which reads a null queried object there: an inheriting
+        // template on a term archive without its term lists nothing.
+        let request = hyscribe_render::site::Request {
+            archive: Some(Archive::Term(Taxonomy::Category, None)),
+            ..Default::default()
+        };
+        let inherit = b"<!-- wp:terms-query {\"termQuery\":{\"inherit\":true}} --><div><!-- wp:term-template --><!-- wp:term-name /--><!-- /wp:term-template --></div><!-- /wp:terms-query -->";
+        let html = hyscribe_render::template::render_content(&site.theme, &reads, &request, inherit);
+        assert_eq!(
+            String::from_utf8(html).unwrap(),
+            "<div class=\"is-layout-flow wp-block-terms-query-is-layout-flow\"></div>"
+        );
+        // Outside a template and a term archive, there is no description.
+        let request = hyscribe_render::site::Request::default();
+        let html = hyscribe_render::template::render_content(
+            &site.theme,
+            &reads,
+            &request,
+            b"<!-- wp:term-description /-->",
+        );
+        assert!(html.is_empty());
+    })
+    .await
+    .unwrap();
+}

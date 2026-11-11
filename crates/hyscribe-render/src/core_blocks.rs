@@ -40,6 +40,17 @@ pub(crate) struct Context<'a> {
     pub(crate) comment: Option<Comment>,
     /// The loop and image counts images' loading attributes depend on.
     pub(crate) loading: Loading,
+    /// The terms query block's context and the term template's.
+    pub(crate) terms: TermContext,
+}
+
+/// The block context of a terms query block's descendants.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TermContext {
+    /// `termQuery`.
+    pub(crate) query: Option<Value>,
+    /// `taxonomy` and `termId`, which the term template gives each term.
+    pub(crate) term: Option<(String, u64)>,
 }
 
 /// The block context of a query block's descendants: `query`,

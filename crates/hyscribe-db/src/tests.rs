@@ -5,7 +5,7 @@
 
 use super::*;
 use hyscribe_config::Secret;
-use hyscribe_model::{FormatFilter, Term, TermFilter, TimeCondition};
+use hyscribe_model::{FormatFilter, Term, TermFilter, TermOrder, TermQuery, TimeCondition};
 
 fn fixture_config() -> Database {
     hyscribe_testkit::fixture_database()
@@ -380,6 +380,7 @@ async fn errors_are_reported() {
         db.recent_comments(1).await.unwrap_err(),
         db.cloud_terms("post_tag", 1).await.unwrap_err(),
         db.taxonomy_terms("category").await.unwrap_err(),
+        db.term_query(&TermQuery::default()).await.unwrap_err(),
         db.has_published_posts("post").await.unwrap_err(),
         db.calendar_month(2026, 10, 31).await.unwrap_err(),
         db.term_posts("category").await.unwrap_err(),
@@ -429,6 +430,7 @@ async fn a_row_without_the_columns_fails_to_decode() {
         .unwrap();
     assert!(post(&row).is_err());
     assert!(date_count(&row).is_err());
+    assert!(term_id(&row).is_err());
     let mut c = Columns::new(&row);
     let _ = (c.text("option_name"), c.bytes("option_value"));
     assert!(c.finish(()).is_err());
@@ -1101,4 +1103,38 @@ async fn excluded_authors_leave_their_posts_out() {
     };
     assert!(db.posts(&query(vec![1])).await.unwrap().is_empty());
     assert_eq!(db.posts(&query(vec![2, 3])).await.unwrap().len(), 2);
+}
+
+/// Every order and clause of a term query is valid SQL; the one category
+/// comes back.
+#[tokio::test]
+async fn term_queries_order_by_any_column() {
+    let db = fixture().await;
+    for order in [
+        TermOrder::TermId,
+        TermOrder::Name,
+        TermOrder::Slug,
+        TermOrder::TermGroup,
+        TermOrder::Count,
+        TermOrder::Parent,
+        TermOrder::Taxonomy,
+        TermOrder::TermTaxonomyId,
+        TermOrder::Description,
+        TermOrder::Include,
+    ] {
+        let query = TermQuery {
+            taxonomy: "category".into(),
+            include: vec![1, 2],
+            parent: Some(0),
+            nonempty: true,
+            order: Some((order, order == TermOrder::Name)),
+            limit: Some(5),
+        };
+        let terms = db.term_query(&query).await.unwrap();
+        assert_eq!(
+            terms.iter().map(|t| t.id).collect::<Vec<_>>(),
+            [1],
+            "{order:?}"
+        );
+    }
 }

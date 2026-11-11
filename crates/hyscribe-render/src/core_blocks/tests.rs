@@ -184,6 +184,7 @@ fn matches_php() {
             post_id,
             query: None,
             comment: None,
+            terms: Default::default(),
             loading: Default::default(),
         };
         let ours = render_markup(&context, &markup);
@@ -234,6 +235,7 @@ fn relative_dates() {
         post_id: Some(7),
         query: None,
         comment: None,
+        terms: Default::default(),
         loading: Default::default(),
     };
     let markup = br#"<!-- wp:post-date {"format":"human-diff"} /-->"#;
@@ -258,6 +260,7 @@ fn blocks_without_a_callback_render_their_saved_markup() {
         post_id: None,
         query: None,
         comment: None,
+        terms: Default::default(),
         loading: Default::default(),
     };
     assert_eq!(render(&context, "core/paragraph", &[], b""), None);
@@ -310,6 +313,7 @@ fn bindings_and_the_front_page() {
         post_id: Some(9),
         query: None,
         comment: None,
+        terms: Default::default(),
         loading: Default::default(),
     };
     let html =
@@ -388,6 +392,7 @@ fn post_terms_match_php() {
             post_id: (state.get_str("context") == Some(&Value::Bool(true))).then_some(1001),
             query: None,
             comment: None,
+            terms: Default::default(),
             loading: Default::default(),
         };
         assert_eq!(
@@ -493,6 +498,7 @@ fn post_navigation_links_match_php() {
             post_id: Some(site.post.as_ref().map_or(9999, |post| post.id)),
             query: None,
             comment: None,
+            terms: Default::default(),
             loading: Default::default(),
         };
         assert_eq!(
@@ -529,6 +535,7 @@ fn comments_match_php() {
             post_id: site.post.as_ref().map(|post| post.id),
             query: None,
             comment: None,
+            terms: Default::default(),
             loading: Default::default(),
         };
         assert_eq!(
@@ -564,6 +571,7 @@ fn legacy_comments_are_not_ported() {
         post_id: Some(1),
         query: None,
         comment: None,
+        terms: Default::default(),
         loading: Default::default(),
     };
     for markup in [
@@ -591,6 +599,7 @@ fn avatar_defaults_without_options() {
         post_id: None,
         query: None,
         comment: None,
+        terms: Default::default(),
         loading: Default::default(),
     };
     assert_eq!(
@@ -633,6 +642,7 @@ fn comment_form_without_comment_data() {
         post_id: Some(0),
         query: None,
         comment: None,
+        terms: Default::default(),
         loading: Default::default(),
     };
     let html =
@@ -706,6 +716,7 @@ fn footnotes_match_php() {
             post_id: Some(1),
             query: None,
             comment: None,
+            terms: Default::default(),
             loading: Default::default(),
         };
         let ours = render_markup(&context, &unhex(fields[0]));

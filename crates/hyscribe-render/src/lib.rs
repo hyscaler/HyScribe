@@ -47,6 +47,7 @@ mod social_link;
 pub mod style;
 pub mod supports;
 pub mod template;
+pub mod term_template;
 pub mod theme;
 mod title;
 mod variations;

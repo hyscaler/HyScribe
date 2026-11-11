@@ -1271,7 +1271,7 @@ async fn conditional_requests_match_apache() {
             .unwrap();
         assert_eq!(body.is_empty(), status != StatusCode::OK, "{line}");
     }
-    assert_eq!(golden.lines().count(), 24);
+    assert_eq!(golden.lines().count(), 37);
 }
 
 /// Every file of `reference/wordpress/files-golden.sh`: `wp-includes` as

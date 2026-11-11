@@ -8,7 +8,7 @@ use hyscribe_kses::esc_url;
 use hyscribe_phpser::{add_query_arg, urlencode};
 
 use super::{Block, Context};
-use crate::formatting::find;
+use crate::permalinks::home_path;
 
 /// `render_block_core_loginout()` for a visitor.
 pub(super) fn loginout(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
@@ -58,10 +58,9 @@ fn login_form(login: &[u8], redirect: &[u8]) -> String {
 /// $_SERVER['REQUEST_URI']`, with the scheme and host of the home URL in
 /// place of the `Host` header, which the client controls.
 fn current_url(context: &Context<'_>) -> Vec<u8> {
-    let home = context.site.home_url();
-    let host = find(&home, 0, b"://").map_or(0, |at| at + 3);
-    let end = find(&home, host, b"/").unwrap_or(home.len());
-    [home.get(..end).unwrap_or_default(), &context.request.uri].concat()
+    let home = String::from_utf8_lossy(&context.site.home_url()).into_owned();
+    let origin = home.strip_suffix(home_path(&home)).unwrap_or(&home);
+    [origin.as_bytes(), &context.request.uri].concat()
 }
 
 #[cfg(test)]

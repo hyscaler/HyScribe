@@ -10,8 +10,8 @@ use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     if let Some(tz) = Tz::parse(data) {
-        // Years 1 to 9999, the range stored dates hold.
-        for time in [-62_135_596_800, -1, 0, 1_782_900_000, 253_402_300_799] {
+        // From the empty date's -0001-11-30 to the end of year 9999.
+        for time in [-62_170_000_000, -1, 0, 1_782_900_000, 253_402_300_799] {
             let _ = tz.period(time);
             let _ = tz.resolve(time);
         }

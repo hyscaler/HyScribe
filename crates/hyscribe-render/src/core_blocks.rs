@@ -104,6 +104,7 @@ pub(crate) fn render(
         "core/post-comments-link" => post_comments_link,
         "core/post-date" => post_date,
         "core/post-excerpt" => post_excerpt,
+        "core/post-featured-image" => featured_image::post_featured_image,
         "core/post-navigation-link" => post_navigation_link,
         "core/post-terms" => post_terms,
         "core/post-time-to-read" => time_to_read::post_time_to_read,
@@ -1450,6 +1451,7 @@ mod breadcrumbs;
 mod button;
 mod calendar;
 mod comment_form;
+mod featured_image;
 mod latest_comments;
 mod loginout;
 mod tag_cloud;

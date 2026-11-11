@@ -1,0 +1,430 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! `wp_get_attachment_image()` for a named size, and what it builds on: an
+//! attachment's URL and stored metadata, the size's dimensions, and
+//! `srcset` and `sizes` from the sizes stored.
+
+use hyscribe_kses::{esc_attr, strip_tags};
+use hyscribe_phpser::{Maybe, Value, maybe_unserialize, php_trim};
+
+use crate::media::Loading;
+use crate::site::Site;
+
+/// `wp_get_attachment_image( $id, $size, false, $attr )`: `attr` overrides
+/// or adds attributes, in order. A `post_thumbnail` gets the class
+/// `get_the_post_thumbnail()` adds.
+pub(crate) fn wp_get_attachment_image(
+    site: &dyn Site,
+    loading: &Loading,
+    id: u64,
+    size: &str,
+    attr: &[(&str, Vec<u8>)],
+    post_thumbnail: bool,
+) -> Vec<u8> {
+    let Some((src, width, height)) = image_downsize(site, id, size) else {
+        return Vec::new();
+    };
+    let alt = site
+        .post_meta(id, "_wp_attachment_image_alt")
+        .unwrap_or_default();
+    let mut attrs: Vec<(String, Vec<u8>)> = vec![
+        ("src".into(), src.clone()),
+        (
+            "class".into(),
+            format!("attachment-{size} size-{size}").into_bytes(),
+        ),
+        ("alt".into(), php_trim(&strip_tags(&alt)).to_vec()),
+    ];
+    for (name, value) in attr {
+        set(&mut attrs, name, value.clone());
+    }
+    // A width or height given as a number stays.
+    let given = |attrs: &[(String, Vec<u8>)], name: &str| {
+        get(attrs, name)
+            .map(|v| Value::String(v.to_vec()))
+            .filter(Value::is_numeric)
+    };
+    let shown_width = given(&attrs, "width").map_or(width, |v| v.to_int());
+    let shown_height = given(&attrs, "height").map_or(height, |v| v.to_int());
+    let optimization = loading.img(shown_width, shown_height);
+    let extra = [
+        ("decoding", optimization.decoding),
+        ("fetchpriority", optimization.fetchpriority),
+        ("loading", optimization.loading),
+    ];
+    for (name, value) in extra {
+        if let Some(value) = value {
+            set(&mut attrs, name, value.as_bytes().to_vec());
+        }
+    }
+    if get(&attrs, "srcset").is_none_or(<[u8]>::is_empty) {
+        let size = (width.unsigned_abs(), height.unsigned_abs());
+        let made =
+            metadata(site, id).and_then(|meta| srcset(size, &src, &meta, &upload_baseurl(site)));
+        // A `srcset` means a width, so `sizes` too.
+        if let Some(srcset) = made {
+            set(&mut attrs, "srcset", srcset.into_bytes());
+            if get(&attrs, "sizes").is_none_or(<[u8]>::is_empty) {
+                let sizes = format!("(max-width: {0}px) 100vw, {0}px", size.0);
+                set(&mut attrs, "sizes", sizes.into_bytes());
+            }
+        }
+    }
+    // `wp_img_tag_add_auto_sizes`: lazy images size themselves.
+    let lazy = get(&attrs, "loading") == Some(b"lazy");
+    if let Some(sizes) = get(&attrs, "sizes").filter(|_| lazy) {
+        let first = sizes.split(|b| *b == b',').next().unwrap_or_default();
+        let first = first.trim_ascii().to_ascii_lowercase();
+        if first != b"auto" {
+            let sizes = [b"auto, ", sizes].concat();
+            set(&mut attrs, "sizes", sizes);
+        }
+    }
+    if post_thumbnail {
+        let class = [get(&attrs, "class").unwrap_or_default(), b" wp-post-image"].concat();
+        set(&mut attrs, "class", class);
+    }
+    let width = given(&attrs, "width").map_or(width, |v| v.to_int().abs());
+    let height = given(&attrs, "height").map_or(height, |v| v.to_int().abs());
+    let mut html = String::from("<img");
+    for (name, value) in [("width", width), ("height", height)] {
+        if value != 0 {
+            html.push_str(&format!(" {name}=\"{value}\""));
+        }
+    }
+    for (name, value) in attrs.iter().filter(|(n, _)| n != "width" && n != "height") {
+        html.push_str(&format!(" {name}=\"{}\"", esc_attr(value)));
+    }
+    html.push_str(" />");
+    html.into_bytes()
+}
+
+fn get<'a>(attrs: &'a [(String, Vec<u8>)], name: &str) -> Option<&'a [u8]> {
+    attrs
+        .iter()
+        .find(|(n, _)| n == name)
+        .map(|(_, v)| v.as_slice())
+}
+
+/// `$attrs[ $name ] = $value`: in place, or added last.
+fn set(attrs: &mut Vec<(String, Vec<u8>)>, name: &str, value: Vec<u8>) {
+    match attrs.iter_mut().find(|(n, _)| n == name) {
+        Some(found) => found.1 = value,
+        None => attrs.push((name.to_string(), value)),
+    }
+}
+
+/// `wp_get_upload_dir()['baseurl']`.
+fn upload_baseurl(site: &dyn Site) -> Vec<u8> {
+    let option = |name| site.option(name).unwrap_or_default();
+    let url_path = option("upload_url_path");
+    if !url_path.is_empty() {
+        return url_path;
+    }
+    let siteurl = option("siteurl");
+    let path = option("upload_path");
+    // A path inside `ABSPATH` is relative; the default and absolute ones
+    // sit under `WP_CONTENT_URL`.
+    if path.is_empty() || path == b"wp-content/uploads" || path.starts_with(b"/") {
+        [&siteurl[..], b"/wp-content/uploads"].concat()
+    } else {
+        [&siteurl[..], b"/", &path].concat()
+    }
+}
+
+/// `wp_get_attachment_url()`, from `_wp_attached_file`.
+fn attachment_url(site: &dyn Site, id: u64) -> Option<Vec<u8>> {
+    let file = site.post_meta(id, "_wp_attached_file").unwrap_or_default();
+    let base = upload_baseurl(site);
+    let url = if file.is_empty() {
+        site.post(id).map(|post| post.guid).unwrap_or_default()
+    } else if contains(&file, b"wp-content/uploads") {
+        let relative = relative_path(&file);
+        let slash = if relative.is_empty() { &b""[..] } else { b"/" };
+        [&base[..], b"/", relative, slash, basename(&file)].concat()
+    } else {
+        [&base[..], b"/", &file].concat()
+    };
+    (!url.is_empty()).then_some(url)
+}
+
+/// `wp_get_attachment_metadata()`: the stored value. One that is not an
+/// array, which PHP turns down, has no keys for the callers to find.
+fn metadata(site: &dyn Site, id: u64) -> Option<Value> {
+    let stored = site.post_meta(id, "_wp_attachment_metadata")?;
+    match maybe_unserialize(&stored) {
+        Maybe::Value(value) => Some(value),
+        _ => None,
+    }
+}
+
+/// `image_downsize()` for a named size: the URL, width and height.
+fn image_downsize(site: &dyn Site, id: u64, size: &str) -> Option<(Vec<u8>, i64, i64)> {
+    let post = site
+        .post(id)
+        .filter(|post| post.post_type == "attachment")?;
+    let mut url = attachment_url(site, id)?;
+    let meta = metadata(site, id).unwrap_or_default();
+    let file = site.post_meta(id, "_wp_attached_file").unwrap_or_default();
+    let is_image = !file.is_empty()
+        && (post.mime_type.starts_with("image/")
+            || post.mime_type == "import" && image_extension(&file));
+    let mut name = basename(&url).to_vec();
+    let (mut width, mut height) = (0, 0);
+    let use_size = |sized: &Value, url: &mut Vec<u8>, name: &mut Vec<u8>| {
+        let file = sized
+            .get_str("file")
+            .map(Value::to_php_string)
+            .unwrap_or_default();
+        *url = replace(url, name, &file);
+        *name = file;
+        dimensions(sized)
+    };
+    if !is_image {
+        let full = meta
+            .get_path(&["sizes", "full"])
+            .filter(|full| !full.is_empty())?;
+        (width, height) = use_size(full, &mut url, &mut name);
+    }
+    if let Some(sized) = meta
+        .get_path(&["sizes", size])
+        .filter(|sized| !sized.is_empty())
+    {
+        (width, height) = use_size(sized, &mut url, &mut name);
+    }
+    let isset = |key| meta.get_str(key).is_some_and(|v| *v != Value::Null);
+    if width == 0 && height == 0 && isset("width") && isset("height") {
+        (width, height) = dimensions(&meta);
+    }
+    let (width, height) = constrain_for_editor(site, width, height, size);
+    Some((url, width, height))
+}
+
+/// An image's `width` and `height` as integers.
+fn dimensions(image: &Value) -> (i64, i64) {
+    let get = |key| image.get_str(key).map_or(0, Value::to_int);
+    (get("width"), get("height"))
+}
+
+/// `image_constrain_size_for_editor()` in the `display` context, with no
+/// `$content_width`.
+fn constrain_for_editor(site: &dyn Site, width: i64, height: i64, size: &str) -> (i64, i64) {
+    let option = |name: &str| Value::String(site.option(name).unwrap_or_default()).to_int();
+    let (max_width, max_height) = match size {
+        "thumb" | "thumbnail" => match (option("thumbnail_size_w"), option("thumbnail_size_h")) {
+            (0, 0) => (128, 96),
+            max => max,
+        },
+        "medium" | "medium_large" | "large" => (
+            option(&format!("{size}_size_w")),
+            option(&format!("{size}_size_h")),
+        ),
+        // The sizes core adds with `add_image_size()`.
+        "1536x1536" => (1536, 1536),
+        "2048x2048" => (2048, 2048),
+        _ => (width, height),
+    };
+    constrain_dimensions(width, height, max_width, max_height)
+}
+
+/// `wp_constrain_dimensions()`.
+fn constrain_dimensions(width: i64, height: i64, max_width: i64, max_height: i64) -> (i64, i64) {
+    if max_width == 0 && max_height == 0 {
+        return (width, height);
+    }
+    let ratio =
+        |current: i64, max: i64| (max > 0 && current > max).then(|| max as f64 / current as f64);
+    let (width_ratio, height_ratio) = (ratio(width, max_width), ratio(height, max_height));
+    let (w_ratio, h_ratio) = (width_ratio.unwrap_or(1.0), height_ratio.unwrap_or(1.0));
+    let (smaller, larger) = (w_ratio.min(h_ratio), w_ratio.max(h_ratio));
+    let scaled = |value: i64, ratio: f64| (value as f64 * ratio).round() as i64;
+    let ratio = if scaled(width, larger) > max_width || scaled(height, larger) > max_height {
+        smaller
+    } else {
+        larger
+    };
+    let mut w = scaled(width, ratio).max(1);
+    let mut h = scaled(height, ratio).max(1);
+    // Round up a dimension one short of its limit.
+    if width_ratio.is_some() && w == max_width - 1 {
+        w = max_width;
+    }
+    if height_ratio.is_some() && h == max_height - 1 {
+        h = max_height;
+    }
+    (w, h)
+}
+
+/// `wp_image_matches_ratio()`: within a pixel once the larger is scaled to
+/// the smaller's width.
+fn matches_ratio(width: i64, height: i64, other_width: i64, other_height: i64) -> bool {
+    let mut pair = [(width, height), (other_width, other_height)];
+    pair.sort_unstable();
+    let [(small_width, small_height), (large_width, large_height)] = pair;
+    let (scaled_width, scaled_height) =
+        constrain_dimensions(large_width, large_height, small_width, 0);
+    scaled_width.abs_diff(small_width) <= 1 && scaled_height.abs_diff(small_height) <= 1
+}
+
+/// `wp_calculate_image_srcset()`, with the default 2048 pixel limit.
+fn srcset(size: (u64, u64), src: &[u8], meta: &Value, baseurl: &[u8]) -> Option<String> {
+    let file = meta
+        .get_str("file")
+        .map(Value::to_php_string)
+        .unwrap_or_default();
+    let sizes = meta.get_str("sizes").and_then(Value::as_array);
+    let sizes =
+        sizes.filter(|s| !s.is_empty() && meta.get_str("file").is_some() && file.len() >= 4)?;
+    let (width, height) = (size.0 as i64, size.1 as i64);
+    if width < 1 {
+        return None;
+    }
+    let mut candidates: Vec<(i64, i64, Vec<u8>, Vec<u8>)> = sizes
+        .iter()
+        .filter_map(|(_, image)| {
+            image.as_array()?;
+            let value = image
+                .get_str("width")
+                .map(Value::to_php_string)
+                .unwrap_or_default();
+            let dimension = |key| image.get_str(key).map_or(0, Value::to_int);
+            let file = image
+                .get_str("file")
+                .map(Value::to_php_string)
+                .unwrap_or_default();
+            Some((dimension("width"), dimension("height"), file, value))
+        })
+        .collect();
+    // The full size, unless a GIF's thumbnail shows it is animated.
+    let gif = meta
+        .get_path(&["sizes", "thumbnail", "mime-type"])
+        .map(Value::to_php_string);
+    if gif.as_deref() != Some(b"image/gif") {
+        let dimension = |key| meta.get_str(key).map_or(0, Value::to_int);
+        let value = meta
+            .get_str("width")
+            .map(Value::to_php_string)
+            .unwrap_or_default();
+        candidates.push((
+            dimension("width"),
+            dimension("height"),
+            basename(&file).to_vec(),
+            value,
+        ));
+    } else if contains(src, &file) {
+        return None;
+    }
+    let dirname = relative_path(&file);
+    let dirname = if dirname.is_empty() {
+        Vec::new()
+    } else {
+        [dirname, b"/"].concat()
+    };
+    // `trailingslashit()`.
+    let slashes = baseurl
+        .iter()
+        .rev()
+        .take_while(|b| matches!(b, b'/' | b'\\'))
+        .count();
+    let base = [
+        baseurl.get(..baseurl.len() - slashes).unwrap_or_default(),
+        b"/",
+        &dirname,
+    ]
+    .concat();
+    let edit = edit_hash(basename(src));
+    let mut sources: Vec<(i64, Vec<u8>, Vec<u8>)> = Vec::new();
+    let mut matched = false;
+    for (image_width, image_height, file, value) in candidates {
+        let is_src = !matched && contains(src, &[&dirname[..], &file].concat());
+        matched |= is_src;
+        // `! strpos()`: a hash at the start counts as missing.
+        let edited_away = edit.is_some_and(|hash| find(&file, hash).is_none_or(|at| at == 0));
+        if edited_away || (image_width > 2048 && !is_src) {
+            continue;
+        }
+        if matches_ratio(width, height, image_width, image_height) {
+            let source = (image_width, [&base[..], &file].concat(), value);
+            if is_src {
+                sources.retain(|(w, _, _)| *w != image_width);
+                sources.insert(0, source);
+            } else if let Some(found) = sources.iter_mut().find(|(w, _, _)| *w == image_width) {
+                *found = source;
+            } else {
+                sources.push(source);
+            }
+        }
+    }
+    if !matched || sources.len() < 2 {
+        return None;
+    }
+    let listed: Vec<String> = sources
+        .iter()
+        .map(|(_, url, value)| {
+            let url = String::from_utf8_lossy(url).replace(' ', "%20");
+            format!("{url} {}w", String::from_utf8_lossy(value))
+        })
+        .collect();
+    Some(listed.join(", "))
+}
+
+/// The `-e` and thirteen digits an edited image's file name carries.
+fn edit_hash(name: &[u8]) -> Option<&[u8]> {
+    name.windows(15)
+        .find(|w| w.starts_with(b"-e") && w.iter().skip(2).all(u8::is_ascii_digit))
+}
+
+/// `_wp_get_attachment_relative_path()`.
+fn relative_path(file: &[u8]) -> &[u8] {
+    let dir = match file.iter().rposition(|b| *b == b'/') {
+        Some(at) => file.get(..at).unwrap_or_default(),
+        None => return b"",
+    };
+    match find(dir, b"wp-content/uploads") {
+        Some(at) => {
+            let rest = dir.get(at + 18..).unwrap_or_default();
+            let start = rest.iter().position(|b| *b != b'/').unwrap_or(rest.len());
+            rest.get(start..).unwrap_or_default()
+        }
+        None => dir,
+    }
+}
+
+/// `wp_basename()`.
+fn basename(path: &[u8]) -> &[u8] {
+    let path = path.strip_suffix(b"/").unwrap_or(path);
+    path.rsplit(|b| *b == b'/').next().unwrap_or_default()
+}
+
+/// An image extension `wp_attachment_is( 'image' )` accepts for an
+/// imported file.
+fn image_extension(file: &[u8]) -> bool {
+    let extension = file.rsplit(|b| *b == b'.').next().unwrap_or_default();
+    ["jpg", "jpeg", "jpe", "gif", "png", "webp", "avif", "heic"]
+        .iter()
+        .any(|e| extension.eq_ignore_ascii_case(e.as_bytes()))
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    find(haystack, needle).is_some()
+}
+
+/// `str_replace()` of every `from` in `text`.
+fn replace(text: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(at) = find(rest, from).filter(|_| !from.is_empty()) {
+        out.extend_from_slice(rest.get(..at).unwrap_or_default());
+        out.extend_from_slice(to);
+        rest = rest.get(at + from.len()..).unwrap_or_default();
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
+#[cfg(test)]
+mod tests;

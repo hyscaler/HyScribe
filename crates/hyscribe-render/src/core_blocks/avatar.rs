@@ -120,7 +120,7 @@ fn link_to(url: &[u8], target: &[u8], label: Option<Vec<u8>>, image: &[u8]) -> V
 
 /// `get_block_core_avatar_border_attributes()`: the border's class names
 /// and declarations, from the style engine.
-fn border_attributes(block: &Block<'_>) -> (String, Vec<u8>) {
+pub(super) fn border_attributes(block: &Block<'_>) -> (String, Vec<u8>) {
     let border = block.attributes.get_path(&["style", "border"]);
     let field = |value: Option<&Value>, name: &str| {
         value

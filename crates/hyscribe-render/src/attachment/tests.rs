@@ -1,0 +1,387 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+use hyscribe_phpser::json_decode;
+use hyscribe_testkit::unhex;
+use sha2::{Digest, Sha256};
+
+use super::*;
+use crate::fixture::ThemeTestData;
+
+/// Every case of `reference/attachment-image/golden.sh`, by hash: the
+/// fixture's content is not ours to commit.
+#[test]
+fn matches_php() {
+    let site = ThemeTestData {
+        home: b"http://127.0.0.1:8081".to_vec(),
+    };
+    let golden = include_str!("../../tests/golden/attachment-image.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let id: u64 = fields[0].parse().unwrap();
+        let attrs = json_decode(&unhex(fields[2])).unwrap();
+        let attrs: Vec<(String, Vec<u8>)> = attrs
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| {
+                (
+                    String::from_utf8(k.to_php_string()).unwrap(),
+                    v.to_php_string(),
+                )
+            })
+            .collect();
+        let attrs: Vec<(&str, Vec<u8>)> =
+            attrs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+        let ours =
+            wp_get_attachment_image(&site, &Loading::default(), id, fields[1], &attrs, false);
+        let hash: String = Sha256::digest(&ours)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        if hash != fields[3] {
+            failures.push(format!(
+                "{id} {} {}: ours {}",
+                fields[1],
+                fields[2],
+                String::from_utf8_lossy(&ours)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures[..failures.len().min(10)].join("\n")
+    );
+    assert_eq!(golden.lines().count(), 1053);
+}
+
+/// An in-memory site: options, attachments and their meta.
+struct Fake {
+    options: Vec<(&'static str, &'static str)>,
+    posts: Vec<hyscribe_model::Post>,
+    meta: Vec<(u64, &'static str, Vec<u8>)>,
+}
+
+impl Site for Fake {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        self.options
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, v)| v.as_bytes().to_vec())
+    }
+
+    fn home_url(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        self.posts.iter().find(|p| p.id == id).cloned()
+    }
+
+    fn post_terms(&self, _: u64, _: &str) -> Vec<hyscribe_model::Term> {
+        Vec::new()
+    }
+
+    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        self.meta
+            .iter()
+            .find(|(i, k, _)| *i == id && *k == key)
+            .map(|(_, _, v)| v.clone())
+    }
+
+    fn query(&self, _: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
+        Vec::new()
+    }
+}
+
+fn attachment(id: u64, mime_type: &str, guid: &str) -> hyscribe_model::Post {
+    hyscribe_model::Post {
+        id,
+        post_type: "attachment".into(),
+        mime_type: mime_type.into(),
+        guid: guid.as_bytes().to_vec(),
+        ..Default::default()
+    }
+}
+
+/// Serialized metadata from JSON.
+fn meta(json: &str) -> Vec<u8> {
+    hyscribe_phpser::encode(&json_decode(json.as_bytes()).unwrap())
+}
+
+fn site(options: Vec<(&'static str, &'static str)>) -> Fake {
+    let mut options = options;
+    options.push(("siteurl", "http://s.test"));
+    Fake {
+        options,
+        posts: Vec::new(),
+        meta: Vec::new(),
+    }
+}
+
+#[test]
+fn upload_urls_follow_the_options() {
+    let base = |options| String::from_utf8(upload_baseurl(&site(options))).unwrap();
+    assert_eq!(base(vec![]), "http://s.test/wp-content/uploads");
+    assert_eq!(base(vec![("upload_path", "media")]), "http://s.test/media");
+    assert_eq!(
+        base(vec![("upload_path", "/srv/up")]),
+        "http://s.test/wp-content/uploads"
+    );
+    assert_eq!(
+        base(vec![("upload_url_path", "http://cdn.test/u")]),
+        "http://cdn.test/u"
+    );
+}
+
+#[test]
+fn attachment_urls() {
+    let mut site = site(vec![]);
+    site.posts = vec![
+        attachment(5, "image/jpeg", "http://g.test/x.jpg"),
+        attachment(6, "image/jpeg", ""),
+    ];
+    site.posts.extend([
+        attachment(7, "image/jpeg", ""),
+        attachment(8, "image/jpeg", ""),
+    ]);
+    site.meta = vec![
+        (
+            7,
+            "_wp_attached_file",
+            b"/var/www/wp-content/uploads/2020/01/a.jpg".to_vec(),
+        ),
+        (
+            8,
+            "_wp_attached_file",
+            b"/x/wp-content/uploads/a.jpg".to_vec(),
+        ),
+    ];
+    let url = |id| attachment_url(&site, id).map(|u| String::from_utf8(u).unwrap());
+    assert_eq!(url(5).as_deref(), Some("http://g.test/x.jpg"));
+    assert_eq!(url(6), None);
+    assert_eq!(
+        url(7).as_deref(),
+        Some("http://s.test/wp-content/uploads/2020/01/a.jpg")
+    );
+    assert_eq!(
+        url(8).as_deref(),
+        Some("http://s.test/wp-content/uploads/a.jpg")
+    );
+    assert_eq!(relative_path(b"a.jpg"), b"");
+    assert_eq!(replace(b"x/a.jpg/a.jpg", b"a.jpg", b"b"), b"x/b/b");
+    assert_eq!(image_downsize(&site, 6, "full"), None);
+}
+
+#[test]
+fn downsizes_files_that_are_not_images() {
+    let mut site = site(vec![
+        ("thumbnail_size_w", "150"),
+        ("thumbnail_size_h", "150"),
+        ("medium_size_w", "300"),
+        ("medium_size_h", "300"),
+    ]);
+    site.posts = vec![
+        hyscribe_model::Post {
+            id: 9,
+            post_type: "post".into(),
+            ..Default::default()
+        },
+        attachment(10, "application/pdf", ""),
+        attachment(11, "application/pdf", ""),
+        attachment(12, "import", ""),
+        attachment(13, "import", ""),
+        attachment(14, "image/jpeg", ""),
+    ];
+    let full = r#"{"sizes":{"full":{"file":"doc-pdf.jpg","width":100,"height":200},"thumbnail":{"file":"doc-pdf-150x150.jpg","width":150,"height":150}}}"#;
+    site.meta = vec![
+        (10, "_wp_attached_file", b"2020/doc.pdf".to_vec()),
+        (10, "_wp_attachment_metadata", meta(full)),
+        (11, "_wp_attached_file", b"2020/doc.pdf".to_vec()),
+        (12, "_wp_attached_file", b"2020/p.png".to_vec()),
+        (
+            12,
+            "_wp_attachment_metadata",
+            meta(r#"{"width":10,"height":20,"file":"2020/p.png","sizes":{}}"#),
+        ),
+        (13, "_wp_attached_file", b"2020/p.txt".to_vec()),
+        (14, "_wp_attached_file", b"a.jpg".to_vec()),
+        (14, "_wp_attachment_metadata", b"not serialized".to_vec()),
+    ];
+    let down = |id, size| {
+        image_downsize(&site, id, size).map(|(u, w, h)| (String::from_utf8(u).unwrap(), w, h))
+    };
+    let uploads = "http://s.test/wp-content/uploads";
+    assert_eq!(down(9, "full"), None);
+    assert_eq!(
+        down(10, "full"),
+        Some((format!("{uploads}/2020/doc-pdf.jpg"), 100, 200))
+    );
+    assert_eq!(
+        down(10, "thumbnail"),
+        Some((format!("{uploads}/2020/doc-pdf-150x150.jpg"), 150, 150))
+    );
+    assert_eq!(down(11, "full"), None);
+    assert_eq!(
+        down(12, "medium"),
+        Some((format!("{uploads}/2020/p.png"), 10, 20))
+    );
+    assert_eq!(down(13, "full"), None);
+    let html = wp_get_attachment_image(&site, &Loading::default(), 14, "full", &[], false);
+    assert_eq!(
+        String::from_utf8(html).unwrap(),
+        format!(
+            "<img src=\"{uploads}/a.jpg\" class=\"attachment-full size-full\" alt=\"\" decoding=\"async\" loading=\"lazy\" />"
+        )
+    );
+}
+
+#[test]
+fn constrains_dimensions() {
+    assert_eq!(
+        constrain_for_editor(&site(vec![]), 1000, 1000, "thumbnail"),
+        (96, 96)
+    );
+    let unlimited = site(vec![("medium_size_w", "0"), ("medium_size_h", "0")]);
+    assert_eq!(
+        constrain_for_editor(&unlimited, 500, 400, "medium"),
+        (500, 400)
+    );
+    // One pixel short of the limit rounds up to it.
+    assert_eq!(constrain_dimensions(600, 401, 300, 200), (300, 200));
+    assert_eq!(constrain_dimensions(401, 600, 200, 300), (200, 300));
+    // A side already at its limit is not rounded up.
+    assert_eq!(constrain_dimensions(1000, 1000, 1000, 999), (999, 999));
+    // The larger ratio when it fits both sides, by rounding.
+    assert_eq!(constrain_dimensions(10, 1000, 4, 420), (4, 420));
+    assert_eq!(constrain_dimensions(1000, 10, 420, 4), (420, 4));
+    // A side one short of a limit it was not scaled to stays.
+    assert_eq!(constrain_dimensions(100, 299, 300, 300), (100, 299));
+    assert_eq!(constrain_dimensions(299, 100, 300, 300), (299, 100));
+}
+
+#[test]
+fn srcsets() {
+    let made = |size, src: &str, json: &str| {
+        srcset(
+            size,
+            src.as_bytes(),
+            &json_decode(json.as_bytes()).unwrap(),
+            b"http://s.test/u/",
+        )
+    };
+    let sized = r#"{"file":"a.jpg","width":1000,"height":500,"sizes":{"bad":"x","m":{"file":"a-300x150.jpg","width":300,"height":150},"m2":{"file":"a-300x150b.jpg","width":300,"height":150},"big":{"file":"a-4000x2000.jpg","width":4000,"height":2000}}}"#;
+    assert_eq!(made((0, 0), "http://s.test/u/a.jpg", sized), None);
+    // Same widths replace each other; the source comes first.
+    assert_eq!(
+        made((1000, 500), "http://s.test/u/a.jpg", sized).as_deref(),
+        Some("http://s.test/u/a.jpg 1000w, http://s.test/u/a-300x150b.jpg 300w")
+    );
+    let edited = r#"{"file":"2020/a-e1234567890123.jpg","width":1000,"height":500,"sizes":{"m":{"file":"a-300x150.jpg","width":300,"height":150},"e":{"file":"a-e1234567890123-300x150.jpg","width":300,"height":150},"z":{"file":"-e1234567890123-z.jpg","width":300,"height":150}}}"#;
+    assert_eq!(
+        made(
+            (1000, 500),
+            "http://s.test/u/2020/a-e1234567890123.jpg",
+            edited
+        )
+        .as_deref(),
+        Some(
+            "http://s.test/u/2020/a-e1234567890123.jpg 1000w, http://s.test/u/2020/a-e1234567890123-300x150.jpg 300w"
+        )
+    );
+    let gif = r#"{"file":"g.gif","width":200,"height":200,"sizes":{"thumbnail":{"file":"g-150x150.gif","width":150,"height":150,"mime-type":"image/gif"},"medium":{"file":"g-100x100.gif","width":100,"height":100,"mime-type":"image/gif"}}}"#;
+    assert_eq!(made((200, 200), "http://s.test/u/g.gif", gif), None);
+    assert_eq!(
+        made((150, 150), "http://s.test/u/g-150x150.gif", gif).as_deref(),
+        Some("http://s.test/u/g-150x150.gif 150w, http://s.test/u/g-100x100.gif 100w")
+    );
+    let square = r#"{"file":"q.jpg","width":2,"height":2,"sizes":{"t":{"file":"q-1x1.jpg","width":1,"height":1}}}"#;
+    assert_eq!(
+        made((1, 1), "http://s.test/u/q-1x1.jpg", square).as_deref(),
+        Some("http://s.test/u/q-1x1.jpg 1w, http://s.test/u/q.jpg 2w")
+    );
+    // Only the first file the source contains is the source.
+    let later = r#"{"file":"a.jpg","width":1000,"height":500,"sizes":{"m":{"file":"a-300x150.jpg","width":300,"height":150},"big":{"file":"x150.jpg","width":600,"height":300},"wide":{"file":"a-2048.jpg","width":2048,"height":1024}}}"#;
+    assert_eq!(
+        made((300, 150), "http://s.test/u/a-300x150.jpg", later).as_deref(),
+        Some(
+            "http://s.test/u/a-300x150.jpg 300w, http://s.test/u/x150.jpg 600w, http://s.test/u/a-2048.jpg 2048w, http://s.test/u/a.jpg 1000w"
+        )
+    );
+    // Thirteen digits without `-e` do not mark an edited image.
+    let digits = r#"{"file":"a-x1234567890123.jpg","width":1000,"height":500,"sizes":{"m":{"file":"a-300x150.jpg","width":300,"height":150}}}"#;
+    assert_eq!(
+        made((1000, 500), "http://s.test/u/a-x1234567890123.jpg", digits).as_deref(),
+        Some("http://s.test/u/a-x1234567890123.jpg 1000w, http://s.test/u/a-300x150.jpg 300w")
+    );
+    assert_eq!(
+        made((10, 10), "a", r#"{"file":"a","sizes":{"m":{}}}"#),
+        None
+    );
+    assert_eq!(
+        made((10, 10), "a", r#"{"file":"abcd.jpg","sizes":{}}"#),
+        None
+    );
+}
+
+#[test]
+fn given_attributes() {
+    let mut site = site(vec![("medium_size_w", "300"), ("medium_size_h", "300")]);
+    site.posts = vec![attachment(20, "image/jpeg", "")];
+    let stored = r#"{"file":"2020/a.jpg","width":1000,"height":500,"sizes":{"medium":{"file":"a-300x150.jpg","width":300,"height":150,"mime-type":"image/jpeg"}}}"#;
+    site.meta = vec![
+        (20, "_wp_attached_file", b"2020/a.jpg".to_vec()),
+        (20, "_wp_attachment_metadata", meta(stored)),
+        (20, "_wp_attachment_image_alt", b" <b>Alt</b> ".to_vec()),
+    ];
+    let image = |attr: &[(&str, Vec<u8>)]| {
+        String::from_utf8(wp_get_attachment_image(
+            &site,
+            &Loading::default(),
+            20,
+            "medium",
+            attr,
+            false,
+        ))
+        .unwrap()
+    };
+    let u = "http://s.test/wp-content/uploads/2020";
+    let srcset = format!("{u}/a-300x150.jpg 300w, {u}/a.jpg 1000w");
+    assert_eq!(
+        image(&[("width", b"50".to_vec()), ("height", b"x".to_vec())]),
+        format!(
+            "<img width=\"50\" height=\"150\" src=\"{u}/a-300x150.jpg\" class=\"attachment-medium size-medium\" alt=\"Alt\" decoding=\"async\" loading=\"lazy\" srcset=\"{srcset}\" sizes=\"auto, (max-width: 300px) 100vw, 300px\" />"
+        )
+    );
+    let tall = image(&[("height", b"70".to_vec())]);
+    assert!(
+        tall.starts_with("<img width=\"300\" height=\"70\" "),
+        "{tall}"
+    );
+    assert_eq!(
+        image(&[("sizes", b"AUTO, 50vw".to_vec())]),
+        format!(
+            "<img width=\"300\" height=\"150\" src=\"{u}/a-300x150.jpg\" class=\"attachment-medium size-medium\" alt=\"Alt\" sizes=\"AUTO, 50vw\" decoding=\"async\" loading=\"lazy\" srcset=\"{srcset}\" />"
+        )
+    );
+}
+
+#[test]
+fn stored_sizes_over_their_limits_shrink() {
+    let mut site = site(vec![("medium_size_w", "300"), ("medium_size_h", "300")]);
+    site.posts = vec![attachment(30, "image/jpeg", "")];
+    let stored = r#"{"file":"b.jpg","width":100,"height":100,"sizes":{"medium":{"file":"b-m.jpg","width":400,"height":200},"1536x1536":{"file":"b-l.jpg","width":2000,"height":1000},"2048x2048":{"file":"b-x.jpg","width":3000,"height":1500},"odd":{"file":"b-o.jpg","height":50}}}"#;
+    site.meta = vec![
+        (30, "_wp_attached_file", b"b.jpg".to_vec()),
+        (30, "_wp_attachment_metadata", meta(stored)),
+    ];
+    let size = |name| image_downsize(&site, 30, name).map(|(_, w, h)| (w, h));
+    assert_eq!(size("medium"), Some((300, 150)));
+    assert_eq!(size("1536x1536"), Some((1536, 768)));
+    assert_eq!(size("2048x2048"), Some((2048, 1024)));
+    // A size without a width keeps its height, not the original's; no
+    // side shrinks below 1.
+    assert_eq!(size("odd"), Some((1, 50)));
+}

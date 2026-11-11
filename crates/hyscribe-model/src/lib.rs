@@ -38,6 +38,8 @@ pub struct Post {
     pub menu_order: i64,
     /// `post_type`.
     pub post_type: String,
+    /// `post_mime_type`.
+    pub mime_type: String,
     /// `comment_count`.
     pub comment_count: i64,
     /// `comment_status`: `open` or `closed`.

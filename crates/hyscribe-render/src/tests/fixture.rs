@@ -19,6 +19,56 @@ fn dump() -> &'static Dump {
     DUMP.get_or_init(|| default_install("7.1.3").unwrap())
 }
 
+/// A fixture dump and the home URL it is seen from.
+pub(crate) trait Source {
+    fn dump(&self) -> &'static Dump;
+    fn home(&self) -> Vec<u8>;
+    /// The `siteurl` the oracle sees, where it is a `WP_SITEURL`.
+    fn siteurl(&self) -> Option<Vec<u8>> {
+        None
+    }
+}
+
+impl Source for DefaultInstall {
+    fn dump(&self) -> &'static Dump {
+        dump()
+    }
+
+    fn home(&self) -> Vec<u8> {
+        self.home.clone()
+    }
+}
+
+/// The Theme Test Data fixture, built by `reference/theme-test-data/build.sh`
+/// under `target/` (its data is not ours to commit), seen from `home`.
+pub(crate) struct ThemeTestData {
+    pub(crate) home: Vec<u8>,
+}
+
+impl Source for ThemeTestData {
+    fn dump(&self) -> &'static Dump {
+        static DUMP: OnceLock<Dump> = OnceLock::new();
+        DUMP.get_or_init(|| {
+            let path = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../target/fixtures/theme-test-data/7.1.3/database.sql"
+            );
+            let sql = std::fs::read(path).unwrap_or_else(|e| {
+                panic!("{path}: {e}; build it with reference/theme-test-data/build.sh")
+            });
+            Dump::parse(&sql).unwrap()
+        })
+    }
+
+    fn home(&self) -> Vec<u8> {
+        self.home.clone()
+    }
+
+    fn siteurl(&self) -> Option<Vec<u8>> {
+        Some(self.home.clone())
+    }
+}
+
 fn text(value: &SqlValue) -> Vec<u8> {
     match value {
         SqlValue::Text(bytes) => bytes.clone(),
@@ -54,6 +104,7 @@ fn post(row: &[SqlValue]) -> Post {
         guid: text(&row[18]),
         menu_order: Value::String(text(&row[19])).to_int(),
         post_type: string(&row[20]),
+        mime_type: string(&row[21]),
         comment_count: Value::String(text(&row[22])).to_int(),
         comment_status: string(&row[8]),
         ping_status: string(&row[9]),
@@ -66,9 +117,8 @@ pub(crate) struct DefaultInstall {
 }
 
 /// The dump's approved comments, of every type.
-fn approved_comments() -> impl Iterator<Item = Comment> {
-    dump()
-        .table("wp_comments")
+fn approved_comments(dump: &'static Dump) -> impl Iterator<Item = Comment> {
+    dump.table("wp_comments")
         .filter(|row| text(&row[10]) == b"1")
         .map(|row| Comment {
             id: number(&row[0]),
@@ -184,27 +234,30 @@ impl DefaultInstall {
     }
 }
 
-impl Site for DefaultInstall {
+impl<T: Source> Site for T {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
-        dump()
+        if let Some(url) = self.siteurl().filter(|_| name == "siteurl") {
+            return Some(url);
+        }
+        self.dump()
             .table("wp_options")
             .find(|row| text(&row[1]) == name.as_bytes())
             .map(|row| text(&row[2]))
     }
 
     fn home_url(&self) -> Vec<u8> {
-        self.home.clone()
+        self.home()
     }
 
     fn post(&self, id: u64) -> Option<Post> {
-        dump()
+        self.dump()
             .table("wp_posts")
             .map(post)
             .find(|post| post.id == id)
     }
 
     fn post_terms(&self, post_id: u64, taxonomy: &str) -> Vec<Term> {
-        let dump = dump();
+        let dump = self.dump();
         dump.table("wp_term_relationships")
             .filter(|row| number(&row[0]) == post_id)
             .filter_map(|row| {
@@ -226,7 +279,7 @@ impl Site for DefaultInstall {
     }
 
     fn post_meta(&self, post_id: u64, key: &str) -> Option<Vec<u8>> {
-        dump()
+        self.dump()
             .table("wp_postmeta")
             .find(|row| number(&row[1]) == post_id && text(&row[2]) == key.as_bytes())
             .map(|row| text(&row[3]))
@@ -236,7 +289,7 @@ impl Site for DefaultInstall {
     /// them. Its one post makes a week the same group as its day.
     fn date_counts(&self, period: Period) -> Vec<DateCount> {
         let mut counts: Vec<DateCount> = Vec::new();
-        let posts = dump().table("wp_posts").map(post);
+        let posts = self.dump().table("wp_posts").map(post);
         for p in posts.filter(|p| p.status == "publish" && p.post_type == "post") {
             let part = |at: std::ops::Range<usize>| p.date.get(at).unwrap().parse().unwrap();
             let (year, month, day) = (part(0..4), part(5..7), part(8..10));
@@ -277,7 +330,8 @@ impl Site for DefaultInstall {
         terms: Option<(&str, &[u64])>,
     ) -> Option<Post> {
         let key = |p: &Post| (p.date.clone(), p.id);
-        let mut found: Vec<Post> = dump()
+        let mut found: Vec<Post> = self
+            .dump()
             .table("wp_posts")
             .map(crate::fixture::post)
             .filter(|p| p.status == "publish" && p.post_type == post.post_type)
@@ -305,7 +359,7 @@ impl Site for DefaultInstall {
     }
 
     fn comments(&self, post_id: u64) -> Vec<Comment> {
-        let mut comments: Vec<Comment> = approved_comments()
+        let mut comments: Vec<Comment> = approved_comments(self.dump())
             .filter(|c| c.post_id == post_id && c.comment_type != b"note")
             .collect();
         comments.sort_by(|a, b| (&a.date_gmt, a.id).cmp(&(&b.date_gmt, b.id)));
@@ -313,12 +367,12 @@ impl Site for DefaultInstall {
     }
 
     fn comment(&self, id: u64) -> Option<Comment> {
-        approved_comments().find(|comment| comment.id == id)
+        approved_comments(self.dump()).find(|comment| comment.id == id)
     }
 
     fn recent_comments(&self, limit: u64) -> Vec<Comment> {
         let published = |c: &Comment| self.post(c.post_id).is_some_and(|p| p.status == "publish");
-        let mut comments: Vec<Comment> = approved_comments()
+        let mut comments: Vec<Comment> = approved_comments(self.dump())
             .filter(|c| c.comment_type != b"note" && published(c))
             .collect();
         comments.sort_by(|a, b| (&b.date_gmt, b.id).cmp(&(&a.date_gmt, a.id)));
@@ -327,12 +381,12 @@ impl Site for DefaultInstall {
     }
 
     fn user(&self, id: u64) -> Option<User> {
-        dump()
+        self.dump()
             .table("wp_users")
             .find(|row| number(&row[0]) == id)
             .map(|row| {
                 let meta = |key: &[u8]| {
-                    dump()
+                    self.dump()
                         .table("wp_usermeta")
                         .find(|meta| number(&meta[1]) == id && text(&meta[2]) == key)
                         .map(|meta| text(&meta[3]))
@@ -354,7 +408,7 @@ impl Site for DefaultInstall {
 
     fn query(&self, query: &PostQuery) -> Vec<Post> {
         select(
-            dump().table("wp_posts").map(post).collect(),
+            self.dump().table("wp_posts").map(post).collect(),
             query,
             &|id, taxonomy| self.post_terms(id, taxonomy),
         )

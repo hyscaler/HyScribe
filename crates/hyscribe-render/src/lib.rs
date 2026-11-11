@@ -32,6 +32,7 @@ mod latest_posts;
 mod layout;
 pub mod link;
 mod media;
+mod media_text;
 mod navigation;
 pub mod permalinks;
 pub mod post;

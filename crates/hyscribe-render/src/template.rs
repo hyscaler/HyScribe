@@ -331,6 +331,7 @@ impl Renderer<'_> {
             Some("core/widget-group") => self.widget_group(block),
             Some("core/accordion-item") => self.accordion_item(block),
             Some("core/gallery") => self.gallery(block),
+            Some("core/media-text") => self.media_text(block),
             Some("core/home-link") => self.home_link(block),
             Some("core/page-list") => self.page_list(block),
             Some("core/comment-template") => self.comment_template(block),

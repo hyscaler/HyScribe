@@ -24,6 +24,7 @@ pub mod feed;
 #[path = "tests/fixture.rs"]
 mod fixture;
 pub mod formatting;
+mod gallery;
 pub mod head;
 mod interactivity;
 pub mod kses;

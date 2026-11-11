@@ -6,14 +6,41 @@
 
 use hyscribe_phpser::Value;
 
-/// The site's time zone, as `wp_timezone()` builds it. Named zones other
-/// than UTC need a time zone database; until one lands they format as UTC.
+pub mod zone;
+
+use zone::{LocalType, Named};
+
+/// The site's time zone, as `wp_timezone()` builds it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Zone {
-    /// `UTC` as the `timezone_string`.
+    /// UTC.
     Utc,
     /// A fixed offset in seconds east of UTC, from `gmt_offset`.
     Offset(i32),
+    /// A zone of the time zone database, from `timezone_string`.
+    Named(Named),
+}
+
+impl Zone {
+    /// The offset at `unix`, with the local time type of a named zone.
+    fn at(self, unix: i64) -> (i64, Option<&'static LocalType>) {
+        match self {
+            Zone::Utc => (0, None),
+            Zone::Offset(seconds) => (i64::from(seconds), None),
+            Zone::Named(named) => {
+                let kind = named.tz.period(unix).0;
+                (kind.offset, Some(kind))
+            }
+        }
+    }
+
+    /// The instant of a local time, given in seconds since 1970-01-01.
+    fn resolve(self, local: i64) -> i64 {
+        match self {
+            Zone::Named(named) => named.tz.resolve(local),
+            zone => local - zone.at(local).0,
+        }
+    }
 }
 
 const DAYS: [&str; 7] = [
@@ -41,13 +68,6 @@ pub(crate) const MONTHS: [&str; 12] = [
     "December",
 ];
 
-fn offset(zone: Zone) -> i64 {
-    match zone {
-        Zone::Utc => 0,
-        Zone::Offset(seconds) => i64::from(seconds),
-    }
-}
-
 /// A stored time, resolved.
 struct Time {
     year: i64,
@@ -59,6 +79,8 @@ struct Time {
     /// Days since 1970-01-01.
     days: i64,
     offset: i64,
+    /// A named zone's local time type.
+    kind: Option<&'static LocalType>,
     zone: Zone,
 }
 
@@ -109,11 +131,13 @@ impl Time {
             + number(8..10)
             - 1;
         let seconds = number(11..13) * 3600 + number(14..16) * 60 + number(17..19);
-        Time::at(days, seconds, zone)
+        Time::from_unix(zone.resolve(days * 86_400 + seconds), zone)
     }
 
-    /// The local time `seconds` into day `days`.
-    fn at(days: i64, seconds: i64, zone: Zone) -> Time {
+    fn from_unix(unix: i64, zone: Zone) -> Time {
+        let (offset, kind) = zone.at(unix);
+        let local = unix + offset;
+        let (days, seconds) = (local.div_euclid(86_400), local.rem_euclid(86_400));
         let (year, month, day) = civil_from_days(days);
         Time {
             year,
@@ -123,14 +147,10 @@ impl Time {
             minute: seconds / 60 % 60,
             second: seconds % 60,
             days,
-            offset: offset(zone),
+            offset,
+            kind,
             zone,
         }
-    }
-
-    fn from_unix(unix: i64, zone: Zone) -> Time {
-        let local = unix + offset(zone);
-        Time::at(local.div_euclid(86_400), local.rem_euclid(86_400), zone)
     }
 
     /// 0 for Sunday.
@@ -172,6 +192,14 @@ impl Time {
             .get(self.month as usize - 1)
             .copied()
             .unwrap_or_default()
+    }
+
+    fn abbreviation(&self) -> String {
+        match (self.zone, self.kind) {
+            (Zone::Offset(_), _) => format!("GMT{}", self.offset_text("")),
+            (_, Some(kind)) => kind.abbreviation.clone(),
+            (_, None) => "UTC".to_string(),
+        }
     }
 
     fn hour12(&self) -> i64 {
@@ -226,16 +254,17 @@ impl Time {
             'e' => match self.zone {
                 Zone::Utc => "UTC".to_string(),
                 Zone::Offset(_) => self.offset_text(":"),
+                Zone::Named(named) => named.name.to_string(),
             },
-            'I' => "0".to_string(),
+            'I' => u8::from(self.kind.is_some_and(|kind| kind.dst)).to_string(),
             'O' => self.offset_text(""),
             'P' => self.offset_text(":"),
-            'p' if self.offset == 0 => "Z".to_string(),
-            'p' => self.offset_text(":"),
-            'T' => match self.zone {
-                Zone::Utc => "UTC".to_string(),
-                Zone::Offset(_) => format!("GMT{}", self.offset_text("")),
+            // PHP prints `Z` for the abbreviations of UTC.
+            'p' => match self.abbreviation().as_str() {
+                "UTC" | "Z" | "GMT+0000" => "Z".to_string(),
+                _ => self.offset_text(":"),
             },
+            'T' => self.abbreviation(),
             'Z' => self.offset.to_string(),
             'c' => format_time("Y-m-d\\TH:i:sP", self),
             'r' => format_time("D, d M Y H:i:s O", self),
@@ -264,6 +293,8 @@ fn format_time(format: &str, time: &Time) -> String {
 }
 
 /// `wp_timezone()` from the `timezone_string` and `gmt_offset` options.
+/// Zone names are matched in any case and print as the database spells
+/// them, where PHP prints them as given.
 pub fn site_zone(timezone_string: &[u8], gmt_offset: &[u8]) -> Zone {
     match timezone_string {
         b"" => {
@@ -272,7 +303,8 @@ pub fn site_zone(timezone_string: &[u8], gmt_offset: &[u8]) -> Zone {
             let minutes = (offset.fract() * 60.0) as i32;
             Zone::Offset(offset.trunc() as i32 * 3600 + minutes * 60)
         }
-        _ => Zone::Utc,
+        // PHP throws on an unknown name, which WordPress never saves.
+        name => zone::named(name).map_or(Zone::Utc, Zone::Named),
     }
 }
 

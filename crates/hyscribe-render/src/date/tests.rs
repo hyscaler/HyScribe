@@ -69,8 +69,15 @@ fn site_zones_like_wp_timezone() {
             "{gmt_offset}"
         );
     }
-    assert_eq!(site_zone(b"UTC", b"5"), Zone::Utc);
-    assert_eq!(site_zone(b"Europe/Berlin", b"1"), Zone::Utc);
+    let name = |zone| match zone {
+        Zone::Named(named) => named.name,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(name(site_zone(b"UTC", b"5")), "UTC");
+    assert_eq!(name(site_zone(b"europe/BERLIN", b"1")), "Europe/Berlin");
+    // PHP throws on these; WordPress never saves them.
+    assert_eq!(site_zone(b"Bogus/Zone", b"1"), Zone::Utc);
+    assert_eq!(site_zone(b"Europe/\xff", b"1"), Zone::Utc);
 }
 
 #[test]
@@ -125,4 +132,65 @@ fn unix_times_show_in_the_zone() {
         format_unix("c", 0, Zone::Offset(3600)),
         "1970-01-01T01:00:00+01:00"
     );
+}
+
+/// Every case of `reference/date/zones-golden.php`, apart from where PHP's
+/// time zone database or name parsing differs from `jiff-tzdb`'s.
+#[test]
+fn named_zones_match_php() {
+    let golden = include_str!("../../tests/golden/date-zones.tsv");
+    let format_text = "e|T|I|O|P|p|Z|U|Y-m-d H:i:s|B";
+    // Zones whose data `jiff-tzdb` shares with another name: PHP keeps
+    // their own history before 1970 (IANA's backzone file).
+    let mut shared = std::collections::HashMap::new();
+    for name in jiff_tzdb::available() {
+        *shared
+            .entry(jiff_tzdb::get(name).unwrap().1.as_ptr())
+            .or_insert(0) += 1;
+    }
+    let merged = |name: &str| shared[&jiff_tzdb::get(name).unwrap().1.as_ptr()] > 1;
+    let mut failures = Vec::new();
+    let mut known = 0;
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [name, kind, input, php] = fields[..] else {
+            panic!("{line}");
+        };
+        let zone = site_zone(name.as_bytes(), b"");
+        let ours = match kind {
+            "local" => format(format_text, input, zone),
+            _ => format_unix(format_text, input.parse().unwrap(), zone),
+        };
+        if ours == php {
+            continue;
+        }
+        let theirs: Vec<&str> = php.split('|').collect();
+        let mut mine: Vec<&str> = ours.split('|').collect();
+        // PHP prints the name as given.
+        mine[0] = theirs[0];
+        let before_1970 = theirs[7].starts_with('-');
+        let explained = mine == theirs
+            // `jiff-tzdb` is built from IANA's rearguard data, which
+            // flips the daylight saving flag where it is negative.
+            || ["Europe/Dublin", "Eire", "Africa/Casablanca", "Africa/El_Aaiun", "Africa/Windhoek"]
+                .contains(&name)
+                && mine.iter().zip(&theirs).filter(|(a, b)| a != b).count() == 1
+                && mine[2] != theirs[2]
+            // PHP reads these as abbreviations or offsets, not zones.
+            || ["CET", "EET", "MET", "WET", "UCT", "GMT+0", "GMT-0"].contains(&name)
+            || before_1970 && merged(name);
+        if explained {
+            known += 1;
+        } else {
+            failures.push(format!("{name} {kind} {input}: php {php}, ours {ours}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures[..failures.len().min(30)].join("\n")
+    );
+    assert!(known < 1_000, "{known}");
+    assert!(golden.lines().count() > 30_000);
 }

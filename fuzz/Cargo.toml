@@ -121,6 +121,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "date_zone"
+path = "fuzz_targets/date_zone.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "kses_post"
 path = "fuzz_targets/kses_post.rs"
 test = false

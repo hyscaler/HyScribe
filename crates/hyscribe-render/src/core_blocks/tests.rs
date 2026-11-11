@@ -721,3 +721,26 @@ fn footnotes_match_php() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert_eq!(golden.lines().count(), 44);
 }
+
+/// Every case of `reference/small-blocks/golden.sh`.
+#[test]
+fn small_blocks_match_php() {
+    let theme = twentytwentyfive();
+    let site = crate::fixture::DefaultInstall {
+        home: b"http://127.0.0.1:8081".to_vec(),
+    };
+    let request = Request::default();
+    let golden = include_str!("../../tests/golden/small-blocks.tsv");
+    for line in golden.lines() {
+        let (markup, php) = line.split_once('\t').unwrap();
+        let (markup, php) = (unhex(markup), unhex(php));
+        let ours = crate::template::Renderer::new(&theme, &site, &request).render(&markup);
+        assert_eq!(
+            String::from_utf8_lossy(&ours),
+            String::from_utf8_lossy(&php),
+            "{}",
+            String::from_utf8_lossy(&markup)
+        );
+    }
+    assert_eq!(golden.lines().count(), 10);
+}

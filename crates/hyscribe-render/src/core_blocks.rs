@@ -100,6 +100,7 @@ pub(crate) fn render(
         "core/list" => heading_list::list,
         "core/latest-comments" => latest_comments::latest_comments,
         "core/loginout" => loginout::loginout,
+        "core/navigation-overlay-close" => navigation_overlay_close,
         "core/post-author" => author::post_author,
         "core/post-author-biography" => author::post_author_biography,
         "core/post-author-name" => author::post_author_name,
@@ -118,6 +119,7 @@ pub(crate) fn render(
         "core/query-title" => query_title,
         "core/query-total" => query_total,
         "core/read-more" => read_more,
+        "core/shortcode" => shortcode,
         "core/site-logo" => site_logo::site_logo,
         "core/site-tagline" => site_tagline,
         "core/tag-cloud" => tag_cloud::tag_cloud,
@@ -1319,6 +1321,52 @@ fn tag(level: Option<&Value>, default: &[u8]) -> Vec<u8> {
             format!("h{}", level.to_int()).into_bytes()
         }),
     }
+}
+
+/// `render_block_core_shortcode()`: the content in paragraphs; shortcodes
+/// themselves are not run.
+fn shortcode(_: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    wpautop(block.content, true)
+}
+
+/// `render_block_core_navigation_overlay_close()`: a close button with an
+/// icon, its text, or both.
+fn navigation_overlay_close(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
+    let text = block
+        .attribute("text")
+        .filter(|text| !text.is_empty())
+        .map_or(b"Close".to_vec(), Value::to_php_string);
+    let mode = block
+        .attribute("displayMode")
+        .filter(|mode| !mode.is_empty())
+        .map_or(b"icon".to_vec(), Value::to_php_string);
+    let show_icon = mode == b"both" || mode == b"icon";
+    let show_text = mode == b"both" || mode == b"text";
+    let mut button = Vec::new();
+    if show_icon {
+        button.extend_from_slice(br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false"><path d="M13 11.8l6.1-6.3-1.1-1-6.1 6.2-6.1-6.2-1.1 1 6.1 6.3-6.5 6.7 1.1 1 6.5-6.6 6.5 6.6 1.1-1z" /></svg>"#);
+    }
+    if show_text {
+        let text = crate::kses::wp_kses_post(&text, &context.upload_host());
+        button.extend_from_slice(b"<span class=\"wp-block-navigation-overlay-close__text\">");
+        button.extend_from_slice(&text);
+        button.extend_from_slice(b"</span>");
+    }
+    let label = if show_text {
+        ""
+    } else {
+        "aria-label=\"Close\""
+    };
+    [
+        format!(
+            "<button {} type=\"button\" {label} >",
+            block.wrapper(context, b"")
+        )
+        .as_bytes(),
+        &button,
+        b"</button>",
+    ]
+    .concat()
 }
 
 /// `sprintf( '<%1$s %2$s>%3$s</%1$s>', $tag, $wrapper, $content )`.

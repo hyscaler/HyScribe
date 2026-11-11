@@ -356,6 +356,25 @@ impl TagProcessor {
         self.bytes_already_parsed
     }
 
+    /// Where the current token starts in the input, before any edit.
+    pub fn token_start(&self) -> Option<usize> {
+        self.token_starts_at
+    }
+
+    /// `'#comment' === get_token_name()`: a comment, or markup that HTML
+    /// reads as one (`<!x>`, a CDATA lookalike), not a doctype; PHP does not
+    /// count `<?x>`.
+    pub fn is_comment(&self) -> bool {
+        let token = self
+            .token_starts_at
+            .and_then(|start| self.html.get(start..self.bytes_already_parsed))
+            .unwrap_or_default();
+        let doctype = token
+            .get(..9)
+            .is_some_and(|t| t.eq_ignore_ascii_case(b"<!doctype"));
+        self.state == State::OtherToken && token.starts_with(b"<!") && !doctype
+    }
+
     /// The current tag's name in upper case, `None` when not at a tag.
     pub fn get_tag(&self) -> Option<Vec<u8>> {
         if self.state != State::MatchedTag {
@@ -380,8 +399,9 @@ impl TagProcessor {
         false
     }
 
-    /// `base_class_next_token()`.
-    fn next_token(&mut self) -> bool {
+    /// `next_token()`: moves to the next token of any kind, `false` at the
+    /// end or before an incomplete one.
+    pub fn next_token(&mut self) -> bool {
         let was_at = self.bytes_already_parsed;
         self.after_tag();
         if matches!(self.state, State::Complete | State::Incomplete) {
@@ -1118,6 +1138,28 @@ mod tests {
     use super::*;
 
     /// Parsing stops just after the tag found.
+    #[test]
+    fn tokens_and_comments() {
+        let html = b"a<!-- c --><!x><!DOCTYPE html><?p?><b>";
+        let mut tags = TagProcessor::new(html);
+        assert_eq!(tags.token_start(), None);
+        let mut seen = Vec::new();
+        while tags.next_token() {
+            seen.push((tags.token_start(), tags.is_comment()));
+        }
+        assert_eq!(
+            seen,
+            [
+                (Some(0), false),
+                (Some(1), true),
+                (Some(11), true),
+                (Some(15), false),
+                (Some(30), false),
+                (Some(35), false),
+            ]
+        );
+    }
+
     #[test]
     fn parsed_up_to_the_tag_end() {
         let mut tags = TagProcessor::new(b"ab<p class=x>cd<i>");

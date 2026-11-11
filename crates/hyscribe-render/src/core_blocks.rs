@@ -94,6 +94,7 @@ pub(crate) fn render(
         "core/button" => button::button,
         "core/calendar" => calendar::calendar,
         "core/footnotes" => footnotes,
+        "core/image" => image::image,
         "core/latest-comments" => latest_comments::latest_comments,
         "core/loginout" => loginout::loginout,
         "core/post-author" => author::post_author,
@@ -1452,6 +1453,7 @@ mod button;
 mod calendar;
 mod comment_form;
 mod featured_image;
+mod image;
 mod latest_comments;
 mod loginout;
 mod tag_cloud;

@@ -61,3 +61,66 @@ fn data_ids_for_images_only() {
     blocks.iter_mut().for_each(super::data_id);
     assert_eq!(blocks, before);
 }
+
+/// Viewport gaps, the rules PHP stores for the gallery itself; the golden
+/// leaves these cases out, as the layout support's own viewport rules are
+/// not ported.
+#[test]
+fn viewport_gaps_like_php() {
+    let theme = twentytwentyfive();
+    let request = Request::default();
+    let site = DefaultInstall {
+        home: b"http://127.0.0.1:8081".to_vec(),
+    };
+    let image = r#"<!-- wp:image {"id":5} --><figure class="wp-block-image"><img src="a.jpg" alt="" class="wp-image-5"/></figure><!-- /wp:image -->"#;
+    let mobile = "@media (width <= 480px){.wp-block-gallery.wp-block-gallery-1{--wp--style--unstable-gallery-gap:";
+    let tablet = "@media (480px < width <= 782px){.wp-block-gallery.wp-block-gallery-1{--wp--style--unstable-gallery-gap:";
+    for (style, expected) in [
+        (
+            r#"{"@mobile":{"spacing":{"blockGap":"2px"}}}"#,
+            vec![format!("{mobile}2px;}}}}")],
+        ),
+        (
+            r#"{"@tablet":{"spacing":{"blockGap":{"left":"3px"}}},"spacing":{"blockGap":"1em"}}"#,
+            vec![format!("{tablet}3px;}}}}")],
+        ),
+        (
+            r#"{"@mobile":{"spacing":{"blockGap":null}},"@tablet":{"spacing":{"blockGap":"0"}}}"#,
+            vec![format!("{tablet}0px;}}}}")],
+        ),
+        (r#"{"@mobile":{"spacing":"x"},"@tablet":"y"}"#, vec![]),
+        (r#"{"@mobile":{"spacing":{"padding":"1px"}}}"#, vec![]),
+    ] {
+        let markup = format!(
+            r#"<!-- wp:gallery {{"style":{style}}} --><figure class="wp-block-gallery has-nested-images">{image}</figure><!-- /wp:gallery -->"#
+        );
+        let mut renderer = Renderer::new(&theme, &site, &request);
+        renderer.render(markup.as_bytes());
+        let css = stylesheet(&renderer.assets.rules);
+        let found: Vec<String> = css
+            .split("@media")
+            .skip(1)
+            .map(|rule| format!("@media{}", rule.split_inclusive("}}").next().unwrap()))
+            .filter(|rule| rule.contains(".wp-block-gallery.wp-block-gallery-1"))
+            .collect();
+        assert_eq!(found, expected, "{style}");
+    }
+}
+
+/// A viewport gap from the site's global styles applies where the block
+/// sets no gap of its own.
+#[test]
+fn global_viewport_gaps() {
+    let user = br#"{"version":3,"isGlobalStylesUserThemeJSON":true,"styles":{"blocks":{"core/gallery":{"@mobile":{"spacing":{"blockGap":"4px"}}}}}}"#;
+    let theme = crate::theme::twentytwentyfive_with(user, &[]);
+    let request = Request::default();
+    let site = DefaultInstall {
+        home: b"http://127.0.0.1:8081".to_vec(),
+    };
+    let mut renderer = Renderer::new(&theme, &site, &request);
+    renderer.render(
+        br#"<!-- wp:gallery --><figure class="wp-block-gallery"></figure><!-- /wp:gallery -->"#,
+    );
+    let css = stylesheet(&renderer.assets.rules);
+    assert!(css.contains("@media (width <= 480px){.wp-block-gallery.wp-block-gallery-1{--wp--style--unstable-gallery-gap:4px;}}"), "{css}");
+}

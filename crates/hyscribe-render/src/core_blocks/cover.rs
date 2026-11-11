@@ -7,12 +7,15 @@
 //! does when that fetch fails.
 
 use hyscribe_html::TagProcessor;
-use hyscribe_kses::{esc_url, strip_tags};
-use hyscribe_phpser::{Value, float_to_string, php_trim};
+use hyscribe_kses::esc_url;
+use hyscribe_phpser::Value;
 
 use super::{Block, Context};
-use crate::attachment::{image_downsize, wp_get_attachment_image};
-use crate::formatting::find;
+use crate::attachment::{
+    attachment_alt, focal_position, image_downsize, post_thumbnail_id, wp_get_attachment_image,
+};
+use crate::blocks::is_pcre_space;
+use crate::formatting::is_word;
 
 /// `render_block_core_cover()`.
 pub(super) fn cover(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
@@ -24,20 +27,9 @@ pub(super) fn cover(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     if !image_background || attribute("useFeaturedImage") == Some(&Value::Bool(false)) {
         return content.to_vec();
     }
-    let position = attribute("focalPoint").map(|point| {
-        let percent = |axis| {
-            float_to_string((point.get_str(axis).map_or(0.0, Value::to_float) * 100.0).round())
-        };
-        format!("{}% {}%", percent("x"), percent("y"))
-    });
-    // `get_post()`: the global post, which a post template sets.
-    let post = context.post_id.or(context.request.post);
-    let thumbnail = post
-        .and_then(|id| context.site.post(id))
-        .and_then(|post| context.site.post_meta(post.id, "_thumbnail_id"))
-        .map_or(0, |id| {
-            u64::try_from(Value::String(id).to_int()).unwrap_or(0)
-        });
+    let position = attribute("focalPoint").map(focal_position);
+    // The global post, which a post template sets.
+    let thumbnail = post_thumbnail_id(context.site, context.post_id);
     let image = if !(truthy("hasParallax") || truthy("isRepeated")) {
         let mut attr: Vec<(&str, Vec<u8>)> = vec![
             ("class", b"wp-block-cover__image-background".to_vec()),
@@ -66,11 +58,7 @@ pub(super) fn cover(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         };
         let mut tags = TagProcessor::new(b"<div></div>");
         tags.next_tag(None, None);
-        let alt = context
-            .site
-            .post_meta(thumbnail, "_wp_attachment_image_alt")
-            .unwrap_or_default();
-        let alt = php_trim(&strip_tags(&alt)).to_vec();
+        let alt = attachment_alt(context.site, thumbnail);
         if !hyscribe_phpser::is_empty_string(&alt) {
             tags.set_attribute(b"role", b"img");
             tags.set_attribute(b"aria-label", &alt);
@@ -106,38 +94,30 @@ pub(super) fn cover(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 }
 
 /// `/<div\b[^>]+wp-block-cover__inner-container[\s|"][^>]*>/U`: where the
-/// first such tag starts.
+/// first such tag starts, in one pass: the earliest `<div` since the last
+/// `>` is the one a match starts at.
 fn inner_container(content: &[u8]) -> Option<usize> {
-    let mut at = 0;
-    while let Some(start) = find(content, at, b"<div") {
-        at = start + 1;
-        let after = start + 4;
-        // `\b`: a word character cannot follow.
-        if content
-            .get(after)
-            .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
+    const CLASS: &[u8] = b"wp-block-cover__inner-container";
+    // A match ends at a `>`, and neither the class nor the byte after it is
+    // one, so the scan can stop at the last.
+    let last_close = content.iter().rposition(|b| *b == b'>')?;
+    let mut opener = None;
+    for (at, byte) in content.iter().enumerate().take(last_close) {
+        let rest = content.get(at..).unwrap_or_default();
+        if *byte == b'>' {
+            opener = None;
+        } else if opener.is_none()
+            && rest.starts_with(b"<div")
+            && !content.get(at + 4).copied().is_some_and(is_word)
         {
-            continue;
+            opener = Some(at);
         }
-        let end = content
-            .iter()
-            .skip(after)
-            .position(|b| *b == b'>')
-            .map(|i| after + i);
-        let tag = content
-            .get(after..end.unwrap_or(content.len()))
-            .unwrap_or_default();
-        let class = b"wp-block-cover__inner-container";
-        let found = (1..tag.len()).any(|i| {
-            tag.get(i..).is_some_and(|rest| {
-                rest.starts_with(class)
-                    && rest.get(class.len()).is_some_and(|b| {
-                        b.is_ascii_whitespace() || matches!(b, b'|' | b'"' | b'\x0b')
-                    })
-            })
-        });
-        if end.is_some() && found {
-            return Some(start);
+        // `\b` keeps the class from following `<div` at once, so `[^>]+`
+        // holds.
+        let after = content.get(at + CLASS.len()).copied();
+        let ends = after.is_some_and(|b| is_pcre_space(b) || matches!(b, b'|' | b'"'));
+        if opener.is_some() && rest.starts_with(CLASS) && ends {
+            return opener;
         }
     }
     None

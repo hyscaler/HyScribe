@@ -4,11 +4,11 @@
 //! post's featured image put into the media figure.
 
 use hyscribe_html::TagProcessor;
-use hyscribe_kses::{esc_url, strip_tags};
-use hyscribe_phpser::{Value, float_to_string, php_trim};
+use hyscribe_kses::esc_url;
+use hyscribe_phpser::Value;
 
-use crate::attachment::image_downsize;
-use crate::blocks::Block;
+use crate::attachment::{attachment_alt, focal_position, image_downsize, post_thumbnail_id};
+use crate::blocks::{Block, is_pcre_space, run};
 use crate::core_blocks::prepared;
 use crate::formatting::find;
 use crate::template::Renderer;
@@ -24,13 +24,7 @@ impl Renderer<'_> {
             return content;
         }
         let site = self.context.site;
-        let post = self.context.post_id.or(self.context.request.post);
-        let thumbnail = post
-            .and_then(|id| site.post(id))
-            .and_then(|post| site.post_meta(post.id, "_thumbnail_id"))
-            .map_or(0, |id| {
-                u64::try_from(Value::String(id).to_int()).unwrap_or(0)
-            });
+        let thumbnail = post_thumbnail_id(site, self.context.post_id);
         let Some((url, _, _)) = image_downsize(site, thumbnail, "post-thumbnail") else {
             return content;
         };
@@ -39,17 +33,7 @@ impl Renderer<'_> {
             .as_deref()
             == Some(b"right");
         let fill = attribute("imageFill").is_some_and(|v| !v.is_empty());
-        let focal = attribute("focalPoint").map_or_else(
-            || "50% 50%".to_string(),
-            |point| {
-                let percent = |axis| {
-                    float_to_string(
-                        (point.get_str(axis).map_or(0.0, Value::to_float) * 100.0).round(),
-                    )
-                };
-                format!("{}% {}%", percent("x"), percent("y"))
-            },
-        );
+        let focal = attribute("focalPoint").map_or_else(|| "50% 50%".to_string(), focal_position);
         let id =
             String::from_utf8_lossy(&self.unique_id("wp-block-media-text__media-")).into_owned();
         let mut tags = TagProcessor::new(&content);
@@ -91,10 +75,7 @@ impl Renderer<'_> {
             attribute("mediaSizeSlug").map_or_else(|| b"full".to_vec(), Value::to_php_string);
         let class = [format!("wp-image-{thumbnail} size-").as_bytes(), &size].concat();
         tags.set_attribute(b"class", &class);
-        let alt = site
-            .post_meta(thumbnail, "_wp_attachment_image_alt")
-            .unwrap_or_default();
-        tags.set_attribute(b"alt", php_trim(&strip_tags(&alt)));
+        tags.set_attribute(b"alt", &attachment_alt(site, thumbnail));
         if fill {
             tags.set_attribute(b"style", format!("object-position:{focal};").as_bytes());
         }
@@ -135,10 +116,7 @@ fn with_image_tag(content: &[u8], id: &str) -> Vec<u8> {
 /// `\s+` (`min` 1) or `\s*` (`min` 0) at the start of `rest`, and what
 /// follows it.
 fn skip(rest: &[u8], min: usize) -> Option<&[u8]> {
-    let n = rest
-        .iter()
-        .take_while(|b| b.is_ascii_whitespace() || **b == b'\x0b')
-        .count();
+    let n = run(rest, 0, is_pcre_space);
     (n >= min).then(|| rest.get(n..).unwrap_or_default())
 }
 

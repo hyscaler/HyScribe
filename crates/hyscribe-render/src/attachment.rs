@@ -6,7 +6,7 @@
 
 use hyscribe_kses::{esc_attr, strip_tags};
 use hyscribe_phpser::{
-    Maybe, Value, is_empty_string, isset, maybe_unserialize, php_trim, wp_basename,
+    Maybe, Value, float_to_string, is_empty_string, isset, maybe_unserialize, php_trim, wp_basename,
 };
 
 use crate::formatting::{contains, dirname, find, untrailingslashit};
@@ -29,16 +29,13 @@ pub(crate) fn wp_get_attachment_image(
     let Some((src, width, height)) = image_downsize(site, id, size) else {
         return Vec::new();
     };
-    let alt = site
-        .post_meta(id, "_wp_attachment_image_alt")
-        .unwrap_or_default();
     let mut attrs: Vec<(String, Vec<u8>)> = vec![
         ("src".into(), src.clone()),
         (
             "class".into(),
             format!("attachment-{size} size-{size}").into_bytes(),
         ),
-        ("alt".into(), php_trim(&strip_tags(&alt)).to_vec()),
+        ("alt".into(), attachment_alt(site, id)),
     ];
     for (name, value) in attr {
         set(&mut attrs, name, value.clone());
@@ -112,6 +109,31 @@ fn set(attrs: &mut Vec<(String, Vec<u8>)>, name: &str, value: Vec<u8>) {
         Some(found) => found.1 = value,
         None => attrs.push((name.to_string(), value)),
     }
+}
+
+/// `get_post_thumbnail_id( $post )`: 0 without a post or thumbnail, as no
+/// post has ID 0 or below.
+pub(crate) fn post_thumbnail_id(site: &dyn Site, post: Option<u64>) -> u64 {
+    post.filter(|id| site.post(*id).is_some())
+        .and_then(|id| site.post_meta(id, "_thumbnail_id"))
+        .map_or(0, |id| {
+            u64::try_from(Value::String(id).to_int()).unwrap_or(0)
+        })
+}
+
+/// The attachment's alt text, `trim( strip_tags( ... ) )`.
+pub(crate) fn attachment_alt(site: &dyn Site, id: u64) -> Vec<u8> {
+    let alt = site
+        .post_meta(id, "_wp_attachment_image_alt")
+        .unwrap_or_default();
+    php_trim(&strip_tags(&alt)).to_vec()
+}
+
+/// A focal point as `object-position`: each axis `round( $x * 100 )`%.
+pub(crate) fn focal_position(point: &Value) -> String {
+    let percent =
+        |axis| float_to_string((point.get_str(axis).map_or(0.0, Value::to_float) * 100.0).round());
+    format!("{}% {}%", percent("x"), percent("y"))
 }
 
 /// `wp_get_upload_dir()['baseurl']`.

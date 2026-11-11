@@ -36,5 +36,5 @@ fn matches_php() {
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(golden.lines().count(), 224);
+    assert_eq!(golden.lines().count(), 290);
 }

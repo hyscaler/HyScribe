@@ -361,9 +361,9 @@ impl TagProcessor {
         self.token_starts_at
     }
 
-    /// `'#comment' === get_token_name()`: a comment, or markup that HTML
-    /// reads as one (`<!x>`, a CDATA lookalike), not a doctype; PHP does not
-    /// count `<?x>`.
+    /// `'#comment' === get_token_name()`: a comment, or markup HTML reads
+    /// as one: `<!x>`, a CDATA lookalike or a `<?` that is not a processing
+    /// instruction; not a doctype.
     pub fn is_comment(&self) -> bool {
         let token = self
             .token_starts_at
@@ -372,7 +372,11 @@ impl TagProcessor {
         let doctype = token
             .get(..9)
             .is_some_and(|t| t.eq_ignore_ascii_case(b"<!doctype"));
-        self.state == State::OtherToken && token.starts_with(b"<!") && !doctype
+        let bang = token.starts_with(b"<!") && !doctype;
+        let bogus_pi = token
+            .strip_prefix(b"<?")
+            .is_some_and(|rest| !is_processing_instruction(rest));
+        self.state == State::OtherToken && (bang || bogus_pi)
     }
 
     /// The current tag's name in upper case, `None` when not at a tag.
@@ -1133,14 +1137,39 @@ impl TagProcessor {
     }
 }
 
+/// What follows `<?` names a processing instruction: a target of an ASCII
+/// letter or `_` then letters, digits, `_` or `-`, ended by whitespace, `?`
+/// or `>`, and neither `xml` nor `xml-stylesheet`.
+fn is_processing_instruction(rest: &[u8]) -> bool {
+    let first = rest
+        .first()
+        .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_');
+    let length = if first {
+        1 + rest
+            .iter()
+            .skip(1)
+            .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+            .count()
+    } else {
+        0
+    };
+    let target = rest.get(..length).unwrap_or_default();
+    let ended = rest
+        .get(length)
+        .is_some_and(|b| b" \t\x0c\r\n?>".contains(b));
+    let reserved =
+        target.eq_ignore_ascii_case(b"xml") || target.eq_ignore_ascii_case(b"xml-stylesheet");
+    length > 0 && ended && !reserved
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Parsing stops just after the tag found.
+    /// Each token's start, and which count as comments.
     #[test]
     fn tokens_and_comments() {
-        let html = b"a<!-- c --><!x><!DOCTYPE html><?p?><b>";
+        let html = b"a<!-- c --><!x><!DOCTYPE html><?p?><?xml?><?><?1><?a*b><?_b-1\n><?Xml-Stylesheet x><b>";
         let mut tags = TagProcessor::new(html);
         assert_eq!(tags.token_start(), None);
         let mut seen = Vec::new();
@@ -1155,11 +1184,18 @@ mod tests {
                 (Some(11), true),
                 (Some(15), false),
                 (Some(30), false),
-                (Some(35), false),
+                (Some(35), true),
+                (Some(42), true),
+                (Some(45), true),
+                (Some(49), true),
+                (Some(55), false),
+                (Some(63), true),
+                (Some(82), false),
             ]
         );
     }
 
+    /// Parsing stops just after the tag found.
     #[test]
     fn parsed_up_to_the_tag_end() {
         let mut tags = TagProcessor::new(b"ab<p class=x>cd<i>");

@@ -10,7 +10,7 @@ use hyscribe_phpser::{Key, Value, is_empty_string, php_trim};
 
 use super::avatar::border_attributes;
 use super::{Block, Context};
-use crate::attachment::wp_get_attachment_image;
+use crate::attachment::{post_thumbnail_id, wp_get_attachment_image};
 use crate::post::the_title;
 use crate::style::get_styles;
 
@@ -56,11 +56,7 @@ pub(super) fn post_featured_image(context: &Context<'_>, block: &Block<'_>) -> V
             None => attr.push(("style", extra.into_bytes())),
         }
     }
-    // `(int)`: no post has ID 0 or below.
-    let thumbnail = context
-        .site
-        .post_meta(id, "_thumbnail_id")
-        .map_or(0, |v| u64::try_from(Value::String(v).to_int()).unwrap_or(0));
+    let thumbnail = post_thumbnail_id(context.site, Some(id));
     let mut image = match &post {
         Some(_) => wp_get_attachment_image(
             context.site,

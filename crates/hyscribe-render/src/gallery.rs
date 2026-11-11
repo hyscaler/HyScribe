@@ -4,7 +4,7 @@
 //! unique class whose column gap goes to the block supports stylesheet,
 //! and the `data-id` its images get from `render_block_data`. Not ported:
 //! images from `dynamicContent`, `randomOrder`'s shuffle, the lightbox and
-//! viewport gaps, which no theme here sets.
+//! breakpoints a theme sets in `viewport` (the defaults are used).
 
 use hyscribe_html::TagProcessor;
 use hyscribe_kses::esc_attr;
@@ -16,6 +16,13 @@ use crate::core_blocks::prepared;
 use crate::formatting::contains;
 use crate::layout::Rule;
 use crate::template::Renderer;
+
+/// `WP_Theme_JSON::get_viewport_media_queries()` with the default
+/// breakpoints.
+const VIEWPORTS: [(&str, &str); 2] = [
+    ("@mobile", "@media (width <= 480px)"),
+    ("@tablet", "@media (480px < width <= 782px)"),
+];
 
 const FALLBACK_GAP: &str = "var( --wp--style--gallery-gap-default, var( --gallery-block--gutter-size, var( --wp--style--block-gap, 0.5em ) ) )";
 
@@ -31,36 +38,53 @@ impl Renderer<'_> {
         let mut tags = TagProcessor::new(&content);
         tags.next_tag(None, None);
         tags.add_class(class.as_bytes());
-        let spacing = attributes
-            .get_path(&["style", "spacing"])
-            .and_then(Value::as_array)
-            .filter(|_| {
-                attributes
-                    .get_str("style")
-                    .and_then(Value::as_array)
-                    .is_some()
-            });
-        let gap = match spacing.and_then(|spacing| lookup(spacing, "blockGap")) {
-            Some(gap) => gap.clone(),
-            None => self
-                .context
-                .theme
-                .global
-                .styles()
-                .get_path(&["blocks", "core/gallery", "spacing", "blockGap"])
-                .cloned()
-                .unwrap_or(Value::Null),
-        };
-        self.assets.rules.push(Rule {
-            selector: format!(".wp-block-gallery.{class}"),
+        let style = attributes
+            .get_str("style")
+            .filter(|s| s.as_array().is_some());
+        let global = self
+            .context
+            .theme
+            .global
+            .styles()
+            .get_path(&["blocks", "core/gallery"]);
+        let own = block_gap(style);
+        let gap = own
+            .or_else(|| block_gap(global))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let selector = format!(".wp-block-gallery.{class}");
+        let rule = |gap: &Value, group: Option<&str>| Rule {
+            selector: selector.clone(),
             declarations: vec![(
                 "--wp--style--unstable-gallery-gap".into(),
-                Value::String(column_gap(&gap)),
+                Value::String(column_gap(gap)),
             )],
-            group: None,
-        });
+            group: group.map(str::to_string),
+        };
+        self.assets.rules.push(rule(&gap, None));
+        // The default breakpoints, as no theme here sets `viewport`.
+        for (breakpoint, query) in VIEWPORTS {
+            let viewport = block_gap(style.and_then(|style| style.get_str(breakpoint)));
+            let global_viewport = block_gap(global.and_then(|g| g.get_str(breakpoint)));
+            let gap = match (viewport, own, global_viewport) {
+                (Some(gap), _, _) | (None, None, Some(gap)) => gap,
+                _ => continue,
+            };
+            if *gap != Value::Null {
+                self.assets.rules.push(rule(gap, Some(query)));
+            }
+        }
         tags.get_updated_html().to_vec()
     }
+}
+
+/// `$style['spacing']['blockGap']` when `spacing` is an array holding the
+/// key, a null value included (`array_key_exists()`).
+fn block_gap(style: Option<&Value>) -> Option<&Value> {
+    style
+        .and_then(|style| style.get_str("spacing"))
+        .and_then(Value::as_array)
+        .and_then(|spacing| lookup(spacing, "blockGap"))
 }
 
 /// `block_core_gallery_data_id_backcompatibility()` for one inner block.

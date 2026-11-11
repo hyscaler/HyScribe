@@ -47,3 +47,20 @@ fn matches_php() {
     );
     assert_eq!(golden.lines().count(), 112);
 }
+
+/// The inner container search is linear: a megabyte of `<div ` takes no time.
+#[test]
+fn inner_container_is_linear() {
+    let content = b"<div ".repeat(200_000);
+    let started = std::time::Instant::now();
+    assert_eq!(super::inner_container(&content), None);
+    let found = [&content[..], b"x wp-block-cover__inner-container\">"].concat();
+    assert_eq!(super::inner_container(&found), Some(0));
+    assert!(started.elapsed().as_secs() < 2, "{:?}", started.elapsed());
+    // A word byte after `<div` is not a `<div` tag, wherever it starts.
+    let longer = b"ab<divx  wp-block-cover__inner-container\">";
+    assert_eq!(super::inner_container(longer), None);
+    // A tag that never closes is no match, though a `>` comes before it.
+    let open = b"><div a wp-block-cover__inner-container\" x";
+    assert_eq!(super::inner_container(open), None);
+}

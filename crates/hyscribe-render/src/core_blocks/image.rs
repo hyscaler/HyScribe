@@ -44,8 +44,8 @@ pub(super) fn image(_: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
             value => tags.set_attribute(b"data-id", &value.to_php_string()),
         };
     }
-    // Where the empty caption was, in the markup as given.
     let caption = block.attribute("caption").is_none_or(Value::is_empty);
+    // Where the empty caption was, in the markup as given.
     let span = if caption && tags.next_tag(Some(b"FIGCAPTION"), None) {
         empty_caption(&mut tags)
     } else {

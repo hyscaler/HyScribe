@@ -14,15 +14,15 @@ use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, wptexturize};
 /// `term_description` display filters.
 /// The template's term gives its description as stored.
 pub(super) fn term_description(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
-    let description = match (&context.terms.term, context.request.archive.as_ref()) {
-        (Some(_), _) => queried_term(context).map(|(_, term)| term.description),
-        (None, Some(archive)) => archive.term().map(|(_, term)| {
-            let text = wptexturize(&term.description, &CORE_SHORTCODE_TAGS);
-            wpautop(&convert_chars(&text), true)
-        }),
-        (None, None) => None,
+    let Some((_, term)) = queried_term(context) else {
+        return Vec::new();
     };
-    let description = description.unwrap_or_default();
+    let description = if context.terms.term.is_some() {
+        term.description
+    } else {
+        let text = wptexturize(&term.description, &CORE_SHORTCODE_TAGS);
+        wpautop(&convert_chars(&text), true)
+    };
     if is_empty_string(&description) {
         return Vec::new();
     }

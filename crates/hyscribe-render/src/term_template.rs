@@ -128,7 +128,7 @@ fn term_args(archive: Option<&Archive>, query: &Value) -> Option<TermArgs> {
             let include = get("include");
             if !include.is_empty() {
                 for (_, id) in include.as_array().unwrap_or_default() {
-                    let id = id.to_int().unsigned_abs();
+                    let id = absint(id);
                     if !args.include.contains(&id) {
                         args.include.push(id);
                     }
@@ -151,12 +151,6 @@ fn hierarchical(taxonomy: &str) -> bool {
 /// `WP_Term_Query::get_terms()` for the term template's arguments.
 pub fn get_terms(site: &dyn Site, args: &TermArgs) -> Vec<Term> {
     let hierarchical = hierarchical(&args.taxonomy);
-    // A non-hierarchical taxonomy has no `_get_term_hierarchy()`.
-    let all = if hierarchical {
-        site.taxonomy_terms(&args.taxonomy)
-    } else {
-        Vec::new()
-    };
     // A negative parent or `child_of` is in no `_get_term_hierarchy()`, or
     // no term's parent; one without children finds none below.
     // 'parent' overrides 'child_of'.
@@ -205,7 +199,7 @@ pub fn get_terms(site: &dyn Site, args: &TermArgs) -> Vec<Term> {
         terms = term_children(child_of, &terms, &mut vec![child_of]);
     }
     if hierarchical && args.hide_empty {
-        keep_used(&all, &mut terms);
+        keep_used(&site.taxonomy_terms(&args.taxonomy), &mut terms);
     }
     // Only a hierarchical query is cut to `number` here: others went
     // without a limit only with a parent or `child_of`, and keep every term.

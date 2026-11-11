@@ -95,6 +95,7 @@ pub(crate) fn render(
         "core/calendar" => calendar::calendar,
         "core/footnotes" => footnotes,
         "core/latest-comments" => latest_comments::latest_comments,
+        "core/loginout" => loginout::loginout,
         "core/post-author" => author::post_author,
         "core/post-author-biography" => author::post_author_biography,
         "core/post-author-name" => author::post_author_name,
@@ -1450,6 +1451,7 @@ mod button;
 mod calendar;
 mod comment_form;
 mod latest_comments;
+mod loginout;
 mod tag_cloud;
 mod time_to_read;
 

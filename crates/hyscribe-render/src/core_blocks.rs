@@ -109,6 +109,7 @@ pub(crate) fn render(
         "core/heading" => heading_list::heading,
         "core/image" => image::image,
         "core/list" => heading_list::list,
+        "core/icon" => icon::icon,
         "core/latest-comments" => latest_comments::latest_comments,
         "core/loginout" => loginout::loginout,
         "core/navigation-overlay-close" => navigation_overlay_close,
@@ -1505,6 +1506,7 @@ mod comment_form;
 mod cover;
 mod featured_image;
 mod heading_list;
+mod icon;
 mod image;
 mod latest_comments;
 mod loginout;

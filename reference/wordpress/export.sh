@@ -9,6 +9,7 @@
 #   wordpress/wp-includes/blocks/registered.json    their block.json, in registration order
 #   wordpress/wp-includes/kses-post.json            wp_kses_allowed_html( 'post' )
 #   wordpress/wp-includes/mime-types.json           get_allowed_mime_types() for a visitor
+#   wordpress/wp-includes/icons.json                the registered icons' sanitized SVG
 #   wordpress/wp-includes/blocks/<name>/*.min.css   core block styles (LTR)
 #   wordpress/wp-includes/css/dist/block-library/*.min.css
 #   wordpress/wp-includes/css/wp-block-template-skip-link.min.css
@@ -49,13 +50,14 @@ mkdir -p "$OUT"
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; do_action( "wp_default_scripts", wp_scripts() ); $registered = ( new ReflectionProperty( "WP_Script_Modules", "registered" ) )->getValue( wp_script_modules() ); ksort( $registered ); foreach ( $registered as &$module ) { $module["src"] = str_replace( site_url(), "", $module["src"] ); } echo wp_json_encode( $registered, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ), "\n";' > "$OUT/wp-includes/script-modules.json"
 # The MIME types a visitor may upload, which Atom enclosures are checked
 # against.
+"$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; $out = array(); foreach ( WP_Icons_Registry::get_instance()->get_registered_icons() as $icon ) { $out[ $icon["name"] ] = $icon["content"]; } ksort( $out ); echo wp_json_encode( $out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );' > "$OUT/wp-includes/icons.json"
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 0 ); echo wp_json_encode( array_values( get_allowed_mime_types() ), JSON_UNESCAPED_SLASHES ), "\n";' > "$OUT/wp-includes/mime-types.json"
 # The tags and attributes wp_kses_post() allows.
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; echo wp_json_encode( wp_kses_allowed_html( "post" ), JSON_UNESCAPED_SLASHES );' > "$OUT/wp-includes/kses-post.json"
 cat > "$OUT/README.md" <<'README'
 # WordPress core data
 
-Files from WordPress core that HyScribe uses as data: the core `theme.json`, every core block's `block.json`, the block types as WordPress registers them (`blocks/registry.json`) and their `block.json` in registration order (`blocks/registered.json`), the tags and attributes `wp_kses_post()` allows (`kses-post.json`), the MIME types a visitor may upload (`mime-types.json`), the registered script modules (`script-modules.json`), the block library and skip link styles, the emoji detection script, and the embed template's style and scripts. Exported by `reference/wordpress/export.sh` from the pinned version in `VERSION`. Never edit by hand.
+Files from WordPress core that HyScribe uses as data: the core `theme.json`, every core block's `block.json`, the block types as WordPress registers them (`blocks/registry.json`) and their `block.json` in registration order (`blocks/registered.json`), the tags and attributes `wp_kses_post()` allows (`kses-post.json`), the MIME types a visitor may upload (`mime-types.json`), the registered script modules (`script-modules.json`), the registered icons' sanitized SVG (`icons.json`), the block library and skip link styles, the emoji detection script, and the embed template's style and scripts. Exported by `reference/wordpress/export.sh` from the pinned version in `VERSION`. Never edit by hand.
 
 License: GPL-2.0-or-later, as WordPress (ADR 0004).
 README

@@ -123,8 +123,7 @@ fn matches_php() {
                         id: request.queried_object_id,
                         name: "Uncategorized".into(),
                         slug: "uncategorized".into(),
-                        description: Vec::new(),
-                        parent: 0,
+                        ..Term::default()
                     }),
                 ));
             }

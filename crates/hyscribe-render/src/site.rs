@@ -66,13 +66,13 @@ pub trait Site {
     /// `get_terms()` for a tag cloud: the terms of `taxonomy` with posts,
     /// the most used first, `limit` of them, with their post counts.
     /// Sites without term data have none.
-    fn cloud_terms(&self, _taxonomy: &str, _limit: u64) -> Vec<(Term, u64)> {
+    fn cloud_terms(&self, _taxonomy: &str, _limit: u64) -> Vec<Term> {
         vec![]
     }
 
     /// Every term of `taxonomy` with its post count, by name. Sites
     /// without term data have none.
-    fn taxonomy_terms(&self, _taxonomy: &str) -> Vec<(Term, u64)> {
+    fn taxonomy_terms(&self, _taxonomy: &str) -> Vec<Term> {
         vec![]
     }
 

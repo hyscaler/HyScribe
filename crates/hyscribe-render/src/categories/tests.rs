@@ -31,15 +31,15 @@ fn field(row: &Value, i: i64) -> &Value {
     row.get(&Key::Int(i)).unwrap()
 }
 
-fn term(row: &Value) -> (Term, u64) {
-    let term = Term {
+fn term(row: &Value) -> Term {
+    Term {
         id: field(row, 0).to_int() as u64,
         name: field(row, 1).to_php_string(),
         slug: field(row, 2).to_php_string(),
         parent: field(row, 3).to_int() as u64,
+        count: field(row, 4).to_int() as u64,
         ..Term::default()
-    };
-    (term, field(row, 4).to_int() as u64)
+    }
 }
 
 impl Site for Categorized {
@@ -70,11 +70,10 @@ impl Site for Categorized {
     fn term(&self, id: u64, taxonomy: &str) -> Option<Term> {
         self.taxonomy_terms(taxonomy)
             .into_iter()
-            .map(|(t, _)| t)
             .find(|t| t.id == id)
     }
 
-    fn taxonomy_terms(&self, taxonomy: &str) -> Vec<(Term, u64)> {
+    fn taxonomy_terms(&self, taxonomy: &str) -> Vec<Term> {
         self.taxonomy(taxonomy, "terms").iter().map(term).collect()
     }
 
@@ -148,7 +147,7 @@ fn matches_php() {
 /// Terms whose parents are missing or loop, as only inconsistent data
 /// has them, with the posts in each.
 struct Inconsistent {
-    terms: Vec<(Term, u64)>,
+    terms: Vec<Term>,
     posts: Vec<(u64, u64)>,
 }
 
@@ -177,7 +176,7 @@ impl Site for Inconsistent {
         Vec::new()
     }
 
-    fn taxonomy_terms(&self, _: &str) -> Vec<(Term, u64)> {
+    fn taxonomy_terms(&self, _: &str) -> Vec<Term> {
         self.terms.clone()
     }
 
@@ -199,15 +198,13 @@ fn render(site: &dyn Site, attributes: &str) -> String {
 /// no name prints only its closing tag.
 #[test]
 fn trees_with_missing_parents() {
-    let term = |id, name: &str, parent| {
-        let term = Term {
-            id,
-            name: name.as_bytes().to_vec(),
-            slug: name.as_bytes().to_vec(),
-            parent,
-            ..Term::default()
-        };
-        (term, 1)
+    let term = |id, name: &str, parent| Term {
+        id,
+        name: name.as_bytes().to_vec(),
+        slug: name.as_bytes().to_vec(),
+        parent,
+        count: 1,
+        ..Term::default()
     };
     let tree = r#"{"showHierarchy":true}"#;
     let rooted = Inconsistent {
@@ -245,15 +242,13 @@ fn trees_with_missing_parents() {
 /// climbs; the walk shows each term once.
 #[test]
 fn parents_in_a_loop() {
-    let term = |id, parent, count| {
-        let term = Term {
-            id,
-            name: format!("t{id}").into_bytes(),
-            slug: format!("t{id}").into_bytes(),
-            parent,
-            ..Term::default()
-        };
-        (term, count)
+    let term = |id, parent, count| Term {
+        id,
+        name: format!("t{id}").into_bytes(),
+        slug: format!("t{id}").into_bytes(),
+        parent,
+        count,
+        ..Term::default()
     };
     let site = Inconsistent {
         terms: vec![term(20, 21, 0), term(21, 20, 0)],
@@ -305,7 +300,10 @@ fn empty_dropdowns_and_format_archives() {
         ..Term::default()
     };
     let site = Inconsistent {
-        terms: vec![(aside.clone(), 1)],
+        terms: vec![Term {
+            count: 1,
+            ..aside.clone()
+        }],
         posts: Vec::new(),
     };
     let theme = twentytwentyfive();
@@ -319,7 +317,7 @@ fn empty_dropdowns_and_format_archives() {
 }
 
 /// Terms only, with `Site`'s default answer for the posts in them.
-struct TermsOnly(Vec<(Term, u64)>);
+struct TermsOnly(Vec<Term>);
 
 impl Site for TermsOnly {
     fn option(&self, _: &str) -> Option<Vec<u8>> {
@@ -346,7 +344,7 @@ impl Site for TermsOnly {
         Vec::new()
     }
 
-    fn taxonomy_terms(&self, _: &str) -> Vec<(Term, u64)> {
+    fn taxonomy_terms(&self, _: &str) -> Vec<Term> {
         self.0.clone()
     }
 }
@@ -361,7 +359,10 @@ fn other_taxonomies_archives() {
         slug: slug.as_bytes().to_vec(),
         ..Term::default()
     };
-    let site = TermsOnly(vec![(term(1, "shared"), 1)]);
+    let site = TermsOnly(vec![Term {
+        count: 1,
+        ..term(1, "shared")
+    }]);
     let theme = twentytwentyfive();
     let show = |kind, markup: &[u8]| {
         let request = Request {
@@ -375,7 +376,7 @@ fn other_taxonomies_archives() {
     let tags = br#"<!-- wp:categories {"taxonomy":"post_tag","displayAsDropdown":true} /-->"#;
     assert!(!show(Taxonomy::Category, tags).contains("selected=\"selected\""));
     // Without posts in its terms, `Site` leaves every count as it is.
-    let counts = TermsOnly(vec![(term(0, "zero"), 0), (term(1, "one"), 0)]);
+    let counts = TermsOnly(vec![term(0, "zero"), term(1, "one")]);
     let html = render(
         &counts,
         r#"{"showHierarchy":true,"showPostCounts":true,"showEmpty":true}"#,

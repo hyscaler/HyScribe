@@ -191,8 +191,7 @@ fn query_filters_match_php() {
                                 id: number(term, "term_id"),
                                 name: text(term, "name"),
                                 slug: text(term, "slug"),
-                                description: Vec::new(),
-                                parent: 0,
+                                ..hyscribe_model::Term::default()
                             },
                         )
                     })

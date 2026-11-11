@@ -680,6 +680,7 @@ async fn options_meta_and_terms() {
             slug: b"uncategorized".to_vec(),
             description: Vec::new(),
             parent: 0,
+            count: 1,
         }]
     );
     assert!(db.post_terms(1, "post_tag").await.unwrap().is_empty());
@@ -813,7 +814,7 @@ async fn date_counts_group_published_posts() {
     let tags = db.cloud_terms("post_tag", 45).await.unwrap();
     assert_eq!(
         tags.iter()
-            .map(|(t, n)| (&t.slug[..], *n))
+            .map(|t| (&t.slug[..], t.count))
             .collect::<Vec<_>>(),
         [(&b"foo"[..], 1)]
     );
@@ -822,7 +823,7 @@ async fn date_counts_group_published_posts() {
     let tags = db.taxonomy_terms("post_tag").await.unwrap();
     assert_eq!(
         tags.iter()
-            .map(|(t, n)| (&t.slug[..], *n))
+            .map(|t| (&t.slug[..], t.count))
             .collect::<Vec<_>>(),
         [(&b"empty"[..], 0), (&b"foo"[..], 1)]
     );

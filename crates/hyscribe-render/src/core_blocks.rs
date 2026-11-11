@@ -20,7 +20,7 @@ use crate::media::Loading;
 use crate::post::{the_title, title_filters};
 use crate::query_loop::{inherits, own_counts, own_page, query_posts};
 use crate::registry::block_type;
-use crate::site::{Archive, Request, Site};
+use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::{replace, site_smilies};
 use crate::theme::Theme;
@@ -121,7 +121,9 @@ pub(crate) fn render(
         "core/site-logo" => site_logo::site_logo,
         "core/site-tagline" => site_tagline,
         "core/tag-cloud" => tag_cloud::tag_cloud,
-        "core/term-description" => term_description,
+        "core/term-count" => term::term_count,
+        "core/term-description" => term::term_description,
+        "core/term-name" => term::term_name,
         "core/video" => video::video,
         "core/site-title" => site_title,
         _ => return None,
@@ -1435,22 +1437,6 @@ fn footnotes(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     .concat()
 }
 
-/// `render_block_core_term_description()` on a term archive, its
-/// description through the `term_description` display filters. The
-/// `termId` context comes with the term template, not ported yet.
-fn term_description(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
-    let Some(Archive::Term(_, Some(term))) = &context.request.archive else {
-        return Vec::new();
-    };
-    let text = wptexturize(&term.description, &CORE_SHORTCODE_TAGS);
-    let description = wpautop(&convert_chars(&text), true);
-    if is_empty_string(&description) {
-        return Vec::new();
-    }
-    let wrapper = block.wrapper(context, &align_link_classes(block, Vec::new()));
-    element(b"div", &wrapper, &description)
-}
-
 mod author;
 mod avatar;
 mod breadcrumbs;
@@ -1465,6 +1451,7 @@ mod latest_comments;
 mod loginout;
 mod site_logo;
 mod tag_cloud;
+mod term;
 mod time_to_read;
 mod video;
 

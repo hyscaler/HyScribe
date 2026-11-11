@@ -7,7 +7,7 @@ use hyscribe_testkit::unhex;
 
 use super::*;
 use crate::blocks::parse_blocks;
-use crate::site::Taxonomy;
+use crate::site::{Archive, Taxonomy};
 use crate::theme::twentytwentyfive;
 
 /// The options, home URL and post one golden case rendered with.
@@ -370,8 +370,7 @@ fn post_terms_match_php() {
                         id: term.get(&Key::Int(0)).unwrap().to_int() as u64,
                         name: slug.clone(),
                         slug,
-                        description: Vec::new(),
-                        parent: 0,
+                        ..hyscribe_model::Term::default()
                     }
                 })
                 .collect();

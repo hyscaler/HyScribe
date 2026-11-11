@@ -88,7 +88,7 @@ fn matches_php() {
                 name: at(t, 1).to_php_string(),
                 slug: at(t, 2).to_php_string(),
                 parent: int(at(t, 3)),
-                description: Vec::new(),
+                ..Term::default()
             };
             (String::from_utf8(at(t, 4).to_php_string()).unwrap(), term)
         })
@@ -246,7 +246,7 @@ fn trails_stop_where_parents_do() {
         parent,
         name: format!("C{id}").into_bytes(),
         slug: format!("c{id}").into_bytes(),
-        description: Vec::new(),
+        ..Term::default()
     };
     // Category 4 under 5 under 4 and 8 under itself list themselves as
     // ancestors, as get_ancestors() does; 6 is under a missing 9.

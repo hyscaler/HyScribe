@@ -40,7 +40,7 @@ pub(super) fn tag_cloud(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         let all = context.site.taxonomy_terms(&taxonomy);
         let mut used = all.clone();
         keep_used(&all, &mut used);
-        used.sort_by(|(_, a), (_, b)| b.cmp(a));
+        used.sort_by_key(|term| std::cmp::Reverse(term.count));
         used.truncate(usize::try_from(number).unwrap_or(usize::MAX));
         used
     } else {
@@ -51,13 +51,13 @@ pub(super) fn tag_cloud(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     }
     // _post_format_get_terms(): a format's name is its label.
     if taxonomy == "post_format" {
-        for (term, _) in &mut tags {
+        for term in &mut tags {
             term.name = post_format_string(&term.slug).as_bytes().to_vec();
         }
     }
     // A stable sort by name, as uasort() keeps ties in order.
-    tags.sort_by(|(a, _), (b, _)| strnatcasecmp(&a.name, &b.name));
-    let scaled: Vec<i64> = tags.iter().map(|&(_, count)| scale(count)).collect();
+    tags.sort_by(|a, b| strnatcasecmp(&a.name, &b.name));
+    let scaled: Vec<i64> = tags.iter().map(|term| scale(term.count)).collect();
     let min = scaled.iter().copied().min().unwrap_or_default();
     let max = scaled.iter().copied().max().unwrap_or_default();
     let spread = (max - min).max(1);
@@ -68,9 +68,10 @@ pub(super) fn tag_cloud(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         .iter()
         .zip(&scaled)
         .enumerate()
-        .map(|(position, ((term, count), &scaled))| {
-            let label = if *count == 1 { "item" } else { "items" };
-            let formatted = format!("{} {label}", number_format(*count));
+        .map(|(position, (term, &scaled))| {
+            let count = term.count;
+            let label = if count == 1 { "item" } else { "items" };
+            let formatted = format!("{} {label}", number_format(count));
             let size = smallest + (scaled - min) as f64 * step;
             let size = format!("{}{unit}", float_to_string(size));
             let shown = if show_count {

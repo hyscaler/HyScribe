@@ -135,11 +135,11 @@ impl RenderSite for Reads<'_> {
         })
     }
 
-    fn cloud_terms(&self, taxonomy: &str, limit: u64) -> Vec<(Term, u64)> {
+    fn cloud_terms(&self, taxonomy: &str, limit: u64) -> Vec<Term> {
         self.wait(self.site.db.cloud_terms(taxonomy, limit))
     }
 
-    fn taxonomy_terms(&self, taxonomy: &str) -> Vec<(Term, u64)> {
+    fn taxonomy_terms(&self, taxonomy: &str) -> Vec<Term> {
         self.wait(self.site.db.taxonomy_terms(taxonomy))
     }
 

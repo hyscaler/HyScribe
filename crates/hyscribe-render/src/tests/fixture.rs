@@ -271,8 +271,8 @@ impl<T: Source> Site for T {
                     id: number(&term[0]),
                     name: text(&term[1]),
                     slug: text(&term[2]),
-                    description: Vec::new(),
-                    parent: 0,
+                    count: number(&taxonomy_row[5]),
+                    ..Term::default()
                 })
             })
             .collect()

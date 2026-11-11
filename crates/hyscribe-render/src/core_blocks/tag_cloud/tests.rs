@@ -14,7 +14,7 @@ use crate::theme::twentytwentyfive;
 /// The default install with the terms a case gives `get_terms()`.
 struct Tagged {
     site: DefaultInstall,
-    terms: Vec<(Term, u64)>,
+    terms: Vec<Term>,
 }
 
 impl Site for Tagged {
@@ -42,14 +42,14 @@ impl Site for Tagged {
         self.site.query(query)
     }
 
-    fn cloud_terms(&self, _: &str, limit: u64) -> Vec<(Term, u64)> {
+    fn cloud_terms(&self, _: &str, limit: u64) -> Vec<Term> {
         let limit = usize::try_from(limit).unwrap();
         self.terms.iter().take(limit).cloned().collect()
     }
 
     /// The same terms for a category cloud: `terms_pre_query` skips the
     /// tree's handling, and the sets are already most used first.
-    fn taxonomy_terms(&self, _: &str) -> Vec<(Term, u64)> {
+    fn taxonomy_terms(&self, _: &str) -> Vec<Term> {
         self.terms.clone()
     }
 }
@@ -75,13 +75,13 @@ fn matches_php() {
             .iter()
             .map(|(_, t)| {
                 let field = |i: i64| t.get(&hyscribe_phpser::Key::Int(i)).unwrap();
-                let term = Term {
+                Term {
                     id: field(0).to_int() as u64,
                     name: field(1).to_php_string(),
                     slug: field(2).to_php_string(),
+                    count: field(3).to_int() as u64,
                     ..Term::default()
-                };
-                (term, field(3).to_int() as u64)
+                }
             })
             .collect();
         let site = Tagged {

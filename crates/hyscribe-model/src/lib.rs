@@ -61,6 +61,8 @@ pub struct Term {
     pub description: Vec<u8>,
     /// `parent`: the term above it in its taxonomy, 0 for none.
     pub parent: u64,
+    /// `count`: its published posts.
+    pub count: u64,
 }
 
 /// A row of `{prefix}users`, with the columns rendering needs.

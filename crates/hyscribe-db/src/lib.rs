@@ -138,14 +138,9 @@ fn term(row: &MySqlRow) -> Result<Term, DbError> {
         slug: c.bytes("slug"),
         description: c.bytes("description"),
         parent: c.unsigned("parent"),
+        count: c.signed("count").unsigned_abs(),
     };
     c.finish(term)
-}
-
-/// A term row with its taxonomy's post count.
-fn counted_term(row: &MySqlRow) -> Result<(Term, u64), DbError> {
-    let count = Columns::new(row).signed("count").unsigned_abs();
-    term(row).map(|term| (term, count))
 }
 
 fn date_count(row: &MySqlRow) -> Result<DateCount, DbError> {
@@ -691,11 +686,7 @@ impl Db {
 
     /// `get_terms()` for a tag cloud: the terms of `taxonomy` with posts,
     /// the most used first, `limit` of them, each with its post count.
-    pub async fn cloud_terms(
-        &self,
-        taxonomy: &str,
-        limit: u64,
-    ) -> Result<Vec<(Term, u64)>, DbError> {
+    pub async fn cloud_terms(&self, taxonomy: &str, limit: u64) -> Result<Vec<Term>, DbError> {
         let sql = self.prefix.sql(concat!(
             "SELECT ",
             terms_from!(),
@@ -707,12 +698,12 @@ impl Db {
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
-        rows.iter().map(counted_term).collect()
+        rows.iter().map(term).collect()
     }
 
     /// Every term of `taxonomy` with its post count, by name, as
     /// `get_terms()` orders them for `wp_list_categories()`.
-    pub async fn taxonomy_terms(&self, taxonomy: &str) -> Result<Vec<(Term, u64)>, DbError> {
+    pub async fn taxonomy_terms(&self, taxonomy: &str) -> Result<Vec<Term>, DbError> {
         let sql = self.prefix.sql(concat!(
             "SELECT ",
             terms_from!(),
@@ -723,7 +714,7 @@ impl Db {
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
-        rows.iter().map(counted_term).collect()
+        rows.iter().map(term).collect()
     }
 
     /// The published posts in each term of `taxonomy`, as `(term ID, post

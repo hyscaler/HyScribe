@@ -218,3 +218,13 @@ pub enum Archive {
     /// A week's or a time's: no year, month or day.
     Date,
 }
+
+impl Archive {
+    /// The queried term of a term archive, with its taxonomy.
+    pub fn term(&self) -> Option<(Taxonomy, &Term)> {
+        match self {
+            Archive::Term(taxonomy, Some(term)) => Some((*taxonomy, term)),
+            _ => None,
+        }
+    }
+}

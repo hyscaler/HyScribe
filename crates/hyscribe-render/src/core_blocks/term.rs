@@ -29,10 +29,7 @@ pub(super) fn term_description(context: &Context<'_>, block: &Block<'_>) -> Vec<
 
 /// The queried term, as the term blocks take it outside a term template.
 fn queried_term<'a>(context: &Context<'a>) -> Option<(Taxonomy, &'a Term)> {
-    match &context.request.archive {
-        Some(Archive::Term(taxonomy, Some(term))) => Some((*taxonomy, term)),
-        _ => None,
-    }
+    context.request.archive.as_ref().and_then(Archive::term)
 }
 
 /// `render_block_core_term_name()`: the name as stored, in a paragraph or
@@ -41,11 +38,7 @@ pub(super) fn term_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let Some((taxonomy, term)) = queried_term(context) else {
         return Vec::new();
     };
-    // `0 === $level`: a float zero still makes `h0`.
-    let tag = match block.attribute("level") {
-        None | Some(Value::Null | Value::Int(0)) => "p".to_owned(),
-        Some(level) => format!("h{}", level.to_int()),
-    };
+    let tag = super::tag(block.attribute("level"), b"p");
     let name = if block.attribute("isLink").is_some_and(|v| !v.is_empty()) {
         let link = crate::permalinks::term_link(context.site, taxonomy.name(), term);
         [
@@ -60,7 +53,7 @@ pub(super) fn term_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         term.name.clone()
     };
     let wrapper = block.wrapper(context, &align_link_classes(block, Vec::new()));
-    element(tag.as_bytes(), &wrapper, &name)
+    element(&tag, &wrapper, &name)
 }
 
 /// `render_block_core_term_count()`: the term's post count in the block's

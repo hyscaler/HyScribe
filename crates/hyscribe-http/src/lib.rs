@@ -1784,10 +1784,7 @@ fn list_templates(
     if search {
         templates.push("search".into());
     } else {
-        let queried = match term_archive {
-            Some(Archive::Term(taxonomy, Some(term))) => Some((*taxonomy, term)),
-            _ => None,
-        };
+        let queried = term_archive.and_then(Archive::term);
         for kind in kinds {
             // get_taxonomy_template() names the queried term's taxonomy.
             let prefix = match (kind, queried) {

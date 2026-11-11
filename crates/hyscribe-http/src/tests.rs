@@ -1170,20 +1170,24 @@ async fn link_headers_match_php() {
     assert_eq!(reply.headers.get_all("link").iter().count(), 1);
 }
 
-/// A static file as served: status, content type (empty for none) and
-/// the SHA-256 of the body.
-async fn served(site: &Arc<Site>, path: &str) -> (String, String, String) {
+/// A static file as served: status, content type (empty for none), the
+/// SHA-256 of the body, `Last-Modified` and `ETag`.
+async fn served(site: &Arc<Site>, path: &str) -> [String; 5] {
     use sha2::Digest;
     let response = router(site.clone())
         .oneshot(Request::get(path).body(Body::empty()).unwrap())
         .await
         .unwrap();
     let status = response.status().as_u16().to_string();
-    let content_type = response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .map_or("", |v| v.to_str().unwrap())
-        .to_string();
+    let header = |name| {
+        response
+            .headers()
+            .get(name)
+            .map_or("", |v| v.to_str().unwrap())
+            .to_string()
+    };
+    let content_type = header(header::CONTENT_TYPE);
+    let (modified, etag) = (header(header::LAST_MODIFIED), header(header::ETAG));
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
@@ -1191,7 +1195,7 @@ async fn served(site: &Arc<Site>, path: &str) -> (String, String, String) {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect();
-    (status, content_type, sha)
+    [status, content_type, sha, modified, etag]
 }
 
 /// Every file of `reference/themes/files-golden.sh`: the default theme's
@@ -1202,13 +1206,11 @@ async fn theme_files_match_php() {
     let golden = include_str!("../tests/golden/theme-files.tsv");
     for line in golden.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
-        let (status, content_type, sha) = served(&site, fields[0]).await;
-        assert_eq!(
-            (status.as_str(), content_type.as_str(), sha.as_str()),
-            (fields[1], fields[2], fields[3]),
-            "{}",
-            fields[0]
-        );
+        // The ETag is the SHA-256 of what PHP serves: the files are the
+        // release's own.
+        let etag = format!("\"{}\"", fields[3]);
+        let expected = [fields[1], fields[2], fields[3], fields[4], &etag];
+        assert_eq!(served(&site, fields[0]).await, expected, "{}", fields[0]);
     }
     assert_eq!(golden.lines().count(), 136);
     // No PHP, no data files of the port's own, and only GET and HEAD.
@@ -1236,6 +1238,42 @@ async fn theme_files_match_php() {
     );
 }
 
+/// Every case of `reference/themes/conditional-golden.sh`: conditional
+/// requests for a theme file, answered as Apache answers them.
+#[tokio::test]
+async fn conditional_requests_match_apache() {
+    let site = fixture_site(None).await;
+    let path = "/wp-content/themes/twentytwentyfive/style.css";
+    let [.., modified, etag] = served(&site, path).await;
+    let golden = include_str!("../tests/golden/conditional.tsv");
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let fill = |v: &str| v.replace("ETAG", &etag).replace("MODIFIED", &modified);
+        let mut builder = Request::builder().method(fields[0]).uri(path);
+        for pair in [(fields[1], fields[2]), (fields[3], fields[4])] {
+            if !pair.0.is_empty() {
+                builder = builder.header(pair.0, fill(pair.1));
+            }
+        }
+        let response = router(site.clone())
+            .oneshot(builder.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        assert_eq!(status.as_str(), fields[5], "{line}");
+        let headers = response.headers();
+        assert_eq!(headers[header::ETAG], etag.as_str());
+        assert_eq!(headers[header::LAST_MODIFIED], modified.as_str());
+        let typed = headers.contains_key(header::CONTENT_TYPE);
+        assert_eq!(typed, status != StatusCode::NOT_MODIFIED, "{line}");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(body.is_empty(), status != StatusCode::OK, "{line}");
+    }
+    assert_eq!(golden.lines().count(), 24);
+}
+
 /// Every file of `reference/wordpress/files-golden.sh`: `wp-includes` as
 /// the web server sends it, skipping PHP and the unminified files with a
 /// `.min` twin, which are not bundled.
@@ -1251,21 +1289,19 @@ async fn wp_includes_files_match_php() {
     for line in golden.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
         let path = fields[0];
-        let (status, content_type, sha) = served(&site, path).await;
+        let served = served(&site, path).await;
         let twin = [".js", ".css"].iter().find_map(|ext| {
             let stem = path.strip_suffix(ext)?;
             (!stem.ends_with(".min")).then(|| format!("{stem}.min{ext}"))
         });
         if twin.is_some_and(|twin| paths.contains(&twin.as_str())) {
             unminified += 1;
-            assert_eq!(status, "404", "{path}");
+            assert_eq!(served[0], "404", "{path}");
             continue;
         }
-        assert_eq!(
-            (status.as_str(), content_type.as_str(), sha.as_str()),
-            (fields[1], fields[2], fields[3]),
-            "{path}"
-        );
+        let etag = format!("\"{}\"", fields[3]);
+        let expected = [fields[1], fields[2], fields[3], fields[4], &etag];
+        assert_eq!(served, expected, "{path}");
     }
     assert_eq!((golden.lines().count(), unminified), (1670, 643));
     for path in [

@@ -4,16 +4,20 @@
 //!: downloaded, or read from `HYSCRIBE_WORDPRESS_TARBALL` for
 //! offline builds, and checked against its SHA-256 before anything in it
 //! is used. PHP is left out, and so is a `.js` or `.css` that has a `.min`
-//! twin, which pages only request with `SCRIPT_DEBUG`.
+//! twin, which pages only request with `SCRIPT_DEBUG`. Each file served
+//! from the release, the default theme's too, keeps its modification time
+//! and SHA-256 for `Last-Modified` and `ETag`.
 
 use sha2::{Digest, Sha256};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::UNIX_EPOCH;
 
 const VERSION: &str = "7.1.3";
 const SHA256: &str = "d2a09acb6a15e3b9c471d72557753c266d6f41a79ed19bfe04cbfe49e283b2a5";
 const TARBALL_ENV: &str = "HYSCRIBE_WORDPRESS_TARBALL";
+const THEME: &str = "wp-content/themes/twentytwentyfive";
 /// As the web server sends them; a file with no extension gets no type.
 const CONTENT_TYPES: [(&str, &str); 14] = [
     ("css", "text/css"),
@@ -56,13 +60,16 @@ fn main() -> io::Result<()> {
         .arg(&tarball)
         .arg("-C")
         .arg(&tree)
-        .arg("wordpress/wp-includes"))?;
+        .arg("wordpress/wp-includes")
+        .arg(format!("wordpress/{THEME}")))?;
     let root = tree.join("wordpress/wp-includes");
     let mut files = Vec::new();
     collect(&root, "", &mut files)?;
     files.sort();
     let mut entries = String::new();
+    let mut release = Vec::new();
     for file in files.iter().filter(|f| served(f, &root)) {
+        release.push(format!("wp-includes/{file}"));
         let name = file.rsplit('/').next().unwrap_or_default();
         let extension = name.rsplit_once('.').map_or("", |(_, e)| e);
         let (_, content_type) = CONTENT_TYPES
@@ -74,7 +81,32 @@ fn main() -> io::Result<()> {
             root.join(file)
         ));
     }
-    std::fs::write(out.join("wp_includes.rs"), format!("&[\n{entries}]\n"))
+    std::fs::write(out.join("wp_includes.rs"), format!("&[\n{entries}]\n"))?;
+    let mut theme = Vec::new();
+    collect(&tree.join("wordpress").join(THEME), "", &mut theme)?;
+    release.extend(
+        theme
+            .iter()
+            .filter(|f| !f.ends_with(".php"))
+            .map(|f| format!("{THEME}/{f}")),
+    );
+    release.sort();
+    let mut dates = String::new();
+    for path in &release {
+        let file = tree.join("wordpress").join(path);
+        let modified = std::fs::metadata(&file)?
+            .modified()?
+            .duration_since(UNIX_EPOCH)
+            .map_err(io::Error::other)?
+            .as_secs();
+        let digest = hex(&Sha256::digest(std::fs::read(&file)?));
+        dates.push_str(&format!("    ({path:?}, {modified}, {digest:?}),\n"));
+    }
+    std::fs::write(out.join("release.rs"), format!("&[\n{dates}]\n"))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The verified release: the offline copy, a verified earlier download, or
@@ -100,10 +132,7 @@ fn tarball(out: &Path) -> io::Result<PathBuf> {
 }
 
 fn verify(path: &Path) -> io::Result<()> {
-    let digest: String = Sha256::digest(std::fs::read(path)?)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+    let digest = hex(&Sha256::digest(std::fs::read(path)?));
     if digest == SHA256 {
         Ok(())
     } else {

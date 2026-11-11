@@ -1,0 +1,24 @@
+GET	If-Modified-Since	MODIFIED			304
+HEAD	If-Modified-Since	MODIFIED			304
+GET	If-Modified-Since	Tue, 11 Aug 2026 14:45:48 GMT			200
+GET	If-Modified-Since	Thu, 13 Aug 2026 00:00:00 GMT			304
+GET	If-Modified-Since	Thu, 01 Jan 2099 00:00:00 GMT			200
+GET	If-Modified-Since	garbage			200
+GET	If-Modified-Since	Thursday, 13-Aug-26 00:00:00 GMT			304
+GET	If-Modified-Since	Thu Aug 13 00:00:00 2026			304
+GET	If-None-Match	ETAG			304
+GET	If-None-Match	W/ETAG			304
+GET	If-None-Match	"x", ETAG			304
+GET	If-None-Match	*			304
+GET	If-None-Match	"x"			200
+GET	If-None-Match	"x"	If-Modified-Since	MODIFIED	200
+GET	If-None-Match	ETAG	If-Modified-Since	Wed, 12 Aug 2020 00:00:00 GMT	200
+GET	If-Match	"x"			412
+GET	If-Match	ETAG			200
+GET	If-Match	W/ETAG			412
+GET	If-Match	*			200
+GET	If-Match	ETAG	If-None-Match	ETAG	304
+GET	If-Unmodified-Since	Wed, 12 Aug 2020 00:00:00 GMT			412
+GET	If-Unmodified-Since	MODIFIED			200
+GET	If-Unmodified-Since	garbage			200
+GET	If-Match	ETAG	If-Unmodified-Since	Wed, 12 Aug 2020 00:00:00 GMT	412

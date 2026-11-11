@@ -17,7 +17,6 @@ use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use hyscribe_assets::wp_includes;
 use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html, esc_url_raw};
 use hyscribe_model::{OrderBy, Post, PostQuery, Term, TermFilter, TimeCondition};
@@ -33,12 +32,13 @@ use hyscribe_render::permalinks::{self, Permalinks, home_path};
 use hyscribe_render::post::body_class;
 use hyscribe_render::site::{Archive, Request, Taxonomy};
 use hyscribe_render::template::render_template;
-use hyscribe_render::theme::{Theme, twentytwentyfive, twentytwentyfive_file};
+use hyscribe_render::theme::{Theme, twentytwentyfive};
 use hyscribe_render::{search_terms, sticky_posts};
 use tokio::net::TcpListener;
 
 mod canonical;
 mod feed;
+mod files;
 pub mod query;
 mod reads;
 mod rewrite;
@@ -318,7 +318,8 @@ async fn page(
     if method != Method::GET && !head && !post {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
-    if let Some(response) = static_file(uri.path()).filter(|_| !post) {
+    if let Some(response) = files::static_file(uri.path(), &headers, now() as u64).filter(|_| !post)
+    {
         return response;
     }
     // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.
@@ -1000,23 +1001,6 @@ fn single_post(query: &HashMap<String, String>) -> Option<(&'static str, u64, &'
         (0, page_id) => Some(("page_id", page_id, "page")),
         (p, page_id) => Some(("p", if page_id > 0 { page_id } else { p }, "post")),
     }
-}
-
-/// One of the default theme's files, which pages link to.
-fn static_file(path: &str) -> Option<Response> {
-    let (content_type, bytes) = path
-        .strip_prefix("/wp-content/themes/twentytwentyfive/")
-        .and_then(twentytwentyfive_file)
-        .or_else(|| wp_includes(path.strip_prefix("/wp-includes/")?))?;
-    let mut response = bytes.into_response();
-    if content_type.is_empty() {
-        response.headers_mut().remove(header::CONTENT_TYPE);
-    } else {
-        response
-            .headers_mut()
-            .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
-    }
-    Some(response)
 }
 
 /// Static file trees: never redirected or rewritten, so their public URLs

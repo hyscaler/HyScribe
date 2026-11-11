@@ -3,7 +3,7 @@
 #
 # Records how the PHP oracle's web server sends each file of wp-includes but
 # its PHP, as crates/hyscribe-http/tests/golden/wp-includes-files.tsv:
-#   path<TAB>status<TAB>content type<TAB>sha256 of the body
+#   path<TAB>status<TAB>content type<TAB>sha256 of the body<TAB>Last-Modified
 # Needs the default install oracle running (db.sh up, then php.sh up). Only
 # reads from it.
 set -euo pipefail
@@ -24,6 +24,7 @@ while read -r file; do
   curl -s -D "$HEADERS" -o "$TMP" "$BASE$path" > /dev/null
   status=$(head -n 1 "$HEADERS" | cut -d ' ' -f 2)
   type=$(grep -i '^content-type:' "$HEADERS" | cut -d ' ' -f 2- | tr -d '\r' || true)
-  printf '%s\t%s\t%s\t%s\n' "$path" "$status" "$type" "$(sha256sum "$TMP" | cut -d ' ' -f 1)" >> "$OUT"
+  modified=$(grep -i '^last-modified:' "$HEADERS" | cut -d ' ' -f 2- | tr -d '\r' || true)
+  printf '%s\t%s\t%s\t%s\t%s\n' "$path" "$status" "$type" "$(sha256sum "$TMP" | cut -d ' ' -f 1)" "$modified" >> "$OUT"
 done
 wc -l "$OUT"

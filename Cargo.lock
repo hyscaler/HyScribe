@@ -677,6 +677,7 @@ name = "hyscribe-http"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "httpdate",
  "hyscribe-assets",
  "hyscribe-config",
  "hyscribe-db",

@@ -157,17 +157,6 @@ impl<'a> LoginReads<'a> {
         }
     }
 
-    /// The user of a valid logged in cookie, and its session token.
-    fn current_user(&self, cookie: Option<&[u8]>, post: bool) -> Option<(u64, Vec<u8>)> {
-        let parsed = parse_auth_cookie(cookie?)?;
-        let sessions = self.site.sessions.as_ref()?;
-        let user = self.credentials(UserField::Login, parsed.username)?;
-        let salt = self.salt("logged_in")?;
-        let good = parsed.is_valid(&user.pass, &salt, self.now, post)
-            && sessions.verify(user.id, parsed.token, self.now);
-        good.then(|| (user.id, parsed.token.to_vec()))
-    }
-
     /// `get_user_locale( $id )`: the user's own, else the site's.
     fn locale(&self, id: u64) -> Vec<u8> {
         self.user_meta(id, "locale")
@@ -208,18 +197,38 @@ impl<'a> LoginReads<'a> {
     /// `wp_validate_auth_cookie()` of the auth cookie, with the session:
     /// the secure one's salt over HTTPS.
     pub(crate) fn session(&self, cookie: Option<&[u8]>, post: bool, https: bool) -> Session {
-        let Some(cookie) = cookie.filter(|cookie| !cookie.is_empty()) else {
+        if cookie.is_none_or(<[u8]>::is_empty) {
             return Session::None;
-        };
-        let valid = parse_auth_cookie(cookie).and_then(|parsed| {
-            let sessions = self.site.sessions.as_ref()?;
-            let user = self.credentials(UserField::Login, parsed.username)?;
-            let salt = self.salt(if https { "secure_auth" } else { "auth" })?;
-            let good = parsed.is_valid(&user.pass, &salt, self.now, post)
-                && sessions.verify(user.id, parsed.token, self.now);
-            good.then_some(user.id)
-        });
-        valid.map_or(Session::Expired, Session::User)
+        }
+        self.auth_user(cookie, post, https)
+            .map_or(Session::Expired, |(id, _)| Session::User(id))
+    }
+
+    /// The user of a valid auth cookie, the secure one over HTTPS, and its
+    /// session token.
+    pub(crate) fn auth_user(
+        &self,
+        cookie: Option<&[u8]>,
+        post: bool,
+        https: bool,
+    ) -> Option<(u64, Vec<u8>)> {
+        self.validate(cookie?, post, if https { "secure_auth" } else { "auth" })
+    }
+
+    /// The user of a valid cookie of `scheme` and its session token.
+    fn validate(&self, cookie: &[u8], post: bool, scheme: &str) -> Option<(u64, Vec<u8>)> {
+        let parsed = parse_auth_cookie(cookie)?;
+        let sessions = self.site.sessions.as_ref()?;
+        let user = self.credentials(UserField::Login, parsed.username)?;
+        let salt = self.salt(scheme)?;
+        let good = parsed.is_valid(&user.pass, &salt, self.now, post)
+            && sessions.verify(user.id, parsed.token, self.now);
+        good.then(|| (user.id, parsed.token.to_vec()))
+    }
+
+    /// Acts for a logged in user: their nonces.
+    pub(crate) fn act_as(&mut self, user: u64, token: Vec<u8>) {
+        self.current = (user, token);
     }
 
     /// `wp_verify_nonce( $nonce, $action )` for the current user.
@@ -373,18 +382,23 @@ pub(crate) fn joined(answer: Result<Response, tokio::task::JoinError>) -> Respon
     }
 }
 
-/// The headers every login screen response carries: `nocache_headers()`,
-/// `send_frame_options_header()` and the test cookie.
-fn headers(names: &Names, https: bool) -> Vec<(header::HeaderName, String)> {
-    let mut headers = vec![
+/// `nocache_headers()`.
+pub(crate) fn nocache() -> Vec<(header::HeaderName, String)> {
+    vec![
         (header::EXPIRES, "Wed, 11 Jan 1984 05:00:00 GMT".to_string()),
         (
             header::CACHE_CONTROL,
             "no-cache, must-revalidate, max-age=0, no-store, private".to_string(),
         ),
-        (header::X_FRAME_OPTIONS, "SAMEORIGIN".to_string()),
-        (header::CONTENT_TYPE, "text/html; charset=UTF-8".to_string()),
-    ];
+    ]
+}
+
+/// The headers every login screen response carries: `nocache_headers()`,
+/// `send_frame_options_header()` and the test cookie.
+fn headers(names: &Names, https: bool) -> Vec<(header::HeaderName, String)> {
+    let mut headers = nocache();
+    headers.push((header::X_FRAME_OPTIONS, "SAMEORIGIN".to_string()));
+    headers.push((header::CONTENT_TYPE, "text/html; charset=UTF-8".to_string()));
     for path in names.site_paths() {
         let cookie = set_cookie(&names.test(), b"WP Cookie check", (0, 0), path, https);
         headers.push((header::SET_COOKIE, cookie));
@@ -424,7 +438,9 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     );
     let mut reads = LoginReads::new(site, handle, now);
     reads.profile_user = query.get_str("user_id").map_or(0, Value::to_int);
-    if let Some(current) = reads.current_user(cookie(&cookies, &names.logged_in()), asked.post) {
+    if let Some(current) = cookie(&cookies, &names.logged_in())
+        .and_then(|cookie| reads.validate(cookie, asked.post, "logged_in"))
+    {
         reads.current = current;
     }
     let request = Request {

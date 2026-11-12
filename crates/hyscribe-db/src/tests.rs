@@ -379,6 +379,7 @@ async fn errors_are_reported() {
         .await
         .unwrap_err(),
         db.last_comment_modified().await.unwrap_err(),
+        db.moderated_comments().await.unwrap_err(),
         db.last_post_modified().await.unwrap_err(),
         db.date_counts(Period::Year).await.unwrap_err(),
         db.recent_comments(1).await.unwrap_err(),
@@ -1176,4 +1177,17 @@ async fn term_queries_order_by_any_column() {
             "{order:?}"
         );
     }
+}
+
+/// Pending comments: none on the default install, three in the Theme Test
+/// Data.
+#[tokio::test]
+async fn moderated_comments() {
+    assert_eq!(fixture().await.moderated_comments().await.unwrap(), 0);
+    let mut config = fixture_config();
+    config.name = "wordpress_ttd".into();
+    let ttd = Db::connect(&config)
+        .await
+        .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
+    assert_eq!(ttd.moderated_comments().await.unwrap(), 3);
 }

@@ -2,7 +2,8 @@
 --
 -- Terms and posts the default install lacks, for the term archive and
 -- sitemap tests: a tag on the first post, a tag on no post, the first
--- post's aside format, a link category, a later post and a reusable block.
+-- post's aside format, a link category, a later post, a reusable block and
+-- the administrator's stored editor preferences.
 -- db.sh loads it into the wordpress_terms database; reference/head/golden.sh
 -- adds it to the PHP oracle's database while it records term pages.
 INSERT INTO wp_terms (term_id, name, slug, term_group) VALUES
@@ -25,3 +26,5 @@ INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, p
    '2026-10-28 00:00:00', '2026-10-28 00:00:00', '', 0, 'http://default-install.test/?p=101', 0, 'post', '', 0),
   (102, 1, '2026-10-28 00:00:00', '2026-10-28 00:00:00', '', 'Block', '', 'publish', 'closed', 'closed', '', 'block', '', '',
    '2026-10-28 00:00:00', '2026-10-28 00:00:00', '', 0, 'http://default-install.test/?p=102', 0, 'wp_block', '', 0);
+INSERT INTO wp_usermeta (umeta_id, user_id, meta_key, meta_value) VALUES
+  (101, 1, 'wp_persisted_preferences', 'a:2:{s:4:"core";a:1:{s:10:"editorMode";s:6:"visual";}s:9:"_modified";s:24:"2026-10-28T00:00:00.000Z";}');

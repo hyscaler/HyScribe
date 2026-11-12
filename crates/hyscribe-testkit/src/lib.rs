@@ -146,6 +146,49 @@ fn value(input: &[u8]) -> Result<(SqlValue, &[u8]), String> {
     }
 }
 
+/// The PHP oracle's page under hs-admin's URLs, without the update notice
+/// hs-admin leaves out until an open question is decided.
+pub fn hs_admin_page(page: &str) -> String {
+    let nag = "<div class=\"notice notice-warning update-nag inline\">";
+    let page = match page.split_once(nag) {
+        Some((head, tail)) => format!(
+            "{head}{}",
+            tail.split_once("</div>").map_or("", |(_, rest)| rest)
+        ),
+        None => page.to_string(),
+    };
+    let mut out = String::new();
+    let mut rest = page.as_str();
+    while let Some(at) = rest.find("/wp-admin/") {
+        let (head, tail) = rest.split_at(at);
+        out.push_str(head);
+        out.push_str("/hs-admin/");
+        let tail = tail.get(10..).unwrap_or_default();
+        let end = tail.find(['\'', '?', '"']).unwrap_or(tail.len());
+        let (file, tail) = tail.split_at(end);
+        out.push_str(file.strip_suffix(".php").unwrap_or(file));
+        rest = tail;
+    }
+    out.push_str(rest);
+    let mut page = out.replace("/wp-login.php", "/hs-login");
+    for prefix in ["href='", "href=\"", "\"url\":\""] {
+        let mut out = String::new();
+        let mut rest = page.as_str();
+        while let Some(at) = rest.find(prefix) {
+            let (head, tail) = rest.split_at(at + prefix.len());
+            out.push_str(head);
+            let end = tail.find(['\'', '?', '"']).unwrap_or(tail.len());
+            let (file, tail) = tail.split_at(end);
+            let local = file.strip_suffix(".php").filter(|f| !f.contains('/'));
+            out.push_str(local.unwrap_or(file));
+            rest = tail;
+        }
+        out.push_str(rest);
+        page = out;
+    }
+    page
+}
+
 /// Path of a file or folder under the repository's `fixtures/` directory.
 pub fn fixture_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -207,6 +250,22 @@ pub const NO_FIXTURE_DATABASE: &str = "no fixture database: run reference/defaul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn php_pages_under_hs_admin_urls() {
+        assert_eq!(
+            hs_admin_page(
+                "<div class=\"notice notice-warning update-nag inline\">n</div><a href='edit.php?x'>\
+                 <a href=\"https://w.org/a.php\">'/wp-admin/css/a.css' '/wp-admin/load-styles.php?c' /wp-login.php \"url\":\"index.php\"/wp-admin/"
+            ),
+            "<a href='edit?x'><a href=\"https://w.org/a.php\">'/hs-admin/css/a.css' '/hs-admin/load-styles?c' /hs-login \"url\":\"index\"/hs-admin/"
+        );
+        assert_eq!(
+            hs_admin_page("<div class=\"notice notice-warning update-nag inline\">"),
+            ""
+        );
+        assert_eq!(hs_admin_page("plain"), "plain");
+    }
 
     #[test]
     fn unhex_reads_pairs_and_skips_malformed_ones() {

@@ -598,6 +598,22 @@ impl Db {
         row.try_get("latest").map_err(db_error)
     }
 
+    /// `wp_count_comments()->moderated`: the comments awaiting moderation,
+    /// without notes, which `WP_Comment_Query` leaves out.
+    pub async fn moderated_comments(&self) -> Result<u64, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT COUNT(*) AS moderated FROM {prefix}comments \
+             WHERE comment_approved = '0' AND comment_type != 'note'",
+        );
+        let row = sqlx::query(sql)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        let mut c = Columns::new(&row);
+        let moderated = c.signed("moderated").unsigned_abs();
+        c.finish(moderated)
+    }
+
     /// One approved comment by ID, of any type.
     pub async fn comment(&self, id: u64) -> Result<Option<Comment>, DbError> {
         let sql = self.prefix.sql(concat!(

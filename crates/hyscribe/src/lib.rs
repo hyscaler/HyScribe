@@ -251,8 +251,8 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
                 let number = stopped.await.unwrap_or(0);
                 seen.store(number, std::sync::atomic::Ordering::SeqCst);
             })
-            .await
-            .map_err(failed("the server failed".into()))
+            .await;
+            Ok(())
         })
     })?;
     // The last line is written before the lock is released, so whoever sees

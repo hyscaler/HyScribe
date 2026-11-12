@@ -38,6 +38,9 @@ pub(crate) struct Context<'a> {
     pub(crate) query: Option<QueryContext>,
     /// The comment the comment template is rendering, its `commentId`.
     pub(crate) comment: Option<Comment>,
+    /// How deep that comment is in its thread, 1 for a top-level comment,
+    /// as `get_comment_reply_link()` counts it through its parents.
+    pub(crate) comment_depth: usize,
     /// The loop and image counts images' loading attributes depend on.
     pub(crate) loading: Loading,
     /// The terms query block's context and the term template's.
@@ -408,15 +411,8 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     if is_empty_string(&option("thread_comments")) {
         return Vec::new();
     }
-    let all = context.site.comments(comment.post_id);
-    let mut depth = 1;
-    let mut parent = comment.parent;
-    while parent != 0 && depth <= all.len() {
-        depth += 1;
-        parent = all.iter().find(|c| c.id == parent).map_or(0, |c| c.parent);
-    }
     let max_depth = Value::String(option("thread_comments_depth")).to_int();
-    if max_depth <= i64::try_from(depth).unwrap_or(i64::MAX) {
+    if max_depth <= i64::try_from(context.comment_depth).unwrap_or(i64::MAX) {
         return Vec::new();
     }
     let Some(post) = context

@@ -402,6 +402,7 @@ fn comment_pages_under_pretty_permalinks() {
         post_id: None,
         query: None,
         comment: None,
+        comment_depth: 0,
         terms: Default::default(),
         loading: Default::default(),
     };

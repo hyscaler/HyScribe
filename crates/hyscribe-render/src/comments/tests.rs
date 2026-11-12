@@ -204,3 +204,59 @@ fn matches_php() {
     );
     assert_eq!(golden.lines().count(), 2292);
 }
+
+/// A thread of replies far past `thread_comments_depth` renders on a 2 MiB
+/// worker stack, in time linear in its length: replies deeper than the
+/// limit go on in the item of the last comment that nests them, as in PHP,
+/// without a stack frame each.
+#[test]
+fn long_reply_chains_render_without_recursing() {
+    const REPLIES: u64 = 10_000;
+    let comments: Vec<Comment> = (1..=REPLIES)
+        .map(|id| Comment {
+            id,
+            post_id: 1,
+            parent: id - 1,
+            date_gmt: "2026-11-12 00:00:00".into(),
+            ..Comment::default()
+        })
+        .collect();
+    let html = std::thread::Builder::new()
+        .stack_size(2 << 20)
+        .spawn(move || {
+            let site = WithComments {
+                base: DefaultInstall {
+                    home: b"http://example.test".to_vec(),
+                },
+                options: json_decode(br#"{"thread_comments":"1","thread_comments_depth":"5"}"#)
+                    .unwrap(),
+                comments,
+                users: Vec::new(),
+                password: false,
+                closed: false,
+                siteurl: b"http://example.test".to_vec(),
+            };
+            let request = Request {
+                post: Some(1),
+                ..Request::default()
+            };
+            let theme = twentytwentyfive();
+            let mut renderer = Renderer::new(&theme, &site, &request);
+            let markup = b"<!-- wp:comment-template --><!-- wp:comment-reply-link /--><!-- /wp:comment-template -->";
+            let block = &crate::blocks::parse_blocks(markup)[0];
+            String::from_utf8(renderer.block(block)).unwrap()
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    assert_eq!(html.matches("<li id=\"comment-").count(), REPLIES as usize);
+    assert_eq!(html.matches("</li>").count(), REPLIES as usize);
+    // Four levels open below the first, and only those comments can still
+    // be replied to.
+    assert_eq!(html.matches("<ol>").count(), 4);
+    assert_eq!(html.matches("wp-block-comment-reply-link").count(), 4);
+    // The replies from the fifth level on close inside its item, then the
+    // four levels above it and the template's own list close.
+    let end = ["</li>".repeat(REPLIES as usize - 4), "</ol></li>".repeat(4)].concat() + "</ol>";
+    assert!(html.ends_with(&end));
+}

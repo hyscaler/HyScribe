@@ -318,6 +318,85 @@ fn the_deepest_blocks_fit_a_worker_stack() {
     assert_eq!(html.matches("<div class=\"wp-block-group").count(), depth);
 }
 
+/// Published synced patterns, each as deep as the parser allows with the
+/// next pattern at the bottom, without end.
+struct PatternChain;
+
+impl Site for PatternChain {
+    fn option(&self, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn home_url(&self) -> Vec<u8> {
+        b"http://example.test".to_vec()
+    }
+
+    fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        let depth = crate::blocks::MAX_BLOCK_DEPTH - 1;
+        let content = [
+            "<!-- wp:group --><div class=\"wp-block-group\">".repeat(depth),
+            format!("<!-- wp:block {{\"ref\":{}}} /-->", id + 1),
+            "</div><!-- /wp:group -->".repeat(depth),
+        ]
+        .concat();
+        Some(hyscribe_model::Post {
+            id,
+            post_type: "wp_block".into(),
+            status: "publish".into(),
+            content: content.into_bytes(),
+            ..Default::default()
+        })
+    }
+
+    fn post_terms(&self, _: u64, _: &str) -> Vec<hyscribe_model::Term> {
+        Vec::new()
+    }
+
+    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn query(&self, _: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
+        Vec::new()
+    }
+}
+
+/// Every parse starts its own nesting count, so rendering counts the
+/// blocks it is inside across synced patterns, post content and template
+/// parts, and renders nothing past [`MAX_RENDER_DEPTH`].
+#[test]
+fn chained_patterns_stop_at_the_render_depth() {
+    let html = std::thread::Builder::new()
+        .stack_size(2 << 20)
+        .spawn(|| {
+            let html = render_content(
+                &twentytwentyfive(),
+                &PatternChain,
+                &Request::default(),
+                br#"<!-- wp:block {"ref":1} /-->"#,
+            );
+            String::from_utf8(html).unwrap()
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    // Each pattern's groups, and the pattern blocks themselves, which
+    // render no wrapper of their own.
+    let groups = MAX_RENDER_DEPTH - MAX_RENDER_DEPTH / crate::blocks::MAX_BLOCK_DEPTH;
+    assert_eq!(html.matches("<div class=\"wp-block-group").count(), groups);
+}
+
+/// The depth counts blocks rendered inside others, not blocks rendered
+/// before: a page of more blocks side by side renders them all.
+#[test]
+fn blocks_side_by_side_do_not_count_as_depth() {
+    let blocks = MAX_RENDER_DEPTH + 1;
+    let markup =
+        "<!-- wp:group --><div class=\"wp-block-group\"></div><!-- /wp:group -->".repeat(blocks);
+    let html = render(&twentytwentyfive(), &markup);
+    assert_eq!(html.matches("<div class=\"wp-block-group").count(), blocks);
+}
+
 #[test]
 fn replacing_nothing_keeps_the_subject() {
     assert_eq!(replace(b"abc", b"", b"x"), b"abc");

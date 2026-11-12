@@ -187,6 +187,7 @@ fn matches_php() {
             post_id,
             query: None,
             comment: None,
+            comment_depth: 0,
             terms: Default::default(),
             loading: Default::default(),
         };
@@ -238,6 +239,7 @@ fn relative_dates() {
         post_id: Some(7),
         query: None,
         comment: None,
+        comment_depth: 0,
         terms: Default::default(),
         loading: Default::default(),
     };
@@ -263,6 +265,7 @@ fn blocks_without_a_callback_render_their_saved_markup() {
         post_id: None,
         query: None,
         comment: None,
+        comment_depth: 0,
         terms: Default::default(),
         loading: Default::default(),
     };
@@ -316,6 +319,7 @@ fn bindings_and_the_front_page() {
         post_id: Some(9),
         query: None,
         comment: None,
+        comment_depth: 0,
         terms: Default::default(),
         loading: Default::default(),
     };
@@ -395,6 +399,7 @@ fn post_terms_match_php() {
             post_id: (state.get_str("context") == Some(&Value::Bool(true))).then_some(1001),
             query: None,
             comment: None,
+            comment_depth: 0,
             terms: Default::default(),
             loading: Default::default(),
         };
@@ -501,6 +506,7 @@ fn post_navigation_links_match_php() {
             post_id: Some(site.post.as_ref().map_or(9999, |post| post.id)),
             query: None,
             comment: None,
+            comment_depth: 0,
             terms: Default::default(),
             loading: Default::default(),
         };
@@ -538,6 +544,7 @@ fn comments_match_php() {
             post_id: site.post.as_ref().map(|post| post.id),
             query: None,
             comment: None,
+            comment_depth: 0,
             terms: Default::default(),
             loading: Default::default(),
         };
@@ -574,6 +581,7 @@ fn legacy_comments_are_not_ported() {
         post_id: Some(1),
         query: None,
         comment: None,
+        comment_depth: 0,
         terms: Default::default(),
         loading: Default::default(),
     };
@@ -602,6 +610,7 @@ fn avatar_defaults_without_options() {
         post_id: None,
         query: None,
         comment: None,
+        comment_depth: 0,
         terms: Default::default(),
         loading: Default::default(),
     };
@@ -645,6 +654,7 @@ fn comment_form_without_comment_data() {
         post_id: Some(0),
         query: None,
         comment: None,
+        comment_depth: 0,
         terms: Default::default(),
         loading: Default::default(),
     };
@@ -719,6 +729,7 @@ fn footnotes_match_php() {
             post_id: Some(1),
             query: None,
             comment: None,
+            comment_depth: 0,
             terms: Default::default(),
             loading: Default::default(),
         };

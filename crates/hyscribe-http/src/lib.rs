@@ -12,11 +12,16 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
+use hyper::server::conn::http1;
+use hyper_util::rt::{TokioIo, TokioTimer};
+use hyper_util::server::graceful::GracefulShutdown;
+use hyper_util::service::TowerToHyperService;
 use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html, esc_url_raw};
 use hyscribe_model::{OrderBy, Post, PostQuery, Term, TermFilter, TimeCondition};
@@ -35,6 +40,7 @@ use hyscribe_render::template::render_template;
 use hyscribe_render::theme::{Theme, twentytwentyfive};
 use hyscribe_render::{search_terms, sticky_posts};
 use tokio::net::TcpListener;
+use tokio::sync::Semaphore;
 
 mod canonical;
 mod feed;
@@ -246,16 +252,61 @@ pub fn router(site: Arc<Site>) -> Router {
         .layer(axum::middleware::map_response(security_headers))
 }
 
+/// Connections served at once. More wait in the listen backlog, so many
+/// open connections cannot take every file descriptor, which the database
+/// pool needs too.
+const MAX_CONNECTIONS: usize = 1024;
+
+/// How long a client has to send a request's headers, from when the
+/// connection opens or its last response ends. hyper has this default but
+/// keeps it only with a timer, which `axum::serve` does not give it.
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Serves `site` on `listener` until `shutdown` completes, then finishes the
 /// requests in flight.
 pub async fn serve(
     listener: TcpListener,
     site: Arc<Site>,
     shutdown: impl Future<Output = ()> + Send + 'static,
-) -> std::io::Result<()> {
-    axum::serve(listener, router(site))
-        .with_graceful_shutdown(shutdown)
-        .await
+) {
+    serve_connections(listener, router(site), MAX_CONNECTIONS, shutdown).await;
+}
+
+/// [`serve`] with at most `limit` connections open.
+async fn serve_connections(
+    mut listener: TcpListener,
+    app: Router,
+    limit: usize,
+    shutdown: impl Future<Output = ()>,
+) {
+    let service = TowerToHyperService::new(app);
+    let mut http = http1::Builder::new();
+    http.timer(TokioTimer::new())
+        .header_read_timeout(HEADER_READ_TIMEOUT);
+    let permits = Arc::new(Semaphore::new(limit));
+    let graceful = GracefulShutdown::new();
+    let mut shutdown = std::pin::pin!(shutdown);
+    loop {
+        // axum's accept logs and retries errors such as running out of file
+        // descriptors.
+        let accepted = async {
+            let permit = permits.clone().acquire_owned().await.ok();
+            (permit, axum::serve::Listener::accept(&mut listener).await)
+        };
+        let (permit, (stream, _)) = tokio::select! {
+            accepted = accepted => accepted,
+            () = &mut shutdown => break,
+        };
+        let connection =
+            graceful.watch(http.serve_connection(TokioIo::new(stream), service.clone()));
+        tokio::spawn(async move {
+            let _ = connection.await;
+            drop(permit);
+        });
+    }
+    // New clients are refused at once while the open connections finish.
+    drop(listener);
+    graceful.shutdown().await;
 }
 
 /// Embed pages are made to be framed by other sites, so they go without

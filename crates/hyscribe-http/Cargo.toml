@@ -12,6 +12,8 @@ publish.workspace = true
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "query"] }
 httpdate = "1.0"
+hyper = { version = "1.12", default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["server-graceful", "service", "tokio"] }
 hyscribe-assets.workspace = true
 hyscribe-auth.workspace = true
 hyscribe-config.workspace = true
@@ -20,12 +22,12 @@ hyscribe-kses.workspace = true
 hyscribe-model.workspace = true
 hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true
-tokio = { version = "1", features = ["net", "rt"] }
+tokio = { version = "1", features = ["macros", "net", "rt", "sync"] }
 
 [dev-dependencies]
 hyscribe-testkit.workspace = true
 sha2.workspace = true
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["rt-multi-thread", "test-util"] }
 tower = { version = "0.5", default-features = false, features = ["util"] }
 
 [lints]

@@ -316,7 +316,91 @@ async fn serves_until_shutdown() {
     assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
     assert!(response.contains("Hello world!"));
     stop.send(()).unwrap();
-    server.await.unwrap().unwrap();
+    server.await.unwrap();
+}
+
+/// A client that leaves a request's headers unfinished, or a kept-alive
+/// connection idle, is cut off after [`HEADER_READ_TIMEOUT`], so slow
+/// clients cannot hold connections open.
+#[tokio::test]
+async fn unfinished_headers_time_out() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let site = fixture_site(None).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(serve(listener, site, std::future::pending()));
+    // Before the server can start its timer.
+    let started = tokio::time::Instant::now();
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: loc")
+        .await
+        .unwrap();
+    // The server reads the start of the headers, and its timer runs, before
+    // the paused clock may jump ahead to the next timer.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    tokio::time::pause();
+    let mut rest = Vec::new();
+    let read = tokio::time::timeout(2 * HEADER_READ_TIMEOUT, stream.read_to_end(&mut rest)).await;
+    assert!(read.is_ok(), "still open");
+    assert!(started.elapsed() >= HEADER_READ_TIMEOUT);
+}
+
+/// Past the connection limit a client waits until a connection closes.
+#[tokio::test]
+async fn connections_past_the_limit_wait() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let site = fixture_site(None).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(serve_connections(listener, router(site), 1, async {
+        let _ = stopped.await;
+    }));
+    let first = tokio::net::TcpStream::connect(address).await.unwrap();
+    let mut second = tokio::net::TcpStream::connect(address).await.unwrap();
+    second
+        .write_all(b"GET /?p=1 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut byte = [0];
+    let waiting = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        second.read(&mut byte),
+    );
+    assert!(waiting.await.is_err(), "answered past the limit");
+    drop(first);
+    let mut response = Vec::new();
+    second.read_to_end(&mut response).await.unwrap();
+    assert!(response.starts_with(b"HTTP/1.1 200 OK"));
+    stop.send(()).unwrap();
+    server.await.unwrap();
+}
+
+/// Once shutdown starts the server stops listening, so new clients are
+/// refused at once while the connections open finish.
+#[tokio::test]
+async fn shutdown_refuses_new_connections() {
+    use tokio::io::AsyncWriteExt;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    // A request that is never answered keeps the server finishing it.
+    let app = Router::new().route("/", axum::routing::get(std::future::pending::<()>));
+    tokio::spawn(serve_connections(listener, app, 2, async {
+        let _ = stopped.await;
+    }));
+    let mut open = tokio::net::TcpStream::connect(address).await.unwrap();
+    open.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    stop.send(()).unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    // Kept listening, the kernel would take the connection into the
+    // backlog for no one to accept.
+    assert!(tokio::net::TcpStream::connect(address).await.is_err());
+    drop(open);
 }
 
 #[test]
@@ -2165,6 +2249,35 @@ fn category_lists_match_php() {
         );
     }
     assert_eq!(golden.lines().count(), 28);
+}
+
+/// `WP_Tax_Query::clean_query()` keeps each asked category once
+/// (`array_unique()`) before adding its children, so a list repeating one
+/// ID takes linear time, not a scan of the list for every entry.
+#[test]
+fn repeated_categories_count_once() {
+    let cat = "5,".repeat(100_000);
+    let query = HashMap::from([("cat".to_string(), cat)]);
+    let hierarchy = b"a:1:{i:5;a:1:{i:0;i:6;}}";
+    let filters = query::tax_query(&query).resolve(&[], hierarchy).filters;
+    assert_eq!(filters.len(), 1);
+    assert_eq!(filters[0].terms, [5, 6]);
+}
+
+/// Many tags take linear time to keep each once.
+#[test]
+fn long_tag_lists_count_each_once() {
+    let tags: Vec<String> = (0..100_000).map(|n| format!("t{n}")).collect();
+    let tag = [tags.join(","), ",t0".to_string()].concat();
+    let query = HashMap::from([("tag".to_string(), tag)]);
+    let (slugs, _) = query::tax_query(&query).lookups();
+    assert_eq!(
+        slugs
+            .iter()
+            .filter(|(taxonomy, _)| taxonomy == "post_tag")
+            .count(),
+        100_000 + 1
+    );
 }
 
 /// Every case of `reference/canonical/clean-golden.php`.

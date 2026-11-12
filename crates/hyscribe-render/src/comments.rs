@@ -6,6 +6,8 @@
 //! The unapproved comments a visitor's cookie would show are not ported
 //! yet.
 
+use std::collections::HashMap;
+
 use hyscribe_model::Comment;
 use hyscribe_phpser::{Value, is_empty_string};
 
@@ -57,8 +59,12 @@ impl Renderer<'_> {
             &[],
             &self.context.theme.global,
         );
+        let mut children: HashMap<u64, Vec<&Comment>> = HashMap::new();
+        for comment in &all {
+            children.entry(comment.parent).or_default().push(comment);
+        }
         let threads = Threads {
-            all: &all,
+            children,
             threaded,
             depth_limit,
         };
@@ -66,7 +72,9 @@ impl Renderer<'_> {
         [format!("<ol {wrapper}>").as_bytes(), &items, b"</ol>"].concat()
     }
 
-    /// `block_core_comment_template_render_comments()`.
+    /// `block_core_comment_template_render_comments()`, which recurses
+    /// once per reply; here a stack of the levels open, so a thread of any
+    /// length takes no stack frames.
     fn render_comments(
         &mut self,
         block: &Block,
@@ -77,33 +85,44 @@ impl Renderer<'_> {
             self.comment_depth = 1;
         }
         let mut content = Vec::new();
-        for comment in comments {
+        // The comments left at each level, and whether the level is a
+        // nested list, which closes with `</ol>` and one depth up.
+        let mut levels = vec![(comments.iter(), false)];
+        while let Some((rest, _)) = levels.last_mut() {
+            let Some(comment) = rest.next() else {
+                if let Some((_, nested)) = levels.pop().filter(|_| !levels.is_empty()) {
+                    if nested {
+                        content.extend_from_slice(b"</ol>");
+                        self.comment_depth -= 1;
+                    }
+                    content.extend_from_slice(b"</li>");
+                }
+                continue;
+            };
             let outer = self.context.comment.replace((*comment).clone());
+            let outer_depth = std::mem::replace(&mut self.context.comment_depth, levels.len());
             // Each comment renders as the template block again, whose
             // `render_block` filters see its class.
-            let mut html = elements_class(self.saved_markup(block), block);
+            let html = elements_class(self.saved_markup(block), block);
             self.context.comment = outer;
-            let children: Vec<&Comment> = threads
-                .all
-                .iter()
-                .filter(|c| c.parent == comment.id)
-                .collect();
+            self.context.comment_depth = outer_depth;
             let classes = self.comment_class(comment);
-            if !children.is_empty() && threads.threaded {
-                if i64::try_from(self.comment_depth).unwrap_or(i64::MAX) < threads.depth_limit {
-                    self.comment_depth += 1;
-                    let inner = self.render_comments(block, &children, threads);
-                    html = [&html[..], b"<ol>", &inner, b"</ol>"].concat();
-                    self.comment_depth -= 1;
-                } else {
-                    html.extend(self.render_comments(block, &children, threads));
-                }
-            }
             content.extend(
                 format!("<li id=\"comment-{}\" class=\"{}\">", comment.id, classes).into_bytes(),
             );
             content.extend(html);
-            content.extend_from_slice(b"</li>");
+            match threads.children.get(&comment.id) {
+                Some(children) if threads.threaded => {
+                    let nested =
+                        i64::try_from(self.comment_depth).unwrap_or(i64::MAX) < threads.depth_limit;
+                    if nested {
+                        self.comment_depth += 1;
+                        content.extend_from_slice(b"<ol>");
+                    }
+                    levels.push((children.iter(), nested));
+                }
+                _ => content.extend_from_slice(b"</li>"),
+            }
         }
         content
     }
@@ -161,9 +180,9 @@ impl Renderer<'_> {
     }
 }
 
-/// The comments a thread draws its replies from.
+/// The replies to each comment, in the order of all the post's comments.
 struct Threads<'a> {
-    all: &'a [Comment],
+    children: HashMap<u64, Vec<&'a Comment>>,
     threaded: bool,
     depth_limit: i64,
 }

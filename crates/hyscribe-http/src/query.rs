@@ -5,7 +5,7 @@
 //! `http_query` covers them all.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use hyscribe_model::{Term, TermFilter, TimeCondition};
 use hyscribe_phpser::{Key, Value, decode, is_empty_string, php_trim, wp_basename};
@@ -179,13 +179,12 @@ pub fn tax_query(query: &HashMap<String, String>) -> TaxQuery {
             tag = sanitize_title(&tag);
             (vec![tag.clone()], Operator::In)
         };
-        let mut unique: Vec<Vec<u8>> = Vec::new();
-        for slug in slugs {
-            let slug = sanitize_title(&slug);
-            if !unique.contains(&slug) {
-                unique.push(slug);
-            }
-        }
+        let mut seen = HashSet::new();
+        let unique: Vec<Vec<u8>> = slugs
+            .iter()
+            .map(|slug| sanitize_title(slug))
+            .filter(|slug| seen.insert(slug.clone()))
+            .collect();
         let mut slugs: Vec<Vec<u8>> = unique.iter().map(|s| sanitize_title_for_query(s)).collect();
         slugs.sort_by(|a, b| php_compare(a, b));
         clauses.push(TaxClause {
@@ -398,9 +397,12 @@ impl TaxQuery {
     }
 }
 
-/// `ids` and, after them, their descendants in `tree`, as
-/// get_term_children() walks it, once each where a cycle would loop.
-fn with_children(tree: &Value, mut ids: Vec<u64>) -> Vec<u64> {
+/// `ids`, each once as `array_unique()` leaves them, and after them their
+/// descendants in `tree`, as get_term_children() walks it, once each where
+/// a cycle would loop.
+fn with_children(tree: &Value, ids: Vec<u64>) -> Vec<u64> {
+    let mut seen = HashSet::new();
+    let mut ids: Vec<u64> = ids.into_iter().filter(|&id| seen.insert(id)).collect();
     let mut next = 0;
     while let Some(&id) = ids.get(next) {
         let children = tree
@@ -409,7 +411,7 @@ fn with_children(tree: &Value, mut ids: Vec<u64>) -> Vec<u64> {
             .unwrap_or_default();
         for (_, child) in children {
             let child = child.to_int().unsigned_abs();
-            if !ids.contains(&child) {
+            if seen.insert(child) {
                 ids.push(child);
             }
         }

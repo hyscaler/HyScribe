@@ -151,6 +151,13 @@ pub fn render_content(
     Renderer::new(theme, site, request).render(content)
 }
 
+/// Blocks rendered inside this many others render nothing. Each parse
+/// counts its own nesting up to [`crate::blocks::MAX_BLOCK_DEPTH`], but
+/// synced patterns, post content and template parts parse again, so
+/// rendering counts across them: twice the parser's depth leaves room for a
+/// template around the deepest content and still fits a 2 MiB worker stack.
+pub(crate) const MAX_RENDER_DEPTH: usize = 2 * crate::blocks::MAX_BLOCK_DEPTH;
+
 pub(crate) struct Renderer<'a> {
     pub(crate) context: Context<'a>,
     /// The styles, block supports CSS and script modules rendering
@@ -206,6 +213,8 @@ pub(crate) struct Renderer<'a> {
     pub(crate) playlist: Option<Value>,
     /// The `pattern/overrides` context a synced pattern gives its blocks.
     pub(crate) pattern_overrides: Option<Value>,
+    /// The blocks being rendered, up to [`MAX_RENDER_DEPTH`].
+    depth: usize,
 }
 
 /// A string attribute.
@@ -224,6 +233,7 @@ impl<'a> Renderer<'a> {
                 post_id: request.post,
                 query: None,
                 comment: None,
+                comment_depth: 0,
                 terms: Default::default(),
                 loading: Loading::in_the_loop(request.singular),
             },
@@ -251,6 +261,7 @@ impl<'a> Renderer<'a> {
             open_refs: Vec::new(),
             playlist: None,
             pattern_overrides: None,
+            depth: 0,
         }
     }
 
@@ -296,6 +307,10 @@ impl Renderer<'_> {
 
     /// `render_block()` for one block.
     pub(crate) fn block(&mut self, block: &Block) -> Vec<u8> {
+        if self.depth == MAX_RENDER_DEPTH {
+            return Vec::new();
+        }
+        self.depth += 1;
         let styles = self.assets.styles.len();
         let scripts = self.assets.scripts.len();
         let modules = self.assets.modules.len();
@@ -307,6 +322,7 @@ impl Renderer<'_> {
             self.assets.scripts.truncate(scripts);
             self.assets.modules.truncate(modules);
         }
+        self.depth -= 1;
         html
     }
 

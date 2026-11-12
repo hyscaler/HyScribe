@@ -28,11 +28,11 @@ trap cleanup EXIT
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 1 ); foreach ( array_slice( $argv, 1 ) as $action ) { echo wp_create_nonce( $action ), "\t", $action, "\n"; }' \
   log-out heartbeat-nonce wp_rest update_can_compress_scripts welcome-panel-nonce screen-options-nonce replyto-comment \
   add-post closedpostboxes meta-box-order approve-comment_1 delete-comment_1 internal-linking community_events \
-  health-check-site-status health-check-site-status-result > "$NONCES"
+  health-check-site-status health-check-site-status-result trash-post_1 inlineeditnonce bulk-posts > "$NONCES"
 : > "$OUT"
 for role in administrator editor author contributor subscriber; do
-  for screen in 'tools.php' 'index.php'; do
-    [ "$role" = subscriber ] && [ "$screen" = tools.php ] && continue
+  for screen in 'tools.php' 'index.php' 'edit.php'; do
+    [ "$role" = subscriber ] && [ "$screen" != index.php ] && continue
     : > "$TMP"
     curl -sf -o "$TMP" -b "hyscribe_role=$role" "$BASE/wp-admin/$screen"
     page=$(php -r '

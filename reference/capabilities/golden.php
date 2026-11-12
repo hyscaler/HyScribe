@@ -36,6 +36,11 @@ update_user_meta( $users['garbled'], $wpdb->prefix . 'capabilities', 'not an arr
 $users['broken'] = wp_insert_user( array( 'user_login' => 'cap_broken', 'user_pass' => 'x', 'role' => 'editor' ) );
 $wpdb->update( $wpdb->usermeta, array( 'meta_value' => 'a:1:{s:6:"editor"' ), array( 'user_id' => $users['broken'], 'meta_key' => $wpdb->prefix . 'capabilities' ) );
 wp_cache_delete( $users['broken'], 'user_meta' );
+$roles              = get_option( $wpdb->prefix . 'user_roles' );
+$roles['nameless']  = array( 'capabilities' => array( 'edit_posts' => true, 'read' => true ) );
+update_option( $wpdb->prefix . 'user_roles', $roles );
+$users['nameless'] = wp_insert_user( array( 'user_login' => 'cap_nameless', 'user_pass' => 'x', 'role' => '' ) );
+update_user_meta( $users['nameless'], $wpdb->prefix . 'capabilities', array( 'nameless' => true ) );
 $users['missing'] = 999999;
 
 $insert = static fn( $fields ) => wp_insert_post( $fields + array( 'post_title' => 'Cap', 'post_status' => 'publish', 'post_type' => 'post' ), false, false );
@@ -150,7 +155,7 @@ foreach ( $terms as $id ) {
 }
 
 $checks = array();
-foreach ( array( 'read', 'edit_posts', 'edit_others_posts', 'edit_published_posts', 'publish_posts', 'edit_pages', 'manage_options', 'manage_categories', 'moderate_comments', 'upload_files', 'edit_theme_options', 'list_users', 'switch_themes', 'activate_plugins', 'deactivate_plugin', 'unfiltered_html', 'edit_css', 'unfiltered_upload', 'export', 'import', 'create_users', 'delete_users', 'delete_user', 'promote_users', 'promote_user', 'add_users', 'remove_users', 'edit_users', 'edit_dashboard', 'customize', 'delete_site', 'exist', 'do_not_allow', 'install_languages', 'update_languages', 'view_site_health_checks', 'resume_plugins', 'resume_plugin', 'resume_theme', 'resume_themes', 'manage_links', 'update_core', 'update_php', 'update_https', 'edit_files', 'edit_plugins', 'install_plugins', 'upload_themes', 'edit_blocks', 'publish_blocks', 'read_private_blocks', 'edit_others_blocks', 'delete_published_blocks', 'setup_network', 'manage_privacy_options', 'export_others_personal_data', 'manage_network', 'manage_post_tags', 'edit_categories', 'assign_categories', 'assign_post_tags', 'custom_cap', 'nonexistent_cap', 'edit_post', 'edit_comment', 'edit_term', 'publish_post', 'edit_user_meta', 'create_app_password', 'manage_blocks', 'read_blocks' ) as $cap ) {
+foreach ( array( 'read', 'edit_posts', 'edit_others_posts', 'edit_published_posts', 'publish_posts', 'edit_pages', 'manage_options', 'manage_categories', 'moderate_comments', 'upload_files', 'edit_theme_options', 'list_users', 'switch_themes', 'activate_plugins', 'deactivate_plugin', 'unfiltered_html', 'edit_css', 'unfiltered_upload', 'export', 'import', 'create_users', 'delete_users', 'delete_user', 'promote_users', 'promote_user', 'add_users', 'remove_users', 'edit_users', 'edit_dashboard', 'customize', 'delete_site', 'exist', 'do_not_allow', 'install_languages', 'update_languages', 'view_site_health_checks', 'resume_plugins', 'resume_plugin', 'resume_theme', 'resume_themes', 'manage_links', 'update_core', 'update_php', 'update_https', 'edit_files', 'edit_plugins', 'install_plugins', 'upload_themes', 'edit_blocks', 'publish_blocks', 'read_private_blocks', 'edit_others_blocks', 'delete_published_blocks', 'setup_network', 'manage_privacy_options', 'export_others_personal_data', 'manage_network', 'manage_post_tags', 'edit_categories', 'assign_categories', 'assign_post_tags', 'custom_cap', 'nonexistent_cap', 'edit_post', 'edit_comment', 'edit_term', 'publish_post', 'edit_user_meta', 'create_app_password', 'manage_blocks', 'read_blocks', '0', '1', '7', '10', 'edit_block_binding' ) as $cap ) {
 	$checks[] = array( $cap, array() );
 }
 foreach ( $posts as $id ) {
@@ -164,11 +169,24 @@ foreach ( $posts as $id ) {
 	$checks[] = array( 'add_post_meta', array( $id, 'plain' ) );
 }
 $checks[] = array( 'edit_post', array( (string) $posts[0] ) );
+$checks[] = array( 'edit_post', array( "{$posts[0]}x" ) );
+$checks[] = array( 'edit_block_binding', array( new WP_Block_Editor_Context( array( 'name' => 'core/edit-site' ) ) ) );
+$checks[] = array( 'edit_block_binding', array( new WP_Block_Editor_Context( array( 'name' => 'core/edit-post' ) ) ) );
+$checks[] = array( 'edit_block_binding', array( new WP_Block_Editor_Context( array( 'post' => new WP_Post( (object) array( 'ID' => 999999 ) ) ) ) ) );
+foreach ( $posts as $id ) {
+	$p = get_post( $id );
+	if ( $p && get_post_type_object( $p->post_type ) ) {
+		$checks[] = array( 'edit_block_binding', array( new WP_Block_Editor_Context( array( 'post' => $p ) ) ) );
+	}
+}
 $checks[] = array( 'edit_post', array( 0 ) );
 foreach ( $comments as $id ) {
 	$checks[] = array( 'edit_comment', array( $id ) );
 	$checks[] = array( 'edit_comment_meta', array( $id, 'plain' ) );
 	$checks[] = array( 'delete_comment_meta', array( $id, '_x' ) );
+	$checks[] = array( 'edit_comment_meta', array( $id, '_wp_note_status' ) );
+	$checks[] = array( 'edit_comment', array( "{$id}x" ) );
+	$checks[] = array( 'edit_comment', array( (string) $id ) );
 }
 foreach ( $terms as $id ) {
 	foreach ( array( 'edit_term', 'delete_term', 'assign_term' ) as $cap ) {
@@ -193,7 +211,9 @@ foreach ( array( 0, '1', 1 ) as $value ) {
 }
 update_option( 'link_manager_enabled', 0 );
 echo 'option', "\tlink_manager_enabled\t", bin2hex( maybe_serialize( 0 ) ), "\n";
+// A registered meta's auth callback asks about the current user.
 foreach ( $users as $id ) {
+	wp_set_current_user( $id );
 	foreach ( $checks as list( $cap, $args ) ) {
 		echo 'can', "\t", $id, "\t", $cap, "\t", bin2hex( serialize( $args ) ), "\t", user_can( $id, $cap, ...$args ) ? 1 : 0, "\n";
 	}

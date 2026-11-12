@@ -5,22 +5,11 @@
 //! so they never stand for a PHP WordPress login.
 
 use hyscribe_phpser::{Value, bin2hex, hash_equals, hash_hmac_md5};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 
 /// `hash_hmac( 'sha256', $data, $key )`.
 fn hmac_sha256(data: &[u8], key: &[u8]) -> String {
-    let key = if key.len() > 64 {
-        Sha256::digest(key).to_vec()
-    } else {
-        key.to_vec()
-    };
-    let pad = |byte: u8| -> Vec<u8> {
-        (0..64)
-            .map(|i| key.get(i).copied().unwrap_or(0) ^ byte)
-            .collect()
-    };
-    let inner = Sha256::digest([pad(0x36), data.to_vec()].concat());
-    bin2hex(&Sha256::digest([&pad(0x5c)[..], &inner].concat()))
+    bin2hex(&crate::hmac::<Sha256>(data, key, 64))
 }
 
 /// The four bytes of the password hash a cookie binds to: past the prefix

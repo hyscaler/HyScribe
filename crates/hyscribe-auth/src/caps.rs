@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use hyscribe_phpser::{Key, Maybe, Value, json_decode, maybe_unserialize};
+use hyscribe_phpser::{Key, Maybe, Value, isset, json_decode, maybe_unserialize};
 
 /// What `map_meta_cap()` reads of the post types, taxonomies and statuses.
 const REGISTRY: &[u8] = include_bytes!("../../../wordpress/wp-includes/capabilities.json");
@@ -32,7 +32,7 @@ const FILE_MODS: [&str; 15] = [
 ];
 
 /// A post as `map_meta_cap()` reads it.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone)]
 pub struct CapPost {
     /// `ID`.
     pub id: u64,
@@ -62,11 +62,15 @@ pub trait CapabilityData {
     fn comment_post(&self, id: u64) -> Option<u64>;
     /// The taxonomy of the term `id`, `None` without the term.
     fn term_taxonomy(&self, id: u64) -> Option<String>;
+    /// Whether `wp-config.php` defines the constant as true.
+    fn constant(&self, name: &str) -> bool;
 }
 
 /// The capability names of a post type or taxonomy.
 struct Caps {
     map_meta_cap: bool,
+    /// The singular base of its capability names.
+    capability_type: String,
     cap: HashMap<String, String>,
 }
 
@@ -87,6 +91,7 @@ fn registry() -> &'static Registry {
                 .unwrap_or_default()
         };
         let text = |value: &Value| String::from_utf8_lossy(&value.to_php_string()).into_owned();
+        let key_text = |key: &Key| String::from_utf8_lossy(&key.to_php_string()).into_owned();
         let caps = |name: &str| {
             entries(name)
                 .iter()
@@ -97,12 +102,13 @@ fn registry() -> &'static Registry {
                         .unwrap_or_default();
                     let caps = Caps {
                         map_meta_cap: value.get_str("map_meta_cap") == Some(&Value::Bool(true)),
-                        cap: cap
-                            .iter()
-                            .map(|(k, v)| (text(&Value::String(k.to_php_string())), text(v)))
-                            .collect(),
+                        capability_type: value
+                            .get_str("capability_type")
+                            .map(text)
+                            .unwrap_or_default(),
+                        cap: cap.iter().map(|(k, v)| (key_text(k), text(v))).collect(),
                     };
-                    (text(&Value::String(key.to_php_string())), caps)
+                    (key_text(key), caps)
                 })
                 .collect()
         };
@@ -110,17 +116,14 @@ fn registry() -> &'static Registry {
             post_types: caps("post_types"),
             post_type_meta_caps: entries("post_type_meta_caps")
                 .iter()
-                .map(|(key, value)| (text(&Value::String(key.to_php_string())), text(value)))
+                .map(|(key, value)| (key_text(key), text(value)))
                 .collect(),
             taxonomies: caps("taxonomies"),
             statuses: entries("post_statuses")
                 .iter()
                 .map(|(key, value)| {
                     let flag = |name| value.get_str(name) == Some(&Value::Bool(true));
-                    (
-                        text(&Value::String(key.to_php_string())),
-                        (flag("public"), flag("private")),
-                    )
+                    (key_text(key), (flag("public"), flag("private")))
                 })
                 .collect(),
         }
@@ -165,7 +168,10 @@ impl User {
         };
         let mut allcaps = Vec::new();
         for (key, _) in &caps {
-            let Some(role) = roles.get(key) else { continue };
+            // `is_role()`: a role WordPress names.
+            let Some(role) = roles.get(key).filter(|role| isset(role.get_str("name"))) else {
+                continue;
+            };
             let granted = role
                 .get_str("capabilities")
                 .and_then(Value::as_array)
@@ -179,6 +185,14 @@ impl User {
     /// `has_cap( $cap, ...$args )`: every capability `map_meta_cap()` asks
     /// for is granted.
     pub fn has_cap(&self, data: &dyn CapabilityData, cap: &str, args: &[Value]) -> bool {
+        // Multisite's super admin rules are not ported: nothing is granted.
+        if data.constant("MULTISITE") {
+            return false;
+        }
+        // A user level, deprecated since 2.0, as `translate_level_to_cap()`.
+        let level = format!("level_{cap}");
+        let numeric = Value::String(cap.as_bytes().to_vec()).is_numeric();
+        let cap = if numeric { level.as_str() } else { cap };
         let caps = map_meta_cap(data, self, cap, args);
         let mut allcaps = self.allcaps.clone();
         let granted = |allcaps: &[(Key, Value)], name: &str| {
@@ -224,7 +238,16 @@ fn merge(into: &mut Vec<(Key, Value)>, from: &[(Key, Value)]) {
 }
 
 /// `get_post_status()`: an attachment's inherited status, from its parent.
+/// A loop of parents, which PHP never leaves, has no status.
 fn post_status(data: &dyn CapabilityData, post: &CapPost) -> String {
+    inherited_status(data, post, &mut Vec::new())
+}
+
+fn inherited_status(data: &dyn CapabilityData, post: &CapPost, seen: &mut Vec<u64>) -> String {
+    if seen.contains(&post.id) {
+        return String::new();
+    }
+    seen.push(post.id);
     if post.post_type != "attachment" {
         return post.status.clone();
     }
@@ -242,7 +265,7 @@ fn post_status(data: &dyn CapabilityData, post: &CapPost) -> String {
     let Some(parent) = parent else {
         return "publish".into();
     };
-    let status = post_status(data, &parent);
+    let status = inherited_status(data, &parent, seen);
     if status != "trash" {
         return status;
     }
@@ -268,21 +291,18 @@ fn arg(args: &[Value], n: usize) -> Option<i64> {
         .map(Value::to_int)
 }
 
-/// The post `$args[0]` names.
+/// The post `$args[0]` names: `get_post()` takes only a numeric ID.
 fn arg_post(data: &dyn CapabilityData, args: &[Value]) -> Option<CapPost> {
-    u64::try_from(arg(args, 0)?)
-        .ok()
-        .and_then(|id| data.post(id))
+    let id = args.first().filter(|id| id.is_numeric())?.to_int();
+    u64::try_from(id).ok().and_then(|id| data.post(id))
 }
 
 /// `map_meta_cap()`: the primitive capabilities `cap` needs.
-pub fn map_meta_cap(
-    data: &dyn CapabilityData,
-    user: &User,
-    cap: &str,
-    args: &[Value],
-) -> Vec<String> {
-    let deny = || vec!["do_not_allow".to_string()];
+fn deny() -> Vec<String> {
+    vec!["do_not_allow".to_string()]
+}
+
+fn map_meta_cap(data: &dyn CapabilityData, user: &User, cap: &str, args: &[Value]) -> Vec<String> {
     let one = |name: &str| vec![name.to_string()];
     let registry = registry();
     let user_id = i64::try_from(user.id).unwrap_or(0);
@@ -399,13 +419,24 @@ pub fn map_meta_cap(
                 .get(1)
                 .filter(|key| !key.is_empty())
                 .map(Value::to_php_string);
-            if key.is_some_and(|key| is_protected_meta(&key)) {
+            // Core's one registered meta with an auth callback lets whoever
+            // may edit the comment set a note's status.
+            let allowed = match key {
+                None => true,
+                Some(key) if object_type == "comment" && key == b"_wp_note_status" => {
+                    user.has_cap(data, "edit_comment", &[Value::Int(id)])
+                }
+                Some(key) => !is_protected_meta(&key),
+            };
+            if !allowed {
                 caps.push(cap.to_string());
             }
             caps
         }
+        // `get_comment()` takes only a numeric ID.
         "edit_comment" => {
-            match arg(args, 0).and_then(|id| data.comment_post(u64::try_from(id).ok()?)) {
+            let id = args.first().filter(|id| id.is_numeric()).map(Value::to_int);
+            match id.and_then(|id| data.comment_post(u64::try_from(id).ok()?)) {
                 None => deny(),
                 Some(post) => match data.post(post) {
                     Some(post) => map_meta_cap(
@@ -418,8 +449,9 @@ pub fn map_meta_cap(
                 },
             }
         }
-        // `ALLOW_UNFILTERED_UPLOADS` is not set; `DISALLOW_UNFILTERED_HTML` is not.
+        "unfiltered_upload" if data.constant("ALLOW_UNFILTERED_UPLOADS") => one(cap),
         "unfiltered_upload" => deny(),
+        "edit_css" | "unfiltered_html" if data.constant("DISALLOW_UNFILTERED_HTML") => deny(),
         "edit_css" | "unfiltered_html" => one("unfiltered_html"),
         "activate_plugins" | "deactivate_plugins" | "activate_plugin" | "deactivate_plugin" => {
             one("activate_plugins")
@@ -476,6 +508,40 @@ pub fn map_meta_cap(
         | "delete_app_password" => {
             map_meta_cap(data, user, "edit_user", args.get(..1).unwrap_or_default())
         }
+        "edit_block_binding" => {
+            // The block editor's context: its post, else the site editor's name.
+            let property = |value: Option<&Value>, name: &str| match value {
+                Some(Value::Object { properties, .. }) => {
+                    hyscribe_phpser::lookup(properties, name).cloned()
+                }
+                _ => None,
+            };
+            let context = args.first();
+            let post = property(property(context, "post").as_ref(), "ID").map(|id| id.to_int());
+            let Some(id) = post else {
+                let site_editor = property(context, "name")
+                    .is_some_and(|name| name == Value::String(b"core/edit-site".to_vec()));
+                return if site_editor {
+                    map_meta_cap(data, user, "edit_theme_options", &[])
+                } else {
+                    deny()
+                };
+            };
+            // `get_post_type_capabilities()` of the type without its own map;
+            // for a type mapping meta capabilities it registers `edit_post`.
+            let edit = u64::try_from(id)
+                .ok()
+                .and_then(|id| data.post(id))
+                .and_then(|post| registry.post_types.get(&post.post_type))
+                .map(|post_type| match post_type.map_meta_cap {
+                    true => "edit_post".to_string(),
+                    false => format!("edit_{}", post_type.capability_type),
+                });
+            match edit {
+                Some(edit) => map_meta_cap(data, user, &edit, &[Value::Int(id)]),
+                None => deny(),
+            }
+        }
         _ => match registry.post_type_meta_caps.get(cap) {
             Some(meta) => map_meta_cap(data, user, meta, args),
             None => {
@@ -504,7 +570,6 @@ pub fn map_meta_cap(
 
 /// `delete_post`, `delete_page`, `edit_post` and `edit_page`.
 fn post_caps(data: &dyn CapabilityData, user_id: i64, cap: &str, args: &[Value]) -> Vec<String> {
-    let deny = || vec!["do_not_allow".to_string()];
     let delete = cap.starts_with("delete_");
     let Some(post) = arg_post(data, args) else {
         return deny();

@@ -2,6 +2,7 @@
     "post_types": {
         "attachment": {
             "map_meta_cap": true,
+            "capability_type": "post",
             "cap": {
                 "edit_post": "edit_post",
                 "read_post": "read_post",
@@ -22,6 +23,7 @@
         },
         "custom_css": {
             "map_meta_cap": false,
+            "capability_type": "post",
             "cap": {
                 "edit_post": "edit_css",
                 "read_post": "read",
@@ -40,6 +42,7 @@
         },
         "customize_changeset": {
             "map_meta_cap": true,
+            "capability_type": "customize_changeset",
             "cap": {
                 "edit_post": "customize",
                 "read_post": "customize",
@@ -60,6 +63,7 @@
         },
         "nav_menu_item": {
             "map_meta_cap": true,
+            "capability_type": "edit_theme_options",
             "cap": {
                 "edit_post": "edit_post",
                 "read_post": "read_post",
@@ -80,6 +84,7 @@
         },
         "oembed_cache": {
             "map_meta_cap": true,
+            "capability_type": "post",
             "cap": {
                 "edit_post": "edit_post",
                 "read_post": "read_post",
@@ -100,6 +105,7 @@
         },
         "page": {
             "map_meta_cap": true,
+            "capability_type": "page",
             "cap": {
                 "edit_post": "edit_page",
                 "read_post": "read_page",
@@ -120,6 +126,7 @@
         },
         "post": {
             "map_meta_cap": true,
+            "capability_type": "post",
             "cap": {
                 "edit_post": "edit_post",
                 "read_post": "read_post",
@@ -140,6 +147,7 @@
         },
         "revision": {
             "map_meta_cap": true,
+            "capability_type": "post",
             "cap": {
                 "edit_post": "edit_post",
                 "read_post": "read_post",
@@ -160,6 +168,7 @@
         },
         "user_request": {
             "map_meta_cap": true,
+            "capability_type": "post",
             "cap": {
                 "edit_post": "edit_post",
                 "read_post": "read_post",
@@ -180,6 +189,7 @@
         },
         "wp_block": {
             "map_meta_cap": true,
+            "capability_type": "block",
             "cap": {
                 "edit_post": "edit_block",
                 "read_post": "read_block",
@@ -200,6 +210,7 @@
         },
         "wp_font_face": {
             "map_meta_cap": true,
+            "capability_type": "post",
             "cap": {
                 "edit_post": "edit_post",
                 "read_post": "read_post",
@@ -220,6 +231,7 @@
         },
         "wp_font_family": {
             "map_meta_cap": true,
+            "capability_type": "post",
             "cap": {
                 "edit_post": "edit_post",
                 "read_post": "read_post",
@@ -240,6 +252,7 @@
         },
         "wp_global_styles": {
             "map_meta_cap": true,
+            "capability_type": "post",
             "cap": {
                 "edit_post": "edit_post",
                 "read_post": "read_post",
@@ -260,6 +273,7 @@
         },
         "wp_navigation": {
             "map_meta_cap": true,
+            "capability_type": "post",
             "cap": {
                 "edit_post": "edit_post",
                 "read_post": "read_post",
@@ -280,6 +294,7 @@
         },
         "wp_template": {
             "map_meta_cap": true,
+            "capability_type": "template",
             "cap": {
                 "edit_post": "edit_template",
                 "read_post": "read_template",
@@ -300,6 +315,7 @@
         },
         "wp_template_part": {
             "map_meta_cap": true,
+            "capability_type": "post",
             "cap": {
                 "edit_post": "edit_post",
                 "read_post": "read_post",

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Password hashing as WordPress 7 does it (`wp_hash_password()`,
-//! `wp_check_password()`, `wp_password_needs_rehash()`): bcrypt over an
-//! HMAC-SHA384 of the password, with a `$wp` prefix, and checks of the
-//! phpass, plain bcrypt and MD5 hashes older sites hold.
+//! WordPress 7's authentication: password hashing and checks (bcrypt over
+//! an HMAC-SHA384, and the phpass, bcrypt and MD5 hashes older sites hold),
+//! salts, nonces, auth cookies, and roles and capabilities.
 
 pub mod caps;
 pub mod cookie;
@@ -95,20 +94,31 @@ pub fn password_needs_rehash(hash: &[u8]) -> bool {
 
 /// `base64_encode( hash_hmac( 'sha384', $password, 'wp-sha384', true ) )`.
 fn prehash(password: &[u8]) -> Vec<u8> {
-    let mut key = [0u8; 128];
-    for (k, b) in key.iter_mut().zip(b"wp-sha384") {
-        *k = *b;
-    }
-    let pad = |byte: u8| key.map(|k| k ^ byte);
-    let inner = Sha384::new()
+    let mac = hmac::<Sha384>(password, b"wp-sha384", 128);
+    encode(&mac, BASE64_ALPHABET, false).into_bytes()
+}
+
+/// RFC 2104 HMAC over a SHA-2 digest whose blocks are `block` bytes.
+pub(crate) fn hmac<D: Digest>(data: &[u8], key: &[u8], block: usize) -> Vec<u8> {
+    let key = if key.len() > block {
+        D::digest(key).to_vec()
+    } else {
+        key.to_vec()
+    };
+    let pad = |byte: u8| -> Vec<u8> {
+        (0..block)
+            .map(|i| key.get(i).copied().unwrap_or(0) ^ byte)
+            .collect()
+    };
+    let inner = D::new()
         .chain_update(pad(0x36))
-        .chain_update(password)
+        .chain_update(data)
         .finalize();
-    let mac = Sha384::new()
+    D::new()
         .chain_update(pad(0x5c))
         .chain_update(inner)
-        .finalize();
-    encode(&mac, BASE64_ALPHABET, false).into_bytes()
+        .finalize()
+        .to_vec()
 }
 
 /// `password_verify()` for bcrypt hashes. Other formats PHP's `crypt()`

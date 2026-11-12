@@ -249,7 +249,48 @@ pub fn router(site: Arc<Site>) -> Router {
     Router::new()
         .fallback(page)
         .with_state(site)
+        .layer(axum::middleware::from_fn(request_line_limit))
         .layer(axum::middleware::map_response(security_headers))
+}
+
+/// The longest request line (method, URL and protocol with their spaces)
+/// Apache serves at its default `LimitRequestLine`, so the longest PHP
+/// WordPress behind it is ever asked for. It also keeps every list in a
+/// query string far below the values one database query can bind.
+const MAX_REQUEST_LINE: usize = 8191;
+
+/// Apache's 414 page, without the server signature it ends with.
+const URI_TOO_LONG: &str =
+    "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\">
+<html><head>
+<title>414 Request-URI Too Long</title>
+</head><body>
+<h1>Request-URI Too Long</h1>
+<p>The requested URL's length exceeds the capacity
+limit for this server.<br />
+</p>
+</body></html>
+";
+
+/// A request line longer than [`MAX_REQUEST_LINE`] gets Apache's 414.
+async fn request_line_limit(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let line = request.method().as_str().len()
+        + 1
+        + request.uri().to_string().len()
+        + 1
+        + "HTTP/1.1".len();
+    if line <= MAX_REQUEST_LINE {
+        return next.run(request).await;
+    }
+    (
+        StatusCode::URI_TOO_LONG,
+        [(header::CONTENT_TYPE, "text/html; charset=iso-8859-1")],
+        URI_TOO_LONG,
+    )
+        .into_response()
 }
 
 /// Connections served at once. More wait in the listen backlog, so many

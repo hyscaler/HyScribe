@@ -403,6 +403,64 @@ async fn shutdown_refuses_new_connections() {
     drop(open);
 }
 
+/// Every case of `reference/request-line/golden.sh`: a request line longer
+/// than Apache's limit gets Apache's 414, without the server signature, and
+/// one at the limit is served. The limit also keeps every query var's lists
+/// far below the bound values a database query takes.
+#[tokio::test]
+async fn long_request_lines_match_apache() {
+    let site = fixture_site(None).await;
+    let golden = include_str!("../tests/golden/request-line.tsv");
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [method, version, length, status, content_type, body] = fields[..] else {
+            panic!("{line}");
+        };
+        let length: usize = length.parse().unwrap();
+        let filler = length - method.len() - 1 - 4 - 1 - "HTTP/1.1".len();
+        let uri = format!("/?q={}", "a".repeat(filler));
+        let version = match version {
+            "1.0" => axum::http::Version::HTTP_10,
+            _ => axum::http::Version::HTTP_11,
+        };
+        let response = router(site.clone())
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .version(version)
+                    .uri(uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        if status != "414" {
+            assert_ne!(
+                response.status(),
+                StatusCode::URI_TOO_LONG,
+                "{method} {length}"
+            );
+            continue;
+        }
+        assert_eq!(
+            response.status(),
+            StatusCode::URI_TOO_LONG,
+            "{method} {length}"
+        );
+        let headers = response.headers().clone();
+        assert_eq!(headers["content-type"], content_type);
+        assert_eq!(headers["x-content-type-options"], "nosniff");
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        // HEAD's body is left out on the wire, by hyper as by Apache.
+        if method != "HEAD" {
+            assert_eq!(bytes, hyscribe_testkit::unhex(body));
+        }
+    }
+    assert_eq!(golden.lines().count(), 18);
+}
+
 #[test]
 fn absint_casts_like_php() {
     assert_eq!(absint("42"), 42);

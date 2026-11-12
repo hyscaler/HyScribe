@@ -9,6 +9,7 @@
 #   wordpress/wp-includes/blocks/registered.json    their block.json, in registration order
 #   wordpress/wp-includes/kses-post.json            wp_kses_allowed_html( 'post' )
 #   wordpress/wp-includes/mime-types.json           get_allowed_mime_types() for a visitor
+#   wordpress/wp-includes/capabilities.json         the post types', taxonomies' and statuses' capability data
 #   wordpress/wp-includes/icons.json                the registered icons' sanitized SVG
 #   wordpress/wp-includes/blocks/<name>/*.min.css   core block styles (LTR)
 #   wordpress/wp-includes/css/dist/block-library/*.min.css
@@ -52,12 +53,16 @@ mkdir -p "$OUT"
 # against.
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; $out = array(); foreach ( WP_Icons_Registry::get_instance()->get_registered_icons() as $icon ) { $out[ $icon["name"] ] = $icon["content"]; } ksort( $out ); echo wp_json_encode( $out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );' > "$OUT/wp-includes/icons.json"
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 0 ); echo wp_json_encode( array_values( get_allowed_mime_types() ), JSON_UNESCAPED_SLASHES ), "\n";' > "$OUT/wp-includes/mime-types.json"
+# What map_meta_cap() reads: each post type's capabilities and whether it maps
+# meta capabilities, $post_type_meta_caps, each taxonomy's capabilities, and
+# whether each post status is public or private.
+"$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; global $post_type_meta_caps; $types = array(); foreach ( get_post_types( array(), "objects" ) as $name => $type ) { $types[ $name ] = array( "map_meta_cap" => $type->map_meta_cap, "cap" => $type->cap ); } $taxonomies = array(); foreach ( get_taxonomies( array(), "objects" ) as $name => $taxonomy ) { $taxonomies[ $name ] = array( "cap" => $taxonomy->cap ); } $statuses = array(); foreach ( get_post_stati( array(), "objects" ) as $name => $status ) { $statuses[ $name ] = array( "public" => $status->public, "private" => $status->private ); } ksort( $types ); ksort( $taxonomies ); ksort( $statuses ); $meta = $post_type_meta_caps; ksort( $meta ); echo wp_json_encode( array( "post_types" => $types, "post_type_meta_caps" => $meta, "taxonomies" => $taxonomies, "post_statuses" => $statuses ), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ), "\n";' > "$OUT/wp-includes/capabilities.json"
 # The tags and attributes wp_kses_post() allows.
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; echo wp_json_encode( wp_kses_allowed_html( "post" ), JSON_UNESCAPED_SLASHES );' > "$OUT/wp-includes/kses-post.json"
 cat > "$OUT/README.md" <<'README'
 # WordPress core data
 
-Files from WordPress core that HyScribe uses as data: the core `theme.json`, every core block's `block.json`, the block types as WordPress registers them (`blocks/registry.json`) and their `block.json` in registration order (`blocks/registered.json`), the tags and attributes `wp_kses_post()` allows (`kses-post.json`), the MIME types a visitor may upload (`mime-types.json`), the registered script modules (`script-modules.json`), the registered icons' sanitized SVG (`icons.json`), the block library and skip link styles, the emoji detection script, and the embed template's style and scripts. Exported by `reference/wordpress/export.sh` from the pinned version in `VERSION`. Never edit by hand.
+Files from WordPress core that HyScribe uses as data: the core `theme.json`, every core block's `block.json`, the block types as WordPress registers them (`blocks/registry.json`) and their `block.json` in registration order (`blocks/registered.json`), the tags and attributes `wp_kses_post()` allows (`kses-post.json`), the MIME types a visitor may upload (`mime-types.json`), the capability data of the post types, taxonomies and post statuses (`capabilities.json`), the registered script modules (`script-modules.json`), the registered icons' sanitized SVG (`icons.json`), the block library and skip link styles, the emoji detection script, and the embed template's style and scripts. Exported by `reference/wordpress/export.sh` from the pinned version in `VERSION`. Never edit by hand.
 
 License: GPL-2.0-or-later, as WordPress (ADR 0004).
 README

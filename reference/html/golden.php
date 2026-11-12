@@ -27,6 +27,12 @@
 //   J:name       seek()                          1 or 0
 //   Y:name       has_bookmark()                  1 or 0
 //   Z:at:n:text  replace n bytes at at with text 1
+//   V            next_token() until the end: v<token>,<token>... each
+//                type.name.text.comment-type in hex, ~ for null
+//   E:namespace  change_parsing_namespace()      1 or 0
+//   P            get_token_type()                n or s<hex>
+//   I            get_namespace()                 s<hex>
+//   O            next_token()                    1 or 0
 
 ini_set( 'display_errors', 'stderr' );
 error_reporting( E_ALL & ~E_WARNING );
@@ -144,6 +150,21 @@ function run_op( $p, $op ) {
 			return bit( $p->seek( $args[0] ) );
 		case 'Y':
 			return bit( $p->has_bookmark( $args[0] ) );
+		case 'V':
+			$tokens = array();
+			while ( $p->next_token() ) {
+				$tokens[] = implode( '.', array_map( 'arg', array( $p->get_token_type(), $p->get_token_name(), $p->get_modifiable_text(), $p->get_comment_type() ) ) );
+			}
+			return 'v' . implode( ',', $tokens );
+		case 'P':
+			$type = $p->get_token_type();
+			return null === $type ? 'n' : 's' . bin2hex( $type );
+		case 'O':
+			return bit( $p->next_token() );
+		case 'I':
+			return 's' . bin2hex( $p->get_namespace() );
+		case 'E':
+			return bit( $p->change_parsing_namespace( $args[0] ) );
 		case 'Z':
 			$p->replace( (int) $args[0], (int) $args[1], $args[2] );
 			return '1';
@@ -206,8 +227,21 @@ function edge_cases() {
 		'<div class="a b">', '<div class=" a  b ">', '<div class>', '<div class="">', '<div CLASS="A">',
 		'<div class="a" class="b">', '<p>&amp;</p>', '<div x="&amp;&lt;&#65;&#x42;&notin;&ampx">',
 	);
+	$tokens = array_merge(
+		$tokens,
+		array(
+			'<?xml version="1.0"?>x', '<?php echo 1 ?>', '<?a b?>', '<?a?>', '<?a  ?>', '<?a-b_c d ?>', '<?_x?>', '<?1x?>', '<?x:y?>', '<?xml-stylesheet a?>', '<?XML x?>', '<?a', '<?a b c', '<?>x', '<??>', '<?:x y?>',
+			'<!DOCTYPE html>', '<!doctype html PUBLIC "x">', '<!DOCTYPE>', '<!DOCTYPEx>', '<!doctypehtml>', '<!DOCTYP>', '<!DOC', '<!doctype',
+			'<![CDATA[x]]>', '<![CDATA[]]>', '<![CDATA[x]>', '<![CDATA[x]]', '<![CDATA[a]]b]]>', '<!x>', '<!>', '<!->', '<!--a-->', '<!---->', '<!----->', '<!-- a --!>', "<!--\r\na\rb-->",
+			"<pre>\nx</pre>", "<pre>\n\nx</pre>", "<pre>\r\nx</pre>", "<listing>\nx</listing>", "<PRE>\n&amp;x", "<pre><b>\nx</b>", "<div>\nx</div>",
+			"<textarea>\nx</textarea>", "<textarea>\n\nx</textarea>", "<textarea>&amp;&lt;b&gt;</textarea>", "<title>a&amp;b\x00c</title>", "<script>a&amp;\x00b</script>", "<style>a&amp;\r\nb</style>",
+			"<xmp>&amp;</xmp>", "<iframe>&amp;</iframe>", "<noembed>&amp;</noembed>", "<noframes>&amp;</noframes>",
+			"a&amp;b&not=c&notd&#65;&#x42;\x00e\r\nf\rg", '&notin;&notit;&ampx', "x\x00y", '</3>', '</ x>', '</>', '</-x>', '</!x>', '</?x>', '</', '</x', "a\r\n<b>\r\n", '<?a b>', '</-', '<!---', '<!------', 'xxxxxx<!a>', 'xxxxxxxxxx<!-- a -->', '<?xml a>', '<?:?>', '<?:a?>', 'xxxxxx<?x y?>', 'xxxxxx<?:a?>',
+		)
+	);
 	foreach ( $tokens as $html ) {
 		$cases[] = array( $html, $walk );
+		$cases[] = array( $html, array( op( 'V' ) ) );
 		$cases[] = array( $html, $first );
 		$cases[] = array(
 			$html,
@@ -341,6 +375,20 @@ function edge_cases() {
 				'<a><b><c><d>',
 				array( $n, $n, op( 'K', 'b' ), $n, $n, op( 'Z', (string) $first[0], (string) $first[1], $first[2] ), op( 'U' ), op( 'Y', 'b' ), op( 'Z', (string) $second[0], (string) $second[1], $second[2] ), op( 'J', 'b' ), $t, op( 'Y', 'b' ) ),
 			);
+		}
+	}
+	// The target of a processing instruction and of a comment that looks like one.
+	foreach ( array( '<?a b?>', '<?x:y z?>', '<?a b>', '<!x>' ) as $html ) {
+		$cases[] = array( $html, array( op( 'O' ), op( 'T' ) ) );
+	}
+	// Token types before the first token, at the end and before incomplete input.
+	foreach ( array( '<a>', '<div', 'x<!--', '' ) as $html ) {
+		$cases[] = array( $html, array( op( 'P' ), op( 'V' ), op( 'P' ) ) );
+	}
+	// Foreign content: CDATA sections, and special elements as ordinary tags.
+	foreach ( array( 'html', 'svg', 'math', 'xml' ) as $namespace ) {
+		foreach ( array( '<![CDATA[x<y]]>z', 'xxxxxxxxxx<![CDATA[y]]>', '<![CDATA[x', '<title>&amp;</title>', '<script>x</script>', "<pre>\nx" ) as $html ) {
+			$cases[] = array( $html, array( op( 'I' ), op( 'E', $namespace ), op( 'I' ), op( 'V' ) ) );
 		}
 	}
 	$many = array( $n, op( 'K', 'a' ), $n, op( 'K', 'b' ) );

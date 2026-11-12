@@ -8,7 +8,7 @@
 // Tests fail by panicking.
 #![allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)]
 
-use hyscribe_html::{Attribute, TagProcessor};
+use hyscribe_html::{Attribute, Namespace, TagProcessor};
 use hyscribe_testkit::unhex;
 
 fn hex(bytes: &[u8]) -> String {
@@ -61,6 +61,44 @@ fn run(p: &mut TagProcessor, op: &str) -> String {
         "X" => bit(p.release_bookmark(arg(0))),
         "J" => bit(p.seek(arg(0))),
         "Y" => bit(p.has_bookmark(arg(0))),
+        "V" => {
+            let mut tokens = Vec::new();
+            while p.next_token() {
+                let field = |value: Option<Vec<u8>>| value.map_or_else(|| "~".into(), |v| hex(&v));
+                tokens.push(
+                    [
+                        field(p.get_token_type()),
+                        field(p.get_token_name()),
+                        hex(&p.get_modifiable_text()),
+                        field(p.get_comment_type().map(|t| t.name().as_bytes().to_vec())),
+                    ]
+                    .join("."),
+                );
+            }
+            format!("v{}", tokens.join(","))
+        }
+        "O" => bit(p.next_token()),
+        "P" => p
+            .get_token_type()
+            .map_or_else(|| "n".into(), |t| format!("s{}", hex(&t))),
+        "I" => {
+            let name: &[u8] = match p.get_namespace() {
+                Namespace::Html => b"html",
+                Namespace::Svg => b"svg",
+                Namespace::Math => b"math",
+            };
+            format!("s{}", hex(name))
+        }
+        "E" => {
+            let namespace = match arg(0) {
+                b"html" => Namespace::Html,
+                b"svg" => Namespace::Svg,
+                b"math" => Namespace::Math,
+                _ => return "0".into(),
+            };
+            p.change_parsing_namespace(namespace);
+            "1".into()
+        }
         "Z" => {
             let number = |i| {
                 String::from_utf8(arg(i).to_vec())
@@ -133,7 +171,7 @@ fn check(golden: &str, expected_count: usize) {
 
 #[test]
 fn matches_wordpress_on_edge_cases() {
-    check(include_str!("golden/edge.tsv"), 2386);
+    check(include_str!("golden/edge.tsv"), 2872);
 }
 
 #[test]

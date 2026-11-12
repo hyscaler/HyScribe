@@ -16,7 +16,7 @@ use std::mem;
 
 use hyscribe_kses::esc_url;
 
-use crate::decoder::{REPLACEMENT, decode_attribute};
+use crate::decoder::{REPLACEMENT, decode_attribute, decode_text_node};
 
 /// HTML whitespace.
 const WHITESPACE: &[u8] = b" \t\x0c\r\n";
@@ -68,8 +68,54 @@ enum State {
     Complete,
     Incomplete,
     MatchedTag,
-    /// Text, a comment, a doctype or another token that is not a tag.
-    OtherToken,
+    TextNode,
+    Comment,
+    Doctype,
+    CdataNode,
+    /// `</>`.
+    PresumptuousTag,
+    /// A closer that cannot be a tag, such as `</3>`.
+    FunkyComment,
+    ProcessingInstruction,
+}
+
+/// How a comment token was written: `get_comment_type()`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommentType {
+    /// `<!-- ... -->`.
+    HtmlComment,
+    /// `<!-->` or `<!--->`.
+    AbruptlyClosed,
+    /// `<![CDATA[ ... ]]>` in HTML.
+    CdataLookalike,
+    /// `<?target ... ?>` that is not a processing instruction.
+    PiNodeLookalike,
+    /// Any other `<!...>` or `<?...>`.
+    InvalidHtml,
+}
+
+impl CommentType {
+    /// The name PHP gives the type's constant.
+    pub fn name(self) -> &'static str {
+        match self {
+            CommentType::HtmlComment => "COMMENT_AS_HTML_COMMENT",
+            CommentType::AbruptlyClosed => "COMMENT_AS_ABRUPTLY_CLOSED_COMMENT",
+            CommentType::CdataLookalike => "COMMENT_AS_CDATA_LOOKALIKE",
+            CommentType::PiNodeLookalike => "COMMENT_AS_PI_NODE_LOOKALIKE",
+            CommentType::InvalidHtml => "COMMENT_AS_INVALID_HTML",
+        }
+    }
+}
+
+/// The namespace tokens are parsed in: `get_namespace()`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Namespace {
+    /// `html`.
+    Html,
+    /// `math`.
+    Math,
+    /// `svg`.
+    Svg,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -194,6 +240,21 @@ fn php_substr(text: &[u8], start: usize, length: isize) -> &[u8] {
     text.get(start..end).unwrap_or_default()
 }
 
+/// `\r\n` and `\r` as `\n`.
+fn normalize_newlines(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut bytes = text.iter().peekable();
+    while let Some(&b) = bytes.next() {
+        if b == b'\r' {
+            bytes.next_if(|&&n| n == b'\n');
+            out.push(b'\n');
+        } else {
+            out.push(b);
+        }
+    }
+    out
+}
+
 /// `str_replace( "\0", "\u{FFFD}", $name )`.
 fn replace_nulls(name: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(name.len());
@@ -260,6 +321,13 @@ pub struct TagProcessor {
     /// Named token spans to come back to.
     bookmarks: HashMap<Vec<u8>, Span>,
     seek_count: usize,
+    /// The current token's modifiable text.
+    text_starts_at: usize,
+    text_length: usize,
+    comment_type: Option<CommentType>,
+    namespace: Namespace,
+    /// Where a newline right after a `<pre>` or `<listing>` is dropped.
+    skip_newline_at: Option<usize>,
 }
 
 impl TagProcessor {
@@ -281,6 +349,11 @@ impl TagProcessor {
             lexical_updates: Updates::default(),
             bookmarks: HashMap::new(),
             seek_count: 0,
+            text_starts_at: 0,
+            text_length: 0,
+            comment_type: None,
+            namespace: Namespace::Html,
+            skip_newline_at: None,
         }
     }
 
@@ -444,32 +517,104 @@ impl TagProcessor {
     /// as one: `<!x>`, a CDATA lookalike or a `<?` that is not a processing
     /// instruction; not a doctype.
     pub fn is_comment(&self) -> bool {
-        let token = self
-            .token_starts_at
-            .and_then(|start| self.html.get(start..self.bytes_already_parsed))
+        self.state == State::Comment
+    }
+
+    /// `get_token_type()`: `#tag`, `#doctype`, or the token's name.
+    pub fn get_token_type(&self) -> Option<Vec<u8>> {
+        match self.state {
+            State::MatchedTag => Some(b"#tag".to_vec()),
+            State::Doctype => Some(b"#doctype".to_vec()),
+            _ => self.get_token_name(),
+        }
+    }
+
+    /// `get_token_name()`: a tag's name, or the kind of token.
+    pub fn get_token_name(&self) -> Option<Vec<u8>> {
+        let name: &[u8] = match self.state {
+            State::MatchedTag => return self.get_tag(),
+            State::TextNode => b"#text",
+            State::CdataNode => b"#cdata-section",
+            State::Comment => b"#comment",
+            State::Doctype => b"html",
+            State::PresumptuousTag => b"#presumptuous-tag",
+            State::FunkyComment => b"#funky-comment",
+            State::ProcessingInstruction => b"#processing-instruction",
+            State::Ready | State::Complete | State::Incomplete => return None,
+        };
+        Some(name.to_vec())
+    }
+
+    /// `get_comment_type()`: how a comment token was written.
+    pub fn get_comment_type(&self) -> Option<CommentType> {
+        self.comment_type.filter(|_| self.state == State::Comment)
+    }
+
+    /// `get_namespace()`.
+    pub fn get_namespace(&self) -> Namespace {
+        self.namespace
+    }
+
+    /// `change_parsing_namespace()`: tokens after this one are parsed as
+    /// that namespace's.
+    pub fn change_parsing_namespace(&mut self, namespace: Namespace) {
+        self.namespace = namespace;
+    }
+
+    /// `get_modifiable_text()`: a text node's or a special element's text,
+    /// decoded unless raw text or script data, or a comment's or other
+    /// token's data, with newlines normalized.
+    pub fn get_modifiable_text(&self) -> Vec<u8> {
+        if self.text_length == 0 {
+            return Vec::new();
+        }
+        let raw = self
+            .html
+            .get(self.text_starts_at..self.text_starts_at + self.text_length)
             .unwrap_or_default();
-        let doctype = token
-            .get(..9)
-            .is_some_and(|t| t.eq_ignore_ascii_case(b"<!doctype"));
-        let bang = token.starts_with(b"<!") && !doctype;
-        let bogus_pi = token
-            .strip_prefix(b"<?")
-            .is_some_and(|rest| !is_processing_instruction(rest));
-        self.state == State::OtherToken && (bang || bogus_pi)
+        let text = normalize_newlines(raw);
+        let name = self.get_token_name().unwrap_or_default();
+        let undecoded = !matches!(self.state, State::TextNode | State::MatchedTag)
+            || matches!(
+                name.as_slice(),
+                b"SCRIPT" | b"IFRAME" | b"NOEMBED" | b"NOFRAMES" | b"STYLE" | b"XMP"
+            );
+        if undecoded {
+            return replace_nulls(&text);
+        }
+        let mut decoded = decode_text_node(&text);
+        let skips_newline = (self.state == State::TextNode
+            && self.skip_newline_at.is_some()
+            && self.skip_newline_at == self.token_starts_at)
+            || name == b"TEXTAREA";
+        if skips_newline && decoded.first() == Some(&b'\n') {
+            decoded.remove(0);
+        }
+        if self.state == State::TextNode && self.namespace == Namespace::Html {
+            decoded.retain(|&b| b != 0);
+            decoded
+        } else {
+            replace_nulls(&decoded)
+        }
     }
 
     /// The current tag's name in upper case, `None` when not at a tag.
     pub fn get_tag(&self) -> Option<Vec<u8>> {
-        if self.state != State::MatchedTag {
-            return None;
-        }
         let name = self
             .html
             .get(self.tag_name_starts_at..self.tag_name_starts_at + self.tag_name_length)
             .unwrap_or_default();
         let mut name = replace_nulls(name);
-        name.make_ascii_uppercase();
-        Some(name)
+        match (self.state, self.comment_type) {
+            (State::MatchedTag, _) => {
+                name.make_ascii_uppercase();
+                Some(name)
+            }
+            // A processing instruction's target, as written.
+            (State::ProcessingInstruction, _)
+            | (State::Comment, Some(CommentType::PiNodeLookalike)) => Some(name),
+            _ => None,
+        }
     }
 
     fn byte(&self, at: usize) -> Option<u8> {
@@ -516,12 +661,17 @@ impl TagProcessor {
         };
         self.state = State::MatchedTag;
         self.bytes_already_parsed = tag_ends_at + 1;
-        if self.is_closing_tag {
+        if self.is_closing_tag || self.namespace != Namespace::Html {
             return true;
         }
         let tag = self.get_tag().unwrap_or_default();
-        // The contents of these elements are text up to their closing tag.
+        // The contents of these elements are text up to their closing tag; a
+        // newline right after a `<pre>` or `<listing>` is not text.
         let script = match tag.as_slice() {
+            b"LISTING" | b"PRE" => {
+                self.skip_newline_at = Some(self.bytes_already_parsed);
+                return true;
+            }
             b"SCRIPT" => true,
             b"TEXTAREA" | b"TITLE" | b"IFRAME" | b"NOEMBED" | b"NOFRAMES" | b"STYLE" | b"XMP" => {
                 false
@@ -533,7 +683,7 @@ impl TagProcessor {
         let attributes = mem::take(&mut self.attributes);
         let duplicates = mem::take(&mut self.duplicate_attributes);
         let self_closing = self.has_self_closing_flag;
-        let found_closer = if script {
+        let closer_at = if script {
             self.skip_script_data()
         } else {
             self.skip_rcdata(&tag)
@@ -541,32 +691,32 @@ impl TagProcessor {
         self.attributes = attributes;
         self.duplicate_attributes = duplicates;
         self.has_self_closing_flag = self_closing;
-        if !found_closer {
+        let Some(closer_at) = closer_at else {
             self.state = State::Incomplete;
             self.bytes_already_parsed = was_at;
             return false;
-        }
+        };
         self.state = State::MatchedTag;
         self.token_starts_at = Some(was_at);
+        self.text_starts_at = tag_ends_at + 1;
+        self.text_length = closer_at - self.text_starts_at;
         true
     }
 
-    /// The token at `was_at`, a text node up to `end`.
-    fn text_token(&mut self, was_at: usize, end: usize) -> bool {
-        self.state = State::OtherToken;
-        self.token_starts_at = Some(was_at);
+    /// A token of `state` from the token's start to `end`, its text from
+    /// `text_at` to `text_end`.
+    fn token(&mut self, state: State, end: usize, text_at: usize, text_end: usize) -> bool {
+        self.state = state;
+        self.text_starts_at = text_at;
+        self.text_length = text_end.saturating_sub(text_at);
         self.bytes_already_parsed = end;
         true
     }
 
-    /// A token that ends at the next `>` after `from`, which is not one.
-    fn token_until_gt(&mut self, from: usize) -> bool {
-        let Some(closer_at) = find(&self.html, from, b">") else {
-            return self.incomplete();
-        };
-        self.state = State::OtherToken;
-        self.bytes_already_parsed = closer_at + 1;
-        true
+    /// A text node from `was_at` to `end`.
+    fn text_token(&mut self, was_at: usize, end: usize) -> bool {
+        self.token_starts_at = Some(was_at);
+        self.token(State::TextNode, end, was_at, end)
     }
 
     /// `parse_next_tag()`: the next token, attributes not yet parsed.
@@ -574,10 +724,8 @@ impl TagProcessor {
         let length = self.html.len();
         let was_at = self.bytes_already_parsed;
         let mut at = was_at;
-        for _ in 0..=length {
-            let Some(found) = find(&self.html, at, b"<") else {
-                break;
-            };
+        // A search from the end finds nothing.
+        while let Some(found) = find(&self.html, at, b"<") {
             at = found;
             if at > was_at {
                 // Text, unless this `<` cannot start a tag.
@@ -590,7 +738,8 @@ impl TagProcessor {
                 }
                 return self.text_token(was_at, at);
             }
-            self.token_starts_at = Some(at);
+            let start = at;
+            self.token_starts_at = Some(start);
             self.is_closing_tag = self.byte(at + 1) == Some(b'/');
             at += usize::from(self.is_closing_tag);
             let prefix = self
@@ -614,45 +763,55 @@ impl TagProcessor {
             };
             if !self.is_closing_tag && next == b'!' {
                 if self.html.get(at + 2..at + 4) == Some(b"--") {
-                    return self.comment(at + 4);
+                    return self.comment(start);
                 }
-                // A doctype, or a bogus comment such as a CDATA lookalike.
-                return self.token_until_gt(at);
+                return self.bang_token(start);
             }
             if next == b'>' {
                 if !self.is_closing_tag {
                     at += 1;
                     continue;
                 }
-                // `</>` is ignored.
-                self.state = State::OtherToken;
-                self.bytes_already_parsed = at + 2;
-                return true;
+                return self.token(State::PresumptuousTag, at + 2, 0, 0);
             }
-            if self.is_closing_tag || next == b'?' {
-                // A processing instruction or its lookalike comment, or a
-                // closer that cannot be a tag: WordPress's "funky comment".
-                return self.token_until_gt(at);
+            if !self.is_closing_tag && next == b'?' {
+                return self.question_token(start);
+            }
+            if self.is_closing_tag {
+                if at + 3 > length {
+                    return self.incomplete();
+                }
+                let Some(closer_at) = find(&self.html, at + 2, b">") else {
+                    return self.incomplete();
+                };
+                return self.token(State::FunkyComment, closer_at + 1, start + 2, closer_at);
             }
             at += 1;
         }
         self.text_token(was_at, length)
     }
 
-    /// An HTML comment whose text starts at `text_at`, after `<!--`.
-    fn comment(&mut self, text_at: usize) -> bool {
-        let length = self.html.len();
-        // `<!-->` and `<!--->` close at once.
-        let gt = text_at + span_of(&self.html, text_at, b"-");
-        if self.byte(gt) == Some(b'>') {
-            self.state = State::OtherToken;
-            self.bytes_already_parsed = gt + 1;
-            return true;
+    /// An HTML comment starting at `start`, its `<!--`.
+    fn comment(&mut self, start: usize) -> bool {
+        // At the end of the input the search for `--` below finds none.
+        let closer_at = start + 4;
+        let dashes = span_of(&self.html, closer_at, b"-");
+        // `<!-->` and `<!--->` close at once; with two dashes or more it is
+        // a comment of the dashes past the first two.
+        if self.byte(closer_at + dashes) == Some(b'>') {
+            self.comment_type = Some(CommentType::AbruptlyClosed);
+            let end = closer_at + dashes + 1;
+            if dashes >= 2 {
+                self.comment_type = Some(CommentType::HtmlComment);
+                return self.token(State::Comment, end, start + 4, start + 4 + dashes - 2);
+            }
+            return self.token(State::Comment, end, 0, 0);
         }
-        let mut from = text_at;
-        for _ in 0..=length {
+        // Each search starts past the last; one finding nothing ends it.
+        let mut from = closer_at;
+        loop {
             let Some(dashes_at) = find(&self.html, from, b"--") else {
-                break;
+                return self.incomplete();
             };
             let end = match (self.byte(dashes_at + 2), self.byte(dashes_at + 3)) {
                 (Some(b'>'), _) => Some(dashes_at + 3),
@@ -660,13 +819,103 @@ impl TagProcessor {
                 _ => None,
             };
             if let Some(end) = end {
-                self.state = State::OtherToken;
-                self.bytes_already_parsed = end;
-                return true;
+                self.comment_type = Some(CommentType::HtmlComment);
+                return self.token(State::Comment, end, start + 4, dashes_at);
             }
             from = dashes_at + 1;
         }
-        self.incomplete()
+    }
+
+    /// `<!` that does not open a comment, at `start`: a doctype, a CDATA
+    /// section in foreign content, or a bogus comment.
+    fn bang_token(&mut self, start: usize) -> bool {
+        let doctype = self
+            .html
+            .get(start + 2..start + 9)
+            .is_some_and(|word| word.eq_ignore_ascii_case(b"doctype"));
+        if doctype {
+            let Some(closer_at) = find(&self.html, start + 9, b">") else {
+                return self.incomplete();
+            };
+            return self.token(State::Doctype, closer_at + 1, start + 9, closer_at);
+        }
+        let cdata = self.html.get(start + 2..start + 9) == Some(b"[CDATA[");
+        if self.namespace != Namespace::Html && cdata {
+            let Some(closer_at) = find(&self.html, start + 9, b"]]>") else {
+                return self.incomplete();
+            };
+            return self.token(State::CdataNode, closer_at + 3, start + 9, closer_at);
+        }
+        // Past the `<!`, neither of which is `>`.
+        let Some(closer_at) = find(&self.html, start + 2, b">") else {
+            return self.incomplete();
+        };
+        self.comment_type = Some(CommentType::InvalidHtml);
+        // The `]]` cannot overlap the `[CDATA[`, which has no `]`.
+        let lookalike = cdata && self.html.get(closer_at - 2..closer_at) == Some(b"]]");
+        if lookalike {
+            self.comment_type = Some(CommentType::CdataLookalike);
+            return self.token(State::Comment, closer_at + 1, start + 9, closer_at - 2);
+        }
+        self.token(State::Comment, closer_at + 1, start + 2, closer_at)
+    }
+
+    /// `<?` at `start`: a processing instruction, or a bogus comment, which
+    /// may look like one.
+    fn question_token(&mut self, start: usize) -> bool {
+        let Some(closer_at) = find(&self.html, start + 2, b">") else {
+            return self.incomplete();
+        };
+        let target_at = start + 2;
+        let rest = self.html.get(target_at..).unwrap_or_default();
+        if is_processing_instruction(rest) {
+            let target_length = 1 + span_of(
+                &self.html,
+                target_at + 1,
+                b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-",
+            );
+            let data_at = target_at + target_length;
+            let data_at = data_at + span_of(&self.html, data_at, WHITESPACE);
+            // A `?` before the `>` is at or past the data, which skipping
+            // whitespace stops at.
+            let mut data_end = closer_at;
+            if self.byte(closer_at - 1) == Some(b'?') {
+                data_end -= 1;
+            }
+            self.tag_name_starts_at = target_at;
+            self.tag_name_length = target_length;
+            return self.token(
+                State::ProcessingInstruction,
+                closer_at + 1,
+                data_at,
+                data_end,
+            );
+        }
+        self.comment_type = Some(CommentType::InvalidHtml);
+        let mut text_at = start + 2;
+        let mut text_end = closer_at;
+        // A token shorter than `<?x?>` has no target before its `?`; the
+        // target's characters stop at that `?`.
+        if self.byte(closer_at - 1) == Some(b'?') {
+            let mut target = span_of(
+                &self.html,
+                start + 2,
+                b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:_",
+            );
+            if target > 0 {
+                target += span_of(
+                    &self.html,
+                    start + 2 + target,
+                    b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:_-.",
+                );
+                self.comment_type = Some(CommentType::PiNodeLookalike);
+                self.tag_name_starts_at = start + 2;
+                self.tag_name_length = target;
+                text_at += target;
+                text_end -= 1;
+            }
+        }
+        self.token(State::Comment, closer_at + 1, text_at, text_end)
     }
 
     /// `parse_next_attribute()`; `false` at the end of the tag, or of the
@@ -759,7 +1008,7 @@ impl TagProcessor {
 
     /// Skips the text of a `<textarea>`, `<title>` or raw text element to
     /// the end of its closing tag, named `tag` in upper case.
-    fn skip_rcdata(&mut self, tag: &[u8]) -> bool {
+    fn skip_rcdata(&mut self, tag: &[u8]) -> Option<usize> {
         let length = self.html.len();
         let mut at = self.bytes_already_parsed;
         for _ in 0..=length {
@@ -796,17 +1045,17 @@ impl TagProcessor {
                 None => break,
                 Some(b'>') => {
                     self.bytes_already_parsed = at + 1;
-                    return true;
+                    return Some(closer_at);
                 }
                 Some(_) => {}
             }
         }
-        false
+        None
     }
 
     /// Skips the text of a `<script>` to the end of its closing tag,
     /// following the HTML5 script data states.
-    fn skip_script_data(&mut self) -> bool {
+    fn skip_script_data(&mut self) -> Option<usize> {
         #[derive(PartialEq)]
         enum Escape {
             Unescaped,
@@ -835,6 +1084,7 @@ impl TagProcessor {
                 state = Escape::Unescaped;
                 continue;
             }
+            let lt = at;
             // Past the `<`.
             at += 1;
             if state == Escape::Unescaped && html.get(at..at + 3) == Some(b"!--") {
@@ -878,13 +1128,13 @@ impl TagProcessor {
                     None => break,
                     Some(b'>') => {
                         self.bytes_already_parsed += 1;
-                        return true;
+                        return Some(lt);
                     }
                     Some(_) => {}
                 }
             }
         }
-        false
+        None
     }
 
     /// `after_tag()`: turns the class edits into an attribute edit and
@@ -898,6 +1148,9 @@ impl TagProcessor {
         self.token_starts_at = None;
         self.is_closing_tag = false;
         self.has_self_closing_flag = false;
+        self.text_starts_at = 0;
+        self.text_length = 0;
+        self.comment_type = None;
         self.attributes.clear();
         self.attribute_order.clear();
         self.duplicate_attributes.clear();

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `WP_HTML_Decoder::decode_attribute()`: character references in an
-//! attribute value, with the HTML5 rules for a missing semicolon.
+//! `WP_HTML_Decoder`: character references in an attribute value, with the
+//! HTML5 rules for a missing semicolon there, and in text.
 
 use crate::entities::{ENTITIES, LONGEST};
 
@@ -18,6 +18,17 @@ pub(crate) const REPLACEMENT: &[u8] = "\u{FFFD}".as_bytes();
 /// `WP_HTML_Decoder::decode_attribute()`: decodes the character references
 /// in an attribute value.
 pub fn decode_attribute(text: &[u8]) -> Vec<u8> {
+    decode(text, true)
+}
+
+/// `WP_HTML_Decoder::decode_text_node()`: decodes the character references
+/// in text, where a reference without its semicolon is never ambiguous.
+pub fn decode_text_node(text: &[u8]) -> Vec<u8> {
+    decode(text, false)
+}
+
+/// `WP_HTML_Decoder::decode()` in the attribute context or the data one.
+fn decode(text: &[u8], attribute: bool) -> Vec<u8> {
     let mut decoded = Vec::with_capacity(text.len());
     let mut was_at = 0;
     let mut at = 0;
@@ -29,7 +40,7 @@ pub fn decode_attribute(text: &[u8]) -> Vec<u8> {
             break;
         };
         let reference_at = at + found;
-        match read_character_reference(text, reference_at) {
+        match read_character_reference(text, reference_at, attribute) {
             Some((replacement, length)) => {
                 decoded.extend_from_slice(text.get(was_at..reference_at).unwrap_or_default());
                 decoded.extend_from_slice(&replacement);
@@ -44,8 +55,8 @@ pub fn decode_attribute(text: &[u8]) -> Vec<u8> {
 }
 
 /// The character reference at `at` (an `&`), as its UTF-8 bytes and the
-/// length it spans, in the attribute context.
-fn read_character_reference(text: &[u8], at: usize) -> Option<(Vec<u8>, usize)> {
+/// length it spans.
+fn read_character_reference(text: &[u8], at: usize, attribute: bool) -> Option<(Vec<u8>, usize)> {
     let byte = |i: usize| text.get(i).copied();
     match byte(at + 1)? {
         b'#' => numeric_reference(text, at),
@@ -59,7 +70,8 @@ fn read_character_reference(text: &[u8], at: usize) -> Option<(Vec<u8>, usize)> 
             let after_name = name_at + name_length;
             // Without its semicolon, a reference followed by `=` or an
             // alphanumeric is literal text inside an attribute.
-            let ambiguous = byte(after_name - 1) != Some(b';')
+            let ambiguous = attribute
+                && byte(after_name - 1) != Some(b';')
                 && byte(after_name).is_some_and(|b| b == b'=' || b.is_ascii_alphanumeric());
             (!ambiguous).then(|| (replacement.to_vec(), after_name - at))
         }

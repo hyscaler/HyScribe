@@ -196,5 +196,5 @@ fn bindings_match_php() {
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(lines.len(), 125);
+    assert_eq!(lines.len(), 130);
 }

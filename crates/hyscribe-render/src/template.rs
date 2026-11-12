@@ -205,7 +205,7 @@ pub(crate) struct Renderer<'a> {
     /// The playlist's prepared attributes, its tracks' context.
     pub(crate) playlist: Option<Value>,
     /// The `pattern/overrides` context a synced pattern gives its blocks.
-    pattern_overrides: Option<Value>,
+    pub(crate) pattern_overrides: Option<Value>,
 }
 
 /// A string attribute.

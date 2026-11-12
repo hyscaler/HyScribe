@@ -15,8 +15,9 @@ use hyscribe_model::{OrderBy, Post, PostQuery};
 use hyscribe_phpser::{Key, Value, is_empty_string, isset, php_trim, wp_array_set};
 use hyscribe_theme_json::kebab_case;
 
+use crate::bindings::computed_attributes;
 use crate::blocks::{Block, parse_blocks, serialize_blocks};
-use crate::core_blocks::prepared;
+use crate::core_blocks::{merged, prepared};
 use crate::formatting::find;
 use crate::kses::wp_kses_post;
 use crate::site::{Archive, Site};
@@ -331,10 +332,17 @@ impl Renderer<'_> {
         .concat()
     }
 
+    /// The prepared attributes with those block bindings computed.
+    fn bound(&self, name: &str, block: &Block) -> Value {
+        let parsed = block.attrs.as_deref().unwrap_or_default();
+        let computed = computed_attributes(&self.context, block, self.pattern_overrides.as_ref());
+        merged(prepared(name, parsed), &computed)
+    }
+
     /// `render_block_core_navigation_link()`.
     pub(crate) fn navigation_link(&mut self, block: &Block) -> Vec<u8> {
         let parsed = block.attrs.as_deref().unwrap_or_default();
-        let attributes = prepared("core/navigation-link", parsed);
+        let attributes = self.bound("core/navigation-link", block);
         let attribute = |name| attributes.get_str(name).filter(|v| isset(Some(v)));
         if !self.item_should_render(&attributes) {
             return Vec::new();
@@ -448,7 +456,7 @@ impl Renderer<'_> {
     pub(crate) fn navigation_submenu(&mut self, block: &Block) -> Vec<u8> {
         let name = "core/navigation-submenu";
         let parsed = block.attrs.as_deref().unwrap_or_default();
-        let mut attributes = prepared(name, parsed);
+        let mut attributes = self.bound(name, block);
         if !self.item_should_render(&attributes) {
             return Vec::new();
         }

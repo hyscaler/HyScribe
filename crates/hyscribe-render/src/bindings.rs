@@ -20,7 +20,7 @@ fn supported_attributes(name: &str) -> &'static [&'static str] {
         "core/image" => &["id", "url", "title", "alt", "caption"],
         "core/button" => &["url", "text", "linkTarget", "rel"],
         "core/post-date" => &["datetime"],
-        // The navigation link and submenu bind `url` too, but render apart.
+        "core/navigation-link" | "core/navigation-submenu" => &["url"],
         _ => &[],
     }
 }
@@ -312,10 +312,8 @@ fn replace_rich_text(
     text: &[u8],
     inner_blocks: &[usize],
 ) -> Option<Vec<u8>> {
-    // `next_tag()` stops on openers only.
-    if p.expects_closer() != Some(true) {
-        return None;
-    }
+    // PHP first rejects an element without a closer, which the walk below
+    // rejects too: it never visits such a closer.
     let depth = p.get_current_depth();
     let tag = p.get_tag();
     let (opener, length) = p.token_span().unwrap_or_default();

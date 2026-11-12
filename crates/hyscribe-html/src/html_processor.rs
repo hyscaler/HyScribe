@@ -465,13 +465,6 @@ impl HtmlProcessor {
         false
     }
 
-    /// `expects_closer()` of the current token.
-    pub fn expects_closer(&self) -> Option<bool> {
-        self.current_element
-            .as_ref()
-            .map(|event| expects_closer_of(&event.token))
-    }
-
     /// The start and length `set_bookmark()` would record, if it can.
     pub fn token_span(&self) -> Option<(usize, usize)> {
         if self.is_virtual() {

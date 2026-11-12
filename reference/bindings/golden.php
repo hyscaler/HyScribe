@@ -140,6 +140,12 @@ $renders = array(
 	array( $public, $block( $nested, array( 'content' => array( 'Intro' => array( 'content' => 'Outer' ) ) ) ) ),
 	array( $public, $block( $looping, array( 'content' => array( 'Intro' => array( 'content' => 'Overridden' ) ) ) ) ),
 );
+$nav = static fn( $name, $attrs, $source ) => '<!-- wp:' . $name . ' ' . wp_json_encode( $attrs + array( 'label' => 'Item', 'url' => 'http://old.test', 'metadata' => array( 'bindings' => array( 'url' => array( 'source' => $source, 'args' => array( 'field' => 'link' ) ) ) ) ) ) . ' /-->';
+$renders[] = array( $public, $nav( 'navigation-link', array( 'id' => $public, 'kind' => 'post-type', 'type' => 'post' ), 'core/post-data' ) );
+$renders[] = array( $public, $nav( 'navigation-link', array( 'id' => $draft, 'kind' => 'post-type', 'type' => 'post' ), 'core/post-data' ) );
+$renders[] = array( $public, $nav( 'navigation-link', array( 'id' => $tag['term_id'], 'kind' => 'taxonomy', 'type' => 'tag' ), 'core/term-data' ) );
+$renders[] = array( $public, $nav( 'navigation-link', array( 'id' => 1, 'kind' => 'taxonomy', 'type' => 'category' ), 'core/term-data' ) );
+$renders[] = array( $public, $nav( 'navigation-submenu', array( 'id' => $page, 'kind' => 'post-type', 'type' => 'page' ), 'core/post-data' ) );
 foreach ( $renders as list( $id, $markup ) ) {
 	$GLOBALS['post'] = $id ? get_post( $id ) : null;
 	echo 'render', "\t", $id, "\t", bin2hex( $markup ), "\t", bin2hex( do_blocks( $markup ) ), "\n";

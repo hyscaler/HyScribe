@@ -635,6 +635,7 @@ version = "0.1.0"
 dependencies = [
  "hyscribe-auth",
  "hyscribe-kses",
+ "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-render",
  "hyscribe-testkit",

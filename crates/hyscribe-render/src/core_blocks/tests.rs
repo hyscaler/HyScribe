@@ -785,3 +785,34 @@ fn computed_attributes_merge_as_array_merge() {
         ])
     );
 }
+
+/// `get_avatar()` in the admin: lazy, from the site's avatar options, and
+/// nothing when avatars are off.
+#[test]
+fn admin_avatars_load_lazily() {
+    let user = hyscribe_model::User {
+        email: b" Admin@Example.test ".to_vec(),
+        display_name: b"Ann Example".to_vec(),
+        ..hyscribe_model::User::default()
+    };
+    let options = |show: &'static str| {
+        move |name: &str| match name {
+            "show_avatars" => Some(show.as_bytes().to_vec()),
+            "avatar_default" => Some(b"initials".to_vec()),
+            "avatar_rating" => Some(b"G".to_vec()),
+            _ => None,
+        }
+    };
+    let avatar = String::from_utf8(user_avatar(&options("1"), &user, 28)).unwrap();
+    assert!(
+        avatar.starts_with("<img alt='' src='https://secure.gravatar.com/avatar/"),
+        "{avatar}"
+    );
+    assert!(
+        avatar.contains("?s=28&#038;d=initials&#038;r=g&#038;initials=AE' srcset='"),
+        "{avatar}"
+    );
+    assert!(avatar.contains("?s=56&#038;d=initials"), "{avatar}");
+    assert!(avatar.ends_with(" class='avatar avatar-28 photo' height='28' width='28' loading='lazy' decoding='async'/>"), "{avatar}");
+    assert!(user_avatar(&options(""), &user, 28).is_empty());
+}

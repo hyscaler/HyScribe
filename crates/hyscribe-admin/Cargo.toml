@@ -16,6 +16,7 @@ hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true
 
 [dev-dependencies]
+hyscribe-model.workspace = true
 hyscribe-testkit.workspace = true
 
 [lints]

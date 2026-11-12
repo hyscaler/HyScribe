@@ -1518,6 +1518,7 @@ fn footnotes(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 
 mod author;
 mod avatar;
+pub use avatar::user_avatar;
 mod breadcrumbs;
 mod button;
 mod calendar;

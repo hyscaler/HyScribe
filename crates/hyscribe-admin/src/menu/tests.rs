@@ -1,73 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use std::collections::HashMap;
-use std::sync::OnceLock;
-
-use hyscribe_auth::caps::{CapPost, CapabilityData, User};
-use hyscribe_testkit::{SqlValue, unhex};
+use hyscribe_testkit::unhex;
 
 use super::*;
-
-/// The default install's options.
-fn options() -> &'static HashMap<String, Vec<u8>> {
-    static OPTIONS: OnceLock<HashMap<String, Vec<u8>>> = OnceLock::new();
-    OPTIONS.get_or_init(|| {
-        let version = hyscribe_testkit::default_install_versions().pop().unwrap();
-        let dump = hyscribe_testkit::default_install(&version).unwrap();
-        dump.table("wp_options")
-            .filter_map(|row| match (&row[1], &row[2]) {
-                (SqlValue::Text(name), SqlValue::Text(value)) => {
-                    Some((String::from_utf8_lossy(name).into_owned(), value.clone()))
-                }
-                _ => None,
-            })
-            .collect()
-    })
-}
-
-/// User 1 with a role's capabilities, on HyScribe's constants, as
-/// `reference/admin-menu/as-role.php` sets PHP up.
-struct Role(&'static str);
-
-impl CapabilityData for Role {
-    fn option(&self, name: &str) -> Option<Vec<u8>> {
-        options().get(name).cloned()
-    }
-    fn user_meta(&self, _: u64, key: &str) -> Option<Vec<u8>> {
-        (key == "wp_capabilities")
-            .then(|| format!("a:1:{{s:{}:\"{}\";b:1;}}", self.0.len(), self.0).into_bytes())
-    }
-    fn user_exists(&self, id: u64) -> bool {
-        id == 1
-    }
-    fn post(&self, _: u64) -> Option<CapPost> {
-        None
-    }
-    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        None
-    }
-    fn comment_post(&self, _: u64) -> Option<u64> {
-        None
-    }
-    fn term_taxonomy(&self, _: u64) -> Option<String> {
-        None
-    }
-    fn constant(&self, name: &str) -> bool {
-        name == "DISALLOW_UNFILTERED_HTML"
-    }
-}
-
-impl MenuUser for Role {
-    fn can(&self, cap: &str) -> bool {
-        User::load(self, "wp_", 1).has_cap(self, cap, &[])
-    }
-    fn moderated_comments(&self) -> u64 {
-        0
-    }
-    fn transient(&self, _: &str) -> Option<Vec<u8>> {
-        None
-    }
-}
+use crate::tests::Role;
 
 /// A recorded screen: its globals, and the capabilities its own file asks
 /// for (any of them), before the menu's check.
@@ -330,7 +266,11 @@ fn odd_site_health_counts() {
         let expected =
             format!("site-health-counter count-{class}\"><span class=\"count\">{number}</span>");
         let at = menu.find("site-health-counter").unwrap();
-        assert!(menu.contains(&expected), "{json}: {}", menu.get(at..at + 120).unwrap());
+        assert!(
+            menu.contains(&expected),
+            "{json}: {}",
+            menu.get(at..at + 120).unwrap()
+        );
     }
 }
 

@@ -169,10 +169,7 @@ pub(super) fn get_avatar(
 ) -> Vec<u8> {
     let site = context.site;
     let optimization = context.loading.img(size, size);
-    if site
-        .option("show_avatars")
-        .is_none_or(|v| is_empty_string(&v))
-    {
+    if !shows_avatars(&|name| site.option(name)) {
         return Vec::new();
     }
     let (Some((url2x, _)), Some((url, found))) = (
@@ -181,18 +178,6 @@ pub(super) fn get_avatar(
     ) else {
         return Vec::new();
     };
-    let size = data_size(size);
-    let mut classes = vec![
-        "avatar".to_owned(),
-        format!("avatar-{size}"),
-        "photo".to_owned(),
-    ];
-    if !found {
-        classes.push("avatar-default".to_owned());
-    }
-    if !class.is_empty() {
-        classes.push(class.to_owned());
-    }
     // get_avatar() adds these unless the extra attributes have them, and
     // the style, through safecss_filter_attr(), never holds an `=`.
     let mut extra = extra.to_owned();
@@ -208,14 +193,71 @@ pub(super) fn get_avatar(
             extra.push_str(&format!("{name}='{value}'"));
         }
     }
+    img(alt, (&url, &url2x, found), size, class, &extra)
+}
+
+/// `get_option( 'show_avatars' )`.
+fn shows_avatars(option: &dyn Fn(&str) -> Option<Vec<u8>>) -> bool {
+    option("show_avatars").is_some_and(|v| !is_empty_string(&v))
+}
+
+/// The `<img>` `get_avatar()` prints, with its URLs at the size and twice it.
+fn img(
+    alt: &[u8],
+    (url, url2x, found): (&[u8], &[u8], bool),
+    size: i64,
+    class: &str,
+    extra: &str,
+) -> Vec<u8> {
+    let size = data_size(size);
+    let mut classes = vec![
+        "avatar".to_owned(),
+        format!("avatar-{size}"),
+        "photo".to_owned(),
+    ];
+    if !found {
+        classes.push("avatar-default".to_owned());
+    }
+    if !class.is_empty() {
+        classes.push(class.to_owned());
+    }
     format!(
         "<img alt='{}' src='{}' srcset='{} 2x' class='{}' height='{size}' width='{size}' {extra}/>",
         esc_attr(alt),
-        String::from_utf8_lossy(&esc_url(&url)),
-        String::from_utf8_lossy(&esc_url(&url2x)),
+        String::from_utf8_lossy(&esc_url(url)),
+        String::from_utf8_lossy(&esc_url(url2x)),
         esc_attr(classes.join(" ").as_bytes()),
     )
     .into_bytes()
+}
+
+/// `get_avatar( $user_id, $size )` in the admin, where avatars load lazily:
+/// empty when the site shows none.
+pub fn user_avatar(option: &dyn Fn(&str) -> Option<Vec<u8>>, user: &User, size: i64) -> Vec<u8> {
+    if !shows_avatars(option) {
+        return Vec::new();
+    }
+    let name = user_name(user);
+    let (url, found) = gravatar(option, &user.email, &name, size);
+    let (url2x, _) = gravatar(option, &user.email, &name, size.saturating_mul(2));
+    img(
+        b"",
+        (&url, &url2x, found),
+        size,
+        "",
+        "loading='lazy' decoding='async'",
+    )
+}
+
+/// The name a user's initials come from.
+fn user_name(user: &User) -> Vec<u8> {
+    if !user.display_name.is_empty() {
+        user.display_name.clone()
+    } else if !user.first_name.is_empty() && !user.last_name.is_empty() {
+        [&user.first_name[..], b" ", &user.last_name].concat()
+    } else {
+        user.login.clone()
+    }
 }
 
 /// `get_avatar_data()`'s size: the absolute value, or 96 for none.
@@ -230,19 +272,6 @@ fn data_size(size: i64) -> u64 {
 /// `None` for a comment type that has no avatars.
 fn avatar_data(context: &Context<'_>, subject: &Subject<'_>, size: i64) -> Option<(Vec<u8>, bool)> {
     let site = context.site;
-    // get_option( 'avatar_default', 'mystery' ): an empty value stays empty.
-    let mut default = site
-        .option("avatar_default")
-        .unwrap_or_else(|| b"mystery".to_vec());
-    match &default[..] {
-        b"mm" | b"mystery" | b"mysteryman" => default = b"mm".to_vec(),
-        b"gravatar_default" => default.clear(),
-        _ => {}
-    }
-    let rating = site
-        .option("avatar_rating")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
     let user = match subject {
         Subject::User(user) => user.clone(),
         Subject::Comment(comment) => {
@@ -255,44 +284,55 @@ fn avatar_data(context: &Context<'_>, subject: &Subject<'_>, size: i64) -> Optio
                 .flatten()
         }
     };
-    let email = match (&user, subject) {
-        (Some(user), _) => user.email.clone(),
-        (None, Subject::Comment(comment)) => comment.author_email.clone(),
-        (None, Subject::User(_)) => Vec::new(),
+    let (email, name) = match (&user, subject) {
+        (Some(user), _) => (user.email.clone(), user_name(user)),
+        (None, Subject::Comment(comment)) => (comment.author_email.clone(), comment.author.clone()),
+        (None, Subject::User(_)) => (Vec::new(), Vec::new()),
     };
-    let hash = if is_empty_string(&email) {
+    Some(gravatar(&|name| site.option(name), &email, &name, size))
+}
+
+/// The Gravatar URL `get_avatar_data()` makes for `email` from the site's
+/// avatar options, with initials from `name` where they are the default,
+/// and whether there was an address.
+fn gravatar(
+    option: &dyn Fn(&str) -> Option<Vec<u8>>,
+    email: &[u8],
+    name: &[u8],
+    size: i64,
+) -> (Vec<u8>, bool) {
+    // get_option( 'avatar_default', 'mystery' ): an empty value stays empty.
+    let mut default = option("avatar_default").unwrap_or_else(|| b"mystery".to_vec());
+    match &default[..] {
+        b"mm" | b"mystery" | b"mysteryman" => default = b"mm".to_vec(),
+        b"gravatar_default" => default.clear(),
+        _ => {}
+    }
+    let rating = option("avatar_rating")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let hash = if is_empty_string(email) {
         String::new()
     } else {
-        bin2hex(&Sha256::digest(php_trim(&email).to_ascii_lowercase()))
+        bin2hex(&Sha256::digest(php_trim(email).to_ascii_lowercase()))
     };
     let mut url = format!(
         "https://secure.gravatar.com/avatar/{hash}?s={}",
         data_size(size)
     )
     .into_bytes();
-    let mut arg = |name: &str, value: &[u8]| {
+    let mut arg = |key: &str, value: &[u8]| {
         if !is_empty_string(value) {
-            url.extend(format!("&{name}=").into_bytes());
+            url.extend(format!("&{key}=").into_bytes());
             url.extend(rawurlencode(value));
         }
     };
     arg("d", &default);
     arg("r", &rating);
-    if default == b"initials" {
-        let name = match (&user, subject) {
-            (Some(user), _) if !user.display_name.is_empty() => user.display_name.clone(),
-            (Some(user), _) if !user.first_name.is_empty() && !user.last_name.is_empty() => {
-                [&user.first_name[..], b" ", &user.last_name].concat()
-            }
-            (Some(user), _) => user.login.clone(),
-            (None, Subject::Comment(comment)) => comment.author.clone(),
-            (None, Subject::User(_)) => Vec::new(),
-        };
-        if !name.is_empty() {
-            arg("initials", &initials(&name));
-        }
+    if default == b"initials" && !name.is_empty() {
+        arg("initials", &initials(name));
     }
-    Some((url, !hash.is_empty()))
+    (url, !hash.is_empty())
 }
 
 /// The initials `get_avatar_data()` sends: the first two characters of a

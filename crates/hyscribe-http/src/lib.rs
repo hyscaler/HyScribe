@@ -59,6 +59,8 @@ mod trackback;
 #[doc(hidden)]
 pub mod fuzzing {
     pub use crate::files::http_date;
+    pub use crate::login::cookies;
+    pub use crate::redirect::{wp_sanitize_redirect, wp_validate_redirect};
     pub use crate::rewrite::pattern::Pattern;
 }
 

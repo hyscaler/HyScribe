@@ -500,6 +500,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyscribe-admin"
+version = "0.1.0"
+dependencies = [
+ "hyscribe-auth",
+ "hyscribe-kses",
+ "hyscribe-phpser",
+ "hyscribe-render",
+]
+
+[[package]]
 name = "hyscribe-assets"
 version = "0.1.0"
 dependencies = [
@@ -562,6 +572,7 @@ dependencies = [
  "httpdate",
  "hyper",
  "hyper-util",
+ "hyscribe-admin",
  "hyscribe-assets",
  "hyscribe-auth",
  "hyscribe-config",

@@ -122,14 +122,14 @@ fn set_cookie(
     cookie
 }
 
-/// `$_COOKIE`: each name's first value, both decoded. PHP also turns dots
+/// `$_COOKIE` from the Cookie headers' values: each name's first value,
+/// both decoded. PHP also turns dots
 /// and spaces in names into underscores, which HyScribe's names have none of.
-fn cookies(headers: &HeaderMap) -> Vec<(Vec<u8>, Vec<u8>)> {
+pub fn cookies<'a>(values: impl IntoIterator<Item = &'a [u8]>) -> Vec<(Vec<u8>, Vec<u8>)> {
     let mut cookies: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-    let pairs = headers
-        .get_all(header::COOKIE)
-        .iter()
-        .flat_map(|value| value.as_bytes().split(|&b| b == b';'));
+    let pairs = values
+        .into_iter()
+        .flat_map(|value| value.split(|&b| b == b';'));
     for pair in pairs {
         let pair = hyscribe_phpser::php_trim(pair);
         let mut halves = pair.splitn(2, |&b| b == b'=');
@@ -378,7 +378,13 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
         .to_ascii_lowercase()
         .starts_with("https:");
     let query = parse_str(asked.query.as_deref().unwrap_or_default().as_bytes());
-    let cookies = cookies(&asked.headers);
+    let cookies = cookies(
+        asked
+            .headers
+            .get_all(header::COOKIE)
+            .iter()
+            .map(HeaderValue::as_bytes),
+    );
     let reads = LoginReads {
         reads: Reads::new(site, handle),
         site,

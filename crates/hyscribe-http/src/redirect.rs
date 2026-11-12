@@ -26,7 +26,7 @@ fn utf8_sequence(first: u8, after: &[u8]) -> Option<usize> {
 
 /// `wp_sanitize_redirect()`: spaces and UTF-8 percent-encoded, every other
 /// character a URL does not use dropped, and encoded line breaks removed.
-pub(crate) fn wp_sanitize_redirect(location: &[u8]) -> Vec<u8> {
+pub fn wp_sanitize_redirect(location: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(location.len());
     let mut at = 0;
     while let Some(&b) = location.get(at) {
@@ -51,7 +51,7 @@ pub(crate) fn wp_sanitize_redirect(location: &[u8]) -> Vec<u8> {
 
 /// `wp_validate_redirect( $location, $fallback )` for a request to the
 /// login screen at the site's root, on a site whose home URL has `host`.
-pub(crate) fn wp_validate_redirect(location: &[u8], host: &[u8], fallback: &[u8]) -> Vec<u8> {
+pub fn wp_validate_redirect(location: &[u8], host: &[u8], fallback: &[u8]) -> Vec<u8> {
     let trimmed = location
         .iter()
         .position(|b| !b" \t\n\r\0\x08\x0B".contains(b))

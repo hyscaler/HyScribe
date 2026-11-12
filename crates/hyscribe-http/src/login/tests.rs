@@ -386,10 +386,7 @@ fn cookies_are_set_as_php_sets_them_and_same_site() {
     assert_eq!(cookie_path("http://example.test"), "/");
     assert_eq!(cookie_path("/relative"), "/relative/");
     assert_eq!(cookie_path("http:example"), "http:example/");
-    let mut headers = HeaderMap::new();
-    headers.append(header::COOKIE, HeaderValue::from_static("a=1; b=%7C; a=2"));
-    headers.append(header::COOKIE, HeaderValue::from_static("=x;c"));
-    let found = cookies(&headers);
+    let found = cookies([&b"a=1; b=%7C; a=2"[..], b"=x;c"]);
     assert_eq!(cookie(&found, "a"), Some(&b"1"[..]));
     assert_eq!(cookie(&found, "b"), Some(&b"|"[..]));
     assert_eq!(cookie(&found, "c"), Some(&b""[..]));

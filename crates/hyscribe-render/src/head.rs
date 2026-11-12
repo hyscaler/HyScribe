@@ -1273,7 +1273,7 @@ fn inline_script(data: &[u8]) -> Vec<u8> {
 /// A tag as `WP_HTML_Tag_Processor` builds it from `<name></name>`, with
 /// `attributes` set (`None` for a boolean one) and, given, its text; and a
 /// newline after it.
-fn tag(name: &[u8], attributes: &[(&[u8], Option<&[u8]>)], text: Option<&[u8]>) -> Vec<u8> {
+pub fn tag(name: &[u8], attributes: &[(&[u8], Option<&[u8]>)], text: Option<&[u8]>) -> Vec<u8> {
     let markup = [
         &b"<"[..],
         name,

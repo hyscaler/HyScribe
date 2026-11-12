@@ -12,6 +12,7 @@ repository = "https://github.com/hyscaler/HyScribe"
 publish = false
 
 [workspace.dependencies]
+hyscribe-admin = { path = "crates/hyscribe-admin" }
 hyscribe-assets = { path = "crates/hyscribe-assets" }
 hyscribe-auth = { path = "crates/hyscribe-auth" }
 hyscribe-config = { path = "crates/hyscribe-config" }

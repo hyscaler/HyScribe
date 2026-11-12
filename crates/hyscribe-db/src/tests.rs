@@ -362,6 +362,10 @@ async fn errors_are_reported() {
         db.post_terms(1, "category").await.unwrap_err(),
         db.term(1, "category").await.unwrap_err(),
         db.user(1).await.unwrap_err(),
+        db.credentials(UserField::Login, b"admin")
+            .await
+            .unwrap_err(),
+        db.user_meta(1, "use_ssl").await.unwrap_err(),
         db.comments(1).await.unwrap_err(),
         db.comment(1).await.unwrap_err(),
         db.adjacent_post(&Post::default(), true, None)
@@ -403,6 +407,7 @@ async fn errors_are_reported() {
                 "missing_term_relationships",
                 "missing_postmeta",
                 "missing_users",
+                "missing_usermeta",
                 "missing_comments"
             ]
             .iter()
@@ -658,6 +663,40 @@ async fn options_meta_and_terms() {
         )
     );
     assert_eq!(db.user(99).await.unwrap(), None);
+    // Logins and emails match as the collation compares, case aside.
+    let login = db
+        .credentials(UserField::Login, b"ADMIN")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!((login.id, &login.login[..]), (1, &b"admin"[..]));
+    assert!(login.pass.starts_with(b"$wp$2y$"));
+    let email = db
+        .credentials(UserField::Email, b"Admin@Default-Install.test")
+        .await
+        .unwrap();
+    assert_eq!(email.as_ref(), Some(&login));
+    assert_eq!(
+        db.credentials(UserField::Login, b"nobody").await.unwrap(),
+        None
+    );
+    assert_eq!(
+        db.credentials(UserField::Email, b"admin").await.unwrap(),
+        None
+    );
+    let caps = db
+        .user_meta(1, &format!("{}capabilities", db.prefix()))
+        .await
+        .unwrap();
+    assert_eq!(
+        caps.as_deref(),
+        Some(&b"a:1:{s:13:\"administrator\";b:1;}"[..])
+    );
+    assert_eq!(
+        db.user_meta(1, "use_ssl").await.unwrap().as_deref(),
+        Some(&b"0"[..])
+    );
+    assert_eq!(db.user_meta(1, "no_such_meta").await.unwrap(), None);
     let comments = db.comments(1).await.unwrap();
     assert_eq!(comments.len(), 1);
     assert_eq!(db.comment(1).await.unwrap().as_ref(), comments.first());

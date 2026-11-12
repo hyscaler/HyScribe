@@ -65,6 +65,26 @@ pub struct Term {
     pub count: u64,
 }
 
+/// What a login checks of a user: `ID`, `user_login` and `user_pass`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Credentials {
+    /// `ID`.
+    pub id: u64,
+    /// `user_login`.
+    pub login: Vec<u8>,
+    /// `user_pass`, the password hash.
+    pub pass: Vec<u8>,
+}
+
+/// The column `get_user_by()` looks a user up by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UserField {
+    /// `user_login`.
+    Login,
+    /// `user_email`.
+    Email,
+}
+
 /// A row of `{prefix}users`, with the columns rendering needs.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct User {

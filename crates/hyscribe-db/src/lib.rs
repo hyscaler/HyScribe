@@ -14,8 +14,8 @@ use std::fmt;
 
 use hyscribe_config::{Database, Prefix};
 use hyscribe_model::{
-    CalendarMonth, Comment, DateCount, OrderBy, Period, Post, PostQuery, Term, TermOrder,
-    TermQuery, TimeCondition, User,
+    CalendarMonth, Comment, Credentials, DateCount, OrderBy, Period, Post, PostQuery, Term,
+    TermOrder, TermQuery, TimeCondition, User, UserField,
 };
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
@@ -632,6 +632,62 @@ impl Db {
             .await
             .map_err(db_error)?;
         row.as_ref().map(user).transpose()
+    }
+
+    /// `get_user_by( 'login' | 'email', $value )`: the user whose column
+    /// matches as the database's collation compares, the first by ID.
+    pub async fn credentials(
+        &self,
+        field: UserField,
+        value: &[u8],
+    ) -> Result<Option<Credentials>, DbError> {
+        let sql = self.prefix.sql(match field {
+            UserField::Login => {
+                "SELECT ID, user_login, user_pass FROM {prefix}users WHERE user_login = ? ORDER BY ID LIMIT 1"
+            }
+            UserField::Email => {
+                "SELECT ID, user_login, user_pass FROM {prefix}users WHERE user_email = ? ORDER BY ID LIMIT 1"
+            }
+        });
+        let row = sqlx::query(sql)
+            .bind(value)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.map(|row| {
+            let mut c = Columns::new(&row);
+            let credentials = Credentials {
+                id: c.unsigned("ID"),
+                login: c.bytes("user_login"),
+                pass: c.bytes("user_pass"),
+            };
+            c.finish(credentials)
+        })
+        .transpose()
+    }
+
+    /// `get_user_meta( $user_id, $key, true )`: the first value stored.
+    pub async fn user_meta(&self, user_id: u64, key: &str) -> Result<Option<Vec<u8>>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT meta_value FROM {prefix}usermeta WHERE user_id = ? AND meta_key = ? ORDER BY umeta_id LIMIT 1",
+        );
+        let row = sqlx::query(sql)
+            .bind(user_id)
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.map(|row| {
+            let mut c = Columns::new(&row);
+            let value = c.bytes("meta_value");
+            c.finish(value)
+        })
+        .transpose()
+    }
+
+    /// The table prefix, which some meta keys begin with.
+    pub fn prefix(&self) -> &str {
+        self.prefix.as_str()
     }
 
     /// The terms of `slugs`, `(taxonomy, slug)` pairs, and the categories

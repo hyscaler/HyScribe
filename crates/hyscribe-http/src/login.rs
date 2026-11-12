@@ -258,12 +258,11 @@ impl Urls for LoginReads<'_> {
 
     /// `/wp-admin/<screen>.php` is `/hs-admin/<screen>` (ADR 0008).
     fn admin_url(&self, path: &str) -> String {
-        let (file, query) = path
-            .split_once('?')
-            .map_or((path, None), |(f, q)| (f, Some(q)));
-        let file = file.strip_suffix(".php").unwrap_or(file);
-        let query = query.map_or(String::new(), |query| format!("?{query}"));
-        format!("{}/hs-admin/{file}{query}", self.site_url())
+        format!(
+            "{}/hs-admin/{}",
+            self.site_url(),
+            hyscribe_admin::menu::link(path)
+        )
     }
 
     fn fill(&self, text: &str) -> String {

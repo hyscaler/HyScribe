@@ -85,7 +85,7 @@ fn screen(user: &Role, file: &str) -> (Screen<'static>, Vec<&'static str>) {
     let screen = |pagenow, typenow, parent_file, submenu_file| Screen {
         pagenow,
         typenow,
-        parent_file,
+        parent_file: Some(parent_file).filter(|p: &&str| !p.is_empty()),
         submenu_file,
     };
     match file {
@@ -289,7 +289,7 @@ fn dashboard() -> Screen<'static> {
     Screen {
         pagenow: "index.php",
         typenow: "",
-        parent_file: "index.php",
+        parent_file: Some("index.php"),
         submenu_file: None,
     }
 }
@@ -315,6 +315,25 @@ fn counts_read_as_php_writes_them() {
     }
 }
 
+/// The cached critical count prints as PHP prints it, rounded for its
+/// number and escaped where PHP leaves it raw.
+#[test]
+fn odd_site_health_counts() {
+    let caps: &[&str] = &["read", "edit_posts", "view_site_health_checks"];
+    for (json, class, number) in [
+        (r#"{"critical":-3}"#, "-3", "-3"),
+        (r#"{"critical":2.7}"#, "2.7", "3"),
+        (r#"{"good":1}"#, "", "0"),
+        (r#"{"critical":"1\"><b>"}"#, "1&quot;&gt;&lt;b&gt;", "1"),
+    ] {
+        let menu = admin_menu(&Caps(caps, 0, Some(json)), &dashboard()).unwrap();
+        let expected =
+            format!("site-health-counter count-{class}\"><span class=\"count\">{number}</span>");
+        let at = menu.find("site-health-counter").unwrap();
+        assert!(menu.contains(&expected), "{json}: {}", menu.get(at..at + 120).unwrap());
+    }
+}
+
 /// A role that may add users but not list them gets them under Profile,
 /// and one that may list them but not add them has no Add User.
 #[test]
@@ -335,7 +354,7 @@ fn a_denied_page_under_its_parent() {
     let screen = Screen {
         pagenow: "tools.php",
         typenow: "",
-        parent_file: "tools.php",
+        parent_file: Some("tools.php"),
         submenu_file: None,
     };
     let user = Caps(&["read", "edit_posts"], 0, None);
@@ -350,7 +369,7 @@ fn screen_of(
     Screen {
         pagenow,
         typenow,
-        parent_file,
+        parent_file: Some(parent_file).filter(|p| !p.is_empty()),
         submenu_file: None,
     }
 }

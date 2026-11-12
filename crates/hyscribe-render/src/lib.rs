@@ -17,6 +17,7 @@ mod comments;
 mod content;
 pub mod content_tags;
 mod core_blocks;
+pub use core_blocks::number_format;
 pub mod date;
 mod elements;
 mod excerpt;

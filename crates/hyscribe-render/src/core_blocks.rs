@@ -587,7 +587,7 @@ fn comments_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 
 /// `number_format_i18n( $number )` in English: thousands separated by
 /// commas.
-pub(crate) fn number_format(number: impl Into<i128>) -> String {
+pub fn number_format(number: impl Into<i128>) -> String {
     let number = number.into();
     let digits = number.unsigned_abs().to_string();
     let mut out = String::new();

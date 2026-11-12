@@ -5,7 +5,9 @@
 //! Links drop `.php`, as hs-admin's screens do (ADR 0008).
 
 use hyscribe_kses::esc_attr;
+use hyscribe_phpser::Value;
 use hyscribe_render::formatting::wptexturize;
+use hyscribe_render::number_format;
 
 /// What the menu asks of the user and the site.
 pub trait MenuUser {
@@ -17,7 +19,8 @@ pub trait MenuUser {
     fn transient(&self, name: &str) -> Option<Vec<u8>>;
 }
 
-/// The Site Health count: the critical issues of the last cached check.
+/// The Site Health count: the critical issues of the last cached check,
+/// printed as PHP prints them but escaped, which PHP leaves out.
 fn site_health_count(user: &dyn MenuUser) -> String {
     if !user.can("view_site_health_checks") {
         return String::new();
@@ -25,16 +28,17 @@ fn site_health_count(user: &dyn MenuUser) -> String {
     let result = user
         .transient("health-check-site-status-result")
         .unwrap_or_default();
-    let critical = hyscribe_phpser::json_decode(&result)
-        .and_then(|issues| {
-            issues
-                .get_str("critical")
-                .map(hyscribe_phpser::Value::to_int)
-        })
-        .unwrap_or(0);
-    let number = number_format(critical.unsigned_abs());
+    let critical = match hyscribe_phpser::json_decode(&result) {
+        Some(issues) if issues.as_array().is_some_and(|issues| !issues.is_empty()) => {
+            issues.get_str("critical").cloned().unwrap_or(Value::Null)
+        }
+        _ => Value::Int(0),
+    };
+    let class = esc_attr(&critical.to_php_string());
+    // `number_format()` rounds half away from zero.
+    let number = number_format(critical.to_float().round() as i128);
     format!(
-        "<span class=\"menu-counter site-health-counter count-{critical}\"><span class=\"count\">{number}</span></span>"
+        "<span class=\"menu-counter site-health-counter count-{class}\"><span class=\"count\">{number}</span></span>"
     )
 }
 
@@ -44,14 +48,14 @@ pub struct Screen<'a> {
     pub pagenow: &'a str,
     /// `$typenow`, the post type it lists or edits.
     pub typenow: &'a str,
-    /// `$parent_file`.
-    pub parent_file: &'a str,
+    /// `$parent_file`, if the screen sets one. PHP checks access before the
+    /// screen's file runs, so the check starts without it.
+    pub parent_file: Option<&'a str>,
     /// `$submenu_file`, if the screen sets one.
     pub submenu_file: Option<&'a str>,
 }
 
 /// A `$menu` entry: title, capability, slug, classes, ID and icon.
-#[derive(Clone)]
 struct Item {
     title: String,
     cap: String,
@@ -62,7 +66,6 @@ struct Item {
 }
 
 /// A `$submenu` entry: title, capability and slug.
-#[derive(Clone)]
 struct Sub {
     title: String,
     cap: String,
@@ -446,19 +449,6 @@ fn build(user: &dyn MenuUser) -> Menu {
     }
 }
 
-/// `number_format_i18n()` for English.
-fn number_format(n: u64) -> String {
-    let digits = n.to_string();
-    let mut out = String::new();
-    for (i, digit) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(digit);
-    }
-    out
-}
-
 /// `wp-admin/includes/menu.php`: what the user may not reach is taken out.
 fn prune(menu: &mut Menu, user: &dyn MenuUser) {
     for (parent, entries) in &mut menu.submenu.0 {
@@ -593,8 +583,9 @@ fn add_class(classes: &mut String, class: &str) {
     classes.push_str(class);
 }
 
-/// hs-admin's link to a `wp-admin` file: without `.php`.
-fn link(file: &str) -> String {
+/// hs-admin's name for a `wp-admin` file, with its query: without `.php`
+/// (ADR 0008).
+pub fn link(file: &str) -> String {
     match file.split_once('?') {
         Some((path, query)) => format!("{}?{query}", path.strip_suffix(".php").unwrap_or(path)),
         None => file.strip_suffix(".php").unwrap_or(file).to_string(),
@@ -606,10 +597,13 @@ fn link(file: &str) -> String {
 pub fn admin_menu(user: &dyn MenuUser, screen: &Screen) -> Option<String> {
     let mut menu = build(user);
     prune(&mut menu, user);
-    let mut parent_file = screen.parent_file.to_string();
-    if !can_access(&menu, user, screen, &mut parent_file) {
+    // `user_can_access_admin_page()` runs from `admin.php`, before the
+    // screen sets its parent file; one it leaves unset keeps what was found.
+    let mut found = String::new();
+    if !can_access(&menu, user, screen, &mut found) {
         return None;
     }
+    let mut parent_file = screen.parent_file.map_or(found, String::from);
     menu_classes(&mut menu.items);
     // `menu-header.php` asks for the parent once more.
     admin_page_parent(&menu, screen, &mut parent_file);

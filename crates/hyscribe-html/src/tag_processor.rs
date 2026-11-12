@@ -351,6 +351,16 @@ impl TagProcessor {
         class_name.is_none_or(|wanted| self.has_class(wanted) == Some(true))
     }
 
+    /// Replaces the input from `start` to `end` with `text`, as a
+    /// `WP_HTML_Text_Replacement` in `lexical_updates`.
+    pub fn replace_range(&mut self, start: usize, end: usize, text: &[u8]) {
+        self.lexical_updates.append(Replacement {
+            start,
+            length: end.saturating_sub(start),
+            text: text.to_vec(),
+        });
+    }
+
     /// Where parsing stopped: just after the current token.
     pub fn parsed_up_to(&self) -> usize {
         self.bytes_already_parsed

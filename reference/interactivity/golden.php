@@ -83,6 +83,17 @@ $cases[] = '<div data-wp-interactive="a" data-wp-context=\'{"v":"A"}\'><div data
 $cases[] = $ctx( $context, '<i data-wp-bind--abcd-="context.no" data-wp-bind--a.b="context.yes" data-wp-bind--a---b-="context.yes">suffixes</i>' );
 $cases[] = "<div data-wp-interactive=\"test\" data-wp-context='test::\n{\"a\":1}'><i data-wp-bind--title=\"context.a\">newline</i></div>";
 $cases[] = "<div data-wp-interactive=\"test\" data-wp-context='test::{\"a\":1}'><i data-wp-bind--title=\"context.a\">explicit</i></div>";
+// data-wp-text: the first plain entry replaces the content between the tag
+// and its closer, escaped twice, or empties it.
+foreach ( array( 'yes', 'no', 'zero', 'one', 'half', 'text', 'empty', 'list', 'nil', 'missing', 'list.length', '!yes' ) as $path ) {
+	$cases[] = $ctx( $context, "<i data-wp-text=\"context.$path\">old <b>x</b></i>" );
+}
+$cases[] = $ctx( array( 't' => '<a> & "b"' ), '<i data-wp-text="context.t">old</i>' );
+$cases[] = $ctx( $context, '<i data-wp-text--x="context.text" data-wp-text---u="context.text">kept</i><i data-wp-text="" data-wp-text--y="context.one">empty value</i>' );
+$cases[] = $ctx( $context, '<textarea data-wp-text="context.text">special</textarea><img data-wp-text="context.text"><b data-wp-text="context.text"></b>' );
+$cases[] = $ctx( $context, '<p data-wp-text="context.text">a <b data-wp-bind--title="context.text">inner</b> c</p><i data-wp-bind--title="context.one">after</i>' );
+$cases[] = $ctx( $context, '<p data-wp-text="context.text"><p data-wp-text="context.one">nested</p></p>' );
+$cases[] = $ctx( $context, '<svg><text data-wp-text="context.text">in svg</text></svg><i data-wp-text="context.one">x</i>' );
 foreach ( $cases as $markup ) {
 	echo bin2hex( $markup ), "\t", bin2hex( wp_interactivity_process_directives( $markup ) ), "\n";
 }

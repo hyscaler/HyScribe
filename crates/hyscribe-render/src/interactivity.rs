@@ -4,15 +4,16 @@
 //! `WP_Interactivity_API::process_directives()`, which runs on the markup
 //! of each root interactive block.
 //!
-//! The `interactive`, `context`, `bind`, `class` and `style` directives are
-//! processed, against the server state ported blocks register: the
-//! accordion's `isOpen`, derived from its item's context.
-//! `text`, `each` and `router-region` are not ported yet, so markup that
-//! mentions them is left as rendered.
+//! The `interactive`, `context`, `bind`, `class`, `style` and `text`
+//! directives are processed, against the server state ported blocks
+//! register: the accordion's `isOpen`, derived from its item's context.
+//! `each` and `router-region` are not ported yet, so markup that mentions
+//! them is left as rendered.
 
 use crate::formatting::find;
 use crate::layout::is_void;
 use hyscribe_html::{Attribute, TagProcessor};
+use hyscribe_kses::esc_html;
 use hyscribe_phpser::{Key, Value, is_empty_string, json_decode, json_encode, php_trim};
 
 /// The server state of `namespace` as `wp_interactivity_state()` holds it,
@@ -37,14 +38,16 @@ enum Directive {
     Bind,
     Class,
     Style,
+    Text,
 }
 
-const DIRECTIVES: [(&[u8], Directive); 5] = [
+const DIRECTIVES: [(&[u8], Directive); 6] = [
     (b"interactive", Directive::Interactive),
     (b"context", Directive::Context),
     (b"bind", Directive::Bind),
     (b"class", Directive::Class),
     (b"style", Directive::Style),
+    (b"text", Directive::Text),
 ];
 
 /// Elements the tag processor reads as text up to their closer, which it
@@ -71,11 +74,7 @@ struct Entry {
 /// `process_directives()`: the markup with its directives applied, or as
 /// it was when its tags do not balance.
 pub(crate) fn process_directives(html: &[u8]) -> Vec<u8> {
-    let unported = [
-        &b"data-wp-text"[..],
-        b"data-wp-each",
-        b"data-wp-router-region",
-    ];
+    let unported = [&b"data-wp-each"[..], b"data-wp-router-region"];
     if find(html, 0, b"data-wp-").is_none()
         || unported.iter().any(|name| find(html, 0, name).is_some())
     {
@@ -116,12 +115,22 @@ impl Directives {
             } else {
                 let directives = present_directives(&p);
                 if visits_closer {
-                    tag_stack.push((tag, directives.clone()));
+                    tag_stack.push((tag.clone(), directives.clone()));
                 }
                 directives
             };
-            if !closer {
-                self.enter(&mut p, &directives);
+            if !closer && let Some(text) = self.enter(&mut p, &directives) {
+                // The content is replaced at once, so the tags in it are
+                // never visited; the closer then leaves the tag.
+                let after_opener = p.parsed_up_to();
+                skip_to_tag_closer(&mut p, &tag);
+                let before_closer = p.token_start().filter(|_| p.is_tag_closer())?;
+                p.replace_range(after_opener, before_closer, &text);
+                tag_stack.pop();
+                for directive in directives.iter().rev() {
+                    self.exit(*directive);
+                }
+                continue;
             }
             if closer || !visits_closer {
                 for directive in directives.iter().rev() {
@@ -132,8 +141,10 @@ impl Directives {
         tag_stack.is_empty().then(|| p.get_updated_html().to_vec())
     }
 
-    /// Each processor's work on entering a tag.
-    fn enter(&mut self, p: &mut TagProcessor, directives: &[Directive]) {
+    /// Each processor's work on entering a tag; the content a `text`
+    /// directive gives it, if any.
+    fn enter(&mut self, p: &mut TagProcessor, directives: &[Directive]) -> Option<Vec<u8>> {
+        let mut text = None;
         for directive in directives {
             match directive {
                 Directive::Interactive => self.interactive(p),
@@ -141,8 +152,10 @@ impl Directives {
                 Directive::Bind => self.bind(p),
                 Directive::Class => self.class(p),
                 Directive::Style => self.style(p),
+                Directive::Text => text = self.text(p),
             }
         }
+        text
     }
 
     /// The exit half of the processors that have one.
@@ -280,6 +293,25 @@ impl Directives {
                 p.set_attribute(b"style", &merged);
             }
         }
+    }
+
+    /// `data_wp_text_processor()`: the first plain entry's string or number,
+    /// escaped, or nothing, for a tag whose content it replaces.
+    fn text(&self, p: &mut TagProcessor) -> Option<Vec<u8>> {
+        let entry = self.entries(p, b"text").into_iter().find(|entry| {
+            entry.suffix.is_none() && entry.unique_id.is_none() && !entry.value.is_empty()
+        })?;
+        let tag = p.get_tag().unwrap_or_default();
+        if is_void(&tag) || SPECIAL.contains(&tag.as_slice()) {
+            return None;
+        }
+        // `set_content_between_balanced_tags()` escapes again, to the same.
+        Some(match self.evaluate(&entry) {
+            text @ (Value::String(_) | Value::Int(_) | Value::Float(_)) => {
+                esc_html(&text.to_php_string()).into_bytes()
+            }
+            _ => Vec::new(),
+        })
     }
 
     /// `get_directive_entries()`: the tag's `data-wp-<prefix>` directives,

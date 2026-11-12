@@ -35,10 +35,16 @@ fn matches_php() {
 #[test]
 fn unported_directives_leave_the_markup_alone() {
     for markup in [
-        &br#"<div data-wp-interactive="t"><b data-wp-bind--title="!state.x" data-wp-text="state.y">x</b></div>"#[..],
-        br#"<div data-wp-interactive="t" data-wp-router-region="r"><b data-wp-bind--title="!state.x">x</b></div>"#,
-        br#"<div data-wp-interactive="t"><template data-wp-each="state.list"><b></b></template></div>"#,
+        &br#"<div data-wp-interactive="t" data-wp-router-region="r"><b data-wp-bind--title="!state.x">x</b></div>"#[..],
+        br#"<div data-wp-interactive="t"><template data-wp-each="state.list"><b data-wp-bind--title="!state.x"></b></template></div>"#,
     ] {
         assert_eq!(process_directives(markup), markup);
     }
+}
+
+/// A text directive whose tag never closes leaves the markup as rendered.
+#[test]
+fn text_needs_a_closer() {
+    let markup = br#"<div data-wp-interactive="t"><b data-wp-text="state.y">x"#;
+    assert_eq!(process_directives(markup), markup);
 }

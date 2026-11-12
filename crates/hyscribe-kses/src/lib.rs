@@ -21,8 +21,9 @@ mod url;
 pub use css::safecss_filter_attr;
 pub use entities::{wp_kses_decode_entities, wp_kses_normalize_entities};
 pub use escape::{esc_attr, esc_html, esc_textarea, sanitize_key};
+pub use php::contains as str_contains;
 pub use protocol::{
     ALLOWED_PROTOCOLS, wp_kses_bad_protocol, wp_kses_no_null, wp_kses_no_null_keep_slash_zero,
 };
 pub use strip::{collapse_breaks, strip_tags, wp_strip_all_tags};
-pub use url::{esc_url, esc_url_protocols, esc_url_raw, url_host, url_scheme};
+pub use url::{esc_url, esc_url_protocols, esc_url_raw, url_host, url_query, url_scheme};

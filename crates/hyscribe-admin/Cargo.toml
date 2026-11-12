@@ -10,6 +10,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+hyscribe-auth.workspace = true
 hyscribe-kses.workspace = true
 hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true

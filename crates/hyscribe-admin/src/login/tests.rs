@@ -1,0 +1,250 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+use hyscribe_testkit::unhex;
+
+use super::*;
+use crate::tests::{Oracle, first_difference};
+
+/// Every case of `reference/login/golden.sh`.
+#[test]
+fn the_login_screen_is_php_s() {
+    let golden = include_str!("../../tests/golden/login.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let query = parse_str(f[1].as_bytes());
+        let form = parse_str(f[2].as_bytes());
+        let state = f[3];
+        let request = Request {
+            query: &query,
+            form: (f[0] == "POST").then_some(&form),
+            test_cookie: matches!(state, "1" | "resetpass" | "use_ssl"),
+            logged_in_cookie: false,
+            session: match state {
+                "expired" => Session::Expired,
+                _ => Session::None,
+            },
+            reset_cookie: (state == "resetpass").then_some(&b"::<b>Ad  min:key"[..]),
+        };
+        let oracle = Oracle {
+            use_ssl: state == "use_ssl",
+        };
+        assert_eq!(f[4], "200", "{line}");
+        let Login::Page(ours) = login(&oracle, &request) else {
+            failures.push(format!("{} {} {}: logged in", f[0], f[1], f[2]));
+            continue;
+        };
+        let ours = String::from_utf8(ours).unwrap();
+        let php = String::from_utf8(unhex(f[5])).unwrap();
+        if ours != php {
+            let difference = first_difference(&php, &ours);
+            failures.push(format!("{} {} {} {state}{difference}", f[0], f[1], f[2]));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} differ:\n{}",
+        failures.len(),
+        golden.lines().count(),
+        failures.join("\n")
+    );
+}
+
+fn request<'a>(query: &'a Value, form: Option<&'a Value>, session: Session) -> Request<'a> {
+    Request {
+        query,
+        form,
+        test_cookie: true,
+        logged_in_cookie: !matches!(session, Session::None),
+        session,
+        reset_cookie: None,
+    }
+}
+
+/// `wp-login.php`'s choice of action, before its switch.
+#[test]
+fn the_action_is_wp_login_php_s() {
+    for (query, form, action) in [
+        ("", "", "login"),
+        ("action=lostpassword", "", "lostpassword"),
+        ("action=lostpassword", "action=logout", "logout"),
+        ("action=nope", "", "login"),
+        ("action%5B%5D=logout", "", "login"),
+        ("action=logout&key=x", "", "resetpass"),
+        ("checkemail=confirm", "", "checkemail"),
+        ("key=x&checkemail=confirm", "", "checkemail"),
+    ] {
+        let (query, form) = (parse_str(query.as_bytes()), parse_str(form.as_bytes()));
+        let request = request(&query, Some(&form), Session::None);
+        assert_eq!(request.action(), action, "{query:?} {form:?}");
+    }
+}
+
+/// Good credentials, or a valid session with none, log in; with `reauth`
+/// the screen shows as it does after a failed login.
+#[test]
+fn good_credentials_log_in() {
+    let empty = Value::Array(Vec::new());
+    let admin = "http://127.0.0.1:8081/wp-admin/";
+    // Query, form, session, `use_ssl`, then the user (0 for the screen),
+    // remember, secure and where to.
+    let cases = [
+        (
+            "",
+            "log=admin&pwd=reference-only-password&testcookie=1",
+            Session::None,
+            false,
+            1,
+            false,
+            false,
+            admin,
+        ),
+        (
+            "",
+            "log=admin%40default-install.test&pwd=+reference-only-password+&rememberme=forever",
+            Session::None,
+            false,
+            1,
+            true,
+            false,
+            admin,
+        ),
+        (
+            "",
+            "log=admin&pwd=reference-only-password",
+            Session::None,
+            true,
+            1,
+            false,
+            true,
+            "https://127.0.0.1:8081/wp-admin/",
+        ),
+        (
+            "redirect_to=http%3A%2F%2Fx%2Fwp-admin%2F",
+            "log=admin&pwd=reference-only-password",
+            Session::None,
+            true,
+            1,
+            false,
+            true,
+            "https://x/wp-admin/",
+        ),
+        (
+            "redirect_to=%2Fx%22",
+            "",
+            Session::User(7),
+            false,
+            7,
+            false,
+            false,
+            "/x\\\"",
+        ),
+        (
+            "",
+            "log=admin&pwd=wrong",
+            Session::User(7),
+            false,
+            0,
+            false,
+            false,
+            "",
+        ),
+        (
+            "",
+            "log=admin&pwd=",
+            Session::User(7),
+            false,
+            0,
+            false,
+            false,
+            "",
+        ),
+    ];
+    for (query, form, session, use_ssl, user, remember, secure, to) in cases {
+        let (query, form) = (parse_str(query.as_bytes()), parse_str(form.as_bytes()));
+        let form = Some(&form).filter(|form| **form != empty);
+        match login(&Oracle { use_ssl }, &request(&query, form, session)) {
+            Login::LoggedIn {
+                user: id,
+                remember: kept,
+                secure: safe,
+                redirect_to,
+            } => {
+                assert_eq!(
+                    (id, kept, safe, redirect_to),
+                    (user, remember, secure, to.as_bytes().to_vec())
+                );
+            }
+            Login::Page(_) => assert_eq!(user, 0, "{query:?} {form:?}"),
+        }
+    }
+    let golden = include_str!("../../tests/golden/login.tsv");
+    let reauth = golden
+        .lines()
+        .find(|line| line.starts_with("POST\treauth=1\t"))
+        .unwrap();
+    let (query, form) = (
+        parse_str(b"reauth=1"),
+        parse_str(b"log=admin&pwd=reference-only-password"),
+    );
+    let Login::Page(page) = login(
+        &Oracle::default(),
+        &request(&query, Some(&form), Session::None),
+    ) else {
+        panic!("reauth logged in");
+    };
+    assert_eq!(page, unhex(reauth.rsplit('\t').next().unwrap()));
+}
+
+/// A site whose email lookup finds a `use_ssl` user for any address.
+struct AnyEmail(Oracle);
+
+impl Urls for AnyEmail {
+    fn site_url(&self) -> String {
+        self.0.site_url()
+    }
+    fn admin_url(&self, path: &str) -> String {
+        self.0.admin_url(path)
+    }
+    fn fill(&self, text: &str) -> String {
+        self.0.fill(text)
+    }
+}
+
+impl Site for AnyEmail {
+    fn blogname(&self) -> String {
+        self.0.blogname()
+    }
+    fn home_url(&self) -> String {
+        self.0.home_url()
+    }
+    fn login_url(&self, query: &str) -> String {
+        self.0.login_url(query)
+    }
+    fn user_by_login(&self, _: &[u8]) -> Option<User> {
+        None
+    }
+    fn user_by_email(&self, _: &[u8]) -> Option<User> {
+        self.0.user_by_email(b"admin@default-install.test")
+    }
+}
+
+/// `use_ssl` is looked up by email only for a name with an `@` after its
+/// first character, as `strpos()` is truthy.
+#[test]
+fn use_ssl_by_email_needs_an_at_past_the_start() {
+    let site = AnyEmail(Oracle { use_ssl: true });
+    for (log, secure) in [("x%40y", true), ("%40x", false)] {
+        let form = parse_str(format!("log={log}&pwd=wrong").as_bytes());
+        let query = Value::Array(Vec::new());
+        let Login::Page(page) = login(&site, &request(&query, Some(&form), Session::None)) else {
+            panic!("{log} logged in");
+        };
+        let page = String::from_utf8(page).unwrap();
+        assert_eq!(
+            page.contains("https://127.0.0.1:8081/wp-login.php"),
+            secure,
+            "{log}"
+        );
+    }
+}

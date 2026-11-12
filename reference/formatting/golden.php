@@ -5,7 +5,7 @@
 // "hex(input)<TAB>hex(output)" lines:
 //   php golden.php texturize > crates/hyscribe-render/tests/golden/wptexturize.tsv
 //   php golden.php smilies   > crates/hyscribe-render/tests/golden/convert-smilies.tsv
-// and likewise balance, autop, clickable and accents (golden.sh lists the
+// and likewise balance, autop, clickable, accents and user (golden.sh lists the
 // files). The accents lines are "hex(input)<TAB>hex(remove_accents)<TAB>
 // hex(sanitize_title)": every code point up to U+20FF that remove_accents()
 // changes, then mixed, decomposed, Latin-1 and invalid UTF-8 cases.
@@ -250,6 +250,17 @@ if ( 'text-field' === $argv[1] ) {
 	$atoms = array( '<', '>', '<b>', '</b>', ' ', "\t", "\n", "\r", '%', '4', '1', 'a', 'G', '%41', "\x00", "\xc2\xa0", '"', '&', 'x', '<script>', '</script>', '!' );
 	foreach ( array_merge( $cases, random_cases( $atoms, 1500, 10 ) ) as $case ) {
 		echo bin2hex( $case ), "\t", bin2hex( sanitize_text_field( $case ) ), "\n";
+	}
+	exit;
+}
+if ( 'user' === $argv[1] ) {
+	$cases = array(
+		'', '0', 'admin', ' admin ', 'Ad Min', "a\tb\r\nc  d", "a\x0b\x0cb", "\xc2\xa0x\xc2\xa0", '<b>admin</b>', '<b>admin"', 'a<b', '%41dmin', '%%41', '%2541', '%4',
+		'a&amp;b', '&;', '&;;', 'a&b', "a&\n;b", "a&x\n;b", '&&x;', 'Ã©lise', 'Ελένη', "a\xc3", 'a@b.test', '<script>x</script>y', "\x00a\x00",
+	);
+	$atoms = array( '<', '>', '<b>', '</b>', ' ', "\t", "\n", "\r", "\x0b", "\x0c", '%', '4', 'a', 'G', '%41', '&', ';', '&amp;', 'é', "\xc3", "\xc2\xa0", '"', 'x', '@' );
+	foreach ( array_merge( $cases, random_cases( $atoms, 1500, 10 ) ) as $case ) {
+		echo bin2hex( $case ), "\t", bin2hex( sanitize_user( $case ) ), "\n";
 	}
 	exit;
 }

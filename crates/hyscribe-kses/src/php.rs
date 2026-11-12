@@ -37,7 +37,7 @@ pub(crate) fn empty(text: &[u8]) -> bool {
 }
 
 /// PHP's `str_contains()`.
-pub(crate) fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+pub fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     (0..haystack.len()).any(|i| rest(haystack, i).starts_with(needle))
 }
 

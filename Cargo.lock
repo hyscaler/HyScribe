@@ -632,6 +632,7 @@ dependencies = [
 name = "hyscribe-admin"
 version = "0.1.0"
 dependencies = [
+ "hyscribe-auth",
  "hyscribe-kses",
  "hyscribe-phpser",
  "hyscribe-render",

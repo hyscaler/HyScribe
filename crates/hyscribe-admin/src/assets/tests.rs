@@ -3,28 +3,7 @@
 use hyscribe_testkit::unhex;
 
 use super::*;
-
-const SITE: &str = "http://127.0.0.1:8081";
-
-/// The oracle's site: its URLs filled in, the request's nonces left as
-/// their placeholders, as the golden keeps them.
-struct Oracle;
-
-impl Urls for Oracle {
-    fn site_url(&self) -> String {
-        SITE.into()
-    }
-    fn admin_url(&self, path: &str) -> String {
-        format!("{SITE}/wp-admin/{path}")
-    }
-    fn fill(&self, text: &str) -> String {
-        text.replace("%rest_url%", &format!("{SITE}/index.php?rest_route=/"))
-            .replace("%admin_url%", &format!("{SITE}/wp-admin/"))
-            .replace("\\\"%admin_path%", "\\\"/wp-admin/")
-            .replace("\"%admin_path%", "\"/wp-admin/")
-            .replace("%site_url%", SITE)
-    }
-}
+use crate::tests::{Oracle, SITE, first_difference};
 
 /// The placeholders `reference/admin-assets/golden.php` writes over PHP's.
 fn placeholders(text: &str) -> String {
@@ -32,6 +11,8 @@ fn placeholders(text: &str) -> String {
         .replace(&format!("{SITE}/wp-admin/"), "%admin_url%")
         .replace("\"/wp-admin/", "\"%admin_path%")
         .replace(SITE, "%site_url%")
+        .replace("\"user_id\":\"0\"", "\"user_id\":\"%user_id%\"")
+        .replace("\"uid\":\"0\"", "\"uid\":\"%user_id%\"")
 }
 
 /// Every case of `reference/admin-assets/golden.sh`.
@@ -48,31 +29,15 @@ fn assets_print_as_php_prints_them() {
         for handle in f[2].split(',').filter(|h| !h.is_empty()) {
             assets.enqueue_script(handle);
         }
-        let mut out = assets.print_admin_styles(&Oracle);
-        out.extend(assets.print_head_scripts(&Oracle));
+        let mut out = assets.print_admin_styles(&Oracle::default());
+        out.extend(assets.print_head_scripts(&Oracle::default()));
         out.extend_from_slice(b"<!-- footer -->\n");
-        out.extend(assets.print_footer_scripts(&Oracle));
+        out.extend(assets.print_footer_scripts(&Oracle::default()));
         let ours = placeholders(&String::from_utf8(out).unwrap());
         let php = String::from_utf8(unhex(f[3])).unwrap();
         if ours != php {
-            let at = ours
-                .bytes()
-                .zip(php.bytes())
-                .position(|(a, b)| a != b)
-                .unwrap_or(ours.len().min(php.len()));
-            let near = |text: &str| {
-                text.get(at.saturating_sub(80)..(at + 120).min(text.len()))
-                    .unwrap_or_default()
-                    .to_string()
-            };
-            failures.push(format!(
-                "{} {} {}\n  php:  {:?}\n  ours: {:?}",
-                f[0],
-                f[1],
-                f[2],
-                near(&php),
-                near(&ours)
-            ));
+            let difference = first_difference(&php, &ours);
+            failures.push(format!("{} {} {}{difference}", f[0], f[1], f[2]));
         }
     }
     assert!(

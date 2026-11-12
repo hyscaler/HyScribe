@@ -141,6 +141,21 @@ pub fn url_host(url: &[u8]) -> Option<Vec<u8>> {
     wp_parse_url(url).and_then(|parts| parts.host)
 }
 
+/// `wp_parse_url( $url, PHP_URL_QUERY )`: after the first `?` up to a `#`,
+/// none when a `#` comes first; control characters become `_`.
+pub fn url_query(url: &[u8]) -> Option<Vec<u8>> {
+    wp_parse_url(url)?;
+    let at = url.iter().position(|b| matches!(b, b'?' | b'#'))?;
+    let rest = url.get(at + 1..).filter(|_| url.get(at) == Some(&b'?'))?;
+    let query = rest.split(|&b| b == b'#').next().unwrap_or_default();
+    Some(
+        query
+            .iter()
+            .map(|&b| if b.is_ascii_control() { b'_' } else { b })
+            .collect(),
+    )
+}
+
 /// `wp_parse_url( $url )`; `None` where it returns `false`.
 fn wp_parse_url(url: &[u8]) -> Option<Parts> {
     if url.starts_with(b"//") {

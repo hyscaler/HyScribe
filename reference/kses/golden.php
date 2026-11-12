@@ -204,6 +204,9 @@ $urls = array(
 	'http://h:80:90/[x]', '0', '00', '/', '#', '?', ':', ' 0', 'a:0', 'feed:feed:0', 'mailto: x ',
 );
 
+/** Pieces of URLs, for random cases. */
+$url_atoms = array( 'http', 'https', 'HTTP', 'ftp', 'feed', 'feed:', 'javascript', 'javascript:', 'mailto', 'mailto:', 'data', 'tel', 'x', 'host', 'example.com', ':', '://', ';//', '//', '/', '?', '#', '&#58', '&#58;', '&#x3A;', '&#x3a', '&colon;', '&#106;', '[', ']', '[::1]', '[2001:db8::1]', ':80', ':8080', ':65536', ':0', ':-1', 'u:p@', 'user@', '@', ' ', "\t", "\n", "\0", "\x01", "\x7f", '%', '%0a', '%0D', '%5B', '&', '&amp;', '&nbsp;', '&#039;', '&#', ';', "'", '"', '<', '>', '\\', '.php', 'index', 'a-b', '0', '1', '=', 'é', "\xff" );
+
 /** Inputs for the functions on byte strings. */
 $real    = real_values( $theme );
 $sets    = array(
@@ -217,11 +220,18 @@ $sets    = array(
 	'strip-all-tags-breaks' => array( 'strip_breaks', array_merge( $tags, $real ), array( '<', '>', '<b>', 'a', ' ', "\n", "\r", "\t", "\0", '<script>', '</script>' ) ),
 	'sanitize-key'       => array( 'sanitize_key', array_merge( $keys, $real ), array( 'A', 'z', '_', '-', ' ', "\xc3\xa9", '0', '.', 'Z' ) ),
 	'safecss-filter-attr' => array( 'safecss_filter_attr', array_merge( $css, $real ), array( 'color', 'background', 'width', '--x', ':', ';', ' ', 'red', 'url(', ')', '(', 'javascript:', 'http://a', '"', "'", 'calc(', 'var(', 'linear-gradient(', 'repeating-', ',', '1px', '\\', '&', '=', '}', '/*', '*/', '0', 'data:', 'rgb(', "\n", "\0", 'expression(', '-gradient(', 'url( ', 'URL(' ) ),
-	'esc-url'            => array( 'esc_url', $urls, array( 'http', 'https', 'HTTP', 'ftp', 'feed', 'feed:', 'javascript', 'javascript:', 'mailto', 'mailto:', 'data', 'tel', 'x', 'host', 'example.com', ':', '://', ';//', '//', '/', '?', '#', '&#58', '&#58;', '&#x3A;', '&#x3a', '&colon;', '&#106;', '[', ']', '[::1]', '[2001:db8::1]', ':80', ':8080', ':65536', ':0', ':-1', 'u:p@', 'user@', '@', ' ', "\t", "\n", "\0", "\x01", "\x7f", '%', '%0a', '%0D', '%5B', '&', '&amp;', '&nbsp;', '&#039;', '&#', ';', "'", '"', '<', '>', '\\', '.php', 'index', 'a-b', '0', '1', '=', 'é', "\xff" ) ),
+	'esc-url'            => array( 'esc_url', $urls, $url_atoms ),
+	'url-query'          => array( 'url_query', $urls, $url_atoms ),
 );
 
 function bad_protocol( $text ) {
 	return wp_kses_bad_protocol( $text, wp_allowed_protocols() );
+}
+
+// The query wp_parse_url() finds, "=" first, or "null" when there is none.
+function url_query( $url ) {
+	$query = wp_parse_url( $url, PHP_URL_QUERY );
+	return is_string( $query ) ? "=$query" : 'null';
 }
 
 function strip_breaks( $text ) {

@@ -7,7 +7,7 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use hyscribe_kses::{
-    ALLOWED_PROTOCOLS, esc_attr, esc_html, esc_url, safecss_filter_attr, sanitize_key,
+    ALLOWED_PROTOCOLS, esc_attr, esc_html, esc_url, safecss_filter_attr, sanitize_key, url_query,
     wp_kses_bad_protocol, wp_kses_decode_entities, wp_kses_no_null, wp_kses_normalize_entities,
     wp_strip_all_tags,
 };
@@ -98,6 +98,13 @@ fn bad_protocol_matches() {
 #[test]
 fn esc_url_matches() {
     check(include_str!("golden/esc-url.tsv"), 1312, esc_url);
+}
+
+#[test]
+fn url_query_matches() {
+    check(include_str!("golden/url-query.tsv"), 1312, |url| {
+        url_query(url).map_or(b"null".to_vec(), |query| [&b"="[..], &query].concat())
+    });
 }
 
 #[test]

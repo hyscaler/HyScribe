@@ -1029,6 +1029,58 @@ pub fn sanitize_text_field(text: &[u8]) -> Vec<u8> {
     text
 }
 
+/// `sanitize_user( $username )`, not strict: tags, accents, percent-encoded
+/// octets and entities removed, whitespace trimmed and collapsed.
+pub fn sanitize_user(username: &[u8]) -> Vec<u8> {
+    let text = hyscribe_kses::wp_strip_all_tags(username, false);
+    let text = remove_accents(&text);
+    let mut octets = Vec::with_capacity(text.len());
+    let mut rest: &[u8] = &text;
+    while let Some((&first, tail)) = rest.split_first() {
+        rest = match tail {
+            [a, b, more @ ..]
+                if first == b'%' && a.is_ascii_hexdigit() && b.is_ascii_hexdigit() =>
+            {
+                more
+            }
+            _ => {
+                octets.push(first);
+                tail
+            }
+        };
+    }
+    // `/&.+?;/`: at least one character before the `;`, all on one line.
+    let mut out = Vec::with_capacity(octets.len());
+    let mut rest: &[u8] = &octets;
+    while let Some((&first, tail)) = rest.split_first() {
+        let end = tail.iter().skip(1).position(|b| matches!(b, b';' | b'\n'));
+        rest = match end {
+            Some(at)
+                if first == b'&'
+                    && tail.first() != Some(&b'\n')
+                    && tail.get(at + 1) == Some(&b';') =>
+            {
+                tail.get(at + 2..).unwrap_or_default()
+            }
+            _ => {
+                out.push(first);
+                tail
+            }
+        };
+    }
+    // `|\s+|` to one space.
+    let mut collapsed = Vec::with_capacity(out.len());
+    let mut in_space = false;
+    for &b in hyscribe_phpser::php_trim(&out) {
+        let space = matches!(b, b' ' | b'\t' | b'\n' | b'\x0B' | b'\x0C' | b'\r');
+        if !space || !in_space {
+            collapsed.push(if space { b' ' } else { b });
+        }
+        in_space = space;
+    }
+    collapsed
+}
+
 /// `wp_pre_kses_less_than()`: a `<` whose run up to the next `<` or the
 /// end holds no `>` is HTML-escaped with that run.
 fn pre_kses_less_than(text: &[u8]) -> Vec<u8> {
@@ -1256,7 +1308,7 @@ pub use accents::remove_accents;
 
 /// `is_email()`: whether `email` has the shape WordPress accepts, a local
 /// part of the allowed characters and a domain of two or more labels.
-pub(crate) fn is_email(email: &[u8]) -> bool {
+pub fn is_email(email: &[u8]) -> bool {
     if email.len() < 6 {
         return false;
     }

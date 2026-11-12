@@ -92,7 +92,7 @@ impl RenderSite for Reads<'_> {
             .iter()
             .map(|(name, secret)| (*name, secret.expose().as_bytes()))
             .collect();
-        let salt = hyscribe_auth::wp_salt_auth(&constants, |name| self.option(name))?;
+        let salt = hyscribe_auth::wp_salt("auth", &constants, |name| self.option(name))?;
         Some(hyscribe_phpser::hash_hmac_md5(data, &salt))
     }
 

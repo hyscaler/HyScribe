@@ -5,8 +5,11 @@
 //! HMAC-SHA384 of the password, with a `$wp` prefix, and checks of the
 //! phpass, plain bcrypt and MD5 hashes older sites hold.
 
+pub mod caps;
+pub mod cookie;
+
 use blowfish::Blowfish;
-use hyscribe_phpser::{hash_equals, md5, md5_raw, php_trim};
+use hyscribe_phpser::{hash_equals, hash_hmac_md5, md5, md5_raw, php_trim};
 use sha2::{Digest, Sha384};
 use std::io::{self, Read};
 
@@ -267,9 +270,11 @@ fn phpass(password: &[u8], hash: &[u8]) -> bool {
     hash_equals(&out, hash)
 }
 
-/// `wp_salt( 'auth' )`: `AUTH_KEY` and `AUTH_SALT` unless empty, shared or the
-/// placeholder, else their options; `None` where WordPress would store new ones.
-pub fn wp_salt_auth(
+/// `wp_salt( $scheme )` for `auth`, `secure_auth`, `logged_in` and `nonce`:
+/// its key and salt constants unless empty, shared or the placeholder, else
+/// their options; `None` where WordPress would store new ones.
+pub fn wp_salt(
+    scheme: &str,
     constants: &[(&str, &[u8])],
     option: impl Fn(&str) -> Option<Vec<u8>>,
 ) -> Option<Vec<u8>> {
@@ -279,14 +284,61 @@ pub fn wp_salt_auth(
             && value != b"put your unique phrase here"
             && constants.iter().filter(|(_, v)| *v == value).count() < 2
     };
-    let part = |name: &str| {
+    let part = |name: String| {
         let constant = constants
             .iter()
             .find(|(n, v)| *n == name && usable(v))
             .map(|(_, v)| v.to_vec());
         constant.or_else(|| option(&name.to_ascii_lowercase()).filter(|v| truthy(v)))
     };
-    Some([part("AUTH_KEY")?, part("AUTH_SALT")?].concat())
+    let scheme = scheme.to_ascii_uppercase();
+    Some(
+        [
+            part(format!("{scheme}_KEY"))?,
+            part(format!("{scheme}_SALT"))?,
+        ]
+        .concat(),
+    )
+}
+
+/// `wp_nonce_tick()`: `ceil( time() / ( DAY_IN_SECONDS / 2 ) )`.
+pub fn nonce_tick(now: i64) -> i64 {
+    now.div_euclid(43_200) + i64::from(now.rem_euclid(43_200) != 0)
+}
+
+/// `wp_create_nonce( $action )` for the tick, signed with the `nonce` salt.
+pub fn create_nonce(salt: &[u8], tick: i64, action: &str, user: u64, token: &[u8]) -> String {
+    let data = [format!("{tick}|{action}|{user}|").as_bytes(), token].concat();
+    hash_hmac_md5(&data, salt)
+        .get(20..30)
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// `wp_verify_nonce()`: 1 for the tick's nonce, 2 for the tick before's,
+/// else 0.
+pub fn verify_nonce(
+    nonce: &[u8],
+    salt: &[u8],
+    tick: i64,
+    action: &str,
+    user: u64,
+    token: &[u8],
+) -> u8 {
+    // An empty nonce, which PHP turns down first, never matches either.
+    let matches = |tick| {
+        hash_equals(
+            create_nonce(salt, tick, action, user, token).as_bytes(),
+            nonce,
+        )
+    };
+    if matches(tick) {
+        1
+    } else if matches(tick - 1) {
+        2
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]

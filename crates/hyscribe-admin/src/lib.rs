@@ -5,5 +5,6 @@
 pub mod assets;
 pub mod die;
 pub mod login;
+pub mod menu;
 #[cfg(test)]
 mod tests;

@@ -19,6 +19,9 @@
 # Private private notes clone and scratch files
 /tmp/
 CLAUDE.local.md
+AGENT.local.md
+AGENTS.local.md
+GEMINI.local.md
 
 # Coverage and mutation testing output
 *.profraw

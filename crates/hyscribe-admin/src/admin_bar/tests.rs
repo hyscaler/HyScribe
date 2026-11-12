@@ -61,7 +61,7 @@ fn the_admin_bar_is_php_s() {
     for line in golden.lines().filter(|line| !line.ends_with('\t')) {
         let f: Vec<&str> = line.split('\t').collect();
         let role: &'static str = Box::leak(f[0].to_string().into_boxed_str());
-        let ours = admin_bar(&Role(role), b"Mozilla/5.0 (X11; Linux x86_64)");
+        let ours = admin_bar(&Role(role), &agent(b"Mozilla/5.0 (X11; Linux x86_64)"));
         let php = hs_admin(&String::from_utf8(unhex(f[2])).unwrap());
         if ours != php {
             failures.push(format!("{role} {}{}", f[1], first_difference(&php, &ours)));
@@ -138,7 +138,7 @@ fn fake() -> Fake {
 /// and without an avatar the account item has no avatar class.
 #[test]
 fn names_counts_and_avatars() {
-    let bar = admin_bar(&fake(), b"");
+    let bar = admin_bar(&fake(), &agent(b""));
     assert!(bar.contains("<span class='display-name'>Ann</span><span class='username'>ann</span>"));
     assert!(bar.contains("1 Comment in moderation"));
     assert!(bar.contains("<li role='group' id='wp-admin-bar-my-account' class=\"menupop\">"));
@@ -147,16 +147,53 @@ fn names_counts_and_avatars() {
             avatar: true,
             ..fake()
         },
-        b"",
+        &agent(b""),
     );
     assert!(bar.contains("class=\"menupop with-avatar\""));
     assert!(bar.contains("<img size='28'/>") && bar.contains("<img size='64'/>"));
 }
 
+fn agent(user_agent: &[u8]) -> Browser<'_> {
+    Browser {
+        user_agent,
+        mobile_hint: None,
+    }
+}
+
+/// A phone's bar has the `mobile` class, by its user agent or its hint.
+#[test]
+fn phones() {
+    let phone = agent(b"Mozilla/5.0 (iPhone) Mobile/15E148");
+    assert!(
+        admin_bar(&fake(), &phone)
+            .starts_with("<div id=\"wpadminbar\" class=\"nojq nojs mobile\">")
+    );
+    for name in [
+        "Android",
+        "Silk/",
+        "Kindle",
+        "BlackBerry",
+        "Opera Mini",
+        "Opera Mobi",
+    ] {
+        assert!(agent(name.as_bytes()).is_mobile(), "{name}");
+    }
+    let hinted = |hint| Browser {
+        mobile_hint: Some(hint),
+        ..phone
+    };
+    assert!(hinted(b"?1").is_mobile());
+    assert!(!hinted(b"?0").is_mobile());
+    assert!(!agent(b"Mozilla/5.0 (X11)").is_mobile());
+}
+
 /// Apple systems get their own shortcut label.
 #[test]
 fn the_shortcut_follows_the_system() {
-    let bar = admin_bar(&fake(), b"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)");
+    let bar = admin_bar(
+        &fake(),
+        &agent(b"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"),
+    );
     assert!(bar.contains("<kbd>⌘K</kbd>"));
 }
 
@@ -164,7 +201,7 @@ fn the_shortcut_follows_the_system() {
 #[test]
 fn site_names_are_cut_as_php_cuts_them() {
     let name = |blogname| {
-        let bar = admin_bar(&Fake { blogname, ..fake() }, b"");
+        let bar = admin_bar(&Fake { blogname, ..fake() }, &agent(b""));
         let at = bar.find("id='wp-admin-bar-site-name'").unwrap();
         let title = bar.get(at..).unwrap().split("'>").nth(1).unwrap();
         title.split("</a>").next().unwrap().to_string()

@@ -9,9 +9,10 @@ use std::sync::OnceLock;
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
 use hyscribe_testkit::SqlValue;
 
-use crate::assets::Urls;
+use crate::assets::{Urls, admin_links};
 use crate::login::{Site, User};
-use crate::menu::MenuUser;
+use crate::menu::{MenuUser, link};
+use crate::page::PageSite;
 
 pub const SITE: &str = "http://127.0.0.1:8081";
 
@@ -158,5 +159,50 @@ impl MenuUser for Role {
     }
     fn transient(&self, _: &str) -> Option<Vec<u8>> {
         None
+    }
+}
+
+impl Urls for Role {
+    fn site_url(&self) -> String {
+        SITE.into()
+    }
+    fn admin_url(&self, path: &str) -> String {
+        format!("{SITE}/hs-admin/{}", link(path))
+    }
+    fn fill(&self, text: &str) -> String {
+        admin_links(text, "%admin_url%", &format!("{SITE}/hs-admin/"))
+            .replace("%rest_url%", &format!("{SITE}/index.php?rest_route=/"))
+            .replace("%site_url%", SITE)
+            .replace("%user_id%", "1")
+    }
+}
+
+impl PageSite for Role {
+    fn user_id(&self) -> u64 {
+        1
+    }
+    fn nonce(&self, action: &str) -> String {
+        format!("%nonce:{action}%")
+    }
+    fn admin_color(&self) -> Option<Vec<u8>> {
+        Some(b"modern".to_vec())
+    }
+    fn preferences(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn compression_tested(&self) -> bool {
+        false
+    }
+    fn login_url(&self) -> String {
+        format!("{SITE}/hs-login")
+    }
+    fn template(&self) -> String {
+        "twentytwentyfive".into()
+    }
+    fn font_faces(&self) -> Vec<u8> {
+        static FACES: OnceLock<Vec<u8>> = OnceLock::new();
+        FACES
+            .get_or_init(|| hyscribe_render::theme::twentytwentyfive().admin_font_faces(SITE))
+            .clone()
     }
 }

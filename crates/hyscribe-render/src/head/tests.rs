@@ -557,3 +557,44 @@ fn script_module_data_needs_the_interactivity_api() {
     assert!(data(&["@wordpress/a11y"]).is_empty());
     assert!(!data(&["@wordpress/interactivity"]).is_empty());
 }
+
+/// Classic scripts' imports in the admin: each once, registered ones only.
+#[test]
+fn the_admin_import_map() {
+    let worker = "@wordpress/vips/worker".to_string();
+    let map = admin_import_map("http://h", &[worker.clone(), "x".into(), worker]);
+    let map = String::from_utf8(map).unwrap();
+    assert_eq!(map.matches("vips/worker").count(), 2, "{map}");
+    assert!(admin_import_map("http://h", &["x".into()]).is_empty());
+}
+
+/// A module classic scripts import and one it imports are listed once.
+#[test]
+fn the_admin_import_map_follows_imports() {
+    let ids = [
+        "@wordpress/block-editor/utils/fit-text-frontend".to_string(),
+        "@wordpress/interactivity".into(),
+    ];
+    let one = String::from_utf8(admin_import_map("http://h", &ids[..1])).unwrap();
+    let both = String::from_utf8(admin_import_map("http://h", &ids)).unwrap();
+    assert_eq!(one, both);
+    assert_eq!(
+        one.matches("@wordpress/interactivity\"").count(),
+        1,
+        "{one}"
+    );
+}
+
+/// The admin's font faces: the theme's, then every style variation's, as
+/// `reference/admin-page/golden.sh` records them.
+#[test]
+fn the_admin_font_faces() {
+    let faces = crate::theme::twentytwentyfive().admin_font_faces("http://h");
+    let faces = String::from_utf8(faces).unwrap();
+    let (theme, variations) = faces.split_once("</style>").unwrap();
+    assert_eq!(theme.matches("@font-face").count(), 2);
+    assert_eq!(variations.matches("@font-face").count(), 192);
+    assert!(variations.trim_end().ends_with(
+        "font-style:italic;font-weight:900;font-display:fallback;src:url('http://h/wp-content/themes/twentytwentyfive/assets/fonts/fira-sans/FiraSans-BlackItalic.woff2') format('woff2');}\n</style>"
+    ));
+}

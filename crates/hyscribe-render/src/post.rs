@@ -58,7 +58,7 @@ pub(crate) fn title_filters(title: &[u8]) -> Vec<u8> {
 }
 
 /// `sanitize_html_class( $class, $fallback )`.
-pub(crate) fn sanitize_html_class(class: &[u8], fallback: &[u8]) -> Vec<u8> {
+pub fn sanitize_html_class(class: &[u8], fallback: &[u8]) -> Vec<u8> {
     let mut kept = Vec::with_capacity(class.len());
     let mut rest = class;
     for _ in 0..=class.len() {

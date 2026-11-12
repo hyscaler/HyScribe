@@ -592,6 +592,54 @@ pub fn link(file: &str) -> String {
     }
 }
 
+/// `wp_enqueue_command_palette_assets()`'s menu commands: label, hs-admin
+/// URL and name of each menu item the user may reach and its submenu.
+pub fn commands(user: &dyn MenuUser) -> Vec<(String, String, String)> {
+    let mut menu = build(user);
+    prune(&mut menu, user);
+    let mut out = Vec::new();
+    for (_, item) in &menu.items {
+        if item.title.is_empty() || !user.can(&item.cap) {
+            continue;
+        }
+        let label = root_text(&item.title);
+        out.push((label.clone(), link(&item.slug), item.slug.clone()));
+        // Pruning left only titled entries the user may reach.
+        for entry in menu.submenu.get(&item.slug) {
+            out.push((
+                format!("{label} > {}", root_text(&entry.title)),
+                link(&entry.slug),
+                format!("{}-{}", item.slug, entry.slug),
+            ));
+        }
+    }
+    out
+}
+
+/// The text of a menu title outside its tags, trimmed; core's titles hold
+/// no void tags or character references.
+fn root_text(title: &str) -> String {
+    let mut text = String::new();
+    let mut depth = 0usize;
+    let mut rest = title;
+    while let Some((before, tag)) = rest.split_once('<') {
+        if depth == 0 {
+            text.push_str(before);
+        }
+        let (name, after) = tag.split_once('>').unwrap_or((tag, ""));
+        if name.starts_with('/') {
+            depth = depth.saturating_sub(1);
+        } else {
+            depth += 1;
+        }
+        rest = after;
+    }
+    if depth == 0 {
+        text.push_str(rest);
+    }
+    text.trim().to_string()
+}
+
 /// The admin menu, `#adminmenumain`, on `screen` for `user`; `None` when
 /// `user_can_access_admin_page()` turns them away.
 pub fn admin_menu(user: &dyn MenuUser, screen: &Screen) -> Option<String> {

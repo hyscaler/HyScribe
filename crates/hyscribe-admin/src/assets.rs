@@ -27,6 +27,44 @@ pub trait Urls {
     fn fill(&self, text: &str) -> String;
 }
 
+/// `preg_replace( '|https?://[^/]+|i', '', $url . '/' )`: a URL's path, for
+/// `COOKIEPATH` and `SITECOOKIEPATH`.
+pub fn cookie_path(url: &str) -> String {
+    let url = format!("{url}/");
+    let lower = url.to_ascii_lowercase();
+    let scheme = ["http://", "https://"]
+        .into_iter()
+        .find(|scheme| lower.starts_with(scheme));
+    match scheme {
+        Some(scheme) => {
+            let rest = url.get(scheme.len()..).unwrap_or_default();
+            rest.find('/').map_or(String::new(), |at| {
+                rest.get(at..).unwrap_or_default().into()
+            })
+        }
+        None => url,
+    }
+}
+
+/// `text` with each `placeholder` and the admin file after it as hs-admin
+/// links them: `base`, then the file without `.php`.
+pub fn admin_links(text: &str, placeholder: &str, base: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some((before, after)) = rest.split_once(placeholder) {
+        out.push_str(before);
+        out.push_str(base);
+        let end = after
+            .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')))
+            .unwrap_or(after.len());
+        let (file, tail) = after.split_at(end);
+        out.push_str(file.strip_suffix(".php").unwrap_or(file));
+        rest = tail;
+    }
+    out.push_str(rest);
+    out
+}
+
 /// A registered style or script.
 struct Item {
     /// A path or URL; `None` for an alias.
@@ -89,10 +127,26 @@ fn trim(text: &str) -> &str {
     text.trim_matches(['\n', '\r', ' '])
 }
 
+/// What a request registers with no source, as `wp_register_style( $handle,
+/// false )` does before adding inline styles.
+static ALIAS: Item = Item {
+    src: None,
+    color_scheme: false,
+    deps: Vec::new(),
+    ver: String::new(),
+    footer: false,
+    extra: Value::Null,
+    textdomain: false,
+};
+
 /// The queue and printing state of `WP_Styles` or `WP_Scripts`.
 #[derive(Default)]
 struct Dependencies {
     scripts: bool,
+    /// `extra` values this request sets, by handle and key.
+    extra: HashMap<(String, String), Value>,
+    /// The admin color scheme's stylesheet, `wp_style_loader_src()`'s.
+    color_scheme: Option<String>,
     queue: Vec<String>,
     to_do: Vec<(String, &'static Item)>,
     done: Vec<String>,
@@ -134,6 +188,53 @@ impl Assets {
         self.scripts.queue.push(handle.to_string());
     }
 
+    /// `add_data()` on a style, over what was registered; an unregistered
+    /// handle becomes an alias, as `wp_register_style( $handle, false )`.
+    pub fn set_style_data(&mut self, handle: &str, key: &str, value: Value) {
+        self.styles
+            .extra
+            .insert((handle.to_string(), key.to_string()), value);
+    }
+
+    /// `add_data()` on a registered script, over what was registered: this
+    /// request's inline scripts and localized data.
+    pub fn set_script_data(&mut self, handle: &str, key: &str, value: Value) {
+        self.scripts
+            .extra
+            .insert((handle.to_string(), key.to_string()), value);
+    }
+
+    /// The URL of the admin color scheme's stylesheet, `None` for a scheme
+    /// without one.
+    pub fn set_color_scheme(&mut self, url: Option<String>) {
+        self.styles.color_scheme = url;
+    }
+
+    /// The script modules the queued and printed scripts import, in the
+    /// order `WP_Script_Modules::get_import_map()` finds them.
+    pub fn module_dependencies(&self) -> Vec<String> {
+        let scripts = &self.scripts;
+        let mut handles: Vec<String> = scripts.queue.iter().chain(&scripts.done).cloned().collect();
+        let mut processed: Vec<String> = Vec::new();
+        let mut found = Vec::new();
+        while let Some(handle) = handles.pop() {
+            let Some(item) = scripts
+                .item(&handle)
+                .filter(|_| !processed.contains(&handle))
+            else {
+                continue;
+            };
+            processed.push(handle.clone());
+            let modules = scripts.data(&handle, "module_dependencies");
+            for (_, module) in modules.and_then(Value::as_array).unwrap_or_default() {
+                let id = module.get_str("id").unwrap_or(module);
+                found.push(String::from_utf8_lossy(&id.to_php_string()).into_owned());
+            }
+            handles.extend(item.deps.iter().filter(|d| !processed.contains(d)).cloned());
+        }
+        found
+    }
+
     /// `print_admin_styles()`.
     pub fn print_admin_styles(&mut self, urls: &dyn Urls) -> Vec<u8> {
         let mut out = Vec::new();
@@ -166,12 +267,20 @@ impl Assets {
 
 impl Dependencies {
     fn item(&self, handle: &str) -> Option<&'static Item> {
-        registry().get(&(self.scripts, handle.to_string()))
+        registry()
+            .get(&(self.scripts, handle.to_string()))
+            .or_else(|| {
+                let added = !self.scripts && self.extra.keys().any(|(h, _)| h == handle);
+                added.then_some(&ALIAS)
+            })
     }
 
     /// `get_data( $handle, $key )`.
-    fn data(&self, handle: &str, key: &str) -> Option<&'static Value> {
-        self.item(handle)?.extra.get_str(key)
+    fn data(&self, handle: &str, key: &str) -> Option<&Value> {
+        match self.extra.get(&(handle.to_string(), key.to_string())) {
+            Some(value) => Some(value),
+            None => self.item(handle)?.extra.get_str(key),
+        }
     }
 
     /// `reset()`.
@@ -287,9 +396,15 @@ impl Dependencies {
         if self.data(handle, "conditional").is_some() {
             return false;
         }
-        // The default color scheme, the only one without a profile, has no
-        // stylesheet, so `wp_style_loader_src()` gives none.
         if item.color_scheme {
+            if let Some(url) = self.color_scheme.clone() {
+                let href = self.versioned(urls, item, &url, esc_url);
+                let link = format!(
+                    "<link rel='stylesheet' id='{handle}-css' href='{}' media='all' />\n",
+                    String::from_utf8_lossy(&href)
+                );
+                self.emit(out, link.as_bytes());
+            }
             return true;
         }
         let Some(src) = &item.src else {
@@ -307,6 +422,8 @@ impl Dependencies {
         };
         if self.do_concat && self.in_default_dir(src) {
             self.concat.push_str(&format!("{handle},"));
+            let inline = self.inline_style(urls, handle).unwrap_or_default();
+            self.print_code.push_str(&inline);
             return true;
         }
         let href = self.versioned(urls, item, src, esc_url);
@@ -512,6 +629,15 @@ impl Dependencies {
                     )
                     .into_bytes(),
                 );
+                if !self.print_code.is_empty() {
+                    let source = rawurlencode(format!("css-inline-concat-{concat}").as_bytes());
+                    let text = format!(
+                        "\n{}\n/*# sourceURL={} */\n",
+                        self.print_code,
+                        String::from_utf8_lossy(&source)
+                    );
+                    out.extend(tag(b"style", &[], Some(text.as_bytes())));
+                }
             }
         }
         out.extend(self.print_html.as_bytes());

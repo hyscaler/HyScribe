@@ -7,5 +7,7 @@ pub mod assets;
 pub mod die;
 pub mod login;
 pub mod menu;
+pub mod page;
 #[cfg(test)]
 mod tests;
+pub mod tools;

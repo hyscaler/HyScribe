@@ -407,3 +407,10 @@ fn a_typed_screen_needs_its_menu_item() {
         &mut String::new()
     ));
 }
+
+/// Text inside a tag is not the title's, even when the tag never closes.
+#[test]
+fn root_text_leaves_tags_out() {
+    assert_eq!(root_text("A <b>x</b> B "), "A  B");
+    assert_eq!(root_text("a <b>c"), "a");
+}

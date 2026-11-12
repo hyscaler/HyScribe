@@ -9,7 +9,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use hyscribe_admin::assets::Urls;
+use hyscribe_admin::assets::{Urls, admin_links, cookie_path};
 use hyscribe_admin::login::{self, Login, Request, Session, Site as LoginSite, User};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
 use hyscribe_auth::cookie::{generate_auth_cookie, parse_auth_cookie};
@@ -28,25 +28,6 @@ use crate::{Site, now};
 pub(crate) const PATH: &str = "/hs-login";
 
 const DAY: i64 = 86_400;
-
-/// `preg_replace( '|https?://[^/]+|i', '', $url . '/' )`: a URL's path, for
-/// `COOKIEPATH` and `SITECOOKIEPATH`.
-fn cookie_path(url: &str) -> String {
-    let url = format!("{url}/");
-    let lower = url.to_ascii_lowercase();
-    let scheme = ["http://", "https://"]
-        .into_iter()
-        .find(|scheme| lower.starts_with(scheme));
-    match scheme {
-        Some(scheme) => {
-            let rest = url.get(scheme.len()..).unwrap_or_default();
-            rest.find('/').map_or(String::new(), |at| {
-                rest.get(at..).unwrap_or_default().into()
-            })
-        }
-        None => url,
-    }
-}
 
 /// HyScribe's cookie names, which never stand for a PHP WordPress login,
 /// and their paths.
@@ -272,9 +253,9 @@ impl Urls for LoginReads<'_> {
             format!("{}/index.php?rest_route=/", self.site.home)
         };
         let admin_path = format!("{}hs-admin/", cookie_path(&self.site_url()));
-        text.replace("%rest_url%", &rest_url)
-            .replace("%admin_url%", &self.admin_url(""))
-            .replace("\"%admin_path%", &format!("\"{admin_path}"))
+        let text = admin_links(text, "%admin_url%", &self.admin_url(""));
+        admin_links(&text, "\"%admin_path%", &format!("\"{admin_path}"))
+            .replace("%rest_url%", &rest_url)
             .replace("%site_url%", &self.site_url())
             .replace("%nonce:wp_rest%", &self.nonce("wp_rest"))
             .replace(

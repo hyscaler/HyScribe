@@ -6,10 +6,40 @@
 //! plugins nest groups in groups or menus three deep, so containers and
 //! arrows are left out.
 
-use hyscribe_kses::{esc_attr, esc_url, wp_strip_all_tags};
+use hyscribe_kses::{esc_attr, esc_url, str_contains, wp_strip_all_tags};
 use hyscribe_render::number_format;
 
 use crate::menu::MenuUser;
+
+/// The browser a page is for: its `User-Agent` and `Sec-CH-UA-Mobile`
+/// headers.
+#[derive(Clone, Copy, Default)]
+pub struct Browser<'a> {
+    /// `User-Agent`.
+    pub user_agent: &'a [u8],
+    /// `Sec-CH-UA-Mobile`, if sent.
+    pub mobile_hint: Option<&'a [u8]>,
+}
+
+impl Browser<'_> {
+    /// `wp_is_mobile()`.
+    pub fn is_mobile(&self) -> bool {
+        match self.mobile_hint {
+            Some(hint) => hint == b"?1",
+            None => [
+                &b"Mobile"[..],
+                b"Android",
+                b"Silk/",
+                b"Kindle",
+                b"BlackBerry",
+                b"Opera Mini",
+                b"Opera Mobi",
+            ]
+            .iter()
+            .any(|name| str_contains(self.user_agent, name)),
+        }
+    }
+}
 
 /// What the admin bar shows of the site and the current user.
 pub trait BarSite: MenuUser {
@@ -248,8 +278,8 @@ fn html_excerpt(text: &str, count: usize, more: &str) -> String {
 /// The command palette's script, which labels its shortcut for Apple systems.
 const PALETTE_SCRIPT: &str = "<script>\n( \t( applePattern, appleOSLabel ) => {\n\t\tif ( ! ( new RegExp( applePattern, 'i' ) ).test( navigator.userAgent ) ) {\n\t\t\treturn;\n\t\t}\n\t\tconst kbd = document.querySelector( '#wp-admin-bar-command-palette .ab-label kbd' );\n\t\tif ( kbd ) {\n\t\t\tkbd.textContent = appleOSLabel;\n\t\t}\n\t} )( \"Macintosh|Mac OS X|Mac_PowerPC\", \"\\u2318K\" );\n//# sourceURL=wp_admin_bar_command_palette_menu\n</script>\n";
 
-/// The admin bar on an admin screen, for a browser with `user_agent`.
-pub fn admin_bar(site: &dyn BarSite, user_agent: &[u8]) -> String {
+/// The admin bar on an admin screen, for `browser`.
+pub fn admin_bar(site: &dyn BarSite, browser: &Browser) -> String {
     let mut bar = Bar::default();
     let icon = "<span class=\"ab-icon\" aria-hidden=\"true\"></span>";
     let profile = site.admin_url("profile.php");
@@ -352,7 +382,7 @@ pub fn admin_bar(site: &dyn BarSite, user_agent: &[u8]) -> String {
         Meta::default(),
     );
     // wp_admin_bar_command_palette_menu().
-    let agent = user_agent.to_ascii_lowercase();
+    let agent = browser.user_agent.to_ascii_lowercase();
     let apple = ["macintosh", "mac os x", "mac_powerpc"]
         .iter()
         .any(|name| agent.windows(name.len()).any(|w| w == name.as_bytes()));
@@ -445,8 +475,9 @@ pub fn admin_bar(site: &dyn BarSite, user_agent: &[u8]) -> String {
         meta,
     );
     let root = bar.bind();
-    let mut out = String::from(
-        "<div id=\"wpadminbar\" class=\"nojq nojs\">\n\t\t\t\t\t\t<div class=\"quicklinks\" id=\"wp-toolbar\" role=\"navigation\" aria-label=\"Toolbar\">\n\t\t\t\t",
+    let mobile = if browser.is_mobile() { " mobile" } else { "" };
+    let mut out = format!(
+        "<div id=\"wpadminbar\" class=\"nojq nojs{mobile}\">\n\t\t\t\t\t\t<div class=\"quicklinks\" id=\"wp-toolbar\" role=\"navigation\" aria-label=\"Toolbar\">\n\t\t\t\t",
     );
     for group in bar
         .nodes

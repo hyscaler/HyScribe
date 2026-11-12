@@ -113,7 +113,7 @@ fn json_string(text: &str) -> String {
 }
 
 /// `_print_emoji_detection_script()`.
-pub(super) fn emoji_detection_script(siteurl: &str) -> Vec<u8> {
+pub fn emoji_detection_script(siteurl: &str) -> Vec<u8> {
     let text = |s: &str| Value::String(s.as_bytes().to_vec());
     let entry = |k: &str, v: Value| (Key::String(k.as_bytes().to_vec()), v);
     let concatemoji = format!(

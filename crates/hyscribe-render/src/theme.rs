@@ -88,6 +88,16 @@ pub fn twentytwentyfive_file(path: &str) -> Option<(&'static str, &'static [u8])
         .map(|(_, content_type, bytes)| (*content_type, *bytes))
 }
 
+/// The theme's style variations, `WP_Theme_JSON_Resolver::get_style_variations()`
+/// in path order: its `styles/` files that are not for a block type.
+pub(crate) fn style_variations() -> impl Iterator<Item = Value> {
+    FILES
+        .iter()
+        .filter(|(name, _, _)| name.starts_with("styles/") && name.ends_with(".json"))
+        .filter_map(|(_, _, bytes)| json_decode(bytes))
+        .filter(|variation| variation.get_str("blockTypes").is_none())
+}
+
 const PATTERNS: &[u8] = include_bytes!("../../../themes/twentytwentyfive/patterns.json");
 const THEME_JSON: &[u8] = include_bytes!("../../../themes/twentytwentyfive/theme.json");
 const CORE_THEME_JSON: &[u8] = include_bytes!("../../../wordpress/wp-includes/theme.json");

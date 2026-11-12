@@ -1,0 +1,6 @@
+	<link id="wp-admin-canonical" rel="canonical" href="%canonical%" />
+	<script>
+		if ( window.history.replaceState ) {
+			window.history.replaceState( null, null, document.getElementById( 'wp-admin-canonical' ).href + window.location.hash );
+		}
+	</script>

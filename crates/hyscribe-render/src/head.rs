@@ -27,7 +27,7 @@ mod footer;
 
 use block_styles::BLOCK_STYLES;
 pub use embed::{Share, embed_page};
-pub use footer::wp_footer;
+pub use footer::{emoji_detection_script, wp_footer};
 
 /// The WordPress version the bundled assets come from.
 const WP_VERSION: &str = include_str!("../../../wordpress/VERSION");
@@ -459,6 +459,40 @@ impl Head<'_> {
             self.theme.global.setting(&["typography", "fontFamilies"]),
             &format!("{siteurl}/wp-content/themes/{}", self.theme.slug),
         )
+    }
+}
+
+impl Theme {
+    /// `wp_print_font_faces()` and `wp_print_font_faces_from_style_variations()`,
+    /// which the admin prints after its styles.
+    pub fn admin_font_faces(&self, siteurl: &str) -> Vec<u8> {
+        let theme_uri = format!("{siteurl}/wp-content/themes/{}", self.slug);
+        let mut out = font_faces(
+            self.global.setting(&["typography", "fontFamilies"]),
+            &theme_uri,
+        );
+        let mut fonts = Vec::new();
+        for variation in crate::theme::style_variations() {
+            let families = variation
+                .get_str("settings")
+                .and_then(|v| v.get_str("typography"))
+                .and_then(|v| v.get_str("fontFamilies"))
+                .and_then(Value::as_array)
+                .unwrap_or_default();
+            fonts.extend(families.iter().map(|(_, family)| family.clone()));
+        }
+        let setting = Value::Array(vec![(
+            hyscribe_phpser::Key::String(b"theme".to_vec()),
+            Value::Array(
+                fonts
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, family)| (hyscribe_phpser::Key::Int(i as i64), family))
+                    .collect(),
+            ),
+        )]);
+        out.extend(font_faces(Some(&setting), &theme_uri));
+        out
     }
 }
 
@@ -1097,12 +1131,9 @@ impl Modules<'_> {
             .collect()
     }
 
-    /// `print_import_map()`, `print_head_enqueued_script_modules()` and
-    /// `print_script_module_preloads()`.
-    fn head(&self) -> Vec<u8> {
-        let mut out = Vec::new();
-        let imports: Vec<(hyscribe_phpser::Key, Value)> = self
-            .dependencies(self.queue, false)
+    /// `print_import_map()` of `ids`.
+    fn import_map(&self, ids: &[String]) -> Vec<u8> {
+        let imports: Vec<(hyscribe_phpser::Key, Value)> = ids
             .iter()
             .map(|id| {
                 (
@@ -1112,20 +1143,27 @@ impl Modules<'_> {
             })
             .filter(|(_, src)| !src.is_empty())
             .collect();
-        if !imports.is_empty() {
-            let map = Value::Array(vec![(
-                hyscribe_phpser::Key::String(b"imports".to_vec()),
-                Value::Array(imports),
-            )]);
-            out.extend(tag(
-                b"script",
-                &[
-                    (b"type", Some(b"importmap")),
-                    (b"id", Some(b"wp-importmap")),
-                ],
-                Some(&[&b"\n"[..], &json_hex_tag(&map), b"\n"].concat()),
-            ));
+        if imports.is_empty() {
+            return Vec::new();
         }
+        let map = Value::Array(vec![(
+            hyscribe_phpser::Key::String(b"imports".to_vec()),
+            Value::Array(imports),
+        )]);
+        tag(
+            b"script",
+            &[
+                (b"type", Some(b"importmap")),
+                (b"id", Some(b"wp-importmap")),
+            ],
+            Some(&[&b"\n"[..], &json_hex_tag(&map), b"\n"].concat()),
+        )
+    }
+
+    /// `print_import_map()`, `print_head_enqueued_script_modules()` and
+    /// `print_script_module_preloads()`.
+    fn head(&self) -> Vec<u8> {
+        let mut out = self.import_map(&self.dependencies(self.queue, false));
         for id in self.sorted(self.queue, false) {
             if let Some(module) = self.module(&id).filter(|_| self.in_head(&id)) {
                 out.extend(self.script(module));
@@ -1295,10 +1333,32 @@ pub fn tag(name: &[u8], attributes: &[(&[u8], Option<&[u8]>)], text: Option<&[u8
     [tags.get_updated_html(), b"\n"].concat()
 }
 
+/// The admin's `print_import_map()`, where no script module is enqueued:
+/// the registered modules classic scripts import, and what they import.
+pub fn admin_import_map(siteurl: &str, imports: &[String]) -> Vec<u8> {
+    let registry = registered_modules(siteurl);
+    let modules = Modules {
+        registry: &registry,
+        queue: &[],
+    };
+    let mut ids: Vec<String> = Vec::new();
+    for id in imports.iter().filter(|id| modules.module(id).is_some()) {
+        if !ids.contains(id) {
+            ids.push(id.clone());
+        }
+    }
+    for id in modules.dependencies(&ids, false) {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    modules.import_map(&ids)
+}
+
 /// `wp_json_encode( $value, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES )`:
 /// PHP's default encoding with slashes left alone and `<` and `>` as
 /// escapes, which only strings hold.
-pub(crate) fn json_hex_tag(value: &Value) -> Vec<u8> {
+pub fn json_hex_tag(value: &Value) -> Vec<u8> {
     let json = hyscribe_phpser::json_encode(value).unwrap_or_default();
     let mut out = Vec::with_capacity(json.len());
     let mut bytes = json.iter();

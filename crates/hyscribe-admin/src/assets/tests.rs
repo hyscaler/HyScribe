@@ -93,3 +93,31 @@ fn the_registry_needs_no_more_than_the_printer_ports() {
         assert_eq!(item.get_str("args"), Some(&Value::Null), "{handle:?}");
     }
 }
+
+#[test]
+fn admin_files_as_hs_admin_links_them() {
+    assert_eq!(
+        admin_links("a %x%b.php?c %x%d-e_f.g \"%x%h.php", "%x%", "/base/"),
+        "a /base/b?c /base/d-e_f.g \"/base/h"
+    );
+    assert_eq!(admin_links("none", "%x%", "/base/"), "none");
+}
+
+#[test]
+fn a_site_url_has_its_path() {
+    assert_eq!(cookie_path("http://example.test"), "/");
+    assert_eq!(cookie_path("HTTPS://example.test/blog"), "/blog/");
+    assert_eq!(cookie_path("/relative"), "/relative/");
+    assert_eq!(cookie_path("http:example"), "http:example/");
+}
+
+/// Only a style set at runtime becomes an alias.
+#[test]
+fn runtime_aliases_are_styles() {
+    let mut assets = Assets::new(false);
+    assets.set_style_data("added", "after", Value::Null);
+    assets.set_script_data("script", "data", Value::Null);
+    assert!(assets.styles.item("added").is_some());
+    assert!(assets.styles.item("other").is_none());
+    assert!(assets.scripts.item("script").is_none());
+}

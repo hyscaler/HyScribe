@@ -199,3 +199,31 @@ path = "fuzz_targets/auth_check_password.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "render"
+path = "fuzz_targets/render.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rewrite_pattern"
+path = "fuzz_targets/rewrite_pattern.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http_date"
+path = "fuzz_targets/http_date.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "text_fields"
+path = "fuzz_targets/text_fields.rs"
+test = false
+doc = false
+bench = false

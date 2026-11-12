@@ -10,6 +10,9 @@
 //! `each` and `router-region` are not ported yet, so markup that mentions
 //! them is left as rendered.
 
+use std::cell::Cell;
+use std::collections::HashMap;
+
 use crate::formatting::find;
 use hyscribe_html::{Attribute, TagProcessor, is_void};
 use hyscribe_kses::esc_html;
@@ -82,14 +85,23 @@ pub(crate) fn process_directives(html: &[u8]) -> Vec<u8> {
     let mut state = Directives {
         namespaces: Vec::new(),
         contexts: Vec::new(),
+        copied: Cell::new(0),
     };
     state.run(html).unwrap_or_else(|| html.to_vec())
 }
+
+/// The bytes of context the processor may copy for one root interactive
+/// block, as the block parser bounds its own copying. PHP shares arrays and
+/// strings until they are written, so a context copied at every nested
+/// element costs it little, where here each copy is whole.
+const MAX_COPIED_BYTES: usize = 64 << 20;
 
 struct Directives {
     /// The namespace stack; PHP pushes `false` where there is none.
     namespaces: Vec<Option<Vec<u8>>>,
     contexts: Vec<Value>,
+    /// The bytes of context copied so far.
+    copied: Cell<usize>,
 }
 
 impl Directives {
@@ -98,6 +110,9 @@ impl Directives {
         let mut p = TagProcessor::new(html);
         let mut tag_stack: Vec<(Vec<u8>, Vec<Directive>)> = Vec::new();
         while p.next_tag_visiting_closers() {
+            if self.copied.get() > MAX_COPIED_BYTES {
+                return None;
+            }
             let tag = p.get_tag().unwrap_or_default();
             if tag == b"SVG" || tag == b"MATH" {
                 skip_to_tag_closer(&mut p, &tag);
@@ -192,12 +207,13 @@ impl Directives {
 
     /// `data_wp_context_processor()` on entering a tag.
     fn context(&mut self, p: &mut TagProcessor) {
-        let mut context = self
+        let parent = self
             .contexts
             .last()
             .and_then(Value::as_array)
-            .unwrap_or_default()
-            .to_vec();
+            .unwrap_or_default();
+        let mut context = parent.to_vec();
+        self.count_entries(&context);
         for entry in self.entries(p, b"context") {
             let (None, Some(namespace)) = (entry.suffix, entry.namespace) else {
                 continue;
@@ -210,6 +226,18 @@ impl Directives {
             context = array_replace_recursive(context, replacement);
         }
         self.contexts.push(Value::Array(context));
+    }
+
+    /// Counts a copy of `value` against [`MAX_COPIED_BYTES`].
+    fn count(&self, value: &Value) {
+        self.copied
+            .set(self.copied.get().saturating_add(weight(value)));
+    }
+
+    /// Counts a copy of `entries` against [`MAX_COPIED_BYTES`].
+    fn count_entries(&self, entries: &[(Key, Value)]) {
+        self.copied
+            .set(self.copied.get().saturating_add(entries_weight(entries)));
     }
 
     /// `data_wp_bind_processor()`.
@@ -355,41 +383,43 @@ impl Directives {
             None => (false, path.as_slice()),
         };
         let key = Key::from_php_string(namespace.clone());
+        let empty = Value::Array(Vec::new());
         let context = self
             .contexts
             .last()
             .and_then(|context| context.get(&key))
-            .cloned()
-            .unwrap_or(Value::Array(Vec::new()));
-        let mut current = Value::Array(vec![
-            (
-                Key::String(b"state".to_vec()),
-                derived_state(namespace, &context),
-            ),
-            (Key::String(b"context".to_vec()), context),
-        ]);
-        for segment in path.split(|&b| b == b'.') {
+            .unwrap_or(&empty);
+        let state = derived_state(namespace, context);
+        // The path walks `['state' => ..., 'context' => ...]` in place; only
+        // the value it ends on is copied.
+        let mut segments = path.split(|&b| b == b'.');
+        let mut current = match segments.next() {
+            Some(b"state") => Some(&state),
+            Some(b"context") => Some(context),
+            _ => None,
+        };
+        let mut length = None;
+        while let (Some(value), Some(segment)) = (current, segments.next()) {
             if segment == b"length" {
-                match &current {
-                    Value::Array(entries) if is_list(entries) => {
-                        current = Value::Int(i64::try_from(entries.len()).unwrap_or(i64::MAX));
-                        break;
-                    }
-                    Value::String(text) => {
-                        current = Value::Int(i64::try_from(text.len()).unwrap_or(i64::MAX));
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            match current.get(&Key::from_php_string(segment.to_vec())) {
-                Some(next) => current = next.clone(),
-                _ => {
-                    current = Value::Null;
+                length = match value {
+                    Value::Array(entries) if is_list(entries) => Some(entries.len()),
+                    Value::String(text) => Some(text.len()),
+                    _ => None,
+                };
+                if length.is_some() {
                     break;
                 }
             }
+            current = value.get(&Key::from_php_string(segment.to_vec()));
         }
+        let current = match (length, current) {
+            (Some(length), _) => Value::Int(i64::try_from(length).unwrap_or(i64::MAX)),
+            (None, Some(value)) => {
+                self.count(value);
+                value.clone()
+            }
+            (None, None) => Value::Null,
+        };
         if negate {
             Value::Bool(current.is_empty())
         } else {
@@ -547,18 +577,49 @@ fn merge_style_property(style: &[u8], property: &[u8], value: &Value) -> Vec<u8>
     out
 }
 
-/// `array_replace_recursive()`.
+/// The bytes of the strings in `value`, keys included, what a copy of it
+/// copies.
+fn weight(value: &Value) -> usize {
+    match value {
+        Value::String(text) => text.len(),
+        Value::Array(entries) => entries_weight(entries),
+        _ => 0,
+    }
+}
+
+/// [`weight`] of an array's entries.
+fn entries_weight(entries: &[(Key, Value)]) -> usize {
+    entries
+        .iter()
+        .map(|(key, value)| {
+            let key = match key {
+                Key::String(text) => text.len(),
+                Key::Int(_) => 0,
+            };
+            key + weight(value)
+        })
+        .sum()
+}
+
+/// `array_replace_recursive()`, finding each key through an index.
 pub(crate) fn array_replace_recursive(
     mut entries: Vec<(Key, Value)>,
     replacements: Vec<(Key, Value)>,
 ) -> Vec<(Key, Value)> {
+    let mut at: HashMap<Key, usize> = HashMap::new();
+    for (i, (key, _)) in entries.iter().enumerate() {
+        at.entry(key.clone()).or_insert(i);
+    }
     for (key, value) in replacements {
-        match (entries.iter_mut().find(|(k, _)| *k == key), value) {
+        match (at.get(&key).and_then(|&i| entries.get_mut(i)), value) {
             (Some((_, Value::Array(slot))), Value::Array(inner)) => {
                 *slot = array_replace_recursive(std::mem::take(slot), inner);
             }
             (Some((_, slot)), value) => *slot = value,
-            (None, value) => entries.push((key, value)),
+            (None, value) => {
+                at.insert(key.clone(), entries.len());
+                entries.push((key, value));
+            }
         }
     }
     entries

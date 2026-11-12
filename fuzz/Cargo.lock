@@ -560,7 +560,11 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "httpdate",
+ "hyper",
+ "hyper-util",
  "hyscribe-assets",
+ "hyscribe-auth",
+ "hyscribe-config",
  "hyscribe-db",
  "hyscribe-kses",
  "hyscribe-model",

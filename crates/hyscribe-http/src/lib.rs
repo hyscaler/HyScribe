@@ -52,6 +52,14 @@ mod rewrite;
 mod sitemaps;
 mod trackback;
 
+/// Parsers of request input that only the fuzz targets in `fuzz/` call
+/// from outside.
+#[doc(hidden)]
+pub mod fuzzing {
+    pub use crate::files::http_date;
+    pub use crate::rewrite::pattern::Pattern;
+}
+
 use reads::Reads;
 
 use query::{Resolved, absint, clean_query, date_query, tax_query};

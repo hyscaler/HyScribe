@@ -5,9 +5,24 @@
 //! with `|`, greedy and lazy quantifiers and the `^` and `$` anchors.
 //! Matching backtracks in PCRE's order, so captures come out as in PHP.
 
+/// PCRE2's limit on nested parentheses, past which it refuses a pattern.
+const MAX_NESTING: usize = 250;
+
+/// PCRE's largest `{}` count, past which it refuses a pattern.
+const MAX_COUNT: usize = 65535;
+
+/// How deep matching nests, one level for each quantified item or group
+/// repetition still open, before it gives up as PCRE gives up past its JIT
+/// stack. Rewrite rules nest a few dozen levels.
+const MAX_DEPTH: usize = 1000;
+
+/// How many steps matching takes before giving up, as PCRE gives up past
+/// `pcre.backtrack_limit`.
+const MAX_STEPS: usize = 1_000_000;
+
 /// A parsed regex.
 #[derive(Debug)]
-pub(crate) struct Pattern {
+pub struct Pattern {
     items: Vec<Item>,
     groups: usize,
 }
@@ -37,15 +52,16 @@ enum Node {
 }
 
 /// A group's start and end, where it took part in the match.
-pub(crate) type Captures = Vec<Option<(usize, usize)>>;
+pub type Captures = Vec<Option<(usize, usize)>>;
 
 impl Pattern {
     /// `None` for syntax outside what rewrite rules use.
-    pub(crate) fn new(regex: &str) -> Option<Pattern> {
+    pub fn new(regex: &str) -> Option<Pattern> {
         let mut parser = Parser {
             bytes: regex.as_bytes(),
             at: 0,
             groups: 0,
+            nesting: 0,
         };
         let alternatives = parser.alternatives()?;
         if parser.at != regex.len() {
@@ -60,10 +76,12 @@ impl Pattern {
 
     /// The captures of a match at the start of `input`, the whole match
     /// first.
-    pub(crate) fn captures(&self, input: &[u8]) -> Option<Captures> {
+    pub fn captures(&self, input: &[u8]) -> Option<Captures> {
         let mut run = Run {
             input,
             captures: vec![None; self.groups + 1],
+            depth: 0,
+            steps: 0,
         };
         run.sequence(&self.items, 0, &mut |_, _| true)
             .then_some(run.captures)
@@ -85,6 +103,8 @@ struct Parser<'a> {
     bytes: &'a [u8],
     at: usize,
     groups: usize,
+    /// Groups open around the one being read.
+    nesting: usize,
 }
 
 impl Parser<'_> {
@@ -115,7 +135,12 @@ impl Parser<'_> {
                         self.groups += 1;
                         Some(self.groups)
                     };
+                    if self.nesting >= MAX_NESTING {
+                        return None;
+                    }
+                    self.nesting += 1;
                     let inner = self.alternatives()?;
+                    self.nesting -= 1;
                     self.eat(b')')
                         .then_some(Atom::Node(Node::Group(index, inner)))?
                 }
@@ -190,7 +215,7 @@ impl Parser<'_> {
                 let inside = self.bytes.get(self.at + 1..close).unwrap_or_default();
                 let inside = String::from_utf8_lossy(inside);
                 let inside = inside.as_ref();
-                let number = |s: &str| s.parse::<usize>().ok();
+                let number = |s: &str| s.parse::<usize>().ok().filter(|n| *n <= MAX_COUNT);
                 let bounds = match inside.split_once(',') {
                     None => (number(inside)?, number(inside)),
                     Some((low, "")) => (number(low)?, None),
@@ -223,13 +248,47 @@ type Next<'n, 'a> = &'n mut dyn FnMut(&mut Run<'a>, usize) -> bool;
 struct Run<'a> {
     input: &'a [u8],
     captures: Captures,
+    depth: usize,
+    steps: usize,
 }
 
 impl<'a> Run<'a> {
-    fn sequence(&mut self, items: &[Item], at: usize, next: Next<'_, 'a>) -> bool {
+    /// `step` one level deeper, or no match past the limits.
+    fn deeper(&mut self, step: impl FnOnce(&mut Self) -> bool) -> bool {
+        self.steps += 1;
+        if self.depth >= MAX_DEPTH || self.steps > MAX_STEPS {
+            return false;
+        }
+        self.depth += 1;
+        let found = step(self);
+        self.depth -= 1;
+        found
+    }
+
+    fn sequence(&mut self, mut items: &[Item], mut at: usize, next: Next<'_, 'a>) -> bool {
+        // A byte that occurs once leaves no choice to come back to, so a
+        // run of literals matches in a loop.
+        while let Some((
+            Item {
+                atom: Atom::Byte(set),
+                min: 1,
+                max: Some(1),
+                ..
+            },
+            rest,
+        )) = items.split_first()
+        {
+            let byte = self.input.get(at).map(|b| usize::from(*b));
+            if !byte.and_then(|b| set.get(b)).copied().unwrap_or_default() {
+                return false;
+            }
+            (items, at) = (rest, at + 1);
+        }
         match items.split_first() {
             None => next(self, at),
-            Some((item, rest)) => self.item(item, at, &mut |run, at| run.sequence(rest, at, next)),
+            Some((item, rest)) => {
+                self.deeper(|run| run.item(item, at, &mut |run, at| run.sequence(rest, at, next)))
+            }
         }
     }
 
@@ -294,8 +353,10 @@ impl<'a> Run<'a> {
         if item.max.is_some_and(|max| count >= max) {
             return false;
         }
-        self.once(node, at, &mut |run, end| {
-            run.repeat(node, item, count + 1, end, next)
+        self.deeper(|run| {
+            run.once(node, at, &mut |run, end| {
+                run.repeat(node, item, count + 1, end, next)
+            })
         })
     }
 
@@ -383,5 +444,50 @@ mod tests {
         assert_eq!(groups("[a-]+", "-a-b"), Some(vec![Some("-a-")]));
         assert_eq!(groups("x^", "x"), None);
         assert_eq!(groups("b", "ab"), None);
+    }
+
+    #[test]
+    fn what_pcre_refuses_to_compile_is_refused() {
+        assert!(Pattern::new("a{65535}").is_some());
+        assert!(Pattern::new("^{65536}").is_none());
+        assert!(Pattern::new("a{1,65536}").is_none());
+        let nested = |n| format!("{}a{}", "(".repeat(n), ")".repeat(n));
+        assert!(Pattern::new(&nested(250)).is_some());
+        assert!(Pattern::new(&nested(251)).is_none());
+        // Groups side by side do not nest.
+        assert!(Pattern::new(&"(a)".repeat(251)).is_some());
+    }
+
+    /// `x?.*?(?:b)` takes two steps for each byte before the `b` and six
+    /// more, and every step but the last returns to the top.
+    #[test]
+    fn matching_stops_at_the_step_limit() {
+        let pattern = Pattern::new("x?.*?(?:b)").unwrap();
+        let input = |before| format!("{}b", "a".repeat(before));
+        let last = (MAX_STEPS - 6) / 2;
+        assert!(pattern.captures(input(last).as_bytes()).is_some());
+        assert_eq!(pattern.captures(input(last + 1).as_bytes()), None);
+    }
+
+    /// PCRE gives up past its limits, and `preg_match()` returns false.
+    #[test]
+    fn matching_gives_up_past_the_limits() {
+        let run = || {
+            let deep = Pattern::new("(?:(?:^){65535}){65535}").unwrap();
+            assert_eq!(deep.captures(b""), None);
+            let literal = Pattern::new(&"a".repeat(20_000)).unwrap();
+            assert!(literal.captures("a".repeat(20_000).as_bytes()).is_some());
+            assert_eq!(literal.captures("a".repeat(19_999).as_bytes()), None);
+            let long = Pattern::new(&"a?".repeat(20_000)).unwrap();
+            assert_eq!(long.captures("a".repeat(20_000).as_bytes()), None);
+            let nested = format!("{}a{}", "(?:".repeat(250), ")".repeat(250));
+            assert!(Pattern::new(&nested).unwrap().captures(b"a").is_some());
+            let backtracking =
+                Pattern::new(&format!("{}{}", "a?".repeat(40), "a".repeat(40))).unwrap();
+            assert_eq!(backtracking.captures("a".repeat(40).as_bytes()), None);
+        };
+        // A Tokio worker's stack.
+        let worker = std::thread::Builder::new().stack_size(2 << 20).spawn(run);
+        worker.unwrap().join().unwrap();
     }
 }

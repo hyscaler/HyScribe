@@ -68,7 +68,7 @@ struct Rewrite<'a> {
     page_on_front: &'a str,
 }
 
-mod pattern;
+pub(crate) mod pattern;
 
 use crate::{Site, lossy, page_exists};
 use hyscribe_db::DbError;

@@ -109,3 +109,25 @@ fn the_deepest_blocks_fit_a_worker_stack() {
         .unwrap();
     assert!(clean.starts_with(br#"<!-- wp:group {"a":{"b":"\u003ci\u003e"}} -->"#));
 }
+
+/// Block attributes with many keys filter in linear time, each key found
+/// through an index. A key the filter changes moves to the end, as PHP
+/// unsets it and sets the filtered one, so here every key but the first
+/// moves, in order.
+#[test]
+fn many_attribute_keys_filter_in_linear_time() {
+    let keys = |suffix: &str| {
+        (0..20_000)
+            .map(|n| format!(r#""k{n}{suffix}":{n}"#))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let document = format!(r#"<!-- wp:x {{"a":1,{}}} /-->"#, keys(r"\u0026"));
+    let clean = String::from_utf8(wp_kses_post(document.as_bytes(), b"")).unwrap();
+    let expected = format!(r#"<!-- wp:x {{"a":1,{}}} /-->"#, keys(r"\u0026amp;"));
+    assert!(
+        clean == expected,
+        "{}",
+        clean.get(..200).unwrap_or_default()
+    );
+}

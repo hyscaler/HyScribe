@@ -88,7 +88,7 @@ fn precondition(headers: &HeaderMap, etag: &str, modified: u64, now: u64) -> Sta
 /// `apr_date_parse_http()`: the Unix time of an RFC 1123, RFC 850 or
 /// asctime date, its first word (the weekday) skipped and anything after
 /// the time ignored; `None` for anything else or a time before 1970.
-fn http_date(text: &str) -> Option<i64> {
+pub fn http_date(text: &str) -> Option<i64> {
     const MONTHS: [&[u8]; 12] = [
         b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov",
         b"Dec",

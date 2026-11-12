@@ -10,7 +10,7 @@
 //! work budget, and drops a token that runs out of either, so that no input
 //! can make it unbounded.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::LazyLock;
 
 use hyscribe_html::{Attribute, TagProcessor, decode_attribute, escape};
@@ -386,7 +386,13 @@ impl Kses<'_> {
         template_part: bool,
         depth: usize,
     ) -> Vec<(Key, Value)> {
-        let mut out = entries.to_vec();
+        // PHP's ordered array: unset keys leave a gap, set keys keep their
+        // place or go last, and an index finds each key.
+        let mut out: Vec<Option<(Key, Value)>> = entries.iter().cloned().map(Some).collect();
+        let mut at: HashMap<Key, usize> = HashMap::new();
+        for (i, (key, _)) in entries.iter().enumerate() {
+            at.entry(key.clone()).or_insert(i);
+        }
         for (key, value) in entries {
             let filtered_key = match key {
                 Key::String(name) => Key::from_php_string(self.kses(name, false, depth)),
@@ -405,15 +411,21 @@ impl Kses<'_> {
                     filtered = Value::String(Vec::new());
                 }
             }
-            if filtered_key != *key {
-                out.retain(|(k, _)| k != key);
+            if filtered_key != *key
+                && let Some(i) = at.remove(key)
+                && let Some(entry) = out.get_mut(i)
+            {
+                *entry = None;
             }
-            match out.iter_mut().find(|(k, _)| *k == filtered_key) {
-                Some((_, slot)) => *slot = filtered,
-                None => out.push((filtered_key, filtered)),
+            match at.get(&filtered_key).and_then(|&i| out.get_mut(i)) {
+                Some(Some((_, slot))) => *slot = filtered,
+                _ => {
+                    at.insert(filtered_key.clone(), out.len());
+                    out.push(Some((filtered_key, filtered)));
+                }
             }
         }
-        out
+        out.into_iter().flatten().collect()
     }
 }
 

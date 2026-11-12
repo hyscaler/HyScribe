@@ -6,6 +6,7 @@
 
 pub mod caps;
 pub mod cookie;
+pub mod sessions;
 
 use blowfish::Blowfish;
 use hyscribe_phpser::{hash_equals, hash_hmac_md5, md5, md5_raw, php_trim};
@@ -27,10 +28,13 @@ const PHPASS_ALPHABET: &[u8; 64] =
 /// random salt, or `*` for a password over 4096 bytes.
 pub fn hash_password(password: &[u8]) -> io::Result<String> {
     let mut salt = [0; 16];
-    let salt = std::fs::File::open("/dev/urandom")
-        .and_then(|mut random| random.read_exact(&mut salt))
-        .map(|()| salt);
+    let salt = random_bytes(&mut salt).map(|()| salt);
     hash_from(password, salt)
+}
+
+/// Fills `buf` from the kernel's random source.
+pub(crate) fn random_bytes(buf: &mut [u8]) -> io::Result<()> {
+    std::fs::File::open("/dev/urandom").and_then(|mut random| random.read_exact(buf))
 }
 
 fn hash_from(password: &[u8], salt: io::Result<[u8; 16]>) -> io::Result<String> {

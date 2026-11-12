@@ -82,10 +82,13 @@ fn post(row: &Value) -> Post {
 
 fn render_markup(context: &Context<'_>, markup: &[u8]) -> Vec<u8> {
     let block = &parse_blocks(markup)[0];
-    render(
+    // With its bindings resolved, as `WP_Block::render()` resolves them.
+    let computed = crate::bindings::computed_attributes(context, block, None);
+    render_bound(
         context,
         block.name.as_deref().unwrap(),
         block.attrs.as_deref().unwrap(),
+        &computed,
         &block.inner_html,
     )
     .unwrap()
@@ -754,4 +757,20 @@ fn small_blocks_match_php() {
         );
     }
     assert_eq!(golden.lines().count(), 10);
+}
+
+/// `array_merge()` with string keys: replaced in place, else appended.
+#[test]
+fn computed_attributes_merge_as_array_merge() {
+    let key = |k: &str| Key::String(k.as_bytes().to_vec());
+    let attributes = Value::Array(vec![(key("a"), Value::Int(1)), (key("b"), Value::Int(2))]);
+    let computed = [(key("b"), Value::Int(3)), (key("c"), Value::Int(4))];
+    assert_eq!(
+        super::merged(attributes, &computed),
+        Value::Array(vec![
+            (key("a"), Value::Int(1)),
+            (key("b"), Value::Int(3)),
+            (key("c"), Value::Int(4)),
+        ])
+    );
 }

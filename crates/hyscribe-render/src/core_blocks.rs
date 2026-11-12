@@ -83,12 +83,36 @@ pub(crate) fn prepared(name: &str, parsed: &[(Key, Value)]) -> Value {
     )
 }
 
+/// `array_merge()` of the prepared attributes and those block bindings
+/// computed, which skip validation.
+pub(crate) fn merged(attributes: Value, computed: &[(Key, Value)]) -> Value {
+    let mut attributes = attributes.as_array().unwrap_or_default().to_vec();
+    for (key, value) in computed {
+        match attributes.iter_mut().find(|(k, _)| k == key) {
+            Some((_, old)) => *old = value.clone(),
+            None => attributes.push((key.clone(), value.clone())),
+        }
+    }
+    Value::Array(attributes)
+}
+
 /// The output of `name`'s render callback, `None` for a block that renders
 /// its saved markup.
 pub(crate) fn render(
     context: &Context<'_>,
     name: &str,
     parsed: &[(Key, Value)],
+    content: &[u8],
+) -> Option<Vec<u8>> {
+    render_bound(context, name, parsed, &[], content)
+}
+
+/// [`render`], with the attributes block bindings computed.
+pub(crate) fn render_bound(
+    context: &Context<'_>,
+    name: &str,
+    parsed: &[(Key, Value)],
+    computed: &[(Key, Value)],
     content: &[u8],
 ) -> Option<Vec<u8>> {
     let callback = match name {
@@ -145,7 +169,7 @@ pub(crate) fn render(
     let block = Block {
         name,
         parsed,
-        attributes: prepared(name, parsed),
+        attributes: merged(prepared(name, parsed), computed),
         content,
     };
     Some(callback(context, &block))
@@ -181,7 +205,7 @@ impl Block<'_> {
 
 impl Context<'_> {
     /// The post in the `postId` context.
-    fn post(&self) -> Option<Post> {
+    pub(crate) fn post(&self) -> Option<Post> {
         self.post_id.and_then(|id| self.site.post(id))
     }
 
@@ -1016,12 +1040,19 @@ fn post_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     )
 }
 
-/// `_block_bindings_post_data_get_value()`: `None` unless the post is
+/// The post, if public and without a password, as a visitor may read it.
+pub(crate) fn public(post: Option<Post>) -> Option<Post> {
+    post.filter(|post| post.status == "publish" && post.password.is_empty())
+}
+
+/// `_block_bindings_post_data_get_value()` for `post`: `None` unless it is
 /// public and has no password.
-fn post_data(context: &Context<'_>, field: &[u8]) -> Option<Vec<u8>> {
-    let post = context
-        .post()
-        .filter(|post| post.status == "publish" && post.password.is_empty())?;
+pub(crate) fn post_data(
+    context: &Context<'_>,
+    post: Option<Post>,
+    field: &[u8],
+) -> Option<Vec<u8>> {
+    let post = public(post)?;
     let zone = context.zone();
     let iso = |stored: &str| esc_attr(date::format("c", stored, zone).as_bytes()).into_bytes();
     match field {
@@ -1043,27 +1074,15 @@ fn post_data(context: &Context<'_>, field: &[u8]) -> Option<Vec<u8>> {
 /// `WP_Block` resolves it before rendering.
 fn post_date(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let mut classes = Vec::new();
-    let binding = block
+    // Bound, `datetime` is what block bindings computed, if anything.
+    let bound = block
         .attributes
         .get_path(&["metadata", "bindings", "datetime"])
-        .filter(|b| isset(b.get_str("source")) && isset(b.get_str("args")));
-    let datetime = match (binding, block.attribute("datetime")) {
-        (Some(binding), _) => match binding
-            .get_str("source")
-            .map(Value::to_php_string)
-            .as_deref()
-        {
-            Some(b"core/post-data") => post_data(
-                context,
-                &binding
-                    .get_path(&["args", "field"])
-                    .map(Value::to_php_string)
-                    .unwrap_or_default(),
-            ),
-            _ => None,
-        },
-        (None, Some(datetime)) => Some(datetime.to_php_string()),
-        (None, None) => {
+        .is_some_and(|b| isset(b.get_str("source")) && isset(b.get_str("args")));
+    let datetime = match block.attribute("datetime") {
+        Some(datetime) => Some(datetime.to_php_string()),
+        None if bound => None,
+        None => {
             let modified = block
                 .attribute("displayType")
                 .map(Value::to_php_string)
@@ -1072,7 +1091,11 @@ fn post_date(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
             if modified {
                 classes.push(b"wp-block-post-date__modified-date".to_vec());
             }
-            post_data(context, if modified { b"modified" } else { b"date" })
+            post_data(
+                context,
+                context.post(),
+                if modified { b"modified" } else { b"date" },
+            )
         }
     };
     let Some(datetime) = datetime.filter(|d| !is_empty_string(d)) else {

@@ -431,16 +431,53 @@ impl HtmlProcessor {
         Some(self.token_name())
     }
 
-    /// `get_tag()` while processing a token: an `IMAGE` tag is an `IMG`.
-    fn get_tag(&self) -> Option<String> {
+    /// `get_tag()`, an implied element's too; an `IMAGE` tag is an `IMG`.
+    pub fn get_tag(&self) -> Option<String> {
+        if self.last_error.is_some() {
+            return None;
+        }
+        if let Some(event) = self.current_element.as_ref().filter(|e| !e.real) {
+            return Some(event.token.node_name.clone());
+        }
         let tag = self
             .tags
             .get_tag()
             .map(|t| String::from_utf8_lossy(&t).into_owned());
         let image = tag.as_deref() == Some("IMAGE")
-            && self.tags.get_namespace() == Namespace::Html
+            && self.get_namespace() == Namespace::Html
             && self.tags.get_token_type().as_deref() == Some(b"#tag");
         if image { Some("IMG".into()) } else { tag }
+    }
+
+    /// `next_tag()`: the next opener, of `tag_name` in any case if given.
+    pub fn next_tag(&mut self, tag_name: Option<&str>) -> bool {
+        let wanted = tag_name.map(str::to_ascii_uppercase);
+        while self.next_token() {
+            let found = self.get_token_type().as_deref() == Some("#tag")
+                && wanted
+                    .as_deref()
+                    .is_none_or(|name| self.get_token_name().as_deref() == Some(name))
+                && !self.is_tag_closer();
+            if found {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// `expects_closer()` of the current token.
+    pub fn expects_closer(&self) -> Option<bool> {
+        self.current_element
+            .as_ref()
+            .map(|event| expects_closer_of(&event.token))
+    }
+
+    /// The start and length `set_bookmark()` would record, if it can.
+    pub fn token_span(&self) -> Option<(usize, usize)> {
+        if self.is_virtual() {
+            return None;
+        }
+        self.tags.current_span()
     }
 
     /// `get_namespace()`: the current element's.

@@ -382,13 +382,23 @@ impl TagProcessor {
         })
     }
 
+    /// The current token's span while one is paused on.
+    fn bookmarkable_span(&self) -> Option<Span> {
+        self.token_span()
+            .filter(|_| !matches!(self.state, State::Complete | State::Incomplete))
+    }
+
+    /// Where `set_bookmark()` would point: the current token's start and
+    /// length.
+    pub(crate) fn current_span(&self) -> Option<(usize, usize)> {
+        self.bookmarkable_span()
+            .map(|span| (span.start, span.length))
+    }
+
     /// `set_bookmark()`: names the current token, up to `MAX_BOOKMARKS`
     /// names; `false` past the end or the limit.
     pub fn set_bookmark(&mut self, name: &[u8]) -> bool {
-        let Some(span) = self
-            .token_span()
-            .filter(|_| !matches!(self.state, State::Complete | State::Incomplete))
-        else {
+        let Some(span) = self.bookmarkable_span() else {
             return false;
         };
         if !self.bookmarks.contains_key(name) && self.bookmarks.len() >= self.max_bookmarks {

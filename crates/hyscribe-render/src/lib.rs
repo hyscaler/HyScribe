@@ -8,6 +8,7 @@ mod archives;
 mod attachment;
 pub mod autop;
 pub mod balance;
+mod bindings;
 pub mod blocks;
 mod categories;
 pub mod clickable;

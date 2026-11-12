@@ -11,6 +11,7 @@ use hyscribe_html::{Attribute, TagProcessor};
 use hyscribe_kses::{esc_html, esc_url};
 use hyscribe_phpser::{Value, is_empty_string, lookup, php_trim};
 
+use crate::bindings::{computed_attributes, replace_html};
 use crate::blocks::{Block, parse_blocks};
 use crate::core_blocks::{self, Context, prepared};
 use crate::elements::elements_class;
@@ -203,6 +204,8 @@ pub(crate) struct Renderer<'a> {
     pub(crate) open_refs: Vec<i64>,
     /// The playlist's prepared attributes, its tracks' context.
     pub(crate) playlist: Option<Value>,
+    /// The `pattern/overrides` context a synced pattern gives its blocks.
+    pattern_overrides: Option<Value>,
 }
 
 /// A string attribute.
@@ -247,6 +250,7 @@ impl<'a> Renderer<'a> {
             tab_counters: HashMap::new(),
             open_refs: Vec::new(),
             playlist: None,
+            pattern_overrides: None,
         }
     }
 
@@ -332,14 +336,15 @@ impl Renderer<'_> {
             Some("core/pattern") => self.pattern(block),
             Some("core/block") => self.synced_pattern(block),
             Some("core/query") => self.query(block),
-            Some("core/post-template") => self.post_template(block),
+            // These give their inner blocks no context but their own.
+            Some("core/post-template") => self.without_overrides(|r| r.post_template(block)),
             Some("core/tabs") => self.tabs(block),
             Some("core/playlist") => self.playlist(block),
             Some("core/playlist-track") => self.playlist_track(block),
             Some("core/tab-list") => self.tab_list(block),
             Some("core/tab-panel") => self.tab_panel(block),
             Some("core/terms-query") => self.terms_query(block),
-            Some("core/term-template") => self.term_template(block),
+            Some("core/term-template") => self.without_overrides(|r| r.term_template(block)),
             Some("core/post-content") => self.post_content(block),
             Some("core/navigation") => self.navigation(block),
             Some("core/search") => self.search(block),
@@ -356,7 +361,7 @@ impl Renderer<'_> {
             Some("core/media-text") => self.media_text(block),
             Some("core/home-link") => self.home_link(block),
             Some("core/page-list") => self.page_list(block),
-            Some("core/comment-template") => self.comment_template(block),
+            Some("core/comment-template") => self.without_overrides(|r| r.comment_template(block)),
             Some("core/comments-pagination") => self.comments_pagination(block),
             Some("core/comments-pagination-previous") => self.comments_pagination_previous(block),
             Some("core/comments-pagination-numbers") => self.comments_pagination_numbers(block),
@@ -370,13 +375,33 @@ impl Renderer<'_> {
             Some("core/query-pagination-next") => self.query_pagination_next(block),
             Some("core/query-pagination-numbers") => self.query_pagination_numbers(block),
             Some(name) => {
-                let content = self.saved_markup(block);
+                let parsed = block.attrs.as_deref().unwrap_or_default();
+                let overrides = self.pattern_overrides.as_ref();
+                let computed = computed_attributes(&self.context, block, overrides);
+                let (mut content, mut inner_blocks) = self.saved_markup_at(block);
+                if !content.is_empty() {
+                    for (attribute, value) in &computed {
+                        let replaced = replace_html(
+                            &self.context,
+                            name,
+                            &content,
+                            attribute,
+                            value,
+                            &inner_blocks,
+                        );
+                        // Inner blocks' offsets hold only while the markup is unchanged.
+                        if replaced != content {
+                            inner_blocks.clear();
+                        }
+                        content = replaced;
+                    }
+                }
                 // The form's reply links move it with comment-reply.js.
                 if name == "core/post-comments-form" {
                     self.assets.enqueue_script("comment-reply");
                 }
-                let parsed = block.attrs.as_deref().unwrap_or_default();
-                core_blocks::render(&self.context, name, parsed, &content).unwrap_or(content)
+                core_blocks::render_bound(&self.context, name, parsed, &computed, &content)
+                    .unwrap_or(content)
             }
             None => self.saved_markup(block),
         };
@@ -413,11 +438,21 @@ impl Renderer<'_> {
         html
     }
 
+    /// Renders without a synced pattern's overrides in context.
+    fn without_overrides(&mut self, render: impl FnOnce(&mut Self) -> Vec<u8>) -> Vec<u8> {
+        let overrides = self.pattern_overrides.take();
+        let html = render(self);
+        self.pattern_overrides = overrides;
+        html
+    }
+
     /// `do_blocks()` on content of its own, whose blocks have no parent.
     pub(crate) fn render_top_level(&mut self, markup: &[u8]) -> Vec<u8> {
         let outer = self.parent_layout.take();
+        let overrides = self.pattern_overrides.take();
         let html = self.render(markup);
         self.parent_layout = outer;
+        self.pattern_overrides = overrides;
         html
     }
 
@@ -450,19 +485,26 @@ impl Renderer<'_> {
 
     /// The block's own markup with its inner blocks rendered in place.
     pub(crate) fn saved_markup(&mut self, block: &Block) -> Vec<u8> {
+        self.saved_markup_at(block).0
+    }
+
+    /// The saved markup, with where each inner block's output starts.
+    fn saved_markup_at(&mut self, block: &Block) -> (Vec<u8>, Vec<usize>) {
         let mut out = Vec::new();
+        let mut starts = Vec::new();
         let mut inner = block.inner_blocks.iter();
         for chunk in &block.inner_content {
             match chunk {
                 Some(html) => out.extend_from_slice(html),
                 None => {
+                    starts.push(out.len());
                     if let Some(child) = inner.next() {
                         out.extend(self.block(child));
                     }
                 }
             }
         }
-        out
+        (out, starts)
     }
 
     /// `render_block_core_template_part()`.
@@ -546,7 +588,12 @@ impl Renderer<'_> {
             return Vec::new();
         }
         self.open_refs.push(id);
+        // Its blocks get its own `content`, empty by default, which its
+        // normalizing of older formats never reaches.
+        let content = prepared("core/block", parsed).get_str("content").cloned();
+        let outer = std::mem::replace(&mut self.pattern_overrides, content);
         let html = self.render(&pattern.content);
+        self.pattern_overrides = outer;
         self.open_refs.pop();
         html
     }

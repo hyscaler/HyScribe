@@ -199,6 +199,8 @@ pub(crate) struct Renderer<'a> {
     pub(crate) tabs: Option<crate::tabs::TabsContext>,
     /// The tab panels counted so far, by tabs ID.
     pub(crate) tab_counters: crate::tabs::TabCounters,
+    /// The synced patterns being rendered, by `ref`.
+    pub(crate) open_refs: Vec<i64>,
 }
 
 /// A string attribute.
@@ -241,6 +243,7 @@ impl<'a> Renderer<'a> {
             query_pagination: None,
             tabs: None,
             tab_counters: HashMap::new(),
+            open_refs: Vec::new(),
         }
     }
 
@@ -324,6 +327,7 @@ impl Renderer<'_> {
         let html = match block.name.as_deref() {
             Some("core/template-part") => self.template_part(block),
             Some("core/pattern") => self.pattern(block),
+            Some("core/block") => self.synced_pattern(block),
             Some("core/query") => self.query(block),
             Some("core/post-template") => self.post_template(block),
             Some("core/tabs") => self.tabs(block),
@@ -511,6 +515,34 @@ impl Renderer<'_> {
         self.open_patterns.push(slug.to_vec());
         let html = self.render_top_level(content);
         self.open_patterns.pop();
+        html
+    }
+
+    /// `render_block_core_block()`: a published synced pattern's blocks,
+    /// once in a chain of patterns. Not ported yet: its embeds, which wait
+    /// on outbound fetches, and pattern overrides, which need block
+    /// bindings.
+    fn synced_pattern(&mut self, block: &Block) -> Vec<u8> {
+        let parsed = block.attrs.as_deref().unwrap_or_default();
+        let id = prepared("core/block", parsed)
+            .get_str("ref")
+            .map_or(0, Value::to_int);
+        let pattern = u64::try_from(id)
+            .ok()
+            .and_then(|id| self.context.site.post(id))
+            .filter(|post| post.post_type == "wp_block");
+        let Some(pattern) = pattern else {
+            return Vec::new();
+        };
+        if self.open_refs.contains(&id)
+            || pattern.status != "publish"
+            || !is_empty_string(&pattern.password)
+        {
+            return Vec::new();
+        }
+        self.open_refs.push(id);
+        let html = self.render(&pattern.content);
+        self.open_refs.pop();
         html
     }
 }

@@ -384,3 +384,42 @@ fn widget_groups_match_php() {
     }
     assert_eq!(golden.lines().count(), 6);
 }
+
+/// Every case of `reference/synced-pattern/golden.sh`, over the patterns
+/// it inserted and rolled back.
+#[test]
+fn synced_patterns_match_php() {
+    let golden = include_str!("../../tests/golden/synced-pattern.tsv");
+    let mut site = crate::fixture::site(vec![]);
+    let mut cases = Vec::new();
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields[0] == "post" {
+            site.posts.push(hyscribe_model::Post {
+                id: fields[1].parse().unwrap(),
+                post_type: fields[2].into(),
+                status: fields[3].into(),
+                password: hyscribe_testkit::unhex(fields[4]),
+                content: hyscribe_testkit::unhex(fields[5]),
+                ..Default::default()
+            });
+        } else {
+            cases.push((
+                hyscribe_testkit::unhex(fields[1]),
+                hyscribe_testkit::unhex(fields[2]),
+            ));
+        }
+    }
+    let theme = crate::theme::twentytwentyfive();
+    let request = crate::site::Request::default();
+    for (markup, php) in &cases {
+        let ours = render_content(&theme, &site, &request, markup);
+        assert_eq!(
+            String::from_utf8_lossy(&ours),
+            String::from_utf8_lossy(php),
+            "{}",
+            String::from_utf8_lossy(markup)
+        );
+    }
+    assert_eq!(cases.len(), 13);
+}

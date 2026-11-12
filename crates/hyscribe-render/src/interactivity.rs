@@ -105,8 +105,7 @@ impl Directives {
                 continue;
             }
             let closer = p.is_tag_closer();
-            // has_and_visits_its_closer_tag()
-            let visits_closer = !is_void(&tag) && !SPECIAL.contains(&tag.as_slice());
+            let visits_closer = visits_closer(&tag);
             let directives = if closer {
                 match tag_stack.pop() {
                     Some((opener, directives)) if opener == tag => directives,
@@ -302,7 +301,7 @@ impl Directives {
             entry.suffix.is_none() && entry.unique_id.is_none() && !entry.value.is_empty()
         })?;
         let tag = p.get_tag().unwrap_or_default();
-        if is_void(&tag) || SPECIAL.contains(&tag.as_slice()) {
+        if !visits_closer(&tag) {
             return None;
         }
         // `set_content_between_balanced_tags()` escapes again, to the same.
@@ -415,6 +414,12 @@ fn present_directives(p: &TagProcessor) -> Vec<Directive> {
         .filter(|(name, _)| prefixes.iter().any(|prefix| prefix == name))
         .map(|(_, directive)| *directive)
         .collect()
+}
+
+/// `has_and_visits_its_closer_tag()`: neither void nor read as text up to
+/// its closer.
+fn visits_closer(tag: &[u8]) -> bool {
+    !is_void(tag) && !SPECIAL.contains(&tag)
 }
 
 /// `skip_to_tag_closer()`: past the closer that balances the current tag.

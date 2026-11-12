@@ -15,7 +15,7 @@ use crate::core_blocks::prepared;
 use crate::template::Renderer;
 
 /// The `core/tabs-id` and `core/tabs-list` context.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone)]
 pub(crate) struct TabsContext {
     id: Value,
     list: Vec<Vec<u8>>,
@@ -136,11 +136,7 @@ fn tabs_list(inner: &[Block], tabs_id: &Value) -> Vec<Vec<u8>> {
     else {
         return Vec::new();
     };
-    let tabs_id = if tabs_id.is_empty() {
-        Vec::new()
-    } else {
-        tabs_id.to_php_string()
-    };
+    let tabs_id = tabs_id.to_php_string();
     panels
         .inner_blocks
         .iter()

@@ -11,6 +11,7 @@ use hyscribe_html::{Attribute, TagProcessor};
 use hyscribe_phpser::{Key, Value, is_empty_string, json_decode};
 
 use super::{Block, Context};
+use crate::blocks::is_pcre_space;
 use crate::style::get_styles;
 
 /// The registered icons' SVG as `WP_Icons_Registry` sanitizes it: each
@@ -137,7 +138,7 @@ fn wp_get_icon(name: &[u8], class: &[u8], label: &[u8]) -> Vec<u8> {
     tags.next_tag(Some(b"SVG"), None);
     // `preg_split( '/\s+/' )`.
     for class in class
-        .split(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r'))
+        .split(|&b| is_pcre_space(b))
         .filter(|class| !class.is_empty())
     {
         tags.add_class(class);

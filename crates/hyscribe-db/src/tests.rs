@@ -379,7 +379,16 @@ async fn errors_are_reported() {
         .await
         .unwrap_err(),
         db.last_comment_modified().await.unwrap_err(),
-        db.moderated_comments().await.unwrap_err(),
+        db.comment_counts(1).await.unwrap_err(),
+        db.latest_comments(true, 1, 0).await.unwrap_err(),
+        db.posts_by_status(&StatusQuery {
+            status: "draft",
+            author: Some(1),
+            order: StatusOrder::DateAsc,
+            limit: 1,
+        })
+        .await
+        .unwrap_err(),
         db.last_post_modified().await.unwrap_err(),
         db.date_counts(Period::Year).await.unwrap_err(),
         db.recent_comments(1).await.unwrap_err(),
@@ -1179,15 +1188,67 @@ async fn term_queries_order_by_any_column() {
     }
 }
 
-/// Pending comments: none on the default install, three in the Theme Test
-/// Data.
+/// The dashboard's comment counts, latest comments and posts by status,
+/// over the three fixtures.
 #[tokio::test]
-async fn moderated_comments() {
-    assert_eq!(fixture().await.moderated_comments().await.unwrap(), 0);
-    let mut config = fixture_config();
-    config.name = "wordpress_ttd".into();
-    let ttd = Db::connect(&config)
-        .await
-        .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
-    assert_eq!(ttd.moderated_comments().await.unwrap(), 3);
+async fn dashboard_reads() {
+    let db = fixture().await;
+    assert_eq!(db.comment_counts(1).await.unwrap(), [1, 0, 0, 0, 0]);
+    let latest = db.latest_comments(true, 5, 0).await.unwrap();
+    let ids: Vec<(u64, String)> = latest.into_iter().map(|(c, a)| (c.id, a)).collect();
+    assert_eq!(ids, [(1, "1".to_string())]);
+    assert!(db.latest_comments(false, 5, 1).await.unwrap().is_empty());
+    let connect = |name: &str| {
+        let config = Database {
+            name: name.into(),
+            ..fixture_config()
+        };
+        async move {
+            Db::connect(&config)
+                .await
+                .expect(hyscribe_testkit::NO_FIXTURE_DATABASE)
+        }
+    };
+    let ttd = connect("wordpress_ttd").await;
+    let [approved, moderated, spam, trash, _] = ttd.comment_counts(1).await.unwrap();
+    assert_eq!((approved, moderated, spam, trash), (31, 3, 0, 0));
+    let approved_only = ttd.latest_comments(false, 50, 0).await.unwrap();
+    assert!(approved_only.iter().all(|(_, a)| a == "1"));
+    assert_eq!(ttd.latest_comments(true, 50, 0).await.unwrap().len(), 34);
+    let terms = connect("wordpress_terms").await;
+    let ids = |posts: Vec<Post>| posts.iter().map(|p| p.id).collect::<Vec<_>>();
+    let query = |order, author| StatusQuery {
+        status: "publish",
+        author,
+        order,
+        limit: 5,
+    };
+    assert_eq!(
+        ids(terms
+            .posts_by_status(&query(StatusOrder::DateDesc, None))
+            .await
+            .unwrap()),
+        [101, 1]
+    );
+    assert_eq!(
+        ids(terms
+            .posts_by_status(&query(StatusOrder::DateAsc, Some(1)))
+            .await
+            .unwrap()),
+        [1, 101]
+    );
+    assert_eq!(
+        ids(terms
+            .posts_by_status(&query(StatusOrder::ModifiedDesc, None))
+            .await
+            .unwrap()),
+        [101, 1]
+    );
+    assert!(
+        terms
+            .posts_by_status(&query(StatusOrder::DateAsc, Some(2)))
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

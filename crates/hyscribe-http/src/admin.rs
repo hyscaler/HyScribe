@@ -3,17 +3,22 @@
 //! hs-admin's screens at `/hs-admin/` (ADR 0008): `auth_redirect()` before
 //! any of them; screens not ported yet answer `501`.
 
+use std::cell::{OnceCell, RefCell};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::admin_bar::{BarSite, Browser};
 use hyscribe_admin::assets::Urls;
+use hyscribe_admin::dashboard::{CommentCounts, DashboardSite, RecentComment, dashboard};
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
-use hyscribe_auth::caps::{CapabilityData, User as Capabilities};
+use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
+use hyscribe_db::{StatusOrder, StatusQuery};
 use hyscribe_phpser::{Value, remove_query_arg, urlencode};
+use hyscribe_render::date::Zone;
 use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
@@ -103,14 +108,104 @@ struct Admin<'a> {
     site: &'a Site,
     caps: Capabilities,
     user: hyscribe_model::User,
+    /// The posts read, each once, as WordPress's object cache keeps them.
+    posts: RefCell<HashMap<u64, Option<hyscribe_model::Post>>>,
+    comment_counts: OnceCell<CommentCounts>,
+}
+
+impl<'a> Admin<'a> {
+    fn new(reads: &'a LoginReads<'a>, site: &'a Site, user: hyscribe_model::User) -> Admin<'a> {
+        Admin {
+            caps: Capabilities::load(reads, site.db.prefix(), user.id),
+            reads,
+            site,
+            user,
+            posts: RefCell::default(),
+            comment_counts: OnceCell::new(),
+        }
+    }
+
+    /// `current_user_can( $cap, $id )` of an object.
+    fn can_for(&self, cap: &str, id: u64) -> bool {
+        let id = i64::try_from(id).unwrap_or_default();
+        self.caps.has_cap(self, cap, &[Value::Int(id)])
+    }
+
+    /// `edit_comment` of a comment on `post`: `edit_posts` without one.
+    fn comment_editable(&self, post: Option<&hyscribe_model::Post>) -> bool {
+        post.map_or_else(
+            || self.can("edit_posts"),
+            |post| self.can_for("edit_post", post.id),
+        )
+    }
+
+    fn full_post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        if let Some(post) = self.posts.borrow().get(&id) {
+            return post.clone();
+        }
+        let post = self.reads.reads.wait(self.site.db.post(id));
+        self.posts.borrow_mut().insert(id, post.clone());
+        post
+    }
+
+    fn posts(
+        &self,
+        status: &str,
+        author: Option<u64>,
+        order: StatusOrder,
+        limit: u32,
+    ) -> Vec<hyscribe_model::Post> {
+        let query = StatusQuery {
+            status,
+            author,
+            order,
+            limit,
+        };
+        self.reads.reads.wait(self.site.db.posts_by_status(&query))
+    }
+}
+
+/// The admin's capability checks, with the posts and comments they name.
+impl CapabilityData for Admin<'_> {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        CapabilityData::option(self.reads, name)
+    }
+    fn user_meta(&self, user_id: u64, key: &str) -> Option<Vec<u8>> {
+        self.reads.user_meta(user_id, key)
+    }
+    fn user_exists(&self, user_id: u64) -> bool {
+        self.reads.user_exists(user_id)
+    }
+    fn post(&self, id: u64) -> Option<CapPost> {
+        self.full_post(id).map(|post| CapPost {
+            id: post.id,
+            author: post.author,
+            status: post.status,
+            post_type: post.post_type,
+            parent: post.parent,
+        })
+    }
+    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        self.reads.reads.wait(self.site.db.post_meta(id, key))
+    }
+    /// The dashboard checks a comment through its post (`comment_editable`).
+    fn comment_post(&self, _: u64) -> Option<u64> {
+        None
+    }
+    fn term_taxonomy(&self, _: u64) -> Option<String> {
+        None
+    }
+    fn constant(&self, name: &str) -> bool {
+        self.reads.constant(name)
+    }
 }
 
 impl MenuUser for Admin<'_> {
     fn can(&self, cap: &str) -> bool {
-        self.caps.has_cap(self.reads, cap, &[])
+        self.caps.has_cap(self, cap, &[])
     }
     fn moderated_comments(&self) -> u64 {
-        self.reads.reads.wait(self.site.db.moderated_comments())
+        DashboardSite::comment_counts(self).moderated
     }
     /// `get_transient()` without its timeout: the transients read here
     /// never expire.
@@ -185,6 +280,130 @@ impl PageSite for Admin<'_> {
     }
 }
 
+impl DashboardSite for Admin<'_> {
+    fn show_welcome_panel(&self) -> Option<Vec<u8>> {
+        self.reads.user_meta(self.user.id, "show_welcome_panel")
+    }
+    fn user_email(&self) -> Vec<u8> {
+        self.user.email.clone()
+    }
+    fn published(&self, post_type: &str) -> u64 {
+        let query = hyscribe_model::PostQuery {
+            post_types: vec![post_type.to_string()],
+            ..hyscribe_model::PostQuery::default()
+        };
+        self.reads.reads.wait(self.site.db.count_posts(&query))
+    }
+    fn comment_counts(&self) -> CommentCounts {
+        *self.comment_counts.get_or_init(|| {
+            let [approved, moderated, spam, trash, mine] = self
+                .reads
+                .reads
+                .wait(self.site.db.comment_counts(self.user.id));
+            CommentCounts {
+                approved,
+                moderated,
+                spam,
+                trash,
+                mine,
+            }
+        })
+    }
+    /// `wp_dashboard_recent_comments()`'s search: batches of the latest
+    /// comments, kept while the user may see their post.
+    fn recent_comments(&self, global: Option<&hyscribe_model::Post>) -> Vec<RecentComment> {
+        let pending = self.can("edit_posts");
+        let (mut offset, mut number) = (0, 25);
+        let mut found = Vec::new();
+        loop {
+            let batch = self
+                .reads
+                .reads
+                .wait(self.site.db.latest_comments(pending, number, offset));
+            if batch.is_empty() {
+                return found;
+            }
+            for (comment, approved) in batch {
+                let post = match comment.post_id {
+                    0 => global.cloned(),
+                    id => self.full_post(id),
+                };
+                let id = post.as_ref().map_or(0, |post| post.id);
+                let protected = post.as_ref().is_some_and(|post| !post.password.is_empty());
+                if !self.can_for("edit_post", id) && (protected || !self.can_for("read_post", id)) {
+                    continue;
+                }
+                let permalink = post
+                    .as_ref()
+                    .map(|post| self.permalink(post))
+                    .unwrap_or_default();
+                found.push(RecentComment {
+                    link: format!("{permalink}#comment-{}", comment.id),
+                    permalink,
+                    status: if approved == "1" {
+                        "approved"
+                    } else {
+                        "unapproved"
+                    },
+                    user: (comment.user_id != 0)
+                        .then(|| self.reads.reads.wait(self.site.db.user(comment.user_id)))
+                        .flatten(),
+                    can_edit: self.comment_editable(post.as_ref()),
+                    post: post.filter(|_| comment.post_id != 0),
+                    comment,
+                });
+                if found.len() == 5 {
+                    return found;
+                }
+            }
+            offset += number;
+            number = 50;
+        }
+    }
+    fn theme_name(&self) -> String {
+        self.site.theme.name()
+    }
+    fn recent_posts(&self, status: &str) -> Vec<hyscribe_model::Post> {
+        if status == "future" {
+            // `perm => editable`: others' only for those who may edit them.
+            let author = (!self.can("edit_others_posts")).then_some(self.user.id);
+            return self.posts("future", author, StatusOrder::DateAsc, 5);
+        }
+        self.posts(status, None, StatusOrder::DateDesc, 5)
+    }
+    fn can_edit_post(&self, post: &hyscribe_model::Post) -> bool {
+        self.can_for("edit_post", post.id)
+    }
+    fn permalink(&self, post: &hyscribe_model::Post) -> String {
+        String::from_utf8_lossy(&hyscribe_render::permalinks::permalink(
+            &self.reads.reads,
+            post,
+        ))
+        .into_owned()
+    }
+    fn clock(&self) -> (Zone, i64) {
+        (self.site.zone(), self.reads.now)
+    }
+    fn quick_draft(&self) -> Option<u64> {
+        let stored = self
+            .reads
+            .user_option(self.user.id, "dashboard_quick_press_last_post_id")?;
+        let id = u64::try_from(Value::String(stored).to_int()).unwrap_or_default();
+        self.full_post(id)
+            .filter(|post| post.status == "auto-draft")
+            .map(|post| post.id)
+    }
+    fn drafts(&self) -> Vec<hyscribe_model::Post> {
+        self.posts("draft", Some(self.user.id), StatusOrder::ModifiedDesc, 4)
+    }
+    fn user_option(&self, name: &str) -> Option<Vec<u8>> {
+        self.reads.user_option(self.user.id, name)
+    }
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        CapabilityData::option(self.reads, name)
+    }
+}
+
 /// The headers of an admin screen: `nocache_headers()` and
 /// `send_frame_options_header()`; every response has `wp_admin_headers()`'s.
 fn screen_headers() -> Vec<(header::HeaderName, String)> {
@@ -198,6 +417,7 @@ fn screen_headers() -> Vec<(header::HeaderName, String)> {
 fn screen(
     admin: &Admin,
     path: &str,
+    request_uri: &str,
     url: &str,
     origin: &str,
     browser: &Browser,
@@ -206,6 +426,9 @@ fn screen(
         String::from_utf8_lossy(&remove_query_arg(&REMOVABLE, url.as_bytes())).into_owned();
     let page = match path {
         "/hs-admin/tools" => hyscribe_admin::tools::tools(admin, &canonical, origin, browser),
+        "/hs-admin/" | "/hs-admin/index" => {
+            dashboard(admin, &canonical, origin, request_uri, browser)
+        }
         _ => return None,
     };
     Some(match page {
@@ -256,12 +479,8 @@ fn answer(
                 // The auth cookie's token, which `/hs-login` gives the logged
                 // in cookie too: `wp_get_session_token()`'s.
                 reads.act_as(id, token);
-                let admin = Admin {
-                    reads: &reads,
-                    site,
-                    caps: Capabilities::load(&reads, site.db.prefix(), id),
-                    user: reads.reads.wait(site.db.user(id)).unwrap_or_default(),
-                };
+                let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
+                let admin = Admin::new(&reads, site, user);
                 let header = |name: &str| headers.get(name).map(HeaderValue::as_bytes);
                 let browser = Browser {
                     user_agent: header("user-agent").unwrap_or_default(),
@@ -270,7 +489,7 @@ fn answer(
                 let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
                 let url = text(&[scheme, &here].concat());
                 let origin = text(&[scheme, host].concat());
-                screen(&admin, uri.path(), &url, &origin, &browser)
+                screen(&admin, uri.path(), requested, &url, &origin, &browser)
                     .unwrap_or_else(|| response(StatusCode::NOT_IMPLEMENTED, nocache(), Vec::new()))
             })
         }

@@ -75,8 +75,9 @@ pub trait DashboardSite: PageSite {
     fn published(&self, post_type: &str) -> u64;
     /// `wp_count_comments()`, with the user's own comments.
     fn comment_counts(&self) -> CommentCounts;
-    /// The five latest comments the user may see.
-    fn recent_comments(&self) -> Vec<RecentComment>;
+    /// The five latest comments the user may see; `global` is the post a
+    /// comment on no post reads, the last the Activity widget lists.
+    fn recent_comments(&self, global: Option<&Post>) -> Vec<RecentComment>;
     /// The theme's `Name` header.
     fn theme_name(&self) -> String;
     /// The latest five posts of `status`, `future` ones the user may edit
@@ -845,10 +846,13 @@ pub fn dashboard(
 ) -> Option<String> {
     let hidden = listed(site, "metaboxhidden_dashboard");
     let closed = listed(site, "closedpostboxes_dashboard");
+    let future = site.recent_posts("future");
+    let published = site.recent_posts("publish");
+    let comments = site.recent_comments(published.last().or(future.last()));
     let data = Activity {
-        future: site.recent_posts("future"),
-        published: site.recent_posts("publish"),
-        comments: site.recent_comments(),
+        future,
+        published,
+        comments,
     };
     let registered = widgets(site, &data, request_uri);
     // The screen options list the widgets before `do_meta_boxes()` sorts them.

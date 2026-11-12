@@ -124,8 +124,16 @@ async fn logged_in_users_are_let_in() {
         .next()
         .unwrap()
         .to_string();
-    let response = get(&site, "/hs-admin/", "127.0.0.1:8081", &auth).await;
+    let response = get(&site, "/hs-admin/edit", "127.0.0.1:8081", &auth).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // The dashboard, as PHP showed it to a user who had no auto-draft yet.
+    let cookies = all.join("; ");
+    for path in ["/hs-admin/", "/hs-admin/index"] {
+        let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
+        let php = golden("administrator\tindex.php\t").replace("%auto-draft%", "");
+        let php = php.replace("/hs-admin/index\"", &format!("{path}\""));
+        assert_eq!(with_values(&php, &page), page, "{path}");
+    }
     let response = get(
         &site,
         "/hs-admin/tools?message=1&x=2",
@@ -140,8 +148,12 @@ async fn logged_in_users_are_let_in() {
         .await
         .unwrap();
     let body = String::from_utf8(body.to_vec()).unwrap();
-    let page = tools(&site, &all.join("; ")).await;
-    assert_eq!(placeholders(&page), administrator_tools());
+    let page =
+        page_of(get(&site, "/hs-admin/tools", "127.0.0.1:8081", &all.join("; ")).await).await;
+    assert_eq!(
+        with_values(&golden("administrator\ttools.php\t"), &page),
+        page
+    );
     // The page's nonces are the user's: its log out link logs them out.
     let at = page.find("action=logout&#038;_wpnonce=").unwrap() + 28;
     let nonce = page.get(at..at + 10).unwrap();
@@ -179,43 +191,42 @@ async fn logged_in_users_are_let_in() {
     );
 }
 
-/// The administrator's Tools screen as `reference/admin-page/golden.sh`
-/// recorded it, under hs-admin's URLs.
-fn administrator_tools() -> String {
+/// A page of `reference/admin-page/golden.sh`, by its row's start, under
+/// hs-admin's URLs.
+fn golden(row: &str) -> String {
     let golden = include_str!("../../../hyscribe-admin/tests/golden/pages.tsv");
-    let row = golden
-        .lines()
-        .find(|l| l.starts_with("administrator\ttools.php\t"))
-        .unwrap();
+    let row = golden.lines().find(|l| l.starts_with(row)).unwrap();
     let page = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
     hyscribe_testkit::hs_admin_page(&String::from_utf8(page).unwrap())
 }
 
-/// The Tools screen at its plain URL.
-async fn tools(site: &Arc<Site>, auth: &str) -> String {
-    let response = get(site, "/hs-admin/tools", "127.0.0.1:8081", auth).await;
+async fn page_of(response: Response) -> String {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
     String::from_utf8(body.to_vec()).unwrap()
 }
 
-/// A page with its nonces and time as the golden's placeholders.
-fn placeholders(page: &str) -> String {
-    let mut page = page.to_string();
-    for (marker, action) in [
-        ("_wpnonce=", "log-out"),
-        ("heartbeatSettings = {\"nonce\":\"", "heartbeat-nonce"),
-        ("createNonceMiddleware( \"", "wp_rest"),
-        ("compressionNonce = \"", "update_can_compress_scripts"),
-    ] {
-        let at = page.find(marker).unwrap() + marker.len();
-        page.replace_range(at..at + 10, &format!("%nonce:{action}%"));
+/// `golden` with the ten characters `page` has where it has a nonce or time
+/// placeholder: equal to `page` when the rest is.
+fn with_values(golden: &str, page: &str) -> String {
+    let mut out = String::new();
+    let (mut golden, mut page) = (golden, page);
+    let next = |golden: &str| {
+        [golden.find("%nonce:"), golden.find("%time%")]
+            .into_iter()
+            .flatten()
+            .min()
+    };
+    while let Some(at) = next(golden) {
+        out.push_str(golden.get(..at).unwrap());
+        let rest = golden.get(at + 1..).unwrap();
+        out.push_str(page.get(at..at + 10).unwrap_or_default());
+        golden = rest.get(rest.find('%').unwrap() + 1..).unwrap();
+        page = page.get(at + 10..).unwrap_or_default();
     }
-    let at = page.find("\"time\":\"").unwrap() + 8;
-    let end = at + page.get(at..).unwrap().find('"').unwrap();
-    page.replace_range(at..end, "%time%");
-    page
+    out.push_str(golden);
+    out
 }
 
 /// A user without the screen's capability gets `wp_die()`'s refusal.
@@ -225,16 +236,11 @@ async fn refusals() {
     let handle = Handle::current();
     let response = tokio::task::spawn_blocking(move || {
         let reads = LoginReads::new(&site, handle, now());
-        let caps = Capabilities::load(&reads, site.db.prefix(), 0);
-        let admin = Admin {
-            reads: &reads,
-            site: &site,
-            caps,
-            user: hyscribe_model::User::default(),
-        };
+        let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
         let browser = Browser::default();
         screen(
             &admin,
+            "/hs-admin/tools",
             "/hs-admin/tools",
             "http://h/hs-admin/tools",
             "http://h",
@@ -306,14 +312,12 @@ async fn the_user_s_data() {
     let ttd = site("wordpress_ttd").await;
     let handle = Handle::current();
     tokio::task::spawn_blocking(move || {
-        let admin = |site, reads, id| Admin {
-            reads,
-            site,
-            caps: Capabilities::load(reads, "wp_", id),
-            user: hyscribe_model::User {
+        let admin = |site, reads, id| {
+            let user = hyscribe_model::User {
                 id,
                 ..hyscribe_model::User::default()
-            },
+            };
+            Admin::new(reads, site, user)
         };
         let reads = LoginReads::new(&terms, handle.clone(), now());
         let first = admin(&terms, &reads, 1);
@@ -329,6 +333,97 @@ async fn the_user_s_data() {
         assert_eq!(admin(&terms, &reads, 7).user_id(), 7);
         let reads = LoginReads::new(&ttd, handle, now());
         assert_eq!(admin(&ttd, &reads, 1).moderated_comments(), 3);
+    })
+    .await
+    .unwrap();
+}
+
+/// The dashboard's reads for an administrator and a subscriber, over the
+/// terms fixture and the Theme Test Data.
+#[tokio::test(flavor = "multi_thread")]
+async fn dashboard_data() {
+    let load = |name: &str| {
+        let config = hyscribe_config::Database {
+            name: name.into(),
+            ..hyscribe_testkit::fixture_database()
+        };
+        async move {
+            let db = hyscribe_db::Db::connect(&config).await.unwrap();
+            Site::load(db, None, None).await.unwrap()
+        }
+    };
+    let (terms, ttd) = (load("wordpress_terms").await, load("wordpress_ttd").await);
+    let handle = Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let check = |site: &Site, (id, login): (u64, &[u8]), test: &dyn Fn(&Admin)| {
+            let reads = LoginReads::new(site, handle.clone(), now());
+            // As a session's check finds the user.
+            LoginSite::user_by_login(&reads, login);
+            let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
+            test(&Admin::new(&reads, site, user));
+        };
+        check(&terms, (1, b"admin"), &|admin| {
+            assert_eq!(admin.quick_draft(), Some(103));
+            let comments = admin.recent_comments(admin.recent_posts("publish").last());
+            let postless = comments.iter().find(|c| c.comment.id == 2).unwrap();
+            assert!(postless.post.is_none() && postless.can_edit);
+            assert_eq!(postless.user.as_ref().unwrap().id, 1);
+            assert!(postless.link.ends_with("#comment-2"));
+            assert_eq!(admin.theme_name(), "Twenty Twenty-Five");
+            assert_eq!(admin.user_email(), b"admin@default-install.test");
+            assert_eq!(admin.show_welcome_panel().as_deref(), Some(&b"1"[..]));
+            assert_eq!(admin.published("page"), 1);
+            assert_eq!(admin.moderated_comments(), 0);
+            assert!(admin.comment_editable(None));
+            // What capability checks of other objects read.
+            assert_eq!(admin.comment_post(2), None);
+            assert!(admin.term_taxonomy(1).is_none());
+            assert!(admin.user_exists(1) && !admin.user_exists(999));
+            assert_eq!(
+                CapabilityData::user_meta(admin, 1, "wp_capabilities").as_deref(),
+                Some(&b"a:1:{s:13:\"administrator\";b:1;}"[..])
+            );
+            assert_eq!(
+                CapabilityData::option(admin, "blogname").as_deref(),
+                Some(&b"HyScribe Default Install"[..])
+            );
+            assert!(admin.constant("DISALLOW_UNFILTERED_HTML"));
+        });
+        check(&ttd, (1, b"admin"), &|admin| {
+            // The one post draft is by another user.
+            assert!(admin.drafts().is_empty());
+            assert_eq!(admin.recent_posts("future").len(), 1);
+            let comments = admin.recent_comments(admin.recent_posts("publish").last());
+            assert_eq!(comments.len(), 5);
+            assert!(admin.can_edit_post(&comments[0].post.clone().unwrap()));
+            assert_eq!(admin.comment_counts().moderated, 3);
+            assert_eq!(admin.published("post"), 57);
+            assert_eq!(
+                admin.post_meta(2, "_wp_page_template").as_deref(),
+                Some(&b"default"[..])
+            );
+            assert!(admin.quick_draft().is_none());
+        });
+        check(&ttd, (2, b"themedemos"), &|author| {
+            let drafts: Vec<u64> = author.drafts().iter().map(|post| post.id).collect();
+            assert_eq!(drafts, [1164]);
+        });
+        check(&ttd, (3, b"themereviewteam"), &|subscriber| {
+            assert!(subscriber.recent_posts("future").is_empty());
+            assert_eq!(
+                DashboardSite::user_option(subscriber, "admin_color").as_deref(),
+                Some(&b"modern"[..])
+            );
+            let comments = subscriber.recent_comments(None);
+            assert_eq!(comments.len(), 5);
+            assert!(
+                comments
+                    .iter()
+                    .all(|c| c.status == "approved" && !c.can_edit)
+            );
+            assert!(comments.iter().all(|c| c.comment.post_id != 1168));
+            assert!(!subscriber.can_edit_post(&comments[0].post.clone().unwrap()));
+        });
     })
     .await
     .unwrap();

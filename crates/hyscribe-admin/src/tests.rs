@@ -314,7 +314,10 @@ impl crate::dashboard::DashboardSite for Role {
             }
         }
     }
-    fn recent_comments(&self) -> Vec<crate::dashboard::RecentComment> {
+    fn recent_comments(
+        &self,
+        _: Option<&hyscribe_model::Post>,
+    ) -> Vec<crate::dashboard::RecentComment> {
         // `edit_comment` is `edit_post` of the comment's post, user 1's.
         let can_edit = self.can("edit_published_posts");
         let hello = crate::dashboard::tests::hello_comment(can_edit);

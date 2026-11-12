@@ -598,20 +598,85 @@ impl Db {
         row.try_get("latest").map_err(db_error)
     }
 
-    /// `wp_count_comments()->moderated`: the comments awaiting moderation,
-    /// without notes, which `WP_Comment_Query` leaves out.
-    pub async fn moderated_comments(&self) -> Result<u64, DbError> {
+    /// Posts of type `post` in one status, as the dashboard lists them.
+    pub async fn posts_by_status(&self, query: &StatusQuery<'_>) -> Result<Vec<Post>, DbError> {
+        let mut sql = Sql::new(concat!(
+            "SELECT ",
+            post_columns!(),
+            " FROM {prefix}posts WHERE post_type = 'post' AND post_status = ?"
+        ));
+        sql.bind(Bind::Text(query.status.to_string()));
+        if let Some(author) = query.author {
+            sql.push(" AND post_author = ?");
+            sql.bind(Bind::Int(author));
+        }
+        sql.push(match query.order {
+            StatusOrder::DateAsc => " ORDER BY post_date ASC LIMIT ?",
+            StatusOrder::DateDesc => " ORDER BY post_date DESC LIMIT ?",
+            StatusOrder::ModifiedDesc => " ORDER BY post_modified DESC LIMIT ?",
+        });
+        sql.bind(Bind::Int(u64::from(query.limit)));
+        let rows = sql
+            .query(&self.prefix)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(post).collect()
+    }
+
+    /// `wp_count_comments()`'s approved, moderated, spam and trashed
+    /// comments, and `user`'s approved and pending ones; notes left out.
+    pub async fn comment_counts(&self, user: u64) -> Result<[u64; 5], DbError> {
         let sql = self.prefix.sql(
-            "SELECT COUNT(*) AS moderated FROM {prefix}comments \
-             WHERE comment_approved = '0' AND comment_type != 'note'",
+            "SELECT CAST(COALESCE(SUM(comment_approved = '1'), 0) AS SIGNED) AS approved, \
+             CAST(COALESCE(SUM(comment_approved = '0'), 0) AS SIGNED) AS moderated, \
+             CAST(COALESCE(SUM(comment_approved = 'spam'), 0) AS SIGNED) AS spam, \
+             CAST(COALESCE(SUM(comment_approved = 'trash'), 0) AS SIGNED) AS trash, \
+             CAST(COALESCE(SUM(user_id = ? AND comment_approved IN ('0', '1')), 0) AS SIGNED) AS mine \
+             FROM {prefix}comments WHERE comment_type != 'note'",
         );
         let row = sqlx::query(sql)
+            .bind(user)
             .fetch_one(&self.pool)
             .await
             .map_err(db_error)?;
         let mut c = Columns::new(&row);
-        let moderated = c.signed("moderated").unsigned_abs();
-        c.finish(moderated)
+        let counts = ["approved", "moderated", "spam", "trash", "mine"]
+            .map(|name| c.signed(name).unsigned_abs());
+        c.finish(counts)
+    }
+
+    /// The latest comments that are approved, or also pending when
+    /// `pending`, newest first, with their `comment_approved`.
+    pub async fn latest_comments(
+        &self,
+        pending: bool,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<(Comment, String)>, DbError> {
+        let sql = self.prefix.sql(concat!(
+            "SELECT ",
+            comment_columns!(),
+            ", comment_approved FROM {prefix}comments \
+             WHERE (comment_approved = '1' OR (? AND comment_approved = '0')) AND comment_type != 'note' \
+             ORDER BY comment_date_gmt DESC, comment_ID DESC LIMIT ? OFFSET ?"
+        ));
+        let rows = sqlx::query(sql)
+            .bind(pending)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                comment(row).and_then(|comment| {
+                    let mut c = Columns::new(row);
+                    let approved = c.text("comment_approved");
+                    c.finish((comment, approved))
+                })
+            })
+            .collect()
     }
 
     /// One approved comment by ID, of any type.
@@ -1364,6 +1429,29 @@ fn esc_like(text: &str) -> String {
 enum Bind {
     Text(String),
     Int(u64),
+}
+
+/// The posts `Db::posts_by_status()` lists.
+pub struct StatusQuery<'a> {
+    /// `post_status`.
+    pub status: &'a str,
+    /// Only this author's.
+    pub author: Option<u64>,
+    /// Their order.
+    pub order: StatusOrder,
+    /// How many.
+    pub limit: u32,
+}
+
+/// The orders of `StatusQuery`.
+#[derive(Clone, Copy)]
+pub enum StatusOrder {
+    /// Oldest first.
+    DateAsc,
+    /// Newest first.
+    DateDesc,
+    /// Last modified first.
+    ModifiedDesc,
 }
 
 /// SQL assembled only from fixed fragments, with bound values.

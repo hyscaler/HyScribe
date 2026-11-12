@@ -405,7 +405,7 @@ fn data(site: &Role) -> Activity {
     Activity {
         future: site.recent_posts("future"),
         published: site.recent_posts("publish"),
-        comments: site.recent_comments(),
+        comments: site.recent_comments(None),
     }
 }
 

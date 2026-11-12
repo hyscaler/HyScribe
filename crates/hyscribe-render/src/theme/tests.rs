@@ -123,3 +123,8 @@ fn twentytwentyfive_files_are_built_in() {
         assert_eq!(twentytwentyfive_file(path), None, "{path}");
     }
 }
+
+#[test]
+fn the_theme_is_named_by_its_header() {
+    assert_eq!(twentytwentyfive().name(), "Twenty Twenty-Five");
+}

@@ -198,6 +198,11 @@ fn style_handles(name: &str, metadata: &Value) -> Vec<String> {
 }
 
 impl Theme {
+    /// The theme's `Theme Name` header.
+    pub fn name(&self) -> String {
+        header(STYLE_CSS, "Theme Name")
+    }
+
     /// The theme's slug, its `stylesheet`.
     pub fn slug(&self) -> &str {
         self.slug

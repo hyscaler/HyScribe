@@ -134,7 +134,7 @@ pub(crate) fn cookie<'a>(cookies: &'a [(Vec<u8>, Vec<u8>)], name: &str) -> Optio
 pub(crate) struct LoginReads<'a> {
     pub(crate) reads: Reads<'a>,
     site: &'a Site,
-    now: i64,
+    pub(crate) now: i64,
     /// The users found, for the cookies of the one who logs in and for the
     /// current user.
     found: RefCell<Vec<Credentials>>,

@@ -201,6 +201,8 @@ pub(crate) struct Renderer<'a> {
     pub(crate) tab_counters: crate::tabs::TabCounters,
     /// The synced patterns being rendered, by `ref`.
     pub(crate) open_refs: Vec<i64>,
+    /// The playlist's prepared attributes, its tracks' context.
+    pub(crate) playlist: Option<Value>,
 }
 
 /// A string attribute.
@@ -244,6 +246,7 @@ impl<'a> Renderer<'a> {
             tabs: None,
             tab_counters: HashMap::new(),
             open_refs: Vec::new(),
+            playlist: None,
         }
     }
 
@@ -331,6 +334,8 @@ impl Renderer<'_> {
             Some("core/query") => self.query(block),
             Some("core/post-template") => self.post_template(block),
             Some("core/tabs") => self.tabs(block),
+            Some("core/playlist") => self.playlist(block),
+            Some("core/playlist-track") => self.playlist_track(block),
             Some("core/tab-list") => self.tab_list(block),
             Some("core/tab-panel") => self.tab_panel(block),
             Some("core/terms-query") => self.terms_query(block),

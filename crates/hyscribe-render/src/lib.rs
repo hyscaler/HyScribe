@@ -36,6 +36,7 @@ mod media;
 mod media_text;
 mod navigation;
 pub mod permalinks;
+mod playlist;
 pub mod post;
 mod query_loop;
 mod query_pagination;

@@ -231,7 +231,8 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
             let site =
                 hyscribe_http::Site::load(db, config.home_url.clone(), config.site_url.clone())
                     .await
-                    .map_err(|err| format!("cannot read the site options: {err}"))?;
+                    .map_err(|err| format!("cannot read the site options: {err}"))?
+                    .with_salts(config.salts.clone());
             let address = std::net::SocketAddr::new(config.server.bind_host, config.server.port);
             let listener = tokio::net::TcpListener::bind(address)
                 .await

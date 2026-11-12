@@ -27,6 +27,23 @@ pub fn md5(data: &[u8]) -> String {
     bin2hex(&md5_raw(data))
 }
 
+/// `hash_hmac( 'md5', $data, $key )` (RFC 2104), as `wp_hash()` signs with.
+pub fn hash_hmac_md5(data: &[u8], key: &[u8]) -> String {
+    // A key longer than the 64 byte block is hashed first.
+    let key = if key.len() > 64 {
+        md5_raw(key).to_vec()
+    } else {
+        key.to_vec()
+    };
+    let pad = |byte: u8| -> Vec<u8> {
+        (0..64)
+            .map(|i| key.get(i).copied().unwrap_or(0) ^ byte)
+            .collect()
+    };
+    let inner = md5_raw(&[pad(0x36), data.to_vec()].concat());
+    bin2hex(&md5_raw(&[&pad(0x5c)[..], &inner].concat()))
+}
+
 /// `md5( $data, true )`: the 16 byte digest.
 pub fn md5_raw(data: &[u8]) -> [u8; 16] {
     let mut message = data.to_vec();
@@ -114,6 +131,37 @@ mod tests {
             (1000, "cf99013ad280afe9f95b676ad1badfc6"),
         ] {
             assert_eq!(md5(&text.as_bytes()[..len]), digest, "{len}");
+        }
+    }
+
+    /// RFC 2202's HMAC-MD5 cases, and an empty key, as PHP gives them.
+    #[test]
+    fn hmac_like_php() {
+        for (data, key, digest) in [
+            (
+                &b"Hi There"[..],
+                vec![0x0b; 16],
+                "9294727a3638bb1c13f48ef8158bfc9d",
+            ),
+            (
+                b"what do ya want for nothing?",
+                b"Jefe".to_vec(),
+                "750c783e6ab0b503eaa86e310a5db738",
+            ),
+            (
+                &[0xdd; 50][..],
+                vec![0xaa; 16],
+                "56be34521d144c88dbb8c733f0e8b3f6",
+            ),
+            (
+                b"Test Using Larger Than Block-Size Key - Hash Key First",
+                vec![0xaa; 80],
+                "6b1ab7fe4bd7bf8f0b62e6ce61b9d0cd",
+            ),
+            (b"", Vec::new(), "74e6f7298a9c2d168935f58c001bad88"),
+            (b"data", vec![b'k'; 64], "e0525f930df7e5415f8beed9da4e1f3c"),
+        ] {
+            assert_eq!(super::hash_hmac_md5(data, &key), digest);
         }
     }
 }

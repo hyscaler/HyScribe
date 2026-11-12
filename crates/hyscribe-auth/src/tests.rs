@@ -76,3 +76,36 @@ fn hashes_are_salted_at_random() {
     assert_eq!(hash_password(&[b'p'; 4096]).unwrap().len(), 63);
     assert!(hash_from(b"x", Err(io::Error::other("no"))).is_err());
 }
+
+/// Every case of `reference/auth/salt-golden.php`.
+#[test]
+fn salts_match_php() {
+    use hyscribe_phpser::json_decode;
+    let golden = include_str!("../tests/golden/salt.tsv");
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let constants = json_decode(&unhex(fields[0])).unwrap();
+        let options = json_decode(&unhex(fields[1])).unwrap();
+        let constants: Vec<(String, Vec<u8>)> = constants
+            .as_array()
+            .unwrap_or_default()
+            .iter()
+            .map(|(k, v)| {
+                (
+                    String::from_utf8(k.to_php_string()).unwrap(),
+                    v.to_php_string(),
+                )
+            })
+            .collect();
+        let constants: Vec<(&str, &[u8])> = constants
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_slice()))
+            .collect();
+        let ours = wp_salt_auth(&constants, |name| {
+            options.get_str(name).map(|v| v.to_php_string())
+        });
+        let php = (fields[2] != "~").then(|| unhex(fields[2]));
+        assert_eq!(ours, php, "{line}");
+    }
+    assert_eq!(golden.lines().count(), 15);
+}

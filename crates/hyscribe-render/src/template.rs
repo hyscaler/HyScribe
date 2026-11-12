@@ -355,6 +355,7 @@ impl Renderer<'_> {
             Some("core/navigation-submenu") => self.navigation_submenu(block),
             Some("core/accordion") => self.accordion(block),
             Some("core/widget-group") => self.widget_group(block),
+            Some("core/legacy-widget") => self.legacy_widget(block),
             Some("core/accordion-item") => self.accordion_item(block),
             Some("core/gallery") => self.gallery(block),
             Some("core/file") => self.file(block),

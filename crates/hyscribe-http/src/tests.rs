@@ -241,6 +241,7 @@ async fn database_errors_show_no_details() {
         home: String::new(),
         theme: hyscribe_render::theme::twentytwentyfive(),
         rewriter: rewrite::Rewriter::default(),
+        salts: Vec::new(),
     });
     // The 404 page fails while rendering, reading an option it has not loaded.
     for uri in [
@@ -714,6 +715,7 @@ async fn the_front_page_links_to_home() {
         home: base.home.clone(),
         theme: hyscribe_render::theme::twentytwentyfive(),
         rewriter: rewrite::Rewriter::default(),
+        salts: Vec::new(),
     });
     // Search results list the front page with a link to it.
     let reply = request(&site, "GET", "/?s=sample").await;
@@ -838,12 +840,39 @@ async fn failed_reads_answer_defaults() {
         home: String::new(),
         theme: hyscribe_render::theme::twentytwentyfive(),
         rewriter: rewrite::Rewriter::default(),
+        salts: Vec::new(),
     });
     let handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
         let reads = Reads::new(&site, handle);
         assert!(!reads.has_published_posts());
         assert!(reads.finish().is_err());
+    })
+    .await
+    .unwrap();
+}
+
+/// `wp_hash()` signs with `AUTH_KEY` and `AUTH_SALT`; the default install
+/// stores no salts to fall back on.
+#[tokio::test(flavor = "multi_thread")]
+async fn wp_hash_signs_with_the_configured_salts() {
+    use hyscribe_config::Secret;
+    use hyscribe_render::site::Site as _;
+    let db = Db::connect(&fixture_config()).await.unwrap();
+    let salted = Site::load(db.clone(), None, None)
+        .await
+        .unwrap()
+        .with_salts(vec![
+            ("AUTH_KEY", Secret::new("key")),
+            ("AUTH_SALT", Secret::new("salt")),
+        ]);
+    let bare = Site::load(db, None, None).await.unwrap();
+    let handle = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let reads = Reads::new(&salted, handle.clone());
+        let expected = hyscribe_phpser::hash_hmac_md5(b"data", b"keysalt");
+        assert_eq!(reads.wp_hash(b"data"), Some(expected));
+        assert_eq!(Reads::new(&bare, handle).wp_hash(b"data"), None);
     })
     .await
     .unwrap();

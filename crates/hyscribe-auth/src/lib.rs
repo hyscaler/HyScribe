@@ -272,5 +272,28 @@ fn equal(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0, |d, (x, y)| d | (x ^ y)) == 0
 }
 
+/// `wp_salt( 'auth' )` from the keys and salts set and the options: each
+/// of `AUTH_KEY` and `AUTH_SALT` unless empty, shared or the placeholder,
+/// else its option; `None` where WordPress would generate and store one.
+pub fn wp_salt_auth(
+    constants: &[(&str, &[u8])],
+    option: impl Fn(&str) -> Option<Vec<u8>>,
+) -> Option<Vec<u8>> {
+    let truthy = |value: &[u8]| !value.is_empty() && value != b"0";
+    let usable = |value: &[u8]| {
+        truthy(value)
+            && value != b"put your unique phrase here"
+            && constants.iter().filter(|(_, v)| *v == value).count() < 2
+    };
+    let part = |name: &str| {
+        let constant = constants
+            .iter()
+            .find(|(n, v)| *n == name && usable(v))
+            .map(|(_, v)| v.to_vec());
+        constant.or_else(|| option(&name.to_ascii_lowercase()).filter(|v| truthy(v)))
+    };
+    Some([part("AUTH_KEY")?, part("AUTH_SALT")?].concat())
+}
+
 #[cfg(test)]
 mod tests;

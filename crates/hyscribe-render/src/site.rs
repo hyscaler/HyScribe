@@ -60,6 +60,11 @@ pub trait Site {
         None
     }
 
+    /// `wp_hash( $data )`, `None` without the salts it signs with.
+    fn wp_hash(&self, _data: &[u8]) -> Option<String> {
+        None
+    }
+
     /// `get_term( $id, $taxonomy )`. Sites without term data have none.
     fn term(&self, _id: u64, _taxonomy: &str) -> Option<Term> {
         None

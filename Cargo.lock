@@ -680,6 +680,7 @@ dependencies = [
  "axum",
  "httpdate",
  "hyscribe-assets",
+ "hyscribe-auth",
  "hyscribe-config",
  "hyscribe-db",
  "hyscribe-kses",

@@ -15,6 +15,7 @@
 //! [`is_serialized`] and [`maybe_unserialize`] reproduce the WordPress
 //! functions of the same name.
 
+mod base64;
 mod cast;
 mod decode;
 mod encode;
@@ -27,6 +28,7 @@ mod query;
 mod value;
 mod wp;
 
+pub use base64::base64_decode;
 pub use cast::{absint, float_to_string, is_empty_string, isset, string_to_float};
 pub use decode::{MAX_DEPTH, decode};
 pub use encode::encode;
@@ -35,7 +37,7 @@ pub use float::Float;
 pub use json::{
     JSON_MAX_DEPTH, json_decode, json_encode, json_encode_script_data, json_encode_unescaped,
 };
-pub use md5::{bin2hex, md5, md5_raw};
+pub use md5::{bin2hex, hash_hmac_md5, md5, md5_raw};
 pub use natcmp::strnatcasecmp;
 pub use query::{
     add_query_arg, add_query_values, build_query, parse_str, rawurlencode, rawurlencode_deep,

@@ -66,6 +66,8 @@ pub struct Site {
     theme: Theme,
     /// The rewrite rules of the permalink options, built once.
     rewriter: rewrite::Rewriter,
+    /// The keys and salts set in the configuration.
+    salts: Vec<(&'static str, hyscribe_config::Secret)>,
 }
 
 impl Site {
@@ -94,9 +96,15 @@ impl Site {
             home,
             theme: twentytwentyfive(),
             rewriter: rewrite::Rewriter::default(),
+            salts: Vec::new(),
         };
         site.build_rewriter();
         Ok(site)
+    }
+
+    /// The site with the keys and salts `wp_hash()` signs with.
+    pub fn with_salts(self, salts: Vec<(&'static str, hyscribe_config::Secret)>) -> Site {
+        Site { salts, ..self }
     }
 
     /// The permalink options.

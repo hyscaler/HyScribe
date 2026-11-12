@@ -54,5 +54,6 @@ pub mod term_template;
 pub mod theme;
 mod title;
 mod variations;
+mod widgets;
 
 pub use query_loop::{search_terms, sticky_posts};

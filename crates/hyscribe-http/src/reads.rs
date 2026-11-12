@@ -85,6 +85,17 @@ impl<'a> Reads<'a> {
 }
 
 impl RenderSite for Reads<'_> {
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        let constants: Vec<(&str, &[u8])> = self
+            .site
+            .salts
+            .iter()
+            .map(|(name, secret)| (*name, secret.expose().as_bytes()))
+            .collect();
+        let salt = hyscribe_auth::wp_salt_auth(&constants, |name| self.option(name))?;
+        Some(hyscribe_phpser::hash_hmac_md5(data, &salt))
+    }
+
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         match self.site.options.get(name) {
             Some(value) => Some(value.clone()),

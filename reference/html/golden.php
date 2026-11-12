@@ -33,6 +33,8 @@
 //   P            get_token_type()                n or s<hex>
 //   I            get_namespace()                 s<hex>
 //   O            next_token()                    1 or 0
+//   F            next_token() until the end, subdividing text: f<token>,...
+//                each type.subdivided.classification.text in hex
 
 ini_set( 'display_errors', 'stderr' );
 error_reporting( E_ALL & ~E_WARNING );
@@ -70,6 +72,10 @@ class Golden_Processor extends WP_HTML_Tag_Processor {
 
 	// Whether a bookmark has moved to a negative offset, where PHP's strpos()
 	// counts from the end.
+	public function text_class() {
+		return $this->text_node_classification;
+	}
+
 	public function has_negative_bookmark() {
 		foreach ( $this->bookmarks as $bookmark ) {
 			if ( $bookmark->start < 0 ) {
@@ -159,6 +165,13 @@ function run_op( $p, $op ) {
 		case 'P':
 			$type = $p->get_token_type();
 			return null === $type ? 'n' : 's' . bin2hex( $type );
+		case 'F':
+			$tokens = array();
+			while ( $p->next_token() ) {
+				$split    = $p->subdivide_text_appropriately();
+				$tokens[] = implode( '.', array( bin2hex( (string) $p->get_token_type() ), bit( $split ), bin2hex( $p->text_class() ), bin2hex( $p->get_modifiable_text() ) ) );
+			}
+			return 'f' . implode( ',', $tokens );
 		case 'O':
 			return bit( $p->next_token() );
 		case 'I':
@@ -376,6 +389,12 @@ function edge_cases() {
 				array( $n, $n, op( 'K', 'b' ), $n, $n, op( 'Z', (string) $first[0], (string) $first[1], $first[2] ), op( 'U' ), op( 'Y', 'b' ), op( 'Z', (string) $second[0], (string) $second[1], $second[2] ), op( 'J', 'b' ), $t, op( 'Y', 'b' ) ),
 			);
 		}
+	}
+	// Text split into its leading NUL bytes, or its leading whitespace.
+	$texts = array( '', 'abc', "  \t\nabc", "\x00\x00a", "\x00 a", " \x00", "\x00", "   ", '&#32;&Tab; x', '&#x20;&nbsp;x', '&#32', '&#32;', '&NewLine;&#10;x', '&#13;x', '&#9;&#x9;&#12;y', '&amp; x', ' &#65;', "a\x00", ' <b> c', '&#32;<b>', "\r\n x", '&Tab', '&#0;x', '&#xA0;x' );
+	foreach ( $texts as $html ) {
+		$cases[] = array( $html, array( op( 'F' ) ) );
+		$cases[] = array( '<p>' . $html . '</p>', array( op( 'F' ) ) );
 	}
 	// The target of a processing instruction and of a comment that looks like one.
 	foreach ( array( '<?a b?>', '<?x:y z?>', '<?a b>', '<!x>' ) as $html ) {

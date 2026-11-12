@@ -8,7 +8,7 @@
 // Tests fail by panicking.
 #![allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)]
 
-use hyscribe_html::{Attribute, Namespace, TagProcessor};
+use hyscribe_html::{Attribute, Namespace, TagProcessor, TextClass};
 use hyscribe_testkit::unhex;
 
 fn hex(bytes: &[u8]) -> String {
@@ -78,6 +78,25 @@ fn run(p: &mut TagProcessor, op: &str) -> String {
             format!("v{}", tokens.join(","))
         }
         "O" => bit(p.next_token()),
+        "F" => {
+            let mut tokens = Vec::new();
+            while p.next_token() {
+                let split = p.subdivide_text_appropriately();
+                let class: &[u8] = match p.text_class() {
+                    TextClass::Generic => b"TEXT_IS_GENERIC",
+                    TextClass::NullSequence => b"TEXT_IS_NULL_SEQUENCE",
+                    TextClass::Whitespace => b"TEXT_IS_WHITESPACE",
+                };
+                tokens.push(format!(
+                    "{}.{}.{}.{}",
+                    hex(&p.get_token_type().unwrap_or_default()),
+                    bit(split),
+                    hex(class),
+                    hex(&p.get_modifiable_text())
+                ));
+            }
+            format!("f{}", tokens.join(","))
+        }
         "P" => p
             .get_token_type()
             .map_or_else(|| "n".into(), |t| format!("s{}", hex(&t))),
@@ -171,7 +190,7 @@ fn check(golden: &str, expected_count: usize) {
 
 #[test]
 fn matches_wordpress_on_edge_cases() {
-    check(include_str!("golden/edge.tsv"), 2872);
+    check(include_str!("golden/edge.tsv"), 2920);
 }
 
 #[test]

@@ -16,7 +16,7 @@ use std::mem;
 
 use hyscribe_kses::esc_url;
 
-use crate::decoder::{REPLACEMENT, decode_attribute, decode_text_node};
+use crate::decoder::{REPLACEMENT, decode_attribute, decode_text_node, read_character_reference};
 
 /// HTML whitespace.
 const WHITESPACE: &[u8] = b" \t\x0c\r\n";
@@ -105,6 +105,17 @@ impl CommentType {
             CommentType::InvalidHtml => "COMMENT_AS_INVALID_HTML",
         }
     }
+}
+
+/// What a text node holds, as `subdivide_text_appropriately()` finds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextClass {
+    /// `TEXT_IS_GENERIC`.
+    Generic,
+    /// `TEXT_IS_NULL_SEQUENCE`: only NUL bytes.
+    NullSequence,
+    /// `TEXT_IS_WHITESPACE`: only whitespace, or references to it.
+    Whitespace,
 }
 
 /// The namespace tokens are parsed in: `get_namespace()`.
@@ -328,6 +339,7 @@ pub struct TagProcessor {
     namespace: Namespace,
     /// Where a newline right after a `<pre>` or `<listing>` is dropped.
     skip_newline_at: Option<usize>,
+    text_class: TextClass,
 }
 
 impl TagProcessor {
@@ -354,6 +366,7 @@ impl TagProcessor {
             comment_type: None,
             namespace: Namespace::Html,
             skip_newline_at: None,
+            text_class: TextClass::Generic,
         }
     }
 
@@ -543,6 +556,55 @@ impl TagProcessor {
             State::Ready | State::Complete | State::Incomplete => return None,
         };
         Some(name.to_vec())
+    }
+
+    /// `subdivide_text_appropriately()`: shortens a text node to its leading
+    /// NUL bytes, or else its leading whitespace, whitespace character
+    /// references included, so a tree builder can treat them apart; `false`
+    /// when there are none, or not at text.
+    pub fn subdivide_text_appropriately(&mut self) -> bool {
+        if self.state != State::TextNode {
+            return false;
+        }
+        self.text_class = TextClass::Generic;
+        let start = self.text_starts_at;
+        let end = start + self.text_length;
+        let text = self.html.get(..end).unwrap_or_default();
+        let nulls = span_of(text, start, b"\0");
+        if nulls > 0 {
+            self.text_class = TextClass::NullSequence;
+            return self.shorten_text(start + nulls);
+        }
+        // At the end of the text neither whitespace nor a reference follows.
+        let mut at = start;
+        loop {
+            at += span_of(text, at, WHITESPACE);
+            let reference = (text.get(at) == Some(&b'&'))
+                .then(|| read_character_reference(text, at, false))
+                .flatten()
+                .filter(|(replacement, _)| span_of(replacement, 0, WHITESPACE) == 1);
+            match reference {
+                Some((_, length)) => at += length,
+                None => break,
+            }
+        }
+        if at == start {
+            return false;
+        }
+        self.text_class = TextClass::Whitespace;
+        self.shorten_text(at)
+    }
+
+    /// The text node, ending at `end`.
+    fn shorten_text(&mut self, end: usize) -> bool {
+        self.text_length = end - self.text_starts_at;
+        self.bytes_already_parsed = end;
+        true
+    }
+
+    /// `text_node_classification`.
+    pub fn text_class(&self) -> TextClass {
+        self.text_class
     }
 
     /// `get_comment_type()`: how a comment token was written.
@@ -1151,6 +1213,7 @@ impl TagProcessor {
         self.text_starts_at = 0;
         self.text_length = 0;
         self.comment_type = None;
+        self.text_class = TextClass::Generic;
         self.attributes.clear();
         self.attribute_order.clear();
         self.duplicate_attributes.clear();

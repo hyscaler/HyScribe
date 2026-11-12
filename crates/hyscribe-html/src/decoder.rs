@@ -56,7 +56,11 @@ fn decode(text: &[u8], attribute: bool) -> Vec<u8> {
 
 /// The character reference at `at` (an `&`), as its UTF-8 bytes and the
 /// length it spans.
-fn read_character_reference(text: &[u8], at: usize, attribute: bool) -> Option<(Vec<u8>, usize)> {
+pub(crate) fn read_character_reference(
+    text: &[u8],
+    at: usize,
+    attribute: bool,
+) -> Option<(Vec<u8>, usize)> {
     let byte = |i: usize| text.get(i).copied();
     match byte(at + 1)? {
         b'#' => numeric_reference(text, at),

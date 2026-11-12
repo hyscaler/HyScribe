@@ -4,12 +4,16 @@
 
 use hyscribe_kses::{esc_html, esc_url};
 use hyscribe_phpser::{
-    Key, Maybe, Value, base64_decode, decode, is_empty_string, isset, maybe_unserialize, parse_str,
+    Key, Maybe, Value, base64_decode, hash_equals, is_empty_string, isset, maybe_unserialize,
+    parse_str, unserialize,
 };
 
+use crate::autop::wpautop;
+use crate::balance::force_balance_tags;
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, wptexturize};
+use crate::permalinks;
 use crate::template::Renderer;
 
 /// A core widget class: its `id_base` and class name.
@@ -18,8 +22,9 @@ struct Widget {
     classname: &'static str,
 }
 
-/// The core widgets `wp_widgets_init()` registers, in its order.
-const WIDGETS: [Widget; 17] = [
+/// The core widgets `wp_widgets_init()` registers. The links widget needs
+/// the link manager, which WordPress has turned off by default since 3.5.
+const WIDGETS: [Widget; 18] = [
     Widget {
         id_base: "pages",
         classname: "widget_pages",
@@ -88,9 +93,14 @@ const WIDGETS: [Widget; 17] = [
         id_base: "custom_html",
         classname: "widget_custom_html",
     },
+    Widget {
+        id_base: "block",
+        classname: "widget_block",
+    },
 ];
 
 /// The markup a widget is wrapped in: a sidebar's, or `the_widget()`'s.
+#[derive(Default)]
 struct Args {
     before_widget: Vec<u8>,
     after_widget: Vec<u8>,
@@ -117,10 +127,11 @@ impl Renderer<'_> {
             (Some(encoded), Some(hash)) if isset(Some(encoded)) && isset(Some(hash)) => {
                 let serialized = base64_decode(&encoded.to_php_string());
                 let signed = self.context.site.wp_hash(&serialized);
-                if signed.map(String::into_bytes) != Some(hash.to_php_string()) {
+                let hash = hash.to_php_string();
+                if !signed.is_some_and(|signed| hash_equals(signed.as_bytes(), &hash)) {
                     return Vec::new();
                 }
-                parse_args(decode(&serialized).unwrap_or(Value::Bool(false)))
+                parse_args(unserialize(&serialized).unwrap_or(Value::Bool(false)))
             }
             _ => Value::Array(Vec::new()),
         };
@@ -153,28 +164,25 @@ impl Renderer<'_> {
         if sidebar.map(|(name, _)| name) != Some(&Key::String(b"wp_inactive_widgets".to_vec())) {
             return Vec::new();
         }
-        let found = WIDGETS.iter().find_map(|widget| {
-            settings(site, widget)
-                .into_iter()
-                .find(|(number, _)| format!("{}-{number}", widget.id_base).as_bytes() == id)
-                .map(|(_, instance)| (widget, instance))
-        });
-        let Some((widget, instance)) = found else {
-            return Vec::new();
-        };
-        let args = Args {
-            before_widget: Vec::new(),
-            after_widget: Vec::new(),
-            before_title: Vec::new(),
-            after_title: Vec::new(),
-        };
-        self.widget(widget, &args, &instance)
+        let found = WIDGETS
+            .iter()
+            .find_map(|widget| Some((widget, instance(site, widget, id)?)));
+        // `display_callback()` skips an instance that is unset or `false`.
+        match found {
+            Some((widget, instance)) if !matches!(instance, Value::Null | Value::Bool(false)) => {
+                self.widget(widget, &Args::default(), &instance)
+            }
+            _ => Vec::new(),
+        }
     }
 
     /// The widget's `widget()` output.
     fn widget(&mut self, widget: &Widget, args: &Args, instance: &Value) -> Vec<u8> {
         match widget.id_base {
             "search" => self.search_widget(args, instance),
+            "custom_html" => self.custom_html_widget(args, instance),
+            "meta" => self.meta_widget(args, instance),
+            "text" => self.text_widget(args, instance),
             _ => Vec::new(),
         }
     }
@@ -213,19 +221,215 @@ fn option_value(site: &dyn crate::site::Site, name: &str) -> Value {
     }
 }
 
-/// The widget's stored instances by number, as `get_settings()` gives them.
-fn settings(site: &dyn crate::site::Site, widget: &Widget) -> Vec<(i64, Value)> {
+impl Renderer<'_> {
+    /// `WP_Widget_Custom_HTML::widget()`.
+    fn custom_html_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
+        let title = widget_title(instance);
+        let content = instance.get_str("content").map(Value::to_php_string);
+        let content = self.balance_tags(&content.unwrap_or_default());
+        [
+            &with_text_class(&args.before_widget)[..],
+            &titled(args, &title),
+            b"<div class=\"textwidget custom-html-widget\">",
+            &content,
+            b"</div>",
+            &args.after_widget,
+        ]
+        .concat()
+    }
+
+    /// `WP_Widget_Meta::widget()`, in the XHTML format a block theme gets.
+    fn meta_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
+        let context = &self.context;
+        let site = context.site;
+        let title = instance.get_str("title").filter(|title| !title.is_empty());
+        let title = title.map_or(b"Meta".to_vec(), Value::to_php_string);
+        let title = filter_title(&title);
+        let register = if is_empty_string(&site.option("users_can_register").unwrap_or_default()) {
+            Vec::new()
+        } else {
+            let url = context.site_url(b"/wp-login.php?action=register");
+            [b"<li><a href=\"", &url[..], b"\">Register</a></li>"].concat()
+        };
+        let login = esc_url(&context.site_url(b"/wp-login.php"));
+        let feed = |name| esc_url(&permalinks::feed_link(site, name));
+        [
+            &args.before_widget[..],
+            &titled(args, &title),
+            b"\n\t\t<ul>\n\t\t\t",
+            &register,
+            b"\t\t\t<li><a href=\"",
+            &login,
+            b"\">Log in</a></li>\n\t\t\t<li><a href=\"",
+            &feed("rss2"),
+            b"\">Entries feed</a></li>\n\t\t\t<li><a href=\"",
+            &feed("comments_rss2"),
+            b"\">Comments feed</a></li>\n\n\t\t\t<li><a href=\"https://wordpress.org/\">WordPress.org</a></li>\n\t\t</ul>\n\n\t\t",
+            &args.after_widget,
+        ]
+        .concat()
+    }
+
+    /// `WP_Widget_Text::widget()`: a visual widget's text gets the content
+    /// filters, a legacy one `wpautop()` when it asks for it.
+    fn text_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
+        let title = widget_title(instance);
+        let set = |name| instance.get_str(name).is_some_and(|v| !v.is_empty());
+        let visual = set("visual") && set("filter")
+            || matches!(instance.get_str("filter"), Some(Value::String(s)) if s == b"content");
+        let text = instance.get_str("text").filter(|text| !text.is_empty());
+        let text = self.balance_tags(&text.map(Value::to_php_string).unwrap_or_default());
+        let text = if visual {
+            self.content_filters(&text, true, true)
+        } else if set("filter") {
+            wpautop(&text, true)
+        } else {
+            text
+        };
+        [
+            &args.before_widget[..],
+            &titled(args, &title),
+            b"\t\t\t<div class=\"textwidget\">",
+            &fit_videos(&text),
+            b"</div>\n\t\t",
+            &args.after_widget,
+        ]
+        .concat()
+    }
+
+    /// `balanceTags()`: balanced only with the `use_balanceTags` option.
+    fn balance_tags(&self, text: &[u8]) -> Vec<u8> {
+        let option = self
+            .context
+            .site
+            .option("use_balanceTags")
+            .unwrap_or_default();
+        if Value::String(option).to_int() == 1 {
+            force_balance_tags(text)
+        } else {
+            text.to_vec()
+        }
+    }
+}
+
+/// The custom HTML widget's `widget_text` class, after each ` class="`.
+fn with_text_class(before_widget: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (i, &byte) in before_widget.iter().enumerate() {
+        out.push(byte);
+        let head = before_widget.get(..=i).unwrap_or_default();
+        let opened = matches!(
+            head.get(head.len().saturating_sub(8)..),
+            Some([space, b'c', b'l', b'a', b's', b's', b'=', b'"' | b'\''])
+                if is_pcre_space(*space)
+        );
+        if opened {
+            out.extend_from_slice(b"widget_text ");
+        }
+    }
+    out
+}
+
+/// PCRE's `\s`.
+fn is_pcre_space(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
+}
+
+/// `inject_video_max_width_style()` on each `video`, `iframe`, `object`
+/// or `embed` tag: no `width` or `height` attribute, and `100%` widths.
+fn fit_videos(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(start) = text
+        .get(at..)
+        .and_then(|rest| rest.iter().position(|&b| b == b'<'))
+    {
+        let start = at + start;
+        let tag = text.get(start..).unwrap_or_default();
+        let named = [&b"video"[..], b"iframe", b"object", b"embed"]
+            .iter()
+            .find_map(|name| {
+                let after = tag.get(1..=name.len())?;
+                (after.eq_ignore_ascii_case(name)
+                    && tag.get(name.len() + 1).is_some_and(|b| is_pcre_space(*b)))
+                .then_some(name.len())
+            });
+        let end = named.and_then(|_| tag.iter().position(|&b| b == b'>'));
+        let Some(end) = end else {
+            out.extend_from_slice(text.get(at..=start).unwrap_or_default());
+            at = start + 1;
+            continue;
+        };
+        out.extend_from_slice(text.get(at..start).unwrap_or_default());
+        let fitted = without_attribute(tag.get(..=end).unwrap_or_default(), b"height");
+        out.extend(full_width(&without_attribute(&fitted, b"width")));
+        at = start + end + 1;
+    }
+    out.extend_from_slice(text.get(at..).unwrap_or_default());
+    out
+}
+
+/// `preg_replace( '/\sNAME="\d+"/', '', $tag )`.
+fn without_attribute(tag: &[u8], name: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(rest) = tag.get(at..).filter(|rest| !rest.is_empty()) {
+        let value = rest
+            .get(1..)
+            .filter(|_| rest.first().is_some_and(|b| is_pcre_space(*b)))
+            .and_then(|r| r.strip_prefix(name))
+            .and_then(|r| r.strip_prefix(b"=\""));
+        let digits = value.map_or(0, |v| v.iter().take_while(|b| b.is_ascii_digit()).count());
+        if let Some(value) = value.filter(|v| digits > 0 && v.get(digits) == Some(&b'"')) {
+            at = tag.len() - value.len() + digits + 1;
+            continue;
+        }
+        out.extend(rest.first());
+        at += 1;
+    }
+    out
+}
+
+/// `preg_replace( '/(?<=width:)\s*\d+px(?=;?)/', '100%', $tag )`.
+fn full_width(tag: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(rest) = tag.get(at..).filter(|rest| !rest.is_empty()) {
+        if out.ends_with(b"width:") {
+            let space = rest.iter().take_while(|b| is_pcre_space(**b)).count();
+            let digits = rest
+                .get(space..)
+                .unwrap_or_default()
+                .iter()
+                .take_while(|b| b.is_ascii_digit())
+                .count();
+            if digits > 0 && rest.get(space + digits..space + digits + 2) == Some(b"px") {
+                out.extend_from_slice(b"100%");
+                at += space + digits + 2;
+                continue;
+            }
+        }
+        out.extend(rest.first());
+        at += 1;
+    }
+    out
+}
+
+/// The stored instance `id` names, from `get_settings()`, if it is registered.
+fn instance(site: &dyn crate::site::Site, widget: &Widget, id: &[u8]) -> Option<Value> {
     let settings = option_value(site, &format!("widget_{}", widget.id_base));
+    let numbered = |key: &Key| match key {
+        Key::Int(_) => true,
+        Key::String(number) => Value::String(number.clone()).is_numeric(),
+    };
     settings
         .as_array()
         .unwrap_or_default()
         .iter()
-        .cloned()
-        .filter_map(|(key, instance)| match key {
-            Key::Int(number) => Some((number, instance)),
-            Key::String(_) => None,
+        .find(|(key, _)| {
+            numbered(key) && [widget.id_base.as_bytes(), b"-", &key.to_php_string()].concat() == id
         })
-        .collect()
+        .map(|(_, instance)| instance.clone())
 }
 
 /// `wp_parse_args()` of an unserialized instance.
@@ -233,19 +437,19 @@ fn parse_args(instance: Value) -> Value {
     match instance {
         Value::Array(_) => instance,
         Value::Object { properties, .. } => Value::Array(properties),
-        Value::Null | Value::Bool(false) => Value::Array(Vec::new()),
         other => parse_str(&other.to_php_string()),
     }
 }
 
 /// The `title` instance setting through the `widget_title` filters.
 fn widget_title(instance: &Value) -> Vec<u8> {
-    let title = instance
-        .get_str("title")
-        .filter(|title| !title.is_empty())
-        .map(Value::to_php_string)
-        .unwrap_or_default();
-    esc_html(&convert_chars(&wptexturize(&title, &CORE_SHORTCODE_TAGS))).into_bytes()
+    let title = instance.get_str("title").filter(|title| !title.is_empty());
+    filter_title(&title.map(Value::to_php_string).unwrap_or_default())
+}
+
+/// The `widget_title` filters.
+fn filter_title(title: &[u8]) -> Vec<u8> {
+    esc_html(&convert_chars(&wptexturize(title, &CORE_SHORTCODE_TAGS))).into_bytes()
 }
 
 /// The title in the sidebar's title markup, if there is one.

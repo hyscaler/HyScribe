@@ -26,6 +26,12 @@ pub fn decode(input: &[u8]) -> Result<Value, Error> {
     }
 }
 
+/// PHP's `unserialize()`: the value at the start of the input, with any
+/// trailing bytes ignored, as PHP 8 only warns about them.
+pub fn unserialize(input: &[u8]) -> Option<Value> {
+    Parser { input, pos: 0 }.value(0).ok()
+}
+
 struct Parser<'a> {
     input: &'a [u8],
     pos: usize,
@@ -334,6 +340,13 @@ mod tests {
         );
         assert_eq!(decode(b"s:0:\"\";"), Ok(Value::String(Vec::new())));
         assert_eq!(decode(b"r:2;"), Ok(Value::ObjectRef(2)));
+    }
+
+    /// PHP 8.4 keeps a value that trailing bytes follow.
+    #[test]
+    fn unserialize_ignores_trailing_bytes() {
+        assert_eq!(super::unserialize(b"i:5;junk"), Some(Value::Int(5)));
+        assert_eq!(super::unserialize(b"junk"), None);
         assert_eq!(decode(b"R:3;"), Ok(Value::Ref(3)));
         assert_eq!(
             decode(b"E:7:\"Suit:Up\";"),

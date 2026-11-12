@@ -6,7 +6,7 @@
 //! phpass, plain bcrypt and MD5 hashes older sites hold.
 
 use blowfish::Blowfish;
-use hyscribe_phpser::{md5, md5_raw, php_trim};
+use hyscribe_phpser::{hash_equals, md5, md5_raw, php_trim};
 use sha2::{Digest, Sha384};
 use std::io::{self, Read};
 
@@ -49,7 +49,7 @@ fn hash_with_salt(password: &[u8], salt: [u8; 16]) -> String {
 /// bcrypt or 2^30 MD5 rounds, so `hash` must never come from a request.
 pub fn check_password(password: &[u8], hash: &[u8]) -> bool {
     if hash.len() <= 32 {
-        return equal(hash, md5(password).as_bytes());
+        return hash_equals(hash, md5(password).as_bytes());
     }
     if password.len() > MAX_PASSWORD {
         return false;
@@ -111,7 +111,7 @@ fn prehash(password: &[u8]) -> Vec<u8> {
 /// `password_verify()` for bcrypt hashes. Other formats PHP's `crypt()`
 /// knows (MD5, SHA-256 and SHA-512 crypt, DES) and Argon2 are not ported.
 fn password_verify(password: &[u8], hash: &[u8]) -> bool {
-    crypt(password, hash).is_some_and(|out| equal(out.as_bytes(), hash))
+    crypt(password, hash).is_some_and(|out| hash_equals(out.as_bytes(), hash))
 }
 
 /// PHP's `crypt()` with a bcrypt setting (`crypt_blowfish`), or `None`
@@ -264,17 +264,11 @@ fn phpass(password: &[u8], hash: &[u8]) -> bool {
     }
     let mut out = setting.to_vec();
     out.extend(encode(&digest, PHPASS_ALPHABET, true).bytes());
-    equal(&out, hash)
+    hash_equals(&out, hash)
 }
 
-/// Compares in time that depends only on the lengths, as `hash_equals()`.
-fn equal(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0, |d, (x, y)| d | (x ^ y)) == 0
-}
-
-/// `wp_salt( 'auth' )` from the keys and salts set and the options: each
-/// of `AUTH_KEY` and `AUTH_SALT` unless empty, shared or the placeholder,
-/// else its option; `None` where WordPress would generate and store one.
+/// `wp_salt( 'auth' )`: `AUTH_KEY` and `AUTH_SALT` unless empty, shared or the
+/// placeholder, else their options; `None` where WordPress would store new ones.
 pub fn wp_salt_auth(
     constants: &[(&str, &[u8])],
     option: impl Fn(&str) -> Option<Vec<u8>>,

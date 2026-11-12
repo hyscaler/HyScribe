@@ -223,7 +223,7 @@ impl Context<'_> {
     }
 
     /// `site_url( $path )`.
-    fn site_url(&self, path: &[u8]) -> Vec<u8> {
+    pub(crate) fn site_url(&self, path: &[u8]) -> Vec<u8> {
         [&self.site.option("siteurl").unwrap_or_default()[..], path].concat()
     }
 

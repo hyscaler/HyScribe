@@ -27,6 +27,11 @@ pub fn md5(data: &[u8]) -> String {
     bin2hex(&md5_raw(data))
 }
 
+/// `hash_equals()`: compares in time that depends only on the lengths.
+pub fn hash_equals(known: &[u8], user: &[u8]) -> bool {
+    known.len() == user.len() && known.iter().zip(user).fold(0, |d, (x, y)| d | (x ^ y)) == 0
+}
+
 /// `hash_hmac( 'md5', $data, $key )` (RFC 2104), as `wp_hash()` signs with.
 pub fn hash_hmac_md5(data: &[u8], key: &[u8]) -> String {
     // A key longer than the 64 byte block is hashed first.
@@ -163,5 +168,17 @@ mod tests {
         ] {
             assert_eq!(super::hash_hmac_md5(data, &key), digest);
         }
+    }
+
+    /// Equal only byte for byte, whatever the bytes cancel out to.
+    #[test]
+    fn hash_equals_compares_every_byte() {
+        use super::hash_equals;
+        assert!(hash_equals(b"abc", b"abc"));
+        assert!(!hash_equals(b"abc", b"abd"));
+        assert!(!hash_equals(b"\x01\x01", b"\x00\x00"));
+        assert!(!hash_equals(b"\x01", b"\x02"));
+        assert!(!hash_equals(b"abc", b"ab"));
+        assert!(hash_equals(b"", b""));
     }
 }

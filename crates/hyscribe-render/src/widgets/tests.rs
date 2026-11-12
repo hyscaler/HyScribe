@@ -44,19 +44,22 @@ impl Site for Widgets {
 fn legacy_widgets_match_php() {
     let golden = include_str!("../../tests/golden/legacy-widget.tsv");
     let lines: Vec<Vec<&str>> = golden.lines().map(|l| l.split('\t').collect()).collect();
-    let site = Widgets {
-        install: crate::fixture::DefaultInstall {
-            home: b"http://127.0.0.1:8081".to_vec(),
-        },
-        options: lines
-            .iter()
-            .filter(|f| f[0] == "option")
-            .map(|f| (f[1].to_string(), unhex(f[2])))
-            .collect(),
-    };
+    // Options apply from where the oracle set them; its `WP_SITEURL`
+    // overrides the stored one.
+    let mut options = vec![("siteurl".to_string(), b"http://127.0.0.1:8081".to_vec())];
     let theme = twentytwentyfive();
     let mut failures = Vec::new();
-    for f in lines.iter().filter(|f| f[0] == "render") {
+    for f in &lines {
+        if f[0] == "option" {
+            options.insert(0, (f[1].to_string(), unhex(f[2])));
+            continue;
+        }
+        let site = Widgets {
+            install: crate::fixture::DefaultInstall {
+                home: b"http://127.0.0.1:8081".to_vec(),
+            },
+            options: options.clone(),
+        };
         let request = Request {
             search_query: unhex(f[1]),
             ..Default::default()
@@ -79,7 +82,7 @@ fn legacy_widgets_match_php() {
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(lines.len(), 49);
+    assert_eq!(lines.len(), 93);
 }
 
 /// Without the salts `wp_hash()` signs with, no instance checks out.

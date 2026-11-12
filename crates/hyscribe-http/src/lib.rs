@@ -46,8 +46,10 @@ mod canonical;
 mod feed;
 mod files;
 mod loaders;
+mod login;
 pub mod query;
 mod reads;
+mod redirect;
 mod rewrite;
 mod sitemaps;
 mod trackback;
@@ -83,6 +85,8 @@ pub struct Site {
     rewriter: rewrite::Rewriter,
     /// The keys and salts set in the configuration.
     salts: Vec<(&'static str, hyscribe_config::Secret)>,
+    /// The login sessions, in primary mode only.
+    sessions: Option<hyscribe_auth::sessions::Sessions>,
 }
 
 impl Site {
@@ -112,6 +116,7 @@ impl Site {
             theme: twentytwentyfive(),
             rewriter: rewrite::Rewriter::default(),
             salts: Vec::new(),
+            sessions: None,
         };
         site.build_rewriter();
         Ok(site)
@@ -120,6 +125,24 @@ impl Site {
     /// The site with the keys and salts `wp_hash()` signs with.
     pub fn with_salts(self, salts: Vec<(&'static str, hyscribe_config::Secret)>) -> Site {
         Site { salts, ..self }
+    }
+
+    /// The site in primary mode, keeping login sessions in `sessions`.
+    pub fn with_sessions(self, sessions: hyscribe_auth::sessions::Sessions) -> Site {
+        Site {
+            sessions: Some(sessions),
+            ..self
+        }
+    }
+
+    /// `wp_salt( $scheme )`: the configured keys and salts, else `option`'s.
+    fn salt(&self, scheme: &str, option: impl Fn(&str) -> Option<Vec<u8>>) -> Option<Vec<u8>> {
+        let constants: Vec<(&str, &[u8])> = self
+            .salts
+            .iter()
+            .map(|(name, secret)| (*name, secret.expose().as_bytes()))
+            .collect();
+        hyscribe_auth::wp_salt(scheme, &constants, option)
     }
 
     /// The permalink options.
@@ -430,6 +453,20 @@ async fn page(
     if let Some(response) = files::static_file(uri.path(), &headers, now() as u64).filter(|_| !post)
     {
         return response;
+    }
+    if uri.path() == login::PATH {
+        let form = if post {
+            trackback::form(&headers, &body)
+        } else {
+            Value::Array(Vec::new())
+        };
+        let asked = login::Asked {
+            post,
+            query: uri.query().map(String::from),
+            headers,
+            form,
+        };
+        return login::respond(&site, asked).await;
     }
     // The loaders read only the query, whatever the method, as PHP's do.
     if let Some(loader) = loaders::Loader::at(uri.path()) {
@@ -1098,8 +1135,8 @@ fn admin_redirect(
     Some((status, format!("{}{target}{query}", site.home)))
 }
 
-/// Paths no canonical redirect touches: the static trees, and hs-login and
-/// hs-admin, which come with M4 and M5.
+/// Paths no canonical redirect touches: the static trees, the login screen
+/// and hs-admin.
 fn reserved(path: &str) -> bool {
     is_static(path) || path == "/hs-login" || path == "/hs-admin" || path.starts_with("/hs-admin/")
 }

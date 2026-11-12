@@ -75,7 +75,7 @@ fn php_file(url: &[u8]) -> bool {
 
 /// `_deep_replace( array( '%0d', '%0a', '%0D', '%0A' ), $url )`. Every
 /// round that changes anything shortens the URL.
-fn deep_replace(mut url: Vec<u8>) -> Vec<u8> {
+pub fn deep_replace(mut url: Vec<u8>) -> Vec<u8> {
     for _ in 0..=url.len() {
         let before = url.len();
         for search in [b"%0d", b"%0a", b"%0D", b"%0A"] {
@@ -88,14 +88,49 @@ fn deep_replace(mut url: Vec<u8>) -> Vec<u8> {
     url
 }
 
-/// What `esc_url()` keeps of `parse_url()`.
+/// PHP's `parse_url()` of a URL: the components it has.
 #[derive(Debug, Default, PartialEq)]
-struct Parts {
-    scheme: Option<Vec<u8>>,
-    user: Option<Vec<u8>>,
-    pass: Option<Vec<u8>>,
-    host: Option<Vec<u8>>,
-    port: Option<u16>,
+pub struct Parts {
+    /// `scheme`.
+    pub scheme: Option<Vec<u8>>,
+    /// `user`.
+    pub user: Option<Vec<u8>>,
+    /// `pass`.
+    pub pass: Option<Vec<u8>>,
+    /// `host`.
+    pub host: Option<Vec<u8>>,
+    /// `port`.
+    pub port: Option<u16>,
+    /// `path`.
+    pub path: Option<Vec<u8>>,
+    /// `query`.
+    pub query: Option<Vec<u8>>,
+    /// `fragment`.
+    pub fragment: Option<Vec<u8>>,
+}
+
+/// `php_replace_controlchars()`: control characters become `_`.
+fn controls(text: &[u8]) -> Vec<u8> {
+    text.iter()
+        .map(|&b| if b.is_ascii_control() { b'_' } else { b })
+        .collect()
+}
+
+/// `parse_url()`'s `just_path`: the path, query and fragment from `from`.
+fn just_path(mut parts: Parts, s: &[u8], from: usize) -> Parts {
+    let mut halves = rest(s, from).splitn(2, |&b| b == b'#');
+    let before = halves.next().unwrap_or_default();
+    let fragment = halves.next();
+    let mut halves = before.splitn(2, |&b| b == b'?');
+    let path = halves.next().unwrap_or_default();
+    let query = halves.next();
+    parts.fragment = fragment.map(controls);
+    parts.query = query.map(controls);
+    // An empty path is kept only when nothing follows `from`.
+    if !path.is_empty() || from >= s.len() {
+        parts.path = Some(controls(path));
+    }
+    parts
 }
 
 /// Percent-encodes the brackets outside the scheme, credentials, host and
@@ -141,23 +176,13 @@ pub fn url_host(url: &[u8]) -> Option<Vec<u8>> {
     wp_parse_url(url).and_then(|parts| parts.host)
 }
 
-/// `wp_parse_url( $url, PHP_URL_QUERY )`: after the first `?` up to a `#`,
-/// none when a `#` comes first; control characters become `_`.
+/// `wp_parse_url( $url, PHP_URL_QUERY )`.
 pub fn url_query(url: &[u8]) -> Option<Vec<u8>> {
-    wp_parse_url(url)?;
-    let at = url.iter().position(|b| matches!(b, b'?' | b'#'))?;
-    let rest = url.get(at + 1..).filter(|_| url.get(at) == Some(&b'?'))?;
-    let query = rest.split(|&b| b == b'#').next().unwrap_or_default();
-    Some(
-        query
-            .iter()
-            .map(|&b| if b.is_ascii_control() { b'_' } else { b })
-            .collect(),
-    )
+    wp_parse_url(url)?.query
 }
 
 /// `wp_parse_url( $url )`; `None` where it returns `false`.
-fn wp_parse_url(url: &[u8]) -> Option<Parts> {
+pub fn wp_parse_url(url: &[u8]) -> Option<Parts> {
     if url.starts_with(b"//") {
         parse_url(&[b"placeholder:", url].concat()).map(|parts| Parts {
             scheme: None,
@@ -192,10 +217,8 @@ fn port(text: &[u8]) -> Option<u16> {
     }
 }
 
-/// The scheme, credentials, host and port of PHP's `parse_url()`
-/// (`php_url_parse_ex2()`); `None` where it fails. The path, query and
-/// fragment are not needed.
-fn parse_url(s: &[u8]) -> Option<Parts> {
+/// PHP's `parse_url()` (`php_url_parse_ex2()`); `None` where it fails.
+pub fn parse_url(s: &[u8]) -> Option<Parts> {
     let ue = s.len();
     let at = |i: usize| s.get(i).copied();
     let slice = |from: usize, to: usize| s.get(from..to).unwrap_or_default().to_vec();
@@ -219,7 +242,7 @@ fn parse_url(s: &[u8]) -> Option<Parts> {
                     start = 2;
                     None
                 } else {
-                    return Some(parts);
+                    return Some(just_path(parts, s, 0));
                 }
             } else if e + 1 == ue {
                 parts.scheme = Some(slice(0, e));
@@ -231,16 +254,24 @@ fn parse_url(s: &[u8]) -> Option<Parts> {
                     Some(e)
                 } else {
                     parts.scheme = Some(slice(0, e));
-                    return Some(parts);
+                    return Some(just_path(parts, s, e + 1));
                 }
             } else {
                 parts.scheme = Some(slice(0, e));
                 if at(e + 2) != Some(b'/') {
-                    return Some(parts);
+                    return Some(just_path(parts, s, e + 1));
                 }
                 start = e + 3;
                 if scheme.eq_ignore_ascii_case(b"file") && at(e + 3) == Some(b'/') {
-                    return Some(parts);
+                    return Some(just_path(
+                        parts,
+                        s,
+                        if at(e + 5) == Some(b':') {
+                            e + 4
+                        } else {
+                            e + 3
+                        },
+                    ));
                 }
                 None
             }
@@ -250,7 +281,7 @@ fn parse_url(s: &[u8]) -> Option<Parts> {
             start = 2;
             None
         }
-        None => return Some(parts),
+        None => return Some(just_path(parts, s, 0)),
     };
     if let Some(e) = port_at {
         let p = e + 1;
@@ -267,7 +298,7 @@ fn parse_url(s: &[u8]) -> Option<Parts> {
         } else if relative(start) {
             start += 2;
         } else {
-            return Some(parts);
+            return Some(just_path(parts, s, start));
         }
     }
     // The host, after any credentials.
@@ -281,10 +312,10 @@ fn parse_url(s: &[u8]) -> Option<Parts> {
             let login = authority.get(..p).unwrap_or_default();
             match login.iter().position(|&b| b == b':') {
                 Some(pp) => {
-                    parts.user = Some(login.get(..pp).unwrap_or_default().to_vec());
-                    parts.pass = Some(rest(login, pp + 1).to_vec());
+                    parts.user = Some(controls(login.get(..pp).unwrap_or_default()));
+                    parts.pass = Some(controls(rest(login, pp + 1)));
                 }
-                None => parts.user = Some(login.to_vec()),
+                None => parts.user = Some(controls(login)),
             }
             rest(authority, p + 1)
         }
@@ -310,8 +341,12 @@ fn parse_url(s: &[u8]) -> Option<Parts> {
     if host_length == 0 {
         return None;
     }
-    parts.host = Some(authority.get(..host_length).unwrap_or_default().to_vec());
-    Some(parts)
+    parts.host = Some(controls(authority.get(..host_length).unwrap_or_default()));
+    Some(if e == ue {
+        parts
+    } else {
+        just_path(parts, s, e)
+    })
 }
 
 #[cfg(test)]
@@ -501,12 +536,19 @@ mod tests {
     #[test]
     fn parses_urls_as_wordpress_does() {
         assert_eq!(wp_parse_url(b"//"), None);
-        assert_eq!(wp_parse_url(b"/"), Some(Parts::default()));
+        assert_eq!(
+            wp_parse_url(b"/"),
+            Some(Parts {
+                path: Some(b"/".to_vec()),
+                ..Parts::default()
+            })
+        );
         assert_eq!(
             wp_parse_url(b"//h:8/"),
             Some(Parts {
                 host: Some(b"h".to_vec()),
                 port: Some(8),
+                path: Some(b"/".to_vec()),
                 ..Parts::default()
             })
         );

@@ -242,6 +242,7 @@ async fn database_errors_show_no_details() {
         theme: hyscribe_render::theme::twentytwentyfive(),
         rewriter: rewrite::Rewriter::default(),
         salts: Vec::new(),
+        sessions: None,
     });
     // The 404 page fails while rendering, reading an option it has not loaded.
     for uri in [
@@ -817,8 +818,13 @@ async fn admin_and_login_urls_are_clean() {
             "{uri}"
         );
     }
-    // Clean URLs are reserved (no login or admin yet), never redirected.
-    for uri in ["/hs-login", "/hs-admin", "/hs-admin/", "/hs-admin/edit"] {
+    // The login screen answers; the admin's clean URLs are reserved (no
+    // screens yet), never redirected.
+    assert_eq!(
+        request(&site, "GET", "/hs-login").await.status,
+        StatusCode::OK
+    );
+    for uri in ["/hs-admin", "/hs-admin/", "/hs-admin/edit"] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "{uri}");
     }
@@ -858,6 +864,7 @@ async fn the_front_page_links_to_home() {
         theme: hyscribe_render::theme::twentytwentyfive(),
         rewriter: rewrite::Rewriter::default(),
         salts: Vec::new(),
+        sessions: None,
     });
     // Search results list the front page with a link to it.
     let reply = request(&site, "GET", "/?s=sample").await;
@@ -983,6 +990,7 @@ async fn failed_reads_answer_defaults() {
         theme: hyscribe_render::theme::twentytwentyfive(),
         rewriter: rewrite::Rewriter::default(),
         salts: Vec::new(),
+        sessions: None,
     });
     let handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {

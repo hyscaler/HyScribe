@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use hyscribe_auth::sessions::Sessions;
 use hyscribe_config::{Config, Mode};
 use hyscribe_service::{Paths, Spawn, Status};
 
@@ -219,6 +220,7 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
     });
     let signal = std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0));
     let seen = signal.clone();
+    let sessions_dir = site.paths.home().join("sessions");
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -233,6 +235,11 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
                     .await
                     .map_err(|err| format!("cannot read the site options: {err}"))?
                     .with_salts(config.salts.clone());
+            // Logging in needs primary mode.
+            let site = match config.mode {
+                Mode::Primary => site.with_sessions(Sessions::new(sessions_dir)),
+                Mode::Shadow => site,
+            };
             let address = std::net::SocketAddr::new(config.server.bind_host, config.server.port);
             let listener = tokio::net::TcpListener::bind(address)
                 .await

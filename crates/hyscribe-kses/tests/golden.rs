@@ -7,9 +7,9 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use hyscribe_kses::{
-    ALLOWED_PROTOCOLS, esc_attr, esc_html, esc_url, safecss_filter_attr, sanitize_key, url_query,
-    wp_kses_bad_protocol, wp_kses_decode_entities, wp_kses_no_null, wp_kses_normalize_entities,
-    wp_strip_all_tags,
+    ALLOWED_PROTOCOLS, Parts, esc_attr, esc_html, esc_url, parse_url, safecss_filter_attr,
+    sanitize_key, url_query, wp_kses_bad_protocol, wp_kses_decode_entities, wp_kses_no_null,
+    wp_kses_normalize_entities, wp_parse_url, wp_strip_all_tags,
 };
 use hyscribe_testkit::unhex;
 
@@ -104,6 +104,53 @@ fn esc_url_matches() {
 fn url_query_matches() {
     check(include_str!("golden/url-query.tsv"), 1312, |url| {
         url_query(url).map_or(b"null".to_vec(), |query| [&b"="[..], &query].concat())
+    });
+}
+
+/// `serialize()` of `parse_url()`'s array, or "false".
+fn serialized(parts: Option<Parts>) -> Vec<u8> {
+    let Some(parts) = parts else {
+        return b"false".to_vec();
+    };
+    let string = |text: &[u8]| [format!("s:{}:\"", text.len()).as_bytes(), text, b"\";"].concat();
+    let mut entries = Vec::new();
+    let mut add =
+        |name: &str, value: Vec<u8>| entries.push([string(name.as_bytes()), value].concat());
+    let text = [("scheme", &parts.scheme), ("host", &parts.host)];
+    for (name, value) in text {
+        if let Some(value) = value {
+            add(name, string(value));
+        }
+    }
+    if let Some(port) = parts.port {
+        add("port", format!("i:{port};").into_bytes());
+    }
+    for (name, value) in [
+        ("user", &parts.user),
+        ("pass", &parts.pass),
+        ("path", &parts.path),
+        ("query", &parts.query),
+        ("fragment", &parts.fragment),
+    ] {
+        if let Some(value) = value {
+            add(name, string(value));
+        }
+    }
+    [
+        format!("a:{}:{{", entries.len()).into_bytes(),
+        entries.concat(),
+        b"}".to_vec(),
+    ]
+    .concat()
+}
+
+#[test]
+fn parse_url_matches() {
+    check(include_str!("golden/wp-parse-url.tsv"), 1312, |url| {
+        serialized(wp_parse_url(url))
+    });
+    check(include_str!("golden/parse-url.tsv"), 1312, |url| {
+        serialized(parse_url(url))
     });
 }
 

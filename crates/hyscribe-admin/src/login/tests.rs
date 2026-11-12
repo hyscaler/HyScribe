@@ -25,6 +25,7 @@ fn the_login_screen_is_php_s() {
                 _ => Session::None,
             },
             reset_cookie: (state == "resetpass").then_some(&b"::<b>Ad  min:key"[..]),
+            read_only: false,
         };
         let oracle = Oracle {
             use_ssl: state == "use_ssl",
@@ -58,6 +59,7 @@ fn request<'a>(query: &'a Value, form: Option<&'a Value>, session: Session) -> R
         logged_in_cookie: !matches!(session, Session::None),
         session,
         reset_cookie: None,
+        read_only: false,
     }
 }
 
@@ -247,4 +249,20 @@ fn use_ssl_by_email_needs_an_at_past_the_start() {
             "{log}"
         );
     }
+}
+
+/// In shadow mode the screen says the site is read only, and good
+/// credentials log nobody in.
+#[test]
+fn shadow_mode_logs_nobody_in() {
+    let query = Value::Array(Vec::new());
+    let form = parse_str(b"log=admin&pwd=reference-only-password");
+    let mut shadow = request(&query, Some(&form), Session::None);
+    shadow.read_only = true;
+    let Login::Page(page) = login(&Oracle::default(), &shadow) else {
+        panic!("logged in read only");
+    };
+    let page = String::from_utf8(page).unwrap();
+    assert!(page.contains("<div id=\"login-message\" class=\"notice notice-info message\"><p>This site is read only: logging in needs HyScribe&#8217;s primary mode.</p></div>"));
+    assert!(page.contains("aria-describedby=\"login-message\""));
 }

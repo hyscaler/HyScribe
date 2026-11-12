@@ -222,6 +222,8 @@ $sets    = array(
 	'safecss-filter-attr' => array( 'safecss_filter_attr', array_merge( $css, $real ), array( 'color', 'background', 'width', '--x', ':', ';', ' ', 'red', 'url(', ')', '(', 'javascript:', 'http://a', '"', "'", 'calc(', 'var(', 'linear-gradient(', 'repeating-', ',', '1px', '\\', '&', '=', '}', '/*', '*/', '0', 'data:', 'rgb(', "\n", "\0", 'expression(', '-gradient(', 'url( ', 'URL(' ) ),
 	'esc-url'            => array( 'esc_url', $urls, $url_atoms ),
 	'url-query'          => array( 'url_query', $urls, $url_atoms ),
+	'wp-parse-url'       => array( 'url_parts', $urls, $url_atoms ),
+	'parse-url'          => array( 'php_parse_url', $urls, $url_atoms ),
 );
 
 function bad_protocol( $text ) {
@@ -232,6 +234,17 @@ function bad_protocol( $text ) {
 function url_query( $url ) {
 	$query = wp_parse_url( $url, PHP_URL_QUERY );
 	return is_string( $query ) ? "=$query" : 'null';
+}
+
+// The parts wp_parse_url() and parse_url() find, serialized, or "false".
+function url_parts( $url ) {
+	$parts = wp_parse_url( $url );
+	return false === $parts ? 'false' : serialize( $parts );
+}
+
+function php_parse_url( $url ) {
+	$parts = parse_url( $url );
+	return false === $parts ? 'false' : serialize( $parts );
 }
 
 function strip_breaks( $text ) {

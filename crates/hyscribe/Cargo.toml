@@ -17,6 +17,7 @@ test = false
 
 [dependencies]
 clap.workspace = true
+hyscribe-auth.workspace = true
 hyscribe-config.workspace = true
 hyscribe-db.workspace = true
 hyscribe-http.workspace = true

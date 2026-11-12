@@ -61,7 +61,7 @@ impl<'a> Reads<'a> {
     }
 
     /// The query's result, or its type's default after an error.
-    fn wait<T: Default>(&self, query: impl Future<Output = Result<T, DbError>>) -> T {
+    pub(crate) fn wait<T: Default>(&self, query: impl Future<Output = Result<T, DbError>>) -> T {
         self.handle.block_on(query).unwrap_or_else(|err| {
             self.error.borrow_mut().get_or_insert(err);
             T::default()
@@ -86,13 +86,7 @@ impl<'a> Reads<'a> {
 
 impl RenderSite for Reads<'_> {
     fn wp_hash(&self, data: &[u8]) -> Option<String> {
-        let constants: Vec<(&str, &[u8])> = self
-            .site
-            .salts
-            .iter()
-            .map(|(name, secret)| (*name, secret.expose().as_bytes()))
-            .collect();
-        let salt = hyscribe_auth::wp_salt("auth", &constants, |name| self.option(name))?;
+        let salt = self.site.salt("auth", |name| self.option(name))?;
         Some(hyscribe_phpser::hash_hmac_md5(data, &salt))
     }
 

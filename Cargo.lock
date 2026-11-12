@@ -619,6 +619,7 @@ name = "hyscribe"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "hyscribe-auth",
  "hyscribe-config",
  "hyscribe-db",
  "hyscribe-http",
@@ -693,6 +694,7 @@ dependencies = [
  "httpdate",
  "hyper",
  "hyper-util",
+ "hyscribe-admin",
  "hyscribe-assets",
  "hyscribe-auth",
  "hyscribe-config",
@@ -703,6 +705,7 @@ dependencies = [
  "hyscribe-render",
  "hyscribe-testkit",
  "sha2 0.11.1",
+ "tempfile",
  "tokio",
  "tower",
 ]

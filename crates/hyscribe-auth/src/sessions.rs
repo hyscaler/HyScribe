@@ -27,6 +27,7 @@ pub struct Origin<'a> {
 }
 
 /// The sessions of every user, in a folder of their own.
+#[derive(Debug)]
 pub struct Sessions {
     dir: PathBuf,
     /// One request changes a user's file at a time.

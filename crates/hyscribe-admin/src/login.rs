@@ -34,6 +34,8 @@ pub struct Request<'a> {
     pub session: Session,
     /// The reset password cookie's value, `login:key`.
     pub reset_cookie: Option<&'a [u8]>,
+    /// Shadow mode: the screen says so and nobody logs in.
+    pub read_only: bool,
 }
 
 /// A user's ID and password hash.
@@ -297,7 +299,7 @@ pub fn login(site: &dyn Site, request: &Request) -> Login {
         )]);
     }
     let mut errors = match user {
-        Ok(user) if !reauth => {
+        Ok(user) if !reauth && !request.read_only => {
             return Login::LoggedIn {
                 user,
                 remember,
@@ -362,6 +364,12 @@ pub fn login(site: &dyn Site, request: &Request) -> Login {
             ),
         };
         errors.push(message("authorize_application", text));
+    }
+    if request.read_only {
+        errors.push(message(
+            "read_only",
+            "This site is read only: logging in needs HyScribe&#8217;s primary mode.".into(),
+        ));
     }
     // The reset password cookie's login, unless one was posted.
     let mut user_login = request.reset_cookie.map_or(Vec::new(), |cookie| {

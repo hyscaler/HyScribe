@@ -528,3 +528,37 @@ fn start_reports_what_stops_it_serving() {
         output.err
     );
 }
+
+/// In primary mode the login screen lets people log in: it has no read
+/// only notice.
+#[test]
+fn primary_mode_serves_a_login_screen() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let mut env = site_env(home);
+    env.insert("MODE".into(), "primary".into());
+    let run = |command: &str| {
+        run_as(
+            &["service", command],
+            env.clone(),
+            home,
+            USER,
+            child_server(),
+        )
+    };
+    let started = run("start");
+    assert_eq!(started.code, 0, "{}", started.err);
+    let log = home.join("logs/hyscribe.log");
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !std::fs::read_to_string(&log)
+        .unwrap_or_default()
+        .contains("in primary mode")
+    {
+        assert!(std::time::Instant::now() < deadline, "server never logged");
+        std::thread::sleep(hyscribe_service::POLL);
+    }
+    let page = http_get(site_port(home), "/hs-login");
+    assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
+    assert!(!page.contains("read only"), "{page}");
+    assert_eq!(run("stop").code, 0);
+}

@@ -8,7 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use hyscribe_assets::{release_file, wp_includes};
+use hyscribe_assets::{release_file, wp_admin, wp_includes};
 use hyscribe_render::date::days_from_civil;
 use hyscribe_render::theme::twentytwentyfive_file;
 
@@ -21,9 +21,15 @@ pub(crate) fn static_file(path: &str, headers: &HeaderMap, now: u64) -> Option<R
     let (content_type, bytes) = path
         .strip_prefix(THEME)
         .and_then(twentytwentyfive_file)
-        .or_else(|| wp_includes(path.strip_prefix("wp-includes/")?))?;
-    // Every served file is in the release (`theme_files_match_php`).
-    let (modified, sha) = release_file(path).unwrap_or_default();
+        .or_else(|| wp_includes(path.strip_prefix("wp-includes/")?))
+        .or_else(|| wp_admin(path.strip_prefix("hs-admin/")?))?;
+    // Every served file is in the release (`theme_files_match_php`), the
+    // admin's under `wp-admin`.
+    let release = match path.strip_prefix("hs-admin/") {
+        Some(admin) => format!("wp-admin/{admin}"),
+        None => path.to_string(),
+    };
+    let (modified, sha) = release_file(&release).unwrap_or_default();
     let etag = format!("\"{sha}\"");
     let status = precondition(headers, &etag, modified, now);
     let mut response = match status {

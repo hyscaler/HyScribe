@@ -1491,6 +1491,39 @@ async fn wp_includes_files_match_php() {
     }
 }
 
+/// Every file of `reference/wordpress/files-golden.sh wp-admin`: the admin's
+/// CSS, scripts and images, served under `/hs-admin/` (ADR 0008) as the web
+/// server sends them under `/wp-admin/`, skipping the unminified twins.
+#[tokio::test]
+async fn wp_admin_files_match_php() {
+    let site = fixture_site(None).await;
+    let golden = include_str!("../tests/golden/wp-admin-files.tsv");
+    let paths: Vec<&str> = golden
+        .lines()
+        .filter_map(|l| l.split('\t').next())
+        .collect();
+    let mut unminified = 0;
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let path = fields[0].replacen("/wp-admin/", "/hs-admin/", 1);
+        let served = served(&site, &path).await;
+        let twin = [".js", ".css"].iter().find_map(|ext| {
+            let stem = fields[0].strip_suffix(ext)?;
+            (!stem.ends_with(".min")).then(|| format!("{stem}.min{ext}"))
+        });
+        if twin.is_some_and(|twin| paths.contains(&twin.as_str())) {
+            unminified += 1;
+            assert_eq!(served[0], "404", "{path}");
+            continue;
+        }
+        let etag = format!("\"{}\"", fields[3]);
+        let expected = [fields[1], fields[2], fields[3], fields[4], &etag];
+        assert_eq!(served, expected, "{path}");
+    }
+    assert!(unminified > 0);
+    assert_eq!(golden.lines().count(), 351);
+}
+
 /// With a page on the front, its link and shortlink are the home page.
 #[tokio::test]
 async fn the_front_page_links_to_the_home_page() {

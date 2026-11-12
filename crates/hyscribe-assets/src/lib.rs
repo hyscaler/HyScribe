@@ -6,6 +6,9 @@
 /// The files by path under `wp-includes/`, with their content types.
 const FILES: &[(&str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/wp_includes.rs"));
 
+/// The files by path under `wp-admin/`, its CSS, scripts and images.
+const ADMIN_FILES: &[(&str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/wp_admin.rs"));
+
 /// Every file served from the release, by path under `wordpress/`, with
 /// its modification time and SHA-256 in hex.
 const RELEASE: &[(&str, u64, &str)] = include!(concat!(env!("OUT_DIR"), "/release.rs"));
@@ -20,13 +23,25 @@ pub fn release_file(path: &str) -> Option<(u64, &'static str)> {
         .map(|(_, modified, sha)| (*modified, *sha))
 }
 
+/// One of the files under `wp-admin/`, as the web server sends it.
+pub fn wp_admin(path: &str) -> Option<(&'static str, &'static [u8])> {
+    lookup(ADMIN_FILES, path)
+}
+
 /// One of the files under `wp-includes/`, as the web server sends it: its
 /// content type (empty for none) and bytes.
 pub fn wp_includes(path: &str) -> Option<(&'static str, &'static [u8])> {
-    FILES
+    lookup(FILES, path)
+}
+
+fn lookup(
+    files: &'static [(&str, &str, &[u8])],
+    path: &str,
+) -> Option<(&'static str, &'static [u8])> {
+    files
         .binary_search_by(|(name, _, _)| name.cmp(&path))
         .ok()
-        .and_then(|i| FILES.get(i))
+        .and_then(|i| files.get(i))
         .map(|(_, content_type, bytes)| (*content_type, *bytes))
 }
 

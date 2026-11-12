@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Embeds the files of `wp-includes` from the pinned WordPress release
+//! Embeds the files of `wp-includes` and `wp-admin` from the pinned WordPress release
 //!: downloaded, or read from `HYSCRIBE_WORDPRESS_TARBALL` for
 //! offline builds, and checked against its SHA-256 before anything in it
 //! is used. PHP is left out, and so is a `.js` or `.css` that has a `.min`
@@ -19,7 +19,7 @@ const SHA256: &str = "d2a09acb6a15e3b9c471d72557753c266d6f41a79ed19bfe04cbfe49e2
 const TARBALL_ENV: &str = "HYSCRIBE_WORDPRESS_TARBALL";
 const THEME: &str = "wp-content/themes/twentytwentyfive";
 /// As the web server sends them; a file with no extension gets no type.
-const CONTENT_TYPES: [(&str, &str); 14] = [
+const CONTENT_TYPES: [(&str, &str); 15] = [
     ("css", "text/css"),
     ("crt", "application/x-x509-ca-cert"),
     ("eot", "application/vnd.ms-fontobject"),
@@ -28,6 +28,8 @@ const CONTENT_TYPES: [(&str, &str); 14] = [
     ("json", "application/json"),
     ("md", "text/markdown"),
     ("png", "image/png"),
+    // Sass sources, which Apache sends without a type.
+    ("scss", ""),
     ("svg", "image/svg+xml"),
     ("ttf", "font/ttf"),
     ("txt", "text/plain"),
@@ -61,27 +63,31 @@ fn main() -> io::Result<()> {
         .arg("-C")
         .arg(&tree)
         .arg("wordpress/wp-includes")
+        .arg("wordpress/wp-admin")
         .arg(format!("wordpress/{THEME}")))?;
-    let root = tree.join("wordpress/wp-includes");
-    let mut files = Vec::new();
-    collect(&root, "", &mut files)?;
-    files.sort();
-    let mut entries = String::new();
     let mut release = Vec::new();
-    for file in files.iter().filter(|f| served(f, &root)) {
-        release.push(format!("wp-includes/{file}"));
-        let name = file.rsplit('/').next().unwrap_or_default();
-        let extension = name.rsplit_once('.').map_or("", |(_, e)| e);
-        let (_, content_type) = CONTENT_TYPES
-            .iter()
-            .find(|(known, _)| *known == extension)
-            .ok_or_else(|| io::Error::other(format!("no content type for {file}")))?;
-        entries.push_str(&format!(
-            "    ({file:?}, {content_type:?}, include_bytes!({:?})),\n",
-            root.join(file)
-        ));
+    for dir in ["wp-includes", "wp-admin"] {
+        let root = tree.join("wordpress").join(dir);
+        let mut files = Vec::new();
+        collect(&root, "", &mut files)?;
+        files.sort();
+        let mut entries = String::new();
+        for file in files.iter().filter(|f| served(f, &root)) {
+            release.push(format!("{dir}/{file}"));
+            let name = file.rsplit('/').next().unwrap_or_default();
+            let extension = name.rsplit_once('.').map_or("", |(_, e)| e);
+            let (_, content_type) = CONTENT_TYPES
+                .iter()
+                .find(|(known, _)| *known == extension)
+                .ok_or_else(|| io::Error::other(format!("no content type for {dir}/{file}")))?;
+            entries.push_str(&format!(
+                "    ({file:?}, {content_type:?}, include_bytes!({:?})),\n",
+                root.join(file)
+            ));
+        }
+        let name = dir.replace('-', "_");
+        std::fs::write(out.join(format!("{name}.rs")), format!("&[\n{entries}]\n"))?;
     }
-    std::fs::write(out.join("wp_includes.rs"), format!("&[\n{entries}]\n"))?;
     let mut theme = Vec::new();
     collect(&tree.join("wordpress").join(THEME), "", &mut theme)?;
     release.extend(

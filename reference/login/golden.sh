@@ -7,7 +7,9 @@
 # where state is 1 for the test cookie, 0 for no cookie, expired for an auth
 # cookie that does not validate, resetpass for the test cookie and a reset
 # password cookie, or use_ssl for the test cookie with every user's use_ssl
-# option on (a must-use plugin filters it, and is removed after).
+# option on (a must-use plugin filters it, and is removed after), or private
+# for the test cookie on a site that asks not to be indexed (blog_public 0, by
+# a must-use plugin too).
 # user-profile's nonce is replaced by %nonce:reset-password-for-user%, a logout
 # link's by %nonce:log-out%. Needs
 # the default install oracle running (db.sh up, then php.sh up). Failed logins
@@ -23,7 +25,7 @@ TMP=$(mktemp)
 HEADERS=$(mktemp)
 cleanup() {
   rm -f "$TMP" "$HEADERS"
-  "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-use-ssl.php"
+  "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-use-ssl.php" "$MU/hyscribe-private.php"
 }
 trap cleanup EXIT
 HASH=$(printf %s "$BASE" | md5sum | cut -d ' ' -f 1)
@@ -33,7 +35,7 @@ record() {
   : > "$TMP"
   local args=(-s -D "$HEADERS" -o "$TMP")
   case "$state" in
-    1 | use_ssl) args+=(-b 'wordpress_test_cookie=WP%20Cookie%20check') ;;
+    1 | use_ssl | private) args+=(-b 'wordpress_test_cookie=WP%20Cookie%20check') ;;
     expired) args+=(-b "wordpress_$HASH=admin|1|x|y") ;;
     resetpass) args+=(-b "wordpress_test_cookie=WP%20Cookie%20check; wp-resetpass-$HASH=%3A%3A%3Cb%3EAd%20%20min%3Akey") ;;
   esac
@@ -84,4 +86,8 @@ for body in 'log=admin&pwd=wrong&testcookie=1' 'log=admin%40default-install.test
   record POST '' "$body" use_ssl
 done
 record GET '' '' use_ssl
+"$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-use-ssl.php"
+"$DOCKER" exec "$NAME" sh -c "printf '%s\n' '<?php' \"add_filter( 'pre_option_blog_public', '__return_zero' );\" > $MU/hyscribe-private.php"
+record GET '' '' private
+record GET 'action=logout' '' private
 wc -l "$OUT"

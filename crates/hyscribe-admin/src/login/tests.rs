@@ -18,7 +18,7 @@ fn the_login_screen_is_php_s() {
         let request = Request {
             query: &query,
             form: (f[0] == "POST").then_some(&form),
-            test_cookie: matches!(state, "1" | "resetpass" | "use_ssl"),
+            test_cookie: matches!(state, "1" | "resetpass" | "use_ssl" | "private"),
             logged_in_cookie: false,
             session: match state {
                 "expired" => Session::Expired,
@@ -29,6 +29,7 @@ fn the_login_screen_is_php_s() {
         };
         let oracle = Oracle {
             use_ssl: state == "use_ssl",
+            private: state == "private",
         };
         if request.action() == "logout" {
             assert_eq!(f[4], "403", "{line}");
@@ -179,7 +180,13 @@ fn good_credentials_log_in() {
     for (query, form, session, use_ssl, user, remember, secure, to) in cases {
         let (query, form) = (parse_str(query.as_bytes()), parse_str(form.as_bytes()));
         let form = Some(&form).filter(|form| **form != empty);
-        match login(&Oracle { use_ssl }, &request(&query, form, session)) {
+        match login(
+            &Oracle {
+                use_ssl,
+                ..Oracle::default()
+            },
+            &request(&query, form, session),
+        ) {
             Login::LoggedIn {
                 user: id,
                 remember: kept,
@@ -237,6 +244,9 @@ impl Site for AnyEmail {
     fn nonce(&self, action: &str) -> String {
         self.0.nonce(action)
     }
+    fn public(&self) -> bool {
+        self.0.public()
+    }
     fn home_url(&self) -> String {
         self.0.home_url()
     }
@@ -255,7 +265,10 @@ impl Site for AnyEmail {
 /// first character, as `strpos()` is truthy.
 #[test]
 fn use_ssl_by_email_needs_an_at_past_the_start() {
-    let site = AnyEmail(Oracle { use_ssl: true });
+    let site = AnyEmail(Oracle {
+        use_ssl: true,
+        ..Oracle::default()
+    });
     for (log, secure) in [("x%40y", true), ("%40x", false)] {
         let form = parse_str(format!("log={log}&pwd=wrong").as_bytes());
         let query = Value::Array(Vec::new());

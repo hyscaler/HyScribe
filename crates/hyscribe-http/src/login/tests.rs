@@ -635,3 +635,53 @@ async fn logging_out_asks_without_a_nonce_and_ends_the_session_with_one() {
         "http://127.0.0.1:8081/hs-admin/"
     );
 }
+
+/// The request's `user_id` goes to user-profile's data; a site that asks not
+/// to be indexed says so to robots; logging out of a site whose login is on
+/// another host than its home goes to the admin, as `wp_safe_redirect()`
+/// keeps it.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_request_and_the_site_shape_the_screens() {
+    let site = login_site(None).await;
+    let page = send(&site, "GET", "/hs-login?user_id=7x", "", "").await;
+    assert!(page.body.contains("\"user_id\":\"7\""));
+    let mut private = Arc::try_unwrap(login_site(None).await).unwrap();
+    private.options.insert("blog_public".into(), b"0".to_vec());
+    let private = Arc::new(private);
+    let page = send(&private, "GET", "/hs-login", "", "").await;
+    assert!(
+        page.body
+            .contains("<meta name='robots' content='noindex, nofollow, noarchive' />")
+    );
+    let asked = send(&private, "GET", "/hs-login?action=logout", "", "").await;
+    assert!(
+        asked
+            .body
+            .contains("<meta name='robots' content='noindex, nofollow' />")
+    );
+    let db = hyscribe_db::Db::connect(&hyscribe_testkit::fixture_database())
+        .await
+        .unwrap();
+    let split = Site::load(
+        db,
+        Some("http://home.test".into()),
+        Some("http://login.test".into()),
+    )
+    .await
+    .unwrap();
+    let salts = SALTS
+        .iter()
+        .map(|name| (*name, Secret::new(*name)))
+        .collect();
+    let split = Arc::new(split.with_salts(salts));
+    let asked = send(&split, "GET", "/hs-login?action=logout", "", "").await;
+    let uri = format!(
+        "/hs-login?action=logout&_wpnonce={}",
+        logout_nonce(&asked.body)
+    );
+    let out = send(&split, "GET", &uri, "", "").await;
+    assert_eq!(
+        out.headers.get(header::LOCATION).unwrap(),
+        "http://login.test/hs-admin/"
+    );
+}

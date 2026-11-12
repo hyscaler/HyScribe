@@ -4,9 +4,31 @@
 
 const PAGE: &str = include_str!("die.html");
 
-/// The page for `wp_die( $message, $title )`; `message` is HTML.
-pub fn page(title: &str, message: &str) -> Vec<u8> {
-    let (head, rest) = PAGE.split_once("%title%").unwrap_or_default();
+/// `wp_robots()`'s directives on the login screen, a sensitive page, or
+/// on `wp_die()`'s, which asks for no robots; `public` is `blog_public`.
+pub(crate) fn robots(public: bool, login: bool) -> String {
+    let mut directives = if public {
+        vec!["max-image-preview:large"]
+    } else {
+        vec!["noindex", "nofollow"]
+    };
+    match (login, public) {
+        (true, true) => directives.extend(["noindex", "noarchive"]),
+        (true, false) => directives.push("noarchive"),
+        (false, true) => directives.extend(["noindex", "follow"]),
+        (false, false) => {}
+    }
+    directives.join(", ")
+}
+
+/// The page for `wp_die( $message, $title )` on a site that is `public` or
+/// not; `message` is HTML.
+pub fn page(public: bool, title: &str, message: &str) -> Vec<u8> {
+    let (head, rest) = PAGE.split_once("%robots%").unwrap_or_default();
+    let (before, rest) = rest.split_once("%title%").unwrap_or_default();
     let (middle, tail) = rest.split_once("%message%").unwrap_or_default();
-    [head, title, middle, message, tail].concat().into_bytes()
+    let robots = robots(public, false);
+    [head, &robots, before, title, middle, message, tail]
+        .concat()
+        .into_bytes()
 }

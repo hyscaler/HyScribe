@@ -14,6 +14,8 @@ pub const SITE: &str = "http://127.0.0.1:8081";
 #[derive(Default)]
 pub struct Oracle {
     pub use_ssl: bool,
+    /// `blog_public` is 0.
+    pub private: bool,
 }
 
 impl Urls for Oracle {
@@ -56,6 +58,9 @@ impl Site for Oracle {
     }
     fn nonce(&self, action: &str) -> String {
         format!("%nonce:{action}%")
+    }
+    fn public(&self) -> bool {
+        !self.private
     }
     fn home_url(&self) -> String {
         format!("{SITE}/")

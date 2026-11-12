@@ -154,11 +154,14 @@ struct LoginReads<'a> {
     reads: Reads<'a>,
     site: &'a Site,
     now: i64,
-    /// The users found, for the cookies of the one who logs in.
+    /// The users found, for the cookies of the one who logs in and for the
+    /// current user.
     found: RefCell<Vec<Credentials>>,
     /// `wp_get_current_user()`'s ID and session token, from the logged in
     /// cookie: 0 and none for a visitor.
     current: (u64, Vec<u8>),
+    /// `user-profile`'s user: the request's `user_id`, cast to an integer.
+    profile_user: i64,
 }
 
 impl<'a> LoginReads<'a> {
@@ -169,16 +172,17 @@ impl<'a> LoginReads<'a> {
             now,
             found: RefCell::default(),
             current: (0, Vec::new()),
+            profile_user: 0,
         }
     }
 
     /// The user of a valid logged in cookie, and its session token.
-    fn current_user(&self, cookie: Option<&[u8]>) -> Option<(u64, Vec<u8>)> {
+    fn current_user(&self, cookie: Option<&[u8]>, post: bool) -> Option<(u64, Vec<u8>)> {
         let parsed = parse_auth_cookie(cookie?)?;
         let sessions = self.site.sessions.as_ref()?;
         let user = self.credentials(UserField::Login, parsed.username)?;
         let salt = self.salt("logged_in")?;
-        let good = parsed.is_valid(&user.pass, &salt, self.now, false)
+        let good = parsed.is_valid(&user.pass, &salt, self.now, post)
             && sessions.verify(user.id, parsed.token, self.now);
         good.then(|| (user.id, parsed.token.to_vec()))
     }
@@ -278,7 +282,7 @@ impl Urls for LoginReads<'_> {
                 "%nonce:reset-password-for-user%",
                 &self.nonce("reset-password-for-0"),
             )
-            .replace("%user_id%", &self.current.0.to_string())
+            .replace("%user_id%", &self.profile_user.to_string())
             .replace("%time%", &self.now.to_string())
     }
 }
@@ -290,6 +294,10 @@ impl LoginSite for LoginReads<'_> {
 
     fn name(&self) -> String {
         self.site.option("blogname")
+    }
+
+    fn public(&self) -> bool {
+        !Value::String(self.site.raw_option("blog_public").to_vec()).is_empty()
     }
 
     /// `wp_create_nonce( $action )` for the current user.
@@ -432,7 +440,8 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             .map(HeaderValue::as_bytes),
     );
     let mut reads = LoginReads::new(site, handle, now);
-    if let Some(current) = reads.current_user(cookie(&cookies, &names.logged_in())) {
+    reads.profile_user = query.get_str("user_id").map_or(0, Value::to_int);
+    if let Some(current) = reads.current_user(cookie(&cookies, &names.logged_in()), asked.post) {
         reads.current = current;
     }
     let request = Request {
@@ -502,13 +511,7 @@ fn logout(
     request: &Request,
     headers: &mut Vec<(header::HeaderName, String)>,
 ) -> (StatusCode, Vec<u8>) {
-    let posted = |key| {
-        request
-            .form
-            .and_then(|form| form.get_str(key))
-            .or_else(|| request.query.get_str(key))
-    };
-    let nonce = posted("_wpnonce").map(Value::to_php_string);
+    let nonce = request.request("_wpnonce").map(Value::to_php_string);
     if !nonce.is_some_and(|nonce| reads.verify_nonce(&nonce, "log-out")) {
         return (
             StatusCode::FORBIDDEN,
@@ -517,8 +520,8 @@ fn logout(
     }
     // `wp_destroy_current_session()`, then `wp_clear_auth_cookie()`.
     let (user, token) = &reads.current;
-    // A visitor, user 0, has no sessions to end.
-    if let Some(sessions) = reads.site.sessions.as_ref() {
+    // A visitor has no session token, so no session to end.
+    if let Some(sessions) = reads.site.sessions.as_ref().filter(|_| !token.is_empty()) {
         // A session that cannot be removed expires all the same.
         let _ = sessions.destroy(*user, token, reads.now);
     }
@@ -536,14 +539,12 @@ fn logout(
             set_cookie(&names.logged_in(), b" ", expired, path, false),
         ));
     }
-    let location = match posted("redirect_to")
+    let redirect_to = match request
+        .request("redirect_to")
         .and_then(Value::as_bytes)
         .filter(|to| !hyscribe_phpser::is_empty_string(to))
     {
-        Some(to) => {
-            let host = hyscribe_kses::url_host(reads.site.home.as_bytes()).unwrap_or_default();
-            wp_validate_redirect(&login::slash(to), &host, reads.admin_url("").as_bytes())
-        }
+        Some(to) => login::slash(to),
         None => {
             let locale = String::from_utf8_lossy(&reads.locale(*user)).into_owned();
             reads
@@ -551,6 +552,9 @@ fn logout(
                 .into_bytes()
         }
     };
+    // `wp_safe_redirect()`.
+    let host = hyscribe_kses::url_host(reads.site.home.as_bytes()).unwrap_or_default();
+    let location = wp_validate_redirect(&redirect_to, &host, reads.admin_url("").as_bytes());
     let location = String::from_utf8_lossy(&wp_sanitize_redirect(&location)).into_owned();
     headers.push((header::LOCATION, location));
     headers.push((

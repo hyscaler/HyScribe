@@ -56,6 +56,8 @@ pub trait Site: Urls {
     fn name(&self) -> String;
     /// `wp_create_nonce( $action )` for the current user.
     fn nonce(&self, action: &str) -> String;
+    /// `get_option( 'blog_public' )`: search engines may index the site.
+    fn public(&self) -> bool;
     /// `home_url( '/' )`.
     fn home_url(&self) -> String;
     /// The login screen's URL with `query`, `?...` or empty.
@@ -140,7 +142,7 @@ fn login_url(site: &dyn Site, query: &str, secure: bool) -> String {
 
 impl Request<'_> {
     /// `$_REQUEST[ $key ]`: the form's value over the query's.
-    fn request(&self, key: &str) -> Option<&Value> {
+    pub fn request(&self, key: &str) -> Option<&Value> {
         self.form
             .and_then(|form| form.get_str(key))
             .or_else(|| self.query.get_str(key))
@@ -420,7 +422,7 @@ pub fn logout_confirmation(site: &dyn Site, request: &Request) -> Vec<u8> {
     // `wp_nonce_url()` escapes the URL as HTML.
     let url = esc_html(site.login_url(&query).as_bytes());
     let message = format!("{title}</p><p>Do you really want to <a href=\"{url}\">log out</a>?");
-    crate::die::page(&title, &message)
+    crate::die::page(site.public(), &title, &message)
 }
 
 /// `esc_url()` of a URL.
@@ -463,9 +465,8 @@ impl Screen<'_> {
         if self.loggedout {
             out.push_str(&inline_script("if(\"sessionStorage\" in window){try{for(var key in sessionStorage){if(key.indexOf(\"wp-autosave-\")!=-1){sessionStorage.removeItem(key)}}}catch(e){}};"));
         }
-        out.push_str(
-            "<meta name='robots' content='max-image-preview:large, noindex, noarchive' />\n",
-        );
+        let robots = crate::die::robots(site.public(), true);
+        out.push_str(&format!("<meta name='robots' content='{robots}' />\n"));
         let mut bytes = out.into_bytes();
         bytes.extend(assets.print_head_scripts(site));
         bytes.extend(assets.print_admin_styles(site));

@@ -13,7 +13,9 @@
 
 mod decoder;
 mod entities;
+mod html_processor;
 mod tag_processor;
 
 pub use decoder::decode_attribute;
+pub use html_processor::{HtmlProcessor, ProcessorError, is_void};
 pub use tag_processor::{Attribute, CommentType, Namespace, TagProcessor, TextClass, escape};

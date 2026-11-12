@@ -80,6 +80,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "html_processor"
+path = "fuzz_targets/html_processor.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "html_tag_processor"
 path = "fuzz_targets/html_tag_processor.rs"
 test = false

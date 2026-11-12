@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Records WordPress's WP_HTML_Tag_Processor as goldens for hyscribe-html:
-#   crates/hyscribe-html/tests/golden/{edge,theme,random}.tsv
+# Records WordPress's WP_HTML_Tag_Processor and WP_HTML_Processor as goldens
+# for hyscribe-html:
+#   crates/hyscribe-html/tests/golden/{edge,theme,random,processor}.tsv
 # and regenerates the entity tables it needs:
 #   crates/hyscribe-html/src/entities.rs
 # Needs docker (or podman with DOCKER=podman) and network access.
@@ -21,5 +22,6 @@ mkdir -p "$ROOT/crates/hyscribe-html/tests/golden"
   php /repo/reference/html/golden.php /tmp/wp edge > \$out/edge.tsv
   php /repo/reference/html/golden.php /tmp/wp theme /repo/themes/twentytwentyfive > \$out/theme.tsv
   php /repo/reference/html/golden.php /tmp/wp random > \$out/random.tsv
+  php /repo/reference/html/processor-golden.php /tmp/wp > \$out/processor.tsv
 "
 wc -l "$ROOT"/crates/hyscribe-html/tests/golden/*.tsv

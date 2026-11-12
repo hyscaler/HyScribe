@@ -11,8 +11,7 @@
 //! them is left as rendered.
 
 use crate::formatting::find;
-use crate::layout::is_void;
-use hyscribe_html::{Attribute, TagProcessor};
+use hyscribe_html::{Attribute, TagProcessor, is_void};
 use hyscribe_kses::esc_html;
 use hyscribe_phpser::{Key, Value, is_empty_string, json_decode, json_encode, php_trim};
 

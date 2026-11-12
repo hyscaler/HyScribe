@@ -670,6 +670,7 @@ version = "0.1.0"
 dependencies = [
  "hyscribe-kses",
  "hyscribe-testkit",
+ "sha2 0.11.1",
 ]
 
 [[package]]

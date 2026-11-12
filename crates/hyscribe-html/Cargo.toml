@@ -14,6 +14,7 @@ hyscribe-kses.workspace = true
 
 [dev-dependencies]
 hyscribe-testkit.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

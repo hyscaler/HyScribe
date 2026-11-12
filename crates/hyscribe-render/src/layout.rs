@@ -7,7 +7,7 @@
 //! WordPress 7 reads from `settings.viewport`) and block gaps set by block
 //! style variations.
 
-use hyscribe_html::TagProcessor;
+use hyscribe_html::{TagProcessor, is_void};
 use hyscribe_phpser::{Key, Value, is_empty_string, json_encode, md5};
 use hyscribe_theme_json::{GlobalStyles, kebab_case};
 
@@ -550,31 +550,6 @@ fn layout_class(kind: Option<&Value>) -> Vec<u8> {
         Some(b"grid") => b"is-layout-grid".to_vec(),
         Some(_) => Vec::new(),
     }
-}
-
-/// `WP_HTML_Processor::is_void()`.
-pub(crate) fn is_void(tag: &[u8]) -> bool {
-    const VOID: [&[u8]; 18] = [
-        b"AREA",
-        b"BASE",
-        b"BASEFONT",
-        b"BGSOUND",
-        b"BR",
-        b"COL",
-        b"EMBED",
-        b"FRAME",
-        b"HR",
-        b"IMG",
-        b"INPUT",
-        b"KEYGEN",
-        b"LINK",
-        b"META",
-        b"PARAM",
-        b"SOURCE",
-        b"TRACK",
-        b"WBR",
-    ];
-    VOID.contains(&tag)
 }
 
 /// The class of the element the first chunk of a block's own markup leaves

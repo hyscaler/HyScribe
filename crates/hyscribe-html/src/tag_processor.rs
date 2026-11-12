@@ -332,6 +332,8 @@ pub struct TagProcessor {
     /// Named token spans to come back to.
     bookmarks: HashMap<Vec<u8>, Span>,
     seek_count: usize,
+    /// `MAX_BOOKMARKS`, which the HTML processor raises.
+    max_bookmarks: usize,
     /// The current token's modifiable text.
     text_starts_at: usize,
     text_length: usize,
@@ -361,6 +363,7 @@ impl TagProcessor {
             lexical_updates: Updates::default(),
             bookmarks: HashMap::new(),
             seek_count: 0,
+            max_bookmarks: MAX_BOOKMARKS,
             text_starts_at: 0,
             text_length: 0,
             comment_type: None,
@@ -388,11 +391,26 @@ impl TagProcessor {
         else {
             return false;
         };
-        if !self.bookmarks.contains_key(name) && self.bookmarks.len() >= MAX_BOOKMARKS {
+        if !self.bookmarks.contains_key(name) && self.bookmarks.len() >= self.max_bookmarks {
             return false;
         }
         self.bookmarks.insert(name.to_vec(), span);
         true
+    }
+
+    /// A processor allowing `max` bookmarks, as a subclass overriding
+    /// `MAX_BOOKMARKS` does.
+    pub(crate) fn with_bookmark_limit(html: &[u8], max: usize) -> TagProcessor {
+        TagProcessor {
+            max_bookmarks: max,
+            ..TagProcessor::new(html)
+        }
+    }
+
+    /// Sets the bookmark `name` to a span directly, as a subclass writing
+    /// `$this->bookmarks[ $name ]` does, past the limit.
+    pub(crate) fn put_bookmark(&mut self, name: &[u8], start: usize, length: usize) {
+        self.bookmarks.insert(name.to_vec(), Span { start, length });
     }
 
     /// `release_bookmark()`: `false` for a name not set.
@@ -488,7 +506,10 @@ impl TagProcessor {
 
     /// `is_tag_closer()`: the current tag is a closing tag.
     pub fn is_tag_closer(&self) -> bool {
-        self.state == State::MatchedTag && self.is_closing_tag
+        // HTML reads `</br>` as `<br>`.
+        self.state == State::MatchedTag
+            && self.is_closing_tag
+            && self.get_tag().as_deref() != Some(b"BR")
     }
 
     fn matches(&mut self, tag_name: Option<&[u8]>, class_name: Option<&[u8]>) -> bool {

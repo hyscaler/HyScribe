@@ -8,10 +8,11 @@ use std::sync::OnceLock;
 
 use hyscribe_kses::{esc_attr, esc_url, esc_url_raw, strip_tags, wp_strip_all_tags};
 use hyscribe_model::Term;
-use hyscribe_phpser::{Value, add_query_arg, is_empty_string, json_decode, urlencode};
+use hyscribe_phpser::{Key, Value, add_query_arg, is_empty_string, json_decode, urlencode};
 
 use crate::comment_pages::{comments_pagenum_link, cpage};
 use crate::core_blocks::comments_open;
+use crate::interactivity::array_replace_recursive;
 use crate::layout::{Rule, stylesheet};
 use crate::link;
 use crate::permalinks;
@@ -65,6 +66,8 @@ pub struct Assets {
     pub(crate) variations: Vec<String>,
     /// Script handles, in the order they were enqueued.
     pub(crate) scripts: Vec<String>,
+    /// The Interactivity API's server state, by store namespace.
+    pub(crate) state: Vec<(Key, Value)>,
 }
 
 impl Assets {
@@ -81,6 +84,16 @@ impl Assets {
     /// `wp_enqueue_script_module( $id )`.
     pub(crate) fn enqueue_module(&mut self, id: &str) {
         enqueue(&mut self.modules, id);
+    }
+
+    /// `wp_interactivity_state( $namespace, $state )`: merged into what the
+    /// namespace holds.
+    pub(crate) fn interactivity_state(&mut self, namespace: &str, state: Vec<(Key, Value)>) {
+        let entry = (
+            Key::String(namespace.as_bytes().to_vec()),
+            Value::Array(state),
+        );
+        self.state = array_replace_recursive(std::mem::take(&mut self.state), vec![entry]);
     }
 }
 
@@ -1160,6 +1173,37 @@ impl Modules<'_> {
                 .dependencies(std::slice::from_ref(id), false)
                 .iter()
                 .any(|d| self.queue.contains(d) && self.module(d).is_some_and(|m| m.in_footer))
+    }
+
+    /// `print_script_module_data()`: the Interactivity API's server state,
+    /// for a page that loads it; namespaces with an empty state are left
+    /// out.
+    fn data(&self, state: &[(Key, Value)]) -> Vec<u8> {
+        let id = "@wordpress/interactivity";
+        let loaded = self.queue.iter().any(|q| q == id)
+            || self.dependencies(self.queue, false).iter().any(|d| d == id);
+        let state: Vec<(Key, Value)> = state
+            .iter()
+            .filter(|(_, value)| !value.is_empty())
+            .cloned()
+            .collect();
+        if !loaded || state.is_empty() {
+            return Vec::new();
+        }
+        let data = Value::Array(vec![(Key::String(b"state".to_vec()), Value::Array(state))]);
+        tag(
+            b"script",
+            &[
+                (
+                    b"id",
+                    Some(format!("wp-script-module-data-{id}").as_bytes()),
+                ),
+                (b"type", Some(b"application/json")),
+            ],
+            Some(&inline_script(
+                &hyscribe_phpser::json_encode_script_data(&data).unwrap_or_default(),
+            )),
+        )
     }
 
     /// `print_enqueued_script_modules()` in the footer: the queued modules

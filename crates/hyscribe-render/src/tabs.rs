@@ -12,6 +12,7 @@ use hyscribe_phpser::{Key, Value, is_empty_string, json_encode, lookup};
 
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
+use crate::interactivity::list;
 use crate::template::Renderer;
 
 /// The `core/tabs-id` and `core/tabs-list` context.
@@ -47,6 +48,7 @@ impl Renderer<'_> {
             .get_str("activeTabIndex")
             .cloned()
             .unwrap_or(Value::Null);
+        let key = Key::from_php_string(context.id.to_php_string());
         let state = Value::Array(vec![
             (Key::String(b"tabsId".to_vec()), context.id),
             (Key::String(b"activeTabIndex".to_vec()), active),
@@ -57,6 +59,9 @@ impl Renderer<'_> {
         tags.set_attribute(b"data-wp-context", &json_encode(&state).unwrap_or_default());
         tags.set_attribute(b"data-wp-init", b"callbacks.onTabsInit");
         tags.set_attribute(b"data-wp-on--keydown", b"actions.handleTabKeyDown");
+        let ids = context.list.into_iter().map(Value::String).collect();
+        self.assets
+            .interactivity_state("core/tabs", vec![(key, Value::Array(list(ids)))]);
         tags.get_updated_html().to_vec()
     }
 

@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The playlist blocks: the tracks with their image and artist shown as the
-//! playlist sets, and the playlist's store, context and waveform player.
-//! Not checked yet: the tracks' data in the footer's Interactivity API
-//! state.
+//! playlist sets, and the playlist's store, context, state and waveform
+//! player.
 
 use hyscribe_html::TagProcessor;
-use hyscribe_kses::{esc_attr, esc_html, esc_url};
+use hyscribe_kses::{esc_attr, esc_html, esc_url, wp_strip_all_tags};
 use hyscribe_phpser::{Key, Value, is_empty_string, json_encode};
 
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
 use crate::formatting::find;
+use crate::interactivity::list;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
 
@@ -25,24 +25,40 @@ impl Renderer<'_> {
         let content = self.saved_markup(block);
         self.playlist = outer;
         let playlist_id = self.unique_id("playlist-");
-        let tracks: Vec<Value> = block
+        let (tracks, data): (Vec<Value>, Vec<(Key, Value)>) = block
             .inner_blocks
             .iter()
             .filter(|track| track.name.as_deref() == Some("core/playlist-track"))
-            .filter(|track| {
-                let parsed = track.attrs.as_deref().unwrap_or_default();
-                prepared("core/playlist-track", parsed)
-                    .get_str("id")
-                    .is_some_and(|id| !id.is_empty())
+            .map(|track| {
+                prepared(
+                    "core/playlist-track",
+                    track.attrs.as_deref().unwrap_or_default(),
+                )
             })
+            .filter(|track| track.get_str("id").is_some_and(|id| !id.is_empty()))
             .enumerate()
-            .map(|(index, _)| Value::String(format!("track-{index}").into_bytes()))
-            .collect();
+            .map(|(index, track)| {
+                let id = format!("track-{index}").into_bytes();
+                (
+                    Value::String(id.clone()),
+                    (Key::String(id), track_data(&track)),
+                )
+            })
+            .unzip();
         let Some(first) = tracks.first().cloned() else {
             return Vec::new();
         };
         self.assets
             .enqueue_module("@wordpress/block-library/playlist/view");
+        let entry = |key: &str, value: Value| (Key::String(key.as_bytes().to_vec()), value);
+        let playlist = vec![(
+            Key::String(playlist_id.clone()),
+            Value::Array(vec![entry("tracks", Value::Array(data))]),
+        )];
+        self.assets.interactivity_state(
+            "core/playlist",
+            vec![entry("playlists", Value::Array(playlist))],
+        );
         let mut waveform = String::new();
         for (key, name) in [
             ("waveformColor", "color"),
@@ -74,7 +90,6 @@ impl Renderer<'_> {
             }
             None => content,
         };
-        let entry = |key: &str, value: Value| (Key::String(key.as_bytes().to_vec()), value);
         let show_artwork = attributes
             .get_str("showPlayButtonArtwork")
             .is_some_and(|v| !v.is_empty());
@@ -181,9 +196,35 @@ impl Renderer<'_> {
     }
 }
 
-/// The values as a list, keyed from 0.
-fn list(values: Vec<Value>) -> Vec<(Key, Value)> {
-    (0..).map(Key::Int).zip(values).collect()
+/// A track's data in the playlist's state: its metadata without tags, its
+/// URLs escaped, and a label naming its artist and album when it has both.
+fn track_data(track: &Value) -> Value {
+    let text = |key| {
+        track
+            .get_str(key)
+            .map(Value::to_php_string)
+            .unwrap_or_default()
+    };
+    let title = Some(text("title"))
+        .filter(|title| !is_empty_string(title))
+        .unwrap_or(b"Unknown title".to_vec());
+    let (artist, album) = (text("artist"), text("album"));
+    let label = if is_empty_string(&artist) || is_empty_string(&album) {
+        title.clone()
+    } else {
+        [&title[..], b" by ", &artist, b" from the album ", &album].concat()
+    };
+    let stripped = |text: &[u8]| Value::String(wp_strip_all_tags(text, false));
+    let entry = |key: &str, value: Value| (Key::String(key.as_bytes().to_vec()), value);
+    Value::Array(vec![
+        entry("url", Value::String(esc_url(&text("src")))),
+        entry("title", stripped(&title)),
+        entry("artist", stripped(&artist)),
+        entry("album", stripped(&album)),
+        entry("image", Value::String(esc_url(&text("image")))),
+        entry("imageAlt", stripped(&text("imageAlt"))),
+        entry("ariaLabel", stripped(&label)),
+    ])
 }
 
 /// A `preg_replace()` replacement with its references to `groups` filled

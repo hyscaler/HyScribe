@@ -549,7 +549,7 @@ fn merge_style_property(style: &[u8], property: &[u8], value: &Value) -> Vec<u8>
 }
 
 /// `array_replace_recursive()`.
-fn array_replace_recursive(
+pub(crate) fn array_replace_recursive(
     mut entries: Vec<(Key, Value)>,
     replacements: Vec<(Key, Value)>,
 ) -> Vec<(Key, Value)> {
@@ -563,6 +563,11 @@ fn array_replace_recursive(
         }
     }
     entries
+}
+
+/// The values as a list, keyed from 0.
+pub(crate) fn list(values: Vec<Value>) -> Vec<(Key, Value)> {
+    (0..).map(Key::Int).zip(values).collect()
 }
 
 /// `array_is_list()`.

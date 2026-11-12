@@ -283,14 +283,25 @@ fn utf8_sequence(bytes: &[u8]) -> Option<&[u8]> {
     std::str::from_utf8(sequence).ok().map(|_| sequence)
 }
 
+/// Which of `json_encode()`'s escapes apply.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Flags {
+    /// None of the flags.
+    Default,
+    /// `JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE`.
+    Unescaped,
+    /// Those with `JSON_HEX_TAG | JSON_UNESCAPED_LINE_TERMINATORS`.
+    ScriptData,
+}
+
 /// `json_encode( $value )` with no flags, as `wp_json_encode()` calls it:
-/// lists as arrays and other arrays as objects, `/` and every non-ASCII
-/// character escaped. `None` where PHP fails: a string that is not UTF-8,
-/// an infinite or NaN float, or a value other than null, a scalar or an
-/// array.
+/// lists as arrays and other arrays as objects, an object as its public
+/// properties, `/` and every non-ASCII character escaped. `None` where PHP
+/// fails: a string that is not UTF-8, an infinite or NaN float, or a
+/// serialized payload.
 pub fn json_encode(value: &Value) -> Option<Vec<u8>> {
     let mut out = Vec::new();
-    encode_value(value, false, &mut out)?;
+    encode_value(value, Flags::Default, &mut out)?;
     Some(out)
 }
 
@@ -299,11 +310,21 @@ pub fn json_encode(value: &Value) -> Option<Vec<u8>> {
 /// escaped, as PHP keeps them without `JSON_UNESCAPED_LINE_TERMINATORS`.
 pub fn json_encode_unescaped(value: &Value) -> Option<Vec<u8>> {
     let mut out = Vec::new();
-    encode_value(value, true, &mut out)?;
+    encode_value(value, Flags::Unescaped, &mut out)?;
     Some(out)
 }
 
-fn encode_value(value: &Value, unescaped: bool, out: &mut Vec<u8>) -> Option<()> {
+/// `json_encode()` with `JSON_HEX_TAG | JSON_UNESCAPED_SLASHES |
+/// JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS`, as
+/// `print_script_module_data()` calls it: `<` and `>` escaped, nothing
+/// else beyond JSON's own.
+pub fn json_encode_script_data(value: &Value) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    encode_value(value, Flags::ScriptData, &mut out)?;
+    Some(out)
+}
+
+fn encode_value(value: &Value, flags: Flags, out: &mut Vec<u8>) -> Option<()> {
     match value {
         Value::Null => out.extend_from_slice(b"null"),
         Value::Bool(true) => out.extend_from_slice(b"true"),
@@ -320,7 +341,7 @@ fn encode_value(value: &Value, unescaped: bool, out: &mut Vec<u8>) -> Option<()>
                     .as_bytes(),
             );
         }
-        Value::String(text) => encode_string(text, unescaped, out)?,
+        Value::String(text) => encode_string(text, flags, out)?,
         Value::Array(entries) => {
             let list = entries
                 .iter()
@@ -336,33 +357,53 @@ fn encode_value(value: &Value, unescaped: bool, out: &mut Vec<u8>) -> Option<()>
                         Key::Int(n) => n.to_string().into_bytes(),
                         Key::String(name) => name.clone(),
                     };
-                    encode_string(&name, unescaped, out)?;
+                    encode_string(&name, flags, out)?;
                     out.push(b':');
                 }
-                encode_value(item, unescaped, out)?;
+                encode_value(item, flags, out)?;
             }
             out.push(if list { b']' } else { b'}' });
+        }
+        Value::Object { properties, .. } => {
+            out.push(b'{');
+            let public = properties
+                .iter()
+                .filter(|(key, _)| !matches!(key, Key::String(name) if name.first() == Some(&0)));
+            for (i, (key, item)) in public.enumerate() {
+                if i > 0 {
+                    out.push(b',');
+                }
+                encode_string(&key.to_php_string(), flags, out)?;
+                out.push(b':');
+                encode_value(item, flags, out)?;
+            }
+            out.push(b'}');
         }
         _ => return None,
     }
     Some(())
 }
 
-fn encode_string(text: &[u8], unescaped: bool, out: &mut Vec<u8>) -> Option<()> {
+fn encode_string(text: &[u8], flags: Flags, out: &mut Vec<u8>) -> Option<()> {
     let text = std::str::from_utf8(text).ok()?;
     out.push(b'"');
     for c in text.chars() {
         match c {
             '"' => out.extend_from_slice(b"\\\""),
             '\\' => out.extend_from_slice(b"\\\\"),
-            '/' if !unescaped => out.extend_from_slice(b"\\/"),
+            '/' if flags == Flags::Default => out.extend_from_slice(b"\\/"),
+            '<' if flags == Flags::ScriptData => out.extend_from_slice(b"\\u003C"),
+            '>' if flags == Flags::ScriptData => out.extend_from_slice(b"\\u003E"),
             '\u{8}' => out.extend_from_slice(b"\\b"),
             '\u{c}' => out.extend_from_slice(b"\\f"),
             '\n' => out.extend_from_slice(b"\\n"),
             '\r' => out.extend_from_slice(b"\\r"),
             '\t' => out.extend_from_slice(b"\\t"),
             ' '..='~' | '\u{7f}' => out.push(c as u8),
-            '\u{80}'.. if unescaped && !matches!(c, '\u{2028}' | '\u{2029}') => {
+            '\u{80}'..
+                if flags == Flags::ScriptData
+                    || flags == Flags::Unescaped && !matches!(c, '\u{2028}' | '\u{2029}') =>
+            {
                 out.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
             }
             _ => {
@@ -552,10 +593,11 @@ mod tests {
         for line in golden.lines() {
             let mut fields = line.split('\t').map(hyscribe_testkit::unhex);
             let mut field = || fields.next().unwrap();
-            let (value, php, unescaped) = (field(), field(), field());
+            let (value, php, unescaped, script) = (field(), field(), field(), field());
             let value = crate::decode(&value).unwrap();
             assert_eq!(json_encode(&value), Some(php), "{value:?}");
             assert_eq!(json_encode_unescaped(&value), Some(unescaped), "{value:?}");
+            assert_eq!(json_encode_script_data(&value), Some(script), "{value:?}");
         }
         assert!(golden.lines().count() > 30);
     }
@@ -568,6 +610,17 @@ mod tests {
             None
         );
         assert_eq!(json_encode(&Value::Enum(b"Suit:Hearts".to_vec())), None);
+        assert_eq!(json_encode_script_data(&Value::String(vec![0xff])), None);
+        for properties in [
+            vec![(Key::String(vec![0xff]), Value::Null)],
+            vec![(Key::Int(0), Value::String(vec![0xff]))],
+        ] {
+            let object = Value::Object {
+                class: b"C".to_vec(),
+                properties,
+            };
+            assert_eq!(json_encode(&object), None);
+        }
         let nested = Value::Array(vec![(Key::String(vec![0xff]), Value::Null)]);
         assert_eq!(json_encode(&nested), None);
         assert_eq!(

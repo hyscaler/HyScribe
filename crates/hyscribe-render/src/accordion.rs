@@ -5,7 +5,7 @@
 //! directives the accordion's root block then processes.
 
 use hyscribe_html::TagProcessor;
-use hyscribe_phpser::Value;
+use hyscribe_phpser::{Key, Value};
 
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
@@ -41,6 +41,15 @@ impl Renderer<'_> {
         let parsed = block.attrs.as_deref().unwrap_or_default();
         let open = flag(&prepared("core/accordion-item", parsed), "openByDefault");
         let id = String::from_utf8_lossy(&self.unique_id("accordion-item-")).into_owned();
+        // A closure on the server, which encodes as an empty object.
+        let closure = Value::Object {
+            class: b"Closure".to_vec(),
+            properties: Vec::new(),
+        };
+        self.assets.interactivity_state(
+            "core/accordion",
+            vec![(Key::String(b"isOpen".to_vec()), closure)],
+        );
         let mut tags = TagProcessor::new(&content);
         if tags.next_tag(None, Some(b"wp-block-accordion-item")) {
             let context = format!("{{ \"id\": \"{id}\", \"openByDefault\": {open} }}");

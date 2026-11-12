@@ -505,3 +505,55 @@ fn a_closed_embed_with_comments_counts_them() {
     assert!(page.contains("?p=1#comments\" target=\"_top\">"));
     assert!(page.contains("2 <span class=\"screen-reader-text\">Comments</span>"));
 }
+
+/// Every case of `reference/script-module-data/golden.sh`: the
+/// Interactivity API's state after its blocks render, each case a request.
+#[test]
+fn script_module_data_matches_php() {
+    let theme = crate::theme::twentytwentyfive();
+    let request = Request::default();
+    let site = crate::fixture::DefaultInstall {
+        home: b"http://127.0.0.1:8081".to_vec(),
+    };
+    let registry = registered_modules("http://127.0.0.1:8081");
+    let golden = include_str!("../../tests/golden/script-module-data.tsv");
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let mut renderer = crate::template::Renderer::new(&theme, &site, &request);
+        renderer.unique_id = fields[0].parse().unwrap();
+        let markup = unhex(fields[1]);
+        renderer.render(&markup);
+        let modules = Modules {
+            registry: &registry,
+            queue: &renderer.assets.modules,
+        };
+        assert_eq!(
+            String::from_utf8_lossy(&modules.data(&renderer.assets.state)),
+            String::from_utf8_lossy(&unhex(fields[2])),
+            "{}",
+            String::from_utf8_lossy(&markup)
+        );
+    }
+    assert_eq!(golden.lines().count(), 7);
+}
+
+/// The state prints only on a page that loads the Interactivity API,
+/// queued itself or imported.
+#[test]
+fn script_module_data_needs_the_interactivity_api() {
+    let registry = registered_modules("http://s.test");
+    let state = [(
+        hyscribe_phpser::Key::String(b"ns".to_vec()),
+        Value::Array(vec![(hyscribe_phpser::Key::Int(0), Value::Int(1))]),
+    )];
+    let data = |queue: &[&str]| {
+        let queue: Vec<String> = queue.iter().map(|id| (*id).to_string()).collect();
+        Modules {
+            registry: &registry,
+            queue: &queue,
+        }
+        .data(&state)
+    };
+    assert!(data(&["@wordpress/a11y"]).is_empty());
+    assert!(!data(&["@wordpress/interactivity"]).is_empty());
+}

@@ -24,13 +24,12 @@ pub fn wp_footer(site: &dyn Site, assets: &Assets) -> Vec<u8> {
     let siteurl = String::from_utf8_lossy(&site.option("siteurl").unwrap_or_default()).into_owned();
     let registry = registered_modules(&siteurl);
     let mut out = speculation_rules(site, &siteurl);
-    out.extend(
-        Modules {
-            registry: &registry,
-            queue: &assets.modules,
-        }
-        .footer(),
-    );
+    let modules = Modules {
+        registry: &registry,
+        queue: &assets.modules,
+    };
+    out.extend(modules.footer());
+    out.extend(modules.data(&assets.state));
     // wp_print_footer_scripts()
     if assets.scripts.iter().any(|h| h == "comment-reply") {
         let src =

@@ -50,7 +50,7 @@ fn cookie_path(url: &str) -> String {
 
 /// HyScribe's cookie names, which never stand for a PHP WordPress login,
 /// and their paths.
-struct Names {
+pub(crate) struct Names {
     hash: String,
     /// `COOKIEPATH`, from the home URL.
     path: String,
@@ -59,7 +59,7 @@ struct Names {
 }
 
 impl Names {
-    fn new(site: &Site) -> Names {
+    pub(crate) fn new(site: &Site) -> Names {
         let siteurl = site.option("siteurl");
         Names {
             hash: md5(siteurl.as_bytes()),
@@ -73,7 +73,7 @@ impl Names {
     }
 
     /// `AUTH_COOKIE`, or `SECURE_AUTH_COOKIE` when `secure`.
-    fn auth(&self, secure: bool) -> String {
+    pub(crate) fn auth(&self, secure: bool) -> String {
         format!("hyscribe_{}{}", if secure { "sec_" } else { "" }, self.hash)
     }
 
@@ -142,7 +142,7 @@ pub fn cookies<'a>(values: impl IntoIterator<Item = &'a [u8]>) -> Vec<(Vec<u8>, 
     cookies
 }
 
-fn cookie<'a>(cookies: &'a [(Vec<u8>, Vec<u8>)], name: &str) -> Option<&'a [u8]> {
+pub(crate) fn cookie<'a>(cookies: &'a [(Vec<u8>, Vec<u8>)], name: &str) -> Option<&'a [u8]> {
     cookies
         .iter()
         .find(|(known, _)| known == name.as_bytes())
@@ -150,8 +150,8 @@ fn cookie<'a>(cookies: &'a [(Vec<u8>, Vec<u8>)], name: &str) -> Option<&'a [u8]>
 }
 
 /// What the login screen reads, on a blocking thread.
-struct LoginReads<'a> {
-    reads: Reads<'a>,
+pub(crate) struct LoginReads<'a> {
+    pub(crate) reads: Reads<'a>,
     site: &'a Site,
     now: i64,
     /// The users found, for the cookies of the one who logs in and for the
@@ -165,7 +165,7 @@ struct LoginReads<'a> {
 }
 
 impl<'a> LoginReads<'a> {
-    fn new(site: &'a Site, handle: Handle, now: i64) -> LoginReads<'a> {
+    pub(crate) fn new(site: &'a Site, handle: Handle, now: i64) -> LoginReads<'a> {
         LoginReads {
             reads: Reads::new(site, handle),
             site,
@@ -207,7 +207,7 @@ impl<'a> LoginReads<'a> {
     }
 
     /// `get_user_option( $option )`: the site's own meta first.
-    fn user_option(&self, id: u64, option: &str) -> Option<Vec<u8>> {
+    pub(crate) fn user_option(&self, id: u64, option: &str) -> Option<Vec<u8>> {
         let prefixed = format!("{}{option}", self.site.db.prefix());
         self.reads
             .wait(self.site.db.user_meta(id, &prefixed))
@@ -226,7 +226,7 @@ impl<'a> LoginReads<'a> {
 
     /// `wp_validate_auth_cookie()` of the auth cookie, with the session:
     /// the secure one's salt over HTTPS.
-    fn session(&self, cookie: Option<&[u8]>, post: bool, https: bool) -> Session {
+    pub(crate) fn session(&self, cookie: Option<&[u8]>, post: bool, https: bool) -> Session {
         let Some(cookie) = cookie.filter(|cookie| !cookie.is_empty()) else {
             return Session::None;
         };
@@ -361,6 +361,14 @@ impl CapabilityData for LoginReads<'_> {
     }
 }
 
+/// `is_ssl()`: HyScribe serves HTTP, so a site whose URL is https is reached
+/// over a TLS proxy and its cookies stay on HTTPS (ADMIN.md).
+pub(crate) fn is_ssl(site: &Site) -> bool {
+    site.option("siteurl")
+        .to_ascii_lowercase()
+        .starts_with("https:")
+}
+
 /// The request as the login screen sees it.
 pub(crate) struct Asked {
     pub(crate) post: bool,
@@ -378,7 +386,7 @@ pub(crate) async fn respond(site: &Arc<Site>, asked: Asked) -> Response {
 }
 
 /// The answer, or a server error if working it out panicked.
-fn joined(answer: Result<Response, tokio::task::JoinError>) -> Response {
+pub(crate) fn joined(answer: Result<Response, tokio::task::JoinError>) -> Response {
     match answer {
         Ok(response) => response,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -404,7 +412,7 @@ fn headers(names: &Names, https: bool) -> Vec<(header::HeaderName, String)> {
     headers
 }
 
-fn response(
+pub(crate) fn response(
     status: StatusCode,
     headers: Vec<(header::HeaderName, String)>,
     body: Vec<u8>,
@@ -425,12 +433,7 @@ fn response(
 
 fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     let names = Names::new(site);
-    // `is_ssl()`: HyScribe serves HTTP, so a site whose URL is https is
-    // reached over a TLS proxy and its cookies stay on HTTPS (ADMIN.md).
-    let https = site
-        .option("siteurl")
-        .to_ascii_lowercase()
-        .starts_with("https:");
+    let https = is_ssl(site);
     let query = parse_str(asked.query.as_deref().unwrap_or_default().as_bytes());
     let cookies = cookies(
         asked

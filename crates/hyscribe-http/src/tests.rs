@@ -645,7 +645,7 @@ async fn canonical_redirects_match_wordpress() {
         ("/?p=1&page_id=999", StatusCode::NOT_FOUND),
         ("/?feed=rss&cat=1.&page_id=", StatusCode::OK),
         ("/wp-content/x?cat=", StatusCode::NOT_FOUND),
-        ("/hs-admin/?p=", StatusCode::NOT_FOUND),
+        ("/hs-admin/?p=", StatusCode::FOUND),
         ("/?year=2026&monthnum=4&day=30", StatusCode::NOT_FOUND),
         ("/?p=-1&page_id=999", StatusCode::OK),
         ("/?p[]=1", StatusCode::OK),
@@ -818,15 +818,16 @@ async fn admin_and_login_urls_are_clean() {
             "{uri}"
         );
     }
-    // The login screen answers; the admin's clean URLs are reserved (no
-    // screens yet), never redirected.
+    // The login screen answers; the admin's screens send visitors to it.
     assert_eq!(
         request(&site, "GET", "/hs-login").await.status,
         StatusCode::OK
     );
     for uri in ["/hs-admin", "/hs-admin/", "/hs-admin/edit"] {
         let reply = request(&site, "GET", uri).await;
-        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{uri}");
+        assert_eq!(reply.status, StatusCode::FOUND, "{uri}");
+        let location = reply.headers["location"].to_str().unwrap();
+        assert!(location.contains("/hs-login?redirect_to="), "{location}");
     }
     // Look-alikes are ordinary paths.
     for uri in ["/wp-adminx", "/wp-login.phpx", "/x/wp-admin/", "/hs-loginx"] {
@@ -2602,7 +2603,7 @@ async fn pretty_permalinks_route_requests() {
     assert_eq!(file.status, StatusCode::FOUND);
     assert_eq!(
         request(&site, "GET", "/hs-admin/").await.status,
-        StatusCode::NOT_FOUND
+        StatusCode::FOUND
     );
 }
 

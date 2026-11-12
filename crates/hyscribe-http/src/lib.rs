@@ -42,6 +42,7 @@ use hyscribe_render::{search_terms, sticky_posts};
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 
+mod admin;
 mod canonical;
 mod feed;
 mod files;
@@ -473,6 +474,9 @@ async fn page(
     // The loaders read only the query, whatever the method, as PHP's do.
     if let Some(loader) = loaders::Loader::at(uri.path()) {
         return loaders::load(loader, uri.query(), &headers, now() as u64);
+    }
+    if admin::is_admin(uri.path()) {
+        return admin::respond(&site, uri, headers, post).await;
     }
     // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.
     let original = uri.clone();

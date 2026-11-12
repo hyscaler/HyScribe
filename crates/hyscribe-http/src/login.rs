@@ -156,9 +156,41 @@ struct LoginReads<'a> {
     now: i64,
     /// The users found, for the cookies of the one who logs in.
     found: RefCell<Vec<Credentials>>,
+    /// `wp_get_current_user()`'s ID and session token, from the logged in
+    /// cookie: 0 and none for a visitor.
+    current: (u64, Vec<u8>),
 }
 
-impl LoginReads<'_> {
+impl<'a> LoginReads<'a> {
+    fn new(site: &'a Site, handle: Handle, now: i64) -> LoginReads<'a> {
+        LoginReads {
+            reads: Reads::new(site, handle),
+            site,
+            now,
+            found: RefCell::default(),
+            current: (0, Vec::new()),
+        }
+    }
+
+    /// The user of a valid logged in cookie, and its session token.
+    fn current_user(&self, cookie: Option<&[u8]>) -> Option<(u64, Vec<u8>)> {
+        let parsed = parse_auth_cookie(cookie?)?;
+        let sessions = self.site.sessions.as_ref()?;
+        let user = self.credentials(UserField::Login, parsed.username)?;
+        let salt = self.salt("logged_in")?;
+        let good = parsed.is_valid(&user.pass, &salt, self.now, false)
+            && sessions.verify(user.id, parsed.token, self.now);
+        good.then(|| (user.id, parsed.token.to_vec()))
+    }
+
+    /// `get_user_locale( $id )`: the user's own, else the site's.
+    fn locale(&self, id: u64) -> Vec<u8> {
+        self.user_meta(id, "locale")
+            .filter(|locale| !locale.is_empty())
+            .or_else(|| self.reads.option("WPLANG").filter(|lang| !lang.is_empty()))
+            .unwrap_or_else(|| b"en_US".to_vec())
+    }
+
     fn credentials(&self, field: UserField, value: &[u8]) -> Option<Credentials> {
         let found = self.reads.wait(self.site.db.credentials(field, value))?;
         self.found.borrow_mut().push(found.clone());
@@ -205,10 +237,12 @@ impl LoginReads<'_> {
         valid.map_or(Session::Expired, Session::User)
     }
 
-    /// `create_nonce( $action )` for a visitor.
-    fn nonce(&self, action: &str) -> String {
-        self.salt("nonce").map_or(String::new(), |salt| {
-            create_nonce(&salt, nonce_tick(self.now), action, 0, b"")
+    /// `wp_verify_nonce( $nonce, $action )` for the current user.
+    fn verify_nonce(&self, nonce: &[u8], action: &str) -> bool {
+        let (user, token) = &self.current;
+        self.salt("nonce").is_some_and(|salt| {
+            hyscribe_auth::verify_nonce(nonce, &salt, nonce_tick(self.now), action, *user, token)
+                > 0
         })
     }
 }
@@ -244,7 +278,7 @@ impl Urls for LoginReads<'_> {
                 "%nonce:reset-password-for-user%",
                 &self.nonce("reset-password-for-0"),
             )
-            .replace("%user_id%", "0")
+            .replace("%user_id%", &self.current.0.to_string())
             .replace("%time%", &self.now.to_string())
     }
 }
@@ -252,6 +286,18 @@ impl Urls for LoginReads<'_> {
 impl LoginSite for LoginReads<'_> {
     fn blogname(&self) -> String {
         self.site.name()
+    }
+
+    fn name(&self) -> String {
+        self.site.option("blogname")
+    }
+
+    /// `wp_create_nonce( $action )` for the current user.
+    fn nonce(&self, action: &str) -> String {
+        let (user, token) = &self.current;
+        self.salt("nonce").map_or(String::new(), |salt| {
+            create_nonce(&salt, nonce_tick(self.now), action, *user, token)
+        })
     }
 
     fn home_url(&self) -> String {
@@ -385,12 +431,10 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             .iter()
             .map(HeaderValue::as_bytes),
     );
-    let reads = LoginReads {
-        reads: Reads::new(site, handle),
-        site,
-        now,
-        found: RefCell::default(),
-    };
+    let mut reads = LoginReads::new(site, handle, now);
+    if let Some(current) = reads.current_user(cookie(&cookies, &names.logged_in())) {
+        reads.current = current;
+    }
     let request = Request {
         query: &query,
         form: asked.post.then_some(&asked.form),
@@ -403,11 +447,16 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     let mut headers = headers(&names, https);
     let interim =
         query.get_str("interim-login").is_some() || asked.form.get_str("interim-login").is_some();
-    if !matches!(request.action().as_str(), "login" | "entered_recovery_mode") {
+    let action = request.action();
+    let outcome = match action.as_str() {
+        "logout" => {
+            let (status, body) = logout(&reads, &names, &request, &mut headers);
+            return response(status, headers, body);
+        }
+        "login" | "entered_recovery_mode" => login::login(&reads, &request),
         // The other actions are not ported yet.
-        return response(StatusCode::NOT_IMPLEMENTED, headers, Vec::new());
-    }
-    let outcome = login::login(&reads, &request);
+        _ => return response(StatusCode::NOT_IMPLEMENTED, headers, Vec::new()),
+    };
     let answer = match outcome {
         Login::Page(page) => Some((StatusCode::OK, page)),
         // The admin's session expiry dialog is not ported yet.
@@ -443,6 +492,72 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
         (Ok(()), Some((status, body))) => response(status, headers, body),
         (Ok(()), None) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
+}
+
+/// The logout action: with a good nonce, `wp_logout()` and the redirect;
+/// without, the page asking whether to log out.
+fn logout(
+    reads: &LoginReads,
+    names: &Names,
+    request: &Request,
+    headers: &mut Vec<(header::HeaderName, String)>,
+) -> (StatusCode, Vec<u8>) {
+    let posted = |key| {
+        request
+            .form
+            .and_then(|form| form.get_str(key))
+            .or_else(|| request.query.get_str(key))
+    };
+    let nonce = posted("_wpnonce").map(Value::to_php_string);
+    if !nonce.is_some_and(|nonce| reads.verify_nonce(&nonce, "log-out")) {
+        return (
+            StatusCode::FORBIDDEN,
+            login::logout_confirmation(reads, request),
+        );
+    }
+    // `wp_destroy_current_session()`, then `wp_clear_auth_cookie()`.
+    let (user, token) = &reads.current;
+    // A visitor, user 0, has no sessions to end.
+    if let Some(sessions) = reads.site.sessions.as_ref() {
+        // A session that cannot be removed expires all the same.
+        let _ = sessions.destroy(*user, token, reads.now);
+    }
+    let expired = (reads.now - 365 * DAY, reads.now);
+    let admin_path = format!("{}hs-admin", names.site_path);
+    for name in [names.auth(false), names.auth(true)] {
+        headers.push((
+            header::SET_COOKIE,
+            set_cookie(&name, b" ", expired, &admin_path, false),
+        ));
+    }
+    for path in names.site_paths() {
+        headers.push((
+            header::SET_COOKIE,
+            set_cookie(&names.logged_in(), b" ", expired, path, false),
+        ));
+    }
+    let location = match posted("redirect_to")
+        .and_then(Value::as_bytes)
+        .filter(|to| !hyscribe_phpser::is_empty_string(to))
+    {
+        Some(to) => {
+            let host = hyscribe_kses::url_host(reads.site.home.as_bytes()).unwrap_or_default();
+            wp_validate_redirect(&login::slash(to), &host, reads.admin_url("").as_bytes())
+        }
+        None => {
+            let locale = String::from_utf8_lossy(&reads.locale(*user)).into_owned();
+            reads
+                .login_url(&format!("?loggedout=true&wp_lang={locale}"))
+                .into_bytes()
+        }
+    };
+    let location = String::from_utf8_lossy(&wp_sanitize_redirect(&location)).into_owned();
+    headers.push((header::LOCATION, location));
+    headers.push((
+        header::HeaderName::from_static("x-redirect-by"),
+        "WordPress".into(),
+    ));
+    (StatusCode::FOUND, Vec::new())
 }
 
 /// `wp_set_auth_cookie()` and the redirect after a login: the cookies and
@@ -531,11 +646,7 @@ fn location(
     )
     .to_int();
     if can("manage_options") && reads.now > lifespan {
-        let locale = reads
-            .user_meta(id, "locale")
-            .filter(|locale| !locale.is_empty())
-            .or_else(|| reads.reads.option("WPLANG").filter(|lang| !lang.is_empty()))
-            .unwrap_or_else(|| b"en_US".to_vec());
+        let locale = reads.locale(id);
         let back = if hyscribe_phpser::is_empty_string(&redirect_to) {
             String::new()
         } else {

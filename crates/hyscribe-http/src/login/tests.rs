@@ -219,7 +219,21 @@ async fn shadow_mode_shows_the_screen_but_logs_nobody_in() {
     let reply = send(&site, "POST", "/hs-login", "", form).await;
     assert_eq!(reply.status, StatusCode::OK);
     assert!(reply.body.contains("This site is read only"));
-    // With no sessions, no auth cookie is valid.
+    // With no sessions, no auth or logged in cookie is valid.
+    let hash = md5(b"http://127.0.0.1:8081");
+    let logged_in = format!("hyscribe_logged_in_{hash}=admin%7C9999999999%7Cx%7Cy");
+    let asked = send(&site, "GET", "/hs-login?action=logout", &logged_in, "").await;
+    let visitor = send(&site, "GET", "/hs-login?action=logout", "", "").await;
+    assert_eq!(logout_nonce(&asked.body), logout_nonce(&visitor.body));
+    // Logging out needs no session store.
+    let uri = format!(
+        "/hs-login?action=logout&_wpnonce={}",
+        logout_nonce(&visitor.body)
+    );
+    assert_eq!(
+        send(&site, "GET", &uri, "", "").await.status,
+        StatusCode::FOUND
+    );
     let cookie = format!(
         "hyscribe_{}=admin%7C1%7Cx%7Cy",
         md5(b"http://127.0.0.1:8081")
@@ -232,7 +246,7 @@ async fn shadow_mode_shows_the_screen_but_logs_nobody_in() {
 async fn other_actions_are_not_ported_yet() {
     let site = login_site(None).await;
     for uri in [
-        "/hs-login?action=logout",
+        "/hs-login?action=register",
         "/hs-login?action=lostpassword",
         "/hs-login?key=x",
     ] {
@@ -303,12 +317,7 @@ async fn logged_in_users_go_where_they_may() {
     let site = login_site(None).await;
     let handle = Handle::current();
     tokio::task::spawn_blocking(move || {
-        let reads = LoginReads {
-            reads: Reads::new(&site, handle),
-            site: &site,
-            now: 1_900_000_000,
-            found: RefCell::default(),
-        };
+        let reads = LoginReads::new(&site, handle, 1_900_000_000);
         let admin = "http://127.0.0.1:8081/hs-admin/";
         let everything = |_: &str| true;
         let reader = |cap: &str| cap == "read";
@@ -346,12 +355,7 @@ async fn logged_in_users_go_where_they_may() {
         assert_eq!(reads.fill("%nonce:wp_rest%").len(), 10);
         // At the lifespan's last second, no confirmation yet.
         let lifespan = reads.reads.option("admin_email_lifespan").unwrap();
-        let edge = LoginReads {
-            reads: Reads::new(&site, Handle::current()),
-            site: &site,
-            now: Value::String(lifespan).to_int(),
-            found: RefCell::default(),
-        };
+        let edge = LoginReads::new(&site, Handle::current(), Value::String(lifespan).to_int());
         assert_eq!(location(&edge, &everything, (1, false), b""), "");
     })
     .await
@@ -364,12 +368,7 @@ async fn logged_in_users_go_where_they_may() {
     pretty.options.insert("WPLANG".into(), b"de_DE".to_vec());
     let handle = Handle::current();
     tokio::task::spawn_blocking(move || {
-        let reads = LoginReads {
-            reads: Reads::new(&pretty, handle),
-            site: &pretty,
-            now: 1_900_000_000,
-            found: RefCell::default(),
-        };
+        let reads = LoginReads::new(&pretty, handle, 1_900_000_000);
         assert_eq!(reads.fill("%rest_url%"), "http://127.0.0.1:8081/wp-json/");
         // A user without a locale of their own confirms in the site's.
         let confirm = location(&reads, &|_: &str| true, (1, false), b"");
@@ -433,6 +432,10 @@ async fn without_salts_nobody_logs_in() {
         let reply = send(&site, "GET", "/hs-login", &cookie, "").await;
         assert!(reply.body.contains("<p>Please log in again.</p>"), "{user}");
     }
+    // Nor is a logged in cookie, without the salt to check it by.
+    let cookie = format!("hyscribe_logged_in_{hash}=admin%7C9999999999%7Cx%7Cy");
+    let asked = send(&site, "GET", "/hs-login?action=logout", &cookie, "").await;
+    assert_eq!(asked.status, StatusCode::FORBIDDEN);
     // A logged in cookie stands in for the test cookie.
     let cookie = format!("hyscribe_logged_in_{hash}=x");
     let reply = send(
@@ -454,12 +457,7 @@ async fn use_ssl_users_get_the_secure_cookie() {
     let site = login_site(Some(dir.path())).await;
     let handle = Handle::current();
     tokio::task::spawn_blocking(move || {
-        let reads = LoginReads {
-            reads: Reads::new(&site, handle),
-            site: &site,
-            now: now(),
-            found: RefCell::default(),
-        };
+        let reads = LoginReads::new(&site, handle, now());
         reads.credentials(UserField::Login, b"admin").unwrap();
         let names = Names::new(&site);
         let (cookies, _) =
@@ -523,5 +521,117 @@ async fn an_https_site_keeps_its_cookies_on_https() {
     assert_eq!(
         send(&site, "POST", "/hs-login", "", form).await.status,
         StatusCode::NOT_IMPLEMENTED
+    );
+}
+
+/// The logout link's nonce on a page.
+fn logout_nonce(page: &str) -> String {
+    let at = page.find("_wpnonce=").unwrap() + 9;
+    page.get(at..at + 10).unwrap().to_string()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logging_out_asks_without_a_nonce_and_ends_the_session_with_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = login_site(Some(dir.path())).await;
+    // Without a nonce, PHP's page asking first, under HyScribe's URLs.
+    let asked = send(
+        &site,
+        "GET",
+        "/hs-login?action=logout&redirect_to=%2Fx%22",
+        "",
+        "",
+    )
+    .await;
+    assert_eq!(asked.status, StatusCode::FORBIDDEN);
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/login.tsv");
+    let line = golden
+        .lines()
+        .find(|l| l.starts_with("GET\taction=logout&redirect_to=%2Fx%22\t"))
+        .unwrap();
+    let php = String::from_utf8(unhex(line.rsplit('\t').next().unwrap())).unwrap();
+    let expected = php
+        .replace("/wp-login.php", "/hs-login")
+        .replace("%nonce:log-out%", &logout_nonce(&asked.body));
+    assert_eq!(asked.body, expected);
+    // A visitor with their own nonce logs out, which ends no session.
+    let nonce = logout_nonce(&asked.body);
+    let out = send(
+        &site,
+        "GET",
+        &format!("/hs-login?action=logout&_wpnonce={nonce}"),
+        "",
+        "",
+    )
+    .await;
+    assert_eq!(out.status, StatusCode::FOUND);
+    assert_eq!(
+        out.headers.get(header::LOCATION).unwrap(),
+        "http://127.0.0.1:8081/hs-login?loggedout=true&wp_lang=en_US"
+    );
+    let hash = md5(b"http://127.0.0.1:8081");
+    let cookies = all(&out.headers, header::SET_COOKIE);
+    assert_eq!(cookies.len(), 4);
+    assert!(cookies[1].starts_with(&format!("hyscribe_{hash}=%20; expires=")));
+    assert!(cookies[1].ends_with("; Max-Age=0; path=/hs-admin; HttpOnly; SameSite=Lax"));
+    // They expired a year ago.
+    let date = cookies[1]
+        .split("expires=")
+        .nth(1)
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap();
+    let expired = httpdate::parse_http_date(date).unwrap();
+    let ago = std::time::SystemTime::now()
+        .duration_since(expired)
+        .unwrap()
+        .as_secs();
+    assert!(
+        (365 * 86_400 - 60..=365 * 86_400 + 60).contains(&ago),
+        "{ago}"
+    );
+    assert!(cookies[2].starts_with(&format!("hyscribe_sec_{hash}=%20;")));
+    assert!(
+        cookies[3].starts_with(&format!("hyscribe_logged_in_{hash}=%20;"))
+            && cookies[3].contains("; path=/;")
+    );
+    // A logged in user's link carries their own nonce, and ends their session.
+    let form = "log=admin&pwd=reference-only-password";
+    let login = send(&site, "POST", "/hs-login", "", form).await;
+    let set = all(&login.headers, header::SET_COOKIE);
+    let auth = set[1].split(';').next().unwrap().to_string();
+    let logged_in = set[2].split(';').next().unwrap().to_string();
+    let asked = send(&site, "GET", "/hs-login?action=logout", &logged_in, "").await;
+    let theirs = logout_nonce(&asked.body);
+    // A logged in cookie for nobody is a visitor's.
+    let nobody = logged_in.replacen("admin%7C", "nobody%7C", 1);
+    let visitor = send(&site, "GET", "/hs-login?action=logout", &nobody, "").await;
+    assert_eq!(logout_nonce(&visitor.body), nonce);
+    assert_ne!(theirs, nonce);
+    let uri = format!("/hs-login?action=logout&_wpnonce={theirs}&redirect_to=%2Fy");
+    let out = send(&site, "GET", &uri, &logged_in, "").await;
+    assert_eq!(out.headers.get(header::LOCATION).unwrap(), "/y");
+    let after = send(&site, "GET", "/hs-login", &auth, "").await;
+    assert!(after.body.contains("<p>Please log in again.</p>"));
+    // Its logged in cookie is a visitor's now.
+    let asked = send(&site, "GET", "/hs-login?action=logout", &logged_in, "").await;
+    assert_eq!(logout_nonce(&asked.body), nonce);
+    // A wrong nonce asks again.
+    let wrong = send(
+        &site,
+        "GET",
+        "/hs-login?action=logout&_wpnonce=0123456789",
+        "",
+        "",
+    )
+    .await;
+    assert_eq!(wrong.status, StatusCode::FORBIDDEN);
+    // A redirect off the site goes to the admin instead; the form counts.
+    let form = format!("_wpnonce={nonce}&redirect_to=http%3A%2F%2Fexample.test%2F");
+    let out = send(&site, "POST", "/hs-login?action=logout", "", &form).await;
+    assert_eq!(
+        out.headers.get(header::LOCATION).unwrap(),
+        "http://127.0.0.1:8081/hs-admin/"
     );
 }

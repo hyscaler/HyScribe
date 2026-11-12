@@ -8,7 +8,8 @@
 # cookie that does not validate, resetpass for the test cookie and a reset
 # password cookie, or use_ssl for the test cookie with every user's use_ssl
 # option on (a must-use plugin filters it, and is removed after).
-# user-profile's nonce is replaced by %nonce:reset-password-for-user%. Needs
+# user-profile's nonce is replaced by %nonce:reset-password-for-user%, a logout
+# link's by %nonce:log-out%. Needs
 # the default install oracle running (db.sh up, then php.sh up). Failed logins
 # write nothing, so it only reads.
 set -euo pipefail
@@ -40,7 +41,7 @@ record() {
   curl "${args[@]}" "$BASE/wp-login.php${query:+?$query}" > /dev/null
   local status
   status=$(head -n 1 "$HEADERS" | cut -d ' ' -f 2)
-  sed -i -E 's/("nonce":")[0-9a-f]{10}"/\1%nonce:reset-password-for-user%"/' "$TMP"
+  sed -i -E -e 's/("nonce":")[0-9a-f]{10}"/\1%nonce:reset-password-for-user%"/' -e 's/_wpnonce=[0-9a-f]{10}/_wpnonce=%nonce:log-out%/' "$TMP"
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$method" "$query" "$body" "$state" "$status" "$(xxd -p "$TMP" | tr -d '\n')" >> "$OUT"
 }
 ADMIN="$BASE/wp-admin"
@@ -63,6 +64,12 @@ record POST '' 'log=admin&pwd=wrong&testcookie=1' 0
 record POST '' 'log=&pwd=&testcookie=1' 0
 record POST 'reauth=1' 'log=admin&pwd=wrong' 1
 record GET 'action=entered_recovery_mode' '' 0
+# Logging out without a good nonce asks first, with a 403.
+for query in 'action=logout' 'action=logout&redirect_to=%2Fx%22' 'action=logout&redirect_to=0' \
+  'action=logout&_wpnonce=bad&redirect_to=http://example.test/a%20b'; do
+  record GET "$query" '' 0
+done
+record POST 'action=logout' 'redirect_to=%2Fy' 0
 record GET '' '' expired
 record POST '' 'log=&pwd=' expired
 record POST 'loggedout=0' 'log=admin&pwd=wrong&testcookie=1' 1

@@ -3,6 +3,7 @@
 //! hs-admin, the dashboard emulating `wp-admin` (ADR 0008).
 
 pub mod assets;
+pub mod die;
 pub mod login;
 #[cfg(test)]
 mod tests;

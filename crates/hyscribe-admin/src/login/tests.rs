@@ -30,6 +30,20 @@ fn the_login_screen_is_php_s() {
         let oracle = Oracle {
             use_ssl: state == "use_ssl",
         };
+        if request.action() == "logout" {
+            assert_eq!(f[4], "403", "{line}");
+            let ours = String::from_utf8(logout_confirmation(&oracle, &request)).unwrap();
+            let php = String::from_utf8(unhex(f[5])).unwrap();
+            if ours != php {
+                failures.push(format!(
+                    "{} {}{}",
+                    f[0],
+                    f[1],
+                    first_difference(&php, &ours)
+                ));
+            }
+            continue;
+        }
         assert_eq!(f[4], "200", "{line}");
         let Login::Page(ours) = login(&oracle, &request) else {
             failures.push(format!("{} {} {}: logged in", f[0], f[1], f[2]));
@@ -217,6 +231,12 @@ impl Site for AnyEmail {
     fn blogname(&self) -> String {
         self.0.blogname()
     }
+    fn name(&self) -> String {
+        self.0.name()
+    }
+    fn nonce(&self, action: &str) -> String {
+        self.0.nonce(action)
+    }
     fn home_url(&self) -> String {
         self.0.home_url()
     }
@@ -265,4 +285,13 @@ fn shadow_mode_logs_nobody_in() {
     let page = String::from_utf8(page).unwrap();
     assert!(page.contains("<div id=\"login-message\" class=\"notice notice-info message\"><p>This site is read only: logging in needs HyScribe&#8217;s primary mode.</p></div>"));
     assert!(page.contains("aria-describedby=\"login-message\""));
+}
+
+/// A `redirect_to` that is not a string, where PHP fails, is left out.
+#[test]
+fn a_logout_link_leaves_out_an_array() {
+    let query = parse_str(b"action=logout&redirect_to%5B%5D=x");
+    let page = logout_confirmation(&Oracle::default(), &request(&query, None, Session::None));
+    let page = String::from_utf8(page).unwrap();
+    assert!(page.contains("wp-login.php?action=logout&amp;_wpnonce=%nonce:log-out%"));
 }

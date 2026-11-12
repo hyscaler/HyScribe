@@ -51,6 +51,12 @@ impl Site for Oracle {
     fn blogname(&self) -> String {
         "HyScribe Default Install".into()
     }
+    fn name(&self) -> String {
+        "HyScribe Default Install".into()
+    }
+    fn nonce(&self, action: &str) -> String {
+        format!("%nonce:{action}%")
+    }
     fn home_url(&self) -> String {
         format!("{SITE}/")
     }

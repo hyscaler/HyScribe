@@ -4,7 +4,7 @@
 
 use hyscribe_auth::check_password;
 use hyscribe_kses::{esc_attr, esc_html, esc_url, str_contains, url_query};
-use hyscribe_phpser::{Value, is_empty_string, parse_str, php_trim};
+use hyscribe_phpser::{Value, is_empty_string, parse_str, php_trim, urlencode};
 use hyscribe_render::formatting::{is_email, sanitize_user};
 
 use crate::assets::{Assets, Urls};
@@ -52,6 +52,10 @@ pub struct User {
 pub trait Site: Urls {
     /// `get_bloginfo( 'name', 'display' )`.
     fn blogname(&self) -> String;
+    /// `get_bloginfo( 'name' )`, as stored.
+    fn name(&self) -> String;
+    /// `wp_create_nonce( $action )` for the current user.
+    fn nonce(&self, action: &str) -> String;
     /// `home_url( '/' )`.
     fn home_url(&self) -> String;
     /// The login screen's URL with `query`, `?...` or empty.
@@ -104,7 +108,7 @@ fn message(code: &'static str, text: String) -> Notice {
 }
 
 /// `addslashes()`, as `wp_magic_quotes()` applies it.
-fn slash(text: &[u8]) -> Vec<u8> {
+pub fn slash(text: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     for &b in text {
         match b {
@@ -396,6 +400,27 @@ pub fn login(site: &dyn Site, request: &Request) -> Login {
         redirect_to: &redirect_to,
     };
     Login::Page(screen.render(site))
+}
+
+/// `wp_nonce_ays( 'log-out' )`: the page asking whether to log out, which
+/// is sent with a 403.
+pub fn logout_confirmation(site: &dyn Site, request: &Request) -> Vec<u8> {
+    let title = format!("You are attempting to log out of {}", site.name());
+    let redirect = as_text(request.request("redirect_to"))
+        .map(slash)
+        .unwrap_or_default();
+    let mut query = String::from("?action=logout");
+    if !is_empty_string(&redirect) {
+        query.push_str(&format!(
+            "&redirect_to={}",
+            String::from_utf8_lossy(&urlencode(&redirect))
+        ));
+    }
+    query.push_str(&format!("&_wpnonce={}", site.nonce("log-out")));
+    // `wp_nonce_url()` escapes the URL as HTML.
+    let url = esc_html(site.login_url(&query).as_bytes());
+    let message = format!("{title}</p><p>Do you really want to <a href=\"{url}\">log out</a>?");
+    crate::die::page(&title, &message)
 }
 
 /// `esc_url()` of a URL.

@@ -22,6 +22,11 @@
 //   T            get_tag()                       n or s<hex>
 //   W            next_tag() and get_tag() until the end: w<hex>,<hex>...
 //   U            get_updated_html()              s<hex>
+//   K:name       set_bookmark()                  1 or 0
+//   X:name       release_bookmark()              1 or 0
+//   J:name       seek()                          1 or 0
+//   Y:name       has_bookmark()                  1 or 0
+//   Z:at:n:text  replace n bytes at at with text 1
 
 ini_set( 'display_errors', 'stderr' );
 error_reporting( E_ALL & ~E_WARNING );
@@ -50,6 +55,24 @@ foreach ( array(
 }
 
 mt_srand( 20261027 );
+
+// A replacement of a range of the input, as HyScribe's replace_range() makes.
+class Golden_Processor extends WP_HTML_Tag_Processor {
+	public function replace( $at, $length, $text ) {
+		$this->lexical_updates[] = new WP_HTML_Text_Replacement( $at, $length, $text );
+	}
+
+	// Whether a bookmark has moved to a negative offset, where PHP's strpos()
+	// counts from the end.
+	public function has_negative_bookmark() {
+		foreach ( $this->bookmarks as $bookmark ) {
+			if ( $bookmark->start < 0 ) {
+				return true;
+			}
+		}
+		return false;
+	}
+}
 
 function arg( $value ) {
 	return null === $value ? '~' : bin2hex( $value );
@@ -113,16 +136,36 @@ function run_op( $p, $op ) {
 			return 'w' . implode( ',', $tags );
 		case 'U':
 			return 's' . bin2hex( $p->get_updated_html() );
+		case 'K':
+			return bit( $p->set_bookmark( $args[0] ) );
+		case 'X':
+			return bit( $p->release_bookmark( $args[0] ) );
+		case 'J':
+			return bit( $p->seek( $args[0] ) );
+		case 'Y':
+			return bit( $p->has_bookmark( $args[0] ) );
+		case 'Z':
+			$p->replace( (int) $args[0], (int) $args[1], $args[2] );
+			return '1';
 	}
 	throw new Exception( "unknown operation $code" );
 }
 
 function emit( $html, $ops ) {
 	$ops[]   = op( 'U' );
-	$p       = new WP_HTML_Tag_Processor( $html );
+	$p       = new Golden_Processor( $html );
 	$results = array();
-	foreach ( $ops as $op ) {
-		$results[] = run_op( $p, $op );
+	// A case PHP fails on, or that moves a bookmark to a negative offset, is
+	// left out: no edit WordPress makes reaches either.
+	try {
+		foreach ( $ops as $op ) {
+			$results[] = run_op( $p, $op );
+			if ( $p->has_negative_bookmark() ) {
+				return;
+			}
+		}
+	} catch ( Throwable $e ) {
+		return;
 	}
 	echo bin2hex( $html ), "\t", implode( ' ', array_map( 'encode_op', $ops ) ), "\t", implode( ' ', $results ), "\n";
 }
@@ -273,6 +316,41 @@ function edge_cases() {
 		$ops[]   = op( 'N', null, null );
 		$ops[]   = op( 'S', 'z', 'q' );
 		$cases[] = array( $html, $ops );
+	}
+	// Bookmarks: set on tags and other tokens, moved by edits before and inside
+	// them, released, sought back to after edits, and their limits.
+	$n = op( 'N', null, null );
+	$t = op( 'T' );
+	$bookmarks = array(
+		array( '<a><b><c>', array( $n, op( 'K', 'a' ), $n, op( 'K', 'b' ), $n, op( 'J', 'a' ), $t, op( 'J', 'b' ), $t, op( 'Y', 'a' ), op( 'X', 'a' ), op( 'Y', 'a' ), op( 'X', 'a' ), op( 'J', 'a' ), $t ) ),
+		array( '<a><b><c>', array( $n, op( 'K', 'a' ), op( 'S', 'x', 'long value' ), $n, op( 'K', 'b' ), op( 'S', 'y', '1' ), $n, op( 'J', 'a' ), $t, op( 'G', 'x' ), op( 'J', 'b' ), op( 'G', 'y' ), $n, $t ) ),
+		array( '<a x="1"><b y="2">', array( $n, op( 'R', 'x' ), $n, op( 'K', 'b' ), op( 'R', 'y' ), op( 'J', 'b' ), op( 'G', 'y' ) ) ),
+		array( '<a><b>', array( $n, op( 'J', 'nope' ), op( 'K', 'a' ), op( 'J', 'a' ), $t ) ),
+		array( '<a><b>', array( $n, $n, $n, op( 'K', 'end' ), op( 'Y', 'end' ) ) ),
+		array( '<a class="x"><b>', array( $n, op( 'K', 'a' ), op( 'A', 'yy' ), op( 'D', 'x' ), $n, op( 'J', 'a' ), op( 'L' ), $n, $t ) ),
+		array( '<a><b><c><d><e><f><g><h><i><j><k><l>', array( $n, op( 'K', '1' ), op( 'K', '2' ), op( 'K', '3' ), op( 'K', '4' ), op( 'K', '5' ), op( 'K', '6' ), op( 'K', '7' ), op( 'K', '8' ), op( 'K', '9' ), op( 'K', '10' ), op( 'K', '11' ), op( 'K', '1' ), op( 'X', '5' ), op( 'K', '11' ) ) ),
+		array( '<a>x<script>y</script><!--z--><b>', array( $n, op( 'K', 'a' ), op( 'N', 'b', null ), op( 'K', 'b' ), op( 'J', 'a' ), op( 'N', 'b', null ), op( 'J', 'a' ), op( 'S', 'q', 'w' ), op( 'J', 'b' ), $t ) ),
+	);
+	// Replacements around a bookmark on <b> while the cursor is on <d>, as edits
+	// make them: whole tokens and the spans between them, and edits inside a
+	// tag; before, over, around and after it, then again after a flush.
+	$ranges = array( array( 0, 3, '<aa>' ), array( 0, 0, 'x' ), array( 3, 3, '' ), array( 0, 6, '' ), array( 3, 6, 'x' ), array( 4, 1, 'q' ), array( 5, 0, ' y' ), array( 6, 3, '<cc>' ), array( 6, 0, '<z>' ), array( 3, 0, '<y>' ), array( 9, 3, '' ) );
+	foreach ( $ranges as $first ) {
+		foreach ( $ranges as $second ) {
+			$cases[] = array(
+				'<a><b><c><d>',
+				array( $n, $n, op( 'K', 'b' ), $n, $n, op( 'Z', (string) $first[0], (string) $first[1], $first[2] ), op( 'U' ), op( 'Y', 'b' ), op( 'Z', (string) $second[0], (string) $second[1], $second[2] ), op( 'J', 'b' ), $t, op( 'Y', 'b' ) ),
+			);
+		}
+	}
+	$many = array( $n, op( 'K', 'a' ), $n, op( 'K', 'b' ) );
+	for ( $i = 0; $i < 1002; $i++ ) {
+		$many[] = op( 'J', 0 === $i % 2 ? 'a' : 'b' );
+	}
+	$many[]      = $t;
+	$bookmarks[] = array( '<a><b>', $many );
+	foreach ( $bookmarks as $case ) {
+		$cases[] = $case;
 	}
 	return $cases;
 }

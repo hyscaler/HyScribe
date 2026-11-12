@@ -57,6 +57,21 @@ fn run(p: &mut TagProcessor, op: &str) -> String {
             format!("w{}", tags.join(","))
         }
         "U" => format!("s{}", hex(p.get_updated_html())),
+        "K" => bit(p.set_bookmark(arg(0))),
+        "X" => bit(p.release_bookmark(arg(0))),
+        "J" => bit(p.seek(arg(0))),
+        "Y" => bit(p.has_bookmark(arg(0))),
+        "Z" => {
+            let number = |i| {
+                String::from_utf8(arg(i).to_vec())
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap()
+            };
+            let start = number(0);
+            p.replace_range(start, start + number(1), arg(2));
+            "1".to_string()
+        }
         _ => panic!("unknown operation {op}"),
     }
 }
@@ -118,7 +133,7 @@ fn check(golden: &str, expected_count: usize) {
 
 #[test]
 fn matches_wordpress_on_edge_cases() {
-    check(include_str!("golden/edge.tsv"), 2276);
+    check(include_str!("golden/edge.tsv"), 2386);
 }
 
 #[test]
@@ -129,4 +144,27 @@ fn matches_wordpress_on_the_default_theme() {
 #[test]
 fn matches_wordpress_on_random_edits() {
     check(include_str!("golden/random.tsv"), 3000);
+}
+
+/// A replacement over a bookmarked token releases its bookmark; one
+/// running past a bookmark's end leaves its length.
+#[test]
+fn replacements_move_or_release_bookmarks() {
+    let mut p = TagProcessor::new(b"<a><b>c</b><d>");
+    p.next_tag(None, None);
+    p.next_tag(None, None);
+    assert!(p.set_bookmark(b"b"));
+    p.next_tag(None, None);
+    p.replace_range(3, 11, b"");
+    // Released while seeking, its offset reads as PHP's `null`: 0.
+    assert!(p.seek(b"b"));
+    assert_eq!(p.get_tag(), Some(b"A".to_vec()));
+    assert!(!p.has_bookmark(b"b"));
+    let mut p = TagProcessor::new(b"<a><b><c>");
+    p.next_tag(None, None);
+    assert!(p.set_bookmark(b"a"));
+    p.next_tag(None, None);
+    p.replace_range(1, 5, b"q");
+    assert!(p.seek(b"a"));
+    assert_eq!(p.get_tag(), Some(b"Q".to_vec()));
 }

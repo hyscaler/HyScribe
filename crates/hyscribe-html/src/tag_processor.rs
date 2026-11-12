@@ -47,6 +47,12 @@ const URI_ATTRIBUTES: [&[u8]; 17] = [
 /// WordPress does to bound its bookkeeping.
 const MAX_PENDING_UPDATES: usize = 1000;
 
+/// `MAX_BOOKMARKS`: no bookmark is set past this many.
+const MAX_BOOKMARKS: usize = 10;
+
+/// `MAX_SEEK_OPS`: no seek moves past this many.
+const MAX_SEEK_OPS: usize = 1000;
+
 /// An attribute's value as `get_attribute()` returns it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Attribute {
@@ -251,6 +257,9 @@ pub struct TagProcessor {
     /// Class name to add (`true`) or remove, in the order first named.
     classname_updates: Vec<(Key, bool)>,
     lexical_updates: Updates,
+    /// Named token spans to come back to.
+    bookmarks: HashMap<Vec<u8>, Span>,
+    seek_count: usize,
 }
 
 impl TagProcessor {
@@ -270,7 +279,67 @@ impl TagProcessor {
             duplicate_attributes: HashMap::new(),
             classname_updates: Vec::new(),
             lexical_updates: Updates::default(),
+            bookmarks: HashMap::new(),
+            seek_count: 0,
         }
+    }
+
+    /// The current token's span, when there is one.
+    fn token_span(&self) -> Option<Span> {
+        let start = self.token_starts_at?;
+        Some(Span {
+            start,
+            length: self.bytes_already_parsed.saturating_sub(start),
+        })
+    }
+
+    /// `set_bookmark()`: names the current token, up to `MAX_BOOKMARKS`
+    /// names; `false` past the end or the limit.
+    pub fn set_bookmark(&mut self, name: &[u8]) -> bool {
+        let Some(span) = self
+            .token_span()
+            .filter(|_| !matches!(self.state, State::Complete | State::Incomplete))
+        else {
+            return false;
+        };
+        if !self.bookmarks.contains_key(name) && self.bookmarks.len() >= MAX_BOOKMARKS {
+            return false;
+        }
+        self.bookmarks.insert(name.to_vec(), span);
+        true
+    }
+
+    /// `release_bookmark()`: `false` for a name not set.
+    pub fn release_bookmark(&mut self, name: &[u8]) -> bool {
+        self.bookmarks.remove(name).is_some()
+    }
+
+    /// `has_bookmark()`.
+    pub fn has_bookmark(&self, name: &[u8]) -> bool {
+        self.bookmarks.contains_key(name)
+    }
+
+    /// `seek()`: back or forward to the named token, edits applied first;
+    /// `false` for a name not set or past `MAX_SEEK_OPS` moves.
+    pub fn seek(&mut self, name: &[u8]) -> bool {
+        let Some(&bookmark) = self.bookmarks.get(name) else {
+            return false;
+        };
+        if let Some(span) = self.token_span()
+            && span.start == bookmark.start
+            && span.length == bookmark.length
+        {
+            return true;
+        }
+        self.seek_count += 1;
+        if self.seek_count > MAX_SEEK_OPS {
+            return false;
+        }
+        self.get_updated_html();
+        // A bookmark the flushed edits released reads as `null`, offset 0.
+        self.bytes_already_parsed = self.bookmarks.get(name).map_or(0, |b| b.start);
+        self.state = State::Ready;
+        self.next_token()
     }
 
     /// Moves to the next opening tag, optionally one with the given tag name
@@ -1143,6 +1212,30 @@ impl TagProcessor {
         }
         output.extend_from_slice(self.html.get(copied..).unwrap_or_default());
         self.html = output;
+        // A bookmark inside an edit is released; others move with the edits
+        // before their start and end.
+        self.bookmarks.retain(|_, bookmark| {
+            let end = bookmark.start + bookmark.length;
+            let (mut head, mut tail) = (0isize, 0isize);
+            for diff in &updates {
+                // PHP stops at the first edit after the bookmark, which only
+                // saves work: no later edit moves it.
+                let diff_end = diff.start + diff.length;
+                if bookmark.start >= diff.start && end < diff_end {
+                    return false;
+                }
+                let delta = diff.text.len() as isize - diff.length as isize;
+                if bookmark.start >= diff.start {
+                    head += delta;
+                }
+                if end >= diff_end {
+                    tail += delta;
+                }
+            }
+            bookmark.start = bookmark.start.saturating_add_signed(head);
+            bookmark.length = bookmark.length.saturating_add_signed(tail - head);
+            true
+        });
         shift
     }
 }

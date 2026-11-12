@@ -185,7 +185,7 @@ fn administrator_tools() -> String {
     let golden = include_str!("../../../hyscribe-admin/tests/golden/pages.tsv");
     let row = golden
         .lines()
-        .find(|l| l.starts_with("administrator\t"))
+        .find(|l| l.starts_with("administrator\ttools.php\t"))
         .unwrap();
     let page = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
     hyscribe_testkit::hs_admin_page(&String::from_utf8(page).unwrap())

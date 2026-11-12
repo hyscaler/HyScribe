@@ -10,7 +10,7 @@ use crate::tests::{Role, SITE, first_difference};
 fn the_tools_screen_is_php_s() {
     let golden = include_str!("../../tests/golden/pages.tsv");
     let mut failures = Vec::new();
-    for line in golden.lines() {
+    for line in golden.lines().filter(|line| line.contains("\ttools.php\t")) {
         let f: Vec<&str> = line.split('\t').collect();
         let role: &'static str = Box::leak(f[0].to_string().into_boxed_str());
         let ours = tools(

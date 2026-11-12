@@ -13,7 +13,7 @@ use crate::menu::MenuUser;
 
 /// What the admin bar shows of the site and the current user.
 pub trait BarSite: MenuUser {
-    /// `home_url( '/' )`.
+    /// `home_url( '/' )`; without its slash, `get_home_url()`.
     fn home_url(&self) -> String;
     /// `admin_url( $path )`.
     fn admin_url(&self, path: &str) -> String;
@@ -221,20 +221,27 @@ impl Bar {
 /// and without a broken entity at its end, with `more` when it was cut.
 fn html_excerpt(text: &str, count: usize, more: &str) -> String {
     let text = String::from_utf8_lossy(&wp_strip_all_tags(text.as_bytes(), true)).into_owned();
-    let mut excerpt: String = text.chars().take(count).collect();
-    // `preg_replace( '/&[^;\s]{0,6}$/', '', $excerpt )`.
-    if let Some(at) = excerpt.rfind('&') {
+    let mut excerpt: Vec<u8> = text.chars().take(count).collect::<String>().into_bytes();
+    // `preg_replace( '/&[^;\s]{0,6}$/', '', $excerpt )`, on bytes: from the
+    // first `&` that reaches the end with at most six bytes of neither.
+    let entity = excerpt.iter().enumerate().position(|(at, &b)| {
         let tail = excerpt.get(at + 1..).unwrap_or_default();
-        if tail.chars().count() <= 6
-            && !tail.contains(|c: char| c == ';' || c.is_ascii_whitespace())
-        {
-            excerpt.truncate(at);
-        }
+        b == b'&'
+            && tail.len() <= 6
+            && !tail
+                .iter()
+                .any(|c| matches!(c, b';' | b' ' | b'\t' | b'\n' | b'\x0B' | b'\x0C' | b'\r'))
+    });
+    if let Some(at) = entity {
+        excerpt.truncate(at);
     }
-    if excerpt == text {
-        excerpt
+    if excerpt == text.as_bytes() {
+        text
     } else {
-        format!("{}{more}", excerpt.trim())
+        format!(
+            "{}{more}",
+            String::from_utf8_lossy(hyscribe_phpser::php_trim(&excerpt))
+        )
     }
 }
 
@@ -322,8 +329,10 @@ pub fn admin_bar(site: &dyn BarSite, user_agent: &[u8]) -> String {
     }
     // wp_admin_bar_site_menu(), without a site icon.
     let mut blogname = site.blogname();
-    if blogname.is_empty() {
+    if hyscribe_phpser::is_empty_string(blogname.as_bytes()) {
+        // `get_home_url()`, which has no trailing slash.
         let home = site.home_url();
+        let home = home.strip_suffix('/').unwrap_or(&home);
         let bare = home
             .trim_start_matches("https://")
             .trim_start_matches("http://");

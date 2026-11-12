@@ -4,9 +4,7 @@ use hyscribe_testkit::unhex;
 
 use super::*;
 use crate::menu::link;
-use crate::tests::{Role, options};
-
-const SITE: &str = "http://127.0.0.1:8081";
+use crate::tests::{Role, SITE, first_difference, options};
 
 impl BarSite for Role {
     fn home_url(&self) -> String {
@@ -66,22 +64,7 @@ fn the_admin_bar_is_php_s() {
         let ours = admin_bar(&Role(role), b"Mozilla/5.0 (X11; Linux x86_64)");
         let php = hs_admin(&String::from_utf8(unhex(f[2])).unwrap());
         if ours != php {
-            let at = ours
-                .bytes()
-                .zip(php.bytes())
-                .position(|(a, b)| a != b)
-                .unwrap_or(ours.len().min(php.len()));
-            let near = |t: &str| {
-                t.get(at.saturating_sub(100)..(at + 150).min(t.len()))
-                    .unwrap_or_default()
-                    .to_string()
-            };
-            failures.push(format!(
-                "{role} {}\n  php:  {:?}\n  ours: {:?}",
-                f[1],
-                near(&php),
-                near(&ours)
-            ));
+            failures.push(format!("{role} {}{}", f[1], first_difference(&php, &ours)));
         }
     }
     assert!(
@@ -186,7 +169,8 @@ fn site_names_are_cut_as_php_cuts_them() {
         let title = bar.get(at..).unwrap().split("'>").nth(1).unwrap();
         title.split("</a>").next().unwrap().to_string()
     };
-    assert_eq!(name(""), "example.test/");
+    assert_eq!(name(""), "example.test");
+    assert_eq!(name("0"), "example.test");
     assert_eq!(name("<b>Bold</b> site"), "Bold site");
     assert_eq!(
         name("A site with a name longer than forty chars"),
@@ -207,6 +191,11 @@ fn site_names_are_cut_as_php_cuts_them() {
     assert_eq!(html_excerpt("ab &cdefghij", 9, "…"), "ab…");
     assert_eq!(html_excerpt("ab &cdefghij", 11, "…"), "ab &cdefghi…");
     assert_eq!(html_excerpt("ab &cdefghZZ", 10, "…"), "ab…");
+    // The first `&` that reaches the end, six bytes, PCRE's spaces and PHP's trim.
+    assert_eq!(html_excerpt("x&a&bcdefgh", 5, "…"), "x…");
+    assert_eq!(html_excerpt("x&ééééz", 6, "…"), "x&éééé…");
+    assert_eq!(html_excerpt("x&a\u{b}bcdefgh", 5, "…"), "x&a\u{b}b…");
+    assert_eq!(html_excerpt("x\u{a0} zzzz", 3, "…"), "x\u{a0}…");
 }
 
 /// A node under a parent that is not there is left out, as `_bind()`

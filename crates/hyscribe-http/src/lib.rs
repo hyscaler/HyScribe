@@ -45,6 +45,7 @@ use tokio::sync::Semaphore;
 mod canonical;
 mod feed;
 mod files;
+mod loaders;
 pub mod query;
 mod reads;
 mod rewrite;
@@ -421,6 +422,10 @@ async fn page(
     if let Some(response) = files::static_file(uri.path(), &headers, now() as u64).filter(|_| !post)
     {
         return response;
+    }
+    // The loaders read only the query, whatever the method, as PHP's do.
+    if let Some(loader) = loaders::Loader::at(uri.path()) {
+        return loaders::load(loader, uri.query(), &headers, now() as u64);
     }
     // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.
     let original = uri.clone();

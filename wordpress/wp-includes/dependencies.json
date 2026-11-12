@@ -203,7 +203,7 @@
             "ver": false
         },
         "wp-block-library": {
-            "src": "/wp-includes/css/dist/block-library/common.min.css",
+            "src": "/wp-includes/css/dist/block-library/style.min.css",
             "ver": false,
             "rtl": true
         },
@@ -272,7 +272,7 @@
             "rtl": true
         },
         "wp-editor-font": {
-            "src": "https://fonts.googleapis.com/css?family=Noto+Serif%3A400%2C400i%2C700%2C700i",
+            "src": "https://fonts.googleapis.com/css?family=",
             "ver": false
         },
         "wp-embed-template-ie": {
@@ -365,6 +365,22 @@
             "src": "/wp-includes/js/admin-bar.min.js",
             "ver": false
         },
+        "admin-comments": {
+            "src": "/wp-admin/js/edit-comments.min.js",
+            "ver": false
+        },
+        "admin-gallery": {
+            "src": "/wp-admin/js/gallery.min.js",
+            "ver": false
+        },
+        "admin-tags": {
+            "src": "/wp-admin/js/tags.min.js",
+            "ver": false
+        },
+        "admin-widgets": {
+            "src": "/wp-admin/js/widgets.min.js",
+            "ver": false
+        },
         "application-passwords": {
             "src": "/wp-admin/js/application-passwords.min.js",
             "ver": false
@@ -393,6 +409,10 @@
             "src": "/wp-includes/js/colorpicker.min.js",
             "ver": "3517m"
         },
+        "comment": {
+            "src": "/wp-admin/js/comment.min.js",
+            "ver": false
+        },
         "comment-reply": {
             "src": "/wp-includes/js/comment-reply.min.js",
             "ver": false
@@ -408,6 +428,18 @@
         "csslint": {
             "src": "/wp-includes/js/codemirror/csslint.js",
             "ver": "1.0.5"
+        },
+        "custom-background": {
+            "src": "/wp-admin/js/custom-background.min.js",
+            "ver": false
+        },
+        "custom-header": {
+            "src": "/wp-admin/js/custom-header.js",
+            "ver": false
+        },
+        "custom-html-widgets": {
+            "src": "/wp-admin/js/widgets/custom-html-widgets.min.js",
+            "ver": false
         },
         "customize-base": {
             "src": "/wp-includes/js/customize-base.min.js",
@@ -453,13 +485,25 @@
             "src": "/wp-admin/js/customize-widgets.min.js",
             "ver": false
         },
+        "dashboard": {
+            "src": "/wp-admin/js/dashboard.min.js",
+            "ver": false
+        },
         "editor": {
             "src": "/wp-admin/js/editor.min.js",
+            "ver": false
+        },
+        "editor-expand": {
+            "src": "/wp-admin/js/editor-expand.min.js",
             "ver": false
         },
         "esprima": {
             "src": "/wp-includes/js/codemirror/esprima.js",
             "ver": "4.0.1"
+        },
+        "farbtastic": {
+            "src": "/wp-admin/js/farbtastic.js",
+            "ver": "1.2"
         },
         "heartbeat": {
             "src": "/wp-includes/js/heartbeat.min.js",
@@ -481,6 +525,10 @@
             "src": "/wp-includes/js/codemirror/htmlhint-kses.js",
             "ver": false
         },
+        "image-edit": {
+            "src": "/wp-admin/js/image-edit.min.js",
+            "ver": false
+        },
         "imagesloaded": {
             "src": "/wp-includes/js/imagesloaded.min.js",
             "ver": "5.0.0"
@@ -488,6 +536,18 @@
         "imgareaselect": {
             "src": "/wp-includes/js/imgareaselect/jquery.imgareaselect.min.js",
             "ver": false
+        },
+        "inline-edit-post": {
+            "src": "/wp-admin/js/inline-edit-post.min.js",
+            "ver": false
+        },
+        "inline-edit-tax": {
+            "src": "/wp-admin/js/inline-edit-tax.min.js",
+            "ver": false
+        },
+        "iris": {
+            "src": "/wp-admin/js/iris.min.js",
+            "ver": "1.1.1"
         },
         "jcrop": {
             "src": "/wp-includes/js/jcrop/jquery.Jcrop.min.js",
@@ -709,6 +769,14 @@
             "src": "/wp-admin/js/language-chooser.min.js",
             "ver": false
         },
+        "link": {
+            "src": "/wp-admin/js/link.min.js",
+            "ver": false
+        },
+        "list-revisions": {
+            "src": "/wp-includes/js/wp-list-revisions.min.js",
+            "ver": false
+        },
         "lodash": {
             "src": "/wp-includes/js/dist/vendor/lodash.min.js",
             "ver": "4.18.1"
@@ -721,12 +789,36 @@
             "src": "/wp-includes/js/mce-view.min.js",
             "ver": false
         },
+        "media": {
+            "src": "/wp-admin/js/media.min.js",
+            "ver": false
+        },
+        "media-audio-widget": {
+            "src": "/wp-admin/js/widgets/media-audio-widget.min.js",
+            "ver": false
+        },
         "media-audiovideo": {
             "src": "/wp-includes/js/media-audiovideo.min.js",
             "ver": false
         },
         "media-editor": {
             "src": "/wp-includes/js/media-editor.min.js",
+            "ver": false
+        },
+        "media-gallery": {
+            "src": "/wp-admin/js/media-gallery.min.js",
+            "ver": false
+        },
+        "media-gallery-widget": {
+            "src": "/wp-admin/js/widgets/media-gallery-widget.min.js",
+            "ver": false
+        },
+        "media-grid": {
+            "src": "/wp-includes/js/media-grid.min.js",
+            "ver": false
+        },
+        "media-image-widget": {
+            "src": "/wp-admin/js/widgets/media-image-widget.min.js",
             "ver": false
         },
         "media-models": {
@@ -737,8 +829,16 @@
             "src": "/wp-admin/js/media-upload.min.js",
             "ver": false
         },
+        "media-video-widget": {
+            "src": "/wp-admin/js/widgets/media-video-widget.min.js",
+            "ver": false
+        },
         "media-views": {
             "src": "/wp-includes/js/media-views.min.js",
+            "ver": false
+        },
+        "media-widgets": {
+            "src": "/wp-admin/js/widgets/media-widgets.min.js",
             "ver": false
         },
         "mediaelement": {
@@ -765,12 +865,20 @@
             "src": "/wp-includes/js/plupload/moxie.min.js",
             "ver": "1.3.5.1"
         },
+        "nav-menu": {
+            "src": "/wp-admin/js/nav-menu.min.js",
+            "ver": false
+        },
         "password-strength-meter": {
             "src": "/wp-admin/js/password-strength-meter.min.js",
             "ver": false
         },
         "password-toggle": {
             "src": "/wp-admin/js/password-toggle.min.js",
+            "ver": false
+        },
+        "plugin-install": {
+            "src": "/wp-admin/js/plugin-install.min.js",
             "ver": false
         },
         "plupload": {
@@ -800,6 +908,18 @@
         "plupload-silverlight": {
             "src": false,
             "ver": "2.1.1"
+        },
+        "post": {
+            "src": "/wp-admin/js/post.min.js",
+            "ver": false
+        },
+        "postbox": {
+            "src": "/wp-admin/js/postbox.min.js",
+            "ver": false
+        },
+        "privacy-tools": {
+            "src": "/wp-admin/js/privacy-tools.min.js",
+            "ver": false
         },
         "prototype": {
             "src": "https://ajax.googleapis.com/ajax/libs/prototype/1.7.1.0/prototype.js",
@@ -869,8 +989,16 @@
             "src": "https://ajax.googleapis.com/ajax/libs/scriptaculous/1.9.0/sound.js",
             "ver": "1.9.0"
         },
+        "set-post-thumbnail": {
+            "src": "/wp-admin/js/set-post-thumbnail.min.js",
+            "ver": false
+        },
         "shortcode": {
             "src": "/wp-includes/js/shortcode.min.js",
+            "ver": false
+        },
+        "site-health": {
+            "src": "/wp-admin/js/site-health.min.js",
             "ver": false
         },
         "site-icon": {
@@ -881,6 +1009,26 @@
             "src": "/wp-includes/js/jquery/suggest.min.js",
             "ver": "1.1-20110113"
         },
+        "svg-painter": {
+            "src": "/wp-admin/js/svg-painter.js",
+            "ver": false
+        },
+        "tags-box": {
+            "src": "/wp-admin/js/tags-box.min.js",
+            "ver": false
+        },
+        "tags-suggest": {
+            "src": "/wp-admin/js/tags-suggest.min.js",
+            "ver": false
+        },
+        "text-widgets": {
+            "src": "/wp-admin/js/widgets/text-widgets.min.js",
+            "ver": false
+        },
+        "theme": {
+            "src": "/wp-admin/js/theme.min.js",
+            "ver": false
+        },
         "thickbox": {
             "src": "/wp-includes/js/thickbox/thickbox.js",
             "ver": "3.1-20121105"
@@ -888,6 +1036,10 @@
         "underscore": {
             "src": "/wp-includes/js/underscore.min.js",
             "ver": "1.13.8"
+        },
+        "updates": {
+            "src": "/wp-admin/js/updates.min.js",
+            "ver": false
         },
         "user-profile": {
             "src": "/wp-admin/js/user-profile.min.js",
@@ -976,6 +1128,10 @@
         "wp-codemirror": {
             "src": "/wp-includes/js/codemirror/codemirror.min.js",
             "ver": "5.65.20"
+        },
+        "wp-color-picker": {
+            "src": "/wp-admin/js/color-picker.min.js",
+            "ver": false
         },
         "wp-commands": {
             "src": "/wp-includes/js/dist/commands.min.js",
@@ -1229,18 +1385,6 @@
             "src": "/wp-admin/js/theme-plugin-editor.min.js",
             "ver": false
         },
-        "wp-tinymce": {
-            "src": "http://127.0.0.1:8081/wp-includes/js/tinymce/plugins/compat3x/plugin.min.js",
-            "ver": "49110-20250317"
-        },
-        "wp-tinymce-lists": {
-            "src": "http://127.0.0.1:8081/wp-includes/js/tinymce/plugins/lists/plugin.min.js",
-            "ver": "49110-20250317"
-        },
-        "wp-tinymce-root": {
-            "src": "http://127.0.0.1:8081/wp-includes/js/tinymce/tinymce.min.js",
-            "ver": "49110-20250317"
-        },
         "wp-token-list": {
             "src": "/wp-includes/js/dist/token-list.min.js",
             "ver": "e86ab419d8302d57822c"
@@ -1287,6 +1431,10 @@
         },
         "wplink": {
             "src": "/wp-includes/js/wplink.min.js",
+            "ver": false
+        },
+        "xfn": {
+            "src": "/wp-admin/js/xfn.min.js",
             "ver": false
         },
         "zxcvbn-async": {

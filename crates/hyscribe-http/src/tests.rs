@@ -1448,6 +1448,13 @@ async fn conditional_requests_match_apache() {
     assert_eq!(golden.lines().count(), 37);
 }
 
+/// Whether a registered style or script names the file, which is served
+/// even with a `.min` twin.
+fn registered(path: &str) -> bool {
+    let dependencies = include_str!("../../../wordpress/wp-includes/dependencies.json");
+    dependencies.contains(&format!("\"src\": \"{path}\""))
+}
+
 /// Every file of `reference/wordpress/files-golden.sh`: `wp-includes` as
 /// the web server sends it, skipping PHP and the unminified files with a
 /// `.min` twin, which are not bundled.
@@ -1468,7 +1475,7 @@ async fn wp_includes_files_match_php() {
             let stem = path.strip_suffix(ext)?;
             (!stem.ends_with(".min")).then(|| format!("{stem}.min{ext}"))
         });
-        if twin.is_some_and(|twin| paths.contains(&twin.as_str())) {
+        if twin.is_some_and(|twin| paths.contains(&twin.as_str())) && !registered(fields[0]) {
             unminified += 1;
             assert_eq!(served[0], "404", "{path}");
             continue;
@@ -1477,7 +1484,7 @@ async fn wp_includes_files_match_php() {
         let expected = [fields[1], fields[2], fields[3], fields[4], &etag];
         assert_eq!(served, expected, "{path}");
     }
-    assert_eq!((golden.lines().count(), unminified), (1670, 643));
+    assert_eq!((golden.lines().count(), unminified), (1670, 640));
     for path in [
         "/wp-includes/version.php",
         "/wp-includes/nope.js",
@@ -1511,7 +1518,7 @@ async fn wp_admin_files_match_php() {
             let stem = fields[0].strip_suffix(ext)?;
             (!stem.ends_with(".min")).then(|| format!("{stem}.min{ext}"))
         });
-        if twin.is_some_and(|twin| paths.contains(&twin.as_str())) {
+        if twin.is_some_and(|twin| paths.contains(&twin.as_str())) && !registered(fields[0]) {
             unminified += 1;
             assert_eq!(served[0], "404", "{path}");
             continue;
@@ -1522,6 +1529,67 @@ async fn wp_admin_files_match_php() {
     }
     assert!(unminified > 0);
     assert_eq!(golden.lines().count(), 351);
+}
+
+/// Every request of `reference/loaders/golden.sh`: `load-styles.php` and
+/// `load-scripts.php` at `/hs-admin/load-styles` and `/hs-admin/load-scripts`,
+/// headers and bodies as PHP sends them (`Expires` follows the clock).
+#[tokio::test]
+async fn loaders_match_php() {
+    use sha2::Digest;
+    let site = fixture_site(None).await;
+    let golden = include_str!("../tests/golden/loaders.tsv");
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let mut request = Request::get(format!("/hs-admin/{}?{}", f[0], f[1]));
+        if !f[2].is_empty() {
+            request = request.header(header::IF_NONE_MATCH, f[2]);
+        }
+        let response = router(site.clone())
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let header = |name| {
+            response
+                .headers()
+                .get(name)
+                .map_or("", |v| v.to_str().unwrap())
+                .to_string()
+        };
+        let headers = [
+            response.status().as_u16().to_string(),
+            header(header::CONTENT_TYPE),
+            header(header::ETAG),
+            header(header::CACHE_CONTROL),
+        ];
+        // `Expires` is a year from now, as PHP dates it.
+        let expires = response.headers().get(header::EXPIRES).map(|date| {
+            let date = httpdate::parse_http_date(date.to_str().unwrap()).unwrap();
+            let ahead = date
+                .duration_since(std::time::SystemTime::now())
+                .unwrap()
+                .as_secs();
+            assert!((31_535_990..=31_536_000).contains(&ahead), "{ahead}");
+        });
+        let expires = expires.is_some();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let sha: String = sha2::Sha256::digest(&body)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(headers, [f[3], f[4], f[5], f[6]], "{line}");
+        assert_eq!(expires, f[3] == "200", "{line}");
+        assert_eq!(sha, f[7], "{line}");
+    }
+    assert_eq!(golden.lines().count(), 416);
+    // The WordPress URL redirects, as every admin URL does.
+    let moved = request(&site, "GET", "/wp-admin/load-styles.php?load=login").await;
+    assert_eq!(
+        moved.headers[header::LOCATION],
+        "http://default-install.test/hs-admin/load-styles?load=login"
+    );
 }
 
 /// With a page on the front, its link and shortlink are the home page.

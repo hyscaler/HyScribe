@@ -41,6 +41,7 @@ const CONTENT_TYPES: [(&str, &str); 15] = [
 fn main() -> io::Result<()> {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed=../../wordpress/VERSION");
+    println!("cargo::rerun-if-changed=../../wordpress/wp-includes/dependencies.json");
     println!("cargo::rerun-if-env-changed={TARBALL_ENV}");
     let pinned = std::fs::read_to_string("../../wordpress/VERSION")?;
     let pinned = pinned.trim();
@@ -65,6 +66,14 @@ fn main() -> io::Result<()> {
         .arg("wordpress/wp-includes")
         .arg("wordpress/wp-admin")
         .arg(format!("wordpress/{THEME}")))?;
+    // Files a registered style or script names are served even with a
+    // `.min` twin: WordPress asks for them as they are.
+    let dependencies = std::fs::read_to_string("../../wordpress/wp-includes/dependencies.json")?;
+    let registered: Vec<&str> = dependencies
+        .split("\"src\": \"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .collect();
     let mut release = Vec::new();
     for dir in ["wp-includes", "wp-admin"] {
         let root = tree.join("wordpress").join(dir);
@@ -72,7 +81,8 @@ fn main() -> io::Result<()> {
         collect(&root, "", &mut files)?;
         files.sort();
         let mut entries = String::new();
-        for file in files.iter().filter(|f| served(f, &root)) {
+        let named = |file: &str| registered.contains(&format!("/{dir}/{file}").as_str());
+        for file in files.iter().filter(|f| named(f) || served(f, &root)) {
             release.push(format!("{dir}/{file}"));
             let name = file.rsplit('/').next().unwrap_or_default();
             let extension = name.rsplit_once('.').map_or("", |(_, e)| e);

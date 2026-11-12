@@ -249,6 +249,31 @@ pub fn user_avatar(option: &dyn Fn(&str) -> Option<Vec<u8>>, user: &User, size: 
     )
 }
 
+/// `get_avatar( $comment, $size, 'mystery' )` in the admin, for the
+/// commenter's `email`: empty when the site shows none.
+pub fn comment_avatar(
+    option: &dyn Fn(&str) -> Option<Vec<u8>>,
+    email: &[u8],
+    size: i64,
+) -> Vec<u8> {
+    if !shows_avatars(option) {
+        return Vec::new();
+    }
+    let mystery = |name: &str| match name {
+        "avatar_default" => Some(b"mystery".to_vec()),
+        name => option(name),
+    };
+    let (url, found) = gravatar(&mystery, email, b"", size);
+    let (url2x, _) = gravatar(&mystery, email, b"", size.saturating_mul(2));
+    img(
+        b"",
+        (&url, &url2x, found),
+        size,
+        "",
+        "loading='lazy' decoding='async'",
+    )
+}
+
 /// The name a user's initials come from.
 fn user_name(user: &User) -> Vec<u8> {
     if !user.display_name.is_empty() {

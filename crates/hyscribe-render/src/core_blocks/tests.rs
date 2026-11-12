@@ -816,3 +816,14 @@ fn admin_avatars_load_lazily() {
     assert!(avatar.ends_with(" class='avatar avatar-28 photo' height='28' width='28' loading='lazy' decoding='async'/>"), "{avatar}");
     assert!(user_avatar(&options(""), &user, 28).is_empty());
 }
+
+/// The admin's comment avatars: the mystery person by default, none when
+/// the site shows no avatars.
+#[test]
+fn comment_avatars() {
+    let options =
+        |show: &'static [u8]| move |name: &str| (name == "show_avatars").then(|| show.to_vec());
+    let avatar = String::from_utf8(comment_avatar(&options(b"1"), b"a@b.test", 50)).unwrap();
+    assert!(avatar.contains("?s=50&#038;d=mm' srcset="), "{avatar}");
+    assert!(comment_avatar(&options(b"0"), b"a@b.test", 50).is_empty());
+}

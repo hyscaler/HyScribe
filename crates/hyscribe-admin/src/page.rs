@@ -65,6 +65,20 @@ pub struct Page<'a> {
     pub help: &'a [HelpTab<'a>],
     /// The help sidebar, as markup.
     pub sidebar: &'a str,
+    /// `WP_Screen::render_screen_options()`'s markup, empty for none.
+    pub screen_options: &'a str,
+    /// The styles the screen enqueues.
+    pub styles: &'a [&'a str],
+    /// The scripts the screen enqueues.
+    pub scripts: &'a [&'a str],
+    /// The scripts the screen's markup enqueues as it prints.
+    pub late_scripts: &'a [&'a str],
+    /// The screen's localized script data: handle and its `var` statement.
+    pub script_data: &'a [(&'a str, String)],
+    /// What the screen's `admin_footer` hooks print.
+    pub admin_footer: &'a str,
+    /// What the screen prints after the footer scripts.
+    pub footer_scripts: &'a str,
     /// The screen's markup, between the header and the footer.
     pub content: &'a str,
     /// The requested URL without `wp_removable_query_args()`.
@@ -190,11 +204,11 @@ fn apostrophes(text: &str) -> String {
     out
 }
 
-fn text(value: &str) -> Value {
+pub(crate) fn text(value: &str) -> Value {
     Value::String(value.as_bytes().to_vec())
 }
 
-fn object(entries: Vec<(&str, Value)>) -> Value {
+pub(crate) fn object(entries: Vec<(&str, Value)>) -> Value {
     Value::Array(
         entries
             .into_iter()
@@ -203,7 +217,7 @@ fn object(entries: Vec<(&str, Value)>) -> Value {
     )
 }
 
-fn json(value: &Value) -> String {
+pub(crate) fn json(value: &Value) -> String {
     String::from_utf8_lossy(&json_hex_tag(value)).into_owned()
 }
 
@@ -218,7 +232,10 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
         .find(|scheme| scheme.name.as_bytes() == color)
         .unwrap_or(&SCHEMES[0]);
     let mut assets = Assets::new(true);
-    enqueue(&mut assets, site, scheme);
+    enqueue(&mut assets, site, page, scheme);
+    for (handle, data) in page.script_data {
+        assets.set_script_data(handle, "data", Value::String(data.as_bytes().to_vec()));
+    }
     let mut out = head(site, page);
     out.extend(assets.print_admin_styles(urls));
     out.extend(site.font_faces());
@@ -254,9 +271,14 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
 
 /// `admin_enqueue_scripts`: what every screen enqueues, with this
 /// request's data.
-fn enqueue(assets: &mut Assets, site: &dyn PageSite, scheme: &Scheme) {
+fn enqueue(assets: &mut Assets, site: &dyn PageSite, page: &Page, scheme: &Scheme) {
+    // `admin.php` enqueues the admin bar's, the screen its own, then
+    // `admin-header.php` and its hooks the rest.
+    assets.enqueue_style("admin-bar");
+    for style in page.styles {
+        assets.enqueue_style(style);
+    }
     for style in [
-        "admin-bar",
         "colors",
         "wp-auth-check",
         "wp-commands",
@@ -265,9 +287,12 @@ fn enqueue(assets: &mut Assets, site: &dyn PageSite, scheme: &Scheme) {
     ] {
         assets.enqueue_style(style);
     }
+    assets.enqueue_script("common");
+    assets.enqueue_script("admin-bar");
+    for script in page.scripts {
+        assets.enqueue_script(script);
+    }
     for script in [
-        "common",
-        "admin-bar",
         "utils",
         "svg-painter",
         "wp-auth-check",
@@ -471,7 +496,7 @@ fn body(site: &dyn PageSite, page: &Page, color: &str, browser: &Browser) -> Str
     out
 }
 
-/// `WP_Screen::render_screen_meta()` for a screen without screen options.
+/// `WP_Screen::render_screen_meta()`, with the screen's own options.
 fn screen_meta(page: &Page) -> String {
     let mut out = format!(
         "\t\t<div id=\"screen-meta\" class=\"metabox-prefs\">\n\n\t\t\t<div id=\"contextual-help-wrap\" class=\"{}\" tabindex=\"-1\" aria-label=\"Contextual Help Tab\">\n\t\t\t\t<div id=\"contextual-help-back\"></div>\n\t\t\t\t<div id=\"contextual-help-columns\">\n\t\t\t\t\t<div class=\"contextual-help-tabs\">\n\t\t\t\t\t\t<ul>\n\t\t\t\t\t\t",
@@ -510,10 +535,20 @@ fn screen_meta(page: &Page) -> String {
         ));
         classes = "help-tab-content";
     }
-    out.push_str("\t\t\t\t\t</div>\n\t\t\t\t</div>\n\t\t\t</div>\n\t\t\t\t</div>\n\t\t");
-    if !page.help.is_empty() {
-        out.push_str("\t\t<div id=\"screen-meta-links\">\n\t\t\t\t\t<div id=\"contextual-help-link-wrap\" class=\"hide-if-no-js screen-meta-toggle\">\n\t\t\t<button type=\"button\" id=\"contextual-help-link\" class=\"button button-compact show-settings\" aria-controls=\"contextual-help-wrap\" aria-expanded=\"false\">Help</button>\n\t\t\t</div>\n\t\t\t\t</div>\n\t\t");
+    out.push_str("\t\t\t\t\t</div>\n\t\t\t\t</div>\n\t\t\t</div>\n\t\t");
+    out.push_str(page.screen_options);
+    out.push_str("\t\t</div>\n\t\t");
+    if page.help.is_empty() && page.screen_options.is_empty() {
+        return out;
     }
+    out.push_str("\t\t<div id=\"screen-meta-links\">\n\t\t");
+    if !page.screen_options.is_empty() {
+        out.push_str("\t\t\t<div id=\"screen-options-link-wrap\" class=\"hide-if-no-js screen-meta-toggle\">\n\t\t\t<button type=\"button\" id=\"show-settings-link\" class=\"button button-compact show-settings\" aria-controls=\"screen-options-wrap\" aria-expanded=\"false\">Screen Options</button>\n\t\t\t</div>\n\t\t\t");
+    }
+    if !page.help.is_empty() {
+        out.push_str("\t\t\t<div id=\"contextual-help-link-wrap\" class=\"hide-if-no-js screen-meta-toggle\">\n\t\t\t<button type=\"button\" id=\"contextual-help-link\" class=\"button button-compact show-settings\" aria-controls=\"contextual-help-wrap\" aria-expanded=\"false\">Help</button>\n\t\t\t</div>\n\t\t");
+    }
+    out.push_str("\t\t</div>\n\t\t");
     out
 }
 
@@ -524,6 +559,7 @@ fn footer(site: &dyn PageSite, page: &Page, assets: &mut Assets) -> String {
         "\n<div class=\"clear\"></div></div><!-- wpbody-content -->\n<div class=\"clear\"></div></div><!-- wpbody -->\n<div class=\"clear\"></div></div><!-- wpcontent -->\n\n<div id=\"wpfooter\" role=\"contentinfo\">\n\t\t<p id=\"footer-left\" class=\"alignleft\">\n\t\t<span id=\"footer-thankyou\">Thank you for creating with <a href=\"https://wordpress.org/\">WordPress</a>.</span>\t</p>\n\t<p id=\"footer-upgrade\" class=\"alignright\">\n\t\tVersion {}\t</p>\n\t<div class=\"clear\"></div>\n</div>\n",
         VERSION.trim()
     );
+    out.push_str(page.admin_footer);
     let login = site.login_url();
     let same_domain = login.starts_with(page.origin);
     let src = String::from_utf8_lossy(&add_query_arg(
@@ -549,10 +585,14 @@ fn footer(site: &dyn PageSite, page: &Page, assets: &mut Assets) -> String {
     out.push_str(&check);
     out.push('\t');
     let siteurl = urls.site_url();
+    for script in page.late_scripts {
+        assets.enqueue_script(script);
+    }
     let imports = assets.module_dependencies();
     let mut tail = admin_import_map(&siteurl, &imports);
     tail.extend(assets.print_footer_scripts(urls));
     tail.extend(emoji_detection_script(&siteurl));
+    tail.extend(page.footer_scripts.as_bytes());
     out.push_str(&String::from_utf8_lossy(&tail));
     if !site.compression_tested() {
         let nonce = json(&text(&site.nonce("update_can_compress_scripts")));

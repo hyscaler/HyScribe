@@ -106,6 +106,13 @@ fn page<'a>(help: &'a [HelpTab<'a>], sidebar: &'a str, typenow: &'a str) -> Page
         title: "Tools",
         help,
         sidebar,
+        screen_options: "",
+        styles: &[],
+        scripts: &[],
+        late_scripts: &[],
+        script_data: &[],
+        admin_footer: "",
+        footer_scripts: "",
         content: "",
         canonical: "https://example.test/wp/hs-admin/tools",
         origin: "https://example.test",
@@ -271,4 +278,16 @@ fn phones_and_ipv6_hosts() {
         ..site()
     };
     assert!(render(&ipv6, &page(&[], "", "")).contains("request = (function(){"));
+}
+
+/// Screen options without help tabs get their link alone.
+#[test]
+fn screen_options_without_help() {
+    let page = Page {
+        screen_options: "<div id=\"screen-options-wrap\"></div>",
+        ..page(&[], "", "")
+    };
+    let html = render(&site(), &page);
+    assert!(html.contains("id=\"show-settings-link\""));
+    assert!(!html.contains("id=\"contextual-help-link\""));
 }

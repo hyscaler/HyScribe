@@ -203,7 +203,7 @@ fn footnote(text: &[u8]) -> Option<usize> {
 
 /// `wp_trim_words( $text, $num_words, $more )` for a language that counts
 /// words.
-pub(crate) fn wp_trim_words(text: &[u8], num_words: i64, more: &[u8]) -> Vec<u8> {
+pub fn wp_trim_words(text: &[u8], num_words: i64, more: &[u8]) -> Vec<u8> {
     let text = wp_strip_all_tags(text, false);
     let words: Vec<&[u8]> = text
         .split(|b| matches!(b, b'\n' | b'\r' | b'\t' | b' '))

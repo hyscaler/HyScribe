@@ -39,7 +39,7 @@ pub fn post_format_string(slug: &[u8]) -> &'static str {
 }
 
 /// `get_the_title( $post )` with the `the_title` filters.
-pub(crate) fn the_title(post: &Post) -> Vec<u8> {
+pub fn the_title(post: &Post) -> Vec<u8> {
     let title = if !post.password.is_empty() {
         [b"Protected: ", &post.title[..]].concat()
     } else if post.status == "private" {

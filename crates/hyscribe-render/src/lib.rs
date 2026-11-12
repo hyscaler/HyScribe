@@ -17,10 +17,11 @@ mod comments;
 mod content;
 pub mod content_tags;
 mod core_blocks;
-pub use core_blocks::{number_format, user_avatar};
+pub use core_blocks::{comment_avatar, number_format, user_avatar};
 pub mod date;
 mod elements;
 mod excerpt;
+pub use excerpt::wp_trim_words;
 pub mod feed;
 mod file_block;
 #[cfg(test)]

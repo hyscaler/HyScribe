@@ -350,6 +350,25 @@ async fn connections_are_read_only() {
 }
 
 #[tokio::test]
+async fn terms_are_searched_paged_and_counted() {
+    let db = Db::connect(&fixture_config()).await.unwrap();
+    assert_eq!(db.count_terms("category", None).await.unwrap(), 1);
+    assert_eq!(db.count_terms("category", Some("CAT")).await.unwrap(), 1);
+    assert_eq!(db.count_terms("category", Some("%")).await.unwrap(), 0);
+    let query = |search: &str, offset| TermQuery {
+        taxonomy: "category".into(),
+        search: Some(search.into()),
+        order: Some((TermOrder::Name, false)),
+        limit: Some(1),
+        offset,
+        ..TermQuery::default()
+    };
+    let found = db.term_query(&query("uncat", 0)).await.unwrap();
+    assert_eq!(found.iter().map(|term| term.id).collect::<Vec<_>>(), [1]);
+    assert!(db.term_query(&query("uncat", 1)).await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn a_term_s_taxonomy_is_its_only_one() {
     let db = Db::connect(&fixture_config()).await.unwrap();
     assert_eq!(
@@ -383,6 +402,7 @@ async fn errors_are_reported() {
         db.post_terms(1, "category").await.unwrap_err(),
         db.term(1, "category").await.unwrap_err(),
         db.term_taxonomy(1).await.unwrap_err(),
+        db.count_terms("category", None).await.unwrap_err(),
         db.user(1).await.unwrap_err(),
         db.credentials(UserField::Login, b"admin")
             .await
@@ -1208,6 +1228,7 @@ async fn term_queries_order_by_any_column() {
             nonempty: true,
             order: Some((order, order == TermOrder::Name)),
             limit: Some(5),
+            ..TermQuery::default()
         };
         let terms = db.term_query(&query).await.unwrap();
         assert_eq!(

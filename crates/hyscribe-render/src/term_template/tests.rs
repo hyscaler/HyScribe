@@ -137,6 +137,8 @@ fn orders_by_name() {
         ("Id", Some(TermOrder::TermId)),
         ("none", None),
         ("rand", Some(TermOrder::Name)),
+        ("term_order", Some(TermOrder::TermId)),
+        ("include", Some(TermOrder::Name)),
     ] {
         let args = TermArgs {
             taxonomy: "post_tag".into(),
@@ -147,6 +149,36 @@ fn orders_by_name() {
         let asked = site.1.take().unwrap();
         assert_eq!(asked.order.map(|(order, _)| order), order, "{name}");
     }
+}
+
+/// `include` orders by the IDs only when there are some; a `term_order`
+/// spelled otherwise makes no query, as PHP's fails.
+#[test]
+fn include_and_term_order_spellings() {
+    let site = Asked(
+        DefaultInstall {
+            home: b"http://s.test".to_vec(),
+        },
+        RefCell::new(None),
+    );
+    let args = TermArgs {
+        taxonomy: "post_tag".into(),
+        orderby: b"include".to_vec(),
+        include: vec![1],
+        ..TermArgs::default()
+    };
+    get_terms(&site, &args);
+    let asked = site.1.take().unwrap();
+    assert_eq!(
+        asked.order.map(|(order, _)| order),
+        Some(TermOrder::Include)
+    );
+    let args = TermArgs {
+        orderby: b"Term_Order".to_vec(),
+        ..args
+    };
+    assert!(get_terms(&site, &args).is_empty());
+    assert!(site.1.take().is_none());
 }
 
 /// A negative parent or `child_of` finds nothing without a query.

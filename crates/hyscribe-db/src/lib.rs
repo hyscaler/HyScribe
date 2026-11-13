@@ -1043,6 +1043,9 @@ impl Db {
         if query.nonempty {
             sql.push(" AND tt.count > 0");
         }
+        if let Some(search) = &query.search {
+            search_terms(&mut sql, search);
+        }
         if let Some((order, descending)) = query.order {
             sql.push(" ORDER BY ");
             match term_order_column(order) {
@@ -1055,7 +1058,8 @@ impl Db {
             sql.push(if descending { " DESC" } else { " ASC" });
         }
         if let Some(limit) = query.limit {
-            sql.push(" LIMIT ?");
+            sql.push(" LIMIT ?, ?");
+            sql.bind(Bind::Int(query.offset));
             sql.bind(Bind::Int(limit));
         }
         let rows = sql
@@ -1107,6 +1111,28 @@ impl Db {
                 c.finish(pair)
             })
             .collect()
+    }
+
+    /// `wp_count_terms()` of `taxonomy`: its terms, those `search` finds
+    /// when given.
+    pub async fn count_terms(&self, taxonomy: &str, search: Option<&str>) -> Result<u64, DbError> {
+        let mut sql = Sql::new(
+            "SELECT COUNT(*) AS found FROM {prefix}terms AS t \
+             INNER JOIN {prefix}term_taxonomy AS tt ON t.term_id = tt.term_id \
+             WHERE tt.taxonomy IN (?)",
+        );
+        sql.bind(Bind::Text(taxonomy.into()));
+        if let Some(search) = search {
+            search_terms(&mut sql, search);
+        }
+        let row = sql
+            .query(&self.prefix)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.try_get::<i64, _>("found")
+            .map(i64::unsigned_abs)
+            .map_err(db_error)
     }
 
     /// How many terms of `taxonomy` have posts.
@@ -1664,6 +1690,13 @@ fn order_column(column: OrderBy) -> &'static str {
         OrderBy::CommentCount => "comment_count",
         _ => "RAND()",
     }
+}
+
+/// `WP_Term_Query::get_search_sql()`: a name or slug containing `search`.
+fn search_terms(sql: &mut Sql, search: &str) {
+    sql.push(" AND ((t.name LIKE ?) OR (t.slug LIKE ?))");
+    sql.bind(Bind::Text(like(search)));
+    sql.bind(Bind::Text(like(search)));
 }
 
 /// A `LIKE` pattern matching `text` anywhere.

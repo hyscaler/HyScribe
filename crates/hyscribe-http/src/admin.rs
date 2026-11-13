@@ -490,6 +490,13 @@ impl PostsSite for Admin<'_> {
 }
 
 impl TermsSite for Admin<'_> {
+    fn list_terms(&self, query: &TermQuery) -> Vec<Term> {
+        RenderSite::term_query(&self.reads.reads, query)
+    }
+    fn count_terms(&self, taxonomy: &str, search: Option<&str>) -> u64 {
+        let count = self.site.db.count_terms(taxonomy, search);
+        self.reads.reads.wait(count)
+    }
     fn can_term(&self, cap: &str, term: &Term) -> bool {
         self.can_for(cap, term.id)
     }
@@ -499,25 +506,38 @@ impl TermsSite for Admin<'_> {
     }
 }
 
-/// The terms list's arguments: its taxonomy and page so far; `None` for others.
-fn term_args(request_uri: &str) -> Option<TermArgs> {
-    let query = request_uri.split_once('?').map_or("", |(_, query)| query);
+/// The terms list's arguments from the request's unslashed path and
+/// query; `None` for one not ported yet.
+fn term_args(raw_request_uri: &str) -> Option<TermArgs> {
+    let query = raw_request_uri
+        .split_once('?')
+        .map_or("", |(_, query)| query);
     let args = parse_str(query.as_bytes());
-    let (mut taxonomy, mut paged) = (None, None);
+    let (mut taxonomy, mut paged, mut search, mut orderby, mut order) =
+        (None, None, None, None, None);
     for (key, value) in args.as_array().unwrap_or_default() {
-        match (key, value) {
-            (Key::String(key), Value::String(value)) if key == b"taxonomy" => {
-                taxonomy = Some(Terms::named(value)?);
-            }
-            (Key::String(key), Value::String(value)) if key == b"paged" => {
-                paged = Some(String::from_utf8(value.clone()).ok()?);
-            }
+        let (Key::String(key), Value::String(value)) = (key, value) else {
+            return None;
+        };
+        if key == b"taxonomy" {
+            taxonomy = Some(Terms::named(value)?);
+            continue;
+        }
+        let value = Some(String::from_utf8(value.clone()).ok()?);
+        match key.as_slice() {
+            b"paged" => paged = value,
+            b"s" => search = value,
+            b"orderby" => orderby = value,
+            b"order" => order = value,
             _ => return None,
         }
     }
     Some(TermArgs {
         taxonomy: taxonomy?,
         paged,
+        search,
+        orderby,
+        order,
     })
 }
 
@@ -665,7 +685,8 @@ fn screen(
             dashboard(admin, &canonical, origin, request_uri, browser)
         }
         "/hs-admin/edit-tags" => {
-            let args = term_args(request_uri)?;
+            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
+            let args = term_args(&raw)?;
             match edit_tags(admin, &args, &canonical, origin, request_uri, browser) {
                 Answer::Denied(message) => return Some(denied(admin, message)),
                 Answer::Redirect(to) => {

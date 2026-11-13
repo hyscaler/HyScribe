@@ -4,16 +4,17 @@
 
 use std::collections::{HashMap, HashSet};
 
-use hyscribe_kses::{esc_attr, esc_textarea, esc_url};
-use hyscribe_model::Term;
+use hyscribe_kses::{esc_attr, esc_html, esc_textarea, esc_url};
+use hyscribe_model::{Term, TermOrder, TermQuery};
 use hyscribe_phpser::{
-    Key, Maybe, Value, add_query_arg, is_empty_string, maybe_unserialize, remove_query_arg,
-    urldecode, urlencode,
+    Key, Maybe, Value, add_query_arg, addslashes, is_empty_string, maybe_unserialize, php_trim,
+    remove_query_arg, urldecode, urlencode,
 };
 use hyscribe_render::autop::wpautop;
 use hyscribe_render::formatting::{convert_chars, wptexturize};
 use hyscribe_render::kses::wp_kses_data;
 use hyscribe_render::number_format;
+use hyscribe_render::term_template::parse_orderby;
 
 use crate::admin_bar::BarSite;
 use crate::admin_bar::Browser;
@@ -31,6 +32,10 @@ pub trait TermsSite: PostsSite {
     fn can_term(&self, cap: &str, term: &Term) -> bool;
     /// `get_term_link( $term, $taxonomy )`.
     fn term_link(&self, term: &Term, taxonomy: &str) -> String;
+    /// The terms `query` selects, in its order.
+    fn list_terms(&self, query: &TermQuery) -> Vec<Term>;
+    /// `wp_count_terms()` of `taxonomy`, those `search` finds when given.
+    fn count_terms(&self, taxonomy: &str, search: Option<&str>) -> u64;
 }
 
 /// A taxonomy the lists show, as `register_taxonomy()` labels it.
@@ -89,6 +94,12 @@ pub struct TermArgs {
     pub taxonomy: Taxonomy,
     /// `$_REQUEST['paged']`, if given.
     pub paged: Option<String>,
+    /// `$_REQUEST['s']`, unslashed, if given.
+    pub search: Option<String>,
+    /// `$_REQUEST['orderby']`, unslashed, if given.
+    pub orderby: Option<String>,
+    /// `$_REQUEST['order']`, unslashed, if given.
+    pub order: Option<String>,
 }
 
 /// `get_ancestors( $term_id, $taxonomy, 'taxonomy' )` over the terms by
@@ -122,6 +133,7 @@ fn column_description(text: &[u8]) -> String {
 struct Listing<'a> {
     site: &'a dyn TermsSite,
     taxonomy: Taxonomy,
+    /// The terms listed, and the taxonomy's by ID where their parents count.
     terms: &'a [Term],
     by_id: HashMap<u64, &'a Term>,
     /// The parents `{$taxonomy}_children` caches, which alone are opened.
@@ -290,11 +302,18 @@ impl Listing<'_> {
             number_format(term.count)
         )
     }
-
-    /// `_rows()`: the rows from `start` to `end` of a tree of the terms, by
-    /// name, a subtree after its parents; terms whose parents are not
-    /// listed are left out.
-    fn tree(&self, start: u64, end: u64) -> String {
+    /// `_rows()` from `start` to `end`: a tree by name, a subtree after its
+    /// parents and terms under unlisted parents left out; flat for a search.
+    fn tree(&self, start: u64, end: u64, searching: bool) -> String {
+        if searching {
+            // A search lists what it finds flat.
+            let skip = usize::try_from(start).unwrap_or(usize::MAX);
+            let take = usize::try_from(end - start).unwrap_or(usize::MAX);
+            let rows = self.terms.iter().skip(skip).take(take);
+            return rows
+                .map(|term| format!("\t{}", self.row(term, 0)))
+                .collect();
+        }
         let mut children: HashMap<u64, Vec<&Term>> = HashMap::new();
         for term in self.terms {
             children.entry(term.parent).or_default().push(term);
@@ -498,11 +517,22 @@ pub fn edit_tags(
             "<h1>You need a higher level of permission.</h1><p>Sorry, you are not allowed to manage terms in this taxonomy.</p>",
         );
     }
-    let terms = site.terms(taxonomy.name);
     let option = format!("edit_{}_per_page", taxonomy.name);
     let per_page = per_page(site, &option);
-    let tree = taxonomy.hierarchical();
-    let columns = columns(tree);
+    let hierarchical = taxonomy.hierarchical();
+    let given = |value: &Option<String>| {
+        value
+            .as_deref()
+            .filter(|value| !is_empty_string(value.as_bytes()))
+            .map(|value| String::from_utf8_lossy(php_trim(value.as_bytes())).into_owned())
+    };
+    let searching = given(&args.search);
+    // `WP_Term_Query` searches only for what is left once trimmed.
+    let search = searching.clone().filter(|s| !is_empty_string(s.as_bytes()));
+    let orderby = given(&args.orderby);
+    // `prepare_items()` lists a whole tree unless another order is asked.
+    let tree = hierarchical && orderby.is_none();
+    let columns = columns(hierarchical && args.orderby.is_none());
     let screen_id = format!("edit-{}", taxonomy.name);
     let hidden = hidden_columns(site, &screen_id);
     let hidden_keys: Vec<&str> = hidden.iter().map(String::as_str).collect();
@@ -511,7 +541,7 @@ pub fn edit_tags(
         .iter()
         .filter(|column| !hidden_keys.contains(&column.key))
         .count();
-    let total = terms.len() as u64;
+    let total = site.count_terms(taxonomy.name, search.as_deref());
     let pages = total.div_ceil(per_page);
     // `get_pagenum()`, and the last page for one past it.
     let page = Value::String(args.paged.clone().unwrap_or_default().into_bytes())
@@ -525,10 +555,53 @@ pub fn edit_tags(
     }
     let start = (page - 1).saturating_mul(per_page);
     let end = start.saturating_add(per_page);
+    // `parse_order()`: what reads ASC ascends, anything else descends.
+    let descending = given(&args.order).is_some_and(|order| !order.eq_ignore_ascii_case("asc"));
+    let base = TermQuery {
+        taxonomy: taxonomy.name.into(),
+        search: search.clone(),
+        ..TermQuery::default()
+    };
+    // A hierarchical taxonomy is sorted whole and sliced, as PHP does.
+    let page_of = |terms: Vec<Term>| {
+        let skip = usize::try_from(start).unwrap_or(usize::MAX);
+        let take = usize::try_from(per_page).unwrap_or(usize::MAX);
+        terms.into_iter().skip(skip).take(take).collect()
+    };
+    let items = if tree {
+        site.list_terms(&TermQuery {
+            order: Some((TermOrder::Name, descending)),
+            ..base
+        })
+    } else {
+        match parse_orderby(orderby.as_deref().unwrap_or("name").as_bytes(), false) {
+            Some(order) if hierarchical => page_of(site.list_terms(&TermQuery {
+                order: order.map(|order| (order, descending)),
+                ..base
+            })),
+            Some(order) => site.list_terms(&TermQuery {
+                order: order.map(|order| (order, descending)),
+                limit: Some(per_page),
+                offset: start,
+                ..base
+            }),
+            // The query fails, as PHP's does.
+            None => Vec::new(),
+        }
+    };
+    // Every term by name, for ancestors and the add form, as a whole tree
+    // lists them; tags are read only when one listed has a parent.
+    let terms = if tree && searching.is_none() && !descending {
+        items.clone()
+    } else if hierarchical || items.iter().any(|term| term.parent > 0) {
+        site.terms(taxonomy.name)
+    } else {
+        Vec::new()
+    };
     let listing = Listing {
         site,
         taxonomy,
-        terms: &terms,
+        terms: &items,
         by_id: terms.iter().map(|term| (term.id, term)).collect(),
         cached: if tree {
             site.option(&format!("{}_children", taxonomy.name))
@@ -540,20 +613,16 @@ pub fn edit_tags(
         hidden: &hidden_keys,
         request_uri,
     };
-    let rows = if terms.is_empty() {
+    let empty = items.is_empty();
+    let rows = if empty {
         format!(
             "<tr class=\"no-items\"><td class=\"colspanchange\" colspan=\"{visible}\">No {} found.</td></tr>",
             taxonomy.plural.to_ascii_lowercase()
         )
     } else if tree {
-        listing.tree(start, end)
+        listing.tree(start, end, searching.is_some())
     } else {
-        terms
-            .iter()
-            .skip(usize::try_from(start).unwrap_or(usize::MAX))
-            .take(usize::try_from(per_page).unwrap_or(usize::MAX))
-            .map(|term| listing.row(term, 0))
-            .collect()
+        items.iter().map(|term| listing.row(term, 0)).collect()
     };
     let referer = String::from_utf8_lossy(&esc_url(&remove_query_arg(
         &[b"_wp_http_referer"],
@@ -561,13 +630,12 @@ pub fn edit_tags(
     )))
     .into_owned();
     let order = Order {
-        orderby: None,
-        desc: false,
+        orderby: args.orderby.as_deref(),
+        desc: args.order.as_deref() == Some("desc"),
     };
     // Deleting these terms takes the capability that managing them does.
     let actions = [("delete", "Delete")];
     let heading = format!("{} list navigation", taxonomy.plural);
-    let empty = terms.is_empty();
     let tablenav = |which| {
         format!(
             "\t<div class=\"tablenav {which}\">\n\n\t\t\t\t<div class=\"alignleft actions bulkactions{}\">\n\t\t\t{}\t\t</div>\n\t\t{}\n\t\t<br class=\"clear\" />\n\t</div>\n\t\t",
@@ -590,7 +658,7 @@ pub fn edit_tags(
     if !empty {
         list.push_str(&tablenav("bottom"));
     }
-    let parent = if tree {
+    let parent = if hierarchical {
         format!(
             "\t<div class=\"form-field term-parent-wrap\">\n\t<label for=\"parent\">Parent {}</label>\n\t\t<select  name='parent' id='parent' class='postform' aria-describedby=\"parent-description\">\n\t<option value='-1'>None</option>\n{}</select>\n\t\t\t\t<p id=\"parent-description\">Categories, unlike tags, can have a hierarchy. You might have a Jazz category, and under that have children categories for Bebop and Big Band. Totally optional.</p>\n\t</div>\n",
             taxonomy.singular,
@@ -599,18 +667,40 @@ pub fn edit_tags(
     } else {
         String::new()
     };
-    let search = if empty {
+    let requested = args.search.as_deref().unwrap_or_default();
+    let search_field = if empty && is_empty_string(requested.as_bytes()) {
         String::new()
     } else {
-        search_box(&format!("Search {}", taxonomy.plural), "tag", "", &[])
+        // The order fields are printed as requested, slashed.
+        let slashed = |value: &Option<String>| {
+            String::from_utf8_lossy(&addslashes(value.as_deref().unwrap_or_default().as_bytes()))
+                .into_owned()
+        };
+        let (orderby, order) = (slashed(&args.orderby), slashed(&args.order));
+        let fields = [("orderby", orderby.as_str()), ("order", order.as_str())];
+        search_box(
+            &format!("Search {}", taxonomy.plural),
+            "tag",
+            requested,
+            &fields,
+        )
+    };
+    let subtitle = if requested.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<span class=\"subtitle\">Search results for: <strong>{}</strong></span>",
+            esc_html(requested.as_bytes())
+        )
     };
     let content = fill(
         PAGE,
         &[
             ("title", taxonomy.plural.into()),
+            ("subtitle", subtitle),
             ("taxonomy", taxonomy.name.into()),
             ("screen", screen_id.clone()),
-            ("search", search),
+            ("search", search_field),
             ("add", format!("Add {}", taxonomy.singular)),
             ("referer", referer.clone()),
             ("nonce:add-tag", site.nonce("add-tag")),

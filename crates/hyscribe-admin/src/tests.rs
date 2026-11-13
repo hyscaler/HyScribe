@@ -16,6 +16,14 @@ use crate::page::PageSite;
 
 pub const SITE: &str = "http://127.0.0.1:8081";
 
+thread_local! {
+    /// The term queries the test site was asked, and how often it read
+    /// every term of a taxonomy, on this thread.
+    pub static TERM_QUERIES: std::cell::RefCell<Vec<hyscribe_model::TermQuery>> =
+        std::cell::RefCell::default();
+    pub static TERM_READS: std::cell::Cell<usize> = std::cell::Cell::default();
+}
+
 /// The oracle, with every user's `use_ssl` option as given.
 #[derive(Default)]
 pub struct Oracle {
@@ -155,6 +163,17 @@ impl Role {
         ["terms", "paged", "stale"].contains(&self.variant())
     }
 
+    /// Every term of `taxonomy` on the variant's site, by name.
+    fn all_terms(&self, taxonomy: &str) -> Vec<hyscribe_model::Term> {
+        if self.terms_content() {
+            return crate::terms::content::terms(taxonomy);
+        }
+        if self.listing() {
+            return crate::posts::content::terms(taxonomy);
+        }
+        crate::posts::PostsSite::post_terms(self, &crate::posts::tests::hello(), taxonomy)
+    }
+
     /// The posts and pages of the variant.
     fn posts(&self) -> Vec<hyscribe_model::Post> {
         crate::posts::content::posts(self.listing(), self.variant() == "empty")
@@ -219,11 +238,7 @@ impl CapabilityData for Role {
     fn term_taxonomy(&self, id: u64) -> Option<String> {
         ["category", "post_tag", "post_format"]
             .into_iter()
-            .find(|taxonomy| {
-                crate::posts::PostsSite::terms(self, taxonomy)
-                    .iter()
-                    .any(|term| term.id == id)
-            })
+            .find(|taxonomy| self.all_terms(taxonomy).iter().any(|term| term.id == id))
             .map(String::from)
     }
     fn constant(&self, name: &str) -> bool {
@@ -235,6 +250,18 @@ impl crate::terms::TermsSite for Role {
     fn can_term(&self, cap: &str, term: &hyscribe_model::Term) -> bool {
         let id = hyscribe_phpser::Value::Int(i64::try_from(term.id).unwrap());
         Capabilities::load(self, "wp_", 1).has_cap(self, cap, &[id])
+    }
+    fn list_terms(&self, query: &hyscribe_model::TermQuery) -> Vec<hyscribe_model::Term> {
+        TERM_QUERIES.with_borrow_mut(|queries| queries.push(query.clone()));
+        crate::terms::content::query(self.all_terms(&query.taxonomy), query)
+    }
+    fn count_terms(&self, taxonomy: &str, search: Option<&str>) -> u64 {
+        let query = hyscribe_model::TermQuery {
+            taxonomy: taxonomy.into(),
+            search: search.map(String::from),
+            ..hyscribe_model::TermQuery::default()
+        };
+        crate::terms::content::query(self.all_terms(taxonomy), &query).len() as u64
     }
     fn term_link(&self, term: &hyscribe_model::Term, taxonomy: &str) -> String {
         match taxonomy {
@@ -627,13 +654,8 @@ impl crate::posts::PostsSite for Role {
         hyscribe_render::wp_trim_words(&post.content, 55, b" [&hellip;]")
     }
     fn terms(&self, taxonomy: &str) -> Vec<hyscribe_model::Term> {
-        if self.terms_content() {
-            return crate::terms::content::terms(taxonomy);
-        }
-        if self.listing() {
-            return crate::posts::content::terms(taxonomy);
-        }
-        crate::posts::PostsSite::post_terms(self, &crate::posts::tests::hello(), taxonomy)
+        TERM_READS.set(TERM_READS.get() + 1);
+        self.all_terms(taxonomy)
     }
     fn popular_terms(&self, taxonomy: &str) -> Vec<u64> {
         let mut terms = crate::posts::PostsSite::terms(self, taxonomy);

@@ -148,6 +148,28 @@ fn hierarchical(taxonomy: &str) -> bool {
     taxonomy == "category"
 }
 
+/// `WP_Term_Query::parse_orderby()` without meta: none for `none`; `None`
+/// when PHP's query fails, as a `term_order` spelled otherwise does.
+pub fn parse_orderby(orderby: &[u8], include: bool) -> Option<Option<TermOrder>> {
+    let lower = orderby.to_ascii_lowercase();
+    Some(match &lower[..] {
+        // Without object IDs, `term_order` falls back to the ID.
+        b"term_order" if orderby == b"term_order" => Some(TermOrder::TermId),
+        b"term_order" => return None,
+        b"" | b"id" | b"term_id" => Some(TermOrder::TermId),
+        b"slug" => Some(TermOrder::Slug),
+        b"term_group" => Some(TermOrder::TermGroup),
+        b"count" => Some(TermOrder::Count),
+        b"parent" => Some(TermOrder::Parent),
+        b"taxonomy" => Some(TermOrder::Taxonomy),
+        b"term_taxonomy_id" => Some(TermOrder::TermTaxonomyId),
+        b"description" => Some(TermOrder::Description),
+        b"include" if include => Some(TermOrder::Include),
+        b"none" => None,
+        _ => Some(TermOrder::Name),
+    })
+}
+
 /// `WP_Term_Query::get_terms()` for the term template's arguments.
 pub fn get_terms(site: &dyn Site, args: &TermArgs) -> Vec<Term> {
     let hierarchical = hierarchical(&args.taxonomy);
@@ -163,24 +185,8 @@ pub fn get_terms(site: &dyn Site, args: &TermArgs) -> Vec<Term> {
         return Vec::new();
     }
     let child_of = child_of.unsigned_abs();
-    let orderby = &args.orderby[..];
-    let lower = orderby.to_ascii_lowercase();
-    let order = match &lower[..] {
-        // Without object IDs, `term_order` falls back to the ID; spelled
-        // otherwise it names a missing table, and the query fails.
-        b"term_order" if orderby == b"term_order" => Some(TermOrder::TermId),
-        b"term_order" => return Vec::new(),
-        b"" | b"id" | b"term_id" => Some(TermOrder::TermId),
-        b"slug" => Some(TermOrder::Slug),
-        b"term_group" => Some(TermOrder::TermGroup),
-        b"count" => Some(TermOrder::Count),
-        b"parent" => Some(TermOrder::Parent),
-        b"taxonomy" => Some(TermOrder::Taxonomy),
-        b"term_taxonomy_id" => Some(TermOrder::TermTaxonomyId),
-        b"description" => Some(TermOrder::Description),
-        b"include" if !args.include.is_empty() => Some(TermOrder::Include),
-        b"none" => None,
-        _ => Some(TermOrder::Name),
+    let Some(order) = parse_orderby(&args.orderby, !args.include.is_empty()) else {
+        return Vec::new();
     };
     // `parse_order()`: only a string reading ASC ascends.
     let ascending =
@@ -193,6 +199,7 @@ pub fn get_terms(site: &dyn Site, args: &TermArgs) -> Vec<Term> {
         order: order.map(|order| (order, !ascending)),
         limit: (args.number > 0 && !hierarchical && child_of == 0 && args.parent.is_none())
             .then_some(args.number),
+        ..TermQuery::default()
     };
     let mut terms = site.term_query(&query);
     if child_of != 0 {

@@ -22,8 +22,8 @@ NONCES=$(mktemp)
 sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress; }
 cleanup() {
   rm -f "$TMP" "$NONCES"
-  echo "DELETE FROM wp_terms WHERE term_id BETWEEN 401 AND 415;
-    DELETE FROM wp_term_taxonomy WHERE term_taxonomy_id BETWEEN 401 AND 415;
+  echo "DELETE FROM wp_terms WHERE term_id BETWEEN 401 AND 416;
+    DELETE FROM wp_term_taxonomy WHERE term_taxonomy_id BETWEEN 401 AND 416;
     DELETE FROM wp_options WHERE option_name = 'category_children';" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
 }
@@ -31,7 +31,7 @@ trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/terms-list/variants.php"
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce add-tag taxinlineeditnonce bulk-tags"
-for id in 1 401 402 403 404 405 406 407 411 412 413 414 415; do
+for id in 1 401 402 403 404 405 406 407 411 412 413 414 415 416; do
   actions="$actions delete-tag_$id"
 done
 # shellcheck disable=SC2086
@@ -70,6 +70,17 @@ for taxonomy in category post_tag; do
 done
 for query in '?taxonomy=category' '?taxonomy=category&paged=2' '?taxonomy=category&paged=3' \
   '?taxonomy=category&paged=9' '?taxonomy=post_tag&paged=2'; do
+  record paged administrator "$query"
+done
+# Searched and sorted: a search lists what it finds flat, an order flat by page.
+for query in '?taxonomy=category&s=a' '?taxonomy=category&s=LO' '?taxonomy=category&s=nothing' \
+  '?taxonomy=category&s=0' "?taxonomy=category&s=a%27b" '?taxonomy=category&orderby=name&order=desc' \
+  '?taxonomy=category&orderby=slug' '?taxonomy=category&orderby=term_order' \
+  '?taxonomy=category&orderby=Term_Order' '?taxonomy=category&orderby=' '?taxonomy=category&order=xyz' \
+  '?taxonomy=post_tag&orderby=slug&order=desc' '?taxonomy=post_tag&s=e&orderby=name&order=asc'; do
+  record content administrator "$query"
+done
+for query in '?taxonomy=category&s=a&paged=2' '?taxonomy=post_tag&orderby=name&paged=2'; do
   record paged administrator "$query"
 done
 rm -f "$TMP.head"

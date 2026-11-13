@@ -214,6 +214,10 @@ pub struct TermQuery {
     pub order: Option<(TermOrder, bool)>,
     /// `LIMIT n`.
     pub limit: Option<u64>,
+    /// `OFFSET n` of a limited query.
+    pub offset: u64,
+    /// `search`: the terms whose name or slug contains it.
+    pub search: Option<String>,
 }
 
 /// What `WP_Term_Query::parse_orderby()` orders terms by.

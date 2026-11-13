@@ -4,8 +4,16 @@ use hyscribe_testkit::{hs_admin_page, unhex};
 
 use std::collections::HashMap;
 
+use hyscribe_model::TermQuery;
+use hyscribe_phpser::{addslashes, remove_query_arg, urldecode};
+
 use super::*;
 use crate::tests::{Role, SITE, first_difference};
+
+/// A query value as PHP decodes it.
+fn decoded(value: &str) -> String {
+    String::from_utf8(urldecode(value.as_bytes())).unwrap()
+}
 
 /// Every page of `reference/terms-list/golden.sh`; a refusal is `403`.
 #[test]
@@ -28,13 +36,22 @@ fn pages_are_php_s() {
         let args = TermArgs {
             taxonomy: Taxonomy::named(arg("taxonomy").unwrap().as_bytes()).unwrap(),
             paged: arg("paged").map(String::from),
+            search: arg("s").map(decoded),
+            orderby: arg("orderby").map(decoded),
+            order: arg("order").map(decoded),
         };
+        // The request's path and query, slashed as `wp_magic_quotes()` does.
         let path = format!("/hs-admin/edit-tags?{query}");
+        let path = String::from_utf8(addslashes(path.as_bytes())).unwrap();
         let role: &'static str = Box::leak(format!("{variant}:{}", f[1]).into_boxed_str());
         let ours = edit_tags(
             &Role(role),
             &args,
-            &format!("{SITE}{path}"),
+            &String::from_utf8(remove_query_arg(
+                &[b"message"],
+                format!("{SITE}{path}").as_bytes(),
+            ))
+            .unwrap(),
             SITE,
             &path,
             &crate::admin_bar::Browser {
@@ -96,6 +113,9 @@ fn phones_get_no_focus_script() {
     let args = TermArgs {
         taxonomy: POST_TAG,
         paged: None,
+        search: None,
+        orderby: None,
+        order: None,
     };
     let browser = crate::admin_bar::Browser {
         user_agent: b"Mozilla/5.0 (iPhone) Mobile",
@@ -155,6 +175,9 @@ fn a_stale_hierarchy_cache_hides_children() {
     let args = TermArgs {
         taxonomy: CATEGORY,
         paged: None,
+        search: None,
+        orderby: None,
+        order: None,
     };
     let path = "/hs-admin/edit-tags?taxonomy=category";
     let browser = crate::admin_bar::Browser::default();
@@ -187,4 +210,72 @@ fn cached_parents_are_the_array_s_keys() {
     let parents = cached_parents(b"a:2:{i:401;a:1:{i:0;i:402;}s:1:\"x\";a:0:{}}").unwrap();
     assert_eq!(parents.into_iter().collect::<Vec<_>>(), [401]);
     assert!(cached_parents(b"s:1:\"x\";").is_none());
+}
+
+/// The terms list `args` asks for on `variant`'s site: its term queries and
+/// whether it read every term.
+fn asked(variant: &'static str, args: &TermArgs) -> (Vec<TermQuery>, bool) {
+    use crate::tests::{TERM_QUERIES, TERM_READS};
+    TERM_QUERIES.with_borrow_mut(Vec::clear);
+    TERM_READS.set(0);
+    let path = "/hs-admin/edit-tags";
+    let browser = crate::admin_bar::Browser::default();
+    edit_tags(
+        &Role(variant),
+        args,
+        &format!("{SITE}{path}"),
+        SITE,
+        path,
+        &browser,
+    );
+    (TERM_QUERIES.with_borrow(Clone::clone), TERM_READS.get() > 0)
+}
+
+/// Sorted categories are read whole and sliced, as PHP does; tags are read
+/// a page at a time, and all of them only when one listed has a parent.
+#[test]
+fn what_is_read_for_a_page() {
+    let args = |taxonomy, paged: Option<&str>| TermArgs {
+        taxonomy,
+        paged: paged.map(String::from),
+        search: None,
+        orderby: Some("name".into()),
+        order: None,
+    };
+    let (queries, read) = asked("paged:administrator", &args(CATEGORY, Some("2")));
+    assert_eq!((queries[0].limit, queries[0].offset, read), (None, 0, true));
+    let (queries, read) = asked("paged:administrator", &args(POST_TAG, None));
+    assert_eq!(
+        (queries[0].limit, queries[0].offset, read),
+        (Some(3), 0, false)
+    );
+    let (queries, read) = asked("paged:administrator", &args(POST_TAG, Some("2")));
+    assert_eq!(
+        (queries[0].limit, queries[0].offset, read),
+        (Some(3), 3, true)
+    );
+}
+
+/// A search's page is a slice of what it found.
+#[test]
+fn a_search_pages_what_it_found() {
+    let role = Role("terms:administrator");
+    let columns = columns(false);
+    let terms: Vec<Term> = (1..=7)
+        .map(|id| Term {
+            id,
+            ..Term::default()
+        })
+        .collect();
+    let listing = Listing {
+        site: &role,
+        taxonomy: CATEGORY,
+        terms: &terms,
+        by_id: HashMap::new(),
+        cached: None,
+        columns: &columns,
+        hidden: &[],
+        request_uri: "/hs-admin/edit-tags?taxonomy=category&s=x",
+    };
+    assert_eq!(listing.tree(3, 6, true).matches("<tr ").count(), 3);
 }

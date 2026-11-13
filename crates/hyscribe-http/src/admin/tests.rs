@@ -359,12 +359,22 @@ async fn refusals() {
     assert!(body.contains("Sorry, you are not allowed to manage terms in this taxonomy."));
 }
 
-/// The terms list reads its taxonomy and page so far.
+/// The terms list reads its taxonomy, page, search and order.
 #[test]
 fn the_terms_list_reads_its_taxonomy() {
     let taxonomy = |uri| term_args(uri).map(|args| args.taxonomy);
-    let paged = term_args("/hs-admin/edit-tags?taxonomy=category&paged=2").unwrap();
-    assert_eq!(paged.paged.as_deref(), Some("2"));
+    let args =
+        term_args("/hs-admin/edit-tags?taxonomy=category&paged=2&s=a+b&orderby=slug&order=desc")
+            .unwrap();
+    assert_eq!(
+        (
+            args.paged.as_deref(),
+            args.search.as_deref(),
+            args.orderby.as_deref(),
+            args.order.as_deref()
+        ),
+        (Some("2"), Some("a b"), Some("slug"), Some("desc"))
+    );
     assert_eq!(
         taxonomy("/hs-admin/edit-tags?taxonomy=post_tag"),
         Terms::named(b"post_tag")
@@ -372,7 +382,8 @@ fn the_terms_list_reads_its_taxonomy() {
     for refused in [
         "/hs-admin/edit-tags",
         "/hs-admin/edit-tags?taxonomy=nav_menu",
-        "/hs-admin/edit-tags?taxonomy=category&s=x",
+        "/hs-admin/edit-tags?taxonomy=category&x=1",
+        "/hs-admin/edit-tags?taxonomy=category&s[]=x",
         "/hs-admin/edit-tags?taxonomy[]=category",
         "/hs-admin/edit-tags?taxonomy=category&paged=%FF",
     ] {
@@ -500,6 +511,8 @@ async fn dashboard_data() {
             // What capability checks of other objects read.
             assert_eq!(admin.comment_post(2), None);
             assert_eq!(admin.term_taxonomy(1).as_deref(), Some("category"));
+            assert_eq!(admin.count_terms("category", None), 1);
+            assert_eq!(admin.count_terms("category", Some("zzz")), 0);
             assert!(admin.term_taxonomy(999_999).is_none());
             let term = admin.terms("category").remove(0);
             assert!(admin.can_term("edit_term", &term) && !admin.can_term("delete_term", &term));

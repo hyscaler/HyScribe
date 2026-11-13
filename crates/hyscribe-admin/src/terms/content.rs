@@ -3,7 +3,7 @@
 //! `reference/terms-list/content.sql` over the default install, as the
 //! terms list's test site reads it.
 
-use hyscribe_model::Term;
+use hyscribe_model::{Term, TermOrder, TermQuery};
 
 fn term(id: u64, name: &str, slug: &str, description: &str, parent: u64, count: u64) -> Term {
     Term {
@@ -25,6 +25,7 @@ pub(crate) fn terms(taxonomy: &str) -> Vec<Term> {
             term(414, "delta", "delta", "", 0, 0),
             term(415, "epsilon", "epsilon", "", 0, 0),
             term(413, "gamma", "gamma", "", 0, 3),
+            term(416, "omega", "omega", "", 413, 0),
         ];
     }
     vec![
@@ -51,4 +52,37 @@ pub(crate) fn terms(taxonomy: &str) -> Vec<Term> {
         term(404, "World", "world", "", 401, 1),
         term(406, "Zeta", "zeta", "", 499, 0),
     ]
+}
+
+/// `query` over `terms`, which are by name: a search on names and slugs
+/// as MySQL compares them, in ASCII, then the order, offset and limit.
+pub(crate) fn query(terms: Vec<Term>, query: &TermQuery) -> Vec<Term> {
+    let lower = |bytes: &[u8]| String::from_utf8_lossy(bytes).to_lowercase();
+    let mut found: Vec<Term> = terms
+        .into_iter()
+        .filter(|term| {
+            query.search.as_deref().is_none_or(|search| {
+                let search = search.to_lowercase();
+                lower(&term.name).contains(&search) || lower(&term.slug).contains(&search)
+            })
+        })
+        .collect();
+    if let Some((order, descending)) = query.order {
+        found.sort_by(|a, b| {
+            let order = match order {
+                TermOrder::Slug => lower(&a.slug).cmp(&lower(&b.slug)),
+                TermOrder::TermId => a.id.cmp(&b.id),
+                _ => std::cmp::Ordering::Equal,
+            };
+            if descending { order.reverse() } else { order }
+        });
+        if order == TermOrder::Name && descending {
+            found.reverse();
+        }
+    }
+    let skip = usize::try_from(query.offset).unwrap();
+    let take = query
+        .limit
+        .map_or(usize::MAX, |n| usize::try_from(n).unwrap());
+    found.into_iter().skip(skip).take(take).collect()
 }

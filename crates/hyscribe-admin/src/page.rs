@@ -85,6 +85,8 @@ pub struct Page<'a> {
     pub canonical: &'a str,
     /// The scheme and host of the request.
     pub origin: &'a str,
+    /// The admin bar's View link to what the screen is about: label and URL.
+    pub view: Option<(&'a str, &'a str)>,
 }
 
 /// A color scheme `register_admin_color_schemes()` adds.
@@ -261,7 +263,7 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
     html.push_str(&body(site, page, &String::from_utf8_lossy(&color), browser));
     html.push_str(&menu);
     html.push_str("<div id=\"wpcontent\">\n\n\t\t");
-    html.push_str(&admin_bar(site, browser));
+    html.push_str(&admin_bar(site, browser, page.view));
     html.push_str("<div id=\"wpbody\" role=\"main\">\n\n<div id=\"wpbody-content\">\n");
     html.push_str(&screen_meta(page));
     html.push_str(page.content);

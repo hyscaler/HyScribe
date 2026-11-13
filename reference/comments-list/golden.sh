@@ -67,6 +67,7 @@ record noavatars administrator ''
 for view in moderated trash; do
   record default administrator "?comment_status=$view"
 done
+record default administrator '?p=1'
 # With its only comment in the Trash the list is empty.
 echo "UPDATE wp_comments SET comment_approved = 'trash' WHERE comment_ID = 1;" | sql
 record empty administrator ''
@@ -81,6 +82,11 @@ for view in moderated approved spam trash 'mine&user_id=1' mine bogus 'all&user_
   record content administrator "?comment_status=$view"
 done
 record content editor '?comment_status=spam'
+for query in p=1 p=2 p=501 p=999 p=abc 'p=1&comment_status=moderated' 'p=1&comment_type=comment&comment_status=all'; do
+  record content administrator "?$query"
+done
+record content editor '?p=1'
+record content author '?p=1'
 for query in s=example 's=127.0.0.1&mode=detail' s=zzz s=0 s=100%25 s=Pat%27s comment_type=comment comment_type=comments \
   comment_type=pings comment_type=pingback comment_type=note comment_type=all 'comment_type=pings&comment_status=approved' \
   'orderby=comment_author&order=asc' orderby=comment_author 'orderby=comment_post_ID&order=desc' \

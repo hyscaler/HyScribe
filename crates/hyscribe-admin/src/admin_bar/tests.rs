@@ -64,7 +64,11 @@ fn the_admin_bar_is_php_s() {
     for line in golden.lines().filter(|line| !line.ends_with('\t')) {
         let f: Vec<&str> = line.split('\t').collect();
         let role: &'static str = Box::leak(f[0].to_string().into_boxed_str());
-        let ours = admin_bar(&Role(role), &agent(b"Mozilla/5.0 (X11; Linux x86_64)"));
+        let ours = admin_bar(
+            &Role(role),
+            &agent(b"Mozilla/5.0 (X11; Linux x86_64)"),
+            None,
+        );
         let php = hs_admin(&String::from_utf8(unhex(f[2])).unwrap());
         if ours != php {
             failures.push(format!("{role} {}{}", f[1], first_difference(&php, &ours)));
@@ -141,7 +145,7 @@ fn fake() -> Fake {
 /// and without an avatar the account item has no avatar class.
 #[test]
 fn names_counts_and_avatars() {
-    let bar = admin_bar(&fake(), &agent(b""));
+    let bar = admin_bar(&fake(), &agent(b""), None);
     assert!(bar.contains("<span class='display-name'>Ann</span><span class='username'>ann</span>"));
     assert!(bar.contains("1 Comment in moderation"));
     assert!(bar.contains("<li role='group' id='wp-admin-bar-my-account' class=\"menupop\">"));
@@ -151,8 +155,10 @@ fn names_counts_and_avatars() {
             ..fake()
         },
         &agent(b""),
+        Some(("View Post", "http://x/?p=1")),
     );
     assert!(bar.contains("class=\"menupop with-avatar\""));
+    assert!(bar.contains("id='wp-admin-bar-view'><a class='ab-item' role=\"menuitem\" href='http://x/?p=1'>View Post</a>"));
     assert!(bar.contains("<img size='28'/>") && bar.contains("<img size='64'/>"));
 }
 
@@ -168,7 +174,7 @@ fn agent(user_agent: &[u8]) -> Browser<'_> {
 fn phones() {
     let phone = agent(b"Mozilla/5.0 (iPhone) Mobile/15E148");
     assert!(
-        admin_bar(&fake(), &phone)
+        admin_bar(&fake(), &phone, None)
             .starts_with("<div id=\"wpadminbar\" class=\"nojq nojs mobile\">")
     );
     for name in [
@@ -196,6 +202,7 @@ fn the_shortcut_follows_the_system() {
     let bar = admin_bar(
         &fake(),
         &agent(b"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"),
+        None,
     );
     assert!(bar.contains("<kbd>⌘K</kbd>"));
 }
@@ -204,7 +211,7 @@ fn the_shortcut_follows_the_system() {
 #[test]
 fn site_names_are_cut_as_php_cuts_them() {
     let name = |blogname| {
-        let bar = admin_bar(&Fake { blogname, ..fake() }, &agent(b""));
+        let bar = admin_bar(&Fake { blogname, ..fake() }, &agent(b""), None);
         let at = bar.find("id='wp-admin-bar-site-name'").unwrap();
         let title = bar.get(at..).unwrap().split("'>").nth(1).unwrap();
         title.split("</a>").next().unwrap().to_string()

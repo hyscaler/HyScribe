@@ -333,19 +333,9 @@ impl DashboardSite for Admin<'_> {
         self.reads.reads.wait(self.site.db.count_posts(&query))
     }
     fn comment_counts(&self) -> CommentCounts {
-        *self.comment_counts.get_or_init(|| {
-            let [approved, moderated, spam, trash, mine] = self
-                .reads
-                .reads
-                .wait(self.site.db.comment_counts(self.user.id));
-            CommentCounts {
-                approved,
-                moderated,
-                spam,
-                trash,
-                mine,
-            }
-        })
+        *self
+            .comment_counts
+            .get_or_init(|| self.post_comment_counts(0))
     }
     /// `wp_dashboard_recent_comments()`'s search: batches of the latest
     /// comments, kept while the user may see their post.
@@ -360,6 +350,7 @@ impl DashboardSite for Admin<'_> {
                     user: None,
                     types: &[],
                     search: None,
+                    post: 0,
                 },
                 &[("comment_date_gmt", true), ("comment_ID", true)],
                 number,
@@ -515,6 +506,7 @@ impl CommentsSite for Admin<'_> {
             user: query.user,
             types: query.types,
             search: query.search,
+            post: query.post,
         };
         let limit = u32::try_from(query.number).unwrap_or(u32::MAX);
         let offset = u32::try_from(query.offset).unwrap_or(u32::MAX);
@@ -533,6 +525,17 @@ impl CommentsSite for Admin<'_> {
             .collect();
         let total = self.reads.reads.wait(self.site.db.count_comments(&filter));
         (rows, total)
+    }
+    fn post_comment_counts(&self, post: u64) -> CommentCounts {
+        let counts = self.site.db.comment_counts(self.user.id, post);
+        let [approved, moderated, spam, trash, mine] = self.reads.reads.wait(counts);
+        CommentCounts {
+            approved,
+            moderated,
+            spam,
+            trash,
+            mine,
+        }
     }
     fn approved_before(&self, id: u64) -> bool {
         let meta = self.site.db.comment_meta(id, "_wp_trash_meta_status");
@@ -622,6 +625,7 @@ fn comment_args(raw_request_uri: &str) -> Option<CommentArgs> {
             b"orderby" => args.orderby = value,
             b"order" => args.order = value,
             b"mode" => args.mode = value,
+            b"p" => args.post = value,
             _ => return None,
         }
     }
@@ -779,6 +783,18 @@ fn screen(
         "/hs-admin/edit-comments" => {
             let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
             let args = comment_args(&raw)?;
+            // Only posts' and pages' comments are listed, and a draft's
+            // Preview link is not ported.
+            let post = args
+                .post
+                .as_deref()
+                .map(|p| Value::String(p.into()).to_int());
+            let listed = post.and_then(|id| PostsSite::post(admin, id.unsigned_abs()));
+            if listed.is_some_and(|post| {
+                !matches!(post.post_type.as_str(), "post" | "page") || post.status == "draft"
+            }) {
+                return None;
+            }
             let answer = edit_comments(
                 admin,
                 &args,

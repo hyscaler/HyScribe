@@ -15,6 +15,7 @@ const PENDING: CommentFilter<'static> = CommentFilter {
     user: None,
     types: &[],
     search: None,
+    post: 0,
 };
 
 /// The newest comments first.
@@ -443,7 +444,7 @@ async fn errors_are_reported() {
         .await
         .unwrap_err(),
         db.last_comment_modified().await.unwrap_err(),
-        db.comment_counts(1).await.unwrap_err(),
+        db.comment_counts(1, 0).await.unwrap_err(),
         db.list_comments(&PENDING, NEWEST, 1, 0).await.unwrap_err(),
         db.count_comments(&PENDING).await.unwrap_err(),
         db.comment_meta(1, "_wp_trash_meta_status")
@@ -1271,7 +1272,7 @@ async fn term_queries_order_by_any_column() {
 #[tokio::test]
 async fn dashboard_reads() {
     let db = fixture().await;
-    assert_eq!(db.comment_counts(1).await.unwrap(), [1, 0, 0, 0, 0]);
+    assert_eq!(db.comment_counts(1, 0).await.unwrap(), [1, 0, 0, 0, 0]);
     let latest = db.list_comments(&PENDING, NEWEST, 5, 0).await.unwrap();
     let ids: Vec<(u64, String)> = latest.into_iter().map(|(c, a)| (c.id, a)).collect();
     assert_eq!(ids, [(1, "1".to_string())]);
@@ -1299,8 +1300,15 @@ async fn dashboard_reads() {
         None
     );
     let ttd = named("wordpress_ttd").await;
-    let [approved, moderated, spam, trash, _] = ttd.comment_counts(1).await.unwrap();
+    let [approved, moderated, spam, trash, _] = ttd.comment_counts(1, 0).await.unwrap();
     assert_eq!((approved, moderated, spam, trash), (31, 3, 0, 0));
+    let [approved, moderated, ..] = ttd.comment_counts(1, 1148).await.unwrap();
+    assert_eq!((approved, moderated), (19, 1));
+    let on_post = CommentFilter {
+        post: 155,
+        ..PENDING
+    };
+    assert_eq!(ttd.count_comments(&on_post).await.unwrap(), 4);
     let approved_only = CommentFilter {
         approved: &["1"],
         ..PENDING

@@ -762,6 +762,7 @@ pub fn edit_tags(
         content: &content,
         canonical,
         origin,
+        view: None,
     };
     // The menu lets in whoever may manage terms.
     admin_page(site, &page, browser).map_or(

@@ -39,7 +39,7 @@ fn comment(
 
 /// The content's posts: post 1 with its three approved comments, the
 /// Sample Page with one, and a protected post.
-fn post(id: u64) -> Post {
+pub(crate) fn post(id: u64) -> Post {
     match id {
         1 => Post {
             comment_count: 3,

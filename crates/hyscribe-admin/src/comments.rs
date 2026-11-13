@@ -15,7 +15,7 @@ use hyscribe_render::{
 };
 
 use crate::admin_bar::{BarSite, Browser, html_excerpt};
-use crate::dashboard::{DashboardSite, RecentComment, approved_of};
+use crate::dashboard::{CommentCounts, DashboardSite, RecentComment, approved_of};
 use crate::list_table::{Column, Order, Sort, View, bulk_actions, column_headers, pagination};
 use crate::list_table::{pagenum, screen_options, search_box, table_description, views};
 use crate::menu::{Screen, esc_link, link};
@@ -36,6 +36,8 @@ pub trait CommentsSite: DashboardSite {
     /// Whether comment `id`'s `_wp_trash_meta_status` is `1`: approved
     /// before it was trashed or marked as spam.
     fn approved_before(&self, id: u64) -> bool;
+    /// `wp_count_comments( $post )`, and the user's comments on it.
+    fn post_comment_counts(&self, post: u64) -> CommentCounts;
 }
 
 /// The comments the list asks for, notes aside.
@@ -50,6 +52,8 @@ pub struct CommentQuery<'a> {
     pub search: Option<&'a str>,
     /// `ORDER BY` columns of `COMMENT_ORDERBY`, descending where true.
     pub order: &'a [(&'static str, bool)],
+    /// Only those on this post, unless 0.
+    pub post: u64,
     /// How many to skip.
     pub offset: u64,
     /// How many to list.
@@ -75,6 +79,8 @@ pub struct CommentArgs {
     pub order: Option<String>,
     /// `mode`.
     pub mode: Option<String>,
+    /// `p`, the post whose comments are listed.
+    pub post: Option<String>,
     /// `comment_order()` of `orderby` and `order`.
     pub clauses: Vec<(&'static str, bool)>,
 }
@@ -621,8 +627,8 @@ fn column_date(row: &RecentComment, zone: Zone) -> String {
     format!("<div class=\"submitted-on\">{shown}</div>")
 }
 
-/// The list's columns.
-fn columns() -> Vec<Column> {
+/// The list's columns, the post's only when listing every post's comments.
+fn columns(response: bool) -> Vec<Column> {
     let column = |key, label: &str, sort| Column {
         key,
         label: label.into(),
@@ -638,7 +644,7 @@ fn columns() -> Vec<Column> {
             initial: None,
         })
     };
-    vec![
+    let mut columns = vec![
         column("cb", "<input type=\"checkbox\" />", None),
         column(
             "author",
@@ -660,13 +666,22 @@ fn columns() -> Vec<Column> {
             ),
         ),
         column("date", "Submitted on", sort("comment_date", "", "")),
-    ]
+    ];
+    if !response {
+        columns.retain(|column| column.key != "response");
+    }
+    columns
 }
 
 /// `get_views()`: each status with its count, `current` the one shown,
-/// of comments of type `kind`.
-pub(crate) fn comment_views(site: &dyn DashboardSite, current: &str, kind: &str) -> Vec<View> {
-    let counts = site.comment_counts();
+/// of comments of type `kind`, on `post` unless 0.
+pub(crate) fn comment_views(
+    site: &dyn DashboardSite,
+    counts: CommentCounts,
+    current: &str,
+    kind: &str,
+    post: u64,
+) -> Vec<View> {
     let user = site.user_id();
     let mut link = BarSite::admin_url(site, "edit-comments.php").into_bytes();
     if !kind.is_empty() && kind != "all" {
@@ -688,6 +703,9 @@ pub(crate) fn comment_views(site: &dyn DashboardSite, current: &str, kind: &str)
             remove_query_arg(&[b"user_id"], &link)
         };
         link = add_query_arg(&[(b"comment_status", Some(status.as_bytes()))], &link);
+        if post > 0 {
+            link = add_query_arg(&[(b"p", Some(post.to_string().as_bytes()))], &link);
+        }
         View {
             class: (*status).into(),
             url: String::from_utf8_lossy(&link).into_owned(),
@@ -726,6 +744,14 @@ pub fn edit_comments(
     let mode = view_mode(site, args.mode.as_deref(), settings);
     let per_page = per_page(site, "edit_comments_per_page");
     let page = pagenum(args.paged.as_deref());
+    let post_id = Value::String(args.post.clone().unwrap_or_default().into_bytes())
+        .to_int()
+        .unsigned_abs();
+    let counts = if post_id > 0 {
+        site.post_comment_counts(post_id)
+    } else {
+        site.comment_counts()
+    };
     // The type, search and order as requested, slashed.
     let slashed = |value: &Option<String>| {
         String::from_utf8_lossy(&addslashes(value.as_deref().unwrap_or_default().as_bytes()))
@@ -750,6 +776,7 @@ pub fn edit_comments(
         types: &comment_types(&kind),
         search: Some(search.as_str()).filter(|search| !search.is_empty()),
         order: &args.clauses,
+        post: post_id,
         offset: (page - 1).saturating_mul(per_page),
         number: per_page + per_page.min(8),
     });
@@ -763,7 +790,7 @@ pub fn edit_comments(
         .len()
         .min(usize::try_from(per_page).unwrap_or(usize::MAX));
     let (items, extra) = found.split_at(split);
-    let columns = columns();
+    let columns = columns(post_id == 0);
     let hidden = hidden_columns(site, "edit-comments");
     let hidden_keys: Vec<&str> = hidden.iter().map(String::as_str).collect();
     // `get_column_count()`: the columns not hidden.
@@ -928,9 +955,59 @@ pub fn edit_comments(
             Value::String(paged.into()).to_int().unsigned_abs()
         )
     });
+    let listed_post = if post_id == 0 {
+        None
+    } else {
+        site.post(post_id)
+    };
+    // `_draft_or_post_title()` cut to 50 characters, and its editor's link.
+    let listed = (post_id > 0).then(|| {
+        let title = listed_post
+            .as_ref()
+            .map(|post| esc_html(&admin_title(post)));
+        let title = title
+            .filter(|title| !is_empty_string(title.as_bytes()))
+            .unwrap_or_else(|| "(no title)".into());
+        let edit = listed_post
+            .as_ref()
+            .filter(|post| site.can_post("edit_post", post))
+            .map_or_else(String::new, |post| edit_link(site, post));
+        (edit, html_excerpt(&title, 50, "&hellip;"))
+    });
+    let heading = match &listed {
+        Some((edit, name)) => {
+            format!("Comments on &#8220;<a href=\"{edit}\">{name}</a>&#8221;")
+        }
+        None => "Comments".into(),
+    };
+    let viewed = listed_post.as_ref().map(|post| {
+        let label = if post.post_type == "page" {
+            "View Page"
+        } else {
+            "View Post"
+        };
+        (post, label, site.permalink(post))
+    });
+    let view_link = viewed
+        .as_ref()
+        .map_or_else(String::new, |(_, label, href)| {
+            format!("<a href=\"{href}\" class=\"comments-view-item-link\">{label}</a>")
+        });
+    // `wp_admin_bar_edit_menu()`'s View link, for a post the user may read.
+    let bar_view = viewed
+        .filter(|(post, ..)| site.can_post("read_post", post))
+        .map(|(_, label, href)| (label, href));
+    let post_field = if post_id > 0 {
+        format!("<input type=\"hidden\" name=\"p\" value=\"{post_id}\" />\n")
+    } else {
+        String::new()
+    };
     let content = format!(
-        "\n<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\nComments</h1>\n\n{subtitle}\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"comments-form\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"comment_status\" value=\"{view}\" />\n<input type=\"hidden\" name=\"pagegen_timestamp\" value=\"{}\" />\n\n<input type=\"hidden\" name=\"_total\" value=\"{total}\" />\n<input type=\"hidden\" name=\"_per_page\" value=\"{per_page}\" />\n<input type=\"hidden\" name=\"_page\" value=\"{page}\" />\n\n{paged}\n{list}</form>\n</div>\n\n<div id=\"ajax-response\"></div>\n\n{}\t",
-        views("Filter comments list", &comment_views(site, view, &kind)),
+        "\n<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\n{heading}</h1>\n\n{view_link}{subtitle}\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"comments-form\" method=\"get\">\n\n{}\n{post_field}<input type=\"hidden\" name=\"comment_status\" value=\"{view}\" />\n<input type=\"hidden\" name=\"pagegen_timestamp\" value=\"{}\" />\n\n<input type=\"hidden\" name=\"_total\" value=\"{total}\" />\n<input type=\"hidden\" name=\"_per_page\" value=\"{per_page}\" />\n<input type=\"hidden\" name=\"_page\" value=\"{page}\" />\n\n{paged}\n{list}</form>\n</div>\n\n<div id=\"ajax-response\"></div>\n\n{}\t",
+        views(
+            "Filter comments list",
+            &comment_views(site, counts, view, &kind, post_id)
+        ),
         search_box,
         date::format_unix("Y-m-d H:i:s", now, Zone::Utc),
         comment_reply(site, Some(visible), true, "detail")
@@ -955,11 +1032,15 @@ pub fn edit_comments(
             content: HELP_MODERATING,
         },
     ];
-    let moderated = site.comment_counts().moderated;
-    let title = if moderated > 0 {
-        format!("Comments ({})", number_format(moderated))
-    } else {
-        "Comments".into()
+    let moderated = counts.moderated;
+    let title = match &listed {
+        None if moderated > 0 => format!("Comments ({})", number_format(moderated)),
+        None => "Comments".into(),
+        Some((_, name)) if moderated > 0 => format!(
+            "Comments ({}) on &#8220;{name}&#8221;",
+            number_format(moderated)
+        ),
+        Some((_, name)) => format!("Comments on &#8220;{name}&#8221;"),
     };
     let page = Page {
         screen: Screen {
@@ -984,6 +1065,9 @@ pub fn edit_comments(
         content: &content,
         canonical,
         origin,
+        view: bar_view
+            .as_ref()
+            .map(|(label, href)| (*label, href.as_str())),
     };
     admin_page(site, &page, browser).map_or(
         Answer::Denied("Sorry, you are not allowed to access this page."),

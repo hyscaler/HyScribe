@@ -172,20 +172,22 @@ async fn logged_in_users_are_let_in() {
         hyscribe_testkit::settled_page(&page),
     );
     assert_eq!(with_values(&php, &page), page);
-    // A view, as PHP lists it.
-    let path = "/hs-admin/edit-comments?comment_status=moderated";
-    let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
-    let row = list
-        .lines()
-        .find(|l| l.starts_with("default?comment_status=moderated\tadministrator\t"))
-        .unwrap();
-    let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
-    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
-    let (php, page) = (
-        hyscribe_testkit::settled_page(&php),
-        hyscribe_testkit::settled_page(&page),
-    );
-    assert_eq!(with_values(&php, &page), page);
+    // A view and a post's comments, as PHP lists them.
+    for query in ["comment_status=moderated", "p=1"] {
+        let path = format!("/hs-admin/edit-comments?{query}");
+        let page = page_of(get(&site, &path, "127.0.0.1:8081", &cookies).await).await;
+        let row = list
+            .lines()
+            .find(|l| l.starts_with(&format!("default?{query}\tadministrator\t")))
+            .unwrap();
+        let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+        let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+        let (php, page) = (
+            hyscribe_testkit::settled_page(&php),
+            hyscribe_testkit::settled_page(&page),
+        );
+        assert_eq!(with_values(&php, &page), page, "{query}");
+    }
     let path = "/hs-admin/edit-comments?comment_status=trash&user_id=1&paged=1";
     let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
     assert!(page.contains("No comments found in Trash."));
@@ -203,7 +205,8 @@ async fn logged_in_users_are_let_in() {
     assert!(page.contains("Search results for: <strong>WordPress</strong>"));
     assert!(page.contains("id='comment-1'") && page.contains("row-actions visible"));
     for path in [
-        "/hs-admin/edit-comments?p=1",
+        "/hs-admin/edit-comments?approved=1",
+        "/hs-admin/edit-comments?p=3",
         "/hs-admin/edit-comments?orderby=meta_value",
         "/hs-admin/edit-comments?comment_status[]=x",
         "/hs-admin/edit-comments?comment_status=%FF",

@@ -54,6 +54,7 @@ pub fn tools(
         content: &content,
         canonical,
         origin,
+        view: None,
     };
     admin_page(site, &page, browser)
 }

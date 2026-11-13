@@ -779,10 +779,11 @@ impl Db {
         rows.iter().map(user).collect()
     }
 
-    /// `wp_count_comments()`'s approved, moderated, spam and trashed
-    /// comments, and `user`'s approved and pending ones; notes left out.
-    pub async fn comment_counts(&self, user: u64) -> Result<[u64; 5], DbError> {
-        let sql = self.prefix.sql(
+    /// `wp_count_comments( $post )`'s approved, moderated, spam and trashed
+    /// comments, and `user`'s approved and pending ones; notes left out, and
+    /// those on other posts when `post` is not 0.
+    pub async fn comment_counts(&self, user: u64, post: u64) -> Result<[u64; 5], DbError> {
+        let mut sql = Sql::new(
             "SELECT CAST(COALESCE(SUM(comment_approved = '1'), 0) AS SIGNED) AS approved, \
              CAST(COALESCE(SUM(comment_approved = '0'), 0) AS SIGNED) AS moderated, \
              CAST(COALESCE(SUM(comment_approved = 'spam'), 0) AS SIGNED) AS spam, \
@@ -790,8 +791,10 @@ impl Db {
              CAST(COALESCE(SUM(user_id = ? AND comment_approved IN ('0', '1')), 0) AS SIGNED) AS mine \
              FROM {prefix}comments WHERE comment_type != 'note'",
         );
-        let row = sqlx::query(sql)
-            .bind(user)
+        sql.bind(Bind::Int(user));
+        post_filter(&mut sql, post);
+        let row = sql
+            .query(&self.prefix)
             .fetch_one(&self.pool)
             .await
             .map_err(db_error)?;
@@ -1807,11 +1810,23 @@ pub struct CommentFilter<'a> {
     /// `get_search_sql()`: only those with this in their author, email,
     /// URL, IP or content.
     pub search: Option<&'a str>,
+    /// Only those on this post, unless 0.
+    pub post: u64,
+}
+
+/// Only the comments on `post`, unless 0, in a condition the index serves.
+fn post_filter(sql: &mut Sql, post: u64) {
+    if post > 0 {
+        sql.push(" AND comment_post_ID = ?");
+        sql.bind(Bind::Int(post));
+    }
 }
 
 /// The `WHERE` of `filter`.
 fn comment_filter(sql: &mut Sql, filter: &CommentFilter<'_>) {
-    sql.push("comment_type != 'note' AND comment_approved IN (");
+    sql.push("comment_type != 'note'");
+    post_filter(sql, filter.post);
+    sql.push(" AND comment_approved IN (");
     list(sql, filter.approved.iter().map(|v| Bind::Text((*v).into())));
     if let Some(user) = filter.user {
         sql.push(" AND user_id = ?");

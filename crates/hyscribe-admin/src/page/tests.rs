@@ -117,6 +117,7 @@ fn page<'a>(help: &'a [HelpTab<'a>], sidebar: &'a str, typenow: &'a str) -> Page
         content: "",
         canonical: "https://example.test/wp/hs-admin/tools",
         origin: "https://example.test",
+        view: None,
     }
 }
 
@@ -191,6 +192,7 @@ fn another_home_host_and_origin() {
         &other,
         &Page {
             origin: "http://example.test",
+            view: None,
             ..page(&[], "", "")
         },
     );

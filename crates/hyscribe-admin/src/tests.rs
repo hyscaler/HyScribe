@@ -181,6 +181,19 @@ impl Role {
         ["comments", "cpaged", "chidden"].contains(&self.variant())
     }
 
+    /// The fixture's one comment, trashed when the list is empty, or the
+    /// content's.
+    fn comment_rows(&self) -> Vec<crate::dashboard::RecentComment> {
+        if self.comments_content() {
+            return crate::comments::content::comments(self);
+        }
+        let mut hello = crate::dashboard::tests::hello_comment(self.can("edit_published_posts"));
+        if self.variant() == "cempty" {
+            hello.status = "trash";
+        }
+        vec![hello]
+    }
+
     /// The posts and pages of the variant.
     fn posts(&self) -> Vec<hyscribe_model::Post> {
         crate::posts::content::posts(self.listing(), self.variant() == "empty")
@@ -397,23 +410,13 @@ fn comment(
 }
 
 impl crate::comments::CommentsSite for Role {
-    /// The fixture's one comment, trashed when the list is empty, or the
-    /// content's, as `query` filters them.
+    /// `comment_rows()` as `query` filters them.
     fn list_comments(
         &self,
         query: &crate::comments::CommentQuery<'_>,
     ) -> (Vec<crate::dashboard::RecentComment>, u64) {
         COMMENTS_ASKED.set(query.number);
-        let all = if self.comments_content() {
-            crate::comments::content::comments(self)
-        } else {
-            let mut hello =
-                crate::dashboard::tests::hello_comment(self.can("edit_published_posts"));
-            if self.variant() == "cempty" {
-                hello.status = "trash";
-            }
-            vec![hello]
-        };
+        let all = self.comment_rows();
         let lower = |bytes: &[u8]| String::from_utf8_lossy(bytes).to_lowercase();
         let mut found: Vec<_> = all
             .into_iter()
@@ -426,9 +429,10 @@ impl crate::comments::CommentsSite for Role {
                     &c.author_ip,
                     &c.content,
                 ];
-                query
-                    .approved
-                    .contains(&crate::dashboard::approved_of(row.status))
+                (query.post == 0 || c.post_id == query.post)
+                    && query
+                        .approved
+                        .contains(&crate::dashboard::approved_of(row.status))
                     && query
                         .user
                         .is_none_or(|user| i64::try_from(c.user_id) == Ok(user))
@@ -473,6 +477,28 @@ impl crate::comments::CommentsSite for Role {
     /// The spam comment was approved before.
     fn approved_before(&self, id: u64) -> bool {
         id == 504
+    }
+    /// Counted from the comments on `post`.
+    fn post_comment_counts(&self, post: u64) -> crate::dashboard::CommentCounts {
+        let rows: Vec<_> = self
+            .comment_rows()
+            .into_iter()
+            .filter(|row| row.comment.post_id == post)
+            .collect();
+        let count = |status: &str| rows.iter().filter(|row| row.status == status).count() as u64;
+        crate::dashboard::CommentCounts {
+            approved: count("approved"),
+            moderated: count("unapproved"),
+            spam: count("spam"),
+            trash: count("trash"),
+            mine: rows
+                .iter()
+                .filter(|row| {
+                    row.comment.user_id == self.user_id()
+                        && matches!(row.status, "approved" | "unapproved")
+                })
+                .count() as u64,
+        }
     }
     fn parent_comment(&self, id: u64) -> Option<(String, Vec<u8>)> {
         (id == 1).then(|| {
@@ -843,6 +869,11 @@ impl crate::posts::PostsSite for Role {
         crate::posts::content::months(self.posts(), post_type, trash)
     }
     fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        if self.comments_content() {
+            return [1, 2, 501]
+                .contains(&id)
+                .then(|| crate::comments::content::post(id));
+        }
         self.posts().into_iter().find(|post| post.id == id)
     }
     fn page_templates(&self, post_type: &str) -> Vec<(String, String)> {

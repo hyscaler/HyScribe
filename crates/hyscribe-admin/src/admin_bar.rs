@@ -278,8 +278,9 @@ pub(crate) fn html_excerpt(text: &str, count: usize, more: &str) -> String {
 /// The command palette's script, which labels its shortcut for Apple systems.
 const PALETTE_SCRIPT: &str = "<script>\n( \t( applePattern, appleOSLabel ) => {\n\t\tif ( ! ( new RegExp( applePattern, 'i' ) ).test( navigator.userAgent ) ) {\n\t\t\treturn;\n\t\t}\n\t\tconst kbd = document.querySelector( '#wp-admin-bar-command-palette .ab-label kbd' );\n\t\tif ( kbd ) {\n\t\t\tkbd.textContent = appleOSLabel;\n\t\t}\n\t} )( \"Macintosh|Mac OS X|Mac_PowerPC\", \"\\u2318K\" );\n//# sourceURL=wp_admin_bar_command_palette_menu\n</script>\n";
 
-/// The admin bar on an admin screen, for `browser`.
-pub fn admin_bar(site: &dyn BarSite, browser: &Browser) -> String {
+/// The admin bar on an admin screen, for `browser`, with `view`'s label
+/// and link to what the screen is about.
+pub fn admin_bar(site: &dyn BarSite, browser: &Browser, view: Option<(&str, &str)>) -> String {
     let mut bar = Bar::default();
     let icon = "<span class=\"ab-icon\" aria-hidden=\"true\"></span>";
     let profile = site.admin_url("profile.php");
@@ -450,6 +451,10 @@ pub fn admin_bar(site: &dyn BarSite, browser: &Browser) -> String {
                 Meta::default(),
             );
         }
+    }
+    // wp_admin_bar_edit_menu().
+    if let Some((title, href)) = view {
+        bar.add("view", "", title.into(), href.into(), Meta::default());
     }
     // wp_admin_bar_add_secondary_groups().
     bar.add_group("top-secondary", "", "ab-top-secondary");

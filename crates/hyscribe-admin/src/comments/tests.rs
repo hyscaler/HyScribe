@@ -31,6 +31,7 @@ fn pages_are_php_s() {
             orderby: decoded("orderby"),
             order: decoded("order"),
             mode: decoded("mode"),
+            post: decoded("p"),
             clauses: comment_order(
                 &decoded("orderby").unwrap_or_default(),
                 &decoded("order").unwrap_or_default(),
@@ -133,7 +134,7 @@ fn author_urls_are_shortened() {
     assert_eq!(strip_scheme(b"www.example.test/"), b"www.example.test");
     assert_eq!(strip_scheme(b"HTTPS://www.example.test//"), b"example.test");
     let role = Role("comments:administrator");
-    let columns = columns();
+    let columns = columns(true);
     let listing = Listing {
         site: &role,
         columns: &columns,
@@ -166,7 +167,7 @@ fn all_counts_approved_and_pending() {
 #[test]
 fn the_spam_view_links_ips_to_spam() {
     let role = Role("comments:administrator");
-    let columns = columns();
+    let columns = columns(true);
     let listing = Listing {
         site: &role,
         columns: &columns,
@@ -211,7 +212,13 @@ fn orders_are_parsed_as_php_parses_them() {
 /// PHP printed them for `a&b`.
 #[test]
 fn view_links_keep_the_type_as_php_does() {
-    let views = comment_views(&Role("administrator"), "all", "a&b");
+    let views = comment_views(
+        &Role("administrator"),
+        CommentCounts::default(),
+        "all",
+        "a&b",
+        0,
+    );
     assert!(
         views[0]
             .url

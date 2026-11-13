@@ -2122,6 +2122,7 @@ pub fn edit(
         content: &content,
         canonical,
         origin,
+        view: None,
     };
     admin_page(site, &page, browser).map(Answer::Page)
 }

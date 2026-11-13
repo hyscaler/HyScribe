@@ -1951,6 +1951,8 @@ pub enum Answer {
     Redirect(String),
     /// `wp_die()`'s `403` with this message.
     Denied(&'static str),
+    /// `wp_die()`'s default `500` with this message.
+    Died(&'static str),
 }
 
 /// `get_user_setting( $name )`: from the settings cookie when sent, else

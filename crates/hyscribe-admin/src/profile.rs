@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `profile.php`: the current user's profile, `user-edit.php` with
-//! `IS_PROFILE_PAGE`.
+//! `profile.php` and `user-edit.php`: a user's profile, the current
+//! user's with `IS_PROFILE_PAGE`.
 
-use hyscribe_kses::{esc_attr, esc_html, esc_url};
+use hyscribe_kses::{esc_attr, esc_html, esc_url, esc_url_raw};
 use hyscribe_model::User;
-use hyscribe_phpser::{Key, Maybe, Value, is_empty_string, maybe_unserialize, remove_query_arg};
+use hyscribe_phpser::{
+    Key, Maybe, Value, absint, is_empty_string, maybe_unserialize, remove_query_arg,
+};
 use hyscribe_render::user_avatar;
 
 use crate::admin_bar::{BarSite, Browser};
@@ -13,14 +15,18 @@ use crate::list_table::{checked, fill, selected};
 use crate::menu::Screen;
 use crate::page::{HelpTab, Page, SCHEMES, admin_page};
 use crate::posts::Answer;
-use crate::users::{UsersSite, role_names};
+use crate::users::{UsersSite, dropdown_roles, role_names};
 
 /// What the profile asks of the site beyond the users list's.
 pub trait ProfileSite: UsersSite {
-    /// The current user, with their name meta.
-    fn profile_user(&self) -> User;
-    /// How many of the current user's sessions are unexpired.
-    fn sessions(&self) -> usize;
+    /// `get_userdata( $id )` with the user's name meta; `None` for none.
+    fn profile_user(&self, id: u64) -> Option<User>;
+    /// `get_user_option( $name, $id )`, as stored.
+    fn user_option_of(&self, id: u64, name: &str) -> Option<Vec<u8>>;
+    /// `user_can( $id, $cap )`.
+    fn user_can(&self, id: u64, cap: &str) -> bool;
+    /// How many of a user's sessions are unexpired.
+    fn sessions(&self, id: u64) -> usize;
     /// `wp_generate_password( 24 )`, the password the form offers.
     fn generated_password(&self) -> String;
 }
@@ -206,20 +212,154 @@ fn admin_bar_pref(stored: Option<&[u8]>) -> bool {
     stored.is_none_or(|pref| pref == b"true")
 }
 
+/// What `user-edit.php` is asked, as requested.
+#[derive(Default)]
+pub struct EditArgs {
+    /// `user_id`.
+    pub user_id: Option<String>,
+    /// `wp_http_referer`.
+    pub referer: Option<String>,
+}
+
+/// The request a screen answers.
+pub struct Request<'a> {
+    /// The requested URL without `wp_removable_query_args()`.
+    pub canonical: &'a str,
+    /// The scheme and host of the request.
+    pub origin: &'a str,
+    /// `$_SERVER['REQUEST_URI']`, slashed.
+    pub uri: &'a str,
+    /// The browser that asks.
+    pub browser: &'a Browser<'a>,
+}
+
+/// `user-edit.php`'s own: its cleaned `wp_http_referer` and `(int)
+/// $_GET['user_id']`, which the user-profile script carries.
+struct Edit {
+    referer: Vec<u8>,
+    script_id: i64,
+}
+
 /// `profile.php` for the current user.
-pub fn profile(
+pub fn profile(site: &dyn ProfileSite, request: &Request) -> Answer {
+    let user = site.profile_user(site.user_id()).unwrap_or_default();
+    form(site, &user, None, request)
+}
+
+/// `user-edit.php`: a user's profile, the current user's as on
+/// `profile.php`; `wp_die()` for no such user or one they may not edit.
+pub fn user_edit(site: &dyn ProfileSite, args: &EditArgs, request: &Request) -> Answer {
+    let given = |arg: &Option<String>| {
+        arg.as_deref()
+            .map(|text| Value::String(text.as_bytes().to_vec()))
+            .filter(|value| !value.is_empty())
+    };
+    let id = given(&args.user_id).map_or(0, |id| absint(&id));
+    let Some(user) = site.profile_user(id) else {
+        return Answer::Died("Invalid user ID.");
+    };
+    if !site.can_user("edit_user", id) {
+        return Answer::Died("Sorry, you are not allowed to edit this user.");
+    }
+    // `sanitize_url()`, then without the arguments of an update.
+    let referer = given(&args.referer).map_or_else(Vec::new, |referer| {
+        let referer = esc_url_raw(&referer.to_php_string());
+        remove_query_arg(&[b"update", b"delete_count", b"user_id"], &referer)
+    });
+    let script_id = args
+        .user_id
+        .as_deref()
+        .map_or(0, |id| Value::String(id.as_bytes().to_vec()).to_int());
+    let edit = Edit { referer, script_id };
+    form(site, &user, Some(&edit), request)
+}
+
+/// The rows of the Account Management table after the password's: the
+/// reset link and sessions of another user, or the profile's sessions.
+fn account_rows(site: &dyn ProfileSite, user: &User, profile: bool) -> (String, String) {
+    let sessions = site.sessions(user.id);
+    if !profile {
+        let name = edit(&user.display_name);
+        let reset = format!(
+            "\t\t\t\t\t\t\t\t<tr class=\"user-generate-reset-link-wrap hide-if-no-js\">\n\t\t\t\t\t\t\t\t\t<th>Password Reset</th>\n\t\t\t\t\t\t\t\t\t<td>\n\t\t\t\t\t\t\t\t\t\t<div class=\"generate-reset-link\">\n\t\t\t\t\t\t\t\t\t\t\t<button type=\"button\" class=\"button button-secondary\" id=\"generate-reset-link\">\n\t\t\t\t\t\t\t\t\t\t\t\tSend Reset Link\t\t\t\t\t\t\t\t\t\t\t</button>\n\t\t\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t\t\t<p class=\"description\">\n\t\t\t\t\t\t\t\t\t\t\tSend {} a link to reset their password. This will not change their password, nor will it force a change.\t\t\t\t\t\t\t\t\t\t</p>\n\t\t\t\t\t\t\t\t\t</td>\n\t\t\t\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t",
+            esc_html(name.as_bytes())
+        );
+        let sessions = if sessions == 0 {
+            String::new()
+        } else {
+            format!(
+                "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr class=\"user-sessions-wrap hide-if-no-js\">\n\t\t\t\t\t\t\t\t\t<th>Sessions</th>\n\t\t\t\t\t\t\t\t\t<td>\n\t\t\t\t\t\t\t\t\t\t<p><button type=\"button\" class=\"button\" id=\"destroy-sessions\">Log Out Everywhere</button></p>\n\t\t\t\t\t\t\t\t\t\t<p class=\"description\">\n\t\t\t\t\t\t\t\t\t\t\tLog {name} out of all locations.\t\t\t\t\t\t\t\t\t\t</p>\n\t\t\t\t\t\t\t\t\t</td>\n\t\t\t\t\t\t\t\t</tr>\n"
+            )
+        };
+        return (reset, sessions);
+    }
+    let sessions = match sessions {
+        0 => String::new(),
+        1 => "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr class=\"user-sessions-wrap hide-if-no-js\">\n\t\t\t\t\t\t\t\t\t<th>Sessions</th>\n\t\t\t\t\t\t\t\t\t<td aria-live=\"assertive\">\n\t\t\t\t\t\t\t\t\t\t<div class=\"destroy-sessions\"><button type=\"button\" disabled class=\"button\">Log Out Everywhere Else</button></div>\n\t\t\t\t\t\t\t\t\t\t<p class=\"description\">\n\t\t\t\t\t\t\t\t\t\t\tYou are only logged in at this location.\t\t\t\t\t\t\t\t\t\t</p>\n\t\t\t\t\t\t\t\t\t</td>\n\t\t\t\t\t\t\t\t</tr>\n".into(),
+        _ => "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr class=\"user-sessions-wrap hide-if-no-js\">\n\t\t\t\t\t\t\t\t\t<th>Sessions</th>\n\t\t\t\t\t\t\t\t\t<td aria-live=\"assertive\">\n\t\t\t\t\t\t\t\t\t\t<div class=\"destroy-sessions\"><button type=\"button\" class=\"button\" id=\"destroy-sessions\">Log Out Everywhere Else</button></div>\n\t\t\t\t\t\t\t\t\t\t<p class=\"description\">\n\t\t\t\t\t\t\t\t\t\t\tDid you lose your phone or leave your account logged in at a public computer? You can log out everywhere else, and stay logged in here.\t\t\t\t\t\t\t\t\t\t</p>\n\t\t\t\t\t\t\t\t\t</td>\n\t\t\t\t\t\t\t\t</tr>\n".into(),
+    };
+    (String::new(), sessions)
+}
+
+/// The Role row of another user's form: the editable roles with the
+/// user's first chosen, or no role.
+fn role_row(roles: &[(String, String)], user_roles: &[String]) -> String {
+    let role = user_roles.first().map_or("", String::as_str);
+    let none = if role.is_empty() {
+        " selected=\"selected\""
+    } else {
+        ""
+    };
+    format!(
+        "\t\t\t\t\t\t<tr class=\"user-role-wrap\">\n\t\t\t\t\t\t\t<th><label for=\"role\">Role</label></th>\n\t\t\t\t\t\t\t<td>\n\t\t\t\t\t\t\t\t<select name=\"role\" id=\"role\">\n\t\t\t\t\t\t\t\t\t{}<option value=\"\"{none}>&mdash; No role for this site &mdash;</option>\t\t\t\t\t\t\t</select>\n\t\t\t\t\t\t\t</td>\n\t\t\t\t\t\t</tr>\n\t\t\t\t\t",
+        dropdown_roles(roles, role)
+    )
+}
+
+/// What tells the profile from another user's form: the heading, Add User
+/// link, role row and email field.
+fn heading(
     site: &dyn ProfileSite,
-    canonical: &str,
-    origin: &str,
-    request_uri: &str,
-    browser: &Browser,
-) -> Answer {
-    let user = site.profile_user();
-    let me = site.user_id();
-    let option = |name: &str| site.user_option(name).unwrap_or_default();
-    let is = |name: &str, value: &[u8]| option(name) == value;
-    let can_edit = site.can("edit_posts") || site.can("edit_pages");
-    let rich = if can_edit && is("rich_editing", b"false") {
+    user: &User,
+    roles: (&[(String, String)], &[String]),
+) -> [String; 4] {
+    let email = edit(&user.email);
+    if user.id == site.user_id() {
+        return [
+            "Profile".into(),
+            String::new(),
+            String::new(),
+            format!(
+                "<input type=\"email\" name=\"email\" id=\"email\" aria-describedby=\"email-description\" value=\"{email}\" autocomplete=\"email\" class=\"regular-text ltr\" />\n\t\t\t\t\t\t\t\t<p class=\"description\" id=\"email-description\">\n\t\t\t\t\t\t\t\t\tIf you change this, an email will be sent at your new address to confirm it. <strong>The new address will not become active until confirmed.</strong>\t\t\t\t\t\t\t\t</p>"
+            ),
+        ];
+    }
+    let add = if site.can("create_users") {
+        "\t\t\t\t\t\t\t\t\t<a href=\"user-new\" class=\"page-title-action\">Add User</a>\n\t\t\t\t\t\t\t"
+    } else {
+        "\t\t\t\t\t\t\t"
+    };
+    let role = if site.can_user("promote_user", user.id) {
+        role_row(roles.0, roles.1)
+    } else {
+        String::new()
+    };
+    [
+        format!("Edit User {}", edit(&user.display_name)),
+        add.into(),
+        role,
+        format!(
+            "<input type=\"email\" name=\"email\" id=\"email\" value=\"{email}\" class=\"regular-text ltr\" />"
+        ),
+    ]
+}
+
+/// The Personal Options rows the form shows: the visual editor, syntax
+/// highlighting, keyboard shortcuts and infinite scrolling.
+fn personal_options(site: &dyn ProfileSite, id: u64) -> [String; 4] {
+    let is = |name: &str, value: &[u8]| site.user_option_of(id, name).unwrap_or_default() == value;
+    let personal = id != site.user_id() || site.can("edit_posts") || site.can("edit_pages");
+    let rich = if personal && is("rich_editing", b"false") {
         option_row(
             "user-rich-editing-wrap",
             "Visual Editor",
@@ -233,7 +373,7 @@ pub fn profile(
     };
     let syntax = if ["edit_theme_options", "edit_plugins", "edit_themes"]
         .iter()
-        .any(|cap| site.can(cap))
+        .any(|cap| site.user_can(id, cap))
     {
         option_row(
             "user-syntax-highlighting-wrap",
@@ -246,7 +386,7 @@ pub fn profile(
     } else {
         String::new()
     };
-    let shortcuts = if can_edit {
+    let shortcuts = if personal {
         format!(
             "\t\t\t\t\t\t\t\t\t\t<tr class=\"user-comment-shortcuts-wrap\">\n\t\t\t\t\t\t<th scope=\"row\">Keyboard Shortcuts</th>\n\t\t\t\t\t\t<td>\n\t\t\t\t\t\t\t<label for=\"comment_shortcuts\">\n\t\t\t\t\t\t\t\t<input type=\"checkbox\" name=\"comment_shortcuts\" id=\"comment_shortcuts\" value=\"true\" {} />\n\t\t\t\t\t\t\t\tEnable keyboard shortcuts for comment moderation.\t\t\t\t\t\t\t</label>\n\t\t\t\t\t\t\t<a href=\"https://wordpress.org/documentation/article/keyboard-shortcuts-classic-editor/#keyboard-shortcuts-for-comments\">Documentation on Keyboard Shortcuts</a>\t\t\t\t\t\t</td>\n\t\t\t\t\t</tr>\n",
             checked(is("comment_shortcuts", b"true"))
@@ -254,7 +394,7 @@ pub fn profile(
     } else {
         String::new()
     };
-    let scrolling = if site.can("upload_files") {
+    let scrolling = if site.user_can(id, "upload_files") {
         option_row(
             "user-infinite-scrolling-wrap",
             "Infinite Scrolling",
@@ -266,40 +406,86 @@ pub fn profile(
     } else {
         String::new()
     };
+    [rich, syntax, shortcuts, scrolling]
+}
+
+/// The user's roles, as `WP_User` names them: the keys of their
+/// `capabilities` that are roles.
+fn roles_of(capabilities: &[u8], roles: &[String]) -> Vec<String> {
+    match maybe_unserialize(capabilities) {
+        Maybe::Value(Value::Array(caps)) => caps
+            .iter()
+            .map(|(key, _)| text(&key.to_php_string()))
+            .filter(|key| roles.contains(key))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The profile form of `user`, on `profile.php`, or on `user-edit.php`
+/// when `shown` there.
+fn form(site: &dyn ProfileSite, user: &User, shown: Option<&Edit>, request: &Request) -> Answer {
+    let me = site.user_id();
+    let id = user.id;
+    let profile = id == me;
+    let option = |name: &str| site.user_option_of(id, name).unwrap_or_default();
+    let [rich, syntax, shortcuts, scrolling] = personal_options(site, id);
     let nickname = edit(&option("nickname"));
-    // A pending email change `_new_email` holds, with a link to cancel it.
-    let pending = pending_email(site, &option("_new_email"), &user.email);
-    let avatar = text(&user_avatar(&|name| site.option(name), &user, 96));
+    let avatar = text(&user_avatar(&|name| site.option(name), user, 96));
+    let gravatar = if profile {
+        "\t\t\t\t\t\t\t\t\t<a href=\"https://gravatar.com/\">You can change your profile picture on Gravatar</a>.\t\t\t\t\t\t\t\t"
+    } else {
+        "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t"
+    };
     let picture = if avatar.is_empty() {
         String::new()
     } else {
         format!(
-            "\t\t\t\t\t\t\t\t\t\t\t<tr class=\"user-profile-picture\">\n\t\t\t\t\t\t\t<th>Profile Picture</th>\n\t\t\t\t\t\t\t<td>\n\t\t\t\t\t\t\t\t{avatar}\t\t\t\t\t\t\t\t<p class=\"description\">\n\t\t\t\t\t\t\t\t\t<a href=\"https://gravatar.com/\">You can change your profile picture on Gravatar</a>.\t\t\t\t\t\t\t\t</p>\n\t\t\t\t\t\t\t</td>\n\t\t\t\t\t\t</tr>\n"
+            "\t\t\t\t\t\t\t\t\t\t\t<tr class=\"user-profile-picture\">\n\t\t\t\t\t\t\t<th>Profile Picture</th>\n\t\t\t\t\t\t\t<td>\n\t\t\t\t\t\t\t\t{avatar}\t\t\t\t\t\t\t\t<p class=\"description\">\n{gravatar}</p>\n\t\t\t\t\t\t\t</td>\n\t\t\t\t\t\t</tr>\n"
         )
     };
-    let sessions = match site.sessions() {
-        0 => String::new(),
-        1 => "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr class=\"user-sessions-wrap hide-if-no-js\">\n\t\t\t\t\t\t\t\t\t<th>Sessions</th>\n\t\t\t\t\t\t\t\t\t<td aria-live=\"assertive\">\n\t\t\t\t\t\t\t\t\t\t<div class=\"destroy-sessions\"><button type=\"button\" disabled class=\"button\">Log Out Everywhere Else</button></div>\n\t\t\t\t\t\t\t\t\t\t<p class=\"description\">\n\t\t\t\t\t\t\t\t\t\t\tYou are only logged in at this location.\t\t\t\t\t\t\t\t\t\t</p>\n\t\t\t\t\t\t\t\t\t</td>\n\t\t\t\t\t\t\t\t</tr>\n".into(),
-        _ => "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr class=\"user-sessions-wrap hide-if-no-js\">\n\t\t\t\t\t\t\t\t\t<th>Sessions</th>\n\t\t\t\t\t\t\t\t\t<td aria-live=\"assertive\">\n\t\t\t\t\t\t\t\t\t\t<div class=\"destroy-sessions\"><button type=\"button\" class=\"button\" id=\"destroy-sessions\">Log Out Everywhere Else</button></div>\n\t\t\t\t\t\t\t\t\t\t<p class=\"description\">\n\t\t\t\t\t\t\t\t\t\t\tDid you lose your phone or leave your account logged in at a public computer? You can log out everywhere else, and stay logged in here.\t\t\t\t\t\t\t\t\t\t</p>\n\t\t\t\t\t\t\t\t\t</td>\n\t\t\t\t\t\t\t\t</tr>\n".into(),
-    };
     // `is_role()`: the roles WordPress names.
-    let roles: Vec<String> = role_names(&site.user_roles().unwrap_or_default())
-        .into_iter()
-        .map(|(key, _)| key)
-        .collect();
+    let roles = role_names(&site.user_roles().unwrap_or_default());
+    let keys: Vec<String> = roles.iter().map(|(key, _)| key.clone()).collect();
+    let capabilities = option("capabilities");
+    let user_roles = roles_of(&capabilities, &keys);
+    let [title, add, role, email] = heading(site, user, (&roles, &user_roles));
     let referer = text(&esc_url(&remove_query_arg(
         &[b"_wp_http_referer"],
-        request_uri.as_bytes(),
+        request.uri.as_bytes(),
     )));
+    let (reset, sessions) = account_rows(site, user, profile);
+    let auto = |name: &str| {
+        if profile {
+            format!(" autocomplete=\"{name}\"")
+        } else {
+            String::new()
+        }
+    };
+    let either = |mine: &str, other: &str| if profile { mine } else { other }.to_string();
+    let wp_referer = shown
+        .filter(|edit| !edit.referer.is_empty())
+        .map_or_else(String::new, |edit| {
+            format!(
+                "\t\t\t\t\t\t\t\t\t<input type=\"hidden\" name=\"wp_http_referer\" value=\"{}\" />\n",
+                text(&esc_url(&edit.referer))
+            )
+        });
+    let title = esc_html(title.as_bytes());
     let content = fill(
         PAGE,
         &[
+            ("heading", title.clone()),
+            ("add", add),
             (
                 "action",
-                text(&esc_url(BarSite::admin_url(site, "profile.php").as_bytes())),
+                text(&esc_url(
+                    BarSite::admin_url(site, &either("profile.php", "user-edit.php")).as_bytes(),
+                )),
             ),
-            ("nonce", site.nonce(&format!("update-user_{me}"))),
+            ("nonce", site.nonce(&format!("update-user_{id}"))),
             ("referer", referer),
+            ("wp_referer", wp_referer),
             ("me", me.to_string()),
             ("rich", rich),
             ("syntax", syntax),
@@ -308,25 +494,46 @@ pub fn profile(
             (
                 "front",
                 checked(admin_bar_pref(
-                    site.user_option("show_admin_bar_front").as_deref(),
+                    site.user_option_of(id, "show_admin_bar_front").as_deref(),
                 ))
                 .into(),
             ),
             ("scrolling", scrolling),
             ("login", edit(&user.login)),
+            ("role", role),
             ("first", edit(&user.first_name)),
+            ("given", auto("given-name")),
             ("last", edit(&user.last_name)),
+            ("family", auto("family-name")),
             ("nickname", nickname.clone()),
-            ("display", display_options(&user, &nickname)),
-            ("email", edit(&user.email)),
-            ("pending", pending),
+            ("nick_auto", auto("nickname")),
+            ("display", display_options(user, &nickname)),
+            ("email_field", email),
+            (
+                "pending",
+                if profile {
+                    pending_email(site, &option("_new_email"), &user.email)
+                } else {
+                    String::new()
+                },
+            ),
             ("url", edit(&esc_url(edit(&user.url).as_bytes()))),
+            ("about", either("About Yourself", "About the user")),
             ("description", esc_html(&user.description)),
             ("picture", picture),
             ("password", esc_attr(site.generated_password().as_bytes())),
+            (
+                "pass2",
+                either(
+                    "Type your new password again.",
+                    "Type the new password again.",
+                ),
+            ),
+            ("reset", reset),
             ("sessions", sessions),
-            ("caps", additional_caps(&option("capabilities"), &roles)),
-            ("user_id", me.to_string()),
+            ("caps", additional_caps(&capabilities, &keys)),
+            ("user_id", id.to_string()),
+            ("submit", either("Update Profile", "Update User")),
         ],
     );
     let help = [HelpTab {
@@ -334,35 +541,52 @@ pub fn profile(
         title: "Overview",
         content: HELP_OVERVIEW,
     }];
+    let edit_users = site.can("edit_users");
+    let users = |on: bool| if on { "users.php" } else { "profile.php" };
+    let script_data = shown.map(|edit| {
+        let script_id = edit.script_id;
+        (
+            "user-profile",
+            format!(
+                "var userProfileL10n = {{\"user_id\":\"{script_id}\",\"nonce\":\"{}\"}};",
+                site.nonce(&format!("reset-password-for-{script_id}"))
+            ),
+        )
+    });
+    let author = site.author_url(id);
     let page = Page {
         screen: Screen {
-            pagenow: "profile.php",
-            typenow: "",
-            taxonomy: "",
-            parent_file: Some(if site.can("edit_users") {
-                "users.php"
+            pagenow: if shown.is_some() {
+                "user-edit.php"
             } else {
                 "profile.php"
-            }),
-            submenu_file: Some("profile.php"),
+            },
+            typenow: "",
+            taxonomy: "",
+            parent_file: Some(users(edit_users)),
+            submenu_file: Some(users(edit_users && !profile)),
         },
-        id: "profile",
-        title: "Profile",
+        id: if shown.is_some() {
+            "user-edit"
+        } else {
+            "profile"
+        },
+        title: &title,
         help: &help,
         sidebar: HELP_SIDEBAR,
         screen_options: "",
         styles: &[],
         scripts: &["user-profile"],
         late_scripts: &[],
-        script_data: &[],
+        script_data: script_data.as_slice(),
         admin_footer: "",
         footer_scripts: "",
         content: &content,
-        canonical,
-        origin,
-        view: None,
+        canonical: request.canonical,
+        origin: request.origin,
+        view: shown.map(|_| ("View User", author.as_str())),
     };
-    admin_page(site, &page, browser).map_or(
+    admin_page(site, &page, request.browser).map_or(
         Answer::Denied("Sorry, you are not allowed to access this page."),
         Answer::Page,
     )

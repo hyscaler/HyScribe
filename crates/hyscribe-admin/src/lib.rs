@@ -18,4 +18,5 @@ pub mod terms;
 #[cfg(test)]
 mod tests;
 pub mod tools;
+pub mod user_new;
 pub mod users;

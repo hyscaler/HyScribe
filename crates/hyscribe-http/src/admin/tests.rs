@@ -255,16 +255,7 @@ async fn logged_in_users_are_let_in() {
         .unwrap();
     let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
     let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
-    // The generated password, escaped, is the attribute's whole value.
-    let at = page.find("data-pw=\"").unwrap() + 9;
-    let end = at + page.get(at..).unwrap().find('"').unwrap();
-    let password = page.get(at..end).unwrap();
-    assert!(password.len() >= 24);
-    let page = format!(
-        "{}%password%{}",
-        page.get(..at).unwrap(),
-        page.get(end..).unwrap()
-    );
+    let page = masked(&page);
     assert_eq!(with_values(&php, &page), page);
     // A second session offers to end the others.
     let origin = hyscribe_auth::sessions::Origin {
@@ -323,6 +314,45 @@ async fn logged_in_users_are_let_in() {
         let response = router(Arc::clone(&site)).oneshot(form).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
     }
+    // Add User, as PHP showed it.
+    let page = page_of(get(&site, "/hs-admin/user-new", "127.0.0.1:8081", &cookies).await).await;
+    let php = edit_golden("u3\tuser-new.php\tadministrator\t");
+    let page = masked(&page);
+    assert_eq!(with_values(&php, &page), page);
+    // The administrator's own profile through `user-edit.php`.
+    let path = "/hs-admin/user-edit?user_id=1&wp_http_referer=%2Fhs-admin%2Fusers";
+    let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
+    assert!(page.contains("name=\"wp_http_referer\" value=\"/hs-admin/users\""));
+    assert!(page.contains("var userProfileL10n = {\"user_id\":\"1\""));
+    assert!(page.contains("id='wp-admin-bar-view'"));
+    let response = get(
+        &site,
+        "/hs-admin/user-edit?user_id=9",
+        "127.0.0.1:8081",
+        &auth,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(page_of(response).await.contains("Invalid user ID."));
+    for path in [
+        "/hs-admin/user-edit?user_id=1&updated=1",
+        "/hs-admin/user-edit?user_id[]=1",
+        "/hs-admin/user-edit?user_id=%FF",
+        "/hs-admin/user-new?update=add",
+    ] {
+        let response = get(&site, path, "127.0.0.1:8081", &auth).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+    }
+    // No form is saved yet.
+    let post = axum::http::Request::builder()
+        .method("POST")
+        .uri("/hs-admin/user-edit?user_id=1")
+        .header(header::HOST, "127.0.0.1:8081")
+        .header(header::COOKIE, &cookies)
+        .body(Body::from("action=update"))
+        .unwrap();
+    let response = router(Arc::clone(&site)).oneshot(post).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     // The categories.
     let path = "/hs-admin/edit-tags?taxonomy=category";
     let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
@@ -420,6 +450,28 @@ fn golden(row: &str) -> String {
     let row = golden.lines().find(|l| l.starts_with(row)).unwrap();
     let page = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
     hyscribe_testkit::hs_admin_page(&String::from_utf8(page).unwrap())
+}
+
+/// A page of `reference/user-edit/golden.sh`, by its row's start, under
+/// hs-admin's URLs.
+fn edit_golden(row: &str) -> String {
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/user-edit.tsv");
+    let row = golden.lines().find(|l| l.starts_with(row)).unwrap();
+    let page = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+    hyscribe_testkit::hs_admin_page(&String::from_utf8(page).unwrap())
+}
+
+/// `page` with its generated password, escaped and the attribute's whole
+/// value, masked as the goldens mask it.
+fn masked(page: &str) -> String {
+    let at = page.find("data-pw=\"").unwrap() + 9;
+    let end = at + page.get(at..).unwrap().find('"').unwrap();
+    assert!(end - at >= 24);
+    format!(
+        "{}%password%{}",
+        page.get(..at).unwrap(),
+        page.get(end..).unwrap()
+    )
 }
 
 async fn page_of(response: Response) -> String {
@@ -601,6 +653,30 @@ async fn refusals() {
     .unwrap()
     .unwrap();
     assert_eq!(privacy.status(), StatusCode::FORBIDDEN);
+    // Editing a user needs `edit_users`, adding one `create_users`; over
+    // HTTPS the form offers application passwords.
+    for (path, https, status) in [
+        (
+            "/hs-admin/user-edit?user_id=1",
+            false,
+            Some(StatusCode::INTERNAL_SERVER_ERROR),
+        ),
+        ("/hs-admin/user-edit?user_id=1", true, None),
+        ("/hs-admin/user-new", false, Some(StatusCode::FORBIDDEN)),
+    ] {
+        let (site, handle) = (Arc::clone(&site), handle.clone());
+        let response = tokio::task::spawn_blocking(move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            let origin = if https { "https://h" } else { "http://h" };
+            let file = path.split_once('?').map_or(path, |(file, _)| file);
+            let url = format!("{origin}{path}");
+            screen(&admin, file, path, &url, origin, &Browser::default())
+        })
+        .await
+        .unwrap();
+        assert_eq!(response.map(|r| r.status()), status, "{path}");
+    }
     let terms = tokio::task::spawn_blocking(move || {
         let reads = LoginReads::new(&site, handle, now());
         let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
@@ -730,6 +806,12 @@ async fn the_user_s_data() {
         assert_eq!(first.transient("x").as_deref(), Some(&b"v"[..]));
         assert!(first.compression_tested());
         assert_eq!(admin(&terms, &reads, 7).user_id(), 7);
+        // Another user's, though they did not log in.
+        assert!(first.user_can(1, "edit_users") && !first.user_can(99, "read"));
+        let nickname = first.user_option_of(1, "nickname");
+        assert_eq!(nickname.as_deref(), Some(&b"admin"[..]));
+        assert_eq!(first.profile_user(1).unwrap().login, b"admin");
+        assert_eq!(first.sessions(1), 0);
         let reads = LoginReads::new(&ttd, handle, now());
         assert_eq!(admin(&ttd, &reads, 1).moderated_comments(), 3);
     })

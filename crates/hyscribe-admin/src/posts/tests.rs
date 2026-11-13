@@ -39,7 +39,8 @@ fn rows_are_php_s() {
         let start = page.find(open).unwrap() + open.len();
         let rest = page.get(start..).unwrap();
         let php = rest.get(..rest.find("\t</tbody>").unwrap()).unwrap();
-        let ours = row(&Role(role), &hello(), &columns(""), &[], "", false);
+        let columns = columns(POST, "", false);
+        let ours = row(&Role(role), &hello(), &columns, &[], "", false, None);
         assert!(ours == php, "{role}: {}", first_difference(php, &ours));
     }
 }
@@ -53,7 +54,7 @@ fn inline_editors_are_php_s() {
         let php = rest
             .get(..rest.find("\t\t</form>\n").unwrap() + 10)
             .unwrap();
-        let ours = inline_edit(&Role(role), &hello(), 7, "", false);
+        let ours = inline_edit(&Role(role), POST, &hello(), 7, "", false);
         assert!(ours == php, "{role}: {}", first_difference(php, &ours));
     }
 }
@@ -184,9 +185,19 @@ fn variants_are_php_s() {
             ..PostQuery::default()
         };
         let flag = |name| arg(name).is_some_and(|v| v == "1");
+        // `is_base_request()`: no argument but `paged`, or only the post type
+        // or a view mode.
+        let named: Vec<&str> = query
+            .split('&')
+            .filter(|pair| !pair.is_empty() && !pair.starts_with("paged="))
+            .collect();
+        let alone = |pair: &str| pair.starts_with("post_type=") || pair.starts_with("mode=");
         let args = ListArgs {
+            post_type: arg("post_type")
+                .and_then(|name| PostType::named(name.as_bytes()))
+                .unwrap_or_default(),
             status: arg("post_status").unwrap_or_default(),
-            orderby: arg("orderby"),
+            orderby: arg("orderby").map(|o| o.replace('+', " ")),
             order: arg("order"),
             paged: arg("paged"),
             search,
@@ -199,7 +210,7 @@ fn variants_are_php_s() {
             post_format: arg("post_format").unwrap_or_default(),
             cat: cat.into(),
             filters,
-            base: query.is_empty() || query.starts_with("paged=") || query.starts_with("mode="),
+            base: named.is_empty() || named.len() == 1 && alone(named[0]),
         };
         let role: &'static str = Box::leak(format!("{variant}:{}", f[1]).into_boxed_str());
         let recorded = String::from_utf8(unhex(f[2])).unwrap();
@@ -376,7 +387,7 @@ fn no_posts_no_mine_link() {
 /// Only private posts are limited to the user's own.
 #[test]
 fn only_private_posts_are_the_user_s_own() {
-    let statuses = all_statuses(&Role("author"));
+    let statuses = all_statuses(&Role("author"), POST);
     let limited: Vec<&str> = statuses
         .iter()
         .filter(|filter| filter.author == Some(1))
@@ -501,7 +512,10 @@ fn searches_rank_unless_ordered_otherwise() {
             orderby: orderby.map(String::from),
             ..ListArgs::default()
         };
-        sort(&args, &query).first().map(|(column, _)| *column)
+        let (orderby, tree) = list_orderby(POST, &args);
+        sort(&args, &query, &orderby, tree)
+            .first()
+            .map(|(column, _)| *column)
     };
     for orderby in [None, Some("0"), Some("relevance")] {
         assert_eq!(first(orderby), Some(OrderBy::Relevance), "{orderby:?}");
@@ -550,4 +564,102 @@ fn user_settings_are_read_as_php_reads_them() {
         user_setting(&Role("administrator"), None, "posts_list_mode"),
         None
     );
+}
+
+/// With no published pages of the type there is no parent menu.
+#[test]
+fn no_published_pages_leave_no_parent_menu() {
+    assert_eq!(parent_options(&Role("empty:administrator"), POST), "");
+    assert_eq!(parent_dropdown("", false), "");
+    // An untitled one is named by its ID.
+    let options = parent_options(&Role("posts:administrator"), POST);
+    assert!(options.contains("value=\"308\">#308 (no title)</option>"));
+    // By order, then title.
+    let at = |id: &str| options.find(&format!("value=\"{id}\"")).unwrap();
+    assert!(at("308") < at("311") && at("311") < at("1"));
+}
+
+/// A page that is its own parent is a top one; orphans are paged too.
+#[test]
+fn trees_take_self_parents_to_the_top_and_page_orphans() {
+    let page = |id, parent| Post {
+        id,
+        parent,
+        post_type: "page".into(),
+        ..Post::default()
+    };
+    let rows = |per_page| -> Vec<(u64, u64, usize)> {
+        let pages = vec![page(1, 1), page(2, 99), page(3, 99)];
+        tree_rows(&Role("administrator"), pages, 1, per_page, false)
+            .iter()
+            .map(|(post, level)| (post.id, post.parent, *level))
+            .collect()
+    };
+    assert_eq!(rows(2), [(1, 0, 0), (2, 99, 0)]);
+    assert_eq!(rows(3), [(1, 0, 0), (2, 99, 0), (3, 99, 0)]);
+    // A subtree's parent that cannot be read is left out.
+    let pages = vec![page(10, 0), page(11, 10)];
+    let rows = tree_rows(&Role("administrator"), pages, 2, 1, false);
+    assert_eq!(
+        rows.iter()
+            .map(|(post, level)| (post.id, *level))
+            .collect::<Vec<_>>(),
+        [(11, 1)]
+    );
+}
+
+/// Values are not read for placeholders, and a lone `%` is kept.
+#[test]
+fn templates_fill_in_one_pass() {
+    let values = [("a", "%b%".to_string()), ("b", "B".to_string())];
+    assert_eq!(fill("1% %a% %b% %c %a b", &values), "1% %b% B %c %a b");
+}
+
+/// Ancestors stop at the top, at one missing, and where they loop, back to
+/// the post or not.
+#[test]
+fn ancestors_stop_where_php_s_do() {
+    let page = |id, parent| Post {
+        id,
+        parent,
+        ..Post::default()
+    };
+    let pages = [
+        page(1, 0),
+        page(2, 1),
+        page(3, 2),
+        page(5, 6),
+        page(6, 5),
+        page(7, 8),
+        page(8, 7),
+    ];
+    let lookup = |id| pages.iter().find(|page| page.id == id).cloned();
+    assert_eq!(ancestors(&lookup, &page(3, 2)), [2, 1]);
+    assert_eq!(ancestors(&lookup, &page(4, 9)), [9]);
+    assert_eq!(ancestors(&lookup, &page(5, 6)), [6]);
+    assert_eq!(ancestors(&lookup, &page(4, 7)), [7, 8]);
+    assert!(ancestors(&lookup, &page(1, 1)).is_empty());
+}
+
+/// Without months to filter by, the Pages list has no Filter button.
+#[test]
+fn nothing_to_filter_shows_no_filter_button() {
+    let args = ListArgs {
+        post_type: PAGE,
+        status: "trash".into(),
+        ..ListArgs::default()
+    };
+    let page = page(edit(
+        &Role("administrator"),
+        &args,
+        &format!("{}/hs-admin/edit", crate::tests::SITE),
+        crate::tests::SITE,
+        "/hs-admin/edit",
+        &crate::admin_bar::Browser {
+            user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
+            mobile_hint: None,
+        },
+    ));
+    assert!(page.contains("No pages found in Trash."));
+    assert!(!page.contains("post-query-submit"));
 }

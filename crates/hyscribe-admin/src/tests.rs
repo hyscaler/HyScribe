@@ -147,7 +147,12 @@ impl Role {
 
     /// A variant of `reference/posts-list/golden.sh`, over its content.
     fn listing(&self) -> bool {
-        ["posts", "hidden", "excerpt"].contains(&self.variant())
+        ["posts", "hidden", "excerpt", "front"].contains(&self.variant())
+    }
+
+    /// The posts and pages of the variant.
+    fn posts(&self) -> Vec<hyscribe_model::Post> {
+        crate::posts::content::posts(self.listing(), self.variant() == "empty")
     }
 }
 
@@ -221,7 +226,7 @@ impl MenuUser for Role {
     fn moderated_comments(&self) -> u64 {
         match self.variant() {
             "content" => 1,
-            _ if self.listing() => 2,
+            _ if self.listing() => 3,
             _ => 0,
         }
     }
@@ -512,11 +517,30 @@ impl crate::posts::PostsSite for Role {
         Capabilities::load(self, "wp_", 1).has_cap(&known, cap, &[id])
     }
     fn permalink(&self, post: &hyscribe_model::Post) -> String {
-        format!("{SITE}/?p={}", post.id)
+        if self.variant() == "front" && post.id == 316 {
+            return format!("{SITE}/");
+        }
+        let query = if post.post_type == "page" {
+            "page_id"
+        } else {
+            "p"
+        };
+        format!("{SITE}/?{query}={}", post.id)
     }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         if name == "sticky_posts" && (self.listing() || self.variant() == "empty") {
             return Some(b"a:2:{i:0;i:304;i:1;i:306;}".to_vec());
+        }
+        if self.variant() == "front" {
+            let value: &[u8] = match name {
+                "show_on_front" => b"page",
+                "page_on_front" => b"316",
+                "page_for_posts" => b"321",
+                _ => b"",
+            };
+            if !value.is_empty() {
+                return Some(value.to_vec());
+            }
         }
         if name == "show_avatars" && self.variant() == "noavatars"
             || name == "blog_public" && self.variant() == "layout"
@@ -534,25 +558,14 @@ impl crate::posts::PostsSite for Role {
         (hyscribe_render::date::Zone::Utc, 1_794_500_000)
     }
     fn post_class(&self, class: &str, post: &hyscribe_model::Post) -> String {
-        if self.listing() {
-            return crate::posts::content::post_class(class, post);
-        }
-        let terms: String = self
-            .post_terms(post, "category")
-            .iter()
-            .map(|term| format!(" category-{}", String::from_utf8_lossy(&term.slug)))
-            .collect();
-        format!(
-            "{class} post-{} type-{} status-{} format-standard hentry{terms}",
-            post.id, post.post_type, post.status
-        )
+        crate::posts::content::post_class(class, post)
     }
     /// The fixture's Uncategorized for posts 1 to 99.
     fn post_terms(&self, post: &hyscribe_model::Post, taxonomy: &str) -> Vec<hyscribe_model::Term> {
         if self.listing() {
             return crate::posts::content::post_terms(post, taxonomy);
         }
-        if taxonomy != "category" || post.id > 99 {
+        if taxonomy != "category" || post.id > 99 || post.post_type != "post" {
             return Vec::new();
         }
         vec![hyscribe_model::Term {
@@ -567,13 +580,13 @@ impl crate::posts::PostsSite for Role {
         crate::posts::content::meta(post, key).filter(|_| self.listing())
     }
     fn display_name(&self, id: u64) -> Option<Vec<u8>> {
-        self.authors()
+        self.authors("edit_posts")
             .into_iter()
             .find(|user| user.id == id)
             .map(|user| user.display_name)
     }
     fn pending_comments(&self, post: &hyscribe_model::Post) -> u64 {
-        u64::from(self.listing() && [309, 311].contains(&post.id))
+        u64::from(self.listing() && [309, 311, 321].contains(&post.id))
     }
     /// `get_the_excerpt()` of the content's plain text.
     fn excerpt(&self, post: &hyscribe_model::Post) -> Vec<u8> {
@@ -589,11 +602,7 @@ impl crate::posts::PostsSite for Role {
         if self.listing() {
             return crate::posts::content::terms(taxonomy);
         }
-        let post = hyscribe_model::Post {
-            id: 1,
-            ..hyscribe_model::Post::default()
-        };
-        crate::posts::PostsSite::post_terms(self, &post, taxonomy)
+        crate::posts::PostsSite::post_terms(self, &crate::posts::tests::hello(), taxonomy)
     }
     fn popular_terms(&self, taxonomy: &str) -> Vec<u64> {
         let mut terms = crate::posts::PostsSite::terms(self, taxonomy);
@@ -601,9 +610,10 @@ impl crate::posts::PostsSite for Role {
         terms.sort_by_key(|term| std::cmp::Reverse(term.count));
         terms.iter().take(10).map(|term| term.id).collect()
     }
-    fn authors(&self) -> Vec<hyscribe_model::User> {
+    /// The content's author may edit posts, not pages.
+    fn authors(&self, cap: &str) -> Vec<hyscribe_model::User> {
         let mut authors = crate::posts::content::authors();
-        if !self.listing() {
+        if !self.listing() || cap == "edit_pages" {
             authors.truncate(1);
         }
         authors
@@ -615,7 +625,7 @@ impl crate::posts::PostsSite for Role {
         if self.variant() == "hidden" {
             let value: &[u8] = match name {
                 "manageedit-postcolumnshidden" => b"a:2:{i:0;s:4:\"tags\";i:1;s:8:\"comments\";}",
-                "edit_post_per_page" => b"3",
+                "edit_post_per_page" | "edit_page_per_page" => b"3",
                 _ => return None,
             };
             return Some(value.to_vec());
@@ -634,49 +644,32 @@ impl crate::posts::PostsSite for Role {
         };
         Some(value.to_vec())
     }
-    /// The fixture's post 1, the only post, or the content's.
     fn list_posts(&self, query: &hyscribe_model::PostQuery) -> (Vec<hyscribe_model::Post>, u64) {
-        if self.listing() {
-            return crate::posts::content::list(query);
-        }
-        let published = query
-            .statuses
-            .iter()
-            .any(|filter| filter.status == "publish");
-        if self.variant() == "empty" || !published {
-            return (Vec::new(), 0);
-        }
-        (vec![crate::posts::tests::hello()], 1)
+        crate::posts::content::list(self.posts(), query)
     }
-    fn status_counts(&self, _: &str, private_author: Option<u64>) -> Vec<(String, u64)> {
-        if self.listing() {
-            return crate::posts::content::status_counts(private_author);
-        }
-        let status = if self.variant() == "empty" {
-            "trash"
-        } else {
-            "publish"
+    fn status_counts(&self, post_type: &str, private_author: Option<u64>) -> Vec<(String, u64)> {
+        crate::posts::content::status_counts(self.posts(), post_type, private_author)
+    }
+    fn own_posts(&self, post_type: &str) -> u64 {
+        let own = |post: &hyscribe_model::Post| {
+            post.post_type == post_type && post.author == 1 && post.status != "trash"
         };
-        vec![(status.into(), 1)]
-    }
-    fn own_posts(&self, _: &str) -> u64 {
-        match self.variant() {
-            "empty" => 0,
-            _ if self.listing() => 11,
-            _ => 1,
-        }
+        self.posts().iter().filter(|post| own(post)).count() as u64
     }
     fn sticky_count(&self, _: &str, ids: &[u64]) -> u64 {
         if self.listing() { ids.len() as u64 } else { 0 }
     }
-    fn months(&self, _: &str, trash: bool) -> Vec<(u32, u32)> {
-        if self.listing() {
-            return crate::posts::content::months(trash);
-        }
-        if self.variant() == "empty" || trash {
+    fn months(&self, post_type: &str, trash: bool) -> Vec<(u32, u32)> {
+        crate::posts::content::months(self.posts(), post_type, trash)
+    }
+    fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        self.posts().into_iter().find(|post| post.id == id)
+    }
+    fn page_templates(&self, post_type: &str) -> Vec<(String, String)> {
+        if post_type != "page" {
             return Vec::new();
         }
-        vec![(2026, 10)]
+        vec![("page-no-title".into(), "Page No Title".into())]
     }
     fn post_formats(&self) -> &'static [&'static str] {
         static THEME: OnceLock<hyscribe_render::theme::Theme> = OnceLock::new();

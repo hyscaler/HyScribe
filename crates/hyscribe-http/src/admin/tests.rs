@@ -136,6 +136,17 @@ async fn logged_in_users_are_let_in() {
     let page = page_of(get(&site, "/hs-admin/edit", "127.0.0.1:8081", &cookies).await).await;
     let php = golden("administrator\tedit.php\t");
     assert_eq!(with_values(&php, &page), page);
+    // The pages, as a tree.
+    let path = "/hs-admin/edit?post_type=page";
+    let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
+    let list = include_str!("../../../hyscribe-admin/tests/golden/posts-list.tsv");
+    let row = list
+        .lines()
+        .find(|l| l.starts_with("default?post_type=page\tadministrator\t"))
+        .unwrap();
+    let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+    assert_eq!(with_values(&php, &page), page);
     // The settings cookie the admin's scripts keep chooses the view.
     let extended = format!("{cookies}; wp-settings-1=posts_list_mode%3Dexcerpt");
     let page = page_of(get(&site, "/hs-admin/edit", "127.0.0.1:8081", &extended).await).await;
@@ -442,8 +453,15 @@ async fn dashboard_data() {
             let page = admin.full_post(155).unwrap();
             assert_eq!(admin.pending_comments(&page), 1);
             assert_eq!(admin.display_name(2).as_deref(), Some(&b"Theme Buster"[..]));
-            let authors: Vec<u64> = admin.authors().iter().map(|user| user.id).collect();
+            let authors: Vec<u64> = admin
+                .authors("edit_pages")
+                .iter()
+                .map(|user| user.id)
+                .collect();
             assert_eq!(authors, [1]);
+            assert_eq!(PostsSite::post(admin, 155).map(|post| post.id), Some(155));
+            let templates = admin.page_templates("page");
+            assert_eq!(templates[0].0, "page-no-title");
             let popular = admin.popular_terms("category");
             assert_eq!((popular.len(), popular[0], popular[1]), (10, 16, 7));
             assert_eq!(admin.terms("category").len(), 68);
@@ -533,6 +551,11 @@ async fn the_posts_list_reads_its_arguments() {
             args("/hs-admin/edit?post_type=post"),
             Some((String::new(), true))
         );
+        let pages = list_args(&admin, "/hs-admin/edit?post_type=page").unwrap();
+        assert_eq!(
+            (pages.post_type, pages.base),
+            (PostType::named(b"page").unwrap(), true)
+        );
         assert_eq!(
             args("/hs-admin/edit?post_status=draft&post_type=post&post_status=trash"),
             Some(("trash".into(), false))
@@ -540,7 +563,7 @@ async fn the_posts_list_reads_its_arguments() {
         for refused in [
             "/hs-admin/edit?post_status=%FF",
             "/hs-admin/edit?post_status[]=draft",
-            "/hs-admin/edit?post_type=page",
+            "/hs-admin/edit?post_type=attachment",
             "/hs-admin/edit?post_status=draft&detached=1",
             "/hs-admin/edit?mode=%FF",
             "/hs-admin/edit?paged=%FF",

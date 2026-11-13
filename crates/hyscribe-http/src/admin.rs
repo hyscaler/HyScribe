@@ -15,7 +15,7 @@ use hyscribe_admin::dashboard::{CommentCounts, DashboardSite, RecentComment, das
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
-use hyscribe_admin::posts::{Answer, ListArgs, PostsSite, edit, kept_ids, sorted_ids};
+use hyscribe_admin::posts::{Answer, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
 use hyscribe_db::{StatusOrder, StatusQuery};
 use hyscribe_model::{Post, PostQuery, Term, TermOrder, TermQuery, User};
@@ -444,10 +444,10 @@ impl PostsSite for Admin<'_> {
             .map(|term| term.id)
             .collect()
     }
-    fn authors(&self) -> Vec<User> {
+    fn authors(&self, cap: &str) -> Vec<User> {
         let prefix = self.site.db.prefix();
-        let mut names = vec!["edit_posts".to_string()];
-        names.extend(roles_with(self, prefix, "edit_posts"));
+        let mut names = vec![cap.to_string()];
+        names.extend(roles_with(self, prefix, cap));
         let key = format!("{prefix}capabilities");
         self.reads.reads.wait(self.site.db.users_with(&key, &names))
     }
@@ -479,6 +479,12 @@ impl PostsSite for Admin<'_> {
     }
     fn user_option(&self, name: &str) -> Option<Vec<u8>> {
         self.reads.user_option(self.user.id, name)
+    }
+    fn post(&self, id: u64) -> Option<Post> {
+        self.full_post(id)
+    }
+    fn page_templates(&self, post_type: &str) -> Vec<(String, String)> {
+        self.site.theme.page_templates(post_type)
     }
 }
 
@@ -537,7 +543,8 @@ fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
             (Key::String(key), Value::String(value)) if key == b"post_status" => {
                 list.status = String::from_utf8(value.clone()).ok()?;
             }
-            (Key::String(key), Value::String(value)) if key == b"post_type" && value == b"post" => {
+            (Key::String(key), Value::String(value)) if key == b"post_type" => {
+                list.post_type = PostType::named(value)?;
                 alone = true;
             }
             (Key::String(key), Value::String(value)) if key == b"mode" => {

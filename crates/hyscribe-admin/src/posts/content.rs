@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `reference/posts-list/content.sql` over the default install, as the
-//! posts list's test site reads it.
+//! The default install's posts and pages, and with them
+//! `reference/posts-list/content.sql`, as the posts list's test site reads them.
 
 use hyscribe_model::{OrderBy, Post, PostQuery, Term, User};
 
@@ -58,12 +58,97 @@ const CONTENTS: [&str; 15] = [
     "New edit",
 ];
 
-/// Every post of type `post`, the fixture's first.
-pub(crate) fn posts() -> Vec<Post> {
+/// A page: ID, author, parent, menu order, date, title, status and slug.
+#[allow(clippy::too_many_arguments)]
+fn page(
+    id: u64,
+    author: u64,
+    parent: u64,
+    menu_order: i64,
+    date: &str,
+    title: &str,
+    status: &str,
+    name: &str,
+) -> Post {
+    Post {
+        parent,
+        menu_order,
+        post_type: "page".into(),
+        ..post(
+            id,
+            author,
+            date,
+            title,
+            "",
+            status,
+            ("closed", "open"),
+            "",
+            name,
+            0,
+        )
+    }
+}
+
+/// The default install's posts and pages, post 1 in the Trash if
+/// `trashed`, and with the content if `content`.
+pub(crate) fn posts(content: bool, trashed: bool) -> Vec<Post> {
+    let installed = "2026-10-27 08:08:15";
+    let mut hello = super::tests::hello();
+    if trashed {
+        hello.status = "trash".into();
+    }
+    let mut all = vec![
+        hello,
+        page(
+            2,
+            1,
+            0,
+            0,
+            installed,
+            "Sample Page",
+            "publish",
+            "sample-page",
+        ),
+        page(
+            3,
+            1,
+            0,
+            0,
+            installed,
+            "Privacy Policy",
+            "draft",
+            "privacy-policy",
+        ),
+    ];
+    if content {
+        all.extend(content_posts());
+        all.extend(pages());
+    }
+    all
+}
+
+/// The content's pages: About over Team over Board, a draft History over
+/// Archive, and Contact with comments.
+fn pages() -> Vec<Post> {
+    let at = |minutes: u8| format!("2026-11-01 09:{minutes:02}:00");
+    let mut contact = page(321, 1, 0, 2, &at(50), "Contact", "publish", "contact");
+    contact.comment_status = "open".into();
+    contact.comment_count = 1;
+    vec![
+        page(316, 1, 0, 1, &at(0), "About", "publish", "about"),
+        page(317, 1, 316, 0, &at(10), "Team", "publish", "team"),
+        page(318, 2, 317, 0, &at(20), "Board", "publish", "board"),
+        page(319, 1, 316, 1, &at(30), "History", "draft", "history"),
+        page(320, 1, 319, 0, &at(40), "Archive", "publish", "archive"),
+        contact,
+    ]
+}
+
+/// Posts 301 to 315.
+fn content_posts() -> Vec<Post> {
     let open = ("open", "open");
     let fifteen = "One two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen";
     let posts = vec![
-        super::tests::hello(),
         post(
             301,
             1,
@@ -254,13 +339,11 @@ pub(crate) fn posts() -> Vec<Post> {
                 314 => post.modified = "2026-10-30 10:00:00".into(),
                 _ => {}
             }
-            if post.id > 1 {
-                post.content = CONTENTS
-                    .get(usize::try_from(post.id - 301).unwrap())
-                    .unwrap()
-                    .as_bytes()
-                    .to_vec();
-            }
+            post.content = CONTENTS
+                .get(usize::try_from(post.id - 301).unwrap())
+                .unwrap()
+                .as_bytes()
+                .to_vec();
             post
         })
         .collect()
@@ -297,8 +380,11 @@ pub(crate) fn terms(taxonomy: &str) -> Vec<Term> {
     }
 }
 
-/// The terms of `post` in `taxonomy`, by name.
+/// The terms of `post` in `taxonomy`, by name: pages have none.
 pub(crate) fn post_terms(post: &Post, taxonomy: &str) -> Vec<Term> {
+    if post.post_type != "post" {
+        return Vec::new();
+    }
     let ids: &[u64] = match (post.id, taxonomy) {
         (309, "category") => &[302, 301],
         (309, "post_tag") => &[304, 303],
@@ -324,9 +410,10 @@ pub(crate) fn meta(post: &Post, key: &str) -> Option<Vec<u8>> {
     Some(value.to_vec())
 }
 
-/// The posts `query` selects, newest first, and how many it matches.
-pub(crate) fn list(query: &PostQuery) -> (Vec<Post>, u64) {
-    let mut found: Vec<Post> = posts()
+/// The posts of `posts` that `query` selects, in its order, and how many
+/// it matches.
+pub(crate) fn list(posts: Vec<Post>, query: &PostQuery) -> (Vec<Post>, u64) {
+    let mut found: Vec<Post> = posts
         .into_iter()
         .filter(|post| {
             let terms = |taxonomy: &str| -> Vec<u64> {
@@ -372,6 +459,7 @@ pub(crate) fn list(query: &PostQuery) -> (Vec<Post>, u64) {
                     OrderBy::Relevance => rank(a, query).cmp(&rank(b, query)),
                     OrderBy::Title => a.title.cmp(&b.title),
                     OrderBy::Modified => a.modified.cmp(&b.modified),
+                    OrderBy::MenuOrder => a.menu_order.cmp(&b.menu_order),
                     _ => a.date.cmp(&b.date),
                 };
                 if ascending || column == OrderBy::Relevance {
@@ -447,11 +535,18 @@ pub(crate) fn rank(post: &Post, query: &PostQuery) -> u8 {
     }
 }
 
-/// The posts of each status, private ones only by `private_author`.
-pub(crate) fn status_counts(private_author: Option<u64>) -> Vec<(String, u64)> {
+/// The posts of `post_type` of each status, private ones only by
+/// `private_author`.
+pub(crate) fn status_counts(
+    posts: Vec<Post>,
+    post_type: &str,
+    private_author: Option<u64>,
+) -> Vec<(String, u64)> {
     let mut counts: Vec<(String, u64)> = Vec::new();
-    for post in posts() {
-        if post.status == "private" && private_author.is_some_and(|a| a != post.author) {
+    for post in posts {
+        if post.post_type != post_type
+            || post.status == "private" && private_author.is_some_and(|a| a != post.author)
+        {
             continue;
         }
         match counts.iter_mut().find(|(status, _)| *status == post.status) {
@@ -462,11 +557,12 @@ pub(crate) fn status_counts(private_author: Option<u64>) -> Vec<(String, u64)> {
     counts
 }
 
-/// The months with posts, only trashed ones when `trash`, newest first.
-pub(crate) fn months(trash: bool) -> Vec<(u32, u32)> {
-    let mut dates: Vec<String> = posts()
+/// The months with posts of `post_type`, only trashed ones when `trash`,
+/// newest first.
+pub(crate) fn months(posts: Vec<Post>, post_type: &str, trash: bool) -> Vec<(u32, u32)> {
+    let mut dates: Vec<String> = posts
         .into_iter()
-        .filter(|post| (post.status == "trash") == trash)
+        .filter(|post| post.post_type == post_type && (post.status == "trash") == trash)
         .map(|post| post.date)
         .collect();
     dates.sort_by(|a, b| b.cmp(a));
@@ -495,18 +591,21 @@ pub(crate) fn authors() -> Vec<User> {
     ]
 }
 
-/// `get_post_class()` in the admin for a post of the content, posts 304
-/// and 306 sticky.
+/// `get_post_class()` in the admin, posts 304 and 306 sticky; pages have
+/// no format.
 pub(crate) fn post_class(class: &str, post: &Post) -> String {
-    let format = post_terms(post, "post_format")
-        .first()
-        .map_or("standard".to_string(), |term| {
-            String::from_utf8_lossy(&term.slug).replacen("post-format-", "", 1)
-        });
     let mut classes = format!(
-        "{class} post-{} type-post status-{} format-{format}",
-        post.id, post.status
+        "{class} post-{} type-{} status-{}",
+        post.id, post.post_type, post.status
     );
+    if post.post_type == "post" {
+        let format = post_terms(post, "post_format")
+            .first()
+            .map_or("standard".to_string(), |term| {
+                String::from_utf8_lossy(&term.slug).replacen("post-format-", "", 1)
+            });
+        classes.push_str(&format!(" format-{format}"));
+    }
     if !post.password.is_empty() {
         classes.push_str(" post-password-required");
     }

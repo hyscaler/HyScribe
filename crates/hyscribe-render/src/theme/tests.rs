@@ -136,3 +136,31 @@ fn post_formats_are_the_theme_s() {
     assert_eq!(formats.first(), Some(&"aside"));
     assert_eq!(formats.len(), 9);
 }
+
+#[test]
+fn page_templates_are_the_custom_ones_for_the_type() {
+    let theme = twentytwentyfive();
+    let no_title = ("page-no-title".to_string(), "Page No Title".to_string());
+    assert_eq!(theme.page_templates("page"), vec![no_title]);
+    assert!(theme.page_templates("post").is_empty());
+    // Templates naming no post types are for pages and need a name, titled by
+    // it if they have no title; the last of a title is kept, numbers sorted as numbers.
+    let json = br#"{"customTemplates":[{"name":"z","title":"Zed"},{"name":"a","title":"Ay","postTypes":["post","page"]},{"name":"x"},{"title":"No name"},{"name":"t10","title":"10"},{"name":"old","title":"9"},{"name":"t9","title":"9"}]}"#;
+    let pairs = |list: &[(&str, &str)]| -> Vec<(String, String)> {
+        list.iter()
+            .map(|(a, b)| ((*a).into(), (*b).into()))
+            .collect()
+    };
+    assert_eq!(
+        custom_templates(json, "page"),
+        pairs(&[
+            ("t9", "9"),
+            ("t10", "10"),
+            ("a", "Ay"),
+            ("z", "Zed"),
+            ("x", "x")
+        ])
+    );
+    assert_eq!(custom_templates(json, "post"), pairs(&[("a", "Ay")]));
+    assert!(custom_templates(b"[]", "page").is_empty());
+}

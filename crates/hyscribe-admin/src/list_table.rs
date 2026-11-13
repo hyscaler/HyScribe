@@ -150,15 +150,22 @@ pub fn months_dropdown(months: &[(u32, u32)], m: &str, filter_label: &str) -> St
 }
 
 /// `pagination( $which )`: `total` items over `pages` pages, page `current`
-/// of `url`, the page's without its removable arguments.
-pub fn pagination(which: &str, total: u64, pages: u64, current: u64, url: &str) -> String {
+/// of `url`, the page's without its removable arguments, under `heading`.
+pub fn pagination(
+    which: &str,
+    heading: &str,
+    total: u64,
+    pages: u64,
+    current: u64,
+    url: &str,
+) -> String {
     if total == 0 {
         return "<div class=\"tablenav-pages no-pages\"><span class=\"displaying-num\">0 items</span></div>".into();
     }
     let more = pages > 1;
     let mut out = String::new();
     if which == "top" && more {
-        out.push_str("<h2 class='screen-reader-text'>Posts list navigation</h2>");
+        out.push_str(&format!("<h2 class='screen-reader-text'>{heading}</h2>"));
     }
     let items = if total == 1 { "item" } else { "items" };
     let page_url = |page: Option<u64>| {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Records the PHP oracle's posts list with post 1 trashed, then over
+# Records the PHP oracle's posts and pages lists with post 1 trashed, then over
 # reference/posts-list/content.sql, which it adds and deletes after, as
 # crates/hyscribe-admin/tests/golden/posts-list.tsv:
 #   variant[?query]<TAB>role<TAB>hex(page)
@@ -22,7 +22,7 @@ NONCES=$(mktemp)
 sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress; }
 cleanup() {
   rm -f "$TMP" "$NONCES"
-  echo "DELETE FROM wp_posts WHERE ID BETWEEN 301 AND 315; DELETE FROM wp_comments WHERE comment_ID BETWEEN 301 AND 304;
+  echo "DELETE FROM wp_posts WHERE ID BETWEEN 301 AND 321; DELETE FROM wp_comments WHERE comment_ID BETWEEN 301 AND 306;
     DELETE FROM wp_postmeta WHERE post_id IN (306, 307, 312); UPDATE wp_posts SET post_status = 'publish' WHERE ID = 1;
     DELETE FROM wp_term_relationships WHERE object_id BETWEEN 301 AND 315; DELETE FROM wp_terms WHERE term_id BETWEEN 301 AND 307;
     DELETE FROM wp_term_taxonomy WHERE term_taxonomy_id BETWEEN 301 AND 307; UPDATE wp_term_taxonomy SET count = 1 WHERE term_taxonomy_id = 1;
@@ -33,7 +33,7 @@ trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/posts-list/variants.php"
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce inlineeditnonce bulk-posts untrash-post_307 delete-post_307"
-for id in 1 301 302 303 304 305 306 308 309 310 311 312 313 314 315; do
+for id in 1 2 3 301 302 303 304 305 306 308 309 310 311 312 313 314 315 316 317 318 319 320 321; do
   actions="$actions trash-post_$id"
 done
 # shellcheck disable=SC2086
@@ -60,6 +60,10 @@ record() {
 }
 : > "$OUT"
 record default administrator '?post_status=trash'
+# Pages, for those who may edit them.
+for role in administrator editor; do
+  record default "$role" '?post_type=page'
+done
 # With post 1 in the Trash the list is empty.
 echo "UPDATE wp_posts SET post_status = 'trash' WHERE ID = 1;" | sql
 record empty administrator
@@ -89,6 +93,18 @@ for query in '?s=edit' '?s=draft&post_status=draft' '?s=-later+e' '?s=edit&order
 done
 for query in '?orderby=title&order=asc' '?orderby=title' '?post_status=publish&orderby=date&order=asc' '?order=desc'; do
   record content administrator "$query"
+done
+# Pages, as a tree unless ordered otherwise or searched.
+for role in administrator editor; do
+  record content "$role" '?post_type=page'
+done
+record front administrator '?post_type=page'
+for query in '?post_type=page&post_status=publish' '?post_type=page&post_status=draft' \
+  '?post_type=page&orderby=title&order=asc' '?post_type=page&s=a' '?post_type=page&orderby=menu_order+title'; do
+  record content administrator "$query"
+done
+for query in '?post_type=page&paged=2' '?post_type=page&paged=3' '?post_type=page&paged=4'; do
+  record hidden administrator "$query"
 done
 # The extended view, from the settings cookie or the request; last, as the
 # request's mode is saved in the user's settings.

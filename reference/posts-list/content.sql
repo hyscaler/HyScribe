@@ -2,7 +2,8 @@
 --
 -- Rows reference/posts-list/golden.sh adds and deletes after: a second
 -- author, posts in every status the list shows (one by a deleted user),
--- categories, tags, an aside and comments, as WordPress would store them.
+-- categories, tags, an aside, comments and a tree of pages, as WordPress
+-- would store them.
 INSERT INTO wp_users (ID, user_login, user_pass, user_nicename, user_email, user_url, user_registered,
   user_activation_key, user_status, display_name) VALUES
   (2, 'writer', '', 'writer', 'writer@default-install.test', '', '2026-11-01 00:00:00', '', 0, 'Another Writer');
@@ -41,7 +42,19 @@ INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, p
   (314, 1, '2026-11-12 09:00:00', '2026-11-12 09:00:00', 'Old edit', 'Edited long ago', '', 'draft', 'open', 'open', '', '', '', '',
    '2026-10-30 10:00:00', '2026-10-30 10:00:00', '', 0, 'http://127.0.0.1:8081/?p=314', 0, 'post', '', 0),
   (315, 1, '2026-11-12 11:00:00', '2026-11-12 11:00:00', 'New edit', 'Edited lately', '', 'pending', 'open', 'open', '', '', '', '',
-   '2026-11-12 11:00:00', '2026-11-12 11:00:00', '', 0, 'http://127.0.0.1:8081/?p=315', 0, 'post', '', 0);
+   '2026-11-12 11:00:00', '2026-11-12 11:00:00', '', 0, 'http://127.0.0.1:8081/?p=315', 0, 'post', '', 0),
+  (316, 1, '2026-11-01 09:00:00', '2026-11-01 09:00:00', '', 'About', '', 'publish', 'closed', 'open', '', 'about', '', '',
+   '2026-11-01 09:00:00', '2026-11-01 09:00:00', '', 0, 'http://127.0.0.1:8081/?page_id=316', 1, 'page', '', 0),
+  (317, 1, '2026-11-01 09:10:00', '2026-11-01 09:10:00', '', 'Team', '', 'publish', 'closed', 'open', '', 'team', '', '',
+   '2026-11-01 09:10:00', '2026-11-01 09:10:00', '', 316, 'http://127.0.0.1:8081/?page_id=317', 0, 'page', '', 0),
+  (318, 2, '2026-11-01 09:20:00', '2026-11-01 09:20:00', '', 'Board', '', 'publish', 'closed', 'open', '', 'board', '', '',
+   '2026-11-01 09:20:00', '2026-11-01 09:20:00', '', 317, 'http://127.0.0.1:8081/?page_id=318', 0, 'page', '', 0),
+  (319, 1, '2026-11-01 09:30:00', '2026-11-01 09:30:00', '', 'History', '', 'draft', 'closed', 'open', '', 'history', '', '',
+   '2026-11-01 09:30:00', '2026-11-01 09:30:00', '', 316, 'http://127.0.0.1:8081/?page_id=319', 1, 'page', '', 0),
+  (320, 1, '2026-11-01 09:40:00', '2026-11-01 09:40:00', '', 'Archive', '', 'publish', 'closed', 'open', '', 'archive', '', '',
+   '2026-11-01 09:40:00', '2026-11-01 09:40:00', '', 319, 'http://127.0.0.1:8081/?page_id=320', 0, 'page', '', 0),
+  (321, 1, '2026-11-01 09:50:00', '2026-11-01 09:50:00', '', 'Contact', '', 'publish', 'open', 'open', '', 'contact', '', '',
+   '2026-11-01 09:50:00', '2026-11-01 09:50:00', '', 0, 'http://127.0.0.1:8081/?page_id=321', 2, 'page', '', 1);
 INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES
   (312, '_customize_changeset_uuid', '0c3a1b2c-1111-4222-8333-444455556666'),
   (306, '_wp_page_template', 'wide'),
@@ -65,4 +78,6 @@ INSERT INTO wp_comments (comment_ID, comment_post_ID, comment_author, comment_au
   (301, 309, 'Visitor', 'visitor@example.test', '', '', '2026-11-11 10:00:00', '2026-11-11 10:00:00', 'Waiting', 0, '0', '', 'comment', 0, 0),
   (302, 311, 'Visitor', 'visitor@example.test', '', '', '2026-11-11 11:00:00', '2026-11-11 11:00:00', 'One', 0, '1', '', 'comment', 0, 0),
   (303, 311, 'Visitor', 'visitor@example.test', '', '', '2026-11-11 12:00:00', '2026-11-11 12:00:00', 'Two', 0, '1', '', 'comment', 0, 0),
-  (304, 311, 'Visitor', 'visitor@example.test', '', '', '2026-11-11 13:00:00', '2026-11-11 13:00:00', 'Three', 0, '0', '', 'comment', 0, 0);
+  (304, 311, 'Visitor', 'visitor@example.test', '', '', '2026-11-11 13:00:00', '2026-11-11 13:00:00', 'Three', 0, '0', '', 'comment', 0, 0),
+  (305, 321, 'Visitor', 'visitor@example.test', '', '', '2026-11-11 14:00:00', '2026-11-11 14:00:00', 'Waiting too', 0, '0', '', 'comment', 0, 0),
+  (306, 321, 'Visitor', 'visitor@example.test', '', '', '2026-11-11 15:00:00', '2026-11-11 15:00:00', 'Four', 0, '1', '', 'comment', 0, 0);

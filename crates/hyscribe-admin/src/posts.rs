@@ -2,6 +2,8 @@
 
 //! `edit.php`: the posts list, `WP_Posts_List_Table`.
 
+use std::collections::HashMap;
+
 use hyscribe_kses::{esc_attr, esc_html, esc_textarea, esc_url};
 use hyscribe_model::{OrderBy, Post, PostQuery, StatusFilter, Term, User};
 use hyscribe_phpser::{
@@ -51,8 +53,8 @@ pub trait PostsSite: PageSite {
     fn terms(&self, taxonomy: &str) -> Vec<Term>;
     /// The IDs of the ten terms of `taxonomy` with the most posts.
     fn popular_terms(&self, taxonomy: &str) -> Vec<u64>;
-    /// The users who may `edit_posts`, by display name.
-    fn authors(&self) -> Vec<User>;
+    /// The users who have `cap`, by display name.
+    fn authors(&self, cap: &str) -> Vec<User>;
     /// The post formats the theme supports.
     fn post_formats(&self) -> &'static [&'static str];
     /// The posts `query` selects and how many it matches on every page.
@@ -69,6 +71,64 @@ pub trait PostsSite: PageSite {
     fn months(&self, post_type: &str, trash: bool) -> Vec<(u32, u32)>;
     /// `get_user_option( $name )`, as stored.
     fn user_option(&self, name: &str) -> Option<Vec<u8>>;
+    /// `get_post( $id )`, of any type and status.
+    fn post(&self, id: u64) -> Option<Post>;
+    /// `get_page_templates( null, $post_type )`: each template's slug and
+    /// title, by title.
+    fn page_templates(&self, post_type: &str) -> Vec<(String, String)>;
+}
+
+/// A post type the list shows, as `register_post_type()` labels it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PostType {
+    /// Its name.
+    pub name: &'static str,
+    /// `labels->name`, which in lower case names its capabilities.
+    plural: &'static str,
+    /// `labels->singular_name`.
+    singular: &'static str,
+}
+
+/// Posts.
+pub const POST: PostType = PostType {
+    name: "post",
+    plural: "Posts",
+    singular: "Post",
+};
+
+/// Pages, which nest and have an order.
+pub const PAGE: PostType = PostType {
+    name: "page",
+    plural: "Pages",
+    singular: "Page",
+};
+
+impl Default for PostType {
+    fn default() -> Self {
+        POST
+    }
+}
+
+impl PostType {
+    /// The type the list shows by `name`, if any.
+    pub fn named(name: &[u8]) -> Option<Self> {
+        [POST, PAGE]
+            .into_iter()
+            .find(|kind| kind.name.as_bytes() == name)
+    }
+
+    fn hierarchical(self) -> bool {
+        self == PAGE
+    }
+
+    fn lower(self) -> String {
+        self.plural.to_ascii_lowercase()
+    }
+
+    /// The type's own `*_posts` capability.
+    fn cap(self, cap: &str) -> String {
+        cap.replacen("posts", &self.lower(), 1)
+    }
 }
 
 /// `_draft_or_post_title()`: the title, escaped, or `(no title)`.
@@ -134,7 +194,7 @@ fn column_cb(site: &dyn PostsSite, post: &Post, excerpt: bool) -> String {
 }
 
 /// `get_post_states()` in the posts list filtered by `filter`, whose own
-/// state goes unsaid; the pages' states come with Pages.
+/// state goes unsaid.
 fn post_states(site: &dyn PostsSite, post: &Post, filter: &str) -> Vec<&'static str> {
     let mut states = Vec::new();
     if !post.password.is_empty() {
@@ -156,6 +216,20 @@ fn post_states(site: &dyn PostsSite, post: &Post, filter: &str) -> Vec<&'static 
     }
     if post.status == "future" {
         states.push("Scheduled");
+    }
+    let is = |option: &str| {
+        Value::String(site.option(option).unwrap_or_default()).to_int() == post.id as i64
+    };
+    if site.option("show_on_front").as_deref() == Some(b"page") {
+        if is("page_on_front") {
+            states.push("Front Page");
+        }
+        if is("page_for_posts") {
+            states.push("Posts Page");
+        }
+    }
+    if is("wp_page_for_privacy_policy") {
+        states.push("Privacy Policy Page");
     }
     states
 }
@@ -190,7 +264,7 @@ fn inline_data(site: &dyn PostsSite, post: &Post) -> String {
     let stored = |format: &str| date::format(format, &post.date, Zone::Utc);
     let template = site.meta(post, "_wp_page_template").unwrap_or_default();
     let mut out = format!(
-        "\n<div class=\"hidden\" id=\"inline_{id}\">\n\t<div class=\"post_title\">{}</div>\n\t<div class=\"post_name\">{}</div>\n\t<div class=\"post_author\">{}</div>\n\t<div class=\"comment_status\">{}</div>\n\t<div class=\"ping_status\">{}</div>\n\t<div class=\"_status\">{}</div>\n\t<div class=\"jj\">{}</div>\n\t<div class=\"mm\">{}</div>\n\t<div class=\"aa\">{}</div>\n\t<div class=\"hh\">{}</div>\n\t<div class=\"mn\">{}</div>\n\t<div class=\"ss\">{}</div>\n\t<div class=\"post_password\">{}</div><div class=\"page_template\">{}</div>",
+        "\n<div class=\"hidden\" id=\"inline_{id}\">\n\t<div class=\"post_title\">{}</div>\n\t<div class=\"post_name\">{}</div>\n\t<div class=\"post_author\">{}</div>\n\t<div class=\"comment_status\">{}</div>\n\t<div class=\"ping_status\">{}</div>\n\t<div class=\"_status\">{}</div>\n\t<div class=\"jj\">{}</div>\n\t<div class=\"mm\">{}</div>\n\t<div class=\"aa\">{}</div>\n\t<div class=\"hh\">{}</div>\n\t<div class=\"mn\">{}</div>\n\t<div class=\"ss\">{}</div>\n\t<div class=\"post_password\">{}</div>{}<div class=\"page_template\">{}</div>",
         text(&esc_textarea(hyscribe_phpser::php_trim(&post.title))),
         text(&esc_textarea(&urldecode(&post.name))),
         post.author,
@@ -204,12 +278,24 @@ fn inline_data(site: &dyn PostsSite, post: &Post) -> String {
         stored("i"),
         stored("s"),
         esc_html(&post.password),
+        if post.post_type == "page" {
+            format!("<div class=\"post_parent\">{}</div>", post.parent)
+        } else {
+            String::new()
+        },
         if template.is_empty() {
             "default".to_string()
         } else {
             esc_html(&template)
         },
     );
+    if post.post_type == "page" {
+        out.push_str(&format!(
+            "<div class=\"menu_order\">{}</div></div>",
+            post.menu_order
+        ));
+        return out;
+    }
     let categories = site.post_terms(post, "category");
     let ids: Vec<String> = categories.iter().map(|term| term.id.to_string()).collect();
     out.push_str(&format!(
@@ -237,14 +323,37 @@ fn inline_data(site: &dyn PostsSite, post: &Post) -> String {
     out
 }
 
-/// `_column_title()` and `column_title()`, with the row actions; the
-/// extended view shows the excerpt too.
+/// `get_post_ancestors( $post )`: its parent's ID, then theirs, until one
+/// is missing or repeats.
+fn ancestors(lookup: &dyn Fn(u64) -> Option<Post>, post: &Post) -> Vec<u64> {
+    if post.parent == 0 || post.parent == post.id {
+        return Vec::new();
+    }
+    let mut ids = vec![post.parent];
+    while let Some(ancestor) = ids.last().and_then(|id| lookup(*id)) {
+        let up = ancestor.parent;
+        if up == 0 || up == post.id || ids.contains(&up) {
+            break;
+        }
+        ids.push(up);
+    }
+    ids
+}
+
+/// `the_title` of `post` with the list's `esc_html` filter.
+fn listed_title(post: &Post) -> String {
+    esc_html(&admin_title(post))
+}
+
+/// `_column_title()` and `column_title()` with the row actions; a tree's
+/// page at `level` 0 with a parent is padded to its depth and names it.
 fn column_title(
     site: &dyn PostsSite,
     post: &Post,
     classes: &str,
     filter: &str,
     excerpt: bool,
+    level: Option<usize>,
 ) -> String {
     let aria_label = if is_empty_string(&post.title) {
         "no title".to_string()
@@ -254,23 +363,57 @@ fn column_title(
     let mut out = format!(
         "<th scope=\"row\" class=\"{classes} page-title\" data-colname=\"Title\" aria-label=\"{aria_label}\">"
     );
+    let mut depth = level.unwrap_or_default();
+    let mut parent_name = None;
+    if level == Some(0) {
+        // The ancestors there are, which PHP walks forever round a loop.
+        let found: Vec<Post> = ancestors(&|id| site.post(id), post)
+            .into_iter()
+            .map_while(|id| site.post(id))
+            .collect();
+        depth += found.len();
+        parent_name = found.first().map(listed_title);
+    }
     let editable = site.can_post("edit_post", post) && post.status != "trash";
     if editable {
         out.push_str("<div class=\"locked-info\"><span class=\"locked-avatar\"></span> <span class=\"locked-text\"></span></div>\n");
     }
+    let pad = "<span aria-hidden=\"true\">&#8212;</span> ".repeat(depth);
+    let (described_by, linked, unlinked) = match site.post(post.parent) {
+        Some(parent) => {
+            let id = format!("post-hierarchy-{}", post.id);
+            let child_of = format!(
+                "Child of {}",
+                text(&hyscribe_kses::wp_strip_all_tags(
+                    listed_title(&parent).as_bytes(),
+                    false
+                ))
+            );
+            let child_of = esc_html(child_of.as_bytes());
+            (
+                format!(" aria-describedby=\"{id}\""),
+                format!("<span id=\"{id}\" class=\"hidden\">{child_of}</span>"),
+                format!("<span id=\"{id}\" class=\"screen-reader-text\"> ({child_of})</span>"),
+            )
+        }
+        None => Default::default(),
+    };
     let title = labelled_title(site, post, true, excerpt);
     out.push_str("<strong>");
     if editable {
         out.push_str(&format!(
-            "<a class=\"row-title\" href=\"{}\">{title}</a>",
+            "{pad}<a class=\"row-title\" href=\"{}\"{described_by}>{title}</a>{linked}",
             edit_link(site, post)
         ));
     } else {
-        out.push_str(&format!("<span>{title}</span>"));
+        out.push_str(&format!("{pad}<span>{title}{unlinked}</span>"));
     }
     out.push_str(&post_states_html(site, post, filter));
+    if let Some(name) = parent_name {
+        out.push_str(&format!(" | Parent Page: {}", esc_html(name.as_bytes())));
+    }
     out.push_str("</strong>\n");
-    if excerpt && site.can_post("read_post", post) {
+    if excerpt && post.post_type != "page" && site.can_post("read_post", post) {
         let text = esc_html(&site.excerpt(post));
         if post.password.is_empty() {
             out.push_str(&text);
@@ -433,15 +576,14 @@ fn column_terms(site: &dyn PostsSite, post: &Post, taxonomy: &str) -> String {
     links.join(", ")
 }
 
-/// `comments_bubble()`: the approved and pending comment counts.
-fn comments_bubble(site: &dyn PostsSite, post: &Post) -> String {
+/// `comments_bubble()`: the approved and `pending` comment counts.
+fn comments_bubble(site: &dyn PostsSite, post: &Post, pending: u64) -> String {
     if !site.can_post("edit_post", post)
         && (!post.password.is_empty() || !site.can_post("read_post", post))
     {
         return String::new();
     }
     let approved = u64::try_from(post.comment_count).unwrap_or_default();
-    let pending = site.pending_comments(post);
     let plural = |n: u64, one: &str, many: &str| {
         format!("{} {}", number_format(n), if n == 1 { one } else { many })
     };
@@ -684,17 +826,139 @@ const STICKY: &str = "\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t<label class=\"alignleft
 
 const BULK_STICKY: &str = "\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t<label class=\"alignright\">\n\t\t\t\t\t\t\t\t\t<span class=\"title\">Sticky</span>\n\t\t\t\t\t\t\t\t\t<select name=\"sticky\">\n\t\t\t\t\t\t\t\t\t\t<option value=\"-1\">&mdash; No Change &mdash;</option>\n\t\t\t\t\t\t\t\t\t\t<option value=\"sticky\">Sticky</option>\n\t\t\t\t\t\t\t\t\t\t<option value=\"unsticky\">Not Sticky</option>\n\t\t\t\t\t\t\t\t\t</select>\n\t\t\t\t\t\t\t\t</label>\n\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t";
 
-/// `inline_edit()`: the Quick Edit and Bulk Edit rows of a table of
-/// `columns` visible columns, the date fields from `first`, the global post.
+/// The options of `wp_dropdown_pages()` for the published pages of `kind`:
+/// a tree by order and title, without pages whose parents are not listed.
+fn parent_options(site: &dyn PostsSite, kind: PostType) -> String {
+    let query = PostQuery {
+        post_types: vec![kind.name.into()],
+        statuses: vec![StatusFilter {
+            status: "publish".into(),
+            author: None,
+        }],
+        order: vec![(OrderBy::MenuOrder, true), (OrderBy::Title, true)],
+        limit: u32::MAX,
+        ..PostQuery::default()
+    };
+    let (pages, _) = site.list_posts(&query);
+    let mut children: HashMap<u64, Vec<&Post>> = HashMap::new();
+    for page in &pages {
+        children.entry(page.parent).or_default().push(page);
+    }
+    let mut below = |parent: u64, depth: usize| {
+        let pages = children.remove(&parent).unwrap_or_default();
+        pages.into_iter().rev().map(move |page| (page, depth))
+    };
+    let mut stack: Vec<(&Post, usize)> = below(0, 0).collect();
+    let mut out = String::new();
+    while let Some((page, depth)) = stack.pop() {
+        let title = if page.title.is_empty() {
+            format!("#{} (no title)", page.id)
+        } else {
+            text(&page.title)
+        };
+        out.push_str(&format!(
+            "\t<option class=\"level-{depth}\" value=\"{}\">{}{}</option>\n",
+            page.id,
+            "&nbsp;".repeat(depth * 3),
+            esc_html(title.as_bytes())
+        ));
+        stack.extend(below(page.id, depth + 1));
+    }
+    out
+}
+
+/// The parent select of an inline editor over `options`, with the bulk
+/// editor's "no change"; none without options.
+fn parent_dropdown(options: &str, bulk: bool) -> String {
+    if options.is_empty() {
+        return String::new();
+    }
+    let (id, no_change) = if bulk {
+        (
+            "bulk_edit_post_parent",
+            "\t<option value=\"-1\">&mdash; No Change &mdash;</option>\n",
+        )
+    } else {
+        ("post_parent", "")
+    };
+    format!(
+        "<select name='post_parent' id='{id}'>\n{no_change}\t<option value=\"0\">Main Page (no parent)</option>\n{options}</select>\n"
+    )
+}
+
+/// The template select of an inline editor over `templates`, if any.
+fn templates_select(templates: &[(String, String)], bulk: bool) -> String {
+    if templates.is_empty() {
+        return String::new();
+    }
+    let options: String = templates
+        .iter()
+        .map(|(slug, title)| {
+            format!(
+                "\n\t<option value='{}' >{}</option>",
+                esc_attr(slug.as_bytes()),
+                esc_html(title.as_bytes())
+            )
+        })
+        .collect();
+    format!(
+        "\t\t\t\t\t<label>\n\t\t\t\t\t\t<span class=\"title\">Template</span>\n\t\t\t\t\t\t<select name=\"page_template\">\n{}{}<option value=\"default\">Default template</option>\n\t\t\t\t\t\t\t{options}\t\t\t\t\t\t</select>\n\t\t\t\t\t</label>\n\n\t\t\t\t\n",
+        if bulk {
+            format!(
+                "{}<option value=\"-1\">&mdash; No Change &mdash;</option>\n",
+                "\t".repeat(14)
+            )
+        } else {
+            String::new()
+        },
+        "\t".repeat(21)
+    )
+}
+
+/// `template` with each `%name%` of `values` filled in one pass, so no
+/// value's text is read as a placeholder.
+fn fill(template: &str, values: &[(&str, String)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some((before, after)) = rest.split_once('%') {
+        out.push_str(before);
+        let found = values
+            .iter()
+            .find_map(|(name, value)| Some((value, after.strip_prefix(name)?.strip_prefix('%')?)));
+        match found {
+            Some((value, tail)) => {
+                out.push_str(value);
+                rest = tail;
+            }
+            None => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+const INLINE_CATEGORIES: &str = include_str!("posts/inline/categories.html");
+const INLINE_TAGS: &str = include_str!("posts/inline/tags.html");
+const INLINE_PINGS: &str = include_str!("posts/inline/pings.html");
+const INLINE_BULK_PINGS: &str = include_str!("posts/inline/bulk-pings.html");
+const INLINE_ATTRIBUTES: &str = include_str!("posts/inline/attributes.html");
+const INLINE_BULK_ATTRIBUTES: &str = include_str!("posts/inline/bulk-attributes.html");
+
+/// `inline_edit()`: the Quick and Bulk Edit rows of a list of `kind` with
+/// `columns` visible columns, dated from `first`, the global post.
 fn inline_edit(
     site: &dyn PostsSite,
+    kind: PostType,
     first: &Post,
     columns: usize,
     author: &str,
     excerpt: bool,
 ) -> String {
-    let can_publish = site.can("publish_posts");
-    let others = site.can("edit_others_posts");
+    let can_publish = site.can(&kind.cap("publish_posts"));
+    let others = site.can(&kind.cap("edit_others_posts"));
     let (zone, now) = site.clock();
     let when = |shown: bool, text: &str| {
         if shown {
@@ -704,7 +968,7 @@ fn inline_edit(
         }
     };
     let (authors, bulk_authors) = if others {
-        let users = site.authors();
+        let users = site.authors(&kind.cap("edit_posts"));
         (
             authors_dropdown(&users, false, author),
             authors_dropdown(&users, true, author),
@@ -712,28 +976,57 @@ fn inline_edit(
     } else {
         Default::default()
     };
-    let formats = site.post_formats();
-    INLINE_EDIT
-        .replace("%view%", if excerpt { "excerpt" } else { "list" })
-        .replace("%columns%", &columns.to_string())
-        .replace("%date%", &touch_time(first, zone, now))
-        .replace("%authors%", &authors)
-        .replace("%bulk_authors%", &bulk_authors)
-        .replace("%password%", &when(can_publish, PASSWORD))
-        .replace("%categories%", &categories_checklist(site))
-        .replace("%statuses%", &status_options(can_publish, false))
-        .replace("%bulk_statuses%", &status_options(can_publish, true))
-        .replace("%sticky%", &when(can_publish && others, STICKY))
-        .replace("%bulk_sticky%", &when(can_publish && others, BULK_STICKY))
-        .replace(
-            "%formats%",
-            &when(!formats.is_empty(), &formats_select(formats)),
+    let posts = kind == POST;
+    let formats = if posts { site.post_formats() } else { &[] };
+    let (attributes, bulk_attributes) = if kind.hierarchical() {
+        let options = parent_options(site, kind);
+        (
+            INLINE_ATTRIBUTES.replace("%parent%", &parent_dropdown(&options, false)),
+            INLINE_BULK_ATTRIBUTES.replace("%parent%", &parent_dropdown(&options, true)),
         )
-        .replace("%nonce%", &site.nonce("inlineeditnonce"))
+    } else {
+        Default::default()
+    };
+    let categories = if posts {
+        INLINE_CATEGORIES.replace("%checklist%", &categories_checklist(site))
+    } else {
+        String::new()
+    };
+    let templates = site.page_templates(kind.name);
+    let sticky = posts && can_publish && others;
+    fill(
+        INLINE_EDIT,
+        &[
+            ("type", kind.name.into()),
+            ("view", if excerpt { "excerpt" } else { "list" }.into()),
+            ("columns", columns.to_string()),
+            ("date", touch_time(first, zone, now)),
+            ("authors", authors),
+            ("bulk_authors", bulk_authors),
+            ("password", when(can_publish, PASSWORD)),
+            ("categories", categories),
+            ("attributes", attributes),
+            ("bulk_attributes", bulk_attributes),
+            ("templates", templates_select(&templates, false)),
+            ("bulk_templates", templates_select(&templates, true)),
+            ("tags", when(posts, INLINE_TAGS)),
+            ("pings", when(posts, INLINE_PINGS)),
+            ("bulk_pings", when(posts, INLINE_BULK_PINGS)),
+            ("statuses", status_options(can_publish, false)),
+            ("bulk_statuses", status_options(can_publish, true)),
+            ("sticky", when(sticky, STICKY)),
+            ("bulk_sticky", when(sticky, BULK_STICKY)),
+            (
+                "formats",
+                when(!formats.is_empty(), &formats_select(formats)),
+            ),
+            ("nonce", site.nonce("inlineeditnonce")),
+        ],
+    )
 }
 
-/// `single_row( $post )` of `columns`, `hidden` ones hidden, in the list
-/// filtered by `filter`, in the extended view if `excerpt`.
+/// `single_row( $post, $level )` of `columns` but `hidden`, in the view of
+/// `filter` and `excerpt`; a tree's rows have a `level`, no pending count.
 pub fn row(
     site: &dyn PostsSite,
     post: &Post,
@@ -741,13 +1034,18 @@ pub fn row(
     hidden: &[&str],
     filter: &str,
     excerpt: bool,
+    level: Option<usize>,
 ) -> String {
     let author = if site.user_id() == post.author {
         "self"
     } else {
         "other"
     };
-    let class = site.post_class(&format!("iedit author-{author} level-0"), post);
+    let class = format!(
+        "iedit author-{author} level-{}",
+        ancestors(&|id| site.post(id), post).len()
+    );
+    let class = site.post_class(&class, post);
     let mut out = format!("\t\t<tr id=\"post-{}\" class=\"{class}\">\n\t\t\t", post.id);
     for column in columns {
         let key = column.key;
@@ -767,7 +1065,7 @@ pub fn row(
                 continue;
             }
             "title" => {
-                out.push_str(&column_title(site, post, &classes, filter, excerpt));
+                out.push_str(&column_title(site, post, &classes, filter, excerpt, level));
                 continue;
             }
             "author" => column_author(site, post),
@@ -775,7 +1073,11 @@ pub fn row(
             "tags" => column_terms(site, post, "post_tag"),
             "comments" => format!(
                 "\t\t<div class=\"post-com-count-wrapper\">\n\t\t{}\t\t</div>\n\t\t",
-                comments_bubble(site, post)
+                comments_bubble(
+                    site,
+                    post,
+                    level.map_or_else(|| site.pending_comments(post), |_| 0)
+                )
             ),
             _ => column_date(site, post),
         };
@@ -789,9 +1091,9 @@ pub fn row(
     out
 }
 
-/// The posts list's columns in the view of `filter`: no comments for posts
-/// not published yet.
-pub fn columns(filter: &str) -> Vec<Column> {
+/// The columns of a list of `kind` in the view of `filter`, without
+/// comments before publishing; a page title's caption says if `ordered`.
+pub fn columns(kind: PostType, filter: &str, ordered: bool) -> Vec<Column> {
     let sort = |orderby, desc_first, abbr, caption, initial| {
         Some(Sort {
             orderby,
@@ -801,48 +1103,48 @@ pub fn columns(filter: &str) -> Vec<Column> {
             initial,
         })
     };
+    let column = |key, label: &str, sort| Column {
+        key,
+        label: label.into(),
+        sort,
+    };
+    let pages = kind.hierarchical();
+    let caption = if pages && !ordered {
+        "Table ordered by Hierarchical Menu Order and Title."
+    } else {
+        "Table ordered by Title."
+    };
     let mut columns = vec![
-        Column {
-            key: "cb",
-            label: "<input type=\"checkbox\" />".into(),
-            sort: None,
-        },
-        Column {
-            key: "title",
-            label: "Title".into(),
-            sort: sort("title", false, "Title", "Table ordered by Title.", None),
-        },
-        Column {
-            key: "author",
-            label: "Author".into(),
-            sort: None,
-        },
-        Column {
-            key: "categories",
-            label: "Categories".into(),
-            sort: None,
-        },
-        Column {
-            key: "tags",
-            label: "Tags".into(),
-            sort: None,
-        },
-        Column {
-            key: "date",
-            label: "Date".into(),
-            sort: sort("date", true, "Date", "Table ordered by Date.", Some("desc")),
-        },
+        column("cb", "<input type=\"checkbox\" />", None),
+        column(
+            "title",
+            "Title",
+            sort("title", false, "Title", caption, pages.then_some("asc")),
+        ),
+        column("author", "Author", None),
     ];
-    if !["pending", "draft", "future"].contains(&filter) {
-        columns.insert(
-            5,
-            Column {
-                key: "comments",
-                label: "<span class=\"vers comment-grey-bubble\" title=\"Comments\" aria-hidden=\"true\"></span><span class=\"screen-reader-text\">Comments</span>".into(),
-                sort: sort("comment_count", false, "Comments", "Table ordered by Comments.", None),
-            },
-        );
+    if !pages {
+        columns.push(column("categories", "Categories", None));
+        columns.push(column("tags", "Tags", None));
     }
+    if !["pending", "draft", "future"].contains(&filter) {
+        columns.push(column(
+            "comments",
+            "<span class=\"vers comment-grey-bubble\" title=\"Comments\" aria-hidden=\"true\"></span><span class=\"screen-reader-text\">Comments</span>",
+            sort("comment_count", false, "Comments", "Table ordered by Comments.", None),
+        ));
+    }
+    columns.push(column(
+        "date",
+        "Date",
+        sort(
+            "date",
+            true,
+            "Date",
+            "Table ordered by Date.",
+            (!pages).then_some("desc"),
+        ),
+    ));
     columns
 }
 
@@ -871,7 +1173,10 @@ const NOT_IN_ALL: [&str; 7] = [
 /// What the list shows: the counts its links and pages read.
 #[derive(Default)]
 struct Listing {
+    kind: PostType,
     posts: Vec<Post>,
+    /// The level of each post of a tree, none for a flat list.
+    levels: Option<Vec<usize>>,
     total: u64,
     counts: Vec<(String, u64)>,
     own: u64,
@@ -931,12 +1236,13 @@ fn status_views(listing: &Listing) -> Vec<View> {
     let label =
         |text: &str, n: u64| format!("{text} <span class=\"count\">({})</span>", number_format(n));
     let mine = listing.own > 0 && listing.own != all_total;
+    let kind = listing.kind.name;
     let mut links = vec![View {
         class: "all".into(),
         url: if mine {
-            "edit.php?post_type=post&all_posts=1".into()
+            format!("edit.php?post_type={kind}&all_posts=1")
         } else {
-            "edit.php?post_type=post".into()
+            format!("edit.php?post_type={kind}")
         },
         label: label("All", all_total),
         current: listing.base && !listing.own_only || listing.all_posts,
@@ -944,7 +1250,7 @@ fn status_views(listing: &Listing) -> Vec<View> {
     if mine {
         links.push(View {
             class: "mine".into(),
-            url: format!("edit.php?post_type=post&author={}", listing.user),
+            url: format!("edit.php?post_type={kind}&author={}", listing.user),
             label: label("Mine", listing.own),
             current: listing.mine,
         });
@@ -956,7 +1262,7 @@ fn status_views(listing: &Listing) -> Vec<View> {
         }
         links.push(View {
             class: status.into(),
-            url: format!("edit.php?post_status={status}&post_type=post"),
+            url: format!("edit.php?post_status={status}&post_type={kind}"),
             label: label(if n == 1 { one } else { many }, n),
             current: listing.filter == status,
         });
@@ -970,7 +1276,7 @@ fn status_views(listing: &Listing) -> Vec<View> {
             after + 1,
             View {
                 class: "sticky".into(),
-                url: "edit.php?post_type=post&show_sticky=1".into(),
+                url: format!("edit.php?post_type={kind}&show_sticky=1"),
                 label: label("Sticky", listing.sticky),
                 current: listing.show_sticky,
             },
@@ -1061,7 +1367,8 @@ fn tablenav(
     } else {
         ("edit", "Bulk edit")
     }];
-    if site.can("delete_posts") {
+    let kind = listing.kind;
+    if site.can(&kind.cap("delete_posts")) {
         actions.push(if listing.trash() {
             ("delete", "Delete permanently")
         } else {
@@ -1070,21 +1377,20 @@ fn tablenav(
     }
     let empty = listing.posts.is_empty();
     let hidden = if empty { " hidden" } else { "" };
-    let mut extra = if which == "top" {
-        format!(
-            "{}{}{}<input type=\"submit\" name=\"filter_action\" id=\"post-query-submit\" class=\"button button-compact\" value=\"Filter\"  />",
-            months_dropdown(months, &listing.m, "Filter by date"),
-            categories_dropdown(site, &listing.cat),
-            if listing.trash() {
-                String::new()
-            } else {
-                formats_dropdown(site, &listing.post_format)
+    let mut extra = String::new();
+    if which == "top" {
+        extra.push_str(&months_dropdown(months, &listing.m, "Filter by date"));
+        if kind == POST {
+            extra.push_str(&categories_dropdown(site, &listing.cat));
+            if !listing.trash() {
+                extra.push_str(&formats_dropdown(site, &listing.post_format));
             }
-        )
-    } else {
-        String::new()
-    };
-    if listing.trash() && !empty && site.can("edit_others_posts") {
+        }
+        if !extra.is_empty() {
+            extra.push_str("<input type=\"submit\" name=\"filter_action\" id=\"post-query-submit\" class=\"button button-compact\" value=\"Filter\"  />");
+        }
+    }
+    if listing.trash() && !empty && site.can(&kind.cap("edit_others_posts")) {
         extra.push_str("<input type=\"submit\" name=\"delete_all\" id=\"delete_all\" class=\"button apply\" value=\"Empty Trash\"  />");
     }
     format!(
@@ -1102,13 +1408,33 @@ fn list_content(
     url: &str,
     request_uri: &str,
 ) -> String {
-    let columns = columns(&listing.filter);
-    let months = site.months("post", listing.trash());
+    let kind = listing.kind;
+    let columns = columns(kind, &listing.filter, listing.orderby.is_some());
+    let months = site.months(kind.name, listing.trash());
     let extended = listing.mode == "excerpt";
     let rows: String = listing
         .posts
         .iter()
-        .map(|post| row(site, post, &columns, hidden, &listing.filter, extended))
+        .enumerate()
+        .map(|(i, post)| {
+            let level = listing
+                .levels
+                .as_ref()
+                .and_then(|levels| levels.get(i).copied());
+            let row = row(
+                site,
+                post,
+                &columns,
+                hidden,
+                &listing.filter,
+                extended,
+                level,
+            );
+            match level {
+                Some(_) => format!("\t{row}"),
+                None => row,
+            }
+        })
         .collect();
     let visible = columns
         .iter()
@@ -1130,11 +1456,16 @@ fn list_content(
         .iter()
         .map(|(name, value)| (*name, value.as_str()))
         .collect();
+    let new_post = if kind == POST {
+        "post-new.php".to_string()
+    } else {
+        format!("post-new.php?post_type={}", kind.name)
+    };
     let mut out = format!(
-        "<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\nPosts</h1>\n\n <a href=\"{}\" class=\"page-title-action\">Add Post</a>{}\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"posts-filter\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"post_status\" class=\"post_status_page\" value=\"{}\" />\n<input type=\"hidden\" name=\"post_type\" class=\"post_type_page\" value=\"post\" />\n\n{}\n{}\n",
-        text(&esc_url(
-            BarSite::admin_url(site, "post-new.php").as_bytes()
-        )),
+        "<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\n{}</h1>\n\n <a href=\"{}\" class=\"page-title-action\">Add {}</a>{}\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"posts-filter\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"post_status\" class=\"post_status_page\" value=\"{}\" />\n<input type=\"hidden\" name=\"post_type\" class=\"post_type_page\" value=\"{}\" />\n\n{}\n{}\n",
+        kind.plural,
+        text(&esc_url(BarSite::admin_url(site, &new_post).as_bytes())),
+        kind.singular,
         // `get_search_query()`, the query var without line breaks.
         match listing.search.as_deref().filter(|s| !s.is_empty()) {
             Some(search) => format!(
@@ -1148,7 +1479,7 @@ fn list_content(
             ),
             None => String::new(),
         },
-        views("Filter posts list", &links),
+        views(&format!("Filter {} list", kind.lower()), &links),
         if listing.posts.is_empty()
             && listing
                 .search
@@ -1158,13 +1489,15 @@ fn list_content(
             String::new()
         } else {
             let search = listing.search.as_deref().unwrap_or_default();
-            search_box("Search Posts", "post", search, &order_fields)
+            let label = format!("Search {}", kind.plural);
+            search_box(&label, "post", search, &order_fields)
         },
         if is_empty_string(listing.filter.as_bytes()) {
             "all".to_string()
         } else {
             esc_attr(&addslashes(listing.filter.as_bytes()))
         },
+        kind.name,
         if is_empty_string(listing.author.as_bytes()) {
             String::new()
         } else {
@@ -1197,46 +1530,44 @@ fn list_content(
         )))
     ));
     let empty = listing.posts.is_empty();
-    out.push_str(&tablenav(
-        site,
-        listing,
-        "top",
-        &months,
-        pagination("top", listing.total, listing.pages, listing.page, url),
-    ));
+    let heading = format!("{} list navigation", kind.plural);
+    let pages = |which| {
+        pagination(
+            which,
+            &heading,
+            listing.total,
+            listing.pages,
+            listing.page,
+            url,
+        )
+    };
+    out.push_str(&tablenav(site, listing, "top", &months, pages("top")));
     let rows = if empty {
-        let none = if listing.trash() {
-            "No posts found in Trash."
-        } else {
-            "No posts found."
-        };
+        let in_trash = if listing.trash() { " in Trash" } else { "" };
         format!(
-            "<tr class=\"no-items\"><td class=\"colspanchange\" colspan=\"{visible}\">{none}</td></tr>"
+            "<tr class=\"no-items\"><td class=\"colspanchange\" colspan=\"{visible}\">No {} found{in_trash}.</td></tr>",
+            kind.lower()
         )
     } else {
         rows
     };
     out.push_str(&format!(
-        "<h2 class='screen-reader-text'>Posts list</h2><table class=\"wp-list-table widefat fixed striped {} posts\">\n\t\t{}\t<thead>\n\t<tr>\n\t\t{}\t</tr>\n\t</thead>\n\n\t<tbody id=\"the-list\"\n\t\t\t\t>\n\t\t{rows}\t</tbody>\n\n\t<tfoot>\n\t<tr>\n\t\t{}\t</tr>\n\t</tfoot>\n\n</table>\n\t\t",
+        "<h2 class='screen-reader-text'>{} list</h2><table class=\"wp-list-table widefat fixed striped {} {}\">\n\t\t{}\t<thead>\n\t<tr>\n\t\t{}\t</tr>\n\t</thead>\n\n\t<tbody id=\"the-list\"\n\t\t\t\t>\n\t\t{rows}\t</tbody>\n\n\t<tfoot>\n\t<tr>\n\t\t{}\t</tr>\n\t</tfoot>\n\n</table>\n\t\t",
+        kind.plural,
         esc_attr(format!("table-view-{}", listing.mode).as_bytes()),
+        kind.lower(),
         table_description(&columns, &order),
         column_headers(&columns, hidden, &order, &unpaged, 1, true),
         column_headers(&columns, hidden, &order, &unpaged, 2, false)
     ));
     if !empty {
-        out.push_str(&tablenav(
-            site,
-            listing,
-            "bottom",
-            &months,
-            pagination("bottom", listing.total, listing.pages, listing.page, url),
-        ));
+        out.push_str(&tablenav(site, listing, "bottom", &months, pages("bottom")));
     }
     out.push_str("\n</form>\n\n");
     if let Some(first) = listing.posts.first() {
         out.push_str(&format!(
             "\n{}\t\t",
-            inline_edit(site, first, visible, &listing.author_query, extended)
+            inline_edit(site, kind, first, visible, &listing.author_query, extended)
         ));
     }
     out.push_str("\n<div id=\"ajax-response\"></div>\n<div class=\"clear\"></div>\n</div>\n\n");
@@ -1253,12 +1584,42 @@ const HELP_BULK_ACTIONS: &str = "<p>You can also edit or move multiple posts to 
 
 const HELP_SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/posts-screen/\">Documentation on Managing Posts</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
 
+const HELP_PAGES_OVERVIEW: &str = "<p>Pages are similar to posts in that they have a title, body text, and associated metadata, but they are different in that they are not part of the chronological blog stream, kind of like permanent posts. Pages are not categorized or tagged, but can have a hierarchy. You can nest pages under other pages by making one the &#8220;Parent&#8221; of the other, creating a group of pages.</p>";
+
+const HELP_MANAGING_PAGES: &str = "<p>Managing pages is very similar to managing posts, and the screens can be customized in the same way.</p><p>You can also perform the same types of actions, including narrowing the list by using the filters, acting on a page using the action links that appear when you hover over a row, or using the Bulk actions menu to edit the metadata for multiple pages at once.</p>";
+
+const HELP_PAGES_SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/pages-screen/\">Documentation on Managing Pages</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
+
+/// `edit.php`'s help tabs for `kind`, and its sidebar.
+fn help(kind: PostType) -> (Vec<HelpTab<'static>>, &'static str) {
+    let tab = |id, title, content| HelpTab { id, title, content };
+    if kind.hierarchical() {
+        return (
+            vec![
+                tab("overview", "Overview", HELP_PAGES_OVERVIEW),
+                tab("managing-pages", "Managing Pages", HELP_MANAGING_PAGES),
+            ],
+            HELP_PAGES_SIDEBAR,
+        );
+    }
+    (
+        vec![
+            tab("overview", "Overview", HELP_OVERVIEW),
+            tab("screen-content", "Screen Content", HELP_SCREEN_CONTENT),
+            tab("action-links", "Available Actions", HELP_ACTION_LINKS),
+            tab("bulk-actions", "Bulk actions", HELP_BULK_ACTIONS),
+        ],
+        HELP_SIDEBAR,
+    )
+}
+
 const SCREEN_OPTIONS: &str = include_str!("posts/screen-options.html");
 
 /// `render_screen_options()`: the columns the user may hide, `hidden` ones
-/// unchecked, and the number of posts per page.
+/// unchecked, and the number of posts of `kind` per page.
 fn screen_options(
     site: &dyn PostsSite,
+    kind: PostType,
     columns: &[Column],
     hidden: &[String],
     per_page: u64,
@@ -1290,16 +1651,17 @@ fn screen_options(
     SCREEN_OPTIONS
         .replace("%labels%", &labels)
         .replace("%per_page%", &per_page.to_string())
+        .replace("%type%", kind.name)
         .replace("%list%", checked("list"))
         .replace("%excerpt%", checked("excerpt"))
         .replace("%nonce%", &site.nonce("screen-options-nonce"))
 }
 
-/// `get_hidden_columns()`: the columns the user hid, none by default.
-fn hidden_columns(site: &dyn PostsSite) -> Vec<String> {
-    let stored = site
-        .user_option("manageedit-postcolumnshidden")
-        .unwrap_or_default();
+/// `get_hidden_columns()`: the columns of the list of `kind` the user hid,
+/// none by default.
+fn hidden_columns(site: &dyn PostsSite, kind: PostType) -> Vec<String> {
+    let option = format!("manageedit-{}columnshidden", kind.name);
+    let stored = site.user_option(&option).unwrap_or_default();
     match maybe_unserialize(&stored) {
         Maybe::Value(Value::Array(items)) => items
             .iter()
@@ -1309,22 +1671,23 @@ fn hidden_columns(site: &dyn PostsSite) -> Vec<String> {
     }
 }
 
-/// `edit_post_per_page`, 20 unless the user chose a number of posts.
-fn per_page(site: &dyn PostsSite) -> u64 {
-    let stored = Value::String(site.user_option("edit_post_per_page").unwrap_or_default()).to_int();
+/// `edit_{$post_type}_per_page`, 20 unless the user chose a number.
+fn per_page(site: &dyn PostsSite, kind: PostType) -> u64 {
+    let option = format!("edit_{}_per_page", kind.name);
+    let stored = Value::String(site.user_option(&option).unwrap_or_default()).to_int();
     u64::try_from(stored).ok().filter(|n| *n > 0).unwrap_or(20)
 }
 
-/// The only author whose private posts the user may read, unless they may
-/// read everyone's.
-fn private_author(site: &dyn PostsSite) -> Option<u64> {
-    (!site.can("read_private_posts")).then(|| site.user_id())
+/// The only author whose private posts of `kind` the user may read, unless
+/// they may read everyone's.
+fn private_author(site: &dyn PostsSite, kind: PostType) -> Option<u64> {
+    (!site.can(&kind.cap("read_private_posts"))).then(|| site.user_id())
 }
 
 /// The statuses the All list shows the user: private ones only their own
 /// unless they may read others'.
-fn all_statuses(site: &dyn PostsSite) -> Vec<StatusFilter> {
-    let private_author = private_author(site);
+fn all_statuses(site: &dyn PostsSite, kind: PostType) -> Vec<StatusFilter> {
+    let private_author = private_author(site, kind);
     ["publish", "future", "draft", "pending", "private"]
         .iter()
         .map(|status| StatusFilter {
@@ -1340,28 +1703,38 @@ fn all_statuses(site: &dyn PostsSite) -> Vec<StatusFilter> {
 
 /// `wp_edit_posts_query()`'s statuses for the requested `filter`: one
 /// registered status, readable, or the All list's.
-fn filtered(site: &dyn PostsSite, filter: &str) -> Vec<StatusFilter> {
+fn filtered(site: &dyn PostsSite, kind: PostType, filter: &str) -> Vec<StatusFilter> {
     let registered =
         STATUSES.iter().any(|(status, ..)| *status == filter) || NOT_IN_ALL.contains(&filter);
     if !registered {
-        return all_statuses(site);
+        return all_statuses(site, kind);
     }
     vec![StatusFilter {
         status: filter.into(),
-        author: private_author(site).filter(|_| filter == "private"),
+        author: private_author(site, kind).filter(|_| filter == "private"),
     }]
 }
 
-/// `wp_edit_posts_query()`'s order through `WP_Query`: the requested one,
-/// drafts and pending posts by their last change, pending ones oldest first.
-fn sort(args: &ListArgs, query: &PostQuery) -> Vec<(OrderBy, bool)> {
+/// `wp_edit_posts_query()`'s `orderby`, drafts and pending by their change,
+/// else a tree of all pages by order and title, which it says.
+fn list_orderby(kind: PostType, args: &ListArgs) -> (String, bool) {
     let changed = ["draft", "pending"].contains(&args.status.as_str());
     let orderby = match &args.orderby {
         Some(orderby) => orderby.as_str(),
         None if changed => "modified",
         None => "",
     };
+    if kind.hierarchical() && is_empty_string(orderby.as_bytes()) {
+        return ("menu_order title".into(), true);
+    }
+    (orderby.into(), false)
+}
+
+/// The order of `orderby` through `WP_Query`: pending posts oldest first
+/// and a `tree` ascending unless asked otherwise.
+fn sort(args: &ListArgs, query: &PostQuery, orderby: &str, tree: bool) -> Vec<(OrderBy, bool)> {
     let ascending = match &args.order {
+        _ if tree => true,
         Some(order) => order.eq_ignore_ascii_case("asc"),
         None => args.status == "pending",
     };
@@ -1375,9 +1748,134 @@ fn sort(args: &ListArgs, query: &PostQuery) -> Vec<(OrderBy, bool)> {
     order
 }
 
+/// `_display_rows_hierarchical()`: page `page` of a tree of `pages`, a
+/// subtree after its parents, orphans last; flat for a search.
+fn tree_rows(
+    site: &dyn PostsSite,
+    pages: Vec<Post>,
+    page: u64,
+    per_page: u64,
+    search: bool,
+) -> Vec<(Post, usize)> {
+    let start = (page - 1).saturating_mul(per_page);
+    let mut rows = Tree {
+        site,
+        start,
+        end: start.saturating_add(per_page),
+        count: 0,
+        rows: Vec::new(),
+        children: HashMap::new(),
+    };
+    if search {
+        for page in pages {
+            rows.add(page, 0);
+        }
+        return rows.rows;
+    }
+    let mut parents = Vec::new();
+    let mut top = Vec::new();
+    for page in pages.into_iter().map(repaired) {
+        if page.parent > 0 {
+            if !rows.children.contains_key(&page.parent) {
+                parents.push(page.parent);
+            }
+            rows.children.entry(page.parent).or_default().push(page);
+        } else {
+            top.push(page);
+        }
+    }
+    for page in top {
+        let id = page.id;
+        if !rows.add(page, 0) {
+            break;
+        }
+        rows.children_of(id, 1);
+    }
+    for parent in parents {
+        for orphan in rows.children.remove(&parent).unwrap_or_default() {
+            if !rows.add(orphan, 0) {
+                break;
+            }
+        }
+    }
+    rows.rows
+}
+
+/// `page` as a tree shows it: a page that is its own parent is a top one,
+/// which PHP also writes.
+fn repaired(mut page: Post) -> Post {
+    if page.parent == page.id {
+        page.parent = 0;
+    }
+    page
+}
+
+/// A tree of pages being paged: the rows on the page and the pages left.
+struct Tree<'a> {
+    site: &'a dyn PostsSite,
+    start: u64,
+    end: u64,
+    count: u64,
+    rows: Vec<(Post, usize)>,
+    children: HashMap<u64, Vec<Post>>,
+}
+
+impl Tree<'_> {
+    /// Counts `page` at `level`, a row if on the page; false past its end.
+    fn add(&mut self, page: Post, level: usize) -> bool {
+        if self.count >= self.end {
+            return false;
+        }
+        if self.count >= self.start {
+            self.rows.push((page, level));
+        }
+        self.count += 1;
+        true
+    }
+
+    /// `_page_rows()`: the children of `parent` at `level`, and theirs,
+    /// depth first without recursing.
+    fn children_of(&mut self, parent: u64, level: usize) {
+        let mut stack = vec![(self.take(parent), level)];
+        while let Some((siblings, level)) = stack.last_mut() {
+            let level = *level;
+            let Some(page) = siblings.next() else {
+                stack.pop();
+                continue;
+            };
+            if self.count == self.start {
+                let ancestors = ancestors(&|id| self.site.post(id), &page);
+                let above = ancestors.len();
+                for (i, id) in ancestors.iter().rev().enumerate() {
+                    if let Some(ancestor) = self.site.post(*id).map(repaired) {
+                        self.rows
+                            .push((ancestor, (level + i).saturating_sub(above)));
+                    }
+                }
+            }
+            let id = page.id;
+            if !self.add(page, level) {
+                // Past the page's end nothing more is listed.
+                break;
+            }
+            stack.push((self.take(id), level + 1));
+        }
+    }
+
+    /// The children of `parent` not yet listed, which are then no orphans.
+    fn take(&mut self, parent: u64) -> std::vec::IntoIter<Post> {
+        self.children
+            .remove(&parent)
+            .unwrap_or_default()
+            .into_iter()
+    }
+}
+
 /// The posts list's query arguments this port reads.
 #[derive(Default)]
 pub struct ListArgs {
+    /// `$_GET['post_type']`, posts for none.
+    pub post_type: PostType,
     /// `$_GET['post_status']`, empty for none.
     pub status: String,
     /// `$_GET['orderby']`, if given.
@@ -1507,14 +2005,15 @@ pub fn edit(
     request_uri: &str,
     browser: &Browser,
 ) -> Option<Answer> {
-    if !site.can("edit_posts") {
+    let kind = args.post_type;
+    if !site.can(&kind.cap("edit_posts")) {
         return None;
     }
-    let own = site.own_posts("post");
+    let own = site.own_posts(kind.name);
     let filter = args.status.as_str();
     let author = args.author.as_deref().unwrap_or_default();
     let own_only = own > 0
-        && !site.can("edit_others_posts")
+        && !site.can(&kind.cap("edit_others_posts"))
         && [filter, author]
             .iter()
             .all(|arg| is_empty_string(arg.as_bytes()))
@@ -1523,7 +2022,7 @@ pub fn edit(
             .as_deref()
             .is_none_or(|all| is_empty_string(all.as_bytes()))
         && !args.show_sticky;
-    let per_page = per_page(site);
+    let per_page = per_page(site, kind);
     let author_ids = author_ids(author);
     let (authors, excluded_authors) = if own_only {
         (vec![site.user_id()], Vec::new())
@@ -1531,40 +2030,63 @@ pub fn edit(
         author_lists(&author_ids.clone().unwrap_or_default())
     };
     let sticky_ids = sticky_posts(&site.option("sticky_posts").unwrap_or_default());
+    let (orderby, tree) = list_orderby(kind, args);
     let mut query = PostQuery {
-        post_types: vec!["post".into()],
-        statuses: filtered(site, filter),
+        post_types: vec![kind.name.into()],
+        statuses: filtered(site, kind, filter),
         authors,
         excluded_authors,
-        limit: u32::try_from(per_page).unwrap_or(u32::MAX),
+        limit: if tree {
+            u32::MAX
+        } else {
+            u32::try_from(per_page).unwrap_or(u32::MAX)
+        },
         ..args.filters.clone()
     };
     if args.show_sticky && !sticky_ids.is_empty() {
         query.include = Some(sticky_ids.clone());
     }
-    query.order = sort(args, &query);
+    query.order = sort(args, &query, &orderby, tree);
     // `absint( $_REQUEST['paged'] )`, the first page for none.
     let requested = Value::String(args.paged.clone().unwrap_or_default().into_bytes())
         .to_int()
         .unsigned_abs()
         .max(1);
-    query.offset = u32::try_from((requested - 1).saturating_mul(per_page)).unwrap_or(u32::MAX);
-    let (posts, total) = site.list_posts(&query);
+    if !tree {
+        query.offset = u32::try_from((requested - 1).saturating_mul(per_page)).unwrap_or(u32::MAX);
+    }
+    let (posts, found) = site.list_posts(&query);
+    // A tree's pages are counted as listed.
+    let display = kind.hierarchical() && orderby == "menu_order title";
+    let total = if display { posts.len() as u64 } else { found };
     let pages = total.div_ceil(per_page);
     if pages > 0 && requested > pages {
         let page = pages.to_string();
         let to = add_query_arg(&[(b"paged", Some(page.as_bytes()))], request_uri.as_bytes());
         return Some(Answer::Redirect(text(&to)));
     }
+    let (posts, levels) = if display {
+        let searched = args
+            .search
+            .as_deref()
+            .is_some_and(|s| !is_empty_string(s.as_bytes()));
+        let rows = tree_rows(site, posts, requested, per_page, searched);
+        let (posts, levels) = rows.into_iter().unzip();
+        (posts, Some(levels))
+    } else {
+        (posts, None)
+    };
     let listing = Listing {
+        kind,
         posts,
+        levels,
         total,
-        counts: site.status_counts("post", private_author(site)),
+        counts: site.status_counts(kind.name, private_author(site, kind)),
         own,
-        sticky: if sticky_ids.is_empty() {
+        sticky: if sticky_ids.is_empty() || kind != POST {
             0
         } else {
-            site.sticky_count("post", &sticky_ids)
+            site.sticky_count(kind.name, &sticky_ids)
         },
         own_only,
         user: site.user_id(),
@@ -1590,43 +2112,29 @@ pub fn edit(
         search: args.search.clone(),
         mode: view_mode(site, args),
     };
-    let hidden = hidden_columns(site);
+    let hidden = hidden_columns(site, kind);
     let hidden_keys: Vec<&str> = hidden.iter().map(String::as_str).collect();
     let content = list_content(site, &listing, &hidden_keys, canonical, request_uri);
-    let screen_options = screen_options(site, &columns(filter), &hidden, per_page, &listing.mode);
-    let help = [
-        HelpTab {
-            id: "overview",
-            title: "Overview",
-            content: HELP_OVERVIEW,
-        },
-        HelpTab {
-            id: "screen-content",
-            title: "Screen Content",
-            content: HELP_SCREEN_CONTENT,
-        },
-        HelpTab {
-            id: "action-links",
-            title: "Available Actions",
-            content: HELP_ACTION_LINKS,
-        },
-        HelpTab {
-            id: "bulk-actions",
-            title: "Bulk actions",
-            content: HELP_BULK_ACTIONS,
-        },
-    ];
+    let columns = columns(kind, filter, args.orderby.is_some());
+    let screen_options = screen_options(site, kind, &columns, &hidden, per_page, &listing.mode);
+    let (help, sidebar) = help(kind);
+    let file = if kind == POST {
+        "edit.php".to_string()
+    } else {
+        format!("edit.php?post_type={}", kind.name)
+    };
+    let id = format!("edit-{}", kind.name);
     let page = Page {
         screen: Screen {
             pagenow: "edit.php",
-            typenow: "post",
-            parent_file: Some("edit.php"),
-            submenu_file: Some("edit.php"),
+            typenow: kind.name,
+            parent_file: Some(&file),
+            submenu_file: Some(&file),
         },
-        id: "edit-post",
-        title: "Posts",
+        id: &id,
+        title: kind.plural,
         help: &help,
-        sidebar: HELP_SIDEBAR,
+        sidebar,
         screen_options: &screen_options,
         styles: &[],
         scripts: &["inline-edit-post", "heartbeat"],

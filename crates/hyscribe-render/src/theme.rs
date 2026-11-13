@@ -205,6 +205,12 @@ impl Theme {
         ]
     }
 
+    /// `get_page_templates( null, $post_type )`: the slug and title of each
+    /// of `theme.json`'s custom templates for `post_type`, by title.
+    pub fn page_templates(&self, post_type: &str) -> Vec<(String, String)> {
+        custom_templates(THEME_JSON, post_type)
+    }
+
     /// The theme's `Theme Name` header.
     pub fn name(&self) -> String {
         header(STYLE_CSS, "Theme Name")
@@ -291,6 +297,46 @@ fn style_partials(json: &[u8]) -> Vec<(String, Vec<u8>)> {
 /// The string at `key` of a decoded JSON object.
 fn string<'v>(value: &'v Value, key: &str) -> Option<&'v [u8]> {
     value.get_str(key).and_then(Value::as_bytes)
+}
+
+/// The custom templates of `theme_json` for `post_type`, by title.
+fn custom_templates(theme_json: &[u8], post_type: &str) -> Vec<(String, String)> {
+    let root = json_decode(theme_json).unwrap_or(Value::Null);
+    let custom = root
+        .get_str("customTemplates")
+        .and_then(Value::as_array)
+        .unwrap_or_default();
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    let mut templates: Vec<(String, String)> = custom
+        .iter()
+        .filter(|(_, template)| match template.get_str("postTypes") {
+            Some(Value::Array(types)) => types
+                .iter()
+                .any(|(_, name)| name.as_bytes() == Some(post_type.as_bytes())),
+            _ => post_type == "page",
+        })
+        .filter_map(|(_, template)| {
+            let name = string(template, "name")?;
+            Some((text(name), text(string(template, "title").unwrap_or(name))))
+        })
+        .collect();
+    // `array_flip()` keeps the last template of a title; `ksort()` compares
+    // numeric titles as numbers.
+    let mut kept: Vec<(String, String)> = Vec::new();
+    for template in templates.drain(..).rev() {
+        if !kept.iter().any(|(_, title)| *title == template.1) {
+            kept.push(template);
+        }
+    }
+    let number = |title: &str| {
+        let value = Value::String(title.as_bytes().to_vec());
+        value.is_numeric().then(|| value.to_float())
+    };
+    kept.sort_by(|a, b| match (number(&a.1), number(&b.1)) {
+        (Some(x), Some(y)) => x.total_cmp(&y),
+        _ => a.1.cmp(&b.1),
+    });
+    kept
 }
 
 /// `templateParts` in `theme.json`: part name to area.

@@ -1,6 +1,6 @@
 		<form method="get">
 		<table style="display: none"><tbody id="inlineedit">
-					<tr id="inline-edit" class="inline-edit-row inline-edit-row-post quick-edit-row quick-edit-row-post inline-edit-post" style="display: none">
+					<tr id="inline-edit" class="inline-edit-row inline-edit-row-%type% quick-edit-row quick-edit-row-%type% inline-edit-%type%" style="display: none">
 			<td colspan="%columns%" class="colspanchange">
 			<div class="inline-edit-wrapper" role="region" aria-labelledby="quick-edit-legend">
 			<fieldset class="inline-edit-col-left">
@@ -34,39 +34,14 @@
 			</fieldset>
 
 			
-				<fieldset class="inline-edit-col-center inline-edit-categories">
-					<div class="inline-edit-col">
-
-					
-						<span class="title inline-edit-categories-label">Categories</span>
-						<input type="hidden" name="post_category[]" value="0" />
-						<ul class="cat-checklist category-checklist">
-							%categories%						</ul>
-
-					
-					</div>
-				</fieldset>
-
-			
-			<fieldset class="inline-edit-col-right">
+%categories%			<fieldset class="inline-edit-col-right">
 				<div class="inline-edit-col">
 
 				
 				
-				
-				
-					
-																				<div class="inline-edit-tags-wrap">
-							<label class="inline-edit-tags">
-								<span class="title">Tags</span>
-								<textarea data-wp-taxonomy="post_tag" cols="22" rows="1" name="tax_input[post_tag]" class="tax_input_post_tag" aria-describedby="inline-edit-post_tag-desc"></textarea>
-							</label>
-							<p class="howto" id="inline-edit-post_tag-desc">Separate tags with commas</p>
-							</div>
-						
-					
-				
-				
+%attributes%				
+%templates%				
+%tags%				
 					
 						<div class="inline-edit-group wp-clearfix">
 
@@ -77,13 +52,7 @@
 							</label>
 
 						
-						
-							<label class="alignleft">
-								<input type="checkbox" name="ping_status" value="open" />
-								<span class="checkbox-title">Allow Pings</span>
-							</label>
-
-						
+%pings%						
 						</div>
 
 					
@@ -112,14 +81,14 @@
 									<span class="spinner"></span>
 				
 				<input type="hidden" name="post_view" value="%view%" />
-				<input type="hidden" name="screen" value="edit-post" />
+				<input type="hidden" name="screen" value="edit-%type%" />
 				
 				<div class="notice notice-error notice-alt inline hidden"><p class="error"></p></div>			</div>
 		</div> <!-- end of .inline-edit-wrapper -->
 
 			</td></tr>
 
-						<tr id="bulk-edit" class="inline-edit-row inline-edit-row-post bulk-edit-row bulk-edit-row-post bulk-edit-post" style="display: none">
+						<tr id="bulk-edit" class="inline-edit-row inline-edit-row-%type% bulk-edit-row bulk-edit-row-%type% bulk-edit-%type%" style="display: none">
 			<td colspan="%columns%" class="colspanchange">
 			<div class="inline-edit-wrapper" role="region" aria-labelledby="bulk-edit-legend">
 			<fieldset class="inline-edit-col-left">
@@ -146,8 +115,8 @@
 
 				%bulk_authors%
 				
-				
-				
+%bulk_attributes%				
+%bulk_templates%				
 				
 					
 						<div class="inline-edit-group wp-clearfix">
@@ -163,17 +132,7 @@
 							</label>
 
 						
-						
-							<label class="alignright">
-								<span class="title">Pings</span>
-								<select name="ping_status">
-									<option value="">&mdash; No Change &mdash;</option>
-									<option value="open">Allow</option>
-									<option value="closed">Do not allow</option>
-								</select>
-							</label>
-
-						
+%bulk_pings%						
 						</div>
 
 					
@@ -200,7 +159,7 @@
 
 				
 				<input type="hidden" name="post_view" value="%view%" />
-				<input type="hidden" name="screen" value="edit-post" />
+				<input type="hidden" name="screen" value="edit-%type%" />
 				
 				<div class="notice notice-error notice-alt inline hidden"><p class="error"></p></div>			</div>
 		</div> <!-- end of .inline-edit-wrapper -->

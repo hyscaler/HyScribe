@@ -284,6 +284,45 @@ async fn logged_in_users_are_let_in() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // The Discussion, Media, Permalinks and Privacy settings, without
+    // their arguments and actions.
+    let list = include_str!("../../../hyscribe-admin/tests/golden/settings-more.tsv");
+    let today = |format| hyscribe_render::date::format_unix(format, now(), Zone::Utc);
+    for file in [
+        "options-discussion",
+        "options-media",
+        "options-permalink",
+        "options-privacy",
+    ] {
+        let path = format!("/hs-admin/{file}");
+        let page = page_of(get(&site, &path, "127.0.0.1:8081", &cookies).await).await;
+        let row = list
+            .lines()
+            .find(|l| l.starts_with(&format!("default\t{file}.php\tadministrator\t")))
+            .unwrap();
+        let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+        let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap())
+            .replace("%ymd%", &today("Y/m/d"))
+            .replace("%ym%", &today("Y/m"));
+        assert_eq!(with_values(&php, &page), page, "{file}");
+        let response = get(
+            &site,
+            &format!("{path}?tab=policyguide"),
+            "127.0.0.1:8081",
+            &auth,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
+        let form = axum::http::Request::builder()
+            .method("POST")
+            .uri(&path)
+            .header(header::HOST, "127.0.0.1:8081")
+            .header(header::COOKIE, &cookies)
+            .body(Body::from("action=create-privacy-page"))
+            .unwrap();
+        let response = router(Arc::clone(&site)).oneshot(form).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
+    }
     // The categories.
     let path = "/hs-admin/edit-tags?taxonomy=category";
     let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
@@ -542,6 +581,26 @@ async fn refusals() {
     .unwrap()
     .unwrap();
     assert_eq!(profile.status(), StatusCode::FORBIDDEN);
+    let privacy = tokio::task::spawn_blocking({
+        let (site, handle) = (Arc::clone(&site), handle.clone());
+        move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            let path = "/hs-admin/options-privacy";
+            screen(
+                &admin,
+                path,
+                path,
+                "http://h/hs-admin/options-privacy",
+                "http://h",
+                &Browser::default(),
+            )
+        }
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(privacy.status(), StatusCode::FORBIDDEN);
     let terms = tokio::task::spawn_blocking(move || {
         let reads = LoginReads::new(&site, handle, now());
         let admin = Admin::new(&reads, &site, hyscribe_model::User::default());

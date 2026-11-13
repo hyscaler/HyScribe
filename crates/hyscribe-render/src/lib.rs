@@ -18,8 +18,8 @@ mod content;
 pub mod content_tags;
 mod core_blocks;
 pub use core_blocks::{
-    admin_comment_text, comment_author_of, comment_author_url, comment_avatar, number_format,
-    user_avatar,
+    admin_comment_text, comment_author_of, comment_author_url, comment_avatar, default_avatar,
+    number_format, user_avatar,
 };
 pub mod date;
 mod elements;

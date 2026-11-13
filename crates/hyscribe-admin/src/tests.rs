@@ -208,6 +208,71 @@ impl Role {
         Some(value.to_vec())
     }
 
+    /// The options the variants of `reference/settings-more/variants.php`
+    /// give.
+    fn settings_option(&self, name: &str) -> Option<&'static [u8]> {
+        let value: &[u8] = match (self.variant(), name) {
+            ("s2discussion", "default_ping_status" | "default_comment_status") => b"closed",
+            (
+                "s2discussion",
+                "default_pingback_flag"
+                | "require_name_email"
+                | "show_comments_cookies_opt_in"
+                | "thread_comments"
+                | "comments_notify"
+                | "moderation_notify"
+                | "wp_notes_notify"
+                | "comment_previously_approved",
+            )
+            | ("s2noavatars", "show_avatars")
+            | ("s2media", "thumbnail_crop" | "uploads_use_yearmonth_folders" | "medium_size_h") => {
+                b"0"
+            }
+            (
+                "s2discussion",
+                "comment_registration"
+                | "close_comments_for_old_posts"
+                | "page_comments"
+                | "comment_moderation",
+            ) => b"1",
+            ("s2discussion", "close_comments_days_old") => b"7\"",
+            ("s2discussion", "thread_comments_depth") => b"10",
+            ("s2discussion", "comments_per_page") => b"20",
+            ("s2discussion", "default_comments_page") => b"oldest",
+            ("s2discussion", "comment_order") => b"desc",
+            ("s2discussion", "comment_max_links") => b"5",
+            ("s2discussion", "moderation_keys") => b"spam\n<b>&amp; \"x\"",
+            ("s2discussion", "disallowed_keys") => b"viagra\n'y' & </textarea>",
+            ("s2discussion", "avatar_rating") => b"PG",
+            ("s2discussion", "avatar_default") => b"identicon",
+            ("s2discussion", "show_avatars") => b"2",
+            ("s2noavatars", "avatar_rating") => b"X",
+            ("s2noavatars", "avatar_default") => b"gravatar_default",
+            ("s2noavatars", "thread_comments_depth") => b"3x",
+            ("s2media", "thumbnail_size_w") => b"100\"",
+            ("s2media", "thumbnail_size_h") => b"80",
+            ("s2media", "medium_size_w") => b"400",
+            ("s2media", "large_size_w") => b"2048",
+            ("s2media", "large_size_h") => b"1536",
+            ("s2media", "upload_path") => b"files/<up>",
+            ("s2urlpath" | "s2uploads", "upload_path") => b"wp-content/uploads",
+            ("s2urlpath", "upload_url_path") => b"http://cdn.test/a\"b",
+            ("s2day", "permalink_structure") => b"/%year%/%monthnum%/%day%/%postname%/",
+            ("s2month", "permalink_structure") => b"/%year%/%monthnum%/%postname%/",
+            ("s2numeric", "permalink_structure") => b"/archives/%post_id%",
+            ("s2postname", "permalink_structure") => b"/%postname%/",
+            ("s2custom", "permalink_structure") => b"/%category%/<%postname%>/",
+            ("s2custom", "category_base") => b"topics",
+            ("s2custom", "tag_base") => b"labels\"<",
+            ("s2published", "wp_page_for_privacy_policy") => b"2",
+            ("s2unset", "wp_page_for_privacy_policy") => b"0",
+            ("s2missing", "wp_page_for_privacy_policy") => b"99",
+            ("s2trashed", "wp_page_for_privacy_policy") => b"98",
+            _ => return None,
+        };
+        Some(value)
+    }
+
     /// A variant of `reference/users-list/golden.sh` over its content.
     fn users_content(&self) -> bool {
         ["users", "upaged", "uhidden"].contains(&self.variant())
@@ -373,13 +438,23 @@ impl Urls for Role {
     fn fill(&self, text: &str) -> String {
         let text = admin_links(text, "%admin_url%", &format!("{SITE}/hs-admin/"));
         admin_links(&text, "\"%admin_path%", "\"/hs-admin/")
-            .replace("%rest_url%", &format!("{SITE}/index.php?rest_route=/"))
+            .replace("%rest_url%", &format!("{SITE}/{}", self.rest_path()))
             .replace("%site_url%", SITE)
             .replace("%user_id%", "0")
             .replace(
                 "%nonce:reset-password-for-user%",
                 "%nonce:reset-password-for-0%",
             )
+    }
+}
+
+impl Role {
+    /// The REST API's path, pretty with a permalink structure.
+    fn rest_path(&self) -> &'static str {
+        match self.settings_option("permalink_structure") {
+            Some(_) => "wp-json/",
+            None => "index.php?rest_route=/",
+        }
     }
 }
 
@@ -893,6 +968,9 @@ impl crate::posts::PostsSite for Role {
         if name == "category_children" && self.variant() == "stale" {
             return Some(b"a:0:{}".to_vec());
         }
+        if let Some(value) = self.settings_option(name) {
+            return Some(value.to_vec());
+        }
         if name == "show_avatars" && self.variant() == "noavatars"
             || name == "blog_public" && self.variant() == "layout"
         {
@@ -1022,6 +1100,18 @@ impl crate::posts::PostsSite for Role {
         Some(value.to_vec())
     }
     fn list_posts(&self, query: &hyscribe_model::PostQuery) -> (Vec<hyscribe_model::Post>, u64) {
+        if self.variant() == "s2nopages" && query.post_types == ["page"] {
+            return (Vec::new(), 0);
+        }
+        if self.variant() == "s2orphan" && query.post_types == ["page"] {
+            let orphan = hyscribe_model::Post {
+                id: 60,
+                parent: 999,
+                title: b"Orphan".to_vec(),
+                ..hyscribe_model::Post::default()
+            };
+            return (vec![orphan], 1);
+        }
         crate::posts::content::list(self.posts(), query)
     }
     fn status_counts(&self, post_type: &str, private_author: Option<u64>) -> Vec<(String, u64)> {
@@ -1040,6 +1130,14 @@ impl crate::posts::PostsSite for Role {
         crate::posts::content::months(self.posts(), post_type, trash)
     }
     fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        if self.variant() == "s2trashed" && id == 98 {
+            return Some(hyscribe_model::Post {
+                id,
+                post_type: "page".into(),
+                status: "trash".into(),
+                ..hyscribe_model::Post::default()
+            });
+        }
         if self.comments_content() {
             return [1, 2, 501]
                 .contains(&id)

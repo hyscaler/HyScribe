@@ -842,8 +842,14 @@ fn parent_options(site: &dyn PostsSite, kind: PostType) -> String {
         ..PostQuery::default()
     };
     let (pages, _) = site.list_posts(&query);
+    page_options(&pages, 0)
+}
+
+/// `wp_dropdown_pages()`'s options for `pages` as a tree, without pages
+/// whose parents are not listed, the page `selected` marked.
+pub(crate) fn page_options(pages: &[Post], selected: u64) -> String {
     let mut children: HashMap<u64, Vec<&Post>> = HashMap::new();
-    for page in &pages {
+    for page in pages {
         children.entry(page.parent).or_default().push(page);
     }
     let mut below = |parent: u64, depth: usize| {
@@ -859,8 +865,13 @@ fn parent_options(site: &dyn PostsSite, kind: PostType) -> String {
             text(&page.title)
         };
         out.push_str(&format!(
-            "\t<option class=\"level-{depth}\" value=\"{}\">{}{}</option>\n",
+            "\t<option class=\"level-{depth}\" value=\"{}\"{}>{}{}</option>\n",
             page.id,
+            if page.id == selected {
+                " selected=\"selected\""
+            } else {
+                ""
+            },
             "&nbsp;".repeat(depth * 3),
             esc_html(title.as_bytes())
         ));

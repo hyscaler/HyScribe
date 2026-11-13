@@ -828,6 +828,22 @@ fn comment_avatars() {
     assert!(comment_avatar(&options(b"0"), b"a@b.test", 50).is_empty());
 }
 
+/// The Discussion settings' avatars: the default forced, initials from the
+/// address's name with dots, underscores and hyphens as spaces.
+#[test]
+fn default_avatars_are_forced() {
+    let options = |name: &str| (name == "avatar_rating").then(|| b"G".to_vec());
+    let avatar =
+        |email: &[u8]| String::from_utf8(default_avatar(&options, email, "initials", 32)).unwrap();
+    assert!(
+        avatar(b"jo.an_li-x@b.test")
+            .contains("?s=32&#038;d=initials&#038;f=y&#038;r=g&#038;initials=jx' srcset="),
+        "{}",
+        avatar(b"jo.an_li-x@b.test")
+    );
+    assert!(avatar(b"nobody").contains("?s=32&#038;d=initials&#038;f=y&#038;r=g' srcset="));
+}
+
 /// The admin's `comment_text` runs `wp_kses_post()` after `make_clickable()`.
 #[test]
 fn admin_comment_text_is_kses_d() {

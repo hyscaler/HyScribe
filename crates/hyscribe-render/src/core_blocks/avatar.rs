@@ -238,8 +238,8 @@ pub fn user_avatar(option: &dyn Fn(&str) -> Option<Vec<u8>>, user: &User, size: 
         return Vec::new();
     }
     let name = user_name(user);
-    let (url, found) = gravatar(option, &user.email, &name, size);
-    let (url2x, _) = gravatar(option, &user.email, &name, size.saturating_mul(2));
+    let (url, found) = gravatar(option, &user.email, &name, size, false);
+    let (url2x, _) = gravatar(option, &user.email, &name, size.saturating_mul(2), false);
     img(
         b"",
         (&url, &url2x, found),
@@ -263,11 +263,50 @@ pub fn comment_avatar(
         "avatar_default" => Some(b"mystery".to_vec()),
         name => option(name),
     };
-    let (url, found) = gravatar(&mystery, email, b"", size);
-    let (url2x, _) = gravatar(&mystery, email, b"", size.saturating_mul(2));
+    let (url, found) = gravatar(&mystery, email, b"", size, false);
+    let (url2x, _) = gravatar(&mystery, email, b"", size.saturating_mul(2), false);
     img(
         b"",
         (&url, &url2x, found),
+        size,
+        "",
+        "loading='lazy' decoding='async'",
+    )
+}
+
+/// `get_avatar( $email, $size, $default, '', array( 'force_default' => true ) )`
+/// as the Discussion settings show each default, whether or not avatars show.
+pub fn default_avatar(
+    option: &dyn Fn(&str) -> Option<Vec<u8>>,
+    email: &[u8],
+    default: &str,
+    size: i64,
+) -> Vec<u8> {
+    let chosen = |name: &str| match name {
+        "avatar_default" => Some(default.as_bytes().to_vec()),
+        name => option(name),
+    };
+    // Initials come from the address's name, its dots, underscores and
+    // hyphens read as spaces.
+    let name: Vec<u8> = email
+        .iter()
+        .position(|&b| b == b'@')
+        .and_then(|at| email.get(..at))
+        .unwrap_or_default()
+        .iter()
+        .map(|&b| {
+            if matches!(b, b'.' | b'_' | b'-') {
+                b' '
+            } else {
+                b
+            }
+        })
+        .collect();
+    let (url, _) = gravatar(&chosen, email, &name, size, true);
+    let (url2x, _) = gravatar(&chosen, email, &name, size.saturating_mul(2), true);
+    img(
+        b"",
+        (&url, &url2x, false),
         size,
         "",
         "loading='lazy' decoding='async'",
@@ -314,17 +353,25 @@ fn avatar_data(context: &Context<'_>, subject: &Subject<'_>, size: i64) -> Optio
         (None, Subject::Comment(comment)) => (comment.author_email.clone(), comment.author.clone()),
         (None, Subject::User(_)) => (Vec::new(), Vec::new()),
     };
-    Some(gravatar(&|name| site.option(name), &email, &name, size))
+    Some(gravatar(
+        &|name| site.option(name),
+        &email,
+        &name,
+        size,
+        false,
+    ))
 }
 
 /// The Gravatar URL `get_avatar_data()` makes for `email` from the site's
 /// avatar options, with initials from `name` where they are the default,
-/// and whether there was an address.
+/// and whether there was an address; `force` shows the default whatever
+/// Gravatar holds.
 fn gravatar(
     option: &dyn Fn(&str) -> Option<Vec<u8>>,
     email: &[u8],
     name: &[u8],
     size: i64,
+    force: bool,
 ) -> (Vec<u8>, bool) {
     // get_option( 'avatar_default', 'mystery' ): an empty value stays empty.
     let mut default = option("avatar_default").unwrap_or_else(|| b"mystery".to_vec());
@@ -353,6 +400,9 @@ fn gravatar(
         }
     };
     arg("d", &default);
+    if force {
+        arg("f", b"y");
+    }
     arg("r", &rating);
     if default == b"initials" && !name.is_empty() {
         arg("initials", &initials(name));

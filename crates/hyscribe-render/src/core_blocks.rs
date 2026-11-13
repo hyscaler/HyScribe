@@ -1573,7 +1573,7 @@ fn footnotes(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 
 mod author;
 mod avatar;
-pub use avatar::{comment_avatar, user_avatar};
+pub use avatar::{comment_avatar, default_avatar, user_avatar};
 mod breadcrumbs;
 mod button;
 pub(crate) mod calendar;

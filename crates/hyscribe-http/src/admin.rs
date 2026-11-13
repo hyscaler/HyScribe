@@ -22,6 +22,7 @@ use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
 use hyscribe_admin::posts::{Answer, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids};
 use hyscribe_admin::profile::{ProfileSite, profile};
+use hyscribe_admin::settings_more;
 use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
 use hyscribe_admin::users::{ListedUser, UserArgs, UserQuery, UsersSite, user_order, users};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
@@ -912,6 +913,28 @@ fn screen(
                 Err(response) => return Some(*response),
             }
         }
+        // Their arguments and actions are not ported.
+        "/hs-admin/options-discussion"
+        | "/hs-admin/options-media"
+        | "/hs-admin/options-permalink"
+        | "/hs-admin/options-privacy" => {
+            if request_uri.contains('?') {
+                return None;
+            }
+            let screen = match path {
+                "/hs-admin/options-discussion" => settings_more::discussion,
+                "/hs-admin/options-media" => settings_more::media,
+                "/hs-admin/options-permalink" => settings_more::permalink,
+                _ => settings_more::privacy,
+            };
+            match answered(
+                admin,
+                screen(admin, (&canonical, origin), request_uri, browser),
+            ) {
+                Ok(html) => Some(html),
+                Err(response) => return Some(*response),
+            }
+        }
         "/hs-admin/users" => {
             let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
             let args = user_args(&raw)?;
@@ -1049,8 +1072,11 @@ fn answer(
                 let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
                 let url = text(&[scheme, &here].concat());
                 let origin = text(&[scheme, host].concat());
-                screen(&admin, uri.path(), &requested, &url, &origin, &browser)
-                    .unwrap_or_else(|| response(StatusCode::NOT_IMPLEMENTED, nocache(), Vec::new()))
+                // No screen's actions are ported.
+                let page = (!post)
+                    .then(|| screen(&admin, uri.path(), &requested, &url, &origin, &browser))
+                    .flatten();
+                page.unwrap_or_else(|| response(StatusCode::NOT_IMPLEMENTED, nocache(), Vec::new()))
             })
         }
         None => {

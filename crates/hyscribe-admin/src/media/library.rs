@@ -22,12 +22,12 @@ use crate::list_table::{
     row_actions, screen_options, table_description,
 };
 use crate::menu::{Screen, esc_link, link};
+use crate::page::Request;
 use crate::page::{HelpTab, Page, admin_page, json, text};
 use crate::posts::{
     Answer, author_ids, author_lists, comments_bubble, draft_or_post_title, edit_link,
     hidden_columns, per_page,
 };
-use crate::page::Request;
 
 const GRID: &str = include_str!("grid.html");
 const LIST: &str = include_str!("list.html");
@@ -461,6 +461,7 @@ fn query(
         query.sentence = search.into();
         query.search_count = search_count(search);
         query.filenames = true;
+        query.logged_in = true;
     }
     let orderby = args.get("orderby").unwrap_or_default();
     let ascending = args

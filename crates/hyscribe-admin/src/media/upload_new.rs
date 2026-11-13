@@ -11,9 +11,9 @@ use super::{MAX_UPLOAD, MediaSite, can_upload, single_file};
 use crate::admin_bar::BarSite;
 use crate::list_table::fill;
 use crate::menu::Screen;
+use crate::page::Request;
 use crate::page::{HelpTab, Page, admin_page, json, object, text};
 use crate::posts::{Answer, user_setting};
-use crate::page::Request;
 
 const CONTENT: &str = include_str!("new.html");
 const UPLOADER: &str = include_str!("uploader.html");

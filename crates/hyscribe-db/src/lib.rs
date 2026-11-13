@@ -1881,9 +1881,8 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
             sql.bind(Bind::Text(pattern.clone()));
         }
     }
-    // A visitor's search leaves out protected posts; a filename search is
-    // the admin's.
-    if !query.search.is_empty() && !query.filenames {
+    // A visitor's search leaves out protected posts.
+    if !query.search.is_empty() && !query.logged_in {
         sql.push(" AND post_password = ''");
     }
     let date = [

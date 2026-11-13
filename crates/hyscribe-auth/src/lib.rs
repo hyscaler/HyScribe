@@ -32,6 +32,16 @@ pub fn hash_password(password: &[u8]) -> io::Result<String> {
     hash_from(password, salt)
 }
 
+/// `wp_generate_password( $length )`: letters, digits and the special
+/// characters, drawn from the kernel's random source.
+pub fn generate_password(length: usize) -> io::Result<String> {
+    sessions::generated(
+        random_bytes,
+        length,
+        b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()",
+    )
+}
+
 /// Fills `buf` from the kernel's random source.
 pub(crate) fn random_bytes(buf: &mut [u8]) -> io::Result<()> {
     std::fs::File::open("/dev/urandom").and_then(|mut random| random.read_exact(buf))

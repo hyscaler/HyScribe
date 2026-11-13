@@ -21,6 +21,7 @@ use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
 use hyscribe_admin::posts::{Answer, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids};
+use hyscribe_admin::profile::{ProfileSite, profile};
 use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
 use hyscribe_admin::users::{ListedUser, UserArgs, UserQuery, UsersSite, user_order, users};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
@@ -632,6 +633,21 @@ impl UsersSite for Admin<'_> {
     }
 }
 
+impl ProfileSite for Admin<'_> {
+    fn profile_user(&self) -> hyscribe_model::User {
+        let user = self.reads.reads.wait(self.site.db.user(self.user.id));
+        user.unwrap_or_else(|| self.user.clone())
+    }
+    /// HyScribe's own sessions.
+    fn sessions(&self) -> usize {
+        let sessions = self.site.sessions.as_ref();
+        sessions.map_or(0, |sessions| sessions.count(self.user.id, self.reads.now))
+    }
+    fn generated_password(&self) -> String {
+        hyscribe_auth::generate_password(24).unwrap_or_default()
+    }
+}
+
 impl TermsSite for Admin<'_> {
     fn list_terms(&self, query: &TermQuery) -> Vec<Term> {
         RenderSite::term_query(&self.reads.reads, query)
@@ -883,6 +899,19 @@ fn screen(
         String::from_utf8_lossy(&remove_query_arg(&REMOVABLE, url.as_bytes())).into_owned();
     let page = match path {
         "/hs-admin/tools" => hyscribe_admin::tools::tools(admin, &canonical, origin, browser),
+        // HTTPS offers application passwords, whose list is not ported.
+        "/hs-admin/profile" => {
+            if request_uri.contains('?') || origin.starts_with("https://") {
+                return None;
+            }
+            match answered(
+                admin,
+                profile(admin, &canonical, origin, request_uri, browser),
+            ) {
+                Ok(html) => Some(html),
+                Err(response) => return Some(*response),
+            }
+        }
         "/hs-admin/users" => {
             let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
             let args = user_args(&raw)?;

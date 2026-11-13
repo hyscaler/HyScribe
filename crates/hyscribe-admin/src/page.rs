@@ -90,58 +90,80 @@ pub struct Page<'a> {
 }
 
 /// A color scheme `register_admin_color_schemes()` adds.
-struct Scheme {
-    name: &'static str,
-    stylesheet: bool,
+pub(crate) struct Scheme {
+    pub(crate) name: &'static str,
+    /// Its name in the color picker.
+    pub(crate) label: &'static str,
+    pub(crate) stylesheet: bool,
     /// Base, focus and current icon colors.
-    icons: [&'static str; 3],
+    pub(crate) icons: [&'static str; 3],
+    /// The colors the picker shows.
+    pub(crate) palette: &'static [&'static str],
 }
 
-const SCHEMES: [Scheme; 9] = [
+pub(crate) const SCHEMES: [Scheme; 9] = [
     Scheme {
         name: "modern",
+        label: "Default",
         stylesheet: true,
         icons: ["#f3f1f1", "#fff", "#fff"],
+        palette: &["#1e1e1e", "#3858e9", "#7b90ff"],
     },
     Scheme {
         name: "fresh",
+        label: "Fresh",
         stylesheet: false,
         icons: ["#a7aaad", "#72aee6", "#fff"],
+        palette: &["#1d2327", "#2c3338", "#2271b1", "#72aee6"],
     },
     Scheme {
         name: "light",
+        label: "Light",
         stylesheet: true,
         icons: ["#999", "#ccc", "#ccc"],
+        palette: &["#e5e5e5", "#6a6a6a", "#c64606", "#007cba"],
     },
     Scheme {
         name: "blue",
+        label: "Blue",
         stylesheet: true,
         icons: ["#e5f8ff", "#fff", "#fff"],
+        palette: &["#183751", "#245278", "#437aa8", "#e1a948"],
     },
     Scheme {
         name: "midnight",
+        label: "Midnight",
         stylesheet: true,
         icons: ["#f1f2f3", "#fff", "#fff"],
+        palette: &["#232a2e", "#333c42", "#69a8bb", "#cf4339"],
     },
     Scheme {
         name: "sunrise",
+        label: "Sunrise",
         stylesheet: true,
         icons: ["#f3f1f1", "#fff", "#fff"],
+        palette: &["#6f2724", "#8a312d", "#ad631e", "#ccaf0b"],
     },
     Scheme {
         name: "ectoplasm",
+        label: "Ectoplasm",
         stylesheet: true,
         icons: ["#ece6f6", "#fff", "#fff"],
+        palette: &["#392751", "#4a3369", "#646c3e", "#d46f15"],
     },
     Scheme {
         name: "ocean",
+        label: "Ocean",
         stylesheet: true,
         icons: ["#f2fcff", "#fff", "#fff"],
+        palette: &["#2b3f44", "#39535a", "#567958", "#aa9d88"],
     },
     Scheme {
         name: "coffee",
+        label: "Coffee",
         stylesheet: true,
         icons: ["#f3f2f1", "#fff", "#fff"],
+        palette: &["#382e27", "#5c4c40", "#916745", "#9ea476"],
     },
 ];
 

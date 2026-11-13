@@ -27,6 +27,8 @@ fn a_session_lives_until_it_expires_or_ends() {
     assert!(!sessions.verify(1, b"other", NOW));
     let second = sessions.create(1, NOW + 120, &origin()).unwrap();
     assert_ne!(token, second);
+    assert_eq!(sessions.count(1, NOW), 2);
+    assert_eq!(sessions.count(1, NOW + 61), 1);
     sessions.destroy(1, token.as_bytes(), NOW).unwrap();
     assert!(!sessions.verify(1, token.as_bytes(), NOW));
     assert!(sessions.verify(1, second.as_bytes(), NOW));

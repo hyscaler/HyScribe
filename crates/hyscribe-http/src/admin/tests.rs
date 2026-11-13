@@ -138,7 +138,7 @@ async fn logged_in_users_are_let_in() {
     let response = get(&site, "/hs-admin/edit?paged=9", "127.0.0.1:8081", &auth).await;
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(location(&response), "/hs-admin/edit?paged=1");
-    let response = get(&site, "/hs-admin/profile", "127.0.0.1:8081", &auth).await;
+    let response = get(&site, "/hs-admin/upload", "127.0.0.1:8081", &auth).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     let cookies = all.join("; ");
     let page = page_of(get(&site, "/hs-admin/edit", "127.0.0.1:8081", &cookies).await).await;
@@ -246,6 +246,44 @@ async fn logged_in_users_are_let_in() {
         let response = get(&site, path, "127.0.0.1:8081", &auth).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
     }
+    // The profile, with the session this request has.
+    let page = page_of(get(&site, "/hs-admin/profile", "127.0.0.1:8081", &cookies).await).await;
+    let list = include_str!("../../../hyscribe-admin/tests/golden/profile.tsv");
+    let row = list
+        .lines()
+        .find(|l| l.starts_with("sessions1\tadministrator\t"))
+        .unwrap();
+    let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+    // The generated password, escaped, is the attribute's whole value.
+    let at = page.find("data-pw=\"").unwrap() + 9;
+    let end = at + page.get(at..).unwrap().find('"').unwrap();
+    let password = page.get(at..end).unwrap();
+    assert!(password.len() >= 24);
+    let page = format!(
+        "{}%password%{}",
+        page.get(..at).unwrap(),
+        page.get(end..).unwrap()
+    );
+    assert_eq!(with_values(&php, &page), page);
+    // A second session offers to end the others.
+    let origin = hyscribe_auth::sessions::Origin {
+        ip: b"",
+        ua: b"",
+        login: now(),
+    };
+    let sessions = site.sessions.as_ref().unwrap();
+    sessions.create(1, now() + 3600, &origin).unwrap();
+    let page = page_of(get(&site, "/hs-admin/profile", "127.0.0.1:8081", &cookies).await).await;
+    assert!(page.contains("id=\"destroy-sessions\">Log Out Everywhere Else"));
+    let response = get(
+        &site,
+        "/hs-admin/profile?updated=1",
+        "127.0.0.1:8081",
+        &auth,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     // The categories.
     let path = "/hs-admin/edit-tags?taxonomy=category";
     let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
@@ -464,6 +502,46 @@ async fn refusals() {
     .unwrap()
     .unwrap();
     assert_eq!(users.status(), StatusCode::FORBIDDEN);
+    // Over HTTPS the profile offers application passwords, not ported.
+    let profile = tokio::task::spawn_blocking({
+        let (site, handle) = (Arc::clone(&site), handle.clone());
+        move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            let path = "/hs-admin/profile";
+            screen(
+                &admin,
+                path,
+                path,
+                "https://h/hs-admin/profile",
+                "https://h",
+                &Browser::default(),
+            )
+        }
+    })
+    .await
+    .unwrap();
+    assert!(profile.is_none());
+    let profile = tokio::task::spawn_blocking({
+        let (site, handle) = (Arc::clone(&site), handle.clone());
+        move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            let path = "/hs-admin/profile";
+            screen(
+                &admin,
+                path,
+                path,
+                "http://h/hs-admin/profile",
+                "http://h",
+                &Browser::default(),
+            )
+        }
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(profile.status(), StatusCode::FORBIDDEN);
     let terms = tokio::task::spawn_blocking(move || {
         let reads = LoginReads::new(&site, handle, now());
         let admin = Admin::new(&reads, &site, hyscribe_model::User::default());

@@ -178,7 +178,7 @@ fn array_of(stored: &[u8]) -> Vec<(Key, Value)> {
 
 /// `wp_roles()->get_names()` of the `stored` roles: each role's key and
 /// name, in stored order, those without a name left out.
-fn role_names(stored: &[u8]) -> Vec<(String, String)> {
+pub(crate) fn role_names(stored: &[u8]) -> Vec<(String, String)> {
     array_of(stored)
         .iter()
         .filter_map(|(key, role)| {

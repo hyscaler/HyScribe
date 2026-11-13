@@ -176,6 +176,38 @@ impl Role {
         crate::posts::PostsSite::post_terms(self, &crate::posts::tests::hello(), taxonomy)
     }
 
+    /// The user options the profile variants of
+    /// `reference/profile/variants.php` give, and the nickname and roles.
+    fn profile_option(&self, name: &str) -> Option<Vec<u8>> {
+        let value: &[u8] = match (self.variant(), name) {
+            (
+                "poptions",
+                "rich_editing"
+                | "syntax_highlighting"
+                | "show_admin_bar_front"
+                | "infinite_scrolling",
+            ) => b"false",
+            ("poptions", "comment_shortcuts") => b"true",
+            ("poptions", "admin_color") => b"ocean",
+            ("poptions", "nickname") => b"boss",
+            (_, "nickname") => b"admin",
+            ("ppending", "_new_email") => {
+                b"a:2:{s:4:\"hash\";s:1:\"x\";s:8:\"newemail\";s:16:\"new@example.test\";}"
+            }
+            ("pcaps", "capabilities") => {
+                b"a:3:{s:13:\"administrator\";b:1;s:10:\"edit_posts\";b:1;s:6:\"custom\";b:0;}"
+            }
+            (_, "capabilities") => {
+                return Some(
+                    format!("a:1:{{s:{}:\"{}\";b:1;}}", self.role().len(), self.role())
+                        .into_bytes(),
+                );
+            }
+            _ => return None,
+        };
+        Some(value.to_vec())
+    }
+
     /// A variant of `reference/users-list/golden.sh` over its content.
     fn users_content(&self) -> bool {
         ["users", "upaged", "uhidden"].contains(&self.variant())
@@ -343,7 +375,11 @@ impl Urls for Role {
         admin_links(&text, "\"%admin_path%", "\"/hs-admin/")
             .replace("%rest_url%", &format!("{SITE}/index.php?rest_route=/"))
             .replace("%site_url%", SITE)
-            .replace("%user_id%", "1")
+            .replace("%user_id%", "0")
+            .replace(
+                "%nonce:reset-password-for-user%",
+                "%nonce:reset-password-for-0%",
+            )
     }
 }
 
@@ -355,7 +391,8 @@ impl PageSite for Role {
         format!("%nonce:{action}%")
     }
     fn admin_color(&self) -> Option<Vec<u8>> {
-        Some(b"modern".to_vec())
+        self.profile_option("admin_color")
+            .or_else(|| Some(b"modern".to_vec()))
     }
     fn preferences(&self) -> Option<Vec<u8>> {
         None
@@ -501,6 +538,36 @@ impl crate::users::UsersSite for Role {
     }
     fn author_url(&self, id: u64) -> String {
         format!("{SITE}/?author={id}")
+    }
+}
+
+impl crate::profile::ProfileSite for Role {
+    /// The fixture's administrator, named in the options variant.
+    fn profile_user(&self) -> hyscribe_model::User {
+        let named = self.variant() == "poptions";
+        let value = |set: &[u8]| if named { set.to_vec() } else { Vec::new() };
+        hyscribe_model::User {
+            id: 1,
+            login: b"admin".to_vec(),
+            nicename: b"admin".to_vec(),
+            email: b"admin@default-install.test".to_vec(),
+            url: b"http://default-install.test".to_vec(),
+            display_name: b"admin".to_vec(),
+            first_name: value(b"Ad &amp; Min"),
+            last_name: value(b"Istrator"),
+            description: value(b"Bio <b>bold</b> & more"),
+        }
+    }
+    fn sessions(&self) -> usize {
+        match self.variant() {
+            "psessions1" => 1,
+            "psessions2" => 2,
+            _ => 0,
+        }
+    }
+    /// The goldens' mask of the generated password.
+    fn generated_password(&self) -> String {
+        "%password%".into()
     }
 }
 
@@ -914,6 +981,9 @@ impl crate::posts::PostsSite for Role {
                 _ => return None,
             };
             return Some(value.to_vec());
+        }
+        if let Some(value) = self.profile_option(name) {
+            return Some(value);
         }
         if self.variant() == "upaged" && name == "users_per_page" {
             return Some(b"2".to_vec());

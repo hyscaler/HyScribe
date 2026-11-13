@@ -171,3 +171,14 @@ fn nonce_ticks_are_half_days() {
     assert_eq!(nonce_tick(43_200), 1);
     assert_eq!(nonce_tick(43_201), 2);
 }
+
+/// `wp_generate_password( 24 )` draws its characters, special ones among
+/// them, from the kernel.
+#[test]
+fn passwords_are_generated() {
+    let password = generate_password(24).unwrap();
+    assert_eq!(password.len(), 24);
+    let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()";
+    assert!(password.chars().all(|c| chars.contains(c)));
+    assert_ne!(password, generate_password(24).unwrap());
+}

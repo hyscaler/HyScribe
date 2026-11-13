@@ -119,6 +119,11 @@ pub fn selected(chosen: bool) -> &'static str {
     if chosen { " selected='selected'" } else { "" }
 }
 
+/// `checked()`'s ` checked='checked'`, when `on`.
+pub fn checked(on: bool) -> &'static str {
+    if on { " checked='checked'" } else { "" }
+}
+
 /// `row_actions( $actions )`: the links under a row's primary column,
 /// always shown when `visible`.
 pub fn row_actions(actions: &[(&str, String)], visible: bool) -> String {

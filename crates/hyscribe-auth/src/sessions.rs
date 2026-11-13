@@ -40,18 +40,33 @@ fn verifier(token: &[u8]) -> Vec<u8> {
 }
 
 /// `wp_generate_password( 43, false, false )`, from `fill`'s bytes.
-fn new_token(mut fill: impl FnMut(&mut [u8]) -> io::Result<()>) -> io::Result<String> {
-    let mut token = String::with_capacity(43);
+fn new_token(fill: impl FnMut(&mut [u8]) -> io::Result<()>) -> io::Result<String> {
+    generated(fill, 43, TOKEN_CHARS)
+}
+
+/// `length` characters of `chars`, each drawn evenly from `fill`'s bytes.
+pub(crate) fn generated(
+    mut fill: impl FnMut(&mut [u8]) -> io::Result<()>,
+    length: usize,
+    chars: &[u8],
+) -> io::Result<String> {
+    let mut out = String::with_capacity(length);
     let (mut bytes, mut read) = ([0; 64], Ok(()));
-    while read.is_ok() && token.len() < 43 {
+    // Below this, the bytes fall evenly on the characters.
+    let even = 256 - 256 % chars.len();
+    while read.is_ok() && out.len() < length {
         read = fill(&mut bytes);
-        // Below 248, the bytes fall evenly on the 62 characters.
-        let chars = bytes.iter().filter(|&&b| b < 248).take(43 - token.len());
-        token.extend(
-            chars.filter_map(|&b| TOKEN_CHARS.get(usize::from(b % 62)).map(|&c| char::from(c))),
-        );
+        let drawn = bytes
+            .iter()
+            .filter(|&&b| usize::from(b) < even)
+            .take(length - out.len());
+        out.extend(drawn.filter_map(|&b| {
+            chars
+                .get(usize::from(b) % chars.len())
+                .map(|&c| char::from(c))
+        }));
     }
-    read.map(|()| token)
+    read.map(|()| out)
 }
 
 impl Sessions {
@@ -112,6 +127,12 @@ impl Sessions {
                     .and_then(|()| file.sync_all())
             })
             .and_then(|()| std::fs::rename(&temporary, path))
+    }
+
+    /// `count( $sessions->get_all() )`: how many of `user`'s sessions are
+    /// unexpired.
+    pub fn count(&self, user: u64, now: i64) -> usize {
+        self.sessions(user, now).len()
     }
 
     /// `WP_Session_Tokens::create()`: a new session for `user` until

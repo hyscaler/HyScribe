@@ -5,7 +5,7 @@
 
 use hyscribe_kses::esc_attr;
 use hyscribe_model::Post;
-use hyscribe_phpser::{Value, decode, php_trim};
+use hyscribe_phpser::{Value, decode, is_empty_string, php_trim};
 
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit_title, convert_chars, wptexturize};
 use crate::site::{Archive, Request, Site, Taxonomy};
@@ -54,6 +54,16 @@ pub fn the_title(post: &Post) -> Vec<u8> {
         post.title.clone()
     };
     title_filters(&title)
+}
+
+/// [`the_title`], or `(no title)` for one that is `empty()`, as post
+/// lists show it.
+pub(crate) fn listed_title(post: &Post) -> Vec<u8> {
+    let title = the_title(post);
+    if is_empty_string(&title) {
+        return b"(no title)".to_vec();
+    }
+    title
 }
 
 /// The `the_title` filters: `wptexturize`, `convert_chars`, `trim` and

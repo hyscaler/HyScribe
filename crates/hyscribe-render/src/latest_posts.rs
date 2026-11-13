@@ -14,7 +14,7 @@ use crate::date;
 use crate::excerpt::EXCERPT_MORE;
 use crate::formatting::{CORE_SHORTCODE_TAGS, sanitize_title, wptexturize};
 use crate::permalinks::permalink;
-use crate::post::the_title;
+use crate::post::listed_title;
 use crate::query_loop::order_by;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::{Renderer, replace, site_smilies};
@@ -40,10 +40,7 @@ impl Renderer<'_> {
         let mut items = Vec::new();
         for post in posts {
             let link = esc_url(&permalink(site, &post));
-            let mut title = the_title(&post);
-            if is_empty_string(&title) {
-                title = b"(no title)".to_vec();
-            }
+            let title = listed_title(&post);
             items.extend_from_slice(b"<li><a class=\"wp-block-latest-posts__post-title\" href=\"");
             items.extend_from_slice(&esc_url(&link));
             items.extend_from_slice(b"\">");

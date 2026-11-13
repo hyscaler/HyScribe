@@ -3,7 +3,7 @@
 //! The legacy widget block and the classic core widgets it renders.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
-use hyscribe_model::Term;
+use hyscribe_model::{PostQuery, Term};
 use hyscribe_phpser::{
     Key, Maybe, Value, base64_decode, hash_equals, is_empty_string, isset, maybe_unserialize,
     parse_str, unserialize,
@@ -16,9 +16,11 @@ use crate::blocks::Block;
 use crate::categories::{dropdown_select, terms};
 use crate::core_blocks::calendar::request_calendar;
 use crate::core_blocks::prepared;
+use crate::date;
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, wptexturize};
 use crate::head::json_hex_tag;
 use crate::permalinks;
+use crate::post::listed_title;
 use crate::site::{Archive, Taxonomy};
 use crate::template::Renderer;
 
@@ -218,6 +220,7 @@ impl Renderer<'_> {
             "archives" => self.archives_widget(number, args, instance),
             "categories" => self.categories_widget(number, args, instance),
             "calendar" => self.calendar_widget(args, instance),
+            "recent-posts" => self.recent_posts_widget(args, instance),
             "search" => self.search_widget(args, instance),
             "custom_html" => self.custom_html_widget(args, instance),
             "meta" => self.meta_widget(args, instance),
@@ -361,6 +364,69 @@ impl Renderer<'_> {
             wrap,
             request_calendar(&self.context).as_bytes(),
             b"</div>",
+            &args.after_widget,
+        ]
+        .concat()
+    }
+
+    /// `WP_Widget_Recent_Posts::widget()`: the newest published posts,
+    /// sticky or not, five unless the instance asks for another number;
+    /// nothing at all without one.
+    fn recent_posts_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
+        let context = &self.context;
+        let site = context.site;
+        let number = instance
+            .get_str("number")
+            .filter(|number| !number.is_empty())
+            .map_or(0, hyscribe_phpser::absint);
+        let query = PostQuery {
+            post_types: vec!["post".into()],
+            // `posts_per_page` as asked, five for none.
+            limit: match number {
+                0 => 5,
+                n => u32::try_from(n).unwrap_or(u32::MAX),
+            },
+            ..PostQuery::default()
+        };
+        let posts = site.query(&query);
+        if posts.is_empty() {
+            return Vec::new();
+        }
+        let title = widget_title(instance, b"Recent Posts");
+        let date_format =
+            String::from_utf8_lossy(&site.option("date_format").unwrap_or_default()).into_owned();
+        let mut items = Vec::new();
+        for post in &posts {
+            let title = listed_title(post);
+            let current = if context.request.queried_object_id == post.id {
+                &b" aria-current=\"page\""[..]
+            } else {
+                b""
+            };
+            items.extend_from_slice(b"\t\t\t\t\t\t\t\t\t\t\t<li>\n\t\t\t\t\t<a href=\"");
+            items.extend_from_slice(&esc_url(&permalinks::permalink(site, post)));
+            items.extend_from_slice(b"\"");
+            items.extend_from_slice(current);
+            items.extend_from_slice(b">");
+            items.extend_from_slice(&title);
+            items.extend_from_slice(b"</a>\n");
+            if checked(instance, "show_date") {
+                let shown = date::format(&date_format, &post.date, context.zone());
+                items.extend(
+                    format!("\t\t\t\t\t\t\t\t\t\t\t<span class=\"post-date\">{shown}</span>\n")
+                        .into_bytes(),
+                );
+            }
+            items.extend_from_slice(b"\t\t\t\t\t\t\t\t\t</li>\n");
+        }
+        [
+            &b"\n\t\t"[..],
+            &args.before_widget,
+            b"\n\t\t",
+            &titled(args, &title),
+            b"\n\t\t<ul>\n",
+            &items,
+            b"\t\t\t\t\t</ul>\n\n\t\t",
             &args.after_widget,
         ]
         .concat()

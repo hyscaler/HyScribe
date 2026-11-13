@@ -67,8 +67,7 @@ fn post(id: u64) -> Post {
     }
 }
 
-/// The approved and pending comments of the content, newest first, as
-/// `role` reads them.
+/// The comments of the content, newest first, as `role` reads them.
 pub(crate) fn comments(role: &Role) -> Vec<RecentComment> {
     let mut hello = crate::dashboard::tests::hello_comment(false);
     let admin = User {
@@ -123,6 +122,40 @@ pub(crate) fn comments(role: &Role) -> Vec<RecentComment> {
                 0,
             ),
             "approved",
+        ),
+        (
+            Comment {
+                date: "2026-11-04 11:00:00".into(),
+                ..comment(
+                    505,
+                    1,
+                    ("Trashed", "gone@example.test", "", ""),
+                    4,
+                    "Gone",
+                    "comment",
+                    0,
+                    0,
+                )
+            },
+            "trash",
+        ),
+        (
+            comment(
+                504,
+                1,
+                (
+                    "Spammer",
+                    "spam@example.test",
+                    "http://spam.example.test",
+                    "",
+                ),
+                4,
+                "Buy now",
+                "comment",
+                0,
+                0,
+            ),
+            "spam",
         ),
         (
             comment(

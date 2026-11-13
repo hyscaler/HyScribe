@@ -11,15 +11,17 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::admin_bar::{BarSite, Browser};
 use hyscribe_admin::assets::Urls;
-use hyscribe_admin::comments::{CommentsSite, edit_comments};
-use hyscribe_admin::dashboard::{CommentCounts, DashboardSite, RecentComment, dashboard};
+use hyscribe_admin::comments::{CommentArgs, CommentQuery, CommentsSite, edit_comments};
+use hyscribe_admin::dashboard::{
+    CommentCounts, DashboardSite, RecentComment, comment_status, dashboard,
+};
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
 use hyscribe_admin::posts::{Answer, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids};
 use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
-use hyscribe_db::{StatusOrder, StatusQuery};
+use hyscribe_db::{CommentFilter, StatusOrder, StatusQuery};
 use hyscribe_model::{Post, PostQuery, Term, TermOrder, TermQuery, User};
 use hyscribe_phpser::{
     Key, Value, addslashes, is_empty_string, parse_str, remove_query_arg, stripslashes, urlencode,
@@ -155,12 +157,7 @@ impl<'a> Admin<'a> {
         RecentComment {
             link: format!("{permalink}#comment-{}", comment.id),
             permalink,
-            // The lists read approved and pending comments only.
-            status: if approved == "1" {
-                "approved"
-            } else {
-                "unapproved"
-            },
+            status: comment_status(approved),
             user: (comment.user_id != 0)
                 .then(|| self.reads.reads.wait(self.site.db.user(comment.user_id)))
                 .flatten(),
@@ -355,10 +352,14 @@ impl DashboardSite for Admin<'_> {
         let (mut offset, mut number) = (0, 25);
         let mut found = Vec::new();
         loop {
-            let batch = self
-                .reads
-                .reads
-                .wait(self.site.db.latest_comments(pending, number, offset));
+            let batch = self.reads.reads.wait(self.site.db.list_comments(
+                &CommentFilter {
+                    approved: if pending { &["0", "1"] } else { &["1"] },
+                    user: None,
+                },
+                number,
+                offset,
+            ));
             if batch.is_empty() {
                 return found;
             }
@@ -503,13 +504,17 @@ impl PostsSite for Admin<'_> {
 }
 
 impl CommentsSite for Admin<'_> {
-    fn list_comments(&self, offset: u64, number: u64) -> (Vec<RecentComment>, u64) {
-        let limit = u32::try_from(number).unwrap_or(u32::MAX);
-        let offset = u32::try_from(offset).unwrap_or(u32::MAX);
+    fn list_comments(&self, query: &CommentQuery<'_>) -> (Vec<RecentComment>, u64) {
+        let filter = CommentFilter {
+            approved: query.approved,
+            user: query.user,
+        };
+        let limit = u32::try_from(query.number).unwrap_or(u32::MAX);
+        let offset = u32::try_from(query.offset).unwrap_or(u32::MAX);
         let found = self
             .reads
             .reads
-            .wait(self.site.db.latest_comments(true, limit, offset));
+            .wait(self.site.db.list_comments(&filter, limit, offset));
         let rows = found
             .into_iter()
             .map(|(comment, approved)| {
@@ -517,7 +522,12 @@ impl CommentsSite for Admin<'_> {
                 self.comment_row(comment, &approved, post)
             })
             .collect();
-        (rows, self.comment_counts().all())
+        let total = self.reads.reads.wait(self.site.db.count_comments(&filter));
+        (rows, total)
+    }
+    fn approved_before(&self, id: u64) -> bool {
+        let meta = self.site.db.comment_meta(id, "_wp_trash_meta_status");
+        self.reads.reads.wait(meta).as_deref() == Some(b"1")
     }
     fn parent_comment(&self, id: u64) -> Option<(String, Vec<u8>)> {
         let comment = self.reads.reads.wait(self.site.db.any_comment(id))?;
@@ -587,6 +597,27 @@ fn term_args(raw_request_uri: &str) -> Option<TermArgs> {
         orderby,
         order,
     })
+}
+
+/// The arguments of `edit-comments.php` ported so far; `None` for others.
+fn comment_args(raw_request_uri: &str) -> Option<CommentArgs> {
+    let query = raw_request_uri
+        .split_once('?')
+        .map_or("", |(_, query)| query);
+    let mut args = CommentArgs::default();
+    for (key, value) in parse_str(query.as_bytes()).as_array().unwrap_or_default() {
+        let (Key::String(key), Value::String(value)) = (key, value) else {
+            return None;
+        };
+        let value = Some(String::from_utf8(value.clone()).ok()?);
+        match key.as_slice() {
+            b"comment_status" => args.status = value,
+            b"user_id" => args.user_id = value,
+            b"paged" => args.paged = value,
+            _ => return None,
+        }
+    }
+    Some(args)
 }
 
 /// The headers of an admin screen: `nocache_headers()` and
@@ -733,11 +764,11 @@ fn screen(
             dashboard(admin, &canonical, origin, request_uri, browser)
         }
         "/hs-admin/edit-comments" => {
-            if request_uri.contains('?') {
-                return None;
-            }
+            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
+            let args = comment_args(&raw)?;
             let answer = edit_comments(
                 admin,
+                &args,
                 admin.settings.as_deref(),
                 &canonical,
                 origin,

@@ -12,7 +12,18 @@ fn pages_are_php_s() {
     let mut failures = Vec::new();
     for line in golden.lines() {
         let f: Vec<&str> = line.split('\t').collect();
-        let variant = match f[0].split_once('?').map_or(f[0], |(variant, _)| variant) {
+        let (variant, query) = f[0].split_once('?').unwrap_or((f[0], ""));
+        let arg = |name: &str| {
+            query
+                .split('&')
+                .find_map(|pair| Some(pair.strip_prefix(name)?.strip_prefix('=')?.to_string()))
+        };
+        let args = CommentArgs {
+            status: arg("comment_status"),
+            user_id: arg("user_id"),
+            paged: arg("paged"),
+        };
+        let variant = match variant {
             "content" => "comments",
             "paged" => "cpaged",
             "empty" => "cempty",
@@ -20,13 +31,18 @@ fn pages_are_php_s() {
             other => other,
         };
         let role: &'static str = Box::leak(format!("{variant}:{}", f[1]).into_boxed_str());
-        let path = "/hs-admin/edit-comments";
+        let path = if query.is_empty() {
+            "/hs-admin/edit-comments".to_string()
+        } else {
+            format!("/hs-admin/edit-comments?{query}")
+        };
         let ours = edit_comments(
             &Role(role),
+            &args,
             None,
             &format!("{SITE}{path}"),
             SITE,
-            path,
+            &path,
             &crate::admin_bar::Browser {
                 user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
                 mobile_hint: None,
@@ -42,10 +58,10 @@ fn pages_are_php_s() {
                     format!("403\t{}", String::from_utf8(page).unwrap()),
                 )
             }
-            Answer::Redirect(to) => (recorded, to),
+            Answer::Redirect(to) => (hs_admin_page(&recorded), format!("302\t{to}")),
         };
         if ours != php {
-            failures.push(format!("{role}: {}", first_difference(&php, &ours)));
+            failures.push(format!("{role}?{query}: {}", first_difference(&php, &ours)));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
@@ -59,6 +75,7 @@ fn the_extended_view_shows_row_actions() {
     let settings = Some("posts_list_mode=excerpt");
     let Answer::Page(page) = edit_comments(
         &Role("administrator"),
+        &CommentArgs::default(),
         settings,
         &format!("{SITE}{path}"),
         SITE,
@@ -79,6 +96,7 @@ fn a_page_asks_for_spare_comments() {
     let browser = crate::admin_bar::Browser::default();
     edit_comments(
         &Role("administrator"),
+        &CommentArgs::default(),
         None,
         &format!("{SITE}{path}"),
         SITE,
@@ -101,6 +119,7 @@ fn author_urls_are_shortened() {
         columns: &columns,
         hidden: &[],
         excerpt: false,
+        view: "all",
     };
     let mut row = crate::dashboard::tests::hello_comment(true);
     let fifty = "a".repeat(50);
@@ -121,4 +140,25 @@ fn all_counts_approved_and_pending() {
         ..Default::default()
     };
     assert_eq!(counts.all(), 5);
+}
+
+/// In the spam view an author's IP links to their other spam.
+#[test]
+fn the_spam_view_links_ips_to_spam() {
+    let role = Role("comments:administrator");
+    let columns = columns();
+    let listing = Listing {
+        site: &role,
+        columns: &columns,
+        hidden: &[],
+        excerpt: false,
+        view: "spam",
+    };
+    let mut row = crate::dashboard::tests::hello_comment(true);
+    row.comment.author_ip = b"192.0.2.9".to_vec();
+    let author = listing.column_author(&row);
+    assert!(
+        author.contains("&#038;mode=detail&#038;comment_status=spam\">"),
+        "{author}"
+    );
 }

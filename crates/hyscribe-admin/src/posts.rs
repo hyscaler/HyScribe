@@ -2032,11 +2032,7 @@ pub fn edit(
         query.include = Some(sticky_ids.clone());
     }
     query.order = sort(args, &query, &orderby, tree);
-    // `absint( $_REQUEST['paged'] )`, the first page for none.
-    let requested = Value::String(args.paged.clone().unwrap_or_default().into_bytes())
-        .to_int()
-        .unsigned_abs()
-        .max(1);
+    let requested = crate::list_table::pagenum(args.paged.as_deref());
     if !tree {
         query.offset = u32::try_from((requested - 1).saturating_mul(per_page)).unwrap_or(u32::MAX);
     }

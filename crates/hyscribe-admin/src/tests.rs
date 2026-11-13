@@ -397,25 +397,42 @@ fn comment(
 }
 
 impl crate::comments::CommentsSite for Role {
-    /// The fixture's one comment, or the content's.
+    /// The fixture's one comment, trashed when the list is empty, or the
+    /// content's, as `query` filters them.
     fn list_comments(
         &self,
-        offset: u64,
-        number: u64,
+        query: &crate::comments::CommentQuery<'_>,
     ) -> (Vec<crate::dashboard::RecentComment>, u64) {
-        COMMENTS_ASKED.set(number);
-        if self.variant() == "cempty" {
-            return (Vec::new(), 0);
-        }
-        if !self.comments_content() {
-            let can_edit = self.can("edit_published_posts");
-            return (vec![crate::dashboard::tests::hello_comment(can_edit)], 1);
-        }
-        let all = crate::comments::content::comments(self);
-        let total = all.len() as u64;
-        let skip = usize::try_from(offset).unwrap();
-        let take = usize::try_from(number).unwrap();
-        (all.into_iter().skip(skip).take(take).collect(), total)
+        COMMENTS_ASKED.set(query.number);
+        let all = if self.comments_content() {
+            crate::comments::content::comments(self)
+        } else {
+            let mut hello =
+                crate::dashboard::tests::hello_comment(self.can("edit_published_posts"));
+            if self.variant() == "cempty" {
+                hello.status = "trash";
+            }
+            vec![hello]
+        };
+        let found: Vec<_> = all
+            .into_iter()
+            .filter(|row| {
+                query
+                    .approved
+                    .contains(&crate::dashboard::approved_of(row.status))
+                    && query
+                        .user
+                        .is_none_or(|user| i64::try_from(row.comment.user_id) == Ok(user))
+            })
+            .collect();
+        let total = found.len() as u64;
+        let skip = usize::try_from(query.offset).unwrap();
+        let take = usize::try_from(query.number).unwrap();
+        (found.into_iter().skip(skip).take(take).collect(), total)
+    }
+    /// The spam comment was approved before.
+    fn approved_before(&self, id: u64) -> bool {
+        id == 504
     }
     fn parent_comment(&self, id: u64) -> Option<(String, Vec<u8>)> {
         (id == 1).then(|| {
@@ -423,9 +440,9 @@ impl crate::comments::CommentsSite for Role {
             (hello.link, hello.comment.author)
         })
     }
-    /// The content has a pingback.
+    /// The content has a pingback; the empty list only a trashed comment.
     fn has_comments(&self, kind: &str) -> bool {
-        kind == "comment" || self.comments_content()
+        kind == "comment" && self.variant() != "cempty" || self.comments_content()
     }
 }
 

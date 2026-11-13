@@ -47,6 +47,27 @@ pub struct RecentComment {
     pub permalink: String,
 }
 
+/// `wp_get_comment_status()` of a comment's `comment_approved`; empty for
+/// a state it does not name.
+pub fn comment_status(approved: &str) -> &'static str {
+    match approved {
+        "1" => "approved",
+        "0" => "unapproved",
+        "spam" => "spam",
+        "trash" => "trash",
+        _ => "",
+    }
+}
+
+/// The `comment_approved` of a `wp_get_comment_status()` state.
+pub(crate) fn approved_of(status: &str) -> &str {
+    match status {
+        "approved" => "1",
+        "unapproved" => "0",
+        other => other,
+    }
+}
+
 /// `wp_count_comments()`'s counts, and the user's comments.
 #[derive(Clone, Copy, Default)]
 pub struct CommentCounts {

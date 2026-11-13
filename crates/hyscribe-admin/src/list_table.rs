@@ -106,6 +106,14 @@ pub fn bulk_actions(which: &str, actions: &[(&str, &str)]) -> String {
     out
 }
 
+/// `get_pagenum()`: `absint()` of `paged`, the first page for none.
+pub fn pagenum(paged: Option<&str>) -> u64 {
+    Value::String(paged.unwrap_or_default().into())
+        .to_int()
+        .unsigned_abs()
+        .max(1)
+}
+
 /// `selected( $current, true, false )`: the attribute of a chosen option.
 pub fn selected(chosen: bool) -> &'static str {
     if chosen { " selected='selected'" } else { "" }

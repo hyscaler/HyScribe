@@ -26,5 +26,9 @@ INSERT INTO wp_comments (comment_ID, comment_post_ID, comment_author, comment_au
    'Locked words', 0, '1', '', 'comment', 0, 0),
   (508, 999, 'Lost', 'lost@example.test', '', '', '2026-11-07 10:00:00', '2026-11-07 10:00:00',
    'On a post since deleted', 0, '1', '', 'comment', 0, 0);
+-- wp_spam_comment() and wp_trash_comment() keep the state they left.
+INSERT INTO wp_commentmeta (meta_id, comment_id, meta_key, meta_value) VALUES
+  (501, 504, '_wp_trash_meta_status', '1'), (502, 504, '_wp_trash_meta_time', '1793786400'),
+  (503, 505, '_wp_trash_meta_status', '0'), (504, 505, '_wp_trash_meta_time', '1793790000');
 UPDATE wp_posts SET comment_count = 3 WHERE ID = 1;
 UPDATE wp_posts SET comment_count = 1 WHERE ID = 2;

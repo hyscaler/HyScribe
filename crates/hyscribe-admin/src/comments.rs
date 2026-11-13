@@ -5,7 +5,7 @@
 
 use hyscribe_kses::{esc_attr, esc_html, esc_textarea, esc_url};
 use hyscribe_model::{Comment, User};
-use hyscribe_phpser::{add_query_arg, is_empty_string, remove_query_arg};
+use hyscribe_phpser::{Value, add_query_arg, is_empty_string, remove_query_arg};
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::CORE_SHORTCODE_TAGS;
 use hyscribe_render::formatting::{antispambot, convert_chars, wptexturize};
@@ -15,9 +15,9 @@ use hyscribe_render::{
 };
 
 use crate::admin_bar::{BarSite, Browser, html_excerpt};
-use crate::dashboard::{DashboardSite, RecentComment};
+use crate::dashboard::{DashboardSite, RecentComment, approved_of};
 use crate::list_table::{Column, Order, Sort, View, bulk_actions, column_headers, pagination};
-use crate::list_table::{screen_options, search_box, views};
+use crate::list_table::{pagenum, screen_options, search_box, views};
 use crate::menu::{Screen, esc_link, link};
 use crate::page::{HelpTab, Page, admin_page};
 use crate::posts::{
@@ -26,16 +26,50 @@ use crate::posts::{
 
 /// What the comments list asks of the site beyond the dashboard's.
 pub trait CommentsSite: DashboardSite {
-    /// The comments of `status` (`all`, `moderated`, `approved`, `spam`,
-    /// `trash` or `mine`), newest first, `number` from `offset`, and how
-    /// many there are.
-    fn list_comments(&self, offset: u64, number: u64) -> (Vec<RecentComment>, u64);
+    /// The comments `query` finds, newest first, and how many there are.
+    fn list_comments(&self, query: &CommentQuery<'_>) -> (Vec<RecentComment>, u64);
     /// Whether any comment, notes aside, is of `kind`: `comment` or `pings`.
     fn has_comments(&self, kind: &str) -> bool;
     /// `get_comment_link()` and `get_comment_author()` of comment `id`,
     /// if there is one.
     fn parent_comment(&self, id: u64) -> Option<(String, Vec<u8>)>;
+    /// Whether comment `id`'s `_wp_trash_meta_status` is `1`: approved
+    /// before it was trashed or marked as spam.
+    fn approved_before(&self, id: u64) -> bool;
 }
+
+/// The comments the list asks for, notes aside.
+pub struct CommentQuery<'a> {
+    /// Their `comment_approved` values.
+    pub approved: &'a [&'a str],
+    /// `user_id = %d`, when the request gives a user.
+    pub user: Option<i64>,
+    /// How many to skip.
+    pub offset: u64,
+    /// How many to list.
+    pub number: u64,
+}
+
+/// The arguments of `edit-comments.php` ported so far, as requested.
+#[derive(Default)]
+pub struct CommentArgs {
+    /// `comment_status`.
+    pub status: Option<String>,
+    /// `user_id`.
+    pub user_id: Option<String>,
+    /// `paged`.
+    pub paged: Option<String>,
+}
+
+/// The views of `prepare_items()`, and the `comment_approved` each lists.
+const VIEWS: [(&str, &[&str]); 6] = [
+    ("all", &["0", "1"]),
+    ("mine", &["0", "1"]),
+    ("moderated", &["0"]),
+    ("approved", &["1"]),
+    ("spam", &["spam"]),
+    ("trash", &["trash"]),
+];
 
 const REPLY: &str = include_str!("comments/reply.html");
 const EDITOR: &str = include_str!("comments/editor.html");
@@ -137,6 +171,8 @@ struct Listing<'a> {
     hidden: &'a [&'a str],
     /// The extended view, whose row actions always show.
     excerpt: bool,
+    /// `$comment_status`, the view listed.
+    view: &'a str,
 }
 
 impl Listing<'_> {
@@ -251,10 +287,13 @@ impl Listing<'_> {
                 ));
             }
             if !is_empty_string(&comment.author_ip) {
-                let url = add_query_arg(
+                let mut url = add_query_arg(
                     &[(b"s", Some(&comment.author_ip)), (b"mode", Some(b"detail"))],
                     BarSite::admin_url(site, "edit-comments.php").as_bytes(),
                 );
+                if self.view == "spam" {
+                    url = add_query_arg(&[(b"comment_status", Some(b"spam"))], &url);
+                }
                 out.push_str(&format!(
                     "<a href=\"{}\">{}</a>",
                     text(&esc_url(&url)),
@@ -298,88 +337,149 @@ impl Listing<'_> {
                 esc_html(&comment.author_email),
                 esc_html(&comment.author),
                 String::from_utf8_lossy(&esc_url(&comment.author_url)),
-                // All comments lists approved and pending ones.
-                if row.status == "approved" { "1" } else { "0" }
+                approved_of(row.status)
             ));
         }
         out
     }
 
-    /// `handle_row_actions()` in the view of all comments.
+    /// `handle_row_actions()`: what the user may do to the comment in this
+    /// view.
     fn actions(&self, row: &RecentComment) -> String {
         if !row.can_edit {
             return String::new();
         }
         let site = self.site;
         let id = row.comment.id;
+        let status = row.status;
         // The nonce, hex digits, escapes to itself.
         let url = |action: &str, nonce: &str| {
             let url = esc_link(&format!("comment.php?action={action}&c={id}&_wpnonce="));
             format!("{url}{}", site.nonce(&format!("{nonce}-comment_{id}")))
         };
-        let dim = |new: &str| {
-            format!("dim:the-comment-list:comment-{id}:unapproved:e7e7d3:e7e7d3:new={new}")
+        let anchor = |href: String, lists: String, class: &str, label: &str, text: &str| {
+            format!(
+                "<a href=\"{href}\" data-wp-lists=\"{lists}\" class=\"{class} aria-button-if-js\" aria-label=\"{label}\">{text}</a>"
+            )
+        };
+        let button = |action: &str, class: &str, label: &str, text: &str| {
+            format!(
+                "<button type=\"button\" data-comment-id=\"{id}\" data-post-id=\"{}\" data-action=\"{action}\" class=\"{class} comment-inline button-link\" aria-expanded=\"false\" aria-label=\"{label}\">{text}</button>",
+                row.comment.post_id
+            )
+        };
+        let all = self.view == "all";
+        let approve = |new: &str, class: &str, label: &str, text: &str| {
+            let action = if new == "approved" {
+                "approvecomment"
+            } else {
+                "unapprovecomment"
+            };
+            let lists = if all {
+                format!("dim:the-comment-list:comment-{id}:unapproved:e7e7d3:e7e7d3:new={new}")
+            } else {
+                format!(
+                    "delete:the-comment-list:comment-{id}:e7e7d3:action=dim-comment&amp;new={new}"
+                )
+            };
+            let class = if all {
+                class.to_string()
+            } else {
+                format!("{class} vim-destructive")
+            };
+            anchor(url(action, "approve"), lists, &class, label, text)
+        };
+        let shown = !matches!(status, "spam" | "trash");
+        let destroy = |action: &str, lists: &str, class: &str, label: &str, text: &str| {
+            anchor(
+                url(action, "delete"),
+                format!("delete:the-comment-list:comment-{id}:{lists}"),
+                class,
+                label,
+                text,
+            )
         };
         let actions = [
             (
                 "approve",
-                format!(
-                    "<a href=\"{}\" data-wp-lists=\"{}\" class=\"vim-a aria-button-if-js\" aria-label=\"Approve this comment\">Approve</a>",
-                    url("approvecomment", "approve"),
-                    dim("approved")
-                ),
+                (all || status == "unapproved")
+                    .then(|| approve("approved", "vim-a", "Approve this comment", "Approve")),
             ),
             (
                 "unapprove",
-                format!(
-                    "<a href=\"{}\" data-wp-lists=\"{}\" class=\"vim-u aria-button-if-js\" aria-label=\"Unapprove this comment\">Unapprove</a>",
-                    url("unapprovecomment", "approve"),
-                    dim("unapproved")
-                ),
+                (all || status == "approved")
+                    .then(|| approve("unapproved", "vim-u", "Unapprove this comment", "Unapprove")),
             ),
             (
-                "reply hide-if-no-js",
-                format!(
-                    "<button type=\"button\" data-comment-id=\"{id}\" data-post-id=\"{}\" data-action=\"replyto\" class=\"vim-r comment-inline button-link\" aria-expanded=\"false\" aria-label=\"Reply to this comment\">Reply</button>",
-                    row.comment.post_id
-                ),
+                "reply",
+                shown.then(|| button("replyto", "vim-r", "Reply to this comment", "Reply")),
             ),
             (
-                "quickedit hide-if-no-js",
-                format!(
-                    "<button type=\"button\" data-comment-id=\"{id}\" data-post-id=\"{}\" data-action=\"edit\" class=\"vim-q comment-inline button-link\" aria-expanded=\"false\" aria-label=\"Quick edit this comment inline\">Quick&nbsp;Edit</button>",
-                    row.comment.post_id
-                ),
+                "quickedit",
+                shown.then(|| {
+                    button("edit", "vim-q", "Quick edit this comment inline", "Quick&nbsp;Edit")
+                }),
             ),
             (
                 "edit",
-                format!(
-                    "<a href=\"{}?action=editcomment&amp;c={id}\" aria-label=\"Edit this comment\">Edit</a>",
-                    link("comment.php")
-                ),
+                shown.then(|| {
+                    format!(
+                        "<a href=\"{}?action=editcomment&amp;c={id}\" aria-label=\"Edit this comment\">Edit</a>",
+                        link("comment.php")
+                    )
+                }),
             ),
             (
                 "spam",
-                format!(
-                    "<a href=\"{}\" data-wp-lists=\"delete:the-comment-list:comment-{id}::spam=1\" class=\"vim-s vim-destructive aria-button-if-js\" aria-label=\"Mark this comment as spam\">Spam</a>",
-                    url("spamcomment", "delete")
-                ),
+                (status != "spam")
+                    .then(|| {
+                        destroy("spamcomment", ":spam=1", "vim-s vim-destructive", "Mark this comment as spam", "Spam")
+                    }),
+            ),
+            (
+                "unspam",
+                (status == "spam")
+                    .then(|| {
+                        destroy("unspamcomment", "66cc66:unspam=1", "vim-z vim-destructive", "Restore this comment from the spam", "Not Spam")
+                    }),
             ),
             (
                 "trash",
-                format!(
-                    "<a href=\"{}\" data-wp-lists=\"delete:the-comment-list:comment-{id}::trash=1\" class=\"delete vim-d vim-destructive aria-button-if-js\" aria-label=\"Move this comment to the Trash\">Trash</a>",
-                    url("trashcomment", "delete")
-                ),
+                shown
+                    .then(|| {
+                        destroy("trashcomment", ":trash=1", "delete vim-d vim-destructive", "Move this comment to the Trash", "Trash")
+                    }),
+            ),
+            (
+                "untrash",
+                (status == "trash")
+                    .then(|| {
+                        destroy("untrashcomment", "66cc66:untrash=1", "vim-z vim-destructive", "Restore this comment from the Trash", "Restore")
+                    }),
+            ),
+            (
+                "delete",
+                (!shown)
+                    .then(|| {
+                        destroy("deletecomment", ":delete=1", "delete vim-d vim-destructive", "Delete this comment permanently", "Delete Permanently")
+                    }),
             ),
         ];
         let spans: String = actions
-            .iter()
+            .into_iter()
+            .filter_map(|(action, markup)| Some((action, markup?)))
             .enumerate()
             .map(|(i, (action, markup))| {
                 // Approve and Unapprove both open the list, one of them hidden.
-                let separator = if i < 2 { "" } else { " | " };
-                format!("<span class='{action}'>{separator}{markup}</span>")
+                let first = i == 0 || i == 1 && matches!(action, "approve" | "unapprove");
+                let separator = if first { "" } else { " | " };
+                let class = match action {
+                    "reply" | "quickedit" => format!("{action} hide-if-no-js"),
+                    "untrash" | "unspam" if site.approved_before(id) => format!("{action} approve"),
+                    "untrash" | "unspam" => format!("{action} unapprove"),
+                    _ => action.to_string(),
+                };
+                format!("<span class='{class}'>{separator}{markup}</span>")
             })
             .collect();
         format!(
@@ -533,22 +633,42 @@ const HELP_MODERATING: &str = "<p>A red bar on the left means the comment is wai
 
 const HELP_SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/comments-screen/\">Documentation on Comments</a></p><p><a href=\"https://wordpress.org/documentation/article/understand-comment-spam/\">Documentation on Comment Spam</a></p><p><a href=\"https://wordpress.org/documentation/article/keyboard-shortcuts-classic-editor/#keyboard-shortcuts-for-comments\">Documentation on Keyboard Shortcuts</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
 
-/// `edit-comments.php`: every comment, in the view mode of the user's
-/// `settings` cookie or stored settings; the menu refuses those who may
-/// not edit posts.
+/// `edit-comments.php`: the comments of the view and page `args` ask
+/// for, in the view mode of the user's `settings` cookie or stored
+/// settings; the menu refuses those who may not edit posts.
 pub fn edit_comments(
     site: &dyn CommentsSite,
+    args: &CommentArgs,
     settings: Option<&str>,
     canonical: &str,
     origin: &str,
     request_uri: &str,
     browser: &Browser,
 ) -> Answer {
-    let view = "all";
+    let (view, approved) = VIEWS
+        .into_iter()
+        .find(|(view, _)| args.status.as_deref() == Some(*view))
+        .unwrap_or(VIEWS[0]);
     let mode = user_setting(site, settings, "posts_list_mode").unwrap_or_else(|| "list".into());
     let per_page = per_page(site, "edit_comments_per_page");
+    let page = pagenum(args.paged.as_deref());
     // A few more than a page, for the rows that replace those acted on.
-    let (found, total) = site.list_comments(0, per_page + per_page.min(8));
+    let (found, total) = site.list_comments(&CommentQuery {
+        approved,
+        user: args
+            .user_id
+            .as_deref()
+            .filter(|user| !user.is_empty())
+            .map(|user| Value::String(user.into()).to_int()),
+        offset: (page - 1).saturating_mul(per_page),
+        number: per_page + per_page.min(8),
+    });
+    let pages = total.div_ceil(per_page);
+    if pages > 0 && page > pages {
+        let last = pages.to_string();
+        let to = add_query_arg(&[(b"paged", Some(last.as_bytes()))], request_uri.as_bytes());
+        return Answer::Redirect(String::from_utf8_lossy(&to).into_owned());
+    }
     let split = found
         .len()
         .min(usize::try_from(per_page).unwrap_or(usize::MAX));
@@ -566,6 +686,7 @@ pub fn edit_comments(
         columns: &columns,
         hidden: &hidden_keys,
         excerpt: mode == "excerpt",
+        view,
     };
     let mut index = 0;
     let rows: String = items
@@ -577,27 +698,65 @@ pub fn edit_comments(
         .map(|row| listing.row(row, &mut index))
         .collect();
     let none = format!(
-        "<tr class=\"no-items\"><td class=\"colspanchange\" colspan=\"{visible}\">No comments found.</td></tr>"
+        "<tr class=\"no-items\"><td class=\"colspanchange\" colspan=\"{visible}\">{}</td></tr>",
+        match view {
+            "moderated" => "No comments awaiting moderation.",
+            "trash" => "No comments found in Trash.",
+            _ => "No comments found.",
+        }
     );
     let empty = items.is_empty();
     let rows = if empty { none.clone() } else { rows };
     let extra_rows = if extra.is_empty() { none } else { extra_rows };
-    let actions: &[(&str, &str)] = if site.can("moderate_comments") {
-        &[
-            ("unapprove", "Unapprove"),
-            ("approve", "Approve"),
-            ("spam", "Mark as spam"),
-            ("trash", "Move to Trash"),
-        ]
-    } else {
-        &[]
-    };
-    let pages = total.div_ceil(per_page);
+    let moderate = site.can("moderate_comments");
+    // `get_bulk_actions()`, none for those who may not moderate.
+    let actions: Vec<(&str, &str)> = [
+        ("unapprove", "Unapprove", matches!(view, "all" | "approved")),
+        ("approve", "Approve", matches!(view, "all" | "moderated")),
+        ("spam", "Mark as spam", !matches!(view, "mine" | "spam")),
+        ("untrash", "Restore", view == "trash"),
+        ("unspam", "Not spam", view == "spam"),
+        (
+            "delete",
+            "Delete permanently",
+            matches!(view, "spam" | "trash"),
+        ),
+        ("trash", "Move to Trash", !matches!(view, "spam" | "trash")),
+    ]
+    .into_iter()
+    .filter(|(_, _, offered)| moderate && *offered)
+    .map(|(action, label, _)| (action, label))
+    .collect();
     let types: String = [("comment", "Comments"), ("pings", "Pings")]
         .iter()
         .filter(|(kind, _)| site.has_comments(kind))
         .map(|(kind, label)| format!("\t<option value='{kind}'>{label}</option>\n"))
         .collect();
+    let referer = String::from_utf8_lossy(&esc_url(&remove_query_arg(
+        &[b"_wp_http_referer"],
+        request_uri.as_bytes(),
+    )))
+    .into_owned();
+    let field = |id: &str, action: &str| {
+        format!(
+            "<input type=\"hidden\" id=\"{id}\" name=\"{id}\" value=\"{}\" /><input type=\"hidden\" name=\"_wp_http_referer\" value=\"{referer}\" />",
+            site.nonce(action)
+        )
+    };
+    // `extra_tablenav()`: a spam or trashed list can be emptied.
+    let destroy = if moderate && matches!(view, "spam" | "trash") {
+        format!(
+            "{}<input type=\"submit\" name=\"delete_all\" id=\"delete_all\" class=\"button apply\" value=\"{}\"  />",
+            field("_destroy_nonce", "bulk-destroy"),
+            if view == "spam" {
+                "Empty Spam"
+            } else {
+                "Empty Trash"
+            }
+        )
+    } else {
+        String::new()
+    };
     let tablenav = |which: &str| {
         if empty {
             return String::new();
@@ -610,27 +769,16 @@ pub fn edit_comments(
             String::new()
         };
         format!(
-            "\t<div class=\"tablenav {which}\">\n\n\t\t\t\t<div class=\"alignleft actions bulkactions\">\n\t\t\t{}\t\t</div>\n\t\t<div class=\"alignleft actions\">{extra}</div>{}\n\t\t<br class=\"clear\" />\n\t</div>\n\t\t",
-            bulk_actions(which, actions),
+            "\t<div class=\"tablenav {which}\">\n\n\t\t\t\t<div class=\"alignleft actions bulkactions\">\n\t\t\t{}\t\t</div>\n\t\t<div class=\"alignleft actions\">{extra}{destroy}</div>{}\n\t\t<br class=\"clear\" />\n\t</div>\n\t\t",
+            bulk_actions(which, &actions),
             pagination(
                 which,
                 "Comments list navigation",
                 total,
                 pages,
-                1,
+                page,
                 canonical
             )
-        )
-    };
-    let referer = String::from_utf8_lossy(&esc_url(&remove_query_arg(
-        &[b"_wp_http_referer"],
-        request_uri.as_bytes(),
-    )))
-    .into_owned();
-    let field = |id: &str, action: &str| {
-        format!(
-            "<input type=\"hidden\" id=\"{id}\" name=\"{id}\" value=\"{}\" /><input type=\"hidden\" name=\"_wp_http_referer\" value=\"{referer}\" />",
-            site.nonce(action)
         )
     };
     let order = Order {
@@ -663,8 +811,15 @@ pub fn edit_comments(
     } else {
         search_box("Search Comments", "comment", "", &[])
     };
+    // `absint()` of the page asked for, which may be 0.
+    let paged = args.paged.as_deref().map_or_else(String::new, |paged| {
+        format!(
+            "\t<input type=\"hidden\" name=\"paged\" value=\"{}\" />\n",
+            Value::String(paged.into()).to_int().unsigned_abs()
+        )
+    });
     let content = format!(
-        "\n<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\nComments</h1>\n\n\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"comments-form\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"comment_status\" value=\"{view}\" />\n<input type=\"hidden\" name=\"pagegen_timestamp\" value=\"{}\" />\n\n<input type=\"hidden\" name=\"_total\" value=\"{total}\" />\n<input type=\"hidden\" name=\"_per_page\" value=\"{per_page}\" />\n<input type=\"hidden\" name=\"_page\" value=\"1\" />\n\n\n{list}</form>\n</div>\n\n<div id=\"ajax-response\"></div>\n\n{}\t",
+        "\n<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\nComments</h1>\n\n\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"comments-form\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"comment_status\" value=\"{view}\" />\n<input type=\"hidden\" name=\"pagegen_timestamp\" value=\"{}\" />\n\n<input type=\"hidden\" name=\"_total\" value=\"{total}\" />\n<input type=\"hidden\" name=\"_per_page\" value=\"{per_page}\" />\n<input type=\"hidden\" name=\"_page\" value=\"{page}\" />\n\n{paged}\n{list}</form>\n</div>\n\n<div id=\"ajax-response\"></div>\n\n{}\t",
         views("Filter comments list", &comment_views(site, view)),
         search,
         date::format_unix("Y-m-d H:i:s", now, Zone::Utc),

@@ -24,6 +24,7 @@ sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress; }
 cleanup() {
   rm -f "$TMP" "$NONCES"
   echo "DELETE FROM wp_comments WHERE comment_ID BETWEEN 501 AND 508; DELETE FROM wp_posts WHERE ID = 501;
+    DELETE FROM wp_commentmeta WHERE meta_id BETWEEN 501 AND 504;
     UPDATE wp_posts SET comment_count = 1 WHERE ID = 1; UPDATE wp_posts SET comment_count = 0 WHERE ID = 2;
     UPDATE wp_comments SET comment_approved = '1' WHERE comment_ID = 1;" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
@@ -31,7 +32,7 @@ cleanup() {
 trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/comments-list/variants.php"
-actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce bulk-comments replyto-comment fetch-list-WP_Comments_List_Table internal-linking"
+actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce bulk-comments replyto-comment fetch-list-WP_Comments_List_Table internal-linking bulk-destroy"
 for id in 1 501 502 503 504 505 506 507 508; do
   actions="$actions approve-comment_$id delete-comment_$id"
 done
@@ -63,15 +64,29 @@ for role in administrator editor author contributor subscriber; do
   record default "$role" ''
 done
 record noavatars administrator ''
+for view in moderated trash; do
+  record default administrator "?comment_status=$view"
+done
 # With its only comment in the Trash the list is empty.
 echo "UPDATE wp_comments SET comment_approved = 'trash' WHERE comment_ID = 1;" | sql
 record empty administrator ''
+record empty administrator '?comment_status=trash'
+record empty editor '?comment_status=trash'
 echo "UPDATE wp_comments SET comment_approved = '1' WHERE comment_ID = 1;" | sql
 sql < "$ROOT/reference/comments-list/content.sql"
 for role in administrator editor author contributor; do
   record content "$role" ''
 done
+for view in moderated approved spam trash 'mine&user_id=1' mine bogus 'all&user_id=x'; do
+  record content administrator "?comment_status=$view"
+done
+record content editor '?comment_status=spam'
+record content author '?comment_status=trash'
 record paged administrator ''
+for page in 2 4 -2 0 9; do
+  record paged administrator "?paged=$page"
+done
+record paged administrator '?comment_status=approved&paged=2'
 record hidecols administrator ''
 rm -f "$TMP.head"
 wc -l "$OUT"

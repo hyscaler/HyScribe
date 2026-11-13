@@ -172,14 +172,39 @@ async fn logged_in_users_are_let_in() {
         hyscribe_testkit::settled_page(&page),
     );
     assert_eq!(with_values(&php, &page), page);
-    let response = get(
-        &site,
+    // A view, as PHP lists it.
+    let path = "/hs-admin/edit-comments?comment_status=moderated";
+    let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
+    let row = list
+        .lines()
+        .find(|l| l.starts_with("default?comment_status=moderated\tadministrator\t"))
+        .unwrap();
+    let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+    let (php, page) = (
+        hyscribe_testkit::settled_page(&php),
+        hyscribe_testkit::settled_page(&page),
+    );
+    assert_eq!(with_values(&php, &page), page);
+    let path = "/hs-admin/edit-comments?comment_status=trash&user_id=1&paged=1";
+    let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
+    assert!(page.contains("No comments found in Trash."));
+    // A page past the last goes to the last.
+    let path = "/hs-admin/edit-comments?paged=5";
+    let response = get(&site, path, "127.0.0.1:8081", &cookies).await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        response.headers()[header::LOCATION],
+        "/hs-admin/edit-comments?paged=1"
+    );
+    for path in [
         "/hs-admin/edit-comments?s=x",
-        "127.0.0.1:8081",
-        &auth,
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+        "/hs-admin/edit-comments?comment_status[]=x",
+        "/hs-admin/edit-comments?comment_status=%FF",
+    ] {
+        let response = get(&site, path, "127.0.0.1:8081", &auth).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+    }
     // The categories.
     let path = "/hs-admin/edit-tags?taxonomy=category";
     let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
@@ -561,6 +586,8 @@ async fn dashboard_data() {
                 (true, &b"A WordPress Commenter"[..])
             );
             assert!(admin.parent_comment(999).is_none());
+            // The spam comment was approved before.
+            assert!(admin.approved_before(3) && !admin.approved_before(2));
             assert!(admin.has_comments("comment") && !admin.has_comments("pings"));
             assert_eq!(admin.count_terms("category", Some("zzz")), 0);
             assert!(admin.term_taxonomy(999_999).is_none());

@@ -83,7 +83,7 @@ remove_terms() {
   echo 'DELETE FROM wp_term_relationships WHERE term_taxonomy_id IN (2, 3, 4, 5);
     DELETE FROM wp_term_taxonomy WHERE term_taxonomy_id IN (2, 3, 4, 5); DELETE FROM wp_terms WHERE term_id IN (2, 3, 4, 5);
     DELETE FROM wp_posts WHERE ID IN (101, 102, 103); DELETE FROM wp_usermeta WHERE umeta_id IN (101, 102);
-    DELETE FROM wp_comments WHERE comment_ID = 2;' | sql
+    DELETE FROM wp_comments WHERE comment_ID IN (2, 3); DELETE FROM wp_commentmeta WHERE meta_id IN (1, 2);' | sql
 }
 sql < "$ROOT/reference/default-install/terms.sql"
 trap 'remove_terms; rm -f "$TMP"' EXIT

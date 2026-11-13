@@ -9,6 +9,12 @@ use hyscribe_model::{
     FormatFilter, StatusFilter, Term, TermFilter, TermOrder, TermQuery, TimeCondition, User,
 };
 
+/// The approved and pending comments.
+const PENDING: CommentFilter<'static> = CommentFilter {
+    approved: &["0", "1"],
+    user: None,
+};
+
 fn fixture_config() -> Database {
     hyscribe_testkit::fixture_database()
 }
@@ -433,7 +439,11 @@ async fn errors_are_reported() {
         .unwrap_err(),
         db.last_comment_modified().await.unwrap_err(),
         db.comment_counts(1).await.unwrap_err(),
-        db.latest_comments(true, 1, 0).await.unwrap_err(),
+        db.list_comments(&PENDING, 1, 0).await.unwrap_err(),
+        db.count_comments(&PENDING).await.unwrap_err(),
+        db.comment_meta(1, "_wp_trash_meta_status")
+            .await
+            .unwrap_err(),
         db.posts_by_status(&StatusQuery {
             status: "draft",
             author: Some(1),
@@ -479,7 +489,8 @@ async fn errors_are_reported() {
                 "missing_postmeta",
                 "missing_users",
                 "missing_usermeta",
-                "missing_comments"
+                "missing_comments",
+                "missing_commentmeta"
             ]
             .iter()
             .any(|table| err.to_string().contains(table)),
@@ -578,7 +589,7 @@ fn order_follows_the_query() {
         .iter()
         .filter_map(|b| match b {
             Bind::Int(n) => Some(*n),
-            Bind::Text(_) => None,
+            _ => None,
         })
         .collect();
     // The WHERE parents and IDs (0 first), then the FIELD lists ending in 0.
@@ -1256,16 +1267,32 @@ async fn term_queries_order_by_any_column() {
 async fn dashboard_reads() {
     let db = fixture().await;
     assert_eq!(db.comment_counts(1).await.unwrap(), [1, 0, 0, 0, 0]);
-    let latest = db.latest_comments(true, 5, 0).await.unwrap();
+    let latest = db.list_comments(&PENDING, 5, 0).await.unwrap();
     let ids: Vec<(u64, String)> = latest.into_iter().map(|(c, a)| (c.id, a)).collect();
     assert_eq!(ids, [(1, "1".to_string())]);
-    assert!(db.latest_comments(false, 5, 1).await.unwrap().is_empty());
+    assert!(db.list_comments(&PENDING, 5, 1).await.unwrap().is_empty());
+    let user = |user| CommentFilter {
+        approved: &["1"],
+        user: Some(user),
+    };
+    assert_eq!(db.count_comments(&user(0)).await.unwrap(), 1);
+    assert_eq!(db.count_comments(&user(-1)).await.unwrap(), 0);
+    assert!(db.list_comments(&user(-1), 5, 0).await.unwrap().is_empty());
+    assert_eq!(
+        db.comment_meta(1, "_wp_trash_meta_status").await.unwrap(),
+        None
+    );
     let ttd = named("wordpress_ttd").await;
     let [approved, moderated, spam, trash, _] = ttd.comment_counts(1).await.unwrap();
     assert_eq!((approved, moderated, spam, trash), (31, 3, 0, 0));
-    let approved_only = ttd.latest_comments(false, 50, 0).await.unwrap();
-    assert!(approved_only.iter().all(|(_, a)| a == "1"));
-    assert_eq!(ttd.latest_comments(true, 50, 0).await.unwrap().len(), 34);
+    let approved_only = CommentFilter {
+        approved: &["1"],
+        user: None,
+    };
+    let listed = ttd.list_comments(&approved_only, 50, 0).await.unwrap();
+    assert!(listed.iter().all(|(_, a)| a == "1"));
+    assert_eq!(ttd.count_comments(&approved_only).await.unwrap(), 31);
+    assert_eq!(ttd.list_comments(&PENDING, 50, 0).await.unwrap().len(), 34);
     let terms = named("wordpress_terms").await;
     let ids = |posts: Vec<Post>| posts.iter().map(|p| p.id).collect::<Vec<_>>();
     let query = |order, author| StatusQuery {

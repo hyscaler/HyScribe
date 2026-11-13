@@ -433,21 +433,12 @@ impl Db {
 
     /// `get_post_meta( $post_id, $key, true )`: the first value stored.
     pub async fn post_meta(&self, post_id: u64, key: &str) -> Result<Option<Vec<u8>>, DbError> {
-        let sql = self.prefix.sql(
+        self.first_meta(
             "SELECT meta_value FROM {prefix}postmeta WHERE post_id = ? AND meta_key = ? ORDER BY meta_id LIMIT 1",
-        );
-        let row = sqlx::query(sql)
-            .bind(post_id)
-            .bind(key)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(db_error)?;
-        row.map(|row| {
-            let mut c = Columns::new(&row);
-            let value = c.bytes("meta_value");
-            c.finish(value)
-        })
-        .transpose()
+            post_id,
+            key,
+        )
+        .await
     }
 
     /// `get_term( $id, $taxonomy )`.
@@ -829,25 +820,25 @@ impl Db {
         Ok(!rows.is_empty())
     }
 
-    /// The latest comments that are approved, or also pending when
-    /// `pending`, newest first, with their `comment_approved`.
-    pub async fn latest_comments(
+    /// `WP_Comment_Query`'s comments in `filter`, newest first, with their
+    /// `comment_approved`.
+    pub async fn list_comments(
         &self,
-        pending: bool,
+        filter: &CommentFilter<'_>,
         limit: u32,
         offset: u32,
     ) -> Result<Vec<(Comment, String)>, DbError> {
-        let sql = self.prefix.sql(concat!(
+        let mut sql = Sql::new(concat!(
             "SELECT ",
             comment_columns!(),
-            ", comment_approved FROM {prefix}comments \
-             WHERE (comment_approved = '1' OR (? AND comment_approved = '0')) AND comment_type != 'note' \
-             ORDER BY comment_date_gmt DESC, comment_ID DESC LIMIT ? OFFSET ?"
+            ", comment_approved FROM {prefix}comments WHERE "
         ));
-        let rows = sqlx::query(sql)
-            .bind(pending)
-            .bind(limit)
-            .bind(offset)
+        comment_filter(&mut sql, filter);
+        sql.push(" ORDER BY comment_date_gmt DESC, comment_ID DESC LIMIT ? OFFSET ?");
+        sql.bind(Bind::Int(limit.into()));
+        sql.bind(Bind::Int(offset.into()));
+        let rows = sql
+            .query(&self.prefix)
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
@@ -860,6 +851,30 @@ impl Db {
                 })
             })
             .collect()
+    }
+
+    /// How many comments `filter` finds.
+    pub async fn count_comments(&self, filter: &CommentFilter<'_>) -> Result<u64, DbError> {
+        let mut sql = Sql::new("SELECT COUNT(*) AS found FROM {prefix}comments WHERE ");
+        comment_filter(&mut sql, filter);
+        let row = sql
+            .query(&self.prefix)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.try_get::<i64, _>("found")
+            .map(i64::unsigned_abs)
+            .map_err(db_error)
+    }
+
+    /// `get_comment_meta( $id, $key, true )`: the first value stored.
+    pub async fn comment_meta(&self, id: u64, key: &str) -> Result<Option<Vec<u8>>, DbError> {
+        self.first_meta(
+            "SELECT meta_value FROM {prefix}commentmeta WHERE comment_id = ? AND meta_key = ? ORDER BY meta_id LIMIT 1",
+            id,
+            key,
+        )
+        .await
     }
 
     /// `get_comment( $id )` in any state.
@@ -947,11 +962,23 @@ impl Db {
 
     /// `get_user_meta( $user_id, $key, true )`: the first value stored.
     pub async fn user_meta(&self, user_id: u64, key: &str) -> Result<Option<Vec<u8>>, DbError> {
-        let sql = self.prefix.sql(
+        self.first_meta(
             "SELECT meta_value FROM {prefix}usermeta WHERE user_id = ? AND meta_key = ? ORDER BY umeta_id LIMIT 1",
-        );
-        let row = sqlx::query(sql)
-            .bind(user_id)
+            user_id,
+            key,
+        )
+        .await
+    }
+
+    /// The first `meta_value` of `sql`'s object `id` and `key`.
+    async fn first_meta(
+        &self,
+        sql: &'static str,
+        id: u64,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, DbError> {
+        let row = sqlx::query(self.prefix.sql(sql))
+            .bind(id)
             .bind(key)
             .fetch_optional(&self.pool)
             .await
@@ -1755,6 +1782,25 @@ fn esc_like(text: &str) -> String {
 enum Bind {
     Text(String),
     Int(u64),
+    Signed(i64),
+}
+
+/// The comments `Db::list_comments()` lists, notes aside.
+pub struct CommentFilter<'a> {
+    /// The `comment_approved` values.
+    pub approved: &'a [&'a str],
+    /// Only those of this user ID, `user_id = %d`.
+    pub user: Option<i64>,
+}
+
+/// The `WHERE` of `filter`.
+fn comment_filter(sql: &mut Sql, filter: &CommentFilter<'_>) {
+    sql.push("comment_type != 'note' AND comment_approved IN (");
+    list(sql, filter.approved.iter().map(|v| Bind::Text((*v).into())));
+    if let Some(user) = filter.user {
+        sql.push(" AND user_id = ?");
+        sql.bind(Bind::Signed(user));
+    }
 }
 
 /// The posts `Db::posts_by_status()` lists.
@@ -1811,6 +1857,7 @@ impl Sql {
             query = match value {
                 Bind::Text(text) => query.bind(text),
                 Bind::Int(n) => query.bind(n),
+                Bind::Signed(n) => query.bind(n),
             };
         }
         query

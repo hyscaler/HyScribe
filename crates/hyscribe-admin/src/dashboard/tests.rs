@@ -429,3 +429,12 @@ fn tomorrow_across_a_clock_change() {
     let html = recent_posts(&site, &site.recent_posts("future"), "S", "f");
     assert!(html.contains("<span>Tomorrow, 9:00 am</span>"), "{html}");
 }
+
+/// A comment's state and its `comment_approved` map both ways.
+#[test]
+fn comment_states_map_both_ways() {
+    for approved in ["1", "0", "spam", "trash"] {
+        assert_eq!(approved_of(comment_status(approved)), approved);
+    }
+    assert_eq!(comment_status("post-trashed"), "");
+}

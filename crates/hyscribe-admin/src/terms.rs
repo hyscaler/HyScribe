@@ -545,10 +545,7 @@ pub fn edit_tags(
     let total = site.count_terms(taxonomy.name, search.as_deref());
     let pages = total.div_ceil(per_page);
     // `get_pagenum()`, and the last page for one past it.
-    let page = Value::String(args.paged.clone().unwrap_or_default().into_bytes())
-        .to_int()
-        .unsigned_abs()
-        .max(1);
+    let page = crate::list_table::pagenum(args.paged.as_deref());
     if pages > 0 && page > pages {
         let last = pages.to_string();
         let to = add_query_arg(&[(b"paged", Some(last.as_bytes()))], request_uri.as_bytes());

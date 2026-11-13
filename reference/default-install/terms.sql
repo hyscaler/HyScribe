@@ -4,7 +4,8 @@
 -- sitemap tests: a tag on the first post, a tag on no post, the first
 -- post's aside format, a link category, a later post, a reusable block, and
 -- for the dashboard the administrator's stored editor preferences, their
--- Quick Draft auto-draft and a comment of theirs on no post.
+-- Quick Draft auto-draft, a comment of theirs on no post, and an approved
+-- comment since marked as spam.
 -- db.sh loads it into the wordpress_terms database; reference/head/golden.sh
 -- adds it to the PHP oracle's database while it records term pages.
 INSERT INTO wp_terms (term_id, name, slug, term_group) VALUES
@@ -38,4 +39,7 @@ INSERT INTO wp_usermeta (umeta_id, user_id, meta_key, meta_value) VALUES
   (102, 1, 'wp_dashboard_quick_press_last_post_id', '103');
 INSERT INTO wp_comments (comment_ID, comment_post_ID, comment_author, comment_author_email, comment_author_url, comment_author_IP,
   comment_date, comment_date_gmt, comment_content, comment_karma, comment_approved, comment_agent, comment_type, comment_parent, user_id) VALUES
-  (2, 0, 'admin', 'admin@default-install.test', '', '', '2026-10-28 00:00:00', '2026-10-28 00:00:00', 'On no post', 0, '1', '', 'comment', 0, 1);
+  (2, 0, 'admin', 'admin@default-install.test', '', '', '2026-10-28 00:00:00', '2026-10-28 00:00:00', 'On no post', 0, '1', '', 'comment', 0, 1),
+  (3, 1, 'Spammer', 'spam@example.test', '', '', '2026-10-28 00:00:00', '2026-10-28 00:00:00', 'Buy now', 0, 'spam', '', 'comment', 0, 0);
+INSERT INTO wp_commentmeta (meta_id, comment_id, meta_key, meta_value) VALUES
+  (1, 3, '_wp_trash_meta_status', '1'), (2, 3, '_wp_trash_meta_time', '1793145600');

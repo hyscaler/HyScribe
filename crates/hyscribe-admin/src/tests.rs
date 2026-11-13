@@ -208,6 +208,48 @@ impl Role {
         Some(value.to_vec())
     }
 
+    /// A variant of `reference/user-edit/golden.sh`, over the users of
+    /// `reference/users-list/content.sql`.
+    fn edited(&self) -> bool {
+        self.variant().starts_with("u3")
+    }
+
+    /// A user other than 1 in a `reference/user-edit/golden.sh` variant.
+    fn other_user(&self, id: u64) -> Option<crate::users::ListedUser> {
+        let users = crate::users::content::users(self.edited());
+        users
+            .into_iter()
+            .find(|listed| listed.user.id == id && id != 1)
+    }
+
+    /// Another user's options, as `reference/user-edit/variants.php` gives
+    /// them in the variant.
+    fn other_option(&self, id: u64, name: &str) -> Option<Vec<u8>> {
+        let listed = self.other_user(id)?;
+        let value: &[u8] = match (self.variant(), id, name) {
+            (
+                "u3options",
+                601,
+                "rich_editing"
+                | "syntax_highlighting"
+                | "show_admin_bar_front"
+                | "infinite_scrolling",
+            ) => b"false",
+            ("u3options", 601, "comment_shortcuts") => b"true",
+            ("u3options", 601, "admin_color") => b"ocean",
+            ("u3options", 601, "nickname") => b"eddie",
+            (_, _, "nickname") => &listed.user.login,
+            ("u3caps", 601, "capabilities") => {
+                b"a:3:{s:6:\"editor\";b:1;s:10:\"edit_users\";b:1;s:6:\"custom\";b:0;}"
+            }
+            ("u3roles", 604, "capabilities") => b"a:1:{s:11:\"contributor\";b:1;}",
+            ("u3roles", 606, "capabilities") => b"a:1:{s:13:\"administrator\";b:1;}",
+            (_, _, "capabilities") if !listed.capabilities.is_empty() => &listed.capabilities,
+            _ => return None,
+        };
+        Some(value.to_vec())
+    }
+
     /// A variant of `reference/users-list/golden.sh` over its content.
     fn users_content(&self) -> bool {
         ["users", "upaged", "uhidden"].contains(&self.variant())
@@ -271,13 +313,32 @@ impl CapabilityData for Role {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         options().get(name).cloned()
     }
-    fn user_meta(&self, _: u64, key: &str) -> Option<Vec<u8>> {
-        (key == "wp_capabilities").then(|| {
-            format!("a:1:{{s:{}:\"{}\";b:1;}}", self.role().len(), self.role()).into_bytes()
-        })
+    /// User 1's role, less the capability a `u3no` variant denies, and the
+    /// other users' as `reference/user-edit/variants.php` gives them.
+    fn user_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        if key != "wp_capabilities" {
+            return None;
+        }
+        if id != 1 && self.edited() {
+            return self.other_option(id, "capabilities");
+        }
+        let role = self.role();
+        let denied = match self.variant() {
+            "u3nocreate" => "create_users",
+            "u3nopromote" => "promote_users",
+            _ => return Some(format!("a:1:{{s:{}:\"{role}\";b:1;}}", role.len()).into_bytes()),
+        };
+        Some(
+            format!(
+                "a:2:{{s:{}:\"{role}\";b:1;s:{}:\"{denied}\";b:0;}}",
+                role.len(),
+                denied.len()
+            )
+            .into_bytes(),
+        )
     }
     fn user_exists(&self, id: u64) -> bool {
-        id == 1 || self.listing() && id == 2
+        id == 1 || self.listing() && id == 2 || self.other_user(id).is_some()
     }
     fn post(&self, _: u64) -> Option<CapPost> {
         None
@@ -542,11 +603,19 @@ impl crate::users::UsersSite for Role {
 }
 
 impl crate::profile::ProfileSite for Role {
-    /// The fixture's administrator, named in the options variant.
-    fn profile_user(&self) -> hyscribe_model::User {
+    /// The fixture's administrator, named in the options variant, or
+    /// another user of the variant.
+    fn profile_user(&self, id: u64) -> Option<hyscribe_model::User> {
+        if id != 1 {
+            let mut user = self.other_user(id)?.user;
+            if self.variant() == "u3options" {
+                user.description = b"Bio <b>bold</b> & more".to_vec();
+            }
+            return Some(user);
+        }
         let named = self.variant() == "poptions";
         let value = |set: &[u8]| if named { set.to_vec() } else { Vec::new() };
-        hyscribe_model::User {
+        Some(hyscribe_model::User {
             id: 1,
             login: b"admin".to_vec(),
             nicename: b"admin".to_vec(),
@@ -556,12 +625,21 @@ impl crate::profile::ProfileSite for Role {
             first_name: value(b"Ad &amp; Min"),
             last_name: value(b"Istrator"),
             description: value(b"Bio <b>bold</b> & more"),
-        }
+        })
     }
-    fn sessions(&self) -> usize {
-        match self.variant() {
-            "psessions1" => 1,
-            "psessions2" => 2,
+    fn user_option_of(&self, id: u64, name: &str) -> Option<Vec<u8>> {
+        if id == 1 {
+            return crate::posts::PostsSite::user_option(self, name);
+        }
+        self.other_option(id, name)
+    }
+    fn user_can(&self, id: u64, cap: &str) -> bool {
+        Capabilities::load(self, "wp_", id).has_cap(self, cap, &[])
+    }
+    fn sessions(&self, id: u64) -> usize {
+        match (self.variant(), id) {
+            ("psessions1", 1) | ("u3sessions", 601) => 1,
+            ("psessions2", 1) => 2,
             _ => 0,
         }
     }
@@ -893,10 +971,13 @@ impl crate::posts::PostsSite for Role {
         if name == "category_children" && self.variant() == "stale" {
             return Some(b"a:0:{}".to_vec());
         }
-        if name == "show_avatars" && self.variant() == "noavatars"
+        if name == "show_avatars" && ["noavatars", "u3noavatars"].contains(&self.variant())
             || name == "blog_public" && self.variant() == "layout"
         {
             return Some(b"0".to_vec());
+        }
+        if name == "default_role" && self.variant() == "u3default" {
+            return Some(b"editor".to_vec());
         }
         options().get(name).cloned()
     }

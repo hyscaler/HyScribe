@@ -2,14 +2,14 @@
 		
 		<div class="wrap" id="profile-page">
 			<h1 class="wp-heading-inline">
-					Profile			</h1>
+					%heading%			</h1>
 
-			
+			%add%
 			<hr class="wp-header-end">
 
 			<form id="your-profile" action="%action%" method="post" novalidate="novalidate"
 								>
-				<input type="hidden" id="_wpnonce" name="_wpnonce" value="%nonce%" /><input type="hidden" name="_wp_http_referer" value="%referer%" />								<p>
+				<input type="hidden" id="_wpnonce" name="_wpnonce" value="%nonce%" /><input type="hidden" name="_wp_http_referer" value="%referer%" />%wp_referer%								<p>
 					<input type="hidden" name="from" value="profile" />
 					<input type="hidden" name="checkuser_id" value="%me%" />
 				</p>
@@ -52,26 +52,26 @@
 						<td><input type="text" name="user_login" id="user_login" value="%login%" readonly="readonly" class="regular-text ltr" /> <span class="description">Usernames cannot be changed.</span></td>
 					</tr>
 
-					
+					%role%
 					
 					<tr class="user-first-name-wrap">
 						<th><label for="first_name">First Name</label></th>
 						<td>
-													<input type="text" name="first_name" id="first_name" value="%first%" autocomplete="given-name" class="regular-text" />
+													<input type="text" name="first_name" id="first_name" value="%first%"%given% class="regular-text" />
 												</td>
 					</tr>
 
 					<tr class="user-last-name-wrap">
 						<th><label for="last_name">Last Name</label></th>
 						<td>
-													<input type="text" name="last_name" id="last_name" value="%last%" autocomplete="family-name" class="regular-text" />
+													<input type="text" name="last_name" id="last_name" value="%last%"%family% class="regular-text" />
 												</td>
 					</tr>
 
 					<tr class="user-nickname-wrap">
 						<th><label for="nickname">Nickname <span class="description">(required)</span></label></th>
 						<td>
-													<input type="text" name="nickname" id="nickname" value="%nickname%" autocomplete="nickname" class="regular-text" />
+													<input type="text" name="nickname" id="nickname" value="%nickname%"%nick_auto% class="regular-text" />
 												</td>
 					</tr>
 
@@ -92,9 +92,7 @@
 					<tr class="user-email-wrap">
 						<th><label for="email">Email <span class="description">(required)</span></label></th>
 						<td>
-															<input type="email" name="email" id="email" aria-describedby="email-description" value="%email%" autocomplete="email" class="regular-text ltr" />
-								<p class="description" id="email-description">
-									If you change this, an email will be sent at your new address to confirm it. <strong>The new address will not become active until confirmed.</strong>								</p>
+															%email_field%
 							
 							%pending%						</td>
 					</tr>
@@ -106,7 +104,7 @@
 
 									</table>
 
-				<h2>About Yourself</h2>
+				<h2>%about%</h2>
 
 				<table class="form-table" role="presentation">
 					<tr class="user-description-wrap">
@@ -145,7 +143,7 @@
 								<th scope="row"><label for="pass2">Repeat New Password</label></th>
 								<td>
 								<input type="password" name="pass2" id="pass2" class="regular-text" value="" autocomplete="new-password" spellcheck="false" aria-describedby="pass2-desc" />
-																			<p class="description" id="pass2-desc">Type your new password again.</p>
+																			<p class="description" id="pass2-desc">%pass2%</p>
 																	</td>
 							</tr>
 							<tr class="pw-weak">
@@ -158,7 +156,7 @@
 								</td>
 							</tr>
 							
-														
+														%reset%
 %sessions%													</table>
 
 											<div class="application-passwords hide-if-no-js" id="application-passwords-section">
@@ -175,7 +173,7 @@
 				<input type="hidden" name="action" value="update" />
 				<input type="hidden" name="user_id" id="user_id" value="%user_id%" />
 
-				<p class="submit"><input type="submit" name="submit" id="submit" class="button button-primary" value="Update Profile"  /></p>
+				<p class="submit"><input type="submit" name="submit" id="submit" class="button button-primary" value="%submit%"  /></p>
 			</form>
 		</div>
 		<script>

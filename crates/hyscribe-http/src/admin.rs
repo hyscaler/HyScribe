@@ -21,7 +21,7 @@ use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
 use hyscribe_admin::posts::{Answer, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids};
-use hyscribe_admin::profile::{ProfileSite, profile};
+use hyscribe_admin::profile::{EditArgs, ProfileSite, Request, profile, user_edit};
 use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
 use hyscribe_admin::users::{ListedUser, UserArgs, UserQuery, UsersSite, user_order, users};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
@@ -221,6 +221,7 @@ impl CapabilityData for Admin<'_> {
     }
     fn user_exists(&self, user_id: u64) -> bool {
         self.reads.user_exists(user_id)
+            || self.reads.reads.wait(self.site.db.user(user_id)).is_some()
     }
     fn post(&self, id: u64) -> Option<CapPost> {
         self.full_post(id).map(|post| CapPost {
@@ -634,14 +635,19 @@ impl UsersSite for Admin<'_> {
 }
 
 impl ProfileSite for Admin<'_> {
-    fn profile_user(&self) -> hyscribe_model::User {
-        let user = self.reads.reads.wait(self.site.db.user(self.user.id));
-        user.unwrap_or_else(|| self.user.clone())
+    fn profile_user(&self, id: u64) -> Option<hyscribe_model::User> {
+        self.reads.reads.wait(self.site.db.user(id))
+    }
+    fn user_option_of(&self, id: u64, name: &str) -> Option<Vec<u8>> {
+        self.reads.user_option(id, name)
+    }
+    fn user_can(&self, id: u64, cap: &str) -> bool {
+        Capabilities::load(self, self.site.db.prefix(), id).has_cap(self, cap, &[])
     }
     /// HyScribe's own sessions.
-    fn sessions(&self) -> usize {
+    fn sessions(&self, id: u64) -> usize {
         let sessions = self.site.sessions.as_ref();
-        sessions.map_or(0, |sessions| sessions.count(self.user.id, self.reads.now))
+        sessions.map_or(0, |sessions| sessions.count(id, self.reads.now))
     }
     fn generated_password(&self) -> String {
         hyscribe_auth::generate_password(24).unwrap_or_default()
@@ -756,6 +762,26 @@ fn user_args(raw_request_uri: &str) -> Option<UserArgs> {
     let role = args.role.as_deref().unwrap_or_default();
     let roles = !is_empty_string(role.as_bytes()) && role != "none";
     args.clauses = user_order(args.orderby.as_deref(), args.order.as_deref(), roles)?;
+    Some(args)
+}
+
+/// The arguments of `user-edit.php` ported so far; `None` for others.
+fn edit_args(raw_request_uri: &str) -> Option<EditArgs> {
+    let query = raw_request_uri
+        .split_once('?')
+        .map_or("", |(_, query)| query);
+    let mut args = EditArgs::default();
+    for (key, value) in parse_str(query.as_bytes()).as_array().unwrap_or_default() {
+        let (Key::String(key), Value::String(value)) = (key, value) else {
+            return None;
+        };
+        let value = Some(String::from_utf8(value.clone()).ok()?);
+        match key.as_slice() {
+            b"user_id" => args.user_id = value,
+            b"wp_http_referer" => args.referer = value,
+            _ => return None,
+        }
+    }
     Some(args)
 }
 
@@ -897,6 +923,12 @@ fn screen(
 ) -> Option<Response> {
     let canonical =
         String::from_utf8_lossy(&remove_query_arg(&REMOVABLE, url.as_bytes())).into_owned();
+    let request = Request {
+        canonical: &canonical,
+        origin,
+        uri: request_uri,
+        browser,
+    };
     let page = match path {
         "/hs-admin/tools" => hyscribe_admin::tools::tools(admin, &canonical, origin, browser),
         // HTTPS offers application passwords, whose list is not ported.
@@ -904,10 +936,24 @@ fn screen(
             if request_uri.contains('?') || origin.starts_with("https://") {
                 return None;
             }
-            match answered(
-                admin,
-                profile(admin, &canonical, origin, request_uri, browser),
-            ) {
+            match answered(admin, profile(admin, &request)) {
+                Ok(html) => Some(html),
+                Err(response) => return Some(*response),
+            }
+        }
+        "/hs-admin/user-edit" => {
+            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
+            let args = edit_args(&raw).filter(|_| !origin.starts_with("https://"))?;
+            match answered(admin, user_edit(admin, &args, &request)) {
+                Ok(html) => Some(html),
+                Err(response) => return Some(*response),
+            }
+        }
+        "/hs-admin/user-new" => {
+            if request_uri.contains('?') {
+                return None;
+            }
+            match answered(admin, hyscribe_admin::user_new::user_new(admin, &request)) {
                 Ok(html) => Some(html),
                 Err(response) => return Some(*response),
             }
@@ -992,13 +1038,19 @@ fn answered(admin: &Admin, answer: Answer) -> Result<String, Box<Response>> {
         Answer::Page(html) => return Ok(html),
         Answer::Redirect(to) => redirect(screen_headers(), to.as_bytes()),
         Answer::Denied(message) => denied(admin, message),
+        Answer::Died(message) => died(admin, StatusCode::INTERNAL_SERVER_ERROR, message),
     }))
 }
 
 /// `wp_die( $message, 403 )` on an admin screen.
 fn denied(admin: &Admin, message: &str) -> Response {
+    died(admin, StatusCode::FORBIDDEN, message)
+}
+
+/// `wp_die( $message )` with `status` on an admin screen.
+fn died(admin: &Admin, status: StatusCode, message: &str) -> Response {
     let body = hyscribe_admin::die::page(admin.reads.public(), "WordPress &rsaquo; Error", message);
-    response(StatusCode::FORBIDDEN, screen_headers(), body)
+    response(status, screen_headers(), body)
 }
 
 fn answer(
@@ -1049,7 +1101,11 @@ fn answer(
                 let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
                 let url = text(&[scheme, &here].concat());
                 let origin = text(&[scheme, host].concat());
-                screen(&admin, uri.path(), &requested, &url, &origin, &browser)
+                // No form is saved yet: every POST is not ported.
+                let screen = (!post)
+                    .then(|| screen(&admin, uri.path(), &requested, &url, &origin, &browser))
+                    .flatten();
+                screen
                     .unwrap_or_else(|| response(StatusCode::NOT_IMPLEMENTED, nocache(), Vec::new()))
             })
         }

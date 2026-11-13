@@ -188,6 +188,25 @@ pub(crate) fn role_names(stored: &[u8]) -> Vec<(String, String)> {
         .collect()
 }
 
+/// `wp_dropdown_roles( $selected )`: the editable roles, last first.
+pub(crate) fn dropdown_roles(roles: &[(String, String)], selected: &str) -> String {
+    roles
+        .iter()
+        .rev()
+        .map(|(role, name)| {
+            let chosen = if role == selected {
+                "selected='selected' "
+            } else {
+                ""
+            };
+            format!(
+                "\n\t<option {chosen}value='{}'>{name}</option>",
+                esc_attr(role.as_bytes())
+            )
+        })
+        .collect()
+}
+
 /// `count_users()`: how many users there are, and of each role, those of
 /// none last, as its queries compare, case aside and `=` ignoring trailing
 /// spaces.
@@ -559,17 +578,7 @@ pub fn users(
     .filter(|(_, _, cap)| site.can(cap))
     .map(|(action, label, _)| (action, label))
     .collect();
-    // `wp_dropdown_roles()`, the editable roles last first.
-    let options: String = roles
-        .iter()
-        .rev()
-        .map(|(role, name)| {
-            format!(
-                "\n\t<option value='{}'>{name}</option>",
-                esc_attr(role.as_bytes())
-            )
-        })
-        .collect();
+    let options = dropdown_roles(&roles, "");
     // `display_tablenav()` hides the bulk actions of an empty list.
     let bulk_hidden = if found.is_empty() { " hidden" } else { "" };
     let tablenav = |which: &str| {

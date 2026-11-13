@@ -163,6 +163,19 @@ fn date_count(row: &MySqlRow) -> Result<DateCount, DbError> {
     c.finish(count)
 }
 
+/// The columns of a user, with the first value of each name meta.
+macro_rules! user_columns {
+    () => {
+        "SELECT ID, display_name, user_nicename, user_login, user_email, user_url, \
+         COALESCE((SELECT meta_value FROM {prefix}usermeta WHERE user_id = u.ID \
+         AND meta_key = 'first_name' ORDER BY umeta_id LIMIT 1), '') AS first_name, \
+         COALESCE((SELECT meta_value FROM {prefix}usermeta WHERE user_id = u.ID \
+         AND meta_key = 'last_name' ORDER BY umeta_id LIMIT 1), '') AS last_name, \
+         COALESCE((SELECT meta_value FROM {prefix}usermeta WHERE user_id = u.ID \
+         AND meta_key = 'description' ORDER BY umeta_id LIMIT 1), '') AS description"
+    };
+}
+
 fn user(row: &MySqlRow) -> Result<User, DbError> {
     let mut c = Columns::new(row);
     let user = User {
@@ -924,22 +937,97 @@ impl Db {
     /// One user by ID, with the first value of each name meta as
     /// `get_user_meta( $id, $key, true )` reads it.
     pub async fn user(&self, id: u64) -> Result<Option<User>, DbError> {
-        let sql = self.prefix.sql(
-            "SELECT ID, display_name, user_nicename, user_login, user_email, user_url, \
-             COALESCE((SELECT meta_value FROM {prefix}usermeta WHERE user_id = u.ID \
-             AND meta_key = 'first_name' ORDER BY umeta_id LIMIT 1), '') AS first_name, \
-             COALESCE((SELECT meta_value FROM {prefix}usermeta WHERE user_id = u.ID \
-             AND meta_key = 'last_name' ORDER BY umeta_id LIMIT 1), '') AS last_name, \
-             COALESCE((SELECT meta_value FROM {prefix}usermeta WHERE user_id = u.ID \
-             AND meta_key = 'description' ORDER BY umeta_id LIMIT 1), '') AS description \
-             FROM {prefix}users u WHERE ID = ?",
-        );
+        let sql = self.prefix.sql(concat!(
+            user_columns!(),
+            " FROM {prefix}users u WHERE ID = ?"
+        ));
         let row = sqlx::query(sql)
             .bind(id)
             .fetch_optional(&self.pool)
             .await
             .map_err(db_error)?;
         row.as_ref().map(user).transpose()
+    }
+
+    /// `WP_User_Query`'s users by login, `limit` from `offset`.
+    pub async fn list_users(&self, limit: u32, offset: u32) -> Result<Vec<User>, DbError> {
+        let sql = self.prefix.sql(concat!(
+            user_columns!(),
+            " FROM {prefix}users u ORDER BY user_login ASC LIMIT ? OFFSET ?"
+        ));
+        let rows = sqlx::query(sql)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(user).collect()
+    }
+
+    /// How many users there are.
+    pub async fn count_users(&self) -> Result<u64, DbError> {
+        let sql = self
+            .prefix
+            .sql("SELECT COUNT(*) AS found FROM {prefix}users");
+        let row = sqlx::query(sql)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.try_get::<i64, _>("found")
+            .map(i64::unsigned_abs)
+            .map_err(db_error)
+    }
+
+    /// The `key` meta of every user, by user ID, as `count_users()` reads
+    /// them.
+    pub async fn users_meta(&self, key: &str) -> Result<Vec<(u64, Vec<u8>)>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT user_id, meta_value FROM {prefix}usermeta \
+             INNER JOIN {prefix}users ON user_id = ID WHERE meta_key = ?",
+        );
+        let rows = sqlx::query(sql)
+            .bind(key)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let value = (c.unsigned("user_id"), c.bytes("meta_value"));
+                c.finish(value)
+            })
+            .collect()
+    }
+
+    /// `count_many_users_posts( $ids )`: each author's published posts, and
+    /// private ones too when `all_private`, or else `me`'s own.
+    pub async fn user_post_counts(
+        &self,
+        ids: &[u64],
+        all_private: bool,
+        me: u64,
+    ) -> Result<Vec<(u64, u64)>, DbError> {
+        let mut sql = Sql::new(
+            "SELECT post_author, COUNT(*) AS found FROM {prefix}posts WHERE post_type = 'post' \
+             AND (post_status = 'publish' OR (post_status = 'private' AND (? OR post_author = ?))) \
+             AND post_author IN (",
+        );
+        sql.bind(Bind::Int(u64::from(all_private)));
+        sql.bind(Bind::Int(me));
+        list(&mut sql, field_ids(ids));
+        sql.push(" GROUP BY post_author");
+        let rows = sql
+            .query(&self.prefix)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let counted = (c.unsigned("post_author"), c.signed("found").unsigned_abs());
+                c.finish(counted)
+            })
+            .collect()
     }
 
     /// `get_user_by( 'login' | 'email', $value )`: the user whose column

@@ -571,3 +571,24 @@ fn sanitize_user_matches_php() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert_eq!(golden.lines().count(), 1528);
 }
+
+/// The admin's display filters of user names and emails, as PHP runs them
+/// (`reference/formatting/golden.php user-display`).
+#[test]
+fn user_fields_display_as_php_s() {
+    let golden = include_str!("../../tests/golden/user-display.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let f: Vec<Vec<u8>> = line.split('\t').map(hyscribe_testkit::unhex).collect();
+        if user_name_display(&f[0]) != f[1] || user_email_display(&f[0]) != f[2] {
+            failures.push(line.to_string());
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {}: {:?}",
+        failures.len(),
+        golden.lines().count(),
+        failures.first()
+    );
+}

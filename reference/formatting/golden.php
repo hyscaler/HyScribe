@@ -264,6 +264,22 @@ if ( 'user' === $argv[1] ) {
 	}
 	exit;
 }
+if ( 'user-display' === $argv[1] ) {
+	// The admin's display filters of a user's names and email, from
+	// default-filters.php, which this command line run does not count as admin.
+	$cases = array(
+		'', '0', ' 0 ', 'Ann', ' Ann ', 'R&D', 'R&amp;D', '&#039;', '<b>x</b>', '<script>x</script>', 'a < b', '"q"', "it's", "a\tb\nc",
+		'a@b.test', 'A.B@Ex-ample.TEST', ' a@b.test ', 'a&b@x.test', "a'b@x.test", 'a<b>@x.test', 'ab@x', 'a@b..c.test', 'a@-b-.c.test',
+		'a@b.c', 'a@.b.c', 'a@b_c.d', 'é@x.test', 'a@x.tést', '@ab.test', 'a b@x.test', 'a@b@c.test', 'a@b.test.', "a\x00@b.test", "a\xc3@b.test",
+	);
+	$atoms = array( '<', '>', '<b>', '</b>', ' ', "\t", '&', ';', '&amp;', '"', "'", 'a', 'B', '1', '@', '.', '..', '-', '_', 'é', "\xc3", '%41', '0' );
+	foreach ( array_merge( $cases, random_cases( $atoms, 1500, 10 ) ) as $case ) {
+		$name  = _wp_specialchars( wp_kses_data( sanitize_text_field( $case ) ), ENT_NOQUOTES, false, false );
+		$email = wp_kses_data( sanitize_email( $case ) );
+		echo bin2hex( $case ), "\t", bin2hex( $name ), "\t", bin2hex( $email ), "\n";
+	}
+	exit;
+}
 if ( 'clickable' === $argv[1] ) {
 	echo home_url(), "\n";
 	remove_all_filters( 'comment_text' );

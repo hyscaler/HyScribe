@@ -431,6 +431,10 @@ async fn errors_are_reported() {
             .await
             .unwrap_err(),
         db.user_meta(1, "use_ssl").await.unwrap_err(),
+        db.list_users(1, 0).await.unwrap_err(),
+        db.count_users().await.unwrap_err(),
+        db.users_meta("wp_capabilities").await.unwrap_err(),
+        db.user_post_counts(&[1], true, 1).await.unwrap_err(),
         db.comments(1).await.unwrap_err(),
         db.comment(1).await.unwrap_err(),
         db.adjacent_post(&Post::default(), true, None)
@@ -1273,6 +1277,13 @@ async fn term_queries_order_by_any_column() {
 async fn dashboard_reads() {
     let db = fixture().await;
     assert_eq!(db.comment_counts(1, 0).await.unwrap(), [1, 0, 0, 0, 0]);
+    let users = db.list_users(5, 0).await.unwrap();
+    assert_eq!(users.iter().map(|u| u.id).collect::<Vec<_>>(), [1]);
+    assert!(db.list_users(5, 1).await.unwrap().is_empty());
+    assert_eq!(db.count_users().await.unwrap(), 1);
+    let caps = db.users_meta("wp_capabilities").await.unwrap();
+    assert_eq!(caps, [(1, b"a:1:{s:13:\"administrator\";b:1;}".to_vec())]);
+    assert_eq!(db.user_post_counts(&[1], false, 0).await.unwrap(), [(1, 1)]);
     let latest = db.list_comments(&PENDING, NEWEST, 5, 0).await.unwrap();
     let ids: Vec<(u64, String)> = latest.into_iter().map(|(c, a)| (c.id, a)).collect();
     assert_eq!(ids, [(1, "1".to_string())]);

@@ -138,7 +138,7 @@ async fn logged_in_users_are_let_in() {
     let response = get(&site, "/hs-admin/edit?paged=9", "127.0.0.1:8081", &auth).await;
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(location(&response), "/hs-admin/edit?paged=1");
-    let response = get(&site, "/hs-admin/users", "127.0.0.1:8081", &auth).await;
+    let response = get(&site, "/hs-admin/profile", "127.0.0.1:8081", &auth).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     let cookies = all.join("; ");
     let page = page_of(get(&site, "/hs-admin/edit", "127.0.0.1:8081", &cookies).await).await;
@@ -214,6 +214,24 @@ async fn logged_in_users_are_let_in() {
         let response = get(&site, path, "127.0.0.1:8081", &auth).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
     }
+    // The users.
+    let page = page_of(get(&site, "/hs-admin/users", "127.0.0.1:8081", &cookies).await).await;
+    let list = include_str!("../../../hyscribe-admin/tests/golden/users-list.tsv");
+    let row = list
+        .lines()
+        .find(|l| l.starts_with("default\tadministrator\t"))
+        .unwrap();
+    let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+    assert_eq!(with_values(&php, &page), page);
+    let response = get(
+        &site,
+        "/hs-admin/users?role=editor",
+        "127.0.0.1:8081",
+        &auth,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     // The categories.
     let path = "/hs-admin/edit-tags?taxonomy=category";
     let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
@@ -412,6 +430,26 @@ async fn refusals() {
     .unwrap()
     .unwrap();
     assert_eq!(comments.status(), StatusCode::FORBIDDEN);
+    let users = tokio::task::spawn_blocking({
+        let (site, handle) = (Arc::clone(&site), handle.clone());
+        move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            let path = "/hs-admin/users";
+            screen(
+                &admin,
+                path,
+                path,
+                &format!("http://h{path}"),
+                "http://h",
+                &Browser::default(),
+            )
+        }
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(users.status(), StatusCode::FORBIDDEN);
     let terms = tokio::task::spawn_blocking(move || {
         let reads = LoginReads::new(&site, handle, now());
         let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
@@ -573,6 +611,7 @@ async fn dashboard_data() {
             test(&Admin::new(&reads, site, user));
         };
         check(&terms, (1, b"admin"), &|admin| {
+            assert!(admin.can_user("edit_user", 2));
             assert_eq!(admin.quick_draft(), Some(103));
             let comments = admin.recent_comments(admin.recent_posts("publish").last());
             let postless = comments.iter().find(|c| c.comment.id == 2).unwrap();
@@ -701,6 +740,7 @@ async fn dashboard_data() {
             assert_eq!(author.own_posts("post"), 39);
         });
         check(&ttd, (3, b"themereviewteam"), &|subscriber| {
+            assert!(!subscriber.can_user("edit_user", 1));
             assert!(subscriber.recent_posts("future").is_empty());
             assert_eq!(
                 PostsSite::user_option(subscriber, "admin_color").as_deref(),

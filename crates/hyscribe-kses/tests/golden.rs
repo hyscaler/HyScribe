@@ -9,7 +9,7 @@
 use hyscribe_kses::{
     ALLOWED_PROTOCOLS, Parts, esc_attr, esc_html, esc_url, parse_url, safecss_filter_attr,
     sanitize_key, url_query, wp_kses_bad_protocol, wp_kses_decode_entities, wp_kses_no_null,
-    wp_kses_normalize_entities, wp_parse_url, wp_strip_all_tags,
+    wp_kses_normalize_entities, wp_parse_url, wp_specialchars, wp_strip_all_tags,
 };
 use hyscribe_testkit::unhex;
 
@@ -214,4 +214,16 @@ fn limits_match() {
         count += 1;
     }
     assert_eq!(count, 22);
+}
+
+/// `_wp_specialchars()` keeps quotes and entities, and a text without any
+/// special character as it is, invalid UTF-8 too.
+#[test]
+fn wp_specialchars_keeps_quotes() {
+    assert_eq!(wp_specialchars(b"plain"), b"plain");
+    assert_eq!(wp_specialchars(b"R&D"), b"R&amp;D");
+    assert_eq!(wp_specialchars(b"a<b>\"'"), b"a&lt;b&gt;\"'");
+    assert_eq!(wp_specialchars(b"&#039;&apos;"), b"&#039;&amp;apos;");
+    assert_eq!(wp_specialchars(b"\xc3&"), b"");
+    assert_eq!(wp_specialchars(b"\xc3"), b"\xc3");
 }

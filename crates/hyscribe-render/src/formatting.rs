@@ -1306,6 +1306,73 @@ mod entities;
 
 pub use accents::remove_accents;
 
+/// `sanitize_email()`: the local part's allowed characters, and the domain
+/// without runs of periods, edge periods and hyphens or other characters,
+/// in two labels or more; empty when anything is left out entirely.
+pub fn sanitize_email(email: &[u8]) -> Vec<u8> {
+    // An `@` after the first byte, though the split is at the first one.
+    let has_at = email.get(1..).is_some_and(|rest| rest.contains(&b'@'));
+    if email.len() < 6 || !has_at {
+        return Vec::new();
+    }
+    let at = email.iter().position(|&b| b == b'@').unwrap_or_default();
+    let (local, domain) = email.split_at(at);
+    let domain = domain.get(1..).unwrap_or_default();
+    let local: Vec<u8> = local
+        .iter()
+        .copied()
+        .filter(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+/=?^_`{|}~.-".contains(b))
+        .collect();
+    // `preg_replace( '/\.{2,}/', '' )`.
+    let mut squeezed = Vec::new();
+    for run in domain.chunk_by(|a, b| (*a == b'.') == (*b == b'.')) {
+        if !(run.len() > 1 && run.first() == Some(&b'.')) {
+            squeezed.extend_from_slice(run);
+        }
+    }
+    let domain = php_trim_chars(&squeezed, b" \t\n\r\0\x0B.");
+    let subs: Vec<Vec<u8>> = domain
+        .split(|&b| b == b'.')
+        .map(|sub| {
+            php_trim_chars(sub, b" \t\n\r\0\x0B-")
+                .iter()
+                .copied()
+                .filter(|b| b.is_ascii_alphanumeric() || *b == b'-')
+                .collect::<Vec<u8>>()
+        })
+        .filter(|sub| !sub.is_empty())
+        .collect();
+    if local.is_empty() || subs.len() < 2 {
+        return Vec::new();
+    }
+    [local, b"@".to_vec(), subs.join(&b'.')].concat()
+}
+
+/// `trim( $text, $list )`.
+fn php_trim_chars<'a>(text: &'a [u8], list: &[u8]) -> &'a [u8] {
+    let start = text
+        .iter()
+        .position(|b| !list.contains(b))
+        .unwrap_or(text.len());
+    let end = text
+        .iter()
+        .rposition(|b| !list.contains(b))
+        .map_or(start, |end| end + 1);
+    text.get(start..end).unwrap_or_default()
+}
+
+/// A user's first or last name or display name through the admin's display
+/// filters: `sanitize_text_field()`, `wp_kses_data()`, `_wp_specialchars()`.
+pub fn user_name_display(name: &[u8]) -> Vec<u8> {
+    hyscribe_kses::wp_specialchars(&crate::kses::wp_kses_data(&sanitize_text_field(name)))
+}
+
+/// A user's email through the admin's display filters: `sanitize_email()`,
+/// then `wp_kses_data()`.
+pub fn user_email_display(email: &[u8]) -> Vec<u8> {
+    crate::kses::wp_kses_data(&sanitize_email(email))
+}
+
 /// `is_email()`: whether `email` has the shape WordPress accepts, a local
 /// part of the allowed characters and a domain of two or more labels.
 pub fn is_email(email: &[u8]) -> bool {

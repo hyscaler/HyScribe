@@ -446,8 +446,13 @@ pub fn fill(template: &str, values: &[(&str, String)]) -> String {
 
 const SCREEN_OPTIONS: &str = include_str!("list_table/screen-options.html");
 
+/// The columns `render_list_table_columns_preferences()` never offers to hide.
+const SPECIAL_COLUMNS: [&str; 8] = [
+    "_title", "cb", "comment", "media", "name", "title", "username", "blogname",
+];
+
 /// `render_screen_options()` of a list: a box for each column but the
-/// check boxes and the primary one, `hidden` ones unchecked, the number per
+/// special and primary ones, `hidden` ones unchecked, the number per
 /// page saved as `option`, then `view_mode`'s fields.
 pub fn screen_options(
     columns: &[Column],
@@ -459,7 +464,7 @@ pub fn screen_options(
 ) -> String {
     let labels: String = columns
         .iter()
-        .filter(|column| column.key != "cb" && !column.primary)
+        .filter(|column| !SPECIAL_COLUMNS.contains(&column.key) && !column.primary)
         .map(|column| {
             let key = column.key;
             let checked = if hidden.iter().any(|h| h == key) {

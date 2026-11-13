@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `esc_html()`, `esc_attr()`, `esc_textarea()` and `sanitize_key()`.
+//! `esc_html()`, `esc_attr()`, `esc_textarea()`, `_wp_specialchars()` and
+//! `sanitize_key()`.
 
 use crate::entities::wp_kses_normalize_entities;
 use crate::php::rest;
@@ -29,8 +30,24 @@ pub fn esc_textarea(text: &[u8]) -> Vec<u8> {
 /// empty string, then `_wp_specialchars()` with `ENT_QUOTES` and no
 /// double encoding.
 pub fn esc_html(text: &[u8]) -> String {
+    String::from_utf8(specialchars(text, true)).unwrap_or_default()
+}
+
+/// `_wp_specialchars( $text )`: `<`, `>` and `&` encoded, quotes kept and
+/// entities not encoded again; a text without any of `&<>"'` is kept as is.
+pub fn wp_specialchars(text: &[u8]) -> Vec<u8> {
+    if text.iter().any(|b| b"&<>\"'".contains(b)) {
+        specialchars(text, false)
+    } else {
+        text.to_vec()
+    }
+}
+
+/// `htmlspecialchars()` without double encoding, of quotes too when
+/// `quotes`; empty for invalid UTF-8.
+fn specialchars(text: &[u8], quotes: bool) -> Vec<u8> {
     if std::str::from_utf8(text).is_err() {
-        return String::new();
+        return Vec::new();
     }
     let text = wp_kses_normalize_entities(text);
     let mut out = Vec::with_capacity(text.len());
@@ -38,8 +55,8 @@ pub fn esc_html(text: &[u8]) -> String {
         match byte {
             b'<' => out.extend_from_slice(b"&lt;"),
             b'>' => out.extend_from_slice(b"&gt;"),
-            b'"' => out.extend_from_slice(b"&quot;"),
-            b'\'' => out.extend_from_slice(b"&#039;"),
+            b'"' if quotes => out.extend_from_slice(b"&quot;"),
+            b'\'' if quotes => out.extend_from_slice(b"&#039;"),
             // After normalizing, every `&` starts `&amp;`, a valid numeric
             // reference or an allowed name. `htmlspecialchars()` keeps all
             // of those but `&apos;`, which is not in HTML 4.01.
@@ -47,7 +64,7 @@ pub fn esc_html(text: &[u8]) -> String {
             _ => out.push(byte),
         }
     }
-    String::from_utf8(out).unwrap_or_default()
+    out
 }
 
 /// `esc_attr()`: the same escaping as [`esc_html`].

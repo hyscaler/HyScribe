@@ -22,6 +22,7 @@ use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
 use hyscribe_admin::posts::{Answer, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids};
 use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
+use hyscribe_admin::users::{ListedUser, UsersSite, users};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
 use hyscribe_db::{CommentFilter, StatusOrder, StatusQuery};
 use hyscribe_model::{Post, PostQuery, Term, TermOrder, TermQuery, User};
@@ -137,6 +138,12 @@ impl<'a> Admin<'a> {
             comment_counts: OnceCell::new(),
             settings: None,
         }
+    }
+
+    /// Each user's `{prefix}capabilities`, by user ID.
+    fn capabilities(&self) -> Vec<(u64, Vec<u8>)> {
+        let key = format!("{}capabilities", self.site.db.prefix());
+        self.reads.reads.wait(self.site.db.users_meta(&key))
     }
 
     /// `current_user_can( $cap, $id )` of an object.
@@ -553,6 +560,59 @@ impl CommentsSite for Admin<'_> {
     }
 }
 
+impl UsersSite for Admin<'_> {
+    fn user_roles(&self) -> Option<Vec<u8>> {
+        self.reads
+            .reads
+            .option(&format!("{}user_roles", self.site.db.prefix()))
+    }
+    fn all_capabilities(&self) -> Vec<Vec<u8>> {
+        self.capabilities()
+            .into_iter()
+            .map(|(_, caps)| caps)
+            .collect()
+    }
+    fn list_users(&self, number: u64) -> (Vec<ListedUser>, u64) {
+        let limit = u32::try_from(number).unwrap_or(u32::MAX);
+        let users = self.reads.reads.wait(self.site.db.list_users(limit, 0));
+        let ids: Vec<u64> = users.iter().map(|user| user.id).collect();
+        let all_private = self.can("read_private_posts");
+        let counts = self
+            .site
+            .db
+            .user_post_counts(&ids, all_private, self.user.id);
+        let counts = self.reads.reads.wait(counts);
+        let capabilities = self.capabilities();
+        let found = |id: u64| {
+            capabilities
+                .iter()
+                .find(|(user, _)| *user == id)
+                .map(|(_, caps)| caps.clone())
+                .unwrap_or_default()
+        };
+        let listed = users
+            .into_iter()
+            .map(|user| ListedUser {
+                capabilities: found(user.id),
+                posts: counts
+                    .iter()
+                    .find(|(author, _)| *author == user.id)
+                    .map_or(0, |(_, n)| *n),
+                user,
+            })
+            .collect();
+        (listed, self.reads.reads.wait(self.site.db.count_users()))
+    }
+    fn can_user(&self, cap: &str, id: u64) -> bool {
+        self.can_for(cap, id)
+    }
+    fn author_url(&self, id: u64) -> String {
+        let id = i64::try_from(id).unwrap_or_default();
+        let url = hyscribe_render::permalinks::author_posts_url(&self.reads.reads, id);
+        String::from_utf8_lossy(&url).into_owned()
+    }
+}
+
 impl TermsSite for Admin<'_> {
     fn list_terms(&self, query: &TermQuery) -> Vec<Term> {
         RenderSite::term_query(&self.reads.reads, query)
@@ -777,6 +837,18 @@ fn screen(
         String::from_utf8_lossy(&remove_query_arg(&REMOVABLE, url.as_bytes())).into_owned();
     let page = match path {
         "/hs-admin/tools" => hyscribe_admin::tools::tools(admin, &canonical, origin, browser),
+        "/hs-admin/users" => {
+            if request_uri.contains('?') {
+                return None;
+            }
+            match answered(
+                admin,
+                users(admin, &canonical, origin, request_uri, browser),
+            ) {
+                Ok(html) => Some(html),
+                Err(response) => return Some(*response),
+            }
+        }
         "/hs-admin/" | "/hs-admin/index" => {
             dashboard(admin, &canonical, origin, request_uri, browser)
         }

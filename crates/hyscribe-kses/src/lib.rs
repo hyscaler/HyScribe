@@ -20,7 +20,7 @@ mod url;
 
 pub use css::safecss_filter_attr;
 pub use entities::{wp_kses_decode_entities, wp_kses_normalize_entities};
-pub use escape::{esc_attr, esc_html, esc_textarea, sanitize_key};
+pub use escape::{esc_attr, esc_html, esc_textarea, sanitize_key, wp_specialchars};
 pub use php::contains as str_contains;
 pub use protocol::{
     ALLOWED_PROTOCOLS, wp_kses_bad_protocol, wp_kses_no_null, wp_kses_no_null_keep_slash_zero,

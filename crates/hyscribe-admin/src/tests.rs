@@ -176,6 +176,11 @@ impl Role {
         crate::posts::PostsSite::post_terms(self, &crate::posts::tests::hello(), taxonomy)
     }
 
+    /// A variant of `reference/users-list/golden.sh` over its content.
+    fn users_content(&self) -> bool {
+        ["users", "upaged", "uhidden"].contains(&self.variant())
+    }
+
     /// A variant of `reference/comments-list/golden.sh` over its content.
     fn comments_content(&self) -> bool {
         ["comments", "cpaged", "chidden"].contains(&self.variant())
@@ -406,6 +411,33 @@ fn comment(
         content: content.as_bytes().to_vec(),
         comment_type: comment_type.as_bytes().to_vec(),
         ..hyscribe_model::Comment::default()
+    }
+}
+
+impl crate::users::UsersSite for Role {
+    fn user_roles(&self) -> Option<Vec<u8>> {
+        options().get("wp_user_roles").cloned()
+    }
+    /// Those of the listed users who have any on the site.
+    fn all_capabilities(&self) -> Vec<Vec<u8>> {
+        crate::users::content::users(self.users_content())
+            .into_iter()
+            .map(|listed| listed.capabilities)
+            .filter(|caps| !caps.is_empty())
+            .collect()
+    }
+    fn list_users(&self, number: u64) -> (Vec<crate::users::ListedUser>, u64) {
+        let all = crate::users::content::users(self.users_content());
+        let total = all.len() as u64;
+        let take = usize::try_from(number).unwrap();
+        (all.into_iter().take(take).collect(), total)
+    }
+    fn can_user(&self, cap: &str, id: u64) -> bool {
+        let id = hyscribe_phpser::Value::Int(i64::try_from(id).unwrap());
+        Capabilities::load(self, "wp_", 1).has_cap(self, cap, &[id])
+    }
+    fn author_url(&self, id: u64) -> String {
+        format!("{SITE}/?author={id}")
     }
 }
 
@@ -819,6 +851,12 @@ impl crate::posts::PostsSite for Role {
                 _ => return None,
             };
             return Some(value.to_vec());
+        }
+        if self.variant() == "upaged" && name == "users_per_page" {
+            return Some(b"2".to_vec());
+        }
+        if self.variant() == "uhidden" && name == "manageuserscolumnshidden" {
+            return Some(b"a:1:{i:0;s:5:\"email\";}".to_vec());
         }
         if self.variant() == "cpaged" && name == "edit_comments_per_page" {
             return Some(b"2".to_vec());

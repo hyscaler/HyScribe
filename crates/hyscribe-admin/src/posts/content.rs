@@ -303,7 +303,30 @@ pub(crate) fn list(query: &PostQuery) -> (Vec<Post>, u64) {
     let mut found: Vec<Post> = posts()
         .into_iter()
         .filter(|post| {
+            let terms = |taxonomy: &str| -> Vec<u64> {
+                post_terms(post, taxonomy)
+                    .iter()
+                    .map(|term| term.id)
+                    .collect()
+            };
+            let month = post.date.get(..7).unwrap_or_default();
             query.post_types.contains(&post.post_type)
+                && query
+                    .include
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(&post.id))
+                && !query.excluded_authors.contains(&post.author)
+                && query.terms.iter().all(|filter| {
+                    terms(&filter.taxonomy)
+                        .iter()
+                        .any(|id| filter.terms.contains(id))
+                })
+                && query
+                    .year
+                    .is_none_or(|year| month.starts_with(&year.to_string()))
+                && query
+                    .month
+                    .is_none_or(|m| month.ends_with(&format!("-{m:02}")))
                 && query.statuses.iter().any(|filter| {
                     filter.status == post.status && filter.author.is_none_or(|a| a == post.author)
                 })

@@ -15,13 +15,13 @@ use hyscribe_admin::dashboard::{CommentCounts, DashboardSite, RecentComment, das
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
-use hyscribe_admin::posts::{Answer, ListArgs, PostsSite, edit};
+use hyscribe_admin::posts::{Answer, ListArgs, PostsSite, edit, kept_ids, sorted_ids};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
 use hyscribe_db::{StatusOrder, StatusQuery};
 use hyscribe_model::{Post, PostQuery, Term, TermOrder, TermQuery, User};
-use hyscribe_phpser::{Key, Value, parse_str, remove_query_arg, urlencode};
+use hyscribe_phpser::{Key, Value, is_empty_string, parse_str, remove_query_arg, urlencode};
 use hyscribe_render::date::Zone;
-use hyscribe_render::site::Site as RenderSite;
+use hyscribe_render::site::{Archive, Site as RenderSite, Taxonomy};
 use tokio::runtime::Handle;
 
 use crate::login::{LoginReads, Names, PATH, cookie, cookies, is_ssl, joined, nocache, response};
@@ -486,15 +486,30 @@ fn screen_headers() -> Vec<(header::HeaderName, String)> {
     headers
 }
 
-/// The posts list's arguments; `None` for a query with arguments not
-/// ported yet.
-fn list_args(request_uri: &str) -> Option<ListArgs> {
+/// The posts list's term and date filters, which `main_query()` reads.
+const FILTERS: [&str; 5] = ["m", "cat", "category_name", "tag", "post_format"];
+
+/// `WP_Query`'s `cat` once cleaned: sorted integers unless that leaves it
+/// empty.
+fn cat_var(raw: &str) -> String {
+    let kept = kept_ids(raw);
+    if is_empty_string(kept.as_bytes()) {
+        return kept;
+    }
+    let ids: Vec<String> = sorted_ids(&kept).iter().map(i64::to_string).collect();
+    ids.join(",")
+}
+
+/// The posts list's arguments, with the filters of `main_query()` for
+/// them; `None` for a query with arguments not ported yet.
+fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
     let query = request_uri.split_once('?').map_or("", |(_, query)| query);
     let args = parse_str(query.as_bytes());
     let mut list = ListArgs {
         base: true,
         ..ListArgs::default()
     };
+    let mut vars = HashMap::new();
     for (key, value) in args.as_array().unwrap_or_default() {
         match (key, value) {
             (Key::String(key), Value::String(value)) if key == b"post_status" => {
@@ -506,6 +521,28 @@ fn list_args(request_uri: &str) -> Option<ListArgs> {
             (Key::String(key), Value::String(value)) if key == b"paged" => {
                 list.paged = Some(String::from_utf8(value.clone()).ok()?);
             }
+            (Key::String(key), Value::String(value))
+                if [&b"author"[..], b"all_posts", b"show_sticky"].contains(&key.as_slice())
+                    || FILTERS.iter().any(|name| name.as_bytes() == key) =>
+            {
+                let value = String::from_utf8(value.clone()).ok()?;
+                let name = String::from_utf8_lossy(key).into_owned();
+                match name.as_str() {
+                    "author" => list.author = Some(value),
+                    "all_posts" => list.all_posts = Some(value),
+                    "show_sticky" => list.show_sticky = !is_empty_string(value.as_bytes()),
+                    _ => {
+                        match name.as_str() {
+                            "m" => list.m = value.clone(),
+                            "post_format" => list.post_format = value.clone(),
+                            "cat" => list.cat = cat_var(&value),
+                            _ => {}
+                        }
+                        vars.insert(name, value);
+                    }
+                }
+                list.base = false;
+            }
             (Key::String(key), Value::String(value)) if key == b"orderby" || key == b"order" => {
                 let value = Some(String::from_utf8(value.clone()).ok()?);
                 if key == b"orderby" {
@@ -516,6 +553,25 @@ fn list_args(request_uri: &str) -> Option<ListArgs> {
                 list.base = false;
             }
             _ => return None,
+        }
+    }
+    if !vars.is_empty() {
+        let (query, resolved) = admin
+            .reads
+            .reads
+            .wait(crate::main_query(admin.site, &vars, false));
+        list.filters = PostQuery {
+            terms: query.terms,
+            year: query.year,
+            month: query.month,
+            day: query.day,
+            time: query.time,
+            ..PostQuery::default()
+        };
+        // `WP_Query` sets `cat` to the queried category.
+        if let Some((Taxonomy::Category, term)) = resolved.archive.as_ref().and_then(Archive::term)
+        {
+            list.cat = term.id.to_string();
         }
     }
     Some(list)
@@ -538,7 +594,7 @@ fn screen(
             dashboard(admin, &canonical, origin, request_uri, browser)
         }
         "/hs-admin/edit" => {
-            let args = list_args(request_uri)?;
+            let args = list_args(admin, request_uri)?;
             match edit(admin, &args, &canonical, origin, request_uri, browser) {
                 Some(Answer::Redirect(to)) => {
                     return Some(redirect(screen_headers(), to.as_bytes()));

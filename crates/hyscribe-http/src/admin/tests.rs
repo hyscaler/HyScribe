@@ -515,35 +515,87 @@ async fn dashboard_data() {
     .unwrap();
 }
 
-/// The posts list reads `post_status` and the post type, no other argument
-/// yet.
-#[test]
-fn the_posts_list_reads_its_status() {
-    let args = |uri| list_args(uri).map(|args| (args.status, args.base));
-    assert_eq!(args("/hs-admin/edit"), Some((String::new(), true)));
-    assert_eq!(
-        args("/hs-admin/edit?post_type=post"),
-        Some((String::new(), true))
-    );
-    assert_eq!(
-        args("/hs-admin/edit?post_status=draft&post_type=post&post_status=trash"),
-        Some(("trash".into(), false))
-    );
-    assert_eq!(args("/hs-admin/edit?post_status=%FF"), None);
-    assert_eq!(args("/hs-admin/edit?post_status[]=draft"), None);
-    assert_eq!(args("/hs-admin/edit?post_type=page"), None);
-    assert_eq!(args("/hs-admin/edit?post_status=draft&s=x"), None);
-    assert_eq!(args("/hs-admin/edit?paged=%FF"), None);
-    assert_eq!(args("/hs-admin/edit?order=%FF"), None);
-    let sorted = list_args("/hs-admin/edit?orderby=title&order=desc&paged=2").unwrap();
-    assert_eq!(
-        (sorted.orderby, sorted.order, sorted.paged, sorted.base),
-        (
-            Some("title".into()),
-            Some("desc".into()),
-            Some("2".into()),
-            false
+/// The posts list's arguments, and the filters the fixture's terms make.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_posts_list_reads_its_arguments() {
+    let site = oracle_site().await;
+    let handle = Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, now());
+        let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+        let args = |uri| list_args(&admin, uri).map(|args| (args.status, args.base));
+        assert_eq!(args("/hs-admin/edit"), Some((String::new(), true)));
+        assert_eq!(
+            args("/hs-admin/edit?post_type=post"),
+            Some((String::new(), true))
+        );
+        assert_eq!(
+            args("/hs-admin/edit?post_status=draft&post_type=post&post_status=trash"),
+            Some(("trash".into(), false))
+        );
+        for refused in [
+            "/hs-admin/edit?post_status=%FF",
+            "/hs-admin/edit?post_status[]=draft",
+            "/hs-admin/edit?post_type=page",
+            "/hs-admin/edit?post_status=draft&s=x",
+            "/hs-admin/edit?paged=%FF",
+            "/hs-admin/edit?order=%FF",
+            "/hs-admin/edit?author=%FF",
+        ] {
+            assert_eq!(args(refused), None, "{refused}");
+        }
+        let sorted = list_args(&admin, "/hs-admin/edit?orderby=title&order=desc&paged=2").unwrap();
+        assert_eq!(
+            (sorted.orderby, sorted.order, sorted.paged, sorted.base),
+            (
+                Some("title".into()),
+                Some("desc".into()),
+                Some("2".into()),
+                false
+            )
+        );
+        assert!(list_args(&admin, "/hs-admin/edit?paged=2").unwrap().base);
+        let filtered = list_args(
+            &admin,
+            "/hs-admin/edit?author=2&all_posts=1&show_sticky=1&m=2026102708&post_format=aside",
         )
-    );
-    assert!(list_args("/hs-admin/edit?paged=2").unwrap().base);
+        .unwrap();
+        assert_eq!(
+            (
+                filtered.author.as_deref(),
+                filtered.all_posts.as_deref(),
+                filtered.show_sticky
+            ),
+            (Some("2"), Some("1"), true)
+        );
+        assert_eq!(
+            (filtered.m.as_str(), filtered.post_format.as_str()),
+            ("2026102708", "aside")
+        );
+        assert_eq!(
+            (
+                filtered.filters.year,
+                filtered.filters.month,
+                filtered.filters.day
+            ),
+            (Some(2026), Some(10), Some(27))
+        );
+        assert_eq!(
+            filtered.filters.time,
+            [hyscribe_model::TimeCondition::Hour(8)]
+        );
+        assert_eq!(filtered.filters.terms.len(), 1);
+        // A category's slug chooses it in the filter, as `cat` does.
+        let named = list_args(&admin, "/hs-admin/edit?category_name=uncategorized").unwrap();
+        assert_eq!(named.cat, "1");
+        let given = list_args(&admin, "/hs-admin/edit?cat=0&tag=nothing").unwrap();
+        assert_eq!(given.cat, "0");
+        // `WP_Query` keeps digits, commas and minus signs, then sorts.
+        for (raw, cat) in [("00", "0"), ("abc", ""), ("3x,-1", "-1,3")] {
+            let args = list_args(&admin, &format!("/hs-admin/edit?cat={raw}")).unwrap();
+            assert_eq!(args.cat, cat, "{raw}");
+        }
+    })
+    .await
+    .unwrap();
 }

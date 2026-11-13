@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use hyscribe_model::TermFilter;
 use hyscribe_testkit::{hs_admin_page, unhex};
 
 use super::*;
@@ -51,7 +52,7 @@ fn inline_editors_are_php_s() {
         let php = rest
             .get(..rest.find("\t\t</form>\n").unwrap() + 10)
             .unwrap();
-        let ours = inline_edit(&Role(role), &hello(), 7);
+        let ours = inline_edit(&Role(role), &hello(), 7, "");
         assert!(ours == php, "{role}: {}", first_difference(php, &ours));
     }
 }
@@ -83,6 +84,7 @@ fn the_list_is_php_s() {
             pages: 1,
             orderby: None,
             order: None,
+            ..Listing::default()
         };
         let url = format!("{}/hs-admin/edit", crate::tests::SITE);
         let ours = list_content(&Role(role), &listing, &[], &url, "/hs-admin/edit");
@@ -131,11 +133,51 @@ fn variants_are_php_s() {
                 .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
                 .map(String::from)
         };
+        // The filters `main_query()` makes of the request.
+        let category = |terms: Vec<u64>| TermFilter {
+            taxonomy: "category".into(),
+            terms,
+            exclude: false,
+        };
+        let (terms, cat) = match query {
+            "cat=301" => (vec![category(vec![301, 302])], "301"),
+            "cat=0" | "cat=00" => (Vec::new(), "0"),
+            "category_name=local" => (vec![category(vec![302])], "302"),
+            "tag=php" | "post_format=aside" => {
+                let (taxonomy, id) = if query == "tag=php" {
+                    ("post_tag", 304)
+                } else {
+                    ("post_format", 305)
+                };
+                let filter = TermFilter {
+                    taxonomy: taxonomy.into(),
+                    terms: vec![id],
+                    exclude: false,
+                };
+                (vec![filter], "")
+            }
+            _ => (Vec::new(), ""),
+        };
+        let m = arg("m").unwrap_or_default();
+        let filters = PostQuery {
+            terms,
+            year: m.get(..4).and_then(|y| y.parse().ok()),
+            month: m.get(4..6).and_then(|m| m.parse().ok()),
+            ..PostQuery::default()
+        };
+        let flag = |name| arg(name).is_some_and(|v| v == "1");
         let args = ListArgs {
             status: arg("post_status").unwrap_or_default(),
             orderby: arg("orderby"),
             order: arg("order"),
             paged: arg("paged"),
+            author: arg("author"),
+            all_posts: arg("all_posts"),
+            show_sticky: flag("show_sticky"),
+            m,
+            post_format: arg("post_format").unwrap_or_default(),
+            cat: cat.into(),
+            filters,
             base: query.is_empty() || query.starts_with("paged="),
         };
         let role: &'static str = Box::leak(format!("{variant}:{}", f[1]).into_boxed_str());
@@ -145,10 +187,13 @@ fn variants_are_php_s() {
         } else {
             format!("/hs-admin/edit?{query}")
         };
+        // The canonical URL, rebuilt as `remove_query_arg()` rebuilds it.
+        let url = format!("{}{path}", crate::tests::SITE);
+        let canonical = hyscribe_phpser::remove_query_arg(&[b"message"], url.as_bytes());
         let ours = edit(
             &Role(role),
             &args,
-            &format!("{}{path}", crate::tests::SITE),
+            &String::from_utf8(canonical).unwrap(),
             crate::tests::SITE,
             &path,
             &crate::admin_bar::Browser {
@@ -244,6 +289,7 @@ fn the_trash_needs_delete_posts() {
         pages: 1,
         orderby: None,
         order: None,
+        ..Listing::default()
     };
     let nav = |role| tablenav(&Role(role), &listing, "bottom", &[], String::new());
     assert!(nav("contributor").contains("value=\"trash\""));
@@ -293,6 +339,7 @@ fn no_posts_no_mine_link() {
         pages: 1,
         orderby: None,
         order: None,
+        ..Listing::default()
     };
     assert!(
         status_views(&listing)
@@ -336,6 +383,18 @@ fn protected_posts_show_no_excerpt() {
     );
 }
 
+/// `WP_Query`'s `author`: cleaned, sorted, and leaving out wins.
+#[test]
+fn authors_are_read_as_wp_query_reads_them() {
+    assert_eq!(author_ids("abc"), None);
+    assert_eq!(author_ids(""), None);
+    assert_eq!(author_ids("00"), None);
+    assert_eq!(author_ids("3, 1x,3"), Some(vec![1, 3]));
+    assert_eq!(author_lists(&[1, 3]), (vec![1, 3], Vec::new()));
+    assert_eq!(author_lists(&[0, 1]), (Vec::new(), vec![0]));
+    assert_eq!(author_lists(&[-2, 1]), (Vec::new(), vec![2]));
+}
+
 /// The request's status as PHP reads it: slashed, and empty when `"0"`.
 #[test]
 fn the_status_is_read_as_php_reads_it() {
@@ -354,6 +413,7 @@ fn the_status_is_read_as_php_reads_it() {
         pages: 1,
         orderby: None,
         order: None,
+        ..Listing::default()
     };
     assert!(!status_views(&listing)[0].current);
 }

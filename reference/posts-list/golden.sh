@@ -77,6 +77,12 @@ record content author '?post_status=private'
 for query in '?paged=2' '?paged=5' '?paged=9' '?orderby=title&order=desc&paged=2'; do
   record hidden administrator "$query"
 done
+for query in '?author=2' '?author=1' '?all_posts=1' '?show_sticky=1' '?m=202611' '?cat=301' \
+  '?category_name=local' '?tag=php' '?post_format=aside' '?author=1,-2' '?author=00' '?author=a-1' \
+  '?all_posts=' '?cat=0' '?cat=00'; do
+  record content administrator "$query"
+done
+record content author '?all_posts=1'
 for query in '?orderby=title&order=asc' '?orderby=title' '?post_status=publish&orderby=date&order=asc' '?order=desc'; do
   record content administrator "$query"
 done

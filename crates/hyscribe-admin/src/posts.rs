@@ -17,7 +17,7 @@ use crate::admin_bar::BarSite;
 use crate::admin_bar::Browser;
 use crate::list_table::{
     Column, Order, Sort, View, bulk_actions, column_headers, months_dropdown, pagination,
-    row_actions, search_box, table_description, views,
+    row_actions, search_box, selected as selected_if, table_description, views,
 };
 use crate::menu::Screen;
 use crate::menu::esc_link;
@@ -551,20 +551,24 @@ fn touch_time(post: &Post, zone: Zone, now: i64) -> String {
     )
 }
 
-/// `wp_dropdown_users()` of `users` in the inline editors, with the bulk
-/// editor's "no change".
-fn authors_dropdown(users: &[User], bulk: bool) -> String {
+/// `wp_dropdown_users()` of `users` in the inline editors, `selected` the
+/// author query's; with the bulk editor's "no change".
+fn authors_dropdown(users: &[User], bulk: bool, chosen_author: &str) -> String {
     let mut out = String::from(
         "<label class=\"inline-edit-author\"><span class=\"title\">Author</span><select name='post_author' class='authors'>\n",
     );
     if bulk {
-        out.push_str("\t<option value='-1'>&mdash; No Change &mdash;</option>\n");
+        out.push_str(&format!(
+            "\t<option value='-1'{}>&mdash; No Change &mdash;</option>\n",
+            selected_if("-1" == chosen_author)
+        ));
     }
     for user in users {
         let label = [&user.display_name[..], b" (", &user.login, b")"].concat();
         out.push_str(&format!(
-            "\t<option value='{}'>{}</option>\n",
+            "\t<option value='{}'{}>{}</option>\n",
             user.id,
+            selected_if(user.id.to_string() == chosen_author),
             esc_html(&label)
         ));
     }
@@ -663,7 +667,7 @@ const BULK_STICKY: &str = "\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t<label class=\"alig
 
 /// `inline_edit()`: the Quick Edit and Bulk Edit rows of a table of
 /// `columns` visible columns, the date fields from `first`, the global post.
-fn inline_edit(site: &dyn PostsSite, first: &Post, columns: usize) -> String {
+fn inline_edit(site: &dyn PostsSite, first: &Post, columns: usize, author: &str) -> String {
     let can_publish = site.can("publish_posts");
     let others = site.can("edit_others_posts");
     let (zone, now) = site.clock();
@@ -677,8 +681,8 @@ fn inline_edit(site: &dyn PostsSite, first: &Post, columns: usize) -> String {
     let (authors, bulk_authors) = if others {
         let users = site.authors();
         (
-            authors_dropdown(&users, false),
-            authors_dropdown(&users, true),
+            authors_dropdown(&users, false, author),
+            authors_dropdown(&users, true, author),
         )
     } else {
         Default::default()
@@ -838,6 +842,7 @@ const NOT_IN_ALL: [&str; 7] = [
 ];
 
 /// What the list shows: the counts its links and pages read.
+#[derive(Default)]
 struct Listing {
     posts: Vec<Post>,
     total: u64,
@@ -857,6 +862,17 @@ struct Listing {
     /// `$_GET['orderby']` and `$_GET['order']`, if given.
     orderby: Option<String>,
     order: Option<String>,
+    /// The user's own posts are listed.
+    mine: bool,
+    /// `$_GET['all_posts']`, `$_GET['show_sticky']` and `$_GET['author']`.
+    all_posts: bool,
+    show_sticky: bool,
+    author: String,
+    author_query: String,
+    /// The filters' choices: `m`, `post_format` and `cat`.
+    m: String,
+    post_format: String,
+    cat: String,
 }
 
 impl Listing {
@@ -892,14 +908,14 @@ fn status_views(listing: &Listing) -> Vec<View> {
             "edit.php?post_type=post".into()
         },
         label: label("All", all_total),
-        current: !listing.own_only && listing.base,
+        current: listing.base && !listing.own_only || listing.all_posts,
     }];
     if mine {
         links.push(View {
             class: "mine".into(),
             url: format!("edit.php?post_type=post&author={}", listing.user),
             label: label("Mine", listing.own),
-            current: listing.own_only,
+            current: listing.mine,
         });
     }
     for (status, one, many) in STATUSES {
@@ -925,26 +941,35 @@ fn status_views(listing: &Listing) -> Vec<View> {
                 class: "sticky".into(),
                 url: "edit.php?post_type=post&show_sticky=1".into(),
                 label: label("Sticky", listing.sticky),
-                current: false,
+                current: listing.show_sticky,
             },
         );
     }
     links
 }
 
-/// `wp_dropdown_categories()` of the category filter, all of them by name.
-fn categories_dropdown(site: &dyn PostsSite) -> String {
+/// `wp_dropdown_categories()` of the category filter, all of them by name,
+/// `selected` the `cat` query var.
+fn categories_dropdown(site: &dyn PostsSite, selected: &str) -> String {
     let terms = site.terms("category");
     let mut out = String::from(
         "<label class=\"screen-reader-text\" for=\"cat\">Filter by category</label><select  name='cat' id='cat' class='postform'>\n",
     );
     // The default category is always there.
-    out.push_str("\t<option value='0'>All Categories</option>\n");
+    let all = selected_if(selected == "0");
+    out.push_str(&format!(
+        "\t<option value='0'{all}>All Categories</option>\n"
+    ));
     let mut depth = 0;
     walk(&terms, true, &mut |event| match event {
         Walk::Start(term) => out.push_str(&format!(
-            "\t<option class=\"level-{depth}\" value=\"{}\">{}{}</option>\n",
+            "\t<option class=\"level-{depth}\" value=\"{}\"{}>{}{}</option>\n",
             term.id,
+            if term.id.to_string() == selected {
+                " selected=\"selected\""
+            } else {
+                ""
+            },
             "&nbsp;".repeat(depth * 3),
             text(&wptexturize(&term.name, &[]))
         )),
@@ -961,8 +986,9 @@ fn categories_dropdown(site: &dyn PostsSite) -> String {
     out
 }
 
-/// `formats_dropdown()`: the formats some post has, standard left out.
-fn formats_dropdown(site: &dyn PostsSite) -> String {
+/// `formats_dropdown()`: the formats some post has, standard left out,
+/// `selected` the requested one.
+fn formats_dropdown(site: &dyn PostsSite, chosen_format: &str) -> String {
     let used: Vec<Term> = site
         .terms("post_format")
         .into_iter()
@@ -977,14 +1003,16 @@ fn formats_dropdown(site: &dyn PostsSite) -> String {
         .filter(|slug| slug != "standard")
         .map(|slug| {
             format!(
-                "\t\t\t\t<option value=\"{}\">{}</option>\n\t\t\t\t",
+                "\t\t\t\t<option{} value=\"{}\">{}</option>\n\t\t\t\t",
+                selected_if(slug == chosen_format),
                 esc_attr(slug.as_bytes()),
                 esc_html(post_format_string(slug.as_bytes()).as_bytes())
             )
         })
         .collect();
     format!(
-        "\t\t<label for=\"filter-by-format\" class=\"screen-reader-text\">\n\t\t\tFilter by post format\t\t</label>\n\t\t<select name=\"post_format\" id=\"filter-by-format\">\n\t\t\t<option selected='selected' value=\"\">All formats</option>\n\t\t\t{options}\t\t</select>\n\t\t"
+        "\t\t<label for=\"filter-by-format\" class=\"screen-reader-text\">\n\t\t\tFilter by post format\t\t</label>\n\t\t<select name=\"post_format\" id=\"filter-by-format\">\n\t\t\t<option{} value=\"\">All formats</option>\n\t\t\t{options}\t\t</select>\n\t\t",
+        selected_if(chosen_format.is_empty())
     )
 }
 
@@ -1014,12 +1042,12 @@ fn tablenav(
     let mut extra = if which == "top" {
         format!(
             "{}{}{}<input type=\"submit\" name=\"filter_action\" id=\"post-query-submit\" class=\"button button-compact\" value=\"Filter\"  />",
-            months_dropdown(months, "Filter by date"),
-            categories_dropdown(site),
+            months_dropdown(months, &listing.m, "Filter by date"),
+            categories_dropdown(site, &listing.cat),
             if listing.trash() {
                 String::new()
             } else {
-                formats_dropdown(site)
+                formats_dropdown(site, &listing.post_format)
             }
         )
     } else {
@@ -1070,7 +1098,7 @@ fn list_content(
         .map(|(name, value)| (*name, value.as_str()))
         .collect();
     let mut out = format!(
-        "<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\nPosts</h1>\n\n <a href=\"{}\" class=\"page-title-action\">Add Post</a>\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"posts-filter\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"post_status\" class=\"post_status_page\" value=\"{}\" />\n<input type=\"hidden\" name=\"post_type\" class=\"post_type_page\" value=\"post\" />\n\n\n\n",
+        "<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\nPosts</h1>\n\n <a href=\"{}\" class=\"page-title-action\">Add Post</a>\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"posts-filter\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"post_status\" class=\"post_status_page\" value=\"{}\" />\n<input type=\"hidden\" name=\"post_type\" class=\"post_type_page\" value=\"post\" />\n\n{}\n{}\n",
         text(&esc_url(
             BarSite::admin_url(site, "post-new.php").as_bytes()
         )),
@@ -1084,12 +1112,37 @@ fn list_content(
             "all".to_string()
         } else {
             esc_attr(addslashes(&listing.filter).as_bytes())
+        },
+        if is_empty_string(listing.author.as_bytes()) {
+            String::new()
+        } else {
+            format!(
+                "<input type=\"hidden\" name=\"author\" value=\"{}\" />\n",
+                esc_attr(addslashes(&listing.author).as_bytes())
+            )
+        },
+        if listing.show_sticky {
+            "<input type=\"hidden\" name=\"show_sticky\" value=\"1\" />\n"
+        } else {
+            ""
         }
     );
     out.push_str(&format!(
         "<input type=\"hidden\" id=\"_wpnonce\" name=\"_wpnonce\" value=\"{}\" /><input type=\"hidden\" name=\"_wp_http_referer\" value=\"{}\" />",
         site.nonce("bulk-posts"),
-        text(&esc_url(request_uri.as_bytes()))
+        // `edit.php` and `wp_referer_field()` rebuild the request's query.
+        text(&esc_url(&remove_query_arg(
+            &[
+                b"locked",
+                b"skipped",
+                b"updated",
+                b"deleted",
+                b"trashed",
+                b"untrashed",
+                b"_wp_http_referer",
+            ],
+            request_uri.as_bytes()
+        )))
     ));
     let empty = listing.posts.is_empty();
     out.push_str(&tablenav(
@@ -1128,7 +1181,10 @@ fn list_content(
     }
     out.push_str("\n</form>\n\n");
     if let Some(first) = listing.posts.first() {
-        out.push_str(&format!("\n{}\t\t", inline_edit(site, first, visible)));
+        out.push_str(&format!(
+            "\n{}\t\t",
+            inline_edit(site, first, visible, &listing.author_query)
+        ));
     }
     out.push_str("\n<div id=\"ajax-response\"></div>\n<div class=\"clear\"></div>\n</div>\n\n");
     out
@@ -1260,8 +1316,67 @@ pub struct ListArgs {
     pub order: Option<String>,
     /// `$_GET['paged']`, if given.
     pub paged: Option<String>,
+    /// `$_GET['author']`, if given.
+    pub author: Option<String>,
+    /// `$_GET['all_posts']`, if given.
+    pub all_posts: Option<String>,
+    /// `$_GET['show_sticky']` is not empty.
+    pub show_sticky: bool,
+    /// `$_GET['m']`, empty for none.
+    pub m: String,
+    /// `$_GET['post_format']`, empty for none.
+    pub post_format: String,
+    /// The `cat` query var after `WP_Query` cleaned it, empty for none.
+    pub cat: String,
+    /// The term and date filters of `WP_Query` for the request.
+    pub filters: PostQuery,
     /// `is_base_request()`: no arguments but `paged` and the post type.
     pub base: bool,
+}
+
+/// `WP_Query`'s cleaning of `author` and `cat`: their digits, commas and
+/// minus signs.
+pub fn kept_ids(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| c.is_ascii_digit() || *c == ',' || *c == '-')
+        .collect()
+}
+
+/// The sorted integers of a cleaned `author` or `cat`.
+pub fn sorted_ids(kept: &str) -> Vec<i64> {
+    let mut ids: Vec<i64> = kept
+        .split(',')
+        .map(|id| Value::String(id.as_bytes().to_vec()).to_int())
+        .collect();
+    ids.sort_unstable();
+    ids
+}
+
+/// `author__in` and `author__not_in` of `ids`: any ID not above 0 leaves
+/// out its posts, and then no others are listed alone.
+fn author_lists(ids: &[i64]) -> (Vec<u64>, Vec<u64>) {
+    let list = |positive: bool| -> Vec<u64> {
+        ids.iter()
+            .filter(|id| (**id > 0) == positive)
+            .map(|id| id.unsigned_abs())
+            .collect()
+    };
+    match list(false) {
+        excluded if excluded.is_empty() => (list(true), Vec::new()),
+        excluded => (Vec::new(), excluded),
+    }
+}
+
+/// `WP_Query`'s `author` IDs, each once: none for an empty or zero value.
+fn author_ids(raw: &str) -> Option<Vec<i64>> {
+    let kept = kept_ids(raw);
+    let value = Value::String(kept.clone().into_bytes());
+    if is_empty_string(kept.as_bytes()) || value.is_numeric() && value.to_float() == 0.0 {
+        return None;
+    }
+    let mut ids = sorted_ids(&kept);
+    ids.dedup();
+    Some(ids)
 }
 
 /// What a screen answers: its page, or a redirect to the URL given.
@@ -1303,19 +1418,36 @@ pub fn edit(
     }
     let own = site.own_posts("post");
     let filter = args.status.as_str();
-    let own_only = own > 0 && !site.can("edit_others_posts") && is_empty_string(filter.as_bytes());
+    let author = args.author.as_deref().unwrap_or_default();
+    let own_only = own > 0
+        && !site.can("edit_others_posts")
+        && [filter, author]
+            .iter()
+            .all(|arg| is_empty_string(arg.as_bytes()))
+        && args
+            .all_posts
+            .as_deref()
+            .is_none_or(|all| is_empty_string(all.as_bytes()))
+        && !args.show_sticky;
     let per_page = per_page(site);
+    let author_ids = author_ids(author);
+    let (authors, excluded_authors) = if own_only {
+        (vec![site.user_id()], Vec::new())
+    } else {
+        author_lists(&author_ids.clone().unwrap_or_default())
+    };
+    let sticky_ids = sticky_posts(&site.option("sticky_posts").unwrap_or_default());
     let mut query = PostQuery {
         post_types: vec!["post".into()],
         statuses: filtered(site, filter),
-        authors: if own_only {
-            vec![site.user_id()]
-        } else {
-            Vec::new()
-        },
+        authors,
+        excluded_authors,
         limit: u32::try_from(per_page).unwrap_or(u32::MAX),
-        ..PostQuery::default()
+        ..args.filters.clone()
     };
+    if args.show_sticky && !sticky_ids.is_empty() {
+        query.include = Some(sticky_ids.clone());
+    }
     query.order = sort(args, &query);
     // `absint( $_REQUEST['paged'] )`, the first page for none.
     let requested = Value::String(args.paged.clone().unwrap_or_default().into_bytes())
@@ -1330,7 +1462,6 @@ pub fn edit(
         let to = add_query_arg(&[(b"paged", Some(page.as_bytes()))], request_uri.as_bytes());
         return Some(Answer::Redirect(text(&to)));
     }
-    let sticky_ids = sticky_posts(&site.option("sticky_posts").unwrap_or_default());
     let listing = Listing {
         posts,
         total,
@@ -1349,6 +1480,19 @@ pub fn edit(
         pages,
         orderby: args.orderby.clone(),
         order: args.order.clone(),
+        mine: own_only || Value::String(author.into()).to_int() == site.user_id() as i64,
+        all_posts: args.all_posts.is_some(),
+        show_sticky: args.show_sticky,
+        author: author.into(),
+        // `get_query_var( 'author' )` of an author query, which the authors
+        // menu chooses.
+        author_query: author_ids.map_or_else(String::new, |ids| {
+            let ids: Vec<String> = ids.iter().map(i64::to_string).collect();
+            ids.join(",")
+        }),
+        m: args.m.clone(),
+        post_format: args.post_format.clone(),
+        cat: args.cat.clone(),
     };
     let hidden = hidden_columns(site);
     let hidden_keys: Vec<&str> = hidden.iter().map(String::as_str).collect();

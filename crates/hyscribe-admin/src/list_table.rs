@@ -3,7 +3,7 @@
 //! `WP_List_Table`: the parts every admin list shares.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
-use hyscribe_phpser::{add_query_arg, is_empty_string, remove_query_arg};
+use hyscribe_phpser::{Value, add_query_arg, is_empty_string, remove_query_arg};
 use hyscribe_render::date::MONTHS;
 use hyscribe_render::number_format;
 
@@ -94,6 +94,11 @@ pub fn bulk_actions(which: &str, actions: &[(&str, &str)]) -> String {
     out
 }
 
+/// `selected( $current, true, false )`: the attribute of a chosen option.
+pub fn selected(chosen: bool) -> &'static str {
+    if chosen { " selected='selected'" } else { "" }
+}
+
 /// `row_actions( $actions )`: the links under a row's primary column.
 pub fn row_actions(actions: &[(&str, String)]) -> String {
     if actions.is_empty() {
@@ -113,15 +118,17 @@ pub fn row_actions(actions: &[(&str, String)]) -> String {
     )
 }
 
-/// `months_dropdown()` of `months`, years and months newest first, all
-/// dates chosen.
-pub fn months_dropdown(months: &[(u32, u32)], filter_label: &str) -> String {
+/// `months_dropdown()` of `months`, years and months newest first, with
+/// `(int) $_GET['m']` chosen.
+pub fn months_dropdown(months: &[(u32, u32)], m: &str, filter_label: &str) -> String {
+    let m = Value::String(m.as_bytes().to_vec()).to_int().to_string();
     let months: Vec<&(u32, u32)> = months.iter().filter(|(year, _)| *year != 0).collect();
     if months.is_empty() {
         return String::new();
     }
     let mut out = format!(
-        "\t\t<label for=\"filter-by-date\" class=\"screen-reader-text\">{filter_label}</label>\n\t\t<select name=\"m\" id=\"filter-by-date\">\n\t\t\t<option selected='selected' value=\"0\">All dates</option>\n\t\t"
+        "\t\t<label for=\"filter-by-date\" class=\"screen-reader-text\">{filter_label}</label>\n\t\t<select name=\"m\" id=\"filter-by-date\">\n\t\t\t<option{} value=\"0\">All dates</option>\n\t\t",
+        selected("0" == m)
     );
     for (year, month) in months {
         let value = format!("{year}{month:02}");
@@ -130,7 +137,8 @@ pub fn months_dropdown(months: &[(u32, u32)], filter_label: &str) -> String {
             .copied()
             .unwrap_or_default();
         out.push_str(&format!(
-            "<option  value='{value}'>{}</option>\n",
+            "<option {} value='{value}'>{}</option>\n",
+            selected(value == m),
             esc_html(format!("{name} {year}").as_bytes())
         ));
     }

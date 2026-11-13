@@ -21,7 +21,7 @@ use hyscribe_admin::dashboard::{
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::media::{LibraryArgs, MediaSite, NewArgs, media_new, upload};
 use hyscribe_admin::menu::MenuUser;
-use hyscribe_admin::page::{PageSite, REMOVABLE, Request};
+use hyscribe_admin::page::{PageSite, REMOVABLE, Request, query_strings};
 use hyscribe_admin::posts::{
     Answer, BULK, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids,
 };
@@ -120,12 +120,6 @@ impl<'a> Admin<'a> {
     fn capabilities(&self) -> Vec<(u64, Vec<u8>)> {
         let key = format!("{}capabilities", self.site.db.prefix());
         self.reads.reads.wait(self.site.db.users_meta(&key))
-    }
-
-    /// `current_user_can( $cap, $id )` of an object.
-    fn can_for(&self, cap: &str, id: u64) -> bool {
-        let id = i64::try_from(id).unwrap_or_default();
-        self.caps.has_cap(self, cap, &[Value::Int(id)])
     }
 
     /// A comment with what its rows show, `post` the one it is read with.
@@ -391,6 +385,10 @@ impl PostsSite for Admin<'_> {
     fn can_post(&self, cap: &str, post: &Post) -> bool {
         self.can_for(cap, post.id)
     }
+    fn can_for(&self, cap: &str, id: u64) -> bool {
+        let id = i64::try_from(id).unwrap_or_default();
+        self.caps.has_cap(self, cap, &[Value::Int(id)])
+    }
     fn permalink(&self, post: &Post) -> String {
         let link = hyscribe_render::permalinks::permalink(&self.reads.reads, post);
         String::from_utf8_lossy(&link).into_owned()
@@ -602,9 +600,6 @@ impl UsersSite for Admin<'_> {
             .reads
             .wait(self.site.db.users_without_role(&key, regex))
     }
-    fn can_user(&self, cap: &str, id: u64) -> bool {
-        self.can_for(cap, id)
-    }
     fn author_url(&self, id: u64) -> String {
         let id = i64::try_from(id).unwrap_or_default();
         let url = hyscribe_render::permalinks::author_posts_url(&self.reads.reads, id);
@@ -665,41 +660,26 @@ impl TermsSite for Admin<'_> {
         let count = self.site.db.count_terms(taxonomy, search);
         self.reads.reads.wait(count)
     }
-    fn can_term(&self, cap: &str, term: &Term) -> bool {
-        self.can_for(cap, term.id)
-    }
     fn term_link(&self, term: &Term, taxonomy: &str) -> String {
         let link = hyscribe_render::permalinks::term_link(&self.reads.reads, taxonomy, term);
         String::from_utf8_lossy(&link).into_owned()
     }
 }
 
-/// The terms list's arguments from the request's unslashed path and
-/// query; `None` for one not ported yet.
-fn term_args(raw_request_uri: &str) -> Option<TermArgs> {
-    let query = raw_request_uri
-        .split_once('?')
-        .map_or("", |(_, query)| query);
-    let args = parse_str(query.as_bytes());
+/// The terms list's arguments; `None` for one not ported yet.
+fn term_args(query: &str) -> Option<TermArgs> {
     let (mut taxonomy, mut paged, mut search, mut orderby, mut order, mut message) =
         (None, None, None, None, None, None);
     let mut error = false;
-    for (key, value) in args.as_array().unwrap_or_default() {
-        let (Key::String(key), Value::String(value)) = (key, value) else {
-            return None;
-        };
-        if key == b"taxonomy" {
-            taxonomy = Some(Terms::named(value)?);
-            continue;
-        }
-        let value = Some(String::from_utf8(value.clone()).ok()?);
-        match key.as_slice() {
-            b"paged" => paged = value,
-            b"s" => search = value,
-            b"orderby" => orderby = value,
-            b"order" => order = value,
-            b"message" => message = value,
-            b"error" => error = true,
+    for (key, value) in query_strings(query)? {
+        match key.as_str() {
+            "taxonomy" => taxonomy = Some(Terms::named(value.as_bytes())?),
+            "paged" => paged = Some(value),
+            "s" => search = Some(value),
+            "orderby" => orderby = Some(value),
+            "order" => order = Some(value),
+            "message" => message = Some(value),
+            "error" => error = true,
             _ => return None,
         }
     }
@@ -715,33 +695,27 @@ fn term_args(raw_request_uri: &str) -> Option<TermArgs> {
 }
 
 /// The arguments of `edit-comments.php` ported so far; `None` for others.
-fn comment_args(raw_request_uri: &str) -> Option<CommentArgs> {
-    let query = raw_request_uri
-        .split_once('?')
-        .map_or("", |(_, query)| query);
+fn comment_args(query: &str) -> Option<CommentArgs> {
     let mut args = CommentArgs::default();
-    for (key, value) in parse_str(query.as_bytes()).as_array().unwrap_or_default() {
-        let (Key::String(key), Value::String(value)) = (key, value) else {
-            return None;
-        };
-        let value = Some(String::from_utf8(value.clone()).ok()?);
-        match key.as_slice() {
-            b"comment_status" => args.status = value,
-            b"user_id" => args.user_id = value,
-            b"paged" => args.paged = value,
-            b"s" => args.search = value,
-            b"comment_type" => args.kind = value,
-            b"orderby" => args.orderby = value,
-            b"order" => args.order = value,
-            b"mode" => args.mode = value,
-            b"p" => args.post = value,
-            b"ids" => args.ids = value,
-            b"error" => args.error = value,
+    for (key, value) in query_strings(query)? {
+        let value = Some(value);
+        match key.as_str() {
+            "comment_status" => args.status = value,
+            "user_id" => args.user_id = value,
+            "paged" => args.paged = value,
+            "s" => args.search = value,
+            "comment_type" => args.kind = value,
+            "orderby" => args.orderby = value,
+            "order" => args.order = value,
+            "mode" => args.mode = value,
+            "p" => args.post = value,
+            "ids" => args.ids = value,
+            "error" => args.error = value,
             // Sent back after unapproving, with no notice.
-            b"unapproved" => {}
+            "unapproved" => {}
             name => {
                 let mut counts = MODERATED.iter().zip(&mut args.moderated);
-                *counts.find(|(m, _)| m.as_bytes() == name)?.1 = value;
+                *counts.find(|(m, _)| **m == name)?.1 = value;
             }
         }
     }
@@ -754,26 +728,20 @@ fn comment_args(raw_request_uri: &str) -> Option<CommentArgs> {
 }
 
 /// The arguments of `users.php` ported so far; `None` for others.
-fn user_args(raw_request_uri: &str) -> Option<UserArgs> {
-    let query = raw_request_uri
-        .split_once('?')
-        .map_or("", |(_, query)| query);
+fn user_args(query: &str) -> Option<UserArgs> {
     let mut args = UserArgs::default();
-    for (key, value) in parse_str(query.as_bytes()).as_array().unwrap_or_default() {
-        let (Key::String(key), Value::String(value)) = (key, value) else {
-            return None;
-        };
-        let value = Some(String::from_utf8(value.clone()).ok()?);
-        match key.as_slice() {
-            b"role" => args.role = value,
-            b"s" => args.search = value,
-            b"orderby" => args.orderby = value,
-            b"order" => args.order = value,
-            b"paged" => args.paged = value,
-            b"update" => args.update = value,
-            b"delete_count" => args.delete_count = value,
-            b"reset_count" => args.reset_count = value,
-            b"id" => args.id = value,
+    for (key, value) in query_strings(query)? {
+        let value = Some(value);
+        match key.as_str() {
+            "role" => args.role = value,
+            "s" => args.search = value,
+            "orderby" => args.orderby = value,
+            "order" => args.order = value,
+            "paged" => args.paged = value,
+            "update" => args.update = value,
+            "delete_count" => args.delete_count = value,
+            "reset_count" => args.reset_count = value,
+            "id" => args.id = value,
             _ => return None,
         }
     }
@@ -786,40 +754,30 @@ fn user_args(raw_request_uri: &str) -> Option<UserArgs> {
 
 /// The arguments of `user-edit.php` and `profile.php` ported so far;
 /// `None` for others.
-fn edit_args(raw_request_uri: &str) -> Option<EditArgs> {
-    let query = raw_request_uri
-        .split_once('?')
-        .map_or("", |(_, query)| query);
+fn edit_args(query: &str) -> Option<EditArgs> {
     let mut args = EditArgs::default();
-    for (key, value) in parse_str(query.as_bytes()).as_array().unwrap_or_default() {
-        let (Key::String(key), Value::String(value)) = (key, value) else {
-            return None;
-        };
-        let value = Some(String::from_utf8(value.clone()).ok()?);
-        match key.as_slice() {
-            b"user_id" => args.user_id = value,
-            b"wp_http_referer" => args.referer = value,
-            b"updated" => args.updated = true,
-            b"error" => args.error = value,
+    for (key, value) in query_strings(query)? {
+        let value = Some(value);
+        match key.as_str() {
+            "user_id" => args.user_id = value,
+            "wp_http_referer" => args.referer = value,
+            "updated" => args.updated = true,
+            "error" => args.error = value,
             _ => return None,
         }
     }
     Some(args)
 }
 
-/// The value of `name` in a request that may give only it: `None` for
+/// The value of `name` in a query that may give only it: `None` for
 /// another argument, `Some(None)` for none.
-fn only_argument(request_uri: &str, name: &str) -> Option<Option<String>> {
-    let query = request_uri.split_once('?').map_or("", |(_, query)| query);
+fn only_argument(query: &str, name: &str) -> Option<Option<String>> {
     let mut found = None;
-    for (key, value) in parse_str(query.as_bytes()).as_array().unwrap_or_default() {
-        let (Key::String(key), Value::String(value)) = (key, value) else {
-            return None;
-        };
-        if key != name.as_bytes() {
+    for (key, value) in query_strings(query)? {
+        if key != name {
             return None;
         }
-        found = Some(String::from_utf8(value.clone()).ok()?);
+        found = Some(value);
     }
     Some(found)
 }
@@ -985,9 +943,11 @@ fn screen(
         uri: request_uri,
         browser,
     };
+    let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
+    let query = raw.split_once('?').map_or("", |(_, query)| query);
     // The Settings screens are sent back with `settings-updated` alone.
     let settings = || {
-        let updated = only_argument(request_uri, "settings-updated")?;
+        let updated = only_argument(query, "settings-updated")?;
         // `settings_errors()` would print and delete what the save left.
         let left = [
             "_transient_settings_errors",
@@ -998,92 +958,13 @@ fn screen(
         let saved = updated.is_some_and(|updated| !Value::String(updated.into()).is_empty());
         (!saved || !left).then_some(())
     };
-    let page = match path {
+    let answer = match path {
         "/hs-admin/options-general" | "/hs-admin/options-writing" | "/hs-admin/options-reading" => {
             settings()?;
-            let answer = match path {
+            match path {
                 "/hs-admin/options-general" => general(admin, &request)?,
                 "/hs-admin/options-writing" => writing(admin, &request),
                 _ => reading(admin, &request)?,
-            };
-            match answered(admin, answer) {
-                Ok(html) => Some(html),
-                Err(response) => return Some(*response),
-            }
-        }
-        "/hs-admin/tools" => tools::tools(admin, &canonical, origin, browser),
-        // Their arguments and actions are not ported.
-        "/hs-admin/themes"
-        | "/hs-admin/import"
-        | "/hs-admin/export"
-        | "/hs-admin/export-personal-data"
-        | "/hs-admin/erase-personal-data" => {
-            if request_uri.contains('?') {
-                return None;
-            }
-            let request = (canonical.as_str(), origin);
-            let requests =
-                |requests| privacy_requests(admin, requests, request, request_uri, browser);
-            let answer = match path {
-                "/hs-admin/themes" => themes(admin, request, request_uri, browser),
-                "/hs-admin/import" => Some(tools::import(admin, request, browser)),
-                "/hs-admin/export" => Some(tools::export(admin, request, browser)),
-                "/hs-admin/export-personal-data" => requests(Requests::Export),
-                _ => requests(Requests::Erase),
-            }?;
-            match answered(admin, answer) {
-                Ok(html) => Some(html),
-                Err(response) => return Some(*response),
-            }
-        }
-        // Their actions are not ported.
-        "/hs-admin/upload" | "/hs-admin/media-new" => {
-            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
-            let query = raw.split_once('?').map_or("", |(_, query)| query);
-            let answer = if path == "/hs-admin/upload" {
-                upload(admin, &LibraryArgs::parse(query)?, &request)?
-            } else {
-                media_new(
-                    admin,
-                    &NewArgs::parse(query, admin.settings.clone())?,
-                    &request,
-                )
-            };
-            match answered(admin, answer) {
-                Ok(html) => Some(html),
-                Err(response) => return Some(*response),
-            }
-        }
-        // Their pages print the PHP and web server details HyScribe has no
-        // equivalent for: refused as PHP refuses, else not ported.
-        "/hs-admin/plugins" if !admin.can("activate_plugins") => None,
-        "/hs-admin/site-health" if !admin.can("view_site_health_checks") => None,
-        // HTTPS offers application passwords, whose list is not ported.
-        "/hs-admin/profile" => {
-            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
-            // Only the arguments of a save.
-            let args = edit_args(&raw).filter(|args| {
-                args.user_id.is_none() && args.referer.is_none() && !origin.starts_with("https://")
-            })?;
-            match answered(admin, profile(admin, &args, &request)) {
-                Ok(html) => Some(html),
-                Err(response) => return Some(*response),
-            }
-        }
-        "/hs-admin/user-edit" => {
-            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
-            let args = edit_args(&raw).filter(|_| !origin.starts_with("https://"))?;
-            match answered(admin, user_edit(admin, &args, &request)) {
-                Ok(html) => Some(html),
-                Err(response) => return Some(*response),
-            }
-        }
-        "/hs-admin/user-new" => {
-            let update = only_argument(request_uri, "update")?;
-            let answer = hyscribe_admin::user_new::user_new(admin, update.as_deref(), &request);
-            match answered(admin, answer) {
-                Ok(html) => Some(html),
-                Err(response) => return Some(*response),
             }
         }
         "/hs-admin/options-discussion"
@@ -1097,28 +978,58 @@ fn screen(
                 "/hs-admin/options-permalink" => settings_more::permalink,
                 _ => settings_more::privacy,
             };
-            match answered(admin, screen(admin, &request)) {
-                Ok(html) => Some(html),
-                Err(response) => return Some(*response),
+            screen(admin, &request)
+        }
+        "/hs-admin/tools" => Answer::from_page(tools::tools(admin, &request)),
+        // Their arguments and actions are not ported.
+        "/hs-admin/themes"
+        | "/hs-admin/import"
+        | "/hs-admin/export"
+        | "/hs-admin/export-personal-data"
+        | "/hs-admin/erase-personal-data" => {
+            if request_uri.contains('?') {
+                return None;
             }
+            match path {
+                "/hs-admin/themes" => themes(admin, &request),
+                "/hs-admin/import" => Some(tools::import(admin, &request)),
+                "/hs-admin/export" => Some(tools::export(admin, &request)),
+                "/hs-admin/export-personal-data" => {
+                    privacy_requests(admin, Requests::Export, &request)
+                }
+                _ => privacy_requests(admin, Requests::Erase, &request),
+            }?
         }
-        "/hs-admin/users" => {
-            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
-            let args = user_args(&raw)?;
-            match answered(
-                admin,
-                users(admin, &args, &canonical, origin, request_uri, browser),
-            ) {
-                Ok(html) => Some(html),
-                Err(response) => return Some(*response),
-            }
+        // Their actions are not ported.
+        "/hs-admin/upload" => upload(admin, &LibraryArgs::parse(query)?, &request)?,
+        "/hs-admin/media-new" => {
+            let args = NewArgs::parse(query, admin.settings.clone())?;
+            media_new(admin, &args, &request)
         }
-        "/hs-admin/" | "/hs-admin/index" => {
-            dashboard(admin, &canonical, origin, request_uri, browser)
+        // Their pages print the PHP and web server details HyScribe has no
+        // equivalent for: refused as PHP refuses, else not ported.
+        "/hs-admin/plugins" if !admin.can("activate_plugins") => Answer::from_page(None),
+        "/hs-admin/site-health" if !admin.can("view_site_health_checks") => Answer::from_page(None),
+        // HTTPS offers application passwords, whose list is not ported.
+        "/hs-admin/profile" => {
+            // Only the arguments of a save.
+            let args = edit_args(query).filter(|args| {
+                args.user_id.is_none() && args.referer.is_none() && !origin.starts_with("https://")
+            })?;
+            profile(admin, &args, &request)
         }
+        "/hs-admin/user-edit" => {
+            let args = edit_args(query).filter(|_| !origin.starts_with("https://"))?;
+            user_edit(admin, &args, &request)
+        }
+        "/hs-admin/user-new" => {
+            let update = only_argument(query, "update")?;
+            hyscribe_admin::user_new::user_new(admin, update.as_deref(), &request)
+        }
+        "/hs-admin/users" => users(admin, &user_args(query)?, &request),
+        "/hs-admin/" | "/hs-admin/index" => Answer::from_page(dashboard(admin, &request)),
         "/hs-admin/edit-comments" => {
-            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
-            let args = comment_args(&raw)?;
+            let args = comment_args(query)?;
             // Only posts' and pages' comments are listed, and a draft's
             // Preview link is not ported.
             let post = args
@@ -1131,59 +1042,26 @@ fn screen(
             }) {
                 return None;
             }
-            let answer = edit_comments(
-                admin,
-                &args,
-                admin.settings.as_deref(),
-                &canonical,
-                origin,
-                request_uri,
-                browser,
-            )?;
-            match answered(admin, answer) {
-                Ok(html) => Some(html),
-                Err(response) => return Some(*response),
-            }
+            edit_comments(admin, &args, admin.settings.as_deref(), &request)?
         }
-        "/hs-admin/edit-tags" => {
-            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
-            let args = term_args(&raw)?;
-            match answered(
-                admin,
-                edit_tags(admin, &args, &canonical, origin, request_uri, browser),
-            ) {
-                Ok(html) => Some(html),
-                Err(response) => return Some(*response),
-            }
-        }
+        "/hs-admin/edit-tags" => edit_tags(admin, &term_args(query)?, &request),
         "/hs-admin/edit" => {
-            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
             let args = list_args(admin, &raw)?;
-            match answered(
-                admin,
-                edit(admin, &args, &canonical, origin, request_uri, browser)?,
-            ) {
-                Ok(html) => Some(html),
-                Err(response) => return Some(*response),
-            }
+            edit(admin, &args, &canonical, origin, request_uri, browser)?
         }
         _ => return None,
     };
-    Some(match page {
-        Some(html) => response(StatusCode::OK, screen_headers(), html.into_bytes()),
-        // `wp_die()` from `wp-admin/includes/menu.php`.
-        None => denied(admin, "Sorry, you are not allowed to access this page."),
-    })
+    Some(served(admin, answer))
 }
 
-/// A screen's page, or the response that redirects or refuses instead.
-fn answered(admin: &Admin, answer: Answer) -> Result<String, Box<Response>> {
-    Err(Box::new(match answer {
-        Answer::Page(html) => return Ok(html),
+/// The response that serves a screen's answer.
+fn served(admin: &Admin, answer: Answer) -> Response {
+    match answer {
+        Answer::Page(html) => response(StatusCode::OK, screen_headers(), html.into_bytes()),
         Answer::Redirect(to) => redirect(screen_headers(), to.as_bytes()),
         Answer::Denied(message) => denied(admin, message),
         Answer::Died(message) => died(admin, StatusCode::INTERNAL_SERVER_ERROR, message),
-    }))
+    }
 }
 
 /// `wp_die( $message, 403 )` on an admin screen.

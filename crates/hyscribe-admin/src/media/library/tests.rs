@@ -13,12 +13,7 @@ fn answer(role: &'static str, query: &str) -> Option<Answer> {
         user_agent: b"curl",
         mobile_hint: None,
     };
-    let request = Request {
-        canonical: &canonical,
-        origin: SITE,
-        uri: &uri,
-        browser: &browser,
-    };
+    let request = crate::tests::request(&canonical, &uri, &browser);
     upload(&Role(role), &LibraryArgs::parse(query)?, &request)
 }
 

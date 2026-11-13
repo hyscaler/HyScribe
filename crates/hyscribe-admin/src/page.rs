@@ -4,7 +4,7 @@
 //! `admin-footer.php` print it around the screen's own markup.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url, parse_url};
-use hyscribe_phpser::{Key, Maybe, Value, add_query_arg, maybe_unserialize};
+use hyscribe_phpser::{Key, Maybe, Value, add_query_arg, maybe_unserialize, parse_str};
 use hyscribe_render::head::{admin_import_map, emoji_detection_script, json_hex_tag};
 use hyscribe_render::kses::wp_kses_post;
 use hyscribe_render::post::sanitize_html_class;
@@ -170,6 +170,24 @@ pub struct Request<'a> {
     pub uri: &'a str,
     /// The browser that asks.
     pub browser: &'a Browser<'a>,
+}
+
+/// `$_GET` of `query`: each name and its string; `None` if one is not a
+/// string or not text.
+pub fn query_strings(query: &str) -> Option<Vec<(String, String)>> {
+    let parsed = parse_str(query.as_bytes());
+    let mut args = Vec::new();
+    for (key, value) in parsed.as_array().unwrap_or_default() {
+        let Value::String(value) = value else {
+            return None;
+        };
+        let key = match key {
+            Key::String(key) => String::from_utf8(key.clone()).ok()?,
+            Key::Int(key) => key.to_string(),
+        };
+        args.push((key, String::from_utf8(value.clone()).ok()?));
+    }
+    Some(args)
 }
 
 /// A color scheme `register_admin_color_schemes()` adds.

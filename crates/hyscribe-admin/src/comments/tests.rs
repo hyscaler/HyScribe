@@ -58,17 +58,15 @@ fn pages_are_php_s() {
             &Role(role),
             &args,
             None,
-            &String::from_utf8(remove_query_arg(
-                &[b"message"],
-                format!("{SITE}{path}").as_bytes(),
-            ))
-            .unwrap(),
-            SITE,
-            &path,
-            &crate::admin_bar::Browser {
-                user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
-                mobile_hint: None,
-            },
+            &crate::tests::request(
+                &String::from_utf8(remove_query_arg(
+                    &[b"message"],
+                    format!("{SITE}{path}").as_bytes(),
+                ))
+                .unwrap(),
+                &path,
+                &crate::tests::BROWSER,
+            ),
         )
         .unwrap();
         let recorded = String::from_utf8(unhex(f[2])).unwrap();
@@ -100,10 +98,7 @@ fn the_extended_view_shows_row_actions() {
         &Role("administrator"),
         &CommentArgs::default(),
         settings,
-        &format!("{SITE}{path}"),
-        SITE,
-        path,
-        &browser,
+        &crate::tests::request(&format!("{SITE}{path}"), path, &browser),
     )
     .unwrap() else {
         panic!("no page");
@@ -122,10 +117,7 @@ fn a_page_asks_for_spare_comments() {
         &Role("administrator"),
         &CommentArgs::default(),
         None,
-        &format!("{SITE}{path}"),
-        SITE,
-        path,
-        &browser,
+        &crate::tests::request(&format!("{SITE}{path}"), path, &browser),
     );
     assert_eq!(crate::tests::COMMENTS_ASKED.get(), 28);
 }

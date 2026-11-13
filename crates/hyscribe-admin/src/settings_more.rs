@@ -15,8 +15,9 @@ use crate::page::{HelpTab, Request};
 use crate::posts::{Answer, page_options};
 use crate::settings::{
     Form, SettingsSite, checks, form_option, option, pages_dropdown, replaced, settings_fields,
-    settings_page, text, url,
+    settings_page, url,
 };
+use crate::text;
 
 const DISCUSSION: &str = include_str!("settings_more/discussion.html");
 const MEDIA: &str = include_str!("settings_more/media.html");

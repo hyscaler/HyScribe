@@ -17,19 +17,16 @@ use hyscribe_render::number_format;
 use hyscribe_render::term_template::parse_orderby;
 
 use crate::admin_bar::BarSite;
-use crate::admin_bar::Browser;
 use crate::list_table::{
     Column, Order, Sort, bulk_actions, column_headers, fill, pagination, row_actions,
     screen_options, search_box, table_description, wp_nonce_field,
 };
 use crate::menu::{Screen, esc_link, link};
-use crate::page::{HelpTab, Page, admin_page, wp_admin_notice};
+use crate::page::{HelpTab, Page, Request, admin_page, wp_admin_notice};
 use crate::posts::{Answer, PostsSite, hidden_columns, per_page, term_name, term_options};
 
 /// What the terms lists ask of the site beyond the posts list's.
 pub trait TermsSite: PostsSite {
-    /// `current_user_can( $cap, $term->term_id )`.
-    fn can_term(&self, cap: &str, term: &Term) -> bool;
     /// `get_term_link( $term, $taxonomy )`.
     fn term_link(&self, term: &Term, taxonomy: &str) -> String;
     /// The terms `query` selects, in its order.
@@ -221,7 +218,7 @@ impl Listing<'_> {
 
     /// `column_cb()`: a box for a term the user may delete.
     fn column_cb(&self, term: &Term, name: &str) -> String {
-        if !self.site.can_term("delete_term", term) {
+        if !self.site.can_for("delete_term", term.id) {
             return "&nbsp;".into();
         }
         let id = term.id;
@@ -233,7 +230,7 @@ impl Listing<'_> {
     /// `get_edit_term_link()` with the request to come back to, for a term
     /// the user may edit.
     fn edit_link(&self, term: &Term) -> Option<String> {
-        if !self.site.can_term("edit_term", term) {
+        if !self.site.can_for("edit_term", term.id) {
             return None;
         }
         let id = term.id.to_string();
@@ -287,7 +284,7 @@ impl Listing<'_> {
                 ),
             ));
         }
-        if self.site.can_term("delete_term", term) {
+        if self.site.can_for("delete_term", term.id) {
             let nonce = self.site.nonce(&format!("delete-tag_{}", term.id));
             actions.push((
                 "delete",
@@ -527,14 +524,13 @@ fn notes(site: &dyn TermsSite, taxonomy: Taxonomy, terms: &[Term]) -> String {
 
 /// `edit-tags.php` for `args`: the terms of a taxonomy and the form to add
 /// one, refused to a user who may not manage them.
-pub fn edit_tags(
-    site: &dyn TermsSite,
-    args: &TermArgs,
-    canonical: &str,
-    origin: &str,
-    request_uri: &str,
-    browser: &Browser,
-) -> Answer {
+pub fn edit_tags(site: &dyn TermsSite, args: &TermArgs, request: &Request) -> Answer {
+    let &Request {
+        canonical,
+        origin,
+        uri: request_uri,
+        browser,
+    } = request;
     let taxonomy = args.taxonomy;
     if !site.can(taxonomy.manage_cap()) {
         return Answer::Denied(

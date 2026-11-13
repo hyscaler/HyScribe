@@ -5,7 +5,6 @@ use hyscribe_testkit::{hs_admin_page, unhex};
 
 use super::*;
 use crate::posts::Answer;
-use crate::page::Request;
 use crate::tests::{Role, SITE, first_difference};
 
 /// `wp_removable_query_args()` that the goldens' queries use.
@@ -78,12 +77,7 @@ fn answer(role: &'static str, screen: &str, variant: &str) -> String {
         user_agent: agent(variant),
         mobile_hint: None,
     };
-    let request = Request {
-        canonical: &canonical,
-        origin: SITE,
-        uri: &uri,
-        browser: &browser,
-    };
+    let request = crate::tests::request(&canonical, &uri, &browser);
     let site = Role(role);
     let answer = if file == "upload" {
         upload(&site, &LibraryArgs::parse(query).unwrap(), &request).unwrap()

@@ -15,6 +15,7 @@ use crate::list_table::{checked, fill, selected, wp_nonce_field};
 use crate::menu::Screen;
 use crate::page::{HelpTab, Page, Request, SCHEMES, admin_page, wp_admin_notice};
 use crate::posts::Answer;
+use crate::text;
 use crate::users::{UsersSite, dropdown_roles, role_names};
 
 /// What the profile asks of the site beyond the users list's.
@@ -39,10 +40,6 @@ const PAGE: &str = include_str!("profile/page.html");
 const HELP_OVERVIEW: &str = "<p>Your profile contains information about you (your &#8220;account&#8221;) as well as some personal options related to using WordPress.</p><p>You can change your password, turn on keyboard shortcuts, change the color scheme of your WordPress administration screens, and turn off the WYSIWYG (Visual) editor, among other things. You can hide the Toolbar (formerly called the Admin Bar) from the front end of your site, however it cannot be disabled on the admin screens.</p><p>You can select the language you wish to use while using the WordPress administration screen without affecting the language site visitors see.</p><p>Your username cannot be changed, but you can use other fields to enter your real name or a nickname, and change which name to display on your posts.</p><p>You can log out of other devices, such as your phone or a public computer, by clicking the Log Out Everywhere Else button.</p><p>Required fields are indicated; the rest are optional. Profile information will only be displayed if your theme is set up to do so.</p><p>Remember to click the Update Profile button when you are finished.</p>";
 
 const HELP_SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/users-your-profile-screen/\">Documentation on User Profiles</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
 
 /// `admin_color_scheme_picker()`: the default, fresh and light schemes
 /// first, then the others by name, `current` chosen.
@@ -323,7 +320,7 @@ pub fn user_edit(site: &dyn ProfileSite, args: &EditArgs, request: &Request) -> 
     let Some(user) = site.profile_user(id) else {
         return Answer::Died("Invalid user ID.");
     };
-    if !site.can_user("edit_user", id) {
+    if !site.can_for("edit_user", id) {
         return Answer::Died("Sorry, you are not allowed to edit this user.");
     }
     // `sanitize_url()`, then without the arguments of an update.
@@ -405,7 +402,7 @@ fn heading(
     } else {
         "\t\t\t\t\t\t\t"
     };
-    let role = if site.can_user("promote_user", user.id) {
+    let role = if site.can_for("promote_user", user.id) {
         role_row(roles.0, roles.1)
     } else {
         String::new()

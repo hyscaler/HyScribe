@@ -23,3 +23,8 @@ mod tests;
 pub mod tools;
 pub mod user_new;
 pub mod users;
+
+/// Bytes as text, invalid UTF-8 replaced.
+pub(crate) fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}

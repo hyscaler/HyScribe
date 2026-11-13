@@ -3,6 +3,7 @@
 use hyscribe_testkit::{hs_admin_page, unhex};
 
 use super::*;
+use crate::admin_bar::Browser;
 use crate::tests::Role;
 
 /// The PHP oracle's dashboard for `role`, under hs-admin's URLs.
@@ -213,13 +214,11 @@ fn the_dashboard_is_php_s() {
         let php = golden(role);
         let ours = dashboard(
             &Role(role),
-            &format!("{}/hs-admin/index", crate::tests::SITE),
-            crate::tests::SITE,
-            "/hs-admin/index",
-            &Browser {
-                user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
-                mobile_hint: None,
-            },
+            &crate::tests::request(
+                &format!("{}/hs-admin/index", crate::tests::SITE),
+                "/hs-admin/index",
+                &crate::tests::BROWSER,
+            ),
         )
         .unwrap();
         assert!(
@@ -242,13 +241,11 @@ fn dashboard_variants_are_php_s() {
             hs_admin_page(&String::from_utf8(unhex(f[2])).unwrap()).replace("%auto-draft%", "4");
         let ours = dashboard(
             &Role(role),
-            &format!("{}/hs-admin/index", crate::tests::SITE),
-            crate::tests::SITE,
-            "/hs-admin/index",
-            &Browser {
-                user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
-                mobile_hint: None,
-            },
+            &crate::tests::request(
+                &format!("{}/hs-admin/index", crate::tests::SITE),
+                "/hs-admin/index",
+                &crate::tests::BROWSER,
+            ),
         )
         .unwrap();
         if ours != php {
@@ -280,7 +277,16 @@ fn other_states() {
         user_agent: b"Android",
         mobile_hint: None,
     };
-    let page = dashboard(&empty, "http://h/", "http://h", "/", &phone).unwrap();
+    let page = dashboard(
+        &empty,
+        &Request {
+            canonical: "http://h/",
+            origin: "http://h",
+            uri: "/",
+            browser: &phone,
+        },
+    )
+    .unwrap();
     assert!(page.contains("jquery-touch-punch"));
     assert!(!page.contains("list_args") && !page.contains("tinyMCEPreInit"));
     let dates = recent_posts(
@@ -351,10 +357,12 @@ fn smaller_cases() {
     );
     let page = dashboard(
         &Role("layout:subscriber"),
-        "http://h/",
-        "http://h",
-        "/",
-        &Browser::default(),
+        &Request {
+            canonical: "http://h/",
+            origin: "http://h",
+            uri: "/",
+            browser: &Browser::default(),
+        },
     )
     .unwrap();
     assert!(!page.contains("dashboard_quick_press"));
@@ -380,10 +388,12 @@ fn edges() {
     assert!(!recent_drafts(&dates).contains("view-all"));
     let page = dashboard(
         &Role("empty:administrator"),
-        "http://h/",
-        "http://h",
-        "/",
-        &Browser::default(),
+        &Request {
+            canonical: "http://h/",
+            origin: "http://h",
+            uri: "/",
+            browser: &Browser::default(),
+        },
     )
     .unwrap();
     // The reply editor's link dialog, which only its form loads.

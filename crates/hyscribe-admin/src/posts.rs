@@ -28,11 +28,14 @@ use crate::menu::Screen;
 use crate::menu::esc_link;
 use crate::page::PageSite;
 use crate::page::{HelpTab, Page, admin_page, wp_admin_notice};
+use crate::text;
 
 /// What the posts list asks of the site about its posts.
 pub trait PostsSite: PageSite {
     /// `current_user_can( $cap, $post->ID )`.
     fn can_post(&self, cap: &str, post: &Post) -> bool;
+    /// `current_user_can( $cap, $id )` of a user or a term.
+    fn can_for(&self, cap: &str, id: u64) -> bool;
     /// `get_permalink( $post )`.
     fn permalink(&self, post: &Post) -> String;
     /// The site's time zone and the time now.
@@ -141,10 +144,6 @@ pub(crate) fn draft_or_post_title(post: &Post) -> String {
     } else {
         esc_html(&title)
     }
-}
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
 }
 
 /// `is_sticky( $post->ID )`.
@@ -2042,7 +2041,7 @@ pub enum Answer {
 impl Answer {
     /// A screen's page, or `wp_die()`'s refusal from
     /// `wp-admin/includes/menu.php` when the menu turns the user away.
-    pub(crate) fn from_page(page: Option<String>) -> Answer {
+    pub fn from_page(page: Option<String>) -> Answer {
         page.map_or(
             Answer::Denied("Sorry, you are not allowed to access this page."),
             Answer::Page,

@@ -10,11 +10,11 @@ use hyscribe_phpser::{
 };
 use hyscribe_render::date::human_time_diff;
 
-use crate::admin_bar::{BarSite, Browser};
+use crate::admin_bar::BarSite;
 use crate::list_table::wp_referer_field;
 use crate::list_table::{Column, Order, column_headers, fill, screen_options};
 use crate::menu::{Screen, link};
-use crate::page::{HelpTab, Page, admin_page, json, text};
+use crate::page::{HelpTab, Page, Request, admin_page, json, text};
 use crate::posts::{Answer, PostsSite, hidden_columns, per_page};
 use crate::tools::NOTICES;
 
@@ -65,14 +65,9 @@ pub fn auto_update_message(cron: &[u8], now: i64) -> String {
     }
 }
 
-/// `themes.php` at `request_uri`, `None` when the active theme is not the
+/// `themes.php` for `request`, `None` when the active theme is not the
 /// bundled one.
-pub fn themes(
-    site: &dyn PostsSite,
-    (canonical, origin): (&str, &str),
-    request_uri: &str,
-    browser: &Browser,
-) -> Option<Answer> {
+pub fn themes(site: &dyn PostsSite, request: &Request) -> Option<Answer> {
     if site.option("stylesheet").as_deref() != Some(THEME.as_bytes()) {
         return None;
     }
@@ -82,7 +77,7 @@ pub fn themes(
     );
     let options = site.can("edit_theme_options");
     let customize = options.then(|| {
-        let back = urlencode(&esc_url_raw(&stripslashes(request_uri.as_bytes())));
+        let back = urlencode(&esc_url_raw(&stripslashes(request.uri.as_bytes())));
         let url = add_query_arg(
             &[(b"return", Some(&back))],
             BarSite::admin_url(site, "site-editor.php").as_bytes(),
@@ -197,11 +192,11 @@ pub fn themes(
         admin_footer: "",
         footer_scripts: "",
         content: &content,
-        canonical,
-        origin,
+        canonical: request.canonical,
+        origin: request.origin,
         view: None,
     };
-    Some(Answer::from_page(admin_page(site, &page, browser)))
+    Some(Answer::from_page(admin_page(site, &page, request.browser)))
 }
 
 /// `_wpUpdatesSettings`, which `updates` gets, then the screen's
@@ -220,13 +215,7 @@ pub(crate) fn updates_settings(site: &dyn PostsSite, items: Option<&str>) -> Str
 }
 
 /// `plugins.php` with no plugin installed, its help naming `plugin_dir`.
-pub fn plugins(
-    site: &dyn PostsSite,
-    plugin_dir: &str,
-    (canonical, origin): (&str, &str),
-    request_uri: &str,
-    browser: &Browser,
-) -> Answer {
+pub fn plugins(site: &dyn PostsSite, plugin_dir: &str, request: &Request) -> Answer {
     let hidden = hidden_columns(site, "plugins");
     let hidden: Vec<&str> = hidden.iter().map(String::as_str).collect();
     let columns = [
@@ -254,7 +243,7 @@ pub fn plugins(
             &columns,
             &hidden,
             &Order::default(),
-            canonical,
+            request.canonical,
             counter,
             with_id,
         )
@@ -264,7 +253,7 @@ pub fn plugins(
         PLUGINS,
         &[
             ("nonce", site.nonce("bulk-plugins")),
-            ("referer", wp_referer_field(request_uri)),
+            ("referer", wp_referer_field(request.uri)),
             ("head", headers(1, true)),
             ("foot", headers(2, false)),
             ("colspan", shown.to_string()),
@@ -317,11 +306,11 @@ pub fn plugins(
         admin_footer: "",
         footer_scripts: "",
         content: &content,
-        canonical,
-        origin,
+        canonical: request.canonical,
+        origin: request.origin,
         view: None,
     };
-    Answer::from_page(admin_page(site, &page, browser))
+    Answer::from_page(admin_page(site, &page, request.browser))
 }
 
 /// `_wpUpdatesItemCounts`' plugins, with none installed.

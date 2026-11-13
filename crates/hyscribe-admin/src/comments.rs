@@ -14,17 +14,18 @@ use hyscribe_render::{
     admin_comment_text, comment_author_of, comment_author_url, comment_avatar, number_format,
 };
 
-use crate::admin_bar::{BarSite, Browser, html_excerpt};
+use crate::admin_bar::{BarSite, html_excerpt};
 use crate::dashboard::{CommentCounts, DashboardSite, RecentComment, approved_of};
 use crate::list_table::{Column, Order, Sort, View, bulk_actions, column_headers, pagination};
 use crate::list_table::{
     nonce_url, pagenum, screen_options, search_box, table_description, views, wp_nonce_field,
 };
 use crate::menu::{Screen, esc_link, link};
-use crate::page::{HelpTab, Page, admin_page, wp_admin_notice};
+use crate::page::{HelpTab, Page, Request, admin_page, wp_admin_notice};
 use crate::posts::{
     Answer, comments_bubble, edit_link, hidden_columns, per_page, view_mode, view_mode_fields,
 };
+use crate::text;
 
 /// What the comments list asks of the site beyond the dashboard's.
 pub trait CommentsSite: DashboardSite {
@@ -313,7 +314,6 @@ pub(crate) fn comment_classes(
     index: usize,
     extra: &[&str],
 ) -> String {
-    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     let mut classes = vec![if comment.comment_type.is_empty() {
         "comment".to_string()
     } else {
@@ -423,7 +423,6 @@ impl Listing<'_> {
     fn column_author(&self, row: &RecentComment) -> String {
         let site = self.site;
         let comment = &row.comment;
-        let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
         let name = comment_author_of(comment, row.user.as_ref());
         let texturized = wptexturize(&name, &CORE_SHORTCODE_TAGS);
         let mut author = esc_html(&convert_chars(&texturized));
@@ -839,11 +838,14 @@ pub fn edit_comments(
     site: &dyn CommentsSite,
     args: &CommentArgs,
     settings: Option<&str>,
-    canonical: &str,
-    origin: &str,
-    request_uri: &str,
-    browser: &Browser,
+    request: &Request,
 ) -> Option<Answer> {
+    let &Request {
+        canonical,
+        origin,
+        uri: request_uri,
+        browser,
+    } = request;
     let (view, approved) = VIEWS
         .into_iter()
         .find(|(view, _)| args.status.as_deref() == Some(*view))

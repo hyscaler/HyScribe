@@ -45,17 +45,15 @@ fn pages_are_php_s() {
         let ours = users(
             &Role(role),
             &args,
-            &String::from_utf8(remove_query_arg(
-                &[b"message"],
-                format!("{SITE}{path}").as_bytes(),
-            ))
-            .unwrap(),
-            SITE,
-            &path,
-            &crate::admin_bar::Browser {
-                user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
-                mobile_hint: None,
-            },
+            &crate::tests::request(
+                &String::from_utf8(remove_query_arg(
+                    &[b"message"],
+                    format!("{SITE}{path}").as_bytes(),
+                ))
+                .unwrap(),
+                &path,
+                &crate::tests::BROWSER,
+            ),
         );
         let recorded = String::from_utf8(unhex(f[2])).unwrap();
         let (php, ours) = match ours {
@@ -82,10 +80,11 @@ fn listing_alone_offers_no_changes() {
     let Answer::Page(page) = users(
         &Role("users:list_users"),
         &UserArgs::default(),
-        &format!("{SITE}/hs-admin/users"),
-        SITE,
-        "/hs-admin/users",
-        &crate::admin_bar::Browser::default(),
+        &crate::tests::request(
+            &format!("{SITE}/hs-admin/users"),
+            "/hs-admin/users",
+            &crate::admin_bar::Browser::default(),
+        ),
     ) else {
         panic!("no page");
     };
@@ -147,10 +146,11 @@ fn roles_are_asked_for_once() {
     let Answer::Page(page) = users(
         &Role("users:administrator"),
         &args,
-        &format!("{SITE}/hs-admin/users"),
-        SITE,
-        "/hs-admin/users",
-        &crate::admin_bar::Browser::default(),
+        &crate::tests::request(
+            &format!("{SITE}/hs-admin/users"),
+            "/hs-admin/users",
+            &crate::admin_bar::Browser::default(),
+        ),
     ) else {
         panic!("no page");
     };

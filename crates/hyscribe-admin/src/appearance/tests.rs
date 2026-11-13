@@ -3,14 +3,9 @@
 use hyscribe_testkit::{hs_admin_page, unhex};
 
 use super::*;
-use crate::tests::{Role, SITE, first_difference, options};
+use crate::tests::{BROWSER, Role, SITE, first_difference, options, request};
 
 pub(crate) const GOLDEN: &str = include_str!("../../tests/golden/appearance.tsv");
-
-pub(crate) const BROWSER: Browser = Browser {
-    user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
-    mobile_hint: None,
-};
 
 /// The rows of `reference/appearance/golden.sh` for `file`: the test site,
 /// and the page or `None` for a refusal.
@@ -54,17 +49,13 @@ fn themes_are_php_s() {
     let message = auto_update_message(&options()["cron"], 1_794_500_000);
     let mut failures = Vec::new();
     let rows = rows("themes.php");
+    let path = "/hs-admin/themes";
+    let canonical = format!("{SITE}{path}");
     for (role, php) in &rows {
         let php = php
             .as_ref()
             .map(|php| php.replace("%auto-update%", &message));
-        let ours = themes(
-            role,
-            (&format!("{SITE}/hs-admin/themes"), SITE),
-            "/hs-admin/themes",
-            &BROWSER,
-        )
-        .unwrap();
+        let ours = themes(role, &request(&canonical, path, &BROWSER)).unwrap();
         failures.extend(check(role, ours, php.as_ref()));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
@@ -73,12 +64,9 @@ fn themes_are_php_s() {
 
 #[test]
 fn another_active_theme_is_not_ported() {
-    let page = themes(
-        &Role("a5other:administrator"),
-        (&format!("{SITE}/hs-admin/themes"), SITE),
-        "/hs-admin/themes",
-        &BROWSER,
-    );
+    let canonical = format!("{SITE}/hs-admin/themes");
+    let request = request(&canonical, "/hs-admin/themes", &BROWSER);
+    let page = themes(&Role("a5other:administrator"), &request);
     assert!(page.is_none());
 }
 
@@ -118,14 +106,10 @@ fn the_automatic_update_message_is_php_s() {
 fn plugins_are_php_s() {
     let mut failures = Vec::new();
     let rows = rows("plugins.php");
+    let canonical = format!("{SITE}/hs-admin/plugins");
+    let request = request(&canonical, "/hs-admin/plugins", &BROWSER);
     for (role, php) in &rows {
-        let ours = plugins(
-            role,
-            "/var/www/html/wp-content/plugins",
-            (&format!("{SITE}/hs-admin/plugins"), SITE),
-            "/hs-admin/plugins",
-            &BROWSER,
-        );
+        let ours = plugins(role, "/var/www/html/wp-content/plugins", &request);
         failures.extend(check(role, ours, php.as_ref()));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

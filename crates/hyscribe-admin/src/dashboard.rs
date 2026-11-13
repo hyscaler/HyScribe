@@ -12,12 +12,12 @@ use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::convert_chars;
 use hyscribe_render::{comment_avatar, number_format, wp_trim_words};
 
-use crate::admin_bar::{BarSite, Browser};
+use crate::admin_bar::BarSite;
 use crate::comments::{comment_classes, comment_reply, comment_views, editor_footer};
 use crate::list_table::{view_list, wp_nonce_field};
 use crate::menu::Screen;
 use crate::menu::{esc_link, link};
-use crate::page::{HelpTab, Page, admin_page, json, object, text};
+use crate::page::{HelpTab, Page, Request, admin_page, json, object, text};
 use crate::posts::{PostsSite, draft_or_post_title};
 
 /// `$wp_version`.
@@ -339,12 +339,11 @@ fn comment_row(
     global: Option<&Post>,
 ) -> String {
     let comment = &row.comment;
-    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     let post_link = row.post.as_ref().map(|post| {
         let title = draft_or_post_title(post);
         format!(
             "<a href=\"{}\">{title}</a>",
-            text(&esc_url(row.permalink.as_bytes()))
+            crate::text(&esc_url(row.permalink.as_bytes()))
         )
     });
     let mut actions = String::new();
@@ -406,7 +405,7 @@ fn comment_row(
                 "view",
                 format!(
                     "<a class=\"comment-link\" href=\"{}\" aria-label=\"View this comment\">View</a>",
-                    text(&esc_url(row.link.as_bytes()))
+                    crate::text(&esc_url(row.link.as_bytes()))
                 ),
             ),
         ];
@@ -442,11 +441,11 @@ fn comment_row(
     };
     let has_avatar = if avatar.is_empty() { "" } else { " has-avatar" };
     let author = if is_empty_string(&comment.author) {
-        row.user
-            .as_ref()
-            .map_or("Anonymous".to_string(), |user| text(&user.display_name))
+        row.user.as_ref().map_or("Anonymous".to_string(), |user| {
+            crate::text(&user.display_name)
+        })
     } else {
-        text(&comment.author)
+        crate::text(&comment.author)
     };
     let url = if comment.author_url == b"http://" {
         Vec::new()
@@ -473,7 +472,7 @@ fn comment_row(
         };
         format!(
             "<a href=\"{}\" class=\"url\" rel=\"{rel}\">{author}</a>",
-            text(&url)
+            crate::text(&url)
         )
     };
     let pending = "<span class=\"approve\">[Pending]</span>";
@@ -509,7 +508,7 @@ fn comment_row(
     let excerpt = if protected {
         "Password protected".to_string()
     } else {
-        text(&convert_chars(&wp_trim_words(
+        crate::text(&convert_chars(&wp_trim_words(
             &strip_tags(&comment.content),
             20,
             b"&hellip;",
@@ -524,7 +523,7 @@ fn comment_row(
         "\n\t\t<li id=\"comment-{}\" class=\"{}\">\n\n\t\t\t{}\n\t\t\t{body}\t\t\t<blockquote><p>{excerpt}</p></blockquote>\n\t\t\t{actions}\t\t\t</div>\n\t\t</li>\n\t",
         comment.id,
         classes,
-        text(&avatar)
+        crate::text(&avatar)
     )
 }
 
@@ -660,11 +659,7 @@ struct Activity {
 
 /// An option as text, empty when unset.
 fn text_option(site: &dyn DashboardSite, name: &str) -> String {
-    text_of(&site.option(name).unwrap_or_default())
-}
-
-fn text_of(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
+    crate::text(&site.option(name).unwrap_or_default())
 }
 
 /// A dashboard widget: ID, title, context and content.
@@ -773,15 +768,14 @@ fn events(site: &dyn DashboardSite) -> String {
     EVENTS.replace("%ajax%", &String::from_utf8_lossy(&ajax))
 }
 
-/// The Dashboard at `canonical`, requested as `request_uri` from `origin`,
-/// or `None` when the user may not see it.
-pub fn dashboard(
-    site: &dyn DashboardSite,
-    canonical: &str,
-    origin: &str,
-    request_uri: &str,
-    browser: &Browser,
-) -> Option<String> {
+/// The Dashboard for `request`, or `None` when the user may not see it.
+pub fn dashboard(site: &dyn DashboardSite, request: &Request) -> Option<String> {
+    let &Request {
+        canonical,
+        origin,
+        uri: request_uri,
+        browser,
+    } = request;
     let hidden = listed(site, "metaboxhidden_dashboard");
     let closed = listed(site, "closedpostboxes_dashboard");
     let future = site.recent_posts("future");

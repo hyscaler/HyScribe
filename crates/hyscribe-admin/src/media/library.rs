@@ -22,12 +22,11 @@ use crate::list_table::{
     row_actions, screen_options, table_description,
 };
 use crate::menu::{Screen, esc_link, link};
-use crate::page::{HelpTab, Page, admin_page, json, text};
+use crate::page::{HelpTab, Page, Request, admin_page, json, query_strings, text};
 use crate::posts::{
     Answer, author_ids, author_lists, comments_bubble, draft_or_post_title, edit_link,
     hidden_columns, per_page,
 };
-use crate::page::Request;
 
 const GRID: &str = include_str!("grid.html");
 const LIST: &str = include_str!("list.html");
@@ -171,28 +170,6 @@ impl LibraryArgs {
         let count = Value::String(value.into()).to_int().unsigned_abs();
         (count > 0).then_some(count)
     }
-}
-
-/// `$_GET` of `query`: each name and its string; `None` if one is not a
-/// string or not text.
-pub(crate) fn query_strings(query: &str) -> Option<Vec<(String, String)>> {
-    let parsed = hyscribe_phpser::parse_str(query.as_bytes());
-    let mut args = Vec::new();
-    for (key, value) in parsed.as_array().unwrap_or_default() {
-        let Value::String(value) = value else {
-            return None;
-        };
-        let key = match key {
-            Key::String(key) => String::from_utf8(key.clone()).ok()?,
-            Key::Int(key) => key.to_string(),
-        };
-        args.push((key, String::from_utf8(value.clone()).ok()?));
-    }
-    Some(args)
-}
-
-fn bytes(text: &[u8]) -> String {
-    String::from_utf8_lossy(text).into_owned()
 }
 
 /// `_n()` of a count: the message for one, else for `count` with `%s`.
@@ -598,7 +575,7 @@ fn view_switch(mode: &str, uri: &str) -> String {
             };
             format!(
                 "<a href='{}' class='view-{name}{class}' id='view-switch-{name}'{current}><span class='screen-reader-text'>{title}</span></a>\n",
-                bytes(&esc_url(&url))
+                crate::text(&esc_url(&url))
             )
         })
         .collect();
@@ -610,7 +587,7 @@ fn view_switch(mode: &str, uri: &str) -> String {
 
 /// `media_states()`: the custom logo's, as the screen's theme mods give it.
 fn media_states(site: &dyn MediaSite, post: &Post) -> String {
-    let stylesheet = bytes(&site.option("stylesheet").unwrap_or_default());
+    let stylesheet = crate::text(&site.option("stylesheet").unwrap_or_default());
     let mods = site
         .option(&format!("theme_mods_{stylesheet}"))
         .unwrap_or_default();
@@ -642,7 +619,7 @@ fn column_title(site: &dyn MediaSite, post: &Post, trash: bool) -> String {
     let file = wp_basename(&site.meta(post, "_wp_attached_file").unwrap_or_default());
     format!(
         "\t\t<strong class=\"has-media-icon\">\n\t\t\t{start}\t\t\t\t<span class=\"media-icon {}\">{thumb}</span>\n\t\t\t\t{}{end}{}\t\t</strong>\n\t\t<p class=\"filename\">\n\t\t\t<span class=\"screen-reader-text\">\n\t\t\t\tFile name:\t\t\t</span>\n\t\t\t{}\t\t</p>\n\t\t",
-        bytes(&class),
+        crate::text(&class),
         draft_or_post_title(post),
         media_states(site, post),
         esc_html(&file)
@@ -664,7 +641,7 @@ fn actions(site: &dyn MediaSite, post: &Post, title: &str, listing: &Listing) ->
             "edit",
             format!(
                 "<a href=\"{}\" aria-label=\"{}\">Edit</a>",
-                bytes(&esc_url(edit_link(site, post).as_bytes())),
+                crate::text(&esc_url(edit_link(site, post).as_bytes())),
                 label("Edit &#8220;%s&#8221;")
             ),
         ));
@@ -695,14 +672,14 @@ fn actions(site: &dyn MediaSite, post: &Post, title: &str, listing: &Listing) ->
             ),
         ));
     }
-    let url = attachment_url(site, post).map(|url| bytes(&esc_url(&url)));
+    let url = attachment_url(site, post).map(|url| crate::text(&esc_url(&url)));
     // `get_permalink()` fails only for a post that is not there.
     if !listing.trash {
         actions.push((
             "view",
             format!(
                 "<a href=\"{}\" aria-label=\"{}\" rel=\"bookmark\">View</a>",
-                bytes(&esc_url(site.permalink(post).as_bytes())),
+                crate::text(&esc_url(site.permalink(post).as_bytes())),
                 label("View &#8220;%s&#8221;")
             ),
         ));
@@ -970,7 +947,7 @@ fn grid(
     let mut removable = vec![&b"error"[..]];
     removable.extend_from_slice(removed);
     let url = format!("{}{}", request.origin, request.uri);
-    let canonical = bytes(&remove_query_arg(&removable, url.as_bytes()));
+    let canonical = crate::text(&remove_query_arg(&removable, url.as_bytes()));
     let content = fill(
         GRID,
         &[
@@ -980,7 +957,7 @@ fn grid(
             ),
             (
                 "add",
-                bytes(&esc_url(
+                crate::text(&esc_url(
                     BarSite::admin_url(site, "media-new.php").as_bytes(),
                 )),
             ),
@@ -1047,8 +1024,8 @@ fn list(
     notice: &str,
     removed: &[&[u8]],
 ) -> Option<Answer> {
-    let uri = bytes(&remove_query_arg(removed, request.uri.as_bytes()));
-    let canonical = bytes(&remove_query_arg(removed, request.canonical.as_bytes()));
+    let uri = crate::text(&remove_query_arg(removed, request.uri.as_bytes()));
+    let canonical = crate::text(&remove_query_arg(removed, request.canonical.as_bytes()));
     let filter = args.get("attachment-filter").unwrap_or_default();
     let trash = filter == "trash";
     let detached = filter == "detached";
@@ -1100,7 +1077,7 @@ fn list(
     };
     // The headers link to the request's URL, its removable arguments kept.
     let current = format!("{}{uri}", request.origin);
-    let unpaged = bytes(&remove_query_arg(&[b"paged"], current.as_bytes()));
+    let unpaged = crate::text(&remove_query_arg(&[b"paged"], current.as_bytes()));
     let hidden: Vec<&str> = listing.hidden.iter().map(String::as_str).collect();
     let search = args.get("s").unwrap_or_default();
     let subtitle = if search.is_empty() {
@@ -1134,7 +1111,7 @@ fn list(
     let top = format!(
         "<input type=\"hidden\" id=\"_wpnonce\" name=\"_wpnonce\" value=\"{}\" /><input type=\"hidden\" name=\"_wp_http_referer\" value=\"{}\" />{}",
         site.nonce("bulk-media"),
-        bytes(&esc_url(&referer)),
+        crate::text(&esc_url(&referer)),
         tablenav(&listing, "top", &canonical)
     );
     let bottom = if listing.posts.is_empty() {
@@ -1147,7 +1124,7 @@ fn list(
         &[
             (
                 "add",
-                bytes(&esc_url(
+                crate::text(&esc_url(
                     BarSite::admin_url(site, "media-new.php").as_bytes(),
                 )),
             ),
@@ -1224,7 +1201,7 @@ pub fn upload(site: &dyn MediaSite, args: &LibraryArgs, request: &Request) -> Op
     let stored = site.user_option("media_library_mode").unwrap_or_default();
     let mode = match args.get("mode") {
         Some(mode @ ("grid" | "list")) => mode.to_string(),
-        _ if !Value::String(stored.clone()).is_empty() => bytes(&stored),
+        _ if !Value::String(stored.clone()).is_empty() => crate::text(&stored),
         _ => "grid".into(),
     };
     if mode == "grid" {
@@ -1246,9 +1223,9 @@ pub fn upload(site: &dyn MediaSite, args: &LibraryArgs, request: &Request) -> Op
     }
     if args.given("_wp_http_referer") {
         let uri = remove_query_arg(&[b"_wp_http_referer", b"_wpnonce"], request.uri.as_bytes());
-        return Some(Answer::Redirect(bytes(&hyscribe_phpser::stripslashes(
-            &uri,
-        ))));
+        return Some(Answer::Redirect(crate::text(
+            &hyscribe_phpser::stripslashes(&uri),
+        )));
     }
     list(site, args, request, &notice, &removed)
 }

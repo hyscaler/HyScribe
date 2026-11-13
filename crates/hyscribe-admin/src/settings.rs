@@ -11,6 +11,7 @@ use crate::list_table::{checked, wp_nonce_field};
 use crate::menu::Screen;
 use crate::page::{HelpTab, Page, Request, admin_page, json, object, text as value_text};
 use crate::posts::Answer;
+use crate::text;
 use crate::users::UsersSite;
 
 mod general;
@@ -30,10 +31,6 @@ pub trait SettingsSite: UsersSite {
 }
 
 const SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/settings-%s-screen/\">Documentation on %S Settings</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
-
-pub(crate) fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
 
 /// `get_option( $name )`, as stored, empty when unset.
 pub(crate) fn option(site: &dyn SettingsSite, name: &str) -> String {

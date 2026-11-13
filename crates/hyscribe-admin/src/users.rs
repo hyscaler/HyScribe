@@ -12,15 +12,16 @@ use hyscribe_phpser::{
 use hyscribe_render::formatting::{user_email_display, user_name_display};
 use hyscribe_render::{number_format, user_avatar};
 
-use crate::admin_bar::{BarSite, Browser};
+use crate::admin_bar::BarSite;
 use crate::dashboard::DashboardSite;
 use crate::list_table::{
     Column, Order, Sort, View, bulk_actions, column_headers, fill, pagenum, pagination,
     row_actions, screen_options, search_box, table_description, views, wp_nonce_field,
 };
 use crate::menu::{Screen, link};
-use crate::page::{HelpTab, Page, admin_notice, admin_page};
+use crate::page::{HelpTab, Page, Request, admin_notice, admin_page};
 use crate::posts::{Answer, hidden_columns, per_page};
+use crate::text;
 
 /// What the users list asks of the site beyond the dashboard's.
 pub trait UsersSite: DashboardSite {
@@ -33,8 +34,6 @@ pub trait UsersSite: DashboardSite {
     /// `wp_get_users_with_no_role()`: those whose capabilities do not match
     /// `regex`.
     fn users_without_role(&self, regex: &str) -> Vec<u64>;
-    /// `current_user_can( $cap, $id )` of a user.
-    fn can_user(&self, cap: &str, id: u64) -> bool;
     /// `get_author_posts_url( $id )`.
     fn author_url(&self, id: u64) -> String;
 }
@@ -117,7 +116,7 @@ fn user_notices(site: &dyn UsersSite, args: &UserArgs, request_uri: &str) -> Str
                 .filter(|id| !Value::String(id.clone().into_bytes()).is_empty());
             let editable = |id: &String| {
                 let id = Value::String(id.clone().into_bytes()).to_int();
-                site.can_user("edit_user", id.unsigned_abs())
+                site.can_for("edit_user", id.unsigned_abs())
             };
             if let Some(id) = id.filter(editable) {
                 let referer = urlencode(&stripslashes(request_uri.as_bytes()));
@@ -254,10 +253,6 @@ const HELP_ACTIONS: &str = "<p>Hovering over a row in the users list will displa
 const HELP_RESET: &str = "<li><strong>Send password reset</strong> sends the user an email with a link to set a new password.</li>";
 
 const HELP_SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/users-screen/\">Documentation on Managing Users</a></p><p><a href=\"https://wordpress.org/documentation/article/roles-and-capabilities/\">Descriptions of Roles and Capabilities</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
 
 /// The array `stored` unserializes to, or none.
 fn array_of(stored: &[u8]) -> Vec<(Key, Value)> {
@@ -408,7 +403,7 @@ impl Listing<'_> {
         let me = site.user_id();
         let roles = role_list(&listed.capabilities, self.roles);
         let mut actions: Vec<(&str, String)> = Vec::new();
-        let edit = if site.can_user("edit_user", id) {
+        let edit = if site.can_for("edit_user", id) {
             let base = if id == me {
                 BarSite::admin_url(site, "profile.php")
             } else {
@@ -424,7 +419,7 @@ impl Listing<'_> {
             format!("<strong>{login}</strong><br />")
         };
         let nonce = site.nonce("bulk-users");
-        if id != me && site.can_user("delete_user", id) {
+        if id != me && site.can_for("delete_user", id) {
             actions.push((
                 "delete",
                 format!(
@@ -447,7 +442,7 @@ impl Listing<'_> {
                 )
             ),
         ));
-        if id != me && site.can_user("edit_user", id) {
+        if id != me && site.can_for("edit_user", id) {
             actions.push((
                 "resetpassword",
                 format!(
@@ -542,14 +537,13 @@ fn posts_cell(id: u64, posts: u64) -> String {
 }
 
 /// `users.php` for those who may list users.
-pub fn users(
-    site: &dyn UsersSite,
-    args: &UserArgs,
-    canonical: &str,
-    origin: &str,
-    request_uri: &str,
-    browser: &Browser,
-) -> Answer {
+pub fn users(site: &dyn UsersSite, args: &UserArgs, request: &Request) -> Answer {
+    let &Request {
+        canonical,
+        origin,
+        uri: request_uri,
+        browser,
+    } = request;
     if !site.can("list_users") {
         return Answer::Denied(
             "<h1>You need a higher level of permission.</h1><p>Sorry, you are not allowed to list users.</p>",

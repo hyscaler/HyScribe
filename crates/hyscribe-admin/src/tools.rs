@@ -8,13 +8,14 @@ use hyscribe_model::Term;
 use hyscribe_render::date::MONTHS;
 use hyscribe_render::formatting::wptexturize;
 
-use crate::admin_bar::{BarSite, Browser};
+use crate::admin_bar::BarSite;
 use crate::appearance::updates_settings;
 use crate::list_table::wp_referer_field;
 use crate::list_table::{Column, Order, Sort, column_headers, fill, screen_options};
 use crate::menu::{Screen, link};
-use crate::page::{HelpTab, Page, PageSite, admin_page};
+use crate::page::{HelpTab, Page, PageSite, Request, admin_page};
 use crate::posts::{Answer, PostsSite, hidden_columns, per_page};
+use crate::text;
 use crate::users::{UserQuery, UsersSite};
 
 /// `wp_print_admin_notice_templates()`.
@@ -51,10 +52,6 @@ pub trait ToolsSite: UsersSite {
     fn post_authors(&self, post_type: &str) -> Vec<u64>;
 }
 
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
-
 /// A screen under Tools: its file, title, help and markup.
 struct Tool<'a> {
     file: &'a str,
@@ -70,12 +67,7 @@ struct Tool<'a> {
 }
 
 /// The page of a screen under Tools, or `None` for one who may not see it.
-fn tool_page(
-    site: &dyn PageSite,
-    tool: &Tool,
-    (canonical, origin): (&str, &str),
-    browser: &Browser,
-) -> Option<String> {
+fn tool_page(site: &dyn PageSite, tool: &Tool, request: &Request) -> Option<String> {
     let page = Page {
         screen: Screen {
             pagenow: tool.file,
@@ -99,21 +91,15 @@ fn tool_page(
         admin_footer: "",
         footer_scripts: "",
         content: tool.content,
-        canonical,
-        origin,
+        canonical: request.canonical,
+        origin: request.origin,
         view: None,
     };
-    admin_page(site, &page, browser)
+    admin_page(site, &page, request.browser)
 }
 
-/// The Tools screen at `canonical`, requested from `origin`, or `None`
-/// when the user may not see it.
-pub fn tools(
-    site: &dyn PageSite,
-    canonical: &str,
-    origin: &str,
-    browser: &Browser,
-) -> Option<String> {
+/// The Tools screen, or `None` when the user may not see it.
+pub fn tools(site: &dyn PageSite, request: &Request) -> Option<String> {
     let mut content = String::from("<div class=\"wrap\">\n<h1>Tools</h1>\n");
     // Categories and tags both need `manage_categories`.
     if site.can("import") && site.can("manage_categories") {
@@ -140,11 +126,11 @@ pub fn tools(
         admin_head: "",
         content: &content,
     };
-    tool_page(site, &tool, (canonical, origin), browser)
+    tool_page(site, &tool, request)
 }
 
 /// `import.php`, with no importer: none is installed, and none can be.
-pub fn import(site: &dyn PostsSite, request: (&str, &str), browser: &Browser) -> Answer {
+pub fn import(site: &dyn PostsSite, request: &Request) -> Answer {
     let help = [HelpTab {
         id: "overview",
         title: "Overview",
@@ -165,7 +151,7 @@ pub fn import(site: &dyn PostsSite, request: (&str, &str), browser: &Browser) ->
         admin_head: "",
         content: &(IMPORT.to_string() + NOTICES),
     };
-    Answer::from_page(tool_page(site, &tool, request, browser))
+    Answer::from_page(tool_page(site, &tool, request))
 }
 
 /// `export_date_options( $post_type )`: the months with posts of
@@ -250,7 +236,7 @@ fn categories_dropdown(site: &dyn PostsSite) -> String {
 
 /// `export.php`'s form, without its `download` and the rest of its
 /// arguments.
-pub fn export(site: &dyn ToolsSite, request: (&str, &str), browser: &Browser) -> Answer {
+pub fn export(site: &dyn ToolsSite, request: &Request) -> Answer {
     let content = fill(
         EXPORT,
         &[
@@ -282,7 +268,7 @@ pub fn export(site: &dyn ToolsSite, request: (&str, &str), browser: &Browser) ->
         admin_head: EXPORT_JS,
         content: &content,
     };
-    Answer::from_page(tool_page(site, &tool, request, browser))
+    Answer::from_page(tool_page(site, &tool, request))
 }
 
 /// Which personal data requests a screen lists.
@@ -299,9 +285,7 @@ pub enum Requests {
 pub fn privacy_requests(
     site: &dyn PostsSite,
     requests: Requests,
-    (canonical, origin): (&str, &str),
-    request_uri: &str,
-    browser: &Browser,
+    request: &Request,
 ) -> Option<Answer> {
     if !site.status_counts("user_request", None).is_empty() {
         return None;
@@ -370,7 +354,7 @@ pub fn privacy_requests(
             ("url", text(&esc_url(url.as_bytes()))),
             ("request_nonce", site.nonce("personal-data-request")),
             ("bulk_nonce", site.nonce("bulk-privacy_requests")),
-            ("referer", wp_referer_field(request_uri)),
+            ("referer", wp_referer_field(request.uri)),
             ("head", headers(1, true)),
             ("foot", headers(2, false)),
             ("colspan", shown.to_string()),
@@ -410,12 +394,7 @@ pub fn privacy_requests(
         admin_head: "",
         content: &content,
     };
-    Some(Answer::from_page(tool_page(
-        site,
-        &tool,
-        (canonical, origin),
-        browser,
-    )))
+    Some(Answer::from_page(tool_page(site, &tool, request)))
 }
 
 #[cfg(test)]

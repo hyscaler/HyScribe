@@ -1521,7 +1521,7 @@ mod avatar;
 pub use avatar::{comment_avatar, user_avatar};
 mod breadcrumbs;
 mod button;
-mod calendar;
+pub(crate) mod calendar;
 mod comment_form;
 mod cover;
 mod featured_image;

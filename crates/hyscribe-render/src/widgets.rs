@@ -14,6 +14,7 @@ use crate::autop::wpautop;
 use crate::balance::force_balance_tags;
 use crate::blocks::Block;
 use crate::categories::{dropdown_select, terms};
+use crate::core_blocks::calendar::request_calendar;
 use crate::core_blocks::prepared;
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, wptexturize};
 use crate::head::json_hex_tag;
@@ -216,6 +217,7 @@ impl Renderer<'_> {
         match widget.id_base {
             "archives" => self.archives_widget(number, args, instance),
             "categories" => self.categories_widget(number, args, instance),
+            "calendar" => self.calendar_widget(args, instance),
             "search" => self.search_widget(args, instance),
             "custom_html" => self.custom_html_widget(args, instance),
             "meta" => self.meta_widget(args, instance),
@@ -339,6 +341,26 @@ impl Renderer<'_> {
             &args.before_widget[..],
             &titled(args, &title),
             &body,
+            &args.after_widget,
+        ]
+        .concat()
+    }
+
+    /// `WP_Widget_Calendar::widget()`: the request's month in a wrapper
+    /// that only the first calendar widget of a request names.
+    fn calendar_widget(&mut self, args: &Args, instance: &Value) -> Vec<u8> {
+        let title = widget_title(instance, b"");
+        let wrap = if std::mem::replace(&mut self.calendar_widget_shown, true) {
+            &b"<div class=\"calendar_wrap\">"[..]
+        } else {
+            b"<div id=\"calendar_wrap\" class=\"calendar_wrap\">"
+        };
+        [
+            &args.before_widget[..],
+            &titled(args, &title),
+            wrap,
+            request_calendar(&self.context).as_bytes(),
+            b"</div>",
             &args.after_widget,
         ]
         .concat()

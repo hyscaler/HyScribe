@@ -25,7 +25,15 @@ pub(super) fn calendar(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     if !published {
         return Vec::new();
     }
-    let (year, month) = shown_month(context, block);
+    let structure = site.option("permalink_structure").unwrap_or_default();
+    let has = |tag: &[u8]| structure.windows(tag.len()).any(|w| w == tag);
+    let chosen = match (block.attribute("month"), block.attribute("year")) {
+        (Some(m), Some(y)) if has(b"%monthnum%") && has(b"%year%") => {
+            Some((m.to_int(), y.to_int()))
+        }
+        _ => None,
+    };
+    let (year, month) = shown_month(context, chosen);
     let table = get_calendar(context, year, month);
     let (styles, classes) = color_styles(block);
     let table = table
@@ -38,24 +46,23 @@ pub(super) fn calendar(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     format!("<div {}>{table}</div>", block.wrapper(context, b"")).into_bytes()
 }
 
+/// `get_calendar()` as the calendar widget calls it: the request's month,
+/// or nothing when neither the main query nor the site has a post.
+pub(crate) fn request_calendar(context: &Context<'_>) -> String {
+    if context.request.posts.is_empty() && !context.site.has_published_posts() {
+        return String::new();
+    }
+    let (year, month) = shown_month(context, None);
+    get_calendar(context, year, month)
+}
+
 /// The month `get_calendar()` shows: the request's `monthnum` and
-/// `year`, which the block's own attributes replace under permalinks with
-/// both; else the month of week `w` of `m`'s year; else `m`'s; else now's.
-fn shown_month(context: &Context<'_>, block: &Block<'_>) -> (i64, i64) {
+/// `year`, or the block's `chosen` month and year in their place; else
+/// the month of week `w` of `m`'s year; else `m`'s; else now's.
+fn shown_month(context: &Context<'_>, chosen: Option<(i64, i64)>) -> (i64, i64) {
     let request = context.request;
     let var = |name| request.vars.get_str(name).map_or(0, |v| v.to_int());
-    let (mut month, mut year) = (var("monthnum").abs(), var("year").abs());
-    let structure = context
-        .site
-        .option("permalink_structure")
-        .unwrap_or_default();
-    let has = |tag: &[u8]| structure.windows(tag.len()).any(|w| w == tag);
-    if let (Some(m), Some(y)) = (block.attribute("month"), block.attribute("year"))
-        && has(b"%monthnum%")
-        && has(b"%year%")
-    {
-        (month, year) = (m.to_int(), y.to_int());
-    }
+    let (month, year) = chosen.unwrap_or_else(|| (var("monthnum").abs(), var("year").abs()));
     if month != 0 && year != 0 {
         return (year, month);
     }

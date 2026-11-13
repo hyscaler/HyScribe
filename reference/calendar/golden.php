@@ -16,6 +16,7 @@ remove_filter( 'render_block_data', 'wp_render_elements_support_styles', 10 );
 
 global $wpdb;
 $wpdb->query( 'START TRANSACTION' );
+add_filter( 'salt', static fn() => 'test-salt' );
 foreach ( array( '2026-09-03 10:00:00', '2026-09-30 23:59:59', '2026-11-02 00:00:00', '2025-02-14 12:00:00' ) as $date ) {
 	wp_insert_post( array( 'post_title' => "At $date", 'post_status' => 'publish', 'post_date' => $date, 'post_date_gmt' => $date ) );
 }
@@ -26,16 +27,32 @@ function calendar( $attrs ) {
 	$json = $attrs ? ' ' . wp_json_encode( $attrs, JSON_UNESCAPED_SLASHES ) : '';
 	return "<!-- wp:calendar$json /-->";
 }
+// The calendar widget in a legacy widget block, signed under `test-salt`.
+function widget( $instance ) {
+	$serialized = serialize( $instance );
+	$attrs      = array(
+		'idBase'   => 'calendar',
+		'instance' => array(
+			'encoded' => base64_encode( $serialized ),
+			'hash'    => wp_hash( $serialized ),
+		),
+	);
+	return '<!-- wp:legacy-widget ' . wp_json_encode( $attrs ) . ' /-->';
+}
 $cases = array(
 	calendar( array() ),
 	calendar( array( 'month' => 2, 'year' => 2025 ) ),
 	calendar( array( 'textColor' => 'contrast', 'backgroundColor' => 'base' ) ),
 	calendar( array( 'style' => array( 'color' => array( 'text' => '#123', 'background' => '#fed' ), 'elements' => array( 'link' => array( 'color' => array( 'text' => '#f00' ) ) ) ) ) ),
 	calendar( array( 'align' => 'center', 'className' => 'extra', 'fontSize' => 'small' ) ),
+	// Only PHP's first calendar widget is `#calendar_wrap`.
+	widget( array() ),
+	widget( array( 'title' => 'When & <b>where</b>' ) ),
 );
 // Not $request: WordPress sets that global.
 $queries = array( '', 'm=202610', 'year=2026&monthnum=9', 'm=2026', 'm=2026&w=44', 'm=20261027', 'p=1', 'year=2025&monthnum=2', 'year=2026&monthnum=13', 'monthnum=9', 'year=2026', 'm=2026&w=4', 'm=2026&w=5', 'year=2025&monthnum=12' );
-foreach ( array( '', '/%year%/%monthnum%/%postname%/', '/%postname%/' ) as $structure ) {
+// A structure with %year% alone leaves the block's month and year unused.
+foreach ( array( '', '/%year%/%monthnum%/%postname%/', '/%postname%/', '/%year%/%postname%/' ) as $structure ) {
 	remove_all_filters( 'pre_option_permalink_structure' );
 	add_filter( 'pre_option_permalink_structure', static fn() => $structure );
 	$GLOBALS['wp_rewrite']->init();
@@ -54,4 +71,13 @@ foreach ( array( '', '/%year%/%monthnum%/%postname%/', '/%postname%/' ) as $stru
 		}
 	}
 }
+// With no published post, get_calendar() prints nothing.
+$wpdb->query( "UPDATE $wpdb->posts SET post_status = 'draft' WHERE post_type = 'post'" );
+remove_all_filters( 'pre_option_permalink_structure' );
+remove_all_filters( 'pre_option_start_of_week' );
+$GLOBALS['wp'] = new WP();
+wp( '' );
+wp_cache_delete( 'get_calendar', 'calendar' );
+$markup = widget( array() );
+echo bin2hex( $markup ), "\t", '', "\t", '', "\t", get_option( 'start_of_week' ), "\t", time(), "\t", bin2hex( wp_json_encode( array() ) ), "\t", bin2hex( do_blocks( $markup ) ), "\n";
 $wpdb->query( 'ROLLBACK' );

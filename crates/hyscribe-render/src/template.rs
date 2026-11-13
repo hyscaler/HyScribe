@@ -177,6 +177,9 @@ pub(crate) struct Renderer<'a> {
     /// `WP_Widget_Categories::widget()`'s `static $first_dropdown`, spent
     /// once a categories widget has printed its dropdown.
     pub(crate) categories_dropdown_used: bool,
+    /// `WP_Widget_Calendar::$instance`: whether a calendar widget has
+    /// printed, after which none is `#calendar_wrap`.
+    pub(crate) calendar_widget_shown: bool,
     /// The `layout` attribute of the block being rendered, `parentLayout`
     /// to its inner blocks.
     pub(crate) parent_layout: Option<Value>,
@@ -247,6 +250,7 @@ impl<'a> Renderer<'a> {
             latest_posts_open: Vec::new(),
             categories_blocks: 0,
             categories_dropdown_used: false,
+            calendar_widget_shown: false,
             parent_layout: None,
             unique_id: 0,
             elements_id: 0,

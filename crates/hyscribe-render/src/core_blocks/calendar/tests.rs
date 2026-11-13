@@ -53,6 +53,11 @@ impl Site for Dated {
         !self.dates.is_empty()
     }
 
+    /// Signed as the oracle's `salt` filter signs.
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        Some(hyscribe_phpser::hash_hmac_md5(data, b"test-salt"))
+    }
+
     /// The month's reads over the dates, compared as strings as MySQL
     /// compares them with get_calendar()'s, which turns a date in a month
     /// past 12 into the zero date.
@@ -96,13 +101,16 @@ impl Site for Dated {
     }
 }
 
-/// Every case of `reference/calendar/golden.sh`, through the render
-/// callback, as the oracle leaves out the elements support.
+/// Every case of `reference/calendar/golden.sh`: blocks through the render
+/// callback, as the oracle leaves out the elements support, and widgets
+/// through the legacy widget block, in order, as whether one has printed
+/// carries over as PHP's static does.
 #[test]
 fn matches_php() {
     let theme = twentytwentyfive();
     let golden = include_str!("../../../tests/golden/calendar.tsv");
     let mut failures = Vec::new();
+    let mut widget_shown = false;
     for line in golden.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
         let query = unhex(fields[1]);
@@ -126,11 +134,18 @@ fn matches_php() {
             now: fields[4].parse().unwrap(),
             ..Request::default()
         };
-        let context = Renderer::new(&theme, &site, &request).context;
+        let mut renderer = Renderer::new(&theme, &site, &request);
         let markup = unhex(fields[0]);
         let block = &parse_blocks(&markup)[0];
-        let attrs = block.attrs.as_deref().unwrap_or_default();
-        let ours = render(&context, "core/calendar", attrs, b"").unwrap();
+        let ours = if block.name.as_deref() == Some("core/legacy-widget") {
+            renderer.calendar_widget_shown = widget_shown;
+            let ours = renderer.render(&markup);
+            widget_shown = renderer.calendar_widget_shown;
+            ours
+        } else {
+            let attrs = block.attrs.as_deref().unwrap_or_default();
+            render(&renderer.context, "core/calendar", attrs, b"").unwrap()
+        };
         let php = unhex(fields[6]);
         if ours != php {
             failures.push(format!(
@@ -148,7 +163,7 @@ fn matches_php() {
         failures.len(),
         failures[..failures.len().min(2)].join("\n")
     );
-    assert_eq!(golden.lines().count(), 420);
+    assert_eq!(golden.lines().count(), 687);
 }
 
 /// No post data, and the published posts option as given.

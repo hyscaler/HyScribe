@@ -1,0 +1,52 @@
+
+<div class="wrap">
+<h1 class="wp-heading-inline">
+Plugins</h1>
+
+
+<hr class="wp-header-end">
+
+
+
+<form class="search-form search-plugins" method="get">
+</form>
+
+<form method="post" id="bulk-action-form">
+
+<input type="hidden" name="plugin_status" value="all" />
+<input type="hidden" name="paged" value="1" />
+
+<input type="hidden" id="_wpnonce" name="_wpnonce" value="%nonce%" />%referer%	<div class="tablenav top">
+
+				<div class="alignleft actions bulkactions hidden">
+			<label for="bulk-action-selector-top" class="screen-reader-text">Select bulk action</label><select name="action" id="bulk-action-selector-top">
+<option value="-1">Bulk actions</option>
+	<option value="activate-selected">Activate</option>
+	<option value="deactivate-selected">Deactivate</option>
+</select>
+<input type="submit" name="bulk_action" id="doaction" class="button action button-compact" value="Apply"  />
+		</div>
+		<div class="tablenav-pages no-pages"><span class="displaying-num">0 items</span></div>
+		<br class="clear" />
+	</div>
+		<h2 class='screen-reader-text'>Plugins list</h2><table class="wp-list-table widefat plugins">
+			<thead>
+	<tr>
+		%head%	</tr>
+	</thead>
+
+	<tbody id="the-list"
+				>
+		<tr class="no-items"><td class="colspanchange" colspan="%colspan%">No plugins are currently available.</td></tr>	</tbody>
+
+	<tfoot>
+	<tr>
+		%foot%	</tr>
+	</tfoot>
+
+</table>
+		</form>
+
+	<span class="spinner"></span>
+</div>
+

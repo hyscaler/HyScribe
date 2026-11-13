@@ -10,6 +10,7 @@ use std::sync::Arc;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::admin_bar::{BarSite, Browser};
+use hyscribe_admin::appearance::themes;
 use hyscribe_admin::assets::Urls;
 use hyscribe_admin::comments::{
     CommentArgs, CommentQuery, CommentsSite, comment_order, edit_comments,
@@ -25,6 +26,7 @@ use hyscribe_admin::profile::{EditArgs, ProfileSite, Request, profile, user_edit
 use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
 use hyscribe_admin::settings_more;
 use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
+use hyscribe_admin::tools::{self, Requests, ToolsSite, privacy_requests};
 use hyscribe_admin::users::{ListedUser, UserArgs, UserQuery, UsersSite, user_order, users};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
 use hyscribe_db::{CommentFilter, StatusOrder, StatusQuery, UserFilter};
@@ -656,6 +658,12 @@ impl ProfileSite for Admin<'_> {
     }
 }
 
+impl ToolsSite for Admin<'_> {
+    fn post_authors(&self, post_type: &str) -> Vec<u64> {
+        self.reads.reads.wait(self.site.db.post_authors(post_type))
+    }
+}
+
 impl SettingsSite for Admin<'_> {
     fn defined(&self, name: &str) -> bool {
         self.site.defined.contains(&name)
@@ -960,7 +968,35 @@ fn screen(
                 Err(response) => return Some(*response),
             }
         }
-        "/hs-admin/tools" => hyscribe_admin::tools::tools(admin, &canonical, origin, browser),
+        "/hs-admin/tools" => tools::tools(admin, &canonical, origin, browser),
+        // Their arguments and actions are not ported.
+        "/hs-admin/themes"
+        | "/hs-admin/import"
+        | "/hs-admin/export"
+        | "/hs-admin/export-personal-data"
+        | "/hs-admin/erase-personal-data" => {
+            if request_uri.contains('?') {
+                return None;
+            }
+            let request = (canonical.as_str(), origin);
+            let requests =
+                |requests| privacy_requests(admin, requests, request, request_uri, browser);
+            let answer = match path {
+                "/hs-admin/themes" => themes(admin, request, request_uri, browser),
+                "/hs-admin/import" => Some(tools::import(admin, request, browser)),
+                "/hs-admin/export" => Some(tools::export(admin, request, browser)),
+                "/hs-admin/export-personal-data" => requests(Requests::Export),
+                _ => requests(Requests::Erase),
+            }?;
+            match answered(admin, answer) {
+                Ok(html) => Some(html),
+                Err(response) => return Some(*response),
+            }
+        }
+        // Their pages print the PHP and web server details HyScribe has no
+        // equivalent for: refused as PHP refuses, else not ported.
+        "/hs-admin/plugins" if !admin.can("activate_plugins") => None,
+        "/hs-admin/site-health" if !admin.can("view_site_health_checks") => None,
         // HTTPS offers application passwords, whose list is not ported.
         "/hs-admin/profile" => {
             if request_uri.contains('?') || origin.starts_with("https://") {

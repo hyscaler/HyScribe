@@ -742,7 +742,7 @@ pub fn edit_comments(
         .find(|(view, _)| args.status.as_deref() == Some(*view))
         .unwrap_or(VIEWS[0]);
     let mode = view_mode(site, args.mode.as_deref(), settings);
-    let per_page = per_page(site, "edit_comments_per_page");
+    let per_page = per_page(site, "edit_comments_per_page", 20);
     let page = pagenum(args.paged.as_deref());
     let post_id = Value::String(args.post.clone().unwrap_or_default().into_bytes())
         .to_int()

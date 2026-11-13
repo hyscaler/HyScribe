@@ -1,0 +1,17 @@
+	<script id="tmpl-item-update-row" type="text/template">
+		<tr class="plugin-update-tr update" id="{{ data.slug }}-update" data-slug="{{ data.slug }}" <# if ( data.plugin ) { #>data-plugin="{{ data.plugin }}"<# } #>>
+			<td colspan="{{ data.colspan }}" class="plugin-update colspanchange">
+				{{{ data.content }}}
+			</td>
+		</tr>
+	</script>
+	<script id="tmpl-item-deleted-row" type="text/template">
+		<tr class="plugin-deleted-tr inactive deleted" id="{{ data.slug }}-deleted" data-slug="{{ data.slug }}" <# if ( data.plugin ) { #>data-plugin="{{ data.plugin }}"<# } #>>
+			<td colspan="{{ data.colspan }}" class="plugin-update colspanchange">
+				<# if ( data.plugin ) { #>
+					<strong>{{{ data.name }}}</strong> was successfully deleted.				<# } else { #>
+					<strong>{{{ data.name }}}</strong> was successfully deleted.				<# } #>
+			</td>
+		</tr>
+	</script>
+	

@@ -519,7 +519,7 @@ pub fn edit_tags(
         );
     }
     let option = format!("edit_{}_per_page", taxonomy.name);
-    let per_page = per_page(site, &option);
+    let per_page = per_page(site, &option, 20);
     let hierarchical = taxonomy.hierarchical();
     let given = |value: &Option<String>| {
         value

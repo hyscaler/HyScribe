@@ -57,7 +57,7 @@ fn attr(site: &dyn DashboardSite, name: &str) -> String {
 }
 
 /// `wp_referer_field()` for the request.
-fn referer(request_uri: &str) -> String {
+pub(crate) fn referer(request_uri: &str) -> String {
     let url = remove_query_arg(&[b"_wp_http_referer"], request_uri.as_bytes());
     format!(
         "<input type=\"hidden\" name=\"_wp_http_referer\" value=\"{}\" />",
@@ -130,7 +130,7 @@ fn settings_page(
 }
 
 /// The page, or `wp_die()`'s refusal from `wp-admin/includes/menu.php`.
-fn answer(page: Option<String>) -> Answer {
+pub(crate) fn answer(page: Option<String>) -> Answer {
     page.map_or(
         Answer::Denied("Sorry, you are not allowed to access this page."),
         Answer::Page,

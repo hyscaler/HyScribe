@@ -128,7 +128,8 @@ pub fn author_posts_url(home: &[u8], id: impl std::fmt::Display) -> Vec<u8> {
 
 /// `get_term_link( $term, $taxonomy )` for the taxonomies the default
 /// install shows: `?cat=<ID>` for a category, `?tag=<slug>` for a tag,
-/// and for a post format its slug without `post-format-`.
+/// for a post format its slug without `post-format-`, and
+/// `?taxonomy=<name>&term=<slug>` for a taxonomy without a query variable.
 pub fn term_link(home: &[u8], taxonomy: &str, term: &Term) -> Vec<u8> {
     let base = [home, b"/"].concat();
     match taxonomy {
@@ -139,7 +140,16 @@ pub fn term_link(home: &[u8], taxonomy: &str, term: &Term) -> Vec<u8> {
             let slug = crate::template::replace(&term.slug, b"post-format-", b"");
             hyscribe_phpser::add_query_arg(&[(b"post_format", Some(&slug))], &base)
         }
-        _ => [&base[..], b"?tag=", &term.slug].concat(),
+        "post_tag" => [&base[..], b"?tag=", &term.slug].concat(),
+        // A taxonomy without a query variable.
+        _ => [
+            &base[..],
+            b"?taxonomy=",
+            taxonomy.as_bytes(),
+            b"&term=",
+            &term.slug,
+        ]
+        .concat(),
     }
 }
 

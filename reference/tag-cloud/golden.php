@@ -36,6 +36,8 @@ $cases = array(
 	cloud( array( 'taxonomy' => 'category' ) ),
 	cloud( array( 'taxonomy' => 'post_format' ) ),
 	cloud( array( 'taxonomy' => 'nope' ) ),
+	// Registered, with neither public links nor a query variable.
+	cloud( array( 'taxonomy' => 'nav_menu' ) ),
 	cloud( array( 'align' => 'center', 'className' => 'extra', 'fontSize' => 'small' ) ),
 );
 $term_sets = array(

@@ -11,10 +11,31 @@ use crate::site::{Request, Site};
 use crate::template::Renderer;
 use crate::theme::twentytwentyfive;
 
-/// The default install with the terms a case gives `get_terms()`.
-struct Tagged {
-    site: DefaultInstall,
-    terms: Vec<Term>,
+/// The default install with the terms a case gives `get_terms()`, also
+/// for the tag cloud widget's golden.
+pub(crate) struct Tagged {
+    pub(crate) site: DefaultInstall,
+    pub(crate) terms: Vec<Term>,
+}
+
+/// A golden's JSON terms: ID, name, slug and count.
+pub(crate) fn golden_terms(json: &[u8]) -> Vec<Term> {
+    json_decode(json)
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|(_, t)| {
+            let field = |i: i64| t.get(&hyscribe_phpser::Key::Int(i)).unwrap();
+            Term {
+                id: field(0).to_int() as u64,
+                name: field(1).to_php_string(),
+                slug: field(2).to_php_string(),
+                count: field(3).to_int() as u64,
+                ..Term::default()
+            }
+        })
+        .collect()
 }
 
 impl Site for Tagged {
@@ -52,6 +73,11 @@ impl Site for Tagged {
     fn taxonomy_terms(&self, _: &str) -> Vec<Term> {
         self.terms.clone()
     }
+
+    /// Under the salt the widget oracle fixes, `test-salt`.
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        Some(hyscribe_phpser::hash_hmac_md5(data, b"test-salt"))
+    }
 }
 
 /// Every case of `reference/tag-cloud/golden.sh`, through the render
@@ -66,24 +92,9 @@ fn matches_php() {
         let fields: Vec<&str> = line.split('\t').collect();
         let (markup, terms, php) = (
             unhex(fields[0]),
-            json_decode(&unhex(fields[1])).unwrap(),
+            golden_terms(&unhex(fields[1])),
             unhex(fields[2]),
         );
-        let terms = terms
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|(_, t)| {
-                let field = |i: i64| t.get(&hyscribe_phpser::Key::Int(i)).unwrap();
-                Term {
-                    id: field(0).to_int() as u64,
-                    name: field(1).to_php_string(),
-                    slug: field(2).to_php_string(),
-                    count: field(3).to_int() as u64,
-                    ..Term::default()
-                }
-            })
-            .collect();
         let site = Tagged {
             site: DefaultInstall {
                 home: b"http://127.0.0.1:8081".to_vec(),
@@ -110,5 +121,5 @@ fn matches_php() {
         failures.len(),
         failures[..failures.len().min(4)].join("\n")
     );
-    assert_eq!(golden.lines().count(), 96);
+    assert_eq!(golden.lines().count(), 102);
 }

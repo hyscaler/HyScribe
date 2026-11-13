@@ -15,6 +15,7 @@ use crate::balance::force_balance_tags;
 use crate::blocks::Block;
 use crate::categories::{dropdown_select, terms};
 use crate::core_blocks::calendar::request_calendar;
+use crate::core_blocks::tag_cloud::{TAXONOMIES, wp_tag_cloud};
 use crate::core_blocks::{comment_author_link, comment_link, prepared};
 use crate::date;
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, wptexturize};
@@ -222,6 +223,7 @@ impl Renderer<'_> {
             "calendar" => self.calendar_widget(args, instance),
             "recent-posts" => self.recent_posts_widget(args, instance),
             "recent-comments" => self.recent_comments_widget(number, args, instance),
+            "tag_cloud" => self.tag_cloud_widget(args, instance),
             "search" => self.search_widget(args, instance),
             "custom_html" => self.custom_html_widget(args, instance),
             "meta" => self.meta_widget(args, instance),
@@ -460,6 +462,40 @@ impl Renderer<'_> {
             b"\">",
             &items,
             b"</ul>",
+            &args.after_widget,
+        ]
+        .concat()
+    }
+
+    /// `WP_Widget_Tag_Cloud::widget()`: the cloud of the instance's
+    /// taxonomy when it is registered, else of tags, titled with the
+    /// taxonomy's label by default; nothing without terms.
+    fn tag_cloud_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
+        let chosen = instance
+            .get_str("taxonomy")
+            .filter(|taxonomy| !taxonomy.is_empty())
+            .map(Value::to_php_string);
+        let (taxonomy, label) = TAXONOMIES
+            .into_iter()
+            .find(|(name, _)| chosen.as_deref() == Some(name.as_bytes()))
+            .unwrap_or(("post_tag", "Tags"));
+        let cloud = wp_tag_cloud(
+            &self.context,
+            taxonomy,
+            b"8",
+            b"22",
+            45,
+            checked(instance, "count"),
+        );
+        if cloud.is_empty() {
+            return Vec::new();
+        }
+        [
+            &args.before_widget[..],
+            &titled(args, &widget_title(instance, label.as_bytes())),
+            b"<div class=\"tagcloud\">",
+            &cloud,
+            b"</div>\n",
             &args.after_widget,
         ]
         .concat()

@@ -2,6 +2,7 @@
 
 use hyscribe_testkit::unhex;
 
+use crate::core_blocks::tag_cloud::tests::{Tagged, golden_terms};
 use crate::site::{Request, Site};
 use crate::template::Renderer;
 use crate::theme::twentytwentyfive;
@@ -326,4 +327,40 @@ fn recent_comments_match_php() {
         failures[..failures.len().min(2)].join("\n")
     );
     assert_eq!(golden.lines().count(), 11);
+}
+
+/// Every case of `reference/tag-cloud-widget/golden.sh`.
+#[test]
+fn tag_cloud_matches_php() {
+    let golden = include_str!("../../tests/golden/tag-cloud-widget.tsv");
+    let theme = twentytwentyfive();
+    let request = Request::default();
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let site = Tagged {
+            site: crate::fixture::DefaultInstall {
+                home: b"http://127.0.0.1:8081".to_vec(),
+            },
+            terms: golden_terms(&unhex(f[1])),
+        };
+        let (markup, php) = (unhex(f[0]), unhex(f[2]));
+        let ours = Renderer::new(&theme, &site, &request).render(&markup);
+        if ours != php {
+            failures.push(format!(
+                "{} {}\n  php:  {:?}\n  ours: {:?}",
+                String::from_utf8_lossy(&markup),
+                String::from_utf8_lossy(&unhex(f[1])),
+                String::from_utf8_lossy(&php),
+                String::from_utf8_lossy(&ours)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures[..failures.len().min(2)].join("\n")
+    );
+    assert_eq!(golden.lines().count(), 64);
 }

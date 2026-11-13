@@ -1561,7 +1561,7 @@ mod image;
 mod latest_comments;
 mod loginout;
 mod site_logo;
-mod tag_cloud;
+pub(crate) mod tag_cloud;
 mod term;
 mod time_to_read;
 mod video;

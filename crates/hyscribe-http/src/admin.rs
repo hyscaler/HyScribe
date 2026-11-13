@@ -957,6 +957,8 @@ fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
             exact: query.exact,
             sentence: query.sentence,
             search_count: query.search_count,
+            // The admin's searches are a logged in user's.
+            logged_in: true,
             ..PostQuery::default()
         };
         // `WP_Query` sets `cat` to the queried category.
@@ -1058,6 +1060,9 @@ fn screen(
         // equivalent for: refused as PHP refuses, else not ported.
         "/hs-admin/plugins" if !admin.can("activate_plugins") => None,
         "/hs-admin/site-health" if !admin.can("view_site_health_checks") => None,
+        // Its page preloads REST responses not served yet, and its first view
+        // writes the theme's `wp_global_styles` post.
+        "/hs-admin/site-editor" if !admin.can("edit_theme_options") => None,
         // HTTPS offers application passwords, whose list is not ported.
         "/hs-admin/profile" => {
             let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();

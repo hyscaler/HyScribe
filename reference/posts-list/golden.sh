@@ -7,15 +7,24 @@
 #   variant[?query]<TAB>role<TAB>hex(page)
 # Posts 304 and 306 are sticky and the hidden variant's columns and page size come from
 # filters (reference/posts-list/variants.php). Masks as
-# reference/admin-page/golden.sh. Start from a fresh db.sh up, then php.sh up,
-# and take both down after.
+# reference/admin-page/golden.sh. With PHP on the Theme Test Data
+# (HYSCRIBE_PHP_DB=wordpress_ttd reference/default-install/php.sh up) it
+# records searches of that content instead, as
+# crates/hyscribe-admin/tests/golden/posts-list-ttd.tsv, each page as the
+# hashes of reference/media/mask.php. Start from a fresh db.sh up, then
+# php.sh up, and take both down after.
 set -euo pipefail
 DOCKER="${DOCKER:-docker}"
 NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
 DB="${HYSCRIBE_DB_CONTAINER:-hyscribe-default-install-db}"
 BASE="${HYSCRIBE_PHP_URL:-http://127.0.0.1:8081}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-OUT="$ROOT/crates/hyscribe-admin/tests/golden/posts-list.tsv"
+TTD=$("$DOCKER" exec "$NAME" sh -c 'echo "$WORDPRESS_DB_NAME"')
+if [ "$TTD" = wordpress_ttd ]; then
+  OUT="$ROOT/crates/hyscribe-admin/tests/golden/posts-list-ttd.tsv"
+else
+  OUT="$ROOT/crates/hyscribe-admin/tests/golden/posts-list.tsv"
+fi
 MU=/var/www/html/wp-content/mu-plugins
 TMP=$(mktemp)
 NONCES=$(mktemp)
@@ -31,9 +40,13 @@ cleanup() {
 }
 trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
-"$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/posts-list/variants.php"
+[ "$TTD" = wordpress_ttd ] || "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/posts-list/variants.php"
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce inlineeditnonce bulk-posts untrash-post_307 delete-post_307"
-for id in 1 2 3 301 302 303 304 305 306 308 309 310 311 312 313 314 315 316 317 318 319 320 321; do
+ids="1 2 3 301 302 303 304 305 306 308 309 310 311 312 313 314 315 316 317 318 319 320 321"
+if [ "$TTD" = wordpress_ttd ]; then
+  ids=$("$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; echo implode( " ", get_posts( array( "post_type" => "any", "post_status" => "any", "numberposts" => -1, "fields" => "ids" ) ) );')
+fi
+for id in $ids; do
   actions="$actions trash-post_$id"
 done
 # shellcheck disable=SC2086
@@ -48,17 +61,20 @@ record() {
     printf '302\t%s' "$(grep -i '^location:' "$TMP.head" | cut -d' ' -f2 | tr -d '\r')" > "$TMP"
   fi
   rm -f "$TMP.head"
-  page=$(php -r '
-    $p = file_get_contents( $argv[1] );
-    foreach ( file( $argv[2], FILE_IGNORE_NEW_LINES ) as $line ) {
-      list( $nonce, $action ) = explode( "\t", $line );
-      $p = str_replace( $nonce, "%nonce:$action%", $p );
-    }
-    $p = preg_replace( "/\"time\":\"[0-9]+\"/", "\"time\":\"%time%\"", $p );
-    echo bin2hex( $p );' "$TMP" "$NONCES")
+  hashed=
+  [ "$TTD" = wordpress_ttd ] && hashed=1
+  page=$(php "$ROOT/reference/media/mask.php" "$TMP" "$NONCES" "$hashed" "${3:-}")
   printf '%s%s\t%s\t%s\n' "$1" "${3:-}" "$2" "$page" >> "$OUT"
 }
 : > "$OUT"
+# A logged in user's search finds password protected posts too.
+if [ "$TTD" = wordpress_ttd ]; then
+  for query in '?s=Template:+Password' '?s=enter&post_status=publish'; do
+    record default administrator "$query"
+  done
+  wc -l "$OUT"
+  exit
+fi
 record default administrator '?post_status=trash'
 # Pages, for those who may edit them.
 for role in administrator editor; do

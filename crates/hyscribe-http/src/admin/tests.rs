@@ -332,7 +332,7 @@ async fn logged_in_users_are_let_in() {
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
     }
     // Themes and the Tools screens, without their arguments and actions;
-    // Plugins and Site Health are not ported.
+    // Plugins, Site Health and the site editor are not ported.
     let list = include_str!("../../../hyscribe-admin/tests/golden/appearance.tsv");
     let cron = site.option("cron");
     let message = hyscribe_admin::appearance::auto_update_message(cron.as_bytes(), now());
@@ -356,7 +356,12 @@ async fn logged_in_users_are_let_in() {
         let response = get(&site, &format!("{path}?x=1"), "127.0.0.1:8081", &auth).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
     }
-    for path in ["/hs-admin/plugins", "/hs-admin/site-health"] {
+    for path in [
+        "/hs-admin/plugins",
+        "/hs-admin/site-health",
+        "/hs-admin/site-editor",
+        "/hs-admin/site-editor?p=%2Fpage",
+    ] {
         let response = get(&site, path, "127.0.0.1:8081", &auth).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
     }
@@ -657,6 +662,22 @@ async fn media_screens_are_php_s() {
     assert_eq!(pages, 64);
 }
 
+/// Searches of the Theme Test Data's posts in `reference/posts-list/golden.sh`,
+/// which find its password protected post for a logged in user.
+#[tokio::test(flavor = "multi_thread")]
+async fn searches_find_protected_posts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress_ttd", dir.path()).await;
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/posts-list-ttd.tsv");
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let path = format!("/hs-admin/edit{}", f[0].trim_start_matches("default"));
+        let page = page_of(get(&site, &path, "127.0.0.1:8081", &cookies).await).await;
+        assert!(page.contains("id=\"post-1168\""), "{path}");
+        assert_eq!(sha256(&masked_nonces(&page)), f[3], "{path}");
+    }
+}
+
 /// `page` with its nonces, ten hexadecimal digits standing alone, and its
 /// time masked, as the hashed goldens hold them.
 fn masked_nonces(page: &str) -> String {
@@ -748,6 +769,33 @@ fn with_values(golden: &str, page: &str) -> String {
     }
     out.push_str(golden);
     out
+}
+
+/// The site editor's refusals of `reference/site-editor/golden.sh`, whatever
+/// the arguments.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_site_editor_s_refusals() {
+    let site = oracle_site().await;
+    let handle = Handle::current();
+    let golden = include_str!("../../tests/golden/site-editor.tsv");
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let (site, handle, query) = (Arc::clone(&site), handle.clone(), f[0].to_string());
+        let response = tokio::task::spawn_blocking(move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            let path = "/hs-admin/site-editor";
+            let uri = format!("{path}{query}");
+            let url = format!("http://h{uri}");
+            screen(&admin, path, &uri, &url, "http://h", &Browser::default()).unwrap()
+        })
+        .await
+        .unwrap();
+        assert_eq!(response.status().as_str(), f[2], "{line}");
+        let php = String::from_utf8(hyscribe_testkit::unhex(f[3])).unwrap();
+        assert_eq!(page_of(response).await, php, "{}", f[0]);
+    }
+    assert_eq!(golden.lines().count(), 12);
 }
 
 /// A user without the screen's capability gets `wp_die()`'s refusal.

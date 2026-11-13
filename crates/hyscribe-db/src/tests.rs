@@ -566,6 +566,12 @@ fn order_follows_the_query() {
             .ends_with("ORDER BY post_date DESC LIMIT ? OFFSET ?")
     );
     assert!(text(vec![]).text.contains(" AND post_password = ''"));
+    let logged_in = PostQuery {
+        search: vec!["x".into()],
+        logged_in: true,
+        ..PostQuery::default()
+    };
+    assert!(!posts_sql(&logged_in).text.contains("post_password = ''"));
     assert!(
         !posts_sql(&PostQuery::default())
             .text

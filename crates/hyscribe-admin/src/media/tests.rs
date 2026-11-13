@@ -4,8 +4,8 @@ use hyscribe_phpser::remove_query_arg;
 use hyscribe_testkit::{hs_admin_page, unhex};
 
 use super::*;
-use crate::posts::Answer;
 use crate::page::Request;
+use crate::posts::Answer;
 use crate::tests::{Role, SITE, first_difference};
 
 /// `wp_removable_query_args()` that the goldens' queries use.

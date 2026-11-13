@@ -199,6 +199,8 @@ pub struct PostQuery {
     /// `wp_allow_query_attachment_by_filename`: a search term may match the
     /// `_wp_attached_file` meta too.
     pub filenames: bool,
+    /// `is_user_logged_in()`: a search finds password protected posts too.
+    pub logged_in: bool,
     /// `wp_post_mime_type_where()`: `post_mime_type` is one of these, each
     /// a `LIKE` pattern when it holds a `%`; none means any.
     pub mime_types: Vec<String>,

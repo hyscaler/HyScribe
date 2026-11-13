@@ -126,6 +126,14 @@ async fn logged_in_users_are_let_in() {
         .to_string();
     let response = get(&site, "/hs-admin/edit?detached=1", "127.0.0.1:8081", &auth).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let response = get(
+        &site,
+        "/hs-admin/edit-tags?taxonomy=nav_menu",
+        "127.0.0.1:8081",
+        &auth,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     // A page past the last goes to the last.
     let response = get(&site, "/hs-admin/edit?paged=9", "127.0.0.1:8081", &auth).await;
     assert_eq!(response.status(), StatusCode::FOUND);
@@ -135,6 +143,30 @@ async fn logged_in_users_are_let_in() {
     let cookies = all.join("; ");
     let page = page_of(get(&site, "/hs-admin/edit", "127.0.0.1:8081", &cookies).await).await;
     let php = golden("administrator\tedit.php\t");
+    assert_eq!(with_values(&php, &page), page);
+    // A page of categories past the last goes to the last.
+    let response = get(
+        &site,
+        "/hs-admin/edit-tags?taxonomy=category&paged=4",
+        "127.0.0.1:8081",
+        &auth,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        location(&response),
+        "/hs-admin/edit-tags?taxonomy=category&paged=1"
+    );
+    // The categories.
+    let path = "/hs-admin/edit-tags?taxonomy=category";
+    let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
+    let list = include_str!("../../../hyscribe-admin/tests/golden/terms-list.tsv");
+    let row = list
+        .lines()
+        .find(|l| l.starts_with("default?taxonomy=category\tadministrator\t"))
+        .unwrap();
+    let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
     assert_eq!(with_values(&php, &page), page);
     // The pages, as a tree.
     let path = "/hs-admin/edit?post_type=page";
@@ -278,18 +310,21 @@ async fn refusals() {
     .unwrap()
     .unwrap();
     assert_eq!(edit.status(), StatusCode::FORBIDDEN);
-    let response = tokio::task::spawn_blocking(move || {
-        let reads = LoginReads::new(&site, handle, now());
-        let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
-        let browser = Browser::default();
-        screen(
-            &admin,
-            "/hs-admin/tools",
-            "/hs-admin/tools",
-            "http://h/hs-admin/tools",
-            "http://h",
-            &browser,
-        )
+    let response = tokio::task::spawn_blocking({
+        let (site, handle) = (Arc::clone(&site), handle.clone());
+        move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            let browser = Browser::default();
+            screen(
+                &admin,
+                "/hs-admin/tools",
+                "/hs-admin/tools",
+                "http://h/hs-admin/tools",
+                "http://h",
+                &browser,
+            )
+        }
     })
     .await
     .unwrap()
@@ -300,6 +335,49 @@ async fn refusals() {
         .unwrap();
     let body = String::from_utf8(body.to_vec()).unwrap();
     assert!(body.contains("Sorry, you are not allowed to access this page."));
+    let terms = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, now());
+        let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+        let path = "/hs-admin/edit-tags?taxonomy=category";
+        screen(
+            &admin,
+            "/hs-admin/edit-tags",
+            path,
+            &format!("http://h{path}"),
+            "http://h",
+            &Browser::default(),
+        )
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(terms.status(), StatusCode::FORBIDDEN);
+    let body = axum::body::to_bytes(terms.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    assert!(body.contains("Sorry, you are not allowed to manage terms in this taxonomy."));
+}
+
+/// The terms list reads its taxonomy and page so far.
+#[test]
+fn the_terms_list_reads_its_taxonomy() {
+    let taxonomy = |uri| term_args(uri).map(|args| args.taxonomy);
+    let paged = term_args("/hs-admin/edit-tags?taxonomy=category&paged=2").unwrap();
+    assert_eq!(paged.paged.as_deref(), Some("2"));
+    assert_eq!(
+        taxonomy("/hs-admin/edit-tags?taxonomy=post_tag"),
+        Terms::named(b"post_tag")
+    );
+    for refused in [
+        "/hs-admin/edit-tags",
+        "/hs-admin/edit-tags?taxonomy=nav_menu",
+        "/hs-admin/edit-tags?taxonomy=category&s=x",
+        "/hs-admin/edit-tags?taxonomy[]=category",
+        "/hs-admin/edit-tags?taxonomy=category&paged=%FF",
+    ] {
+        assert!(taxonomy(refused).is_none(), "{refused}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -421,7 +499,14 @@ async fn dashboard_data() {
             assert!(admin.comment_editable(None));
             // What capability checks of other objects read.
             assert_eq!(admin.comment_post(2), None);
-            assert!(admin.term_taxonomy(1).is_none());
+            assert_eq!(admin.term_taxonomy(1).as_deref(), Some("category"));
+            assert!(admin.term_taxonomy(999_999).is_none());
+            let term = admin.terms("category").remove(0);
+            assert!(admin.can_term("edit_term", &term) && !admin.can_term("delete_term", &term));
+            assert_eq!(
+                admin.term_link(&term, "category"),
+                "http://default-install.test/?cat=1"
+            );
             assert!(admin.user_exists(1) && !admin.user_exists(999));
             assert_eq!(
                 CapabilityData::user_meta(admin, 1, "wp_capabilities").as_deref(),

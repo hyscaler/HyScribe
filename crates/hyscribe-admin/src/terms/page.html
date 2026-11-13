@@ -1,0 +1,112 @@
+
+<div class="wrap nosubsub">
+<h1 class="wp-heading-inline">%title%</h1>
+
+
+<hr class="wp-header-end">
+
+<div id="ajax-response"></div>
+
+<form class="search-form wp-clearfix" method="get">
+<input type="hidden" name="taxonomy" value="%taxonomy%" />
+<input type="hidden" name="post_type" value="post" />
+
+%search%
+</form>
+
+<div id="col-container" class="wp-clearfix">
+
+<div id="col-left">
+<div class="col-wrap">
+
+	
+<div class="form-wrap">
+<h2>%add%</h2>
+<form id="addtag" method="post" action="edit-tags.php" class="validate"
+	>
+<input type="hidden" name="action" value="add-tag" />
+<input type="hidden" name="screen" value="%screen%" />
+<input type="hidden" name="taxonomy" value="%taxonomy%" />
+<input type="hidden" name="post_type" value="post" />
+	<input type="hidden" id="_wpnonce_add-tag" name="_wpnonce_add-tag" value="%nonce:add-tag%" /><input type="hidden" name="_wp_http_referer" value="%referer%" />
+<div class="form-field form-required term-name-wrap">
+	<label for="tag-name">Name</label>
+	<input name="tag-name" id="tag-name" type="text" value="" size="40" aria-required="true" aria-describedby="name-description" />
+	<p id="name-description">The name is how it appears on your site.</p>
+</div>
+<div class="form-field term-slug-wrap">
+	<label for="tag-slug">Slug</label>
+	<input name="slug" id="tag-slug" type="text" value="" size="40" aria-describedby="slug-description" />
+	<p id="slug-description">The &#8220;slug&#8221; is the URL-friendly version of the name. It is usually all lowercase and contains only letters, numbers, and hyphens.</p>
+</div>
+%parent%	<div class="form-field term-description-wrap">
+	<label for="tag-description">Description</label>
+	<textarea name="description" id="tag-description" rows="5" cols="40" aria-describedby="description-description"></textarea>
+	<p id="description-description">The description is not prominent by default; however, some themes may show it.</p>
+</div>
+
+		<p class="submit">
+		<input type="submit" name="submit" id="submit" class="button button-primary" value="%add%"  />		<span class="spinner"></span>
+	</p>
+	</form></div>
+</div>
+</div><!-- /col-left -->
+
+<div id="col-right">
+<div class="col-wrap">
+
+
+<form id="posts-filter" method="post">
+<input type="hidden" name="taxonomy" value="%taxonomy%" />
+<input type="hidden" name="post_type" value="post" />
+
+%list%
+</form>
+
+%notes%</div>
+</div><!-- /col-right -->
+
+</div><!-- /col-container -->
+
+</div><!-- /wrap -->
+
+%focus%
+		<form method="get">
+		<table style="display: none"><tbody id="inlineedit">
+
+			<tr id="inline-edit" class="inline-edit-row" style="display: none">
+			<td colspan="%columns%" class="colspanchange">
+			<div class="inline-edit-wrapper">
+
+			<fieldset>
+				<legend class="inline-edit-legend">Quick Edit</legend>
+				<div class="inline-edit-col">
+				<label>
+					<span class="title">Name</span>
+					<span class="input-text-wrap"><input type="text" name="name" class="ptitle" value="" /></span>
+				</label>
+
+				<label>
+					<span class="title">Slug</span>
+					<span class="input-text-wrap"><input type="text" name="slug" class="ptitle" value="" /></span>
+				</label>
+				</div>
+			</fieldset>
+
+			
+			<div class="inline-edit-save submit">
+				<button type="button" class="save button button-primary">%update%</button>
+				<button type="button" class="cancel button">Cancel</button>
+				<span class="spinner"></span>
+
+				<input type="hidden" id="_inline_edit" name="_inline_edit" value="%nonce:taxinlineeditnonce%" />				<input type="hidden" name="taxonomy" value="%taxonomy%" />
+				<input type="hidden" name="post_type" value="post" />
+
+				<div class="notice notice-error notice-alt inline hidden"><p class="error"></p></div>			</div>
+			</div>
+
+			</td></tr>
+
+		</tbody></table>
+		</form>
+		

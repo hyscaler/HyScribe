@@ -48,6 +48,8 @@ pub struct Screen<'a> {
     pub pagenow: &'a str,
     /// `$typenow`, the post type it lists or edits.
     pub typenow: &'a str,
+    /// The taxonomy it lists, if any.
+    pub taxonomy: &'a str,
     /// `$parent_file`, if the screen sets one. PHP checks access before the
     /// screen's file runs, so the check starts without it.
     pub parent_file: Option<&'a str>,

@@ -399,3 +399,73 @@ pub fn table_description(columns: &[Column], order: &Order) -> String {
             )
         })
 }
+
+/// `template` with each `%name%` of `values` filled in one pass, so no
+/// value's text is read as a placeholder.
+pub fn fill(template: &str, values: &[(&str, String)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some((before, after)) = rest.split_once('%') {
+        out.push_str(before);
+        let found = values
+            .iter()
+            .find_map(|(name, value)| Some((value, after.strip_prefix(name)?.strip_prefix('%')?)));
+        match found {
+            Some((value, tail)) => {
+                out.push_str(value);
+                rest = tail;
+            }
+            None => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+const SCREEN_OPTIONS: &str = include_str!("list_table/screen-options.html");
+
+/// `render_screen_options()` of a list: a box for each column but the
+/// check boxes and the primary one, `hidden` ones unchecked, the number per
+/// page saved as `option`, then `view_mode`'s fields.
+pub fn screen_options(
+    columns: &[Column],
+    hidden: &[String],
+    option: &str,
+    per_page: u64,
+    view_mode: &str,
+    nonce: String,
+) -> String {
+    let primary = columns
+        .iter()
+        .find(|column| column.key != "cb")
+        .map(|column| column.key);
+    let labels: String = columns
+        .iter()
+        .filter(|column| column.key != "cb" && Some(column.key) != primary)
+        .map(|column| {
+            let key = column.key;
+            let checked = if hidden.iter().any(|h| h == key) {
+                ""
+            } else {
+                " checked='checked'"
+            };
+            format!(
+                "<label><input class=\"hide-column-tog\" name=\"{key}-hide\" type=\"checkbox\" id=\"{key}-hide\" value=\"{key}\"{checked} />{}</label>\n",
+                String::from_utf8_lossy(&hyscribe_kses::wp_strip_all_tags(column.label.as_bytes(), false))
+            )
+        })
+        .collect();
+    fill(
+        SCREEN_OPTIONS,
+        &[
+            ("labels", labels),
+            ("option", option.into()),
+            ("per_page", per_page.to_string()),
+            ("view_mode", view_mode.into()),
+            ("nonce", nonce),
+        ],
+    )
+}

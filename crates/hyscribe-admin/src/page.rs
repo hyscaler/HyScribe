@@ -469,6 +469,9 @@ fn body(site: &dyn PageSite, page: &Page, color: &str, browser: &Browser) -> Str
     if !page.screen.typenow.is_empty() {
         classes.push_str(&format!(" post-type-{}", page.screen.typenow));
     }
+    if !page.screen.taxonomy.is_empty() {
+        classes.push_str(&format!(" taxonomy-{}", page.screen.taxonomy));
+    }
     let template = sanitize_html_class(site.template().as_bytes(), b"");
     let mobile = if browser.is_mobile() { " mobile" } else { "" };
     classes.push_str(&format!(

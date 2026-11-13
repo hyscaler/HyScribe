@@ -21,6 +21,7 @@ fn screen(user: &Role, file: &str) -> (Screen<'static>, Vec<&'static str>) {
     let screen = |pagenow, typenow, parent_file, submenu_file| Screen {
         pagenow,
         typenow,
+        taxonomy: "",
         parent_file: Some(parent_file).filter(|p: &&str| !p.is_empty()),
         submenu_file,
     };
@@ -225,6 +226,7 @@ fn dashboard() -> Screen<'static> {
     Screen {
         pagenow: "index.php",
         typenow: "",
+        taxonomy: "",
         parent_file: Some("index.php"),
         submenu_file: None,
     }
@@ -294,6 +296,7 @@ fn a_denied_page_under_its_parent() {
     let screen = Screen {
         pagenow: "tools.php",
         typenow: "",
+        taxonomy: "",
         parent_file: Some("tools.php"),
         submenu_file: None,
     };
@@ -309,6 +312,7 @@ fn screen_of(
     Screen {
         pagenow,
         typenow,
+        taxonomy: "",
         parent_file: Some(parent_file).filter(|p| !p.is_empty()),
         submenu_file: None,
     }

@@ -5,21 +5,12 @@
 		%labels%		</fieldset>
 				<fieldset class="screen-options">
 		<legend>Pagination</legend>
-							<label for="edit_%type%_per_page">Number of items per page:</label>
+							<label for="%option%">Number of items per page:</label>
 				<input type="number" step="1" min="1" max="999" class="screen-per-page small-text" name="wp_screen_options[value]"
-					id="edit_%type%_per_page"
+					id="%option%"
 					value="%per_page%" />
-							<input type="hidden" name="wp_screen_options[option]" value="edit_%type%_per_page" />
-		</fieldset>
-				<fieldset class="metabox-prefs view-mode">
-			<legend>View mode</legend>
-			<label for="list-view-mode">
-				<input id="list-view-mode" type="radio" name="mode" value="list" %list% />
-				Compact view			</label>
-			<label for="excerpt-view-mode">
-				<input id="excerpt-view-mode" type="radio" name="mode" value="excerpt" %excerpt% />
-				Extended view			</label>
-		</fieldset>
+							<input type="hidden" name="wp_screen_options[option]" value="%option%" />
+%view_mode%		</fieldset>
 		<p class="submit"><input type="submit" name="screen-options-apply" id="screen-options-apply" class="button button-primary" value="Apply"  /></p>
 <input type="hidden" id="screenoptionnonce" name="screenoptionnonce" value="%nonce%" />
 </form>

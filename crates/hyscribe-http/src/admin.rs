@@ -16,6 +16,7 @@ use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
 use hyscribe_admin::posts::{Answer, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids};
+use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
 use hyscribe_db::{StatusOrder, StatusQuery};
 use hyscribe_model::{Post, PostQuery, Term, TermOrder, TermQuery, User};
@@ -199,8 +200,8 @@ impl CapabilityData for Admin<'_> {
     fn comment_post(&self, _: u64) -> Option<u64> {
         None
     }
-    fn term_taxonomy(&self, _: u64) -> Option<String> {
-        None
+    fn term_taxonomy(&self, id: u64) -> Option<String> {
+        self.reads.reads.wait(self.site.db.term_taxonomy(id))
     }
     fn constant(&self, name: &str) -> bool {
         self.reads.constant(name)
@@ -488,6 +489,38 @@ impl PostsSite for Admin<'_> {
     }
 }
 
+impl TermsSite for Admin<'_> {
+    fn can_term(&self, cap: &str, term: &Term) -> bool {
+        self.can_for(cap, term.id)
+    }
+    fn term_link(&self, term: &Term, taxonomy: &str) -> String {
+        let link = hyscribe_render::permalinks::term_link(&self.reads.reads, taxonomy, term);
+        String::from_utf8_lossy(&link).into_owned()
+    }
+}
+
+/// The terms list's arguments: its taxonomy and page so far; `None` for others.
+fn term_args(request_uri: &str) -> Option<TermArgs> {
+    let query = request_uri.split_once('?').map_or("", |(_, query)| query);
+    let args = parse_str(query.as_bytes());
+    let (mut taxonomy, mut paged) = (None, None);
+    for (key, value) in args.as_array().unwrap_or_default() {
+        match (key, value) {
+            (Key::String(key), Value::String(value)) if key == b"taxonomy" => {
+                taxonomy = Some(Terms::named(value)?);
+            }
+            (Key::String(key), Value::String(value)) if key == b"paged" => {
+                paged = Some(String::from_utf8(value.clone()).ok()?);
+            }
+            _ => return None,
+        }
+    }
+    Some(TermArgs {
+        taxonomy: taxonomy?,
+        paged,
+    })
+}
+
 /// The headers of an admin screen: `nocache_headers()` and
 /// `send_frame_options_header()`; every response has `wp_admin_headers()`'s.
 fn screen_headers() -> Vec<(header::HeaderName, String)> {
@@ -631,6 +664,16 @@ fn screen(
         "/hs-admin/" | "/hs-admin/index" => {
             dashboard(admin, &canonical, origin, request_uri, browser)
         }
+        "/hs-admin/edit-tags" => {
+            let args = term_args(request_uri)?;
+            match edit_tags(admin, &args, &canonical, origin, request_uri, browser) {
+                Answer::Denied(message) => return Some(denied(admin, message)),
+                Answer::Redirect(to) => {
+                    return Some(redirect(screen_headers(), to.as_bytes()));
+                }
+                Answer::Page(html) => Some(html),
+            }
+        }
         "/hs-admin/edit" => {
             let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
             let args = list_args(admin, &raw)?;
@@ -639,7 +682,7 @@ fn screen(
                     return Some(redirect(screen_headers(), to.as_bytes()));
                 }
                 Some(Answer::Page(html)) => Some(html),
-                None => None,
+                _ => None,
             }
         }
         _ => return None,
@@ -647,15 +690,14 @@ fn screen(
     Some(match page {
         Some(html) => response(StatusCode::OK, screen_headers(), html.into_bytes()),
         // `wp_die()` from `wp-admin/includes/menu.php`.
-        None => {
-            let body = hyscribe_admin::die::page(
-                admin.reads.public(),
-                "WordPress &rsaquo; Error",
-                "Sorry, you are not allowed to access this page.",
-            );
-            response(StatusCode::FORBIDDEN, screen_headers(), body)
-        }
+        None => denied(admin, "Sorry, you are not allowed to access this page."),
     })
+}
+
+/// `wp_die( $message, 403 )` on an admin screen.
+fn denied(admin: &Admin, message: &str) -> Response {
+    let body = hyscribe_admin::die::page(admin.reads.public(), "WordPress &rsaquo; Error", message);
+    response(StatusCode::FORBIDDEN, screen_headers(), body)
 }
 
 fn answer(

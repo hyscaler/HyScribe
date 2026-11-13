@@ -464,6 +464,27 @@ impl Db {
         row.as_ref().map(term).transpose()
     }
 
+    /// The taxonomy of term `id`, as `get_term( $id )` finds it: none when
+    /// no taxonomy or more than one has it.
+    pub async fn term_taxonomy(&self, id: u64) -> Result<Option<String>, DbError> {
+        let sql = self.prefix.sql(concat!(
+            "SELECT tt.taxonomy FROM {prefix}term_taxonomy AS tt ",
+            "INNER JOIN {prefix}terms AS t ON t.term_id = tt.term_id ",
+            "WHERE tt.term_id = ? LIMIT 2"
+        ));
+        let rows = sqlx::query(sql)
+            .bind(id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        let [row] = rows.as_slice() else {
+            return Ok(None);
+        };
+        let mut c = Columns::new(row);
+        let taxonomy = c.text("taxonomy");
+        c.finish(taxonomy).map(Some)
+    }
+
     /// `get_the_terms( $post_id, $taxonomy )`: ordered by name, as
     /// `wp_get_object_terms()` orders them.
     pub async fn post_terms(&self, post_id: u64, taxonomy: &str) -> Result<Vec<Term>, DbError> {

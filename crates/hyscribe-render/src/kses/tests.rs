@@ -131,3 +131,14 @@ fn many_attribute_keys_filter_in_linear_time() {
         clean.get(..200).unwrap_or_default()
     );
 }
+
+/// `wp_kses_data()` keeps `$allowedtags` only, with their attributes.
+#[test]
+fn data_keeps_the_allowed_tags() {
+    assert_eq!(
+        wp_kses_data(
+            b"<b>x</b><script>y</script><a href=\"https://h.test/\" onclick=\"z\">l</a><p>p</p>"
+        ),
+        b"<b>x</b>y<a href=\"https://h.test/\">l</a>p"
+    );
+}

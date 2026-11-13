@@ -146,6 +146,25 @@ fn value(input: &[u8]) -> Result<(SqlValue, &[u8]), String> {
     }
 }
 
+/// `page` with each `wp-admin` path after `from` put under `to`, without
+/// `.php` before the first of `stops`.
+fn admin_paths(page: &str, from: &str, to: &str, stops: &[char]) -> String {
+    let mut out = String::new();
+    let mut rest = page;
+    while let Some(at) = rest.find(from) {
+        let (head, tail) = rest.split_at(at);
+        out.push_str(head);
+        out.push_str(to);
+        let tail = tail.get(from.len()..).unwrap_or_default();
+        let end = tail.find(stops).unwrap_or(tail.len());
+        let (file, tail) = tail.split_at(end);
+        out.push_str(file.strip_suffix(".php").unwrap_or(file));
+        rest = tail;
+    }
+    out.push_str(rest);
+    out
+}
+
 /// The PHP oracle's page under hs-admin's URLs, without the update notice
 /// hs-admin leaves out until an open question is decided.
 pub fn hs_admin_page(page: &str) -> String {
@@ -157,20 +176,15 @@ pub fn hs_admin_page(page: &str) -> String {
         ),
         None => page.to_string(),
     };
-    let mut out = String::new();
-    let mut rest = page.as_str();
-    while let Some(at) = rest.find("/wp-admin/") {
-        let (head, tail) = rest.split_at(at);
-        out.push_str(head);
-        out.push_str("/hs-admin/");
-        let tail = tail.get(10..).unwrap_or_default();
-        let end = tail.find(['\'', '?', '"']).unwrap_or(tail.len());
-        let (file, tail) = tail.split_at(end);
-        out.push_str(file.strip_suffix(".php").unwrap_or(file));
-        rest = tail;
-    }
-    out.push_str(rest);
-    let mut page = out.replace("/wp-login.php", "/hs-login");
+    // Paths plain and URL-encoded, as a `wp_http_referer` carries them.
+    let page = admin_paths(&page, "/wp-admin/", "/hs-admin/", &['\'', '?', '"']);
+    let encoded = admin_paths(
+        &page,
+        "%2Fwp-admin%2F",
+        "%2Fhs-admin%2F",
+        &['%', '\'', '"', '&'],
+    );
+    let mut page = encoded.replace("/wp-login.php", "/hs-login");
     for prefix in ["href='", "href=\"", "\"url\":\""] {
         let mut out = String::new();
         let mut rest = page.as_str();
@@ -265,6 +279,10 @@ mod tests {
             ""
         );
         assert_eq!(hs_admin_page("plain"), "plain");
+        assert_eq!(
+            hs_admin_page("r=%2Fwp-admin%2Fedit-tags.php%3Ft r=%2Fwp-admin%2Fx.php"),
+            "r=%2Fhs-admin%2Fedit-tags%3Ft r=%2Fhs-admin%2Fx"
+        );
     }
 
     #[test]

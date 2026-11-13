@@ -5,7 +5,8 @@
 // 1's, with the capabilities of the role in the hyscribe_role cookie (set
 // before core's own user_has_cap filters add to them), on a
 // site with HyScribe's constants: no file changes from the browser
-// (DISALLOW_FILE_MODS) and no unfiltered HTML. It writes nothing.
+// (DISALLOW_FILE_MODS) and no unfiltered HTML. It writes nothing,
+// and offers no WordPress update, which hs-admin does not show.
 define( 'DISALLOW_FILE_MODS', true );
 define( 'DISALLOW_UNFILTERED_HTML', true );
 
@@ -19,3 +20,11 @@ add_filter( 'user_has_cap', function ( $allcaps ) {
 	$role = get_role( isset( $_COOKIE['hyscribe_role'] ) ? $_COOKIE['hyscribe_role'] : 'administrator' );
 	return $role ? $role->capabilities : array();
 }, 0 );
+
+add_filter( 'pre_site_transient_update_core', function () {
+	return (object) array(
+		'updates'         => array(),
+		'version_checked' => $GLOBALS['wp_version'],
+		'last_checked'    => time(),
+	);
+} );

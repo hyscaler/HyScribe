@@ -8,6 +8,7 @@
 #   wordpress/wp-includes/blocks/registry.json      the registered block types
 #   wordpress/wp-includes/blocks/registered.json    their block.json, in registration order
 #   wordpress/wp-includes/kses-post.json            wp_kses_allowed_html( 'post' )
+#   wordpress/wp-includes/kses-data.json            wp_kses_allowed_html( 'data' )
 #   wordpress/wp-includes/mime-types.json           get_allowed_mime_types() for a visitor
 #   wordpress/wp-includes/capabilities.json         the post types', taxonomies' and statuses' capability data
 #   wordpress/wp-includes/dependencies.json         the styles and scripts load-styles.php and load-scripts.php serve
@@ -68,12 +69,14 @@ mkdir -p "$OUT"
 # placeholder: the REST root, admin URLs, other site URLs, the REST nonce,
 # user-profile's user ID and nonce, and utils' user ID and time.
 "$DOCKER" exec "$NAME" php -r 'define( "WP_ADMIN", true ); require "/var/www/html/wp-load.php"; $out = array(); foreach ( array( "styles" => wp_styles(), "scripts" => wp_scripts() ) as $kind => $registry ) { foreach ( $registry->registered as $handle => $item ) { $out[ $kind ][ $handle ] = array( "src" => $item->src, "deps" => $item->deps, "ver" => $item->ver, "args" => $item->args, "extra" => $item->extra, "textdomain" => $item->textdomain ); } ksort( $out[ $kind ] ); } $out["scripts"]["user-profile"]["extra"]["data"] = str_replace( array( "\"user_id\":\"0\"", wp_create_nonce( "reset-password-for-0" ) ), array( "\"user_id\":\"%user_id%\"", "%nonce:reset-password-for-user%" ), $out["scripts"]["user-profile"]["extra"]["data"] ); $out["scripts"]["utils"]["extra"]["data"] = preg_replace( array( "/\"uid\":\"0\"/", "/\"time\":\"\\d+\"/" ), array( "\"uid\":\"%user_id%\"", "\"time\":\"%time%\"" ), $out["scripts"]["utils"]["extra"]["data"] ); $json = json_encode( $out, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ); $json = str_replace( array( rest_url(), admin_url(), "\\\"" . admin_url( "", "relative" ), site_url(), wp_create_nonce( "wp_rest" ) ), array( "%rest_url%", "%admin_url%", "\\\"%admin_path%", "%site_url%", "%nonce:wp_rest%" ), $json ); echo $json, "\n";' > "$OUT/wp-includes/registry.json"
-# The tags and attributes wp_kses_post() allows.
-"$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; echo wp_json_encode( wp_kses_allowed_html( "post" ), JSON_UNESCAPED_SLASHES );' > "$OUT/wp-includes/kses-post.json"
+# The tags and attributes wp_kses_post() and wp_kses_data() allow.
+for context in post data; do
+  "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; echo wp_json_encode( wp_kses_allowed_html( $argv[1] ), JSON_UNESCAPED_SLASHES );' "$context" > "$OUT/wp-includes/kses-$context.json"
+done
 cat > "$OUT/README.md" <<'README'
 # WordPress core data
 
-Files from WordPress core that HyScribe uses as data: the core `theme.json`, every core block's `block.json`, the block types as WordPress registers them (`blocks/registry.json`) and their `block.json` in registration order (`blocks/registered.json`), the tags and attributes `wp_kses_post()` allows (`kses-post.json`), the MIME types a visitor may upload (`mime-types.json`), the capability data of the post types, taxonomies and post statuses (`capabilities.json`), the styles and scripts the admin's concatenating loaders serve (`dependencies.json`), the styles and scripts an admin request registers with placeholders for its URLs and nonces (`registry.json`), the registered script modules (`script-modules.json`), the registered icons' sanitized SVG (`icons.json`), the block library and skip link styles, the emoji detection script, and the embed template's style and scripts. Exported by `reference/wordpress/export.sh` from the pinned version in `VERSION`. Never edit by hand.
+Files from WordPress core that HyScribe uses as data: the core `theme.json`, every core block's `block.json`, the block types as WordPress registers them (`blocks/registry.json`) and their `block.json` in registration order (`blocks/registered.json`), the tags and attributes `wp_kses_post()` and `wp_kses_data()` allow (`kses-post.json`, `kses-data.json`), the MIME types a visitor may upload (`mime-types.json`), the capability data of the post types, taxonomies and post statuses (`capabilities.json`), the styles and scripts the admin's concatenating loaders serve (`dependencies.json`), the styles and scripts an admin request registers with placeholders for its URLs and nonces (`registry.json`), the registered script modules (`script-modules.json`), the registered icons' sanitized SVG (`icons.json`), the block library and skip link styles, the emoji detection script, and the embed template's style and scripts. Exported by `reference/wordpress/export.sh` from the pinned version in `VERSION`. Never edit by hand.
 
 License: GPL-2.0-or-later, as WordPress (ADR 0004).
 README

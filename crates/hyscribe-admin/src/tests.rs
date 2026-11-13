@@ -150,6 +150,11 @@ impl Role {
         ["posts", "hidden", "excerpt", "front"].contains(&self.variant())
     }
 
+    /// A variant of `reference/terms-list/golden.sh` over its content.
+    fn terms_content(&self) -> bool {
+        ["terms", "paged", "stale"].contains(&self.variant())
+    }
+
     /// The posts and pages of the variant.
     fn posts(&self) -> Vec<hyscribe_model::Post> {
         crate::posts::content::posts(self.listing(), self.variant() == "empty")
@@ -211,11 +216,31 @@ impl CapabilityData for Role {
     fn comment_post(&self, _: u64) -> Option<u64> {
         None
     }
-    fn term_taxonomy(&self, _: u64) -> Option<String> {
-        None
+    fn term_taxonomy(&self, id: u64) -> Option<String> {
+        ["category", "post_tag", "post_format"]
+            .into_iter()
+            .find(|taxonomy| {
+                crate::posts::PostsSite::terms(self, taxonomy)
+                    .iter()
+                    .any(|term| term.id == id)
+            })
+            .map(String::from)
     }
     fn constant(&self, name: &str) -> bool {
         name == "DISALLOW_UNFILTERED_HTML"
+    }
+}
+
+impl crate::terms::TermsSite for Role {
+    fn can_term(&self, cap: &str, term: &hyscribe_model::Term) -> bool {
+        let id = hyscribe_phpser::Value::Int(i64::try_from(term.id).unwrap());
+        Capabilities::load(self, "wp_", 1).has_cap(self, cap, &[id])
+    }
+    fn term_link(&self, term: &hyscribe_model::Term, taxonomy: &str) -> String {
+        match taxonomy {
+            "category" => format!("{SITE}/?cat={}", term.id),
+            _ => format!("{SITE}/?tag={}", String::from_utf8_lossy(&term.slug)),
+        }
     }
 }
 
@@ -542,6 +567,9 @@ impl crate::posts::PostsSite for Role {
                 return Some(value.to_vec());
             }
         }
+        if name == "category_children" && self.variant() == "stale" {
+            return Some(b"a:0:{}".to_vec());
+        }
         if name == "show_avatars" && self.variant() == "noavatars"
             || name == "blog_public" && self.variant() == "layout"
         {
@@ -599,6 +627,9 @@ impl crate::posts::PostsSite for Role {
         hyscribe_render::wp_trim_words(&post.content, 55, b" [&hellip;]")
     }
     fn terms(&self, taxonomy: &str) -> Vec<hyscribe_model::Term> {
+        if self.terms_content() {
+            return crate::terms::content::terms(taxonomy);
+        }
         if self.listing() {
             return crate::posts::content::terms(taxonomy);
         }
@@ -626,6 +657,16 @@ impl crate::posts::PostsSite for Role {
             let value: &[u8] = match name {
                 "manageedit-postcolumnshidden" => b"a:2:{i:0;s:4:\"tags\";i:1;s:8:\"comments\";}",
                 "edit_post_per_page" | "edit_page_per_page" => b"3",
+                _ => return None,
+            };
+            return Some(value.to_vec());
+        }
+        if self.variant() == "paged" {
+            let value: &[u8] = match name {
+                "edit_category_per_page" | "edit_post_tag_per_page" => b"3",
+                "manageedit-categorycolumnshidden" | "manageedit-post_tagcolumnshidden" => {
+                    b"a:1:{i:0;s:11:\"description\";}"
+                }
                 _ => return None,
             };
             return Some(value.to_vec());

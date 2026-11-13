@@ -12,6 +12,7 @@ use hyscribe_phpser::{
 };
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::{convert_chars, ent2ncr, sanitize_text_field, wptexturize};
+use hyscribe_render::kses::wp_kses_data;
 use hyscribe_render::post::admin_title;
 use hyscribe_render::post::post_format_string;
 use hyscribe_render::{Walk, number_format, order_by, sticky_posts, walk, wp_trim_words};
@@ -19,8 +20,9 @@ use hyscribe_render::{Walk, number_format, order_by, sticky_posts, walk, wp_trim
 use crate::admin_bar::BarSite;
 use crate::admin_bar::Browser;
 use crate::list_table::{
-    Column, Order, Sort, View, bulk_actions, column_headers, months_dropdown, pagination,
-    row_actions, search_box, selected as selected_if, table_description, views,
+    Column, Order, Sort, View, bulk_actions, column_headers, fill, months_dropdown, pagination,
+    row_actions, screen_options as list_screen_options, search_box, selected as selected_if,
+    table_description, views,
 };
 use crate::menu::Screen;
 use crate::menu::esc_link;
@@ -549,11 +551,11 @@ fn column_author(site: &dyn PostsSite, post: &Post) -> String {
     }
 }
 
-/// A term's name through the admin's `term_name` display filters, short
-/// of `wp_kses_data()`; their `esc_html()` covers `column_default()`'s.
-fn term_name(name: &[u8]) -> String {
+/// A term's name through the admin's `term_name` display filters; their
+/// `esc_html()` covers `column_default()`'s.
+pub(crate) fn term_name(name: &[u8]) -> String {
     esc_html(&convert_chars(&wptexturize(
-        &sanitize_text_field(name),
+        &wp_kses_data(&sanitize_text_field(name)),
         &[],
     )))
 }
@@ -915,31 +917,6 @@ fn templates_select(templates: &[(String, String)], bulk: bool) -> String {
     )
 }
 
-/// `template` with each `%name%` of `values` filled in one pass, so no
-/// value's text is read as a placeholder.
-fn fill(template: &str, values: &[(&str, String)]) -> String {
-    let mut out = String::with_capacity(template.len());
-    let mut rest = template;
-    while let Some((before, after)) = rest.split_once('%') {
-        out.push_str(before);
-        let found = values
-            .iter()
-            .find_map(|(name, value)| Some((value, after.strip_prefix(name)?.strip_prefix('%')?)));
-        match found {
-            Some((value, tail)) => {
-                out.push_str(value);
-                rest = tail;
-            }
-            None => {
-                out.push('%');
-                rest = after;
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
 const INLINE_CATEGORIES: &str = include_str!("posts/inline/categories.html");
 const INLINE_TAGS: &str = include_str!("posts/inline/tags.html");
 const INLINE_PINGS: &str = include_str!("posts/inline/pings.html");
@@ -1285,20 +1262,12 @@ fn status_views(listing: &Listing) -> Vec<View> {
     links
 }
 
-/// `wp_dropdown_categories()` of the category filter, all of them by name,
-/// `selected` the `cat` query var.
-fn categories_dropdown(site: &dyn PostsSite, selected: &str) -> String {
-    let terms = site.terms("category");
-    let mut out = String::from(
-        "<label class=\"screen-reader-text\" for=\"cat\">Filter by category</label><select  name='cat' id='cat' class='postform'>\n",
-    );
-    // The default category is always there.
-    let all = selected_if(selected == "0");
-    out.push_str(&format!(
-        "\t<option value='0'{all}>All Categories</option>\n"
-    ));
+/// The options of `wp_dropdown_categories()` for `terms` as a tree, the
+/// term `selected` marked.
+pub(crate) fn term_options(terms: &[Term], selected: &str) -> String {
+    let mut out = String::new();
     let mut depth = 0;
-    walk(&terms, true, &mut |event| match event {
+    walk(terms, true, &mut |event| match event {
         Walk::Start(term) => out.push_str(&format!(
             "\t<option class=\"level-{depth}\" value=\"{}\"{}>{}{}</option>\n",
             term.id,
@@ -1319,6 +1288,22 @@ fn categories_dropdown(site: &dyn PostsSite, selected: &str) -> String {
         }
         Walk::End => {}
     });
+    out
+}
+
+/// `wp_dropdown_categories()` of the category filter, all of them by name,
+/// `selected` the `cat` query var.
+fn categories_dropdown(site: &dyn PostsSite, selected: &str) -> String {
+    let terms = site.terms("category");
+    let mut out = String::from(
+        "<label class=\"screen-reader-text\" for=\"cat\">Filter by category</label><select  name='cat' id='cat' class='postform'>\n",
+    );
+    // The default category is always there.
+    let all = selected_if(selected == "0");
+    out.push_str(&format!(
+        "\t<option value='0'{all}>All Categories</option>\n"
+    ));
+    out.push_str(&term_options(&terms, selected));
     out.push_str("</select>\n");
     out
 }
@@ -1613,10 +1598,10 @@ fn help(kind: PostType) -> (Vec<HelpTab<'static>>, &'static str) {
     )
 }
 
-const SCREEN_OPTIONS: &str = include_str!("posts/screen-options.html");
+const VIEW_MODE: &str = include_str!("posts/view-mode.html");
 
-/// `render_screen_options()`: the columns the user may hide, `hidden` ones
-/// unchecked, and the number of posts of `kind` per page.
+/// `render_screen_options()`: the columns, `hidden` ones unchecked, the
+/// number of posts of `kind` per page and the view `mode`.
 fn screen_options(
     site: &dyn PostsSite,
     kind: PostType,
@@ -1632,36 +1617,25 @@ fn screen_options(
             ""
         }
     };
-    let labels: String = columns
-        .iter()
-        .filter(|column| !["cb", "title"].contains(&column.key))
-        .map(|column| {
-            let key = column.key;
-            let checked = if hidden.iter().any(|h| h == key) {
-                ""
-            } else {
-                " checked='checked'"
-            };
-            format!(
-                "<label><input class=\"hide-column-tog\" name=\"{key}-hide\" type=\"checkbox\" id=\"{key}-hide\" value=\"{key}\"{checked} />{}</label>\n",
-                text(&hyscribe_kses::wp_strip_all_tags(column.label.as_bytes(), false))
-            )
-        })
-        .collect();
-    SCREEN_OPTIONS
-        .replace("%labels%", &labels)
-        .replace("%per_page%", &per_page.to_string())
-        .replace("%type%", kind.name)
+    let view_mode = VIEW_MODE
         .replace("%list%", checked("list"))
-        .replace("%excerpt%", checked("excerpt"))
-        .replace("%nonce%", &site.nonce("screen-options-nonce"))
+        .replace("%excerpt%", checked("excerpt"));
+    list_screen_options(
+        columns,
+        hidden,
+        &format!("edit_{}_per_page", kind.name),
+        per_page,
+        &view_mode,
+        site.nonce("screen-options-nonce"),
+    )
 }
 
-/// `get_hidden_columns()`: the columns of the list of `kind` the user hid,
+/// `get_hidden_columns()`: the columns of screen `screen` the user hid,
 /// none by default.
-fn hidden_columns(site: &dyn PostsSite, kind: PostType) -> Vec<String> {
-    let option = format!("manageedit-{}columnshidden", kind.name);
-    let stored = site.user_option(&option).unwrap_or_default();
+pub(crate) fn hidden_columns(site: &dyn PostsSite, screen: &str) -> Vec<String> {
+    let stored = site
+        .user_option(&format!("manage{screen}columnshidden"))
+        .unwrap_or_default();
     match maybe_unserialize(&stored) {
         Maybe::Value(Value::Array(items)) => items
             .iter()
@@ -1671,10 +1645,9 @@ fn hidden_columns(site: &dyn PostsSite, kind: PostType) -> Vec<String> {
     }
 }
 
-/// `edit_{$post_type}_per_page`, 20 unless the user chose a number.
-fn per_page(site: &dyn PostsSite, kind: PostType) -> u64 {
-    let option = format!("edit_{}_per_page", kind.name);
-    let stored = Value::String(site.user_option(&option).unwrap_or_default()).to_int();
+/// The number per page the user chose as `option`, 20 by default.
+pub(crate) fn per_page(site: &dyn PostsSite, option: &str) -> u64 {
+    let stored = Value::String(site.user_option(option).unwrap_or_default()).to_int();
     u64::try_from(stored).ok().filter(|n| *n > 0).unwrap_or(20)
 }
 
@@ -1959,6 +1932,8 @@ pub enum Answer {
     Page(String),
     /// A `302` to this URL.
     Redirect(String),
+    /// `wp_die()`'s `403` with this message.
+    Denied(&'static str),
 }
 
 /// `get_user_setting( $name )`: from the settings cookie when sent, else
@@ -2022,7 +1997,7 @@ pub fn edit(
             .as_deref()
             .is_none_or(|all| is_empty_string(all.as_bytes()))
         && !args.show_sticky;
-    let per_page = per_page(site, kind);
+    let per_page = per_page(site, &format!("edit_{}_per_page", kind.name));
     let author_ids = author_ids(author);
     let (authors, excluded_authors) = if own_only {
         (vec![site.user_id()], Vec::new())
@@ -2112,7 +2087,7 @@ pub fn edit(
         search: args.search.clone(),
         mode: view_mode(site, args),
     };
-    let hidden = hidden_columns(site, kind);
+    let hidden = hidden_columns(site, &format!("edit-{}", kind.name));
     let hidden_keys: Vec<&str> = hidden.iter().map(String::as_str).collect();
     let content = list_content(site, &listing, &hidden_keys, canonical, request_uri);
     let columns = columns(kind, filter, args.orderby.is_some());
@@ -2128,6 +2103,7 @@ pub fn edit(
         screen: Screen {
             pagenow: "edit.php",
             typenow: kind.name,
+            taxonomy: "",
             parent_file: Some(&file),
             submenu_file: Some(&file),
         },

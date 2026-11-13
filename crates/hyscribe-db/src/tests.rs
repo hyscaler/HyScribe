@@ -350,6 +350,16 @@ async fn connections_are_read_only() {
 }
 
 #[tokio::test]
+async fn a_term_s_taxonomy_is_its_only_one() {
+    let db = Db::connect(&fixture_config()).await.unwrap();
+    assert_eq!(
+        db.term_taxonomy(1).await.unwrap().as_deref(),
+        Some("category")
+    );
+    assert_eq!(db.term_taxonomy(999_999).await.unwrap(), None);
+}
+
+#[tokio::test]
 async fn errors_are_reported() {
     // Every query fails against tables that do not exist.
     let mut config = fixture_config();
@@ -372,6 +382,7 @@ async fn errors_are_reported() {
         db.post_meta(1, "x").await.unwrap_err(),
         db.post_terms(1, "category").await.unwrap_err(),
         db.term(1, "category").await.unwrap_err(),
+        db.term_taxonomy(1).await.unwrap_err(),
         db.user(1).await.unwrap_err(),
         db.credentials(UserField::Login, b"admin")
             .await

@@ -59,6 +59,12 @@ static POST: LazyLock<AllowedHtml> = LazyLock::new(|| {
     ))
 });
 
+static DATA: LazyLock<AllowedHtml> = LazyLock::new(|| {
+    AllowedHtml::from_json(include_bytes!(
+        "../../../wordpress/wp-includes/kses-data.json"
+    ))
+});
+
 /// A limit in an `$allowed_html` attribute entry.
 enum Check {
     /// `'required' => true`: the tag goes without this attribute.
@@ -135,6 +141,11 @@ fn checks(spec: Value) -> Vec<Check> {
 /// URL, with `:port` where it has one: embedded PDFs must come from there.
 pub fn wp_kses_post(content: &[u8], upload_host: &[u8]) -> Vec<u8> {
     wp_kses(content, &POST, upload_host)
+}
+
+/// `wp_kses_data( $data )`: only the tags of `$allowedtags`.
+pub fn wp_kses_data(content: &[u8]) -> Vec<u8> {
+    wp_kses(content, &DATA, b"")
 }
 
 /// `wp_kses( $content, $allowed_html )` with the default protocols.

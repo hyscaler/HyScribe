@@ -989,6 +989,7 @@ pub fn dashboard(
         screen: Screen {
             pagenow: "index.php",
             typenow: "",
+            taxonomy: "",
             parent_file: Some("index.php"),
             submenu_file: None,
         },

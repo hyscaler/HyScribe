@@ -99,6 +99,7 @@ fn page<'a>(help: &'a [HelpTab<'a>], sidebar: &'a str, typenow: &'a str) -> Page
         screen: Screen {
             pagenow: "tools.php",
             typenow,
+            taxonomy: "",
             parent_file: None,
             submenu_file: None,
         },

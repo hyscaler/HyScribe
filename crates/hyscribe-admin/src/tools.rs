@@ -36,6 +36,7 @@ pub fn tools(
         screen: Screen {
             pagenow: "tools.php",
             typenow: "",
+            taxonomy: "",
             parent_file: None,
             submenu_file: None,
         },

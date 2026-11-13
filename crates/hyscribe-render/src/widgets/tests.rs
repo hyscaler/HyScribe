@@ -364,3 +364,148 @@ fn tag_cloud_matches_php() {
     );
     assert_eq!(golden.lines().count(), 64);
 }
+
+/// The default install with the posts, pages and reading options of a
+/// state.
+struct Paged {
+    install: crate::fixture::DefaultInstall,
+    posts: Vec<hyscribe_model::Post>,
+    options: hyscribe_phpser::Value,
+}
+
+impl Site for Paged {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        match self.options.get_str(name) {
+            Some(value) => Some(value.to_php_string()),
+            None => self.install.option(name),
+        }
+    }
+    fn home_url(&self) -> Vec<u8> {
+        self.install.home_url()
+    }
+    fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        self.posts.iter().find(|post| post.id == id).cloned()
+    }
+    fn post_terms(&self, _: u64, _: &str) -> Vec<hyscribe_model::Term> {
+        Vec::new()
+    }
+    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+    /// The published posts of the types asked for, less those excluded,
+    /// sorted by the columns the golden uses (titles compare as MySQL's
+    /// collation does for these).
+    fn query(&self, query: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
+        use hyscribe_model::OrderBy;
+        // get_pages() asks for every published page, and only those.
+        assert!(query.statuses.is_empty());
+        assert_eq!(query.limit, u32::MAX);
+        let mut posts: Vec<_> = self
+            .posts
+            .iter()
+            .filter(|post| {
+                query.post_types.contains(&post.post_type)
+                    && post.status == "publish"
+                    && !query.exclude.contains(&post.id)
+            })
+            .cloned()
+            .collect();
+        posts.sort_by(|a, b| {
+            query
+                .order
+                .iter()
+                .map(|(by, ascending)| {
+                    let order = match by {
+                        OrderBy::Title => a
+                            .title
+                            .to_ascii_lowercase()
+                            .cmp(&b.title.to_ascii_lowercase()),
+                        OrderBy::MenuOrder => a.menu_order.cmp(&b.menu_order),
+                        OrderBy::Id => a.id.cmp(&b.id),
+                        OrderBy::Date => a.date.cmp(&b.date),
+                        OrderBy::Modified => a.modified.cmp(&b.modified),
+                        other => panic!("no {other:?} order in the golden"),
+                    };
+                    if *ascending { order } else { order.reverse() }
+                })
+                .find(|order| order.is_ne())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        posts
+    }
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        Some(hyscribe_phpser::hash_hmac_md5(data, b"test-salt"))
+    }
+}
+
+/// Every case of `reference/pages-widget/golden.sh`.
+#[test]
+fn pages_match_php() {
+    let golden = include_str!("../../tests/golden/pages-widget.tsv");
+    let theme = twentytwentyfive();
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let state = hyscribe_phpser::json_decode(&unhex(f[2])).unwrap();
+        let text = |row: &hyscribe_phpser::Value, i| {
+            row.get(&hyscribe_phpser::Key::Int(i))
+                .unwrap()
+                .to_php_string()
+        };
+        let int = |row: &hyscribe_phpser::Value, i| {
+            row.get(&hyscribe_phpser::Key::Int(i)).unwrap().to_int()
+        };
+        let string = |row: &hyscribe_phpser::Value, i| String::from_utf8(text(row, i)).unwrap();
+        let site = Paged {
+            install: crate::fixture::DefaultInstall {
+                home: b"http://127.0.0.1:8081".to_vec(),
+            },
+            posts: state
+                .get_str("posts")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|(_, row)| hyscribe_model::Post {
+                    id: int(row, 0) as u64,
+                    title: text(row, 1),
+                    parent: int(row, 2) as u64,
+                    menu_order: int(row, 3),
+                    password: text(row, 4),
+                    date: string(row, 5),
+                    name: text(row, 6),
+                    post_type: string(row, 7),
+                    status: string(row, 8),
+                    modified: string(row, 9),
+                    ..hyscribe_model::Post::default()
+                })
+                .collect(),
+            options: state.get_str("options").unwrap().clone(),
+        };
+        let flag = |name| state.get_str(name).is_some_and(|v| !v.is_empty());
+        let request = Request {
+            singular: flag("singular"),
+            home: flag("home"),
+            queried_object_id: state.get_str("queried").unwrap().to_int() as u64,
+            ..Default::default()
+        };
+        let (markup, php) = (unhex(f[0]), unhex(f[3]));
+        let ours = Renderer::new(&theme, &site, &request).render(&markup);
+        if ours != php {
+            failures.push(format!(
+                "{} {}\n  php:  {:?}\n  ours: {:?}",
+                String::from_utf8_lossy(&markup),
+                f[1],
+                String::from_utf8_lossy(&php),
+                String::from_utf8_lossy(&ours)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures[..failures.len().min(2)].join("\n")
+    );
+    assert_eq!(golden.lines().count(), 136);
+}

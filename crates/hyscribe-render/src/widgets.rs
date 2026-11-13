@@ -12,7 +12,7 @@ use hyscribe_phpser::{
 use crate::archives::Format;
 use crate::autop::wpautop;
 use crate::balance::force_balance_tags;
-use crate::blocks::Block;
+use crate::blocks::{Block, is_pcre_space};
 use crate::categories::{dropdown_select, terms};
 use crate::core_blocks::calendar::request_calendar;
 use crate::core_blocks::tag_cloud::{TAXONOMIES, wp_tag_cloud};
@@ -20,6 +20,7 @@ use crate::core_blocks::{comment_author_link, comment_link, prepared};
 use crate::date;
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, wptexturize};
 use crate::head::json_hex_tag;
+use crate::pages::wp_list_pages;
 use crate::permalinks;
 use crate::post::{listed_title, the_title};
 use crate::site::{Archive, Taxonomy};
@@ -224,6 +225,7 @@ impl Renderer<'_> {
             "recent-posts" => self.recent_posts_widget(args, instance),
             "recent-comments" => self.recent_comments_widget(number, args, instance),
             "tag_cloud" => self.tag_cloud_widget(args, instance),
+            "pages" => self.pages_widget(args, instance),
             "search" => self.search_widget(args, instance),
             "custom_html" => self.custom_html_widget(args, instance),
             "meta" => self.meta_widget(args, instance),
@@ -501,6 +503,40 @@ impl Renderer<'_> {
         .concat()
     }
 
+    /// `WP_Widget_Pages::widget()`: the published pages, by menu order and
+    /// title unless the instance sorts otherwise, less those it excludes;
+    /// nothing without pages.
+    fn pages_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
+        let text = |name| {
+            instance
+                .get_str(name)
+                .filter(|value| !value.is_empty())
+                .map(Value::to_php_string)
+        };
+        let sort_column = match text("sortby") {
+            None => b"menu_order, post_title".to_vec(),
+            Some(sortby) if sortby == b"menu_order" => b"menu_order, post_title".to_vec(),
+            Some(sortby) => sortby,
+        };
+        let list = wp_list_pages(
+            &self.context,
+            &sort_column,
+            &text("exclude").unwrap_or_default(),
+        );
+        if list.is_empty() {
+            return Vec::new();
+        }
+        [
+            &args.before_widget[..],
+            &titled(args, &widget_title(instance, b"Pages")),
+            b"\n\t\t\t<ul>\n\t\t\t\t",
+            &list,
+            b"\t\t\t</ul>\n\n\t\t\t",
+            &args.after_widget,
+        ]
+        .concat()
+    }
+
     /// `WP_Widget_Search::widget()`.
     fn search_widget(&mut self, args: &Args, instance: &Value) -> Vec<u8> {
         let title = widget_title(instance, b"");
@@ -640,11 +676,6 @@ fn with_text_class(before_widget: &[u8]) -> Vec<u8> {
         }
     }
     out
-}
-
-/// PCRE's `\s`.
-fn is_pcre_space(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
 }
 
 /// `inject_video_max_width_style()` on each `video`, `iframe`, `object`

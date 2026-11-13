@@ -38,6 +38,7 @@ pub mod link;
 mod media;
 mod media_text;
 mod navigation;
+mod pages;
 pub mod permalinks;
 mod playlist;
 pub mod post;

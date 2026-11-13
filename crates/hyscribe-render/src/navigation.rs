@@ -20,6 +20,7 @@ use crate::blocks::{Block, parse_blocks, serialize_blocks};
 use crate::core_blocks::{merged, prepared};
 use crate::formatting::find;
 use crate::kses::wp_kses_post;
+use crate::pages::add_child;
 use crate::site::{Archive, Site};
 use crate::supports::forced_colors;
 use crate::supports::get_block_wrapper_attributes;
@@ -710,13 +711,7 @@ impl Renderer<'_> {
             if page.parent == 0 {
                 top_level.push(listed);
             } else {
-                match children
-                    .iter_mut()
-                    .find(|(parent, _)| *parent == page.parent)
-                {
-                    Some((_, siblings)) => siblings.push(listed),
-                    None => children.push((page.parent, vec![listed])),
-                }
+                add_child(&mut children, page.parent, listed);
             }
         }
         let none = Value::Null;

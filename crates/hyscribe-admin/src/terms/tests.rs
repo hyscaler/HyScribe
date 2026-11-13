@@ -39,6 +39,8 @@ fn pages_are_php_s() {
             search: arg("s").map(decoded),
             orderby: arg("orderby").map(decoded),
             order: arg("order").map(decoded),
+            message: None,
+            error: false,
         };
         // The request's path and query, slashed as `wp_magic_quotes()` does.
         let path = format!("/hs-admin/edit-tags?{query}");
@@ -116,6 +118,8 @@ fn phones_get_no_focus_script() {
         search: None,
         orderby: None,
         order: None,
+        message: None,
+        error: false,
     };
     let browser = crate::admin_bar::Browser {
         user_agent: b"Mozilla/5.0 (iPhone) Mobile",
@@ -178,6 +182,8 @@ fn a_stale_hierarchy_cache_hides_children() {
         search: None,
         orderby: None,
         order: None,
+        message: None,
+        error: false,
     };
     let path = "/hs-admin/edit-tags?taxonomy=category";
     let browser = crate::admin_bar::Browser::default();
@@ -241,6 +247,8 @@ fn what_is_read_for_a_page() {
         search: None,
         orderby: Some("name".into()),
         order: None,
+        message: None,
+        error: false,
     };
     let (queries, read) = asked("paged:administrator", &args(CATEGORY, Some("2")));
     assert_eq!((queries[0].limit, queries[0].offset, read), (None, 0, true));

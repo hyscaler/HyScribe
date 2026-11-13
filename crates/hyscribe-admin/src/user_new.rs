@@ -6,7 +6,7 @@ use hyscribe_kses::esc_attr;
 
 use crate::list_table::{fill, wp_nonce_field};
 use crate::menu::Screen;
-use crate::page::{HelpTab, Page, Request, admin_page};
+use crate::page::{HelpTab, Page, Request, admin_page, wp_admin_notice};
 use crate::posts::Answer;
 use crate::profile::ProfileSite;
 use crate::users::{dropdown_roles, role_names};
@@ -20,8 +20,9 @@ const HELP_ROLES: &str = "<p>Here is a basic overview of the different user role
 const HELP_SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/users-add-new-screen/\">Documentation on Adding New Users</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
 
 /// `user-new.php`'s form to create a user, the role `default_role` names
-/// chosen; `wp_die()` for one who may not create users.
-pub fn user_new(site: &dyn ProfileSite, request: &Request) -> Answer {
+/// chosen, after the `update` it is sent back with; `wp_die()` for one who
+/// may not create users.
+pub fn user_new(site: &dyn ProfileSite, update: Option<&str>, request: &Request) -> Answer {
     if !site.can("create_users") {
         return Answer::Denied(
             "<h1>You need a higher level of permission.</h1><p>Sorry, you are not allowed to create users.</p>",
@@ -40,6 +41,14 @@ pub fn user_new(site: &dyn ProfileSite, request: &Request) -> Answer {
     let content = fill(
         PAGE,
         &[
+            (
+                "notice",
+                if update == Some("add") {
+                    wp_admin_notice("User added.", "message", "is-dismissible updated", true, "")
+                } else {
+                    String::new()
+                },
+            ),
             (
                 "nonce",
                 wp_nonce_field(site, "create-user", "_wpnonce_create-user", request.uri),

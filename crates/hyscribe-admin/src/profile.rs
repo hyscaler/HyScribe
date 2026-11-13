@@ -3,7 +3,7 @@
 //! `profile.php` and `user-edit.php`: a user's profile, the current
 //! user's with `IS_PROFILE_PAGE`.
 
-use hyscribe_kses::{esc_attr, esc_html, esc_url, esc_url_raw};
+use hyscribe_kses::{esc_attr, esc_html, esc_url, esc_url_raw, parse_url};
 use hyscribe_model::User;
 use hyscribe_phpser::{
     Key, Maybe, Value, absint, is_empty_string, maybe_unserialize, remove_query_arg,
@@ -13,7 +13,7 @@ use hyscribe_render::user_avatar;
 use crate::admin_bar::BarSite;
 use crate::list_table::{checked, fill, selected, wp_nonce_field};
 use crate::menu::Screen;
-use crate::page::{HelpTab, Page, Request, SCHEMES, admin_page};
+use crate::page::{HelpTab, Page, Request, SCHEMES, admin_page, wp_admin_notice};
 use crate::posts::Answer;
 use crate::users::{UsersSite, dropdown_roles, role_names};
 
@@ -29,6 +29,9 @@ pub trait ProfileSite: UsersSite {
     fn sessions(&self, id: u64) -> usize;
     /// `wp_generate_password( 24 )`, the password the form offers.
     fn generated_password(&self) -> String;
+    /// `wp_validate_redirect( $location, $fallback )` of an absolute
+    /// `location`.
+    fn validate_redirect(&self, location: &[u8], fallback: &str) -> Vec<u8>;
 }
 
 const PAGE: &str = include_str!("profile/page.html");
@@ -219,6 +222,10 @@ pub struct EditArgs {
     pub user_id: Option<String>,
     /// `wp_http_referer`.
     pub referer: Option<String>,
+    /// `updated` is set: the profile was saved.
+    pub updated: bool,
+    /// `error`, the save's failure, if given.
+    pub error: Option<String>,
 }
 
 /// `user-edit.php`'s own: its cleaned `wp_http_referer` and `(int)
@@ -228,10 +235,80 @@ struct Edit {
     script_id: i64,
 }
 
-/// `profile.php` for the current user.
-pub fn profile(site: &dyn ProfileSite, request: &Request) -> Answer {
+/// The notices of a save of `user`'s profile, `referer` the cleaned
+/// `wp_http_referer` of the request `uri`.
+fn notices(
+    site: &dyn ProfileSite,
+    args: &EditArgs,
+    user: &User,
+    (referer, uri): (&[u8], &str),
+) -> String {
+    let profile = user.id == site.user_id();
+    let mut out = String::new();
+    if args.updated {
+        let mut message = if profile {
+            "<p><strong>Profile updated.</strong></p>".to_string()
+        } else {
+            "<p><strong>User updated.</strong></p>".to_string()
+        };
+        // Not back to Add User, `user-new.php` in PHP's form or hs-admin's.
+        let add_user = |referer: &str| {
+            referer.contains("user-new.php")
+                || referer
+                    .split("/hs-admin/user-new")
+                    .skip(1)
+                    .any(|rest| rest.is_empty() || rest.starts_with('?') || rest.starts_with('#'))
+        };
+        let users = |referer: &&[u8]| !referer.is_empty() && !add_user(&text(referer)) && !profile;
+        if let Some(referer) = Some(referer).filter(users) {
+            let mut location = esc_url_raw(referer);
+            // `wp_validate_redirect()` puts a relative path in the folder of
+            // the request.
+            let test = location.split(|&b| b == b'?').next().unwrap_or_default();
+            let relative = parse_url(test).is_some_and(|parts| {
+                parts.scheme.is_none()
+                    && parts.host.is_none()
+                    && parts
+                        .path
+                        .is_some_and(|path| path.first().is_some_and(|b| *b != b'/'))
+            });
+            if relative {
+                let path = uri.split(['?', '#']).next().unwrap_or_default();
+                let dir = path.rsplit_once('/').map_or("", |(dir, _)| dir);
+                let dir = format!("/{}", format!("{dir}/").trim_start_matches('/'));
+                location = [dir.as_bytes(), &location].concat();
+            }
+            let fallback = BarSite::admin_url(site, "users.php");
+            let link = esc_url(&site.validate_redirect(&location, &fallback));
+            message.push_str(&format!(
+                "<p><a href=\"{}\">&larr; Go to Users</a></p>",
+                text(&link)
+            ));
+        }
+        out.push_str(&wp_admin_notice(
+            &message,
+            "message",
+            "is-dismissible updated",
+            false,
+            "",
+        ));
+    }
+    if let Some(error) = &args.error {
+        let message = if error == "new-email" {
+            "Error while saving the new email address. Please try again."
+        } else {
+            ""
+        };
+        out.push_str(&wp_admin_notice(message, "", "notice-error", true, ""));
+    }
+    out
+}
+
+/// `profile.php` for the current user, after a save as `args` give it.
+pub fn profile(site: &dyn ProfileSite, args: &EditArgs, request: &Request) -> Answer {
     let user = site.profile_user(site.user_id()).unwrap_or_default();
-    form(site, &user, None, request)
+    let notices = notices(site, args, &user, (b"", request.uri));
+    form(site, &user, None, request, notices)
 }
 
 /// `user-edit.php`: a user's profile, the current user's as on
@@ -258,8 +335,9 @@ pub fn user_edit(site: &dyn ProfileSite, args: &EditArgs, request: &Request) -> 
         .user_id
         .as_deref()
         .map_or(0, |id| Value::String(id.as_bytes().to_vec()).to_int());
+    let notices = notices(site, args, &user, (&referer, request.uri));
     let edit = Edit { referer, script_id };
-    form(site, &user, Some(&edit), request)
+    form(site, &user, Some(&edit), request, notices)
 }
 
 /// The rows of the Account Management table after the password's: the
@@ -411,8 +489,14 @@ fn roles_of(capabilities: &[u8], roles: &[String]) -> Vec<String> {
 }
 
 /// The profile form of `user`, on `profile.php`, or on `user-edit.php`
-/// when `shown` there.
-fn form(site: &dyn ProfileSite, user: &User, shown: Option<&Edit>, request: &Request) -> Answer {
+/// when `shown` there, after the `notices` of a save.
+fn form(
+    site: &dyn ProfileSite,
+    user: &User,
+    shown: Option<&Edit>,
+    request: &Request,
+    notices: String,
+) -> Answer {
     let me = site.user_id();
     let id = user.id;
     let profile = id == me;
@@ -459,6 +543,7 @@ fn form(site: &dyn ProfileSite, user: &User, shown: Option<&Edit>, request: &Req
     let content = fill(
         PAGE,
         &[
+            ("notices", notices),
             ("heading", title.clone()),
             ("add", add),
             (

@@ -6,6 +6,8 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+mod notices;
+
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
 use hyscribe_testkit::SqlValue;
 
@@ -847,6 +849,14 @@ impl crate::profile::ProfileSite for Role {
     fn generated_password(&self) -> String {
         "%password%".into()
     }
+    /// A path on the site, or else the fallback.
+    fn validate_redirect(&self, location: &[u8], fallback: &str) -> Vec<u8> {
+        if location.starts_with(b"/") {
+            location.to_vec()
+        } else {
+            fallback.as_bytes().to_vec()
+        }
+    }
 }
 
 impl crate::comments::CommentsSite for Role {
@@ -945,6 +955,16 @@ impl crate::comments::CommentsSite for Role {
             let hello = crate::dashboard::tests::hello_comment(false);
             (hello.link, hello.comment.author)
         })
+    }
+    /// Comment 1's status, as `reference/notices/variants.php` gives it.
+    fn comment_approved(&self, id: u64) -> Option<String> {
+        let status = match self.variant() {
+            "n6trash" => "trash",
+            "n6spam" => "spam",
+            "n6pending" => "0",
+            _ => "1",
+        };
+        (id == 1).then(|| status.into())
     }
     /// The content has a pingback; the empty list only a trashed comment.
     fn has_comments(&self, types: &[&str]) -> bool {
@@ -1397,6 +1417,15 @@ impl crate::posts::PostsSite for Role {
             return Some(hyscribe_model::Post {
                 id,
                 post_type: "wp_template".into(),
+                ..hyscribe_model::Post::default()
+            });
+        }
+        if self.variant() == "n6media" && id == 9 {
+            return Some(hyscribe_model::Post {
+                id,
+                author: 1,
+                post_type: "attachment".into(),
+                status: "inherit".into(),
                 ..hyscribe_model::Post::default()
             });
         }

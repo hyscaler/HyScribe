@@ -148,6 +148,26 @@ pub(crate) fn wp_nonce_field(
     )
 }
 
+/// The URL `print_column_headers()` sorts on: the request's own, which
+/// keeps the arguments the canonical URL leaves out, without `paged`.
+pub(crate) fn columns_url(origin: &str, request_uri: &str) -> String {
+    text(&remove_query_arg(
+        &[b"paged"],
+        format!("{origin}{request_uri}").as_bytes(),
+    ))
+}
+
+/// The nonce [`nonce_url`] gives, of a nonce's characters, for the notice
+/// it is in to replace once filtered.
+pub(crate) const NONCE: &str = "0000000000";
+
+/// `esc_url( wp_nonce_url( $url, $action ) )` of a relative `wp-admin`
+/// URL, with the [`NONCE`], as its hs-admin link.
+pub(crate) fn nonce_url(url: &str) -> String {
+    let url = add_query_arg(&[(b"_wpnonce", Some(NONCE.as_bytes()))], url.as_bytes());
+    esc_link(&esc_html(&url))
+}
+
 /// `row_actions( $actions )`: the links under a row's primary column,
 /// always shown when `visible`.
 pub fn row_actions(actions: &[(&str, String)], visible: bool) -> String {

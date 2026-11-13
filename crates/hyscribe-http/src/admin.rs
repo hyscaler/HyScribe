@@ -13,7 +13,7 @@ use hyscribe_admin::admin_bar::{BarSite, Browser};
 use hyscribe_admin::appearance::themes;
 use hyscribe_admin::assets::Urls;
 use hyscribe_admin::comments::{
-    CommentArgs, CommentQuery, CommentsSite, comment_order, edit_comments,
+    CommentArgs, CommentQuery, CommentsSite, MODERATED, comment_order, edit_comments,
 };
 use hyscribe_admin::dashboard::{
     CommentCounts, DashboardSite, RecentComment, comment_status, dashboard,
@@ -21,9 +21,10 @@ use hyscribe_admin::dashboard::{
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::media::{LibraryArgs, MediaSite, NewArgs, media_new, upload};
 use hyscribe_admin::menu::MenuUser;
-use hyscribe_admin::page::PageSite;
-use hyscribe_admin::page::Request;
-use hyscribe_admin::posts::{Answer, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids};
+use hyscribe_admin::page::{PageSite, REMOVABLE, Request};
+use hyscribe_admin::posts::{
+    Answer, BULK, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids,
+};
 use hyscribe_admin::profile::{EditArgs, ProfileSite, profile, user_edit};
 use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
 use hyscribe_admin::settings_more;
@@ -88,38 +89,6 @@ fn admitted(https: bool, use_ssl: bool, here: &[u8], serve: impl FnOnce() -> Res
         serve()
     }
 }
-
-/// `wp_removable_query_args()`: what the canonical admin URL leaves out.
-const REMOVABLE: [&[u8]; 28] = [
-    b"activate",
-    b"activated",
-    b"admin_email_remind_later",
-    b"approved",
-    b"core-major-auto-updates-saved",
-    b"deactivate",
-    b"delete_count",
-    b"deleted",
-    b"disabled",
-    b"doing_wp_cron",
-    b"enabled",
-    b"error",
-    b"hotkeys_highlight_first",
-    b"hotkeys_highlight_last",
-    b"ids",
-    b"locked",
-    b"message",
-    b"same",
-    b"saved",
-    b"settings-updated",
-    b"skipped",
-    b"spammed",
-    b"trashed",
-    b"unspammed",
-    b"untrashed",
-    b"update",
-    b"updated",
-    b"wp-post-new-reload",
-];
 
 /// A logged in user in the admin, on a blocking thread.
 struct Admin<'a> {
@@ -566,6 +535,9 @@ impl CommentsSite for Admin<'_> {
     fn has_comments(&self, types: &[&str]) -> bool {
         self.reads.reads.wait(self.site.db.has_comment_types(types))
     }
+    fn comment_approved(&self, id: u64) -> Option<String> {
+        self.reads.reads.wait(self.site.db.comment_approved(id))
+    }
 }
 
 impl UsersSite for Admin<'_> {
@@ -658,6 +630,10 @@ impl ProfileSite for Admin<'_> {
     fn generated_password(&self) -> String {
         hyscribe_auth::generate_password(24, true).unwrap_or_default()
     }
+    fn validate_redirect(&self, location: &[u8], fallback: &str) -> Vec<u8> {
+        let host = hyscribe_kses::url_host(self.site.home.as_bytes()).unwrap_or_default();
+        crate::redirect::wp_validate_redirect(location, &host, fallback.as_bytes())
+    }
 }
 
 impl ToolsSite for Admin<'_> {
@@ -705,8 +681,9 @@ fn term_args(raw_request_uri: &str) -> Option<TermArgs> {
         .split_once('?')
         .map_or("", |(_, query)| query);
     let args = parse_str(query.as_bytes());
-    let (mut taxonomy, mut paged, mut search, mut orderby, mut order) =
-        (None, None, None, None, None);
+    let (mut taxonomy, mut paged, mut search, mut orderby, mut order, mut message) =
+        (None, None, None, None, None, None);
+    let mut error = false;
     for (key, value) in args.as_array().unwrap_or_default() {
         let (Key::String(key), Value::String(value)) = (key, value) else {
             return None;
@@ -721,6 +698,8 @@ fn term_args(raw_request_uri: &str) -> Option<TermArgs> {
             b"s" => search = value,
             b"orderby" => orderby = value,
             b"order" => order = value,
+            b"message" => message = value,
+            b"error" => error = true,
             _ => return None,
         }
     }
@@ -730,6 +709,8 @@ fn term_args(raw_request_uri: &str) -> Option<TermArgs> {
         search,
         orderby,
         order,
+        message,
+        error,
     })
 }
 
@@ -754,7 +735,14 @@ fn comment_args(raw_request_uri: &str) -> Option<CommentArgs> {
             b"order" => args.order = value,
             b"mode" => args.mode = value,
             b"p" => args.post = value,
-            _ => return None,
+            b"ids" => args.ids = value,
+            b"error" => args.error = value,
+            // Sent back after unapproving, with no notice.
+            b"unapproved" => {}
+            name => {
+                let mut counts = MODERATED.iter().zip(&mut args.moderated);
+                *counts.find(|(m, _)| m.as_bytes() == name)?.1 = value;
+            }
         }
     }
     // The meta and `comment__in` orders are not ported.
@@ -782,6 +770,10 @@ fn user_args(raw_request_uri: &str) -> Option<UserArgs> {
             b"orderby" => args.orderby = value,
             b"order" => args.order = value,
             b"paged" => args.paged = value,
+            b"update" => args.update = value,
+            b"delete_count" => args.delete_count = value,
+            b"reset_count" => args.reset_count = value,
+            b"id" => args.id = value,
             _ => return None,
         }
     }
@@ -792,7 +784,8 @@ fn user_args(raw_request_uri: &str) -> Option<UserArgs> {
     Some(args)
 }
 
-/// The arguments of `user-edit.php` ported so far; `None` for others.
+/// The arguments of `user-edit.php` and `profile.php` ported so far;
+/// `None` for others.
 fn edit_args(raw_request_uri: &str) -> Option<EditArgs> {
     let query = raw_request_uri
         .split_once('?')
@@ -806,10 +799,29 @@ fn edit_args(raw_request_uri: &str) -> Option<EditArgs> {
         match key.as_slice() {
             b"user_id" => args.user_id = value,
             b"wp_http_referer" => args.referer = value,
+            b"updated" => args.updated = true,
+            b"error" => args.error = value,
             _ => return None,
         }
     }
     Some(args)
+}
+
+/// The value of `name` in a request that may give only it: `None` for
+/// another argument, `Some(None)` for none.
+fn only_argument(request_uri: &str, name: &str) -> Option<Option<String>> {
+    let query = request_uri.split_once('?').map_or("", |(_, query)| query);
+    let mut found = None;
+    for (key, value) in parse_str(query.as_bytes()).as_array().unwrap_or_default() {
+        let (Key::String(key), Value::String(value)) = (key, value) else {
+            return None;
+        };
+        if key != name.as_bytes() {
+            return None;
+        }
+        found = Some(String::from_utf8(value.clone()).ok()?);
+    }
+    Some(found)
 }
 
 /// The headers of an admin screen: `nocache_headers()` and
@@ -909,6 +921,23 @@ fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
                     list.order = value;
                 }
             }
+            // The arguments of a bulk action's notice; `skipped` has none.
+            (Key::String(key), Value::String(value))
+                if key == b"ids"
+                    || key == b"skipped"
+                    || BULK.iter().any(|b| b.as_bytes() == key) =>
+            {
+                let value = Some(String::from_utf8(value.clone()).ok()?);
+                match BULK
+                    .iter()
+                    .zip(&mut list.counts)
+                    .find(|(b, _)| b.as_bytes() == key)
+                {
+                    Some((_, count)) => *count = value,
+                    None if key == b"ids" => list.ids = value,
+                    None => {}
+                }
+            }
             _ => return None,
         }
     }
@@ -956,13 +985,22 @@ fn screen(
         uri: request_uri,
         browser,
     };
-    // The Settings screens, Profile and Add User take no arguments.
-    let arguments = request_uri.contains('?');
+    // The Settings screens are sent back with `settings-updated` alone.
+    let settings = || {
+        let updated = only_argument(request_uri, "settings-updated")?;
+        // `settings_errors()` would print and delete what the save left.
+        let left = [
+            "_transient_settings_errors",
+            "_transient_timeout_settings_errors",
+        ]
+        .iter()
+        .any(|name| admin.reads.reads.option(name).is_some());
+        let saved = updated.is_some_and(|updated| !Value::String(updated.into()).is_empty());
+        (!saved || !left).then_some(())
+    };
     let page = match path {
         "/hs-admin/options-general" | "/hs-admin/options-writing" | "/hs-admin/options-reading" => {
-            if arguments {
-                return None;
-            }
+            settings()?;
             let answer = match path {
                 "/hs-admin/options-general" => general(admin, &request)?,
                 "/hs-admin/options-writing" => writing(admin, &request),
@@ -1022,10 +1060,12 @@ fn screen(
         "/hs-admin/site-health" if !admin.can("view_site_health_checks") => None,
         // HTTPS offers application passwords, whose list is not ported.
         "/hs-admin/profile" => {
-            if arguments || origin.starts_with("https://") {
-                return None;
-            }
-            match answered(admin, profile(admin, &request)) {
+            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
+            // Only the arguments of a save.
+            let args = edit_args(&raw).filter(|args| {
+                args.user_id.is_none() && args.referer.is_none() && !origin.starts_with("https://")
+            })?;
+            match answered(admin, profile(admin, &args, &request)) {
                 Ok(html) => Some(html),
                 Err(response) => return Some(*response),
             }
@@ -1039,10 +1079,9 @@ fn screen(
             }
         }
         "/hs-admin/user-new" => {
-            if arguments {
-                return None;
-            }
-            match answered(admin, hyscribe_admin::user_new::user_new(admin, &request)) {
+            let update = only_argument(request_uri, "update")?;
+            let answer = hyscribe_admin::user_new::user_new(admin, update.as_deref(), &request);
+            match answered(admin, answer) {
                 Ok(html) => Some(html),
                 Err(response) => return Some(*response),
             }
@@ -1051,9 +1090,7 @@ fn screen(
         | "/hs-admin/options-media"
         | "/hs-admin/options-permalink"
         | "/hs-admin/options-privacy" => {
-            if arguments {
-                return None;
-            }
+            settings()?;
             let screen = match path {
                 "/hs-admin/options-discussion" => settings_more::discussion,
                 "/hs-admin/options-media" => settings_more::media,
@@ -1102,7 +1139,7 @@ fn screen(
                 origin,
                 request_uri,
                 browser,
-            );
+            )?;
             match answered(admin, answer) {
                 Ok(html) => Some(html),
                 Err(response) => return Some(*response),
@@ -1122,12 +1159,12 @@ fn screen(
         "/hs-admin/edit" => {
             let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
             let args = list_args(admin, &raw)?;
-            match edit(admin, &args, &canonical, origin, request_uri, browser) {
-                Some(Answer::Redirect(to)) => {
-                    return Some(redirect(screen_headers(), to.as_bytes()));
-                }
-                Some(Answer::Page(html)) => Some(html),
-                _ => None,
+            match answered(
+                admin,
+                edit(admin, &args, &canonical, origin, request_uri, browser)?,
+            ) {
+                Ok(html) => Some(html),
+                Err(response) => return Some(*response),
             }
         }
         _ => return None,

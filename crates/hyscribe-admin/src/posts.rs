@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use hyscribe_kses::{esc_attr, esc_html, esc_textarea, esc_url};
 use hyscribe_model::{OrderBy, Post, PostQuery, StatusFilter, Term, User};
 use hyscribe_phpser::{
-    Maybe, Value, add_query_arg, addslashes, is_empty_string, maybe_unserialize, remove_query_arg,
-    urldecode,
+    Maybe, Value, absint, add_query_arg, addslashes, is_empty_string, maybe_unserialize,
+    remove_query_arg, urldecode,
 };
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::{convert_chars, ent2ncr, sanitize_text_field, wptexturize};
@@ -27,7 +27,7 @@ use crate::list_table::{
 use crate::menu::Screen;
 use crate::menu::esc_link;
 use crate::page::PageSite;
-use crate::page::{HelpTab, Page, admin_page};
+use crate::page::{HelpTab, Page, admin_page, wp_admin_notice};
 
 /// What the posts list asks of the site about its posts.
 pub trait PostsSite: PageSite {
@@ -1197,6 +1197,8 @@ struct Listing {
     m: String,
     post_format: String,
     cat: String,
+    /// The notice of a bulk action, empty for none.
+    notice: String,
 }
 
 impl Listing {
@@ -1397,7 +1399,7 @@ fn list_content(
     site: &dyn PostsSite,
     listing: &Listing,
     hidden: &[&str],
-    url: &str,
+    (url, origin): (&str, &str),
     request_uri: &str,
 ) -> String {
     let kind = listing.kind;
@@ -1437,7 +1439,9 @@ fn list_content(
         orderby: listing.orderby.as_deref(),
         desc: listing.order.as_deref() == Some("desc"),
     };
-    let unpaged = text(&remove_query_arg(&[b"paged"], url.as_bytes()));
+    // `edit.php` removes its notices' arguments from the request first.
+    let request_uri = text(&remove_query_arg(&NOTICE_ARGS, request_uri.as_bytes()));
+    let unpaged = crate::list_table::columns_url(origin, &request_uri);
     let kept =
         |value: &Option<String>| text(&addslashes(value.as_deref().unwrap_or_default().as_bytes()));
     let order_fields = [
@@ -1454,7 +1458,7 @@ fn list_content(
         format!("post-new.php?post_type={}", kind.name)
     };
     let mut out = format!(
-        "<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\n{}</h1>\n\n <a href=\"{}\" class=\"page-title-action\">Add {}</a>{}\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"posts-filter\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"post_status\" class=\"post_status_page\" value=\"{}\" />\n<input type=\"hidden\" name=\"post_type\" class=\"post_type_page\" value=\"{}\" />\n\n{}\n{}\n",
+        "<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\n{}</h1>\n\n <a href=\"{}\" class=\"page-title-action\">Add {}</a>{}\n<hr class=\"wp-header-end\">\n\n{}\n{}\n<form id=\"posts-filter\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"post_status\" class=\"post_status_page\" value=\"{}\" />\n<input type=\"hidden\" name=\"post_type\" class=\"post_type_page\" value=\"{}\" />\n\n{}\n{}\n",
         kind.plural,
         text(&esc_url(BarSite::admin_url(site, &new_post).as_bytes())),
         kind.singular,
@@ -1471,6 +1475,7 @@ fn list_content(
             ),
             None => String::new(),
         },
+        listing.notice,
         views(&format!("Filter {} list", kind.lower()), &links),
         if listing.posts.is_empty()
             && listing
@@ -1504,23 +1509,11 @@ fn list_content(
             ""
         }
     );
-    // `edit.php` removes its notices' arguments from the request first.
-    let request_uri = remove_query_arg(
-        &[
-            b"locked",
-            b"skipped",
-            b"updated",
-            b"deleted",
-            b"trashed",
-            b"untrashed",
-        ],
-        request_uri.as_bytes(),
-    );
     out.push_str(&wp_nonce_field(
         site,
         "bulk-posts",
         "_wpnonce",
-        &text(&request_uri),
+        &request_uri,
     ));
     let empty = listing.posts.is_empty();
     let heading = format!("{} list navigation", kind.plural);
@@ -1895,6 +1888,98 @@ pub struct ListArgs {
     pub filters: PostQuery,
     /// `is_base_request()`: no arguments but `paged` and the post type.
     pub base: bool,
+    /// The counts of a bulk action, as `BULK` names them, if given.
+    pub counts: [Option<String>; 5],
+    /// `$_REQUEST['ids']`, the posts acted on, if given.
+    pub ids: Option<String>,
+}
+
+/// The counts `edit.php` is sent back with after a bulk action, in the
+/// order its notice reports them.
+pub const BULK: [&str; 5] = ["updated", "locked", "deleted", "trashed", "untrashed"];
+
+/// The arguments `edit.php` removes from the request after its notice.
+const NOTICE_ARGS: [&[u8]; 6] = [
+    b"locked",
+    b"skipped",
+    b"updated",
+    b"deleted",
+    b"trashed",
+    b"untrashed",
+];
+
+/// `edit.php`'s bulk action notice, empty for none, `first` the global
+/// post; `None` for an Edit link to a post type not ported.
+fn bulk_notice(site: &dyn PostsSite, args: &ListArgs, first: Option<&Post>) -> Option<String> {
+    let kind = args.post_type;
+    let one = kind.singular.to_ascii_lowercase();
+    let mut messages = Vec::new();
+    for (name, count) in BULK.into_iter().zip(&args.counts) {
+        let count = count
+            .as_deref()
+            .map_or(0, |count| absint(&Value::String(count.into())));
+        if count == 0 {
+            continue;
+        }
+        let noun = if count == 1 {
+            one.clone()
+        } else {
+            kind.lower()
+        };
+        let n = number_format(count);
+        messages.push(match name {
+            "updated" => format!("{n} {noun} updated."),
+            "locked" if count == 1 => format!("{n} {noun} not updated, somebody is editing it."),
+            "locked" => format!("{n} {noun} not updated, somebody is editing them."),
+            "deleted" => format!("{n} {noun} permanently deleted."),
+            "trashed" => format!("{n} {noun} moved to the Trash."),
+            _ => format!("{n} {noun} restored from the Trash."),
+        });
+        let Some(ids) = args.ids.as_deref() else {
+            continue;
+        };
+        if name == "trashed" {
+            let ids: String = ids
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == ',')
+                .collect();
+            let url = format!(
+                "edit.php?post_type={}&doaction=undo&action=untrash&ids={ids}",
+                kind.name
+            );
+            let url = crate::list_table::nonce_url(&url);
+            messages.push(format!("<a href=\"{url}\">Undo</a>"));
+        } else if name == "untrashed" && !ids.contains(',') {
+            // `get_post( $ids[0] )`: the global post for an empty ID.
+            let id = Value::String(ids.into());
+            let post = if id.is_empty() {
+                first.cloned()
+            } else if id.is_numeric() {
+                // No post has an ID below 1.
+                u64::try_from(id.to_int()).ok().and_then(|id| site.post(id))
+            } else {
+                None
+            };
+            if let Some(post) = post.filter(|post| site.can_post("edit_post", post)) {
+                let label = PostType::named(post.post_type.as_bytes())?.singular;
+                let link = format!("post.php?post={}&amp;action=edit", post.id);
+                let link = text(&esc_url(BarSite::admin_url(site, &link).as_bytes()));
+                messages.push(format!("<a href=\"{link}\">Edit {label}</a>"));
+            }
+        }
+    }
+    if messages.is_empty() {
+        return Some(String::new());
+    }
+    let message = messages.join(" ");
+    let nonce = site.nonce("bulk-posts");
+    Some(wp_admin_notice(
+        &message,
+        "message",
+        "is-dismissible updated",
+        true,
+        &nonce,
+    ))
 }
 
 /// `WP_Query`'s cleaning of `author` and `cat`: their digits, commas and
@@ -2002,8 +2087,8 @@ pub(crate) fn view_mode(
     }
 }
 
-/// `edit.php`: the posts list for `args`, or a redirect from a page past
-/// the last; `None` for a user who may not edit posts.
+/// `edit.php` for `args`: the list, a redirect from a page past the last or
+/// a refusal; `None` for an Edit link in its notice not ported.
 pub fn edit(
     site: &dyn PostsSite,
     args: &ListArgs,
@@ -2014,7 +2099,7 @@ pub fn edit(
 ) -> Option<Answer> {
     let kind = args.post_type;
     if !site.can(&kind.cap("edit_posts")) {
-        return None;
+        return Some(Answer::from_page(None));
     }
     let own = site.own_posts(kind.name);
     let filter = args.status.as_str();
@@ -2068,6 +2153,7 @@ pub fn edit(
         let to = add_query_arg(&[(b"paged", Some(page.as_bytes()))], request_uri.as_bytes());
         return Some(Answer::Redirect(text(&to)));
     }
+    let notice = bulk_notice(site, args, posts.first())?;
     let (posts, levels) = if display {
         let searched = args
             .search
@@ -2114,10 +2200,17 @@ pub fn edit(
         cat: args.cat.clone(),
         search: args.search.clone(),
         mode: view_mode(site, args.mode.as_deref(), args.settings.as_deref()),
+        notice,
     };
     let hidden = hidden_columns(site, &format!("edit-{}", kind.name));
     let hidden_keys: Vec<&str> = hidden.iter().map(String::as_str).collect();
-    let content = list_content(site, &listing, &hidden_keys, canonical, request_uri);
+    let content = list_content(
+        site,
+        &listing,
+        &hidden_keys,
+        (canonical, origin),
+        request_uri,
+    );
     let columns = columns(kind, filter, args.orderby.is_some());
     let screen_options = screen_options(site, kind, &columns, &hidden, per_page, &listing.mode);
     let (help, sidebar) = help(kind);

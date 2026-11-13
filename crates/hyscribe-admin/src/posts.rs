@@ -1944,11 +1944,7 @@ pub enum Answer {
 
 /// `get_user_setting( $name )`: from the settings cookie when sent, else
 /// the stored `user-settings`; none when the cleaned cookie has no `=`.
-pub(crate) fn user_setting(
-    site: &dyn PostsSite,
-    cookie: Option<&str>,
-    name: &str,
-) -> Option<String> {
+fn user_setting(site: &dyn PostsSite, cookie: Option<&str>, name: &str) -> Option<String> {
     let stored = match cookie {
         Some(cookie) => {
             let kept: String = cookie
@@ -1967,16 +1963,15 @@ pub(crate) fn user_setting(
 
 /// `prepare_items()`'s view mode: a non-empty request's, which PHP saves
 ///, else the user's setting.
-fn view_mode(site: &dyn PostsSite, args: &ListArgs) -> String {
-    match args
-        .mode
-        .as_deref()
-        .filter(|mode| !is_empty_string(mode.as_bytes()))
-    {
+pub(crate) fn view_mode(
+    site: &dyn PostsSite,
+    mode: Option<&str>,
+    settings: Option<&str>,
+) -> String {
+    match mode.filter(|mode| !is_empty_string(mode.as_bytes())) {
         Some("excerpt") => "excerpt".into(),
         Some(_) => "list".into(),
-        None => user_setting(site, args.settings.as_deref(), "posts_list_mode")
-            .unwrap_or_else(|| "list".into()),
+        None => user_setting(site, settings, "posts_list_mode").unwrap_or_else(|| "list".into()),
     }
 }
 
@@ -2091,7 +2086,7 @@ pub fn edit(
         post_format: args.post_format.clone(),
         cat: args.cat.clone(),
         search: args.search.clone(),
-        mode: view_mode(site, args),
+        mode: view_mode(site, args.mode.as_deref(), args.settings.as_deref()),
     };
     let hidden = hidden_columns(site, &format!("edit-{}", kind.name));
     let hidden_keys: Vec<&str> = hidden.iter().map(String::as_str).collect();

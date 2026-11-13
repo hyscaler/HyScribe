@@ -197,8 +197,14 @@ async fn logged_in_users_are_let_in() {
         response.headers()[header::LOCATION],
         "/hs-admin/edit-comments?paged=1"
     );
+    // Searched, filtered by type and sorted in the extended view.
+    let path = "/hs-admin/edit-comments?s=WordPress&comment_type=comment&orderby=comment_author&order=asc&mode=excerpt";
+    let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
+    assert!(page.contains("Search results for: <strong>WordPress</strong>"));
+    assert!(page.contains("id='comment-1'") && page.contains("row-actions visible"));
     for path in [
-        "/hs-admin/edit-comments?s=x",
+        "/hs-admin/edit-comments?p=1",
+        "/hs-admin/edit-comments?orderby=meta_value",
         "/hs-admin/edit-comments?comment_status[]=x",
         "/hs-admin/edit-comments?comment_status=%FF",
     ] {
@@ -588,7 +594,7 @@ async fn dashboard_data() {
             assert!(admin.parent_comment(999).is_none());
             // The spam comment was approved before.
             assert!(admin.approved_before(3) && !admin.approved_before(2));
-            assert!(admin.has_comments("comment") && !admin.has_comments("pings"));
+            assert!(admin.has_comments(&["", "comment"]) && !admin.has_comments(&["pingback"]));
             assert_eq!(admin.count_terms("category", Some("zzz")), 0);
             assert!(admin.term_taxonomy(999_999).is_none());
             let term = admin.terms("category").remove(0);

@@ -108,6 +108,25 @@ pub struct User {
     pub description: Vec<u8>,
 }
 
+/// The columns `WP_Comment_Query::parse_orderby()` sorts by.
+pub const COMMENT_ORDERBY: [&str; 15] = [
+    "comment_agent",
+    "comment_approved",
+    "comment_author",
+    "comment_author_email",
+    "comment_author_IP",
+    "comment_author_url",
+    "comment_content",
+    "comment_date",
+    "comment_date_gmt",
+    "comment_ID",
+    "comment_karma",
+    "comment_parent",
+    "comment_post_ID",
+    "comment_type",
+    "user_id",
+];
+
 /// A row of `{prefix}comments`, with the columns rendering needs.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Comment {

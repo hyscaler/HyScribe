@@ -13,7 +13,12 @@ use hyscribe_model::{
 const PENDING: CommentFilter<'static> = CommentFilter {
     approved: &["0", "1"],
     user: None,
+    types: &[],
+    search: None,
 };
+
+/// The newest comments first.
+const NEWEST: &[(&str, bool)] = &[("comment_date_gmt", true), ("comment_ID", true)];
 
 fn fixture_config() -> Database {
     hyscribe_testkit::fixture_database()
@@ -439,7 +444,7 @@ async fn errors_are_reported() {
         .unwrap_err(),
         db.last_comment_modified().await.unwrap_err(),
         db.comment_counts(1).await.unwrap_err(),
-        db.list_comments(&PENDING, 1, 0).await.unwrap_err(),
+        db.list_comments(&PENDING, NEWEST, 1, 0).await.unwrap_err(),
         db.count_comments(&PENDING).await.unwrap_err(),
         db.comment_meta(1, "_wp_trash_meta_status")
             .await
@@ -1267,17 +1272,28 @@ async fn term_queries_order_by_any_column() {
 async fn dashboard_reads() {
     let db = fixture().await;
     assert_eq!(db.comment_counts(1).await.unwrap(), [1, 0, 0, 0, 0]);
-    let latest = db.list_comments(&PENDING, 5, 0).await.unwrap();
+    let latest = db.list_comments(&PENDING, NEWEST, 5, 0).await.unwrap();
     let ids: Vec<(u64, String)> = latest.into_iter().map(|(c, a)| (c.id, a)).collect();
     assert_eq!(ids, [(1, "1".to_string())]);
-    assert!(db.list_comments(&PENDING, 5, 1).await.unwrap().is_empty());
+    assert!(
+        db.list_comments(&PENDING, NEWEST, 5, 1)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let user = |user| CommentFilter {
         approved: &["1"],
         user: Some(user),
+        ..PENDING
     };
     assert_eq!(db.count_comments(&user(0)).await.unwrap(), 1);
     assert_eq!(db.count_comments(&user(-1)).await.unwrap(), 0);
-    assert!(db.list_comments(&user(-1), 5, 0).await.unwrap().is_empty());
+    assert!(
+        db.list_comments(&user(-1), NEWEST, 5, 0)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         db.comment_meta(1, "_wp_trash_meta_status").await.unwrap(),
         None
@@ -1287,12 +1303,40 @@ async fn dashboard_reads() {
     assert_eq!((approved, moderated, spam, trash), (31, 3, 0, 0));
     let approved_only = CommentFilter {
         approved: &["1"],
-        user: None,
+        ..PENDING
     };
-    let listed = ttd.list_comments(&approved_only, 50, 0).await.unwrap();
+    let listed = ttd
+        .list_comments(&approved_only, NEWEST, 50, 0)
+        .await
+        .unwrap();
     assert!(listed.iter().all(|(_, a)| a == "1"));
     assert_eq!(ttd.count_comments(&approved_only).await.unwrap(), 31);
-    assert_eq!(ttd.list_comments(&PENDING, 50, 0).await.unwrap().len(), 34);
+    assert_eq!(
+        ttd.list_comments(&PENDING, NEWEST, 50, 0)
+            .await
+            .unwrap()
+            .len(),
+        34
+    );
+    let pings = CommentFilter {
+        types: &["pingback", "trackback"],
+        ..PENDING
+    };
+    assert_eq!(ttd.count_comments(&pings).await.unwrap(), 4);
+    let searched = CommentFilter {
+        search: Some("anon"),
+        ..PENDING
+    };
+    assert_eq!(ttd.count_comments(&searched).await.unwrap(), 2);
+    // Unknown columns are left out of the order, which may be empty.
+    let by_author = [("comment_author", false), ("x", true), ("comment_ID", true)];
+    let sorted = ttd.list_comments(&PENDING, &by_author, 2, 0).await.unwrap();
+    let ids: Vec<u64> = sorted.iter().map(|(c, _)| c.id).collect();
+    assert_eq!(ids, [1, 3]);
+    assert_eq!(
+        ttd.list_comments(&PENDING, &[], 50, 0).await.unwrap().len(),
+        34
+    );
     let terms = named("wordpress_terms").await;
     let ids = |posts: Vec<Post>| posts.iter().map(|p| p.id).collect::<Vec<_>>();
     let query = |order, author| StatusQuery {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use hyscribe_phpser::{addslashes, remove_query_arg, urldecode};
 use hyscribe_testkit::{hs_admin_page, settled_page, unhex};
 
 use super::*;
@@ -18,10 +19,23 @@ fn pages_are_php_s() {
                 .split('&')
                 .find_map(|pair| Some(pair.strip_prefix(name)?.strip_prefix('=')?.to_string()))
         };
+        let decoded = |name: &str| {
+            arg(name).map(|value| String::from_utf8(urldecode(value.as_bytes())).unwrap())
+        };
         let args = CommentArgs {
-            status: arg("comment_status"),
-            user_id: arg("user_id"),
-            paged: arg("paged"),
+            status: decoded("comment_status"),
+            user_id: decoded("user_id"),
+            paged: decoded("paged"),
+            search: decoded("s"),
+            kind: decoded("comment_type"),
+            orderby: decoded("orderby"),
+            order: decoded("order"),
+            mode: decoded("mode"),
+            clauses: comment_order(
+                &decoded("orderby").unwrap_or_default(),
+                &decoded("order").unwrap_or_default(),
+            )
+            .unwrap(),
         };
         let variant = match variant {
             "content" => "comments",
@@ -31,16 +45,22 @@ fn pages_are_php_s() {
             other => other,
         };
         let role: &'static str = Box::leak(format!("{variant}:{}", f[1]).into_boxed_str());
+        // The request's path and query, slashed as `wp_magic_quotes()` does.
         let path = if query.is_empty() {
             "/hs-admin/edit-comments".to_string()
         } else {
             format!("/hs-admin/edit-comments?{query}")
         };
+        let path = String::from_utf8(addslashes(path.as_bytes())).unwrap();
         let ours = edit_comments(
             &Role(role),
             &args,
             None,
-            &format!("{SITE}{path}"),
+            &String::from_utf8(remove_query_arg(
+                &[b"message"],
+                format!("{SITE}{path}").as_bytes(),
+            ))
+            .unwrap(),
             SITE,
             &path,
             &crate::admin_bar::Browser {
@@ -160,5 +180,46 @@ fn the_spam_view_links_ips_to_spam() {
     assert!(
         author.contains("&#038;mode=detail&#038;comment_status=spam\">"),
         "{author}"
+    );
+}
+
+/// `orderby` as `WP_Comment_Query` reads it.
+#[test]
+fn orders_are_parsed_as_php_parses_them() {
+    assert_eq!(comment_order("none", "asc"), Some(Vec::new()));
+    assert_eq!(
+        comment_order("", "ASC"),
+        Some(vec![("comment_date_gmt", false)])
+    );
+    assert_eq!(comment_order("comment__in", ""), None);
+    // An ID anywhere leaves out the ID clause added for a stable order.
+    assert_eq!(
+        comment_order("comment_ID,,0,comment_author", "asc"),
+        Some(vec![("comment_ID", false), ("comment_author", false)])
+    );
+    assert_eq!(
+        comment_order("comment_karma\tcomment_date", "asc"),
+        Some(vec![
+            ("comment_karma", false),
+            ("comment_date", false),
+            ("comment_ID", false)
+        ])
+    );
+}
+
+/// A type's view links are built as `add_query_arg()` builds them, as
+/// PHP printed them for `a&b`.
+#[test]
+fn view_links_keep_the_type_as_php_does() {
+    let views = comment_views(&Role("administrator"), "all", "a&b");
+    assert!(
+        views[0]
+            .url
+            .ends_with("edit-comments?comment_type=a&b&comment_status=all")
+    );
+    assert!(
+        views[1]
+            .url
+            .ends_with("?comment_type=a&b&comment_status=mine&user_id=1")
     );
 }

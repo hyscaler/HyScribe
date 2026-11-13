@@ -4,8 +4,8 @@
 //! the comment parts the dashboard shares with it.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_textarea, esc_url};
-use hyscribe_model::{Comment, User};
-use hyscribe_phpser::{Value, add_query_arg, is_empty_string, remove_query_arg};
+use hyscribe_model::{COMMENT_ORDERBY, Comment, User};
+use hyscribe_phpser::{Value, add_query_arg, addslashes, is_empty_string, remove_query_arg};
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::CORE_SHORTCODE_TAGS;
 use hyscribe_render::formatting::{antispambot, convert_chars, wptexturize};
@@ -17,19 +17,19 @@ use hyscribe_render::{
 use crate::admin_bar::{BarSite, Browser, html_excerpt};
 use crate::dashboard::{DashboardSite, RecentComment, approved_of};
 use crate::list_table::{Column, Order, Sort, View, bulk_actions, column_headers, pagination};
-use crate::list_table::{pagenum, screen_options, search_box, views};
+use crate::list_table::{pagenum, screen_options, search_box, table_description, views};
 use crate::menu::{Screen, esc_link, link};
 use crate::page::{HelpTab, Page, admin_page};
 use crate::posts::{
-    Answer, comments_bubble, edit_link, hidden_columns, per_page, user_setting, view_mode_fields,
+    Answer, comments_bubble, edit_link, hidden_columns, per_page, view_mode, view_mode_fields,
 };
 
 /// What the comments list asks of the site beyond the dashboard's.
 pub trait CommentsSite: DashboardSite {
     /// The comments `query` finds, newest first, and how many there are.
     fn list_comments(&self, query: &CommentQuery<'_>) -> (Vec<RecentComment>, u64);
-    /// Whether any comment, notes aside, is of `kind`: `comment` or `pings`.
-    fn has_comments(&self, kind: &str) -> bool;
+    /// Whether any approved or pending comment is of one of `types`.
+    fn has_comments(&self, types: &[&str]) -> bool;
     /// `get_comment_link()` and `get_comment_author()` of comment `id`,
     /// if there is one.
     fn parent_comment(&self, id: u64) -> Option<(String, Vec<u8>)>;
@@ -44,6 +44,12 @@ pub struct CommentQuery<'a> {
     pub approved: &'a [&'a str],
     /// `user_id = %d`, when the request gives a user.
     pub user: Option<i64>,
+    /// Their `comment_type`s, any for none.
+    pub types: &'a [&'a str],
+    /// What their author, email, URL, IP or content contains, if given.
+    pub search: Option<&'a str>,
+    /// `ORDER BY` columns of `COMMENT_ORDERBY`, descending where true.
+    pub order: &'a [(&'static str, bool)],
     /// How many to skip.
     pub offset: u64,
     /// How many to list.
@@ -59,6 +65,67 @@ pub struct CommentArgs {
     pub user_id: Option<String>,
     /// `paged`.
     pub paged: Option<String>,
+    /// `s`.
+    pub search: Option<String>,
+    /// `comment_type`.
+    pub kind: Option<String>,
+    /// `orderby`.
+    pub orderby: Option<String>,
+    /// `order`.
+    pub order: Option<String>,
+    /// `mode`.
+    pub mode: Option<String>,
+    /// `comment_order()` of `orderby` and `order`.
+    pub clauses: Vec<(&'static str, bool)>,
+}
+
+/// `WP_Comment_Query`'s `ORDER BY` for `orderby` and `order`; `None` for
+/// the meta and `comment__in` orders, not ported.
+pub fn comment_order(orderby: &str, order: &str) -> Option<Vec<(&'static str, bool)>> {
+    let desc = !order.eq_ignore_ascii_case("asc");
+    match orderby {
+        "none" => return Some(Vec::new()),
+        "" | "0" => return Some(vec![("comment_date_gmt", desc)]),
+        _ => {}
+    }
+    let mut clauses = Vec::new();
+    let mut by_id = false;
+    // `preg_split( '/[,\s]/' )`, skipping what PHP finds empty.
+    for name in orderby.split([',', ' ', '\t', '\n', '\x0b', '\x0c', '\r']) {
+        if matches!(name, "" | "0") {
+            continue;
+        }
+        if matches!(name, "meta_value" | "meta_value_num" | "comment__in") {
+            return None;
+        }
+        by_id |= name == "comment_ID";
+        if let Some(column) = COMMENT_ORDERBY.iter().find(|column| **column == name) {
+            clauses.push((*column, desc));
+        }
+    }
+    if clauses.is_empty() {
+        clauses.push(("comment_date_gmt", desc));
+    }
+    // A date's direction, else descending.
+    if !by_id {
+        let id_desc = clauses
+            .iter()
+            .find(|(column, _)| matches!(*column, "comment_date" | "comment_date_gmt"))
+            .is_none_or(|(_, desc)| *desc);
+        clauses.push(("comment_ID", id_desc));
+    }
+    Some(clauses)
+}
+
+/// The `comment_type`s of a requested type: any for all, the default type
+/// for comments, and pingbacks and trackbacks for pings.
+pub fn comment_types(kind: &str) -> Vec<&str> {
+    match kind {
+        "" | "all" => Vec::new(),
+        "comment" | "comments" => vec!["", "comment"],
+        "pings" => vec!["pingback", "trackback"],
+        other => vec![other],
+    }
 }
 
 /// The views of `prepare_items()`, and the `comment_approved` each lists.
@@ -596,10 +663,15 @@ fn columns() -> Vec<Column> {
     ]
 }
 
-/// `get_views()`: each status with its count, `current` the one shown.
-pub(crate) fn comment_views(site: &dyn DashboardSite, current: &str) -> Vec<View> {
+/// `get_views()`: each status with its count, `current` the one shown,
+/// of comments of type `kind`.
+pub(crate) fn comment_views(site: &dyn DashboardSite, current: &str, kind: &str) -> Vec<View> {
     let counts = site.comment_counts();
     let user = site.user_id();
+    let mut link = BarSite::admin_url(site, "edit-comments.php").into_bytes();
+    if !kind.is_empty() && kind != "all" {
+        link = add_query_arg(&[(b"comment_type", Some(kind.as_bytes()))], &link);
+    }
     [
         ("all", "All", "all", counts.all()),
         ("mine", "Mine", "mine", counts.mine),
@@ -610,13 +682,15 @@ pub(crate) fn comment_views(site: &dyn DashboardSite, current: &str) -> Vec<View
     ]
     .iter()
     .map(|(status, label, class, count)| {
-        let mut url = format!("edit-comments.php?comment_status={status}");
-        if *status == "mine" {
-            url = format!("edit-comments.php?comment_status=mine&user_id={user}");
-        }
+        link = if *status == "mine" {
+            add_query_arg(&[(b"user_id", Some(user.to_string().as_bytes()))], &link)
+        } else {
+            remove_query_arg(&[b"user_id"], &link)
+        };
+        link = add_query_arg(&[(b"comment_status", Some(status.as_bytes()))], &link);
         View {
             class: (*status).into(),
-            url: BarSite::admin_url(site, &url),
+            url: String::from_utf8_lossy(&link).into_owned(),
             label: format!(
                 "{label} <span class=\"count\">(<span class=\"{class}-count\">{}</span>)</span>",
                 number_format(*count)
@@ -649,9 +723,22 @@ pub fn edit_comments(
         .into_iter()
         .find(|(view, _)| args.status.as_deref() == Some(*view))
         .unwrap_or(VIEWS[0]);
-    let mode = user_setting(site, settings, "posts_list_mode").unwrap_or_else(|| "list".into());
+    let mode = view_mode(site, args.mode.as_deref(), settings);
     let per_page = per_page(site, "edit_comments_per_page");
     let page = pagenum(args.paged.as_deref());
+    // The type, search and order as requested, slashed.
+    let slashed = |value: &Option<String>| {
+        String::from_utf8_lossy(&addslashes(value.as_deref().unwrap_or_default().as_bytes()))
+            .into_owned()
+    };
+    let kind = slashed(&args.kind);
+    let kind = if is_empty_string(kind.as_bytes()) || kind == "note" {
+        String::new()
+    } else {
+        kind
+    };
+    let search = slashed(&args.search);
+    let (orderby, order_arg) = (slashed(&args.orderby), slashed(&args.order));
     // A few more than a page, for the rows that replace those acted on.
     let (found, total) = site.list_comments(&CommentQuery {
         approved,
@@ -660,6 +747,9 @@ pub fn edit_comments(
             .as_deref()
             .filter(|user| !user.is_empty())
             .map(|user| Value::String(user.into()).to_int()),
+        types: &comment_types(&kind),
+        search: Some(search.as_str()).filter(|search| !search.is_empty()),
+        order: &args.clauses,
         offset: (page - 1).saturating_mul(per_page),
         number: per_page + per_page.min(8),
     });
@@ -729,8 +819,11 @@ pub fn edit_comments(
     .collect();
     let types: String = [("comment", "Comments"), ("pings", "Pings")]
         .iter()
-        .filter(|(kind, _)| site.has_comments(kind))
-        .map(|(kind, label)| format!("\t<option value='{kind}'>{label}</option>\n"))
+        .filter(|(value, _)| site.has_comments(&comment_types(value)))
+        .map(|(value, label)| {
+            let selected = crate::list_table::selected(kind == *value);
+            format!("\t<option value='{value}'{selected}>{label}</option>\n")
+        })
         .collect();
     let referer = String::from_utf8_lossy(&esc_url(&remove_query_arg(
         &[b"_wp_http_referer"],
@@ -782,13 +875,20 @@ pub fn edit_comments(
         )
     };
     let order = Order {
-        orderby: None,
-        desc: false,
+        orderby: args.orderby.as_deref(),
+        desc: args.order.as_deref() == Some("desc"),
     };
     let unpaged =
         String::from_utf8_lossy(&remove_query_arg(&[b"paged"], canonical.as_bytes())).into_owned();
+    // The initial view is ordered by a date no column shows.
+    let caption = if args.orderby.is_none() {
+        "<caption class=\"screen-reader-text\">Ordered by Comment Date, descending.</caption>"
+            .into()
+    } else {
+        table_description(&columns, &order)
+    };
     let list = format!(
-        "{}{}{}<h2 class='screen-reader-text'>Comments list</h2><table class=\"wp-list-table widefat fixed striped {} comments\">\n\t\t<caption class=\"screen-reader-text\">Ordered by Comment Date, descending.</caption>\t<thead>\n\t<tr>\n\t\t{}\t</tr>\n\t</thead>\n\n\t<tbody id=\"the-comment-list\" data-wp-lists=\"list:comment\">\n\t\t{rows}\t</tbody>\n\n\t<tbody id=\"the-extra-comment-list\" data-wp-lists=\"list:comment\" style=\"display: none;\">\n\t\t{extra_rows}\t</tbody>\n\n\t<tfoot>\n\t<tr>\n\t\t{}\t</tr>\n\t</tfoot>\n\n</table>\n\t\t{}",
+        "{}{}{}<h2 class='screen-reader-text'>Comments list</h2><table class=\"wp-list-table widefat fixed striped {} comments\">\n\t\t{caption}\t<thead>\n\t<tr>\n\t\t{}\t</tr>\n\t</thead>\n\n\t<tbody id=\"the-comment-list\" data-wp-lists=\"list:comment\">\n\t\t{rows}\t</tbody>\n\n\t<tbody id=\"the-extra-comment-list\" data-wp-lists=\"list:comment\" style=\"display: none;\">\n\t\t{extra_rows}\t</tbody>\n\n\t<tfoot>\n\t<tr>\n\t\t{}\t</tr>\n\t</tfoot>\n\n</table>\n\t\t{}",
         field(
             "_ajax_fetch_list_nonce",
             "fetch-list-WP_Comments_List_Table"
@@ -806,10 +906,20 @@ pub fn edit_comments(
     );
     // `current_time( 'mysql', true )`.
     let now = site.clock().1;
-    let search = if empty {
+    let requested = args.search.as_deref().unwrap_or_default();
+    let search_box = if empty && is_empty_string(requested.as_bytes()) {
         String::new()
     } else {
-        search_box("Search Comments", "comment", "", &[])
+        let fields = [("orderby", orderby.as_str()), ("order", order_arg.as_str())];
+        search_box("Search Comments", "comment", requested, &fields)
+    };
+    let subtitle = if requested.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<span class=\"subtitle\">Search results for: <strong>{}</strong></span>",
+            esc_html(requested.as_bytes())
+        )
     };
     // `absint()` of the page asked for, which may be 0.
     let paged = args.paged.as_deref().map_or_else(String::new, |paged| {
@@ -819,9 +929,9 @@ pub fn edit_comments(
         )
     });
     let content = format!(
-        "\n<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\nComments</h1>\n\n\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"comments-form\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"comment_status\" value=\"{view}\" />\n<input type=\"hidden\" name=\"pagegen_timestamp\" value=\"{}\" />\n\n<input type=\"hidden\" name=\"_total\" value=\"{total}\" />\n<input type=\"hidden\" name=\"_per_page\" value=\"{per_page}\" />\n<input type=\"hidden\" name=\"_page\" value=\"{page}\" />\n\n{paged}\n{list}</form>\n</div>\n\n<div id=\"ajax-response\"></div>\n\n{}\t",
-        views("Filter comments list", &comment_views(site, view)),
-        search,
+        "\n<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\nComments</h1>\n\n{subtitle}\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"comments-form\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"comment_status\" value=\"{view}\" />\n<input type=\"hidden\" name=\"pagegen_timestamp\" value=\"{}\" />\n\n<input type=\"hidden\" name=\"_total\" value=\"{total}\" />\n<input type=\"hidden\" name=\"_per_page\" value=\"{per_page}\" />\n<input type=\"hidden\" name=\"_page\" value=\"{page}\" />\n\n{paged}\n{list}</form>\n</div>\n\n<div id=\"ajax-response\"></div>\n\n{}\t",
+        views("Filter comments list", &comment_views(site, view, &kind)),
+        search_box,
         date::format_unix("Y-m-d H:i:s", now, Zone::Utc),
         comment_reply(site, Some(visible), true, "detail")
     );

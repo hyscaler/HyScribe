@@ -405,7 +405,7 @@ pub fn table_description(columns: &[Column], order: &Order) -> String {
     columns
         .iter()
         .filter_map(|column| column.sort.as_ref())
-        .find(|sort| sort.orderby == current)
+        .find(|sort| sort.orderby == current && !sort.caption.is_empty())
         .map_or_else(String::new, |sort| {
             let direction = if direction == "asc" {
                 "Ascending."

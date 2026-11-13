@@ -14,8 +14,8 @@ use std::fmt;
 
 use hyscribe_config::{Database, Prefix};
 use hyscribe_model::{
-    CalendarMonth, Comment, Credentials, DateCount, OrderBy, Period, Post, PostQuery, Term,
-    TermOrder, TermQuery, TimeCondition, User, UserField,
+    COMMENT_ORDERBY, CalendarMonth, Comment, Credentials, DateCount, OrderBy, Period, Post,
+    PostQuery, Term, TermOrder, TermQuery, TimeCondition, User, UserField,
 };
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
@@ -820,11 +820,13 @@ impl Db {
         Ok(!rows.is_empty())
     }
 
-    /// `WP_Comment_Query`'s comments in `filter`, newest first, with their
+    /// `WP_Comment_Query`'s comments in `filter`, sorted by `order`'s
+    /// columns of `COMMENT_ORDERBY`, descending where true, with their
     /// `comment_approved`.
     pub async fn list_comments(
         &self,
         filter: &CommentFilter<'_>,
+        order: &[(&str, bool)],
         limit: u32,
         offset: u32,
     ) -> Result<Vec<(Comment, String)>, DbError> {
@@ -834,7 +836,16 @@ impl Db {
             ", comment_approved FROM {prefix}comments WHERE "
         ));
         comment_filter(&mut sql, filter);
-        sql.push(" ORDER BY comment_date_gmt DESC, comment_ID DESC LIMIT ? OFFSET ?");
+        let columns = order.iter().filter_map(|(name, desc)| {
+            let column = COMMENT_ORDERBY.iter().find(|column| *column == name)?;
+            Some((*column, *desc))
+        });
+        for (i, (column, desc)) in columns.enumerate() {
+            sql.push(if i == 0 { " ORDER BY " } else { ", " });
+            sql.push(column);
+            sql.push(if desc { " DESC" } else { " ASC" });
+        }
+        sql.push(" LIMIT ? OFFSET ?");
         sql.bind(Bind::Int(limit.into()));
         sql.bind(Bind::Int(offset.into()));
         let rows = sql
@@ -1791,6 +1802,11 @@ pub struct CommentFilter<'a> {
     pub approved: &'a [&'a str],
     /// Only those of this user ID, `user_id = %d`.
     pub user: Option<i64>,
+    /// Only those of these `comment_type`s, when any are given.
+    pub types: &'a [&'a str],
+    /// `get_search_sql()`: only those with this in their author, email,
+    /// URL, IP or content.
+    pub search: Option<&'a str>,
 }
 
 /// The `WHERE` of `filter`.
@@ -1800,6 +1816,19 @@ fn comment_filter(sql: &mut Sql, filter: &CommentFilter<'_>) {
     if let Some(user) = filter.user {
         sql.push(" AND user_id = ?");
         sql.bind(Bind::Signed(user));
+    }
+    if !filter.types.is_empty() {
+        sql.push(" AND comment_type IN (");
+        list(sql, filter.types.iter().map(|v| Bind::Text((*v).into())));
+    }
+    if let Some(search) = filter.search {
+        sql.push(
+            " AND (comment_author LIKE ? OR comment_author_email LIKE ? OR comment_author_url LIKE ? \
+             OR comment_author_IP LIKE ? OR comment_content LIKE ?)",
+        );
+        for _ in 0..5 {
+            sql.bind(Bind::Text(like(search)));
+        }
     }
 }
 

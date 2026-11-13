@@ -11,7 +11,9 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::admin_bar::{BarSite, Browser};
 use hyscribe_admin::assets::Urls;
-use hyscribe_admin::comments::{CommentArgs, CommentQuery, CommentsSite, edit_comments};
+use hyscribe_admin::comments::{
+    CommentArgs, CommentQuery, CommentsSite, comment_order, edit_comments,
+};
 use hyscribe_admin::dashboard::{
     CommentCounts, DashboardSite, RecentComment, comment_status, dashboard,
 };
@@ -356,7 +358,10 @@ impl DashboardSite for Admin<'_> {
                 &CommentFilter {
                     approved: if pending { &["0", "1"] } else { &["1"] },
                     user: None,
+                    types: &[],
+                    search: None,
                 },
+                &[("comment_date_gmt", true), ("comment_ID", true)],
                 number,
                 offset,
             ));
@@ -508,13 +513,17 @@ impl CommentsSite for Admin<'_> {
         let filter = CommentFilter {
             approved: query.approved,
             user: query.user,
+            types: query.types,
+            search: query.search,
         };
         let limit = u32::try_from(query.number).unwrap_or(u32::MAX);
         let offset = u32::try_from(query.offset).unwrap_or(u32::MAX);
-        let found = self
-            .reads
-            .reads
-            .wait(self.site.db.list_comments(&filter, limit, offset));
+        let found = self.reads.reads.wait(self.site.db.list_comments(
+            &filter,
+            query.order,
+            limit,
+            offset,
+        ));
         let rows = found
             .into_iter()
             .map(|(comment, approved)| {
@@ -536,13 +545,7 @@ impl CommentsSite for Admin<'_> {
         let author = comment_author_of(&row.comment, row.user.as_ref());
         Some((row.link, author))
     }
-    fn has_comments(&self, kind: &str) -> bool {
-        // `WP_Comment_Query` counts an untyped comment as a comment.
-        let types: &[&str] = if kind == "pings" {
-            &["pingback", "trackback"]
-        } else {
-            &["", "comment"]
-        };
+    fn has_comments(&self, types: &[&str]) -> bool {
         self.reads.reads.wait(self.site.db.has_comment_types(types))
     }
 }
@@ -614,9 +617,19 @@ fn comment_args(raw_request_uri: &str) -> Option<CommentArgs> {
             b"comment_status" => args.status = value,
             b"user_id" => args.user_id = value,
             b"paged" => args.paged = value,
+            b"s" => args.search = value,
+            b"comment_type" => args.kind = value,
+            b"orderby" => args.orderby = value,
+            b"order" => args.order = value,
+            b"mode" => args.mode = value,
             _ => return None,
         }
     }
+    // The meta and `comment__in` orders are not ported.
+    args.clauses = comment_order(
+        args.orderby.as_deref().unwrap_or_default(),
+        args.order.as_deref().unwrap_or_default(),
+    )?;
     Some(args)
 }
 

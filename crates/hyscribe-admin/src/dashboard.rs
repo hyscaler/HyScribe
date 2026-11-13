@@ -582,7 +582,7 @@ fn recent_comments(
     out.push_str("</ul>");
     if site.can("edit_posts") {
         out.push_str("<h3 class=\"screen-reader-text\">View more comments</h3>");
-        out.push_str(&view_list(&comment_views(site, "")));
+        out.push_str(&view_list(&comment_views(site, "", "")));
     }
     out.push_str(&comment_reply(site, None, false, "dashboard"));
     out.push_str("\t</div>");

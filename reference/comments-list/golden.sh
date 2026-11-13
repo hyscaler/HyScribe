@@ -81,6 +81,13 @@ for view in moderated approved spam trash 'mine&user_id=1' mine bogus 'all&user_
   record content administrator "?comment_status=$view"
 done
 record content editor '?comment_status=spam'
+for query in s=example 's=127.0.0.1&mode=detail' s=zzz s=0 s=100%25 s=Pat%27s comment_type=comment comment_type=comments \
+  comment_type=pings comment_type=pingback comment_type=note comment_type=all 'comment_type=pings&comment_status=approved' \
+  'orderby=comment_author&order=asc' orderby=comment_author 'orderby=comment_post_ID&order=desc' \
+  'orderby=comment_date&order=asc' orderby=bogus 'orderby=comment_ID,comment_author&order=asc' orderby=0 \
+  'orderby=comment_karma&order=asc' mode=excerpt mode=list 's=e&orderby=comment_author&order=asc'; do
+  record content administrator "?$query"
+done
 record content author '?comment_status=trash'
 record paged administrator ''
 for page in 2 4 -2 0 9; do

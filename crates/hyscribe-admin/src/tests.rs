@@ -414,17 +414,57 @@ impl crate::comments::CommentsSite for Role {
             }
             vec![hello]
         };
-        let found: Vec<_> = all
+        let lower = |bytes: &[u8]| String::from_utf8_lossy(bytes).to_lowercase();
+        let mut found: Vec<_> = all
             .into_iter()
             .filter(|row| {
+                let c = &row.comment;
+                let fields = [
+                    &c.author,
+                    &c.author_email,
+                    &c.author_url,
+                    &c.author_ip,
+                    &c.content,
+                ];
                 query
                     .approved
                     .contains(&crate::dashboard::approved_of(row.status))
                     && query
                         .user
-                        .is_none_or(|user| i64::try_from(row.comment.user_id) == Ok(user))
+                        .is_none_or(|user| i64::try_from(c.user_id) == Ok(user))
+                    && (query.types.is_empty()
+                        || query
+                            .types
+                            .contains(&&*String::from_utf8_lossy(&c.comment_type)))
+                    && query.search.is_none_or(|search| {
+                        fields
+                            .iter()
+                            .any(|field| lower(field).contains(&search.to_lowercase()))
+                    })
             })
             .collect();
+        // As MySQL sorts the columns the goldens sort by, case aside.
+        let key = |row: &crate::dashboard::RecentComment, column: &str| {
+            let c = &row.comment;
+            match column {
+                "comment_author" => (lower(&c.author), 0),
+                "comment_post_ID" => (String::new(), c.post_id),
+                "comment_ID" => (String::new(), c.id),
+                "comment_date" | "comment_date_gmt" => (c.date.clone(), 0),
+                _ => (String::new(), 0),
+            }
+        };
+        found.sort_by(|a, b| {
+            query
+                .order
+                .iter()
+                .map(|(column, desc)| {
+                    let ordering = key(a, column).cmp(&key(b, column));
+                    if *desc { ordering.reverse() } else { ordering }
+                })
+                .find(|ordering| ordering.is_ne())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         let total = found.len() as u64;
         let skip = usize::try_from(query.offset).unwrap();
         let take = usize::try_from(query.number).unwrap();
@@ -441,8 +481,8 @@ impl crate::comments::CommentsSite for Role {
         })
     }
     /// The content has a pingback; the empty list only a trashed comment.
-    fn has_comments(&self, kind: &str) -> bool {
-        kind == "comment" && self.variant() != "cempty" || self.comments_content()
+    fn has_comments(&self, types: &[&str]) -> bool {
+        types.contains(&"comment") && self.variant() != "cempty" || self.comments_content()
     }
 }
 

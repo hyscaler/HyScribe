@@ -828,9 +828,15 @@ const STICKY: &str = "\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t<label class=\"alignleft
 
 const BULK_STICKY: &str = "\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t<label class=\"alignright\">\n\t\t\t\t\t\t\t\t\t<span class=\"title\">Sticky</span>\n\t\t\t\t\t\t\t\t\t<select name=\"sticky\">\n\t\t\t\t\t\t\t\t\t\t<option value=\"-1\">&mdash; No Change &mdash;</option>\n\t\t\t\t\t\t\t\t\t\t<option value=\"sticky\">Sticky</option>\n\t\t\t\t\t\t\t\t\t\t<option value=\"unsticky\">Not Sticky</option>\n\t\t\t\t\t\t\t\t\t</select>\n\t\t\t\t\t\t\t\t</label>\n\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t";
 
+/// The dropdown walkers' attribute of the chosen option.
+fn walker_selected(chosen: bool) -> &'static str {
+    if chosen { " selected=\"selected\"" } else { "" }
+}
+
 /// The options of `wp_dropdown_pages()` for the published pages of `kind`:
-/// a tree by order and title, without pages whose parents are not listed.
-fn parent_options(site: &dyn PostsSite, kind: PostType) -> String {
+/// a tree by order and title, without pages whose parents are not listed,
+/// the page `selected` marked.
+pub(crate) fn parent_options(site: &dyn PostsSite, kind: PostType, selected: &str) -> String {
     let query = PostQuery {
         post_types: vec![kind.name.into()],
         statuses: vec![StatusFilter {
@@ -842,12 +848,12 @@ fn parent_options(site: &dyn PostsSite, kind: PostType) -> String {
         ..PostQuery::default()
     };
     let (pages, _) = site.list_posts(&query);
-    page_options(&pages, 0)
+    page_options(&pages, selected)
 }
 
 /// `wp_dropdown_pages()`'s options for `pages` as a tree, without pages
 /// whose parents are not listed, the page `selected` marked.
-pub(crate) fn page_options(pages: &[Post], selected: u64) -> String {
+pub(crate) fn page_options(pages: &[Post], selected: &str) -> String {
     let mut children: HashMap<u64, Vec<&Post>> = HashMap::new();
     for page in pages {
         children.entry(page.parent).or_default().push(page);
@@ -867,11 +873,7 @@ pub(crate) fn page_options(pages: &[Post], selected: u64) -> String {
         out.push_str(&format!(
             "\t<option class=\"level-{depth}\" value=\"{}\"{}>{}{}</option>\n",
             page.id,
-            if page.id == selected {
-                " selected=\"selected\""
-            } else {
-                ""
-            },
+            walker_selected(page.id.to_string() == selected),
             "&nbsp;".repeat(depth * 3),
             esc_html(title.as_bytes())
         ));
@@ -967,7 +969,7 @@ fn inline_edit(
     let posts = kind == POST;
     let formats = if posts { site.post_formats() } else { &[] };
     let (attributes, bulk_attributes) = if kind.hierarchical() {
-        let options = parent_options(site, kind);
+        let options = parent_options(site, kind, "");
         (
             INLINE_ATTRIBUTES.replace("%parent%", &parent_dropdown(&options, false)),
             INLINE_BULK_ATTRIBUTES.replace("%parent%", &parent_dropdown(&options, true)),
@@ -1283,11 +1285,7 @@ pub(crate) fn term_options(terms: &[Term], selected: &str) -> String {
         Walk::Start(term) => out.push_str(&format!(
             "\t<option class=\"level-{depth}\" value=\"{}\"{}>{}{}</option>\n",
             term.id,
-            if term.id.to_string() == selected {
-                " selected=\"selected\""
-            } else {
-                ""
-            },
+            walker_selected(term.id.to_string() == selected),
             "&nbsp;".repeat(depth * 3),
             text(&wptexturize(&term.name, &[]))
         )),
@@ -2130,6 +2128,9 @@ pub fn edit(
         scripts: &["inline-edit-post", "heartbeat"],
         late_scripts: &[],
         script_data: &[],
+        script_after: &[],
+        late_styles: &[],
+        admin_head: "",
         admin_footer: "",
         footer_scripts: "",
         content: &content,

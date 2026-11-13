@@ -210,7 +210,7 @@ impl Role {
 
     /// The options the variants of `reference/settings-more/variants.php`
     /// give.
-    fn settings_option(&self, name: &str) -> Option<&'static [u8]> {
+    fn more_settings_option(&self, name: &str) -> Option<&'static [u8]> {
         let value: &[u8] = match (self.variant(), name) {
             ("s2discussion", "default_ping_status" | "default_comment_status") => b"closed",
             (
@@ -340,7 +340,72 @@ impl Role {
 
     /// The posts and pages of the variant.
     fn posts(&self) -> Vec<hyscribe_model::Post> {
-        crate::posts::content::posts(self.listing(), self.variant() == "empty")
+        let mut posts = crate::posts::content::posts(self.listing(), self.variant() == "empty");
+        match self.variant() {
+            "s1nopages" | "s1hidden" => posts.retain(|post| post.post_type != "page"),
+            // `reference/settings/content.sql`.
+            "s1media" => posts.extend([("2025-03-04", "inherit"), ("2024-12-01", "trash")].map(
+                |(day, status)| hyscribe_model::Post {
+                    post_type: "attachment".into(),
+                    status: status.into(),
+                    date: format!("{day} 10:00:00"),
+                    ..hyscribe_model::Post::default()
+                },
+            )),
+            _ => {}
+        }
+        posts
+    }
+
+    /// The options `reference/settings/variants.php` gives.
+    fn settings_option(&self, name: &str) -> Option<&'static str> {
+        let value = match (self.variant(), name) {
+            // `WP_SITEURL` and `WP_HOME`.
+            (_, "siteurl" | "home") => SITE,
+            ("s1static" | "s1same" | "s1privacy" | "s1unset" | "s1hidden", "show_on_front") => {
+                "page"
+            }
+            ("s1icon", "site_icon") => "5",
+            ("s1static" | "s1same" | "s1privacy", "page_on_front") => "2",
+            ("s1same", "page_for_posts") => "2",
+            ("s1privacy", "page_for_posts") => "3",
+            ("s1private", "blog_public") => "0",
+            ("s1private", "rss_use_excerpt") => "1",
+            ("s1general", "blogname") => "My <b>\"Site\"</b> & Co",
+            ("s1general", "blogdescription") => "Tag 'line' &amp; more",
+            ("s1general", "date_format") => "j F Y",
+            ("s1general", "time_format") => "H:i",
+            ("s1general", "start_of_week") => "0",
+            ("s1general", "users_can_register") => "1",
+            ("s1general", "default_role") => "author",
+            ("s1general", "new_admin_email") => "new<b>@example.test",
+            ("s1general", "timezone_string") => "America/New_York",
+            ("s1offset" | "s1plus", "timezone_string") => "",
+            ("s1offset", "gmt_offset") => "-5.5",
+            ("s1offset", "date_format") => "Y-m-d",
+            ("s1offset", "time_format") => "g:i A",
+            ("s1etc", "timezone_string") => "Etc/GMT+3",
+            ("s1etc", "date_format") => "",
+            ("s1kolkata", "timezone_string") => "Asia/Kolkata",
+            ("s1kolkata", "default_role") => "editor",
+            ("s1calcutta", "timezone_string") => "Asia/Calcutta",
+            ("s1calcutta", "new_admin_email") => "admin@default-install.test",
+            ("s1utc", "timezone_string") => "UTC",
+            ("s1utc", "start_of_week") => "6",
+            ("s1plus", "gmt_offset") => "5.75",
+            ("s1writing", "initial_db_version") => "30000",
+            ("s1db", "initial_db_version") => "32453",
+            ("s1writing", "use_smilies" | "use_balanceTags" | "link_manager_enabled") => "1",
+            ("s1writing", "default_category") => "99",
+            ("s1writing", "default_post_format") => "aside",
+            ("s1writing", "mailserver_url") => "mail.example.test",
+            ("s1writing", "mailserver_port") => "995",
+            ("s1writing", "mailserver_login") => "me@example.test",
+            ("s1writing", "mailserver_pass") => "p\"w&<x>",
+            ("s1writing", "ping_sites") => "http://a.test/\nhttp://b.test/?x=<y>&z",
+            _ => return None,
+        };
+        Some(value)
     }
 }
 
@@ -376,7 +441,10 @@ impl CapabilityData for WithPost<'_> {
 
 impl CapabilityData for Role {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
-        options().get(name).cloned()
+        let set = self
+            .settings_option(name)
+            .map(|value| value.as_bytes().to_vec());
+        set.or_else(|| options().get(name).cloned())
     }
     /// User 1's role, less the capability a `u3no` variant denies, and the
     /// other users' as `reference/user-edit/variants.php` gives them.
@@ -512,7 +580,7 @@ impl Urls for Role {
 impl Role {
     /// The REST API's path, pretty with a permalink structure.
     fn rest_path(&self) -> &'static str {
-        match self.settings_option("permalink_structure") {
+        match self.more_settings_option("permalink_structure") {
             Some(_) => "wp-json/",
             None => "index.php?rest_route=/",
         }
@@ -674,6 +742,16 @@ impl crate::users::UsersSite for Role {
     }
     fn author_url(&self, id: u64) -> String {
         format!("{SITE}/?author={id}")
+    }
+}
+
+impl crate::settings::SettingsSite for Role {
+    /// The fixture's `wp-config.php` sets both addresses.
+    fn defined(&self, name: &str) -> bool {
+        ["WP_HOME", "WP_SITEURL"].contains(&name) && self.variant() != "s1undefined"
+    }
+    fn random_key(&self) -> String {
+        "%password%".into()
     }
 }
 
@@ -1029,6 +1107,9 @@ impl crate::posts::PostsSite for Role {
         format!("{SITE}/?{query}={}", post.id)
     }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
+        if let Some(value) = self.settings_option(name) {
+            return Some(value.as_bytes().to_vec());
+        }
         if name == "sticky_posts" && (self.listing() || self.variant() == "empty") {
             return Some(b"a:2:{i:0;i:304;i:1;i:306;}".to_vec());
         }
@@ -1046,7 +1127,7 @@ impl crate::posts::PostsSite for Role {
         if name == "category_children" && self.variant() == "stale" {
             return Some(b"a:0:{}".to_vec());
         }
-        if let Some(value) = self.settings_option(name) {
+        if let Some(value) = self.more_settings_option(name) {
             return Some(value.to_vec());
         }
         if name == "show_avatars" && ["noavatars", "u3noavatars"].contains(&self.variant())

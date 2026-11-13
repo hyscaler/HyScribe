@@ -1,0 +1,159 @@
+
+<div class="wrap">
+<h1>General Settings</h1>
+
+<form method="post" action="options.php" novalidate="novalidate">
+%fields%
+<table class="form-table" role="presentation">
+
+<tr>
+<th scope="row"><label for="blogname">Site Title</label></th>
+<td><input name="blogname" type="text" id="blogname" value="%blogname%" class="regular-text" /></td>
+</tr>
+
+<tr>
+<th scope="row"><label for="blogdescription">Tagline</label></th>
+<td><input name="blogdescription" type="text" id="blogdescription" aria-describedby="tagline-description" value="%blogdescription%" class="regular-text" />
+<p class="description" id="tagline-description">In a few words, explain what this site is about. Example: &#8220;Just another WordPress site.&#8221;</p></td>
+</tr>
+
+<tr class="hide-if-no-js site-icon-section">
+<th scope="row">Site Icon</th>
+<td>
+	
+	<style>
+	:root {
+		--site-icon-url: url( '' );
+	}
+	</style>
+
+	<div id="site-icon-preview" class="site-icon-preview settings  hidden">
+		<div class="direction-wrap">
+			<img id="app-icon-preview" src="" class="app-icon-preview" alt="" />
+			<div class="site-icon-preview-browser">
+				<svg role="img" aria-hidden="true" fill="none" xmlns="http://www.w3.org/2000/svg" class="browser-buttons"><path fill-rule="evenodd" clip-rule="evenodd" d="M0 20a6 6 0 1 1 12 0 6 6 0 0 1-12 0Zm18 0a6 6 0 1 1 12 0 6 6 0 0 1-12 0Zm24-6a6 6 0 1 0 0 12 6 6 0 0 0 0-12Z" /></svg>
+				<div class="site-icon-preview-tab">
+					<img id="browser-icon-preview" src="" class="browser-icon-preview" alt="" />
+					<div class="site-icon-preview-site-title" id="site-icon-preview-site-title" aria-hidden="true">%title%</div>
+						<svg role="img" aria-hidden="true" fill="none" xmlns="http://www.w3.org/2000/svg" class="close-button">
+							<path d="M12 13.0607L15.7123 16.773L16.773 15.7123L13.0607 12L16.773 8.28772L15.7123 7.22706L12 10.9394L8.28771 7.22705L7.22705 8.28771L10.9394 12L7.22706 15.7123L8.28772 16.773L12 13.0607Z" />
+						</svg>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<input type="hidden" name="site_icon" id="site_icon_hidden_field" value="%site_icon%" />
+	<div class="site-icon-action-buttons">
+		<button type="button"
+			id="choose-from-library-button"
+			class="upload-button button-hero button"
+			data-alt-classes="button"
+			data-size="512"
+			data-choose-text="Choose a Site Icon"
+			data-update-text="Change Site Icon"
+			data-update="Set as Site Icon"
+			data-state=""
+
+		>
+							Choose a Site Icon					</button>
+		<button
+			id="js-remove-site-icon"
+			type="button"
+			class="button button-secondary reset remove-site-icon hidden"		>
+			Remove Site Icon		</button>
+	</div>
+
+	<p class="description">
+		The Site Icon is what you see in browser tabs, bookmark bars, and within the WordPress mobile apps. It should be square and at least <strong>512 by 512</strong> pixels.	</p>
+
+</td>
+</tr>
+
+	
+<tr>
+<th scope="row"><label for="siteurl">WordPress Address (URL)</label></th>
+<td><input name="siteurl" type="url" id="siteurl" value="%siteurl%"%siteurl_disabled% class="regular-text code%siteurl_class%" /></td>
+</tr>
+
+<tr>
+<th scope="row"><label for="home">Site Address (URL)</label></th>
+<td><input name="home" type="url" id="home" aria-describedby="home-description" value="%home%"%home_disabled% class="regular-text code%home_class%" />
+	%home_description%</td>
+</tr>
+
+
+<tr>
+<th scope="row"><label for="new_admin_email">Administration Email Address</label></th>
+<td><input name="new_admin_email" type="email" id="new_admin_email" aria-describedby="new-admin-email-description" value="%admin_email%" class="regular-text ltr" />
+<p class="description" id="new-admin-email-description">This address is used for admin purposes. If you change this, an email will be sent to your new address to confirm it. <strong>The new address will not become active until confirmed.</strong></p>
+%pending%</td>
+</tr>
+
+<tr>
+<th scope="row">Membership</th>
+<td><fieldset><legend class="screen-reader-text"><span>Membership</span></legend><label for="users_can_register">
+<input name="users_can_register" type="checkbox" id="users_can_register" value="1" %register% />
+	Anyone can register</label>
+</fieldset></td>
+</tr>
+
+<tr>
+<th scope="row"><label for="default_role">New User Default Role</label></th>
+<td>
+		<select name="default_role" id="default_role">%roles%</select>
+</td>
+</tr>
+
+		<tr>
+		<th scope="row"><label for="WPLANG">Site Language<span class="dashicons dashicons-translation" aria-hidden="true"></span></label></th>
+		<td>
+			<select name="WPLANG" id="WPLANG"><option value="" lang="en" data-installed="1" selected='selected'>English (United States)</option></select>		</td>
+	</tr>
+	<tr>
+<th scope="row"><label for="timezone_string">Timezone</label></th>
+<td>
+
+<select id="timezone_string" name="timezone_string" aria-describedby="timezone-description">
+	%zones%</select>
+
+<p class="description" id="timezone-description">
+Choose either a city in the same timezone as you or a <abbr>UTC</abbr> (Coordinated Universal Time) time offset.</p>
+
+<p class="timezone-info">
+	<span id="utc-time">
+	Universal time is <code>%utc%</code>.	</span>
+%local%</p>
+
+%zone_info%</td>
+</tr>
+
+<tr>
+<th scope="row">Date Format</th>
+<td>
+	<fieldset><legend class="screen-reader-text"><span>Date Format</span></legend>
+%date_formats%	</fieldset>
+</td>
+</tr>
+
+<tr>
+<th scope="row">Time Format</th>
+<td>
+	<fieldset><legend class="screen-reader-text"><span>Time Format</span></legend>
+%time_formats%	<p class='date-time-doc'><a href="https://wordpress.org/documentation/article/customize-date-and-time-format/">Documentation on date and time formatting</a>.</p>
+	</fieldset>
+</td>
+</tr>
+<tr>
+<th scope="row"><label for="start_of_week">Week Starts On</label></th>
+<td><select name="start_of_week" id="start_of_week">
+%weekdays%</select></td>
+</tr>
+</table>
+
+
+<p class="submit"><input type="submit" name="submit" id="submit" class="button button-primary" value="Save Changes"  /></p></form>
+
+</div>
+

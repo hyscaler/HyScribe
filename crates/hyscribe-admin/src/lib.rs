@@ -13,6 +13,7 @@ pub mod menu;
 pub mod page;
 pub mod posts;
 pub mod profile;
+pub mod settings;
 pub mod settings_more;
 pub mod terms;
 #[cfg(test)]

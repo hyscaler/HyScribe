@@ -32,14 +32,16 @@ pub fn hash_password(password: &[u8]) -> io::Result<String> {
     hash_from(password, salt)
 }
 
-/// `wp_generate_password( $length )`: letters, digits and the special
-/// characters, drawn from the kernel's random source.
-pub fn generate_password(length: usize) -> io::Result<String> {
-    sessions::generated(
-        random_bytes,
-        length,
-        b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()",
-    )
+/// `wp_generate_password( $length, $special_chars )`, drawn from the
+/// kernel: letters, digits and, when asked, the special characters.
+pub fn generate_password(length: usize, special_chars: bool) -> io::Result<String> {
+    let chars = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()";
+    let chars = if special_chars {
+        &chars[..]
+    } else {
+        &chars[..62]
+    };
+    sessions::generated(random_bytes, length, chars)
 }
 
 /// Fills `buf` from the kernel's random source.

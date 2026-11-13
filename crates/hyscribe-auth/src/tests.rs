@@ -173,12 +173,19 @@ fn nonce_ticks_are_half_days() {
 }
 
 /// `wp_generate_password( 24 )` draws its characters, special ones among
-/// them, from the kernel.
+/// them, from the kernel; without special characters, only letters and
+/// digits.
 #[test]
 fn passwords_are_generated() {
-    let password = generate_password(24).unwrap();
+    let password = generate_password(24, true).unwrap();
     assert_eq!(password.len(), 24);
     let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()";
     assert!(password.chars().all(|c| chars.contains(c)));
-    assert_ne!(password, generate_password(24).unwrap());
+    assert_ne!(password, generate_password(24, true).unwrap());
+    let plain: String = (0..20)
+        .map(|_| generate_password(8, false).unwrap())
+        .collect();
+    assert_eq!(plain.len(), 160);
+    assert!(plain.chars().all(|c| c.is_ascii_alphanumeric()));
+    assert!(plain.contains(|c: char| c.is_ascii_digit()));
 }

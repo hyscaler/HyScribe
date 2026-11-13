@@ -43,7 +43,8 @@ impl Zone {
     }
 }
 
-const DAYS: [&str; 7] = [
+/// The weekdays' names, from Sunday.
+pub const DAYS: [&str; 7] = [
     "Sunday",
     "Monday",
     "Tuesday",

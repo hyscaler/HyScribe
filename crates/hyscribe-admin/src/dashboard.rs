@@ -967,6 +967,9 @@ pub fn dashboard(
             &[]
         },
         script_data: &script_data,
+        script_after: &[],
+        late_styles: &[],
+        admin_head: "",
         admin_footer: &admin_footer,
         footer_scripts: &footer_scripts,
         content: &content,

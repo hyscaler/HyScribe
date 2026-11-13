@@ -122,6 +122,9 @@ fn settings_page(
         canonical,
         origin,
         view: None,
+        script_after: &[],
+        late_styles: &[],
+        admin_head: "",
     };
     admin_page(site, &page, browser)
 }
@@ -528,7 +531,7 @@ pub fn privacy(
     let choose = if pages.is_empty() {
         String::new()
     } else {
-        let options = page_options(&pages, u64::try_from(id).unwrap_or_default());
+        let options = page_options(&pages, &id.to_string());
         let select = if options.is_empty() {
             String::new()
         } else {

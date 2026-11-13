@@ -22,6 +22,7 @@ use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
 use hyscribe_admin::posts::{Answer, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids};
 use hyscribe_admin::profile::{EditArgs, ProfileSite, Request, profile, user_edit};
+use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
 use hyscribe_admin::settings_more;
 use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
 use hyscribe_admin::users::{ListedUser, UserArgs, UserQuery, UsersSite, user_order, users};
@@ -651,7 +652,16 @@ impl ProfileSite for Admin<'_> {
         sessions.map_or(0, |sessions| sessions.count(id, self.reads.now))
     }
     fn generated_password(&self) -> String {
-        hyscribe_auth::generate_password(24).unwrap_or_default()
+        hyscribe_auth::generate_password(24, true).unwrap_or_default()
+    }
+}
+
+impl SettingsSite for Admin<'_> {
+    fn defined(&self, name: &str) -> bool {
+        self.site.defined.contains(&name)
+    }
+    fn random_key(&self) -> String {
+        hyscribe_auth::generate_password(8, false).unwrap_or_default()
     }
 }
 
@@ -930,7 +940,26 @@ fn screen(
         uri: request_uri,
         browser,
     };
+    // The Settings screens take no arguments, and their forms are not saved.
+    let settings = !request_uri.contains('?');
     let page = match path {
+        "/hs-admin/options-general" | "/hs-admin/options-writing" | "/hs-admin/options-reading"
+            if settings =>
+        {
+            let answer = match path {
+                "/hs-admin/options-general" => {
+                    general(admin, &canonical, origin, request_uri, browser)?
+                }
+                "/hs-admin/options-writing" => {
+                    writing(admin, &canonical, origin, request_uri, browser)
+                }
+                _ => reading(admin, &canonical, origin, request_uri, browser)?,
+            };
+            match answered(admin, answer) {
+                Ok(html) => Some(html),
+                Err(response) => return Some(*response),
+            }
+        }
         "/hs-admin/tools" => hyscribe_admin::tools::tools(admin, &canonical, origin, browser),
         // HTTPS offers application passwords, whose list is not ported.
         "/hs-admin/profile" => {

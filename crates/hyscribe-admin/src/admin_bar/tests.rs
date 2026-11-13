@@ -4,7 +4,7 @@ use hyscribe_testkit::unhex;
 
 use super::*;
 use crate::menu::link;
-use crate::tests::{Role, SITE, first_difference, options};
+use crate::tests::{Role, SITE, first_difference};
 
 impl BarSite for Role {
     fn home_url(&self) -> String {
@@ -14,7 +14,8 @@ impl BarSite for Role {
         format!("{SITE}/hs-admin/{}", link(path))
     }
     fn blogname(&self) -> String {
-        String::from_utf8_lossy(&options()["blogname"]).into_owned()
+        String::from_utf8_lossy(&crate::posts::PostsSite::option(self, "blogname").unwrap())
+            .into_owned()
     }
     fn logout_url(&self) -> String {
         format!("{SITE}/hs-login?action=logout&amp;_wpnonce=%nonce:log-out%")

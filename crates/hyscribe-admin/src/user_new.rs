@@ -86,6 +86,9 @@ pub fn user_new(site: &dyn ProfileSite, request: &Request) -> Answer {
         canonical: request.canonical,
         origin: request.origin,
         view: None,
+        script_after: &[],
+        late_styles: &[],
+        admin_head: "",
     };
     admin_page(site, &page, request.browser).map_or(
         Answer::Denied("Sorry, you are not allowed to access this page."),

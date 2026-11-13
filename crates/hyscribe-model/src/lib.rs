@@ -148,6 +148,10 @@ pub struct PostQuery {
     pub search: Vec<String>,
     /// `exact`: a term must be a whole title, excerpt or content.
     pub exact: bool,
+    /// `s` as searched, which the relevance order matches as a phrase.
+    pub sentence: String,
+    /// `search_terms_count`: the words of `s` before any were dropped.
+    pub search_count: usize,
     /// `YEAR(post_date)`.
     pub year: Option<u64>,
     /// `MONTH(post_date)`.

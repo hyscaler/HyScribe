@@ -39,6 +39,25 @@ fn post(
     }
 }
 
+/// The contents of posts 301 to 315.
+const CONTENTS: [&str; 15] = [
+    "Draft words",
+    "Waiting",
+    "Soon",
+    "Mine only",
+    "Hidden",
+    "On top",
+    "Gone",
+    "Body",
+    "Filed",
+    "Late",
+    "Theirs",
+    "Left",
+    "Theirs only",
+    "Old edit",
+    "New edit",
+];
+
 /// Every post of type `post`, the fixture's first.
 pub(crate) fn posts() -> Vec<Post> {
     let open = ("open", "open");
@@ -235,6 +254,13 @@ pub(crate) fn posts() -> Vec<Post> {
                 314 => post.modified = "2026-10-30 10:00:00".into(),
                 _ => {}
             }
+            if post.id > 1 {
+                post.content = CONTENTS
+                    .get(usize::try_from(post.id - 301).unwrap())
+                    .unwrap()
+                    .as_bytes()
+                    .to_vec();
+            }
             post
         })
         .collect()
@@ -331,21 +357,31 @@ pub(crate) fn list(query: &PostQuery) -> (Vec<Post>, u64) {
                     filter.status == post.status && filter.author.is_none_or(|a| a == post.author)
                 })
                 && (query.authors.is_empty() || query.authors.contains(&post.author))
+                && query
+                    .search
+                    .iter()
+                    .all(|term| searched(post, term, query.exact))
         })
         .collect();
-    // `order_by()` always gives a column.
-    let (column, ascending) = query
-        .order
-        .first()
-        .copied()
-        .unwrap_or((OrderBy::Date, false));
     found.sort_by(|a, b| {
-        let order = match column {
-            OrderBy::Title => a.title.cmp(&b.title),
-            OrderBy::Modified => a.modified.cmp(&b.modified),
-            _ => a.date.cmp(&b.date),
-        };
-        if ascending { order } else { order.reverse() }
+        query
+            .order
+            .iter()
+            .map(|&(column, ascending)| {
+                let order = match column {
+                    OrderBy::Relevance => rank(a, query).cmp(&rank(b, query)),
+                    OrderBy::Title => a.title.cmp(&b.title),
+                    OrderBy::Modified => a.modified.cmp(&b.modified),
+                    _ => a.date.cmp(&b.date),
+                };
+                if ascending || column == OrderBy::Relevance {
+                    order
+                } else {
+                    order.reverse()
+                }
+            })
+            .find(|order| order.is_ne())
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
     let total = found.len() as u64;
     let page = found
@@ -354,6 +390,61 @@ pub(crate) fn list(query: &PostQuery) -> (Vec<Post>, u64) {
         .take(query.limit as usize)
         .collect();
     (page, total)
+}
+
+/// The lowercase title, excerpt and content of `post`, as MySQL compares.
+fn fields(post: &Post) -> [String; 3] {
+    [&post.title, &post.excerpt, &post.content]
+        .map(|field| String::from_utf8_lossy(field).to_lowercase())
+}
+
+/// A search `term` matches `post`: in a field, or as one when `exact`; a
+/// term after `-` in none.
+fn searched(post: &Post, term: &str, exact: bool) -> bool {
+    let (term, wanted) = match term.strip_prefix('-') {
+        Some(term) => (term.to_lowercase(), false),
+        None => (term.to_lowercase(), true),
+    };
+    let found = fields(post).iter().any(|field| {
+        if exact {
+            *field == term
+        } else {
+            field.contains(&term)
+        }
+    });
+    found == wanted
+}
+
+/// `parse_search_order()`'s rank of `post`, lowest first.
+pub(crate) fn rank(post: &Post, query: &PostQuery) -> u8 {
+    let [title, excerpt, content] = fields(post);
+    let titled: Vec<String> = query
+        .search
+        .iter()
+        .filter(|term| !term.starts_with('-'))
+        .map(|term| term.to_lowercase())
+        .collect();
+    if query.search_count < 2 {
+        return u8::from(!titled.iter().take(1).any(|term| title.contains(term)));
+    }
+    let phrase = query.sentence.to_lowercase();
+    let whole = !query
+        .sentence
+        .split(char::is_whitespace)
+        .any(|word| word.starts_with('-'));
+    if whole && title.contains(&phrase) {
+        1
+    } else if titled.len() < 7 && titled.iter().all(|term| title.contains(term)) {
+        2
+    } else if titled.len() < 7 && titled.iter().any(|term| title.contains(term)) {
+        3
+    } else if whole && excerpt.contains(&phrase) {
+        4
+    } else if whole && content.contains(&phrase) {
+        5
+    } else {
+        6
+    }
 }
 
 /// The posts of each status, private ones only by `private_author`.

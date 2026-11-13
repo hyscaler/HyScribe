@@ -49,9 +49,9 @@ pub fn views(heading: &str, views: &[View]) -> String {
     )
 }
 
-/// `search_box( $text, $input_id )` of a list not searched, the requested
+/// `search_box( $text, $input_id )` of the search `query`, the requested
 /// `orderby` and `order` kept in hidden fields.
-pub fn search_box(label: &str, input_id: &str, order: &[(&str, &str)]) -> String {
+pub fn search_box(label: &str, input_id: &str, query: &str, order: &[(&str, &str)]) -> String {
     let mut out = String::new();
     for (name, value) in order
         .iter()
@@ -64,7 +64,8 @@ pub fn search_box(label: &str, input_id: &str, order: &[(&str, &str)]) -> String
     }
     let id = esc_attr(format!("{input_id}-search-input").as_bytes());
     out.push_str(&format!(
-        "<p class=\"search-box\">\n\t<label class=\"screen-reader-text\" for=\"{id}\">{label}:</label>\n\t<input type=\"search\" id=\"{id}\" name=\"s\" value=\"\" />\n\t\t<input type=\"submit\" id=\"search-submit\" class=\"button button-compact\" value=\"{}\"  /></p>\n\t\t",
+        "<p class=\"search-box\">\n\t<label class=\"screen-reader-text\" for=\"{id}\">{label}:</label>\n\t<input type=\"search\" id=\"{id}\" name=\"s\" value=\"{}\" />\n\t\t<input type=\"submit\" id=\"search-submit\" class=\"button button-compact\" value=\"{}\"  /></p>\n\t\t",
+        esc_attr(query.as_bytes()),
         esc_attr(label.as_bytes())
     ));
     out

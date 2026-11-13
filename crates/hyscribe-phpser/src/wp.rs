@@ -109,6 +109,34 @@ pub fn wp_basename(path: &[u8]) -> Vec<u8> {
     path.get(start..).unwrap_or_default().to_vec()
 }
 
+/// `addslashes()`, which `wp_magic_quotes()` applies to the request.
+pub fn addslashes(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    for &b in text {
+        match b {
+            b'\'' | b'"' | b'\\' => out.extend([b'\\', b]),
+            0 => out.extend(b"\\0"),
+            _ => out.push(b),
+        }
+    }
+    out
+}
+
+/// PHP's `stripslashes()`: a backslash escapes the next byte, `\0` is NUL.
+pub fn stripslashes(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut bytes = text.iter();
+    while let Some(&b) = bytes.next() {
+        match (b == b'\\').then(|| bytes.next()) {
+            None => out.push(b),
+            Some(Some(b'0')) => out.push(0),
+            Some(Some(&next)) => out.push(next),
+            Some(None) => {}
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,5 +238,11 @@ mod tests {
         ] {
             assert_eq!(wp_basename(path), name);
         }
+    }
+
+    #[test]
+    fn slashes_go_on_and_come_off() {
+        assert_eq!(addslashes(b"a'b\"c\\d\0e"), b"a\\'b\\\"c\\\\d\\0e");
+        assert_eq!(stripslashes(b"a\\'b\\0c\\"), b"a'b\0c");
     }
 }

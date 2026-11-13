@@ -4,7 +4,7 @@
 
 use hyscribe_auth::check_password;
 use hyscribe_kses::{esc_attr, esc_html, esc_url, str_contains, url_query};
-use hyscribe_phpser::{Value, is_empty_string, parse_str, php_trim, urlencode};
+use hyscribe_phpser::{Value, addslashes, is_empty_string, parse_str, php_trim, urlencode};
 use hyscribe_render::formatting::{is_email, sanitize_user};
 
 use crate::assets::{Assets, Urls};
@@ -107,19 +107,6 @@ fn message(code: &'static str, text: String) -> Notice {
         text,
         info: true,
     }
-}
-
-/// `addslashes()`, as `wp_magic_quotes()` applies it.
-pub fn slash(text: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(text.len());
-    for &b in text {
-        match b {
-            b'\'' | b'"' | b'\\' => out.extend([b'\\', b]),
-            0 => out.extend(b"\\0"),
-            _ => out.push(b),
-        }
-    }
-    out
 }
 
 /// A string value, or none for an array or a missing key.
@@ -282,7 +269,7 @@ pub fn login(site: &dyn Site, request: &Request) -> Login {
     });
     let redirect_to = match as_text(request.request("redirect_to")) {
         Some(to) => {
-            let to = slash(to);
+            let to = addslashes(to);
             match to.strip_prefix(b"http://") {
                 Some(rest) if secure && str_contains(&to, b"wp-admin") => {
                     [&b"https://"[..], rest].concat()
@@ -295,7 +282,7 @@ pub fn login(site: &dyn Site, request: &Request) -> Login {
     };
     let reauth = request.request("reauth").is_some_and(|v| !v.is_empty());
     let login = posted("log").unwrap_or_default();
-    let password = slash(posted("pwd").unwrap_or_default());
+    let password = addslashes(posted("pwd").unwrap_or_default());
     let remember = request.posted("rememberme").is_some_and(|v| !v.is_empty());
     let mut user = authenticate(site, login, &password, &request.session, secure);
     if !request.logged_in_cookie && request.posted("testcookie").is_some() && !request.test_cookie {
@@ -353,7 +340,7 @@ pub fn login(site: &dyn Site, request: &Request) -> Login {
     } else if let Some(to) =
         redirect_get.filter(|to| str_contains(to, b"wp-admin/authorize-application.php"))
     {
-        let query = url_query(&slash(to)).map(|query| parse_str(&query));
+        let query = url_query(&addslashes(to)).map(|query| parse_str(&query));
         let app = query
             .as_ref()
             .and_then(|q| q.get_str("app_name"))
@@ -409,7 +396,7 @@ pub fn login(site: &dyn Site, request: &Request) -> Login {
 pub fn logout_confirmation(site: &dyn Site, request: &Request) -> Vec<u8> {
     let title = format!("You are attempting to log out of {}", site.name());
     let redirect = as_text(request.request("redirect_to"))
-        .map(slash)
+        .map(addslashes)
         .unwrap_or_default();
     let mut query = String::from("?action=logout");
     if !is_empty_string(&redirect) {

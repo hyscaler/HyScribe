@@ -1310,17 +1310,24 @@ fn posts_sql(query: &PostQuery) -> Sql {
     ));
     post_criteria(&mut sql, query);
     sql.push(" ORDER BY ");
-    if query.order.is_empty() {
+    let ranked = ranked(query);
+    let order: Vec<(OrderBy, bool)> = query
+        .order
+        .iter()
+        .copied()
+        .filter(|(column, _)| ranked || *column != OrderBy::Relevance)
+        .collect();
+    if order.is_empty() {
         sql.push("post_date DESC");
     }
-    for (i, &(column, ascending)) in query.order.iter().enumerate() {
+    for (i, &(column, ascending)) in order.iter().enumerate() {
         if i > 0 {
             sql.push(", ");
         }
         match column {
             OrderBy::Relevance => {
-                sql.push("post_title LIKE ?");
-                sql.bind(Bind::Text(like(&query.search.join(" "))));
+                relevance(&mut sql, query);
+                continue;
             }
             OrderBy::Seeded(seed) => {
                 sql.push("RAND(?)");
@@ -1345,6 +1352,78 @@ fn posts_sql(query: &PostQuery) -> Sql {
     sql.bind(Bind::Int(query.limit.into()));
     sql.bind(Bind::Int(query.offset.into()));
     sql
+}
+
+/// The terms of `query`'s search not left out.
+fn titled(query: &PostQuery) -> Vec<&String> {
+    query
+        .search
+        .iter()
+        .filter(|term| !term.starts_with('-'))
+        .collect()
+}
+
+/// The phrase match of `parse_search_order()`: none when a word of the
+/// search, split on ASCII whitespace as PCRE's `\s`, is left out.
+fn phrase(query: &PostQuery) -> Option<String> {
+    let left_out = query
+        .sentence
+        .split([' ', '\t', '\n', '\x0B', '\x0C', '\r'])
+        .any(|word| word.starts_with('-'));
+    (!left_out).then(|| like(&query.sentence))
+}
+
+/// `parse_search_order()` gives an order: a term in the title, and a
+/// phrase or fewer than seven terms to rank by.
+fn ranked(query: &PostQuery) -> bool {
+    let titled = titled(query).len();
+    titled > 0 && (titled < 7 || phrase(query).is_some())
+}
+
+/// `WP_Query::parse_search_order()`: the first term in the title for one
+/// word; with more, the CASE of the phrase and terms in each field.
+fn relevance(sql: &mut Sql, query: &PostQuery) {
+    let titled = titled(query);
+    let title = |term: &String, sql: &mut Sql| {
+        sql.push("post_title LIKE ?");
+        sql.bind(Bind::Text(like(term)));
+    };
+    if query.search_count < 2 {
+        for term in titled.iter().take(1) {
+            title(term, sql);
+        }
+        sql.push(" DESC");
+        return;
+    }
+    let phrase = phrase(query);
+    sql.push("(CASE ");
+    if let Some(phrase) = &phrase {
+        sql.push("WHEN post_title LIKE ? THEN 1 ");
+        sql.bind(Bind::Text(phrase.clone()));
+    }
+    // WordPress leaves out THEN 3 for one term, which repeats THEN 2.
+    if titled.len() < 7 {
+        for (joiner, then) in [(" AND ", " THEN 2 "), (" OR ", " THEN 3 ")] {
+            sql.push("WHEN ");
+            for (i, term) in titled.iter().enumerate() {
+                if i > 0 {
+                    sql.push(joiner);
+                }
+                title(term, sql);
+            }
+            sql.push(then);
+        }
+    }
+    if let Some(phrase) = phrase {
+        for when in [
+            "WHEN post_excerpt LIKE ? THEN 4 ",
+            "WHEN post_content LIKE ? THEN 5 ",
+        ] {
+            sql.push(when);
+            sql.bind(Bind::Text(phrase.clone()));
+        }
+    }
+    sql.push("ELSE 6 END)");
 }
 
 /// The `WHERE` criteria of [`posts_sql`]: posts of the query's statuses and

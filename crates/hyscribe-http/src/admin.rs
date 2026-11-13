@@ -19,7 +19,9 @@ use hyscribe_admin::posts::{Answer, ListArgs, PostsSite, edit, kept_ids, sorted_
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
 use hyscribe_db::{StatusOrder, StatusQuery};
 use hyscribe_model::{Post, PostQuery, Term, TermOrder, TermQuery, User};
-use hyscribe_phpser::{Key, Value, is_empty_string, parse_str, remove_query_arg, urlencode};
+use hyscribe_phpser::{
+    Key, Value, addslashes, is_empty_string, parse_str, remove_query_arg, stripslashes, urlencode,
+};
 use hyscribe_render::date::Zone;
 use hyscribe_render::site::{Archive, Site as RenderSite, Taxonomy};
 use tokio::runtime::Handle;
@@ -486,8 +488,18 @@ fn screen_headers() -> Vec<(header::HeaderName, String)> {
     headers
 }
 
-/// The posts list's term and date filters, which `main_query()` reads.
-const FILTERS: [&str; 5] = ["m", "cat", "category_name", "tag", "post_format"];
+/// The posts list's term, date and search filters, which `main_query()`
+/// reads.
+const FILTERS: [&str; 8] = [
+    "m",
+    "cat",
+    "category_name",
+    "tag",
+    "post_format",
+    "s",
+    "exact",
+    "sentence",
+];
 
 /// `WP_Query`'s `cat` once cleaned: sorted integers unless that leaves it
 /// empty.
@@ -536,6 +548,7 @@ fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
                             "m" => list.m = value.clone(),
                             "post_format" => list.post_format = value.clone(),
                             "cat" => list.cat = cat_var(&value),
+                            "s" => list.search = Some(value.clone()),
                             _ => {}
                         }
                         vars.insert(name, value);
@@ -566,6 +579,10 @@ fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
             month: query.month,
             day: query.day,
             time: query.time,
+            search: query.search,
+            exact: query.exact,
+            sentence: query.sentence,
+            search_count: query.search_count,
             ..PostQuery::default()
         };
         // `WP_Query` sets `cat` to the queried category.
@@ -594,7 +611,8 @@ fn screen(
             dashboard(admin, &canonical, origin, request_uri, browser)
         }
         "/hs-admin/edit" => {
-            let args = list_args(admin, request_uri)?;
+            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
+            let args = list_args(admin, &raw)?;
             match edit(admin, &args, &canonical, origin, request_uri, browser) {
                 Some(Answer::Redirect(to)) => {
                     return Some(redirect(screen_headers(), to.as_bytes()));
@@ -641,7 +659,9 @@ fn answer(
     let host = headers
         .get(header::HOST)
         .map_or(&b""[..], HeaderValue::as_bytes);
-    let requested = uri.path_and_query().map_or("", |p| p.as_str());
+    // `wp_magic_quotes()` slashes `$_SERVER['REQUEST_URI']` too.
+    let requested = addslashes(uri.path_and_query().map_or("", |p| p.as_str()).as_bytes());
+    let requested = String::from_utf8_lossy(&requested).into_owned();
     let here = [host, requested.as_bytes()].concat();
     let scheme: &[u8] = if https { b"https://" } else { b"http://" };
     let answer = match user {
@@ -663,7 +683,7 @@ fn answer(
                 let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
                 let url = text(&[scheme, &here].concat());
                 let origin = text(&[scheme, host].concat());
-                screen(&admin, uri.path(), requested, &url, &origin, &browser)
+                screen(&admin, uri.path(), &requested, &url, &origin, &browser)
                     .unwrap_or_else(|| response(StatusCode::NOT_IMPLEMENTED, nocache(), Vec::new()))
             })
         }

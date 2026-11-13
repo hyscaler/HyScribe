@@ -124,7 +124,13 @@ async fn logged_in_users_are_let_in() {
         .next()
         .unwrap()
         .to_string();
-    let response = get(&site, "/hs-admin/edit?s=hello", "127.0.0.1:8081", &auth).await;
+    let response = get(
+        &site,
+        "/hs-admin/edit?mode=excerpt",
+        "127.0.0.1:8081",
+        &auth,
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     // A page past the last goes to the last.
     let response = get(&site, "/hs-admin/edit?paged=9", "127.0.0.1:8081", &auth).await;
@@ -537,7 +543,7 @@ async fn the_posts_list_reads_its_arguments() {
             "/hs-admin/edit?post_status=%FF",
             "/hs-admin/edit?post_status[]=draft",
             "/hs-admin/edit?post_type=page",
-            "/hs-admin/edit?post_status=draft&s=x",
+            "/hs-admin/edit?post_status=draft&mode=list",
             "/hs-admin/edit?paged=%FF",
             "/hs-admin/edit?order=%FF",
             "/hs-admin/edit?author=%FF",
@@ -585,6 +591,19 @@ async fn the_posts_list_reads_its_arguments() {
             [hyscribe_model::TimeCondition::Hour(8)]
         );
         assert_eq!(filtered.filters.terms.len(), 1);
+        let searched = list_args(&admin, "/hs-admin/edit?s=hello+world&exact=1").unwrap();
+        assert_eq!(searched.search.as_deref(), Some("hello world"));
+        assert_eq!(searched.filters.search, ["hello", "world"]);
+        assert_eq!(searched.filters.search_count, 2);
+        assert_eq!(
+            (searched.filters.exact, searched.filters.sentence.as_str()),
+            (true, "hello world")
+        );
+        // `0` is `empty()`, which searches nothing; over 1600 bytes is none.
+        let zero = list_args(&admin, "/hs-admin/edit?s=0").unwrap();
+        assert!(zero.filters.search.is_empty());
+        let long = list_args(&admin, &format!("/hs-admin/edit?s={}", "x".repeat(1601))).unwrap();
+        assert!(long.filters.search.is_empty());
         // A category's slug chooses it in the filter, as `cat` does.
         let named = list_args(&admin, "/hs-admin/edit?category_name=uncategorized").unwrap();
         assert_eq!(named.cat, "1");

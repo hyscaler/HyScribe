@@ -83,6 +83,10 @@ for query in '?author=2' '?author=1' '?all_posts=1' '?show_sticky=1' '?m=202611'
   record content administrator "$query"
 done
 record content author '?all_posts=1'
+for query in '?s=edit' '?s=draft&post_status=draft' '?s=-later+e' '?s=edit&orderby=title&order=asc' \
+  '?s=new+edit' '?s=nothing+here' "?s=a'b%22c" '?s=Edited&exact=1' '?s=edited+lately&sentence=1'; do
+  record content administrator "$query"
+done
 for query in '?orderby=title&order=asc' '?orderby=title' '?post_status=publish&orderby=date&order=asc' '?order=desc'; do
   record content administrator "$query"
 done

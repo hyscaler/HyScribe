@@ -11,7 +11,7 @@
 use hyscribe_html::TagProcessor;
 use hyscribe_kses::esc_attr;
 use hyscribe_model::{FormatFilter, OrderBy, Post, PostQuery, TermFilter};
-use hyscribe_phpser::{Key, Value, absint, decode, isset, php_trim, urldecode};
+use hyscribe_phpser::{Key, Value, absint, decode, isset, php_trim, stripslashes, urldecode};
 
 use crate::blocks::Block;
 use crate::core_blocks::{Context, QueryContext, prepared};
@@ -286,8 +286,10 @@ pub(crate) fn query_vars(context: &Context<'_>, query: &Value, page: i64) -> Pos
     );
     vars.authors = field("author").map(authors).unwrap_or_default();
     if let Some(search) = field("search").filter(|v| !v.is_empty()) {
-        let text = stripslashes(&search.to_php_string());
-        vars.search = search_terms(&String::from_utf8_lossy(&text));
+        let text = String::from_utf8_lossy(&stripslashes(&search.to_php_string())).into_owned();
+        vars.search = search_terms(&text);
+        vars.sentence = text.replace(['\r', '\n'], "");
+        vars.search_count = search_count(&text);
         // Relevance first for `relevance`, or for an empty `orderBy`.
         if field("orderBy")
             .is_some_and(|by| by.is_empty() || urldecode(&by.to_php_string()) == b"relevance")
@@ -389,6 +391,14 @@ pub fn search_terms(search: &str) -> Vec<String> {
     terms
 }
 
+/// `search_terms_count`: the words of `search` before any are dropped, one
+/// when it has none.
+pub fn search_count(search: &str) -> usize {
+    search_matches(&search.replace(['\r', '\n'], ""))
+        .len()
+        .max(1)
+}
+
 /// The matches of `/".*?("|$)|((?<=[\t ",+])|^)[^\t ",+]+/` in `search`.
 fn search_matches(search: &str) -> Vec<&str> {
     let delimiter = |c: char| matches!(c, '\t' | ' ' | '"' | ',' | '+');
@@ -448,21 +458,6 @@ pub fn order_by(by: &Value, ascending: bool, query: &PostQuery) -> Vec<(OrderBy,
         return vec![(OrderBy::Date, ascending)];
     }
     order
-}
-
-/// PHP's `stripslashes()`: a backslash escapes the next byte, `\0` is NUL.
-pub(crate) fn stripslashes(text: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(text.len());
-    let mut bytes = text.iter();
-    while let Some(&b) = bytes.next() {
-        match (b == b'\\').then(|| bytes.next()) {
-            None => out.push(b),
-            Some(Some(b'0')) => out.push(0),
-            Some(Some(&next)) => out.push(next),
-            Some(None) => {}
-        }
-    }
-    out
 }
 
 /// `WP_Query::parse_orderby()`'s key: a post column, a random order, or

@@ -2156,6 +2156,22 @@ async fn an_empty_sentence_search_has_no_terms() {
         post_query(&site, &query("a\r\nb"), false, vec![], false).search,
         ["ab"]
     );
+    // A sentence is one word to the relevance order; a search counts its
+    // words, and one over 1600 bytes is none.
+    let words = post_query(&site, &query("red fox"), false, vec![], false);
+    assert_eq!(
+        (words.search_count, words.sentence.as_str()),
+        (1, "red fox")
+    );
+    let plain = |s: &str| HashMap::from([("s".to_string(), s.to_string())]);
+    assert_eq!(
+        post_query(&site, &plain("red fox"), false, vec![], false).search_count,
+        2
+    );
+    let long = post_query(&site, &plain(&"x".repeat(1600)), false, vec![], false);
+    assert_eq!(long.sentence.len(), 1600);
+    let longer = post_query(&site, &plain(&"x".repeat(1601)), false, vec![], false);
+    assert_eq!(longer.sentence, "");
 }
 
 /// Sitemaps are XML, off for a site search engines may not index, and have

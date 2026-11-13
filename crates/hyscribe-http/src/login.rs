@@ -16,7 +16,7 @@ use hyscribe_auth::cookie::{generate_auth_cookie, parse_auth_cookie};
 use hyscribe_auth::sessions::Origin;
 use hyscribe_auth::{create_nonce, nonce_tick};
 use hyscribe_model::{Credentials, UserField};
-use hyscribe_phpser::{Value, md5, parse_str, rawurlencode, urldecode, urlencode};
+use hyscribe_phpser::{Value, addslashes, md5, parse_str, rawurlencode, urldecode, urlencode};
 use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
@@ -543,7 +543,7 @@ fn logout(
         .and_then(Value::as_bytes)
         .filter(|to| !hyscribe_phpser::is_empty_string(to))
     {
-        Some(to) => login::slash(to),
+        Some(to) => addslashes(to),
         None => {
             let locale = String::from_utf8_lossy(&reads.locale(*user)).into_owned();
             reads

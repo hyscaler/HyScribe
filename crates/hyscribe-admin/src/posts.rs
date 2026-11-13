@@ -5,7 +5,8 @@
 use hyscribe_kses::{esc_attr, esc_html, esc_textarea, esc_url};
 use hyscribe_model::{OrderBy, Post, PostQuery, StatusFilter, Term, User};
 use hyscribe_phpser::{
-    Maybe, Value, add_query_arg, is_empty_string, maybe_unserialize, remove_query_arg, urldecode,
+    Maybe, Value, add_query_arg, addslashes, is_empty_string, maybe_unserialize, remove_query_arg,
+    urldecode,
 };
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::{convert_chars, ent2ncr, sanitize_text_field, wptexturize};
@@ -869,6 +870,8 @@ struct Listing {
     show_sticky: bool,
     author: String,
     author_query: String,
+    /// `$_GET['s']`, if given.
+    search: Option<String>,
     /// The filters' choices: `m`, `post_format` and `cat`.
     m: String,
     post_format: String,
@@ -1088,7 +1091,8 @@ fn list_content(
         desc: listing.order.as_deref() == Some("desc"),
     };
     let unpaged = text(&remove_query_arg(&[b"paged"], url.as_bytes()));
-    let kept = |value: &Option<String>| addslashes(value.as_deref().unwrap_or_default());
+    let kept =
+        |value: &Option<String>| text(&addslashes(value.as_deref().unwrap_or_default().as_bytes()));
     let order_fields = [
         ("orderby", kept(&listing.orderby)),
         ("order", kept(&listing.order)),
@@ -1098,27 +1102,46 @@ fn list_content(
         .map(|(name, value)| (*name, value.as_str()))
         .collect();
     let mut out = format!(
-        "<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\nPosts</h1>\n\n <a href=\"{}\" class=\"page-title-action\">Add Post</a>\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"posts-filter\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"post_status\" class=\"post_status_page\" value=\"{}\" />\n<input type=\"hidden\" name=\"post_type\" class=\"post_type_page\" value=\"post\" />\n\n{}\n{}\n",
+        "<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\nPosts</h1>\n\n <a href=\"{}\" class=\"page-title-action\">Add Post</a>{}\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"posts-filter\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"post_status\" class=\"post_status_page\" value=\"{}\" />\n<input type=\"hidden\" name=\"post_type\" class=\"post_type_page\" value=\"post\" />\n\n{}\n{}\n",
         text(&esc_url(
             BarSite::admin_url(site, "post-new.php").as_bytes()
         )),
+        // `get_search_query()`, the query var without line breaks.
+        match listing.search.as_deref().filter(|s| !s.is_empty()) {
+            Some(search) => format!(
+                "<span class=\"subtitle\">Search results for: <strong>{}</strong></span>",
+                // `parse_query()` empties a search over 1600 bytes.
+                if search.len() > 1600 {
+                    String::new()
+                } else {
+                    esc_attr(search.replace(['\r', '\n'], "").as_bytes())
+                }
+            ),
+            None => String::new(),
+        },
         views("Filter posts list", &links),
-        if listing.posts.is_empty() {
+        if listing.posts.is_empty()
+            && listing
+                .search
+                .as_deref()
+                .is_none_or(|s| is_empty_string(s.as_bytes()))
+        {
             String::new()
         } else {
-            search_box("Search Posts", "post", &order_fields)
+            let search = listing.search.as_deref().unwrap_or_default();
+            search_box("Search Posts", "post", search, &order_fields)
         },
         if is_empty_string(listing.filter.as_bytes()) {
             "all".to_string()
         } else {
-            esc_attr(addslashes(&listing.filter).as_bytes())
+            esc_attr(&addslashes(listing.filter.as_bytes()))
         },
         if is_empty_string(listing.author.as_bytes()) {
             String::new()
         } else {
             format!(
                 "<input type=\"hidden\" name=\"author\" value=\"{}\" />\n",
-                esc_attr(addslashes(&listing.author).as_bytes())
+                esc_attr(&addslashes(listing.author.as_bytes()))
             )
         },
         if listing.show_sticky {
@@ -1302,7 +1325,14 @@ fn sort(args: &ListArgs, query: &PostQuery) -> Vec<(OrderBy, bool)> {
         Some(order) => order.eq_ignore_ascii_case("asc"),
         None => args.status == "pending",
     };
-    order_by(&Value::String(orderby.into()), ascending, query)
+    let mut order = order_by(&Value::String(orderby.into()), ascending, query);
+    // A search with a term not left out is ordered by relevance first,
+    // unless another order is asked.
+    let titled = query.search.iter().any(|term| !term.starts_with('-'));
+    if titled && !query.exact && (is_empty_string(orderby.as_bytes()) || orderby == "relevance") {
+        order.insert(0, (OrderBy::Relevance, false));
+    }
+    order
 }
 
 /// The posts list's query arguments this port reads.
@@ -1316,6 +1346,8 @@ pub struct ListArgs {
     pub order: Option<String>,
     /// `$_GET['paged']`, if given.
     pub paged: Option<String>,
+    /// `$_GET['s']`, if given.
+    pub search: Option<String>,
     /// `$_GET['author']`, if given.
     pub author: Option<String>,
     /// `$_GET['all_posts']`, if given.
@@ -1385,22 +1417,6 @@ pub enum Answer {
     Page(String),
     /// A `302` to this URL.
     Redirect(String),
-}
-
-/// `addslashes()`, which `wp_magic_quotes()` applies to the request.
-fn addslashes(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        match c {
-            '\'' | '"' | '\\' => {
-                out.push('\\');
-                out.push(c);
-            }
-            '\0' => out.push_str("\\0"),
-            c => out.push(c),
-        }
-    }
-    out
 }
 
 /// `edit.php`: the posts list for `args`, or a redirect from a page past
@@ -1493,6 +1509,7 @@ pub fn edit(
         m: args.m.clone(),
         post_format: args.post_format.clone(),
         cat: args.cat.clone(),
+        search: args.search.clone(),
     };
     let hidden = hidden_columns(site);
     let hidden_keys: Vec<&str> = hidden.iter().map(String::as_str).collect();

@@ -26,6 +26,7 @@ pub(crate) fn hello() -> Post {
         comment_count: 1,
         comment_status: "open".into(),
         ping_status: "open".into(),
+        content: b"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->".to_vec(),
         ..Post::default()
     }
 }
@@ -159,7 +160,23 @@ fn variants_are_php_s() {
             _ => (Vec::new(), ""),
         };
         let m = arg("m").unwrap_or_default();
+        // The search as `main_query()` reads it.
+        let search =
+            arg("s").map(|s| String::from_utf8(hyscribe_phpser::urldecode(s.as_bytes())).unwrap());
+        let sentence = search.clone().unwrap_or_default();
         let filters = PostQuery {
+            search: match &search {
+                Some(s) if arg("sentence").is_some() => vec![s.clone()],
+                Some(s) => hyscribe_render::search_terms(s),
+                None => Vec::new(),
+            },
+            exact: arg("exact").is_some(),
+            search_count: match &search {
+                Some(_) if arg("sentence").is_some() => 1,
+                Some(s) => hyscribe_render::search_count(s),
+                None => 1,
+            },
+            sentence,
             terms,
             year: m.get(..4).and_then(|y| y.parse().ok()),
             month: m.get(4..6).and_then(|m| m.parse().ok()),
@@ -171,6 +188,7 @@ fn variants_are_php_s() {
             orderby: arg("orderby"),
             order: arg("order"),
             paged: arg("paged"),
+            search,
             author: arg("author"),
             all_posts: arg("all_posts"),
             show_sticky: flag("show_sticky"),
@@ -182,10 +200,12 @@ fn variants_are_php_s() {
         };
         let role: &'static str = Box::leak(format!("{variant}:{}", f[1]).into_boxed_str());
         let recorded = String::from_utf8(unhex(f[2])).unwrap();
+        // The request's path and query, slashed as `wp_magic_quotes()` does.
         let path = if query.is_empty() {
             "/hs-admin/edit".to_string()
         } else {
-            format!("/hs-admin/edit?{query}")
+            let path = format!("/hs-admin/edit?{query}");
+            String::from_utf8(hyscribe_phpser::addslashes(path.as_bytes())).unwrap()
         };
         // The canonical URL, rebuilt as `remove_query_arg()` rebuilds it.
         let url = format!("{}{path}", crate::tests::SITE);
@@ -395,10 +415,9 @@ fn authors_are_read_as_wp_query_reads_them() {
     assert_eq!(author_lists(&[-2, 1]), (Vec::new(), vec![2]));
 }
 
-/// The request's status as PHP reads it: slashed, and empty when `"0"`.
+/// The All view is current only for a request with no filter.
 #[test]
 fn the_status_is_read_as_php_reads_it() {
-    assert_eq!(addslashes("a'b\"c\\d\0e"), "a\\'b\\\"c\\\\d\\0e");
     let listing = Listing {
         posts: Vec::new(),
         total: 0,
@@ -416,4 +435,87 @@ fn the_status_is_read_as_php_reads_it() {
         ..Listing::default()
     };
     assert!(!status_views(&listing)[0].current);
+}
+
+/// The test site's relevance follows `parse_search_order()`'s ranks.
+#[test]
+fn the_test_site_ranks_searches() {
+    use super::content::rank;
+    let post = |title: &str, excerpt: &str, content: &str| Post {
+        title: title.as_bytes().to_vec(),
+        excerpt: excerpt.as_bytes().to_vec(),
+        content: content.as_bytes().to_vec(),
+        ..Post::default()
+    };
+    let query = |search: &[&str], sentence: &str| PostQuery {
+        search: search.iter().map(|term| (*term).to_string()).collect(),
+        sentence: sentence.into(),
+        search_count: search.len(),
+        ..PostQuery::default()
+    };
+    let two = query(&["red", "fox"], "red fox");
+    let cases = [
+        (post("A red fox", "", ""), 1),
+        (post("Fox, red", "", ""), 2),
+        (post("Red", "", ""), 3),
+        (post("", "A red fox", ""), 4),
+        (post("", "", "A red fox"), 5),
+        (post("", "", ""), 6),
+    ];
+    for (post, rank_of) in cases {
+        assert_eq!(rank(&post, &two), rank_of);
+    }
+    let left_out = query(&["red", "-fox"], "red -fox");
+    assert_eq!(rank(&post("", "red -fox", ""), &left_out), 6);
+    let one = query(&["red"], "red");
+    assert_eq!(
+        (
+            rank(&post("Red", "", ""), &one),
+            rank(&post("", "", ""), &one)
+        ),
+        (0, 1)
+    );
+}
+
+/// A search is ranked first unless another order is asked; `relevance`
+/// and `0` ask for none.
+#[test]
+fn searches_rank_unless_ordered_otherwise() {
+    let query = PostQuery {
+        search: vec!["red".into()],
+        ..PostQuery::default()
+    };
+    let first = |orderby: Option<&str>| {
+        let args = ListArgs {
+            orderby: orderby.map(String::from),
+            ..ListArgs::default()
+        };
+        sort(&args, &query).first().map(|(column, _)| *column)
+    };
+    for orderby in [None, Some("0"), Some("relevance")] {
+        assert_eq!(first(orderby), Some(OrderBy::Relevance), "{orderby:?}");
+    }
+    assert_eq!(first(Some("title")), Some(OrderBy::Title));
+}
+
+/// `get_search_query()` of a search over 1600 bytes is empty.
+#[test]
+fn long_searches_show_empty() {
+    let listing = Listing {
+        posts: vec![hello()],
+        total: 1,
+        pages: 1,
+        page: 1,
+        search: Some("x".repeat(1601)),
+        ..Listing::default()
+    };
+    let url = format!("{}/hs-admin/edit", crate::tests::SITE);
+    let page = list_content(
+        &Role("administrator"),
+        &listing,
+        &[],
+        &url,
+        "/hs-admin/edit",
+    );
+    assert!(page.contains("Search results for: <strong></strong>"));
 }

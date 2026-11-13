@@ -1309,3 +1309,89 @@ async fn posts_list_reads() {
     assert_eq!(page_ids(ttd.posts(&drafts_by(Some(1))).await.unwrap()), [3]);
     assert!(ttd.posts(&drafts_by(Some(2))).await.unwrap().is_empty());
 }
+
+/// A search's relevance order is `parse_search_order()`'s: WordPress's own
+/// SQL for it, run here, sorts the Theme Test Data's posts the same.
+#[tokio::test]
+async fn searches_sort_by_relevance() {
+    let ttd = named("wordpress_ttd").await;
+    for (terms, sentence, case) in [
+        (
+            vec!["image", "alignment"],
+            "image alignment",
+            "CASE WHEN post_title LIKE '%image alignment%' THEN 1 \
+             WHEN post_title LIKE '%image%' AND post_title LIKE '%alignment%' THEN 2 \
+             WHEN post_title LIKE '%image%' OR post_title LIKE '%alignment%' THEN 3 \
+             WHEN post_excerpt LIKE '%image alignment%' THEN 4 \
+             WHEN post_content LIKE '%image alignment%' THEN 5 ELSE 6 END",
+        ),
+        // Seven terms rank only as a phrase, though one title has a term.
+        (
+            vec!["wp:", "class", "figure", "size", "src", "alt", "image"],
+            "wp: class figure size src alt image",
+            "CASE WHEN post_title LIKE '%wp: class figure size src alt image%' THEN 1 \
+             WHEN post_excerpt LIKE '%wp: class figure size src alt image%' THEN 4 \
+             WHEN post_content LIKE '%wp: class figure size src alt image%' THEN 5 ELSE 6 END",
+        ),
+        (
+            vec!["image", "-gallery"],
+            "image -gallery",
+            "CASE WHEN post_title LIKE '%image%' THEN 2 ELSE 6 END",
+        ),
+        // A stopword dropped still counts as a word.
+        (
+            vec!["image"],
+            "the image",
+            "CASE WHEN post_title LIKE '%the image%' THEN 1 \
+             WHEN post_title LIKE '%image%' THEN 2 \
+             WHEN post_excerpt LIKE '%the image%' THEN 4 \
+             WHEN post_content LIKE '%the image%' THEN 5 ELSE 6 END",
+        ),
+        // Seven terms and one left out leave nothing to rank by.
+        (
+            vec![
+                "image", "block", "wp:", "class", "figure", "size", "src", "-xyzzy",
+            ],
+            "image block wp: class figure size src -xyzzy",
+            "NULL",
+        ),
+    ] {
+        let query = PostQuery {
+            post_types: vec!["post".into()],
+            search: terms.iter().map(|term| (*term).to_string()).collect(),
+            sentence: sentence.into(),
+            search_count: sentence.split(' ').count(),
+            order: vec![(OrderBy::Relevance, false), (OrderBy::Date, false)],
+            limit: 50,
+            ..PostQuery::default()
+        };
+        let ours: Vec<u64> = ttd
+            .posts(&query)
+            .await
+            .unwrap()
+            .iter()
+            .map(|p| p.id)
+            .collect();
+        let found = |term: &str| match term.strip_prefix('-') {
+            Some(term) => format!(
+                "post_title NOT LIKE '%{term}%' AND post_excerpt NOT LIKE '%{term}%' AND post_content NOT LIKE '%{term}%'"
+            ),
+            None => format!(
+                "(post_title LIKE '%{term}%' OR post_excerpt LIKE '%{term}%' OR post_content LIKE '%{term}%')"
+            ),
+        };
+        let filters: Vec<String> = terms.iter().map(|term| found(term)).collect();
+        let sql = format!(
+            "SELECT ID FROM wp_posts WHERE post_status = 'publish' AND post_type = 'post' AND {} \
+             ORDER BY ({case}), post_date DESC LIMIT 50",
+            filters.join(" AND ")
+        );
+        // Test SQL built from the constants above.
+        let theirs: Vec<u64> = sqlx::query_scalar::<_, u64>(sqlx::AssertSqlSafe(sql))
+            .fetch_all(&ttd.pool)
+            .await
+            .unwrap();
+        assert!(theirs.len() > 1, "{sentence}");
+        assert_eq!(ours, theirs, "{sentence}");
+    }
+}

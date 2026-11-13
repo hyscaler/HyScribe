@@ -38,7 +38,7 @@ use hyscribe_render::post::body_class;
 use hyscribe_render::site::{Archive, Request, Taxonomy};
 use hyscribe_render::template::render_template;
 use hyscribe_render::theme::{Theme, twentytwentyfive};
-use hyscribe_render::{search_terms, sticky_posts};
+use hyscribe_render::{search_count, search_terms, sticky_posts};
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 
@@ -1685,7 +1685,14 @@ async fn main_query(
 
 /// The search, as parse_search() leaves it: without line breaks.
 fn shown_search(query: &HashMap<String, String>) -> Option<String> {
-    query.get("s").map(|s| s.replace(['\r', '\n'], ""))
+    // `parse_query()` empties a search over 1600 bytes.
+    query.get("s").map(|s| {
+        if s.len() > 1600 {
+            String::new()
+        } else {
+            s.replace(['\r', '\n'], "")
+        }
+    })
 }
 
 /// The query of a list page with the tax query's `terms`; a feed lists
@@ -1734,12 +1741,20 @@ fn post_query(
             None => vec!["post".into()],
         },
         // `sentence` makes the whole search one term.
+        // `parse_search()` runs for a search not `empty()`.
         search: match &search {
-            Some(s) if flag("sentence") && !s.is_empty() => vec![s.clone()],
+            Some(s) if is_empty_string(s.as_bytes()) => Vec::new(),
+            Some(s) if flag("sentence") => vec![s.clone()],
             Some(s) => search_terms(s),
             None => Vec::new(),
         },
         exact,
+        sentence: search.clone().unwrap_or_default(),
+        search_count: match &search {
+            Some(_) if flag("sentence") => 1,
+            Some(s) => search_count(s),
+            None => 1,
+        },
         // WordPress sorts a search by relevance, then date, except in feeds
         // and exact searches.
         order: if search.is_some() && !feed && !exact {

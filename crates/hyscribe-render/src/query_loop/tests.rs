@@ -231,7 +231,8 @@ fn query_filters_match_php() {
 /// block's `stripslashes()`.
 #[test]
 fn search_terms_match_php() {
-    use crate::query_loop::{search_terms, stripslashes};
+    use crate::query_loop::{search_count, search_terms};
+    use hyscribe_phpser::stripslashes;
     use hyscribe_phpser::{Key, Value, json_encode};
     let golden = include_str!("../../tests/golden/search-terms.tsv");
     for line in golden.lines() {
@@ -251,6 +252,15 @@ fn search_terms_match_php() {
     }
     assert_eq!(golden.lines().count(), 54);
     assert!(search_terms("").is_empty());
+    // The words before any are dropped, one at the least.
+    assert_eq!(
+        [
+            search_count("the red, fox"),
+            search_count(""),
+            search_count("a\r\nb")
+        ],
+        [3, 1, 1]
+    );
 }
 
 /// `WP_Query::parse_orderby()`'s post columns, under both of their names.

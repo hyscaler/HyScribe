@@ -39,7 +39,7 @@ fn rows_are_php_s() {
         let start = page.find(open).unwrap() + open.len();
         let rest = page.get(start..).unwrap();
         let php = rest.get(..rest.find("\t</tbody>").unwrap()).unwrap();
-        let ours = row(&Role(role), &hello(), &columns(""), &[], "");
+        let ours = row(&Role(role), &hello(), &columns(""), &[], "", false);
         assert!(ours == php, "{role}: {}", first_difference(php, &ours));
     }
 }
@@ -53,7 +53,7 @@ fn inline_editors_are_php_s() {
         let php = rest
             .get(..rest.find("\t\t</form>\n").unwrap() + 10)
             .unwrap();
-        let ours = inline_edit(&Role(role), &hello(), 7, "");
+        let ours = inline_edit(&Role(role), &hello(), 7, "", false);
         assert!(ours == php, "{role}: {}", first_difference(php, &ours));
     }
 }
@@ -85,6 +85,7 @@ fn the_list_is_php_s() {
             pages: 1,
             orderby: None,
             order: None,
+            mode: "list".into(),
             ..Listing::default()
         };
         let url = format!("{}/hs-admin/edit", crate::tests::SITE);
@@ -189,6 +190,8 @@ fn variants_are_php_s() {
             order: arg("order"),
             paged: arg("paged"),
             search,
+            mode: arg("mode"),
+            settings: (variant == "excerpt").then(|| "posts_list_mode=excerpt".to_string()),
             author: arg("author"),
             all_posts: arg("all_posts"),
             show_sticky: flag("show_sticky"),
@@ -196,7 +199,7 @@ fn variants_are_php_s() {
             post_format: arg("post_format").unwrap_or_default(),
             cat: cat.into(),
             filters,
-            base: query.is_empty() || query.starts_with("paged="),
+            base: query.is_empty() || query.starts_with("paged=") || query.starts_with("mode="),
         };
         let role: &'static str = Box::leak(format!("{variant}:{}", f[1]).into_boxed_str());
         let recorded = String::from_utf8(unhex(f[2])).unwrap();
@@ -309,6 +312,7 @@ fn the_trash_needs_delete_posts() {
         pages: 1,
         orderby: None,
         order: None,
+        mode: "list".into(),
         ..Listing::default()
     };
     let nav = |role| tablenav(&Role(role), &listing, "bottom", &[], String::new());
@@ -359,6 +363,7 @@ fn no_posts_no_mine_link() {
         pages: 1,
         orderby: None,
         order: None,
+        mode: "list".into(),
         ..Listing::default()
     };
     assert!(
@@ -392,15 +397,20 @@ fn protected_posts_show_no_excerpt() {
         title: Vec::new(),
         ..protected.clone()
     };
-    assert_eq!(no_title_excerpt(&Role("administrator"), &untitled), "");
+    assert_eq!(
+        no_title_excerpt(&Role("administrator"), &untitled, false),
+        ""
+    );
     let open = Post {
         password: Vec::new(),
         ..untitled
     };
     assert_eq!(
-        no_title_excerpt(&Role("administrator"), &open),
+        no_title_excerpt(&Role("administrator"), &open, false),
         "Hidden words"
     );
+    // The extended view shows the excerpt under the title instead.
+    assert_eq!(no_title_excerpt(&Role("administrator"), &open, true), "");
 }
 
 /// `WP_Query`'s `author`: cleaned, sorted, and leaving out wins.
@@ -432,6 +442,7 @@ fn the_status_is_read_as_php_reads_it() {
         pages: 1,
         orderby: None,
         order: None,
+        mode: "list".into(),
         ..Listing::default()
     };
     assert!(!status_views(&listing)[0].current);
@@ -507,6 +518,7 @@ fn long_searches_show_empty() {
         pages: 1,
         page: 1,
         search: Some("x".repeat(1601)),
+        mode: "list".into(),
         ..Listing::default()
     };
     let url = format!("{}/hs-admin/edit", crate::tests::SITE);
@@ -518,4 +530,24 @@ fn long_searches_show_empty() {
         "/hs-admin/edit",
     );
     assert!(page.contains("Search results for: <strong></strong>"));
+}
+
+/// `get_user_setting()`: the cookie when sent, cleaned and needing an `=`
+/// after its first character; else the stored option.
+#[test]
+fn user_settings_are_read_as_php_reads_them() {
+    let stored = Role("settings:administrator");
+    let mode = |cookie| user_setting(&stored, cookie, "posts_list_mode");
+    assert_eq!(mode(None).as_deref(), Some("excerpt"));
+    assert_eq!(mode(Some("posts_list_mode=list")).as_deref(), Some("list"));
+    assert_eq!(mode(Some("=x&posts_list_mode=list")), None);
+    assert_eq!(mode(Some("posts_list_mode")), None);
+    assert_eq!(
+        mode(Some("posts_list_mode=ex cerpt!")).as_deref(),
+        Some("excerpt")
+    );
+    assert_eq!(
+        user_setting(&Role("administrator"), None, "posts_list_mode"),
+        None
+    );
 }

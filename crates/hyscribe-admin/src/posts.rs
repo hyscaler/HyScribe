@@ -91,9 +91,10 @@ fn is_sticky(site: &dyn PostsSite, post: &Post) -> bool {
 }
 
 /// `get_the_excerpt()` trimmed to 15 words, for a post without a title the
-/// user may read, in list mode.
-fn no_title_excerpt(site: &dyn PostsSite, post: &Post) -> String {
-    if !admin_title(post).is_empty()
+/// user may read, in the compact view.
+fn no_title_excerpt(site: &dyn PostsSite, post: &Post, excerpt: bool) -> String {
+    if excerpt
+        || !admin_title(post).is_empty()
         || !post.password.is_empty()
         || !site.can_post("read_post", post)
     {
@@ -104,9 +105,9 @@ fn no_title_excerpt(site: &dyn PostsSite, post: &Post) -> String {
 
 /// The post's title for its labels: with part of its excerpt if it has
 /// none, the excerpt wrapped as `column_title()` shows it.
-fn labelled_title(site: &dyn PostsSite, post: &Post, wrap: bool) -> String {
+fn labelled_title(site: &dyn PostsSite, post: &Post, wrap: bool, extended: bool) -> String {
     let mut title = draft_or_post_title(post);
-    let excerpt = no_title_excerpt(site, post);
+    let excerpt = no_title_excerpt(site, post, extended);
     if !excerpt.is_empty() {
         title.push(' ');
         if wrap {
@@ -121,12 +122,12 @@ fn labelled_title(site: &dyn PostsSite, post: &Post, wrap: bool) -> String {
 }
 
 /// `column_cb()`.
-fn column_cb(site: &dyn PostsSite, post: &Post) -> String {
+fn column_cb(site: &dyn PostsSite, post: &Post, excerpt: bool) -> String {
     if !site.can_post("edit_post", post) {
         return String::new();
     }
     let id = post.id;
-    let title = labelled_title(site, post, false);
+    let title = labelled_title(site, post, false, excerpt);
     format!(
         "\t\t\t<input id=\"cb-select-{id}\" type=\"checkbox\" name=\"post[]\" value=\"{id}\" />\n\t\t\t<label for=\"cb-select-{id}\">\n\t\t\t\t<span class=\"screen-reader-text\">\n\t\t\t\tSelect {title}\t\t\t\t</span>\n\t\t\t</label>\n\t\t\t<div class=\"locked-indicator\">\n\t\t\t\t<span class=\"locked-indicator-icon\" aria-hidden=\"true\"></span>\n\t\t\t\t<span class=\"screen-reader-text\">\n\t\t\t\t&#8220;{title}&#8221; is locked\t\t\t\t</span>\n\t\t\t</div>\n\t\t\t"
     )
@@ -236,8 +237,15 @@ fn inline_data(site: &dyn PostsSite, post: &Post) -> String {
     out
 }
 
-/// `_column_title()` and `column_title()`, with the row actions.
-fn column_title(site: &dyn PostsSite, post: &Post, classes: &str, filter: &str) -> String {
+/// `_column_title()` and `column_title()`, with the row actions; the
+/// extended view shows the excerpt too.
+fn column_title(
+    site: &dyn PostsSite,
+    post: &Post,
+    classes: &str,
+    filter: &str,
+    excerpt: bool,
+) -> String {
     let aria_label = if is_empty_string(&post.title) {
         "no title".to_string()
     } else {
@@ -250,7 +258,7 @@ fn column_title(site: &dyn PostsSite, post: &Post, classes: &str, filter: &str) 
     if editable {
         out.push_str("<div class=\"locked-info\"><span class=\"locked-avatar\"></span> <span class=\"locked-text\"></span></div>\n");
     }
-    let title = labelled_title(site, post, true);
+    let title = labelled_title(site, post, true, excerpt);
     out.push_str("<strong>");
     if editable {
         out.push_str(&format!(
@@ -262,16 +270,26 @@ fn column_title(site: &dyn PostsSite, post: &Post, classes: &str, filter: &str) 
     }
     out.push_str(&post_states_html(site, post, filter));
     out.push_str("</strong>\n");
+    if excerpt && site.can_post("read_post", post) {
+        let text = esc_html(&site.excerpt(post));
+        if post.password.is_empty() {
+            out.push_str(&text);
+        } else {
+            out.push_str(&format!(
+                "<span class=\"protected-post-excerpt\">{text}</span>"
+            ));
+        }
+    }
     if site.can_post("edit_post", post) {
         out.push_str(&inline_data(site, post));
     }
-    out.push_str(&title_actions(site, post));
+    out.push_str(&title_actions(site, post, excerpt));
     out.push_str("</th>");
     out
 }
 
 /// `handle_row_actions()` for the title column.
-fn title_actions(site: &dyn PostsSite, post: &Post) -> String {
+fn title_actions(site: &dyn PostsSite, post: &Post, excerpt: bool) -> String {
     let title = draft_or_post_title(post);
     let can_edit = site.can_post("edit_post", post);
     let mut actions: Vec<(&str, String)> = Vec::new();
@@ -352,7 +370,7 @@ fn title_actions(site: &dyn PostsSite, post: &Post) -> String {
             ),
         ));
     }
-    row_actions(&actions)
+    row_actions(&actions, excerpt)
 }
 
 /// `get_edit_link( $args, $text )`: a link to the list filtered by `args`.
@@ -668,7 +686,13 @@ const BULK_STICKY: &str = "\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t<label class=\"alig
 
 /// `inline_edit()`: the Quick Edit and Bulk Edit rows of a table of
 /// `columns` visible columns, the date fields from `first`, the global post.
-fn inline_edit(site: &dyn PostsSite, first: &Post, columns: usize, author: &str) -> String {
+fn inline_edit(
+    site: &dyn PostsSite,
+    first: &Post,
+    columns: usize,
+    author: &str,
+    excerpt: bool,
+) -> String {
     let can_publish = site.can("publish_posts");
     let others = site.can("edit_others_posts");
     let (zone, now) = site.clock();
@@ -690,6 +714,7 @@ fn inline_edit(site: &dyn PostsSite, first: &Post, columns: usize, author: &str)
     };
     let formats = site.post_formats();
     INLINE_EDIT
+        .replace("%view%", if excerpt { "excerpt" } else { "list" })
         .replace("%columns%", &columns.to_string())
         .replace("%date%", &touch_time(first, zone, now))
         .replace("%authors%", &authors)
@@ -707,14 +732,15 @@ fn inline_edit(site: &dyn PostsSite, first: &Post, columns: usize, author: &str)
         .replace("%nonce%", &site.nonce("inlineeditnonce"))
 }
 
-/// `single_row( $post )`: the post's row of `columns`, `hidden` ones
-/// hidden.
+/// `single_row( $post )` of `columns`, `hidden` ones hidden, in the list
+/// filtered by `filter`, in the extended view if `excerpt`.
 pub fn row(
     site: &dyn PostsSite,
     post: &Post,
     columns: &[Column],
     hidden: &[&str],
     filter: &str,
+    excerpt: bool,
 ) -> String {
     let author = if site.user_id() == post.author {
         "self"
@@ -736,12 +762,12 @@ pub fn row(
             "cb" => {
                 out.push_str(&format!(
                     "<td class=\"check-column\">{}</td>",
-                    column_cb(site, post)
+                    column_cb(site, post, excerpt)
                 ));
                 continue;
             }
             "title" => {
-                out.push_str(&column_title(site, post, &classes, filter));
+                out.push_str(&column_title(site, post, &classes, filter, excerpt));
                 continue;
             }
             "author" => column_author(site, post),
@@ -872,6 +898,8 @@ struct Listing {
     author_query: String,
     /// `$_GET['s']`, if given.
     search: Option<String>,
+    /// `get_user_setting( 'posts_list_mode', 'list' )`.
+    mode: String,
     /// The filters' choices: `m`, `post_format` and `cat`.
     m: String,
     post_format: String,
@@ -1076,10 +1104,11 @@ fn list_content(
 ) -> String {
     let columns = columns(&listing.filter);
     let months = site.months("post", listing.trash());
+    let extended = listing.mode == "excerpt";
     let rows: String = listing
         .posts
         .iter()
-        .map(|post| row(site, post, &columns, hidden, &listing.filter))
+        .map(|post| row(site, post, &columns, hidden, &listing.filter, extended))
         .collect();
     let visible = columns
         .iter()
@@ -1188,7 +1217,8 @@ fn list_content(
         rows
     };
     out.push_str(&format!(
-        "<h2 class='screen-reader-text'>Posts list</h2><table class=\"wp-list-table widefat fixed striped table-view-list posts\">\n\t\t{}\t<thead>\n\t<tr>\n\t\t{}\t</tr>\n\t</thead>\n\n\t<tbody id=\"the-list\"\n\t\t\t\t>\n\t\t{rows}\t</tbody>\n\n\t<tfoot>\n\t<tr>\n\t\t{}\t</tr>\n\t</tfoot>\n\n</table>\n\t\t",
+        "<h2 class='screen-reader-text'>Posts list</h2><table class=\"wp-list-table widefat fixed striped {} posts\">\n\t\t{}\t<thead>\n\t<tr>\n\t\t{}\t</tr>\n\t</thead>\n\n\t<tbody id=\"the-list\"\n\t\t\t\t>\n\t\t{rows}\t</tbody>\n\n\t<tfoot>\n\t<tr>\n\t\t{}\t</tr>\n\t</tfoot>\n\n</table>\n\t\t",
+        esc_attr(format!("table-view-{}", listing.mode).as_bytes()),
         table_description(&columns, &order),
         column_headers(&columns, hidden, &order, &unpaged, 1, true),
         column_headers(&columns, hidden, &order, &unpaged, 2, false)
@@ -1206,7 +1236,7 @@ fn list_content(
     if let Some(first) = listing.posts.first() {
         out.push_str(&format!(
             "\n{}\t\t",
-            inline_edit(site, first, visible, &listing.author_query)
+            inline_edit(site, first, visible, &listing.author_query, extended)
         ));
     }
     out.push_str("\n<div id=\"ajax-response\"></div>\n<div class=\"clear\"></div>\n</div>\n\n");
@@ -1232,7 +1262,15 @@ fn screen_options(
     columns: &[Column],
     hidden: &[String],
     per_page: u64,
+    mode: &str,
 ) -> String {
+    let checked = |value: &str| {
+        if value == mode {
+            " checked='checked'"
+        } else {
+            ""
+        }
+    };
     let labels: String = columns
         .iter()
         .filter(|column| !["cb", "title"].contains(&column.key))
@@ -1252,6 +1290,8 @@ fn screen_options(
     SCREEN_OPTIONS
         .replace("%labels%", &labels)
         .replace("%per_page%", &per_page.to_string())
+        .replace("%list%", checked("list"))
+        .replace("%excerpt%", checked("excerpt"))
         .replace("%nonce%", &site.nonce("screen-options-nonce"))
 }
 
@@ -1348,6 +1388,10 @@ pub struct ListArgs {
     pub paged: Option<String>,
     /// `$_GET['s']`, if given.
     pub search: Option<String>,
+    /// `$_GET['mode']`, if given.
+    pub mode: Option<String>,
+    /// The user's `wp-settings-{ID}` cookie, if sent.
+    pub settings: Option<String>,
     /// `$_GET['author']`, if given.
     pub author: Option<String>,
     /// `$_GET['all_posts']`, if given.
@@ -1417,6 +1461,40 @@ pub enum Answer {
     Page(String),
     /// A `302` to this URL.
     Redirect(String),
+}
+
+/// `get_user_setting( $name )`: from the settings cookie when sent, else
+/// the stored `user-settings`; none when the cleaned cookie has no `=`.
+fn user_setting(site: &dyn PostsSite, cookie: Option<&str>, name: &str) -> Option<String> {
+    let stored = match cookie {
+        Some(cookie) => {
+            let kept: String = cookie
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '=' | '&' | '_' | '-'))
+                .collect();
+            kept.find('=')
+                .filter(|at| *at > 0)
+                .map(|_| kept.into_bytes())
+        }
+        None => site.user_option("user-settings"),
+    }?;
+    let settings = hyscribe_phpser::parse_str(&stored);
+    settings.get_str(name).and_then(Value::as_bytes).map(text)
+}
+
+/// `prepare_items()`'s view mode: a non-empty request's, which PHP saves
+///, else the user's setting.
+fn view_mode(site: &dyn PostsSite, args: &ListArgs) -> String {
+    match args
+        .mode
+        .as_deref()
+        .filter(|mode| !is_empty_string(mode.as_bytes()))
+    {
+        Some("excerpt") => "excerpt".into(),
+        Some(_) => "list".into(),
+        None => user_setting(site, args.settings.as_deref(), "posts_list_mode")
+            .unwrap_or_else(|| "list".into()),
+    }
 }
 
 /// `edit.php`: the posts list for `args`, or a redirect from a page past
@@ -1510,11 +1588,12 @@ pub fn edit(
         post_format: args.post_format.clone(),
         cat: args.cat.clone(),
         search: args.search.clone(),
+        mode: view_mode(site, args),
     };
     let hidden = hidden_columns(site);
     let hidden_keys: Vec<&str> = hidden.iter().map(String::as_str).collect();
     let content = list_content(site, &listing, &hidden_keys, canonical, request_uri);
-    let screen_options = screen_options(site, &columns(filter), &hidden, per_page);
+    let screen_options = screen_options(site, &columns(filter), &hidden, per_page, &listing.mode);
     let help = [
         HelpTab {
             id: "overview",

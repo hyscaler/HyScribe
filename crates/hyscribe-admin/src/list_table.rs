@@ -100,8 +100,9 @@ pub fn selected(chosen: bool) -> &'static str {
     if chosen { " selected='selected'" } else { "" }
 }
 
-/// `row_actions( $actions )`: the links under a row's primary column.
-pub fn row_actions(actions: &[(&str, String)]) -> String {
+/// `row_actions( $actions )`: the links under a row's primary column,
+/// always shown when `visible`.
+pub fn row_actions(actions: &[(&str, String)], visible: bool) -> String {
     if actions.is_empty() {
         return String::new();
     }
@@ -115,7 +116,8 @@ pub fn row_actions(actions: &[(&str, String)]) -> String {
         })
         .collect();
     format!(
-        "<div class=\"row-actions\">{spans}</div><button type=\"button\" class=\"toggle-row\"><span class=\"screen-reader-text\">Show more details</span></button>"
+        "<div class=\"row-actions{}\">{spans}</div><button type=\"button\" class=\"toggle-row\"><span class=\"screen-reader-text\">Show more details</span></button>",
+        if visible { " visible" } else { "" }
     )
 }
 

@@ -147,7 +147,7 @@ impl Role {
 
     /// A variant of `reference/posts-list/golden.sh`, over its content.
     fn listing(&self) -> bool {
-        ["posts", "hidden"].contains(&self.variant())
+        ["posts", "hidden", "excerpt"].contains(&self.variant())
     }
 }
 
@@ -575,13 +575,15 @@ impl crate::posts::PostsSite for Role {
     fn pending_comments(&self, post: &hyscribe_model::Post) -> u64 {
         u64::from(self.listing() && [309, 311].contains(&post.id))
     }
-    /// The hand-written excerpt, or a stand-in for one made of the content.
+    /// `get_the_excerpt()` of the content's plain text.
     fn excerpt(&self, post: &hyscribe_model::Post) -> Vec<u8> {
-        if post.excerpt.is_empty() {
-            b"Words".to_vec()
-        } else {
-            post.excerpt.clone()
+        if !post.password.is_empty() {
+            return b"There is no excerpt because this is a protected post.".to_vec();
         }
+        if !post.excerpt.is_empty() {
+            return post.excerpt.clone();
+        }
+        hyscribe_render::wp_trim_words(&post.content, 55, b" [&hellip;]")
     }
     fn terms(&self, taxonomy: &str) -> Vec<hyscribe_model::Term> {
         if self.listing() {
@@ -607,6 +609,9 @@ impl crate::posts::PostsSite for Role {
         authors
     }
     fn user_option(&self, name: &str) -> Option<Vec<u8>> {
+        if self.variant() == "settings" && name == "user-settings" {
+            return Some(b"mfold=f&posts_list_mode=excerpt".to_vec());
+        }
         if self.variant() == "hidden" {
             let value: &[u8] = match name {
                 "manageedit-postcolumnshidden" => b"a:2:{i:0;s:4:\"tags\";i:1;s:8:\"comments\";}",

@@ -124,13 +124,7 @@ async fn logged_in_users_are_let_in() {
         .next()
         .unwrap()
         .to_string();
-    let response = get(
-        &site,
-        "/hs-admin/edit?mode=excerpt",
-        "127.0.0.1:8081",
-        &auth,
-    )
-    .await;
+    let response = get(&site, "/hs-admin/edit?detached=1", "127.0.0.1:8081", &auth).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     // A page past the last goes to the last.
     let response = get(&site, "/hs-admin/edit?paged=9", "127.0.0.1:8081", &auth).await;
@@ -142,6 +136,10 @@ async fn logged_in_users_are_let_in() {
     let page = page_of(get(&site, "/hs-admin/edit", "127.0.0.1:8081", &cookies).await).await;
     let php = golden("administrator\tedit.php\t");
     assert_eq!(with_values(&php, &page), page);
+    // The settings cookie the admin's scripts keep chooses the view.
+    let extended = format!("{cookies}; wp-settings-1=posts_list_mode%3Dexcerpt");
+    let page = page_of(get(&site, "/hs-admin/edit", "127.0.0.1:8081", &extended).await).await;
+    assert!(page.contains("table-view-excerpt"));
     // The dashboard, as PHP showed it to a user who had no auto-draft yet.
     for path in ["/hs-admin/", "/hs-admin/index"] {
         let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
@@ -543,7 +541,8 @@ async fn the_posts_list_reads_its_arguments() {
             "/hs-admin/edit?post_status=%FF",
             "/hs-admin/edit?post_status[]=draft",
             "/hs-admin/edit?post_type=page",
-            "/hs-admin/edit?post_status=draft&mode=list",
+            "/hs-admin/edit?post_status=draft&detached=1",
+            "/hs-admin/edit?mode=%FF",
             "/hs-admin/edit?paged=%FF",
             "/hs-admin/edit?order=%FF",
             "/hs-admin/edit?author=%FF",
@@ -561,6 +560,15 @@ async fn the_posts_list_reads_its_arguments() {
             )
         );
         assert!(list_args(&admin, "/hs-admin/edit?paged=2").unwrap().base);
+        // A view mode alone keeps the base request; with the post type, not.
+        for (uri, base) in [
+            ("/hs-admin/edit?mode=excerpt&paged=2", true),
+            ("/hs-admin/edit?mode=", false),
+            ("/hs-admin/edit?mode=list&post_type=post", false),
+        ] {
+            let args = list_args(&admin, uri).unwrap();
+            assert_eq!(args.base, base, "{uri}");
+        }
         let filtered = list_args(
             &admin,
             "/hs-admin/edit?author=2&all_posts=1&show_sticky=1&m=2026102708&post_format=aside",

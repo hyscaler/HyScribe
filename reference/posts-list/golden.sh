@@ -42,7 +42,7 @@ done
 record() {
   : > "$TMP"
   # A redirect is kept as its status and location.
-  status=$(curl -s -o "$TMP" -D "$TMP.head" -w '%{http_code}' -b "hyscribe_role=$2; hyscribe_variant=${1%%\?*}" "$BASE/wp-admin/edit.php${3:-}")
+  status=$(curl -s -o "$TMP" -D "$TMP.head" -w '%{http_code}' -b "hyscribe_role=$2; hyscribe_variant=${1%%\?*}${4:+; $4}" "$BASE/wp-admin/edit.php${3:-}")
   [ "$status" = 200 ] || [ "$status" = 302 ] || { echo "PHP answered $status for ${3:-}" >&2; exit 1; }
   if [ "$status" = 302 ]; then
     printf '302\t%s' "$(grep -i '^location:' "$TMP.head" | cut -d' ' -f2 | tr -d '\r')" > "$TMP"
@@ -90,4 +90,10 @@ done
 for query in '?orderby=title&order=asc' '?orderby=title' '?post_status=publish&orderby=date&order=asc' '?order=desc'; do
   record content administrator "$query"
 done
+# The extended view, from the settings cookie or the request; last, as the
+# request's mode is saved in the user's settings.
+record excerpt administrator '' 'wp-settings-1=posts_list_mode%3Dexcerpt'
+record excerpt contributor '' 'wp-settings-1=posts_list_mode%3Dexcerpt'
+record excerpt administrator '?mode=list' 'wp-settings-1=posts_list_mode%3Dexcerpt'
+record content administrator '?mode=excerpt'
 wc -l "$OUT"

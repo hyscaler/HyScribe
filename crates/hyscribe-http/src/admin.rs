@@ -115,6 +115,8 @@ struct Admin<'a> {
     /// The posts read, each once, as WordPress's object cache keeps them.
     posts: RefCell<HashMap<u64, Option<hyscribe_model::Post>>>,
     comment_counts: OnceCell<CommentCounts>,
+    /// The user's `wp-settings-{ID}` cookie, if sent.
+    settings: Option<String>,
 }
 
 impl<'a> Admin<'a> {
@@ -126,6 +128,7 @@ impl<'a> Admin<'a> {
             user,
             posts: RefCell::default(),
             comment_counts: OnceCell::new(),
+            settings: None,
         }
     }
 
@@ -518,17 +521,29 @@ fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
     let query = request_uri.split_once('?').map_or("", |(_, query)| query);
     let args = parse_str(query.as_bytes());
     let mut list = ListArgs {
-        base: true,
+        settings: admin.settings.clone(),
         ..ListArgs::default()
     };
+    // `is_base_request()`: no argument but `paged`, or only the post type
+    // or a view mode.
+    let mut named = 0;
+    let mut alone = false;
     let mut vars = HashMap::new();
     for (key, value) in args.as_array().unwrap_or_default() {
+        if !matches!(key, Key::String(key) if key == b"paged") {
+            named += 1;
+        }
         match (key, value) {
             (Key::String(key), Value::String(value)) if key == b"post_status" => {
                 list.status = String::from_utf8(value.clone()).ok()?;
-                list.base = false;
             }
             (Key::String(key), Value::String(value)) if key == b"post_type" && value == b"post" => {
+                alone = true;
+            }
+            (Key::String(key), Value::String(value)) if key == b"mode" => {
+                let mode = String::from_utf8(value.clone()).ok()?;
+                alone = !is_empty_string(mode.as_bytes());
+                list.mode = Some(mode);
             }
             (Key::String(key), Value::String(value)) if key == b"paged" => {
                 list.paged = Some(String::from_utf8(value.clone()).ok()?);
@@ -554,7 +569,6 @@ fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
                         vars.insert(name, value);
                     }
                 }
-                list.base = false;
             }
             (Key::String(key), Value::String(value)) if key == b"orderby" || key == b"order" => {
                 let value = Some(String::from_utf8(value.clone()).ok()?);
@@ -563,11 +577,11 @@ fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
                 } else {
                     list.order = value;
                 }
-                list.base = false;
             }
             _ => return None,
         }
     }
+    list.base = named == 0 || named == 1 && alone;
     if !vars.is_empty() {
         let (query, resolved) = admin
             .reads
@@ -674,7 +688,9 @@ fn answer(
                 // in cookie too: `wp_get_session_token()`'s.
                 reads.act_as(id, token);
                 let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
-                let admin = Admin::new(&reads, site, user);
+                let mut admin = Admin::new(&reads, site, user);
+                let settings = cookie(&cookies, &format!("wp-settings-{id}"));
+                admin.settings = settings.map(|value| String::from_utf8_lossy(value).into_owned());
                 let header = |name: &str| headers.get(name).map(HeaderValue::as_bytes);
                 let browser = Browser {
                     user_agent: header("user-agent").unwrap_or_default(),

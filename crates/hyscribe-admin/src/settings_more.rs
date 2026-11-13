@@ -1,21 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The Discussion, Media, Permalinks and Privacy settings screens:
-//! `options-discussion.php`, `options-media.php`, `options-permalink.php`
-//! and `options-privacy.php`.
+//! The Discussion, Media, Permalinks and Privacy settings screens, from
+//! `options-discussion.php` to `options-privacy.php`.
 
-use hyscribe_kses::{esc_attr, esc_html, esc_textarea, esc_url};
+use hyscribe_kses::{esc_attr, esc_html, esc_textarea};
 use hyscribe_model::{OrderBy, PostQuery, StatusFilter};
-use hyscribe_phpser::{Value, remove_query_arg};
+use hyscribe_phpser::Value;
 use hyscribe_render::date::{Zone, format_unix};
 use hyscribe_render::default_avatar;
 
-use crate::admin_bar::{BarSite, Browser};
-use crate::dashboard::DashboardSite;
-use crate::list_table::{checked, fill, selected};
-use crate::menu::Screen;
-use crate::page::{HelpTab, Page, admin_page};
+use crate::admin_bar::BarSite;
+use crate::list_table::{checked, fill, selected, wp_nonce_field};
+use crate::page::{HelpTab, Request};
 use crate::posts::{Answer, page_options};
+use crate::settings::{
+    Form, SettingsSite, checks, form_option, option, pages_dropdown, replaced, settings_fields,
+    settings_page, text, url,
+};
 
 const DISCUSSION: &str = include_str!("settings_more/discussion.html");
 const MEDIA: &str = include_str!("settings_more/media.html");
@@ -27,9 +28,7 @@ const UPLOAD_PATHS: &str = "<tr>\n<th scope=\"row\"><label for=\"upload_path\">S
 
 const STRUCTURE: &str = "\t\t\t<div class=\"row\">\n\t\t\t\t<input id=\"permalink-input-%id%\"\n\t\t\t\t\tname=\"selection\" aria-describedby=\"permalink-%id%\"\n\t\t\t\t\ttype=\"radio\" value=\"%value%\"\n\t\t\t\t\t%checked%\t\t\t\t/>\n\t\t\t\t<div>\n\t\t\t\t\t<label for=\"permalink-input-%id%\">\n\t\t\t\t\t\t%label%\t\t\t\t\t</label>\n\t\t\t\t\t<p>\n\t\t\t\t\t\t<code id=\"permalink-%id%\">\n\t\t\t\t\t\t\t%example%\t\t\t\t\t\t</code>\n\t\t\t\t\t</p>\n\t\t\t\t</div>\n\t\t\t</div><!-- .row -->\n";
 
-const CHOOSE: &str = "\t\t\t\t<tr>\n\t\t\t<th scope=\"row\">\n\t\t\t\t<label for=\"page_for_privacy_policy\">\n\t\t\t\t\t%label%\t\t\t\t</label>\n\t\t\t</th>\n\t\t\t<td>\n\t\t\t\t<form method=\"post\">\n\t\t\t\t\t<input type=\"hidden\" name=\"action\" value=\"set-privacy-page\" />\n\t\t\t\t\t%select%<input type=\"hidden\" id=\"_wpnonce\" name=\"_wpnonce\" value=\"%nonce%\" />%referer%<input type=\"submit\" name=\"submit\" id=\"set-page\" class=\"button button-primary\" value=\"Use This Page\"  />\t\t\t\t</form>\n\t\t\t</td>\n\t\t</tr>\n";
-
-const SUPPORT: &str = "<p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
+const CHOOSE: &str = "\t\t\t\t<tr>\n\t\t\t<th scope=\"row\">\n\t\t\t\t<label for=\"page_for_privacy_policy\">\n\t\t\t\t\t%label%\t\t\t\t</label>\n\t\t\t</th>\n\t\t\t<td>\n\t\t\t\t<form method=\"post\">\n\t\t\t\t\t<input type=\"hidden\" name=\"action\" value=\"set-privacy-page\" />\n\t\t\t\t\t%select%%nonce%<input type=\"submit\" name=\"submit\" id=\"set-page\" class=\"button button-primary\" value=\"Use This Page\"  />\t\t\t\t</form>\n\t\t\t</td>\n\t\t</tr>\n";
 
 const SAVE: &str = "<p>You must click the Save Changes button at the bottom of the screen for new settings to take effect.</p>";
 
@@ -37,114 +36,9 @@ const SAVE: &str = "<p>You must click the Save Changes button at the bottom of t
 /// avatars.
 const DISCUSSION_JS: &str = "\t<script>\n\t(function($){\n\t\tvar parent = $( '#show_avatars' ),\n\t\t\tchildren = $( '.avatar-settings' );\n\t\tparent.on( 'change', function(){\n\t\t\tchildren.toggleClass( 'hide-if-js', ! this.checked );\n\t\t});\n\t})(jQuery);\n\t</script>\n\t";
 
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
-
-/// `get_option( $name )`, empty when unset.
-fn option(site: &dyn DashboardSite, name: &str) -> Vec<u8> {
-    site.option(name).unwrap_or_default()
-}
-
-/// `checked( $value, get_option( $name ) )`.
-fn checks(site: &dyn DashboardSite, name: &str, value: &str) -> String {
-    checked(option(site, name) == value.as_bytes()).into()
-}
-
-/// `esc_attr( get_option( $name ) )`.
-fn attr(site: &dyn DashboardSite, name: &str) -> String {
-    esc_attr(&option(site, name))
-}
-
-/// `wp_referer_field()` for the request.
-fn referer(request_uri: &str) -> String {
-    let url = remove_query_arg(&[b"_wp_http_referer"], request_uri.as_bytes());
-    format!(
-        "<input type=\"hidden\" name=\"_wp_http_referer\" value=\"{}\" />",
-        text(&esc_url(&url))
-    )
-}
-
-/// `wp_nonce_field( $action )`.
-fn nonce_field(site: &dyn DashboardSite, action: &str, request_uri: &str) -> String {
-    format!(
-        "<input type=\"hidden\" id=\"_wpnonce\" name=\"_wpnonce\" value=\"{}\" />{}",
-        site.nonce(action),
-        referer(request_uri)
-    )
-}
-
-/// `settings_fields( $group )`.
-fn settings_fields(site: &dyn DashboardSite, group: &str, request_uri: &str) -> String {
-    format!(
-        "<input type='hidden' name='option_page' value='{group}' /><input type=\"hidden\" name=\"action\" value=\"update\" />{}",
-        nonce_field(site, &format!("{group}-options"), request_uri)
-    )
-}
-
-/// A settings screen: its file, title, help and markup.
-struct Settings<'a> {
-    file: &'a str,
-    title: &'a str,
-    help: &'a [HelpTab<'a>],
-    sidebar: &'a str,
-    scripts: &'a [&'a str],
-    content: &'a str,
-}
-
-/// The page of a screen under Settings, or `wp_die()`'s refusal.
-fn settings_page(
-    site: &dyn DashboardSite,
-    settings: &Settings,
-    (canonical, origin): (&str, &str),
-    browser: &Browser,
-) -> Option<String> {
-    let page = Page {
-        screen: Screen {
-            pagenow: settings.file,
-            typenow: "",
-            taxonomy: "",
-            parent_file: Some("options-general.php"),
-            submenu_file: None,
-        },
-        id: settings.file.trim_end_matches(".php"),
-        title: settings.title,
-        help: settings.help,
-        sidebar: settings.sidebar,
-        screen_options: "",
-        styles: &[],
-        scripts: settings.scripts,
-        late_scripts: &[],
-        script_data: &[],
-        admin_footer: "",
-        footer_scripts: "",
-        content: settings.content,
-        canonical,
-        origin,
-        view: None,
-        script_after: &[],
-        late_styles: &[],
-        admin_head: "",
-    };
-    admin_page(site, &page, browser)
-}
-
-/// The page, or `wp_die()`'s refusal from `wp-admin/includes/menu.php`.
-fn answer(page: Option<String>) -> Answer {
-    page.map_or(
-        Answer::Denied("Sorry, you are not allowed to access this page."),
-        Answer::Page,
-    )
-}
-
 /// `options-discussion.php`.
-pub fn discussion(
-    site: &dyn DashboardSite,
-    (canonical, origin): (&str, &str),
-    request_uri: &str,
-    browser: &Browser,
-) -> Answer {
-    let depth = Value::String(option(site, "thread_comments_depth")).to_int();
+pub fn discussion(site: &dyn SettingsSite, request: &Request) -> Answer {
+    let depth = Value::String(option(site, "thread_comments_depth").into_bytes()).to_int();
     let mut select =
         String::from("<select name=\"thread_comments_depth\" id=\"thread_comments_depth\">");
     for i in 2..=10 {
@@ -165,7 +59,7 @@ pub fn discussion(
     ]
     .iter()
     .map(|(key, label)| {
-        let chosen = if rating == key.as_bytes() {
+        let chosen = if rating == *key {
             "checked=\"checked\""
         } else {
             ""
@@ -202,20 +96,20 @@ pub fn discussion(
     })
     .collect();
     let mut values = vec![
-        ("fields", settings_fields(site, "discussion", request_uri)),
+        ("fields", settings_fields(site, "discussion", request.uri)),
         (
             "default_ping_status",
-            checks(site, "default_ping_status", "open"),
+            checks(site, "default_ping_status", "open").into(),
         ),
         (
             "default_comment_status",
-            checks(site, "default_comment_status", "open"),
+            checks(site, "default_comment_status", "open").into(),
         ),
         ("depth", select),
-        ("show_avatars", checked(shows == b"1").into()),
+        ("show_avatars", checked(shows == "1").into()),
         (
             "hide",
-            if Value::String(shows).is_empty() {
+            if Value::String(shows.into_bytes()).is_empty() {
                 " hide-if-js"
             } else {
                 ""
@@ -242,14 +136,14 @@ pub fn discussion(
         "comment_moderation",
         "comment_previously_approved",
     ] {
-        values.push((name, checks(site, name, "1")));
+        values.push((name, checks(site, name, "1").into()));
     }
     for name in [
         "close_comments_days_old",
         "comments_per_page",
         "comment_max_links",
     ] {
-        values.push((name, attr(site, name)));
+        values.push((name, form_option(site, name)));
     }
     for (name, choice) in [
         ("default_comments_page", "newest"),
@@ -257,13 +151,11 @@ pub fn discussion(
         ("comment_order", "asc"),
         ("comment_order", "desc"),
     ] {
-        values.push((
-            choice,
-            selected(option(site, name) == choice.as_bytes()).into(),
-        ));
+        values.push((choice, selected(option(site, name) == choice).into()));
     }
     for name in ["moderation_keys", "disallowed_keys"] {
-        values.push((name, text(&esc_textarea(&option(site, name)))));
+        let value = site.option(name).unwrap_or_default();
+        values.push((name, text(&esc_textarea(&value))));
     }
     let content = fill(DISCUSSION, &values);
     let help = [HelpTab {
@@ -273,53 +165,41 @@ pub fn discussion(
             "<p>This screen provides many options for controlling the management and display of comments and links to your posts/pages. So many, in fact, they will not all fit here! :) Use the documentation links to get information on what each discussion setting does.</p>{SAVE}"
         ),
     }];
-    let sidebar = format!(
-        "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/settings-discussion-screen/\">Documentation on Discussion Settings</a></p>{SUPPORT}"
-    );
-    let settings = Settings {
+    let form = Form {
         file: "options-discussion.php",
         title: "Discussion Settings",
         help: &help,
-        sidebar: &sidebar,
-        scripts: &[],
         content: &content,
+        ..Form::default()
     };
     // `admin_print_footer_scripts` prints the script before the emoji
     // detection script.
-    let page = settings_page(site, &settings, (canonical, origin), browser).map(|page| {
-        page.replacen(
-            "<script id=\"wp-emoji-settings\"",
-            &format!("{DISCUSSION_JS}<script id=\"wp-emoji-settings\""),
-            1,
-        )
-    });
-    answer(page)
+    replaced(
+        settings_page(site, &form, request),
+        "<script id=\"wp-emoji-settings\"",
+        &format!("{DISCUSSION_JS}<script id=\"wp-emoji-settings\""),
+    )
 }
 
 /// `options-media.php`.
-pub fn media(
-    site: &dyn DashboardSite,
-    (canonical, origin): (&str, &str),
-    request_uri: &str,
-    browser: &Browser,
-) -> Answer {
+pub fn media(site: &dyn SettingsSite, request: &Request) -> Answer {
     let upload_path = option(site, "upload_path");
     // The folder and URL can be changed only once either is not the default.
     let editable = !option(site, "upload_url_path").is_empty()
-        || !upload_path.is_empty() && upload_path != b"wp-content/uploads";
+        || !upload_path.is_empty() && upload_path != "wp-content/uploads";
     let paths = if editable {
         fill(
             UPLOAD_PATHS,
             &[
-                ("upload_path", attr(site, "upload_path")),
-                ("upload_url_path", attr(site, "upload_url_path")),
+                ("upload_path", form_option(site, "upload_path")),
+                ("upload_url_path", form_option(site, "upload_url_path")),
             ],
         )
     } else {
         "<tr>\n<td class=\"td-full\">\n".into()
     };
     let mut values = vec![
-        ("fields", settings_fields(site, "media", request_uri)),
+        ("fields", settings_fields(site, "media", request.uri)),
         ("paths", paths),
     ];
     for name in [
@@ -330,10 +210,10 @@ pub fn media(
         "large_size_w",
         "large_size_h",
     ] {
-        values.push((name, attr(site, name)));
+        values.push((name, form_option(site, name)));
     }
     for name in ["thumbnail_crop", "uploads_use_yearmonth_folders"] {
-        values.push((name, checks(site, name, "1")));
+        values.push((name, checks(site, name, "1").into()));
     }
     let content = fill(MEDIA, &values);
     let uploading = if editable {
@@ -348,28 +228,19 @@ pub fn media(
             "<p>You can set maximum sizes for images inserted into your written content; you can also insert an image as Full Size.</p>{uploading}{SAVE}"
         ),
     }];
-    let sidebar = format!(
-        "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/settings-media-screen/\">Documentation on Media Settings</a></p>{SUPPORT}"
-    );
-    let settings = Settings {
+    let form = Form {
         file: "options-media.php",
         title: "Media Settings",
         help: &help,
-        sidebar: &sidebar,
-        scripts: &[],
         content: &content,
+        ..Form::default()
     };
-    answer(settings_page(site, &settings, (canonical, origin), browser))
+    settings_page(site, &form, request)
 }
 
 /// `options-permalink.php`, on a server that rewrites URLs and whose
 /// rewrite rules need no hand editing.
-pub fn permalink(
-    site: &dyn DashboardSite,
-    (canonical, origin): (&str, &str),
-    request_uri: &str,
-    browser: &Browser,
-) -> Answer {
+pub fn permalink(site: &dyn SettingsSite, request: &Request) -> Answer {
     let structure = option(site, "permalink_structure");
     let home = BarSite::home_url(site);
     let base = home.trim_end_matches('/');
@@ -404,7 +275,7 @@ pub fn permalink(
     ];
     let custom = !structures
         .iter()
-        .any(|(_, _, value, _)| structure == value.as_bytes());
+        .any(|(_, _, value, _)| structure == *value);
     let rows: Vec<String> = structures
         .iter()
         .map(|(id, label, value, example)| {
@@ -413,7 +284,7 @@ pub fn permalink(
                 &[
                     ("id", (*id).into()),
                     ("value", esc_attr(value.as_bytes())),
-                    ("checked", checked(structure == value.as_bytes()).into()),
+                    ("checked", checked(structure == *value).into()),
                     ("label", (*label).into()),
                     ("example", esc_html(example.as_bytes())),
                 ],
@@ -423,14 +294,17 @@ pub fn permalink(
     let content = fill(
         PERMALINK,
         &[
-            ("fields", nonce_field(site, "update-permalink", request_uri)),
+            (
+                "fields",
+                wp_nonce_field(site, "update-permalink", "_wpnonce", request.uri),
+            ),
             ("structures", rows.join("\t\t\t")),
             ("custom", checked(custom).into()),
-            ("base_url", text(&esc_url(base.as_bytes()))),
-            ("structure", esc_attr(&structure)),
+            ("base_url", url(base)),
+            ("structure", form_option(site, "permalink_structure")),
             ("base", base.into()),
-            ("category_base", attr(site, "category_base")),
-            ("tag_base", attr(site, "tag_base")),
+            ("category_base", form_option(site, "category_base")),
+            ("tag_base", form_option(site, "tag_base")),
         ],
     );
     let help = [
@@ -456,18 +330,17 @@ pub fn permalink(
             ),
         },
     ];
-    let sidebar = format!(
-        "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/settings-permalinks-screen/\">Documentation on Permalinks Settings</a></p><p><a href=\"https://wordpress.org/documentation/article/customize-permalinks/\">Documentation on Using Permalinks</a></p>{SUPPORT}"
-    );
-    let settings = Settings {
+    let form = Form {
         file: "options-permalink.php",
         title: "Permalink Settings",
         help: &help,
-        sidebar: &sidebar,
-        scripts: &[],
+        sidebar: Some(
+            "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/settings-permalinks-screen/\">Documentation on Permalinks Settings</a></p><p><a href=\"https://wordpress.org/documentation/article/customize-permalinks/\">Documentation on Using Permalinks</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>",
+        ),
         content: &content,
+        ..Form::default()
     };
-    answer(settings_page(site, &settings, (canonical, origin), browser))
+    settings_page(site, &form, request)
 }
 
 /// `settings_errors()` of one error for `page_for_privacy_policy`.
@@ -478,13 +351,8 @@ fn privacy_error(message: &str) -> String {
 }
 
 /// `options-privacy.php`.
-pub fn privacy(
-    site: &dyn DashboardSite,
-    (canonical, origin): (&str, &str),
-    request_uri: &str,
-    browser: &Browser,
-) -> Answer {
-    let id = Value::String(option(site, "wp_page_for_privacy_policy")).to_int();
+pub fn privacy(site: &dyn SettingsSite, request: &Request) -> Answer {
+    let id = Value::String(option(site, "wp_page_for_privacy_policy").into_bytes()).to_int();
     let policy = (id != 0).then(|| u64::try_from(id).ok().and_then(|id| site.post(id)));
     let (error, page) = match policy {
         None => (String::new(), None),
@@ -506,8 +374,8 @@ pub fn privacy(
         let edit = BarSite::admin_url(site, &format!("post.php?post={id}&action=edit"));
         format!(
             "\t\t\t\t\t\t<strong>\n\t\t\t\t<a href=\"{}\">Edit</a> or <a href=\"{}\">{}</a> your Privacy Policy page content.\t\t\t\t</strong>\n\t\t\t",
-            text(&esc_url(edit.as_bytes())),
-            text(&esc_url(site.permalink(page).as_bytes())),
+            url(&edit),
+            url(&site.permalink(page)),
             if page.status == "publish" {
                 "view"
             } else {
@@ -532,13 +400,7 @@ pub fn privacy(
         String::new()
     } else {
         let options = page_options(&pages, &id.to_string());
-        let select = if options.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "<select name='page_for_privacy_policy' id='page_for_privacy_policy'>\n\t<option value=\"0\">&mdash; Select &mdash;</option>\n{options}</select>\n"
-            )
-        };
+        let select = pages_dropdown("page_for_privacy_policy", &options);
         fill(
             CHOOSE,
             &[
@@ -552,18 +414,23 @@ pub fn privacy(
                     .into(),
                 ),
                 ("select", select),
-                ("nonce", site.nonce("set-privacy-page")),
-                ("referer", referer(request_uri)),
+                (
+                    "nonce",
+                    wp_nonce_field(site, "set-privacy-page", "_wpnonce", request.uri),
+                ),
             ],
         )
     };
-    let url = |path: &str| text(&esc_url(BarSite::admin_url(site, path).as_bytes()));
+    let admin_url = |path: &str| url(&BarSite::admin_url(site, path));
     let content = error
         + &fill(
             PRIVACY,
             &[
-                ("settings_url", url("options-privacy.php")),
-                ("guide_url", url("options-privacy.php?tab=policyguide")),
+                ("settings_url", admin_url("options-privacy.php")),
+                (
+                    "guide_url",
+                    admin_url("options-privacy.php?tab=policyguide"),
+                ),
                 ("links", links),
                 (
                     "create",
@@ -574,8 +441,10 @@ pub fn privacy(
                     }
                     .into(),
                 ),
-                ("create_nonce", site.nonce("create-privacy-page")),
-                ("referer", referer(request_uri)),
+                (
+                    "create_nonce",
+                    wp_nonce_field(site, "create-privacy-page", "_wpnonce", request.uri),
+                ),
                 ("choose", choose),
             ],
         );
@@ -584,23 +453,23 @@ pub fn privacy(
         title: "Overview",
         content: "<p>The Privacy screen lets you either build a new privacy-policy page or choose one you already have to show.</p><p>This screen includes suggestions to help you write your own privacy policy. However, it is your responsibility to use these resources correctly, to provide the information required by your privacy policy, and to keep this information current and accurate.</p>",
     }];
-    let settings = Settings {
+    let form = Form {
         file: "options-privacy.php",
         title: "Privacy",
         help: &help,
-        sidebar: "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/settings-privacy-screen/\">Documentation on Privacy Settings</a></p>",
+        sidebar: Some(
+            "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/settings-privacy-screen/\">Documentation on Privacy Settings</a></p>",
+        ),
         scripts: &["privacy-tools"],
         content: &content,
+        ..Form::default()
     };
     // The `admin_body_class` filter's class comes before the screen's own.
-    let page = settings_page(site, &settings, (canonical, origin), browser).map(|page| {
-        page.replacen(
-            "no-js options-privacy-php ",
-            "no-js privacy-settings  options-privacy-php ",
-            1,
-        )
-    });
-    answer(page)
+    replaced(
+        settings_page(site, &form, request),
+        "no-js options-privacy-php ",
+        "no-js privacy-settings  options-privacy-php ",
+    )
 }
 
 #[cfg(test)]

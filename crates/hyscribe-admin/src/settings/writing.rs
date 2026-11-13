@@ -6,10 +6,11 @@ use hyscribe_kses::{esc_attr, esc_html, esc_textarea};
 use hyscribe_phpser::{Value, is_empty_string};
 use hyscribe_render::post::POST_FORMATS;
 
-use super::{Form, SettingsSite, form_option, option, settings_fields, settings_page, text};
-use crate::admin_bar::Browser;
-use crate::list_table::{checked, fill, selected};
-use crate::page::HelpTab;
+use super::{
+    Form, SettingsSite, checks, form_option, option, settings_fields, settings_page, text,
+};
+use crate::list_table::{fill, selected};
+use crate::page::{HelpTab, Request};
 use crate::posts::{Answer, term_options};
 
 const CONTENT: &str = include_str!("writing.html");
@@ -54,19 +55,13 @@ pub(super) fn formatting(site: &dyn SettingsSite) -> String {
     }
     format!(
         "\t<tr>\n<th scope=\"row\">Formatting</th>\n<td><fieldset><legend class=\"screen-reader-text\"><span>Formatting</span></legend>\n<label for=\"use_smilies\">\n<input name=\"use_smilies\" type=\"checkbox\" id=\"use_smilies\" value=\"1\" {} />\n\tConvert emoticons like <code>:-)</code> and <code>:-P</code> to graphics on display</label><br />\n<label for=\"use_balanceTags\"><input name=\"use_balanceTags\" type=\"checkbox\" id=\"use_balanceTags\" value=\"1\" {} /> WordPress should correct invalidly nested XHTML automatically</label>\n</fieldset></td>\n</tr>\n",
-        checked(option(site, "use_smilies") == "1"),
-        checked(option(site, "use_balanceTags") == "1")
+        checks(site, "use_smilies", "1"),
+        checks(site, "use_balanceTags", "1")
     )
 }
 
 /// `options-writing.php`.
-pub fn writing(
-    site: &dyn SettingsSite,
-    canonical: &str,
-    origin: &str,
-    request_uri: &str,
-    browser: &Browser,
-) -> Answer {
+pub fn writing(site: &dyn SettingsSite, request: &Request) -> Answer {
     let format = option(site, "default_post_format");
     let formats: String = POST_FORMATS[1..]
         .iter()
@@ -100,7 +95,7 @@ pub fn writing(
     let content = fill(
         CONTENT,
         &[
-            ("fields", settings_fields(site, "writing", request_uri)),
+            ("fields", settings_fields(site, "writing", request.uri)),
             ("formatting", formatting(site)),
             ("category", categories(site, "default_category", "category")),
             ("formats", formats),
@@ -124,12 +119,8 @@ pub fn writing(
         title: "Writing Settings",
         help: &HELP,
         content: &content,
-        admin_head: "",
         scripts: &["user-profile"],
-        late_scripts: &[],
-        late_styles: &[],
-        script_data: &[],
-        admin_footer: "",
+        ..Form::default()
     };
-    settings_page(site, &form, canonical, origin, browser)
+    settings_page(site, &form, request)
 }

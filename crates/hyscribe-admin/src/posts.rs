@@ -22,7 +22,7 @@ use crate::admin_bar::Browser;
 use crate::list_table::{
     Column, Order, Sort, View, bulk_actions, column_headers, fill, months_dropdown, pagination,
     row_actions, screen_options as list_screen_options, search_box, selected as selected_if,
-    table_description, views,
+    table_description, views, wp_nonce_field,
 };
 use crate::menu::Screen;
 use crate::menu::esc_link;
@@ -833,10 +833,8 @@ fn walker_selected(chosen: bool) -> &'static str {
     if chosen { " selected=\"selected\"" } else { "" }
 }
 
-/// The options of `wp_dropdown_pages()` for the published pages of `kind`:
-/// a tree by order and title, without pages whose parents are not listed,
-/// the page `selected` marked.
-pub(crate) fn parent_options(site: &dyn PostsSite, kind: PostType, selected: &str) -> String {
+/// The published posts of `kind` by order and title, as `wp_dropdown_pages()` asks.
+pub(crate) fn published(site: &dyn PostsSite, kind: PostType) -> Vec<Post> {
     let query = PostQuery {
         post_types: vec![kind.name.into()],
         statuses: vec![StatusFilter {
@@ -847,8 +845,7 @@ pub(crate) fn parent_options(site: &dyn PostsSite, kind: PostType, selected: &st
         limit: u32::MAX,
         ..PostQuery::default()
     };
-    let (pages, _) = site.list_posts(&query);
-    page_options(&pages, selected)
+    site.list_posts(&query).0
 }
 
 /// `wp_dropdown_pages()`'s options for `pages` as a tree, without pages
@@ -969,7 +966,7 @@ fn inline_edit(
     let posts = kind == POST;
     let formats = if posts { site.post_formats() } else { &[] };
     let (attributes, bulk_attributes) = if kind.hierarchical() {
-        let options = parent_options(site, kind, "");
+        let options = page_options(&published(site, kind), "");
         (
             INLINE_ATTRIBUTES.replace("%parent%", &parent_dropdown(&options, false)),
             INLINE_BULK_ATTRIBUTES.replace("%parent%", &parent_dropdown(&options, true)),
@@ -1507,22 +1504,23 @@ fn list_content(
             ""
         }
     );
-    out.push_str(&format!(
-        "<input type=\"hidden\" id=\"_wpnonce\" name=\"_wpnonce\" value=\"{}\" /><input type=\"hidden\" name=\"_wp_http_referer\" value=\"{}\" />",
-        site.nonce("bulk-posts"),
-        // `edit.php` and `wp_referer_field()` rebuild the request's query.
-        text(&esc_url(&remove_query_arg(
-            &[
-                b"locked",
-                b"skipped",
-                b"updated",
-                b"deleted",
-                b"trashed",
-                b"untrashed",
-                b"_wp_http_referer",
-            ],
-            request_uri.as_bytes()
-        )))
+    // `edit.php` removes its notices' arguments from the request first.
+    let request_uri = remove_query_arg(
+        &[
+            b"locked",
+            b"skipped",
+            b"updated",
+            b"deleted",
+            b"trashed",
+            b"untrashed",
+        ],
+        request_uri.as_bytes(),
+    );
+    out.push_str(&wp_nonce_field(
+        site,
+        "bulk-posts",
+        "_wpnonce",
+        &text(&request_uri),
     ));
     let empty = listing.posts.is_empty();
     let heading = format!("{} list navigation", kind.plural);

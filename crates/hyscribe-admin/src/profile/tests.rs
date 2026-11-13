@@ -4,6 +4,7 @@ use hyscribe_phpser::{addslashes, parse_str};
 use hyscribe_testkit::{hs_admin_page, unhex};
 
 use super::*;
+use crate::admin_bar::Browser;
 use crate::tests::{Role, SITE, first_difference};
 
 const BROWSER: Browser = Browser {

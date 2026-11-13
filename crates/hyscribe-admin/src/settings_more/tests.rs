@@ -3,6 +3,7 @@
 use hyscribe_testkit::{hs_admin_page, unhex};
 
 use super::*;
+use crate::admin_bar::Browser;
 use crate::tests::{Role, SITE, first_difference};
 
 /// Every page of `reference/settings-more/golden.sh`, today's date the test
@@ -26,15 +27,17 @@ fn pages_are_php_s() {
             "options-permalink" => permalink,
             _ => privacy,
         };
-        let ours = screen(
-            &Role(role),
-            (&format!("{SITE}{path}"), SITE),
-            &path,
-            &Browser {
-                user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
-                mobile_hint: None,
-            },
-        );
+        let browser = Browser {
+            user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
+            mobile_hint: None,
+        };
+        let request = Request {
+            canonical: &format!("{SITE}{path}"),
+            origin: SITE,
+            uri: &path,
+            browser: &browser,
+        };
+        let ours = screen(&Role(role), &request);
         let recorded = String::from_utf8(unhex(f[3])).unwrap();
         let Answer::Page(ours) = ours else {
             let refusal = "Sorry, you are not allowed to access this page.";

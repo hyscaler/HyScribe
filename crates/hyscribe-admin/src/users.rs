@@ -16,7 +16,7 @@ use crate::admin_bar::{BarSite, Browser};
 use crate::dashboard::DashboardSite;
 use crate::list_table::{
     Column, Order, Sort, View, bulk_actions, column_headers, fill, pagenum, pagination,
-    row_actions, screen_options, search_box, table_description, views,
+    row_actions, screen_options, search_box, table_description, views, wp_nonce_field,
 };
 use crate::menu::{Screen, link};
 use crate::page::{HelpTab, Page, admin_page};
@@ -607,11 +607,6 @@ pub fn users(
             )
         )
     };
-    let referer = String::from_utf8_lossy(&esc_url(&remove_query_arg(
-        &[b"_wp_http_referer"],
-        request_uri.as_bytes(),
-    )))
-    .into_owned();
     let order = Order {
         orderby: args.orderby.as_deref(),
         desc: args.order.as_deref() == Some("desc"),
@@ -664,10 +659,7 @@ pub fn users(
             ("role", role_field),
             (
                 "nonce",
-                format!(
-                    "<input type=\"hidden\" id=\"_wpnonce\" name=\"_wpnonce\" value=\"{}\" /><input type=\"hidden\" name=\"_wp_http_referer\" value=\"{referer}\" />",
-                    site.nonce("bulk-users")
-                ),
+                wp_nonce_field(site, "bulk-users", "_wpnonce", request_uri),
             ),
             ("top", format!("{}\n\t\t", tablenav("top"))),
             ("caption", table_description(&columns, &order)),

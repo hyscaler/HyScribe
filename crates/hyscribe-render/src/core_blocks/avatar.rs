@@ -362,10 +362,8 @@ fn avatar_data(context: &Context<'_>, subject: &Subject<'_>, size: i64) -> Optio
     ))
 }
 
-/// The Gravatar URL `get_avatar_data()` makes for `email` from the site's
-/// avatar options, with initials from `name` where they are the default,
-/// and whether there was an address; `force` shows the default whatever
-/// Gravatar holds.
+/// `get_avatar_data()`'s Gravatar URL for `email`, initials from `name`, and
+/// whether there was an address; `force` shows the default whatever Gravatar holds.
 fn gravatar(
     option: &dyn Fn(&str) -> Option<Vec<u8>>,
     email: &[u8],

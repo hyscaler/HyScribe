@@ -4,12 +4,12 @@
 //! options `options.php` saves.
 
 use hyscribe_kses::{esc_attr, esc_url};
-use hyscribe_phpser::{Float, Key, Value, remove_query_arg};
+use hyscribe_phpser::{Float, Key, Value};
 use hyscribe_render::date::{DAYS, MONTHS, Zone, site_zone};
 
-use crate::admin_bar::Browser;
+use crate::list_table::{checked, wp_nonce_field};
 use crate::menu::Screen;
-use crate::page::{HelpTab, Page, admin_page, json, object, text as value_text};
+use crate::page::{HelpTab, Page, Request, admin_page, json, object, text as value_text};
 use crate::posts::Answer;
 use crate::users::UsersSite;
 
@@ -31,29 +31,40 @@ pub trait SettingsSite: UsersSite {
 
 const SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/settings-%s-screen/\">Documentation on %S Settings</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
 
-fn text(bytes: &[u8]) -> String {
+pub(crate) fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
 /// `get_option( $name )`, as stored, empty when unset.
-fn option(site: &dyn SettingsSite, name: &str) -> String {
+pub(crate) fn option(site: &dyn SettingsSite, name: &str) -> String {
     text(&site.option(name).unwrap_or_default())
 }
 
 /// `form_option( $name )`.
-fn form_option(site: &dyn SettingsSite, name: &str) -> String {
-    esc_attr(option(site, name).as_bytes())
+pub(crate) fn form_option(site: &dyn SettingsSite, name: &str) -> String {
+    esc_attr(&site.option(name).unwrap_or_default())
+}
+
+/// `checked( $value, get_option( $name ) )`.
+pub(crate) fn checks(site: &dyn SettingsSite, name: &str, value: &str) -> &'static str {
+    checked(option(site, name) == value)
 }
 
 /// `settings_fields( $group )` for the request `request_uri`.
-fn settings_fields(site: &dyn SettingsSite, group: &str, request_uri: &str) -> String {
-    let referer = esc_attr(&remove_query_arg(
-        &[b"_wp_http_referer"],
-        request_uri.as_bytes(),
-    ));
+pub(crate) fn settings_fields(site: &dyn SettingsSite, group: &str, request_uri: &str) -> String {
     format!(
-        "<input type='hidden' name='option_page' value='{group}' /><input type=\"hidden\" name=\"action\" value=\"update\" /><input type=\"hidden\" id=\"_wpnonce\" name=\"_wpnonce\" value=\"{}\" /><input type=\"hidden\" name=\"_wp_http_referer\" value=\"{referer}\" />",
-        site.nonce(&format!("{group}-options"))
+        "<input type='hidden' name='option_page' value='{group}' /><input type=\"hidden\" name=\"action\" value=\"update\" />{}",
+        wp_nonce_field(site, &format!("{group}-options"), "_wpnonce", request_uri)
+    )
+}
+
+/// `wp_dropdown_pages()` of `name` over its `options`, none without.
+pub(crate) fn pages_dropdown(name: &str, options: &str) -> String {
+    if options.is_empty() {
+        return String::new();
+    }
+    format!(
+        "<select name='{name}' id='{name}'>\n\t<option value=\"0\">&mdash; Select &mdash;</option>\n{options}</select>\n"
     )
 }
 
@@ -198,31 +209,33 @@ fn date_scripts(site: &dyn SettingsSite) -> Vec<(&'static str, String)> {
 }
 
 /// What a Settings screen adds to the frame.
-struct Form<'a> {
-    file: &'a str,
-    title: &'a str,
-    help: &'a [HelpTab<'a>],
-    content: &'a str,
-    admin_head: &'a str,
-    scripts: &'a [&'a str],
-    late_scripts: &'a [&'a str],
-    late_styles: &'a [&'a str],
-    script_data: &'a [(&'a str, String)],
-    admin_footer: &'a str,
+#[derive(Default)]
+pub(crate) struct Form<'a> {
+    pub(crate) file: &'a str,
+    pub(crate) title: &'a str,
+    pub(crate) help: &'a [HelpTab<'a>],
+    /// The help sidebar, when not the usual links.
+    pub(crate) sidebar: Option<&'a str>,
+    pub(crate) content: &'a str,
+    pub(crate) admin_head: &'a str,
+    pub(crate) scripts: &'a [&'a str],
+    pub(crate) late_scripts: &'a [&'a str],
+    pub(crate) late_styles: &'a [&'a str],
+    pub(crate) script_data: &'a [(&'a str, String)],
+    pub(crate) admin_footer: &'a str,
 }
 
 /// The screen in the frame, for those the menu lets in.
-fn settings_page(
-    site: &dyn SettingsSite,
-    screen: &Form,
-    canonical: &str,
-    origin: &str,
-    browser: &Browser,
-) -> Answer {
+pub(crate) fn settings_page(site: &dyn SettingsSite, screen: &Form, request: &Request) -> Answer {
     let name = screen.title.split(' ').next().unwrap_or_default();
-    let sidebar = SIDEBAR
-        .replace("%s", &name.to_ascii_lowercase())
-        .replace("%S", name);
+    let sidebar = screen.sidebar.map_or_else(
+        || {
+            SIDEBAR
+                .replace("%s", &name.to_ascii_lowercase())
+                .replace("%S", name)
+        },
+        str::to_string,
+    );
     let id = screen.file.trim_end_matches(".php");
     let page = Page {
         screen: Screen {
@@ -247,18 +260,27 @@ fn settings_page(
         admin_footer: screen.admin_footer,
         footer_scripts: "",
         content: screen.content,
-        canonical,
-        origin,
+        canonical: request.canonical,
+        origin: request.origin,
         view: None,
     };
-    admin_page(site, &page, browser).map_or(
+    admin_page(site, &page, request.browser).map_or(
         Answer::Denied("Sorry, you are not allowed to access this page."),
         Answer::Page,
     )
 }
 
+/// The page with `from` replaced by `to` once, for what the screen's hooks
+/// print out of the frame's order.
+pub(crate) fn replaced(answer: Answer, from: &str, to: &str) -> Answer {
+    match answer {
+        Answer::Page(page) => Answer::Page(page.replacen(from, to, 1)),
+        refused => refused,
+    }
+}
+
 /// `esc_url()` as text.
-fn url(value: &str) -> String {
+pub(crate) fn url(value: &str) -> String {
     text(&esc_url(value.as_bytes()))
 }
 

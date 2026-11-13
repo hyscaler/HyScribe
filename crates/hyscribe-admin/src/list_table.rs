@@ -8,6 +8,7 @@ use hyscribe_render::date::MONTHS;
 use hyscribe_render::number_format;
 
 use crate::menu::esc_link;
+use crate::page::PageSite;
 
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
@@ -122,6 +123,29 @@ pub fn selected(chosen: bool) -> &'static str {
 /// `checked()`'s ` checked='checked'`, when `on`.
 pub fn checked(on: bool) -> &'static str {
     if on { " checked='checked'" } else { "" }
+}
+
+/// `wp_referer_field()` for the request `request_uri`.
+fn wp_referer_field(request_uri: &str) -> String {
+    let url = remove_query_arg(&[b"_wp_http_referer"], request_uri.as_bytes());
+    format!(
+        "<input type=\"hidden\" name=\"_wp_http_referer\" value=\"{}\" />",
+        text(&esc_url(&url))
+    )
+}
+
+/// `wp_nonce_field( $action, $name )` for the request `request_uri`.
+pub(crate) fn wp_nonce_field(
+    site: &dyn PageSite,
+    action: &str,
+    name: &str,
+    request_uri: &str,
+) -> String {
+    format!(
+        "<input type=\"hidden\" id=\"{name}\" name=\"{name}\" value=\"{}\" />{}",
+        site.nonce(action),
+        wp_referer_field(request_uri)
+    )
 }
 
 /// `row_actions( $actions )`: the links under a row's primary column,

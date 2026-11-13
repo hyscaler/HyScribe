@@ -10,10 +10,10 @@ use hyscribe_phpser::{
 };
 use hyscribe_render::user_avatar;
 
-use crate::admin_bar::{BarSite, Browser};
-use crate::list_table::{checked, fill, selected};
+use crate::admin_bar::BarSite;
+use crate::list_table::{checked, fill, selected, wp_nonce_field};
 use crate::menu::Screen;
-use crate::page::{HelpTab, Page, SCHEMES, admin_page};
+use crate::page::{HelpTab, Page, Request, SCHEMES, admin_page};
 use crate::posts::Answer;
 use crate::users::{UsersSite, dropdown_roles, role_names};
 
@@ -219,18 +219,6 @@ pub struct EditArgs {
     pub user_id: Option<String>,
     /// `wp_http_referer`.
     pub referer: Option<String>,
-}
-
-/// The request a screen answers.
-pub struct Request<'a> {
-    /// The requested URL without `wp_removable_query_args()`.
-    pub canonical: &'a str,
-    /// The scheme and host of the request.
-    pub origin: &'a str,
-    /// `$_SERVER['REQUEST_URI']`, slashed.
-    pub uri: &'a str,
-    /// The browser that asks.
-    pub browser: &'a Browser<'a>,
 }
 
 /// `user-edit.php`'s own: its cleaned `wp_http_referer` and `(int)
@@ -450,10 +438,6 @@ fn form(site: &dyn ProfileSite, user: &User, shown: Option<&Edit>, request: &Req
     let capabilities = option("capabilities");
     let user_roles = roles_of(&capabilities, &keys);
     let [title, add, role, email] = heading(site, user, (&roles, &user_roles));
-    let referer = text(&esc_url(&remove_query_arg(
-        &[b"_wp_http_referer"],
-        request.uri.as_bytes(),
-    )));
     let (reset, sessions) = account_rows(site, user, profile);
     let auto = |name: &str| {
         if profile {
@@ -483,8 +467,10 @@ fn form(site: &dyn ProfileSite, user: &User, shown: Option<&Edit>, request: &Req
                     BarSite::admin_url(site, &either("profile.php", "user-edit.php")).as_bytes(),
                 )),
             ),
-            ("nonce", site.nonce(&format!("update-user_{id}"))),
-            ("referer", referer),
+            (
+                "nonce",
+                wp_nonce_field(site, &format!("update-user_{id}"), "_wpnonce", request.uri),
+            ),
             ("wp_referer", wp_referer),
             ("me", me.to_string()),
             ("rich", rich),

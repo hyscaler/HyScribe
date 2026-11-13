@@ -2,8 +2,15 @@
 
 use hyscribe_testkit::{hs_admin_page, unhex};
 
+use hyscribe_phpser::remove_query_arg;
+
 use super::*;
+use crate::admin_bar::Browser;
 use crate::tests::{Role, SITE, first_difference};
+
+/// The query `reference/settings/golden.sh` asks the `s1referer` page
+/// with, slashed as `wp_magic_quotes()` leaves `REQUEST_URI`.
+const REFERER_QUERY: &str = "?x=1&y=\\'q\\'";
 
 /// The user agents `reference/settings/golden.sh` sends.
 fn agent(variant: &str) -> &'static [u8] {
@@ -15,7 +22,18 @@ fn agent(variant: &str) -> &'static [u8] {
     }
 }
 
-/// Every page of `reference/settings/golden.sh`.
+/// The request for `path` from `browser`.
+fn request<'a>(path: &'a str, canonical: &'a str, browser: &'a Browser<'a>) -> Request<'a> {
+    Request {
+        canonical,
+        origin: SITE,
+        uri: path,
+        browser,
+    }
+}
+
+/// Every page of `reference/settings/golden.sh`, the `s1referer` one asked
+/// with a query its form's referer field escapes.
 #[test]
 fn pages_are_php_s() {
     let golden = include_str!("../../tests/golden/settings.tsv");
@@ -23,17 +41,25 @@ fn pages_are_php_s() {
     for line in golden.lines() {
         let f: Vec<&str> = line.split('\t').collect();
         let role: &'static str = Box::leak(format!("{}:{}", f[0], f[1]).into_boxed_str());
-        let path = format!("/hs-admin/options-{}", f[2]);
+        let query = if f[0] == "s1referer" {
+            REFERER_QUERY
+        } else {
+            ""
+        };
+        let path = format!("/hs-admin/options-{}{query}", f[2]);
         let site = Role(role);
         let browser = Browser {
             user_agent: agent(f[0]),
             mobile_hint: None,
         };
-        let canonical = format!("{SITE}{path}");
+        // `wp_admin_canonical_url()` rebuilds the query.
+        let canonical = remove_query_arg(&[b"updated"], format!("{SITE}{path}").as_bytes());
+        let canonical = text(&canonical);
+        let request = request(&path, &canonical, &browser);
         let screen = match f[2] {
-            "general" => general(&site, &canonical, SITE, &path, &browser),
-            "writing" => Some(writing(&site, &canonical, SITE, &path, &browser)),
-            _ => reading(&site, &canonical, SITE, &path, &browser),
+            "general" => general(&site, &request),
+            "writing" => Some(writing(&site, &request)),
+            _ => reading(&site, &request),
         };
         let recorded = String::from_utf8(unhex(f[3])).unwrap();
         let (php, ours) = match screen {
@@ -65,13 +91,13 @@ fn unported_states_have_no_page() {
     let show = |variant: &'static str| {
         let site = Role(variant);
         let path = "/hs-admin/options-reading";
-        reading(&site, SITE, SITE, path, &browser).is_some()
+        reading(&site, &request(path, SITE, &browser)).is_some()
     };
     assert!(!show("s1unset:administrator") && !show("s1hidden:administrator"));
     assert!(show("s1static:administrator") && show("s1nopages:administrator"));
     let site = Role("s1icon:administrator");
     let path = "/hs-admin/options-general";
-    assert!(general(&site, SITE, SITE, path, &browser).is_none());
+    assert!(general(&site, &request(path, SITE, &browser)).is_none());
 }
 
 /// Without `WP_HOME` and `WP_SITEURL` the addresses can be changed, and
@@ -80,7 +106,8 @@ fn unported_states_have_no_page() {
 fn addresses_without_constants_can_change() {
     let site = Role("s1undefined:administrator");
     let path = "/hs-admin/options-general";
-    let Some(Answer::Page(page)) = general(&site, SITE, SITE, path, &Browser::default()) else {
+    let browser = Browser::default();
+    let Some(Answer::Page(page)) = general(&site, &request(path, SITE, &browser)) else {
         panic!("no page");
     };
     assert!(!page.contains("disabled='disabled'") && !page.contains("code disabled"));

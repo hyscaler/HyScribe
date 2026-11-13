@@ -569,10 +569,13 @@ fn user_settings_are_read_as_php_reads_them() {
 /// With no published pages of the type there is no parent menu.
 #[test]
 fn no_published_pages_leave_no_parent_menu() {
-    assert_eq!(parent_options(&Role("empty:administrator"), POST, ""), "");
+    assert_eq!(
+        page_options(&published(&Role("empty:administrator"), POST), ""),
+        ""
+    );
     assert_eq!(parent_dropdown("", false), "");
     // An untitled one is named by its ID.
-    let options = parent_options(&Role("posts:administrator"), POST, "");
+    let options = page_options(&published(&Role("posts:administrator"), POST), "");
     assert!(options.contains("value=\"308\">#308 (no title)</option>"));
     // By order, then title.
     let at = |id: &str| options.find(&format!("value=\"{id}\"")).unwrap();

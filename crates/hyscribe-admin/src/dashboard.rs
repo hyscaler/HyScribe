@@ -7,7 +7,6 @@ use hyscribe_kses::{
 };
 use hyscribe_model::{Comment, Post, User};
 use hyscribe_phpser::is_empty_string;
-use hyscribe_phpser::remove_query_arg;
 use hyscribe_phpser::{Maybe, Value, json_decode, maybe_unserialize};
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::convert_chars;
@@ -15,7 +14,7 @@ use hyscribe_render::{comment_avatar, number_format, wp_trim_words};
 
 use crate::admin_bar::{BarSite, Browser};
 use crate::comments::{comment_classes, comment_reply, comment_views, editor_footer};
-use crate::list_table::view_list;
+use crate::list_table::{view_list, wp_nonce_field};
 use crate::menu::Screen;
 use crate::menu::{esc_link, link};
 use crate::page::{HelpTab, Page, admin_page, json, object, text};
@@ -601,15 +600,11 @@ fn quick_press(site: &dyn DashboardSite, request_uri: &str) -> String {
     let action = String::from_utf8_lossy(&esc_url(BarSite::admin_url(site, "post.php").as_bytes()))
         .into_owned();
     format!(
-        "\n\t<form name=\"post\" action=\"{action}\" method=\"post\" id=\"quick-press\" class=\"hide-if-no-js\">\n\n\t\t\n\t\t<div class=\"input-text-wrap\" id=\"title-wrap\">\n\t\t\t<label for=\"title\">\n\t\t\t\tTitle\t\t\t</label>\n\t\t\t<input type=\"text\" name=\"post_title\" id=\"title\" autocomplete=\"off\" />\n\t\t</div>\n\n\t\t<div class=\"textarea-wrap\" id=\"description-wrap\">\n\t\t\t<label for=\"content\">Content</label>\n\t\t\t<textarea name=\"content\" id=\"content\" placeholder=\"What&#8217;s on your mind?\" class=\"mceEditor\" rows=\"3\" cols=\"15\" autocomplete=\"off\"></textarea>\n\t\t</div>\n\n\t\t<p class=\"submit\">\n\t\t\t<input type=\"hidden\" name=\"action\" id=\"quickpost-action\" value=\"post-quickdraft-save\" />\n\t\t\t<input type=\"hidden\" name=\"post_ID\" value=\"{}\" />\n\t\t\t<input type=\"hidden\" name=\"post_type\" value=\"post\" />\n\t\t\t<input type=\"hidden\" id=\"_wpnonce\" name=\"_wpnonce\" value=\"{}\" /><input type=\"hidden\" name=\"_wp_http_referer\" value=\"{}\" />\t\t\t<input type=\"submit\" name=\"save\" id=\"save-post\" class=\"button button-primary\" value=\"Save Draft\"  />\t\t\t<br class=\"clear\" />\n\t\t</p>\n\n\t</form>\n\t{}",
+        "\n\t<form name=\"post\" action=\"{action}\" method=\"post\" id=\"quick-press\" class=\"hide-if-no-js\">\n\n\t\t\n\t\t<div class=\"input-text-wrap\" id=\"title-wrap\">\n\t\t\t<label for=\"title\">\n\t\t\t\tTitle\t\t\t</label>\n\t\t\t<input type=\"text\" name=\"post_title\" id=\"title\" autocomplete=\"off\" />\n\t\t</div>\n\n\t\t<div class=\"textarea-wrap\" id=\"description-wrap\">\n\t\t\t<label for=\"content\">Content</label>\n\t\t\t<textarea name=\"content\" id=\"content\" placeholder=\"What&#8217;s on your mind?\" class=\"mceEditor\" rows=\"3\" cols=\"15\" autocomplete=\"off\"></textarea>\n\t\t</div>\n\n\t\t<p class=\"submit\">\n\t\t\t<input type=\"hidden\" name=\"action\" id=\"quickpost-action\" value=\"post-quickdraft-save\" />\n\t\t\t<input type=\"hidden\" name=\"post_ID\" value=\"{}\" />\n\t\t\t<input type=\"hidden\" name=\"post_type\" value=\"post\" />\n\t\t\t{}\t\t\t<input type=\"submit\" name=\"save\" id=\"save-post\" class=\"button button-primary\" value=\"Save Draft\"  />\t\t\t<br class=\"clear\" />\n\t\t</p>\n\n\t</form>\n\t{}",
         site.quick_draft()
             .map(|id| id.to_string())
             .unwrap_or_default(),
-        site.nonce("add-post"),
-        text_of(&esc_url(&remove_query_arg(
-            &[b"_wp_http_referer"],
-            request_uri.as_bytes()
-        ))),
+        wp_nonce_field(site, "add-post", "_wpnonce", request_uri),
         recent_drafts(site)
     )
 }

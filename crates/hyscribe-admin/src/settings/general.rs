@@ -9,15 +9,15 @@ use hyscribe_render::date::{DAYS, MONTHS, Zone, format_unix, site_zone};
 use hyscribe_render::formatting::{convert_chars, wptexturize};
 
 use super::{
-    Form, SettingsSite, form_option, gmt_offset, option, settings_fields, settings_page, text, url,
-    zone,
+    Form, SettingsSite, checks, form_option, gmt_offset, option, replaced, settings_fields,
+    settings_page, text, url, zone,
 };
 use crate::admin_bar::{BarSite, Browser};
 use crate::assets::{cookie_path, registered_script_data};
 use crate::list_table::{checked, fill};
-use crate::page::{HelpTab, esc_js, json, object, text as value_text};
+use crate::page::{HelpTab, Request, esc_js, json, object, text as value_text};
 use crate::posts::Answer;
-use crate::users::role_names;
+use crate::users::{dropdown_roles, role_names};
 
 const CONTENT: &str = include_str!("general.html");
 const HEAD: &str = include_str!("general-head.html");
@@ -64,24 +64,11 @@ fn pending(site: &dyn SettingsSite) -> String {
 /// administrator and the editor unless one of them is chosen.
 fn roles(site: &dyn SettingsSite) -> String {
     let chosen = option(site, "default_role");
-    role_names(&site.user_roles().unwrap_or_default())
-        .into_iter()
-        .rev()
-        .filter(|(role, _)| {
-            !["administrator", "editor"].contains(&role.as_str()) || *role == chosen
-        })
-        .map(|(role, name)| {
-            let selected = if role == chosen {
-                "selected='selected' "
-            } else {
-                ""
-            };
-            format!(
-                "\n\t<option {selected}value='{}'>{name}</option>",
-                esc_attr(role.as_bytes())
-            )
-        })
-        .collect()
+    let mut roles = role_names(&site.user_roles().unwrap_or_default());
+    roles.retain(|(role, _)| {
+        !["administrator", "editor"].contains(&role.as_str()) || *role == chosen
+    });
+    dropdown_roles(&roles, &chosen)
 }
 
 /// `wp_timezone_choice( $zone )`: a valid name the list leaves out first,
@@ -346,13 +333,7 @@ fn media_views(site: &dyn SettingsSite) -> String {
 }
 
 /// `options-general.php`; `None` with a Site Icon, not ported.
-pub fn general(
-    site: &dyn SettingsSite,
-    canonical: &str,
-    origin: &str,
-    request_uri: &str,
-    browser: &Browser,
-) -> Option<Answer> {
+pub fn general(site: &dyn SettingsSite, request: &Request) -> Option<Answer> {
     if Value::String(option(site, "site_icon").into_bytes()).to_int() != 0 {
         return None;
     }
@@ -373,7 +354,7 @@ pub fn general(
         "<p class=\"description\" id=\"home-description\">\n\t\tEnter the same address here unless you <a href=\"https://developer.wordpress.org/advanced-administration/server/wordpress-in-directory/\">want your site home page to be different from your WordPress installation directory</a>.</p>\n".into()
     };
     let mut values = vec![
-        ("fields", settings_fields(site, "general", request_uri)),
+        ("fields", settings_fields(site, "general", request.uri)),
         ("blogname", form_option(site, "blogname")),
         ("blogdescription", form_option(site, "blogdescription")),
         ("title", title),
@@ -387,10 +368,7 @@ pub fn general(
         ("home_description", home_description),
         ("admin_email", form_option(site, "admin_email")),
         ("pending", pending(site)),
-        (
-            "register",
-            checked(option(site, "users_can_register") == "1").into(),
-        ),
+        ("register", checks(site, "users_can_register", "1").into()),
         ("roles", roles(site)),
         (
             "date_formats",
@@ -413,7 +391,7 @@ pub fn general(
         "%home%",
         &json(&value_text(home.strip_suffix('/').unwrap_or(&home))),
     );
-    let upload = if can_upload(browser) {
+    let upload = if can_upload(request.browser) {
         UPLOAD
     } else {
         NO_UPLOAD
@@ -424,7 +402,7 @@ pub fn general(
     ));
     let script_data = [
         ("media-views", media_views(site)),
-        ("wp-plupload", plupload(site, browser)),
+        ("wp-plupload", plupload(site, request.browser)),
         // `wp_default_scripts()` lists the shortcodes core adds by then.
         (
             "mce-view",
@@ -437,7 +415,6 @@ pub fn general(
         help: &HELP,
         content: &content,
         admin_head: &head,
-        scripts: &[],
         late_scripts: &[
             "media-editor",
             "media-audiovideo",
@@ -448,15 +425,13 @@ pub fn general(
         late_styles: &["media-views", "imgareaselect"],
         script_data: &script_data,
         admin_footer: &templates,
+        ..Form::default()
     };
     // The screen sets the global `$locale` to the installed language
     // chosen, none, which the session check's login link then carries.
-    Some(
-        match settings_page(site, &form, canonical, origin, browser) {
-            Answer::Page(page) => {
-                Answer::Page(page.replacen("&#038;wp_lang=en_US", "&#038;wp_lang", 1))
-            }
-            refused => refused,
-        },
-    )
+    Some(replaced(
+        settings_page(site, &form, request),
+        "&#038;wp_lang=en_US",
+        "&#038;wp_lang",
+    ))
 }

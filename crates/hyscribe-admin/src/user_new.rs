@@ -2,14 +2,13 @@
 
 //! The Add User screen, `user-new.php`, on a single site.
 
-use hyscribe_kses::{esc_attr, esc_url};
-use hyscribe_phpser::remove_query_arg;
+use hyscribe_kses::esc_attr;
 
-use crate::list_table::fill;
+use crate::list_table::{fill, wp_nonce_field};
 use crate::menu::Screen;
-use crate::page::{HelpTab, Page, admin_page};
+use crate::page::{HelpTab, Page, Request, admin_page};
 use crate::posts::Answer;
-use crate::profile::{ProfileSite, Request};
+use crate::profile::ProfileSite;
 use crate::users::{dropdown_roles, role_names};
 
 const PAGE: &str = include_str!("user_new/page.html");
@@ -38,15 +37,13 @@ pub fn user_new(site: &dyn ProfileSite, request: &Request) -> Answer {
     } else {
         "\t".into()
     };
-    let referer = esc_url(&remove_query_arg(
-        &[b"_wp_http_referer"],
-        request.uri.as_bytes(),
-    ));
     let content = fill(
         PAGE,
         &[
-            ("nonce", site.nonce("create-user")),
-            ("referer", String::from_utf8_lossy(&referer).into_owned()),
+            (
+                "nonce",
+                wp_nonce_field(site, "create-user", "_wpnonce_create-user", request.uri),
+            ),
             ("password", esc_attr(site.generated_password().as_bytes())),
             ("role", role),
         ],

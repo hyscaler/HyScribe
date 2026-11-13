@@ -4,7 +4,8 @@
 # Records the PHP oracle's General, Writing and Reading Settings screens for
 # each role and in the variants of reference/settings/variants.php, General
 # also over reference/settings/content.sql, which it adds and deletes after,
-# and for mobile browsers, as crates/hyscribe-admin/tests/golden/settings.tsv,
+# for mobile browsers, and Reading asked with a query its referer field
+# escapes, as crates/hyscribe-admin/tests/golden/settings.tsv,
 # the Writing screen's random strings masked as %password%:
 #   variant<TAB>role<TAB>screen<TAB>hex(page)
 # A refusal is kept as 403<TAB>page. Masks as reference/admin-page/golden.sh.
@@ -35,7 +36,7 @@ actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts reset-passw
 record() {
   : > "$TMP"
   status=$(curl -s -o "$TMP" -D "$TMP.head" -w '%{http_code}' -A "${4:-curl}" -b "hyscribe_role=$2; hyscribe_variant=$1" \
-    "$BASE/wp-admin/options-$3.php")
+    "$BASE/wp-admin/options-$3.php${5:-}")
   case "$status" in
     200) ;;
     403) { printf '403\t'; cat "$TMP"; } > "$TMP.403" && mv "$TMP.403" "$TMP" ;;
@@ -70,6 +71,7 @@ done
 record s1android administrator general 'Mozilla/5.0 (Linux; Android 14) Mobile'
 record s1ios7 administrator general 'Mozilla/5.0 (iPhone; CPU iPhone OS 7_0 like Mac OS X) Mobile'
 record s1ios5 administrator general 'Mozilla/5.0 (iPad; CPU OS 5_1 like Mac OS X) Mobile'
+record s1referer administrator reading curl "?x=1&y='q'"
 sql < "$ROOT/reference/settings/content.sql"
 record s1media administrator general
 wc -l "$OUT"

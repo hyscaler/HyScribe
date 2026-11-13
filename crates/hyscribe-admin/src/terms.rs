@@ -20,7 +20,7 @@ use crate::admin_bar::BarSite;
 use crate::admin_bar::Browser;
 use crate::list_table::{
     Column, Order, Sort, bulk_actions, column_headers, fill, pagination, row_actions,
-    screen_options, search_box, table_description,
+    screen_options, search_box, table_description, wp_nonce_field,
 };
 use crate::menu::{Screen, esc_link, link};
 use crate::page::{HelpTab, Page, admin_page};
@@ -622,11 +622,6 @@ pub fn edit_tags(
     } else {
         items.iter().map(|term| listing.row(term, 0)).collect()
     };
-    let referer = String::from_utf8_lossy(&esc_url(&remove_query_arg(
-        &[b"_wp_http_referer"],
-        request_uri.as_bytes(),
-    )))
-    .into_owned();
     let order = Order {
         orderby: args.orderby.as_deref(),
         desc: args.order.as_deref() == Some("desc"),
@@ -645,8 +640,8 @@ pub fn edit_tags(
     let unpaged =
         String::from_utf8_lossy(&remove_query_arg(&[b"paged"], canonical.as_bytes())).into_owned();
     let mut list = format!(
-        "<input type=\"hidden\" id=\"_wpnonce\" name=\"_wpnonce\" value=\"{}\" /><input type=\"hidden\" name=\"_wp_http_referer\" value=\"{referer}\" />{}<h2 class='screen-reader-text'>{} list</h2><table class=\"wp-list-table widefat fixed striped table-view-list tags\">\n\t\t{}\t<thead>\n\t<tr>\n\t\t{}\t</tr>\n\t</thead>\n\n\t<tbody id=\"the-list\"\n\t\t data-wp-lists='list:tag'\t\t>\n\t\t{rows}\t</tbody>\n\n\t<tfoot>\n\t<tr>\n\t\t{}\t</tr>\n\t</tfoot>\n\n</table>\n\t\t",
-        site.nonce("bulk-tags"),
+        "{}{}<h2 class='screen-reader-text'>{} list</h2><table class=\"wp-list-table widefat fixed striped table-view-list tags\">\n\t\t{}\t<thead>\n\t<tr>\n\t\t{}\t</tr>\n\t</thead>\n\n\t<tbody id=\"the-list\"\n\t\t data-wp-lists='list:tag'\t\t>\n\t\t{rows}\t</tbody>\n\n\t<tfoot>\n\t<tr>\n\t\t{}\t</tr>\n\t</tfoot>\n\n</table>\n\t\t",
+        wp_nonce_field(site, "bulk-tags", "_wpnonce", request_uri),
         tablenav("top"),
         taxonomy.plural,
         table_description(&columns, &order),
@@ -700,8 +695,10 @@ pub fn edit_tags(
             ("screen", screen_id.clone()),
             ("search", search_field),
             ("add", format!("Add {}", taxonomy.singular)),
-            ("referer", referer.clone()),
-            ("nonce:add-tag", site.nonce("add-tag")),
+            (
+                "nonce_field",
+                wp_nonce_field(site, "add-tag", "_wpnonce_add-tag", request_uri),
+            ),
             ("parent", parent),
             ("list", list),
             ("notes", notes(site, taxonomy, &terms)),

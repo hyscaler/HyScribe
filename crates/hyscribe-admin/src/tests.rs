@@ -140,6 +140,19 @@ pub fn page_golden(role: &str, screen: &str) -> String {
     )
 }
 
+/// The personal options the `poptions` and `u3options` variants give.
+fn personal_option(name: &str) -> Option<&'static [u8]> {
+    let value: &[u8] = match name {
+        "rich_editing" | "syntax_highlighting" | "show_admin_bar_front" | "infinite_scrolling" => {
+            b"false"
+        }
+        "comment_shortcuts" => b"true",
+        "admin_color" => b"ocean",
+        _ => return None,
+    };
+    Some(value)
+}
+
 /// User 1 with a role's capabilities, on HyScribe's constants, as
 /// `reference/admin-menu/as-role.php` sets PHP up.
 pub struct Role(pub &'static str);
@@ -179,16 +192,10 @@ impl Role {
     /// The user options the profile variants of
     /// `reference/profile/variants.php` give, and the nickname and roles.
     fn profile_option(&self, name: &str) -> Option<Vec<u8>> {
+        if let Some(value) = personal_option(name).filter(|_| self.variant() == "poptions") {
+            return Some(value.to_vec());
+        }
         let value: &[u8] = match (self.variant(), name) {
-            (
-                "poptions",
-                "rich_editing"
-                | "syntax_highlighting"
-                | "show_admin_bar_front"
-                | "infinite_scrolling",
-            ) => b"false",
-            ("poptions", "comment_shortcuts") => b"true",
-            ("poptions", "admin_color") => b"ocean",
             ("poptions", "nickname") => b"boss",
             (_, "nickname") => b"admin",
             ("ppending", "_new_email") => {
@@ -208,10 +215,53 @@ impl Role {
         Some(value.to_vec())
     }
 
-    /// The options the variants of `reference/settings-more/variants.php`
-    /// give.
-    fn more_settings_option(&self, name: &str) -> Option<&'static [u8]> {
+    /// The options the variants of `reference/settings/variants.php` and
+    /// `reference/settings-more/variants.php` give.
+    fn variant_option(&self, name: &str) -> Option<&'static [u8]> {
         let value: &[u8] = match (self.variant(), name) {
+            // `WP_SITEURL` and `WP_HOME`.
+            (_, "siteurl" | "home") => SITE.as_bytes(),
+            ("s1static" | "s1same" | "s1privacy" | "s1unset" | "s1hidden", "show_on_front") => {
+                b"page"
+            }
+            ("s1icon", "site_icon") => b"5",
+            ("s1static" | "s1same" | "s1privacy", "page_on_front") => b"2",
+            ("s1same", "page_for_posts") => b"2",
+            ("s1privacy", "page_for_posts") => b"3",
+            ("s1private", "blog_public") => b"0",
+            ("s1private", "rss_use_excerpt") => b"1",
+            ("s1general", "blogname") => b"My <b>\"Site\"</b> & Co",
+            ("s1general", "blogdescription") => b"Tag 'line' &amp; more",
+            ("s1general", "date_format") => b"j F Y",
+            ("s1general", "time_format") => b"H:i",
+            ("s1general", "start_of_week") => b"0",
+            ("s1general", "users_can_register") => b"1",
+            ("s1general", "default_role") => b"author",
+            ("s1general", "new_admin_email") => b"new<b>@example.test",
+            ("s1general", "timezone_string") => b"America/New_York",
+            ("s1offset" | "s1plus", "timezone_string") => b"",
+            ("s1offset", "gmt_offset") => b"-5.5",
+            ("s1offset", "date_format") => b"Y-m-d",
+            ("s1offset", "time_format") => b"g:i A",
+            ("s1etc", "timezone_string") => b"Etc/GMT+3",
+            ("s1etc", "date_format") => b"",
+            ("s1kolkata", "timezone_string") => b"Asia/Kolkata",
+            ("s1kolkata", "default_role") => b"editor",
+            ("s1calcutta", "timezone_string") => b"Asia/Calcutta",
+            ("s1calcutta", "new_admin_email") => b"admin@default-install.test",
+            ("s1utc", "timezone_string") => b"UTC",
+            ("s1utc", "start_of_week") => b"6",
+            ("s1plus", "gmt_offset") => b"5.75",
+            ("s1writing", "initial_db_version") => b"30000",
+            ("s1db", "initial_db_version") => b"32453",
+            ("s1writing", "use_smilies" | "use_balanceTags" | "link_manager_enabled") => b"1",
+            ("s1writing", "default_category") => b"99",
+            ("s1writing", "default_post_format") => b"aside",
+            ("s1writing", "mailserver_url") => b"mail.example.test",
+            ("s1writing", "mailserver_port") => b"995",
+            ("s1writing", "mailserver_login") => b"me@example.test",
+            ("s1writing", "mailserver_pass") => b"p\"w&<x>",
+            ("s1writing", "ping_sites") => b"http://a.test/\nhttp://b.test/?x=<y>&z",
             ("s2discussion", "default_ping_status" | "default_comment_status") => b"closed",
             (
                 "s2discussion",
@@ -273,6 +323,14 @@ impl Role {
         Some(value)
     }
 
+    /// The REST API's path, pretty with a permalink structure.
+    fn rest_path(&self) -> &'static str {
+        match self.variant_option("permalink_structure") {
+            Some(_) => "wp-json/",
+            None => "index.php?rest_route=/",
+        }
+    }
+
     /// A variant of `reference/user-edit/golden.sh`, over the users of
     /// `reference/users-list/content.sql`.
     fn edited(&self) -> bool {
@@ -291,17 +349,11 @@ impl Role {
     /// them in the variant.
     fn other_option(&self, id: u64, name: &str) -> Option<Vec<u8>> {
         let listed = self.other_user(id)?;
+        let options = (self.variant(), id) == ("u3options", 601);
+        if let Some(value) = personal_option(name).filter(|_| options) {
+            return Some(value.to_vec());
+        }
         let value: &[u8] = match (self.variant(), id, name) {
-            (
-                "u3options",
-                601,
-                "rich_editing"
-                | "syntax_highlighting"
-                | "show_admin_bar_front"
-                | "infinite_scrolling",
-            ) => b"false",
-            ("u3options", 601, "comment_shortcuts") => b"true",
-            ("u3options", 601, "admin_color") => b"ocean",
             ("u3options", 601, "nickname") => b"eddie",
             (_, _, "nickname") => &listed.user.login,
             ("u3caps", 601, "capabilities") => {
@@ -356,57 +408,6 @@ impl Role {
         }
         posts
     }
-
-    /// The options `reference/settings/variants.php` gives.
-    fn settings_option(&self, name: &str) -> Option<&'static str> {
-        let value = match (self.variant(), name) {
-            // `WP_SITEURL` and `WP_HOME`.
-            (_, "siteurl" | "home") => SITE,
-            ("s1static" | "s1same" | "s1privacy" | "s1unset" | "s1hidden", "show_on_front") => {
-                "page"
-            }
-            ("s1icon", "site_icon") => "5",
-            ("s1static" | "s1same" | "s1privacy", "page_on_front") => "2",
-            ("s1same", "page_for_posts") => "2",
-            ("s1privacy", "page_for_posts") => "3",
-            ("s1private", "blog_public") => "0",
-            ("s1private", "rss_use_excerpt") => "1",
-            ("s1general", "blogname") => "My <b>\"Site\"</b> & Co",
-            ("s1general", "blogdescription") => "Tag 'line' &amp; more",
-            ("s1general", "date_format") => "j F Y",
-            ("s1general", "time_format") => "H:i",
-            ("s1general", "start_of_week") => "0",
-            ("s1general", "users_can_register") => "1",
-            ("s1general", "default_role") => "author",
-            ("s1general", "new_admin_email") => "new<b>@example.test",
-            ("s1general", "timezone_string") => "America/New_York",
-            ("s1offset" | "s1plus", "timezone_string") => "",
-            ("s1offset", "gmt_offset") => "-5.5",
-            ("s1offset", "date_format") => "Y-m-d",
-            ("s1offset", "time_format") => "g:i A",
-            ("s1etc", "timezone_string") => "Etc/GMT+3",
-            ("s1etc", "date_format") => "",
-            ("s1kolkata", "timezone_string") => "Asia/Kolkata",
-            ("s1kolkata", "default_role") => "editor",
-            ("s1calcutta", "timezone_string") => "Asia/Calcutta",
-            ("s1calcutta", "new_admin_email") => "admin@default-install.test",
-            ("s1utc", "timezone_string") => "UTC",
-            ("s1utc", "start_of_week") => "6",
-            ("s1plus", "gmt_offset") => "5.75",
-            ("s1writing", "initial_db_version") => "30000",
-            ("s1db", "initial_db_version") => "32453",
-            ("s1writing", "use_smilies" | "use_balanceTags" | "link_manager_enabled") => "1",
-            ("s1writing", "default_category") => "99",
-            ("s1writing", "default_post_format") => "aside",
-            ("s1writing", "mailserver_url") => "mail.example.test",
-            ("s1writing", "mailserver_port") => "995",
-            ("s1writing", "mailserver_login") => "me@example.test",
-            ("s1writing", "mailserver_pass") => "p\"w&<x>",
-            ("s1writing", "ping_sites") => "http://a.test/\nhttp://b.test/?x=<y>&z",
-            _ => return None,
-        };
-        Some(value)
-    }
 }
 
 /// The site with one post known to `map_meta_cap()`.
@@ -441,9 +442,7 @@ impl CapabilityData for WithPost<'_> {
 
 impl CapabilityData for Role {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
-        let set = self
-            .settings_option(name)
-            .map(|value| value.as_bytes().to_vec());
+        let set = self.variant_option(name).map(<[u8]>::to_vec);
         set.or_else(|| options().get(name).cloned())
     }
     /// User 1's role, less the capability a `u3no` variant denies, and the
@@ -574,16 +573,6 @@ impl Urls for Role {
                 "%nonce:reset-password-for-user%",
                 "%nonce:reset-password-for-0%",
             )
-    }
-}
-
-impl Role {
-    /// The REST API's path, pretty with a permalink structure.
-    fn rest_path(&self) -> &'static str {
-        match self.more_settings_option("permalink_structure") {
-            Some(_) => "wp-json/",
-            None => "index.php?rest_route=/",
-        }
     }
 }
 
@@ -1107,9 +1096,6 @@ impl crate::posts::PostsSite for Role {
         format!("{SITE}/?{query}={}", post.id)
     }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
-        if let Some(value) = self.settings_option(name) {
-            return Some(value.as_bytes().to_vec());
-        }
         if name == "sticky_posts" && (self.listing() || self.variant() == "empty") {
             return Some(b"a:2:{i:0;i:304;i:1;i:306;}".to_vec());
         }
@@ -1127,9 +1113,6 @@ impl crate::posts::PostsSite for Role {
         if name == "category_children" && self.variant() == "stale" {
             return Some(b"a:0:{}".to_vec());
         }
-        if let Some(value) = self.more_settings_option(name) {
-            return Some(value.to_vec());
-        }
         if name == "show_avatars" && ["noavatars", "u3noavatars"].contains(&self.variant())
             || name == "blog_public" && self.variant() == "layout"
         {
@@ -1138,7 +1121,7 @@ impl crate::posts::PostsSite for Role {
         if name == "default_role" && self.variant() == "u3default" {
             return Some(b"editor".to_vec());
         }
-        options().get(name).cloned()
+        CapabilityData::option(self, name)
     }
     fn clock(&self) -> (hyscribe_render::date::Zone, i64) {
         if self.variant() == "dst" {

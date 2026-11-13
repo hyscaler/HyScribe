@@ -17,7 +17,9 @@ use hyscribe_render::{
 use crate::admin_bar::{BarSite, Browser, html_excerpt};
 use crate::dashboard::{CommentCounts, DashboardSite, RecentComment, approved_of};
 use crate::list_table::{Column, Order, Sort, View, bulk_actions, column_headers, pagination};
-use crate::list_table::{pagenum, screen_options, search_box, table_description, views};
+use crate::list_table::{
+    pagenum, screen_options, search_box, table_description, views, wp_nonce_field,
+};
 use crate::menu::{Screen, esc_link, link};
 use crate::page::{HelpTab, Page, admin_page};
 use crate::posts::{
@@ -852,17 +854,7 @@ pub fn edit_comments(
             format!("\t<option value='{value}'{selected}>{label}</option>\n")
         })
         .collect();
-    let referer = String::from_utf8_lossy(&esc_url(&remove_query_arg(
-        &[b"_wp_http_referer"],
-        request_uri.as_bytes(),
-    )))
-    .into_owned();
-    let field = |id: &str, action: &str| {
-        format!(
-            "<input type=\"hidden\" id=\"{id}\" name=\"{id}\" value=\"{}\" /><input type=\"hidden\" name=\"_wp_http_referer\" value=\"{referer}\" />",
-            site.nonce(action)
-        )
-    };
+    let field = |name: &str, action: &str| wp_nonce_field(site, action, name, request_uri);
     // `extra_tablenav()`: a spam or trashed list can be emptied.
     let destroy = if moderate && matches!(view, "spam" | "trash") {
         format!(

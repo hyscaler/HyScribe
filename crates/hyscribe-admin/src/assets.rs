@@ -128,7 +128,7 @@ fn trim(text: &str) -> &str {
 }
 
 /// A registered script's `extra` data under `key`, as text.
-pub fn registered_script_data(handle: &str, key: &str) -> String {
+pub(crate) fn registered_script_data(handle: &str, key: &str) -> String {
     registry()
         .get(&(true, handle.to_string()))
         .and_then(|item| item.extra.get_str(key))

@@ -95,6 +95,18 @@ pub struct Page<'a> {
     pub view: Option<(&'a str, &'a str)>,
 }
 
+/// The request a screen answers.
+pub struct Request<'a> {
+    /// The requested URL without `wp_removable_query_args()`.
+    pub canonical: &'a str,
+    /// The scheme and host of the request.
+    pub origin: &'a str,
+    /// `$_SERVER['REQUEST_URI']`, slashed.
+    pub uri: &'a str,
+    /// The browser that asks.
+    pub browser: &'a Browser<'a>,
+}
+
 /// A color scheme `register_admin_color_schemes()` adds.
 pub(crate) struct Scheme {
     pub(crate) name: &'static str,

@@ -20,8 +20,9 @@ use hyscribe_admin::dashboard::{
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
+use hyscribe_admin::page::Request;
 use hyscribe_admin::posts::{Answer, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids};
-use hyscribe_admin::profile::{EditArgs, ProfileSite, Request, profile, user_edit};
+use hyscribe_admin::profile::{EditArgs, ProfileSite, profile, user_edit};
 use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
 use hyscribe_admin::settings_more;
 use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
@@ -940,20 +941,17 @@ fn screen(
         uri: request_uri,
         browser,
     };
-    // The Settings screens take no arguments, and their forms are not saved.
-    let settings = !request_uri.contains('?');
+    // The Settings screens, Profile and Add User take no arguments.
+    let arguments = request_uri.contains('?');
     let page = match path {
-        "/hs-admin/options-general" | "/hs-admin/options-writing" | "/hs-admin/options-reading"
-            if settings =>
-        {
+        "/hs-admin/options-general" | "/hs-admin/options-writing" | "/hs-admin/options-reading" => {
+            if arguments {
+                return None;
+            }
             let answer = match path {
-                "/hs-admin/options-general" => {
-                    general(admin, &canonical, origin, request_uri, browser)?
-                }
-                "/hs-admin/options-writing" => {
-                    writing(admin, &canonical, origin, request_uri, browser)
-                }
-                _ => reading(admin, &canonical, origin, request_uri, browser)?,
+                "/hs-admin/options-general" => general(admin, &request)?,
+                "/hs-admin/options-writing" => writing(admin, &request),
+                _ => reading(admin, &request)?,
             };
             match answered(admin, answer) {
                 Ok(html) => Some(html),
@@ -963,7 +961,7 @@ fn screen(
         "/hs-admin/tools" => hyscribe_admin::tools::tools(admin, &canonical, origin, browser),
         // HTTPS offers application passwords, whose list is not ported.
         "/hs-admin/profile" => {
-            if request_uri.contains('?') || origin.starts_with("https://") {
+            if arguments || origin.starts_with("https://") {
                 return None;
             }
             match answered(admin, profile(admin, &request)) {
@@ -980,7 +978,7 @@ fn screen(
             }
         }
         "/hs-admin/user-new" => {
-            if request_uri.contains('?') {
+            if arguments {
                 return None;
             }
             match answered(admin, hyscribe_admin::user_new::user_new(admin, &request)) {
@@ -988,12 +986,11 @@ fn screen(
                 Err(response) => return Some(*response),
             }
         }
-        // Their arguments and actions are not ported.
         "/hs-admin/options-discussion"
         | "/hs-admin/options-media"
         | "/hs-admin/options-permalink"
         | "/hs-admin/options-privacy" => {
-            if request_uri.contains('?') {
+            if arguments {
                 return None;
             }
             let screen = match path {
@@ -1002,10 +999,7 @@ fn screen(
                 "/hs-admin/options-permalink" => settings_more::permalink,
                 _ => settings_more::privacy,
             };
-            match answered(
-                admin,
-                screen(admin, (&canonical, origin), request_uri, browser),
-            ) {
+            match answered(admin, screen(admin, &request)) {
                 Ok(html) => Some(html),
                 Err(response) => return Some(*response),
             }

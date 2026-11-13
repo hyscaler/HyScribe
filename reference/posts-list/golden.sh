@@ -41,7 +41,13 @@ done
   $actions > "$NONCES"
 record() {
   : > "$TMP"
-  curl -sf -o "$TMP" -b "hyscribe_role=$2; hyscribe_variant=${1%%\?*}" "$BASE/wp-admin/edit.php${3:-}"
+  # A redirect is kept as its status and location.
+  status=$(curl -s -o "$TMP" -D "$TMP.head" -w '%{http_code}' -b "hyscribe_role=$2; hyscribe_variant=${1%%\?*}" "$BASE/wp-admin/edit.php${3:-}")
+  [ "$status" = 200 ] || [ "$status" = 302 ] || { echo "PHP answered $status for ${3:-}" >&2; exit 1; }
+  if [ "$status" = 302 ]; then
+    printf '302\t%s' "$(grep -i '^location:' "$TMP.head" | cut -d' ' -f2 | tr -d '\r')" > "$TMP"
+  fi
+  rm -f "$TMP.head"
   page=$(php -r '
     $p = file_get_contents( $argv[1] );
     foreach ( file( $argv[2], FILE_IGNORE_NEW_LINES ) as $line ) {
@@ -68,4 +74,10 @@ for status in publish future draft pending private trash; do
   record content administrator "?post_status=$status"
 done
 record content author '?post_status=private'
+for query in '?paged=2' '?paged=5' '?paged=9' '?orderby=title&order=desc&paged=2'; do
+  record hidden administrator "$query"
+done
+for query in '?orderby=title&order=asc' '?orderby=title' '?post_status=publish&orderby=date&order=asc' '?order=desc'; do
+  record content administrator "$query"
+done
 wc -l "$OUT"

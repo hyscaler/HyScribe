@@ -4,18 +4,20 @@
 
 use hyscribe_kses::{esc_attr, esc_html, esc_textarea, esc_url};
 use hyscribe_model::{OrderBy, Post, PostQuery, StatusFilter, Term, User};
-use hyscribe_phpser::{Maybe, Value, add_query_arg, is_empty_string, maybe_unserialize, urldecode};
+use hyscribe_phpser::{
+    Maybe, Value, add_query_arg, is_empty_string, maybe_unserialize, remove_query_arg, urldecode,
+};
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::{convert_chars, ent2ncr, sanitize_text_field, wptexturize};
 use hyscribe_render::post::admin_title;
 use hyscribe_render::post::post_format_string;
-use hyscribe_render::{Walk, number_format, sticky_posts, walk, wp_trim_words};
+use hyscribe_render::{Walk, number_format, order_by, sticky_posts, walk, wp_trim_words};
 
 use crate::admin_bar::BarSite;
 use crate::admin_bar::Browser;
 use crate::list_table::{
-    Column, Sort, View, bulk_actions, column_headers, months_dropdown, pagination, row_actions,
-    search_box, table_description, views,
+    Column, Order, Sort, View, bulk_actions, column_headers, months_dropdown, pagination,
+    row_actions, search_box, table_description, views,
 };
 use crate::menu::Screen;
 use crate::menu::esc_link;
@@ -759,9 +761,10 @@ pub fn row(
 /// The posts list's columns in the view of `filter`: no comments for posts
 /// not published yet.
 pub fn columns(filter: &str) -> Vec<Column> {
-    let sort = |orderby, abbr, caption, initial| {
+    let sort = |orderby, desc_first, abbr, caption, initial| {
         Some(Sort {
             orderby,
+            desc_first,
             abbr,
             caption,
             initial,
@@ -776,7 +779,7 @@ pub fn columns(filter: &str) -> Vec<Column> {
         Column {
             key: "title",
             label: "Title".into(),
-            sort: sort("title", "Title", "Table ordered by Title.", false),
+            sort: sort("title", false, "Title", "Table ordered by Title.", None),
         },
         Column {
             key: "author",
@@ -796,7 +799,7 @@ pub fn columns(filter: &str) -> Vec<Column> {
         Column {
             key: "date",
             label: "Date".into(),
-            sort: sort("date", "Date", "Table ordered by Date.", true),
+            sort: sort("date", true, "Date", "Table ordered by Date.", Some("desc")),
         },
     ];
     if !["pending", "draft", "future"].contains(&filter) {
@@ -805,7 +808,7 @@ pub fn columns(filter: &str) -> Vec<Column> {
             Column {
                 key: "comments",
                 label: "<span class=\"vers comment-grey-bubble\" title=\"Comments\" aria-hidden=\"true\"></span><span class=\"screen-reader-text\">Comments</span>".into(),
-                sort: sort("comment_count", "Comments", "Table ordered by Comments.", false),
+                sort: sort("comment_count", false, "Comments", "Table ordered by Comments.", None),
             },
         );
     }
@@ -848,6 +851,12 @@ struct Listing {
     filter: String,
     /// `is_base_request()`.
     base: bool,
+    /// The page shown, from 1, of how many.
+    page: u64,
+    pages: u64,
+    /// `$_GET['orderby']` and `$_GET['order']`, if given.
+    orderby: Option<String>,
+    order: Option<String>,
 }
 
 impl Listing {
@@ -1045,9 +1054,21 @@ fn list_content(
         .iter()
         .filter(|column| !hidden.contains(&column.key))
         .count();
-    let per_page = per_page(site);
-    let pages = listing.total.div_ceil(per_page);
     let links = status_views(listing);
+    let order = Order {
+        orderby: listing.orderby.as_deref(),
+        desc: listing.order.as_deref() == Some("desc"),
+    };
+    let unpaged = text(&remove_query_arg(&[b"paged"], url.as_bytes()));
+    let kept = |value: &Option<String>| addslashes(value.as_deref().unwrap_or_default());
+    let order_fields = [
+        ("orderby", kept(&listing.orderby)),
+        ("order", kept(&listing.order)),
+    ];
+    let order_fields: Vec<(&str, &str)> = order_fields
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .collect();
     let mut out = format!(
         "<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\nPosts</h1>\n\n <a href=\"{}\" class=\"page-title-action\">Add Post</a>\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"posts-filter\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"post_status\" class=\"post_status_page\" value=\"{}\" />\n<input type=\"hidden\" name=\"post_type\" class=\"post_type_page\" value=\"post\" />\n\n\n\n",
         text(&esc_url(
@@ -1057,9 +1078,9 @@ fn list_content(
         if listing.posts.is_empty() {
             String::new()
         } else {
-            search_box("Search Posts", "post")
+            search_box("Search Posts", "post", &order_fields)
         },
-        if empty(&listing.filter) {
+        if is_empty_string(listing.filter.as_bytes()) {
             "all".to_string()
         } else {
             esc_attr(addslashes(&listing.filter).as_bytes())
@@ -1076,7 +1097,7 @@ fn list_content(
         listing,
         "top",
         &months,
-        pagination("top", listing.total, pages, url),
+        pagination("top", listing.total, listing.pages, listing.page, url),
     ));
     let rows = if empty {
         let none = if listing.trash() {
@@ -1092,9 +1113,9 @@ fn list_content(
     };
     out.push_str(&format!(
         "<h2 class='screen-reader-text'>Posts list</h2><table class=\"wp-list-table widefat fixed striped table-view-list posts\">\n\t\t{}\t<thead>\n\t<tr>\n\t\t{}\t</tr>\n\t</thead>\n\n\t<tbody id=\"the-list\"\n\t\t\t\t>\n\t\t{rows}\t</tbody>\n\n\t<tfoot>\n\t<tr>\n\t\t{}\t</tr>\n\t</tfoot>\n\n</table>\n\t\t",
-        table_description(&columns),
-        column_headers(&columns, hidden, url, 1, true),
-        column_headers(&columns, hidden, url, 2, false)
+        table_description(&columns, &order),
+        column_headers(&columns, hidden, &order, &unpaged, 1, true),
+        column_headers(&columns, hidden, &order, &unpaged, 2, false)
     ));
     if !empty {
         out.push_str(&tablenav(
@@ -1102,7 +1123,7 @@ fn list_content(
             listing,
             "bottom",
             &months,
-            pagination("bottom", listing.total, pages, url),
+            pagination("bottom", listing.total, listing.pages, listing.page, url),
         ));
     }
     out.push_str("\n</form>\n\n");
@@ -1127,7 +1148,12 @@ const SCREEN_OPTIONS: &str = include_str!("posts/screen-options.html");
 
 /// `render_screen_options()`: the columns the user may hide, `hidden` ones
 /// unchecked, and the number of posts per page.
-fn screen_options(site: &dyn PostsSite, columns: &[Column], hidden: &[String]) -> String {
+fn screen_options(
+    site: &dyn PostsSite,
+    columns: &[Column],
+    hidden: &[String],
+    per_page: u64,
+) -> String {
     let labels: String = columns
         .iter()
         .filter(|column| !["cb", "title"].contains(&column.key))
@@ -1146,7 +1172,7 @@ fn screen_options(site: &dyn PostsSite, columns: &[Column], hidden: &[String]) -
         .collect();
     SCREEN_OPTIONS
         .replace("%labels%", &labels)
-        .replace("%per_page%", &per_page(site).to_string())
+        .replace("%per_page%", &per_page.to_string())
         .replace("%nonce%", &site.nonce("screen-options-nonce"))
 }
 
@@ -1193,24 +1219,34 @@ fn all_statuses(site: &dyn PostsSite) -> Vec<StatusFilter> {
         .collect()
 }
 
-/// `wp_edit_posts_query()`'s statuses and order for the requested `filter`:
-/// one registered status, readable, or the All list's.
-fn filtered(site: &dyn PostsSite, filter: &str) -> (Vec<StatusFilter>, Vec<(OrderBy, bool)>) {
+/// `wp_edit_posts_query()`'s statuses for the requested `filter`: one
+/// registered status, readable, or the All list's.
+fn filtered(site: &dyn PostsSite, filter: &str) -> Vec<StatusFilter> {
     let registered =
         STATUSES.iter().any(|(status, ..)| *status == filter) || NOT_IN_ALL.contains(&filter);
     if !registered {
-        return (all_statuses(site), Vec::new());
+        return all_statuses(site);
     }
-    let statuses = vec![StatusFilter {
+    vec![StatusFilter {
         status: filter.into(),
         author: private_author(site).filter(|_| filter == "private"),
-    }];
-    let order = match filter {
-        "draft" => vec![(OrderBy::Modified, false)],
-        "pending" => vec![(OrderBy::Modified, true)],
-        _ => Vec::new(),
+    }]
+}
+
+/// `wp_edit_posts_query()`'s order through `WP_Query`: the requested one,
+/// drafts and pending posts by their last change, pending ones oldest first.
+fn sort(args: &ListArgs, query: &PostQuery) -> Vec<(OrderBy, bool)> {
+    let changed = ["draft", "pending"].contains(&args.status.as_str());
+    let orderby = match &args.orderby {
+        Some(orderby) => orderby.as_str(),
+        None if changed => "modified",
+        None => "",
     };
-    (statuses, order)
+    let ascending = match &args.order {
+        Some(order) => order.eq_ignore_ascii_case("asc"),
+        None => args.status == "pending",
+    };
+    order_by(&Value::String(orderby.into()), ascending, query)
 }
 
 /// The posts list's query arguments this port reads.
@@ -1218,13 +1254,22 @@ fn filtered(site: &dyn PostsSite, filter: &str) -> (Vec<StatusFilter>, Vec<(Orde
 pub struct ListArgs {
     /// `$_GET['post_status']`, empty for none.
     pub status: String,
+    /// `$_GET['orderby']`, if given.
+    pub orderby: Option<String>,
+    /// `$_GET['order']`, if given.
+    pub order: Option<String>,
+    /// `$_GET['paged']`, if given.
+    pub paged: Option<String>,
     /// `is_base_request()`: no arguments but `paged` and the post type.
     pub base: bool,
 }
 
-/// PHP's `empty()` of a string.
-fn empty(text: &str) -> bool {
-    text.is_empty() || text == "0"
+/// What a screen answers: its page, or a redirect to the URL given.
+pub enum Answer {
+    /// The page.
+    Page(String),
+    /// A `302` to this URL.
+    Redirect(String),
 }
 
 /// `addslashes()`, which `wp_magic_quotes()` applies to the request.
@@ -1243,8 +1288,8 @@ fn addslashes(text: &str) -> String {
     out
 }
 
-/// `edit.php`: the posts list for `args`; `None` for a user who may not
-/// edit posts.
+/// `edit.php`: the posts list for `args`, or a redirect from a page past
+/// the last; `None` for a user who may not edit posts.
 pub fn edit(
     site: &dyn PostsSite,
     args: &ListArgs,
@@ -1252,27 +1297,39 @@ pub fn edit(
     origin: &str,
     request_uri: &str,
     browser: &Browser,
-) -> Option<String> {
+) -> Option<Answer> {
     if !site.can("edit_posts") {
         return None;
     }
     let own = site.own_posts("post");
     let filter = args.status.as_str();
-    let own_only = own > 0 && !site.can("edit_others_posts") && empty(filter);
-    let (statuses, order) = filtered(site, filter);
-    let query = PostQuery {
+    let own_only = own > 0 && !site.can("edit_others_posts") && is_empty_string(filter.as_bytes());
+    let per_page = per_page(site);
+    let mut query = PostQuery {
         post_types: vec!["post".into()],
-        statuses,
-        order,
+        statuses: filtered(site, filter),
         authors: if own_only {
             vec![site.user_id()]
         } else {
             Vec::new()
         },
-        limit: u32::try_from(per_page(site)).unwrap_or(u32::MAX),
+        limit: u32::try_from(per_page).unwrap_or(u32::MAX),
         ..PostQuery::default()
     };
+    query.order = sort(args, &query);
+    // `absint( $_REQUEST['paged'] )`, the first page for none.
+    let requested = Value::String(args.paged.clone().unwrap_or_default().into_bytes())
+        .to_int()
+        .unsigned_abs()
+        .max(1);
+    query.offset = u32::try_from((requested - 1).saturating_mul(per_page)).unwrap_or(u32::MAX);
     let (posts, total) = site.list_posts(&query);
+    let pages = total.div_ceil(per_page);
+    if pages > 0 && requested > pages {
+        let page = pages.to_string();
+        let to = add_query_arg(&[(b"paged", Some(page.as_bytes()))], request_uri.as_bytes());
+        return Some(Answer::Redirect(text(&to)));
+    }
     let sticky_ids = sticky_posts(&site.option("sticky_posts").unwrap_or_default());
     let listing = Listing {
         posts,
@@ -1288,11 +1345,15 @@ pub fn edit(
         user: site.user_id(),
         filter: filter.into(),
         base: args.base,
+        page: requested,
+        pages,
+        orderby: args.orderby.clone(),
+        order: args.order.clone(),
     };
     let hidden = hidden_columns(site);
     let hidden_keys: Vec<&str> = hidden.iter().map(String::as_str).collect();
     let content = list_content(site, &listing, &hidden_keys, canonical, request_uri);
-    let screen_options = screen_options(site, &columns(filter), &hidden);
+    let screen_options = screen_options(site, &columns(filter), &hidden, per_page);
     let help = [
         HelpTab {
             id: "overview",
@@ -1337,7 +1398,7 @@ pub fn edit(
         canonical,
         origin,
     };
-    admin_page(site, &page, browser)
+    admin_page(site, &page, browser).map(Answer::Page)
 }
 
 #[cfg(test)]

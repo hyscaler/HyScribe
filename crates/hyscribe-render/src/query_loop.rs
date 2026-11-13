@@ -416,7 +416,7 @@ fn search_matches(search: &str) -> Vec<&str> {
 /// The `orderby` of `WP_Query` for `orderBy`: each allowed key of a
 /// space separated list in `ascending` order, or of an array in its own.
 /// `post__in` and `post_parent__in` count only when `query` has the list.
-pub(crate) fn order_by(by: &Value, ascending: bool, query: &PostQuery) -> Vec<(OrderBy, bool)> {
+pub fn order_by(by: &Value, ascending: bool, query: &PostQuery) -> Vec<(OrderBy, bool)> {
     let column = |key: &[u8]| {
         order_column(key).filter(|c| match c {
             OrderBy::Included => query.include.is_some(),

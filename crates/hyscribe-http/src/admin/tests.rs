@@ -124,8 +124,12 @@ async fn logged_in_users_are_let_in() {
         .next()
         .unwrap()
         .to_string();
-    let response = get(&site, "/hs-admin/edit?paged=2", "127.0.0.1:8081", &auth).await;
+    let response = get(&site, "/hs-admin/edit?s=hello", "127.0.0.1:8081", &auth).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // A page past the last goes to the last.
+    let response = get(&site, "/hs-admin/edit?paged=9", "127.0.0.1:8081", &auth).await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(location(&response), "/hs-admin/edit?paged=1");
     let response = get(&site, "/hs-admin/users", "127.0.0.1:8081", &auth).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     let cookies = all.join("; ");
@@ -239,6 +243,26 @@ fn with_values(golden: &str, page: &str) -> String {
 async fn refusals() {
     let site = oracle_site().await;
     let handle = Handle::current();
+    let edit = tokio::task::spawn_blocking({
+        let (site, handle) = (Arc::clone(&site), handle.clone());
+        move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            let url = "http://h/hs-admin/edit";
+            screen(
+                &admin,
+                "/hs-admin/edit",
+                "/hs-admin/edit",
+                url,
+                "http://h",
+                &Browser::default(),
+            )
+        }
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(edit.status(), StatusCode::FORBIDDEN);
     let response = tokio::task::spawn_blocking(move || {
         let reads = LoginReads::new(&site, handle, now());
         let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
@@ -508,5 +532,18 @@ fn the_posts_list_reads_its_status() {
     assert_eq!(args("/hs-admin/edit?post_status=%FF"), None);
     assert_eq!(args("/hs-admin/edit?post_status[]=draft"), None);
     assert_eq!(args("/hs-admin/edit?post_type=page"), None);
-    assert_eq!(args("/hs-admin/edit?post_status=draft&paged=2"), None);
+    assert_eq!(args("/hs-admin/edit?post_status=draft&s=x"), None);
+    assert_eq!(args("/hs-admin/edit?paged=%FF"), None);
+    assert_eq!(args("/hs-admin/edit?order=%FF"), None);
+    let sorted = list_args("/hs-admin/edit?orderby=title&order=desc&paged=2").unwrap();
+    assert_eq!(
+        (sorted.orderby, sorted.order, sorted.paged, sorted.base),
+        (
+            Some("title".into()),
+            Some("desc".into()),
+            Some("2".into()),
+            false
+        )
+    );
+    assert!(list_args("/hs-admin/edit?paged=2").unwrap().base);
 }

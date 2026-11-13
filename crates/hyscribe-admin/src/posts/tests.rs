@@ -79,6 +79,10 @@ fn the_list_is_php_s() {
             user: 1,
             filter: String::new(),
             base: true,
+            page: 1,
+            pages: 1,
+            orderby: None,
+            order: None,
         };
         let url = format!("{}/hs-admin/edit", crate::tests::SITE);
         let ours = list_content(&Role(role), &listing, &[], &url, "/hs-admin/edit");
@@ -90,7 +94,7 @@ fn the_list_is_php_s() {
 fn the_page_is_php_s() {
     for role in ["administrator", "editor", "author", "contributor"] {
         let php = golden(role);
-        let ours = edit(
+        let ours = page(edit(
             &Role(role),
             &ListArgs {
                 base: true,
@@ -103,8 +107,7 @@ fn the_page_is_php_s() {
                 user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
                 mobile_hint: None,
             },
-        )
-        .unwrap();
+        ));
         assert!(ours == php, "{role}: {}", first_difference(&php, &ours));
     }
 }
@@ -122,15 +125,21 @@ fn variants_are_php_s() {
         } else {
             variant
         };
+        let arg = |name: &str| {
+            query
+                .split('&')
+                .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
+                .map(String::from)
+        };
         let args = ListArgs {
-            status: query
-                .strip_prefix("post_status=")
-                .unwrap_or_default()
-                .into(),
-            base: query.is_empty(),
+            status: arg("post_status").unwrap_or_default(),
+            orderby: arg("orderby"),
+            order: arg("order"),
+            paged: arg("paged"),
+            base: query.is_empty() || query.starts_with("paged="),
         };
         let role: &'static str = Box::leak(format!("{variant}:{}", f[1]).into_boxed_str());
-        let php = hs_admin_page(&String::from_utf8(unhex(f[2])).unwrap());
+        let recorded = String::from_utf8(unhex(f[2])).unwrap();
         let path = if query.is_empty() {
             "/hs-admin/edit".to_string()
         } else {
@@ -146,13 +155,32 @@ fn variants_are_php_s() {
                 user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
                 mobile_hint: None,
             },
-        )
-        .unwrap();
+        );
+        let (php, ours) = match recorded.strip_prefix("302\t") {
+            Some(to) => (hs_admin_page(to), redirect(ours)),
+            None => (hs_admin_page(&recorded), page(ours)),
+        };
         if ours != php {
             failures.push(format!("{role}?{query}: {}", first_difference(&php, &ours)));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The page of an answer, empty for any other.
+fn page(answer: Option<Answer>) -> String {
+    match answer {
+        Some(Answer::Page(page)) => page,
+        _ => String::new(),
+    }
+}
+
+/// Where an answer redirects, empty for any other.
+fn redirect(answer: Option<Answer>) -> String {
+    match answer {
+        Some(Answer::Redirect(to)) => to,
+        _ => String::new(),
+    }
 }
 
 /// A user who may not edit posts is refused.
@@ -212,6 +240,10 @@ fn the_trash_needs_delete_posts() {
         user: 1,
         filter: String::new(),
         base: true,
+        page: 1,
+        pages: 1,
+        orderby: None,
+        order: None,
     };
     let nav = |role| tablenav(&Role(role), &listing, "bottom", &[], String::new());
     assert!(nav("contributor").contains("value=\"trash\""));
@@ -257,6 +289,10 @@ fn no_posts_no_mine_link() {
         user: 1,
         filter: String::new(),
         base: true,
+        page: 1,
+        pages: 1,
+        orderby: None,
+        order: None,
     };
     assert!(
         status_views(&listing)
@@ -304,7 +340,6 @@ fn protected_posts_show_no_excerpt() {
 #[test]
 fn the_status_is_read_as_php_reads_it() {
     assert_eq!(addslashes("a'b\"c\\d\0e"), "a\\'b\\\"c\\\\d\\0e");
-    assert!(empty("") && empty("0") && !empty("00"));
     let listing = Listing {
         posts: Vec::new(),
         total: 0,
@@ -315,6 +350,10 @@ fn the_status_is_read_as_php_reads_it() {
         user: 1,
         filter: String::new(),
         base: false,
+        page: 1,
+        pages: 1,
+        orderby: None,
+        order: None,
     };
     assert!(!status_views(&listing)[0].current);
 }

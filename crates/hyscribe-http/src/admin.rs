@@ -15,7 +15,7 @@ use hyscribe_admin::dashboard::{CommentCounts, DashboardSite, RecentComment, das
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
-use hyscribe_admin::posts::{ListArgs, PostsSite, edit};
+use hyscribe_admin::posts::{Answer, ListArgs, PostsSite, edit};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
 use hyscribe_db::{StatusOrder, StatusQuery};
 use hyscribe_model::{Post, PostQuery, Term, TermOrder, TermQuery, User};
@@ -503,6 +503,18 @@ fn list_args(request_uri: &str) -> Option<ListArgs> {
             }
             (Key::String(key), Value::String(value)) if key == b"post_type" && value == b"post" => {
             }
+            (Key::String(key), Value::String(value)) if key == b"paged" => {
+                list.paged = Some(String::from_utf8(value.clone()).ok()?);
+            }
+            (Key::String(key), Value::String(value)) if key == b"orderby" || key == b"order" => {
+                let value = Some(String::from_utf8(value.clone()).ok()?);
+                if key == b"orderby" {
+                    list.orderby = value;
+                } else {
+                    list.order = value;
+                }
+                list.base = false;
+            }
             _ => return None,
         }
     }
@@ -527,7 +539,13 @@ fn screen(
         }
         "/hs-admin/edit" => {
             let args = list_args(request_uri)?;
-            edit(admin, &args, &canonical, origin, request_uri, browser)
+            match edit(admin, &args, &canonical, origin, request_uri, browser) {
+                Some(Answer::Redirect(to)) => {
+                    return Some(redirect(screen_headers(), to.as_bytes()));
+                }
+                Some(Answer::Page(html)) => Some(html),
+                None => None,
+            }
         }
         _ => return None,
     };

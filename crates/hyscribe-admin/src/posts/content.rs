@@ -3,7 +3,7 @@
 //! `reference/posts-list/content.sql` over the default install, as the
 //! posts list's test site reads it.
 
-use hyscribe_model::{Post, PostQuery, Term, User};
+use hyscribe_model::{OrderBy, Post, PostQuery, Term, User};
 
 /// A post of the content: ID, author, date, title, excerpt, status,
 /// comment and ping status, password, slug and approved comments.
@@ -310,14 +310,27 @@ pub(crate) fn list(query: &PostQuery) -> (Vec<Post>, u64) {
                 && (query.authors.is_empty() || query.authors.contains(&post.author))
         })
         .collect();
-    match query.order.first() {
-        Some((_, true)) => found.sort_by(|a, b| a.modified.cmp(&b.modified)),
-        Some(_) => found.sort_by(|a, b| b.modified.cmp(&a.modified)),
-        None => found.sort_by(|a, b| b.date.cmp(&a.date)),
-    }
+    // `order_by()` always gives a column.
+    let (column, ascending) = query
+        .order
+        .first()
+        .copied()
+        .unwrap_or((OrderBy::Date, false));
+    found.sort_by(|a, b| {
+        let order = match column {
+            OrderBy::Title => a.title.cmp(&b.title),
+            OrderBy::Modified => a.modified.cmp(&b.modified),
+            _ => a.date.cmp(&b.date),
+        };
+        if ascending { order } else { order.reverse() }
+    });
     let total = found.len() as u64;
-    found.truncate(query.limit as usize);
-    (found, total)
+    let page = found
+        .into_iter()
+        .skip(query.offset as usize)
+        .take(query.limit as usize)
+        .collect();
+    (page, total)
 }
 
 /// The posts of each status, private ones only by `private_author`.

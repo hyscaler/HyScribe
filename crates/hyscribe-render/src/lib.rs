@@ -59,4 +59,4 @@ mod variations;
 mod widgets;
 
 pub use categories::{Walk, walk};
-pub use query_loop::{search_terms, sticky_posts};
+pub use query_loop::{order_by, search_terms, sticky_posts};

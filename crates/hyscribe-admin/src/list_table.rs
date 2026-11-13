@@ -3,7 +3,7 @@
 //! `WP_List_Table`: the parts every admin list shares.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
-use hyscribe_phpser::add_query_arg;
+use hyscribe_phpser::{add_query_arg, is_empty_string, remove_query_arg};
 use hyscribe_render::date::MONTHS;
 use hyscribe_render::number_format;
 
@@ -49,13 +49,25 @@ pub fn views(heading: &str, views: &[View]) -> String {
     )
 }
 
-/// `search_box( $text, $input_id )` of a list not searched or sorted.
-pub fn search_box(label: &str, input_id: &str) -> String {
+/// `search_box( $text, $input_id )` of a list not searched, the requested
+/// `orderby` and `order` kept in hidden fields.
+pub fn search_box(label: &str, input_id: &str, order: &[(&str, &str)]) -> String {
+    let mut out = String::new();
+    for (name, value) in order
+        .iter()
+        .filter(|(_, value)| !is_empty_string(value.as_bytes()))
+    {
+        out.push_str(&format!(
+            "<input type=\"hidden\" name=\"{name}\" value=\"{}\" />",
+            esc_attr(value.as_bytes())
+        ));
+    }
     let id = esc_attr(format!("{input_id}-search-input").as_bytes());
-    format!(
+    out.push_str(&format!(
         "<p class=\"search-box\">\n\t<label class=\"screen-reader-text\" for=\"{id}\">{label}:</label>\n\t<input type=\"search\" id=\"{id}\" name=\"s\" value=\"\" />\n\t\t<input type=\"submit\" id=\"search-submit\" class=\"button button-compact\" value=\"{}\"  /></p>\n\t\t",
         esc_attr(label.as_bytes())
-    )
+    ));
+    out
 }
 
 /// `bulk_actions( $which )`: `actions` are values and labels; the bottom
@@ -126,9 +138,9 @@ pub fn months_dropdown(months: &[(u32, u32)], filter_label: &str) -> String {
     out
 }
 
-/// `pagination( $which )` of the first page: `total` items over `pages`
-/// pages of `url`.
-pub fn pagination(which: &str, total: u64, pages: u64, url: &str) -> String {
+/// `pagination( $which )`: `total` items over `pages` pages, page `current`
+/// of `url`, the page's without its removable arguments.
+pub fn pagination(which: &str, total: u64, pages: u64, current: u64, url: &str) -> String {
     if total == 0 {
         return "<div class=\"tablenav-pages no-pages\"><span class=\"displaying-num\">0 items</span></div>".into();
     }
@@ -138,14 +150,20 @@ pub fn pagination(which: &str, total: u64, pages: u64, url: &str) -> String {
         out.push_str("<h2 class='screen-reader-text'>Posts list navigation</h2>");
     }
     let items = if total == 1 { "item" } else { "items" };
-    let link = |class: &str, label: &str, glyph: &str, page: u64| {
-        let url = add_query_arg(
-            &[(b"paged", Some(page.to_string().as_bytes()))],
-            url.as_bytes(),
-        );
+    let page_url = |page: Option<u64>| {
+        let url = match page {
+            None => remove_query_arg(&[b"paged"], url.as_bytes()),
+            Some(page) => add_query_arg(
+                &[(b"paged", Some(page.to_string().as_bytes()))],
+                url.as_bytes(),
+            ),
+        };
+        text(&esc_url(&url))
+    };
+    let link = |class: &str, label: &str, glyph: &str, page| {
         format!(
             "<a class='{class} button' href='{}'><span class='screen-reader-text'>{label}</span><span aria-hidden='true'>{glyph}</span></a>",
-            text(&esc_url(&url))
+            page_url(page)
         )
     };
     let disabled = |glyph: &str| {
@@ -153,29 +171,44 @@ pub fn pagination(which: &str, total: u64, pages: u64, url: &str) -> String {
             "<span class=\"tablenav-pages-navspan button disabled\" aria-hidden=\"true\">{glyph}</span>"
         )
     };
-    let current = if which == "bottom" {
-        "<span class=\"screen-reader-text\">Current Page</span><span id=\"table-paging\" class=\"paging-input\"><span class=\"tablenav-paging-text\">1".to_string()
+    let first = current == 1;
+    let last = current == pages;
+    let here = if which == "bottom" {
+        format!(
+            "<span class=\"screen-reader-text\">Current Page</span><span id=\"table-paging\" class=\"paging-input\"><span class=\"tablenav-paging-text\">{current}"
+        )
     } else {
         format!(
-            "<span class=\"paging-input\"><label for=\"current-page-selector\" class=\"screen-reader-text\">Current Page</label><input class='current-page' id='current-page-selector' type='text'\n\t\t\t\t\tname='paged' value='1' size='{}' aria-describedby='table-paging' /><span class='tablenav-paging-text'>",
+            "<span class=\"paging-input\"><label for=\"current-page-selector\" class=\"screen-reader-text\">Current Page</label><input class='current-page' id='current-page-selector' type='text'\n\t\t\t\t\tname='paged' value='{current}' size='{}' aria-describedby='table-paging' /><span class='tablenav-paging-text'>",
             pages.to_string().len()
         )
     };
-    let mut links = vec![
-        disabled("&laquo;"),
-        disabled("&lsaquo;"),
+    let links = [
+        if first {
+            disabled("&laquo;")
+        } else {
+            link("first-page", "First page", "&laquo;", None)
+        },
+        if first {
+            disabled("&lsaquo;")
+        } else {
+            link("prev-page", "Previous page", "&lsaquo;", Some(current - 1))
+        },
         format!(
-            "{current} of <span class='total-pages'>{}</span></span></span>",
+            "{here} of <span class='total-pages'>{}</span></span></span>",
             number_format(pages)
         ),
+        if last {
+            disabled("&rsaquo;")
+        } else {
+            link("next-page", "Next page", "&rsaquo;", Some(current + 1))
+        },
+        if last {
+            disabled("&raquo;")
+        } else {
+            link("last-page", "Last page", "&raquo;", Some(pages))
+        },
     ];
-    if more {
-        links.push(link("next-page", "Next page", "&rsaquo;", 2));
-        links.push(link("last-page", "Last page", "&raquo;", pages));
-    } else {
-        links.push(disabled("&rsaquo;"));
-        links.push(disabled("&raquo;"));
-    }
     let class = if more { "" } else { " one-page" };
     out.push_str(&format!(
         "<div class='tablenav-pages{class}'><span class=\"displaying-num\">{} {items}</span>\n<span class='pagination-links'>{}</span></div>",
@@ -195,28 +228,56 @@ pub struct Column {
     pub sort: Option<Sort>,
 }
 
-/// A sortable column: `orderby`, its `abbr` and caption, and whether the
-/// initial view sorts by it, descending; others sort ascending first.
+/// A sortable column: `orderby`, whether it sorts descending first, its
+/// `abbr` and caption, and its order in the initial view if sorted by it.
 pub struct Sort {
     /// The `orderby` value.
     pub orderby: &'static str,
+    /// Sorted descending first.
+    pub desc_first: bool,
     /// The heading's `abbr`.
     pub abbr: &'static str,
     /// The table's caption when sorted by it.
     pub caption: &'static str,
-    /// The initial view sorts by it, newest first.
-    pub initial: bool,
+    /// `asc` or `desc` when the initial view sorts by it.
+    pub initial: Option<&'static str>,
 }
 
-/// `print_column_headers( $with_id )` of the initial view, the first column
-/// after the checkbox the primary: `counter` numbers the select all box.
+/// The requested order: `$_GET['orderby']` and whether `$_GET['order']` is
+/// `desc`.
+#[derive(Default)]
+pub struct Order<'a> {
+    /// `$_GET['orderby']`, if given.
+    pub orderby: Option<&'a str>,
+    /// `$_GET['order']` is `desc`.
+    pub desc: bool,
+}
+
+/// The sorted column's `orderby` and direction: the requested one, or the
+/// initial view's.
+fn current<'a>(columns: &'a [Column], order: &Order<'a>) -> (&'a str, &'a str) {
+    let direction = if order.desc { "desc" } else { "asc" };
+    match order.orderby.filter(|orderby| !orderby.is_empty()) {
+        Some(orderby) => (orderby, direction),
+        None => columns
+            .iter()
+            .filter_map(|column| column.sort.as_ref())
+            .find_map(|sort| sort.initial.map(|initial| (sort.orderby, initial)))
+            .unwrap_or(("", direction)),
+    }
+}
+
+/// `print_column_headers( $with_id )` sorted by `order` on `url`, the page's
+/// without `paged`; `counter` numbers the select all box.
 pub fn column_headers(
     columns: &[Column],
     hidden: &[&str],
+    order: &Order,
     url: &str,
     counter: u32,
     with_id: bool,
 ) -> String {
+    let (current, direction) = current(columns, order);
     let primary = columns
         .iter()
         .find(|column| column.key != "cb")
@@ -245,16 +306,30 @@ pub fn column_headers(
         }
         if let Some(sort) = &column.sort {
             let mut order_text = "";
-            let next = if sort.initial {
-                aria = " aria-sort=\"descending\"".into();
+            let next = if current == sort.orderby {
+                let (next, sorted) = if direction == "asc" {
+                    ("desc", "ascending")
+                } else {
+                    ("asc", "descending")
+                };
+                aria = format!(" aria-sort=\"{sorted}\"");
                 class.push("sorted".into());
-                class.push("desc".into());
-                "asc"
+                class.push(direction.into());
+                next
             } else {
+                let (next, other) = if sort.desc_first {
+                    ("desc", "asc")
+                } else {
+                    ("asc", "desc")
+                };
                 class.push("sortable".into());
-                class.push("desc".into());
-                order_text = " <span class=\"screen-reader-text\">Sort ascending.</span>";
-                "asc"
+                class.push(other.into());
+                order_text = if sort.desc_first {
+                    " <span class=\"screen-reader-text\">Sort descending.</span>"
+                } else {
+                    " <span class=\"screen-reader-text\">Sort ascending.</span>"
+                };
+                next
             };
             abbr = format!(" abbr=\"{}\"", esc_attr(sort.abbr.as_bytes()));
             let href = add_query_arg(
@@ -287,15 +362,21 @@ pub fn column_headers(
     out
 }
 
-/// `print_table_description()` of the initial view.
-pub fn table_description(columns: &[Column]) -> String {
+/// `print_table_description()`: the caption naming the sorted column.
+pub fn table_description(columns: &[Column], order: &Order) -> String {
+    let (current, direction) = current(columns, order);
     columns
         .iter()
         .filter_map(|column| column.sort.as_ref())
-        .find(|sort| sort.initial)
+        .find(|sort| sort.orderby == current)
         .map_or_else(String::new, |sort| {
+            let direction = if direction == "asc" {
+                "Ascending."
+            } else {
+                "Descending."
+            };
             format!(
-                "<caption class=\"screen-reader-text\">{} Descending.</caption>",
+                "<caption class=\"screen-reader-text\">{} {direction}</caption>",
                 sort.caption
             )
         })

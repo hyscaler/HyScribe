@@ -180,6 +180,9 @@ pub(crate) struct Renderer<'a> {
     /// `WP_Widget_Calendar::$instance`: whether a calendar widget has
     /// printed, after which none is `#calendar_wrap`.
     pub(crate) calendar_widget_shown: bool,
+    /// `WP_Widget_Recent_Comments::widget()`'s `static $first_instance`,
+    /// spent once a recent comments widget has printed `#recentcomments`.
+    pub(crate) recent_comments_shown: bool,
     /// The `layout` attribute of the block being rendered, `parentLayout`
     /// to its inner blocks.
     pub(crate) parent_layout: Option<Value>,
@@ -251,6 +254,7 @@ impl<'a> Renderer<'a> {
             categories_blocks: 0,
             categories_dropdown_used: false,
             calendar_widget_shown: false,
+            recent_comments_shown: false,
             parent_layout: None,
             unique_id: 0,
             elements_id: 0,

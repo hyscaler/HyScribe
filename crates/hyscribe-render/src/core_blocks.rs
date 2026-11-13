@@ -4,7 +4,7 @@
 //! `wp-includes/blocks/`, run on the attributes as
 //! `prepare_attributes_for_render()` leaves them.
 
-use hyscribe_kses::{esc_attr, esc_html, esc_url, esc_url_protocols};
+use hyscribe_kses::{esc_attr, esc_html, esc_url, esc_url_protocols, url_host, url_scheme};
 use hyscribe_model::{Comment, Post};
 use hyscribe_phpser::{Key, Value, add_query_arg, is_empty_string, isset, php_trim, urlencode};
 
@@ -355,6 +355,36 @@ pub(crate) fn comment_author_url(comment: &Comment) -> Vec<u8> {
         &comment.author_url
     };
     esc_url_protocols(url, &["http", "https"])
+}
+
+/// `get_comment_author_link( $comment )`: the author, linked to their site
+/// when there is one (an escaped `http://` is none), `external nofollow` unless `wp_is_internal_link()`
+/// finds the site's own host behind a scheme (the URL allows only http and
+/// https, so a protocol relative one is external).
+pub(crate) fn comment_author_link(context: &Context<'_>, comment: &Comment) -> Vec<u8> {
+    let author = comment_author(context, comment);
+    let url = comment_author_url(comment);
+    if url.is_empty() || url == b"http://" {
+        return author;
+    }
+    let lower = url.to_ascii_lowercase();
+    let home = url_host(&context.site.home_url()).map(|host| host.to_ascii_lowercase());
+    let internal = url_scheme(&lower).is_some() && url_host(&lower) == home;
+    let rel: &[u8] = if internal {
+        b"ugc"
+    } else {
+        b"ugc external nofollow"
+    };
+    [
+        &b"<a href=\""[..],
+        &url,
+        b"\" class=\"url\" rel=\"",
+        rel,
+        b"\">",
+        &author,
+        b"</a>",
+    ]
+    .concat()
 }
 
 /// `render_block_core_comment_author_name()`: the author, linked to their

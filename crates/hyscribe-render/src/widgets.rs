@@ -15,12 +15,12 @@ use crate::balance::force_balance_tags;
 use crate::blocks::Block;
 use crate::categories::{dropdown_select, terms};
 use crate::core_blocks::calendar::request_calendar;
-use crate::core_blocks::prepared;
+use crate::core_blocks::{comment_author_link, comment_link, prepared};
 use crate::date;
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, wptexturize};
 use crate::head::json_hex_tag;
 use crate::permalinks;
-use crate::post::listed_title;
+use crate::post::{listed_title, the_title};
 use crate::site::{Archive, Taxonomy};
 use crate::template::Renderer;
 
@@ -221,6 +221,7 @@ impl Renderer<'_> {
             "categories" => self.categories_widget(number, args, instance),
             "calendar" => self.calendar_widget(args, instance),
             "recent-posts" => self.recent_posts_widget(args, instance),
+            "recent-comments" => self.recent_comments_widget(number, args, instance),
             "search" => self.search_widget(args, instance),
             "custom_html" => self.custom_html_widget(args, instance),
             "meta" => self.meta_widget(args, instance),
@@ -375,17 +376,9 @@ impl Renderer<'_> {
     fn recent_posts_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
         let context = &self.context;
         let site = context.site;
-        let number = instance
-            .get_str("number")
-            .filter(|number| !number.is_empty())
-            .map_or(0, hyscribe_phpser::absint);
         let query = PostQuery {
             post_types: vec!["post".into()],
-            // `posts_per_page` as asked, five for none.
-            limit: match number {
-                0 => 5,
-                n => u32::try_from(n).unwrap_or(u32::MAX),
-            },
+            limit: u32::try_from(listed(instance)).unwrap_or(u32::MAX),
             ..PostQuery::default()
         };
         let posts = site.query(&query);
@@ -427,6 +420,46 @@ impl Renderer<'_> {
             b"\n\t\t<ul>\n",
             &items,
             b"\t\t\t\t\t</ul>\n\n\t\t",
+            &args.after_widget,
+        ]
+        .concat()
+    }
+
+    /// `WP_Widget_Recent_Comments::widget()`: the newest approved comments
+    /// on published posts, five unless `number` asks otherwise, the first
+    /// list of a request as `#recentcomments`.
+    fn recent_comments_widget(&mut self, number: &[u8], args: &Args, instance: &Value) -> Vec<u8> {
+        let id = if std::mem::replace(&mut self.recent_comments_shown, true) {
+            [&b"recentcomments-"[..], number].concat()
+        } else {
+            b"recentcomments".to_vec()
+        };
+        let context = &self.context;
+        let mut items = Vec::new();
+        for comment in context.site.recent_comments(listed(instance)) {
+            let title = context
+                .site
+                .post(comment.post_id)
+                .map(|post| the_title(&post))
+                .unwrap_or_default();
+            items.extend_from_slice(
+                b"<li class=\"recentcomments\"><span class=\"comment-author-link\">",
+            );
+            items.extend(comment_author_link(context, &comment));
+            items.extend_from_slice(b"</span> on <a href=\"");
+            items.extend(esc_url(&comment_link(context, &comment)));
+            items.extend_from_slice(b"\">");
+            items.extend(title);
+            items.extend_from_slice(b"</a></li>");
+        }
+        [
+            &args.before_widget[..],
+            &titled(args, &widget_title(instance, b"Recent Comments")),
+            b"<ul id=\"",
+            esc_attr(&id).as_bytes(),
+            b"\">",
+            &items,
+            b"</ul>",
             &args.after_widget,
         ]
         .concat()
@@ -712,6 +745,19 @@ fn checked(instance: &Value, name: &str) -> bool {
     instance
         .get_str(name)
         .is_some_and(|value| !value.is_empty())
+}
+
+/// How many entries a recent posts or comments widget lists: its `number`
+/// through `absint()`, five for none.
+fn listed(instance: &Value) -> u64 {
+    match instance
+        .get_str("number")
+        .filter(|number| !number.is_empty())
+        .map_or(0, hyscribe_phpser::absint)
+    {
+        0 => 5,
+        n => n,
+    }
 }
 
 /// The title in the sidebar's title markup, if there is one.

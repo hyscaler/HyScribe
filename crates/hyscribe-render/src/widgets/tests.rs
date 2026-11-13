@@ -198,3 +198,132 @@ fn recent_posts_match_php() {
     );
     assert_eq!(golden.lines().count(), 34);
 }
+
+/// A site serving the comments, posts and users of a state.
+struct Talk {
+    install: crate::fixture::DefaultInstall,
+    comments: Vec<hyscribe_model::Comment>,
+    posts: Vec<hyscribe_model::Post>,
+    users: Vec<hyscribe_model::User>,
+}
+
+impl Site for Talk {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        self.install.option(name)
+    }
+    fn home_url(&self) -> Vec<u8> {
+        self.install.home_url()
+    }
+    fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        self.posts.iter().find(|post| post.id == id).cloned()
+    }
+    fn post_terms(&self, _: u64, _: &str) -> Vec<hyscribe_model::Term> {
+        Vec::new()
+    }
+    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+    fn query(&self, _: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
+        Vec::new()
+    }
+    fn recent_comments(&self, limit: u64) -> Vec<hyscribe_model::Comment> {
+        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+        self.comments.iter().take(limit).cloned().collect()
+    }
+    fn user(&self, id: u64) -> Option<hyscribe_model::User> {
+        self.users.iter().find(|user| user.id == id).cloned()
+    }
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        Some(hyscribe_phpser::hash_hmac_md5(data, b"test-salt"))
+    }
+}
+
+/// Every case of `reference/recent-comments-widget/golden.sh`, in order:
+/// only the first widget of the run is `#recentcomments`.
+#[test]
+fn recent_comments_match_php() {
+    let golden = include_str!("../../tests/golden/recent-comments-widget.tsv");
+    let theme = twentytwentyfive();
+    let request = Request::default();
+    let mut shown = false;
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let state = hyscribe_phpser::json_decode(&unhex(f[1])).unwrap();
+        let rows = |name| {
+            state
+                .get_str(name)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|(_, row)| row.clone())
+                .collect::<Vec<_>>()
+        };
+        let text = |row: &hyscribe_phpser::Value, i| {
+            row.get(&hyscribe_phpser::Key::Int(i))
+                .unwrap()
+                .to_php_string()
+        };
+        let int = |row: &hyscribe_phpser::Value, i| {
+            row.get(&hyscribe_phpser::Key::Int(i)).unwrap().to_int() as u64
+        };
+        let site = Talk {
+            install: crate::fixture::DefaultInstall {
+                home: b"http://127.0.0.1:8081".to_vec(),
+            },
+            comments: rows("comments")
+                .iter()
+                .map(|row| hyscribe_model::Comment {
+                    id: int(row, 0),
+                    post_id: int(row, 1),
+                    author: text(row, 2),
+                    author_url: text(row, 3),
+                    user_id: int(row, 4),
+                    ..hyscribe_model::Comment::default()
+                })
+                .collect(),
+            posts: rows("posts")
+                .iter()
+                .map(|row| hyscribe_model::Post {
+                    id: int(row, 0),
+                    title: text(row, 1),
+                    password: text(row, 2),
+                    post_type: String::from_utf8(text(row, 3)).unwrap(),
+                    name: text(row, 4),
+                    date: String::from_utf8(text(row, 5)).unwrap(),
+                    status: "publish".into(),
+                    ..hyscribe_model::Post::default()
+                })
+                .collect(),
+            users: rows("users")
+                .iter()
+                .map(|row| hyscribe_model::User {
+                    id: int(row, 0),
+                    display_name: text(row, 1),
+                    ..hyscribe_model::User::default()
+                })
+                .collect(),
+        };
+        let (markup, php) = (unhex(f[0]), unhex(f[2]));
+        let mut renderer = Renderer::new(&theme, &site, &request);
+        renderer.recent_comments_shown = shown;
+        let ours = renderer.render(&markup);
+        shown = renderer.recent_comments_shown;
+        if ours != php {
+            failures.push(format!(
+                "{}\n  php:  {:?}\n  ours: {:?}",
+                String::from_utf8_lossy(&markup),
+                String::from_utf8_lossy(&php),
+                String::from_utf8_lossy(&ours)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures[..failures.len().min(2)].join("\n")
+    );
+    assert_eq!(golden.lines().count(), 11);
+}

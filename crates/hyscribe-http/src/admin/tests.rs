@@ -124,13 +124,9 @@ async fn logged_in_users_are_let_in() {
         .next()
         .unwrap()
         .to_string();
-    let response = get(
-        &site,
-        "/hs-admin/edit?post_status=draft",
-        "127.0.0.1:8081",
-        &auth,
-    )
-    .await;
+    let response = get(&site, "/hs-admin/edit?paged=2", "127.0.0.1:8081", &auth).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let response = get(&site, "/hs-admin/users", "127.0.0.1:8081", &auth).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     let cookies = all.join("; ");
     let page = page_of(get(&site, "/hs-admin/edit", "127.0.0.1:8081", &cookies).await).await;
@@ -414,7 +410,7 @@ async fn dashboard_data() {
             assert_eq!(admin.sticky_count("post", &[155]), 0);
             // The menus with items: five of six.
             assert_eq!(admin.popular_terms("nav_menu").len(), 5);
-            assert_eq!(admin.months("post").first(), Some(&(2030, 1)));
+            assert_eq!(admin.months("post", false).first(), Some(&(2030, 1)));
             let page = admin.full_post(155).unwrap();
             assert_eq!(admin.pending_comments(&page), 1);
             assert_eq!(admin.display_name(2).as_deref(), Some(&b"Theme Buster"[..]));
@@ -493,4 +489,24 @@ async fn dashboard_data() {
     })
     .await
     .unwrap();
+}
+
+/// The posts list reads `post_status` and the post type, no other argument
+/// yet.
+#[test]
+fn the_posts_list_reads_its_status() {
+    let args = |uri| list_args(uri).map(|args| (args.status, args.base));
+    assert_eq!(args("/hs-admin/edit"), Some((String::new(), true)));
+    assert_eq!(
+        args("/hs-admin/edit?post_type=post"),
+        Some((String::new(), true))
+    );
+    assert_eq!(
+        args("/hs-admin/edit?post_status=draft&post_type=post&post_status=trash"),
+        Some(("trash".into(), false))
+    );
+    assert_eq!(args("/hs-admin/edit?post_status=%FF"), None);
+    assert_eq!(args("/hs-admin/edit?post_status[]=draft"), None);
+    assert_eq!(args("/hs-admin/edit?post_type=page"), None);
+    assert_eq!(args("/hs-admin/edit?post_status=draft&paged=2"), None);
 }

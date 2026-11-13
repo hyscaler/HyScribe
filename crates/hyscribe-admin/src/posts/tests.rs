@@ -37,7 +37,7 @@ fn rows_are_php_s() {
         let start = page.find(open).unwrap() + open.len();
         let rest = page.get(start..).unwrap();
         let php = rest.get(..rest.find("\t</tbody>").unwrap()).unwrap();
-        let ours = row(&Role(role), &hello(), &columns(), &[]);
+        let ours = row(&Role(role), &hello(), &columns(""), &[], "");
         assert!(ours == php, "{role}: {}", first_difference(php, &ours));
     }
 }
@@ -77,8 +77,11 @@ fn the_list_is_php_s() {
             sticky: 0,
             own_only: !Role(role).can("edit_others_posts"),
             user: 1,
+            filter: String::new(),
+            base: true,
         };
-        let ours = list_content(&Role(role), &listing, &[], "/hs-admin/edit");
+        let url = format!("{}/hs-admin/edit", crate::tests::SITE);
+        let ours = list_content(&Role(role), &listing, &[], &url, "/hs-admin/edit");
         assert!(ours == php, "{role}: {}", first_difference(php, &ours));
     }
 }
@@ -89,6 +92,10 @@ fn the_page_is_php_s() {
         let php = golden(role);
         let ours = edit(
             &Role(role),
+            &ListArgs {
+                base: true,
+                ..ListArgs::default()
+            },
             &format!("{}/hs-admin/edit", crate::tests::SITE),
             crate::tests::SITE,
             "/hs-admin/edit",
@@ -109,14 +116,32 @@ fn variants_are_php_s() {
     let mut failures = Vec::new();
     for line in golden.lines() {
         let f: Vec<&str> = line.split('\t').collect();
-        let variant = if f[0] == "content" { "posts" } else { f[0] };
+        let (variant, query) = f[0].split_once('?').unwrap_or((f[0], ""));
+        let variant = if variant == "content" {
+            "posts"
+        } else {
+            variant
+        };
+        let args = ListArgs {
+            status: query
+                .strip_prefix("post_status=")
+                .unwrap_or_default()
+                .into(),
+            base: query.is_empty(),
+        };
         let role: &'static str = Box::leak(format!("{variant}:{}", f[1]).into_boxed_str());
         let php = hs_admin_page(&String::from_utf8(unhex(f[2])).unwrap());
+        let path = if query.is_empty() {
+            "/hs-admin/edit".to_string()
+        } else {
+            format!("/hs-admin/edit?{query}")
+        };
         let ours = edit(
             &Role(role),
-            &format!("{}/hs-admin/edit", crate::tests::SITE),
+            &args,
+            &format!("{}{path}", crate::tests::SITE),
             crate::tests::SITE,
-            "/hs-admin/edit",
+            &path,
             &crate::admin_bar::Browser {
                 user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
                 mobile_hint: None,
@@ -124,7 +149,7 @@ fn variants_are_php_s() {
         )
         .unwrap();
         if ours != php {
-            failures.push(format!("{role}: {}", first_difference(&php, &ours)));
+            failures.push(format!("{role}?{query}: {}", first_difference(&php, &ours)));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
@@ -135,6 +160,7 @@ fn variants_are_php_s() {
 fn subscribers_may_not_list_posts() {
     let page = edit(
         &Role("subscriber"),
+        &ListArgs::default(),
         &format!("{}/hs-admin/edit", crate::tests::SITE),
         crate::tests::SITE,
         "/hs-admin/edit",
@@ -176,7 +202,18 @@ fn undated_drafts_take_the_time_now() {
 /// Moving to the Trash is offered only to those who may delete posts.
 #[test]
 fn the_trash_needs_delete_posts() {
-    let nav = |role| tablenav(&Role(role), "bottom", false, &[], String::new());
+    let listing = Listing {
+        posts: vec![hello()],
+        total: 1,
+        counts: Vec::new(),
+        own: 0,
+        sticky: 0,
+        own_only: false,
+        user: 1,
+        filter: String::new(),
+        base: true,
+    };
+    let nav = |role| tablenav(&Role(role), &listing, "bottom", &[], String::new());
     assert!(nav("contributor").contains("value=\"trash\""));
     assert!(!nav("nobody").contains("value=\"trash\""));
 }
@@ -218,6 +255,8 @@ fn no_posts_no_mine_link() {
         sticky: 0,
         own_only: false,
         user: 1,
+        filter: String::new(),
+        base: true,
     };
     assert!(
         status_views(&listing)
@@ -259,4 +298,23 @@ fn protected_posts_show_no_excerpt() {
         no_title_excerpt(&Role("administrator"), &open),
         "Hidden words"
     );
+}
+
+/// The request's status as PHP reads it: slashed, and empty when `"0"`.
+#[test]
+fn the_status_is_read_as_php_reads_it() {
+    assert_eq!(addslashes("a'b\"c\\d\0e"), "a\\'b\\\"c\\\\d\\0e");
+    assert!(empty("") && empty("0") && !empty("00"));
+    let listing = Listing {
+        posts: Vec::new(),
+        total: 0,
+        counts: Vec::new(),
+        own: 0,
+        sticky: 0,
+        own_only: false,
+        user: 1,
+        filter: String::new(),
+        base: false,
+    };
+    assert!(!status_views(&listing)[0].current);
 }

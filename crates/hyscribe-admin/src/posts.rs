@@ -3,7 +3,7 @@
 //! `edit.php`: the posts list, `WP_Posts_List_Table`.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_textarea, esc_url};
-use hyscribe_model::{Post, PostQuery, StatusFilter, Term, User};
+use hyscribe_model::{OrderBy, Post, PostQuery, StatusFilter, Term, User};
 use hyscribe_phpser::{Maybe, Value, add_query_arg, is_empty_string, maybe_unserialize, urldecode};
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::{convert_chars, ent2ncr, sanitize_text_field, wptexturize};
@@ -61,9 +61,9 @@ pub trait PostsSite: PageSite {
     fn own_posts(&self, post_type: &str) -> u64;
     /// The posts of `post_type` among `ids` neither trashed nor auto-drafts.
     fn sticky_count(&self, post_type: &str, ids: &[u64]) -> u64;
-    /// The years and months with posts of `post_type` not trashed, newest
-    /// first.
-    fn months(&self, post_type: &str) -> Vec<(u32, u32)>;
+    /// The years and months with posts of `post_type`, newest first: of the
+    /// trashed ones when `trash`, else of the others.
+    fn months(&self, post_type: &str, trash: bool) -> Vec<(u32, u32)>;
     /// `get_user_option( $name )`, as stored.
     fn user_option(&self, name: &str) -> Option<Vec<u8>>;
 }
@@ -129,24 +129,22 @@ fn column_cb(site: &dyn PostsSite, post: &Post) -> String {
     )
 }
 
-/// `get_post_states()` of a post in the unfiltered posts list; the pages'
-/// states (front page, posts page, privacy policy) come with Pages.
-fn post_states(site: &dyn PostsSite, post: &Post) -> Vec<&'static str> {
+/// `get_post_states()` in the posts list filtered by `filter`, whose own
+/// state goes unsaid; the pages' states come with Pages.
+fn post_states(site: &dyn PostsSite, post: &Post, filter: &str) -> Vec<&'static str> {
     let mut states = Vec::new();
     if !post.password.is_empty() {
         states.push("Password protected");
     }
+    let customized = || {
+        site.meta(post, "_customize_changeset_uuid")
+            .is_some_and(|v| !v.is_empty())
+    };
     match post.status.as_str() {
-        "private" => states.push("Private"),
-        "draft"
-            if site
-                .meta(post, "_customize_changeset_uuid")
-                .is_some_and(|v| !v.is_empty()) =>
-        {
-            states.push("Customization Draft");
-        }
-        "draft" => states.push("Draft"),
-        "pending" => states.push("Pending"),
+        "private" if filter != "private" => states.push("Private"),
+        "draft" | "trash" if customized() => states.push("Customization Draft"),
+        "draft" if filter != "draft" => states.push("Draft"),
+        "pending" if filter != "pending" => states.push("Pending"),
         _ => {}
     }
     if is_sticky(site, post) {
@@ -159,8 +157,8 @@ fn post_states(site: &dyn PostsSite, post: &Post) -> Vec<&'static str> {
 }
 
 /// `_post_states( $post )`.
-fn post_states_html(site: &dyn PostsSite, post: &Post) -> String {
-    let states = post_states(site, post);
+fn post_states_html(site: &dyn PostsSite, post: &Post, filter: &str) -> String {
+    let states = post_states(site, post, filter);
     if states.is_empty() {
         return String::new();
     }
@@ -236,7 +234,7 @@ fn inline_data(site: &dyn PostsSite, post: &Post) -> String {
 }
 
 /// `_column_title()` and `column_title()`, with the row actions.
-fn column_title(site: &dyn PostsSite, post: &Post, classes: &str) -> String {
+fn column_title(site: &dyn PostsSite, post: &Post, classes: &str, filter: &str) -> String {
     let aria_label = if is_empty_string(&post.title) {
         "no title".to_string()
     } else {
@@ -259,7 +257,7 @@ fn column_title(site: &dyn PostsSite, post: &Post, classes: &str) -> String {
     } else {
         out.push_str(&format!("<span>{title}</span>"));
     }
-    out.push_str(&post_states_html(site, post));
+    out.push_str(&post_states_html(site, post, filter));
     out.push_str("</strong>\n");
     if site.can_post("edit_post", post) {
         out.push_str(&inline_data(site, post));
@@ -291,19 +289,40 @@ fn title_actions(site: &dyn PostsSite, post: &Post) -> String {
             ),
         ));
     }
-    // The Trash, with its restore and delete links, is not listed yet.
     if site.can_post("delete_post", post) {
         let id = post.id;
-        let nonce = site.nonce(&format!("trash-post_{id}"));
-        let link = format!("post.php?post={id}&amp;action=trash&amp;_wpnonce={nonce}");
-        actions.push((
-            "trash",
-            format!(
-                "<a href=\"{}\" class=\"submitdelete\" aria-label=\"{}\">Trash</a>",
-                BarSite::admin_url(site, &link),
-                esc_attr(format!("Move &#8220;{title}&#8221; to the Trash").as_bytes())
-            ),
-        ));
+        let link = |action: &str| {
+            let nonce = site.nonce(&format!("{action}-post_{id}"));
+            let link = format!("post.php?post={id}&amp;action={action}&amp;_wpnonce={nonce}");
+            BarSite::admin_url(site, &link)
+        };
+        if post.status == "trash" {
+            actions.push((
+                "untrash",
+                format!(
+                    "<a href=\"{}\" aria-label=\"{}\">Restore</a>",
+                    link("untrash"),
+                    esc_attr(format!("Restore &#8220;{title}&#8221; from the Trash").as_bytes())
+                ),
+            ));
+            actions.push((
+                "delete",
+                format!(
+                    "<a href=\"{}\" class=\"submitdelete\" aria-label=\"{}\">Delete Permanently</a>",
+                    link("delete"),
+                    esc_attr(format!("Delete &#8220;{title}&#8221; permanently").as_bytes())
+                ),
+            ));
+        } else {
+            actions.push((
+                "trash",
+                format!(
+                    "<a href=\"{}\" class=\"submitdelete\" aria-label=\"{}\">Trash</a>",
+                    link("trash"),
+                    esc_attr(format!("Move &#8220;{title}&#8221; to the Trash").as_bytes())
+                ),
+            ));
+        }
     }
     if ["pending", "draft", "future"].contains(&post.status.as_str()) {
         if can_edit {
@@ -320,7 +339,7 @@ fn title_actions(site: &dyn PostsSite, post: &Post) -> String {
                 ),
             ));
         }
-    } else {
+    } else if post.status != "trash" {
         actions.push((
             "view",
             format!(
@@ -422,9 +441,14 @@ fn comments_bubble(site: &dyn PostsSite, post: &Post) -> String {
     let mut out = if approved == 0 && pending == 0 {
         none("No comments")
     } else if approved > 0 {
+        // A trashed post's bubble links nowhere.
+        let (open, close) = if post.status == "trash" {
+            ("<span".to_string(), "</span>")
+        } else {
+            (format!("<a href=\"{}\"", link("approved")), "</a>")
+        };
         format!(
-            "<a href=\"{}\" class=\"post-com-count post-com-count-approved\"><span class=\"comment-count-approved\" aria-hidden=\"true\">{}</span><span class=\"screen-reader-text\">{approved_phrase}</span></a>",
-            link("approved"),
+            "{open} class=\"post-com-count post-com-count-approved\"><span class=\"comment-count-approved\" aria-hidden=\"true\">{}</span><span class=\"screen-reader-text\">{approved_phrase}</span>{close}",
             number_format(approved)
         )
     } else {
@@ -678,7 +702,13 @@ fn inline_edit(site: &dyn PostsSite, first: &Post, columns: usize) -> String {
 
 /// `single_row( $post )`: the post's row of `columns`, `hidden` ones
 /// hidden.
-pub fn row(site: &dyn PostsSite, post: &Post, columns: &[Column], hidden: &[&str]) -> String {
+pub fn row(
+    site: &dyn PostsSite,
+    post: &Post,
+    columns: &[Column],
+    hidden: &[&str],
+    filter: &str,
+) -> String {
     let author = if site.user_id() == post.author {
         "self"
     } else {
@@ -704,7 +734,7 @@ pub fn row(site: &dyn PostsSite, post: &Post, columns: &[Column], hidden: &[&str
                 continue;
             }
             "title" => {
-                out.push_str(&column_title(site, post, &classes));
+                out.push_str(&column_title(site, post, &classes, filter));
                 continue;
             }
             "author" => column_author(site, post),
@@ -726,8 +756,9 @@ pub fn row(site: &dyn PostsSite, post: &Post, columns: &[Column], hidden: &[&str
     out
 }
 
-/// The posts list's columns.
-pub fn columns() -> Vec<Column> {
+/// The posts list's columns in the view of `filter`: no comments for posts
+/// not published yet.
+pub fn columns(filter: &str) -> Vec<Column> {
     let sort = |orderby, abbr, caption, initial| {
         Some(Sort {
             orderby,
@@ -736,7 +767,7 @@ pub fn columns() -> Vec<Column> {
             initial,
         })
     };
-    vec![
+    let mut columns = vec![
         Column {
             key: "cb",
             label: "<input type=\"checkbox\" />".into(),
@@ -763,16 +794,22 @@ pub fn columns() -> Vec<Column> {
             sort: None,
         },
         Column {
-            key: "comments",
-            label: "<span class=\"vers comment-grey-bubble\" title=\"Comments\" aria-hidden=\"true\"></span><span class=\"screen-reader-text\">Comments</span>".into(),
-            sort: sort("comment_count", "Comments", "Table ordered by Comments.", false),
-        },
-        Column {
             key: "date",
             label: "Date".into(),
             sort: sort("date", "Date", "Table ordered by Date.", true),
         },
-    ]
+    ];
+    if !["pending", "draft", "future"].contains(&filter) {
+        columns.insert(
+            5,
+            Column {
+                key: "comments",
+                label: "<span class=\"vers comment-grey-bubble\" title=\"Comments\" aria-hidden=\"true\"></span><span class=\"screen-reader-text\">Comments</span>".into(),
+                sort: sort("comment_count", "Comments", "Table ordered by Comments.", false),
+            },
+        );
+    }
+    columns
 }
 
 /// The statuses `get_post_stati()` registers that the status links list,
@@ -807,9 +844,20 @@ struct Listing {
     /// `$_GET['author']` set to the user, who may only list their own.
     own_only: bool,
     user: u64,
+    /// `$_REQUEST['post_status']`, empty for none.
+    filter: String,
+    /// `is_base_request()`.
+    base: bool,
 }
 
-/// `WP_Posts_List_Table::get_views()` for the unfiltered list.
+impl Listing {
+    /// The Trash is listed.
+    fn trash(&self) -> bool {
+        self.filter == "trash"
+    }
+}
+
+/// `WP_Posts_List_Table::get_views()`.
 fn status_views(listing: &Listing) -> Vec<View> {
     let count = |status: &str| {
         listing
@@ -835,7 +883,7 @@ fn status_views(listing: &Listing) -> Vec<View> {
             "edit.php?post_type=post".into()
         },
         label: label("All", all_total),
-        current: !listing.own_only,
+        current: !listing.own_only && listing.base,
     }];
     if mine {
         links.push(View {
@@ -854,7 +902,7 @@ fn status_views(listing: &Listing) -> Vec<View> {
             class: status.into(),
             url: format!("edit.php?post_status={status}&post_type=post"),
             label: label(if n == 1 { one } else { many }, n),
-            current: false,
+            current: listing.filter == status,
         });
     }
     if listing.sticky > 0 {
@@ -931,29 +979,46 @@ fn formats_dropdown(site: &dyn PostsSite) -> String {
     )
 }
 
-/// `display_tablenav( $which )`, its bulk actions hidden for an `empty` list.
+/// `display_tablenav( $which )` of `listing`, its bulk actions hidden when
+/// it is empty.
 fn tablenav(
     site: &dyn PostsSite,
+    listing: &Listing,
     which: &str,
-    empty: bool,
     months: &[(u32, u32)],
     pages: String,
 ) -> String {
-    let mut actions = vec![("edit", "Bulk edit")];
+    let mut actions = vec![if listing.trash() {
+        ("untrash", "Restore")
+    } else {
+        ("edit", "Bulk edit")
+    }];
     if site.can("delete_posts") {
-        actions.push(("trash", "Move to Trash"));
+        actions.push(if listing.trash() {
+            ("delete", "Delete permanently")
+        } else {
+            ("trash", "Move to Trash")
+        });
     }
+    let empty = listing.posts.is_empty();
     let hidden = if empty { " hidden" } else { "" };
-    let extra = if which == "top" {
+    let mut extra = if which == "top" {
         format!(
             "{}{}{}<input type=\"submit\" name=\"filter_action\" id=\"post-query-submit\" class=\"button button-compact\" value=\"Filter\"  />",
             months_dropdown(months, "Filter by date"),
             categories_dropdown(site),
-            formats_dropdown(site)
+            if listing.trash() {
+                String::new()
+            } else {
+                formats_dropdown(site)
+            }
         )
     } else {
         String::new()
     };
+    if listing.trash() && !empty && site.can("edit_others_posts") {
+        extra.push_str("<input type=\"submit\" name=\"delete_all\" id=\"delete_all\" class=\"button apply\" value=\"Empty Trash\"  />");
+    }
     format!(
         "\t<div class=\"tablenav {which}\">\n\n\t\t\t\t<div class=\"alignleft actions bulkactions{hidden}\">\n\t\t\t{}\t\t</div>\n\t\t\t\t<div class=\"alignleft actions\">\n\t\t{extra}\t\t</div>\n\t\t{pages}\n\t\t<br class=\"clear\" />\n\t</div>\n\t\t",
         bulk_actions(which, &actions)
@@ -961,19 +1026,20 @@ fn tablenav(
 }
 
 /// The list's markup, from its heading to the inline editors.
+/// `url` is the page's and `request_uri` its path and query.
 fn list_content(
     site: &dyn PostsSite,
     listing: &Listing,
     hidden: &[&str],
+    url: &str,
     request_uri: &str,
 ) -> String {
-    let columns = columns();
-    let url = BarSite::admin_url(site, "edit.php");
-    let months = site.months("post");
+    let columns = columns(&listing.filter);
+    let months = site.months("post", listing.trash());
     let rows: String = listing
         .posts
         .iter()
-        .map(|post| row(site, post, &columns, hidden))
+        .map(|post| row(site, post, &columns, hidden, &listing.filter))
         .collect();
     let visible = columns
         .iter()
@@ -983,7 +1049,7 @@ fn list_content(
     let pages = listing.total.div_ceil(per_page);
     let links = status_views(listing);
     let mut out = format!(
-        "<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\nPosts</h1>\n\n <a href=\"{}\" class=\"page-title-action\">Add Post</a>\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"posts-filter\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"post_status\" class=\"post_status_page\" value=\"all\" />\n<input type=\"hidden\" name=\"post_type\" class=\"post_type_page\" value=\"post\" />\n\n\n\n",
+        "<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\nPosts</h1>\n\n <a href=\"{}\" class=\"page-title-action\">Add Post</a>\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"posts-filter\" method=\"get\">\n\n{}\n<input type=\"hidden\" name=\"post_status\" class=\"post_status_page\" value=\"{}\" />\n<input type=\"hidden\" name=\"post_type\" class=\"post_type_page\" value=\"post\" />\n\n\n\n",
         text(&esc_url(
             BarSite::admin_url(site, "post-new.php").as_bytes()
         )),
@@ -992,24 +1058,34 @@ fn list_content(
             String::new()
         } else {
             search_box("Search Posts", "post")
+        },
+        if empty(&listing.filter) {
+            "all".to_string()
+        } else {
+            esc_attr(addslashes(&listing.filter).as_bytes())
         }
     );
     out.push_str(&format!(
         "<input type=\"hidden\" id=\"_wpnonce\" name=\"_wpnonce\" value=\"{}\" /><input type=\"hidden\" name=\"_wp_http_referer\" value=\"{}\" />",
         site.nonce("bulk-posts"),
-        esc_attr(request_uri.as_bytes())
+        text(&esc_url(request_uri.as_bytes()))
     ));
     let empty = listing.posts.is_empty();
     out.push_str(&tablenav(
         site,
+        listing,
         "top",
-        empty,
         &months,
-        pagination("top", listing.total, pages, &url),
+        pagination("top", listing.total, pages, url),
     ));
     let rows = if empty {
+        let none = if listing.trash() {
+            "No posts found in Trash."
+        } else {
+            "No posts found."
+        };
         format!(
-            "<tr class=\"no-items\"><td class=\"colspanchange\" colspan=\"{visible}\">No posts found.</td></tr>"
+            "<tr class=\"no-items\"><td class=\"colspanchange\" colspan=\"{visible}\">{none}</td></tr>"
         )
     } else {
         rows
@@ -1017,16 +1093,16 @@ fn list_content(
     out.push_str(&format!(
         "<h2 class='screen-reader-text'>Posts list</h2><table class=\"wp-list-table widefat fixed striped table-view-list posts\">\n\t\t{}\t<thead>\n\t<tr>\n\t\t{}\t</tr>\n\t</thead>\n\n\t<tbody id=\"the-list\"\n\t\t\t\t>\n\t\t{rows}\t</tbody>\n\n\t<tfoot>\n\t<tr>\n\t\t{}\t</tr>\n\t</tfoot>\n\n</table>\n\t\t",
         table_description(&columns),
-        column_headers(&columns, hidden, &url, 1, true),
-        column_headers(&columns, hidden, &url, 2, false)
+        column_headers(&columns, hidden, url, 1, true),
+        column_headers(&columns, hidden, url, 2, false)
     ));
     if !empty {
         out.push_str(&tablenav(
             site,
+            listing,
             "bottom",
-            false,
             &months,
-            pagination("bottom", listing.total, pages, &url),
+            pagination("bottom", listing.total, pages, url),
         ));
     }
     out.push_str("\n</form>\n\n");
@@ -1117,9 +1193,61 @@ fn all_statuses(site: &dyn PostsSite) -> Vec<StatusFilter> {
         .collect()
 }
 
-/// `edit.php`: the posts list, `None` for a user who may not edit posts.
+/// `wp_edit_posts_query()`'s statuses and order for the requested `filter`:
+/// one registered status, readable, or the All list's.
+fn filtered(site: &dyn PostsSite, filter: &str) -> (Vec<StatusFilter>, Vec<(OrderBy, bool)>) {
+    let registered =
+        STATUSES.iter().any(|(status, ..)| *status == filter) || NOT_IN_ALL.contains(&filter);
+    if !registered {
+        return (all_statuses(site), Vec::new());
+    }
+    let statuses = vec![StatusFilter {
+        status: filter.into(),
+        author: private_author(site).filter(|_| filter == "private"),
+    }];
+    let order = match filter {
+        "draft" => vec![(OrderBy::Modified, false)],
+        "pending" => vec![(OrderBy::Modified, true)],
+        _ => Vec::new(),
+    };
+    (statuses, order)
+}
+
+/// The posts list's query arguments this port reads.
+#[derive(Default)]
+pub struct ListArgs {
+    /// `$_GET['post_status']`, empty for none.
+    pub status: String,
+    /// `is_base_request()`: no arguments but `paged` and the post type.
+    pub base: bool,
+}
+
+/// PHP's `empty()` of a string.
+fn empty(text: &str) -> bool {
+    text.is_empty() || text == "0"
+}
+
+/// `addslashes()`, which `wp_magic_quotes()` applies to the request.
+fn addslashes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\'' | '"' | '\\' => {
+                out.push('\\');
+                out.push(c);
+            }
+            '\0' => out.push_str("\\0"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// `edit.php`: the posts list for `args`; `None` for a user who may not
+/// edit posts.
 pub fn edit(
     site: &dyn PostsSite,
+    args: &ListArgs,
     canonical: &str,
     origin: &str,
     request_uri: &str,
@@ -1129,10 +1257,13 @@ pub fn edit(
         return None;
     }
     let own = site.own_posts("post");
-    let own_only = own > 0 && !site.can("edit_others_posts");
+    let filter = args.status.as_str();
+    let own_only = own > 0 && !site.can("edit_others_posts") && empty(filter);
+    let (statuses, order) = filtered(site, filter);
     let query = PostQuery {
         post_types: vec!["post".into()],
-        statuses: all_statuses(site),
+        statuses,
+        order,
         authors: if own_only {
             vec![site.user_id()]
         } else {
@@ -1155,11 +1286,13 @@ pub fn edit(
         },
         own_only,
         user: site.user_id(),
+        filter: filter.into(),
+        base: args.base,
     };
     let hidden = hidden_columns(site);
     let hidden_keys: Vec<&str> = hidden.iter().map(String::as_str).collect();
-    let content = list_content(site, &listing, &hidden_keys, request_uri);
-    let screen_options = screen_options(site, &columns(), &hidden);
+    let content = list_content(site, &listing, &hidden_keys, canonical, request_uri);
+    let screen_options = screen_options(site, &columns(filter), &hidden);
     let help = [
         HelpTab {
             id: "overview",

@@ -692,14 +692,21 @@ impl Db {
             .map_err(db_error)
     }
 
-    /// `months_dropdown()`'s months: the years and months of the posts of
-    /// `post_type` neither trashed nor auto-drafts, newest first.
-    pub async fn post_months(&self, post_type: &str) -> Result<Vec<(u32, u32)>, DbError> {
-        let sql = self.prefix.sql(
+    /// `months_dropdown()`'s months of the posts of `post_type`, newest first:
+    /// of the trashed ones when `trash`, else of the others.
+    pub async fn post_months(
+        &self,
+        post_type: &str,
+        trash: bool,
+    ) -> Result<Vec<(u32, u32)>, DbError> {
+        let sql = self.prefix.sql(if trash {
+            "SELECT DISTINCT YEAR(post_date) AS year, MONTH(post_date) AS month FROM {prefix}posts \
+             WHERE post_type = ? AND post_status = 'trash' ORDER BY post_date DESC"
+        } else {
             "SELECT DISTINCT YEAR(post_date) AS year, MONTH(post_date) AS month FROM {prefix}posts \
              WHERE post_type = ? AND post_status != 'auto-draft' AND post_status != 'trash' \
-             ORDER BY post_date DESC",
-        );
+             ORDER BY post_date DESC"
+        });
         let rows = sqlx::query(sql)
             .bind(post_type)
             .fetch_all(&self.pool)

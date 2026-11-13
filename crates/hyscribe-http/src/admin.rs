@@ -15,11 +15,11 @@ use hyscribe_admin::dashboard::{CommentCounts, DashboardSite, RecentComment, das
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
-use hyscribe_admin::posts::{PostsSite, edit};
+use hyscribe_admin::posts::{ListArgs, PostsSite, edit};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
 use hyscribe_db::{StatusOrder, StatusQuery};
 use hyscribe_model::{Post, PostQuery, Term, TermOrder, TermQuery, User};
-use hyscribe_phpser::{Value, remove_query_arg, urlencode};
+use hyscribe_phpser::{Key, Value, parse_str, remove_query_arg, urlencode};
 use hyscribe_render::date::Zone;
 use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
@@ -467,8 +467,10 @@ impl PostsSite for Admin<'_> {
             .reads
             .wait(self.site.db.sticky_count(post_type, ids))
     }
-    fn months(&self, post_type: &str) -> Vec<(u32, u32)> {
-        self.reads.reads.wait(self.site.db.post_months(post_type))
+    fn months(&self, post_type: &str, trash: bool) -> Vec<(u32, u32)> {
+        self.reads
+            .reads
+            .wait(self.site.db.post_months(post_type, trash))
     }
     fn user_option(&self, name: &str) -> Option<Vec<u8>> {
         self.reads.user_option(self.user.id, name)
@@ -482,6 +484,29 @@ fn screen_headers() -> Vec<(header::HeaderName, String)> {
     headers.push((header::CONTENT_TYPE, "text/html; charset=UTF-8".to_string()));
     headers.push((header::X_FRAME_OPTIONS, "SAMEORIGIN".to_string()));
     headers
+}
+
+/// The posts list's arguments; `None` for a query with arguments not
+/// ported yet.
+fn list_args(request_uri: &str) -> Option<ListArgs> {
+    let query = request_uri.split_once('?').map_or("", |(_, query)| query);
+    let args = parse_str(query.as_bytes());
+    let mut list = ListArgs {
+        base: true,
+        ..ListArgs::default()
+    };
+    for (key, value) in args.as_array().unwrap_or_default() {
+        match (key, value) {
+            (Key::String(key), Value::String(value)) if key == b"post_status" => {
+                list.status = String::from_utf8(value.clone()).ok()?;
+                list.base = false;
+            }
+            (Key::String(key), Value::String(value)) if key == b"post_type" && value == b"post" => {
+            }
+            _ => return None,
+        }
+    }
+    Some(list)
 }
 
 /// The screen at `path` for `admin`, `None` for one not ported yet.
@@ -500,9 +525,9 @@ fn screen(
         "/hs-admin/" | "/hs-admin/index" => {
             dashboard(admin, &canonical, origin, request_uri, browser)
         }
-        // Only the unfiltered list is ported.
-        "/hs-admin/edit" if !request_uri.contains('?') => {
-            edit(admin, &canonical, origin, request_uri, browser)
+        "/hs-admin/edit" => {
+            let args = list_args(request_uri)?;
+            edit(admin, &args, &canonical, origin, request_uri, browser)
         }
         _ => return None,
     };

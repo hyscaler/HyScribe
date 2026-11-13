@@ -421,7 +421,7 @@ async fn errors_are_reported() {
         db.status_counts("post", None).await.unwrap_err(),
         db.own_posts("post", 1).await.unwrap_err(),
         db.sticky_count("post", &[1]).await.unwrap_err(),
-        db.post_months("post").await.unwrap_err(),
+        db.post_months("post", true).await.unwrap_err(),
         db.pending_comments(1).await.unwrap_err(),
         db.users_with("wp_capabilities", &["administrator".into()])
             .await
@@ -1272,7 +1272,7 @@ async fn posts_list_reads() {
     assert_eq!(ttd.status_counts("page", Some(2)).await.unwrap().len(), 2);
     assert_eq!(ttd.own_posts("post", 2).await.unwrap(), 39);
     assert_eq!(ttd.sticky_count("post", &[1241, 155]).await.unwrap(), 1);
-    let months = ttd.post_months("post").await.unwrap();
+    let months = ttd.post_months("post", false).await.unwrap();
     assert_eq!(months.get(..2), Some(&[(2030, 1), (2026, 11)][..]));
     assert_eq!(ttd.pending_comments(155).await.unwrap(), 1);
     assert_eq!(ttd.pending_comments(1241).await.unwrap(), 0);

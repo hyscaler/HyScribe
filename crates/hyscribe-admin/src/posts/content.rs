@@ -24,11 +24,8 @@ fn post(
         id,
         author,
         date: date.into(),
-        date_gmt: if status == "draft" {
-            "0000-00-00 00:00:00".into()
-        } else {
-            date.into()
-        },
+        modified: date.into(),
+        date_gmt: date.into(),
         title: title.as_bytes().to_vec(),
         excerpt: excerpt.as_bytes().to_vec(),
         status: status.into(),
@@ -46,7 +43,7 @@ fn post(
 pub(crate) fn posts() -> Vec<Post> {
     let open = ("open", "open");
     let fifteen = "One two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen";
-    vec![
+    let posts = vec![
         super::tests::hello(),
         post(
             301,
@@ -130,7 +127,7 @@ pub(crate) fn posts() -> Vec<Post> {
             open,
             "",
             "thrown-away__trashed",
-            0,
+            1,
         ),
         post(
             308,
@@ -204,7 +201,43 @@ pub(crate) fn posts() -> Vec<Post> {
             "their-secret",
             0,
         ),
-    ]
+        post(
+            314,
+            1,
+            "2026-11-12 09:00:00",
+            "Edited long ago",
+            "",
+            "draft",
+            open,
+            "",
+            "",
+            0,
+        ),
+        post(
+            315,
+            1,
+            "2026-11-12 11:00:00",
+            "Edited lately",
+            "",
+            "pending",
+            open,
+            "",
+            "",
+            0,
+        ),
+    ];
+    // Three were last modified on other days than their dates.
+    posts
+        .into_iter()
+        .map(|mut post| {
+            match post.id {
+                303 | 312 => post.modified = "2026-11-01 10:00:00".into(),
+                314 => post.modified = "2026-10-30 10:00:00".into(),
+                _ => {}
+            }
+            post
+        })
+        .collect()
 }
 
 fn term(id: u64, name: &str, slug: &str, parent: u64, count: u64) -> Term {
@@ -252,11 +285,14 @@ pub(crate) fn post_terms(post: &Post, taxonomy: &str) -> Vec<Term> {
         .collect()
 }
 
-/// The meta of the content: post 306's template and 312's changeset.
+/// The meta of the content: post 306's template, 307's status before the
+/// Trash, and 307's and 312's changesets.
 pub(crate) fn meta(post: &Post, key: &str) -> Option<Vec<u8>> {
     let value: &[u8] = match (post.id, key) {
         (306, "_wp_page_template") => b"wide",
         (312, "_customize_changeset_uuid") => b"0c3a1b2c-1111-4222-8333-444455556666",
+        (307, "_wp_trash_meta_status") => b"publish",
+        (307, "_customize_changeset_uuid") => b"1d4b2c3d-2222-4333-8444-555566667777",
         _ => return None,
     };
     Some(value.to_vec())
@@ -274,7 +310,11 @@ pub(crate) fn list(query: &PostQuery) -> (Vec<Post>, u64) {
                 && (query.authors.is_empty() || query.authors.contains(&post.author))
         })
         .collect();
-    found.sort_by(|a, b| b.date.cmp(&a.date));
+    match query.order.first() {
+        Some((_, true)) => found.sort_by(|a, b| a.modified.cmp(&b.modified)),
+        Some(_) => found.sort_by(|a, b| b.modified.cmp(&a.modified)),
+        None => found.sort_by(|a, b| b.date.cmp(&a.date)),
+    }
     let total = found.len() as u64;
     found.truncate(query.limit as usize);
     (found, total)
@@ -295,11 +335,11 @@ pub(crate) fn status_counts(private_author: Option<u64>) -> Vec<(String, u64)> {
     counts
 }
 
-/// The months with posts not trashed, newest first.
-pub(crate) fn months() -> Vec<(u32, u32)> {
+/// The months with posts, only trashed ones when `trash`, newest first.
+pub(crate) fn months(trash: bool) -> Vec<(u32, u32)> {
     let mut dates: Vec<String> = posts()
         .into_iter()
-        .filter(|post| post.status != "trash")
+        .filter(|post| (post.status == "trash") == trash)
         .map(|post| post.date)
         .collect();
     dates.sort_by(|a, b| b.cmp(a));

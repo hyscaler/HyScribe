@@ -196,8 +196,12 @@ impl CapabilityData for Role {
     fn post(&self, _: u64) -> Option<CapPost> {
         None
     }
-    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        None
+    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        let post = hyscribe_model::Post {
+            id,
+            ..hyscribe_model::Post::default()
+        };
+        crate::posts::content::meta(&post, key).filter(|_| self.listing())
     }
     fn comment_post(&self, _: u64) -> Option<u64> {
         None
@@ -630,7 +634,11 @@ impl crate::posts::PostsSite for Role {
         if self.listing() {
             return crate::posts::content::list(query);
         }
-        if self.variant() == "empty" {
+        let published = query
+            .statuses
+            .iter()
+            .any(|filter| filter.status == "publish");
+        if self.variant() == "empty" || !published {
             return (Vec::new(), 0);
         }
         (vec![crate::posts::tests::hello()], 1)
@@ -649,18 +657,18 @@ impl crate::posts::PostsSite for Role {
     fn own_posts(&self, _: &str) -> u64 {
         match self.variant() {
             "empty" => 0,
-            _ if self.listing() => 9,
+            _ if self.listing() => 11,
             _ => 1,
         }
     }
     fn sticky_count(&self, _: &str, ids: &[u64]) -> u64 {
         if self.listing() { ids.len() as u64 } else { 0 }
     }
-    fn months(&self, _: &str) -> Vec<(u32, u32)> {
+    fn months(&self, _: &str, trash: bool) -> Vec<(u32, u32)> {
         if self.listing() {
-            return crate::posts::content::months();
+            return crate::posts::content::months(trash);
         }
-        if self.variant() == "empty" {
+        if self.variant() == "empty" || trash {
             return Vec::new();
         }
         vec![(2026, 10)]

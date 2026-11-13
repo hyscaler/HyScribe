@@ -381,7 +381,7 @@ pub fn strtotime(text: &str) -> Option<i64> {
 }
 
 /// `human_time_diff( $from, $to )`.
-pub(crate) fn human_time_diff(from: i64, to: i64) -> String {
+pub fn human_time_diff(from: i64, to: i64) -> String {
     const UNITS: [(i64, &str); 6] = [
         (60, "minute"),
         (3600, "hour"),

@@ -314,6 +314,35 @@ async fn logged_in_users_are_let_in() {
         let response = router(Arc::clone(&site)).oneshot(form).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
     }
+    // Themes and the Tools screens, without their arguments and actions;
+    // Plugins and Site Health are not ported.
+    let list = include_str!("../../../hyscribe-admin/tests/golden/appearance.tsv");
+    let cron = site.option("cron");
+    let message = hyscribe_admin::appearance::auto_update_message(cron.as_bytes(), now());
+    for file in [
+        "themes",
+        "import",
+        "export",
+        "export-personal-data",
+        "erase-personal-data",
+    ] {
+        let path = format!("/hs-admin/{file}");
+        let page = page_of(get(&site, &path, "127.0.0.1:8081", &cookies).await).await;
+        let row = list
+            .lines()
+            .find(|l| l.starts_with(&format!("default\t{file}.php\tadministrator\t")))
+            .unwrap();
+        let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+        let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap())
+            .replace("%auto-update%", &message);
+        assert_eq!(with_values(&php, &page), page, "{file}");
+        let response = get(&site, &format!("{path}?x=1"), "127.0.0.1:8081", &auth).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
+    }
+    for path in ["/hs-admin/plugins", "/hs-admin/site-health"] {
+        let response = get(&site, path, "127.0.0.1:8081", &auth).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+    }
     // Add User, as PHP showed it.
     let page = page_of(get(&site, "/hs-admin/user-new", "127.0.0.1:8081", &cookies).await).await;
     let php = edit_golden("u3\tuser-new.php\tadministrator\t");
@@ -700,6 +729,21 @@ async fn refusals() {
         ),
         ("/hs-admin/user-edit?user_id=1", true, None),
         ("/hs-admin/user-new", false, Some(StatusCode::FORBIDDEN)),
+        ("/hs-admin/themes", false, Some(StatusCode::FORBIDDEN)),
+        ("/hs-admin/import", false, Some(StatusCode::FORBIDDEN)),
+        ("/hs-admin/export", false, Some(StatusCode::FORBIDDEN)),
+        ("/hs-admin/plugins", false, Some(StatusCode::FORBIDDEN)),
+        ("/hs-admin/site-health", false, Some(StatusCode::FORBIDDEN)),
+        (
+            "/hs-admin/export-personal-data",
+            false,
+            Some(StatusCode::FORBIDDEN),
+        ),
+        (
+            "/hs-admin/erase-personal-data",
+            false,
+            Some(StatusCode::FORBIDDEN),
+        ),
     ] {
         let (site, handle) = (Arc::clone(&site), handle.clone());
         let response = tokio::task::spawn_blocking(move || {
@@ -765,7 +809,8 @@ async fn refusals() {
 }
 
 /// A Site Icon, and a static homepage with neither page chosen, which PHP
-/// saves as the latest posts first, are not ported.
+/// saves as the latest posts first, and another active theme are not
+/// ported.
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_not_ported() {
     let db = hyscribe_db::Db::connect(&hyscribe_testkit::fixture_database())
@@ -775,8 +820,14 @@ async fn settings_not_ported() {
     site.options.insert("site_icon".into(), b"5".to_vec());
     site.options
         .insert("show_on_front".into(), b"page".to_vec());
+    site.options
+        .insert("stylesheet".into(), b"twentytwentyfour".to_vec());
     let site = Arc::new(site);
-    for path in ["/hs-admin/options-general", "/hs-admin/options-reading"] {
+    for path in [
+        "/hs-admin/options-general",
+        "/hs-admin/options-reading",
+        "/hs-admin/themes",
+    ] {
         let site = Arc::clone(&site);
         let handle = Handle::current();
         let response = tokio::task::spawn_blocking(move || {
@@ -897,6 +948,8 @@ async fn the_user_s_data() {
         };
         let reads = LoginReads::new(&terms, handle.clone(), now());
         let first = admin(&terms, &reads, 1);
+        assert_eq!(first.post_authors("post"), [1]);
+        assert!(first.post_authors("attachment").is_empty());
         assert_eq!(first.admin_color().as_deref(), Some(&b"modern"[..]));
         assert!(
             first

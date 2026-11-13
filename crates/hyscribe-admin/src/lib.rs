@@ -3,6 +3,7 @@
 //! hs-admin, the dashboard emulating `wp-admin` (ADR 0008).
 
 pub mod admin_bar;
+pub mod appearance;
 pub mod assets;
 pub mod comments;
 pub mod dashboard;

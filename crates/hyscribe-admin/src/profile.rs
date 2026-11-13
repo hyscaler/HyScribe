@@ -575,10 +575,7 @@ fn form(site: &dyn ProfileSite, user: &User, shown: Option<&Edit>, request: &Req
         origin: request.origin,
         view: shown.map(|_| ("View User", author.as_str())),
     };
-    admin_page(site, &page, request.browser).map_or(
-        Answer::Denied("Sorry, you are not allowed to access this page."),
-        Answer::Page,
-    )
+    Answer::from_page(admin_page(site, &page, request.browser))
 }
 
 #[cfg(test)]

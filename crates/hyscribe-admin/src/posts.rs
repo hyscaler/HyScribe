@@ -1658,10 +1658,13 @@ pub(crate) fn hidden_columns(site: &dyn PostsSite, screen: &str) -> Vec<String> 
     }
 }
 
-/// The number per page the user chose as `option`, 20 by default.
-pub(crate) fn per_page(site: &dyn PostsSite, option: &str) -> u64 {
+/// The number per page the user chose as `option`, else `default`.
+pub(crate) fn per_page(site: &dyn PostsSite, option: &str, default: u64) -> u64 {
     let stored = Value::String(site.user_option(option).unwrap_or_default()).to_int();
-    u64::try_from(stored).ok().filter(|n| *n > 0).unwrap_or(20)
+    u64::try_from(stored)
+        .ok()
+        .filter(|n| *n > 0)
+        .unwrap_or(default)
 }
 
 /// The only author whose private posts of `kind` the user may read, unless
@@ -1951,6 +1954,17 @@ pub enum Answer {
     Died(&'static str),
 }
 
+impl Answer {
+    /// A screen's page, or `wp_die()`'s refusal from
+    /// `wp-admin/includes/menu.php` when the menu turns the user away.
+    pub(crate) fn from_page(page: Option<String>) -> Answer {
+        page.map_or(
+            Answer::Denied("Sorry, you are not allowed to access this page."),
+            Answer::Page,
+        )
+    }
+}
+
 /// `get_user_setting( $name )`: from the settings cookie when sent, else
 /// the stored `user-settings`; none when the cleaned cookie has no `=`.
 fn user_setting(site: &dyn PostsSite, cookie: Option<&str>, name: &str) -> Option<String> {
@@ -2011,7 +2025,7 @@ pub fn edit(
             .as_deref()
             .is_none_or(|all| is_empty_string(all.as_bytes()))
         && !args.show_sticky;
-    let per_page = per_page(site, &format!("edit_{}_per_page", kind.name));
+    let per_page = per_page(site, &format!("edit_{}_per_page", kind.name), 20);
     let author_ids = author_ids(author);
     let (authors, excluded_authors) = if own_only {
         (vec![site.user_id()], Vec::new())

@@ -126,7 +126,7 @@ pub fn checked(on: bool) -> &'static str {
 }
 
 /// `wp_referer_field()` for the request `request_uri`.
-fn wp_referer_field(request_uri: &str) -> String {
+pub(crate) fn wp_referer_field(request_uri: &str) -> String {
     let url = remove_query_arg(&[b"_wp_http_referer"], request_uri.as_bytes());
     format!(
         "<input type=\"hidden\" name=\"_wp_http_referer\" value=\"{}\" />",

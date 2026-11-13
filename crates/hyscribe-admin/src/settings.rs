@@ -264,10 +264,7 @@ pub(crate) fn settings_page(site: &dyn SettingsSite, screen: &Form, request: &Re
         origin: request.origin,
         view: None,
     };
-    admin_page(site, &page, request.browser).map_or(
-        Answer::Denied("Sorry, you are not allowed to access this page."),
-        Answer::Page,
-    )
+    Answer::from_page(admin_page(site, &page, request.browser))
 }
 
 /// The page with `from` replaced by `to` once, for what the screen's hooks

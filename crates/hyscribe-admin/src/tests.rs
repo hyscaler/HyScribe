@@ -225,6 +225,8 @@ impl Role {
                 b"page"
             }
             ("s1icon", "site_icon") => b"5",
+            ("a5auto", "auto_update_themes") => b"a:1:{i:0;s:16:\"twentytwentyfive\";}",
+            ("a5other", "stylesheet") => b"twentytwentyfour",
             ("s1static" | "s1same" | "s1privacy", "page_on_front") => b"2",
             ("s1same", "page_for_posts") => b"2",
             ("s1privacy", "page_for_posts") => b"3",
@@ -404,6 +406,17 @@ impl Role {
                     ..hyscribe_model::Post::default()
                 },
             )),
+            "a5zero" => posts.push(hyscribe_model::Post {
+                post_type: "attachment".into(),
+                status: "inherit".into(),
+                date: "0000-00-00 00:00:00".into(),
+                ..hyscribe_model::Post::default()
+            }),
+            "a5requests" => posts.push(hyscribe_model::Post {
+                post_type: "user_request".into(),
+                status: "request-pending".into(),
+                ..hyscribe_model::Post::default()
+            }),
             _ => {}
         }
         posts
@@ -458,6 +471,8 @@ impl CapabilityData for Role {
         let denied = match self.variant() {
             "u3nocreate" => "create_users",
             "u3nopromote" => "promote_users",
+            "a5nooptions" => "edit_theme_options",
+            "a5noswitch" => "switch_themes",
             _ => return Some(format!("a:1:{{s:{}:\"{role}\";b:1;}}", role.len()).into_bytes()),
         };
         Some(
@@ -731,6 +746,17 @@ impl crate::users::UsersSite for Role {
     }
     fn author_url(&self, id: u64) -> String {
         format!("{SITE}/?author={id}")
+    }
+}
+
+impl crate::tools::ToolsSite for Role {
+    /// User 1 wrote the posts and pages, and nobody the media.
+    fn post_authors(&self, post_type: &str) -> Vec<u64> {
+        if post_type == "attachment" {
+            Vec::new()
+        } else {
+            vec![1]
+        }
     }
 }
 
@@ -1201,6 +1227,16 @@ impl crate::posts::PostsSite for Role {
             let value: &[u8] = match name {
                 "manageedit-postcolumnshidden" => b"a:2:{i:0;s:4:\"tags\";i:1;s:8:\"comments\";}",
                 "edit_post_per_page" | "edit_page_per_page" => b"3",
+                _ => return None,
+            };
+            return Some(value.to_vec());
+        }
+        if self.variant() == "a5hidden" {
+            let value: &[u8] = match name {
+                "manageexport-personal-datacolumnshidden" => b"a:1:{i:0;s:6:\"status\";}",
+                "export_personal_data_requests_per_page" => b"50",
+                "managepluginscolumnshidden" => b"a:1:{i:0;s:11:\"description\";}",
+                "plugins_per_page" => b"10",
                 _ => return None,
             };
             return Some(value.to_vec());

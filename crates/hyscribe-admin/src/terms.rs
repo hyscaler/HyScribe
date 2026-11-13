@@ -519,7 +519,7 @@ pub fn edit_tags(
         );
     }
     let option = format!("edit_{}_per_page", taxonomy.name);
-    let per_page = per_page(site, &option);
+    let per_page = per_page(site, &option, 20);
     let hierarchical = taxonomy.hierarchical();
     let given = |value: &Option<String>| {
         value
@@ -765,10 +765,7 @@ pub fn edit_tags(
         view: None,
     };
     // The menu lets in whoever may manage terms.
-    admin_page(site, &page, browser).map_or(
-        Answer::Denied("Sorry, you are not allowed to access this page."),
-        Answer::Page,
-    )
+    Answer::from_page(admin_page(site, &page, browser))
 }
 
 #[cfg(test)]

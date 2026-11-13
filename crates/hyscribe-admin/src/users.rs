@@ -464,7 +464,7 @@ pub fn users(
             "<h1>You need a higher level of permission.</h1><p>Sorry, you are not allowed to list users.</p>",
         );
     }
-    let per_page = per_page(site, "users_per_page");
+    let per_page = per_page(site, "users_per_page", 20);
     let page = pagenum(args.paged.as_deref());
     let roles = role_names(&site.user_roles().unwrap_or_default());
     // `$_REQUEST['role']` as requested, slashed; `none` lists those of no role.
@@ -740,10 +740,7 @@ pub fn users(
         origin,
         view: None,
     };
-    admin_page(site, &page, browser).map_or(
-        Answer::Denied("Sorry, you are not allowed to access this page."),
-        Answer::Page,
-    )
+    Answer::from_page(admin_page(site, &page, browser))
 }
 
 #[cfg(test)]

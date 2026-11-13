@@ -1009,6 +1009,26 @@ impl Db {
             .map_err(db_error)
     }
 
+    /// The authors of posts of `post_type`, of any status, as the Export
+    /// screen reads them.
+    pub async fn post_authors(&self, post_type: &str) -> Result<Vec<u64>, DbError> {
+        let sql = self
+            .prefix
+            .sql("SELECT DISTINCT post_author FROM {prefix}posts WHERE post_type = ?");
+        let rows = sqlx::query(sql)
+            .bind(post_type)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let id = c.unsigned("post_author");
+                c.finish(id)
+            })
+            .collect()
+    }
+
     /// `wp_get_users_with_no_role()`: those whose `key` meta does not match
     /// `regex`, the roles' names.
     pub async fn users_without_role(&self, key: &str, regex: &str) -> Result<Vec<u64>, DbError> {

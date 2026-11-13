@@ -24,6 +24,9 @@ thread_local! {
     pub static TERM_READS: std::cell::Cell<usize> = std::cell::Cell::default();
     /// How many comments the test site was last asked for.
     pub static COMMENTS_ASKED: std::cell::Cell<u64> = std::cell::Cell::default();
+    /// The attachment queries the test site was asked, on this thread.
+    pub static MEDIA_QUERIES: std::cell::RefCell<Vec<hyscribe_model::PostQuery>> =
+        std::cell::RefCell::default();
 }
 
 /// The oracle, with every user's `use_ssl` option as given.
@@ -156,6 +159,11 @@ impl Role {
     }
 
     /// A variant of `reference/posts-list/golden.sh`, over its content.
+    /// A variant of `reference/media/golden.sh` over the Theme Test Data.
+    fn ttd(&self) -> bool {
+        self.variant().starts_with("m4ttd")
+    }
+
     fn listing(&self) -> bool {
         ["posts", "hidden", "excerpt", "front"].contains(&self.variant())
     }
@@ -340,6 +348,9 @@ impl Role {
 
     /// The posts and pages of the variant.
     fn posts(&self) -> Vec<hyscribe_model::Post> {
+        if self.ttd() {
+            return crate::media::content::posts();
+        }
         let mut posts = crate::posts::content::posts(self.listing(), self.variant() == "empty");
         match self.variant() {
             "s1nopages" | "s1hidden" => posts.retain(|post| post.post_type != "page"),
@@ -745,6 +756,27 @@ impl crate::users::UsersSite for Role {
     }
 }
 
+impl crate::media::MediaSite for Role {
+    fn attachment_mime_types(&self) -> Vec<String> {
+        if ["m4types", "m4ttdtypes"].contains(&self.variant()) {
+            return ["image/jpeg", "application/pdf", "application/vnd.ms-excel"]
+                .into_iter()
+                .chain(["application/zip", "text/plain"])
+                .map(String::from)
+                .collect();
+        }
+        let mut types: Vec<String> = self
+            .posts()
+            .into_iter()
+            .filter(|post| post.post_type == "attachment" && !post.mime_type.is_empty())
+            .map(|post| post.mime_type)
+            .collect();
+        types.sort();
+        types.dedup();
+        types
+    }
+}
+
 impl crate::settings::SettingsSite for Role {
     /// The fixture's `wp-config.php` sets both addresses.
     fn defined(&self, name: &str) -> bool {
@@ -1099,10 +1131,10 @@ impl crate::posts::PostsSite for Role {
         if self.variant() == "front" && post.id == 316 {
             return format!("{SITE}/");
         }
-        let query = if post.post_type == "page" {
-            "page_id"
-        } else {
-            "p"
+        let query = match post.post_type.as_str() {
+            "page" => "page_id",
+            "attachment" => "attachment_id",
+            _ => "p",
         };
         format!("{SITE}/?{query}={}", post.id)
     }
@@ -1123,6 +1155,17 @@ impl crate::posts::PostsSite for Role {
             if !value.is_empty() {
                 return Some(value.to_vec());
             }
+        }
+        match (self.variant(), name) {
+            ("m4ttdpages", "wp_attachment_pages_enabled") => return Some(b"1".to_vec()),
+            ("m4large", "large_size_h") => return Some(b"0".to_vec()),
+            ("m4ttdcron", "cron") => {
+                return Some(b"a:1:{i:1;a:1:{s:26:\"upgrader_scheduled_cleanup\";a:1:{s:1:\"k\";a:1:{s:4:\"args\";a:1:{i:0;i:611;}}}}}".to_vec());
+            }
+            ("m4ttdstates", "theme_mods_twentytwentyfive") => {
+                return Some(b"a:1:{s:11:\"custom_logo\";i:1692;}".to_vec());
+            }
+            _ => {}
         }
         if name == "category_children" && self.variant() == "stale" {
             return Some(b"a:0:{}".to_vec());
@@ -1168,9 +1211,18 @@ impl crate::posts::PostsSite for Role {
         }]
     }
     fn meta(&self, post: &hyscribe_model::Post, key: &str) -> Option<Vec<u8>> {
+        if self.variant() == "m4ttdrecent" && post.id == 1690 && key == "_thumbnail_id" {
+            return Some(b"611".to_vec());
+        }
+        if self.ttd() {
+            return crate::media::content::meta(post.id, key);
+        }
         crate::posts::content::meta(post, key).filter(|_| self.listing())
     }
     fn display_name(&self, id: u64) -> Option<Vec<u8>> {
+        if self.ttd() {
+            return crate::media::content::display_name(id);
+        }
         self.authors("edit_posts")
             .into_iter()
             .find(|user| user.id == id)
@@ -1211,6 +1263,14 @@ impl crate::posts::PostsSite for Role {
         authors
     }
     fn user_option(&self, name: &str) -> Option<Vec<u8>> {
+        match (self.variant(), name) {
+            ("m4list" | "m4ttdlist", "media_library_mode") => return Some(b"list".to_vec()),
+            ("m4ttdpaged", "upload_per_page") => return Some(b"5".to_vec()),
+            ("m4ttdhidden", "manageuploadcolumnshidden") => {
+                return Some(b"a:1:{i:0;s:6:\"author\";}".to_vec());
+            }
+            _ => {}
+        }
         if self.variant() == "settings" && name == "user-settings" {
             return Some(b"mfold=f&posts_list_mode=excerpt".to_vec());
         }
@@ -1274,6 +1334,28 @@ impl crate::posts::PostsSite for Role {
             };
             return (vec![orphan], 1);
         }
+        if query.post_types == ["attachment"] {
+            MEDIA_QUERIES.with_borrow_mut(|queries| queries.push(query.clone()));
+            if self.variant() == "m4ttdtrash" {
+                let mut post = crate::posts::PostsSite::post(self, 611).unwrap();
+                post.status = "trash".into();
+                return (vec![post], 1);
+            }
+            let (mut posts, found) = crate::media::content::list(self.posts(), query);
+            // `reference/media/variants.php`'s newest upload, the user's two
+            // hours ago; or attached to a template.
+            let now = crate::posts::PostsSite::clock(self).1;
+            let zone = hyscribe_render::date::Zone::Utc;
+            let date = hyscribe_render::date::format_unix("Y-m-d H:i:s", now - 7200, zone);
+            for post in posts.iter_mut().filter(|p| p.id == 1692) {
+                match self.variant() {
+                    "m4ttdrecent" => (post.date, post.author) = (date.clone(), 1),
+                    "m4ttdtemplate" => post.parent = 9999,
+                    _ => {}
+                }
+            }
+            return (posts, found);
+        }
         crate::posts::content::list(self.posts(), query)
     }
     fn status_counts(&self, post_type: &str, private_author: Option<u64>) -> Vec<(String, u64)> {
@@ -1292,6 +1374,13 @@ impl crate::posts::PostsSite for Role {
         crate::posts::content::months(self.posts(), post_type, trash)
     }
     fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        if self.variant() == "m4ttdtemplate" && id == 9999 {
+            return Some(hyscribe_model::Post {
+                id,
+                post_type: "wp_template".into(),
+                ..hyscribe_model::Post::default()
+            });
+        }
         if self.variant() == "s2trashed" && id == 98 {
             return Some(hyscribe_model::Post {
                 id,

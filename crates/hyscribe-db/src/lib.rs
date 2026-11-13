@@ -750,6 +750,27 @@ impl Db {
             .collect()
     }
 
+    /// `get_available_post_mime_types( $post_type )`: the MIME types its
+    /// posts have, each once.
+    pub async fn mime_types(&self, post_type: &str) -> Result<Vec<String>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT DISTINCT post_mime_type FROM {prefix}posts \
+             WHERE post_type = ? AND post_mime_type != ''",
+        );
+        let rows = sqlx::query(sql)
+            .bind(post_type)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let mime = c.text("post_mime_type");
+                c.finish(mime)
+            })
+            .collect()
+    }
+
     /// `get_pending_comments_num( $post_id )`.
     pub async fn pending_comments(&self, post_id: u64) -> Result<u64, DbError> {
         let sql = self.prefix.sql(
@@ -1715,6 +1736,18 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
         sql.push(" AND post_type IN (");
         list(sql, query.post_types.iter().map(|t| Bind::Text(t.clone())));
     }
+    for (i, pattern) in query.mime_types.iter().enumerate() {
+        sql.push(if i == 0 { " AND (" } else { " OR " });
+        sql.push(if pattern.contains('%') {
+            "post_mime_type LIKE ?"
+        } else {
+            "post_mime_type = ?"
+        });
+        sql.bind(Bind::Text(pattern.clone()));
+    }
+    if !query.mime_types.is_empty() {
+        sql.push(")");
+    }
     if !query.authors.is_empty() {
         sql.push(" AND post_author IN (");
         list(sql, query.authors.iter().map(|&id| Bind::Int(id)));
@@ -1781,28 +1814,38 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
     }
     // A term after `-` excludes the posts with it in any column.
     for term in &query.search {
-        let (term, columns) = match term.strip_prefix('-') {
+        let (term, columns, filename) = match term.strip_prefix('-') {
             Some(rest) => (
                 rest,
-                " AND (post_title NOT LIKE ? AND post_excerpt NOT LIKE ? AND post_content NOT LIKE ?)",
+                " AND (post_title NOT LIKE ? AND post_excerpt NOT LIKE ? AND post_content NOT LIKE ?",
+                " AND EXISTS (SELECT 1 FROM {prefix}postmeta sq1 WHERE sq1.post_id = {prefix}posts.ID \
+                 AND sq1.meta_key = '_wp_attached_file' AND sq1.meta_value NOT LIKE ?)",
             ),
             None => (
                 term.as_str(),
-                " AND (post_title LIKE ? OR post_excerpt LIKE ? OR post_content LIKE ?)",
+                " AND (post_title LIKE ? OR post_excerpt LIKE ? OR post_content LIKE ?",
+                " OR EXISTS (SELECT 1 FROM {prefix}postmeta sq1 WHERE sq1.post_id = {prefix}posts.ID \
+                 AND sq1.meta_key = '_wp_attached_file' AND sq1.meta_value LIKE ?)",
             ),
         };
         sql.push(columns);
+        // `WP_Query` joins the meta as `sq1` and matches its value alike.
+        if query.filenames {
+            sql.push(filename);
+        }
+        sql.push(")");
         let pattern = if query.exact {
             esc_like(term)
         } else {
             like(term)
         };
-        for _ in 0..3 {
+        for _ in 0..3 + usize::from(query.filenames) {
             sql.bind(Bind::Text(pattern.clone()));
         }
     }
-    // A visitor's search leaves out protected posts.
-    if !query.search.is_empty() {
+    // A visitor's search leaves out protected posts; a filename search is
+    // the admin's.
+    if !query.search.is_empty() && !query.filenames {
         sql.push(" AND post_password = ''");
     }
     let date = [

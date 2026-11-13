@@ -123,7 +123,7 @@ fn add_skip_link(html: Vec<u8>) -> Vec<u8> {
 }
 
 /// `str_replace( $search, $with, $subject )`.
-pub(crate) fn replace(subject: &[u8], search: &[u8], with: &[u8]) -> Vec<u8> {
+pub fn replace(subject: &[u8], search: &[u8], with: &[u8]) -> Vec<u8> {
     if search.is_empty() {
         return subject.to_vec();
     }

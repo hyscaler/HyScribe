@@ -1916,7 +1916,7 @@ pub fn sorted_ids(kept: &str) -> Vec<i64> {
 
 /// `author__in` and `author__not_in` of `ids`: any ID not above 0 leaves
 /// out its posts, and then no others are listed alone.
-fn author_lists(ids: &[i64]) -> (Vec<u64>, Vec<u64>) {
+pub(crate) fn author_lists(ids: &[i64]) -> (Vec<u64>, Vec<u64>) {
     let list = |positive: bool| -> Vec<u64> {
         ids.iter()
             .filter(|id| (**id > 0) == positive)
@@ -1930,7 +1930,7 @@ fn author_lists(ids: &[i64]) -> (Vec<u64>, Vec<u64>) {
 }
 
 /// `WP_Query`'s `author` IDs, each once: none for an empty or zero value.
-fn author_ids(raw: &str) -> Option<Vec<i64>> {
+pub(crate) fn author_ids(raw: &str) -> Option<Vec<i64>> {
     let kept = kept_ids(raw);
     let value = Value::String(kept.clone().into_bytes());
     if is_empty_string(kept.as_bytes()) || value.is_numeric() && value.to_float() == 0.0 {
@@ -1955,7 +1955,11 @@ pub enum Answer {
 
 /// `get_user_setting( $name )`: from the settings cookie when sent, else
 /// the stored `user-settings`; none when the cleaned cookie has no `=`.
-fn user_setting(site: &dyn PostsSite, cookie: Option<&str>, name: &str) -> Option<String> {
+pub(crate) fn user_setting(
+    site: &dyn PostsSite,
+    cookie: Option<&str>,
+    name: &str,
+) -> Option<String> {
     let stored = match cookie {
         Some(cookie) => {
             let kept: String = cookie

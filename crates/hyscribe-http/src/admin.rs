@@ -18,6 +18,7 @@ use hyscribe_admin::dashboard::{
     CommentCounts, DashboardSite, RecentComment, comment_status, dashboard,
 };
 use hyscribe_admin::login::Site as LoginSite;
+use hyscribe_admin::media::{LibraryArgs, MediaSite, NewArgs, media_new, upload};
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
 use hyscribe_admin::posts::{Answer, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids};
@@ -656,6 +657,12 @@ impl ProfileSite for Admin<'_> {
     }
 }
 
+impl MediaSite for Admin<'_> {
+    fn attachment_mime_types(&self) -> Vec<String> {
+        self.reads.reads.wait(self.site.db.mime_types("attachment"))
+    }
+}
+
 impl SettingsSite for Admin<'_> {
     fn defined(&self, name: &str) -> bool {
         self.site.defined.contains(&name)
@@ -961,6 +968,24 @@ fn screen(
             }
         }
         "/hs-admin/tools" => hyscribe_admin::tools::tools(admin, &canonical, origin, browser),
+        // Their actions are not ported.
+        "/hs-admin/upload" | "/hs-admin/media-new" => {
+            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
+            let query = raw.split_once('?').map_or("", |(_, query)| query);
+            let answer = if path == "/hs-admin/upload" {
+                upload(admin, &LibraryArgs::parse(query)?, &request)?
+            } else {
+                media_new(
+                    admin,
+                    &NewArgs::parse(query, admin.settings.clone())?,
+                    &request,
+                )
+            };
+            match answered(admin, answer) {
+                Ok(html) => Some(html),
+                Err(response) => return Some(*response),
+            }
+        }
         // HTTPS offers application passwords, whose list is not ported.
         "/hs-admin/profile" => {
             if request_uri.contains('?') || origin.starts_with("https://") {

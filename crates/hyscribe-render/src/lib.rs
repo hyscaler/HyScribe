@@ -5,7 +5,7 @@
 
 mod accordion;
 mod archives;
-mod attachment;
+pub mod attachment;
 pub mod autop;
 pub mod balance;
 mod bindings;

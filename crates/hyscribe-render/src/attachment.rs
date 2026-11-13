@@ -80,8 +80,8 @@ pub(crate) fn wp_get_attachment_image(
             i64::try_from(width.unsigned_abs()).unwrap_or(i64::MAX),
             i64::try_from(height.unsigned_abs()).unwrap_or(i64::MAX),
         );
-        let made =
-            metadata(site, id).and_then(|meta| srcset(size, &src, &meta, &upload_baseurl(site)));
+        let made = metadata(site, id)
+            .and_then(|meta| srcset(size, &src, &meta, &upload_baseurl(&site_options(site))));
         // A `srcset` means a width, so `sizes` too.
         if let Some(srcset) = made {
             set(&mut attrs, "srcset", srcset.into_bytes());
@@ -160,9 +160,8 @@ pub(crate) fn focal_position(point: &Value) -> String {
     format!("{}% {}%", percent("x"), percent("y"))
 }
 
-/// `wp_get_upload_dir()['baseurl']`.
-pub(crate) fn upload_baseurl(site: &dyn Site) -> Vec<u8> {
-    let option = |name| site.option(name).unwrap_or_default();
+/// `wp_get_upload_dir()['baseurl']` from the options `option` reads.
+pub fn upload_baseurl(option: &dyn Fn(&str) -> Vec<u8>) -> Vec<u8> {
     let url_path = option("upload_url_path");
     if !is_empty_string(&url_path) {
         return url_path;
@@ -179,17 +178,28 @@ pub(crate) fn upload_baseurl(site: &dyn Site) -> Vec<u8> {
     }
 }
 
+/// The site's options, as `upload_baseurl()` reads them.
+fn site_options(site: &dyn Site) -> impl Fn(&str) -> Vec<u8> {
+    |name| site.option(name).unwrap_or_default()
+}
+
 /// `wp_get_attachment_url()`, from `_wp_attached_file`.
 fn attachment_url(site: &dyn Site, id: u64) -> Option<Vec<u8>> {
     let file = site.post_meta(id, "_wp_attached_file").unwrap_or_default();
-    let base = upload_baseurl(site);
-    let url = if is_empty_string(&file) {
-        site.post(id).map(|post| post.guid).unwrap_or_default()
-    } else if contains(&file, b"wp-content/uploads") {
-        let directory = [&base[..], b"/", relative_path(&file)].concat();
-        [untrailingslashit(&directory), b"/", &wp_basename(&file)].concat()
+    let guid = || site.post(id).map(|post| post.guid).unwrap_or_default();
+    file_url(&file, guid, &upload_baseurl(&site_options(site)))
+}
+
+/// `wp_get_attachment_url()` of an attachment whose `_wp_attached_file` is
+/// `file`, under the uploads' `base` URL; its `guid` without one.
+pub fn file_url(file: &[u8], guid: impl FnOnce() -> Vec<u8>, base: &[u8]) -> Option<Vec<u8>> {
+    let url = if is_empty_string(file) {
+        guid()
+    } else if contains(file, b"wp-content/uploads") {
+        let directory = [base, b"/", relative_path(file)].concat();
+        [untrailingslashit(&directory), b"/", &wp_basename(file)].concat()
     } else {
-        [&base[..], b"/", &file].concat()
+        [base, b"/", file].concat()
     };
     (!url.is_empty()).then_some(url)
 }
@@ -210,9 +220,14 @@ pub(crate) fn attachment_is_image(site: &dyn Site, post: &Post) -> bool {
     let file = site
         .post_meta(post.id, "_wp_attached_file")
         .unwrap_or_default();
-    !is_empty_string(&file)
-        && (post.mime_type.starts_with("image/")
-            || post.mime_type == "import" && image_extension(&file))
+    is_image(&file, &post.mime_type)
+}
+
+/// `wp_attachment_is( 'image' )` of an attachment of type `mime` whose
+/// `_wp_attached_file` is `file`.
+pub fn is_image(file: &[u8], mime: &str) -> bool {
+    !is_empty_string(file)
+        && (mime.starts_with("image/") || mime == "import" && image_extension(file))
 }
 
 /// `image_downsize()` for a named size: the URL, width and height.
@@ -282,7 +297,12 @@ fn constrain_for_editor(site: &dyn Site, width: i64, height: i64, size: &str) ->
 }
 
 /// `wp_constrain_dimensions()`.
-fn constrain_dimensions(width: i64, height: i64, max_width: i64, max_height: i64) -> (i64, i64) {
+pub fn constrain_dimensions(
+    width: i64,
+    height: i64,
+    max_width: i64,
+    max_height: i64,
+) -> (i64, i64) {
     if max_width == 0 && max_height == 0 {
         return (width, height);
     }
@@ -311,7 +331,7 @@ fn constrain_dimensions(width: i64, height: i64, max_width: i64, max_height: i64
 
 /// `wp_image_matches_ratio()`: within a pixel once the larger is scaled to
 /// the smaller's width.
-fn matches_ratio(width: i64, height: i64, other_width: i64, other_height: i64) -> bool {
+pub fn matches_ratio(width: i64, height: i64, other_width: i64, other_height: i64) -> bool {
     let mut pair = [(width, height), (other_width, other_height)];
     pair.sort_unstable();
     let [(small_width, small_height), (large_width, large_height)] = pair;
@@ -321,7 +341,7 @@ fn matches_ratio(width: i64, height: i64, other_width: i64, other_height: i64) -
 }
 
 /// `wp_calculate_image_srcset()`, with the default 2048 pixel limit.
-pub(crate) fn srcset(size: (i64, i64), src: &[u8], meta: &Value, baseurl: &[u8]) -> Option<String> {
+pub fn srcset(size: (i64, i64), src: &[u8], meta: &Value, baseurl: &[u8]) -> Option<String> {
     let file = meta
         .get_str("file")
         .map(Value::to_php_string)

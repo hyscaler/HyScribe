@@ -1,0 +1,75 @@
+
+<div class="wrap">
+<h1 class="wp-heading-inline">Media Library</h1>
+
+	<a href="%add%" class="page-title-action">Add Media File</a>
+						%subtitle%
+<hr class="wp-header-end">
+
+%notice%
+<form id="posts-filter" method="get">
+
+<h2 class='screen-reader-text'>Filter media items list</h2>		<div class="wp-filter">
+			<div class="filter-items">
+				%switch%
+				<label for="attachment-filter" class="screen-reader-text">
+					Filter by type				</label>
+				<select class="attachment-filters" name="attachment-filter" id="attachment-filter">
+					%types%				</select>
+
+						<div class="actions">
+			%filters%		</div>
+					</div>
+
+			<div class="search-form">
+				<p class="search-box">
+					<label class="screen-reader-text" for="media-search-input">
+					Search Media					</label>
+					<input type="search" id="media-search-input" class="search" name="s" value="%search%">
+					<input id="search-submit" type="submit" class="button button-compact" value="Search Media">
+				</p>
+			</div>
+		</div>
+		
+%top%		<h2 class='screen-reader-text'>Media items list</h2><table class="wp-list-table widefat fixed striped table-view-%mode% media">
+		%caption%	<thead>
+	<tr>
+		%head%	</tr>
+	</thead>
+
+	<tbody id="the-list"
+				>
+		%rows%	</tbody>
+
+	<tfoot>
+	<tr>
+		%foot%	</tr>
+	</tfoot>
+
+</table>
+%bottom%
+<div id="ajax-response"></div>
+	<div id="find-posts" class="find-box" style="display: none;">
+		<div id="find-posts-head" class="find-box-head">
+			Attach to existing content			<button type="button" id="find-posts-close"><span class="screen-reader-text">
+				Close media attachment panel			</span></button>
+		</div>
+		<div class="find-box-inside">
+			<div class="find-box-search">
+								<input type="hidden" name="affected" id="affected" value="" />
+				<input type="hidden" id="_ajax_nonce" name="_ajax_nonce" value="%find_posts%" />				<label class="screen-reader-text" for="find-posts-input">
+					Search				</label>
+				<input type="text" id="find-posts-input" name="ps" value="" />
+				<span class="spinner"></span>
+				<input type="button" id="find-posts-search" value="Search" class="button" />
+				<div class="clear"></div>
+			</div>
+			<div id="find-posts-response"></div>
+		</div>
+		<div class="find-box-buttons">
+			<input type="submit" name="find-posts-submit" id="find-posts-submit" class="button button-primary alignright" value="Select"  />			<div class="clear"></div>
+		</div>
+	</div>
+	</form>
+</div>
+

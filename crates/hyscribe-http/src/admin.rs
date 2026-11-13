@@ -22,9 +22,9 @@ use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
 use hyscribe_admin::posts::{Answer, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids};
 use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
-use hyscribe_admin::users::{ListedUser, UsersSite, users};
+use hyscribe_admin::users::{ListedUser, UserArgs, UserQuery, UsersSite, user_order, users};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
-use hyscribe_db::{CommentFilter, StatusOrder, StatusQuery};
+use hyscribe_db::{CommentFilter, StatusOrder, StatusQuery, UserFilter};
 use hyscribe_model::{Post, PostQuery, Term, TermOrder, TermQuery, User};
 use hyscribe_phpser::{
     Key, Value, addslashes, is_empty_string, parse_str, remove_query_arg, stripslashes, urlencode,
@@ -572,15 +572,25 @@ impl UsersSite for Admin<'_> {
             .map(|(_, caps)| caps)
             .collect()
     }
-    fn list_users(&self, number: u64) -> (Vec<ListedUser>, u64) {
-        let limit = u32::try_from(number).unwrap_or(u32::MAX);
-        let users = self.reads.reads.wait(self.site.db.list_users(limit, 0));
+    fn list_users(&self, query: &UserQuery<'_>) -> (Vec<ListedUser>, u64) {
+        let key = format!("{}capabilities", self.site.db.prefix());
+        let filter = UserFilter {
+            caps_key: &key,
+            roles: query.roles,
+            include: query.include,
+            search: query.search,
+            all_private: self.can("read_private_posts"),
+            me: self.user.id,
+        };
+        let limit = u32::try_from(query.number).unwrap_or(u32::MAX);
+        let offset = u32::try_from(query.offset).unwrap_or(u32::MAX);
+        let users = self.site.db.list_users(&filter, query.order, limit, offset);
+        let users = self.reads.reads.wait(users);
         let ids: Vec<u64> = users.iter().map(|user| user.id).collect();
-        let all_private = self.can("read_private_posts");
         let counts = self
             .site
             .db
-            .user_post_counts(&ids, all_private, self.user.id);
+            .user_post_counts(&ids, filter.all_private, filter.me);
         let counts = self.reads.reads.wait(counts);
         let capabilities = self.capabilities();
         let found = |id: u64| {
@@ -601,7 +611,16 @@ impl UsersSite for Admin<'_> {
                 user,
             })
             .collect();
-        (listed, self.reads.reads.wait(self.site.db.count_users()))
+        (
+            listed,
+            self.reads.reads.wait(self.site.db.count_users(&filter)),
+        )
+    }
+    fn users_without_role(&self, regex: &str) -> Vec<u64> {
+        let key = format!("{}capabilities", self.site.db.prefix());
+        self.reads
+            .reads
+            .wait(self.site.db.users_without_role(&key, regex))
     }
     fn can_user(&self, cap: &str, id: u64) -> bool {
         self.can_for(cap, id)
@@ -694,6 +713,33 @@ fn comment_args(raw_request_uri: &str) -> Option<CommentArgs> {
         args.orderby.as_deref().unwrap_or_default(),
         args.order.as_deref().unwrap_or_default(),
     )?;
+    Some(args)
+}
+
+/// The arguments of `users.php` ported so far; `None` for others.
+fn user_args(raw_request_uri: &str) -> Option<UserArgs> {
+    let query = raw_request_uri
+        .split_once('?')
+        .map_or("", |(_, query)| query);
+    let mut args = UserArgs::default();
+    for (key, value) in parse_str(query.as_bytes()).as_array().unwrap_or_default() {
+        let (Key::String(key), Value::String(value)) = (key, value) else {
+            return None;
+        };
+        let value = Some(String::from_utf8(value.clone()).ok()?);
+        match key.as_slice() {
+            b"role" => args.role = value,
+            b"s" => args.search = value,
+            b"orderby" => args.orderby = value,
+            b"order" => args.order = value,
+            b"paged" => args.paged = value,
+            _ => return None,
+        }
+    }
+    // The meta and list orders are not ported.
+    let role = args.role.as_deref().unwrap_or_default();
+    let roles = !is_empty_string(role.as_bytes()) && role != "none";
+    args.clauses = user_order(args.orderby.as_deref(), args.order.as_deref(), roles)?;
     Some(args)
 }
 
@@ -838,12 +884,11 @@ fn screen(
     let page = match path {
         "/hs-admin/tools" => hyscribe_admin::tools::tools(admin, &canonical, origin, browser),
         "/hs-admin/users" => {
-            if request_uri.contains('?') {
-                return None;
-            }
+            let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
+            let args = user_args(&raw)?;
             match answered(
                 admin,
-                users(admin, &canonical, origin, request_uri, browser),
+                users(admin, &args, &canonical, origin, request_uri, browser),
             ) {
                 Ok(html) => Some(html),
                 Err(response) => return Some(*response),

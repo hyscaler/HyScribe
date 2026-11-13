@@ -44,12 +44,20 @@ pub(crate) fn users(content: bool) -> Vec<ListedUser> {
     }
     vec![
         admin,
-        user(
-            (602, "author1", "ann@example.test", "Ann"),
-            ("Ann", ""),
-            "a:1:{s:6:\"author\";b:1;}",
-            0,
-        ),
+        ListedUser {
+            user: User {
+                url: b"http://ann.example.test".to_vec(),
+                ..user(
+                    (602, "author1", "ann@example.test", "Ann"),
+                    ("Ann", ""),
+                    "a:1:{s:6:\"author\";b:1;}",
+                    0,
+                )
+                .user
+            },
+            capabilities: b"a:1:{s:6:\"author\";b:1;}".to_vec(),
+            posts: 0,
+        },
         user(
             (605, "both", "both@example.test", "Both Roles"),
             ("Both", "Roles"),

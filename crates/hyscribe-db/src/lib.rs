@@ -15,7 +15,8 @@ use std::fmt;
 use hyscribe_config::{Database, Prefix};
 use hyscribe_model::{
     COMMENT_ORDERBY, CalendarMonth, Comment, Credentials, DateCount, OrderBy, Period, Post,
-    PostQuery, Term, TermOrder, TermQuery, TimeCondition, User, UserField,
+    PostQuery, Term, TermOrder, TermQuery, TimeCondition, USER_ORDERBY, USER_SEARCH_COLUMNS, User,
+    UserField,
 };
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Executor, Row};
@@ -949,33 +950,84 @@ impl Db {
         row.as_ref().map(user).transpose()
     }
 
-    /// `WP_User_Query`'s users by login, `limit` from `offset`.
-    pub async fn list_users(&self, limit: u32, offset: u32) -> Result<Vec<User>, DbError> {
-        let sql = self.prefix.sql(concat!(
-            user_columns!(),
-            " FROM {prefix}users u ORDER BY user_login ASC LIMIT ? OFFSET ?"
-        ));
-        let rows = sqlx::query(sql)
-            .bind(limit)
-            .bind(offset)
+    /// `WP_User_Query`'s users in `filter`, sorted by `order`'s columns of
+    /// `USER_ORDERBY`, descending where true, `limit` from `offset`.
+    pub async fn list_users(
+        &self,
+        filter: &UserFilter<'_>,
+        order: &[(&str, bool)],
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<User>, DbError> {
+        let columns: Vec<(&'static str, bool)> = order
+            .iter()
+            .filter_map(|(name, desc)| {
+                let column = USER_ORDERBY.iter().find(|column| *column == name)?;
+                Some((*column, *desc))
+            })
+            .collect();
+        let mut sql = Sql::new(concat!(user_columns!(), " FROM {prefix}users u"));
+        // `get_posts_by_author_sql( 'post' )`'s counts, for their order.
+        if columns.iter().any(|(column, _)| *column == "post_count") {
+            sql.push(
+                " LEFT OUTER JOIN (SELECT post_author, COUNT(*) AS post_count FROM {prefix}posts \
+                 WHERE post_type = 'post' AND (post_status = 'publish' \
+                 OR (post_status = 'private' AND (? OR post_author = ?))) \
+                 GROUP BY post_author) p ON (u.ID = p.post_author)",
+            );
+            sql.bind(Bind::Int(u64::from(filter.all_private)));
+            sql.bind(Bind::Int(filter.me));
+        }
+        user_filter(&mut sql, filter);
+        for (i, (column, desc)) in columns.into_iter().enumerate() {
+            sql.push(if i == 0 { " ORDER BY " } else { ", " });
+            sql.push(column);
+            sql.push(if desc { " DESC" } else { " ASC" });
+        }
+        sql.push(" LIMIT ? OFFSET ?");
+        sql.bind(Bind::Int(limit.into()));
+        sql.bind(Bind::Int(offset.into()));
+        let rows = sql
+            .query(&self.prefix)
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
         rows.iter().map(user).collect()
     }
 
-    /// How many users there are.
-    pub async fn count_users(&self) -> Result<u64, DbError> {
-        let sql = self
-            .prefix
-            .sql("SELECT COUNT(*) AS found FROM {prefix}users");
-        let row = sqlx::query(sql)
+    /// How many users `filter` finds.
+    pub async fn count_users(&self, filter: &UserFilter<'_>) -> Result<u64, DbError> {
+        let mut sql = Sql::new("SELECT COUNT(*) AS found FROM {prefix}users u");
+        user_filter(&mut sql, filter);
+        let row = sql
+            .query(&self.prefix)
             .fetch_one(&self.pool)
             .await
             .map_err(db_error)?;
         row.try_get::<i64, _>("found")
             .map(i64::unsigned_abs)
             .map_err(db_error)
+    }
+
+    /// `wp_get_users_with_no_role()`: those whose `key` meta does not match
+    /// `regex`, the roles' names.
+    pub async fn users_without_role(&self, key: &str, regex: &str) -> Result<Vec<u64>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT user_id FROM {prefix}usermeta WHERE meta_key = ? AND meta_value NOT REGEXP ?",
+        );
+        let rows = sqlx::query(sql)
+            .bind(key)
+            .bind(regex)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let id = c.unsigned("user_id");
+                c.finish(id)
+            })
+            .collect()
     }
 
     /// The `key` meta of every user, by user ID, as `count_users()` reads
@@ -1885,6 +1937,63 @@ enum Bind {
     Text(String),
     Int(u64),
     Signed(i64),
+}
+
+/// The users `Db::list_users()` lists.
+pub struct UserFilter<'a> {
+    /// The `{prefix}capabilities` meta key.
+    pub caps_key: &'a str,
+    /// Roles each listed user's capabilities name.
+    pub roles: &'a [String],
+    /// Only these users, unless none are given.
+    pub include: &'a [u64],
+    /// `get_search_sql()` of a text in columns of `USER_SEARCH_COLUMNS`, the
+    /// ID compared whole and the others containing it.
+    pub search: Option<(&'a [&'a str], &'a str)>,
+    /// Private posts count for everyone's post counts, else only `me`'s.
+    pub all_private: bool,
+    /// The current user.
+    pub me: u64,
+}
+
+/// The `WHERE` of `filter`.
+fn user_filter(sql: &mut Sql, filter: &UserFilter<'_>) {
+    sql.push(" WHERE 1=1");
+    for role in filter.roles {
+        sql.push(
+            " AND EXISTS (SELECT 1 FROM {prefix}usermeta r WHERE r.user_id = u.ID \
+             AND r.meta_key = ? AND r.meta_value LIKE ?)",
+        );
+        sql.bind(Bind::Text(filter.caps_key.into()));
+        sql.bind(Bind::Text(like(&format!("\"{role}\""))));
+    }
+    if !filter.include.is_empty() {
+        sql.push(" AND u.ID IN (");
+        list(sql, filter.include.iter().copied().map(Bind::Int));
+    }
+    if let Some((columns, text)) = filter.search {
+        let columns: Vec<&'static str> = columns
+            .iter()
+            .filter_map(|name| USER_SEARCH_COLUMNS.iter().find(|column| *column == name))
+            .copied()
+            .collect();
+        // A caller's columns are all known; none would make the query invalid.
+        if columns.is_empty() {
+            return;
+        }
+        for (i, column) in columns.into_iter().enumerate() {
+            sql.push(if i == 0 { " AND (" } else { " OR " });
+            sql.push(column);
+            if column == "ID" {
+                sql.push(" = ?");
+                sql.bind(Bind::Text(text.into()));
+            } else {
+                sql.push(" LIKE ?");
+                sql.bind(Bind::Text(like(text)));
+            }
+        }
+        sql.push(")");
+    }
 }
 
 /// The comments `Db::list_comments()` lists, notes aside.

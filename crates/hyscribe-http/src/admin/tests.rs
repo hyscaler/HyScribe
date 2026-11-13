@@ -224,14 +224,28 @@ async fn logged_in_users_are_let_in() {
     let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
     let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
     assert_eq!(with_values(&php, &page), page);
-    let response = get(
-        &site,
-        "/hs-admin/users?role=editor",
-        "127.0.0.1:8081",
-        &auth,
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let path = "/hs-admin/users?role=editor&s=admin&orderby=post_count&order=desc";
+    let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
+    assert!(page.contains("No users found.") && page.contains("<strong>admin</strong>"));
+    let path = "/hs-admin/users?role=none";
+    let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
+    assert!(page.contains("id='user-1'"));
+    // Only a role filter names its meta clauses.
+    let path = "/hs-admin/users?role=none&orderby=mt1";
+    let response = get(&site, path, "127.0.0.1:8081", &cookies).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = get(&site, "/hs-admin/users?paged=5", "127.0.0.1:8081", &cookies).await;
+    assert_eq!(location(&response), "/hs-admin/users?paged=1");
+    for path in [
+        "/hs-admin/users?orderby=meta_value",
+        "/hs-admin/users?role=editor&orderby=mt1",
+        "/hs-admin/users?s=%FF",
+        "/hs-admin/users?role[]=editor",
+        "/hs-admin/users?update=add",
+    ] {
+        let response = get(&site, path, "127.0.0.1:8081", &auth).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+    }
     // The categories.
     let path = "/hs-admin/edit-tags?taxonomy=category";
     let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
@@ -657,6 +671,7 @@ async fn dashboard_data() {
             assert!(admin.constant("DISALLOW_UNFILTERED_HTML"));
         });
         check(&ttd, (1, b"admin"), &|admin| {
+            assert_eq!(admin.users_without_role("administrator"), [2, 3]);
             // The one post draft is by another user.
             assert!(admin.drafts().is_empty());
             assert_eq!(admin.recent_posts("future").len(), 1);

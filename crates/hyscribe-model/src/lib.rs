@@ -108,6 +108,29 @@ pub struct User {
     pub description: Vec<u8>,
 }
 
+/// The columns `WP_User_Query::parse_orderby()` sorts by, `post_count`
+/// being each user's posts.
+pub const USER_ORDERBY: [&str; 8] = [
+    "user_login",
+    "user_nicename",
+    "user_email",
+    "user_url",
+    "user_registered",
+    "display_name",
+    "ID",
+    "post_count",
+];
+
+/// The columns `WP_User_Query` searches.
+pub const USER_SEARCH_COLUMNS: [&str; 6] = [
+    "ID",
+    "user_login",
+    "user_email",
+    "user_url",
+    "user_nicename",
+    "display_name",
+];
+
 /// The columns `WP_Comment_Query::parse_orderby()` sorts by.
 pub const COMMENT_ORDERBY: [&str; 15] = [
     "comment_agent",

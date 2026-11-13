@@ -18,6 +18,16 @@ const PENDING: CommentFilter<'static> = CommentFilter {
     post: 0,
 };
 
+/// Every user.
+const EVERYONE: UserFilter<'static> = UserFilter {
+    caps_key: "wp_capabilities",
+    roles: &[],
+    include: &[],
+    search: None,
+    all_private: true,
+    me: 1,
+};
+
 /// The newest comments first.
 const NEWEST: &[(&str, bool)] = &[("comment_date_gmt", true), ("comment_ID", true)];
 
@@ -431,8 +441,11 @@ async fn errors_are_reported() {
             .await
             .unwrap_err(),
         db.user_meta(1, "use_ssl").await.unwrap_err(),
-        db.list_users(1, 0).await.unwrap_err(),
-        db.count_users().await.unwrap_err(),
+        db.list_users(&EVERYONE, &[], 1, 0).await.unwrap_err(),
+        db.count_users(&EVERYONE).await.unwrap_err(),
+        db.users_without_role("wp_capabilities", "administrator")
+            .await
+            .unwrap_err(),
         db.users_meta("wp_capabilities").await.unwrap_err(),
         db.user_post_counts(&[1], true, 1).await.unwrap_err(),
         db.comments(1).await.unwrap_err(),
@@ -1277,10 +1290,62 @@ async fn term_queries_order_by_any_column() {
 async fn dashboard_reads() {
     let db = fixture().await;
     assert_eq!(db.comment_counts(1, 0).await.unwrap(), [1, 0, 0, 0, 0]);
-    let users = db.list_users(5, 0).await.unwrap();
+    let by_login = [("user_login", false), ("x", true)];
+    let users = db.list_users(&EVERYONE, &by_login, 5, 0).await.unwrap();
     assert_eq!(users.iter().map(|u| u.id).collect::<Vec<_>>(), [1]);
-    assert!(db.list_users(5, 1).await.unwrap().is_empty());
-    assert_eq!(db.count_users().await.unwrap(), 1);
+    assert!(
+        db.list_users(&EVERYONE, &by_login, 5, 1)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(db.count_users(&EVERYONE).await.unwrap(), 1);
+    let filtered = |roles: &'static [String], include: &'static [u64], search| UserFilter {
+        roles,
+        include,
+        search,
+        ..EVERYONE
+    };
+    let editors: &'static [String] = Box::leak(vec!["editor".to_string()].into_boxed_slice());
+    assert_eq!(
+        db.count_users(&filtered(editors, &[], None)).await.unwrap(),
+        0
+    );
+    assert_eq!(db.count_users(&filtered(&[], &[2], None)).await.unwrap(), 0);
+    let by_id: &'static [&'static str] = &["ID", "user_login", "bogus"];
+    assert_eq!(
+        db.count_users(&filtered(&[], &[], Some((by_id, "1"))))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.count_users(&filtered(&[], &[], Some((&["bogus"], "1"))))
+            .await
+            .unwrap(),
+        1
+    );
+    let by_posts = [("post_count", true)];
+    assert_eq!(
+        db.list_users(&EVERYONE, &by_posts, 5, 0)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(db.list_users(&EVERYONE, &[], 5, 0).await.unwrap().len() == 1);
+    assert!(
+        db.users_without_role("wp_capabilities", "administrator")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        db.users_without_role("wp_capabilities", "editor")
+            .await
+            .unwrap(),
+        [1]
+    );
     let caps = db.users_meta("wp_capabilities").await.unwrap();
     assert_eq!(caps, [(1, b"a:1:{s:13:\"administrator\";b:1;}".to_vec())]);
     assert_eq!(db.user_post_counts(&[1], false, 0).await.unwrap(), [(1, 1)]);
@@ -1311,6 +1376,27 @@ async fn dashboard_reads() {
         None
     );
     let ttd = named("wordpress_ttd").await;
+    let ids = |users: Vec<User>| users.iter().map(|u| u.id).collect::<Vec<_>>();
+    let by_email = [("user_email", false), ("ID", true)];
+    let sorted = ttd.list_users(&EVERYONE, &by_email, 5, 0).await.unwrap();
+    assert_eq!(ids(sorted), [1, 3, 2]);
+    let searched = |columns: &'static [&'static str], text: &'static str| UserFilter {
+        search: Some((columns, text)),
+        ..EVERYONE
+    };
+    assert_eq!(
+        ttd.count_users(&searched(&["user_email"], "gmail"))
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        ttd.count_users(&searched(&["user_login"], "theme"))
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(ttd.count_users(&searched(&["ID"], "2")).await.unwrap(), 1);
     let [approved, moderated, spam, trash, _] = ttd.comment_counts(1, 0).await.unwrap();
     assert_eq!((approved, moderated, spam, trash), (31, 3, 0, 0));
     let [approved, moderated, ..] = ttd.comment_counts(1, 1148).await.unwrap();

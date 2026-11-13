@@ -3,10 +3,11 @@
 //! `users.php`: the users list, `WP_Users_List_Table`.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
+use hyscribe_model::USER_ORDERBY;
 use hyscribe_model::User;
 use hyscribe_phpser::{
-    Key, Maybe, Value, add_query_arg, is_empty_string, maybe_unserialize, remove_query_arg,
-    urlencode,
+    Key, Maybe, Value, add_query_arg, addslashes, is_empty_string, maybe_unserialize, php_trim,
+    remove_query_arg, stripslashes, urlencode,
 };
 use hyscribe_render::formatting::{user_email_display, user_name_display};
 use hyscribe_render::{number_format, user_avatar};
@@ -14,8 +15,8 @@ use hyscribe_render::{number_format, user_avatar};
 use crate::admin_bar::{BarSite, Browser};
 use crate::dashboard::DashboardSite;
 use crate::list_table::{
-    Column, Order, Sort, View, bulk_actions, column_headers, fill, pagination, row_actions,
-    screen_options, search_box, table_description, views,
+    Column, Order, Sort, View, bulk_actions, column_headers, fill, pagenum, pagination,
+    row_actions, screen_options, search_box, table_description, views,
 };
 use crate::menu::{Screen, link};
 use crate::page::{HelpTab, Page, admin_page};
@@ -27,12 +28,118 @@ pub trait UsersSite: DashboardSite {
     fn user_roles(&self) -> Option<Vec<u8>>;
     /// Every user's `{prefix}capabilities`, as `count_users()` reads them.
     fn all_capabilities(&self) -> Vec<Vec<u8>>;
-    /// The first `number` users by login, and how many there are.
-    fn list_users(&self, number: u64) -> (Vec<ListedUser>, u64);
+    /// The users `query` finds, and how many there are.
+    fn list_users(&self, query: &UserQuery<'_>) -> (Vec<ListedUser>, u64);
+    /// `wp_get_users_with_no_role()`: those whose capabilities do not match
+    /// `regex`.
+    fn users_without_role(&self, regex: &str) -> Vec<u64>;
     /// `current_user_can( $cap, $id )` of a user.
     fn can_user(&self, cap: &str, id: u64) -> bool;
     /// `get_author_posts_url( $id )`.
     fn author_url(&self, id: u64) -> String;
+}
+
+/// The users the list asks for.
+pub struct UserQuery<'a> {
+    /// Roles each user has.
+    pub roles: &'a [String],
+    /// Only these users, unless none.
+    pub include: &'a [u64],
+    /// The columns searched and the text sought.
+    pub search: Option<(&'a [&'static str], &'a str)>,
+    /// `ORDER BY` columns of `USER_ORDERBY`, descending where true.
+    pub order: &'a [(&'static str, bool)],
+    /// How many to skip.
+    pub offset: u64,
+    /// How many to list.
+    pub number: u64,
+}
+
+/// The arguments of `users.php` ported so far, as requested.
+#[derive(Default)]
+pub struct UserArgs {
+    /// `role`.
+    pub role: Option<String>,
+    /// `s`.
+    pub search: Option<String>,
+    /// `orderby`.
+    pub orderby: Option<String>,
+    /// `order`.
+    pub order: Option<String>,
+    /// `paged`.
+    pub paged: Option<String>,
+    /// `user_order()` of `orderby` and `order`.
+    pub clauses: Vec<(&'static str, bool)>,
+}
+
+/// `WP_User_Query`'s `ORDER BY` for `orderby` and `order`, by login when
+/// none is valid; `None` for the meta and list orders, not ported, and for
+/// the role filter's meta clauses by name when `roles` are asked for.
+pub fn user_order(
+    orderby: Option<&str>,
+    order: Option<&str>,
+    roles: bool,
+) -> Option<Vec<(&'static str, bool)>> {
+    // Ascending when not given, else descending unless it reads ASC.
+    let desc = order.is_some_and(|order| !order.eq_ignore_ascii_case("asc"));
+    let mut clauses = Vec::new();
+    for name in orderby
+        .unwrap_or_default()
+        .split([',', ' ', '\t', '\n', '\x0b', '\x0c', '\r'])
+    {
+        let column = match name {
+            "" | "0" => continue,
+            "login" => "user_login",
+            "nicename" => "user_nicename",
+            "email" => "user_email",
+            "url" => "user_url",
+            "registered" => "user_registered",
+            "name" | "display_name" => "display_name",
+            "ID" | "id" => "ID",
+            "meta_value" | "meta_value_num" | "include" | "nicename__in" | "login__in" => {
+                return None;
+            }
+            // `{prefix}usermeta`, `mt1` and so on name the role clauses.
+            alias
+                if roles
+                    && (alias.ends_with("usermeta")
+                        || alias.strip_prefix("mt").is_some_and(|n| {
+                            !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())
+                        })) =>
+            {
+                return None;
+            }
+            other => match USER_ORDERBY.iter().find(|column| **column == other) {
+                Some(column) => column,
+                None => continue,
+            },
+        };
+        clauses.push((column, desc));
+    }
+    if clauses.is_empty() {
+        clauses.push(("user_login", desc));
+    }
+    Some(clauses)
+}
+
+/// `WP_User_Query`'s search columns for `search`: the email for an
+/// address, login and ID for a number, the URL for one, else all but ID.
+fn search_columns(search: &str) -> &'static [&'static str] {
+    if search.contains('@') {
+        &["user_email"]
+    } else if Value::String(search.into()).is_numeric() {
+        &["user_login", "ID"]
+    } else if search.starts_with("http://") || search.starts_with("https://") {
+        &["user_url"]
+    } else {
+        &[
+            "user_login",
+            "user_url",
+            "user_email",
+            "user_nicename",
+            "display_name",
+        ]
+    }
 }
 
 /// A user on the list.
@@ -327,6 +434,7 @@ fn posts_cell(id: u64, posts: u64) -> String {
 /// `users.php` for those who may list users.
 pub fn users(
     site: &dyn UsersSite,
+    args: &UserArgs,
     canonical: &str,
     origin: &str,
     request_uri: &str,
@@ -338,9 +446,53 @@ pub fn users(
         );
     }
     let per_page = per_page(site, "users_per_page");
-    let (found, total) = site.list_users(per_page);
-    let pages = total.div_ceil(per_page);
+    let page = pagenum(args.paged.as_deref());
     let roles = role_names(&site.user_roles().unwrap_or_default());
+    // `$_REQUEST['role']` as requested, slashed; `none` lists those of no role.
+    let role = text(&addslashes(
+        args.role.as_deref().unwrap_or_default().as_bytes(),
+    ));
+    let include = if role == "none" {
+        let names: Vec<&str> = roles.iter().map(|(key, _)| key.as_str()).collect();
+        let regex: String = names
+            .join("|")
+            .chars()
+            .filter(|c| c.is_ascii_alphabetic() || "_|-".contains(*c))
+            .collect();
+        site.users_without_role(&regex)
+    } else {
+        Vec::new()
+    };
+    let wanted: Vec<String> = if role == "none" || is_empty_string(role.as_bytes()) {
+        Vec::new()
+    } else {
+        let mut wanted: Vec<String> = Vec::new();
+        for name in role.split(',').map(|name| text(php_trim(name.as_bytes()))) {
+            if !wanted.contains(&name) {
+                wanted.push(name);
+            }
+        }
+        wanted
+    };
+    // `wp_unslash( trim( $_REQUEST['s'] ) )`, trimmed while slashed as PHP
+    // does, so a NUL stays; sought between wildcards.
+    let raw = addslashes(args.search.as_deref().unwrap_or_default().as_bytes());
+    let usersearch = text(&stripslashes(php_trim(&raw)));
+    let sought = usersearch.trim_matches('*');
+    let (found, total) = site.list_users(&UserQuery {
+        roles: &wanted,
+        include: &include,
+        search: (!usersearch.is_empty()).then(|| (search_columns(sought), sought)),
+        order: &args.clauses,
+        offset: (page - 1).saturating_mul(per_page),
+        number: per_page,
+    });
+    let pages = total.div_ceil(per_page);
+    if pages > 0 && page > pages {
+        let last = pages.to_string();
+        let to = add_query_arg(&[(b"paged", Some(last.as_bytes()))], request_uri.as_bytes());
+        return Answer::Redirect(text(&to));
+    }
     let columns = columns();
     let hidden = hidden_columns(site, "users");
     let hidden_keys: Vec<&str> = hidden.iter().map(String::as_str).collect();
@@ -351,10 +503,20 @@ pub fn users(
         roles: &roles,
         referer: String::from_utf8_lossy(&urlencode(request_uri.as_bytes())).into_owned(),
     };
-    let rows: String = found
-        .iter()
-        .map(|listed| format!("\n\t{}", listing.row(listed)))
-        .collect();
+    let rows: String = if found.is_empty() {
+        format!(
+            "<tr class=\"no-items\"><td class=\"colspanchange\" colspan=\"{}\">No users found.</td></tr>",
+            columns
+                .iter()
+                .filter(|column| !hidden_keys.contains(&column.key))
+                .count()
+        )
+    } else {
+        found
+            .iter()
+            .map(|listed| format!("\n\t{}", listing.row(listed)))
+            .collect()
+    };
     let (count, avail) = count_users(site, &roles);
     let mut links = vec![View {
         class: "all".into(),
@@ -363,18 +525,18 @@ pub fn users(
             "All <span class=\"count\">({})</span>",
             number_format(count)
         ),
-        current: true,
+        current: is_empty_string(role.as_bytes()),
     }];
-    for (role, name) in &roles {
-        if let Some((_, n)) = avail.iter().find(|(key, _)| key == role) {
+    for (key, name) in &roles {
+        if let Some((_, n)) = avail.iter().find(|(counted, _)| counted == key) {
             links.push(View {
-                class: role.clone(),
-                url: format!("users.php?role={role}"),
+                class: key.clone(),
+                url: format!("users.php?role={key}"),
                 label: format!(
                     "{name} <span class=\"count\">({})</span>",
                     number_format(*n)
                 ),
-                current: false,
+                current: *key == role,
             });
         }
     }
@@ -386,7 +548,7 @@ pub fn users(
                 "No role <span class=\"count\">({})</span>",
                 number_format(*none)
             ),
-            current: false,
+            current: role == "none",
         });
     }
     let actions: Vec<(&str, &str)> = [
@@ -408,6 +570,8 @@ pub fn users(
             )
         })
         .collect();
+    // `display_tablenav()` hides the bulk actions of an empty list.
+    let bulk_hidden = if found.is_empty() { " hidden" } else { "" };
     let tablenav = |which: &str| {
         let (id, button) = if which == "bottom" {
             ("new_role2", "changeit2")
@@ -416,15 +580,22 @@ pub fn users(
         };
         let change = if site.can("promote_users") && !found.is_empty() {
             format!(
-                "<label class=\"screen-reader-text\" for=\"{id}\">\n\t\t\tChange role to&hellip;\t\t</label>\n\t\t<select name=\"{id}\" id=\"{id}\">\n\t\t\t<option value=\"\">Change role to&hellip;</option>\n\t\t\t{options}\t\t\t<option value=\"none\">&mdash; No role for this site &mdash;</option>\n\t\t</select>\n\t\t\t<input type=\"submit\" name=\"{button}\" id=\"{button}\" class=\"button\" value=\"Change\"  />"
+                "<label class=\"screen-reader-text\" for=\"{id}\">\n\t\t\tChange role to&hellip;\t\t</label>\n\t\t<select name=\"{id}\" id=\"{id}\">\n\t\t\t<option value=\"\">Change role to&hellip;</option>\n\t\t\t{options}\t\t\t<option value=\"none\">&mdash; No role for this site &mdash;</option>\n\t\t</select>\n\t\t\t<input type=\"submit\" name=\"{button}\" id=\"{button}\" class=\"button\" value=\"Change\"  />\t\t"
             )
         } else {
             String::new()
         };
         format!(
-            "<div class=\"tablenav {which}\">\n\n\t\t\t\t<div class=\"alignleft actions bulkactions\">\n\t\t\t{}\t\t</div>\n\t\t\t<div class=\"alignleft actions\">\n\t\t\t\t{change}\t\t</div>\n\t\t{}\n\t\t<br class=\"clear\" />\n\t</div>",
+            "<div class=\"tablenav {which}\">\n\n\t\t\t\t<div class=\"alignleft actions bulkactions{bulk_hidden}\">\n\t\t\t{}\t\t</div>\n\t\t\t<div class=\"alignleft actions\">\n\t\t\t\t{change}</div>\n\t\t{}\n\t\t<br class=\"clear\" />\n\t</div>",
             bulk_actions(which, &actions),
-            pagination(which, "Users list navigation", total, pages, 1, canonical)
+            pagination(
+                which,
+                "Users list navigation",
+                total,
+                pages,
+                page,
+                canonical
+            )
         )
     };
     let referer = String::from_utf8_lossy(&esc_url(&remove_query_arg(
@@ -432,7 +603,10 @@ pub fn users(
         request_uri.as_bytes(),
     )))
     .into_owned();
-    let order = Order::default();
+    let order = Order {
+        orderby: args.orderby.as_deref(),
+        desc: args.order.as_deref() == Some("desc"),
+    };
     let unpaged =
         String::from_utf8_lossy(&remove_query_arg(&[b"paged"], canonical.as_bytes())).into_owned();
     let add = if site.can("create_users") {
@@ -445,12 +619,40 @@ pub fn users(
     } else {
         String::new()
     };
+    let subtitle = if usersearch.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<span class=\"subtitle\">Search results for: <strong>{}</strong></span>",
+            esc_html(usersearch.as_bytes())
+        )
+    };
+    // The order fields are kept as requested, slashed.
+    let slashed =
+        |value: &Option<String>| text(&addslashes(value.as_deref().unwrap_or_default().as_bytes()));
+    let (orderby, order_arg) = (slashed(&args.orderby), slashed(&args.order));
+    let requested = args.search.as_deref().unwrap_or_default();
+    let search = if found.is_empty() && is_empty_string(requested.as_bytes()) {
+        String::new()
+    } else {
+        let fields = [("orderby", orderby.as_str()), ("order", order_arg.as_str())];
+        search_box("Search Users", "user", requested, &fields)
+    };
+    let role_field = if is_empty_string(role.as_bytes()) {
+        String::new()
+    } else {
+        format!(
+            "\t\t\t<input type=\"hidden\" name=\"role\" value=\"{}\" />\n\t\t",
+            esc_attr(role.as_bytes())
+        )
+    };
     let content = fill(
         PAGE,
         &[
-            ("heading_links", add),
+            ("heading_links", format!("{add}{subtitle}")),
             ("views", views("Filter users list", &links)),
-            ("search", search_box("Search Users", "user", "", &[])),
+            ("search", search),
+            ("role", role_field),
             (
                 "nonce",
                 format!(
@@ -469,7 +671,15 @@ pub fn users(
                 "foot",
                 column_headers(&columns, &hidden_keys, &order, &unpaged, 2, false),
             ),
-            ("bottom", format!("\t{}", tablenav("bottom"))),
+            // `display()` leaves the bottom one out of an empty list.
+            (
+                "bottom",
+                if found.is_empty() {
+                    String::new()
+                } else {
+                    format!("\t{}\n\t\t", tablenav("bottom"))
+                },
+            ),
         ],
     );
     let screen_options = screen_options(

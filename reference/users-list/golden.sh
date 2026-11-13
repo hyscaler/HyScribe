@@ -61,5 +61,15 @@ sql < "$ROOT/reference/users-list/content.sql"
 for variant in users paged hidecols; do
   record "$variant" administrator ''
 done
+for query in role=editor role=author role=subscriber role=administrator role=none role=bogus 'role=editor,author' \
+  'role=%20author%20,editor' role=0 s=ed s=example.test s=@example s=601 s=1 s=http://ann s=zzz 's=e*' 's=*' s=0 s=%00 s=a%00 \
+  'orderby=email&order=asc' 'orderby=email&order=desc' 'orderby=login&order=desc' orderby=name 'orderby=post_count,login&order=desc' \
+  'orderby=registered,login' 'orderby=ID&order=desc' orderby=bogus 'orderby=nicename%20url' order=xyz \
+  'role=editor&s=e&orderby=email&order=desc'; do
+  record users administrator "?$query"
+done
+for query in paged=2 paged=4 paged=9 paged=-2 'role=editor&paged=2'; do
+  record paged administrator "?$query"
+done
 rm -f "$TMP.head"
 wc -l "$OUT"

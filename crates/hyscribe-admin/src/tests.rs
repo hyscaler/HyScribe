@@ -426,11 +426,74 @@ impl crate::users::UsersSite for Role {
             .filter(|caps| !caps.is_empty())
             .collect()
     }
-    fn list_users(&self, number: u64) -> (Vec<crate::users::ListedUser>, u64) {
-        let all = crate::users::content::users(self.users_content());
-        let total = all.len() as u64;
-        let take = usize::try_from(number).unwrap();
-        (all.into_iter().take(take).collect(), total)
+    /// The users of the variant as `query` filters and sorts them, cases
+    /// aside as MySQL compares.
+    fn list_users(
+        &self,
+        query: &crate::users::UserQuery<'_>,
+    ) -> (Vec<crate::users::ListedUser>, u64) {
+        let lower = |bytes: &[u8]| String::from_utf8_lossy(bytes).to_lowercase();
+        let mut found: Vec<_> = crate::users::content::users(self.users_content())
+            .into_iter()
+            .filter(|listed| {
+                let user = &listed.user;
+                let caps = lower(&listed.capabilities);
+                query
+                    .roles
+                    .iter()
+                    .all(|role| caps.contains(&format!("\"{role}\"")))
+                    && (query.include.is_empty() || query.include.contains(&user.id))
+                    && query.search.is_none_or(|(columns, text)| {
+                        columns.iter().any(|column| match *column {
+                            "ID" => user.id.to_string() == text,
+                            "user_login" => lower(&user.login).contains(&text.to_lowercase()),
+                            "user_email" => lower(&user.email).contains(&text.to_lowercase()),
+                            "user_url" => lower(&user.url).contains(&text.to_lowercase()),
+                            "user_nicename" => lower(&user.nicename).contains(&text.to_lowercase()),
+                            _ => lower(&user.display_name).contains(&text.to_lowercase()),
+                        })
+                    })
+            })
+            .collect();
+        let key = |listed: &crate::users::ListedUser, column: &str| {
+            let user = &listed.user;
+            match column {
+                "ID" => (String::new(), user.id),
+                "post_count" => (String::new(), listed.posts),
+                // The fixture's administrator registered first.
+                "user_registered" => (String::new(), u64::from(user.id != 1)),
+                "user_email" => (lower(&user.email), 0),
+                "display_name" => (lower(&user.display_name), 0),
+                _ => (lower(&user.login), 0),
+            }
+        };
+        found.sort_by(|a, b| {
+            query
+                .order
+                .iter()
+                .map(|(column, desc)| {
+                    let ordering = key(a, column).cmp(&key(b, column));
+                    if *desc { ordering.reverse() } else { ordering }
+                })
+                .find(|ordering| ordering.is_ne())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let total = found.len() as u64;
+        let skip = usize::try_from(query.offset).unwrap();
+        let take = usize::try_from(query.number).unwrap();
+        (found.into_iter().skip(skip).take(take).collect(), total)
+    }
+    /// Those with capabilities naming none of the roles.
+    fn users_without_role(&self, regex: &str) -> Vec<u64> {
+        let roles: Vec<&str> = regex.split('|').collect();
+        crate::users::content::users(self.users_content())
+            .into_iter()
+            .filter(|listed| {
+                let caps = String::from_utf8_lossy(&listed.capabilities).to_lowercase();
+                !caps.is_empty() && !roles.iter().any(|role| caps.contains(role))
+            })
+            .map(|listed| listed.user.id)
+            .collect()
     }
     fn can_user(&self, cap: &str, id: u64) -> bool {
         let id = hyscribe_phpser::Value::Int(i64::try_from(id).unwrap());

@@ -10,6 +10,7 @@ pub mod dashboard;
 pub mod die;
 pub mod list_table;
 pub mod login;
+pub mod media;
 pub mod menu;
 pub mod page;
 pub mod posts;

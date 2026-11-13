@@ -138,7 +138,7 @@ async fn logged_in_users_are_let_in() {
     let response = get(&site, "/hs-admin/edit?paged=9", "127.0.0.1:8081", &auth).await;
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(location(&response), "/hs-admin/edit?paged=1");
-    let response = get(&site, "/hs-admin/upload", "127.0.0.1:8081", &auth).await;
+    let response = get(&site, "/hs-admin/site-editor", "127.0.0.1:8081", &auth).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     let cookies = all.join("; ");
     let page = page_of(get(&site, "/hs-admin/edit", "127.0.0.1:8081", &cookies).await).await;
@@ -507,6 +507,142 @@ async fn logged_in_users_are_let_in() {
         admitted(false, false, b"x", teapot).status(),
         StatusCode::IM_A_TEAPOT
     );
+}
+
+/// `database` seen from the oracle's address, with a login for `admin`:
+/// the site and its cookies.
+async fn logged_in(database: &str, dir: &std::path::Path) -> (Arc<Site>, String) {
+    let config = hyscribe_config::Database {
+        name: database.into(),
+        ..hyscribe_testkit::fixture_database()
+    };
+    let db = hyscribe_db::Db::connect(&config).await.unwrap();
+    let url = Some("http://127.0.0.1:8081".to_string());
+    let site = Site::load(db, url.clone(), url).await.unwrap();
+    let site = Arc::new(salted(site).with_sessions(hyscribe_auth::sessions::Sessions::new(dir)));
+    let login = axum::http::Request::builder()
+        .method("POST")
+        .uri("/hs-login")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from("log=admin&pwd=reference-only-password"))
+        .unwrap();
+    let response = router(Arc::clone(&site)).oneshot(login).await.unwrap();
+    let cookies: Vec<String> = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|c| c.to_str().unwrap().split(';').next().unwrap().to_string())
+        .collect();
+    (site, cookies.join("; "))
+}
+
+/// The administrator's Media screens of `reference/media/golden.sh` over
+/// the default install and the Theme Test Data, as the database gives
+/// them; a POST or an action answers 501.
+#[tokio::test(flavor = "multi_thread")]
+async fn media_screens_are_php_s() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut pages = 0;
+    for (database, golden) in [
+        (
+            "wordpress",
+            include_str!("../../../hyscribe-admin/tests/golden/media.tsv"),
+        ),
+        (
+            "wordpress_ttd",
+            include_str!("../../../hyscribe-admin/tests/golden/media-ttd.tsv"),
+        ),
+    ] {
+        let (site, cookies) = logged_in(database, dir.path()).await;
+        for line in golden.lines() {
+            let f: Vec<&str> = line.split('\t').collect();
+            if f[0] != "default" || f[2] != "administrator" {
+                continue;
+            }
+            let (file, query) = f[1].split_once('?').unwrap_or((f[1], ""));
+            let path = format!("/hs-admin/{}?{query}", file.trim_end_matches(".php"));
+            let path = path.trim_end_matches('?');
+            let response = get(&site, path, "127.0.0.1:8081", &cookies).await;
+            let page = match response.status() {
+                StatusCode::FOUND => format!("302\t{}", location(&response)),
+                _ => page_of(response).await,
+            };
+            pages += 1;
+            // The fixture's pages are kept as hashes, every nonce masked;
+            // the database breaks the ties of sorts by author or parent as
+            // it goes, so their rows are left out.
+            if let [_, _, _, _, hash] = f[..] {
+                let page = masked_nonces(&page);
+                let page = if query.contains("orderby=author") || query.contains("orderby=parent") {
+                    let start = page.find("<tbody id=\"the-list\"").unwrap();
+                    let end = page.find("\t</tbody>").unwrap();
+                    format!("{}{}", page.get(..start).unwrap(), page.get(end..).unwrap())
+                } else {
+                    page
+                };
+                assert_eq!(sha256(&page), hash, "{database} {path}");
+                continue;
+            }
+            let php = hyscribe_testkit::unhex(f[3]);
+            let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+            assert_eq!(with_values(&php, &page), page, "{database} {path}");
+        }
+        for path in [
+            "/hs-admin/upload?mode=list&action=delete&media=1",
+            "/hs-admin/upload?mode=list&p=1",
+            "/hs-admin/upload?mode=list&cat=1",
+            "/hs-admin/upload?x[]=1",
+            "/hs-admin/media-new?post_id[]=1",
+            // An attachment's edit screen is not ported.
+            "/hs-admin/post?post=611&action=edit",
+        ] {
+            let response = get(&site, path, "127.0.0.1:8081", &cookies).await;
+            assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+        }
+        let post = axum::http::Request::builder()
+            .method("POST")
+            .uri("/hs-admin/media-new")
+            .header(header::HOST, "127.0.0.1:8081")
+            .header(header::COOKIE, &cookies)
+            .body(Body::from("html-upload=Upload"))
+            .unwrap();
+        let response = router(Arc::clone(&site)).oneshot(post).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    }
+    assert_eq!(pages, 64);
+}
+
+/// `page` with its nonces, ten hexadecimal digits standing alone, and its
+/// time masked, as the hashed goldens hold them.
+fn masked_nonces(page: &str) -> String {
+    let mut out = String::new();
+    let mut word = String::new();
+    for c in page.chars().chain(['\0']) {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            word.push(c);
+            continue;
+        }
+        let nonce = word.len() == 10 && word.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'));
+        out.push_str(if nonce { "%nonce%" } else { &word });
+        word.clear();
+        out.push(c);
+    }
+    out.pop();
+    let at = out.find("\"time\":\"").unwrap() + 8;
+    let end = at + out.get(at..).unwrap().find('"').unwrap();
+    format!(
+        "{}%time%{}",
+        out.get(..at).unwrap(),
+        out.get(end..).unwrap()
+    )
+}
+
+fn sha256(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// A page of `reference/admin-page/golden.sh`, by its row's start, under

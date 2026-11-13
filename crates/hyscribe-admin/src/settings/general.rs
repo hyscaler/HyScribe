@@ -4,45 +4,29 @@
 //! brings for the Site Icon.
 
 use hyscribe_kses::{esc_attr, esc_html};
-use hyscribe_phpser::{Key, Value, is_empty_string};
-use hyscribe_render::date::{DAYS, MONTHS, Zone, format_unix, site_zone};
+use hyscribe_phpser::{Value, is_empty_string};
+use hyscribe_render::date::{DAYS, Zone, format_unix, site_zone};
 use hyscribe_render::formatting::{convert_chars, wptexturize};
 
 use super::{
     Form, SettingsSite, checks, form_option, gmt_offset, option, replaced, settings_fields,
     settings_page, text, url, zone,
 };
-use crate::admin_bar::{BarSite, Browser};
-use crate::assets::{cookie_path, registered_script_data};
+use crate::admin_bar::BarSite;
 use crate::list_table::{checked, fill};
-use crate::page::{HelpTab, Request, esc_js, json, object, text as value_text};
+use crate::media::{MEDIA_SCRIPTS, MEDIA_STYLES, enqueue_media};
+use crate::page::{HelpTab, Request, json, text as value_text};
 use crate::posts::Answer;
 use crate::users::{dropdown_roles, role_names};
 
 const CONTENT: &str = include_str!("general.html");
 const HEAD: &str = include_str!("general-head.html");
 const ZONES: &str = include_str!("zones.html");
-const MEDIA_TEMPLATES: &str = include_str!("media.html");
-const MEDIA_VIEWS: &str = include_str!("media-views.js");
-
 const HELP: [HelpTab; 1] = [HelpTab {
     id: "overview",
     title: "Overview",
     content: "<p>The fields on this screen determine some of the basics of your site setup.</p><p>Most themes show the site title at the top of every page, in the title bar of the browser, and as the identifying name for syndicated feeds. Many themes also show the tagline.</p><p>Two terms you will want to know are the WordPress URL and the site URL. The WordPress URL is where the core WordPress installation files are, and the site URL is the address a visitor uses in the browser to go to your site.</p><p>Though the terms refer to two different concepts, in practice, they can be the same address or different. For example, you can have the core WordPress installation files in the root directory (<code>https://example.com</code>), in which case the two URLs would be the same. Or the <a href=\"https://developer.wordpress.org/advanced-administration/server/wordpress-in-directory/\">WordPress files can be in a subdirectory</a> (<code>https://example.com/wordpress</code>). In that case, the WordPress URL and the site URL would be different.</p><p>Both WordPress URL and site URL can start with either <code>http://</code> or <code>https://</code>. A URL starting with <code>https://</code> requires an SSL certificate, so be sure that you have one before changing to <code>https://</code>. With <code>https://</code>, a padlock will appear next to the address in the browser address bar. Both <code>https://</code> and the padlock signal that your site meets some basic security requirements, which can build trust with your visitors and with search engines.</p><p>If you want site visitors to be able to register themselves, check the membership box. If you want the site administrator to register every new user, leave the box unchecked. In either case, you can set a default user role for all new users.</p><p>You can set the language, and WordPress will automatically download and install the translation files (available if your filesystem is writable).</p><p>UTC means Coordinated Universal Time.</p><p>You must click the Save Changes button at the bottom of the screen for new settings to take effect.</p>",
 }];
-
-/// The uploader's buttons and limits, for a browser that can upload.
-const UPLOAD: &str = "\t\t\t\t<h2 class=\"upload-instructions drop-instructions\">Drop files to upload</h2>\n\t\t\t\t<p class=\"upload-instructions drop-instructions\">or</p>\n\t\t\t\t<button type=\"button\" class=\"browser button button-hero\" aria-describedby=\"post-upload-info\">Select Files</button>\n\t\t\t</div>\n\n\t\t\t<div class=\"upload-inline-status\"></div>\n\n\t\t\t<div class=\"post-upload-ui\" id=\"post-upload-info\">\n\t\t\t\t\n\t\t\t\t<p class=\"max-upload-size\">\n\t\t\t\tMaximum upload file size: 2 MB.\t\t\t\t</p>\n\n\t\t\t\t<# if ( data.suggestedWidth && data.suggestedHeight ) { #>\n\t\t\t\t\t<p class=\"suggested-dimensions\">\n\t\t\t\t\t\tSuggested image dimensions: {{data.suggestedWidth}} by {{data.suggestedHeight}} pixels.\t\t\t\t\t</p>\n\t\t\t\t<# } #>\n\n\t\t\t\t\t\t\t</div>\n";
-
-/// What the uploader says to a browser that cannot upload.
-const NO_UPLOAD: &str = "\t\t\t\t<h2 class=\"upload-instructions\">Your browser cannot upload files</h2>\n\t\t\t\t<p>\n\t\t\t\tThe web browser on your device cannot be used to upload files. You may be able to use the <a href=\"https://apps.wordpress.org/\">native app for your device</a> instead.\t\t\t\t</p>\n\t\t\t</div>\n";
-
-/// The extensions `get_allowed_mime_types()` gives an administrator
-/// without unfiltered uploads.
-const EXTENSIONS: &str = "jpg,jpeg,jpe,gif,png,bmp,tiff,tif,webp,avif,ico,heic,heif,heics,heifs,asf,asx,wmv,wmx,wm,avi,divx,flv,mov,qt,mpeg,mpg,mpe,mp4,m4v,ogv,webm,mkv,3gp,3gpp,3g2,3gp2,txt,asc,c,cc,h,srt,csv,tsv,ics,rtx,css,vtt,dfxp,mp3,m4a,m4b,aac,ra,ram,wav,x-wav,ogg,oga,flac,mid,midi,wma,wax,mka,rtf,pdf,class,tar,zip,gz,gzip,rar,7z,psd,xcf,doc,pot,pps,ppt,wri,xla,xls,xlt,xlw,mdb,mpp,docx,docm,dotx,dotm,xlsx,xlsm,xlsb,xltx,xltm,xlam,pptx,pptm,ppsx,ppsm,potx,potm,ppam,sldx,sldm,onetoc,onetoc2,onetmp,onepkg,oxps,xps,odt,odp,ods,odg,odc,odb,odf,wp,wpd,key,numbers,pages";
-
-/// `wp_max_upload_size()`, the oracle's `upload_max_filesize`.
-const MAX_UPLOAD: &str = "2097152b";
 
 /// The notice of a pending change of the admin email, with a link to
 /// cancel it; none without one, or with one to the current address.
@@ -206,132 +190,6 @@ fn weekdays(site: &dyn SettingsSite) -> String {
         .collect()
 }
 
-/// `_device_can_upload()`: not on iOS before 6.
-pub(super) fn can_upload(browser: &Browser) -> bool {
-    let agent = String::from_utf8_lossy(browser.user_agent);
-    if !browser.is_mobile() || !["iPhone", "iPad", "iPod"].iter().any(|d| agent.contains(d)) {
-        return true;
-    }
-    agent
-        .split_once("OS ")
-        .filter(|(_, rest)| rest.contains(" like Mac OS X"))
-        .and_then(|(_, rest)| {
-            rest.split(['_', ' '])
-                .next()
-                .unwrap_or_default()
-                .parse::<u32>()
-                .ok()
-        })
-        .is_some_and(|major| major >= 6)
-}
-
-/// `wp_plupload_default_settings()`'s data after the registered strings.
-fn plupload(site: &dyn SettingsSite, browser: &Browser) -> String {
-    let agent = String::from_utf8_lossy(browser.user_agent);
-    let ajax = cookie_path(&BarSite::admin_url(site, "async-upload.php"));
-    let mut defaults = vec![
-        ("file_data_name", value_text("async-upload")),
-        ("url", value_text(ajax.strip_suffix('/').unwrap_or(&ajax))),
-        (
-            "filters",
-            object(vec![
-                ("max_file_size", value_text(MAX_UPLOAD)),
-                (
-                    "mime_types",
-                    Value::Array(vec![(
-                        Key::Int(0),
-                        object(vec![("extensions", value_text(EXTENSIONS))]),
-                    )]),
-                ),
-            ]),
-        ),
-    ];
-    if browser.is_mobile() && agent.contains("OS 7_") && agent.contains("like Mac OS X") {
-        defaults.push(("multi_selection", Value::Bool(false)));
-    }
-    defaults.push((
-        "multipart_params",
-        object(vec![
-            ("action", value_text("upload-attachment")),
-            ("_wpnonce", value_text(&site.nonce("media-form"))),
-        ]),
-    ));
-    let settings = object(vec![
-        ("defaults", object(defaults)),
-        (
-            "browser",
-            object(vec![
-                ("mobile", Value::Bool(browser.is_mobile())),
-                ("supported", Value::Bool(can_upload(browser))),
-            ]),
-        ),
-        ("limitExceeded", Value::Bool(false)),
-    ]);
-    format!(
-        "{}\nvar _wpPluploadSettings = {};",
-        registered_script_data("wp-plupload", "data"),
-        json(&settings)
-    )
-}
-
-/// `wp_enqueue_media()`'s `_wpMediaViewsL10n`, its settings from the
-/// site: the months with attachments newest first among them.
-fn media_views(site: &dyn SettingsSite) -> String {
-    let mut months = site.months("attachment", false);
-    months.extend(site.months("attachment", true));
-    months.sort_by(|a, b| b.cmp(a));
-    months.dedup();
-    let months = Value::Array(
-        months
-            .into_iter()
-            .enumerate()
-            .map(|(i, (year, month))| {
-                let name = MONTHS.get((month as usize).wrapping_sub(1)).copied();
-                let name = name.unwrap_or_default();
-                let entry = object(vec![
-                    ("year", value_text(&year.to_string())),
-                    ("month", value_text(&month.to_string())),
-                    ("text", value_text(&format!("{name} {year}"))),
-                ]);
-                (Key::Int(i as i64), entry)
-            })
-            .collect(),
-    );
-    let props = object(vec![
-        ("link", value_text(&option(site, "image_default_link_type"))),
-        ("align", value_text(&option(site, "image_default_align"))),
-        ("size", value_text(&option(site, "image_default_size"))),
-    ]);
-    let scrolling = site.user_option("infinite_scrolling").as_deref() != Some(b"false");
-    fill(
-        MEDIA_VIEWS,
-        &[
-            (
-                "tab_url",
-                json(&value_text(&BarSite::admin_url(
-                    site,
-                    "media-upload.php?chromeless=1",
-                ))),
-            ),
-            (
-                "nonce:media-send-to-editor",
-                site.nonce("media-send-to-editor"),
-            ),
-            (
-                "nonce:set-attachment-thumbnail",
-                site.nonce("set-attachment-thumbnail"),
-            ),
-            ("props", json(&props)),
-            (
-                "proxy",
-                json(&value_text(&site.fill("%rest_url%oembed/1.0/proxy"))),
-            ),
-            ("months", json(&months)),
-            ("scrolling", u8::from(scrolling).to_string()),
-        ],
-    )
-}
-
 /// `options-general.php`; `None` with a Site Icon, not ported.
 pub fn general(site: &dyn SettingsSite, request: &Request) -> Option<Answer> {
     if Value::String(option(site, "site_icon").into_bytes()).to_int() != 0 {
@@ -391,24 +249,7 @@ pub fn general(site: &dyn SettingsSite, request: &Request) -> Option<Answer> {
         "%home%",
         &json(&value_text(home.strip_suffix('/').unwrap_or(&home))),
     );
-    let upload = if can_upload(request.browser) {
-        UPLOAD
-    } else {
-        NO_UPLOAD
-    };
-    let templates = site.fill(&fill(
-        MEDIA_TEMPLATES,
-        &[("title", esc_js(&name)), ("upload", upload.into())],
-    ));
-    let script_data = [
-        ("media-views", media_views(site)),
-        ("wp-plupload", plupload(site, request.browser)),
-        // `wp_default_scripts()` lists the shortcodes core adds by then.
-        (
-            "mce-view",
-            "var mceViewL10n = {\"shortcodes\":[\"wp_caption\",\"caption\",\"gallery\",\"playlist\",\"audio\",\"video\",\"embed\"]};".into(),
-        ),
-    ];
+    let (templates, script_data) = enqueue_media(site, request.browser);
     let form = Form {
         file: "options-general.php",
         title: "General Settings",
@@ -416,13 +257,13 @@ pub fn general(site: &dyn SettingsSite, request: &Request) -> Option<Answer> {
         content: &content,
         admin_head: &head,
         late_scripts: &[
-            "media-editor",
-            "media-audiovideo",
-            "mce-view",
-            "image-edit",
+            MEDIA_SCRIPTS[0],
+            MEDIA_SCRIPTS[1],
+            MEDIA_SCRIPTS[2],
+            MEDIA_SCRIPTS[3],
             "site-icon",
         ],
-        late_styles: &["media-views", "imgareaselect"],
+        late_styles: &MEDIA_STYLES,
         script_data: &script_data,
         admin_footer: &templates,
         ..Form::default()

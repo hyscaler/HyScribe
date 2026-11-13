@@ -62,7 +62,7 @@ fn matches_php() {
 
 #[test]
 fn upload_urls_follow_the_options() {
-    let base = |options| String::from_utf8(upload_baseurl(&site(options))).unwrap();
+    let base = |options| String::from_utf8(upload_baseurl(&site_options(&site(options)))).unwrap();
     assert_eq!(base(vec![]), "http://s.test/wp-content/uploads");
     assert_eq!(base(vec![("upload_path", "media")]), "http://s.test/media");
     assert_eq!(
@@ -407,7 +407,7 @@ fn php_paths() {
     assert!(image_extension(b"a.png"));
     assert!(!image_extension(b"a.PNG"));
     assert!(!image_extension(b"png"));
-    let base = |options| String::from_utf8(upload_baseurl(&site(options))).unwrap();
+    let base = |options| String::from_utf8(upload_baseurl(&site_options(&site(options)))).unwrap();
     let mut slashed = vec![("upload_path", " files ")];
     slashed.push(("siteurl", "http://t.test/"));
     // The fixture site's own siteurl comes later, so this one is found first.

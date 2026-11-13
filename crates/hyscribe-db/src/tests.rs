@@ -498,6 +498,7 @@ async fn errors_are_reported() {
         db.own_posts("post", 1).await.unwrap_err(),
         db.sticky_count("post", &[1]).await.unwrap_err(),
         db.post_months("post", true).await.unwrap_err(),
+        db.mime_types("attachment").await.unwrap_err(),
         db.pending_comments(1).await.unwrap_err(),
         db.users_with("wp_capabilities", &["administrator".into()])
             .await
@@ -1616,4 +1617,40 @@ async fn searches_sort_by_relevance() {
         assert!(theirs.len() > 1, "{sentence}");
         assert_eq!(ours, theirs, "{sentence}");
     }
+}
+
+/// The Theme Test Data's attachments by type and by file name, as the
+/// media library asks for them.
+#[tokio::test]
+async fn attachments_by_type_and_file() {
+    let ttd = named("wordpress_ttd").await;
+    let mut types = ttd.mime_types("attachment").await.unwrap();
+    types.sort();
+    assert_eq!(
+        types,
+        ["audio/mpeg", "image/gif", "image/jpeg", "video/quicktime"]
+    );
+    let count = |mime_types: &[&str], search: &[&str], filenames: bool| {
+        let query = PostQuery {
+            post_types: vec!["attachment".into()],
+            statuses: vec![StatusFilter {
+                status: "inherit".into(),
+                author: None,
+            }],
+            mime_types: mime_types.iter().map(|t| t.to_string()).collect(),
+            search: search.iter().map(|t| t.to_string()).collect(),
+            filenames,
+            ..PostQuery::default()
+        };
+        let ttd = &ttd;
+        async move { ttd.count_posts(&query).await.unwrap() }
+    };
+    assert_eq!(count(&[], &[], false).await, 37);
+    assert_eq!(count(&["image/%"], &[], false).await, 35);
+    assert_eq!(count(&["audio/%", "video/quicktime"], &[], false).await, 2);
+    assert_eq!(count(&["video/mp4"], &[], false).await, 0);
+    // The files' names hold `jpg` more often than the text.
+    assert_eq!(count(&[], &["jpg"], false).await, 15);
+    assert_eq!(count(&[], &["jpg"], true).await, 34);
+    assert_eq!(count(&[], &["-jpg"], true).await, 3);
 }

@@ -140,20 +140,3 @@ fn formatting_is_for_old_sites() {
     assert!(writing::formatting(&Role("s1db:administrator")).is_empty());
     assert!(!writing::formatting(&Role("s1writing:administrator")).is_empty());
 }
-
-/// Uploads need iOS 6 or later on an Apple device.
-#[test]
-fn uploads_follow_the_device() {
-    let can = |agent: &'static [u8]| {
-        general::can_upload(&Browser {
-            user_agent: agent,
-            mobile_hint: None,
-        })
-    };
-    assert!(can(b"iPhone; CPU iPhone OS 6_0 like Mac OS X Mobile"));
-    assert!(can(b"iPod; CPU OS 12 like Mac OS X Mobile"));
-    assert!(!can(b"iPhone; CPU iPhone OS 5_1 like Mac OS X Mobile"));
-    assert!(!can(b"iPhone; Mobile"));
-    assert!(!can(b"iPhone; CPU OS 9_0 Mobile"));
-    assert!(can(b"Macintosh; iPhone OS 5_1 like Mac OS X"));
-}

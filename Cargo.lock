@@ -639,6 +639,7 @@ dependencies = [
  "hyscribe-phpser",
  "hyscribe-render",
  "hyscribe-testkit",
+ "sha2 0.11.1",
 ]
 
 [[package]]

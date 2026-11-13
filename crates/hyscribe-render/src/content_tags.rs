@@ -238,7 +238,12 @@ fn add_srcset_and_sizes(site: &dyn Site, image: &[u8], id: u64) -> Vec<u8> {
     let Some((width, height)) = size else {
         return image.to_vec();
     };
-    let made = srcset((width, height), src, &meta, &upload_baseurl(site));
+    let made = srcset(
+        (width, height),
+        src,
+        &meta,
+        &upload_baseurl(&|name| site.option(name).unwrap_or_default()),
+    );
     let has_sizes = find(image, 0, b" sizes=").is_some();
     let attr = match made {
         Some(srcset) if has_sizes => format!(" srcset=\"{}\"", esc_attr(srcset.as_bytes())),

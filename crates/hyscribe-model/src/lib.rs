@@ -196,6 +196,12 @@ pub struct PostQuery {
     pub sentence: String,
     /// `search_terms_count`: the words of `s` before any were dropped.
     pub search_count: usize,
+    /// `wp_allow_query_attachment_by_filename`: a search term may match the
+    /// `_wp_attached_file` meta too.
+    pub filenames: bool,
+    /// `wp_post_mime_type_where()`: `post_mime_type` is one of these, each
+    /// a `LIKE` pattern when it holds a `%`; none means any.
+    pub mime_types: Vec<String>,
     /// `YEAR(post_date)`.
     pub year: Option<u64>,
     /// `MONTH(post_date)`.

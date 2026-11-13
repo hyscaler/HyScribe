@@ -85,7 +85,7 @@ fn labels(taxonomy: &str) -> Option<Labels> {
 }
 
 /// The terms `get_terms()` finds for the block, by name.
-struct Listing {
+pub(crate) struct Listing {
     terms: Vec<Term>,
     /// `walk_category_tree()`'s depth: the full tree, or flat.
     hierarchical: bool,
@@ -146,8 +146,18 @@ impl Renderer<'_> {
             let select = listed.as_ref().map_or_else(Vec::new, |(labels, listing)| {
                 let selected = self.selected_term(&taxonomy, labels.query_var);
                 let source = "build_dropdown_script_block_core_categories";
+                let none = format!("Select {}", labels.singular);
+                let slug = |term: &Term| term.slug.clone();
                 [
-                    dropdown_select(&id, labels, listing, show_count, &selected),
+                    dropdown_select(
+                        &id,
+                        labels.query_var,
+                        &none,
+                        listing,
+                        show_count,
+                        &slug,
+                        &selected,
+                    ),
                     dropdown_script(site, SCRIPT, source, &id).into_bytes(),
                     b"\n".to_vec(),
                 ]
@@ -163,7 +173,7 @@ impl Renderer<'_> {
             .concat();
         }
         let items = listed.as_ref().map_or_else(Vec::new, |(labels, listing)| {
-            self.category_list(&taxonomy, labels, listing, show_count)
+            self.category_list(&taxonomy, labels.no_terms, listing, show_count)
         });
         let enhanced = self
             .context
@@ -184,15 +194,15 @@ impl Renderer<'_> {
 
     /// `wp_list_categories()`'s items: each term linked, with its count,
     /// the current one and its ancestors marked, nested for a tree.
-    fn category_list(
+    pub(crate) fn category_list(
         &self,
         taxonomy: &str,
-        labels: &Labels,
+        no_terms: &str,
         listing: &Listing,
         show_count: bool,
     ) -> Vec<u8> {
         if listing.terms.is_empty() {
-            return format!("<li class=\"cat-item-none\">{}</li>", labels.no_terms).into_bytes();
+            return format!("<li class=\"cat-item-none\">{no_terms}</li>").into_bytes();
         }
         let current = match &self.context.request.archive {
             Some(Archive::Term(kind, Some(term))) if kind.name() == taxonomy => Some(term.id),
@@ -281,7 +291,7 @@ impl Renderer<'_> {
 /// a tree with counts, each count padded with the posts below it
 /// (`_pad_term_counts()`); without empty terms, though a tree keeps those
 /// with a used term below them.
-fn terms(
+pub(crate) fn terms(
     site: &dyn Site,
     taxonomy: &str,
     hierarchical: bool,
@@ -431,22 +441,22 @@ fn display<'a>(
 }
 
 /// `wp_dropdown_categories()` up to `</select>`, where the block puts its
-/// script: the select, with the "none" option when
-/// there are terms, each term's slug as its value, padded by depth.
-fn dropdown_select(
+/// script: the select named `name`, with the `none` option, each term
+/// valued by `value` and padded by depth, the one valued `selected` chosen.
+pub(crate) fn dropdown_select(
     id: &str,
-    labels: &Labels,
+    name: &str,
+    none: &str,
     listing: &Listing,
     show_count: bool,
+    value: &dyn Fn(&Term) -> Vec<u8>,
     selected: &[u8],
 ) -> Vec<u8> {
-    let name = labels.query_var;
     let mut out = format!(
         "<select  name='{name}' id='{}' class='postform'>\n",
         esc_attr(id.as_bytes())
     )
     .into_bytes();
-    let none = format!("Select {}", labels.singular);
     if listing.terms.is_empty() {
         out.extend(
             format!("\t<option value='-1' selected='selected'>{none}</option>\n").into_bytes(),
@@ -464,7 +474,8 @@ fn dropdown_select(
             listing.hierarchical,
             &mut |event| match event {
                 Walk::Start(term) => {
-                    let chosen = if term.slug == selected {
+                    let value = value(term);
+                    let chosen = if value == selected {
                         " selected=\"selected\""
                     } else {
                         ""
@@ -472,7 +483,7 @@ fn dropdown_select(
                     out.extend(
                         format!(
                             "\t<option class=\"level-{depth}\" value=\"{}\"{chosen}>{}",
-                            esc_attr(&term.slug),
+                            esc_attr(&value),
                             "&nbsp;".repeat(depth * 3)
                         )
                         .into_bytes(),

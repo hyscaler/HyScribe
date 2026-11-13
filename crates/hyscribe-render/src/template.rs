@@ -174,6 +174,9 @@ pub(crate) struct Renderer<'a> {
     pub(crate) latest_posts_open: Vec<u64>,
     /// The categories blocks rendered, which number their dropdowns.
     pub(crate) categories_blocks: u64,
+    /// `WP_Widget_Categories::widget()`'s `static $first_dropdown`, spent
+    /// once a categories widget has printed its dropdown.
+    pub(crate) categories_dropdown_used: bool,
     /// The `layout` attribute of the block being rendered, `parentLayout`
     /// to its inner blocks.
     pub(crate) parent_layout: Option<Value>,
@@ -243,6 +246,7 @@ impl<'a> Renderer<'a> {
             open_posts: Vec::new(),
             latest_posts_open: Vec::new(),
             categories_blocks: 0,
+            categories_dropdown_used: false,
             parent_layout: None,
             unique_id: 0,
             elements_id: 0,

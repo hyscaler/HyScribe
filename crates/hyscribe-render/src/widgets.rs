@@ -3,6 +3,7 @@
 //! The legacy widget block and the classic core widgets it renders.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
+use hyscribe_model::Term;
 use hyscribe_phpser::{
     Key, Maybe, Value, base64_decode, hash_equals, is_empty_string, isset, maybe_unserialize,
     parse_str, unserialize,
@@ -12,25 +13,26 @@ use crate::archives::Format;
 use crate::autop::wpautop;
 use crate::balance::force_balance_tags;
 use crate::blocks::Block;
+use crate::categories::{dropdown_select, terms};
 use crate::core_blocks::prepared;
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, wptexturize};
 use crate::head::json_hex_tag;
 use crate::permalinks;
+use crate::site::{Archive, Taxonomy};
 use crate::template::Renderer;
 
-/// The archives widget's dropdown script up to its argument, as
-/// `WP_Widget_Archives::widget()` prints it.
-const ARCHIVES_SCRIPT: &str = "( ( dropdownId ) => {
+/// The classic widgets' dropdown script up to what a change does.
+const SCRIPT_START: &str = "( ( dropdownId ) => {
 \tconst dropdown = document.getElementById( dropdownId );
 \tfunction onSelectChange() {
 \t\tsetTimeout( () => {
 \t\t\tif ( 'escape' === dropdown.dataset.lastkey ) {
 \t\t\t\treturn;
 \t\t\t}
-\t\t\tif ( dropdown.value ) {
-\t\t\t\tdocument.location.href = dropdown.value;
-\t\t\t}
-\t\t}, 250 );
+";
+
+/// The rest of the dropdown script, up to its argument.
+const SCRIPT_END: &str = "\t\t}, 250 );
 \t}
 \tfunction onKeyUp( event ) {
 \t\tif ( 'Escape' === event.key ) {
@@ -213,6 +215,7 @@ impl Renderer<'_> {
     fn widget(&mut self, widget: &Widget, number: &[u8], args: &Args, instance: &Value) -> Vec<u8> {
         match widget.id_base {
             "archives" => self.archives_widget(number, args, instance),
+            "categories" => self.categories_widget(number, args, instance),
             "search" => self.search_widget(args, instance),
             "custom_html" => self.custom_html_widget(args, instance),
             "meta" => self.meta_widget(args, instance),
@@ -239,10 +242,12 @@ impl Renderer<'_> {
                 &attr,
                 b"\" name=\"archive-dropdown\">\n\t\t\t\n\t\t\t<option value=\"\">Select Month</option>\n\t\t\t",
                 &options,
-                b"\n\t\t</select>\n\n\t\t\t<script>\n",
-                ARCHIVES_SCRIPT.as_bytes(),
-                &json_hex_tag(&id),
-                b" );\n\n//# sourceURL=WP_Widget_Archives%3A%3Awidget\n</script>\n",
+                b"\n\t\t</select>\n\n\t\t\t",
+                &dropdown_script(
+                    "\t\t\tif ( dropdown.value ) {\n\t\t\t\tdocument.location.href = dropdown.value;\n\t\t\t}\n",
+                    &id,
+                    "WP_Widget_Archives",
+                ),
             ]
             .concat()
         } else {
@@ -250,6 +255,82 @@ impl Renderer<'_> {
             [
                 b"\n\t\t\t<ul>\n\t\t\t\t",
                 &links[..],
+                b"\t\t\t</ul>\n\n\t\t\t",
+            ]
+            .concat()
+        };
+        [
+            &args.before_widget[..],
+            &titled(args, &title),
+            &body,
+            &args.after_widget,
+        ]
+        .concat()
+    }
+
+    /// `WP_Widget_Categories::widget()`: the categories by name as a list,
+    /// or as a dropdown that submits the one picked. The first dropdown of
+    /// a request is `cat`, after the query var it sets.
+    fn categories_widget(&mut self, number: &[u8], args: &Args, instance: &Value) -> Vec<u8> {
+        let site = self.context.site;
+        let title = widget_title(instance, b"Categories");
+        let count = checked(instance, "count");
+        let listing = terms(
+            site,
+            "category",
+            checked(instance, "hierarchical"),
+            true,
+            false,
+            count,
+        );
+        let body = if checked(instance, "dropdown") {
+            let id = if std::mem::replace(&mut self.categories_dropdown_used, true) {
+                [b"categories-dropdown-", number].concat()
+            } else {
+                b"cat".to_vec()
+            };
+            // `is_category() ? get_query_var( 'cat' ) : 0`: a category
+            // archive always has its term, whose ID `cat` then holds.
+            let selected = match &self.context.request.archive {
+                Some(Archive::Term(Taxonomy::Category, Some(term))) => {
+                    term.id.to_string().into_bytes()
+                }
+                _ => b"0".to_vec(),
+            };
+            let term_id = |term: &Term| term.id.to_string().into_bytes();
+            let id = Value::String(id);
+            let id_text = String::from_utf8_lossy(&id.to_php_string()).into_owned();
+            let select = dropdown_select(
+                &id_text,
+                "cat",
+                "Select Category",
+                &listing,
+                count,
+                &term_id,
+                &selected,
+            );
+            [
+                &b"<form action=\""[..],
+                &esc_url(&site.home_url()),
+                b"\" method=\"get\"><label class=\"screen-reader-text\" for=\"",
+                esc_attr(id_text.as_bytes()).as_bytes(),
+                b"\">",
+                &title,
+                b"</label>",
+                &select,
+                b"\n</form>",
+                &dropdown_script(
+                    "\t\t\tif ( dropdown.value && parseInt( dropdown.value ) > 0 && dropdown instanceof HTMLSelectElement ) {\n\t\t\t\tdropdown.parentElement.submit();\n\t\t\t}\n",
+                    &id,
+                    "WP_Widget_Categories",
+                ),
+            ]
+            .concat()
+        } else {
+            let items = self.category_list("category", "No categories", &listing, count);
+            [
+                &b"\n\t\t\t<ul>\n\t\t\t\t"[..],
+                &items,
                 b"\t\t\t</ul>\n\n\t\t\t",
             ]
             .concat()
@@ -521,6 +602,21 @@ fn widget_title(instance: &Value, default: &[u8]) -> Vec<u8> {
     let title = instance.get_str("title").filter(|title| !title.is_empty());
     let title = title.map_or(default.to_vec(), Value::to_php_string);
     esc_html(&convert_chars(&wptexturize(&title, &CORE_SHORTCODE_TAGS))).into_bytes()
+}
+
+/// A classic widget's inline dropdown script, as `wp_print_inline_script_tag()`
+/// prints it: `change` is what picking an option does, `id` the select's,
+/// and the source URL names `class`'s `widget()`.
+fn dropdown_script(change: &str, id: &Value, class: &str) -> Vec<u8> {
+    [
+        b"<script>\n",
+        SCRIPT_START.as_bytes(),
+        change.as_bytes(),
+        SCRIPT_END.as_bytes(),
+        &json_hex_tag(id),
+        format!(" );\n\n//# sourceURL={class}%3A%3Awidget\n</script>\n").as_bytes(),
+    ]
+    .concat()
 }
 
 /// `! empty( $instance[ $name ] )`.

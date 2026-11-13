@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Records the categories block from the PHP WordPress oracle
+# Records the categories block and widget from the PHP WordPress oracle
 # (reference/default-install/php.sh up) into
 # crates/hyscribe-render/tests/golden/categories.tsv. Its inserts are rolled back.
 set -euo pipefail

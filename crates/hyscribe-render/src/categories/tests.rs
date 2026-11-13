@@ -81,16 +81,22 @@ impl Site for Categorized {
         let pair = |row: &Value| (field(row, 0).to_int() as u64, field(row, 1).to_int() as u64);
         self.taxonomy(taxonomy, "posts").iter().map(pair).collect()
     }
+
+    /// Signed as the oracle's `salt` filter signs.
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        Some(hyscribe_phpser::hash_hmac_md5(data, b"test-salt"))
+    }
 }
 
 /// Every case of `reference/categories/golden.sh`, in its order: the
-/// count of categories blocks, which numbers dropdowns, carries over as
-/// PHP's static does.
+/// count of categories blocks, which numbers dropdowns, and whether a
+/// categories widget has printed its first dropdown carry over as PHP's
+/// statics do.
 #[test]
 fn matches_php() {
     let theme = twentytwentyfive();
     let golden = include_str!("../../tests/golden/categories.tsv");
-    let mut blocks = 0;
+    let (mut blocks, mut dropdown_used) = (0, false);
     let mut failures = Vec::new();
     for line in golden.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
@@ -123,8 +129,12 @@ fn matches_php() {
         };
         let mut renderer = Renderer::new(&theme, &site, &request);
         renderer.categories_blocks = blocks;
+        renderer.categories_dropdown_used = dropdown_used;
         let ours = renderer.render(&markup);
-        blocks = renderer.categories_blocks;
+        (blocks, dropdown_used) = (
+            renderer.categories_blocks,
+            renderer.categories_dropdown_used,
+        );
         if ours != php {
             failures.push(format!(
                 "{} {}\n  php:  {}\n  ours: {}",
@@ -141,7 +151,7 @@ fn matches_php() {
         failures.len(),
         failures[..failures.len().min(3)].join("\n")
     );
-    assert_eq!(golden.lines().count(), 168);
+    assert_eq!(golden.lines().count(), 224);
 }
 
 /// Terms whose parents are missing or loop, as only inconsistent data

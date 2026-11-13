@@ -1,9 +1,11 @@
 <?php
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Prints do_blocks() for categories block markup over categories and tags
-// inserted for it and rolled back after, on several requests, without
-// the elements support, which is checked on its own. Lines are
+// Prints do_blocks() for categories block markup, and for the categories
+// widget in a legacy widget block (signed under the fixed salt `test-salt`),
+// over categories and tags inserted for it and rolled back after, on
+// several requests, without the elements support, which is checked on its
+// own. Lines are
 //   hex(markup)<TAB>hex(request)<TAB>hex(state JSON)<TAB>hex(html)
 // where the state holds each taxonomy's terms by name (ID, name, slug,
 // parent, count), its published posts per term, and the queried term.
@@ -16,6 +18,7 @@ remove_filter( 'render_block_data', 'wp_render_elements_support_styles', 10 );
 
 global $wpdb;
 $wpdb->query( 'START TRANSACTION' );
+add_filter( 'salt', static fn() => 'test-salt' );
 $parent = wp_insert_term( 'Parent', 'category' )['term_id'];
 $child  = wp_insert_term( 'Child & <b>co</b>', 'category', array( 'parent' => $parent, 'slug' => 'child' ) )['term_id'];
 $grand  = wp_insert_term( 'Grand', 'category', array( 'parent' => $child ) )['term_id'];
@@ -30,6 +33,17 @@ clean_term_cache( array( $parent, $child, $grand, $other ), 'category' );
 function block( $attrs ) {
 	$json = $attrs ? ' ' . wp_json_encode( $attrs, JSON_UNESCAPED_SLASHES ) : '';
 	return "<!-- wp:categories$json /-->";
+}
+function widget( $instance ) {
+	$serialized = serialize( $instance );
+	$attrs      = array(
+		'idBase'   => 'categories',
+		'instance' => array(
+			'encoded' => base64_encode( $serialized ),
+			'hash'    => wp_hash( $serialized ),
+		),
+	);
+	return '<!-- wp:legacy-widget ' . wp_json_encode( $attrs ) . ' /-->';
 }
 $cases = array(
 	block( array() ),
@@ -54,6 +68,14 @@ $cases = array(
 	'<!-- wp:tag-cloud {"taxonomy":"category"} /-->',
 	'<!-- wp:tag-cloud {"taxonomy":"category","showTagCounts":true} /-->',
 	'<!-- wp:tag-cloud {"taxonomy":"category","numberOfTags":3} /-->',
+	// The categories widget; PHP's first dropdown in a request is `cat`.
+	widget( array() ),
+	widget( array( 'count' => 1 ) ),
+	widget( array( 'hierarchical' => '1' ) ),
+	widget( array( 'hierarchical' => true, 'count' => true, 'title' => 'Topics & <b>more</b>' ) ),
+	widget( array( 'dropdown' => 1 ) ),
+	widget( array( 'dropdown' => 1, 'hierarchical' => 1, 'count' => 1, 'title' => 'Pick "one"' ) ),
+	widget( array( 'title' => '0', 'dropdown' => '0', 'count' => '0' ) ),
 );
 
 $state = array();

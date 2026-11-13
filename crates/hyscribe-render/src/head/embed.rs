@@ -119,7 +119,7 @@ fn content(renderer: &mut Renderer, blog: &Blog, post: &Post) -> Vec<u8> {
         &convert_chars(&wptexturize(&excerpt, &CORE_SHORTCODE_TAGS)),
         true,
     );
-    let classes = post_class(site, renderer.context.request, "wp-embed", post);
+    let classes = post_class(site, Some(renderer.context.request), "wp-embed", post);
     let mut out = [
         &b"\t<div class=\""[..],
         &classes,

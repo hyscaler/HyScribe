@@ -124,10 +124,19 @@ async fn logged_in_users_are_let_in() {
         .next()
         .unwrap()
         .to_string();
-    let response = get(&site, "/hs-admin/edit", "127.0.0.1:8081", &auth).await;
+    let response = get(
+        &site,
+        "/hs-admin/edit?post_status=draft",
+        "127.0.0.1:8081",
+        &auth,
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
-    // The dashboard, as PHP showed it to a user who had no auto-draft yet.
     let cookies = all.join("; ");
+    let page = page_of(get(&site, "/hs-admin/edit", "127.0.0.1:8081", &cookies).await).await;
+    let php = golden("administrator\tedit.php\t");
+    assert_eq!(with_values(&php, &page), page);
+    // The dashboard, as PHP showed it to a user who had no auto-draft yet.
     for path in ["/hs-admin/", "/hs-admin/index"] {
         let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
         let php = golden("administrator\tindex.php\t").replace("%auto-draft%", "");
@@ -395,7 +404,63 @@ async fn dashboard_data() {
             assert_eq!(admin.recent_posts("future").len(), 1);
             let comments = admin.recent_comments(admin.recent_posts("publish").last());
             assert_eq!(comments.len(), 5);
-            assert!(admin.can_edit_post(&comments[0].post.clone().unwrap()));
+            assert!(admin.can_post("edit_post", &comments[0].post.clone().unwrap()));
+            let mut counts = admin.status_counts("post", None);
+            counts.sort();
+            let counts: Vec<(&str, u64)> = counts.iter().map(|(s, n)| (s.as_str(), *n)).collect();
+            assert_eq!(counts, [("draft", 1), ("future", 1), ("publish", 57)]);
+            assert_eq!(admin.status_counts("page", Some(1)).len(), 2);
+            assert_eq!(admin.sticky_count("post", &[1241, 155]), 1);
+            assert_eq!(admin.sticky_count("post", &[155]), 0);
+            // The menus with items: five of six.
+            assert_eq!(admin.popular_terms("nav_menu").len(), 5);
+            assert_eq!(admin.months("post").first(), Some(&(2030, 1)));
+            let page = admin.full_post(155).unwrap();
+            assert_eq!(admin.pending_comments(&page), 1);
+            assert_eq!(admin.display_name(2).as_deref(), Some(&b"Theme Buster"[..]));
+            let authors: Vec<u64> = admin.authors().iter().map(|user| user.id).collect();
+            assert_eq!(authors, [1]);
+            let popular = admin.popular_terms("category");
+            assert_eq!((popular.len(), popular[0], popular[1]), (10, 16, 7));
+            assert_eq!(admin.terms("category").len(), 68);
+            let sticky = admin.full_post(1241).unwrap();
+            assert!(
+                admin
+                    .post_class("iedit", &sticky)
+                    .starts_with("iedit post-1241 type-post status-publish")
+            );
+            assert!(
+                admin
+                    .post_class("iedit", &sticky)
+                    .contains(" status-sticky ")
+            );
+            let slugs: Vec<Vec<u8>> = admin
+                .post_terms(&sticky, "category")
+                .into_iter()
+                .map(|t| t.slug)
+                .collect();
+            assert_eq!(slugs, [b"classic".to_vec(), b"uncategorized".to_vec()]);
+            let about = admin.full_post(2).unwrap();
+            assert_eq!(
+                admin.meta(&about, "_wp_page_template").as_deref(),
+                Some(&b"default"[..])
+            );
+            assert!(
+                String::from_utf8_lossy(&admin.excerpt(&sticky))
+                    .starts_with("This is a sticky post.")
+            );
+            assert_eq!(admin.post_formats().len(), 9);
+            let drafts = PostQuery {
+                post_types: vec!["post".into()],
+                statuses: vec![hyscribe_model::StatusFilter {
+                    status: "draft".into(),
+                    author: None,
+                }],
+                limit: 5,
+                ..PostQuery::default()
+            };
+            let (posts, found) = admin.list_posts(&drafts);
+            assert_eq!((posts.len(), found), (1, 1));
             assert_eq!(admin.comment_counts().moderated, 3);
             assert_eq!(admin.published("post"), 57);
             assert_eq!(
@@ -407,11 +472,12 @@ async fn dashboard_data() {
         check(&ttd, (2, b"themedemos"), &|author| {
             let drafts: Vec<u64> = author.drafts().iter().map(|post| post.id).collect();
             assert_eq!(drafts, [1164]);
+            assert_eq!(author.own_posts("post"), 39);
         });
         check(&ttd, (3, b"themereviewteam"), &|subscriber| {
             assert!(subscriber.recent_posts("future").is_empty());
             assert_eq!(
-                DashboardSite::user_option(subscriber, "admin_color").as_deref(),
+                PostsSite::user_option(subscriber, "admin_color").as_deref(),
                 Some(&b"modern"[..])
             );
             let comments = subscriber.recent_comments(None);
@@ -422,7 +488,7 @@ async fn dashboard_data() {
                     .all(|c| c.status == "approved" && !c.can_edit)
             );
             assert!(comments.iter().all(|c| c.comment.post_id != 1168));
-            assert!(!subscriber.can_edit_post(&comments[0].post.clone().unwrap()));
+            assert!(!subscriber.can_post("edit_post", &comments[0].post.clone().unwrap()));
         });
     })
     .await

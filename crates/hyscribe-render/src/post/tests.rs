@@ -101,7 +101,7 @@ fn post_classes_match_php() {
             post_type: text(&row, "post_type"),
             ..Post::default()
         };
-        let ours = post_class(&site, &request, "wp-block-post", &post);
+        let ours = post_class(&site, Some(&request), "wp-block-post", &post);
         assert_eq!(
             String::from_utf8_lossy(&ours),
             String::from_utf8_lossy(&php),
@@ -110,6 +110,38 @@ fn post_classes_match_php() {
         count += 1;
     }
     assert!(count >= 64);
+}
+
+/// The admin's classes: no bare post type, and `status-sticky`.
+#[test]
+fn admin_post_classes() {
+    let site = Fixture {
+        terms: HashMap::from([(
+            "category".to_string(),
+            vec![Term {
+                id: 1,
+                slug: b"uncategorized".to_vec(),
+                ..Term::default()
+            }],
+        )]),
+        thumbnail: Vec::new(),
+        sticky: b"a:1:{i:0;i:7;}".to_vec(),
+    };
+    let post = |id| Post {
+        id,
+        status: "publish".into(),
+        post_type: "post".into(),
+        ..Post::default()
+    };
+    let class = |id| String::from_utf8(post_class(&site, None, "iedit", &post(id))).unwrap();
+    assert_eq!(
+        class(7),
+        "iedit post-7 type-post status-publish format-standard status-sticky hentry category-uncategorized"
+    );
+    assert_eq!(
+        class(8),
+        "iedit post-8 type-post status-publish format-standard hentry category-uncategorized"
+    );
 }
 
 #[test]
@@ -218,4 +250,20 @@ fn body_classes_match_php() {
         count += 1;
     }
     assert!(count >= 14);
+}
+
+/// The admin prefixes neither a protected nor a private post's title.
+#[test]
+fn admin_titles_have_no_prefix() {
+    let post = Post {
+        title: b" \"Quoted\" ".to_vec(),
+        password: b"secret".to_vec(),
+        status: "private".into(),
+        ..Post::default()
+    };
+    assert_eq!(admin_title(&post), "&#8220;Quoted&#8221;".as_bytes());
+    assert_eq!(
+        the_title(&post),
+        "Protected:  &#8220;Quoted&#8221;".as_bytes()
+    );
 }

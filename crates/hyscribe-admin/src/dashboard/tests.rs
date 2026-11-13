@@ -7,13 +7,7 @@ use crate::tests::Role;
 
 /// The PHP oracle's dashboard for `role`, under hs-admin's URLs.
 fn golden(role: &str) -> String {
-    let golden = include_str!("../../tests/golden/pages.tsv");
-    let row = golden
-        .lines()
-        .find(|line| line.starts_with(&format!("{role}\tindex.php\t")))
-        .unwrap();
-    hs_admin_page(&String::from_utf8(unhex(row.rsplit('\t').next().unwrap())).unwrap())
-        .replace("%auto-draft%", "4")
+    crate::tests::page_golden(role, "index.php").replace("%auto-draft%", "4")
 }
 
 /// The part of `page` from `start` to `end`, without `end`.

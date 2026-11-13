@@ -14,7 +14,9 @@ use crate::blocks::{Block, parse_blocks};
 use crate::content::get_the_content;
 use crate::core_blocks::{prepared, render};
 use crate::formatting::contains;
+use crate::site::{Request, Site};
 use crate::template::{Renderer, replace};
+use crate::theme::Theme;
 
 /// The blocks whose markup an excerpt keeps (`null` is HTML between
 /// blocks), and those it looks inside.
@@ -37,6 +39,14 @@ const WRAPPER_BLOCKS: [&str; 3] = ["core/columns", "core/column", "core/group"];
 /// `excerpt_length` and `excerpt_more`.
 const EXCERPT_LENGTH: i64 = 55;
 pub(crate) const EXCERPT_MORE: &[u8] = b" [&hellip;]";
+
+/// `get_the_excerpt( $post )` outside a page, as the admin's lists read it.
+pub fn the_excerpt(theme: &Theme, site: &dyn Site, post: &Post) -> Vec<u8> {
+    let request = Request::default();
+    let mut renderer = Renderer::new(theme, site, &request);
+    renderer.context.post_id = Some(post.id);
+    renderer.get_the_excerpt(post)
+}
 
 impl Renderer<'_> {
     /// `get_the_excerpt()` for `post`, the loop's post.

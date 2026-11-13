@@ -198,6 +198,13 @@ fn style_handles(name: &str, metadata: &Value) -> Vec<String> {
 }
 
 impl Theme {
+    /// The post formats `functions.php` adds theme support for.
+    pub fn post_formats(&self) -> &'static [&'static str] {
+        &[
+            "aside", "audio", "chat", "gallery", "image", "link", "quote", "status", "video",
+        ]
+    }
+
     /// The theme's `Theme Name` header.
     pub fn name(&self) -> String {
         header(STYLE_CSS, "Theme Name")

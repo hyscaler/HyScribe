@@ -624,6 +624,140 @@ impl Db {
         rows.iter().map(post).collect()
     }
 
+    /// `wp_count_posts( $post_type, 'readable' )`: the posts of each status,
+    /// private ones only by `private_author` when given.
+    pub async fn status_counts(
+        &self,
+        post_type: &str,
+        private_author: Option<u64>,
+    ) -> Result<Vec<(String, u64)>, DbError> {
+        let mut sql = Sql::new(
+            "SELECT post_status, COUNT(*) AS num_posts FROM {prefix}posts WHERE post_type = ?",
+        );
+        sql.bind(Bind::Text(post_type.into()));
+        if let Some(author) = private_author {
+            sql.push(
+                " AND (post_status != 'private' OR (post_author = ? AND post_status = 'private'))",
+            );
+            sql.bind(Bind::Int(author));
+        }
+        sql.push(" GROUP BY post_status");
+        let rows = sql
+            .query(&self.prefix)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let count = (c.text("post_status"), c.signed("num_posts").unsigned_abs());
+                c.finish(count)
+            })
+            .collect()
+    }
+
+    /// The posts of `post_type` by `author` the admin's All list shows.
+    pub async fn own_posts(&self, post_type: &str, author: u64) -> Result<u64, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT COUNT(1) AS found FROM {prefix}posts WHERE post_type = ? \
+             AND post_status NOT IN ('trash', 'auto-draft', 'inherit', 'request-pending', \
+             'request-confirmed', 'request-failed', 'request-completed') AND post_author = ?",
+        );
+        let row = sqlx::query(sql)
+            .bind(post_type)
+            .bind(author)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.try_get::<i64, _>("found")
+            .map(i64::unsigned_abs)
+            .map_err(db_error)
+    }
+
+    /// The posts of `post_type` among `ids` neither trashed nor auto-drafts.
+    pub async fn sticky_count(&self, post_type: &str, ids: &[u64]) -> Result<u64, DbError> {
+        let mut sql = Sql::new(
+            "SELECT COUNT(1) AS found FROM {prefix}posts WHERE post_type = ? \
+             AND post_status NOT IN ('trash', 'auto-draft') AND ID IN (",
+        );
+        sql.bind(Bind::Text(post_type.into()));
+        list(&mut sql, ids_or_none(ids));
+        let row = sql
+            .query(&self.prefix)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.try_get::<i64, _>("found")
+            .map(i64::unsigned_abs)
+            .map_err(db_error)
+    }
+
+    /// `months_dropdown()`'s months: the years and months of the posts of
+    /// `post_type` neither trashed nor auto-drafts, newest first.
+    pub async fn post_months(&self, post_type: &str) -> Result<Vec<(u32, u32)>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT DISTINCT YEAR(post_date) AS year, MONTH(post_date) AS month FROM {prefix}posts \
+             WHERE post_type = ? AND post_status != 'auto-draft' AND post_status != 'trash' \
+             ORDER BY post_date DESC",
+        );
+        let rows = sqlx::query(sql)
+            .bind(post_type)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let year = u32::try_from(c.signed("year")).unwrap_or_default();
+                let month = u32::try_from(c.signed("month")).unwrap_or_default();
+                c.finish((year, month))
+            })
+            .collect()
+    }
+
+    /// `get_pending_comments_num( $post_id )`.
+    pub async fn pending_comments(&self, post_id: u64) -> Result<u64, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT COUNT(comment_ID) AS found FROM {prefix}comments \
+             WHERE comment_post_ID = ? AND comment_approved = '0' AND comment_type != 'note'",
+        );
+        let row = sqlx::query(sql)
+            .bind(post_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.try_get::<i64, _>("found")
+            .map(i64::unsigned_abs)
+            .map_err(db_error)
+    }
+
+    /// `WP_User_Query`'s users for a `capability`: those whose capabilities
+    /// meta, `key`, names any of `names` (roles or capabilities), by name.
+    pub async fn users_with(&self, key: &str, names: &[String]) -> Result<Vec<User>, DbError> {
+        let mut sql = Sql::new(
+            "SELECT DISTINCT ID, display_name, user_nicename, user_login, user_email, user_url, \
+             '' AS first_name, '' AS last_name, '' AS description \
+             FROM {prefix}users u INNER JOIN {prefix}usermeta m ON u.ID = m.user_id \
+             WHERE m.meta_key = ? AND (",
+        );
+        sql.bind(Bind::Text(key.into()));
+        for (i, name) in names.iter().enumerate() {
+            sql.push(if i > 0 {
+                " OR m.meta_value LIKE ?"
+            } else {
+                "m.meta_value LIKE ?"
+            });
+            sql.bind(Bind::Text(format!("%\"{}\"%", esc_like(name))));
+        }
+        sql.push(") ORDER BY display_name ASC");
+        let rows = sql
+            .query(&self.prefix)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(user).collect()
+    }
+
     /// `wp_count_comments()`'s approved, moderated, spam and trashed
     /// comments, and `user`'s approved and pending ones; notes left out.
     pub async fn comment_counts(&self, user: u64) -> Result<[u64; 5], DbError> {
@@ -1206,11 +1340,27 @@ fn posts_sql(query: &PostQuery) -> Sql {
     sql
 }
 
-/// The `WHERE` criteria of [`posts_sql`]: published posts of the query's
+/// The `WHERE` criteria of [`posts_sql`]: posts of the query's statuses and
 /// types (any, if none), authors in or out, parents, terms, formats, inclusions,
 /// search and date.
 fn post_criteria(sql: &mut Sql, query: &PostQuery) {
-    sql.push("post_status = 'publish'");
+    if query.statuses.is_empty() {
+        sql.push("post_status = 'publish'");
+    } else {
+        sql.push("(");
+        for (i, filter) in query.statuses.iter().enumerate() {
+            if i > 0 {
+                sql.push(" OR ");
+            }
+            if let Some(author) = filter.author {
+                sql.push("post_author = ? AND ");
+                sql.bind(Bind::Int(author));
+            }
+            sql.push("post_status = ?");
+            sql.bind(Bind::Text(filter.status.clone()));
+        }
+        sql.push(")");
+    }
     if !query.post_types.is_empty() {
         sql.push(" AND post_type IN (");
         list(sql, query.post_types.iter().map(|t| Bind::Text(t.clone())));

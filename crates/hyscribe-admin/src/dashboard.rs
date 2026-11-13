@@ -12,13 +12,13 @@ use hyscribe_phpser::{Maybe, Value, json_decode, maybe_unserialize};
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::convert_chars;
 use hyscribe_render::post::sanitize_html_class;
-use hyscribe_render::post::the_title;
 use hyscribe_render::{comment_avatar, number_format, wp_trim_words};
 
 use crate::admin_bar::{BarSite, Browser};
 use crate::menu::Screen;
-use crate::menu::link;
-use crate::page::{HelpTab, Page, PageSite, admin_page, json, object, text};
+use crate::menu::{esc_link, link};
+use crate::page::{HelpTab, Page, admin_page, json, object, text};
+use crate::posts::{PostsSite, draft_or_post_title};
 
 /// `$wp_version`.
 const VERSION: &str = include_str!("../../../wordpress/VERSION");
@@ -66,7 +66,7 @@ pub struct CommentCounts {
 }
 
 /// What the dashboard asks of the site and its user.
-pub trait DashboardSite: PageSite {
+pub trait DashboardSite: PostsSite {
     /// `get_user_meta( $user, 'show_welcome_panel', true )`, as stored.
     fn show_welcome_panel(&self) -> Option<Vec<u8>>;
     /// The user's email.
@@ -83,21 +83,11 @@ pub trait DashboardSite: PageSite {
     /// The latest five posts of `status`, `future` ones the user may edit
     /// soonest first, others newest first.
     fn recent_posts(&self, status: &str) -> Vec<Post>;
-    /// `current_user_can( 'edit_post', $post->ID )`.
-    fn can_edit_post(&self, post: &Post) -> bool;
-    /// `get_permalink( $post )`.
-    fn permalink(&self, post: &Post) -> String;
-    /// The site's time zone and the time now.
-    fn clock(&self) -> (Zone, i64);
     /// The Quick Draft's auto-draft: the user's stored one while it is
     /// still an auto-draft.
     fn quick_draft(&self) -> Option<u64>;
     /// The user's four latest drafts, last modified first.
     fn drafts(&self) -> Vec<Post>;
-    /// `get_user_option( $name )`, as stored.
-    fn user_option(&self, name: &str) -> Option<Vec<u8>>;
-    /// `get_option( $name )`, as stored.
-    fn option(&self, name: &str) -> Option<Vec<u8>>;
 }
 
 /// The welcome panel for a user who may `edit_theme_options`, as
@@ -300,7 +290,7 @@ fn recent_posts(site: &dyn DashboardSite, posts: &[Post], title: &str, id: &str)
             utc("M jS")
         };
         let time = date::format(&time_format, &post.date, zone);
-        let link = if site.can_edit_post(post) {
+        let link = if site.can_post("edit_post", post) {
             BarSite::admin_url(site, &format!("post.php?post={}&amp;action=edit", post.id))
         } else {
             site.permalink(post)
@@ -337,13 +327,12 @@ fn comment_row(
     if row.can_edit {
         let id = comment.id;
         let url = |action: &str, nonce: &str| {
-            // Escaped in PHP's relative form, which `esc_url()` keeps; the
-            // nonce, hex digits, escapes to itself.
+            // The nonce, hex digits, escapes to itself.
             let url = format!(
                 "comment.php?action={action}&p={}&c={id}&_wpnonce=",
                 comment.post_id
             );
-            let url = link(&text(&esc_url(url.as_bytes())));
+            let url = esc_link(&url);
             format!("{url}{}", site.nonce(&format!("{nonce}_{id}")))
         };
         let links = [
@@ -708,16 +697,6 @@ struct Activity {
     future: Vec<Post>,
     published: Vec<Post>,
     comments: Vec<RecentComment>,
-}
-
-/// `_draft_or_post_title()`: the title, escaped, or `(no title)`.
-fn draft_or_post_title(post: &Post) -> String {
-    let title = the_title(post);
-    if title.is_empty() {
-        "(no title)".to_string()
-    } else {
-        esc_html(&title)
-    }
 }
 
 /// An option as text, empty when unset.

@@ -120,7 +120,7 @@ impl Renderer<'_> {
             self.context.post_id = Some(post.id);
             let class = post_class(
                 self.context.site,
-                self.context.request,
+                Some(self.context.request),
                 "wp-block-post",
                 post,
             );

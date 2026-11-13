@@ -3,6 +3,7 @@
 //! Post template tags from `wp-includes/post-template.php`: the title, and
 //! the classes of a post and of the page body.
 
+use hyscribe_kses::esc_attr;
 use hyscribe_model::Post;
 use hyscribe_phpser::{Value, decode, php_trim};
 
@@ -36,6 +37,11 @@ pub fn post_format_string(slug: &[u8]) -> &'static str {
         .iter()
         .find(|(slug, _)| slug.as_bytes() == format)
         .map_or("", |(_, name)| name)
+}
+
+/// `get_the_title( $post )` in the admin, which prefixes no state.
+pub fn admin_title(post: &Post) -> Vec<u8> {
+    title_filters(&post.title)
 }
 
 /// `get_the_title( $post )` with the `the_title` filters.
@@ -105,16 +111,18 @@ fn taxonomies(post_type: &str) -> &'static [&'static str] {
     }
 }
 
-/// `get_post_class( $class, $post )`, joined by spaces. Only `post`
-/// supports post formats among the core types.
-pub(crate) fn post_class(site: &dyn Site, request: &Request, class: &str, post: &Post) -> Vec<u8> {
+/// `get_post_class( $class, $post )`, joined by spaces, for `request` or
+/// the admin (`None`); only `post` has post formats among core types.
+pub fn post_class(site: &dyn Site, request: Option<&Request>, class: &str, post: &Post) -> Vec<u8> {
     let id = post.id;
     let mut classes: Vec<Vec<u8>> = class
         .split_whitespace()
         .map(|c| c.as_bytes().to_vec())
         .collect();
     classes.push(format!("post-{id}").into_bytes());
-    classes.push(post.post_type.clone().into_bytes());
+    if request.is_some() {
+        classes.push(post.post_type.clone().into_bytes());
+    }
     classes.push(format!("type-{}", post.post_type).into_bytes());
     classes.push(format!("status-{}", post.status).into_bytes());
     if post.post_type == "post" {
@@ -138,8 +146,12 @@ pub(crate) fn post_class(site: &dyn Site, request: &Request, class: &str, post: 
         .as_ref()
         .and_then(Value::as_array)
         .is_some_and(|ids| ids.iter().any(|(_, v)| v.to_int() == id as i64));
-    if is_sticky && request.home && !request.is_paged() {
-        classes.push(b"sticky".to_vec());
+    match request {
+        Some(request) if is_sticky && request.home && !request.is_paged() => {
+            classes.push(b"sticky".to_vec());
+        }
+        None if is_sticky => classes.push(b"status-sticky".to_vec()),
+        _ => {}
     }
     classes.push(b"hentry".to_vec());
     for taxonomy in taxonomies(&post.post_type) {
@@ -160,7 +172,7 @@ pub(crate) fn post_class(site: &dyn Site, request: &Request, class: &str, post: 
         }
     }
     let mut unique: Vec<Vec<u8>> = Vec::with_capacity(classes.len());
-    for class in classes {
+    for class in classes.iter().map(|class| esc_attr(class).into_bytes()) {
         if !unique.contains(&class) {
             unique.push(class);
         }
@@ -296,7 +308,7 @@ pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8>
         .concat(),
     );
     let mut unique: Vec<Vec<u8>> = Vec::with_capacity(classes.len());
-    for class in classes {
+    for class in classes.iter().map(|class| esc_attr(class).into_bytes()) {
         if !unique.contains(&class) {
             unique.push(class);
         }

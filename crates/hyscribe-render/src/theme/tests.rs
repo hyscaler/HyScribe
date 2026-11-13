@@ -128,3 +128,11 @@ fn twentytwentyfive_files_are_built_in() {
 fn the_theme_is_named_by_its_header() {
     assert_eq!(twentytwentyfive().name(), "Twenty Twenty-Five");
 }
+
+/// `functions.php`'s post formats.
+#[test]
+fn post_formats_are_the_theme_s() {
+    let formats = twentytwentyfive().post_formats();
+    assert_eq!(formats.first(), Some(&"aside"));
+    assert_eq!(formats.len(), 9);
+}

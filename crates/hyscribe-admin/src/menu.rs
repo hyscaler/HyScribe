@@ -640,6 +640,14 @@ fn root_text(title: &str) -> String {
     text.trim().to_string()
 }
 
+/// `esc_url()` of a relative `wp-admin` URL, `file.php?query`, then its
+/// hs-admin link: `esc_url()` keeps a relative URL only in the PHP form.
+pub fn esc_link(php_url: &str) -> String {
+    link(&String::from_utf8_lossy(&hyscribe_kses::esc_url(
+        php_url.as_bytes(),
+    )))
+}
+
 /// The admin menu, `#adminmenumain`, on `screen` for `user`; `None` when
 /// `user_can_access_admin_page()` turns them away.
 pub fn admin_menu(user: &dyn MenuUser, screen: &Screen) -> Option<String> {

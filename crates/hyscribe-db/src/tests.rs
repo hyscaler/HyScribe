@@ -5,14 +5,25 @@
 
 use super::*;
 use hyscribe_config::Secret;
-use hyscribe_model::{FormatFilter, Term, TermFilter, TermOrder, TermQuery, TimeCondition};
+use hyscribe_model::{
+    FormatFilter, StatusFilter, Term, TermFilter, TermOrder, TermQuery, TimeCondition, User,
+};
 
 fn fixture_config() -> Database {
     hyscribe_testkit::fixture_database()
 }
 
 async fn fixture() -> Db {
-    Db::connect(&fixture_config())
+    named(&fixture_config().name).await
+}
+
+/// The fixture database `name`.
+async fn named(name: &str) -> Db {
+    let config = Database {
+        name: name.into(),
+        ..fixture_config()
+    };
+    Db::connect(&config)
         .await
         .expect(hyscribe_testkit::NO_FIXTURE_DATABASE)
 }
@@ -407,6 +418,14 @@ async fn errors_are_reported() {
         )
         .await
         .unwrap_err(),
+        db.status_counts("post", None).await.unwrap_err(),
+        db.own_posts("post", 1).await.unwrap_err(),
+        db.sticky_count("post", &[1]).await.unwrap_err(),
+        db.post_months("post").await.unwrap_err(),
+        db.pending_comments(1).await.unwrap_err(),
+        db.users_with("wp_capabilities", &["administrator".into()])
+            .await
+            .unwrap_err(),
     ] {
         assert!(
             [
@@ -1198,24 +1217,13 @@ async fn dashboard_reads() {
     let ids: Vec<(u64, String)> = latest.into_iter().map(|(c, a)| (c.id, a)).collect();
     assert_eq!(ids, [(1, "1".to_string())]);
     assert!(db.latest_comments(false, 5, 1).await.unwrap().is_empty());
-    let connect = |name: &str| {
-        let config = Database {
-            name: name.into(),
-            ..fixture_config()
-        };
-        async move {
-            Db::connect(&config)
-                .await
-                .expect(hyscribe_testkit::NO_FIXTURE_DATABASE)
-        }
-    };
-    let ttd = connect("wordpress_ttd").await;
+    let ttd = named("wordpress_ttd").await;
     let [approved, moderated, spam, trash, _] = ttd.comment_counts(1).await.unwrap();
     assert_eq!((approved, moderated, spam, trash), (31, 3, 0, 0));
     let approved_only = ttd.latest_comments(false, 50, 0).await.unwrap();
     assert!(approved_only.iter().all(|(_, a)| a == "1"));
     assert_eq!(ttd.latest_comments(true, 50, 0).await.unwrap().len(), 34);
-    let terms = connect("wordpress_terms").await;
+    let terms = named("wordpress_terms").await;
     let ids = |posts: Vec<Post>| posts.iter().map(|p| p.id).collect::<Vec<_>>();
     let query = |order, author| StatusQuery {
         status: "publish",
@@ -1251,4 +1259,53 @@ async fn dashboard_reads() {
             .unwrap()
             .is_empty()
     );
+}
+
+/// The posts list's counts and lists, over the Theme Test Data.
+#[tokio::test]
+async fn posts_list_reads() {
+    let ttd = named("wordpress_ttd").await;
+    let mut counts = ttd.status_counts("post", None).await.unwrap();
+    counts.sort();
+    let counts: Vec<(&str, u64)> = counts.iter().map(|(s, n)| (s.as_str(), *n)).collect();
+    assert_eq!(counts, [("draft", 1), ("future", 1), ("publish", 57)]);
+    assert_eq!(ttd.status_counts("page", Some(2)).await.unwrap().len(), 2);
+    assert_eq!(ttd.own_posts("post", 2).await.unwrap(), 39);
+    assert_eq!(ttd.sticky_count("post", &[1241, 155]).await.unwrap(), 1);
+    let months = ttd.post_months("post").await.unwrap();
+    assert_eq!(months.get(..2), Some(&[(2030, 1), (2026, 11)][..]));
+    assert_eq!(ttd.pending_comments(155).await.unwrap(), 1);
+    assert_eq!(ttd.pending_comments(1241).await.unwrap(), 0);
+    let ids = |users: Vec<User>| users.iter().map(|u| u.id).collect::<Vec<_>>();
+    let editors = ["edit_posts".to_string(), "administrator".to_string()];
+    let admins = ttd.users_with("wp_capabilities", &editors).await.unwrap();
+    assert_eq!(ids(admins), [1]);
+    let readers = ["subscriber".to_string()];
+    let subscribers = ttd.users_with("wp_capabilities", &readers).await.unwrap();
+    assert_eq!(ids(subscribers), [2, 3]);
+    let all = PostQuery {
+        post_types: vec!["post".into()],
+        statuses: ["publish", "future", "draft", "pending", "private"]
+            .iter()
+            .map(|status| StatusFilter {
+                status: (*status).into(),
+                author: None,
+            })
+            .collect(),
+        limit: 100,
+        ..PostQuery::default()
+    };
+    assert_eq!(ttd.count_posts(&all).await.unwrap(), 59);
+    let drafts_by = |author| PostQuery {
+        post_types: vec!["page".into()],
+        statuses: vec![StatusFilter {
+            status: "draft".into(),
+            author,
+        }],
+        limit: 5,
+        ..PostQuery::default()
+    };
+    let page_ids = |posts: Vec<Post>| posts.iter().map(|p| p.id).collect::<Vec<_>>();
+    assert_eq!(page_ids(ttd.posts(&drafts_by(Some(1))).await.unwrap()), [3]);
+    assert!(ttd.posts(&drafts_by(Some(2))).await.unwrap().is_empty());
 }

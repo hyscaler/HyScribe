@@ -53,7 +53,8 @@ const DAYS: [&str; 7] = [
     "Saturday",
 ];
 
-pub(crate) const MONTHS: [&str; 12] = [
+/// The months' names.
+pub const MONTHS: [&str; 12] = [
     "January",
     "February",
     "March",
@@ -319,7 +320,7 @@ pub fn format_unix(format: &str, unix: i64, zone: Zone) -> String {
 }
 
 /// The Unix time of a stored local time in `zone`.
-pub(crate) fn stored_unix(stored: &str, zone: Zone) -> i64 {
+pub fn stored_unix(stored: &str, zone: Zone) -> i64 {
     Time::parse(stored, zone).unix()
 }
 

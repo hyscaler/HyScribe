@@ -142,6 +142,8 @@ pub struct PostQuery {
     /// Post types to include, such as `post`, or `post` and `page` for a
     /// search; none means any.
     pub post_types: Vec<String>,
+    /// The statuses to include; none means `publish`.
+    pub statuses: Vec<StatusFilter>,
     /// Search terms; every term must appear in the title, excerpt or content.
     pub search: Vec<String>,
     /// `exact`: a term must be a whole title, excerpt or content.
@@ -180,6 +182,16 @@ pub struct PostQuery {
     pub limit: u32,
     /// How many to skip.
     pub offset: u32,
+}
+
+/// A status a query selects, and the only author whose posts of it it
+/// selects when given, as `WP_Query` limits private posts.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StatusFilter {
+    /// `post_status`.
+    pub status: String,
+    /// `post_author`, when only theirs.
+    pub author: Option<u64>,
 }
 
 /// The SQL part of a `WP_Term_Query` for one taxonomy: what its `WHERE`,

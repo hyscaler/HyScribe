@@ -365,16 +365,18 @@ fn pad_counts(terms: &mut [Term], posts: &[(u64, u64)]) {
 }
 
 /// What `Walker::walk()` does at each step.
-enum Walk<'a> {
+pub enum Walk<'a> {
+    /// An element starts.
     Start(&'a Term),
     /// A level of children opens or closes at a depth.
     Level(usize, bool),
+    /// The element ends.
     End,
 }
 
 /// `Walker::walk()` over `terms`: the full tree from the top level (or,
 /// with none, from the first term's parent), then orphans flat; or all flat.
-fn walk<'a>(terms: &'a [Term], tree: bool, visit: &mut dyn FnMut(Walk<'a>)) {
+pub fn walk<'a>(terms: &'a [Term], tree: bool, visit: &mut dyn FnMut(Walk<'a>)) {
     if !tree {
         for term in terms {
             visit(Walk::Start(term));

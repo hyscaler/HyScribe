@@ -4,6 +4,7 @@ use hyscribe_model::{Post, PostQuery, Term};
 use hyscribe_phpser::json_decode;
 use hyscribe_testkit::unhex;
 
+use crate::excerpt::the_excerpt;
 use crate::fixture::DefaultInstall;
 use crate::formatting::{contains, convert_chars, ent2ncr, html_entity_decode};
 use crate::site::{Request, Site};
@@ -80,6 +81,10 @@ fn matches_php() {
         let mut renderer = Renderer::new(&theme, &site, &request);
         renderer.context.post_id = Some(site.post.id);
         let excerpt = renderer.get_the_excerpt(&site.post);
+        // Outside a feed the content stops at its more tag.
+        if !contains(&site.post.content, b"<!--more") {
+            assert_eq!(the_excerpt(&theme, &site, &site.post), excerpt);
+        }
         let rss = convert_chars(&ent2ncr(&excerpt));
         let content = replace(&renderer.the_content(&site.post), b"]]>", b"]]&gt;");
         // wp_filter_content_tags(), which adds image attributes, is not

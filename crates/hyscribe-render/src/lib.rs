@@ -21,7 +21,7 @@ pub use core_blocks::{comment_avatar, number_format, user_avatar};
 pub mod date;
 mod elements;
 mod excerpt;
-pub use excerpt::wp_trim_words;
+pub use excerpt::{the_excerpt, wp_trim_words};
 pub mod feed;
 mod file_block;
 #[cfg(test)]
@@ -58,4 +58,5 @@ mod title;
 mod variations;
 mod widgets;
 
+pub use categories::{Walk, walk};
 pub use query_loop::{search_terms, sticky_posts};

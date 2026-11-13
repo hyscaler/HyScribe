@@ -15,8 +15,10 @@ use hyscribe_admin::dashboard::{CommentCounts, DashboardSite, RecentComment, das
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
-use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
+use hyscribe_admin::posts::{PostsSite, edit};
+use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
 use hyscribe_db::{StatusOrder, StatusQuery};
+use hyscribe_model::{Post, PostQuery, Term, TermOrder, TermQuery, User};
 use hyscribe_phpser::{Value, remove_query_arg, urlencode};
 use hyscribe_render::date::Zone;
 use hyscribe_render::site::Site as RenderSite;
@@ -371,19 +373,6 @@ impl DashboardSite for Admin<'_> {
         }
         self.posts(status, None, StatusOrder::DateDesc, 5)
     }
-    fn can_edit_post(&self, post: &hyscribe_model::Post) -> bool {
-        self.can_for("edit_post", post.id)
-    }
-    fn permalink(&self, post: &hyscribe_model::Post) -> String {
-        String::from_utf8_lossy(&hyscribe_render::permalinks::permalink(
-            &self.reads.reads,
-            post,
-        ))
-        .into_owned()
-    }
-    fn clock(&self) -> (Zone, i64) {
-        (self.site.zone(), self.reads.now)
-    }
     fn quick_draft(&self) -> Option<u64> {
         let stored = self
             .reads
@@ -396,11 +385,93 @@ impl DashboardSite for Admin<'_> {
     fn drafts(&self) -> Vec<hyscribe_model::Post> {
         self.posts("draft", Some(self.user.id), StatusOrder::ModifiedDesc, 4)
     }
-    fn user_option(&self, name: &str) -> Option<Vec<u8>> {
-        self.reads.user_option(self.user.id, name)
+}
+
+impl PostsSite for Admin<'_> {
+    fn can_post(&self, cap: &str, post: &Post) -> bool {
+        self.can_for(cap, post.id)
+    }
+    fn permalink(&self, post: &Post) -> String {
+        let link = hyscribe_render::permalinks::permalink(&self.reads.reads, post);
+        String::from_utf8_lossy(&link).into_owned()
+    }
+    fn clock(&self) -> (Zone, i64) {
+        (self.site.zone(), self.reads.now)
     }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         CapabilityData::option(self.reads, name)
+    }
+    fn post_class(&self, class: &str, post: &Post) -> String {
+        let classes = hyscribe_render::post::post_class(&self.reads.reads, None, class, post);
+        String::from_utf8_lossy(&classes).into_owned()
+    }
+    fn post_terms(&self, post: &Post, taxonomy: &str) -> Vec<Term> {
+        RenderSite::post_terms(&self.reads.reads, post.id, taxonomy)
+    }
+    fn meta(&self, post: &Post, key: &str) -> Option<Vec<u8>> {
+        CapabilityData::post_meta(self, post.id, key)
+    }
+    fn display_name(&self, id: u64) -> Option<Vec<u8>> {
+        let user = self.reads.reads.wait(self.site.db.user(id));
+        user.map(|user| user.display_name)
+    }
+    fn pending_comments(&self, post: &Post) -> u64 {
+        self.reads
+            .reads
+            .wait(self.site.db.pending_comments(post.id))
+    }
+    fn excerpt(&self, post: &Post) -> Vec<u8> {
+        hyscribe_render::the_excerpt(&self.site.theme, &self.reads.reads, post)
+    }
+    fn terms(&self, taxonomy: &str) -> Vec<Term> {
+        RenderSite::taxonomy_terms(&self.reads.reads, taxonomy)
+    }
+    fn popular_terms(&self, taxonomy: &str) -> Vec<u64> {
+        let query = TermQuery {
+            taxonomy: taxonomy.into(),
+            nonempty: true,
+            order: Some((TermOrder::Count, true)),
+            limit: Some(10),
+            ..TermQuery::default()
+        };
+        RenderSite::term_query(&self.reads.reads, &query)
+            .iter()
+            .map(|term| term.id)
+            .collect()
+    }
+    fn authors(&self) -> Vec<User> {
+        let prefix = self.site.db.prefix();
+        let mut names = vec!["edit_posts".to_string()];
+        names.extend(roles_with(self, prefix, "edit_posts"));
+        let key = format!("{prefix}capabilities");
+        self.reads.reads.wait(self.site.db.users_with(&key, &names))
+    }
+    fn post_formats(&self) -> &'static [&'static str] {
+        self.site.theme.post_formats()
+    }
+    fn list_posts(&self, query: &PostQuery) -> (Vec<Post>, u64) {
+        let posts = self.reads.reads.wait(self.site.db.posts(query));
+        let found = self.reads.reads.wait(self.site.db.count_posts(query));
+        (posts, found)
+    }
+    fn status_counts(&self, post_type: &str, private_author: Option<u64>) -> Vec<(String, u64)> {
+        let counts = self.site.db.status_counts(post_type, private_author);
+        self.reads.reads.wait(counts)
+    }
+    fn own_posts(&self, post_type: &str) -> u64 {
+        let count = self.site.db.own_posts(post_type, self.user.id);
+        self.reads.reads.wait(count)
+    }
+    fn sticky_count(&self, post_type: &str, ids: &[u64]) -> u64 {
+        self.reads
+            .reads
+            .wait(self.site.db.sticky_count(post_type, ids))
+    }
+    fn months(&self, post_type: &str) -> Vec<(u32, u32)> {
+        self.reads.reads.wait(self.site.db.post_months(post_type))
+    }
+    fn user_option(&self, name: &str) -> Option<Vec<u8>> {
+        self.reads.user_option(self.user.id, name)
     }
 }
 
@@ -428,6 +499,10 @@ fn screen(
         "/hs-admin/tools" => hyscribe_admin::tools::tools(admin, &canonical, origin, browser),
         "/hs-admin/" | "/hs-admin/index" => {
             dashboard(admin, &canonical, origin, request_uri, browser)
+        }
+        // Only the unfiltered list is ported.
+        "/hs-admin/edit" if !request_uri.contains('?') => {
+            edit(admin, &canonical, origin, request_uri, browser)
         }
         _ => return None,
     };

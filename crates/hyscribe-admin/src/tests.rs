@@ -118,6 +118,18 @@ pub fn options() -> &'static HashMap<String, Vec<u8>> {
     })
 }
 
+/// The PHP oracle's `screen` for `role` in `pages.tsv`, under hs-admin's URLs.
+pub fn page_golden(role: &str, screen: &str) -> String {
+    let golden = include_str!("../tests/golden/pages.tsv");
+    let row = golden
+        .lines()
+        .find(|line| line.starts_with(&format!("{role}\t{screen}\t")))
+        .unwrap();
+    hyscribe_testkit::hs_admin_page(
+        &String::from_utf8(hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap())).unwrap(),
+    )
+}
+
 /// User 1 with a role's capabilities, on HyScribe's constants, as
 /// `reference/admin-menu/as-role.php` sets PHP up.
 pub struct Role(pub &'static str);
@@ -132,6 +144,41 @@ impl Role {
     pub fn variant(&self) -> &'static str {
         self.0.split_once(':').map_or("", |(variant, _)| variant)
     }
+
+    /// A variant of `reference/posts-list/golden.sh`, over its content.
+    fn listing(&self) -> bool {
+        ["posts", "hidden"].contains(&self.variant())
+    }
+}
+
+/// The site with one post known to `map_meta_cap()`.
+struct WithPost<'a>(&'a Role, CapPost);
+
+impl CapabilityData for WithPost<'_> {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        CapabilityData::option(self.0, name)
+    }
+    fn user_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        self.0.user_meta(id, key)
+    }
+    fn user_exists(&self, id: u64) -> bool {
+        self.0.user_exists(id)
+    }
+    fn post(&self, id: u64) -> Option<CapPost> {
+        (id == self.1.id).then(|| self.1.clone())
+    }
+    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        self.0.post_meta(id, key)
+    }
+    fn comment_post(&self, id: u64) -> Option<u64> {
+        self.0.comment_post(id)
+    }
+    fn term_taxonomy(&self, id: u64) -> Option<String> {
+        self.0.term_taxonomy(id)
+    }
+    fn constant(&self, name: &str) -> bool {
+        self.0.constant(name)
+    }
 }
 
 impl CapabilityData for Role {
@@ -144,7 +191,7 @@ impl CapabilityData for Role {
         })
     }
     fn user_exists(&self, id: u64) -> bool {
-        id == 1
+        id == 1 || self.listing() && id == 2
     }
     fn post(&self, _: u64) -> Option<CapPost> {
         None
@@ -168,7 +215,11 @@ impl MenuUser for Role {
         Capabilities::load(self, "wp_", 1).has_cap(self, cap, &[])
     }
     fn moderated_comments(&self) -> u64 {
-        u64::from(self.variant() == "content")
+        match self.variant() {
+            "content" => 1,
+            _ if self.listing() => 2,
+            _ => 0,
+        }
     }
     fn transient(&self, name: &str) -> Option<Vec<u8>> {
         let counts: &[u8] = match (name, self.variant()) {
@@ -251,6 +302,7 @@ fn post(id: u64, title: &str, status: &str, date: &str, content: &str) -> hyscri
         date_gmt: date.into(),
         modified: date.into(),
         status: status.into(),
+        post_type: "post".into(),
         ..hyscribe_model::Post::default()
     }
 }
@@ -413,40 +465,6 @@ impl crate::dashboard::DashboardSite for Role {
             _ => Vec::new(),
         }
     }
-    /// `map_meta_cap()`'s `edit_post` for a post by user 1.
-    fn can_edit_post(&self, post: &hyscribe_model::Post) -> bool {
-        if post.status == "publish" {
-            self.can("edit_published_posts")
-        } else {
-            self.can("edit_posts")
-        }
-    }
-    fn permalink(&self, post: &hyscribe_model::Post) -> String {
-        format!("{SITE}/?p={}", post.id)
-    }
-    fn option(&self, name: &str) -> Option<Vec<u8>> {
-        if name == "show_avatars" && self.variant() == "noavatars"
-            || name == "blog_public" && self.variant() == "layout"
-        {
-            return Some(b"0".to_vec());
-        }
-        options().get(name).cloned()
-    }
-    fn user_option(&self, name: &str) -> Option<Vec<u8>> {
-        if self.variant() == "twice" && name == "meta-box-order_dashboard" {
-            return Some(b"a:3:{s:6:\"normal\";s:37:\"dashboard_activity,dashboard_activity\";s:4:\"side\";s:19:\"dashboard_right_now\";s:7:\"column3\";s:19:\"dashboard_right_now\";}".to_vec());
-        }
-        if self.variant() != "layout" {
-            return None;
-        }
-        let value: &[u8] = match name {
-            "metaboxhidden_dashboard" => b"a:1:{i:0;s:18:\"dashboard_activity\";}",
-            "closedpostboxes_dashboard" => b"a:1:{i:0;s:19:\"dashboard_right_now\";}",
-            "meta-box-order_dashboard" => b"a:2:{s:4:\"side\";s:39:\"dashboard_site_health,dashboard_primary\";s:6:\"normal\";s:21:\"dashboard_quick_press\";}",
-            _ => return None,
-        };
-        Some(value.to_vec())
-    }
     /// The auto-draft the goldens mask, as post 4.
     fn quick_draft(&self) -> Option<u64> {
         Some(4)
@@ -472,6 +490,37 @@ impl crate::dashboard::DashboardSite for Role {
             ),
         ]
     }
+}
+
+impl crate::posts::PostsSite for Role {
+    fn can_post(&self, cap: &str, post: &hyscribe_model::Post) -> bool {
+        let known = WithPost(
+            self,
+            CapPost {
+                id: post.id,
+                author: post.author,
+                status: post.status.clone(),
+                post_type: post.post_type.clone(),
+                parent: post.parent,
+            },
+        );
+        let id = hyscribe_phpser::Value::Int(i64::try_from(post.id).unwrap());
+        Capabilities::load(self, "wp_", 1).has_cap(&known, cap, &[id])
+    }
+    fn permalink(&self, post: &hyscribe_model::Post) -> String {
+        format!("{SITE}/?p={}", post.id)
+    }
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        if name == "sticky_posts" && (self.listing() || self.variant() == "empty") {
+            return Some(b"a:2:{i:0;i:304;i:1;i:306;}".to_vec());
+        }
+        if name == "show_avatars" && self.variant() == "noavatars"
+            || name == "blog_public" && self.variant() == "layout"
+        {
+            return Some(b"0".to_vec());
+        }
+        options().get(name).cloned()
+    }
     fn clock(&self) -> (hyscribe_render::date::Zone, i64) {
         if self.variant() == "dst" {
             // 2026-11-01 00:30 in New York, the day its clocks go back.
@@ -479,5 +528,147 @@ impl crate::dashboard::DashboardSite for Role {
             return (zone, 1_793_507_400);
         }
         (hyscribe_render::date::Zone::Utc, 1_794_500_000)
+    }
+    fn post_class(&self, class: &str, post: &hyscribe_model::Post) -> String {
+        if self.listing() {
+            return crate::posts::content::post_class(class, post);
+        }
+        let terms: String = self
+            .post_terms(post, "category")
+            .iter()
+            .map(|term| format!(" category-{}", String::from_utf8_lossy(&term.slug)))
+            .collect();
+        format!(
+            "{class} post-{} type-{} status-{} format-standard hentry{terms}",
+            post.id, post.post_type, post.status
+        )
+    }
+    /// The fixture's Uncategorized for posts 1 to 99.
+    fn post_terms(&self, post: &hyscribe_model::Post, taxonomy: &str) -> Vec<hyscribe_model::Term> {
+        if self.listing() {
+            return crate::posts::content::post_terms(post, taxonomy);
+        }
+        if taxonomy != "category" || post.id > 99 {
+            return Vec::new();
+        }
+        vec![hyscribe_model::Term {
+            id: 1,
+            name: b"Uncategorized".to_vec(),
+            slug: b"uncategorized".to_vec(),
+            count: 1,
+            ..hyscribe_model::Term::default()
+        }]
+    }
+    fn meta(&self, post: &hyscribe_model::Post, key: &str) -> Option<Vec<u8>> {
+        crate::posts::content::meta(post, key).filter(|_| self.listing())
+    }
+    fn display_name(&self, id: u64) -> Option<Vec<u8>> {
+        self.authors()
+            .into_iter()
+            .find(|user| user.id == id)
+            .map(|user| user.display_name)
+    }
+    fn pending_comments(&self, post: &hyscribe_model::Post) -> u64 {
+        u64::from(self.listing() && [309, 311].contains(&post.id))
+    }
+    /// The hand-written excerpt, or a stand-in for one made of the content.
+    fn excerpt(&self, post: &hyscribe_model::Post) -> Vec<u8> {
+        if post.excerpt.is_empty() {
+            b"Words".to_vec()
+        } else {
+            post.excerpt.clone()
+        }
+    }
+    fn terms(&self, taxonomy: &str) -> Vec<hyscribe_model::Term> {
+        if self.listing() {
+            return crate::posts::content::terms(taxonomy);
+        }
+        let post = hyscribe_model::Post {
+            id: 1,
+            ..hyscribe_model::Post::default()
+        };
+        crate::posts::PostsSite::post_terms(self, &post, taxonomy)
+    }
+    fn popular_terms(&self, taxonomy: &str) -> Vec<u64> {
+        let mut terms = crate::posts::PostsSite::terms(self, taxonomy);
+        terms.retain(|term| term.count > 0);
+        terms.sort_by_key(|term| std::cmp::Reverse(term.count));
+        terms.iter().take(10).map(|term| term.id).collect()
+    }
+    fn authors(&self) -> Vec<hyscribe_model::User> {
+        let mut authors = crate::posts::content::authors();
+        if !self.listing() {
+            authors.truncate(1);
+        }
+        authors
+    }
+    fn user_option(&self, name: &str) -> Option<Vec<u8>> {
+        if self.variant() == "hidden" {
+            let value: &[u8] = match name {
+                "manageedit-postcolumnshidden" => b"a:2:{i:0;s:4:\"tags\";i:1;s:8:\"comments\";}",
+                "edit_post_per_page" => b"3",
+                _ => return None,
+            };
+            return Some(value.to_vec());
+        }
+        if self.variant() == "twice" && name == "meta-box-order_dashboard" {
+            return Some(b"a:3:{s:6:\"normal\";s:37:\"dashboard_activity,dashboard_activity\";s:4:\"side\";s:19:\"dashboard_right_now\";s:7:\"column3\";s:19:\"dashboard_right_now\";}".to_vec());
+        }
+        if self.variant() != "layout" {
+            return None;
+        }
+        let value: &[u8] = match name {
+            "metaboxhidden_dashboard" => b"a:1:{i:0;s:18:\"dashboard_activity\";}",
+            "closedpostboxes_dashboard" => b"a:1:{i:0;s:19:\"dashboard_right_now\";}",
+            "meta-box-order_dashboard" => b"a:2:{s:4:\"side\";s:39:\"dashboard_site_health,dashboard_primary\";s:6:\"normal\";s:21:\"dashboard_quick_press\";}",
+            _ => return None,
+        };
+        Some(value.to_vec())
+    }
+    /// The fixture's post 1, the only post, or the content's.
+    fn list_posts(&self, query: &hyscribe_model::PostQuery) -> (Vec<hyscribe_model::Post>, u64) {
+        if self.listing() {
+            return crate::posts::content::list(query);
+        }
+        if self.variant() == "empty" {
+            return (Vec::new(), 0);
+        }
+        (vec![crate::posts::tests::hello()], 1)
+    }
+    fn status_counts(&self, _: &str, private_author: Option<u64>) -> Vec<(String, u64)> {
+        if self.listing() {
+            return crate::posts::content::status_counts(private_author);
+        }
+        let status = if self.variant() == "empty" {
+            "trash"
+        } else {
+            "publish"
+        };
+        vec![(status.into(), 1)]
+    }
+    fn own_posts(&self, _: &str) -> u64 {
+        match self.variant() {
+            "empty" => 0,
+            _ if self.listing() => 9,
+            _ => 1,
+        }
+    }
+    fn sticky_count(&self, _: &str, ids: &[u64]) -> u64 {
+        if self.listing() { ids.len() as u64 } else { 0 }
+    }
+    fn months(&self, _: &str) -> Vec<(u32, u32)> {
+        if self.listing() {
+            return crate::posts::content::months();
+        }
+        if self.variant() == "empty" {
+            return Vec::new();
+        }
+        vec![(2026, 10)]
+    }
+    fn post_formats(&self) -> &'static [&'static str] {
+        static THEME: OnceLock<hyscribe_render::theme::Theme> = OnceLock::new();
+        THEME
+            .get_or_init(hyscribe_render::theme::twentytwentyfive)
+            .post_formats()
     }
 }

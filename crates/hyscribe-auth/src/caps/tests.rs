@@ -181,3 +181,26 @@ fn do_not_allow_is_never_granted() {
     assert!(!user.has_cap(&data, "delete_site", &[]));
     assert!(!user.has_cap(&data, "do_not_allow", &[]));
 }
+
+/// The roles that grant a capability, in the order the option lists them;
+/// `wp_roles()->roles` keeps a role without a name.
+#[test]
+fn roles_grant_capabilities() {
+    let data = fixture();
+    assert_eq!(
+        roles_with(&data, "wp_", "edit_posts"),
+        [
+            "administrator",
+            "editor",
+            "author",
+            "contributor",
+            "nameless"
+        ]
+    );
+    assert_eq!(
+        roles_with(&data, "wp_", "manage_options"),
+        ["administrator"]
+    );
+    assert!(roles_with(&data, "wp_", "no_such_cap").is_empty());
+    assert!(roles_with(&Fixture::default(), "wp_", "read").is_empty());
+}

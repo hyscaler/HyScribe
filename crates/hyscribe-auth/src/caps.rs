@@ -145,6 +145,25 @@ fn option_int(data: &dyn CapabilityData, name: &str) -> i64 {
     stored(data.option(name)).to_int()
 }
 
+/// The roles that grant `cap`, as `WP_User_Query` lists them for its
+/// `capability` argument.
+pub fn roles_with(data: &dyn CapabilityData, prefix: &str, cap: &str) -> Vec<String> {
+    let Value::Array(roles) = stored(data.option(&format!("{prefix}user_roles"))) else {
+        return Vec::new();
+    };
+    roles
+        .iter()
+        .filter(|(_, role)| {
+            role.get_str("capabilities")
+                .and_then(Value::as_array)
+                .unwrap_or_default()
+                .iter()
+                .any(|(key, granted)| key.to_php_string() == cap.as_bytes() && !granted.is_empty())
+        })
+        .map(|(key, _)| String::from_utf8_lossy(&key.to_php_string()).into_owned())
+        .collect()
+}
+
 /// A user's capabilities, as `WP_User` loads them for the site.
 pub struct User {
     id: u64,

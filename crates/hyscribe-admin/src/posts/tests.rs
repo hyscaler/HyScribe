@@ -90,7 +90,13 @@ fn the_list_is_php_s() {
             ..Listing::default()
         };
         let url = format!("{}/hs-admin/edit", crate::tests::SITE);
-        let ours = list_content(&Role(role), &listing, &[], &url, "/hs-admin/edit");
+        let ours = list_content(
+            &Role(role),
+            &listing,
+            &[],
+            (&url, crate::tests::SITE),
+            "/hs-admin/edit",
+        );
         assert!(ours == php, "{role}: {}", first_difference(php, &ours));
     }
 }
@@ -211,6 +217,7 @@ fn variants_are_php_s() {
             cat: cat.into(),
             filters,
             base: named.is_empty() || named.len() == 1 && alone(named[0]),
+            ..ListArgs::default()
         };
         let role: &'static str = Box::leak(format!("{variant}:{}", f[1]).into_boxed_str());
         let recorded = String::from_utf8(unhex(f[2])).unwrap();
@@ -276,7 +283,7 @@ fn subscribers_may_not_list_posts() {
             mobile_hint: None,
         },
     );
-    assert!(page.is_none());
+    assert!(matches!(page, Some(Answer::Denied(_))));
 }
 
 /// `touch_time()` of a draft never dated shows the time now.
@@ -540,7 +547,7 @@ fn long_searches_show_empty() {
         &Role("administrator"),
         &listing,
         &[],
-        &url,
+        (&url, crate::tests::SITE),
         "/hs-admin/edit",
     );
     assert!(page.contains("Search results for: <strong></strong>"));

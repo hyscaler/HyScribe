@@ -7,7 +7,7 @@ use hyscribe_model::USER_ORDERBY;
 use hyscribe_model::User;
 use hyscribe_phpser::{
     Key, Maybe, Value, add_query_arg, addslashes, is_empty_string, maybe_unserialize, php_trim,
-    remove_query_arg, stripslashes, urlencode,
+    stripslashes, urlencode,
 };
 use hyscribe_render::formatting::{user_email_display, user_name_display};
 use hyscribe_render::{number_format, user_avatar};
@@ -19,7 +19,7 @@ use crate::list_table::{
     row_actions, screen_options, search_box, table_description, views, wp_nonce_field,
 };
 use crate::menu::{Screen, link};
-use crate::page::{HelpTab, Page, admin_page};
+use crate::page::{HelpTab, Page, admin_notice, admin_page};
 use crate::posts::{Answer, hidden_columns, per_page};
 
 /// What the users list asks of the site beyond the dashboard's.
@@ -70,6 +70,97 @@ pub struct UserArgs {
     pub paged: Option<String>,
     /// `user_order()` of `orderby` and `order`.
     pub clauses: Vec<(&'static str, bool)>,
+    /// `update`, the action the list is sent back from, if given.
+    pub update: Option<String>,
+    /// `delete_count`, the users deleted, if given.
+    pub delete_count: Option<String>,
+    /// `reset_count`, the users sent a reset link, if given.
+    pub reset_count: Option<String>,
+    /// `id`, the user added, if given.
+    pub id: Option<String>,
+}
+
+/// `users.php`'s notices of `args`, as printed without `wp_kses_post()`;
+/// `request_uri` is slashed.
+fn user_notices(site: &dyn UsersSite, args: &UserArgs, request_uri: &str) -> String {
+    let count = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map_or(0, |value| Value::String(value.into()).to_int())
+    };
+    let notice = |message: &str, class: &str| {
+        admin_notice(message, "message", &format!("is-dismissible {class}"), true)
+    };
+    let deleted = count(&args.delete_count);
+    let others = |message: &str| {
+        if deleted > 0 {
+            notice(message, "updated")
+        } else {
+            String::new()
+        }
+    };
+    match args.update.as_deref() {
+        Some("del" | "del_many") => {
+            let message = match deleted {
+                1 => "User deleted.".into(),
+                n => format!("{} users deleted.", number_format(n)),
+            };
+            notice(&message, "updated")
+        }
+        Some("add") => {
+            let mut message = "New user created.".to_string();
+            // `$_GET['id']`, slashed.
+            let id = args
+                .id
+                .as_deref()
+                .map(|id| text(&addslashes(id.as_bytes())))
+                .filter(|id| !Value::String(id.clone().into_bytes()).is_empty());
+            let editable = |id: &String| {
+                let id = Value::String(id.clone().into_bytes()).to_int();
+                site.can_user("edit_user", id.unsigned_abs())
+            };
+            if let Some(id) = id.filter(editable) {
+                let referer = urlencode(&stripslashes(request_uri.as_bytes()));
+                let edit = BarSite::admin_url(site, &format!("user-edit.php?user_id={id}"));
+                let url = add_query_arg(&[(b"wp_http_referer", Some(&referer))], edit.as_bytes());
+                message.push_str(&format!(
+                    " <a href=\"{}\">Edit user</a>",
+                    text(&esc_url(&url))
+                ));
+            }
+            notice(&message, "updated")
+        }
+        Some("resetpassword") => {
+            let message = match count(&args.reset_count) {
+                1 => "Password reset link sent.".into(),
+                n => format!("Password reset links sent to {} users.", number_format(n)),
+            };
+            notice(&message, "updated")
+        }
+        Some("promote") => notice("Changed roles.", "updated"),
+        Some("err_admin_role") => {
+            notice(
+                "You cannot change your own role to one that does not allow managing other users. Your role was not changed.",
+                "error",
+            ) + &others("Other user roles have been changed.")
+        }
+        Some("err_admin_del") => {
+            notice("You cannot delete the current user.", "error")
+                + &others("Other users have been deleted.")
+        }
+        Some("err_missing_reassign") => {
+            notice(
+                "Users could not be deleted because no user was selected for content reassignment.",
+                "error",
+            ) + &others("Other users have been deleted.")
+        }
+        Some("remove") => notice("User removed from this site.", "updated fade"),
+        Some("err_admin_remove") => {
+            notice("You cannot remove the current user.", "error")
+                + &notice("Other users have been removed.", "updated fade")
+        }
+        _ => String::new(),
+    }
 }
 
 /// `WP_User_Query`'s `ORDER BY` for `orderby` and `order`, by login when
@@ -611,8 +702,7 @@ pub fn users(
         orderby: args.orderby.as_deref(),
         desc: args.order.as_deref() == Some("desc"),
     };
-    let unpaged =
-        String::from_utf8_lossy(&remove_query_arg(&[b"paged"], canonical.as_bytes())).into_owned();
+    let unpaged = crate::list_table::columns_url(origin, request_uri);
     let add = if site.can("create_users") {
         format!(
             "<a href=\"{}\" class=\"page-title-action\">Add User</a>",
@@ -653,6 +743,7 @@ pub fn users(
     let content = fill(
         PAGE,
         &[
+            ("notices", user_notices(site, args, request_uri)),
             ("heading_links", format!("{add}{subtitle}")),
             ("views", views("Filter users list", &links)),
             ("search", search),

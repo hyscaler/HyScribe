@@ -23,7 +23,7 @@ use crate::list_table::{
     screen_options, search_box, table_description, wp_nonce_field,
 };
 use crate::menu::{Screen, esc_link, link};
-use crate::page::{HelpTab, Page, admin_page};
+use crate::page::{HelpTab, Page, admin_page, wp_admin_notice};
 use crate::posts::{Answer, PostsSite, hidden_columns, per_page, term_name, term_options};
 
 /// What the terms lists ask of the site beyond the posts list's.
@@ -100,6 +100,29 @@ pub struct TermArgs {
     pub orderby: Option<String>,
     /// `$_REQUEST['order']`, unslashed, if given.
     pub order: Option<String>,
+    /// `$_REQUEST['message']`, the notice of an action, if given.
+    pub message: Option<String>,
+    /// `$_REQUEST['error']` is set: the action failed.
+    pub error: bool,
+}
+
+/// `edit-tag-messages.php`'s notice of `args`, if one: the message of an
+/// action on the taxonomy's terms.
+fn term_notice(args: &TermArgs) -> Option<String> {
+    let taxonomy = args.taxonomy;
+    let (singular, plural) = (taxonomy.singular, taxonomy.plural);
+    let message = match Value::String(args.message.clone()?.into_bytes()).to_int() {
+        1 => format!("{singular} added."),
+        2 => format!("{singular} deleted."),
+        3 => format!("{singular} updated."),
+        4 => format!("{singular} not added."),
+        5 => format!("{singular} not updated."),
+        6 => format!("{plural} deleted."),
+        _ => return None,
+    };
+    let class = if args.error { "error" } else { "updated" };
+    let classes = format!("is-dismissible {class}");
+    Some(wp_admin_notice(&message, "message", &classes, true, ""))
 }
 
 /// `get_ancestors( $term_id, $taxonomy, 'taxonomy' )` over the terms by
@@ -551,6 +574,17 @@ pub fn edit_tags(
         let to = add_query_arg(&[(b"paged", Some(last.as_bytes()))], request_uri.as_bytes());
         return Answer::Redirect(String::from_utf8_lossy(&to).into_owned());
     }
+    // The request without the notice's arguments once it is shown.
+    let notice = term_notice(args);
+    let request_uri = match notice {
+        Some(_) => String::from_utf8_lossy(&remove_query_arg(
+            &[b"message", b"error"],
+            request_uri.as_bytes(),
+        ))
+        .into_owned(),
+        None => request_uri.to_string(),
+    };
+    let request_uri = request_uri.as_str();
     let start = (page - 1).saturating_mul(per_page);
     let end = start.saturating_add(per_page);
     // `parse_order()`: what reads ASC ascends, anything else descends.
@@ -637,8 +671,7 @@ pub fn edit_tags(
             pagination(which, &heading, total, pages, page, canonical)
         )
     };
-    let unpaged =
-        String::from_utf8_lossy(&remove_query_arg(&[b"paged"], canonical.as_bytes())).into_owned();
+    let unpaged = crate::list_table::columns_url(origin, request_uri);
     let mut list = format!(
         "{}{}<h2 class='screen-reader-text'>{} list</h2><table class=\"wp-list-table widefat fixed striped table-view-list tags\">\n\t\t{}\t<thead>\n\t<tr>\n\t\t{}\t</tr>\n\t</thead>\n\n\t<tbody id=\"the-list\"\n\t\t data-wp-lists='list:tag'\t\t>\n\t\t{rows}\t</tbody>\n\n\t<tfoot>\n\t<tr>\n\t\t{}\t</tr>\n\t</tfoot>\n\n</table>\n\t\t",
         wp_nonce_field(site, "bulk-tags", "_wpnonce", request_uri),
@@ -691,6 +724,7 @@ pub fn edit_tags(
         &[
             ("title", taxonomy.plural.into()),
             ("subtitle", subtitle),
+            ("notice", notice.unwrap_or_default()),
             ("taxonomy", taxonomy.name.into()),
             ("screen", screen_id.clone()),
             ("search", search_field),

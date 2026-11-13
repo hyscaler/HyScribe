@@ -395,6 +395,8 @@ async fn any_comment_is_read() {
     let db = Db::connect(&fixture_config()).await.unwrap();
     assert_eq!(db.any_comment(1).await.unwrap().map(|c| c.id), Some(1));
     assert!(db.any_comment(999).await.unwrap().is_none());
+    assert_eq!(db.comment_approved(1).await.unwrap().as_deref(), Some("1"));
+    assert_eq!(db.comment_approved(999).await.unwrap(), None);
     assert!(db.has_comment_types(&["", "comment"]).await.unwrap());
     assert!(!db.has_comment_types(&["pingback"]).await.unwrap());
 }
@@ -434,6 +436,7 @@ async fn errors_are_reported() {
         db.term(1, "category").await.unwrap_err(),
         db.term_taxonomy(1).await.unwrap_err(),
         db.any_comment(1).await.unwrap_err(),
+        db.comment_approved(1).await.unwrap_err(),
         db.has_comment_types(&["comment"]).await.unwrap_err(),
         db.count_terms("category", None).await.unwrap_err(),
         db.user(1).await.unwrap_err(),

@@ -33,6 +33,7 @@ fn pages_are_php_s() {
             order: arg("order"),
             paged: arg("paged"),
             clauses: user_order(arg("orderby").as_deref(), arg("order").as_deref(), false).unwrap(),
+            ..UserArgs::default()
         };
         // The request's path and query, slashed as `wp_magic_quotes()` does.
         let path = if query.is_empty() {

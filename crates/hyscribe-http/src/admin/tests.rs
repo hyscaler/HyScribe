@@ -205,7 +205,9 @@ async fn logged_in_users_are_let_in() {
     assert!(page.contains("Search results for: <strong>WordPress</strong>"));
     assert!(page.contains("id='comment-1'") && page.contains("row-actions visible"));
     for path in [
-        "/hs-admin/edit-comments?approved=1",
+        "/hs-admin/edit-comments?same=999",
+        "/hs-admin/edit-comments?approved[]=1",
+        "/hs-admin/edit-comments?x=1",
         "/hs-admin/edit-comments?p=3",
         "/hs-admin/edit-comments?orderby=meta_value",
         "/hs-admin/edit-comments?comment_status[]=x",
@@ -241,7 +243,8 @@ async fn logged_in_users_are_let_in() {
         "/hs-admin/users?role=editor&orderby=mt1",
         "/hs-admin/users?s=%FF",
         "/hs-admin/users?role[]=editor",
-        "/hs-admin/users?update=add",
+        "/hs-admin/users?update[]=add",
+        "/hs-admin/users?x=1",
     ] {
         let response = get(&site, path, "127.0.0.1:8081", &auth).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
@@ -267,14 +270,28 @@ async fn logged_in_users_are_let_in() {
     sessions.create(1, now() + 3600, &origin).unwrap();
     let page = page_of(get(&site, "/hs-admin/profile", "127.0.0.1:8081", &cookies).await).await;
     assert!(page.contains("id=\"destroy-sessions\">Log Out Everywhere Else"));
-    let response = get(
-        &site,
-        "/hs-admin/profile?updated=1",
-        "127.0.0.1:8081",
-        &auth,
+    // After a save; a profile's referer is not ported.
+    let page = page_of(
+        get(
+            &site,
+            "/hs-admin/profile?updated=1&error=x",
+            "127.0.0.1:8081",
+            &cookies,
+        )
+        .await,
     )
     .await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    assert!(page.contains("<p><strong>Profile updated.</strong></p></div><div class=\"notice notice-error\"><p></p></div>"));
+    let path = "/hs-admin/user-new?update=add";
+    let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
+    assert!(page.contains("class=\"notice is-dismissible updated\"><p>User added.</p></div>"));
+    for path in [
+        "/hs-admin/profile?wp_http_referer=x",
+        "/hs-admin/profile?user_id=1",
+    ] {
+        let response = get(&site, path, "127.0.0.1:8081", &auth).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+    }
     // The Discussion, Media, Permalinks and Privacy settings, without
     // their arguments and actions.
     let list = include_str!("../../../hyscribe-admin/tests/golden/settings-more.tsv");
@@ -398,13 +415,15 @@ async fn logged_in_users_are_let_in() {
         "value=\"http://127.0.0.1:8081\" disabled='disabled' class=\"regular-text code disabled\""
     ));
     for path in [
-        "/hs-admin/user-edit?user_id=1&updated=1",
+        "/hs-admin/user-edit?user_id=1&updated[]=1",
+        "/hs-admin/user-edit?user_id=1&x=1",
         "/hs-admin/user-edit?user_id[]=1",
         "/hs-admin/user-edit?user_id=%FF",
-        "/hs-admin/user-new?update=add",
-        "/hs-admin/options-general?settings-updated=true",
+        "/hs-admin/user-new?update=add&user_id=1",
+        "/hs-admin/user-new?update[]=add",
+        "/hs-admin/user-new?update=%FF",
         "/hs-admin/options-writing?x",
-        "/hs-admin/options-reading?",
+        "/hs-admin/options-reading?settings-updated=1&x",
     ] {
         let response = get(&site, path, "127.0.0.1:8081", &auth).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
@@ -441,6 +460,32 @@ async fn logged_in_users_are_let_in() {
     let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
     let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
     assert_eq!(with_values(&php, &page), page);
+    // The lists as an action sends users back to them, with its notices; a
+    // request that makes PHP fail part way is not ported.
+    let notices = include_str!("../../../hyscribe-admin/tests/golden/notices.tsv");
+    for row in notices.lines() {
+        let f: Vec<&str> = row.split('\t').collect();
+        let file = f[1].split('?').next().unwrap();
+        let lists = [
+            "edit.php",
+            "edit-tags.php",
+            "edit-comments.php",
+            "users.php",
+        ];
+        if f[0] != "default" || f[2] != "administrator" || !lists.contains(&file) {
+            continue;
+        }
+        let path = hyscribe_testkit::hs_admin_page(&format!("/wp-admin/{}", f[1]));
+        let response = get(&site, &path, "127.0.0.1:8081", &cookies).await;
+        let php = String::from_utf8(hyscribe_testkit::unhex(f[3])).unwrap();
+        if php.contains("There has been a critical error") {
+            assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+            continue;
+        }
+        let page = hyscribe_testkit::settled_page(&page_of(response).await);
+        let php = hyscribe_testkit::settled_page(&hyscribe_testkit::hs_admin_page(&php));
+        assert_eq!(with_values(&php, &page), page, "{path}");
+    }
     // The settings cookie the admin's scripts keep chooses the view.
     let extended = format!("{cookies}; wp-settings-1=posts_list_mode%3Dexcerpt");
     let page = page_of(get(&site, "/hs-admin/edit", "127.0.0.1:8081", &extended).await).await;
@@ -853,6 +898,94 @@ async fn settings_not_ported() {
     assert!(!defined);
 }
 
+/// Over the Theme Test Data fixture's content: the Edit link to a restored
+/// post of a type not ported (attachment 611), and another user's saves.
+#[tokio::test(flavor = "multi_thread")]
+async fn notices_over_more_content() {
+    let mut config = hyscribe_testkit::fixture_database();
+    config.name = "wordpress_ttd".into();
+    let db = hyscribe_db::Db::connect(&config)
+        .await
+        .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
+    let site = Arc::new(Site::load(db, None, None).await.unwrap());
+    let handle = Handle::current();
+    let (restored, saved) = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, now());
+        // Found as a login finds them, which loads their capabilities.
+        let user = LoginSite::user_by_login(&reads, b"admin").unwrap();
+        let user = reads.reads.wait(site.db.user(user.id)).unwrap();
+        let admin = Admin::new(&reads, &site, user);
+        let served = |path: &str, query: &str| {
+            let uri = format!("{path}?{query}");
+            let url = format!("http://h{uri}");
+            screen(&admin, path, &uri, &url, "http://h", &Browser::default())
+        };
+        let restored = |id: u64| {
+            let query = format!("untrashed=1&ids={id}");
+            served("/hs-admin/edit", &query).map(|response| response.status())
+        };
+        let query = "user_id=2&updated=1&wp_http_referer=%2Fhs-admin%2Fusers%3Frole%3Deditor";
+        (
+            (restored(611), restored(1)),
+            served("/hs-admin/user-edit", query).unwrap(),
+        )
+    })
+    .await
+    .unwrap();
+    assert_eq!(restored, (None, Some(StatusCode::OK)));
+    let page = page_of(saved).await;
+    assert!(page.contains("<p><a href=\"/hs-admin/users?role=editor\">&larr; Go to Users</a></p>"));
+}
+
+/// A save's `settings-updated` shows the screen as it is, unless the save
+/// left the errors PHP would print and delete.
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_after_a_save() {
+    for (left, query, shown) in [
+        (None, "?settings-updated=true", true),
+        (
+            Some("_transient_settings_errors"),
+            "?settings-updated=true",
+            false,
+        ),
+        (
+            Some("_transient_timeout_settings_errors"),
+            "?settings-updated=1",
+            false,
+        ),
+        (
+            Some("_transient_settings_errors"),
+            "?settings-updated=0",
+            true,
+        ),
+        (Some("_transient_settings_errors"), "", true),
+    ] {
+        let db = hyscribe_db::Db::connect(&hyscribe_testkit::fixture_database())
+            .await
+            .unwrap();
+        let mut site = Site::load(db, None, None).await.unwrap();
+        if let Some(name) = left {
+            site.options.insert(name.into(), b"a:0:{}".to_vec());
+        }
+        let site = Arc::new(site);
+        for file in ["options-writing", "options-media"] {
+            let site = Arc::clone(&site);
+            let handle = Handle::current();
+            let path = format!("/hs-admin/{file}");
+            let uri = format!("{path}{query}");
+            let response = tokio::task::spawn_blocking(move || {
+                let reads = LoginReads::new(&site, handle, now());
+                let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+                let url = format!("http://h{uri}");
+                screen(&admin, &path, &uri, &url, "http://h", &Browser::default())
+            })
+            .await
+            .unwrap();
+            assert_eq!(response.is_some(), shown, "{left:?} {file}{query}");
+        }
+    }
+}
+
 /// The terms list reads its taxonomy, page, search and order.
 #[test]
 fn the_terms_list_reads_its_taxonomy() {
@@ -1181,6 +1314,7 @@ async fn the_posts_list_reads_its_arguments() {
             "/hs-admin/edit?paged=%FF",
             "/hs-admin/edit?order=%FF",
             "/hs-admin/edit?author=%FF",
+            "/hs-admin/edit?trashed=%FF",
         ] {
             assert_eq!(args(refused), None, "{refused}");
         }
@@ -1195,6 +1329,10 @@ async fn the_posts_list_reads_its_arguments() {
             )
         );
         assert!(list_args(&admin, "/hs-admin/edit?paged=2").unwrap().base);
+        // `skipped` is accepted and has no notice.
+        let acted = list_args(&admin, "/hs-admin/edit?ids=2&skipped=1&trashed=3").unwrap();
+        let trashed = acted.counts.get(3).cloned().flatten();
+        assert_eq!((acted.ids, trashed), (Some("2".into()), Some("3".into())));
         // A view mode alone keeps the base request; with the post type, not.
         for (uri, base) in [
             ("/hs-admin/edit?mode=excerpt&paged=2", true),

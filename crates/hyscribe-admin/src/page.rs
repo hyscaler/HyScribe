@@ -6,11 +6,76 @@
 use hyscribe_kses::{esc_attr, esc_html, esc_url, parse_url};
 use hyscribe_phpser::{Key, Maybe, Value, add_query_arg, maybe_unserialize};
 use hyscribe_render::head::{admin_import_map, emoji_detection_script, json_hex_tag};
+use hyscribe_render::kses::wp_kses_post;
 use hyscribe_render::post::sanitize_html_class;
 
 use crate::admin_bar::{BarSite, Browser, admin_bar};
 use crate::assets::{Assets, Urls, cookie_path};
 use crate::menu::{Screen, admin_menu, commands};
+
+/// `wp_removable_query_args()`: what the canonical admin URL leaves out.
+pub const REMOVABLE: [&[u8]; 28] = [
+    b"activate",
+    b"activated",
+    b"admin_email_remind_later",
+    b"approved",
+    b"core-major-auto-updates-saved",
+    b"deactivate",
+    b"delete_count",
+    b"deleted",
+    b"disabled",
+    b"doing_wp_cron",
+    b"enabled",
+    b"error",
+    b"hotkeys_highlight_first",
+    b"hotkeys_highlight_last",
+    b"ids",
+    b"locked",
+    b"message",
+    b"same",
+    b"saved",
+    b"settings-updated",
+    b"skipped",
+    b"spammed",
+    b"trashed",
+    b"unspammed",
+    b"untrashed",
+    b"update",
+    b"updated",
+    b"wp-post-new-reload",
+];
+
+/// `wp_get_admin_notice( $message )` with an `id` (none when empty), its
+/// classes after `notice`, and the message in a paragraph when `wrap`.
+pub(crate) fn admin_notice(message: &str, id: &str, classes: &str, wrap: bool) -> String {
+    let id = if id.is_empty() {
+        String::new()
+    } else {
+        format!("id=\"{id}\" ")
+    };
+    if wrap {
+        format!("<div {id}class=\"notice {classes}\"><p>{message}</p></div>")
+    } else {
+        format!("<div {id}class=\"notice {classes}\">{message}</div>")
+    }
+}
+
+/// `wp_admin_notice()`: the notice through `wp_kses_post()`, then with
+/// `nonce` in the place of each `_wpnonce` argument's `NONCE`.
+pub(crate) fn wp_admin_notice(
+    message: &str,
+    id: &str,
+    classes: &str,
+    wrap: bool,
+    nonce: &str,
+) -> String {
+    let notice = admin_notice(message, id, classes, wrap);
+    let notice = String::from_utf8_lossy(&wp_kses_post(notice.as_bytes(), b"")).into_owned();
+    notice.replace(
+        &format!(";_wpnonce={}", crate::list_table::NONCE),
+        &format!(";_wpnonce={nonce}"),
+    )
+}
 
 /// `$wp_version`.
 const VERSION: &str = include_str!("../../../wordpress/VERSION");

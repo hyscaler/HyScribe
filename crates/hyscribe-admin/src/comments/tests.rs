@@ -37,6 +37,7 @@ fn pages_are_php_s() {
                 &decoded("order").unwrap_or_default(),
             )
             .unwrap(),
+            ..CommentArgs::default()
         };
         let variant = match variant {
             "content" => "comments",
@@ -68,7 +69,8 @@ fn pages_are_php_s() {
                 user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
                 mobile_hint: None,
             },
-        );
+        )
+        .unwrap();
         let recorded = String::from_utf8(unhex(f[2])).unwrap();
         let (php, ours) = match ours {
             Answer::Page(page) => (settled_page(&hs_admin_page(&recorded)), settled_page(&page)),
@@ -102,7 +104,8 @@ fn the_extended_view_shows_row_actions() {
         SITE,
         path,
         &browser,
-    ) else {
+    )
+    .unwrap() else {
         panic!("no page");
     };
     assert!(

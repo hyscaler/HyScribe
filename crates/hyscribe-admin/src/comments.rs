@@ -18,10 +18,10 @@ use crate::admin_bar::{BarSite, Browser, html_excerpt};
 use crate::dashboard::{CommentCounts, DashboardSite, RecentComment, approved_of};
 use crate::list_table::{Column, Order, Sort, View, bulk_actions, column_headers, pagination};
 use crate::list_table::{
-    pagenum, screen_options, search_box, table_description, views, wp_nonce_field,
+    nonce_url, pagenum, screen_options, search_box, table_description, views, wp_nonce_field,
 };
 use crate::menu::{Screen, esc_link, link};
-use crate::page::{HelpTab, Page, admin_page};
+use crate::page::{HelpTab, Page, admin_page, wp_admin_notice};
 use crate::posts::{
     Answer, comments_bubble, edit_link, hidden_columns, per_page, view_mode, view_mode_fields,
 };
@@ -40,6 +40,106 @@ pub trait CommentsSite: DashboardSite {
     fn approved_before(&self, id: u64) -> bool;
     /// `wp_count_comments( $post )`, and the user's comments on it.
     fn post_comment_counts(&self, post: u64) -> CommentCounts;
+    /// Comment `id`'s `comment_approved`, if there is one.
+    fn comment_approved(&self, id: u64) -> Option<String>;
+}
+
+/// What `edit-comments.php` is sent back with after moderating, in the
+/// order its notice reports them.
+pub const MODERATED: [&str; 7] = [
+    "approved",
+    "spammed",
+    "unspammed",
+    "trashed",
+    "untrashed",
+    "deleted",
+    "same",
+];
+
+/// `edit-comments.php`'s notices of `args`, empty for none; `None` where
+/// PHP fails: a count given and nothing to report.
+fn moderation_notice(site: &dyn CommentsSite, args: &CommentArgs) -> Option<String> {
+    let int = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(|value| Value::String(value.into()).to_int())
+    };
+    let mut out = match int(&args.error) {
+        Some(1) => wp_admin_notice("Invalid comment ID.", "moderated", "error", true, ""),
+        Some(2) => wp_admin_notice(
+            "Sorry, you are not allowed to edit comments on this post.",
+            "moderated",
+            "error",
+            true,
+            "",
+        ),
+        _ => String::new(),
+    };
+    let counts: Vec<i64> = args
+        .moderated
+        .iter()
+        .map(|count| int(count).unwrap_or_default())
+        .collect();
+    if counts.iter().all(|count| *count <= 0) {
+        return Some(out);
+    }
+    // The Undo link's IDs as requested, slashed.
+    let ids = args.ids.as_deref().map_or_else(
+        || "0".to_string(),
+        |ids| String::from_utf8_lossy(&addslashes(ids.as_bytes())).into_owned(),
+    );
+    let undo = |action: &str| {
+        let url = format!("edit-comments.php?doaction=undo&action={action}&ids={ids}");
+        format!(" <a href=\"{}\">Undo</a><br />", nonce_url(&url))
+    };
+    let mut messages = Vec::new();
+    for (name, n) in MODERATED.into_iter().zip(counts) {
+        if n <= 0 {
+            continue;
+        }
+        let comments = if n == 1 { "comment" } else { "comments" };
+        messages.push(match name {
+            "approved" => format!("{n} {comments} approved."),
+            "spammed" => format!("{n} {comments} marked as spam.{}", undo("unspam")),
+            "unspammed" => format!("{n} {comments} restored from the spam."),
+            "trashed" => format!("{n} {comments} moved to the Trash.{}", undo("untrash")),
+            "untrashed" => format!("{n} {comments} restored from the Trash."),
+            "deleted" => format!("{n} {comments} permanently deleted."),
+            _ => {
+                let edit =
+                    BarSite::admin_url(site, &format!("comment.php?action=editcomment&c={n}"));
+                let (message, url, label) = match site.comment_approved(n.unsigned_abs()).as_deref()
+                {
+                    Some("1") => ("This comment is already approved.", edit, "Edit comment"),
+                    Some("trash") => (
+                        "This comment is already in the Trash.",
+                        BarSite::admin_url(site, "edit-comments.php?comment_status=trash"),
+                        "View Trash",
+                    ),
+                    Some("spam") => (
+                        "This comment is already marked as spam.",
+                        edit,
+                        "Edit comment",
+                    ),
+                    _ => continue,
+                };
+                let url = String::from_utf8_lossy(&esc_url(url.as_bytes())).into_owned();
+                format!("{message} <a href=\"{url}\">{label}</a>")
+            }
+        });
+    }
+    if messages.is_empty() {
+        return None;
+    }
+    let nonce = site.nonce("bulk-comments");
+    out.push_str(&wp_admin_notice(
+        &messages.join("<br />\n"),
+        "moderated",
+        "is-dismissible updated",
+        true,
+        &nonce,
+    ));
+    Some(out)
 }
 
 /// The comments the list asks for, notes aside.
@@ -85,6 +185,12 @@ pub struct CommentArgs {
     pub post: Option<String>,
     /// `comment_order()` of `orderby` and `order`.
     pub clauses: Vec<(&'static str, bool)>,
+    /// The counts of a moderation, as `MODERATED` names them, if given.
+    pub moderated: [Option<String>; 7],
+    /// `ids`, the comments moderated, if given.
+    pub ids: Option<String>,
+    /// `error`, the moderation's failure, if given.
+    pub error: Option<String>,
 }
 
 /// `WP_Comment_Query`'s `ORDER BY` for `orderby` and `order`; `None` for
@@ -727,9 +833,8 @@ const HELP_MODERATING: &str = "<p>A red bar on the left means the comment is wai
 
 const HELP_SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/comments-screen/\">Documentation on Comments</a></p><p><a href=\"https://wordpress.org/documentation/article/understand-comment-spam/\">Documentation on Comment Spam</a></p><p><a href=\"https://wordpress.org/documentation/article/keyboard-shortcuts-classic-editor/#keyboard-shortcuts-for-comments\">Documentation on Keyboard Shortcuts</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
 
-/// `edit-comments.php`: the comments of the view and page `args` ask
-/// for, in the view mode of the user's `settings` cookie or stored
-/// settings; the menu refuses those who may not edit posts.
+/// `edit-comments.php`: the comments `args` ask for, in the view mode of
+/// `settings` (the cookie) or the user's; `None` where PHP fails.
 pub fn edit_comments(
     site: &dyn CommentsSite,
     args: &CommentArgs,
@@ -738,7 +843,7 @@ pub fn edit_comments(
     origin: &str,
     request_uri: &str,
     browser: &Browser,
-) -> Answer {
+) -> Option<Answer> {
     let (view, approved) = VIEWS
         .into_iter()
         .find(|(view, _)| args.status.as_deref() == Some(*view))
@@ -786,8 +891,9 @@ pub fn edit_comments(
     if pages > 0 && page > pages {
         let last = pages.to_string();
         let to = add_query_arg(&[(b"paged", Some(last.as_bytes()))], request_uri.as_bytes());
-        return Answer::Redirect(String::from_utf8_lossy(&to).into_owned());
+        return Some(Answer::Redirect(String::from_utf8_lossy(&to).into_owned()));
     }
+    let notice = moderation_notice(site, args)?;
     let split = found
         .len()
         .min(usize::try_from(per_page).unwrap_or(usize::MAX));
@@ -897,8 +1003,7 @@ pub fn edit_comments(
         orderby: args.orderby.as_deref(),
         desc: args.order.as_deref() == Some("desc"),
     };
-    let unpaged =
-        String::from_utf8_lossy(&remove_query_arg(&[b"paged"], canonical.as_bytes())).into_owned();
+    let unpaged = crate::list_table::columns_url(origin, request_uri);
     // The initial view is ordered by a date no column shows.
     let caption = if args.orderby.is_none() {
         "<caption class=\"screen-reader-text\">Ordered by Comment Date, descending.</caption>"
@@ -995,7 +1100,7 @@ pub fn edit_comments(
         String::new()
     };
     let content = format!(
-        "\n<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\n{heading}</h1>\n\n{view_link}{subtitle}\n<hr class=\"wp-header-end\">\n\n\n{}\n<form id=\"comments-form\" method=\"get\">\n\n{}\n{post_field}<input type=\"hidden\" name=\"comment_status\" value=\"{view}\" />\n<input type=\"hidden\" name=\"pagegen_timestamp\" value=\"{}\" />\n\n<input type=\"hidden\" name=\"_total\" value=\"{total}\" />\n<input type=\"hidden\" name=\"_per_page\" value=\"{per_page}\" />\n<input type=\"hidden\" name=\"_page\" value=\"{page}\" />\n\n{paged}\n{list}</form>\n</div>\n\n<div id=\"ajax-response\"></div>\n\n{}\t",
+        "\n<div class=\"wrap\">\n<h1 class=\"wp-heading-inline\">\n{heading}</h1>\n\n{view_link}{subtitle}\n<hr class=\"wp-header-end\">\n\n{notice}\n{}\n<form id=\"comments-form\" method=\"get\">\n\n{}\n{post_field}<input type=\"hidden\" name=\"comment_status\" value=\"{view}\" />\n<input type=\"hidden\" name=\"pagegen_timestamp\" value=\"{}\" />\n\n<input type=\"hidden\" name=\"_total\" value=\"{total}\" />\n<input type=\"hidden\" name=\"_per_page\" value=\"{per_page}\" />\n<input type=\"hidden\" name=\"_page\" value=\"{page}\" />\n\n{paged}\n{list}</form>\n</div>\n\n<div id=\"ajax-response\"></div>\n\n{}\t",
         views(
             "Filter comments list",
             &comment_views(site, counts, view, &kind, post_id)
@@ -1064,7 +1169,7 @@ pub fn edit_comments(
             .as_ref()
             .map(|(label, href)| (*label, href.as_str())),
     };
-    Answer::from_page(admin_page(site, &page, browser))
+    Some(Answer::from_page(admin_page(site, &page, browser)))
 }
 
 #[cfg(test)]

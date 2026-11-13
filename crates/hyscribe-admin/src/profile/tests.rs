@@ -31,7 +31,7 @@ fn pages_are_php_s() {
             uri: path,
             browser: &BROWSER,
         };
-        let ours = profile(&Role(role), &request);
+        let ours = profile(&Role(role), &EditArgs::default(), &request);
         let recorded = String::from_utf8(unhex(f[2])).unwrap();
         let Answer::Page(ours) = ours else {
             panic!("{role}: no page");
@@ -65,7 +65,7 @@ fn edit_and_add_pages_are_php_s() {
             browser: &BROWSER,
         };
         let ours = if f[1].starts_with("user-new.php") {
-            crate::user_new::user_new(&Role(role), &request)
+            crate::user_new::user_new(&Role(role), None, &request)
         } else {
             let query = hs_admin_page(f[1].split_once('?').map_or("", |(_, query)| query));
             let mut args = EditArgs::default();

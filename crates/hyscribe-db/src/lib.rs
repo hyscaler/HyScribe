@@ -905,6 +905,24 @@ impl Db {
         .await
     }
 
+    /// `get_comment( $id )->comment_approved`, `None` for no such comment.
+    pub async fn comment_approved(&self, id: u64) -> Result<Option<String>, DbError> {
+        let sql = self
+            .prefix
+            .sql("SELECT comment_approved FROM {prefix}comments WHERE comment_ID = ?");
+        let row = sqlx::query(sql)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let mut c = Columns::new(&row);
+        let approved = c.text("comment_approved");
+        c.finish(approved).map(Some)
+    }
+
     /// `get_comment( $id )` in any state.
     pub async fn any_comment(&self, id: u64) -> Result<Option<Comment>, DbError> {
         let sql = self.prefix.sql(concat!(

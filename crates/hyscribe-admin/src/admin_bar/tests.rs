@@ -29,8 +29,11 @@ impl BarSite for Role {
             email: b"admin@default-install.test".to_vec(),
             ..hyscribe_model::User::default()
         };
-        let avatar =
-            hyscribe_render::user_avatar(&|name| options().get(name).cloned(), &user, size);
+        let avatar = hyscribe_render::user_avatar(
+            &|name| crate::posts::PostsSite::option(self, name),
+            &user,
+            size,
+        );
         String::from_utf8(avatar).unwrap()
     }
 }

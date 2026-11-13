@@ -11,26 +11,23 @@ use hyscribe_phpser::remove_query_arg;
 use hyscribe_phpser::{Maybe, Value, json_decode, maybe_unserialize};
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::convert_chars;
-use hyscribe_render::post::sanitize_html_class;
 use hyscribe_render::{comment_avatar, number_format, wp_trim_words};
 
 use crate::admin_bar::{BarSite, Browser};
+use crate::comments::{comment_classes, comment_reply, comment_views, editor_footer};
+use crate::list_table::view_list;
 use crate::menu::Screen;
 use crate::menu::{esc_link, link};
 use crate::page::{HelpTab, Page, admin_page, json, object, text};
 use crate::posts::{PostsSite, draft_or_post_title};
 
 /// `$wp_version`.
-const VERSION: &str = include_str!("../../../wordpress/VERSION");
+pub(crate) const VERSION: &str = include_str!("../../../wordpress/VERSION");
 const WELCOME: &str = include_str!("dashboard/welcome.html");
 const EVENTS: &str = include_str!("dashboard/events.html");
-const EDITOR: &str = include_str!("dashboard/editor.html");
 const SCREEN_OPTIONS: &str = include_str!("dashboard/screen-options.html");
 /// `wp_print_community_events_templates()`, after the wrap.
 const TEMPLATES: &str = include_str!("dashboard/templates.html");
-/// `wp_comment_reply( -1, false, 'dashboard', false )` and
-/// `wp_comment_trashnotice()`.
-const REPLY: &str = include_str!("dashboard/reply.html");
 
 /// A comment the Activity widget lists, with what its row shows.
 pub struct RecentComment {
@@ -63,6 +60,13 @@ pub struct CommentCounts {
     pub trash: u64,
     /// The user's approved and pending comments.
     pub mine: u64,
+}
+
+impl CommentCounts {
+    /// The approved and pending comments: what All lists.
+    pub fn all(&self) -> u64 {
+        self.approved + self.moderated
+    }
 }
 
 /// What the dashboard asks of the site and its user.
@@ -399,35 +403,13 @@ fn comment_row(
             ));
         }
     }
-    let mut classes = vec![if comment.comment_type.is_empty() {
-        "comment".to_string()
-    } else {
-        text(&comment.comment_type)
-    }];
-    if let Some(user) = &row.user {
-        classes.push("byuser".into());
-        let fallback = comment.user_id.to_string();
-        classes.push(format!(
-            "comment-author-{}",
-            text(&sanitize_html_class(&user.nicename, fallback.as_bytes()))
-        ));
-        if global.is_some_and(|post| post.author == comment.user_id) {
-            classes.push("bypostauthor".into());
-        }
-    }
-    let odd = index % 2 == 1;
-    classes.push(if odd { "odd alt" } else { "even" }.into());
-    classes.push(
-        if odd {
-            "thread-odd thread-alt"
-        } else {
-            "thread-even"
-        }
-        .into(),
+    let classes = comment_classes(
+        comment,
+        row.user.as_ref(),
+        global.map(|post| post.author),
+        index,
+        &["comment-item", row.status],
     );
-    classes.push("depth-1".into());
-    classes.push("comment-item".into());
-    classes.push(row.status.into());
     let email = row
         .user
         .as_ref()
@@ -521,7 +503,7 @@ fn comment_row(
     format!(
         "\n\t\t<li id=\"comment-{}\" class=\"{}\">\n\n\t\t\t{}\n\t\t\t{body}\t\t\t<blockquote><p>{excerpt}</p></blockquote>\n\t\t\t{actions}\t\t\t</div>\n\t\t</li>\n\t",
         comment.id,
-        esc_attr(classes.join(" ").as_bytes()),
+        classes,
         text(&avatar)
     )
 }
@@ -579,56 +561,11 @@ fn recent_comments(
     out.push_str("</ul>");
     if site.can("edit_posts") {
         out.push_str("<h3 class=\"screen-reader-text\">View more comments</h3>");
-        out.push_str(&comment_views(site));
+        out.push_str(&view_list(&comment_views(site, "")));
     }
-    let editor_css = format!(
-        "{}/wp-includes/css/editor.min.css?ver={}",
-        site.site_url(),
-        VERSION.trim()
-    );
-    out.push_str(
-        &REPLY
-            .replace(
-                "%editor_css%",
-                &String::from_utf8_lossy(&esc_url(editor_css.as_bytes())),
-            )
-            .replace("%nonce%", &site.nonce("replyto-comment")),
-    );
+    out.push_str(&comment_reply(site, None, false, "dashboard"));
     out.push_str("\t</div>");
     out
-}
-
-/// `WP_Comments_List_Table::views()` on the dashboard.
-fn comment_views(site: &dyn DashboardSite) -> String {
-    let counts = site.comment_counts();
-    let user = site.user_id();
-    let statuses = [
-        ("all", "All", "all", counts.approved + counts.moderated),
-        ("mine", "Mine", "mine", counts.mine),
-        ("moderated", "Pending", "pending", counts.moderated),
-        ("approved", "Approved", "approved", counts.approved),
-        ("spam", "Spam", "spam", counts.spam),
-        ("trash", "Trash", "trash", counts.trash),
-    ];
-    let links: Vec<String> = statuses
-        .iter()
-        .map(|(status, label, class, count)| {
-            let mut url = format!("edit-comments.php?comment_status={status}");
-            if *status == "mine" {
-                url.push_str(&format!("&user_id={user}"));
-            }
-            let url = esc_url(BarSite::admin_url(site, &url).as_bytes());
-            format!(
-                "\t<li class='{status}'><a href=\"{}\">{label} <span class=\"count\">(<span class=\"{class}-count\">{}</span>)</span></a>",
-                String::from_utf8_lossy(&url),
-                number_format(*count)
-            )
-        })
-        .collect();
-    format!(
-        "<ul class='subsubsub'>\n{}</li>\n</ul>",
-        links.join(" |</li>\n")
-    )
 }
 
 /// `wp_dashboard_quick_press()` for a user who may `edit_posts`, the
@@ -962,11 +899,8 @@ pub fn dashboard(
             format!("var SiteHealth = {};", json(&health)),
         ));
     }
-    // `_WP_Editors::editor_js()` and the link dialog of the reply form.
     let footer_scripts = if tables > 0 {
-        EDITOR
-            .replace("%site_url%", &site.site_url())
-            .replace("%nonce%", &site.nonce("internal-linking"))
+        editor_footer(site)
     } else {
         String::new()
     };

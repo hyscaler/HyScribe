@@ -376,6 +376,7 @@ fn columns(tree: bool) -> Vec<Column> {
         key,
         label: label.into(),
         sort,
+        primary: key == "name",
     };
     let caption = if tree {
         "Table ordered hierarchically."

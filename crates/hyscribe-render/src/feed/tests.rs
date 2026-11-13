@@ -247,6 +247,7 @@ fn feed_comments(state: &Value) -> Vec<Comment> {
             author: text(row, "comment_author"),
             author_email: text(row, "comment_author_email"),
             author_url: text(row, "comment_author_url"),
+            author_ip: text(row, "comment_author_IP"),
             date: String::from_utf8(text(row, "comment_date")).unwrap(),
             date_gmt: String::from_utf8(text(row, "comment_date_gmt")).unwrap(),
             content: text(row, "comment_content"),

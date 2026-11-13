@@ -146,6 +146,54 @@ fn value(input: &[u8]) -> Result<(SqlValue, &[u8]), String> {
     }
 }
 
+/// An admin `page` with what differs by chance in PHP's settled:
+/// `antispambot()`'s random references in `mailto:` links decoded, and the
+/// time a comments list was made masked as `%pagegen%`.
+pub fn settled_page(page: &str) -> String {
+    let mut out = String::new();
+    let mut rest = page;
+    while let Some(at) = rest.find("mailto:") {
+        let (head, tail) = rest.split_at(at);
+        out.push_str(head);
+        let end = tail.find("</a>").unwrap_or(tail.len());
+        let (link, tail) = tail.split_at(end);
+        out.push_str(&decoded(link));
+        rest = tail;
+    }
+    out.push_str(rest);
+    match out.split_once("name=\"pagegen_timestamp\" value=\"") {
+        Some((head, tail)) => {
+            let tail = tail.split_once('"').map_or("", |(_, tail)| tail);
+            format!("{head}name=\"pagegen_timestamp\" value=\"%pagegen%\"{tail}")
+        }
+        None => out,
+    }
+}
+
+/// `text` with its decimal character references as the characters.
+fn decoded(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some((head, tail)) = rest.split_once("&#") {
+        out.push_str(head);
+        let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
+        let after = tail.strip_prefix(digits.as_str()).unwrap_or(tail);
+        let code = digits.parse::<u8>().ok().filter(u8::is_ascii);
+        match (after.strip_prefix(';'), code) {
+            (Some(after), Some(code)) => {
+                out.push(char::from(code));
+                rest = after;
+            }
+            _ => {
+                out.push_str("&#");
+                rest = tail;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// `page` with each `wp-admin` path after `from` put under `to`, without
 /// `.php` before the first of `stops`.
 fn admin_paths(page: &str, from: &str, to: &str, stops: &[char]) -> String {
@@ -279,6 +327,12 @@ mod tests {
             ""
         );
         assert_eq!(hs_admin_page("plain"), "plain");
+        let page = "x <a href=\"mailto:a&#064;b\">a&#64;b&#9999;&#x41;&#</a> value=\"pagegen_timestamp\" value=\"1\" y";
+        assert_eq!(
+            settled_page(&page.replace("value=\"pagegen", "name=\"pagegen")),
+            "x <a href=\"mailto:a@b\">a@b&#9999;&#x41;&#</a> name=\"pagegen_timestamp\" value=\"%pagegen%\" y"
+        );
+        assert_eq!(settled_page("no links"), "no links");
         assert_eq!(
             hs_admin_page("r=%2Fwp-admin%2Fedit-tags.php%3Ft r=%2Fwp-admin%2Fx.php"),
             "r=%2Fhs-admin%2Fedit-tags%3Ft r=%2Fhs-admin%2Fx"

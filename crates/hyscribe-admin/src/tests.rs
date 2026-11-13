@@ -22,6 +22,8 @@ thread_local! {
     pub static TERM_QUERIES: std::cell::RefCell<Vec<hyscribe_model::TermQuery>> =
         std::cell::RefCell::default();
     pub static TERM_READS: std::cell::Cell<usize> = std::cell::Cell::default();
+    /// How many comments the test site was last asked for.
+    pub static COMMENTS_ASKED: std::cell::Cell<u64> = std::cell::Cell::default();
 }
 
 /// The oracle, with every user's `use_ssl` option as given.
@@ -174,6 +176,11 @@ impl Role {
         crate::posts::PostsSite::post_terms(self, &crate::posts::tests::hello(), taxonomy)
     }
 
+    /// A variant of `reference/comments-list/golden.sh` over its content.
+    fn comments_content(&self) -> bool {
+        ["comments", "cpaged", "chidden"].contains(&self.variant())
+    }
+
     /// The posts and pages of the variant.
     fn posts(&self) -> Vec<hyscribe_model::Post> {
         crate::posts::content::posts(self.listing(), self.variant() == "empty")
@@ -278,6 +285,7 @@ impl MenuUser for Role {
     fn moderated_comments(&self) -> u64 {
         match self.variant() {
             "content" => 1,
+            _ if self.comments_content() => 1,
             _ if self.listing() => 3,
             _ => 0,
         }
@@ -388,6 +396,39 @@ fn comment(
     }
 }
 
+impl crate::comments::CommentsSite for Role {
+    /// The fixture's one comment, or the content's.
+    fn list_comments(
+        &self,
+        offset: u64,
+        number: u64,
+    ) -> (Vec<crate::dashboard::RecentComment>, u64) {
+        COMMENTS_ASKED.set(number);
+        if self.variant() == "cempty" {
+            return (Vec::new(), 0);
+        }
+        if !self.comments_content() {
+            let can_edit = self.can("edit_published_posts");
+            return (vec![crate::dashboard::tests::hello_comment(can_edit)], 1);
+        }
+        let all = crate::comments::content::comments(self);
+        let total = all.len() as u64;
+        let skip = usize::try_from(offset).unwrap();
+        let take = usize::try_from(number).unwrap();
+        (all.into_iter().skip(skip).take(take).collect(), total)
+    }
+    fn parent_comment(&self, id: u64) -> Option<(String, Vec<u8>)> {
+        (id == 1).then(|| {
+            let hello = crate::dashboard::tests::hello_comment(false);
+            (hello.link, hello.comment.author)
+        })
+    }
+    /// The content has a pingback.
+    fn has_comments(&self, kind: &str) -> bool {
+        kind == "comment" || self.comments_content()
+    }
+}
+
 impl crate::dashboard::DashboardSite for Role {
     fn show_welcome_panel(&self) -> Option<Vec<u8>> {
         let shown: &[u8] = match self.variant() {
@@ -411,6 +452,15 @@ impl crate::dashboard::DashboardSite for Role {
         }
     }
     fn comment_counts(&self) -> crate::dashboard::CommentCounts {
+        if self.comments_content() {
+            return crate::dashboard::CommentCounts {
+                approved: 6,
+                moderated: 1,
+                spam: 1,
+                trash: 1,
+                mine: 1,
+            };
+        }
         if self.variant() == "content" {
             crate::dashboard::CommentCounts {
                 approved: 3,
@@ -421,7 +471,8 @@ impl crate::dashboard::DashboardSite for Role {
             }
         } else {
             crate::dashboard::CommentCounts {
-                approved: u64::from(!matches!(self.variant(), "empty" | "pending")),
+                approved: u64::from(!matches!(self.variant(), "empty" | "pending" | "cempty")),
+                trash: u64::from(self.variant() == "cempty"),
                 moderated: u64::from(self.variant() == "pending"),
                 ..crate::dashboard::CommentCounts::default()
             }
@@ -641,7 +692,10 @@ impl crate::posts::PostsSite for Role {
             .map(|user| user.display_name)
     }
     fn pending_comments(&self, post: &hyscribe_model::Post) -> u64 {
-        u64::from(self.listing() && [309, 311, 321].contains(&post.id))
+        u64::from(
+            self.listing() && [309, 311, 321].contains(&post.id)
+                || self.comments_content() && post.id == 1,
+        )
     }
     /// `get_the_excerpt()` of the content's plain text.
     fn excerpt(&self, post: &hyscribe_model::Post) -> Vec<u8> {
@@ -682,6 +736,12 @@ impl crate::posts::PostsSite for Role {
                 _ => return None,
             };
             return Some(value.to_vec());
+        }
+        if self.variant() == "cpaged" && name == "edit_comments_per_page" {
+            return Some(b"2".to_vec());
+        }
+        if self.variant() == "chidden" && name == "manageedit-commentscolumnshidden" {
+            return Some(b"a:1:{i:0;s:8:\"response\";}".to_vec());
         }
         if self.variant() == "paged" {
             let value: &[u8] = match name {

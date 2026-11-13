@@ -126,6 +126,7 @@ fn approved_comments(dump: &'static Dump) -> impl Iterator<Item = Comment> {
             author: text(&row[2]),
             author_email: text(&row[3]),
             author_url: text(&row[4]),
+            author_ip: text(&row[5]),
             date: string(&row[6]),
             date_gmt: string(&row[7]),
             content: text(&row[8]),

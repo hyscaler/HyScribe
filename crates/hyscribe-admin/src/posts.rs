@@ -255,7 +255,7 @@ fn post_states_html(site: &dyn PostsSite, post: &Post, filter: &str) -> String {
 }
 
 /// `get_edit_post_link( $post->ID )`.
-fn edit_link(site: &dyn PostsSite, post: &Post) -> String {
+pub(crate) fn edit_link(site: &dyn PostsSite, post: &Post) -> String {
     BarSite::admin_url(site, &format!("post.php?post={}&amp;action=edit", post.id))
 }
 
@@ -579,7 +579,7 @@ fn column_terms(site: &dyn PostsSite, post: &Post, taxonomy: &str) -> String {
 }
 
 /// `comments_bubble()`: the approved and `pending` comment counts.
-fn comments_bubble(site: &dyn PostsSite, post: &Post, pending: u64) -> String {
+pub(crate) fn comments_bubble(site: &dyn PostsSite, post: &Post, pending: u64) -> String {
     if !site.can_post("edit_post", post)
         && (!post.password.is_empty() || !site.can_post("read_post", post))
     {
@@ -1084,6 +1084,7 @@ pub fn columns(kind: PostType, filter: &str, ordered: bool) -> Vec<Column> {
         key,
         label: label.into(),
         sort,
+        primary: key == "title",
     };
     let pages = kind.hierarchical();
     let caption = if pages && !ordered {
@@ -1600,6 +1601,20 @@ fn help(kind: PostType) -> (Vec<HelpTab<'static>>, &'static str) {
 
 const VIEW_MODE: &str = include_str!("posts/view-mode.html");
 
+/// The screen options' view mode fields, `mode` checked.
+pub(crate) fn view_mode_fields(mode: &str) -> String {
+    let checked = |value: &str| {
+        if value == mode {
+            " checked='checked'"
+        } else {
+            ""
+        }
+    };
+    VIEW_MODE
+        .replace("%list%", checked("list"))
+        .replace("%excerpt%", checked("excerpt"))
+}
+
 /// `render_screen_options()`: the columns, `hidden` ones unchecked, the
 /// number of posts of `kind` per page and the view `mode`.
 fn screen_options(
@@ -1610,16 +1625,7 @@ fn screen_options(
     per_page: u64,
     mode: &str,
 ) -> String {
-    let checked = |value: &str| {
-        if value == mode {
-            " checked='checked'"
-        } else {
-            ""
-        }
-    };
-    let view_mode = VIEW_MODE
-        .replace("%list%", checked("list"))
-        .replace("%excerpt%", checked("excerpt"));
+    let view_mode = view_mode_fields(mode);
     list_screen_options(
         columns,
         hidden,
@@ -1938,7 +1944,11 @@ pub enum Answer {
 
 /// `get_user_setting( $name )`: from the settings cookie when sent, else
 /// the stored `user-settings`; none when the cleaned cookie has no `=`.
-fn user_setting(site: &dyn PostsSite, cookie: Option<&str>, name: &str) -> Option<String> {
+pub(crate) fn user_setting(
+    site: &dyn PostsSite,
+    cookie: Option<&str>,
+    name: &str,
+) -> Option<String> {
     let stored = match cookie {
         Some(cookie) => {
             let kept: String = cookie

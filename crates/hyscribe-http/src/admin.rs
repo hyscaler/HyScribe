@@ -11,6 +11,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::admin_bar::{BarSite, Browser};
 use hyscribe_admin::assets::Urls;
+use hyscribe_admin::comments::{CommentsSite, edit_comments};
 use hyscribe_admin::dashboard::{CommentCounts, DashboardSite, RecentComment, dashboard};
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::menu::MenuUser;
@@ -23,6 +24,7 @@ use hyscribe_model::{Post, PostQuery, Term, TermOrder, TermQuery, User};
 use hyscribe_phpser::{
     Key, Value, addslashes, is_empty_string, parse_str, remove_query_arg, stripslashes, urlencode,
 };
+use hyscribe_render::comment_author_of;
 use hyscribe_render::date::Zone;
 use hyscribe_render::site::{Archive, Site as RenderSite, Taxonomy};
 use tokio::runtime::Handle;
@@ -137,6 +139,35 @@ impl<'a> Admin<'a> {
     fn can_for(&self, cap: &str, id: u64) -> bool {
         let id = i64::try_from(id).unwrap_or_default();
         self.caps.has_cap(self, cap, &[Value::Int(id)])
+    }
+
+    /// A comment with what its rows show, `post` the one it is read with.
+    fn comment_row(
+        &self,
+        comment: hyscribe_model::Comment,
+        approved: &str,
+        post: Option<hyscribe_model::Post>,
+    ) -> RecentComment {
+        let permalink = post
+            .as_ref()
+            .map(|post| self.permalink(post))
+            .unwrap_or_default();
+        RecentComment {
+            link: format!("{permalink}#comment-{}", comment.id),
+            permalink,
+            // The lists read approved and pending comments only.
+            status: if approved == "1" {
+                "approved"
+            } else {
+                "unapproved"
+            },
+            user: (comment.user_id != 0)
+                .then(|| self.reads.reads.wait(self.site.db.user(comment.user_id)))
+                .flatten(),
+            can_edit: self.comment_editable(post.as_ref()),
+            post: post.filter(|_| comment.post_id != 0),
+            comment,
+        }
     }
 
     /// `edit_comment` of a comment on `post`: `edit_posts` without one.
@@ -341,25 +372,7 @@ impl DashboardSite for Admin<'_> {
                 if !self.can_for("edit_post", id) && (protected || !self.can_for("read_post", id)) {
                     continue;
                 }
-                let permalink = post
-                    .as_ref()
-                    .map(|post| self.permalink(post))
-                    .unwrap_or_default();
-                found.push(RecentComment {
-                    link: format!("{permalink}#comment-{}", comment.id),
-                    permalink,
-                    status: if approved == "1" {
-                        "approved"
-                    } else {
-                        "unapproved"
-                    },
-                    user: (comment.user_id != 0)
-                        .then(|| self.reads.reads.wait(self.site.db.user(comment.user_id)))
-                        .flatten(),
-                    can_edit: self.comment_editable(post.as_ref()),
-                    post: post.filter(|_| comment.post_id != 0),
-                    comment,
-                });
+                found.push(self.comment_row(comment, &approved, post));
                 if found.len() == 5 {
                     return found;
                 }
@@ -486,6 +499,41 @@ impl PostsSite for Admin<'_> {
     }
     fn page_templates(&self, post_type: &str) -> Vec<(String, String)> {
         self.site.theme.page_templates(post_type)
+    }
+}
+
+impl CommentsSite for Admin<'_> {
+    fn list_comments(&self, offset: u64, number: u64) -> (Vec<RecentComment>, u64) {
+        let limit = u32::try_from(number).unwrap_or(u32::MAX);
+        let offset = u32::try_from(offset).unwrap_or(u32::MAX);
+        let found = self
+            .reads
+            .reads
+            .wait(self.site.db.latest_comments(true, limit, offset));
+        let rows = found
+            .into_iter()
+            .map(|(comment, approved)| {
+                let post = self.full_post(comment.post_id);
+                self.comment_row(comment, &approved, post)
+            })
+            .collect();
+        (rows, self.comment_counts().all())
+    }
+    fn parent_comment(&self, id: u64) -> Option<(String, Vec<u8>)> {
+        let comment = self.reads.reads.wait(self.site.db.any_comment(id))?;
+        let post = self.full_post(comment.post_id);
+        let row = self.comment_row(comment, "", post);
+        let author = comment_author_of(&row.comment, row.user.as_ref());
+        Some((row.link, author))
+    }
+    fn has_comments(&self, kind: &str) -> bool {
+        // `WP_Comment_Query` counts an untyped comment as a comment.
+        let types: &[&str] = if kind == "pings" {
+            &["pingback", "trackback"]
+        } else {
+            &["", "comment"]
+        };
+        self.reads.reads.wait(self.site.db.has_comment_types(types))
     }
 }
 
@@ -684,15 +732,32 @@ fn screen(
         "/hs-admin/" | "/hs-admin/index" => {
             dashboard(admin, &canonical, origin, request_uri, browser)
         }
+        "/hs-admin/edit-comments" => {
+            if request_uri.contains('?') {
+                return None;
+            }
+            let answer = edit_comments(
+                admin,
+                admin.settings.as_deref(),
+                &canonical,
+                origin,
+                request_uri,
+                browser,
+            );
+            match answered(admin, answer) {
+                Ok(html) => Some(html),
+                Err(response) => return Some(*response),
+            }
+        }
         "/hs-admin/edit-tags" => {
             let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
             let args = term_args(&raw)?;
-            match edit_tags(admin, &args, &canonical, origin, request_uri, browser) {
-                Answer::Denied(message) => return Some(denied(admin, message)),
-                Answer::Redirect(to) => {
-                    return Some(redirect(screen_headers(), to.as_bytes()));
-                }
-                Answer::Page(html) => Some(html),
+            match answered(
+                admin,
+                edit_tags(admin, &args, &canonical, origin, request_uri, browser),
+            ) {
+                Ok(html) => Some(html),
+                Err(response) => return Some(*response),
             }
         }
         "/hs-admin/edit" => {
@@ -713,6 +778,15 @@ fn screen(
         // `wp_die()` from `wp-admin/includes/menu.php`.
         None => denied(admin, "Sorry, you are not allowed to access this page."),
     })
+}
+
+/// A screen's page, or the response that redirects or refuses instead.
+fn answered(admin: &Admin, answer: Answer) -> Result<String, Box<Response>> {
+    Err(Box::new(match answer {
+        Answer::Page(html) => return Ok(html),
+        Answer::Redirect(to) => redirect(screen_headers(), to.as_bytes()),
+        Answer::Denied(message) => denied(admin, message),
+    }))
 }
 
 /// `wp_die( $message, 403 )` on an admin screen.

@@ -4,6 +4,7 @@
 
 pub mod admin_bar;
 pub mod assets;
+pub mod comments;
 pub mod dashboard;
 pub mod die;
 pub mod list_table;

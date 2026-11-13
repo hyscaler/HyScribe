@@ -30,11 +30,13 @@ use crate::variations::variation_class;
 /// `convert_smilies()`, which does nothing unless the site's
 /// `use_smilies` option is set.
 pub(crate) fn site_smilies(site: &dyn Site, text: &[u8]) -> Vec<u8> {
-    if site
-        .option("use_smilies")
-        .is_some_and(|v| !is_empty_string(&v))
-    {
-        let siteurl = site.option("siteurl").unwrap_or_default();
+    smilies(&|name| site.option(name), text)
+}
+
+/// `convert_smilies()` when the site has smilies on, over its options.
+pub(crate) fn smilies(option: &dyn Fn(&str) -> Option<Vec<u8>>, text: &[u8]) -> Vec<u8> {
+    if option("use_smilies").is_some_and(|v| !is_empty_string(&v)) {
+        let siteurl = option("siteurl").unwrap_or_default();
         return convert_smilies(
             text,
             &esc_url(&[&siteurl[..], b"/wp-includes/images/smilies/"].concat()),

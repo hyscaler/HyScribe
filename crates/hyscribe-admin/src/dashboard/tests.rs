@@ -130,18 +130,14 @@ pub(crate) fn hello_comment(can_edit: bool) -> RecentComment {
             author: text(2),
             author_email: text(3),
             author_url: text(4),
+            author_ip: text(5),
+            date: String::from_utf8(text(6)).unwrap(),
             content: text(8),
             comment_type: text(12),
             ..hyscribe_model::Comment::default()
         },
         status: "approved",
-        post: Some(Post {
-            id: 1,
-            author: 1,
-            title: b"Hello world!".to_vec(),
-            status: "publish".into(),
-            ..Post::default()
-        }),
+        post: Some(crate::posts::tests::hello()),
         user: None,
         can_edit,
         link: "http://127.0.0.1:8081/?p=1#comment-1".into(),

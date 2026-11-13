@@ -827,3 +827,20 @@ fn comment_avatars() {
     assert!(avatar.contains("?s=50&#038;d=mm' srcset="), "{avatar}");
     assert!(comment_avatar(&options(b"0"), b"a@b.test", 50).is_empty());
 }
+
+/// The admin's `comment_text` runs `wp_kses_post()` after `make_clickable()`.
+#[test]
+fn admin_comment_text_is_kses_d() {
+    let option = |name: &str| (name == "siteurl").then(|| b"http://s.test".to_vec());
+    let text = admin_comment_text(
+        &option,
+        b"http://s.test/",
+        b"<script>x</script>see http://e.test",
+    );
+    let text = String::from_utf8(text).unwrap();
+    assert!(
+        text.starts_with("<p>xsee <a href=\"http://e.test\""),
+        "{text}"
+    );
+    assert!(text.ends_with("</a></p>\n"), "{text}");
+}

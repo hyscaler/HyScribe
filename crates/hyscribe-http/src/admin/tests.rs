@@ -157,6 +157,29 @@ async fn logged_in_users_are_let_in() {
         location(&response),
         "/hs-admin/edit-tags?taxonomy=category&paged=1"
     );
+    // The comments, and their arguments not ported yet.
+    let page =
+        page_of(get(&site, "/hs-admin/edit-comments", "127.0.0.1:8081", &cookies).await).await;
+    let list = include_str!("../../../hyscribe-admin/tests/golden/comments-list.tsv");
+    let row = list
+        .lines()
+        .find(|l| l.starts_with("default\tadministrator\t"))
+        .unwrap();
+    let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+    let (php, page) = (
+        hyscribe_testkit::settled_page(&php),
+        hyscribe_testkit::settled_page(&page),
+    );
+    assert_eq!(with_values(&php, &page), page);
+    let response = get(
+        &site,
+        "/hs-admin/edit-comments?s=x",
+        "127.0.0.1:8081",
+        &auth,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     // The categories.
     let path = "/hs-admin/edit-tags?taxonomy=category";
     let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
@@ -335,6 +358,26 @@ async fn refusals() {
         .unwrap();
     let body = String::from_utf8(body.to_vec()).unwrap();
     assert!(body.contains("Sorry, you are not allowed to access this page."));
+    let comments = tokio::task::spawn_blocking({
+        let (site, handle) = (Arc::clone(&site), handle.clone());
+        move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            let path = "/hs-admin/edit-comments";
+            screen(
+                &admin,
+                path,
+                path,
+                &format!("http://h{path}"),
+                "http://h",
+                &Browser::default(),
+            )
+        }
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(comments.status(), StatusCode::FORBIDDEN);
     let terms = tokio::task::spawn_blocking(move || {
         let reads = LoginReads::new(&site, handle, now());
         let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
@@ -512,6 +555,13 @@ async fn dashboard_data() {
             assert_eq!(admin.comment_post(2), None);
             assert_eq!(admin.term_taxonomy(1).as_deref(), Some("category"));
             assert_eq!(admin.count_terms("category", None), 1);
+            let (link, author) = admin.parent_comment(1).unwrap();
+            assert_eq!(
+                (link.ends_with("#comment-1"), &author[..]),
+                (true, &b"A WordPress Commenter"[..])
+            );
+            assert!(admin.parent_comment(999).is_none());
+            assert!(admin.has_comments("comment") && !admin.has_comments("pings"));
             assert_eq!(admin.count_terms("category", Some("zzz")), 0);
             assert!(admin.term_taxonomy(999_999).is_none());
             let term = admin.terms("category").remove(0);

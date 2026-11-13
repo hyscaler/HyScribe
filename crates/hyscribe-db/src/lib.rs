@@ -61,6 +61,7 @@ fn db_error(err: sqlx::Error) -> DbError {
 macro_rules! comment_columns {
     () => {
         "comment_ID, comment_post_ID, comment_author, comment_author_email, comment_author_url, \
+         comment_author_IP, \
          CAST(comment_date AS CHAR) AS comment_date, \
          CAST(comment_date_gmt AS CHAR) AS comment_date_gmt, comment_content, comment_type, \
          comment_parent, user_id"
@@ -186,6 +187,7 @@ fn comment(row: &MySqlRow) -> Result<Comment, DbError> {
         author: c.bytes("comment_author"),
         author_email: c.bytes("comment_author_email"),
         author_url: c.bytes("comment_author_url"),
+        author_ip: c.bytes("comment_author_IP"),
         date: c.text("comment_date"),
         date_gmt: c.text("comment_date_gmt"),
         content: c.bytes("comment_content"),
@@ -808,6 +810,25 @@ impl Db {
         c.finish(counts)
     }
 
+    /// Whether any approved or pending comment is of one of `types`.
+    pub async fn has_comment_types(&self, types: &[&str]) -> Result<bool, DbError> {
+        let mut sql = Sql::new(
+            "SELECT comment_ID FROM {prefix}comments \
+             WHERE comment_approved IN ('0', '1') AND comment_type IN (",
+        );
+        list(
+            &mut sql,
+            types.iter().map(|kind| Bind::Text((*kind).into())),
+        );
+        sql.push(" LIMIT 1");
+        let rows = sql
+            .query(&self.prefix)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        Ok(!rows.is_empty())
+    }
+
     /// The latest comments that are approved, or also pending when
     /// `pending`, newest first, with their `comment_approved`.
     pub async fn latest_comments(
@@ -839,6 +860,21 @@ impl Db {
                 })
             })
             .collect()
+    }
+
+    /// `get_comment( $id )` in any state.
+    pub async fn any_comment(&self, id: u64) -> Result<Option<Comment>, DbError> {
+        let sql = self.prefix.sql(concat!(
+            "SELECT ",
+            comment_columns!(),
+            " FROM {prefix}comments WHERE comment_ID = ?"
+        ));
+        let row = sqlx::query(sql)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.as_ref().map(comment).transpose()
     }
 
     /// One approved comment by ID, of any type.

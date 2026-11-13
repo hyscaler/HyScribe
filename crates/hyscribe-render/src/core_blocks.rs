@@ -5,7 +5,7 @@
 //! `prepare_attributes_for_render()` leaves them.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url, esc_url_protocols, url_host, url_scheme};
-use hyscribe_model::{Comment, Post};
+use hyscribe_model::{Comment, Post, User};
 use hyscribe_phpser::{Key, Value, add_query_arg, is_empty_string, isset, php_trim, urlencode};
 
 use crate::autop::wpautop;
@@ -22,7 +22,7 @@ use crate::query_loop::{inherits, own_counts, own_page, query_posts};
 use crate::registry::block_type;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
-use crate::template::{replace, site_smilies};
+use crate::template::{replace, smilies};
 use crate::theme::Theme;
 use crate::title::archive_title;
 
@@ -266,8 +266,25 @@ fn comment_content(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 /// The `comment_text` filters over a comment's content.
 pub(crate) fn comment_text(site: &dyn Site, content: &[u8]) -> Vec<u8> {
     let text = make_clickable(content, &site.home_url(), true);
-    let text = convert_chars(&wptexturize(&text, &CORE_SHORTCODE_TAGS));
-    let text = force_balance_tags(&site_smilies(site, &text));
+    formatted_comment(&|name| site.option(name), &text)
+}
+
+/// The `comment_text` filters in the admin, where `wp_kses_post()` runs
+/// after `make_clickable()`, over the site's options and home URL.
+pub fn admin_comment_text(
+    option: &dyn Fn(&str) -> Option<Vec<u8>>,
+    home: &[u8],
+    content: &[u8],
+) -> Vec<u8> {
+    let text = make_clickable(content, home, true);
+    let host = link::host(&option("siteurl").unwrap_or_default());
+    formatted_comment(option, &wp_kses_post(&text, &host))
+}
+
+/// The `comment_text` filters after `make_clickable()` and kses.
+fn formatted_comment(option: &dyn Fn(&str) -> Option<Vec<u8>>, text: &[u8]) -> Vec<u8> {
+    let text = convert_chars(&wptexturize(text, &CORE_SHORTCODE_TAGS));
+    let text = force_balance_tags(&smilies(option, &text));
     capital_p_dangit(&wpautop(&text, true))
 }
 
@@ -343,12 +360,20 @@ pub(crate) fn comment_author(context: &Context<'_>, comment: &Comment) -> Vec<u8
     let user = (comment.user_id != 0)
         .then(|| context.site.user(comment.user_id))
         .flatten();
-    user.map_or(b"Anonymous".to_vec(), |user| user.display_name)
+    comment_author_of(comment, user.as_ref())
+}
+
+/// `get_comment_author()` of `comment`, written by `user` if one.
+pub fn comment_author_of(comment: &Comment, user: Option<&User>) -> Vec<u8> {
+    if !is_empty_string(&comment.author) {
+        return comment.author.clone();
+    }
+    user.map_or(b"Anonymous".to_vec(), |user| user.display_name.clone())
 }
 
 /// `get_comment_author_url( $comment )`: the author's site, with `http://`
 /// alone counting as none.
-pub(crate) fn comment_author_url(comment: &Comment) -> Vec<u8> {
+pub fn comment_author_url(comment: &Comment) -> Vec<u8> {
     let url: &[u8] = if comment.author_url == b"http://" {
         b""
     } else {

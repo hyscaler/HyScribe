@@ -121,6 +121,8 @@ pub struct Comment {
     pub author_email: Vec<u8>,
     /// `comment_author_url`.
     pub author_url: Vec<u8>,
+    /// `comment_author_IP`.
+    pub author_ip: Vec<u8>,
     /// `comment_date`, local time.
     pub date: String,
     /// `comment_date_gmt`.

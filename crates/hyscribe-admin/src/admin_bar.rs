@@ -249,7 +249,7 @@ impl Bar {
 
 /// `wp_html_excerpt()`: the text without tags, cut to `count` characters
 /// and without a broken entity at its end, with `more` when it was cut.
-fn html_excerpt(text: &str, count: usize, more: &str) -> String {
+pub(crate) fn html_excerpt(text: &str, count: usize, more: &str) -> String {
     let text = String::from_utf8_lossy(&wp_strip_all_tags(text.as_bytes(), true)).into_owned();
     let mut excerpt: Vec<u8> = text.chars().take(count).collect::<String>().into_bytes();
     // `preg_replace( '/&[^;\s]{0,6}$/', '', $excerpt )`, on bytes: from the

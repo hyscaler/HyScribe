@@ -27,6 +27,14 @@ pub struct View {
 
 /// `views()` with its screen reader `heading`.
 pub fn views(heading: &str, views: &[View]) -> String {
+    format!(
+        "<h2 class='screen-reader-text'>{heading}</h2>{}",
+        view_list(views)
+    )
+}
+
+/// The links of `views()`, in their list.
+pub fn view_list(views: &[View]) -> String {
     let links: Vec<String> = views
         .iter()
         .map(|view| {
@@ -44,7 +52,7 @@ pub fn views(heading: &str, views: &[View]) -> String {
         })
         .collect();
     format!(
-        "<h2 class='screen-reader-text'>{heading}</h2><ul class='subsubsub'>\n{}</li>\n</ul>",
+        "<ul class='subsubsub'>\n{}</li>\n</ul>",
         links.join(" |</li>\n")
     )
 }
@@ -74,6 +82,9 @@ pub fn search_box(label: &str, input_id: &str, query: &str, order: &[(&str, &str
 /// `bulk_actions( $which )`: `actions` are values and labels; the bottom
 /// copy names its fields with a `2`.
 pub fn bulk_actions(which: &str, actions: &[(&str, &str)]) -> String {
+    if actions.is_empty() {
+        return String::new();
+    }
     let two = if which == "bottom" { "2" } else { "" };
     let mut out = format!(
         "<label for=\"bulk-action-selector-{which}\" class=\"screen-reader-text\">Select bulk action</label><select name=\"action{two}\" id=\"bulk-action-selector-{which}\">\n<option value=\"-1\">Bulk actions</option>\n"
@@ -244,6 +255,8 @@ pub struct Column {
     pub label: String,
     /// `get_sortable_columns()`'s entry, if it sorts.
     pub sort: Option<Sort>,
+    /// The primary column, which holds the row actions.
+    pub primary: bool,
 }
 
 /// A sortable column: `orderby`, whether it sorts descending first, its
@@ -296,10 +309,6 @@ pub fn column_headers(
     with_id: bool,
 ) -> String {
     let (current, direction) = current(columns, order);
-    let primary = columns
-        .iter()
-        .find(|column| column.key != "cb")
-        .map_or("", |column| column.key);
     let mut out = String::new();
     for column in columns {
         let key = column.key;
@@ -312,7 +321,7 @@ pub fn column_headers(
         } else if matches!(key, "posts" | "comments" | "links") {
             class.push("num".into());
         }
-        if key == primary {
+        if column.primary {
             class.push("column-primary".into());
         }
         let mut label = column.label.clone();
@@ -349,7 +358,9 @@ pub fn column_headers(
                 };
                 next
             };
-            abbr = format!(" abbr=\"{}\"", esc_attr(sort.abbr.as_bytes()));
+            if !sort.abbr.is_empty() {
+                abbr = format!(" abbr=\"{}\"", esc_attr(sort.abbr.as_bytes()));
+            }
             let href = add_query_arg(
                 &[
                     (b"orderby", Some(sort.orderby.as_bytes())),
@@ -438,13 +449,9 @@ pub fn screen_options(
     view_mode: &str,
     nonce: String,
 ) -> String {
-    let primary = columns
-        .iter()
-        .find(|column| column.key != "cb")
-        .map(|column| column.key);
     let labels: String = columns
         .iter()
-        .filter(|column| column.key != "cb" && Some(column.key) != primary)
+        .filter(|column| column.key != "cb" && !column.primary)
         .map(|column| {
             let key = column.key;
             let checked = if hidden.iter().any(|h| h == key) {

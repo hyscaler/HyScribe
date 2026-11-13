@@ -1344,7 +1344,7 @@ fn untrimmed(text: &[u8], list: &[u8]) -> bool {
 /// `antispambot()` on an address `is_email()` accepts: each character as
 /// itself or a decimal reference, drawn at random, and `@` always as
 /// `&#64;`.
-pub(crate) fn antispambot(email: &[u8]) -> Vec<u8> {
+pub fn antispambot(email: &[u8]) -> Vec<u8> {
     use std::hash::{BuildHasher, RandomState};
     let state = RandomState::new();
     let mut out = Vec::new();

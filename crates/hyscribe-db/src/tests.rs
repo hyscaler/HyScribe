@@ -369,6 +369,15 @@ async fn terms_are_searched_paged_and_counted() {
 }
 
 #[tokio::test]
+async fn any_comment_is_read() {
+    let db = Db::connect(&fixture_config()).await.unwrap();
+    assert_eq!(db.any_comment(1).await.unwrap().map(|c| c.id), Some(1));
+    assert!(db.any_comment(999).await.unwrap().is_none());
+    assert!(db.has_comment_types(&["", "comment"]).await.unwrap());
+    assert!(!db.has_comment_types(&["pingback"]).await.unwrap());
+}
+
+#[tokio::test]
 async fn a_term_s_taxonomy_is_its_only_one() {
     let db = Db::connect(&fixture_config()).await.unwrap();
     assert_eq!(
@@ -402,6 +411,8 @@ async fn errors_are_reported() {
         db.post_terms(1, "category").await.unwrap_err(),
         db.term(1, "category").await.unwrap_err(),
         db.term_taxonomy(1).await.unwrap_err(),
+        db.any_comment(1).await.unwrap_err(),
+        db.has_comment_types(&["comment"]).await.unwrap_err(),
         db.count_terms("category", None).await.unwrap_err(),
         db.user(1).await.unwrap_err(),
         db.credentials(UserField::Login, b"admin")

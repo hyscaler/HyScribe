@@ -22,6 +22,7 @@ use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::PageSite;
 use hyscribe_admin::posts::{Answer, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids};
 use hyscribe_admin::profile::{ProfileSite, profile};
+use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
 use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
 use hyscribe_admin::users::{ListedUser, UserArgs, UserQuery, UsersSite, user_order, users};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
@@ -644,7 +645,16 @@ impl ProfileSite for Admin<'_> {
         sessions.map_or(0, |sessions| sessions.count(self.user.id, self.reads.now))
     }
     fn generated_password(&self) -> String {
-        hyscribe_auth::generate_password(24).unwrap_or_default()
+        hyscribe_auth::generate_password(24, true).unwrap_or_default()
+    }
+}
+
+impl SettingsSite for Admin<'_> {
+    fn defined(&self, name: &str) -> bool {
+        self.site.defined.contains(&name)
+    }
+    fn random_key(&self) -> String {
+        hyscribe_auth::generate_password(8, false).unwrap_or_default()
     }
 }
 
@@ -894,10 +904,30 @@ fn screen(
     url: &str,
     origin: &str,
     browser: &Browser,
+    post: bool,
 ) -> Option<Response> {
     let canonical =
         String::from_utf8_lossy(&remove_query_arg(&REMOVABLE, url.as_bytes())).into_owned();
+    // The Settings screens take no arguments, and their forms are not saved.
+    let settings = !post && !request_uri.contains('?');
     let page = match path {
+        "/hs-admin/options-general" | "/hs-admin/options-writing" | "/hs-admin/options-reading"
+            if settings =>
+        {
+            let answer = match path {
+                "/hs-admin/options-general" => {
+                    general(admin, &canonical, origin, request_uri, browser)?
+                }
+                "/hs-admin/options-writing" => {
+                    writing(admin, &canonical, origin, request_uri, browser)
+                }
+                _ => reading(admin, &canonical, origin, request_uri, browser)?,
+            };
+            match answered(admin, answer) {
+                Ok(html) => Some(html),
+                Err(response) => return Some(*response),
+            }
+        }
         "/hs-admin/tools" => hyscribe_admin::tools::tools(admin, &canonical, origin, browser),
         // HTTPS offers application passwords, whose list is not ported.
         "/hs-admin/profile" => {
@@ -1049,8 +1079,16 @@ fn answer(
                 let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
                 let url = text(&[scheme, &here].concat());
                 let origin = text(&[scheme, host].concat());
-                screen(&admin, uri.path(), &requested, &url, &origin, &browser)
-                    .unwrap_or_else(|| response(StatusCode::NOT_IMPLEMENTED, nocache(), Vec::new()))
+                screen(
+                    &admin,
+                    uri.path(),
+                    &requested,
+                    &url,
+                    &origin,
+                    &browser,
+                    post,
+                )
+                .unwrap_or_else(|| response(StatusCode::NOT_IMPLEMENTED, nocache(), Vec::new()))
             })
         }
         None => {

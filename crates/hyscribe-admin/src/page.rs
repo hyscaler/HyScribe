@@ -75,6 +75,12 @@ pub struct Page<'a> {
     pub late_scripts: &'a [&'a str],
     /// The screen's localized script data: handle and its `var` statement.
     pub script_data: &'a [(&'a str, String)],
+    /// The screen's inline scripts after a handle's: handle and script.
+    pub script_after: &'a [(&'a str, String)],
+    /// The styles the screen's markup enqueues as it prints.
+    pub late_styles: &'a [&'a str],
+    /// What the screen's `admin_head` hooks print.
+    pub admin_head: &'a str,
     /// What the screen's `admin_footer` hooks print.
     pub admin_footer: &'a str,
     /// What the screen prints after the footer scripts.
@@ -169,7 +175,7 @@ pub(crate) const SCHEMES: [Scheme; 9] = [
 
 /// `esc_js()`: special characters as entities, backslashes stripped, then
 /// quotes, backslashes and NULs slashed and line breaks as `\n`.
-fn esc_js(text: &str) -> String {
+pub(crate) fn esc_js(text: &str) -> String {
     let safe = esc_attr(text.as_bytes());
     let mut stripped = String::new();
     let mut chars = safe.chars();
@@ -259,6 +265,10 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
     enqueue(&mut assets, site, page, scheme);
     for (handle, data) in page.script_data {
         assets.set_script_data(handle, "data", Value::String(data.as_bytes().to_vec()));
+    }
+    for (handle, script) in page.script_after {
+        let after = Value::Array(vec![(Key::Int(0), text(script))]);
+        assets.set_script_data(handle, "after", after);
     }
     let mut out = head(site, page);
     out.extend(assets.print_admin_styles(urls));
@@ -503,7 +513,8 @@ fn body(site: &dyn PageSite, page: &Page, color: &str, browser: &Browser) -> Str
         String::from_utf8_lossy(&template)
     ));
     let mut out = format!(
-        "\t<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\"></head>\n<body class=\"wp-admin wp-core-ui no-js {}\">\n<script>\n\tdocument.body.className = document.body.className.replace('no-js','js');\n</script>\n\n",
+        "\t<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">{}</head>\n<body class=\"wp-admin wp-core-ui no-js {}\">\n<script>\n\tdocument.body.className = document.body.className.replace('no-js','js');\n</script>\n\n",
+        page.admin_head,
         esc_attr(classes.as_bytes())
     );
     if site.can("customize") {
@@ -617,6 +628,10 @@ fn footer(site: &dyn PageSite, page: &Page, assets: &mut Assets) -> String {
     }
     let imports = assets.module_dependencies();
     let mut tail = admin_import_map(&siteurl, &imports);
+    for style in page.late_styles {
+        assets.enqueue_style(style);
+    }
+    tail.extend(assets.print_admin_styles(urls));
     tail.extend(assets.print_footer_scripts(urls));
     tail.extend(emoji_detection_script(&siteurl));
     tail.extend(page.footer_scripts.as_bytes());

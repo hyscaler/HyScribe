@@ -127,6 +127,15 @@ fn trim(text: &str) -> &str {
     text.trim_matches(['\n', '\r', ' '])
 }
 
+/// A registered script's `extra` data under `key`, as text.
+pub fn registered_script_data(handle: &str, key: &str) -> String {
+    registry()
+        .get(&(true, handle.to_string()))
+        .and_then(|item| item.extra.get_str(key))
+        .map(|data| String::from_utf8_lossy(&data.to_php_string()).into_owned())
+        .unwrap_or_default()
+}
+
 /// What a request registers with no source, as `wp_register_style( $handle,
 /// false )` does before adding inline styles.
 static ALIAS: Item = Item {
@@ -235,7 +244,7 @@ impl Assets {
         found
     }
 
-    /// `print_admin_styles()`.
+    /// `print_admin_styles()`, and `print_late_styles()` after it.
     pub fn print_admin_styles(&mut self, urls: &dyn Urls) -> Vec<u8> {
         let mut out = Vec::new();
         self.styles.do_concat = self.concatenate;
@@ -283,11 +292,14 @@ impl Dependencies {
         }
     }
 
-    /// `reset()`.
+    /// `reset()`; `WP_Styles` keeps its inline styles, which the late
+    /// styles print again.
     fn reset(&mut self) {
         self.do_concat = false;
         self.concat.clear();
-        self.print_code.clear();
+        if self.scripts {
+            self.print_code.clear();
+        }
         self.print_html.clear();
     }
 

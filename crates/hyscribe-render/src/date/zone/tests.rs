@@ -189,6 +189,27 @@ fn rules_apply_after_the_last_transition() {
     assert_eq!(fixed.period(0), (&fixed.types[0], None));
 }
 
+/// The next transition is the data's, then the rule's, none for a rule
+/// without daylight saving time.
+#[test]
+fn finds_the_next_transition() {
+    let footer = b"CET-1CEST,M3.5.0,M10.5.0/3";
+    let tz = Tz::parse(&tzif(&[(100, 1), (200, 0)], &TYPES, CHARS, footer)).unwrap();
+    assert_eq!(tz.next_transition(99), Some((100, &tz.types[1])));
+    assert_eq!(tz.next_transition(100), Some((200, &tz.types[0])));
+    // Summer time from 2026-03-29 01:00 UTC to 2026-10-25 01:00 UTC, then
+    // from 2027-03-28 01:00 UTC.
+    let (summer, winter, next_summer) = (1_774_746_000, 1_792_890_000, 1_806_195_600);
+    let next = |unix| tz.next_transition(unix).map(|(at, kind)| (at, kind.dst));
+    assert_eq!(next(summer - 1), Some((summer, true)));
+    assert_eq!(next(summer), Some((winter, false)));
+    assert_eq!(next(winter), Some((next_summer, true)));
+    let fixed = Tz::parse(&tzif(&[], &TYPES, CHARS, b"CET-1")).unwrap();
+    assert_eq!(fixed.next_transition(0), None);
+    let bare = Tz::parse(&tzif(&[], &TYPES, CHARS, b"")).unwrap();
+    assert_eq!(bare.next_transition(0), None);
+}
+
 #[test]
 fn resolves_local_times_like_timelib() {
     let paris = named(b"Europe/Paris").unwrap().tz;

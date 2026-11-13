@@ -90,6 +90,8 @@ pub struct Site {
     salts: Vec<(&'static str, hyscribe_config::Secret)>,
     /// The login sessions, in primary mode only.
     sessions: Option<hyscribe_auth::sessions::Sessions>,
+    /// The constants of `home` and `siteurl` the configuration sets.
+    defined: Vec<&'static str>,
 }
 
 impl Site {
@@ -103,10 +105,15 @@ impl Site {
     ) -> Result<Site, DbError> {
         let mut options: HashMap<String, Vec<u8>> =
             db.autoload_options().await?.into_iter().collect();
-        for (name, url) in [("home", home), ("siteurl", siteurl)] {
+        let mut defined = Vec::new();
+        for (name, constant, url) in [
+            ("home", "WP_HOME", home),
+            ("siteurl", "WP_SITEURL", siteurl),
+        ] {
             if let Some(url) = url {
                 let url = url.trim_end_matches(['/', '\\']).as_bytes().to_vec();
                 options.insert(name.to_string(), url);
+                defined.push(constant);
             }
         }
         let home = String::from_utf8_lossy(options.get("home").map_or(&[][..], Vec::as_slice))
@@ -120,6 +127,7 @@ impl Site {
             rewriter: rewrite::Rewriter::default(),
             salts: Vec::new(),
             sessions: None,
+            defined,
         };
         site.build_rewriter();
         Ok(site)

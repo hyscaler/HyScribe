@@ -1059,6 +1059,9 @@ pub fn edit_comments(
         scripts: &["admin-comments"],
         late_scripts: &["quicktags", "wplink", "jquery-ui-autocomplete"],
         script_data: &[],
+        script_after: &[],
+        late_styles: &[],
+        admin_head: "",
         // `_js_vars()` of the list table, which loads its pages by Ajax.
         admin_footer: "<script>list_args = {\"class\":\"WP_Comments_List_Table\",\"screen\":{\"id\":\"edit-comments\",\"base\":\"edit-comments\"}};</script>\n",
         footer_scripts: &editor_footer(site),

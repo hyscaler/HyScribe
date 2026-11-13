@@ -1,0 +1,266 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! The Settings screens: General, Writing and Reading, each a form of
+//! options `options.php` saves.
+
+use hyscribe_kses::{esc_attr, esc_url};
+use hyscribe_phpser::{Float, Key, Value, remove_query_arg};
+use hyscribe_render::date::{DAYS, MONTHS, Zone, site_zone};
+
+use crate::admin_bar::Browser;
+use crate::menu::Screen;
+use crate::page::{HelpTab, Page, admin_page, json, object, text as value_text};
+use crate::posts::Answer;
+use crate::users::UsersSite;
+
+mod general;
+mod reading;
+mod writing;
+
+pub use general::general;
+pub use reading::reading;
+pub use writing::writing;
+
+/// What the Settings screens ask of the site beyond the users list's.
+pub trait SettingsSite: UsersSite {
+    /// Whether `wp-config.php` defines the constant `name`.
+    fn defined(&self, name: &str) -> bool;
+    /// `wp_generate_password( 8, false )`.
+    fn random_key(&self) -> String;
+}
+
+const SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/settings-%s-screen/\">Documentation on %S Settings</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
+
+fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// `get_option( $name )`, as stored, empty when unset.
+fn option(site: &dyn SettingsSite, name: &str) -> String {
+    text(&site.option(name).unwrap_or_default())
+}
+
+/// `form_option( $name )`.
+fn form_option(site: &dyn SettingsSite, name: &str) -> String {
+    esc_attr(option(site, name).as_bytes())
+}
+
+/// `settings_fields( $group )` for the request `request_uri`.
+fn settings_fields(site: &dyn SettingsSite, group: &str, request_uri: &str) -> String {
+    let referer = esc_attr(&remove_query_arg(
+        &[b"_wp_http_referer"],
+        request_uri.as_bytes(),
+    ));
+    format!(
+        "<input type='hidden' name='option_page' value='{group}' /><input type=\"hidden\" name=\"action\" value=\"update\" /><input type=\"hidden\" id=\"_wpnonce\" name=\"_wpnonce\" value=\"{}\" /><input type=\"hidden\" name=\"_wp_http_referer\" value=\"{referer}\" />",
+        site.nonce(&format!("{group}-options"))
+    )
+}
+
+/// `get_option( 'gmt_offset' )` through `wp_timezone_override_offset()`:
+/// a named zone's offset now in hours, else the stored one.
+fn gmt_offset(site: &dyn SettingsSite) -> Value {
+    match site_zone(option(site, "timezone_string").as_bytes(), b"") {
+        Zone::Named(named) => {
+            let seconds = named.tz.period(site.clock().1).0.offset as f64;
+            Value::Float(Float::from_f64((seconds / 36.0).round() / 100.0))
+        }
+        _ => Value::String(option(site, "gmt_offset").into_bytes()),
+    }
+}
+
+/// The site's time zone, as `wp_timezone()` reads the options.
+fn zone(site: &dyn SettingsSite) -> Zone {
+    site_zone(
+        option(site, "timezone_string").as_bytes(),
+        &gmt_offset(site).to_php_string(),
+    )
+}
+
+/// The `moment` and `wp-date` settings `wp_default_packages_inline_scripts()`
+/// prints from the date and time options.
+fn date_scripts(site: &dyn SettingsSite) -> Vec<(&'static str, String)> {
+    let list = |names: &[&str], len: usize| {
+        Value::Array(
+            names
+                .iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    (
+                        Key::Int(i as i64),
+                        value_text(name.get(..len).unwrap_or(name)),
+                    )
+                })
+                .collect(),
+        )
+    };
+    let week = Value::Int(Value::String(option(site, "start_of_week").into_bytes()).to_int());
+    let time = value_text(&option(site, "time_format"));
+    let date = value_text(&option(site, "date_format"));
+    let moment = object(vec![
+        ("months", list(&MONTHS, 99)),
+        ("monthsShort", list(&MONTHS, 3)),
+        ("weekdays", list(&DAYS, 99)),
+        ("weekdaysShort", list(&DAYS, 3)),
+        ("week", object(vec![("dow", week.clone())])),
+        (
+            "longDateFormat",
+            object(vec![
+                ("LT", time.clone()),
+                ("LTS", Value::Null),
+                ("L", Value::Null),
+                ("LL", date.clone()),
+                ("LLL", value_text("F j, Y g:i a")),
+                ("LLLL", Value::Null),
+            ]),
+        ),
+    ]);
+    let string = option(site, "timezone_string");
+    let abbr = match site_zone(string.as_bytes(), b"") {
+        Zone::Named(named) => named.tz.period(site.clock().1).0.abbreviation.clone(),
+        _ => String::new(),
+    };
+    let offset = gmt_offset(site);
+    let formatted = text(&offset.to_php_string())
+        .replace(".25", ":15")
+        .replace(".5", ":30")
+        .replace(".75", ":45");
+    let pairs = |pairs: &[(&str, &str)]| {
+        object(
+            pairs
+                .iter()
+                .map(|(key, value)| (*key, value_text(value)))
+                .collect(),
+        )
+    };
+    let relative = pairs(&[
+        ("future", "%s from now"),
+        ("past", "%s ago"),
+        ("s", "a second"),
+        ("ss", "%d seconds"),
+        ("m", "a minute"),
+        ("mm", "%d minutes"),
+        ("h", "an hour"),
+        ("hh", "%d hours"),
+        ("d", "a day"),
+        ("dd", "%d days"),
+        ("M", "a month"),
+        ("MM", "%d months"),
+        ("y", "a year"),
+        ("yy", "%d years"),
+    ]);
+    let settings = object(vec![
+        (
+            "l10n",
+            object(vec![
+                ("locale", value_text("en_US")),
+                ("months", list(&MONTHS, 99)),
+                ("monthsShort", list(&MONTHS, 3)),
+                ("weekdays", list(&DAYS, 99)),
+                ("weekdaysShort", list(&DAYS, 3)),
+                (
+                    "meridiem",
+                    pairs(&[("am", "am"), ("pm", "pm"), ("AM", "AM"), ("PM", "PM")]),
+                ),
+                ("relative", relative),
+                ("startOfWeek", week),
+            ]),
+        ),
+        (
+            "formats",
+            object(vec![
+                ("time", time),
+                ("date", date),
+                ("datetime", value_text("F j, Y g:i a")),
+                ("datetimeAbbreviated", value_text("M j, Y g:i a")),
+            ]),
+        ),
+        (
+            "timezone",
+            object(vec![
+                ("offset", Value::Float(Float::from_f64(offset.to_float()))),
+                ("offsetFormatted", value_text(&formatted)),
+                ("string", value_text(&string)),
+                ("abbr", value_text(&abbr)),
+            ]),
+        ),
+    ]);
+    vec![
+        (
+            "moment",
+            format!("moment.updateLocale( 'en_US', {} );", json(&moment)),
+        ),
+        (
+            "wp-date",
+            format!("wp.date.setSettings( {} );", json(&settings)),
+        ),
+    ]
+}
+
+/// What a Settings screen adds to the frame.
+struct Form<'a> {
+    file: &'a str,
+    title: &'a str,
+    help: &'a [HelpTab<'a>],
+    content: &'a str,
+    admin_head: &'a str,
+    scripts: &'a [&'a str],
+    late_scripts: &'a [&'a str],
+    late_styles: &'a [&'a str],
+    script_data: &'a [(&'a str, String)],
+    admin_footer: &'a str,
+}
+
+/// The screen in the frame, for those the menu lets in.
+fn settings_page(
+    site: &dyn SettingsSite,
+    screen: &Form,
+    canonical: &str,
+    origin: &str,
+    browser: &Browser,
+) -> Answer {
+    let name = screen.title.split(' ').next().unwrap_or_default();
+    let sidebar = SIDEBAR
+        .replace("%s", &name.to_ascii_lowercase())
+        .replace("%S", name);
+    let id = screen.file.trim_end_matches(".php");
+    let page = Page {
+        screen: Screen {
+            pagenow: screen.file,
+            typenow: "",
+            taxonomy: "",
+            parent_file: Some("options-general.php"),
+            submenu_file: None,
+        },
+        id,
+        title: screen.title,
+        help: screen.help,
+        sidebar: &sidebar,
+        screen_options: "",
+        styles: &[],
+        scripts: screen.scripts,
+        late_scripts: screen.late_scripts,
+        script_data: screen.script_data,
+        script_after: &date_scripts(site),
+        late_styles: screen.late_styles,
+        admin_head: screen.admin_head,
+        admin_footer: screen.admin_footer,
+        footer_scripts: "",
+        content: screen.content,
+        canonical,
+        origin,
+        view: None,
+    };
+    admin_page(site, &page, browser).map_or(
+        Answer::Denied("Sorry, you are not allowed to access this page."),
+        Answer::Page,
+    )
+}
+
+/// `esc_url()` as text.
+fn url(value: &str) -> String {
+    text(&esc_url(value.as_bytes()))
+}
+
+#[cfg(test)]
+mod tests;

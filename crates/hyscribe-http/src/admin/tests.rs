@@ -284,6 +284,48 @@ async fn logged_in_users_are_let_in() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // The Settings screens; Writing with its random strings masked, and
+    // General, whose dates are now's, by its parts.
+    let settings = include_str!("../../../hyscribe-admin/tests/golden/settings.tsv");
+    for screen in ["writing", "reading"] {
+        let path = format!("/hs-admin/options-{screen}");
+        let page = page_of(get(&site, &path, "127.0.0.1:8081", &cookies).await).await;
+        let start = format!("default\tadministrator\t{screen}\t");
+        let row = settings.lines().find(|l| l.starts_with(&start)).unwrap();
+        let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+        let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+        // The random strings are the eight characters of their `<kbd>`s.
+        let parts: Vec<&str> = page.split("<kbd>").collect();
+        let mut masked = parts[0].to_string();
+        for part in &parts[1..] {
+            let key = part.get(8..).filter(|rest| rest.starts_with("</kbd>"));
+            masked.push_str("<kbd>");
+            masked.push_str(&key.map_or(part.to_string(), |rest| format!("%password%{rest}")));
+        }
+        assert_eq!(with_values(&php, &masked), masked, "{screen}");
+    }
+    let page = page_of(
+        get(
+            &site,
+            "/hs-admin/options-general",
+            "127.0.0.1:8081",
+            &cookies,
+        )
+        .await,
+    )
+    .await;
+    assert!(page.contains("<h1>General Settings</h1>"));
+    assert!(page.contains(
+        "value=\"http://127.0.0.1:8081\" disabled='disabled' class=\"regular-text code disabled\""
+    ));
+    for path in [
+        "/hs-admin/options-general?settings-updated=true",
+        "/hs-admin/options-writing?x",
+        "/hs-admin/options-reading?",
+    ] {
+        let response = get(&site, path, "127.0.0.1:8081", &auth).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+    }
     // The categories.
     let path = "/hs-admin/edit-tags?taxonomy=category";
     let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
@@ -430,6 +472,7 @@ async fn refusals() {
                 url,
                 "http://h",
                 &Browser::default(),
+                false,
             )
         }
     })
@@ -450,6 +493,7 @@ async fn refusals() {
                 "http://h/hs-admin/tools",
                 "http://h",
                 &browser,
+                false,
             )
         }
     })
@@ -475,6 +519,7 @@ async fn refusals() {
                 &format!("http://h{path}"),
                 "http://h",
                 &Browser::default(),
+                false,
             )
         }
     })
@@ -495,6 +540,7 @@ async fn refusals() {
                 &format!("http://h{path}"),
                 "http://h",
                 &Browser::default(),
+                false,
             )
         }
     })
@@ -516,6 +562,7 @@ async fn refusals() {
                 "https://h/hs-admin/profile",
                 "https://h",
                 &Browser::default(),
+                false,
             )
         }
     })
@@ -535,6 +582,7 @@ async fn refusals() {
                 "http://h/hs-admin/profile",
                 "http://h",
                 &Browser::default(),
+                false,
             )
         }
     })
@@ -542,18 +590,22 @@ async fn refusals() {
     .unwrap()
     .unwrap();
     assert_eq!(profile.status(), StatusCode::FORBIDDEN);
-    let terms = tokio::task::spawn_blocking(move || {
-        let reads = LoginReads::new(&site, handle, now());
-        let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
-        let path = "/hs-admin/edit-tags?taxonomy=category";
-        screen(
-            &admin,
-            "/hs-admin/edit-tags",
-            path,
-            &format!("http://h{path}"),
-            "http://h",
-            &Browser::default(),
-        )
+    let terms = tokio::task::spawn_blocking({
+        let (site, handle) = (Arc::clone(&site), handle.clone());
+        move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            let path = "/hs-admin/edit-tags?taxonomy=category";
+            screen(
+                &admin,
+                "/hs-admin/edit-tags",
+                path,
+                &format!("http://h{path}"),
+                "http://h",
+                &Browser::default(),
+                false,
+            )
+        }
     })
     .await
     .unwrap()
@@ -564,6 +616,69 @@ async fn refusals() {
         .unwrap();
     let body = String::from_utf8(body.to_vec()).unwrap();
     assert!(body.contains("Sorry, you are not allowed to manage terms in this taxonomy."));
+    // The Settings screens refuse those who may not manage options, and
+    // their forms are not saved yet.
+    for (path, post, refused) in [
+        ("/hs-admin/options-general", false, true),
+        ("/hs-admin/options-writing", false, true),
+        ("/hs-admin/options-reading", false, true),
+        ("/hs-admin/options-reading", true, false),
+    ] {
+        let site = Arc::clone(&site);
+        let handle = Handle::current();
+        let response = tokio::task::spawn_blocking(move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            let url = format!("http://h{path}");
+            let browser = Browser::default();
+            screen(&admin, path, path, &url, "http://h", &browser, post)
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            response.map(|r| r.status()),
+            refused.then_some(StatusCode::FORBIDDEN),
+            "{path}"
+        );
+    }
+}
+
+/// A Site Icon, and a static homepage with neither page chosen, which PHP
+/// saves as the latest posts first, are not ported.
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_not_ported() {
+    let db = hyscribe_db::Db::connect(&hyscribe_testkit::fixture_database())
+        .await
+        .unwrap();
+    let mut site = Site::load(db, None, None).await.unwrap();
+    site.options.insert("site_icon".into(), b"5".to_vec());
+    site.options
+        .insert("show_on_front".into(), b"page".to_vec());
+    let site = Arc::new(site);
+    for path in ["/hs-admin/options-general", "/hs-admin/options-reading"] {
+        let site = Arc::clone(&site);
+        let handle = Handle::current();
+        let response = tokio::task::spawn_blocking(move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            let url = format!("http://h{path}");
+            let browser = Browser::default();
+            screen(&admin, path, path, &url, "http://h", &browser, false)
+        })
+        .await
+        .unwrap();
+        assert!(response.is_none(), "{path}");
+    }
+    // Without `WP_HOME` and `WP_SITEURL` configured, neither is defined.
+    let handle = Handle::current();
+    let defined = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, now());
+        let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+        SettingsSite::defined(&admin, "WP_HOME") || SettingsSite::defined(&admin, "WP_SITEURL")
+    })
+    .await
+    .unwrap();
+    assert!(!defined);
 }
 
 /// The terms list reads its taxonomy, page, search and order.

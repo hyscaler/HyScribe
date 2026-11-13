@@ -160,6 +160,15 @@ impl Tz {
         }
     }
 
+    /// The first transition after `unix` and the type it starts, as
+    /// `timezone_transitions_get()` lists it second.
+    pub fn next_transition(&self, unix: i64) -> Option<(i64, &LocalType)> {
+        match self.transitions.iter().find(|(at, _)| *at > unix) {
+            Some((at, kind)) => Some((*at, self.kind(*kind))),
+            None => self.rule.as_ref()?.next(unix),
+        }
+    }
+
     fn kind(&self, index: usize) -> &LocalType {
         // `parse` checked every index and that a first type exists.
         self.types.get(index).unwrap_or(&FALLBACK)
@@ -191,24 +200,43 @@ static FALLBACK: LocalType = LocalType {
 };
 
 impl Rule {
+    /// The changes to daylight saving time and back in the years `years`
+    /// after that of `unix`, with the type each starts.
+    fn changes<'a>(
+        &'a self,
+        unix: i64,
+        years: std::ops::RangeInclusive<i64>,
+        (daylight, start, end): (&'a LocalType, Change, Change),
+    ) -> impl Iterator<Item = (i64, &'a LocalType)> {
+        let (year, _, _) = civil_from_days(unix.div_euclid(86_400));
+        let change =
+            |year: i64, (day, time): Change, before: i64| day.days(year) * 86_400 + time - before;
+        years.flat_map(move |offset| {
+            [
+                (change(year + offset, start, self.standard.offset), daylight),
+                (change(year + offset, end, daylight.offset), &self.standard),
+            ]
+        })
+    }
+
+    /// The first change after `unix`, if the rule has daylight saving time.
+    fn next(&self, unix: i64) -> Option<(i64, &LocalType)> {
+        let (daylight, start, end) = self.daylight.as_ref()?;
+        self.changes(unix, 0..=1, (daylight, *start, *end))
+            .filter(|(at, _)| *at > unix)
+            .min_by_key(|(at, _)| *at)
+    }
+
     /// The type at `unix`, after the TZif data's last transition `last`.
     fn period(&self, unix: i64, last: Option<i64>) -> Period<'_> {
         let Some((daylight, start, end)) = &self.daylight else {
             return (&self.standard, last);
         };
-        let (year, _, _) = civil_from_days(unix.div_euclid(86_400));
-        let change =
-            |year: i64, (day, time): Change, before: i64| day.days(year) * 86_400 + time - before;
         let initial = (last.unwrap_or(i64::MIN), &self.standard);
         // No zone changes within a day of New Year, so the next year never
         // has a change before `unix`.
-        let (at, kind) = (year - 1..=year)
-            .flat_map(|year| {
-                [
-                    (change(year, *start, self.standard.offset), daylight),
-                    (change(year, *end, daylight.offset), &self.standard),
-                ]
-            })
+        let (at, kind) = self
+            .changes(unix, -1..=0, (daylight, *start, *end))
             .filter(|(at, _)| *at <= unix)
             .fold(
                 initial,

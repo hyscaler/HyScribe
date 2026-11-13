@@ -2,19 +2,50 @@
 
 //! The legacy widget block and the classic core widgets it renders.
 
-use hyscribe_kses::{esc_html, esc_url};
+use hyscribe_kses::{esc_attr, esc_html, esc_url};
 use hyscribe_phpser::{
     Key, Maybe, Value, base64_decode, hash_equals, is_empty_string, isset, maybe_unserialize,
     parse_str, unserialize,
 };
 
+use crate::archives::Format;
 use crate::autop::wpautop;
 use crate::balance::force_balance_tags;
 use crate::blocks::Block;
 use crate::core_blocks::prepared;
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, wptexturize};
+use crate::head::json_hex_tag;
 use crate::permalinks;
 use crate::template::Renderer;
+
+/// The archives widget's dropdown script up to its argument, as
+/// `WP_Widget_Archives::widget()` prints it.
+const ARCHIVES_SCRIPT: &str = "( ( dropdownId ) => {
+\tconst dropdown = document.getElementById( dropdownId );
+\tfunction onSelectChange() {
+\t\tsetTimeout( () => {
+\t\t\tif ( 'escape' === dropdown.dataset.lastkey ) {
+\t\t\t\treturn;
+\t\t\t}
+\t\t\tif ( dropdown.value ) {
+\t\t\t\tdocument.location.href = dropdown.value;
+\t\t\t}
+\t\t}, 250 );
+\t}
+\tfunction onKeyUp( event ) {
+\t\tif ( 'Escape' === event.key ) {
+\t\t\tdropdown.dataset.lastkey = 'escape';
+\t\t} else {
+\t\t\tdelete dropdown.dataset.lastkey;
+\t\t}
+\t}
+\tfunction onClick() {
+\t\tdelete dropdown.dataset.lastkey;
+\t}
+\tdropdown.addEventListener( 'keyup', onKeyUp );
+\tdropdown.addEventListener( 'click', onClick );
+\tdropdown.addEventListener( 'change', onSelectChange );
+})( ";
 
 /// A core widget class: its `id_base` and class name.
 struct Widget {
@@ -141,7 +172,8 @@ impl Renderer<'_> {
             before_title: b"<h2 class=\"widgettitle\">".to_vec(),
             after_title: b"</h2>".to_vec(),
         };
-        self.widget(widget, &args, &instance)
+        // `the_widget()` numbers its widget -1.
+        self.widget(widget, b"-1", &args, &instance)
     }
 
     /// `wp_render_widget()` for a widget stored in a sidebar. A block theme
@@ -170,15 +202,17 @@ impl Renderer<'_> {
         // `display_callback()` skips an instance that is unset or `false`.
         match found {
             Some((widget, instance)) if !matches!(instance, Value::Null | Value::Bool(false)) => {
-                self.widget(widget, &Args::default(), &instance)
+                let number = id.get(widget.id_base.len() + 1..).unwrap_or_default();
+                self.widget(widget, number, &Args::default(), &instance)
             }
             _ => Vec::new(),
         }
     }
 
-    /// The widget's `widget()` output.
-    fn widget(&mut self, widget: &Widget, args: &Args, instance: &Value) -> Vec<u8> {
+    /// The widget's `widget()` output, for the instance `number`.
+    fn widget(&mut self, widget: &Widget, number: &[u8], args: &Args, instance: &Value) -> Vec<u8> {
         match widget.id_base {
+            "archives" => self.archives_widget(number, args, instance),
             "search" => self.search_widget(args, instance),
             "custom_html" => self.custom_html_widget(args, instance),
             "meta" => self.meta_widget(args, instance),
@@ -187,9 +221,51 @@ impl Renderer<'_> {
         }
     }
 
+    /// `WP_Widget_Archives::widget()`: the monthly archives as a list, or
+    /// as a dropdown that goes to the one picked.
+    fn archives_widget(&self, number: &[u8], args: &Args, instance: &Value) -> Vec<u8> {
+        let title = widget_title(instance, b"Archives");
+        let count = checked(instance, "count");
+        let body = if checked(instance, "dropdown") {
+            let id = Value::String([b"archives-dropdown-", number].concat());
+            let options = self.archive_links(b"monthly", Format::Option, count);
+            let attr = esc_attr(&id.to_php_string()).into_bytes();
+            [
+                &b"\t\t<label class=\"screen-reader-text\" for=\""[..],
+                &attr,
+                b"\">",
+                &title,
+                b"</label>\n\t\t<select id=\"",
+                &attr,
+                b"\" name=\"archive-dropdown\">\n\t\t\t\n\t\t\t<option value=\"\">Select Month</option>\n\t\t\t",
+                &options,
+                b"\n\t\t</select>\n\n\t\t\t<script>\n",
+                ARCHIVES_SCRIPT.as_bytes(),
+                &json_hex_tag(&id),
+                b" );\n\n//# sourceURL=WP_Widget_Archives%3A%3Awidget\n</script>\n",
+            ]
+            .concat()
+        } else {
+            let links = self.archive_links(b"monthly", Format::Html, count);
+            [
+                b"\n\t\t\t<ul>\n\t\t\t\t",
+                &links[..],
+                b"\t\t\t</ul>\n\n\t\t\t",
+            ]
+            .concat()
+        };
+        [
+            &args.before_widget[..],
+            &titled(args, &title),
+            &body,
+            &args.after_widget,
+        ]
+        .concat()
+    }
+
     /// `WP_Widget_Search::widget()`.
     fn search_widget(&mut self, args: &Args, instance: &Value) -> Vec<u8> {
-        let title = widget_title(instance);
+        let title = widget_title(instance, b"");
         let home = esc_url(&[&self.context.site.home_url()[..], b"/"].concat());
         let query = hyscribe_kses::esc_attr(&self.context.request.search_query);
         let form = format!(
@@ -224,7 +300,7 @@ fn option_value(site: &dyn crate::site::Site, name: &str) -> Value {
 impl Renderer<'_> {
     /// `WP_Widget_Custom_HTML::widget()`.
     fn custom_html_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
-        let title = widget_title(instance);
+        let title = widget_title(instance, b"");
         let content = instance.get_str("content").map(Value::to_php_string);
         let content = self.balance_tags(&content.unwrap_or_default());
         [
@@ -242,9 +318,7 @@ impl Renderer<'_> {
     fn meta_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
         let context = &self.context;
         let site = context.site;
-        let title = instance.get_str("title").filter(|title| !title.is_empty());
-        let title = title.map_or(b"Meta".to_vec(), Value::to_php_string);
-        let title = filter_title(&title);
+        let title = widget_title(instance, b"Meta");
         let register = if is_empty_string(&site.option("users_can_register").unwrap_or_default()) {
             Vec::new()
         } else {
@@ -273,8 +347,8 @@ impl Renderer<'_> {
     /// `WP_Widget_Text::widget()`: a visual widget's text gets the content
     /// filters, a legacy one `wpautop()` when it asks for it.
     fn text_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
-        let title = widget_title(instance);
-        let set = |name| instance.get_str(name).is_some_and(|v| !v.is_empty());
+        let title = widget_title(instance, b"");
+        let set = |name| checked(instance, name);
         let visual = set("visual") && set("filter")
             || matches!(instance.get_str("filter"), Some(Value::String(s)) if s == b"content");
         let text = instance.get_str("text").filter(|text| !text.is_empty());
@@ -441,15 +515,19 @@ fn parse_args(instance: Value) -> Value {
     }
 }
 
-/// The `title` instance setting through the `widget_title` filters.
-fn widget_title(instance: &Value) -> Vec<u8> {
+/// The `title` instance setting, or the widget's `default` when it is
+/// `empty()`, through the `widget_title` filters.
+fn widget_title(instance: &Value, default: &[u8]) -> Vec<u8> {
     let title = instance.get_str("title").filter(|title| !title.is_empty());
-    filter_title(&title.map(Value::to_php_string).unwrap_or_default())
+    let title = title.map_or(default.to_vec(), Value::to_php_string);
+    esc_html(&convert_chars(&wptexturize(&title, &CORE_SHORTCODE_TAGS))).into_bytes()
 }
 
-/// The `widget_title` filters.
-fn filter_title(title: &[u8]) -> Vec<u8> {
-    esc_html(&convert_chars(&wptexturize(title, &CORE_SHORTCODE_TAGS))).into_bytes()
+/// `! empty( $instance[ $name ] )`.
+fn checked(instance: &Value, name: &str) -> bool {
+    instance
+        .get_str(name)
+        .is_some_and(|value| !value.is_empty())
 }
 
 /// The title in the sidebar's title markup, if there is one.

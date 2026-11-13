@@ -27,7 +27,7 @@ fi
 case "${1:-}" in
   up)
     "$DOCKER" rm -f "$NAME" >/dev/null 2>&1 || true
-    "$DOCKER" run -d --name "$NAME" --network "$NETWORK" -p "127.0.0.1:$PORT:80" "${UPLOADS[@]}" \
+    "$DOCKER" run -d --name "$NAME" --network "$NETWORK" -p "127.0.0.1:$PORT:80" ${UPLOADS[@]+"${UPLOADS[@]}"} \
       -e WORDPRESS_DB_HOST=db -e WORDPRESS_DB_NAME="$DB_NAME" \
       -e WORDPRESS_DB_USER=wordpress -e WORDPRESS_DB_PASSWORD=reference-only \
       -e WORDPRESS_CONFIG_EXTRA="define( 'WP_HOME', 'http://127.0.0.1:$PORT' ); define( 'WP_SITEURL', 'http://127.0.0.1:$PORT' );" \

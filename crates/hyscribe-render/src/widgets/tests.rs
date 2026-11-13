@@ -34,6 +34,9 @@ impl Site for Widgets {
     fn query(&self, query: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
         self.install.query(query)
     }
+    fn date_counts(&self, period: hyscribe_model::Period) -> Vec<hyscribe_model::DateCount> {
+        self.install.date_counts(period)
+    }
     fn wp_hash(&self, data: &[u8]) -> Option<String> {
         Some(hyscribe_phpser::hash_hmac_md5(data, b"test-salt"))
     }
@@ -82,7 +85,7 @@ fn legacy_widgets_match_php() {
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(lines.len(), 93);
+    assert_eq!(lines.len(), 108);
 }
 
 /// Without the salts `wp_hash()` signs with, no instance checks out.

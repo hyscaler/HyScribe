@@ -24,6 +24,11 @@ $options = array(
 		'_multiwidget' => 1,
 	),
 	'widget_tag_cloud' => 'plain',
+	'widget_archives'  => array(
+		2              => array( 'title' => 'Stored & dated', 'dropdown' => 1 ),
+		3              => array( 'count' => '1' ),
+		'_multiwidget' => 1,
+	),
 	'widget_custom_html' => array(
 		2              => array( 'title' => 'Stored', 'content' => '<p>Stored <em>HTML</em></p>' ),
 		'_multiwidget' => 1,
@@ -31,7 +36,7 @@ $options = array(
 	'users_can_register' => '1',
 	'sidebars_widgets' => array(
 		'sidebar-1'           => array( 'search-5', 'block-2' ),
-		'wp_inactive_widgets' => array( 'search-2', 'search-3', 'search-4', 'search-5', 'search-9', 'search-02', 'custom_html-2', 'search-6', 'search-7', 'search-1.5' ),
+		'wp_inactive_widgets' => array( 'search-2', 'search-3', 'search-4', 'search-5', 'search-9', 'search-02', 'custom_html-2', 'search-6', 'search-7', 'search-1.5', 'archives-2', 'archives-3' ),
 		'array_version'       => 3,
 	),
 );
@@ -66,6 +71,13 @@ $cases  = array(
 	$block( array( 'id' => 'search-7' ) ),
 	$block( array( 'id' => 'search-1.5' ) ),
 	$block( array( 'id' => 'nowhere-1' ) ),
+	$block( array( 'id' => 'archives-2' ) ),
+	$block( array( 'id' => 'archives-3' ) ),
+	$block( array( 'idBase' => 'archives' ) ),
+	$block( array( 'idBase' => 'archives', 'instance' => $signed( serialize( array( 'title' => 'By <b>month</b> & "year"', 'count' => 1 ) ) ) ) ),
+	$block( array( 'idBase' => 'archives', 'instance' => $signed( serialize( array( 'title' => '0', 'dropdown' => '1' ) ) ) ) ),
+	$block( array( 'idBase' => 'archives', 'instance' => $signed( serialize( array( 'title' => 'Pick <i>one</i>', 'dropdown' => true, 'count' => true ) ) ) ) ),
+	$block( array( 'idBase' => 'archives', 'instance' => $signed( serialize( array( 'dropdown' => 0, 'count' => '0' ) ) ) ) ),
 	$block( array() ),
 	$block( array( 'idBase' => 'search' ) ),
 	$block( array( 'idBase' => 'nope' ) ),

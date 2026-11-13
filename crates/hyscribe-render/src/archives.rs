@@ -107,7 +107,12 @@ impl Renderer<'_> {
     }
 
     /// `wp_get_archives()` of `kind` in `format`, `''` as monthly.
-    fn archive_links(&self, kind: &[u8], format: Format, show_post_count: bool) -> Vec<u8> {
+    pub(crate) fn archive_links(
+        &self,
+        kind: &[u8],
+        format: Format,
+        show_post_count: bool,
+    ) -> Vec<u8> {
         let site = self.context.site;
         let option = |name| site.option(name).unwrap_or_default();
         let period = match kind {
@@ -256,7 +261,7 @@ pub(crate) fn dropdown_script(site: &dyn Site, script: &str, source: &str, id: &
 
 /// The formats of [`archives_link`].
 #[derive(Clone, Copy)]
-enum Format {
+pub(crate) enum Format {
     Html,
     Option,
 }

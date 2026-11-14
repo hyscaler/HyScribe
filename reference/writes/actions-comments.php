@@ -97,17 +97,19 @@ return array(
 	),
 	'new-comment-moderation-key' => array(
 		'setup'  => function () {
-			update_option( 'moderation_keys', "\n  0\nSPAM#Wörd\n" );
+			update_option( 'moderation_keys', "\n  0\nSPAM#Wörd\n🙂\n" );
 		},
 		'action' => function () use ( $submit, $known ) {
 			$submit( array( 'comment_content' => 'This has spam#wÖrd in it.' ) + $known );
 			$submit( array( 'comment_agent' => 'a SPAM#WÖRD agent' ) + $known );
 			$submit( array( 'comment_content' => 'This is clean.' ) + $known );
+			// The key is in the text as displayed, with its smilies.
+			$submit( array( 'comment_content' => 'Nice :)' ) + $known );
 		},
 	),
 	'new-comment-disallowed'    => array(
 		'setup'  => function () {
-			update_option( 'disallowed_keys', "\nbadword\n" );
+			update_option( 'disallowed_keys', "\nbadword\n<i>\n" );
 		},
 		'action' => function () use ( $submit, $known ) {
 			$submit( array( 'comment_content' => 'A bad<b>word</b> here.' ) + $known );
@@ -119,6 +121,8 @@ return array(
 				)
 			);
 			$submit( array( 'comment_content' => 'A clean comment.' ) + $known );
+			// Only the unfiltered name has the key; the comment stays in the trash.
+			$submit( array( 'comment_author' => 'A WordPress <i>Commenter</i>' ) + $known );
 		},
 	),
 	'new-comment-unchecked'     => array(
@@ -136,7 +140,7 @@ return array(
 	),
 	'new-comment-not-flood'     => array(
 		'setup'  => function () use ( $comment ) {
-			$then = gmdate( 'Y-m-d H:i:s', time() - 60 );
+			$then = gmdate( 'Y-m-d H:i:s', time() - 15 );
 			$comment(
 				1,
 				array(
@@ -335,6 +339,55 @@ return array(
 		},
 		'action' => function () {
 			wp_unspam_comment( 1 );
+		},
+	),
+	'trash-comment-with-notes'  => array(
+		'setup'  => function () use ( $comment ) {
+			$comment( 1, array( 'comment_type' => 'note', 'comment_parent' => 1 ) );
+		},
+		'action' => function () {
+			wp_trash_comment( 1 );
+		},
+	),
+	'new-comment-backdated'     => array(
+		'setup'  => function () use ( $comment ) {
+			$comment(
+				1,
+				array(
+					'comment_author_IP' => '192.0.2.7',
+					'comment_date'      => '2020-01-01 00:00:00',
+					'comment_date_gmt'  => '2020-01-01 00:00:00',
+				)
+			);
+		},
+		'action' => function () use ( $submit ) {
+			wp_set_current_user( 0 );
+			$submit(
+				array(
+					'comment_author_IP' => '192.0.2.7',
+					'comment_date'      => '2020-01-01 00:00:05',
+					'comment_date_gmt'  => '2020-01-01 00:00:05',
+				)
+			);
+		},
+	),
+	'new-comment-no-author'     => array(
+		'setup'  => function () use ( $comment ) {
+			$comment(
+				1,
+				array(
+					'comment_author'       => '',
+					'comment_author_email' => 'nameless@example.test',
+				)
+			);
+		},
+		'action' => function () use ( $submit ) {
+			$submit(
+				array(
+					'comment_author'       => '',
+					'comment_author_email' => 'nameless@example.test',
+				)
+			);
 		},
 	),
 	'trash-comment'             => array(

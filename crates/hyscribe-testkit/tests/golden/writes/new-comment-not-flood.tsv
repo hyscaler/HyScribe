@@ -1,7 +1,7 @@
 # The rows PHP WordPress writes for the action new-comment-not-flood (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 20:23:27 to 2026-11-14 20:23:27 UTC.
-# %wp_comments:1% is 7.
-# %wp_comments:2% is 8.
+# %now% and %unix% stand for times from 2026-11-14 20:43:26 to 2026-11-14 20:43:26 UTC.
+# %wp_comments:1% is 10.
+# %wp_comments:2% is 11.
 wp_comments	%wp_comments:2%	+	comment_ID	%wp_comments:2%
 wp_comments	%wp_comments:2%	+	comment_agent	Oracle
 wp_comments	%wp_comments:2%	+	comment_approved	1

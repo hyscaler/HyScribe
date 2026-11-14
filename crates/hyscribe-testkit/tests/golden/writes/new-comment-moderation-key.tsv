@@ -1,8 +1,9 @@
 # The rows PHP WordPress writes for the action new-comment-moderation-key (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 19:41:00 to 2026-11-14 19:41:00 UTC.
-# %wp_comments:1% is 9.
-# %wp_comments:2% is 10.
-# %wp_comments:3% is 11.
+# %now% and %unix% stand for times from 2026-11-14 20:43:25 to 2026-11-14 20:43:25 UTC.
+# %wp_comments:1% is 2.
+# %wp_comments:2% is 3.
+# %wp_comments:3% is 4.
+# %wp_comments:4% is 5.
 wp_comments	%wp_comments:1%	+	comment_ID	%wp_comments:1%
 wp_comments	%wp_comments:1%	+	comment_agent	Oracle
 wp_comments	%wp_comments:1%	+	comment_approved	0
@@ -48,4 +49,19 @@ wp_comments	%wp_comments:3%	+	comment_parent	0
 wp_comments	%wp_comments:3%	+	comment_post_ID	1
 wp_comments	%wp_comments:3%	+	comment_type	comment
 wp_comments	%wp_comments:3%	+	user_id	0
+wp_comments	%wp_comments:4%	+	comment_ID	%wp_comments:4%
+wp_comments	%wp_comments:4%	+	comment_agent	Oracle
+wp_comments	%wp_comments:4%	+	comment_approved	0
+wp_comments	%wp_comments:4%	+	comment_author	A WordPress Commenter
+wp_comments	%wp_comments:4%	+	comment_author_IP	192.0.2.1
+wp_comments	%wp_comments:4%	+	comment_author_email	wapuu@wordpress.example
+wp_comments	%wp_comments:4%	+	comment_author_url	https://reader.example.test
+wp_comments	%wp_comments:4%	+	comment_content	Nice :)
+wp_comments	%wp_comments:4%	+	comment_date	%now%
+wp_comments	%wp_comments:4%	+	comment_date_gmt	%now%
+wp_comments	%wp_comments:4%	+	comment_karma	0
+wp_comments	%wp_comments:4%	+	comment_parent	0
+wp_comments	%wp_comments:4%	+	comment_post_ID	1
+wp_comments	%wp_comments:4%	+	comment_type	comment
+wp_comments	%wp_comments:4%	+	user_id	0
 wp_posts	1	~	comment_count	1	2

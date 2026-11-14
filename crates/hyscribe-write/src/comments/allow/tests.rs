@@ -17,6 +17,7 @@ fn links_count_as_preg_match_all() {
         ("<a\nhref=x>", 0),
         ("<a x href y href>", 1),
         ("<a title=x>href", 0),
+        ("<a xxxxxhref><a href>", 2),
     ] {
         assert_eq!(links(text.as_bytes()), count, "{text:?}");
     }

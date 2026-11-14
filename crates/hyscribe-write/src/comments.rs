@@ -356,11 +356,11 @@ async fn trash(steps: &mut Steps<'_, '_>, context: Context<'_>, id: u64) -> bool
     if comment.comment_type != "note" || comment.parent != 0 {
         return true;
     }
-    let mut all = true;
+    // The replies are approved or held, so each goes to the trash.
     for child in step!(steps, child_note_ids(id)) {
-        all &= put_away(steps, context, child, "trash").await.is_some();
+        put_away(steps, context, child, "trash").await;
     }
-    all
+    true
 }
 
 /// `wp_spam_comment()`: the comment marked as spam, its status and time

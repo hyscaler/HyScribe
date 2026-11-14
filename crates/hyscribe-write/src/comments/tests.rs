@@ -208,7 +208,7 @@ async fn new_comments_follow_the_discussion_options() {
     .await;
     check(
         "new-comment-moderation-key",
-        option("moderation_keys", "\n  0\nSPAM#Wörd\n".as_bytes()),
+        option("moderation_keys", "\n  0\nSPAM#Wörd\n🙂\n".as_bytes()),
         async |write, ()| {
             let content = known("This has spam#wÖrd in it.".as_bytes());
             submit(write, content, ADMIN).await.unwrap();
@@ -220,12 +220,13 @@ async fn new_comments_follow_the_discussion_options() {
             submit(write, known(b"This is clean."), ADMIN)
                 .await
                 .unwrap();
+            submit(write, known(b"Nice :)"), ADMIN).await.unwrap();
         },
     )
     .await;
     check(
         "new-comment-disallowed",
-        option("disallowed_keys", b"\nbadword\n"),
+        option("disallowed_keys", b"\nbadword\n<i>\n"),
         async |write, ()| {
             submit(write, known(b"A bad<b>word</b> here."), ADMIN)
                 .await
@@ -239,6 +240,11 @@ async fn new_comments_follow_the_discussion_options() {
             submit(write, known(b"A clean comment."), ADMIN)
                 .await
                 .unwrap();
+            let tagged = NewComment {
+                author: b"A WordPress <i>Commenter</i>".to_vec(),
+                ..known(b"A new comment.")
+            };
+            submit(write, tagged, ADMIN).await.unwrap();
         },
     )
     .await;
@@ -261,7 +267,7 @@ async fn new_comments_follow_the_discussion_options() {
     check(
         "new-comment-not-flood",
         async |write| {
-            let then = format_unix(MYSQL, context().now - 60, Zone::Utc);
+            let then = format_unix(MYSQL, context().now - 15, Zone::Utc);
             let earlier = NewComment {
                 author_ip: b"192.0.2.7".to_vec(),
                 date: Some(then.clone()),
@@ -331,6 +337,49 @@ async fn new_comments_by_others() {
         };
         submit(write, other, author).await.unwrap();
     })
+    .await;
+}
+
+#[tokio::test]
+async fn new_comments_by_name_and_date() {
+    check(
+        "new-comment-backdated",
+        async |write| {
+            let earlier = NewComment {
+                author_ip: b"192.0.2.7".to_vec(),
+                date: Some("2020-01-01 00:00:00".into()),
+                date_gmt: Some("2020-01-01 00:00:00".into()),
+                ..reader("1")
+            };
+            insert(write, earlier).await;
+        },
+        async |write, ()| {
+            let backdated = NewComment {
+                author_ip: b"192.0.2.7".to_vec(),
+                date: Some("2020-01-01 00:00:05".into()),
+                date_gmt: Some("2020-01-01 00:00:05".into()),
+                ..submitted()
+            };
+            submit(write, backdated, Commenter::default())
+                .await
+                .unwrap();
+        },
+    )
+    .await;
+    let nameless = |comment: NewComment| NewComment {
+        author: Vec::new(),
+        author_email: b"nameless@example.test".to_vec(),
+        ..comment
+    };
+    check(
+        "new-comment-no-author",
+        async |write| {
+            insert(write, nameless(reader("1"))).await;
+        },
+        async |write, ()| {
+            submit(write, nameless(submitted()), ADMIN).await.unwrap();
+        },
+    )
     .await;
 }
 
@@ -501,6 +550,19 @@ async fn statuses_change() {
 
 #[tokio::test]
 async fn trash_and_delete() {
+    check(
+        "trash-comment-with-notes",
+        async |write| {
+            let note = NewComment {
+                comment_type: "note".into(),
+                parent: 1,
+                ..reader("1")
+            };
+            insert(write, note).await;
+        },
+        async |write, ()| assert!(trash_comment(write, context(), 1).await.unwrap()),
+    )
+    .await;
     check("trash-comment", nothing, async |write, ()| {
         assert!(trash_comment(write, context(), 1).await.unwrap());
         assert!(!trash_comment(write, context(), 1).await.unwrap());

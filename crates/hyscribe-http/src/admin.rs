@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
+use hyscribe_admin::actions::{ActionSite, Asked, Body, Refusal, admin_ajax};
 use hyscribe_admin::admin_bar::{BarSite, Browser};
 use hyscribe_admin::appearance::themes;
 use hyscribe_admin::assets::Urls;
@@ -58,18 +59,68 @@ pub(crate) fn is_admin(path: &str) -> bool {
     (path == "/hs-admin" || path.starts_with("/hs-admin/")) && screen
 }
 
-/// The answer to a request for an admin screen.
+/// The answer to a request for an admin screen; `form` is `$_POST`, `None`
+/// for a body only PHP reads.
 pub(crate) async fn respond(
     site: &Arc<Site>,
     uri: Uri,
     headers: HeaderMap,
     post: bool,
+    form: Option<Value>,
 ) -> Response {
     let site = Arc::clone(site);
     let (now, handle) = (now(), Handle::current());
     joined(
-        tokio::task::spawn_blocking(move || answer(&site, &uri, &headers, post, now, handle)).await,
+        tokio::task::spawn_blocking(move || {
+            let asked = Asking {
+                uri: &uri,
+                headers: &headers,
+                post,
+                form: form.as_ref(),
+            };
+            answer(&site, &asked, now, handle)
+        })
+        .await,
     )
+}
+
+/// An admin request as read.
+struct Asking<'a> {
+    uri: &'a Uri,
+    headers: &'a HeaderMap,
+    post: bool,
+    form: Option<&'a Value>,
+}
+
+/// `entries` of `$_GET` or `$_POST`.
+fn entries(value: Option<&Value>) -> &[(Key, Value)] {
+    value.and_then(Value::as_array).unwrap_or_default()
+}
+
+/// The answer to a refused action.
+fn refused(public: bool, refusal: Refusal) -> Response {
+    let status = StatusCode::from_u16(refusal.status).unwrap_or(StatusCode::FORBIDDEN);
+    let (kind, body) = match refusal.body {
+        Body::Page(title, message) => {
+            let page = hyscribe_admin::die::page(public, title, &message);
+            return response(status, screen_headers(), page);
+        }
+        Body::Text(text) => ("text/html; charset=UTF-8", text.into_bytes()),
+        Body::Json(json) => ("application/json; charset=UTF-8", json.as_bytes().to_vec()),
+    };
+    let mut headers = nocache();
+    headers.push((header::CONTENT_TYPE, kind.to_string()));
+    headers.push((header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()));
+    headers.push((
+        header::HeaderName::from_static("x-robots-tag"),
+        "noindex".to_string(),
+    ));
+    response(status, headers, body)
+}
+
+/// `501`, for what is not ported.
+fn not_ported() -> Response {
+    response(StatusCode::NOT_IMPLEMENTED, nocache(), Vec::new())
 }
 
 /// A `302` to `location`, as `wp_redirect()` sends it.
@@ -209,15 +260,36 @@ impl CapabilityData for Admin<'_> {
     fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
         self.reads.reads.wait(self.site.db.post_meta(id, key))
     }
-    /// The dashboard checks a comment through its post (`comment_editable`).
-    fn comment_post(&self, _: u64) -> Option<u64> {
-        None
+    fn comment_post(&self, id: u64) -> Option<u64> {
+        let comment = self.reads.reads.wait(self.site.db.any_comment(id));
+        comment.map(|comment| comment.post_id)
     }
     fn term_taxonomy(&self, id: u64) -> Option<String> {
         self.reads.reads.wait(self.site.db.term_taxonomy(id))
     }
     fn constant(&self, name: &str) -> bool {
         self.reads.constant(name)
+    }
+}
+
+impl ActionSite for Admin<'_> {
+    fn current_user_id(&self) -> u64 {
+        self.user.id
+    }
+    fn current_user_can(&self, cap: &str, args: &[Value]) -> bool {
+        self.caps.has_cap(self, cap, args)
+    }
+    fn verify_nonce(&self, nonce: &[u8], action: &str) -> bool {
+        self.reads.verify_nonce(nonce, action)
+    }
+    fn validate_redirect(&self, location: &[u8]) -> Vec<u8> {
+        ProfileSite::validate_redirect(self, location, "")
+    }
+    fn comment_approved(&self, id: u64) -> Option<Vec<u8>> {
+        CommentsSite::comment_approved(self, id).map(String::into_bytes)
+    }
+    fn user_roles(&self) -> Option<Vec<u8>> {
+        UsersSite::user_roles(self)
     }
 }
 
@@ -1091,14 +1163,61 @@ fn died(admin: &Admin, status: StatusCode, message: &str) -> Response {
     response(status, screen_headers(), body)
 }
 
-fn answer(
+/// What an action reads of the request: `$_GET` and `$_POST`, unslashed.
+fn action_request<'a>(
+    site: &'a Site,
+    asking: &'a Asking,
+    get: &'a Value,
+    uri: &'a [u8],
+) -> Asked<'a> {
+    Asked {
+        get: entries(Some(get)),
+        post: entries(asking.form),
+        referer: asking
+            .headers
+            .get(header::REFERER)
+            .map(HeaderValue::as_bytes),
+        uri,
+        home: &site.home,
+    }
+}
+
+/// `admin-ajax.php`, which sends no one to log in: the user of the auth
+/// cookie, else of the logged in cookie.
+fn ajax_answer(
     site: &Site,
-    uri: &Uri,
-    headers: &HeaderMap,
-    post: bool,
-    now: i64,
-    handle: Handle,
+    asking: &Asking,
+    reads: &mut LoginReads,
+    cookies: &[(Vec<u8>, Vec<u8>)],
 ) -> Response {
+    let names = Names::new(site);
+    let auth = cookie(cookies, &names.auth(is_ssl(site)));
+    let user = reads.auth_user(auth, asking.post, is_ssl(site));
+    let user =
+        user.or_else(|| reads.logged_in_user(cookie(cookies, &names.logged_in()), asking.post));
+    let get = parse_str(asking.uri.query().unwrap_or_default().as_bytes());
+    let uri = asking
+        .uri
+        .path_and_query()
+        .map_or("", |p| p.as_str())
+        .as_bytes();
+    let asked = action_request(site, asking, &get, uri);
+    let checked = match user {
+        Some((id, token)) => {
+            reads.act_as(id, token);
+            let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
+            admin_ajax(Some(&Admin::new(reads, site, user)), &asked)
+        }
+        None => admin_ajax(None, &asked),
+    };
+    checked.map_or_else(
+        |refusal| refused(reads.public(), refusal),
+        |()| not_ported(),
+    )
+}
+
+fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
+    let (uri, headers, post) = (asking.uri, asking.headers, asking.post);
     let names = Names::new(site);
     let https = is_ssl(site);
     let cookies = cookies(
@@ -1108,13 +1227,24 @@ fn answer(
             .map(HeaderValue::as_bytes),
     );
     let mut reads = LoginReads::new(site, handle, now);
+    if asking.form.is_none() {
+        return not_ported();
+    }
+    if uri.path() == "/hs-admin/admin-ajax" {
+        let answer = ajax_answer(site, asking, &mut reads, &cookies);
+        return match reads.reads.finish() {
+            Ok(()) => answer,
+            Err(err) => crate::html(crate::database_error(site, &err)),
+        };
+    }
     let user = reads.auth_user(cookie(&cookies, &names.auth(https)), post, https);
     // `$_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI']`.
     let host = headers
         .get(header::HOST)
         .map_or(&b""[..], HeaderValue::as_bytes);
     // `wp_magic_quotes()` slashes `$_SERVER['REQUEST_URI']` too.
-    let requested = addslashes(uri.path_and_query().map_or("", |p| p.as_str()).as_bytes());
+    let raw_uri = uri.path_and_query().map_or("", |p| p.as_str());
+    let requested = addslashes(raw_uri.as_bytes());
     let requested = String::from_utf8_lossy(&requested).into_owned();
     let here = [host, requested.as_bytes()].concat();
     let scheme: &[u8] = if https { b"https://" } else { b"http://" };
@@ -1129,6 +1259,15 @@ fn answer(
                 reads.act_as(id, token);
                 let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
                 let mut admin = Admin::new(&reads, site, user);
+                let get = parse_str(uri.query().unwrap_or_default().as_bytes());
+                let asked = action_request(site, asking, &get, raw_uri.as_bytes());
+                let name = uri.path().strip_prefix("/hs-admin/").unwrap_or_default();
+                match hyscribe_admin::actions::admin(&admin, name, &asked, post) {
+                    Some(Err(refusal)) => return refused(reads.public(), refusal),
+                    Some(Ok(())) => return not_ported(),
+                    None if post => return not_ported(),
+                    None => {}
+                }
                 let settings = cookie(&cookies, &format!("wp-settings-{id}"));
                 admin.settings = settings.map(|value| String::from_utf8_lossy(value).into_owned());
                 let header = |name: &str| headers.get(name).map(HeaderValue::as_bytes);
@@ -1141,11 +1280,8 @@ fn answer(
                 let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
                 let url = text(&[scheme, &here].concat());
                 let origin = text(&[scheme, host].concat());
-                // No screen's actions are ported.
-                let page = (!post)
-                    .then(|| screen(&admin, uri.path(), &requested, &url, &origin, &browser))
-                    .flatten();
-                page.unwrap_or_else(|| response(StatusCode::NOT_IMPLEMENTED, nocache(), Vec::new()))
+                screen(&admin, uri.path(), &requested, &url, &origin, &browser)
+                    .unwrap_or_else(not_ported)
             })
         }
         None => {

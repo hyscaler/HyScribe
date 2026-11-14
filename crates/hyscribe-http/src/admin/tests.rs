@@ -1628,3 +1628,134 @@ async fn the_posts_list_reads_its_arguments() {
     .await
     .unwrap();
 }
+
+/// `method` on `uri` with `cookie` and a body of `content_type`.
+async fn send(
+    site: &Arc<Site>,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    form: Option<(&str, &str)>,
+) -> Response {
+    let mut request = axum::http::Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::HOST, "127.0.0.1:8081")
+        .header(header::COOKIE, cookie);
+    let body = match form {
+        Some((kind, body)) => {
+            request = request.header(header::CONTENT_TYPE, kind);
+            body.to_string()
+        }
+        None => String::new(),
+    };
+    let request = request.body(Body::from(body)).unwrap();
+    router(Arc::clone(site)).oneshot(request).await.unwrap()
+}
+
+/// The nonce of `action` for the session of the logged in cookie in `cookies`.
+async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &'static str) -> String {
+    let auth = cookies
+        .split("; ")
+        .find(|cookie| cookie.starts_with("hyscribe_logged_in_"))
+        .unwrap();
+    let value = hyscribe_phpser::urldecode(auth.split_once('=').unwrap().1.as_bytes());
+    let token = hyscribe_auth::cookie::parse_auth_cookie(&value)
+        .unwrap()
+        .token
+        .to_vec();
+    let (site, handle) = (Arc::clone(site), Handle::current());
+    tokio::task::spawn_blocking(move || {
+        let mut reads = LoginReads::new(&site, handle, now());
+        reads.act_as(1, token);
+        LoginSite::nonce(&reads, action)
+    })
+    .await
+    .unwrap()
+}
+
+/// An action is refused as PHP refuses it until its checks pass, then
+/// answered 501; a POST whose body only PHP reads is not answered.
+#[tokio::test(flavor = "multi_thread")]
+async fn actions_are_checked_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let trash = "/hs-admin/edit?action=trash&post[]=1";
+    let response = send(&site, "GET", trash, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let page = page_of(response).await;
+    assert!(page.contains("<title>An error occurred.</title>"), "{page}");
+    assert!(page.contains("The link you followed has expired."));
+    let nonce = session_nonce(&site, &cookies, "bulk-posts").await;
+    let valid = format!("{trash}&_wpnonce={nonce}");
+    let response = send(&site, "GET", &valid, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let form = "application/x-www-form-urlencoded";
+    let body = format!("action=trash&post[]=1&_wpnonce={nonce}");
+    let response = send(
+        &site,
+        "POST",
+        "/hs-admin/edit",
+        &cookies,
+        Some((form, &body)),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let response = send(
+        &site,
+        "POST",
+        "/hs-admin/edit",
+        &cookies,
+        Some((form, "x=1")),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let json = Some(("application/json", "{\"action\":\"trash\"}"));
+    let response = send(&site, "POST", "/hs-admin/edit", &cookies, json).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let response = send(&site, "POST", "/hs-admin/edit", &cookies, Some((form, ""))).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+}
+
+/// `admin-ajax.php` answers who is not logged in itself, and reads the
+/// logged in cookie as well as the auth cookie.
+#[tokio::test(flavor = "multi_thread")]
+async fn ajax_actions_are_checked_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let ajax = "/hs-admin/admin-ajax";
+    let form = "application/x-www-form-urlencoded";
+    let response = send(&site, "POST", ajax, "", Some((form, "action=delete-tag"))).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(page_of(response).await, "0");
+    let response = send(&site, "POST", ajax, "", Some((form, "action=heartbeat"))).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let logged_in = cookies
+        .split("; ")
+        .find(|cookie| cookie.contains("logged_in"))
+        .unwrap();
+    let response = send(
+        &site,
+        "POST",
+        ajax,
+        logged_in,
+        Some((form, "action=delete-tag")),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(page_of(response).await, "-1");
+    let nonce = session_nonce(&site, &cookies, "save-color-scheme").await;
+    let body = format!("action=save-user-color-scheme&color_scheme=x&nonce={nonce}");
+    let response = send(&site, "POST", ajax, &cookies, Some((form, &body))).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let kind = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .unwrap()
+        .clone();
+    assert_eq!(kind, "application/json; charset=UTF-8");
+    assert_eq!(page_of(response).await, "{\"success\":false}");
+    let body = format!("action=save-user-color-scheme&color_scheme=ocean&nonce={nonce}");
+    let response = send(&site, "POST", ajax, &cookies, Some((form, &body))).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+}

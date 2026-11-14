@@ -11,7 +11,7 @@ use hyscribe_render::date::{Zone, format, format_unix, strtotime};
 use hyscribe_render::{avatar_url, user_name};
 
 use crate::fields::{Properties, fields_for_response, item_response, links_wanted};
-use crate::request::{Arg, Params, Sanitize, collection_args, typed};
+use crate::request::{Arg, Params, Sanitize, collection_args, required, typed};
 use crate::response::{Response, RestError, int, list, object, paginate, text};
 use crate::schema::{parse_list, prepare_value};
 use crate::terms::ids;
@@ -136,7 +136,10 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                 permission: items_permission,
                 callback: Some(items),
             },
-            write(Vec::new(), create_permission),
+            write(
+                ["username", "email", "password"].map(required).into(),
+                create_permission,
+            ),
         ]),
         ITEM => Some(vec![
             Endpoint {
@@ -145,7 +148,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                 callback: Some(item),
             },
             write(vec![id()], update_permission),
-            write(vec![id()], delete_permission),
+            write(vec![id(), required("reassign")], delete_permission),
         ]),
         ME => Some(vec![
             Endpoint {
@@ -156,7 +159,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
             write(Vec::new(), |context, params| {
                 update_permission(context, &as_me(context, params))
             }),
-            write(Vec::new(), |context, params| {
+            write(vec![required("reassign")], |context, params| {
                 delete_permission(context, &as_me(context, params))
             }),
         ]),

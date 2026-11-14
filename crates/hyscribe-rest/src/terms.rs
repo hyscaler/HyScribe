@@ -120,7 +120,7 @@ pub(crate) fn taxonomy_endpoints(taxonomy: &'static str, single: bool) -> Vec<En
                 callback: Some(items),
             },
             Endpoint {
-                args: Vec::new(),
+                args: vec![crate::request::required("name")],
                 permission: create_permission,
                 callback: None,
             },

@@ -240,6 +240,12 @@ pub(crate) fn string_arg(name: &'static str) -> Arg {
     typed(name, r#"{"type":"string"}"#)
 }
 
+/// A write's required argument, whose value is never read: a write given
+/// arguments is not ported.
+pub(crate) fn required(name: &'static str) -> Arg {
+    arg(name, r#"{"required":true}"#, false, Sanitize::Endpoint)
+}
+
 /// `get_collection_params()`: the context, the page, its size and the
 /// search.
 pub(crate) fn collection_args() -> Vec<Arg> {

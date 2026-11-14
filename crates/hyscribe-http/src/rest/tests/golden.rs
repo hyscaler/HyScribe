@@ -183,6 +183,7 @@ fn serve_case(site: &Site, handle: &Handle, case: &RestCase) -> hyscribe_rest::S
         origin: None,
         nonce: (user != 0).then_some(b"%nonce%"),
         method_override: None,
+        unread_body: false,
     };
     hyscribe_rest::serve(&as_role, &request)
 }

@@ -249,15 +249,20 @@ fn theme_test_data_posts_match_php() {
     );
 }
 
-/// Writes answer 501, as do arguments whose schemas use keywords not
-/// ported, and content PHP would write the oEmbed or feed caches of or
-/// that uses the duotone filter: `(fixture is TTD, who, method, target)`.
+/// Writes answer 501 once allowed or given arguments, as do arguments of
+/// keywords not ported and content PHP would write caches of or that uses
+/// the duotone filter: `(fixture is TTD, who, method, target)`.
 #[test]
 fn writes_and_unported_content_answer_501() {
     let requests = [
         (false, "administrator", "POST", "/?rest_route=/wp/v2/posts"),
         (false, "administrator", "PUT", "/?rest_route=/wp/v2/posts/1"),
-        (false, "visitor", "DELETE", "/?rest_route=/wp/v2/pages/2"),
+        (
+            false,
+            "visitor",
+            "DELETE",
+            "/?rest_route=/wp/v2/pages/2&force=1",
+        ),
         (
             false,
             "visitor",
@@ -332,6 +337,7 @@ fn revisions_are_linked() {
         origin: None,
         nonce: None,
         method_override: None,
+        unread_body: false,
     };
     let body = String::from_utf8(serve(&oracle, &request).body).unwrap();
     let base =
@@ -381,6 +387,7 @@ fn served(who: &'static str, target: &str, ttd: bool, deny: &'static [&'static s
         origin: None,
         nonce: (user != 0).then_some(b"%nonce%"),
         method_override: None,
+        unread_body: false,
     };
     serve(&oracle, &request)
 }

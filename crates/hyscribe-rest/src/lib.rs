@@ -122,6 +122,8 @@ pub struct Request<'a> {
     pub nonce: Option<&'a [u8]>,
     /// The `X-HTTP-Method-Override` header.
     pub method_override: Option<&'a [u8]>,
+    /// The request has a body that is not a form, which is not read.
+    pub unread_body: bool,
 }
 
 /// The answer: its status, headers and body.
@@ -164,6 +166,8 @@ pub(crate) struct Context<'a> {
     pub(crate) head: bool,
     /// `$_SERVER['REQUEST_URI']`, which rendering reads.
     pub(crate) uri: &'a [u8],
+    /// The request gives parameters a write's arguments would check.
+    pub(crate) parameters: bool,
 }
 
 impl Context<'_> {
@@ -250,6 +254,18 @@ fn encode(data: &Value, pretty: bool) -> Vec<u8> {
     json.unwrap_or_default()
 }
 
+/// The parameters `serve_request()` reads itself, and the route's.
+const GLOBAL_PARAMETERS: [&str; 8] = [
+    "rest_route",
+    "_wpnonce",
+    "_method",
+    "_envelope",
+    "_jsonp",
+    "_pretty",
+    "_fields",
+    "_embed",
+];
+
 /// `serve_request()`, from `rest_api_loaded()`: the route untrailingslashed.
 pub fn serve(site: &dyn Site, request: &Request) -> Served {
     let get = |key| lookup(request.get, key);
@@ -316,11 +332,20 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
             .as_bytes()
             .is_some_and(|nonce| site.verify_nonce(nonce))
     });
+    let given = |source: &[(Key, Value)]| {
+        let names = source.iter().map(|(key, _)| key.to_php_string());
+        names.into_iter().any(|name| {
+            !GLOBAL_PARAMETERS
+                .iter()
+                .any(|known| known.as_bytes() == name)
+        })
+    };
     let context = Context {
         site,
         user,
         head: method == "HEAD",
         uri: request.uri,
+        parameters: request.unread_body || given(request.get) || given(request.post),
     };
     let response = match verified {
         Some(false) => RestError::status("rest_cookie_invalid_nonce", "Cookie check failed", 403)
@@ -544,9 +569,15 @@ fn dispatch(
         return Ok(RestError::status("rest_no_route", message, 404).into_response());
     };
     let (permissions, endpoint) = ported(&matched).ok_or(NotPorted)?;
-    let callback = endpoint.callback.ok_or(NotPorted)?;
+    // A write's arguments are not ported: one given any is not answered,
+    // and one given none is checked, then answered 501.
+    let callback = match endpoint.callback {
+        None if context.parameters => return Err(NotPorted),
+        None => |_: &Context, _: &Params| Err(RestError::not_ported()),
+        Some(callback) => callback,
+    };
     // The public users endpoint is off.
-    if context.user == 0 && users::off_for_visitors(matched.regex) {
+    if context.user == 0 && endpoint.callback.is_some() && users::off_for_visitors(matched.regex) {
         return Err(NotPorted);
     }
     let mut params = Params {

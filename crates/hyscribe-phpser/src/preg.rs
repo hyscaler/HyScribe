@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The regexes rewrite rules are written in, matched as `preg_match()`
-//! matches `#^$regex#` against bytes: literals, `.`, `\d`, classes, groups
-//! with `|`, greedy and lazy quantifiers and the `^` and `$` anchors.
-//! Matching backtracks in PCRE's order, so captures come out as in PHP.
+//! The regexes rewrite rules and REST routes are written in, matched as
+//! `preg_match()` matches them against bytes, without the `u` modifier:
+//! literals, `.`, `\d`, `\w`, `\s`, classes, groups (named with `(?P<name>`)
+//! with `|`, greedy and lazy quantifiers, the `^` and `$` anchors, and the
+//! `i` modifier. Matching backtracks in PCRE's order, so captures come out
+//! as in PHP.
 
 /// PCRE2's limit on nested parentheses, past which it refuses a pattern.
 const MAX_NESTING: usize = 250;
@@ -25,6 +27,8 @@ const MAX_STEPS: usize = 1_000_000;
 pub struct Pattern {
     items: Vec<Item>,
     groups: usize,
+    /// The named groups' names and numbers.
+    names: Vec<(String, usize)>,
 }
 
 #[derive(Debug)]
@@ -55,13 +59,24 @@ enum Node {
 pub type Captures = Vec<Option<(usize, usize)>>;
 
 impl Pattern {
-    /// `None` for syntax outside what rewrite rules use.
+    /// `None` for syntax outside what rewrite rules and routes use.
     pub fn new(regex: &str) -> Option<Pattern> {
+        Pattern::parse(regex, false)
+    }
+
+    /// [`Pattern::new`] with the `i` modifier: ASCII letters match either case.
+    pub fn caseless(regex: &str) -> Option<Pattern> {
+        Pattern::parse(regex, true)
+    }
+
+    fn parse(regex: &str, caseless: bool) -> Option<Pattern> {
         let mut parser = Parser {
             bytes: regex.as_bytes(),
             at: 0,
             groups: 0,
             nesting: 0,
+            caseless,
+            names: Vec::new(),
         };
         let alternatives = parser.alternatives()?;
         if parser.at != regex.len() {
@@ -71,7 +86,13 @@ impl Pattern {
         Some(Pattern {
             items: vec![Item::once(Atom::Node(Node::Group(Some(0), alternatives)))],
             groups: parser.groups,
+            names: parser.names,
         })
+    }
+
+    /// The named groups' names and numbers, in the order they open.
+    pub fn names(&self) -> &[(String, usize)] {
+        &self.names
     }
 
     /// The captures of a match at the start of `input`, the whole match
@@ -105,6 +126,8 @@ struct Parser<'a> {
     groups: usize,
     /// Groups open around the one being read.
     nesting: usize,
+    caseless: bool,
+    names: Vec<(String, usize)>,
 }
 
 impl Parser<'_> {
@@ -129,11 +152,16 @@ impl Parser<'_> {
                     continue;
                 }
                 b'(' => {
-                    let index = if self.eat(b'?') {
-                        self.eat(b':').then_some(None)?
-                    } else {
+                    let index = if !self.eat(b'?') {
                         self.groups += 1;
                         Some(self.groups)
+                    } else if self.eat(b'P') && self.eat(b'<') {
+                        self.groups += 1;
+                        let name = self.name()?;
+                        self.names.push((name, self.groups));
+                        Some(self.groups)
+                    } else {
+                        self.eat(b':').then_some(None)?
                     };
                     if self.nesting >= MAX_NESTING {
                         return None;
@@ -148,9 +176,14 @@ impl Parser<'_> {
                 b'.' => Atom::Byte(Box::new(std::array::from_fn(|b| b != usize::from(b'\n')))),
                 b'^' => Atom::Node(Node::Start),
                 b'$' => Atom::Node(Node::End),
-                b'\\' => Atom::Byte(Box::new(self.escape()?)),
+                b'\\' => {
+                    let set = self.escape()?;
+                    Atom::Byte(Box::new(self.fold(set)))
+                }
                 b'?' | b'*' | b'+' | b'{' => return None,
-                literal => Atom::Byte(Box::new(std::array::from_fn(|b| b == usize::from(literal)))),
+                literal => Atom::Byte(Box::new(
+                    self.fold(std::array::from_fn(|b| b == usize::from(literal))),
+                )),
             };
             current.push(self.quantified(atom)?);
         }
@@ -158,13 +191,46 @@ impl Parser<'_> {
         Some(alternatives)
     }
 
+    /// A group's name, up to its `>`: a word not starting with a digit.
+    fn name(&mut self) -> Option<String> {
+        let start = self.at;
+        while self
+            .peek()
+            .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            self.at += 1;
+        }
+        let name = self.bytes.get(start..self.at).unwrap_or_default();
+        let first = name.first().filter(|b| !b.is_ascii_digit());
+        first?;
+        self.eat(b'>')
+            .then(|| String::from_utf8_lossy(name).into_owned())
+    }
+
     fn escape(&mut self) -> Option<[bool; 256]> {
         let byte = self.peek()?;
         self.at += 1;
+        let within = |test: fn(&u8) -> bool| {
+            std::array::from_fn(|b| u8::try_from(b).is_ok_and(|b| test(&b)))
+        };
         Some(match byte {
-            b'd' => std::array::from_fn(|b| (usize::from(b'0')..=usize::from(b'9')).contains(&b)),
+            b'd' => within(u8::is_ascii_digit),
+            b'w' => within(|b| b.is_ascii_alphanumeric() || *b == b'_'),
+            // PCRE's white space: space, tab, newline, vertical tab, form
+            // feed and carriage return.
+            b's' => within(|b| matches!(b, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')),
             b if !b.is_ascii_alphanumeric() => std::array::from_fn(|c| c == usize::from(b)),
             _ => return None,
+        })
+    }
+
+    /// With the `i` modifier, each ASCII letter of `set` in both cases.
+    fn fold(&self, set: [bool; 256]) -> [bool; 256] {
+        let other = |b: usize| u8::try_from(b).map_or(b, |b| usize::from(b ^ 0x20));
+        let letter = |b: usize| u8::try_from(b).is_ok_and(|b| b.is_ascii_alphabetic());
+        std::array::from_fn(|b| {
+            let own = set.get(b).copied().unwrap_or_default();
+            own || (self.caseless && letter(b) && set.get(other(b)).copied().unwrap_or_default())
         })
     }
 
@@ -197,6 +263,7 @@ impl Parser<'_> {
                 }
             }
         }
+        let mut set = self.fold(set);
         if negated {
             for s in &mut set {
                 *s = !*s;
@@ -226,11 +293,6 @@ impl Parser<'_> {
             }
             _ => return Some(Item::once(atom)),
         };
-        // A group repeats at most a set number of times, so matching nests
-        // only as deep as the pattern; rewrite rules use `?` alone.
-        if max.is_none() && matches!(atom, Atom::Node(_)) {
-            return None;
-        }
         self.at += 1;
         let lazy = self.eat(b'?');
         Some(Item {
@@ -353,8 +415,13 @@ impl<'a> Run<'a> {
         if item.max.is_some_and(|max| count >= max) {
             return false;
         }
+        // An unbounded repeat stops after a time through that matched
+        // nothing, as PCRE stops.
         self.deeper(|run| {
             run.once(node, at, &mut |run, end| {
+                if end == at && item.max.is_none() {
+                    return next(run, end);
+                }
                 run.repeat(node, item, count + 1, end, next)
             })
         })
@@ -406,8 +473,26 @@ mod tests {
     #[test]
     fn syntax_outside_rewrite_rules_is_refused() {
         for regex in [
-            "(?=x)", "a)", "*", "a|*", "[ab", "\\w", "\\", "[\\w]", "a{2", "a{x}", "a{1,x}", "(a",
-            "((?=x))", "a{x,}", "a{x,2}", "(?:ab)*", "(a)+", "(a){2,}",
+            "(?=x)",
+            "a)",
+            "*",
+            "a|*",
+            "[ab",
+            "\\q",
+            "\\",
+            "[\\q]",
+            "a{2",
+            "a{x}",
+            "a{1,x}",
+            "(a",
+            "((?=x))",
+            "a{x,}",
+            "a{x,2}",
+            "(?P<1a>x)",
+            "(?P<a x)",
+            "(?P>a)",
+            "(?P<>a)",
+            "(?Pa)",
         ] {
             assert!(Pattern::new(regex).is_none(), "{regex}");
         }
@@ -444,6 +529,45 @@ mod tests {
         assert_eq!(groups("[a-]+", "-a-b"), Some(vec![Some("-a-")]));
         assert_eq!(groups("x^", "x"), None);
         assert_eq!(groups("b", "ab"), None);
+    }
+
+    /// Checked against PHP 8.4's `preg_match()`.
+    #[test]
+    fn routes_match_as_pcre() {
+        let caseless = |regex: &str, input: &str| {
+            Pattern::caseless(regex)
+                .unwrap()
+                .captures(input.as_bytes())
+                .map(|captures| captures.len())
+        };
+        assert_eq!(caseless("^(?:-[a-z0-9]+)*x$", "-A1-bX"), Some(1));
+        assert_eq!(caseless("^[^a]$", "A"), None);
+        assert_eq!(caseless("^A[B]$", "ab"), Some(1));
+        assert_eq!(caseless("^[^a]$", "b"), Some(1));
+        assert_eq!(groups("^(?:a|)*b", "aab"), Some(vec![Some("aab")]));
+        assert_eq!(groups("^(a)+$", "aaa"), Some(vec![Some("aaa"), Some("a")]));
+        assert_eq!(groups("^(a?)*$", "aa"), Some(vec![Some("aa"), Some("")]));
+        assert_eq!(groups("^(a){2,}$", "a"), None);
+        assert_eq!(groups("^a$", "A"), None);
+        assert_eq!(groups("^a\\.\\/$", "a./"), Some(vec![Some("a./")]));
+        assert_eq!(groups("^a\\.$", "ab"), None);
+        let named = Pattern::new("^(x)(?P<id>[\\w-]+)\\s(?P<_b2>.)$").unwrap();
+        let names: Vec<_> = named
+            .names()
+            .iter()
+            .map(|(n, i)| (n.as_str(), *i))
+            .collect();
+        assert_eq!(names, [("id", 2), ("_b2", 3)]);
+        assert_eq!(
+            groups("^(?P<id>[\\w-]+)\\s$", "Ab_-\t"),
+            Some(vec![Some("Ab_-\t"), Some("Ab_-")])
+        );
+        assert_eq!(groups("^\\w$", "\u{e9}"), None);
+        assert_eq!(
+            groups("^\\s+$", " \n\x0b\x0c\r"),
+            Some(vec![Some(" \n\x0b\x0c\r")])
+        );
+        assert_eq!(groups("^\\s$", "\u{a0}"), None);
     }
 
     #[test]

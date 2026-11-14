@@ -68,13 +68,10 @@ struct Rewrite<'a> {
     page_on_front: &'a str,
 }
 
-pub(crate) mod pattern;
-
 use crate::{Site, lossy, page_exists};
 use hyscribe_db::DbError;
-use hyscribe_phpser::{Value, parse_str, urldecode, urlencode};
+use hyscribe_phpser::{Pattern, Value, parse_str, urldecode, urlencode};
 use hyscribe_render::permalinks::{Permalinks, tokens};
-use pattern::Pattern;
 
 /// A site's rules, compiled once: each regex with its pattern and query,
 /// and whether verbose page rules apply. Empty with plain permalinks.

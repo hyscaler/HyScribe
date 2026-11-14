@@ -24,6 +24,7 @@ mod float;
 mod json;
 mod md5;
 mod natcmp;
+mod preg;
 mod query;
 mod value;
 mod wp;
@@ -35,10 +36,12 @@ pub use encode::encode;
 pub use error::{Error, ErrorKind};
 pub use float::Float;
 pub use json::{
-    JSON_MAX_DEPTH, json_decode, json_encode, json_encode_script_data, json_encode_unescaped,
+    JSON_MAX_DEPTH, json_decode, json_encode, json_encode_pretty, json_encode_script_data,
+    json_encode_unescaped,
 };
 pub use md5::{bin2hex, hash_equals, hash_hmac_md5, md5, md5_raw};
 pub use natcmp::strnatcasecmp;
+pub use preg::{Captures, Pattern};
 pub use query::{
     add_query_arg, add_query_values, build_query, parse_str, rawurlencode, rawurlencode_deep,
     remove_query_arg, urldecode, urlencode, urlencode_deep,

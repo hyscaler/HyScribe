@@ -58,7 +58,8 @@ impl Names {
         format!("hyscribe_{}{}", if secure { "sec_" } else { "" }, self.hash)
     }
 
-    fn logged_in(&self) -> String {
+    /// `LOGGED_IN_COOKIE`.
+    pub(crate) fn logged_in(&self) -> String {
         format!("hyscribe_logged_in_{}", self.hash)
     }
 
@@ -215,6 +216,16 @@ impl<'a> LoginReads<'a> {
         self.validate(cookie?, post, if https { "secure_auth" } else { "auth" })
     }
 
+    /// `wp_validate_logged_in_cookie()`: the user of a valid logged in
+    /// cookie and its session token.
+    pub(crate) fn logged_in_user(
+        &self,
+        cookie: Option<&[u8]>,
+        post: bool,
+    ) -> Option<(u64, Vec<u8>)> {
+        self.validate(cookie?, post, "logged_in")
+    }
+
     /// The user of a valid cookie of `scheme` and its session token.
     fn validate(&self, cookie: &[u8], post: bool, scheme: &str) -> Option<(u64, Vec<u8>)> {
         let parsed = parse_auth_cookie(cookie)?;
@@ -232,7 +243,7 @@ impl<'a> LoginReads<'a> {
     }
 
     /// `wp_verify_nonce( $nonce, $action )` for the current user.
-    fn verify_nonce(&self, nonce: &[u8], action: &str) -> bool {
+    pub(crate) fn verify_nonce(&self, nonce: &[u8], action: &str) -> bool {
         let (user, token) = &self.current;
         self.salt("nonce").is_some_and(|salt| {
             hyscribe_auth::verify_nonce(nonce, &salt, nonce_tick(self.now), action, *user, token)

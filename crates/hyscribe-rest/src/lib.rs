@@ -1,0 +1,392 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! The REST API (ADR 0013): `WP_REST_Server::serve_request()` and the
+//! routes ported so far, pure and synchronous. The site and the current
+//! user are read through [`Site`]; `hyscribe-http` reads the request,
+//! checks the logged in cookie and sends the answer. A request that
+//! reaches a route, method or keyword not ported is answered `501`.
+
+mod fields;
+mod request;
+mod response;
+mod routes;
+mod schema;
+mod types;
+
+use hyscribe_kses::esc_url_raw;
+use hyscribe_phpser::{Key, Value, is_empty_string, json_encode, json_encode_pretty, lookup};
+
+pub use response::{Response, RestError, paginate};
+pub use schema::{Checked, Refusal, sanitize_value_from_schema, validate_value_from_schema};
+
+use request::{Arg, Params, defaults, has_valid_params, sanitize_params};
+use response::{object, text};
+
+/// What the REST API reads from the site.
+pub trait Site {
+    /// `get_option( $name )`.
+    fn option(&self, name: &str) -> Option<Vec<u8>>;
+    /// `rest_url( $path )`, `path` starting with `/`.
+    fn rest_url(&self, path: &str) -> String;
+    /// `wp_verify_nonce( $nonce, 'wp_rest' )` for the logged in cookie's
+    /// user, or a visitor without one.
+    fn verify_nonce(&self, nonce: &[u8]) -> bool;
+    /// `wp_create_nonce( 'wp_rest' )` for the same user.
+    fn create_nonce(&self) -> String;
+    /// `user_can( $user, $cap )`.
+    fn can(&self, user: u64, cap: &str) -> bool;
+}
+
+/// A request for the API.
+#[derive(Clone, Copy, Debug)]
+pub struct Request<'a> {
+    /// `$_SERVER['REQUEST_METHOD']`.
+    pub method: &'a str,
+    /// The `rest_route` query var.
+    pub route: &'a [u8],
+    /// `$_GET`.
+    pub get: &'a [(Key, Value)],
+    /// `$_POST`.
+    pub post: &'a [(Key, Value)],
+    /// The user of a valid logged in cookie, 0 for none.
+    pub cookie_user: u64,
+    /// The `Origin` header.
+    pub origin: Option<&'a [u8]>,
+    /// The `X-WP-Nonce` header.
+    pub nonce: Option<&'a [u8]>,
+    /// The `X-HTTP-Method-Override` header.
+    pub method_override: Option<&'a [u8]>,
+}
+
+/// The answer: its status, headers and body.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Served {
+    /// The status code.
+    pub status: u16,
+    /// The headers, each name once.
+    pub headers: Vec<(String, String)>,
+    /// The body.
+    pub body: Vec<u8>,
+}
+
+impl Served {
+    /// `501`, for what is not ported.
+    fn not_ported() -> Served {
+        Served {
+            status: 501,
+            headers: Vec::new(),
+            body: Vec::new(),
+        }
+    }
+
+    /// `header()`: a header replacing any of its name.
+    fn send(&mut self, name: &str, value: impl Into<String>) {
+        self.headers
+            .retain(|(known, _)| !known.eq_ignore_ascii_case(name));
+        self.headers.push((name.into(), value.into()));
+    }
+}
+
+/// The request reaches what is not ported.
+struct NotPorted;
+
+/// A request on its way through a route: the site and the current user.
+pub(crate) struct Context<'a> {
+    site: &'a dyn Site,
+    user: u64,
+    /// The request is a HEAD request.
+    pub(crate) head: bool,
+}
+
+impl Context<'_> {
+    /// `current_user_can( $cap )`.
+    pub(crate) fn can(&self, cap: &str) -> bool {
+        self.site.can(self.user, cap)
+    }
+
+    /// `rest_authorization_required_code()`.
+    pub(crate) fn authorization_required(&self) -> u16 {
+        if self.user == 0 { 401 } else { 403 }
+    }
+
+    /// `rest_url( $path )`.
+    pub(crate) fn rest_url(&self, path: &str) -> String {
+        self.site.rest_url(path)
+    }
+}
+
+type Permission = fn(&Context, &Params) -> Result<(), RestError>;
+type Callback = fn(&Context, &Params) -> Result<Response, RestError>;
+
+/// A ported endpoint: its arguments, permission check and callback.
+pub(crate) struct Endpoint {
+    args: Vec<Arg>,
+    permission: Permission,
+    callback: Callback,
+}
+
+/// `wp_check_jsonp_callback()`: letters, digits, `_` and `.` only.
+fn valid_callback(callback: &Value) -> bool {
+    let Value::String(callback) = callback else {
+        return false;
+    };
+    callback
+        .iter()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.'))
+}
+
+/// `wp_json_encode()` of `data`, pretty printed if asked for.
+fn encode(data: &Value, pretty: bool) -> Vec<u8> {
+    let json = if pretty {
+        json_encode_pretty(data)
+    } else {
+        json_encode(data)
+    };
+    json.unwrap_or_default()
+}
+
+/// `serve_request()`, from `rest_api_loaded()`: the route untrailingslashed.
+pub fn serve(site: &dyn Site, request: &Request) -> Served {
+    let get = |key| lookup(request.get, key);
+    let jsonp = get("_jsonp").filter(|callback| !callback.is_empty());
+    let charset =
+        String::from_utf8_lossy(&site.option("blog_charset").unwrap_or_default()).into_owned();
+    let kind = if jsonp.is_some() {
+        "application/javascript"
+    } else {
+        "application/json"
+    };
+    let mut served = Served {
+        status: 200,
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    served.send("Content-Type", format!("{kind}; charset={charset}"));
+    served.send("X-Robots-Tag", "noindex");
+    let root = String::from_utf8_lossy(&esc_url_raw(site.rest_url("/").as_bytes())).into_owned();
+    served.send("Link", format!("<{root}>; rel=\"https://api.w.org/\""));
+    served.send("X-Content-Type-Options", "nosniff");
+    if jsonp.is_some_and(|callback| !valid_callback(callback)) {
+        let error = object([
+            ("code", text("rest_callback_invalid")),
+            ("message", text("Invalid JSONP callback function.")),
+        ]);
+        served.status = 400;
+        served.body = encode(&error, false);
+        return served;
+    }
+    let end = request
+        .route
+        .iter()
+        .rposition(|b| !matches!(b, b'/' | b'\\'));
+    let route = request
+        .route
+        .get(..end.map_or(0, |end| end + 1))
+        .unwrap_or_default();
+    let route: &[u8] = if is_empty_string(route) { b"/" } else { route };
+    let (method, overridden) = match (get("_method"), request.method_override) {
+        (Some(Value::String(method)), _) => (method.to_ascii_uppercase(), false),
+        (Some(_), _) => return Served::not_ported(),
+        (None, Some(method)) => (method.to_ascii_uppercase(), true),
+        (None, None) => (request.method.as_bytes().to_vec(), false),
+    };
+    let method = String::from_utf8_lossy(&method).into_owned();
+    served.send(
+        "Access-Control-Expose-Headers",
+        "X-WP-Total, X-WP-TotalPages, Link",
+    );
+    served.send(
+        "Access-Control-Allow-Headers",
+        "Authorization, X-WP-Nonce, Content-Disposition, Content-MD5, Content-Type",
+    );
+    // `rest_cookie_check_errors()`: without a nonce the request is a
+    // visitor's, and a nonce must be the user's.
+    let header = request.nonce.map(|nonce| Value::String(nonce.to_vec()));
+    let nonce = lookup(request.post, "_wpnonce")
+        .or(get("_wpnonce"))
+        .or(header.as_ref());
+    let user = nonce.map_or(0, |_| request.cookie_user);
+    let verified = nonce.map(|nonce| {
+        nonce
+            .as_bytes()
+            .is_some_and(|nonce| site.verify_nonce(nonce))
+    });
+    let context = Context {
+        site,
+        user,
+        head: method == "HEAD",
+    };
+    let response = match verified {
+        Some(false) => RestError::status("rest_cookie_invalid_nonce", "Cookie check failed", 403)
+            .into_response(),
+        _ => {
+            if verified.is_some() {
+                served.send("X-WP-Nonce", site.create_nonce());
+            }
+            match dispatch(&context, &method, route, request.get) {
+                Ok(response) => response,
+                Err(NotPorted) => return Served::not_ported(),
+            }
+        }
+    };
+    let response = match get("_envelope") {
+        Some(_) => {
+            let headers = response
+                .headers
+                .iter()
+                .map(|(name, value)| (Key::String(name.clone().into_bytes()), text(value.clone())))
+                .collect();
+            let status = Value::Int(i64::from(response.status));
+            let body = response.into_data();
+            let envelope = object([
+                ("body", body),
+                ("status", status),
+                ("headers", Value::Array(headers)),
+            ]);
+            Response::new(envelope, 200)
+        }
+        None => response,
+    };
+    for (name, value) in &response.headers {
+        served.send(name, value.clone());
+    }
+    served.status = response.status;
+    let failed = overridden && (400..500).contains(&served.status);
+    if user != 0 || verified == Some(false) || failed {
+        served.send("Expires", "Wed, 11 Jan 1984 05:00:00 GMT");
+        served.send(
+            "Cache-Control",
+            "no-cache, must-revalidate, max-age=0, no-store, private",
+        );
+    }
+    // `rest_send_cors_headers()`.
+    let origin = request
+        .origin
+        .filter(|origin| !Value::String(origin.to_vec()).is_empty());
+    if let Some(origin) = origin {
+        let origin = if origin == b"null" {
+            origin.to_vec()
+        } else {
+            esc_url_raw(origin)
+        };
+        served.send(
+            "Access-Control-Allow-Origin",
+            String::from_utf8_lossy(&origin),
+        );
+        served.send(
+            "Access-Control-Allow-Methods",
+            "OPTIONS, GET, POST, PUT, PATCH, DELETE",
+        );
+        served.send("Access-Control-Allow-Credentials", "true");
+        served.send("Vary", "Origin");
+    } else if request.method == "GET" && user == 0 {
+        served.send("Vary", "Origin");
+    }
+    if method == "HEAD" {
+        return served;
+    }
+    let json = encode(
+        &response.into_data(),
+        request
+            .get
+            .iter()
+            .any(|(key, _)| key.to_php_string() == b"_pretty"),
+    );
+    served.body = match jsonp {
+        Some(callback) => [
+            b"/**/",
+            callback.as_bytes().unwrap_or_default(),
+            b"(",
+            &json,
+            b")",
+        ]
+        .concat(),
+        None => json,
+    };
+    served
+}
+
+/// `dispatch()` with the filters core adds: OPTIONS requests, the route's
+/// arguments checked, its permission and callback, then the `Allow`
+/// header and `_fields`.
+fn dispatch(
+    context: &Context,
+    method: &str,
+    route: &[u8],
+    get: &[(Key, Value)],
+) -> Result<Response, NotPorted> {
+    let params = Params {
+        get: get.to_vec(),
+        ..Params::default()
+    };
+    if method == "OPTIONS" {
+        // `rest_handle_options_request()`: a route's description is not
+        // ported.
+        if routes::any_matches(route) {
+            return Err(NotPorted);
+        }
+        return Ok(Response::new(
+            fields::filter_fields(Value::Array(Vec::new()), &params),
+            200,
+        ));
+    }
+    let Some(matched) = routes::match_request(method, route) else {
+        let message = "No route was found matching the URL and request method.";
+        return Ok(RestError::status("rest_no_route", message, 404).into_response());
+    };
+    let mut endpoints = types::endpoints(matched.regex).ok_or(NotPorted)?;
+    let permissions: Vec<Permission> = endpoints
+        .iter()
+        .map(|endpoint| endpoint.permission)
+        .collect();
+    // A route is ported with every endpoint the table lists.
+    let endpoint = endpoints.swap_remove(matched.endpoint);
+    let mut params = Params {
+        url: matched.params,
+        defaults: defaults(&endpoint.args),
+        ..params
+    };
+    let checked = has_valid_params(&params, &endpoint.args)
+        .and_then(|()| sanitize_params(&mut params, &endpoint.args));
+    let answered = checked.and_then(|()| {
+        (endpoint.permission)(context, &params).and_then(|()| (endpoint.callback)(context, &params))
+    });
+    let mut response = answered.unwrap_or_else(RestError::into_response);
+    // `rest_send_allow_header()`: a method is allowed as its last endpoint
+    // permits, in the order methods first appear.
+    let methods: Vec<(&str, bool)> = permissions
+        .iter()
+        .zip(matched.methods)
+        .flat_map(|(permission, methods)| {
+            let permitted = permission(context, &params).is_ok();
+            methods
+                .iter()
+                .map(move |method| (method.as_str(), permitted))
+        })
+        .collect();
+    let allowed: Vec<&str> = methods
+        .iter()
+        .enumerate()
+        .filter(|(i, (method, _))| {
+            methods.iter().position(|(known, _)| known == method) == Some(*i)
+        })
+        .filter(|(_, (method, _))| {
+            methods
+                .iter()
+                .rev()
+                .find(|(known, _)| known == method)
+                .is_some_and(|(_, allow)| *allow)
+        })
+        .map(|(_, (method, _))| *method)
+        .collect();
+    if !allowed.is_empty() {
+        response.header("Allow", &allowed.join(", "));
+    }
+    if !response.is_error() {
+        response.data = fields::filter_fields(response.data, &params);
+    }
+    Ok(response)
+}
+
+#[cfg(test)]
+mod tests;

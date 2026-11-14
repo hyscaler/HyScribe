@@ -5,7 +5,7 @@
 
 #![no_main]
 
-use hyscribe_http::fuzzing::Pattern;
+use hyscribe_phpser::Pattern;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

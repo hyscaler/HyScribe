@@ -1714,7 +1714,7 @@ async fn actions_are_checked_first() {
     .await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     let json = Some(("application/json", "{\"action\":\"trash\"}"));
-    let response = send(&site, "POST", "/hs-admin/edit", &cookies, json).await;
+    let response = send(&site, "POST", "/hs-admin/edit?action=trash", &cookies, json).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     let response = send(&site, "POST", "/hs-admin/edit", &cookies, Some((form, ""))).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
@@ -1798,4 +1798,26 @@ async fn actions_read_the_site() {
     ));
     let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let form = Some((
+        "application/x-www-form-urlencoded",
+        "action=dim-comment&id=99",
+    ));
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let own = format!("/hs-admin/users?changeit=1&new_role=none&users[]=1&_wpnonce={nonce}");
+    let response = send(&site, "GET", &own, &cookies, None).await;
+    assert!(
+        page_of(response)
+            .await
+            .contains("cannot remove your own role")
+    );
+    let response = send(&site, "GET", "/hs-admin/users", &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let wrong = "/hs-admin/edit?action=trash&post[]=1&_wpnonce=0123456789";
+    let response = send(&site, "GET", wrong, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let posts = session_nonce(&site, &cookies, "bulk-posts").await;
+    let missing = format!("/hs-admin/edit?action=trash&post[]=999&_wpnonce={posts}");
+    let response = send(&site, "GET", &missing, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }

@@ -85,9 +85,6 @@ impl CapabilityData for Oracle {
 }
 
 impl ActionSite for Oracle {
-    fn current_user_id(&self) -> u64 {
-        1
-    }
     fn current_user_can(&self, cap: &str, args: &[Value]) -> bool {
         Capabilities::load(self, "wp_", 1).has_cap(self, cap, args)
     }
@@ -140,6 +137,7 @@ fn check(
         referer,
         uri: uri.as_bytes(),
         home: HOME,
+        user: 1,
     };
     let screen = path.strip_suffix(".php").unwrap();
     if screen == "admin-ajax" {
@@ -572,6 +570,7 @@ fn ajax_shell() {
             referer: None,
             uri: b"/wp-admin/admin-ajax.php",
             home: HOME,
+            user: 1,
         };
         admin_ajax(site, &asked).map_or_else(|refusal| refusal.status, |()| 501)
     };

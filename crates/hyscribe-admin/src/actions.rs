@@ -15,8 +15,6 @@ use crate::users::role_names;
 
 /// What the checks read of the site and the current user.
 pub trait ActionSite: CapabilityData {
-    /// `get_current_user_id()`.
-    fn current_user_id(&self) -> u64;
     /// `current_user_can( $cap, ...$args )`.
     fn current_user_can(&self, cap: &str, args: &[Value]) -> bool;
     /// `wp_verify_nonce( $nonce, $action )` for the current user.
@@ -41,6 +39,8 @@ pub struct Asked<'a> {
     pub uri: &'a [u8],
     /// `home_url()`.
     pub home: &'a str,
+    /// `get_current_user_id()`.
+    pub user: u64,
 }
 
 impl Asked<'_> {
@@ -497,7 +497,7 @@ fn users_list(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
     if !site.current_user_can("list_users", &[]) {
         return Some(Err(higher("Sorry, you are not allowed to list users.")));
     }
-    let me = i64::try_from(site.current_user_id()).unwrap_or_default();
+    let me = i64::try_from(asked.user).unwrap_or_default();
     let checked = match doaction.as_slice() {
         b"promote" => referer(site, asked, "bulk-users").and_then(|()| promote(site, asked, me)),
         b"dodelete" => referer(site, asked, "delete-users").and_then(|()| {
@@ -582,7 +582,7 @@ fn user_new(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
 
 /// `user-edit.php`'s and `profile.php`'s actions.
 fn user_edit(site: &dyn ActionSite, asked: &Asked, profile: bool) -> Option<Checked> {
-    let me = site.current_user_id();
+    let me = asked.user;
     let given = asked
         .request("user_id")
         .filter(|id| !id.is_empty())

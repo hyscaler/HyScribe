@@ -48,9 +48,6 @@ impl CapabilityData for Open {
 }
 
 impl ActionSite for Open {
-    fn current_user_id(&self) -> u64 {
-        1
-    }
     fn current_user_can(&self, _: &str, _: &[Value]) -> bool {
         true
     }
@@ -97,6 +94,7 @@ fuzz_target!(|data: &[u8]| {
         referer: Some(referer),
         uri: query,
         home: "http://example.test",
+        user: 1,
     };
     let screen = SCREENS[usize::from(screen.first().copied().unwrap_or(0)) % SCREENS.len()];
     let _ = admin(&Open, screen, &asked, !body.is_empty());

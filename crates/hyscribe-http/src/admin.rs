@@ -273,9 +273,6 @@ impl CapabilityData for Admin<'_> {
 }
 
 impl ActionSite for Admin<'_> {
-    fn current_user_id(&self) -> u64 {
-        self.user.id
-    }
     fn current_user_can(&self, cap: &str, args: &[Value]) -> bool {
         self.caps.has_cap(self, cap, args)
     }
@@ -1169,6 +1166,7 @@ fn action_request<'a>(
     asking: &'a Asking,
     get: &'a Value,
     uri: &'a [u8],
+    user: u64,
 ) -> Asked<'a> {
     Asked {
         get: entries(Some(get)),
@@ -1179,6 +1177,7 @@ fn action_request<'a>(
             .map(HeaderValue::as_bytes),
         uri,
         home: &site.home,
+        user,
     }
 }
 
@@ -1201,7 +1200,8 @@ fn ajax_answer(
         .path_and_query()
         .map_or("", |p| p.as_str())
         .as_bytes();
-    let asked = action_request(site, asking, &get, uri);
+    let id = user.as_ref().map_or(0, |(id, _)| *id);
+    let asked = action_request(site, asking, &get, uri, id);
     let checked = match user {
         Some((id, token)) => {
             reads.act_as(id, token);
@@ -1260,7 +1260,7 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
                 let mut admin = Admin::new(&reads, site, user);
                 let get = parse_str(uri.query().unwrap_or_default().as_bytes());
-                let asked = action_request(site, asking, &get, raw_uri.as_bytes());
+                let asked = action_request(site, asking, &get, raw_uri.as_bytes(), id);
                 let name = uri.path().strip_prefix("/hs-admin/").unwrap_or_default();
                 match hyscribe_admin::actions::admin(&admin, name, &asked, post) {
                     Some(Err(refusal)) => return refused(reads.public(), refusal),

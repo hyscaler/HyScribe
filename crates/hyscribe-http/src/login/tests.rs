@@ -325,13 +325,20 @@ async fn other_actions_show_their_forms_and_links() {
         }
     }
     let expired = format!("{reset}=admin:abc");
+    let before = now();
     let reply = send(&site, "GET", "/hs-login?action=rp", &expired, "").await;
     let cookies = all(&reply.headers, header::SET_COOKIE);
-    assert!(
-        cookies
-            .iter()
-            .any(|c| c.contains("Max-Age=0; path=/hs-login; HttpOnly"))
-    );
+    // Expired a year before the request.
+    let dates: Vec<String> = (before..=now())
+        .map(|at| {
+            let at = UNIX_EPOCH + Duration::from_secs((at - YEAR).unsigned_abs());
+            format!(
+                "expires={}; Max-Age=0; path=/hs-login; HttpOnly",
+                httpdate::fmt_http_date(at)
+            )
+        })
+        .collect();
+    assert!(cookies.iter().any(|c| dates.iter().any(|d| c.contains(d))));
     // What the forms post, and the post password form, are not ported.
     for (method, uri) in [
         ("POST", "/hs-login?action=lostpassword"),

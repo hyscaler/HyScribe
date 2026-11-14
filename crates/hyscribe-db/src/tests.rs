@@ -1663,3 +1663,61 @@ async fn attachments_by_type_and_file() {
     assert_eq!(count(&[], &["jpg"], true).await, 34);
     assert_eq!(count(&[], &["-jpg"], true).await, 3);
 }
+
+/// The REST API's filters: slugs and their order, parents left out, the
+/// menu order, and the columns a search looks in.
+#[tokio::test]
+async fn rest_post_filters() {
+    let db = fixture().await;
+    let status = |name: &str| StatusFilter {
+        status: name.into(),
+        author: None,
+    };
+    let pages = || PostQuery {
+        post_types: vec!["page".into()],
+        statuses: vec![status("publish"), status("draft")],
+        order: vec![(OrderBy::Id, true)],
+        ..PostQuery::default()
+    };
+    let named = PostQuery {
+        names: vec!["sample-page".into(), "privacy-policy".into()],
+        order: vec![(OrderBy::Names, true)],
+        ..pages()
+    };
+    assert_eq!(titles(&db, named).await, ["Sample Page", "Privacy Policy"]);
+    let orphans = PostQuery {
+        excluded_parents: vec![0],
+        ..pages()
+    };
+    assert!(titles(&db, orphans).await.is_empty());
+    for (order, found) in [(0, 2), (1, 0)] {
+        let query = PostQuery {
+            menu_order: Some(order),
+            ..pages()
+        };
+        assert_eq!(titles(&db, query).await.len(), found);
+    }
+    let search = |term: &str, column: &str| PostQuery {
+        search: vec![term.into()],
+        search_columns: vec![column.into()],
+        ..pages()
+    };
+    assert!(
+        titles(&db, search("example", "post_title"))
+            .await
+            .is_empty()
+    );
+    assert!(
+        titles(&db, search("example", "post_excerpt"))
+            .await
+            .is_empty()
+    );
+    assert_eq!(
+        titles(&db, search("example", "post_content")).await,
+        ["Sample Page"]
+    );
+    assert_eq!(
+        titles(&db, search("-sample", "post_title")).await,
+        ["Privacy Policy"]
+    );
+}

@@ -12,9 +12,10 @@ use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, HeaderValue, Method, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::login::Site as LoginSite;
-use hyscribe_auth::caps::{CapabilityData, User as Capabilities};
+use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
 use hyscribe_phpser::{Value, addslashes, is_empty_string, parse_str};
 use hyscribe_render::link::rest_url;
+use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
 use crate::login::{LoginReads, Names, cookie, cookies, joined};
@@ -58,6 +59,40 @@ struct Rest<'a> {
     caps: OnceCell<Capabilities>,
 }
 
+/// The capability checks of REST requests, with the posts they name.
+impl CapabilityData for Rest<'_> {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        CapabilityData::option(&self.reads, name)
+    }
+    fn user_meta(&self, user_id: u64, key: &str) -> Option<Vec<u8>> {
+        self.reads.user_meta(user_id, key)
+    }
+    fn user_exists(&self, user_id: u64) -> bool {
+        self.reads.reads.user(user_id).is_some()
+    }
+    fn post(&self, id: u64) -> Option<CapPost> {
+        self.reads.reads.post(id).map(|post| CapPost {
+            id: post.id,
+            author: post.author,
+            status: post.status,
+            post_type: post.post_type,
+            parent: post.parent,
+        })
+    }
+    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        self.reads.reads.post_meta(id, key)
+    }
+    fn comment_post(&self, _: u64) -> Option<u64> {
+        None
+    }
+    fn term_taxonomy(&self, id: u64) -> Option<String> {
+        self.reads.reads.wait(self.site.db.term_taxonomy(id))
+    }
+    fn constant(&self, name: &str) -> bool {
+        self.reads.constant(name)
+    }
+}
+
 impl hyscribe_rest::Site for Rest<'_> {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         CapabilityData::option(&self.reads, name)
@@ -76,12 +111,20 @@ impl hyscribe_rest::Site for Rest<'_> {
         self.reads.nonce("wp_rest")
     }
 
-    fn can(&self, user: u64, cap: &str) -> bool {
+    fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
         let caps = || {
             self.caps
-                .get_or_init(|| Capabilities::load(&self.reads, self.site.db.prefix(), self.user))
+                .get_or_init(|| Capabilities::load(self, self.site.db.prefix(), self.user))
         };
-        user != 0 && caps().has_cap(&self.reads, cap, &[])
+        user != 0 && caps().has_cap(self, cap, args)
+    }
+
+    fn reads(&self) -> &dyn RenderSite {
+        &self.reads.reads
+    }
+
+    fn theme(&self) -> &hyscribe_render::theme::Theme {
+        &self.site.theme
     }
 }
 
@@ -115,6 +158,10 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     let request = hyscribe_rest::Request {
         method: asked.method.as_str(),
         route: &asked.route,
+        uri: asked
+            .uri
+            .path_and_query()
+            .map_or(b"/", |uri| uri.as_str().as_bytes()),
         get: &get,
         post: &form,
         cookie_user: user,
@@ -138,3 +185,6 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod golden;

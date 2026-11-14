@@ -536,7 +536,7 @@ fn column_order(a: &Post, b: &Post, column: OrderBy, phrase: &str, query: &PostQ
             field(include, a.id).cmp(&field(include, b.id))
         }
         OrderBy::Parents => field(&query.parents, a.parent).cmp(&field(&query.parents, b.parent)),
-        OrderBy::Random | OrderBy::Seeded(_) => Ordering::Equal,
+        OrderBy::Random | OrderBy::Seeded(_) | OrderBy::Names => Ordering::Equal,
     }
 }
 

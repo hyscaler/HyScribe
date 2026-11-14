@@ -11,7 +11,7 @@ use hyscribe_phpser::{Key, Value, json_decode};
 use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
 use crate::request::{Arg, Params, Sanitize};
 use crate::response::{Response, RestError, object, text};
-use crate::{Context, Endpoint};
+use crate::{Context, Endpoint, Failure};
 
 const POST_TYPES: &[u8] = include_bytes!("../../../wordpress/wp-includes/rest-post-types.json");
 
@@ -77,7 +77,7 @@ fn cannot_edit(code: &'static str, context: &Context) -> RestError {
 }
 
 /// `get_context_param( array( 'default' => 'view' ) )`.
-fn context_arg() -> Arg {
+pub(crate) fn context_arg() -> Arg {
     Arg {
         name: "context",
         schema: object([
@@ -103,7 +103,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         "/wp/v2/types" => Some(vec![Endpoint {
             args: vec![context_arg()],
             permission: items_permission,
-            callback: items,
+            callback: Some(items),
         }]),
         "/wp/v2/types/(?P<type>[\\w-]+)" => Some(vec![Endpoint {
             args: vec![
@@ -116,34 +116,52 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                 context_arg(),
             ],
             permission: |_, _| Ok(()),
-            callback: item,
+            callback: Some(item),
         }]),
         _ => None,
     }
 }
 
+/// Whether the current user can edit posts of a type shown in REST.
+pub(crate) fn can_edit_any(context: &Context) -> bool {
+    shown_in_rest().any(|(_, fields)| can_edit(context, fields))
+}
+
+/// The fields of the post type `name` in the edit context, if shown in
+/// REST.
+pub(crate) fn post_type(name: &str) -> Option<&'static Value> {
+    shown_in_rest()
+        .find(|(key, _)| key.to_php_string() == name.as_bytes())
+        .map(|(_, fields)| fields)
+}
+
 /// `get_items_permissions_check()`.
 fn items_permission(context: &Context, params: &Params) -> Result<(), RestError> {
-    if !wants_edit(params) || shown_in_rest().any(|(_, fields)| can_edit(context, fields)) {
+    if !wants_edit(params) || can_edit_any(context) {
         return Ok(());
     }
     Err(cannot_edit("rest_cannot_view", context))
 }
 
 /// `get_items()`.
-fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
+fn items(context: &Context, params: &Params) -> Result<Response, Failure> {
     if context.head {
         return Ok(Response::new(Value::Array(Vec::new()), 200));
     }
     let data = shown_in_rest()
         .filter(|(_, fields)| !wants_edit(params) || can_edit(context, fields))
-        .map(|(name, fields)| (name.clone(), prepare(context, params, fields).into_data()))
+        .map(|(name, fields)| {
+            (
+                name.clone(),
+                prepare(context, params, fields).into_data(context),
+            )
+        })
         .collect();
     Ok(Response::new(Value::Array(data), 200))
 }
 
 /// `get_item()`.
-fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
+fn item(context: &Context, params: &Params) -> Result<Response, Failure> {
     let name = params
         .get("type")
         .map(Value::to_php_string)
@@ -152,22 +170,16 @@ fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
         .iter()
         .find(|(key, _)| key.to_php_string() == name)
     else {
-        return Err(RestError::status(
-            "rest_type_invalid",
-            "Invalid post type.",
-            404,
-        ));
+        return Err(RestError::status("rest_type_invalid", "Invalid post type.", 404).into());
     };
     if !matches!(fields, Value::Array(_)) {
         let status = context.authorization_required();
-        return Err(RestError::status(
-            "rest_cannot_read_type",
-            "Cannot view post type.",
-            status,
-        ));
+        return Err(
+            RestError::status("rest_cannot_read_type", "Cannot view post type.", status).into(),
+        );
     }
     if wants_edit(params) && !can_edit(context, fields) {
-        return Err(cannot_edit("rest_forbidden_context", context));
+        return Err(cannot_edit("rest_forbidden_context", context).into());
     }
     Ok(prepare(context, params, fields))
 }

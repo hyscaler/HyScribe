@@ -1,0 +1,187 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! The arguments `WP_REST_Posts_Controller` registers: the collection's
+//! (`get_collection_params()`) and a single item's.
+
+use hyscribe_phpser::{Value, json_decode};
+
+use super::Kind;
+use crate::Context;
+use crate::request::{Arg, Sanitize};
+use crate::response::{RestError, text};
+use crate::schema::{Checked, Refusal, parse_list, validate_value_from_schema};
+use crate::types::context_arg;
+
+/// An argument with the schema `json`.
+fn arg(name: &'static str, json: &str, validate: bool, sanitize: Sanitize) -> Arg {
+    Arg {
+        name,
+        schema: json_decode(json.as_bytes()).unwrap_or(Value::Null),
+        validate,
+        sanitize,
+    }
+}
+
+/// An argument `rest_parse_request_arg()` checks by its schema.
+fn typed(name: &'static str, json: &str) -> Arg {
+    arg(name, json, false, Sanitize::Schema)
+}
+
+const IDS: &str = r#"{"type":"array","items":{"type":"integer"},"default":[]}"#;
+const STATUSES: &str = r#"{"default":"publish","type":"array","items":{"enum":["publish","future","draft","pending","private","trash","auto-draft","inherit","request-pending","request-confirmed","request-failed","request-completed","any"],"type":"string"}}"#;
+
+/// `get_collection_params()` of the type.
+pub(super) fn collection(kind: Kind) -> Vec<Arg> {
+    let mut context = context_arg();
+    context.schema =
+        json_decode(br#"{"type":"string","enum":["view","embed","edit"],"default":"view"}"#)
+            .unwrap_or(Value::Null);
+    let date = |name| {
+        arg(
+            name,
+            r#"{"type":"string","format":"date-time"}"#,
+            false,
+            Sanitize::NotPorted,
+        )
+    };
+    let mut args = vec![
+        context,
+        arg(
+            "page",
+            r#"{"type":"integer","default":1,"minimum":1}"#,
+            true,
+            Sanitize::Absint,
+        ),
+        arg(
+            "per_page",
+            r#"{"type":"integer","default":10,"minimum":1,"maximum":100}"#,
+            true,
+            Sanitize::Absint,
+        ),
+        arg("search", r#"{"type":"string"}"#, true, Sanitize::TextField),
+        date("after"),
+        date("modified_after"),
+        typed("author", IDS),
+        typed("author_exclude", IDS),
+        date("before"),
+        date("modified_before"),
+        typed("exclude", IDS),
+        typed("include", IDS),
+    ];
+    let mut orderby = r#"["author","date","id","include","modified","parent","relevance","slug","include_slugs","title""#.to_string();
+    if kind == Kind::Page {
+        args.push(typed("menu_order", r#"{"type":"integer"}"#));
+        orderby.push_str(r#","menu_order""#);
+    }
+    args.extend([
+        typed("search_semantics", r#"{"type":"string","enum":["exact"]}"#),
+        typed("offset", r#"{"type":"integer"}"#),
+        typed(
+            "order",
+            r#"{"type":"string","default":"desc","enum":["asc","desc"]}"#,
+        ),
+    ]);
+    args.push(Arg {
+        name: "orderby",
+        schema: json_decode(
+            format!(r#"{{"type":"string","default":"date","enum":{orderby}]}}"#).as_bytes(),
+        )
+        .unwrap_or(Value::Null),
+        validate: false,
+        sanitize: Sanitize::Schema,
+    });
+    if kind == Kind::Page {
+        args.extend([typed("parent", IDS), typed("parent_exclude", IDS)]);
+    }
+    args.extend([
+        typed(
+            "search_columns",
+            r#"{"default":[],"type":"array","items":{"enum":["post_title","post_content","post_excerpt"],"type":"string"}}"#,
+        ),
+        typed("slug", r#"{"type":"array","items":{"type":"string"}}"#),
+        arg(
+            "status",
+            STATUSES,
+            false,
+            Sanitize::Callback(match kind {
+                Kind::Post => |c, v, s| post_statuses(c, v, s, Kind::Post),
+                Kind::Page => |c, v, s| post_statuses(c, v, s, Kind::Page),
+            }),
+        ),
+    ]);
+    if kind == Kind::Post {
+        let terms = |name| {
+            arg(
+                name,
+                r#"{"type":["object","array"],"oneOf":[]}"#,
+                false,
+                Sanitize::NotPorted,
+            )
+        };
+        args.extend([
+            typed("tax_relation", r#"{"type":"string","enum":["AND","OR"]}"#),
+            terms("categories"),
+            terms("categories_exclude"),
+            terms("tags"),
+            terms("tags_exclude"),
+            typed("sticky", r#"{"type":"boolean"}"#),
+            typed("ignore_sticky", r#"{"type":"boolean","default":true}"#),
+            typed(
+                "format",
+                r#"{"type":"array","uniqueItems":true,"items":{"enum":["standard","aside","chat","gallery","link","image","quote","status","video","audio"],"type":"string"}}"#,
+            ),
+        ]);
+    }
+    args
+}
+
+/// The `id` of a single item's route.
+pub(super) fn id() -> Arg {
+    typed("id", r#"{"type":"integer"}"#)
+}
+
+/// A single item's arguments for GET.
+pub(super) fn item() -> Vec<Arg> {
+    vec![
+        id(),
+        context_arg(),
+        typed("excerpt_length", r#"{"type":"integer"}"#),
+        typed("password", r#"{"type":"string"}"#),
+    ]
+}
+
+/// `sanitize_post_statuses()`: `wp_parse_slug_list()`, each status but
+/// the default allowed only to those who can edit the type's posts, or
+/// read its private ones for `private`.
+fn post_statuses(
+    context: &Context,
+    statuses: &Value,
+    schema: &Value,
+    kind: Kind,
+) -> Checked<Value> {
+    let mut parsed: Vec<Vec<u8>> = Vec::new();
+    for (_, status) in parse_list(statuses) {
+        let slug = hyscribe_render::formatting::sanitize_title(&status.to_php_string());
+        if !parsed.contains(&slug) {
+            parsed.push(slug);
+        }
+    }
+    for status in &parsed {
+        if status == b"publish" {
+            continue;
+        }
+        let private = status == b"private" && context.can(&kind.cap("read_private_posts"));
+        if !context.can(&kind.cap("edit_posts")) && !private {
+            let error = RestError::status(
+                "rest_forbidden_status",
+                "Status is forbidden.",
+                context.authorization_required(),
+            );
+            return Err(Refusal(Some(error)));
+        }
+        validate_value_from_schema(&text(status.clone()), schema, "status")?;
+    }
+    Ok(crate::response::list(
+        parsed.into_iter().map(text).collect(),
+    ))
+}

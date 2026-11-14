@@ -453,6 +453,7 @@ impl Renderer<'_> {
         }
         let html = elements_class(html, block);
         let html = self.layout(block, html);
+        let html = crate::dimensions::dimensions(html, block);
         // The block visibility support hides a block set not to show.
         let hidden = types.is_some() && !visible(block);
         let html = if hidden { Vec::new() } else { html };

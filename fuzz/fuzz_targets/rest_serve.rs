@@ -1,16 +1,54 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The REST API answers any route, query, method and headers without
-//! panicking: route matching, `_fields`, `_jsonp`, `_envelope`, the
-//! arguments' schemas and the types route all take input from the request.
+//! panicking: route matching, `_fields`, `_jsonp`, `_envelope`, `_embed`,
+//! the arguments' schemas and the routes all take input from the request,
+//! the post routes over one published post.
 
 #![no_main]
 
+use std::sync::OnceLock;
+
+use hyscribe_model::{Post, PostQuery, Term};
 use hyscribe_phpser::{Value, parse_str};
+use hyscribe_render::theme::{Theme, twentytwentyfive};
 use hyscribe_rest::{Request, Site, serve};
 use libfuzzer_sys::fuzz_target;
 
 struct Fuzzed;
+
+fn post() -> Post {
+    Post {
+        id: 1,
+        author: 1,
+        status: "publish".into(),
+        post_type: "post".into(),
+        content: b"<!-- wp:paragraph --><p>A</p><!-- /wp:paragraph -->".to_vec(),
+        ..Post::default()
+    }
+}
+
+impl hyscribe_render::site::Site for Fuzzed {
+    fn option(&self, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+    fn home_url(&self) -> Vec<u8> {
+        b"http://example.test".to_vec()
+    }
+    fn post(&self, id: u64) -> Option<Post> {
+        (id == 1).then(post)
+    }
+    fn post_terms(&self, _: u64, _: &str) -> Vec<Term> {
+        Vec::new()
+    }
+    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+    fn query(&self, query: &PostQuery) -> Vec<Post> {
+        let found = query.post_types.iter().any(|t| t == "post") && query.offset == 0;
+        if found { vec![post()] } else { Vec::new() }
+    }
+}
 
 impl Site for Fuzzed {
     fn option(&self, _: &str) -> Option<Vec<u8>> {
@@ -25,8 +63,15 @@ impl Site for Fuzzed {
     fn create_nonce(&self) -> String {
         "n".into()
     }
-    fn can(&self, user: u64, cap: &str) -> bool {
+    fn can(&self, user: u64, cap: &str, _: &[Value]) -> bool {
         user % 2 == 1 && cap.len() % 2 == 0
+    }
+    fn reads(&self) -> &dyn hyscribe_render::site::Site {
+        self
+    }
+    fn theme(&self) -> &Theme {
+        static THEME: OnceLock<Theme> = OnceLock::new();
+        THEME.get_or_init(twentytwentyfive)
     }
 }
 
@@ -43,6 +88,7 @@ fuzz_target!(|data: &[u8]| {
     let request = Request {
         method,
         route,
+        uri: query,
         get: &get,
         post: &[],
         cookie_user: u64::from(header.first().copied().unwrap_or(0) % 3),

@@ -223,6 +223,15 @@ pub struct PostQuery {
     /// `post_parent__in`: children of any of these posts; none means any
     /// parent.
     pub parents: Vec<u64>,
+    /// `post_parent__not_in`.
+    pub excluded_parents: Vec<u64>,
+    /// `post_name__in`: posts with any of these slugs; none means any.
+    pub names: Vec<String>,
+    /// `menu_order`, when set.
+    pub menu_order: Option<i64>,
+    /// `search_columns`: the columns a search term must appear in one of;
+    /// none means the title, excerpt and content.
+    pub search_columns: Vec<String>,
     /// `tax_query` clauses, all of which a post must meet.
     pub terms: Vec<TermFilter>,
     /// The post format filter, when set.
@@ -376,6 +385,8 @@ pub enum OrderBy {
     Included,
     /// `post_parent__in`: the order of the query's `parents`.
     Parents,
+    /// `post_name__in`: the order of the query's `names`.
+    Names,
 }
 
 /// A period `wp_get_archives()` groups published posts by.

@@ -179,7 +179,7 @@ async fn answers_match_php() {
         assert_eq!(ours, text(6), "{what}");
         served += 1;
     }
-    assert_eq!((served, unported), (2 * 63, 2 * 10));
+    assert_eq!((served, unported), (2 * 64, 2 * 9));
 }
 
 /// What WordPress serves as a page stays a page, and a `rest_route` that is

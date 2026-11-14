@@ -6,9 +6,11 @@
 
 use hyscribe_kses::sanitize_key;
 use hyscribe_phpser::{Key, Value};
+use hyscribe_render::formatting::sanitize_text_field;
 
+use crate::Context;
 use crate::response::{RestError, object, text};
-use crate::schema::{Refusal, sanitize_value_from_schema, validate_value_from_schema};
+use crate::schema::{Checked, Refusal, sanitize_value_from_schema, validate_value_from_schema};
 
 /// The parameters by where they come from.
 #[derive(Clone, Debug, Default)]
@@ -58,8 +60,17 @@ impl Params {
 pub(crate) enum Sanitize {
     /// `sanitize_key()`.
     Key,
+    /// `absint()`.
+    Absint,
+    /// `sanitize_text_field()`.
+    TextField,
     /// `rest_parse_request_arg()`: validated, then sanitized, by its schema.
     Schema,
+    /// The endpoint's own callback, which reads the site.
+    Callback(fn(&Context, &Value, &Value) -> Checked<Value>),
+    /// An argument whose schema uses keywords not ported: a request that
+    /// sets it is answered 501.
+    NotPorted,
 }
 
 /// A route's argument: its schema, whether `rest_validate_request_arg()`
@@ -146,7 +157,11 @@ pub(crate) fn has_valid_params(params: &Params, args: &[Arg]) -> Result<(), Rest
 }
 
 /// `sanitize_params()`: every parameter of every source with an argument.
-pub(crate) fn sanitize_params(params: &mut Params, args: &[Arg]) -> Result<(), RestError> {
+pub(crate) fn sanitize_params(
+    context: &Context,
+    params: &mut Params,
+    args: &[Arg],
+) -> Result<(), RestError> {
     let mut invalid = Invalid::default();
     for source in [&mut params.get, &mut params.url, &mut params.defaults] {
         for (key, value) in source.iter_mut() {
@@ -157,8 +172,13 @@ pub(crate) fn sanitize_params(params: &mut Params, args: &[Arg]) -> Result<(), R
             let sanitized = match arg.sanitize {
                 // Validated first, so a string.
                 Sanitize::Key => Ok(text(sanitize_key(&value.to_php_string()))),
-                Sanitize::Schema => validate_value_from_schema(value, &arg.schema, arg.name)
-                    .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name)),
+                Sanitize::Absint => Ok(Value::Int(value.to_int().saturating_abs())),
+                Sanitize::TextField => Ok(text(sanitize_text_field(&value.to_php_string()))),
+                Sanitize::Schema | Sanitize::NotPorted => {
+                    validate_value_from_schema(value, &arg.schema, arg.name)
+                        .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name))
+                }
+                Sanitize::Callback(sanitize) => sanitize(context, value, &arg.schema),
             };
             if let Some(sanitized) = refused(sanitized, arg.name, &mut invalid) {
                 *value = sanitized;

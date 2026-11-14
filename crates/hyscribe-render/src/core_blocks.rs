@@ -265,8 +265,17 @@ fn comment_content(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 
 /// The `comment_text` filters over a comment's content.
 pub(crate) fn comment_text(site: &dyn Site, content: &[u8]) -> Vec<u8> {
-    let text = make_clickable(content, &site.home_url(), true);
-    formatted_comment(&|name| site.option(name), &text)
+    front_comment_text(&|name| site.option(name), &site.home_url(), content)
+}
+
+/// The `comment_text` filters outside the admin, over the site's options
+/// and home URL.
+pub fn front_comment_text(
+    option: &dyn Fn(&str) -> Option<Vec<u8>>,
+    home: &[u8],
+    content: &[u8],
+) -> Vec<u8> {
+    formatted_comment(option, &make_clickable(content, home, true))
 }
 
 /// The `comment_text` filters in the admin, where `wp_kses_post()` runs
@@ -1573,7 +1582,7 @@ fn footnotes(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 
 mod author;
 mod avatar;
-pub use avatar::{comment_avatar, default_avatar, user_avatar};
+pub use avatar::{avatar_url, comment_avatar, default_avatar, user_avatar, user_name};
 mod breadcrumbs;
 mod button;
 pub(crate) mod calendar;

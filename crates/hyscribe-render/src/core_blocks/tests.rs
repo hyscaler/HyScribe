@@ -860,3 +860,14 @@ fn admin_comment_text_is_kses_d() {
     );
     assert!(text.ends_with("</a></p>\n"), "{text}");
 }
+
+/// `get_avatar_url()`: the address's SHA-256 at the size, the mystery
+/// person by default.
+#[test]
+fn avatar_urls_are_gravatars() {
+    let options = |name: &str| (name == "avatar_rating").then(|| b"G".to_vec());
+    let url = avatar_url(&options, b" A@b.test", b"", 24);
+    let hash = "d98fb7ed563d6a2727d2de61d3ec97dbdf76dbc88916a54cefb32e3f54d531fa";
+    let expected = format!("https://secure.gravatar.com/avatar/{hash}?s=24&d=mm&r=g");
+    assert_eq!(String::from_utf8(url).unwrap(), expected);
+}

@@ -6,6 +6,7 @@
 //! checks the logged in cookie and sends the answer. A request that
 //! reaches a route, method or keyword not ported is answered `501`.
 
+mod comments;
 mod editor;
 mod fields;
 mod request;
@@ -17,9 +18,10 @@ mod taxonomies;
 mod templates;
 mod terms;
 mod types;
+mod users;
 
 use hyscribe_kses::esc_url_raw;
-use hyscribe_model::{Post, Term, TermQuery, User};
+use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, Term, TermQuery, User, UserQuery};
 use hyscribe_phpser::{Key, Value, is_empty_string, json_encode, json_encode_pretty, lookup};
 
 pub use response::{Response, RestError, paginate};
@@ -47,8 +49,35 @@ pub trait Site {
     fn count_terms(&self, query: &TermQuery) -> u64;
     /// `get_term_link( $term, $taxonomy )`.
     fn term_link(&self, taxonomy: &str, term: &Term) -> String;
-    /// `get_post( $id )`, for what reading its terms checks.
+    /// `get_post( $id )`.
     fn post(&self, id: u64) -> Option<Post>;
+    /// `home_url()`.
+    fn home_url(&self) -> String;
+    /// The table prefix, which some meta keys and options begin with.
+    fn table_prefix(&self) -> String;
+    /// The comments `WP_Comment_Query` selects with `query`, in its order.
+    fn comments(&self, query: &CommentQuery) -> Vec<CommentRow>;
+    /// How many comments `query` selects, without its limit and offset.
+    fn count_comments(&self, query: &CommentQuery) -> u64;
+    /// `get_comment_link( $comment )`.
+    fn comment_link(&self, comment: &Comment) -> String;
+    /// The users `WP_User_Query` selects with `query`, in its order.
+    fn users(&self, query: &UserQuery) -> Vec<User>;
+    /// How many users `query` selects, without its limit and offset.
+    fn count_users(&self, query: &UserQuery) -> u64;
+    /// `get_userdata( $id )`.
+    fn user(&self, id: u64) -> Option<User>;
+    /// `get_user_meta( $id, $key, true )`, if stored.
+    fn user_meta(&self, id: u64, key: &str) -> Option<Vec<u8>>;
+    /// The user's `user_registered`.
+    fn user_registered(&self, id: u64) -> String;
+    /// The user's `allcaps`: its roles' capabilities and its own.
+    fn allcaps(&self, id: u64) -> Vec<(Key, Value)>;
+    /// `get_author_posts_url( $id, $nicename )`.
+    fn author_link(&self, user: &User) -> String;
+    /// Whether `author` has posts of `types`, published, or private too
+    /// where a type's flag is set.
+    fn has_posts(&self, author: u64, types: &[(String, bool)]) -> bool;
     /// Every post of `post_type` whatever its status, newest first.
     fn posts_of_type(&self, post_type: &str) -> Vec<Post>;
     /// `get_the_terms( $post, $taxonomy )`, by name.
@@ -57,8 +86,6 @@ pub trait Site {
     fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>>;
     /// The IDs of the revisions of `post`, newest first.
     fn revisions(&self, post: u64) -> Vec<u64>;
-    /// `get_userdata( $id )`.
-    fn user(&self, id: u64) -> Option<User>;
 }
 
 /// A request for the API.
@@ -168,7 +195,19 @@ fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         .or_else(|| taxonomies::endpoints(regex))
         .or_else(|| terms::endpoints(regex))
         .or_else(|| settings::endpoints(regex))
+        .or_else(|| comments::endpoints(regex))
+        .or_else(|| users::endpoints(regex))
         .or_else(|| templates::endpoints(regex))
+}
+
+/// `maybe_unserialize()` of a stored option or meta value: `false` where
+/// it is serialized data that does not unserialize.
+pub(crate) fn unserialized(stored: &[u8]) -> Value {
+    match hyscribe_phpser::maybe_unserialize(stored) {
+        hyscribe_phpser::Maybe::Value(value) => value,
+        hyscribe_phpser::Maybe::Plain(text) => Value::String(text.to_vec()),
+        hyscribe_phpser::Maybe::Invalid(_) => Value::Bool(false),
+    }
 }
 
 /// `wp_check_jsonp_callback()`: letters, digits, `_` and `.` only.
@@ -485,6 +524,10 @@ fn dispatch(
     };
     let (permissions, endpoint) = ported(&matched).ok_or(NotPorted)?;
     let callback = endpoint.callback.ok_or(NotPorted)?;
+    // The public users endpoint is off.
+    if context.user == 0 && users::off_for_visitors(matched.regex) {
+        return Err(NotPorted);
+    }
     let mut params = Params {
         route: matched.regex,
         url: matched.params.clone(),

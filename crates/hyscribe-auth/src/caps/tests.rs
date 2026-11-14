@@ -204,3 +204,21 @@ fn roles_grant_capabilities() {
     assert!(roles_with(&data, "wp_", "no_such_cap").is_empty());
     assert!(roles_with(&Fixture::default(), "wp_", "read").is_empty());
 }
+
+/// `$user->allcaps`: the role's capabilities, then the role itself, as the
+/// REST API's users route shows them.
+#[test]
+fn allcaps_are_the_roles_then_the_users_own() {
+    let data = fixture();
+    let admin = User::load(&data, "wp_", 1);
+    let names: Vec<Vec<u8>> = admin
+        .allcaps()
+        .iter()
+        .map(|(key, _)| key.to_php_string())
+        .collect();
+    assert_eq!(
+        names.first().map(Vec::as_slice),
+        Some(&b"switch_themes"[..])
+    );
+    assert_eq!(names.last().map(Vec::as_slice), Some(&b"administrator"[..]));
+}

@@ -172,6 +172,37 @@ async fn content_matches_php() {
     assert_eq!(replay(&sites, golden, true).await, (2 * 92, 2 * 4));
 }
 
+/// The comments and users routes over both fixtures, but for the users
+/// `reference/rest/users.sql` adds, which the fixtures leave out.
+#[tokio::test(flavor = "multi_thread")]
+async fn people_match_php() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture_users = |golden: &str| {
+        let lines = golden.lines().filter(|line| {
+            let target = String::from_utf8(unhex(line.split('\t').nth(2).unwrap())).unwrap();
+            let users = target.contains("/wp/v2/users");
+            let own = target.contains("/users/1&") || target.ends_with("/users/1");
+            let fixture = ["include=1", "slug=admin", "exclude=701,702,703,704"];
+            let listed = target.split('&').any(|arg| fixture.contains(&arg));
+            !users || own || listed || target.contains("/users/me")
+        });
+        lines.collect::<Vec<_>>().join("\n")
+    };
+    let sites = (site(false, dir.path()).await, site(true, dir.path()).await);
+    let golden = fixture_users(include_str!(
+        "../../../hyscribe-rest/tests/golden/people.tsv"
+    ));
+    assert_eq!(replay(&sites, &golden, false).await, (208, 22));
+    let sites = (
+        ttd_site(false, dir.path()).await,
+        ttd_site(true, dir.path()).await,
+    );
+    let golden = fixture_users(include_str!(
+        "../../../hyscribe-rest/tests/golden/people-ttd.tsv"
+    ));
+    assert_eq!(replay(&sites, &golden, true).await, (224, 22));
+}
+
 /// `golden`'s requests of a visitor and the administrator served on the
 /// plain and pretty `sites`, bodies compared by SHA-256 when `hashed`: how
 /// many matched and how many answered 501.
@@ -299,6 +330,39 @@ async fn database_errors_show_the_error_page() {
         .header(header::COOKIE, cookie);
     let response = send(&Arc::new(broken), request, "").await;
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+/// Whether a user has posts, which the users route asks of those who may
+/// not list users, and users by slug are read from the database.
+#[tokio::test(flavor = "multi_thread")]
+async fn authors_posts_are_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let handle = Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let rest = Rest {
+            reads: LoginReads::new(&site, handle, now()),
+            site: &site,
+            user: 0,
+            caps: OnceCell::new(),
+        };
+        let types = [("post".to_string(), false)];
+        assert!(hyscribe_rest::Site::has_posts(&rest, 1, &types));
+        assert!(!hyscribe_rest::Site::has_posts(&rest, 2, &types));
+        assert_eq!(
+            hyscribe_rest::Site::home_url(&rest),
+            "http://127.0.0.1:8081"
+        );
+        // `FIELD()` of no slugs, as PHP writes it, orders nothing.
+        let slugs = UserQuery {
+            order: (hyscribe_model::UserOrder::Nicenames, false),
+            ..UserQuery::default()
+        };
+        let users = hyscribe_rest::Site::users(&rest, &slugs);
+        assert_eq!(users.iter().map(|user| user.id).collect::<Vec<_>>(), [1]);
+    })
+    .await
+    .unwrap();
 }
 
 /// The reads a site's own templates and global styles posts need, which

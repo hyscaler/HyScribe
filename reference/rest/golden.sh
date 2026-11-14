@@ -135,7 +135,7 @@ LIST
 )
 if [ $# -gt 0 ]; then
   REQUESTS=$(grep -v '^#' "$1")
-  OUT="$ROOT/crates/hyscribe-rest/tests/golden/$(basename "$1" .list)$([ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ] && echo -ttd).tsv"
+  OUT="$ROOT/crates/hyscribe-rest/tests/golden/$(basename "$1" .list)$([ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ] && echo -ttd || true).tsv"
 fi
 
 curl_args() {

@@ -3,13 +3,13 @@
 //! The REST API answers any route, query, method and headers without
 //! panicking: route matching, `_fields`, `_jsonp`, `_envelope`, the
 //! arguments' schemas and the routes all take input from the request, and
-//! the site's one template, template part and global styles post have the
-//! input's content.
+//! the site's one template, template part and global styles post, its one
+//! comment and its one user have the input's content.
 
 #![no_main]
 
-use hyscribe_model::{Post, Term, TermQuery, User};
-use hyscribe_phpser::{Value, parse_str};
+use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, Term, TermQuery, User, UserQuery};
+use hyscribe_phpser::{Key, Value, parse_str};
 use hyscribe_rest::{Request, Site, serve};
 use libfuzzer_sys::fuzz_target;
 
@@ -79,7 +79,63 @@ impl Site for Fuzzed<'_> {
         (0..post).collect()
     }
     fn user(&self, id: u64) -> Option<User> {
-        (id == 1).then(User::default)
+        (id == 1).then(|| User {
+            id,
+            display_name: self.content.to_vec(),
+            nicename: self.content.to_vec(),
+            ..User::default()
+        })
+    }
+    fn home_url(&self) -> String {
+        "http://example.test".into()
+    }
+    fn table_prefix(&self) -> String {
+        "wp_".into()
+    }
+    fn comments(&self, _: &CommentQuery) -> Vec<CommentRow> {
+        vec![CommentRow {
+            comment: Comment {
+                id: 1,
+                post_id: 1,
+                author: self.content.to_vec(),
+                content: self.content.to_vec(),
+                date: "2026-11-14 10:00:00".into(),
+                date_gmt: "2026-11-14 10:00:00".into(),
+                ..Comment::default()
+            },
+            approved: "1".into(),
+            ..CommentRow::default()
+        }]
+    }
+    fn count_comments(&self, _: &CommentQuery) -> u64 {
+        1
+    }
+    fn comment_link(&self, comment: &Comment) -> String {
+        format!("http://example.test/#comment-{}", comment.id)
+    }
+    fn users(&self, _: &UserQuery) -> Vec<User> {
+        self.user(1).into_iter().collect()
+    }
+    fn count_users(&self, _: &UserQuery) -> u64 {
+        1
+    }
+    fn user_meta(&self, id: u64, _: &str) -> Option<Vec<u8>> {
+        (id == 1).then(|| self.content.to_vec())
+    }
+    fn user_registered(&self, _: u64) -> String {
+        "2026-11-14 10:00:00".into()
+    }
+    fn allcaps(&self, id: u64) -> Vec<(Key, Value)> {
+        vec![(
+            Key::from_php_string(b"read".to_vec()),
+            Value::Bool(id % 2 == 1),
+        )]
+    }
+    fn author_link(&self, user: &User) -> String {
+        format!("http://example.test/?author={}", user.id)
+    }
+    fn has_posts(&self, author: u64, _: &[(String, bool)]) -> bool {
+        author == 1
     }
 }
 

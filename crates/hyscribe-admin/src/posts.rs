@@ -26,8 +26,8 @@ use crate::list_table::{
 };
 use crate::menu::Screen;
 use crate::menu::esc_link;
-use crate::page::PageSite;
 use crate::page::{HelpTab, Page, admin_page, wp_admin_notice};
+use crate::page::{PageSite, user_setting};
 use crate::text;
 
 /// What the posts list asks of the site about its posts.
@@ -74,8 +74,6 @@ pub trait PostsSite: PageSite {
     /// The years and months with posts of `post_type`, newest first: of the
     /// trashed ones when `trash`, else of the others.
     fn months(&self, post_type: &str, trash: bool) -> Vec<(u32, u32)>;
-    /// `get_user_option( $name )`, as stored.
-    fn user_option(&self, name: &str) -> Option<Vec<u8>>;
     /// `get_post( $id )`, of any type and status.
     fn post(&self, id: u64) -> Option<Post>;
     /// `get_page_templates( null, $post_type )`: each template's slug and
@@ -2049,29 +2047,6 @@ impl Answer {
             Answer::Page,
         )
     }
-}
-
-/// `get_user_setting( $name )`: from the settings cookie when sent, else
-/// the stored `user-settings`; none when the cleaned cookie has no `=`.
-pub(crate) fn user_setting(
-    site: &dyn PostsSite,
-    cookie: Option<&str>,
-    name: &str,
-) -> Option<String> {
-    let stored = match cookie {
-        Some(cookie) => {
-            let kept: String = cookie
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '=' | '&' | '_' | '-'))
-                .collect();
-            kept.find('=')
-                .filter(|at| *at > 0)
-                .map(|_| kept.into_bytes())
-        }
-        None => site.user_option("user-settings"),
-    }?;
-    let settings = hyscribe_phpser::parse_str(&stored);
-    settings.get_str(name).and_then(Value::as_bytes).map(text)
 }
 
 /// `prepare_items()`'s view mode: a non-empty request's, which PHP saves

@@ -274,6 +274,12 @@ impl Urls for Admin<'_> {
 }
 
 impl PageSite for Admin<'_> {
+    fn user_option(&self, name: &str) -> Option<Vec<u8>> {
+        self.reads.user_option(self.user.id, name)
+    }
+    fn settings_cookie(&self) -> Option<String> {
+        self.settings.clone()
+    }
     fn user_id(&self) -> u64 {
         self.user.id
     }
@@ -474,9 +480,6 @@ impl PostsSite for Admin<'_> {
         self.reads
             .reads
             .wait(self.site.db.post_months(post_type, trash))
-    }
-    fn user_option(&self, name: &str) -> Option<Vec<u8>> {
-        self.reads.user_option(self.user.id, name)
     }
     fn post(&self, id: u64) -> Option<Post> {
         self.full_post(id)
@@ -1042,7 +1045,14 @@ fn screen(
             hyscribe_admin::user_new::user_new(admin, update.as_deref(), &request)
         }
         "/hs-admin/users" => users(admin, &user_args(query)?, &request),
-        "/hs-admin/" | "/hs-admin/index" => Answer::from_page(dashboard(admin, &request)),
+        "/hs-admin/" | "/hs-admin/index" => {
+            // `welcome` saves the welcome panel's option for a user who sees it.
+            let welcome = parse_str(query.as_bytes()).get_str("welcome").is_some();
+            if welcome && admin.can("edit_theme_options") {
+                return None;
+            }
+            Answer::from_page(dashboard(admin, &request))
+        }
         "/hs-admin/edit-comments" => {
             let args = comment_args(query)?;
             // Only posts' and pages' comments are listed, and a draft's

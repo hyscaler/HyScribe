@@ -8,6 +8,7 @@ use hyscribe_db::DbError;
 pub mod comments;
 pub mod options;
 pub mod posts;
+mod steps;
 pub mod terms;
 pub mod users;
 

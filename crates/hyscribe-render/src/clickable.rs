@@ -11,6 +11,7 @@ use hyscribe_phpser::is_empty_string;
 
 use crate::blocks::{is_pcre_space, run};
 use crate::formatting::is_word;
+use crate::kses::is_internal_link;
 
 /// `[\w\x80-\xff#%\~/@\[\]*(+=&$-]`: a URL character that is not
 /// punctuation.
@@ -285,7 +286,8 @@ impl Links {
         let scheme = url_scheme(url)
             .map(|s| s.to_ascii_lowercase())
             .unwrap_or_default();
-        if !self.is_internal(url) && (scheme == b"http" || scheme == b"https") {
+        let internal = is_internal_link(url, self.internal_host.as_deref());
+        if !internal && (scheme == b"http" || scheme == b"https") {
             parts.push("nofollow");
         }
         if self.ugc {
@@ -295,12 +297,6 @@ impl Links {
             return Vec::new();
         }
         format!(" rel=\"{}\"", esc_attr(parts.join(" ").as_bytes())).into_bytes()
-    }
-
-    /// `wp_is_internal_link()`, without its protocol check: that always
-    /// passes for the http and https links it is asked about.
-    fn is_internal(&self, url: &[u8]) -> bool {
-        url_host(&url.to_ascii_lowercase()) == self.internal_host
     }
 }
 

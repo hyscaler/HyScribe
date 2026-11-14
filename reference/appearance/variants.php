@@ -5,10 +5,10 @@
 // Every request sees the themes and plugins a HyScribe installation has:
 // Twenty Twenty-Five alone, and no PHP plugin (the image's Akismet and
 // Hello Dolly, and these must-use plugins, are hidden). a5auto turns on the
-// theme's automatic updates; a5nooptions and a5noswitch deny user 1
-// edit_theme_options and switch_themes, and a5hidden gives user options
-// that hide columns of the Plugins and Export Personal Data lists and set
-// how many they show.
+// theme's automatic updates; a5nooptions and a5noswitch (g9nooptions and
+// g9noswitch too) deny user 1 edit_theme_options and switch_themes, and
+// a5hidden gives user options that hide columns of the Plugins and Export
+// Personal Data lists and set how many they show.
 add_filter( 'all_plugins', '__return_empty_array' );
 add_filter( 'show_advanced_plugins', '__return_false' );
 add_filter(
@@ -45,6 +45,8 @@ if ( 'a5hidden' === $hyscribe_variant ) {
 $hyscribe_denied = array(
 	'a5nooptions' => 'edit_theme_options',
 	'a5noswitch'  => 'switch_themes',
+	'g9nooptions' => 'edit_theme_options',
+	'g9noswitch'  => 'switch_themes',
 );
 if ( isset( $hyscribe_denied[ $hyscribe_variant ] ) ) {
 	add_filter(

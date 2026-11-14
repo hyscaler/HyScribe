@@ -35,6 +35,7 @@ struct Statements {
     ids_of_key_valued: &'static str,
     object_ids: &'static str,
     object_meta: &'static str,
+    value: &'static str,
 }
 
 /// The statements of the meta table `$table`, whose object column is
@@ -120,6 +121,15 @@ macro_rules! statements {
                 $object,
                 " = ? ORDER BY ",
                 $id
+            ),
+            value: concat!(
+                "SELECT meta_value FROM {prefix}",
+                $name,
+                " WHERE ",
+                $object,
+                " = ? AND meta_key = ? ORDER BY ",
+                $id,
+                " LIMIT 1"
             ),
         }
     };
@@ -251,6 +261,22 @@ impl Write<'_> {
             .bind(key)
             .bind(value);
         self.ids(query).await
+    }
+
+    /// The first `key` value of `object`, as `get_metadata()` reads a
+    /// single one.
+    pub async fn meta_value(
+        &mut self,
+        meta: Meta,
+        object: u64,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, DbError> {
+        let query = self.sql(meta.statements().value).bind(object).bind(key);
+        let row = query
+            .fetch_optional(&mut *self.tx)
+            .await
+            .map_err(db_error)?;
+        Ok(row.map(|row| super::bytes(&row, "meta_value")))
     }
 
     /// Every meta row of `object`, as deleting the object finds them.

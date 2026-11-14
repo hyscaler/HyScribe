@@ -509,6 +509,122 @@ async fn writes_comments() {
     assert_eq!(write.post_comment_ids(1).await.unwrap(), [1]);
 }
 
+#[tokio::test]
+async fn reads_for_comment_writes() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    let fixture = commenter();
+    assert_eq!(write.comment(1).await.unwrap().unwrap(), fixture);
+    assert_eq!(write.comment(999_999).await.unwrap(), None);
+    let negative = CommentFields {
+        karma: -3,
+        parent: 1,
+        user_id: 1,
+        date: "0000-00-00 00:00:00".into(),
+        ..commenter()
+    };
+    let id = write.insert_comment(&negative).await.unwrap();
+    assert_eq!(write.comment(id).await.unwrap().unwrap(), negative);
+
+    let (author, email) = (&fixture.author[..], &fixture.author_email[..]);
+    let duplicate = async |write: &mut Write<'_>, parent, email, content: &[u8]| {
+        let found = write.duplicate_comment((1, parent), author, email, content);
+        found.await.unwrap()
+    };
+    assert_eq!(
+        duplicate(&mut write, 0, Some(email), &fixture.content).await,
+        Some(1)
+    );
+    assert_eq!(
+        duplicate(&mut write, 0, None, &fixture.content).await,
+        Some(1)
+    );
+    assert_eq!(
+        duplicate(&mut write, 0, Some(b"x"), &fixture.content).await,
+        None
+    );
+    assert_eq!(
+        duplicate(&mut write, 1, None, &fixture.content).await,
+        Some(id)
+    );
+    assert_eq!(duplicate(&mut write, 0, None, b"other").await, None);
+    write.set_comment_status(1, "trash").await.unwrap();
+    assert_eq!(duplicate(&mut write, 0, None, &fixture.content).await, None);
+    write.set_comment_status(1, "1").await.unwrap();
+
+    assert!(
+        write
+            .author_has_approved_comment(author, email)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !write
+            .author_has_approved_comment(author, b"x")
+            .await
+            .unwrap()
+    );
+    assert!(write.user_has_approved_comment(1).await.unwrap());
+    assert!(!write.user_has_approved_comment(2).await.unwrap());
+    write.set_comment_status(id, "0").await.unwrap();
+    assert!(!write.user_has_approved_comment(1).await.unwrap());
+
+    let since = "2026-10-27 08:08:15";
+    let found = Some("2026-10-27 08:08:15".to_string());
+    let later = "2026-10-27 08:08:16";
+    for (since, user, email, last) in [
+        (since, (0, &b""[..]), &b"x"[..], &found),
+        (since, (0, b"x"), email, &found),
+        (since, (1, b"x"), b"x", &found),
+        (since, (2, b""), b"x", &None),
+        (later, (0, b""), email, &None),
+    ] {
+        let date = write.last_comment_date(since, user, email).await.unwrap();
+        assert_eq!(&date, last, "{since} {user:?}");
+    }
+
+    let note = |approved: &str, date: &str| CommentFields {
+        comment_type: "note".into(),
+        approved: approved.into(),
+        parent: id,
+        date_gmt: date.into(),
+        ..commenter()
+    };
+    let older = write
+        .insert_comment(&note("1", "2026-01-01 00:00:01"))
+        .await
+        .unwrap();
+    let newer = write
+        .insert_comment(&note("0", "2026-01-01 00:00:02"))
+        .await
+        .unwrap();
+    write
+        .insert_comment(&note("spam", "2026-01-01 00:00:03"))
+        .await
+        .unwrap();
+    let reply = CommentFields {
+        comment_type: "comment".into(),
+        ..note("1", "2026-01-01 00:00:04")
+    };
+    write.insert_comment(&reply).await.unwrap();
+    assert_eq!(write.child_note_ids(id).await.unwrap(), [newer, older]);
+
+    assert_eq!(write.post_author(1).await.unwrap(), Some(1));
+    assert_eq!(write.post_author(999_999).await.unwrap(), None);
+    let admin = b"admin@default-install.test";
+    assert_eq!(write.user_id_by_email(admin).await.unwrap(), Some(1));
+    assert_eq!(write.user_id_by_email(b"x").await.unwrap(), None);
+
+    let meta = Meta::Comment;
+    assert_eq!(write.meta_value(meta, id, "k").await.unwrap(), None);
+    write.add_meta(meta, id, "k", b"first").await.unwrap();
+    write.add_meta(meta, id, "k", b"second").await.unwrap();
+    write.add_meta(meta, id, "other", b"x").await.unwrap();
+    let first = write.meta_value(meta, id, "k").await.unwrap();
+    assert_eq!(first.as_deref(), Some(&b"first"[..]));
+}
+
 const USER: &str = "SELECT JSON_ARRAY(user_login, user_pass, user_nicename, user_email, \
      user_url, user_registered, user_activation_key, user_status, display_name) FROM wp_users \
      WHERE ID = ?";
@@ -1137,7 +1253,21 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.set_term_order(1, &[(1, 1)]).await.err(),
         w.remove_relationships(1, &[1]).await.err(),
     ];
+    let since = "2026-01-01 00:00:00";
     let reads = [
+        w.comment(1).await.err(),
+        w.duplicate_comment((1, 0), b"a", Some(b"e"), b"c")
+            .await
+            .err(),
+        w.duplicate_comment((1, 0), b"a", None, b"c").await.err(),
+        w.user_has_approved_comment(1).await.err(),
+        w.author_has_approved_comment(b"a", b"e").await.err(),
+        w.last_comment_date(since, (0, b"ip"), b"e").await.err(),
+        w.last_comment_date(since, (1, b""), b"e").await.err(),
+        w.child_note_ids(1).await.err(),
+        w.post_author(1).await.err(),
+        w.user_id_by_email(b"e").await.err(),
+        w.meta_value(meta, 1, "k").await.err(),
         w.term_in("category", 1).await.err(),
         w.term_by_slug("category", None).await.err(),
         w.term_by_name("category", "n").await.err(),

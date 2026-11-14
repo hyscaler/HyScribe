@@ -115,7 +115,8 @@ pub trait DashboardSite: PostsSite {
 }
 
 /// The welcome panel for a user who may `edit_theme_options`, as
-/// `index.php` and `wp_welcome_panel()` print it for a block theme.
+/// `index.php` and `wp_welcome_panel()` print it: for the bundled block
+/// theme, or for an active theme the site does not have, which is classic.
 fn welcome_panel(site: &dyn DashboardSite) -> String {
     if !site.can("edit_theme_options") {
         return String::new();
@@ -125,6 +126,27 @@ fn welcome_panel(site: &dyn DashboardSite) -> String {
         String::from_utf8_lossy(&esc_url(BarSite::admin_url(site, path).as_bytes())).into_owned()
     };
     let version = VERSION.trim();
+    // `customize` maps to `edit_theme_options`, so the Customizer link shows.
+    let (site_column, look) = if site.stylesheet() == "twentytwentyfive" {
+        (
+            format!(
+                "<h3>Customize your entire site with block themes</h3>\n\t\t\t\t<p>Design everything on your site &#8212; from the header down to the footer, all using blocks and patterns.</p>\n\t\t\t\t<a href=\"{}\">Open site editor</a>\n\t\t\t\t\t\t",
+                url("site-editor.php")
+            ),
+            format!(
+                "<h3>Switch up your site&#8217;s look & feel with Styles</h3>\n\t\t\t\t<p>Tweak your site, or give it a whole new look! Get creative &#8212; how about a new color palette or font?</p>\n\t\t\t\t<a href=\"{}\">Edit styles</a>\n\t\t\t\t\t\t",
+                url("site-editor.php?p=%2Fstyles")
+            ),
+        )
+    } else {
+        (
+            format!(
+                "<h3>Start Customizing</h3>\n\t\t\t\t<p>Configure your site&#8217;s logo, header, menus, and more in the Customizer.</p>\n\t\t\t\t\t\t\t\t\t<a class=\"load-customize hide-if-no-customize\" href=\"{}\">Open the Customizer</a>\n\t\t\t\t\t\t\t\t\t\t",
+                url("customize.php")
+            ),
+            "<h3>Discover a new way to build your site.</h3>\n\t\t\t\t<p>There is a new kind of WordPress theme, called a block theme, that lets you build the site you&#8217;ve always wanted &#8212; with blocks and styles.</p>\n\t\t\t\t<a href=\"https://wordpress.org/documentation/article/block-themes/\">Learn about block themes</a>\n\t\t\t\t\t\t".into(),
+        )
+    };
     WELCOME
         .replace(
             "%classes%",
@@ -139,8 +161,8 @@ fn welcome_panel(site: &dyn DashboardSite) -> String {
         .replace("%about%", &url("about.php"))
         .replace("%version%", version.split('-').next().unwrap_or(version))
         .replace("%new_page%", &url("post-new.php?post_type=page"))
-        .replace("%styles%", &url("site-editor.php?p=%2Fstyles"))
-        .replace("%site_editor%", &url("site-editor.php"))
+        .replace("%site%", &site_column)
+        .replace("%look%", &look)
 }
 
 /// The notice after the admin email check was postponed with
@@ -281,7 +303,14 @@ fn right_now(site: &dyn DashboardSite) -> String {
         ));
     }
     // update_right_now_message(): nobody here may `update_core`.
-    let theme = esc_html(site.theme_name().as_bytes());
+    // A theme that is not found is named after its folder.
+    let stylesheet = site.stylesheet();
+    let name = if stylesheet == "twentytwentyfive" {
+        site.theme_name()
+    } else {
+        stylesheet
+    };
+    let theme = esc_html(name.as_bytes());
     let theme = if site.can("switch_themes") {
         format!("<a href=\"{}\">{theme}</a>", link("themes.php"))
     } else {

@@ -20,6 +20,8 @@ use crate::tools::NOTICES;
 
 const THEMES: &str = include_str!("appearance/themes.html");
 const SETTINGS: &str = include_str!("appearance/settings.json");
+const THEME_JSON: &str = include_str!("appearance/theme.json");
+const THEME_BLOCK: &str = include_str!("appearance/theme.html");
 const PLUGINS: &str = include_str!("appearance/plugins.html");
 const UPDATE_ROWS: &str = include_str!("appearance/update-rows.html");
 
@@ -65,10 +67,14 @@ pub fn auto_update_message(cron: &[u8], now: i64) -> String {
     }
 }
 
-/// `themes.php` for `request`, `None` when the active theme is not the
-/// bundled one.
-pub fn themes(site: &dyn PostsSite, request: &Request) -> Option<Answer> {
-    if site.option("stylesheet").as_deref() != Some(THEME.as_bytes()) {
+/// `themes.php` for `request`, `broken` when it asks for the broken theme
+/// notice. An active theme the site does not have is shown as PHP shows
+/// it, without `switch_theme()`'s write; `None` for a missing parent
+/// or child of the bundled theme.
+pub fn themes(site: &dyn PostsSite, request: &Request, broken: bool) -> Option<Answer> {
+    let bundled = |name| site.option(name).as_deref() == Some(THEME.as_bytes());
+    let active = bundled("stylesheet");
+    if active != bundled("template") {
         return None;
     }
     let screenshot = format!(
@@ -79,20 +85,16 @@ pub fn themes(site: &dyn PostsSite, request: &Request) -> Option<Answer> {
     let customize = options.then(|| {
         let back = urlencode(&esc_url_raw(&stripslashes(request.uri.as_bytes())));
         let url = add_query_arg(
-            &[(b"return", Some(&back))],
+            &[
+                (b"wp_theme_preview", (!active).then_some(THEME.as_bytes())),
+                (b"return", Some(&back)),
+            ],
             BarSite::admin_url(site, "site-editor.php").as_bytes(),
         );
         esc_url(&url)
     });
-    // `customize` maps to `edit_theme_options`.
-    let button = match &customize {
-        Some(url) => format!(
-            "\t\t<a class=\"button button-compact button-primary customize load-customize hide-if-no-customize\"\n\t\t\t\t\thref=\"{}\"\n\t\t\t\t\taria-label=\"Customize Twenty Twenty-Five\"\n\t\t\t\t>Customize</a>\n\t\t\t\t\t",
-            String::from_utf8_lossy(&esc_url(url))
-        ),
-        _ => String::new(),
-    };
-    let activate = site.can("switch_themes").then(|| {
+    let switch = site.can("switch_themes");
+    let activate = switch.then(|| {
         // `wp_nonce_url()` escapes with `esc_html()`.
         let url = BarSite::admin_url(
             site,
@@ -103,6 +105,29 @@ pub fn themes(site: &dyn PostsSite, request: &Request) -> Option<Answer> {
         );
         esc_html(url.as_bytes()).into_bytes()
     });
+    let escaped = |url: &[u8]| String::from_utf8_lossy(&esc_url(url)).into_owned();
+    // `customize` maps to `edit_theme_options`.
+    let buttons = if active {
+        let button = customize.as_deref().map_or(String::new(), |url| {
+            format!(
+                "\t\t<a class=\"button button-compact button-primary customize load-customize hide-if-no-customize\"\n\t\t\t\t\thref=\"{}\"\n\t\t\t\t\taria-label=\"Customize Twenty Twenty-Five\"\n\t\t\t\t>Customize</a>\n\t\t\t\t\t",
+                escaped(url)
+            )
+        });
+        format!("\t\t\t\t\t\t\t{button}\n")
+    } else {
+        let preview = customize.as_deref().map_or(String::new(), |url| {
+            format!(
+                "\t\t\t\t\t\t\t<a class=\"button button-compact button-primary load-customize hide-if-no-customize\"\n\t\t\t\t\thref=\"{}\"\n\t\t\t\t\taria-label=\"Live Preview {{{{ data.name }}}}\"\n\t\t\t\t>Live Preview</a>\n",
+                escaped(url)
+            )
+        });
+        // Only a user who may switch themes is shown an inactive one.
+        format!(
+            "\t\t\t\t\t\t\t\t<a class=\"button button-compact activate\"\n\t\t\t\thref=\"{}\"\n\t\t\t\taria-label=\"Activate {{{{ data.name }}}}\"\n\t\t\t>Activate</a>\n\n{preview}\t\t\t\t\t\n",
+            escaped(activate.as_deref().unwrap_or_default())
+        )
+    };
     let auto_update =
         match maybe_unserialize(&site.option("auto_update_themes").unwrap_or_default()) {
             Maybe::Value(Value::Array(items)) => items
@@ -115,44 +140,85 @@ pub fn themes(site: &dyn PostsSite, request: &Request) -> Option<Answer> {
     let admin_path = parse_url(BarSite::admin_url(site, "").as_bytes())
         .and_then(|parts| parts.path)
         .unwrap_or_default();
-    let settings = fill(
-        SETTINGS,
+    // A user who may not switch themes is shown the active theme alone,
+    // which a missing one leaves out.
+    let listed = active || switch;
+    let theme = fill(
+        THEME_JSON,
         &[
             ("screenshot", string(Some(screenshot.clone().into_bytes()))),
             ("activate", string(activate)),
             ("customize", string(customize)),
-            ("admin_path", json(&Value::String(admin_path))),
             ("enabled", auto_update.to_string()),
+            ("active", active.to_string()),
         ],
     );
+    let settings = fill(
+        SETTINGS,
+        &[
+            ("theme", if listed { theme } else { String::new() }),
+            ("admin_path", json(&Value::String(admin_path))),
+        ],
+    );
+    let block = fill(
+        THEME_BLOCK,
+        &[
+            ("class", if active { " active" } else { "" }.into()),
+            (
+                "screenshot",
+                escaped(format!("{screenshot}?ver=1.5").as_bytes()),
+            ),
+            (
+                "name",
+                if active {
+                    "\n\t\t\t\t<span>Active:</span> Twenty Twenty-Five\t\t\t"
+                } else {
+                    "Twenty Twenty-Five"
+                }
+                .into(),
+            ),
+            ("actions", buttons),
+        ],
+    );
+    let notice = if broken || !active {
+        "<div id=\"message1\" class=\"notice is-dismissible updated\"><p>The active theme is broken. Reverting to the default theme.</p></div>"
+    } else {
+        ""
+    };
+    // The Appearance submenu's items but the theme's own screens.
+    let actions = match (options, active) {
+        (false, _) => String::new(),
+        (true, true) => format!(
+            "<a class='button button-compact' href='{}'>Fonts</a>",
+            link("font-library.php")
+        ),
+        (true, false) => format!(
+            "<a class='button button-compact' href='{}'>Patterns</a> <a class='button button-compact' href='{}'>Fonts</a>",
+            link("site-editor.php?p=/pattern"),
+            link("font-library.php")
+        ),
+    };
     let cron = site.option("cron").unwrap_or_default();
     let content = fill(
         THEMES,
         &[
+            ("count", u8::from(listed).to_string()),
+            ("notice", notice.into()),
             (
-                "screenshot",
-                String::from_utf8_lossy(&esc_url(format!("{screenshot}?ver=1.5").as_bytes()))
-                    .into_owned(),
-            ),
-            ("customize", button),
-            // The Appearance submenu's items but the theme's own screens.
-            (
-                "actions",
-                if options {
-                    format!(
-                        "<a class='button button-compact' href='{}'>Fonts</a>",
-                        link("font-library.php")
-                    )
+                "theme",
+                if listed {
+                    format!("\n{block}")
                 } else {
                     String::new()
                 },
             ),
+            ("actions", actions),
             ("auto_update", auto_update_message(&cron, site.clock().1)),
         ],
     ) + NOTICES
         + UPDATE_ROWS;
     let mut help = Vec::new();
-    if site.can("switch_themes") {
+    if switch {
         help.push(HelpTab {
             id: "overview",
             title: "Overview",

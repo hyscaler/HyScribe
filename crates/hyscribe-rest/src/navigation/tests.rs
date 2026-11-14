@@ -72,7 +72,8 @@ fn get(content: &'static Content, target: &str) -> crate::Served {
 /// registers but does not show in REST, is not ported; without
 /// `nav_menu_options`, as on the default install, a menu adds no new
 /// pages, and a location the theme's mods give a category is no menu's
-/// and links from no category.
+/// and links from no category; an item of a post no route shows, as a
+/// revision, links to no object.
 #[test]
 fn menu_items_not_ported_and_plain_menus() {
     let state = concat!(
@@ -83,16 +84,24 @@ fn menu_items_not_ported_and_plain_menus() {
         "INSERT INTO `wp_posts` VALUES ",
         "(871,1,'2026-11-07 10:00:00','2026-11-07 10:00:00','','','','publish','closed','closed','','871','','','2026-11-07 10:00:00','2026-11-07 10:00:00','',0,'',1,'nav_menu_item','',0),",
         "(872,1,'2026-11-07 10:00:00','2026-11-07 10:00:00','','','','publish','closed','closed','','872','','','2026-11-07 10:00:00','2026-11-07 10:00:00','',0,'',2,'nav_menu_item','',0),",
-        "(873,1,'2026-11-07 10:00:00','2026-11-07 10:00:00','','','','publish','closed','closed','','873','','','2026-11-07 10:00:00','2026-11-07 10:00:00','',0,'',3,'nav_menu_item','',0);\n",
+        "(873,1,'2026-11-07 10:00:00','2026-11-07 10:00:00','','','','publish','closed','closed','','873','','','2026-11-07 10:00:00','2026-11-07 10:00:00','',0,'',3,'nav_menu_item','',0),",
+        "(876,1,'2026-11-07 10:00:00','2026-11-07 10:00:00','','','','publish','closed','closed','','876','','','2026-11-07 10:00:00','2026-11-07 10:00:00','',0,'',4,'nav_menu_item','',0),",
+        "(877,1,'2026-11-07 10:00:00','2026-11-07 10:00:00','','Kept','','inherit','closed','closed','','877','','','2026-11-07 10:00:00','2026-11-07 10:00:00','',1,'',0,'revision','',0);\n",
         "INSERT INTO `wp_postmeta` VALUES (871,871,'_menu_item_type','post_type_archive'),",
         "(872,872,'_menu_item_type','post_type'),(873,872,'_menu_item_object','revision'),",
-        "(874,873,'_menu_item_type','taxonomy'),(875,873,'_menu_item_object','post_format');\n",
+        "(874,873,'_menu_item_type','taxonomy'),(875,873,'_menu_item_object','post_format'),",
+        "(876,876,'_menu_item_type','post_type'),(877,876,'_menu_item_object','page'),",
+        "(878,876,'_menu_item_object_id','877');\n",
     );
     let content: &'static Content = Box::leak(Box::new(default_install_with(state)));
     for id in 871..=873 {
         let served = get(content, &format!("/?rest_route=/wp/v2/menu-items/{id}"));
         assert_eq!(served.status, 501, "{id}");
     }
+    // `rest_get_route_for_post()` of a revision is empty: no object link.
+    let item = get(content, "/?rest_route=/wp/v2/menu-items/876");
+    assert_eq!(item.status, 200);
+    assert!(!String::from_utf8_lossy(&item.body).contains("menu-item-object"));
     let served = get(
         content,
         "/?rest_route=/wp/v2/menus/870&_fields=locations,auto_add",

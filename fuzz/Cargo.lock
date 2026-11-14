@@ -546,6 +546,7 @@ dependencies = [
 name = "hyscribe-fuzz"
 version = "0.0.0"
 dependencies = [
+ "hyscribe-admin",
  "hyscribe-auth",
  "hyscribe-config",
  "hyscribe-html",

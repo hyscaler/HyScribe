@@ -130,6 +130,18 @@ fn registry() -> &'static Registry {
     })
 }
 
+/// `post_type_exists( $name )`.
+pub fn post_type_exists(name: &str) -> bool {
+    registry().post_types.contains_key(name)
+}
+
+/// The taxonomy's capability `name` (`manage_terms`, `edit_terms` and so
+/// on), `None` for a taxonomy not registered.
+pub fn taxonomy_cap(taxonomy: &str, name: &str) -> Option<String> {
+    let tax = registry().taxonomies.get(taxonomy)?;
+    Some(tax.cap.get(name).cloned().unwrap_or_default())
+}
+
 /// A stored option or meta value, unserialized.
 fn stored(value: Option<Vec<u8>>) -> Value {
     let value = value.unwrap_or_default();

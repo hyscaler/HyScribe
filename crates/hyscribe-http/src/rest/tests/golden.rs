@@ -186,6 +186,7 @@ fn serve_case(site: &Site, handle: &Handle, case: &RestCase) -> hyscribe_rest::S
         origin: None,
         nonce: (user != 0).then_some(b"%nonce%"),
         method_override: None,
+        unread_body: false,
     };
     hyscribe_rest::serve(&as_role, &request)
 }
@@ -276,7 +277,7 @@ async fn posts_match_php() {
         &[
             ("administrator", "POST", "/?rest_route=/wp/v2/posts"),
             ("administrator", "PUT", "/?rest_route=/wp/v2/posts/1"),
-            ("visitor", "DELETE", "/?rest_route=/wp/v2/pages/2"),
+            ("visitor", "DELETE", "/?rest_route=/wp/v2/pages/2&force=1"),
             ("visitor", "GET", "/?rest_route=/wp/v2/posts&categories=1"),
             (
                 "editor",

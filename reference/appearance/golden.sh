@@ -8,27 +8,37 @@
 # crates/hyscribe-admin/tests/golden/appearance.tsv:
 #   variant<TAB>screen<TAB>role<TAB>hex(page)
 # A refusal is kept as 403<TAB>page. Masks as reference/profile/golden.sh;
-# the Themes screen's automatic update message is masked as %auto-update%,
-# and a last line keeps it with the time it was made:
+# the dashboard's Quick Draft post as %auto-draft%, and the Themes screen's
+# automatic update message as %auto-update%, which a last line keeps with
+# the time it was made:
 #   auto-update<TAB>time<TAB>message
+# The g9 variants record the Themes screen and the dashboard with an active
+# theme the site does not have: each sets stylesheet and template in the
+# database, and the options table is put back from a dump after every view,
+# since the Themes screen then switches to the default theme.
 # Start from a fresh db.sh up, then php.sh up, and take both down after.
 set -euo pipefail
 DOCKER="${DOCKER:-docker}"
 NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
+DB="${HYSCRIBE_DB_CONTAINER:-hyscribe-default-install-db}"
 BASE="${HYSCRIBE_PHP_URL:-http://127.0.0.1:8081}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/crates/hyscribe-admin/tests/golden/appearance.tsv"
 MU=/var/www/html/wp-content/mu-plugins
 TMP=$(mktemp)
 NONCES=$(mktemp)
+OPTIONS=$(mktemp)
+sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress; }
+"$DOCKER" exec "$DB" mariadb-dump -uroot -preference-only wordpress wp_options > "$OPTIONS"
 cleanup() {
-  rm -f "$TMP" "$TMP.403" "$NONCES"
+  sql < "$OPTIONS"
+  rm -f "$TMP" "$TMP.403" "$NONCES" "$OPTIONS"
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
 }
 trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/appearance/variants.php"
-actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts updates switch-theme_twentytwentyfive personal-data-request bulk-privacy_requests bulk-plugins screen-options-nonce health-check-site-status health-check-site-status-result"
+actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts updates switch-theme_twentytwentyfive personal-data-request bulk-privacy_requests bulk-plugins screen-options-nonce health-check-site-status health-check-site-status-result welcome-panel-nonce replyto-comment add-post closedpostboxes meta-box-order internal-linking community_events approve-comment_1 delete-comment_1"
 # shellcheck disable=SC2086
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 1 ); foreach ( array_slice( $argv, 1 ) as $action ) { echo wp_create_nonce( $action ), "\t", $action, "\n"; }' \
   $actions > "$NONCES"
@@ -38,7 +48,7 @@ message() {
 before=$(message)
 record() {
   : > "$TMP"
-  status=$(curl -s -o "$TMP" -w '%{http_code}' -b "hyscribe_role=$3; hyscribe_variant=$1" "$BASE/wp-admin/$2")
+  status=$(curl -s -o "$TMP" -w '%{http_code}' -b "hyscribe_role=$3; hyscribe_variant=$1" "$BASE/wp-admin/$2${4:-}")
   case "$status" in
     200) ;;
     403) { printf '403\t'; cat "$TMP"; } > "$TMP.403" && mv "$TMP.403" "$TMP" ;;
@@ -51,6 +61,7 @@ record() {
       $p = str_replace( $nonce, "%nonce:$action%", $p );
     }
     $p = preg_replace( "/\"time\":\"[0-9]+\"/", "\"time\":\"%time%\"", $p );
+    $p = preg_replace( "/(name=\"post_ID\" value=\")[0-9]+/", "\\1%auto-draft%", $p );
     $p = str_replace( explode( "\t", $argv[3] )[1], "%auto-update%", $p );
     echo bin2hex( $p );' "$TMP" "$NONCES" "$before")
   printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$page" >> "$OUT"
@@ -67,6 +78,22 @@ done
 for screen in plugins.php export-personal-data.php; do
   record a5hidden "$screen" administrator
 done
+record g9broken themes.php administrator '?broken=1'
+# An active theme the site does not have: stylesheet, template, then the
+# screens and roles.
+missing() {
+  printf "UPDATE wp_options SET option_value = '%s' WHERE option_name = 'stylesheet';\n" "$2" | sql
+  printf "UPDATE wp_options SET option_value = '%s' WHERE option_name = 'template';\n" "$3" | sql
+  record "$1" "$4" "$5"
+  sql < "$OPTIONS"
+}
+for role in administrator editor; do
+  missing g9gone gone gone themes.php "$role"
+  missing g9gone gone gone index.php "$role"
+done
+missing g9noswitch gone gone themes.php administrator
+missing g9nooptions gone gone themes.php administrator
+missing g9kid kid gone themes.php administrator
 after=$(message)
 if [ "${before#*	}" != "${after#*	}" ]; then
   echo "The automatic update message changed while recording; run again" >&2

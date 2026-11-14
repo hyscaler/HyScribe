@@ -209,7 +209,7 @@ impl Role {
 
     /// A variant of `reference/attachment-edit/golden.sh` over its content.
     fn a8(&self) -> bool {
-        self.variant().starts_with("a8lock")
+        self.variant().starts_with("a8lock") || self.variant() == "g9attach"
     }
 
     /// A user of the content of a `reference/attachment-edit/golden.sh`
@@ -298,7 +298,12 @@ impl Role {
             }
             ("s1icon", "site_icon") => b"5",
             ("a5auto", "auto_update_themes") => b"a:1:{i:0;s:16:\"twentytwentyfive\";}",
-            ("a5other", "stylesheet") => b"twentytwentyfour",
+            ("g9parent", "template") => b"twentytwentyfour",
+            ("g9gone" | "g9noswitch" | "g9nooptions", "stylesheet" | "template")
+            | ("g9kid", "template") => b"gone",
+            ("g9kid" | "g9child", "stylesheet") => b"kid",
+            ("g9pages" | "g9cpages" | "g9coldest", "page_comments" | "comments_per_page") => b"1",
+            ("g9coldest", "default_comments_page") => b"oldest",
             ("s1static" | "s1same" | "s1privacy", "page_on_front") => b"2",
             ("s1same", "page_for_posts") => b"2",
             ("s1privacy", "page_for_posts") => b"3",
@@ -448,20 +453,65 @@ impl Role {
 
     /// A variant of `reference/comments-list/golden.sh` over its content.
     fn comments_content(&self) -> bool {
-        ["comments", "cpaged", "chidden"].contains(&self.variant())
+        [
+            "comments",
+            "cpaged",
+            "chidden",
+            "g9cpages",
+            "g9coldest",
+            "g9attach",
+        ]
+        .contains(&self.variant())
+    }
+
+    /// The rows of a variant that pages comments, with their pages in their
+    /// links, as `get_comment_link()` gives them on the comments list.
+    fn paged(
+        &self,
+        mut rows: Vec<crate::dashboard::RecentComment>,
+    ) -> Vec<crate::dashboard::RecentComment> {
+        if !["g9pages", "g9cpages", "g9coldest"].contains(&self.variant()) {
+            return rows;
+        }
+        let option = |name: &str| crate::posts::PostsSite::option(self, name).unwrap_or_default();
+        let all: Vec<_> = rows
+            .iter()
+            .map(|row| {
+                (
+                    row.comment.clone(),
+                    crate::dashboard::approved_of(row.status).to_string(),
+                )
+            })
+            .collect();
+        for row in &mut rows {
+            let on_post: Vec<_> = all
+                .iter()
+                .filter(|(comment, _)| comment.post_id == row.comment.post_id)
+                .map(|(comment, approved)| (comment, approved.as_str()))
+                .collect();
+            row.link = crate::comments::comment_link(
+                &option,
+                row.post.as_ref().map(|_| row.permalink.as_str()),
+                "/hs-admin/edit-comments",
+                &on_post,
+                &row.comment,
+                1,
+            );
+        }
+        rows
     }
 
     /// The fixture's one comment, trashed when the list is empty, or the
     /// content's.
     fn comment_rows(&self) -> Vec<crate::dashboard::RecentComment> {
         if self.comments_content() {
-            return crate::comments::content::comments(self);
+            return self.paged(crate::comments::content::comments(self));
         }
         let mut hello = crate::dashboard::tests::hello_comment(self.can("edit_published_posts"));
         if self.variant() == "cempty" {
             hello.status = "trash";
         }
-        vec![hello]
+        self.paged(vec![hello])
     }
 
     /// The posts and pages of the variant.
@@ -550,8 +600,8 @@ impl CapabilityData for Role {
         let denied = match self.variant() {
             "u3nocreate" => "create_users",
             "u3nopromote" => "promote_users",
-            "a5nooptions" => "edit_theme_options",
-            "a5noswitch" => "switch_themes",
+            "a5nooptions" | "g9nooptions" => "edit_theme_options",
+            "a5noswitch" | "g9noswitch" => "switch_themes",
             _ => return Some(format!("a:1:{{s:{}:\"{role}\";b:1;}}", role.len()).into_bytes()),
         };
         Some(
@@ -621,6 +671,7 @@ impl MenuUser for Role {
     fn moderated_comments(&self) -> u64 {
         match self.variant() {
             "content" => 1,
+            "g9attach" => 2,
             _ if self.comments_content() => 1,
             _ if self.listing() => 3,
             _ => 0,
@@ -701,6 +752,7 @@ impl PageSite for Role {
             return Some(b"mfold=f&posts_list_mode=excerpt".to_vec());
         }
         match (self.variant(), name) {
+            ("g9keys", "comment_shortcuts") => return Some(b"true".to_vec()),
             ("f9folded", "user-settings") => return Some(b"mfold=f".to_vec()),
             ("f9unfold", "user-settings") => return Some(b"unfold=1&mfold=o".to_vec()),
             _ => {}
@@ -785,7 +837,12 @@ impl PageSite for Role {
         format!("{SITE}/hs-login")
     }
     fn template(&self) -> String {
-        "twentytwentyfive".into()
+        let template = CapabilityData::option(self, "template").unwrap_or_default();
+        String::from_utf8(template).unwrap()
+    }
+    fn stylesheet(&self) -> String {
+        let stylesheet = CapabilityData::option(self, "stylesheet").unwrap_or_default();
+        String::from_utf8(stylesheet).unwrap()
     }
     fn font_faces(&self) -> Vec<u8> {
         static FACES: OnceLock<Vec<u8>> = OnceLock::new();
@@ -1119,10 +1176,9 @@ impl crate::comments::CommentsSite for Role {
         }
     }
     fn parent_comment(&self, id: u64) -> Option<(String, Vec<u8>)> {
-        (id == 1).then(|| {
-            let hello = crate::dashboard::tests::hello_comment(false);
-            (hello.link, hello.comment.author)
-        })
+        let rows = self.comment_rows();
+        let parent = rows.into_iter().find(|row| row.comment.id == id)?;
+        Some((parent.link, parent.comment.author))
     }
     /// Comment 1's status, as `reference/notices/variants.php` gives it.
     fn comment_approved(&self, id: u64) -> Option<String> {
@@ -1164,9 +1220,11 @@ impl crate::dashboard::DashboardSite for Role {
     }
     fn comment_counts(&self) -> crate::dashboard::CommentCounts {
         if self.comments_content() {
+            // g9attach adds two approved comments and a pending one.
+            let attached = u64::from(self.variant() == "g9attach");
             return crate::dashboard::CommentCounts {
-                approved: 6,
-                moderated: 1,
+                approved: 6 + 2 * attached,
+                moderated: 1 + attached,
                 spam: 1,
                 trash: 1,
                 mine: 1,
@@ -1200,7 +1258,7 @@ impl crate::dashboard::DashboardSite for Role {
             return Vec::new();
         }
         if self.variant() != "content" {
-            return vec![hello];
+            return self.paged(vec![hello]);
         }
         let first = || {
             Some(post(
@@ -1456,7 +1514,8 @@ impl crate::posts::PostsSite for Role {
     fn pending_comments(&self, post: &hyscribe_model::Post) -> u64 {
         u64::from(
             self.listing() && [309, 311, 321].contains(&post.id)
-                || self.comments_content() && post.id == 1,
+                || self.comments_content() && post.id == 1
+                || self.variant() == "g9attach" && post.id == 805,
         )
     }
     /// `get_the_excerpt()` of the content's plain text.
@@ -1571,8 +1630,8 @@ impl crate::posts::PostsSite for Role {
             });
         }
         if self.comments_content() {
-            return [1, 2, 501]
-                .contains(&id)
+            let attached = self.variant() == "g9attach" && [801, 802, 805].contains(&id);
+            return ([1, 2, 501].contains(&id) || attached)
                 .then(|| crate::comments::content::post(id));
         }
         self.posts().into_iter().find(|post| post.id == id)

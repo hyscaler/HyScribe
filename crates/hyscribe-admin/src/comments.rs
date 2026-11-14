@@ -9,6 +9,7 @@ use hyscribe_phpser::{Value, add_query_arg, addslashes, is_empty_string, remove_
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::CORE_SHORTCODE_TAGS;
 use hyscribe_render::formatting::{antispambot, convert_chars, wptexturize};
+use hyscribe_render::permalinks::Permalinks;
 use hyscribe_render::post::{admin_title, sanitize_html_class};
 use hyscribe_render::{
     admin_comment_text, comment_author_of, comment_author_url, comment_avatar, number_format,
@@ -20,6 +21,7 @@ use crate::list_table::{Column, Order, Sort, View, bulk_actions, column_headers,
 use crate::list_table::{
     nonce_url, pagenum, screen_options, search_box, table_description, views, wp_nonce_field,
 };
+use crate::media::image::response_thumbnail;
 use crate::menu::{Screen, esc_link, link};
 use crate::page::{HelpTab, Page, Request, admin_page, wp_admin_notice};
 use crate::posts::{
@@ -230,6 +232,96 @@ pub fn comment_order(orderby: &str, order: &str) -> Option<Vec<(&'static str, bo
         clauses.push(("comment_ID", id_desc));
     }
     Some(clauses)
+}
+
+/// `get_comment_link( $comment )` outside the comment loop: its post's
+/// `permalink` (`None` for a missing post) with the comment's page when
+/// comments are paged, among `comments`, the post's comments of every
+/// status, as the user `user` sees them; a page of a missing post goes on
+/// `request_uri`, as `add_query_arg()` of `false` does.
+pub fn comment_link(
+    option: &dyn Fn(&str) -> Vec<u8>,
+    permalink: Option<&str>,
+    request_uri: &str,
+    comments: &[(&Comment, &str)],
+    comment: &Comment,
+    user: u64,
+) -> String {
+    let set = |name| !is_empty_string(&option(name));
+    let per_page = option("comments_per_page");
+    // `empty( $per_page )` leaves the page 0.
+    let page = if set("page_comments") && !is_empty_string(&per_page) {
+        let max_depth = if set("thread_comments") {
+            Value::String(option("thread_comments_depth")).to_int()
+        } else {
+            -1
+        };
+        let per_page = Value::String(per_page).to_int();
+        page_of_comment(comments, comment.id, per_page, max_depth, user)
+    } else {
+        None
+    };
+    let oldest = option("default_comments_page") == b"oldest";
+    let page = page.filter(|&page| !(oldest && page == 1));
+    let links = Permalinks::new(
+        &String::from_utf8_lossy(&option("permalink_structure")),
+        "",
+        "",
+    );
+    let link = match (page, permalink) {
+        (Some(page), Some(link)) if links.pretty() => {
+            links.under(link, &format!("comment-page-{page}"))
+        }
+        (Some(page), link) => String::from_utf8_lossy(&add_query_arg(
+            &[(b"cpage", Some(page.to_string().as_bytes()))],
+            link.unwrap_or(request_uri).as_bytes(),
+        ))
+        .into_owned(),
+        (None, Some(link)) if links.pretty() => links.trailing(link),
+        (None, link) => link.unwrap_or_default().to_string(),
+    };
+    format!("{link}#comment-{}", comment.id)
+}
+
+/// `get_page_of_comment()` of comment `id` among `comments`: its top level
+/// comment's place among the approved ones and the user's pending ones.
+fn page_of_comment(
+    comments: &[(&Comment, &str)],
+    id: u64,
+    per_page: i64,
+    max_depth: i64,
+    user: u64,
+) -> Option<i64> {
+    let (comment, _) = comments.iter().find(|(c, _)| c.id == id)?;
+    if per_page < 1 {
+        return Some(1);
+    }
+    if max_depth > 1 && comment.parent != 0 {
+        return page_of_comment(comments, comment.parent, per_page, max_depth, user);
+    }
+    let older = comments
+        .iter()
+        .filter(|(c, approved)| {
+            let shown = *approved == "1" || user != 0 && c.user_id == user && *approved == "0";
+            shown && c.parent == 0 && c.comment_type != b"note" && c.date_gmt < comment.date_gmt
+        })
+        .count();
+    let older = i64::try_from(older).unwrap_or(i64::MAX);
+    // `ceil( ( $older + 1 ) / $per_page )`.
+    Some(if older < 1 {
+        1
+    } else {
+        (older + per_page) / per_page
+    })
+}
+
+/// The `view_item` label of the comments' post types.
+fn view_item(post_type: &str) -> &'static str {
+    match post_type {
+        "page" => "View Page",
+        "attachment" => "View Media File",
+        _ => "View Post",
+    }
 }
 
 /// The `comment_type`s of a requested type: any for all, the default type
@@ -683,8 +775,8 @@ impl Listing<'_> {
         )
     }
 
-    /// `column_response()`: the post, linked to its editor for those who may
-    /// edit it, its page and its comment counts.
+    /// `column_response()`: an attachment's thumbnail, the post, linked to
+    /// its editor for those who may edit it, its page and its comment counts.
     fn column_response(&self, row: &RecentComment) -> String {
         let site = self.site;
         let Some(post) = &row.post else {
@@ -699,13 +791,14 @@ impl Listing<'_> {
         } else {
             title
         };
-        let view = if post.post_type == "page" {
-            "View Page"
+        let thumb = if post.post_type == "attachment" {
+            response_thumbnail(site, post)
         } else {
-            "View Post"
+            String::new()
         };
+        let view = view_item(&post.post_type);
         format!(
-            "<div class=\"response-links\">{title}<a href='{}' class='comments-view-item-link'>{view}</a><span class=\"post-com-count-wrapper post-com-count-{}\">{}</span> </div>",
+            "<div class=\"response-links\">{thumb}{title}<a href='{}' class='comments-view-item-link'>{view}</a><span class=\"post-com-count-wrapper post-com-count-{}\">{}</span> </div>",
             row.permalink,
             post.id,
             comments_bubble(site, post, site.pending_comments(post))
@@ -1094,14 +1187,9 @@ pub fn edit_comments(
         }
         None => "Comments".into(),
     };
-    let viewed = listed_post.as_ref().map(|post| {
-        let label = if post.post_type == "page" {
-            "View Page"
-        } else {
-            "View Post"
-        };
-        (post, label, site.permalink(post))
-    });
+    let viewed = listed_post
+        .as_ref()
+        .map(|post| (post, view_item(&post.post_type), site.permalink(post)));
     let view_link = viewed
         .as_ref()
         .map_or_else(String::new, |(_, label, href)| {
@@ -1156,6 +1244,13 @@ pub fn edit_comments(
         ),
         Some((_, name)) => format!("Comments on &#8220;{name}&#8221;"),
     };
+    // `enqueue_comment_hotkeys_js()`: for a user who turned shortcuts on.
+    let shortcuts = site.user_option("comment_shortcuts").as_deref() == Some(b"true");
+    let scripts: &[&str] = if shortcuts {
+        &["admin-comments", "jquery-table-hotkeys"]
+    } else {
+        &["admin-comments"]
+    };
     let page = Page {
         screen: Screen {
             pagenow: "edit-comments.php",
@@ -1170,7 +1265,7 @@ pub fn edit_comments(
         sidebar: HELP_SIDEBAR,
         screen_options: &screen_options,
         styles: &[],
-        scripts: &["admin-comments"],
+        scripts,
         late_scripts: &["quicktags", "wplink", "jquery-ui-autocomplete"],
         script_data: &[],
         script_after: &[],

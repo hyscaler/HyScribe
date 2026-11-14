@@ -2322,4 +2322,4 @@ mod dialect;
 mod people;
 mod write;
 
-pub use write::{CommentFields, Meta, PostFields, UserFields, Write, Writer};
+pub use write::{CommentFields, Meta, PostFields, TermRow, UserFields, Write, Writer};

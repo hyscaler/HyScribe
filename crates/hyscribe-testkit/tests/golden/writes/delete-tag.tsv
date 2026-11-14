@@ -1,0 +1,25 @@
+# The rows PHP WordPress writes for the action delete-tag (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 20:00:44 to 2026-11-14 20:00:44 UTC.
+# %wp_terms:1% is 39.
+# %wp_term_taxonomy:1% is 39.
+# %wp_termmeta:1% is 1.
+wp_term_relationships	1,%wp_term_taxonomy:1%	-	object_id	1
+wp_term_relationships	1,%wp_term_taxonomy:1%	-	term_order	0
+wp_term_relationships	1,%wp_term_taxonomy:1%	-	term_taxonomy_id	%wp_term_taxonomy:1%
+wp_term_relationships	2,%wp_term_taxonomy:1%	-	object_id	2
+wp_term_relationships	2,%wp_term_taxonomy:1%	-	term_order	0
+wp_term_relationships	2,%wp_term_taxonomy:1%	-	term_taxonomy_id	%wp_term_taxonomy:1%
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	count	1
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	description	
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	taxonomy	post_tag
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	term_id	%wp_terms:1%
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	term_taxonomy_id	%wp_term_taxonomy:1%
+wp_termmeta	%wp_termmeta:1%	-	meta_id	%wp_termmeta:1%
+wp_termmeta	%wp_termmeta:1%	-	meta_key	color
+wp_termmeta	%wp_termmeta:1%	-	meta_value	red
+wp_termmeta	%wp_termmeta:1%	-	term_id	%wp_terms:1%
+wp_terms	%wp_terms:1%	-	name	Oracle
+wp_terms	%wp_terms:1%	-	slug	oracle
+wp_terms	%wp_terms:1%	-	term_group	0
+wp_terms	%wp_terms:1%	-	term_id	%wp_terms:1%

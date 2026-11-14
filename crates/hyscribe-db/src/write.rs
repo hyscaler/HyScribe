@@ -18,6 +18,7 @@ mod meta;
 mod terms;
 
 pub use meta::Meta;
+pub use terms::TermRow;
 
 /// The `db_version`s this release writes to: WordPress 7.0 and 7.1.
 const DB_VERSIONS: std::ops::RangeInclusive<u64> = 61833..=61833;

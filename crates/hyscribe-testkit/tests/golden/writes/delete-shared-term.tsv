@@ -1,0 +1,11 @@
+# The rows PHP WordPress writes for the action delete-shared-term (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 20:11:18 to 2026-11-14 20:11:18 UTC.
+# %wp_terms:1% is 22.
+# %wp_term_taxonomy:1% is 22.
+# %wp_term_taxonomy:2% is 23.
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	count	0
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	description	
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	taxonomy	post_tag
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	term_id	%wp_terms:1%
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	term_taxonomy_id	%wp_term_taxonomy:1%

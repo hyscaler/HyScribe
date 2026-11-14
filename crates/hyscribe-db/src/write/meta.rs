@@ -152,13 +152,14 @@ impl Meta {
 }
 
 impl Write<'_> {
-    /// `add_metadata()`'s `INSERT`: the new row's ID.
+    /// `add_metadata()`'s `INSERT`: the new row's ID. `None` stores NULL,
+    /// as `wpdb` does for PHP's `null`.
     pub async fn add_meta(
         &mut self,
         meta: Meta,
         object: u64,
         key: &str,
-        value: &[u8],
+        value: Option<&[u8]>,
     ) -> Result<u64, DbError> {
         let s = meta.statements();
         let query = self.sql(s.add).bind(object).bind(key).bind(value);
@@ -171,7 +172,7 @@ impl Write<'_> {
         meta: Meta,
         object: u64,
         key: &str,
-        value: &[u8],
+        value: Option<&[u8]>,
     ) -> Result<u64, DbError> {
         let s = meta.statements();
         let query = self.sql(s.update).bind(value).bind(object).bind(key);
@@ -185,7 +186,7 @@ impl Write<'_> {
         meta: Meta,
         (object, key): (u64, &str),
         previous: &[u8],
-        value: &[u8],
+        value: Option<&[u8]>,
     ) -> Result<u64, DbError> {
         let s = meta.statements();
         let query = self.sql(s.update_from).bind(value).bind(object).bind(key);

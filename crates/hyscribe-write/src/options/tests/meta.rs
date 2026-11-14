@@ -83,11 +83,11 @@ async fn updates_meta() {
                 .unwrap();
         }
         write
-            .add_meta(Meta::Post, 1, "oracle_str", b"s:3:\"abc\";")
+            .add_meta(Meta::Post, 1, "oracle_str", Some(b"s:3:\"abc\";"))
             .await
             .unwrap();
         write
-            .add_meta(Meta::Post, 1, "oracle_num", b"5")
+            .add_meta(Meta::Post, 1, "oracle_num", Some(b"5"))
             .await
             .unwrap();
     };
@@ -113,6 +113,41 @@ async fn updates_meta() {
         assert!(update(Meta::Term, 1, "oracle_new", text("n"), text("ignored")).await);
         assert!(!update(Meta::Post, 0, "oracle_one", text("none"), none.clone()).await);
         assert!(!update(Meta::Post, 1, "", text("none"), none).await);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn stores_null_as_null() {
+    let setup = async |write: &mut Write<'_>| {
+        add_metadata(write, Meta::Post, 1, "oracle_was", &text("x"), false)
+            .await
+            .unwrap();
+    };
+    check("meta-null", setup, async |write, ()| {
+        let none = Value::Null;
+        assert!(
+            add_metadata(write, Meta::Post, 1, "oracle_null", &none, false)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            add_metadata(write, Meta::User, 1, "oracle_null", &none, false)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            update_metadata(write, Meta::Post, 1, "oracle_was", &none, &none)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !update_metadata(write, Meta::Post, 1, "oracle_null", &none, &none)
+                .await
+                .unwrap()
+        );
     })
     .await;
 }
@@ -194,9 +229,9 @@ async fn meta_functions_return_each_database_error() {
 #[tokio::test]
 async fn no_key_or_no_object_is_never_changed() {
     rolled_back(async |write| {
-        write.add_meta(Meta::Post, 1, "", b"x").await.unwrap();
+        write.add_meta(Meta::Post, 1, "", Some(b"x")).await.unwrap();
         write
-            .add_meta(Meta::Post, 0, "oracle_zero", b"x")
+            .add_meta(Meta::Post, 0, "oracle_zero", Some(b"x"))
             .await
             .unwrap();
         let none = Value::Null;

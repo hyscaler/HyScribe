@@ -36,7 +36,8 @@ const DELETED_WITH_USER: [&str; 6] = [
 
 /// `wp_insert_user()`'s `$userdata`, each field `None` where the array lacks
 /// it. Values are as PHP receives them; the meta functions unslash them.
-/// `user_pass` is the plain password: it is hashed, never stored or logged.
+/// A new user's `user_pass` is the plain password, hashed and never logged;
+/// `wp_insert_user()` stores an update's as given, as PHP does.
 #[derive(Clone, Default)]
 pub struct UserData {
     /// `ID`: the user to update, 0 for a new one.
@@ -175,15 +176,15 @@ fn unslashed_text(text: &[u8]) -> String {
     String::from_utf8_lossy(&stripslashes(text)).into_owned()
 }
 
-/// `wp_insert_user( $userdata )`: a new user, or an update of the user
-/// `id`. An update's `user_pass` is hashed here, where PHP would store it
-/// as given (`wp_update_user()` hashes it first). The user's ID.
+/// `wp_insert_user( $userdata )`: a new user, its password hashed, or an
+/// update of the user `id`, whose `user_pass` PHP takes for a hash and
+/// stores as given (`wp_update_user()` hashes a new password). The ID.
 pub async fn wp_insert_user(write: &mut Write<'_>, data: &UserData) -> Result<u64, Error> {
     let pass = data.user_pass.as_deref().unwrap_or_default();
-    let pass = if data.id != 0 && is_empty_string(pass) {
-        Pass::Kept
-    } else {
-        Pass::Plain(pass)
+    let pass = match data.id {
+        0 => Pass::Plain(pass),
+        _ if is_empty_string(pass) => Pass::Kept,
+        _ => Pass::Hashed(Ok(String::from_utf8_lossy(pass).into_owned())),
     };
     insert(write, data, pass).await
 }

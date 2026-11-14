@@ -42,6 +42,15 @@ fn unslash_key(key: &str) -> String {
     String::from_utf8_lossy(&stripslashes(key.as_bytes())).into_owned()
 }
 
+/// A meta value as `wpdb` stores it after `maybe_serialize()`: `None`, a
+/// NULL, for PHP's `null`.
+fn stored_value(value: &Value) -> Option<Vec<u8>> {
+    match maybe_serialize(value) {
+        Value::Null => None,
+        value => Some(value.to_php_string()),
+    }
+}
+
 /// `get_metadata_raw( $type, $object, $key )`: every value of `key`, in ID
 /// order, unserialized. Keys match exactly, as in PHP's meta cache.
 pub(crate) async fn get_metadata(
@@ -75,8 +84,11 @@ pub async fn add_metadata(
     if unique && !write.meta_ids(meta, object, &key).await?.is_empty() {
         return Ok(None);
     }
-    let value = stored_bytes(&unslash(value));
-    write.add_meta(meta, object, &key, &value).await.map(Some)
+    let value = stored_value(&unslash(value));
+    write
+        .add_meta(meta, object, &key, value.as_deref())
+        .await
+        .map(Some)
 }
 
 /// `update_metadata( $type, $object, $key, $value, $previous )`: the rows
@@ -105,16 +117,18 @@ pub async fn update_metadata(
         let added = add_metadata(write, meta, object, key, value, false).await?;
         return Ok(added.is_some());
     }
-    let new = stored_bytes(&new);
+    let new = stored_value(&new);
     if previous.is_empty() {
-        write.update_meta(meta, object, &name, &new).await?;
-        return Ok(old.iter().any(|old| stored_bytes(old) != new));
+        write
+            .update_meta(meta, object, &name, new.as_deref())
+            .await?;
+        return Ok(old.iter().any(|old| stored_value(old) != new));
     }
     let previous = stored_bytes(previous);
     let matched = write
-        .update_meta_from(meta, (object, &name), &previous, &new)
+        .update_meta_from(meta, (object, &name), &previous, new.as_deref())
         .await?;
-    Ok(matched > 0 && previous != new)
+    Ok(matched > 0 && Some(previous) != new)
 }
 
 /// `delete_metadata( $type, $object, $key, $value, $delete_all )`: the rows

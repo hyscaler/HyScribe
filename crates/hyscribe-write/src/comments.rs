@@ -390,10 +390,10 @@ async fn put_away(
     delete_meta(steps, id, TRASH_STATUS).await;
     delete_meta(steps, id, TRASH_TIME).await;
     let (old, now) = (comment.approved.as_bytes(), context.now.to_string());
-    step!(steps, add_meta(Meta::Comment, id, TRASH_STATUS, old));
+    step!(steps, add_meta(Meta::Comment, id, TRASH_STATUS, Some(old)));
     step!(
         steps,
-        add_meta(Meta::Comment, id, TRASH_TIME, now.as_bytes())
+        add_meta(Meta::Comment, id, TRASH_TIME, Some(now.as_bytes()))
     );
     Some(comment)
 }

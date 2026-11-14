@@ -192,6 +192,27 @@ async fn updates_a_password() {
 }
 
 #[tokio::test]
+async fn an_update_through_insert_stores_the_password_as_given() {
+    let old = UserData {
+        user_activation_key: some("1:key"),
+        ..new_user("oracle-raw")
+    };
+    check(
+        "user-insert-with-id",
+        async |write| setup_user(write, old).await,
+        async |write, id| {
+            let raw = UserData {
+                id,
+                user_pass: some("stored-as-given"),
+                ..new_user("oracle-raw")
+            };
+            assert_eq!(wp_insert_user(write, &raw).await.unwrap(), id);
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn sets_a_role() {
     let setup = async |write: &mut Write<'_>| setup_user(write, new_user("oracle-role")).await;
     check("user-set-role", setup, async |write, id| {
@@ -288,7 +309,7 @@ async fn refuses_what_php_refuses() {
 }
 
 #[tokio::test]
-async fn an_update_through_insert_hashes_the_password() {
+async fn an_update_through_insert_keeps_the_given_hash() {
     rolled_back(async |write| {
         // `empty()` fields take their defaults.
         let zero = UserData {
@@ -324,13 +345,13 @@ async fn an_update_through_insert_hashes_the_password() {
         assert_eq!(second.nicename, format!("{}-2", "n".repeat(48)).as_bytes());
         let update = UserData {
             id,
-            user_pass: some("Changed"),
+            user_pass: some("$wp$given"),
             first_name: some("Ada"),
             ..new_user("oracle-insert-update")
         };
         assert_eq!(insert_ok(write, update).await, id);
         let (_, user) = write.user(id).await.unwrap().unwrap();
-        assert!(check_password(b"Changed", user.pass.as_bytes()));
+        assert_eq!(user.pass, "$wp$given");
         // Updated, not inserted: the display name falls back to the login.
         assert_eq!(user.display_name, b"oracle-insert-update");
         let kept = UserData {

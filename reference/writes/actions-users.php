@@ -160,6 +160,22 @@ return array(
 			);
 		},
 	),
+	'user-insert-with-id'    => array(
+		'setup'  => function () use ( $new_user ) {
+			return $new_user( 'oracle-raw', array( 'user_activation_key' => '1:key' ) );
+		},
+		'action' => function ( $id ) {
+			// An update's user_pass is taken for a hash and stored as given.
+			wp_insert_user(
+				array(
+					'ID'         => $id,
+					'user_login' => 'oracle-raw',
+					'user_email' => 'oracle-raw@example.test',
+					'user_pass'  => 'stored-as-given',
+				)
+			);
+		},
+	),
 	'user-set-role'          => array(
 		'setup'  => function () use ( $new_user ) {
 			return $new_user( 'oracle-role' );
@@ -340,6 +356,17 @@ return array(
 			update_metadata( 'term', 1, 'oracle_new', 'n', 'ignored' );
 			update_metadata( 'post', 0, 'oracle_one', 'none' );
 			update_metadata( 'post', 1, '', 'none' );
+		},
+	),
+	'meta-null'              => array(
+		'setup'  => function () {
+			add_metadata( 'post', 1, 'oracle_was', 'x' );
+		},
+		'action' => function () {
+			add_metadata( 'post', 1, 'oracle_null', null );
+			add_metadata( 'user', 1, 'oracle_null', null );
+			update_metadata( 'post', 1, 'oracle_was', null );
+			update_metadata( 'post', 1, 'oracle_null', null );
 		},
 	),
 	'meta-delete'            => array(

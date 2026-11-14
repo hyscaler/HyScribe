@@ -219,8 +219,14 @@ async fn an_action_commits_or_rolls_back_as_a_whole() {
     let writer = writer().await;
     let key = "hyscribe_commit_test";
     let mut write = writer.begin().await.unwrap();
-    write.add_meta(Meta::Term, 1, key, b"a").await.unwrap();
-    write.add_meta(Meta::Term, 1, key, b"b").await.unwrap();
+    write
+        .add_meta(Meta::Term, 1, key, Some(b"a"))
+        .await
+        .unwrap();
+    write
+        .add_meta(Meta::Term, 1, key, Some(b"b"))
+        .await
+        .unwrap();
     drop(write);
     let mut write = writer.begin().await.unwrap();
     assert!(
@@ -231,8 +237,14 @@ async fn an_action_commits_or_rolls_back_as_a_whole() {
             .is_empty()
     );
 
-    let first = write.add_meta(Meta::Term, 1, key, b"a").await.unwrap();
-    let second = write.add_meta(Meta::Term, 1, key, b"b").await.unwrap();
+    let first = write
+        .add_meta(Meta::Term, 1, key, Some(b"a"))
+        .await
+        .unwrap();
+    let second = write
+        .add_meta(Meta::Term, 1, key, Some(b"b"))
+        .await
+        .unwrap();
     write.commit().await.unwrap();
     let mut write = writer.begin().await.unwrap();
     let kept = sorted(write.meta_ids_of_key(Meta::Term, key).await.unwrap());
@@ -252,11 +264,14 @@ async fn an_action_in_the_callers_transaction_is_rolled_back_with_it() {
     let mut conn = writer.pool.acquire().await.unwrap();
     let mut outer = sqlx::Connection::begin(&mut *conn).await.unwrap();
     let mut write = writer.begin_on(&mut outer).await.unwrap();
-    let kept = write.add_meta(Meta::Term, 1, key, b"kept").await.unwrap();
+    let kept = write
+        .add_meta(Meta::Term, 1, key, Some(b"kept"))
+        .await
+        .unwrap();
     write.commit().await.unwrap();
     let mut write = writer.begin_on(&mut outer).await.unwrap();
     write
-        .add_meta(Meta::Term, 1, key, b"dropped")
+        .add_meta(Meta::Term, 1, key, Some(b"dropped"))
         .await
         .unwrap();
     drop(write);
@@ -618,9 +633,12 @@ async fn reads_for_comment_writes() {
 
     let meta = Meta::Comment;
     assert_eq!(write.meta_value(meta, id, "k").await.unwrap(), None);
-    write.add_meta(meta, id, "k", b"first").await.unwrap();
-    write.add_meta(meta, id, "k", b"second").await.unwrap();
-    write.add_meta(meta, id, "other", b"x").await.unwrap();
+    write.add_meta(meta, id, "k", Some(b"first")).await.unwrap();
+    write
+        .add_meta(meta, id, "k", Some(b"second"))
+        .await
+        .unwrap();
+    write.add_meta(meta, id, "other", Some(b"x")).await.unwrap();
     let first = write.meta_value(meta, id, "k").await.unwrap();
     assert_eq!(first.as_deref(), Some(&b"first"[..]));
 }
@@ -1043,7 +1061,10 @@ async fn reads_terms_inside_the_action() {
             ("_menu_item_type", kind),
             ("_menu_item_object", b"category"),
         ] {
-            write.add_meta(Meta::Post, item, key, value).await.unwrap();
+            write
+                .add_meta(Meta::Post, item, key, Some(value))
+                .await
+                .unwrap();
         }
         assert_eq!(
             write.term_menu_items(news, "category").await.unwrap(),
@@ -1068,7 +1089,7 @@ async fn writes_meta() {
     let mut write = writer.begin().await.unwrap();
     // The rows PHP wrote for the same meta.
     let template = write
-        .add_meta(Meta::Post, 2, "_wp_page_template", b"default")
+        .add_meta(Meta::Post, 2, "_wp_page_template", Some(b"default"))
         .await
         .unwrap();
     let post_row =
@@ -1078,7 +1099,7 @@ async fn writes_meta() {
         json(&mut write, post_row, 1).await
     );
     let nickname = write
-        .add_meta(Meta::User, 1, "nickname", b"admin")
+        .add_meta(Meta::User, 1, "nickname", Some(b"admin"))
         .await
         .unwrap();
     let user_row =
@@ -1102,12 +1123,12 @@ async fn writes_meta() {
     ];
     let key = "hyscribe_key";
     for (meta, row) in kinds {
-        let one = write.add_meta(meta, 1, key, b"one").await.unwrap();
+        let one = write.add_meta(meta, 1, key, Some(b"one")).await.unwrap();
         let two = write
-            .add_meta(meta, 1, key, "two ✓".as_bytes())
+            .add_meta(meta, 1, key, Some("two ✓".as_bytes()))
             .await
             .unwrap();
-        let other = write.add_meta(meta, 2, key, b"one").await.unwrap();
+        let other = write.add_meta(meta, 2, key, Some(b"one")).await.unwrap();
         assert_eq!(
             json(&mut write, row, two).await,
             r#"[1, "hyscribe_key", "two ✓"]"#
@@ -1132,7 +1153,7 @@ async fn writes_meta() {
         assert!(all.contains(&one) && all.contains(&two) && !all.contains(&other));
 
         let from = write
-            .update_meta_from(meta, (1, key), b"one", b"uno")
+            .update_meta_from(meta, (1, key), b"one", Some(b"uno"))
             .await
             .unwrap();
         assert_eq!(from, 1);
@@ -1144,7 +1165,13 @@ async fn writes_meta() {
             json(&mut write, row, other).await,
             r#"[2, "hyscribe_key", "one"]"#
         );
-        assert_eq!(write.update_meta(meta, 1, key, b"both").await.unwrap(), 2);
+        assert_eq!(
+            write
+                .update_meta(meta, 1, key, Some(b"both"))
+                .await
+                .unwrap(),
+            2
+        );
         assert_eq!(
             json(&mut write, row, two).await,
             r#"[1, "hyscribe_key", "both"]"#
@@ -1232,9 +1259,11 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.update_option_autoload("o", b"v", "on").await.err(),
         w.delete_option("o").await.err(),
         w.option_autoload("o").await.err(),
-        w.add_meta(meta, 1, "k", b"v").await.err(),
-        w.update_meta(meta, 1, "k", b"v").await.err(),
-        w.update_meta_from(meta, (1, "k"), b"p", b"v").await.err(),
+        w.add_meta(meta, 1, "k", Some(b"v")).await.err(),
+        w.update_meta(meta, 1, "k", Some(b"v")).await.err(),
+        w.update_meta_from(meta, (1, "k"), b"p", Some(b"v"))
+            .await
+            .err(),
         w.update_meta_by_id(meta, 1, "k", b"v").await.err(),
         w.delete_meta(meta, &[1]).await.err(),
         w.insert_term(b"n", b"s", 0).await.err(),
@@ -1355,7 +1384,7 @@ async fn reads_inside_an_action() {
     assert_eq!(meta[0], (b"nickname".to_vec(), Some(b"admin".to_vec())));
     assert_eq!(meta.len(), 16);
     write
-        .add_meta(Meta::Post, 1, "hyscribe_test", b"v")
+        .add_meta(Meta::Post, 1, "hyscribe_test", Some(b"v"))
         .await
         .unwrap();
     let meta = write.object_meta(Meta::Post, 1).await.unwrap();

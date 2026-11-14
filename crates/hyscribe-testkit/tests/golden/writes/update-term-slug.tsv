@@ -1,0 +1,12 @@
+# The rows PHP WordPress writes for the action update-term-slug (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 20:00:42 to 2026-11-14 20:00:42 UTC.
+# %wp_terms:1% is 28.
+# %wp_terms:2% is 29.
+# %wp_terms:3% is 30.
+# %wp_term_taxonomy:1% is 28.
+# %wp_term_taxonomy:2% is 29.
+# %wp_term_taxonomy:3% is 30.
+wp_terms	%wp_terms:2%	~	name	Two	One
+wp_terms	%wp_terms:2%	~	slug	two	one-2
+wp_terms	%wp_terms:3%	~	name	Three	!!!
+wp_terms	%wp_terms:3%	~	slug	three	%wp_terms:3%

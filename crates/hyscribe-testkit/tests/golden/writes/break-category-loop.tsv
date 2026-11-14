@@ -1,0 +1,15 @@
+# The rows PHP WordPress writes for the action break-category-loop (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 20:00:44 to 2026-11-14 20:00:44 UTC.
+# %wp_terms:1% is 36.
+# %wp_terms:2% is 37.
+# %wp_terms:3% is 38.
+# %wp_term_taxonomy:1% is 36.
+# %wp_term_taxonomy:2% is 37.
+# %wp_term_taxonomy:3% is 38.
+# %wp_options:1% is 153.
+# %wp_options:2% is 156.
+wp_options	category_children	~	option_id	%wp_options:1%	%wp_options:2%
+wp_options	category_children	~	option_value	a:2:{i:%wp_terms:2%;a:1:{i:0;i:%wp_terms:1%;}i:%wp_terms:1%;a:1:{i:0;i:%wp_terms:2%;}}	a:1:{i:%wp_terms:1%;a:1:{i:0;i:%wp_terms:3%;}}
+wp_term_taxonomy	%wp_term_taxonomy:1%	~	parent	%wp_terms:2%	0
+wp_term_taxonomy	%wp_term_taxonomy:2%	~	parent	%wp_terms:1%	0
+wp_term_taxonomy	%wp_term_taxonomy:3%	~	parent	0	%wp_terms:1%

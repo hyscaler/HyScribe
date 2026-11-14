@@ -163,9 +163,12 @@ fn reset_password(site: &dyn Site, request: &Request, request_uri: &[u8]) -> Act
         _ => {}
     }
     let split = |text: &[u8]| {
-        let mut parts = text.splitn(2, |&b| b == b':');
-        let first = parts.next()?.to_vec();
-        Some((first, parts.next()?.to_vec()))
+        let at = text.iter().position(|&b| b == b':')?;
+        let (first, rest) = text.split_at(at);
+        Some((
+            first.to_vec(),
+            rest.iter().skip(1).copied().collect::<Vec<u8>>(),
+        ))
     };
     let pair = request
         .reset_cookie

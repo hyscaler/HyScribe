@@ -3,35 +3,21 @@
 //! The screens as PHP sends users back to them after an action, with the
 //! notices of `reference/notices/golden.sh`.
 
-use hyscribe_phpser::{addslashes, parse_str, remove_query_arg};
+use hyscribe_phpser::{addslashes, remove_query_arg};
 use hyscribe_render::date::{Zone, format_unix};
 use hyscribe_testkit::{hs_admin_page, settled_page, unhex};
 
-use crate::admin_bar::Browser;
 use crate::comments::{CommentArgs, MODERATED, comment_order, edit_comments};
-use crate::page::{REMOVABLE, Request};
+use crate::page::{REMOVABLE, Request, query_strings};
 use crate::posts::{Answer, BULK, ListArgs, PostType};
 use crate::profile::{EditArgs, profile, user_edit};
 use crate::terms::{Taxonomy, TermArgs};
-use crate::tests::{Role, SITE, first_difference};
+use crate::tests::{BROWSER, Role, SITE, first_difference};
 use crate::users::{UserArgs, user_order, users};
-
-const BROWSER: Browser = Browser {
-    user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
-    mobile_hint: None,
-};
 
 /// The request's arguments, each a string.
 fn arguments(query: &str) -> Vec<(String, String)> {
-    let args = parse_str(query.as_bytes());
-    args.as_array()
-        .unwrap()
-        .iter()
-        .map(|(key, value)| {
-            let text = |bytes: Vec<u8>| String::from_utf8(bytes).unwrap();
-            (text(key.to_php_string()), text(value.to_php_string()))
-        })
-        .collect()
+    query_strings(query).unwrap()
 }
 
 /// The posts list's arguments of `query`.
@@ -87,14 +73,7 @@ fn ours(file: &str, query: &str, role: &'static str, request: &Request) -> Optio
                     _ => args.error = true,
                 }
             }
-            crate::terms::edit_tags(
-                &site,
-                &args,
-                request.canonical,
-                request.origin,
-                request.uri,
-                request.browser,
-            )
+            crate::terms::edit_tags(&site, &args, request)
         }
         "edit-comments.php" => {
             let mut args = CommentArgs::default();
@@ -113,9 +92,7 @@ fn ours(file: &str, query: &str, role: &'static str, request: &Request) -> Optio
                 }
             }
             args.clauses = comment_order("", "").unwrap();
-            let canonical = request.canonical;
-            let (origin, uri, browser) = (request.origin, request.uri, request.browser);
-            return edit_comments(&site, &args, None, canonical, origin, uri, browser);
+            return edit_comments(&site, &args, None, request);
         }
         "users.php" => {
             let mut args = UserArgs::default();
@@ -133,15 +110,7 @@ fn ours(file: &str, query: &str, role: &'static str, request: &Request) -> Optio
             }
             let roles = args.role.is_some();
             args.clauses = user_order(None, None, roles).unwrap();
-            let (canonical, origin) = (request.canonical, request.origin);
-            users(
-                &site,
-                &args,
-                canonical,
-                origin,
-                request.uri,
-                request.browser,
-            )
+            users(&site, &args, request)
         }
         "profile.php" | "user-edit.php" => {
             let mut args = EditArgs::default();
@@ -193,12 +162,8 @@ fn notices_are_php_s() {
         let path = hs_admin_page(&format!("/wp-admin/{}", f[1]));
         let path = String::from_utf8(addslashes(path.as_bytes())).unwrap();
         let canonical = remove_query_arg(&REMOVABLE, format!("{SITE}{path}").as_bytes());
-        let request = Request {
-            canonical: &String::from_utf8(canonical).unwrap(),
-            origin: SITE,
-            uri: &path,
-            browser: &BROWSER,
-        };
+        let canonical = String::from_utf8(canonical).unwrap();
+        let request = crate::tests::request(&canonical, &path, &BROWSER);
         let recorded = String::from_utf8(unhex(f[3])).unwrap();
         let answer = ours(file, &query, role, &request);
         // PHP fails part way through the page, which is not ported.
@@ -232,12 +197,8 @@ fn notices_are_php_s() {
 fn edit_links_of_other_types_are_not_ported() {
     let query = "untrashed=1&ids=9";
     let path = format!("/hs-admin/edit?{query}");
-    let request = Request {
-        canonical: &format!("{SITE}/hs-admin/edit"),
-        origin: SITE,
-        uri: &path,
-        browser: &BROWSER,
-    };
+    let canonical = format!("{SITE}/hs-admin/edit");
+    let request = crate::tests::request(&canonical, &path, &BROWSER);
     assert!(ours("edit.php", query, "n6media:administrator", &request).is_none());
 }
 
@@ -249,12 +210,8 @@ fn edit_user_links_back_to_users() {
     let link = |referer: &str| {
         let query = format!("user_id=601&updated=1&wp_http_referer={referer}");
         let path = format!("/hs-admin/user-edit?{query}");
-        let request = Request {
-            canonical: &format!("{SITE}/hs-admin/user-edit?user_id=601"),
-            origin: SITE,
-            uri: &path,
-            browser: &BROWSER,
-        };
+        let canonical = format!("{SITE}/hs-admin/user-edit?user_id=601");
+        let request = crate::tests::request(&canonical, &path, &BROWSER);
         let Some(Answer::Page(page)) = ours("user-edit.php", &query, "u3:administrator", &request)
         else {
             panic!("{referer}: no page");

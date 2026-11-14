@@ -6,7 +6,7 @@ use hyscribe_phpser::remove_query_arg;
 
 use super::*;
 use crate::admin_bar::Browser;
-use crate::tests::{Role, SITE, first_difference};
+use crate::tests::{Role, SITE, first_difference, request};
 
 /// The query `reference/settings/golden.sh` asks the `s1referer` page
 /// with, slashed as `wp_magic_quotes()` leaves `REQUEST_URI`.
@@ -19,16 +19,6 @@ fn agent(variant: &str) -> &'static [u8] {
         "s1ios7" => b"Mozilla/5.0 (iPhone; CPU iPhone OS 7_0 like Mac OS X) Mobile",
         "s1ios5" => b"Mozilla/5.0 (iPad; CPU OS 5_1 like Mac OS X) Mobile",
         _ => b"curl",
-    }
-}
-
-/// The request for `path` from `browser`.
-fn request<'a>(path: &'a str, canonical: &'a str, browser: &'a Browser<'a>) -> Request<'a> {
-    Request {
-        canonical,
-        origin: SITE,
-        uri: path,
-        browser,
     }
 }
 
@@ -55,7 +45,7 @@ fn pages_are_php_s() {
         // `wp_admin_canonical_url()` rebuilds the query.
         let canonical = remove_query_arg(&[b"updated"], format!("{SITE}{path}").as_bytes());
         let canonical = text(&canonical);
-        let request = request(&path, &canonical, &browser);
+        let request = request(&canonical, &path, &browser);
         let screen = match f[2] {
             "general" => general(&site, &request),
             "writing" => Some(writing(&site, &request)),
@@ -91,13 +81,13 @@ fn unported_states_have_no_page() {
     let show = |variant: &'static str| {
         let site = Role(variant);
         let path = "/hs-admin/options-reading";
-        reading(&site, &request(path, SITE, &browser)).is_some()
+        reading(&site, &request(SITE, path, &browser)).is_some()
     };
     assert!(!show("s1unset:administrator") && !show("s1hidden:administrator"));
     assert!(show("s1static:administrator") && show("s1nopages:administrator"));
     let site = Role("s1icon:administrator");
     let path = "/hs-admin/options-general";
-    assert!(general(&site, &request(path, SITE, &browser)).is_none());
+    assert!(general(&site, &request(SITE, path, &browser)).is_none());
 }
 
 /// Without `WP_HOME` and `WP_SITEURL` the addresses can be changed, and
@@ -107,7 +97,7 @@ fn addresses_without_constants_can_change() {
     let site = Role("s1undefined:administrator");
     let path = "/hs-admin/options-general";
     let browser = Browser::default();
-    let Some(Answer::Page(page)) = general(&site, &request(path, SITE, &browser)) else {
+    let Some(Answer::Page(page)) = general(&site, &request(SITE, path, &browser)) else {
         panic!("no page");
     };
     assert!(!page.contains("disabled='disabled'") && !page.contains("code disabled"));

@@ -3,8 +3,9 @@
 use hyscribe_testkit::{hs_admin_page, unhex};
 
 use super::*;
-use crate::appearance::tests::{BROWSER, check, rows};
-use crate::tests::{Role, SITE, first_difference};
+use crate::appearance::tests::{check, rows};
+use crate::page::Request;
+use crate::tests::{BROWSER, Role, SITE, first_difference, request};
 
 /// Every case of `reference/admin-page/golden.sh`.
 #[test]
@@ -14,11 +15,10 @@ fn the_tools_screen_is_php_s() {
     for line in golden.lines().filter(|line| line.contains("\ttools.php\t")) {
         let f: Vec<&str> = line.split('\t').collect();
         let role: &'static str = Box::leak(f[0].to_string().into_boxed_str());
+        let canonical = format!("{SITE}/hs-admin/tools");
         let ours = tools(
             &Role(role),
-            &format!("{SITE}/hs-admin/tools"),
-            SITE,
-            &BROWSER,
+            &request(&canonical, "/hs-admin/tools", &BROWSER),
         )
         .unwrap();
         let php = hs_admin_page(&String::from_utf8(unhex(f[2])).unwrap());
@@ -40,18 +40,16 @@ fn import_and_export_are_php_s() {
     for (file, screen) in [
         (
             "import.php",
-            (|role, request, browser| import(role, request, browser))
-                as fn(&Role, (&str, &str), &Browser) -> Answer,
+            (|role, request| import(role, request)) as fn(&Role, &Request) -> Answer,
         ),
-        ("export.php", |role, request, browser| {
-            export(role, request, browser)
-        }),
+        ("export.php", |role, request| export(role, request)),
     ] {
-        let path = format!("{SITE}/hs-admin/{}", file.trim_end_matches(".php"));
+        let path = format!("/hs-admin/{}", file.trim_end_matches(".php"));
+        let canonical = format!("{SITE}{path}");
         let rows = rows(file);
         assert_eq!(rows.len(), 5);
         for (role, php) in &rows {
-            let ours = screen(role, (&path, SITE), &BROWSER);
+            let ours = screen(role, &request(&canonical, &path, &BROWSER));
             failures.extend(check(role, ours, php.as_ref()));
         }
     }
@@ -89,16 +87,11 @@ fn personal_data_requests_are_php_s() {
         ("erase-personal-data.php", Requests::Erase),
     ] {
         let path = format!("/hs-admin/{}", file.trim_end_matches(".php"));
+        let canonical = format!("{SITE}{path}");
         let rows = rows(file);
         pages += rows.len();
         for (role, php) in &rows {
-            let ours = privacy_requests(
-                role,
-                requests,
-                (&format!("{SITE}{path}"), SITE),
-                &path,
-                &BROWSER,
-            );
+            let ours = privacy_requests(role, requests, &request(&canonical, &path, &BROWSER));
             failures.extend(check(role, ours.unwrap(), php.as_ref()));
         }
     }
@@ -109,12 +102,12 @@ fn personal_data_requests_are_php_s() {
 #[test]
 fn listed_requests_are_not_ported() {
     let path = "/hs-admin/export-personal-data";
+    let canonical = format!("{SITE}{path}");
+    let request = request(&canonical, path, &BROWSER);
     let page = privacy_requests(
         &Role("a5requests:administrator"),
         Requests::Export,
-        (&format!("{SITE}{path}"), SITE),
-        path,
-        &BROWSER,
+        &request,
     );
     assert!(page.is_none());
 }

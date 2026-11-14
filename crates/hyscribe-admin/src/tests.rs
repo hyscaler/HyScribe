@@ -11,10 +11,11 @@ mod notices;
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
 use hyscribe_testkit::SqlValue;
 
+use crate::admin_bar::Browser;
 use crate::assets::{Urls, admin_links};
 use crate::login::{Site, User};
 use crate::menu::{MenuUser, link};
-use crate::page::PageSite;
+use crate::page::{PageSite, Request};
 
 pub const SITE: &str = "http://127.0.0.1:8081";
 
@@ -98,6 +99,22 @@ impl Site for Oracle {
         email
             .eq_ignore_ascii_case(b"admin@default-install.test")
             .then(|| admin(self.use_ssl))
+    }
+}
+
+/// The desktop browser the goldens are recorded with.
+pub const BROWSER: Browser = Browser {
+    user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
+    mobile_hint: None,
+};
+
+/// The request for `uri` at `canonical` from `browser`.
+pub fn request<'a>(canonical: &'a str, uri: &'a str, browser: &'a Browser<'a>) -> Request<'a> {
+    Request {
+        canonical,
+        origin: SITE,
+        uri,
+        browser,
     }
 }
 
@@ -525,10 +542,6 @@ impl CapabilityData for Role {
 }
 
 impl crate::terms::TermsSite for Role {
-    fn can_term(&self, cap: &str, term: &hyscribe_model::Term) -> bool {
-        let id = hyscribe_phpser::Value::Int(i64::try_from(term.id).unwrap());
-        Capabilities::load(self, "wp_", 1).has_cap(self, cap, &[id])
-    }
     fn list_terms(&self, query: &hyscribe_model::TermQuery) -> Vec<hyscribe_model::Term> {
         TERM_QUERIES.with_borrow_mut(|queries| queries.push(query.clone()));
         crate::terms::content::query(self.all_terms(&query.taxonomy), query)
@@ -752,10 +765,6 @@ impl crate::users::UsersSite for Role {
             })
             .map(|listed| listed.user.id)
             .collect()
-    }
-    fn can_user(&self, cap: &str, id: u64) -> bool {
-        let id = hyscribe_phpser::Value::Int(i64::try_from(id).unwrap());
-        Capabilities::load(self, "wp_", 1).has_cap(self, cap, &[id])
     }
     fn author_url(&self, id: u64) -> String {
         format!("{SITE}/?author={id}")
@@ -1148,6 +1157,10 @@ impl crate::dashboard::DashboardSite for Role {
 }
 
 impl crate::posts::PostsSite for Role {
+    fn can_for(&self, cap: &str, id: u64) -> bool {
+        let id = hyscribe_phpser::Value::Int(i64::try_from(id).unwrap());
+        Capabilities::load(self, "wp_", 1).has_cap(self, cap, &[id])
+    }
     fn can_post(&self, cap: &str, post: &hyscribe_model::Post) -> bool {
         let known = WithPost(
             self,

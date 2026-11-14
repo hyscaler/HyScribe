@@ -4,13 +4,7 @@ use hyscribe_phpser::{addslashes, parse_str};
 use hyscribe_testkit::{hs_admin_page, unhex};
 
 use super::*;
-use crate::admin_bar::Browser;
-use crate::tests::{Role, SITE, first_difference};
-
-const BROWSER: Browser = Browser {
-    user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
-    mobile_hint: None,
-};
+use crate::tests::{BROWSER, Role, SITE, first_difference, request};
 
 /// Every page of `reference/profile/golden.sh`.
 #[test]
@@ -25,12 +19,8 @@ fn pages_are_php_s() {
         };
         let role: &'static str = Box::leak(format!("{variant}:{}", f[1]).into_boxed_str());
         let path = "/hs-admin/profile";
-        let request = Request {
-            canonical: &format!("{SITE}{path}"),
-            origin: SITE,
-            uri: path,
-            browser: &BROWSER,
-        };
+        let canonical = format!("{SITE}{path}");
+        let request = request(&canonical, path, &BROWSER);
         let ours = profile(&Role(role), &EditArgs::default(), &request);
         let recorded = String::from_utf8(unhex(f[2])).unwrap();
         let Answer::Page(ours) = ours else {
@@ -58,12 +48,8 @@ fn edit_and_add_pages_are_php_s() {
         let path = hs_admin_page(&format!("/wp-admin/{}", f[1]));
         let path = String::from_utf8(addslashes(path.as_bytes())).unwrap();
         let canonical = remove_query_arg(&[b"message"], format!("{SITE}{path}").as_bytes());
-        let request = Request {
-            canonical: &String::from_utf8(canonical).unwrap(),
-            origin: SITE,
-            uri: &path,
-            browser: &BROWSER,
-        };
+        let canonical = String::from_utf8(canonical).unwrap();
+        let request = request(&canonical, &path, &BROWSER);
         let ours = if f[1].starts_with("user-new.php") {
             crate::user_new::user_new(&Role(role), None, &request)
         } else {

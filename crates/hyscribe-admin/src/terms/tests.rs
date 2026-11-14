@@ -49,17 +49,15 @@ fn pages_are_php_s() {
         let ours = edit_tags(
             &Role(role),
             &args,
-            &String::from_utf8(remove_query_arg(
-                &[b"message"],
-                format!("{SITE}{path}").as_bytes(),
-            ))
-            .unwrap(),
-            SITE,
-            &path,
-            &crate::admin_bar::Browser {
-                user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
-                mobile_hint: None,
-            },
+            &crate::tests::request(
+                &String::from_utf8(remove_query_arg(
+                    &[b"message"],
+                    format!("{SITE}{path}").as_bytes(),
+                ))
+                .unwrap(),
+                &path,
+                &crate::tests::BROWSER,
+            ),
         );
         let recorded = String::from_utf8(unhex(f[2])).unwrap();
         let (php, ours) = match ours {
@@ -129,10 +127,7 @@ fn phones_get_no_focus_script() {
     let Answer::Page(page) = edit_tags(
         &Role("administrator"),
         &args,
-        &format!("{SITE}{path}"),
-        SITE,
-        path,
-        &browser,
+        &crate::tests::request(&format!("{SITE}{path}"), path, &browser),
     ) else {
         panic!("no page");
     };
@@ -188,9 +183,11 @@ fn a_stale_hierarchy_cache_hides_children() {
     let path = "/hs-admin/edit-tags?taxonomy=category";
     let browser = crate::admin_bar::Browser::default();
     let role = Role("stale:administrator");
-    let Answer::Page(page) =
-        edit_tags(&role, &args, &format!("{SITE}{path}"), SITE, path, &browser)
-    else {
+    let Answer::Page(page) = edit_tags(
+        &role,
+        &args,
+        &crate::tests::request(&format!("{SITE}{path}"), path, &browser),
+    ) else {
         panic!("no page");
     };
     assert!(page.contains("id=\"tag-401\"") && !page.contains("id=\"tag-402\""));
@@ -229,10 +226,7 @@ fn asked(variant: &'static str, args: &TermArgs) -> (Vec<TermQuery>, bool) {
     edit_tags(
         &Role(variant),
         args,
-        &format!("{SITE}{path}"),
-        SITE,
-        path,
-        &browser,
+        &crate::tests::request(&format!("{SITE}{path}"), path, &browser),
     );
     (TERM_QUERIES.with_borrow(Clone::clone), TERM_READS.get() > 0)
 }

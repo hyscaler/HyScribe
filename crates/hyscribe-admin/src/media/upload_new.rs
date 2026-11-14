@@ -6,13 +6,11 @@
 use hyscribe_kses::esc_url;
 use hyscribe_phpser::{Value, is_empty_string, remove_query_arg};
 
-use super::library::query_strings;
 use super::{MAX_UPLOAD, MediaSite, can_upload, single_file};
 use crate::admin_bar::BarSite;
 use crate::list_table::fill;
 use crate::menu::Screen;
-use crate::page::Request;
-use crate::page::{HelpTab, Page, admin_page, json, object, text};
+use crate::page::{HelpTab, Page, Request, admin_page, json, object, query_strings, text};
 use crate::posts::{Answer, user_setting};
 
 const CONTENT: &str = include_str!("new.html");

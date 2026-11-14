@@ -9,10 +9,7 @@ use hyscribe_render::number_format;
 
 use crate::menu::esc_link;
 use crate::page::PageSite;
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
+use crate::text;
 
 /// A view link: its class, URL, label and whether it is the current one.
 pub struct View {

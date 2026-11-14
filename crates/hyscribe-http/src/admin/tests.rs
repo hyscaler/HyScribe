@@ -1173,6 +1173,10 @@ async fn settings_after_a_save() {
 /// The terms list reads its taxonomy, page, search and order.
 #[test]
 fn the_terms_list_reads_its_taxonomy() {
+    let term_args = |uri: &str| {
+        let query = uri.split_once('?').map_or("", |(_, query)| query);
+        term_args(query)
+    };
     let taxonomy = |uri| term_args(uri).map(|args| args.taxonomy);
     let args =
         term_args("/hs-admin/edit-tags?taxonomy=category&paged=2&s=a+b&orderby=slug&order=desc")
@@ -1315,7 +1319,7 @@ async fn dashboard_data() {
             test(&Admin::new(&reads, site, user));
         };
         check(&terms, (1, b"admin"), &|admin| {
-            assert!(admin.can_user("edit_user", 2));
+            assert!(admin.can_for("edit_user", 2));
             assert_eq!(admin.quick_draft(), Some(103));
             let comments = admin.recent_comments(admin.recent_posts("publish").last());
             let postless = comments.iter().find(|c| c.comment.id == 2).unwrap();
@@ -1344,7 +1348,7 @@ async fn dashboard_data() {
             assert_eq!(admin.count_terms("category", Some("zzz")), 0);
             assert!(admin.term_taxonomy(999_999).is_none());
             let term = admin.terms("category").remove(0);
-            assert!(admin.can_term("edit_term", &term) && !admin.can_term("delete_term", &term));
+            assert!(admin.can_for("edit_term", term.id) && !admin.can_for("delete_term", term.id));
             assert_eq!(
                 admin.term_link(&term, "category"),
                 "http://default-install.test/?cat=1"
@@ -1445,7 +1449,7 @@ async fn dashboard_data() {
             assert_eq!(author.own_posts("post"), 39);
         });
         check(&ttd, (3, b"themereviewteam"), &|subscriber| {
-            assert!(!subscriber.can_user("edit_user", 1));
+            assert!(!subscriber.can_for("edit_user", 1));
             assert!(subscriber.recent_posts("future").is_empty());
             assert_eq!(
                 PostsSite::user_option(subscriber, "admin_color").as_deref(),

@@ -340,11 +340,8 @@ fn merge(mut meta: Vec<(String, Value)>, more: &[(String, Value)]) -> Vec<(Strin
 /// `wp_maybe_update_user_counts()` after a user is added or deleted: the
 /// `user_count` option, unless it is over 10000.
 async fn update_user_count(write: &mut Write<'_>) -> Result<(), Error> {
-    let known = match get_option(write, "user_count").await? {
-        Value::Bool(false) => -1,
-        count => count.to_int(),
-    };
-    if known <= 10_000 {
+    // A missing count reads as 0, where PHP's default is -1: both are small.
+    if get_option(write, "user_count").await?.to_int() <= 10_000 {
         let count = write.user_count().await?;
         let count = Value::String(count.to_string().into_bytes());
         update_option(write, "user_count", &count, Some(Autoload::Off)).await?;

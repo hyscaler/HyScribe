@@ -306,6 +306,7 @@ async fn an_update_through_insert_hashes_the_password() {
         let (_, user) = write.user(id).await.unwrap().unwrap();
         assert_eq!(user.display_name, b"oracle-insert-update");
         assert_eq!(user.nicename, b"oracle-insert-update");
+        assert_ne!(user.registered, "0000-00-00 00:00:00");
         // No password is the empty one, hashed.
         assert!(check_password(b"", user.pass.as_bytes()));
         let sixty = new_user(&"b".repeat(60));

@@ -43,14 +43,14 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
             Some(vec![Endpoint {
                 args: stylesheet_arg(Sanitize::Schema),
                 permission,
-                callback: variations,
+                callback: Some(variations),
             }])
         }
         "/wp/v2/global-styles/themes/(?P<stylesheet>[^\\/:<>\\*\\?\"\\|]+(?:\\/[^\\/:<>\\*\\?\"\\|]+)?)" => {
             Some(vec![Endpoint {
                 args: stylesheet_arg(Sanitize::Urldecode),
                 permission,
-                callback: item,
+                callback: Some(item),
             }])
         }
         _ => None,

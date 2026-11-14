@@ -32,7 +32,7 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                 sanitize: Sanitize::Schema,
             }],
             permission: items_permission,
-            callback: |_, _| Err(RestError::not_ported()),
+            callback: Some(|_, _| Err(RestError::not_ported())),
         }]),
         "/wp/v2/themes/(?P<stylesheet>[^\\/:<>\\*\\?\"\\|]+(?:\\/[^\\/:<>\\*\\?\"\\|]+)?)" => {
             Some(vec![Endpoint {
@@ -43,7 +43,7 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                     sanitize: Sanitize::Urldecode,
                 }],
                 permission: item_permission,
-                callback: |_, _| Err(RestError::not_ported()),
+                callback: Some(|_, _| Err(RestError::not_ported())),
             }])
         }
         _ => None,

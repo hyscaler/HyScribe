@@ -103,7 +103,22 @@ impl Response {
 
     /// `add_link( $rel, $href )`.
     pub fn add_link(&mut self, rel: &str, href: String) {
-        self.add_link_attributes(rel, object([("href", text(href))]));
+        self.add_link_with(rel, href, Vec::new());
+    }
+
+    /// `add_link( $rel, $href, $attributes )`.
+    pub(crate) fn add_link_with(
+        &mut self,
+        rel: &str,
+        href: String,
+        attributes: Vec<(&str, Value)>,
+    ) {
+        let mut link: Vec<(Key, Value)> = attributes
+            .into_iter()
+            .map(|(name, value)| (Key::String(name.as_bytes().to_vec()), value))
+            .collect();
+        link.push((Key::String(b"href".to_vec()), text(href)));
+        self.add_link_attributes(rel, Value::Array(link));
     }
 
     /// A link to `rel` as `get_response_links()` gives it.
@@ -188,7 +203,7 @@ pub fn paginate(
     let query = urlencode_deep(Value::Array(query.to_vec()));
     let base = add_query_values(query.as_array().unwrap_or_default(), collection.as_bytes());
     let links: Vec<String> = [
-        ("prev", page.saturating_sub(1), page > 1),
+        ("prev", page.saturating_sub(1).min(pages), page > 1),
         ("next", page + 1, page < pages),
     ]
     .into_iter()

@@ -19,7 +19,28 @@ use crate::tests::oracle_site;
 /// The oracle's site, with its keys and salts and sessions in `dir`, under
 /// `/%postname%/` permalinks when `pretty`.
 async fn site(pretty: bool, dir: &std::path::Path) -> Arc<Site> {
-    let mut site = Arc::into_inner(oracle_site().await).unwrap();
+    on(oracle_site().await, pretty, dir)
+}
+
+/// The oracle's site over the Theme Test Data fixture's database.
+async fn ttd_site(pretty: bool, dir: &std::path::Path) -> Arc<Site> {
+    let mut config = crate::tests::fixture_config();
+    config.name = "wordpress_ttd".into();
+    let db = crate::Db::connect(&config)
+        .await
+        .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
+    let home = Some("http://127.0.0.1:8081".to_string());
+    on(
+        Arc::new(Site::load(db, home.clone(), home).await.unwrap()),
+        pretty,
+        dir,
+    )
+}
+
+/// `site` with keys and salts, sessions in `dir`, pretty permalinks when
+/// `pretty`.
+fn on(site: Arc<Site>, pretty: bool, dir: &std::path::Path) -> Arc<Site> {
+    let mut site = Arc::into_inner(site).unwrap();
     if pretty {
         site.options
             .insert("permalink_structure".into(), b"/%postname%/".to_vec());
@@ -124,11 +145,33 @@ fn kept(headers: &HeaderMap, nonce: &str) -> Vec<String> {
 #[tokio::test(flavor = "multi_thread")]
 async fn answers_match_php() {
     let dir = tempfile::tempdir().unwrap();
-    let plain = site(false, dir.path()).await;
-    let pretty = site(true, dir.path()).await;
-    let (cookie, nonce) = log_in(&plain).await;
-    let visitor = self::nonce(&plain, 0, Vec::new()).await;
+    let sites = (site(false, dir.path()).await, site(true, dir.path()).await);
     let golden = include_str!("../../../hyscribe-rest/tests/golden/rest.tsv");
+    assert_eq!(replay(&sites, golden, false).await, (2 * 63, 2 * 10));
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/content.tsv");
+    assert_eq!(replay(&sites, golden, false).await, (2 * 89, 2 * 3));
+}
+
+/// The content routes over the Theme Test Data fixture, by hash.
+#[tokio::test(flavor = "multi_thread")]
+async fn content_matches_php() {
+    let dir = tempfile::tempdir().unwrap();
+    let sites = (
+        ttd_site(false, dir.path()).await,
+        ttd_site(true, dir.path()).await,
+    );
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/content-ttd.tsv");
+    assert_eq!(replay(&sites, golden, true).await, (2 * 92, 2 * 4));
+}
+
+/// `golden`'s requests of a visitor and the administrator served on the
+/// plain and pretty `sites`, bodies compared by SHA-256 when `hashed`: how
+/// many matched and how many answered 501.
+async fn replay(sites: &(Arc<Site>, Arc<Site>), golden: &str, hashed: bool) -> (usize, usize) {
+    use sha2::Digest;
+    let (plain, pretty) = sites;
+    let (cookie, nonce) = log_in(plain).await;
+    let visitor = self::nonce(plain, 0, Vec::new()).await;
     let (mut served, mut unported) = (0, 0);
     for line in golden.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
@@ -138,7 +181,7 @@ async fn answers_match_php() {
             continue;
         }
         let flag = |name: &str| flags.split(',').any(|flag| flag == name);
-        let site = if flag("pretty") { &pretty } else { &plain };
+        let site = if flag("pretty") { pretty } else { plain };
         let nonce = if who == "visitor" { &visitor } else { &nonce };
         let mut request = axum::http::Request::builder()
             .method(method)
@@ -175,11 +218,15 @@ async fn answers_match_php() {
         let mut php: Vec<String> = text(5).lines().map(String::from).collect();
         php.sort();
         assert_eq!(kept(response.headers(), nonce), php, "{what}");
-        let ours = body(response).await.replace(nonce, "%nonce%");
+        let mut ours = body(response).await.replace(nonce, "%nonce%");
+        if hashed {
+            let digest = sha2::Sha256::digest(ours.as_bytes());
+            ours = digest.iter().map(|b| format!("{b:02x}")).collect();
+        }
         assert_eq!(ours, text(6), "{what}");
         served += 1;
     }
-    assert_eq!((served, unported), (2 * 63, 2 * 10));
+    (served, unported)
 }
 
 /// What WordPress serves as a page stays a page, and a `rest_route` that is

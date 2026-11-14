@@ -70,7 +70,7 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     let collection = || Endpoint {
         args: vec![context_arg(), string_arg("namespace")],
         permission: |context, _| read_permission(context),
-        callback: items,
+        callback: Some(items),
     };
     match regex {
         "/wp/v2/block-types" | "/wp/v2/block-types/(?P<namespace>[a-zA-Z0-9_-]+)" => {
@@ -80,7 +80,7 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
             Some(vec![Endpoint {
                 args: vec![string_arg("name"), string_arg("namespace"), context_arg()],
                 permission: item_permission,
-                callback: item,
+                callback: Some(item),
             }])
         }
         _ => None,

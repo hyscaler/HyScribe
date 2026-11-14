@@ -65,7 +65,8 @@ pub struct Term {
     pub count: u64,
 }
 
-/// What a login checks of a user: `ID`, `user_login` and `user_pass`.
+/// What a login checks of a user: `ID`, `user_login`, `user_pass` and
+/// `user_activation_key`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Credentials {
     /// `ID`.
@@ -74,6 +75,8 @@ pub struct Credentials {
     pub login: Vec<u8>,
     /// `user_pass`, the password hash.
     pub pass: Vec<u8>,
+    /// `user_activation_key`.
+    pub activation_key: Vec<u8>,
 }
 
 /// The column `get_user_by()` looks a user up by.

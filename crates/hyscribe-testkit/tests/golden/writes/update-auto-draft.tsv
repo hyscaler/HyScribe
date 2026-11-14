@@ -1,0 +1,5 @@
+# The rows PHP WordPress writes for the action update-auto-draft (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 20:06:13 to 2026-11-14 20:06:13 UTC.
+# %wp_posts:1% is 14.
+wp_posts	%wp_posts:1%	~	post_modified_gmt	0000-00-00 00:00:00	%now%
+wp_posts	%wp_posts:1%	~	post_title	A write oracle post	A renamed post

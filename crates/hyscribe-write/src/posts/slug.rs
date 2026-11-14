@@ -1,0 +1,153 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! `wp_unique_post_slug()`, `_truncate_post_slug()` and the `__trashed`
+//! suffix trashed posts give up their slug with.
+
+use hyscribe_db::{Meta, Write};
+use hyscribe_render::formatting::sanitize_title_for_query;
+
+use super::{Kind, PostError, Result, UNSLUGGED};
+
+/// `$wp_rewrite->feeds`.
+const FEEDS: [&[u8]; 5] = [b"feed", b"rdf", b"rss", b"rss2", b"atom"];
+
+/// `_truncate_post_slug( $slug, $length )`.
+fn truncate(slug: &[u8], length: usize) -> Result<Vec<u8>> {
+    let mut slug = slug.to_vec();
+    if slug.len() > length {
+        if hyscribe_phpser::urldecode(&slug) != slug {
+            return Err(PostError::Unported("a long percent-encoded slug"));
+        }
+        slug.truncate(length);
+    }
+    while slug.last() == Some(&b'-') {
+        slug.pop();
+    }
+    Ok(slug)
+}
+
+/// `/^(page)?\d+$/`, which would read as a page number.
+fn paged(slug: &[u8]) -> bool {
+    let digits = slug.strip_prefix(b"page").unwrap_or(slug);
+    !digits.is_empty() && digits.iter().all(u8::is_ascii_digit)
+}
+
+/// Whether the numeric slug `number` would be read as a year, a month or a
+/// day under the permalink `structure`.
+fn reads_as_date(structure: &[u8], number: u64) -> bool {
+    // array_filter() drops empty parts and "0".
+    let parts: Vec<&[u8]> = structure
+        .split(|&b| b == b'/')
+        .filter(|part| !part.is_empty() && *part != b"0")
+        .collect();
+    match parts.iter().position(|part| *part == b"%postname%") {
+        Some(0) => true,
+        Some(at) => match parts.get(at - 1).copied() {
+            Some(b"%year%") => number < 13,
+            Some(b"%monthnum%") => number < 32,
+            _ => false,
+        },
+        None => false,
+    }
+}
+
+/// Whether a new numeric post slug would be read as a date archive.
+async fn date_archive(write: &mut Write<'_>, slug: &[u8], id: u64) -> Result<bool> {
+    let numeric = !slug.is_empty() && slug.iter().all(u8::is_ascii_digit);
+    if !numeric || slug.iter().all(|&b| b == b'0') {
+        return Ok(false);
+    }
+    if write.post(id).await?.is_some_and(|post| post.name == slug) {
+        return Ok(false);
+    }
+    let structure = write
+        .option("permalink_structure")
+        .await?
+        .unwrap_or_default();
+    // (int) of a number past PHP_INT_MAX is PHP_INT_MAX.
+    let number = std::str::from_utf8(slug)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(u64::MAX);
+    Ok(reads_as_date(&structure, number))
+}
+
+/// `wp_unique_post_slug( $slug, $id, $status, $type, $parent )`.
+pub(super) async fn unique(
+    write: &mut Write<'_>,
+    slug: Vec<u8>,
+    id: u64,
+    (status, kind, post_type): (&str, Kind, &str),
+    parent: u64,
+) -> Result<Vec<u8>> {
+    if UNSLUGGED.contains(&status) || (status == "inherit" && kind == Kind::Revision) {
+        return Ok(slug);
+    }
+    let reserved = FEEDS.contains(&&slug[..]) || slug == b"embed";
+    let taken = if kind.hierarchical() {
+        let used = write
+            .sibling_name_used(&slug, (post_type, parent), id)
+            .await?;
+        used || reserved || paged(&slug)
+    } else {
+        let used = write.post_name_used(&slug, post_type, id).await?;
+        used || reserved || (kind == Kind::Post && date_archive(write, &slug, id).await?)
+    };
+    if !taken {
+        return Ok(slug);
+    }
+    let mut number = 2_u64;
+    loop {
+        let suffix = number.to_string();
+        let mut alt = truncate(&slug, 200 - (suffix.len() + 1))?;
+        alt.push(b'-');
+        alt.extend_from_slice(suffix.as_bytes());
+        let used = if kind.hierarchical() {
+            write
+                .sibling_name_used(&alt, (post_type, parent), id)
+                .await?
+        } else {
+            write.post_name_used(&alt, post_type, id).await?
+        };
+        if !used {
+            return Ok(alt);
+        }
+        number += 1;
+    }
+}
+
+/// `wp_add_trashed_suffix_to_post_name_for_post( $id )`: the post's new
+/// name.
+pub(super) async fn suffix_trashed(write: &mut Write<'_>, id: u64) -> Result<Vec<u8>> {
+    let name = write
+        .post(id)
+        .await?
+        .map(|post| post.name)
+        .unwrap_or_default();
+    if name.ends_with(b"__trashed") {
+        return Ok(name);
+    }
+    write
+        .add_meta(Meta::Post, id, "_wp_desired_post_slug", &name)
+        .await?;
+    let mut trashed = truncate(&name, 191)?;
+    trashed.extend_from_slice(b"__trashed");
+    write.set_post_name(id, &trashed).await?;
+    Ok(trashed)
+}
+
+/// `wp_add_trashed_suffix_to_post_name_for_trashed_posts( $name, $id )`.
+pub(super) async fn suffix_trashed_namesakes(
+    write: &mut Write<'_>,
+    name: &[u8],
+    id: u64,
+) -> Result<()> {
+    let name = sanitize_title_for_query(name);
+    for trashed in write.trashed_post_ids_named(&name, id).await? {
+        suffix_trashed(write, trashed).await?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;

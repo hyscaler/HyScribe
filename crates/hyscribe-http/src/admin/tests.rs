@@ -1716,8 +1716,12 @@ async fn actions_are_checked_first() {
     let json = Some(("application/json", "{\"action\":\"trash\"}"));
     let response = send(&site, "POST", "/hs-admin/edit?action=trash", &cookies, json).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
-    let response = send(&site, "POST", "/hs-admin/edit", &cookies, Some((form, ""))).await;
+    let empty = Some((form, ""));
+    let response = send(&site, "POST", "/hs-admin/edit", &cookies, empty).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // An empty body is an empty `$_POST`: the query's action is checked.
+    let response = send(&site, "POST", trash, &cookies, empty).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
 /// `admin-ajax.php` answers who is not logged in itself, and reads the

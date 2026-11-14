@@ -5,10 +5,13 @@
 use hyscribe_model::{
     CommentOrder, CommentQuery, CommentRow, USER_SEARCH_COLUMNS, User, UserOrder, UserQuery,
 };
-use sqlx::Row;
-use sqlx::mysql::MySqlRow;
+use sqlx::Row as _;
 
-use crate::{Bind, Columns, Db, DbError, Sql, comment, db_error, like, list, user};
+use crate::dialect::Dialect;
+use crate::{
+    Bind, Columns, Db, DbError, Engine, Row, Sql, comment, db_error, like, list, select_comments,
+    user,
+};
 
 /// `values` as text binds.
 fn texts<'a>(values: impl IntoIterator<Item = &'a String>) -> impl Iterator<Item = Bind> {
@@ -79,7 +82,7 @@ fn comment_where(sql: &mut Sql, query: &CommentQuery) {
     }
 }
 
-/// The column a comment order sorts by; none for `FIELD()` of the IDs.
+/// The column a comment order sorts by; none for the order of the IDs.
 pub(crate) fn comment_column(order: CommentOrder) -> Option<&'static str> {
     Some(match order {
         CommentOrder::Date => "comment_date",
@@ -92,7 +95,7 @@ pub(crate) fn comment_column(order: CommentOrder) -> Option<&'static str> {
     })
 }
 
-/// The column a user order sorts by; none for a `FIELD()`.
+/// The column a user order sorts by; none for the order of a list.
 pub(crate) fn user_column(order: UserOrder) -> Option<&'static str> {
     Some(match order {
         UserOrder::Login => "user_login",
@@ -107,7 +110,7 @@ pub(crate) fn user_column(order: UserOrder) -> Option<&'static str> {
 }
 
 /// A comment with the columns the REST API reads.
-pub(crate) fn comment_row(row: &MySqlRow) -> Result<CommentRow, DbError> {
+pub(crate) fn comment_row(row: &Row) -> Result<CommentRow, DbError> {
     comment(row).and_then(|comment| {
         let mut c = Columns::new(row);
         let approved = c.text("comment_approved");
@@ -125,9 +128,9 @@ pub(crate) fn comment_row(row: &MySqlRow) -> Result<CommentRow, DbError> {
 /// A limit and offset, when limited.
 fn limit(sql: &mut Sql, limit: Option<u64>, offset: u64) {
     if let Some(limit) = limit {
-        sql.push(" LIMIT ?, ?");
-        sql.bind(Bind::Int(offset));
+        sql.push(" LIMIT ? OFFSET ?");
         sql.bind(Bind::Int(limit));
+        sql.bind(Bind::Int(offset));
     }
 }
 
@@ -191,24 +194,19 @@ fn user_where(sql: &mut Sql, query: &UserQuery) {
 impl Db {
     /// The comments `query` selects, in its order.
     pub async fn comment_query(&self, query: &CommentQuery) -> Result<Vec<CommentRow>, DbError> {
-        let mut sql = Sql::new(concat!(
-            "SELECT ",
-            comment_columns!(),
+        let mut sql = select_comments(
             ", comment_approved, comment_agent, COALESCE((SELECT meta_value FROM {prefix}commentmeta m \
              WHERE m.comment_id = {prefix}comments.comment_ID AND m.meta_key = '_wp_note_status' \
-             ORDER BY m.meta_id LIMIT 1), '') AS note_status FROM {prefix}comments"
-        ));
+             ORDER BY m.meta_id LIMIT 1), '') AS note_status FROM {prefix}comments",
+        );
         comment_where(&mut sql, query);
         for (i, (order, descending)) in query.order.iter().enumerate() {
             sql.push(if i == 0 { " ORDER BY " } else { ", " });
             if let Some(column) = comment_column(*order) {
                 sql.push(column);
             } else {
-                sql.push("FIELD( comment_ID, ");
-                list(
-                    &mut sql,
-                    ints(&query.include).chain(std::iter::once(Bind::Int(0))),
-                );
+                let ids = ints(&query.include).chain(std::iter::once(Bind::Int(0)));
+                Engine::list_order(&mut sql, "comment_ID", ids);
             }
             sql.push(if *descending { " DESC" } else { " ASC" });
         }
@@ -237,22 +235,18 @@ impl Db {
         match (user_column(order), order) {
             (Some(column), _) => sql.push(column),
             (None, UserOrder::Include) => {
-                sql.push("FIELD( u.ID, ");
-                list(
-                    &mut sql,
-                    ints(&query.include).chain(std::iter::once(Bind::Int(0))),
-                );
+                let ids = ints(&query.include).chain(std::iter::once(Bind::Int(0)));
+                Engine::list_order(&mut sql, "u.ID", ids);
             }
             (None, _) => {
                 // PHP writes `FIELD( user_nicename, '' )` for no names.
-                sql.push("FIELD( user_nicename, ");
                 let names = query.nicenames.iter();
                 let names = names.map(|name| String::from_utf8_lossy(name).into_owned());
                 let mut names: Vec<String> = names.collect();
                 if names.is_empty() {
                     names.push(String::new());
                 }
-                list(&mut sql, names.into_iter().map(Bind::Text));
+                Engine::list_order(&mut sql, "user_nicename", names.into_iter().map(Bind::Text));
             }
         }
         sql.push(if descending { " DESC" } else { " ASC" });
@@ -274,9 +268,9 @@ impl Db {
 
     /// The user's `user_registered`, empty for no such user.
     pub async fn user_registered(&self, id: u64) -> Result<String, DbError> {
-        let mut sql = Sql::new(
-            "SELECT CAST(user_registered AS CHAR) AS registered FROM {prefix}users WHERE ID = ?",
-        );
+        let mut sql = Sql::new("SELECT ");
+        Engine::date_text(&mut sql, "user_registered");
+        sql.push(" AS registered FROM {prefix}users WHERE ID = ?");
         sql.bind(Bind::Int(id));
         let row = sql
             .query(&self.prefix)
@@ -293,11 +287,12 @@ impl Db {
     /// Whether `author` has posts of any of `types`, published, or private
     /// too where a type's flag is set: `count_user_posts()`.
     pub async fn has_posts(&self, author: u64, types: &[(String, bool)]) -> Result<bool, DbError> {
-        let mut sql =
-            Sql::new("SELECT COUNT(*) AS found FROM {prefix}posts WHERE post_author = ? AND (0");
+        let mut sql = Sql::new(
+            "SELECT COUNT(*) AS found FROM {prefix}posts WHERE post_author = ? AND (1 = 0",
+        );
         sql.bind(Bind::Int(author));
         for (post_type, private) in types {
-            sql.push(" OR (post_type = ? AND (post_status = 'publish' OR (? AND post_status = 'private')))");
+            sql.push(" OR (post_type = ? AND (post_status = 'publish' OR (? = 1 AND post_status = 'private')))");
             sql.bind(Bind::Text(post_type.clone()));
             sql.bind(Bind::Int(u64::from(*private)));
         }

@@ -17,6 +17,7 @@
 .vscode/
 
 # Private private notes clone and scratch files
+/repos/
 /tmp/
 CLAUDE.local.md
 AGENT.local.md

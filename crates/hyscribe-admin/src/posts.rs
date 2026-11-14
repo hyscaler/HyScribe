@@ -15,15 +15,19 @@ use hyscribe_render::formatting::{convert_chars, ent2ncr, sanitize_text_field, w
 use hyscribe_render::kses::wp_kses_data;
 use hyscribe_render::post::admin_title;
 use hyscribe_render::post::post_format_string;
-use hyscribe_render::{Walk, number_format, order_by, sticky_posts, walk, wp_trim_words};
+use hyscribe_render::{
+    Walk, number_format, order_by, sticky_posts, user_avatar, walk, wp_trim_words,
+};
 
 use crate::admin_bar::BarSite;
 use crate::admin_bar::Browser;
+use crate::assets::Urls;
 use crate::list_table::{
     Column, Order, Sort, View, bulk_actions, column_headers, fill, months_dropdown, pagination,
     row_actions, screen_options as list_screen_options, search_box, selected as selected_if,
     table_description, views, wp_nonce_field,
 };
+use crate::login::set_url_scheme;
 use crate::menu::Screen;
 use crate::menu::esc_link;
 use crate::page::{HelpTab, Page, admin_page, wp_admin_notice};
@@ -48,8 +52,8 @@ pub trait PostsSite: PageSite {
     fn post_terms(&self, post: &Post, taxonomy: &str) -> Vec<Term>;
     /// `get_post_meta( $post->ID, $key, true )`, as stored.
     fn meta(&self, post: &Post, key: &str) -> Option<Vec<u8>>;
-    /// The display name of user `id`, if there is one.
-    fn display_name(&self, id: u64) -> Option<Vec<u8>>;
+    /// `get_userdata( $id )`.
+    fn userdata(&self, id: u64) -> Option<User>;
     /// `get_pending_comments_num( $post->ID )`.
     fn pending_comments(&self, post: &Post) -> u64;
     /// `get_the_excerpt( $post )`.
@@ -339,6 +343,37 @@ fn ancestors(lookup: &dyn Fn(u64) -> Option<Post>, post: &Post) -> Vec<u64> {
     ids
 }
 
+/// `wp_check_post_lock()`: the other user whose edit lock on `post` is
+/// fresh.
+pub(crate) fn lock_holder(site: &dyn PostsSite, post: &Post) -> Option<User> {
+    let lock = site.meta(post, "_edit_lock").unwrap_or_default();
+    let int = |text: &[u8]| Value::String(text.to_vec()).to_int();
+    let mut parts = lock.split(|b| *b == b':');
+    let time = int(parts.next().unwrap_or_default());
+    let user = match parts.next() {
+        Some(user) => int(user),
+        None => int(&site.meta(post, "_edit_last").unwrap_or_default()),
+    };
+    let user = site.userdata(u64::try_from(user).unwrap_or_default())?;
+    let now = site.clock().1;
+    (time != 0 && time > now - 150 && user.id != site.user_id()).then_some(user)
+}
+
+/// `get_preview_post_link( $post, $args )`: the permalink in the admin's
+/// scheme, which is HTTPS with an HTTPS site URL.
+pub(crate) fn preview_link(
+    site: &dyn PostsSite,
+    post: &Post,
+    args: &[(&[u8], Option<&[u8]>)],
+) -> Vec<u8> {
+    let ssl = Urls::site_url(site)
+        .to_ascii_lowercase()
+        .starts_with("https:");
+    let link = set_url_scheme(&site.permalink(post), if ssl { "https" } else { "http" });
+    let args = [args, &[(b"preview", Some(b"true"))]].concat();
+    add_query_arg(&args, link.as_bytes())
+}
+
 /// `the_title` of `post` with the list's `esc_html` filter.
 fn listed_title(post: &Post) -> String {
     esc_html(&admin_title(post))
@@ -352,7 +387,7 @@ fn column_title(
     classes: &str,
     filter: &str,
     excerpt: bool,
-    level: Option<usize>,
+    (level, lock): (Option<usize>, Option<&User>),
 ) -> String {
     let aria_label = if is_empty_string(&post.title) {
         "no title".to_string()
@@ -375,7 +410,18 @@ fn column_title(
     }
     let editable = site.can_post("edit_post", post) && post.status != "trash";
     if editable {
-        out.push_str("<div class=\"locked-info\"><span class=\"locked-avatar\"></span> <span class=\"locked-text\"></span></div>\n");
+        let (avatar, text) = lock.map_or_else(Default::default, |holder| {
+            let avatar = user_avatar(&|name| site.option(name), holder, 18);
+            let name = String::from_utf8_lossy(&holder.display_name);
+            (
+                avatar,
+                esc_html(format!("{name} is currently editing").as_bytes()),
+            )
+        });
+        out.push_str(&format!(
+            "<div class=\"locked-info\"><span class=\"locked-avatar\">{}</span> <span class=\"locked-text\">{text}</span></div>\n",
+            String::from_utf8_lossy(&avatar)
+        ));
     }
     let pad = "<span aria-hidden=\"true\">&#8212;</span> ".repeat(depth);
     let (described_by, linked, unlinked) = match site.post(post.parent) {
@@ -489,10 +535,7 @@ fn title_actions(site: &dyn PostsSite, post: &Post, excerpt: bool) -> String {
     }
     if ["pending", "draft", "future"].contains(&post.status.as_str()) {
         if can_edit {
-            let preview = add_query_arg(
-                &[(b"preview", Some(b"true"))],
-                site.permalink(post).as_bytes(),
-            );
+            let preview = preview_link(site, post, &[]);
             actions.push((
                 "view",
                 format!(
@@ -531,7 +574,8 @@ fn none(label: &str) -> String {
 /// `column_author()`.
 fn column_author(site: &dyn PostsSite, post: &Post) -> String {
     match site
-        .display_name(post.author)
+        .userdata(post.author)
+        .map(|user| user.display_name)
         .filter(|name| !name.is_empty())
     {
         Some(name) => {
@@ -1025,8 +1069,10 @@ pub fn row(
     } else {
         "other"
     };
+    let lock = lock_holder(site, post);
     let class = format!(
-        "iedit author-{author} level-{}",
+        "iedit author-{author}{} level-{}",
+        if lock.is_some() { " wp-locked" } else { "" },
         ancestors(&|id| site.post(id), post).len()
     );
     let class = site.post_class(&class, post);
@@ -1049,7 +1095,14 @@ pub fn row(
                 continue;
             }
             "title" => {
-                out.push_str(&column_title(site, post, &classes, filter, excerpt, level));
+                out.push_str(&column_title(
+                    site,
+                    post,
+                    &classes,
+                    filter,
+                    excerpt,
+                    (level, lock.as_ref()),
+                ));
                 continue;
             }
             "author" => column_author(site, post),

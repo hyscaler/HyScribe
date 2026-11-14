@@ -3,12 +3,13 @@
 //! The Add User screen, `user-new.php`, on a single site.
 
 use hyscribe_kses::esc_attr;
+use hyscribe_phpser::Value;
 
 use crate::list_table::{fill, wp_nonce_field};
 use crate::menu::Screen;
 use crate::page::{HelpTab, Page, Request, admin_page, wp_admin_notice};
 use crate::posts::Answer;
-use crate::profile::ProfileSite;
+use crate::profile::{ProfileSite, profile_script};
 use crate::users::{dropdown_roles, role_names};
 
 const PAGE: &str = include_str!("user_new/page.html");
@@ -21,8 +22,13 @@ const HELP_SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a h
 
 /// `user-new.php`'s form to create a user, the role `default_role` names
 /// chosen, after the `update` it is sent back with; `wp_die()` for one who
-/// may not create users.
-pub fn user_new(site: &dyn ProfileSite, update: Option<&str>, request: &Request) -> Answer {
+/// may not create users. A `user_id`, read on multisite only, still goes to
+/// the user-profile script.
+pub fn user_new(
+    site: &dyn ProfileSite,
+    (update, user_id): (Option<&str>, Option<&str>),
+    request: &Request,
+) -> Answer {
     if !site.can("create_users") {
         return Answer::Denied(
             "<h1>You need a higher level of permission.</h1><p>Sorry, you are not allowed to create users.</p>",
@@ -69,6 +75,8 @@ pub fn user_new(site: &dyn ProfileSite, update: Option<&str>, request: &Request)
             content: HELP_ROLES,
         },
     ];
+    let script_data =
+        user_id.map(|id| profile_script(site, Value::String(id.as_bytes().to_vec()).to_int()));
     let page = Page {
         screen: Screen {
             pagenow: "user-new.php",
@@ -85,7 +93,7 @@ pub fn user_new(site: &dyn ProfileSite, update: Option<&str>, request: &Request)
         styles: &[],
         scripts: &["wp-ajax-response", "user-profile"],
         late_scripts: &[],
-        script_data: &[],
+        script_data: script_data.as_slice(),
         admin_footer: "",
         footer_scripts: "",
         content: &content,

@@ -228,14 +228,20 @@ fn variants_are_php_s() {
             let path = format!("/hs-admin/edit?{query}");
             String::from_utf8(hyscribe_phpser::addslashes(path.as_bytes())).unwrap()
         };
-        // The canonical URL, rebuilt as `remove_query_arg()` rebuilds it.
-        let url = format!("{}{path}", crate::tests::SITE);
+        // The canonical URL, rebuilt as `remove_query_arg()` rebuilds it,
+        // on the host `h9host` asks with.
+        let host = if variant == "h9host" {
+            "http://admin.test:8081"
+        } else {
+            crate::tests::SITE
+        };
+        let url = format!("{host}{path}");
         let canonical = hyscribe_phpser::remove_query_arg(&[b"message"], url.as_bytes());
         let ours = edit(
             &Role(role),
             &args,
             &String::from_utf8(canonical).unwrap(),
-            crate::tests::SITE,
+            host,
             &path,
             &crate::admin_bar::Browser {
                 user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",

@@ -122,10 +122,15 @@ fn as_text(value: Option<&Value>) -> Option<&[u8]> {
     value.and_then(Value::as_bytes)
 }
 
+/// `set_url_scheme( $url, $scheme )` of a URL the site made.
+pub(crate) fn set_url_scheme(url: &str, scheme: &str) -> String {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    format!("{scheme}://{rest}")
+}
+
 /// `set_url_scheme( $url, 'https' )` of a URL the site made.
 fn https(url: &str) -> String {
-    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    format!("https://{rest}")
+    set_url_scheme(url, "https")
 }
 
 /// The login screen's URL with `query`, under `force_ssl_admin()` when

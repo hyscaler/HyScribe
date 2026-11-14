@@ -201,6 +201,14 @@ impl Role {
         self.0.split_once(':').map_or("", |(variant, _)| variant)
     }
 
+    /// The home URL, HTTPS in the `h9home` variant.
+    pub fn home(&self) -> String {
+        if self.variant() == "h9home" {
+            return SITE.replace("http:", "https:");
+        }
+        SITE.into()
+    }
+
     /// A variant of `reference/media/golden.sh` or
     /// `reference/attachment-edit/golden.sh` over the Theme Test Data.
     fn ttd(&self) -> bool {
@@ -242,7 +250,10 @@ impl Role {
 
     /// A variant of `reference/posts-list/golden.sh`, over its content.
     fn listing(&self) -> bool {
-        ["posts", "hidden", "excerpt", "front"].contains(&self.variant())
+        [
+            "posts", "hidden", "excerpt", "front", "h9locks", "h9home", "h9host",
+        ]
+        .contains(&self.variant())
     }
 
     /// A variant of `reference/terms-list/golden.sh` over its content.
@@ -710,7 +721,10 @@ impl Urls for Role {
     fn fill(&self, text: &str) -> String {
         let text = admin_links(text, "%admin_url%", &format!("{SITE}/hs-admin/"));
         admin_links(&text, "\"%admin_path%", "\"/hs-admin/")
-            .replace("%rest_url%", &format!("{SITE}/{}", self.rest_path()))
+            .replace(
+                "%rest_url%",
+                &format!("{}/{}", self.home(), self.rest_path()),
+            )
             .replace("%site_url%", SITE)
             .replace("%user_id%", "0")
             .replace(
@@ -1405,12 +1419,13 @@ impl crate::posts::PostsSite for Role {
         if self.variant() == "front" && post.id == 316 {
             return format!("{SITE}/");
         }
+        let home = self.home();
         let query = match post.post_type.as_str() {
             "page" => "page_id",
             "attachment" => "attachment_id",
             _ => "p",
         };
-        format!("{SITE}/?{query}={}", post.id)
+        format!("{home}/?{query}={}", post.id)
     }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         if name == "sticky_posts" && (self.listing() || self.variant() == "empty") {
@@ -1494,6 +1509,19 @@ impl crate::posts::PostsSite for Role {
         if self.a8() {
             return crate::media::attachment::content::meta(post.id, key);
         }
+        // The edit locks `reference/posts-list/golden.sh` adds.
+        let lock: &[u8] = match (self.variant(), post.id, key) {
+            ("h9locks", 301 | 307, "_edit_lock") => b"9999999999:2",
+            ("h9locks", 302, "_edit_lock") => b"9999999999:1",
+            ("h9locks", 303, "_edit_lock") => b"1000:2",
+            ("h9locks", 304, "_edit_lock") => b"9999999999",
+            ("h9locks", 304, "_edit_last") => b"2",
+            ("h9locks", 305, "_edit_lock") => b"9999999999:99",
+            _ => b"",
+        };
+        if !lock.is_empty() {
+            return Some(lock.to_vec());
+        }
         if self.variant() == "m4ttdrecent" && post.id == 1690 && key == "_thumbnail_id" {
             return Some(b"611".to_vec());
         }
@@ -1502,14 +1530,13 @@ impl crate::posts::PostsSite for Role {
         }
         crate::posts::content::meta(post, key).filter(|_| self.listing())
     }
-    fn display_name(&self, id: u64) -> Option<Vec<u8>> {
+    fn userdata(&self, id: u64) -> Option<hyscribe_model::User> {
         if self.ttd() {
-            return crate::media::content::user(id).map(|user| user.display_name);
+            return crate::media::content::user(id);
         }
         self.authors("edit_posts")
             .into_iter()
             .find(|user| user.id == id)
-            .map(|user| user.display_name)
     }
     fn pending_comments(&self, post: &hyscribe_model::Post) -> u64 {
         u64::from(

@@ -134,7 +134,7 @@ fn ours(file: &str, query: &str, role: &'static str, request: &Request) -> Optio
                 .into_iter()
                 .find(|(key, _)| key == "update");
             let update = update.map(|(_, value)| value);
-            crate::user_new::user_new(&site, update.as_deref(), request)
+            crate::user_new::user_new(&site, (update.as_deref(), None), request)
         }
         "options-general.php" => crate::settings::general(&site, request).unwrap(),
         "options-writing.php" => crate::settings::writing(&site, request),

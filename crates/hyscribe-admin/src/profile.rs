@@ -225,22 +225,20 @@ pub struct EditArgs {
     pub error: Option<String>,
 }
 
-/// `user-edit.php`'s own: its cleaned `wp_http_referer` and `(int)
-/// $_GET['user_id']`, which the user-profile script carries.
+/// What the form is asked: its cleaned `wp_http_referer`, `(int)
+/// $_GET['user_id']` if given, which the user-profile script carries, if
+/// it is `profile.php`, and `IS_PROFILE_PAGE`.
 struct Edit {
     referer: Vec<u8>,
-    script_id: i64,
+    script_id: Option<i64>,
+    profile_page: bool,
+    profile: bool,
 }
 
 /// The notices of a save of `user`'s profile, `referer` the cleaned
 /// `wp_http_referer` of the request `uri`.
-fn notices(
-    site: &dyn ProfileSite,
-    args: &EditArgs,
-    user: &User,
-    (referer, uri): (&[u8], &str),
-) -> String {
-    let profile = user.id == site.user_id();
+fn notices(site: &dyn ProfileSite, args: &EditArgs, edit: &Edit, uri: &str) -> String {
+    let (referer, profile) = (edit.referer.as_slice(), edit.profile);
     let mut out = String::new();
     if args.updated {
         let mut message = if profile {
@@ -301,25 +299,41 @@ fn notices(
     out
 }
 
-/// `profile.php` for the current user, after a save as `args` give it.
+/// `profile.php`: the current user's profile, or the user `args` name's.
 pub fn profile(site: &dyn ProfileSite, args: &EditArgs, request: &Request) -> Answer {
-    let user = site.profile_user(site.user_id()).unwrap_or_default();
-    let notices = notices(site, args, &user, (b"", request.uri));
-    form(site, &user, None, request, notices)
+    user_form(site, args, request, true)
 }
 
 /// `user-edit.php`: a user's profile, the current user's as on
-/// `profile.php`; `wp_die()` for no such user or one they may not edit.
+/// `profile.php`.
 pub fn user_edit(site: &dyn ProfileSite, args: &EditArgs, request: &Request) -> Answer {
+    user_form(site, args, request, false)
+}
+
+/// `user-edit.php` included by `profile.php` if `profile_page`; `wp_die()`
+/// for no such user or one they may not edit.
+fn user_form(
+    site: &dyn ProfileSite,
+    args: &EditArgs,
+    request: &Request,
+    profile_page: bool,
+) -> Answer {
     let given = |arg: &Option<String>| {
         arg.as_deref()
             .map(|text| Value::String(text.as_bytes().to_vec()))
             .filter(|value| !value.is_empty())
     };
-    let id = given(&args.user_id).map_or(0, |id| absint(&id));
-    let Some(user) = site.profile_user(id) else {
+    let me = site.user_id();
+    let asked = given(&args.user_id).map_or(0, |id| absint(&id));
+    let profile = profile_page || asked == me;
+    // The current user's own profile is not looked up first.
+    let own = asked == 0 && profile;
+    let id = if own { me } else { asked };
+    let user = site.profile_user(id);
+    if user.is_none() && !own {
         return Answer::Died("Invalid user ID.");
-    };
+    }
+    let user = user.unwrap_or_default();
     if !site.can_for("edit_user", id) {
         return Answer::Died("Sorry, you are not allowed to edit this user.");
     }
@@ -331,10 +345,26 @@ pub fn user_edit(site: &dyn ProfileSite, args: &EditArgs, request: &Request) -> 
     let script_id = args
         .user_id
         .as_deref()
-        .map_or(0, |id| Value::String(id.as_bytes().to_vec()).to_int());
-    let notices = notices(site, args, &user, (&referer, request.uri));
-    let edit = Edit { referer, script_id };
-    form(site, &user, Some(&edit), request, notices)
+        .map(|id| Value::String(id.as_bytes().to_vec()).to_int());
+    let edit = Edit {
+        referer,
+        script_id,
+        profile_page,
+        profile,
+    };
+    let notices = notices(site, args, &edit, request.uri);
+    form(site, &user, &edit, request, notices)
+}
+
+/// The user-profile script's data for `(int) $_GET['user_id']`.
+pub(crate) fn profile_script(site: &dyn ProfileSite, id: i64) -> (&'static str, String) {
+    (
+        "user-profile",
+        format!(
+            "var userProfileL10n = {{\"user_id\":\"{id}\",\"nonce\":\"{}\"}};",
+            site.nonce(&format!("reset-password-for-{id}"))
+        ),
+    )
 }
 
 /// The rows of the Account Management table after the password's: the
@@ -385,17 +415,20 @@ fn heading(
     site: &dyn ProfileSite,
     user: &User,
     roles: (&[(String, String)], &[String]),
+    profile: bool,
 ) -> [String; 4] {
     let email = edit(&user.email);
-    if user.id == site.user_id() {
-        return [
-            "Profile".into(),
-            String::new(),
-            String::new(),
-            format!(
-                "<input type=\"email\" name=\"email\" id=\"email\" aria-describedby=\"email-description\" value=\"{email}\" autocomplete=\"email\" class=\"regular-text ltr\" />\n\t\t\t\t\t\t\t\t<p class=\"description\" id=\"email-description\">\n\t\t\t\t\t\t\t\t\tIf you change this, an email will be sent at your new address to confirm it. <strong>The new address will not become active until confirmed.</strong>\t\t\t\t\t\t\t\t</p>"
-            ),
-        ];
+    let field = if user.id == site.user_id() {
+        format!(
+            "<input type=\"email\" name=\"email\" id=\"email\" aria-describedby=\"email-description\" value=\"{email}\" autocomplete=\"email\" class=\"regular-text ltr\" />\n\t\t\t\t\t\t\t\t<p class=\"description\" id=\"email-description\">\n\t\t\t\t\t\t\t\t\tIf you change this, an email will be sent at your new address to confirm it. <strong>The new address will not become active until confirmed.</strong>\t\t\t\t\t\t\t\t</p>"
+        )
+    } else {
+        format!(
+            "<input type=\"email\" name=\"email\" id=\"email\" value=\"{email}\" class=\"regular-text ltr\" />"
+        )
+    };
+    if profile {
+        return ["Profile".into(), String::new(), String::new(), field];
     }
     let add = if site.can("create_users") {
         "\t\t\t\t\t\t\t\t\t<a href=\"user-new\" class=\"page-title-action\">Add User</a>\n\t\t\t\t\t\t\t"
@@ -411,17 +444,15 @@ fn heading(
         format!("Edit User {}", edit(&user.display_name)),
         add.into(),
         role,
-        format!(
-            "<input type=\"email\" name=\"email\" id=\"email\" value=\"{email}\" class=\"regular-text ltr\" />"
-        ),
+        field,
     ]
 }
 
 /// The Personal Options rows the form shows: the visual editor, syntax
 /// highlighting, keyboard shortcuts and infinite scrolling.
-fn personal_options(site: &dyn ProfileSite, id: u64) -> [String; 4] {
+fn personal_options(site: &dyn ProfileSite, id: u64, profile: bool) -> [String; 4] {
     let is = |name: &str, value: &[u8]| site.user_option_of(id, name).unwrap_or_default() == value;
-    let personal = id != site.user_id() || site.can("edit_posts") || site.can("edit_pages");
+    let personal = !profile || site.can("edit_posts") || site.can("edit_pages");
     let rich = if personal && is("rich_editing", b"false") {
         option_row(
             "user-rich-editing-wrap",
@@ -485,20 +516,19 @@ fn roles_of(capabilities: &[u8], roles: &[String]) -> Vec<String> {
     }
 }
 
-/// The profile form of `user`, on `profile.php`, or on `user-edit.php`
-/// when `shown` there, after the `notices` of a save.
+/// The profile form of `user` as `shown`, after the `notices` of a save.
 fn form(
     site: &dyn ProfileSite,
     user: &User,
-    shown: Option<&Edit>,
+    shown: &Edit,
     request: &Request,
     notices: String,
 ) -> Answer {
     let me = site.user_id();
     let id = user.id;
-    let profile = id == me;
+    let profile = shown.profile;
     let option = |name: &str| site.user_option_of(id, name).unwrap_or_default();
-    let [rich, syntax, shortcuts, scrolling] = personal_options(site, id);
+    let [rich, syntax, shortcuts, scrolling] = personal_options(site, id, profile);
     let nickname = edit(&option("nickname"));
     let avatar = text(&user_avatar(&|name| site.option(name), user, 96));
     let gravatar = if profile {
@@ -518,7 +548,7 @@ fn form(
     let keys: Vec<String> = roles.iter().map(|(key, _)| key.clone()).collect();
     let capabilities = option("capabilities");
     let user_roles = roles_of(&capabilities, &keys);
-    let [title, add, role, email] = heading(site, user, (&roles, &user_roles));
+    let [title, add, role, email] = heading(site, user, (&roles, &user_roles), profile);
     let (reset, sessions) = account_rows(site, user, profile);
     let auto = |name: &str| {
         if profile {
@@ -528,14 +558,14 @@ fn form(
         }
     };
     let either = |mine: &str, other: &str| if profile { mine } else { other }.to_string();
-    let wp_referer = shown
-        .filter(|edit| !edit.referer.is_empty())
-        .map_or_else(String::new, |edit| {
-            format!(
-                "\t\t\t\t\t\t\t\t\t<input type=\"hidden\" name=\"wp_http_referer\" value=\"{}\" />\n",
-                text(&esc_url(&edit.referer))
-            )
-        });
+    let wp_referer = if shown.referer.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\t\t\t\t\t\t\t\t\t<input type=\"hidden\" name=\"wp_http_referer\" value=\"{}\" />\n",
+            text(&esc_url(&shown.referer))
+        )
+    };
     let title = esc_html(title.as_bytes());
     let content = fill(
         PAGE,
@@ -579,7 +609,7 @@ fn form(
             ("email_field", email),
             (
                 "pending",
-                if profile {
+                if id == me {
                     pending_email(site, &option("_new_email"), &user.email)
                 } else {
                     String::new()
@@ -611,33 +641,24 @@ fn form(
     }];
     let edit_users = site.can("edit_users");
     let users = |on: bool| if on { "users.php" } else { "profile.php" };
-    let script_data = shown.map(|edit| {
-        let script_id = edit.script_id;
-        (
-            "user-profile",
-            format!(
-                "var userProfileL10n = {{\"user_id\":\"{script_id}\",\"nonce\":\"{}\"}};",
-                site.nonce(&format!("reset-password-for-{script_id}"))
-            ),
-        )
-    });
+    let script_data = shown.script_id.map(|id| profile_script(site, id));
     let author = site.author_url(id);
     let page = Page {
         screen: Screen {
-            pagenow: if shown.is_some() {
-                "user-edit.php"
-            } else {
+            pagenow: if shown.profile_page {
                 "profile.php"
+            } else {
+                "user-edit.php"
             },
             typenow: "",
             taxonomy: "",
             parent_file: Some(users(edit_users)),
             submenu_file: Some(users(edit_users && !profile)),
         },
-        id: if shown.is_some() {
-            "user-edit"
-        } else {
+        id: if shown.profile_page {
             "profile"
+        } else {
+            "user-edit"
         },
         title: &title,
         help: &help,
@@ -655,7 +676,7 @@ fn form(
         content: &content,
         canonical: request.canonical,
         origin: request.origin,
-        view: shown.map(|_| ("View User", author.as_str())),
+        view: (!shown.profile_page).then_some(("View User", author.as_str())),
     };
     Answer::from_page(admin_page(site, &page, request.browser))
 }

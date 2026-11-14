@@ -8,7 +8,7 @@ use crate::tests::{Role, SITE, first_difference};
 
 impl BarSite for Role {
     fn home_url(&self) -> String {
-        format!("{SITE}/")
+        format!("{}/", self.home())
     }
     fn admin_url(&self, path: &str) -> String {
         format!("{SITE}/hs-admin/{}", link(path))

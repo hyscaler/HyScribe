@@ -21,7 +21,7 @@ use crate::list_table::{fill, wp_referer_field};
 use crate::menu::Screen;
 use crate::page::query_strings;
 use crate::page::{HelpTab, Page, Request, admin_page, wp_admin_notice};
-use crate::posts::Answer;
+use crate::posts::{Answer, lock_holder, preview_link};
 use crate::profile::ProfileSite;
 
 const FORM: &str = include_str!("attachment.html");
@@ -101,22 +101,6 @@ impl AttachmentArgs {
             referer,
         })
     }
-}
-
-/// `wp_check_post_lock()`: the other user whose edit lock on `post` is
-/// fresh.
-fn lock_holder(site: &dyn AttachmentSite, post: &Post) -> Option<User> {
-    let lock = site.meta(post, "_edit_lock").unwrap_or_default();
-    let int = |text: &[u8]| Value::String(text.to_vec()).to_int();
-    let mut parts = lock.split(|b| *b == b':');
-    let time = int(parts.next().unwrap_or_default());
-    let user = match parts.next() {
-        Some(user) => int(user),
-        None => int(&site.meta(post, "_edit_last").unwrap_or_default()),
-    };
-    let user = site.profile_user(u64::try_from(user).unwrap_or_default())?;
-    let now = site.clock().1;
-    (time != 0 && time > now - 150 && user.id != site.user_id()).then_some(user)
 }
 
 /// `get_post_status()` of an attachment: its parent's, or `publish`
@@ -471,8 +455,7 @@ fn lock_dialog(
         args.push((b"preview_id", Some(id.as_bytes())));
         args.push((b"preview_nonce", Some(nonce.as_bytes())));
     }
-    args.push((b"preview", Some(b"true")));
-    let preview = add_query_arg(&args, site.permalink(post).as_bytes());
+    let preview = preview_link(site, post, &args);
     let take_over = BarSite::admin_url(
         site,
         &format!(

@@ -4,6 +4,7 @@ use hyscribe_phpser::{addslashes, parse_str};
 use hyscribe_testkit::{hs_admin_page, unhex};
 
 use super::*;
+use crate::page::REMOVABLE;
 use crate::tests::{BROWSER, Role, SITE, first_difference, request};
 
 /// Every page of `reference/profile/golden.sh`.
@@ -47,21 +48,26 @@ fn edit_and_add_pages_are_php_s() {
         // does.
         let path = hs_admin_page(&format!("/wp-admin/{}", f[1]));
         let path = String::from_utf8(addslashes(path.as_bytes())).unwrap();
-        let canonical = remove_query_arg(&[b"message"], format!("{SITE}{path}").as_bytes());
+        let canonical = remove_query_arg(&REMOVABLE, format!("{SITE}{path}").as_bytes());
         let canonical = String::from_utf8(canonical).unwrap();
         let request = request(&canonical, &path, &BROWSER);
-        let ours = if f[1].starts_with("user-new.php") {
-            crate::user_new::user_new(&Role(role), None, &request)
-        } else {
-            let query = hs_admin_page(f[1].split_once('?').map_or("", |(_, query)| query));
-            let mut args = EditArgs::default();
-            for (key, value) in parse_str(query.as_bytes()).as_array().unwrap() {
-                let value = Some(String::from_utf8(value.to_php_string()).unwrap());
-                match key.to_php_string().as_slice() {
-                    b"user_id" => args.user_id = value,
-                    _ => args.referer = value,
-                }
+        let query = hs_admin_page(f[1].split_once('?').map_or("", |(_, query)| query));
+        let mut args = EditArgs::default();
+        let mut update = None;
+        for (key, value) in parse_str(query.as_bytes()).as_array().unwrap() {
+            let value = Some(String::from_utf8(value.to_php_string()).unwrap());
+            match key.to_php_string().as_slice() {
+                b"user_id" => args.user_id = value,
+                b"update" => update = value,
+                _ => args.referer = value,
             }
+        }
+        let ours = if f[1].starts_with("user-new.php") {
+            let user_id = args.user_id.as_deref();
+            crate::user_new::user_new(&Role(role), (update.as_deref(), user_id), &request)
+        } else if f[1].starts_with("profile.php") {
+            profile(&Role(role), &args, &request)
+        } else {
             user_edit(&Role(role), &args, &request)
         };
         let recorded = String::from_utf8(unhex(f[3])).unwrap();

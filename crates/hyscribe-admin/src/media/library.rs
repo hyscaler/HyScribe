@@ -720,7 +720,8 @@ fn attach_link(id: u64, title: &str) -> String {
 /// `column_author()`.
 fn column_author(site: &dyn MediaSite, post: &Post) -> String {
     match site
-        .display_name(post.author)
+        .userdata(post.author)
+        .map(|user| user.display_name)
         .filter(|name| !name.is_empty())
     {
         Some(name) => format!(

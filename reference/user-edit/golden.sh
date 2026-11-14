@@ -74,6 +74,17 @@ for query in 'user_id=601&wp_http_referer=%2Fwp-admin%2Fusers.php%3Frole%3Dedito
   'user_id=601&wp_http_referer=' 'user_id=601&wp_http_referer=0' 'user_id=1&wp_http_referer=%2Fwp-admin%2Fusers.php'; do
   record u3 administrator "user-edit.php?$query"
 done
+# Add User's `user_id` is read on multisite only; the profile takes a user
+# and a referer as Edit User does.
+for query in '?user_id=601' '?user_id=x' '?update=add&user_id=601'; do
+  record u3 administrator "user-new.php$query"
+done
+for query in 'wp_http_referer=%2Fwp-admin%2Fusers.php%3Fupdate%3Dx' 'user_id=1' 'user_id=601' 'user_id=999' 'user_id=x' \
+  'user_id=601&wp_http_referer=%2Fwp-admin%2Fusers.php' 'user_id=0&wp_http_referer=0'; do
+  record u3 administrator "profile.php?$query"
+done
+record u3 subscriber 'profile.php?user_id=601'
+record u3 subscriber 'profile.php?wp_http_referer=%2Fwp-admin%2Fusers.php'
 for variant in u3options u3sessions u3caps u3noavatars; do
   record "$variant" administrator "user-edit.php?user_id=601"
 done

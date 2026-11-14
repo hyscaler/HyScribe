@@ -29,14 +29,27 @@ const PROPERTIES: &Properties = &[
     ("meta", &["view", "edit"]),
 ];
 
+/// The taxonomies served and their REST bases.
+const TAXONOMIES: [(&str, &str); 4] = [
+    ("category", "categories"),
+    ("post_tag", "tags"),
+    ("wp_pattern_category", "wp_pattern_category"),
+    ("nav_menu", "menus"),
+];
+
 /// The taxonomy of the route.
 fn taxonomy(params: &Params) -> &'static str {
-    if params.route.starts_with("/wp/v2/categories") {
-        "category"
-    } else {
-        "post_tag"
-    }
+    let base = params.route.trim_start_matches("/wp/v2/").split('/').next();
+    let found = TAXONOMIES.iter().find(|(_, known)| base == Some(*known));
+    found.map_or("post_tag", |(taxonomy, _)| taxonomy)
 }
+
+/// A menu has no count, link or taxonomy, but its locations and whether
+/// it takes new pages.
+const MENU: &Properties = &[
+    ("locations", &["view", "edit"]),
+    ("auto_add", &["view", "edit"]),
+];
 
 /// The taxonomy's fields: both are shown in REST.
 fn fields_of(taxonomy: &str) -> &'static Value {
@@ -48,9 +61,14 @@ fn hierarchical(taxonomy: &str) -> bool {
 }
 
 fn properties(taxonomy: &str) -> Vec<(&'static str, &'static [&'static str])> {
+    let menu = taxonomy == "nav_menu";
+    let dropped = |name: &str| menu && matches!(name, "count" | "link" | "taxonomy");
+    let extra = if menu { MENU } else { &[] };
     PROPERTIES
         .iter()
         .filter(|(name, _)| *name != "parent" || hierarchical(taxonomy))
+        .filter(|(name, _)| !dropped(name))
+        .chain(extra)
         .copied()
         .collect()
 }
@@ -88,8 +106,14 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         "/wp/v2/tags/(?P<id>[\\d]+)" => ("post_tag", true),
         _ => return None,
     };
+    Some(taxonomy_endpoints(taxonomy, single))
+}
+
+/// The endpoints of a taxonomy's collection, or of its single terms; each
+/// finds its taxonomy from the route.
+pub(crate) fn taxonomy_endpoints(taxonomy: &'static str, single: bool) -> Vec<Endpoint> {
     if !single {
-        return Some(vec![
+        return vec![
             Endpoint {
                 args: items_args(taxonomy),
                 permission: items_permission,
@@ -100,7 +124,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                 permission: create_permission,
                 callback: None,
             },
-        ]);
+        ];
     }
     let id = || typed("id", r#"{"type":"integer"}"#);
     let write = |permission| Endpoint {
@@ -108,7 +132,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         permission,
         callback: None,
     };
-    Some(vec![
+    vec![
         Endpoint {
             args: vec![id(), context_arg()],
             permission: item_permission,
@@ -116,7 +140,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         },
         write(update_permission),
         write(delete_permission),
-    ])
+    ]
 }
 
 /// `get_items_permissions_check()`.
@@ -127,21 +151,29 @@ fn items_permission(context: &Context, params: &Params) -> Result<(), RestError>
         let message = "Sorry, you are not allowed to edit terms in this taxonomy.";
         return Err(context.forbidden("rest_forbidden_context", message));
     }
-    let Some(id) = post_param(params) else {
-        return Ok(());
-    };
-    let Some(post) = context.site.post(id) else {
-        return Err(RestError::status(
-            "rest_post_invalid_id",
-            "Invalid post ID.",
-            400,
-        ));
-    };
-    if !may_read_terms(context, taxonomy, &post) {
-        let message = "Sorry, you are not allowed to view terms for this post.";
-        return Err(context.forbidden("rest_forbidden_context", message));
+    if let Some(id) = post_param(params) {
+        let Some(post) = context.site.post(id) else {
+            return Err(RestError::status(
+                "rest_post_invalid_id",
+                "Invalid post ID.",
+                400,
+            ));
+        };
+        if !may_read_terms(context, taxonomy, &post) {
+            let message = "Sorry, you are not allowed to view terms for this post.";
+            return Err(context.forbidden("rest_forbidden_context", message));
+        }
     }
-    Ok(())
+    menus_access(context, taxonomy)
+}
+
+/// The menus' `check_has_read_only_access()`, after the terms' checks.
+fn menus_access(context: &Context, taxonomy: &str) -> Result<(), RestError> {
+    if taxonomy != "nav_menu" || crate::posts::reads_menus(context) {
+        return Ok(());
+    }
+    let message = "Sorry, you are not allowed to view menus.";
+    Err(context.forbidden("rest_cannot_view", message))
 }
 
 /// `! empty( $request['post'] )`, as an ID.
@@ -159,8 +191,9 @@ fn may_read_terms(context: &Context, taxonomy: &str, post: &Post) -> bool {
         .unwrap_or_default()
         .iter()
         .any(|(_, ty)| ty.to_php_string() == post.post_type.as_bytes());
-    // `is_post_publicly_viewable()`: of the types here, published.
-    in_taxonomy && (post.status == "publish" || context.can_for("read_post", post.id))
+    // `is_post_publicly_viewable()`: of a viewable type, published.
+    let viewable = crate::types::viewable(&post.post_type) && post.status == "publish";
+    in_taxonomy && (viewable || context.can_for("read_post", post.id))
 }
 
 /// The ID asked for, `(int) $id`.
@@ -225,7 +258,7 @@ fn item_permission(context: &Context, params: &Params) -> Result<(), RestError> 
         let message = "Sorry, you are not allowed to edit this term.";
         return Err(context.forbidden("rest_forbidden_context", message));
     }
-    Ok(())
+    menus_access(context, taxonomy(params))
 }
 
 /// `get_item()`.
@@ -432,7 +465,7 @@ fn children(hierarchy: &[(u64, Vec<u64>)], id: u64) -> Vec<u64> {
 }
 
 /// `rest_get_route_for_taxonomy_items()`.
-fn items_route_of(taxonomy: &str) -> String {
+pub(crate) fn items_route_of(taxonomy: &str) -> String {
     let fields = fields_of(taxonomy);
     format!(
         "/{}/{}",
@@ -449,7 +482,8 @@ fn prepare(context: &Context, params: &Params, term: &Term) -> Response {
     let taxonomy = taxonomy(params);
     let properties = properties(taxonomy);
     let wanted = fields_for_response(params, &properties);
-    let fields: [(&str, &dyn Fn() -> Value); 9] = [
+    let locations = || crate::navigation::menu_locations(context, term.id);
+    let fields: [(&str, &dyn Fn() -> Value); 11] = [
         ("id", &|| int(term.id)),
         ("count", &|| int(term.count)),
         ("description", &|| text(term.description.clone())),
@@ -459,6 +493,12 @@ fn prepare(context: &Context, params: &Params, term: &Term) -> Response {
         ("taxonomy", &|| text(taxonomy)),
         ("parent", &|| int(term.parent)),
         ("meta", &|| Value::Array(Vec::new())),
+        ("locations", &|| {
+            list(locations().into_iter().map(text).collect())
+        }),
+        ("auto_add", &|| {
+            Value::Bool(crate::navigation::auto_add(context, term.id))
+        }),
     ];
     let mut response = item_response(&fields, &wanted, &properties, &params.context());
     if links_wanted(&wanted) {
@@ -490,6 +530,17 @@ fn prepare(context: &Context, params: &Params, term: &Term) -> Response {
             let href = add_query_arg(&[(base.as_bytes(), Some(id.as_bytes()))], url.as_bytes());
             let href = String::from_utf8_lossy(&href).into_owned();
             response.add_link("https://api.w.org/post_type", href);
+        }
+        let locations = if taxonomy == "nav_menu" {
+            locations()
+        } else {
+            Vec::new()
+        };
+        for location in locations {
+            let location = String::from_utf8_lossy(&location);
+            let href = context.rest_url(&format!("/wp/v2/menu-locations/{location}"));
+            let embeddable = vec![("embeddable", Value::Bool(true))];
+            response.add_link_with("https://api.w.org/menu-location", href, embeddable);
         }
     }
     response

@@ -154,6 +154,9 @@ impl Site for Oracle {
             .map(|revision| revision.id)
             .collect()
     }
+    fn public_users(&self) -> bool {
+        true
+    }
     fn reads(&self) -> &dyn Reads {
         &self.fixture
     }
@@ -172,19 +175,14 @@ pub(super) fn serve_case(case: &RestCase, ttd: bool, media: bool) -> Served {
             ttd,
             pretty: case.flag("pretty"),
             extra: false,
-            media,
+            state: media.then(|| site::with_media(ttd)),
         },
         deny: &[],
     };
     serve_with(&oracle, case)
 }
 
-const TTD_UNPORTED: [(&str, &str); 5] = [
-    ("*", "/?rest_route=/wp/v2/pages/172&_embed=up"),
-    (
-        "*",
-        "/?rest_route=/wp/v2/pages&parent=1725&_embed=up&exclude=1133",
-    ),
+const TTD_UNPORTED: [(&str, &str); 3] = [
     ("*", "/?rest_route=/wp/v2/posts/555"),
     ("*", "/?rest_route=/wp/v2/posts/555&excerpt_length=5"),
     ("user", "/?rest_route=/wp/v2/posts/51"),
@@ -324,7 +322,7 @@ fn revisions_are_linked() {
             ttd: false,
             pretty: false,
             extra: true,
-            media: false,
+            state: None,
         },
         deny: &[],
     };
@@ -377,7 +375,7 @@ fn served(who: &'static str, target: &str, ttd: bool, deny: &'static [&'static s
             ttd,
             pretty,
             extra: !ttd,
-            media: false,
+            state: None,
         },
         deny,
     };
@@ -473,22 +471,11 @@ fn actions_follow_capabilities() {
     );
 }
 
-/// Embedding a route not ported answers 501, enveloped or not; an error
-/// has no links to embed.
+/// Embedding a link answers; an error has no links to embed.
 #[test]
-fn embedding_what_is_not_ported() {
-    let targets = [
-        "/wp/v2/posts/1&_embed",
-        "/wp/v2/posts&_embed",
-        "/wp/v2/posts/1&_embed&_envelope",
-    ];
-    for target in targets {
-        assert_eq!(
-            served("visitor", target, false, &[]).status,
-            501,
-            "{target}"
-        );
-    }
+fn embedding_links() {
+    let target = "/wp/v2/posts/98&_embed=author";
+    assert_eq!(served("administrator", target, false, &[]).status, 200);
     let missing = served("visitor", "/wp/v2/posts/999", false, &[]);
     let embedded = served("visitor", "/wp/v2/posts/999&_embed", false, &[]);
     assert_eq!(
@@ -624,4 +611,20 @@ fn content_not_ported() {
     }
     assert!(writes_or_unported(b"<!-- wp:loginout /-->", true));
     assert!(writes_or_unported(b"<!-- wp:post-comments-form /-->", true));
+}
+
+/// A site reads its users through `reads()` unless it says otherwise:
+/// `/users/me` finds the fixture's administrator.
+#[test]
+fn users_are_read_through_the_site_reads() {
+    let served = served(
+        "administrator",
+        "/wp/v2/users/me&_fields=id,slug",
+        false,
+        &[],
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&served.body),
+        r#"{"id":1,"slug":"admin"}"#
+    );
 }

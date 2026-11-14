@@ -9,7 +9,7 @@ use super::Kind;
 use crate::Context;
 use crate::request::{Arg, Sanitize, arg, string_arg, typed};
 use crate::response::{list, text};
-use crate::schema::{Checked, Refusal, parse_list, validate_value_from_schema};
+use crate::schema::{Checked, Refusal, validate_value_from_schema};
 use crate::types::context_arg;
 
 const IDS: &str = r#"{"type":"array","items":{"type":"integer"},"default":[]}"#;
@@ -20,11 +20,11 @@ const ATTACHMENT_STATUSES: &str = r#"{"default":"inherit","type":"array","items"
 fn statuses_schema(kind: Kind) -> &'static str {
     match kind {
         Kind::Attachment => ATTACHMENT_STATUSES,
-        Kind::Post | Kind::Page => STATUSES,
+        _ => STATUSES,
     }
 }
 
-/// `get_collection_params()` of the type.
+/// `get_collection_params()` of the type, and the menu items' changes.
 pub(super) fn collection(kind: Kind) -> Vec<Arg> {
     let mut context = context_arg();
     context.schema =
@@ -42,43 +42,51 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
         ),
         arg(
             "per_page",
-            r#"{"type":"integer","default":10,"minimum":1,"maximum":100}"#,
+            if kind == Kind::MenuItem {
+                r#"{"type":"integer","default":100,"minimum":1,"maximum":100}"#
+            } else {
+                r#"{"type":"integer","default":10,"minimum":1,"maximum":100}"#
+            },
             true,
             Sanitize::Absint,
         ),
         arg("search", r#"{"type":"string"}"#, true, Sanitize::TextField),
         date("after"),
         date("modified_after"),
-        typed("author", IDS),
-        typed("author_exclude", IDS),
+    ];
+    if kind.supports("author") {
+        args.extend([typed("author", IDS), typed("author_exclude", IDS)]);
+    }
+    args.extend([
         date("before"),
         date("modified_before"),
         typed("exclude", IDS),
         typed("include", IDS),
-    ];
+    ]);
     let mut orderby = r#"["author","date","id","include","modified","parent","relevance","slug","include_slugs","title""#.to_string();
     if kind == Kind::Page {
         args.push(typed("menu_order", r#"{"type":"integer"}"#));
+    }
+    if matches!(kind, Kind::Page | Kind::MenuItem) {
         orderby.push_str(r#","menu_order""#);
     }
+    let (order, by) = match kind {
+        Kind::MenuItem => ("asc", "menu_order"),
+        _ => ("desc", "date"),
+    };
     args.extend([
         typed("search_semantics", r#"{"type":"string","enum":["exact"]}"#),
         typed("offset", r#"{"type":"integer"}"#),
         typed(
             "order",
-            r#"{"type":"string","default":"desc","enum":["asc","desc"]}"#,
+            &format!(r#"{{"type":"string","default":"{order}","enum":["asc","desc"]}}"#),
+        ),
+        typed(
+            "orderby",
+            &format!(r#"{{"type":"string","default":"{by}","enum":{orderby}]}}"#),
         ),
     ]);
-    args.push(Arg {
-        name: "orderby",
-        schema: json_decode(
-            format!(r#"{{"type":"string","default":"date","enum":{orderby}]}}"#).as_bytes(),
-        )
-        .unwrap_or(Value::Null),
-        validate: false,
-        sanitize: Sanitize::Schema,
-    });
-    if kind != Kind::Post {
+    if matches!(kind, Kind::Page | Kind::Attachment) {
         args.extend([typed("parent", IDS), typed("parent_exclude", IDS)]);
     }
     args.extend([
@@ -94,6 +102,9 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
             Sanitize::Site(match kind {
                 Kind::Post => |context, value| statuses(context, value, Kind::Post),
                 Kind::Page => |context, value| statuses(context, value, Kind::Page),
+                Kind::Block => |context, value| statuses(context, value, Kind::Block),
+                Kind::Navigation => |context, value| statuses(context, value, Kind::Navigation),
+                Kind::MenuItem => |context, value| statuses(context, value, Kind::MenuItem),
                 Kind::Attachment => |context, value| statuses(context, value, Kind::Attachment),
             }),
         ),
@@ -101,15 +112,23 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
     if kind == Kind::Attachment {
         args.extend(crate::media::collection_args());
     }
+    if !kind.taxonomies().is_empty() {
+        args.push(typed(
+            "tax_relation",
+            r#"{"type":"string","enum":["AND","OR"]}"#,
+        ));
+    }
+    // `oneOf` is not ported: the endpoint answers 501.
+    args.extend(
+        limits(kind)
+            .iter()
+            .map(|name| arg(name, "{}", false, Sanitize::Endpoint)),
+    );
+    if kind == Kind::MenuItem {
+        args.push(typed("menu_order", r#"{"type":"integer"}"#));
+    }
     if kind == Kind::Post {
-        // `oneOf` is not ported: the endpoint answers 501.
-        let terms = |name| arg(name, "{}", false, Sanitize::Endpoint);
         args.extend([
-            typed("tax_relation", r#"{"type":"string","enum":["AND","OR"]}"#),
-            terms("categories"),
-            terms("categories_exclude"),
-            terms("tags"),
-            terms("tags_exclude"),
             typed("sticky", r#"{"type":"boolean"}"#),
             typed("ignore_sticky", r#"{"type":"boolean","default":true}"#),
             typed(
@@ -136,29 +155,27 @@ pub(super) fn item() -> Vec<Arg> {
     ]
 }
 
-/// The arguments whose schemas use keywords not ported.
-pub(super) const NOT_PORTED: [&str; 8] = [
-    "after",
-    "modified_after",
-    "before",
-    "modified_before",
-    "categories",
-    "categories_exclude",
-    "tags",
-    "tags_exclude",
-];
+/// The type's arguments that limit it to terms, each taxonomy's.
+fn limits(kind: Kind) -> &'static [&'static str] {
+    match kind {
+        Kind::Post => &["categories", "categories_exclude", "tags", "tags_exclude"],
+        Kind::Block => &["wp_pattern_category", "wp_pattern_category_exclude"],
+        Kind::MenuItem => &["menus", "menus_exclude"],
+        Kind::Page | Kind::Navigation | Kind::Attachment => &[],
+    }
+}
+
+/// The type's arguments whose schemas use keywords not ported.
+pub(super) fn not_ported(kind: Kind) -> impl Iterator<Item = &'static str> {
+    let dates = ["after", "modified_after", "before", "modified_before"];
+    dates.into_iter().chain(limits(kind).iter().copied())
+}
 
 /// `sanitize_post_statuses()`: `wp_parse_slug_list()`, each status but
 /// the type's default allowed only to those who can edit the type's posts, or
 /// read its private ones for `private`.
 fn statuses(context: &Context, statuses: &Value, kind: Kind) -> Checked<Value> {
-    let mut parsed: Vec<Vec<u8>> = Vec::new();
-    for (_, status) in parse_list(statuses) {
-        let slug = hyscribe_render::formatting::sanitize_title(&status.to_php_string());
-        if !parsed.contains(&slug) {
-            parsed.push(slug);
-        }
-    }
+    let parsed = crate::schema::parse_slug_list(statuses);
     let schema = json_decode(statuses_schema(kind).as_bytes()).unwrap_or_default();
     let default = schema.get_str("default").map(Value::to_php_string);
     for status in parsed

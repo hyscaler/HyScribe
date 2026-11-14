@@ -6,10 +6,10 @@
 
 use hyscribe_model::{OrderBy, Post, PostQuery, StatusFilter};
 use hyscribe_phpser::{Key, Value, add_query_arg};
+use hyscribe_render::order_by;
 use hyscribe_render::permalinks::permalink;
 use hyscribe_render::post::admin_title;
 use hyscribe_render::rest::Rendering;
-use hyscribe_render::{order_by, search_count, search_terms};
 
 use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
 use crate::posts::prepare::{PARTS, rfc3339, writes_or_unported};
@@ -121,7 +121,7 @@ fn get_parent(context: &Context, params: &Params, name: &str) -> Result<Post, Re
     let id = params.get(name).map_or(0, Value::to_int);
     let found = context.site.post(id.unsigned_abs());
     found
-        .filter(|post| post.post_type == Kind::of(params).name())
+        .filter(|post| post.post_type == Kind::of(params.route).name())
         .ok_or_else(|| {
             RestError::status("rest_post_invalid_parent", "Invalid post parent ID.", 404)
         })
@@ -164,7 +164,7 @@ fn create_permission(context: &Context, params: &Params) -> Result<(), RestError
             404,
         ));
     }
-    posts::update_permission(context, params, Kind::of(params))
+    posts::update_permission(context, params, Kind::of(params.route))
 }
 
 /// `get_revision()`.
@@ -225,10 +225,7 @@ fn query(params: &Params, parent: &Post) -> PostQuery {
     let ascending = params.text("order") == b"asc";
     query.order = order_by(&Value::String(by.to_vec()), ascending, &query);
     if let Some(search) = params.get("search").map(Value::to_php_string) {
-        let search = String::from_utf8_lossy(&search).into_owned();
-        query.search = search_terms(&search);
-        query.sentence = search.replace(['\r', '\n'], "");
-        query.search_count = search_count(&search);
+        posts::searched(&mut query, &search);
         if orderby == b"relevance" {
             query.order.insert(0, (OrderBy::Relevance, false));
         }
@@ -289,7 +286,11 @@ fn revisions(context: &Context, params: &Params) -> Result<Response, RestError> 
         ));
     }
     let mut response = list(context, params, &found, None)?;
-    let base = format!("/wp/v2/{}/{}/revisions", Kind::of(params).base(), parent.id);
+    let base = format!(
+        "/wp/v2/{}/{}/revisions",
+        Kind::of(params.route).base(),
+        parent.id
+    );
     paginate(
         &mut response,
         (total, pages, page),
@@ -514,7 +515,11 @@ fn prepare(
         .collect();
     let mut response = Response::new(Value::Array(data), 200);
     if has("parent") {
-        let route = format!("/wp/v2/{}/{}", Kind::of(params).base(), revision.parent);
+        let route = format!(
+            "/wp/v2/{}/{}",
+            Kind::of(params.route).base(),
+            revision.parent
+        );
         response.add_link("parent", context.rest_url(&route));
     }
     Ok(response)

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Read access to a WordPress database (M1.3, ADR 0003).
+//! Access to a WordPress database (M1.3, ADR 0003).
 //!
-//! - **Read only.** Every connection is put in a read only transaction mode,
-//!   and this crate has no write methods: shadow mode cannot write.
+//! - **Read only reads.** [`Db`] puts every connection in a read only
+//!   transaction mode, as the read only user when `.env` names one.
+//! - **Gated writes.** Only a [`Writer`], which exists in primary mode
+//!   only, writes, one transaction per action (ADRs 0010 and 0012).
 //! - **No string-built SQL.** Queries are fixed text; only the table prefix
 //!   is inserted, and `Prefix` admits nothing but `[A-Za-z0-9_]`. Values
 //!   are always bound parameters.
@@ -22,7 +24,8 @@ use hyscribe_model::{
 };
 use sqlx::Row as _;
 
-use dialect::{DatePart, Dialect};
+pub use dialect::Connection;
+use dialect::{Access, DatePart, Dialect};
 
 /// The engine's dialect: MySQL and MariaDB, the only one for now.
 type Engine = dialect::MySql;
@@ -277,9 +280,11 @@ pub struct Db {
 }
 
 impl Db {
-    /// Connects with `config`, read only.
+    /// Connects with `config`, read only, as the read user if there is one.
     pub async fn connect(config: &Database) -> Result<Db, DbError> {
-        let pool = Engine::connect(config).await.map_err(db_error)?;
+        let pool = Engine::connect(config, Access::Read)
+            .await
+            .map_err(db_error)?;
         Ok(Db {
             pool,
             prefix: config.prefix.clone(),
@@ -1158,10 +1163,10 @@ impl Db {
     ) -> Result<Option<Credentials>, DbError> {
         let sql = self.prefix.sql(match field {
             UserField::Login => {
-                "SELECT ID, user_login, user_pass FROM {prefix}users WHERE user_login = ? ORDER BY ID LIMIT 1"
+                "SELECT ID, user_login, user_pass, user_activation_key FROM {prefix}users WHERE user_login = ? ORDER BY ID LIMIT 1"
             }
             UserField::Email => {
-                "SELECT ID, user_login, user_pass FROM {prefix}users WHERE user_email = ? ORDER BY ID LIMIT 1"
+                "SELECT ID, user_login, user_pass, user_activation_key FROM {prefix}users WHERE user_email = ? ORDER BY ID LIMIT 1"
             }
         });
         let row = sqlx::query(sql)
@@ -1175,6 +1180,7 @@ impl Db {
                 id: c.unsigned("ID"),
                 login: c.bytes("user_login"),
                 pass: c.bytes("user_pass"),
+                activation_key: c.bytes("user_activation_key"),
             };
             c.finish(credentials)
         })
@@ -2128,6 +2134,7 @@ enum Bind {
     Int(u64),
     Maybe(Option<u64>),
     Signed(i64),
+    Bytes(Vec<u8>),
 }
 
 /// The users `Db::list_users()` lists.
@@ -2302,6 +2309,7 @@ impl Sql {
                 Bind::Int(n) => query.bind(n),
                 Bind::Maybe(n) => query.bind(n),
                 Bind::Signed(n) => query.bind(n),
+                Bind::Bytes(bytes) => query.bind(bytes),
             };
         }
         query
@@ -2313,3 +2321,6 @@ mod tests;
 
 mod dialect;
 mod people;
+mod write;
+
+pub use write::{CommentFields, Meta, PostFields, UserFields, Write, Writer};

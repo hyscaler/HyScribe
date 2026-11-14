@@ -243,19 +243,109 @@ async fn shadow_mode_shows_the_screen_but_logs_nobody_in() {
     assert!(reply.body.contains("<p>Please log in again.</p>"));
 }
 
+/// A site anyone may register on shows the form; a request's post type
+/// is read from the database.
 #[tokio::test(flavor = "multi_thread")]
-async fn other_actions_are_not_ported_yet() {
+async fn registration_and_post_types_are_read() {
+    let mut site = Arc::try_unwrap(login_site(None).await).unwrap();
+    site.options
+        .insert("users_can_register".into(), b"1".to_vec());
+    let site = Arc::new(site);
+    let reply = send(&site, "GET", "/hs-login?action=register", "", "").await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert!(reply.body.contains("id=\"registerform\""));
+    let handle = Handle::current();
+    let types = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, now());
+        (reads.post_type(1), reads.post_type(999))
+    })
+    .await
+    .unwrap();
+    assert_eq!(types, (Some("post".into()), None));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn other_actions_show_their_forms_and_links() {
     let site = login_site(None).await;
-    for uri in [
-        "/hs-login?action=register",
-        "/hs-login?action=lostpassword",
-        "/hs-login?key=x",
+    let golden = |query: &str| {
+        let golden = include_str!("../../../hyscribe-admin/tests/golden/login-actions.tsv");
+        let line = golden
+            .lines()
+            .find(|line| line.starts_with(&format!("{query}\t0\t")))
+            .unwrap();
+        let page = String::from_utf8(unhex(line.rsplit('\t').next().unwrap())).unwrap();
+        page.replace("/wp-login.php", "/hs-login")
+            .replace("/wp-admin/load-styles.php", "/hs-admin/load-styles")
+    };
+    for (query, status) in [
+        ("action=lostpassword", StatusCode::OK),
+        ("checkemail=confirm", StatusCode::OK),
+        (
+            "action=confirmaction&request_id=1&confirm_key=x",
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ),
     ] {
+        let reply = send(&site, "GET", &format!("/hs-login?{query}"), "", "").await;
         assert_eq!(
-            send(&site, "GET", uri, "", "").await.status,
-            StatusCode::NOT_IMPLEMENTED,
-            "{uri}"
+            (reply.status, reply.body),
+            (status, golden(query)),
+            "{query}"
         );
+    }
+    let reset = format!("hyscribe-resetpass-{}", md5(b"http://127.0.0.1:8081"));
+    // Location and the reset password cookie, then the cookie sent.
+    for (uri, cookie, location, set) in [
+        (
+            "/hs-login?action=register",
+            "",
+            "http://127.0.0.1:8081/hs-login?registration=disabled",
+            None,
+        ),
+        (
+            "/hs-login?action=rp&key=abc&login=a%20b",
+            "",
+            "/hs-login?action=rp",
+            Some("=a%20b%3Aabc; path=/hs-login; HttpOnly; SameSite=Lax"),
+        ),
+        (
+            "/hs-login?action=rp",
+            "x=y",
+            "http://127.0.0.1:8081/hs-login?action=lostpassword&error=invalidkey",
+            Some("=%20; expires="),
+        ),
+    ] {
+        let reply = send(&site, "GET", uri, cookie, "").await;
+        assert_eq!(reply.status, StatusCode::FOUND, "{uri}");
+        assert_eq!(reply.headers[header::LOCATION], location, "{uri}");
+        let cookies = all(&reply.headers, header::SET_COOKIE);
+        let ours = cookies.iter().find(|c| c.starts_with(&reset));
+        match set {
+            Some(set) => assert!(ours.unwrap().starts_with(&format!("{reset}{set}")), "{uri}"),
+            None => assert!(ours.is_none(), "{uri}"),
+        }
+    }
+    let expired = format!("{reset}=admin:abc");
+    let before = now();
+    let reply = send(&site, "GET", "/hs-login?action=rp", &expired, "").await;
+    let cookies = all(&reply.headers, header::SET_COOKIE);
+    // Expired a year before the request.
+    let dates: Vec<String> = (before..=now())
+        .map(|at| {
+            let at = UNIX_EPOCH + Duration::from_secs((at - YEAR).unsigned_abs());
+            format!(
+                "expires={}; Max-Age=0; path=/hs-login; HttpOnly",
+                httpdate::fmt_http_date(at)
+            )
+        })
+        .collect();
+    assert!(cookies.iter().any(|c| dates.iter().any(|d| c.contains(d))));
+    // What the forms post, and the post password form, are not ported.
+    for (method, uri) in [
+        ("POST", "/hs-login?action=lostpassword"),
+        ("GET", "/hs-login?action=postpass"),
+    ] {
+        let reply = send(&site, method, uri, "", "user_login=admin").await;
+        assert_eq!(reply.status, StatusCode::NOT_IMPLEMENTED, "{uri}");
     }
     assert_eq!(
         send(

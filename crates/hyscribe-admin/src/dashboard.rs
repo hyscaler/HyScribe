@@ -7,7 +7,7 @@ use hyscribe_kses::{
 };
 use hyscribe_model::{Comment, Post, User};
 use hyscribe_phpser::is_empty_string;
-use hyscribe_phpser::{Maybe, Value, json_decode, maybe_unserialize};
+use hyscribe_phpser::{Maybe, Value, json_decode, maybe_unserialize, parse_str};
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::convert_chars;
 use hyscribe_render::{comment_avatar, number_format, wp_trim_words};
@@ -141,6 +141,26 @@ fn welcome_panel(site: &dyn DashboardSite) -> String {
         .replace("%new_page%", &url("post-new.php?post_type=page"))
         .replace("%styles%", &url("site-editor.php?p=%2Fstyles"))
         .replace("%site_editor%", &url("site-editor.php"))
+}
+
+/// The notice after the admin email check was postponed with
+/// `admin_email_remind_later`, shown for a minute after.
+fn remind_later(site: &dyn DashboardSite, request_uri: &str) -> &'static str {
+    let query = request_uri.split_once('?').map_or("", |(_, query)| query);
+    let asked = parse_str(query.as_bytes());
+    if asked
+        .get_str("admin_email_remind_later")
+        .is_none_or(Value::is_empty)
+    {
+        return "";
+    }
+    const INTERVAL: i64 = 3 * 86_400;
+    let postponed = Value::String(site.option("admin_email_lifespan").unwrap_or_default());
+    if site.clock().1 - (postponed.to_int() - INTERVAL) < 60 {
+        "<div class=\"notice notice-success is-dismissible\"><p>The admin email verification page will reappear after 3 days.</p></div>"
+    } else {
+        ""
+    }
 }
 
 /// `show_welcome_panel`: 0 hides the panel, 2 shows it only to the owner
@@ -825,7 +845,8 @@ pub fn dashboard(site: &dyn DashboardSite, request: &Request) -> Option<String> 
         site.nonce("meta-box-order")
     ));
     let content = format!(
-        "\n<div class=\"wrap\">\n\t<h1>Dashboard</h1>\n\n\t\n\n{}\t<div id=\"dashboard-widgets-wrap\">\n\t{columns}</div><!-- dashboard-widgets-wrap -->\n\n</div><!-- wrap -->{TEMPLATES}",
+        "\n<div class=\"wrap\">\n\t<h1>Dashboard</h1>\n\n\t{}\n\n{}\t<div id=\"dashboard-widgets-wrap\">\n\t{columns}</div><!-- dashboard-widgets-wrap -->\n\n</div><!-- wrap -->{TEMPLATES}",
+        remind_later(site, request_uri),
         welcome_panel(site)
     );
 

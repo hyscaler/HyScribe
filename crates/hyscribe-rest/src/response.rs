@@ -203,22 +203,32 @@ pub fn paginate(
     query: &[(Key, Value)],
     collection: &str,
 ) {
+    let prev = page.saturating_sub(1).min(pages);
+    pages_linked(response, (total, pages, page), prev, query, collection);
+}
+
+/// [`paginate`] with `prev` as the page before, which the search route
+/// does not hold to the last page.
+pub(crate) fn pages_linked(
+    response: &mut Response,
+    (total, pages, page): (u64, u64, u64),
+    prev: u64,
+    query: &[(Key, Value)],
+    collection: &str,
+) {
     response.header("X-WP-Total", &total.to_string());
     response.header("X-WP-TotalPages", &pages.to_string());
     let query = urlencode_deep(Value::Array(query.to_vec()));
     let base = add_query_values(query.as_array().unwrap_or_default(), collection.as_bytes());
-    let links: Vec<String> = [
-        ("prev", page.saturating_sub(1).min(pages), page > 1),
-        ("next", page + 1, page < pages),
-    ]
-    .into_iter()
-    .filter(|(_, _, shown)| *shown)
-    .map(|(rel, to, _)| {
-        let to = to.to_string();
-        let link = add_query_arg(&[(b"page", Some(to.as_bytes()))], &base);
-        format!("<{}>; rel=\"{rel}\"", String::from_utf8_lossy(&link))
-    })
-    .collect();
+    let links: Vec<String> = [("prev", prev, page > 1), ("next", page + 1, page < pages)]
+        .into_iter()
+        .filter(|(_, _, shown)| *shown)
+        .map(|(rel, to, _)| {
+            let to = to.to_string();
+            let link = add_query_arg(&[(b"page", Some(to.as_bytes()))], &base);
+            format!("<{}>; rel=\"{rel}\"", String::from_utf8_lossy(&link))
+        })
+        .collect();
     // `link_header()` joins a response's links in one header.
     if !links.is_empty() {
         response.header("Link", &links.join(", "));

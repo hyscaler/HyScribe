@@ -30,8 +30,15 @@ const MIME_TYPES: &[u8] = include_bytes!("../../../wordpress/wp-includes/mime-ty
 /// The endpoints of the route `regex`, if one of these.
 pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     match regex {
-        "/wp/v2/media" => Some(posts::collection(Kind::Attachment)),
-        "/wp/v2/media/(?P<id>[\\d]+)" => Some(posts::single(vec![id(), context_arg()])),
+        "/wp/v2/media" => Some(posts::type_endpoints(Kind::Attachment, false)),
+        "/wp/v2/media/(?P<id>[\\d]+)" => {
+            let mut endpoints = posts::type_endpoints(Kind::Attachment, true);
+            // A single attachment takes no excerpt length or password.
+            if let Some(get) = endpoints.first_mut() {
+                get.args = vec![id(), context_arg()];
+            }
+            Some(endpoints)
+        }
         _ => None,
     }
 }

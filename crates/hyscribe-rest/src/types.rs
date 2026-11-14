@@ -68,6 +68,12 @@ pub(crate) fn post_type(name: &str) -> Option<&'static Value> {
     found.map(|(_, fields)| fields)
 }
 
+/// `is_post_type_viewable()` of a post type shown in REST.
+pub(crate) fn viewable(name: &str) -> bool {
+    let fields = post_type(name).and_then(|fields| fields.get_str("viewable"));
+    fields == Some(&Value::Bool(true))
+}
+
 /// `rest_get_route_for_post_type_items()`: the route of a post type shown
 /// in REST.
 pub(crate) fn items_route(name: &str) -> Option<String> {

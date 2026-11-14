@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `WP_REST_Posts_Controller` for posts and pages: `/wp/v2/posts`,
-//! `/wp/v2/pages` and their single items, read only. Writes answer 501 but
-//! their permission checks give `Allow` and `targetHints`.
+//! `/wp/v2/pages` and their single items, read only, and for the types
+//! whose controllers extend it. Writes answer 501 but their permission
+//! checks give `Allow` and `targetHints`.
 
 pub(crate) mod args;
+mod menu_items;
 pub(crate) mod prepare;
 
 use hyscribe_model::{FormatFilter, OrderBy, Post, PostQuery, StatusFilter};
@@ -14,7 +16,7 @@ use hyscribe_render::rest::Rendering;
 use hyscribe_render::site::Request;
 use hyscribe_render::{order_by, search_count, search_terms, sticky_posts};
 
-use crate::request::{Arg, Params};
+use crate::request::Params;
 use crate::response::{Response, RestError, paginate};
 use crate::statuses::STATUSES;
 use crate::{Context, Endpoint};
@@ -24,14 +26,29 @@ use crate::{Context, Endpoint};
 pub(crate) enum Kind {
     Post,
     Page,
+    Block,
+    Navigation,
+    MenuItem,
     Attachment,
 }
+
+const KINDS: [Kind; 6] = [
+    Kind::Post,
+    Kind::Page,
+    Kind::Block,
+    Kind::Navigation,
+    Kind::MenuItem,
+    Kind::Attachment,
+];
 
 impl Kind {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Kind::Post => "post",
             Kind::Page => "page",
+            Kind::Block => "wp_block",
+            Kind::Navigation => "wp_navigation",
+            Kind::MenuItem => "nav_menu_item",
             Kind::Attachment => "attachment",
         }
     }
@@ -40,94 +57,116 @@ impl Kind {
         match self {
             Kind::Post => "posts",
             Kind::Page => "pages",
+            Kind::Block => "blocks",
+            Kind::Navigation => "navigation",
+            Kind::MenuItem => "menu-items",
             Kind::Attachment => "media",
         }
     }
 
+    /// The type of a route under `/wp/v2/<base>`.
+    pub(crate) fn of(route: &str) -> Kind {
+        let base = route.trim_start_matches("/wp/v2/").split('/').next();
+        let found = KINDS.into_iter().find(|kind| base == Some(kind.base()));
+        found.unwrap_or(Kind::Post)
+    }
+
+    fn field(self, path: &[&str]) -> Option<&'static Value> {
+        crate::types::post_type(self.name()).and_then(|fields| fields.get_path(path))
+    }
+
     /// `$post_type->cap->$cap`.
     pub(crate) fn cap(self, cap: &str) -> String {
-        let fields = crate::types::post_type(self.name());
-        let mapped = fields.and_then(|fields| fields.get_path(&["capabilities", cap]));
+        let mapped = self.field(&["capabilities", cap]);
         String::from_utf8_lossy(&mapped.map(Value::to_php_string).unwrap_or_default()).into_owned()
+    }
+
+    /// `post_type_supports()`.
+    pub(crate) fn supports(self, feature: &str) -> bool {
+        self.field(&["supports", feature]) == Some(&Value::Bool(true))
     }
 
     /// The REST taxonomies of the type: their names and REST bases.
     pub(crate) fn taxonomies(self) -> &'static [(&'static str, &'static str)] {
         match self {
             Kind::Post => &[("category", "categories"), ("post_tag", "tags")],
-            Kind::Page | Kind::Attachment => &[],
-        }
-    }
-}
-
-impl Kind {
-    /// The type of a request's route, `/wp/v2/<base>` or below it.
-    pub(crate) fn of(params: &Params) -> Kind {
-        match params.route.split('/').nth(3) {
-            Some("pages") => Kind::Page,
-            Some("media") => Kind::Attachment,
-            _ => Kind::Post,
+            Kind::Block => &[("wp_pattern_category", "wp_pattern_category")],
+            Kind::MenuItem => &[("nav_menu", "menus")],
+            Kind::Page | Kind::Navigation | Kind::Attachment => &[],
         }
     }
 }
 
 /// The endpoints of the route `regex`, if one of these.
 pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
-    match regex {
-        "/wp/v2/posts" => Some(collection(Kind::Post)),
-        "/wp/v2/pages" => Some(collection(Kind::Page)),
-        "/wp/v2/posts/(?P<id>[\\d]+)" | "/wp/v2/pages/(?P<id>[\\d]+)" => Some(single(args::item())),
-        _ => None,
+    let (kind, single) = match regex {
+        "/wp/v2/posts" => (Kind::Post, false),
+        "/wp/v2/pages" => (Kind::Page, false),
+        "/wp/v2/posts/(?P<id>[\\d]+)" => (Kind::Post, true),
+        "/wp/v2/pages/(?P<id>[\\d]+)" => (Kind::Page, true),
+        _ => return None,
+    };
+    Some(type_endpoints(kind, single))
+}
+
+/// The endpoints of a type's collection, or of its single items; each
+/// finds its type from the route.
+pub(crate) fn type_endpoints(kind: Kind, single: bool) -> Vec<Endpoint> {
+    if !single {
+        return vec![
+            Endpoint {
+                args: args::collection(kind),
+                permission: |c, p| items_permission(c, p, Kind::of(p.route)),
+                callback: Some(|c, p| items(c, p, Kind::of(p.route))),
+            },
+            Endpoint {
+                args: Vec::new(),
+                permission: |c, p| create_permission(c, p, Kind::of(p.route)),
+                callback: None,
+            },
+        ];
     }
-}
-
-/// The collection route's endpoints for `kind`: GET, and POST's check.
-pub(crate) fn collection(kind: Kind) -> Vec<Endpoint> {
+    let write = |permission| Endpoint {
+        args: vec![args::id()],
+        permission,
+        callback: None,
+    };
     vec![
         Endpoint {
-            args: args::collection(kind),
-            permission: |c, p| items_permission(c, p, Kind::of(p)),
-            callback: Some(|c, p| items(c, p, Kind::of(p))),
+            args: args::item(),
+            permission: |c, p| item_permission(c, p, Kind::of(p.route)),
+            callback: Some(|c, p| item(c, p, Kind::of(p.route))),
         },
-        Endpoint {
-            args: Vec::new(),
-            permission: |c, p| create_permission(c, p, Kind::of(p)),
-            callback: None,
-        },
-    ]
-}
-
-/// A single item's endpoints: GET, and the checks of its writes.
-pub(crate) fn single(args: Vec<Arg>) -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            args,
-            permission: |c, p| item_permission(c, p, Kind::of(p)),
-            callback: Some(|c, p| item(c, p, Kind::of(p))),
-        },
-        Endpoint {
-            args: vec![args::id()],
-            permission: |c, p| update_permission(c, p, Kind::of(p)),
-            callback: None,
-        },
-        Endpoint {
-            args: vec![args::id()],
-            permission: |c, p| delete_permission(c, p, Kind::of(p)),
-            callback: None,
-        },
+        write(|c, p| update_permission(c, p, Kind::of(p.route))),
+        write(|c, p| delete_permission(c, p, Kind::of(p.route))),
     ]
 }
 
 /// `get_items_permissions_check()`.
 fn items_permission(context: &Context, params: &Params, kind: Kind) -> Result<(), RestError> {
-    if args::NOT_PORTED.iter().any(|name| params.has(name)) {
+    if args::not_ported(kind).any(|name| params.has(name)) {
         return Err(RestError::not_ported());
     }
     if params.context() == b"edit" && !context.can(&kind.cap("edit_posts")) {
         let message = "Sorry, you are not allowed to edit posts in this post type.";
         return Err(context.forbidden("rest_forbidden_context", message));
     }
-    Ok(())
+    menu_item_access(context, kind)
+}
+
+/// The menu items' `check_has_read_only_access()`.
+fn menu_item_access(context: &Context, kind: Kind) -> Result<(), RestError> {
+    if kind != Kind::MenuItem || reads_menus(context) {
+        return Ok(());
+    }
+    let message = "Sorry, you are not allowed to view menu items.";
+    Err(context.forbidden("rest_cannot_view", message))
+}
+
+/// The menus controllers' `check_has_read_only_access()`: whoever can
+/// edit the theme's options or posts of any type shown in REST.
+pub(crate) fn reads_menus(context: &Context) -> bool {
+    context.can("edit_theme_options") || crate::types::can_edit_any(context)
 }
 
 /// `! empty( $request[ $name ] )`.
@@ -203,16 +242,18 @@ fn can_update(context: &Context, post: &Post) -> bool {
 
 /// `check_read_permission()`: a post of a type shown in REST, published,
 /// the only public status core registers, or readable by the user, or
-/// inheriting a readable parent's status, or published without one.
+/// inheriting a readable parent's status, or published without one; a
+/// pattern only by those who may read it.
 pub(crate) fn can_read(context: &Context, post: &Post) -> bool {
     let mut seen = Vec::new();
     let mut post = post.clone();
     loop {
+        let readable = || context.can_for("read_post", post.id);
         let shown = crate::types::post_type(&post.post_type).is_some();
-        if !shown {
+        if !shown || post.post_type == "wp_block" && !readable() {
             return false;
         }
-        if post.status == "publish" || context.can_for("read_post", post.id) {
+        if post.status == "publish" || readable() {
             return true;
         }
         if post.status != "inherit" {
@@ -245,11 +286,11 @@ fn item_permission(context: &Context, params: &Params, kind: Kind) -> Result<(),
             403,
         ));
     }
-    if can_read(context, &post) {
-        return Ok(());
+    if !can_read(context, &post) {
+        let message = "Sorry, you are not allowed to do that.";
+        return Err(context.forbidden("rest_forbidden", message));
     }
-    let message = "Sorry, you are not allowed to do that.";
-    Err(context.forbidden("rest_forbidden", message))
+    menu_item_access(context, kind)
 }
 
 /// `update_item_permissions_check()`.
@@ -316,12 +357,14 @@ fn item(context: &Context, params: &Params, kind: Kind) -> Result<Response, Rest
     let request = render_request(context);
     let mut rendering = Rendering::new(context.site.theme(), context.site.reads(), &request);
     let mut response = prepare::post(context, params, kind, &post, &mut rendering)?;
-    let link = link(context, &post);
-    let link = String::from_utf8_lossy(&link);
-    response.header(
-        "Link",
-        &format!("<{link}>; rel=\"alternate\"; type=text/html"),
-    );
+    if crate::types::viewable(kind.name()) {
+        let link = link(context, &post);
+        let link = String::from_utf8_lossy(&link);
+        response.header(
+            "Link",
+            &format!("<{link}>; rel=\"alternate\"; type=text/html"),
+        );
+    }
     Ok(response)
 }
 
@@ -395,8 +438,15 @@ fn query(
             400,
         ));
     }
+    // Only the type's own arguments are read.
+    let registered = args::collection(kind);
+    let param = |name: &str| {
+        let known = registered.iter().any(|arg| arg.name == name);
+        params.get(name).filter(|_| known)
+    };
+    let listed = |name: &str| param(name).map_or_else(Vec::new, |_| ids(params, name));
     let mut exclude = ids(params, "exclude");
-    if let Some(wanted) = params.get("sticky").filter(|_| kind == Kind::Post) {
+    if let Some(wanted) = param("sticky") {
         let sticky = sticky(context);
         if !wanted.is_empty() {
             include = if include.is_empty() {
@@ -433,33 +483,27 @@ fn query(
         statuses: statuses(params),
         include: (!include.is_empty()).then_some(include),
         exclude,
-        authors: ids(params, "author"),
-        excluded_authors: ids(params, "author_exclude"),
-        parents: ids(params, "parent"),
-        excluded_parents: ids(params, "parent_exclude"),
+        authors: listed("author"),
+        excluded_authors: listed("author_exclude"),
+        parents: listed("parent"),
+        excluded_parents: listed("parent_exclude"),
         names,
-        menu_order: params
-            .get("menu_order")
-            .filter(|_| kind == Kind::Page)
-            .map(Value::to_int),
+        menu_order: param("menu_order").map(Value::to_int),
         search_columns: strings(params, "search_columns")
             .into_iter()
             .map(|column| String::from_utf8_lossy(&column).into_owned())
             .collect(),
-        formats: params
-            .get("format")
-            .filter(|_| kind == Kind::Post)
-            .map(|_| {
-                let formats = strings(params, "format");
-                FormatFilter {
-                    standard: formats.iter().any(|format| format == b"standard"),
-                    slugs: formats
-                        .iter()
-                        .filter(|format| *format != b"standard")
-                        .map(|format| format!("post-format-{}", String::from_utf8_lossy(format)))
-                        .collect(),
-                }
-            }),
+        formats: param("format").map(|_| {
+            let formats = strings(params, "format");
+            FormatFilter {
+                standard: formats.iter().any(|format| format == b"standard"),
+                slugs: formats
+                    .iter()
+                    .filter(|format| *format != b"standard")
+                    .map(|format| format!("post-format-{}", String::from_utf8_lossy(format)))
+                    .collect(),
+            }
+        }),
         exact: params.get("search_semantics").is_some(),
         logged_in: context.user != 0,
         mime_types: crate::media::mime_types(params, kind),
@@ -483,10 +527,7 @@ fn query(
     };
     query.order = order_by(&Value::String(by.to_vec()), ascending, &query);
     if let Some(search) = search {
-        let text = String::from_utf8_lossy(&search).into_owned();
-        query.search = search_terms(&text);
-        query.sentence = text.replace(['\r', '\n'], "");
-        query.search_count = search_count(&text);
+        searched(&mut query, &search);
         if orderby == b"relevance" {
             query.order.insert(0, (OrderBy::Relevance, false));
         }
@@ -501,6 +542,14 @@ fn query(
         query.sticky = sticky(context);
     }
     Ok((query, page, u32::try_from(per_page).unwrap_or(u32::MAX)))
+}
+
+/// `WP_Query`'s search for `s`, not empty.
+pub(crate) fn searched(query: &mut PostQuery, search: &[u8]) {
+    let text = String::from_utf8_lossy(search).into_owned();
+    query.search = search_terms(&text);
+    query.sentence = text.replace(['\r', '\n'], "");
+    query.search_count = search_count(&text);
 }
 
 /// `get_items()`.

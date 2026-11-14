@@ -27,6 +27,7 @@ hyscribe-render = { path = "crates/hyscribe-render" }
 hyscribe-rest = { path = "crates/hyscribe-rest" }
 hyscribe-theme-json = { path = "crates/hyscribe-theme-json" }
 hyscribe-testkit = { path = "crates/hyscribe-testkit" }
+hyscribe-write = { path = "crates/hyscribe-write" }
 clap = { version = "4.5", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 dotenvy = "0.15"
 icu_normalizer = { version = "2.4", default-features = false, features = ["compiled_data"] }

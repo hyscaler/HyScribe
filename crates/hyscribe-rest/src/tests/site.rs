@@ -6,7 +6,7 @@
 //! replays the post routes over the databases too.
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use hyscribe_model::{Comment, OrderBy, Post, PostQuery, Term, User};
 use hyscribe_phpser::Value;
@@ -61,7 +61,8 @@ fn string(value: &SqlValue) -> String {
     String::from_utf8_lossy(&text(value)).into_owned()
 }
 
-fn posts(dump: &'static Dump) -> impl Iterator<Item = Post> {
+/// A dump's posts, every column the routes read.
+pub(super) fn posts(dump: &Dump) -> impl Iterator<Item = Post> + '_ {
     dump.table("wp_posts").map(|row| Post {
         id: number(&row[0]),
         author: number(&row[1]),
@@ -99,13 +100,14 @@ pub(super) struct Fixture {
     /// post with a gallery shortcode and its own excerpt (94); and the
     /// site two hours east of UTC.
     pub(super) extra: bool,
-    /// With `reference/rest/media.sql`'s revisions, autosaves and
-    /// attachments.
-    pub(super) media: bool,
+    /// A dump read in place of the fixture's: the default install with a
+    /// state a golden adds.
+    pub(super) state: Option<&'static Dump>,
 }
 
-/// A dump's posts, their meta and terms, read once.
+/// A dump's options, posts, their meta and terms, read once.
 struct Data {
+    options: HashMap<String, Vec<u8>>,
     posts: Vec<Post>,
     meta: HashMap<(u64, Vec<u8>), Vec<u8>>,
     terms: HashMap<(u64, Vec<u8>), Vec<Term>>,
@@ -150,6 +152,7 @@ fn data(dump: &'static Dump) -> Data {
         list.sort_by_key(|term| string_of(&term.name).to_lowercase());
     }
     Data {
+        options: options(dump),
         posts: posts(dump).collect(),
         meta,
         terms,
@@ -158,8 +161,20 @@ fn data(dump: &'static Dump) -> Data {
 
 impl Fixture {
     fn data(self) -> &'static Data {
-        static DATA: [OnceLock<Data>; 4] = [const { OnceLock::new() }; 4];
-        let memo = &DATA[usize::from(self.ttd) + 2 * usize::from(self.media)];
+        static STATES: Mutex<Vec<(usize, &'static Data)>> = Mutex::new(Vec::new());
+        if let Some(dump) = self.state {
+            let key = std::ptr::from_ref(dump) as usize;
+            let mut states = STATES.lock().unwrap();
+            if let Some((_, data)) = states.iter().find(|(known, _)| *known == key) {
+                return data;
+            }
+            let read: &'static Data = Box::leak(Box::new(data(dump)));
+            states.push((key, read));
+            return read;
+        }
+        static DEFAULT: OnceLock<Data> = OnceLock::new();
+        static TTD: OnceLock<Data> = OnceLock::new();
+        let memo = if self.ttd { &TTD } else { &DEFAULT };
         memo.get_or_init(|| data(self.dump()))
     }
 
@@ -229,36 +244,25 @@ impl Fixture {
     }
 
     fn dump(self) -> &'static Dump {
-        static MEDIA: [OnceLock<Dump>; 2] = [const { OnceLock::new() }; 2];
-        let dump = if self.ttd {
+        if let Some(dump) = self.state {
+            dump
+        } else if self.ttd {
             theme_test_data()
         } else {
             default_install()
-        };
-        if !self.media {
-            return dump;
         }
-        MEDIA[usize::from(self.ttd)].get_or_init(|| {
-            let state = include_str!("../../../../reference/rest/media.sql");
-            let mut rows = dump.rows.clone();
-            rows.extend(Dump::parse(state.as_bytes()).unwrap().rows);
-            Dump { rows }
-        })
     }
 }
 
 impl Site for Fixture {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
-        static DEFAULT: OnceLock<HashMap<String, Vec<u8>>> = OnceLock::new();
-        static TTD: OnceLock<HashMap<String, Vec<u8>>> = OnceLock::new();
         if self.pretty && name == "permalink_structure" {
             return Some(b"/%postname%/".to_vec());
         }
         if self.extra && name == "gmt_offset" {
             return Some(b"2".to_vec());
         }
-        let memo = if self.ttd { &TTD } else { &DEFAULT };
-        memo.get_or_init(|| options(self.dump())).get(name).cloned()
+        self.data().options.get(name).cloned()
     }
 
     fn home_url(&self) -> Vec<u8> {
@@ -508,4 +512,21 @@ fn order(query: &PostQuery, a: &Post, b: &Post) -> std::cmp::Ordering {
         return b.id.cmp(&a.id);
     }
     a.id.cmp(&b.id)
+}
+
+/// The default install, or the Theme Test Data fixture when `ttd`, with
+/// `reference/rest/media.sql`'s rows.
+pub(super) fn with_media(ttd: bool) -> &'static Dump {
+    static MEDIA: [OnceLock<Dump>; 2] = [const { OnceLock::new() }; 2];
+    MEDIA[usize::from(ttd)].get_or_init(|| {
+        let dump = if ttd {
+            theme_test_data()
+        } else {
+            default_install()
+        };
+        let state = include_str!("../../../../reference/rest/media.sql");
+        let mut rows = dump.rows.clone();
+        rows.extend(Dump::parse(state.as_bytes()).unwrap().rows);
+        Dump { rows }
+    })
 }

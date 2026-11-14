@@ -9,6 +9,8 @@
 //!   are always bound parameters.
 //! - **Bytes, not text.** Text columns are read as bytes, so content is
 //!   never re-encoded whatever the site's charset.
+//! - **Portable SQL.** Queries are standard SQL; what is not portable is
+//!   written by the engine's [`Dialect`] (ADR 0014).
 
 use std::fmt;
 
@@ -18,8 +20,14 @@ use hyscribe_model::{
     PostQuery, Term, TermOrder, TermQuery, TimeCondition, USER_ORDERBY, USER_SEARCH_COLUMNS, User,
     UserField,
 };
-use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow};
-use sqlx::{Executor, Row};
+use sqlx::Row as _;
+
+use dialect::{DatePart, Dialect};
+
+/// The engine's dialect: MySQL and MariaDB, the only one for now.
+type Engine = dialect::MySql;
+type Backend = <Engine as Dialect>::Backend;
+type Row = <Backend as sqlx::Database>::Row;
 
 /// Puts the table prefix into SQL: the only SQL this crate builds.
 trait PrefixSql {
@@ -33,6 +41,8 @@ trait PrefixSql {
 
 impl PrefixSql for Prefix {
     fn sql(&self, query: &'static str) -> sqlx::AssertSqlSafe<String> {
+        #[cfg(test)]
+        tests::emitted(query);
         self.sql_from_fragments(query.to_string())
     }
 
@@ -57,27 +67,47 @@ fn db_error(err: sqlx::Error) -> DbError {
     DbError(err.to_string())
 }
 
-/// The `{prefix}comments` columns [`Comment`] reads, as a literal for
-/// `concat!`.
-macro_rules! comment_columns {
-    () => {
-        "comment_ID, comment_post_ID, comment_author, comment_author_email, comment_author_url, \
-         comment_author_IP, \
-         CAST(comment_date AS CHAR) AS comment_date, \
-         CAST(comment_date_gmt AS CHAR) AS comment_date_gmt, comment_content, comment_type, \
-         comment_parent, user_id"
-    };
+/// `date` as text under its own name.
+fn date_column(sql: &mut Sql, date: &'static str) {
+    sql.push(", ");
+    Engine::date_text(sql, date);
+    sql.push(" AS ");
+    sql.push(date);
 }
 
-/// The `{prefix}posts` columns [`Post`] reads, as a literal for `concat!`.
-macro_rules! post_columns {
-    () => {
-        "ID, post_author, CAST(post_date AS CHAR) AS post_date, \
-         CAST(post_date_gmt AS CHAR) AS post_date_gmt, post_content, post_title, post_excerpt, \
-         post_status, post_password, post_name, CAST(post_modified AS CHAR) AS post_modified, \
-         CAST(post_modified_gmt AS CHAR) AS post_modified_gmt, post_parent, guid, CAST(menu_order AS SIGNED) AS menu_order, post_type, post_mime_type, comment_count, \
-         comment_status, ping_status"
-    };
+/// `SELECT` the `{prefix}comments` columns [`Comment`] reads, then `rest`.
+fn select_comments(rest: &'static str) -> Sql {
+    let mut sql = Sql::new(
+        "SELECT comment_ID, comment_post_ID, comment_author, comment_author_email, \
+         comment_author_url, comment_author_IP, comment_content, comment_type, comment_parent, \
+         user_id",
+    );
+    date_column(&mut sql, "comment_date");
+    date_column(&mut sql, "comment_date_gmt");
+    sql.push(rest);
+    sql
+}
+
+/// `SELECT` the `{prefix}posts` columns [`Post`] reads, then `rest`.
+fn select_posts(rest: &'static str) -> Sql {
+    let mut sql = Sql::new(
+        "SELECT ID, post_author, post_content, post_title, post_excerpt, post_status, \
+         post_password, post_name, post_parent, guid, post_type, post_mime_type, comment_count, \
+         comment_status, ping_status",
+    );
+    for date in [
+        "post_date",
+        "post_date_gmt",
+        "post_modified",
+        "post_modified_gmt",
+    ] {
+        date_column(&mut sql, date);
+    }
+    sql.push(", ");
+    Engine::integer(&mut sql, |sql| sql.push("menu_order"));
+    sql.push(" AS menu_order");
+    sql.push(rest);
+    sql
 }
 
 /// The columns of a term in its taxonomy, with its post count, and the
@@ -92,12 +122,12 @@ macro_rules! terms_from {
 /// Reads columns from a row, keeping the first error, so a row decodes in
 /// one step.
 struct Columns<'r> {
-    row: &'r MySqlRow,
+    row: &'r Row,
     error: Option<sqlx::Error>,
 }
 
 impl<'r> Columns<'r> {
-    fn new(row: &'r MySqlRow) -> Columns<'r> {
+    fn new(row: &'r Row) -> Columns<'r> {
         Columns { row, error: None }
     }
 
@@ -133,7 +163,7 @@ impl<'r> Columns<'r> {
     }
 }
 
-fn term(row: &MySqlRow) -> Result<Term, DbError> {
+fn term(row: &Row) -> Result<Term, DbError> {
     let mut c = Columns::new(row);
     let term = Term {
         id: c.unsigned("term_id"),
@@ -146,13 +176,13 @@ fn term(row: &MySqlRow) -> Result<Term, DbError> {
     c.finish(term)
 }
 
-fn term_id(row: &MySqlRow) -> Result<u64, DbError> {
+fn term_id(row: &Row) -> Result<u64, DbError> {
     let mut c = Columns::new(row);
     let id = c.unsigned("term_id");
     c.finish(id)
 }
 
-fn date_count(row: &MySqlRow) -> Result<DateCount, DbError> {
+fn date_count(row: &Row) -> Result<DateCount, DbError> {
     let mut c = Columns::new(row);
     let count = DateCount {
         year: c.signed("y").unsigned_abs(),
@@ -177,7 +207,7 @@ macro_rules! user_columns {
     };
 }
 
-fn user(row: &MySqlRow) -> Result<User, DbError> {
+fn user(row: &Row) -> Result<User, DbError> {
     let mut c = Columns::new(row);
     let user = User {
         id: c.unsigned("ID"),
@@ -193,7 +223,7 @@ fn user(row: &MySqlRow) -> Result<User, DbError> {
     c.finish(user)
 }
 
-fn comment(row: &MySqlRow) -> Result<Comment, DbError> {
+fn comment(row: &Row) -> Result<Comment, DbError> {
     let mut c = Columns::new(row);
     let comment = Comment {
         id: c.unsigned("comment_ID"),
@@ -212,7 +242,7 @@ fn comment(row: &MySqlRow) -> Result<Comment, DbError> {
     c.finish(comment)
 }
 
-fn post(row: &MySqlRow) -> Result<Post, DbError> {
+fn post(row: &Row) -> Result<Post, DbError> {
     let mut c = Columns::new(row);
     let post = Post {
         id: c.unsigned("ID"),
@@ -242,36 +272,18 @@ fn post(row: &MySqlRow) -> Result<Post, DbError> {
 /// A read only connection pool for one site.
 #[derive(Clone, Debug)]
 pub struct Db {
-    pool: MySqlPool,
+    pool: sqlx::Pool<Backend>,
     prefix: Prefix,
 }
 
 impl Db {
     /// Connects with `config`, read only.
     pub async fn connect(config: &Database) -> Result<Db, DbError> {
-        let prefix = config.prefix.clone();
-        let options = MySqlConnectOptions::new()
-            .host(&config.host)
-            .port(config.port)
-            .database(&config.name)
-            .username(&config.user)
-            .password(config.password.expose())
-            .charset(&config.charset);
-        let pool = MySqlPoolOptions::new()
-            .max_connections(8)
-            // Report an unreachable database soon instead of retrying for 30s.
-            .acquire_timeout(std::time::Duration::from_secs(5))
-            .after_connect(|conn, _| {
-                Box::pin(async move {
-                    conn.execute("SET SESSION TRANSACTION READ ONLY")
-                        .await
-                        .map(|_| ())
-                })
-            })
-            .connect_with(options)
-            .await
-            .map_err(db_error)?;
-        Ok(Db { pool, prefix })
+        let pool = Engine::connect(config).await.map_err(db_error)?;
+        Ok(Db {
+            pool,
+            prefix: config.prefix.clone(),
+        })
     }
 
     /// Every option WordPress loads on each request, in table order.
@@ -296,13 +308,10 @@ impl Db {
 
     /// One post by ID, whatever its type and status.
     pub async fn post(&self, id: u64) -> Result<Option<Post>, DbError> {
-        let sql = self.prefix.sql(concat!(
-            "SELECT ",
-            post_columns!(),
-            " FROM {prefix}posts WHERE ID = ?"
-        ));
-        let row = sqlx::query(sql)
-            .bind(id)
+        let mut sql = select_posts(" FROM {prefix}posts WHERE ID = ?");
+        sql.bind(Bind::Int(id));
+        let row = sql
+            .query(&self.prefix)
             .fetch_optional(&self.pool)
             .await
             .map_err(db_error)?;
@@ -311,11 +320,7 @@ impl Db {
 
     /// The published post (of type `post`) named `name`.
     pub async fn post_by_name(&self, name: &str) -> Result<Option<Post>, DbError> {
-        let mut sql = Sql::new(concat!(
-            "SELECT ",
-            post_columns!(),
-            " FROM {prefix}posts WHERE "
-        ));
+        let mut sql = select_posts(" FROM {prefix}posts WHERE ");
         sql.push("post_name = ? AND post_type = 'post' AND post_status = 'publish' LIMIT 1");
         sql.bind(Bind::Text(name.to_string()));
         self.select(sql).await.map(|posts| posts.into_iter().next())
@@ -324,11 +329,7 @@ impl Db {
     /// `get_page_by_path()`'s candidates: the pages and attachments of any
     /// status named one of `names`.
     pub async fn named_pages(&self, names: &[Vec<u8>]) -> Result<Vec<Post>, DbError> {
-        let mut sql = Sql::new(concat!(
-            "SELECT ",
-            post_columns!(),
-            " FROM {prefix}posts WHERE "
-        ));
+        let mut sql = select_posts(" FROM {prefix}posts WHERE ");
         sql.push("post_type IN ('page', 'attachment') AND post_name IN (");
         list(
             &mut sql,
@@ -350,27 +351,21 @@ impl Db {
         post_types: &[&str],
         (year, month, day): (Option<u64>, Option<u64>, Option<u64>),
     ) -> Result<Option<Post>, DbError> {
-        let mut sql = Sql::new(concat!(
-            "SELECT ",
-            post_columns!(),
-            " FROM {prefix}posts WHERE "
-        ));
+        let mut sql = select_posts(" FROM {prefix}posts WHERE ");
         sql.push("post_name LIKE ? AND post_status = 'publish' AND post_type IN (");
         sql.bind(Bind::Text(format!("{}%", esc_like(name))));
         list(
             &mut sql,
             post_types.iter().map(|t| Bind::Text((*t).to_string())),
         );
-        for (fragment, value) in [
-            (" AND YEAR(post_date) = ?", year),
-            (" AND MONTH(post_date) = ?", month),
-            (" AND DAYOFMONTH(post_date) = ?", day),
-        ] {
-            if let Some(value) = value {
-                sql.push(fragment);
-                sql.bind(Bind::Int(value));
-            }
-        }
+        date_parts(
+            &mut sql,
+            [
+                (DatePart::Year, year),
+                (DatePart::Month, month),
+                (DatePart::Day, day),
+            ],
+        );
         sql.push(" LIMIT 1");
         self.select(sql).await.map(|posts| posts.into_iter().next())
     }
@@ -528,15 +523,14 @@ impl Db {
     /// A post's approved comments, as `WP_Comment_Query` orders them for
     /// the comment template: oldest first, then by ID.
     pub async fn comments(&self, post_id: u64) -> Result<Vec<Comment>, DbError> {
-        let sql = self.prefix.sql(concat!(
-            "SELECT ",
-            comment_columns!(),
+        let mut sql = select_comments(
             " FROM {prefix}comments \
              WHERE comment_post_ID = ? AND comment_approved = '1' AND comment_type != 'note' \
-             ORDER BY comment_date_gmt ASC, comment_ID ASC"
-        ));
-        let rows = sqlx::query(sql)
-            .bind(post_id)
+             ORDER BY comment_date_gmt ASC, comment_ID ASC",
+        );
+        sql.bind(Bind::Int(post_id));
+        let rows = sql
+            .query(&self.prefix)
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
@@ -550,19 +544,18 @@ impl Db {
         post: Option<u64>,
         limit: u64,
     ) -> Result<Vec<Comment>, DbError> {
-        let sql = self.prefix.sql(concat!(
-            "SELECT ",
-            comment_columns!(),
+        let mut sql = select_comments(
             " FROM {prefix}comments JOIN {prefix}posts ON comment_post_ID = ID \
              WHERE (? IS NULL AND (post_status = 'publish' \
              OR (post_status = 'inherit' AND post_type = 'attachment')) OR comment_post_ID = ?) \
              AND comment_approved = '1' AND comment_type != 'note' \
-             ORDER BY comment_date_gmt DESC LIMIT ?"
-        ));
-        let rows = sqlx::query(sql)
-            .bind(post)
-            .bind(post)
-            .bind(limit)
+             ORDER BY comment_date_gmt DESC LIMIT ?",
+        );
+        sql.bind(Bind::Maybe(post));
+        sql.bind(Bind::Maybe(post));
+        sql.bind(Bind::Int(limit));
+        let rows = sql
+            .query(&self.prefix)
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
@@ -572,16 +565,15 @@ impl Db {
     /// `get_comments()` of the latest comments block: the approved
     /// comments on published posts, newest first, `limit` of them.
     pub async fn recent_comments(&self, limit: u64) -> Result<Vec<Comment>, DbError> {
-        let sql = self.prefix.sql(concat!(
-            "SELECT ",
-            comment_columns!(),
+        let mut sql = select_comments(
             " FROM {prefix}comments JOIN {prefix}posts ON comment_post_ID = ID \
              WHERE post_status = 'publish' AND comment_approved = '1' \
              AND comment_type != 'note' \
-             ORDER BY comment_date_gmt DESC, comment_ID DESC LIMIT ?"
-        ));
-        let rows = sqlx::query(sql)
-            .bind(limit)
+             ORDER BY comment_date_gmt DESC, comment_ID DESC LIMIT ?",
+        );
+        sql.bind(Bind::Int(limit));
+        let rows = sql
+            .query(&self.prefix)
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
@@ -595,12 +587,10 @@ impl Db {
         query: &PostQuery,
         limit: u64,
     ) -> Result<Vec<Comment>, DbError> {
-        let mut sql = Sql::new(concat!(
-            "SELECT ",
-            comment_columns!(),
+        let mut sql = select_comments(
             " FROM {prefix}comments WHERE comment_approved = '1' AND comment_type != 'note' \
-             AND comment_post_ID IN (SELECT ID FROM {prefix}posts WHERE "
-        ));
+             AND comment_post_ID IN (SELECT ID FROM {prefix}posts WHERE ",
+        );
         post_criteria(&mut sql, query);
         sql.push(") ORDER BY comment_date_gmt DESC LIMIT ?");
         sql.bind(Bind::Int(limit));
@@ -615,24 +605,16 @@ impl Db {
     /// `get_lastcommentmodified( 'GMT' )`: the latest approved comment's
     /// time, `None` without one.
     pub async fn last_comment_modified(&self) -> Result<Option<String>, DbError> {
-        let sql = self.prefix.sql(
-            "SELECT CAST(MAX(comment_date_gmt) AS CHAR) AS latest FROM {prefix}comments \
-             WHERE comment_approved = '1'",
-        );
-        let row = sqlx::query(sql)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(db_error)?;
-        row.try_get("latest").map_err(db_error)
+        let mut sql = Sql::new("SELECT ");
+        Engine::date_text(&mut sql, "MAX(comment_date_gmt)");
+        sql.push(" AS latest FROM {prefix}comments WHERE comment_approved = '1'");
+        self.latest(sql).await
     }
 
     /// Posts of type `post` in one status, as the dashboard lists them.
     pub async fn posts_by_status(&self, query: &StatusQuery<'_>) -> Result<Vec<Post>, DbError> {
-        let mut sql = Sql::new(concat!(
-            "SELECT ",
-            post_columns!(),
-            " FROM {prefix}posts WHERE post_type = 'post' AND post_status = ?"
-        ));
+        let mut sql =
+            select_posts(" FROM {prefix}posts WHERE post_type = 'post' AND post_status = ?");
         sql.bind(Bind::Text(query.status.to_string()));
         if let Some(author) = query.author {
             sql.push(" AND post_author = ?");
@@ -727,16 +709,21 @@ impl Db {
         post_type: &str,
         trash: bool,
     ) -> Result<Vec<(u32, u32)>, DbError> {
-        let sql = self.prefix.sql(if trash {
-            "SELECT DISTINCT YEAR(post_date) AS year, MONTH(post_date) AS month FROM {prefix}posts \
-             WHERE post_type = ? AND post_status = 'trash' ORDER BY post_date DESC"
+        let mut sql = Sql::new("SELECT DISTINCT ");
+        Engine::date_part(&mut sql, DatePart::Year, "post_date");
+        sql.push(" AS year, ");
+        Engine::date_part(&mut sql, DatePart::Month, "post_date");
+        sql.push(" AS month FROM {prefix}posts WHERE post_type = ? AND ");
+        sql.push(if trash {
+            "post_status = 'trash'"
         } else {
-            "SELECT DISTINCT YEAR(post_date) AS year, MONTH(post_date) AS month FROM {prefix}posts \
-             WHERE post_type = ? AND post_status != 'auto-draft' AND post_status != 'trash' \
-             ORDER BY post_date DESC"
+            "post_status != 'auto-draft' AND post_status != 'trash'"
         });
-        let rows = sqlx::query(sql)
-            .bind(post_type)
+        // PHP orders by `post_date`, which falls in the month: the same order.
+        sql.push(" ORDER BY year DESC, month DESC");
+        sql.bind(Bind::Text(post_type.into()));
+        let rows = sql
+            .query(&self.prefix)
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
@@ -819,11 +806,11 @@ impl Db {
     /// those on other posts when `post` is not 0.
     pub async fn comment_counts(&self, user: u64, post: u64) -> Result<[u64; 5], DbError> {
         let mut sql = Sql::new(
-            "SELECT CAST(COALESCE(SUM(comment_approved = '1'), 0) AS SIGNED) AS approved, \
-             CAST(COALESCE(SUM(comment_approved = '0'), 0) AS SIGNED) AS moderated, \
-             CAST(COALESCE(SUM(comment_approved = 'spam'), 0) AS SIGNED) AS spam, \
-             CAST(COALESCE(SUM(comment_approved = 'trash'), 0) AS SIGNED) AS trash, \
-             CAST(COALESCE(SUM(user_id = ? AND comment_approved IN ('0', '1')), 0) AS SIGNED) AS mine \
+            "SELECT COUNT(CASE WHEN comment_approved = '1' THEN 1 END) AS approved, \
+             COUNT(CASE WHEN comment_approved = '0' THEN 1 END) AS moderated, \
+             COUNT(CASE WHEN comment_approved = 'spam' THEN 1 END) AS spam, \
+             COUNT(CASE WHEN comment_approved = 'trash' THEN 1 END) AS trash, \
+             COUNT(CASE WHEN user_id = ? AND comment_approved IN ('0', '1') THEN 1 END) AS mine \
              FROM {prefix}comments WHERE comment_type != 'note'",
         );
         sql.bind(Bind::Int(user));
@@ -868,11 +855,7 @@ impl Db {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<(Comment, String)>, DbError> {
-        let mut sql = Sql::new(concat!(
-            "SELECT ",
-            comment_columns!(),
-            ", comment_approved FROM {prefix}comments WHERE "
-        ));
+        let mut sql = select_comments(", comment_approved FROM {prefix}comments WHERE ");
         comment_filter(&mut sql, filter);
         let columns = order.iter().filter_map(|(name, desc)| {
             let column = COMMENT_ORDERBY.iter().find(|column| *column == name)?;
@@ -946,13 +929,10 @@ impl Db {
 
     /// `get_comment( $id )` in any state.
     pub async fn any_comment(&self, id: u64) -> Result<Option<Comment>, DbError> {
-        let sql = self.prefix.sql(concat!(
-            "SELECT ",
-            comment_columns!(),
-            " FROM {prefix}comments WHERE comment_ID = ?"
-        ));
-        let row = sqlx::query(sql)
-            .bind(id)
+        let mut sql = select_comments(" FROM {prefix}comments WHERE comment_ID = ?");
+        sql.bind(Bind::Int(id));
+        let row = sql
+            .query(&self.prefix)
             .fetch_optional(&self.pool)
             .await
             .map_err(db_error)?;
@@ -961,13 +941,12 @@ impl Db {
 
     /// One approved comment by ID, of any type.
     pub async fn comment(&self, id: u64) -> Result<Option<Comment>, DbError> {
-        let sql = self.prefix.sql(concat!(
-            "SELECT ",
-            comment_columns!(),
-            " FROM {prefix}comments WHERE comment_ID = ? AND comment_approved = '1'"
-        ));
-        let row = sqlx::query(sql)
-            .bind(id)
+        let mut sql = select_comments(
+            " FROM {prefix}comments WHERE comment_ID = ? AND comment_approved = '1'",
+        );
+        sql.bind(Bind::Int(id));
+        let row = sql
+            .query(&self.prefix)
             .fetch_optional(&self.pool)
             .await
             .map_err(db_error)?;
@@ -1011,7 +990,7 @@ impl Db {
             sql.push(
                 " LEFT OUTER JOIN (SELECT post_author, COUNT(*) AS post_count FROM {prefix}posts \
                  WHERE post_type = 'post' AND (post_status = 'publish' \
-                 OR (post_status = 'private' AND (? OR post_author = ?))) \
+                 OR (post_status = 'private' AND (? = 1 OR post_author = ?))) \
                  GROUP BY post_author) p ON (u.ID = p.post_author)",
             );
             sql.bind(Bind::Int(u64::from(filter.all_private)));
@@ -1071,11 +1050,7 @@ impl Db {
     /// Every post of `post_type` whatever its status, newest first, as
     /// `WP_Query` orders posts by date.
     pub async fn posts_of_type(&self, post_type: &str) -> Result<Vec<Post>, DbError> {
-        let mut sql = Sql::new(concat!(
-            "SELECT ",
-            post_columns!(),
-            " FROM {prefix}posts WHERE "
-        ));
+        let mut sql = select_posts(" FROM {prefix}posts WHERE ");
         sql.push("post_type = ? ORDER BY post_date DESC");
         sql.bind(Bind::Text(post_type.to_string()));
         self.select(sql).await
@@ -1105,12 +1080,11 @@ impl Db {
     /// `wp_get_users_with_no_role()`: those whose `key` meta does not match
     /// `regex`, the roles' names.
     pub async fn users_without_role(&self, key: &str, regex: &str) -> Result<Vec<u64>, DbError> {
-        let sql = self.prefix.sql(
-            "SELECT user_id FROM {prefix}usermeta WHERE meta_key = ? AND meta_value NOT REGEXP ?",
-        );
-        let rows = sqlx::query(sql)
-            .bind(key)
-            .bind(regex)
+        let mut sql = Sql::new("SELECT user_id FROM {prefix}usermeta WHERE meta_key = ? AND ");
+        sql.bind(Bind::Text(key.into()));
+        Engine::not_matching(&mut sql, "meta_value", regex.into());
+        let rows = sql
+            .query(&self.prefix)
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
@@ -1154,7 +1128,7 @@ impl Db {
     ) -> Result<Vec<(u64, u64)>, DbError> {
         let mut sql = Sql::new(
             "SELECT post_author, COUNT(*) AS found FROM {prefix}posts WHERE post_type = 'post' \
-             AND (post_status = 'publish' OR (post_status = 'private' AND (? OR post_author = ?))) \
+             AND (post_status = 'publish' OR (post_status = 'private' AND (? = 1 OR post_author = ?))) \
              AND post_author IN (",
         );
         sql.bind(Bind::Int(u64::from(all_private)));
@@ -1341,27 +1315,26 @@ impl Db {
             sql.push(" ORDER BY ");
             match (term_order_column(order), order) {
                 (Some(column), _) => sql.push(column),
-                (None, TermOrder::Slugs) => {
-                    sql.push("FIELD( t.slug, ");
-                    list(
-                        &mut sql,
-                        query
-                            .slugs
-                            .iter()
-                            .map(|slug| Bind::Text(String::from_utf8_lossy(slug).into_owned())),
-                    );
-                }
-                (None, _) => {
-                    sql.push("FIELD( t.term_id, ");
-                    list(&mut sql, query.include.iter().copied().map(Bind::Int));
-                }
+                (None, TermOrder::Slugs) => Engine::list_order(
+                    &mut sql,
+                    "t.slug",
+                    query
+                        .slugs
+                        .iter()
+                        .map(|slug| Bind::Text(String::from_utf8_lossy(slug).into_owned())),
+                ),
+                (None, _) => Engine::list_order(
+                    &mut sql,
+                    "t.term_id",
+                    query.include.iter().copied().map(Bind::Int),
+                ),
             }
             sql.push(if descending { " DESC" } else { " ASC" });
         }
         if let Some(limit) = query.limit {
-            sql.push(" LIMIT ?, ?");
-            sql.bind(Bind::Int(query.offset));
+            sql.push(" LIMIT ? OFFSET ?");
             sql.bind(Bind::Int(limit));
+            sql.bind(Bind::Int(query.offset));
         }
         let rows = sql
             .query(&self.prefix)
@@ -1464,30 +1437,32 @@ impl Db {
 
     /// `wp_get_archives()`'s periods of published posts, newest first.
     pub async fn date_counts(&self, period: Period) -> Result<Vec<DateCount>, DbError> {
-        let mut sql = Sql::new("SELECT CAST(YEAR(post_date) AS SIGNED) AS y, ");
+        let mut sql = Sql::new("SELECT ");
+        let number = |sql: &mut Sql, part, date| {
+            Engine::integer(sql, |sql| Engine::date_part(sql, part, date));
+        };
+        number(&mut sql, DatePart::Year, "post_date");
+        sql.push(" AS y, ");
         match period {
             Period::Year => sql.push("0 AS m, 0 AS d, 0 AS w"),
-            Period::Month => sql.push("CAST(MONTH(post_date) AS SIGNED) AS m, 0 AS d, 0 AS w"),
-            Period::Day => sql.push(
-                "CAST(MONTH(post_date) AS SIGNED) AS m, \
-                 CAST(DAYOFMONTH(post_date) AS SIGNED) AS d, 0 AS w",
-            ),
+            Period::Month => {
+                number(&mut sql, DatePart::Month, "post_date");
+                sql.push(" AS m, 0 AS d, 0 AS w");
+            }
+            Period::Day => {
+                number(&mut sql, DatePart::Month, "post_date");
+                sql.push(" AS m, ");
+                number(&mut sql, DatePart::Day, "post_date");
+                sql.push(" AS d, 0 AS w");
+            }
             // `_wp_mysql_week()`, the month and day of the week's latest post.
             Period::Week(start) => {
-                sql.push(
-                    "CAST(MONTH(MAX(post_date)) AS SIGNED) AS m, \
-                     CAST(DAYOFMONTH(MAX(post_date)) AS SIGNED) AS d, ",
-                );
-                match start {
-                    1 => sql.push("CAST(WEEK(post_date, 1) AS SIGNED) AS w"),
-                    2..=6 => {
-                        sql.push(
-                            "CAST(WEEK(DATE_SUB(post_date, INTERVAL ? DAY), 0) AS SIGNED) AS w",
-                        );
-                        sql.bind(Bind::Int(start.unsigned_abs()));
-                    }
-                    _ => sql.push("CAST(WEEK(post_date, 0) AS SIGNED) AS w"),
-                }
+                number(&mut sql, DatePart::Month, "MAX(post_date)");
+                sql.push(" AS m, ");
+                number(&mut sql, DatePart::Day, "MAX(post_date)");
+                sql.push(" AS d, ");
+                Engine::integer(&mut sql, |sql| Engine::week(sql, "post_date", start));
+                sql.push(" AS w");
             }
         }
         sql.push(
@@ -1538,16 +1513,14 @@ impl Db {
         let last = format!("{year}-{month:02}-{last_day} 23:59:59");
         let previous = self
             .month_with_posts(
-                "SELECT CAST(YEAR(post_date) AS SIGNED) AS y, CAST(MONTH(post_date) AS SIGNED) AS m \
-                 FROM {prefix}posts WHERE post_date < ? AND post_type = 'post' \
+                " FROM {prefix}posts WHERE post_date < ? AND post_type = 'post' \
                  AND post_status = 'publish' ORDER BY post_date DESC LIMIT 1",
                 &first,
             )
             .await;
         let next = self
             .month_with_posts(
-                "SELECT CAST(YEAR(post_date) AS SIGNED) AS y, CAST(MONTH(post_date) AS SIGNED) AS m \
-                 FROM {prefix}posts WHERE post_date > ? AND post_type = 'post' \
+                " FROM {prefix}posts WHERE post_date > ? AND post_type = 'post' \
                  AND post_status = 'publish' ORDER BY post_date ASC LIMIT 1",
                 &last,
             )
@@ -1566,14 +1539,25 @@ impl Db {
         })
     }
 
-    /// The `(year, month)` of the post `sql` finds by `date`, if any.
+    /// The `(year, month)` of the post `from` finds by `date`, if any.
     async fn month_with_posts(
         &self,
-        sql: &'static str,
+        from: &'static str,
         date: &str,
     ) -> Result<Option<(u64, u64)>, DbError> {
-        let row = sqlx::query(self.prefix.sql(sql))
-            .bind(date)
+        let mut sql = Sql::new("SELECT ");
+        Engine::integer(&mut sql, |sql| {
+            Engine::date_part(sql, DatePart::Year, "post_date");
+        });
+        sql.push(" AS y, ");
+        Engine::integer(&mut sql, |sql| {
+            Engine::date_part(sql, DatePart::Month, "post_date");
+        });
+        sql.push(" AS m");
+        sql.push(from);
+        sql.bind(Bind::Text(date.into()));
+        let row = sql
+            .query(&self.prefix)
             .fetch_optional(&self.pool)
             .await
             .map_err(db_error)?;
@@ -1587,14 +1571,19 @@ impl Db {
 
     /// The days of published posts from `from` to `to`.
     async fn days_with_posts(&self, from: &str, to: &str) -> Result<Vec<u64>, DbError> {
-        let sql = self.prefix.sql(
-            "SELECT DISTINCT CAST(DAYOFMONTH(post_date) AS SIGNED) AS d FROM {prefix}posts \
+        let mut sql = Sql::new("SELECT DISTINCT ");
+        Engine::integer(&mut sql, |sql| {
+            Engine::date_part(sql, DatePart::Day, "post_date");
+        });
+        sql.push(
+            " AS d FROM {prefix}posts \
              WHERE post_date >= ? AND post_type = 'post' AND post_status = 'publish' \
              AND post_date <= ?",
         );
-        let rows = sqlx::query(sql)
-            .bind(from)
-            .bind(to)
+        sql.bind(Bind::Text(from.into()));
+        sql.bind(Bind::Text(to.into()));
+        let rows = sql
+            .query(&self.prefix)
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
@@ -1610,27 +1599,30 @@ impl Db {
     /// `get_lastpostmodified( 'GMT' )`: the latest modified or published
     /// time of a published post of a public type, `None` without one.
     pub async fn last_post_modified(&self) -> Result<Option<String>, DbError> {
-        let sql = self.prefix.sql(
-            "SELECT CAST(GREATEST(MAX(post_modified_gmt), MAX(post_date_gmt)) AS CHAR) AS latest \
-             FROM {prefix}posts WHERE post_status = 'publish' \
+        let mut sql = Sql::new("SELECT ");
+        Engine::date_text(
+            &mut sql,
+            "CASE WHEN MAX(post_modified_gmt) > MAX(post_date_gmt) \
+             THEN MAX(post_modified_gmt) ELSE MAX(post_date_gmt) END",
+        );
+        sql.push(
+            " AS latest FROM {prefix}posts WHERE post_status = 'publish' \
              AND post_type IN ('post', 'page', 'attachment')",
         );
-        let row = sqlx::query(sql)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(db_error)?;
-        row.try_get("latest").map_err(db_error)
+        self.latest(sql).await
+    }
+
+    /// The `latest` time `sql` selects, `None` for none.
+    async fn latest(&self, sql: Sql) -> Result<Option<String>, DbError> {
+        let row = sql.query(&self.prefix).fetch_one(&self.pool).await;
+        row.and_then(|row| row.try_get("latest")).map_err(db_error)
     }
 }
 
 /// The statement [`Db::adjacent_post`] runs: `get_adjacent_post()`'s, for
 /// a visitor, selecting the whole row.
 fn adjacent_sql(post: &Post, previous: bool, terms: Option<(&str, &[u64])>) -> Sql {
-    let mut sql = Sql::new(concat!(
-        "SELECT ",
-        post_columns!(),
-        " FROM {prefix}posts AS p"
-    ));
+    let mut sql = select_posts(" FROM {prefix}posts AS p");
     if terms.is_some() {
         sql.push(
             " INNER JOIN {prefix}term_relationships AS tr ON p.ID = tr.object_id \
@@ -1661,11 +1653,7 @@ fn adjacent_sql(post: &Post, previous: bool, terms: Option<(&str, &[u64])>) -> S
 
 /// The statement [`Db::posts`] runs for `query`.
 fn posts_sql(query: &PostQuery) -> Sql {
-    let mut sql = Sql::new(concat!(
-        "SELECT ",
-        post_columns!(),
-        " FROM {prefix}posts WHERE "
-    ));
+    let mut sql = select_posts(" FROM {prefix}posts WHERE ");
     post_criteria(&mut sql, query);
     sql.push(" ORDER BY ");
     let ranked = ranked(query);
@@ -1687,29 +1675,24 @@ fn posts_sql(query: &PostQuery) -> Sql {
                 relevance(&mut sql, query);
                 continue;
             }
-            OrderBy::Seeded(seed) => {
-                sql.push("RAND(?)");
-                sql.bind(Bind::Int(seed));
-            }
-            OrderBy::Included => {
-                sql.push("FIELD(ID, ");
-                list(
-                    &mut sql,
-                    field_ids(query.include.as_deref().unwrap_or_default()),
-                );
-            }
+            OrderBy::Seeded(seed) => Engine::seeded_random(&mut sql, seed),
+            OrderBy::Included => Engine::list_order(
+                &mut sql,
+                "ID",
+                field_ids(query.include.as_deref().unwrap_or_default()),
+            ),
             OrderBy::Parents => {
-                sql.push("FIELD(post_parent, ");
-                list(&mut sql, field_ids(&query.parents));
+                Engine::list_order(&mut sql, "post_parent", field_ids(&query.parents));
             }
-            OrderBy::Names => {
-                sql.push("FIELD(post_name, ");
-                list(
-                    &mut sql,
-                    query.names.iter().map(|name| Bind::Text(name.clone())),
-                );
-            }
-            column => sql.push(order_column(column)),
+            OrderBy::Names => Engine::list_order(
+                &mut sql,
+                "post_name",
+                query.names.iter().map(|name| Bind::Text(name.clone())),
+            ),
+            column => match order_column(column) {
+                Some(column) => sql.push(column),
+                None => Engine::random(&mut sql),
+            },
         }
         sql.push(if ascending { " ASC" } else { " DESC" });
     }
@@ -1954,53 +1937,55 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
     if !query.search.is_empty() && !query.logged_in {
         sql.push(" AND post_password = ''");
     }
-    let date = [
-        (" AND YEAR(post_date) = ?", query.year),
-        (" AND MONTH(post_date) = ?", query.month),
-        (" AND DAYOFMONTH(post_date) = ?", query.day),
-    ];
-    for (fragment, value) in date {
-        if let Some(value) = value {
-            sql.push(fragment);
-            sql.bind(Bind::Int(value));
-        }
-    }
+    date_parts(
+        sql,
+        [
+            (DatePart::Year, query.year),
+            (DatePart::Month, query.month),
+            (DatePart::Day, query.day),
+        ],
+    );
     for condition in &query.time {
+        sql.push(" AND ");
         let value = match condition {
             TimeCondition::Hour(n) => {
-                sql.push(" AND HOUR(post_date) = ?");
+                Engine::date_part(sql, DatePart::Hour, "post_date");
                 *n
             }
             TimeCondition::Minute(n) => {
-                sql.push(" AND MINUTE(post_date) = ?");
+                Engine::date_part(sql, DatePart::Minute, "post_date");
                 *n
             }
             TimeCondition::Second(n) => {
-                sql.push(" AND SECOND(post_date) = ?");
+                Engine::date_part(sql, DatePart::Second, "post_date");
                 *n
             }
             TimeCondition::Formatted { format, time } => {
-                sql.push(" AND DATE_FORMAT(post_date, ?) = CAST(? AS DECIMAL(65, 6))");
-                sql.bind(Bind::Text(format.clone()));
-                sql.bind(Bind::Text(time.clone()));
+                Engine::formatted_time(sql, "post_date", format.clone(), time.clone());
                 continue;
             }
             TimeCondition::Week {
                 week,
                 start_of_week,
             } => {
-                match start_of_week {
-                    1 => sql.push(" AND WEEK(post_date, 1) = ?"),
-                    2..=6 => {
-                        sql.push(" AND WEEK(DATE_SUB(post_date, INTERVAL ? DAY), 0) = ?");
-                        sql.bind(Bind::Int(start_of_week.unsigned_abs()));
-                    }
-                    _ => sql.push(" AND WEEK(post_date, 0) = ?"),
-                }
+                Engine::week(sql, "post_date", *start_of_week);
                 *week
             }
         };
+        sql.push(" = ?");
         sql.bind(Bind::Int(value));
+    }
+}
+
+/// ` AND` each date part given equals its value.
+fn date_parts(sql: &mut Sql, parts: [(DatePart, Option<u64>); 3]) {
+    for (part, value) in parts {
+        if let Some(value) = value {
+            sql.push(" AND ");
+            Engine::date_part(sql, part, "post_date");
+            sql.push(" = ?");
+            sql.bind(Bind::Int(value));
+        }
     }
 }
 
@@ -2028,13 +2013,13 @@ fn list(sql: &mut Sql, values: impl Iterator<Item = Bind>) {
     sql.push(")");
 }
 
-/// The list of a `FIELD()` order: `ids` and a 0 after them, which keeps the
+/// The list of an explicit order: `ids` and a 0 after them, which keeps the
 /// list valid when empty and, matching nothing earlier, changes no order.
 fn field_ids(ids: &[u64]) -> impl Iterator<Item = Bind> + '_ {
     ids.iter().copied().chain(std::iter::once(0)).map(Bind::Int)
 }
 
-/// The column a term order sorts by; none for the `FIELD()` of `include`.
+/// The column a term order sorts by; none for the order of `include`.
 fn term_order_column(order: TermOrder) -> Option<&'static str> {
     Some(match order {
         TermOrder::TermId => "t.term_id",
@@ -2050,9 +2035,9 @@ fn term_order_column(order: TermOrder) -> Option<&'static str> {
     })
 }
 
-/// The `ORDER BY` term of an order without binds: a column or `RAND()`.
-fn order_column(column: OrderBy) -> &'static str {
-    match column {
+/// The column of an order without binds; none for a random order.
+fn order_column(column: OrderBy) -> Option<&'static str> {
+    Some(match column {
         OrderBy::Date => "post_date",
         OrderBy::Title => "post_title",
         OrderBy::Modified => "post_modified",
@@ -2063,8 +2048,8 @@ fn order_column(column: OrderBy) -> &'static str {
         OrderBy::Id => "ID",
         OrderBy::MenuOrder => "menu_order",
         OrderBy::CommentCount => "comment_count",
-        _ => "RAND()",
-    }
+        _ => return None,
+    })
 }
 
 /// `WP_Term_Query::get_search_sql()`: a name or slug containing `search`.
@@ -2141,6 +2126,7 @@ fn esc_like(text: &str) -> String {
 enum Bind {
     Text(String),
     Int(u64),
+    Maybe(Option<u64>),
     Signed(i64),
 }
 
@@ -2276,6 +2262,10 @@ pub enum StatusOrder {
 struct Sql {
     text: String,
     binds: Vec<Bind>,
+    /// The text with a marker for each [`Dialect`] fragment, which the
+    /// portability test reads.
+    #[cfg(test)]
+    portable: String,
 }
 
 impl Sql {
@@ -2283,11 +2273,16 @@ impl Sql {
         Sql {
             text: fragment.to_string(),
             binds: Vec::new(),
+            #[cfg(test)]
+            portable: fragment.to_string(),
         }
     }
 
+    /// Appends a portable fragment.
     fn push(&mut self, fragment: &'static str) {
         self.text.push_str(fragment);
+        #[cfg(test)]
+        self.portable.push_str(fragment);
     }
 
     fn bind(&mut self, value: Bind) {
@@ -2297,12 +2292,15 @@ impl Sql {
     fn query(
         self,
         prefix: &Prefix,
-    ) -> sqlx::query::Query<'static, sqlx::MySql, sqlx::mysql::MySqlArguments> {
+    ) -> sqlx::query::Query<'static, Backend, <Backend as sqlx::Database>::Arguments> {
+        #[cfg(test)]
+        tests::emitted(&self.portable);
         let mut query = sqlx::query(prefix.sql_from_fragments(self.text));
         for value in self.binds {
             query = match value {
                 Bind::Text(text) => query.bind(text),
                 Bind::Int(n) => query.bind(n),
+                Bind::Maybe(n) => query.bind(n),
                 Bind::Signed(n) => query.bind(n),
             };
         }
@@ -2313,4 +2311,5 @@ impl Sql {
 #[cfg(test)]
 mod tests;
 
+mod dialect;
 mod people;

@@ -124,6 +124,9 @@ impl hyscribe_rest::Site for AsRole<'_> {
     fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
         user != 0 && Capabilities::load(self, "wp_", user).has_cap(self, cap, args)
     }
+    fn public_users(&self) -> bool {
+        self.rest.public_users()
+    }
     fn reads(&self) -> &dyn RenderSite {
         self.rest.reads()
     }

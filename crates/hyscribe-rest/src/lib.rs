@@ -97,9 +97,7 @@ pub trait Site {
     fn revisions(&self, post: u64) -> Vec<u64>;
     /// Whether the public users endpoint answers visitors as WordPress
     /// does; off, a visitor sees no user as having published posts.
-    fn public_users(&self) -> bool {
-        true
-    }
+    fn public_users(&self) -> bool;
     /// The site's content as `hyscribe-render` reads it, for the post
     /// routes.
     fn reads(&self) -> &dyn Reads;

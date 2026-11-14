@@ -59,3 +59,5 @@ GET	/?rest_route=/wp/v2/search&type=term&search=post	ttd
 GET	/?rest_route=/wp/v2/search&type=post-format&per_page=100	ttd
 GET	/?rest_route=/wp/v2/search&type=post-format&search=Image	ttd
 GET	/wp-json/wp/v2/search?type=post-format	pretty,ttd
+GET	/?rest_route=/wp/v2/search&type=term&subtype=category&page=2	default
+GET	/?rest_route=/wp/v2/search&type=post-format&per_page=2&page=9	ttd

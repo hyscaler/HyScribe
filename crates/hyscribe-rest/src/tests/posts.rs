@@ -151,6 +151,9 @@ impl Site for Oracle {
             .map(|revision| revision.id)
             .collect()
     }
+    fn public_users(&self) -> bool {
+        true
+    }
     fn reads(&self) -> &dyn Reads {
         &self.fixture
     }

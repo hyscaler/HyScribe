@@ -165,7 +165,7 @@ async fn answers_match_php() {
     ));
     assert_eq!(replay(&sites, &golden, false).await, (60, 4));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/search.tsv");
-    assert_eq!(replay(&sites, golden, false).await, (2 * 39, 2 * 7));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 40, 2 * 7));
 }
 
 /// With `REST_PUBLIC_USERS=off`, a visitor sees no user as having
@@ -199,7 +199,7 @@ async fn content_matches_php() {
     ));
     assert_eq!(replay(&sites, &golden, true).await, (68, 6));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/search-ttd.tsv");
-    assert_eq!(replay(&sites, golden, true).await, (2 * 48, 2 * 9));
+    assert_eq!(replay(&sites, golden, true).await, (2 * 49, 2 * 9));
 }
 
 /// `golden` but for the requests of the users `reference/rest/users.sql`

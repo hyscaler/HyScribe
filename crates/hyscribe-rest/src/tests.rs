@@ -605,6 +605,8 @@ fn links_are_served_as_from_url_reads_them() {
         served(&format!("{comments}&context=&per_page=")),
         served(&comments)
     );
+    let page = served(&format!("{comments}&per_page=1"));
+    assert_eq!(page.as_array().map(<[_]>::len), Some(1));
     let missing = served(&format!("{rest}/nope"));
     assert_eq!(missing.get_str("code"), Some(&text("rest_no_route")));
 }

@@ -325,8 +325,9 @@ impl LoginSite for LoginReads<'_> {
     }
 }
 
-/// What the login's redirect asks of a user's capabilities. Nothing else is
-/// read, and an unknown constant is taken at its safer value.
+/// What the login's redirect and the REST API ask of a user's capabilities,
+/// with the posts and terms they name; an unknown constant is taken at its
+/// safer value.
 impl CapabilityData for LoginReads<'_> {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         self.reads.option(name)
@@ -340,8 +341,14 @@ impl CapabilityData for LoginReads<'_> {
         self.found.borrow().iter().any(|user| user.id == user_id)
     }
 
-    fn post(&self, _: u64) -> Option<CapPost> {
-        None
+    fn post(&self, id: u64) -> Option<CapPost> {
+        self.reads.post(id).map(|post| CapPost {
+            id: post.id,
+            author: post.author,
+            status: post.status,
+            post_type: post.post_type,
+            parent: post.parent,
+        })
     }
 
     fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
@@ -352,8 +359,8 @@ impl CapabilityData for LoginReads<'_> {
         None
     }
 
-    fn term_taxonomy(&self, _: u64) -> Option<String> {
-        None
+    fn term_taxonomy(&self, id: u64) -> Option<String> {
+        self.reads.wait(self.site.db.term_taxonomy(id))
     }
 
     fn constant(&self, name: &str) -> bool {

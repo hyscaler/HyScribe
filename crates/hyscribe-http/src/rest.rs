@@ -13,8 +13,10 @@ use axum::http::{HeaderMap, HeaderValue, Method, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_auth::caps::{CapabilityData, User as Capabilities};
+use hyscribe_model::{Post, Term, TermQuery};
 use hyscribe_phpser::{Value, addslashes, is_empty_string, parse_str};
 use hyscribe_render::link::rest_url;
+use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
 use crate::login::{LoginReads, Names, cookie, cookies, joined};
@@ -76,12 +78,29 @@ impl hyscribe_rest::Site for Rest<'_> {
         self.reads.nonce("wp_rest")
     }
 
-    fn can(&self, user: u64, cap: &str) -> bool {
+    fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
         let caps = || {
             self.caps
                 .get_or_init(|| Capabilities::load(&self.reads, self.site.db.prefix(), self.user))
         };
-        user != 0 && caps().has_cap(&self.reads, cap, &[])
+        user != 0 && caps().has_cap(&self.reads, cap, args)
+    }
+
+    fn terms(&self, query: &TermQuery) -> Vec<Term> {
+        RenderSite::term_query(&self.reads.reads, query)
+    }
+
+    fn count_terms(&self, query: &TermQuery) -> u64 {
+        self.reads.reads.wait(self.site.db.term_query_count(query))
+    }
+
+    fn term_link(&self, taxonomy: &str, term: &Term) -> String {
+        let link = hyscribe_render::permalinks::term_link(&self.reads.reads, taxonomy, term);
+        String::from_utf8_lossy(&link).into_owned()
+    }
+
+    fn post(&self, id: u64) -> Option<Post> {
+        RenderSite::post(&self.reads.reads, id)
     }
 }
 

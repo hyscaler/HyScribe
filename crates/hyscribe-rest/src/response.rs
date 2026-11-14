@@ -33,6 +33,20 @@ pub(crate) fn text(text: impl Into<Vec<u8>>) -> Value {
 }
 
 impl RestError {
+    /// What a callback answers where it is not ported, such as where PHP
+    /// would write to the database: `501`.
+    pub(crate) fn not_ported() -> RestError {
+        RestError {
+            code: "",
+            message: String::new(),
+            data: Value::Null,
+        }
+    }
+
+    pub(crate) fn is_not_ported(&self) -> bool {
+        self.code.is_empty()
+    }
+
     /// An error with `array( 'status' => $status )` as its data.
     pub fn status(code: &'static str, message: &str, status: u16) -> RestError {
         RestError {
@@ -91,8 +105,27 @@ impl Response {
 
     /// `add_link( $rel, $href )`.
     pub fn add_link(&mut self, rel: &str, href: String) {
-        self.links
-            .push((rel.into(), object([("href", text(href))])));
+        self.add_link_with(rel, href, Vec::new());
+    }
+
+    /// `add_link( $rel, $href, $attributes )`.
+    pub(crate) fn add_link_with(
+        &mut self,
+        rel: &str,
+        href: String,
+        attributes: Vec<(&str, Value)>,
+    ) {
+        let mut link: Vec<(Key, Value)> = attributes
+            .into_iter()
+            .map(|(name, value)| (Key::String(name.as_bytes().to_vec()), value))
+            .collect();
+        link.push((Key::String(b"href".to_vec()), text(href)));
+        self.add_link_object(rel, Value::Array(link));
+    }
+
+    /// A link as it is given, `href` and all.
+    pub(crate) fn add_link_object(&mut self, rel: &str, link: Value) {
+        self.links.push((rel.into(), link));
     }
 
     /// `is_error()`.
@@ -172,7 +205,7 @@ pub fn paginate(
     let query = urlencode_deep(Value::Array(query.to_vec()));
     let base = add_query_values(query.as_array().unwrap_or_default(), collection.as_bytes());
     let links: Vec<String> = [
-        ("prev", page.saturating_sub(1), page > 1),
+        ("prev", page.saturating_sub(1).min(pages), page > 1),
         ("next", page + 1, page < pages),
     ]
     .into_iter()

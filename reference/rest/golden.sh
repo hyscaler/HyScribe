@@ -13,7 +13,12 @@
 # headers and the body stands for the user's nonce (a visitor's for a
 # visitor). Flags: origin and originnull send an Origin header, pretty serves
 # the request under /%postname%/ permalinks (reference/rewrite/permalinks.php),
-# override sends X-HTTP-Method-Override: DELETE. The headers kept are
+# override sends X-HTTP-Method-Override: DELETE, ttd records the request on
+# the Theme Test Data fixture only. With a requests file and
+# an output as arguments, it records those requests instead, as
+# reference/rest/content.requests lists them, over the database php.sh runs
+# on; on the Theme Test Data fixture (HYSCRIBE_PHP_DB=wordpress_ttd), whose
+# content is not ours to commit, each body is its SHA-256. The headers kept are
 # WordPress's own, one "name: value" a line in the order sent, with Apache's
 # Accept-Encoding left out of Vary. Cron is off for the run, and every
 # table's checksum is compared before and after the REST requests: a REST
@@ -25,10 +30,10 @@ NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
 DB="${HYSCRIBE_DB_CONTAINER:-hyscribe-default-install-db}"
 BASE="${HYSCRIBE_PHP_URL:-http://127.0.0.1:8081}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-OUT="$ROOT/crates/hyscribe-rest/tests/golden/rest.tsv"
+OUT="${2:-$ROOT/crates/hyscribe-rest/tests/golden/rest.tsv}"
 MU=/var/www/html/wp-content/mu-plugins
 TMP=$(mktemp -d)
-sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress "$@"; }
+sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "${HYSCRIBE_PHP_DB:-wordpress}" "$@"; }
 cleanup() {
   rm -rf "$TMP"
   echo "DELETE FROM wp_users WHERE ID BETWEEN 701 AND 704; DELETE FROM wp_usermeta WHERE user_id BETWEEN 701 AND 704;" | sql
@@ -41,6 +46,9 @@ sql < "$ROOT/reference/rest/users.sql"
 checksums() { sql -N -e 'CHECKSUM TABLE wp_commentmeta, wp_comments, wp_links, wp_options, wp_postmeta, wp_posts, wp_term_relationships, wp_term_taxonomy, wp_termmeta, wp_terms, wp_usermeta, wp_users'; }
 
 # method<TAB>target<TAB>flags
+if [ -n "${1:-}" ]; then
+  REQUESTS=$(grep -v '^#' "$1")
+else
 REQUESTS=$(cat <<'LIST'
 GET	/?rest_route=/wp/v2/types
 GET	/index.php?rest_route=/wp/v2/types/post
@@ -117,6 +125,7 @@ GET	/?rest_route=/wp-abilities/v1/categories/a-b
 GET	/?rest_route=/wp/v2/types/post/x
 LIST
 )
+fi
 
 curl_args() {
   local who="$1" flags="$2" nonce="$3"
@@ -149,6 +158,7 @@ before=$(checksums)
 for who in "${WHO[@]}"; do
   nonce=${NONCE[$who]}
   while IFS=$'\t' read -r method target flags; do
+    [[ "$flags" == *ttd* && "${HYSCRIBE_PHP_DB:-}" != wordpress_ttd ]] && continue
     curl_args "$who" "$flags" "$nonce"
     url="$BASE${target//%nonce%/$nonce}"
     if [ "$method" = HEAD ]; then
@@ -159,15 +169,21 @@ for who in "${WHO[@]}"; do
     fi
     headers=$(tr -d '\r' < "$TMP/head" | grep -iE '^(content-type|x-robots-tag|link|access-control-[a-z-]+|allow|vary|x-wp-[a-z]+|expires|cache-control):' |
       sed -E 's/^([^:]+):/\L\1:/; s/^(vary: .*),Accept-Encoding$/\1/' | grep -vx 'vary: Accept-Encoding' | sed "s/$nonce/%nonce%/g" || true)
-    body=$(sed "s/$nonce/%nonce%/g" "$TMP/body" | xxd -p | tr -d '\n')
+    if [ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ]; then
+      body=$(sed "s/$nonce/%nonce%/g" "$TMP/body" | sha256sum | cut -c1-64 | tr -d '\n' | xxd -p | tr -d '\n')
+    else
+      body=$(sed "s/$nonce/%nonce%/g" "$TMP/body" | xxd -p | tr -d '\n')
+    fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$who" "$method" "$(printf '%s' "$target" | xxd -p | tr -d '\n')" "$flags" "$status" \
       "$(printf '%s' "$headers" | xxd -p | tr -d '\n')" "$body" >> "$OUT"
   done <<< "$REQUESTS"
 done
+if [ -z "${1:-}" ]; then
 "$DOCKER" cp "$ROOT/reference/rest/schema-golden.php" "$NAME:/tmp/schema-golden.php"
 "$DOCKER" exec "$NAME" php /tmp/schema-golden.php > "$ROOT/crates/hyscribe-rest/tests/golden/schema.tsv"
 "$DOCKER" cp "$ROOT/reference/rest/fields-golden.php" "$NAME:/tmp/fields-golden.php"
 "$DOCKER" exec "$NAME" php /tmp/fields-golden.php > "$ROOT/crates/hyscribe-rest/tests/golden/fields.tsv"
+fi
 after=$(checksums)
 [ "$before" = "$after" ] || { echo "a REST request wrote to the database" >&2; diff <(echo "$before") <(echo "$after") >&2; exit 1; }
-wc -l "$OUT" "$ROOT"/crates/hyscribe-rest/tests/golden/{schema,fields}.tsv
+wc -l "$OUT"

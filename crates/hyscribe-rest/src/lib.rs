@@ -11,9 +11,13 @@ mod request;
 mod response;
 mod routes;
 mod schema;
+mod settings;
+mod taxonomies;
+mod terms;
 mod types;
 
 use hyscribe_kses::esc_url_raw;
+use hyscribe_model::{Post, Term, TermQuery};
 use hyscribe_phpser::{Key, Value, is_empty_string, json_encode, json_encode_pretty, lookup};
 
 pub use response::{Response, RestError, paginate};
@@ -33,8 +37,16 @@ pub trait Site {
     fn verify_nonce(&self, nonce: &[u8]) -> bool;
     /// `wp_create_nonce( 'wp_rest' )` for the same user.
     fn create_nonce(&self) -> String;
-    /// `user_can( $user, $cap )`.
-    fn can(&self, user: u64, cap: &str) -> bool;
+    /// `user_can( $user, $cap, ...$args )`.
+    fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool;
+    /// The terms `WP_Term_Query` selects with `query`, in its order.
+    fn terms(&self, query: &TermQuery) -> Vec<Term>;
+    /// How many terms `query` selects, without its limit and offset.
+    fn count_terms(&self, query: &TermQuery) -> u64;
+    /// `get_term_link( $term, $taxonomy )`.
+    fn term_link(&self, taxonomy: &str, term: &Term) -> String;
+    /// `get_post( $id )`, for what reading its terms checks.
+    fn post(&self, id: u64) -> Option<Post>;
 }
 
 /// A request for the API.
@@ -101,7 +113,47 @@ pub(crate) struct Context<'a> {
 impl Context<'_> {
     /// `current_user_can( $cap )`.
     pub(crate) fn can(&self, cap: &str) -> bool {
-        self.site.can(self.user, cap)
+        self.site.can(self.user, cap, &[])
+    }
+
+    /// `current_user_can( $cap, $id )`.
+    pub(crate) fn can_for(&self, cap: &str, id: u64) -> bool {
+        let id = i64::try_from(id).unwrap_or(i64::MAX);
+        self.site.can(self.user, cap, &[Value::Int(id)])
+    }
+
+    /// The `self` link to `path`, with the methods the user may use on it
+    /// as `get_target_hints_for_link()` gives them. No ported permission
+    /// check reads a default, so the link's request has none.
+    pub(crate) fn self_link(&self, response: &mut Response, path: &str) {
+        let mut link = vec![(Key::String(b"href".to_vec()), text(self.rest_url(path)))];
+        let matched = routes::match_request("GET", path.as_bytes());
+        let allowed = matched.map(|matched| {
+            let endpoints = endpoints(matched.regex).unwrap_or_default();
+            let permissions: Vec<Permission> = endpoints.iter().map(|e| e.permission).collect();
+            let args = endpoints
+                .into_iter()
+                .nth(matched.endpoint)
+                .map(|endpoint| endpoint.args)
+                .unwrap_or_default();
+            let mut params = Params {
+                route: matched.regex,
+                url: matched.params.clone(),
+                ..Params::default()
+            };
+            let valid = has_valid_params(&params, &args)
+                .and_then(|()| sanitize_params(&mut params, &args))
+                .is_ok();
+            let allowed = allowed(self, &matched, &permissions, &params);
+            allowed.into_iter().filter(|_| valid).collect::<Vec<_>>()
+        });
+        let allowed = allowed.unwrap_or_default();
+        link.extend((!allowed.is_empty()).then(|| {
+            let allowed = allowed.into_iter().map(text).collect();
+            let hints = object([("allow", response::list(allowed))]);
+            (Key::String(b"targetHints".to_vec()), hints)
+        }));
+        response.add_link_object("self", Value::Array(link));
     }
 
     /// `rest_authorization_required_code()`.
@@ -118,11 +170,20 @@ impl Context<'_> {
 type Permission = fn(&Context, &Params) -> Result<(), RestError>;
 type Callback = fn(&Context, &Params) -> Result<Response, RestError>;
 
-/// A ported endpoint: its arguments, permission check and callback.
+/// A ported endpoint: its arguments, permission check and callback, none
+/// for a write, whose permission check alone is ported.
 pub(crate) struct Endpoint {
     args: Vec<Arg>,
     permission: Permission,
-    callback: Callback,
+    callback: Option<Callback>,
+}
+
+/// The ported endpoints of the route `regex`.
+fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
+    types::endpoints(regex)
+        .or_else(|| taxonomies::endpoints(regex))
+        .or_else(|| terms::endpoints(regex))
+        .or_else(|| settings::endpoints(regex))
 }
 
 /// `wp_check_jsonp_callback()`: letters, digits, `_` and `.` only.
@@ -229,6 +290,9 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
             }
         }
     };
+    if get("_embed").is_some_and(|embed| embeds(&response, embed)) {
+        return Served::not_ported();
+    }
     let response = match get("_envelope") {
         Some(_) => {
             let headers = response
@@ -306,6 +370,33 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
     served
 }
 
+/// Whether `embed_links()` would embed a link of `response` for `_embed`:
+/// embedding is not ported.
+fn embeds(response: &Response, embed: &Value) -> bool {
+    let all = embed.is_empty() || matches!(embed.as_bytes(), Some(b"true" | b"1"));
+    let rels = schema::parse_list(embed);
+    let data = response.clone().into_data();
+    let items = if schema::is_list(&data) {
+        data.as_array().unwrap_or_default().to_vec()
+    } else {
+        vec![(Key::Int(0), data)]
+    };
+    items.iter().any(|(_, item)| {
+        let links = item.get_str("_links").and_then(Value::as_array);
+        links.unwrap_or_default().iter().any(|(rel, links)| {
+            let wanted = all
+                || rels.is_empty()
+                || rels
+                    .iter()
+                    .any(|(_, r)| r.to_php_string() == rel.to_php_string());
+            let embeddable = |(_, link): &(Key, Value)| {
+                link.get_str("embeddable").is_some_and(|e| !e.is_empty())
+            };
+            wanted && links.as_array().unwrap_or_default().iter().any(embeddable)
+        })
+    })
+}
+
 /// `dispatch()` with the filters core adds: OPTIONS requests, the route's
 /// arguments checked, its permission and callback, then the `Allow`
 /// header and `_fields`.
@@ -334,37 +425,55 @@ fn dispatch(
         let message = "No route was found matching the URL and request method.";
         return Ok(RestError::status("rest_no_route", message, 404).into_response());
     };
-    let mut endpoints = types::endpoints(matched.regex).ok_or(NotPorted)?;
-    let permissions: Vec<Permission> = endpoints
-        .iter()
-        .map(|endpoint| endpoint.permission)
-        .collect();
+    let mut endpoints = endpoints(matched.regex).ok_or(NotPorted)?;
+    let permissions: Vec<Permission> = endpoints.iter().map(|e| e.permission).collect();
     // A route is ported with every endpoint the table lists.
     let endpoint = endpoints.swap_remove(matched.endpoint);
+    let callback = endpoint.callback.ok_or(NotPorted)?;
     let mut params = Params {
-        url: matched.params,
+        route: matched.regex,
+        url: matched.params.clone(),
         defaults: defaults(&endpoint.args),
         ..params
     };
     let checked = has_valid_params(&params, &endpoint.args)
         .and_then(|()| sanitize_params(&mut params, &endpoint.args));
     let answered = checked.and_then(|()| {
-        (endpoint.permission)(context, &params).and_then(|()| (endpoint.callback)(context, &params))
+        (endpoint.permission)(context, &params).and_then(|()| callback(context, &params))
     });
+    if answered.as_ref().is_err_and(RestError::is_not_ported) {
+        return Err(NotPorted);
+    }
     let mut response = answered.unwrap_or_else(RestError::into_response);
-    // `rest_send_allow_header()`: a method is allowed as its last endpoint
-    // permits, in the order methods first appear.
+    let allowed = allowed(context, &matched, &permissions, &params);
+    if !allowed.is_empty() {
+        response.header("Allow", &allowed.join(", "));
+    }
+    if !response.is_error() {
+        response.data = fields::filter_fields(response.data, &params);
+    }
+    Ok(response)
+}
+
+/// `rest_send_allow_header()`: a method is allowed as its last endpoint
+/// permits, in the order methods first appear.
+fn allowed(
+    context: &Context,
+    matched: &routes::Matched,
+    permissions: &[Permission],
+    params: &Params,
+) -> Vec<&'static str> {
     let methods: Vec<(&str, bool)> = permissions
         .iter()
         .zip(matched.methods)
         .flat_map(|(permission, methods)| {
-            let permitted = permission(context, &params).is_ok();
+            let permitted = permission(context, params).is_ok();
             methods
                 .iter()
                 .map(move |method| (method.as_str(), permitted))
         })
         .collect();
-    let allowed: Vec<&str> = methods
+    methods
         .iter()
         .enumerate()
         .filter(|(i, (method, _))| {
@@ -378,14 +487,7 @@ fn dispatch(
                 .is_some_and(|(_, allow)| *allow)
         })
         .map(|(_, (method, _))| *method)
-        .collect();
-    if !allowed.is_empty() {
-        response.header("Allow", &allowed.join(", "));
-    }
-    if !response.is_error() {
-        response.data = fields::filter_fields(response.data, &params);
-    }
-    Ok(response)
+        .collect()
 }
 
 #[cfg(test)]

@@ -313,14 +313,13 @@ fn posts_bulk(site: &dyn ActionSite, asked: &Asked, doaction: &Value, edit: &str
         return Ok(());
     }
     referer(site, asked, "bulk-posts")?;
-    // Emptying a status is not ported, nor `ids` and `post` that PHP
-    // refuses with a fatal error.
+    // `ids` and `post` that PHP refuses with a fatal error are not ported,
+    // nor emptying a status (`delete_all`), which no action below matches.
     let ids = match (
         asked.request("media"),
         asked.request("ids"),
         asked.request("post"),
     ) {
-        _ if doaction.as_bytes() == Some(b"delete_all") => return Ok(()),
         (Some(media), _, _) => items(media),
         (None, Some(Value::String(ids)), _) => {
             let parts = ids.split(|&b| b == b',');
@@ -512,18 +511,13 @@ fn users_list(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
             }
         }),
         b"resetpassword" => referer(site, asked, "bulk-users").and_then(|()| {
-            if !asked.filled("users") {
-                return Ok(());
+            // `edit_user` maps to nothing for oneself and to `edit_users` for
+            // another, whom PHP checks before it writes.
+            let others = user_ids(asked).into_iter().any(|id| id != me);
+            match others && !site.current_user_can("edit_users", &[]) {
+                true => Err(died(500, "Sorry, you are not allowed to edit this user.")),
+                false => Ok(()),
             }
-            for id in user_ids(asked) {
-                if !can_for(site, "edit_user", id) {
-                    return Err(died(500, "Sorry, you are not allowed to edit this user."));
-                }
-                if id != me && site.user_exists(id.unsigned_abs()) {
-                    return Ok(());
-                }
-            }
-            Ok(())
         }),
         b"remove" => {
             referer(site, asked, "bulk-users").and(Err(died(400, "You cannot remove users.")))
@@ -826,8 +820,9 @@ const COLOR_SCHEMES: [&str; 9] = [
 
 /// `admin-ajax.php`: the action's checks for the logged in user, if any.
 pub fn admin_ajax(site: Option<&dyn ActionSite>, asked: &Asked) -> Checked {
+    // An empty action, `''` or `'0'`, is refused as one not registered.
     let action = match asked.request("action") {
-        Some(action @ Value::String(_)) if !action.is_empty() => action.to_php_string(),
+        Some(action @ Value::String(_)) => action.to_php_string(),
         _ => return Err(ajax(400, "0")),
     };
     let action = String::from_utf8_lossy(&action).into_owned();

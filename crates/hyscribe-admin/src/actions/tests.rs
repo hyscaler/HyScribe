@@ -473,6 +473,31 @@ fn what_is_not_ported_goes_on() {
             Some(501),
         ),
         ("index.php?action=trash".into(), None, None),
+        (
+            "edit.php?action=trash&post_type=post&post[]=1".into(),
+            None,
+            Some(403),
+        ),
+        (
+            "users.php?action=delete&users[]=801".into(),
+            None,
+            Some(403),
+        ),
+        (
+            "options.php?adminhash=x".into(),
+            Some("action=update".into()),
+            Some(501),
+        ),
+        (
+            "options.php?adminhash=0".into(),
+            Some("action=update".into()),
+            Some(403),
+        ),
+        (
+            "options.php?option_page=misc".into(),
+            Some(format!("action=update&{}", nonce("misc-options"))),
+            Some(501),
+        ),
     ] {
         assert_eq!(
             outcome(&admin, &target, body.as_deref()),
@@ -496,6 +521,13 @@ fn locks_and_roles() {
     assert_eq!(outcome(&locked, &untrash, None), Some(500));
     let single = format!("post.php?action=trash&post=1&{}", nonce("trash-post_1"));
     assert_eq!(outcome(&locked, &single, None), Some(501));
+    // The trashed post would refuse, were it not locked.
+    let trashed = format!("edit.php?action=trash&post[]=802&{bulk}");
+    assert_eq!(outcome(&locked, &trashed, None), Some(501));
+    let trashed = format!("post.php?action=trash&post=802&{}", nonce("trash-post_802"));
+    assert_eq!(outcome(&locked, &trashed, None), Some(501));
+    let untrash = format!("post.php?action=untrash&post=1&{}", nonce("untrash-post_1"));
+    assert_eq!(outcome(&locked, &untrash, None), Some(500));
     let activate = "themes.php?action=activate";
     let options = role("editor+edit_theme_options");
     assert_eq!(outcome(&options, activate, None), Some(501));
@@ -585,6 +617,18 @@ fn refusals_of_other_roles() {
     ] {
         assert_eq!(outcome(&lister, &target, None), Some(expected), "{target}");
     }
+    let deleting = format!(
+        "users.php?action=dodelete&users[]=801&{}",
+        nonce("delete-users")
+    );
+    assert_eq!(outcome(&lister, &deleting, None), Some(501));
+    let resetting = format!("users.php?action=resetpassword&users[]=1&users[]=801&{users}");
+    assert_eq!(outcome(&lister, &resetting, None), Some(500));
+    let tag = "action=add-tag&taxonomy=&_wpnonce_add-tag=%nonce:add-tag%";
+    assert_eq!(
+        outcome(&role("contributor"), "admin-ajax.php", Some(tag)),
+        Some(200)
+    );
     let edited = format!(
         "action=editedtag&taxonomy=post_tag&tag_ID=9&{}",
         nonce("update-tag_9")

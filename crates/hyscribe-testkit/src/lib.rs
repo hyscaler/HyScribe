@@ -320,7 +320,7 @@ pub struct RestCase {
     pub status: u16,
     /// The headers kept, one `name: value` a line.
     pub headers: Vec<String>,
-    /// The body, or for the Theme Test Data fixture its sha256 in hex.
+    /// The body, or for the Theme Test Data fixture its SHA-256 in hex.
     pub body: Vec<u8>,
 }
 
@@ -331,9 +331,8 @@ impl RestCase {
     }
 }
 
-/// The cases of a golden file of `reference/rest/golden.sh`; `hashed` for
-/// one whose bodies are sha256 hashes.
-pub fn rest_cases(golden: &str, hashed: bool) -> Vec<RestCase> {
+/// The cases of a golden file of `reference/rest/golden.sh`.
+pub fn rest_cases(golden: &str) -> Vec<RestCase> {
     golden
         .lines()
         .map(|line| {
@@ -347,11 +346,7 @@ pub fn rest_cases(golden: &str, hashed: bool) -> Vec<RestCase> {
                 flags: field(3).into(),
                 status: field(4).parse().unwrap_or_default(),
                 headers: text(5).lines().map(String::from).collect(),
-                body: if hashed {
-                    field(6).as_bytes().to_vec()
-                } else {
-                    unhex(field(6))
-                },
+                body: unhex(field(6)),
             }
         })
         .collect()

@@ -13,7 +13,7 @@ use axum::http::{HeaderMap, HeaderValue, Method, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
-use hyscribe_model::{Post, Term, TermQuery};
+use hyscribe_model::{Post, Term, TermQuery, User};
 use hyscribe_phpser::{Value, addslashes, is_empty_string, parse_str};
 use hyscribe_render::link::rest_url;
 use hyscribe_render::site::Site as RenderSite;
@@ -143,6 +143,27 @@ impl hyscribe_rest::Site for Rest<'_> {
 
     fn post(&self, id: u64) -> Option<Post> {
         RenderSite::post(&self.reads.reads, id)
+    }
+
+    fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
+        let reads = &self.reads.reads;
+        reads.wait(self.site.db.posts_of_type(post_type))
+    }
+
+    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term> {
+        RenderSite::post_terms(&self.reads.reads, post, taxonomy)
+    }
+
+    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>> {
+        RenderSite::post_meta(&self.reads.reads, post, key)
+    }
+
+    fn revisions(&self, post: u64) -> Vec<u64> {
+        self.reads.reads.wait(self.site.db.revisions(post))
+    }
+
+    fn user(&self, id: u64) -> Option<User> {
+        RenderSite::user(&self.reads.reads, id)
     }
 }
 

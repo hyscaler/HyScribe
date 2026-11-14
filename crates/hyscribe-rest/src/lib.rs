@@ -16,11 +16,12 @@ mod schema;
 mod settings;
 mod statuses;
 mod taxonomies;
+mod templates;
 mod terms;
 mod types;
 
 use hyscribe_kses::esc_url_raw;
-use hyscribe_model::{Post, Term, TermQuery};
+use hyscribe_model::{Post, Term, TermQuery, User};
 use hyscribe_phpser::{Key, Value, is_empty_string, json_encode, json_encode_pretty, lookup};
 use hyscribe_render::site::Site as Reads;
 use hyscribe_render::theme::Theme;
@@ -52,6 +53,16 @@ pub trait Site {
     fn term_link(&self, taxonomy: &str, term: &Term) -> String;
     /// `get_post( $id )`, for what reading its terms checks.
     fn post(&self, id: u64) -> Option<Post>;
+    /// Every post of `post_type` whatever its status, newest first.
+    fn posts_of_type(&self, post_type: &str) -> Vec<Post>;
+    /// `get_the_terms( $post, $taxonomy )`, by name.
+    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term>;
+    /// `get_post_meta( $post, $key, true )`.
+    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>>;
+    /// The IDs of the revisions of `post`, newest first.
+    fn revisions(&self, post: u64) -> Vec<u64>;
+    /// `get_userdata( $id )`.
+    fn user(&self, id: u64) -> Option<User>;
     /// The site's content as `hyscribe-render` reads it, for the post
     /// routes.
     fn reads(&self) -> &dyn Reads;
@@ -173,6 +184,7 @@ fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         .or_else(|| settings::endpoints(regex))
         .or_else(|| statuses::endpoints(regex))
         .or_else(|| posts::endpoints(regex))
+        .or_else(|| templates::endpoints(regex))
 }
 
 /// `wp_check_jsonp_callback()`: letters, digits, `_` and `.` only.

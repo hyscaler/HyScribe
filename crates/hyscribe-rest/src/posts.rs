@@ -205,7 +205,7 @@ fn create_permission(context: &Context, params: &Params, kind: Kind) -> Result<(
 fn get_post(context: &Context, params: &Params, kind: Kind) -> Result<Post, RestError> {
     // The route takes digits only, and no post has ID 0.
     let id = params.get("id").map_or(0, Value::to_int).unsigned_abs();
-    let post = context.site.reads().post(id);
+    let post = context.site.post(id);
     let post = post.filter(|post| post.post_type == kind.name());
     post.ok_or_else(|| RestError::status("rest_post_invalid_id", "Invalid post ID.", 404))
 }
@@ -546,24 +546,12 @@ fn render_request(context: &Context) -> Request {
 
 /// The revisions of a post: how many, and the newest.
 pub(crate) fn revisions(context: &Context, post: &Post) -> (u64, Option<u64>) {
-    let query = PostQuery {
-        post_types: vec!["revision".into()],
-        statuses: vec![StatusFilter {
-            status: "inherit".into(),
-            author: None,
-        }],
-        parents: vec![post.id],
-        order: vec![(OrderBy::Date, false), (OrderBy::Id, false)],
-        limit: 1,
-        ..PostQuery::default()
-    };
-    let reads = context.site.reads();
-    let latest = reads.query(&query).first().map(|revision| revision.id);
-    (latest.map_or(0, |_| reads.count_posts(&query)), latest)
+    let revisions = context.site.revisions(post.id);
+    (revisions.len() as u64, revisions.first().copied())
 }
 
 /// `get_post_meta( $id, $key, true )` unserialized.
 pub(crate) fn meta(context: &Context, id: u64, key: &str) -> Option<Value> {
-    let stored = context.site.reads().post_meta(id, key)?;
+    let stored = context.site.post_meta(id, key)?;
     Some(decode(&stored).unwrap_or(Value::String(stored)))
 }

@@ -14,6 +14,7 @@ use sha2::Digest;
 
 use super::{SITE, site};
 use crate::*;
+use hyscribe_model::{OrderBy, PostQuery, StatusFilter};
 
 /// The oracle with one user of `role`, over a fixture, without the
 /// capabilities `deny` names.
@@ -63,8 +64,8 @@ impl CapabilityData for Oracle {
         let found = taxonomies.find(|taxonomy| self.fixture.term(id, taxonomy).is_some());
         found.map(String::from)
     }
-    fn constant(&self, _: &str) -> bool {
-        false
+    fn constant(&self, name: &str) -> bool {
+        name == "DISALLOW_UNFILTERED_HTML"
     }
 }
 
@@ -100,6 +101,41 @@ impl Site for Oracle {
     }
     fn post(&self, id: u64) -> Option<Post> {
         self.fixture.post(id)
+    }
+    fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
+        let query = PostQuery {
+            post_types: vec![post_type.into()],
+            limit: u32::MAX,
+            ..PostQuery::default()
+        };
+        self.fixture.query(&query)
+    }
+    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term> {
+        Reads::post_terms(&self.fixture, post, taxonomy)
+    }
+    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>> {
+        Reads::post_meta(&self.fixture, post, key)
+    }
+    fn revisions(&self, post: u64) -> Vec<u64> {
+        let query = PostQuery {
+            post_types: vec!["revision".into()],
+            statuses: vec![StatusFilter {
+                status: "inherit".into(),
+                author: None,
+            }],
+            parents: vec![post],
+            order: vec![(OrderBy::Date, false), (OrderBy::Id, false)],
+            limit: u32::MAX,
+            ..PostQuery::default()
+        };
+        self.fixture
+            .query(&query)
+            .iter()
+            .map(|revision| revision.id)
+            .collect()
+    }
+    fn user(&self, id: u64) -> Option<hyscribe_model::User> {
+        Reads::user(&self.fixture, id)
     }
     fn reads(&self) -> &dyn Reads {
         &self.fixture
@@ -189,7 +225,7 @@ fn unported_case(unported: &[(&str, &str)], case: &RestCase) -> bool {
 /// Test Data fixture, by their sha256, but those `unported`, answered 501:
 /// `(who, target)`, who `*` for anyone or `user` for any logged in user.
 fn replay(golden: &str, ttd: bool, count: usize, unported: &[(&str, &str)]) {
-    let cases = rest_cases(golden, ttd);
+    let cases = rest_cases(golden);
     assert_eq!(cases.len(), count);
     for case in &cases {
         let served = serve_case(case, ttd);

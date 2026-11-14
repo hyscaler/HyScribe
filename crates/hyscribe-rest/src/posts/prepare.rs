@@ -311,7 +311,8 @@ pub(super) fn post(
         put("template", text(template.unwrap_or_default()));
     }
     if kind == Kind::Post && has("format") {
-        let format = reads
+        let format = context
+            .site
             .post_terms(post.id, "post_format")
             .first()
             .map(|term| {
@@ -329,12 +330,17 @@ pub(super) fn post(
     }
     if has("meta") {
         // The `footnotes` meta is a string, as registered.
-        let footnotes = text(reads.post_meta(post.id, "footnotes").unwrap_or_default());
+        let footnotes = text(
+            context
+                .site
+                .post_meta(post.id, "footnotes")
+                .unwrap_or_default(),
+        );
         put("meta", object([("footnotes", footnotes)]));
     }
     for (taxonomy, base) in kind.taxonomies() {
         if has(base) {
-            let terms = reads.post_terms(post.id, taxonomy);
+            let terms = context.site.post_terms(post.id, taxonomy);
             put(base, list(terms.iter().map(|term| int(term.id)).collect()));
         }
     }
@@ -444,7 +450,7 @@ fn post_status(context: &Context, post: &Post) -> String {
     if post.post_type != "attachment" || post.status != "inherit" {
         return post.status.clone();
     }
-    let parent = (post.parent != post.id).then(|| context.site.reads().post(post.parent));
+    let parent = (post.parent != post.id).then(|| context.site.post(post.parent));
     match parent.flatten() {
         Some(parent) => post_status(context, &parent),
         None => "publish".into(),
@@ -496,10 +502,11 @@ fn links(context: &Context, params: &Params, kind: Kind, post: &Post, response: 
             embeddable(),
         );
     }
-    let reads = context.site.reads();
     let featured =
         meta(context, post.id, "_thumbnail_id").map_or(0, |id| id.to_int().max(0).unsigned_abs());
-    let media = (featured != 0).then(|| reads.post(featured)).flatten();
+    let media = (featured != 0)
+        .then(|| context.site.post(featured))
+        .flatten();
     let shown = |media: &Post| {
         post_status(context, media) == "publish" || context.can_for("read_post", media.id)
     };

@@ -5,7 +5,7 @@
 -- post's aside format, a link category, a later post, a reusable block, and
 -- for the dashboard the administrator's stored editor preferences, their
 -- Quick Draft auto-draft, a comment of theirs on no post, and an approved
--- comment since marked as spam.
+-- comment since marked as spam, and two revisions of the first post.
 -- db.sh loads it into the wordpress_terms database; reference/head/golden.sh
 -- adds it to the PHP oracle's database while it records term pages.
 INSERT INTO wp_terms (term_id, name, slug, term_group) VALUES
@@ -43,3 +43,12 @@ INSERT INTO wp_comments (comment_ID, comment_post_ID, comment_author, comment_au
   (3, 1, 'Spammer', 'spam@example.test', '', '', '2026-10-28 00:00:00', '2026-10-28 00:00:00', 'Buy now', 0, 'spam', '', 'comment', 0, 0);
 INSERT INTO wp_commentmeta (meta_id, comment_id, meta_key, meta_value) VALUES
   (1, 3, '_wp_trash_meta_status', '1'), (2, 3, '_wp_trash_meta_time', '1793145600');
+-- Two revisions of the first post, as saving it twice in a minute stores
+-- them, for the reads of a post's revisions.
+INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt, post_status,
+  comment_status, ping_status, post_password, post_name, to_ping, pinged, post_modified, post_modified_gmt,
+  post_content_filtered, post_parent, guid, menu_order, post_type, post_mime_type, comment_count) VALUES
+  (104, 1, '2026-10-28 00:00:00', '2026-10-28 00:00:00', '', 'Hello world!', '', 'inherit', 'closed', 'closed', '', '1-revision-v1', '', '',
+   '2026-10-28 00:00:00', '2026-10-28 00:00:00', '', 1, 'http://default-install.test/?p=104', 0, 'revision', '', 0),
+  (105, 1, '2026-10-28 00:00:00', '2026-10-28 00:00:00', '', 'Hello world!', '', 'inherit', 'closed', 'closed', '', '1-revision-v1', '', '',
+   '2026-10-28 00:00:00', '2026-10-28 00:00:00', '', 1, 'http://default-install.test/?p=105', 0, 'revision', '', 0);

@@ -955,7 +955,7 @@ async fn odd_stored_values_are_read_as_php_reads_them() {
     let cron = rolled_back(async |w, ctx| {
         site::update_option(w, "cron", b"s:3:\"bad\";", None).await?;
         wp_insert_post(w, ctx, oracle_post("publish")).await?;
-        Ok(w.option("cron").await?.unwrap_or_default())
+        Ok(w.option_value("cron").await?.unwrap_or_default())
     })
     .await;
     let cron = String::from_utf8(cron.unwrap()).unwrap();
@@ -1355,7 +1355,7 @@ async fn rare_values_are_kept_as_php_keeps_them() {
         let list = format!("a:4:{{i:0;i:{id};i:1;i:7;i:2;s:1:\"7\";i:3;i:{id};}}");
         site::update_option(w, "sticky_posts", list.as_bytes(), None).await?;
         wp_trash_post(w, ctx, id).await?;
-        Ok(w.option("sticky_posts").await?.unwrap_or_default())
+        Ok(w.option_value("sticky_posts").await?.unwrap_or_default())
     })
     .await;
     assert_eq!(sticky.unwrap(), b"a:1:{i:0;i:7;}");
@@ -1501,4 +1501,26 @@ async fn database_errors_end_the_rarer_paths() {
         async |w, _, _| site::update_option(w, "hyscribe_auto", b"y", None).await,
     )
     .await;
+}
+
+#[tokio::test]
+async fn post_formats_are_not_ported() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let deleted = rolled_back(async |w, ctx| {
+        let term = w.insert_term(b"Aside", b"post-format-aside", 0).await?;
+        let format = w.insert_term_taxonomy((term, "post_format"), b"", 0).await?;
+        let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+        w.add_relationship(id, format).await?;
+        wp_delete_post(w, ctx, id, true).await
+    })
+    .await;
+    assert!(unported(deleted));
+}
+
+#[test]
+fn term_errors_are_post_errors() {
+    let unported = PostError::from(crate::terms::TermError::Unported("x"));
+    assert!(matches!(unported, PostError::Unported("x")));
+    let invalid = PostError::from(crate::terms::TermError::InvalidTerm);
+    assert!(matches!(invalid, PostError::Invalid("invalid_term")));
 }

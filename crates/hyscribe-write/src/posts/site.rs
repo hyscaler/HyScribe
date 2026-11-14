@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! What the post functions call of the option, meta and term functions:
-//! `update_option()`, `add_post_meta()`, `delete_post_meta()`,
-//! `wp_set_object_terms()`, `wp_remove_object_terms()` and the post term
-//! counts, as far as posts use them.
+//! `update_option()`, `add_post_meta()`, `delete_post_meta()`, the post term
+//! counts and `wp_delete_object_term_relationships()`, as far as posts use
+//! them.
 
 use hyscribe_db::{Meta, Write};
 use hyscribe_phpser::Value;
 
-use super::{Kind, Result};
+use super::{Kind, PostError, Result};
+use crate::terms::{Taxonomy, TermRef, wp_remove_object_terms};
 
 /// `(int) get_option( $name )`.
 pub(super) async fn option_int(write: &mut Write<'_>, name: &str) -> Result<u64> {
-    let value = write.option(name).await?.unwrap_or_default();
+    let value = write.option_value(name).await?.unwrap_or_default();
     Ok(u64::try_from(Value::String(value).to_int()).unwrap_or(0))
 }
 
@@ -30,7 +31,7 @@ pub(super) async fn update_option(
     } else {
         "auto"
     };
-    match write.option(name).await? {
+    match write.option_value(name).await? {
         None => {
             write
                 .add_option(name, value, autoload.unwrap_or(default))
@@ -62,7 +63,7 @@ pub(super) async fn default_status(
 ) -> Result<String> {
     Ok(match kind {
         Kind::Post => {
-            let value = write.option(option).await?.unwrap_or_default();
+            let value = write.option_value(option).await?.unwrap_or_default();
             String::from_utf8_lossy(&value).into_owned()
         }
         Kind::Page | Kind::Revision => "closed".into(),
@@ -115,51 +116,23 @@ pub(super) async fn update_term_counts(write: &mut Write<'_>, tt_ids: &[u64]) ->
     Ok(())
 }
 
-/// `wp_set_object_terms( $object, $terms, $taxonomy )` with term IDs.
-pub(super) async fn set_object_terms(
+/// `wp_delete_object_term_relationships( $object, $taxonomies )`. The
+/// terms port has no post formats, so a post with one is refused.
+pub(super) async fn delete_object_terms(
     write: &mut Write<'_>,
     object: u64,
-    terms: &[u64],
-    taxonomy: &str,
+    taxonomies: &[&str],
 ) -> Result<()> {
-    let old: Vec<u64> = write
-        .object_terms(object, taxonomy)
-        .await?
-        .into_iter()
-        .map(|(_, tt_id)| tt_id)
-        .collect();
-    let (mut tt_ids, mut added) = (Vec::new(), Vec::new());
-    for &term in terms {
-        let Some(tt_id) = write.term_taxonomy_id(term, taxonomy).await? else {
-            continue;
+    for &name in taxonomies {
+        let terms = write.object_terms(object, name).await?;
+        let terms: Vec<TermRef<'_>> = terms.iter().map(|&(id, _)| TermRef::Id(id)).collect();
+        let taxonomy = match name {
+            "category" => Taxonomy::Category,
+            "post_tag" => Taxonomy::PostTag,
+            _ if terms.is_empty() => continue,
+            _ => return Err(PostError::Unported("a post with a post format")),
         };
-        if tt_ids.contains(&tt_id) {
-            continue;
-        }
-        tt_ids.push(tt_id);
-        if !old.contains(&tt_id) {
-            write.add_relationship(object, tt_id).await?;
-            added.push(tt_id);
-        }
+        wp_remove_object_terms(write, object, &terms, taxonomy).await?;
     }
-    update_term_counts(write, &added).await?;
-    let removed: Vec<u64> = old.into_iter().filter(|tt| !tt_ids.contains(tt)).collect();
-    remove_relationships(write, object, &removed).await
-}
-
-/// `wp_remove_object_terms()` of the term taxonomies `tt_ids`.
-async fn remove_relationships(write: &mut Write<'_>, object: u64, tt_ids: &[u64]) -> Result<()> {
-    write.remove_relationships(object, tt_ids).await?;
-    update_term_counts(write, tt_ids).await
-}
-
-/// `wp_delete_object_term_relationships( $object, $taxonomy )`.
-pub(super) async fn remove_object_terms(
-    write: &mut Write<'_>,
-    object: u64,
-    taxonomy: &str,
-) -> Result<()> {
-    let terms = write.object_terms(object, taxonomy).await?;
-    let tt_ids: Vec<u64> = terms.into_iter().map(|(_, tt_id)| tt_id).collect();
-    remove_relationships(write, object, &tt_ids).await
+    Ok(())
 }

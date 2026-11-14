@@ -61,7 +61,7 @@ async fn date_archive(write: &mut Write<'_>, slug: &[u8], id: u64) -> Result<boo
         return Ok(false);
     }
     let structure = write
-        .option("permalink_structure")
+        .option_value("permalink_structure")
         .await?
         .unwrap_or_default();
     // (int) of a number past PHP_INT_MAX is PHP_INT_MAX.

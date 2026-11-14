@@ -1,0 +1,146 @@
+# The rows PHP WordPress writes for the action insert-duplicate-category (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 20:34:53 to 2026-11-14 20:34:53 UTC.
+# %wp_terms:1% is 9.
+# %wp_terms:2% is 10.
+# %wp_terms:3% is 11.
+# %wp_terms:4% is 12.
+# %wp_terms:5% is 13.
+# %wp_terms:6% is 14.
+# %wp_terms:7% is 15.
+# %wp_terms:8% is 16.
+# %wp_terms:9% is 17.
+# %wp_terms:10% is 18.
+# %wp_terms:11% is 19.
+# %wp_terms:12% is 20.
+# %wp_terms:13% is 21.
+# %wp_terms:14% is 22.
+# %wp_terms:15% is 23.
+# %wp_term_taxonomy:1% is 9.
+# %wp_term_taxonomy:2% is 10.
+# %wp_term_taxonomy:3% is 11.
+# %wp_term_taxonomy:4% is 12.
+# %wp_term_taxonomy:5% is 13.
+# %wp_term_taxonomy:6% is 14.
+# %wp_term_taxonomy:7% is 15.
+# %wp_term_taxonomy:8% is 16.
+# %wp_term_taxonomy:9% is 17.
+# %wp_term_taxonomy:10% is 18.
+# %wp_term_taxonomy:11% is 19.
+# %wp_term_taxonomy:12% is 20.
+# %wp_term_taxonomy:13% is 21.
+# %wp_term_taxonomy:14% is 22.
+# %wp_term_taxonomy:15% is 23.
+# %wp_options:1% is 132.
+# %wp_options:2% is 143.
+wp_options	category_children	~	option_id	%wp_options:1%	%wp_options:2%
+wp_options	category_children	~	option_value	a:1:{i:%wp_terms:1%;a:1:{i:0;i:%wp_terms:2%;}}	a:4:{i:%wp_terms:1%;a:5:{i:0;i:%wp_terms:2%;i:1;i:%wp_terms:5%;i:2;i:%wp_terms:6%;i:3;i:%wp_terms:14%;i:4;i:%wp_terms:15%;}i:%wp_terms:3%;a:2:{i:0;i:%wp_terms:8%;i:1;i:%wp_terms:9%;}i:%wp_terms:2%;a:2:{i:0;i:%wp_terms:11%;i:1;i:%wp_terms:13%;}i:%wp_terms:4%;a:1:{i:0;i:%wp_terms:12%;}}
+wp_term_taxonomy	%wp_term_taxonomy:10%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:10%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:10%	+	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:10%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:10%	+	term_id	%wp_terms:10%
+wp_term_taxonomy	%wp_term_taxonomy:10%	+	term_taxonomy_id	%wp_term_taxonomy:10%
+wp_term_taxonomy	%wp_term_taxonomy:11%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:11%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:11%	+	parent	%wp_terms:2%
+wp_term_taxonomy	%wp_term_taxonomy:11%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:11%	+	term_id	%wp_terms:11%
+wp_term_taxonomy	%wp_term_taxonomy:11%	+	term_taxonomy_id	%wp_term_taxonomy:11%
+wp_term_taxonomy	%wp_term_taxonomy:12%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:12%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:12%	+	parent	%wp_terms:4%
+wp_term_taxonomy	%wp_term_taxonomy:12%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:12%	+	term_id	%wp_terms:12%
+wp_term_taxonomy	%wp_term_taxonomy:12%	+	term_taxonomy_id	%wp_term_taxonomy:12%
+wp_term_taxonomy	%wp_term_taxonomy:13%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:13%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:13%	+	parent	%wp_terms:2%
+wp_term_taxonomy	%wp_term_taxonomy:13%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:13%	+	term_id	%wp_terms:13%
+wp_term_taxonomy	%wp_term_taxonomy:13%	+	term_taxonomy_id	%wp_term_taxonomy:13%
+wp_term_taxonomy	%wp_term_taxonomy:14%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:14%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:14%	+	parent	%wp_terms:1%
+wp_term_taxonomy	%wp_term_taxonomy:14%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:14%	+	term_id	%wp_terms:14%
+wp_term_taxonomy	%wp_term_taxonomy:14%	+	term_taxonomy_id	%wp_term_taxonomy:14%
+wp_term_taxonomy	%wp_term_taxonomy:15%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:15%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:15%	+	parent	%wp_terms:1%
+wp_term_taxonomy	%wp_term_taxonomy:15%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:15%	+	term_id	%wp_terms:15%
+wp_term_taxonomy	%wp_term_taxonomy:15%	+	term_taxonomy_id	%wp_term_taxonomy:15%
+wp_term_taxonomy	%wp_term_taxonomy:5%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:5%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:5%	+	parent	%wp_terms:1%
+wp_term_taxonomy	%wp_term_taxonomy:5%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:5%	+	term_id	%wp_terms:5%
+wp_term_taxonomy	%wp_term_taxonomy:5%	+	term_taxonomy_id	%wp_term_taxonomy:5%
+wp_term_taxonomy	%wp_term_taxonomy:6%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:6%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:6%	+	parent	%wp_terms:1%
+wp_term_taxonomy	%wp_term_taxonomy:6%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:6%	+	term_id	%wp_terms:6%
+wp_term_taxonomy	%wp_term_taxonomy:6%	+	term_taxonomy_id	%wp_term_taxonomy:6%
+wp_term_taxonomy	%wp_term_taxonomy:7%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:7%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:7%	+	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:7%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:7%	+	term_id	%wp_terms:7%
+wp_term_taxonomy	%wp_term_taxonomy:7%	+	term_taxonomy_id	%wp_term_taxonomy:7%
+wp_term_taxonomy	%wp_term_taxonomy:8%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:8%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:8%	+	parent	%wp_terms:3%
+wp_term_taxonomy	%wp_term_taxonomy:8%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:8%	+	term_id	%wp_terms:8%
+wp_term_taxonomy	%wp_term_taxonomy:8%	+	term_taxonomy_id	%wp_term_taxonomy:8%
+wp_term_taxonomy	%wp_term_taxonomy:9%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:9%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:9%	+	parent	%wp_terms:3%
+wp_term_taxonomy	%wp_term_taxonomy:9%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:9%	+	term_id	%wp_terms:9%
+wp_term_taxonomy	%wp_term_taxonomy:9%	+	term_taxonomy_id	%wp_term_taxonomy:9%
+wp_terms	%wp_terms:10%	+	name	Tot
+wp_terms	%wp_terms:10%	+	slug	kid-child
+wp_terms	%wp_terms:10%	+	term_group	0
+wp_terms	%wp_terms:10%	+	term_id	%wp_terms:10%
+wp_terms	%wp_terms:11%	+	name	Grandchild
+wp_terms	%wp_terms:11%	+	slug	kid-child-parent
+wp_terms	%wp_terms:11%	+	term_group	0
+wp_terms	%wp_terms:11%	+	term_id	%wp_terms:11%
+wp_terms	%wp_terms:12%	+	name	Stray
+wp_terms	%wp_terms:12%	+	slug	kid-2
+wp_terms	%wp_terms:12%	+	term_group	0
+wp_terms	%wp_terms:12%	+	term_id	%wp_terms:12%
+wp_terms	%wp_terms:13%	+	name	Baby
+wp_terms	%wp_terms:13%	+	slug	child-child
+wp_terms	%wp_terms:13%	+	term_group	0
+wp_terms	%wp_terms:13%	+	term_id	%wp_terms:13%
+wp_terms	%wp_terms:14%	+	name	Tyke
+wp_terms	%wp_terms:14%	+	slug	small
+wp_terms	%wp_terms:14%	+	term_group	0
+wp_terms	%wp_terms:14%	+	term_id	%wp_terms:14%
+wp_terms	%wp_terms:15%	+	name	tyke
+wp_terms	%wp_terms:15%	+	slug	tyke
+wp_terms	%wp_terms:15%	+	term_group	0
+wp_terms	%wp_terms:15%	+	term_id	%wp_terms:15%
+wp_terms	%wp_terms:5%	+	name	Kid
+wp_terms	%wp_terms:5%	+	slug	kid
+wp_terms	%wp_terms:5%	+	term_group	0
+wp_terms	%wp_terms:5%	+	term_id	%wp_terms:5%
+wp_terms	%wp_terms:6%	+	name	Child
+wp_terms	%wp_terms:6%	+	slug	other-parent
+wp_terms	%wp_terms:6%	+	term_group	0
+wp_terms	%wp_terms:6%	+	term_id	%wp_terms:6%
+wp_terms	%wp_terms:7%	+	name	Child
+wp_terms	%wp_terms:7%	+	slug	child-2
+wp_terms	%wp_terms:7%	+	term_group	0
+wp_terms	%wp_terms:7%	+	term_id	%wp_terms:7%
+wp_terms	%wp_terms:8%	+	name	Child
+wp_terms	%wp_terms:8%	+	slug	child-other
+wp_terms	%wp_terms:8%	+	term_group	0
+wp_terms	%wp_terms:8%	+	term_id	%wp_terms:8%
+wp_terms	%wp_terms:9%	+	name	Young
+wp_terms	%wp_terms:9%	+	slug	child-other-2
+wp_terms	%wp_terms:9%	+	term_group	0
+wp_terms	%wp_terms:9%	+	term_id	%wp_terms:9%

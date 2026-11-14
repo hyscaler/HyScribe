@@ -10,7 +10,10 @@ use super::{Context, Kind, PostError, Result, cron, hooks, site, wp_update_post}
 
 /// `unstick_post( $id )`.
 async fn unstick(write: &mut Write<'_>, id: u64) -> Result<()> {
-    let stored = write.option("sticky_posts").await?.unwrap_or_default();
+    let stored = write
+        .option_value("sticky_posts")
+        .await?
+        .unwrap_or_default();
     let Some(Value::Array(stickies)) = unserialize(&stored) else {
         return Ok(());
     };
@@ -160,9 +163,7 @@ async fn delete_one(write: &mut Write<'_>, id: u64, kind: Kind) -> Result<Vec<u6
     }
     site::delete_post_meta(write, id, "_wp_trash_meta_status").await?;
     site::delete_post_meta(write, id, "_wp_trash_meta_time").await?;
-    for taxonomy in kind.taxonomies() {
-        site::remove_object_terms(write, id, taxonomy).await?;
-    }
+    site::delete_object_terms(write, id, kind.taxonomies()).await?;
     if kind.hierarchical() {
         write
             .reparent_posts(id, &post.post_type, post.parent)

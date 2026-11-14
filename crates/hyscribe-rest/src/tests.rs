@@ -322,6 +322,7 @@ pub(super) fn serve_with(site: &dyn Site, case: &RestCase) -> Served {
         },
         nonce: (user != 0 && !flag("nononce")).then_some(b"%nonce%"),
         method_override: flag("override").then_some(b"DELETE"),
+        unread_body: false,
     };
     serve(site, &request)
 }
@@ -405,8 +406,8 @@ pub(super) fn sha256_hex(body: &[u8]) -> Vec<u8> {
 
 /// The answers of `goldens`, each over its content and compared by hash
 /// when flagged, that differ from PHP's, with the public users endpoint on
-/// or off, and how many are 501 as `unported` expects; a write method is
-/// never served.
+/// or off, and how many are 501 as `unported` expects; a write is answered
+/// 501 only where PHP goes on.
 fn mismatches(
     goldens: &[(&'static Content, &str, bool)],
     public_users: bool,
@@ -427,7 +428,7 @@ fn mismatches(
             );
             let write = case.method != "GET" && case.method != "HEAD";
             if served.status == 501 {
-                if !(write || unported(&case)) || !served.body.is_empty() {
+                if !(write && case.status < 400 || unported(&case)) || !served.body.is_empty() {
                     failures.push(format!("{what}: 501"));
                 }
                 not_served += 1;
@@ -482,6 +483,21 @@ fn content_answers_match_php() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// Writes are refused as PHP refuses them, and answered 501 where PHP's
+/// permission check lets them through (`reference/rest/writes.list`).
+#[test]
+fn writes_are_checked_as_php_checks_them() {
+    let golden = include_str!("../tests/golden/writes.tsv");
+    let goldens = [(content::default_install(), golden, false)];
+    let (failures, not_served) = mismatches(&goldens, true, &|_| false);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    let accepted = rest_cases(golden)
+        .iter()
+        .filter(|case| case.body == b"hyscribe-accepted")
+        .count();
+    assert_eq!(not_served, accepted);
 }
 
 /// The arguments of every ported route use only keywords `hyscribe_rest`
@@ -594,6 +610,7 @@ fn links_are_served_as_from_url_reads_them() {
         user: 0,
         head: false,
         uri: b"/",
+        parameters: false,
     };
     let served = |href: &str| crate::embed::serve(&context, href.as_bytes()).ok().unwrap();
     let rest = "http://127.0.0.1:8081/index.php?rest_route=";
@@ -748,6 +765,7 @@ fn self_links_hint_what_their_route_allows() {
         user: 0,
         head: false,
         uri: b"/",
+        parameters: false,
     };
     for route in ["/nope", "/wp/v2/media", "/wp/v2/block-types/core/paragraph"] {
         let mut response = Response::new(Value::Array(Vec::new()), 200);

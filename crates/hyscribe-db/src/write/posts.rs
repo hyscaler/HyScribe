@@ -83,23 +83,6 @@ impl Write<'_> {
         row.as_ref().map(post_fields).transpose()
     }
 
-    /// `get_option( $name )` as stored, read inside the action.
-    pub async fn option(&mut self, name: &str) -> Result<Option<Vec<u8>>, DbError> {
-        let query =
-            self.sql("SELECT option_value FROM {prefix}options WHERE option_name = ? LIMIT 1");
-        let row = query
-            .bind(name)
-            .fetch_optional(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
-        row.map(|row| {
-            let mut c = Columns::new(&row);
-            let value = c.bytes("option_value");
-            c.finish(value)
-        })
-        .transpose()
-    }
-
     /// `wp_unique_post_slug()` for a flat type: whether another post of
     /// `post_type` has the name.
     pub async fn post_name_used(
@@ -170,48 +153,6 @@ impl Write<'_> {
                 c.finish(value)
             })
             .collect()
-    }
-
-    /// The terms of `object` in `taxonomy`, as `(term_id, term_taxonomy_id)`.
-    pub async fn object_terms(
-        &mut self,
-        object: u64,
-        taxonomy: &str,
-    ) -> Result<Vec<(u64, u64)>, DbError> {
-        let query = self.sql(
-            "SELECT tt.term_id, tt.term_taxonomy_id FROM {prefix}term_taxonomy AS tt \
-             INNER JOIN {prefix}term_relationships AS tr \
-             ON tr.term_taxonomy_id = tt.term_taxonomy_id \
-             WHERE tt.taxonomy = ? AND tr.object_id = ? ORDER BY tt.term_taxonomy_id",
-        );
-        let rows = query
-            .bind(taxonomy)
-            .bind(object)
-            .fetch_all(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
-        rows.iter()
-            .map(|row| {
-                let mut c = Columns::new(row);
-                let ids = (c.unsigned("term_id"), c.unsigned("term_taxonomy_id"));
-                c.finish(ids)
-            })
-            .collect()
-    }
-
-    /// `term_exists( $term_id, $taxonomy )`: the term's `term_taxonomy_id`.
-    pub async fn term_taxonomy_id(
-        &mut self,
-        term: u64,
-        taxonomy: &str,
-    ) -> Result<Option<u64>, DbError> {
-        let query = self.sql(
-            "SELECT tt.term_taxonomy_id FROM {prefix}terms AS t \
-             INNER JOIN {prefix}term_taxonomy AS tt ON tt.term_id = t.term_id \
-             WHERE t.term_id = ? AND tt.taxonomy = ?",
-        );
-        let ids = self.ids(query.bind(term).bind(taxonomy)).await?;
-        Ok(ids.first().copied())
     }
 
     /// `block_core_calendar_update_has_published_posts()`'s query.

@@ -10,6 +10,10 @@
 use hyscribe_db::{DbError, PostFields, Write};
 use hyscribe_render::formatting::sanitize_title;
 
+use crate::terms::{
+    Taxonomy, TermError, TermList, TermRef, wp_set_post_categories, wp_set_post_terms,
+};
+
 mod cron;
 mod date;
 mod hooks;
@@ -96,6 +100,17 @@ pub enum PostError {
     Invalid(&'static str),
     /// A case HyScribe does not port yet.
     Unported(&'static str),
+}
+
+impl From<TermError> for PostError {
+    fn from(err: TermError) -> PostError {
+        match err {
+            TermError::Db(err) => PostError::Db(err),
+            TermError::Unported(what) => PostError::Unported(what),
+            // Terms given by ID that do not exist are skipped instead.
+            _ => PostError::Invalid("invalid_term"),
+        }
+    }
 }
 
 impl From<DbError> for PostError {
@@ -230,7 +245,8 @@ pub async fn wp_publish_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> R
     if kind == Kind::Post && write.object_terms(id, "category").await?.is_empty() {
         let default = site::option_int(write, "default_category").await?;
         if default != 0 {
-            site::set_object_terms(write, id, &[default], "category").await?;
+            let terms = TermList::List(&[TermRef::Id(default)]);
+            wp_set_post_terms(write, id, terms, Taxonomy::Category, false).await?;
         }
     }
     write.set_post_status(id, "publish").await?;
@@ -437,7 +453,8 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
         write.set_post_name(id, &fields.name).await?;
     }
     if kind == Kind::Post {
-        site::set_object_terms(write, id, &category, "category").await?;
+        let terms: Vec<TermRef<'_>> = category.iter().map(|&term| TermRef::Id(term)).collect();
+        wp_set_post_categories(write, id, &terms, false).await?;
     }
     if before.is_none() {
         let guid = hooks::permalink(write, ctx, id, &fields).await?;

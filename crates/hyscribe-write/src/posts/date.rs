@@ -70,8 +70,11 @@ fn ymd(date: &str) -> (u32, u32, u32) {
 impl Dates {
     /// The site's time zone, from its options, at `now`.
     pub(super) async fn read(write: &mut Write<'_>, now: i64) -> Result<Dates> {
-        let zone = write.option("timezone_string").await?.unwrap_or_default();
-        let offset = write.option("gmt_offset").await?.unwrap_or_default();
+        let zone = write
+            .option_value("timezone_string")
+            .await?
+            .unwrap_or_default();
+        let offset = write.option_value("gmt_offset").await?.unwrap_or_default();
         Ok(Dates {
             zone: site_zone(&zone, &offset),
             now,

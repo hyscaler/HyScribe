@@ -209,6 +209,9 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     } else {
         Vec::new()
     };
+    // A form's fields are read; any other body, and a form sent with
+    // another method, only PHP reads.
+    let unread_body = !asked.body.is_empty() && form.is_empty();
     let request = hyscribe_rest::Request {
         method: asked.method.as_str(),
         route: &asked.route,
@@ -222,6 +225,7 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
         origin: header("origin"),
         nonce: header("x-wp-nonce"),
         method_override: header("x-http-method-override"),
+        unread_body,
     };
     let served = hyscribe_rest::serve(&rest, &request);
     let Rest { reads, .. } = rest;

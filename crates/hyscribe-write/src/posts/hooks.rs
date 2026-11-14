@@ -19,7 +19,7 @@ pub(super) async fn permalink(
     post: &PostFields,
 ) -> Result<Vec<u8>> {
     let structure = write
-        .option("permalink_structure")
+        .option_value("permalink_structure")
         .await?
         .unwrap_or_default();
     // Pages in the future take pretty links; posts do not.
@@ -30,8 +30,14 @@ pub(super) async fn permalink(
     if !structure.is_empty() && !plain_statuses.contains(&post.status.as_str()) {
         return Err(PostError::Unported("a GUID under pretty permalinks"));
     }
-    let show_on_front = write.option("show_on_front").await?.unwrap_or_default();
-    let page_on_front = write.option("page_on_front").await?.unwrap_or_default();
+    let show_on_front = write
+        .option_value("show_on_front")
+        .await?
+        .unwrap_or_default();
+    let page_on_front = write
+        .option_value("page_on_front")
+        .await?
+        .unwrap_or_default();
     let front_page = hyscribe_render::link::front_page(&show_on_front, &page_on_front);
     let post = Post {
         id,
@@ -107,7 +113,7 @@ pub(super) async fn update_has_published_posts(write: &mut Write<'_>) -> Result<
     let name = "wp_calendar_block_has_published_posts";
     if write.published_post_exists().await? {
         site::update_option(write, name, b"1", None).await
-    } else if write.option(name).await?.is_some() {
+    } else if write.option_value(name).await?.is_some() {
         site::update_option(write, name, b"", None).await
     } else {
         // false is a missing option's value already.
@@ -124,7 +130,7 @@ async fn publish_post(
 ) -> Result<()> {
     if truthy(
         &write
-            .option("default_pingback_flag")
+            .option_value("default_pingback_flag")
             .await?
             .unwrap_or_default(),
     ) {
@@ -142,7 +148,10 @@ async fn publish_post(
 
 /// Whether `nav_menu_options` adds new top level pages to a menu.
 async fn auto_adds_pages(write: &mut Write<'_>) -> Result<bool> {
-    let stored = write.option("nav_menu_options").await?.unwrap_or_default();
+    let stored = write
+        .option_value("nav_menu_options")
+        .await?
+        .unwrap_or_default();
     let menus = unserialize(&stored);
     let auto_add = menus
         .as_ref()

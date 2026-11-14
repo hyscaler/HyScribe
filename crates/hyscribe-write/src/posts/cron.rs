@@ -113,7 +113,7 @@ fn remove(crons: &mut Crons, hook: &str, key: &Key) -> bool {
 
 /// `_get_cron_array()`.
 async fn crons(write: &mut Write<'_>) -> Result<Crons> {
-    let stored = write.option("cron").await?.unwrap_or_default();
+    let stored = write.option_value("cron").await?.unwrap_or_default();
     let Some(Value::Array(mut crons)) = unserialize(&stored) else {
         return Ok(Vec::new());
     };

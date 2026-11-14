@@ -238,6 +238,47 @@ async fn reports_database_errors_after_the_start() {
 }
 
 #[test]
+fn masks_password_hashes_and_transient_expiries() {
+    let masks = Masks {
+        start: (0, Vec::new()),
+        end: (0, Vec::new()),
+        new: NewIds::new(),
+    };
+    let users = &TABLES[9];
+    let hash = "$wp$2y$12$AcR1MJvv/EqV00wDAwU9hOfvyPBz2LDs7JdSwTxTWj1XcAYchMKii";
+    assert_eq!(
+        masks.mask(users, "user_pass", hash.as_bytes()),
+        b"%password%"
+    );
+    for kept in [
+        &hash.replace("ii", "i"),
+        &hash.replace('A', "!"),
+        &hash.replace("$12$", "$10$"),
+    ] {
+        assert_eq!(
+            masks.mask(users, "user_pass", kept.as_bytes()),
+            kept.as_bytes()
+        );
+    }
+    let options = &TABLES[8];
+    let row = |name: &str| {
+        let row: Row = vec![
+            ("option_name".to_string(), name.as_bytes().to_vec()),
+            ("option_value".to_string(), b"1794686138".to_vec()),
+        ];
+        BTreeMap::from([(b"k".to_vec(), row)])
+    };
+    let value = |name: &str, table: &Table| {
+        let rows = masked(&masks, table, &row(name));
+        rows.into_values().next().unwrap()[1].1.clone()
+    };
+    assert_eq!(value("_transient_timeout_a", options), b"%expiry%");
+    assert_eq!(value("_site_transient_timeout_a", options), b"%expiry%");
+    assert_eq!(value("_transient_a", options), b"1794686138");
+    assert_eq!(value("_transient_timeout_a", users), b"1794686138");
+}
+
+#[test]
 fn masks_times_and_new_ids() {
     let new = NewIds::from([(("wp_posts", b"12".to_vec()), b"%wp_posts:1%".to_vec())]);
     let masks = Masks {

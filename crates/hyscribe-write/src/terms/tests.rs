@@ -378,7 +378,7 @@ async fn deletes_a_tag() {
             .await
             .unwrap();
         write
-            .add_meta(Meta::Term, id, "color", b"red")
+            .add_meta(Meta::Term, id, "color", Some(b"red"))
             .await
             .unwrap();
         id
@@ -614,7 +614,10 @@ async fn refuses_what_is_not_ported() {
         ("_menu_item_type", b"taxonomy"),
         ("_menu_item_object", b"post_tag"),
     ] {
-        write.add_meta(Meta::Post, item, key, value).await.unwrap();
+        write
+            .add_meta(Meta::Post, item, key, Some(value))
+            .await
+            .unwrap();
     }
     let menu = wp_delete_term(&mut write, Taxonomy::PostTag, id).await;
     assert!(matches!(menu, Err(TermError::Unported(_))));

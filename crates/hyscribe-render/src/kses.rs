@@ -170,8 +170,6 @@ pub fn wp_kses_comment(content: &[u8]) -> Vec<u8> {
 /// `rel="ugc"` on internal links, added to any `rel` the link has.
 pub fn wp_rel_ugc(text: &[u8], home: &[u8]) -> Vec<u8> {
     let home = url_host(home).map(|host| host.to_ascii_lowercase());
-    let mut closers = Next::new(text, b">");
-    let mut newlines = Next::new(text, b"\n");
     let mut out = Vec::with_capacity(text.len());
     let (mut at, mut from) = (0, 0);
     while let Some(start) = text
@@ -179,18 +177,24 @@ pub fn wp_rel_ugc(text: &[u8], home: &[u8]) -> Vec<u8> {
         .and_then(|rest| rest.windows(3).position(|w| w.eq_ignore_ascii_case(b"<a ")))
         .map(|i| from + i)
     {
-        // `|<a (.+?)>|i`: a byte, then the first `>` before a newline.
+        // `|<a (.+?)>|i`: a byte, then the first `>` or newline after it.
         let body = start + 3;
-        let line = newlines.from(body).unwrap_or(text.len());
-        match closers.from(body + 1) {
-            Some(end) if body < line && end < line => {
+        let stop = text
+            .get(body + 1..)
+            .and_then(|rest| rest.iter().position(|&b| b == b'>' || b == b'\n'))
+            .map(|i| body + 1 + i);
+        match (text.get(body), stop) {
+            (Some(b'\n'), _) => from = body,
+            // Nothing later can match either.
+            (_, None) => from = text.len(),
+            (_, Some(end)) if text.get(end) == Some(&b'>') => {
                 out.extend_from_slice(text.get(at..start).unwrap_or_default());
                 let attributes = text.get(body..end).unwrap_or_default();
                 out.extend(rel_ugc_link(attributes, home.as_deref()));
                 at = end + 1;
                 from = at;
             }
-            _ => from = start + 1,
+            (_, Some(newline)) => from = newline,
         }
     }
     out.extend_from_slice(text.get(at..).unwrap_or_default());
@@ -234,15 +238,11 @@ fn rel_ugc_link(attributes: &[u8], home: Option<&[u8]>) -> Vec<u8> {
     [&b"<a "[..], &text, b" rel=\"", rel.as_bytes(), b"\">"].concat()
 }
 
-/// `wp_is_internal_link()`: an allowed protocol and the home URL's host.
+/// `wp_is_internal_link()`: a protocol and the home URL's host. Callers'
+/// links have an allowed protocol or none, kses or the URL pattern saw to it.
 pub(crate) fn is_internal_link(link: &[u8], home: Option<&[u8]>) -> bool {
     let link = link.to_ascii_lowercase();
-    let allowed = url_scheme(&link).is_some_and(|scheme| {
-        ALLOWED_PROTOCOLS
-            .iter()
-            .any(|protocol| protocol.as_bytes() == scheme)
-    });
-    allowed && url_host(&link).is_some_and(|host| Some(&host[..]) == home)
+    url_scheme(&link).is_some() && url_host(&link).is_some_and(|host| Some(&host[..]) == home)
 }
 
 /// `wp_kses( $content, $allowed_html )` with the default protocols.

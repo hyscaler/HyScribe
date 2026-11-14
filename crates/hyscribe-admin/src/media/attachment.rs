@@ -1,0 +1,855 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! An attachment's edit screen, `post.php?post=N&action=edit`:
+//! `edit-form-advanced.php` with `edit_form_image_editor()` and meta boxes.
+
+use hyscribe_kses::{esc_attr, esc_html, esc_textarea, esc_url};
+use hyscribe_model::{Post, User};
+use hyscribe_phpser::{Value, add_query_arg, is_empty_string, wp_basename};
+use hyscribe_render::attachment::is_image;
+use hyscribe_render::date::{self, Zone};
+use hyscribe_render::post::the_title;
+use hyscribe_render::user_avatar;
+
+use super::MediaSite;
+use super::image::{attachment_url, image_src, metadata};
+use crate::page::query_strings;
+use crate::admin_bar::{BarSite, Browser};
+use crate::assets::cookie_path;
+use crate::comments::{CommentsSite, comment_reply, editor_css, editor_footer};
+use crate::dashboard::{Widget, listed, postbox, sorted};
+use crate::list_table::{fill, wp_referer_field};
+use crate::menu::Screen;
+use crate::page::{HelpTab, Page, Request, admin_page, wp_admin_notice};
+use crate::posts::Answer;
+use crate::profile::ProfileSite;
+
+const FORM: &str = include_str!("attachment.html");
+
+const HELP: [HelpTab; 1] = [HelpTab {
+    id: "overview",
+    title: "Overview",
+    content: "<p>This screen allows you to edit fields for metadata in a file within the media library.</p><p>For images only, you can click on Edit Image under the thumbnail to expand out an inline image editor with icons for cropping, rotating, or flipping the image as well as for undoing and redoing. The boxes on the right give you more options for scaling the image, for cropping it, and for cropping the thumbnail in a different way than you crop the original image. You can click on Help in those boxes to get more information.</p><p>Note that you crop the image by clicking on it (the Crop icon is already selected) and dragging the cropping frame to select the desired part. Then click Save to retain the cropping.</p><p>Remember to click Update to save metadata entered or changed.</p>",
+}];
+
+const SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/edit-media/\">Documentation on Edit Media</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
+
+/// `wp_just_in_time_script_localization()`'s data of the word counter.
+const WORD_COUNT: &str = "var wordCountL10n = {\"type\":\"words\",\"shortcodes\":[\"wp_caption\",\"caption\",\"gallery\",\"playlist\",\"audio\",\"video\",\"embed\"]};";
+
+const ALT: &str = "\t\t\t<p class=\"attachment-alt-text\">\n\t\t\t<label for=\"attachment_alt\"><strong>Alternative Text</strong></label><br />\n\t\t\t<textarea class=\"widefat\" name=\"_wp_attachment_image_alt\" id=\"attachment_alt\" aria-describedby=\"alt-text-description\">%alt%</textarea>\n\t\t</p>\n\t\t<p class=\"attachment-alt-text-description\" id=\"alt-text-description\">\n\t\t<a href=\"https://www.w3.org/WAI/tutorials/images/decision-tree/\" target=\"_blank\">Learn how to describe the purpose of the image<span class=\"screen-reader-text\"> (opens in a new tab)</span><span aria-hidden=\"true\" class=\"dashicons dashicons-external\"></span></a>. Leave empty if the image is purely decorative.\t\t</p>\n\t\n";
+
+/// The image types the oracle's image editor, Imagick, edits.
+const EDITABLE: [&str; 9] = [
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/avif",
+    "image/heic",
+    "image/bmp",
+    "image/tiff",
+    "image/x-icon",
+];
+
+/// The meta boxes hidden until the user shows them: `get_hidden_meta_boxes()`'s.
+const HIDDEN: [&str; 8] = [
+    "slugdiv",
+    "trackbacksdiv",
+    "postcustom",
+    "postexcerpt",
+    "commentstatusdiv",
+    "commentsdiv",
+    "authordiv",
+    "revisionsdiv",
+];
+
+/// What the screen asks of the site: the media's, the comments' and the
+/// users'.
+pub trait AttachmentSite: MediaSite + CommentsSite + ProfileSite {}
+
+impl<T: MediaSite + CommentsSite + ProfileSite> AttachmentSite for T {}
+
+/// The screen's arguments: `post.php`'s post and the notice a save sends
+/// back to it, and the referer the browser sent.
+pub struct AttachmentArgs {
+    /// `$_GET['post']`.
+    pub post: String,
+    /// `$_GET['message']`, if given.
+    pub message: Option<String>,
+    /// The `Referer` header, if sent.
+    pub referer: Option<String>,
+}
+
+impl AttachmentArgs {
+    /// The arguments of the query string `query`, `None` unless it asks to
+    /// edit a post and takes no argument that is not ported.
+    pub fn parse(query: &str, referer: Option<String>) -> Option<AttachmentArgs> {
+        let (mut post, mut message, mut edit) = (None, None, false);
+        for (key, value) in query_strings(query)? {
+            match key.as_str() {
+                "post" => post = Some(value),
+                "message" => message = Some(value),
+                "action" => edit = value == "edit",
+                _ => return None,
+            }
+        }
+        let post = post.filter(|_| edit)?;
+        Some(AttachmentArgs {
+            post,
+            message,
+            referer,
+        })
+    }
+}
+
+/// `wp_check_post_lock()`: the other user whose edit lock on `post` is
+/// fresh.
+fn lock_holder(site: &dyn AttachmentSite, post: &Post) -> Option<User> {
+    let lock = site.meta(post, "_edit_lock").unwrap_or_default();
+    let int = |text: &[u8]| Value::String(text.to_vec()).to_int();
+    let mut parts = lock.split(|b| *b == b':');
+    let time = int(parts.next().unwrap_or_default());
+    let user = match parts.next() {
+        Some(user) => int(user),
+        None => int(&site.meta(post, "_edit_last").unwrap_or_default()),
+    };
+    let user = site.profile_user(u64::try_from(user).unwrap_or_default())?;
+    let now = site.clock().1;
+    (time != 0 && time > now - 150 && user.id != site.user_id()).then_some(user)
+}
+
+/// `get_post_status()` of an attachment: its parent's, or `publish`
+/// without one; `None` under a parent in the Trash, which is not ported.
+fn post_status(site: &dyn AttachmentSite, post: &Post) -> Option<String> {
+    let parent = (post.parent != post.id).then(|| site.post(post.parent));
+    match parent.flatten() {
+        None => Some("publish".into()),
+        Some(parent) if parent.status == "trash" => None,
+        Some(parent) => Some(parent.status),
+    }
+}
+
+/// `wp_get_referer()`: the page the browser came from, if not this one and
+/// on the site.
+fn referer(site: &dyn AttachmentSite, args: &AttachmentArgs, request: &Request) -> Option<String> {
+    let sent = args.referer.as_deref()?;
+    let home = BarSite::home_url(site);
+    let here = format!("{}{}", home.strip_suffix('/').unwrap_or(&home), request.uri);
+    if sent == request.uri || sent == here {
+        return None;
+    }
+    let valid = site.validate_redirect(sent.as_bytes(), "");
+    (!valid.is_empty()).then(|| String::from_utf8_lossy(&valid).into_owned())
+}
+
+/// `user_can_richedit()`: the user's choice, in a browser the visual
+/// editor works in.
+fn rich_editing(site: &dyn AttachmentSite, browser: &Browser) -> bool {
+    let agent = String::from_utf8_lossy(browser.user_agent);
+    let lower = agent.to_ascii_lowercase();
+    let webkit = || {
+        let version = agent
+            .split_once("AppleWebKit/")
+            .map_or("", |(_, version)| version);
+        let digits: String = version.chars().take_while(char::is_ascii_digit).collect();
+        digits.parse::<u32>().is_ok_and(|version| version >= 534)
+    };
+    // `wp-includes/vars.php`'s browser, in its order; Chrome Frame is Chrome
+    // in the admin.
+    let capable = if agent.contains("Lynx") {
+        false
+    } else if agent.contains("Edg") {
+        true
+    } else if agent.contains("Opera") || agent.contains("OPR/") {
+        !browser.is_mobile()
+    } else if lower.contains("chrome") {
+        true
+    } else if lower.contains("safari") {
+        !browser.is_mobile() || webkit()
+    } else if (agent.contains("MSIE") || agent.contains("Trident")) && agent.contains("Win") {
+        agent.contains("Trident/7.0;")
+    } else {
+        !(agent.contains("MSIE") && agent.contains("Mac")) && agent.contains("Gecko")
+    };
+    capable && site.user_option("rich_editing").as_deref() == Some(b"true")
+}
+
+/// `size_format( $bytes )`.
+fn size_format(bytes: i64) -> String {
+    let units = [
+        ("TB", 1i64 << 40),
+        ("GB", 1 << 30),
+        ("MB", 1 << 20),
+        ("KB", 1 << 10),
+    ];
+    let (unit, magnitude) = units
+        .into_iter()
+        .find(|(_, magnitude)| bytes >= *magnitude)
+        .unwrap_or(("B", 1));
+    let rounded = (bytes as f64 / magnitude as f64).round() as i64;
+    format!("{} {unit}", hyscribe_render::number_format(rounded))
+}
+
+/// The attachment's preview: its image, with the image editor's button
+/// when the editor supports its type, or its type's icon.
+fn preview(site: &dyn AttachmentSite, post: &Post, image: bool) -> String {
+    let id = post.id;
+    let (src, _, _) = image_src(site, post, (900, 450));
+    let src = String::from_utf8_lossy(&src).into_owned();
+    if !image {
+        return format!(
+            "\t\t\t<div class=\"wp_attachment_image wp-clearfix\" id=\"media-head-{id}\">\n\t\t\t<p id=\"thumbnail-head-{id}\">\n\t\t\t\t<img class=\"thumbnail\" src=\"{src}\" style=\"max-width:100%\" alt=\"\" />\n\t\t\t</p>\n\t\t</div>\n"
+        );
+    }
+    let button = if EDITABLE.contains(&post.mime_type.as_str()) {
+        format!(
+            "<input type='button' id='imgedit-open-btn-{id}' onclick='imageEdit.open( {id}, \"{}\" )' class='button' value='Edit Image' /> <span class='spinner'></span>",
+            site.nonce(&format!("image_editor-{id}"))
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "\t\t\t<div class=\"imgedit-response\" id=\"imgedit-response-{id}\"></div>\n\n\t\t<div class=\"wp_attachment_image wp-clearfix\" id=\"media-head-{id}\">\n\t\t\t<p id=\"thumbnail-head-{id}\"><img class=\"thumbnail\" src=\"{src}\" style=\"max-width:100%\" alt=\"\" /></p>\n\t\t\t<p>{button}</p>\n\t\t</div>\n\t\t<div style=\"display:none\" class=\"image-editor\" id=\"image-editor-{id}\">\n\t\t\t\t</div>\n"
+    )
+}
+
+/// `get_sample_permalink_html()` under plain permalinks.
+fn sample_permalink(site: &dyn AttachmentSite, post: &Post) -> String {
+    let permalink = site.permalink(post);
+    let mut html = String::from("<strong>Permalink:</strong>\n");
+    if site.can_post("read_post", post) {
+        let (link, target) = if is_empty_string(&post.name) {
+            let preview = add_query_arg(&[(b"preview", Some(b"true"))], permalink.as_bytes());
+            let preview = String::from_utf8_lossy(&preview).into_owned();
+            (preview, format!(" target='wp-preview-{}'", post.id))
+        } else {
+            (permalink, String::new())
+        };
+        let shown = hyscribe_phpser::urldecode(link.as_bytes());
+        html.push_str(&format!(
+            "<a id=\"sample-permalink\" href=\"{}\"{target}>{}</a>\n",
+            String::from_utf8_lossy(&esc_url(link.as_bytes())),
+            esc_html(&shown)
+        ));
+    } else {
+        html.push_str(&format!(
+            "<span id=\"sample-permalink\">{permalink}</span>\n"
+        ));
+    }
+    if site.can("manage_options") {
+        html.push_str("<span id=\"change-permalinks\"><a href=\"options-permalink\" class=\"button button-small\">Change Permalink Structure</a></span>\n");
+    }
+    html
+}
+
+/// The extension `/^.*?\.(\w+)$/` finds in a file's name.
+fn extension(name: &[u8]) -> Option<&[u8]> {
+    let dot = name.iter().rposition(|b| *b == b'.')?;
+    let ext = name.get(dot + 1..).unwrap_or_default();
+    let word = |b: &u8| b.is_ascii_alphanumeric() || *b == b'_';
+    (!ext.is_empty() && ext.iter().all(word)).then_some(ext)
+}
+
+/// `attachment_submitbox_metadata()`'s uploader, parent and file details.
+fn file_details(site: &dyn AttachmentSite, post: &Post, meta: &Value, size: i64) -> String {
+    let id = post.id;
+    let uploader = match site.profile_user(post.author) {
+        Some(user) => {
+            let name = if is_empty_string(&user.display_name) {
+                site.user_option_of(user.id, "nickname").unwrap_or_default()
+            } else {
+                user.display_name
+            };
+            let name = String::from_utf8_lossy(&name).into_owned();
+            if !site.can_for("edit_user", user.id) {
+                format!("<strong>{name}</strong>")
+            } else if user.id == site.user_id() {
+                let link = BarSite::admin_url(site, "profile.php");
+                format!("<a href=\"{link}\"><strong>{name}</strong></a>")
+            } else {
+                let link = BarSite::admin_url(site, &format!("user-edit.php?user_id={}", user.id));
+                format!("<a href=\"{link}\"><strong>{name}</strong></a>")
+            }
+        }
+        None => "<strong>(no author)</strong>".into(),
+    };
+    let mut out = format!(
+        "\t\t<div class=\"misc-pub-section misc-pub-uploadedby word-wrap-break-word\">\n\t\t\t\t\tUploaded by: {uploader}\n\t\t\t</div>\n\n\t"
+    );
+    let parent = (post.parent != 0).then(|| site.post(post.parent)).flatten();
+    if let Some(parent) = parent.filter(|parent| site.can_post("read_post", parent)) {
+        let title = if is_empty_string(&parent.title) {
+            "(no title)".to_string()
+        } else {
+            String::from_utf8_lossy(&parent.title).into_owned()
+        };
+        let link = if site.can_post("edit_post", &parent) {
+            let link =
+                BarSite::admin_url(site, &format!("post.php?post={}&action=edit", parent.id));
+            format!("<a href=\"{link}\"><strong>{title}</strong></a>")
+        } else {
+            format!("<strong>{title}</strong>")
+        };
+        out.push_str(&format!(
+            "\t\t\t<div class=\"misc-pub-section misc-pub-uploadedto\">\n\t\t\t\t\t\t\t\t\tUploaded to: {link}\n\t\t\t\t\t\t\t</div>\n\t\t\t"
+        ));
+    }
+    let url = attachment_url(site, post).unwrap_or_default();
+    let file = site.meta(post, "_wp_attached_file").unwrap_or_default();
+    let name = wp_basename(&file);
+    let kind = match extension(&name) {
+        Some(ext) => {
+            let mut kind = esc_html(&ext.to_ascii_uppercase());
+            let group = post.mime_type.split('/').next().unwrap_or_default();
+            let stored = meta
+                .get_str("mime_type")
+                .map(Value::to_php_string)
+                .unwrap_or_default();
+            let named = format!(
+                "{group}/{}",
+                String::from_utf8_lossy(&ext.to_ascii_lowercase())
+            );
+            if group != "image" && !is_empty_string(&stored) && named.as_bytes() != stored {
+                kind.push_str(&format!(" ({})", String::from_utf8_lossy(&stored)));
+            }
+            kind
+        }
+        None => post.mime_type.replace("image/", "").to_ascii_uppercase(),
+    };
+    out.push_str(&format!(
+        "\n\t<div class=\"misc-pub-section misc-pub-attachment\">\n\t\t<label for=\"attachment_url\">File URL:</label>\n\t\t<input type=\"text\" class=\"widefat urlfield ltr\" readonly=\"readonly\" name=\"attachment_url\" id=\"attachment_url\" value=\"{}\" />\n\t\t<span class=\"copy-to-clipboard-container\">\n\t\t\t<button type=\"button\" class=\"button copy-attachment-url edit-media\" data-clipboard-target=\"#attachment_url\">Copy URL to clipboard</button>\n\t\t\t<span class=\"success hidden\" aria-hidden=\"true\">Copied!</span>\n\t\t</span>\n\t</div>\n\t<div class=\"misc-pub-section misc-pub-download\">\n\t\t<a href=\"{}\" download>Download file</a>\n\t</div>\n\t<div class=\"misc-pub-section misc-pub-filename\">\n\t\tFile name: <strong>{}</strong>\n\t</div>\n\t<div class=\"misc-pub-section misc-pub-filetype\">\n\t\tFile type:\t\t<strong>\n\t\t{kind}\t\t</strong>\n\t</div>\n\n\t\t\t<div class=\"misc-pub-section misc-pub-filesize\">\n\t\t\tFile size: <strong>{}</strong>\n\t\t</div>\n\t\t",
+        esc_attr(&url),
+        String::from_utf8_lossy(&esc_url(&url)),
+        esc_html(&name),
+        size_format(size)
+    ));
+    if let (Some(width), Some(height)) = (meta.get_str("width"), meta.get_str("height")) {
+        out.push_str(&format!(
+            "\t\t<div class=\"misc-pub-section misc-pub-dimensions\">\n\t\t\tDimensions: <strong><span id='media-dims-{id}'>{} by {} pixels</span></strong>\n\t\t</div>\n\t\t",
+            String::from_utf8_lossy(&width.to_php_string()),
+            String::from_utf8_lossy(&height.to_php_string())
+        ));
+    }
+    out
+}
+
+/// `attachment_submit_meta_box()`.
+fn submit_box(site: &dyn AttachmentSite, post: &Post, meta: &Value, size: i64) -> String {
+    let uploaded = format!(
+        "{} at {}",
+        date::format("M j, Y", &post.date, Zone::Utc),
+        date::format("H:i", &post.date, Zone::Utc)
+    );
+    let delete = if site.can_post("delete_post", post) {
+        let link = BarSite::admin_url(
+            site,
+            &format!(
+                "post.php?post={}&amp;action=delete&amp;_wpnonce={}",
+                post.id,
+                site.nonce(&format!("delete-post_{}", post.id))
+            ),
+        );
+        format!(
+            "<a class=\"submitdelete deletion\" onclick='return showNotice.warn();' href=\"{link}\">Delete permanently</a>"
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "<div class=\"submitbox\" id=\"submitpost\">\n\n<div id=\"minor-publishing\">\n\n\t<div style=\"display:none;\">\n\t<p class=\"submit\"><input type=\"submit\" name=\"save\" id=\"save\" class=\"button\" value=\"Save\"  /></p></div>\n\n\n<div id=\"misc-publishing-actions\">\n\t<div class=\"misc-pub-section curtime misc-pub-curtime\">\n\t\t<span id=\"timestamp\">\n\t\t\tUploaded on: <b>{uploaded}</b>\t\t</span>\n\t</div><!-- .misc-pub-section -->\n\n{}</div><!-- #misc-publishing-actions -->\n<div class=\"clear\"></div>\n</div><!-- #minor-publishing -->\n\n<div id=\"major-publishing-actions\">\n\t<div id=\"delete-action\">\n\t{delete}\t</div>\n\n\t<div id=\"publishing-action\">\n\t\t<span class=\"spinner\"></span>\n\t\t<input name=\"original_publish\" type=\"hidden\" id=\"original_publish\" value=\"Update\" />\n\t\t<input name=\"save\" type=\"submit\" class=\"button button-primary button-large\" id=\"publish\" value=\"Update\" />\n\t</div>\n\t<div class=\"clear\"></div>\n</div><!-- #major-publishing-actions -->\n\n</div>\n\n\t",
+        file_details(site, post, meta, size)
+    )
+}
+
+/// `checked( $value, 'open' )`.
+fn checked(value: &str) -> &'static str {
+    if value == "open" {
+        " checked='checked'"
+    } else {
+        ""
+    }
+}
+
+/// `post_comment_status_meta_box()`.
+fn discussion_box(post: &Post) -> String {
+    format!(
+        "<input name=\"advanced_view\" type=\"hidden\" value=\"1\" />\n<p class=\"meta-options\">\n\t<label for=\"comment_status\" class=\"selectit\"><input name=\"comment_status\" type=\"checkbox\" id=\"comment_status\" value=\"open\" {} /> Allow comments</label><br />\n\t<label for=\"ping_status\" class=\"selectit\"><input name=\"ping_status\" type=\"checkbox\" id=\"ping_status\" value=\"open\" {} />\n\t\tAllow <a href=\"https://wordpress.org/documentation/article/introduction-to-blogging/#managing-comments\">trackbacks and pingbacks</a>\t</label>\n\t</p>\n\t",
+        checked(&post.comment_status),
+        checked(&post.ping_status)
+    )
+}
+
+/// `post_comment_meta_box()`, with the list its scripts load when `shown`;
+/// `trash_notice` is `wp_comment_trashnotice()`.
+fn comments_box(
+    site: &dyn AttachmentSite,
+    post: &Post,
+    request: &Request,
+    shown: bool,
+    trash_notice: &str,
+) -> String {
+    let total = site.post_comment_counts(post.id).all();
+    let more = if total < 1 {
+        "\t\t<p id=\"no-comments\">No comments yet.</p>".to_string()
+    } else {
+        let script = if shown {
+            format!(
+                "\t\t\t\t\t<script>jQuery(function(){{commentsBox.get({total}, 10);}});</script>\n\t"
+            )
+        } else {
+            String::new()
+        };
+        format!(
+            "{script}\t\t\t\t<p class=\"hide-if-no-js\" id=\"show-comments\"><a href=\"#commentstatusdiv\" onclick=\"commentsBox.load({total});return false;\">Show comments</a> <span class=\"spinner\"></span></p>\n\t\t"
+        )
+    };
+    format!(
+        "<input type=\"hidden\" id=\"add_comment_nonce\" name=\"add_comment_nonce\" value=\"{}\" />\t<p class=\"hide-if-no-js\" id=\"add-new-comment\"><button type=\"button\" class=\"button\" onclick=\"window.commentReply && commentReply.addcomment({});\">Add Comment</button></p>\n\t<input type=\"hidden\" id=\"_ajax_fetch_list_nonce\" name=\"_ajax_fetch_list_nonce\" value=\"{}\" />{}<table class=\"widefat fixed striped table-view-list comments wp-list-table comments-box\" style=\"display:none;\">\n\t<tbody id=\"the-comment-list\"\n\t\t data-wp-lists='list:comment'\t\t>\n\t\t\t</tbody>\n</table>\n{more}{trash_notice}\t",
+        site.nonce("get-comments"),
+        post.id,
+        site.nonce("fetch-list-WP_Post_Comments_List_Table"),
+        wp_referer_field(request.uri)
+    )
+}
+
+/// `post_author_meta_box()`: the users who may edit posts, and the author.
+fn author_box(site: &dyn AttachmentSite, post: &Post) -> String {
+    let mut users = site.authors("edit_posts");
+    if !users.iter().any(|user| user.id == post.author) {
+        users.extend(site.profile_user(post.author));
+    }
+    let options: String = users
+        .iter()
+        .map(|user| {
+            let label = [&user.display_name[..], b" (", &user.login, b")"].concat();
+            let selected = if user.id == post.author {
+                " selected='selected'"
+            } else {
+                ""
+            };
+            format!(
+                "\t<option value='{}'{selected}>{}</option>\n",
+                user.id,
+                esc_html(&label)
+            )
+        })
+        .collect();
+    format!(
+        "<label class=\"screen-reader-text\" for=\"post_author_override\">\n\tAuthor</label>\n\t<select name='post_author_override' id='post_author_override' class=''>\n{options}</select>"
+    )
+}
+
+/// `_admin_notice_post_locked()` for a lock `holder` has, the user
+/// sent back to `referer` when they came from another screen.
+fn lock_dialog(
+    site: &dyn AttachmentSite,
+    post: &Post,
+    holder: &User,
+    referer: Option<&str>,
+) -> String {
+    // The editors, `post.php` and `post-new.php`, are at `/hs-admin/post` here.
+    let editor = |r: &&str| {
+        ["post.php", "post-new.php", "/hs-admin/post"]
+            .iter()
+            .any(|e| r.contains(e))
+    };
+    let (back, text) = match referer.filter(|r| !editor(r)) {
+        Some(referer) => (referer.to_string(), "Go back"),
+        None => (
+            BarSite::admin_url(site, "edit.php?post_type=attachment"),
+            "Media",
+        ),
+    };
+    let (id, nonce) = (
+        post.id.to_string(),
+        site.nonce(&format!("post_preview_{}", post.id)),
+    );
+    let mut args: Vec<(&[u8], Option<&[u8]>)> = Vec::new();
+    if holder.id != post.author {
+        args.push((b"preview_id", Some(id.as_bytes())));
+        args.push((b"preview_nonce", Some(nonce.as_bytes())));
+    }
+    args.push((b"preview", Some(b"true")));
+    let preview = add_query_arg(&args, site.permalink(post).as_bytes());
+    let take_over = BarSite::admin_url(
+        site,
+        &format!(
+            "post.php?post={}&action=edit&_wpnonce={}&get-post-lock=1",
+            post.id,
+            site.nonce(&format!("lock-post_{}", post.id))
+        ),
+    );
+    let avatar = user_avatar(&|name| site.option(name), holder, 64);
+    format!(
+        "\t<div id=\"post-lock-dialog\" class=\"notification-dialog-wrap\">\n\t<div class=\"notification-dialog-background\"></div>\n\t<div class=\"notification-dialog\">\n\t\t\t<div class=\"post-locked-message\">\n\t\t<div class=\"post-locked-avatar\">{}</div>\n\t\t<p class=\"currently-editing wp-tab-first\" tabindex=\"0\">\n\t\t{} is currently editing this post. Do you want to take over?\t\t</p>\n\t\t\t\t<p>\n\t\t<a class=\"button\" href=\"{}\">{text}</a>\n\t\t\t\t<a class=\"button\" href=\"{}\">Preview</a>\n\t\t\t\t<a class=\"button button-primary wp-tab-last\" href=\"{}\">Take over</a>\n\t\t\t\t\t</p>\n\t\t</div>\n\t\t\t</div>\n\t</div>\n\t",
+        String::from_utf8_lossy(&avatar),
+        esc_html(&holder.display_name),
+        String::from_utf8_lossy(&esc_url(back.as_bytes())),
+        String::from_utf8_lossy(&esc_url(&preview)),
+        String::from_utf8_lossy(&esc_url(take_over.as_bytes())),
+    )
+}
+
+/// The screen for the attachment `args` names: `None` for what is not
+/// ported, which a view that would write its own edit lock is.
+pub fn attachment_edit(
+    site: &dyn AttachmentSite,
+    args: &AttachmentArgs,
+    request: &Request,
+) -> Option<Answer> {
+    let id = Value::String(args.post.clone().into_bytes()).to_int();
+    if id == 0 {
+        return None;
+    }
+    let Some(post) = u64::try_from(id).ok().and_then(|id| site.post(id)) else {
+        return Some(Answer::Missing(
+            "You attempted to edit an item that does not exist. Perhaps it was deleted?",
+        ));
+    };
+    if post.post_type != "attachment" {
+        return None;
+    }
+    if !site.can_post("edit_post", &post) {
+        return Some(Answer::Denied(
+            "Sorry, you are not allowed to edit this item.",
+        ));
+    }
+    let meta = metadata(site, &post);
+    let size = meta.get_str("filesize").map_or(0, Value::to_int);
+    // Not ported: a status of its own (Trash), a media player, a file size
+    // read from disk, a scaled original and pretty permalinks' slug.
+    let unported = post.status != "inherit"
+        || post.mime_type.starts_with("audio/")
+        || post.mime_type.starts_with("video/")
+        || size <= 0
+        || meta
+            .get_str("original_image")
+            .is_some_and(|o| !o.is_empty())
+        || site
+            .option("permalink_structure")
+            .is_some_and(|s| !is_empty_string(&s));
+    if unported {
+        return None;
+    }
+    let status = post_status(site, &post)?;
+    let holder = lock_holder(site, &post)?;
+    let state = State {
+        meta,
+        size,
+        status,
+        holder,
+    };
+    Some(page(site, args, request, &post, &state))
+}
+
+/// What the screen shows of an attachment beyond its post: its metadata
+/// and file size, `get_post_status()` and the lock's holder.
+struct State {
+    meta: Value,
+    size: i64,
+    status: String,
+    holder: User,
+}
+
+/// The form, its meta boxes and the lock dialog.
+fn page(
+    site: &dyn AttachmentSite,
+    args: &AttachmentArgs,
+    request: &Request,
+    post: &Post,
+    state: &State,
+) -> Answer {
+    let (id, meta, size) = (post.id, &state.meta, state.size);
+    // Without the right to publish, a pending attachment's slug is not shown.
+    let slug_shown = state.status != "pending" || site.can("publish_posts");
+    let file = site.meta(post, "_wp_attached_file").unwrap_or_default();
+    let image = is_image(&file, &post.mime_type);
+    let referer = referer(site, args, request);
+    let columns = site.user_option("screen_layout_attachment");
+    let columns = if columns.is_some_and(|c| Value::String(c).to_int() == 1) {
+        1
+    } else {
+        2
+    };
+    let stored = site.user_option("metaboxhidden_attachment");
+    let hidden: Vec<String> = match stored {
+        Some(_) => listed(site, "metaboxhidden_attachment"),
+        None => HIDDEN.iter().map(|id| id.to_string()).collect(),
+    };
+    let closed = listed(site, "closedpostboxes_attachment");
+    let reply = comment_reply(site, Some(2), (false, "single"), 1, false);
+    let (reply, trash_notice) = reply.split_once("\t</form>\n\t").unwrap_or_default();
+    let mut boxes = vec![Widget {
+        id: "submitdiv",
+        title: "Save",
+        context: "side".into(),
+        inside: submit_box(site, post, meta, size),
+    }];
+    let mut add = |id, title, inside| {
+        boxes.push(Widget {
+            id,
+            title,
+            context: "normal".into(),
+            inside,
+        })
+    };
+    add("commentstatusdiv", "Discussion", discussion_box(post));
+    // Only a published or private attachment's comments are listed.
+    let commented = ["publish", "private"].contains(&state.status.as_str());
+    if commented {
+        let shown = !hidden.iter().any(|h| h == "commentsdiv");
+        add(
+            "commentsdiv",
+            "Comments",
+            comments_box(site, post, request, shown, trash_notice),
+        );
+    }
+    let slug = format!(
+        "<label class=\"screen-reader-text\" for=\"post_name\">\n\tSlug</label><input name=\"post_name\" type=\"text\" class=\"large-text\" id=\"post_name\" value=\"{}\" />\n\t",
+        esc_attr(&post.name)
+    );
+    if slug_shown {
+        add("slugdiv", "Slug", slug);
+    }
+    if site.can("edit_others_posts") {
+        add("authordiv", "Author", author_box(site, post));
+    }
+    let labels: String = boxes
+        .iter()
+        .filter(|b| b.id != "submitdiv")
+        .map(|b| {
+            let checked = if hidden.iter().any(|h| h == b.id) { "" } else { " checked='checked'" };
+            format!(
+                "<label for=\"{0}-hide\"><input class=\"hide-postbox-tog\" name=\"{0}-hide\" type=\"checkbox\" id=\"{0}-hide\" value=\"{0}\" {checked} />{1}</label>",
+                b.id, b.title
+            )
+        })
+        .collect();
+    let boxes = sorted(site, "meta-box-order_attachment", boxes);
+    // `edit-form-advanced.php` sets `$_GET['message']` to its `absint()`.
+    let message = args.message.as_deref().map_or(0, |m| {
+        Value::String(m.as_bytes().to_vec()).to_int().unsigned_abs()
+    });
+    let mut containers = String::new();
+    for (number, context) in [(1, "side"), (2, "normal")] {
+        containers.push_str(&format!(
+            "<div id=\"postbox-container-{number}\" class=\"postbox-container\">\n<div id=\"{context}-sortables\" class=\"meta-box-sortables\">"
+        ));
+        for b in boxes.iter().filter(|b| b.context == context) {
+            let id = b.id.to_string();
+            containers.push_str(&postbox(
+                b.id,
+                b.title,
+                closed.contains(&id),
+                hidden.contains(&id),
+                &b.inside,
+            ));
+        }
+        containers.push_str("</div>");
+        if context == "normal" {
+            // `WP_Embed::maybe_run_ajax_cache()`, after a save.
+            if message != 0 {
+                let ajax = cookie_path(&BarSite::admin_url(site, "admin-ajax.php"));
+                containers.push_str(&format!(
+                    "<script>\n\tjQuery( function($) {{\n\t\t$.get(\"{}?action=oembed-cache&post={}\");\n\t}} );\n</script>\n\t\t",
+                    String::from_utf8_lossy(&esc_url(ajax.strip_suffix('/').unwrap_or(&ajax).as_bytes())),
+                    post.id
+                ));
+            }
+            containers
+                .push_str("<div id=\"advanced-sortables\" class=\"meta-box-sortables\"></div>");
+        }
+        containers.push_str("</div>\n");
+    }
+    containers.push_str(&format!(
+        "</div><!-- /post-body -->\n<br class=\"clear\" />\n</div><!-- /poststuff -->\n</form>\n</div>\n\n{reply}\t</form>\n\t\n"
+    ));
+    if is_empty_string(&post.title) && !request.browser.is_mobile() {
+        containers.push_str("<script>\ntry{document.post.title.focus();}catch(e){}\n</script>\n");
+    }
+    let message = Some(message)
+        .filter(|m| (1..=10).contains(m))
+        .map_or(String::new(), |_| {
+            wp_admin_notice(
+                "Media file updated.",
+                "message",
+                "notice-success is-dismissible updated",
+                true,
+                "",
+            )
+        });
+    let new = if site.can("upload_files") {
+        format!(
+            " <a href=\"{}\" class=\"page-title-action\">Add Media File</a>",
+            String::from_utf8_lossy(&esc_url(
+                BarSite::admin_url(site, "media-new.php").as_bytes()
+            ))
+        )
+    } else {
+        String::new()
+    };
+    let raw_title = esc_textarea(&post.title);
+    let description = esc_textarea(&post.content);
+    let description = if rich_editing(site, request.browser) {
+        description
+    } else {
+        esc_textarea(&description)
+    };
+    let referer_url = referer.as_deref().unwrap_or_default();
+    // `wp_original_referer_field()`, which a draft's form goes without.
+    let original = if state.status == "draft" {
+        String::new()
+    } else {
+        format!(
+            "<input type=\"hidden\" name=\"_wp_original_http_referer\" value=\"{}\" />",
+            esc_attr(&hyscribe_phpser::stripslashes(referer_url.as_bytes()))
+        )
+    };
+    let permalink_box = if slug_shown {
+        format!(
+            "\t\t<div id=\"edit-slug-box\" class=\"hide-if-no-js\">\n\t\t\t{}\t</div>\n\t\t",
+            sample_permalink(site, post)
+        )
+    } else {
+        String::new()
+    };
+    let alt = if post.mime_type.starts_with("image") {
+        let alt = site
+            .meta(post, "_wp_attachment_image_alt")
+            .unwrap_or_default();
+        ALT.replace("%alt%", &esc_attr(&alt))
+    } else {
+        "\t\n".into()
+    };
+    let content = fill(
+        FORM,
+        &[
+            ("new", new),
+            ("message", message),
+            ("nonce", site.nonce(&format!("update-post_{id}"))),
+            ("referer", wp_referer_field(request.uri)),
+            ("user", site.user_id().to_string()),
+            ("author", post.author.to_string()),
+            ("status", esc_attr(post.status.as_bytes())),
+            (
+                "referredby",
+                String::from_utf8_lossy(&esc_url(referer_url.as_bytes())).into_owned(),
+            ),
+            ("original", original),
+            ("id", id.to_string()),
+            ("order_nonce", site.nonce("meta-box-order")),
+            ("closed_nonce", site.nonce("closedpostboxes")),
+            ("columns", columns.to_string()),
+            ("title", esc_attr(&raw_title)),
+            ("permalink", permalink_box),
+            ("permalink_nonce", site.nonce("samplepermalink")),
+            ("preview", preview(site, post, image)),
+            ("alt", alt),
+            (
+                "caption_label",
+                if image {
+                    "Image Caption"
+                } else {
+                    "Short Description"
+                }
+                .into(),
+            ),
+            (
+                "caption",
+                String::from_utf8_lossy(&esc_textarea(&post.excerpt)).into_owned(),
+            ),
+            ("editor_css", editor_css(site)),
+            (
+                "description",
+                String::from_utf8_lossy(&description).into_owned(),
+            ),
+            ("boxes", containers),
+        ],
+    );
+    let screen_options = format!(
+        "<div id=\"screen-options-wrap\" class=\"hidden\" tabindex=\"-1\" aria-label=\"Screen Options Tab\">\n<form id='adv-settings' method='post'>\n\t\t<fieldset class=\"metabox-prefs\">\n\t\t<legend>Screen elements</legend>\n\t\t<p>\n\t\t\tSome screen elements can be shown or hidden by using the checkboxes.\t\t\tExpand or collapse the elements by clicking on their headings, and arrange them by dragging their headings or by clicking on the up and down arrows.\t\t</p>\n\t\t<div class=\"metabox-prefs-container\">\n\t\t{labels}\t\t</div>\n\t\t</fieldset>\n\t\t\t\t<fieldset class='columns-prefs'>\n\t\t<legend class=\"screen-layout\">Layout</legend>\n\t\t\t\t\t<label class=\"columns-prefs-1\">\n\t\t\t<input type='radio' name='screen_columns' value='1' {} />\n\t\t\t1 column\t\t\t</label>\n\t\t\t\t\t<label class=\"columns-prefs-2\">\n\t\t\t<input type='radio' name='screen_columns' value='2' {} />\n\t\t\t2 columns\t\t\t</label>\n\t\t\t\t</fieldset>\n\t\t<fieldset class=\"editor-expand hidden\"><legend>Additional settings</legend><label for=\"editor-expand-toggle\"><input type=\"checkbox\" id=\"editor-expand-toggle\" checked='checked' />Enable full-height editor and distraction-free functionality.</label></fieldset>\n<input type=\"hidden\" id=\"screenoptionnonce\" name=\"screenoptionnonce\" value=\"{}\" />\n</form>\n</div>",
+        if columns == 1 {
+            " checked='checked'"
+        } else {
+            ""
+        },
+        if columns == 2 {
+            " checked='checked'"
+        } else {
+            ""
+        },
+        site.nonce("screen-options-nonce")
+    );
+    let users = Value::String(site.option("user_count").unwrap_or(b"-1".to_vec())).to_int();
+    let mut footer = if users > 1 {
+        lock_dialog(site, post, &state.holder, referer.as_deref())
+    } else {
+        String::new()
+    };
+    footer.push_str("<div id=\"local-storage-notice\" class=\"notice is-dismissible hidden\"><p class=\"local-restore\">The backup of this post in your browser is different from the version below.<button type=\"button\" class=\"button restore-backup\">Restore the backup</button></p><p class=\"help\">This will replace the current editor content with the last backup version. You can use undo and redo in the editor to get the old content back or to return to the restored version.</p></div>");
+    // `_js_vars()` of the comments box's list table and the reply form's.
+    footer.push_str(&"<script>list_args = {\"class\":\"WP_Post_Comments_List_Table\",\"screen\":{\"id\":\"attachment\",\"base\":\"post\"}};</script>\n".repeat(1 + usize::from(commented)));
+    let editor = editor_footer(site).replacen(
+        "qtInit: {",
+        "qtInit: {'attachment_content':{id:\"attachment_content\",buttons:\"strong,em,link,block,del,ins,img,ul,ol,li,code,close\"},",
+        1,
+    );
+    let shown_title = the_title(post);
+    let title = if is_empty_string(&shown_title) {
+        "Edit Media".to_string()
+    } else {
+        format!(
+            "Edit Media &#8220;{}&#8221;",
+            String::from_utf8_lossy(&hyscribe_kses::strip_tags(&shown_title))
+        )
+    };
+    let permalink = site.permalink(post);
+    let scripts: &[&str] = if request.browser.is_mobile() {
+        &["admin-comments", "post", "jquery-touch-punch", "image-edit"]
+    } else {
+        &["admin-comments", "post", "image-edit"]
+    };
+    // `wp_heartbeat_set_suspension()`: the editors keep the heartbeat.
+    let heartbeat = format!(
+        "var heartbeatSettings = {{\"nonce\":\"{}\",\"suspension\":\"disable\"}};",
+        site.nonce("heartbeat-nonce")
+    );
+    let page = Page {
+        screen: Screen {
+            pagenow: "post.php",
+            typenow: "attachment",
+            taxonomy: "",
+            parent_file: Some("upload.php"),
+            submenu_file: Some("upload.php"),
+        },
+        id: "attachment",
+        title: &title,
+        help: &HELP,
+        sidebar: SIDEBAR,
+        screen_options: &screen_options,
+        styles: &["imgareaselect"],
+        scripts,
+        late_scripts: &["quicktags", "wplink", "jquery-ui-autocomplete"],
+        script_data: &[("word-count", WORD_COUNT.into()), ("heartbeat", heartbeat)],
+        script_after: &[],
+        late_styles: &[],
+        admin_head: "",
+        admin_footer: &footer,
+        footer_scripts: &editor,
+        content: &content,
+        canonical: request.canonical,
+        origin: request.origin,
+        // `wp_admin_bar_edit_menu()`, for a user who may read it.
+        view: site
+            .can_post("read_post", post)
+            .then_some(("View Media File", permalink.as_str())),
+    };
+    Answer::from_page(admin_page(site, &page, request.browser))
+}
+
+#[cfg(test)]
+pub(crate) mod content;
+#[cfg(test)]
+mod tests;

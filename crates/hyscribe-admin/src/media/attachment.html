@@ -1,0 +1,52 @@
+
+<div class="wrap">
+<h1 class="wp-heading-inline">
+Edit Media</h1>
+
+%new%
+<hr class="wp-header-end">
+
+%message%<div id="lost-connection-notice" class="notice error hidden"><p><span class="spinner"></span> <strong>Connection lost.</strong> Saving has been disabled until you are reconnected. <span class="hide-if-no-sessionstorage">This post is being backed up in your browser, just in case.</span></p></div><form name="post" action="post.php" method="post" id="post"
+>
+<input type="hidden" id="_wpnonce" name="_wpnonce" value="%nonce%" />%referer%<input type="hidden" id="user-id" name="user_ID" value="%user%" />
+<input type="hidden" id="hiddenaction" name="action" value="editpost" />
+<input type="hidden" id="originalaction" name="originalaction" value="editpost" />
+<input type="hidden" id="post_author" name="post_author" value="%author%" />
+<input type="hidden" id="post_type" name="post_type" value="attachment" />
+<input type="hidden" id="original_post_status" name="original_post_status" value="%status%" />
+<input type="hidden" id="referredby" name="referredby" value="%referredby%" />
+%original%<input type='hidden' id='post_ID' name='post_ID' value='%id%' /><input type="hidden" id="meta-box-order-nonce" name="meta-box-order-nonce" value="%order_nonce%" /><input type="hidden" id="closedpostboxesnonce" name="closedpostboxesnonce" value="%closed_nonce%" />
+
+<div id="poststuff">
+<div id="post-body" class="metabox-holder columns-%columns%">
+<div id="post-body-content">
+
+<div id="titlediv">
+<div id="titlewrap">
+		<label class="screen-reader-text" id="title-prompt-text" for="title">Add title</label>
+	<input type="text" name="post_title" size="30" value="%title%" id="title" spellcheck="true" autocomplete="off" />
+	</div>
+	<div class="inside">
+%permalink%	</div>
+	<input type="hidden" id="samplepermalinknonce" name="samplepermalinknonce" value="%permalink_nonce%" /></div><!-- /titlediv -->
+		<div class="wp_attachment_holder wp-clearfix">
+%preview%			</div>
+	<div class="wp_attachment_details edit-form-section">
+%alt%		<p>
+			<label for="attachment_caption"><strong>
+				%caption_label%			</strong></label><br />
+			<textarea class="widefat" name="excerpt" id="attachment_caption">%caption%</textarea>
+		</p>
+
+	
+	<label for="attachment_content" class="attachment-content-description"><strong>Description</strong>
+		</label>
+	<div id="wp-attachment_content-wrap" class="wp-core-ui wp-editor-wrap html-active">%editor_css%<div id="wp-attachment_content-editor-container" class="wp-editor-container"><div id="qt_attachment_content_toolbar" class="quicktags-toolbar hide-if-no-js"></div><textarea class="wp-editor-area" rows="5" cols="40" name="content" id="attachment_content">%description%</textarea></div>
+</div>
+
+
+	</div>
+	<input type="hidden" id="image-edit-context" value="edit-attachment" />
+</div><!-- /post-body-content -->
+
+%boxes%

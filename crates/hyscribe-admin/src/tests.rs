@@ -190,12 +190,46 @@ impl Role {
         self.0.split_once(':').map_or("", |(variant, _)| variant)
     }
 
-    /// A variant of `reference/posts-list/golden.sh`, over its content.
-    /// A variant of `reference/media/golden.sh` over the Theme Test Data.
+    /// A variant of `reference/media/golden.sh` or
+    /// `reference/attachment-edit/golden.sh` over the Theme Test Data.
     fn ttd(&self) -> bool {
-        self.variant().starts_with("m4ttd")
+        self.variant().starts_with("m4ttd") || self.variant().starts_with("a8ttd")
     }
 
+    /// A variant of `reference/attachment-edit/golden.sh` over its content.
+    fn a8(&self) -> bool {
+        self.variant().starts_with("a8lock")
+    }
+
+    /// A user of the content of a `reference/attachment-edit/golden.sh`
+    /// variant.
+    fn a8_user(&self, id: u64) -> Option<hyscribe_model::User> {
+        if self.variant().starts_with("a8ttd") {
+            return crate::media::content::user(id);
+        }
+        crate::media::attachment::content::user(id).filter(|_| self.a8())
+    }
+
+    /// The edit lock of an `a8` variant, user 2's as fresh as can be unless
+    /// the variant names another, and the `_edit_last` of one without a user.
+    fn a8_lock(&self, key: &str) -> Option<&'static str> {
+        let lock = match (self.variant(), key) {
+            ("a8locklast", "_edit_last") => "2",
+            (_, "_edit_last") => return None,
+            ("a8lockold", _) => "1794499850:2",
+            ("a8locknew", _) => "1794499851:2",
+            ("a8lockself", _) => "1794500000:1",
+            ("a8locklast", _) => "1794500000",
+            ("a8lockzero", _) => "0:2",
+            ("a8lockgone", _) => "1794500000:99",
+            (variant, _) if variant.ends_with("lock3") => "1794500000:3",
+            _ => "1794500000:2",
+        };
+        let locked = self.variant().starts_with("a8") && self.variant().contains("lock");
+        (locked && (key == "_edit_lock" || key == "_edit_last")).then_some(lock)
+    }
+
+    /// A variant of `reference/posts-list/golden.sh`, over its content.
     fn listing(&self) -> bool {
         ["posts", "hidden", "excerpt", "front"].contains(&self.variant())
     }
@@ -425,6 +459,10 @@ impl Role {
             return crate::media::content::posts();
         }
         let mut posts = crate::posts::content::posts(self.listing(), self.variant() == "empty");
+        if self.a8() {
+            posts.extend(crate::media::attachment::content::posts());
+            posts.extend(crate::media::attachment::content::unported());
+        }
         match self.variant() {
             "s1nopages" | "s1hidden" => posts.retain(|post| post.post_type != "page"),
             // `reference/settings/content.sql`.
@@ -515,7 +553,10 @@ impl CapabilityData for Role {
         )
     }
     fn user_exists(&self, id: u64) -> bool {
-        id == 1 || self.listing() && id == 2 || self.other_user(id).is_some()
+        id == 1
+            || self.listing() && id == 2
+            || self.other_user(id).is_some()
+            || self.a8_user(id).is_some()
     }
     fn post(&self, _: u64) -> Option<CapPost> {
         None
@@ -817,6 +858,9 @@ impl crate::profile::ProfileSite for Role {
     /// The fixture's administrator, named in the options variant, or
     /// another user of the variant.
     fn profile_user(&self, id: u64) -> Option<hyscribe_model::User> {
+        if id != 1 && self.variant().starts_with("a8") {
+            return self.a8_user(id);
+        }
         if id != 1 {
             let mut user = self.other_user(id)?.user;
             if self.variant() == "u3options" {
@@ -839,6 +883,9 @@ impl crate::profile::ProfileSite for Role {
         })
     }
     fn user_option_of(&self, id: u64, name: &str) -> Option<Vec<u8>> {
+        if self.a8() && (id, name) == (3, "nickname") {
+            return Some(b"sub".to_vec());
+        }
         if id == 1 {
             return crate::posts::PostsSite::user_option(self, name);
         }
@@ -860,7 +907,7 @@ impl crate::profile::ProfileSite for Role {
     }
     /// A path on the site, or else the fallback.
     fn validate_redirect(&self, location: &[u8], fallback: &str) -> Vec<u8> {
-        if location.starts_with(b"/") {
+        if location.starts_with(b"/") || location.starts_with(SITE.as_bytes()) {
             location.to_vec()
         } else {
             fallback.as_bytes().to_vec()
@@ -939,6 +986,12 @@ impl crate::comments::CommentsSite for Role {
     }
     /// Counted from the comments on `post`.
     fn post_comment_counts(&self, post: u64) -> crate::dashboard::CommentCounts {
+        if self.a8() && post == 801 {
+            return crate::dashboard::CommentCounts {
+                approved: 1,
+                ..crate::dashboard::CommentCounts::default()
+            };
+        }
         let rows: Vec<_> = self
             .comment_rows()
             .into_iter()
@@ -1162,6 +1215,15 @@ impl crate::posts::PostsSite for Role {
         Capabilities::load(self, "wp_", 1).has_cap(self, cap, &[id])
     }
     fn can_post(&self, cap: &str, post: &hyscribe_model::Post) -> bool {
+        // `reference/attachment-edit/variants.php` takes these away.
+        let denied = match self.variant() {
+            "a8locknodelete" => "delete_post",
+            "a8locknoread" => "read_post",
+            _ => "",
+        };
+        if (cap, post.id) == (denied, 801) {
+            return false;
+        }
         let known = WithPost(
             self,
             CapPost {
@@ -1202,6 +1264,11 @@ impl crate::posts::PostsSite for Role {
             }
         }
         match (self.variant(), name) {
+            ("a8lockcount" | "a8lockref" | "a8lockrefpost", "user_count") => {
+                return Some(b"2".to_vec());
+            }
+            (variant, "user_count") if variant.starts_with("a8ttd") => return Some(b"3".to_vec()),
+            ("a8lockpretty", "permalink_structure") => return Some(b"/%postname%/".to_vec()),
             ("m4ttdpages", "wp_attachment_pages_enabled") => return Some(b"1".to_vec()),
             ("m4large", "large_size_h") => return Some(b"0".to_vec()),
             ("m4ttdcron", "cron") => {
@@ -1253,6 +1320,12 @@ impl crate::posts::PostsSite for Role {
         }]
     }
     fn meta(&self, post: &hyscribe_model::Post, key: &str) -> Option<Vec<u8>> {
+        if let Some(lock) = self.a8_lock(key) {
+            return Some(lock.as_bytes().to_vec());
+        }
+        if self.a8() {
+            return crate::media::attachment::content::meta(post.id, key);
+        }
         if self.variant() == "m4ttdrecent" && post.id == 1690 && key == "_thumbnail_id" {
             return Some(b"611".to_vec());
         }
@@ -1263,7 +1336,7 @@ impl crate::posts::PostsSite for Role {
     }
     fn display_name(&self, id: u64) -> Option<Vec<u8>> {
         if self.ttd() {
-            return crate::media::content::display_name(id);
+            return crate::media::content::user(id).map(|user| user.display_name);
         }
         self.authors("edit_posts")
             .into_iter()
@@ -1298,6 +1371,12 @@ impl crate::posts::PostsSite for Role {
     }
     /// The content's author may edit posts, not pages.
     fn authors(&self, cap: &str) -> Vec<hyscribe_model::User> {
+        if self.variant().starts_with("a8") {
+            return [1, 2]
+                .into_iter()
+                .filter_map(|id| self.a8_user(id))
+                .collect();
+        }
         let mut authors = crate::posts::content::authors();
         if !self.listing() || cap == "edit_pages" {
             authors.truncate(1);
@@ -1305,6 +1384,24 @@ impl crate::posts::PostsSite for Role {
         authors
     }
     fn user_option(&self, name: &str) -> Option<Vec<u8>> {
+        let edit: &[u8] = match (self.variant(), name) {
+            ("a8locklayout" | "a8ttdlocklayout", "screen_layout_attachment") => b"1",
+            ("a8locklayout" | "a8ttdlocklayout", "metaboxhidden_attachment") => {
+                b"a:1:{i:0;s:16:\"commentstatusdiv\";}"
+            }
+            ("a8locklayout" | "a8ttdlocklayout", "closedpostboxes_attachment") => {
+                b"a:1:{i:0;s:7:\"slugdiv\";}"
+            }
+            ("a8locklayout" | "a8ttdlocklayout", "meta-box-order_attachment") => {
+                b"a:2:{s:4:\"side\";s:19:\"authordiv,submitdiv\";s:6:\"normal\";s:7:\"slugdiv\";}"
+            }
+            ("a8locknorich", "rich_editing") => b"false",
+            (variant, "rich_editing") if variant.starts_with("a8") => b"true",
+            _ => b"",
+        };
+        if !edit.is_empty() {
+            return Some(edit.to_vec());
+        }
         match (self.variant(), name) {
             ("m4list" | "m4ttdlist", "media_library_mode") => return Some(b"list".to_vec()),
             ("m4ttdpaged", "upload_per_page") => return Some(b"5".to_vec()),

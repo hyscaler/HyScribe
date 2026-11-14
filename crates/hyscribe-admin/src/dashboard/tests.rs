@@ -421,7 +421,11 @@ fn review_cases() {
     assert!(html.contains("<p>Tom &#038; Jerry</p>"));
     assert!(html.contains("rel=\"ugc external nofollow\""));
     let twice = Role("twice:administrator");
-    let widgets = sorted(&twice, widgets(&twice, &data(&twice), "/"));
+    let widgets = sorted(
+        &twice,
+        "meta-box-order_dashboard",
+        widgets(&twice, &data(&twice), "/"),
+    );
     assert!(!widgets.iter().any(|w| w.id == "dashboard_activity"));
     assert!(
         widgets

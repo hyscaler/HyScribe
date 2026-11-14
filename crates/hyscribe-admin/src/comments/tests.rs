@@ -72,7 +72,7 @@ fn pages_are_php_s() {
         let recorded = String::from_utf8(unhex(f[2])).unwrap();
         let (php, ours) = match ours {
             Answer::Page(page) => (settled_page(&hs_admin_page(&recorded)), settled_page(&page)),
-            Answer::Denied(message) | Answer::Died(message) => {
+            Answer::Denied(message) | Answer::Died(message) | Answer::Missing(message) => {
                 let page = crate::die::page(true, "WordPress &rsaquo; Error", message);
                 (
                     recorded,

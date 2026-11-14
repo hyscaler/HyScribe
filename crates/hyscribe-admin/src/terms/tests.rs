@@ -63,7 +63,7 @@ fn pages_are_php_s() {
         let (php, ours) = match ours {
             Answer::Page(page) => (hs_admin_page(&recorded), page),
             Answer::Redirect(to) => (hs_admin_page(&recorded), format!("302\t{to}")),
-            Answer::Denied(message) | Answer::Died(message) => {
+            Answer::Denied(message) | Answer::Died(message) | Answer::Missing(message) => {
                 let page = crate::die::page(true, "WordPress &rsaquo; Error", message);
                 (
                     recorded,

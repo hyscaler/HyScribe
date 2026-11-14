@@ -39,7 +39,7 @@ fn the_box_picks_a_size() {
         size("big", "a-90x90.jpg", 90, 90),
     ]);
     assert_eq!(
-        intermediate(&exact),
+        intermediate(&exact, LIST_BOX),
         Some((b"a-60x60.jpg".to_vec(), 60, 60))
     );
     let square = sizes(&[
@@ -47,12 +47,12 @@ fn the_box_picks_a_size() {
         size("small", "a-90x90.jpg", 90, 90),
     ]);
     assert_eq!(
-        intermediate(&square),
+        intermediate(&square, LIST_BOX),
         Some((b"a-90x90.jpg".to_vec(), 60, 60))
     );
     let wide = sizes(&[size("thumbnail", "a-150x100.jpg", 150, 100)]);
     assert_eq!(
-        intermediate(&wide),
+        intermediate(&wide, LIST_BOX),
         Some((b"a-150x100.jpg".to_vec(), 60, 40))
     );
     // A size the box's width or height fits, but not its ratio, is no match.
@@ -60,31 +60,43 @@ fn the_box_picks_a_size() {
         size("tall", "a-60x90.jpg", 60, 90),
         size("mid", "a-75x75.jpg", 75, 75),
     ]);
-    assert_eq!(intermediate(&tall), Some((b"a-75x75.jpg".to_vec(), 60, 60)));
+    assert_eq!(
+        intermediate(&tall, LIST_BOX),
+        Some((b"a-75x75.jpg".to_vec(), 60, 60))
+    );
     let wide = sizes(&[
         size("wide", "a-90x60.jpg", 90, 60),
         size("mid", "a-75x75.jpg", 75, 75),
     ]);
-    assert_eq!(intermediate(&wide), Some((b"a-75x75.jpg".to_vec(), 60, 60)));
+    assert_eq!(
+        intermediate(&wide, LIST_BOX),
+        Some((b"a-75x75.jpg".to_vec(), 60, 60))
+    );
     let low = sizes(&[
         size("low", "a-70x50.jpg", 70, 50),
         size("mid", "a-75x75.jpg", 75, 75),
     ]);
-    assert_eq!(intermediate(&low), Some((b"a-75x75.jpg".to_vec(), 60, 60)));
+    assert_eq!(
+        intermediate(&low, LIST_BOX),
+        Some((b"a-75x75.jpg".to_vec(), 60, 60))
+    );
     // The smaller wins in either order; of two alike, the later.
     let rising = sizes(&[
         size("mid", "a-75x75.jpg", 75, 75),
         size("big", "a-90x90.jpg", 90, 90),
     ]);
     assert_eq!(
-        intermediate(&rising),
+        intermediate(&rising, LIST_BOX),
         Some((b"a-75x75.jpg".to_vec(), 60, 60))
     );
     let twins = sizes(&[size("one", "u.jpg", 75, 75), size("two", "v.jpg", 75, 75)]);
-    assert_eq!(intermediate(&twins), Some((b"v.jpg".to_vec(), 60, 60)));
+    assert_eq!(
+        intermediate(&twins, LIST_BOX),
+        Some((b"v.jpg".to_vec(), 60, 60))
+    );
     let narrow = sizes(&[size("thumbnail", "a-50x50.jpg", 50, 50)]);
-    assert_eq!(intermediate(&narrow), None);
-    assert_eq!(intermediate(&meta("a:0:{}")), None);
+    assert_eq!(intermediate(&narrow, LIST_BOX), None);
+    assert_eq!(intermediate(&meta("a:0:{}"), LIST_BOX), None);
 }
 
 /// A file that is not an image shows its preview's full size, and nothing
@@ -94,10 +106,13 @@ fn files_downsize_to_their_preview() {
     let url = b"http://x.test/2026/doc.pdf".to_vec();
     let preview = sizes(&[size("full", "doc-pdf.jpg", 1088, 1408)]);
     assert_eq!(
-        downsize(url.clone(), &preview, false),
+        downsize(url.clone(), &preview, false, LIST_BOX),
         Some((b"http://x.test/2026/doc-pdf.jpg".to_vec(), 46, 60))
     );
-    assert_eq!(downsize(url.clone(), &meta("a:0:{}"), false), None);
+    assert_eq!(
+        downsize(url.clone(), &meta("a:0:{}"), false, LIST_BOX),
+        None
+    );
     // A preview without a width keeps its own size, not the file's.
     let flat = meta(&format!(
         "a:3:{{s:5:\"width\";i:120;s:6:\"height\";i:30;s:5:\"sizes\";a:1:{{{}}}}}",
@@ -105,12 +120,12 @@ fn files_downsize_to_their_preview() {
     ));
     let pdf = b"http://x.test/2026/doc.pdf".to_vec();
     assert_eq!(
-        downsize(pdf, &flat, false).map(|(_, w, h)| (w, h)),
+        downsize(pdf, &flat, false, LIST_BOX).map(|(_, w, h)| (w, h)),
         Some((1, 50))
     );
     let plain = meta("a:2:{s:5:\"width\";i:120;s:6:\"height\";i:30;}");
     assert_eq!(
-        downsize(url, &plain, true).map(|(_, w, h)| (w, h)),
+        downsize(url, &plain, true, LIST_BOX).map(|(_, w, h)| (w, h)),
         Some((60, 15))
     );
 }

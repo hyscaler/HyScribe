@@ -643,8 +643,6 @@ async fn media_screens_are_php_s() {
             "/hs-admin/upload?mode=list&cat=1",
             "/hs-admin/upload?x[]=1",
             "/hs-admin/media-new?post_id[]=1",
-            // An attachment's edit screen is not ported.
-            "/hs-admin/post?post=611&action=edit",
         ] {
             let response = get(&site, path, "127.0.0.1:8081", &cookies).await;
             assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
@@ -676,6 +674,49 @@ async fn searches_find_protected_posts() {
         assert!(page.contains("id=\"post-1168\""), "{path}");
         assert_eq!(sha256(&masked_nonces(&page)), f[3], "{path}");
     }
+}
+
+/// The attachment edit screen of `reference/attachment-edit/golden.sh`
+/// where the database holds no edit lock: a missing post is PHP's `404`;
+/// an attachment, whose view would write the user's lock, another post
+/// and any other argument answer 501, with a referer sent or not.
+#[tokio::test(flavor = "multi_thread")]
+async fn attachment_edit_screen_is_php_s() {
+    let dir = tempfile::tempdir().unwrap();
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/attachment-edit.tsv");
+    let missing = golden.lines().next().unwrap().split('\t').nth(3).unwrap();
+    let missing = String::from_utf8(hyscribe_testkit::unhex(missing)).unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let response = get(
+        &site,
+        "/hs-admin/post?post=9999&action=edit",
+        "127.0.0.1:8081",
+        &cookies,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(format!("404\t{}", page_of(response).await), missing);
+    let (site, cookies) = logged_in("wordpress_ttd", dir.path()).await;
+    for path in [
+        "/hs-admin/post?post=611&action=edit",
+        "/hs-admin/post?post=555&action=edit",
+        "/hs-admin/post?post=0&action=edit",
+        "/hs-admin/post?post=611",
+        "/hs-admin/post?post=611&action=edit&get-post-lock=1",
+        "/hs-admin/post?post[]=611&action=edit",
+    ] {
+        let response = get(&site, path, "127.0.0.1:8081", &cookies).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+    }
+    let request = axum::http::Request::builder()
+        .uri("/hs-admin/post?post=611&action=edit")
+        .header(header::HOST, "127.0.0.1:8081")
+        .header(header::COOKIE, &cookies)
+        .header(header::REFERER, "http://127.0.0.1:8081/hs-admin/upload")
+        .body(Body::empty())
+        .unwrap();
+    let response = router(Arc::clone(&site)).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
 }
 
 /// `page` with its nonces, ten hexadecimal digits standing alone, and its

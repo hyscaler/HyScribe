@@ -84,6 +84,7 @@ const CUSTOMIZE: &str = include_str!("page/customize.html");
 const AUTH_CHECK: &str = include_str!("page/auth-check.html");
 const CANONICAL: &str = include_str!("page/canonical.html");
 const COMPRESSION: &str = include_str!("page/compression.html");
+const RELOAD: &str = "\t<script>\n\t\tif ( typeof performance !== 'undefined' && performance.navigation && performance.navigation.type === 2 ) {\n\t\t\tdocument.location.reload( true );\n\t\t}\n\t</script>\n\t";
 
 /// The interim login form, which only a login page on the same domain gets.
 const FORM: &str = "\t\t\t<div id=\"wp-auth-check-form\" class=\"loading\" data-src=\"%login_src%\"></div>\n\t\t\t<div class=\"wp-auth-fallback\">";
@@ -368,6 +369,10 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
     let mut out = head(site, page);
     out.extend(assets.print_admin_styles(urls));
     out.extend(site.font_faces());
+    // `wp_page_reload_on_back_button_js()`, on the editors' screens.
+    if matches!(page.screen.pagenow, "post.php" | "post-new.php") {
+        out.extend(RELOAD.as_bytes());
+    }
     out.extend(assets.print_head_scripts(urls));
     let [base, focus, current] = scheme.icons;
     let icons = object(vec![(

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The Media screens: the library, `upload.php`, in its grid and list
-//! modes, and Add New Media, `media-new.php`; with the media library
-//! `wp_enqueue_media()` brings to a screen.
+//! modes, Add New Media, `media-new.php`, and an attachment's edit screen;
+//! with the media library `wp_enqueue_media()` brings to a screen.
 
 use hyscribe_phpser::{Key, Value};
 use hyscribe_render::date::MONTHS;
@@ -13,10 +13,12 @@ use crate::list_table::fill;
 use crate::page::{esc_js, json, object, text};
 use crate::posts::PostsSite;
 
+pub(crate) mod attachment;
 mod image;
 mod library;
 mod upload_new;
 
+pub use attachment::{AttachmentArgs, AttachmentSite, attachment_edit};
 pub use library::{LibraryArgs, upload};
 pub use upload_new::{NewArgs, media_new};
 

@@ -19,7 +19,7 @@ const REMOVABLE: [&[u8]; 6] = [
 
 /// `page` from its screen meta to the end of its content, the part that is
 /// the screen's own.
-fn own(page: &str) -> &str {
+pub(super) fn own(page: &str) -> &str {
     let start = page.find("<div id=\"screen-meta\"").unwrap_or(0);
     let end = page.find("<!-- wpbody-content -->").unwrap_or(page.len());
     page.get(start..end).unwrap_or_default()
@@ -35,7 +35,7 @@ fn rowless(page: &str) -> String {
 
 /// `page` with each nonce placeholder as `%nonce%`, as the hashed goldens
 /// hold them.
-fn nonces(page: &str) -> String {
+pub(super) fn nonces(page: &str) -> String {
     let mut out = String::new();
     let mut rest = page;
     while let Some(at) = rest.find("%nonce:") {
@@ -50,7 +50,7 @@ fn nonces(page: &str) -> String {
     out
 }
 
-fn sha256(text: &str) -> String {
+pub(super) fn sha256(text: &str) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(text.as_bytes())
         .iter()

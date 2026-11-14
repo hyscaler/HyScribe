@@ -588,7 +588,7 @@ fn recent_comments(
             0,
         )));
     }
-    out.push_str(&comment_reply(site, None, false, "dashboard"));
+    out.push_str(&comment_reply(site, None, (false, "dashboard"), -1, true));
     out.push_str("\t</div>");
     out
 }
@@ -662,12 +662,12 @@ fn text_option(site: &dyn DashboardSite, name: &str) -> String {
     crate::text(&site.option(name).unwrap_or_default())
 }
 
-/// A dashboard widget: ID, title, context and content.
-struct Widget {
-    id: &'static str,
-    title: &'static str,
-    context: String,
-    inside: String,
+/// A meta box, as a dashboard widget: ID, title, context and content.
+pub(crate) struct Widget {
+    pub(crate) id: &'static str,
+    pub(crate) title: &'static str,
+    pub(crate) context: String,
+    pub(crate) inside: String,
 }
 
 /// `wp_dashboard_setup()`'s widgets for the user, in registration order.
@@ -720,10 +720,10 @@ fn widgets(site: &dyn DashboardSite, data: &Activity, request_uri: &str) -> Vec<
     widgets
 }
 
-/// The widgets as `do_meta_boxes()` orders them: those the user sorted
-/// first, in their order and columns.
-fn sorted(site: &dyn DashboardSite, mut widgets: Vec<Widget>) -> Vec<Widget> {
-    let order = user_array(site, "meta-box-order_dashboard");
+/// The meta boxes as `do_meta_boxes()` orders them: those the user sorted
+/// in the option `name` first, in their order and columns.
+pub(crate) fn sorted(site: &dyn PostsSite, name: &str, mut widgets: Vec<Widget>) -> Vec<Widget> {
+    let order = user_array(site, name);
     let mut sorted: Vec<Widget> = Vec::new();
     for (context, ids) in &order {
         let context = String::from_utf8_lossy(&context.to_php_string()).into_owned();
@@ -743,7 +743,7 @@ fn sorted(site: &dyn DashboardSite, mut widgets: Vec<Widget>) -> Vec<Widget> {
 }
 
 /// A user option holding a serialized array, as an array.
-fn user_array(site: &dyn DashboardSite, name: &str) -> Vec<(Value, Value)> {
+fn user_array(site: &dyn PostsSite, name: &str) -> Vec<(Value, Value)> {
     let stored = site.user_option(name).unwrap_or_default();
     let Maybe::Value(Value::Array(entries)) = maybe_unserialize(&stored) else {
         return Vec::new();
@@ -755,7 +755,7 @@ fn user_array(site: &dyn DashboardSite, name: &str) -> Vec<(Value, Value)> {
 }
 
 /// The IDs a user option lists, as `get_hidden_meta_boxes()` reads them.
-fn listed(site: &dyn DashboardSite, name: &str) -> Vec<String> {
+pub(crate) fn listed(site: &dyn PostsSite, name: &str) -> Vec<String> {
     user_array(site, name)
         .iter()
         .map(|(_, id)| String::from_utf8_lossy(&id.to_php_string()).into_owned())
@@ -800,7 +800,7 @@ pub fn dashboard(site: &dyn DashboardSite, request: &Request) -> Option<String> 
             format!("<label for=\"{id}-hide\"><input class=\"hide-postbox-tog\" name=\"{id}-hide\" type=\"checkbox\" id=\"{id}-hide\" value=\"{id}\" {checked} />{}</label>", widget.title)
         })
         .collect();
-    let widgets = sorted(site, registered);
+    let widgets = sorted(site, "meta-box-order_dashboard", registered);
     let mut columns = String::from("<div id=\"dashboard-widgets\" class=\"metabox-holder\">\n");
     for (number, context) in ["normal", "side", "column3", "column4"].iter().enumerate() {
         columns.push_str(&format!(
@@ -1015,7 +1015,7 @@ fn tooltip(id: &str, label: &str, button: &str) -> String {
 
 /// A meta box as `do_meta_boxes()` prints it, `hidden` by the user's
 /// screen options.
-fn postbox(id: &str, title: &str, closed: bool, hidden: bool, inside: &str) -> String {
+pub(crate) fn postbox(id: &str, title: &str, closed: bool, hidden: bool, inside: &str) -> String {
     let closed = if closed { "closed" } else { "" };
     let hidden = if hidden { " hide-if-js" } else { "" };
     let label = esc_attr(&wp_strip_all_tags(title.as_bytes(), false));

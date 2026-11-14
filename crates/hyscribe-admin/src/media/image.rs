@@ -14,8 +14,8 @@ use hyscribe_render::template::replace;
 
 use crate::posts::PostsSite;
 
-/// The requested box, `array( 60, 60 )`.
-const SIZE: i64 = 60;
+/// The list's box, `array( 60, 60 )`.
+const LIST_BOX: (i64, i64) = (60, 60);
 
 /// `wp_get_ext_types()`, less the images, which have no icon.
 const EXT_TYPES: [(&str, &[&str]); 8] = [
@@ -87,41 +87,46 @@ fn dimensions(image: &Value) -> (i64, i64) {
     (get("width"), get("height"))
 }
 
-/// `image_get_intermediate_size( $id, array( 60, 60 ) )`: the file and
+/// `image_get_intermediate_size( $id, $size )` of a box: the file and
 /// size, constrained to the box, of the smallest stored size of the box's
-/// ratio that covers it, or else of the thumbnail if it does.
-fn intermediate(meta: &Value) -> Option<(Vec<u8>, i64, i64)> {
+/// ratio that covers it, or else of the thumbnail if it is that wide.
+fn intermediate(meta: &Value, (w, h): (i64, i64)) -> Option<(Vec<u8>, i64, i64)> {
     let sizes = meta.get_str("sizes").filter(|sizes| !sizes.is_empty())?;
     let mut candidates: Vec<(i64, &Value)> = Vec::new();
     for (_, data) in sizes.as_array().unwrap_or_default() {
         let (width, height) = dimensions(data);
         let area = width.saturating_mul(height);
         // The box's own size is the smallest that covers it.
-        if width == SIZE && height == SIZE {
+        if width == w && height == h {
             candidates.push((area, data));
             break;
         }
-        if width >= SIZE && height >= SIZE && matches_ratio(width, height, SIZE, SIZE) {
+        if width >= w && height >= h && matches_ratio(width, height, w, h) {
             candidates.retain(|(other, _)| *other != area);
             candidates.push((area, data));
         }
     }
     let thumbnail = meta
         .get_path(&["sizes", "thumbnail"])
-        .filter(|thumb| !thumb.is_empty() && dimensions(thumb).0 >= SIZE);
+        .filter(|thumb| !thumb.is_empty() && dimensions(thumb).0 >= w.max(h));
     let data = match candidates.into_iter().min_by_key(|(area, _)| *area) {
         Some((_, data)) => data,
         None => thumbnail?,
     };
     let (width, height) = dimensions(data);
-    let (width, height) = constrain_dimensions(width, height, SIZE, SIZE);
+    let (width, height) = constrain_dimensions(width, height, w, h);
     let file = data.get_str("file").map(Value::to_php_string);
     Some((file.unwrap_or_default(), width, height))
 }
 
-/// `image_downsize( $id, array( 60, 60 ) )` of an attachment at `url`, an
-/// `image` or not, with metadata `meta`: the URL, width and height.
-fn downsize(mut url: Vec<u8>, meta: &Value, image: bool) -> Option<(Vec<u8>, i64, i64)> {
+/// `image_downsize( $id, $size )` of an attachment at `url`, an `image` or
+/// not, with metadata `meta`, to a box: the URL, width and height.
+fn downsize(
+    mut url: Vec<u8>,
+    meta: &Value,
+    image: bool,
+    size: (i64, i64),
+) -> Option<(Vec<u8>, i64, i64)> {
     let mut name = wp_basename(&url);
     let (mut width, mut height) = (0, 0);
     if !image {
@@ -134,14 +139,14 @@ fn downsize(mut url: Vec<u8>, meta: &Value, image: bool) -> Option<(Vec<u8>, i64
         name = full_file;
         (width, height) = dimensions(full);
     }
-    if let Some((sized, w, h)) = intermediate(meta) {
+    if let Some((sized, w, h)) = intermediate(meta, size) {
         url = replace(&url, &name, &sized);
         (width, height) = (w, h);
     }
     if width == 0 && height == 0 && isset(meta.get_str("width")) && isset(meta.get_str("height")) {
         (width, height) = dimensions(meta);
     }
-    let (width, height) = constrain_dimensions(width, height, SIZE, SIZE);
+    let (width, height) = constrain_dimensions(width, height, size.0, size.1);
     Some((url, width, height))
 }
 
@@ -172,20 +177,35 @@ fn icon_name(file: &[u8], mime: &str) -> &'static str {
         .unwrap_or("default")
 }
 
-/// The thumbnail of attachment `id`: its image, or its type's icon.
-pub(super) fn thumbnail(site: &dyn PostsSite, id: u64) -> String {
-    let post = site.post(id).unwrap_or_default();
-    let file = site.meta(&post, "_wp_attached_file").unwrap_or_default();
-    let meta = metadata(site, &post);
+/// `wp_get_attachment_image_src( $id, $size, true )`: the attachment's
+/// image for a box, or its type's icon.
+pub(super) fn image_src(
+    site: &dyn PostsSite,
+    post: &Post,
+    size: (i64, i64),
+) -> (Vec<u8>, i64, i64) {
+    let file = site.meta(post, "_wp_attached_file").unwrap_or_default();
     let image = is_image(&file, &post.mime_type);
-    let found = attachment_url(site, &post).and_then(|url| downsize(url, &meta, image));
-    let (src, width, height) = found.unwrap_or_else(|| {
+    let found = attachment_url(site, post)
+        .and_then(|url| downsize(url, &metadata(site, post), image, size));
+    found.unwrap_or_else(|| {
         let icon = icon_name(&file, &post.mime_type);
         let src = format!("{}/wp-includes/images/media/{icon}.svg", site.site_url());
         (src.into_bytes(), 48, 64)
-    });
+    })
+}
+
+/// The thumbnail of attachment `id`: its image, or its type's icon.
+pub(super) fn thumbnail(site: &dyn PostsSite, id: u64) -> String {
+    let post = site.post(id).unwrap_or_default();
+    let (src, width, height) = image_src(site, &post, LIST_BOX);
     let options = |name: &str| site.option(name).unwrap_or_default();
-    img(&src, (width, height), &meta, &upload_baseurl(&options))
+    img(
+        &src,
+        (width, height),
+        &metadata(site, &post),
+        &upload_baseurl(&options),
+    )
 }
 
 /// The `img` of `src` sized `size`, lazy as every image of the admin is,

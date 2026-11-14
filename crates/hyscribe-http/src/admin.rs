@@ -19,7 +19,9 @@ use hyscribe_admin::dashboard::{
     CommentCounts, DashboardSite, RecentComment, comment_status, dashboard,
 };
 use hyscribe_admin::login::Site as LoginSite;
-use hyscribe_admin::media::{LibraryArgs, MediaSite, NewArgs, media_new, upload};
+use hyscribe_admin::media::{
+    AttachmentArgs, LibraryArgs, MediaSite, NewArgs, attachment_edit, media_new, upload,
+};
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::{PageSite, REMOVABLE, Request, query_strings};
 use hyscribe_admin::posts::{
@@ -101,6 +103,8 @@ struct Admin<'a> {
     comment_counts: OnceCell<CommentCounts>,
     /// The user's `wp-settings-{ID}` cookie, if sent.
     settings: Option<String>,
+    /// The `Referer` header, if sent.
+    referer: Option<String>,
 }
 
 impl<'a> Admin<'a> {
@@ -113,6 +117,7 @@ impl<'a> Admin<'a> {
             posts: RefCell::default(),
             comment_counts: OnceCell::new(),
             settings: None,
+            referer: None,
         }
     }
 
@@ -1008,6 +1013,11 @@ fn screen(
             let args = NewArgs::parse(query, admin.settings.clone())?;
             media_new(admin, &args, &request)
         }
+        // Only an attachment's edit screen is ported.
+        "/hs-admin/post" => {
+            let args = AttachmentArgs::parse(query, admin.referer.clone())?;
+            attachment_edit(admin, &args, &request)?
+        }
         // Their pages print the PHP and web server details HyScribe has no
         // equivalent for: refused as PHP refuses, else not ported.
         "/hs-admin/plugins" if !admin.can("activate_plugins") => Answer::from_page(None),
@@ -1066,6 +1076,7 @@ fn served(admin: &Admin, answer: Answer) -> Response {
         Answer::Redirect(to) => redirect(screen_headers(), to.as_bytes()),
         Answer::Denied(message) => denied(admin, message),
         Answer::Died(message) => died(admin, StatusCode::INTERNAL_SERVER_ERROR, message),
+        Answer::Missing(message) => died(admin, StatusCode::NOT_FOUND, message),
     }
 }
 
@@ -1121,6 +1132,8 @@ fn answer(
                 let settings = cookie(&cookies, &format!("wp-settings-{id}"));
                 admin.settings = settings.map(|value| String::from_utf8_lossy(value).into_owned());
                 let header = |name: &str| headers.get(name).map(HeaderValue::as_bytes);
+                admin.referer =
+                    header("referer").map(|value| String::from_utf8_lossy(value).into_owned());
                 let browser = Browser {
                     user_agent: header("user-agent").unwrap_or_default(),
                     mobile_hint: header("sec-ch-ua-mobile"),

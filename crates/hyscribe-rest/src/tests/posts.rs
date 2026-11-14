@@ -615,3 +615,19 @@ fn content_not_ported() {
     assert!(writes_or_unported(b"<!-- wp:loginout /-->", true));
     assert!(writes_or_unported(b"<!-- wp:post-comments-form /-->", true));
 }
+
+/// A site reads its users through `reads()` unless it says otherwise:
+/// `/users/me` finds the fixture's administrator.
+#[test]
+fn users_are_read_through_the_site_reads() {
+    let served = served(
+        "administrator",
+        "/wp/v2/users/me&_fields=id,slug",
+        false,
+        &[],
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&served.body),
+        r#"{"id":1,"slug":"admin"}"#
+    );
+}

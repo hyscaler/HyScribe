@@ -427,3 +427,26 @@ async fn posts_are_read_for_the_routes() {
     .await
     .unwrap();
 }
+
+/// A write action's body is read when it is a form; any other body, which
+/// only PHP reads, leaves the write unanswered.
+#[tokio::test(flavor = "multi_thread")]
+async fn write_actions_read_only_forms() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let post = |kind: &'static str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/?rest_route=/wp/v2/posts/1")
+            .header(header::CONTENT_TYPE, kind)
+    };
+    let form = "application/x-www-form-urlencoded";
+    let response = send(&site, post(form), "").await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let response = send(&site, post(form), "_wpnonce=x").await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let response = send(&site, post(form), "title=x").await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let response = send(&site, post("application/json"), "{}").await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+}

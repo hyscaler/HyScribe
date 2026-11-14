@@ -12,6 +12,7 @@ publish.workspace = true
 [dependencies]
 hyscribe-kses.workspace = true
 hyscribe-phpser.workspace = true
+hyscribe-render.workspace = true
 
 [dev-dependencies]
 hyscribe-auth.workspace = true

@@ -186,6 +186,18 @@ fn default_install_matches_php() {
     assert!(page == golden("page.css"));
 }
 
+/// A style variation is sanitized as the theme's own data: what the schema
+/// does not know goes, and a registered block style's variation stays.
+#[test]
+fn style_variations_are_sanitized() {
+    let fixture = fixture();
+    let styles = GlobalStyles::resolve(&fixture.sources());
+    let raw = br#"{"version": 3, "title": "T", "nope": 1, "styles": {"blocks": {"core/group": {"variations": {"section-1": {"color": {"text": "red"}}}}}}}"#;
+    let data = styles.theme_json(json_decode(raw).unwrap());
+    let kept = br#"{"version":3,"title":"T","styles":{"blocks":{"core\/group":{"variations":{"section-1":{"color":{"text":"red"}}}}}}}"#;
+    assert_eq!(hyscribe_phpser::json_encode(&data).unwrap(), kept);
+}
+
 #[test]
 fn lookups() {
     let fixture = fixture();

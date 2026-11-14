@@ -6,6 +6,7 @@
 //! checks the logged in cookie and sends the answer. A request that
 //! reaches a route, method or keyword not ported is answered `501`.
 
+mod editor;
 mod fields;
 mod request;
 mod response;
@@ -107,6 +108,11 @@ impl Context<'_> {
     /// `rest_authorization_required_code()`.
     pub(crate) fn authorization_required(&self) -> u16 {
         if self.user == 0 { 401 } else { 403 }
+    }
+
+    /// `get_option( $name )`.
+    pub(crate) fn option(&self, name: &str) -> Option<Vec<u8>> {
+        self.site.option(name)
     }
 
     /// `rest_url( $path )`.
@@ -306,6 +312,79 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
     served
 }
 
+/// The permission checks of a matched route's endpoints and the endpoint
+/// matched, if the route is ported.
+fn ported(matched: &routes::Matched) -> Option<(Vec<Permission>, Endpoint)> {
+    let mut endpoints =
+        types::endpoints(matched.regex).or_else(|| editor::endpoints(matched.regex))?;
+    let permissions = endpoints
+        .iter()
+        .map(|endpoint| endpoint.permission)
+        .collect();
+    // A route is ported with every endpoint the table lists.
+    Some((permissions, endpoints.swap_remove(matched.endpoint)))
+}
+
+/// `rest_send_allow_header()`: a method is allowed as its last endpoint
+/// permits, in the order methods first appear.
+fn allowed(
+    context: &Context,
+    permissions: &[Permission],
+    methods: &'static [Vec<String>],
+    params: &Params,
+) -> Vec<&'static str> {
+    let methods: Vec<(&str, bool)> = permissions
+        .iter()
+        .zip(methods)
+        .flat_map(|(permission, methods)| {
+            let permitted = permission(context, params).is_ok();
+            methods
+                .iter()
+                .map(move |method| (method.as_str(), permitted))
+        })
+        .collect();
+    methods
+        .iter()
+        .enumerate()
+        .filter(|(i, (method, _))| {
+            methods.iter().position(|(known, _)| known == method) == Some(*i)
+        })
+        .filter(|(_, (method, _))| {
+            methods
+                .iter()
+                .rev()
+                .find(|(known, _)| known == method)
+                .is_some_and(|(_, allow)| *allow)
+        })
+        .map(|(_, (method, _))| *method)
+        .collect()
+}
+
+/// A `self` link to `route`, as `get_response_links()` gives it: with the
+/// methods the route allows as its `targetHints`, when it allows any. A
+/// link's parameters are its route's own, which its arguments accept, and
+/// no permission check ported reads an argument's default.
+pub(crate) fn self_link(context: &Context, response: &mut Response, route: &str) {
+    let href = text(context.rest_url(route));
+    let hints = routes::match_request("GET", route.as_bytes()).and_then(|matched| {
+        let (permissions, endpoint) = ported(&matched)?;
+        let mut params = Params {
+            url: matched.params,
+            ..Params::default()
+        };
+        let sanitized = sanitize_params(&mut params, &endpoint.args).ok();
+        let allowed = sanitized.map(|()| allowed(context, &permissions, matched.methods, &params));
+        let allowed = allowed.filter(|allowed| !allowed.is_empty())?;
+        let allow = allowed.into_iter().map(text).collect();
+        Some(object([("allow", response::list(allow))]))
+    });
+    let link = match hints {
+        Some(hints) => object([("href", href), ("targetHints", hints)]),
+        None => object([("href", href)]),
+    };
+    response.add_link_attributes("self", link);
+}
+
 /// `dispatch()` with the filters core adds: OPTIONS requests, the route's
 /// arguments checked, its permission and callback, then the `Allow`
 /// header and `_fields`.
@@ -334,13 +413,7 @@ fn dispatch(
         let message = "No route was found matching the URL and request method.";
         return Ok(RestError::status("rest_no_route", message, 404).into_response());
     };
-    let mut endpoints = types::endpoints(matched.regex).ok_or(NotPorted)?;
-    let permissions: Vec<Permission> = endpoints
-        .iter()
-        .map(|endpoint| endpoint.permission)
-        .collect();
-    // A route is ported with every endpoint the table lists.
-    let endpoint = endpoints.swap_remove(matched.endpoint);
+    let (permissions, endpoint) = ported(&matched).ok_or(NotPorted)?;
     let mut params = Params {
         url: matched.params,
         defaults: defaults(&endpoint.args),
@@ -351,34 +424,14 @@ fn dispatch(
     let answered = checked.and_then(|()| {
         (endpoint.permission)(context, &params).and_then(|()| (endpoint.callback)(context, &params))
     });
+    if answered
+        .as_ref()
+        .is_err_and(|error| error.code == response::NOT_PORTED)
+    {
+        return Err(NotPorted);
+    }
     let mut response = answered.unwrap_or_else(RestError::into_response);
-    // `rest_send_allow_header()`: a method is allowed as its last endpoint
-    // permits, in the order methods first appear.
-    let methods: Vec<(&str, bool)> = permissions
-        .iter()
-        .zip(matched.methods)
-        .flat_map(|(permission, methods)| {
-            let permitted = permission(context, &params).is_ok();
-            methods
-                .iter()
-                .map(move |method| (method.as_str(), permitted))
-        })
-        .collect();
-    let allowed: Vec<&str> = methods
-        .iter()
-        .enumerate()
-        .filter(|(i, (method, _))| {
-            methods.iter().position(|(known, _)| known == method) == Some(*i)
-        })
-        .filter(|(_, (method, _))| {
-            methods
-                .iter()
-                .rev()
-                .find(|(known, _)| known == method)
-                .is_some_and(|(_, allow)| *allow)
-        })
-        .map(|(_, (method, _))| *method)
-        .collect();
+    let allowed = allowed(context, &permissions, matched.methods, &params);
     if !allowed.is_empty() {
         response.header("Allow", &allowed.join(", "));
     }

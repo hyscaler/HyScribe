@@ -98,18 +98,24 @@ impl Site for Oracle {
 }
 
 /// A recorded request and PHP's answer.
-struct Case {
-    who: String,
-    method: String,
-    target: String,
-    flags: String,
-    status: u16,
-    headers: Vec<String>,
-    body: Vec<u8>,
+pub(crate) struct Case {
+    pub(crate) who: String,
+    pub(crate) method: String,
+    pub(crate) target: String,
+    pub(crate) flags: String,
+    /// 0 for a request that writes, which the golden records as `writes`.
+    pub(crate) status: u16,
+    pub(crate) headers: Vec<String>,
+    pub(crate) body: Vec<u8>,
 }
 
 fn cases() -> Vec<Case> {
-    include_str!("../tests/golden/rest.tsv")
+    cases_of(include_str!("../tests/golden/rest.tsv"))
+}
+
+/// The cases of a golden recorded by `reference/rest/golden.sh`.
+pub(crate) fn cases_of(golden: &str) -> Vec<Case> {
+    golden
         .lines()
         .map(|line| {
             let fields: Vec<&str> = line.split('\t').collect();
@@ -119,7 +125,7 @@ fn cases() -> Vec<Case> {
                 method: fields[1].into(),
                 target: text(2),
                 flags: fields[3].into(),
-                status: fields[4].parse().unwrap(),
+                status: fields[4].parse().unwrap_or(0),
                 headers: text(5).lines().map(String::from).collect(),
                 body: unhex(fields[6]),
             }
@@ -142,7 +148,7 @@ fn route(path: &str, get: &[(Key, Value)]) -> Vec<u8> {
 }
 
 /// `case` served by HyScribe's API.
-fn serve_case(case: &Case) -> Served {
+pub(crate) fn serve_case(case: &Case) -> Served {
     let (path, query) = case.target.split_once('?').unwrap_or((&case.target, ""));
     let get = match parse_str(query.as_bytes()) {
         Value::Array(get) => get,
@@ -179,7 +185,7 @@ fn serve_case(case: &Case) -> Served {
 }
 
 /// The headers the golden keeps, as it writes them.
-fn kept(headers: &[(String, String)]) -> Vec<String> {
+pub(crate) fn kept(headers: &[(String, String)]) -> Vec<String> {
     let kept = |name: &str| {
         [
             "content-type",
@@ -310,4 +316,31 @@ fn a_single_page_has_no_links() {
         kept(&response.headers),
         ["x-wp-total: 1", "x-wp-totalpages: 1"]
     );
+}
+
+/// A `self` link has `targetHints` only to a route ported, whose methods the
+/// user may use.
+#[test]
+fn self_links_hint_what_their_route_allows() {
+    let oracle = Oracle {
+        role: "",
+        pretty: false,
+    };
+    let context = Context {
+        site: &oracle,
+        user: 0,
+        head: false,
+    };
+    for route in ["/nope", "/wp/v2/posts", "/wp/v2/block-types/core/paragraph"] {
+        let mut response = Response::new(Value::Array(Vec::new()), 200);
+        self_link(&context, &mut response, route);
+        let href = oracle.rest_url(route);
+        let link = object([("href", text(href))]);
+        let links = object([("self", Value::Array(vec![(Key::Int(0), link)]))]);
+        assert_eq!(
+            response.into_data(),
+            Value::Array(vec![(Key::String(b"_links".to_vec()), links)]),
+            "{route}"
+        );
+    }
 }

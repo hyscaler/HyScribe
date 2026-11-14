@@ -103,7 +103,7 @@ const THEME_JSON: &[u8] = include_bytes!("../../../themes/twentytwentyfive/theme
 const CORE_THEME_JSON: &[u8] = include_bytes!("../../../wordpress/wp-includes/theme.json");
 const REGISTERED_BLOCKS: &[u8] =
     include_bytes!("../../../wordpress/wp-includes/blocks/registered.json");
-const BLOCK_STYLES: &str = include_str!("../../../themes/twentytwentyfive/block-styles.tsv");
+const REGISTERED: &[u8] = include_bytes!("../../../themes/twentytwentyfive/registered.json");
 const STYLE_PARTIALS: &[u8] = include_bytes!("../../../themes/twentytwentyfive/styles.json");
 const STYLE_CSS: &str = include_str!("../../../themes/twentytwentyfive/style.css");
 const STYLE_MIN_CSS: &str = include_str!("../../../themes/twentytwentyfive/style.min.css");
@@ -143,7 +143,7 @@ pub(crate) fn twentytwentyfive_with(user: &[u8], styles: &[(String, String)]) ->
 
 fn with_user_styles(user: Option<&[u8]>, styles: &[(String, String)]) -> Theme {
     let blocks = registered_blocks(REGISTERED_BLOCKS);
-    let mut block_styles = block_styles(BLOCK_STYLES);
+    let mut block_styles = block_styles(REGISTERED);
     block_styles.extend_from_slice(styles);
     Theme {
         slug: "twentytwentyfive",
@@ -198,6 +198,20 @@ fn style_handles(name: &str, metadata: &Value) -> Vec<String> {
 }
 
 impl Theme {
+    /// The theme's global settings and styles, without the site's own:
+    /// `WP_Theme_JSON_Resolver::get_merged_data( 'theme' )`.
+    pub fn global_styles(&self) -> &GlobalStyles {
+        &self.global
+    }
+
+    /// `WP_Theme_JSON_Resolver::get_style_variations()`: the theme's style
+    /// variations as raw data, each of Twenty Twenty-Five's titled.
+    pub fn style_variations(&self) -> Vec<Value> {
+        style_variations()
+            .map(|variation| self.global.theme_json(variation))
+            .collect()
+    }
+
     /// The post formats `functions.php` adds theme support for.
     pub fn post_formats(&self) -> &'static [&'static str] {
         &[
@@ -268,12 +282,25 @@ fn registered_blocks(json: &[u8]) -> Vec<Metadata> {
         .collect()
 }
 
-/// `block-styles.tsv`: the block styles registered with the theme, block
-/// and style name per line.
-fn block_styles(tsv: &str) -> Vec<(String, String)> {
-    tsv.lines()
-        .filter_map(|line| line.split_once('\t'))
-        .map(|(block, style)| (block.to_string(), style.to_string()))
+/// `registered.json`'s `block_styles`: the block styles registered with
+/// the theme, by block and style name.
+fn block_styles(json: &[u8]) -> Vec<(String, String)> {
+    let root = json_decode(json).unwrap_or_default();
+    let text = |value: Option<&Value>| {
+        let bytes = value.and_then(Value::as_bytes)?;
+        Some(String::from_utf8_lossy(bytes).into_owned())
+    };
+    root.get_str("block_styles")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|(_, entry)| {
+            let block = text(entry.get(&Key::Int(0)))?;
+            let style = entry
+                .get(&Key::Int(1))
+                .and_then(|style| text(style.get_str("name")))?;
+            Some((block, style))
+        })
         .collect()
 }
 

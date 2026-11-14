@@ -77,7 +77,7 @@ fn cannot_edit(code: &'static str, context: &Context) -> RestError {
 }
 
 /// `get_context_param( array( 'default' => 'view' ) )`.
-fn context_arg() -> Arg {
+pub(crate) fn context_arg() -> Arg {
     Arg {
         name: "context",
         schema: object([
@@ -120,6 +120,13 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         }]),
         _ => None,
     }
+}
+
+/// `current_user_can( 'edit_posts' )`, or the `edit_posts` capability of
+/// any post type shown in REST, as the editors' registries check: the first
+/// is the post type `post`'s own.
+pub(crate) fn can_edit_any(context: &Context) -> bool {
+    shown_in_rest().any(|(_, fields)| can_edit(context, fields))
 }
 
 /// `get_items_permissions_check()`.

@@ -17,6 +17,9 @@ pub struct RestError {
     pub data: Value,
 }
 
+/// The code of [`RestError::not_ported`].
+pub(crate) const NOT_PORTED: &str = "hyscribe_not_ported";
+
 /// A PHP array of string keys.
 pub(crate) fn object<const N: usize>(entries: [(&str, Value); N]) -> Value {
     Value::Array(
@@ -39,6 +42,15 @@ impl RestError {
             code,
             message: message.into(),
             data: object([("status", Value::Int(i64::from(status)))]),
+        }
+    }
+
+    /// What a route answers where it is not ported, which is sent as `501`.
+    pub(crate) fn not_ported() -> RestError {
+        RestError {
+            code: NOT_PORTED,
+            message: String::new(),
+            data: Value::Null,
         }
     }
 
@@ -68,7 +80,7 @@ pub struct Response {
     pub headers: Vec<(String, String)>,
     /// The data.
     pub data: Value,
-    /// The links and their relations, each link's `href` last.
+    /// The links and their relations.
     links: Vec<(String, Value)>,
 }
 
@@ -91,8 +103,12 @@ impl Response {
 
     /// `add_link( $rel, $href )`.
     pub fn add_link(&mut self, rel: &str, href: String) {
-        self.links
-            .push((rel.into(), object([("href", text(href))])));
+        self.add_link_attributes(rel, object([("href", text(href))]));
+    }
+
+    /// A link to `rel` as `get_response_links()` gives it.
+    pub(crate) fn add_link_attributes(&mut self, rel: &str, link: Value) {
+        self.links.push((rel.into(), link));
     }
 
     /// `is_error()`.

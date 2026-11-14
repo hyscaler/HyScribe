@@ -13,6 +13,7 @@ use crate::response::paginate;
 use super::*;
 
 pub(crate) mod content;
+mod media;
 mod people;
 mod posts;
 mod site;
@@ -96,6 +97,9 @@ impl Site for Oracle {
     fn create_nonce(&self) -> String {
         "%nonce%".into()
     }
+    fn nonce(&self, _: &str) -> String {
+        "%preview_nonce%".into()
+    }
     fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
         user != 0 && Capabilities::load(self, "wp_", user).has_cap(self, cap, args)
     }
@@ -121,11 +125,13 @@ impl Site for Oracle {
                 ttd: false,
                 pretty: false,
                 extra: false,
+                media: false,
             },
             site::Fixture {
                 ttd: false,
                 pretty: true,
                 extra: false,
+                media: false,
             },
         ];
         &FIXTURES[usize::from(self.pretty)]
@@ -750,7 +756,11 @@ fn self_links_hint_what_their_route_allows() {
         head: false,
         uri: b"/",
     };
-    for route in ["/nope", "/wp/v2/media", "/wp/v2/block-types/core/paragraph"] {
+    for route in [
+        "/nope",
+        "/wp/v2/plugins",
+        "/wp/v2/block-types/core/paragraph",
+    ] {
         let mut response = Response::new(Value::Array(Vec::new()), 200);
         self_link(&context, &mut response, route);
         let href = oracle.rest_url(route);

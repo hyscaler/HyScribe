@@ -14,6 +14,15 @@ use crate::types::context_arg;
 
 const IDS: &str = r#"{"type":"array","items":{"type":"integer"},"default":[]}"#;
 const STATUSES: &str = r#"{"default":"publish","type":"array","items":{"enum":["publish","future","draft","pending","private","trash","auto-draft","inherit","request-pending","request-confirmed","request-failed","request-completed","any"],"type":"string"}}"#;
+const ATTACHMENT_STATUSES: &str = r#"{"default":"inherit","type":"array","items":{"enum":["inherit","private","trash"],"type":"string"}}"#;
+
+/// The `status` argument's schema for `kind`.
+fn statuses_schema(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Attachment => ATTACHMENT_STATUSES,
+        Kind::Post | Kind::Page => STATUSES,
+    }
+}
 
 /// `get_collection_params()` of the type.
 pub(super) fn collection(kind: Kind) -> Vec<Arg> {
@@ -69,7 +78,7 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
         validate: false,
         sanitize: Sanitize::Schema,
     });
-    if kind == Kind::Page {
+    if kind != Kind::Post {
         args.extend([typed("parent", IDS), typed("parent_exclude", IDS)]);
     }
     args.extend([
@@ -80,14 +89,18 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
         typed("slug", r#"{"type":"array","items":{"type":"string"}}"#),
         arg(
             "status",
-            STATUSES,
+            statuses_schema(kind),
             false,
             Sanitize::Site(match kind {
                 Kind::Post => |context, value| statuses(context, value, Kind::Post),
                 Kind::Page => |context, value| statuses(context, value, Kind::Page),
+                Kind::Attachment => |context, value| statuses(context, value, Kind::Attachment),
             }),
         ),
     ]);
+    if kind == Kind::Attachment {
+        args.extend(crate::media::collection_args());
+    }
     if kind == Kind::Post {
         // `oneOf` is not ported: the endpoint answers 501.
         let terms = |name| arg(name, "{}", false, Sanitize::Endpoint);
@@ -109,7 +122,7 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
 }
 
 /// The `id` of a single item's route.
-pub(super) fn id() -> Arg {
+pub(crate) fn id() -> Arg {
     typed("id", r#"{"type":"integer"}"#)
 }
 
@@ -136,7 +149,7 @@ pub(super) const NOT_PORTED: [&str; 8] = [
 ];
 
 /// `sanitize_post_statuses()`: `wp_parse_slug_list()`, each status but
-/// the default allowed only to those who can edit the type's posts, or
+/// the type's default allowed only to those who can edit the type's posts, or
 /// read its private ones for `private`.
 fn statuses(context: &Context, statuses: &Value, kind: Kind) -> Checked<Value> {
     let mut parsed: Vec<Vec<u8>> = Vec::new();
@@ -146,8 +159,12 @@ fn statuses(context: &Context, statuses: &Value, kind: Kind) -> Checked<Value> {
             parsed.push(slug);
         }
     }
-    let schema = json_decode(STATUSES.as_bytes()).unwrap_or_default();
-    for status in parsed.iter().filter(|status| *status != b"publish") {
+    let schema = json_decode(statuses_schema(kind).as_bytes()).unwrap_or_default();
+    let default = schema.get_str("default").map(Value::to_php_string);
+    for status in parsed
+        .iter()
+        .filter(|status| Some(*status) != default.as_ref())
+    {
         let private = status == b"private" && context.can(&kind.cap("read_private_posts"));
         if !context.can(&kind.cap("edit_posts")) && !private {
             let error = context.forbidden("rest_forbidden_status", "Status is forbidden.");

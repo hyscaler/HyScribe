@@ -79,6 +79,10 @@ impl hyscribe_rest::Site for Rest<'_> {
         self.reads.nonce("wp_rest")
     }
 
+    fn nonce(&self, action: &str) -> String {
+        self.reads.nonce(action)
+    }
+
     fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
         let caps = || {
             self.caps

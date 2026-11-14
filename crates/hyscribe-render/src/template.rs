@@ -226,6 +226,14 @@ pub(crate) struct Renderer<'a> {
     pub(crate) pattern_overrides: Option<Value>,
     /// The blocks being rendered, up to [`MAX_RENDER_DEPTH`].
     depth: usize,
+    /// The attachment that is the global post, whose content
+    /// `prepend_attachment()` adds to.
+    pub(crate) attachment: Option<hyscribe_model::Post>,
+    /// `wp_audio_shortcode()`'s `static $instance`.
+    pub(crate) audio_instances: std::cell::Cell<u64>,
+    /// `_restore_wpautop_hook()` has added `wpautop()` back after content
+    /// with blocks, last of its priority, after `prepend_attachment()`.
+    pub(crate) autop_restored: bool,
 }
 
 /// A string attribute.
@@ -276,6 +284,9 @@ impl<'a> Renderer<'a> {
             playlist: None,
             pattern_overrides: None,
             depth: 0,
+            attachment: None,
+            audio_instances: std::cell::Cell::new(0),
+            autop_restored: false,
         }
     }
 

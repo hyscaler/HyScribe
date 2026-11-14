@@ -205,6 +205,49 @@ async fn people_match_php() {
     assert_eq!(replay(&sites, &golden, true).await, (224, 22));
 }
 
+/// The media, revisions and autosaves routes over both fixtures, but for
+/// what `reference/rest/media.sql` adds, which the fixtures leave out.
+#[tokio::test(flavor = "multi_thread")]
+async fn media_match_php() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = |golden: &str, kept: &[&str]| {
+        let lines = golden.lines().filter(|line| {
+            let target = String::from_utf8(unhex(line.split('\t').nth(2).unwrap())).unwrap();
+            let route = target
+                .split(['&', '?'])
+                .nth(usize::from(target.starts_with("/?")));
+            route.is_some_and(|route| kept.iter().any(|kept| route.ends_with(kept)))
+        });
+        lines.collect::<Vec<_>>().join("\n")
+    };
+    let sites = (site(false, dir.path()).await, site(true, dir.path()).await);
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/media.tsv");
+    let kept = [
+        "/media/1",
+        "/media/99999",
+        "/posts/2/revisions",
+        "/posts/99999/revisions",
+        "/posts/0/revisions/9111",
+        "/posts/2/autosaves",
+        "/posts/2/autosaves/1",
+        "/pages/3/revisions",
+        "/pages/3/autosaves",
+        "/pages/3/autosaves/1",
+        "/posts/0/autosaves",
+    ];
+    assert_eq!(
+        replay(&sites, &fixture(golden, &kept), false).await,
+        (26, 0)
+    );
+    let sites = (
+        ttd_site(false, dir.path()).await,
+        ttd_site(true, dir.path()).await,
+    );
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/media-ttd.tsv");
+    let kept = ["/611", "/821", "/1029", "/1690", "/1692", "/1023"];
+    assert_eq!(replay(&sites, &fixture(golden, &kept), true).await, (16, 0));
+}
+
 /// `golden`'s requests of a visitor and the administrator served on the
 /// plain and pretty `sites`, bodies compared by SHA-256 when `hashed`: how
 /// many matched and how many answered 501.
@@ -386,6 +429,7 @@ async fn posts_are_read_for_the_routes() {
         };
         let site: &dyn hyscribe_rest::Site = &rest;
         assert_eq!(site.revisions(1), [105, 104]);
+        assert_eq!(site.nonce("wp_rest"), site.create_nonce());
         let blocks = site.posts_of_type("wp_block");
         assert_eq!(blocks.iter().map(|post| post.id).collect::<Vec<_>>(), [102]);
         assert_eq!(site.post_terms(1, "category")[0].name, b"Uncategorized");

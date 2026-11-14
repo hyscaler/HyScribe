@@ -99,6 +99,9 @@ pub(super) struct Fixture {
     /// post with a gallery shortcode and its own excerpt (94); and the
     /// site two hours east of UTC.
     pub(super) extra: bool,
+    /// With `reference/rest/media.sql`'s revisions, autosaves and
+    /// attachments.
+    pub(super) media: bool,
 }
 
 /// A dump's posts, their meta and terms, read once.
@@ -155,9 +158,8 @@ fn data(dump: &'static Dump) -> Data {
 
 impl Fixture {
     fn data(self) -> &'static Data {
-        static DEFAULT: OnceLock<Data> = OnceLock::new();
-        static TTD: OnceLock<Data> = OnceLock::new();
-        let memo = if self.ttd { &TTD } else { &DEFAULT };
+        static DATA: [OnceLock<Data>; 4] = [const { OnceLock::new() }; 4];
+        let memo = &DATA[usize::from(self.ttd) + 2 * usize::from(self.media)];
         memo.get_or_init(|| data(self.dump()))
     }
 
@@ -227,11 +229,21 @@ impl Fixture {
     }
 
     fn dump(self) -> &'static Dump {
-        if self.ttd {
+        static MEDIA: [OnceLock<Dump>; 2] = [const { OnceLock::new() }; 2];
+        let dump = if self.ttd {
             theme_test_data()
         } else {
             default_install()
+        };
+        if !self.media {
+            return dump;
         }
+        MEDIA[usize::from(self.ttd)].get_or_init(|| {
+            let state = include_str!("../../../../reference/rest/media.sql");
+            let mut rows = dump.rows.clone();
+            rows.extend(Dump::parse(state.as_bytes()).unwrap().rows);
+            Dump { rows }
+        })
     }
 }
 
@@ -394,7 +406,13 @@ fn matches(site: &Fixture, query: &PostQuery, post: &Post) -> bool {
         .iter()
         .all(|term| match term.strip_prefix('-') {
             Some(term) => columns.iter().all(|c| !hit(c, term)),
-            None => columns.iter().any(|c| hit(c, term)),
+            None => {
+                let file = || {
+                    site.post_meta(post.id, "_wp_attached_file")
+                        .unwrap_or_default()
+                };
+                columns.iter().any(|c| hit(c, term)) || query.filenames && like(&file(), term)
+            }
         });
     let format = query.formats.as_ref().is_none_or(|formats| {
         let terms = site.post_terms(post.id, "post_format");
@@ -419,6 +437,7 @@ fn matches(site: &Fixture, query: &PostQuery, post: &Post) -> bool {
             .menu_order
             .is_none_or(|order| order == post.menu_order)
         && searched
+        && (query.mime_types.is_empty() || query.mime_types.contains(&post.mime_type))
         && (query.search.is_empty() || query.logged_in || post.password.is_empty())
         && format
 }
@@ -483,6 +502,10 @@ fn order(query: &PostQuery, a: &Post, b: &Post) -> std::cmp::Ordering {
         if ordering.is_ne() {
             return ordering;
         }
+    }
+    // MariaDB's sort of attachments by date leaves ties newest first.
+    if query.post_types == ["attachment"] && query.order == [(OrderBy::Date, false)] {
+        return b.id.cmp(&a.id);
     }
     a.id.cmp(&b.id)
 }

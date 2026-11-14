@@ -4,7 +4,7 @@
 //! `/wp/v2/pages` and their single items, read only. Writes answer 501 but
 //! their permission checks give `Allow` and `targetHints`.
 
-mod args;
+pub(crate) mod args;
 pub(crate) mod prepare;
 
 use hyscribe_model::{FormatFilter, OrderBy, Post, PostQuery, StatusFilter};
@@ -14,16 +14,17 @@ use hyscribe_render::rest::Rendering;
 use hyscribe_render::site::Request;
 use hyscribe_render::{order_by, search_count, search_terms, sticky_posts};
 
-use crate::request::Params;
+use crate::request::{Arg, Params};
 use crate::response::{Response, RestError, paginate};
 use crate::statuses::STATUSES;
-use crate::{Callback, Context, Endpoint, Permission};
+use crate::{Context, Endpoint};
 
 /// A post type the controller serves.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
     Post,
     Page,
+    Attachment,
 }
 
 impl Kind {
@@ -31,6 +32,7 @@ impl Kind {
         match self {
             Kind::Post => "post",
             Kind::Page => "page",
+            Kind::Attachment => "attachment",
         }
     }
 
@@ -38,6 +40,7 @@ impl Kind {
         match self {
             Kind::Post => "posts",
             Kind::Page => "pages",
+            Kind::Attachment => "media",
         }
     }
 
@@ -52,83 +55,67 @@ impl Kind {
     pub(crate) fn taxonomies(self) -> &'static [(&'static str, &'static str)] {
         match self {
             Kind::Post => &[("category", "categories"), ("post_tag", "tags")],
-            Kind::Page => &[],
+            Kind::Page | Kind::Attachment => &[],
+        }
+    }
+}
+
+impl Kind {
+    /// The type of a request's route, `/wp/v2/<base>` or below it.
+    pub(crate) fn of(params: &Params) -> Kind {
+        match params.route.split('/').nth(3) {
+            Some("pages") => Kind::Page,
+            Some("media") => Kind::Attachment,
+            _ => Kind::Post,
         }
     }
 }
 
 /// The endpoints of the route `regex`, if one of these.
 pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
-    let (kind, single) = match regex {
-        "/wp/v2/posts" => (Kind::Post, false),
-        "/wp/v2/pages" => (Kind::Page, false),
-        "/wp/v2/posts/(?P<id>[\\d]+)" => (Kind::Post, true),
-        "/wp/v2/pages/(?P<id>[\\d]+)" => (Kind::Page, true),
-        _ => return None,
-    };
-    let (permission, callback): (Permission, Callback) = match (kind, single) {
-        (Kind::Post, false) => (
-            |c, p| items_permission(c, p, Kind::Post),
-            |c, p| items(c, p, Kind::Post),
-        ),
-        (Kind::Page, false) => (
-            |c, p| items_permission(c, p, Kind::Page),
-            |c, p| items(c, p, Kind::Page),
-        ),
-        (Kind::Post, true) => (
-            |c, p| item_permission(c, p, Kind::Post),
-            |c, p| item(c, p, Kind::Post),
-        ),
-        (Kind::Page, true) => (
-            |c, p| item_permission(c, p, Kind::Page),
-            |c, p| item(c, p, Kind::Page),
-        ),
-    };
-    if !single {
-        let create: Permission = match kind {
-            Kind::Post => |c, p| create_permission(c, p, Kind::Post),
-            Kind::Page => |c, p| create_permission(c, p, Kind::Page),
-        };
-        return Some(vec![
-            Endpoint {
-                args: args::collection(kind),
-                permission,
-                callback: Some(callback),
-            },
-            Endpoint {
-                args: Vec::new(),
-                permission: create,
-                callback: None,
-            },
-        ]);
+    match regex {
+        "/wp/v2/posts" => Some(collection(Kind::Post)),
+        "/wp/v2/pages" => Some(collection(Kind::Page)),
+        "/wp/v2/posts/(?P<id>[\\d]+)" | "/wp/v2/pages/(?P<id>[\\d]+)" => Some(single(args::item())),
+        _ => None,
     }
-    let (update, delete): (Permission, Permission) = match kind {
-        Kind::Post => (
-            |c, p| update_permission(c, p, Kind::Post),
-            |c, p| delete_permission(c, p, Kind::Post),
-        ),
-        Kind::Page => (
-            |c, p| update_permission(c, p, Kind::Page),
-            |c, p| delete_permission(c, p, Kind::Page),
-        ),
-    };
-    Some(vec![
+}
+
+/// The collection route's endpoints for `kind`: GET, and POST's check.
+pub(crate) fn collection(kind: Kind) -> Vec<Endpoint> {
+    vec![
         Endpoint {
-            args: args::item(),
-            permission,
-            callback: Some(callback),
+            args: args::collection(kind),
+            permission: |c, p| items_permission(c, p, Kind::of(p)),
+            callback: Some(|c, p| items(c, p, Kind::of(p))),
+        },
+        Endpoint {
+            args: Vec::new(),
+            permission: |c, p| create_permission(c, p, Kind::of(p)),
+            callback: None,
+        },
+    ]
+}
+
+/// A single item's endpoints: GET, and the checks of its writes.
+pub(crate) fn single(args: Vec<Arg>) -> Vec<Endpoint> {
+    vec![
+        Endpoint {
+            args,
+            permission: |c, p| item_permission(c, p, Kind::of(p)),
+            callback: Some(|c, p| item(c, p, Kind::of(p))),
         },
         Endpoint {
             args: vec![args::id()],
-            permission: update,
+            permission: |c, p| update_permission(c, p, Kind::of(p)),
             callback: None,
         },
         Endpoint {
             args: vec![args::id()],
-            permission: delete,
+            permission: |c, p| delete_permission(c, p, Kind::of(p)),
             callback: None,
         },
-    ])
+    ]
 }
 
 /// `get_items_permissions_check()`.
@@ -194,6 +181,9 @@ fn create_permission(context: &Context, params: &Params, kind: Kind) -> Result<(
         let message = "Sorry, you are not allowed to create posts as this user.";
         return Err(context.forbidden("rest_cannot_create", message));
     }
+    if kind == Kind::Attachment {
+        crate::media::create_permission(context, params)?;
+    }
     Ok(())
 }
 
@@ -211,10 +201,32 @@ fn can_update(context: &Context, post: &Post) -> bool {
     context.can_for("edit_post", post.id)
 }
 
-/// `check_read_permission()` of a post or page: published, the only
-/// public status core registers, or readable by the user.
+/// `check_read_permission()`: a post of a type shown in REST, published,
+/// the only public status core registers, or readable by the user, or
+/// inheriting a readable parent's status, or published without one.
 pub(crate) fn can_read(context: &Context, post: &Post) -> bool {
-    post.status == "publish" || context.can_for("read_post", post.id)
+    let mut seen = Vec::new();
+    let mut post = post.clone();
+    loop {
+        let shown = crate::types::post_type(&post.post_type).is_some();
+        if !shown {
+            return false;
+        }
+        if post.status == "publish" || context.can_for("read_post", post.id) {
+            return true;
+        }
+        if post.status != "inherit" {
+            return false;
+        }
+        seen.push(post.id);
+        let parent = (post.parent > 0 && !seen.contains(&post.parent))
+            .then(|| context.site.post(post.parent))
+            .flatten();
+        match parent {
+            Some(parent) => post = parent,
+            None => return true,
+        }
+    }
 }
 
 /// `get_item_permissions_check()`.
@@ -241,7 +253,11 @@ fn item_permission(context: &Context, params: &Params, kind: Kind) -> Result<(),
 }
 
 /// `update_item_permissions_check()`.
-fn update_permission(context: &Context, params: &Params, kind: Kind) -> Result<(), RestError> {
+pub(crate) fn update_permission(
+    context: &Context,
+    params: &Params,
+    kind: Kind,
+) -> Result<(), RestError> {
     let post = get_post(context, params, kind)?;
     if !can_update(context, &post) {
         let message = "Sorry, you are not allowed to edit this post.";
@@ -285,6 +301,14 @@ pub(crate) fn is_sticky(context: &Context, id: u64) -> bool {
     sticky(context).contains(&id)
 }
 
+/// `get_permalink()`: an attachment's link, or the post's.
+pub(crate) fn link(context: &Context, post: &Post) -> Vec<u8> {
+    if post.post_type == "attachment" {
+        return crate::media::attachment_link(context, post, false);
+    }
+    hyscribe_render::permalinks::permalink(context.site.reads(), post)
+}
+
 /// `get_item()`.
 fn item(context: &Context, params: &Params, kind: Kind) -> Result<Response, RestError> {
     // The permission check found the post.
@@ -292,7 +316,7 @@ fn item(context: &Context, params: &Params, kind: Kind) -> Result<Response, Rest
     let request = render_request(context);
     let mut rendering = Rendering::new(context.site.theme(), context.site.reads(), &request);
     let mut response = prepare::post(context, params, kind, &post, &mut rendering)?;
-    let link = hyscribe_render::permalinks::permalink(context.site.reads(), &post);
+    let link = link(context, &post);
     let link = String::from_utf8_lossy(&link);
     response.header(
         "Link",
@@ -301,7 +325,7 @@ fn item(context: &Context, params: &Params, kind: Kind) -> Result<Response, Rest
     Ok(response)
 }
 
-fn ids(params: &Params, name: &str) -> Vec<u64> {
+pub(crate) fn ids(params: &Params, name: &str) -> Vec<u64> {
     let list = params
         .get(name)
         .and_then(Value::as_array)
@@ -372,7 +396,7 @@ fn query(
         ));
     }
     let mut exclude = ids(params, "exclude");
-    if let Some(wanted) = params.get("sticky") {
+    if let Some(wanted) = params.get("sticky").filter(|_| kind == Kind::Post) {
         let sticky = sticky(context);
         if !wanted.is_empty() {
             include = if include.is_empty() {
@@ -414,24 +438,32 @@ fn query(
         parents: ids(params, "parent"),
         excluded_parents: ids(params, "parent_exclude"),
         names,
-        menu_order: params.get("menu_order").map(Value::to_int),
+        menu_order: params
+            .get("menu_order")
+            .filter(|_| kind == Kind::Page)
+            .map(Value::to_int),
         search_columns: strings(params, "search_columns")
             .into_iter()
             .map(|column| String::from_utf8_lossy(&column).into_owned())
             .collect(),
-        formats: params.get("format").map(|_| {
-            let formats = strings(params, "format");
-            FormatFilter {
-                standard: formats.iter().any(|format| format == b"standard"),
-                slugs: formats
-                    .iter()
-                    .filter(|format| *format != b"standard")
-                    .map(|format| format!("post-format-{}", String::from_utf8_lossy(format)))
-                    .collect(),
-            }
-        }),
+        formats: params
+            .get("format")
+            .filter(|_| kind == Kind::Post)
+            .map(|_| {
+                let formats = strings(params, "format");
+                FormatFilter {
+                    standard: formats.iter().any(|format| format == b"standard"),
+                    slugs: formats
+                        .iter()
+                        .filter(|format| *format != b"standard")
+                        .map(|format| format!("post-format-{}", String::from_utf8_lossy(format)))
+                        .collect(),
+                }
+            }),
         exact: params.get("search_semantics").is_some(),
         logged_in: context.user != 0,
+        mime_types: crate::media::mime_types(params, kind),
+        filenames: kind == Kind::Attachment && search.is_some(),
         limit: u32::try_from(per_page).unwrap_or(u32::MAX),
         offset: u32::try_from(if offset > 0 {
             offset
@@ -530,7 +562,7 @@ fn items(context: &Context, params: &Params, kind: Kind) -> Result<Response, Res
 
 /// The request as rendering reads it: its URI, which links keep, and no
 /// main query, which `rest_api_loaded()` leaves unrun.
-fn render_request(context: &Context) -> Request {
+pub(crate) fn render_request(context: &Context) -> Request {
     Request {
         uri: context.uri.to_vec(),
         ..Request::default()

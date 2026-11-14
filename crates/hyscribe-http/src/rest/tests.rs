@@ -302,11 +302,16 @@ async fn database_errors_show_the_error_page() {
 }
 
 /// The reads a site's own templates and global styles posts need, which
-/// the default install has none of, of its first posts.
+/// the default install has none of, over `reference/default-install/terms.sql`.
 #[tokio::test(flavor = "multi_thread")]
 async fn posts_are_read_for_the_routes() {
-    let dir = tempfile::tempdir().unwrap();
-    let plain = site(false, dir.path()).await;
+    let mut config = crate::tests::fixture_config();
+    config.name = "wordpress_terms".into();
+    let db = crate::Db::connect(&config)
+        .await
+        .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
+    let home = Some("http://127.0.0.1:8081".to_string());
+    let plain = Site::load(db, home.clone(), home).await.unwrap();
     let handle = Handle::current();
     tokio::task::spawn_blocking(move || {
         let mut reads = LoginReads::new(&plain, handle, now());
@@ -318,7 +323,9 @@ async fn posts_are_read_for_the_routes() {
             caps: OnceCell::new(),
         };
         let site: &dyn hyscribe_rest::Site = &rest;
-        assert!(site.revisions(2).is_empty());
+        assert_eq!(site.revisions(1), [105, 104]);
+        let blocks = site.posts_of_type("wp_block");
+        assert_eq!(blocks.iter().map(|post| post.id).collect::<Vec<_>>(), [102]);
         assert_eq!(site.post_terms(1, "category")[0].name, b"Uncategorized");
         assert_eq!(site.post_meta(2, "_wp_page_template").unwrap(), b"default");
         assert_eq!(site.user(1).unwrap().display_name, b"admin");

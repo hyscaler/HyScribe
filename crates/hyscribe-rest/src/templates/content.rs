@@ -165,9 +165,10 @@ fn resolve(mut blocks: Vec<Block>, mut inner: Option<&mut Vec<Option<Vec<u8>>>>)
                 .iter()
                 .enumerate()
                 .filter(|(_, chunk)| chunk.is_none());
-            if let Some(at) = nulls.map(|(at, _)| at).nth(i) {
+            let at = nulls.map(|(at, _)| at).nth(i);
+            at.into_iter().for_each(|at| {
                 chunks.splice(at..=at, std::iter::repeat_n(None, count));
-            }
+            });
         }
         i += count;
     }

@@ -17,6 +17,25 @@ use crate::response::{list, text};
 use crate::tests::content::{Content, default_install, default_install_with};
 use crate::tests::{Case, cases_of, kept, serve_over};
 
+/// `get_item()` reads only the theme's file for `source=plugin` too, as
+/// for `source=theme`.
+#[test]
+fn a_plugin_source_is_the_theme_file() {
+    let content = custom();
+    let ask = |source: &str| Case {
+        who: "administrator".into(),
+        method: "GET".into(),
+        target: format!("/?rest_route=/wp/v2/templates/twentytwentyfive//index&source={source}"),
+        flags: String::new(),
+        status: 200,
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let theme = serve_over(content, &ask("theme"));
+    assert_eq!(serve_over(content, &ask("plugin")), theme);
+    assert_ne!(serve_over(content, &ask("x")), theme);
+}
+
 /// Each case of `reference/rest/hierarchy-golden.php`.
 #[test]
 fn hierarchies_are_php_s() {

@@ -1,0 +1,19 @@
+# The rows PHP WordPress writes for the action new-comment-by-admin (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 19:40:58 to 2026-11-14 19:40:58 UTC.
+# %wp_comments:1% is 3.
+wp_comments	%wp_comments:1%	+	comment_ID	%wp_comments:1%
+wp_comments	%wp_comments:1%	+	comment_agent	Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Agent Ag
+wp_comments	%wp_comments:1%	+	comment_approved	1
+wp_comments	%wp_comments:1%	+	comment_author	Admin &amp; co's name
+wp_comments	%wp_comments:1%	+	comment_author_IP	192.0.2.1c, ::1
+wp_comments	%wp_comments:1%	+	comment_author_email	ADMINi@iExample.test
+wp_comments	%wp_comments:1%	+	comment_author_url	https://example.test/a%20bc
+wp_comments	%wp_comments:1%	+	comment_content	<a href="https://example.test" rel="nofollow ugc">out</a> <a href="http://127.0.0.1:8081/about" rel="ugc">in</A> <a href="https://split.test" rel="nofollow ugc">split</a> <span class="wp-note-mention user-2">@me</span> alert(1) &#8220;quoted&#8221; it's "fine" \\ <b>bold
+wp_comments	%wp_comments:1%	+	comment_date	%now%
+wp_comments	%wp_comments:1%	+	comment_date_gmt	%now%
+wp_comments	%wp_comments:1%	+	comment_karma	0
+wp_comments	%wp_comments:1%	+	comment_parent	0
+wp_comments	%wp_comments:1%	+	comment_post_ID	1
+wp_comments	%wp_comments:1%	+	comment_type	comment
+wp_comments	%wp_comments:1%	+	user_id	1
+wp_posts	1	~	comment_count	1	2

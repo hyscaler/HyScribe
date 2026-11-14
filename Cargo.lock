@@ -789,6 +789,17 @@ dependencies = [
 [[package]]
 name = "hyscribe-write"
 version = "0.1.0"
+dependencies = [
+ "hyscribe-config",
+ "hyscribe-db",
+ "hyscribe-html",
+ "hyscribe-kses",
+ "hyscribe-phpser",
+ "hyscribe-render",
+ "hyscribe-testkit",
+ "sqlx",
+ "tokio",
+]
 
 [[package]]
 name = "icu_collections"

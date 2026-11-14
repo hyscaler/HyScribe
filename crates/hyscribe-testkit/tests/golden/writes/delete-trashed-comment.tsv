@@ -1,0 +1,27 @@
+# The rows PHP WordPress writes for the action delete-trashed-comment (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 19:41:05 to 2026-11-14 19:41:05 UTC.
+# %wp_commentmeta:1% is 13.
+# %wp_commentmeta:2% is 14.
+wp_commentmeta	%wp_commentmeta:1%	-	comment_id	1
+wp_commentmeta	%wp_commentmeta:1%	-	meta_id	%wp_commentmeta:1%
+wp_commentmeta	%wp_commentmeta:1%	-	meta_key	_wp_trash_meta_status
+wp_commentmeta	%wp_commentmeta:1%	-	meta_value	1
+wp_commentmeta	%wp_commentmeta:2%	-	comment_id	1
+wp_commentmeta	%wp_commentmeta:2%	-	meta_id	%wp_commentmeta:2%
+wp_commentmeta	%wp_commentmeta:2%	-	meta_key	_wp_trash_meta_time
+wp_commentmeta	%wp_commentmeta:2%	-	meta_value	%unix%
+wp_comments	1	-	comment_ID	1
+wp_comments	1	-	comment_agent	
+wp_comments	1	-	comment_approved	trash
+wp_comments	1	-	comment_author	A WordPress Commenter
+wp_comments	1	-	comment_author_IP	
+wp_comments	1	-	comment_author_email	wapuu@wordpress.example
+wp_comments	1	-	comment_author_url	https://wordpress.org/
+wp_comments	1	-	comment_content	Hi, this is a comment.\nTo get started with moderating, editing, and deleting comments, please visit the Comments screen in the dashboard.\nCommenter avatars come from <a href="https://gravatar.com/">Gravatar</a>.
+wp_comments	1	-	comment_date	2026-10-27 08:08:15
+wp_comments	1	-	comment_date_gmt	2026-10-27 08:08:15
+wp_comments	1	-	comment_karma	0
+wp_comments	1	-	comment_parent	0
+wp_comments	1	-	comment_post_ID	1
+wp_comments	1	-	comment_type	comment
+wp_comments	1	-	user_id	0

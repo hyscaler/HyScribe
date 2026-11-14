@@ -143,8 +143,13 @@ impl Writer {
 
 /// A text column of an information schema row, whatever its type.
 fn text(row: &crate::Row, name: &str) -> String {
-    let bytes = row.try_get_unchecked::<Vec<u8>, _>(name);
-    String::from_utf8_lossy(&bytes.unwrap_or_default()).into_owned()
+    String::from_utf8_lossy(&bytes(row, name)).into_owned()
+}
+
+/// A text column's bytes.
+fn bytes(row: &crate::Row, name: &str) -> Vec<u8> {
+    row.try_get_unchecked::<Vec<u8>, _>(name)
+        .unwrap_or_default()
 }
 
 /// One action's writes: committed together by [`Write::commit`], rolled
@@ -324,6 +329,12 @@ impl<'w> Write<'w> {
         self.ids(query.bind(parent).bind(post_type)).await
     }
 
+    /// The author of `post`, none when there is no such post.
+    pub async fn post_author(&mut self, post: u64) -> Result<Option<u64>, DbError> {
+        let query = self.sql("SELECT post_author FROM {prefix}posts WHERE ID = ? LIMIT 1");
+        Ok(self.ids(query.bind(post)).await?.first().copied())
+    }
+
     /// The posts of `author`, as `wp_delete_user()` finds them.
     pub async fn author_post_ids(&mut self, author: u64) -> Result<Vec<u64>, DbError> {
         let query = self.sql("SELECT ID FROM {prefix}posts WHERE post_author = ?");
@@ -415,6 +426,130 @@ impl<'w> Write<'w> {
         self.ids(query.bind(post)).await
     }
 
+    /// `get_comment()`: the comment `id`, as the action sees it.
+    pub async fn comment(&mut self, id: u64) -> Result<Option<CommentFields>, DbError> {
+        let mut sql = Sql::new(
+            "SELECT comment_post_ID, comment_author, comment_author_email, comment_author_url, \
+             comment_author_IP, comment_content, comment_karma, comment_approved, comment_agent, \
+             comment_type, comment_parent, user_id",
+        );
+        crate::date_column(&mut sql, "comment_date");
+        crate::date_column(&mut sql, "comment_date_gmt");
+        sql.push(" FROM {prefix}comments WHERE comment_ID = ?");
+        sql.bind(Bind::Int(id));
+        let row = sql
+            .query(&self.writer.prefix)
+            .fetch_optional(&mut *self.tx)
+            .await
+            .map_err(db_error)?;
+        Ok(row.map(|row| CommentFields::read(&row)))
+    }
+
+    /// `wp_allow_comment()`'s duplicate: a comment not in the trash with
+    /// the same post, parent, author, email (unless `email` is `None`) and
+    /// content.
+    pub async fn duplicate_comment(
+        &mut self,
+        (post, parent): (u64, u64),
+        author: &[u8],
+        email: Option<&[u8]>,
+        content: &[u8],
+    ) -> Result<Option<u64>, DbError> {
+        let query = match email {
+            Some(email) => self
+                .sql(
+                    "SELECT comment_ID FROM {prefix}comments WHERE comment_post_ID = ? \
+                     AND comment_parent = ? AND comment_approved != 'trash' \
+                     AND ( comment_author = ? AND comment_author_email = ? ) \
+                     AND comment_content = ? LIMIT 1",
+                )
+                .bind(post)
+                .bind(parent)
+                .bind(author)
+                .bind(email),
+            None => self
+                .sql(
+                    "SELECT comment_ID FROM {prefix}comments WHERE comment_post_ID = ? \
+                     AND comment_parent = ? AND comment_approved != 'trash' \
+                     AND ( comment_author = ? ) AND comment_content = ? LIMIT 1",
+                )
+                .bind(post)
+                .bind(parent)
+                .bind(author),
+        };
+        Ok(self.ids(query.bind(content)).await?.first().copied())
+    }
+
+    /// `check_comment()`: whether the user `user` has an approved comment.
+    pub async fn user_has_approved_comment(&mut self, user: u64) -> Result<bool, DbError> {
+        let query = self.sql(
+            "SELECT comment_ID FROM {prefix}comments WHERE user_id = ? \
+             AND comment_approved = '1' LIMIT 1",
+        );
+        Ok(!self.ids(query.bind(user)).await?.is_empty())
+    }
+
+    /// `check_comment()`: whether `author` with `email` has an approved
+    /// comment.
+    pub async fn author_has_approved_comment(
+        &mut self,
+        author: &[u8],
+        email: &[u8],
+    ) -> Result<bool, DbError> {
+        let query = self.sql(
+            "SELECT comment_ID FROM {prefix}comments WHERE comment_author = ? \
+             AND comment_author_email = ? AND comment_approved = '1' LIMIT 1",
+        );
+        Ok(!self.ids(query.bind(author).bind(email)).await?.is_empty())
+    }
+
+    /// `wp_check_comment_flood()`: the latest `comment_date_gmt` since
+    /// `since` of the comments by the user `user` (by the IP address `ip`
+    /// when logged out) or by `email`.
+    pub async fn last_comment_date(
+        &mut self,
+        since: &str,
+        (user, ip): (u64, &[u8]),
+        email: &[u8],
+    ) -> Result<Option<String>, DbError> {
+        let mut sql = Sql::new("SELECT ");
+        Engine::date_text(&mut sql, "comment_date_gmt");
+        sql.push(" AS last");
+        sql.bind(Bind::Text(since.to_string()));
+        if user == 0 {
+            sql.push(
+                " FROM {prefix}comments WHERE comment_date_gmt >= ? \
+                 AND ( comment_author_IP = ? OR comment_author_email = ? )",
+            );
+            sql.bind(Bind::Bytes(ip.to_vec()));
+        } else {
+            sql.push(
+                " FROM {prefix}comments WHERE comment_date_gmt >= ? \
+                 AND ( user_id = ? OR comment_author_email = ? )",
+            );
+            sql.bind(Bind::Int(user));
+        }
+        sql.push(" ORDER BY comment_date_gmt DESC LIMIT 1");
+        sql.bind(Bind::Bytes(email.to_vec()));
+        let row = sql
+            .query(&self.writer.prefix)
+            .fetch_optional(&mut *self.tx)
+            .await
+            .map_err(db_error)?;
+        Ok(row.map(|row| text(&row, "last")))
+    }
+
+    /// The approved and held notes replying to `parent`, newest first, as
+    /// `wp_trash_comment()` finds a note's replies.
+    pub async fn child_note_ids(&mut self, parent: u64) -> Result<Vec<u64>, DbError> {
+        let query = self.sql(
+            "SELECT comment_ID FROM {prefix}comments WHERE comment_parent = ? \
+             AND comment_type = 'note' AND ( comment_approved = '0' OR comment_approved = '1' ) \
+             ORDER BY comment_date_gmt DESC",
+        );
+        self.ids(query.bind(parent)).await
+    }
+
     /// `wp_update_comment_count_now()`'s count: the approved comments of
     /// `post`, notes left out.
     pub async fn approved_comment_count(&mut self, post: u64) -> Result<u64, DbError> {
@@ -458,6 +593,12 @@ impl<'w> Write<'w> {
     pub async fn clear_activation_key(&mut self, id: u64) -> Result<u64, DbError> {
         let query = self.sql("UPDATE {prefix}users SET user_activation_key = '' WHERE ID = ?");
         self.change(Table::Users, query.bind(id)).await
+    }
+
+    /// `get_user_by( 'email', $email )`'s user.
+    pub async fn user_id_by_email(&mut self, email: &[u8]) -> Result<Option<u64>, DbError> {
+        let query = self.sql("SELECT ID FROM {prefix}users WHERE user_email = ? LIMIT 1");
+        Ok(self.ids(query.bind(email)).await?.first().copied())
     }
 
     /// `wp_delete_user()`: the links of `owner` pass to `new_owner`.
@@ -517,6 +658,18 @@ impl<'w> Write<'w> {
     pub async fn delete_option(&mut self, name: &str) -> Result<u64, DbError> {
         let query = self.sql("DELETE FROM {prefix}options WHERE option_name = ?");
         self.change(Table::Options, query.bind(name)).await
+    }
+
+    /// `get_option( $name )`'s stored value, as the action sees it.
+    pub async fn option(&mut self, name: &str) -> Result<Option<Vec<u8>>, DbError> {
+        let query =
+            self.sql("SELECT option_value FROM {prefix}options WHERE option_name = ? LIMIT 1");
+        let row = query
+            .bind(name)
+            .fetch_optional(&mut *self.tx)
+            .await
+            .map_err(db_error)?;
+        Ok(row.map(|row| bytes(&row, "option_value")))
     }
 
     /// The autoload of option `name`, as `update_option()` reads it.
@@ -607,7 +760,7 @@ impl PostFields {
 
 /// The columns of a comment `wp_insert_comment()` and
 /// `wp_update_comment()` write.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommentFields {
     /// `comment_post_ID`.
     pub post_id: u64,
@@ -640,6 +793,26 @@ pub struct CommentFields {
 }
 
 impl CommentFields {
+    fn read(row: &crate::Row) -> CommentFields {
+        let number = |name: &str| row.try_get::<u64, _>(name).unwrap_or_default();
+        CommentFields {
+            post_id: number("comment_post_ID"),
+            author: bytes(row, "comment_author"),
+            author_email: bytes(row, "comment_author_email"),
+            author_url: bytes(row, "comment_author_url"),
+            author_ip: bytes(row, "comment_author_IP"),
+            date: text(row, "comment_date"),
+            date_gmt: text(row, "comment_date_gmt"),
+            content: bytes(row, "comment_content"),
+            karma: row.try_get::<i64, _>("comment_karma").unwrap_or_default(),
+            approved: text(row, "comment_approved"),
+            agent: bytes(row, "comment_agent"),
+            comment_type: text(row, "comment_type"),
+            parent: number("comment_parent"),
+            user_id: number("user_id"),
+        }
+    }
+
     fn bind(&self, query: Query) -> Query {
         query
             .bind(self.post_id)

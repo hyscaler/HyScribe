@@ -15,10 +15,10 @@ use std::sync::LazyLock;
 
 use hyscribe_html::{Attribute, TagProcessor, decode_attribute, escape};
 use hyscribe_kses::{
-    ALLOWED_PROTOCOLS, esc_attr, esc_html, safecss_filter_attr, wp_kses_bad_protocol,
-    wp_kses_no_null_keep_slash_zero, wp_kses_normalize_entities,
+    ALLOWED_PROTOCOLS, esc_attr, esc_html, safecss_filter_attr, url_host, url_scheme,
+    wp_kses_bad_protocol, wp_kses_no_null_keep_slash_zero, wp_kses_normalize_entities,
 };
-use hyscribe_phpser::{Key, Value, is_empty_string, json_decode};
+use hyscribe_phpser::{Key, Value, is_empty_string, json_decode, php_trim};
 
 use crate::blocks::{Block, is_pcre_space, parse_blocks, serialize_blocks};
 use crate::formatting::{Next, find};
@@ -63,6 +63,17 @@ static DATA: LazyLock<AllowedHtml> = LazyLock::new(|| {
     AllowedHtml::from_json(include_bytes!(
         "../../../wordpress/wp-includes/kses-data.json"
     ))
+});
+
+/// `pre_comment_content`'s list: `$allowedtags`, and `class` on `span`
+/// from `_wp_kses_allow_note_mention_span()`.
+static COMMENT: LazyLock<AllowedHtml> = LazyLock::new(|| {
+    let mut tags = AllowedHtml::from_json(include_bytes!(
+        "../../../wordpress/wp-includes/kses-data.json"
+    ));
+    let span = tags.0.entry(b"span".to_vec()).or_default();
+    span.insert(b"class".to_vec(), Vec::new());
+    tags
 });
 
 /// A limit in an `$allowed_html` attribute entry.
@@ -146,6 +157,92 @@ pub fn wp_kses_post(content: &[u8], upload_host: &[u8]) -> Vec<u8> {
 /// `wp_kses_data( $data )`: only the tags of `$allowedtags`.
 pub fn wp_kses_data(content: &[u8]) -> Vec<u8> {
     wp_kses(content, &DATA, b"")
+}
+
+/// `wp_kses( $content, 'pre_comment_content' )`, as `wp_filter_kses()`
+/// filters a comment's content.
+pub fn wp_kses_comment(content: &[u8]) -> Vec<u8> {
+    wp_kses(content, &COMMENT, b"")
+}
+
+/// `wp_rel_ugc()` on unslashed text, on a site whose `home_url()` is
+/// `home`: `rel="nofollow ugc"` on each `<a ...>` written on one line,
+/// `rel="ugc"` on internal links, added to any `rel` the link has.
+pub fn wp_rel_ugc(text: &[u8], home: &[u8]) -> Vec<u8> {
+    let home = url_host(home).map(|host| host.to_ascii_lowercase());
+    let mut closers = Next::new(text, b">");
+    let mut newlines = Next::new(text, b"\n");
+    let mut out = Vec::with_capacity(text.len());
+    let (mut at, mut from) = (0, 0);
+    while let Some(start) = text
+        .get(from..)
+        .and_then(|rest| rest.windows(3).position(|w| w.eq_ignore_ascii_case(b"<a ")))
+        .map(|i| from + i)
+    {
+        // `|<a (.+?)>|i`: a byte, then the first `>` before a newline.
+        let body = start + 3;
+        let line = newlines.from(body).unwrap_or(text.len());
+        match closers.from(body + 1) {
+            Some(end) if body < line && end < line => {
+                out.extend_from_slice(text.get(at..start).unwrap_or_default());
+                let attributes = text.get(body..end).unwrap_or_default();
+                out.extend(rel_ugc_link(attributes, home.as_deref()));
+                at = end + 1;
+                from = at;
+            }
+            _ => from = start + 1,
+        }
+    }
+    out.extend_from_slice(text.get(at..).unwrap_or_default());
+    out
+}
+
+/// `wp_rel_callback()` with `nofollow ugc`, for one link's attributes.
+fn rel_ugc_link(attributes: &[u8], home: Option<&[u8]>) -> Vec<u8> {
+    let hair = wp_kses_hair(attributes);
+    let internal = hair
+        .iter()
+        .find(|attribute| attribute.name == b"href")
+        .is_some_and(|href| is_internal_link(&href.value, home));
+    let mut rel: Vec<&[u8]> = if internal {
+        vec![b"ugc"]
+    } else {
+        vec![b"nofollow", b"ugc"]
+    };
+    let mut text = attributes.to_vec();
+    if let Some(old) = hair.iter().find(|attribute| attribute.name == b"rel") {
+        let mut parts: Vec<&[u8]> = Vec::new();
+        for part in old.value.split(|&b| b == b' ').map(php_trim).chain(rel) {
+            if !parts.contains(&part) {
+                parts.push(part);
+            }
+        }
+        rel = parts;
+        let mut html = Vec::new();
+        for attribute in hair.iter().filter(|attribute| attribute.name != b"rel") {
+            html.extend_from_slice(&attribute.name);
+            if !attribute.valueless {
+                html.extend_from_slice(b"=\"");
+                html.extend_from_slice(esc_attr(&attribute.value).as_bytes());
+                html.push(b'"');
+            }
+            html.push(b' ');
+        }
+        text = php_trim(&html).to_vec();
+    }
+    let rel = esc_attr(&rel.join(&b' '));
+    [&b"<a "[..], &text, b" rel=\"", rel.as_bytes(), b"\">"].concat()
+}
+
+/// `wp_is_internal_link()`: an allowed protocol and the home URL's host.
+fn is_internal_link(link: &[u8], home: Option<&[u8]>) -> bool {
+    let link = link.to_ascii_lowercase();
+    let allowed = url_scheme(&link).is_some_and(|scheme| {
+        ALLOWED_PROTOCOLS
+            .iter()
+            .any(|protocol| protocol.as_bytes() == scheme)
+    });
+    allowed && url_host(&link).is_some_and(|host| Some(&host[..]) == home)
 }
 
 /// `wp_kses( $content, $allowed_html )` with the default protocols.

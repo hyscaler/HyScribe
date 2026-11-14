@@ -1,0 +1,40 @@
+# The rows PHP WordPress writes for the action trash-note (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 19:41:05 to 2026-11-14 19:41:05 UTC.
+# %wp_comments:1% is 28.
+# %wp_comments:2% is 29.
+# %wp_comments:3% is 30.
+# %wp_comments:4% is 31.
+# %wp_comments:5% is 32.
+# %wp_commentmeta:1% is 15.
+# %wp_commentmeta:2% is 16.
+# %wp_commentmeta:3% is 17.
+# %wp_commentmeta:4% is 18.
+# %wp_commentmeta:5% is 19.
+# %wp_commentmeta:6% is 20.
+wp_commentmeta	%wp_commentmeta:1%	+	comment_id	%wp_comments:1%
+wp_commentmeta	%wp_commentmeta:1%	+	meta_id	%wp_commentmeta:1%
+wp_commentmeta	%wp_commentmeta:1%	+	meta_key	_wp_trash_meta_status
+wp_commentmeta	%wp_commentmeta:1%	+	meta_value	1
+wp_commentmeta	%wp_commentmeta:2%	+	comment_id	%wp_comments:1%
+wp_commentmeta	%wp_commentmeta:2%	+	meta_id	%wp_commentmeta:2%
+wp_commentmeta	%wp_commentmeta:2%	+	meta_key	_wp_trash_meta_time
+wp_commentmeta	%wp_commentmeta:2%	+	meta_value	%unix%
+wp_commentmeta	%wp_commentmeta:3%	+	comment_id	%wp_comments:3%
+wp_commentmeta	%wp_commentmeta:3%	+	meta_id	%wp_commentmeta:3%
+wp_commentmeta	%wp_commentmeta:3%	+	meta_key	_wp_trash_meta_status
+wp_commentmeta	%wp_commentmeta:3%	+	meta_value	0
+wp_commentmeta	%wp_commentmeta:4%	+	comment_id	%wp_comments:3%
+wp_commentmeta	%wp_commentmeta:4%	+	meta_id	%wp_commentmeta:4%
+wp_commentmeta	%wp_commentmeta:4%	+	meta_key	_wp_trash_meta_time
+wp_commentmeta	%wp_commentmeta:4%	+	meta_value	%unix%
+wp_commentmeta	%wp_commentmeta:5%	+	comment_id	%wp_comments:2%
+wp_commentmeta	%wp_commentmeta:5%	+	meta_id	%wp_commentmeta:5%
+wp_commentmeta	%wp_commentmeta:5%	+	meta_key	_wp_trash_meta_status
+wp_commentmeta	%wp_commentmeta:5%	+	meta_value	1
+wp_commentmeta	%wp_commentmeta:6%	+	comment_id	%wp_comments:2%
+wp_commentmeta	%wp_commentmeta:6%	+	meta_id	%wp_commentmeta:6%
+wp_commentmeta	%wp_commentmeta:6%	+	meta_key	_wp_trash_meta_time
+wp_commentmeta	%wp_commentmeta:6%	+	meta_value	%unix%
+wp_comments	%wp_comments:1%	~	comment_approved	1	trash
+wp_comments	%wp_comments:2%	~	comment_approved	1	trash
+wp_comments	%wp_comments:3%	~	comment_approved	0	trash

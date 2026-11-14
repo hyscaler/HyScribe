@@ -806,6 +806,146 @@ async fn writes_terms() {
 }
 
 #[tokio::test]
+async fn reads_terms_inside_the_action() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    let uncategorized = TermRow {
+        term_id: 1,
+        name: b"Uncategorized".to_vec(),
+        slug: b"uncategorized".to_vec(),
+        term_group: 0,
+        term_taxonomy_id: 1,
+        description: Vec::new(),
+        parent: 0,
+    };
+    assert_eq!(
+        write.term_in("category", 1).await.unwrap(),
+        Some(uncategorized.clone())
+    );
+    assert_eq!(write.term_in("post_tag", 1).await.unwrap(), None);
+    let news = write.insert_term(b"News", b"news", 3).await.unwrap();
+    let news_tt = write
+        .insert_term_taxonomy((news, "category"), b"What", 1)
+        .await
+        .unwrap();
+    let alpha = write.insert_term(b"Alpha", b"alpha", 0).await.unwrap();
+    let alpha_tt = write
+        .insert_term_taxonomy((alpha, "category"), b"", 1)
+        .await
+        .unwrap();
+    let id = |term: Option<TermRow>| term.map(|term| term.term_id);
+
+    // Names and slugs compare under the column's collation.
+    let found = write.term_by_slug("category", Some("NEWS")).await.unwrap();
+    let found = found.unwrap();
+    assert_eq!(
+        (found.term_id, found.term_taxonomy_id, found.term_group),
+        (news, news_tt, 3)
+    );
+    assert_eq!((found.parent, &found.description[..]), (1, &b"What"[..]));
+    let first = write.term_by_slug("category", None).await.unwrap();
+    assert_eq!(first, Some(uncategorized.clone()));
+    assert_eq!(write.term_by_slug("post_tag", None).await.unwrap(), None);
+    let named = write.term_by_name("category", "news").await.unwrap();
+    assert_eq!(id(named), Some(news));
+    assert_eq!(write.term_by_name("category", "").await.unwrap(), None);
+    let under = write.terms_under("category", 1, None).await.unwrap();
+    let under: Vec<u64> = under.into_iter().map(|term| term.term_id).collect();
+    assert_eq!(under, [alpha, news]);
+    let named = write
+        .terms_under("category", 1, Some("NEWS"))
+        .await
+        .unwrap();
+    assert_eq!(named.len(), 1);
+    let top = write.terms_under("category", 0, None).await.unwrap();
+    assert_eq!(top, [uncategorized]);
+
+    let newer = write.insert_term(b"News", b"news", 0).await.unwrap();
+    let newer_tt = write
+        .insert_term_taxonomy((newer, "category"), b"", 1)
+        .await
+        .unwrap();
+    let older = write
+        .older_duplicate(("category", 1), "news", (newer, newer_tt))
+        .await
+        .unwrap();
+    assert_eq!(id(older), Some(news));
+    for (place, slug, ids) in [
+        (("category", 1), "news", (news, news_tt)),
+        (("category", 0), "news", (newer, newer_tt)),
+        (("post_tag", 1), "news", (newer, newer_tt)),
+        (("category", 1), "missing", (newer, newer_tt)),
+        (("category", 1), "news", (newer, news_tt)),
+    ] {
+        let older = write.older_duplicate(place, slug, ids).await.unwrap();
+        assert_eq!(older, None);
+    }
+
+    assert!(write.term_exists(1).await.unwrap());
+    assert!(!write.term_exists(999).await.unwrap());
+    for (slug, name, matches) in [
+        (Some("uncategorized"), "x", true),
+        (Some("x"), "Uncategorized", true),
+        (Some("x"), "y", false),
+        (None, "y", true),
+    ] {
+        assert_eq!(write.term_matches(slug, name).await.unwrap(), matches);
+    }
+    assert!(write.slug_taken("alpha", 0).await.unwrap());
+    assert!(!write.slug_taken("alpha", alpha).await.unwrap());
+    assert!(!write.slug_taken("nope", 0).await.unwrap());
+
+    assert_eq!(write.object_terms(1, "category").await.unwrap(), [(1, 1)]);
+    write.add_relationship(1, alpha_tt).await.unwrap();
+    let terms = write.object_terms(1, "category").await.unwrap();
+    assert_eq!(terms, [(1, 1), (alpha, alpha_tt)]);
+    assert!(write.object_terms(1, "post_tag").await.unwrap().is_empty());
+    assert!(write.has_relationship(1, alpha_tt).await.unwrap());
+    assert!(!write.has_relationship(2, alpha_tt).await.unwrap());
+    write.add_relationship(2, alpha_tt).await.unwrap();
+    assert_eq!(write.term_object_ids(alpha_tt).await.unwrap(), [1, 2]);
+    assert_eq!(write.max_term_group().await.unwrap(), 3);
+    let parents = write.term_parents("category").await.unwrap();
+    assert_eq!(parents, [(1, 0), (news, 1), (alpha, 1), (newer, 1)]);
+    assert!(write.term_parents("post_tag").await.unwrap().is_empty());
+
+    // Menu items linking to a term; a post, or a custom link, does not.
+    let menu_item = PostFields {
+        post_type: "nav_menu_item".into(),
+        ..hello()
+    };
+    let news_text = news.to_string();
+    for (post, kind, count) in [
+        (&hello(), &b"taxonomy"[..], 0),
+        (&menu_item, b"custom", 0),
+        (&menu_item, b"taxonomy", 1),
+    ] {
+        let item = write.insert_post(post).await.unwrap();
+        for (key, value) in [
+            ("_menu_item_object_id", news_text.as_bytes()),
+            ("_menu_item_type", kind),
+            ("_menu_item_object", b"category"),
+        ] {
+            write.add_meta(Meta::Post, item, key, value).await.unwrap();
+        }
+        assert_eq!(
+            write.term_menu_items(news, "category").await.unwrap(),
+            count
+        );
+    }
+    assert_eq!(write.term_menu_items(news, "post_tag").await.unwrap(), 0);
+    assert_eq!(write.term_menu_items(alpha, "category").await.unwrap(), 0);
+
+    let default = write.option_value("default_category").await.unwrap();
+    assert_eq!(default.as_deref(), Some(&b"1"[..]));
+    assert_eq!(write.option_value("hyscribe_missing").await.unwrap(), None);
+    let post = write.post_type_status(2).await.unwrap();
+    assert_eq!(post, Some(("page".into(), "publish".into())));
+    assert_eq!(write.post_type_status(999).await.unwrap(), None);
+}
+
+#[tokio::test]
 async fn writes_meta() {
     let _one = ONE_AT_A_TIME.lock().await;
     let writer = writer().await;
@@ -939,7 +1079,6 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.nicename_owner(b"n", b"u").await.err(),
         w.author_post_ids_of_types(1, &["post"]).await.err(),
         w.owner_link_ids(1).await.err(),
-        w.option_value("o").await.err(),
     ];
     let counts = [
         w.approved_comment_count(1).await.err(),
@@ -998,7 +1137,25 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.set_term_order(1, &[(1, 1)]).await.err(),
         w.remove_relationships(1, &[1]).await.err(),
     ];
-    for error in ids.into_iter().chain(counts).chain(writes) {
+    let reads = [
+        w.term_in("category", 1).await.err(),
+        w.term_by_slug("category", None).await.err(),
+        w.term_by_name("category", "n").await.err(),
+        w.terms_under("category", 0, None).await.err(),
+        w.older_duplicate(("category", 0), "s", (2, 2)).await.err(),
+        w.term_exists(1).await.err(),
+        w.term_matches(None, "n").await.err(),
+        w.slug_taken("s", 0).await.err(),
+        w.object_terms(1, "category").await.err(),
+        w.has_relationship(1, 1).await.err(),
+        w.term_object_ids(1).await.err(),
+        w.max_term_group().await.err(),
+        w.term_parents("category").await.err(),
+        w.term_menu_items(1, "category").await.err(),
+        w.option_value("o").await.err(),
+        w.post_type_status(1).await.err(),
+    ];
+    for error in ids.into_iter().chain(counts).chain(writes).chain(reads) {
         errors.push(error.expect("a missing table fails"));
     }
     errors

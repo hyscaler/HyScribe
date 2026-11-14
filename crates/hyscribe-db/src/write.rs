@@ -18,6 +18,7 @@ mod meta;
 mod terms;
 
 pub use meta::Meta;
+pub use terms::TermRow;
 
 /// The `db_version`s this release writes to: WordPress 7.0 and 7.1.
 const DB_VERSIONS: std::ops::RangeInclusive<u64> = 61833..=61833;
@@ -634,21 +635,6 @@ impl<'w> Write<'w> {
     pub async fn delete_option(&mut self, name: &str) -> Result<u64, DbError> {
         let query = self.sql("DELETE FROM {prefix}options WHERE option_name = ?");
         self.change(Table::Options, query.bind(name)).await
-    }
-
-    /// The value of option `name`, as `get_option()` reads it.
-    pub async fn option_value(&mut self, name: &str) -> Result<Option<Vec<u8>>, DbError> {
-        self.spend()?;
-        let query =
-            self.sql("SELECT option_value FROM {prefix}options WHERE option_name = ? LIMIT 1");
-        let row = query
-            .bind(name)
-            .fetch_optional(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
-        row.map(|row| row.try_get_unchecked::<Vec<u8>, _>(0))
-            .transpose()
-            .map_err(db_error)
     }
 
     /// The autoload of option `name`, as `update_option()` reads it.

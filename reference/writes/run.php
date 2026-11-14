@@ -21,17 +21,17 @@ require '/var/www/html/wp-load.php';
 	}
 	$case = $actions[ $argv[1] ];
 
-	// Table => [auto increment column or null, key columns, column => [table its IDs are of, whole value or digit runs]].
+	// Table => [auto increment column or null, key columns, column => [table its IDs are of, whole value (true), digit runs (false) or a term map ('map')]].
 	$tables = array(
 		'wp_posts'              => array( 'ID', array( 'ID' ), array( 'ID' => array( 'wp_posts', true ), 'post_parent' => array( 'wp_posts', true ), 'post_author' => array( 'wp_users', true ), 'guid' => array( 'wp_posts', false ), 'post_name' => array( 'wp_posts', false ) ) ),
 		'wp_postmeta'           => array( 'meta_id', array( 'meta_id' ), array( 'meta_id' => array( 'wp_postmeta', true ), 'post_id' => array( 'wp_posts', true ) ) ),
 		'wp_comments'           => array( 'comment_ID', array( 'comment_ID' ), array( 'comment_ID' => array( 'wp_comments', true ), 'comment_parent' => array( 'wp_comments', true ), 'comment_post_ID' => array( 'wp_posts', true ), 'user_id' => array( 'wp_users', true ) ) ),
 		'wp_commentmeta'        => array( 'meta_id', array( 'meta_id' ), array( 'meta_id' => array( 'wp_commentmeta', true ), 'comment_id' => array( 'wp_comments', true ) ) ),
-		'wp_terms'              => array( 'term_id', array( 'term_id' ), array( 'term_id' => array( 'wp_terms', true ) ) ),
+		'wp_terms'              => array( 'term_id', array( 'term_id' ), array( 'term_id' => array( 'wp_terms', true ), 'slug' => array( 'wp_terms', true ) ) ),
 		'wp_term_taxonomy'      => array( 'term_taxonomy_id', array( 'term_taxonomy_id' ), array( 'term_taxonomy_id' => array( 'wp_term_taxonomy', true ), 'term_id' => array( 'wp_terms', true ), 'parent' => array( 'wp_terms', true ) ) ),
 		'wp_term_relationships' => array( null, array( 'object_id', 'term_taxonomy_id' ), array( 'object_id' => array( 'wp_posts', true ), 'term_taxonomy_id' => array( 'wp_term_taxonomy', true ) ) ),
 		'wp_termmeta'           => array( 'meta_id', array( 'meta_id' ), array( 'meta_id' => array( 'wp_termmeta', true ), 'term_id' => array( 'wp_terms', true ) ) ),
-		'wp_options'            => array( 'option_id', array( 'option_name' ), array( 'option_id' => array( 'wp_options', true ) ) ),
+		'wp_options'            => array( 'option_id', array( 'option_name' ), array( 'option_id' => array( 'wp_options', true ), 'option_value' => array( 'wp_terms', 'map' ) ) ),
 		'wp_users'              => array( 'ID', array( 'ID' ), array( 'ID' => array( 'wp_users', true ) ) ),
 		'wp_usermeta'           => array( 'umeta_id', array( 'umeta_id' ), array( 'umeta_id' => array( 'wp_usermeta', true ), 'user_id' => array( 'wp_users', true ) ) ),
 		'wp_links'              => array( 'link_id', array( 'link_id' ), array( 'link_id' => array( 'wp_links', true ), 'link_owner' => array( 'wp_users', true ) ) ),
@@ -85,7 +85,31 @@ require '/var/www/html/wp-load.php';
 		}
 	}
 
-	$mask = function ( $table, $column, $value ) use ( $tables, $new, $start, $end ) {
+	// A `{$taxonomy}_children` map, a:n:{i:<parent>;a:m:{i:<n>;i:<child>;...}...},
+	// with its IDs masked; any other value as it is.
+	$term_map = function ( $value, $id ) {
+		$parents = @unserialize( $value, array( 'allowed_classes' => false ) );
+		if ( ! is_array( $parents ) ) {
+			return $value;
+		}
+		$out = 'a:' . count( $parents ) . ':{';
+		foreach ( $parents as $parent => $children ) {
+			if ( ! is_int( $parent ) || ! is_array( $children ) ) {
+				return $value;
+			}
+			$out .= 'i:' . $id( (string) $parent ) . ';a:' . count( $children ) . ':{';
+			foreach ( $children as $n => $child ) {
+				if ( ! is_int( $n ) || ! is_int( $child ) ) {
+					return $value;
+				}
+				$out .= "i:$n;i:" . $id( (string) $child ) . ';';
+			}
+			$out .= '}';
+		}
+		return $out . '}';
+	};
+
+	$mask = function ( $table, $column, $value ) use ( $tables, $new, $start, $end, $term_map ) {
 		if ( null === $value ) {
 			return null;
 		}
@@ -107,6 +131,9 @@ require '/var/www/html/wp-load.php';
 			return $value;
 		}
 		list( $of, $whole ) = $tables[ $table ][2][ $column ];
+		if ( 'map' === $whole ) {
+			return $term_map( $value, fn( $id ) => isset( $new[ $of ][ $id ] ) ? $new[ $of ][ $id ] : $id );
+		}
 		if ( $whole ) {
 			return isset( $new[ $of ][ $value ] ) ? $new[ $of ][ $value ] : $value;
 		}

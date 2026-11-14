@@ -344,6 +344,49 @@ fn masks_times_and_new_ids() {
 }
 
 #[test]
+fn masks_term_ids_in_term_maps() {
+    let new = NewIds::from([
+        (("wp_terms", b"2".to_vec()), b"%wp_terms:1%".to_vec()),
+        (("wp_terms", b"3".to_vec()), b"%wp_terms:2%".to_vec()),
+    ]);
+    let masks = Masks {
+        start: (0, Vec::new()),
+        end: (0, Vec::new()),
+        new,
+    };
+    let (terms, options) = (&TABLES[4], &TABLES[8]);
+    let mask = |table, column: &str, value: &str| {
+        String::from_utf8(masks.mask(table, column, value.as_bytes())).unwrap()
+    };
+    assert_eq!(mask(terms, "slug", "2"), "%wp_terms:1%");
+    assert_eq!(mask(terms, "slug", "kid-2"), "kid-2");
+    let map = mask(
+        options,
+        "option_value",
+        "a:2:{i:3;a:1:{i:0;i:2;}i:2;a:0:{}}",
+    );
+    assert_eq!(
+        map,
+        "a:2:{i:%wp_terms:2%;a:1:{i:0;i:%wp_terms:1%;}i:%wp_terms:1%;a:0:{}}"
+    );
+    assert_eq!(
+        mask(options, "option_value", "a:1:{i:4;a:1:{i:2;i:5;}}"),
+        "a:1:{i:4;a:1:{i:2;i:5;}}"
+    );
+    // Other values keep their digits.
+    for value in [
+        "a:1:{i:0;i:2;}",
+        "a:1:{s:1:\"x\";a:0:{}}",
+        "a:1:{i:2;a:1:{i:0;s:1:\"2\";}}",
+        "a:1:{i:2;a:1:{s:1:\"k\";i:2;}}",
+        "i:2;",
+        "2",
+    ] {
+        assert_eq!(mask(options, "option_value", value), value);
+    }
+}
+
+#[test]
 fn escapes_as_php_does() {
     assert_eq!(escape(None), b"\\N");
     assert_eq!(escape(Some(b"a\\b\tc\nd\re")), b"a\\\\b\\tc\\nd\\re");

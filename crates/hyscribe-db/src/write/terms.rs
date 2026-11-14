@@ -4,9 +4,62 @@
 //! `wp_delete_term()`, `wp_set_object_terms()`, `wp_remove_object_terms()`
 //! and the term counts.
 
-use super::{Table, Write};
+use super::{Query, Table, Write};
 use crate::dialect::Dialect;
-use crate::{Bind, DbError, Engine, Sql, ids_or_none, list};
+use crate::{Bind, Columns, DbError, Engine, Row, Sql, db_error, ids_or_none, list};
+
+/// A term in a taxonomy, as the term functions read it inside an action.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TermRow {
+    /// `term_id`.
+    pub term_id: u64,
+    /// `name`.
+    pub name: Vec<u8>,
+    /// `slug`.
+    pub slug: Vec<u8>,
+    /// `term_group`.
+    pub term_group: i64,
+    /// `term_taxonomy_id`.
+    pub term_taxonomy_id: u64,
+    /// `description`.
+    pub description: Vec<u8>,
+    /// `parent`.
+    pub parent: u64,
+}
+
+fn term_row(row: &Row) -> Result<TermRow, DbError> {
+    let mut c = Columns::new(row);
+    let term = TermRow {
+        term_id: c.unsigned("term_id"),
+        name: c.bytes("name"),
+        slug: c.bytes("slug"),
+        term_group: c.signed("term_group"),
+        term_taxonomy_id: c.unsigned("term_taxonomy_id"),
+        description: c.bytes("description"),
+        parent: c.unsigned("parent"),
+    };
+    c.finish(term)
+}
+
+/// Two unsigned columns of a row.
+fn pair(row: &Row, first: &str, second: &str) -> Result<(u64, u64), DbError> {
+    let mut c = Columns::new(row);
+    let pair = (c.unsigned(first), c.unsigned(second));
+    c.finish(pair)
+}
+
+/// The query of [`TermRow`]s where `$where`, joined as `WP_Term_Query`
+/// joins them.
+macro_rules! terms_where {
+    ($where:literal) => {
+        concat!(
+            "SELECT t.term_id, t.name, t.slug, t.term_group, tt.term_taxonomy_id, \
+             tt.description, tt.parent FROM {prefix}terms AS t INNER JOIN \
+             {prefix}term_taxonomy AS tt ON t.term_id = tt.term_id WHERE ",
+            $where
+        )
+    };
+}
 
 /// `values` as text, led by `''`, which keeps the list valid when empty and
 /// matches no status or type.
@@ -242,5 +295,227 @@ impl Write<'_> {
         list(&mut sql, ids_or_none(term_taxonomies));
         let query = sql.query(&self.writer.prefix);
         self.change(Table::TermRelationships, query).await
+    }
+
+    // The reads of the term functions, inside the action. Names and slugs
+    // are text, so they compare under the column's collation, as in PHP.
+
+    async fn term_rows(&mut self, query: Query) -> Result<Vec<TermRow>, DbError> {
+        let rows = query.fetch_all(&mut *self.tx).await.map_err(db_error)?;
+        rows.iter().map(term_row).collect()
+    }
+
+    async fn pairs(
+        &mut self,
+        query: Query,
+        (first, second): (&str, &str),
+    ) -> Result<Vec<(u64, u64)>, DbError> {
+        let rows = query.fetch_all(&mut *self.tx).await.map_err(db_error)?;
+        rows.iter().map(|row| pair(row, first, second)).collect()
+    }
+
+    /// `get_term()`: term `id` in `taxonomy`.
+    pub async fn term_in(&mut self, taxonomy: &str, id: u64) -> Result<Option<TermRow>, DbError> {
+        let query = self.sql(terms_where!("tt.taxonomy = ? AND t.term_id = ? LIMIT 1"));
+        let rows = self.term_rows(query.bind(taxonomy).bind(id)).await?;
+        Ok(rows.into_iter().next())
+    }
+
+    /// The first term of `taxonomy` by ID with `slug`, or of all for
+    /// `None`, as `get_terms()` drops an empty slug text.
+    pub async fn term_by_slug(
+        &mut self,
+        taxonomy: &str,
+        slug: Option<&str>,
+    ) -> Result<Option<TermRow>, DbError> {
+        let query = self.sql(terms_where!(
+            "tt.taxonomy = ? AND (? OR t.slug = ?) ORDER BY t.term_id LIMIT 1"
+        ));
+        let query = query.bind(taxonomy).bind(slug.is_none());
+        let rows = self.term_rows(query.bind(slug.unwrap_or_default())).await?;
+        Ok(rows.into_iter().next())
+    }
+
+    /// `term_exists()`'s query by name: the first term of `taxonomy` by ID
+    /// named `name`.
+    pub async fn term_by_name(
+        &mut self,
+        taxonomy: &str,
+        name: &str,
+    ) -> Result<Option<TermRow>, DbError> {
+        let query = self.sql(terms_where!(
+            "tt.taxonomy = ? AND t.name = ? ORDER BY t.term_id LIMIT 1"
+        ));
+        let rows = self.term_rows(query.bind(taxonomy).bind(name)).await?;
+        Ok(rows.into_iter().next())
+    }
+
+    /// The terms of `taxonomy` under `parent` named `name`, or all of them
+    /// for `None`, by name: `wp_insert_term()`'s name matches and siblings.
+    pub async fn terms_under(
+        &mut self,
+        taxonomy: &str,
+        parent: u64,
+        name: Option<&str>,
+    ) -> Result<Vec<TermRow>, DbError> {
+        let query = self.sql(terms_where!(
+            "tt.taxonomy = ? AND tt.parent = ? AND (? OR t.name = ?) ORDER BY t.name"
+        ));
+        let query = query.bind(taxonomy).bind(parent).bind(name.is_none());
+        self.term_rows(query.bind(name.unwrap_or_default())).await
+    }
+
+    /// `wp_insert_term()`'s last check: a term of `taxonomy` under `parent`
+    /// with `slug`, older than the new `(term_id, term_taxonomy_id)`.
+    pub async fn older_duplicate(
+        &mut self,
+        (taxonomy, parent): (&str, u64),
+        slug: &str,
+        (term, term_taxonomy): (u64, u64),
+    ) -> Result<Option<TermRow>, DbError> {
+        let query = self.sql(terms_where!(
+            "t.slug = ? AND tt.parent = ? AND tt.taxonomy = ? AND t.term_id < ? \
+             AND tt.term_taxonomy_id != ? LIMIT 1"
+        ));
+        let query = query.bind(slug).bind(parent).bind(taxonomy);
+        let rows = self.term_rows(query.bind(term).bind(term_taxonomy)).await?;
+        Ok(rows.into_iter().next())
+    }
+
+    /// `term_exists( $id )`: whether term `id` is in a taxonomy.
+    pub async fn term_exists(&mut self, id: u64) -> Result<bool, DbError> {
+        let query = self.sql(
+            "SELECT COUNT(*) FROM {prefix}terms AS t INNER JOIN {prefix}term_taxonomy AS tt \
+             ON t.term_id = tt.term_id WHERE t.term_id = ?",
+        );
+        Ok(self.count(query.bind(id)).await? > 0)
+    }
+
+    /// `term_exists( $text )`: whether a term of any taxonomy has `slug`,
+    /// any slug for `None`, or `name`.
+    pub async fn term_matches(&mut self, slug: Option<&str>, name: &str) -> Result<bool, DbError> {
+        let query = self.sql(
+            "SELECT COUNT(*) FROM {prefix}terms AS t INNER JOIN {prefix}term_taxonomy AS tt \
+             ON t.term_id = tt.term_id WHERE ? OR t.slug = ? OR t.name = ?",
+        );
+        let query = query.bind(slug.is_none()).bind(slug.unwrap_or_default());
+        Ok(self.count(query.bind(name)).await? > 0)
+    }
+
+    /// `wp_unique_term_slug()`: whether a term but `except` has `slug`.
+    pub async fn slug_taken(&mut self, slug: &str, except: u64) -> Result<bool, DbError> {
+        let query = self.sql("SELECT COUNT(*) FROM {prefix}terms WHERE slug = ? AND term_id != ?");
+        Ok(self.count(query.bind(slug).bind(except)).await? > 0)
+    }
+
+    /// `wp_get_object_terms()`: the terms of `taxonomy` that `object` has,
+    /// as `(term_id, term_taxonomy_id)`.
+    pub async fn object_terms(
+        &mut self,
+        object: u64,
+        taxonomy: &str,
+    ) -> Result<Vec<(u64, u64)>, DbError> {
+        let query = self.sql(
+            "SELECT t.term_id, tt.term_taxonomy_id FROM {prefix}terms AS t INNER JOIN \
+             {prefix}term_taxonomy AS tt ON t.term_id = tt.term_id INNER JOIN \
+             {prefix}term_relationships AS tr ON tr.term_taxonomy_id = tt.term_taxonomy_id \
+             WHERE tt.taxonomy = ? AND tr.object_id = ? ORDER BY tt.term_taxonomy_id",
+        );
+        let query = query.bind(taxonomy).bind(object);
+        self.pairs(query, ("term_id", "term_taxonomy_id")).await
+    }
+
+    /// `wp_set_object_terms()`: whether `object` has the term taxonomy
+    /// `term_taxonomy`.
+    pub async fn has_relationship(
+        &mut self,
+        object: u64,
+        term_taxonomy: u64,
+    ) -> Result<bool, DbError> {
+        let query = self.sql(
+            "SELECT COUNT(*) FROM {prefix}term_relationships WHERE object_id = ? \
+             AND term_taxonomy_id = ?",
+        );
+        Ok(self.count(query.bind(object).bind(term_taxonomy)).await? > 0)
+    }
+
+    /// `wp_delete_term()`: the objects with the term taxonomy `id`.
+    pub async fn term_object_ids(&mut self, id: u64) -> Result<Vec<u64>, DbError> {
+        let query = self.sql(
+            "SELECT object_id FROM {prefix}term_relationships WHERE term_taxonomy_id = ? \
+             ORDER BY object_id",
+        );
+        self.ids(query.bind(id)).await
+    }
+
+    /// `wp_insert_term()`'s new group for an alias: the highest
+    /// `term_group`, 0 without terms.
+    pub async fn max_term_group(&mut self) -> Result<i64, DbError> {
+        let query = self.sql("SELECT COALESCE(MAX(term_group), 0) FROM {prefix}terms");
+        // WordPress never writes a negative group.
+        Ok(self.count(query).await? as i64)
+    }
+
+    /// `_get_term_hierarchy()`: each term of `taxonomy` with its parent, by
+    /// term ID.
+    pub async fn term_parents(&mut self, taxonomy: &str) -> Result<Vec<(u64, u64)>, DbError> {
+        let query = self.sql(
+            "SELECT t.term_id, tt.parent FROM {prefix}terms AS t INNER JOIN \
+             {prefix}term_taxonomy AS tt ON t.term_id = tt.term_id WHERE tt.taxonomy = ? \
+             ORDER BY t.term_id",
+        );
+        self.pairs(query.bind(taxonomy), ("term_id", "parent"))
+            .await
+    }
+
+    /// `_wp_delete_tax_menu_item()`: how many menu items link to term `id`
+    /// of `taxonomy`.
+    pub async fn term_menu_items(&mut self, id: u64, taxonomy: &str) -> Result<u64, DbError> {
+        let query = self.sql(
+            "SELECT COUNT(*) FROM {prefix}posts AS p \
+             INNER JOIN {prefix}postmeta AS o ON o.post_id = p.ID \
+             AND o.meta_key = '_menu_item_object_id' \
+             INNER JOIN {prefix}postmeta AS k ON k.post_id = p.ID \
+             AND k.meta_key = '_menu_item_type' \
+             INNER JOIN {prefix}postmeta AS x ON x.post_id = p.ID \
+             AND x.meta_key = '_menu_item_object' \
+             WHERE p.post_type = 'nav_menu_item' AND o.meta_value = ? \
+             AND k.meta_value = 'taxonomy' AND x.meta_value = ?",
+        );
+        self.count(query.bind(id.to_string()).bind(taxonomy)).await
+    }
+
+    /// `get_option()`'s value of option `name`, read inside the action.
+    pub async fn option_value(&mut self, name: &str) -> Result<Option<Vec<u8>>, DbError> {
+        self.spend()?;
+        let query =
+            self.sql("SELECT option_value FROM {prefix}options WHERE option_name = ? LIMIT 1");
+        let row = query
+            .bind(name)
+            .fetch_optional(&mut *self.tx)
+            .await
+            .map_err(db_error)?;
+        row.map(|row| {
+            let mut c = Columns::new(&row);
+            let value = c.bytes("option_value");
+            c.finish(value)
+        })
+        .transpose()
+    }
+
+    /// `get_post_type()` and `get_post_status()` of post `id`.
+    pub async fn post_type_status(&mut self, id: u64) -> Result<Option<(String, String)>, DbError> {
+        let query = self.sql("SELECT post_type, post_status FROM {prefix}posts WHERE ID = ?");
+        let row = query
+            .bind(id)
+            .fetch_optional(&mut *self.tx)
+            .await
+            .map_err(db_error)?;
+        Ok(row.map(|row| {
+            (
+                super::text(&row, "post_type"),
+                super::text(&row, "post_status"),
+            )
+        }))
     }
 }

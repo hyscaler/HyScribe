@@ -7,16 +7,30 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use hyscribe_phpser::{Key, Value};
 use sqlx::mysql::{MySqlConnectOptions, MySqlRow};
 use sqlx::{Column as _, Connection as _, MySqlConnection, Row as _};
 
+use Held::{Digits, TermMap, Whole};
+
+/// How a column holds IDs.
+#[derive(Clone, Copy)]
+enum Held {
+    /// As its whole value.
+    Whole,
+    /// As runs of digits.
+    Digits,
+    /// As the parents and children of a `{$taxonomy}_children` option.
+    TermMap,
+}
+
 /// A core table: its auto increment column, its key columns, and the columns
-/// holding IDs of a table, as whole values (`true`) or as digit runs.
+/// holding IDs of a table.
 struct Table {
     name: &'static str,
     id: Option<&'static str>,
     key: &'static [&'static str],
-    ids: &'static [(&'static str, &'static str, bool)],
+    ids: &'static [(&'static str, &'static str, Held)],
 }
 
 const TABLES: [Table; 12] = [
@@ -25,11 +39,11 @@ const TABLES: [Table; 12] = [
         id: Some("ID"),
         key: &["ID"],
         ids: &[
-            ("ID", "wp_posts", true),
-            ("post_parent", "wp_posts", true),
-            ("post_author", "wp_users", true),
-            ("guid", "wp_posts", false),
-            ("post_name", "wp_posts", false),
+            ("ID", "wp_posts", Whole),
+            ("post_parent", "wp_posts", Whole),
+            ("post_author", "wp_users", Whole),
+            ("guid", "wp_posts", Digits),
+            ("post_name", "wp_posts", Digits),
         ],
     },
     Table {
@@ -37,8 +51,8 @@ const TABLES: [Table; 12] = [
         id: Some("meta_id"),
         key: &["meta_id"],
         ids: &[
-            ("meta_id", "wp_postmeta", true),
-            ("post_id", "wp_posts", true),
+            ("meta_id", "wp_postmeta", Whole),
+            ("post_id", "wp_posts", Whole),
         ],
     },
     Table {
@@ -46,10 +60,10 @@ const TABLES: [Table; 12] = [
         id: Some("comment_ID"),
         key: &["comment_ID"],
         ids: &[
-            ("comment_ID", "wp_comments", true),
-            ("comment_parent", "wp_comments", true),
-            ("comment_post_ID", "wp_posts", true),
-            ("user_id", "wp_users", true),
+            ("comment_ID", "wp_comments", Whole),
+            ("comment_parent", "wp_comments", Whole),
+            ("comment_post_ID", "wp_posts", Whole),
+            ("user_id", "wp_users", Whole),
         ],
     },
     Table {
@@ -57,24 +71,24 @@ const TABLES: [Table; 12] = [
         id: Some("meta_id"),
         key: &["meta_id"],
         ids: &[
-            ("meta_id", "wp_commentmeta", true),
-            ("comment_id", "wp_comments", true),
+            ("meta_id", "wp_commentmeta", Whole),
+            ("comment_id", "wp_comments", Whole),
         ],
     },
     Table {
         name: "wp_terms",
         id: Some("term_id"),
         key: &["term_id"],
-        ids: &[("term_id", "wp_terms", true)],
+        ids: &[("term_id", "wp_terms", Whole), ("slug", "wp_terms", Whole)],
     },
     Table {
         name: "wp_term_taxonomy",
         id: Some("term_taxonomy_id"),
         key: &["term_taxonomy_id"],
         ids: &[
-            ("term_taxonomy_id", "wp_term_taxonomy", true),
-            ("term_id", "wp_terms", true),
-            ("parent", "wp_terms", true),
+            ("term_taxonomy_id", "wp_term_taxonomy", Whole),
+            ("term_id", "wp_terms", Whole),
+            ("parent", "wp_terms", Whole),
         ],
     },
     Table {
@@ -82,8 +96,8 @@ const TABLES: [Table; 12] = [
         id: None,
         key: &["object_id", "term_taxonomy_id"],
         ids: &[
-            ("object_id", "wp_posts", true),
-            ("term_taxonomy_id", "wp_term_taxonomy", true),
+            ("object_id", "wp_posts", Whole),
+            ("term_taxonomy_id", "wp_term_taxonomy", Whole),
         ],
     },
     Table {
@@ -91,29 +105,32 @@ const TABLES: [Table; 12] = [
         id: Some("meta_id"),
         key: &["meta_id"],
         ids: &[
-            ("meta_id", "wp_termmeta", true),
-            ("term_id", "wp_terms", true),
+            ("meta_id", "wp_termmeta", Whole),
+            ("term_id", "wp_terms", Whole),
         ],
     },
     Table {
         name: "wp_options",
         id: Some("option_id"),
         key: &["option_name"],
-        ids: &[("option_id", "wp_options", true)],
+        ids: &[
+            ("option_id", "wp_options", Whole),
+            ("option_value", "wp_terms", TermMap),
+        ],
     },
     Table {
         name: "wp_users",
         id: Some("ID"),
         key: &["ID"],
-        ids: &[("ID", "wp_users", true)],
+        ids: &[("ID", "wp_users", Whole)],
     },
     Table {
         name: "wp_usermeta",
         id: Some("umeta_id"),
         key: &["umeta_id"],
         ids: &[
-            ("umeta_id", "wp_usermeta", true),
-            ("user_id", "wp_users", true),
+            ("umeta_id", "wp_usermeta", Whole),
+            ("user_id", "wp_users", Whole),
         ],
     },
     Table {
@@ -121,8 +138,8 @@ const TABLES: [Table; 12] = [
         id: Some("link_id"),
         key: &["link_id"],
         ids: &[
-            ("link_id", "wp_links", true),
-            ("link_owner", "wp_users", true),
+            ("link_id", "wp_links", Whole),
+            ("link_owner", "wp_users", Whole),
         ],
     },
 ];
@@ -256,15 +273,48 @@ impl Masks {
                 .contains(&unix)
                 .then(|| b"%unix%".to_vec())
         });
-        let Some((_, of, whole)) = table.ids.iter().find(|(name, ..)| *name == column) else {
+        let Some((_, of, held)) = table.ids.iter().find(|(name, ..)| *name == column) else {
             return value;
         };
         let token = |id: &[u8]| self.new.get(&(*of, id.to_vec())).cloned();
-        if *whole {
-            return token(&value).unwrap_or(value);
+        match held {
+            Whole => token(&value).unwrap_or(value),
+            Digits => digit_runs(&value, token),
+            TermMap => term_map(&value, token).unwrap_or(value),
         }
-        digit_runs(&value, token)
     }
+}
+
+/// A `{$taxonomy}_children` map, `a:n:{i:<parent>;a:m:{i:<n>;i:<child>;…}…}`,
+/// with its IDs replaced as `replace` says; `None` for any other value.
+fn term_map(value: &[u8], replace: impl Fn(&[u8]) -> Option<Vec<u8>>) -> Option<Vec<u8>> {
+    let Ok(Value::Array(parents)) = hyscribe_phpser::decode(value) else {
+        return None;
+    };
+    let id = |id: i64| {
+        let id = id.to_string().into_bytes();
+        replace(&id).unwrap_or(id)
+    };
+    let mut out = format!("a:{}:{{", parents.len()).into_bytes();
+    for (parent, children) in parents {
+        let (Key::Int(parent), Value::Array(children)) = (parent, children) else {
+            return None;
+        };
+        out.extend(b"i:");
+        out.extend(id(parent));
+        out.extend(format!(";a:{}:{{", children.len()).bytes());
+        for (n, child) in children {
+            let (Key::Int(n), Value::Int(child)) = (n, child) else {
+                return None;
+            };
+            out.extend(format!("i:{n};i:").bytes());
+            out.extend(id(child));
+            out.push(b';');
+        }
+        out.push(b'}');
+    }
+    out.push(b'}');
+    Some(out)
 }
 
 /// `value` with each maximal run of ASCII digits replaced as `replace` says.

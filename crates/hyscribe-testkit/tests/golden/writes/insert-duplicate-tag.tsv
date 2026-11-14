@@ -1,0 +1,56 @@
+# The rows PHP WordPress writes for the action insert-duplicate-tag (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 20:34:52 to 2026-11-14 20:34:52 UTC.
+# %wp_terms:1% is 2.
+# %wp_terms:2% is 3.
+# %wp_terms:3% is 4.
+# %wp_terms:4% is 5.
+# %wp_terms:5% is 6.
+# %wp_terms:6% is 7.
+# %wp_terms:7% is 8.
+# %wp_term_taxonomy:1% is 2.
+# %wp_term_taxonomy:2% is 3.
+# %wp_term_taxonomy:3% is 4.
+# %wp_term_taxonomy:4% is 5.
+# %wp_term_taxonomy:5% is 6.
+# %wp_term_taxonomy:6% is 7.
+# %wp_term_taxonomy:7% is 8.
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	parent	1
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	taxonomy	post_tag
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	term_id	%wp_terms:4%
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	term_taxonomy_id	%wp_term_taxonomy:4%
+wp_term_taxonomy	%wp_term_taxonomy:5%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:5%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:5%	+	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:5%	+	taxonomy	post_tag
+wp_term_taxonomy	%wp_term_taxonomy:5%	+	term_id	%wp_terms:5%
+wp_term_taxonomy	%wp_term_taxonomy:5%	+	term_taxonomy_id	%wp_term_taxonomy:5%
+wp_term_taxonomy	%wp_term_taxonomy:6%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:6%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:6%	+	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:6%	+	taxonomy	post_tag
+wp_term_taxonomy	%wp_term_taxonomy:6%	+	term_id	%wp_terms:6%
+wp_term_taxonomy	%wp_term_taxonomy:6%	+	term_taxonomy_id	%wp_term_taxonomy:6%
+wp_term_taxonomy	%wp_term_taxonomy:7%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:7%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:7%	+	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:7%	+	taxonomy	post_tag
+wp_term_taxonomy	%wp_term_taxonomy:7%	+	term_id	%wp_terms:7%
+wp_term_taxonomy	%wp_term_taxonomy:7%	+	term_taxonomy_id	%wp_term_taxonomy:7%
+wp_terms	%wp_terms:4%	+	name	Kid
+wp_terms	%wp_terms:4%	+	slug	kid-2
+wp_terms	%wp_terms:4%	+	term_group	0
+wp_terms	%wp_terms:4%	+	term_id	%wp_terms:4%
+wp_terms	%wp_terms:5%	+	name	Oracle
+wp_terms	%wp_terms:5%	+	slug	oracle-other
+wp_terms	%wp_terms:5%	+	term_group	0
+wp_terms	%wp_terms:5%	+	term_id	%wp_terms:5%
+wp_terms	%wp_terms:6%	+	name	Another
+wp_terms	%wp_terms:6%	+	slug	oracle-2
+wp_terms	%wp_terms:6%	+	term_group	0
+wp_terms	%wp_terms:6%	+	term_id	%wp_terms:6%
+wp_terms	%wp_terms:7%	+	name	Yet another
+wp_terms	%wp_terms:7%	+	slug	oracle-3
+wp_terms	%wp_terms:7%	+	term_group	0
+wp_terms	%wp_terms:7%	+	term_id	%wp_terms:7%

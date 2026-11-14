@@ -45,8 +45,8 @@ impl CapabilityData for Oracle {
             parent: post.parent,
         })
     }
-    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        None
+    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        self.fixture.post_meta(id, key)
     }
     fn comment_post(&self, _: u64) -> Option<u64> {
         None
@@ -395,7 +395,7 @@ fn served(who: &'static str, target: &str, ttd: bool, deny: &'static [&'static s
     serve(&oracle, &request)
 }
 
-pub(super) fn allow(served: &Served) -> &str {
+fn allow(served: &Served) -> &str {
     let allow = served.headers.iter().find(|(name, _)| name == "Allow");
     allow.map_or("", |(_, value)| value.as_str())
 }

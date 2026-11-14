@@ -219,7 +219,7 @@ pub(crate) fn can_read(context: &Context, post: &Post) -> bool {
             return false;
         }
         seen.push(post.id);
-        let parent = (post.parent > 0 && !seen.contains(&post.parent))
+        let parent = (!seen.contains(&post.parent))
             .then(|| context.site.post(post.parent))
             .flatten();
         match parent {
@@ -463,7 +463,7 @@ fn query(
         exact: params.get("search_semantics").is_some(),
         logged_in: context.user != 0,
         mime_types: crate::media::mime_types(params, kind),
-        filenames: kind == Kind::Attachment && search.is_some(),
+        filenames: kind == Kind::Attachment,
         limit: u32::try_from(per_page).unwrap_or(u32::MAX),
         offset: u32::try_from(if offset > 0 {
             offset

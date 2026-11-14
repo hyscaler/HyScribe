@@ -33,9 +33,14 @@ fn attachment_is(site: &dyn Site, post: &Post, kind: &str, extensions: &[&str]) 
     let file = site
         .post_meta(post.id, "_wp_attached_file")
         .unwrap_or_default();
-    !is_empty_string(&file)
-        && (post.mime_type.starts_with(&format!("{kind}/"))
-            || post.mime_type == "import" && extensions.contains(&extension(&file).as_str()))
+    file_is(&file, &post.mime_type, kind, extensions)
+}
+
+/// [`attachment_is`] of a file `file` of type `mime`.
+fn file_is(file: &[u8], mime: &str, kind: &str, extensions: &[&str]) -> bool {
+    !is_empty_string(file)
+        && (mime.starts_with(&format!("{kind}/"))
+            || mime == "import" && extensions.contains(&extension(file).as_str()))
 }
 
 /// The extension of a file or URL, in lower case, as
@@ -137,4 +142,19 @@ fn attachment_link(site: &dyn Site, loading: &Loading, post: &Post, url: &[u8]) 
         esc_html(stem).into_bytes()
     };
     [b"<a href='", &esc_url(url)[..], b"'>", &text, b"</a>"].concat()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{VIDEO, file_is};
+
+    /// An imported file is a video by its extension, any other by its type.
+    #[test]
+    fn imported_files_are_known_by_extension() {
+        assert!(file_is(b"a/clip.MP4", "import", "video", &VIDEO));
+        assert!(!file_is(b"a/notes.txt", "import", "video", &VIDEO));
+        assert!(!file_is(b"a/clip.mp4", "video", "video", &VIDEO));
+        assert!(file_is(b"a/clip.mov", "video/quicktime", "video", &VIDEO));
+        assert!(!file_is(b"", "video/mp4", "video", &VIDEO));
+    }
 }

@@ -9,7 +9,7 @@
 use std::sync::LazyLock;
 
 use hyscribe_model::Post;
-use hyscribe_phpser::{Key, Value, is_empty_string, json_decode, php_trim, wp_basename};
+use hyscribe_phpser::{Key, Value, is_empty_string, json_decode, wp_basename};
 use hyscribe_render::attachment::prepend::plays_video;
 use hyscribe_render::attachment::{
     attachment_url, constrain_dimensions, image_downsize, is_image, metadata,
@@ -136,13 +136,14 @@ pub(crate) fn create_permission(context: &Context, params: &Params) -> Result<()
     Ok(())
 }
 
-/// `get_post_status()`: an attachment inheriting its parent's, or
-/// published without one, or with one in the trash its status before.
+/// `get_post_status()` of an attachment: inheriting its parent's, or
+/// published without one (none has ID 0) or with itself as one, or with
+/// one in the trash its status before.
 pub(crate) fn post_status(context: &Context, post: &Post) -> String {
     let mut seen = vec![post.id];
     let mut post = post.clone();
-    while post.post_type == "attachment" && post.status == "inherit" {
-        let parent = (post.parent != 0 && !seen.contains(&post.parent))
+    while post.status == "inherit" {
+        let parent = (!seen.contains(&post.parent))
             .then(|| context.site.post(post.parent))
             .flatten();
         let Some(parent) = parent else {
@@ -210,7 +211,7 @@ pub(crate) fn attachment_link(context: &Context, post: &Post, sample: bool) -> V
 
 /// `wp_get_registered_image_subsizes()`: each size's name, width, height
 /// and whether it is cropped, those with a width or height.
-fn registered_sizes(context: &Context) -> Vec<(&'static str, i64, i64, bool)> {
+pub(crate) fn registered_sizes(context: &Context) -> Vec<(&'static str, i64, i64, bool)> {
     let option = |name: String| Value::String(context.option(&name).unwrap_or_default());
     let defaults = ["thumbnail", "medium", "medium_large", "large"].map(|size| {
         let dimension = |side| option(format!("{size}_size_{side}")).to_int();
@@ -225,20 +226,16 @@ fn registered_sizes(context: &Context) -> Vec<(&'static str, i64, i64, bool)> {
     defaults
         .into_iter()
         .chain(added)
-        .filter(|(_, width, height, _)| *width != 0 || *height != 0)
+        .filter(|(_, width, height, _)| (*width, *height) != (0, 0))
         .collect()
 }
 
 /// Whether `image_resize_dimensions()` resizes an image of `width` by
 /// `height` to a size.
 fn resizes(width: i64, height: i64, (size_width, size_height, crop): (i64, i64, bool)) -> bool {
-    if width <= 0 || height <= 0 || size_width <= 0 && size_height <= 0 {
-        return false;
-    }
-    // A size larger than the image, on each side it sets, is none.
-    let larger =
-        (size_width == 0 || width < size_width) && (size_height == 0 || height < size_height);
-    if larger {
+    // A size larger than the image leaves it as it is, and a registered
+    // size has a width or a height.
+    if width <= 0 || height <= 0 {
         return false;
     }
     let (new_width, new_height) = if crop {
@@ -363,7 +360,8 @@ pub(crate) fn fields(
 ) -> Result<Vec<(Key, Value)>, RestError> {
     let wants = |name: &str| fields.iter().any(|field| field == name.as_bytes());
     let reads = context.site.reads();
-    let renders = wants("description") || wants("caption") && php_trim(&post.excerpt).is_empty();
+    // A caption from an empty excerpt renders the content too.
+    let renders = wants("description") || wants("caption");
     let logged_in = context.user != 0;
     if renders && (writes_or_unported(&post.content, logged_in) || plays_video(reads, post)) {
         return Err(RestError::not_ported());
@@ -421,9 +419,10 @@ pub(crate) fn fields(
     }
     let original = meta
         .as_ref()
+        .filter(|_| image)
         .and_then(|meta| meta.get_str("original_image"))
         .map(Value::to_php_string)
-        .filter(|original| image && !original.is_empty());
+        .filter(|original| !original.is_empty());
     if wants("filename") {
         let name = original.clone().unwrap_or(file.clone());
         let name = (!is_empty_string(&name)).then(|| text(wp_basename(&name)));
@@ -498,8 +497,12 @@ mod tests {
     fn resizes_as_php_does() {
         assert!(resizes(300, 200, (150, 0, true)));
         assert!(resizes(300, 200, (0, 150, true)));
+        assert!(!resizes(300, 200, (300, 0, true)));
+        assert!(!resizes(300, 200, (0, 200, true)));
         assert!(!resizes(0, 200, (150, 150, true)));
-        assert!(!resizes(300, 200, (0, 0, false)));
         assert!(!resizes(100, 100, (150, 150, true)));
+        assert!(!resizes(301, 200, (300, 300, false)));
+        assert!(resizes(150, 400, (150, 150, true)));
+        assert!(!resizes(150, 151, (150, 150, true)));
     }
 }

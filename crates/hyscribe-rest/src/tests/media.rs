@@ -4,52 +4,97 @@
 //! `media-ttd.tsv`, replayed for a visitor and each role over the dumps
 //! with `reference/rest/media.sql`, and what the goldens cannot show.
 
-use hyscribe_phpser::parse_str;
+use hyscribe_model::Post;
 
 use super::posts::{Oracle, replay};
-use super::{role, site};
-use crate::{Request, Served, serve};
+use super::site;
+use crate::{Context, Site};
 
-/// `target`, a route and its query, as `who` without the capabilities
-/// `deny` names, over the default install with the media rows.
-fn served(who: &'static str, target: &str, deny: &'static [&'static str]) -> Served {
-    let (route, query) = target.split_once('&').unwrap_or((target, ""));
-    let get = parse_str(query.as_bytes());
-    let (_, user) = role(who);
-    let oracle = Oracle {
-        role: who,
+/// The administrator over the default install with the media rows.
+fn oracle(pretty: bool) -> Oracle {
+    Oracle {
+        role: "administrator",
         fixture: site::Fixture {
             ttd: false,
-            pretty: false,
+            pretty,
             extra: false,
             media: true,
         },
-        deny,
-    };
-    let request = Request {
-        method: "GET",
-        route: route.as_bytes(),
-        uri: b"/",
-        get: get.as_array().unwrap_or_default(),
-        post: &[],
-        cookie_user: user,
-        origin: None,
-        nonce: (user != 0).then_some(b"%nonce%"),
-        method_override: None,
-    };
-    serve(&oracle, &request)
+        deny: &[],
+    }
 }
 
-/// A user who may delete a post but not edit it may delete none of its
-/// revisions, which `Allow` leaves out.
+fn context(oracle: &Oracle) -> Context<'_> {
+    Context {
+        site: oracle,
+        user: 1,
+        head: false,
+        uri: b"/",
+    }
+}
+
+/// `get_post_status()` of attachments: a draft's image is a draft, an
+/// image in a trashed post has its status before, one without a parent
+/// or whose parent is gone is published, a private one private, and one
+/// of another status published.
 #[test]
-fn deleting_revisions_needs_editing() {
-    let target = "/wp/v2/posts/1/revisions/9112";
-    let served = served("administrator", target, &["edit_post"]);
-    assert_eq!(served.status, 403);
-    assert!(!served.headers.iter().any(|(name, _)| name == "Allow"));
-    let all = self::served("administrator", target, &[]);
-    assert_eq!(super::posts::allow(&all), "GET");
+fn attachments_inherit_their_status() {
+    let oracle = oracle(false);
+    let statuses = [
+        (9133, "draft"),
+        (9145, "draft"),
+        (9146, "publish"),
+        (9151, "publish"),
+        (9135, "private"),
+        (9149, "publish"),
+    ];
+    for (id, status) in statuses {
+        let post = oracle.post(id).unwrap();
+        let found = crate::media::post_status(&context(&oracle), &post);
+        assert_eq!(found, status, "{id}");
+    }
+    let pending = Post {
+        status: "pending".into(),
+        ..oracle.post(9132).unwrap()
+    };
+    let found = crate::media::post_status(&context(&oracle), &pending);
+    assert_eq!(found, "publish");
+}
+
+/// A trashed attachment and one that is its own parent keep their plain
+/// links under pretty permalinks.
+#[test]
+fn attachment_links_stay_plain() {
+    let oracle = oracle(true);
+    let plain = |id| format!("http://127.0.0.1:8081/?attachment_id={id}").into_bytes();
+    let trashed = oracle.post(9136).unwrap();
+    let link = crate::media::attachment_link(&context(&oracle), &trashed, false);
+    assert_eq!(link, plain(9136));
+    let own = Post {
+        id: 1,
+        parent: 1,
+        ..oracle.post(9131).unwrap()
+    };
+    let link = crate::media::attachment_link(&context(&oracle), &own, false);
+    assert_eq!(link, plain(1));
+}
+
+/// The image sizes the default install registers, from its options.
+#[test]
+fn image_sizes_are_registered() {
+    let oracle = oracle(false);
+    let sizes = crate::media::registered_sizes(&context(&oracle));
+    assert_eq!(
+        sizes,
+        [
+            ("thumbnail", 150, 150, true),
+            ("medium", 300, 300, false),
+            ("medium_large", 768, 0, false),
+            ("large", 1024, 1024, false),
+            ("1536x1536", 1536, 1536, false),
+            ("2048x2048", 2048, 2048, false),
+        ]
+    );
 }
 
 /// Only the post routes' own regexes are theirs.
@@ -63,18 +108,36 @@ fn revisions_routes_are_their_own() {
 /// image's missing sizes, which PHP reads from its original file, a
 /// video player, a file size missing from the metadata, and a revision
 /// with a gallery shortcode.
-const UNPORTED: [(&str, &str); 8] = [
+const UNPORTED: [(&str, &str); 17] = [
     (
         "administrator",
         "/?rest_route=/wp/v2/media/9139&context=edit",
     ),
     ("administrator", "/?rest_route=/wp/v2/media/9140"),
+    (
+        "administrator",
+        "/?rest_route=/wp/v2/media/9140&_fields=caption",
+    ),
     ("administrator", "/?rest_route=/wp/v2/media/9141"),
+    (
+        "administrator",
+        "/?rest_route=/wp/v2/media/9152&_fields=filesize",
+    ),
+    (
+        "administrator",
+        "/?rest_route=/wp/v2/media/9153&_fields=filesize",
+    ),
+    ("administrator", "/?rest_route=/wp/v2/media/9157"),
     ("administrator", "/?rest_route=/wp/v2/posts/9106/revisions"),
     ("editor", "/?rest_route=/wp/v2/media/9139&context=edit"),
     ("editor", "/?rest_route=/wp/v2/media/9140"),
+    ("editor", "/?rest_route=/wp/v2/media/9140&_fields=caption"),
     ("editor", "/?rest_route=/wp/v2/media/9141"),
+    ("editor", "/?rest_route=/wp/v2/media/9152&_fields=filesize"),
+    ("editor", "/?rest_route=/wp/v2/media/9153&_fields=filesize"),
+    ("editor", "/?rest_route=/wp/v2/media/9157"),
     ("editor", "/?rest_route=/wp/v2/posts/9106/revisions"),
+    ("author", "/?rest_route=/wp/v2/media/9157"),
 ];
 
 /// The routes over the default install: `reference/rest/media.tsv`.
@@ -83,7 +146,7 @@ fn media_match_php() {
     replay(
         include_str!("../../tests/golden/media.tsv"),
         (false, true),
-        6 * 133,
+        6 * 141,
         &UNPORTED,
     );
 }

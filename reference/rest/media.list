@@ -138,6 +138,14 @@ GET	/?rest_route=/wp/v2/posts/1/revisions&orderby=include_slugs&_fields=id	defau
 HEAD	/?rest_route=/wp/v2/posts/1/revisions/9112	default
 HEAD	/?rest_route=/wp/v2/posts/1/autosaves/9113	default
 GET	/?rest_route=/wp/v2/posts/0/autosaves	default
+GET	/?rest_route=/wp/v2/media/9140&_fields=caption	default
+GET	/?rest_route=/wp/v2/media/9152&_fields=filesize	default
+GET	/?rest_route=/wp/v2/media/9153&_fields=filesize	default
+GET	/?rest_route=/wp/v2/media/9155&context=edit&_fields=image_quality,media_type	default
+GET	/?rest_route=/wp/v2/media/9157	default
+GET	/?rest_route=/wp/v2/media/9157&_fields=id,alt_text	default
+GET	/?rest_route=/wp/v2/posts/1/revisions&search=hello%20world&orderby=relevance&_fields=id	default
+GET	/?rest_route=/wp/v2/posts/1/revisions/9112&_fields=id,_links	default
 GET	/?rest_route=/wp/v2/media	ttd
 GET	/?rest_route=/wp/v2/media&context=edit	ttd
 GET	/?rest_route=/wp/v2/media&context=embed&per_page=100	ttd

@@ -119,9 +119,7 @@ fn collection_args() -> Vec<Arg> {
 /// `get_parent()`: the post of the route's type with the ID `name` gives.
 fn get_parent(context: &Context, params: &Params, name: &str) -> Result<Post, RestError> {
     let id = params.get(name).map_or(0, Value::to_int);
-    let found = (id > 0)
-        .then(|| context.site.post(id.unsigned_abs()))
-        .flatten();
+    let found = context.site.post(id.unsigned_abs());
     found
         .filter(|post| post.post_type == Kind::of(params).name())
         .ok_or_else(|| {
@@ -172,32 +170,22 @@ fn create_permission(context: &Context, params: &Params) -> Result<(), RestError
 /// `get_revision()`.
 fn get_revision(context: &Context, params: &Params) -> Result<Post, RestError> {
     let id = params.get("id").map_or(0, Value::to_int);
-    let found = (id > 0)
-        .then(|| context.site.post(id.unsigned_abs()))
-        .flatten();
+    let found = context.site.post(id.unsigned_abs());
     found
         .filter(|post| post.post_type == "revision")
         .ok_or_else(|| RestError::status("rest_post_invalid_id", "Invalid revision ID.", 404))
 }
 
-/// `delete_item_permissions_check()`.
-fn delete_permission(context: &Context, params: &Params) -> Result<(), RestError> {
-    let parent = get_parent(context, params, "parent")?;
-    let denied = |message| Err(context.forbidden("rest_cannot_delete", message));
-    if !context.can_for("delete_post", parent.id) {
-        return denied("Sorry, you are not allowed to delete revisions of this post.");
-    }
-    let revision = get_revision(context, params)?;
-    items_permission(context, params)?;
-    if !context.can_for("delete_post", revision.id) {
-        return denied("Sorry, you are not allowed to delete this revision.");
-    }
-    Ok(())
+/// `delete_item_permissions_check()`, which never passes: `map_meta_cap()`
+/// lets no one delete a revision.
+fn delete_permission(context: &Context, _: &Params) -> Result<(), RestError> {
+    let message = "Sorry, you are not allowed to delete this revision.";
+    Err(context.forbidden("rest_cannot_delete", message))
 }
 
 /// The revisions of `parent` as `get_items()` queries them, every one
 /// without `per_page`, and the page asked for.
-fn query(context: &Context, params: &Params, parent: &Post) -> PostQuery {
+fn query(params: &Params, parent: &Post) -> PostQuery {
     let orderby = params.text("orderby");
     let per_page = params.get("per_page").map(Value::to_int);
     let page = params.get("page").map_or(1, Value::to_int).unsigned_abs();
@@ -212,7 +200,6 @@ fn query(context: &Context, params: &Params, parent: &Post) -> PostQuery {
         parents: vec![parent.id],
         include: (!include.is_empty()).then_some(include),
         exclude: ids(params, "exclude"),
-        logged_in: context.user != 0,
         limit: u32::MAX,
         ..PostQuery::default()
     };
@@ -275,14 +262,10 @@ fn order_errors(params: &Params) -> Result<(), RestError> {
 fn revisions(context: &Context, params: &Params) -> Result<Response, RestError> {
     let parent = get_parent(context, params, "parent")?;
     order_errors(params)?;
-    let query = query(context, params, &parent);
+    let query = query(params, &parent);
     let reads = context.site.reads();
     let found = reads.query(&query);
-    let total = reads.count_posts(&PostQuery {
-        limit: u32::MAX,
-        offset: 0,
-        ..query.clone()
-    });
+    let total = reads.count_posts(&query);
     let page = params.get("page").map_or(1, Value::to_int).unsigned_abs();
     let offset = params.get("offset").map_or(0, Value::to_int).unsigned_abs();
     let pages = match params.get("per_page") {
@@ -440,7 +423,8 @@ fn prepare(
     let fields = fields_for_response(params, REVISION);
     let has = |field: &str| is_field_included(field, &fields);
     let renders = has("content.rendered");
-    if renders && writes_or_unported(&revision.content, context.user != 0) {
+    // Only those who may edit a post see its revisions.
+    if renders && writes_or_unported(&revision.content, true) {
         return Err(RestError::not_ported());
     }
     let mut data: Vec<(Key, Value)> = Vec::new();
@@ -524,14 +508,12 @@ fn prepare(
     let data: Vec<(Key, Value)> = filter_by_context(data, REVISION, &shown)
         .into_iter()
         .map(|(name, value)| match value {
-            Value::Array(parts) if name.to_php_string() != b"meta" => {
-                (name, Value::Array(filter_by_context(parts, PARTS, &shown)))
-            }
+            Value::Array(parts) => (name, Value::Array(filter_by_context(parts, PARTS, &shown))),
             value => (name, value),
         })
         .collect();
     let mut response = Response::new(Value::Array(data), 200);
-    if has("parent") && revision.parent != 0 {
+    if has("parent") {
         let route = format!("/wp/v2/{}/{}", Kind::of(params).base(), revision.parent);
         response.add_link("parent", context.rest_url(&route));
     }

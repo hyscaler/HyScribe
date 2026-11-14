@@ -237,7 +237,7 @@ async fn media_match_php() {
     ];
     assert_eq!(
         replay(&sites, &fixture(golden, &kept), false).await,
-        (26, 0)
+        (22, 0)
     );
     let sites = (
         ttd_site(false, dir.path()).await,

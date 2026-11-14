@@ -8,8 +8,7 @@
 //! [`PostError::Unported`], and the caller's action rolls back.
 
 use hyscribe_db::{DbError, PostFields, Write};
-use hyscribe_phpser::urlencode;
-use hyscribe_render::formatting::{sanitize_title, sanitize_title_for_query};
+use hyscribe_render::formatting::sanitize_title;
 
 mod cron;
 mod date;
@@ -284,16 +283,6 @@ fn sanitize_trackback_urls(to_ping: &[u8]) -> Vec<u8> {
     urls.join(&b'\n')
 }
 
-/// The post's name: `wp_insert_post()` keeps a given name it already has
-/// in the old sanitization.
-fn post_name(given: &[u8], before: Option<&PostFields>) -> Vec<u8> {
-    let check = sanitize_title_for_query(given);
-    let kept = before.is_some_and(|before| {
-        urlencode(given).to_ascii_lowercase() == check && before.name == check
-    });
-    if kept { check } else { sanitize_title(given) }
-}
-
 /// `wp_insert_post()` up to its `wp_insert_post` action: the post's ID and
 /// kind, and whether it was an update.
 async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<(u64, Kind, bool)> {
@@ -347,7 +336,8 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
         name.clear();
     }
     name = if truthy(&name) {
-        post_name(&name, before.as_ref())
+        // The old sanitization a kept name passes gives the same slug.
+        sanitize_title(&name)
     } else if UNSLUGGED.contains(&status.as_str()) {
         Vec::new()
     } else {

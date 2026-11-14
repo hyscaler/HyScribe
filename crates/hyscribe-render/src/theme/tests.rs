@@ -151,6 +151,18 @@ fn post_formats_are_the_theme_s() {
     assert_eq!(formats.len(), 9);
 }
 
+/// The lists of `theme.json`, as the templates' REST routes read them.
+#[test]
+fn theme_json_lists_are_read() {
+    let theme = twentytwentyfive();
+    let custom = theme.theme_json_list("customTemplates");
+    let name = Value::String(b"page-no-title".to_vec());
+    assert_eq!(custom.len(), 1);
+    assert_eq!(custom[0].get_str("name"), Some(&name));
+    assert_eq!(theme.theme_json_list("templateParts").len(), 7);
+    assert!(theme.theme_json_list("nope").is_empty());
+}
+
 #[test]
 fn page_templates_are_the_custom_ones_for_the_type() {
     let theme = twentytwentyfive();

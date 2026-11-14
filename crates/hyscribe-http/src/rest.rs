@@ -145,10 +145,6 @@ impl hyscribe_rest::Site for Rest<'_> {
         self.reads.reads.wait(self.site.db.count_user_query(query))
     }
 
-    fn user(&self, id: u64) -> Option<User> {
-        self.reads.reads.wait(self.site.db.user(id))
-    }
-
     fn user_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
         CapabilityData::user_meta(&self.reads, id, key)
     }
@@ -170,6 +166,27 @@ impl hyscribe_rest::Site for Rest<'_> {
 
     fn has_posts(&self, author: u64, types: &[(String, bool)]) -> bool {
         self.reads.reads.wait(self.site.db.has_posts(author, types))
+    }
+
+    fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
+        let reads = &self.reads.reads;
+        reads.wait(self.site.db.posts_of_type(post_type))
+    }
+
+    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term> {
+        RenderSite::post_terms(&self.reads.reads, post, taxonomy)
+    }
+
+    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>> {
+        RenderSite::post_meta(&self.reads.reads, post, key)
+    }
+
+    fn revisions(&self, post: u64) -> Vec<u64> {
+        self.reads.reads.wait(self.site.db.revisions(post))
+    }
+
+    fn user(&self, id: u64) -> Option<User> {
+        RenderSite::user(&self.reads.reads, id)
     }
 }
 

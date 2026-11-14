@@ -123,7 +123,7 @@ fn render_into(block: &Block, out: &mut Vec<u8>) {
 
 /// `serialize_blocks()`: the block markup `parse_blocks()` reads back as
 /// `blocks`.
-pub(crate) fn serialize_blocks(blocks: &[Block]) -> Vec<u8> {
+pub fn serialize_blocks(blocks: &[Block]) -> Vec<u8> {
     let mut out = Vec::new();
     for block in blocks {
         serialize_into(block, &mut out);

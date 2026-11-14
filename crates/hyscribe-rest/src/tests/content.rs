@@ -22,7 +22,7 @@ pub(super) struct Row {
 
 /// One database's content.
 #[derive(Default)]
-pub(super) struct Content {
+pub(crate) struct Content {
     pub(super) options: HashMap<String, Vec<u8>>,
     pub(super) terms: Vec<Row>,
     /// `(object_id, term_taxonomy_id)`.
@@ -30,6 +30,8 @@ pub(super) struct Content {
     pub(super) posts: Vec<Post>,
     /// `(user_id, meta_key, meta_value)`.
     pub(super) usermeta: Vec<(u64, String, Vec<u8>)>,
+    /// `(post_id, meta_key, meta_value)`.
+    pub(super) postmeta: Vec<(u64, String, Vec<u8>)>,
     pub(super) comments: Vec<CommentRow>,
     /// Each user and its `user_registered`.
     pub(super) users: Vec<(User, String)>,
@@ -103,11 +105,16 @@ fn load(dump: &Dump) -> Content {
         .map(|row| Post {
             id: number(&row[0]),
             author: number(&row[1]),
+            date: string(&row[2]),
             date_gmt: string(&row[3]),
+            content: text(&row[4]),
+            title: text(&row[5]),
+            excerpt: text(&row[6]),
             status: string(&row[7]),
             comment_status: string(&row[8]),
             password: text(&row[10]),
             name: text(&row[11]),
+            modified: string(&row[14]),
             parent: number(&row[17]),
             post_type: string(&row[20]),
             ..Post::default()
@@ -154,6 +161,10 @@ fn load(dump: &Dump) -> Content {
         usermeta.push((id, "wp_capabilities".into(), caps.into_bytes()));
         usermeta.push((id, "wp_user_level".into(), level.to_string().into_bytes()));
     }
+    let postmeta = dump
+        .table("wp_postmeta")
+        .map(|row| (number(&row[1]), string(&row[2]), text(&row[3])))
+        .collect();
     let meta = |id: u64, key: &str| {
         let found = usermeta
             .iter()
@@ -197,12 +208,13 @@ fn load(dump: &Dump) -> Content {
         posts,
         usermeta,
         comments,
+        postmeta,
         users,
     }
 }
 
 /// The default install.
-pub(super) fn default_install() -> &'static Content {
+pub(crate) fn default_install() -> &'static Content {
     static CONTENT: OnceLock<Content> = OnceLock::new();
     CONTENT.get_or_init(|| {
         let version = hyscribe_testkit::default_install_versions().pop().unwrap();
@@ -210,16 +222,21 @@ pub(super) fn default_install() -> &'static Content {
     })
 }
 
+/// The default install with the rows of `state`, a dump's inserts.
+pub(crate) fn default_install_with(state: &str) -> Content {
+    let version = hyscribe_testkit::default_install_versions().pop().unwrap();
+    let mut dump = hyscribe_testkit::default_install(&version).unwrap();
+    dump.rows
+        .extend(Dump::parse(state.as_bytes()).unwrap().rows);
+    load(&dump)
+}
+
 /// The default install with `reference/rest/people-more.sql`'s posts and
 /// comments.
 pub(super) fn default_install_more() -> &'static Content {
     static CONTENT: OnceLock<Content> = OnceLock::new();
     CONTENT.get_or_init(|| {
-        let version = hyscribe_testkit::default_install_versions().pop().unwrap();
-        let mut dump = hyscribe_testkit::default_install(&version).unwrap();
-        let more = include_bytes!("../../../../reference/rest/people-more.sql");
-        dump.rows.extend(Dump::parse(more).unwrap().rows);
-        load(&dump)
+        default_install_with(include_str!("../../../../reference/rest/people-more.sql"))
     })
 }
 

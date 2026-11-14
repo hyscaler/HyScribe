@@ -140,6 +140,12 @@ fn kept(headers: &HeaderMap, nonce: &str) -> Vec<String> {
     headers
 }
 
+/// The theme footer's credit, which names HyScribe, as JSON.
+const CREDIT: [&str; 2] = [
+    "Designed with <a href=\\\"https:\\/\\/wordpress.org\\\" rel=\\\"nofollow\\\">WordPress<\\/a>",
+    "Designed with <a href=\\\"https:\\/\\/github.com\\/hyscaler\\/HyScribe\\\" rel=\\\"nofollow\\\">HyScribe<\\/a>",
+];
+
 /// The PHP oracle's answers to a visitor and the administrator, served
 /// over HTTP; routes not ported answer 501.
 #[tokio::test(flavor = "multi_thread")]
@@ -147,9 +153,11 @@ async fn answers_match_php() {
     let dir = tempfile::tempdir().unwrap();
     let sites = (site(false, dir.path()).await, site(true, dir.path()).await);
     let golden = include_str!("../../../hyscribe-rest/tests/golden/rest.tsv");
-    assert_eq!(replay(&sites, golden, false).await, (2 * 63, 2 * 10));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 64, 2 * 9));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/content.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 89, 2 * 3));
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/templates.tsv");
+    assert_eq!(replay(&sites, golden, false).await, (2 * 85, 0));
 }
 
 /// The content routes over the Theme Test Data fixture, by hash.
@@ -254,7 +262,7 @@ async fn replay(sites: &(Arc<Site>, Arc<Site>), golden: &str, hashed: bool) -> (
             let digest = sha2::Sha256::digest(ours.as_bytes());
             ours = digest.iter().map(|b| format!("{b:02x}")).collect();
         }
-        assert_eq!(ours, text(6), "{what}");
+        assert_eq!(ours, text(6).replace(CREDIT[0], CREDIT[1]), "{what}");
         served += 1;
     }
     (served, unported)
@@ -352,6 +360,40 @@ async fn authors_posts_are_read() {
         };
         let users = hyscribe_rest::Site::users(&rest, &slugs);
         assert_eq!(users.iter().map(|user| user.id).collect::<Vec<_>>(), [1]);
+    })
+    .await
+    .unwrap();
+}
+
+/// The reads a site's own templates and global styles posts need, which
+/// the default install has none of, over `reference/default-install/terms.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn posts_are_read_for_the_routes() {
+    let mut config = crate::tests::fixture_config();
+    config.name = "wordpress_terms".into();
+    let db = crate::Db::connect(&config)
+        .await
+        .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
+    let home = Some("http://127.0.0.1:8081".to_string());
+    let plain = Site::load(db, home.clone(), home).await.unwrap();
+    let handle = Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let mut reads = LoginReads::new(&plain, handle, now());
+        reads.act_as(1, Vec::new());
+        let rest = Rest {
+            reads,
+            site: &plain,
+            user: 1,
+            caps: OnceCell::new(),
+        };
+        let site: &dyn hyscribe_rest::Site = &rest;
+        assert_eq!(site.revisions(1), [105, 104]);
+        let blocks = site.posts_of_type("wp_block");
+        assert_eq!(blocks.iter().map(|post| post.id).collect::<Vec<_>>(), [102]);
+        assert_eq!(site.post_terms(1, "category")[0].name, b"Uncategorized");
+        assert_eq!(site.post_meta(2, "_wp_page_template").unwrap(), b"default");
+        assert_eq!(site.user(1).unwrap().display_name, b"admin");
+        assert!(rest.reads.reads.finish().is_ok());
     })
     .await
     .unwrap();

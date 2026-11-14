@@ -15,6 +15,7 @@ mod routes;
 mod schema;
 mod settings;
 mod taxonomies;
+mod templates;
 mod terms;
 mod types;
 mod users;
@@ -77,6 +78,14 @@ pub trait Site {
     /// Whether `author` has posts of `types`, published, or private too
     /// where a type's flag is set.
     fn has_posts(&self, author: u64, types: &[(String, bool)]) -> bool;
+    /// Every post of `post_type` whatever its status, newest first.
+    fn posts_of_type(&self, post_type: &str) -> Vec<Post>;
+    /// `get_the_terms( $post, $taxonomy )`, by name.
+    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term>;
+    /// `get_post_meta( $post, $key, true )`.
+    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>>;
+    /// The IDs of the revisions of `post`, newest first.
+    fn revisions(&self, post: u64) -> Vec<u64>;
 }
 
 /// A request for the API.
@@ -188,6 +197,7 @@ fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         .or_else(|| settings::endpoints(regex))
         .or_else(|| comments::endpoints(regex))
         .or_else(|| users::endpoints(regex))
+        .or_else(|| templates::endpoints(regex))
 }
 
 /// `maybe_unserialize()` of a stored option or meta value: `false` where

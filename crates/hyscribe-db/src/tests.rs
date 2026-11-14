@@ -452,6 +452,8 @@ async fn errors_are_reported() {
             .unwrap_err(),
         db.users_meta("wp_capabilities").await.unwrap_err(),
         db.post_authors("post").await.unwrap_err(),
+        db.posts_of_type("page").await.unwrap_err(),
+        db.revisions(1).await.unwrap_err(),
         db.user_post_counts(&[1], true, 1).await.unwrap_err(),
         db.comments(1).await.unwrap_err(),
         db.comment(1).await.unwrap_err(),
@@ -1501,6 +1503,16 @@ async fn dashboard_reads() {
     );
     let terms = named("wordpress_terms").await;
     let ids = |posts: Vec<Post>| posts.iter().map(|p| p.id).collect::<Vec<_>>();
+    // Every status, newest first: the auto-draft 103 is as new as 101.
+    let posts = terms.posts_of_type("post").await.unwrap();
+    assert!(posts.windows(2).all(|pair| pair[0].date >= pair[1].date));
+    let mut found = ids(posts);
+    found.sort_unstable();
+    assert_eq!(found, [1, 101, 103]);
+    assert_eq!(ids(terms.posts_of_type("wp_block").await.unwrap()), [102]);
+    // Newest first, the later saved first of those saved together.
+    assert_eq!(terms.revisions(1).await.unwrap(), [105, 104]);
+    assert!(terms.revisions(2).await.unwrap().is_empty());
     let query = |order, author| StatusQuery {
         status: "publish",
         author,

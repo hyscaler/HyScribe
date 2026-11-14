@@ -305,6 +305,14 @@ pub fn json_encode(value: &Value) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// `json_encode( $value, JSON_PRETTY_PRINT )`: [`json_encode`] with each
+/// item on its own line, indented four spaces a level, and `": "` after keys.
+pub fn json_encode_pretty(value: &Value) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    encode_indented(value, Flags::Default, Some(0), &mut out)?;
+    Some(out)
+}
+
 /// `json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE )`,
 /// as `serialize_block_attributes()` calls it. U+2028 and U+2029 stay
 /// escaped, as PHP keeps them without `JSON_UNESCAPED_LINE_TERMINATORS`.
@@ -325,6 +333,26 @@ pub fn json_encode_script_data(value: &Value) -> Option<Vec<u8>> {
 }
 
 fn encode_value(value: &Value, flags: Flags, out: &mut Vec<u8>) -> Option<()> {
+    encode_indented(value, flags, None, out)
+}
+
+/// A new line and the indentation of `depth`, when pretty printing.
+fn new_line(depth: Option<usize>, out: &mut Vec<u8>) {
+    if let Some(depth) = depth {
+        out.push(b'\n');
+        out.extend(std::iter::repeat_n(b' ', depth * 4));
+    }
+}
+
+/// [`encode_value`], pretty printed at `depth` when it is set.
+fn encode_indented(
+    value: &Value,
+    flags: Flags,
+    depth: Option<usize>,
+    out: &mut Vec<u8>,
+) -> Option<()> {
+    let inner = depth.map(|depth| depth + 1);
+    let colon: &[u8] = if depth.is_some() { b": " } else { b":" };
     match value {
         Value::Null => out.extend_from_slice(b"null"),
         Value::Bool(true) => out.extend_from_slice(b"true"),
@@ -352,15 +380,19 @@ fn encode_value(value: &Value, flags: Flags, out: &mut Vec<u8>) -> Option<()> {
                 if i > 0 {
                     out.push(b',');
                 }
+                new_line(inner, out);
                 if !list {
                     let name = match key {
                         Key::Int(n) => n.to_string().into_bytes(),
                         Key::String(name) => name.clone(),
                     };
                     encode_string(&name, flags, out)?;
-                    out.push(b':');
+                    out.extend_from_slice(colon);
                 }
-                encode_value(item, flags, out)?;
+                encode_indented(item, flags, inner, out)?;
+            }
+            if !entries.is_empty() {
+                new_line(depth, out);
             }
             out.push(if list { b']' } else { b'}' });
         }
@@ -369,13 +401,19 @@ fn encode_value(value: &Value, flags: Flags, out: &mut Vec<u8>) -> Option<()> {
             let public = properties
                 .iter()
                 .filter(|(key, _)| !matches!(key, Key::String(name) if name.first() == Some(&0)));
+            let mut any = false;
             for (i, (key, item)) in public.enumerate() {
                 if i > 0 {
                     out.push(b',');
                 }
+                new_line(inner, out);
                 encode_string(&key.to_php_string(), flags, out)?;
-                out.push(b':');
-                encode_value(item, flags, out)?;
+                out.extend_from_slice(colon);
+                encode_indented(item, flags, inner, out)?;
+                any = true;
+            }
+            if any {
+                new_line(depth, out);
             }
             out.push(b'}');
         }
@@ -594,8 +632,10 @@ mod tests {
             let mut fields = line.split('\t').map(hyscribe_testkit::unhex);
             let mut field = || fields.next().unwrap();
             let (value, php, unescaped, script) = (field(), field(), field(), field());
+            let pretty = field();
             let value = crate::decode(&value).unwrap();
             assert_eq!(json_encode(&value), Some(php), "{value:?}");
+            assert_eq!(json_encode_pretty(&value), Some(pretty), "{value:?}");
             assert_eq!(json_encode_unescaped(&value), Some(unescaped), "{value:?}");
             assert_eq!(json_encode_script_data(&value), Some(script), "{value:?}");
         }
@@ -611,6 +651,7 @@ mod tests {
         );
         assert_eq!(json_encode(&Value::Enum(b"Suit:Hearts".to_vec())), None);
         assert_eq!(json_encode_script_data(&Value::String(vec![0xff])), None);
+        assert_eq!(json_encode_pretty(&Value::String(vec![0xff])), None);
         for properties in [
             vec![(Key::String(vec![0xff]), Value::Null)],
             vec![(Key::Int(0), Value::String(vec![0xff]))],

@@ -705,6 +705,7 @@ dependencies = [
  "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-render",
+ "hyscribe-rest",
  "hyscribe-testkit",
  "sha2 0.11.1",
  "tempfile",
@@ -744,6 +745,16 @@ dependencies = [
  "icu_normalizer",
  "jiff-tzdb",
  "sha2 0.11.1",
+]
+
+[[package]]
+name = "hyscribe-rest"
+version = "0.1.0"
+dependencies = [
+ "hyscribe-auth",
+ "hyscribe-kses",
+ "hyscribe-phpser",
+ "hyscribe-testkit",
 ]
 
 [[package]]

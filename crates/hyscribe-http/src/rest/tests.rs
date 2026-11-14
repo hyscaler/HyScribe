@@ -1,0 +1,247 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! These tests read the default install fixture from a live MariaDB:
+//! start it with `reference/default-install/db.sh up`.
+
+use axum::body::Body;
+use axum::http::StatusCode;
+use hyscribe_auth::cookie::parse_auth_cookie;
+use hyscribe_auth::sessions::Sessions;
+use hyscribe_config::Secret;
+use hyscribe_phpser::urldecode;
+use hyscribe_testkit::unhex;
+use tower::ServiceExt;
+
+use super::*;
+use crate::router;
+use crate::tests::oracle_site;
+
+/// The oracle's site, with its keys and salts and sessions in `dir`, under
+/// `/%postname%/` permalinks when `pretty`.
+async fn site(pretty: bool, dir: &std::path::Path) -> Arc<Site> {
+    let mut site = Arc::into_inner(oracle_site().await).unwrap();
+    if pretty {
+        site.options
+            .insert("permalink_structure".into(), b"/%postname%/".to_vec());
+        site.build_rewriter();
+    }
+    let salts = [
+        "AUTH_KEY",
+        "AUTH_SALT",
+        "LOGGED_IN_KEY",
+        "LOGGED_IN_SALT",
+        "NONCE_KEY",
+        "NONCE_SALT",
+    ];
+    let salts = salts
+        .iter()
+        .map(|name| (*name, Secret::new(*name)))
+        .collect();
+    Arc::new(site.with_salts(salts).with_sessions(Sessions::new(dir)))
+}
+
+async fn send(site: &Arc<Site>, request: axum::http::request::Builder, body: &str) -> Response {
+    let request = request.body(Body::from(body.to_string())).unwrap();
+    router(Arc::clone(site)).oneshot(request).await.unwrap()
+}
+
+async fn body(response: Response) -> String {
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+/// The REST nonce of `user` with the session `token`.
+async fn nonce(site: &Arc<Site>, user: u64, token: Vec<u8>) -> String {
+    let (site, handle) = (Arc::clone(site), Handle::current());
+    tokio::task::spawn_blocking(move || {
+        let mut reads = LoginReads::new(&site, handle, now());
+        reads.act_as(user, token);
+        reads.nonce("wp_rest")
+    })
+    .await
+    .unwrap()
+}
+
+/// The administrator's logged in cookie, from logging in at `/hs-login`,
+/// and their REST nonce.
+async fn log_in(site: &Arc<Site>) -> (String, String) {
+    let login = axum::http::Request::builder()
+        .method("POST")
+        .uri("/hs-login")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    let response = send(site, login, "log=admin&pwd=reference-only-password").await;
+    let cookie = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|cookie| {
+            cookie
+                .to_str()
+                .unwrap()
+                .split(';')
+                .next()
+                .unwrap()
+                .to_string()
+        })
+        .find(|cookie| cookie.starts_with("hyscribe_logged_in_"))
+        .unwrap();
+    let value = urldecode(cookie.split_once('=').unwrap().1.as_bytes());
+    let token = parse_auth_cookie(&value).unwrap().token.to_vec();
+    (cookie, nonce(site, 1, token).await)
+}
+
+/// The headers the golden keeps, sorted.
+fn kept(headers: &HeaderMap, nonce: &str) -> Vec<String> {
+    let kept = |name: &str| {
+        [
+            "content-type",
+            "x-robots-tag",
+            "link",
+            "allow",
+            "vary",
+            "expires",
+            "cache-control",
+        ]
+        .contains(&name)
+            || name.starts_with("access-control-")
+            || name.starts_with("x-wp-")
+    };
+    let mut headers: Vec<String> = headers
+        .iter()
+        .filter(|(name, _)| kept(name.as_str()))
+        .map(|(name, value)| {
+            format!("{name}: {}", value.to_str().unwrap()).replace(nonce, "%nonce%")
+        })
+        .collect();
+    headers.sort();
+    headers
+}
+
+/// The PHP oracle's answers to a visitor and the administrator, served
+/// over HTTP; routes not ported answer 501.
+#[tokio::test(flavor = "multi_thread")]
+async fn answers_match_php() {
+    let dir = tempfile::tempdir().unwrap();
+    let plain = site(false, dir.path()).await;
+    let pretty = site(true, dir.path()).await;
+    let (cookie, nonce) = log_in(&plain).await;
+    let visitor = self::nonce(&plain, 0, Vec::new()).await;
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/rest.tsv");
+    let (mut served, mut unported) = (0, 0);
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let text = |i: usize| String::from_utf8(unhex(fields[i])).unwrap();
+        let (who, method, target, flags) = (fields[0], fields[1], text(2), fields[3]);
+        if who != "visitor" && who != "administrator" {
+            continue;
+        }
+        let flag = |name: &str| flags.split(',').any(|flag| flag == name);
+        let site = if flag("pretty") { &pretty } else { &plain };
+        let nonce = if who == "visitor" { &visitor } else { &nonce };
+        let mut request = axum::http::Request::builder()
+            .method(method)
+            .uri(target.replace("%nonce%", nonce).replace("[]", "%5B%5D"))
+            .header(header::HOST, "127.0.0.1:8081");
+        if who == "administrator" {
+            request = request.header(header::COOKIE, &cookie);
+            if !flag("nononce") {
+                request = request.header("x-wp-nonce", nonce);
+            }
+        }
+        for (name, value, set) in [
+            ("origin", "http://example.test", flag("origin")),
+            ("origin", "null", flag("originnull")),
+            ("x-http-method-override", "DELETE", flag("override")),
+        ] {
+            if set {
+                request = request.header(name, value);
+            }
+        }
+        let response = send(site, request, "").await;
+        let what = format!("{who} {method} {target} {flags}");
+        if response.status() == StatusCode::NOT_IMPLEMENTED {
+            assert!(
+                !String::from_utf8(unhex(fields[6]))
+                    .unwrap()
+                    .contains("rest_no_route"),
+                "{what}"
+            );
+            unported += 1;
+            continue;
+        }
+        assert_eq!(response.status().as_u16().to_string(), fields[4], "{what}");
+        let mut php: Vec<String> = text(5).lines().map(String::from).collect();
+        php.sort();
+        assert_eq!(kept(response.headers(), nonce), php, "{what}");
+        let ours = body(response).await.replace(nonce, "%nonce%");
+        assert_eq!(ours, text(6), "{what}");
+        served += 1;
+    }
+    assert_eq!((served, unported), (2 * 63, 2 * 10));
+}
+
+/// What WordPress serves as a page stays a page, and a `rest_route` that is
+/// not a string is not ported.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_rest_routes_reach_the_api() {
+    let dir = tempfile::tempdir().unwrap();
+    let plain = site(false, dir.path()).await;
+    let get = |uri: &str| axum::http::Request::builder().uri(uri.to_string());
+    let response = send(&plain, get("/?rest_route%5B%5D=/x"), "").await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // Plain permalinks have no `/wp-json/` rule.
+    for page in ["/?rest_route=", "/?rest_route=0", "/wp-json/"] {
+        let response = send(&plain, get(page), "").await;
+        assert_eq!(response.status(), StatusCode::OK, "{page}");
+        assert!(
+            body(response).await.starts_with("<!DOCTYPE html>"),
+            "{page}"
+        );
+    }
+    let put = axum::http::Request::builder().method("PUT").uri("/");
+    assert_eq!(
+        send(&plain, put, "").await.status(),
+        StatusCode::METHOD_NOT_ALLOWED
+    );
+    // A form's nonce is checked before the query's.
+    let visitor = nonce(&plain, 0, Vec::new()).await;
+    let post = |uri: String| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+    };
+    let uri = format!("/?rest_route=/wp/v2/types/post&_wpnonce={visitor}");
+    let response = send(&plain, post(uri.clone()), "").await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let response = send(&plain, post(uri), "_wpnonce=abc").await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    // A cookie that does not validate is a visitor's.
+    let name = Names::new(&plain).logged_in();
+    let stranger = get("/?rest_route=/wp/v2/types&context=edit")
+        .header(header::COOKIE, format!("{name}=admin%7C1%7Ct%7Ch"))
+        .header("x-wp-nonce", "x");
+    assert_eq!(
+        send(&plain, stranger, "").await.status(),
+        StatusCode::FORBIDDEN
+    );
+}
+
+/// A database failure reading the cookie's user shows the error page.
+#[tokio::test(flavor = "multi_thread")]
+async fn database_errors_show_the_error_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let plain = site(false, dir.path()).await;
+    let (cookie, _) = log_in(&plain).await;
+    let mut broken = Arc::into_inner(plain).unwrap();
+    let mut config = crate::tests::fixture_config();
+    config.prefix = hyscribe_config::Prefix::new("missing_").unwrap();
+    broken.db = hyscribe_db::Db::connect(&config).await.unwrap();
+    let request = axum::http::Request::builder()
+        .uri("/?rest_route=/wp/v2/types")
+        .header(header::COOKIE, cookie);
+    let response = send(&Arc::new(broken), request, "").await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}

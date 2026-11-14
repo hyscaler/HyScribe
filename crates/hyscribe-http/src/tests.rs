@@ -11,7 +11,7 @@ use hyscribe_model::Term;
 use hyscribe_phpser::{Key, Value};
 use tower::ServiceExt;
 
-fn fixture_config() -> Database {
+pub(crate) fn fixture_config() -> Database {
     hyscribe_testkit::fixture_database()
 }
 

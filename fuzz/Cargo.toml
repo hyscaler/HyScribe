@@ -17,6 +17,7 @@ hyscribe-auth = { path = "../crates/hyscribe-auth" }
 hyscribe-phpser = { path = "../crates/hyscribe-phpser" }
 hyscribe-config = { path = "../crates/hyscribe-config" }
 hyscribe-render = { path = "../crates/hyscribe-render" }
+hyscribe-rest = { path = "../crates/hyscribe-rest" }
 hyscribe-model = { path = "../crates/hyscribe-model" }
 hyscribe-http = { path = "../crates/hyscribe-http" }
 hyscribe-html = { path = "../crates/hyscribe-html" }
@@ -231,6 +232,13 @@ bench = false
 [[bin]]
 name = "login_input"
 path = "fuzz_targets/login_input.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rest_serve"
+path = "fuzz_targets/rest_serve.rs"
 test = false
 doc = false
 bench = false

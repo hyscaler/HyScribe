@@ -51,6 +51,7 @@ mod login;
 pub mod query;
 mod reads;
 mod redirect;
+mod rest;
 mod rewrite;
 mod sitemaps;
 mod trackback;
@@ -62,7 +63,6 @@ pub mod fuzzing {
     pub use crate::files::http_date;
     pub use crate::login::cookies;
     pub use crate::redirect::{wp_sanitize_redirect, wp_validate_redirect};
-    pub use crate::rewrite::pattern::Pattern;
 }
 
 use reads::Reads;
@@ -458,14 +458,12 @@ async fn page(
         return (status, [(header::LOCATION, location)]).into_response();
     }
     let (head, post) = (method == Method::HEAD, method == Method::POST);
-    if method != Method::GET && !head && !post {
-        return StatusCode::METHOD_NOT_ALLOWED.into_response();
-    }
-    if let Some(response) = files::static_file(uri.path(), &headers, now() as u64).filter(|_| !post)
-    {
+    let page_method = method == Method::GET || head || post;
+    let file = files::static_file(uri.path(), &headers, now() as u64);
+    if let Some(response) = file.filter(|_| page_method && !post) {
         return response;
     }
-    if uri.path() == login::PATH {
+    if uri.path() == login::PATH && page_method {
         let form = if post {
             trackback::form(&headers, &body)
         } else {
@@ -480,10 +478,10 @@ async fn page(
         return login::respond(&site, asked).await;
     }
     // The loaders read only the query, whatever the method, as PHP's do.
-    if let Some(loader) = loaders::Loader::at(uri.path()) {
+    if let Some(loader) = loaders::Loader::at(uri.path()).filter(|_| page_method) {
         return loaders::load(loader, uri.query(), &headers, now() as u64);
     }
-    if admin::is_admin(uri.path()) {
+    if admin::is_admin(uri.path()) && page_method {
         return admin::respond(&site, uri, headers, post).await;
     }
     // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.
@@ -492,6 +490,22 @@ async fn page(
         Ok(request) => request,
         Err(err) => return html(database_error(&site, &err)),
     };
+    // `rest_api_loaded()`, for any method.
+    match rest::route(&original, &query) {
+        Some(Some(route)) => {
+            let asked = rest::Asked {
+                method,
+                uri: original,
+                headers,
+                body,
+                route,
+            };
+            return rest::respond(&site, asked).await;
+        }
+        Some(None) => return StatusCode::NOT_IMPLEMENTED.into_response(),
+        None if !page_method => return StatusCode::METHOD_NOT_ALLOWED.into_response(),
+        None => {}
+    }
     // `WP::send_headers()` sends the status `error` asks for; these end the
     // request before any redirect.
     let status = error_status(&query);

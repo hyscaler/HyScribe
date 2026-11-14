@@ -169,6 +169,7 @@ fn serve_case(case: &RestCase, ttd: bool) -> Served {
             ttd,
             pretty: case.flag("pretty"),
             extra: false,
+            state: None,
         },
         deny: &[],
     };
@@ -313,6 +314,7 @@ fn revisions_are_linked() {
             ttd: false,
             pretty: false,
             extra: true,
+            state: None,
         },
         deny: &[],
     };
@@ -365,6 +367,7 @@ fn served(who: &'static str, target: &str, ttd: bool, deny: &'static [&'static s
             ttd,
             pretty,
             extra: !ttd,
+            state: None,
         },
         deny,
     };

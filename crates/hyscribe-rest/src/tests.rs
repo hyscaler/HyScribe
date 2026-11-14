@@ -116,16 +116,21 @@ impl Site for Oracle {
             .cloned()
     }
     fn reads(&self) -> &dyn Reads {
+        if let Some(fixtures) = &self.content.reads {
+            return &fixtures[usize::from(self.pretty)];
+        }
         static FIXTURES: [site::Fixture; 2] = [
             site::Fixture {
                 ttd: false,
                 pretty: false,
                 extra: false,
+                state: None,
             },
             site::Fixture {
                 ttd: false,
                 pretty: true,
                 extra: false,
+                state: None,
             },
         ];
         &FIXTURES[usize::from(self.pretty)]

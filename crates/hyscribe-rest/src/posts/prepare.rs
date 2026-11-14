@@ -18,6 +18,7 @@ use crate::fields::{
 };
 use crate::request::Params;
 use crate::response::{Response, RestError, list, object, text};
+use crate::taxonomies::field;
 
 const POST: &Properties = &[
     ("date", &["view", "edit", "embed"]),
@@ -77,6 +78,47 @@ const PAGE: &Properties = &[
     ("template", &["view", "edit"]),
 ];
 
+/// `WP_REST_Blocks_Controller`'s: a pattern has no rendered title or
+/// content, and `wp_pattern_sync_status` is added after.
+const BLOCK: &Properties = &[
+    ("date", &["view", "edit", "embed"]),
+    ("date_gmt", &["view", "edit"]),
+    ("guid", &["view", "edit"]),
+    ("id", &["view", "edit", "embed"]),
+    ("link", &["view", "edit", "embed"]),
+    ("modified", &["view", "edit"]),
+    ("modified_gmt", &["view", "edit"]),
+    ("slug", &["view", "edit", "embed"]),
+    ("status", &["view", "edit"]),
+    ("type", &["view", "edit", "embed"]),
+    ("password", &["edit"]),
+    ("title", &["view", "edit", "embed"]),
+    ("content", &["view", "edit"]),
+    ("excerpt", &["view", "edit", "embed"]),
+    ("meta", &["view", "edit"]),
+    ("template", &["view", "edit"]),
+    ("wp_pattern_category", &["view", "edit"]),
+];
+
+/// With `WP_Navigation_Fallback::update_wp_navigation_post_schema()`:
+/// the status and content embedded too.
+const NAVIGATION: &Properties = &[
+    ("date", &["view", "edit", "embed"]),
+    ("date_gmt", &["view", "edit"]),
+    ("guid", &["view", "edit"]),
+    ("id", &["view", "edit", "embed"]),
+    ("link", &["view", "edit", "embed"]),
+    ("modified", &["view", "edit"]),
+    ("modified_gmt", &["view", "edit"]),
+    ("slug", &["view", "edit", "embed"]),
+    ("status", &["view", "edit", "embed"]),
+    ("type", &["view", "edit", "embed"]),
+    ("password", &["edit"]),
+    ("title", &["view", "edit", "embed"]),
+    ("content", &["view", "edit", "embed"]),
+    ("template", &["view", "edit"]),
+];
+
 /// The contexts of the parts of `title`, `content`, `excerpt` and `guid`.
 const PARTS: &Properties = &[
     ("raw", &["edit"]),
@@ -84,6 +126,49 @@ const PARTS: &Properties = &[
     ("protected", &["view", "edit", "embed"]),
     ("block_version", &["edit"]),
 ];
+
+/// A pattern's title and content: raw in view too, never rendered.
+const BLOCK_PARTS: &Properties = &[
+    ("raw", &["view", "edit"]),
+    ("rendered", &[]),
+    ("protected", &["view", "edit", "embed"]),
+    ("block_version", &["edit"]),
+];
+
+/// A navigation menu's title and content, embedded whole.
+const NAVIGATION_PARTS: &Properties = &[
+    ("raw", &["edit", "embed"]),
+    ("rendered", &["view", "edit", "embed"]),
+    ("protected", &["view", "edit", "embed"]),
+    ("block_version", &["edit", "embed"]),
+];
+
+/// The properties of the type's schema.
+fn properties(kind: Kind) -> &'static Properties {
+    match kind {
+        Kind::Post => POST,
+        Kind::Page => PAGE,
+        Kind::Block => BLOCK,
+        Kind::Navigation => NAVIGATION,
+        Kind::MenuItem => super::menu_items::PROPERTIES,
+    }
+}
+
+/// The contexts of the parts of the property `name`.
+fn parts(kind: Kind, name: &[u8]) -> &'static Properties {
+    match (kind, name) {
+        (Kind::Block, b"title" | b"content") => BLOCK_PARTS,
+        (Kind::Navigation, b"title" | b"content") => NAVIGATION_PARTS,
+        _ => PARTS,
+    }
+}
+
+/// Whether the part `name` of `property` is shown in `context`.
+fn part_shown(kind: Kind, property: &[u8], name: &str, context: &[u8]) -> bool {
+    let parts = parts(kind, property);
+    let contexts = parts.iter().find(|(part, _)| *part == name);
+    contexts.is_some_and(|(_, contexts)| contexts.iter().any(|c| c.as_bytes() == context))
+}
 
 /// `mysql_to_rfc3339()` of a date WordPress has set.
 fn rfc3339(date: &str) -> Value {
@@ -151,10 +236,10 @@ pub(super) fn post(
     if context.head {
         return Ok(Response::new(Value::Array(Vec::new()), 200));
     }
-    let properties = match kind {
-        Kind::Post => POST,
-        Kind::Page => PAGE,
-    };
+    if kind == Kind::MenuItem {
+        return super::menu_items::prepare(context, params, post);
+    }
+    let properties = properties(kind);
     let fields = fields_for_response(params, properties);
     let has = |field: &str| is_field_included(field, &fields);
     let reads = context.site.reads();
@@ -251,7 +336,9 @@ pub(super) fn post(
     let rendered = (unlocked && has("content.rendered")).then(|| rendering.the_content(&open));
     let length = params.get("excerpt_length").map_or(55, Value::to_int);
     let excerpt = (unlocked && has("excerpt")).then(|| rendering.the_excerpt(&open, length));
-    let hooked = edit && has("content.raw") && !text(post.content.clone()).is_empty();
+    let shown = params.context();
+    let raw = part_shown(kind, b"content", "raw", &shown);
+    let hooked = raw && has("content.raw") && !text(post.content.clone()).is_empty();
     let rendered = match rendered {
         Some(first) if hooked && !text(first.clone()).is_empty() => {
             Some(rendering.the_content(&open))
@@ -363,21 +450,37 @@ pub(super) fn post(
             .map(|class| text(class.to_vec()));
         put("class_list", list(classes.collect()));
     }
-    let shown = params.context();
-    let data: Vec<(Key, Value)> = filter_by_context(data, properties, &shown)
+    let mut data: Vec<(Key, Value)> = filter_by_context(data, properties, &shown)
         .into_iter()
-        .map(
-            |(name, value)| match (name.to_php_string().as_slice(), value) {
-                (b"title" | b"content" | b"excerpt" | b"guid", Value::Array(parts)) => {
-                    (name, Value::Array(filter_by_context(parts, PARTS, &shown)))
+        .map(|(name, value)| {
+            let property = name.to_php_string();
+            match (property.as_slice(), value) {
+                (b"title" | b"content" | b"excerpt" | b"guid", Value::Array(found)) => {
+                    let kept = filter_by_context(found, parts(kind, &property), &shown);
+                    (name, Value::Array(kept))
                 }
                 (_, value) => (name, value),
-            },
-        )
+            }
+        })
         .collect();
+    if kind == Kind::Block {
+        // The meta's `wp_pattern_sync_status`, moved up: a value its enum
+        // does not take is null.
+        let status = data
+            .iter()
+            .any(|(name, _)| name.to_php_string() == b"meta")
+            .then(|| context.site.post_meta(post.id, "wp_pattern_sync_status"))
+            .flatten()
+            .filter(|status| matches!(status.as_slice(), b"partial" | b"unsynced"));
+        data.push((
+            key("wp_pattern_sync_status"),
+            text(status.unwrap_or_default()),
+        ));
+    }
     let mut response = Response::new(Value::Array(data), 200);
     if links_wanted(&fields) {
-        links(context, params, kind, post, &mut response);
+        links(context, kind, post, &mut response);
+        actions(context, params, kind, post, &mut response);
     }
     Ok(response)
 }
@@ -458,8 +561,8 @@ fn post_status(context: &Context, post: &Post) -> String {
     }
 }
 
-/// `prepare_links()` and the actions `get_available_actions()` allows.
-fn links(context: &Context, params: &Params, kind: Kind, post: &Post, response: &mut Response) {
+/// `prepare_links()`.
+pub(super) fn links(context: &Context, kind: Kind, post: &Post, response: &mut Response) {
     let rest = |path: &str| context.rest_url(path);
     let with_arg = |path: &str, name: &[u8], id: u64| {
         let id = id.to_string();
@@ -472,29 +575,33 @@ fn links(context: &Context, params: &Params, kind: Kind, post: &Post, response: 
     crate::self_link(context, response, &own);
     response.add_link("collection", rest(&base));
     response.add_link("about", rest(&format!("/wp/v2/types/{}", kind.name())));
-    if post.author != 0 {
+    if kind.supports("author") && post.author != 0 {
         let author = rest(&format!("/wp/v2/users/{}", post.author));
         response.add_link_with("author", author, embeddable());
     }
-    response.add_link_with(
-        "replies",
-        with_arg("/wp/v2/comments", b"post", post.id),
-        embeddable(),
-    );
-    let (count, latest) = revisions(context, post);
-    let history = vec![("count", int(count))];
-    response.add_link_with(
-        "version-history",
-        rest(&format!("{own}/revisions")),
-        history,
-    );
-    if let Some(latest) = latest {
-        let id = vec![("id", int(latest))];
+    if kind.supports("comments") {
         response.add_link_with(
-            "predecessor-version",
-            rest(&format!("{own}/revisions/{latest}")),
-            id,
+            "replies",
+            with_arg("/wp/v2/comments", b"post", post.id),
+            embeddable(),
         );
+    }
+    if kind.supports("revisions") {
+        let (count, latest) = revisions(context, post);
+        let history = vec![("count", int(count))];
+        response.add_link_with(
+            "version-history",
+            rest(&format!("{own}/revisions")),
+            history,
+        );
+        if let Some(latest) = latest {
+            let id = vec![("id", int(latest))];
+            response.add_link_with(
+                "predecessor-version",
+                rest(&format!("{own}/revisions/{latest}")),
+                id,
+            );
+        }
     }
     if kind == Kind::Page && post.parent != 0 {
         response.add_link_with(
@@ -515,20 +622,32 @@ fn links(context: &Context, params: &Params, kind: Kind, post: &Post, response: 
         let link = rest(&format!("/wp/v2/media/{}", media.id));
         response.add_link_with("https://api.w.org/featuredmedia", link, embeddable());
     }
-    response.add_link(
-        "https://api.w.org/attachment",
-        with_arg("/wp/v2/media", b"parent", post.id),
-    );
+    if kind != Kind::MenuItem {
+        response.add_link(
+            "https://api.w.org/attachment",
+            with_arg("/wp/v2/media", b"parent", post.id),
+        );
+    }
     for (taxonomy, base) in kind.taxonomies() {
         let mut attributes = vec![("taxonomy", text(*taxonomy))];
         attributes.extend(embeddable());
         let link = with_arg(&format!("/wp/v2/{base}"), b"post", post.id);
         response.add_link_with("https://api.w.org/term", link, attributes);
     }
+}
+
+/// The actions `get_available_actions()` allows, linked to the post.
+pub(super) fn actions(
+    context: &Context,
+    params: &Params,
+    kind: Kind,
+    post: &Post,
+    response: &mut Response,
+) {
     if params.context() != b"edit" {
         return;
     }
-    let self_link = rest(&own);
+    let self_link = context.rest_url(&format!("/wp/v2/{}/{}", kind.base(), post.id));
     let mut action = |rel: &str| {
         response.add_link(
             &format!("https://api.w.org/action-{rel}"),
@@ -545,18 +664,21 @@ fn links(context: &Context, params: &Params, kind: Kind, post: &Post, response: 
     if kind == Kind::Post && others && context.can(&kind.cap("publish_posts")) {
         action("sticky");
     }
-    if others {
+    if kind.supports("author") && others {
         action("assign-author");
     }
     for (taxonomy, base) in kind.taxonomies() {
-        let (create, assign) = match *taxonomy {
-            "category" => ("edit_categories", "assign_categories"),
-            _ => ("assign_post_tags", "assign_post_tags"),
+        let fields = crate::taxonomies::shown(taxonomy).unwrap_or(&Value::Null);
+        let hierarchical = fields.get_str("hierarchical") == Some(&Value::Bool(true));
+        let create = if hierarchical {
+            "edit_terms"
+        } else {
+            "assign_terms"
         };
-        if context.can(create) {
+        if context.can(&field(fields, &["capabilities", create])) {
             action(&format!("create-{base}"));
         }
-        if context.can(assign) {
+        if context.can(&field(fields, &["capabilities", "assign_terms"])) {
             action(&format!("assign-{base}"));
         }
     }

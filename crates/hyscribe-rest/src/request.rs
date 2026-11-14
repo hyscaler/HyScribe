@@ -5,7 +5,7 @@
 //! sanitized by their route's arguments.
 
 use hyscribe_kses::sanitize_key;
-use hyscribe_phpser::{Key, Value};
+use hyscribe_phpser::{Key, Value, absint, urldecode};
 use hyscribe_render::formatting::sanitize_text_field;
 
 use crate::Context;
@@ -15,6 +15,8 @@ use crate::schema::{Checked, Refusal, sanitize_value_from_schema, validate_value
 /// The parameters by where they come from.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Params {
+    /// The regex of the route matched.
+    pub(crate) route: &'static str,
     pub(crate) get: Vec<(Key, Value)>,
     pub(crate) url: Vec<(Key, Value)>,
     pub(crate) defaults: Vec<(Key, Value)>,
@@ -66,11 +68,13 @@ pub(crate) enum Sanitize {
     TextField,
     /// `rest_parse_request_arg()`: validated, then sanitized, by its schema.
     Schema,
-    /// The endpoint's own callback, which reads the site.
-    Callback(fn(&Context, &Value, &Value) -> Checked<Value>),
-    /// An argument whose schema uses keywords not ported: a request that
-    /// sets it is answered 501.
-    NotPorted,
+    /// `urldecode()` of a URL parameter, a string.
+    Urldecode,
+    /// Left as given, for the endpoint to check: a schema whose keywords
+    /// are not ported.
+    Endpoint,
+    /// The endpoint's own sanitizer, which reads the site.
+    Site(fn(&Context, &Value) -> Checked<Value>),
 }
 
 /// A route's argument: its schema, whether `rest_validate_request_arg()`
@@ -83,11 +87,14 @@ pub(crate) struct Arg {
     pub(crate) sanitize: Sanitize,
 }
 
-/// The arguments' defaults.
+/// The arguments' defaults, those set.
 pub(crate) fn defaults(args: &[Arg]) -> Vec<(Key, Value)> {
     args.iter()
         .filter_map(|arg| {
-            let default = arg.schema.get_str("default")?;
+            let default = arg
+                .schema
+                .get_str("default")
+                .filter(|v| **v != Value::Null)?;
             Some((Key::String(arg.name.as_bytes().to_vec()), default.clone()))
         })
         .collect()
@@ -135,7 +142,8 @@ impl Invalid {
 }
 
 /// An invalid parameter noted. Ported arguments use only ported keywords
-/// (`types::tests`), so a refusal always carries its error.
+/// (`tests::arguments_use_ported_keywords`), so a refusal always carries
+/// its error.
 fn refused<T>(result: Result<T, Refusal>, name: &str, invalid: &mut Invalid) -> Option<T> {
     result
         .map_err(|Refusal(error)| invalid.0.extend(error.map(|error| (name.into(), error))))
@@ -172,13 +180,15 @@ pub(crate) fn sanitize_params(
             let sanitized = match arg.sanitize {
                 // Validated first, so a string.
                 Sanitize::Key => Ok(text(sanitize_key(&value.to_php_string()))),
-                Sanitize::Absint => Ok(Value::Int(value.to_int().saturating_abs())),
-                Sanitize::TextField => Ok(text(sanitize_text_field(&value.to_php_string()))),
-                Sanitize::Schema | Sanitize::NotPorted => {
-                    validate_value_from_schema(value, &arg.schema, arg.name)
-                        .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name))
+                Sanitize::Absint => {
+                    Ok(Value::Int(i64::try_from(absint(value)).unwrap_or(i64::MAX)))
                 }
-                Sanitize::Callback(sanitize) => sanitize(context, value, &arg.schema),
+                Sanitize::TextField => Ok(text(sanitize_text_field(&value.to_php_string()))),
+                Sanitize::Urldecode => Ok(text(urldecode(&value.to_php_string()))),
+                Sanitize::Endpoint => Ok(value.clone()),
+                Sanitize::Site(sanitize) => sanitize(context, value),
+                Sanitize::Schema => validate_value_from_schema(value, &arg.schema, arg.name)
+                    .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name)),
             };
             if let Some(sanitized) = refused(sanitized, arg.name, &mut invalid) {
                 *value = sanitized;
@@ -186,4 +196,36 @@ pub(crate) fn sanitize_params(
         }
     }
     invalid.check()
+}
+
+/// An argument of `schema`, JSON, checked and sanitized as `sanitize`
+/// says; `rest_validate_request_arg()` validates it when `validate`.
+pub(crate) fn arg(name: &'static str, schema: &str, validate: bool, sanitize: Sanitize) -> Arg {
+    Arg {
+        name,
+        schema: hyscribe_phpser::json_decode(schema.as_bytes()).unwrap_or_default(),
+        validate,
+        sanitize,
+    }
+}
+
+/// `get_collection_params()`: the context, the page, its size and the
+/// search.
+pub(crate) fn collection_args() -> Vec<Arg> {
+    vec![
+        crate::types::context_arg(),
+        arg(
+            "page",
+            r#"{"type":"integer","default":1,"minimum":1}"#,
+            true,
+            Sanitize::Absint,
+        ),
+        arg(
+            "per_page",
+            r#"{"type":"integer","default":10,"minimum":1,"maximum":100}"#,
+            true,
+            Sanitize::Absint,
+        ),
+        arg("search", r#"{"type":"string"}"#, true, Sanitize::TextField),
+    ]
 }

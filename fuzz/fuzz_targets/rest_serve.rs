@@ -9,7 +9,7 @@
 
 use std::sync::OnceLock;
 
-use hyscribe_model::{Post, PostQuery, Term};
+use hyscribe_model::{Post, PostQuery, Term, TermQuery};
 use hyscribe_phpser::{Value, parse_str};
 use hyscribe_render::theme::{Theme, twentytwentyfive};
 use hyscribe_rest::{Request, Site, serve};
@@ -65,6 +65,18 @@ impl Site for Fuzzed {
     }
     fn can(&self, user: u64, cap: &str, _: &[Value]) -> bool {
         user % 2 == 1 && cap.len() % 2 == 0
+    }
+    fn terms(&self, _: &TermQuery) -> Vec<Term> {
+        Vec::new()
+    }
+    fn count_terms(&self, _: &TermQuery) -> u64 {
+        0
+    }
+    fn term_link(&self, _: &str, _: &Term) -> String {
+        String::new()
+    }
+    fn post(&self, id: u64) -> Option<Post> {
+        (id == 1).then(post)
     }
     fn reads(&self) -> &dyn hyscribe_render::site::Site {
         self

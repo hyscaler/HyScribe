@@ -1,3 +1,9 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The requests reference/rest/golden.sh records for the posts, pages and
+# statuses routes: method<TAB>target<TAB>flags, as golden.sh lists its own.
+# The ttd lines leave out the posts PHP writes caches for (oEmbed, feeds)
+# and those HyScribe answers 501.
 GET	/?rest_route=/wp/v2/posts
 GET	/?rest_route=/wp/v2/posts&context=edit
 GET	/?rest_route=/wp/v2/posts&context=embed
@@ -87,3 +93,42 @@ GET	/?rest_route=/wp/v2/pages&parent=2
 GET	/?rest_route=/wp/v2/pages&parent_exclude=0	
 GET	/?rest_route=/wp/v2/pages&slug=nope	
 GET	/?rest_route=/wp/v2/pages&menu_order=5	
+GET	/?rest_route=/wp/v2/posts&per_page=100&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts&per_page=100&context=edit&status=any&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts&per_page=100&context=embed&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts&per_page=20&page=2&ignore_sticky=0&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts&ignore_sticky=0&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts&sticky=1&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts&sticky=0&per_page=5&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts&format=aside,gallery,standard&per_page=50&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts&search=content&per_page=50&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts&search=template%20-image&orderby=relevance&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts&orderby=title&order=asc&per_page=100&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts&orderby=modified&per_page=100&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts&status=future,draft&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts&status=private&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts/1168	ttd
+GET	/?rest_route=/wp/v2/posts/1168&password=enter	ttd
+GET	/?rest_route=/wp/v2/posts/1168&password=wrong	ttd
+GET	/?rest_route=/wp/v2/posts/1168&context=edit	ttd
+GET	/?rest_route=/wp/v2/posts/1241	ttd
+GET	/?rest_route=/wp/v2/posts/1153	ttd
+GET	/?rest_route=/wp/v2/posts/1164&context=edit	ttd
+GET	/?rest_route=/wp/v2/posts/1011	ttd
+GET	/?rest_route=/wp/v2/posts/555	ttd
+GET	/?rest_route=/wp/v2/posts/555&excerpt_length=5	ttd
+GET	/?rest_route=/wp/v2/pages&per_page=100&exclude=1133	ttd
+GET	/?rest_route=/wp/v2/pages&per_page=100&context=edit&exclude=1133	ttd
+GET	/?rest_route=/wp/v2/pages&parent=1725&orderby=menu_order&order=asc&exclude=1133	ttd
+GET	/?rest_route=/wp/v2/pages&parent_exclude=0&per_page=100&exclude=1133	ttd
+GET	/?rest_route=/wp/v2/pages/172	ttd
+GET	/?rest_route=/wp/v2/pages/172&context=edit	ttd
+GET	/?rest_route=/wp/v2/pages/146&context=embed	ttd
+GET	/wp-json/wp/v2/pages/172?context=edit	pretty,ttd
+GET	/wp-json/wp/v2/posts?per_page=100&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	pretty,ttd
+GET	/?rest_route=/wp/v2/pages/172&_embed=up	ttd
+GET	/?rest_route=/wp/v2/pages&parent=1725&_embed=up&exclude=1133	ttd
+GET	/?rest_route=/wp/v2/posts/1241&context=edit	ttd
+GET	/?rest_route=/wp/v2/posts/1153&context=edit	ttd
+GET	/?rest_route=/wp/v2/posts&search=password&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/posts/51	ttd

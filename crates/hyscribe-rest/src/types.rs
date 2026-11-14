@@ -11,7 +11,7 @@ use hyscribe_phpser::{Key, Value, json_decode};
 use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
 use crate::request::{Arg, Params, Sanitize};
 use crate::response::{Response, RestError, object, text};
-use crate::{Context, Endpoint, Failure};
+use crate::{Context, Endpoint};
 
 const POST_TYPES: &[u8] = include_bytes!("../../../wordpress/wp-includes/rest-post-types.json");
 
@@ -57,6 +57,26 @@ fn field<'a>(fields: &'a Value, name: &str) -> &'a [u8] {
         .get_path(&[name])
         .and_then(Value::as_bytes)
         .unwrap_or_default()
+}
+
+/// The fields of the post type `name` in the edit context, if shown in
+/// REST.
+pub(crate) fn post_type(name: &str) -> Option<&'static Value> {
+    let found = shown_in_rest().find(|(key, _)| key.to_php_string() == name.as_bytes());
+    found.map(|(_, fields)| fields)
+}
+
+/// `rest_get_route_for_post_type_items()`: the route of a post type shown
+/// in REST.
+pub(crate) fn items_route(name: &str) -> Option<String> {
+    let found = shown_in_rest().find(|(key, _)| key.to_php_string() == name.as_bytes());
+    found.map(|(_, fields)| {
+        format!(
+            "/{}/{}",
+            String::from_utf8_lossy(field(fields, "rest_namespace")),
+            String::from_utf8_lossy(field(fields, "rest_base"))
+        )
+    })
 }
 
 /// `current_user_can( $type->cap->edit_posts )`.
@@ -122,46 +142,35 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     }
 }
 
-/// Whether the current user can edit posts of a type shown in REST.
+/// `current_user_can( 'edit_posts' )`, or the `edit_posts` capability of
+/// any post type shown in REST, as the editors' registries check: the first
+/// is the post type `post`'s own.
 pub(crate) fn can_edit_any(context: &Context) -> bool {
     shown_in_rest().any(|(_, fields)| can_edit(context, fields))
 }
 
-/// The fields of the post type `name` in the edit context, if shown in
-/// REST.
-pub(crate) fn post_type(name: &str) -> Option<&'static Value> {
-    shown_in_rest()
-        .find(|(key, _)| key.to_php_string() == name.as_bytes())
-        .map(|(_, fields)| fields)
-}
-
 /// `get_items_permissions_check()`.
 fn items_permission(context: &Context, params: &Params) -> Result<(), RestError> {
-    if !wants_edit(params) || can_edit_any(context) {
+    if !wants_edit(params) || shown_in_rest().any(|(_, fields)| can_edit(context, fields)) {
         return Ok(());
     }
     Err(cannot_edit("rest_cannot_view", context))
 }
 
 /// `get_items()`.
-fn items(context: &Context, params: &Params) -> Result<Response, Failure> {
+fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
     if context.head {
         return Ok(Response::new(Value::Array(Vec::new()), 200));
     }
     let data = shown_in_rest()
         .filter(|(_, fields)| !wants_edit(params) || can_edit(context, fields))
-        .map(|(name, fields)| {
-            (
-                name.clone(),
-                prepare(context, params, fields).into_data(context),
-            )
-        })
+        .map(|(name, fields)| (name.clone(), prepare(context, params, fields).into_data()))
         .collect();
     Ok(Response::new(Value::Array(data), 200))
 }
 
 /// `get_item()`.
-fn item(context: &Context, params: &Params) -> Result<Response, Failure> {
+fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
     let name = params
         .get("type")
         .map(Value::to_php_string)
@@ -170,16 +179,22 @@ fn item(context: &Context, params: &Params) -> Result<Response, Failure> {
         .iter()
         .find(|(key, _)| key.to_php_string() == name)
     else {
-        return Err(RestError::status("rest_type_invalid", "Invalid post type.", 404).into());
+        return Err(RestError::status(
+            "rest_type_invalid",
+            "Invalid post type.",
+            404,
+        ));
     };
     if !matches!(fields, Value::Array(_)) {
         let status = context.authorization_required();
-        return Err(
-            RestError::status("rest_cannot_read_type", "Cannot view post type.", status).into(),
-        );
+        return Err(RestError::status(
+            "rest_cannot_read_type",
+            "Cannot view post type.",
+            status,
+        ));
     }
     if wants_edit(params) && !can_edit(context, fields) {
-        return Err(cannot_edit("rest_forbidden_context", context).into());
+        return Err(cannot_edit("rest_forbidden_context", context));
     }
     Ok(prepare(context, params, fields))
 }
@@ -206,37 +221,9 @@ fn prepare(context: &Context, params: &Params, fields: &Value) -> Response {
     );
     if is_field_included("_links", &wanted) || is_field_included("_embedded", &wanted) {
         response.add_link("collection", context.rest_url("/wp/v2/types"));
-        let items = format!(
-            "/{}/{}",
-            String::from_utf8_lossy(field(fields, "rest_namespace")),
-            String::from_utf8_lossy(field(fields, "rest_base"))
-        );
+        let slug = String::from_utf8_lossy(field(fields, "slug"));
+        let items = items_route(&slug).unwrap_or_default();
         response.add_link("https://api.w.org/items", context.rest_url(&items));
     }
     response
-}
-
-#[cfg(test)]
-mod tests {
-    use hyscribe_phpser::json_encode;
-
-    use super::*;
-    use crate::schema::UNPORTED;
-
-    /// The arguments use only keywords `hyscribe_rest` checks.
-    #[test]
-    fn arguments_use_ported_keywords() {
-        for regex in ["/wp/v2/types", "/wp/v2/types/(?P<type>[\\w-]+)"] {
-            for endpoint in endpoints(regex).unwrap() {
-                for arg in endpoint.args {
-                    let json = String::from_utf8(json_encode(&arg.schema).unwrap()).unwrap();
-                    assert!(
-                        UNPORTED
-                            .iter()
-                            .all(|keyword| !json.contains(&format!("\"{keyword}\"")))
-                    );
-                }
-            }
-        }
-    }
 }

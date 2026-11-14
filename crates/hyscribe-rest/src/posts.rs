@@ -17,7 +17,7 @@ use hyscribe_render::{order_by, search_count, search_terms, sticky_posts};
 use crate::request::Params;
 use crate::response::{Response, RestError, paginate};
 use crate::statuses::STATUSES;
-use crate::{Context, Endpoint, Failure};
+use crate::{Callback, Context, Endpoint, Permission};
 
 /// A post type the controller serves.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -66,7 +66,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         "/wp/v2/pages/(?P<id>[\\d]+)" => (Kind::Page, true),
         _ => return None,
     };
-    let (permission, callback): (crate::Permission, crate::Callback) = match (kind, single) {
+    let (permission, callback): (Permission, Callback) = match (kind, single) {
         (Kind::Post, false) => (
             |c, p| items_permission(c, p, Kind::Post),
             |c, p| items(c, p, Kind::Post),
@@ -85,7 +85,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         ),
     };
     if !single {
-        let create: crate::Permission = match kind {
+        let create: Permission = match kind {
             Kind::Post => |c, p| create_permission(c, p, Kind::Post),
             Kind::Page => |c, p| create_permission(c, p, Kind::Page),
         };
@@ -102,7 +102,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
             },
         ]);
     }
-    let (update, delete): (crate::Permission, crate::Permission) = match kind {
+    let (update, delete): (Permission, Permission) = match kind {
         Kind::Post => (
             |c, p| update_permission(c, p, Kind::Post),
             |c, p| delete_permission(c, p, Kind::Post),
@@ -137,6 +137,9 @@ fn forbidden(context: &Context, code: &'static str, message: &str) -> RestError 
 
 /// `get_items_permissions_check()`.
 fn items_permission(context: &Context, params: &Params, kind: Kind) -> Result<(), RestError> {
+    if args::NOT_PORTED.iter().any(|name| params.has(name)) {
+        return Err(RestError::not_ported());
+    }
     if params.context() == b"edit" && !context.can(&kind.cap("edit_posts")) {
         let message = "Sorry, you are not allowed to edit posts in this post type.";
         return Err(forbidden(context, "rest_forbidden_context", message));
@@ -287,7 +290,7 @@ pub(crate) fn is_sticky(context: &Context, id: u64) -> bool {
 }
 
 /// `get_item()`.
-fn item(context: &Context, params: &Params, kind: Kind) -> Result<Response, Failure> {
+fn item(context: &Context, params: &Params, kind: Kind) -> Result<Response, RestError> {
     // The permission check found the post.
     let post = get_post(context, params, kind).unwrap_or_default();
     let request = render_request(context);
@@ -475,7 +478,7 @@ fn query(
 }
 
 /// `get_items()`.
-fn items(context: &Context, params: &Params, kind: Kind) -> Result<Response, Failure> {
+fn items(context: &Context, params: &Params, kind: Kind) -> Result<Response, RestError> {
     let (query, page, per_page) = query(context, params, kind)?;
     let reads = context.site.reads();
     let posts = reads.query(&query);
@@ -500,7 +503,11 @@ fn items(context: &Context, params: &Params, kind: Kind) -> Result<Response, Fai
     let pages = total.div_ceil(u64::from(per_page));
     if page > pages && total > 0 {
         let message = "The page number requested is larger than the number of pages available.";
-        return Err(RestError::status("rest_post_invalid_page_number", message, 400).into());
+        return Err(RestError::status(
+            "rest_post_invalid_page_number",
+            message,
+            400,
+        ));
     }
     let edit = params.context() == b"edit";
     let shown = posts.iter().filter(|_| !context.head).filter(|post| {
@@ -513,9 +520,8 @@ fn items(context: &Context, params: &Params, kind: Kind) -> Result<Response, Fai
     let request = render_request(context);
     let mut rendering = Rendering::new(context.site.theme(), reads, &request);
     let mut prepared = |post| prepare::post(context, params, kind, post, &mut rendering);
-    let data: Result<Vec<Value>, Failure> = shown
-        .map(|post| Ok(prepared(post)?.into_data(context)))
-        .collect();
+    let data: Result<Vec<Value>, RestError> =
+        shown.map(|post| Ok(prepared(post)?.into_data())).collect();
     let data = data?;
     let mut response = Response::new(crate::response::list(data), 200);
     let collection = context.rest_url(&format!("/wp/v2/{}", kind.base()));

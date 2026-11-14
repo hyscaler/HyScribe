@@ -1,0 +1,152 @@
+{
+    "title": {
+        "option": "blogname",
+        "schema": {
+            "type": "string",
+            "default": null
+        }
+    },
+    "description": {
+        "option": "blogdescription",
+        "schema": {
+            "type": "string",
+            "default": null
+        }
+    },
+    "url": {
+        "option": "siteurl",
+        "schema": {
+            "type": "string",
+            "default": null,
+            "format": "uri"
+        }
+    },
+    "email": {
+        "option": "admin_email",
+        "schema": {
+            "type": "string",
+            "default": null,
+            "format": "email"
+        }
+    },
+    "timezone": {
+        "option": "timezone_string",
+        "schema": {
+            "type": "string",
+            "default": null
+        }
+    },
+    "date_format": {
+        "option": "date_format",
+        "schema": {
+            "type": "string",
+            "default": null
+        }
+    },
+    "time_format": {
+        "option": "time_format",
+        "schema": {
+            "type": "string",
+            "default": null
+        }
+    },
+    "start_of_week": {
+        "option": "start_of_week",
+        "schema": {
+            "type": "integer",
+            "default": null
+        }
+    },
+    "language": {
+        "option": "WPLANG",
+        "schema": {
+            "type": "string",
+            "default": "en_US"
+        }
+    },
+    "use_smilies": {
+        "option": "use_smilies",
+        "schema": {
+            "type": "boolean",
+            "default": true
+        }
+    },
+    "default_category": {
+        "option": "default_category",
+        "schema": {
+            "type": "integer",
+            "default": null
+        }
+    },
+    "default_post_format": {
+        "option": "default_post_format",
+        "schema": {
+            "type": "string",
+            "default": null
+        }
+    },
+    "posts_per_page": {
+        "option": "posts_per_page",
+        "schema": {
+            "type": "integer",
+            "default": 10
+        }
+    },
+    "show_on_front": {
+        "option": "show_on_front",
+        "schema": {
+            "type": "string",
+            "default": null
+        }
+    },
+    "page_on_front": {
+        "option": "page_on_front",
+        "schema": {
+            "type": "integer",
+            "default": null
+        }
+    },
+    "page_for_posts": {
+        "option": "page_for_posts",
+        "schema": {
+            "type": "integer",
+            "default": null
+        }
+    },
+    "default_ping_status": {
+        "option": "default_ping_status",
+        "schema": {
+            "type": "string",
+            "default": null,
+            "enum": [
+                "open",
+                "closed"
+            ]
+        }
+    },
+    "default_comment_status": {
+        "option": "default_comment_status",
+        "schema": {
+            "type": "string",
+            "default": null,
+            "enum": [
+                "open",
+                "closed"
+            ]
+        }
+    },
+    "site_logo": {
+        "option": "site_logo",
+        "schema": {
+            "type": "integer",
+            "default": null
+        }
+    },
+    "site_icon": {
+        "option": "site_icon",
+        "schema": {
+            "type": "integer",
+            "default": null
+        }
+    }
+}

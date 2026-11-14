@@ -9,7 +9,7 @@ use hyscribe_db::Db;
 use hyscribe_testkit::{RestCase, rest_cases, rest_headers};
 use sha2::{Digest, Sha256};
 
-use super::*;
+use super::super::*;
 use crate::tests::fixture_config;
 
 /// A user of `role`, or the fixture's own user for the administrator.
@@ -62,6 +62,18 @@ impl CapabilityData for AsRole<'_> {
 }
 
 impl hyscribe_rest::Site for AsRole<'_> {
+    fn terms(&self, query: &TermQuery) -> Vec<Term> {
+        self.rest.terms(query)
+    }
+    fn count_terms(&self, query: &TermQuery) -> u64 {
+        self.rest.count_terms(query)
+    }
+    fn term_link(&self, taxonomy: &str, term: &Term) -> String {
+        self.rest.term_link(taxonomy, term)
+    }
+    fn post(&self, id: u64) -> Option<Post> {
+        hyscribe_rest::Site::post(&self.rest, id)
+    }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         hyscribe_rest::Site::option(&self.rest, name)
     }
@@ -219,7 +231,7 @@ async fn unported(database: &str, requests: &'static [(&str, &str, &str)]) {
 /// ported (`format`, `oneOf`).
 #[tokio::test]
 async fn posts_match_php() {
-    let golden = include_str!("../../../hyscribe-rest/tests/golden/posts.tsv");
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/posts.tsv");
     replay("wordpress", golden, false, 6 * 89, &[]).await;
     unported(
         "wordpress",
@@ -243,8 +255,13 @@ async fn posts_match_php() {
 /// caches of are answered 501 too.
 #[tokio::test]
 async fn theme_test_data_posts_match_php() {
-    let golden = include_str!("../../../hyscribe-rest/tests/golden/posts-ttd.tsv");
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/posts-ttd.tsv");
     let skipped = &[
+        ("*", "/?rest_route=/wp/v2/pages/172&_embed=up"),
+        (
+            "*",
+            "/?rest_route=/wp/v2/pages&parent=1725&_embed=up&exclude=1133",
+        ),
         ("*", "/?rest_route=/wp/v2/posts/555"),
         ("*", "/?rest_route=/wp/v2/posts/555&excerpt_length=5"),
         ("user", "/?rest_route=/wp/v2/posts/51"),

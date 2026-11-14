@@ -2,9 +2,12 @@
 
 //! `rest_validate_value_from_schema()` and `rest_sanitize_value_from_schema()`
 //! for every type and keyword but `anyOf`, `oneOf`, `pattern`,
-//! `patternProperties` and `format`, which a schema using them is refused for.
+//! `patternProperties` and a `format` other than `email` and `uri`, which a
+//! schema using them is refused for.
 
+use hyscribe_kses::esc_url_raw;
 use hyscribe_phpser::{Key, Value, encode, json_encode};
+use hyscribe_render::formatting::{is_email, sanitize_text_field};
 
 use crate::response::{RestError, object, text};
 
@@ -192,8 +195,16 @@ fn resolve(value: &Value, schema: &Value) -> Result<String, String> {
         .ok_or_else(|| types.join(","))
 }
 
+/// The formats ported.
+const FORMATS: [&[u8]; 2] = [b"email", b"uri"];
+
 fn unported(schema: &Value) -> Checked<()> {
-    if UNPORTED.iter().any(|key| schema.get_str(key).is_some()) {
+    let format = schema.get_str("format").and_then(Value::as_bytes);
+    let ported = |key: &&str| *key == "format" && format.is_some_and(|f| FORMATS.contains(&f));
+    if UNPORTED
+        .iter()
+        .any(|key| schema.get_str(key).is_some() && !ported(key))
+    {
         return Err(Refusal(None));
     }
     Ok(())
@@ -284,6 +295,10 @@ pub fn validate_value_from_schema(value: &Value, schema: &Value, param: &str) ->
     }
     if set(schema, "enum") {
         validate_enum(value, schema, &ty, param)?;
+    }
+    let format = schema.get_str("format").and_then(Value::as_bytes);
+    if ty == "string" && format == Some(b"email") && !is_email(&value.to_php_string()) {
+        return invalid("rest_invalid_email", "Invalid email address.".into());
     }
     Ok(())
 }
@@ -590,7 +605,11 @@ fn sanitize_as(value: &Value, schema: &Value, ty: &str, param: &str) -> Checked<
         "integer" => Value::Int(value.to_int()),
         "number" => Value::Float(hyscribe_phpser::Float::from_f64(value.to_float())),
         "boolean" => Value::Bool(sanitize_boolean(value)),
-        "string" => Value::String(value.to_php_string()),
+        "string" => match schema.get_str("format").and_then(Value::as_bytes) {
+            Some(b"email") => Value::String(sanitize_text_field(&value.to_php_string())),
+            Some(b"uri") => Value::String(esc_url_raw(&value.to_php_string())),
+            _ => Value::String(value.to_php_string()),
+        },
         _ => value.clone(),
     })
 }

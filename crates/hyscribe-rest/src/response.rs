@@ -6,8 +6,6 @@
 
 use hyscribe_phpser::{Key, Value, add_query_arg, add_query_values, urlencode_deep};
 
-use crate::Context;
-
 /// A `WP_Error` with one code, its message and data.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RestError {
@@ -18,6 +16,9 @@ pub struct RestError {
     /// The data, `Null` for none.
     pub data: Value,
 }
+
+/// The code of [`RestError::not_ported`].
+pub(crate) const NOT_PORTED: &str = "hyscribe_not_ported";
 
 /// A PHP array of string keys.
 pub(crate) fn object<const N: usize>(entries: [(&str, Value); N]) -> Value {
@@ -41,6 +42,15 @@ impl RestError {
             code,
             message: message.into(),
             data: object([("status", Value::Int(i64::from(status)))]),
+        }
+    }
+
+    /// What a route answers where it is not ported, which is sent as `501`.
+    pub(crate) fn not_ported() -> RestError {
+        RestError {
+            code: NOT_PORTED,
+            message: String::new(),
+            data: Value::Null,
         }
     }
 
@@ -70,8 +80,8 @@ pub struct Response {
     pub headers: Vec<(String, String)>,
     /// The data.
     pub data: Value,
-    /// The links and their relations: each link's attributes, `href` last.
-    links: Vec<(String, Vec<(Key, Value)>)>,
+    /// The links and their relations.
+    links: Vec<(String, Value)>,
 }
 
 impl Response {
@@ -97,8 +107,22 @@ impl Response {
     }
 
     /// `add_link( $rel, $href, $attributes )`.
-    pub(crate) fn add_link_with(&mut self, rel: &str, href: String, mut link: Vec<(Key, Value)>) {
+    pub(crate) fn add_link_with(
+        &mut self,
+        rel: &str,
+        href: String,
+        attributes: Vec<(&str, Value)>,
+    ) {
+        let mut link: Vec<(Key, Value)> = attributes
+            .into_iter()
+            .map(|(name, value)| (Key::String(name.as_bytes().to_vec()), value))
+            .collect();
         link.push((Key::String(b"href".to_vec()), text(href)));
+        self.add_link_attributes(rel, Value::Array(link));
+    }
+
+    /// A link to `rel` as `get_response_links()` gives it.
+    pub(crate) fn add_link_attributes(&mut self, rel: &str, link: Value) {
         self.links.push((rel.into(), link));
     }
 
@@ -108,40 +132,36 @@ impl Response {
     }
 
     /// `get_compact_response_links()`: each `https://api.w.org/` relation
-    /// as `wp:` and the curie after them; `self` links with their
-    /// `targetHints`, as `get_response_links()` adds them.
-    fn compact_links(links: Vec<(String, Vec<(Key, Value)>)>, context: &Context) -> Option<Value> {
+    /// as `wp:` and the curie after them.
+    fn compact_links(&self) -> Option<Value> {
         const CURIE: &str = "https://api.w.org/";
-        if links.is_empty() {
+        if self.links.is_empty() {
             return None;
         }
         // Each relation once, in the order it first appears, with its links.
-        let mut rels: Vec<(String, Vec<Value>)> = Vec::new();
-        for (rel, mut link) in links {
-            if rel == "self"
-                && let Some(hints) = crate::links::target_hints(context, &link)
-            {
-                link.push((Key::String(b"targetHints".to_vec()), hints));
-            }
-            match rels.iter_mut().find(|(known, _)| *known == rel) {
-                Some((_, items)) => items.push(Value::Array(link)),
-                None => rels.push((rel, vec![Value::Array(link)])),
-            }
-        }
-        let entry = |rel: String, items| (Key::String(rel.into_bytes()), list(items));
-        let (curied, plain): (Vec<_>, Vec<_>) = rels
-            .into_iter()
-            .partition(|(rel, _)| rel.strip_prefix(CURIE).is_some_and(|rest| !rest.is_empty()));
-        let has_curies = !curied.is_empty();
+        let rels = self
+            .links
+            .iter()
+            .enumerate()
+            .filter(|(i, (rel, _))| {
+                self.links.iter().position(|(known, _)| known == rel) == Some(*i)
+            })
+            .map(|(_, (rel, _))| {
+                let items = self.links.iter().filter(|(known, _)| known == rel);
+                (rel, list(items.map(|(_, link)| link.clone()).collect()))
+            });
+        let entry = |rel: String, items| (Key::String(rel.into_bytes()), items);
+        let (curied, plain): (Vec<_>, Vec<_>) =
+            rels.partition(|(rel, _)| rel.strip_prefix(CURIE).is_some_and(|rest| !rest.is_empty()));
         let mut links: Vec<(Key, Value)> = plain
             .into_iter()
-            .map(|(rel, items)| entry(rel, items))
+            .map(|(rel, items)| entry(rel.clone(), items))
             .collect();
-        for (rel, items) in curied {
+        for (rel, items) in &curied {
             let short = rel.get(CURIE.len()..).unwrap_or_default();
-            links.push(entry(format!("wp:{short}"), items));
+            links.push(entry(format!("wp:{short}"), items.clone()));
         }
-        links.extend(has_curies.then(|| {
+        links.extend((!curied.is_empty()).then(|| {
             let curie = object([
                 ("name", text("wp")),
                 ("href", text("https://api.w.org/{rel}")),
@@ -154,11 +174,9 @@ impl Response {
 
     /// The data with its links under `_links`, as
     /// `prepare_response_for_collection()` and `response_to_data()` give it.
-    pub(crate) fn into_data(self, context: &Context) -> Value {
-        let Response {
-            mut data, links, ..
-        } = self;
-        let links = Response::compact_links(links, context);
+    pub fn into_data(self) -> Value {
+        let links = self.compact_links();
+        let mut data = self.data;
         if let (Some(links), Value::Array(entries)) = (links, &mut data) {
             entries.push((Key::String(b"_links".to_vec()), links));
         }
@@ -185,7 +203,7 @@ pub fn paginate(
     let query = urlencode_deep(Value::Array(query.to_vec()));
     let base = add_query_values(query.as_array().unwrap_or_default(), collection.as_bytes());
     let links: Vec<String> = [
-        ("prev", page.saturating_sub(1), page > 1),
+        ("prev", page.saturating_sub(1).min(pages), page > 1),
         ("next", page + 1, page < pages),
     ]
     .into_iter()

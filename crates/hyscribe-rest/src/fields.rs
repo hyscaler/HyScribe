@@ -4,7 +4,7 @@
 //! and `get_fields_for_response()` read it, and the context's as
 //! `rest_filter_response_by_context()` keeps them.
 
-use hyscribe_phpser::{Key, Value};
+use hyscribe_phpser::{Key, Value, is_empty_string};
 
 use crate::request::Params;
 use crate::schema::{is_list, parse_list};
@@ -130,12 +130,14 @@ fn shown(contexts: &[&str], context: &[u8]) -> bool {
 }
 
 /// `get_fields_for_response()`: the properties shown in the request's
-/// context and `_links`, narrowed to those `_fields` asks for.
+/// context, all of them without one, and `_links`, narrowed to those
+/// `_fields` asks for.
 pub(crate) fn fields_for_response(params: &Params, properties: &Properties) -> Vec<Vec<u8>> {
     let context = params.context();
+    let all = is_empty_string(&context);
     let mut fields: Vec<Vec<u8>> = properties
         .iter()
-        .filter(|(_, contexts)| shown(contexts, &context))
+        .filter(|(_, contexts)| all || shown(contexts, &context))
         .map(|(name, _)| name.as_bytes().to_vec())
         .collect();
     fields.push(b"_links".to_vec());

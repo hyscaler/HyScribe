@@ -7,20 +7,10 @@ use hyscribe_phpser::{Value, json_decode};
 
 use super::Kind;
 use crate::Context;
-use crate::request::{Arg, Sanitize};
-use crate::response::{RestError, text};
+use crate::request::{Arg, Sanitize, arg};
+use crate::response::{RestError, list, text};
 use crate::schema::{Checked, Refusal, parse_list, validate_value_from_schema};
 use crate::types::context_arg;
-
-/// An argument with the schema `json`.
-fn arg(name: &'static str, json: &str, validate: bool, sanitize: Sanitize) -> Arg {
-    Arg {
-        name,
-        schema: json_decode(json.as_bytes()).unwrap_or(Value::Null),
-        validate,
-        sanitize,
-    }
-}
 
 /// An argument `rest_parse_request_arg()` checks by its schema.
 fn typed(name: &'static str, json: &str) -> Arg {
@@ -36,14 +26,8 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
     context.schema =
         json_decode(br#"{"type":"string","enum":["view","embed","edit"],"default":"view"}"#)
             .unwrap_or(Value::Null);
-    let date = |name| {
-        arg(
-            name,
-            r#"{"type":"string","format":"date-time"}"#,
-            false,
-            Sanitize::NotPorted,
-        )
-    };
+    // `format` (`date-time`) is not ported: the endpoint answers 501.
+    let date = |name| arg(name, "{}", false, Sanitize::Endpoint);
     let mut args = vec![
         context,
         arg(
@@ -103,21 +87,15 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
             "status",
             STATUSES,
             false,
-            Sanitize::Callback(match kind {
-                Kind::Post => |c, v, s| post_statuses(c, v, s, Kind::Post),
-                Kind::Page => |c, v, s| post_statuses(c, v, s, Kind::Page),
+            Sanitize::Site(match kind {
+                Kind::Post => |context, value| statuses(context, value, Kind::Post),
+                Kind::Page => |context, value| statuses(context, value, Kind::Page),
             }),
         ),
     ]);
     if kind == Kind::Post {
-        let terms = |name| {
-            arg(
-                name,
-                r#"{"type":["object","array"],"oneOf":[]}"#,
-                false,
-                Sanitize::NotPorted,
-            )
-        };
+        // `oneOf` is not ported: the endpoint answers 501.
+        let terms = |name| arg(name, "{}", false, Sanitize::Endpoint);
         args.extend([
             typed("tax_relation", r#"{"type":"string","enum":["AND","OR"]}"#),
             terms("categories"),
@@ -150,15 +128,22 @@ pub(super) fn item() -> Vec<Arg> {
     ]
 }
 
+/// The arguments whose schemas use keywords not ported.
+pub(super) const NOT_PORTED: [&str; 8] = [
+    "after",
+    "modified_after",
+    "before",
+    "modified_before",
+    "categories",
+    "categories_exclude",
+    "tags",
+    "tags_exclude",
+];
+
 /// `sanitize_post_statuses()`: `wp_parse_slug_list()`, each status but
 /// the default allowed only to those who can edit the type's posts, or
 /// read its private ones for `private`.
-fn post_statuses(
-    context: &Context,
-    statuses: &Value,
-    schema: &Value,
-    kind: Kind,
-) -> Checked<Value> {
+fn statuses(context: &Context, statuses: &Value, kind: Kind) -> Checked<Value> {
     let mut parsed: Vec<Vec<u8>> = Vec::new();
     for (_, status) in parse_list(statuses) {
         let slug = hyscribe_render::formatting::sanitize_title(&status.to_php_string());
@@ -166,22 +151,15 @@ fn post_statuses(
             parsed.push(slug);
         }
     }
-    for status in &parsed {
-        if status == b"publish" {
-            continue;
-        }
+    let schema = json_decode(STATUSES.as_bytes()).unwrap_or_default();
+    for status in parsed.iter().filter(|status| *status != b"publish") {
         let private = status == b"private" && context.can(&kind.cap("read_private_posts"));
         if !context.can(&kind.cap("edit_posts")) && !private {
-            let error = RestError::status(
-                "rest_forbidden_status",
-                "Status is forbidden.",
-                context.authorization_required(),
-            );
+            let code = context.authorization_required();
+            let error = RestError::status("rest_forbidden_status", "Status is forbidden.", code);
             return Err(Refusal(Some(error)));
         }
-        validate_value_from_schema(&text(status.clone()), schema, "status")?;
+        validate_value_from_schema(&text(status.clone()), &schema, "status")?;
     }
-    Ok(crate::response::list(
-        parsed.into_iter().map(text).collect(),
-    ))
+    Ok(list(parsed.into_iter().map(text).collect()))
 }

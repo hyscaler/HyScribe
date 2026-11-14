@@ -91,6 +91,13 @@ impl GlobalStyles {
         php::get(&self.data, &["styles"]).unwrap_or(&Value::Null)
     }
 
+    /// `( new WP_Theme_JSON( $config ) )->get_raw_data()` of the theme's
+    /// origin, as the theme's style variations are read, over the block
+    /// types and styles registered once the theme's data is.
+    pub fn theme_json(&self, config: Value) -> Value {
+        theme_json::new(config, theme_json::Origin::Theme, &self.blocks)
+    }
+
     /// A global setting, e.g. `["layout", "contentSize"]`; `None` where it
     /// is missing (PHP would return every setting).
     pub fn setting(&self, path: &[&str]) -> Option<&Value> {

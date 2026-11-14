@@ -12,10 +12,10 @@ use hyscribe_render::rest::Rendering;
 use hyscribe_render::site::Request;
 
 use super::{Kind, is_sticky, meta, revisions};
+use crate::Context;
 use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
 use crate::request::Params;
-use crate::response::{Response, list, object, text};
-use crate::{Context, Failure};
+use crate::response::{Response, RestError, list, object, text};
 
 const POST: &Properties = &[
     ("date", &["view", "edit", "embed"]),
@@ -145,7 +145,7 @@ pub(super) fn post(
     kind: Kind,
     post: &Post,
     rendering: &mut Rendering,
-) -> Result<Response, Failure> {
+) -> Result<Response, RestError> {
     if context.head {
         return Ok(Response::new(Value::Array(Vec::new()), 200));
     }
@@ -241,7 +241,7 @@ pub(super) fn post(
     let from_content = php_trim(&post.excerpt).is_empty();
     let renders = has("content.rendered") || has("excerpt") && from_content;
     if unlocked && renders && writes_or_unported(&post.content, context.user != 0) {
-        return Err(Failure::NotPorted);
+        return Err(RestError::not_ported());
     }
     // `the_content` renders the content, then the excerpt's filters; in
     // the edit context `insert_hooked_blocks_into_rest_response()`
@@ -328,8 +328,8 @@ pub(super) fn post(
         );
     }
     if has("meta") {
-        let footnotes = meta(context, post.id, "footnotes").map(|v| v.to_php_string());
-        let footnotes = text(footnotes.unwrap_or_default());
+        // The `footnotes` meta is a string, as registered.
+        let footnotes = text(reads.post_meta(post.id, "footnotes").unwrap_or_default());
         put("meta", object([("footnotes", footnotes)]));
     }
     for (taxonomy, base) in kind.taxonomies() {
@@ -459,10 +459,10 @@ fn links(context: &Context, params: &Params, kind: Kind, post: &Post, response: 
         let link = add_query_arg(&[(name, Some(id.as_bytes()))], rest(path).as_bytes());
         String::from_utf8_lossy(&link).into_owned()
     };
-    let embeddable = || vec![(key("embeddable"), Value::Bool(true))];
+    let embeddable = || vec![("embeddable", Value::Bool(true))];
     let base = format!("/wp/v2/{}", kind.base());
     let own = format!("{base}/{}", post.id);
-    response.add_link("self", rest(&own));
+    crate::self_link(context, response, &own);
     response.add_link("collection", rest(&base));
     response.add_link("about", rest(&format!("/wp/v2/types/{}", kind.name())));
     if post.author != 0 {
@@ -475,14 +475,14 @@ fn links(context: &Context, params: &Params, kind: Kind, post: &Post, response: 
         embeddable(),
     );
     let (count, latest) = revisions(context, post);
-    let history = vec![(key("count"), int(count))];
+    let history = vec![("count", int(count))];
     response.add_link_with(
         "version-history",
         rest(&format!("{own}/revisions")),
         history,
     );
     if let Some(latest) = latest {
-        let id = vec![(key("id"), int(latest))];
+        let id = vec![("id", int(latest))];
         response.add_link_with(
             "predecessor-version",
             rest(&format!("{own}/revisions/{latest}")),
@@ -512,7 +512,7 @@ fn links(context: &Context, params: &Params, kind: Kind, post: &Post, response: 
         with_arg("/wp/v2/media", b"parent", post.id),
     );
     for (taxonomy, base) in kind.taxonomies() {
-        let mut attributes = vec![(key("taxonomy"), text(*taxonomy))];
+        let mut attributes = vec![("taxonomy", text(*taxonomy))];
         attributes.extend(embeddable());
         let link = with_arg(&format!("/wp/v2/{base}"), b"post", post.id);
         response.add_link_with("https://api.w.org/term", link, attributes);

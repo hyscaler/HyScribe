@@ -279,6 +279,12 @@ pub struct TermQuery {
     pub offset: u64,
     /// `search`: the terms whose name or slug contains it.
     pub search: Option<String>,
+    /// `exclude`: `t.term_id NOT IN (...)` when not empty.
+    pub exclude: Vec<u64>,
+    /// `slug`: `t.slug IN (...)` when not empty.
+    pub slugs: Vec<Vec<u8>>,
+    /// `object_ids`: the terms of these objects, when not empty.
+    pub objects: Vec<u64>,
 }
 
 /// What `WP_Term_Query::parse_orderby()` orders terms by.
@@ -304,6 +310,8 @@ pub enum TermOrder {
     Description,
     /// `FIELD( t.term_id, include )`.
     Include,
+    /// `FIELD( t.slug, slugs )`.
+    Slugs,
 }
 
 /// A `tax_query` clause on term IDs, without children.

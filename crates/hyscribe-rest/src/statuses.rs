@@ -11,7 +11,7 @@ use crate::fields::{Properties, fields_for_response, filter_by_context};
 use crate::request::{Arg, Params, Sanitize};
 use crate::response::{Response, RestError, object, text};
 use crate::types::{can_edit_any, context_arg};
-use crate::{Context, Endpoint, Failure};
+use crate::{Context, Endpoint};
 
 /// The schema's properties and their contexts.
 const PROPERTIES: &Properties = &[
@@ -177,14 +177,14 @@ fn items_permission(context: &Context, params: &Params) -> Result<(), RestError>
 }
 
 /// `get_items()`: the statuses not internal, and trash.
-fn items(context: &Context, params: &Params) -> Result<Response, Failure> {
+fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
     let data = STATUSES
         .iter()
         .filter(|status| !status.internal || status.name == "trash")
         .filter(|status| can_read(context, status))
         .map(|status| {
             let key = Key::String(status.name.as_bytes().to_vec());
-            (key, prepare(context, params, status).into_data(context))
+            (key, prepare(context, params, status).into_data())
         })
         .collect();
     Ok(Response::new(Value::Array(data), 200))
@@ -213,7 +213,7 @@ fn item_permission(context: &Context, params: &Params) -> Result<(), RestError> 
 }
 
 /// `get_item()`, after its permission check found the status.
-fn item(context: &Context, params: &Params) -> Result<Response, Failure> {
+fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
     // The permission check found the status.
     let status = requested(params).cloned().unwrap_or_default();
     Ok(prepare(context, params, &status))

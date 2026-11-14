@@ -71,6 +71,8 @@ $cases = array(
 	array( array( 'type' => 'object', 'enum' => array( array( 'a' => 1, 'b' => 2 ) ) ), array( array( 'b' => 2, 'a' => 1 ), array( 'a' => 1 ) ) ),
 	array( array( 'type' => array( 'array', 'string' ) ), array( 'a,b' ) ),
 	array( array( 'type' => 'integer', 'minimum' => 1 ), array( ' 2 ', "\x0b3" ) ),
+	array( array( 'type' => 'string', 'format' => 'email' ), array( 'a@example.test', 'not an email', ' a@b.test ', '<b>x</b>@y.test', '' ) ),
+	array( array( 'type' => 'string', 'format' => 'uri' ), array( 'http://example.test/a b', 'javascript:alert(1)', '' ) ),
 );
 foreach ( $cases as list( $schema, $values ) ) {
 	foreach ( $values as $value ) {

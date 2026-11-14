@@ -70,7 +70,7 @@ fn malformed_theme_data_is_skipped() {
     assert!(registered_blocks(b"[[\"core/x\"]]").is_empty());
     assert_eq!(style_partials(b"{\"0\": \"x\", \"a.json\": 3}"), []);
     assert_eq!(
-        block_styles("no tab\ncore/list\tcheckmark-list"),
+        block_styles(br#"{"block_styles": [1, ["core/x"], ["core/x", {}], ["core/list", {"name": "checkmark-list"}]]}"#),
         [("core/list".to_string(), "checkmark-list".to_string())]
     );
 }
@@ -84,6 +84,20 @@ fn style_partials_reach_the_global_styles() {
             .block_style("core/columns", &["variations", "section-1"])
             .is_some()
     );
+}
+
+/// The theme's style variations, sanitized, and its own global styles.
+#[test]
+fn style_variations_are_read() {
+    let theme = twentytwentyfive();
+    let titles: Vec<Vec<u8>> = theme
+        .style_variations()
+        .iter()
+        .map(|variation| variation.get_str("title").unwrap().to_php_string())
+        .collect();
+    assert_eq!(titles.len(), 23);
+    assert_eq!(titles[0], b"Evening");
+    assert!(std::ptr::eq(theme.global_styles(), &theme.global));
 }
 
 /// `get_file_data()` reads `Version` from `style.css`, case-insensitively
@@ -116,7 +130,7 @@ fn twentytwentyfive_files_are_built_in() {
     for path in [
         "patterns.json",
         "styles.json",
-        "block-styles.tsv",
+        "registered.json",
         "functions.php",
         "nope.css",
     ] {

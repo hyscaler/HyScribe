@@ -119,12 +119,9 @@ async fn check_comment(
     if option(steps, "comment_moderation").await == b"1" {
         return false;
     }
+    // Smiley images get no site URL (gap: a key naming it is not found there).
     let use_smilies = step!(steps, option("use_smilies"));
-    let siteurl = step!(steps, option("siteurl"));
-    let options = |name: &str| match name {
-        "use_smilies" => use_smilies.clone(),
-        _ => siteurl.clone(),
-    };
+    let options = |name: &str| use_smilies.clone().filter(|_| name == "use_smilies");
     let text = front_comment_text(&options, context.home, &fields.content);
     let max_links = option(steps, "comment_max_links").await;
     if !is_empty_string(&max_links) && links(&text) >= Value::String(max_links).to_int() {

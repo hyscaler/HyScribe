@@ -416,28 +416,13 @@ fn query(
     params: &Params,
     kind: Kind,
 ) -> Result<(PostQuery, u64, u32), RestError> {
+    order_errors(params)?;
     let orderby = params.text("orderby");
     let search = params
         .get("search")
         .map(Value::to_php_string)
         .filter(|s| !s.is_empty());
-    if orderby == b"relevance" && search.is_none() {
-        let message = "You need to define a search term to order by relevance.";
-        return Err(RestError::status(
-            "rest_no_search_term_defined",
-            message,
-            400,
-        ));
-    }
     let mut include = ids(params, "include");
-    if orderby == b"include" && include.is_empty() {
-        let message = "You need to define an include parameter to order by include.";
-        return Err(RestError::status(
-            "rest_orderby_include_missing_include",
-            message,
-            400,
-        ));
-    }
     // Only the type's own arguments are read.
     let registered = args::collection(kind);
     let param = |name: &str| {
@@ -550,6 +535,29 @@ pub(crate) fn searched(query: &mut PostQuery, search: &[u8]) {
     query.search = search_terms(&text);
     query.sentence = text.replace(['\r', '\n'], "");
     query.search_count = search_count(&text);
+}
+
+/// The ordering errors `get_items()` checks: relevance without a search,
+/// and the order of `include` without one.
+pub(crate) fn order_errors(params: &Params) -> Result<(), RestError> {
+    let orderby = params.text("orderby");
+    if orderby == b"relevance" && !params.get("search").is_some_and(|s| !s.is_empty()) {
+        let message = "You need to define a search term to order by relevance.";
+        return Err(RestError::status(
+            "rest_no_search_term_defined",
+            message,
+            400,
+        ));
+    }
+    if orderby == b"include" && ids(params, "include").is_empty() {
+        let message = "You need to define an include parameter to order by include.";
+        return Err(RestError::status(
+            "rest_orderby_include_missing_include",
+            message,
+            400,
+        ));
+    }
+    Ok(())
 }
 
 /// `get_items()`.

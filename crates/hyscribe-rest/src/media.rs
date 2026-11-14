@@ -82,9 +82,8 @@ pub(crate) fn collection_args() -> Vec<Arg> {
     ]
 }
 
-/// The `post_mime_type` `prepare_items_query()` limits attachments to: the
-/// types of each media type asked for, and each MIME type asked for that
-/// is allowed.
+/// The `post_mime_type` `prepare_items_query()` limits attachments to:
+/// each media type's types, and each MIME type asked for that is allowed.
 pub(crate) fn mime_types(params: &Params, kind: Kind) -> Vec<String> {
     if kind != Kind::Attachment {
         return Vec::new();
@@ -126,9 +125,8 @@ pub(crate) fn mime_types(params: &Params, kind: Kind) -> Vec<String> {
     unique
 }
 
-/// The attachments' own part of `create_item_permissions_check()`: its
-/// `upload_files` check is the type's `create_posts` the posts controller
-/// made already.
+/// The attachments' own part of `create_item_permissions_check()`, whose
+/// `upload_files` is the type's `create_posts` checked already.
 pub(crate) fn create_permission(context: &Context, params: &Params) -> Result<(), RestError> {
     let post = params.get("post").filter(|post| !post.is_empty());
     if post.is_some_and(|post| !context.can_for("edit_post", post.to_int().unsigned_abs())) {
@@ -138,9 +136,8 @@ pub(crate) fn create_permission(context: &Context, params: &Params) -> Result<()
     Ok(())
 }
 
-/// `get_post_status()` of an attachment: inheriting its parent's, or
-/// published without one (none has ID 0) or with itself as one, or with
-/// one in the trash its status before.
+/// `get_post_status()` of an attachment: its parent's, or published without
+/// one, or a trashed parent's status before.
 pub(crate) fn post_status(context: &Context, post: &Post) -> String {
     let mut seen = vec![post.id];
     let mut post = post.clone();
@@ -180,9 +177,7 @@ pub(crate) fn attachment_link(context: &Context, post: &Post, sample: bool) -> V
     let shown = status == "publish"
         || status == "private" && context.can_for("read_post", post.id)
         || sample;
-    let parent = (post.parent != 0)
-        .then(|| context.site.post(post.parent))
-        .flatten();
+    let parent = parent(context, post);
     let viewable = |parent: &Post| {
         parent.id != post.id && ["post", "page", "attachment"].contains(&parent.post_type.as_str())
     };
@@ -209,6 +204,13 @@ pub(crate) fn attachment_link(context: &Context, post: &Post, sample: bool) -> V
     };
     let base = parent_link.trim_end_matches(['/', '\\']);
     links.trailing(&format!("{base}/{name}")).into_bytes()
+}
+
+/// The attachment's parent, if it has one that is there.
+fn parent(context: &Context, post: &Post) -> Option<Post> {
+    (post.parent != 0)
+        .then(|| context.site.post(post.parent))
+        .flatten()
 }
 
 /// `wp_get_registered_image_subsizes()`: each size's name, width, height
@@ -256,9 +258,8 @@ fn resizes(width: i64, height: i64, (size_width, size_height, crop): (i64, i64, 
     (new_width - width).abs() > 1 || (new_height - height).abs() > 1
 }
 
-/// `missing_image_sizes`: the sizes an image could have and its metadata
-/// lacks, or for a PDF the fallback sizes it lacks; 501 where PHP reads
-/// an original image's size from its file.
+/// `missing_image_sizes`: the sizes an image, or a PDF's fallbacks, could
+/// have and lack; 501 where PHP reads an original image's file.
 fn missing_sizes(
     context: &Context,
     post: &Post,
@@ -473,10 +474,7 @@ pub(crate) fn attached_to(
     post: &Post,
     response: &mut crate::response::Response,
 ) {
-    let Some(parent) = (post.parent != 0)
-        .then(|| context.site.post(post.parent))
-        .flatten()
-    else {
+    let Some(parent) = parent(context, post) else {
         return;
     };
     let route = crate::types::items_route(&parent.post_type)

@@ -46,10 +46,17 @@ fn file_is(file: &[u8], mime: &str, kind: &str, extensions: &[&str]) -> bool {
 /// The extension of a file or URL, in lower case, as
 /// `wp_check_filetype()` finds it and its caller lowers it.
 fn extension(file: &[u8]) -> String {
+    let (_, extension) = split_name(file);
+    String::from_utf8_lossy(&extension).to_ascii_lowercase()
+}
+
+/// A file's name without its directory, split at its last dot: the stem
+/// and the extension, empty without a dot.
+fn split_name(file: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let name = wp_basename(file);
-    let found = name.iter().rposition(|b| *b == b'.');
-    let extension = found.map_or(&[][..], |at| name.get(at + 1..).unwrap_or_default());
-    String::from_utf8_lossy(extension).to_ascii_lowercase()
+    let end = name.iter().rposition(|b| *b == b'.').unwrap_or(name.len());
+    let extension = name.get(end + 1..).unwrap_or_default().to_vec();
+    (name.get(..end).unwrap_or_default().to_vec(), extension)
 }
 
 /// Whether `post` shows a video player, which is not ported: a video
@@ -136,10 +143,7 @@ fn attachment_link(site: &dyn Site, loading: &Loading, post: &Post, url: &[u8]) 
         let file = site
             .post_meta(post.id, "_wp_attached_file")
             .unwrap_or_default();
-        let name = wp_basename(&file);
-        let end = name.iter().rposition(|b| *b == b'.').unwrap_or(name.len());
-        let stem = name.get(..end).unwrap_or_default();
-        esc_html(stem).into_bytes()
+        esc_html(&split_name(&file).0).into_bytes()
     };
     [b"<a href='", &esc_url(url)[..], b"'>", &text, b"</a>"].concat()
 }

@@ -12,7 +12,8 @@ use hyscribe_render::post::admin_title;
 use hyscribe_render::rest::Rendering;
 
 use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
-use crate::posts::prepare::{PARTS, rfc3339, writes_or_unported};
+use crate::posts::args::id;
+use crate::posts::prepare::{PARTS, UNSET, rfc3339, writes_or_unported};
 use crate::posts::{self, Kind, ids, render_request};
 use crate::request::{Arg, Params, Sanitize, arg, typed};
 use crate::response::{Response, RestError, int, object, paginate, text};
@@ -41,8 +42,6 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     let route = regex
         .strip_prefix("/wp/v2/posts/")
         .or_else(|| regex.strip_prefix("/wp/v2/pages/"))?;
-    let parent = || typed("parent", r#"{"type":"integer"}"#);
-    let id = || typed("id", r#"{"type":"integer"}"#);
     let get = |args, permission, callback| Endpoint {
         args,
         permission,
@@ -83,11 +82,16 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     })
 }
 
+/// The `parent` of a route of revisions or autosaves.
+fn parent() -> Arg {
+    typed("parent", r#"{"type":"integer"}"#)
+}
+
 /// `get_collection_params()` of the revisions.
 fn collection_args() -> Vec<Arg> {
     let ids = r#"{"type":"array","items":{"type":"integer"},"default":[]}"#;
     vec![
-        typed("parent", r#"{"type":"integer"}"#),
+        parent(),
         context_arg(),
         arg(
             "page",
@@ -233,33 +237,11 @@ fn query(params: &Params, parent: &Post) -> PostQuery {
     query
 }
 
-/// The request's ordering errors, as `get_items()` checks them.
-fn order_errors(params: &Params) -> Result<(), RestError> {
-    let orderby = params.text("orderby");
-    if orderby == b"relevance" && !params.get("search").is_some_and(|s| !s.is_empty()) {
-        let message = "You need to define a search term to order by relevance.";
-        return Err(RestError::status(
-            "rest_no_search_term_defined",
-            message,
-            400,
-        ));
-    }
-    if orderby == b"include" && ids(params, "include").is_empty() {
-        let message = "You need to define an include parameter to order by include.";
-        return Err(RestError::status(
-            "rest_orderby_include_missing_include",
-            message,
-            400,
-        ));
-    }
-    Ok(())
-}
-
 /// `get_items()` of the revisions.
 fn revisions(context: &Context, params: &Params) -> Result<Response, RestError> {
     // The permission check found the parent.
     let parent = get_parent(context, params, "parent").unwrap_or_default();
-    order_errors(params)?;
+    posts::order_errors(params)?;
     let query = query(params, &parent);
     let reads = context.site.reads();
     let found = reads.query(&query);
@@ -403,7 +385,7 @@ fn autosave(context: &Context, params: &Params) -> Result<Response, RestError> {
 
 /// `prepare_date_response()`: none for an unset GMT date.
 fn date(gmt: &str, local: &str) -> Value {
-    if gmt == "0000-00-00 00:00:00" {
+    if gmt == UNSET {
         Value::Null
     } else {
         rfc3339(local)

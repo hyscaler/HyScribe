@@ -207,7 +207,7 @@ pub(crate) fn rfc3339(date: &str) -> Value {
     text(date.replacen(' ', "T", 1))
 }
 
-const UNSET: &str = "0000-00-00 00:00:00";
+pub(crate) const UNSET: &str = "0000-00-00 00:00:00";
 
 /// A draft's unset GMT date: `get_gmt_from_date( $post_date )` for the
 /// date, `$post_modified` less `gmt_offset` for the modified date.

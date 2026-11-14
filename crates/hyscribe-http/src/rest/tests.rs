@@ -197,7 +197,7 @@ async fn content_matches_php() {
     let golden = fixture_users(include_str!(
         "../../../hyscribe-rest/tests/golden/embed-ttd.tsv"
     ));
-    assert_eq!(replay(&sites, &golden, true).await, (68, 6));
+    assert_eq!(replay(&sites, &golden, true).await, (70, 4));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/search-ttd.tsv");
     assert_eq!(replay(&sites, golden, true).await, (2 * 50, 2 * 9));
 }

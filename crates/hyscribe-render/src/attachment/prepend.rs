@@ -146,7 +146,130 @@ fn attachment_link(site: &dyn Site, loading: &Loading, post: &Post, url: &[u8]) 
 
 #[cfg(test)]
 mod tests {
-    use super::{VIDEO, file_is};
+    use std::cell::Cell;
+
+    use hyscribe_model::{Post, PostQuery, Term};
+
+    use super::{VIDEO, file_is, prepend_attachment};
+    use crate::media::Loading;
+    use crate::site::Site;
+
+    /// A site whose attachments' files are named by their IDs.
+    struct Files;
+
+    const FILES: [(u64, &str); 6] = [
+        (1, "2026/10/clip.mov"),
+        (2, "2026/10/song.mp3"),
+        (3, "2026/10/voice.aac"),
+        (4, "2026/10/notes.txt"),
+        (6, "2026/10/dot.png"),
+        (7, "2026/10/clip.mp4"),
+    ];
+
+    impl Site for Files {
+        fn option(&self, _: &str) -> Option<Vec<u8>> {
+            None
+        }
+        fn home_url(&self) -> Vec<u8> {
+            b"http://example.test".to_vec()
+        }
+        fn post(&self, id: u64) -> Option<Post> {
+            // Only the dot is an image.
+            let mime = if id == 6 { "image/png" } else { "" };
+            Some(attachment(id, mime, "Dot"))
+        }
+        fn post_terms(&self, _: u64, _: &str) -> Vec<Term> {
+            Vec::new()
+        }
+        fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+            if key == "_wp_attachment_metadata" {
+                return Some(b"a:2:{s:5:\"width\";i:10;s:6:\"height\";i:10;}".to_vec());
+            }
+            let file = FILES.iter().find(|(known, _)| *known == id);
+            file.filter(|_| key == "_wp_attached_file")
+                .map(|(_, file)| file.as_bytes().to_vec())
+        }
+        fn query(&self, _: &PostQuery) -> Vec<Post> {
+            Vec::new()
+        }
+    }
+
+    fn attachment(id: u64, mime: &str, title: &str) -> Post {
+        Post {
+            id,
+            post_type: "attachment".into(),
+            mime_type: mime.into(),
+            title: title.as_bytes().to_vec(),
+            ..Post::default()
+        }
+    }
+
+    /// What `prepend_attachment()` puts before each kind of attachment:
+    /// a link to a video no player plays, a player for a song and a link
+    /// to one it does not play, the title of a file that is no image, its
+    /// file's name without one, and without a file a missing one.
+    #[test]
+    fn attachments_are_prepended() {
+        let audio = Cell::new(0);
+        let prepend = |post: &Post| {
+            let html = prepend_attachment(&Files, &Loading::default(), post, &audio);
+            String::from_utf8(html).unwrap()
+        };
+        // No `siteurl`: the uploads sit at the root.
+        let uploads = "/wp-content/uploads/2026/10";
+        let cases = [
+            (
+                attachment(1, "video/quicktime", "Clip"),
+                format!(
+                    "<a class=\"wp-embedded-video\" href=\"{uploads}/clip.mov\">{uploads}/clip.mov</a>\n"
+                ),
+            ),
+            (
+                attachment(2, "audio/mpeg", "Song"),
+                format!(
+                    "<audio class=\"wp-audio-shortcode\" id=\"audio-2-1\" preload=\"none\" style=\"width: 100%;\" controls=\"controls\"><source type=\"audio/mpeg\" src=\"{uploads}/song.mp3?_=1\" /><a href=\"{uploads}/song.mp3\">{uploads}/song.mp3</a></audio>\n"
+                ),
+            ),
+            (
+                attachment(3, "audio/aac", "Voice"),
+                format!(
+                    "<a class=\"wp-embedded-audio\" href=\"{uploads}/voice.aac\">{uploads}/voice.aac</a>\n"
+                ),
+            ),
+            (
+                attachment(4, "text/plain", "Notes"),
+                format!("<p class=\"attachment\"><a href='{uploads}/notes.txt'>Notes</a></p>\n"),
+            ),
+            (
+                attachment(4, "text/plain", ""),
+                format!("<p class=\"attachment\"><a href='{uploads}/notes.txt'>notes</a></p>\n"),
+            ),
+            (
+                attachment(5, "image/png", ""),
+                "<p class=\"attachment\">Missing Attachment</p>\n".to_string(),
+            ),
+            (
+                attachment(6, "image/png", "Dot"),
+                format!(
+                    "<p class=\"attachment\"><a href='{uploads}/dot.png'><img width=\"10\" height=\"10\" src=\"{uploads}/dot.png\" class=\"attachment-medium size-medium\" alt=\"\" /></a></p>\n"
+                ),
+            ),
+        ];
+        for (post, html) in cases {
+            assert_eq!(prepend(&post), html, "{}", post.id);
+        }
+        assert_eq!(audio.get(), 2);
+        // Only a file a player plays is a video player, which is not ported.
+        assert!(super::plays_video(&Files, &attachment(7, "video/mp4", "")));
+        assert!(!super::plays_video(
+            &Files,
+            &attachment(1, "video/quicktime", "")
+        ));
+        // The site's other reads, which prepending makes none of.
+        assert_eq!(Files.home_url(), b"http://example.test");
+        assert!(Files.post_terms(1, "category").is_empty());
+        assert!(Files.query(&PostQuery::default()).is_empty());
+    }
 
     /// An imported file is a video by its extension, any other by its type.
     #[test]

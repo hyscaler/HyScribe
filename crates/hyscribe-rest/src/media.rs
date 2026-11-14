@@ -34,7 +34,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         "/wp/v2/media/(?P<id>[\\d]+)" => {
             let mut endpoints = posts::type_endpoints(Kind::Attachment, true);
             // A single attachment takes no excerpt length or password.
-            if let Some(get) = endpoints.first_mut() {
+            for get in endpoints.iter_mut().take(1) {
                 get.args = vec![id(), context_arg()];
             }
             Some(endpoints)
@@ -126,15 +126,10 @@ pub(crate) fn mime_types(params: &Params, kind: Kind) -> Vec<String> {
     unique
 }
 
-/// The attachments' own part of `create_item_permissions_check()`.
+/// The attachments' own part of `create_item_permissions_check()`: its
+/// `upload_files` check is the type's `create_posts` the posts controller
+/// made already.
 pub(crate) fn create_permission(context: &Context, params: &Params) -> Result<(), RestError> {
-    if !context.can("upload_files") {
-        return Err(RestError::status(
-            "rest_cannot_create",
-            "Sorry, you are not allowed to upload media on this site.",
-            400,
-        ));
-    }
     let post = params.get("post").filter(|post| !post.is_empty());
     if post.is_some_and(|post| !context.can_for("edit_post", post.to_int().unsigned_abs())) {
         let message = "Sorry, you are not allowed to upload media to this post.";
@@ -328,32 +323,35 @@ fn media_details(context: &Context, post: &Post, meta: Option<&Value>) -> Value 
         *sizes = empty();
         return Value::Array(details);
     }
-    if let Value::Array(sizes) = sizes {
-        for (name, size) in sizes.iter_mut() {
-            if let Value::Array(fields) = size {
-                let mime = Key::String(b"mime-type".to_vec());
-                if let Some(at) = fields.iter().position(|(key, _)| *key == mime) {
-                    let (_, value) = fields.remove(at);
-                    fields.push((Key::String(b"mime_type".to_vec()), value));
-                }
-                let name = String::from_utf8_lossy(&name.to_php_string()).into_owned();
-                if let Some((url, ..)) = image_downsize(reads, post.id, &name) {
-                    fields.push((Key::String(b"source_url".to_vec()), text(url)));
-                }
-            }
-        }
-        if let Some((url, width, height)) = image_downsize(reads, post.id, "full") {
-            let full = object([
-                ("file", text(wp_basename(&url))),
-                ("width", Value::Int(width)),
-                ("height", Value::Int(height)),
-                ("mime_type", text(post.mime_type.clone())),
-                ("source_url", text(url)),
-            ]);
-            sizes.retain(|(key, _)| key.to_php_string() != b"full");
-            sizes.push((Key::String(b"full".to_vec()), full));
-        }
-    }
+    // A size's MIME type renamed and its URL added, and the full size.
+    let mime = Key::String(b"mime-type".to_vec());
+    let mut named: Vec<(Key, Value)> = sizes
+        .as_array()
+        .unwrap_or_default()
+        .iter()
+        .map(|(name, size)| {
+            let mut fields = size.as_array().unwrap_or_default().to_vec();
+            let at = fields.iter().position(|(key, _)| *key == mime);
+            let renamed = at.map(|at| fields.remove(at).1);
+            fields.extend(renamed.map(|value| (Key::String(b"mime_type".to_vec()), value)));
+            let label = String::from_utf8_lossy(&name.to_php_string()).into_owned();
+            let url = image_downsize(reads, post.id, &label);
+            fields.extend(url.map(|(url, ..)| (Key::String(b"source_url".to_vec()), text(url))));
+            (name.clone(), Value::Array(fields))
+        })
+        .collect();
+    let full = image_downsize(reads, post.id, "full").map(|(url, width, height)| {
+        object([
+            ("file", text(wp_basename(&url))),
+            ("width", Value::Int(width)),
+            ("height", Value::Int(height)),
+            ("mime_type", text(post.mime_type.clone())),
+            ("source_url", text(url)),
+        ])
+    });
+    named.retain(|(key, _)| full.is_none() || key.to_php_string() != b"full");
+    named.extend(full.map(|full| (Key::String(b"full".to_vec()), full)));
+    *sizes = Value::Array(named);
     Value::Array(details)
 }
 

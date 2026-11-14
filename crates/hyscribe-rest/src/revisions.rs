@@ -257,7 +257,8 @@ fn order_errors(params: &Params) -> Result<(), RestError> {
 
 /// `get_items()` of the revisions.
 fn revisions(context: &Context, params: &Params) -> Result<Response, RestError> {
-    let parent = get_parent(context, params, "parent")?;
+    // The permission check found the parent.
+    let parent = get_parent(context, params, "parent").unwrap_or_default();
     order_errors(params)?;
     let query = query(params, &parent);
     let reads = context.site.reads();
@@ -320,7 +321,7 @@ fn list(
 
 /// `get_item()` of a revision.
 fn revision(context: &Context, params: &Params) -> Result<Response, RestError> {
-    let parent = get_parent(context, params, "parent")?;
+    let parent = get_parent(context, params, "parent").unwrap_or_default();
     let revision = get_revision(context, params)?;
     if revision.parent != parent.id {
         let message = format!(
@@ -375,7 +376,7 @@ fn is_autosave(revision: &Post, parent: u64) -> bool {
 
 /// `get_items()` of the autosaves: every one, by any author.
 fn autosaves(context: &Context, params: &Params) -> Result<Response, RestError> {
-    let parent = get_parent(context, params, "id")?;
+    let parent = get_parent(context, params, "id").unwrap_or_default();
     let found: Vec<Post> = all_revisions(context, &parent)
         .into_iter()
         .filter(|revision| is_autosave(revision, parent.id))
@@ -385,7 +386,7 @@ fn autosaves(context: &Context, params: &Params) -> Result<Response, RestError> 
 
 /// `get_item()` of an autosave: the parent's newest, whatever the ID.
 fn autosave(context: &Context, params: &Params) -> Result<Response, RestError> {
-    let parent = get_parent(context, params, "parent")?;
+    let parent = get_parent(context, params, "parent").unwrap_or_default();
     let name = format!("{}-autosave-v1", parent.id);
     let mut found = all_revisions(context, &parent)
         .into_iter()
@@ -431,14 +432,11 @@ fn prepare(
     let mut data: Vec<(Key, Value)> = Vec::new();
     let mut put = |name: &str, value: Value| data.push((Key::String(name.into()), value));
     // A part of an object, `raw` or `rendered`, when `_fields` wants it.
-    let parts = |prefix: &str, raw: &[u8], rendered: Option<Vec<u8>>| {
-        let mut kept = Vec::new();
-        if has(&format!("{prefix}.raw")) {
-            kept.push((Key::String(b"raw".to_vec()), text(raw.to_vec())));
-        }
-        if let Some(rendered) = rendered {
-            kept.push((Key::String(b"rendered".to_vec()), text(rendered)));
-        }
+    // `_fields` and the context keep `raw` where wanted.
+    let parts = |raw: &[u8], rendered: Option<Vec<u8>>| {
+        let mut kept = vec![(Key::String(b"raw".to_vec()), text(raw.to_vec()))];
+        let rendered = rendered.map(|rendered| (Key::String(b"rendered".to_vec()), text(rendered)));
+        kept.extend(rendered);
         Value::Array(kept)
     };
     if has("author") {
@@ -450,9 +448,8 @@ fn prepare(
     if has("date_gmt") {
         put("date_gmt", date(&revision.date_gmt, &revision.date_gmt));
     }
-    if has("id") {
-        put("id", int(revision.id));
-    }
+    // `_fields` keeps `id` where wanted.
+    put("id", int(revision.id));
     if has("modified") {
         put("modified", date(&revision.modified_gmt, &revision.modified));
     }
@@ -478,11 +475,11 @@ fn prepare(
     }
     if has("title") {
         let rendered = has("title.rendered").then(|| admin_title(revision));
-        put("title", parts("title", &revision.title, rendered));
+        put("title", parts(&revision.title, rendered));
     }
     if has("content") {
         let rendered = renders.then(|| rendering.the_content(revision));
-        put("content", parts("content", &revision.content, rendered));
+        put("content", parts(&revision.content, rendered));
     }
     if has("excerpt") {
         // `the_excerpt` of the excerpt alone, empty without one.
@@ -493,7 +490,7 @@ fn prepare(
                 rendering.the_excerpt(revision, 55)
             }
         });
-        put("excerpt", parts("excerpt", &revision.excerpt, rendered));
+        put("excerpt", parts(&revision.excerpt, rendered));
     }
     if has("meta") {
         let footnotes = context.site.post_meta(revision.id, "footnotes");

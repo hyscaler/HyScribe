@@ -371,6 +371,9 @@ impl BarSite for Admin<'_> {
             hyscribe_render::user_avatar(&|name| self.reads.reads.option(name), &self.user, size);
         String::from_utf8_lossy(&avatar).into_owned()
     }
+    fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
+        hyscribe_admin::media::site_icon_url(self, size)
+    }
 }
 
 impl Urls for Admin<'_> {
@@ -1048,6 +1051,12 @@ fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
         }
     }
     Some(list)
+}
+
+/// `get_site_icon_url( $size )` outside the admin, as the login screen asks.
+pub(crate) fn site_icon(reads: &LoginReads, size: i64) -> Option<Vec<u8>> {
+    let admin = Admin::new(reads, reads.site, hyscribe_model::User::default());
+    hyscribe_admin::media::site_icon_url(&admin, size)
 }
 
 /// The screen at `path` for `admin`, `None` for one not ported yet.

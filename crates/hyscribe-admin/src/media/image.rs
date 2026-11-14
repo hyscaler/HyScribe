@@ -151,6 +151,35 @@ fn downsize(
     Some((url, width, height))
 }
 
+/// `get_site_icon_url( $size )`: the `site_icon` attachment's image for a
+/// square of `size`, from 512 its full image; `None` without one.
+pub fn site_icon_url(site: &dyn PostsSite, size: i64) -> Option<Vec<u8>> {
+    let id = Value::String(site.option("site_icon").unwrap_or_default()).to_int();
+    let post = u64::try_from(id).ok().and_then(|id| site.post(id))?;
+    let url = attachment_url(site, &post)?;
+    let meta = metadata(site, &post);
+    let file = site.meta(&post, "_wp_attached_file").unwrap_or_default();
+    let image = is_image(&file, &post.mime_type);
+    let url = if size < 512 {
+        downsize(url, &meta, image, (size, size))?.0
+    } else {
+        // `image_downsize( $id, 'full' )`: a stored `full` size, which a
+        // file that is not an image needs.
+        match meta
+            .get_path(&["sizes", "full"])
+            .filter(|full| !full.is_empty())
+        {
+            Some(full) => {
+                let full = full.get_str("file").map(Value::to_php_string);
+                replace(&url, &wp_basename(&url), &full.unwrap_or_default())
+            }
+            None if image => url,
+            None => return None,
+        }
+    };
+    (!url.is_empty()).then_some(url)
+}
+
 /// `wp_mime_type_icon( $id, '.svg' )`'s icon name: the type of the file's
 /// extension or of its MIME type that has an icon, else the default one.
 fn icon_name(file: &[u8], mime: &str) -> &'static str {

@@ -19,6 +19,7 @@ mod library;
 mod upload_new;
 
 pub use attachment::{AttachmentArgs, AttachmentSite, attachment_edit};
+pub use image::site_icon_url;
 pub use library::{LibraryArgs, upload};
 pub use upload_new::{NewArgs, media_new};
 

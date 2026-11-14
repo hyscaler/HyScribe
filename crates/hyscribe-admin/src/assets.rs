@@ -659,3 +659,29 @@ impl Dependencies {
 
 #[cfg(test)]
 mod tests;
+
+/// `wp_site_icon()`: the tags of the site icon `icon` gives at a size, if
+/// it has one at 512.
+pub(crate) fn site_icon_tags(icon: &dyn Fn(i64) -> Option<Vec<u8>>) -> String {
+    if icon(512).is_none() {
+        return String::new();
+    }
+    let tags = [
+        (32, "<link rel=\"icon\" href=\"%s\" sizes=\"32x32\" />"),
+        (192, "<link rel=\"icon\" href=\"%s\" sizes=\"192x192\" />"),
+        (180, "<link rel=\"apple-touch-icon\" href=\"%s\" />"),
+        (
+            270,
+            "<meta name=\"msapplication-TileImage\" content=\"%s\" />",
+        ),
+    ];
+    let mut out = String::new();
+    for (size, tag) in tags {
+        if let Some(url) = icon(size) {
+            let url = String::from_utf8_lossy(&esc_url(&url)).into_owned();
+            out.push_str(&tag.replace("%s", &url));
+            out.push('\n');
+        }
+    }
+    out
+}

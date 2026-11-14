@@ -173,3 +173,57 @@ fn files_show_their_type_s_icon() {
         "{html}"
     );
 }
+
+/// Every page of `reference/site-icon/golden.sh`: the login screen's head
+/// and the Tools screen's head and admin bar with a site icon.
+#[test]
+fn site_icons_are_php_s() {
+    let golden = include_str!("../../../tests/golden/site-icon.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let php = String::from_utf8(hyscribe_testkit::unhex(f[3])).unwrap();
+        let ours = if f[2] == "-" {
+            let query = Value::Array(Vec::new());
+            let request = crate::login::Request {
+                query: &query,
+                form: None,
+                test_cookie: false,
+                logged_in_cookie: false,
+                session: crate::login::Session::None,
+                reset_cookie: None,
+                read_only: false,
+            };
+            let oracle = crate::tests::Oracle {
+                icon: Some(Box::leak(format!("{}:-", f[0]).into_boxed_str())),
+                ..crate::tests::Oracle::default()
+            };
+            match crate::login::login(&oracle, &request) {
+                crate::login::Login::Page(page) => String::from_utf8(page).unwrap(),
+                crate::login::Login::LoggedIn { .. } => String::new(),
+            }
+        } else {
+            let role: &'static str = Box::leak(format!("{}:{}", f[0], f[2]).into_boxed_str());
+            let canonical = format!("{}/hs-admin/tools", crate::tests::SITE);
+            let request =
+                crate::tests::request(&canonical, "/hs-admin/tools", &crate::tests::BROWSER);
+            let php = hyscribe_testkit::hs_admin_page(&php);
+            let ours = crate::tools::tools(&Role(role), &request).unwrap();
+            if ours != php {
+                failures.push(format!(
+                    "{line:.40}{}",
+                    crate::tests::first_difference(&php, &ours)
+                ));
+            }
+            continue;
+        };
+        if ours != php {
+            failures.push(format!(
+                "{line:.40}{}",
+                crate::tests::first_difference(&php, &ours)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(golden.lines().count(), 7);
+}

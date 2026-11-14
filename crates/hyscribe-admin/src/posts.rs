@@ -2037,6 +2037,8 @@ pub enum Answer {
     Denied(&'static str),
     /// `wp_die()`'s default `500` with this message.
     Died(&'static str),
+    /// `wp_die()`'s `404` with this message.
+    Missing(&'static str),
 }
 
 impl Answer {

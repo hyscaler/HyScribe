@@ -19,7 +19,9 @@ use hyscribe_admin::dashboard::{
     CommentCounts, DashboardSite, RecentComment, comment_status, dashboard,
 };
 use hyscribe_admin::login::Site as LoginSite;
-use hyscribe_admin::media::{LibraryArgs, MediaSite, NewArgs, media_new, upload};
+use hyscribe_admin::media::{
+    AttachmentArgs, LibraryArgs, MediaSite, NewArgs, attachment_edit, media_new, upload,
+};
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::{PageSite, REMOVABLE, Request};
 use hyscribe_admin::posts::{
@@ -101,6 +103,8 @@ struct Admin<'a> {
     comment_counts: OnceCell<CommentCounts>,
     /// The user's `wp-settings-{ID}` cookie, if sent.
     settings: Option<String>,
+    /// The `Referer` header, if sent.
+    referer: Option<String>,
 }
 
 impl<'a> Admin<'a> {
@@ -113,6 +117,7 @@ impl<'a> Admin<'a> {
             posts: RefCell::default(),
             comment_counts: OnceCell::new(),
             settings: None,
+            referer: None,
         }
     }
 
@@ -1036,18 +1041,22 @@ fn screen(
                 Err(response) => return Some(*response),
             }
         }
-        // Their actions are not ported.
-        "/hs-admin/upload" | "/hs-admin/media-new" => {
+        // Their actions are not ported, nor `/hs-admin/post` but an
+        // attachment's edit screen.
+        "/hs-admin/upload" | "/hs-admin/media-new" | "/hs-admin/post" => {
             let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
             let query = raw.split_once('?').map_or("", |(_, query)| query);
-            let answer = if path == "/hs-admin/upload" {
-                upload(admin, &LibraryArgs::parse(query)?, &request)?
-            } else {
-                media_new(
+            let answer = match path {
+                "/hs-admin/upload" => upload(admin, &LibraryArgs::parse(query)?, &request)?,
+                "/hs-admin/post" => {
+                    let args = AttachmentArgs::parse(query, admin.referer.clone())?;
+                    attachment_edit(admin, &args, &request)?
+                }
+                _ => media_new(
                     admin,
                     &NewArgs::parse(query, admin.settings.clone())?,
                     &request,
-                )
+                ),
             };
             match answered(admin, answer) {
                 Ok(html) => Some(html),
@@ -1183,6 +1192,7 @@ fn answered(admin: &Admin, answer: Answer) -> Result<String, Box<Response>> {
         Answer::Redirect(to) => redirect(screen_headers(), to.as_bytes()),
         Answer::Denied(message) => denied(admin, message),
         Answer::Died(message) => died(admin, StatusCode::INTERNAL_SERVER_ERROR, message),
+        Answer::Missing(message) => died(admin, StatusCode::NOT_FOUND, message),
     }))
 }
 
@@ -1238,6 +1248,8 @@ fn answer(
                 let settings = cookie(&cookies, &format!("wp-settings-{id}"));
                 admin.settings = settings.map(|value| String::from_utf8_lossy(value).into_owned());
                 let header = |name: &str| headers.get(name).map(HeaderValue::as_bytes);
+                admin.referer =
+                    header("referer").map(|value| String::from_utf8_lossy(value).into_owned());
                 let browser = Browser {
                     user_agent: header("user-agent").unwrap_or_default(),
                     mobile_hint: header("sec-ch-ua-mobile"),

@@ -255,6 +255,19 @@ const VIEWS: [(&str, &[&str]); 6] = [
 const REPLY: &str = include_str!("comments/reply.html");
 const EDITOR: &str = include_str!("comments/editor.html");
 
+/// The editor's styles, which `wp_editor()` prints with the page's first.
+pub(crate) fn editor_css(site: &dyn DashboardSite) -> String {
+    let url = format!(
+        "{}/wp-includes/css/editor.min.css?ver={}",
+        site.site_url(),
+        crate::dashboard::VERSION.trim()
+    );
+    format!(
+        "<link rel='stylesheet' id='editor-buttons-css' href='{}' media='all' />\n",
+        String::from_utf8_lossy(&esc_url(url.as_bytes()))
+    )
+}
+
 /// `_WP_Editors::editor_js()` and the link dialog of the reply form.
 pub(crate) fn editor_footer(site: &dyn DashboardSite) -> String {
     EDITOR
@@ -262,14 +275,16 @@ pub(crate) fn editor_footer(site: &dyn DashboardSite) -> String {
         .replace("%nonce%", &site.nonce("internal-linking"))
 }
 
-/// `wp_comment_reply( -1, $checkbox, $mode )` and
+/// `wp_comment_reply( $position, $checkbox, $mode )` and
 /// `wp_comment_trashnotice()`: in a table row of `colspan` columns, or in
-/// the dashboard's `<div>`s without one.
+/// the dashboard's `<div>`s without one; `styled` when its editor is the
+/// page's first, which prints the editor's styles.
 pub(crate) fn comment_reply(
     site: &dyn DashboardSite,
     colspan: Option<usize>,
-    checkbox: bool,
-    mode: &str,
+    (checkbox, mode): (bool, &str),
+    position: i8,
+    styled: bool,
 ) -> String {
     let (open, close) = match colspan {
         Some(columns) => (
@@ -283,11 +298,6 @@ pub(crate) fn comment_reply(
             "</div></div>",
         ),
     };
-    let editor_css = format!(
-        "{}/wp-includes/css/editor.min.css?ver={}",
-        site.site_url(),
-        crate::dashboard::VERSION.trim()
-    );
     crate::list_table::fill(
         REPLY,
         &[
@@ -295,8 +305,13 @@ pub(crate) fn comment_reply(
             ("close", close.into()),
             (
                 "editor_css",
-                String::from_utf8_lossy(&esc_url(editor_css.as_bytes())).into_owned(),
+                if styled {
+                    editor_css(site)
+                } else {
+                    String::new()
+                },
             ),
+            ("position", position.to_string()),
             ("checkbox", u8::from(checkbox).to_string()),
             ("mode", mode.into()),
             ("nonce", site.nonce("replyto-comment")),
@@ -1107,7 +1122,7 @@ pub fn edit_comments(
         ),
         search_box,
         date::format_unix("Y-m-d H:i:s", now, Zone::Utc),
-        comment_reply(site, Some(visible), true, "detail")
+        comment_reply(site, Some(visible), (true, "detail"), -1, true)
     );
     let screen_options = screen_options(
         &columns,

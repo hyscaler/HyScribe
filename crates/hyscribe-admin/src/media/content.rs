@@ -8,14 +8,14 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use hyscribe_model::{OrderBy, Post, PostQuery};
+use hyscribe_model::{OrderBy, Post, PostQuery, User};
 use hyscribe_phpser::Value;
 use hyscribe_testkit::{Dump, SqlValue};
 
 struct Fixture {
     posts: Vec<Post>,
     meta: HashMap<(u64, Vec<u8>), Vec<u8>>,
-    names: HashMap<u64, Vec<u8>>,
+    users: Vec<User>,
 }
 
 /// A value's text, or a number's digits: the posts' columns hold no NULL.
@@ -55,6 +55,7 @@ fn fixture() -> &'static Fixture {
                 excerpt: text(&row[6]),
                 status: string(&row[7]),
                 comment_status: string(&row[8]),
+                ping_status: string(&row[9]),
                 password: text(&row[10]),
                 name: text(&row[11]),
                 parent: number(&row[17]),
@@ -69,11 +70,17 @@ fn fixture() -> &'static Fixture {
             .table("wp_postmeta")
             .map(|row| ((number(&row[1]), text(&row[2])), text(&row[3])))
             .collect();
-        let names = dump
+        let users = dump
             .table("wp_users")
-            .map(|row| (number(&row[0]), text(&row[9])))
+            .map(|row| User {
+                id: number(&row[0]),
+                login: text(&row[1]),
+                email: text(&row[4]),
+                display_name: text(&row[9]),
+                ..User::default()
+            })
             .collect();
-        Fixture { posts, meta, names }
+        Fixture { posts, meta, users }
     })
 }
 
@@ -87,9 +94,9 @@ pub(crate) fn meta(id: u64, key: &str) -> Option<Vec<u8>> {
     fixture().meta.get(&(id, key.as_bytes().to_vec())).cloned()
 }
 
-/// A user's display name.
-pub(crate) fn display_name(id: u64) -> Option<Vec<u8>> {
-    fixture().names.get(&id).cloned()
+/// A user of the fixture.
+pub(crate) fn user(id: u64) -> Option<User> {
+    fixture().users.iter().find(|user| user.id == id).cloned()
 }
 
 /// `LIKE` as MySQL compares text without case, for the patterns the

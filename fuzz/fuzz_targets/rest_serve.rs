@@ -185,9 +185,9 @@ impl hyscribe_render::site::Site for Fuzzed<'_> {
 fuzz_target!(|data: &[u8]| {
     let mut parts = data.split(|&b| b == 0);
     let mut next = || parts.next().unwrap_or_default();
-    let (method, route, query, header, content) = (next(), next(), next(), next(), next());
+    let (verb, route, query, header, content) = (next(), next(), next(), next(), next());
     let methods = ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"];
-    let method = methods[usize::from(method.first().copied().unwrap_or(0)) % methods.len()];
+    let method = methods[usize::from(verb.first().copied().unwrap_or(0)) % methods.len()];
     let get = match parse_str(query) {
         Value::Array(get) => get,
         _ => Vec::new(),
@@ -202,6 +202,7 @@ fuzz_target!(|data: &[u8]| {
         origin: header.get(1..).filter(|origin| !origin.is_empty()),
         nonce: header.get(..1),
         method_override: None,
+        unread_body: verb.first().is_some_and(|b| b & 0x80 != 0),
     };
     let served = serve(&Fuzzed { content }, &request);
     assert!((200..600).contains(&served.status));

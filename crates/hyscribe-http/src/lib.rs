@@ -493,7 +493,15 @@ async fn page(
         return loaders::load(loader, uri.query(), &headers, now() as u64);
     }
     if admin::is_admin(uri.path()) && page_method {
-        return admin::respond(&site, uri, headers, post).await;
+        // `$_POST`, unless the body is one only PHP reads.
+        let form = if post {
+            trackback::form(&headers, &body)
+        } else {
+            Value::Array(Vec::new())
+        };
+        let read = !post || body.is_empty() || form.as_array().is_some_and(|f| !f.is_empty());
+        let form = read.then_some(form);
+        return admin::respond(&site, uri, headers, post, form).await;
     }
     // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.
     let original = uri.clone();

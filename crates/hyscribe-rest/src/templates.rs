@@ -14,7 +14,7 @@ use hyscribe_render::date::{Zone, format};
 use hyscribe_render::post::admin_title;
 
 use crate::fields::{fields_for_response, is_field_included, links_wanted};
-use crate::request::{Arg, Params, Sanitize, string_arg};
+use crate::request::{Arg, Params, Sanitize, required, string_arg};
 use crate::response::{Response, RestError, list, object, text};
 use crate::types::{can_edit_any, context_arg};
 use crate::{Context, Endpoint};
@@ -77,10 +77,10 @@ fn per_kind(
 }
 
 /// A write endpoint, not ported: its permission check, which `Allow` and
-/// links read.
-fn write() -> Endpoint {
+/// links read, after its `args`.
+fn write(args: Vec<Arg>) -> Endpoint {
     Endpoint {
-        args: Vec::new(),
+        args,
         permission: manage,
         callback: None,
     }
@@ -118,7 +118,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                     |context, params| items(context, params, Kind::Part),
                 ),
             },
-            write(),
+            write(vec![required("slug")]),
         ]),
         "/lookup" => Some(vec![Endpoint {
             args: vec![
@@ -153,8 +153,8 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                     |context, params| item(context, params, Kind::Part),
                 ),
             },
-            write(),
-            write(),
+            write(Vec::new()),
+            write(Vec::new()),
         ]),
         _ => None,
     }

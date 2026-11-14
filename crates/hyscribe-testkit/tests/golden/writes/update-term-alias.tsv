@@ -1,0 +1,8 @@
+# The rows PHP WordPress writes for the action update-term-alias (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 20:00:43 to 2026-11-14 20:00:43 UTC.
+# %wp_terms:1% is 31.
+# %wp_terms:2% is 32.
+# %wp_term_taxonomy:1% is 31.
+# %wp_term_taxonomy:2% is 32.
+wp_terms	%wp_terms:1%	~	term_group	0	1
+wp_terms	%wp_terms:2%	~	term_group	0	1

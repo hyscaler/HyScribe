@@ -10,6 +10,7 @@ use hyscribe_kses::{esc_attr, esc_url};
 use hyscribe_model::Post;
 use hyscribe_phpser::{Value, is_empty_string};
 
+use crate::attachment::prepend::prepend_attachment;
 use crate::autop::wpautop;
 use crate::blocks::Block;
 use crate::content_tags::wp_filter_content_tags;
@@ -96,12 +97,24 @@ impl Renderer<'_> {
     pub(crate) fn content_filters(&self, content: &[u8], autop: bool, tags: bool) -> Vec<u8> {
         let site = self.context.site;
         let content = wptexturize(content, &CORE_SHORTCODE_TAGS);
-        let content = if autop {
-            wpautop(&content, true)
-        } else {
-            content
+        let autop_at = |restored: bool, content: Vec<u8>| {
+            if autop && restored == self.autop_restored {
+                wpautop(&content, true)
+            } else {
+                content
+            }
         };
-        let content = capital_p_dangit(&replace_insecure_home_url(&site.home_url(), &content));
+        let content = autop_at(false, content);
+        let content = match &self.attachment {
+            Some(post) => [
+                prepend_attachment(site, &self.context.loading, post, &self.audio_instances),
+                content,
+            ]
+            .concat(),
+            None => content,
+        };
+        let content = replace_insecure_home_url(&site.home_url(), &content);
+        let content = capital_p_dangit(&autop_at(true, content));
         let content = if tags {
             wp_filter_content_tags(site, &self.context.loading, &content)
         } else {

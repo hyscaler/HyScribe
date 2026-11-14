@@ -410,7 +410,13 @@ fn matches(site: &Fixture, query: &PostQuery, post: &Post) -> bool {
         .iter()
         .all(|term| match term.strip_prefix('-') {
             Some(term) => columns.iter().all(|c| !hit(c, term)),
-            None => columns.iter().any(|c| hit(c, term)),
+            None => {
+                let file = || {
+                    site.post_meta(post.id, "_wp_attached_file")
+                        .unwrap_or_default()
+                };
+                columns.iter().any(|c| hit(c, term)) || query.filenames && like(&file(), term)
+            }
         });
     let format = query.formats.as_ref().is_none_or(|formats| {
         let terms = site.post_terms(post.id, "post_format");
@@ -435,6 +441,7 @@ fn matches(site: &Fixture, query: &PostQuery, post: &Post) -> bool {
             .menu_order
             .is_none_or(|order| order == post.menu_order)
         && searched
+        && (query.mime_types.is_empty() || query.mime_types.contains(&post.mime_type))
         && (query.search.is_empty() || query.logged_in || post.password.is_empty())
         && format
 }
@@ -500,5 +507,26 @@ fn order(query: &PostQuery, a: &Post, b: &Post) -> std::cmp::Ordering {
             return ordering;
         }
     }
+    // MariaDB's sort of attachments by date leaves ties newest first.
+    if query.post_types == ["attachment"] && query.order == [(OrderBy::Date, false)] {
+        return b.id.cmp(&a.id);
+    }
     a.id.cmp(&b.id)
+}
+
+/// The default install, or the Theme Test Data fixture when `ttd`, with
+/// `reference/rest/media.sql`'s rows.
+pub(super) fn with_media(ttd: bool) -> &'static Dump {
+    static MEDIA: [OnceLock<Dump>; 2] = [const { OnceLock::new() }; 2];
+    MEDIA[usize::from(ttd)].get_or_init(|| {
+        let dump = if ttd {
+            theme_test_data()
+        } else {
+            default_install()
+        };
+        let state = include_str!("../../../../reference/rest/media.sql");
+        let mut rows = dump.rows.clone();
+        rows.extend(Dump::parse(state.as_bytes()).unwrap().rows);
+        Dump { rows }
+    })
 }

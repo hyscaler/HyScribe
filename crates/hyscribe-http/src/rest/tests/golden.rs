@@ -121,6 +121,9 @@ impl hyscribe_rest::Site for AsRole<'_> {
     fn create_nonce(&self) -> String {
         "%nonce%".into()
     }
+    fn nonce(&self, _: &str) -> String {
+        "%preview_nonce%".into()
+    }
     fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
         user != 0 && Capabilities::load(self, "wp_", user).has_cap(self, cap, args)
     }

@@ -236,6 +236,46 @@ async fn new_comments_follow_the_discussion_options() {
                 ..submitted()
             };
             submit(write, own, ADMIN).await.unwrap();
+            submit(write, known(b"A clean comment."), ADMIN)
+                .await
+                .unwrap();
+        },
+    )
+    .await;
+    check(
+        "new-comment-unchecked",
+        option("comment_previously_approved", b"0"),
+        async |write, ()| {
+            submit(write, submitted(), ADMIN).await.unwrap();
+        },
+    )
+    .await;
+    check("new-comment-blank-email", nothing, async |write, ()| {
+        let blank = NewComment {
+            author_email: b"  ".to_vec(),
+            ..submitted()
+        };
+        submit(write, blank, ADMIN).await.unwrap();
+    })
+    .await;
+    check(
+        "new-comment-not-flood",
+        async |write| {
+            let then = format_unix(MYSQL, context().now - 60, Zone::Utc);
+            let earlier = NewComment {
+                author_ip: b"192.0.2.7".to_vec(),
+                date: Some(then.clone()),
+                date_gmt: Some(then),
+                ..reader("1")
+            };
+            insert(write, earlier).await;
+        },
+        async |write, ()| {
+            let again = NewComment {
+                author_ip: b"192.0.2.7".to_vec(),
+                ..submitted()
+            };
+            submit(write, again, Commenter::default()).await.unwrap();
         },
     )
     .await;
@@ -463,6 +503,7 @@ async fn statuses_change() {
 async fn trash_and_delete() {
     check("trash-comment", nothing, async |write, ()| {
         assert!(trash_comment(write, context(), 1).await.unwrap());
+        assert!(!trash_comment(write, context(), 1).await.unwrap());
     })
     .await;
     check(

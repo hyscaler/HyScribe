@@ -201,7 +201,9 @@ pub async fn new_comment(
     if !parent.is_some_and(|parent| matches!(parent.approved.as_str(), "0" | "1")) {
         comment.parent = 0;
     }
-    (comment.author_ip).retain(|b| b.is_ascii_hexdigit() || b":., ".contains(b));
+    comment
+        .author_ip
+        .retain(|b| b.is_ascii_hexdigit() || b":., ".contains(b));
     comment.agent.truncate(254);
     let zone = zone(&mut steps).await;
     let set = |date: Option<String>| date.filter(|date| !is_empty_string(date.as_bytes()));
@@ -210,9 +212,8 @@ pub async fn new_comment(
         set(comment.date_gmt.take()).unwrap_or_else(|| format_unix(MYSQL, context.now, Zone::Utc));
     comment.date = Some(date);
     comment.date_gmt = Some(date_gmt);
-    if comment.comment_type.is_empty() {
-        comment.comment_type = "comment".into();
-    }
+    // An empty `comment_type` is `comment` from here on in PHP, which only
+    // trackbacks and pingbacks tell apart; `insert()` names it.
     let approved = allow::allow_comment(&mut steps, context, &comment, commenter).await;
     let approved = match approved {
         Ok(approved) => approved,

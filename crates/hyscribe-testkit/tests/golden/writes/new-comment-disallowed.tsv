@@ -1,7 +1,8 @@
 # The rows PHP WordPress writes for the action new-comment-disallowed (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 19:41:00 to 2026-11-14 19:41:00 UTC.
-# %wp_comments:1% is 12.
-# %wp_comments:2% is 13.
+# %now% and %unix% stand for times from 2026-11-14 20:23:26 to 2026-11-14 20:23:26 UTC.
+# %wp_comments:1% is 2.
+# %wp_comments:2% is 3.
+# %wp_comments:3% is 4.
 wp_comments	%wp_comments:1%	+	comment_ID	%wp_comments:1%
 wp_comments	%wp_comments:1%	+	comment_agent	Oracle
 wp_comments	%wp_comments:1%	+	comment_approved	trash
@@ -32,4 +33,19 @@ wp_comments	%wp_comments:2%	+	comment_parent	0
 wp_comments	%wp_comments:2%	+	comment_post_ID	1
 wp_comments	%wp_comments:2%	+	comment_type	comment
 wp_comments	%wp_comments:2%	+	user_id	1
-wp_posts	1	~	comment_count	1	2
+wp_comments	%wp_comments:3%	+	comment_ID	%wp_comments:3%
+wp_comments	%wp_comments:3%	+	comment_agent	Oracle
+wp_comments	%wp_comments:3%	+	comment_approved	1
+wp_comments	%wp_comments:3%	+	comment_author	A WordPress Commenter
+wp_comments	%wp_comments:3%	+	comment_author_IP	192.0.2.1
+wp_comments	%wp_comments:3%	+	comment_author_email	wapuu@wordpress.example
+wp_comments	%wp_comments:3%	+	comment_author_url	https://reader.example.test
+wp_comments	%wp_comments:3%	+	comment_content	A clean comment.
+wp_comments	%wp_comments:3%	+	comment_date	%now%
+wp_comments	%wp_comments:3%	+	comment_date_gmt	%now%
+wp_comments	%wp_comments:3%	+	comment_karma	0
+wp_comments	%wp_comments:3%	+	comment_parent	0
+wp_comments	%wp_comments:3%	+	comment_post_ID	1
+wp_comments	%wp_comments:3%	+	comment_type	comment
+wp_comments	%wp_comments:3%	+	user_id	0
+wp_posts	1	~	comment_count	1	3

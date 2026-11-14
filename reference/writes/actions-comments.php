@@ -118,6 +118,37 @@ return array(
 					'comment_content' => 'My own badword.',
 				)
 			);
+			$submit( array( 'comment_content' => 'A clean comment.' ) + $known );
+		},
+	),
+	'new-comment-unchecked'     => array(
+		'setup'  => function () {
+			update_option( 'comment_previously_approved', '0' );
+		},
+		'action' => function () use ( $submit ) {
+			$submit();
+		},
+	),
+	'new-comment-blank-email'   => array(
+		'action' => function () use ( $submit ) {
+			$submit( array( 'comment_author_email' => '  ' ) );
+		},
+	),
+	'new-comment-not-flood'     => array(
+		'setup'  => function () use ( $comment ) {
+			$then = gmdate( 'Y-m-d H:i:s', time() - 60 );
+			$comment(
+				1,
+				array(
+					'comment_author_IP' => '192.0.2.7',
+					'comment_date'      => $then,
+					'comment_date_gmt'  => $then,
+				)
+			);
+		},
+		'action' => function () use ( $submit ) {
+			wp_set_current_user( 0 );
+			$submit( array( 'comment_author_IP' => '192.0.2.7' ) );
 		},
 	),
 	'new-comment-replies'       => array(
@@ -309,6 +340,9 @@ return array(
 	'trash-comment'             => array(
 		'action' => function () {
 			wp_trash_comment( 1 );
+			if ( false !== wp_trash_comment( 1 ) ) {
+				throw new Exception( 'trashed twice' );
+			}
 		},
 	),
 	'untrash-comment'           => array(

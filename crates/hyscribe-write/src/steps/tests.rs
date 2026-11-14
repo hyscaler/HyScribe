@@ -24,8 +24,10 @@ async fn the_first_error_stops_the_action() {
     let writer = Writer::open(&db, Mode::Primary).await.unwrap().unwrap();
     let mut write = writer.begin_on(&mut conn).await.unwrap();
     let mut steps = Steps::new(&mut write);
-    let blogname = steps.run(async |w| w.option("blogname").await).await;
-    assert_eq!(blogname.unwrap(), b"HyScribe Default Install");
+    // One closure type, so one instance of `run` takes every path.
+    let blogname = || async |w: &mut Write<'_>| w.option("blogname").await;
+    let name = steps.run(blogname()).await;
+    assert_eq!(name.unwrap(), b"HyScribe Default Install");
 
     let mut killer = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
     sqlx::query("KILL ?")
@@ -33,8 +35,8 @@ async fn the_first_error_stops_the_action() {
         .execute(&mut killer)
         .await
         .unwrap();
-    assert_eq!(steps.run(async |w| w.option("blogname").await).await, None);
-    // Skipped: the statement would have succeeded.
-    assert_eq!(steps.run(async |_| Ok(1)).await, 0);
+    assert_eq!(steps.run(blogname()).await, None);
+    // Skipped, and the first error kept.
+    assert_eq!(steps.run(blogname()).await, None);
     assert!(steps.finish(()).is_err());
 }

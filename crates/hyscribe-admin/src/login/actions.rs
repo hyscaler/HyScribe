@@ -35,12 +35,13 @@ pub enum Reset {
     Expire,
 }
 
-/// The value of `$_REQUEST['redirect_to']` as printed, empty for none.
+/// `$_REQUEST['redirect_to']` as printed when not `empty()`; a query
+/// string's array is never empty.
 fn redirect_to(request: &Request) -> Vec<u8> {
     match request.request("redirect_to") {
-        Some(Value::String(to)) => addslashes(to),
-        Some(other) if !other.is_empty() => b"Array".to_vec(),
-        _ => Vec::new(),
+        Some(Value::String(to)) if !is_empty_string(to) => addslashes(to),
+        Some(Value::String(_)) | None => Vec::new(),
+        Some(_) => b"Array".to_vec(),
     }
 }
 

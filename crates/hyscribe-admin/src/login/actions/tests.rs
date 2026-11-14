@@ -114,3 +114,17 @@ fn hashes_and_writes_are_not_ported() {
         );
     }
 }
+
+/// `redirect_to` of "0" is `empty()`, so the form carries none.
+#[test]
+fn a_zero_redirect_is_none() {
+    let oracle = Oracle::default();
+    let page = |query: &str| {
+        let query = parse_str(query.as_bytes());
+        action(&oracle, &request(&query, None), "lostpassword", b"/")
+    };
+    assert_eq!(
+        page("action=lostpassword&redirect_to=0"),
+        page("action=lostpassword")
+    );
+}

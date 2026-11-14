@@ -989,6 +989,18 @@ async fn refusals() {
     .unwrap()
     .unwrap();
     assert_eq!(privacy.status(), StatusCode::FORBIDDEN);
+    // An item in the Trash is PHP's `409`.
+    let conflict = tokio::task::spawn_blocking({
+        let (site, handle) = (Arc::clone(&site), handle.clone());
+        move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            served(&admin, Answer::Conflict("In the Trash.")).status()
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(conflict, StatusCode::CONFLICT);
     // Editing a user needs `edit_users`, adding one `create_users`; over
     // HTTPS the form offers application passwords.
     for (path, https, status) in [

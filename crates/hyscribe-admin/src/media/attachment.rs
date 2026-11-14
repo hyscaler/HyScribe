@@ -8,7 +8,7 @@ use hyscribe_model::{Post, User};
 use hyscribe_phpser::{Value, add_query_arg, is_empty_string, wp_basename};
 use hyscribe_render::attachment::is_image;
 use hyscribe_render::date::{self, Zone};
-use hyscribe_render::post::the_title;
+use hyscribe_render::post::admin_title;
 use hyscribe_render::user_avatar;
 
 use super::MediaSite;
@@ -23,6 +23,7 @@ use crate::page::query_strings;
 use crate::page::{HelpTab, Page, Request, admin_page, wp_admin_notice};
 use crate::posts::{Answer, lock_holder, preview_link};
 use crate::profile::ProfileSite;
+use crate::text;
 
 const FORM: &str = include_str!("attachment.html");
 
@@ -103,14 +104,26 @@ impl AttachmentArgs {
     }
 }
 
-/// `get_post_status()` of an attachment: its parent's, or `publish`
-/// without one; `None` under a parent in the Trash, which is not ported.
-fn post_status(site: &dyn AttachmentSite, post: &Post) -> Option<String> {
+/// `get_post_status()` of an attachment: its parent's (before the Trash,
+/// as its trash meta keeps it), `publish` without one, or its own private
+/// status.
+fn post_status(site: &dyn AttachmentSite, post: &Post) -> String {
+    if post.status != "inherit" {
+        return if post.status == "private" {
+            post.status.clone()
+        } else {
+            "publish".into()
+        };
+    }
     let parent = (post.parent != post.id).then(|| site.post(post.parent));
     match parent.flatten() {
-        None => Some("publish".into()),
-        Some(parent) if parent.status == "trash" => None,
-        Some(parent) => Some(parent.status),
+        None => "publish".into(),
+        Some(parent) if parent.status == "trash" => {
+            let kept = site.meta(&parent, "_wp_trash_meta_status");
+            let kept = kept.filter(|status| !Value::String(status.clone()).is_empty());
+            kept.map_or_else(|| "publish".into(), |status| text(&status))
+        }
+        Some(parent) => parent.status,
     }
 }
 
@@ -316,6 +329,23 @@ fn file_details(site: &dyn AttachmentSite, post: &Post, meta: &Value, size: i64)
             String::from_utf8_lossy(&height.to_php_string())
         ));
     }
+    let original = meta.get_str("original_image").map(Value::to_php_string);
+    if let Some(original) = original.filter(|original| !is_empty_string(original)) {
+        // `wp_get_original_image_url()` and its path, of images only.
+        let (link, name) = if is_image(&file, &post.mime_type) {
+            let dir = url
+                .get(..url.iter().rposition(|b| *b == b'/').unwrap_or(0))
+                .unwrap_or_default();
+            ([dir, b"/", &original].concat(), wp_basename(&original))
+        } else {
+            Default::default()
+        };
+        out.push_str(&format!(
+            "		<div class=\"misc-pub-section misc-pub-original-image word-wrap-break-word\">\n\t\t\tOriginal image:\t\t\t<a href=\"{}\">\n\t\t\t\t<strong>{}</strong>\n\t\t\t</a>\n\t\t</div>\n\t\t",
+            String::from_utf8_lossy(&esc_url(&link)),
+            esc_html(&name)
+        ));
+    }
     out
 }
 
@@ -501,22 +531,23 @@ pub fn attachment_edit(
     }
     let meta = metadata(site, &post);
     let size = meta.get_str("filesize").map_or(0, Value::to_int);
-    // Not ported: a status of its own (Trash), a media player, a file size
-    // read from disk, a scaled original and pretty permalinks' slug.
-    let unported = post.status != "inherit"
-        || post.mime_type.starts_with("audio/")
+    if post.status == "trash" {
+        return Some(Answer::Conflict(
+            "You cannot edit this item because it is in the Trash. Please restore it and try again.",
+        ));
+    }
+    // Not ported: a media player, a file size read from disk and pretty
+    // permalinks' slug.
+    let unported = post.mime_type.starts_with("audio/")
         || post.mime_type.starts_with("video/")
         || size <= 0
-        || meta
-            .get_str("original_image")
-            .is_some_and(|o| !o.is_empty())
         || site
             .option("permalink_structure")
             .is_some_and(|s| !is_empty_string(&s));
     if unported {
         return None;
     }
-    let status = post_status(site, &post)?;
+    let status = post_status(site, &post);
     let holder = lock_holder(site, &post)?;
     let state = State {
         meta,
@@ -779,7 +810,7 @@ fn page(
         "qtInit: {'attachment_content':{id:\"attachment_content\",buttons:\"strong,em,link,block,del,ins,img,ul,ol,li,code,close\"},",
         1,
     );
-    let shown_title = the_title(post);
+    let shown_title = admin_title(post);
     let title = if is_empty_string(&shown_title) {
         "Edit Media".to_string()
     } else {

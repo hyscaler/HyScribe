@@ -11,7 +11,8 @@
 #     Data, with HYSCRIBE_PHP_DB=wordpress_ttd reference/default-install/php.sh up)
 # one row each:
 #   variant<TAB>screen?query<TAB>role<TAB>hex(page)
-# A refusal is kept as 403<TAB>page and a missing post as 404<TAB>page. Masks
+# A refusal is kept as 403<TAB>page, a missing post as 404<TAB>page and one in
+# the Trash as 409<TAB>page. Masks
 # and hashes as reference/media/golden.sh. Only locked views are recorded: an
 # unlocked one writes the user's edit lock. Start from a fresh db.sh up, then
 # php.sh up, and take both down after.
@@ -36,7 +37,7 @@ cleanup() {
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
   if [ "$TTD" != wordpress_ttd ]; then
     echo "DELETE FROM wp_users WHERE ID IN (2, 3); DELETE FROM wp_usermeta WHERE umeta_id BETWEEN 801 AND 806;
-      DELETE FROM wp_posts WHERE ID BETWEEN 801 AND 809; DELETE FROM wp_postmeta WHERE meta_id BETWEEN 801 AND 813;
+      DELETE FROM wp_posts WHERE ID BETWEEN 801 AND 816; DELETE FROM wp_postmeta WHERE meta_id BETWEEN 801 AND 824;
       DELETE FROM wp_comments WHERE comment_ID = 801;" | sql
   fi
 }
@@ -47,7 +48,7 @@ if [ "$TTD" = wordpress_ttd ]; then
   ids="611 1692 827 1045 1686"
 else
   sql < "$ROOT/reference/attachment-edit/content.sql"
-  ids="801 802 803 805 807 808"
+  ids="801 802 803 805 807 808 810 811 812 813 815"
 fi
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce meta-box-order closedpostboxes
   samplepermalink get-comments replyto-comment internal-linking fetch-list-WP_Post_Comments_List_Table"
@@ -88,7 +89,7 @@ record() {
   status=$(curl -s -A "$agent" -e "$referer" -o "$TMP" -D "$TMP.head" -w '%{http_code}' -b "hyscribe_role=$3; hyscribe_variant=$1" "$BASE/wp-admin/$2")
   case "$status" in
     200) ;;
-    403 | 404) { printf '%s\t' "$status"; cat "$TMP"; } > "$TMP.die" && mv "$TMP.die" "$TMP" ;;
+    403 | 404 | 409) { printf '%s\t' "$status"; cat "$TMP"; } > "$TMP.die" && mv "$TMP.die" "$TMP" ;;
     *) echo "PHP answered $status for $2" >&2; exit 1 ;;
   esac
   hashed=
@@ -112,9 +113,10 @@ else
       record a8lock "post.php?post=$id&action=edit" "$role"
     done
   done
-  for id in 803 805 807 808; do
+  for id in 803 805 807 808 810 811 812 813 815; do
     record a8lock "post.php?post=$id&action=edit" administrator
   done
+  record a8lock 'post.php?post=811&action=edit' contributor
   record a8lock 'post.php?post=803&action=edit' editor
   record a8lock 'post.php?post=808&action=edit' contributor
   record a8lockcount 'post.php?post=802&action=edit' administrator

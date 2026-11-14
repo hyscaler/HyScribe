@@ -2089,6 +2089,8 @@ pub enum Answer {
     Died(&'static str),
     /// `wp_die()`'s `404` with this message.
     Missing(&'static str),
+    /// `wp_die()`'s `409` with this message.
+    Conflict(&'static str),
 }
 
 impl Answer {

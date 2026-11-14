@@ -78,7 +78,9 @@ fn edit_and_add_pages_are_php_s() {
         let (php, ours) = match ours {
             Answer::Page(page) => (hs_admin_page(&recorded), page),
             Answer::Denied(message) => (recorded, die(403, message)),
-            Answer::Died(message) | Answer::Missing(message) => (recorded, die(500, message)),
+            Answer::Died(message) | Answer::Missing(message) | Answer::Conflict(message) => {
+                (recorded, die(500, message))
+            }
             Answer::Redirect(to) => (recorded, to),
         };
         if ours != php {

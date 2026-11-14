@@ -1209,6 +1209,7 @@ fn served(admin: &Admin, answer: Answer) -> Response {
         Answer::Denied(message) => denied(admin, message),
         Answer::Died(message) => died(admin, StatusCode::INTERNAL_SERVER_ERROR, message),
         Answer::Missing(message) => died(admin, StatusCode::NOT_FOUND, message),
+        Answer::Conflict(message) => died(admin, StatusCode::CONFLICT, message),
     }
 }
 

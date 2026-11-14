@@ -10,6 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_admin::assets::{Urls, admin_links, cookie_path};
+use hyscribe_admin::login::actions::{self, Action, Reset};
 use hyscribe_admin::login::{self, Login, Request, Session, Site as LoginSite, User};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
 use hyscribe_auth::cookie::{generate_auth_cookie, parse_auth_cookie};
@@ -192,6 +193,7 @@ impl<'a> LoginReads<'a> {
                 .is_some_and(|v| !Value::String(v).is_empty()),
             id: user.id,
             pass: user.pass,
+            activation_key: user.activation_key,
         })
     }
 
@@ -322,6 +324,15 @@ impl LoginSite for LoginReads<'_> {
 
     fn user_by_email(&self, email: &[u8]) -> Option<User> {
         self.user(self.credentials(UserField::Email, email))
+    }
+
+    fn can_register(&self) -> bool {
+        !Value::String(self.site.raw_option("users_can_register").to_vec()).is_empty()
+    }
+
+    fn is_user_request(&self, id: u64) -> bool {
+        let post = self.reads.wait(self.site.db.post(id));
+        post.is_some_and(|post| post.post_type == "user_request")
     }
 }
 
@@ -482,8 +493,12 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             return response(status, headers, body);
         }
         "login" | "entered_recovery_mode" => login::login(&reads, &request),
-        // The other actions are not ported yet.
-        _ => return response(StatusCode::NOT_IMPLEMENTED, headers, Vec::new()),
+        // What the other actions' forms post is not ported.
+        _ if asked.post => return response(StatusCode::NOT_IMPLEMENTED, headers, Vec::new()),
+        _ => {
+            let answer = other_action(&reads, &names, &request, asked, &mut headers);
+            return finished(site, reads, Some(answer), headers);
+        }
     };
     let answer = match outcome {
         Login::Page(page) => Some((StatusCode::OK, page)),
@@ -515,10 +530,63 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             (StatusCode::FOUND, Vec::new())
         }),
     };
+    finished(site, reads, answer, headers)
+}
+
+/// The response once the reads are done: the database's error page if one
+/// failed.
+fn finished(
+    site: &Site,
+    reads: LoginReads,
+    answer: Option<(StatusCode, Vec<u8>)>,
+    headers: Vec<(header::HeaderName, String)>,
+) -> Response {
     match (reads.reads.finish(), answer) {
         (Err(err), _) => crate::html(crate::database_error(site, &err)),
         (Ok(()), Some((status, body))) => response(status, headers, body),
         (Ok(()), None) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+/// A GET of an action other than logging in or out; the reset password
+/// cookie goes to the login screen's path only.
+fn other_action(
+    reads: &LoginReads,
+    names: &Names,
+    request: &Request,
+    asked: &Asked,
+    headers: &mut Vec<(header::HeaderName, String)>,
+) -> (StatusCode, Vec<u8>) {
+    let query = asked
+        .query
+        .as_deref()
+        .map_or(String::new(), |q| format!("?{q}"));
+    let uri = addslashes(format!("{PATH}{query}").as_bytes());
+    let secure = is_ssl(reads.site);
+    match actions::action(reads, request, &request.action(), &uri) {
+        Action::Page(page) => (StatusCode::OK, page),
+        Action::Died(page) => (StatusCode::INTERNAL_SERVER_ERROR, page),
+        Action::Redirect(to, reset) => {
+            let cookie = match reset {
+                Reset::Keep => None,
+                Reset::Set(value) => Some(set_cookie(&names.reset(), &value, (0, 0), PATH, secure)),
+                Reset::Expire => {
+                    let gone = (reads.now - 365 * DAY, reads.now);
+                    Some(set_cookie(&names.reset(), b" ", gone, PATH, secure))
+                }
+            };
+            headers.extend(cookie.map(|c| (header::SET_COOKIE, c)));
+            let host = hyscribe_kses::url_host(reads.site.home.as_bytes()).unwrap_or_default();
+            let fallback = reads.admin_url("");
+            let to = wp_validate_redirect(&wp_sanitize_redirect(&to), &host, fallback.as_bytes());
+            headers.push((header::LOCATION, String::from_utf8_lossy(&to).into_owned()));
+            headers.push((
+                header::HeaderName::from_static("x-redirect-by"),
+                "WordPress".into(),
+            ));
+            (StatusCode::FOUND, Vec::new())
+        }
+        Action::NotPorted => (StatusCode::NOT_IMPLEMENTED, Vec::new()),
     }
 }
 

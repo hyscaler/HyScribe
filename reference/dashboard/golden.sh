@@ -6,7 +6,8 @@
 #   variant<TAB>role<TAB>hex(page)
 # Cached Site Health counts, a private site and a user's widget layout come
 # from filters (reference/dashboard/variants.php); the content variant adds
-# reference/dashboard/content.sql and deletes it after. Masks as
+# reference/dashboard/content.sql and deletes it after; the f9 variants add
+# a query string or the user's settings (reference/dashboard/variants.php). Masks as
 # reference/admin-page/golden.sh. Start from a fresh db.sh up, then php.sh up,
 # and take both down after.
 set -euo pipefail
@@ -38,7 +39,7 @@ trap cleanup EXIT
   approve-comment_11 delete-comment_11 approve-comment_14 delete-comment_14 > "$NONCES"
 record() {
   : > "$TMP"
-  curl -sf -o "$TMP" -b "hyscribe_role=$2; hyscribe_variant=$1" "$BASE/wp-admin/index.php"
+  curl -sf -o "$TMP" -b "hyscribe_role=$2; hyscribe_variant=$1" "$BASE/wp-admin/index.php${3:-}"
   page=$(php -r '
     $p = file_get_contents( $argv[1] );
     foreach ( file( $argv[2], FILE_IGNORE_NEW_LINES ) as $line ) {
@@ -54,6 +55,13 @@ record() {
 for variant in health critical one passing layout; do
   record "$variant" administrator
 done
+# Query arguments that only change what is shown, and the user's menu folding.
+record f9edit administrator '?edit=dashboard_primary'
+record f9welcome editor '?welcome=0'
+record f9remind administrator '?admin_email_remind_later=1'
+record f9old administrator '?admin_email_remind_later=1'
+record f9folded administrator
+record f9unfold editor
 remove_content
 sql < "$ROOT/reference/dashboard/content.sql"
 for role in administrator editor author subscriber; do

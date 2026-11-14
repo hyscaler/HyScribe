@@ -9,6 +9,8 @@ use hyscribe_render::formatting::{is_email, sanitize_user};
 
 use crate::assets::{Assets, Urls};
 
+pub mod actions;
+
 /// The auth cookie a request carries, as `wp_validate_auth_cookie()` finds it.
 pub enum Session {
     /// No login cookie.
@@ -46,6 +48,8 @@ pub struct User {
     pub pass: Vec<u8>,
     /// The `use_ssl` user option.
     pub use_ssl: bool,
+    /// `user_activation_key`.
+    pub activation_key: Vec<u8>,
 }
 
 /// The site the screen is for.
@@ -66,6 +70,10 @@ pub trait Site: Urls {
     fn user_by_login(&self, login: &[u8]) -> Option<User>;
     /// `get_user_by( 'email', $email )`.
     fn user_by_email(&self, email: &[u8]) -> Option<User>;
+    /// `get_option( 'users_can_register' )`.
+    fn can_register(&self) -> bool;
+    /// `wp_get_user_request( $id )` finds a `user_request` post.
+    fn is_user_request(&self, id: u64) -> bool;
 }
 
 /// What the login screen answers.
@@ -436,7 +444,26 @@ fn inline_script(js: &str) -> String {
     format!("<script>\n{js}\n</script>\n")
 }
 
-impl Screen<'_> {
+/// What `login_header()` and `login_footer()` print around an action's
+/// markup.
+struct Frame<'a> {
+    title: &'a str,
+    action: &'a str,
+    interim: bool,
+    customize: bool,
+    loggedout: bool,
+    /// `login_header()`'s `$message`, as markup.
+    message: &'a str,
+    errors: &'a [Notice],
+    /// The scripts the action enqueues after `login_header()`.
+    scripts: &'a [&'a str],
+    /// The action's markup between the notices and `login_footer()`.
+    body: &'a str,
+    /// `login_footer( $input_id )`.
+    input_id: &'a str,
+}
+
+impl Frame<'_> {
     fn render(&self, site: &dyn Site) -> Vec<u8> {
         let mut assets = Assets::new(true);
         assets.enqueue_style("login");
@@ -447,7 +474,8 @@ impl Screen<'_> {
         let mut out = String::new();
         out.push_str("<!DOCTYPE html>\n\t<html lang=\"en-US\">\n\t<head>\n\t<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\" />\n");
         out.push_str(&format!(
-            "\t<title>Log In &lsaquo; {blogname} &#8212; WordPress</title>\n\t"
+            "\t<title>{} &lsaquo; {blogname} &#8212; WordPress</title>\n\t",
+            self.title
         ));
         if self.loggedout {
             out.push_str(&inline_script("if(\"sessionStorage\" in window){try{for(var key in sessionStorage){if(key.indexOf(\"wp-autosave-\")!=-1){sessionStorage.removeItem(key)}}}catch(e){}};"));
@@ -457,9 +485,9 @@ impl Screen<'_> {
         let mut bytes = out.into_bytes();
         bytes.extend(assets.print_head_scripts(site));
         bytes.extend(assets.print_admin_styles(site));
-        // The login action enqueues these after `login_header()`.
-        assets.enqueue_script("user-profile");
-        assets.enqueue_script("wp-tooltip");
+        for script in self.scripts {
+            assets.enqueue_script(script);
+        }
         let mut out = String::from(
             "\t<meta name='referrer' content='strict-origin-when-cross-origin' />\n\t\t<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n\t\t",
         );
@@ -480,10 +508,39 @@ impl Screen<'_> {
         out.push_str(&inline_script(
             "document.body.className = document.body.className.replace('no-js','js');",
         ));
-        out.push_str("\n\t\t\t\t<h1 class=\"screen-reader-text\">Log In</h1>\n\t\t\t<div id=\"login\">\n\t\t<h1 role=\"presentation\" class=\"wp-login-logo\"><a href=\"https://wordpress.org/\">Powered by WordPress</a></h1>\n\t");
+        out.push_str(&format!("\n\t\t\t\t<h1 class=\"screen-reader-text\">{}</h1>\n\t\t\t<div id=\"login\">\n\t\t<h1 role=\"presentation\" class=\"wp-login-logo\"><a href=\"https://wordpress.org/\">Powered by WordPress</a></h1>\n\t", self.title));
+        if !self.message.is_empty() {
+            out.push_str(&format!("{}\n", self.message));
+        }
         out.push_str(&self.notices());
-        out.push_str(&self.form(site));
-        out.push_str(&self.footer(site));
+        out.push_str(self.body);
+        if self.interim {
+            out.push_str("\t</div>\n\t\n\t");
+        } else {
+            out.push_str(&format!(
+                "\t\t<p id=\"backtoblog\">\n\t\t\t<a href=\"{}\">&larr; Go to {}</a>\t\t</p>\n\t\t\t</div>\n\t\t\n\t",
+                url(&site.home_url()),
+                site.blogname()
+            ));
+        }
+        if !self.input_id.is_empty() {
+            out.push_str(&format!("<script>\n\t\ttry{{document.getElementById('{}').focus();}}catch(e){{}}\n\t\tif(typeof wpOnload==='function')wpOnload();\n\t\t\n</script>\n", self.input_id));
+        }
+        let shake = [
+            "empty_password",
+            "empty_email",
+            "invalid_email",
+            "invalidcombo",
+            "empty_username",
+            "invalid_username",
+            "incorrect_password",
+            "retrieve_password_email_failure",
+        ];
+        if self.errors.first().is_some_and(|e| shake.contains(&e.code)) {
+            out.push_str(&inline_script(
+                "document.querySelector('form').classList.add('shake');",
+            ));
+        }
         bytes.extend(out.into_bytes());
         bytes.extend(assets.print_footer_scripts(site));
         bytes.extend(b"\t</body>\n\t</html>\n\t");
@@ -519,6 +576,25 @@ impl Screen<'_> {
             ));
         }
         out
+    }
+}
+
+impl Screen<'_> {
+    fn render(&self, site: &dyn Site) -> Vec<u8> {
+        let body = self.form(site) + &self.footer(site);
+        Frame {
+            title: "Log In",
+            action: self.action,
+            interim: self.interim,
+            customize: self.customize,
+            loggedout: self.loggedout,
+            message: "",
+            errors: self.errors,
+            scripts: &["user-profile", "wp-tooltip"],
+            body: &body,
+            input_id: "",
+        }
+        .render(site)
     }
 
     fn form(&self, site: &dyn Site) -> String {
@@ -558,7 +634,7 @@ impl Screen<'_> {
         out
     }
 
-    /// The links, the focus script and `login_footer()`.
+    /// The links and the focus script.
     fn footer(&self, site: &dyn Site) -> String {
         let mut out = String::new();
         if self.interim {
@@ -586,28 +662,6 @@ impl Screen<'_> {
         )));
         if self.interim {
             out.push_str(&inline_script("\t\t\t( function() {\n\t\t\t\ttry {\n\t\t\t\t\tvar i, links = document.getElementsByTagName( 'a' );\n\t\t\t\t\tfor ( i in links ) {\n\t\t\t\t\t\tif ( links[i].href ) {\n\t\t\t\t\t\t\tlinks[i].target = '_blank';\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t} catch( er ) {}\n\t\t\t}());\n\t\t\t"));
-            out.push_str("\t</div>\n\t\n\t");
-        } else {
-            out.push_str(&format!(
-                "\t\t<p id=\"backtoblog\">\n\t\t\t<a href=\"{}\">&larr; Go to {}</a>\t\t</p>\n\t\t\t</div>\n\t\t\n\t",
-                url(&site.home_url()),
-                site.blogname()
-            ));
-        }
-        let shake = [
-            "empty_password",
-            "empty_email",
-            "invalid_email",
-            "invalidcombo",
-            "empty_username",
-            "invalid_username",
-            "incorrect_password",
-            "retrieve_password_email_failure",
-        ];
-        if self.errors.first().is_some_and(|e| shake.contains(&e.code)) {
-            out.push_str(&inline_script(
-                "document.querySelector('form').classList.add('shake');",
-            ));
         }
         out
     }

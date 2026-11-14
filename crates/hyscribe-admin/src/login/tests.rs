@@ -30,6 +30,7 @@ fn the_login_screen_is_php_s() {
         let oracle = Oracle {
             use_ssl: state == "use_ssl",
             private: state == "private",
+            ..Oracle::default()
         };
         if request.action() == "logout" {
             assert_eq!(f[4], "403", "{line}");
@@ -259,6 +260,12 @@ impl Site for AnyEmail {
     fn user_by_email(&self, _: &[u8]) -> Option<User> {
         self.0.user_by_email(b"admin@default-install.test")
     }
+    fn can_register(&self) -> bool {
+        self.0.can_register()
+    }
+    fn is_user_request(&self, id: u64) -> bool {
+        self.0.is_user_request(id)
+    }
 }
 
 /// `use_ssl` is looked up by email only for a name with an `@` after its
@@ -269,6 +276,7 @@ fn use_ssl_by_email_needs_an_at_past_the_start() {
         use_ssl: true,
         ..Oracle::default()
     });
+    assert!(!site.can_register() && !site.is_user_request(1));
     for (log, secure) in [("x%40y", true), ("%40x", false)] {
         let form = parse_str(format!("log={log}&pwd=wrong").as_bytes());
         let query = Value::Array(Vec::new());

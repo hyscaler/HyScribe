@@ -33,7 +33,7 @@ $new_comment = function ( $approved ) {
 	);
 };
 
-return array(
+$actions = array(
 	'insert-draft-post'  => array(
 		'action' => function () use ( $new_post ) {
 			$new_post( 'draft' );
@@ -113,3 +113,11 @@ return array(
 		},
 	),
 );
+
+// Each area's actions live in their own file beside this one (actions-posts.php,
+// actions-terms.php and so on), so they can be added side by side.
+foreach ( glob( __DIR__ . '/actions-*.php' ) as $more ) {
+	$actions += require $more;
+}
+
+return $actions;

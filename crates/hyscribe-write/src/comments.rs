@@ -5,8 +5,8 @@
 //! `wp_update_comment()`, the status changes (`wp_set_comment_status()`,
 //! trash, spam and their undoing), `wp_delete_comment()` and comment counts.
 //! Each writes through the action's [`Write`]; what PHP reads from the
-//! request or the clock is an argument. `EMPTY_TRASH_DAYS` is WordPress's
-//! default, so comments go to the trash before they are deleted.
+//! request or the clock is an argument. Comments go to the trash before
+//! they are deleted while [`crate::EMPTY_TRASH_DAYS`] is not 0.
 
 mod allow;
 mod filter;
@@ -438,7 +438,8 @@ async fn delete(steps: &mut Steps<'_, '_>, context: Context<'_>, id: u64, force:
     let Some(comment) = step!(steps, comment(id)) else {
         return false;
     };
-    if !force && !matches!(comment.approved.as_str(), "trash" | "spam") {
+    let to_trash = !force && crate::EMPTY_TRASH_DAYS != 0;
+    if to_trash && !matches!(comment.approved.as_str(), "trash" | "spam") {
         return trash(steps, context, id).await;
     }
     step!(steps, reparent_comments(id, comment.parent));

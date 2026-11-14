@@ -173,11 +173,11 @@ impl Write<'_> {
         self.ids(query.bind(parent)).await
     }
 
-    /// The comments of `post` as `(comment_ID, comment_approved,
-    /// comment_parent)`, in ID order.
-    pub async fn post_comments(&mut self, post: u64) -> Result<Vec<(u64, String, u64)>, DbError> {
+    /// The comments of `post` as `(comment_ID, comment_approved)`, in ID
+    /// order, as `wp_trash_post_comments()` reads them.
+    pub async fn post_comments(&mut self, post: u64) -> Result<Vec<(u64, String)>, DbError> {
         let query = self.sql(
-            "SELECT comment_ID, comment_approved, comment_parent FROM {prefix}comments \
+            "SELECT comment_ID, comment_approved FROM {prefix}comments \
              WHERE comment_post_ID = ? ORDER BY comment_ID",
         );
         let rows = query
@@ -188,11 +188,7 @@ impl Write<'_> {
         rows.iter()
             .map(|row| {
                 let mut c = Columns::new(row);
-                let comment = (
-                    c.unsigned("comment_ID"),
-                    c.text("comment_approved"),
-                    c.unsigned("comment_parent"),
-                );
+                let comment = (c.unsigned("comment_ID"), c.text("comment_approved"));
                 c.finish(comment)
             })
             .collect()

@@ -1384,7 +1384,7 @@ async fn rare_values_are_kept_as_php_keeps_them() {
         Ok(w.post_comments(id).await?)
     })
     .await;
-    let statuses: Vec<String> = restored.unwrap().into_iter().map(|(_, s, _)| s).collect();
+    let statuses: Vec<String> = restored.unwrap().into_iter().map(|(_, s)| s).collect();
     assert_eq!(statuses, ["0"]);
 }
 
@@ -1508,7 +1508,9 @@ async fn post_formats_are_not_ported() {
     let _one = ONE_AT_A_TIME.lock().await;
     let deleted = rolled_back(async |w, ctx| {
         let term = w.insert_term(b"Aside", b"post-format-aside", 0).await?;
-        let format = w.insert_term_taxonomy((term, "post_format"), b"", 0).await?;
+        let format = w
+            .insert_term_taxonomy((term, "post_format"), b"", 0)
+            .await?;
         let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
         w.add_relationship(id, format).await?;
         wp_delete_post(w, ctx, id, true).await

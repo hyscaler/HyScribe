@@ -527,10 +527,9 @@ async fn reads_posts_inside_an_action() {
     write.insert_post(&other).await.unwrap();
     assert_eq!(write.revision_ids(1).await.unwrap(), [tie, new, old]);
 
-    write.reparent_comments(0, 1).await.unwrap();
     assert_eq!(
         write.post_comments(1).await.unwrap(),
-        [(1, "1".to_string(), 1)]
+        [(1, "1".to_string())]
     );
     assert!(write.post_comments(2).await.unwrap().is_empty());
 }

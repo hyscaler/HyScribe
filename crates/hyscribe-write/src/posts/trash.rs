@@ -80,7 +80,7 @@ pub async fn wp_trash_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Res
     if !comments.is_empty() {
         let statuses = comments
             .into_iter()
-            .map(|(comment, approved, _)| {
+            .map(|(comment, approved)| {
                 let comment = i64::try_from(comment).unwrap_or(i64::MAX);
                 (Key::Int(comment), Value::String(approved.into_bytes()))
             })
@@ -134,27 +134,13 @@ pub async fn wp_untrash_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> R
     Ok(true)
 }
 
-/// `wp_delete_comment( $id, true )` of each comment of `post`, newest
-/// first.
-async fn delete_comments(write: &mut Write<'_>, post: u64) -> Result<()> {
-    let mut comments = write.post_comments(post).await?;
-    while let Some((comment, _, parent)) = comments.pop() {
-        write.reparent_comments(comment, parent).await?;
-        for (_, _, other) in &mut comments {
-            if *other == comment {
-                *other = parent;
-            }
-        }
-        let meta = write.object_meta_ids(Meta::Comment, comment).await?;
-        write.delete_meta(Meta::Comment, &meta).await?;
-        write.delete_comment(comment).await?;
-    }
-    Ok(())
-}
-
 /// `wp_delete_post( $id, true )` of one post of `kind`: its revisions,
 /// which the caller deletes next.
-async fn delete_one(write: &mut Write<'_>, id: u64, kind: Kind) -> Result<Vec<u64>> {
+async fn delete_one(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    (id, kind): (u64, Kind),
+) -> Result<Vec<u64>> {
     let post = super::existing(write, id).await?;
     // before_delete_post.
     reset_front_page(write, id, kind).await?;
@@ -171,7 +157,13 @@ async fn delete_one(write: &mut Write<'_>, id: u64, kind: Kind) -> Result<Vec<u6
     }
     let revisions = write.child_ids(id, "revision").await?;
     write.reparent_posts(id, "attachment", post.parent).await?;
-    delete_comments(write, id).await?;
+    let comments = crate::comments::Context {
+        now: ctx.now,
+        home: &ctx.home,
+    };
+    for comment in write.post_comment_ids(id).await? {
+        crate::comments::delete_comment(write, comments, comment, true).await?;
+    }
     let meta = write.object_meta_ids(Meta::Post, id).await?;
     write.delete_meta(Meta::Post, &meta).await?;
     // block_core_calendar_update_has_published_post_on_delete().
@@ -195,7 +187,8 @@ pub async fn wp_delete_post(
         return Ok(false);
     };
     let kind = Kind::of(&post.post_type)?;
-    if !force && kind != Kind::Revision && post.status != "trash" {
+    let to_trash = !force && crate::EMPTY_TRASH_DAYS != 0;
+    if to_trash && kind != Kind::Revision && post.status != "trash" {
         return wp_trash_post(write, ctx, id).await;
     }
     // _wp_delete_post_menu_item() deletes the classic menu items to it.
@@ -213,7 +206,7 @@ pub async fn wp_delete_post(
     // terms and children; their order changes no row.
     let mut queue = vec![(id, kind)];
     while let Some((next, kind)) = queue.pop() {
-        let revisions = delete_one(write, next, kind).await?;
+        let revisions = delete_one(write, ctx, (next, kind)).await?;
         queue.extend(revisions.into_iter().map(|id| (id, Kind::Revision)));
     }
     Ok(true)

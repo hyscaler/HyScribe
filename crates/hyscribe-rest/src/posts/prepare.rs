@@ -119,8 +119,46 @@ const NAVIGATION: &Properties = &[
     ("template", &["view", "edit"]),
 ];
 
+const ATTACHMENT: &Properties = &[
+    ("date", &["view", "edit", "embed"]),
+    ("date_gmt", &["view", "edit"]),
+    ("guid", &["view", "edit"]),
+    ("id", &["view", "edit", "embed"]),
+    ("link", &["view", "edit", "embed"]),
+    ("modified", &["view", "edit"]),
+    ("modified_gmt", &["view", "edit"]),
+    ("slug", &["view", "edit", "embed"]),
+    ("status", &["view", "edit"]),
+    ("type", &["view", "edit", "embed"]),
+    ("permalink_template", &["edit"]),
+    ("generated_slug", &["edit"]),
+    ("class_list", &["view", "edit"]),
+    ("title", &["view", "edit", "embed"]),
+    ("author", &["view", "edit", "embed"]),
+    ("featured_media", &["view", "edit", "embed"]),
+    ("comment_status", &["view", "edit"]),
+    ("ping_status", &["view", "edit"]),
+    ("meta", &["view", "edit"]),
+    ("template", &["view", "edit"]),
+    ("alt_text", &["view", "edit", "embed"]),
+    ("caption", &["view", "edit", "embed"]),
+    ("description", &["view", "edit"]),
+    ("media_type", &["view", "edit", "embed"]),
+    ("mime_type", &["view", "edit", "embed"]),
+    ("media_details", &["view", "edit", "embed"]),
+    ("post", &["view", "edit"]),
+    ("source_url", &["view", "edit", "embed"]),
+    ("missing_image_sizes", &["edit"]),
+    ("filename", &["view", "edit"]),
+    ("filesize", &["view", "edit"]),
+    ("exif_orientation", &["edit"]),
+    ("image_quality", &["edit"]),
+    ("image_output_format", &["edit"]),
+    ("image_save_progressive", &["edit"]),
+];
+
 /// The contexts of the parts of `title`, `content`, `excerpt` and `guid`.
-const PARTS: &Properties = &[
+pub(crate) const PARTS: &Properties = &[
     ("raw", &["edit"]),
     ("rendered", &["view", "edit", "embed"]),
     ("protected", &["view", "edit", "embed"]),
@@ -151,6 +189,7 @@ pub(super) fn properties(kind: Kind) -> &'static Properties {
         Kind::Block => BLOCK,
         Kind::Navigation => NAVIGATION,
         Kind::MenuItem => super::menu_items::PROPERTIES,
+        Kind::Attachment => ATTACHMENT,
     }
 }
 
@@ -164,11 +203,11 @@ fn parts(kind: Kind, name: &[u8]) -> &'static Properties {
 }
 
 /// `mysql_to_rfc3339()` of a date WordPress has set.
-fn rfc3339(date: &str) -> Value {
+pub(crate) fn rfc3339(date: &str) -> Value {
     text(date.replacen(' ', "T", 1))
 }
 
-const UNSET: &str = "0000-00-00 00:00:00";
+pub(crate) const UNSET: &str = "0000-00-00 00:00:00";
 
 /// A draft's unset GMT date: `get_gmt_from_date( $post_date )` for the
 /// date, `$post_modified` less `gmt_offset` for the modified date.
@@ -207,7 +246,10 @@ fn sample_permalink(context: &Context, post: &Post) -> (Vec<u8>, Vec<u8>) {
         name: token.to_vec(),
         ..post.clone()
     };
-    let link = permalink(context.site.reads(), &sample);
+    let link = match post.post_type.as_str() {
+        "attachment" => crate::media::attachment_link(context, post, true),
+        _ => permalink(context.site.reads(), &sample),
+    };
     let slug = hyscribe_render::formatting::sanitize_title(&post.title);
     let slug = if slug.is_empty() {
         post.id.to_string().into_bytes()
@@ -294,7 +336,7 @@ pub(super) fn post(
         put("type", text(post.post_type.clone()));
     }
     if has("link") {
-        put("link", text(permalink(reads, post)));
+        put("link", text(super::link(context, post)));
     }
     if has("title") {
         put(
@@ -408,7 +450,9 @@ pub(super) fn post(
             text(format.unwrap_or_else(|| b"standard".to_vec())),
         );
     }
-    if has("meta") {
+    if has("meta") && kind == Kind::Attachment {
+        put("meta", Value::Array(Vec::new()));
+    } else if has("meta") {
         // The `footnotes` meta is a string, as registered.
         let footnotes = text(
             context
@@ -441,13 +485,19 @@ pub(super) fn post(
             .map(|class| text(class.to_vec()));
         put("class_list", list(classes.collect()));
     }
+    if kind == Kind::Attachment {
+        data.extend(crate::media::fields(context, &fields, post, rendering)?);
+    }
     let shown = params.context();
     let mut data: Vec<(Key, Value)> = filter_by_context(data, properties, &shown)
         .into_iter()
         .map(|(name, value)| {
             let property = name.to_php_string();
             match (property.as_slice(), value) {
-                (b"title" | b"content" | b"excerpt" | b"guid", Value::Array(found)) => {
+                (
+                    b"title" | b"content" | b"excerpt" | b"guid" | b"caption" | b"description",
+                    Value::Array(found),
+                ) => {
                     let kept = filter_by_context(found, parts(kind, &property), &shown);
                     (name, Value::Array(kept))
                 }
@@ -541,18 +591,6 @@ pub(crate) fn writes_or_unported(content: &[u8], logged_in: bool) -> bool {
     rss || duotone || personal || shortcode || alone || paragraph
 }
 
-/// `get_post_status()` of an attachment: inheriting, its parent's, or
-/// published without one.
-fn post_status(context: &Context, post: &Post) -> String {
-    if post.status != "inherit" {
-        return post.status.clone();
-    }
-    match context.site.post(post.parent) {
-        Some(parent) => parent.status,
-        None => "publish".into(),
-    }
-}
-
 /// `prepare_links()`.
 pub(super) fn links(context: &Context, kind: Kind, post: &Post, response: &mut Response) {
     let rest = |path: &str| context.rest_url(path);
@@ -608,17 +646,20 @@ pub(super) fn links(context: &Context, kind: Kind, post: &Post, response: &mut R
         .then(|| context.site.post(featured))
         .flatten();
     let shown = |media: &Post| {
-        post_status(context, media) == "publish" || context.can_for("read_post", media.id)
+        crate::media::post_status(context, media) == "publish"
+            || context.can_for("read_post", media.id)
     };
     if let Some(media) = media.filter(shown) {
         let link = rest(&format!("/wp/v2/media/{}", media.id));
         response.add_link_with("https://api.w.org/featuredmedia", link, embeddable());
     }
-    if kind != Kind::MenuItem {
-        response.add_link(
+    match kind {
+        Kind::MenuItem => {}
+        Kind::Attachment => crate::media::attached_to(context, post, response),
+        _ => response.add_link(
             "https://api.w.org/attachment",
             with_arg("/wp/v2/media", b"parent", post.id),
-        );
+        ),
     }
     for (taxonomy, base) in kind.taxonomies() {
         let mut attributes = vec![("taxonomy", text(*taxonomy))];
@@ -646,7 +687,7 @@ pub(super) fn actions(
             self_link.clone(),
         )
     };
-    if context.can(&kind.cap("publish_posts")) {
+    if kind != Kind::Attachment && context.can(&kind.cap("publish_posts")) {
         action("publish");
     }
     if context.can("unfiltered_html") {

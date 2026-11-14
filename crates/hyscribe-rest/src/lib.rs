@@ -10,10 +10,12 @@ mod comments;
 mod editor;
 mod embed;
 mod fields;
+mod media;
 mod navigation;
 pub(crate) mod posts;
 mod request;
 mod response;
+mod revisions;
 mod routes;
 mod schema;
 mod search;
@@ -45,6 +47,8 @@ pub trait Site {
     fn verify_nonce(&self, nonce: &[u8]) -> bool;
     /// `wp_create_nonce( 'wp_rest' )` for the same user.
     fn create_nonce(&self) -> String;
+    /// `wp_create_nonce( $action )` for the same user.
+    fn nonce(&self, action: &str) -> String;
     /// `user_can( $user, $cap, ...$args )`.
     fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool;
     /// The terms `WP_Term_Query` selects with `query`, in its order.
@@ -228,6 +232,8 @@ fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         .or_else(|| templates::endpoints(regex))
         .or_else(|| search::endpoints(regex))
         .or_else(|| navigation::endpoints(regex))
+        .or_else(|| media::endpoints(regex))
+        .or_else(|| revisions::endpoints(regex))
 }
 
 /// `maybe_unserialize()` of a stored option or meta value: `false` where

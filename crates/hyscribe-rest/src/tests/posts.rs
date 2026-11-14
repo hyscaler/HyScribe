@@ -18,10 +18,10 @@ use hyscribe_model::{OrderBy, PostQuery, StatusFilter};
 
 /// The oracle with one user of `role`, over a fixture, without the
 /// capabilities `deny` names.
-struct Oracle {
-    role: &'static str,
-    fixture: site::Fixture,
-    deny: &'static [&'static str],
+pub(super) struct Oracle {
+    pub(super) role: &'static str,
+    pub(super) fixture: site::Fixture,
+    pub(super) deny: &'static [&'static str],
 }
 
 impl CapabilityData for Oracle {
@@ -45,8 +45,8 @@ impl CapabilityData for Oracle {
             parent: post.parent,
         })
     }
-    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        None
+    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        self.fixture.post_meta(id, key)
     }
     fn comment_post(&self, _: u64) -> Option<u64> {
         None
@@ -78,6 +78,9 @@ impl Site for Oracle {
     }
     fn create_nonce(&self) -> String {
         "%nonce%".into()
+    }
+    fn nonce(&self, _: &str) -> String {
+        "%preview_nonce%".into()
     }
     fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
         let denied = |cap: &str| self.deny.contains(&cap);
@@ -164,15 +167,15 @@ impl Site for Oracle {
 }
 
 /// `case` served by HyScribe's API, over the Theme Test Data fixture when
-/// `ttd`.
-fn serve_case(case: &RestCase, ttd: bool) -> Served {
+/// `ttd`, with `reference/rest/media.sql` when `media`.
+pub(super) fn serve_case(case: &RestCase, ttd: bool, media: bool) -> Served {
     let oracle = Oracle {
         role: role(&case.who).0,
         fixture: site::Fixture {
             ttd,
             pretty: case.flag("pretty"),
             extra: false,
-            state: None,
+            state: media.then(|| site::with_media(ttd)),
         },
         deny: &[],
     };
@@ -188,18 +191,25 @@ const TTD_UNPORTED: [(&str, &str); 3] = [
 /// Whether `case` is one of `unported`.
 fn unported_case(unported: &[(&str, &str)], case: &RestCase) -> bool {
     unported.iter().any(|(who, target)| {
-        *target == case.target && (*who == "*" || *who == "user" && case.who != "visitor")
+        let user = *who == "user" && case.who != "visitor";
+        *target == case.target && (*who == "*" || user || *who == case.who)
     })
 }
 
 /// Every case of `golden` over a fixture, bodies whole or, for the Theme
 /// Test Data fixture, by their sha256, but those `unported`, answered 501:
-/// `(who, target)`, who `*` for anyone or `user` for any logged in user.
-fn replay(golden: &str, ttd: bool, count: usize, unported: &[(&str, &str)]) {
+/// `(who, target)`, who `*` for anyone, `user` for any logged in user or a
+/// role.
+pub(super) fn replay(
+    golden: &str,
+    (ttd, media): (bool, bool),
+    count: usize,
+    unported: &[(&str, &str)],
+) {
     let cases = rest_cases(golden);
     assert_eq!(cases.len(), count);
     for case in &cases {
-        let served = serve_case(case, ttd);
+        let served = serve_case(case, ttd, media);
         let what = format!("{} {} {}", case.who, case.method, case.target);
         if unported_case(unported, case) {
             assert_eq!(served.status, 501, "{what}");
@@ -229,7 +239,7 @@ fn replay(golden: &str, ttd: bool, count: usize, unported: &[(&str, &str)]) {
 fn posts_match_php() {
     replay(
         include_str!("../../tests/golden/posts.tsv"),
-        false,
+        (false, false),
         6 * 89,
         &[],
     );
@@ -241,7 +251,7 @@ fn posts_match_php() {
 fn theme_test_data_posts_match_php() {
     replay(
         include_str!("../../tests/golden/posts-ttd.tsv"),
-        true,
+        (true, false),
         6 * 39,
         &TTD_UNPORTED,
     );
@@ -300,7 +310,7 @@ fn writes_and_unported_content_answer_501() {
             body: Vec::new(),
         };
         assert_eq!(
-            serve_case(&case, ttd).status,
+            serve_case(&case, ttd, false).status,
             501,
             "{who} {method} {target}"
         );
@@ -468,20 +478,9 @@ fn actions_follow_capabilities() {
     );
 }
 
-/// Embedding a link to a route not ported, a featured image's, answers
-/// 501, enveloped or not, and a list of posts with one too; an error has no
-/// links to embed.
+/// Embedding a link answers; an error has no links to embed.
 #[test]
-fn embedding_what_is_not_ported() {
-    let targets = [
-        "/wp/v2/posts/98&_embed",
-        "/wp/v2/posts/98&_embed=wp:featuredmedia&_envelope",
-        "/wp/v2/posts&status=draft&_embed",
-    ];
-    for target in targets {
-        let served = served("administrator", target, false, &[]);
-        assert_eq!(served.status, 501, "{target}");
-    }
+fn embedding_links() {
     let target = "/wp/v2/posts/98&_embed=author";
     assert_eq!(served("administrator", target, false, &[]).status, 200);
     let missing = served("visitor", "/wp/v2/posts/999", false, &[]);

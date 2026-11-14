@@ -5,7 +5,7 @@
 //! whose controllers extend it. Writes answer 501 but their permission
 //! checks give `Allow` and `targetHints`.
 
-mod args;
+pub(crate) mod args;
 mod menu_items;
 pub(crate) mod prepare;
 
@@ -29,14 +29,16 @@ pub(crate) enum Kind {
     Block,
     Navigation,
     MenuItem,
+    Attachment,
 }
 
-const KINDS: [Kind; 5] = [
+const KINDS: [Kind; 6] = [
     Kind::Post,
     Kind::Page,
     Kind::Block,
     Kind::Navigation,
     Kind::MenuItem,
+    Kind::Attachment,
 ];
 
 impl Kind {
@@ -47,6 +49,7 @@ impl Kind {
             Kind::Block => "wp_block",
             Kind::Navigation => "wp_navigation",
             Kind::MenuItem => "nav_menu_item",
+            Kind::Attachment => "attachment",
         }
     }
 
@@ -57,11 +60,12 @@ impl Kind {
             Kind::Block => "blocks",
             Kind::Navigation => "navigation",
             Kind::MenuItem => "menu-items",
+            Kind::Attachment => "media",
         }
     }
 
     /// The type of a route under `/wp/v2/<base>`.
-    fn of(route: &str) -> Kind {
+    pub(crate) fn of(route: &str) -> Kind {
         let base = route.trim_start_matches("/wp/v2/").split('/').next();
         let found = KINDS.into_iter().find(|kind| base == Some(kind.base()));
         found.unwrap_or(Kind::Post)
@@ -88,7 +92,7 @@ impl Kind {
             Kind::Post => &[("category", "categories"), ("post_tag", "tags")],
             Kind::Block => &[("wp_pattern_category", "wp_pattern_category")],
             Kind::MenuItem => &[("nav_menu", "menus")],
-            Kind::Page | Kind::Navigation => &[],
+            Kind::Page | Kind::Navigation | Kind::Attachment => &[],
         }
     }
 }
@@ -216,6 +220,9 @@ fn create_permission(context: &Context, params: &Params, kind: Kind) -> Result<(
         let message = "Sorry, you are not allowed to create posts as this user.";
         return Err(context.forbidden("rest_cannot_create", message));
     }
+    if kind == Kind::Attachment {
+        crate::media::create_permission(context, params)?;
+    }
     Ok(())
 }
 
@@ -233,12 +240,34 @@ fn can_update(context: &Context, post: &Post) -> bool {
     context.can_for("edit_post", post.id)
 }
 
-/// `check_read_permission()` of a post or page: published, the only
-/// public status core registers, or readable by the user; a pattern only
-/// by those who may read it.
+/// `check_read_permission()`: a post of a type shown in REST, published,
+/// the only public status core registers, or readable by the user, or
+/// inheriting a readable parent's status, or published without one; a
+/// pattern only by those who may read it.
 pub(crate) fn can_read(context: &Context, post: &Post) -> bool {
-    let readable = || context.can_for("read_post", post.id);
-    (post.post_type != "wp_block" || readable()) && (post.status == "publish" || readable())
+    let mut seen = Vec::new();
+    let mut post = post.clone();
+    loop {
+        let readable = || context.can_for("read_post", post.id);
+        let shown = crate::types::post_type(&post.post_type).is_some();
+        if !shown || post.post_type == "wp_block" && !readable() {
+            return false;
+        }
+        if post.status == "publish" || readable() {
+            return true;
+        }
+        if post.status != "inherit" {
+            return false;
+        }
+        seen.push(post.id);
+        let parent = (!seen.contains(&post.parent))
+            .then(|| context.site.post(post.parent))
+            .flatten();
+        match parent {
+            Some(parent) => post = parent,
+            None => return true,
+        }
+    }
 }
 
 /// `get_item_permissions_check()`.
@@ -265,7 +294,11 @@ fn item_permission(context: &Context, params: &Params, kind: Kind) -> Result<(),
 }
 
 /// `update_item_permissions_check()`.
-fn update_permission(context: &Context, params: &Params, kind: Kind) -> Result<(), RestError> {
+pub(crate) fn update_permission(
+    context: &Context,
+    params: &Params,
+    kind: Kind,
+) -> Result<(), RestError> {
     let post = get_post(context, params, kind)?;
     if !can_update(context, &post) {
         let message = "Sorry, you are not allowed to edit this post.";
@@ -309,6 +342,14 @@ pub(crate) fn is_sticky(context: &Context, id: u64) -> bool {
     sticky(context).contains(&id)
 }
 
+/// `get_permalink()`: an attachment's link, or the post's.
+pub(crate) fn link(context: &Context, post: &Post) -> Vec<u8> {
+    if post.post_type == "attachment" {
+        return crate::media::attachment_link(context, post, false);
+    }
+    hyscribe_render::permalinks::permalink(context.site.reads(), post)
+}
+
 /// `get_item()`.
 fn item(context: &Context, params: &Params, kind: Kind) -> Result<Response, RestError> {
     // The permission check found the post.
@@ -317,7 +358,7 @@ fn item(context: &Context, params: &Params, kind: Kind) -> Result<Response, Rest
     let mut rendering = Rendering::new(context.site.theme(), context.site.reads(), &request);
     let mut response = prepare::post(context, params, kind, &post, &mut rendering)?;
     if crate::types::viewable(kind.name()) {
-        let link = hyscribe_render::permalinks::permalink(context.site.reads(), &post);
+        let link = link(context, &post);
         let link = String::from_utf8_lossy(&link);
         response.header(
             "Link",
@@ -327,7 +368,7 @@ fn item(context: &Context, params: &Params, kind: Kind) -> Result<Response, Rest
     Ok(response)
 }
 
-fn ids(params: &Params, name: &str) -> Vec<u64> {
+pub(crate) fn ids(params: &Params, name: &str) -> Vec<u64> {
     let list = params
         .get(name)
         .and_then(Value::as_array)
@@ -375,28 +416,13 @@ fn query(
     params: &Params,
     kind: Kind,
 ) -> Result<(PostQuery, u64, u32), RestError> {
+    order_errors(params)?;
     let orderby = params.text("orderby");
     let search = params
         .get("search")
         .map(Value::to_php_string)
         .filter(|s| !s.is_empty());
-    if orderby == b"relevance" && search.is_none() {
-        let message = "You need to define a search term to order by relevance.";
-        return Err(RestError::status(
-            "rest_no_search_term_defined",
-            message,
-            400,
-        ));
-    }
     let mut include = ids(params, "include");
-    if orderby == b"include" && include.is_empty() {
-        let message = "You need to define an include parameter to order by include.";
-        return Err(RestError::status(
-            "rest_orderby_include_missing_include",
-            message,
-            400,
-        ));
-    }
     // Only the type's own arguments are read.
     let registered = args::collection(kind);
     let param = |name: &str| {
@@ -465,6 +491,8 @@ fn query(
         }),
         exact: params.get("search_semantics").is_some(),
         logged_in: context.user != 0,
+        mime_types: crate::media::mime_types(params, kind),
+        filenames: kind == Kind::Attachment,
         limit: u32::try_from(per_page).unwrap_or(u32::MAX),
         offset: u32::try_from(if offset > 0 {
             offset
@@ -507,6 +535,29 @@ pub(crate) fn searched(query: &mut PostQuery, search: &[u8]) {
     query.search = search_terms(&text);
     query.sentence = text.replace(['\r', '\n'], "");
     query.search_count = search_count(&text);
+}
+
+/// The ordering errors `get_items()` checks: relevance without a search,
+/// and the order of `include` without one.
+pub(crate) fn order_errors(params: &Params) -> Result<(), RestError> {
+    let orderby = params.text("orderby");
+    if orderby == b"relevance" && !params.get("search").is_some_and(|s| !s.is_empty()) {
+        let message = "You need to define a search term to order by relevance.";
+        return Err(RestError::status(
+            "rest_no_search_term_defined",
+            message,
+            400,
+        ));
+    }
+    if orderby == b"include" && ids(params, "include").is_empty() {
+        let message = "You need to define an include parameter to order by include.";
+        return Err(RestError::status(
+            "rest_orderby_include_missing_include",
+            message,
+            400,
+        ));
+    }
+    Ok(())
 }
 
 /// `get_items()`.
@@ -568,7 +619,7 @@ fn items(context: &Context, params: &Params, kind: Kind) -> Result<Response, Res
 
 /// The request as rendering reads it: its URI, which links keep, and no
 /// main query, which `rest_api_loaded()` leaves unrun.
-fn render_request(context: &Context) -> Request {
+pub(crate) fn render_request(context: &Context) -> Request {
     Request {
         uri: context.uri.to_vec(),
         ..Request::default()

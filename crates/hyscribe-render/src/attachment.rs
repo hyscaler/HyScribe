@@ -184,7 +184,7 @@ fn site_options(site: &dyn Site) -> impl Fn(&str) -> Vec<u8> {
 }
 
 /// `wp_get_attachment_url()`, from `_wp_attached_file`.
-fn attachment_url(site: &dyn Site, id: u64) -> Option<Vec<u8>> {
+pub fn attachment_url(site: &dyn Site, id: u64) -> Option<Vec<u8>> {
     let file = site.post_meta(id, "_wp_attached_file").unwrap_or_default();
     let guid = || site.post(id).map(|post| post.guid).unwrap_or_default();
     file_url(&file, guid, &upload_baseurl(&site_options(site)))
@@ -206,7 +206,7 @@ pub fn file_url(file: &[u8], guid: impl FnOnce() -> Vec<u8>, base: &[u8]) -> Opt
 
 /// `wp_get_attachment_metadata()`: the stored value. PHP turns down one
 /// that is not an array or is empty; neither has keys for the callers.
-pub(crate) fn metadata(site: &dyn Site, id: u64) -> Option<Value> {
+pub fn metadata(site: &dyn Site, id: u64) -> Option<Value> {
     let stored = site.post_meta(id, "_wp_attachment_metadata")?;
     match maybe_unserialize(&stored) {
         Maybe::Value(value) => Some(value),
@@ -231,7 +231,7 @@ pub fn is_image(file: &[u8], mime: &str) -> bool {
 }
 
 /// `image_downsize()` for a named size: the URL, width and height.
-pub(crate) fn image_downsize(site: &dyn Site, id: u64, size: &str) -> Option<(Vec<u8>, i64, i64)> {
+pub fn image_downsize(site: &dyn Site, id: u64, size: &str) -> Option<(Vec<u8>, i64, i64)> {
     let post = site
         .post(id)
         .filter(|post| post.post_type == "attachment")?;
@@ -466,6 +466,8 @@ fn image_extension(file: &[u8]) -> bool {
         .iter()
         .any(|e| extension == Some(e.as_bytes()))
 }
+
+pub mod prepend;
 
 #[cfg(test)]
 mod tests;

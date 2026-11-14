@@ -2,17 +2,23 @@
 
 //! The REST API answers any route, query, method and headers without
 //! panicking: route matching, `_fields`, `_jsonp`, `_envelope`, the
-//! arguments' schemas and the types route all take input from the request.
+//! arguments' schemas and the routes all take input from the request, and
+//! the site's one template, template part and global styles post have the
+//! input's content.
 
 #![no_main]
 
+use hyscribe_model::{Post, Term, User};
 use hyscribe_phpser::{Value, parse_str};
 use hyscribe_rest::{Request, Site, serve};
 use libfuzzer_sys::fuzz_target;
 
-struct Fuzzed;
+/// A site whose posts have the fuzzed content.
+struct Fuzzed<'a> {
+    content: &'a [u8],
+}
 
-impl Site for Fuzzed {
+impl Site for Fuzzed<'_> {
     fn option(&self, _: &str) -> Option<Vec<u8>> {
         Some(b"UTF-8".to_vec())
     }
@@ -28,12 +34,53 @@ impl Site for Fuzzed {
     fn can(&self, user: u64, cap: &str) -> bool {
         user % 2 == 1 && cap.len() % 2 == 0
     }
+    fn can_post(&self, user: u64, cap: &str, post: u64) -> bool {
+        self.can(user, cap) && post % 2 == 1
+    }
+    fn post(&self, id: u64) -> Option<Post> {
+        let post_type = ["wp_template", "wp_template_part", "wp_global_styles"];
+        let post_type = post_type.get(usize::try_from(id).ok()?.checked_sub(1)?)?;
+        Some(Post {
+            id,
+            author: id % 2,
+            content: self.content.to_vec(),
+            title: self.content.to_vec(),
+            name: self.content.to_vec(),
+            status: "publish".into(),
+            date: "2026-11-14 10:00:00".into(),
+            modified: "2026-11-14 10:00:00".into(),
+            post_type: (*post_type).into(),
+            ..Post::default()
+        })
+    }
+    fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
+        (1..4)
+            .filter_map(|id| self.post(id))
+            .filter(|post| post.post_type == post_type)
+            .collect()
+    }
+    fn post_terms(&self, post: u64, _: &str) -> Vec<Term> {
+        let name = if post == 2 { self.content } else { b"UTF-8" };
+        vec![Term {
+            name: name.to_vec(),
+            ..Term::default()
+        }]
+    }
+    fn post_meta(&self, post: u64, _: &str) -> Option<Vec<u8>> {
+        (post == 1).then(|| self.content.to_vec())
+    }
+    fn revisions(&self, post: u64) -> Vec<u64> {
+        (0..post).collect()
+    }
+    fn user(&self, id: u64) -> Option<User> {
+        (id == 1).then(User::default)
+    }
 }
 
 fuzz_target!(|data: &[u8]| {
     let mut parts = data.split(|&b| b == 0);
     let mut next = || parts.next().unwrap_or_default();
-    let (method, route, query, header) = (next(), next(), next(), next());
+    let (method, route, query, header, content) = (next(), next(), next(), next(), next());
     let methods = ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"];
     let method = methods[usize::from(method.first().copied().unwrap_or(0)) % methods.len()];
     let get = match parse_str(query) {
@@ -50,6 +97,6 @@ fuzz_target!(|data: &[u8]| {
         nonce: header.get(..1),
         method_override: None,
     };
-    let served = serve(&Fuzzed, &request);
+    let served = serve(&Fuzzed { content }, &request);
     assert!((200..600).contains(&served.status));
 });

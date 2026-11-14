@@ -7,9 +7,9 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use hyscribe_auth::caps::{CapPost, CapabilityData, User};
+use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
 use hyscribe_phpser::parse_str;
-use hyscribe_testkit::{SqlValue, unhex};
+use hyscribe_testkit::{Dump, SqlValue, unhex};
 
 use super::*;
 
@@ -32,10 +32,118 @@ fn options() -> &'static HashMap<String, Vec<u8>> {
     })
 }
 
-/// The oracle with one user of `role`, under plain or pretty permalinks.
+/// The rows the routes read: the default install's, and a state's added.
+pub(crate) struct Content {
+    posts: Vec<Post>,
+    /// Each post's terms, with their taxonomy.
+    terms: Vec<(u64, String, Term)>,
+    meta: Vec<(u64, String, Vec<u8>)>,
+    users: Vec<hyscribe_model::User>,
+}
+
+fn sql_text(value: &SqlValue) -> Vec<u8> {
+    match value {
+        SqlValue::Text(text) => text.clone(),
+        SqlValue::Number(number) => number.clone().into_bytes(),
+        SqlValue::Null => Vec::new(),
+    }
+}
+
+fn sql_number(value: &SqlValue) -> u64 {
+    String::from_utf8(sql_text(value)).unwrap().parse().unwrap()
+}
+
+fn sql_string(value: &SqlValue) -> String {
+    String::from_utf8(sql_text(value)).unwrap()
+}
+
+impl Content {
+    /// The default install with the rows of `state`, a dump's inserts.
+    pub(crate) fn load(state: &str) -> Content {
+        let version = hyscribe_testkit::default_install_versions().pop().unwrap();
+        let mut dump = hyscribe_testkit::default_install(&version).unwrap();
+        dump.rows
+            .extend(Dump::parse(state.as_bytes()).unwrap().rows);
+        let posts = dump
+            .table("wp_posts")
+            .map(|row| Post {
+                id: sql_number(&row[0]),
+                author: sql_number(&row[1]),
+                date: sql_string(&row[2]),
+                content: sql_text(&row[4]),
+                title: sql_text(&row[5]),
+                excerpt: sql_text(&row[6]),
+                status: sql_string(&row[7]),
+                name: sql_text(&row[11]),
+                modified: sql_string(&row[14]),
+                parent: sql_number(&row[17]),
+                post_type: sql_string(&row[20]),
+                ..Post::default()
+            })
+            .collect();
+        let names: Vec<(u64, Vec<u8>)> = dump
+            .table("wp_terms")
+            .map(|row| (sql_number(&row[0]), sql_text(&row[1])))
+            .collect();
+        let taxonomies: Vec<(u64, u64, String)> = dump
+            .table("wp_term_taxonomy")
+            .map(|row| {
+                (
+                    sql_number(&row[0]),
+                    sql_number(&row[1]),
+                    sql_string(&row[2]),
+                )
+            })
+            .collect();
+        let terms = dump
+            .table("wp_term_relationships")
+            .map(|row| {
+                let (_, term, taxonomy) = taxonomies
+                    .iter()
+                    .find(|(id, _, _)| *id == sql_number(&row[1]))
+                    .unwrap();
+                let (_, name) = names.iter().find(|(id, _)| id == term).unwrap();
+                let term = Term {
+                    id: *term,
+                    name: name.clone(),
+                    ..Term::default()
+                };
+                (sql_number(&row[0]), taxonomy.clone(), term)
+            })
+            .collect();
+        let meta = dump
+            .table("wp_postmeta")
+            .map(|row| (sql_number(&row[1]), sql_string(&row[2]), sql_text(&row[3])))
+            .collect();
+        let users = dump
+            .table("wp_users")
+            .map(|row| hyscribe_model::User {
+                id: sql_number(&row[0]),
+                display_name: sql_text(&row[9]),
+                ..hyscribe_model::User::default()
+            })
+            .collect();
+        Content {
+            posts,
+            terms,
+            meta,
+            users,
+        }
+    }
+}
+
+/// The default install's rows.
+pub(crate) fn default_content() -> &'static Content {
+    static CONTENT: OnceLock<Content> = OnceLock::new();
+    CONTENT.get_or_init(|| Content::load(""))
+}
+
+/// The oracle with one user of `role`, under plain or pretty permalinks,
+/// over `content`.
 struct Oracle {
     role: &'static str,
     pretty: bool,
+    content: &'static Content,
 }
 
 const ROLES: [(&str, u64); 5] = [
@@ -58,11 +166,17 @@ impl CapabilityData for Oracle {
     fn user_exists(&self, _: u64) -> bool {
         true
     }
-    fn post(&self, _: u64) -> Option<CapPost> {
-        None
+    fn post(&self, id: u64) -> Option<CapPost> {
+        Site::post(self, id).map(|post| CapPost {
+            id: post.id,
+            author: post.author,
+            status: post.status,
+            post_type: post.post_type,
+            parent: post.parent,
+        })
     }
-    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        None
+    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        Site::post_meta(self, id, key)
     }
     fn comment_post(&self, _: u64) -> Option<u64> {
         None
@@ -70,8 +184,9 @@ impl CapabilityData for Oracle {
     fn term_taxonomy(&self, _: u64) -> Option<String> {
         None
     }
-    fn constant(&self, _: &str) -> bool {
-        false
+    /// HyScribe's constants: no one may post unfiltered HTML.
+    fn constant(&self, name: &str) -> bool {
+        name == "DISALLOW_UNFILTERED_HTML"
     }
 }
 
@@ -93,7 +208,65 @@ impl Site for Oracle {
         "%nonce%".into()
     }
     fn can(&self, user: u64, cap: &str) -> bool {
-        user != 0 && User::load(self, "wp_", user).has_cap(self, cap, &[])
+        user != 0 && Capabilities::load(self, "wp_", user).has_cap(self, cap, &[])
+    }
+    fn can_post(&self, user: u64, cap: &str, post: u64) -> bool {
+        let post = Value::Int(i64::try_from(post).unwrap());
+        user != 0 && Capabilities::load(self, "wp_", user).has_cap(self, cap, &[post])
+    }
+    fn post(&self, id: u64) -> Option<Post> {
+        self.content
+            .posts
+            .iter()
+            .find(|post| post.id == id)
+            .cloned()
+    }
+    fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
+        let mut posts: Vec<Post> = self
+            .content
+            .posts
+            .iter()
+            .filter(|post| post.post_type == post_type)
+            .cloned()
+            .collect();
+        posts.sort_by(|a, b| b.date.cmp(&a.date));
+        posts
+    }
+    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term> {
+        let mut terms: Vec<Term> = self
+            .content
+            .terms
+            .iter()
+            .filter(|(id, known, _)| *id == post && known == taxonomy)
+            .map(|(_, _, term)| term.clone())
+            .collect();
+        terms.sort_by(|a, b| a.name.cmp(&b.name));
+        terms
+    }
+    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>> {
+        let found = self
+            .content
+            .meta
+            .iter()
+            .find(|(id, known, _)| *id == post && known == key);
+        found.map(|(_, _, value)| value.clone())
+    }
+    fn revisions(&self, post: u64) -> Vec<u64> {
+        let mut revisions: Vec<&Post> = self
+            .content
+            .posts
+            .iter()
+            .filter(|revision| revision.parent == post && revision.post_type == "revision")
+            .collect();
+        revisions.sort_by(|a, b| (&b.date, b.id).cmp(&(&a.date, a.id)));
+        revisions.iter().map(|revision| revision.id).collect()
+    }
+    fn user(&self, id: u64) -> Option<hyscribe_model::User> {
+        self.content
+            .users
+            .iter()
+            .find(|user| user.id == id)
+            .cloned()
     }
 }
 
@@ -147,8 +320,13 @@ fn route(path: &str, get: &[(Key, Value)]) -> Vec<u8> {
     }
 }
 
-/// `case` served by HyScribe's API.
+/// `case` served by HyScribe's API over the default install.
 pub(crate) fn serve_case(case: &Case) -> Served {
+    serve_over(case, default_content())
+}
+
+/// `case` served by HyScribe's API over `content`.
+pub(crate) fn serve_over(case: &Case, content: &'static Content) -> Served {
     let (path, query) = case.target.split_once('?').unwrap_or((&case.target, ""));
     let get = match parse_str(query.as_bytes()) {
         Value::Array(get) => get,
@@ -163,6 +341,7 @@ pub(crate) fn serve_case(case: &Case) -> Served {
     let oracle = Oracle {
         role,
         pretty: flag("pretty"),
+        content,
     };
     let route = route(path, &get);
     let request = Request {
@@ -211,15 +390,11 @@ pub(crate) fn kept(headers: &[(String, String)]) -> Vec<String> {
 }
 
 /// Requests PHP answers on routes or with arguments not ported.
-const UNPORTED: [(&str, &str); 10] = [
+const UNPORTED: [(&str, &str); 9] = [
     ("GET", "/?rest_route=/"),
     ("GET", "/?rest_route=0/"),
     ("GET", "/?rest_route=/wp/v2"),
     ("GET", "/?rest_route=/wp/v2/posts"),
-    (
-        "GET",
-        "/?rest_route=/wp/v2/templates/twentytwentyfive//index",
-    ),
     ("GET", "/?rest_route=/wp-abilities/v1/categories/a-b"),
     ("GET", "/?rest_route=/wp/v2/search&per_page=1"),
     (
@@ -275,6 +450,7 @@ fn pages_are_linked_as_php_links_them() {
     let oracle = Oracle {
         role: "",
         pretty: false,
+        content: default_content(),
     };
     let searches = cases()
         .into_iter()
@@ -325,6 +501,7 @@ fn self_links_hint_what_their_route_allows() {
     let oracle = Oracle {
         role: "",
         pretty: false,
+        content: default_content(),
     };
     let context = Context {
         site: &oracle,

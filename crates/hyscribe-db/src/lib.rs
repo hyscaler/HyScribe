@@ -1068,6 +1068,40 @@ impl Db {
             .collect()
     }
 
+    /// Every post of `post_type` whatever its status, newest first, as
+    /// `WP_Query` orders posts by date.
+    pub async fn posts_of_type(&self, post_type: &str) -> Result<Vec<Post>, DbError> {
+        let mut sql = Sql::new(concat!(
+            "SELECT ",
+            post_columns!(),
+            " FROM {prefix}posts WHERE "
+        ));
+        sql.push("post_type = ? ORDER BY post_date DESC");
+        sql.bind(Bind::Text(post_type.to_string()));
+        self.select(sql).await
+    }
+
+    /// The IDs of `post`'s revisions, newest first, as
+    /// `wp_get_latest_revision_id_and_total_count()` reads them.
+    pub async fn revisions(&self, post: u64) -> Result<Vec<u64>, DbError> {
+        let sql = self.prefix.sql(
+            "SELECT ID FROM {prefix}posts WHERE post_parent = ? AND post_type = 'revision' \
+             AND post_status = 'inherit' ORDER BY post_date DESC, ID DESC",
+        );
+        let rows = sqlx::query(sql)
+            .bind(post)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let id = c.unsigned("ID");
+                c.finish(id)
+            })
+            .collect()
+    }
+
     /// `wp_get_users_with_no_role()`: those whose `key` meta does not match
     /// `regex`, the roles' names.
     pub async fn users_without_role(&self, key: &str, regex: &str) -> Result<Vec<u64>, DbError> {

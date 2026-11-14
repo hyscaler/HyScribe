@@ -12,9 +12,11 @@ mod request;
 mod response;
 mod routes;
 mod schema;
+mod templates;
 mod types;
 
 use hyscribe_kses::esc_url_raw;
+use hyscribe_model::{Post, Term, User};
 use hyscribe_phpser::{Key, Value, is_empty_string, json_encode, json_encode_pretty, lookup};
 
 pub use response::{Response, RestError, paginate};
@@ -36,6 +38,20 @@ pub trait Site {
     fn create_nonce(&self) -> String;
     /// `user_can( $user, $cap )`.
     fn can(&self, user: u64, cap: &str) -> bool;
+    /// `user_can( $user, $cap, $post )`.
+    fn can_post(&self, user: u64, cap: &str, post: u64) -> bool;
+    /// `get_post( $id )`.
+    fn post(&self, id: u64) -> Option<Post>;
+    /// Every post of `post_type` whatever its status, newest first.
+    fn posts_of_type(&self, post_type: &str) -> Vec<Post>;
+    /// `get_the_terms( $post, $taxonomy )`, by name.
+    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term>;
+    /// `get_post_meta( $post, $key, true )`.
+    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>>;
+    /// The IDs of the revisions of `post`, newest first.
+    fn revisions(&self, post: u64) -> Vec<u64>;
+    /// `get_userdata( $id )`.
+    fn user(&self, id: u64) -> Option<User>;
 }
 
 /// A request for the API.
@@ -105,6 +121,11 @@ impl Context<'_> {
         self.site.can(self.user, cap)
     }
 
+    /// `current_user_can( $cap, $post )`.
+    pub(crate) fn can_post(&self, cap: &str, post: u64) -> bool {
+        self.site.can_post(self.user, cap, post)
+    }
+
     /// `rest_authorization_required_code()`.
     pub(crate) fn authorization_required(&self) -> u16 {
         if self.user == 0 { 401 } else { 403 }
@@ -129,6 +150,11 @@ pub(crate) struct Endpoint {
     args: Vec<Arg>,
     permission: Permission,
     callback: Callback,
+}
+
+/// The callback of an endpoint whose answer is not ported.
+pub(crate) fn not_ported(_: &Context, _: &Params) -> Result<Response, RestError> {
+    Err(RestError::not_ported())
 }
 
 /// `wp_check_jsonp_callback()`: letters, digits, `_` and `.` only.
@@ -315,8 +341,9 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
 /// The permission checks of a matched route's endpoints and the endpoint
 /// matched, if the route is ported.
 fn ported(matched: &routes::Matched) -> Option<(Vec<Permission>, Endpoint)> {
-    let mut endpoints =
-        types::endpoints(matched.regex).or_else(|| editor::endpoints(matched.regex))?;
+    let mut endpoints = types::endpoints(matched.regex)
+        .or_else(|| editor::endpoints(matched.regex))
+        .or_else(|| templates::endpoints(matched.regex))?;
     let permissions = endpoints
         .iter()
         .map(|endpoint| endpoint.permission)
@@ -414,6 +441,10 @@ fn dispatch(
         return Ok(RestError::status("rest_no_route", message, 404).into_response());
     };
     let (permissions, endpoint) = ported(&matched).ok_or(NotPorted)?;
+    // No write is ported (ADR 0013).
+    if !matches!(method, "GET" | "HEAD") {
+        return Err(NotPorted);
+    }
     let mut params = Params {
         url: matched.params,
         defaults: defaults(&endpoint.args),

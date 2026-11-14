@@ -119,16 +119,29 @@ fn kept(headers: &HeaderMap, nonce: &str) -> Vec<String> {
     headers
 }
 
+/// The theme footer's credit, which names HyScribe, as JSON.
+const CREDIT: [&str; 2] = [
+    "Designed with <a href=\\\"https:\\/\\/wordpress.org\\\" rel=\\\"nofollow\\\">WordPress<\\/a>",
+    "Designed with <a href=\\\"https:\\/\\/github.com\\/hyscaler\\/HyScribe\\\" rel=\\\"nofollow\\\">HyScribe<\\/a>",
+];
+
 /// The PHP oracle's answers to a visitor and the administrator, served
 /// over HTTP; routes not ported answer 501.
 #[tokio::test(flavor = "multi_thread")]
 async fn answers_match_php() {
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/rest.tsv");
+    assert_eq!(replay(golden).await, (2 * 64, 2 * 9));
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/templates.tsv");
+    assert_eq!(replay(golden).await, (2 * 85, 0));
+}
+
+/// The answers of `golden` served and not ported.
+async fn replay(golden: &str) -> (usize, usize) {
     let dir = tempfile::tempdir().unwrap();
     let plain = site(false, dir.path()).await;
     let pretty = site(true, dir.path()).await;
     let (cookie, nonce) = log_in(&plain).await;
     let visitor = self::nonce(&plain, 0, Vec::new()).await;
-    let golden = include_str!("../../../hyscribe-rest/tests/golden/rest.tsv");
     let (mut served, mut unported) = (0, 0);
     for line in golden.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
@@ -176,10 +189,10 @@ async fn answers_match_php() {
         php.sort();
         assert_eq!(kept(response.headers(), nonce), php, "{what}");
         let ours = body(response).await.replace(nonce, "%nonce%");
-        assert_eq!(ours, text(6), "{what}");
+        assert_eq!(ours, text(6).replace(CREDIT[0], CREDIT[1]), "{what}");
         served += 1;
     }
-    assert_eq!((served, unported), (2 * 63, 2 * 10));
+    (served, unported)
 }
 
 /// What WordPress serves as a page stays a page, and a `rest_route` that is
@@ -244,4 +257,40 @@ async fn database_errors_show_the_error_page() {
         .header(header::COOKIE, cookie);
     let response = send(&Arc::new(broken), request, "").await;
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+/// The reads a site's own templates and global styles posts need, which
+/// the default install has none of: the first post's, read for the routes
+/// and for capabilities over its author.
+#[tokio::test(flavor = "multi_thread")]
+async fn posts_are_read_for_the_routes_and_capabilities() {
+    let dir = tempfile::tempdir().unwrap();
+    let plain = site(false, dir.path()).await;
+    let handle = Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let mut reads = LoginReads::new(&plain, handle, now());
+        reads.act_as(1, Vec::new());
+        // The logged in cookie's user is found first.
+        assert!(LoginSite::user_by_login(&reads, b"admin").is_some());
+        let rest = Rest {
+            reads,
+            site: &plain,
+            user: 1,
+            caps: OnceCell::new(),
+        };
+        let site: &dyn hyscribe_rest::Site = &rest;
+        assert!(site.revisions(2).is_empty());
+        assert_eq!(site.post_terms(1, "category")[0].name, b"Uncategorized");
+        assert_eq!(site.post_meta(2, "_wp_page_template").unwrap(), b"default");
+        assert_eq!(site.user(1).unwrap().display_name, b"admin");
+        assert!(site.can_post(1, "edit_post", 1));
+        assert!(!site.can_post(0, "edit_post", 1));
+        assert_eq!(CapabilityData::post_meta(&rest, 2, "_edit_lock"), None);
+        assert_eq!(CapabilityData::comment_post(&rest, 1), None);
+        assert_eq!(CapabilityData::term_taxonomy(&rest, 1), None);
+        assert!(!CapabilityData::user_exists(&rest, 9));
+        assert!(rest.reads.reads.finish().is_ok());
+    })
+    .await
+    .unwrap();
 }

@@ -1,0 +1,43 @@
+# The templates' read routes over reference/rest/templates-custom.sql, for reference/rest/golden.sh (method, target, flags).
+GET	/?rest_route=/wp/v2/templates
+GET	/?rest_route=/wp/v2/templates&context=edit
+GET	/?rest_route=/wp/v2/templates&context=embed&_fields=id,author_text,original_source,_links
+GET	/?rest_route=/wp/v2/templates&post_type=page&_fields=id,is_custom
+GET	/?rest_route=/wp/v2/templates&post_type=post&_fields=id,is_custom
+GET	/?rest_route=/wp/v2/templates/twentytwentyfive//page-no-title&context=edit
+GET	/?rest_route=/wp/v2/templates/twentytwentyfive//taxonomy-post_format-post-format-aside&_fields=id,is_custom,author_text,original_source
+GET	/?rest_route=/wp/v2/templates/twentytwentyfive//taxonomy-post_format-post-format-nope&_fields=id,is_custom
+GET	/?rest_route=/wp/v2/templates&wp_id=713&_fields=id,status
+GET	/?rest_route=/wp/v2/templates&wp_id=716&_fields=id
+GET	/?rest_route=/wp/v2/templates&wp_id=721&_fields=id
+GET	/?rest_route=/wp/v2/templates/twentytwentyfive//index
+GET	/?rest_route=/wp/v2/templates/twentytwentyfive//index&context=edit
+GET	/?rest_route=/wp/v2/templates/twentytwentyfive//my-custom&context=edit
+GET	/?rest_route=/wp/v2/templates/twentytwentyfive//single&context=edit
+GET	/?rest_route=/wp/v2/templates/twentytwentyfive//archive&_fields=id,status
+GET	/?rest_route=/wp/v2/templates/twentytwentyfive//page-sample-page
+GET	/?rest_route=/wp/v2/templates/twentytwentyfour//index&context=edit
+GET	/?rest_route=/wp/v2/templates/twentytwentyfive//index&source=theme&_fields=id,source,content
+GET	/wp-json/wp/v2/templates/twentytwentyfive//index	pretty
+GET	/?rest_route=/wp/v2/templates/lookup&slug=index&_fields=id,source,wp_id
+GET	/?rest_route=/wp/v2/templates/lookup&slug=single&_fields=id,source
+GET	/?rest_route=/wp/v2/templates/lookup&slug=page-sample-page&_fields=id,source
+GET	/?rest_route=/wp/v2/template-parts
+GET	/?rest_route=/wp/v2/template-parts&context=edit
+GET	/?rest_route=/wp/v2/template-parts&area=header&_fields=id,area
+GET	/?rest_route=/wp/v2/template-parts&area=footer&_fields=id,area
+GET	/?rest_route=/wp/v2/template-parts&wp_id=723&context=edit
+GET	/?rest_route=/wp/v2/template-parts/twentytwentyfive//header&context=edit
+GET	/?rest_route=/wp/v2/template-parts/twentytwentyfive//my-part
+GET	/?rest_route=/wp/v2/template-parts/twentytwentyfive//zero&context=edit
+GET	/?rest_route=/wp/v2/templates/twentytwentyfive//plain
+GET	/?rest_route=/wp/v2/template-parts/twentytwentyfive//loose&context=embed
+GET	/?rest_route=/wp/v2/global-styles/741
+GET	/?rest_route=/wp/v2/global-styles/741&context=edit
+GET	/?rest_route=/wp/v2/global-styles/741&context=embed
+GET	/?rest_route=/wp/v2/global-styles/741&_fields=settings
+GET	/?rest_route=/wp/v2/global-styles/742&context=edit
+GET	/?rest_route=/wp/v2/global-styles/711
+GET	/?rest_route=/wp/v2/global-styles/743
+HEAD	/?rest_route=/wp/v2/global-styles/741
+GET	/wp-json/wp/v2/global-styles/741	pretty

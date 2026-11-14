@@ -133,8 +133,26 @@ fn refused<T>(result: Result<T, Refusal>, name: &str, invalid: &mut Invalid) -> 
         .ok()
 }
 
-/// `has_valid_params()`: each argument set and validated checks out.
+/// `has_valid_params()`: every required argument is set, and each one set
+/// and validated checks out.
 pub(crate) fn has_valid_params(params: &Params, args: &[Arg]) -> Result<(), RestError> {
+    let missing: Vec<&str> = args
+        .iter()
+        .filter(|arg| arg.schema.get_str("required") == Some(&Value::Bool(true)))
+        .filter(|arg| params.get(arg.name).is_none())
+        .map(|arg| arg.name)
+        .collect();
+    if !missing.is_empty() {
+        let names = missing.iter().map(|name| text(*name)).collect();
+        return Err(RestError {
+            code: "rest_missing_callback_param",
+            message: format!("Missing parameter(s): {}", missing.join(", ")),
+            data: object([
+                ("status", Value::Int(400)),
+                ("params", crate::response::list(names)),
+            ]),
+        });
+    }
     let mut invalid = Invalid::default();
     let set = args
         .iter()

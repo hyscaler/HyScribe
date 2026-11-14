@@ -33,7 +33,7 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         "/wp/v2/block-patterns/patterns" => Some(vec![Endpoint {
             args: Vec::new(),
             permission: |context, _| permission(context, "block patterns"),
-            callback: |_, _| Err(RestError::not_ported()),
+            callback: crate::not_ported,
         }]),
         _ => None,
     }

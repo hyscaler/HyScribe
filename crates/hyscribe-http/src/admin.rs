@@ -185,6 +185,17 @@ impl<'a> Admin<'a> {
     }
 }
 
+/// A post as `map_meta_cap()` reads it.
+pub(crate) fn cap_post(post: Post) -> CapPost {
+    CapPost {
+        id: post.id,
+        author: post.author,
+        status: post.status,
+        post_type: post.post_type,
+        parent: post.parent,
+    }
+}
+
 /// The admin's capability checks, with the posts and comments they name.
 impl CapabilityData for Admin<'_> {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
@@ -198,13 +209,7 @@ impl CapabilityData for Admin<'_> {
             || self.reads.reads.wait(self.site.db.user(user_id)).is_some()
     }
     fn post(&self, id: u64) -> Option<CapPost> {
-        self.full_post(id).map(|post| CapPost {
-            id: post.id,
-            author: post.author,
-            status: post.status,
-            post_type: post.post_type,
-            parent: post.parent,
-        })
+        self.full_post(id).map(cap_post)
     }
     fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
         self.reads.reads.wait(self.site.db.post_meta(id, key))

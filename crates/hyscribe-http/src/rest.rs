@@ -12,11 +12,14 @@ use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, HeaderValue, Method, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::login::Site as LoginSite;
-use hyscribe_auth::caps::{CapabilityData, User as Capabilities};
+use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
+use hyscribe_model::{Post, Term, User};
 use hyscribe_phpser::{Value, addslashes, is_empty_string, parse_str};
 use hyscribe_render::link::rest_url;
+use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
+use crate::admin::cap_post;
 use crate::login::{LoginReads, Names, cookie, cookies, joined};
 use crate::{Site, now, trackback};
 
@@ -77,11 +80,73 @@ impl hyscribe_rest::Site for Rest<'_> {
     }
 
     fn can(&self, user: u64, cap: &str) -> bool {
-        let caps = || {
-            self.caps
-                .get_or_init(|| Capabilities::load(&self.reads, self.site.db.prefix(), self.user))
-        };
-        user != 0 && caps().has_cap(&self.reads, cap, &[])
+        user != 0 && self.caps().has_cap(self, cap, &[])
+    }
+
+    fn can_post(&self, user: u64, cap: &str, post: u64) -> bool {
+        let post = Value::Int(i64::try_from(post).unwrap_or_default());
+        user != 0 && self.caps().has_cap(self, cap, &[post])
+    }
+
+    fn post(&self, id: u64) -> Option<Post> {
+        RenderSite::post(&self.reads.reads, id)
+    }
+
+    fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
+        let reads = &self.reads.reads;
+        reads.wait(self.site.db.posts_of_type(post_type))
+    }
+
+    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term> {
+        RenderSite::post_terms(&self.reads.reads, post, taxonomy)
+    }
+
+    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>> {
+        RenderSite::post_meta(&self.reads.reads, post, key)
+    }
+
+    fn revisions(&self, post: u64) -> Vec<u64> {
+        self.reads.reads.wait(self.site.db.revisions(post))
+    }
+
+    fn user(&self, id: u64) -> Option<User> {
+        RenderSite::user(&self.reads.reads, id)
+    }
+}
+
+impl Rest<'_> {
+    /// The current user's capabilities, loaded once.
+    fn caps(&self) -> &Capabilities {
+        self.caps
+            .get_or_init(|| Capabilities::load(self, self.site.db.prefix(), self.user))
+    }
+}
+
+/// The capability checks, with the posts they name.
+impl CapabilityData for Rest<'_> {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        CapabilityData::option(&self.reads, name)
+    }
+    fn user_meta(&self, user_id: u64, key: &str) -> Option<Vec<u8>> {
+        self.reads.user_meta(user_id, key)
+    }
+    fn user_exists(&self, user_id: u64) -> bool {
+        self.reads.user_exists(user_id)
+    }
+    fn post(&self, id: u64) -> Option<CapPost> {
+        RenderSite::post(&self.reads.reads, id).map(cap_post)
+    }
+    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        RenderSite::post_meta(&self.reads.reads, id, key)
+    }
+    fn comment_post(&self, id: u64) -> Option<u64> {
+        self.reads.comment_post(id)
+    }
+    fn term_taxonomy(&self, id: u64) -> Option<String> {
+        self.reads.term_taxonomy(id)
+    }
+    fn constant(&self, name: &str) -> bool {
+        self.reads.constant(name)
     }
 }
 

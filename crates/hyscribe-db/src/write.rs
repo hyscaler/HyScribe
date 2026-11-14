@@ -2,10 +2,11 @@
 
 //! The gated writer (ADRs 0010 and 0012): a second pool, as the main
 //! database user, that only primary mode opens. Each action is one
-//! [`Write`], a transaction committed as a whole; each method is one fixed
-//! statement with bound values, named after what it does. Writes are
-//! refused when `db_version` is newer than supported (ADR 0003) and on
-//! tables whose engine cannot roll back.
+//! [`Write`], a transaction committed as a whole, or a savepoint in the
+//! caller's transaction; each method is one fixed statement with bound
+//! values, named after what it does. Writes are refused when `db_version`
+//! is newer than supported (ADR 0003) and on tables whose engine cannot
+//! roll back.
 
 use hyscribe_config::{Database, Mode, Prefix};
 use sqlx::Row as _;
@@ -129,6 +130,15 @@ impl Writer {
     pub async fn begin(&self) -> Result<Write<'_>, DbError> {
         Write::start(self, self.pool.begin().await).await
     }
+
+    /// Starts an action on `conn`, as a savepoint when `conn` is in a
+    /// transaction already, so the caller's rollback undoes it too.
+    pub async fn begin_on<'w>(
+        &'w self,
+        conn: &'w mut <Backend as sqlx::Database>::Connection,
+    ) -> Result<Write<'w>, DbError> {
+        Write::start(self, sqlx::Connection::begin(conn).await).await
+    }
 }
 
 /// A text column of an information schema row, whatever its type.
@@ -141,13 +151,13 @@ fn text(row: &crate::Row, name: &str) -> String {
 /// back when dropped.
 pub struct Write<'w> {
     writer: &'w Writer,
-    tx: sqlx::Transaction<'static, Backend>,
+    tx: sqlx::Transaction<'w, Backend>,
 }
 
 impl<'w> Write<'w> {
     async fn start(
         writer: &'w Writer,
-        tx: Result<sqlx::Transaction<'static, Backend>, sqlx::Error>,
+        tx: Result<sqlx::Transaction<'w, Backend>, sqlx::Error>,
     ) -> Result<Write<'w>, DbError> {
         let mut tx = tx.map_err(db_error)?;
         let sql = writer

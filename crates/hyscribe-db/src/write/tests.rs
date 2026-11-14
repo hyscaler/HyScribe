@@ -242,6 +242,44 @@ async fn an_action_commits_or_rolls_back_as_a_whole() {
     write.commit().await.unwrap();
 }
 
+/// The write oracle's way: actions on a connection in a transaction the
+/// caller never commits.
+#[tokio::test]
+async fn an_action_in_the_callers_transaction_is_rolled_back_with_it() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = writer().await;
+    let key = "hyscribe_nested_test";
+    let mut conn = writer.pool.acquire().await.unwrap();
+    let mut outer = sqlx::Connection::begin(&mut *conn).await.unwrap();
+    let mut write = writer.begin_on(&mut outer).await.unwrap();
+    let kept = write.add_meta(Meta::Term, 1, key, b"kept").await.unwrap();
+    write.commit().await.unwrap();
+    let mut write = writer.begin_on(&mut outer).await.unwrap();
+    write
+        .add_meta(Meta::Term, 1, key, b"dropped")
+        .await
+        .unwrap();
+    drop(write);
+    // A committed action is seen in the caller's transaction, a dropped one
+    // is not.
+    let mut write = writer.begin_on(&mut outer).await.unwrap();
+    assert_eq!(
+        write.meta_ids_of_key(Meta::Term, key).await.unwrap(),
+        [kept]
+    );
+    drop(write);
+    drop(outer);
+    drop(conn);
+    let mut write = writer.begin().await.unwrap();
+    assert!(
+        write
+            .meta_ids_of_key(Meta::Term, key)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
 #[tokio::test]
 async fn writes_are_refused_unless_db_version_is_supported() {
     let _one = ONE_AT_A_TIME.lock().await;

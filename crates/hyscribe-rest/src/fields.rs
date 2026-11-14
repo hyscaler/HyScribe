@@ -144,13 +144,10 @@ pub(crate) fn fields_for_response(params: &Params, properties: &Properties) -> V
     if params.has("_embed") {
         fields.push(b"_embedded".to_vec());
     }
-    let mut requested = requested(params);
+    let requested = requested(params);
     if requested.is_empty() {
         return fields;
     }
-    // `id` is always kept, for `add_additional_fields_to_object()`; a
-    // schema without it drops it below.
-    requested.push(b"id".to_vec());
     requested
         .into_iter()
         .filter(|field| {

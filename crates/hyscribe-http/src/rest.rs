@@ -12,10 +12,11 @@ use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, HeaderValue, Method, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::login::Site as LoginSite;
-use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
-use hyscribe_model::{Post, Term, TermQuery, User};
-use hyscribe_phpser::{Value, addslashes, is_empty_string, parse_str};
+use hyscribe_auth::caps::{CapabilityData, User as Capabilities};
+use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, Term, TermQuery, User, UserQuery};
+use hyscribe_phpser::{Key, Value, addslashes, is_empty_string, parse_str};
 use hyscribe_render::link::rest_url;
+use hyscribe_render::permalinks::{Permalinks, author_posts_url, permalink};
 use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
@@ -60,40 +61,6 @@ struct Rest<'a> {
     caps: OnceCell<Capabilities>,
 }
 
-/// The capability checks of REST requests, with the posts they name.
-impl CapabilityData for Rest<'_> {
-    fn option(&self, name: &str) -> Option<Vec<u8>> {
-        CapabilityData::option(&self.reads, name)
-    }
-    fn user_meta(&self, user_id: u64, key: &str) -> Option<Vec<u8>> {
-        self.reads.user_meta(user_id, key)
-    }
-    fn user_exists(&self, user_id: u64) -> bool {
-        self.reads.reads.user(user_id).is_some()
-    }
-    fn post(&self, id: u64) -> Option<CapPost> {
-        self.reads.reads.post(id).map(|post| CapPost {
-            id: post.id,
-            author: post.author,
-            status: post.status,
-            post_type: post.post_type,
-            parent: post.parent,
-        })
-    }
-    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
-        self.reads.reads.post_meta(id, key)
-    }
-    fn comment_post(&self, _: u64) -> Option<u64> {
-        None
-    }
-    fn term_taxonomy(&self, id: u64) -> Option<String> {
-        self.reads.reads.wait(self.site.db.term_taxonomy(id))
-    }
-    fn constant(&self, name: &str) -> bool {
-        self.reads.constant(name)
-    }
-}
-
 impl hyscribe_rest::Site for Rest<'_> {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         CapabilityData::option(&self.reads, name)
@@ -115,9 +82,9 @@ impl hyscribe_rest::Site for Rest<'_> {
     fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
         let caps = || {
             self.caps
-                .get_or_init(|| Capabilities::load(self, self.site.db.prefix(), self.user))
+                .get_or_init(|| Capabilities::load(&self.reads, self.site.db.prefix(), self.user))
         };
-        user != 0 && caps().has_cap(self, cap, args)
+        user != 0 && caps().has_cap(&self.reads, cap, args)
     }
 
     fn reads(&self) -> &dyn RenderSite {
@@ -143,6 +110,70 @@ impl hyscribe_rest::Site for Rest<'_> {
 
     fn post(&self, id: u64) -> Option<Post> {
         RenderSite::post(&self.reads.reads, id)
+    }
+
+    fn home_url(&self) -> String {
+        self.site.home.clone()
+    }
+
+    fn table_prefix(&self) -> String {
+        self.site.db.prefix().into()
+    }
+
+    fn comments(&self, query: &CommentQuery) -> Vec<CommentRow> {
+        self.reads.reads.wait(self.site.db.comment_query(query))
+    }
+
+    fn count_comments(&self, query: &CommentQuery) -> u64 {
+        self.reads
+            .reads
+            .wait(self.site.db.count_comment_query(query))
+    }
+
+    fn comment_link(&self, comment: &Comment) -> String {
+        let post = (comment.post_id != 0)
+            .then(|| RenderSite::post(&self.reads.reads, comment.post_id))
+            .flatten();
+        let link = post.map(|post| permalink(&self.reads.reads, &post));
+        let link = String::from_utf8_lossy(&link.unwrap_or_default()).into_owned();
+        let links = Permalinks::of(&self.reads.reads);
+        let link = if links.pretty() {
+            links.trailing(&link)
+        } else {
+            link
+        };
+        format!("{link}#comment-{}", comment.id)
+    }
+
+    fn users(&self, query: &UserQuery) -> Vec<User> {
+        self.reads.reads.wait(self.site.db.user_query(query))
+    }
+
+    fn count_users(&self, query: &UserQuery) -> u64 {
+        self.reads.reads.wait(self.site.db.count_user_query(query))
+    }
+
+    fn user_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        CapabilityData::user_meta(&self.reads, id, key)
+    }
+
+    fn user_registered(&self, id: u64) -> String {
+        self.reads.reads.wait(self.site.db.user_registered(id))
+    }
+
+    fn allcaps(&self, id: u64) -> Vec<(Key, Value)> {
+        let user = Capabilities::load(&self.reads, self.site.db.prefix(), id);
+        user.allcaps().to_vec()
+    }
+
+    fn author_link(&self, user: &User) -> String {
+        let id = i64::try_from(user.id).unwrap_or_default();
+        let link = author_posts_url(&self.reads.reads, id);
+        String::from_utf8_lossy(&link).into_owned()
+    }
+
+    fn has_posts(&self, author: u64, types: &[(String, bool)]) -> bool {
+        self.reads.reads.wait(self.site.db.has_posts(author, types))
     }
 
     fn posts_of_type(&self, post_type: &str) -> Vec<Post> {

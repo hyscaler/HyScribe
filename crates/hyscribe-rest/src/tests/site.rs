@@ -94,7 +94,8 @@ pub(super) struct Fixture {
     pub(super) pretty: bool,
     /// With what neither fixture has: a revision of post 1 (99), drafts
     /// without an author whose GMT dates are unset (98, 96), and their
-    /// featured images, attachments of the draft (97) and of none (95); a
+    /// featured images, attachments of the draft (97) and of none (95),
+    /// and a draft (92) whose image (93) is private; a
     /// post with a gallery shortcode and its own excerpt (94); and the
     /// site two hours east of UTC.
     pub(super) extra: bool,
@@ -206,9 +207,20 @@ impl Fixture {
             parent: 0,
             ..image.clone()
         };
+        let private = Post {
+            id: 93,
+            status: "private".into(),
+            ..image.clone()
+        };
+        let third = Post {
+            id: 92,
+            ..draft.clone()
+        };
         self.data().posts.iter().cloned().chain(
             self.extra
-                .then_some([revision, draft, image, other, orphan, shortcode])
+                .then_some([
+                    revision, draft, image, other, orphan, shortcode, private, third,
+                ])
                 .into_iter()
                 .flatten(),
         )
@@ -306,6 +318,7 @@ impl Site for Fixture {
         let featured = match post_id {
             98 => Some(b"97".to_vec()),
             96 => Some(b"95".to_vec()),
+            92 => Some(b"93".to_vec()),
             _ => None,
         };
         if self.extra && key == "_thumbnail_id" && featured.is_some() {

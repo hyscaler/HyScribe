@@ -6,7 +6,8 @@
 use super::*;
 use hyscribe_config::Secret;
 use hyscribe_model::{
-    FormatFilter, StatusFilter, Term, TermFilter, TermOrder, TermQuery, TimeCondition, User,
+    CommentQuery, FormatFilter, StatusFilter, Term, TermFilter, TermOrder, TermQuery,
+    TimeCondition, User, UserQuery,
 };
 
 /// The approved and pending comments.
@@ -508,6 +509,17 @@ async fn errors_are_reported() {
         db.users_with("wp_capabilities", &["administrator".into()])
             .await
             .unwrap_err(),
+        db.comment_query(&CommentQuery::default())
+            .await
+            .unwrap_err(),
+        db.count_comment_query(&CommentQuery::default())
+            .await
+            .unwrap_err(),
+        db.user_query(&UserQuery::default()).await.unwrap_err(),
+        db.count_user_query(&UserQuery::default())
+            .await
+            .unwrap_err(),
+        db.user_registered(1).await.unwrap_err(),
     ] {
         assert!(
             [
@@ -548,6 +560,7 @@ async fn a_row_without_the_columns_fails_to_decode() {
     assert!(post(&row).is_err());
     assert!(date_count(&row).is_err());
     assert!(term_id(&row).is_err());
+    assert!(people::comment_row(&row).is_err());
     let mut c = Columns::new(&row);
     let _ = (c.text("option_name"), c.bytes("option_value"));
     assert!(c.finish(()).is_err());
@@ -1763,4 +1776,362 @@ async fn rest_post_filters() {
         titles(&db, search("-sample", "post_title")).await,
         ["Privacy Policy"]
     );
+}
+
+/// `count_user_posts()` as the users REST route asks it: published posts
+/// of the types given, private ones too where a type's flag is set; and a
+/// user's `user_registered`, empty for none.
+#[tokio::test]
+async fn authors_posts_are_found() {
+    let db = fixture().await;
+    let types = |types: &[(&str, bool)]| -> Vec<(String, bool)> {
+        types
+            .iter()
+            .map(|(ty, private)| ((*ty).into(), *private))
+            .collect()
+    };
+    assert!(
+        db.has_posts(1, &types(&[("wp_block", false), ("post", false)]))
+            .await
+            .unwrap()
+    );
+    assert!(
+        !db.has_posts(1, &types(&[("wp_block", true)]))
+            .await
+            .unwrap()
+    );
+    assert!(!db.has_posts(2, &types(&[("post", true)])).await.unwrap());
+    assert_eq!(db.user_registered(1).await.unwrap(), "2026-10-27 08:08:15");
+    assert_eq!(db.user_registered(999).await.unwrap(), "");
+    // An ID is searched whole, and `include` orders.
+    let query = |search: &str| hyscribe_model::UserQuery {
+        search: Some((vec!["user_login".into(), "ID".into()], search.into())),
+        include: vec![2, 1],
+        order: (hyscribe_model::UserOrder::Include, false),
+        ..hyscribe_model::UserQuery::default()
+    };
+    let ids = |users: Vec<User>| users.iter().map(|user| user.id).collect::<Vec<_>>();
+    assert_eq!(ids(db.user_query(&query("1")).await.unwrap()), [1]);
+    assert_eq!(
+        ids(db.user_query(&query("11")).await.unwrap()),
+        Vec::<u64>::new()
+    );
+}
+
+/// The REST API's comment and user queries, every clause at once.
+#[tokio::test]
+async fn rest_queries_read_every_clause() {
+    use hyscribe_model::{CommentOrder, UserOrder};
+    let db = fixture().await;
+    let comments = CommentQuery {
+        approved: Some(vec!["1".into()]),
+        types: vec![String::new(), "comment".into()],
+        excluded_types: vec!["note".into()],
+        include: vec![1, 2],
+        exclude: vec![2],
+        parents: vec![0],
+        excluded_parents: vec![5],
+        posts: vec![1],
+        authors: vec![0],
+        excluded_authors: vec![1],
+        author_email: Some(b"wapuu@wordpress.example".to_vec()),
+        search: Some("COMMENT".into()),
+        after: Some("2026-10-27 00:00:00".into()),
+        before: Some("2026-10-28 00:00:00".into()),
+        order: vec![(CommentOrder::Include, false), (CommentOrder::Id, true)],
+        limit: Some(1),
+        offset: 0,
+    };
+    let found = db.comment_query(&comments).await.unwrap();
+    assert_eq!(
+        found.iter().map(|row| row.comment.id).collect::<Vec<_>>(),
+        [1]
+    );
+    assert_eq!(
+        (found[0].approved.as_str(), found[0].agent.as_slice()),
+        ("1", &b""[..])
+    );
+    assert_eq!(db.count_comment_query(&comments).await.unwrap(), 1);
+    let orders = [
+        CommentOrder::Date,
+        CommentOrder::DateGmt,
+        CommentOrder::Post,
+        CommentOrder::Parent,
+        CommentOrder::Type,
+    ];
+    for order in orders {
+        let query = CommentQuery {
+            order: vec![(order, true)],
+            ..CommentQuery::default()
+        };
+        assert_eq!(
+            db.comment_query(&query).await.unwrap().len(),
+            1,
+            "{order:?}"
+        );
+    }
+    let users = UserQuery {
+        caps_key: "wp_capabilities".into(),
+        roles: vec!["administrator".into(), "editor".into()],
+        level_key: Some("wp_user_level".into()),
+        published: Some(vec!["post".into()]),
+        nicenames: vec![b"admin".to_vec()],
+        search: Some((vec!["user_login".into(), "ID".into()], "dmi".into())),
+        include: vec![1],
+        exclude: vec![2],
+        order: (UserOrder::Nicenames, false),
+        limit: Some(1),
+        offset: 0,
+    };
+    let ids = |users: Vec<User>| users.iter().map(|user| user.id).collect::<Vec<_>>();
+    assert_eq!(ids(db.user_query(&users).await.unwrap()), [1]);
+    assert_eq!(db.count_user_query(&users).await.unwrap(), 1);
+    let orders = [
+        UserOrder::Login,
+        UserOrder::Nicename,
+        UserOrder::Email,
+        UserOrder::Url,
+        UserOrder::Registered,
+        UserOrder::DisplayName,
+        UserOrder::Id,
+        UserOrder::Include,
+    ];
+    for order in orders {
+        let query = UserQuery {
+            include: vec![1],
+            order: (order, true),
+            ..UserQuery::default()
+        };
+        assert_eq!(ids(db.user_query(&query).await.unwrap()), [1], "{order:?}");
+    }
+    let slugs = UserQuery {
+        order: (UserOrder::Nicenames, false),
+        ..UserQuery::default()
+    };
+    assert_eq!(ids(db.user_query(&slugs).await.unwrap()), [1]);
+}
+
+/// Each clause of the REST API's comment and user queries narrows the
+/// Theme Test Data's comments and users.
+#[tokio::test]
+async fn rest_queries_narrow_by_each_clause() {
+    use hyscribe_model::CommentOrder;
+    let ttd = named("wordpress_ttd").await;
+    let all = CommentQuery::default();
+    assert_eq!(ttd.count_comment_query(&all).await.unwrap(), 34);
+    let counted = [
+        (
+            CommentQuery {
+                approved: Some(vec!["0".into()]),
+                ..all.clone()
+            },
+            3,
+        ),
+        (
+            CommentQuery {
+                types: vec!["pingback".into()],
+                ..all.clone()
+            },
+            2,
+        ),
+        (
+            CommentQuery {
+                excluded_types: vec!["comment".into()],
+                ..all.clone()
+            },
+            4,
+        ),
+        (
+            CommentQuery {
+                include: vec![3, 4],
+                ..all.clone()
+            },
+            2,
+        ),
+        (
+            CommentQuery {
+                exclude: vec![3],
+                ..all.clone()
+            },
+            33,
+        ),
+        (
+            CommentQuery {
+                parents: vec![13],
+                ..all.clone()
+            },
+            1,
+        ),
+        (
+            CommentQuery {
+                excluded_parents: vec![0],
+                ..all.clone()
+            },
+            10,
+        ),
+        (
+            CommentQuery {
+                posts: vec![155],
+                ..all.clone()
+            },
+            4,
+        ),
+        (
+            CommentQuery {
+                excluded_authors: vec![0],
+                ..all.clone()
+            },
+            0,
+        ),
+        (
+            CommentQuery {
+                authors: vec![1],
+                ..all.clone()
+            },
+            0,
+        ),
+        (
+            CommentQuery {
+                author_email: Some(b"anon@example.com".to_vec()),
+                ..all.clone()
+            },
+            1,
+        ),
+        (
+            CommentQuery {
+                search: Some("\u{393}\u{3b9}\u{3ac}\u{3bd}\u{3bd}\u{3b7}\u{3c2}".into()),
+                ..all.clone()
+            },
+            1,
+        ),
+        (
+            CommentQuery {
+                after: Some("2014-01-01 00:00:00".into()),
+                ..all.clone()
+            },
+            5,
+        ),
+        (
+            CommentQuery {
+                before: Some("2007-09-05 00:00:00".into()),
+                ..all.clone()
+            },
+            3,
+        ),
+    ];
+    for (query, expected) in counted {
+        assert_eq!(
+            ttd.count_comment_query(&query).await.unwrap(),
+            expected,
+            "{query:?}"
+        );
+        let found = ttd.comment_query(&query).await.unwrap();
+        assert_eq!(found.len() as u64, expected, "{query:?}");
+    }
+    let first = |order: Vec<(CommentOrder, bool)>, include: Vec<u64>| CommentQuery {
+        order,
+        include,
+        limit: Some(3),
+        offset: 0,
+        ..CommentQuery::default()
+    };
+    let ordered = [
+        (
+            first(vec![(CommentOrder::Include, false)], vec![5, 3, 4]),
+            [5, 3, 4],
+        ),
+        (
+            first(
+                vec![(CommentOrder::Post, false), (CommentOrder::Id, true)],
+                vec![],
+            ),
+            [1, 2, 6],
+        ),
+        (
+            first(
+                vec![(CommentOrder::Parent, true), (CommentOrder::Id, true)],
+                vec![],
+            ),
+            [22, 21, 20],
+        ),
+        (
+            first(
+                vec![(CommentOrder::Type, true), (CommentOrder::Id, true)],
+                vec![],
+            ),
+            [29, 28, 31],
+        ),
+    ];
+    for (query, expected) in ordered {
+        let found = ttd.comment_query(&query).await.unwrap();
+        let ids: Vec<u64> = found.iter().map(|row| row.comment.id).collect();
+        assert_eq!(ids, expected, "{query:?}");
+    }
+    let paged = CommentQuery {
+        order: vec![(CommentOrder::Id, false)],
+        limit: Some(2),
+        offset: 1,
+        ..CommentQuery::default()
+    };
+    let found = ttd.comment_query(&paged).await.unwrap();
+    assert_eq!(
+        found.iter().map(|row| row.comment.id).collect::<Vec<_>>(),
+        [2, 3]
+    );
+    let users = |query: UserQuery| async move {
+        let found = named("wordpress_ttd")
+            .await
+            .user_query(&query)
+            .await
+            .unwrap();
+        found.iter().map(|user| user.id).collect::<Vec<_>>()
+    };
+    let roles = UserQuery {
+        caps_key: "wp_capabilities".into(),
+        roles: vec!["editor".into(), "administrator".into()],
+        ..UserQuery::default()
+    };
+    assert_eq!(users(roles).await, [1]);
+    let search = UserQuery {
+        search: Some((vec!["user_login".into(), "ID".into()], "admi".into())),
+        ..UserQuery::default()
+    };
+    assert_eq!(users(search).await, [1]);
+    let login = UserQuery {
+        search: Some((vec!["user_login".into()], "admi".into())),
+        ..UserQuery::default()
+    };
+    assert_eq!(users(login).await, [1]);
+}
+
+/// The columns each order sorts by, `FIELD()` of a list for none.
+#[test]
+fn orders_sort_by_their_columns() {
+    use hyscribe_model::{CommentOrder, UserOrder};
+    let comments = [
+        (CommentOrder::Date, Some("comment_date")),
+        (CommentOrder::DateGmt, Some("comment_date_gmt")),
+        (CommentOrder::Id, Some("comment_ID")),
+        (CommentOrder::Post, Some("comment_post_ID")),
+        (CommentOrder::Parent, Some("comment_parent")),
+        (CommentOrder::Type, Some("comment_type")),
+        (CommentOrder::Include, None),
+    ];
+    for (order, column) in comments {
+        assert_eq!(people::comment_column(order), column);
+    }
+    let users = [
+        (UserOrder::Login, Some("user_login")),
+        (UserOrder::Nicename, Some("user_nicename")),
+        (UserOrder::Email, Some("user_email")),
+        (UserOrder::Url, Some("user_url")),
+        (UserOrder::Registered, Some("user_registered")),
+        (UserOrder::DisplayName, Some("display_name")),
+        (UserOrder::Id, Some("u.ID")),
+        (UserOrder::Include, None),
+        (UserOrder::Nicenames, None),
+    ];
+    for (order, column) in users {
+        assert_eq!(people::user_column(order), column);
+    }
 }

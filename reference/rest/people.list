@@ -1,0 +1,181 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The comments and users routes for reference/rest/golden.sh (method, target, flags),
+# over the default install and the Theme Test Data fixture.
+GET	/?rest_route=/wp/v2/comments
+GET	/?rest_route=/wp/v2/comments&context=edit
+GET	/?rest_route=/wp/v2/comments&context=embed
+GET	/?rest_route=/wp/v2/comments&context=bogus
+GET	/?rest_route=/wp/v2/comments/1
+GET	/?rest_route=/wp/v2/comments/1&context=edit
+GET	/?rest_route=/wp/v2/comments/1&context=embed
+GET	/?rest_route=/wp/v2/comments/1&_fields=id,author_avatar_urls,content.rendered,_links
+GET	/?rest_route=/wp/v2/comments/999
+GET	/?rest_route=/wp/v2/comments/0
+HEAD	/?rest_route=/wp/v2/comments
+HEAD	/?rest_route=/wp/v2/comments/1
+HEAD	/?rest_route=/wp/v2/comments/999
+GET	/?rest_route=/wp/v2/comments&per_page=100
+GET	/?rest_route=/wp/v2/comments&per_page=100&context=edit
+GET	/?rest_route=/wp/v2/comments&per_page=2&page=2
+GET	/?rest_route=/wp/v2/comments&per_page=5&page=50
+GET	/?rest_route=/wp/v2/comments&per_page=0
+GET	/?rest_route=/wp/v2/comments&offset=3&per_page=3
+GET	/?rest_route=/wp/v2/comments&offset=x
+GET	/?rest_route=/wp/v2/comments&order=asc&orderby=id&_fields=id
+GET	/?rest_route=/wp/v2/comments&orderby=date&_fields=id,date
+GET	/?rest_route=/wp/v2/comments&orderby=date_gmt&order=asc&_fields=id
+GET	/?rest_route=/wp/v2/comments&orderby=post&_fields=id,post
+GET	/?rest_route=/wp/v2/comments&orderby=parent&order=asc&_fields=id,parent
+GET	/?rest_route=/wp/v2/comments&orderby=type&type=all&_fields=id,type
+GET	/?rest_route=/wp/v2/comments&orderby=include&include=3,1,2&_fields=id
+GET	/?rest_route=/wp/v2/comments&orderby=include&_fields=id
+GET	/?rest_route=/wp/v2/comments&orderby=bogus
+GET	/?rest_route=/wp/v2/comments&order=up
+GET	/?rest_route=/wp/v2/comments&include=1,2,3&_fields=id
+GET	/?rest_route=/wp/v2/comments&include[]=x
+GET	/?rest_route=/wp/v2/comments&exclude=1,2&_fields=id
+GET	/?rest_route=/wp/v2/comments&post=1
+GET	/?rest_route=/wp/v2/comments&post=155,1148&_fields=id,post
+GET	/?rest_route=/wp/v2/comments&post=0
+GET	/?rest_route=/wp/v2/comments&post=1,0
+GET	/?rest_route=/wp/v2/comments&post=99999
+GET	/?rest_route=/wp/v2/comments&post=3
+GET	/?rest_route=/wp/v2/comments&post=1168
+GET	/?rest_route=/wp/v2/comments&post=1168&password=enter
+GET	/?rest_route=/wp/v2/comments&post=1168&password=nope
+GET	/?rest_route=/wp/v2/comments&post=1168,1148&password=enter&_fields=id
+GET	/?rest_route=/wp/v2/comments&post=1168&context=edit
+GET	/?rest_route=/wp/v2/comments/33	ttd
+GET	/?rest_route=/wp/v2/comments/33&password=enter	ttd
+GET	/?rest_route=/wp/v2/comments/33&context=edit	ttd
+GET	/?rest_route=/wp/v2/comments/6	ttd
+GET	/?rest_route=/wp/v2/comments/6&context=edit	ttd
+GET	/?rest_route=/wp/v2/comments/14	ttd
+GET	/?rest_route=/wp/v2/comments/28	ttd
+GET	/?rest_route=/wp/v2/comments/8	ttd
+GET	/?rest_route=/wp/v2/comments&parent=0&_fields=id
+GET	/?rest_route=/wp/v2/comments&parent=13,14&_fields=id,parent
+GET	/?rest_route=/wp/v2/comments&parent_exclude=0&_fields=id,parent
+GET	/?rest_route=/wp/v2/comments&author=0&_fields=id
+GET	/?rest_route=/wp/v2/comments&author=1
+GET	/?rest_route=/wp/v2/comments&author_exclude=1&_fields=id
+GET	/?rest_route=/wp/v2/comments&author_email=wapuu@wordpress.example&_fields=id
+GET	/?rest_route=/wp/v2/comments&author_email=example@example.org&_fields=id
+GET	/?rest_route=/wp/v2/comments&author_email=bad
+GET	/?rest_route=/wp/v2/comments&author_email=
+GET	/?rest_route=/wp/v2/comments&status=hold&_fields=id,status
+GET	/?rest_route=/wp/v2/comments&status=all&_fields=id,status
+GET	/?rest_route=/wp/v2/comments&status=approve&_fields=id
+GET	/?rest_route=/wp/v2/comments&status=spam
+GET	/?rest_route=/wp/v2/comments&status=any&_fields=id
+GET	/?rest_route=/wp/v2/comments&status=Hold&_fields=id
+GET	/?rest_route=/wp/v2/comments&status[]=hold
+GET	/?rest_route=/wp/v2/comments&type=comment&_fields=id
+GET	/?rest_route=/wp/v2/comments&type=pingback&_fields=id,type
+GET	/?rest_route=/wp/v2/comments&type=pings&_fields=id,type
+GET	/?rest_route=/wp/v2/comments&type=trackback&_fields=id,type,author_avatar_urls
+GET	/?rest_route=/wp/v2/comments&type=all&_fields=id
+GET	/?rest_route=/wp/v2/comments&type=note
+GET	/?rest_route=/wp/v2/comments&type=note&post=1
+GET	/?rest_route=/wp/v2/comments&type=note&post=1&context=edit
+GET	/?rest_route=/wp/v2/comments&type=comment&status=approve&author_email=
+GET	/?rest_route=/wp/v2/comments&search=comment&_fields=id
+GET	/?rest_route=/wp/v2/comments&search=EXAMPLE.ORG&_fields=id
+GET	/?rest_route=/wp/v2/comments&search=%25&_fields=id
+GET	/?rest_route=/wp/v2/comments&search=
+GET	/?rest_route=/wp/v2/comments&after=2013-03-14T08:00:00&_fields=id,date
+GET	/?rest_route=/wp/v2/comments&before=2013-03-14T08:00:00Z&_fields=id,date
+GET	/?rest_route=/wp/v2/comments&after=2013-03-14T08:00:00%2B02:00&before=2013-03-14T11:30:00.5&_fields=id
+GET	/?rest_route=/wp/v2/comments&after=2013-03-14%2008:12:16&_fields=id
+GET	/?rest_route=/wp/v2/comments&after=2013-03-14t08:12:16-0130&_fields=id
+GET	/?rest_route=/wp/v2/comments&after=bad
+GET	/?rest_route=/wp/v2/comments&before=2013-13-14T08:00:00
+GET	/?rest_route=/wp/v2/comments&before=1970-01-01T00:00:00
+GET	/?rest_route=/wp/v2/comments&password=x&_fields=id
+GET	/?rest_route=/wp/v2/comments&_fields=id,content.rendered,_links
+GET	/?rest_route=/wp/v2/comments/1&_wpnonce=%nonce%	nononce
+GET	/?rest_route=/wp/v2/comments	pretty
+GET	/?rest_route=/wp/v2/comments/1&_embed
+GET	/?rest_route=/wp/v2/users
+GET	/?rest_route=/wp/v2/users&context=edit
+GET	/?rest_route=/wp/v2/users&context=embed
+GET	/?rest_route=/wp/v2/users&context=bogus
+GET	/?rest_route=/wp/v2/users/1
+GET	/?rest_route=/wp/v2/users/1&context=edit
+GET	/?rest_route=/wp/v2/users/1&context=embed
+GET	/?rest_route=/wp/v2/users/701
+GET	/?rest_route=/wp/v2/users/702&context=edit
+GET	/?rest_route=/wp/v2/users/703&context=embed
+GET	/?rest_route=/wp/v2/users/704
+GET	/?rest_route=/wp/v2/users/2	ttd
+GET	/?rest_route=/wp/v2/users/2&context=edit	ttd
+GET	/?rest_route=/wp/v2/users/999
+GET	/?rest_route=/wp/v2/users/0
+GET	/?rest_route=/wp/v2/users/me
+GET	/?rest_route=/wp/v2/users/me&context=edit
+GET	/?rest_route=/wp/v2/users/me&context=embed
+GET	/?rest_route=/wp/v2/users/me&_fields=id,roles,capabilities,extra_capabilities,meta&context=edit
+HEAD	/?rest_route=/wp/v2/users
+HEAD	/?rest_route=/wp/v2/users/me
+HEAD	/?rest_route=/wp/v2/users/1
+GET	/?rest_route=/wp/v2/users&who=authors
+GET	/?rest_route=/wp/v2/users&who=authors&roles=subscriber
+GET	/?rest_route=/wp/v2/users&who=bogus
+GET	/?rest_route=/wp/v2/users&roles=editor,author
+GET	/?rest_route=/wp/v2/users&roles=nope
+GET	/?rest_route=/wp/v2/users&capabilities=edit_posts
+GET	/?rest_route=/wp/v2/users&capabilities=publish_posts,promote_users
+GET	/?rest_route=/wp/v2/users&capabilities=editor
+GET	/?rest_route=/wp/v2/users&has_published_posts=1
+GET	/?rest_route=/wp/v2/users&has_published_posts=0
+GET	/?rest_route=/wp/v2/users&has_published_posts=page
+GET	/?rest_route=/wp/v2/users&has_published_posts[]=post&has_published_posts[]=wp_block
+GET	/?rest_route=/wp/v2/users&has_published_posts=nope
+GET	/?rest_route=/wp/v2/users&search=edit
+GET	/?rest_route=/wp/v2/users&search=example.test
+GET	/?rest_route=/wp/v2/users&search=@example
+GET	/?rest_route=/wp/v2/users&search=1
+GET	/?rest_route=/wp/v2/users&search=http://theme
+GET	/?rest_route=/wp/v2/users&search=admin&search_columns=email
+GET	/?rest_route=/wp/v2/users&search=a&search_columns=email,name
+GET	/?rest_route=/wp/v2/users&search=a&search_columns=id
+GET	/?rest_route=/wp/v2/users&search_columns=bogus
+GET	/?rest_route=/wp/v2/users&search=%2A
+GET	/?rest_route=/wp/v2/users&slug=admin,editor
+GET	/?rest_route=/wp/v2/users&orderby=include_slugs&slug=subscriber,admin,editor
+GET	/?rest_route=/wp/v2/users&orderby=include_slugs
+GET	/?rest_route=/wp/v2/users&include=703,1,701
+GET	/?rest_route=/wp/v2/users&include=703,1,701&orderby=include
+GET	/?rest_route=/wp/v2/users&orderby=include
+GET	/?rest_route=/wp/v2/users&exclude=1,702
+GET	/?rest_route=/wp/v2/users&include=1&exclude=1
+GET	/?rest_route=/wp/v2/users&orderby=id&order=desc
+GET	/?rest_route=/wp/v2/users&orderby=slug
+GET	/?rest_route=/wp/v2/users&orderby=email
+GET	/?rest_route=/wp/v2/users&orderby=registered_date&order=desc
+GET	/?rest_route=/wp/v2/users&orderby=url
+GET	/?rest_route=/wp/v2/users&orderby=bogus
+GET	/?rest_route=/wp/v2/users&per_page=2&page=2
+GET	/?rest_route=/wp/v2/users&per_page=2&page=9
+GET	/?rest_route=/wp/v2/users&offset=1&per_page=2
+GET	/?rest_route=/wp/v2/users&_fields=id,name,avatar_urls,_links
+GET	/?rest_route=/wp/v2/users	pretty
+GET	/?rest_route=/wp/v2/users/1&_embed
+GET	/?rest_route=/wp/v2/comments/1&post=2
+GET	/?rest_route=/wp/v2/comments/1&post=0
+GET	/?rest_route=/wp/v2/comments/1&post=99999
+GET	/?rest_route=/wp/v2/users/1&roles=editor
+GET	/?rest_route=/wp/v2/users&include=1
+GET	/?rest_route=/wp/v2/users&include=1&orderby=registered_date&context=edit
+GET	/?rest_route=/wp/v2/users&include=1&roles=administrator
+GET	/?rest_route=/wp/v2/users&include=1&capabilities=edit_posts
+GET	/?rest_route=/wp/v2/users&include=1&who=authors
+GET	/?rest_route=/wp/v2/users&include=1&search=adm
+GET	/?rest_route=/wp/v2/users&include=1&has_published_posts=post
+GET	/?rest_route=/wp/v2/users&slug=admin&orderby=include_slugs
+GET	/?rest_route=/wp/v2/users&exclude=701,702,703,704&orderby=id
+GET	/?rest_route=/wp/v2/users&exclude=701,702,703,704&orderby=slug&order=desc
+GET	/?rest_route=/wp/v2/users&exclude=701,702,703,704&orderby=email
+GET	/?rest_route=/wp/v2/users&exclude=701,702,703,704&orderby=url
+GET	/?rest_route=/wp/v2/users&exclude=701,702,703,704&orderby=include

@@ -45,7 +45,7 @@ fn post_types() -> &'static [(Key, Value)] {
         .unwrap_or_default()
 }
 
-fn shown_in_rest() -> impl Iterator<Item = (&'static Key, &'static Value)> {
+pub(crate) fn shown_in_rest() -> impl Iterator<Item = (&'static Key, &'static Value)> {
     post_types()
         .iter()
         .filter(|(_, fields)| matches!(fields, Value::Array(_)))
@@ -94,6 +94,20 @@ fn wants_edit(params: &Params) -> bool {
 fn cannot_edit(code: &'static str, context: &Context) -> RestError {
     let message = "Sorry, you are not allowed to edit posts in this post type.";
     RestError::status(code, message, context.authorization_required())
+}
+
+/// Whether the post type `name` is registered.
+pub(crate) fn registered(name: &str) -> bool {
+    post_types()
+        .iter()
+        .any(|(key, _)| key.to_php_string() == name.as_bytes())
+}
+
+/// `get_all_post_type_supports( $name )[ $feature ]` of a post type shown
+/// in REST.
+pub(crate) fn supports(name: &str, feature: &str) -> Option<&'static Value> {
+    let found = shown_in_rest().find(|(key, _)| key.to_php_string() == name.as_bytes());
+    found.and_then(|(_, fields)| fields.get_path(&["supports", feature]))
 }
 
 /// `get_context_param( array( 'default' => 'view' ) )`.

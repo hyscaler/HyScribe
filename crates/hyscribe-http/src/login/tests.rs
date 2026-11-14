@@ -343,10 +343,11 @@ async fn logged_in_users_go_where_they_may() {
         }
         // The capability data the login and the REST API read, and what they
         // never ask.
-        assert!(!reads.user_exists(1));
+        assert!(reads.user_exists(1) && !reads.user_exists(999));
         assert_eq!(reads.post(1).map(|post| post.post_type).as_deref(), Some("post"));
         assert!(reads.post(999).is_none() && reads.post_meta(1, "x").is_none());
-        assert!(reads.comment_post(1).is_none());
+        assert_eq!(reads.comment_post(1), Some(1));
+        assert!(reads.comment_post(999).is_none());
         assert_eq!(reads.term_taxonomy(1).as_deref(), Some("category"));
         assert!(reads.constant("DISALLOW_UNFILTERED_HTML") && !reads.constant("MULTISITE"));
         // `get_user_option()` reads the site's prefixed meta first.

@@ -65,8 +65,9 @@ impl CapabilityData for Oracle {
         let found = taxonomies.find(|taxonomy| self.fixture.term(id, taxonomy).is_some());
         found.map(String::from)
     }
+    /// HyScribe's `DISALLOW_UNFILTERED_HTML`, unless `deny` names it.
     fn constant(&self, name: &str) -> bool {
-        name == "DISALLOW_UNFILTERED_HTML"
+        name == "DISALLOW_UNFILTERED_HTML" && !self.deny.contains(&name)
     }
 }
 
@@ -102,6 +103,42 @@ impl Site for Oracle {
     }
     fn post(&self, id: u64) -> Option<Post> {
         self.fixture.post(id)
+    }
+    fn home_url(&self) -> String {
+        SITE.into()
+    }
+    fn table_prefix(&self) -> String {
+        "wp_".into()
+    }
+    fn comments(&self, _: &hyscribe_model::CommentQuery) -> Vec<hyscribe_model::CommentRow> {
+        Vec::new()
+    }
+    fn count_comments(&self, _: &hyscribe_model::CommentQuery) -> u64 {
+        0
+    }
+    fn comment_link(&self, _: &hyscribe_model::Comment) -> String {
+        String::new()
+    }
+    fn users(&self, _: &hyscribe_model::UserQuery) -> Vec<hyscribe_model::User> {
+        Vec::new()
+    }
+    fn count_users(&self, _: &hyscribe_model::UserQuery) -> u64 {
+        0
+    }
+    fn user_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        CapabilityData::user_meta(self, id, key)
+    }
+    fn user_registered(&self, _: u64) -> String {
+        String::new()
+    }
+    fn allcaps(&self, _: u64) -> Vec<(Key, Value)> {
+        Vec::new()
+    }
+    fn author_link(&self, _: &hyscribe_model::User) -> String {
+        String::new()
+    }
+    fn has_posts(&self, _: u64, _: &[(String, bool)]) -> bool {
+        false
     }
     fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
         let query = PostQuery {
@@ -474,6 +511,8 @@ fn drafts_show_their_gmt_dates() {
     let other = served("editor", "/wp/v2/posts/96&_fields=_links", false, &[]);
     let body = String::from_utf8(other.body).unwrap();
     assert!(body.contains(&media(95)), "{body}");
+    let private = served("editor", "/wp/v2/posts/92&_fields=_links", false, &[]);
+    assert!(body_of(private).contains(&media(93)));
 }
 
 /// Actions a user's capabilities rule out are not linked.
@@ -590,10 +629,23 @@ fn excerpts_need_no_content() {
     assert_eq!(served("visitor", "/wp/v2/posts/94", false, &[]).status, 501);
 }
 
+fn body_of(served: Served) -> String {
+    String::from_utf8(served.body).unwrap()
+}
+
 /// The categories' create action asks for `edit_categories`, the tags'
-/// for `assign_post_tags`.
+/// for `assign_post_tags`; without `DISALLOW_UNFILTERED_HTML`, unfiltered
+/// HTML is an action of administrators.
 #[test]
 fn term_actions_ask_their_capabilities() {
+    let target = "/wp/v2/posts/1&context=edit&_fields=_links";
+    let allowed = served(
+        "administrator",
+        target,
+        false,
+        &["DISALLOW_UNFILTERED_HTML"],
+    );
+    assert!(body_of(allowed).contains("action-unfiltered-html"));
     let target = "/wp/v2/posts/1&context=edit&_fields=_links";
     let links = body(served("administrator", target, false, &["edit_categories"]));
     assert!(!links.contains("action-create-categories") && links.contains("action-create-tags"));

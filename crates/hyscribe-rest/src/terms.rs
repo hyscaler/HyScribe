@@ -255,7 +255,7 @@ fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
 }
 
 /// A parameter's integers, `wp_parse_id_list()`.
-fn ids(params: &Params, name: &str) -> Vec<u64> {
+pub(crate) fn ids(params: &Params, name: &str) -> Vec<u64> {
     let mut ids: Vec<u64> = Vec::new();
     let value = params.get(name).cloned().unwrap_or_default();
     for (_, id) in parse_list(&value) {

@@ -5,6 +5,7 @@
 //! and each role, as `reference/rest/users.sql` gives the users their
 //! roles; `%nonce%` is each user's nonce.
 
+use hyscribe_auth::caps::CapPost;
 use hyscribe_db::Db;
 use hyscribe_testkit::{RestCase, rest_cases, rest_headers};
 use sha2::{Digest, Sha256};
@@ -28,7 +29,7 @@ const ROLES: [(&str, u64); 5] = [
 
 impl CapabilityData for AsRole<'_> {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
-        CapabilityData::option(&self.rest, name)
+        CapabilityData::option(&self.rest.reads, name)
     }
     fn user_meta(&self, user_id: u64, key: &str) -> Option<Vec<u8>> {
         let role = self.role;
@@ -36,26 +37,26 @@ impl CapabilityData for AsRole<'_> {
             "wp_capabilities" if user_id > 1 => {
                 Some(format!("a:1:{{s:{}:\"{role}\";b:1;}}", role.len()).into_bytes())
             }
-            _ => self.rest.user_meta(user_id, key),
+            _ => CapabilityData::user_meta(&self.rest.reads, user_id, key),
         }
     }
     fn user_exists(&self, user_id: u64) -> bool {
-        user_id > 1 || self.rest.user_exists(user_id)
+        user_id > 1 || CapabilityData::user_exists(&self.rest.reads, user_id)
     }
     fn post(&self, id: u64) -> Option<CapPost> {
-        self.rest.post(id)
+        CapabilityData::post(&self.rest.reads, id)
     }
     fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
-        self.rest.post_meta(id, key)
+        CapabilityData::post_meta(&self.rest.reads, id, key)
     }
     fn comment_post(&self, id: u64) -> Option<u64> {
-        self.rest.comment_post(id)
+        CapabilityData::comment_post(&self.rest.reads, id)
     }
     fn term_taxonomy(&self, id: u64) -> Option<String> {
-        self.rest.term_taxonomy(id)
+        CapabilityData::term_taxonomy(&self.rest.reads, id)
     }
     fn constant(&self, name: &str) -> bool {
-        self.rest.constant(name)
+        CapabilityData::constant(&self.rest.reads, name)
     }
 }
 
@@ -71,6 +72,42 @@ impl hyscribe_rest::Site for AsRole<'_> {
     }
     fn post(&self, id: u64) -> Option<Post> {
         hyscribe_rest::Site::post(&self.rest, id)
+    }
+    fn home_url(&self) -> String {
+        hyscribe_rest::Site::home_url(&self.rest)
+    }
+    fn table_prefix(&self) -> String {
+        self.rest.table_prefix()
+    }
+    fn comments(&self, query: &CommentQuery) -> Vec<CommentRow> {
+        hyscribe_rest::Site::comments(&self.rest, query)
+    }
+    fn count_comments(&self, query: &CommentQuery) -> u64 {
+        self.rest.count_comments(query)
+    }
+    fn comment_link(&self, comment: &Comment) -> String {
+        self.rest.comment_link(comment)
+    }
+    fn users(&self, query: &UserQuery) -> Vec<User> {
+        self.rest.users(query)
+    }
+    fn count_users(&self, query: &UserQuery) -> u64 {
+        self.rest.count_users(query)
+    }
+    fn user_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        CapabilityData::user_meta(self, id, key)
+    }
+    fn user_registered(&self, id: u64) -> String {
+        self.rest.user_registered(id)
+    }
+    fn allcaps(&self, id: u64) -> Vec<(Key, Value)> {
+        self.rest.allcaps(id)
+    }
+    fn author_link(&self, user: &User) -> String {
+        self.rest.author_link(user)
+    }
+    fn has_posts(&self, author: u64, types: &[(String, bool)]) -> bool {
+        self.rest.has_posts(author, types)
     }
     fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
         self.rest.posts_of_type(post_type)
@@ -295,31 +332,4 @@ async fn theme_test_data_posts_match_php() {
         ],
     )
     .await;
-}
-
-/// What capability checks read of the site: users and posts' meta, and no
-/// comment's yet.
-#[tokio::test]
-async fn capability_reads() {
-    let site = site("wordpress", false).await;
-    let handle = Handle::current();
-    tokio::task::spawn_blocking(move || {
-        let rest = Rest {
-            reads: LoginReads::new(&site, handle, now()),
-            site: &site,
-            user: 1,
-            caps: OnceCell::new(),
-        };
-        let as_role = AsRole {
-            rest,
-            role: "editor",
-        };
-        assert_eq!(as_role.comment_post(1), None);
-        let rest = &as_role.rest;
-        assert!(rest.user_exists(1) && !rest.user_exists(999));
-        let meta = CapabilityData::post_meta(rest, 2, "_wp_page_template");
-        assert_eq!(meta.as_deref(), Some(&b"default"[..]));
-    })
-    .await
-    .unwrap();
 }

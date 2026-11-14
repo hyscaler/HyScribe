@@ -339,6 +339,7 @@ impl CapabilityData for LoginReads<'_> {
 
     fn user_exists(&self, user_id: u64) -> bool {
         self.found.borrow().iter().any(|user| user.id == user_id)
+            || self.reads.wait(self.site.db.user(user_id)).is_some()
     }
 
     fn post(&self, id: u64) -> Option<CapPost> {
@@ -355,8 +356,9 @@ impl CapabilityData for LoginReads<'_> {
         None
     }
 
-    fn comment_post(&self, _: u64) -> Option<u64> {
-        None
+    fn comment_post(&self, id: u64) -> Option<u64> {
+        let comment = self.reads.wait(self.site.db.any_comment(id));
+        comment.map(|comment| comment.post_id)
     }
 
     fn term_taxonomy(&self, id: u64) -> Option<String> {

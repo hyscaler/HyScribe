@@ -5,7 +5,7 @@
 
 use std::sync::OnceLock;
 
-use hyscribe_phpser::{Key, Maybe, Value, json_decode, maybe_unserialize};
+use hyscribe_phpser::{Key, Value, json_decode};
 
 use crate::request::Params;
 use crate::response::{Response, RestError};
@@ -59,10 +59,8 @@ fn item(context: &Context, _: &Params) -> Result<Response, RestError> {
             .map(Value::to_php_string)
             .unwrap_or_default();
         let stored = context.site.option(&String::from_utf8_lossy(&option));
-        let value = match stored.as_deref().map(maybe_unserialize) {
-            Some(Maybe::Value(value)) => value,
-            Some(Maybe::Plain(text)) => Value::String(text.to_vec()),
-            Some(Maybe::Invalid(_)) => Value::Bool(false),
+        let value = match stored.as_deref() {
+            Some(stored) => crate::unserialized(stored),
             None => schema.get_str("default").cloned().unwrap_or_default(),
         };
         // `prepare_value()`: a value its schema does not take is null.

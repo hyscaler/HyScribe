@@ -437,3 +437,129 @@ pub struct CalendarMonth {
     /// The days of the month with posts.
     pub days: Vec<u64>,
 }
+
+/// A comment with the columns only the REST API reads.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommentRow {
+    /// The comment.
+    pub comment: Comment,
+    /// `comment_approved`.
+    pub approved: String,
+    /// `comment_agent`.
+    pub agent: Vec<u8>,
+    /// The first `_wp_note_status` comment meta, empty for none.
+    pub note_status: Vec<u8>,
+}
+
+/// The SQL of a `WP_Comment_Query`: what its `WHERE`, `ORDER BY` and
+/// `LIMIT` clauses say.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommentQuery {
+    /// `comment_approved IN (...)`; none for any.
+    pub approved: Option<Vec<String>>,
+    /// `comment_type IN (...)` when not empty.
+    pub types: Vec<String>,
+    /// `comment_type NOT IN (...)` when not empty.
+    pub excluded_types: Vec<String>,
+    /// `comment__in`, when not empty.
+    pub include: Vec<u64>,
+    /// `comment__not_in`.
+    pub exclude: Vec<u64>,
+    /// `parent__in`, when not empty.
+    pub parents: Vec<u64>,
+    /// `parent__not_in`.
+    pub excluded_parents: Vec<u64>,
+    /// `post__in`, when not empty.
+    pub posts: Vec<u64>,
+    /// `author__in`: `user_id IN (...)` when not empty.
+    pub authors: Vec<u64>,
+    /// `author__not_in`.
+    pub excluded_authors: Vec<u64>,
+    /// `comment_author_email = %s`.
+    pub author_email: Option<Vec<u8>>,
+    /// The comments with this in their author, email, URL, IP or content.
+    pub search: Option<String>,
+    /// `comment_date > %s`, local time.
+    pub after: Option<String>,
+    /// `comment_date < %s`, local time.
+    pub before: Option<String>,
+    /// The order, each column descending when its flag is set.
+    pub order: Vec<(CommentOrder, bool)>,
+    /// `LIMIT n`.
+    pub limit: Option<u64>,
+    /// `OFFSET n` of a limited query.
+    pub offset: u64,
+}
+
+/// What a `WP_Comment_Query` orders comments by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommentOrder {
+    /// `comment_date`.
+    Date,
+    /// `comment_date_gmt`.
+    DateGmt,
+    /// `comment_ID`.
+    Id,
+    /// `comment_post_ID`.
+    Post,
+    /// `comment_parent`.
+    Parent,
+    /// `comment_type`.
+    Type,
+    /// `FIELD( comment_ID, include )`.
+    Include,
+}
+
+/// The SQL of a `WP_User_Query`: what its `WHERE`, `ORDER BY` and `LIMIT`
+/// clauses say.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UserQuery {
+    /// The `{prefix}capabilities` meta key.
+    pub caps_key: String,
+    /// `role__in`: users whose capabilities meta names any of these.
+    pub roles: Vec<String>,
+    /// `who=authors`: users whose `{prefix}user_level` is not `0`.
+    pub level_key: Option<String>,
+    /// `has_published_posts`: authors of published posts of these types.
+    pub published: Option<Vec<String>>,
+    /// `nicename__in`, when not empty.
+    pub nicenames: Vec<Vec<u8>>,
+    /// `get_search_sql()` of the REST API's `*text*`: the columns of
+    /// `USER_SEARCH_COLUMNS`, `ID` equal to the text and the others
+    /// containing it.
+    pub search: Option<(Vec<String>, String)>,
+    /// `include`, when not empty.
+    pub include: Vec<u64>,
+    /// `exclude`, without an `include`.
+    pub exclude: Vec<u64>,
+    /// The order, descending when its flag is set.
+    pub order: (UserOrder, bool),
+    /// `LIMIT n`.
+    pub limit: Option<u64>,
+    /// `OFFSET n` of a limited query.
+    pub offset: u64,
+}
+
+/// What a `WP_User_Query` orders users by.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UserOrder {
+    /// `user_login`.
+    #[default]
+    Login,
+    /// `user_nicename`.
+    Nicename,
+    /// `user_email`.
+    Email,
+    /// `user_url`.
+    Url,
+    /// `user_registered`.
+    Registered,
+    /// `display_name`.
+    DisplayName,
+    /// `ID`.
+    Id,
+    /// `FIELD( ID, include )`.
+    Include,
+    /// `FIELD( user_nicename, nicenames )`.
+    Nicenames,
+}

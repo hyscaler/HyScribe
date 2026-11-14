@@ -62,3 +62,4 @@ GET	/wp-json/wp/v2/search?type=post-format	pretty,ttd
 GET	/?rest_route=/wp/v2/search&type=term&subtype=category&page=2	default
 GET	/?rest_route=/wp/v2/search&type=post-format&per_page=2&page=9	ttd
 GET	/?rest_route=/wp/v2/search&type=term&subtype=category&search=UNC	default
+GET	/?rest_route=/wp/v2/search&type=term&subtype=category&search=a&exclude=26&per_page=3&page=2	ttd

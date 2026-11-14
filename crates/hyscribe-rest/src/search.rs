@@ -251,23 +251,18 @@ fn formats(
 ) -> (Vec<Found>, u64) {
     let terms = context.site.terms(&TermQuery {
         taxonomy: "post_format".into(),
-        slugs: POST_FORMATS
-            .iter()
-            .map(|(slug, _)| format!("post-format-{slug}").into_bytes())
-            .collect(),
         ..TermQuery::default()
     });
-    let lower = |text: &[u8]| text.to_ascii_lowercase();
-    let has = |text: &str, search: &[u8]| {
-        let (text, search) = (lower(text.as_bytes()), lower(search));
-        text.windows(search.len()).any(|part| part == search)
-    };
+    // A format's name is its slug capitalised, so one match is both's.
     let found: Vec<Found> = POST_FORMATS
         .iter()
-        .filter(|(slug, name)| {
-            search
-                .as_ref()
-                .is_none_or(|search| has(slug, search) || has(name, search))
+        .filter(|(slug, _)| {
+            search.as_ref().is_none_or(|search| {
+                let search = search.to_ascii_lowercase();
+                slug.as_bytes()
+                    .windows(search.len())
+                    .any(|part| part == search)
+            })
         })
         .filter_map(|(slug, name)| {
             let term = terms

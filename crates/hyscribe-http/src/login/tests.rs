@@ -243,6 +243,27 @@ async fn shadow_mode_shows_the_screen_but_logs_nobody_in() {
     assert!(reply.body.contains("<p>Please log in again.</p>"));
 }
 
+/// A site anyone may register on shows the form; a request's post type
+/// is read from the database.
+#[tokio::test(flavor = "multi_thread")]
+async fn registration_and_post_types_are_read() {
+    let mut site = Arc::try_unwrap(login_site(None).await).unwrap();
+    site.options
+        .insert("users_can_register".into(), b"1".to_vec());
+    let site = Arc::new(site);
+    let reply = send(&site, "GET", "/hs-login?action=register", "", "").await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert!(reply.body.contains("id=\"registerform\""));
+    let handle = Handle::current();
+    let types = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, now());
+        (reads.post_type(1), reads.post_type(999))
+    })
+    .await
+    .unwrap();
+    assert_eq!(types, (Some("post".into()), None));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn other_actions_show_their_forms_and_links() {
     let site = login_site(None).await;

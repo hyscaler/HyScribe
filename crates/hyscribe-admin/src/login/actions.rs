@@ -229,7 +229,9 @@ fn confirm_action(site: &dyn Site, request: &Request) -> Action {
     ) {
         (None, _) => "Missing request ID.",
         (_, None) => "Missing confirm key.",
-        (Some(id), _) if site.is_user_request(id.to_int().unsigned_abs()) => {
+        (Some(id), _)
+            if site.post_type(id.to_int().unsigned_abs()).as_deref() == Some("user_request") =>
+        {
             return Action::NotPorted;
         }
         _ => "Invalid personal data request.",

@@ -108,8 +108,8 @@ impl Site for Oracle {
     fn can_register(&self) -> bool {
         self.register
     }
-    fn is_user_request(&self, id: u64) -> bool {
-        Some(id) == self.user_request
+    fn post_type(&self, id: u64) -> Option<String> {
+        (Some(id) == self.user_request).then(|| "user_request".into())
     }
 }
 

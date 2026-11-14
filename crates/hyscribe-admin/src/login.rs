@@ -72,8 +72,8 @@ pub trait Site: Urls {
     fn user_by_email(&self, email: &[u8]) -> Option<User>;
     /// `get_option( 'users_can_register' )`.
     fn can_register(&self) -> bool;
-    /// `wp_get_user_request( $id )` finds a `user_request` post.
-    fn is_user_request(&self, id: u64) -> bool;
+    /// `get_post( $id )->post_type`, none for no post.
+    fn post_type(&self, id: u64) -> Option<String>;
 }
 
 /// What the login screen answers.

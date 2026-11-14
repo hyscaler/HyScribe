@@ -30,6 +30,8 @@ pub(crate) const PATH: &str = "/hs-login";
 
 const DAY: i64 = 86_400;
 
+const YEAR: i64 = 365 * DAY;
+
 /// HyScribe's cookie names, which never stand for a PHP WordPress login,
 /// and their paths.
 pub(crate) struct Names {
@@ -330,9 +332,9 @@ impl LoginSite for LoginReads<'_> {
         !Value::String(self.site.raw_option("users_can_register").to_vec()).is_empty()
     }
 
-    fn is_user_request(&self, id: u64) -> bool {
-        let post = self.reads.wait(self.site.db.post(id));
-        post.is_some_and(|post| post.post_type == "user_request")
+    fn post_type(&self, id: u64) -> Option<String> {
+        let post = self.reads.wait(self.site.db.post(id))?;
+        Some(post.post_type)
     }
 }
 
@@ -571,7 +573,7 @@ fn other_action(
                 Reset::Keep => None,
                 Reset::Set(value) => Some(set_cookie(&names.reset(), &value, (0, 0), PATH, secure)),
                 Reset::Expire => {
-                    let gone = (reads.now - 365 * DAY, reads.now);
+                    let gone = (reads.now - YEAR, reads.now);
                     Some(set_cookie(&names.reset(), b" ", gone, PATH, secure))
                 }
             };
@@ -612,7 +614,7 @@ fn logout(
         // A session that cannot be removed expires all the same.
         let _ = sessions.destroy(*user, token, reads.now);
     }
-    let expired = (reads.now - 365 * DAY, reads.now);
+    let expired = (reads.now - YEAR, reads.now);
     let admin_path = format!("{}hs-admin", names.site_path);
     for name in [names.auth(false), names.auth(true)] {
         headers.push((

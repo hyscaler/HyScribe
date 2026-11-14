@@ -263,8 +263,8 @@ impl Site for AnyEmail {
     fn can_register(&self) -> bool {
         self.0.can_register()
     }
-    fn is_user_request(&self, id: u64) -> bool {
-        self.0.is_user_request(id)
+    fn post_type(&self, id: u64) -> Option<String> {
+        self.0.post_type(id)
     }
 }
 
@@ -276,7 +276,7 @@ fn use_ssl_by_email_needs_an_at_past_the_start() {
         use_ssl: true,
         ..Oracle::default()
     });
-    assert!(!site.can_register() && !site.is_user_request(1));
+    assert!(!site.can_register() && site.post_type(1).is_none());
     for (log, secure) in [("x%40y", true), ("%40x", false)] {
         let form = parse_str(format!("log={log}&pwd=wrong").as_bytes());
         let query = Value::Array(Vec::new());

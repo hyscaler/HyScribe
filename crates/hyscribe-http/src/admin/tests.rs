@@ -1374,7 +1374,8 @@ async fn dashboard_data() {
             assert_eq!(admin.moderated_comments(), 0);
             assert!(admin.comment_editable(None));
             // What capability checks of other objects read.
-            assert_eq!(admin.comment_post(2), None);
+            assert_eq!(admin.comment_post(2), Some(0));
+            assert_eq!(admin.comment_post(99), None);
             assert_eq!(admin.term_taxonomy(1).as_deref(), Some("category"));
             assert_eq!(admin.count_terms("category", None), 1);
             let (link, author) = admin.parent_comment(1).unwrap();

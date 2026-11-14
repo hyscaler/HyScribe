@@ -124,6 +124,9 @@ impl hyscribe_rest::Site for AsRole<'_> {
     fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
         user != 0 && Capabilities::load(self, "wp_", user).has_cap(self, cap, args)
     }
+    fn public_users(&self) -> bool {
+        self.rest.public_users()
+    }
     fn reads(&self) -> &dyn RenderSite {
         self.rest.reads()
     }
@@ -274,7 +277,7 @@ async fn posts_match_php() {
         &[
             ("administrator", "POST", "/?rest_route=/wp/v2/posts"),
             ("administrator", "PUT", "/?rest_route=/wp/v2/posts/1"),
-            ("visitor", "DELETE", "/?rest_route=/wp/v2/pages/2"),
+            ("visitor", "DELETE", "/?rest_route=/wp/v2/pages/2&force=1"),
             ("visitor", "GET", "/?rest_route=/wp/v2/posts&categories=1"),
             (
                 "editor",
@@ -293,11 +296,6 @@ async fn posts_match_php() {
 async fn theme_test_data_posts_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/posts-ttd.tsv");
     let skipped = &[
-        ("*", "/?rest_route=/wp/v2/pages/172&_embed=up"),
-        (
-            "*",
-            "/?rest_route=/wp/v2/pages&parent=1725&_embed=up&exclude=1133",
-        ),
         ("*", "/?rest_route=/wp/v2/posts/555"),
         ("*", "/?rest_route=/wp/v2/posts/555&excerpt_length=5"),
         ("user", "/?rest_route=/wp/v2/posts/51"),

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `WP_REST_Users_Controller`: `/wp/v2/users`, `/wp/v2/users/me` and
-//! `/wp/v2/users/<id>`, read only. The public users endpoint is off
-//! (docs/SECURITY_MODEL.md): a visitor's request but for `/users/me` is not
-//! answered until an open question says how.
+//! `/wp/v2/users/<id>`, read only. The owner can turn the public users
+//! endpoint off: a visitor then sees no user as having published
+//! posts.
 
 use hyscribe_model::{User, UserOrder, UserQuery};
 use hyscribe_phpser::{Key, Value};
@@ -51,9 +51,10 @@ const ME: &str = "/wp/v2/users/me";
 /// The persisted preferences' schema, `wp_register_persisted_preferences_meta()`'s.
 const PREFERENCES: &str = r#"{"type":"object","context":["edit"],"properties":{"_modified":{"type":"string","format":"date-time","readonly":false}},"additionalProperties":true,"default":[]}"#;
 
-/// Whether a visitor's request on the route `regex` is left unanswered.
-pub(crate) fn off_for_visitors(regex: &str) -> bool {
-    regex == ROUTE || regex == ITEM
+/// Whether the current user is a visitor and the public users endpoint is
+/// off, so no user counts as having published posts.
+fn authors_hidden(context: &Context) -> bool {
+    context.user == 0 && !context.site.public_users()
 }
 
 /// `mysql_to_rfc3339( $date )`.
@@ -384,15 +385,24 @@ fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
         _ => int("page").unsigned_abs().saturating_sub(1) * per_page,
     };
     let query = prepared(context, params);
-    let total = context.site.count_users(&query);
+    let hidden = query.published.is_some() && authors_hidden(context);
+    let total = if hidden {
+        0
+    } else {
+        context.site.count_users(&query)
+    };
     let mut response = if context.head {
         Response::new(Value::Array(Vec::new()), 200)
     } else {
-        let users = context.site.users(&UserQuery {
-            limit: Some(per_page),
-            offset,
-            ..query
-        });
+        let users = if hidden {
+            Vec::new()
+        } else {
+            context.site.users(&UserQuery {
+                limit: Some(per_page),
+                offset,
+                ..query
+            })
+        };
         let edit = params.context() == b"edit";
         let data = users
             .iter()
@@ -440,6 +450,9 @@ fn item_permission(context: &Context, params: &Params) -> Result<(), RestError> 
 /// `count_user_posts( $id, $types )`, of the post types shown in REST: a
 /// type's private posts count where the current user may read them.
 fn has_posts(context: &Context, author: u64) -> bool {
+    if authors_hidden(context) {
+        return false;
+    }
     let types: Vec<(String, bool)> = shown_in_rest()
         .map(|(name, fields)| {
             let cap = fields.get_path(&["capabilities", "read_private_posts"]);

@@ -11,7 +11,8 @@
 # reference/rest/editor.list, it records those as <list name>.tsv instead,
 # over the database php.sh runs on, with the rows of <list name>.sql beside
 # it if there is one (added before, and its statements after a `-- cleanup`
-# line run after); on the Theme Test Data fixture
+# line run after) and the must-use plugin <list name>.php beside it if there
+# is one (added for the run and removed after); on the Theme Test Data fixture
 # (HYSCRIBE_PHP_DB=wordpress_ttd), whose content is not ours to commit, as
 # <list name>-ttd.tsv with each body's SHA-256:
 #   who<TAB>method<TAB>hex(target)<TAB>flags<TAB>status<TAB>hex(headers)<TAB>hex(body)
@@ -41,18 +42,19 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/crates/hyscribe-rest/tests/golden/rest.tsv"
 MU=/var/www/html/wp-content/mu-plugins
 TMP=$(mktemp -d)
-STATE="${1:-}"; STATE="${STATE%.list}.sql"
+STATE="${1:-}"; PLUGIN="${STATE%.list}.php"; STATE="${STATE%.list}.sql"
 [ -f "$STATE" ] || STATE=/dev/null
 sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "${HYSCRIBE_PHP_DB:-wordpress}" "$@"; }
 cleanup() {
   rm -rf "$TMP"
   echo "DELETE FROM wp_users WHERE ID BETWEEN 701 AND 704; DELETE FROM wp_usermeta WHERE user_id BETWEEN 701 AND 704;" | sql
   sed -n '/^-- cleanup$/,$p' "$STATE" | sql
-  "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-permalinks.php" "$MU/hyscribe-no-cron.php"
+  "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-permalinks.php" "$MU/hyscribe-no-cron.php" "$MU/hyscribe-list.php"
 }
 trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-permalinks.php" < "$ROOT/reference/rewrite/permalinks.php"
 echo '<?php define( "DISABLE_WP_CRON", true ); define( "DISALLOW_UNFILTERED_HTML", true );' | "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-no-cron.php"
+[ -f "$PLUGIN" ] && "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-list.php" < "$PLUGIN"
 sql < "$ROOT/reference/rest/users.sql"
 sed '/^-- cleanup$/,$d' "$STATE" | sql
 checksums() { sql -N -e 'CHECKSUM TABLE wp_commentmeta, wp_comments, wp_links, wp_options, wp_postmeta, wp_posts, wp_term_relationships, wp_term_taxonomy, wp_termmeta, wp_terms, wp_usermeta, wp_users' < /dev/null; }

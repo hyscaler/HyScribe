@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# _embed for reference/rest/golden.sh (method, target, flags), over the
+# default install and the Theme Test Data fixture.
+GET	/?rest_route=/wp/v2/posts&_embed	default
+GET	/?rest_route=/wp/v2/posts/1&_embed
+GET	/?rest_route=/wp/v2/posts/1&_embed=author
+GET	/?rest_route=/wp/v2/posts/1&_embed=author,replies
+GET	/?rest_route=/wp/v2/posts/1&_embed[]=wp:term&_embed[]=nope
+GET	/?rest_route=/wp/v2/posts/1&_embed=true
+GET	/?rest_route=/wp/v2/posts/1&_embed=1
+GET	/?rest_route=/wp/v2/posts/1&_embed=0
+GET	/?rest_route=/wp/v2/posts/1&_embed=%20,
+GET	/?rest_route=/wp/v2/posts/1&_embed=self,collection
+GET	/?rest_route=/wp/v2/posts/1&_embed=wp:featuredmedia
+GET	/?rest_route=/wp/v2/posts/1&_embed&context=edit
+GET	/?rest_route=/wp/v2/posts/1&_embed&context=embed
+GET	/?rest_route=/wp/v2/posts/1&_embed&_fields=id,_links
+GET	/?rest_route=/wp/v2/posts/1&_embed&_fields=id,_embedded
+GET	/?rest_route=/wp/v2/posts/1&_embed&_fields=id
+GET	/?rest_route=/wp/v2/posts/1&_embed&_envelope
+GET	/?rest_route=/wp/v2/posts/1&_embed=author&_jsonp=cb
+HEAD	/?rest_route=/wp/v2/posts/1&_embed
+GET	/?rest_route=/wp/v2/posts/999&_embed
+GET	/wp-json/wp/v2/posts/1?_embed	pretty
+GET	/?rest_route=/wp/v2/pages&_embed	default
+GET	/?rest_route=/wp/v2/pages/2&_embed	default
+GET	/?rest_route=/wp/v2/pages/3&_embed	default
+GET	/?rest_route=/wp/v2/comments&_embed	default
+GET	/?rest_route=/wp/v2/comments/1&_embed=up
+GET	/?rest_route=/wp/v2/comments&_embed&context=edit	default
+GET	/?rest_route=/wp/v2/tags&_embed
+GET	/?rest_route=/wp/v2/users&_embed
+GET	/?rest_route=/wp/v2/types/post&_embed
+GET	/?rest_route=/wp/v2/search&_embed	default
+GET	/?rest_route=/wp/v2/search&type=term&_embed
+GET	/?rest_route=/wp/v2/search&type=term&_embed&_envelope
+GET	/?rest_route=/wp/v2/posts/1148&_embed	ttd
+GET	/?rest_route=/wp/v2/posts/1168&_embed	ttd
+GET	/?rest_route=/wp/v2/posts/1168&_embed&password=enter	ttd
+GET	/?rest_route=/wp/v2/posts/1011&_embed	ttd
+GET	/?rest_route=/wp/v2/posts/1011&_embed=author,wp:term	ttd
+GET	/?rest_route=/wp/v2/posts&include=1148,1168,1241,1153,1164&_embed=author,replies,wp:term	ttd
+GET	/?rest_route=/wp/v2/posts&status=draft,private,future&_embed=author,wp:term&exclude=21,34,51,555,568,582,587,1031,1161,1152,1163,1177,1179,1781,1782	ttd
+GET	/?rest_route=/wp/v2/comments&post=1148&_embed	ttd
+GET	/?rest_route=/wp/v2/comments&post=1148&_embed=children,in-reply-to	ttd
+GET	/?rest_route=/wp/v2/comments&per_page=100&_embed=author,in-reply-to	ttd
+GET	/?rest_route=/wp/v2/pages&parent=146&_embed=up,author&exclude=1133	ttd
+GET	/?rest_route=/wp/v2/categories&per_page=100&orderby=id&_embed	ttd
+GET	/?rest_route=/wp/v2/users/2&_embed	ttd

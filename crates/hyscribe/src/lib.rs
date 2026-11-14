@@ -234,7 +234,8 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
                 hyscribe_http::Site::load(db, config.home_url.clone(), config.site_url.clone())
                     .await
                     .map_err(|err| format!("cannot read the site options: {err}"))?
-                    .with_salts(config.salts.clone());
+                    .with_salts(config.salts.clone())
+                    .with_public_users(config.rest_public_users);
             // Logging in needs primary mode.
             let site = match config.mode {
                 Mode::Primary => site.with_sessions(Sessions::new(sessions_dir)),

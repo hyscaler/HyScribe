@@ -137,6 +137,9 @@ impl Site for Fuzzed<'_> {
     fn has_posts(&self, author: u64, _: &[(String, bool)]) -> bool {
         author == 1
     }
+    fn public_users(&self) -> bool {
+        self.content.len() % 2 == 0
+    }
     fn reads(&self) -> &dyn hyscribe_render::site::Site {
         self
     }

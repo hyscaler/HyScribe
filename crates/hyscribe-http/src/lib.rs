@@ -92,6 +92,8 @@ pub struct Site {
     sessions: Option<hyscribe_auth::sessions::Sessions>,
     /// The constants of `home` and `siteurl` the configuration sets.
     defined: Vec<&'static str>,
+    /// `REST_PUBLIC_USERS`: the public users REST endpoint is on.
+    public_users: bool,
 }
 
 impl Site {
@@ -128,6 +130,7 @@ impl Site {
             salts: Vec::new(),
             sessions: None,
             defined,
+            public_users: true,
         };
         site.build_rewriter();
         Ok(site)
@@ -136,6 +139,14 @@ impl Site {
     /// The site with the keys and salts `wp_hash()` signs with.
     pub fn with_salts(self, salts: Vec<(&'static str, hyscribe_config::Secret)>) -> Site {
         Site { salts, ..self }
+    }
+
+    /// The site with the public users REST endpoint on or off.
+    pub fn with_public_users(self, public_users: bool) -> Site {
+        Site {
+            public_users,
+            ..self
+        }
     }
 
     /// The site in primary mode, keeping login sessions in `sessions`.

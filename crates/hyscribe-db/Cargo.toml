@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [package]
 name = "hyscribe-db"
-description = "Read access to a WordPress database with any table prefix"
+description = "Read and gated write access to a WordPress database with any table prefix"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,7 +16,7 @@ sqlx = { version = "0.9", default-features = false, features = ["mysql", "runtim
 
 [dev-dependencies]
 hyscribe-testkit.workspace = true
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 
 [lints]
 workspace = true

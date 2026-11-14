@@ -101,6 +101,11 @@ pub struct Database {
     pub user: String,
     /// `DB_PASSWORD`, default empty.
     pub password: Secret,
+    /// `DB_READ_USER`: a user that may only read, for every read and all of
+    /// shadow mode (ADR 0010). Without it reads use `user`, read only.
+    pub read_user: Option<String>,
+    /// `DB_READ_PASSWORD`, default empty.
+    pub read_password: Secret,
     /// `DB_PREFIX`, WordPress's `$table_prefix`, default `wp_`.
     pub prefix: Prefix,
     /// `DB_CHARSET`, default `utf8mb4`.
@@ -224,12 +229,17 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
     let prefix = Prefix::new(get("DB_PREFIX").unwrap_or("wp_"))
         .ok_or_else(|| invalid("DB_PREFIX", "only letters, digits and underscores"))?;
 
+    if get("DB_READ_PASSWORD").is_some() && get("DB_READ_USER").is_none() {
+        return Err(invalid("DB_READ_PASSWORD", "is set without DB_READ_USER"));
+    }
     let database = Database {
         host: get("DB_HOST").unwrap_or("localhost").to_string(),
         port: port(get("DB_PORT"), "DB_PORT", 3306)?,
         name: required("DB_NAME")?,
         user: required("DB_USER")?,
         password: Secret::new(get("DB_PASSWORD").unwrap_or_default()),
+        read_user: get("DB_READ_USER").map(String::from),
+        read_password: Secret::new(get("DB_READ_PASSWORD").unwrap_or_default()),
         prefix,
         charset: get("DB_CHARSET").unwrap_or("utf8mb4").to_string(),
     };

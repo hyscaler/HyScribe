@@ -32,7 +32,7 @@ const EVERYONE: UserFilter<'static> = UserFilter {
 /// The newest comments first.
 const NEWEST: &[(&str, bool)] = &[("comment_date_gmt", true), ("comment_ID", true)];
 
-fn fixture_config() -> Database {
+pub(crate) fn fixture_config() -> Database {
     hyscribe_testkit::fixture_database()
 }
 
@@ -2239,6 +2239,8 @@ fn mysql_only(sql: &str) -> Option<&'static str> {
         "INSERT IGNORE",
         "REPLACE INTO",
         "STRAIGHT_JOIN",
+        "@@",
+        " ENGINE",
     ];
     const FUNCTIONS: &[&str] = &[
         "FIELD",
@@ -2262,6 +2264,8 @@ fn mysql_only(sql: &str) -> Option<&'static str> {
         "CONCAT",
         "GROUP_CONCAT",
         "FOUND_ROWS",
+        "DATABASE",
+        "LAST_INSERT_ID",
     ];
     let mut upper = sql.to_ascii_uppercase();
     while upper.contains(" (") {
@@ -2287,7 +2291,7 @@ fn mysql_only(sql: &str) -> Option<&'static str> {
 /// of it in the portable text.
 #[test]
 fn the_guard_finds_only_the_dialect() {
-    let pieces: [fn(&mut Sql); 12] = [
+    let pieces: [fn(&mut Sql); 14] = [
         Engine::random,
         |sql| Engine::seeded_random(sql, 1),
         |sql| Engine::list_order(sql, "ID", std::iter::once(Bind::Int(1))),
@@ -2300,6 +2304,8 @@ fn the_guard_finds_only_the_dialect() {
         |sql| Engine::date_text(sql, "post_date"),
         |sql| Engine::integer(sql, |sql| sql.push("menu_order")),
         |sql| Engine::not_matching(sql, "meta_value", "^a$".into()),
+        |sql| Engine::rollback_less(sql, std::iter::once(Bind::Text("wp_posts".into()))),
+        |sql| Engine::insert_or_update(sql, &["option_value"]),
     ];
     for piece in pieces {
         let mut sql = Sql::new("SELECT ");
@@ -2320,7 +2326,8 @@ fn the_guard_finds_only_the_dialect() {
 /// ADR 0014: the SQL the layer emits is portable outside the dialect.
 #[tokio::test]
 async fn emitted_sql_is_portable() {
-    let errors = every_query().await;
+    let mut errors = every_query().await;
+    errors.extend(crate::write::tests::every_write().await);
     let emitted = EMITTED.lock().unwrap();
     assert!(emitted.len() >= errors.len());
     for sql in emitted.iter() {

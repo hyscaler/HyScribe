@@ -51,7 +51,7 @@ fn answers_match_php() {
         let body = String::from_utf8_lossy(&case.body);
         assert_eq!(String::from_utf8_lossy(&served.body), body, "{what}");
     }
-    assert_eq!((cases.len(), not_served), (6 * 100, 6 * 9));
+    assert_eq!((cases.len(), not_served), (6 * 101, 6 * 9));
 }
 
 /// `content` serves `target` to the administrator.

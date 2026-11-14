@@ -144,7 +144,7 @@ const NAVIGATION_PARTS: &Properties = &[
 ];
 
 /// The properties of the type's schema.
-fn properties(kind: Kind) -> &'static Properties {
+pub(super) fn properties(kind: Kind) -> &'static Properties {
     match kind {
         Kind::Post => POST,
         Kind::Page => PAGE,
@@ -161,13 +161,6 @@ fn parts(kind: Kind, name: &[u8]) -> &'static Properties {
         (Kind::Navigation, b"title" | b"content") => NAVIGATION_PARTS,
         _ => PARTS,
     }
-}
-
-/// Whether the part `name` of `property` is shown in `context`.
-fn part_shown(kind: Kind, property: &[u8], name: &str, context: &[u8]) -> bool {
-    let parts = parts(kind, property);
-    let contexts = parts.iter().find(|(part, _)| *part == name);
-    contexts.is_some_and(|(_, contexts)| contexts.iter().any(|c| c.as_bytes() == context))
 }
 
 /// `mysql_to_rfc3339()` of a date WordPress has set.
@@ -336,9 +329,7 @@ pub(super) fn post(
     let rendered = (unlocked && has("content.rendered")).then(|| rendering.the_content(&open));
     let length = params.get("excerpt_length").map_or(55, Value::to_int);
     let excerpt = (unlocked && has("excerpt")).then(|| rendering.the_excerpt(&open, length));
-    let shown = params.context();
-    let raw = part_shown(kind, b"content", "raw", &shown);
-    let hooked = raw && has("content.raw") && !text(post.content.clone()).is_empty();
+    let hooked = edit && has("content.raw") && !text(post.content.clone()).is_empty();
     let rendered = match rendered {
         Some(first) if hooked && !text(first.clone()).is_empty() => {
             Some(rendering.the_content(&open))
@@ -450,6 +441,7 @@ pub(super) fn post(
             .map(|class| text(class.to_vec()));
         put("class_list", list(classes.collect()));
     }
+    let shown = params.context();
     let mut data: Vec<(Key, Value)> = filter_by_context(data, properties, &shown)
         .into_iter()
         .map(|(name, value)| {

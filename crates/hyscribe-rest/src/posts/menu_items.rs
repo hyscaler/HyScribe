@@ -11,7 +11,7 @@ use hyscribe_render::permalinks::permalink;
 use hyscribe_render::post::{admin_title, sanitize_html_class};
 use hyscribe_render::wp_trim_words;
 
-use super::prepare::{actions, links};
+use super::prepare::{actions, links, properties};
 use super::{Kind, meta};
 use crate::Context;
 use crate::fields::{Properties, fields_for_response, item_response, links_wanted};
@@ -151,7 +151,7 @@ pub(super) fn prepare(
     // `get_the_terms()` is false for an item in no menu, which leaves the
     // field out.
     let menus = context.site.post_terms(post.id, "nav_menu");
-    let mut wanted = fields_for_response(params, PROPERTIES);
+    let mut wanted = fields_for_response(params, properties(Kind::MenuItem));
     wanted.retain(|field| !menus.is_empty() || field != b"menus");
     let shown = params.context();
     let title = || {

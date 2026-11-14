@@ -142,3 +142,52 @@ fn data_keeps_the_allowed_tags() {
         b"<b>x</b>y<a href=\"https://h.test/\">l</a>p"
     );
 }
+
+/// What PHP saved for comments' content in the write oracle's
+/// `new-comment-unfiltered` and `new-comment-anonymous` (no kses) and
+/// `new-comment-by-admin` (kses, then `wp_rel_ugc()`).
+#[test]
+fn comments_get_ugc_links() {
+    let home = b"http://127.0.0.1:8081";
+    for (content, saved) in [
+        (
+            "<a href=\"https://example.test\" class=\"x\" rel=\"me\">out</a> \
+             <A HREF='http://127.0.0.1:8081/about'>in</A> <a\nhref=\"https://split.test\">split</a>",
+            "<a href=\"https://example.test\" class=\"x\" rel=\"me nofollow ugc\">out</a> \
+             <a HREF='http://127.0.0.1:8081/about' rel=\"ugc\">in</A> \
+             <a\nhref=\"https://split.test\">split</a>",
+        ),
+        (
+            "<a download rel=\"me  me\" href=\"/about\">x</a> \
+             <a href=\"mailto:x@example.test\">m</a>",
+            "<a download href=\"/about\" rel=\"me  nofollow ugc\">x</a> \
+             <a href=\"mailto:x@example.test\" rel=\"nofollow ugc\">m</a>",
+        ),
+    ] {
+        let filtered = wp_rel_ugc(content.as_bytes(), home);
+        assert_eq!(String::from_utf8(filtered).unwrap(), saved);
+    }
+    // `|<a (.+?)>|i` matches no newline and needs a byte and a `>`.
+    for kept in ["<a \nhref=x>", "<a >", "<a x", "<a x\n>", "<a <a x\n>"] {
+        assert_eq!(wp_rel_ugc(kept.as_bytes(), home), kept.as_bytes());
+    }
+    // Unclosed links stay linear.
+    let started = std::time::Instant::now();
+    for unit in [&b"<a x"[..], b"<a x\n", b"<a <a "] {
+        wp_rel_ugc(&unit.repeat(500_000), home);
+    }
+    assert!(started.elapsed().as_secs() < 20, "{:?}", started.elapsed());
+    // `wp_is_internal_link()` wants a protocol.
+    let relative = wp_rel_ugc(b"<a href=\"//127.0.0.1:8081/x\">", home);
+    let expected = b"<a href=\"//127.0.0.1:8081/x\" rel=\"nofollow ugc\">";
+    assert_eq!(relative, expected);
+    let content = "<a href=\"https://example.test\" class=\"x\" rel=\"me\">out</a> \
+        <A HREF='http://127.0.0.1:8081/about'>in</A> <a\nhref=\"https://split.test\">split</a> \
+        <span class=\"wp-note-mention user-2\">@me</span> <script>alert(1)</script> <b>bold";
+    let saved = "<a href=\"https://example.test\" rel=\"nofollow ugc\">out</a> \
+        <a href=\"http://127.0.0.1:8081/about\" rel=\"ugc\">in</A> \
+        <a href=\"https://split.test\" rel=\"nofollow ugc\">split</a> \
+        <span class=\"wp-note-mention user-2\">@me</span> alert(1) <b>bold";
+    let filtered = wp_rel_ugc(&wp_kses_comment(content.as_bytes()), home);
+    assert_eq!(String::from_utf8(filtered).unwrap(), saved);
+}

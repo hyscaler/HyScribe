@@ -793,6 +793,7 @@ version = "0.1.0"
 dependencies = [
  "hyscribe-config",
  "hyscribe-db",
+ "hyscribe-html",
  "hyscribe-kses",
  "hyscribe-phpser",
  "hyscribe-render",

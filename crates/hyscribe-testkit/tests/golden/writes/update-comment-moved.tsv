@@ -1,0 +1,17 @@
+# The rows PHP WordPress writes for the action update-comment-moved (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 19:59:24 to 2026-11-14 19:59:24 UTC.
+# %wp_comments:1% is 6.
+wp_comments	%wp_comments:1%	~	comment_agent	Oracle	New agent
+wp_comments	%wp_comments:1%	~	comment_approved	0	1
+wp_comments	%wp_comments:1%	~	comment_author_IP	192.0.2.1	192.0.2.9
+wp_comments	%wp_comments:1%	~	comment_author_email	reader@example.test	new@example.test
+wp_comments	%wp_comments:1%	~	comment_author_url	https://reader.example.test	https://new.example.test
+wp_comments	%wp_comments:1%	~	comment_karma	0	3
+wp_comments	%wp_comments:1%	~	comment_parent	0	1
+wp_comments	%wp_comments:1%	~	comment_post_ID	1	2
+wp_comments	%wp_comments:1%	~	comment_type	comment	pingback
+wp_comments	%wp_comments:1%	~	user_id	0	1
+wp_comments	1	~	comment_approved	1	spam
+wp_comments	1	~	comment_content	Hi, this is a comment.\nTo get started with moderating, editing, and deleting comments, please visit the Comments screen in the dashboard.\nCommenter avatars come from <a href="https://gravatar.com/">Gravatar</a>.	Hi, this is a comment.\nTo get started with moderating, editing, and deleting comments, please visit the Comments screen in the dashboard.\nCommenter avatars come from <a href="https://gravatar.com/" rel="nofollow ugc">Gravatar</a>.
+wp_comments	1	~	comment_post_ID	1	0
+wp_posts	2	~	comment_count	0	1

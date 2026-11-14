@@ -1260,8 +1260,10 @@ async fn database_errors_show_no_details() {
         "hyscribe_{}=admin%7C1%7Cx%7Cy",
         hyscribe_phpser::md5(b"http://127.0.0.1:8081")
     );
-    let response = get(&site, "/hs-admin/", "127.0.0.1:8081", &cookie).await;
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    for uri in ["/hs-admin/", "/hs-admin/admin-ajax?action=x"] {
+        let response = get(&site, uri, "127.0.0.1:8081", &cookie).await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
 }
 
 #[test]
@@ -1759,4 +1761,41 @@ async fn ajax_actions_are_checked_first() {
     let body = format!("action=save-user-color-scheme&color_scheme=ocean&nonce={nonce}");
     let response = send(&site, "POST", ajax, &cookies, Some((form, &body))).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+}
+
+/// The checks read the referer, comments and roles from the site.
+#[tokio::test(flavor = "multi_thread")]
+async fn actions_read_the_site() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let request = axum::http::Request::builder()
+        .uri("/hs-admin/edit?action=trash")
+        .header(header::HOST, "127.0.0.1:8081")
+        .header(header::COOKIE, &cookies)
+        .header(
+            header::REFERER,
+            "http://127.0.0.1:8081/hs-admin/edit?updated=1",
+        );
+    let response = router(Arc::clone(&site))
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let page = page_of(response).await;
+    assert!(
+        page.contains("<a href=\"http://127.0.0.1:8081/hs-admin/edit\">Please try again.</a>"),
+        "{page}"
+    );
+    let nonce = session_nonce(&site, &cookies, "bulk-users").await;
+    let promote = format!("/hs-admin/users?changeit=1&new_role=king&users[]=1&_wpnonce={nonce}");
+    let response = send(&site, "GET", &promote, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let promote = promote.replace("king", "editor");
+    let response = send(&site, "GET", &promote, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let form = Some((
+        "application/x-www-form-urlencoded",
+        "action=dim-comment&id=1",
+    ));
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }

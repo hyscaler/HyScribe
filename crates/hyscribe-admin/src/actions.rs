@@ -301,7 +301,9 @@ fn posts_bulk(site: &dyn ActionSite, asked: &Asked, doaction: &Value, edit: &str
         return Err(no_access());
     }
     if !site.current_user_can(edit, &[]) {
-        return Err(higher("Sorry, you are not allowed to edit posts in this post type."));
+        return Err(higher(
+            "Sorry, you are not allowed to edit posts in this post type.",
+        ));
     }
     // Back-compat redirects to a post's comments.
     if ["p", "attachment_id", "page_id"]
@@ -434,21 +436,16 @@ fn terms_list(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
         Some(b"post_tag") => "post_tag",
         _ => return Some(Ok(())),
     };
-    let cap = |name| taxonomy_cap(taxonomy, name).unwrap_or_default();
-    if !site.current_user_can(&cap("manage_terms"), &[]) {
+    let manage = taxonomy_cap(taxonomy, "manage_terms").unwrap_or_default();
+    if !site.current_user_can(&manage, &[]) {
         return Some(Err(higher(
             "Sorry, you are not allowed to manage terms in this taxonomy.",
         )));
     }
     let checked = match doaction.as_slice() {
-        b"add-tag" => admin_referer(site, asked, "add-tag", "_wpnonce_add-tag").and_then(|()| {
-            match site.current_user_can(&cap("edit_terms"), &[]) {
-                true => Ok(()),
-                false => Err(higher(
-                    "Sorry, you are not allowed to create terms in this taxonomy.",
-                )),
-            }
-        }),
+        // `edit_terms` and `delete_terms` map to `manage_terms`, checked above,
+        // for both taxonomies: adding and bulk deleting check only the nonce.
+        b"add-tag" => admin_referer(site, asked, "add-tag", "_wpnonce_add-tag"),
         b"delete" if asked.request("tag_ID").is_some() => {
             let id = asked.int("tag_ID");
             referer(site, asked, &format!("delete-tag_{id}")).and_then(|()| {
@@ -458,12 +455,7 @@ fn terms_list(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
                 }
             })
         }
-        b"bulk-delete" => referer(site, asked, "bulk-tags").and_then(|()| {
-            match site.current_user_can(&cap("delete_terms"), &[]) {
-                true => Ok(()),
-                false => Err(higher("Sorry, you are not allowed to delete these items.")),
-            }
-        }),
+        b"bulk-delete" => referer(site, asked, "bulk-tags"),
         b"editedtag" => {
             let id = asked.post("tag_ID").map_or(0, Value::to_int);
             referer(site, asked, &format!("update-tag_{id}")).and_then(|()| {

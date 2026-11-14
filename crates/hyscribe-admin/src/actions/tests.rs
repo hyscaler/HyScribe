@@ -103,6 +103,8 @@ impl ActionSite for Oracle {
             1 => Some(b"1".to_vec()),
             2 => Some(b"spam".to_vec()),
             3 => Some(b"post-trashed".to_vec()),
+            4 => Some(b"0".to_vec()),
+            5 => Some(b"trash".to_vec()),
             _ => None,
         }
     }
@@ -554,6 +556,43 @@ fn ajax_shell() {
     assert_eq!(ajax(site, "action=rest-nonce", "action=heartbeat"), 501);
 }
 
+/// The users list's refusals of a role that may list users but not change
+/// them, which no core role is, and of a term that does not exist.
+#[test]
+fn refusals_of_other_roles() {
+    let lister = role("editor+list_users");
+    let users = nonce("bulk-users");
+    for (target, expected) in [
+        (
+            format!("users.php?changeit=1&new_role=editor&users[]=801&{users}"),
+            403,
+        ),
+        (
+            format!("users.php?action=resetpassword&users[]=801&{users}"),
+            500,
+        ),
+        (
+            format!("users.php?action=resetpassword&users[]=1&{users}"),
+            501,
+        ),
+        (
+            format!(
+                "users.php?action=dodelete&users[]=801&delete_option=delete&{}",
+                nonce("delete-users")
+            ),
+            403,
+        ),
+    ] {
+        assert_eq!(outcome(&lister, &target, None), Some(expected), "{target}");
+    }
+    let edited = format!(
+        "action=editedtag&taxonomy=post_tag&tag_ID=9&{}",
+        nonce("update-tag_9")
+    );
+    let admin = role("administrator");
+    assert_eq!(outcome(&admin, "edit-tags.php", Some(&edited)), Some(403));
+}
+
 /// The Ajax actions' checks past their nonce, where the goldens do not go.
 #[test]
 fn ajax_actions() {
@@ -588,6 +627,8 @@ fn ajax_actions() {
         ("action=delete-comment&id=-1", 501),
         ("action=dim-comment&id=1&new=approved", 501),
         ("action=dim-comment&id=2&new=spam", 501),
+        ("action=dim-comment&id=4&new=unapproved", 501),
+        ("action=dim-comment&id=5&new=trash", 501),
         ("action=dim-comment&id=3&new=", 403),
         (
             "action=dim-comment&id=3&_wpnonce=%nonce:approve-comment_3%",

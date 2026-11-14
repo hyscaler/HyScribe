@@ -10,10 +10,10 @@ use hyscribe_phpser::{Key, Value};
 use hyscribe_render::date::{Zone, format, format_unix, strtotime};
 use hyscribe_render::{avatar_url, user_name};
 
-use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
-use crate::request::{Arg, Params, Sanitize, arg, collection_args};
-use crate::response::{Response, RestError, list, object, paginate, text};
-use crate::schema::{parse_list, sanitize_value_from_schema, validate_value_from_schema};
+use crate::fields::{Properties, fields_for_response, item_response, links_wanted};
+use crate::request::{Arg, Params, Sanitize, collection_args, typed};
+use crate::response::{Response, RestError, int, list, object, paginate, text};
+use crate::schema::{parse_list, prepare_value};
 use crate::terms::ids;
 use crate::types::{context_arg, shown_in_rest};
 use crate::{Context, Endpoint};
@@ -61,9 +61,15 @@ pub(crate) fn rfc3339(date: &str) -> String {
     format("Y-m-d\\TH:i:s", date, Zone::Utc)
 }
 
-/// `rest_get_avatar_urls()`: each of `rest_get_avatar_sizes()` and its URL.
-pub(crate) fn avatar_urls(url: impl Fn(i64) -> Value) -> Value {
-    Value::Array([24, 48, 96].map(|size| (Key::Int(size), url(size))).into())
+/// `rest_get_avatar_urls()`: each of `rest_get_avatar_sizes()` and the URL
+/// of the avatar of `email` and `name`, or `false` for each where not `shown`.
+pub(crate) fn avatar_urls(context: &Context, email: &[u8], name: &[u8], shown: bool) -> Value {
+    let url = |size| {
+        let option = |name: &str| context.option(name);
+        let url = shown.then(|| text(avatar_url(&option, email, name, size)));
+        (Key::Int(size), url.unwrap_or(Value::Bool(false)))
+    };
+    Value::Array([24, 48, 96].map(url).into())
 }
 
 fn properties(context: &Context) -> Vec<(&'static str, &'static [&'static str])> {
@@ -88,30 +94,15 @@ fn items_args() -> Vec<Arg> {
     let strings = r#"{"type":"array","items":{"type":"string"}}"#;
     let mut args = collection_args();
     args.extend([
-        arg("exclude", ids, false, Sanitize::Schema),
-        arg("include", ids, false, Sanitize::Schema),
-        arg("offset", r#"{"type":"integer"}"#, false, Sanitize::Schema),
-        arg(
-            "order",
-            r#"{"default":"asc","enum":["asc","desc"],"type":"string"}"#,
-            false,
-            Sanitize::Schema,
-        ),
-        arg(
-            "orderby",
-            r#"{"default":"name","enum":["id","include","name","registered_date","slug","include_slugs","email","url"],"type":"string"}"#,
-            false,
-            Sanitize::Schema,
-        ),
-        arg("slug", strings, false, Sanitize::Schema),
-        arg("roles", strings, false, Sanitize::Schema),
-        arg("capabilities", strings, false, Sanitize::Schema),
-        arg(
-            "who",
-            r#"{"type":"string","enum":["authors"]}"#,
-            false,
-            Sanitize::Schema,
-        ),
+        typed("exclude", ids),
+        typed("include", ids),
+        typed("offset", r#"{"type":"integer"}"#),
+        typed("order", r#"{"default":"asc","enum":["asc","desc"],"type":"string"}"#),
+        typed("orderby", r#"{"default":"name","enum":["id","include","name","registered_date","slug","include_slugs","email","url"],"type":"string"}"#),
+        typed("slug", strings),
+        typed("roles", strings),
+        typed("capabilities", strings),
+        typed("who", r#"{"type":"string","enum":["authors"]}"#),
     ]);
     let published = object([
         ("type", list(vec![text("boolean"), text("array")])),
@@ -126,18 +117,13 @@ fn items_args() -> Vec<Arg> {
         validate: false,
         sanitize: Sanitize::Schema,
     });
-    args.push(arg(
-        "search_columns",
-        r#"{"default":[],"type":"array","items":{"enum":["email","name","id","username","slug"],"type":"string"}}"#,
-        false,
-        Sanitize::Schema,
-    ));
+    args.push(typed("search_columns", r#"{"default":[],"type":"array","items":{"enum":["email","name","id","username","slug"],"type":"string"}}"#));
     args
 }
 
 /// The endpoints of the route `regex`, if ported.
 pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
-    let id = || arg("id", r#"{"type":"integer"}"#, false, Sanitize::Schema);
+    let id = || typed("id", r#"{"type":"integer"}"#);
     let write = |args: Vec<Arg>, permission| Endpoint {
         args,
         permission,
@@ -178,10 +164,6 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     }
 }
 
-fn error(code: &'static str, message: &str, context: &Context) -> RestError {
-    RestError::status(code, message, context.authorization_required())
-}
-
 /// `$request['id'] = get_current_user_id()`.
 fn as_me(context: &Context, params: &Params) -> Params {
     let mut params = params.clone();
@@ -194,13 +176,6 @@ fn as_me(context: &Context, params: &Params) -> Params {
     params
 }
 
-fn param(params: &Params, name: &str) -> Vec<u8> {
-    params
-        .get(name)
-        .map(Value::to_php_string)
-        .unwrap_or_default()
-}
-
 fn set(params: &Params, name: &str) -> bool {
     params.get(name).is_some_and(|value| !value.is_empty())
 }
@@ -211,19 +186,19 @@ fn items_permission(context: &Context, params: &Params) -> Result<(), RestError>
     for (name, what) in [("roles", "role"), ("capabilities", "capability")] {
         if set(params, name) && !lists {
             let message = format!("Sorry, you are not allowed to filter users by {what}.");
-            return Err(error("rest_user_cannot_view", &message, context));
+            return Err(context.forbidden("rest_user_cannot_view", &message));
         }
     }
     if params.context() == b"edit" && !lists {
         let message = "Sorry, you are not allowed to edit users.";
-        return Err(error("rest_forbidden_context", message, context));
+        return Err(context.forbidden("rest_forbidden_context", message));
     }
-    let orderby = param(params, "orderby");
+    let orderby = params.text("orderby");
     if (orderby == b"email" || orderby == b"registered_date") && !lists {
         let message = "Sorry, you are not allowed to order users by this parameter.";
-        return Err(error("rest_forbidden_orderby", message, context));
+        return Err(context.forbidden("rest_forbidden_orderby", message));
     }
-    if param(params, "who") == b"authors" {
+    if params.text("who") == b"authors" {
         let edits = shown_in_rest().any(|(name, fields)| {
             let name = String::from_utf8_lossy(&name.to_php_string()).into_owned();
             let cap = fields
@@ -234,7 +209,7 @@ fn items_permission(context: &Context, params: &Params) -> Result<(), RestError>
         });
         if !edits {
             let message = "Sorry, you are not allowed to query users by this parameter.";
-            return Err(error("rest_forbidden_who", message, context));
+            return Err(context.forbidden("rest_forbidden_who", message));
         }
     }
     Ok(())
@@ -282,7 +257,7 @@ fn roles(context: &Context, params: &Params) -> Vec<String> {
 /// `WP_User_Query`'s search of `*text*`: the text without `*` either side,
 /// in the columns asked for, else those guessed from it.
 fn search(context: &Context, params: &Params) -> Option<(Vec<String>, String)> {
-    let text = String::from_utf8_lossy(&param(params, "search")).into_owned();
+    let text = String::from_utf8_lossy(&params.text("search")).into_owned();
     if Value::String(text.clone().into_bytes()).is_empty() {
         return None;
     }
@@ -338,7 +313,7 @@ fn search(context: &Context, params: &Params) -> Option<(Vec<String>, String)> {
 /// The query `get_items()` prepares, without its page.
 fn prepared(context: &Context, params: &Params) -> UserQuery {
     let prefix = context.site.table_prefix();
-    let authors = param(params, "who") == b"authors";
+    let authors = params.text("who") == b"authors";
     let types = || {
         rest_types()
             .iter()
@@ -359,7 +334,7 @@ fn prepared(context: &Context, params: &Params) -> UserQuery {
         .into_iter()
         .map(String::into_bytes)
         .collect();
-    let order = match param(params, "orderby").as_slice() {
+    let order = match params.text("orderby").as_slice() {
         b"id" => UserOrder::Id,
         b"include" if !include.is_empty() => UserOrder::Include,
         b"include" => UserOrder::Login,
@@ -391,7 +366,7 @@ fn prepared(context: &Context, params: &Params) -> UserQuery {
         // `FIELD()` of the slugs is written without a direction.
         order: (
             order,
-            param(params, "order") == b"desc" && order != UserOrder::Nicenames,
+            params.text("order") == b"desc" && order != UserOrder::Nicenames,
         ),
         ..UserQuery::default()
     }
@@ -450,11 +425,11 @@ fn item_permission(context: &Context, params: &Params) -> Result<(), RestError> 
     let edits = context.can_for("edit_user", user.id);
     if params.context() == b"edit" && !edits {
         let message = "Sorry, you are not allowed to edit this user.";
-        return Err(error("rest_forbidden_context", message, context));
+        return Err(context.forbidden("rest_forbidden_context", message));
     }
     if !edits && !context.can("list_users") && !has_posts(context, user.id) {
         let message = "Sorry, you are not allowed to list users.";
-        return Err(error("rest_user_cannot_view", message, context));
+        return Err(context.forbidden("rest_user_cannot_view", message));
     }
     Ok(())
 }
@@ -495,7 +470,7 @@ fn create_permission(context: &Context, _: &Params) -> Result<(), RestError> {
         return Ok(());
     }
     let message = "Sorry, you are not allowed to create new users.";
-    Err(error("rest_cannot_create_user", message, context))
+    Err(context.forbidden("rest_cannot_create_user", message))
 }
 
 /// `update_item_permissions_check()`: a request with roles to set, beside
@@ -504,13 +479,13 @@ fn update_permission(context: &Context, params: &Params) -> Result<(), RestError
     let user = get_user(context, params)?;
     if set(params, "roles") && !context.can_for("promote_user", user.id) {
         let message = "Sorry, you are not allowed to edit roles of this user.";
-        return Err(error("rest_cannot_edit_roles", message, context));
+        return Err(context.forbidden("rest_cannot_edit_roles", message));
     }
     if context.can_for("edit_user", user.id) {
         return Ok(());
     }
     let message = "Sorry, you are not allowed to edit this user.";
-    Err(error("rest_cannot_edit", message, context))
+    Err(context.forbidden("rest_cannot_edit", message))
 }
 
 /// `delete_item_permissions_check()`.
@@ -520,7 +495,7 @@ fn delete_permission(context: &Context, params: &Params) -> Result<(), RestError
         return Ok(());
     }
     let message = "Sorry, you are not allowed to delete this user.";
-    Err(error("rest_user_cannot_delete", message, context))
+    Err(context.forbidden("rest_user_cannot_delete", message))
 }
 
 /// A user meta value, unserialized, `''` when not stored.
@@ -555,10 +530,7 @@ fn meta(context: &Context, params: &Params, user: u64) -> Value {
         .as_deref()
         .map_or_else(|| Value::Array(Vec::new()), crate::unserialized);
     let schema = hyscribe_phpser::json_decode(PREFERENCES.as_bytes()).unwrap_or_default();
-    let value = validate_value_from_schema(&value, &schema, "")
-        .and_then(|()| sanitize_value_from_schema(&value, &schema, ""))
-        .unwrap_or(Value::Null);
-    object([("persisted_preferences", value)])
+    object([("persisted_preferences", prepare_value(&value, &schema, ""))])
 }
 
 /// `prepare_item_for_response()`.
@@ -568,7 +540,6 @@ fn prepare(context: &Context, params: &Params, user: &User) -> Response {
     }
     let properties = properties(context);
     let wanted = fields_for_response(params, &properties);
-    let has = |name: &str| wanted.iter().any(|field| field == name.as_bytes());
     let prefix = context.site.table_prefix();
     let caps = || meta_value(context, user.id, &format!("{prefix}capabilities"));
     let roles = || {
@@ -604,22 +575,10 @@ fn prepare(context: &Context, params: &Params, user: &User) -> Response {
         let unix = strtotime(&date).unwrap_or_default();
         text(format_unix("c", unix, Zone::Utc))
     };
-    let avatars = || {
-        let name = user_name(user);
-        avatar_urls(|size| {
-            text(avatar_url(
-                &|name| context.option(name),
-                &user.email,
-                &name,
-                size,
-            ))
-        })
-    };
+    let avatars = || avatar_urls(context, &user.email, &user_name(user), true);
     let may_see_roles = || context.can("list_users") || context.can_for("edit_user", user.id);
     let fields: [(&str, &dyn Fn() -> Value); 18] = [
-        ("id", &|| {
-            Value::Int(i64::try_from(user.id).unwrap_or(i64::MAX))
-        }),
+        ("id", &|| int(user.id)),
         ("username", &|| text(user.login.clone())),
         ("name", &|| text(user.display_name.clone())),
         ("first_name", &|| text(user.first_name.clone())),
@@ -640,14 +599,10 @@ fn prepare(context: &Context, params: &Params, user: &User) -> Response {
         ("avatar_urls", &avatars),
         ("meta", &|| meta(context, params, user.id)),
     ];
-    let data = fields
-        .iter()
-        .filter(|(name, _)| has(name) && (*name != "roles" || may_see_roles()))
-        .map(|(name, value)| (Key::String(name.as_bytes().to_vec()), value()))
-        .collect();
-    let data = filter_by_context(data, &properties, &params.context());
-    let mut response = Response::new(Value::Array(data), 200);
-    if is_field_included("_links", &wanted) || is_field_included("_embedded", &wanted) {
+    let shown = |field: &&Vec<u8>| *field != b"roles" || may_see_roles();
+    let kept: Vec<Vec<u8>> = wanted.iter().filter(shown).cloned().collect();
+    let mut response = item_response(&fields, &kept, &properties, &params.context());
+    if links_wanted(&wanted) {
         crate::self_link(context, &mut response, &format!("{ROUTE}/{}", user.id));
         response.add_link("collection", context.rest_url(ROUTE));
     }

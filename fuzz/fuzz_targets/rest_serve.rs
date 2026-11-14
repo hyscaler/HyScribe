@@ -89,9 +89,6 @@ impl Site for Fuzzed<'_> {
             ..User::default()
         })
     }
-    fn home_url(&self) -> String {
-        "http://example.test".into()
-    }
     fn table_prefix(&self) -> String {
         "wp_".into()
     }

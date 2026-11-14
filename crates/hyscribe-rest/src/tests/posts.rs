@@ -10,9 +10,8 @@ use hyscribe_auth::caps::{CapPost, CapabilityData, User};
 use hyscribe_phpser::parse_str;
 use hyscribe_render::theme::twentytwentyfive;
 use hyscribe_testkit::{RestCase, rest_cases, rest_headers};
-use sha2::Digest;
 
-use super::{SITE, site};
+use super::{SITE, role, serve_with, sha256_hex, site};
 use crate::posts::prepare::writes_or_unported;
 use crate::*;
 use hyscribe_model::{OrderBy, PostQuery, StatusFilter};
@@ -24,14 +23,6 @@ struct Oracle {
     fixture: site::Fixture,
     deny: &'static [&'static str],
 }
-
-const ROLES: [(&str, u64); 5] = [
-    ("administrator", 1),
-    ("editor", 701),
-    ("author", 702),
-    ("contributor", 703),
-    ("subscriber", 704),
-];
 
 impl CapabilityData for Oracle {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
@@ -101,12 +92,6 @@ impl Site for Oracle {
     fn term_link(&self, _: &str, _: &Term) -> String {
         String::new()
     }
-    fn post(&self, id: u64) -> Option<Post> {
-        self.fixture.post(id)
-    }
-    fn home_url(&self) -> String {
-        SITE.into()
-    }
     fn table_prefix(&self) -> String {
         "wp_".into()
     }
@@ -148,12 +133,6 @@ impl Site for Oracle {
         };
         self.fixture.query(&query)
     }
-    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term> {
-        Reads::post_terms(&self.fixture, post, taxonomy)
-    }
-    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>> {
-        Reads::post_meta(&self.fixture, post, key)
-    }
     fn revisions(&self, post: u64) -> Vec<u64> {
         let query = PostQuery {
             post_types: vec!["revision".into()],
@@ -172,9 +151,6 @@ impl Site for Oracle {
             .map(|revision| revision.id)
             .collect()
     }
-    fn user(&self, id: u64) -> Option<hyscribe_model::User> {
-        Reads::user(&self.fixture, id)
-    }
     fn reads(&self) -> &dyn Reads {
         &self.fixture
     }
@@ -184,61 +160,20 @@ impl Site for Oracle {
     }
 }
 
-fn route(path: &str, get: &[(Key, Value)]) -> Vec<u8> {
-    if let Some(route) = lookup(get, "rest_route") {
-        return route.to_php_string();
-    }
-    let pretty = path.strip_prefix("/index.php").unwrap_or(path);
-    let route = pretty.strip_prefix("/wp-json").unwrap();
-    if route.is_empty() {
-        b"/".to_vec()
-    } else {
-        route.as_bytes().to_vec()
-    }
-}
-
 /// `case` served by HyScribe's API, over the Theme Test Data fixture when
 /// `ttd`.
 fn serve_case(case: &RestCase, ttd: bool) -> Served {
-    let (path, query) = case.target.split_once('?').unwrap_or((&case.target, ""));
-    let get = match parse_str(query.as_bytes()) {
-        Value::Array(get) => get,
-        _ => Vec::new(),
-    };
-    let (role, user) = ROLES
-        .iter()
-        .find(|(role, _)| *role == case.who)
-        .copied()
-        .unwrap_or(("", 0));
-    let flag = |name: &str| case.flag(name);
     let oracle = Oracle {
-        role,
+        role: role(&case.who).0,
         fixture: site::Fixture {
             ttd,
-            pretty: flag("pretty"),
+            pretty: case.flag("pretty"),
             extra: false,
+            state: None,
         },
         deny: &[],
     };
-    let route = route(path, &get);
-    let request = Request {
-        method: &case.method,
-        route: &route,
-        uri: case.target.as_bytes(),
-        get: &get,
-        post: &[],
-        cookie_user: user,
-        origin: if flag("origin") {
-            Some(b"http://example.test")
-        } else if flag("originnull") {
-            Some(b"null")
-        } else {
-            None
-        },
-        nonce: (user != 0 && !flag("nononce")).then_some(b"%nonce%"),
-        method_override: flag("override").then_some(b"DELETE"),
-    };
-    serve(&oracle, &request)
+    serve_with(&oracle, case)
 }
 
 const TTD_UNPORTED: [(&str, &str); 5] = [
@@ -277,12 +212,7 @@ fn replay(golden: &str, ttd: bool, count: usize, unported: &[(&str, &str)]) {
         php.sort();
         assert_eq!(rest_headers(&served.headers), php, "{what}");
         let body = if ttd {
-            let digest = sha2::Sha256::digest(&served.body);
-            digest
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect::<String>()
-                .into_bytes()
+            sha256_hex(&served.body)
         } else {
             served.body
         };
@@ -384,6 +314,7 @@ fn revisions_are_linked() {
             ttd: false,
             pretty: false,
             extra: true,
+            state: None,
         },
         deny: &[],
     };
@@ -429,16 +360,14 @@ fn served(who: &'static str, target: &str, ttd: bool, deny: &'static [&'static s
         .as_array()
         .unwrap_or_default()
         .to_vec();
-    let user = ROLES
-        .iter()
-        .find(|(role, _)| *role == who)
-        .map_or(0, |(_, id)| *id);
+    let (_, user) = role(who);
     let oracle = Oracle {
         role: who,
         fixture: site::Fixture {
             ttd,
             pretty,
             extra: !ttd,
+            state: None,
         },
         deny,
     };

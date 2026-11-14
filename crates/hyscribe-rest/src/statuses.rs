@@ -136,11 +136,7 @@ fn items_permission(context: &Context, params: &Params) -> Result<(), RestError>
         return Ok(());
     }
     let message = "Sorry, you are not allowed to manage post statuses.";
-    Err(RestError::status(
-        "rest_cannot_view",
-        message,
-        context.authorization_required(),
-    ))
+    Err(context.forbidden("rest_cannot_view", message))
 }
 
 /// `get_items()`: the statuses not internal, and trash.
@@ -172,11 +168,7 @@ fn item_permission(context: &Context, params: &Params) -> Result<(), RestError> 
     if can_read(context, status) {
         return Ok(());
     }
-    Err(RestError::status(
-        "rest_cannot_read_status",
-        "Cannot view status.",
-        context.authorization_required(),
-    ))
+    Err(context.forbidden("rest_cannot_read_status", "Cannot view status."))
 }
 
 /// `get_item()`, after its permission check found the status.

@@ -35,6 +35,9 @@ pub(crate) struct Content {
     pub(super) comments: Vec<CommentRow>,
     /// Each user and its `user_registered`.
     pub(super) users: Vec<(User, String)>,
+    /// The posts as rendering reads them, plain and pretty, of a state's
+    /// dump; none for a fixture's own.
+    pub(super) reads: Option<[super::site::Fixture; 2]>,
 }
 
 fn text(value: &SqlValue) -> Vec<u8> {
@@ -112,10 +115,14 @@ fn load(dump: &Dump) -> Content {
             excerpt: text(&row[6]),
             status: string(&row[7]),
             comment_status: string(&row[8]),
+            ping_status: string(&row[9]),
             password: text(&row[10]),
             name: text(&row[11]),
             modified: string(&row[14]),
+            modified_gmt: string(&row[15]),
             parent: number(&row[17]),
+            guid: text(&row[18]),
+            menu_order: Value::String(text(&row[19])).to_int(),
             post_type: string(&row[20]),
             ..Post::default()
         })
@@ -210,6 +217,7 @@ fn load(dump: &Dump) -> Content {
         comments,
         postmeta,
         users,
+        reads: None,
     }
 }
 
@@ -228,7 +236,17 @@ pub(crate) fn default_install_with(state: &str) -> Content {
     let mut dump = hyscribe_testkit::default_install(&version).unwrap();
     dump.rows
         .extend(Dump::parse(state.as_bytes()).unwrap().rows);
-    load(&dump)
+    let dump: &'static Dump = Box::leak(Box::new(dump));
+    let fixture = |pretty| super::site::Fixture {
+        ttd: false,
+        pretty,
+        extra: false,
+        state: Some(dump),
+    };
+    Content {
+        reads: Some([fixture(false), fixture(true)]),
+        ..load(dump)
+    }
 }
 
 /// The default install with `reference/rest/people-more.sql`'s posts and
@@ -340,7 +358,7 @@ impl Content {
         match (taxonomy, pretty) {
             ("category", false) => format!("{site}/?cat={}", term.id),
             ("post_tag", false) => format!("{site}/?tag={}", String::from_utf8_lossy(&term.slug)),
-            _ => {
+            ("category" | "post_tag", true) => {
                 let mut slugs = vec![String::from_utf8_lossy(&term.slug).into_owned()];
                 let mut parent = term.parent;
                 while let Some(row) = self
@@ -358,6 +376,11 @@ impl Content {
                 };
                 format!("{site}/{base}/{}/", slugs.join("/"))
             }
+            // A taxonomy without rewrite rules.
+            _ => format!(
+                "{site}/?taxonomy={taxonomy}&term={}",
+                String::from_utf8_lossy(&term.slug)
+            ),
         }
     }
 }

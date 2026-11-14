@@ -108,14 +108,6 @@ impl hyscribe_rest::Site for Rest<'_> {
         String::from_utf8_lossy(&link).into_owned()
     }
 
-    fn post(&self, id: u64) -> Option<Post> {
-        RenderSite::post(&self.reads.reads, id)
-    }
-
-    fn home_url(&self) -> String {
-        self.site.home.clone()
-    }
-
     fn table_prefix(&self) -> String {
         self.site.db.prefix().into()
     }
@@ -181,20 +173,8 @@ impl hyscribe_rest::Site for Rest<'_> {
         reads.wait(self.site.db.posts_of_type(post_type))
     }
 
-    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term> {
-        RenderSite::post_terms(&self.reads.reads, post, taxonomy)
-    }
-
-    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>> {
-        RenderSite::post_meta(&self.reads.reads, post, key)
-    }
-
     fn revisions(&self, post: u64) -> Vec<u64> {
         self.reads.reads.wait(self.site.db.revisions(post))
-    }
-
-    fn user(&self, id: u64) -> Option<User> {
-        RenderSite::user(&self.reads.reads, id)
     }
 }
 

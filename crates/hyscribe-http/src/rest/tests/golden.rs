@@ -70,12 +70,6 @@ impl hyscribe_rest::Site for AsRole<'_> {
     fn term_link(&self, taxonomy: &str, term: &Term) -> String {
         self.rest.term_link(taxonomy, term)
     }
-    fn post(&self, id: u64) -> Option<Post> {
-        hyscribe_rest::Site::post(&self.rest, id)
-    }
-    fn home_url(&self) -> String {
-        hyscribe_rest::Site::home_url(&self.rest)
-    }
     fn table_prefix(&self) -> String {
         self.rest.table_prefix()
     }
@@ -112,17 +106,8 @@ impl hyscribe_rest::Site for AsRole<'_> {
     fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
         self.rest.posts_of_type(post_type)
     }
-    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term> {
-        hyscribe_rest::Site::post_terms(&self.rest, post, taxonomy)
-    }
-    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>> {
-        hyscribe_rest::Site::post_meta(&self.rest, post, key)
-    }
     fn revisions(&self, post: u64) -> Vec<u64> {
         self.rest.revisions(post)
-    }
-    fn user(&self, id: u64) -> Option<User> {
-        hyscribe_rest::Site::user(&self.rest, id)
     }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         hyscribe_rest::Site::option(&self.rest, name)

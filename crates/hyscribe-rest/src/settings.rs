@@ -9,7 +9,7 @@ use hyscribe_phpser::{Key, Value, json_decode};
 
 use crate::request::Params;
 use crate::response::{Response, RestError};
-use crate::schema::{sanitize_value_from_schema, validate_value_from_schema};
+use crate::schema::prepare_value;
 use crate::taxonomies::forbidden;
 use crate::{Context, Endpoint};
 
@@ -65,10 +65,7 @@ fn item(context: &Context, _: &Params) -> Result<Response, RestError> {
         };
         // `prepare_value()`: a value its schema does not take is null.
         let param = String::from_utf8_lossy(&name.to_php_string()).into_owned();
-        let value = validate_value_from_schema(&value, &schema, &param)
-            .and_then(|()| sanitize_value_from_schema(&value, &schema, &param))
-            .unwrap_or(Value::Null);
-        (name.clone(), value)
+        (name.clone(), prepare_value(&value, &schema, &param))
     });
     Ok(Response::new(Value::Array(data.collect()), 200))
 }

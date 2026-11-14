@@ -592,6 +592,14 @@ fn unique(items: &[(Key, Value)]) -> bool {
     })
 }
 
+/// `prepare_value()` of a setting or meta field: the value sanitized by
+/// `schema` if it validates, else null.
+pub(crate) fn prepare_value(value: &Value, schema: &Value, param: &str) -> Value {
+    validate_value_from_schema(value, schema, param)
+        .and_then(|()| sanitize_value_from_schema(value, schema, param))
+        .unwrap_or(Value::Null)
+}
+
 /// `rest_sanitize_value_from_schema( $value, $schema, $param )`.
 pub fn sanitize_value_from_schema(value: &Value, schema: &Value, param: &str) -> Checked<Value> {
     unported(schema)?;

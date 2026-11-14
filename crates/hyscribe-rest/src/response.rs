@@ -30,6 +30,11 @@ pub(crate) fn object<const N: usize>(entries: [(&str, Value); N]) -> Value {
     )
 }
 
+/// A PHP integer of an ID or count.
+pub(crate) fn int(n: u64) -> Value {
+    Value::Int(i64::try_from(n).unwrap_or(i64::MAX))
+}
+
 /// A PHP string.
 pub(crate) fn text(text: impl Into<Vec<u8>>) -> Value {
     Value::String(text.into())

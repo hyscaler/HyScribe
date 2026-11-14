@@ -5,9 +5,9 @@
 
 use hyscribe_phpser::{Key, Value, add_query_arg, is_empty_string};
 
-use crate::fields::{Properties, fields_for_response, is_field_included};
-use crate::request::{Arg, Params, Sanitize};
-use crate::response::{Response, RestError, list, object, text};
+use crate::fields::{Properties, fields_for_response, is_field_included, links_wanted};
+use crate::request::{Params, string_arg};
+use crate::response::{Response, RestError, list};
 use crate::types::{can_edit_any, context_arg};
 use crate::{Context, Endpoint};
 
@@ -57,15 +57,6 @@ const PROPERTIES: &Properties = &[
 const READS_THEME_DATA: &[u8] = b"core/template-part";
 
 /// An argument typed `string`, sanitized by its schema.
-fn string_arg(name: &'static str) -> Arg {
-    Arg {
-        name,
-        schema: object([("type", text("string"))]),
-        validate: false,
-        sanitize: Sanitize::Schema,
-    }
-}
-
 pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     let collection = || Endpoint {
         args: vec![context_arg(), string_arg("namespace")],
@@ -93,19 +84,7 @@ fn read_permission(context: &Context) -> Result<(), RestError> {
         return Ok(());
     }
     let message = "Sorry, you are not allowed to manage block types.";
-    let status = context.authorization_required();
-    Err(RestError::status(
-        "rest_block_type_cannot_view",
-        message,
-        status,
-    ))
-}
-
-fn param(params: &Params, name: &str) -> Vec<u8> {
-    params
-        .get(name)
-        .map(Value::to_php_string)
-        .unwrap_or_default()
+    Err(context.forbidden("rest_block_type_cannot_view", message))
 }
 
 fn field<'a>(block: &'a Value, name: &str) -> &'a [u8] {
@@ -117,7 +96,7 @@ fn field<'a>(block: &'a Value, name: &str) -> &'a [u8] {
 
 /// `get_block()`: the registered block type named by the request.
 fn block(params: &Params) -> Result<&'static Value, RestError> {
-    let name = [param(params, "namespace"), param(params, "name")].join(&b'/');
+    let name = [params.text("namespace"), params.text("name")].join(&b'/');
     core("block_types")
         .iter()
         .map(|(_, block)| block)
@@ -135,7 +114,7 @@ fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
     if context.head {
         return Ok(Response::new(Value::Array(Vec::new()), 200));
     }
-    let namespace = param(params, "namespace");
+    let namespace = params.text("namespace");
     let mut partials = false;
     let mut data = Vec::new();
     for (_, block) in core("block_types") {
@@ -194,7 +173,7 @@ fn prepare(context: &Context, params: &Params, block: &Value, partials: bool) ->
         .collect();
     let reads = name == READS_THEME_DATA && included(b"variations");
     let mut response = Response::new(Value::Array(data), 200);
-    if included(b"_links") || included(b"_embedded") {
+    if links_wanted(&wanted) {
         let name = String::from_utf8_lossy(name);
         let namespace = name.split('/').next().unwrap_or_default();
         response.add_link("collection", context.rest_url("/wp/v2/block-types"));

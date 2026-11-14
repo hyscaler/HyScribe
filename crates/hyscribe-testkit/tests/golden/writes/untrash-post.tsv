@@ -1,0 +1,24 @@
+# The rows PHP WordPress writes for the action untrash-post (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 18:26:55 to 2026-11-14 18:26:55 UTC.
+# %wp_posts:1% is 12.
+# %wp_posts:2% is 13.
+# %wp_postmeta:1% is 12.
+# %wp_postmeta:2% is 13.
+# %wp_postmeta:3% is 14.
+# %wp_postmeta:4% is 15.
+# %wp_postmeta:5% is 16.
+# %wp_options:1% is 133.
+wp_postmeta	%wp_postmeta:3%	-	meta_id	%wp_postmeta:3%
+wp_postmeta	%wp_postmeta:3%	-	meta_key	_wp_trash_meta_status
+wp_postmeta	%wp_postmeta:3%	-	meta_value	publish
+wp_postmeta	%wp_postmeta:3%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:4%	-	meta_id	%wp_postmeta:4%
+wp_postmeta	%wp_postmeta:4%	-	meta_key	_wp_trash_meta_time
+wp_postmeta	%wp_postmeta:4%	-	meta_value	%unix%
+wp_postmeta	%wp_postmeta:4%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:5%	-	meta_id	%wp_postmeta:5%
+wp_postmeta	%wp_postmeta:5%	-	meta_key	_wp_desired_post_slug
+wp_postmeta	%wp_postmeta:5%	-	meta_value	a-write-oracle-post
+wp_postmeta	%wp_postmeta:5%	-	post_id	%wp_posts:1%
+wp_posts	%wp_posts:1%	~	post_name	a-write-oracle-post__trashed	a-write-oracle-post
+wp_posts	%wp_posts:1%	~	post_status	trash	draft

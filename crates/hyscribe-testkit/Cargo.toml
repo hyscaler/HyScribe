@@ -11,6 +11,10 @@ publish.workspace = true
 
 [dependencies]
 hyscribe-config.workspace = true
+sqlx = { version = "0.9", default-features = false, features = ["mysql", "runtime-tokio"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

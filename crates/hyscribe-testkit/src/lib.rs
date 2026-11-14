@@ -2,9 +2,11 @@
 
 //! Shared test helpers: fixture locations and a reader for the `mysqldump`
 //! files under `fixtures/`, so tests can check real WordPress rows without a
-//! running database.
+//! running database, and the write oracle's HyScribe side ([`writes`]).
 
 use std::path::PathBuf;
+
+pub mod writes;
 
 /// A column value from an `INSERT` statement.
 #[derive(Clone, Debug, PartialEq, Eq)]

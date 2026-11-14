@@ -31,7 +31,8 @@ case "${1:-}" in
     "$DOCKER" run -d --name "$NAME" --network "$NETWORK" --network-alias db -p "127.0.0.1:$PORT:3306" \
       -e MARIADB_ROOT_PASSWORD=reference-only -e MARIADB_DATABASE=wordpress \
       -e MARIADB_USER=wordpress -e MARIADB_PASSWORD=reference-only "$IMAGE" >/dev/null
-    until "$DOCKER" exec "$NAME" mariadb -uroot -preference-only -e 'SELECT 1' >/dev/null 2>&1; do
+    # Over TCP: the image's first, initialising server listens on the socket only.
+    until "$DOCKER" exec "$NAME" mariadb --protocol=tcp -h127.0.0.1 -uroot -preference-only -e 'SELECT 1' >/dev/null 2>&1; do
       sleep 1
     done
     "$DOCKER" exec -i "$NAME" mariadb -uroot -preference-only wordpress < "$dump"

@@ -8,21 +8,21 @@
 use std::sync::OnceLock;
 
 use hyscribe_phpser::json_encode;
-use hyscribe_testkit::unhex;
+use hyscribe_testkit::{RestCase, rest_cases, rest_headers, unhex};
 
 use super::content::hooked;
 use super::query::{PART_FILES, hierarchy};
 use super::theme;
 use crate::response::{list, text};
 use crate::tests::content::{Content, default_install, default_install_with};
-use crate::tests::{Case, cases_of, kept, serve_over};
+use crate::tests::serve_over;
 
 /// `get_item()` reads only the theme's file for `source=plugin` too, as
 /// for `source=theme`.
 #[test]
 fn a_plugin_source_is_the_theme_file() {
     let content = custom();
-    let ask = |source: &str| Case {
+    let ask = |source: &str| RestCase {
         who: "administrator".into(),
         method: "GET".into(),
         target: format!("/?rest_route=/wp/v2/templates/twentytwentyfive//index&source={source}"),
@@ -95,7 +95,7 @@ fn custom() -> &'static Content {
 }
 
 fn replay(golden: &str, content: &'static Content) -> usize {
-    let cases = cases_of(golden);
+    let cases = rest_cases(golden);
     for case in &cases {
         let served = serve_over(content, case);
         let what = format!(
@@ -105,7 +105,7 @@ fn replay(golden: &str, content: &'static Content) -> usize {
         assert_eq!(served.status, case.status, "{what}");
         let mut php = case.headers.clone();
         php.sort();
-        assert_eq!(kept(&served.headers), php, "{what}");
+        assert_eq!(rest_headers(&served.headers), php, "{what}");
         let body = String::from_utf8_lossy(&case.body).replace(CREDIT[0], CREDIT[1]);
         assert_eq!(String::from_utf8_lossy(&served.body), body, "{what}");
     }
@@ -170,7 +170,7 @@ fn what_is_not_ported_answers_501() {
         ),
     ];
     for (method, target) in targets {
-        let case = Case {
+        let case = RestCase {
             who: "administrator".into(),
             method: method.into(),
             target: target.into(),

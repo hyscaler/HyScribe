@@ -13,8 +13,8 @@ use hyscribe_phpser::{Key, Value, is_empty_string};
 use hyscribe_render::date::{Zone, format};
 use hyscribe_render::post::admin_title;
 
-use crate::fields::{fields_for_response, is_field_included};
-use crate::request::{Arg, Params, Sanitize};
+use crate::fields::{fields_for_response, is_field_included, links_wanted};
+use crate::request::{Arg, Params, Sanitize, string_arg};
 use crate::response::{Response, RestError, list, object, text};
 use crate::types::{can_edit_any, context_arg};
 use crate::{Context, Endpoint};
@@ -61,15 +61,6 @@ fn base(kind: Kind) -> &'static str {
     match kind {
         Kind::Template => "templates",
         Kind::Part => "template-parts",
-    }
-}
-
-fn string_arg(name: &'static str) -> Arg {
-    Arg {
-        name,
-        schema: object([("type", text("string"))]),
-        validate: false,
-        sanitize: Sanitize::Schema,
     }
 }
 
@@ -171,11 +162,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
 
 fn cannot_manage(context: &Context) -> RestError {
     let message = "Sorry, you are not allowed to access the templates on this site.";
-    RestError::status(
-        "rest_cannot_manage_templates",
-        message,
-        context.authorization_required(),
-    )
+    context.forbidden("rest_cannot_manage_templates", message)
 }
 
 /// `get_items_permissions_check()` and `get_item_permissions_check()`.
@@ -221,10 +208,7 @@ fn items(context: &Context, params: &Params, kind: Kind) -> Result<Response, Res
 /// `_sanitize_template_id()` after its `urldecode()`: the slug's slash
 /// doubled when it is not.
 fn template_id(params: &Params) -> Vec<u8> {
-    let id = params
-        .get("id")
-        .map(Value::to_php_string)
-        .unwrap_or_default();
+    let id = params.text("id");
     let Some(at) = id.iter().rposition(|&b| b == b'/') else {
         return id;
     };
@@ -256,10 +240,7 @@ fn item(context: &Context, params: &Params, kind: Kind) -> Result<Response, Rest
 /// `get_template_fallback()`: the first template of the slug's hierarchy
 /// with content, or an empty object.
 fn lookup(context: &Context, params: &Params, kind: Kind) -> Result<Response, RestError> {
-    let slug = params
-        .get("slug")
-        .map(Value::to_php_string)
-        .unwrap_or_default();
+    let slug = params.text("slug");
     let is_custom = params.get("is_custom") == Some(&Value::Bool(true));
     let prefix = params.get("template_prefix").map(Value::to_php_string);
     let hierarchy = hierarchy(&slug, is_custom, &prefix.unwrap_or_default());
@@ -438,7 +419,7 @@ fn prepare_resolved(
         (Key::String(name.as_bytes().to_vec()), value)
     });
     let mut response = Response::new(Value::Array(data.collect()), 200);
-    let linked = if included("_links") || included("_embedded") {
+    let linked = if links_wanted(&wanted) {
         links(context, &mut response, template, kind)
     } else {
         Ok(())

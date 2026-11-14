@@ -45,8 +45,7 @@ fn permission(context: &Context, what: &str) -> Result<(), RestError> {
         return Ok(());
     }
     let message = format!("Sorry, you are not allowed to view the registered {what}.");
-    let status = context.authorization_required();
-    Err(RestError::status("rest_cannot_view", &message, status))
+    Err(context.forbidden("rest_cannot_view", &message))
 }
 
 /// `get_items()` of the categories core and then the theme register.

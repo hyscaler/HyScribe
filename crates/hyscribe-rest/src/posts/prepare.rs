@@ -13,7 +13,9 @@ use hyscribe_render::site::Request;
 
 use super::{Kind, is_sticky, meta, revisions};
 use crate::Context;
-use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
+use crate::fields::{
+    Properties, fields_for_response, filter_by_context, is_field_included, links_wanted,
+};
 use crate::request::Params;
 use crate::response::{Response, RestError, list, object, text};
 
@@ -374,7 +376,7 @@ pub(super) fn post(
         )
         .collect();
     let mut response = Response::new(Value::Array(data), 200);
-    if has("_links") || has("_embedded") {
+    if links_wanted(&fields) {
         links(context, params, kind, post, &mut response);
     }
     Ok(response)

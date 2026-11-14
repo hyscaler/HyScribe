@@ -3,14 +3,16 @@
 //! The PHP oracle's answers on the editors' routes, `tests/golden/editor.tsv`
 //! from `reference/rest/editor.list`, replayed for every identity.
 
-use crate::tests::{Case, cases_of, kept, serve_case};
+use hyscribe_testkit::{RestCase, rest_cases, rest_headers};
+
+use crate::tests::serve_case;
 
 /// The identities PHP lets read the editors' registries.
 const EDITORS: [&str; 4] = ["administrator", "editor", "author", "contributor"];
 
 /// `case` as `who`.
-fn as_who(case: &Case, who: &str) -> Case {
-    Case {
+fn as_who(case: &RestCase, who: &str) -> RestCase {
+    RestCase {
         who: who.into(),
         method: case.method.clone(),
         target: case.target.clone(),
@@ -21,7 +23,7 @@ fn as_who(case: &Case, who: &str) -> Case {
     }
 }
 
-fn not_ported(case: &Case) {
+fn not_ported(case: &RestCase) {
     let served = serve_case(case);
     let what = format!("{} {} {}", case.who, case.method, case.target);
     assert_eq!(served.status, 501, "{what}");
@@ -36,7 +38,7 @@ fn not_ported(case: &Case) {
 /// an inactive theme, which HyScribe does not have.
 #[test]
 fn answers_match_php() {
-    let cases = cases_of(include_str!("../../tests/golden/editor.tsv"));
+    let cases = rest_cases(include_str!("../../tests/golden/editor.tsv"));
     assert_eq!(cases.len(), 319);
     for case in &cases {
         if case.status == 0 {
@@ -62,7 +64,7 @@ fn answers_match_php() {
         assert_eq!(served.status, case.status, "{what}");
         let mut php = case.headers.clone();
         php.sort();
-        assert_eq!(kept(&served.headers), php, "{what}");
+        assert_eq!(rest_headers(&served.headers), php, "{what}");
         assert_eq!(
             String::from_utf8_lossy(&served.body),
             String::from_utf8_lossy(&case.body),

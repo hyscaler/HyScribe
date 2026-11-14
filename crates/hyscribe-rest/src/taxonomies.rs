@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 
 use hyscribe_phpser::{Key, Value, json_decode};
 
-use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
+use crate::fields::{Properties, fields_for_response, filter_by_context, links_wanted};
 use crate::request::{Arg, Params, Sanitize};
 use crate::response::{Response, RestError, object, text};
 use crate::types::context_arg;
@@ -70,7 +70,7 @@ fn wants_edit(params: &Params) -> bool {
 
 fn cannot_manage(code: &'static str, context: &Context) -> RestError {
     let message = "Sorry, you are not allowed to manage terms in this taxonomy.";
-    RestError::status(code, message, context.authorization_required())
+    context.forbidden(code, message)
 }
 
 /// The taxonomies `type` names, `get_object_taxonomies()`, or all.
@@ -154,10 +154,7 @@ fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
 }
 
 fn requested(params: &Params) -> Option<&'static (Key, Value)> {
-    let name = params
-        .get("taxonomy")
-        .map(Value::to_php_string)
-        .unwrap_or_default();
+    let name = params.text("taxonomy");
     taxonomies()
         .iter()
         .find(|(key, _)| key.to_php_string() == name)
@@ -177,7 +174,7 @@ fn item_permission(context: &Context, params: &Params) -> Result<(), RestError> 
 /// A permission check's `false`.
 pub(crate) fn forbidden(context: &Context) -> RestError {
     let message = "Sorry, you are not allowed to do that.";
-    RestError::status("rest_forbidden", message, context.authorization_required())
+    context.forbidden("rest_forbidden", message)
 }
 
 /// `get_item()`.
@@ -212,7 +209,7 @@ fn prepare(context: &Context, params: &Params, fields: &Value) -> Response {
         Value::Array(filter_by_context(data, PROPERTIES, &params.context())),
         200,
     );
-    if is_field_included("_links", &wanted) || is_field_included("_embedded", &wanted) {
+    if links_wanted(&wanted) {
         response.add_link("collection", context.rest_url("/wp/v2/taxonomies"));
         let items = format!(
             "/{}/{}",

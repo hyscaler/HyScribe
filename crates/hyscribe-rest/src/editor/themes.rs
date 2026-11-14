@@ -52,11 +52,7 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
 
 fn cannot_view(context: &Context) -> RestError {
     let message = "Sorry, you are not allowed to view themes.";
-    RestError::status(
-        "rest_cannot_view_themes",
-        message,
-        context.authorization_required(),
-    )
+    context.forbidden("rest_cannot_view_themes", message)
 }
 
 fn manages_themes(context: &Context) -> bool {
@@ -69,12 +65,7 @@ fn read_active_theme(context: &Context) -> Result<(), RestError> {
         return Ok(());
     }
     let message = "Sorry, you are not allowed to view the active theme.";
-    let status = context.authorization_required();
-    Err(RestError::status(
-        "rest_cannot_view_active_theme",
-        message,
-        status,
-    ))
+    Err(context.forbidden("rest_cannot_view_active_theme", message))
 }
 
 /// `get_items_permissions_check()`.

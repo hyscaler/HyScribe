@@ -49,11 +49,14 @@ impl Params {
             .any(|source| find(source, key).is_some())
     }
 
+    /// `$request[ $key ]` as text, empty when not set.
+    pub(crate) fn text(&self, key: &str) -> Vec<u8> {
+        self.get(key).map(Value::to_php_string).unwrap_or_default()
+    }
+
     /// `$request['context']`, a string after sanitizing.
     pub(crate) fn context(&self) -> Vec<u8> {
-        self.get("context")
-            .map(Value::to_php_string)
-            .unwrap_or_default()
+        self.text("context")
     }
 }
 
@@ -225,6 +228,16 @@ pub(crate) fn arg(name: &'static str, schema: &str, validate: bool, sanitize: Sa
         validate,
         sanitize,
     }
+}
+
+/// An argument `rest_parse_request_arg()` checks by its schema.
+pub(crate) fn typed(name: &'static str, json: &str) -> Arg {
+    arg(name, json, false, Sanitize::Schema)
+}
+
+/// A string argument checked by its schema.
+pub(crate) fn string_arg(name: &'static str) -> Arg {
+    typed(name, r#"{"type":"string"}"#)
 }
 
 /// `get_collection_params()`: the context, the page, its size and the

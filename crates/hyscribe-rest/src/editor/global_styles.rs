@@ -13,7 +13,7 @@ use hyscribe_phpser::{Key, Value, json_decode};
 use hyscribe_render::post::admin_title;
 use hyscribe_render::theme::{Theme, twentytwentyfive};
 
-use crate::fields::{Properties, fields_for_response, is_field_included};
+use crate::fields::{Properties, fields_for_response, is_field_included, links_wanted};
 use crate::request::{Arg, Params, Sanitize};
 use crate::response::{Response, RestError, list, object, text};
 use crate::types::can_edit_any;
@@ -102,15 +102,14 @@ fn can_update(context: &Context, post: &Post) -> bool {
 
 /// `get_item_permissions_check()`.
 fn post_permission(context: &Context, params: &Params) -> Result<(), RestError> {
-    let status = context.authorization_required();
     let edit = params.get("context") == Some(&text("edit"));
     styles_post(context, params).and_then(|post| {
         if edit && !can_update(context, &post) {
             let message = "Sorry, you are not allowed to edit this global style.";
-            Err(RestError::status("rest_forbidden_context", message, status))
+            Err(context.forbidden("rest_forbidden_context", message))
         } else if !context.can_for("read_post", post.id) {
             let message = "Sorry, you are not allowed to view this global style.";
-            Err(RestError::status("rest_cannot_view", message, status))
+            Err(context.forbidden("rest_cannot_view", message))
         } else {
             Ok(())
         }
@@ -120,12 +119,11 @@ fn post_permission(context: &Context, params: &Params) -> Result<(), RestError> 
 /// `update_item_permissions_check()`.
 fn update_permission(context: &Context, params: &Params) -> Result<(), RestError> {
     let message = "Sorry, you are not allowed to edit this global style.";
-    let status = context.authorization_required();
     styles_post(context, params).and_then(|post| {
         if can_update(context, &post) {
             Ok(())
         } else {
-            Err(RestError::status("rest_cannot_edit", message, status))
+            Err(context.forbidden("rest_cannot_edit", message))
         }
     })
 }
@@ -190,7 +188,7 @@ fn post_response(context: &Context, params: &Params, post: &Post) -> Result<Resp
     }
     // `get_fields_for_response()` kept the context's fields.
     let mut response = Response::new(Value::Array(data), 200);
-    if included("_links") || included("_embedded") {
+    if links_wanted(&wanted) {
         let route = format!("/wp/v2/global-styles/{}", post.id);
         crate::self_link(context, &mut response, &route);
         let about = context.rest_url("/wp/v2/types/wp_global_styles");
@@ -223,21 +221,13 @@ fn permission(context: &Context, _: &Params) -> Result<(), RestError> {
         return Ok(());
     }
     let message = "Sorry, you are not allowed to access the global styles on this site.";
-    let status = context.authorization_required();
-    Err(RestError::status(
-        "rest_cannot_read_global_styles",
-        message,
-        status,
-    ))
+    Err(context.forbidden("rest_cannot_read_global_styles", message))
 }
 
 /// The stylesheet asked for, if it is the active theme's: only its global
 /// styles are served.
 fn active(context: &Context, params: &Params) -> Result<Vec<u8>, RestError> {
-    let stylesheet = params
-        .get("stylesheet")
-        .map(Value::to_php_string)
-        .unwrap_or_default();
+    let stylesheet = params.text("stylesheet");
     if context.option("stylesheet").as_ref() == Some(&stylesheet) {
         return Ok(stylesheet);
     }
@@ -259,7 +249,7 @@ fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
         .filter(|(name, _)| is_field_included(name, &wanted))
         .map(|(name, value)| (Key::String(name.as_bytes().to_vec()), value.clone()));
     let mut response = Response::new(Value::Array(data.collect()), 200);
-    if is_field_included("_links", &wanted) || is_field_included("_embedded", &wanted) {
+    if links_wanted(&wanted) {
         let stylesheet = String::from_utf8_lossy(&stylesheet);
         let route = format!("/wp/v2/global-styles/themes/{stylesheet}");
         crate::self_link(context, &mut response, &route);

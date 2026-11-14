@@ -7,6 +7,7 @@
 use hyscribe_phpser::{Key, Value, is_empty_string};
 
 use crate::request::Params;
+use crate::response::Response;
 use crate::schema::{is_list, parse_list};
 
 /// A schema's properties and the contexts each is shown in.
@@ -124,6 +125,11 @@ pub(crate) fn is_field_included(field: &str, fields: &[Vec<u8>]) -> bool {
         .any(|accepted| accepted == field || under(accepted, field) || under(field, accepted))
 }
 
+/// Whether a response's links are wanted: `_links` or `_embedded`.
+pub(crate) fn links_wanted(fields: &[Vec<u8>]) -> bool {
+    is_field_included("_links", fields) || is_field_included("_embedded", fields)
+}
+
 /// Whether a property is shown in `context`.
 fn shown(contexts: &[&str], context: &[u8]) -> bool {
     contexts.iter().any(|c| c.as_bytes() == context)
@@ -172,6 +178,25 @@ pub(crate) fn filter_by_context(
                 .is_none_or(|(_, contexts)| shown(contexts, context))
         })
         .collect()
+}
+
+/// The response of an item's `fields`, each computed only when `wanted`,
+/// kept as `rest_filter_response_by_context()` keeps them in `context`.
+pub(crate) fn item_response(
+    fields: &[(&str, &dyn Fn() -> Value)],
+    wanted: &[Vec<u8>],
+    properties: &Properties,
+    context: &[u8],
+) -> Response {
+    let data = fields
+        .iter()
+        .filter(|(name, _)| wanted.iter().any(|field| field == name.as_bytes()))
+        .map(|(name, value)| (Key::String(name.as_bytes().to_vec()), value()))
+        .collect();
+    Response::new(
+        Value::Array(filter_by_context(data, properties, context)),
+        200,
+    )
 }
 
 #[cfg(test)]

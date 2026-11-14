@@ -351,10 +351,6 @@ async fn authors_posts_are_read() {
         let types = [("post".to_string(), false)];
         assert!(hyscribe_rest::Site::has_posts(&rest, 1, &types));
         assert!(!hyscribe_rest::Site::has_posts(&rest, 2, &types));
-        assert_eq!(
-            hyscribe_rest::Site::home_url(&rest),
-            "http://127.0.0.1:8081"
-        );
         // `FIELD()` of no slugs, as PHP writes it, orders nothing.
         let slugs = UserQuery {
             order: (hyscribe_model::UserOrder::Nicenames, false),

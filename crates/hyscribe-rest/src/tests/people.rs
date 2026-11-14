@@ -7,6 +7,8 @@ use std::cmp::Ordering;
 
 use hyscribe_model::{Comment, CommentOrder, CommentQuery, CommentRow, User, UserOrder, UserQuery};
 
+use hyscribe_testkit::{RestCase, rest_cases};
+
 use super::content::{Content, collate};
 
 fn lower(text: &[u8]) -> String {
@@ -227,7 +229,7 @@ impl Content {
 /// What the comments and users routes leave unanswered: a visitor's users
 /// request but `/users/me`, and embedding a comment's links (a
 /// user has none to embed).
-fn unported(case: &super::Case) -> bool {
+fn unported(case: &RestCase) -> bool {
     let users = case.target.contains("/wp/v2/users");
     let me = case.target.contains("/users/me");
     (case.who == "visitor" && users && !me) || (!users && case.target.contains("_embed"))
@@ -262,9 +264,7 @@ fn people_answer_as_php() {
         failures.len(),
         failures.join("\n")
     );
-    let expected = goldens
-        .iter()
-        .flat_map(|(_, golden, _)| super::cases_of(golden));
+    let expected = goldens.iter().flat_map(|(_, golden, _)| rest_cases(golden));
     assert_eq!(not_served, expected.filter(unported).count());
 }
 

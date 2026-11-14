@@ -28,11 +28,8 @@ use hyscribe_phpser::{Key, Value, is_empty_string, json_encode, json_encode_pret
 use hyscribe_render::site::Site as Reads;
 use hyscribe_render::theme::Theme;
 
-pub use response::{Response, RestError, paginate};
-pub use schema::{Checked, Refusal, sanitize_value_from_schema, validate_value_from_schema};
-
 use request::{Arg, Params, defaults, has_valid_params, sanitize_params};
-use response::{object, text};
+use response::{Response, RestError, object, text};
 
 /// What the REST API reads from the site.
 pub trait Site {
@@ -54,9 +51,9 @@ pub trait Site {
     /// `get_term_link( $term, $taxonomy )`.
     fn term_link(&self, taxonomy: &str, term: &Term) -> String;
     /// `get_post( $id )`.
-    fn post(&self, id: u64) -> Option<Post>;
-    /// `home_url()`.
-    fn home_url(&self) -> String;
+    fn post(&self, id: u64) -> Option<Post> {
+        self.reads().post(id)
+    }
     /// The table prefix, which some meta keys and options begin with.
     fn table_prefix(&self) -> String;
     /// The comments `WP_Comment_Query` selects with `query`, in its order.
@@ -70,7 +67,9 @@ pub trait Site {
     /// How many users `query` selects, without its limit and offset.
     fn count_users(&self, query: &UserQuery) -> u64;
     /// `get_userdata( $id )`.
-    fn user(&self, id: u64) -> Option<User>;
+    fn user(&self, id: u64) -> Option<User> {
+        self.reads().user(id)
+    }
     /// `get_user_meta( $id, $key, true )`, if stored.
     fn user_meta(&self, id: u64, key: &str) -> Option<Vec<u8>>;
     /// The user's `user_registered`.
@@ -85,9 +84,13 @@ pub trait Site {
     /// Every post of `post_type` whatever its status, newest first.
     fn posts_of_type(&self, post_type: &str) -> Vec<Post>;
     /// `get_the_terms( $post, $taxonomy )`, by name.
-    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term>;
+    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term> {
+        self.reads().post_terms(post, taxonomy)
+    }
     /// `get_post_meta( $post, $key, true )`.
-    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>>;
+    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>> {
+        self.reads().post_meta(post, key)
+    }
     /// The IDs of the revisions of `post`, newest first.
     fn revisions(&self, post: u64) -> Vec<u64>;
     /// The site's content as `hyscribe-render` reads it, for the post
@@ -170,13 +173,13 @@ impl Context<'_> {
 
     /// `current_user_can( $cap, $id )`.
     pub(crate) fn can_for(&self, cap: &str, id: u64) -> bool {
-        let id = i64::try_from(id).unwrap_or(i64::MAX);
-        self.site.can(self.user, cap, &[Value::Int(id)])
+        self.site.can(self.user, cap, &[response::int(id)])
     }
 
-    /// `rest_authorization_required_code()`.
-    pub(crate) fn authorization_required(&self) -> u16 {
-        if self.user == 0 { 401 } else { 403 }
+    /// An error sent with `rest_authorization_required_code()`.
+    pub(crate) fn forbidden(&self, code: &'static str, message: &str) -> RestError {
+        let status = if self.user == 0 { 401 } else { 403 };
+        RestError::status(code, message, status)
     }
 
     /// `get_option( $name )`.

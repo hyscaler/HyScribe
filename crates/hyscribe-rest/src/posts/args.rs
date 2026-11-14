@@ -7,15 +7,10 @@ use hyscribe_phpser::{Value, json_decode};
 
 use super::Kind;
 use crate::Context;
-use crate::request::{Arg, Sanitize, arg};
-use crate::response::{RestError, list, text};
+use crate::request::{Arg, Sanitize, arg, string_arg, typed};
+use crate::response::{list, text};
 use crate::schema::{Checked, Refusal, parse_list, validate_value_from_schema};
 use crate::types::context_arg;
-
-/// An argument `rest_parse_request_arg()` checks by its schema.
-fn typed(name: &'static str, json: &str) -> Arg {
-    arg(name, json, false, Sanitize::Schema)
-}
 
 const IDS: &str = r#"{"type":"array","items":{"type":"integer"},"default":[]}"#;
 const STATUSES: &str = r#"{"default":"publish","type":"array","items":{"enum":["publish","future","draft","pending","private","trash","auto-draft","inherit","request-pending","request-confirmed","request-failed","request-completed","any"],"type":"string"}}"#;
@@ -124,7 +119,7 @@ pub(super) fn item() -> Vec<Arg> {
         id(),
         context_arg(),
         typed("excerpt_length", r#"{"type":"integer"}"#),
-        typed("password", r#"{"type":"string"}"#),
+        string_arg("password"),
     ]
 }
 
@@ -155,8 +150,7 @@ fn statuses(context: &Context, statuses: &Value, kind: Kind) -> Checked<Value> {
     for status in parsed.iter().filter(|status| *status != b"publish") {
         let private = status == b"private" && context.can(&kind.cap("read_private_posts"));
         if !context.can(&kind.cap("edit_posts")) && !private {
-            let code = context.authorization_required();
-            let error = RestError::status("rest_forbidden_status", "Status is forbidden.", code);
+            let error = context.forbidden("rest_forbidden_status", "Status is forbidden.");
             return Err(Refusal(Some(error)));
         }
         validate_value_from_schema(&text(status.clone()), &schema, "status")?;

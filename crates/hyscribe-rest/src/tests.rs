@@ -6,7 +6,9 @@
 
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
 use hyscribe_phpser::parse_str;
-use hyscribe_testkit::unhex;
+use hyscribe_testkit::{RestCase, rest_cases, rest_headers};
+
+use crate::response::paginate;
 
 use super::*;
 
@@ -178,9 +180,6 @@ impl Site for Oracle {
         revisions.sort_by(|a, b| (&b.date, b.id).cmp(&(&a.date, a.id)));
         revisions.iter().map(|revision| revision.id).collect()
     }
-    fn home_url(&self) -> String {
-        SITE.into()
-    }
     fn table_prefix(&self) -> String {
         "wp_".into()
     }
@@ -247,40 +246,8 @@ impl Site for Oracle {
     }
 }
 
-/// A recorded request and PHP's answer.
-pub(crate) struct Case {
-    pub(crate) who: String,
-    pub(crate) method: String,
-    pub(crate) target: String,
-    pub(crate) flags: String,
-    /// 0 for a request that writes, which the golden records as `writes`.
-    pub(crate) status: u16,
-    pub(crate) headers: Vec<String>,
-    pub(crate) body: Vec<u8>,
-}
-
-fn cases() -> Vec<Case> {
-    cases_of(include_str!("../tests/golden/rest.tsv"))
-}
-
-/// The cases of a golden recorded by `reference/rest/golden.sh`.
-pub(crate) fn cases_of(golden: &str) -> Vec<Case> {
-    golden
-        .lines()
-        .map(|line| {
-            let fields: Vec<&str> = line.split('\t').collect();
-            let text = |i: usize| String::from_utf8(unhex(fields[i])).unwrap();
-            Case {
-                who: fields[0].into(),
-                method: fields[1].into(),
-                target: text(2),
-                flags: fields[3].into(),
-                status: fields[4].parse().unwrap_or(0),
-                headers: text(5).lines().map(String::from).collect(),
-                body: unhex(fields[6]),
-            }
-        })
-        .collect()
+fn cases() -> Vec<RestCase> {
+    rest_cases(include_str!("../tests/golden/rest.tsv"))
 }
 
 /// The REST route of a request, as the rewrite rules and `$_GET` give it.
@@ -298,26 +265,34 @@ fn route(path: &str, get: &[(Key, Value)]) -> Vec<u8> {
 }
 
 /// `case` served by HyScribe's API over the default install.
-pub(crate) fn serve_case(case: &Case) -> Served {
+pub(crate) fn serve_case(case: &RestCase) -> Served {
     serve_over(content::default_install(), case)
 }
 
 /// `case` served by HyScribe's API over `content`.
-pub(crate) fn serve_over(content: &'static Content, case: &Case) -> Served {
+pub(crate) fn serve_over(content: &'static Content, case: &RestCase) -> Served {
+    let oracle = Oracle {
+        content,
+        pretty: case.flag("pretty"),
+    };
+    serve_with(&oracle, case)
+}
+
+/// The role of `who` and its user, none for a visitor.
+pub(super) fn role(who: &str) -> (&'static str, u64) {
+    let found = ROLES.iter().find(|(role, _)| *role == who);
+    found.copied().unwrap_or(("", 0))
+}
+
+/// `case` served by HyScribe's API over `site`.
+pub(super) fn serve_with(site: &dyn Site, case: &RestCase) -> Served {
     let (path, query) = case.target.split_once('?').unwrap_or((&case.target, ""));
     let get = match parse_str(query.as_bytes()) {
         Value::Array(get) => get,
         _ => Vec::new(),
     };
-    let user = ROLES
-        .iter()
-        .find(|(role, _)| *role == case.who)
-        .map_or(0, |(_, user)| *user);
-    let flag = |name: &str| case.flags.split(',').any(|flag| flag == name);
-    let oracle = Oracle {
-        content,
-        pretty: flag("pretty"),
-    };
+    let (_, user) = role(&case.who);
+    let flag = |name: &str| case.flag(name);
     let route = route(path, &get);
     let request = Request {
         method: &case.method,
@@ -336,33 +311,7 @@ pub(crate) fn serve_over(content: &'static Content, case: &Case) -> Served {
         nonce: (user != 0 && !flag("nononce")).then_some(b"%nonce%"),
         method_override: flag("override").then_some(b"DELETE"),
     };
-    serve(&oracle, &request)
-}
-
-/// The headers the golden keeps, as it writes them.
-pub(crate) fn kept(headers: &[(String, String)]) -> Vec<String> {
-    let kept = |name: &str| {
-        [
-            "content-type",
-            "x-robots-tag",
-            "link",
-            "allow",
-            "vary",
-            "expires",
-            "cache-control",
-        ]
-        .contains(&name)
-            || name.starts_with("access-control-")
-            || name.starts_with("x-wp-")
-    };
-    let mut headers: Vec<String> = headers
-        .iter()
-        .map(|(name, value)| (name.to_ascii_lowercase(), value))
-        .filter(|(name, _)| kept(name))
-        .map(|(name, value)| format!("{name}: {value}"))
-        .collect();
-    headers.sort();
-    headers
+    serve(site, &request)
 }
 
 /// Requests PHP answers on routes or with arguments not ported.
@@ -409,7 +358,7 @@ fn answers_match_php() {
         assert_eq!(served.status, case.status, "{what}");
         let mut php = case.headers.clone();
         php.sort();
-        assert_eq!(kept(&served.headers), php, "{what}");
+        assert_eq!(rest_headers(&served.headers), php, "{what}");
         assert_eq!(
             String::from_utf8_lossy(&served.body),
             String::from_utf8_lossy(&case.body),
@@ -449,7 +398,7 @@ fn pages_are_linked_as_php_links_them() {
         };
         let mut php: Vec<String> = case.headers.iter().filter(paging).cloned().collect();
         php.sort();
-        assert_eq!(kept(&response.headers), php);
+        assert_eq!(rest_headers(&response.headers), php);
         seen += 1;
     }
     assert_eq!(seen, 2);
@@ -463,7 +412,7 @@ fn a_single_page_has_no_links() {
     let mut response = Response::new(Value::Null, 200);
     paginate(&mut response, (1, 1, 1), &[], "http://example.test/x");
     assert_eq!(
-        kept(&response.headers),
+        rest_headers(&response.headers),
         ["x-wp-total: 1", "x-wp-totalpages: 1"]
     );
 }
@@ -472,18 +421,28 @@ fn a_single_page_has_no_links() {
 /// where it writes.
 const CONTENT_UNPORTED: [&str; 1] = ["/?rest_route=/wp/v2/categories/68&_embed=up"];
 
+/// The SHA-256 of `body` in hex, as the Theme Test Data goldens keep it.
+pub(super) fn sha256_hex(body: &[u8]) -> Vec<u8> {
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(body);
+    digest
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>()
+        .into_bytes()
+}
+
 /// The answers of `goldens`, each over its content and compared by hash
 /// when flagged, that differ from PHP's, and how many are 501 as
 /// `unported` expects; a write method is never served.
 fn mismatches(
     goldens: &[(&'static Content, &str, bool)],
-    unported: &dyn Fn(&Case) -> bool,
+    unported: &dyn Fn(&RestCase) -> bool,
 ) -> (Vec<String>, usize) {
-    use sha2::Digest;
     let mut failures = Vec::new();
     let mut not_served = 0;
     for &(content, golden, hashed) in goldens {
-        for case in cases_of(golden) {
+        for case in rest_cases(golden) {
             let served = serve_over(content, &case);
             let what = format!(
                 "{} {} {} {} {hashed}",
@@ -498,24 +457,22 @@ fn mismatches(
                 continue;
             }
             let body = if hashed {
-                let digest = sha2::Sha256::digest(&served.body);
-                digest
-                    .iter()
-                    .map(|b| format!("{b:02x}"))
-                    .collect::<String>()
-                    .into_bytes()
+                sha256_hex(&served.body)
             } else {
                 served.body.clone()
             };
             let mut php = case.headers.clone();
             php.sort();
-            if served.status != case.status || kept(&served.headers) != php || body != case.body {
+            if served.status != case.status
+                || rest_headers(&served.headers) != php
+                || body != case.body
+            {
                 failures.push(format!(
                     "{what}\n  php:  {} {php:?}\n       {}\n  ours: {} {:?}\n       {}",
                     case.status,
                     String::from_utf8_lossy(&case.body),
                     served.status,
-                    kept(&served.headers),
+                    rest_headers(&served.headers),
                     String::from_utf8_lossy(&served.body)
                 ));
             }
@@ -540,7 +497,7 @@ fn content_answers_match_php() {
             true,
         ),
     ];
-    let unported = |case: &Case| CONTENT_UNPORTED.contains(&case.target.as_str());
+    let unported = |case: &RestCase| CONTENT_UNPORTED.contains(&case.target.as_str());
     let (failures, _) = mismatches(&goldens, &unported);
     assert!(
         failures.is_empty(),
@@ -594,7 +551,7 @@ fn changed(options: &[(&str, &[u8])]) -> &'static Content {
 }
 
 fn get(content: &'static Content, who: &str, target: &str) -> Served {
-    let case = Case {
+    let case = RestCase {
         who: who.into(),
         method: "GET".into(),
         target: target.into(),

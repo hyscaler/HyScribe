@@ -131,10 +131,6 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     ])
 }
 
-fn forbidden(context: &Context, code: &'static str, message: &str) -> RestError {
-    RestError::status(code, message, context.authorization_required())
-}
-
 /// `get_items_permissions_check()`.
 fn items_permission(context: &Context, params: &Params, kind: Kind) -> Result<(), RestError> {
     if args::NOT_PORTED.iter().any(|name| params.has(name)) {
@@ -142,7 +138,7 @@ fn items_permission(context: &Context, params: &Params, kind: Kind) -> Result<()
     }
     if params.context() == b"edit" && !context.can(&kind.cap("edit_posts")) {
         let message = "Sorry, you are not allowed to edit posts in this post type.";
-        return Err(forbidden(context, "rest_forbidden_context", message));
+        return Err(context.forbidden("rest_forbidden_context", message));
     }
     Ok(())
 }
@@ -186,17 +182,17 @@ fn create_permission(context: &Context, params: &Params, kind: Kind) -> Result<(
     let others = context.can(&kind.cap("edit_others_posts"));
     if other_author(context, params) && !others {
         let message = "Sorry, you are not allowed to create posts as this user.";
-        return Err(forbidden(context, "rest_cannot_edit_others", message));
+        return Err(context.forbidden("rest_cannot_edit_others", message));
     }
     if set(params, "sticky") && (!others || !context.can(&kind.cap("publish_posts"))) {
         let message = "Sorry, you are not allowed to make posts sticky.";
-        return Err(forbidden(context, "rest_cannot_assign_sticky", message));
+        return Err(context.forbidden("rest_cannot_assign_sticky", message));
     }
     // The terms check after it never fails here: the collection's
     // `categories` and `tags` are not ported.
     if !context.can(&kind.cap("create_posts")) {
         let message = "Sorry, you are not allowed to create posts as this user.";
-        return Err(forbidden(context, "rest_cannot_create", message));
+        return Err(context.forbidden("rest_cannot_create", message));
     }
     Ok(())
 }
@@ -226,7 +222,7 @@ fn item_permission(context: &Context, params: &Params, kind: Kind) -> Result<(),
     let post = get_post(context, params, kind)?;
     if params.context() == b"edit" && !can_update(context, &post) {
         let message = "Sorry, you are not allowed to edit this post.";
-        return Err(forbidden(context, "rest_forbidden_context", message));
+        return Err(context.forbidden("rest_forbidden_context", message));
     }
     let password =
         hyscribe_phpser::lookup(&params.get, "password").filter(|password| !password.is_empty());
@@ -241,7 +237,7 @@ fn item_permission(context: &Context, params: &Params, kind: Kind) -> Result<(),
         return Ok(());
     }
     let message = "Sorry, you are not allowed to do that.";
-    Err(forbidden(context, "rest_forbidden", message))
+    Err(context.forbidden("rest_forbidden", message))
 }
 
 /// `update_item_permissions_check()`.
@@ -249,22 +245,22 @@ fn update_permission(context: &Context, params: &Params, kind: Kind) -> Result<(
     let post = get_post(context, params, kind)?;
     if !can_update(context, &post) {
         let message = "Sorry, you are not allowed to edit this post.";
-        return Err(forbidden(context, "rest_cannot_edit", message));
+        return Err(context.forbidden("rest_cannot_edit", message));
     }
     let others = context.can(&kind.cap("edit_others_posts"));
     if other_author(context, params) && !others {
         let message = "Sorry, you are not allowed to update posts as this user.";
-        return Err(forbidden(context, "rest_cannot_edit_others", message));
+        return Err(context.forbidden("rest_cannot_edit_others", message));
     }
     let sticky = params.get("sticky").map(|sticky| !sticky.is_empty());
     let changes = sticky.is_some_and(|sticky| sticky != is_sticky(context, post.id));
     if changes && (!others || !context.can(&kind.cap("publish_posts"))) {
         let message = "Sorry, you are not allowed to make posts sticky.";
-        return Err(forbidden(context, "rest_cannot_assign_sticky", message));
+        return Err(context.forbidden("rest_cannot_assign_sticky", message));
     }
     if !can_assign_terms(context, params, kind) {
         let message = "Sorry, you are not allowed to assign the provided terms.";
-        return Err(forbidden(context, "rest_cannot_assign_term", message));
+        return Err(context.forbidden("rest_cannot_assign_term", message));
     }
     Ok(())
 }
@@ -276,7 +272,7 @@ fn delete_permission(context: &Context, params: &Params, kind: Kind) -> Result<(
         return Ok(());
     }
     let message = "Sorry, you are not allowed to delete this post.";
-    Err(forbidden(context, "rest_cannot_delete", message))
+    Err(context.forbidden("rest_cannot_delete", message))
 }
 
 /// The `sticky_posts` option.
@@ -353,10 +349,7 @@ fn query(
     params: &Params,
     kind: Kind,
 ) -> Result<(PostQuery, u64, u32), RestError> {
-    let orderby = params
-        .get("orderby")
-        .map(Value::to_php_string)
-        .unwrap_or_default();
+    let orderby = params.text("orderby");
     let search = params
         .get("search")
         .map(Value::to_php_string)

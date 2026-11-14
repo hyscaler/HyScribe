@@ -8,7 +8,9 @@ use std::sync::OnceLock;
 
 use hyscribe_phpser::{Key, Value, json_decode};
 
-use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
+use crate::fields::{
+    Properties, fields_for_response, filter_by_context, is_field_included, links_wanted,
+};
 use crate::request::{Arg, Params, Sanitize};
 use crate::response::{Response, RestError, object, text};
 use crate::{Context, Endpoint};
@@ -93,7 +95,7 @@ fn wants_edit(params: &Params) -> bool {
 
 fn cannot_edit(code: &'static str, context: &Context) -> RestError {
     let message = "Sorry, you are not allowed to edit posts in this post type.";
-    RestError::status(code, message, context.authorization_required())
+    context.forbidden(code, message)
 }
 
 /// Whether the post type `name` is registered.
@@ -185,10 +187,7 @@ fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
 
 /// `get_item()`.
 fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
-    let name = params
-        .get("type")
-        .map(Value::to_php_string)
-        .unwrap_or_default();
+    let name = params.text("type");
     let Some((_, fields)) = post_types()
         .iter()
         .find(|(key, _)| key.to_php_string() == name)
@@ -200,12 +199,7 @@ fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
         ));
     };
     if !matches!(fields, Value::Array(_)) {
-        let status = context.authorization_required();
-        return Err(RestError::status(
-            "rest_cannot_read_type",
-            "Cannot view post type.",
-            status,
-        ));
+        return Err(context.forbidden("rest_cannot_read_type", "Cannot view post type."));
     }
     if wants_edit(params) && !can_edit(context, fields) {
         return Err(cannot_edit("rest_forbidden_context", context));
@@ -233,7 +227,7 @@ fn prepare(context: &Context, params: &Params, fields: &Value) -> Response {
         Value::Array(filter_by_context(data, PROPERTIES, &shown)),
         200,
     );
-    if is_field_included("_links", &wanted) || is_field_included("_embedded", &wanted) {
+    if links_wanted(&wanted) {
         response.add_link("collection", context.rest_url("/wp/v2/types"));
         let slug = String::from_utf8_lossy(field(fields, "slug"));
         let items = items_route(&slug).unwrap_or_default();

@@ -6,14 +6,12 @@
 use hyscribe_model::{Comment, CommentOrder, CommentQuery, CommentRow, Post};
 use hyscribe_phpser::{Key, Value, add_query_arg};
 use hyscribe_render::date::{Zone, format_unix, site_zone, stored_unix};
-use hyscribe_render::{avatar_url, front_comment_text, user_name};
+use hyscribe_render::{front_comment_text, user_name};
 
-use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
-use crate::request::{Arg, Params, Sanitize, arg, collection_args};
-use crate::response::{Response, RestError, list, object, paginate, text};
-use crate::schema::{
-    parse_date, parse_list, sanitize_value_from_schema, validate_value_from_schema,
-};
+use crate::fields::{Properties, fields_for_response, item_response, links_wanted};
+use crate::request::{Arg, Params, Sanitize, arg, collection_args, string_arg, typed};
+use crate::response::{Response, RestError, int, list, object, paginate, text};
+use crate::schema::{parse_date, parse_list, prepare_value};
 use crate::terms::ids;
 use crate::types::{context_arg, items_route};
 use crate::users::{avatar_urls, rfc3339};
@@ -66,34 +64,19 @@ fn items_args() -> Vec<Arg> {
     let date = r#"{"type":"string","format":"date-time"}"#;
     let mut args = collection_args();
     args.extend([
-        arg("after", date, false, Sanitize::Schema),
-        arg("author", ints, false, Sanitize::Schema),
-        arg("author_exclude", ints, false, Sanitize::Schema),
-        arg(
-            "author_email",
-            r#"{"default":null,"format":"email","type":"string"}"#,
-            false,
-            Sanitize::Schema,
-        ),
-        arg("before", date, false, Sanitize::Schema),
-        arg("exclude", ints_or_none, false, Sanitize::Schema),
-        arg("include", ints_or_none, false, Sanitize::Schema),
-        arg("offset", r#"{"type":"integer"}"#, false, Sanitize::Schema),
-        arg(
-            "order",
-            r#"{"type":"string","default":"desc","enum":["asc","desc"]}"#,
-            false,
-            Sanitize::Schema,
-        ),
-        arg(
-            "orderby",
-            r#"{"type":"string","default":"date_gmt","enum":["date","date_gmt","id","include","post","parent","type"]}"#,
-            false,
-            Sanitize::Schema,
-        ),
-        arg("parent", ints_or_none, false, Sanitize::Schema),
-        arg("parent_exclude", ints_or_none, false, Sanitize::Schema),
-        arg("post", ints_or_none, false, Sanitize::Schema),
+        typed("after", date),
+        typed("author", ints),
+        typed("author_exclude", ints),
+        typed("author_email", r#"{"default":null,"format":"email","type":"string"}"#),
+        typed("before", date),
+        typed("exclude", ints_or_none),
+        typed("include", ints_or_none),
+        typed("offset", r#"{"type":"integer"}"#),
+        typed("order", r#"{"type":"string","default":"desc","enum":["asc","desc"]}"#),
+        typed("orderby", r#"{"type":"string","default":"date_gmt","enum":["date","date_gmt","id","include","post","parent","type"]}"#),
+        typed("parent", ints_or_none),
+        typed("parent_exclude", ints_or_none),
+        typed("post", ints_or_none),
         arg(
             "status",
             r#"{"default":"approve","type":"string"}"#,
@@ -106,14 +89,14 @@ fn items_args() -> Vec<Arg> {
             true,
             Sanitize::Key,
         ),
-        arg("password", r#"{"type":"string"}"#, false, Sanitize::Schema),
+        string_arg("password"),
     ]);
     args
 }
 
 /// The endpoints of the route `regex`, if ported.
 pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
-    let id = || arg("id", r#"{"type":"integer"}"#, false, Sanitize::Schema);
+    let id = || typed("id", r#"{"type":"integer"}"#);
     match regex {
         ROUTE => Some(vec![
             Endpoint {
@@ -128,7 +111,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
             },
         ]),
         "/wp/v2/comments/(?P<id>[\\d]+)" => {
-            let password = arg("password", r#"{"type":"string"}"#, false, Sanitize::Schema);
+            let password = string_arg("password");
             let write = |permission| Endpoint {
                 args: vec![id()],
                 permission,
@@ -148,18 +131,6 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     }
 }
 
-fn error(code: &'static str, message: &str, context: &Context) -> RestError {
-    RestError::status(code, message, context.authorization_required())
-}
-
-/// A parameter as text, empty when not set.
-fn param(params: &Params, name: &str) -> Vec<u8> {
-    params
-        .get(name)
-        .map(Value::to_php_string)
-        .unwrap_or_default()
-}
-
 fn post_ids(params: &Params) -> Vec<Value> {
     parse_list(&params.get("post").cloned().unwrap_or_default())
         .into_iter()
@@ -169,7 +140,7 @@ fn post_ids(params: &Params) -> Vec<Value> {
 
 /// `get_items_permissions_check()`.
 fn items_permission(context: &Context, params: &Params) -> Result<(), RestError> {
-    let note = param(params, "type") == b"note";
+    let note = params.text("type") == b"note";
     let edit = params.context() == b"edit";
     let posts = params.get("post").is_some_and(|post| !post.is_empty());
     let protected = ["author", "author_exclude", "author_email", "type", "status"];
@@ -178,15 +149,15 @@ fn items_permission(context: &Context, params: &Params) -> Result<(), RestError>
             .iter()
             .copied()
             .filter(|name| match *name {
-                "status" => param(params, name) != b"approve",
-                "type" => param(params, name) != b"comment",
+                "status" => params.text(name) != b"approve",
+                "type" => params.text(name) != b"comment",
                 name => params.get(name).is_some_and(|value| !value.is_empty()),
             })
             .collect()
     };
     let not_permitted = |names: Vec<&str>| {
         let message = format!("Query parameter not permitted: {}", names.join(", "));
-        error("rest_forbidden_param", &message, context)
+        context.forbidden("rest_forbidden_param", &message)
     };
     if posts {
         for id in post_ids(params) {
@@ -196,11 +167,11 @@ fn items_permission(context: &Context, params: &Params) -> Result<(), RestError>
             match &post {
                 Some(post) if id.to_int() != 0 && !can_read_post(context, params, post) => {
                     let message = "Sorry, you are not allowed to read the post for this comment.";
-                    return Err(error("rest_cannot_read_post", message, context));
+                    return Err(context.forbidden("rest_cannot_read_post", message));
                 }
                 _ if id == Value::Int(0) && !context.can("moderate_comments") => {
                     let message = "Sorry, you are not allowed to read comments without a post.";
-                    return Err(error("rest_cannot_read", message, context));
+                    return Err(context.forbidden("rest_cannot_read", message));
                 }
                 _ => {}
             }
@@ -221,12 +192,12 @@ fn items_permission(context: &Context, params: &Params) -> Result<(), RestError>
         for id in post_ids(params) {
             if !context.can_for("edit_post", id.to_int().unsigned_abs()) {
                 let message = "Sorry, you are not allowed to edit comments.";
-                return Err(error("rest_forbidden_context", message, context));
+                return Err(context.forbidden("rest_forbidden_context", message));
             }
         }
     } else if edit && !context.can("moderate_comments") {
         let message = "Sorry, you are not allowed to edit comments.";
-        return Err(error("rest_forbidden_context", message, context));
+        return Err(context.forbidden("rest_forbidden_context", message));
     }
     let names = forbidden();
     if !context.can("edit_posts") && !names.is_empty() {
@@ -276,7 +247,7 @@ fn can_access_password(context: &Context, params: &Params, post: &Post) -> bool 
     if params.context() == b"edit" && context.can_for("edit_post", post.id) {
         return true;
     }
-    let password = param(params, "password");
+    let password = params.text("password");
     !Value::String(password.clone()).is_empty() && password == post.password
 }
 
@@ -359,16 +330,16 @@ fn item_permission(context: &Context, params: &Params) -> Result<(), RestError> 
     };
     if params.context() == b"edit" && !may_edit {
         let message = "Sorry, you are not allowed to edit comments.";
-        return Err(error("rest_forbidden_context", message, context));
+        return Err(context.forbidden("rest_forbidden_context", message));
     }
     if !can_read(context, params, &row) {
         let message = "Sorry, you are not allowed to read this comment.";
-        return Err(error("rest_cannot_read", message, context));
+        return Err(context.forbidden("rest_cannot_read", message));
     }
     let post = context.site.post(comment.post_id);
     if post.is_some_and(|post| !can_read_post(context, params, &post)) {
         let message = "Sorry, you are not allowed to read the post for this comment.";
-        return Err(error("rest_cannot_read_post", message, context));
+        return Err(context.forbidden("rest_cannot_read_post", message));
     }
     Ok(())
 }
@@ -390,7 +361,7 @@ fn edit_permission(context: &Context, params: &Params) -> Result<(), RestError> 
     let comment = &row.comment;
     if !can_edit(context, comment) {
         let message = "Sorry, you are not allowed to edit this comment.";
-        return Err(error("rest_cannot_edit", message, context));
+        return Err(context.forbidden("rest_cannot_edit", message));
     }
     match params.get("post").map(Value::to_int) {
         Some(post) if post != i64::try_from(comment.post_id).unwrap_or(i64::MAX) => {
@@ -407,7 +378,7 @@ fn delete_permission(context: &Context, params: &Params) -> Result<(), RestError
         return Ok(());
     }
     let message = "Sorry, you are not allowed to delete this comment.";
-    Err(error("rest_cannot_delete", message, context))
+    Err(context.forbidden("rest_cannot_delete", message))
 }
 
 fn no_post() -> RestError {
@@ -424,11 +395,11 @@ fn target_permission(context: &Context, id: i64, note: bool) -> Result<(), RestE
     let may = context.can_for("edit_post", id) || (!note && context.can("moderate_comments"));
     if !may && note {
         let message = "Sorry, you are not allowed to create notes for this post.";
-        return Err(error("rest_cannot_create_note", message, context));
+        return Err(context.forbidden("rest_cannot_create_note", message));
     }
     if !may {
         let message = "Sorry, you are not allowed to edit this comment.";
-        return Err(error("rest_cannot_edit", message, context));
+        return Err(context.forbidden("rest_cannot_edit", message));
     }
     let post = context.site.post(id).ok_or_else(no_post)?;
     if !note {
@@ -453,7 +424,7 @@ fn target_permission(context: &Context, id: i64, note: bool) -> Result<(), RestE
 
 /// `create_item_permissions_check()`, for the `Allow` header.
 fn create_permission(context: &Context, params: &Params) -> Result<(), RestError> {
-    let note = param(params, "type") == b"note";
+    let note = params.text("type") == b"note";
     let login = || {
         let message = "Sorry, you must be logged in to comment.";
         RestError::status("rest_comment_login_required", message, 401)
@@ -465,7 +436,7 @@ fn create_permission(context: &Context, params: &Params) -> Result<(), RestError
     // The collection's `author` is a list, never the user's ID.
     if params.get("author").is_some() && !context.can("moderate_comments") {
         let message = "Sorry, you are not allowed to edit 'author' for comments.";
-        return Err(error("rest_comment_invalid_author", message, context));
+        return Err(context.forbidden("rest_comment_invalid_author", message));
     }
     // `$_SERVER['REMOTE_ADDR']` is not read.
     if params.get("author_ip").is_some() && !context.can("moderate_comments") {
@@ -483,7 +454,7 @@ fn create_permission(context: &Context, params: &Params) -> Result<(), RestError
     };
     if params.get("status").is_some() && !may_set_status {
         let message = "Sorry, you are not allowed to edit 'status' for comments.";
-        return Err(error("rest_comment_invalid_status", message, context));
+        return Err(context.forbidden("rest_comment_invalid_status", message));
     }
     if !has_post {
         return Err(no_post());
@@ -503,7 +474,7 @@ fn create_permission(context: &Context, params: &Params) -> Result<(), RestError
     }
     if !can_read_post(context, params, &post) {
         let message = "Sorry, you are not allowed to read the post for this comment.";
-        return Err(error("rest_cannot_read_post", message, context));
+        return Err(context.forbidden("rest_cannot_read_post", message));
     }
     if post.comment_status != "open" {
         let message = "Sorry, comments are closed for this item.";
@@ -548,7 +519,7 @@ fn local_time(context: &Context, date: &[u8]) -> String {
 
 /// The query `get_items()` prepares, without its page.
 fn prepared(context: &Context, params: &Params) -> CommentQuery {
-    let status = param(params, "status");
+    let status = params.text("status");
     let approved = match status.as_slice() {
         b"any" => None,
         b"hold" => Some(vec!["0".into()]),
@@ -556,7 +527,7 @@ fn prepared(context: &Context, params: &Params) -> CommentQuery {
         b"all" | b"" => Some(vec!["0".into(), "1".into()]),
         other => Some(vec![String::from_utf8_lossy(other).into_owned()]),
     };
-    let ty = String::from_utf8_lossy(&param(params, "type")).into_owned();
+    let ty = String::from_utf8_lossy(&params.text("type")).into_owned();
     let types = match ty.as_str() {
         "" | "all" => Vec::new(),
         "comment" | "comments" => vec![String::new(), "comment".into()],
@@ -568,7 +539,7 @@ fn prepared(context: &Context, params: &Params) -> CommentQuery {
     } else {
         vec!["note".into()]
     };
-    let order = match param(params, "orderby").as_slice() {
+    let order = match params.text("orderby").as_slice() {
         b"date" => CommentOrder::Date,
         b"id" => CommentOrder::Id,
         b"include" => CommentOrder::Include,
@@ -577,7 +548,7 @@ fn prepared(context: &Context, params: &Params) -> CommentQuery {
         b"type" => CommentOrder::Type,
         _ => CommentOrder::DateGmt,
     };
-    let descending = param(params, "order") != b"asc";
+    let descending = params.text("order") != b"asc";
     // A date's ties go by ID in its direction, other columns' by the
     // latest ID first: PHP looks for "ASC" in a clause the wrong way round.
     // An order by ID, or the IDs listed, has no ties to break.
@@ -585,8 +556,8 @@ fn prepared(context: &Context, params: &Params) -> CommentQuery {
         CommentOrder::Date | CommentOrder::DateGmt => descending,
         _ => true,
     };
-    let search = String::from_utf8_lossy(&param(params, "search")).into_owned();
-    let email = param(params, "author_email");
+    let search = String::from_utf8_lossy(&params.text("search")).into_owned();
+    let email = params.text("author_email");
     let date = |name| {
         params
             .get(name)
@@ -673,18 +644,7 @@ fn comment_avatars(context: &Context, comment: &Comment) -> Value {
         Some(user) => (user.email.clone(), user_name(user)),
         None => (comment.author_email.clone(), comment.author.clone()),
     };
-    avatar_urls(|size| {
-        if avatars {
-            text(avatar_url(
-                &|name| context.option(name),
-                &email,
-                &name,
-                size,
-            ))
-        } else {
-            Value::Bool(false)
-        }
-    })
+    avatar_urls(context, &email, &name, avatars)
 }
 
 /// `WP_REST_Meta_Fields::get_value()` of the note status: `null` unless a
@@ -696,10 +656,7 @@ fn meta(row: &CommentRow) -> Value {
         ("type", text("string")),
         ("enum", list(vec![text("resolved"), text("reopen")])),
     ]);
-    let status = validate_value_from_schema(&value, &schema, "")
-        .and_then(|()| sanitize_value_from_schema(&value, &schema, ""))
-        .unwrap_or(Value::Null);
-    object([("_wp_note_status", status)])
+    object([("_wp_note_status", prepare_value(&value, &schema, ""))])
 }
 
 /// `prepare_status_response()`.
@@ -719,13 +676,11 @@ fn prepare(context: &Context, params: &Params, row: &CommentRow) -> Response {
     let comment = &row.comment;
     let properties = properties(context);
     let wanted = fields_for_response(params, &properties);
-    let has = |name: &str| wanted.iter().any(|field| field == name.as_bytes());
-    let int = |n: u64| Value::Int(i64::try_from(n).unwrap_or(i64::MAX));
     let edit = params.context() == b"edit";
     let content = || {
-        let home = context.site.home_url();
+        let home = context.site.reads().home_url();
         let option = |name: &str| context.option(name);
-        let rendered = front_comment_text(&option, home.as_bytes(), &comment.content);
+        let rendered = front_comment_text(&option, &home, &comment.content);
         let mut content = vec![(Key::String(b"rendered".to_vec()), text(rendered))];
         if edit {
             content.push((Key::String(b"raw".to_vec()), text(comment.content.clone())));
@@ -758,14 +713,8 @@ fn prepare(context: &Context, params: &Params, row: &CommentRow) -> Response {
         ("author_avatar_urls", &|| comment_avatars(context, comment)),
         ("meta", &|| meta(row)),
     ];
-    let data = fields
-        .iter()
-        .filter(|(name, _)| has(name))
-        .map(|(name, value)| (Key::String(name.as_bytes().to_vec()), value()))
-        .collect();
-    let data = filter_by_context(data, &properties, &params.context());
-    let mut response = Response::new(Value::Array(data), 200);
-    if is_field_included("_links", &wanted) || is_field_included("_embedded", &wanted) {
+    let mut response = item_response(&fields, &wanted, &properties, &params.context());
+    if links_wanted(&wanted) {
         links(context, &mut response, comment);
     }
     response

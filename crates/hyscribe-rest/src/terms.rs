@@ -4,12 +4,12 @@
 //! `/wp/v2/tags` and their items, read only.
 
 use hyscribe_model::{Post, Term, TermOrder, TermQuery};
-use hyscribe_phpser::{Key, Maybe, Value, add_query_arg, maybe_unserialize};
+use hyscribe_phpser::{Maybe, Value, add_query_arg, maybe_unserialize};
 use hyscribe_render::formatting::{sanitize_title, sanitize_title_for_query};
 
-use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
-use crate::request::{Arg, Params, Sanitize, arg, collection_args};
-use crate::response::{Response, RestError, list, paginate, text};
+use crate::fields::{Properties, fields_for_response, item_response, links_wanted};
+use crate::request::{Arg, Params, collection_args, typed};
+use crate::response::{Response, RestError, int, list, paginate, text};
 use crate::schema::parse_list;
 use crate::taxonomies::{field, shown};
 use crate::types::{context_arg, items_route};
@@ -59,38 +59,23 @@ fn properties(taxonomy: &str) -> Vec<(&'static str, &'static [&'static str])> {
 fn items_args(taxonomy: &'static str) -> Vec<Arg> {
     let mut args = collection_args();
     let ids = r#"{"type":"array","items":{"type":"integer"},"default":[]}"#;
-    args.push(arg("exclude", ids, false, Sanitize::Schema));
-    args.push(arg("include", ids, false, Sanitize::Schema));
+    args.push(typed("exclude", ids));
+    args.push(typed("include", ids));
     if !hierarchical(taxonomy) {
-        args.push(arg(
-            "offset",
-            r#"{"type":"integer"}"#,
-            false,
-            Sanitize::Schema,
-        ));
+        args.push(typed("offset", r#"{"type":"integer"}"#));
     }
     let order = r#"{"type":"string","default":"asc","enum":["asc","desc"]}"#;
-    args.push(arg("order", order, false, Sanitize::Schema));
+    args.push(typed("order", order));
     let orderby = r#"{"type":"string","default":"name","enum":["id","include","name","slug","include_slugs","term_group","description","count"]}"#;
-    args.push(arg("orderby", orderby, false, Sanitize::Schema));
+    args.push(typed("orderby", orderby));
     let hide = r#"{"type":"boolean","default":false}"#;
-    args.push(arg("hide_empty", hide, false, Sanitize::Schema));
+    args.push(typed("hide_empty", hide));
     if hierarchical(taxonomy) {
-        args.push(arg(
-            "parent",
-            r#"{"type":"integer"}"#,
-            false,
-            Sanitize::Schema,
-        ));
+        args.push(typed("parent", r#"{"type":"integer"}"#));
     }
-    args.push(arg(
-        "post",
-        r#"{"type":"integer","default":null}"#,
-        false,
-        Sanitize::Schema,
-    ));
+    args.push(typed("post", r#"{"type":"integer","default":null}"#));
     let slugs = r#"{"type":"array","items":{"type":"string"}}"#;
-    args.push(arg("slug", slugs, false, Sanitize::Schema));
+    args.push(typed("slug", slugs));
     args
 }
 
@@ -117,7 +102,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
             },
         ]);
     }
-    let id = || arg("id", r#"{"type":"integer"}"#, false, Sanitize::Schema);
+    let id = || typed("id", r#"{"type":"integer"}"#);
     let write = |permission| Endpoint {
         args: vec![id()],
         permission,
@@ -140,8 +125,7 @@ fn items_permission(context: &Context, params: &Params) -> Result<(), RestError>
     let edit_terms = field(fields_of(taxonomy), &["capabilities", "edit_terms"]);
     if params.context() == b"edit" && !context.can(&edit_terms) {
         let message = "Sorry, you are not allowed to edit terms in this taxonomy.";
-        let status = context.authorization_required();
-        return Err(RestError::status("rest_forbidden_context", message, status));
+        return Err(context.forbidden("rest_forbidden_context", message));
     }
     let Some(id) = post_param(params) else {
         return Ok(());
@@ -155,8 +139,7 @@ fn items_permission(context: &Context, params: &Params) -> Result<(), RestError>
     };
     if !may_read_terms(context, taxonomy, &post) {
         let message = "Sorry, you are not allowed to view terms for this post.";
-        let status = context.authorization_required();
-        return Err(RestError::status("rest_forbidden_context", message, status));
+        return Err(context.forbidden("rest_forbidden_context", message));
     }
     Ok(())
 }
@@ -212,8 +195,7 @@ fn create_permission(context: &Context, params: &Params) -> Result<(), RestError
         return Ok(());
     }
     let message = "Sorry, you are not allowed to create terms in this taxonomy.";
-    let status = context.authorization_required();
-    Err(RestError::status("rest_cannot_create", message, status))
+    Err(context.forbidden("rest_cannot_create", message))
 }
 
 /// `update_item_permissions_check()`.
@@ -223,8 +205,7 @@ fn update_permission(context: &Context, params: &Params) -> Result<(), RestError
         return Ok(());
     }
     let message = "Sorry, you are not allowed to edit this term.";
-    let status = context.authorization_required();
-    Err(RestError::status("rest_cannot_update", message, status))
+    Err(context.forbidden("rest_cannot_update", message))
 }
 
 /// `delete_item_permissions_check()`.
@@ -234,8 +215,7 @@ fn delete_permission(context: &Context, params: &Params) -> Result<(), RestError
         return Ok(());
     }
     let message = "Sorry, you are not allowed to delete this term.";
-    let status = context.authorization_required();
-    Err(RestError::status("rest_cannot_delete", message, status))
+    Err(context.forbidden("rest_cannot_delete", message))
 }
 
 /// `get_item_permissions_check()`.
@@ -243,8 +223,7 @@ fn item_permission(context: &Context, params: &Params) -> Result<(), RestError> 
     let term = get_term(context, params)?;
     if params.context() == b"edit" && !context.can_for("edit_term", term.id) {
         let message = "Sorry, you are not allowed to edit this term.";
-        let status = context.authorization_required();
-        return Err(RestError::status("rest_forbidden_context", message, status));
+        return Err(context.forbidden("rest_forbidden_context", message));
     }
     Ok(())
 }
@@ -270,18 +249,12 @@ pub(crate) fn ids(params: &Params, name: &str) -> Vec<u64> {
 /// The query `get_items()` prepares, without its page.
 fn prepared(params: &Params) -> TermQuery {
     let taxonomy = taxonomy(params);
-    let text = |name| {
-        params
-            .get(name)
-            .map(Value::to_php_string)
-            .unwrap_or_default()
-    };
     let slugs: Vec<Vec<u8>> = parse_list(&params.get("slug").cloned().unwrap_or_default())
         .iter()
         .map(|(_, slug)| slug.to_php_string())
         .collect();
     let include = ids(params, "include");
-    let order = match text("orderby").as_slice() {
+    let order = match params.text("orderby").as_slice() {
         b"id" => TermOrder::TermId,
         b"include" if !include.is_empty() => TermOrder::Include,
         b"include_slugs" if !slugs.is_empty() => TermOrder::Slugs,
@@ -292,13 +265,13 @@ fn prepared(params: &Params) -> TermQuery {
         _ => TermOrder::Name,
     };
     let objects: Vec<u64> = post_param(params).into_iter().collect();
-    let search = text("search");
+    let search = params.text("search");
     let parent = params
         .get("parent")
         .filter(|_| hierarchical(taxonomy))
         .map(|parent| parent.to_int())
         .filter(|parent| *parent != 0 || params.get("parent") == Some(&Value::Int(0)));
-    let descending = text("order") == b"desc";
+    let descending = params.text("order") == b"desc";
     TermQuery {
         taxonomy: taxonomy.into(),
         exclude: if include.is_empty() {
@@ -476,27 +449,19 @@ fn prepare(context: &Context, params: &Params, term: &Term) -> Response {
     let taxonomy = taxonomy(params);
     let properties = properties(taxonomy);
     let wanted = fields_for_response(params, &properties);
-    let has = |name: &str| wanted.iter().any(|field| field == name.as_bytes());
-    let int = |n: u64| Value::Int(i64::try_from(n).unwrap_or(i64::MAX));
-    let fields = [
-        ("id", int(term.id)),
-        ("count", int(term.count)),
-        ("description", text(term.description.clone())),
-        ("link", text(context.site.term_link(taxonomy, term))),
-        ("name", text(term.name.clone())),
-        ("slug", text(term.slug.clone())),
-        ("taxonomy", text(taxonomy)),
-        ("parent", int(term.parent)),
-        ("meta", Value::Array(Vec::new())),
+    let fields: [(&str, &dyn Fn() -> Value); 9] = [
+        ("id", &|| int(term.id)),
+        ("count", &|| int(term.count)),
+        ("description", &|| text(term.description.clone())),
+        ("link", &|| text(context.site.term_link(taxonomy, term))),
+        ("name", &|| text(term.name.clone())),
+        ("slug", &|| text(term.slug.clone())),
+        ("taxonomy", &|| text(taxonomy)),
+        ("parent", &|| int(term.parent)),
+        ("meta", &|| Value::Array(Vec::new())),
     ];
-    let data = fields
-        .into_iter()
-        .filter(|(name, _)| has(name))
-        .map(|(name, value)| (Key::String(name.as_bytes().to_vec()), value))
-        .collect();
-    let data = filter_by_context(data, &properties, &params.context());
-    let mut response = Response::new(Value::Array(data), 200);
-    if is_field_included("_links", &wanted) || is_field_included("_embedded", &wanted) {
+    let mut response = item_response(&fields, &wanted, &properties, &params.context());
+    if links_wanted(&wanted) {
         let route = items_route_of(taxonomy);
         crate::self_link(context, &mut response, &format!("{route}/{}", term.id));
         response.add_link("collection", context.rest_url(&route));

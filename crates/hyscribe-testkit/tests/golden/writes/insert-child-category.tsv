@@ -1,0 +1,32 @@
+# The rows PHP WordPress writes for the action insert-child-category (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 20:00:40 to 2026-11-14 20:00:40 UTC.
+# %wp_terms:1% is 4.
+# %wp_terms:2% is 5.
+# %wp_terms:3% is 6.
+# %wp_term_taxonomy:1% is 4.
+# %wp_term_taxonomy:2% is 5.
+# %wp_term_taxonomy:3% is 6.
+# %wp_options:1% is 130.
+# %wp_options:2% is 132.
+wp_options	category_children	~	option_id	%wp_options:1%	%wp_options:2%
+wp_options	category_children	~	option_value	a:0:{}	a:1:{i:%wp_terms:1%;a:2:{i:0;i:%wp_terms:2%;i:1;i:%wp_terms:3%;}}
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	parent	%wp_terms:1%
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	term_id	%wp_terms:2%
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	term_taxonomy_id	%wp_term_taxonomy:2%
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	parent	%wp_terms:1%
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	term_id	%wp_terms:3%
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	term_taxonomy_id	%wp_term_taxonomy:3%
+wp_terms	%wp_terms:2%	+	name	Child
+wp_terms	%wp_terms:2%	+	slug	child
+wp_terms	%wp_terms:2%	+	term_group	0
+wp_terms	%wp_terms:2%	+	term_id	%wp_terms:2%
+wp_terms	%wp_terms:3%	+	name	Second child
+wp_terms	%wp_terms:3%	+	slug	second-child
+wp_terms	%wp_terms:3%	+	term_group	0
+wp_terms	%wp_terms:3%	+	term_id	%wp_terms:3%

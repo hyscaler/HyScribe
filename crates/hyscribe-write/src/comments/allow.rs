@@ -120,7 +120,7 @@ async fn check_comment(
         return false;
     }
     // Smiley images get no site URL (gap: a key naming it is not found there).
-    let use_smilies = step!(steps, option("use_smilies"));
+    let use_smilies = step!(steps, option_value("use_smilies"));
     let options = |name: &str| use_smilies.clone().filter(|_| name == "use_smilies");
     let text = front_comment_text(&options, context.home, &fields.content);
     let max_links = option(steps, "comment_max_links").await;

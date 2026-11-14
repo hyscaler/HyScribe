@@ -25,7 +25,7 @@ async fn the_first_error_stops_the_action() {
     let mut write = writer.begin_on(&mut conn).await.unwrap();
     let mut steps = Steps::new(&mut write);
     // One closure type, so one instance of `run` takes every path.
-    let blogname = || async |w: &mut Write<'_>| w.option("blogname").await;
+    let blogname = || async |w: &mut Write<'_>| w.option_value("blogname").await;
     let name = steps.run(blogname()).await;
     assert_eq!(name.unwrap(), b"HyScribe Default Install");
 

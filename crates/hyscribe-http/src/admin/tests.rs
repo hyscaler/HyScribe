@@ -1081,6 +1081,44 @@ async fn refusals() {
 /// A Site Icon, and a static homepage with neither page chosen, which PHP
 /// saves as the latest posts first, and another active theme are not
 /// ported.
+/// The dashboard's `welcome` saves for a user who may see the panel, so it
+/// answers 501 only for them; the menu folds from the settings cookie.
+#[tokio::test(flavor = "multi_thread")]
+async fn dashboard_arguments_and_folding() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let host = "127.0.0.1:8081";
+    let welcome = get(&site, "/hs-admin/?welcome=0", host, &cookies).await;
+    assert_eq!(welcome.status(), StatusCode::NOT_IMPLEMENTED);
+    let folded = format!("{cookies}; wp-settings-1=mfold%3Df");
+    let edit = get(&site, "/hs-admin/?edit=dashboard_primary", host, &folded).await;
+    assert_eq!(edit.status(), StatusCode::OK);
+    assert!(
+        page_of(edit)
+            .await
+            .contains(" index-php folded auto-fold admin-bar ")
+    );
+    let handle = Handle::current();
+    let shown = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, now());
+        let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+        let (path, uri) = ("/hs-admin/", "/hs-admin/?welcome=0");
+        let browser = Browser::default();
+        screen(
+            &admin,
+            path,
+            uri,
+            "http://h/hs-admin/",
+            "http://h",
+            &browser,
+        )
+        .is_some()
+    })
+    .await
+    .unwrap();
+    assert!(shown);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_not_ported() {
     let db = hyscribe_db::Db::connect(&hyscribe_testkit::fixture_database())
@@ -1260,8 +1298,10 @@ async fn database_errors_show_no_details() {
         "hyscribe_{}=admin%7C1%7Cx%7Cy",
         hyscribe_phpser::md5(b"http://127.0.0.1:8081")
     );
-    let response = get(&site, "/hs-admin/", "127.0.0.1:8081", &cookie).await;
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    for uri in ["/hs-admin/", "/hs-admin/admin-ajax?action=x"] {
+        let response = get(&site, uri, "127.0.0.1:8081", &cookie).await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
 }
 
 #[test]
@@ -1374,7 +1414,8 @@ async fn dashboard_data() {
             assert_eq!(admin.moderated_comments(), 0);
             assert!(admin.comment_editable(None));
             // What capability checks of other objects read.
-            assert_eq!(admin.comment_post(2), None);
+            assert_eq!(admin.comment_post(2), Some(0));
+            assert_eq!(admin.comment_post(99), None);
             assert_eq!(admin.term_taxonomy(1).as_deref(), Some("category"));
             assert_eq!(admin.count_terms("category", None), 1);
             let (link, author) = admin.parent_comment(1).unwrap();
@@ -1493,7 +1534,7 @@ async fn dashboard_data() {
             assert!(!subscriber.can_for("edit_user", 1));
             assert!(subscriber.recent_posts("future").is_empty());
             assert_eq!(
-                PostsSite::user_option(subscriber, "admin_color").as_deref(),
+                PageSite::user_option(subscriber, "admin_color").as_deref(),
                 Some(&b"modern"[..])
             );
             let comments = subscriber.recent_comments(None);
@@ -1627,4 +1668,198 @@ async fn the_posts_list_reads_its_arguments() {
     })
     .await
     .unwrap();
+}
+
+/// `method` on `uri` with `cookie` and a body of `content_type`.
+async fn send(
+    site: &Arc<Site>,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    form: Option<(&str, &str)>,
+) -> Response {
+    let mut request = axum::http::Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::HOST, "127.0.0.1:8081")
+        .header(header::COOKIE, cookie);
+    let body = match form {
+        Some((kind, body)) => {
+            request = request.header(header::CONTENT_TYPE, kind);
+            body.to_string()
+        }
+        None => String::new(),
+    };
+    let request = request.body(Body::from(body)).unwrap();
+    router(Arc::clone(site)).oneshot(request).await.unwrap()
+}
+
+/// The nonce of `action` for the session of the logged in cookie in `cookies`.
+async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &'static str) -> String {
+    let auth = cookies
+        .split("; ")
+        .find(|cookie| cookie.starts_with("hyscribe_logged_in_"))
+        .unwrap();
+    let value = hyscribe_phpser::urldecode(auth.split_once('=').unwrap().1.as_bytes());
+    let token = hyscribe_auth::cookie::parse_auth_cookie(&value)
+        .unwrap()
+        .token
+        .to_vec();
+    let (site, handle) = (Arc::clone(site), Handle::current());
+    tokio::task::spawn_blocking(move || {
+        let mut reads = LoginReads::new(&site, handle, now());
+        reads.act_as(1, token);
+        LoginSite::nonce(&reads, action)
+    })
+    .await
+    .unwrap()
+}
+
+/// An action is refused as PHP refuses it until its checks pass, then
+/// answered 501; a POST whose body only PHP reads is not answered.
+#[tokio::test(flavor = "multi_thread")]
+async fn actions_are_checked_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let trash = "/hs-admin/edit?action=trash&post[]=1";
+    let response = send(&site, "GET", trash, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let page = page_of(response).await;
+    assert!(page.contains("<title>An error occurred.</title>"), "{page}");
+    assert!(page.contains("The link you followed has expired."));
+    let nonce = session_nonce(&site, &cookies, "bulk-posts").await;
+    let valid = format!("{trash}&_wpnonce={nonce}");
+    let response = send(&site, "GET", &valid, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let form = "application/x-www-form-urlencoded";
+    let body = format!("action=trash&post[]=1&_wpnonce={nonce}");
+    let response = send(
+        &site,
+        "POST",
+        "/hs-admin/edit",
+        &cookies,
+        Some((form, &body)),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let response = send(
+        &site,
+        "POST",
+        "/hs-admin/edit",
+        &cookies,
+        Some((form, "x=1")),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let json = Some(("application/json", "{\"action\":\"trash\"}"));
+    let response = send(&site, "POST", "/hs-admin/edit?action=trash", &cookies, json).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let empty = Some((form, ""));
+    let response = send(&site, "POST", "/hs-admin/edit", &cookies, empty).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // An empty body is an empty `$_POST`: the query's action is checked.
+    let response = send(&site, "POST", trash, &cookies, empty).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+/// `admin-ajax.php` answers who is not logged in itself, and reads the
+/// logged in cookie as well as the auth cookie.
+#[tokio::test(flavor = "multi_thread")]
+async fn ajax_actions_are_checked_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let ajax = "/hs-admin/admin-ajax";
+    let form = "application/x-www-form-urlencoded";
+    let response = send(&site, "POST", ajax, "", Some((form, "action=delete-tag"))).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(page_of(response).await, "0");
+    let response = send(&site, "POST", ajax, "", Some((form, "action=heartbeat"))).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let logged_in = cookies
+        .split("; ")
+        .find(|cookie| cookie.contains("logged_in"))
+        .unwrap();
+    let response = send(
+        &site,
+        "POST",
+        ajax,
+        logged_in,
+        Some((form, "action=delete-tag")),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(page_of(response).await, "-1");
+    let nonce = session_nonce(&site, &cookies, "save-color-scheme").await;
+    let body = format!("action=save-user-color-scheme&color_scheme=x&nonce={nonce}");
+    let response = send(&site, "POST", ajax, &cookies, Some((form, &body))).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let kind = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .unwrap()
+        .clone();
+    assert_eq!(kind, "application/json; charset=UTF-8");
+    assert_eq!(page_of(response).await, "{\"success\":false}");
+    let body = format!("action=save-user-color-scheme&color_scheme=ocean&nonce={nonce}");
+    let response = send(&site, "POST", ajax, &cookies, Some((form, &body))).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+}
+
+/// The checks read the referer, comments and roles from the site.
+#[tokio::test(flavor = "multi_thread")]
+async fn actions_read_the_site() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let request = axum::http::Request::builder()
+        .uri("/hs-admin/edit?action=trash")
+        .header(header::HOST, "127.0.0.1:8081")
+        .header(header::COOKIE, &cookies)
+        .header(
+            header::REFERER,
+            "http://127.0.0.1:8081/hs-admin/edit?updated=1",
+        );
+    let response = router(Arc::clone(&site))
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let page = page_of(response).await;
+    assert!(
+        page.contains("<a href=\"http://127.0.0.1:8081/hs-admin/edit\">Please try again.</a>"),
+        "{page}"
+    );
+    let nonce = session_nonce(&site, &cookies, "bulk-users").await;
+    let promote = format!("/hs-admin/users?changeit=1&new_role=king&users[]=1&_wpnonce={nonce}");
+    let response = send(&site, "GET", &promote, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let promote = promote.replace("king", "editor");
+    let response = send(&site, "GET", &promote, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let form = Some((
+        "application/x-www-form-urlencoded",
+        "action=dim-comment&id=1",
+    ));
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let form = Some((
+        "application/x-www-form-urlencoded",
+        "action=dim-comment&id=99",
+    ));
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let own = format!("/hs-admin/users?changeit=1&new_role=none&users[]=1&_wpnonce={nonce}");
+    let response = send(&site, "GET", &own, &cookies, None).await;
+    assert!(
+        page_of(response)
+            .await
+            .contains("cannot remove your own role")
+    );
+    let response = send(&site, "GET", "/hs-admin/users", &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let wrong = "/hs-admin/edit?action=trash&post[]=1&_wpnonce=0123456789";
+    let response = send(&site, "GET", wrong, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let posts = session_nonce(&site, &cookies, "bulk-posts").await;
+    let missing = format!("/hs-admin/edit?action=trash&post[]=999&_wpnonce={posts}");
+    let response = send(&site, "GET", &missing, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }

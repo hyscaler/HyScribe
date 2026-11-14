@@ -38,3 +38,19 @@ if ( 'layout' === $hyscribe_variant ) {
 		3
 	);
 }
+// The f9 variants: an admin email reminder just postponed or long ago, and
+// a folded or never folded menu from the user's settings.
+$hyscribe_lifespans = array(
+	'f9remind' => time() + 3 * DAY_IN_SECONDS,
+	'f9old'    => 1,
+);
+if ( isset( $hyscribe_lifespans[ $hyscribe_variant ] ) ) {
+	add_filter( 'pre_option_admin_email_lifespan', fn() => $hyscribe_lifespans[ $hyscribe_variant ] );
+}
+$hyscribe_settings = array(
+	'f9folded' => 'mfold=f',
+	'f9unfold' => 'unfold=1&mfold=o',
+);
+if ( isset( $hyscribe_settings[ $hyscribe_variant ] ) ) {
+	add_filter( 'get_user_option_user-settings', fn() => $hyscribe_settings[ $hyscribe_variant ] );
+}

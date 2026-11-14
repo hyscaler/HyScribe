@@ -774,6 +774,7 @@ name = "hyscribe-testkit"
 version = "0.1.0"
 dependencies = [
  "hyscribe-config",
+ "hyscribe-phpser",
  "sqlx",
  "tokio",
 ]

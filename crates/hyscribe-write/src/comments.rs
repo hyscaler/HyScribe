@@ -121,7 +121,7 @@ const TRASH_TIME: &str = "_wp_trash_meta_time";
 
 /// `get_option( $name )`, empty when it is not set.
 async fn option(steps: &mut Steps<'_, '_>, name: &str) -> Vec<u8> {
-    step!(steps, option(name)).unwrap_or_default()
+    step!(steps, option_value(name)).unwrap_or_default()
 }
 
 /// `wp_timezone()`.

@@ -1,0 +1,41 @@
+# The rows PHP WordPress writes for the action insert-alias-tag (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 20:00:41 to 2026-11-14 20:00:41 UTC.
+# %wp_terms:1% is 21.
+# %wp_terms:2% is 22.
+# %wp_terms:3% is 23.
+# %wp_terms:4% is 24.
+# %wp_term_taxonomy:1% is 21.
+# %wp_term_taxonomy:2% is 22.
+# %wp_term_taxonomy:3% is 23.
+# %wp_term_taxonomy:4% is 24.
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	taxonomy	post_tag
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	term_id	%wp_terms:2%
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	term_taxonomy_id	%wp_term_taxonomy:2%
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	taxonomy	post_tag
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	term_id	%wp_terms:3%
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	term_taxonomy_id	%wp_term_taxonomy:3%
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	taxonomy	post_tag
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	term_id	%wp_terms:4%
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	term_taxonomy_id	%wp_term_taxonomy:4%
+wp_terms	%wp_terms:1%	~	term_group	0	1
+wp_terms	%wp_terms:2%	+	name	Synonym
+wp_terms	%wp_terms:2%	+	slug	synonym
+wp_terms	%wp_terms:2%	+	term_group	1
+wp_terms	%wp_terms:2%	+	term_id	%wp_terms:2%
+wp_terms	%wp_terms:3%	+	name	Third
+wp_terms	%wp_terms:3%	+	slug	third
+wp_terms	%wp_terms:3%	+	term_group	1
+wp_terms	%wp_terms:3%	+	term_id	%wp_terms:3%
+wp_terms	%wp_terms:4%	+	name	Lonely
+wp_terms	%wp_terms:4%	+	slug	lonely
+wp_terms	%wp_terms:4%	+	term_group	0
+wp_terms	%wp_terms:4%	+	term_id	%wp_terms:4%

@@ -13,6 +13,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+hyscribe-admin = { path = "../crates/hyscribe-admin" }
 hyscribe-auth = { path = "../crates/hyscribe-auth" }
 hyscribe-phpser = { path = "../crates/hyscribe-phpser" }
 hyscribe-config = { path = "../crates/hyscribe-config" }
@@ -246,6 +247,13 @@ bench = false
 [[bin]]
 name = "rest_serve"
 path = "fuzz_targets/rest_serve.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "admin_actions"
+path = "fuzz_targets/admin_actions.rs"
 test = false
 doc = false
 bench = false

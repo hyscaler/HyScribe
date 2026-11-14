@@ -1,0 +1,33 @@
+# The rows PHP WordPress writes for the action delete-category (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 20:00:44 to 2026-11-14 20:00:44 UTC.
+# %wp_terms:1% is 40.
+# %wp_terms:2% is 41.
+# %wp_terms:3% is 42.
+# %wp_term_taxonomy:1% is 40.
+# %wp_term_taxonomy:2% is 41.
+# %wp_term_taxonomy:3% is 42.
+# %wp_options:1% is 159.
+# %wp_options:2% is 161.
+wp_options	category_children	~	option_id	%wp_options:1%	%wp_options:2%
+wp_options	category_children	~	option_value	a:1:{i:%wp_terms:1%;a:1:{i:0;i:%wp_terms:2%;}}	a:0:{}
+wp_term_relationships	1,%wp_term_taxonomy:1%	-	object_id	1
+wp_term_relationships	1,%wp_term_taxonomy:1%	-	term_order	0
+wp_term_relationships	1,%wp_term_taxonomy:1%	-	term_taxonomy_id	%wp_term_taxonomy:1%
+wp_term_relationships	1,1	+	object_id	1
+wp_term_relationships	1,1	+	term_order	0
+wp_term_relationships	1,1	+	term_taxonomy_id	1
+wp_term_relationships	2,%wp_term_taxonomy:1%	-	object_id	2
+wp_term_relationships	2,%wp_term_taxonomy:1%	-	term_order	0
+wp_term_relationships	2,%wp_term_taxonomy:1%	-	term_taxonomy_id	%wp_term_taxonomy:1%
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	count	1
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	description	
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	term_id	%wp_terms:1%
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	term_taxonomy_id	%wp_term_taxonomy:1%
+wp_term_taxonomy	%wp_term_taxonomy:2%	~	parent	%wp_terms:1%	0
+wp_term_taxonomy	1	~	count	0	1
+wp_terms	%wp_terms:1%	-	name	News
+wp_terms	%wp_terms:1%	-	slug	news
+wp_terms	%wp_terms:1%	-	term_group	0
+wp_terms	%wp_terms:1%	-	term_id	%wp_terms:1%

@@ -13,6 +13,7 @@
 #   wordpress/wp-includes/capabilities.json         the post types', taxonomies' and statuses' capability data
 #   wordpress/wp-includes/rest-routes.json          the REST API's namespaces and routes, with each endpoint's methods
 #   wordpress/wp-includes/rest-post-types.json      the post types, as the REST API types route describes those it shows
+#   wordpress/wp-includes/rest-registered.json      the block types and core pattern categories, as the REST API gives them (reference/rest/registered.php)
 #   wordpress/wp-includes/dependencies.json         the styles and scripts load-styles.php and load-scripts.php serve
 #   wordpress/wp-includes/registry.json             the styles and scripts an admin request registers, with placeholders for its URLs and nonces
 #   wordpress/wp-includes/icons.json                the registered icons' sanitized SVG
@@ -82,10 +83,12 @@ mkdir -p "$OUT"
 for context in post data; do
   "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; echo wp_json_encode( wp_kses_allowed_html( $argv[1] ), JSON_UNESCAPED_SLASHES );' "$context" > "$OUT/wp-includes/kses-$context.json"
 done
+"$DOCKER" cp "$ROOT/reference/rest/registered.php" "$NAME:/tmp/registered.php"
+"$DOCKER" exec "$NAME" php /tmp/registered.php core > "$OUT/wp-includes/rest-registered.json"
 cat > "$OUT/README.md" <<'README'
 # WordPress core data
 
-Files from WordPress core that HyScribe uses as data: the core `theme.json`, every core block's `block.json`, the block types as WordPress registers them (`blocks/registry.json`) and their `block.json` in registration order (`blocks/registered.json`), the tags and attributes `wp_kses_post()` and `wp_kses_data()` allow (`kses-post.json`, `kses-data.json`), the MIME types a visitor may upload (`mime-types.json`), the capability data of the post types, taxonomies and post statuses (`capabilities.json`), the REST API's routes (`rest-routes.json`) and the post types it shows (`rest-post-types.json`), the styles and scripts the admin's concatenating loaders serve (`dependencies.json`), the styles and scripts an admin request registers with placeholders for its URLs and nonces (`registry.json`), the registered script modules (`script-modules.json`), the registered icons' sanitized SVG (`icons.json`), the block library and skip link styles, the emoji detection script, and the embed template's style and scripts. Exported by `reference/wordpress/export.sh` from the pinned version in `VERSION`. Never edit by hand.
+Files from WordPress core that HyScribe uses as data: the core `theme.json`, every core block's `block.json`, the block types as WordPress registers them (`blocks/registry.json`) and their `block.json` in registration order (`blocks/registered.json`), the tags and attributes `wp_kses_post()` and `wp_kses_data()` allow (`kses-post.json`, `kses-data.json`), the MIME types a visitor may upload (`mime-types.json`), the capability data of the post types, taxonomies and post statuses (`capabilities.json`), the REST API's routes (`rest-routes.json`), the post types it shows (`rest-post-types.json`) and the block types and core pattern categories it gives (`rest-registered.json`), the styles and scripts the admin's concatenating loaders serve (`dependencies.json`), the styles and scripts an admin request registers with placeholders for its URLs and nonces (`registry.json`), the registered script modules (`script-modules.json`), the registered icons' sanitized SVG (`icons.json`), the block library and skip link styles, the emoji detection script, and the embed template's style and scripts. Exported by `reference/wordpress/export.sh` from the pinned version in `VERSION`. Never edit by hand.
 
 License: GPL-2.0-or-later, as WordPress (ADR 0004).
 README

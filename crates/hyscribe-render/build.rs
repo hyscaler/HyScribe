@@ -8,7 +8,7 @@ use std::io;
 use std::path::Path;
 
 const THEME: &str = "../../themes/twentytwentyfive";
-const EXPORTED: [&str; 3] = ["block-styles.tsv", "patterns.json", "styles.json"];
+const EXPORTED: [&str; 3] = ["patterns.json", "registered.json", "styles.json"];
 const CONTENT_TYPES: [(&str, &str); 7] = [
     ("css", "text/css"),
     ("html", "text/html"),

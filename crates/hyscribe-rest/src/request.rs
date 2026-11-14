@@ -5,7 +5,7 @@
 //! sanitized by their route's arguments.
 
 use hyscribe_kses::sanitize_key;
-use hyscribe_phpser::{Key, Value};
+use hyscribe_phpser::{Key, Value, urldecode};
 
 use crate::response::{RestError, object, text};
 use crate::schema::{Refusal, sanitize_value_from_schema, validate_value_from_schema};
@@ -60,6 +60,8 @@ pub(crate) enum Sanitize {
     Key,
     /// `rest_parse_request_arg()`: validated, then sanitized, by its schema.
     Schema,
+    /// `urldecode()` of a URL parameter, a string.
+    Urldecode,
 }
 
 /// A route's argument: its schema, whether `rest_validate_request_arg()`
@@ -157,6 +159,7 @@ pub(crate) fn sanitize_params(params: &mut Params, args: &[Arg]) -> Result<(), R
             let sanitized = match arg.sanitize {
                 // Validated first, so a string.
                 Sanitize::Key => Ok(text(sanitize_key(&value.to_php_string()))),
+                Sanitize::Urldecode => Ok(text(urldecode(&value.to_php_string()))),
                 Sanitize::Schema => validate_value_from_schema(value, &arg.schema, arg.name)
                     .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name)),
             };

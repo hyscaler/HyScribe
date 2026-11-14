@@ -1,0 +1,180 @@
+{
+    "block_styles": [
+        [
+            "core/list",
+            {
+                "name": "checkmark-list",
+                "label": "Checkmark",
+                "inline_style": "\n\t\t\t\tul.is-style-checkmark-list {\n\t\t\t\t\tlist-style-type: \"\\2713\";\n\t\t\t\t}\n\n\t\t\t\tul.is-style-checkmark-list li {\n\t\t\t\t\tpadding-inline-start: 1ch;\n\t\t\t\t}"
+            }
+        ]
+    ],
+    "partial_styles": [
+        [
+            "core/heading",
+            {
+                "name": "text-display",
+                "label": "Display"
+            }
+        ],
+        [
+            "core/heading",
+            {
+                "name": "text-subtitle",
+                "label": "Subtitle"
+            }
+        ],
+        [
+            "core/heading",
+            {
+                "name": "text-annotation",
+                "label": "Annotation"
+            }
+        ],
+        [
+            "core/paragraph",
+            {
+                "name": "text-display",
+                "label": "Display"
+            }
+        ],
+        [
+            "core/paragraph",
+            {
+                "name": "text-subtitle",
+                "label": "Subtitle"
+            }
+        ],
+        [
+            "core/paragraph",
+            {
+                "name": "text-annotation",
+                "label": "Annotation"
+            }
+        ],
+        [
+            "core/post-terms",
+            {
+                "name": "post-terms-1",
+                "label": "Pill shaped"
+            }
+        ],
+        [
+            "core/group",
+            {
+                "name": "section-1",
+                "label": "Style 1"
+            }
+        ],
+        [
+            "core/group",
+            {
+                "name": "section-2",
+                "label": "Style 2"
+            }
+        ],
+        [
+            "core/group",
+            {
+                "name": "section-3",
+                "label": "Style 3"
+            }
+        ],
+        [
+            "core/group",
+            {
+                "name": "section-4",
+                "label": "Style 4"
+            }
+        ],
+        [
+            "core/group",
+            {
+                "name": "section-5",
+                "label": "Style 5"
+            }
+        ],
+        [
+            "core/columns",
+            {
+                "name": "section-1",
+                "label": "Style 1"
+            }
+        ],
+        [
+            "core/columns",
+            {
+                "name": "section-2",
+                "label": "Style 2"
+            }
+        ],
+        [
+            "core/columns",
+            {
+                "name": "section-3",
+                "label": "Style 3"
+            }
+        ],
+        [
+            "core/columns",
+            {
+                "name": "section-4",
+                "label": "Style 4"
+            }
+        ],
+        [
+            "core/columns",
+            {
+                "name": "section-5",
+                "label": "Style 5"
+            }
+        ],
+        [
+            "core/column",
+            {
+                "name": "section-1",
+                "label": "Style 1"
+            }
+        ],
+        [
+            "core/column",
+            {
+                "name": "section-2",
+                "label": "Style 2"
+            }
+        ],
+        [
+            "core/column",
+            {
+                "name": "section-3",
+                "label": "Style 3"
+            }
+        ],
+        [
+            "core/column",
+            {
+                "name": "section-4",
+                "label": "Style 4"
+            }
+        ],
+        [
+            "core/column",
+            {
+                "name": "section-5",
+                "label": "Style 5"
+            }
+        ]
+    ],
+    "pattern_categories": [
+        {
+            "name": "twentytwentyfive_page",
+            "label": "Pages",
+            "description": "A collection of full page layouts."
+        },
+        {
+            "name": "twentytwentyfive_post-format",
+            "label": "Post formats",
+            "description": "A collection of post format patterns."
+        }
+    ]
+}

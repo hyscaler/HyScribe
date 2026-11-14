@@ -8,6 +8,7 @@
 
 mod comments;
 mod editor;
+mod embed;
 mod fields;
 mod navigation;
 pub(crate) mod posts;
@@ -15,6 +16,7 @@ mod request;
 mod response;
 mod routes;
 mod schema;
+mod search;
 mod settings;
 mod statuses;
 mod taxonomies;
@@ -94,6 +96,9 @@ pub trait Site {
     }
     /// The IDs of the revisions of `post`, newest first.
     fn revisions(&self, post: u64) -> Vec<u64>;
+    /// Whether the public users endpoint answers visitors as WordPress
+    /// does; off, a visitor sees no user as having published posts.
+    fn public_users(&self) -> bool;
     /// The site's content as `hyscribe-render` reads it, for the post
     /// routes.
     fn reads(&self) -> &dyn Reads;
@@ -217,6 +222,7 @@ fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         .or_else(|| comments::endpoints(regex))
         .or_else(|| users::endpoints(regex))
         .or_else(|| templates::endpoints(regex))
+        .or_else(|| search::endpoints(regex))
         .or_else(|| navigation::endpoints(regex))
 }
 
@@ -335,18 +341,23 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
             }
         }
     };
-    if get("_embed").is_some_and(|embed| embeds(&response, embed)) {
-        return Served::not_ported();
-    }
+    let embed = get("_embed").map(embed::relations);
     let response = match get("_envelope") {
         Some(_) => {
+            // The collections set their totals as integers.
+            let header = |name: &String, value: &String| match name.as_str() {
+                "X-WP-Total" | "X-WP-TotalPages" => Value::Int(text(value.clone()).to_int()),
+                _ => text(value.clone()),
+            };
             let headers = response
                 .headers
                 .iter()
-                .map(|(name, value)| (Key::String(name.clone().into_bytes()), text(value.clone())))
+                .map(|(name, value)| (Key::String(name.clone().into_bytes()), header(name, value)))
                 .collect();
             let status = Value::Int(i64::from(response.status));
-            let body = response.into_data();
+            let Ok(body) = embed::to_data(&context, response, embed.as_ref()) else {
+                return Served::not_ported();
+            };
             let envelope = object([
                 ("body", body),
                 ("status", status),
@@ -394,8 +405,11 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
     if method == "HEAD" {
         return served;
     }
+    let Ok(data) = embed::to_data(&context, response, embed.as_ref()) else {
+        return Served::not_ported();
+    };
     let json = encode(
-        &response.into_data(),
+        &data,
         request
             .get
             .iter()
@@ -413,33 +427,6 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
         None => json,
     };
     served
-}
-
-/// Whether `embed_links()` would embed a link of `response` for `_embed`:
-/// embedding is not ported.
-fn embeds(response: &Response, embed: &Value) -> bool {
-    let all = embed.is_empty() || matches!(embed.as_bytes(), Some(b"true" | b"1"));
-    let rels = schema::parse_list(embed);
-    let data = response.clone().into_data();
-    let items = if schema::is_list(&data) {
-        data.as_array().unwrap_or_default().to_vec()
-    } else {
-        vec![(Key::Int(0), data)]
-    };
-    items.iter().any(|(_, item)| {
-        let links = item.get_str("_links").and_then(Value::as_array);
-        links.unwrap_or_default().iter().any(|(rel, links)| {
-            let wanted = all
-                || rels.is_empty()
-                || rels
-                    .iter()
-                    .any(|(_, r)| r.to_php_string() == rel.to_php_string());
-            let embeddable = |(_, link): &(Key, Value)| {
-                link.get_str("embeddable").is_some_and(|e| !e.is_empty())
-            };
-            wanted && links.as_array().unwrap_or_default().iter().any(embeddable)
-        })
-    })
 }
 
 /// The permission checks of a matched route's endpoints and the endpoint
@@ -494,7 +481,17 @@ fn allowed(
 /// link's parameters are its route's own, which its arguments accept, and
 /// no permission check ported reads an argument's default.
 pub(crate) fn self_link(context: &Context, response: &mut Response, route: &str) {
-    let href = text(context.rest_url(route));
+    self_link_with(context, response, route, false);
+}
+
+/// [`self_link`], marked `embeddable` when asked.
+pub(crate) fn self_link_with(
+    context: &Context,
+    response: &mut Response,
+    route: &str,
+    embeddable: bool,
+) {
+    let href = (Key::String(b"href".to_vec()), text(context.rest_url(route)));
     let hints = routes::match_request("GET", route.as_bytes()).and_then(|matched| {
         let (permissions, endpoint) = ported(&matched)?;
         let mut params = Params {
@@ -508,11 +505,13 @@ pub(crate) fn self_link(context: &Context, response: &mut Response, route: &str)
         let allow = allowed.into_iter().map(text).collect();
         Some(object([("allow", response::list(allow))]))
     });
-    let link = match hints {
-        Some(hints) => object([("href", href), ("targetHints", hints)]),
-        None => object([("href", href)]),
-    };
-    response.add_link_attributes("self", link);
+    let mut link = Vec::new();
+    if embeddable {
+        link.push((Key::String(b"embeddable".to_vec()), Value::Bool(true)));
+    }
+    link.push(href);
+    link.extend(hints.map(|hints| (Key::String(b"targetHints".to_vec()), hints)));
+    response.add_link_attributes("self", Value::Array(link));
 }
 
 /// `dispatch()` with the filters core adds: OPTIONS requests, the route's
@@ -545,10 +544,6 @@ fn dispatch(
     };
     let (permissions, endpoint) = ported(&matched).ok_or(NotPorted)?;
     let callback = endpoint.callback.ok_or(NotPorted)?;
-    // The public users endpoint is off.
-    if context.user == 0 && users::off_for_visitors(matched.regex) {
-        return Err(NotPorted);
-    }
     let mut params = Params {
         route: matched.regex,
         url: matched.params.clone(),

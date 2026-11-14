@@ -2,9 +2,11 @@
 
 //! Shared test helpers: fixture locations and a reader for the `mysqldump`
 //! files under `fixtures/`, so tests can check real WordPress rows without a
-//! running database.
+//! running database, and the write oracle's HyScribe side ([`writes`]).
 
 use std::path::PathBuf;
+
+pub mod writes;
 
 /// A column value from an `INSERT` statement.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -291,6 +293,8 @@ pub fn fixture_database() -> hyscribe_config::Database {
         name: "wordpress".into(),
         user: "wordpress".into(),
         password: hyscribe_config::Secret::new("reference-only"),
+        read_user: None,
+        read_password: hyscribe_config::Secret::new(""),
         prefix: hyscribe_config::Prefix::default(),
         charset: "utf8mb4".into(),
     }

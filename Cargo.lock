@@ -774,6 +774,8 @@ name = "hyscribe-testkit"
 version = "0.1.0"
 dependencies = [
  "hyscribe-config",
+ "sqlx",
+ "tokio",
 ]
 
 [[package]]
@@ -783,6 +785,10 @@ dependencies = [
  "hyscribe-phpser",
  "hyscribe-testkit",
 ]
+
+[[package]]
+name = "hyscribe-write"
+version = "0.1.0"
 
 [[package]]
 name = "icu_collections"

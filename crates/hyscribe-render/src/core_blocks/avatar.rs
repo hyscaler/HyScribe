@@ -313,8 +313,18 @@ pub fn default_avatar(
     )
 }
 
-/// The name a user's initials come from.
-fn user_name(user: &User) -> Vec<u8> {
+/// `get_avatar_url()` of `email`, initials from `name`.
+pub fn avatar_url(
+    option: &dyn Fn(&str) -> Option<Vec<u8>>,
+    email: &[u8],
+    name: &[u8],
+    size: i64,
+) -> Vec<u8> {
+    gravatar(option, email, name, size, false).0
+}
+
+/// The name a user's avatar initials come from.
+pub fn user_name(user: &User) -> Vec<u8> {
     if !user.display_name.is_empty() {
         user.display_name.clone()
     } else if !user.first_name.is_empty() && !user.last_name.is_empty() {

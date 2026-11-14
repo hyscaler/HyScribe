@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use hyscribe_model::{Post, Term, TermOrder, TermQuery};
+use hyscribe_model::{Comment, CommentRow, Post, Term, TermOrder, TermQuery, User};
 use hyscribe_phpser::Value;
 use hyscribe_testkit::{Dump, SqlValue};
 
@@ -21,6 +21,7 @@ pub(super) struct Row {
 }
 
 /// One database's content.
+#[derive(Default)]
 pub(super) struct Content {
     pub(super) options: HashMap<String, Vec<u8>>,
     pub(super) terms: Vec<Row>,
@@ -29,6 +30,9 @@ pub(super) struct Content {
     pub(super) posts: Vec<Post>,
     /// `(user_id, meta_key, meta_value)`.
     pub(super) usermeta: Vec<(u64, String, Vec<u8>)>,
+    pub(super) comments: Vec<CommentRow>,
+    /// Each user and its `user_registered`.
+    pub(super) users: Vec<(User, String)>,
 }
 
 fn text(value: &SqlValue) -> Vec<u8> {
@@ -46,12 +50,12 @@ fn string(value: &SqlValue) -> String {
     String::from_utf8(text(value)).unwrap()
 }
 
-/// The roles of `reference/rest/users.sql`'s users.
-pub(super) const ADDED: [(u64, &str); 4] = [
-    (701, "editor"),
-    (702, "author"),
-    (703, "contributor"),
-    (704, "subscriber"),
+/// The roles and user levels of `reference/rest/users.sql`'s users.
+const ADDED: [(u64, &str, u8); 4] = [
+    (701, "editor", 7),
+    (702, "author", 2),
+    (703, "contributor", 1),
+    (704, "subscriber", 0),
 ];
 
 fn load(dump: &Dump) -> Content {
@@ -99,26 +103,101 @@ fn load(dump: &Dump) -> Content {
         .map(|row| Post {
             id: number(&row[0]),
             author: number(&row[1]),
+            date_gmt: string(&row[3]),
             status: string(&row[7]),
+            comment_status: string(&row[8]),
+            password: text(&row[10]),
+            name: text(&row[11]),
             parent: number(&row[17]),
             post_type: string(&row[20]),
             ..Post::default()
+        })
+        .collect();
+    let comments = dump
+        .table("wp_comments")
+        .map(|row| CommentRow {
+            comment: Comment {
+                id: number(&row[0]),
+                post_id: number(&row[1]),
+                author: text(&row[2]),
+                author_email: text(&row[3]),
+                author_url: text(&row[4]),
+                author_ip: text(&row[5]),
+                date: string(&row[6]),
+                date_gmt: string(&row[7]),
+                content: text(&row[8]),
+                comment_type: text(&row[12]),
+                parent: number(&row[13]),
+                user_id: number(&row[14]),
+            },
+            approved: string(&row[10]),
+            agent: text(&row[11]),
+            ..CommentRow::default()
+        })
+        .collect::<Vec<_>>();
+    let comments = comments
+        .into_iter()
+        .map(|mut row| {
+            let status = dump.table("wp_commentmeta").find(|meta| {
+                number(&meta[1]) == row.comment.id && text(&meta[2]) == b"_wp_note_status"
+            });
+            row.note_status = status.map(|meta| text(&meta[3])).unwrap_or_default();
+            row
         })
         .collect();
     let mut usermeta: Vec<(u64, String, Vec<u8>)> = dump
         .table("wp_usermeta")
         .map(|row| (number(&row[1]), string(&row[2]), text(&row[3])))
         .collect();
-    for (id, role) in ADDED {
+    for (id, role, level) in ADDED {
         let caps = format!("a:1:{{s:{}:\"{role}\";b:1;}}", role.len());
         usermeta.push((id, "wp_capabilities".into(), caps.into_bytes()));
+        usermeta.push((id, "wp_user_level".into(), level.to_string().into_bytes()));
     }
+    let meta = |id: u64, key: &str| {
+        let found = usermeta
+            .iter()
+            .find(|(user, name, _)| *user == id && name == key);
+        found.map(|(_, _, value)| value.clone()).unwrap_or_default()
+    };
+    let added = ADDED.iter().map(|(id, role, _)| {
+        let user = User {
+            id: *id,
+            display_name: role.as_bytes().to_vec(),
+            nicename: role.as_bytes().to_vec(),
+            login: role.as_bytes().to_vec(),
+            email: format!("{role}@example.test").into_bytes(),
+            ..User::default()
+        };
+        (user, "2026-11-01 00:00:00".to_string())
+    });
+    let users = dump
+        .table("wp_users")
+        .map(|row| {
+            let id = number(&row[0]);
+            let user = User {
+                id,
+                login: text(&row[1]),
+                nicename: text(&row[3]),
+                email: text(&row[4]),
+                url: text(&row[5]),
+                display_name: text(&row[9]),
+                first_name: meta(id, "first_name"),
+                last_name: meta(id, "last_name"),
+                description: meta(id, "description"),
+            };
+            (user, string(&row[6]))
+        })
+        .chain(added)
+        .collect();
     Content {
         options,
         terms,
         relationships,
         posts,
         usermeta,
+        comments,
+        users,
     }
 }
 
@@ -128,6 +207,19 @@ pub(super) fn default_install() -> &'static Content {
     CONTENT.get_or_init(|| {
         let version = hyscribe_testkit::default_install_versions().pop().unwrap();
         load(&hyscribe_testkit::default_install(&version).unwrap())
+    })
+}
+
+/// The default install with `reference/rest/people-more.sql`'s posts and
+/// comments.
+pub(super) fn default_install_more() -> &'static Content {
+    static CONTENT: OnceLock<Content> = OnceLock::new();
+    CONTENT.get_or_init(|| {
+        let version = hyscribe_testkit::default_install_versions().pop().unwrap();
+        let mut dump = hyscribe_testkit::default_install(&version).unwrap();
+        let more = include_bytes!("../../../../reference/rest/people-more.sql");
+        dump.rows.extend(Dump::parse(more).unwrap().rows);
+        load(&dump)
     })
 }
 
@@ -145,7 +237,7 @@ pub(super) fn theme_test_data() -> &'static Content {
 }
 
 /// MySQL's `utf8mb4_unicode_520_ci` order of plain text: case ignored.
-fn collate(a: &[u8], b: &[u8]) -> Ordering {
+pub(super) fn collate(a: &[u8], b: &[u8]) -> Ordering {
     let key = |text: &[u8]| String::from_utf8_lossy(text).to_lowercase();
     key(a).cmp(&key(b))
 }

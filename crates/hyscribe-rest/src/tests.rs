@@ -4,13 +4,14 @@
 //! routes in `content.tsv` and `content-ttd.tsv`, replayed for a visitor
 //! and each role, with `%nonce%` as each user's nonce.
 
-use hyscribe_auth::caps::{CapPost, CapabilityData, User};
+use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
 use hyscribe_phpser::parse_str;
 use hyscribe_testkit::unhex;
 
 use super::*;
 
 mod content;
+mod people;
 
 use content::Content;
 
@@ -40,8 +41,8 @@ impl CapabilityData for Oracle {
             .find(|(id, name, _)| *id == user && name == key)
             .map(|(_, _, value)| value.clone())
     }
-    fn user_exists(&self, _: u64) -> bool {
-        true
+    fn user_exists(&self, id: u64) -> bool {
+        self.content.users.iter().any(|(user, _)| user.id == id)
     }
     fn post(&self, id: u64) -> Option<CapPost> {
         let post = self.content.posts.iter().find(|post| post.id == id)?;
@@ -56,8 +57,10 @@ impl CapabilityData for Oracle {
     fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
         None
     }
-    fn comment_post(&self, _: u64) -> Option<u64> {
-        None
+    fn comment_post(&self, id: u64) -> Option<u64> {
+        let mut comments = self.content.comments.iter();
+        let found = comments.find(|row| row.comment.id == id);
+        found.map(|row| row.comment.post_id)
     }
     fn term_taxonomy(&self, id: u64) -> Option<String> {
         let terms = self.content.terms.iter();
@@ -89,7 +92,7 @@ impl Site for Oracle {
         "%nonce%".into()
     }
     fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
-        user != 0 && User::load(self, "wp_", user).has_cap(self, cap, args)
+        user != 0 && Capabilities::load(self, "wp_", user).has_cap(self, cap, args)
     }
     fn terms(&self, query: &TermQuery) -> Vec<Term> {
         self.content.terms(query)
@@ -106,6 +109,73 @@ impl Site for Oracle {
             .iter()
             .find(|post| post.id == id)
             .cloned()
+    }
+    fn home_url(&self) -> String {
+        SITE.into()
+    }
+    fn table_prefix(&self) -> String {
+        "wp_".into()
+    }
+    fn comments(&self, query: &CommentQuery) -> Vec<CommentRow> {
+        self.content.comment_query(query)
+    }
+    fn count_comments(&self, query: &CommentQuery) -> u64 {
+        self.content.count_comment_query(query)
+    }
+    /// `get_comment_link()` of a post, page or attachment: plain, or a post's name
+    /// under `/%postname%/`.
+    fn comment_link(&self, comment: &Comment) -> String {
+        let post = Site::post(self, comment.post_id);
+        let link = post.map_or(String::new(), |post| {
+            match (self.pretty, post.post_type.as_str()) {
+                (true, _) => format!("{SITE}/{}/", String::from_utf8_lossy(&post.name)),
+                (false, "page") => format!("{SITE}/?page_id={}", post.id),
+                (false, "attachment") => format!("{SITE}/?attachment_id={}", post.id),
+                _ => format!("{SITE}/?p={}", post.id),
+            }
+        });
+        let link = if self.pretty && link.is_empty() {
+            "/".into()
+        } else {
+            link
+        };
+        format!("{link}#comment-{}", comment.id)
+    }
+    fn users(&self, query: &UserQuery) -> Vec<User> {
+        self.content.user_query(query)
+    }
+    fn count_users(&self, query: &UserQuery) -> u64 {
+        self.content.count_user_query(query)
+    }
+    fn user(&self, id: u64) -> Option<User> {
+        let users = self.content.users.iter();
+        users
+            .map(|(user, _)| user)
+            .find(|user| user.id == id)
+            .cloned()
+    }
+    fn user_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        CapabilityData::user_meta(self, id, key)
+    }
+    fn user_registered(&self, id: u64) -> String {
+        let mut users = self.content.users.iter();
+        let found = users.find(|(user, _)| user.id == id);
+        found
+            .map(|(_, registered)| registered.clone())
+            .unwrap_or_default()
+    }
+    fn allcaps(&self, id: u64) -> Vec<(Key, Value)> {
+        Capabilities::load(self, "wp_", id).allcaps().to_vec()
+    }
+    fn author_link(&self, user: &User) -> String {
+        if self.pretty {
+            format!("{SITE}/author/{}/", String::from_utf8_lossy(&user.nicename))
+        } else {
+            format!("{SITE}/?author={}", user.id)
+        }
+    }
+    fn has_posts(&self, author: u64, types: &[(String, bool)]) -> bool {
+        self.content.has_posts(author, types)
     }
 }
 
@@ -338,37 +408,29 @@ fn a_single_page_has_no_links() {
 /// where it writes.
 const CONTENT_UNPORTED: [&str; 1] = ["/?rest_route=/wp/v2/categories/68&_embed=up"];
 
-/// The content routes answer as PHP does over the default install and, by
-/// hash, the Theme Test Data fixture, but those not ported.
-#[test]
-fn content_answers_match_php() {
+/// The answers of `goldens`, each over its content and compared by hash
+/// when flagged, that differ from PHP's, and how many are 501 as
+/// `unported` expects; a write method is never served.
+fn mismatches(
+    goldens: &[(&'static Content, &str, bool)],
+    unported: &dyn Fn(&Case) -> bool,
+) -> (Vec<String>, usize) {
     use sha2::Digest;
     let mut failures = Vec::new();
-    let goldens = [
-        (
-            content::default_install(),
-            include_str!("../tests/golden/content.tsv"),
-            false,
-        ),
-        (
-            content::theme_test_data(),
-            include_str!("../tests/golden/content-ttd.tsv"),
-            true,
-        ),
-    ];
-    for (content, golden, hashed) in goldens {
+    let mut not_served = 0;
+    for &(content, golden, hashed) in goldens {
         for case in cases_of(golden) {
             let served = serve_over(content, &case);
             let what = format!(
                 "{} {} {} {} {hashed}",
                 case.who, case.method, case.target, case.flags
             );
+            let write = case.method != "GET" && case.method != "HEAD";
             if served.status == 501 {
-                let unported = case.method != "GET" && case.method != "HEAD"
-                    || CONTENT_UNPORTED.contains(&case.target.as_str());
-                if !unported || !served.body.is_empty() {
+                if !(write || unported(&case)) || !served.body.is_empty() {
                     failures.push(format!("{what}: 501"));
                 }
+                not_served += 1;
                 continue;
             }
             let body = if hashed {
@@ -395,6 +457,27 @@ fn content_answers_match_php() {
             }
         }
     }
+    (failures, not_served)
+}
+
+/// The content routes answer as PHP does over the default install and, by
+/// hash, the Theme Test Data fixture, but those not ported.
+#[test]
+fn content_answers_match_php() {
+    let goldens = [
+        (
+            content::default_install(),
+            include_str!("../tests/golden/content.tsv"),
+            false,
+        ),
+        (
+            content::theme_test_data(),
+            include_str!("../tests/golden/content-ttd.tsv"),
+            true,
+        ),
+    ];
+    let unported = |case: &Case| CONTENT_UNPORTED.contains(&case.target.as_str());
+    let (failures, _) = mismatches(&goldens, &unported);
     assert!(
         failures.is_empty(),
         "{} failures\n{}",
@@ -440,6 +523,8 @@ fn changed(options: &[(&str, &[u8])]) -> &'static Content {
         relationships: Vec::new(),
         posts: Vec::new(),
         usermeta: default.usermeta.clone(),
+        users: default.users.clone(),
+        ..Content::default()
     }))
 }
 
@@ -552,6 +637,8 @@ fn empty_categories_with_posts_under_them_stay() {
         relationships: Vec::new(),
         posts: Vec::new(),
         usermeta: default.usermeta.clone(),
+        users: default.users.clone(),
+        ..Content::default()
     }));
     let ids = |target| {
         let served = get(content, "visitor", target);
@@ -588,6 +675,8 @@ fn empty_categories_with_posts_under_them_stay() {
         relationships: Vec::new(),
         posts: Vec::new(),
         usermeta: default.usermeta.clone(),
+        users: default.users.clone(),
+        ..Content::default()
     }));
     let served = get(stale, "visitor", "/?rest_route=/wp/v2/categories&parent=1");
     assert_eq!(served.body, b"[]");

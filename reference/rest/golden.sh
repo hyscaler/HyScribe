@@ -10,7 +10,8 @@
 # reference/rest/editor.list, it records those as <list name>.tsv instead,
 # over the database php.sh runs on; on the Theme Test Data fixture
 # (HYSCRIBE_PHP_DB=wordpress_ttd), whose content is not ours to commit, as
-# <list name>-ttd.tsv with each body's SHA-256:
+# <list name>-ttd.tsv with each body's SHA-256. A list's <list name>.sql beside
+# it, rows of IDs from 9001 to 9999, is added after the users and deleted after:
 #   who<TAB>method<TAB>hex(target)<TAB>flags<TAB>status<TAB>hex(headers)<TAB>hex(body)
 # A logged in user sends the nonce admin-ajax.php's rest-nonce action gives
 # them as X-WP-Nonce, unless flags has nononce; %nonce% in a target, the
@@ -36,16 +37,20 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/crates/hyscribe-rest/tests/golden/rest.tsv"
 MU=/var/www/html/wp-content/mu-plugins
 TMP=$(mktemp -d)
+CONTENT=
+[ $# -gt 0 ] && [ -f "${1%.list}.sql" ] && CONTENT="${1%.list}.sql"
 sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "${HYSCRIBE_PHP_DB:-wordpress}" "$@"; }
 cleanup() {
   rm -rf "$TMP"
   echo "DELETE FROM wp_users WHERE ID BETWEEN 701 AND 704; DELETE FROM wp_usermeta WHERE user_id BETWEEN 701 AND 704;" | sql
+  [ -z "$CONTENT" ] || echo "DELETE FROM wp_posts WHERE ID BETWEEN 9001 AND 9999; DELETE FROM wp_comments WHERE comment_ID BETWEEN 9001 AND 9999; DELETE FROM wp_commentmeta WHERE meta_id BETWEEN 9001 AND 9999;" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-permalinks.php" "$MU/hyscribe-no-cron.php"
 }
 trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-permalinks.php" < "$ROOT/reference/rewrite/permalinks.php"
 echo '<?php define( "DISABLE_WP_CRON", true );' | "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-no-cron.php"
 sql < "$ROOT/reference/rest/users.sql"
+[ -z "$CONTENT" ] || sql < "$CONTENT"
 checksums() { sql -N -e 'CHECKSUM TABLE wp_commentmeta, wp_comments, wp_links, wp_options, wp_postmeta, wp_posts, wp_term_relationships, wp_term_taxonomy, wp_termmeta, wp_terms, wp_usermeta, wp_users' < /dev/null; }
 
 # method<TAB>target<TAB>flags
@@ -127,7 +132,7 @@ LIST
 )
 if [ $# -gt 0 ]; then
   REQUESTS=$(grep -v '^#' "$1")
-  OUT="$ROOT/crates/hyscribe-rest/tests/golden/$(basename "$1" .list)$([ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ] && echo -ttd).tsv"
+  OUT="$ROOT/crates/hyscribe-rest/tests/golden/$(basename "$1" .list)$([ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ] && echo -ttd || true).tsv"
 fi
 
 curl_args() {

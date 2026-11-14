@@ -56,3 +56,31 @@ fn keywords_not_ported_are_refused() {
         );
     }
 }
+
+/// `rest_parse_date()`'s pattern: seconds required, a fraction of them
+/// left out, `t` or a space for `T`, an offset of hours alone or hours and
+/// minutes with a colon.
+#[test]
+fn dates_are_parsed_as_rest_parse_date_parses_them() {
+    let at = |date: &str| parse_date(date.as_bytes());
+    let base = at("2013-03-14T08:00:00+02:00");
+    assert!(base.is_some());
+    for same in [
+        "2013-03-14T08:00:00+02",
+        "2013-03-14t08:00:00.25+02:00",
+        "2013-03-14 06:00:00Z",
+    ] {
+        assert_eq!(at(same), base, "{same}");
+    }
+    for wrong in [
+        "2013-03-14T08:00",
+        "2013-03-14T08:00:00.",
+        "2013-03-14T08:00:00+0200",
+        "2013-03-14T08:00:00+0a",
+        "2013-03-14T08:00:00+02:0a",
+        "2013-03-14X08:00:00",
+        "13-03-14T08:00:00",
+    ] {
+        assert_eq!(at(wrong), None, "{wrong}");
+    }
+}

@@ -201,6 +201,11 @@ impl User {
         User { id, allcaps }
     }
 
+    /// `$user->allcaps`.
+    pub fn allcaps(&self) -> &[(Key, Value)] {
+        &self.allcaps
+    }
+
     /// `has_cap( $cap, ...$args )`: every capability `map_meta_cap()` asks
     /// for is granted.
     pub fn has_cap(&self, data: &dyn CapabilityData, cap: &str, args: &[Value]) -> bool {

@@ -498,7 +498,7 @@ fn prepare(context: &Context, params: &Params, term: &Term) -> Response {
     let mut response = Response::new(Value::Array(data), 200);
     if is_field_included("_links", &wanted) || is_field_included("_embedded", &wanted) {
         let route = items_route_of(taxonomy);
-        context.self_link(&mut response, &format!("{route}/{}", term.id));
+        crate::self_link(context, &mut response, &format!("{route}/{}", term.id));
         response.add_link("collection", context.rest_url(&route));
         let about = format!("/wp/v2/taxonomies/{taxonomy}");
         response.add_link("about", context.rest_url(&about));

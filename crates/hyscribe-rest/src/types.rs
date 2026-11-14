@@ -135,6 +135,13 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     }
 }
 
+/// `current_user_can( 'edit_posts' )`, or the `edit_posts` capability of
+/// any post type shown in REST, as the editors' registries check: the first
+/// is the post type `post`'s own.
+pub(crate) fn can_edit_any(context: &Context) -> bool {
+    shown_in_rest().any(|(_, fields)| can_edit(context, fields))
+}
+
 /// `get_items_permissions_check()`.
 fn items_permission(context: &Context, params: &Params) -> Result<(), RestError> {
     if !wants_edit(params) || shown_in_rest().any(|(_, fields)| can_edit(context, fields)) {

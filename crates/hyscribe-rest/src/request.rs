@@ -5,7 +5,7 @@
 //! sanitized by their route's arguments.
 
 use hyscribe_kses::sanitize_key;
-use hyscribe_phpser::{Key, Value, absint};
+use hyscribe_phpser::{Key, Value, absint, urldecode};
 use hyscribe_render::formatting::sanitize_text_field;
 
 use crate::response::{RestError, object, text};
@@ -67,6 +67,8 @@ pub(crate) enum Sanitize {
     TextField,
     /// `rest_parse_request_arg()`: validated, then sanitized, by its schema.
     Schema,
+    /// `urldecode()` of a URL parameter, a string.
+    Urldecode,
 }
 
 /// A route's argument: its schema, whether `rest_validate_request_arg()`
@@ -172,6 +174,7 @@ pub(crate) fn sanitize_params(params: &mut Params, args: &[Arg]) -> Result<(), R
                     Ok(Value::Int(i64::try_from(absint(value)).unwrap_or(i64::MAX)))
                 }
                 Sanitize::TextField => Ok(text(sanitize_text_field(&value.to_php_string()))),
+                Sanitize::Urldecode => Ok(text(urldecode(&value.to_php_string()))),
                 Sanitize::Schema => validate_value_from_schema(value, &arg.schema, arg.name)
                     .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name)),
             };

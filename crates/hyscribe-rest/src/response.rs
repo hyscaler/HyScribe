@@ -17,6 +17,9 @@ pub struct RestError {
     pub data: Value,
 }
 
+/// The code of [`RestError::not_ported`].
+pub(crate) const NOT_PORTED: &str = "hyscribe_not_ported";
+
 /// A PHP array of string keys.
 pub(crate) fn object<const N: usize>(entries: [(&str, Value); N]) -> Value {
     Value::Array(
@@ -33,26 +36,21 @@ pub(crate) fn text(text: impl Into<Vec<u8>>) -> Value {
 }
 
 impl RestError {
-    /// What a callback answers where it is not ported, such as where PHP
-    /// would write to the database: `501`.
-    pub(crate) fn not_ported() -> RestError {
-        RestError {
-            code: "",
-            message: String::new(),
-            data: Value::Null,
-        }
-    }
-
-    pub(crate) fn is_not_ported(&self) -> bool {
-        self.code.is_empty()
-    }
-
     /// An error with `array( 'status' => $status )` as its data.
     pub fn status(code: &'static str, message: &str, status: u16) -> RestError {
         RestError {
             code,
             message: message.into(),
             data: object([("status", Value::Int(i64::from(status)))]),
+        }
+    }
+
+    /// What a route answers where it is not ported, which is sent as `501`.
+    pub(crate) fn not_ported() -> RestError {
+        RestError {
+            code: NOT_PORTED,
+            message: String::new(),
+            data: Value::Null,
         }
     }
 
@@ -82,7 +80,7 @@ pub struct Response {
     pub headers: Vec<(String, String)>,
     /// The data.
     pub data: Value,
-    /// The links and their relations, each link's `href` last.
+    /// The links and their relations.
     links: Vec<(String, Value)>,
 }
 
@@ -120,11 +118,11 @@ impl Response {
             .map(|(name, value)| (Key::String(name.as_bytes().to_vec()), value))
             .collect();
         link.push((Key::String(b"href".to_vec()), text(href)));
-        self.add_link_object(rel, Value::Array(link));
+        self.add_link_attributes(rel, Value::Array(link));
     }
 
-    /// A link as it is given, `href` and all.
-    pub(crate) fn add_link_object(&mut self, rel: &str, link: Value) {
+    /// A link to `rel` as `get_response_links()` gives it.
+    pub(crate) fn add_link_attributes(&mut self, rel: &str, link: Value) {
         self.links.push((rel.into(), link));
     }
 

@@ -6,7 +6,11 @@
 # (added and deleted after) and the fixture administrator, as
 # crates/hyscribe-rest/tests/golden/rest.tsv, and the cases of
 # reference/rest/schema-golden.php and fields-golden.php as schema.tsv and
-# fields.tsv beside it:
+# fields.tsv beside it. With a list of requests as its argument, such as
+# reference/rest/editor.list, it records those as <list name>.tsv instead,
+# over the database php.sh runs on; on the Theme Test Data fixture
+# (HYSCRIBE_PHP_DB=wordpress_ttd), whose content is not ours to commit, as
+# <list name>-ttd.tsv with each body's SHA-256:
 #   who<TAB>method<TAB>hex(target)<TAB>flags<TAB>status<TAB>hex(headers)<TAB>hex(body)
 # A logged in user sends the nonce admin-ajax.php's rest-nonce action gives
 # them as X-WP-Nonce, unless flags has nononce; %nonce% in a target, the
@@ -14,11 +18,10 @@
 # visitor). Flags: origin and originnull send an Origin header, pretty serves
 # the request under /%postname%/ permalinks (reference/rewrite/permalinks.php),
 # override sends X-HTTP-Method-Override: DELETE, ttd records the request on
-# the Theme Test Data fixture only. With a requests file and
-# an output as arguments, it records those requests instead, as
-# reference/rest/content.requests lists them, over the database php.sh runs
-# on; on the Theme Test Data fixture (HYSCRIBE_PHP_DB=wordpress_ttd), whose
-# content is not ours to commit, each body is its SHA-256. The headers kept are
+# the Theme Test Data fixture only, skip=a+b sends the request
+# as every identity but those listed, and writes
+# sends it once as the administrator after the others, fails the run unless
+# it writes to the database, and records the status as writes. The headers kept are
 # WordPress's own, one "name: value" a line in the order sent, with Apache's
 # Accept-Encoding left out of Vary. Cron is off for the run, and every
 # table's checksum is compared before and after the REST requests: a REST
@@ -30,7 +33,7 @@ NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
 DB="${HYSCRIBE_DB_CONTAINER:-hyscribe-default-install-db}"
 BASE="${HYSCRIBE_PHP_URL:-http://127.0.0.1:8081}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-OUT="${2:-$ROOT/crates/hyscribe-rest/tests/golden/rest.tsv}"
+OUT="$ROOT/crates/hyscribe-rest/tests/golden/rest.tsv"
 MU=/var/www/html/wp-content/mu-plugins
 TMP=$(mktemp -d)
 sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "${HYSCRIBE_PHP_DB:-wordpress}" "$@"; }
@@ -43,12 +46,9 @@ trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-permalinks.php" < "$ROOT/reference/rewrite/permalinks.php"
 echo '<?php define( "DISABLE_WP_CRON", true );' | "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-no-cron.php"
 sql < "$ROOT/reference/rest/users.sql"
-checksums() { sql -N -e 'CHECKSUM TABLE wp_commentmeta, wp_comments, wp_links, wp_options, wp_postmeta, wp_posts, wp_term_relationships, wp_term_taxonomy, wp_termmeta, wp_terms, wp_usermeta, wp_users'; }
+checksums() { sql -N -e 'CHECKSUM TABLE wp_commentmeta, wp_comments, wp_links, wp_options, wp_postmeta, wp_posts, wp_term_relationships, wp_term_taxonomy, wp_termmeta, wp_terms, wp_usermeta, wp_users' < /dev/null; }
 
 # method<TAB>target<TAB>flags
-if [ -n "${1:-}" ]; then
-  REQUESTS=$(grep -v '^#' "$1")
-else
 REQUESTS=$(cat <<'LIST'
 GET	/?rest_route=/wp/v2/types
 GET	/index.php?rest_route=/wp/v2/types/post
@@ -125,6 +125,9 @@ GET	/?rest_route=/wp-abilities/v1/categories/a-b
 GET	/?rest_route=/wp/v2/types/post/x
 LIST
 )
+if [ $# -gt 0 ]; then
+  REQUESTS=$(grep -v '^#' "$1")
+  OUT="$ROOT/crates/hyscribe-rest/tests/golden/$(basename "$1" .list)$([ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ] && echo -ttd).tsv"
 fi
 
 curl_args() {
@@ -158,7 +161,9 @@ before=$(checksums)
 for who in "${WHO[@]}"; do
   nonce=${NONCE[$who]}
   while IFS=$'\t' read -r method target flags; do
+    [[ "$flags" == *writes* ]] && continue
     [[ "$flags" == *ttd* && "${HYSCRIBE_PHP_DB:-}" != wordpress_ttd ]] && continue
+    [[ "+${flags#*skip=}+" == *"+$who+"* && "$flags" == *skip=* ]] && continue
     curl_args "$who" "$flags" "$nonce"
     url="$BASE${target//%nonce%/$nonce}"
     if [ "$method" = HEAD ]; then
@@ -178,12 +183,24 @@ for who in "${WHO[@]}"; do
       "$(printf '%s' "$headers" | xxd -p | tr -d '\n')" "$body" >> "$OUT"
   done <<< "$REQUESTS"
 done
-if [ -z "${1:-}" ]; then
+if [ $# -gt 0 ]; then
+  after=$(checksums)
+  [ "$before" = "$after" ] || { echo "a REST request wrote to the database" >&2; diff <(echo "$before") <(echo "$after") >&2; exit 1; }
+  while IFS=$'\t' read -r method target flags; do
+    [[ "$flags" == *writes* ]] || continue
+    curl_args administrator "$flags" "${NONCE[administrator]}"
+    curl -s -o /dev/null -X "$method" "${args[@]}" "$BASE$target"
+    [ "$(checksums)" != "$after" ] || { echo "$target did not write" >&2; exit 1; }
+    after=$(checksums)
+    printf 'administrator\t%s\t%s\t%s\twrites\t\t\n' "$method" "$(printf '%s' "$target" | xxd -p | tr -d '\n')" "$flags" >> "$OUT"
+  done <<< "$REQUESTS"
+  wc -l "$OUT"
+  exit 0
+fi
 "$DOCKER" cp "$ROOT/reference/rest/schema-golden.php" "$NAME:/tmp/schema-golden.php"
 "$DOCKER" exec "$NAME" php /tmp/schema-golden.php > "$ROOT/crates/hyscribe-rest/tests/golden/schema.tsv"
 "$DOCKER" cp "$ROOT/reference/rest/fields-golden.php" "$NAME:/tmp/fields-golden.php"
 "$DOCKER" exec "$NAME" php /tmp/fields-golden.php > "$ROOT/crates/hyscribe-rest/tests/golden/fields.tsv"
-fi
 after=$(checksums)
 [ "$before" = "$after" ] || { echo "a REST request wrote to the database" >&2; diff <(echo "$before") <(echo "$after") >&2; exit 1; }
-wc -l "$OUT"
+wc -l "$OUT" "$ROOT"/crates/hyscribe-rest/tests/golden/{schema,fields}.tsv

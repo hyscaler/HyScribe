@@ -30,6 +30,7 @@ fn context(oracle: &Oracle) -> Context<'_> {
         user: 1,
         head: false,
         uri: b"/",
+        parameters: false,
     }
 }
 
@@ -116,6 +117,7 @@ fn embedding_what_is_not_ported() {
             origin: None,
             nonce: (user != 0).then_some(b"%nonce%"),
             method_override: None,
+            unread_body: false,
         };
         crate::serve(&oracle, &request).status
     };

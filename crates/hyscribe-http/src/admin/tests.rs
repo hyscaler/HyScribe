@@ -1081,6 +1081,44 @@ async fn refusals() {
 /// A Site Icon, and a static homepage with neither page chosen, which PHP
 /// saves as the latest posts first, and another active theme are not
 /// ported.
+/// The dashboard's `welcome` saves for a user who may see the panel, so it
+/// answers 501 only for them; the menu folds from the settings cookie.
+#[tokio::test(flavor = "multi_thread")]
+async fn dashboard_arguments_and_folding() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let host = "127.0.0.1:8081";
+    let welcome = get(&site, "/hs-admin/?welcome=0", host, &cookies).await;
+    assert_eq!(welcome.status(), StatusCode::NOT_IMPLEMENTED);
+    let folded = format!("{cookies}; wp-settings-1=mfold%3Df");
+    let edit = get(&site, "/hs-admin/?edit=dashboard_primary", host, &folded).await;
+    assert_eq!(edit.status(), StatusCode::OK);
+    assert!(
+        page_of(edit)
+            .await
+            .contains(" index-php folded auto-fold admin-bar ")
+    );
+    let handle = Handle::current();
+    let shown = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, now());
+        let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+        let (path, uri) = ("/hs-admin/", "/hs-admin/?welcome=0");
+        let browser = Browser::default();
+        screen(
+            &admin,
+            path,
+            uri,
+            "http://h/hs-admin/",
+            "http://h",
+            &browser,
+        )
+        .is_some()
+    })
+    .await
+    .unwrap();
+    assert!(shown);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_not_ported() {
     let db = hyscribe_db::Db::connect(&hyscribe_testkit::fixture_database())
@@ -1493,7 +1531,7 @@ async fn dashboard_data() {
             assert!(!subscriber.can_for("edit_user", 1));
             assert!(subscriber.recent_posts("future").is_empty());
             assert_eq!(
-                PostsSite::user_option(subscriber, "admin_color").as_deref(),
+                PageSite::user_option(subscriber, "admin_color").as_deref(),
                 Some(&b"modern"[..])
             );
             let comments = subscriber.recent_comments(None);

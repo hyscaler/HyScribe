@@ -4,7 +4,9 @@
 //! `admin-footer.php` print it around the screen's own markup.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url, parse_url};
-use hyscribe_phpser::{Key, Maybe, Value, add_query_arg, maybe_unserialize, parse_str};
+use hyscribe_phpser::{
+    Key, Maybe, Value, add_query_arg, is_empty_string, maybe_unserialize, parse_str,
+};
 use hyscribe_render::head::{admin_import_map, emoji_detection_script, json_hex_tag};
 use hyscribe_render::kses::wp_kses_post;
 use hyscribe_render::post::sanitize_html_class;
@@ -91,6 +93,10 @@ const FORM: &str = "\t\t\t<div id=\"wp-auth-check-form\" class=\"loading\" data-
 
 /// What the frame asks of the site and its logged-in user.
 pub trait PageSite: BarSite + Urls {
+    /// `get_user_option( $name )`, as stored.
+    fn user_option(&self, name: &str) -> Option<Vec<u8>>;
+    /// The settings cookie, `wp-settings-{$user_id}`, as sent.
+    fn settings_cookie(&self) -> Option<String>;
     /// `get_current_user_id()`.
     fn user_id(&self) -> u64;
     /// `wp_create_nonce( $action )` for the user.
@@ -596,10 +602,16 @@ fn version_classes(version: &str) -> (String, String) {
 /// From `</head>` to the menu.
 fn body(site: &dyn PageSite, page: &Page, color: &str, browser: &Browser) -> String {
     let (branch, version) = version_classes(VERSION.trim());
-    let mut classes = format!(
-        "{} auto-fold admin-bar",
-        admin_page_class(page.screen.pagenow)
-    );
+    let cookie = site.settings_cookie();
+    let setting = |name| user_setting(site, cookie.as_deref(), name);
+    let mut classes = admin_page_class(page.screen.pagenow);
+    if setting("mfold").as_deref() == Some("f") {
+        classes.push_str(" folded");
+    }
+    if setting("unfold").is_none_or(|unfold| is_empty_string(unfold.as_bytes())) {
+        classes.push_str(" auto-fold");
+    }
+    classes.push_str(" admin-bar");
     if !page.screen.typenow.is_empty() {
         classes.push_str(&format!(" post-type-{}", page.screen.typenow));
     }
@@ -743,6 +755,30 @@ fn footer(site: &dyn PageSite, page: &Page, assets: &mut Assets) -> String {
     }
     out.push_str("\n<div class=\"clear\"></div></div><!-- wpwrap -->\n<script>if(typeof wpOnload==='function')wpOnload();</script>\n</body>\n</html>\n");
     out
+}
+
+/// `get_user_setting( $name )`: from the settings cookie when sent, else
+/// the stored `user-settings`; none when the cleaned cookie has no `=`.
+pub(crate) fn user_setting(
+    site: &dyn PageSite,
+    cookie: Option<&str>,
+    name: &str,
+) -> Option<String> {
+    let stored = match cookie {
+        Some(cookie) => {
+            let kept: String = cookie
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '=' | '&' | '_' | '-'))
+                .collect();
+            kept.find('=')
+                .filter(|at| *at > 0)
+                .map(|_| kept.into_bytes())
+        }
+        None => site.user_option("user-settings"),
+    }?;
+    let settings = hyscribe_phpser::parse_str(&stored);
+    let setting = settings.get_str(name).and_then(Value::as_bytes)?;
+    Some(String::from_utf8_lossy(setting).into_owned())
 }
 
 #[cfg(test)]

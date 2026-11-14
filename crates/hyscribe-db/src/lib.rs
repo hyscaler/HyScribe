@@ -1336,31 +1336,22 @@ impl Db {
     /// The terms `WP_Term_Query` selects with `query`, in its order: its
     /// query for IDs as written, whose plan orders ties, then those terms.
     pub async fn term_query(&self, query: &TermQuery) -> Result<Vec<Term>, DbError> {
-        let mut sql = Sql::new(
-            "SELECT t.term_id FROM {prefix}terms AS t \
-             INNER JOIN {prefix}term_taxonomy AS tt ON t.term_id = tt.term_id \
-             WHERE tt.taxonomy IN (?)",
-        );
-        sql.bind(Bind::Text(query.taxonomy.clone()));
-        if !query.include.is_empty() {
-            sql.push(" AND t.term_id IN (");
-            list(&mut sql, query.include.iter().copied().map(Bind::Int));
-        }
-        if let Some(parent) = query.parent {
-            sql.push(" AND tt.parent = ?");
-            sql.bind(Bind::Int(parent));
-        }
-        if query.nonempty {
-            sql.push(" AND tt.count > 0");
-        }
-        if let Some(search) = &query.search {
-            search_terms(&mut sql, search);
-        }
+        let mut sql = term_where(Sql::new("SELECT t.term_id"), query);
         if let Some((order, descending)) = query.order {
             sql.push(" ORDER BY ");
-            match term_order_column(order) {
-                Some(column) => sql.push(column),
-                None => {
+            match (term_order_column(order), order) {
+                (Some(column), _) => sql.push(column),
+                (None, TermOrder::Slugs) => {
+                    sql.push("FIELD( t.slug, ");
+                    list(
+                        &mut sql,
+                        query
+                            .slugs
+                            .iter()
+                            .map(|slug| Bind::Text(String::from_utf8_lossy(slug).into_owned())),
+                    );
+                }
+                (None, _) => {
                     sql.push("FIELD( t.term_id, ");
                     list(&mut sql, query.include.iter().copied().map(Bind::Int));
                 }
@@ -1441,6 +1432,16 @@ impl Db {
             .await
             .map_err(db_error)?;
         row.try_get::<i64, _>("found")
+            .map(i64::unsigned_abs)
+            .map_err(db_error)
+    }
+
+    /// `wp_count_terms()` of `query`: the terms it selects, without its
+    /// order, limit and offset.
+    pub async fn term_query_count(&self, query: &TermQuery) -> Result<u64, DbError> {
+        let sql = term_where(Sql::new("SELECT COUNT(*) AS found"), query);
+        let row = sql.query(&self.prefix).fetch_one(&self.pool).await;
+        row.and_then(|row| row.try_get::<i64, _>("found"))
             .map(i64::unsigned_abs)
             .map_err(db_error)
     }
@@ -2002,7 +2003,7 @@ fn term_order_column(order: TermOrder) -> Option<&'static str> {
         TermOrder::Taxonomy => "tt.taxonomy",
         TermOrder::TermTaxonomyId => "tt.term_taxonomy_id",
         TermOrder::Description => "tt.description",
-        TermOrder::Include => return None,
+        TermOrder::Include | TermOrder::Slugs => return None,
     })
 }
 
@@ -2028,6 +2029,53 @@ fn search_terms(sql: &mut Sql, search: &str) {
     sql.push(" AND ((t.name LIKE ?) OR (t.slug LIKE ?))");
     sql.bind(Bind::Text(like(search)));
     sql.bind(Bind::Text(like(search)));
+}
+
+/// The `FROM` and `WHERE` of a `WP_Term_Query` after `select`.
+fn term_where(mut sql: Sql, query: &TermQuery) -> Sql {
+    sql.push(
+        " FROM {prefix}terms AS t \
+         INNER JOIN {prefix}term_taxonomy AS tt ON t.term_id = tt.term_id",
+    );
+    if !query.objects.is_empty() {
+        sql.push(
+            " INNER JOIN {prefix}term_relationships AS tr \
+             ON tr.term_taxonomy_id = tt.term_taxonomy_id",
+        );
+    }
+    sql.push(" WHERE tt.taxonomy IN (?)");
+    sql.bind(Bind::Text(query.taxonomy.clone()));
+    if !query.include.is_empty() {
+        sql.push(" AND t.term_id IN (");
+        list(&mut sql, query.include.iter().copied().map(Bind::Int));
+    }
+    if !query.exclude.is_empty() {
+        sql.push(" AND t.term_id NOT IN (");
+        list(&mut sql, query.exclude.iter().copied().map(Bind::Int));
+    }
+    if !query.slugs.is_empty() {
+        sql.push(" AND t.slug IN (");
+        let slugs = query.slugs.iter();
+        list(
+            &mut sql,
+            slugs.map(|slug| Bind::Text(String::from_utf8_lossy(slug).into_owned())),
+        );
+    }
+    if let Some(parent) = query.parent {
+        sql.push(" AND tt.parent = ?");
+        sql.bind(Bind::Int(parent));
+    }
+    if query.nonempty {
+        sql.push(" AND tt.count > 0");
+    }
+    if let Some(search) = &query.search {
+        search_terms(&mut sql, search);
+    }
+    if !query.objects.is_empty() {
+        sql.push(" AND tr.object_id IN (");
+        list(&mut sql, query.objects.iter().copied().map(Bind::Int));
+    }
+    sql
 }
 
 /// A `LIKE` pattern matching `text` anywhere.

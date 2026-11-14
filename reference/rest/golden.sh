@@ -9,15 +9,19 @@
 # as schema.tsv, fields.tsv and hierarchy.tsv beside it. With a list of
 # requests as its argument, such as
 # reference/rest/editor.list, it records those as <list name>.tsv instead,
-# over the rows of <list name>.sql beside it if there is one (added before,
-# and its statements after a `-- cleanup` line run after):
+# over the database php.sh runs on, with the rows of <list name>.sql beside
+# it if there is one (added before, and its statements after a `-- cleanup`
+# line run after); on the Theme Test Data fixture
+# (HYSCRIBE_PHP_DB=wordpress_ttd), whose content is not ours to commit, as
+# <list name>-ttd.tsv with each body's SHA-256:
 #   who<TAB>method<TAB>hex(target)<TAB>flags<TAB>status<TAB>hex(headers)<TAB>hex(body)
 # A logged in user sends the nonce admin-ajax.php's rest-nonce action gives
 # them as X-WP-Nonce, unless flags has nononce; %nonce% in a target, the
 # headers and the body stands for the user's nonce (a visitor's for a
 # visitor). Flags: origin and originnull send an Origin header, pretty serves
 # the request under /%postname%/ permalinks (reference/rewrite/permalinks.php),
-# override sends X-HTTP-Method-Override: DELETE, skip=a+b sends the request
+# override sends X-HTTP-Method-Override: DELETE, ttd records the request on
+# the Theme Test Data fixture only, skip=a+b sends the request
 # as every identity but those listed, and writes
 # sends it once as the administrator after the others, fails the run unless
 # it writes to the database, and records the status as writes. The headers kept are
@@ -38,7 +42,7 @@ MU=/var/www/html/wp-content/mu-plugins
 TMP=$(mktemp -d)
 STATE="${1:-}"; STATE="${STATE%.list}.sql"
 [ -f "$STATE" ] || STATE=/dev/null
-sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress "$@"; }
+sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "${HYSCRIBE_PHP_DB:-wordpress}" "$@"; }
 cleanup() {
   rm -rf "$TMP"
   echo "DELETE FROM wp_users WHERE ID BETWEEN 701 AND 704; DELETE FROM wp_usermeta WHERE user_id BETWEEN 701 AND 704;" | sql
@@ -131,7 +135,7 @@ LIST
 )
 if [ $# -gt 0 ]; then
   REQUESTS=$(grep -v '^#' "$1")
-  OUT="$ROOT/crates/hyscribe-rest/tests/golden/$(basename "$1" .list).tsv"
+  OUT="$ROOT/crates/hyscribe-rest/tests/golden/$(basename "$1" .list)$([ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ] && echo -ttd).tsv"
 fi
 
 curl_args() {
@@ -166,6 +170,7 @@ for who in "${WHO[@]}"; do
   nonce=${NONCE[$who]}
   while IFS=$'\t' read -r method target flags; do
     [[ "$flags" == *writes* ]] && continue
+    [[ "$flags" == *ttd* && "${HYSCRIBE_PHP_DB:-}" != wordpress_ttd ]] && continue
     [[ "+${flags#*skip=}+" == *"+$who+"* && "$flags" == *skip=* ]] && continue
     curl_args "$who" "$flags" "$nonce"
     url="$BASE${target//%nonce%/$nonce}"
@@ -177,7 +182,11 @@ for who in "${WHO[@]}"; do
     fi
     headers=$(tr -d '\r' < "$TMP/head" | grep -iE '^(content-type|x-robots-tag|link|access-control-[a-z-]+|allow|vary|x-wp-[a-z]+|expires|cache-control):' |
       sed -E 's/^([^:]+):/\L\1:/; s/^(vary: .*),Accept-Encoding$/\1/' | grep -vx 'vary: Accept-Encoding' | sed "s/$nonce/%nonce%/g" || true)
-    body=$(sed "s/$nonce/%nonce%/g" "$TMP/body" | xxd -p | tr -d '\n')
+    if [ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ]; then
+      body=$(sed "s/$nonce/%nonce%/g" "$TMP/body" | sha256sum | cut -c1-64 | tr -d '\n' | xxd -p | tr -d '\n')
+    else
+      body=$(sed "s/$nonce/%nonce%/g" "$TMP/body" | xxd -p | tr -d '\n')
+    fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$who" "$method" "$(printf '%s' "$target" | xxd -p | tr -d '\n')" "$flags" "$status" \
       "$(printf '%s' "$headers" | xxd -p | tr -d '\n')" "$body" >> "$OUT"
   done <<< "$REQUESTS"

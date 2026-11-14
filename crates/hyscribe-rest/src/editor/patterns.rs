@@ -25,7 +25,7 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         "/wp/v2/block-patterns/categories" => Some(vec![Endpoint {
             args: Vec::new(),
             permission: |context, _| permission(context, "block pattern categories"),
-            callback: categories,
+            callback: Some(categories),
         }]),
         // Listing the patterns first fetches those of the wordpress.org
         // pattern directory and caches the answer, failed or not, in a site
@@ -33,7 +33,7 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         "/wp/v2/block-patterns/patterns" => Some(vec![Endpoint {
             args: Vec::new(),
             permission: |context, _| permission(context, "block patterns"),
-            callback: crate::not_ported,
+            callback: Some(|_, _| Err(RestError::not_ported())),
         }]),
         _ => None,
     }

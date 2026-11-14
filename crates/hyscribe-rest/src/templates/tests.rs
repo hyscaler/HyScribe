@@ -14,7 +14,8 @@ use super::content::hooked;
 use super::query::{PART_FILES, hierarchy};
 use super::theme;
 use crate::response::{list, text};
-use crate::tests::{Case, Content, cases_of, default_content, kept, serve_over};
+use crate::tests::content::{Content, default_install, default_install_with};
+use crate::tests::{Case, cases_of, kept, serve_over};
 
 /// Each case of `reference/rest/hierarchy-golden.php`.
 #[test]
@@ -68,7 +69,7 @@ const UNPORTED: &str = concat!(
 fn custom() -> &'static Content {
     static CONTENT: OnceLock<Content> = OnceLock::new();
     CONTENT.get_or_init(|| {
-        Content::load(include_str!(
+        default_install_with(include_str!(
             "../../../../reference/rest/templates-custom.sql"
         ))
     })
@@ -77,7 +78,7 @@ fn custom() -> &'static Content {
 fn replay(golden: &str, content: &'static Content) -> usize {
     let cases = cases_of(golden);
     for case in &cases {
-        let served = serve_over(case, content);
+        let served = serve_over(content, case);
         let what = format!(
             "{} {} {} {}",
             case.who, case.method, case.target, case.flags
@@ -95,7 +96,7 @@ fn replay(golden: &str, content: &'static Content) -> usize {
 #[test]
 fn answers_match_php_over_the_default_install() {
     let golden = include_str!("../../tests/golden/templates.tsv");
-    assert_eq!(replay(golden, default_content()), 6 * 85);
+    assert_eq!(replay(golden, default_install()), 6 * 85);
 }
 
 #[test]
@@ -111,7 +112,7 @@ fn answers_match_php_over_customised_templates() {
 /// answered 501.
 #[test]
 fn what_is_not_ported_answers_501() {
-    let content: &'static Content = Box::leak(Box::new(Content::load(UNPORTED)));
+    let content: &'static Content = Box::leak(Box::new(default_install_with(UNPORTED)));
     let targets = [
         (
             "GET",
@@ -159,7 +160,7 @@ fn what_is_not_ported_answers_501() {
             headers: Vec::new(),
             body: Vec::new(),
         };
-        let served = serve_over(&case, content);
+        let served = serve_over(content, &case);
         assert_eq!(served.status, 501, "{method} {target}");
         assert!(served.headers.is_empty() && served.body.is_empty());
     }

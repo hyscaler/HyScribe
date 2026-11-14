@@ -341,10 +341,13 @@ async fn logged_in_users_go_where_they_may() {
         for (can, secure, to, expected) in cases {
             assert_eq!(location(&reads, can, (1, secure), to.as_bytes()), expected, "{to}");
         }
-        // The capability data the login reads, and what it never asks.
+        // The capability data the login and the REST API read, and what they
+        // never ask.
         assert!(!reads.user_exists(1));
-        assert!(reads.post(1).is_none() && reads.post_meta(1, "x").is_none());
-        assert!(reads.comment_post(1).is_none() && reads.term_taxonomy(1).is_none());
+        assert_eq!(reads.post(1).map(|post| post.post_type).as_deref(), Some("post"));
+        assert!(reads.post(999).is_none() && reads.post_meta(1, "x").is_none());
+        assert!(reads.comment_post(1).is_none());
+        assert_eq!(reads.term_taxonomy(1).as_deref(), Some("category"));
         assert!(reads.constant("DISALLOW_UNFILTERED_HTML") && !reads.constant("MULTISITE"));
         // `get_user_option()` reads the site's prefixed meta first.
         assert_eq!(reads.user_option(1, "use_ssl").as_deref(), Some(&b"0"[..]));

@@ -1297,6 +1297,37 @@ async fn term_queries_order_by_any_column() {
     }
 }
 
+/// The REST API's term queries: excluded terms, slugs in their order, the
+/// terms of a post, and their count.
+#[tokio::test]
+async fn term_queries_take_the_rest_arguments() {
+    let db = fixture().await;
+    let ids = |terms: Vec<Term>| terms.iter().map(|t| t.id).collect::<Vec<_>>();
+    let query = TermQuery {
+        taxonomy: "category".into(),
+        slugs: vec![b"x".to_vec(), b"uncategorized".to_vec()],
+        objects: vec![1],
+        order: Some((TermOrder::Slugs, true)),
+        ..TermQuery::default()
+    };
+    assert_eq!(ids(db.term_query(&query).await.unwrap()), [1]);
+    assert_eq!(db.term_query_count(&query).await.unwrap(), 1);
+    let excluded = TermQuery {
+        exclude: vec![1],
+        ..query.clone()
+    };
+    assert_eq!(
+        ids(db.term_query(&excluded).await.unwrap()),
+        Vec::<u64>::new()
+    );
+    assert_eq!(db.term_query_count(&excluded).await.unwrap(), 0);
+    let elsewhere = TermQuery {
+        objects: vec![2],
+        ..query
+    };
+    assert_eq!(db.term_query_count(&elsewhere).await.unwrap(), 0);
+}
+
 /// The dashboard's comment counts, latest comments and posts by status,
 /// over the three fixtures.
 #[tokio::test]

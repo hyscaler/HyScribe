@@ -8,7 +8,7 @@
 
 #![no_main]
 
-use hyscribe_model::{Post, Term, User};
+use hyscribe_model::{Post, Term, TermQuery, User};
 use hyscribe_phpser::{Value, parse_str};
 use hyscribe_rest::{Request, Site, serve};
 use libfuzzer_sys::fuzz_target;
@@ -31,11 +31,17 @@ impl Site for Fuzzed<'_> {
     fn create_nonce(&self) -> String {
         "n".into()
     }
-    fn can(&self, user: u64, cap: &str) -> bool {
-        user % 2 == 1 && cap.len() % 2 == 0
+    fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
+        user % 2 == 1 && (cap.len() + args.len()) % 2 == 0
     }
-    fn can_post(&self, user: u64, cap: &str, post: u64) -> bool {
-        self.can(user, cap) && post % 2 == 1
+    fn terms(&self, _: &TermQuery) -> Vec<Term> {
+        Vec::new()
+    }
+    fn count_terms(&self, _: &TermQuery) -> u64 {
+        0
+    }
+    fn term_link(&self, taxonomy: &str, _: &Term) -> String {
+        format!("http://example.test/?taxonomy={taxonomy}")
     }
     fn post(&self, id: u64) -> Option<Post> {
         let post_type = ["wp_template", "wp_template_part", "wp_global_styles"];

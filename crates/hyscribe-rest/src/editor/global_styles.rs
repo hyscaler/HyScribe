@@ -53,14 +53,14 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
             Some(vec![Endpoint {
                 args: stylesheet_arg(Sanitize::Schema),
                 permission,
-                callback: variations,
+                callback: Some(variations),
             }])
         }
         "/wp/v2/global-styles/themes/(?P<stylesheet>[^\\/:<>\\*\\?\"\\|]+(?:\\/[^\\/:<>\\*\\?\"\\|]+)?)" => {
             Some(vec![Endpoint {
                 args: stylesheet_arg(Sanitize::Urldecode),
                 permission,
-                callback: item,
+                callback: Some(item),
             }])
         }
         "/wp/v2/global-styles/(?P<id>[\\/\\d+]+)" => Some(vec![
@@ -72,12 +72,12 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                     sanitize: Sanitize::Schema,
                 }],
                 permission: post_permission,
-                callback: post_item,
+                callback: Some(post_item),
             },
             Endpoint {
                 args: Vec::new(),
                 permission: update_permission,
-                callback: crate::not_ported,
+                callback: None,
             },
         ]),
         _ => None,
@@ -97,7 +97,7 @@ fn styles_post(context: &Context, params: &Params) -> Result<Post, RestError> {
 
 /// `check_update_permission()`: the post type is shown in REST.
 fn can_update(context: &Context, post: &Post) -> bool {
-    context.can_post("edit_post", post.id)
+    context.can_for("edit_post", post.id)
 }
 
 /// `get_item_permissions_check()`.
@@ -108,7 +108,7 @@ fn post_permission(context: &Context, params: &Params) -> Result<(), RestError> 
         if edit && !can_update(context, &post) {
             let message = "Sorry, you are not allowed to edit this global style.";
             Err(RestError::status("rest_forbidden_context", message, status))
-        } else if !context.can_post("read_post", post.id) {
+        } else if !context.can_for("read_post", post.id) {
             let message = "Sorry, you are not allowed to view this global style.";
             Err(RestError::status("rest_cannot_view", message, status))
         } else {

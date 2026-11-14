@@ -59,6 +59,19 @@ fn field<'a>(fields: &'a Value, name: &str) -> &'a [u8] {
         .unwrap_or_default()
 }
 
+/// `rest_get_route_for_post_type_items()`: the route of a post type shown
+/// in REST.
+pub(crate) fn items_route(name: &str) -> Option<String> {
+    let found = shown_in_rest().find(|(key, _)| key.to_php_string() == name.as_bytes());
+    found.map(|(_, fields)| {
+        format!(
+            "/{}/{}",
+            String::from_utf8_lossy(field(fields, "rest_namespace")),
+            String::from_utf8_lossy(field(fields, "rest_base"))
+        )
+    })
+}
+
 /// `current_user_can( $type->cap->edit_posts )`.
 fn can_edit(context: &Context, fields: &Value) -> bool {
     let cap = fields
@@ -103,7 +116,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         "/wp/v2/types" => Some(vec![Endpoint {
             args: vec![context_arg()],
             permission: items_permission,
-            callback: items,
+            callback: Some(items),
         }]),
         "/wp/v2/types/(?P<type>[\\w-]+)" => Some(vec![Endpoint {
             args: vec![
@@ -116,7 +129,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                 context_arg(),
             ],
             permission: |_, _| Ok(()),
-            callback: item,
+            callback: Some(item),
         }]),
         _ => None,
     }
@@ -201,37 +214,9 @@ fn prepare(context: &Context, params: &Params, fields: &Value) -> Response {
     );
     if is_field_included("_links", &wanted) || is_field_included("_embedded", &wanted) {
         response.add_link("collection", context.rest_url("/wp/v2/types"));
-        let items = format!(
-            "/{}/{}",
-            String::from_utf8_lossy(field(fields, "rest_namespace")),
-            String::from_utf8_lossy(field(fields, "rest_base"))
-        );
+        let slug = String::from_utf8_lossy(field(fields, "slug"));
+        let items = items_route(&slug).unwrap_or_default();
         response.add_link("https://api.w.org/items", context.rest_url(&items));
     }
     response
-}
-
-#[cfg(test)]
-mod tests {
-    use hyscribe_phpser::json_encode;
-
-    use super::*;
-    use crate::schema::UNPORTED;
-
-    /// The arguments use only keywords `hyscribe_rest` checks.
-    #[test]
-    fn arguments_use_ported_keywords() {
-        for regex in ["/wp/v2/types", "/wp/v2/types/(?P<type>[\\w-]+)"] {
-            for endpoint in endpoints(regex).unwrap() {
-                for arg in endpoint.args {
-                    let json = String::from_utf8(json_encode(&arg.schema).unwrap()).unwrap();
-                    assert!(
-                        UNPORTED
-                            .iter()
-                            .all(|keyword| !json.contains(&format!("\"{keyword}\"")))
-                    );
-                }
-            }
-        }
-    }
 }

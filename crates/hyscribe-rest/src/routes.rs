@@ -127,6 +127,12 @@ pub(crate) fn match_request(method: &str, path: &[u8]) -> Option<Matched> {
     None
 }
 
+/// Every route's regex.
+#[cfg(test)]
+pub(crate) fn regexes() -> impl Iterator<Item = &'static str> {
+    table().routes.iter().map(|route| route.regex.as_str())
+}
+
 /// Whether any route matches `path`, as `rest_handle_options_request()`
 /// looks for one.
 pub(crate) fn any_matches(path: &[u8]) -> bool {

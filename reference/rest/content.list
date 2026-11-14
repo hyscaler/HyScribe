@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The requests reference/rest/golden.sh records over the default install and
+# the Theme Test Data fixture for the taxonomies, terms and settings routes:
+# method<TAB>target<TAB>flags, as golden.sh lists its own.
+GET	/?rest_route=/wp/v2/taxonomies
+GET	/?rest_route=/wp/v2/taxonomies&context=edit
+GET	/?rest_route=/wp/v2/taxonomies&context=embed
+GET	/?rest_route=/wp/v2/taxonomies&type=post
+GET	/?rest_route=/wp/v2/taxonomies&type=page
+GET	/?rest_route=/wp/v2/taxonomies&type=page&context=edit
+GET	/?rest_route=/wp/v2/taxonomies&type=nav_menu_item&context=edit
+GET	/?rest_route=/wp/v2/taxonomies&type[]=post
+GET	/?rest_route=/wp/v2/taxonomies/category
+GET	/?rest_route=/wp/v2/taxonomies/post_tag&context=edit
+GET	/?rest_route=/wp/v2/taxonomies/post_format
+GET	/?rest_route=/wp/v2/taxonomies/post_format&context=edit
+GET	/?rest_route=/wp/v2/taxonomies/nope
+GET	/?rest_route=/wp/v2/taxonomies/category&_fields=labels.name,slug,_links
+HEAD	/?rest_route=/wp/v2/taxonomies
+HEAD	/?rest_route=/wp/v2/taxonomies/category
+GET	/?rest_route=/wp/v2/taxonomies&_fields=slug
+GET	/?rest_route=/wp/v2/taxonomies/category&_embed&_fields=_embedded
+GET	/?rest_route=/wp/v2/categories
+GET	/?rest_route=/wp/v2/categories&context=edit
+GET	/?rest_route=/wp/v2/categories&context=embed
+GET	/?rest_route=/wp/v2/categories&per_page=2&page=2
+GET	/?rest_route=/wp/v2/categories&per_page=3&page=50
+GET	/?rest_route=/wp/v2/categories&per_page=0
+GET	/?rest_route=/wp/v2/categories&per_page=101
+GET	/?rest_route=/wp/v2/categories&page=0
+GET	/?rest_route=/wp/v2/categories&page=x
+GET	/?rest_route=/wp/v2/categories&orderby=id&order=desc&per_page=5
+GET	/?rest_route=/wp/v2/categories&orderby=slug&per_page=20
+GET	/?rest_route=/wp/v2/categories&orderby=include&include=7,1,16,39
+GET	/?rest_route=/wp/v2/categories&orderby=include
+GET	/?rest_route=/wp/v2/categories&orderby=include_slugs&slug=classic,uncategorized,block
+GET	/?rest_route=/wp/v2/categories&orderby=description&order=desc&per_page=8
+GET	/?rest_route=/wp/v2/categories&orderby=bogus
+GET	/?rest_route=/wp/v2/categories&orderby=term_group&include=16
+GET	/?rest_route=/wp/v2/categories&orderby=count&order=desc&include=7,16,22
+GET	/?rest_route=/wp/v2/categories&order=up
+GET	/?rest_route=/wp/v2/categories&exclude=1,7
+GET	/?rest_route=/wp/v2/categories&include[]=1&include[]=39&exclude=1
+GET	/?rest_route=/wp/v2/categories&include=x
+GET	/?rest_route=/wp/v2/categories&search=cat
+GET	/?rest_route=/wp/v2/categories&search=%3Cb%3EUn
+GET	/?rest_route=/wp/v2/categories&search=0
+GET	/?rest_route=/wp/v2/categories&hide_empty=1	ttd
+GET	/?rest_route=/wp/v2/categories&hide_empty=true&per_page=30	ttd
+GET	/?rest_route=/wp/v2/categories&hide_empty=maybe
+GET	/?rest_route=/wp/v2/categories&parent=0&per_page=100
+GET	/?rest_route=/wp/v2/categories&parent=39	ttd
+GET	/?rest_route=/wp/v2/categories&parent=99999	ttd
+GET	/?rest_route=/wp/v2/categories&post=1
+GET	/?rest_route=/wp/v2/categories&post=1&per_page=1&page=2
+GET	/?rest_route=/wp/v2/categories&post=2
+GET	/?rest_route=/wp/v2/categories&post=3
+GET	/?rest_route=/wp/v2/categories&post=1164
+GET	/?rest_route=/wp/v2/categories&post=999999
+GET	/?rest_route=/wp/v2/categories&slug=uncategorized
+GET	/?rest_route=/wp/v2/categories&slug[]=Uncategorized&slug[]=parent%20category
+GET	/?rest_route=/wp/v2/categories&offset=1
+GET	/?rest_route=/wp/v2/categories&_fields=id,name
+GET	/?rest_route=/wp/v2/categories&_embed
+GET	/?rest_route=/wp/v2/categories&_embed=author
+HEAD	/?rest_route=/wp/v2/categories&per_page=1
+GET	/?rest_route=/wp/v2/categories/1
+GET	/?rest_route=/wp/v2/categories/1&context=edit
+GET	/?rest_route=/wp/v2/categories/1&context=embed
+GET	/?rest_route=/wp/v2/categories/1&_fields=slug
+GET	/?rest_route=/wp/v2/categories/1&_embed&_fields=_embedded
+GET	/?rest_route=/wp/v2/categories&include=1,1,16&exclude=7,7
+GET	/?rest_route=/wp/v2/categories/999
+GET	/?rest_route=/wp/v2/categories/0
+GET	/?rest_route=/wp/v2/categories/70
+GET	/?rest_route=/wp/v2/categories/68
+GET	/?rest_route=/wp/v2/categories/68&_embed=up
+HEAD	/?rest_route=/wp/v2/categories/1
+GET	/?rest_route=/wp/v2/tags
+GET	/?rest_route=/wp/v2/tags&context=edit
+GET	/?rest_route=/wp/v2/tags&offset=2&per_page=2
+GET	/?rest_route=/wp/v2/tags&offset=3&per_page=2&page=9
+GET	/?rest_route=/wp/v2/tags&orderby=slug&order=desc&per_page=5
+GET	/?rest_route=/wp/v2/tags&hide_empty=1&search=a
+GET	/?rest_route=/wp/v2/tags&parent=1
+GET	/?rest_route=/wp/v2/tags&post=1
+GET	/?rest_route=/wp/v2/tags/70
+GET	/?rest_route=/wp/v2/tags/70&context=edit
+GET	/?rest_route=/wp/v2/tags/1
+POST	/?rest_route=/wp/v2/tags
+DELETE	/?rest_route=/wp/v2/categories/1
+GET	/wp-json/wp/v2/categories	pretty
+GET	/wp-json/wp/v2/categories/68	pretty
+GET	/wp-json/wp/v2/tags?per_page=2&page=2	pretty
+GET	/wp-json/wp/v2/taxonomies/category	pretty
+GET	/?rest_route=/wp/v2/settings
+GET	/?rest_route=/wp/v2/settings&_fields=title,url
+GET	/?rest_route=/wp/v2/settings	nononce
+HEAD	/?rest_route=/wp/v2/settings
+POST	/?rest_route=/wp/v2/settings

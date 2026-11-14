@@ -19,7 +19,28 @@ use crate::tests::oracle_site;
 /// The oracle's site, with its keys and salts and sessions in `dir`, under
 /// `/%postname%/` permalinks when `pretty`.
 async fn site(pretty: bool, dir: &std::path::Path) -> Arc<Site> {
-    let mut site = Arc::into_inner(oracle_site().await).unwrap();
+    on(oracle_site().await, pretty, dir)
+}
+
+/// The oracle's site over the Theme Test Data fixture's database.
+async fn ttd_site(pretty: bool, dir: &std::path::Path) -> Arc<Site> {
+    let mut config = crate::tests::fixture_config();
+    config.name = "wordpress_ttd".into();
+    let db = crate::Db::connect(&config)
+        .await
+        .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
+    let home = Some("http://127.0.0.1:8081".to_string());
+    on(
+        Arc::new(Site::load(db, home.clone(), home).await.unwrap()),
+        pretty,
+        dir,
+    )
+}
+
+/// `site` with keys and salts, sessions in `dir`, pretty permalinks when
+/// `pretty`.
+fn on(site: Arc<Site>, pretty: bool, dir: &std::path::Path) -> Arc<Site> {
+    let mut site = Arc::into_inner(site).unwrap();
     if pretty {
         site.options
             .insert("permalink_structure".into(), b"/%postname%/".to_vec());
@@ -129,19 +150,36 @@ const CREDIT: [&str; 2] = [
 /// over HTTP; routes not ported answer 501.
 #[tokio::test(flavor = "multi_thread")]
 async fn answers_match_php() {
+    let dir = tempfile::tempdir().unwrap();
+    let sites = (site(false, dir.path()).await, site(true, dir.path()).await);
     let golden = include_str!("../../../hyscribe-rest/tests/golden/rest.tsv");
-    assert_eq!(replay(golden).await, (2 * 64, 2 * 9));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 64, 2 * 9));
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/content.tsv");
+    assert_eq!(replay(&sites, golden, false).await, (2 * 89, 2 * 3));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/templates.tsv");
-    assert_eq!(replay(golden).await, (2 * 85, 0));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 85, 0));
 }
 
-/// The answers of `golden` served and not ported.
-async fn replay(golden: &str) -> (usize, usize) {
+/// The content routes over the Theme Test Data fixture, by hash.
+#[tokio::test(flavor = "multi_thread")]
+async fn content_matches_php() {
     let dir = tempfile::tempdir().unwrap();
-    let plain = site(false, dir.path()).await;
-    let pretty = site(true, dir.path()).await;
-    let (cookie, nonce) = log_in(&plain).await;
-    let visitor = self::nonce(&plain, 0, Vec::new()).await;
+    let sites = (
+        ttd_site(false, dir.path()).await,
+        ttd_site(true, dir.path()).await,
+    );
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/content-ttd.tsv");
+    assert_eq!(replay(&sites, golden, true).await, (2 * 92, 2 * 4));
+}
+
+/// `golden`'s requests of a visitor and the administrator served on the
+/// plain and pretty `sites`, bodies compared by SHA-256 when `hashed`: how
+/// many matched and how many answered 501.
+async fn replay(sites: &(Arc<Site>, Arc<Site>), golden: &str, hashed: bool) -> (usize, usize) {
+    use sha2::Digest;
+    let (plain, pretty) = sites;
+    let (cookie, nonce) = log_in(plain).await;
+    let visitor = self::nonce(plain, 0, Vec::new()).await;
     let (mut served, mut unported) = (0, 0);
     for line in golden.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
@@ -151,7 +189,7 @@ async fn replay(golden: &str) -> (usize, usize) {
             continue;
         }
         let flag = |name: &str| flags.split(',').any(|flag| flag == name);
-        let site = if flag("pretty") { &pretty } else { &plain };
+        let site = if flag("pretty") { pretty } else { plain };
         let nonce = if who == "visitor" { &visitor } else { &nonce };
         let mut request = axum::http::Request::builder()
             .method(method)
@@ -188,7 +226,11 @@ async fn replay(golden: &str) -> (usize, usize) {
         let mut php: Vec<String> = text(5).lines().map(String::from).collect();
         php.sort();
         assert_eq!(kept(response.headers(), nonce), php, "{what}");
-        let ours = body(response).await.replace(nonce, "%nonce%");
+        let mut ours = body(response).await.replace(nonce, "%nonce%");
+        if hashed {
+            let digest = sha2::Sha256::digest(ours.as_bytes());
+            ours = digest.iter().map(|b| format!("{b:02x}")).collect();
+        }
         assert_eq!(ours, text(6).replace(CREDIT[0], CREDIT[1]), "{what}");
         served += 1;
     }
@@ -260,18 +302,15 @@ async fn database_errors_show_the_error_page() {
 }
 
 /// The reads a site's own templates and global styles posts need, which
-/// the default install has none of: the first post's, read for the routes
-/// and for capabilities over its author.
+/// the default install has none of, of its first posts.
 #[tokio::test(flavor = "multi_thread")]
-async fn posts_are_read_for_the_routes_and_capabilities() {
+async fn posts_are_read_for_the_routes() {
     let dir = tempfile::tempdir().unwrap();
     let plain = site(false, dir.path()).await;
     let handle = Handle::current();
     tokio::task::spawn_blocking(move || {
         let mut reads = LoginReads::new(&plain, handle, now());
         reads.act_as(1, Vec::new());
-        // The logged in cookie's user is found first.
-        assert!(LoginSite::user_by_login(&reads, b"admin").is_some());
         let rest = Rest {
             reads,
             site: &plain,
@@ -283,12 +322,6 @@ async fn posts_are_read_for_the_routes_and_capabilities() {
         assert_eq!(site.post_terms(1, "category")[0].name, b"Uncategorized");
         assert_eq!(site.post_meta(2, "_wp_page_template").unwrap(), b"default");
         assert_eq!(site.user(1).unwrap().display_name, b"admin");
-        assert!(site.can_post(1, "edit_post", 1));
-        assert!(!site.can_post(0, "edit_post", 1));
-        assert_eq!(CapabilityData::post_meta(&rest, 2, "_edit_lock"), None);
-        assert_eq!(CapabilityData::comment_post(&rest, 1), None);
-        assert_eq!(CapabilityData::term_taxonomy(&rest, 1), None);
-        assert!(!CapabilityData::user_exists(&rest, 9));
         assert!(rest.reads.reads.finish().is_ok());
     })
     .await

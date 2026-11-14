@@ -1,149 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The PHP oracle's answers in `tests/golden/rest.tsv`, replayed for each
-//! role over the default install's roles, with `%nonce%` as each user's
-//! nonce.
+//! The PHP oracle's answers in `tests/golden/rest.tsv`, and for the content
+//! routes in `content.tsv` and `content-ttd.tsv`, replayed for a visitor
+//! and each role, with `%nonce%` as each user's nonce.
 
-use std::collections::HashMap;
-use std::sync::OnceLock;
-
-use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
+use hyscribe_auth::caps::{CapPost, CapabilityData, User};
 use hyscribe_phpser::parse_str;
-use hyscribe_testkit::{Dump, SqlValue, unhex};
+use hyscribe_testkit::unhex;
 
 use super::*;
 
+pub(crate) mod content;
+
+use content::Content;
+
 const SITE: &str = "http://127.0.0.1:8081";
 
-/// The default install's options.
-fn options() -> &'static HashMap<String, Vec<u8>> {
-    static OPTIONS: OnceLock<HashMap<String, Vec<u8>>> = OnceLock::new();
-    OPTIONS.get_or_init(|| {
-        let version = hyscribe_testkit::default_install_versions().pop().unwrap();
-        let dump = hyscribe_testkit::default_install(&version).unwrap();
-        dump.table("wp_options")
-            .filter_map(|row| match (&row[1], &row[2]) {
-                (SqlValue::Text(name), SqlValue::Text(value)) => {
-                    Some((String::from_utf8_lossy(name).into_owned(), value.clone()))
-                }
-                _ => None,
-            })
-            .collect()
-    })
-}
-
-/// The rows the routes read: the default install's, and a state's added.
-pub(crate) struct Content {
-    posts: Vec<Post>,
-    /// Each post's terms, with their taxonomy.
-    terms: Vec<(u64, String, Term)>,
-    meta: Vec<(u64, String, Vec<u8>)>,
-    users: Vec<hyscribe_model::User>,
-}
-
-fn sql_text(value: &SqlValue) -> Vec<u8> {
-    match value {
-        SqlValue::Text(text) => text.clone(),
-        SqlValue::Number(number) => number.clone().into_bytes(),
-        SqlValue::Null => Vec::new(),
-    }
-}
-
-fn sql_number(value: &SqlValue) -> u64 {
-    String::from_utf8(sql_text(value)).unwrap().parse().unwrap()
-}
-
-fn sql_string(value: &SqlValue) -> String {
-    String::from_utf8(sql_text(value)).unwrap()
-}
-
-impl Content {
-    /// The default install with the rows of `state`, a dump's inserts.
-    pub(crate) fn load(state: &str) -> Content {
-        let version = hyscribe_testkit::default_install_versions().pop().unwrap();
-        let mut dump = hyscribe_testkit::default_install(&version).unwrap();
-        dump.rows
-            .extend(Dump::parse(state.as_bytes()).unwrap().rows);
-        let posts = dump
-            .table("wp_posts")
-            .map(|row| Post {
-                id: sql_number(&row[0]),
-                author: sql_number(&row[1]),
-                date: sql_string(&row[2]),
-                content: sql_text(&row[4]),
-                title: sql_text(&row[5]),
-                excerpt: sql_text(&row[6]),
-                status: sql_string(&row[7]),
-                name: sql_text(&row[11]),
-                modified: sql_string(&row[14]),
-                parent: sql_number(&row[17]),
-                post_type: sql_string(&row[20]),
-                ..Post::default()
-            })
-            .collect();
-        let names: Vec<(u64, Vec<u8>)> = dump
-            .table("wp_terms")
-            .map(|row| (sql_number(&row[0]), sql_text(&row[1])))
-            .collect();
-        let taxonomies: Vec<(u64, u64, String)> = dump
-            .table("wp_term_taxonomy")
-            .map(|row| {
-                (
-                    sql_number(&row[0]),
-                    sql_number(&row[1]),
-                    sql_string(&row[2]),
-                )
-            })
-            .collect();
-        let terms = dump
-            .table("wp_term_relationships")
-            .map(|row| {
-                let (_, term, taxonomy) = taxonomies
-                    .iter()
-                    .find(|(id, _, _)| *id == sql_number(&row[1]))
-                    .unwrap();
-                let (_, name) = names.iter().find(|(id, _)| id == term).unwrap();
-                let term = Term {
-                    id: *term,
-                    name: name.clone(),
-                    ..Term::default()
-                };
-                (sql_number(&row[0]), taxonomy.clone(), term)
-            })
-            .collect();
-        let meta = dump
-            .table("wp_postmeta")
-            .map(|row| (sql_number(&row[1]), sql_string(&row[2]), sql_text(&row[3])))
-            .collect();
-        let users = dump
-            .table("wp_users")
-            .map(|row| hyscribe_model::User {
-                id: sql_number(&row[0]),
-                display_name: sql_text(&row[9]),
-                ..hyscribe_model::User::default()
-            })
-            .collect();
-        Content {
-            posts,
-            terms,
-            meta,
-            users,
-        }
-    }
-}
-
-/// The default install's rows.
-pub(crate) fn default_content() -> &'static Content {
-    static CONTENT: OnceLock<Content> = OnceLock::new();
-    CONTENT.get_or_init(|| Content::load(""))
-}
-
-/// The oracle with one user of `role`, under plain or pretty permalinks,
-/// over `content`.
+/// The oracle over `content`, under plain or pretty permalinks.
 struct Oracle {
-    role: &'static str,
-    pretty: bool,
     content: &'static Content,
+    pretty: bool,
 }
 
 const ROLES: [(&str, u64); 5] = [
@@ -156,22 +32,24 @@ const ROLES: [(&str, u64); 5] = [
 
 impl CapabilityData for Oracle {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
-        options().get(name).cloned()
+        self.content.options.get(name).cloned()
     }
-    fn user_meta(&self, _: u64, key: &str) -> Option<Vec<u8>> {
-        let role = self.role;
-        (key == "wp_capabilities")
-            .then(|| format!("a:1:{{s:{}:\"{role}\";b:1;}}", role.len()).into_bytes())
+    fn user_meta(&self, user: u64, key: &str) -> Option<Vec<u8>> {
+        let meta = self.content.usermeta.iter();
+        meta.rev()
+            .find(|(id, name, _)| *id == user && name == key)
+            .map(|(_, _, value)| value.clone())
     }
     fn user_exists(&self, _: u64) -> bool {
         true
     }
     fn post(&self, id: u64) -> Option<CapPost> {
-        Site::post(self, id).map(|post| CapPost {
-            id: post.id,
+        let post = self.content.posts.iter().find(|post| post.id == id)?;
+        Some(CapPost {
+            id,
             author: post.author,
-            status: post.status,
-            post_type: post.post_type,
+            status: post.status.clone(),
+            post_type: post.post_type.clone(),
             parent: post.parent,
         })
     }
@@ -181,8 +59,12 @@ impl CapabilityData for Oracle {
     fn comment_post(&self, _: u64) -> Option<u64> {
         None
     }
-    fn term_taxonomy(&self, _: u64) -> Option<String> {
-        None
+    fn term_taxonomy(&self, id: u64) -> Option<String> {
+        let terms = self.content.terms.iter();
+        terms
+            .map(|row| (row.term.id, &row.taxonomy))
+            .find(|(term, _)| *term == id)
+            .map(|(_, taxonomy)| taxonomy.clone())
     }
     /// HyScribe's constants: no one may post unfiltered HTML.
     fn constant(&self, name: &str) -> bool {
@@ -192,7 +74,7 @@ impl CapabilityData for Oracle {
 
 impl Site for Oracle {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
-        options().get(name).cloned()
+        self.content.options.get(name).cloned()
     }
     fn rest_url(&self, path: &str) -> String {
         if self.pretty {
@@ -207,12 +89,17 @@ impl Site for Oracle {
     fn create_nonce(&self) -> String {
         "%nonce%".into()
     }
-    fn can(&self, user: u64, cap: &str) -> bool {
-        user != 0 && Capabilities::load(self, "wp_", user).has_cap(self, cap, &[])
+    fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
+        user != 0 && User::load(self, "wp_", user).has_cap(self, cap, args)
     }
-    fn can_post(&self, user: u64, cap: &str, post: u64) -> bool {
-        let post = Value::Int(i64::try_from(post).unwrap());
-        user != 0 && Capabilities::load(self, "wp_", user).has_cap(self, cap, &[post])
+    fn terms(&self, query: &TermQuery) -> Vec<Term> {
+        self.content.terms(query)
+    }
+    fn count_terms(&self, query: &TermQuery) -> u64 {
+        self.content.count_terms(query)
+    }
+    fn term_link(&self, taxonomy: &str, term: &Term) -> String {
+        self.content.term_link(taxonomy, term, self.pretty)
     }
     fn post(&self, id: u64) -> Option<Post> {
         self.content
@@ -233,22 +120,28 @@ impl Site for Oracle {
         posts
     }
     fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term> {
+        let related = |row: &&content::Row| {
+            row.taxonomy == taxonomy
+                && self
+                    .content
+                    .relationships
+                    .contains(&(post, row.taxonomy_id))
+        };
         let mut terms: Vec<Term> = self
             .content
             .terms
             .iter()
-            .filter(|(id, known, _)| *id == post && known == taxonomy)
-            .map(|(_, _, term)| term.clone())
+            .filter(related)
+            .map(|row| row.term.clone())
             .collect();
         terms.sort_by(|a, b| a.name.cmp(&b.name));
         terms
     }
     fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>> {
-        let found = self
-            .content
-            .meta
-            .iter()
-            .find(|(id, known, _)| *id == post && known == key);
+        let meta = self.content.postmeta.iter();
+        let found = meta
+            .clone()
+            .find(|(id, name, _)| *id == post && name == key);
         found.map(|(_, _, value)| value.clone())
     }
     fn revisions(&self, post: u64) -> Vec<u64> {
@@ -322,26 +215,24 @@ fn route(path: &str, get: &[(Key, Value)]) -> Vec<u8> {
 
 /// `case` served by HyScribe's API over the default install.
 pub(crate) fn serve_case(case: &Case) -> Served {
-    serve_over(case, default_content())
+    serve_over(content::default_install(), case)
 }
 
 /// `case` served by HyScribe's API over `content`.
-pub(crate) fn serve_over(case: &Case, content: &'static Content) -> Served {
+pub(crate) fn serve_over(content: &'static Content, case: &Case) -> Served {
     let (path, query) = case.target.split_once('?').unwrap_or((&case.target, ""));
     let get = match parse_str(query.as_bytes()) {
         Value::Array(get) => get,
         _ => Vec::new(),
     };
-    let (role, user) = ROLES
+    let user = ROLES
         .iter()
         .find(|(role, _)| *role == case.who)
-        .copied()
-        .unwrap_or(("", 0));
+        .map_or(0, |(_, user)| *user);
     let flag = |name: &str| case.flags.split(',').any(|flag| flag == name);
     let oracle = Oracle {
-        role,
-        pretty: flag("pretty"),
         content,
+        pretty: flag("pretty"),
     };
     let route = route(path, &get);
     let request = Request {
@@ -448,9 +339,8 @@ fn answers_match_php() {
 #[test]
 fn pages_are_linked_as_php_links_them() {
     let oracle = Oracle {
-        role: "",
+        content: content::default_install(),
         pretty: false,
-        content: default_content(),
     };
     let searches = cases()
         .into_iter()
@@ -494,14 +384,308 @@ fn a_single_page_has_no_links() {
     );
 }
 
+/// Requests on the content routes PHP answers with what is not ported, or
+/// where it writes.
+const CONTENT_UNPORTED: [&str; 1] = ["/?rest_route=/wp/v2/categories/68&_embed=up"];
+
+/// The content routes answer as PHP does over the default install and, by
+/// hash, the Theme Test Data fixture, but those not ported.
+#[test]
+fn content_answers_match_php() {
+    use sha2::Digest;
+    let mut failures = Vec::new();
+    let goldens = [
+        (
+            content::default_install(),
+            include_str!("../tests/golden/content.tsv"),
+            false,
+        ),
+        (
+            content::theme_test_data(),
+            include_str!("../tests/golden/content-ttd.tsv"),
+            true,
+        ),
+    ];
+    for (content, golden, hashed) in goldens {
+        for case in cases_of(golden) {
+            let served = serve_over(content, &case);
+            let what = format!(
+                "{} {} {} {} {hashed}",
+                case.who, case.method, case.target, case.flags
+            );
+            if served.status == 501 {
+                let unported = case.method != "GET" && case.method != "HEAD"
+                    || CONTENT_UNPORTED.contains(&case.target.as_str());
+                if !unported || !served.body.is_empty() {
+                    failures.push(format!("{what}: 501"));
+                }
+                continue;
+            }
+            let body = if hashed {
+                let digest = sha2::Sha256::digest(&served.body);
+                digest
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>()
+                    .into_bytes()
+            } else {
+                served.body.clone()
+            };
+            let mut php = case.headers.clone();
+            php.sort();
+            if served.status != case.status || kept(&served.headers) != php || body != case.body {
+                failures.push(format!(
+                    "{what}\n  php:  {} {php:?}\n       {}\n  ours: {} {:?}\n       {}",
+                    case.status,
+                    String::from_utf8_lossy(&case.body),
+                    served.status,
+                    kept(&served.headers),
+                    String::from_utf8_lossy(&served.body)
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// The arguments of every ported route use only keywords `hyscribe_rest`
+/// checks.
+#[test]
+fn arguments_use_ported_keywords() {
+    use hyscribe_phpser::json_encode;
+    let mut seen = 0;
+    for route in routes::regexes() {
+        for endpoint in endpoints(route).unwrap_or_default() {
+            for arg in endpoint.args {
+                let json = String::from_utf8(json_encode(&arg.schema).unwrap()).unwrap();
+                for schema in [Some(&arg.schema), arg.schema.get_str("items")]
+                    .into_iter()
+                    .flatten()
+                {
+                    let checked = schema::validate_value_from_schema(&Value::Null, schema, "p");
+                    assert_ne!(checked, Err(schema::Refusal(None)), "{route} {json}");
+                }
+                seen += 1;
+            }
+        }
+    }
+    assert!(seen > 30);
+}
+
+/// The default install with `options` changed.
+fn changed(options: &[(&str, &[u8])]) -> &'static Content {
+    let default = content::default_install();
+    let mut changed = default.options.clone();
+    for (name, value) in options {
+        changed.insert((*name).into(), value.to_vec());
+    }
+    Box::leak(Box::new(Content {
+        options: changed,
+        terms: Vec::new(),
+        relationships: Vec::new(),
+        posts: Vec::new(),
+        usermeta: default.usermeta.clone(),
+        postmeta: Vec::new(),
+        users: Vec::new(),
+    }))
+}
+
+fn get(content: &'static Content, who: &str, target: &str) -> Served {
+    let case = Case {
+        who: who.into(),
+        method: "GET".into(),
+        target: target.into(),
+        flags: String::new(),
+        status: 0,
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    serve_over(content, &case)
+}
+
+/// Where the category hierarchy is not stored, as on the default install,
+/// `_get_term_hierarchy()` writes it for a parent's terms or the terms with
+/// posts: those requests are answered 501.
+#[test]
+fn categories_that_would_write_are_not_served() {
+    let requests = [
+        "/?rest_route=/wp/v2/categories&hide_empty=1",
+        "/?rest_route=/wp/v2/categories&parent=39",
+    ];
+    let stored = changed(&[("category_children", b"a:0:{}")]);
+    let not_array = changed(&[("category_children", b"x")]);
+    for target in requests {
+        assert_eq!(
+            get(content::default_install(), "visitor", target).status,
+            501
+        );
+        assert_eq!(get(not_array, "visitor", target).status, 501);
+        assert_eq!(get(stored, "visitor", target).status, 200);
+    }
+    let tags = "/?rest_route=/wp/v2/tags&hide_empty=1";
+    assert_eq!(get(content::default_install(), "visitor", tags).status, 200);
+}
+
+/// Settings as `get_option()` reads them, serialized or not, and as their
+/// schemas take them in `prepare_value()`: a value a schema does not take
+/// is null.
+#[test]
+fn settings_are_read_as_get_option_reads_them() {
+    let content = changed(&[
+        ("use_smilies", b"b:0;"),
+        ("posts_per_page", b"i:5;"),
+        ("default_category", b"a:1:{x}"),
+        ("start_of_week", b"a:1:{i:0;i:1;}"),
+    ]);
+    let served = get(content, "administrator", "/?rest_route=/wp/v2/settings");
+    let data = hyscribe_phpser::json_decode(&served.body).unwrap();
+    let field = |name| data.get_str(name).cloned();
+    assert_eq!(field("use_smilies"), Some(Value::Bool(false)));
+    assert_eq!(field("posts_per_page"), Some(Value::Int(5)));
+    assert_eq!(field("default_category"), Some(Value::Null));
+    assert_eq!(field("start_of_week"), Some(Value::Null));
+}
+
+/// `rest_parse_embed_param()`: an empty `_embed`, `1` or `true` embeds
+/// every embeddable link, a list those of its relations.
+#[test]
+fn embedding_is_not_ported() {
+    let mut response = Response::new(Value::Array(Vec::new()), 200);
+    response.add_link_with("up", "u".into(), vec![("embeddable", Value::Bool(true))]);
+    response.add_link("about", "a".into());
+    for (embed, embeds) in [
+        ("", true),
+        ("1", true),
+        ("true", true),
+        ("up", true),
+        ("about", false),
+        ("x", false),
+    ] {
+        assert_eq!(
+            super::embeds(&response, &Value::String(embed.into())),
+            embeds,
+            "{embed}"
+        );
+    }
+}
+
+/// Categories under a stored hierarchy: with `hide_empty`, an empty term
+/// with a term under it that is not empty stays (`get_terms()`), and a
+/// parent that is not there gives no `up` link.
+#[test]
+fn empty_categories_with_posts_under_them_stay() {
+    let row = |id, parent, count| content::Row {
+        taxonomy: "category".into(),
+        term: Term {
+            id,
+            name: format!("c{id}").into_bytes(),
+            slug: format!("c{id}").into_bytes(),
+            parent,
+            count,
+            ..Term::default()
+        },
+        group: 0,
+        taxonomy_id: id,
+    };
+    let default = content::default_install();
+    let mut options = default.options.clone();
+    options.insert(
+        "category_children".into(),
+        b"a:1:{i:1;a:1:{i:0;i:2;}}".to_vec(),
+    );
+    let content: &'static Content = Box::leak(Box::new(Content {
+        options,
+        terms: vec![row(1, 0, 0), row(2, 1, 1), row(3, 99, 0)],
+        relationships: Vec::new(),
+        posts: Vec::new(),
+        usermeta: default.usermeta.clone(),
+        postmeta: Vec::new(),
+        users: Vec::new(),
+    }));
+    let ids = |target| {
+        let served = get(content, "visitor", target);
+        let data = hyscribe_phpser::json_decode(&served.body).unwrap();
+        let items = data.as_array().unwrap_or_default().to_vec();
+        items
+            .iter()
+            .map(|(_, item)| {
+                (
+                    item.get_str("id").unwrap().to_int(),
+                    item.get_path(&["_links", "up"]).is_some(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        ids("/?rest_route=/wp/v2/categories&hide_empty=1"),
+        [(1, false), (2, true)]
+    );
+    assert_eq!(
+        ids("/?rest_route=/wp/v2/categories"),
+        [(1, false), (2, true), (3, false)]
+    );
+    assert_eq!(ids("/?rest_route=/wp/v2/categories&parent=1"), [(2, true)]);
+    // A parent the stored hierarchy does not list has no terms.
+    let mut options = content.options.clone();
+    options.insert(
+        "category_children".into(),
+        b"a:1:{i:5;a:1:{i:0;i:6;}}".to_vec(),
+    );
+    let stale: &'static Content = Box::leak(Box::new(Content {
+        options,
+        terms: vec![row(1, 0, 0), row(2, 1, 1)],
+        relationships: Vec::new(),
+        posts: Vec::new(),
+        usermeta: default.usermeta.clone(),
+        postmeta: Vec::new(),
+        users: Vec::new(),
+    }));
+    let served = get(stale, "visitor", "/?rest_route=/wp/v2/categories&parent=1");
+    assert_eq!(served.body, b"[]");
+}
+
+/// Only a flat taxonomy's collection registers `offset`, an integer; a
+/// taxonomy's fields are kept as `in_array()` finds them in `_fields`, so
+/// a field under one leaves it out; `parent=0` asks for no hierarchy.
+#[test]
+fn arguments_are_registered_as_php_registers_them() {
+    let default = content::default_install();
+    assert_eq!(
+        get(default, "visitor", "/?rest_route=/wp/v2/tags&offset=x").status,
+        400
+    );
+    assert_eq!(
+        get(
+            default,
+            "visitor",
+            "/?rest_route=/wp/v2/categories&offset=x"
+        )
+        .status,
+        200
+    );
+    let target = "/?rest_route=/wp/v2/taxonomies/category&_fields=labels.name,slug&context=edit";
+    let body = get(default, "administrator", target).body;
+    assert_eq!(body, br#"{"slug":"category"}"#);
+    let parent = get(
+        default,
+        "visitor",
+        "/?rest_route=/wp/v2/categories&parent=0",
+    );
+    assert!(String::from_utf8_lossy(&parent.body).contains("uncategorized"));
+}
+
 /// A `self` link has `targetHints` only to a route ported, whose methods the
 /// user may use.
 #[test]
 fn self_links_hint_what_their_route_allows() {
     let oracle = Oracle {
-        role: "",
+        content: content::default_install(),
         pretty: false,
-        content: default_content(),
     };
     let context = Context {
         site: &oracle,

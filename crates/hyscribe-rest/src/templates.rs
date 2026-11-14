@@ -73,12 +73,25 @@ fn string_arg(name: &'static str) -> Arg {
     }
 }
 
-/// A write endpoint: its permission check, which `Allow` and links read.
+/// The callback of the controller of `kind`.
+fn per_kind(
+    kind: Kind,
+    template: crate::Callback,
+    part: crate::Callback,
+) -> Option<crate::Callback> {
+    Some(match kind {
+        Kind::Template => template,
+        Kind::Part => part,
+    })
+}
+
+/// A write endpoint, not ported: its permission check, which `Allow` and
+/// links read.
 fn write() -> Endpoint {
     Endpoint {
         args: Vec::new(),
         permission: manage,
-        callback: crate::not_ported,
+        callback: None,
     }
 }
 
@@ -108,10 +121,11 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                     string_arg("post_type"),
                 ],
                 permission: read,
-                callback: match kind {
-                    Kind::Template => |context, params| items(context, params, Kind::Template),
-                    Kind::Part => |context, params| items(context, params, Kind::Part),
-                },
+                callback: per_kind(
+                    kind,
+                    |context, params| items(context, params, Kind::Template),
+                    |context, params| items(context, params, Kind::Part),
+                ),
             },
             write(),
         ]),
@@ -132,19 +146,21 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                 string_arg("template_prefix"),
             ],
             permission: read,
-            callback: match kind {
-                Kind::Template => |context, params| lookup(context, params, Kind::Template),
-                Kind::Part => |context, params| lookup(context, params, Kind::Part),
-            },
+            callback: per_kind(
+                kind,
+                |context, params| lookup(context, params, Kind::Template),
+                |context, params| lookup(context, params, Kind::Part),
+            ),
         }]),
         _ if rest == format!("/(?P<id>{ID})") => Some(vec![
             Endpoint {
                 args: vec![id, context_arg()],
                 permission: read,
-                callback: match kind {
-                    Kind::Template => |context, params| item(context, params, Kind::Template),
-                    Kind::Part => |context, params| item(context, params, Kind::Part),
-                },
+                callback: per_kind(
+                    kind,
+                    |context, params| item(context, params, Kind::Template),
+                    |context, params| item(context, params, Kind::Part),
+                ),
             },
             write(),
             write(),

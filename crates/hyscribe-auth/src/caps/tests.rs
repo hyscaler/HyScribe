@@ -222,3 +222,15 @@ fn allcaps_are_the_roles_then_the_users_own() {
     );
     assert_eq!(names.last().map(Vec::as_slice), Some(&b"administrator"[..]));
 }
+
+/// What the registry tells of post types and taxonomies.
+#[test]
+fn registered_types_and_taxonomies() {
+    assert!(post_type_exists("page") && !post_type_exists("nope"));
+    assert_eq!(
+        taxonomy_cap("post_tag", "manage_terms").as_deref(),
+        Some("manage_post_tags")
+    );
+    assert_eq!(taxonomy_cap("post_tag", "nope").as_deref(), Some(""));
+    assert_eq!(taxonomy_cap("nope", "manage_terms"), None);
+}

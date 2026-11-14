@@ -787,6 +787,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyscribe-write"
+version = "0.1.0"
+
+[[package]]
 name = "icu_collections"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

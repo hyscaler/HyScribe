@@ -917,6 +917,7 @@ pub(crate) async fn every_write() -> Vec<DbError> {
     let mut w = Write {
         writer: &writer,
         tx: writer.pool.begin().await.unwrap(),
+        budget: None,
     };
     let post = hello();
     let comment = commenter();
@@ -931,6 +932,14 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.meta_ids_of_key(meta, "k").await.err(),
         w.meta_ids_of_key_valued(meta, "k", b"v").await.err(),
         w.object_meta_ids(meta, 1).await.err(),
+        w.object_meta(meta, 1).await.err(),
+        w.user(1).await.err(),
+        w.user_id_by_login(b"u").await.err(),
+        w.user_id_by_email(b"e").await.err(),
+        w.nicename_owner(b"n", b"u").await.err(),
+        w.author_post_ids_of_types(1, &["post"]).await.err(),
+        w.owner_link_ids(1).await.err(),
+        w.option_value("o").await.err(),
     ];
     let counts = [
         w.approved_comment_count(1).await.err(),
@@ -938,6 +947,7 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.term_post_count(1, &["publish"], &["post"]).await.err(),
         w.term_attachment_count(1, &["publish"]).await.err(),
         w.term_object_count(1).await.err(),
+        w.user_count().await.err(),
     ];
     let writes = [
         w.insert_post(&post).await.err(),
@@ -998,5 +1008,97 @@ pub(crate) async fn every_write() -> Vec<DbError> {
 async fn every_write_fails_without_its_table() {
     for err in every_write().await {
         assert!(err.to_string().contains("missing_"), "{err}");
+    }
+}
+
+/// The reads the write functions make inside an action.
+#[tokio::test]
+async fn reads_inside_an_action() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    assert_eq!(write.prefix(), "wp_");
+    let (login, admin) = write.user(1).await.unwrap().unwrap();
+    assert_eq!(login, b"admin");
+    assert_eq!(admin.email, b"admin@default-install.test");
+    assert_eq!(admin.registered, "2026-10-27 08:08:15");
+    assert_eq!(admin.display_name, b"admin");
+    assert!(admin.pass.starts_with("$wp$"));
+    assert!(write.user(999_999).await.unwrap().is_none());
+    assert_eq!(write.user_id_by_login(b"admin").await.unwrap(), Some(1));
+    assert_eq!(write.user_id_by_login(b"nobody").await.unwrap(), None);
+    let email = b"admin@default-install.test";
+    assert_eq!(write.user_id_by_email(email).await.unwrap(), Some(1));
+    assert_eq!(write.user_id_by_email(b"no@a.test").await.unwrap(), None);
+    assert_eq!(
+        write.nicename_owner(b"admin", b"other").await.unwrap(),
+        Some(1)
+    );
+    assert_eq!(
+        write.nicename_owner(b"admin", b"admin").await.unwrap(),
+        None
+    );
+    assert_eq!(write.user_count().await.unwrap(), 1);
+    let types = write
+        .author_post_ids_of_types(1, &["page", "attachment"])
+        .await;
+    assert_eq!(sorted(types.unwrap()), [2, 3]);
+    assert!(
+        write
+            .author_post_ids_of_types(2, &["post"])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    sqlx::query("INSERT INTO wp_links (link_owner) VALUES (5), (5), (6)")
+        .execute(&mut *write.tx)
+        .await
+        .unwrap();
+    assert_eq!(write.owner_link_ids(5).await.unwrap().len(), 2);
+    let blogname = write.option_value("blogname").await.unwrap();
+    assert_eq!(blogname.unwrap(), b"HyScribe Default Install");
+    assert!(
+        write
+            .option_value("no_such_option")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let meta = write.object_meta(Meta::User, 1).await.unwrap();
+    assert_eq!(meta[0], (b"nickname".to_vec(), Some(b"admin".to_vec())));
+    assert_eq!(meta.len(), 16);
+    write
+        .add_meta(Meta::Post, 1, "hyscribe_test", b"v")
+        .await
+        .unwrap();
+    let meta = write.object_meta(Meta::Post, 1).await.unwrap();
+    assert_eq!(
+        meta.last().unwrap(),
+        &(b"hyscribe_test".to_vec(), Some(b"v".to_vec()))
+    );
+}
+
+/// Each statement fails once the budget a test sets is spent.
+#[tokio::test]
+async fn a_spent_budget_fails_every_statement() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = writer().await;
+    let mut w = writer.begin().await.unwrap();
+    w.fail_after(1);
+    assert!(w.option_value("blogname").await.unwrap().is_some());
+    let spent = [
+        w.option_value("o").await.err(),
+        w.option_autoload("o").await.err(),
+        w.user(1).await.err(),
+        w.object_meta(Meta::User, 1).await.err(),
+        w.user_count().await.err(),
+        w.owner_link_ids(1).await.err(),
+        w.delete_option("o").await.err(),
+    ];
+    for err in spent {
+        assert_eq!(
+            err.unwrap().to_string(),
+            "the test's statement budget is spent"
+        );
     }
 }

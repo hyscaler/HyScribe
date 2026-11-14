@@ -567,9 +567,13 @@ fn sanitize_user_matches_php() {
         if ours != php {
             failures.push(format!("{text:x?}: php {php:x?} ours {ours:x?}"));
         }
+        let (php, ours) = (fields.next().unwrap(), sanitize_user_strict(&text));
+        if ours != php {
+            failures.push(format!("{text:x?}: strict php {php:x?} ours {ours:x?}"));
+        }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(golden.lines().count(), 1528);
+    assert_eq!(golden.lines().count(), 1532);
 }
 
 /// The admin's display filters of user names and emails, as PHP runs them

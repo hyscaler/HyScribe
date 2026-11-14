@@ -1,0 +1,28 @@
+# The rows PHP WordPress writes for the action meta-update (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 19:47:51 to 2026-11-14 19:47:51 UTC.
+# %wp_postmeta:1% is 6.
+# %wp_postmeta:2% is 7.
+# %wp_postmeta:3% is 8.
+# %wp_postmeta:4% is 9.
+# %wp_postmeta:5% is 10.
+# %wp_postmeta:6% is 11.
+# %wp_postmeta:7% is 12.
+# %wp_postmeta:8% is 13.
+# %wp_postmeta:9% is 14.
+# %wp_termmeta:1% is 2.
+# %wp_usermeta:1% is 47.
+wp_postmeta	%wp_postmeta:3%	~	meta_value	b	c
+wp_postmeta	%wp_postmeta:4%	~	meta_value	a	z
+wp_postmeta	%wp_postmeta:5%	~	meta_value	b	z
+wp_postmeta	%wp_postmeta:9%	+	meta_id	%wp_postmeta:9%
+wp_postmeta	%wp_postmeta:9%	+	meta_key	oracle_new
+wp_postmeta	%wp_postmeta:9%	+	meta_value	n
+wp_postmeta	%wp_postmeta:9%	+	post_id	1
+wp_termmeta	%wp_termmeta:1%	+	meta_id	%wp_termmeta:1%
+wp_termmeta	%wp_termmeta:1%	+	meta_key	oracle_new
+wp_termmeta	%wp_termmeta:1%	+	meta_value	n
+wp_termmeta	%wp_termmeta:1%	+	term_id	1
+wp_usermeta	%wp_usermeta:1%	+	meta_key	oracle_list
+wp_usermeta	%wp_usermeta:1%	+	meta_value	a:2:{i:0;i:1;i:1;i:2;}
+wp_usermeta	%wp_usermeta:1%	+	umeta_id	%wp_usermeta:1%
+wp_usermeta	%wp_usermeta:1%	+	user_id	1

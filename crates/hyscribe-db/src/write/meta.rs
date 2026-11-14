@@ -4,7 +4,9 @@
 //! `delete_metadata()` and the `_by_mid` ones), for the four meta tables.
 
 use super::{Table, Write};
-use crate::{DbError, Sql, ids_or_none, list};
+use sqlx::Row as _;
+
+use crate::{Columns, DbError, Sql, db_error, ids_or_none, list};
 
 /// What a meta row belongs to, which names its table.
 #[derive(Clone, Copy, Debug)]
@@ -32,6 +34,7 @@ struct Statements {
     ids_of_key: &'static str,
     ids_of_key_valued: &'static str,
     object_ids: &'static str,
+    object_meta: &'static str,
 }
 
 /// The statements of the meta table `$table`, whose object column is
@@ -109,6 +112,14 @@ macro_rules! statements {
                 " WHERE ",
                 $object,
                 " = ?"
+            ),
+            object_meta: concat!(
+                "SELECT meta_key, meta_value FROM {prefix}",
+                $name,
+                " WHERE ",
+                $object,
+                " = ? ORDER BY ",
+                $id
             ),
         }
     };
@@ -246,5 +257,25 @@ impl Write<'_> {
     pub async fn object_meta_ids(&mut self, meta: Meta, object: u64) -> Result<Vec<u64>, DbError> {
         let query = self.sql(meta.statements().object_ids).bind(object);
         self.ids(query).await
+    }
+
+    /// Every meta row of `object`, keys and values in ID order, as
+    /// `update_meta_cache()` reads them; a NULL value is `None`.
+    pub async fn object_meta(
+        &mut self,
+        meta: Meta,
+        object: u64,
+    ) -> Result<Vec<(Vec<u8>, Option<Vec<u8>>)>, DbError> {
+        self.spend()?;
+        let query = self.sql(meta.statements().object_meta).bind(object);
+        let rows = query.fetch_all(&mut *self.tx).await.map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let key = c.bytes("meta_key");
+                let value = c.keep(row.try_get_unchecked::<Option<Vec<u8>>, _>("meta_value"));
+                c.finish((key, value))
+            })
+            .collect()
     }
 }

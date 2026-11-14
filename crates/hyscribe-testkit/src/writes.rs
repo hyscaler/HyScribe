@@ -233,7 +233,19 @@ impl Masks {
             })
     }
 
+    /// A `$wp` bcrypt hash: its salt is random.
+    fn is_password(value: &[u8]) -> bool {
+        let salt = value.strip_prefix(b"$wp$2y$12$").unwrap_or_default();
+        salt.len() == 53
+            && salt
+                .iter()
+                .all(|b| b.is_ascii_alphanumeric() || b"./".contains(b))
+    }
+
     fn mask(&self, table: &Table, column: &str, value: &[u8]) -> Vec<u8> {
+        if Self::is_password(value) {
+            return b"%password%".to_vec();
+        }
         // Such dates sort as text in time order.
         if Self::is_date(value) && value >= &self.start.1[..] && value <= &self.end.1[..] {
             return b"%now%".to_vec();
@@ -318,13 +330,26 @@ fn new_ids(fresh: &Snapshot, before: &Snapshot, after: &Snapshot) -> NewIds {
     new
 }
 
+/// Whether `row` of `table` is a transient's timeout, whose value is the
+/// time plus the transient's lifetime.
+fn is_timeout(table: &Table, row: &Row) -> bool {
+    let name = value(row, "option_name");
+    table.name == "wp_options"
+        && (name.starts_with(b"_transient_timeout_")
+            || name.starts_with(b"_site_transient_timeout_"))
+}
+
 /// Rows of `table` masked, by masked key.
 fn masked(masks: &Masks, table: &Table, rows: &BTreeMap<Vec<u8>, Row>) -> BTreeMap<Vec<u8>, Row> {
     rows.values()
         .map(|row| {
+            let timeout = is_timeout(table, row);
             let row: Row = row
                 .iter()
-                .map(|(column, value)| (column.clone(), masks.mask(table, column, value)))
+                .map(|(column, value)| match column.as_str() {
+                    "option_value" if timeout => (column.clone(), b"%expiry%".to_vec()),
+                    _ => (column.clone(), masks.mask(table, column, value)),
+                })
                 .collect();
             (key(&row, table.key), row)
         })

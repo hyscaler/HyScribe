@@ -142,3 +142,20 @@ fn data_keeps_the_allowed_tags() {
         b"<b>x</b>y<a href=\"https://h.test/\">l</a>p"
     );
 }
+
+/// A biography keeps links' `rel` and `target` too, as the write oracle's
+/// `user-insert-every-field` records.
+#[test]
+fn user_descriptions_keep_link_relations() {
+    assert_eq!(
+        wp_kses_user_description(
+            b"<a href=\"https://example.test\" rel=\"me\" target=\"_blank\" onclick=\"x()\">Me</a> \
+              & <b>bold</b> <script>x</script>"
+        ),
+        b"<a href=\"https://example.test\" rel=\"me\" target=\"_blank\">Me</a> &amp; <b>bold</b> x"
+    );
+    assert_eq!(
+        wp_kses_data(b"<a rel=\"me\" target=\"_blank\">l</a>"),
+        b"<a>l</a>"
+    );
+}

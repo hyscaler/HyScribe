@@ -1,0 +1,48 @@
+# The rows PHP WordPress writes for the action meta-delete (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 20:02:12 to 2026-11-14 20:02:12 UTC.
+# %wp_postmeta:1% is 3.
+# %wp_postmeta:2% is 4.
+# %wp_postmeta:3% is 5.
+# %wp_postmeta:4% is 6.
+# %wp_postmeta:5% is 7.
+# %wp_postmeta:6% is 8.
+# %wp_postmeta:7% is 9.
+# %wp_postmeta:8% is 10.
+# %wp_postmeta:9% is 11.
+# %wp_postmeta:10% is 12.
+wp_postmeta	%wp_postmeta:1%	-	meta_id	%wp_postmeta:1%
+wp_postmeta	%wp_postmeta:1%	-	meta_key	oracle_del
+wp_postmeta	%wp_postmeta:1%	-	meta_value	a
+wp_postmeta	%wp_postmeta:1%	-	post_id	1
+wp_postmeta	%wp_postmeta:10%	-	meta_id	%wp_postmeta:10%
+wp_postmeta	%wp_postmeta:10%	-	meta_key	oracle_zero
+wp_postmeta	%wp_postmeta:10%	-	meta_value	0
+wp_postmeta	%wp_postmeta:10%	-	post_id	2
+wp_postmeta	%wp_postmeta:2%	-	meta_id	%wp_postmeta:2%
+wp_postmeta	%wp_postmeta:2%	-	meta_key	oracle_del
+wp_postmeta	%wp_postmeta:2%	-	meta_value	b
+wp_postmeta	%wp_postmeta:2%	-	post_id	1
+wp_postmeta	%wp_postmeta:3%	-	meta_id	%wp_postmeta:3%
+wp_postmeta	%wp_postmeta:3%	-	meta_key	oracle_del
+wp_postmeta	%wp_postmeta:3%	-	meta_value	c
+wp_postmeta	%wp_postmeta:3%	-	post_id	1
+wp_postmeta	%wp_postmeta:4%	-	meta_id	%wp_postmeta:4%
+wp_postmeta	%wp_postmeta:4%	-	meta_key	oracle_all
+wp_postmeta	%wp_postmeta:4%	-	meta_value	x
+wp_postmeta	%wp_postmeta:4%	-	post_id	1
+wp_postmeta	%wp_postmeta:5%	-	meta_id	%wp_postmeta:5%
+wp_postmeta	%wp_postmeta:5%	-	meta_key	oracle_all
+wp_postmeta	%wp_postmeta:5%	-	meta_value	x
+wp_postmeta	%wp_postmeta:5%	-	post_id	2
+wp_postmeta	%wp_postmeta:7%	-	meta_id	%wp_postmeta:7%
+wp_postmeta	%wp_postmeta:7%	-	meta_key	oracle_every
+wp_postmeta	%wp_postmeta:7%	-	meta_value	z
+wp_postmeta	%wp_postmeta:7%	-	post_id	1
+wp_postmeta	%wp_postmeta:8%	-	meta_id	%wp_postmeta:8%
+wp_postmeta	%wp_postmeta:8%	-	meta_key	oracle_every
+wp_postmeta	%wp_postmeta:8%	-	meta_value	z
+wp_postmeta	%wp_postmeta:8%	-	post_id	2
+wp_postmeta	%wp_postmeta:9%	-	meta_id	%wp_postmeta:9%
+wp_postmeta	%wp_postmeta:9%	-	meta_key	oracle_list
+wp_postmeta	%wp_postmeta:9%	-	meta_value	a:1:{i:0;i:1;}
+wp_postmeta	%wp_postmeta:9%	-	post_id	1

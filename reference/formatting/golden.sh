@@ -3,7 +3,7 @@
 #
 # Records WordPress's wptexturize(), convert_smilies(), force_balance_tags(),
 # wpautop(), make_clickable(), remove_accents(), sanitize_text_field(),
-# sanitize_user() and the admin's display filters of user names and emails as
+# sanitize_user() (and strict) and the admin's display filters of user names and emails as
 # goldens in crates/hyscribe-render/tests/golden.
 # Needs the default install oracle running (reference/default-install/db.sh up,
 # then php.sh up). Only reads from it.

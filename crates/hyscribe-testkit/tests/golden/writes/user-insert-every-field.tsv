@@ -1,0 +1,94 @@
+# The rows PHP WordPress writes for the action user-insert-every-field (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 19:43:28 to 2026-11-14 19:43:29 UTC.
+# %wp_users:1% is 9.
+# %wp_usermeta:1% is 115.
+# %wp_usermeta:2% is 116.
+# %wp_usermeta:3% is 117.
+# %wp_usermeta:4% is 118.
+# %wp_usermeta:5% is 119.
+# %wp_usermeta:6% is 120.
+# %wp_usermeta:7% is 121.
+# %wp_usermeta:8% is 122.
+# %wp_usermeta:9% is 123.
+# %wp_usermeta:10% is 124.
+# %wp_usermeta:11% is 125.
+# %wp_usermeta:12% is 126.
+# %wp_usermeta:13% is 127.
+# %wp_usermeta:14% is 128.
+# %wp_usermeta:15% is 129.
+# %wp_usermeta:16% is 130.
+wp_options	user_count	~	option_value	1	2
+wp_usermeta	%wp_usermeta:1%	+	meta_key	nickname
+wp_usermeta	%wp_usermeta:1%	+	meta_value	O'Neil &amp; co
+wp_usermeta	%wp_usermeta:1%	+	umeta_id	%wp_usermeta:1%
+wp_usermeta	%wp_usermeta:1%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:10%	+	meta_key	use_ssl
+wp_usermeta	%wp_usermeta:10%	+	meta_value	1
+wp_usermeta	%wp_usermeta:10%	+	umeta_id	%wp_usermeta:10%
+wp_usermeta	%wp_usermeta:10%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:11%	+	meta_key	show_admin_bar_front
+wp_usermeta	%wp_usermeta:11%	+	meta_value	false
+wp_usermeta	%wp_usermeta:11%	+	umeta_id	%wp_usermeta:11%
+wp_usermeta	%wp_usermeta:11%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:12%	+	meta_key	locale
+wp_usermeta	%wp_usermeta:12%	+	meta_value	fr_FR
+wp_usermeta	%wp_usermeta:12%	+	umeta_id	%wp_usermeta:12%
+wp_usermeta	%wp_usermeta:12%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:13%	+	meta_key	oracle_custom
+wp_usermeta	%wp_usermeta:13%	+	meta_value	one
+wp_usermeta	%wp_usermeta:13%	+	umeta_id	%wp_usermeta:13%
+wp_usermeta	%wp_usermeta:13%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:14%	+	meta_key	oracle_list
+wp_usermeta	%wp_usermeta:14%	+	meta_value	a:2:{i:0;i:1;i:1;s:3:"two";}
+wp_usermeta	%wp_usermeta:14%	+	umeta_id	%wp_usermeta:14%
+wp_usermeta	%wp_usermeta:14%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:15%	+	meta_key	wp_capabilities
+wp_usermeta	%wp_usermeta:15%	+	meta_value	a:1:{s:6:"author";b:1;}
+wp_usermeta	%wp_usermeta:15%	+	umeta_id	%wp_usermeta:15%
+wp_usermeta	%wp_usermeta:15%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:16%	+	meta_key	wp_user_level
+wp_usermeta	%wp_usermeta:16%	+	meta_value	2
+wp_usermeta	%wp_usermeta:16%	+	umeta_id	%wp_usermeta:16%
+wp_usermeta	%wp_usermeta:16%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:2%	+	meta_key	first_name
+wp_usermeta	%wp_usermeta:2%	+	meta_value	Backslash
+wp_usermeta	%wp_usermeta:2%	+	umeta_id	%wp_usermeta:2%
+wp_usermeta	%wp_usermeta:2%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:3%	+	meta_key	last_name
+wp_usermeta	%wp_usermeta:3%	+	meta_value	Tab and space
+wp_usermeta	%wp_usermeta:3%	+	umeta_id	%wp_usermeta:3%
+wp_usermeta	%wp_usermeta:3%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:4%	+	meta_key	description
+wp_usermeta	%wp_usermeta:4%	+	meta_value	<a href="https://example.test" rel="me" target="_blank">Me</a> &amp; <b>bold</b> x
+wp_usermeta	%wp_usermeta:4%	+	umeta_id	%wp_usermeta:4%
+wp_usermeta	%wp_usermeta:4%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:5%	+	meta_key	rich_editing
+wp_usermeta	%wp_usermeta:5%	+	meta_value	false
+wp_usermeta	%wp_usermeta:5%	+	umeta_id	%wp_usermeta:5%
+wp_usermeta	%wp_usermeta:5%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:6%	+	meta_key	syntax_highlighting
+wp_usermeta	%wp_usermeta:6%	+	meta_value	false
+wp_usermeta	%wp_usermeta:6%	+	umeta_id	%wp_usermeta:6%
+wp_usermeta	%wp_usermeta:6%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:7%	+	meta_key	infinite_scrolling
+wp_usermeta	%wp_usermeta:7%	+	meta_value	false
+wp_usermeta	%wp_usermeta:7%	+	umeta_id	%wp_usermeta:7%
+wp_usermeta	%wp_usermeta:7%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:8%	+	meta_key	comment_shortcuts
+wp_usermeta	%wp_usermeta:8%	+	meta_value	true
+wp_usermeta	%wp_usermeta:8%	+	umeta_id	%wp_usermeta:8%
+wp_usermeta	%wp_usermeta:8%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:9%	+	meta_key	admin_color
+wp_usermeta	%wp_usermeta:9%	+	meta_value	freshx
+wp_usermeta	%wp_usermeta:9%	+	umeta_id	%wp_usermeta:9%
+wp_usermeta	%wp_usermeta:9%	+	user_id	%wp_users:1%
+wp_users	%wp_users:1%	+	ID	%wp_users:1%
+wp_users	%wp_users:1%	+	display_name	Full Display
+wp_users	%wp_users:1%	+	user_activation_key	123:abc
+wp_users	%wp_users:1%	+	user_email	full@example.test
+wp_users	%wp_users:1%	+	user_login	OracleFull
+wp_users	%wp_users:1%	+	user_nicename	full-name
+wp_users	%wp_users:1%	+	user_pass	%password%
+wp_users	%wp_users:1%	+	user_registered	2020-01-02 03:04:05
+wp_users	%wp_users:1%	+	user_status	0
+wp_users	%wp_users:1%	+	user_url	https://example.test/me?a=1&amp;b=2

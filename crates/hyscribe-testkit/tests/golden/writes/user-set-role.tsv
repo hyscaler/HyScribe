@@ -1,0 +1,19 @@
+# The rows PHP WordPress writes for the action user-set-role (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 19:43:31 to 2026-11-14 19:43:31 UTC.
+# %wp_users:1% is 12.
+# %wp_usermeta:1% is 159.
+# %wp_usermeta:2% is 160.
+# %wp_usermeta:3% is 161.
+# %wp_usermeta:4% is 162.
+# %wp_usermeta:5% is 163.
+# %wp_usermeta:6% is 164.
+# %wp_usermeta:7% is 165.
+# %wp_usermeta:8% is 166.
+# %wp_usermeta:9% is 167.
+# %wp_usermeta:10% is 168.
+# %wp_usermeta:11% is 169.
+# %wp_usermeta:12% is 170.
+# %wp_usermeta:13% is 171.
+# %wp_usermeta:14% is 172.
+wp_usermeta	%wp_usermeta:13%	~	meta_value	a:1:{s:10:"subscriber";b:1;}	a:1:{s:6:"author";b:1;}
+wp_usermeta	%wp_usermeta:14%	~	meta_value	0	2

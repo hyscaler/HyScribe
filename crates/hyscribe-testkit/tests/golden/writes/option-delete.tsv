@@ -1,0 +1,6 @@
+# The rows PHP WordPress writes for the action option-delete (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 19:47:49 to 2026-11-14 19:47:49 UTC.
+wp_options	blogdescription	-	autoload	on
+wp_options	blogdescription	-	option_id	5
+wp_options	blogdescription	-	option_name	blogdescription
+wp_options	blogdescription	-	option_value	

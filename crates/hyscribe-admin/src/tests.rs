@@ -38,6 +38,12 @@ pub struct Oracle {
     pub use_ssl: bool,
     /// `blog_public` is 0.
     pub private: bool,
+    /// `users_can_register` is 1.
+    pub register: bool,
+    /// Admin's `user_activation_key`.
+    pub activation_key: &'static [u8],
+    /// The ID of a `user_request` post.
+    pub user_request: Option<u64>,
 }
 
 impl Urls for Oracle {
@@ -59,7 +65,7 @@ impl Urls for Oracle {
 
 /// The fixture's administrator, `admin`, whose password is
 /// `reference-only-password`.
-fn admin(use_ssl: bool) -> User {
+fn admin(oracle: &Oracle) -> User {
     static HASH: OnceLock<String> = OnceLock::new();
     let hash = HASH.get_or_init(|| {
         hyscribe_auth::hash_password(b"reference-only-password").unwrap_or_default()
@@ -67,7 +73,8 @@ fn admin(use_ssl: bool) -> User {
     User {
         id: 1,
         pass: hash.clone().into_bytes(),
-        use_ssl,
+        use_ssl: oracle.use_ssl,
+        activation_key: oracle.activation_key.to_vec(),
     }
 }
 
@@ -91,14 +98,18 @@ impl Site for Oracle {
         format!("{SITE}/wp-login.php{query}")
     }
     fn user_by_login(&self, login: &[u8]) -> Option<User> {
-        login
-            .eq_ignore_ascii_case(b"admin")
-            .then(|| admin(self.use_ssl))
+        login.eq_ignore_ascii_case(b"admin").then(|| admin(self))
     }
     fn user_by_email(&self, email: &[u8]) -> Option<User> {
         email
             .eq_ignore_ascii_case(b"admin@default-install.test")
-            .then(|| admin(self.use_ssl))
+            .then(|| admin(self))
+    }
+    fn can_register(&self) -> bool {
+        self.register
+    }
+    fn post_type(&self, id: u64) -> Option<String> {
+        (Some(id) == self.user_request).then(|| "user_request".into())
     }
 }
 
@@ -659,6 +670,101 @@ impl Urls for Role {
 }
 
 impl PageSite for Role {
+    fn user_option(&self, name: &str) -> Option<Vec<u8>> {
+        let edit: &[u8] = match (self.variant(), name) {
+            ("a8locklayout" | "a8ttdlocklayout", "screen_layout_attachment") => b"1",
+            ("a8locklayout" | "a8ttdlocklayout", "metaboxhidden_attachment") => {
+                b"a:1:{i:0;s:16:\"commentstatusdiv\";}"
+            }
+            ("a8locklayout" | "a8ttdlocklayout", "closedpostboxes_attachment") => {
+                b"a:1:{i:0;s:7:\"slugdiv\";}"
+            }
+            ("a8locklayout" | "a8ttdlocklayout", "meta-box-order_attachment") => {
+                b"a:2:{s:4:\"side\";s:19:\"authordiv,submitdiv\";s:6:\"normal\";s:7:\"slugdiv\";}"
+            }
+            ("a8locknorich", "rich_editing") => b"false",
+            (variant, "rich_editing") if variant.starts_with("a8") => b"true",
+            _ => b"",
+        };
+        if !edit.is_empty() {
+            return Some(edit.to_vec());
+        }
+        match (self.variant(), name) {
+            ("m4list" | "m4ttdlist", "media_library_mode") => return Some(b"list".to_vec()),
+            ("m4ttdpaged", "upload_per_page") => return Some(b"5".to_vec()),
+            ("m4ttdhidden", "manageuploadcolumnshidden") => {
+                return Some(b"a:1:{i:0;s:6:\"author\";}".to_vec());
+            }
+            _ => {}
+        }
+        if self.variant() == "settings" && name == "user-settings" {
+            return Some(b"mfold=f&posts_list_mode=excerpt".to_vec());
+        }
+        match (self.variant(), name) {
+            ("f9folded", "user-settings") => return Some(b"mfold=f".to_vec()),
+            ("f9unfold", "user-settings") => return Some(b"unfold=1&mfold=o".to_vec()),
+            _ => {}
+        }
+        if self.variant() == "hidden" {
+            let value: &[u8] = match name {
+                "manageedit-postcolumnshidden" => b"a:2:{i:0;s:4:\"tags\";i:1;s:8:\"comments\";}",
+                "edit_post_per_page" | "edit_page_per_page" => b"3",
+                _ => return None,
+            };
+            return Some(value.to_vec());
+        }
+        if self.variant() == "a5hidden" {
+            let value: &[u8] = match name {
+                "manageexport-personal-datacolumnshidden" => b"a:1:{i:0;s:6:\"status\";}",
+                "export_personal_data_requests_per_page" => b"50",
+                "managepluginscolumnshidden" => b"a:1:{i:0;s:11:\"description\";}",
+                "plugins_per_page" => b"10",
+                _ => return None,
+            };
+            return Some(value.to_vec());
+        }
+        if let Some(value) = self.profile_option(name) {
+            return Some(value);
+        }
+        if self.variant() == "upaged" && name == "users_per_page" {
+            return Some(b"2".to_vec());
+        }
+        if self.variant() == "uhidden" && name == "manageuserscolumnshidden" {
+            return Some(b"a:1:{i:0;s:5:\"email\";}".to_vec());
+        }
+        if self.variant() == "cpaged" && name == "edit_comments_per_page" {
+            return Some(b"2".to_vec());
+        }
+        if self.variant() == "chidden" && name == "manageedit-commentscolumnshidden" {
+            return Some(b"a:1:{i:0;s:8:\"response\";}".to_vec());
+        }
+        if self.variant() == "paged" {
+            let value: &[u8] = match name {
+                "edit_category_per_page" | "edit_post_tag_per_page" => b"3",
+                "manageedit-categorycolumnshidden" | "manageedit-post_tagcolumnshidden" => {
+                    b"a:1:{i:0;s:11:\"description\";}"
+                }
+                _ => return None,
+            };
+            return Some(value.to_vec());
+        }
+        if self.variant() == "twice" && name == "meta-box-order_dashboard" {
+            return Some(b"a:3:{s:6:\"normal\";s:37:\"dashboard_activity,dashboard_activity\";s:4:\"side\";s:19:\"dashboard_right_now\";s:7:\"column3\";s:19:\"dashboard_right_now\";}".to_vec());
+        }
+        if self.variant() != "layout" {
+            return None;
+        }
+        let value: &[u8] = match name {
+            "metaboxhidden_dashboard" => b"a:1:{i:0;s:18:\"dashboard_activity\";}",
+            "closedpostboxes_dashboard" => b"a:1:{i:0;s:19:\"dashboard_right_now\";}",
+            "meta-box-order_dashboard" => b"a:2:{s:4:\"side\";s:39:\"dashboard_site_health,dashboard_primary\";s:6:\"normal\";s:21:\"dashboard_quick_press\";}",
+            _ => return None,
+        };
+        Some(value.to_vec())
+    }
+    fn settings_cookie(&self) -> Option<String> {
+        None
+    }
     fn user_id(&self) -> u64 {
         1
     }
@@ -887,7 +993,7 @@ impl crate::profile::ProfileSite for Role {
             return Some(b"sub".to_vec());
         }
         if id == 1 {
-            return crate::posts::PostsSite::user_option(self, name);
+            return PageSite::user_option(self, name);
         }
         self.other_option(id, name)
     }
@@ -1271,6 +1377,10 @@ impl crate::posts::PostsSite for Role {
             ("a8lockpretty", "permalink_structure") => return Some(b"/%postname%/".to_vec()),
             ("m4ttdpages", "wp_attachment_pages_enabled") => return Some(b"1".to_vec()),
             ("m4large", "large_size_h") => return Some(b"0".to_vec()),
+            // Postponed at the clock's time, or long ago.
+            ("f9remind", "admin_email_lifespan") => return Some(b"1794759200".to_vec()),
+            ("f9old", "admin_email_lifespan") => return Some(b"1".to_vec()),
+            ("f9edge", "admin_email_lifespan") => return Some(b"1794759140".to_vec()),
             ("m4ttdcron", "cron") => {
                 return Some(b"a:1:{i:1;a:1:{s:26:\"upgrader_scheduled_cleanup\";a:1:{s:1:\"k\";a:1:{s:4:\"args\";a:1:{i:0;i:611;}}}}}".to_vec());
             }
@@ -1382,93 +1492,6 @@ impl crate::posts::PostsSite for Role {
             authors.truncate(1);
         }
         authors
-    }
-    fn user_option(&self, name: &str) -> Option<Vec<u8>> {
-        let edit: &[u8] = match (self.variant(), name) {
-            ("a8locklayout" | "a8ttdlocklayout", "screen_layout_attachment") => b"1",
-            ("a8locklayout" | "a8ttdlocklayout", "metaboxhidden_attachment") => {
-                b"a:1:{i:0;s:16:\"commentstatusdiv\";}"
-            }
-            ("a8locklayout" | "a8ttdlocklayout", "closedpostboxes_attachment") => {
-                b"a:1:{i:0;s:7:\"slugdiv\";}"
-            }
-            ("a8locklayout" | "a8ttdlocklayout", "meta-box-order_attachment") => {
-                b"a:2:{s:4:\"side\";s:19:\"authordiv,submitdiv\";s:6:\"normal\";s:7:\"slugdiv\";}"
-            }
-            ("a8locknorich", "rich_editing") => b"false",
-            (variant, "rich_editing") if variant.starts_with("a8") => b"true",
-            _ => b"",
-        };
-        if !edit.is_empty() {
-            return Some(edit.to_vec());
-        }
-        match (self.variant(), name) {
-            ("m4list" | "m4ttdlist", "media_library_mode") => return Some(b"list".to_vec()),
-            ("m4ttdpaged", "upload_per_page") => return Some(b"5".to_vec()),
-            ("m4ttdhidden", "manageuploadcolumnshidden") => {
-                return Some(b"a:1:{i:0;s:6:\"author\";}".to_vec());
-            }
-            _ => {}
-        }
-        if self.variant() == "settings" && name == "user-settings" {
-            return Some(b"mfold=f&posts_list_mode=excerpt".to_vec());
-        }
-        if self.variant() == "hidden" {
-            let value: &[u8] = match name {
-                "manageedit-postcolumnshidden" => b"a:2:{i:0;s:4:\"tags\";i:1;s:8:\"comments\";}",
-                "edit_post_per_page" | "edit_page_per_page" => b"3",
-                _ => return None,
-            };
-            return Some(value.to_vec());
-        }
-        if self.variant() == "a5hidden" {
-            let value: &[u8] = match name {
-                "manageexport-personal-datacolumnshidden" => b"a:1:{i:0;s:6:\"status\";}",
-                "export_personal_data_requests_per_page" => b"50",
-                "managepluginscolumnshidden" => b"a:1:{i:0;s:11:\"description\";}",
-                "plugins_per_page" => b"10",
-                _ => return None,
-            };
-            return Some(value.to_vec());
-        }
-        if let Some(value) = self.profile_option(name) {
-            return Some(value);
-        }
-        if self.variant() == "upaged" && name == "users_per_page" {
-            return Some(b"2".to_vec());
-        }
-        if self.variant() == "uhidden" && name == "manageuserscolumnshidden" {
-            return Some(b"a:1:{i:0;s:5:\"email\";}".to_vec());
-        }
-        if self.variant() == "cpaged" && name == "edit_comments_per_page" {
-            return Some(b"2".to_vec());
-        }
-        if self.variant() == "chidden" && name == "manageedit-commentscolumnshidden" {
-            return Some(b"a:1:{i:0;s:8:\"response\";}".to_vec());
-        }
-        if self.variant() == "paged" {
-            let value: &[u8] = match name {
-                "edit_category_per_page" | "edit_post_tag_per_page" => b"3",
-                "manageedit-categorycolumnshidden" | "manageedit-post_tagcolumnshidden" => {
-                    b"a:1:{i:0;s:11:\"description\";}"
-                }
-                _ => return None,
-            };
-            return Some(value.to_vec());
-        }
-        if self.variant() == "twice" && name == "meta-box-order_dashboard" {
-            return Some(b"a:3:{s:6:\"normal\";s:37:\"dashboard_activity,dashboard_activity\";s:4:\"side\";s:19:\"dashboard_right_now\";s:7:\"column3\";s:19:\"dashboard_right_now\";}".to_vec());
-        }
-        if self.variant() != "layout" {
-            return None;
-        }
-        let value: &[u8] = match name {
-            "metaboxhidden_dashboard" => b"a:1:{i:0;s:18:\"dashboard_activity\";}",
-            "closedpostboxes_dashboard" => b"a:1:{i:0;s:19:\"dashboard_right_now\";}",
-            "meta-box-order_dashboard" => b"a:2:{s:4:\"side\";s:39:\"dashboard_site_health,dashboard_primary\";s:6:\"normal\";s:21:\"dashboard_quick_press\";}",
-            _ => return None,
-        };
-        Some(value.to_vec())
     }
     fn list_posts(&self, query: &hyscribe_model::PostQuery) -> (Vec<hyscribe_model::Post>, u64) {
         if self.variant() == "s2nopages" && query.post_types == ["page"] {

@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Write requests on the ported routes, without arguments, that
+# reference/action-checks/golden.sh records through reference/rest/golden.sh
+# with reference/action-checks/stop.php: a request whose permission check
+# passes is answered hyscribe-accepted (299) before its callback runs.
+POST	/?rest_route=/wp/v2/posts
+POST	/?rest_route=/wp/v2/posts/1
+PUT	/?rest_route=/wp/v2/posts/1
+PATCH	/?rest_route=/wp/v2/posts/1
+DELETE	/?rest_route=/wp/v2/posts/1
+DELETE	/?rest_route=/wp/v2/posts/999
+POST	/?rest_route=/wp/v2/posts/1	nononce
+POST	/?rest_route=/wp/v2/posts/1&_wpnonce=0123456789	nononce
+DELETE	/?rest_route=/wp/v2/posts/1&_method=POST
+POST	/?rest_route=/wp/v2/posts/1	override
+POST	/?rest_route=/wp/v2/pages
+POST	/?rest_route=/wp/v2/pages/2
+DELETE	/?rest_route=/wp/v2/pages/2
+POST	/?rest_route=/wp/v2/categories
+POST	/?rest_route=/wp/v2/categories/1
+POST	/?rest_route=/wp/v2/tags/1
+POST	/?rest_route=/wp/v2/comments
+POST	/?rest_route=/wp/v2/comments/1
+DELETE	/?rest_route=/wp/v2/comments/1
+POST	/?rest_route=/wp/v2/users
+POST	/?rest_route=/wp/v2/users/1
+DELETE	/?rest_route=/wp/v2/users/1
+POST	/?rest_route=/wp/v2/users/me
+DELETE	/?rest_route=/wp/v2/users/me
+POST	/?rest_route=/wp/v2/settings
+POST	/?rest_route=/wp/v2/templates
+POST	/?rest_route=/wp/v2/templates/twentytwentyfive//index
+DELETE	/?rest_route=/wp/v2/templates/twentytwentyfive//index
+POST	/?rest_route=/wp/v2/template-parts

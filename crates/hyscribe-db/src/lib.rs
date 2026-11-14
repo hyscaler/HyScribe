@@ -1163,10 +1163,10 @@ impl Db {
     ) -> Result<Option<Credentials>, DbError> {
         let sql = self.prefix.sql(match field {
             UserField::Login => {
-                "SELECT ID, user_login, user_pass FROM {prefix}users WHERE user_login = ? ORDER BY ID LIMIT 1"
+                "SELECT ID, user_login, user_pass, user_activation_key FROM {prefix}users WHERE user_login = ? ORDER BY ID LIMIT 1"
             }
             UserField::Email => {
-                "SELECT ID, user_login, user_pass FROM {prefix}users WHERE user_email = ? ORDER BY ID LIMIT 1"
+                "SELECT ID, user_login, user_pass, user_activation_key FROM {prefix}users WHERE user_email = ? ORDER BY ID LIMIT 1"
             }
         });
         let row = sqlx::query(sql)
@@ -1180,6 +1180,7 @@ impl Db {
                 id: c.unsigned("ID"),
                 login: c.bytes("user_login"),
                 pass: c.bytes("user_pass"),
+                activation_key: c.bytes("user_activation_key"),
             };
             c.finish(credentials)
         })

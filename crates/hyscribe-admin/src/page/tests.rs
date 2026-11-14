@@ -12,6 +12,10 @@ struct Fake {
     tested: bool,
     home: &'static str,
     site: &'static str,
+    /// The stored user settings.
+    stored: Option<&'static [u8]>,
+    /// The settings cookie.
+    settings: Option<&'static str>,
 }
 
 impl MenuUser for Fake {
@@ -60,6 +64,12 @@ impl Urls for Fake {
 }
 
 impl PageSite for Fake {
+    fn user_option(&self, _: &str) -> Option<Vec<u8>> {
+        self.stored.map(<[u8]>::to_vec)
+    }
+    fn settings_cookie(&self) -> Option<String> {
+        self.settings.map(str::to_string)
+    }
     fn user_id(&self) -> u64 {
         7
     }
@@ -163,6 +173,27 @@ fn the_title_the_head_script_and_the_body() {
     assert!(html.contains("\"secure\":\"1\""));
     assert!(html.contains("var userId = 7;"));
     assert!(html.contains("var serverData = \"\";\n\t\t\t\tvar userId = \"7\";"));
+}
+
+/// `get_user_setting()`'s `mfold` folds the menu and a truthy `unfold` stops
+/// it folding by itself; the cookie wins over the stored settings.
+#[test]
+fn the_menu_folds_as_the_user_set_it() {
+    for (cookie, classes) in [
+        (None, "tools-php folded auto-fold admin-bar "),
+        (Some("mfold=o&unfold=1"), "tools-php admin-bar "),
+        (Some("unfold=0"), "tools-php auto-fold admin-bar "),
+    ] {
+        let site = Fake {
+            settings: cookie,
+            stored: Some(b"mfold=f"),
+            ..site()
+        };
+        assert!(
+            render(&site, &page(&[], "", "")).contains(classes),
+            "{cookie:?}"
+        );
+    }
 }
 
 #[test]

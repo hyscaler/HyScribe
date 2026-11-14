@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use hyscribe_phpser::remove_query_arg;
 use hyscribe_testkit::{hs_admin_page, unhex};
 
 use super::*;
@@ -239,11 +240,23 @@ fn dashboard_variants_are_php_s() {
         let role: &'static str = Box::leak(format!("{}:{}", f[0], f[1]).into_boxed_str());
         let php =
             hs_admin_page(&String::from_utf8(unhex(f[2])).unwrap()).replace("%auto-draft%", "4");
+        let query = match f[0] {
+            "f9edit" => "?edit=dashboard_primary",
+            "f9welcome" => "?welcome=0",
+            "f9remind" | "f9old" => "?admin_email_remind_later=1",
+            _ => "",
+        };
+        let uri = format!("/hs-admin/index{query}");
+        let canonical = remove_query_arg(&crate::page::REMOVABLE, uri.as_bytes());
         let ours = dashboard(
             &Role(role),
             &crate::tests::request(
-                &format!("{}/hs-admin/index", crate::tests::SITE),
-                "/hs-admin/index",
+                &format!(
+                    "{}{}",
+                    crate::tests::SITE,
+                    String::from_utf8_lossy(&canonical)
+                ),
+                &uri,
                 &crate::tests::BROWSER,
             ),
         )
@@ -261,6 +274,17 @@ fn dashboard_variants_are_php_s() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// The postponed admin email notice shows for less than a minute after,
+/// and only for a non-empty argument.
+#[test]
+fn the_reminder_notice_lasts_a_minute() {
+    let uri = "/hs-admin/index?admin_email_remind_later=1";
+    assert!(!remind_later(&Role("f9remind:administrator"), uri).is_empty());
+    assert!(remind_later(&Role("f9edge:administrator"), uri).is_empty());
+    let empty = "/hs-admin/index?admin_email_remind_later=0";
+    assert!(remind_later(&Role("f9remind:administrator"), empty).is_empty());
 }
 
 /// What no golden reaches: an empty site, posts of today and tomorrow,

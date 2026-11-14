@@ -155,11 +155,33 @@ async fn answers_match_php() {
     let dir = tempfile::tempdir().unwrap();
     let sites = (site(false, dir.path()).await, site(true, dir.path()).await);
     let golden = include_str!("../../../hyscribe-rest/tests/golden/rest.tsv");
-    assert_eq!(replay(&sites, golden, false).await, (2 * 65, 2 * 8));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 67, 2 * 6));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/content.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 89, 2 * 3));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/templates.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 85, 0));
+    let golden = fixture_users(include_str!(
+        "../../../hyscribe-rest/tests/golden/embed.tsv"
+    ));
+    assert_eq!(replay(&sites, &golden, false).await, (60, 4));
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/search.tsv");
+    assert_eq!(replay(&sites, golden, false).await, (2 * 39, 2 * 7));
+}
+
+/// With `REST_PUBLIC_USERS=off`, a visitor sees no user as having
+/// published posts.
+#[tokio::test(flavor = "multi_thread")]
+async fn public_users_off_match_php() {
+    let dir = tempfile::tempdir().unwrap();
+    let off = |site: Arc<Site>| Arc::new(Arc::into_inner(site).unwrap().with_public_users(false));
+    let sites = (
+        off(site(false, dir.path()).await),
+        off(site(true, dir.path()).await),
+    );
+    let golden = fixture_users(include_str!(
+        "../../../hyscribe-rest/tests/golden/people-off.tsv"
+    ));
+    assert_eq!(replay(&sites, &golden, false).await, (14, 0));
 }
 
 /// The content routes over the Theme Test Data fixture, by hash.
@@ -171,30 +193,39 @@ async fn content_matches_php() {
         ttd_site(true, dir.path()).await,
     );
     let golden = include_str!("../../../hyscribe-rest/tests/golden/content-ttd.tsv");
-    assert_eq!(replay(&sites, golden, true).await, (2 * 92, 2 * 4));
+    assert_eq!(replay(&sites, golden, true).await, (2 * 93, 2 * 3));
+    let golden = fixture_users(include_str!(
+        "../../../hyscribe-rest/tests/golden/embed-ttd.tsv"
+    ));
+    assert_eq!(replay(&sites, &golden, true).await, (68, 6));
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/search-ttd.tsv");
+    assert_eq!(replay(&sites, golden, true).await, (2 * 48, 2 * 9));
+}
+
+/// `golden` but for the requests of the users `reference/rest/users.sql`
+/// adds, which the fixtures leave out.
+fn fixture_users(golden: &str) -> String {
+    let lines = golden.lines().filter(|line| {
+        let target = String::from_utf8(unhex(line.split('\t').nth(2).unwrap())).unwrap();
+        let users = target.contains("/wp/v2/users");
+        let own = target.contains("/users/1&") || target.ends_with("/users/1");
+        let fixture = ["include=1", "slug=admin", "exclude=701,702,703,704"];
+        let listed = target.split('&').any(|arg| fixture.contains(&arg));
+        !users || own || listed || target.contains("/users/me")
+    });
+    lines.collect::<Vec<_>>().join("\n")
 }
 
 /// The comments and users routes over both fixtures, but for the users
-/// `reference/rest/users.sql` adds, which the fixtures leave out.
+/// `reference/rest/users.sql` adds.
 #[tokio::test(flavor = "multi_thread")]
 async fn people_match_php() {
     let dir = tempfile::tempdir().unwrap();
-    let fixture_users = |golden: &str| {
-        let lines = golden.lines().filter(|line| {
-            let target = String::from_utf8(unhex(line.split('\t').nth(2).unwrap())).unwrap();
-            let users = target.contains("/wp/v2/users");
-            let own = target.contains("/users/1&") || target.ends_with("/users/1");
-            let fixture = ["include=1", "slug=admin", "exclude=701,702,703,704"];
-            let listed = target.split('&').any(|arg| fixture.contains(&arg));
-            !users || own || listed || target.contains("/users/me")
-        });
-        lines.collect::<Vec<_>>().join("\n")
-    };
     let sites = (site(false, dir.path()).await, site(true, dir.path()).await);
     let golden = fixture_users(include_str!(
         "../../../hyscribe-rest/tests/golden/people.tsv"
     ));
-    assert_eq!(replay(&sites, &golden, false).await, (208, 22));
+    assert_eq!(replay(&sites, &golden, false).await, (230, 0));
     let sites = (
         ttd_site(false, dir.path()).await,
         ttd_site(true, dir.path()).await,
@@ -202,7 +233,7 @@ async fn people_match_php() {
     let golden = fixture_users(include_str!(
         "../../../hyscribe-rest/tests/golden/people-ttd.tsv"
     ));
-    assert_eq!(replay(&sites, &golden, true).await, (224, 22));
+    assert_eq!(replay(&sites, &golden, true).await, (246, 0));
 }
 
 /// `golden`'s requests of a visitor and the administrator served on the

@@ -432,7 +432,7 @@ fn children(hierarchy: &[(u64, Vec<u64>)], id: u64) -> Vec<u64> {
 }
 
 /// `rest_get_route_for_taxonomy_items()`.
-fn items_route_of(taxonomy: &str) -> String {
+pub(crate) fn items_route_of(taxonomy: &str) -> String {
     let fields = fields_of(taxonomy);
     format!(
         "/{}/{}",

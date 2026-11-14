@@ -94,6 +94,18 @@ pub(crate) fn parse_list(value: &Value) -> Vec<(Key, Value)> {
         .collect()
 }
 
+/// `wp_parse_slug_list()`: [`parse_list`] of `sanitize_title()`, each once.
+pub(crate) fn parse_slug_list(value: &Value) -> Vec<Vec<u8>> {
+    let mut slugs: Vec<Vec<u8>> = Vec::new();
+    for (_, item) in parse_list(value) {
+        let slug = hyscribe_render::formatting::sanitize_title(&item.to_php_string());
+        if !slugs.contains(&slug) {
+            slugs.push(slug);
+        }
+    }
+    slugs
+}
+
 fn values(entries: Vec<(Key, Value)>) -> Vec<(Key, Value)> {
     (0..)
         .map(Key::Int)

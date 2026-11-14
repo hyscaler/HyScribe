@@ -451,10 +451,7 @@ fn query(
     };
     query.order = order_by(&Value::String(by.to_vec()), ascending, &query);
     if let Some(search) = search {
-        let text = String::from_utf8_lossy(&search).into_owned();
-        query.search = search_terms(&text);
-        query.sentence = text.replace(['\r', '\n'], "");
-        query.search_count = search_count(&text);
+        searched(&mut query, &search);
         if orderby == b"relevance" {
             query.order.insert(0, (OrderBy::Relevance, false));
         }
@@ -469,6 +466,14 @@ fn query(
         query.sticky = sticky(context);
     }
     Ok((query, page, u32::try_from(per_page).unwrap_or(u32::MAX)))
+}
+
+/// `WP_Query`'s search for `s`, not empty.
+pub(crate) fn searched(query: &mut PostQuery, search: &[u8]) {
+    let text = String::from_utf8_lossy(search).into_owned();
+    query.search = search_terms(&text);
+    query.sentence = text.replace(['\r', '\n'], "");
+    query.search_count = search_count(&text);
 }
 
 /// `get_items()`.

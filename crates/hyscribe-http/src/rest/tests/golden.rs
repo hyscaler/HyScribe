@@ -292,11 +292,6 @@ async fn posts_match_php() {
 async fn theme_test_data_posts_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/posts-ttd.tsv");
     let skipped = &[
-        ("*", "/?rest_route=/wp/v2/pages/172&_embed=up"),
-        (
-            "*",
-            "/?rest_route=/wp/v2/pages&parent=1725&_embed=up&exclude=1133",
-        ),
         ("*", "/?rest_route=/wp/v2/posts/555"),
         ("*", "/?rest_route=/wp/v2/posts/555&excerpt_length=5"),
         ("user", "/?rest_route=/wp/v2/posts/51"),

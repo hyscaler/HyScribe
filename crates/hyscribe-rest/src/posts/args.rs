@@ -9,7 +9,7 @@ use super::Kind;
 use crate::Context;
 use crate::request::{Arg, Sanitize, arg, string_arg, typed};
 use crate::response::{list, text};
-use crate::schema::{Checked, Refusal, parse_list, validate_value_from_schema};
+use crate::schema::{Checked, Refusal, validate_value_from_schema};
 use crate::types::context_arg;
 
 const IDS: &str = r#"{"type":"array","items":{"type":"integer"},"default":[]}"#;
@@ -139,13 +139,7 @@ pub(super) const NOT_PORTED: [&str; 8] = [
 /// the default allowed only to those who can edit the type's posts, or
 /// read its private ones for `private`.
 fn statuses(context: &Context, statuses: &Value, kind: Kind) -> Checked<Value> {
-    let mut parsed: Vec<Vec<u8>> = Vec::new();
-    for (_, status) in parse_list(statuses) {
-        let slug = hyscribe_render::formatting::sanitize_title(&status.to_php_string());
-        if !parsed.contains(&slug) {
-            parsed.push(slug);
-        }
-    }
+    let parsed = crate::schema::parse_slug_list(statuses);
     let schema = json_decode(STATUSES.as_bytes()).unwrap_or_default();
     for status in parsed.iter().filter(|status| *status != b"publish") {
         let private = status == b"private" && context.can(&kind.cap("read_private_posts"));

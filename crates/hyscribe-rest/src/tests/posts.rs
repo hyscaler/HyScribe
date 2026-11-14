@@ -175,12 +175,7 @@ fn serve_case(case: &RestCase, ttd: bool) -> Served {
     serve_with(&oracle, case)
 }
 
-const TTD_UNPORTED: [(&str, &str); 5] = [
-    ("*", "/?rest_route=/wp/v2/pages/172&_embed=up"),
-    (
-        "*",
-        "/?rest_route=/wp/v2/pages&parent=1725&_embed=up&exclude=1133",
-    ),
+const TTD_UNPORTED: [(&str, &str); 3] = [
     ("*", "/?rest_route=/wp/v2/posts/555"),
     ("*", "/?rest_route=/wp/v2/posts/555&excerpt_length=5"),
     ("user", "/?rest_route=/wp/v2/posts/51"),
@@ -460,22 +455,22 @@ fn actions_follow_capabilities() {
     );
 }
 
-/// Embedding a route not ported answers 501, enveloped or not; an error
-/// has no links to embed.
+/// Embedding a link to a route not ported, a featured image's, answers
+/// 501, enveloped or not, and a list of posts with one too; an error has no
+/// links to embed.
 #[test]
 fn embedding_what_is_not_ported() {
     let targets = [
-        "/wp/v2/posts/1&_embed",
-        "/wp/v2/posts&_embed",
-        "/wp/v2/posts/1&_embed&_envelope",
+        "/wp/v2/posts/98&_embed",
+        "/wp/v2/posts/98&_embed=wp:featuredmedia&_envelope",
+        "/wp/v2/posts&status=draft&_embed",
     ];
     for target in targets {
-        assert_eq!(
-            served("visitor", target, false, &[]).status,
-            501,
-            "{target}"
-        );
+        let served = served("administrator", target, false, &[]);
+        assert_eq!(served.status, 501, "{target}");
     }
+    let target = "/wp/v2/posts/98&_embed=author";
+    assert_eq!(served("administrator", target, false, &[]).status, 200);
     let missing = served("visitor", "/wp/v2/posts/999", false, &[]);
     let embedded = served("visitor", "/wp/v2/posts/999&_embed", false, &[]);
     assert_eq!(

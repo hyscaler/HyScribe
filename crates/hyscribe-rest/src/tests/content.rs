@@ -35,6 +35,8 @@ pub(crate) struct Content {
     pub(super) comments: Vec<CommentRow>,
     /// Each user and its `user_registered`.
     pub(super) users: Vec<(User, String)>,
+    /// The Theme Test Data fixture's.
+    pub(super) ttd: bool,
 }
 
 fn text(value: &SqlValue) -> Vec<u8> {
@@ -100,26 +102,7 @@ fn load(dump: &Dump) -> Content {
         .table("wp_term_relationships")
         .map(|row| (number(&row[0]), number(&row[1])))
         .collect();
-    let posts = dump
-        .table("wp_posts")
-        .map(|row| Post {
-            id: number(&row[0]),
-            author: number(&row[1]),
-            date: string(&row[2]),
-            date_gmt: string(&row[3]),
-            content: text(&row[4]),
-            title: text(&row[5]),
-            excerpt: text(&row[6]),
-            status: string(&row[7]),
-            comment_status: string(&row[8]),
-            password: text(&row[10]),
-            name: text(&row[11]),
-            modified: string(&row[14]),
-            parent: number(&row[17]),
-            post_type: string(&row[20]),
-            ..Post::default()
-        })
-        .collect();
+    let posts = super::site::posts(dump).collect();
     let comments = dump
         .table("wp_comments")
         .map(|row| CommentRow {
@@ -210,6 +193,7 @@ fn load(dump: &Dump) -> Content {
         comments,
         postmeta,
         users,
+        ttd: false,
     }
 }
 
@@ -249,7 +233,10 @@ pub(super) fn theme_test_data() -> &'static Content {
             "/../../target/fixtures/theme-test-data/7.1.3/database.sql"
         );
         let sql = std::fs::read(path).expect("build it with reference/theme-test-data/build.sh");
-        load(&Dump::parse(&sql).unwrap())
+        Content {
+            ttd: true,
+            ..load(&Dump::parse(&sql).unwrap())
+        }
     })
 }
 
@@ -340,6 +327,14 @@ impl Content {
         match (taxonomy, pretty) {
             ("category", false) => format!("{site}/?cat={}", term.id),
             ("post_tag", false) => format!("{site}/?tag={}", String::from_utf8_lossy(&term.slug)),
+            ("post_format", _) => {
+                let slug = String::from_utf8_lossy(&term.slug).replace("post-format-", "");
+                if pretty {
+                    format!("{site}/type/{slug}/")
+                } else {
+                    format!("{site}/?post_format={slug}")
+                }
+            }
             _ => {
                 let mut slugs = vec![String::from_utf8_lossy(&term.slug).into_owned()];
                 let mut parent = term.parent;

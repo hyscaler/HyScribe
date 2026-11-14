@@ -87,6 +87,10 @@ impl hyscribe_rest::Site for Rest<'_> {
         user != 0 && caps().has_cap(&self.reads, cap, args)
     }
 
+    fn public_users(&self) -> bool {
+        self.site.public_users
+    }
+
     fn reads(&self) -> &dyn RenderSite {
         &self.reads.reads
     }

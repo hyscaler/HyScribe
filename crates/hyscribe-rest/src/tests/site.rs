@@ -61,7 +61,8 @@ fn string(value: &SqlValue) -> String {
     String::from_utf8_lossy(&text(value)).into_owned()
 }
 
-fn posts(dump: &'static Dump) -> impl Iterator<Item = Post> {
+/// A dump's posts, every column the routes read.
+pub(super) fn posts(dump: &Dump) -> impl Iterator<Item = Post> + '_ {
     dump.table("wp_posts").map(|row| Post {
         id: number(&row[0]),
         author: number(&row[1]),

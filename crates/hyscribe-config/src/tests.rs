@@ -52,6 +52,7 @@ fn defaults_are_safe() {
             home_url: None,
             site_url: None,
             salts: Vec::new(),
+            rest_public_users: true,
         }
     );
 }
@@ -73,6 +74,7 @@ fn reads_every_key() {
         ("WP_SITEURL", "https://example.test/wp"),
         ("AUTH_KEY", "a"),
         ("NONCE_SALT", "z"),
+        ("REST_PUBLIC_USERS", "off"),
     ]))
     .unwrap();
     assert_eq!(config.database.host, "db.internal");
@@ -97,6 +99,9 @@ fn reads_every_key() {
             ("NONCE_SALT", Secret::new("z"))
         ]
     );
+    assert!(!config.rest_public_users);
+    let on = from_map(&with(&[("REST_PUBLIC_USERS", "on")])).unwrap();
+    assert!(on.rest_public_users);
 }
 
 #[test]
@@ -119,6 +124,7 @@ fn rejects_bad_values() {
         ("BIND_HOST", "localhost", "not an IP address"),
         ("BEHIND_PROXY", "maybe", "must be true or false"),
         ("MODE", "write", "must be shadow or primary"),
+        ("REST_PUBLIC_USERS", "true", "must be on or off"),
     ];
     for &(key, value, reason) in cases {
         assert_eq!(

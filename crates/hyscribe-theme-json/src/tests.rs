@@ -198,6 +198,18 @@ fn style_variations_are_sanitized() {
     assert_eq!(hyscribe_phpser::json_encode(&data).unwrap(), kept);
 }
 
+/// A site's global styles post is sanitized as the user's data: its
+/// presets are keyed by the `custom` origin (REST `templates-custom.tsv`).
+#[test]
+fn user_global_styles_are_sanitized() {
+    let fixture = fixture();
+    let styles = GlobalStyles::resolve(&fixture.sources());
+    let raw = br#"{"version": 3, "nope": 1, "settings": {"color": {"palette": [{"slug": "b", "color": "red", "name": "B"}]}}}"#;
+    let data = styles.user_theme_json(json_decode(raw).unwrap());
+    let kept = br#"{"version":3,"settings":{"color":{"palette":{"custom":[{"slug":"b","color":"red","name":"B"}]}}}}"#;
+    assert_eq!(hyscribe_phpser::json_encode(&data).unwrap(), kept);
+}
+
 #[test]
 fn lookups() {
     let fixture = fixture();

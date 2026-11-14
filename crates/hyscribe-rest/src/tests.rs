@@ -10,7 +10,7 @@ use hyscribe_testkit::unhex;
 
 use super::*;
 
-mod content;
+pub(crate) mod content;
 
 use content::Content;
 
@@ -53,8 +53,8 @@ impl CapabilityData for Oracle {
             parent: post.parent,
         })
     }
-    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        None
+    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        Site::post_meta(self, id, key)
     }
     fn comment_post(&self, _: u64) -> Option<u64> {
         None
@@ -66,8 +66,9 @@ impl CapabilityData for Oracle {
             .find(|(term, _)| *term == id)
             .map(|(_, taxonomy)| taxonomy.clone())
     }
-    fn constant(&self, _: &str) -> bool {
-        false
+    /// HyScribe's constants: no one may post unfiltered HTML.
+    fn constant(&self, name: &str) -> bool {
+        name == "DISALLOW_UNFILTERED_HTML"
     }
 }
 
@@ -105,6 +106,59 @@ impl Site for Oracle {
             .posts
             .iter()
             .find(|post| post.id == id)
+            .cloned()
+    }
+    fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
+        let mut posts: Vec<Post> = self
+            .content
+            .posts
+            .iter()
+            .filter(|post| post.post_type == post_type)
+            .cloned()
+            .collect();
+        posts.sort_by(|a, b| b.date.cmp(&a.date));
+        posts
+    }
+    fn post_terms(&self, post: u64, taxonomy: &str) -> Vec<Term> {
+        let related = |row: &&content::Row| {
+            row.taxonomy == taxonomy
+                && self
+                    .content
+                    .relationships
+                    .contains(&(post, row.taxonomy_id))
+        };
+        let mut terms: Vec<Term> = self
+            .content
+            .terms
+            .iter()
+            .filter(related)
+            .map(|row| row.term.clone())
+            .collect();
+        terms.sort_by(|a, b| a.name.cmp(&b.name));
+        terms
+    }
+    fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>> {
+        let meta = self.content.postmeta.iter();
+        let found = meta
+            .clone()
+            .find(|(id, name, _)| *id == post && name == key);
+        found.map(|(_, _, value)| value.clone())
+    }
+    fn revisions(&self, post: u64) -> Vec<u64> {
+        let mut revisions: Vec<&Post> = self
+            .content
+            .posts
+            .iter()
+            .filter(|revision| revision.parent == post && revision.post_type == "revision")
+            .collect();
+        revisions.sort_by(|a, b| (&b.date, b.id).cmp(&(&a.date, a.id)));
+        revisions.iter().map(|revision| revision.id).collect()
+    }
+    fn user(&self, id: u64) -> Option<hyscribe_model::User> {
+        self.content
+            .users
+            .iter()
+            .find(|user| user.id == id)
             .cloned()
     }
 }
@@ -165,7 +219,7 @@ pub(crate) fn serve_case(case: &Case) -> Served {
 }
 
 /// `case` served by HyScribe's API over `content`.
-fn serve_over(content: &'static Content, case: &Case) -> Served {
+pub(crate) fn serve_over(content: &'static Content, case: &Case) -> Served {
     let (path, query) = case.target.split_once('?').unwrap_or((&case.target, ""));
     let get = match parse_str(query.as_bytes()) {
         Value::Array(get) => get,
@@ -227,15 +281,11 @@ pub(crate) fn kept(headers: &[(String, String)]) -> Vec<String> {
 }
 
 /// Requests PHP answers on routes or with arguments not ported.
-const UNPORTED: [(&str, &str); 10] = [
+const UNPORTED: [(&str, &str); 9] = [
     ("GET", "/?rest_route=/"),
     ("GET", "/?rest_route=0/"),
     ("GET", "/?rest_route=/wp/v2"),
     ("GET", "/?rest_route=/wp/v2/posts"),
-    (
-        "GET",
-        "/?rest_route=/wp/v2/templates/twentytwentyfive//index",
-    ),
     ("GET", "/?rest_route=/wp-abilities/v1/categories/a-b"),
     ("GET", "/?rest_route=/wp/v2/search&per_page=1"),
     (
@@ -440,6 +490,8 @@ fn changed(options: &[(&str, &[u8])]) -> &'static Content {
         relationships: Vec::new(),
         posts: Vec::new(),
         usermeta: default.usermeta.clone(),
+        postmeta: Vec::new(),
+        users: Vec::new(),
     }))
 }
 
@@ -552,6 +604,8 @@ fn empty_categories_with_posts_under_them_stay() {
         relationships: Vec::new(),
         posts: Vec::new(),
         usermeta: default.usermeta.clone(),
+        postmeta: Vec::new(),
+        users: Vec::new(),
     }));
     let ids = |target| {
         let served = get(content, "visitor", target);
@@ -588,6 +642,8 @@ fn empty_categories_with_posts_under_them_stay() {
         relationships: Vec::new(),
         posts: Vec::new(),
         usermeta: default.usermeta.clone(),
+        postmeta: Vec::new(),
+        users: Vec::new(),
     }));
     let served = get(stale, "visitor", "/?rest_route=/wp/v2/categories&parent=1");
     assert_eq!(served.body, b"[]");

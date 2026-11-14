@@ -225,6 +225,17 @@ impl Theme {
         custom_templates(THEME_JSON, post_type)
     }
 
+    /// The list `name` of the theme's `theme.json`, such as
+    /// `customTemplates` or `templateParts`.
+    pub fn theme_json_list(&self, name: &str) -> Vec<Value> {
+        let root = json_decode(THEME_JSON).unwrap_or(Value::Null);
+        let list = root.get_str(name).and_then(Value::as_array);
+        list.unwrap_or_default()
+            .iter()
+            .map(|(_, item)| item.clone())
+            .collect()
+    }
+
     /// The theme's `Theme Name` header.
     pub fn name(&self) -> String {
         header(STYLE_CSS, "Theme Name")

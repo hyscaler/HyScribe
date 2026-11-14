@@ -291,6 +291,8 @@ pub fn fixture_database() -> hyscribe_config::Database {
         name: "wordpress".into(),
         user: "wordpress".into(),
         password: hyscribe_config::Secret::new("reference-only"),
+        read_user: None,
+        read_password: hyscribe_config::Secret::new(""),
         prefix: hyscribe_config::Prefix::default(),
         charset: "utf8mb4".into(),
     }

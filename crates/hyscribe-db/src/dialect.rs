@@ -29,10 +29,23 @@ pub(crate) trait Dialect {
     /// The engine's `sqlx` driver, which gives the row and pool types.
     type Backend: sqlx::Database;
 
-    /// A read only pool for `config`.
+    /// A pool for `config`: read only, as the read user when there is one,
+    /// or writable, as the main user in WordPress's SQL modes.
     fn connect(
         config: &Database,
+        access: Access,
     ) -> impl Future<Output = Result<sqlx::Pool<Self::Backend>, sqlx::Error>> + Send;
+
+    /// The ID an `INSERT` gave its row.
+    fn inserted_id(result: &<Self::Backend as sqlx::Database>::QueryResult) -> u64;
+
+    /// The names and engines of the tables of `tables` whose engine cannot
+    /// roll back.
+    fn rollback_less(sql: &mut Sql, tables: impl Iterator<Item = Bind>);
+
+    /// Ends an `INSERT`: a row whose key exists already takes `columns` from
+    /// the row inserted instead.
+    fn insert_or_update(sql: &mut Sql, columns: &[&'static str]);
 
     /// An `ORDER BY` term in a random order.
     fn random(sql: &mut Sql);
@@ -65,33 +78,76 @@ pub(crate) trait Dialect {
     fn not_matching(sql: &mut Sql, column: &'static str, pattern: String);
 }
 
+/// What a pool may do.
+#[derive(Clone, Copy)]
+pub(crate) enum Access {
+    Read,
+    Write,
+}
+
+/// `wpdb::set_sql_mode()`: the session's SQL modes without those WordPress
+/// does not work under, so values are written as PHP writes them.
+pub(crate) const WORDPRESS_SQL_MODE: &str = "SET SESSION sql_mode = TRIM(BOTH ',' FROM \
+     REGEXP_REPLACE(CONCAT(',', @@SESSION.sql_mode, ','), \
+     ',(NO_ZERO_DATE|ONLY_FULL_GROUP_BY|STRICT_TRANS_TABLES|STRICT_ALL_TABLES|TRADITIONAL|ANSI)(?=,)', ''))";
+
 /// MySQL and MariaDB.
 pub(crate) struct MySql;
 
 impl Dialect for MySql {
     type Backend = sqlx::MySql;
 
-    async fn connect(config: &Database) -> Result<sqlx::MySqlPool, sqlx::Error> {
+    async fn connect(config: &Database, access: Access) -> Result<sqlx::MySqlPool, sqlx::Error> {
+        let (user, password) = match (access, &config.read_user) {
+            (Access::Read, Some(user)) => (user, &config.read_password),
+            _ => (&config.user, &config.password),
+        };
         let options = MySqlConnectOptions::new()
             .host(&config.host)
             .port(config.port)
             .database(&config.name)
-            .username(&config.user)
-            .password(config.password.expose())
+            .username(user)
+            .password(password.expose())
             .charset(&config.charset);
         MySqlPoolOptions::new()
             .max_connections(8)
             // Report an unreachable database soon instead of retrying for 30s.
             .acquire_timeout(std::time::Duration::from_secs(5))
-            .after_connect(|conn, _| {
+            .after_connect(move |conn, _| {
                 Box::pin(async move {
-                    conn.execute("SET SESSION TRANSACTION READ ONLY")
-                        .await
-                        .map(|_| ())
+                    conn.execute(match access {
+                        Access::Read => "SET SESSION TRANSACTION READ ONLY",
+                        Access::Write => WORDPRESS_SQL_MODE,
+                    })
+                    .await
+                    .map(|_| ())
                 })
             })
             .connect_with(options)
             .await
+    }
+
+    fn inserted_id(result: &sqlx::mysql::MySqlQueryResult) -> u64 {
+        result.last_insert_id()
+    }
+
+    fn rollback_less(sql: &mut Sql, tables: impl Iterator<Item = Bind>) {
+        sql.dialect(
+            "SELECT TABLE_NAME AS name, ENGINE AS engine FROM information_schema.TABLES \
+             WHERE TABLE_SCHEMA = DATABASE() AND ENGINE <> 'InnoDB' AND TABLE_NAME IN (",
+        );
+        list(sql, tables);
+    }
+
+    fn insert_or_update(sql: &mut Sql, columns: &[&'static str]) {
+        sql.dialect(" ON DUPLICATE KEY UPDATE ");
+        for (i, column) in columns.iter().enumerate() {
+            sql.push(if i == 0 { "" } else { ", " });
+            sql.push(column);
+            sql.dialect(" = VALUES(");
+            sql.push(column);
+            sql.push(")");
+        }
     }
 
     fn random(sql: &mut Sql) {

@@ -35,6 +35,9 @@ case "${1:-}" in
       sleep 1
     done
     "$DOCKER" exec -i "$NAME" mariadb -uroot -preference-only wordpress < "$dump"
+    # A read only user, as DB_READ_USER names one (ADR 0010).
+    "$DOCKER" exec "$NAME" mariadb -uroot -preference-only \
+      -e "CREATE USER 'wordpress_read'@'%' IDENTIFIED BY 'reference-only'; GRANT SELECT ON wordpress.* TO 'wordpress_read'@'%'"
     "$DOCKER" exec "$NAME" mariadb -uroot -preference-only \
       -e "CREATE DATABASE wordpress_terms; GRANT ALL ON wordpress_terms.* TO 'wordpress'@'%'"
     cat "$dump" "$ROOT/reference/default-install/terms.sql" |

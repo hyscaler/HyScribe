@@ -39,6 +39,8 @@ fn defaults_are_safe() {
                 name: "wordpress".into(),
                 user: "wp".into(),
                 password: Secret::new(""),
+                read_user: None,
+                read_password: Secret::new(""),
                 prefix: Prefix("wp_".into()),
                 charset: "utf8mb4".into(),
             },
@@ -62,6 +64,8 @@ fn reads_every_key() {
         ("DB_HOST", "db.internal"),
         ("DB_PORT", "3307"),
         ("DB_PASSWORD", "hunter2"),
+        ("DB_READ_USER", "reader"),
+        ("DB_READ_PASSWORD", "hunter3"),
         ("DB_PREFIX", "site2_"),
         ("DB_CHARSET", "utf8"),
         ("BIND_HOST", "::"),
@@ -78,6 +82,8 @@ fn reads_every_key() {
     assert_eq!(config.database.host, "db.internal");
     assert_eq!(config.database.port, 3307);
     assert_eq!(config.database.password.expose(), "hunter2");
+    assert_eq!(config.database.read_user.as_deref(), Some("reader"));
+    assert_eq!(config.database.read_password.expose(), "hunter3");
     assert_eq!(config.database.prefix.as_str(), "site2_");
     assert_eq!(config.database.charset, "utf8");
     assert_eq!(config.server.bind_host, "::".parse::<IpAddr>().unwrap());
@@ -118,6 +124,7 @@ fn rejects_bad_values() {
         ("PORT", "70000", "must be a port number from 1 to 65535"),
         ("BIND_HOST", "localhost", "not an IP address"),
         ("BEHIND_PROXY", "maybe", "must be true or false"),
+        ("DB_READ_PASSWORD", "hunter3", "is set without DB_READ_USER"),
         ("MODE", "write", "must be shadow or primary"),
     ];
     for &(key, value, reason) in cases {

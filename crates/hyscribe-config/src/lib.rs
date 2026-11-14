@@ -135,6 +135,9 @@ pub struct Config {
     pub site_url: Option<String>,
     /// Keys and salts by name, as far as they are set.
     pub salts: Vec<(&'static str, Secret)>,
+    /// `REST_PUBLIC_USERS`: `on` (default) answers visitors' REST users
+    /// requests as WordPress does, `off` as if no user had published posts.
+    pub rest_public_users: bool,
 }
 
 /// Why configuration could not be loaded.
@@ -249,6 +252,12 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         Some(_) => return Err(invalid("MODE", "must be shadow or primary")),
     };
 
+    let rest_public_users = match get("REST_PUBLIC_USERS") {
+        None | Some("on") => true,
+        Some("off") => false,
+        Some(_) => return Err(invalid("REST_PUBLIC_USERS", "must be on or off")),
+    };
+
     let salts = SALT_KEYS
         .iter()
         .filter_map(|&key| get(key).map(|value| (key, Secret::new(value))))
@@ -262,6 +271,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         home_url: get("WP_HOME").map(String::from),
         site_url: get("WP_SITEURL").map(String::from),
         salts,
+        rest_public_users,
     })
 }
 

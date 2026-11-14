@@ -78,6 +78,9 @@ pub(crate) enum Sanitize {
     Endpoint,
     /// The endpoint's own sanitizer, which reads the site.
     Site(fn(&Context, &Value) -> Checked<Value>),
+    /// The endpoint's own sanitizer, which reads the other parameters as
+    /// they were before sanitizing.
+    Params(fn(&Params, &Value) -> Checked<Value>),
 }
 
 /// A route's argument: its schema, whether `rest_validate_request_arg()`
@@ -192,6 +195,7 @@ pub(crate) fn sanitize_params(
     args: &[Arg],
 ) -> Result<(), RestError> {
     let mut invalid = Invalid::default();
+    let given = params.clone();
     for source in [&mut params.get, &mut params.url, &mut params.defaults] {
         for (key, value) in source.iter_mut() {
             let name = key.to_php_string();
@@ -208,6 +212,7 @@ pub(crate) fn sanitize_params(
                 Sanitize::Urldecode => Ok(text(urldecode(&value.to_php_string()))),
                 Sanitize::Endpoint => Ok(value.clone()),
                 Sanitize::Site(sanitize) => sanitize(context, value),
+                Sanitize::Params(sanitize) => sanitize(&given, value),
                 Sanitize::Schema => validate_value_from_schema(value, &arg.schema, arg.name)
                     .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name)),
             };

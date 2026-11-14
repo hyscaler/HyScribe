@@ -13,18 +13,40 @@ use crate::response::paginate;
 use super::*;
 
 pub(crate) mod content;
+mod embed;
 mod people;
 mod posts;
+mod search;
 mod site;
 
 use content::Content;
 
 const SITE: &str = "http://127.0.0.1:8081";
 
-/// The oracle over `content`, under plain or pretty permalinks.
+/// The oracle over `content` and its fixture, under plain or pretty
+/// permalinks, with the public users endpoint on or off.
 struct Oracle {
     content: &'static Content,
-    pretty: bool,
+    fixture: site::Fixture,
+    public_users: bool,
+}
+
+impl Oracle {
+    fn over(content: &'static Content, pretty: bool) -> Oracle {
+        Oracle {
+            content,
+            fixture: content.reads.map_or(
+                site::Fixture {
+                    ttd: content.ttd,
+                    pretty,
+                    extra: false,
+                    state: None,
+                },
+                |fixtures| fixtures[usize::from(pretty)],
+            ),
+            public_users: true,
+        }
+    }
 }
 
 const ROLES: [(&str, u64); 5] = [
@@ -81,10 +103,13 @@ impl CapabilityData for Oracle {
 
 impl Site for Oracle {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
+        if self.fixture.pretty && name == "permalink_structure" {
+            return Some(b"/%postname%/".to_vec());
+        }
         self.content.options.get(name).cloned()
     }
     fn rest_url(&self, path: &str) -> String {
-        if self.pretty {
+        if self.fixture.pretty {
             format!("{SITE}/wp-json{path}")
         } else {
             format!("{SITE}/index.php?rest_route={path}")
@@ -106,7 +131,7 @@ impl Site for Oracle {
         self.content.count_terms(query)
     }
     fn term_link(&self, taxonomy: &str, term: &Term) -> String {
-        self.content.term_link(taxonomy, term, self.pretty)
+        self.content.term_link(taxonomy, term, self.fixture.pretty)
     }
     fn post(&self, id: u64) -> Option<Post> {
         self.content
@@ -116,24 +141,10 @@ impl Site for Oracle {
             .cloned()
     }
     fn reads(&self) -> &dyn Reads {
-        if let Some(fixtures) = &self.content.reads {
-            return &fixtures[usize::from(self.pretty)];
-        }
-        static FIXTURES: [site::Fixture; 2] = [
-            site::Fixture {
-                ttd: false,
-                pretty: false,
-                extra: false,
-                state: None,
-            },
-            site::Fixture {
-                ttd: false,
-                pretty: true,
-                extra: false,
-                state: None,
-            },
-        ];
-        &FIXTURES[usize::from(self.pretty)]
+        &self.fixture
+    }
+    fn public_users(&self) -> bool {
+        self.public_users
     }
     fn theme(&self) -> &Theme {
         static THEME: std::sync::OnceLock<Theme> = std::sync::OnceLock::new();
@@ -199,14 +210,14 @@ impl Site for Oracle {
     fn comment_link(&self, comment: &Comment) -> String {
         let post = Site::post(self, comment.post_id);
         let link = post.map_or(String::new(), |post| {
-            match (self.pretty, post.post_type.as_str()) {
+            match (self.fixture.pretty, post.post_type.as_str()) {
                 (true, _) => format!("{SITE}/{}/", String::from_utf8_lossy(&post.name)),
                 (false, "page") => format!("{SITE}/?page_id={}", post.id),
                 (false, "attachment") => format!("{SITE}/?attachment_id={}", post.id),
                 _ => format!("{SITE}/?p={}", post.id),
             }
         });
-        let link = if self.pretty && link.is_empty() {
+        let link = if self.fixture.pretty && link.is_empty() {
             "/".into()
         } else {
             link
@@ -240,7 +251,7 @@ impl Site for Oracle {
         Capabilities::load(self, "wp_", id).allcaps().to_vec()
     }
     fn author_link(&self, user: &User) -> String {
-        if self.pretty {
+        if self.fixture.pretty {
             format!("{SITE}/author/{}/", String::from_utf8_lossy(&user.nicename))
         } else {
             format!("{SITE}/?author={}", user.id)
@@ -276,11 +287,7 @@ pub(crate) fn serve_case(case: &RestCase) -> Served {
 
 /// `case` served by HyScribe's API over `content`.
 pub(crate) fn serve_over(content: &'static Content, case: &RestCase) -> Served {
-    let oracle = Oracle {
-        content,
-        pretty: case.flag("pretty"),
-    };
-    serve_with(&oracle, case)
+    serve_with(&Oracle::over(content, case.flag("pretty")), case)
 }
 
 /// The role of `who` and its user, none for a visitor.
@@ -320,16 +327,11 @@ pub(super) fn serve_with(site: &dyn Site, case: &RestCase) -> Served {
 }
 
 /// Requests PHP answers on routes or with arguments not ported.
-const UNPORTED: [(&str, &str); 8] = [
+const UNPORTED: [(&str, &str); 6] = [
     ("GET", "/?rest_route=/"),
     ("GET", "/?rest_route=0/"),
     ("GET", "/?rest_route=/wp/v2"),
     ("GET", "/?rest_route=/wp-abilities/v1/categories/a-b"),
-    ("GET", "/?rest_route=/wp/v2/search&per_page=1"),
-    (
-        "GET",
-        "/?rest_route=/wp/v2/search&per_page=1&page=2&search=",
-    ),
     ("GET", "/?rest_route=/wp/v2/types&_method[]=x"),
     ("OPTIONS", "/?rest_route=/wp/v2/types"),
 ];
@@ -373,42 +375,6 @@ fn answers_match_php() {
     assert_eq!(unported, 6 * UNPORTED.len());
 }
 
-/// The pagination headers of `/wp/v2/search`'s two pages of one result.
-#[test]
-fn pages_are_linked_as_php_links_them() {
-    let oracle = Oracle {
-        content: content::default_install(),
-        pretty: false,
-    };
-    let searches = cases()
-        .into_iter()
-        .filter(|case| case.who == "visitor" && case.target.contains("/wp/v2/search"));
-    let mut seen = 0;
-    for (page, case) in (1..).zip(searches) {
-        let query = case.target.split_once('?').unwrap().1;
-        let Value::Array(query) = parse_str(query.as_bytes()) else {
-            panic!("no query");
-        };
-        let mut response = Response::new(Value::Null, 200);
-        paginate(
-            &mut response,
-            (2, 2, page),
-            &query,
-            &oracle.rest_url("/wp/v2/search"),
-        );
-        let paging = |line: &&String| {
-            line.starts_with("x-wp-total")
-                || line.contains("rel=\"next\"")
-                || line.contains("rel=\"prev\"")
-        };
-        let mut php: Vec<String> = case.headers.iter().filter(paging).cloned().collect();
-        php.sort();
-        assert_eq!(rest_headers(&response.headers), php);
-        seen += 1;
-    }
-    assert_eq!(seen, 2);
-}
-
 /// A single page links to no other: `paginate()` sends a `Link` only for a
 /// page before or after, as the collections' `$page > 1` and
 /// `$page < $max_pages` checks do.
@@ -438,17 +404,23 @@ pub(super) fn sha256_hex(body: &[u8]) -> Vec<u8> {
 }
 
 /// The answers of `goldens`, each over its content and compared by hash
-/// when flagged, that differ from PHP's, and how many are 501 as
-/// `unported` expects; a write method is never served.
+/// when flagged, that differ from PHP's, with the public users endpoint on
+/// or off, and how many are 501 as `unported` expects; a write method is
+/// never served.
 fn mismatches(
     goldens: &[(&'static Content, &str, bool)],
+    public_users: bool,
     unported: &dyn Fn(&RestCase) -> bool,
 ) -> (Vec<String>, usize) {
     let mut failures = Vec::new();
     let mut not_served = 0;
     for &(content, golden, hashed) in goldens {
         for case in rest_cases(golden) {
-            let served = serve_over(content, &case);
+            let oracle = Oracle {
+                public_users,
+                ..Oracle::over(content, case.flag("pretty"))
+            };
+            let served = serve_with(&oracle, &case);
             let what = format!(
                 "{} {} {} {} {hashed}",
                 case.who, case.method, case.target, case.flags
@@ -503,7 +475,7 @@ fn content_answers_match_php() {
         ),
     ];
     let unported = |case: &RestCase| CONTENT_UNPORTED.contains(&case.target.as_str());
-    let (failures, _) = mismatches(&goldens, &unported);
+    let (failures, _) = mismatches(&goldens, true, &unported);
     assert!(
         failures.is_empty(),
         "{} failures\n{}",
@@ -611,27 +583,52 @@ fn settings_are_read_as_get_option_reads_them() {
     assert_eq!(field("start_of_week"), Some(Value::Null));
 }
 
-/// `rest_parse_embed_param()`: an empty `_embed`, `1` or `true` embeds
-/// every embeddable link, a list those of its relations.
+/// `WP_REST_Request::from_url()`: a URL not the API's, or with a route
+/// that is empty or not a string, embeds nothing; a context or page size
+/// left empty is set; a route not found embeds its error.
 #[test]
-fn embedding_is_not_ported() {
-    let mut response = Response::new(Value::Array(Vec::new()), 200);
-    response.add_link_with("up", "u".into(), vec![("embeddable", Value::Bool(true))]);
-    response.add_link("about", "a".into());
-    for (embed, embeds) in [
-        ("", true),
-        ("1", true),
-        ("true", true),
-        ("up", true),
-        ("about", false),
-        ("x", false),
+fn links_are_served_as_from_url_reads_them() {
+    let oracle = Oracle::over(content::default_install(), false);
+    let context = Context {
+        site: &oracle,
+        user: 0,
+        head: false,
+        uri: b"/",
+    };
+    let served = |href: &str| crate::embed::serve(&context, href.as_bytes()).ok().unwrap();
+    let rest = "http://127.0.0.1:8081/index.php?rest_route=";
+    for href in [
+        "http://example.test/x".to_string(),
+        rest.to_string(),
+        format!("{rest}/wp/v2/types&rest_route[]=x"),
     ] {
-        assert_eq!(
-            super::embeds(&response, &Value::String(embed.into())),
-            embeds,
-            "{embed}"
-        );
+        assert_eq!(served(&href), Value::Array(Vec::new()), "{href}");
     }
+    let comments = format!("{rest}/wp/v2/comments");
+    assert_eq!(
+        served(&format!("{comments}&context=&per_page=")),
+        served(&comments)
+    );
+    let page = served(&format!("{comments}&per_page=1&context=view"));
+    assert_eq!(page.as_array().map(<[_]>::len), Some(1));
+    let viewed = page.get_path(&["0", "content"]);
+    assert!(viewed.is_some(), "{page:?}");
+    let missing = served(&format!("{rest}/nope"));
+    assert_eq!(missing.get_str("code"), Some(&text("rest_no_route")));
+}
+
+/// `rest_parse_embed_param()`: an empty `_embed`, `0`, `1`, `true` or a
+/// list of nothing embeds every relation, else those listed.
+#[test]
+fn embed_relations() {
+    for embed in ["", "0", "1", "true", " ,"] {
+        assert_eq!(crate::embed::relations(&text(embed)), None, "{embed}");
+    }
+    let listed = crate::embed::relations(&text("up, author")).unwrap();
+    assert_eq!(
+        listed,
+        [(Key::Int(0), text("up")), (Key::Int(1), text("author"))]
+    );
 }
 
 /// Categories under a stored hierarchy: with `hide_empty`, an empty term
@@ -745,10 +742,7 @@ fn arguments_are_registered_as_php_registers_them() {
 /// user may use.
 #[test]
 fn self_links_hint_what_their_route_allows() {
-    let oracle = Oracle {
-        content: content::default_install(),
-        pretty: false,
-    };
+    let oracle = Oracle::over(content::default_install(), false);
     let context = Context {
         site: &oracle,
         user: 0,

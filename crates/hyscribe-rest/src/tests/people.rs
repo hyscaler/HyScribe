@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 
 use hyscribe_model::{Comment, CommentOrder, CommentQuery, CommentRow, User, UserOrder, UserQuery};
 
-use hyscribe_testkit::{RestCase, rest_cases};
+use hyscribe_testkit::rest_cases;
 
 use super::content::{Content, collate};
 
@@ -226,15 +226,6 @@ impl Content {
     }
 }
 
-/// What the comments and users routes leave unanswered: a visitor's users
-/// request but `/users/me`, and embedding a comment's links (a
-/// user has none to embed).
-fn unported(case: &RestCase) -> bool {
-    let users = case.target.contains("/wp/v2/users");
-    let me = case.target.contains("/users/me");
-    (case.who == "visitor" && users && !me) || (!users && case.target.contains("_embed"))
-}
-
 /// The comments and users routes answer as PHP does for a visitor and each
 /// role, over the default install, with `reference/rest/people-more.sql`
 /// and, by hash, over the Theme Test Data fixture.
@@ -257,15 +248,27 @@ fn people_answer_as_php() {
             true,
         ),
     ];
-    let (failures, not_served) = super::mismatches(&goldens, &unported);
+    let (failures, not_served) = super::mismatches(&goldens, true, &|_| false);
     assert!(
         failures.is_empty(),
         "{} failures\n{}",
         failures.len(),
         failures.join("\n")
     );
-    let expected = goldens.iter().flat_map(|(_, golden, _)| rest_cases(golden));
-    assert_eq!(not_served, expected.filter(unported).count());
+    assert_eq!(not_served, 0);
+}
+
+/// With the public users endpoint off, a visitor sees no user as
+/// having published posts, as PHP does with `reference/rest/people-off.php`;
+/// logged in users are answered as before.
+#[test]
+fn people_off_answer_as_php() {
+    let golden = include_str!("../../tests/golden/people-off.tsv");
+    assert_eq!(rest_cases(golden).len(), 6 * 20);
+    let goldens = [(super::content::default_install(), golden, false)];
+    let (failures, not_served) = super::mismatches(&goldens, false, &|_| false);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(not_served, 0);
 }
 
 /// The default install with `reference/rest/people-more.sql`, changed.

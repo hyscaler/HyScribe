@@ -5,7 +5,8 @@
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url, parse_url};
 use hyscribe_phpser::{
-    Key, Maybe, Value, add_query_arg, is_empty_string, maybe_unserialize, parse_str,
+    Key, Maybe, Value, add_query_arg, is_empty_string, maybe_unserialize, parse_str, stripslashes,
+    urlencode,
 };
 use hyscribe_render::head::{admin_import_map, emoji_detection_script, json_hex_tag};
 use hyscribe_render::kses::wp_kses_post;
@@ -111,8 +112,25 @@ pub trait PageSite: BarSite + Urls {
     fn login_url(&self) -> String;
     /// `get_template()`.
     fn template(&self) -> String;
-    /// The theme's font faces as the admin prints them.
+    /// `get_stylesheet()`.
+    fn stylesheet(&self) -> String;
+    /// The bundled theme's font faces as the admin prints them.
     fn font_faces(&self) -> Vec<u8>;
+}
+
+/// The Customize link of the Appearance menu, `None` while the active theme
+/// is the bundled block theme: any other is one the site does not have.
+fn customize_link(site: &dyn PageSite, page: &Page) -> Option<String> {
+    if site.stylesheet() == "twentytwentyfive" {
+        return None;
+    }
+    // `$_SERVER['REQUEST_URI']` without `wp_removable_query_args()`.
+    let uri = page.canonical.strip_prefix(page.origin).unwrap_or_default();
+    let url = format!(
+        "customize.php?return={}",
+        String::from_utf8_lossy(&urlencode(&stripslashes(uri.as_bytes())))
+    );
+    Some(String::from_utf8_lossy(&esc_url(url.as_bytes())).into_owned())
 }
 
 /// A help tab: ID, title and content.
@@ -356,7 +374,8 @@ pub(crate) fn json(value: &Value) -> String {
 /// The page `site` shows its user, or `None` when
 /// `user_can_access_admin_page()` turns them away.
 pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option<String> {
-    let menu = admin_menu(site, &page.screen)?;
+    let customize = customize_link(site, page);
+    let menu = admin_menu(site, &page.screen, customize.as_deref())?;
     let urls: &dyn Urls = site;
     let color = site.admin_color().unwrap_or_default();
     let scheme = SCHEMES
@@ -364,7 +383,7 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
         .find(|scheme| scheme.name.as_bytes() == color)
         .unwrap_or(&SCHEMES[0]);
     let mut assets = Assets::new(true);
-    enqueue(&mut assets, site, page, scheme);
+    enqueue(&mut assets, site, page, scheme, customize.as_deref());
     for (handle, data) in page.script_data {
         assets.set_script_data(handle, "data", Value::String(data.as_bytes().to_vec()));
     }
@@ -374,7 +393,9 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
     }
     let mut out = head(site, page);
     out.extend(assets.print_admin_styles(urls));
-    out.extend(site.font_faces());
+    if customize.is_none() {
+        out.extend(site.font_faces());
+    }
     // `wp_page_reload_on_back_button_js()`, on the editors' screens.
     if matches!(page.screen.pagenow, "post.php" | "post-new.php") {
         out.extend(RELOAD.as_bytes());
@@ -411,7 +432,13 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
 
 /// `admin_enqueue_scripts`: what every screen enqueues, with this
 /// request's data.
-fn enqueue(assets: &mut Assets, site: &dyn PageSite, page: &Page, scheme: &Scheme) {
+fn enqueue(
+    assets: &mut Assets,
+    site: &dyn PageSite,
+    page: &Page,
+    scheme: &Scheme,
+    customize: Option<&str>,
+) {
     // `admin.php` enqueues the admin bar's, the screen its own, then
     // `admin-header.php` and its hooks the rest.
     assets.enqueue_style("admin-bar");
@@ -508,7 +535,7 @@ fn enqueue(assets: &mut Assets, site: &dyn PageSite, page: &Page, scheme: &Schem
             json(&preferences)
         )]),
     );
-    let menu_commands = commands(site)
+    let menu_commands = commands(site, customize)
         .into_iter()
         .enumerate()
         .map(|(i, (label, url, name))| {
@@ -618,12 +645,19 @@ fn body(site: &dyn PageSite, page: &Page, color: &str, browser: &Browser) -> Str
     if !page.screen.taxonomy.is_empty() {
         classes.push_str(&format!(" taxonomy-{}", page.screen.taxonomy));
     }
-    let template = sanitize_html_class(site.template().as_bytes(), b"");
+    let template = site.template();
     let mobile = if browser.is_mobile() { " mobile" } else { "" };
     classes.push_str(&format!(
         " branch-{branch} version-{version} admin-color-{color} locale-en-us{mobile} no-customize-support svg wp-theme-{}",
-        String::from_utf8_lossy(&template)
+        String::from_utf8_lossy(&sanitize_html_class(template.as_bytes(), b""))
     ));
+    let stylesheet = site.stylesheet();
+    if stylesheet != template {
+        classes.push_str(&format!(
+            " wp-child-theme-{}",
+            String::from_utf8_lossy(&sanitize_html_class(stylesheet.as_bytes(), b""))
+        ));
+    }
     let mut out = format!(
         "\t<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">{}</head>\n<body class=\"wp-admin wp-core-ui no-js {}\">\n<script>\n\tdocument.body.className = document.body.className.replace('no-js','js');\n</script>\n\n",
         page.admin_head,

@@ -143,6 +143,8 @@ fn square_sizes_make_a_srcset() {
         (60, 60),
         &square,
         base,
+        "60x60",
+        b"",
     );
     assert!(html.contains(" srcset=\"http://x.test/wp-content/uploads/2026/a-150x150.jpg 150w, http://x.test/wp-content/uploads/2026/a-300x300.jpg 300w, http://x.test/wp-content/uploads/2026/a.jpg 600w\" sizes=\"auto, (max-width: 60px) 100vw, 60px\" />"), "{html}");
 }

@@ -225,3 +225,107 @@ fn view_links_keep_the_type_as_php_does() {
             .ends_with("?comment_type=a&b&comment_status=mine&user_id=1")
     );
 }
+
+/// `get_comment_link()` under pretty permalinks, without threading and
+/// with no comments a page, as `get_page_of_comment()` reads them.
+#[test]
+fn comment_links_page_as_php_does() {
+    let at = |id, parent, date: &str| Comment {
+        id,
+        post_id: 1,
+        parent,
+        date_gmt: date.into(),
+        ..Comment::default()
+    };
+    let (first, second, reply) = (
+        at(1, 0, "2026-11-01 10:00:00"),
+        at(2, 0, "2026-11-02 10:00:00"),
+        at(3, 1, "2026-11-03 10:00:00"),
+    );
+    // The user's pending comment counts, another's and their spam do not.
+    let (mine, theirs, spam) = (
+        Comment {
+            user_id: 1,
+            ..at(4, 0, "2026-10-01 10:00:00")
+        },
+        Comment {
+            user_id: 2,
+            ..at(5, 0, "2026-10-02 10:00:00")
+        },
+        Comment {
+            user_id: 1,
+            ..at(6, 0, "2026-11-05 10:00:00")
+        },
+    );
+    // A reply whose parent is gone has no page.
+    let orphan = at(7, 99, "2026-11-06 10:00:00");
+    let comments = [
+        (&orphan, "1"),
+        (&first, "1"),
+        (&second, "1"),
+        (&reply, "1"),
+        (&mine, "0"),
+        (&theirs, "0"),
+        (&spam, "spam"),
+    ];
+    let link = |options: &[(&str, &str)], comment: &Comment| {
+        let option = |name: &str| {
+            options
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map_or(Vec::new(), |(_, v)| v.as_bytes().to_vec())
+        };
+        comment_link(
+            &option,
+            Some("http://x.test/hello/"),
+            "/u",
+            &comments,
+            comment,
+            1,
+        )
+    };
+    let pretty = [
+        ("page_comments", "1"),
+        ("comments_per_page", "1"),
+        ("permalink_structure", "/%postname%/"),
+    ];
+    assert_eq!(
+        link(&pretty, &second),
+        "http://x.test/hello/comment-page-3/#comment-2"
+    );
+    // Without threading a reply is paged as a comment of its own.
+    assert_eq!(
+        link(&pretty, &reply),
+        "http://x.test/hello/comment-page-4/#comment-3"
+    );
+    let threaded = [
+        pretty.as_slice(),
+        &[("thread_comments", "1"), ("thread_comments_depth", "5")],
+    ]
+    .concat();
+    assert_eq!(
+        link(&threaded, &reply),
+        "http://x.test/hello/comment-page-2/#comment-3"
+    );
+    assert_eq!(link(&threaded, &orphan), "http://x.test/hello/#comment-7");
+    let shallow = [
+        pretty.as_slice(),
+        &[("thread_comments", "1"), ("thread_comments_depth", "1")],
+    ]
+    .concat();
+    assert_eq!(
+        link(&shallow, &reply),
+        "http://x.test/hello/comment-page-4/#comment-3"
+    );
+    let two = [("page_comments", "1"), ("comments_per_page", "2")];
+    assert_eq!(link(&two, &reply), "http://x.test/hello/?cpage=2#comment-3");
+    let flat = [("permalink_structure", "/%postname%")];
+    assert_eq!(link(&flat, &second), "http://x.test/hello#comment-2");
+    let none = [("page_comments", "1"), ("comments_per_page", "-1")];
+    assert_eq!(
+        link(&none, &second),
+        "http://x.test/hello/?cpage=1#comment-2"
+    );
+    let empty = [("page_comments", "1"), ("comments_per_page", "0")];
+    assert_eq!(link(&empty, &second), "http://x.test/hello/#comment-2");
+}

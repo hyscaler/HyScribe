@@ -180,10 +180,10 @@ fn unslashed_text(text: &[u8]) -> String {
 /// as given (`wp_update_user()` hashes it first). The user's ID.
 pub async fn wp_insert_user(write: &mut Write<'_>, data: &UserData) -> Result<u64, Error> {
     let pass = data.user_pass.as_deref().unwrap_or_default();
-    let pass = match data.id {
-        0 => Pass::Plain(pass),
-        _ if is_empty_string(pass) => Pass::Kept,
-        _ => Pass::Plain(pass),
+    let pass = if data.id != 0 && is_empty_string(pass) {
+        Pass::Kept
+    } else {
+        Pass::Plain(pass)
     };
     insert(write, data, pass).await
 }

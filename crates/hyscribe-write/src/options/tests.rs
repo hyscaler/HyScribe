@@ -260,6 +260,9 @@ async fn the_options_cache_names_are_refused() {
             }
         }
         assert!(!update_option(write, " 0 ", &text("x"), None).await.unwrap());
+        // Only an empty home reads the site URL.
+        let empty = get_option(write, "blogdescription").await.unwrap();
+        assert_eq!(empty, text(""));
         assert!(!delete_option(write, "").await.unwrap());
     })
     .await;

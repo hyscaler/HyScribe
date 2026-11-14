@@ -145,5 +145,6 @@ pub async fn delete_metadata(
     if ids.is_empty() {
         return Ok(false);
     }
-    Ok(write.delete_meta(meta, &ids).await? > 0)
+    write.delete_meta(meta, &ids).await?;
+    Ok(true)
 }

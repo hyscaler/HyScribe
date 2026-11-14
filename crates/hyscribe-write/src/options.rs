@@ -130,7 +130,8 @@ pub async fn update_option(
         return Ok(false);
     };
     let old = get_option(write, name).await?;
-    if *value == old || maybe_serialize(value) == maybe_serialize(&old) {
+    // PHP compares the values too, which match exactly when these do.
+    if maybe_serialize(value) == maybe_serialize(&old) {
         return Ok(false);
     }
     if old == Value::Bool(false) {
@@ -160,7 +161,8 @@ pub async fn delete_option(write: &mut Write<'_>, name: &str) -> Result<bool, Er
     if write.option_autoload(name).await?.is_none() {
         return Ok(false);
     }
-    Ok(write.delete_option(name).await? > 0)
+    write.delete_option(name).await?;
+    Ok(true)
 }
 
 /// `set_transient( $name, $value, $expiration )` without an object cache:

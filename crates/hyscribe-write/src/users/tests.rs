@@ -187,14 +187,6 @@ async fn updates_a_password() {
         wp_update_user(write, &new).await.unwrap();
         let hash = write.user(id).await.unwrap().unwrap().1.pass;
         assert!(check_password(b"Another pass phrase", hash.as_bytes()));
-        // The same hash again is kept, not hashed again.
-        let same = UserData {
-            id,
-            user_pass: Some(hash.clone().into_bytes()),
-            ..UserData::default()
-        };
-        wp_update_user(write, &same).await.unwrap();
-        assert_eq!(write.user(id).await.unwrap().unwrap().1.pass, hash);
     })
     .await;
 }
@@ -298,10 +290,41 @@ async fn refuses_what_php_refuses() {
 #[tokio::test]
 async fn an_update_through_insert_hashes_the_password() {
     rolled_back(async |write| {
-        let id = insert_ok(write, new_user("oracle-insert-update")).await;
+        // `empty()` fields take their defaults.
+        let zero = UserData {
+            rich_editing: some("0"),
+            display_name: some(""),
+            user_nicename: some(""),
+            user_pass: None,
+            user_registered: some(""),
+            user_url: some(&format!("https://example.test/{}", "u".repeat(79))),
+            ..new_user("oracle-insert-update")
+        };
+        let id = insert_ok(write, zero).await;
+        let rich = get_metadata(write, Meta::User, id, "rich_editing").await;
+        assert_eq!(rich.unwrap(), [text("true")]);
+        let (_, user) = write.user(id).await.unwrap().unwrap();
+        assert_eq!(user.display_name, b"oracle-insert-update");
+        assert_eq!(user.nicename, b"oracle-insert-update");
+        // No password is the empty one, hashed.
+        assert!(check_password(b"", user.pass.as_bytes()));
+        let sixty = new_user(&"b".repeat(60));
+        assert!(wp_insert_user(write, &sixty).await.is_ok());
+        // Fifty characters fit; a second one is cut to make room for `-2`.
+        for login in ["oracle-n1", "oracle-n2"] {
+            let long = UserData {
+                user_nicename: some(&"n".repeat(50)),
+                ..new_user(login)
+            };
+            insert_ok(write, long).await;
+        }
+        let second = write.user_id_by_login(b"oracle-n2").await.unwrap().unwrap();
+        let (_, second) = write.user(second).await.unwrap().unwrap();
+        assert_eq!(second.nicename, format!("{}-2", "n".repeat(48)).as_bytes());
         let update = UserData {
             id,
             user_pass: some("Changed"),
+            first_name: some("Ada"),
             ..new_user("oracle-insert-update")
         };
         assert_eq!(insert_ok(write, update).await, id);
@@ -383,6 +406,7 @@ async fn levels_come_from_level_keys() {
     assert_eq!(roles::level(&key(b"LEVEL_7\n")), Some(7));
     assert_eq!(roles::level(&key(b"level_11")), None);
     assert_eq!(roles::level(&key(b"level_")), None);
+    assert_eq!(roles::level(&key(b"level_x")), None);
     assert_eq!(roles::level(&key(b"levels_1")), None);
     assert_eq!(roles::level(&Key::Int(5)), None);
 }
@@ -419,6 +443,40 @@ async fn changes_to_users_return_each_database_error() {
         wp_delete_user(write, id, None).await?;
         wp_delete_user(write, 1, Some(999_999)).await?;
         Ok(())
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn an_update_keeps_the_reset_key_and_the_hash() {
+    rolled_back(async |write| {
+        let old = UserData {
+            user_activation_key: some("1:key"),
+            role: some("editor"),
+            ..new_user("oracle-keep")
+        };
+        let id = insert_ok(write, old).await;
+        let (_, user) = write.user(id).await.unwrap().unwrap();
+        // The stored hash given as the password is kept, not hashed again.
+        let same = UserData {
+            id,
+            first_name: some("New"),
+            user_pass: Some(user.pass.clone().into_bytes()),
+            ..UserData::default()
+        };
+        wp_update_user(write, &same).await.unwrap();
+        let (_, updated) = write.user(id).await.unwrap().unwrap();
+        assert_eq!(updated.pass, user.pass);
+        assert_eq!(updated.activation_key, "1:key");
+        // No role given: the user keeps its own.
+        let caps = get_metadata(write, Meta::User, id, "wp_capabilities").await;
+        let editor = Value::Array(vec![(Key::String(b"editor".to_vec()), Value::Bool(true))]);
+        assert_eq!(caps.unwrap(), [editor]);
+        add_role(write, id, b"author").await.unwrap();
+        let caps = get_metadata(write, Meta::User, id, "wp_capabilities").await;
+        let author = (Key::String(b"author".to_vec()), Value::Bool(true));
+        let both = vec![(Key::String(b"editor".to_vec()), Value::Bool(true)), author];
+        assert_eq!(caps.unwrap(), [Value::Array(both)]);
     })
     .await;
 }

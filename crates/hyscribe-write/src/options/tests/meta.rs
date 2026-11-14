@@ -190,3 +190,35 @@ async fn meta_functions_return_each_database_error() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn no_key_or_no_object_is_never_changed() {
+    rolled_back(async |write| {
+        write.add_meta(Meta::Post, 1, "", b"x").await.unwrap();
+        write
+            .add_meta(Meta::Post, 0, "oracle_zero", b"x")
+            .await
+            .unwrap();
+        let none = Value::Null;
+        let updated = update_metadata(write, Meta::Post, 1, "", &text("y"), &none).await;
+        assert!(!updated.unwrap());
+        let y = text("y");
+        let updated = update_metadata(write, Meta::Post, 0, "oracle_zero", &y, &none).await;
+        assert!(!updated.unwrap());
+        assert_eq!(
+            get_metadata(write, Meta::Post, 1, "").await.unwrap(),
+            [text("x")]
+        );
+        let zero = get_metadata(write, Meta::Post, 0, "oracle_zero")
+            .await
+            .unwrap();
+        assert_eq!(zero, [text("x")]);
+        let deleted = delete_metadata(write, Meta::Post, 1, "", &none, false).await;
+        assert!(!deleted.unwrap());
+        assert_eq!(
+            get_metadata(write, Meta::Post, 1, "").await.unwrap(),
+            [text("x")]
+        );
+    })
+    .await;
+}

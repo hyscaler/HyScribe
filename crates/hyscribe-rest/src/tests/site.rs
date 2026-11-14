@@ -94,7 +94,9 @@ pub(super) struct Fixture {
     pub(super) pretty: bool,
     /// With what neither fixture has: a revision of post 1 (99), drafts
     /// without an author whose GMT dates are unset (98, 96), and their
-    /// featured images, attachments of the draft (97) and of none (95).
+    /// featured images, attachments of the draft (97) and of none (95); a
+    /// post with a gallery shortcode and its own excerpt (94); and the
+    /// site two hours east of UTC.
     pub(super) extra: bool,
 }
 
@@ -190,6 +192,15 @@ impl Fixture {
             id: 96,
             ..draft.clone()
         };
+        let shortcode = Post {
+            id: 94,
+            author: 1,
+            content: b"[gallery]".to_vec(),
+            excerpt: b"Short".to_vec(),
+            status: "publish".into(),
+            post_type: "post".into(),
+            ..Post::default()
+        };
         let orphan = Post {
             id: 95,
             parent: 0,
@@ -197,7 +208,7 @@ impl Fixture {
         };
         self.data().posts.iter().cloned().chain(
             self.extra
-                .then_some([revision, draft, image, other, orphan])
+                .then_some([revision, draft, image, other, orphan, shortcode])
                 .into_iter()
                 .flatten(),
         )
@@ -218,6 +229,9 @@ impl Site for Fixture {
         static TTD: OnceLock<HashMap<String, Vec<u8>>> = OnceLock::new();
         if self.pretty && name == "permalink_structure" {
             return Some(b"/%postname%/".to_vec());
+        }
+        if self.extra && name == "gmt_offset" {
+            return Some(b"2".to_vec());
         }
         let memo = if self.ttd { &TTD } else { &DEFAULT };
         memo.get_or_init(|| options(self.dump())).get(name).cloned()

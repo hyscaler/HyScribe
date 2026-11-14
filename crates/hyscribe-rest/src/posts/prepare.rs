@@ -289,10 +289,10 @@ pub(super) fn post(
     if has("featured_media") {
         put("featured_media", Value::Int(thumbnail));
     }
-    if kind == Kind::Page && has("parent") {
+    if has("parent") {
         put("parent", int(post.parent));
     }
-    if kind == Kind::Page && has("menu_order") {
+    if has("menu_order") {
         put("menu_order", Value::Int(post.menu_order));
     }
     if has("comment_status") {
@@ -301,16 +301,16 @@ pub(super) fn post(
     if has("ping_status") {
         put("ping_status", text(post.ping_status.clone()));
     }
-    if kind == Kind::Post && has("sticky") {
+    if has("sticky") {
         put("sticky", Value::Bool(is_sticky(context, post.id)));
     }
     if has("template") {
         let template = meta(context, post.id, "_wp_page_template")
             .map(|template| template.to_php_string())
-            .filter(|template| !template.is_empty() && template != b"default");
+            .filter(|template| template != b"default");
         put("template", text(template.unwrap_or_default()));
     }
-    if kind == Kind::Post && has("format") {
+    if has("format") {
         let format = context
             .site
             .post_terms(post.id, "post_format")
@@ -385,7 +385,7 @@ pub(super) fn post(
 /// comment and login blocks that show them more, or what PHP writes on, an RSS block's feed cache and
 /// `WP_Embed::autoembed()`'s oEmbed cache of a URL alone on its line or in
 /// its paragraph.
-fn writes_or_unported(content: &[u8], logged_in: bool) -> bool {
+pub(crate) fn writes_or_unported(content: &[u8], logged_in: bool) -> bool {
     const SHORTCODES: [&[u8]; 7] = [
         b"embed",
         b"wp_caption",
@@ -444,15 +444,14 @@ fn writes_or_unported(content: &[u8], logged_in: bool) -> bool {
     rss || duotone || personal || shortcode || alone || paragraph
 }
 
-/// `get_post_status()`: an attachment's is its parent's, or published
-/// without one.
+/// `get_post_status()` of an attachment: inheriting, its parent's, or
+/// published without one.
 fn post_status(context: &Context, post: &Post) -> String {
-    if post.post_type != "attachment" || post.status != "inherit" {
+    if post.status != "inherit" {
         return post.status.clone();
     }
-    let parent = (post.parent != post.id).then(|| context.site.post(post.parent));
-    match parent.flatten() {
-        Some(parent) => post_status(context, &parent),
+    match context.site.post(post.parent) {
+        Some(parent) => parent.status,
         None => "publish".into(),
     }
 }

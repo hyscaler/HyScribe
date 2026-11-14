@@ -8,7 +8,7 @@
 
 mod editor;
 mod fields;
-mod posts;
+pub(crate) mod posts;
 mod request;
 mod response;
 mod routes;
@@ -131,9 +131,8 @@ pub(crate) struct Context<'a> {
     user: u64,
     /// The request is a HEAD request.
     pub(crate) head: bool,
-    /// `$_SERVER['REQUEST_URI']` and `$_GET`, which rendering reads.
+    /// `$_SERVER['REQUEST_URI']`, which rendering reads.
     pub(crate) uri: &'a [u8],
-    pub(crate) get: &'a [(Key, Value)],
 }
 
 impl Context<'_> {
@@ -278,7 +277,6 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
         user,
         head: method == "HEAD",
         uri: request.uri,
-        get: request.get,
     };
     let response = match verified {
         Some(false) => RestError::status("rest_cookie_invalid_nonce", "Cookie check failed", 403)

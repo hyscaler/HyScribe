@@ -713,7 +713,6 @@ fn self_links_hint_what_their_route_allows() {
         user: 0,
         head: false,
         uri: b"/",
-        get: &[],
     };
     for route in ["/nope", "/wp/v2/media", "/wp/v2/block-types/core/paragraph"] {
         let mut response = Response::new(Value::Array(Vec::new()), 200);

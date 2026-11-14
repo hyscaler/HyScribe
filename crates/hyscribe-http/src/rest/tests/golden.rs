@@ -297,9 +297,10 @@ async fn theme_test_data_posts_match_php() {
     .await;
 }
 
-/// The routes ported check no comment's capabilities yet.
+/// What capability checks read of the site: users and posts' meta, and no
+/// comment's yet.
 #[tokio::test]
-async fn comments_are_not_read() {
+async fn capability_reads() {
     let site = site("wordpress", false).await;
     let handle = Handle::current();
     tokio::task::spawn_blocking(move || {
@@ -314,6 +315,10 @@ async fn comments_are_not_read() {
             role: "editor",
         };
         assert_eq!(as_role.comment_post(1), None);
+        let rest = &as_role.rest;
+        assert!(rest.user_exists(1) && !rest.user_exists(999));
+        let meta = CapabilityData::post_meta(rest, 2, "_wp_page_template");
+        assert_eq!(meta.as_deref(), Some(&b"default"[..]));
     })
     .await
     .unwrap();

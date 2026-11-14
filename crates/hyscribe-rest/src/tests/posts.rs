@@ -13,6 +13,7 @@ use hyscribe_testkit::{RestCase, rest_cases, rest_headers};
 use sha2::Digest;
 
 use super::{SITE, site};
+use crate::posts::prepare::writes_or_unported;
 use crate::*;
 use hyscribe_model::{OrderBy, PostQuery, StatusFilter};
 
@@ -384,6 +385,8 @@ fn revisions_are_linked() {
 /// `request` of `who` over the default install, with the extra posts, and
 /// the capabilities `deny` names left out.
 fn served(who: &'static str, target: &str, ttd: bool, deny: &'static [&'static str]) -> Served {
+    let pretty = target.ends_with("#pretty");
+    let target = target.trim_end_matches("#pretty");
     let (route, query) = target.split_once('&').unwrap_or((target, ""));
     let get = parse_str(query.as_bytes())
         .as_array()
@@ -397,7 +400,7 @@ fn served(who: &'static str, target: &str, ttd: bool, deny: &'static [&'static s
         role: who,
         fixture: site::Fixture {
             ttd,
-            pretty: false,
+            pretty,
             extra: !ttd,
         },
         deny,
@@ -459,7 +462,7 @@ fn sticky_posts_within_include() {
 fn drafts_show_their_gmt_dates() {
     let target = "/wp/v2/posts/98&context=edit&_fields=date_gmt,modified_gmt,_links";
     let body = String::from_utf8(served("administrator", target, false, &[]).body).unwrap();
-    let dates = "{\"date_gmt\":\"2026-11-02T10:00:00\",\"modified_gmt\":\"2026-11-02T10:00:00\"";
+    let dates = "{\"date_gmt\":\"2026-11-02T08:00:00\",\"modified_gmt\":\"2026-11-02T08:00:00\"";
     assert!(body.starts_with(dates), "{body}");
     assert!(!body.contains("\"author\":"), "{body}");
     let media = |id: u64| {
@@ -534,4 +537,100 @@ fn statuses_and_fields_once() {
         String::from_utf8(slug.body).unwrap(),
         "{\"generated_slug\":\"hello-world\"}"
     );
+}
+
+fn body(served: Served) -> String {
+    String::from_utf8(served.body).unwrap()
+}
+
+/// What only some data shows: sticky posts stay out of a list limited to
+/// some posts, `_fields` asks for status fields by name, `private` is a
+/// status for those who read private pages without editing them, and a
+/// draft's sample permalink is a published post's.
+#[test]
+fn edges_of_the_lists() {
+    let target = "/wp/v2/posts&ignore_sticky=0&include=1&_fields=id";
+    assert_eq!(body(served("visitor", target, true, &[])), "[{\"id\":1}]");
+    let statuses = body(served(
+        "visitor",
+        "/wp/v2/statuses/publish&_fields=name.x,slug",
+        false,
+        &[],
+    ));
+    assert!(
+        statuses.contains("\"slug\"") && !statuses.contains("\"name\""),
+        "{statuses}"
+    );
+    const NO_EDIT: &[&str] = &["edit_pages"];
+    let private = served("editor", "/wp/v2/pages&status=private", false, NO_EDIT);
+    assert_eq!(private.status, 200);
+    assert_eq!(
+        served("editor", "/wp/v2/pages&status=draft", false, NO_EDIT).status,
+        400
+    );
+    let target = "/wp/v2/posts/98&context=edit&_fields=permalink_template#pretty";
+    let template = body(served("administrator", target, false, &[]));
+    assert_eq!(
+        template,
+        "{\"permalink_template\":\"http:\\/\\/127.0.0.1:8081\\/%postname%\\/\"}"
+    );
+}
+
+/// A post's own excerpt shows without rendering its content, which a
+/// shortcode leaves not ported.
+#[test]
+fn excerpts_need_no_content() {
+    let embed = served(
+        "visitor",
+        "/wp/v2/posts/94&context=embed&_fields=excerpt",
+        false,
+        &[],
+    );
+    assert_eq!(embed.status, 200);
+    assert_eq!(served("visitor", "/wp/v2/posts/94", false, &[]).status, 501);
+}
+
+/// The categories' create action asks for `edit_categories`, the tags'
+/// for `assign_post_tags`.
+#[test]
+fn term_actions_ask_their_capabilities() {
+    let target = "/wp/v2/posts/1&context=edit&_fields=_links";
+    let links = body(served("administrator", target, false, &["edit_categories"]));
+    assert!(!links.contains("action-create-categories") && links.contains("action-create-tags"));
+}
+
+/// Content whose `the_content` is not ported or would write, as
+/// `writes_or_unported()` tells it.
+#[test]
+fn content_not_ported() {
+    let cases: [(&[u8], bool, bool); 22] = [
+        (b"[gallery]", false, true),
+        (b"a [video src=x]", false, true),
+        (b"[galleryx]", false, false),
+        (b"[gallery_x]", false, false),
+        (b"[gallery-x]", false, false),
+        (b"[gallery9]", false, false),
+        (b"[caption", false, true),
+        (b"https://example.test/a", false, true),
+        (b"  http://example.test/a  ", false, true),
+        (b"https://", false, false),
+        (b"https://a b", false, false),
+        (b"https://a<b", false, false),
+        (b"x https://example.test/a", false, false),
+        (b"<p>https://example.test/a</p>", false, true),
+        (b"<p class=\"x\"> https://example.test/a </P>", false, true),
+        (b"<pre>https://example.test/a</pre>", false, false),
+        (b"<p>https://example.test/a", false, false),
+        (b"<p>see https://example.test/a</p>", false, false),
+        (b"<!-- wp:rss /-->", false, true),
+        (b"{\"duotone\":1}", false, true),
+        (b"<!-- wp:comments /-->", true, true),
+        (b"<!-- wp:comments /-->", false, false),
+    ];
+    for (content, logged_in, expected) in cases {
+        let what = String::from_utf8_lossy(content);
+        assert_eq!(writes_or_unported(content, logged_in), expected, "{what}");
+    }
+    assert!(writes_or_unported(b"<!-- wp:loginout /-->", true));
+    assert!(writes_or_unported(b"<!-- wp:post-comments-form /-->", true));
 }

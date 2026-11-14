@@ -33,12 +33,9 @@ pub(crate) struct Status {
     pub(crate) public: bool,
     private: bool,
     protected: bool,
-    internal: bool,
+    pub(crate) internal: bool,
     queryable: bool,
-    show_in_list: bool,
     date_floating: bool,
-    /// `exclude_from_search`.
-    pub(crate) searchable: bool,
 }
 
 fn status(name: &'static str, label: &'static str) -> Status {
@@ -50,9 +47,7 @@ fn status(name: &'static str, label: &'static str) -> Status {
         protected: false,
         internal: true,
         queryable: false,
-        show_in_list: false,
         date_floating: false,
-        searchable: false,
     }
 }
 
@@ -64,65 +59,37 @@ pub(crate) static STATUSES: LazyLock<[Status; 12]> = LazyLock::new(|| {
             public: true,
             internal: false,
             queryable: true,
-            show_in_list: true,
-            searchable: true,
             ..status("publish", "Published")
         },
         Status {
             protected: true,
             internal: false,
-            show_in_list: true,
-            searchable: true,
             ..status("future", "Scheduled")
         },
         Status {
             protected: true,
             internal: false,
-            show_in_list: true,
             date_floating: true,
-            searchable: true,
             ..status("draft", "Draft")
         },
         Status {
             protected: true,
             internal: false,
-            show_in_list: true,
             date_floating: true,
-            searchable: true,
             ..status("pending", "Pending")
         },
         Status {
             private: true,
             internal: false,
-            show_in_list: true,
-            searchable: true,
             ..status("private", "Private")
         },
         status("trash", "Trash"),
-        Status {
-            date_floating: true,
-            ..status("auto-draft", "auto-draft")
-        },
-        Status {
-            searchable: true,
-            ..status("inherit", "inherit")
-        },
-        Status {
-            searchable: true,
-            ..status("request-pending", "Pending")
-        },
-        Status {
-            searchable: true,
-            ..status("request-confirmed", "Confirmed")
-        },
-        Status {
-            searchable: true,
-            ..status("request-failed", "Failed")
-        },
-        Status {
-            searchable: true,
-            ..status("request-completed", "Completed")
-        },
+        status("auto-draft", "auto-draft"),
+        status("inherit", "inherit"),
+        status("request-pending", "Pending"),
+        status("request-confirmed", "Confirmed"),
+        status("request-failed", "Failed"),
+        status("request-completed", "Completed"),
     ]
 });
 
@@ -228,7 +195,7 @@ fn prepare(context: &Context, params: &Params, status: &Status) -> Response {
         ("protected", Value::Bool(status.protected)),
         ("public", Value::Bool(status.public)),
         ("queryable", Value::Bool(status.queryable)),
-        ("show_in_list", Value::Bool(status.show_in_list)),
+        ("show_in_list", Value::Bool(!status.internal)),
         ("slug", text(status.name)),
         ("date_floating", Value::Bool(status.date_floating)),
     ];

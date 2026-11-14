@@ -5,7 +5,7 @@
 //! their permission checks give `Allow` and `targetHints`.
 
 mod args;
-mod prepare;
+pub(crate) mod prepare;
 
 use hyscribe_model::{FormatFilter, OrderBy, Post, PostQuery, StatusFilter};
 use hyscribe_phpser::{Value, decode};
@@ -324,7 +324,8 @@ fn strings(params: &Params, name: &str) -> Vec<Vec<u8>> {
 }
 
 /// `WP_Query`'s `post_status` of the request's statuses: `any` is every
-/// status not excluded from searches.
+/// status not excluded from searches, those not internal for the posts and
+/// pages any status of theirs is.
 fn statuses(params: &Params) -> Vec<StatusFilter> {
     let asked = strings(params, "status");
     let status = |name: &str| StatusFilter {
@@ -334,7 +335,7 @@ fn statuses(params: &Params) -> Vec<StatusFilter> {
     if asked.iter().any(|name| name == b"any") {
         return STATUSES
             .iter()
-            .filter(|known| known.searchable || asked.contains(&known.name.as_bytes().to_vec()))
+            .filter(|known| !known.internal || asked.contains(&known.name.as_bytes().to_vec()))
             .map(|known| status(known.name))
             .collect();
     }
@@ -534,12 +535,11 @@ fn items(context: &Context, params: &Params, kind: Kind) -> Result<Response, Res
     Ok(response)
 }
 
-/// The request as rendering reads it: its URI and query, and no main
-/// query, which `rest_api_loaded()` leaves unrun.
+/// The request as rendering reads it: its URI, which links keep, and no
+/// main query, which `rest_api_loaded()` leaves unrun.
 fn render_request(context: &Context) -> Request {
     Request {
         uri: context.uri.to_vec(),
-        get: Value::Array(context.get.to_vec()),
         ..Request::default()
     }
 }

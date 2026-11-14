@@ -331,7 +331,7 @@ fn masked(masks: &Masks, table: &Table, rows: &BTreeMap<Vec<u8>, Row>) -> BTreeM
         .collect()
 }
 
-/// The golden lines for the change from `before` to `after`, sorted.
+/// The golden lines for the change from `before` to `after`.
 fn lines(masks: &Masks, before: &Snapshot, after: &Snapshot) -> Vec<Vec<u8>> {
     let mut lines = Vec::new();
     for ((table, before), after) in TABLES.iter().zip(&before.tables).zip(&after.tables) {
@@ -367,7 +367,6 @@ fn lines(masks: &Masks, before: &Snapshot, after: &Snapshot) -> Vec<Vec<u8>> {
             }
         }
     }
-    lines.sort();
     lines
 }
 
@@ -378,7 +377,8 @@ async fn changed_rows<T>(
     setup: impl AsyncFnOnce(&mut MySqlConnection) -> Result<T, String>,
     action: impl AsyncFnOnce(&mut MySqlConnection, T) -> Result<(), String>,
 ) -> Result<Vec<Vec<u8>>, String> {
-    // Dropping `tx` rolls it back.
+    // Dropping `tx` rolls it back. Errors are combined at the end rather than
+    // returned early, so no early return is left untested.
     let mut tx = conn.begin().await.map_err(sql_error)?;
     let fresh = snapshot(&mut tx).await;
     let state = setup(&mut tx).await?;

@@ -2,18 +2,17 @@
 
 use super::*;
 
-async fn run(conn: &mut MySqlConnection, sql: &'static str) -> Result<u64, String> {
-    let done = sqlx::raw_sql(sql).execute(conn).await.map_err(sql_error)?;
-    Ok(done.last_insert_id())
-}
-
-async fn run_with(conn: &mut MySqlConnection, sql: &'static str, id: u64) -> Result<u64, String> {
-    let done = sqlx::query(sql)
-        .bind(id)
+async fn run(conn: &mut MySqlConnection, sql: &'static str) -> Result<(), String> {
+    sqlx::raw_sql(sql)
         .execute(conn)
         .await
-        .map_err(sql_error)?;
-    Ok(done.last_insert_id())
+        .map(drop)
+        .map_err(sql_error)
+}
+
+async fn run_with(conn: &mut MySqlConnection, sql: &'static str, id: u64) -> Result<(), String> {
+    let done = sqlx::query(sql).bind(id).execute(conn).await;
+    done.map(drop).map_err(sql_error)
 }
 
 /// A setup running `sql`. Its type, and [`then`]'s, is the same for every
@@ -141,7 +140,6 @@ async fn raw_writes_match_php_goldens() {
                 "UPDATE wp_term_taxonomy SET count = 1 WHERE term_taxonomy_id = 1",
             )
             .await
-            .map(drop)
         },
     )
     .await

@@ -49,25 +49,50 @@ fn themes_are_php_s() {
     let message = auto_update_message(&options()["cron"], 1_794_500_000);
     let mut failures = Vec::new();
     let rows = rows("themes.php");
-    let path = "/hs-admin/themes";
-    let canonical = format!("{SITE}{path}");
     for (role, php) in &rows {
         let php = php
             .as_ref()
             .map(|php| php.replace("%auto-update%", &message));
-        let ours = themes(role, &request(&canonical, path, &BROWSER)).unwrap();
+        let broken = role.variant() == "g9broken";
+        let path = if broken {
+            "/hs-admin/themes?broken=1"
+        } else {
+            "/hs-admin/themes"
+        };
+        let canonical = format!("{SITE}{path}");
+        let ours = themes(role, &request(&canonical, path, &BROWSER), broken).unwrap();
         failures.extend(check(role, ours, php.as_ref()));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(rows.len(), 8);
+    assert_eq!(rows.len(), 14);
+}
+
+/// The dashboard with an active theme the site does not have.
+#[test]
+fn the_dashboard_of_a_missing_theme_is_php_s() {
+    let mut failures = Vec::new();
+    let rows = rows("index.php");
+    let canonical = format!("{SITE}/hs-admin/index");
+    let request = request(&canonical, "/hs-admin/index", &BROWSER);
+    for (role, php) in &rows {
+        let php = php.as_ref().map(|php| php.replace("%auto-draft%", "4"));
+        let ours = Answer::from_page(crate::dashboard::dashboard(role, &request));
+        failures.extend(check(role, ours, php.as_ref()));
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(rows.len(), 2);
 }
 
 #[test]
-fn another_active_theme_is_not_ported() {
+fn a_missing_parent_or_child_of_the_bundled_theme_is_not_ported() {
     let canonical = format!("{SITE}/hs-admin/themes");
     let request = request(&canonical, "/hs-admin/themes", &BROWSER);
-    let page = themes(&Role("a5other:administrator"), &request);
-    assert!(page.is_none());
+    for variant in ["g9parent", "g9child"] {
+        let role = Role(Box::leak(
+            format!("{variant}:administrator").into_boxed_str(),
+        ));
+        assert!(themes(&role, &request, false).is_none());
+    }
 }
 
 /// The message PHP made at the time it recorded, and the other schedules.

@@ -1078,9 +1078,69 @@ async fn refusals() {
     }
 }
 
-/// A Site Icon, and a static homepage with neither page chosen, which PHP
-/// saves as the latest posts first, and another active theme are not
-/// ported.
+/// The Themes screen with an active theme the site does not have, and with
+/// `broken`, as `reference/appearance/golden.sh` recorded them, without the
+/// write PHP makes.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_missing_theme_is_php_s() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let host = "127.0.0.1:8081";
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/appearance.tsv");
+    let cron = site.option("cron");
+    let message = hyscribe_admin::appearance::auto_update_message(cron.as_bytes(), now());
+    let php = |variant: &str| {
+        let row = golden
+            .lines()
+            .find(|l| l.starts_with(&format!("{variant}\tthemes.php\tadministrator\t")))
+            .unwrap();
+        let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+        hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap())
+            .replace("%auto-update%", &message)
+    };
+    let page = page_of(get(&site, "/hs-admin/themes?broken=1", host, &cookies).await).await;
+    assert_eq!(with_values(&php("g9broken"), &page), page);
+    let mut gone = Arc::try_unwrap(site).ok().unwrap();
+    for name in ["stylesheet", "template"] {
+        gone.options.insert(name.into(), b"gone".to_vec());
+    }
+    let gone = Arc::new(gone);
+    let page = page_of(get(&gone, "/hs-admin/themes", host, &cookies).await).await;
+    assert_eq!(with_values(&php("g9gone"), &page), page);
+    let response = get(&gone, "/hs-admin/themes?broken=1&x=1", host, &cookies).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+}
+
+/// Paged comments link to their page, on the comments list and the
+/// dashboard, as `reference/comments-list/golden.sh` and
+/// `reference/dashboard/golden.sh` recorded them.
+#[tokio::test(flavor = "multi_thread")]
+async fn comment_links_name_their_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let mut paged = Arc::try_unwrap(site).ok().unwrap();
+    for name in ["page_comments", "comments_per_page"] {
+        paged.options.insert(name.into(), b"1".to_vec());
+    }
+    let paged = Arc::new(paged);
+    let host = "127.0.0.1:8081";
+    let page = page_of(get(&paged, "/hs-admin/edit-comments", host, &cookies).await).await;
+    let list = include_str!("../../../hyscribe-admin/tests/golden/comments-list.tsv");
+    let row = list
+        .lines()
+        .find(|l| l.starts_with("g9pages\tadministrator\t"))
+        .unwrap();
+    let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+    let (php, page) = (
+        hyscribe_testkit::settled_page(&php),
+        hyscribe_testkit::settled_page(&page),
+    );
+    assert_eq!(with_values(&php, &page), page);
+    let dashboard = page_of(get(&paged, "/hs-admin/", host, &cookies).await).await;
+    assert!(dashboard.contains("href=\"http://127.0.0.1:8081/?p=1&#038;cpage=1#comment-1\""));
+}
+
 /// The dashboard's `welcome` saves for a user who may see the panel, so it
 /// answers 501 only for them; the menu folds from the settings cookie.
 #[tokio::test(flavor = "multi_thread")]
@@ -1119,6 +1179,9 @@ async fn dashboard_arguments_and_folding() {
     assert!(shown);
 }
 
+/// A Site Icon, a static homepage with neither page chosen, which PHP saves
+/// as the latest posts first, and a missing child of the bundled theme are
+/// not ported.
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_not_ported() {
     let db = hyscribe_db::Db::connect(&hyscribe_testkit::fixture_database())

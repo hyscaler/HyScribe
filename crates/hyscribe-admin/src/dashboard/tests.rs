@@ -134,6 +134,7 @@ pub(crate) fn hello_comment(can_edit: bool) -> RecentComment {
             author_url: text(4),
             author_ip: text(5),
             date: String::from_utf8(text(6)).unwrap(),
+            date_gmt: String::from_utf8(text(7)).unwrap(),
             content: text(8),
             comment_type: text(12),
             ..hyscribe_model::Comment::default()

@@ -4,6 +4,11 @@
 // Must-use plugin for reference/dashboard/golden.sh: the dashboard's
 // variants, chosen by the hyscribe_variant cookie, through filters only.
 $hyscribe_variant = $_COOKIE['hyscribe_variant'] ?? '';
+// g9pages pages comments, one a page.
+if ( 'g9pages' === $hyscribe_variant ) {
+	add_filter( 'pre_option_page_comments', fn() => '1' );
+	add_filter( 'pre_option_comments_per_page', fn() => '1' );
+}
 $hyscribe_health  = array(
 	'health'   => '{"good":5,"recommended":1,"critical":0}',
 	'critical' => '{"good":1,"recommended":2,"critical":2}',

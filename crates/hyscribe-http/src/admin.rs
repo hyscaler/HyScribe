@@ -1037,20 +1037,19 @@ fn screen(
             screen(admin, &request)
         }
         "/hs-admin/tools" => Answer::from_page(tools::tools(admin, &request)),
-        // Only the broken theme notice's argument is ported.
-        "/hs-admin/themes" => {
-            let broken = only_argument(query, "broken")?.is_some();
-            themes(admin, &request, broken)?
-        }
-        // Their arguments and actions are not ported.
-        "/hs-admin/import"
+        // Their arguments and actions are not ported, but the Themes
+        // screen's broken theme notice.
+        "/hs-admin/themes"
+        | "/hs-admin/import"
         | "/hs-admin/export"
         | "/hs-admin/export-personal-data"
         | "/hs-admin/erase-personal-data" => {
-            if request_uri.contains('?') {
+            let broken = only_argument(query, "broken").filter(|_| path == "/hs-admin/themes");
+            if request_uri.contains('?') && broken.is_none() {
                 return None;
             }
             match path {
+                "/hs-admin/themes" => themes(admin, &request, broken.flatten().is_some()),
                 "/hs-admin/import" => Some(tools::import(admin, &request)),
                 "/hs-admin/export" => Some(tools::export(admin, &request)),
                 "/hs-admin/export-personal-data" => {
@@ -1112,7 +1111,7 @@ fn screen(
                 .map(|p| Value::String(p.into()).to_int());
             let listed = post.and_then(|id| PostsSite::post(admin, id.unsigned_abs()));
             if listed.is_some_and(|post| {
-                !matches!(post.post_type.as_str(), "post" | "page" | "attachment")
+                !["post", "page", "attachment"].contains(&post.post_type.as_str())
                     || post.status == "draft"
             }) {
                 return None;

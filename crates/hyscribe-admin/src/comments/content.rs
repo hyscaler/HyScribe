@@ -34,7 +34,6 @@ fn comment(
         parent,
         user_id,
         date_gmt: format!("2026-11-{day:02} 10:00:00"),
-        ..Comment::default()
     }
 }
 

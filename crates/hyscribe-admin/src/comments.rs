@@ -251,13 +251,11 @@ pub fn comment_link(
     let per_page = option("comments_per_page");
     // `empty( $per_page )` leaves the page 0.
     let page = if set("page_comments") && !is_empty_string(&per_page) {
-        let max_depth = if set("thread_comments") {
-            Value::String(option("thread_comments_depth")).to_int()
-        } else {
-            -1
-        };
+        // A `max_depth` over 1, -1 without threading.
+        let threaded =
+            set("thread_comments") && Value::String(option("thread_comments_depth")).to_int() > 1;
         let per_page = Value::String(per_page).to_int();
-        page_of_comment(comments, comment.id, per_page, max_depth, user)
+        page_of_comment(comments, comment.id, per_page, threaded, user)
     } else {
         None
     };
@@ -289,15 +287,15 @@ fn page_of_comment(
     comments: &[(&Comment, &str)],
     id: u64,
     per_page: i64,
-    max_depth: i64,
+    threaded: bool,
     user: u64,
 ) -> Option<i64> {
     let (comment, _) = comments.iter().find(|(c, _)| c.id == id)?;
     if per_page < 1 {
         return Some(1);
     }
-    if max_depth > 1 && comment.parent != 0 {
-        return page_of_comment(comments, comment.parent, per_page, max_depth, user);
+    if threaded && comment.parent != 0 {
+        return page_of_comment(comments, comment.parent, per_page, threaded, user);
     }
     let older = comments
         .iter()

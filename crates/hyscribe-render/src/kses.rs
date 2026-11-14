@@ -235,7 +235,7 @@ fn rel_ugc_link(attributes: &[u8], home: Option<&[u8]>) -> Vec<u8> {
 }
 
 /// `wp_is_internal_link()`: an allowed protocol and the home URL's host.
-fn is_internal_link(link: &[u8], home: Option<&[u8]>) -> bool {
+pub(crate) fn is_internal_link(link: &[u8], home: Option<&[u8]>) -> bool {
     let link = link.to_ascii_lowercase();
     let allowed = url_scheme(&link).is_some_and(|scheme| {
         ALLOWED_PROTOCOLS

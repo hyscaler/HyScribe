@@ -1,0 +1,557 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! `WP_REST_Posts_Controller` for posts and pages: `/wp/v2/posts`,
+//! `/wp/v2/pages` and their single items, read only. Writes answer 501 but
+//! their permission checks give `Allow` and `targetHints`.
+
+mod args;
+pub(crate) mod prepare;
+
+use hyscribe_model::{FormatFilter, OrderBy, Post, PostQuery, StatusFilter};
+use hyscribe_phpser::{Value, decode};
+use hyscribe_render::formatting::sanitize_title_for_query;
+use hyscribe_render::rest::Rendering;
+use hyscribe_render::site::Request;
+use hyscribe_render::{order_by, search_count, search_terms, sticky_posts};
+
+use crate::request::Params;
+use crate::response::{Response, RestError, paginate};
+use crate::statuses::STATUSES;
+use crate::{Callback, Context, Endpoint, Permission};
+
+/// A post type the controller serves.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    Post,
+    Page,
+}
+
+impl Kind {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Kind::Post => "post",
+            Kind::Page => "page",
+        }
+    }
+
+    pub(crate) fn base(self) -> &'static str {
+        match self {
+            Kind::Post => "posts",
+            Kind::Page => "pages",
+        }
+    }
+
+    /// `$post_type->cap->$cap`.
+    pub(crate) fn cap(self, cap: &str) -> String {
+        let fields = crate::types::post_type(self.name());
+        let mapped = fields.and_then(|fields| fields.get_path(&["capabilities", cap]));
+        String::from_utf8_lossy(&mapped.map(Value::to_php_string).unwrap_or_default()).into_owned()
+    }
+
+    /// The REST taxonomies of the type: their names and REST bases.
+    pub(crate) fn taxonomies(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Kind::Post => &[("category", "categories"), ("post_tag", "tags")],
+            Kind::Page => &[],
+        }
+    }
+}
+
+/// The endpoints of the route `regex`, if one of these.
+pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
+    let (kind, single) = match regex {
+        "/wp/v2/posts" => (Kind::Post, false),
+        "/wp/v2/pages" => (Kind::Page, false),
+        "/wp/v2/posts/(?P<id>[\\d]+)" => (Kind::Post, true),
+        "/wp/v2/pages/(?P<id>[\\d]+)" => (Kind::Page, true),
+        _ => return None,
+    };
+    let (permission, callback): (Permission, Callback) = match (kind, single) {
+        (Kind::Post, false) => (
+            |c, p| items_permission(c, p, Kind::Post),
+            |c, p| items(c, p, Kind::Post),
+        ),
+        (Kind::Page, false) => (
+            |c, p| items_permission(c, p, Kind::Page),
+            |c, p| items(c, p, Kind::Page),
+        ),
+        (Kind::Post, true) => (
+            |c, p| item_permission(c, p, Kind::Post),
+            |c, p| item(c, p, Kind::Post),
+        ),
+        (Kind::Page, true) => (
+            |c, p| item_permission(c, p, Kind::Page),
+            |c, p| item(c, p, Kind::Page),
+        ),
+    };
+    if !single {
+        let create: Permission = match kind {
+            Kind::Post => |c, p| create_permission(c, p, Kind::Post),
+            Kind::Page => |c, p| create_permission(c, p, Kind::Page),
+        };
+        return Some(vec![
+            Endpoint {
+                args: args::collection(kind),
+                permission,
+                callback: Some(callback),
+            },
+            Endpoint {
+                args: Vec::new(),
+                permission: create,
+                callback: None,
+            },
+        ]);
+    }
+    let (update, delete): (Permission, Permission) = match kind {
+        Kind::Post => (
+            |c, p| update_permission(c, p, Kind::Post),
+            |c, p| delete_permission(c, p, Kind::Post),
+        ),
+        Kind::Page => (
+            |c, p| update_permission(c, p, Kind::Page),
+            |c, p| delete_permission(c, p, Kind::Page),
+        ),
+    };
+    Some(vec![
+        Endpoint {
+            args: args::item(),
+            permission,
+            callback: Some(callback),
+        },
+        Endpoint {
+            args: vec![args::id()],
+            permission: update,
+            callback: None,
+        },
+        Endpoint {
+            args: vec![args::id()],
+            permission: delete,
+            callback: None,
+        },
+    ])
+}
+
+fn forbidden(context: &Context, code: &'static str, message: &str) -> RestError {
+    RestError::status(code, message, context.authorization_required())
+}
+
+/// `get_items_permissions_check()`.
+fn items_permission(context: &Context, params: &Params, kind: Kind) -> Result<(), RestError> {
+    if args::NOT_PORTED.iter().any(|name| params.has(name)) {
+        return Err(RestError::not_ported());
+    }
+    if params.context() == b"edit" && !context.can(&kind.cap("edit_posts")) {
+        let message = "Sorry, you are not allowed to edit posts in this post type.";
+        return Err(forbidden(context, "rest_forbidden_context", message));
+    }
+    Ok(())
+}
+
+/// `! empty( $request[ $name ] )`.
+fn set(params: &Params, name: &str) -> bool {
+    params.get(name).is_some_and(|value| !value.is_empty())
+}
+
+/// `get_current_user_id() !== $request['author']`, of an `author` set:
+/// only an integer can be the user's ID.
+fn other_author(context: &Context, params: &Params) -> bool {
+    set(params, "author") && params.get("author") != Some(&Value::Int(context.user.cast_signed()))
+}
+
+/// `check_assign_terms_permission()`: each term of the type's taxonomies
+/// the request names, that exists, can be assigned.
+fn can_assign_terms(context: &Context, params: &Params, kind: Kind) -> bool {
+    kind.taxonomies().iter().all(|(taxonomy, base)| {
+        let ids = match params.get(base) {
+            Some(Value::Array(ids)) => ids.iter().map(|(_, id)| id.to_int()).collect(),
+            Some(id) => vec![id.to_int()],
+            None => Vec::new(),
+        };
+        ids.into_iter().all(|id| {
+            let id = id.unsigned_abs();
+            context.site.reads().term(id, taxonomy).is_none() || context.can_for("assign_term", id)
+        })
+    })
+}
+
+/// `create_item_permissions_check()`.
+fn create_permission(context: &Context, params: &Params, kind: Kind) -> Result<(), RestError> {
+    if set(params, "id") {
+        return Err(RestError::status(
+            "rest_post_exists",
+            "Cannot create existing post.",
+            400,
+        ));
+    }
+    let others = context.can(&kind.cap("edit_others_posts"));
+    if other_author(context, params) && !others {
+        let message = "Sorry, you are not allowed to create posts as this user.";
+        return Err(forbidden(context, "rest_cannot_edit_others", message));
+    }
+    if set(params, "sticky") && (!others || !context.can(&kind.cap("publish_posts"))) {
+        let message = "Sorry, you are not allowed to make posts sticky.";
+        return Err(forbidden(context, "rest_cannot_assign_sticky", message));
+    }
+    // The terms check after it never fails here: the collection's
+    // `categories` and `tags` are not ported.
+    if !context.can(&kind.cap("create_posts")) {
+        let message = "Sorry, you are not allowed to create posts as this user.";
+        return Err(forbidden(context, "rest_cannot_create", message));
+    }
+    Ok(())
+}
+
+/// `get_post()`: the post of the type with the request's `id`.
+fn get_post(context: &Context, params: &Params, kind: Kind) -> Result<Post, RestError> {
+    // The route takes digits only, and no post has ID 0.
+    let id = params.get("id").map_or(0, Value::to_int).unsigned_abs();
+    let post = context.site.post(id);
+    let post = post.filter(|post| post.post_type == kind.name());
+    post.ok_or_else(|| RestError::status("rest_post_invalid_id", "Invalid post ID.", 404))
+}
+
+/// `check_update_permission()`.
+fn can_update(context: &Context, post: &Post) -> bool {
+    context.can_for("edit_post", post.id)
+}
+
+/// `check_read_permission()` of a post or page: published, the only
+/// public status core registers, or readable by the user.
+pub(crate) fn can_read(context: &Context, post: &Post) -> bool {
+    post.status == "publish" || context.can_for("read_post", post.id)
+}
+
+/// `get_item_permissions_check()`.
+fn item_permission(context: &Context, params: &Params, kind: Kind) -> Result<(), RestError> {
+    let post = get_post(context, params, kind)?;
+    if params.context() == b"edit" && !can_update(context, &post) {
+        let message = "Sorry, you are not allowed to edit this post.";
+        return Err(forbidden(context, "rest_forbidden_context", message));
+    }
+    let password =
+        hyscribe_phpser::lookup(&params.get, "password").filter(|password| !password.is_empty());
+    if password.is_some_and(|password| password.to_php_string() != post.password) {
+        return Err(RestError::status(
+            "rest_post_incorrect_password",
+            "Incorrect post password.",
+            403,
+        ));
+    }
+    if can_read(context, &post) {
+        return Ok(());
+    }
+    let message = "Sorry, you are not allowed to do that.";
+    Err(forbidden(context, "rest_forbidden", message))
+}
+
+/// `update_item_permissions_check()`.
+fn update_permission(context: &Context, params: &Params, kind: Kind) -> Result<(), RestError> {
+    let post = get_post(context, params, kind)?;
+    if !can_update(context, &post) {
+        let message = "Sorry, you are not allowed to edit this post.";
+        return Err(forbidden(context, "rest_cannot_edit", message));
+    }
+    let others = context.can(&kind.cap("edit_others_posts"));
+    if other_author(context, params) && !others {
+        let message = "Sorry, you are not allowed to update posts as this user.";
+        return Err(forbidden(context, "rest_cannot_edit_others", message));
+    }
+    let sticky = params.get("sticky").map(|sticky| !sticky.is_empty());
+    let changes = sticky.is_some_and(|sticky| sticky != is_sticky(context, post.id));
+    if changes && (!others || !context.can(&kind.cap("publish_posts"))) {
+        let message = "Sorry, you are not allowed to make posts sticky.";
+        return Err(forbidden(context, "rest_cannot_assign_sticky", message));
+    }
+    if !can_assign_terms(context, params, kind) {
+        let message = "Sorry, you are not allowed to assign the provided terms.";
+        return Err(forbidden(context, "rest_cannot_assign_term", message));
+    }
+    Ok(())
+}
+
+/// `delete_item_permissions_check()`.
+fn delete_permission(context: &Context, params: &Params, kind: Kind) -> Result<(), RestError> {
+    let post = get_post(context, params, kind)?;
+    if context.can_for("delete_post", post.id) {
+        return Ok(());
+    }
+    let message = "Sorry, you are not allowed to delete this post.";
+    Err(forbidden(context, "rest_cannot_delete", message))
+}
+
+/// The `sticky_posts` option.
+fn sticky(context: &Context) -> Vec<u64> {
+    sticky_posts(&context.site.option("sticky_posts").unwrap_or_default())
+}
+
+/// `is_sticky( $id )`.
+pub(crate) fn is_sticky(context: &Context, id: u64) -> bool {
+    sticky(context).contains(&id)
+}
+
+/// `get_item()`.
+fn item(context: &Context, params: &Params, kind: Kind) -> Result<Response, RestError> {
+    // The permission check found the post.
+    let post = get_post(context, params, kind).unwrap_or_default();
+    let request = render_request(context);
+    let mut rendering = Rendering::new(context.site.theme(), context.site.reads(), &request);
+    let mut response = prepare::post(context, params, kind, &post, &mut rendering)?;
+    let link = hyscribe_render::permalinks::permalink(context.site.reads(), &post);
+    let link = String::from_utf8_lossy(&link);
+    response.header(
+        "Link",
+        &format!("<{link}>; rel=\"alternate\"; type=text/html"),
+    );
+    Ok(response)
+}
+
+fn ids(params: &Params, name: &str) -> Vec<u64> {
+    let list = params
+        .get(name)
+        .and_then(Value::as_array)
+        .unwrap_or_default();
+    list.iter()
+        .map(|(_, id)| id.to_int().unsigned_abs())
+        .collect()
+}
+
+fn strings(params: &Params, name: &str) -> Vec<Vec<u8>> {
+    let list = params
+        .get(name)
+        .and_then(Value::as_array)
+        .unwrap_or_default();
+    list.iter().map(|(_, item)| item.to_php_string()).collect()
+}
+
+/// `WP_Query`'s `post_status` of the request's statuses: `any` is every
+/// status not excluded from searches, those not internal for the posts and
+/// pages any status of theirs is.
+fn statuses(params: &Params) -> Vec<StatusFilter> {
+    let asked = strings(params, "status");
+    let status = |name: &str| StatusFilter {
+        status: name.into(),
+        author: None,
+    };
+    if asked.iter().any(|name| name == b"any") {
+        return STATUSES
+            .iter()
+            .filter(|known| !known.internal || asked.contains(&known.name.as_bytes().to_vec()))
+            .map(|known| status(known.name))
+            .collect();
+    }
+    STATUSES
+        .iter()
+        .filter(|known| asked.contains(&known.name.as_bytes().to_vec()))
+        .map(|known| status(known.name))
+        .collect()
+}
+
+/// The `WP_Query` of `get_items()` and `prepare_items_query()`, and the
+/// page it asks for.
+fn query(
+    context: &Context,
+    params: &Params,
+    kind: Kind,
+) -> Result<(PostQuery, u64, u32), RestError> {
+    let orderby = params
+        .get("orderby")
+        .map(Value::to_php_string)
+        .unwrap_or_default();
+    let search = params
+        .get("search")
+        .map(Value::to_php_string)
+        .filter(|s| !s.is_empty());
+    if orderby == b"relevance" && search.is_none() {
+        let message = "You need to define a search term to order by relevance.";
+        return Err(RestError::status(
+            "rest_no_search_term_defined",
+            message,
+            400,
+        ));
+    }
+    let mut include = ids(params, "include");
+    if orderby == b"include" && include.is_empty() {
+        let message = "You need to define an include parameter to order by include.";
+        return Err(RestError::status(
+            "rest_orderby_include_missing_include",
+            message,
+            400,
+        ));
+    }
+    let mut exclude = ids(params, "exclude");
+    if let Some(wanted) = params.get("sticky") {
+        let sticky = sticky(context);
+        if !wanted.is_empty() {
+            include = if include.is_empty() {
+                sticky
+            } else {
+                sticky
+                    .into_iter()
+                    .filter(|id| include.contains(id))
+                    .collect()
+            };
+            if include.is_empty() {
+                include = vec![0];
+            }
+        } else {
+            exclude.extend(sticky);
+        }
+    }
+    let per_page = params.get("per_page").map_or(10, Value::to_int).max(1);
+    let page = params
+        .get("page")
+        .map_or(1, Value::to_int)
+        .max(0)
+        .unsigned_abs();
+    let offset = params.get("offset").map_or(0, Value::to_int).unsigned_abs();
+    let ascending = params
+        .get("order")
+        .is_some_and(|order| order.to_php_string() == b"asc");
+    let names: Vec<String> = strings(params, "slug")
+        .iter()
+        .map(|slug| String::from_utf8_lossy(&sanitize_title_for_query(slug)).into_owned())
+        .collect();
+    let mut query = PostQuery {
+        post_types: vec![kind.name().into()],
+        statuses: statuses(params),
+        include: (!include.is_empty()).then_some(include),
+        exclude,
+        authors: ids(params, "author"),
+        excluded_authors: ids(params, "author_exclude"),
+        parents: ids(params, "parent"),
+        excluded_parents: ids(params, "parent_exclude"),
+        names,
+        menu_order: params.get("menu_order").map(Value::to_int),
+        search_columns: strings(params, "search_columns")
+            .into_iter()
+            .map(|column| String::from_utf8_lossy(&column).into_owned())
+            .collect(),
+        formats: params.get("format").map(|_| {
+            let formats = strings(params, "format");
+            FormatFilter {
+                standard: formats.iter().any(|format| format == b"standard"),
+                slugs: formats
+                    .iter()
+                    .filter(|format| *format != b"standard")
+                    .map(|format| format!("post-format-{}", String::from_utf8_lossy(format)))
+                    .collect(),
+            }
+        }),
+        exact: params.get("search_semantics").is_some(),
+        logged_in: context.user != 0,
+        limit: u32::try_from(per_page).unwrap_or(u32::MAX),
+        offset: u32::try_from(if offset > 0 {
+            offset
+        } else {
+            page.saturating_sub(1)
+                .saturating_mul(per_page.unsigned_abs())
+        })
+        .unwrap_or(u32::MAX),
+        ..PostQuery::default()
+    };
+    let by = match orderby.as_slice() {
+        b"id" => &b"ID"[..],
+        b"include" => b"post__in",
+        b"slug" => b"post_name",
+        b"include_slugs" => b"post_name__in",
+        by => by,
+    };
+    query.order = order_by(&Value::String(by.to_vec()), ascending, &query);
+    if let Some(search) = search {
+        let text = String::from_utf8_lossy(&search).into_owned();
+        query.search = search_terms(&text);
+        query.sentence = text.replace(['\r', '\n'], "");
+        query.search_count = search_count(&text);
+        if orderby == b"relevance" {
+            query.order.insert(0, (OrderBy::Relevance, false));
+        }
+    }
+    // A post list is a home list, which puts sticky posts first on its
+    // first page, unless asked not to or limited to some posts.
+    let ignore = params
+        .get("ignore_sticky")
+        .is_none_or(|ignore| !ignore.is_empty());
+    let home = query.search.is_empty() && query.include.is_none();
+    if kind == Kind::Post && !ignore && home && page <= 1 {
+        query.sticky = sticky(context);
+    }
+    Ok((query, page, u32::try_from(per_page).unwrap_or(u32::MAX)))
+}
+
+/// `get_items()`.
+fn items(context: &Context, params: &Params, kind: Kind) -> Result<Response, RestError> {
+    let (query, page, per_page) = query(context, params, kind)?;
+    let reads = context.site.reads();
+    let posts = reads.query(&query);
+    // `found_posts` stays 0 for an empty page; past the first, it is
+    // counted again from the offset alone, which on the first finds
+    // nothing either.
+    let total = if posts.is_empty() {
+        let offset = params.get("offset").map_or(0, Value::to_int).unsigned_abs();
+        let recount = PostQuery {
+            offset: u32::try_from(offset).unwrap_or(u32::MAX),
+            ..query.clone()
+        };
+        let empty = reads.query(&recount).is_empty();
+        if empty {
+            0
+        } else {
+            reads.count_posts(&recount)
+        }
+    } else {
+        reads.count_posts(&query)
+    };
+    let pages = total.div_ceil(u64::from(per_page));
+    if page > pages && total > 0 {
+        let message = "The page number requested is larger than the number of pages available.";
+        return Err(RestError::status(
+            "rest_post_invalid_page_number",
+            message,
+            400,
+        ));
+    }
+    let edit = params.context() == b"edit";
+    let shown = posts.iter().filter(|_| !context.head).filter(|post| {
+        if edit {
+            can_update(context, post)
+        } else {
+            can_read(context, post)
+        }
+    });
+    let request = render_request(context);
+    let mut rendering = Rendering::new(context.site.theme(), reads, &request);
+    let mut prepared = |post| prepare::post(context, params, kind, post, &mut rendering);
+    let data: Result<Vec<Value>, RestError> =
+        shown.map(|post| Ok(prepared(post)?.into_data())).collect();
+    let data = data?;
+    let mut response = Response::new(crate::response::list(data), 200);
+    let collection = context.rest_url(&format!("/wp/v2/{}", kind.base()));
+    paginate(
+        &mut response,
+        (total, pages, page),
+        &params.get,
+        &collection,
+    );
+    Ok(response)
+}
+
+/// The request as rendering reads it: its URI, which links keep, and no
+/// main query, which `rest_api_loaded()` leaves unrun.
+fn render_request(context: &Context) -> Request {
+    Request {
+        uri: context.uri.to_vec(),
+        ..Request::default()
+    }
+}
+
+/// The revisions of a post: how many, and the newest.
+pub(crate) fn revisions(context: &Context, post: &Post) -> (u64, Option<u64>) {
+    let revisions = context.site.revisions(post.id);
+    (revisions.len() as u64, revisions.first().copied())
+}
+
+/// `get_post_meta( $id, $key, true )` unserialized.
+pub(crate) fn meta(context: &Context, id: u64, key: &str) -> Option<Value> {
+    let stored = context.site.post_meta(id, key)?;
+    Some(decode(&stored).unwrap_or(Value::String(stored)))
+}

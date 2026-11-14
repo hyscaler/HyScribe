@@ -9,11 +9,13 @@
 mod comments;
 mod editor;
 mod fields;
+pub(crate) mod posts;
 mod request;
 mod response;
 mod routes;
 mod schema;
 mod settings;
+mod statuses;
 mod taxonomies;
 mod templates;
 mod terms;
@@ -23,6 +25,8 @@ mod users;
 use hyscribe_kses::esc_url_raw;
 use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, Term, TermQuery, User, UserQuery};
 use hyscribe_phpser::{Key, Value, is_empty_string, json_encode, json_encode_pretty, lookup};
+use hyscribe_render::site::Site as Reads;
+use hyscribe_render::theme::Theme;
 
 pub use response::{Response, RestError, paginate};
 pub use schema::{Checked, Refusal, sanitize_value_from_schema, validate_value_from_schema};
@@ -86,6 +90,11 @@ pub trait Site {
     fn post_meta(&self, post: u64, key: &str) -> Option<Vec<u8>>;
     /// The IDs of the revisions of `post`, newest first.
     fn revisions(&self, post: u64) -> Vec<u64>;
+    /// The site's content as `hyscribe-render` reads it, for the post
+    /// routes.
+    fn reads(&self) -> &dyn Reads;
+    /// The active theme, which renders posts' content.
+    fn theme(&self) -> &Theme;
 }
 
 /// A request for the API.
@@ -95,6 +104,8 @@ pub struct Request<'a> {
     pub method: &'a str,
     /// The `rest_route` query var.
     pub route: &'a [u8],
+    /// `$_SERVER['REQUEST_URI']`, which rendered content links to.
+    pub uri: &'a [u8],
     /// `$_GET`.
     pub get: &'a [(Key, Value)],
     /// `$_POST`.
@@ -147,6 +158,8 @@ pub(crate) struct Context<'a> {
     user: u64,
     /// The request is a HEAD request.
     pub(crate) head: bool,
+    /// `$_SERVER['REQUEST_URI']`, which rendering reads.
+    pub(crate) uri: &'a [u8],
 }
 
 impl Context<'_> {
@@ -177,8 +190,8 @@ impl Context<'_> {
     }
 }
 
-type Permission = fn(&Context, &Params) -> Result<(), RestError>;
-type Callback = fn(&Context, &Params) -> Result<Response, RestError>;
+pub(crate) type Permission = fn(&Context, &Params) -> Result<(), RestError>;
+pub(crate) type Callback = fn(&Context, &Params) -> Result<Response, RestError>;
 
 /// A ported endpoint: its arguments, permission check and callback, none
 /// for a write, whose permission check alone is ported.
@@ -195,6 +208,8 @@ fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         .or_else(|| taxonomies::endpoints(regex))
         .or_else(|| terms::endpoints(regex))
         .or_else(|| settings::endpoints(regex))
+        .or_else(|| statuses::endpoints(regex))
+        .or_else(|| posts::endpoints(regex))
         .or_else(|| comments::endpoints(regex))
         .or_else(|| users::endpoints(regex))
         .or_else(|| templates::endpoints(regex))
@@ -300,6 +315,7 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
         site,
         user,
         head: method == "HEAD",
+        uri: request.uri,
     };
     let response = match verified {
         Some(false) => RestError::status("rest_cookie_invalid_nonce", "Cookie check failed", 403)
@@ -481,7 +497,7 @@ pub(crate) fn self_link(context: &Context, response: &mut Response, route: &str)
             url: matched.params,
             ..Params::default()
         };
-        let sanitized = sanitize_params(&mut params, &endpoint.args).ok();
+        let sanitized = sanitize_params(context, &mut params, &endpoint.args).ok();
         let allowed = sanitized.map(|()| allowed(context, &permissions, matched.methods, &params));
         let allowed = allowed.filter(|allowed| !allowed.is_empty())?;
         let allow = allowed.into_iter().map(text).collect();
@@ -535,7 +551,7 @@ fn dispatch(
         ..params
     };
     let checked = has_valid_params(&params, &endpoint.args)
-        .and_then(|()| sanitize_params(&mut params, &endpoint.args));
+        .and_then(|()| sanitize_params(context, &mut params, &endpoint.args));
     let answered = checked.and_then(|()| {
         (endpoint.permission)(context, &params).and_then(|()| callback(context, &params))
     });

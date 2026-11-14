@@ -21,7 +21,8 @@
 # visitor). Flags: origin and originnull send an Origin header, pretty serves
 # the request under /%postname%/ permalinks (reference/rewrite/permalinks.php),
 # override sends X-HTTP-Method-Override: DELETE, ttd records the request on
-# the Theme Test Data fixture only, skip=a+b sends the request
+# the Theme Test Data fixture only, default on the default install only (as
+# one that PHP would write caches for there), skip=a+b sends the request
 # as every identity but those listed, and writes
 # sends it once as the administrator after the others, fails the run unless
 # it writes to the database, and records the status as writes. The headers kept are
@@ -171,6 +172,7 @@ for who in "${WHO[@]}"; do
   while IFS=$'\t' read -r method target flags; do
     [[ "$flags" == *writes* ]] && continue
     [[ "$flags" == *ttd* && "${HYSCRIBE_PHP_DB:-}" != wordpress_ttd ]] && continue
+    [[ ",$flags," == *,default,* && "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ]] && continue
     [[ "+${flags#*skip=}+" == *"+$who+"* && "$flags" == *skip=* ]] && continue
     curl_args "$who" "$flags" "$nonce"
     url="$BASE${target//%nonce%/$nonce}"

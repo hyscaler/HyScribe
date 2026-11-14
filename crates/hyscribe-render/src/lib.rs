@@ -22,6 +22,7 @@ pub use core_blocks::{
     default_avatar, front_comment_text, number_format, user_avatar, user_name,
 };
 pub mod date;
+mod dimensions;
 mod elements;
 mod excerpt;
 pub use excerpt::{the_excerpt, wp_trim_words};
@@ -48,6 +49,7 @@ pub mod post;
 mod query_loop;
 mod query_pagination;
 pub mod registry;
+pub mod rest;
 mod search;
 pub mod site;
 pub mod sitemap;

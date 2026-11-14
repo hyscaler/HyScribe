@@ -8,8 +8,9 @@ use hyscribe_kses::sanitize_key;
 use hyscribe_phpser::{Key, Value, absint, urldecode};
 use hyscribe_render::formatting::sanitize_text_field;
 
+use crate::Context;
 use crate::response::{RestError, object, text};
-use crate::schema::{Refusal, sanitize_value_from_schema, validate_value_from_schema};
+use crate::schema::{Checked, Refusal, sanitize_value_from_schema, validate_value_from_schema};
 
 /// The parameters by where they come from.
 #[derive(Clone, Debug, Default)]
@@ -69,6 +70,11 @@ pub(crate) enum Sanitize {
     Schema,
     /// `urldecode()` of a URL parameter, a string.
     Urldecode,
+    /// Left as given, for the endpoint to check: a schema whose keywords
+    /// are not ported.
+    Endpoint,
+    /// The endpoint's own sanitizer, which reads the site.
+    Site(fn(&Context, &Value) -> Checked<Value>),
 }
 
 /// A route's argument: its schema, whether `rest_validate_request_arg()`
@@ -177,7 +183,11 @@ pub(crate) fn has_valid_params(params: &Params, args: &[Arg]) -> Result<(), Rest
 }
 
 /// `sanitize_params()`: every parameter of every source with an argument.
-pub(crate) fn sanitize_params(params: &mut Params, args: &[Arg]) -> Result<(), RestError> {
+pub(crate) fn sanitize_params(
+    context: &Context,
+    params: &mut Params,
+    args: &[Arg],
+) -> Result<(), RestError> {
     let mut invalid = Invalid::default();
     for source in [&mut params.get, &mut params.url, &mut params.defaults] {
         for (key, value) in source.iter_mut() {
@@ -193,6 +203,8 @@ pub(crate) fn sanitize_params(params: &mut Params, args: &[Arg]) -> Result<(), R
                 }
                 Sanitize::TextField => Ok(text(sanitize_text_field(&value.to_php_string()))),
                 Sanitize::Urldecode => Ok(text(urldecode(&value.to_php_string()))),
+                Sanitize::Endpoint => Ok(value.clone()),
+                Sanitize::Site(sanitize) => sanitize(context, value),
                 Sanitize::Schema => validate_value_from_schema(value, &arg.schema, arg.name)
                     .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name)),
             };

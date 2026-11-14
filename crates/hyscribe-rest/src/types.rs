@@ -59,6 +59,13 @@ fn field<'a>(fields: &'a Value, name: &str) -> &'a [u8] {
         .unwrap_or_default()
 }
 
+/// The fields of the post type `name` in the edit context, if shown in
+/// REST.
+pub(crate) fn post_type(name: &str) -> Option<&'static Value> {
+    let found = shown_in_rest().find(|(key, _)| key.to_php_string() == name.as_bytes());
+    found.map(|(_, fields)| fields)
+}
+
 /// `rest_get_route_for_post_type_items()`: the route of a post type shown
 /// in REST.
 pub(crate) fn items_route(name: &str) -> Option<String> {

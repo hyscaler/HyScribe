@@ -306,6 +306,78 @@ pub fn unhex(hex: &str) -> Vec<u8> {
         .collect()
 }
 
+/// A request `reference/rest/golden.sh` recorded and PHP's answer.
+pub struct RestCase {
+    /// `visitor` or the role of the user who asked.
+    pub who: String,
+    /// The method.
+    pub method: String,
+    /// The path and query.
+    pub target: String,
+    /// The flags, comma separated.
+    pub flags: String,
+    /// The status code.
+    pub status: u16,
+    /// The headers kept, one `name: value` a line.
+    pub headers: Vec<String>,
+    /// The body, or for the Theme Test Data fixture its SHA-256 in hex.
+    pub body: Vec<u8>,
+}
+
+impl RestCase {
+    /// Whether `flags` has `name`.
+    pub fn flag(&self, name: &str) -> bool {
+        self.flags.split(',').any(|flag| flag == name)
+    }
+}
+
+/// The cases of a golden file of `reference/rest/golden.sh`.
+pub fn rest_cases(golden: &str) -> Vec<RestCase> {
+    golden
+        .lines()
+        .map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
+            let field = |i: usize| fields.get(i).copied().unwrap_or_default();
+            let text = |i: usize| String::from_utf8_lossy(&unhex(field(i))).into_owned();
+            RestCase {
+                who: field(0).into(),
+                method: field(1).into(),
+                target: text(2),
+                flags: field(3).into(),
+                status: field(4).parse().unwrap_or_default(),
+                headers: text(5).lines().map(String::from).collect(),
+                body: unhex(field(6)),
+            }
+        })
+        .collect()
+}
+
+/// The headers a REST golden keeps, as it writes them, sorted.
+pub fn rest_headers(headers: &[(String, String)]) -> Vec<String> {
+    let kept = |name: &str| {
+        [
+            "content-type",
+            "x-robots-tag",
+            "link",
+            "allow",
+            "vary",
+            "expires",
+            "cache-control",
+        ]
+        .contains(&name)
+            || name.starts_with("access-control-")
+            || name.starts_with("x-wp-")
+    };
+    let mut headers: Vec<String> = headers
+        .iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), value))
+        .filter(|(name, _)| kept(name))
+        .map(|(name, value)| format!("{name}: {value}"))
+        .collect();
+    headers.sort();
+    headers
+}
+
 /// What a test prints when the fixture database is not running.
 pub const NO_FIXTURE_DATABASE: &str = "no fixture database: run reference/default-install/db.sh up";
 

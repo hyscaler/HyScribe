@@ -12,6 +12,8 @@ use super::*;
 
 pub(crate) mod content;
 mod people;
+mod posts;
+mod site;
 
 use content::Content;
 
@@ -110,6 +112,25 @@ impl Site for Oracle {
             .iter()
             .find(|post| post.id == id)
             .cloned()
+    }
+    fn reads(&self) -> &dyn Reads {
+        static FIXTURES: [site::Fixture; 2] = [
+            site::Fixture {
+                ttd: false,
+                pretty: false,
+                extra: false,
+            },
+            site::Fixture {
+                ttd: false,
+                pretty: true,
+                extra: false,
+            },
+        ];
+        &FIXTURES[usize::from(self.pretty)]
+    }
+    fn theme(&self) -> &Theme {
+        static THEME: std::sync::OnceLock<Theme> = std::sync::OnceLock::new();
+        THEME.get_or_init(hyscribe_render::theme::twentytwentyfive)
     }
     fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
         let mut posts: Vec<Post> = self
@@ -301,6 +322,7 @@ pub(crate) fn serve_over(content: &'static Content, case: &Case) -> Served {
     let request = Request {
         method: &case.method,
         route: &route,
+        uri: case.target.as_bytes(),
         get: &get,
         post: &[],
         cookie_user: user,
@@ -344,11 +366,10 @@ pub(crate) fn kept(headers: &[(String, String)]) -> Vec<String> {
 }
 
 /// Requests PHP answers on routes or with arguments not ported.
-const UNPORTED: [(&str, &str); 9] = [
+const UNPORTED: [(&str, &str); 8] = [
     ("GET", "/?rest_route=/"),
     ("GET", "/?rest_route=0/"),
     ("GET", "/?rest_route=/wp/v2"),
-    ("GET", "/?rest_route=/wp/v2/posts"),
     ("GET", "/?rest_route=/wp-abilities/v1/categories/a-b"),
     ("GET", "/?rest_route=/wp/v2/search&per_page=1"),
     (
@@ -770,8 +791,9 @@ fn self_links_hint_what_their_route_allows() {
         site: &oracle,
         user: 0,
         head: false,
+        uri: b"/",
     };
-    for route in ["/nope", "/wp/v2/posts", "/wp/v2/block-types/core/paragraph"] {
+    for route in ["/nope", "/wp/v2/media", "/wp/v2/block-types/core/paragraph"] {
         let mut response = Response::new(Value::Array(Vec::new()), 200);
         self_link(&context, &mut response, route);
         let href = oracle.rest_url(route);

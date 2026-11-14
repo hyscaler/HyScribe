@@ -1702,6 +1702,13 @@ fn posts_sql(query: &PostQuery) -> Sql {
                 sql.push("FIELD(post_parent, ");
                 list(&mut sql, field_ids(&query.parents));
             }
+            OrderBy::Names => {
+                sql.push("FIELD(post_name, ");
+                list(
+                    &mut sql,
+                    query.names.iter().map(|name| Bind::Text(name.clone())),
+                );
+            }
             column => sql.push(order_column(column)),
         }
         sql.push(if ascending { " ASC" } else { " DESC" });
@@ -1833,6 +1840,18 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
         sql.push(" AND post_parent IN (");
         list(sql, query.parents.iter().map(|&id| Bind::Int(id)));
     }
+    if !query.excluded_parents.is_empty() {
+        sql.push(" AND post_parent NOT IN (");
+        list(sql, query.excluded_parents.iter().map(|&id| Bind::Int(id)));
+    }
+    if !query.names.is_empty() {
+        sql.push(" AND post_name IN (");
+        list(sql, query.names.iter().map(|name| Bind::Text(name.clone())));
+    }
+    if let Some(order) = query.menu_order {
+        sql.push(" AND menu_order = ?");
+        sql.bind(Bind::Signed(order));
+    }
     for filter in &query.terms {
         sql.push(if filter.exclude {
             " AND ID NOT IN ("
@@ -1885,23 +1904,38 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
         sql.push(" AND ID <> ?");
         sql.bind(Bind::Int(*id));
     }
+    let columns: Vec<&str> = if query.search_columns.is_empty() {
+        vec!["post_title", "post_excerpt", "post_content"]
+    } else {
+        query.search_columns.iter().map(String::as_str).collect()
+    };
     // A term after `-` excludes the posts with it in any column.
     for term in &query.search {
-        let (term, columns, filename) = match term.strip_prefix('-') {
+        let (term, like_op, joiner, filename) = match term.strip_prefix('-') {
             Some(rest) => (
                 rest,
-                " AND (post_title NOT LIKE ? AND post_excerpt NOT LIKE ? AND post_content NOT LIKE ?",
+                " NOT LIKE ?",
+                " AND ",
                 " AND EXISTS (SELECT 1 FROM {prefix}postmeta sq1 WHERE sq1.post_id = {prefix}posts.ID \
                  AND sq1.meta_key = '_wp_attached_file' AND sq1.meta_value NOT LIKE ?)",
             ),
             None => (
                 term.as_str(),
-                " AND (post_title LIKE ? OR post_excerpt LIKE ? OR post_content LIKE ?",
+                " LIKE ?",
+                " OR ",
                 " OR EXISTS (SELECT 1 FROM {prefix}postmeta sq1 WHERE sq1.post_id = {prefix}posts.ID \
                  AND sq1.meta_key = '_wp_attached_file' AND sq1.meta_value LIKE ?)",
             ),
         };
-        sql.push(columns);
+        sql.push(" AND (");
+        for (i, column) in columns.iter().enumerate() {
+            if i > 0 {
+                sql.push(joiner);
+            }
+            // Columns are ported names only, never the request's text.
+            sql.push(column_name(column));
+            sql.push(like_op);
+        }
         // `WP_Query` joins the meta as `sq1` and matches its value alike.
         if query.filenames {
             sql.push(filename);
@@ -1912,7 +1946,7 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
         } else {
             like(term)
         };
-        for _ in 0..3 + usize::from(query.filenames) {
+        for _ in 0..columns.len() + usize::from(query.filenames) {
             sql.bind(Bind::Text(pattern.clone()));
         }
     }
@@ -1967,6 +2001,15 @@ fn post_criteria(sql: &mut Sql, query: &PostQuery) {
             }
         };
         sql.bind(Bind::Int(value));
+    }
+}
+
+/// A searchable column's name: the content's unless the title or excerpt.
+fn column_name(column: &str) -> &'static str {
+    match column {
+        "post_title" => "post_title",
+        "post_excerpt" => "post_excerpt",
+        _ => "post_content",
     }
 }
 

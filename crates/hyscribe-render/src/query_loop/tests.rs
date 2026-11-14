@@ -277,6 +277,7 @@ fn order_keys_name_post_columns() {
         (&[b"rand"], OrderBy::Random),
         (&[b"post__in"], OrderBy::Included),
         (&[b"post_parent__in"], OrderBy::Parents),
+        (&[b"post_name__in"], OrderBy::Names),
     ] {
         for key in keys {
             assert_eq!(order_column(key), Some(column));

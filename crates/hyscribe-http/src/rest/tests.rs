@@ -13,6 +13,8 @@ use hyscribe_testkit::unhex;
 use tower::ServiceExt;
 
 use super::*;
+
+mod golden;
 use crate::router;
 use crate::tests::oracle_site;
 
@@ -153,7 +155,7 @@ async fn answers_match_php() {
     let dir = tempfile::tempdir().unwrap();
     let sites = (site(false, dir.path()).await, site(true, dir.path()).await);
     let golden = include_str!("../../../hyscribe-rest/tests/golden/rest.tsv");
-    assert_eq!(replay(&sites, golden, false).await, (2 * 64, 2 * 9));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 65, 2 * 8));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/content.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 89, 2 * 3));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/templates.tsv");

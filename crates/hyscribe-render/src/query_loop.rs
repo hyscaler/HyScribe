@@ -431,6 +431,7 @@ pub fn order_by(by: &Value, ascending: bool, query: &PostQuery) -> Vec<(OrderBy,
         order_column(key).filter(|c| match c {
             OrderBy::Included => query.include.is_some(),
             OrderBy::Parents => !query.parents.is_empty(),
+            OrderBy::Names => !query.names.is_empty(),
             _ => true,
         })
     };
@@ -480,6 +481,7 @@ fn order_column(key: &[u8]) -> Option<OrderBy> {
         b"rand" => OrderBy::Random,
         b"post__in" => OrderBy::Included,
         b"post_parent__in" => OrderBy::Parents,
+        b"post_name__in" => OrderBy::Names,
         _ => return None,
     })
 }

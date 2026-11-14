@@ -324,7 +324,7 @@ pub(crate) fn password_form(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
 
 /// `wp_replace_insecure_home_url()`: on an HTTPS site, links to its HTTP
 /// address become HTTPS, escaped slashes included.
-fn replace_insecure_home_url(home: &[u8], content: &[u8]) -> Vec<u8> {
+pub(crate) fn replace_insecure_home_url(home: &[u8], content: &[u8]) -> Vec<u8> {
     let Some(rest) = home.strip_prefix(b"https://") else {
         return content.to_vec();
     };

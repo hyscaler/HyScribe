@@ -87,6 +87,14 @@ impl hyscribe_rest::Site for Rest<'_> {
         user != 0 && caps().has_cap(&self.reads, cap, args)
     }
 
+    fn reads(&self) -> &dyn RenderSite {
+        &self.reads.reads
+    }
+
+    fn theme(&self) -> &hyscribe_render::theme::Theme {
+        &self.site.theme
+    }
+
     fn terms(&self, query: &TermQuery) -> Vec<Term> {
         RenderSite::term_query(&self.reads.reads, query)
     }
@@ -220,6 +228,10 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     let request = hyscribe_rest::Request {
         method: asked.method.as_str(),
         route: &asked.route,
+        uri: asked
+            .uri
+            .path_and_query()
+            .map_or(b"/", |uri| uri.as_str().as_bytes()),
         get: &get,
         post: &form,
         cookie_user: user,

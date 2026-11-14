@@ -8,8 +8,11 @@
 
 #![no_main]
 
-use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, Term, TermQuery, User, UserQuery};
+use std::sync::OnceLock;
+
+use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, PostQuery, Term, TermQuery, User, UserQuery};
 use hyscribe_phpser::{Key, Value, parse_str};
+use hyscribe_render::theme::{Theme, twentytwentyfive};
 use hyscribe_rest::{Request, Site, serve};
 use libfuzzer_sys::fuzz_target;
 
@@ -137,6 +140,43 @@ impl Site for Fuzzed<'_> {
     fn has_posts(&self, author: u64, _: &[(String, bool)]) -> bool {
         author == 1
     }
+    fn reads(&self) -> &dyn hyscribe_render::site::Site {
+        self
+    }
+    fn theme(&self) -> &Theme {
+        static THEME: OnceLock<Theme> = OnceLock::new();
+        THEME.get_or_init(twentytwentyfive)
+    }
+}
+
+/// The post routes' reads: one published post, 4, with the fuzzed content.
+impl hyscribe_render::site::Site for Fuzzed<'_> {
+    fn option(&self, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+    fn home_url(&self) -> Vec<u8> {
+        b"http://example.test".to_vec()
+    }
+    fn post(&self, id: u64) -> Option<Post> {
+        (id == 4).then(|| Post {
+            id,
+            author: 1,
+            content: self.content.to_vec(),
+            status: "publish".into(),
+            post_type: "post".into(),
+            ..Post::default()
+        })
+    }
+    fn post_terms(&self, _: u64, _: &str) -> Vec<Term> {
+        Vec::new()
+    }
+    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+    fn query(&self, query: &PostQuery) -> Vec<Post> {
+        let found = query.post_types.iter().any(|t| t == "post") && query.offset == 0;
+        found.then(|| hyscribe_render::site::Site::post(self, 4)).flatten().into_iter().collect()
+    }
 }
 
 fuzz_target!(|data: &[u8]| {
@@ -152,6 +192,7 @@ fuzz_target!(|data: &[u8]| {
     let request = Request {
         method,
         route,
+        uri: query,
         get: &get,
         post: &[],
         cookie_user: u64::from(header.first().copied().unwrap_or(0) % 3),

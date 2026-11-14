@@ -37,6 +37,9 @@ pub(crate) struct Content {
     pub(super) users: Vec<(User, String)>,
     /// The Theme Test Data fixture's.
     pub(super) ttd: bool,
+    /// The posts as rendering reads them, plain and pretty, of a state's
+    /// dump; none for a fixture's own.
+    pub(super) reads: Option<[super::site::Fixture; 2]>,
 }
 
 fn text(value: &SqlValue) -> Vec<u8> {
@@ -194,6 +197,7 @@ fn load(dump: &Dump) -> Content {
         postmeta,
         users,
         ttd: false,
+        reads: None,
     }
 }
 
@@ -212,7 +216,17 @@ pub(crate) fn default_install_with(state: &str) -> Content {
     let mut dump = hyscribe_testkit::default_install(&version).unwrap();
     dump.rows
         .extend(Dump::parse(state.as_bytes()).unwrap().rows);
-    load(&dump)
+    let dump: &'static Dump = Box::leak(Box::new(dump));
+    let fixture = |pretty| super::site::Fixture {
+        ttd: false,
+        pretty,
+        extra: false,
+        state: Some(dump),
+    };
+    Content {
+        reads: Some([fixture(false), fixture(true)]),
+        ..load(dump)
+    }
 }
 
 /// The default install with `reference/rest/people-more.sql`'s posts and
@@ -335,7 +349,7 @@ impl Content {
                     format!("{site}/?post_format={slug}")
                 }
             }
-            _ => {
+            ("category" | "post_tag", true) => {
                 let mut slugs = vec![String::from_utf8_lossy(&term.slug).into_owned()];
                 let mut parent = term.parent;
                 while let Some(row) = self
@@ -353,6 +367,11 @@ impl Content {
                 };
                 format!("{site}/{base}/{}/", slugs.join("/"))
             }
+            // A taxonomy without rewrite rules.
+            _ => format!(
+                "{site}/?taxonomy={taxonomy}&term={}",
+                String::from_utf8_lossy(&term.slug)
+            ),
         }
     }
 }

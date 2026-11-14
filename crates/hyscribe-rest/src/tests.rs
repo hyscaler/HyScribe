@@ -35,11 +35,15 @@ impl Oracle {
     fn over(content: &'static Content, pretty: bool) -> Oracle {
         Oracle {
             content,
-            fixture: site::Fixture {
-                ttd: content.ttd,
-                pretty,
-                extra: false,
-            },
+            fixture: content.reads.map_or(
+                site::Fixture {
+                    ttd: content.ttd,
+                    pretty,
+                    extra: false,
+                    state: None,
+                },
+                |fixtures| fixtures[usize::from(pretty)],
+            ),
             public_users: true,
         }
     }

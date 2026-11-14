@@ -10,6 +10,7 @@ mod comments;
 mod editor;
 mod embed;
 mod fields;
+mod navigation;
 pub(crate) mod posts;
 mod request;
 mod response;
@@ -222,6 +223,7 @@ fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         .or_else(|| users::endpoints(regex))
         .or_else(|| templates::endpoints(regex))
         .or_else(|| search::endpoints(regex))
+        .or_else(|| navigation::endpoints(regex))
 }
 
 /// `maybe_unserialize()` of a stored option or meta value: `false` where

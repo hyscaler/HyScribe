@@ -49,6 +49,13 @@ pub(crate) fn shown(name: &str) -> Option<&'static Value> {
         .map(|(_, fields)| fields)
 }
 
+/// Whether the taxonomy `name` is registered.
+pub(crate) fn registered(name: &str) -> bool {
+    taxonomies()
+        .iter()
+        .any(|(key, _)| key.to_php_string() == name.as_bytes())
+}
+
 fn is_shown(fields: &Value) -> bool {
     matches!(fields, Value::Array(_))
 }

@@ -412,13 +412,83 @@ async fn a_term_s_taxonomy_is_its_only_one() {
     assert_eq!(db.term_taxonomy(999_999).await.unwrap(), None);
 }
 
-#[tokio::test]
-async fn errors_are_reported() {
-    // Every query fails against tables that do not exist.
+/// A call of every query, each failing against tables that do not exist,
+/// with every piece the dialect writes.
+async fn every_query() -> Vec<DbError> {
     let mut config = fixture_config();
     config.prefix = Prefix::new("missing_").unwrap();
     let db = Db::connect(&config).await.unwrap();
-    for err in [
+    let dated = PostQuery {
+        year: Some(2026),
+        month: Some(1),
+        day: Some(1),
+        time: vec![
+            TimeCondition::Hour(1),
+            TimeCondition::Minute(1),
+            TimeCondition::Second(1),
+            TimeCondition::Formatted {
+                format: "%H.%i%s".into(),
+                time: "1.0101".into(),
+            },
+            TimeCondition::Week {
+                week: 1,
+                start_of_week: 3,
+            },
+        ],
+        order: vec![
+            (OrderBy::Random, true),
+            (OrderBy::Seeded(1), true),
+            (OrderBy::Included, true),
+            (OrderBy::Parents, true),
+            (OrderBy::Names, true),
+        ],
+        names: vec!["x".into()],
+        ..PostQuery::default()
+    };
+    let slugs = TermQuery {
+        slugs: vec![b"x".to_vec()],
+        order: Some((TermOrder::Slugs, false)),
+        limit: Some(1),
+        ..TermQuery::default()
+    };
+    let include = TermQuery {
+        include: vec![1],
+        order: Some((TermOrder::Include, false)),
+        ..TermQuery::default()
+    };
+    let comments = CommentQuery {
+        order: vec![(hyscribe_model::CommentOrder::Include, false)],
+        limit: Some(1),
+        ..CommentQuery::default()
+    };
+    let users = UserQuery {
+        order: (hyscribe_model::UserOrder::Include, false),
+        ..UserQuery::default()
+    };
+    let nicenames = UserQuery {
+        order: (hyscribe_model::UserOrder::Nicenames, false),
+        limit: Some(1),
+        ..UserQuery::default()
+    };
+    let mut errors = vec![
+        db.posts(&dated).await.unwrap_err(),
+        db.guess_post("x", &["post"], (Some(1), Some(1), Some(1)))
+            .await
+            .unwrap_err(),
+        db.date_counts(Period::Month).await.unwrap_err(),
+        db.date_counts(Period::Day).await.unwrap_err(),
+        db.date_counts(Period::Week(0)).await.unwrap_err(),
+        db.date_counts(Period::Week(1)).await.unwrap_err(),
+        db.date_counts(Period::Week(3)).await.unwrap_err(),
+        db.term_query(&slugs).await.unwrap_err(),
+        db.term_query(&include).await.unwrap_err(),
+        db.comment_query(&comments).await.unwrap_err(),
+        db.user_query(&users).await.unwrap_err(),
+        db.user_query(&nicenames).await.unwrap_err(),
+        db.has_posts(1, &[("post".into(), true)]).await.unwrap_err(),
+        db.post_months("post", false).await.unwrap_err(),
+    ];
+    errors.extend([
         db.autoload_options().await.unwrap_err(),
         db.post(1).await.unwrap_err(),
         db.posts(&PostQuery {
@@ -520,7 +590,13 @@ async fn errors_are_reported() {
             .await
             .unwrap_err(),
         db.user_registered(1).await.unwrap_err(),
-    ] {
+    ]);
+    errors
+}
+
+#[tokio::test]
+async fn errors_are_reported() {
+    for err in every_query().await {
         assert!(
             [
                 "missing_options",
@@ -617,7 +693,7 @@ fn order_follows_the_query() {
         (OrderBy::CommentCount, "comment_count"),
     ];
     for (column, name) in columns {
-        assert_eq!(order_column(column), name);
+        assert_eq!(order_column(column), Some(name));
     }
     let lists = posts_sql(&PostQuery {
         include: Some(vec![5, 3]),
@@ -2134,4 +2210,121 @@ fn orders_sort_by_their_columns() {
     for (order, column) in users {
         assert_eq!(people::user_column(order), column);
     }
+}
+
+/// The SQL every query emitted in this test binary, each [`Dialect`]
+/// fragment replaced by a marker.
+static EMITTED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+pub(super) fn emitted(sql: &str) {
+    EMITTED.lock().unwrap().push(sql.to_string());
+}
+
+/// The first MySQL or MariaDB only construct in `sql` (ADR 0014).
+fn mysql_only(sql: &str) -> Option<&'static str> {
+    const ONLY: &[&str] = &[
+        "`",
+        "LIMIT ?,",
+        " AS SIGNED",
+        " AS UNSIGNED",
+        " AS CHAR",
+        " AS DECIMAL",
+        " REGEXP ",
+        " RLIKE ",
+        "BINARY ",
+        " COLLATE ",
+        "SQL_CALC_FOUND_ROWS",
+        " INTERVAL ",
+        "ON DUPLICATE KEY",
+        "INSERT IGNORE",
+        "REPLACE INTO",
+        "STRAIGHT_JOIN",
+    ];
+    const FUNCTIONS: &[&str] = &[
+        "FIELD",
+        "RAND",
+        "IF",
+        "IFNULL",
+        "YEAR",
+        "MONTH",
+        "DAYOFMONTH",
+        "HOUR",
+        "MINUTE",
+        "SECOND",
+        "WEEK",
+        "DATE_SUB",
+        "DATE_ADD",
+        "DATE_FORMAT",
+        "NOW",
+        "UNIX_TIMESTAMP",
+        "GREATEST",
+        "LEAST",
+        "CONCAT",
+        "GROUP_CONCAT",
+        "FOUND_ROWS",
+    ];
+    let mut upper = sql.to_ascii_uppercase();
+    while upper.contains(" (") {
+        upper = upper.replace(" (", "(");
+    }
+    if let Some(found) = ONLY.iter().find(|only| upper.contains(*only)) {
+        return Some(found);
+    }
+    // A function name, as a whole word, before its parenthesis.
+    let words = upper.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '('));
+    let call = |word: &str| {
+        FUNCTIONS
+            .iter()
+            .copied()
+            .find(|f| word.strip_prefix(f) == Some("("))
+    };
+    words
+        .flat_map(|word| word.split_inclusive('('))
+        .find_map(call)
+}
+
+/// Each piece of the MySQL dialect is MySQL only, and the guard sees none
+/// of it in the portable text.
+#[test]
+fn the_guard_finds_only_the_dialect() {
+    let pieces: [fn(&mut Sql); 12] = [
+        Engine::random,
+        |sql| Engine::seeded_random(sql, 1),
+        |sql| Engine::list_order(sql, "ID", std::iter::once(Bind::Int(1))),
+        |sql| Engine::date_part(sql, DatePart::Year, "post_date"),
+        |sql| Engine::date_part(sql, DatePart::Day, "post_date"),
+        |sql| Engine::date_part(sql, DatePart::Second, "post_date"),
+        |sql| Engine::week(sql, "post_date", 0),
+        |sql| Engine::week(sql, "post_date", 4),
+        |sql| Engine::formatted_time(sql, "post_date", "%H".into(), "1".into()),
+        |sql| Engine::date_text(sql, "post_date"),
+        |sql| Engine::integer(sql, |sql| sql.push("menu_order")),
+        |sql| Engine::not_matching(sql, "meta_value", "^a$".into()),
+    ];
+    for piece in pieces {
+        let mut sql = Sql::new("SELECT ");
+        piece(&mut sql);
+        assert!(mysql_only(&sql.text).is_some(), "{}", sql.text);
+        assert_eq!(mysql_only(&sql.portable), None, "{}", sql.portable);
+    }
+    assert_eq!(
+        mysql_only("SELECT a FROM t WHERE f LIKE ? LIMIT ? OFFSET ?"),
+        None
+    );
+    assert_eq!(mysql_only("SELECT ifnull (a, b)"), Some("IFNULL"));
+    assert_eq!(mysql_only("SELECT x.ifnull(a, b)"), Some("IFNULL"));
+    assert_eq!(mysql_only("SELECT `a`"), Some("`"));
+    assert_eq!(mysql_only("SELECT NOTIF(a)"), None);
+}
+
+/// ADR 0014: the SQL the layer emits is portable outside the dialect.
+#[tokio::test]
+async fn emitted_sql_is_portable() {
+    let errors = every_query().await;
+    let emitted = EMITTED.lock().unwrap();
+    assert!(emitted.len() >= errors.len());
+    for sql in emitted.iter() {
+        assert_eq!(mysql_only(sql), None, "{sql}");
+    }
+    assert!(emitted.iter().any(|sql| sql.contains("/* dialect */")));
 }

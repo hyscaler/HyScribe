@@ -8,7 +8,8 @@
 # Then: DB_HOST=127.0.0.1 DB_PORT=33061 DB_NAME=wordpress DB_USER=wordpress
 #       DB_PASSWORD=reference-only
 # The wordpress_terms database holds the same install with terms.sql added,
-# and wordpress_ttd the Theme Test Data fixture when it has been built
+# wordpress_saves nothing until a test loads the install into it, and
+# wordpress_ttd the Theme Test Data fixture when it has been built
 # (reference/theme-test-data/build.sh).
 # Needs docker (or podman with DOCKER=podman).
 set -euo pipefail
@@ -43,6 +44,9 @@ case "${1:-}" in
       -e "CREATE DATABASE wordpress_terms; GRANT ALL ON wordpress_terms.* TO 'wordpress'@'%'"
     cat "$dump" "$ROOT/reference/default-install/terms.sql" |
       "$DOCKER" exec -i "$NAME" mariadb -uroot -preference-only wordpress_terms
+    # A scratch copy for the tests whose requests really write, which load it afresh.
+    "$DOCKER" exec "$NAME" mariadb -uroot -preference-only \
+      -e "CREATE DATABASE wordpress_saves; GRANT ALL ON wordpress_saves.* TO 'wordpress'@'%'"
     ttd="$ROOT/target/fixtures/theme-test-data/$version/database.sql"
     if [ -f "$ttd" ]; then
       "$DOCKER" exec "$NAME" mariadb -uroot -preference-only \

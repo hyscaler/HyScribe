@@ -2071,3 +2071,211 @@ async fn actions_answer_as_php_once_checked() {
         "{page}"
     );
 }
+
+/// A page view whose writes fail, before the page or after it, is the
+/// database error page; one with nothing to write sets the cookies alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn page_view_writes_that_fail() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let site = unwritable(site, "wp_").await;
+    let host = "127.0.0.1:8081";
+    let newer = format!("{cookies}; wp-settings-1=a%3D1; wp-settings-time-1=9999999999");
+    for (uri, cookie) in [
+        ("/hs-admin/", &cookies),
+        ("/hs-admin/?welcome=0", &cookies),
+        ("/hs-admin/tools", &newer),
+    ] {
+        let response = get(&site, uri, host, cookie).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{uri}"
+        );
+        let page = page_of(response).await;
+        assert!(
+            page.contains("Error establishing a database connection"),
+            "{uri}"
+        );
+    }
+    // Only a list's mode and the dashboard's `welcome` save.
+    for uri in [
+        "/hs-admin/tools",
+        "/hs-admin/tools?mode=excerpt",
+        "/hs-admin/tools?welcome=0",
+        "/hs-admin/edit?mode=",
+    ] {
+        let response = get(&site, uri, host, &cookies).await;
+        assert_eq!(response.status(), StatusCode::OK, "{uri}");
+        assert!(set_cookies(&response).starts_with("wp-settings-1=deleted;"));
+    }
+    // The Quick Draft: a field PHP cannot trim and a post that is not an
+    // auto-draft are not ported; the form after a bad nonce writes an auto-draft.
+    let nonce = session_nonce(&site, &cookies, "add-post").await;
+    let form = "application/x-www-form-urlencoded";
+    for (body, status) in [
+        ("post_ID=1&content[]=x", StatusCode::NOT_IMPLEMENTED),
+        ("post_ID=1&content=x", StatusCode::NOT_IMPLEMENTED),
+        (
+            "post_ID=1&content=x&_wpnonce=bad",
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+    ] {
+        let body = format!("action=post-quickdraft-save&_wpnonce={nonce}&{body}");
+        let response = send(
+            &site,
+            "POST",
+            "/hs-admin/post",
+            &cookies,
+            Some((form, &body)),
+        )
+        .await;
+        assert_eq!(response.status(), status, "{body}");
+    }
+    // A list's mode is not saved with a page that is not ported.
+    let unported = get(
+        &site,
+        "/hs-admin/edit?mode=excerpt&unknown=1",
+        host,
+        &cookies,
+    )
+    .await;
+    assert_eq!(unported.status(), StatusCode::NOT_IMPLEMENTED);
+    // A writer that refuses the database's version begins no view, and is
+    // not asked to where there is nothing to write.
+    let site = unwritable(site, "missing_").await;
+    let response = get(&site, "/hs-admin/", host, &cookies).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    for (uri, cookie, status) in [
+        ("/hs-admin/tools", &cookies, StatusCode::OK),
+        ("/hs-admin/edit?paged=9", &newer, StatusCode::FOUND),
+    ] {
+        assert_eq!(
+            get(&site, uri, host, cookie).await.status(),
+            status,
+            "{uri}"
+        );
+    }
+}
+
+/// `text` with each run from `start` to the next `end` replaced by `with`.
+fn replaced(text: &str, (start, end): (&str, &str), with: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some((at, to)) = rest
+        .find(start)
+        .and_then(|at| Some((at, at + rest.get(at..)?.find(end)? + end.len())))
+    {
+        out.push_str(rest.get(..at).unwrap());
+        out.push_str(with);
+        rest = rest.get(to..).unwrap();
+    }
+    out + rest
+}
+
+/// The Set-Cookie headers of `response` as `reference/admin-views/golden.sh`
+/// masks them.
+fn set_cookies(response: &Response) -> String {
+    let cookies = response.headers().get_all(header::SET_COOKIE).iter();
+    let cookies: Vec<String> = cookies
+        .map(|cookie| {
+            let cookie = cookie.to_str().unwrap();
+            let cookie = replaced(
+                cookie,
+                ("wp-settings-time-1=", ";"),
+                "wp-settings-time-1=%now%;",
+            );
+            let year = ("expires=", "; Max-Age=31536000");
+            replaced(&cookie, year, "expires=%expires%; Max-Age=31536000")
+        })
+        .collect();
+    cookies.join(" | ")
+}
+
+/// The requests of `reference/admin-views/golden.sh`, in order, in primary
+/// mode over a fresh copy of the default install, really writing: each
+/// answer, cookie and page is PHP's.
+#[tokio::test(flavor = "multi_thread")]
+async fn page_views_and_screen_state_write_as_php() {
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..hyscribe_testkit::fixture_database()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in(&db.name, dir.path()).await;
+    let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary).await;
+    let site = Arc::new(
+        Arc::try_unwrap(site)
+            .ok()
+            .unwrap()
+            .with_writer(writer.unwrap()),
+    );
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-views.tsv");
+    let cases = include_str!("../../../../reference/admin-views/cases.list");
+    let cases = cases.lines().filter(|line| !line.starts_with('#'));
+    for (row, line) in golden.lines().zip(cases) {
+        let [case, status, php_location, php_cookies, body] =
+            row.split('\t').collect::<Vec<_>>()[..]
+        else {
+            panic!("{row}");
+        };
+        let [_, method, target, data, action, field, cookie] =
+            line.split('\t').collect::<Vec<_>>()[..]
+        else {
+            panic!("{line}");
+        };
+        let uri = format!("/hs-admin/{}", target.replace(".php", ""));
+        let jar = match cookie {
+            "-" => cookies.clone(),
+            cookie => format!("{cookies}; {cookie}"),
+        };
+        let response = if method == "POST" {
+            let nonce = match action {
+                "-" => "bad".to_string(),
+                action => session_nonce(&site, &cookies, action).await,
+            };
+            let form = format!("{data}&{field}={nonce}");
+            let form = ("application/x-www-form-urlencoded", form.as_str());
+            send(&site, "POST", &uri, &jar, Some(form)).await
+        } else {
+            send(&site, "GET", &uri, &jar, None).await
+        };
+        assert_eq!(response.status().as_str(), status, "{case}");
+        let ours = response.headers().get(header::LOCATION);
+        let php_location = php_location
+            .replace("/wp-admin/", "/hs-admin/")
+            .replace(".php", "");
+        assert_eq!(
+            ours.map_or("", |l| l.to_str().unwrap()),
+            php_location,
+            "{case}"
+        );
+        assert_eq!(set_cookies(&response), php_cookies, "{case}");
+        // `admin-ajax.php`'s answers are not pages: JSON, or text.
+        if target == "admin-ajax.php" {
+            let kind = response.headers().get(header::CONTENT_TYPE).unwrap();
+            // The body is hex: `{` is `7b`.
+            let json = body.starts_with("7b");
+            assert_eq!(
+                kind.to_str().unwrap().starts_with("application/json"),
+                json,
+                "{case}"
+            );
+            assert!(response.headers().contains_key("x-robots-tag"), "{case}");
+        }
+        let dates = ("<time datetime=\"", "</time>");
+        let page = replaced(
+            &page_of(response).await,
+            dates,
+            "<time datetime=\"%date%\">%date%</time>",
+        );
+        let page = hyscribe_testkit::settled_page(&page);
+        let php = String::from_utf8(hyscribe_testkit::unhex(body)).unwrap();
+        let php = hyscribe_testkit::settled_page(&hyscribe_testkit::hs_admin_page(&php));
+        assert_eq!(with_values(&php, &page), page, "{case}");
+    }
+    assert_eq!(golden.lines().count(), 17);
+}

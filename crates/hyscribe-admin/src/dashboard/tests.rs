@@ -195,7 +195,7 @@ fn quick_draft_is_php_s() {
             "\n\t<form name=\"post\"",
             "</div>\n</div>\n<div id=\"dashboard_primary\"",
         );
-        let ours = quick_press(&Role(role), "/hs-admin/index");
+        let ours = quick_press(&Role(role), "/hs-admin/index", None);
         assert!(
             ours == php,
             "{role}{}",
@@ -457,7 +457,7 @@ fn review_cases() {
             .iter()
             .any(|w| w.id == "dashboard_right_now" && w.context == "side")
     );
-    let form = quick_press(&site, "/hs-admin/index?a=1&b=2&_wp_http_referer=x");
+    let form = quick_press(&site, "/hs-admin/index?a=1&b=2&_wp_http_referer=x", None);
     assert!(form.contains("name=\"_wp_http_referer\" value=\"/hs-admin/index?a=1&#038;b=2\""));
 }
 

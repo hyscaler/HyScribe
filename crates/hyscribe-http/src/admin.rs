@@ -50,6 +50,7 @@ use crate::redirect::wp_sanitize_redirect;
 use crate::{Site, now};
 
 mod saves;
+mod views;
 
 /// Whether `path` is an hs-admin screen: its files have an extension and
 /// are served, or missing, as Apache serves `wp-admin`'s.
@@ -110,6 +111,11 @@ fn refused(public: bool, refusal: Refusal) -> Response {
         Body::Text(text) => ("text/html; charset=UTF-8", text.into_bytes()),
         Body::Json(json) => ("application/json; charset=UTF-8", json.as_bytes().to_vec()),
     };
+    ajax_text(status, kind, body)
+}
+
+/// An answer as `admin-ajax.php` sends it, of the type `kind`.
+fn ajax_text(status: StatusCode, kind: &str, body: Vec<u8>) -> Response {
     let mut headers = nocache();
     headers.push((header::CONTENT_TYPE, kind.to_string()));
     headers.push((header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()));
@@ -163,6 +169,10 @@ struct Admin<'a> {
     /// The comments of each post, of every status, as paged comment links
     /// read them.
     post_comments: RefCell<HashMap<u64, Vec<(hyscribe_model::Comment, String)>>>,
+    /// The Quick Draft form's auto-draft this view wrote, if it did.
+    draft: Option<u64>,
+    /// `show_welcome_panel` as this view's `?welcome=` saves it.
+    welcome: Option<Vec<u8>>,
 }
 
 impl<'a> Admin<'a> {
@@ -178,6 +188,8 @@ impl<'a> Admin<'a> {
             referer: None,
             uri: String::new(),
             post_comments: RefCell::default(),
+            draft: None,
+            welcome: None,
         }
     }
 
@@ -430,7 +442,8 @@ impl PageSite for Admin<'_> {
 
 impl DashboardSite for Admin<'_> {
     fn show_welcome_panel(&self) -> Option<Vec<u8>> {
-        self.reads.user_meta(self.user.id, "show_welcome_panel")
+        let stored = || self.reads.user_meta(self.user.id, "show_welcome_panel");
+        self.welcome.clone().or_else(stored)
     }
     fn user_email(&self) -> Vec<u8> {
         self.user.email.clone()
@@ -500,6 +513,9 @@ impl DashboardSite for Admin<'_> {
         self.posts(status, None, StatusOrder::DateDesc, 5)
     }
     fn quick_draft(&self) -> Option<u64> {
+        if self.draft.is_some() {
+            return self.draft;
+        }
         let stored = self
             .reads
             .user_option(self.user.id, "dashboard_quick_press_last_post_id")?;
@@ -1191,9 +1207,10 @@ fn screen(
         }
         "/hs-admin/users" => users(admin, &user_args(query)?, &request),
         "/hs-admin/" | "/hs-admin/index" => {
-            // `welcome` saves the welcome panel's option for a user who sees it.
+            // `welcome` saves the welcome panel's option for a user who sees
+            // it, which shadow mode does not.
             let welcome = parse_str(query.as_bytes()).get_str("welcome").is_some();
-            if welcome && admin.can("edit_theme_options") {
+            if welcome && admin.can("edit_theme_options") && admin.welcome.is_none() {
                 return None;
             }
             Answer::from_page(dashboard(admin, &request))
@@ -1250,7 +1267,7 @@ fn died(admin: &Admin, status: StatusCode, message: &str) -> Response {
 
 /// The answer to an action past its checks: 501 without a handler, shadow
 /// mode's `wp_die()` without a writer, else the handler's in one action.
-fn save(admin: &Admin, screen: &str, asked: &Asked) -> Response {
+fn save(admin: &mut Admin, screen: &str, asked: &Asked) -> Response {
     let action = hyscribe_admin::actions::action(screen, asked);
     let Some(handler) = saves::handler(screen, &action) else {
         return not_ported();
@@ -1258,13 +1275,71 @@ fn save(admin: &Admin, screen: &str, asked: &Asked) -> Response {
     let Some(writer) = &admin.site.writer else {
         return denied(admin, READ_ONLY);
     };
-    let saved = Handle::current()
-        .block_on(async { saves::act(writer.begin().await, handler, asked).await });
-    match saved {
-        Ok(answer) => served(admin, answer),
-        Err(hyscribe_write::Error::Unported(_)) => not_ported(),
-        Err(err) => crate::html(crate::database_error(admin.site, &format!("{err:?}"))),
+    let act = || {
+        Handle::current().block_on(async { saves::act(writer.begin().await, handler, asked).await })
+    };
+    if screen == "post" {
+        return quick_draft(admin, writer, asked, act);
     }
+    match act() {
+        // Only `admin-ajax.php`'s handlers answer with text: its `wp_die()`
+        // and `wp_send_json()`.
+        Ok(Answer::Page(body)) => {
+            let kind = match body.starts_with('{') {
+                true => "application/json; charset=UTF-8",
+                false => "text/html; charset=UTF-8",
+            };
+            ajax_text(StatusCode::OK, kind, body.into_bytes())
+        }
+        Ok(answer) => served(admin, answer),
+        Err(err) => failed(admin, err),
+    }
+}
+
+/// The answer to a write function's error: 501 for what is not ported,
+/// else the database error page.
+fn failed(admin: &Admin, err: hyscribe_write::Error) -> Response {
+    match err {
+        hyscribe_write::Error::Unported(_) => not_ported(),
+        err => crate::html(crate::database_error(admin.site, &format!("{err:?}"))),
+    }
+}
+
+/// `post.php`'s Quick Draft once checked: saved by `act` with a valid
+/// nonce and a title or content, then the form, a page view, with its notice.
+fn quick_draft(
+    admin: &mut Admin,
+    writer: &hyscribe_db::Writer,
+    asked: &Asked,
+    act: impl FnOnce() -> Result<Answer, hyscribe_write::Error>,
+) -> Response {
+    let nonce = asked.request("_wpnonce").map(Value::to_php_string);
+    let verified = nonce.is_some_and(|nonce| ActionSite::verify_nonce(admin, &nonce, "add-post"));
+    let notice = match hyscribe_admin::actions::quickdraft_filled(asked) {
+        _ if !verified => (
+            "Unable to submit this form, please refresh and try again.",
+            "error",
+        ),
+        None => return not_ported(),
+        Some(false) => (
+            "Cannot create a draft post with empty title and content.",
+            "error",
+        ),
+        Some(true) => match act() {
+            Ok(_) => {
+                // The checks read the auto-draft the save made a draft.
+                admin.posts.borrow_mut().clear();
+                ("Draft created successfully.", "success")
+            }
+            Err(err) => return failed(admin, err),
+        },
+    };
+    let view = views::quick_press(admin);
+    let uri = String::from_utf8_lossy(asked.uri).into_owned();
+    views::viewed(admin, writer, view, |admin| {
+        let form = hyscribe_admin::dashboard::quick_press(admin, &uri, Some(notice));
+        response(StatusCode::OK, screen_headers(), form.into_bytes())
+    })
 }
 
 /// What an action reads of the request: `$_GET` and `$_POST`, unslashed.
@@ -1313,7 +1388,11 @@ fn ajax_answer(
         Some((id, token)) => {
             reads.act_as(id, token);
             let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
-            admin_ajax(Some(&Admin::new(reads, site, user)), &asked)
+            let mut admin = Admin::new(reads, site, user);
+            match admin_ajax(Some(&admin), &asked) {
+                Ok(()) => return save(&mut admin, "admin-ajax", &asked),
+                refused => refused,
+            }
         }
         None => admin_ajax(None, &asked),
     };
@@ -1371,7 +1450,7 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 let name = uri.path().strip_prefix("/hs-admin/").unwrap_or_default();
                 match hyscribe_admin::actions::admin(&admin, name, &asked, post) {
                     Some(Err(refusal)) => return refused(reads.public(), refusal),
-                    Some(Ok(())) => return save(&admin, name, &asked),
+                    Some(Ok(())) => return save(&mut admin, name, &asked),
                     None if post => return not_ported(),
                     None => {}
                 }
@@ -1388,8 +1467,17 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
                 let url = text(&[scheme, &here].concat());
                 let origin = text(&[scheme, host].concat());
-                screen(&admin, uri.path(), &requested, &url, &origin, &browser)
-                    .unwrap_or_else(not_ported)
+                let render = |admin: &Admin| {
+                    screen(admin, uri.path(), &requested, &url, &origin, &browser)
+                        .unwrap_or_else(not_ported)
+                };
+                match &site.writer {
+                    Some(writer) => {
+                        let view = views::plan(&mut admin, &cookies, uri.path(), &get, now);
+                        views::viewed(&mut admin, writer, view, render)
+                    }
+                    None => render(&admin),
+                }
             })
         }
         None => {

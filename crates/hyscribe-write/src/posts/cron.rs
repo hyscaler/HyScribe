@@ -81,6 +81,11 @@ fn add(crons: &mut Crons, (now, at): (i64, i64), hook: &str, post: Option<u64>) 
         }
     }
     let event = vec![(name("schedule"), Value::Bool(false)), (name("args"), args)];
+    put(crons, at, hook, key, event);
+}
+
+/// `$crons[ $at ][ $hook ][ $key ] = $event`, the timestamps sorted.
+fn put(crons: &mut Crons, at: i64, hook: &str, key: Key, event: Crons) {
     update(crons, Key::Int(at), |mut hooks| {
         update(&mut hooks, name(hook), |mut events| {
             update(&mut events, key, |_| event);
@@ -151,6 +156,19 @@ pub(super) async fn schedule(
     let mut crons = crons(write).await?;
     // A duplicate leaves the option as it is, which writes nothing.
     add(&mut crons, times, hook, post);
+    set_crons(write, crons).await
+}
+
+/// `wp_schedule_event( $now, 'daily', $hook )` of an event without arguments.
+pub(super) async fn schedule_daily(write: &mut Write<'_>, now: i64, hook: &str) -> Result<()> {
+    let mut crons = crons(write).await?;
+    let args = args(None);
+    let event = vec![
+        (name("schedule"), Value::String(b"daily".to_vec())),
+        (name("args"), args.clone()),
+        (name("interval"), Value::Int(86_400)),
+    ];
+    put(&mut crons, now, hook, key(&args), event);
     set_crons(write, crons).await
 }
 

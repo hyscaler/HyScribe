@@ -1638,6 +1638,17 @@ async fn posts_list_reads() {
     let counts: Vec<(&str, u64)> = counts.iter().map(|(s, n)| (s.as_str(), *n)).collect();
     assert_eq!(counts, [("draft", 1), ("future", 1), ("publish", 57)]);
     assert_eq!(ttd.status_counts("page", Some(2)).await.unwrap().len(), 2);
+    let named = ttd
+        .named_status_counts("post", "hello-world")
+        .await
+        .unwrap();
+    assert_eq!(named, [("publish".to_string(), 1)]);
+    assert!(
+        ttd.named_status_counts("page", "hello-world")
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(ttd.own_posts("post", 2).await.unwrap(), 39);
     assert_eq!(ttd.sticky_count("post", &[1241, 155]).await.unwrap(), 1);
     let months = ttd.post_months("post", false).await.unwrap();

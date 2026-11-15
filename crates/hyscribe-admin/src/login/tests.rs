@@ -266,6 +266,9 @@ impl Site for AnyEmail {
     fn post_type(&self, id: u64) -> Option<String> {
         self.0.post_type(id)
     }
+    fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
+        self.0.site_icon(size)
+    }
 }
 
 /// `use_ssl` is looked up by email only for a name with an `@` after its

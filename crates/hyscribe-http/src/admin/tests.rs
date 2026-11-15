@@ -1011,6 +1011,7 @@ async fn refusals() {
         ),
         ("/hs-admin/user-edit?user_id=1", true, None),
         ("/hs-admin/user-new", false, Some(StatusCode::FORBIDDEN)),
+        ("/hs-admin/user-new?update[]=add", false, None),
         ("/hs-admin/themes", false, Some(StatusCode::FORBIDDEN)),
         ("/hs-admin/import", false, Some(StatusCode::FORBIDDEN)),
         ("/hs-admin/export", false, Some(StatusCode::FORBIDDEN)),

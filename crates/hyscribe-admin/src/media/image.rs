@@ -161,7 +161,9 @@ pub fn site_icon_url(site: &dyn PostsSite, size: i64) -> Option<Vec<u8>> {
     let file = site.meta(&post, "_wp_attached_file").unwrap_or_default();
     let image = is_image(&file, &post.mime_type);
     let url = if size < 512 {
-        downsize(url, &meta, image, (size, size))?.0
+        downsize(url, &meta, image, (size, size))
+            .unwrap_or_default()
+            .0
     } else {
         // `image_downsize( $id, 'full' )`: a stored `full` size, which a
         // file that is not an image needs.

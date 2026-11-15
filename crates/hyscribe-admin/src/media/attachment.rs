@@ -9,6 +9,7 @@ use hyscribe_phpser::{Value, add_query_arg, is_empty_string, wp_basename};
 use hyscribe_render::attachment::is_image;
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::post::admin_title;
+use hyscribe_render::template::replace;
 use hyscribe_render::user_avatar;
 
 use super::MediaSite;
@@ -108,12 +109,8 @@ impl AttachmentArgs {
 /// as its trash meta keeps it), `publish` without one, or its own private
 /// status.
 fn post_status(site: &dyn AttachmentSite, post: &Post) -> String {
-    if post.status != "inherit" {
-        return if post.status == "private" {
-            post.status.clone()
-        } else {
-            "publish".into()
-        };
+    if post.status == "private" {
+        return post.status.clone();
     }
     let parent = (post.parent != post.id).then(|| site.post(post.parent));
     match parent.flatten() {
@@ -331,15 +328,9 @@ fn file_details(site: &dyn AttachmentSite, post: &Post, meta: &Value, size: i64)
     }
     let original = meta.get_str("original_image").map(Value::to_php_string);
     if let Some(original) = original.filter(|original| !is_empty_string(original)) {
-        // `wp_get_original_image_url()` and its path, of images only.
-        let (link, name) = if is_image(&file, &post.mime_type) {
-            let dir = url
-                .get(..url.iter().rposition(|b| *b == b'/').unwrap_or(0))
-                .unwrap_or_default();
-            ([dir, b"/", &original].concat(), wp_basename(&original))
-        } else {
-            Default::default()
-        };
+        // `wp_get_original_image_url()` and its path; only images get here.
+        let link = replace(&url, &wp_basename(&url), &original);
+        let name = wp_basename(&original);
         out.push_str(&format!(
             "		<div class=\"misc-pub-section misc-pub-original-image word-wrap-break-word\">\n\t\t\tOriginal image:\t\t\t<a href=\"{}\">\n\t\t\t\t<strong>{}</strong>\n\t\t\t</a>\n\t\t</div>\n\t\t",
             String::from_utf8_lossy(&esc_url(&link)),
@@ -536,9 +527,16 @@ pub fn attachment_edit(
             "You cannot edit this item because it is in the Trash. Please restore it and try again.",
         ));
     }
-    // Not ported: a media player, a file size read from disk and pretty
-    // permalinks' slug.
+    // Not ported: a media player, a file size read from disk, pretty
+    // permalinks' slug, a status but inherit or private, and a scaled
+    // original of a file that is not an image.
+    let file = site.meta(&post, "_wp_attached_file").unwrap_or_default();
+    let original = meta
+        .get_str("original_image")
+        .is_some_and(|o| !o.is_empty());
     let unported = post.mime_type.starts_with("audio/")
+        || !["inherit", "private"].contains(&post.status.as_str())
+        || original && !is_image(&file, &post.mime_type)
         || post.mime_type.starts_with("video/")
         || size <= 0
         || site

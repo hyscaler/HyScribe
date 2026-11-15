@@ -75,9 +75,7 @@ pub trait Site: Urls {
     /// `get_post( $id )->post_type`, none for no post.
     fn post_type(&self, id: u64) -> Option<String>;
     /// `get_site_icon_url( $size )`, `None` for no icon.
-    fn site_icon(&self, _size: i64) -> Option<Vec<u8>> {
-        None
-    }
+    fn site_icon(&self, size: i64) -> Option<Vec<u8>>;
 }
 
 /// What the login screen answers.
@@ -132,16 +130,15 @@ pub(crate) fn set_url_scheme(url: &str, scheme: &str) -> String {
     format!("{scheme}://{rest}")
 }
 
-/// `set_url_scheme( $url, 'https' )` of a URL the site made.
-fn https(url: &str) -> String {
-    set_url_scheme(url, "https")
-}
-
 /// The login screen's URL with `query`, under `force_ssl_admin()` when
 /// `secure`.
 fn login_url(site: &dyn Site, query: &str, secure: bool) -> String {
     let url = site.login_url(query);
-    if secure { https(&url) } else { url }
+    if secure {
+        set_url_scheme(&url, "https")
+    } else {
+        url
+    }
 }
 
 impl Request<'_> {
@@ -294,7 +291,7 @@ pub fn login(site: &dyn Site, request: &Request) -> Login {
                 _ => to,
             }
         }
-        None if secure => https(&site.admin_url("")).into_bytes(),
+        None if secure => set_url_scheme(&site.admin_url(""), "https").into_bytes(),
         None => site.admin_url("").into_bytes(),
     };
     let reauth = request.request("reauth").is_some_and(|v| !v.is_empty());

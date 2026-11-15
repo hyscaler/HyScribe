@@ -676,12 +676,11 @@ pub(crate) fn site_icon_tags(icon: &dyn Fn(i64) -> Option<Vec<u8>>) -> String {
         ),
     ];
     let mut out = String::new();
+    // An icon with a full image has every smaller size.
     for (size, tag) in tags {
-        if let Some(url) = icon(size) {
-            let url = String::from_utf8_lossy(&esc_url(&url)).into_owned();
-            out.push_str(&tag.replace("%s", &url));
-            out.push('\n');
-        }
+        let url = esc_url(&icon(size).unwrap_or_default());
+        out.push_str(&tag.replace("%s", &String::from_utf8_lossy(&url)));
+        out.push('\n');
     }
     out
 }

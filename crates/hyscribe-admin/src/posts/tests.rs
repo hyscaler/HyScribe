@@ -679,3 +679,17 @@ fn nothing_to_filter_shows_no_filter_button() {
     assert!(page.contains("No pages found in Trash."));
     assert!(!page.contains("post-query-submit"));
 }
+
+/// A preview link takes the site URL's scheme, as `set_url_scheme()` gives
+/// it the admin's (the other way round in the `h9home` golden).
+#[test]
+fn previews_take_the_admin_s_scheme() {
+    let draft = Post {
+        id: 301,
+        status: "draft".into(),
+        post_type: "post".into(),
+        ..Post::default()
+    };
+    let link = preview_link(&Role("h9ssl:administrator"), &draft, &[]);
+    assert_eq!(link, b"https://127.0.0.1:8081/?p=301&preview=true");
+}

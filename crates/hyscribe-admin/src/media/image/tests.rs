@@ -227,3 +227,13 @@ fn site_icons_are_php_s() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert_eq!(golden.lines().count(), 7);
 }
+
+/// From 512 the icon is the full image, not a stored size that fits, as
+/// `get_site_icon_url()` asks for `full` there.
+#[test]
+fn a_large_site_icon_is_the_full_image() {
+    let site = Role("h9iconbig:administrator");
+    let url = |size| String::from_utf8(site_icon_url(&site, size).unwrap()).unwrap();
+    assert!(url(512).ends_with("/2026/11/big.png"));
+    assert!(url(511).ends_with("/2026/11/big-512x512.png"));
+}

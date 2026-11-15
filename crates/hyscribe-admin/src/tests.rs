@@ -317,6 +317,7 @@ impl Role {
             ("h9iconbare", "site_icon") => b"952",
             ("h9iconpdf", "site_icon") => b"953",
             ("h9iconnone", "site_icon") => b"954",
+            ("h9iconbig", "site_icon") => b"955",
             ("a5auto", "auto_update_themes") => b"a:1:{i:0;s:16:\"twentytwentyfive\";}",
             ("g9parent", "template") => b"twentytwentyfour",
             ("g9gone" | "g9noswitch" | "g9nooptions", "stylesheet" | "template")
@@ -721,7 +722,11 @@ impl MenuUser for Role {
 }
 
 impl Urls for Role {
+    /// The site URL, HTTPS in the `h9ssl` variant.
     fn site_url(&self) -> String {
+        if self.variant() == "h9ssl" {
+            return SITE.replace("http:", "https:");
+        }
         SITE.into()
     }
     fn admin_url(&self, path: &str) -> String {
@@ -1647,11 +1652,11 @@ impl crate::posts::PostsSite for Role {
         crate::posts::content::months(self.posts(), post_type, trash)
     }
     fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
-        if self.variant().starts_with("h9icon") && (951..=954).contains(&id) {
+        if self.variant().starts_with("h9icon") && (951..=955).contains(&id) {
             return Some(hyscribe_model::Post {
                 id,
                 post_type: "attachment".into(),
-                mime_type: if id < 953 {
+                mime_type: if id < 953 || id == 955 {
                     "image/png"
                 } else {
                     "application/pdf"
@@ -1716,6 +1721,10 @@ fn icon_meta(id: u64, key: &str) -> Option<Vec<u8>> {
         (953, "_wp_attachment_metadata") => b"a:2:{s:8:\"filesize\";i:5000;s:5:\"sizes\";a:2:{s:4:\"full\";a:4:{s:4:\"file\";s:11:\"doc-pdf.jpg\";s:5:\"width\";i:1088;s:6:\"height\";i:1408;s:9:\"mime-type\";s:10:\"image/jpeg\";}s:9:\"thumbnail\";a:4:{s:4:\"file\";s:19:\"doc-pdf-116x150.jpg\";s:5:\"width\";i:116;s:6:\"height\";i:150;s:9:\"mime-type\";s:10:\"image/jpeg\";}}}",
         (954, "_wp_attached_file") => b"2026/11/bare.pdf",
         (954, "_wp_attachment_metadata") => b"a:1:{s:8:\"filesize\";i:5000;}",
+        (955, "_wp_attached_file") => b"2026/11/big.png",
+        (955, "_wp_attachment_metadata") => {
+            b"a:4:{s:5:\"width\";i:1024;s:6:\"height\";i:1024;s:4:\"file\";s:15:\"2026/11/big.png\";s:5:\"sizes\";a:1:{s:13:\"site_icon-512\";a:3:{s:4:\"file\";s:15:\"big-512x512.png\";s:5:\"width\";i:512;s:6:\"height\";i:512;}}}"
+        }
         _ => return None,
     };
     Some(value.to_vec())

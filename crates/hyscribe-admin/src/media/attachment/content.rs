@@ -152,18 +152,20 @@ pub(crate) fn posts() -> Vec<Post> {
 }
 
 /// Attachments the screen does not port, which no golden records: audio,
-/// video and sizeless.
+/// video, published, a PDF with a scaled original, and sizeless.
 pub(crate) fn unported() -> Vec<Post> {
     [
-        (901, "audio/mpeg"),
-        (902, "video/mp4"),
-        (905, "application/pdf"),
+        (901, "audio/mpeg", "inherit"),
+        (902, "video/mp4", "inherit"),
+        (903, "image/png", "publish"),
+        (904, "application/pdf", "inherit"),
+        (905, "application/pdf", "inherit"),
     ]
     .into_iter()
-    .map(|(id, mime_type)| Post {
+    .map(|(id, mime_type, status)| Post {
         id,
         author: 1,
-        status: "inherit".into(),
+        status: status.into(),
         post_type: "attachment".into(),
         mime_type: mime_type.into(),
         ..Post::default()
@@ -174,7 +176,10 @@ pub(crate) fn unported() -> Vec<Post> {
 /// The post meta the content adds, and the unported attachments'.
 pub(crate) fn meta(id: u64, key: &str) -> Option<Vec<u8>> {
     let value: &[u8] = match (id, key) {
-        (901 | 902, "_wp_attachment_metadata") => b"a:1:{s:8:\"filesize\";i:1;}",
+        (901..=903, "_wp_attachment_metadata") => b"a:1:{s:8:\"filesize\";i:1;}",
+        (904, "_wp_attachment_metadata") => {
+            b"a:2:{s:8:\"filesize\";i:1;s:14:\"original_image\";s:5:\"a.pdf\";}"
+        }
         (801, "_wp_attached_file") => b"2026/03/sunset.jpg",
         (801, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:1200;s:6:\"height\";i:600;s:4:\"file\";s:18:\"2026/03/sunset.jpg\";s:8:\"filesize\";i:345678;s:5:\"sizes\";a:4:{s:6:\"medium\";a:5:{s:4:\"file\";s:18:\"sunset-300x150.jpg\";s:5:\"width\";i:300;s:6:\"height\";i:150;s:9:\"mime-type\";s:10:\"image/jpeg\";s:8:\"filesize\";i:12345;}s:5:\"large\";a:5:{s:4:\"file\";s:19:\"sunset-1024x512.jpg\";s:5:\"width\";i:1024;s:6:\"height\";i:512;s:9:\"mime-type\";s:10:\"image/jpeg\";s:8:\"filesize\";i:123456;}s:9:\"thumbnail\";a:5:{s:4:\"file\";s:18:\"sunset-150x150.jpg\";s:5:\"width\";i:150;s:6:\"height\";i:150;s:9:\"mime-type\";s:10:\"image/jpeg\";s:8:\"filesize\";i:5432;}s:12:\"medium_large\";a:5:{s:4:\"file\";s:18:\"sunset-768x384.jpg\";s:5:\"width\";i:768;s:6:\"height\";i:384;s:9:\"mime-type\";s:10:\"image/jpeg\";s:8:\"filesize\";i:65432;}}s:10:\"image_meta\";a:0:{}}",
         (801, "_wp_attachment_image_alt") => b"Alt \"text\" &amp; more",
@@ -191,7 +196,6 @@ pub(crate) fn meta(id: u64, key: &str) -> Option<Vec<u8>> {
         (808, "_wp_attached_file") => b"2024/03/data.csv",
         (808, "_wp_attachment_metadata") => b"a:1:{s:8:\"filesize\";i:100;}",
         (810, "_wp_attached_file") => b"2026/04/gone.png",
-        (810, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:16:\"2026/04/gone.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
         (811, "_wp_attached_file") => b"2026/04/shot.png",
         (811, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:16:\"2026/04/shot.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
         (812, "_wp_attached_file") => b"2026/05/big-scaled.jpg",

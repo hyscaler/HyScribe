@@ -177,6 +177,8 @@ fn unported_states_answer_nothing() {
         ("a8lockpretty", "801"),
         ("a8lock", "901"),
         ("a8lock", "902"),
+        ("a8lock", "903"),
+        ("a8lock", "904"),
         ("a8lock", "905"),
     ] {
         let screen = format!("post.php?post={post}&action=edit");

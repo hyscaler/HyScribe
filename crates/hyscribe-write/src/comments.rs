@@ -13,9 +13,11 @@ mod filter;
 
 use hyscribe_db::{CommentFields, DbError, Meta, Write};
 use hyscribe_phpser::{Value, is_empty_string};
-use hyscribe_render::date::{Zone, format_unix, site_zone, stored_unix};
+use hyscribe_render::date::{Zone, format_unix, stored_unix};
 
-use crate::steps::Steps;
+use crate::options::{delete_metadata, delete_object_meta};
+use crate::steps::{Steps, step};
+use crate::{MYSQL, wp_timezone};
 
 pub use allow::Refused;
 
@@ -107,27 +109,19 @@ pub struct CommentEdit {
     pub user_id: Option<u64>,
 }
 
-/// Runs one statement of the action: `step!(steps, method(args))`.
-macro_rules! step {
-    ($steps:expr, $method:ident($($arg:expr),* $(,)?)) => {
-        $steps.run(async |write| write.$method($($arg),*).await).await
-    };
-}
-pub(crate) use step;
-
-const MYSQL: &str = "Y-m-d H:i:s";
 const TRASH_STATUS: &str = "_wp_trash_meta_status";
 const TRASH_TIME: &str = "_wp_trash_meta_time";
 
 /// `get_option( $name )`, empty when it is not set.
-async fn option(steps: &mut Steps<'_, '_>, name: &str) -> Vec<u8> {
+async fn option(steps: &mut Steps<'_, '_, DbError>, name: &str) -> Vec<u8> {
     step!(steps, option_value(name)).unwrap_or_default()
 }
 
 /// `wp_timezone()`.
-async fn zone(steps: &mut Steps<'_, '_>) -> Zone {
-    let name = option(steps, "timezone_string").await;
-    site_zone(&name, &option(steps, "gmt_offset").await)
+async fn zone(steps: &mut Steps<'_, '_, DbError>) -> Zone {
+    let zone = steps.run(async |w| wp_timezone(w).await.map(Some));
+    // Read as UTC once a statement failed, and never written.
+    zone.await.unwrap_or(Zone::Utc)
 }
 
 /// `get_gmt_from_date()` of a stored date in the site's `zone`.
@@ -136,7 +130,7 @@ fn gmt_from_date(date: &str, zone: Zone) -> String {
 }
 
 /// Whether `use_balanceTags` asks `balanceTags()` to balance.
-async fn balance_tags(steps: &mut Steps<'_, '_>) -> bool {
+async fn balance_tags(steps: &mut Steps<'_, '_, DbError>) -> bool {
     Value::String(option(steps, "use_balanceTags").await).to_int() == 1
 }
 
@@ -149,10 +143,14 @@ pub async fn insert_comment(
 ) -> Result<u64, DbError> {
     let mut steps = Steps::new(write);
     let id = insert(&mut steps, context, comment).await;
-    steps.finish(id)
+    steps.finish(Ok(id))
 }
 
-async fn insert(steps: &mut Steps<'_, '_>, context: Context<'_>, comment: &NewComment) -> u64 {
+async fn insert(
+    steps: &mut Steps<'_, '_, DbError>,
+    context: Context<'_>,
+    comment: &NewComment,
+) -> u64 {
     let zone = zone(steps).await;
     let date = (comment.date.clone()).unwrap_or_else(|| format_unix(MYSQL, context.now, zone));
     let date_gmt = (comment.date_gmt.clone()).unwrap_or_else(|| gmt_from_date(&date, zone));
@@ -217,7 +215,7 @@ pub async fn new_comment(
     let approved = allow::allow_comment(&mut steps, context, &comment, commenter).await;
     let approved = match approved {
         Ok(approved) => approved,
-        Err(refused) => return steps.finish(Err(refused)),
+        Err(refused) => return steps.finish(Ok(Err(refused))),
     };
     let balance = balance_tags(&mut steps).await;
     filter::Fields {
@@ -233,7 +231,7 @@ pub async fn new_comment(
     };
     comment.approved = Some(approved);
     let id = insert(&mut steps, context, &comment).await;
-    steps.finish(Ok(id))
+    steps.finish(Ok(Ok(id)))
 }
 
 /// `wp_update_comment()`: `None` when there is no such comment or no such
@@ -248,11 +246,11 @@ pub async fn update_comment(
 ) -> Result<Option<bool>, DbError> {
     let mut steps = Steps::new(write);
     let changed = update(&mut steps, context, edit, kses).await;
-    steps.finish(changed)
+    steps.finish(Ok(changed))
 }
 
 async fn update(
-    steps: &mut Steps<'_, '_>,
+    steps: &mut Steps<'_, '_, DbError>,
     context: Context<'_>,
     edit: &CommentEdit,
     kses: bool,
@@ -315,10 +313,10 @@ pub async fn set_comment_status(
 ) -> Result<bool, DbError> {
     let mut steps = Steps::new(write);
     let changed = set_status(&mut steps, id, status).await;
-    steps.finish(changed)
+    steps.finish(Ok(changed))
 }
 
-async fn set_status(steps: &mut Steps<'_, '_>, id: u64, status: &str) -> bool {
+async fn set_status(steps: &mut Steps<'_, '_, DbError>, id: u64, status: &str) -> bool {
     let status = match status {
         "hold" | "0" => "0",
         "approve" | "1" => "1",
@@ -346,10 +344,10 @@ pub async fn trash_comment(
 ) -> Result<bool, DbError> {
     let mut steps = Steps::new(write);
     let trashed = trash(&mut steps, context, id).await;
-    steps.finish(trashed)
+    steps.finish(Ok(trashed))
 }
 
-async fn trash(steps: &mut Steps<'_, '_>, context: Context<'_>, id: u64) -> bool {
+async fn trash(steps: &mut Steps<'_, '_, DbError>, context: Context<'_>, id: u64) -> bool {
     let Some(comment) = put_away(steps, context, id, "trash").await else {
         return false;
     };
@@ -372,13 +370,13 @@ pub async fn spam_comment(
 ) -> Result<bool, DbError> {
     let mut steps = Steps::new(write);
     let spammed = put_away(&mut steps, context, id, "spam").await.is_some();
-    steps.finish(spammed)
+    steps.finish(Ok(spammed))
 }
 
 /// The comment `id` given `status`, the status it had and the time kept in
 /// `_wp_trash_meta_*`: the comment as it was, if it changed.
 async fn put_away(
-    steps: &mut Steps<'_, '_>,
+    steps: &mut Steps<'_, '_, DbError>,
     context: Context<'_>,
     id: u64,
     status: &str,
@@ -411,13 +409,15 @@ pub async fn restore_comment(write: &mut Write<'_>, id: u64) -> Result<bool, DbE
         delete_meta(&mut steps, id, TRASH_TIME).await;
         delete_meta(&mut steps, id, TRASH_STATUS).await;
     }
-    steps.finish(restored)
+    steps.finish(Ok(restored))
 }
 
 /// `delete_comment_meta( $id, $key )`.
-async fn delete_meta(steps: &mut Steps<'_, '_>, id: u64, key: &str) {
-    let ids = step!(steps, meta_ids(Meta::Comment, id, key));
-    step!(steps, delete_meta(Meta::Comment, &ids));
+async fn delete_meta(steps: &mut Steps<'_, '_, DbError>, id: u64, key: &str) {
+    let any = &Value::String(Vec::new());
+    let deleted =
+        async |w: &mut Write<'_>| delete_metadata(w, Meta::Comment, id, key, any, false).await;
+    steps.run(deleted).await;
 }
 
 /// `wp_delete_comment()`: a comment not in the trash or spam goes to the
@@ -431,10 +431,15 @@ pub async fn delete_comment(
 ) -> Result<bool, DbError> {
     let mut steps = Steps::new(write);
     let deleted = delete(&mut steps, context, id, force).await;
-    steps.finish(deleted)
+    steps.finish(Ok(deleted))
 }
 
-async fn delete(steps: &mut Steps<'_, '_>, context: Context<'_>, id: u64, force: bool) -> bool {
+async fn delete(
+    steps: &mut Steps<'_, '_, DbError>,
+    context: Context<'_>,
+    id: u64,
+    force: bool,
+) -> bool {
     let Some(comment) = step!(steps, comment(id)) else {
         return false;
     };
@@ -443,8 +448,9 @@ async fn delete(steps: &mut Steps<'_, '_>, context: Context<'_>, id: u64, force:
         return trash(steps, context, id).await;
     }
     step!(steps, reparent_comments(id, comment.parent));
-    let meta = step!(steps, object_meta_ids(Meta::Comment, id));
-    step!(steps, delete_meta(Meta::Comment, &meta));
+    steps
+        .run(async |w| delete_object_meta(w, Meta::Comment, id).await)
+        .await;
     step!(steps, delete_comment(id));
     if comment.approved == "1" {
         update_count(steps, comment.post_id).await;
@@ -455,7 +461,7 @@ async fn delete(steps: &mut Steps<'_, '_>, context: Context<'_>, id: u64, force:
 /// `wp_update_comment_count_now()`: the post's `comment_count` set to its
 /// approved comments, notes left out, counted again (ADR 0012). Nothing for
 /// post 0 or a missing post.
-async fn update_count(steps: &mut Steps<'_, '_>, post: u64) {
+async fn update_count(steps: &mut Steps<'_, '_, DbError>, post: u64) {
     let count = step!(steps, approved_comment_count(post));
     step!(steps, set_comment_count(post, count));
 }

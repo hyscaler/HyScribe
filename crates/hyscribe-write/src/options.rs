@@ -13,8 +13,8 @@ use crate::{Error, now};
 mod meta;
 
 pub use hyscribe_db::Meta;
-pub(crate) use meta::get_metadata;
 pub use meta::{add_metadata, delete_metadata, update_metadata};
+pub(crate) use meta::{delete_object_meta, get_metadata};
 
 /// An `$autoload` argument other than `null`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,7 +87,7 @@ pub(crate) async fn get_option(write: &mut Write<'_>, name: &str) -> Result<Valu
 
 /// `wp_determine_option_autoload_value()` with the default filter, which
 /// leaves values over 150000 bytes out of autoloading.
-fn autoload_value(serialized: &[u8], autoload: Option<Autoload>) -> &'static str {
+pub(crate) fn autoload_value(serialized: &[u8], autoload: Option<Autoload>) -> &'static str {
     match autoload {
         Some(Autoload::On) => "on",
         Some(Autoload::Off) => "off",

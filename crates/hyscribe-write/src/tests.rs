@@ -23,6 +23,22 @@ pub(crate) async fn writer() -> Writer {
         .unwrap()
 }
 
+/// A connection of the test's own to the fixture database, to write around
+/// an action in an outer transaction that is rolled back.
+pub(crate) async fn connection() -> Connection {
+    let db = fixture_database();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose())
+        .charset(&db.charset);
+    <Connection as sqlx::Connection>::connect_with(&options)
+        .await
+        .unwrap()
+}
+
 /// The oracle's request: user 1 on PHP's address, now.
 pub(crate) fn admin() -> crate::posts::Context {
     crate::posts::Context {
@@ -33,6 +49,9 @@ pub(crate) fn admin() -> crate::posts::Context {
         now: crate::now(),
     }
 }
+
+/// A setup that writes nothing.
+pub(crate) async fn nothing(_: &mut Write<'_>) {}
 
 /// `text` as a PHP string.
 pub(crate) fn text(text: &str) -> Value {

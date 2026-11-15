@@ -4,14 +4,16 @@
 //! `wp_unique_term_slug()` and the hierarchy loop check.
 
 use hyscribe_db::{Meta, Write};
-use hyscribe_phpser::{Value, addslashes, php_trim, stripslashes};
+use hyscribe_phpser::{Value, addslashes, is_empty_string, php_trim, stripslashes};
 use hyscribe_render::formatting::sanitize_title;
 
 use super::objects::{TermRef, remove_object_terms, set_object_terms};
 use super::{
-    Act, Taxonomy, TermArgs, TermError, TermIds, clean_taxonomy, db, existing, exists_slug,
-    in_hierarchy, is_empty, lossy, sanitize_description, sanitize_name, term_by_slug,
+    Taxonomy, TermArgs, TermError, TermIds, clean_taxonomy, existing, exists_slug, in_hierarchy,
+    lossy, sanitize_description, sanitize_name, term_by_slug,
 };
+use crate::options::delete_object_meta;
+use crate::steps::{Steps, step};
 
 /// `wp_insert_term( $term, $taxonomy, $args )`: the new term's IDs, or an
 /// older term's with the same slug under the same parent.
@@ -21,9 +23,9 @@ pub async fn wp_insert_term(
     term: &[u8],
     args: &TermArgs<'_>,
 ) -> Result<TermIds, TermError> {
-    let mut act = Act::new(write);
-    let inserted = insert(&mut act, taxonomy, term, args).await;
-    act.finish(inserted)
+    let mut steps = Steps::new(write);
+    let inserted = insert(&mut steps, taxonomy, term, args).await;
+    steps.finish(inserted)
 }
 
 /// `wp_update_term( $term_id, $taxonomy, $args )`: the arguments not given
@@ -34,32 +36,32 @@ pub async fn wp_update_term(
     term_id: u64,
     args: &TermArgs<'_>,
 ) -> Result<TermIds, TermError> {
-    let mut act = Act::new(write);
-    let updated = update(&mut act, taxonomy, term_id, args).await;
-    act.finish(updated)
+    let mut steps = Steps::new(write);
+    let updated = update(&mut steps, taxonomy, term_id, args).await;
+    steps.finish(updated)
 }
 
 /// The `term_group` an alias joins: the group of the term `alias_of`
 /// names, or a new one given to it with `wp_update_term()`.
 async fn alias_group(
-    act: &mut Act<'_, '_>,
+    steps: &mut Steps<'_, '_, TermError>,
     taxonomy: Taxonomy,
     alias_of: Option<&[u8]>,
     group: i64,
 ) -> i64 {
-    let Some(alias_of) = alias_of.filter(|alias| !is_empty(alias)) else {
+    let Some(alias_of) = alias_of.filter(|alias| !is_empty_string(alias)) else {
         return group;
     };
-    match term_by_slug(act, taxonomy, alias_of).await {
+    match term_by_slug(steps, taxonomy, alias_of).await {
         Some(alias) if alias.term_group != 0 => alias.term_group,
         Some(alias) => {
-            let group = db!(act.max_term_group()) + 1;
+            let group = step!(steps, max_term_group()) + 1;
             let args = TermArgs {
                 term_group: Some(group),
                 ..TermArgs::default()
             };
             // PHP ignores how the update went.
-            let _ = Box::pin(update(act, taxonomy, alias.term_id, &args)).await;
+            let _ = Box::pin(update(steps, taxonomy, alias.term_id, &args)).await;
             group
         }
         None => group,
@@ -67,7 +69,7 @@ async fn alias_group(
 }
 
 pub(super) async fn insert(
-    act: &mut Act<'_, '_>,
+    steps: &mut Steps<'_, '_, TermError>,
     taxonomy: Taxonomy,
     term: &[u8],
     args: &TermArgs<'_>,
@@ -76,7 +78,7 @@ pub(super) async fn insert(
         return Err(TermError::EmptyName);
     }
     let parent = args.parent.unwrap_or_default();
-    if parent > 0 && !db!(act.term_exists(parent.unsigned_abs())) {
+    if parent > 0 && !step!(steps, term_exists(parent.unsigned_abs())) {
         return Err(TermError::MissingParent);
     }
     let parent = parent.max(0).unsigned_abs();
@@ -85,15 +87,18 @@ pub(super) async fn insert(
     if name.is_empty() {
         return Err(TermError::InvalidName);
     }
-    let given = args.slug.map(sanitize_title).filter(|slug| !is_empty(slug));
+    let given = args
+        .slug
+        .map(sanitize_title)
+        .filter(|slug| !is_empty_string(slug));
     let slug_provided = given.is_some();
     let slug = given.unwrap_or_else(|| sanitize_title(&name));
-    let term_group = alias_group(act, taxonomy, args.alias_of, 0).await;
+    let term_group = alias_group(steps, taxonomy, args.alias_of, 0).await;
 
     // A term of the same name, but for the case, under the parent.
-    let matches = if in_hierarchy(act, taxonomy, parent).await {
+    let matches = if in_hierarchy(steps, taxonomy, parent).await {
         let query = lossy(&sanitize_name(&name));
-        db!(act.terms_under(taxonomy.name(), parent, Some(&query)))
+        step!(steps, terms_under(taxonomy.name(), parent, Some(&query)))
     } else {
         Vec::new()
     };
@@ -102,13 +107,13 @@ pub(super) async fn insert(
         .into_iter()
         .find(|m| m.name.to_ascii_lowercase() == lower);
     if let Some(name_match) = name_match {
-        let slug_match = term_by_slug(act, taxonomy, &slug).await;
+        let slug_match = term_by_slug(steps, taxonomy, &slug).await;
         let same_slug = !slug_provided || name_match.slug == slug;
         if same_slug || slug_match.is_some() {
             if !taxonomy.hierarchical() {
                 return Err(TermError::Exists(name_match.term_id));
             }
-            let siblings = db!(act.terms_under(taxonomy.name(), parent, None));
+            let siblings = step!(steps, terms_under(taxonomy.name(), parent, None));
             if same_slug && siblings.iter().any(|s| s.name == name) {
                 return Err(TermError::Exists(name_match.term_id));
             }
@@ -120,24 +125,27 @@ pub(super) async fn insert(
         }
     }
 
-    let slug = unique_slug(act, taxonomy, slug, (parent, 0)).await;
-    let term_id = db!(act.insert_term(&name, &slug, term_group));
+    let slug = unique_slug(steps, taxonomy, slug, (parent, 0)).await;
+    let term_id = step!(steps, insert_term(&name, &slug, term_group));
     // A name of punctuation only has an empty slug: its ID stands in.
     let slug = if slug.is_empty() {
         let slug = term_id.to_string().into_bytes();
-        db!(act.set_term_slug(term_id, &slug));
+        step!(steps, set_term_slug(term_id, &slug));
         slug
     } else {
         slug
     };
     let row = (term_id, taxonomy.name());
-    let tt_id = db!(act.insert_term_taxonomy(row, &description, parent));
+    let tt_id = step!(steps, insert_term_taxonomy(row, &description, parent));
     let ids = (term_id, tt_id);
-    let older = db!(act.older_duplicate((taxonomy.name(), parent), &lossy(&slug), ids));
+    let older = step!(
+        steps,
+        older_duplicate((taxonomy.name(), parent), &lossy(&slug), ids)
+    );
     let ids = match older {
         Some(older) => {
-            db!(act.delete_term(term_id));
-            db!(act.delete_term_taxonomy(tt_id));
+            step!(steps, delete_term(term_id));
+            step!(steps, delete_term_taxonomy(tt_id));
             TermIds::from(&older)
         }
         None => TermIds {
@@ -145,44 +153,44 @@ pub(super) async fn insert(
             term_taxonomy_id: tt_id,
         },
     };
-    clean_taxonomy(act, taxonomy).await;
+    clean_taxonomy(steps, taxonomy).await;
     Ok(ids)
 }
 
 /// `wp_unique_term_slug( $slug, $term )` for a term of `taxonomy` under
 /// `parent`, other than term `id` (0 for a new term).
 async fn unique_slug(
-    act: &mut Act<'_, '_>,
+    steps: &mut Steps<'_, '_, TermError>,
     taxonomy: Taxonomy,
     mut slug: Vec<u8>,
     (parent, id): (u64, u64),
 ) -> Vec<u8> {
     // `term_exists( $slug )` holds whenever `get_term_by()` finds the slug.
-    if term_by_slug(act, taxonomy, &slug).await.is_none() {
+    if term_by_slug(steps, taxonomy, &slug).await.is_none() {
         return slug;
     }
     if taxonomy.hierarchical() {
         let mut ancestor = parent;
         while ancestor != 0 {
-            let Some(term) = db!(act.term_in(taxonomy.name(), ancestor)) else {
+            let Some(term) = step!(steps, term_in(taxonomy.name(), ancestor)) else {
                 break;
             };
             slug.push(b'-');
             slug.extend(&term.slug);
-            if !text_exists(act, &slug).await {
+            if !text_exists(steps, &slug).await {
                 break;
             }
             ancestor = term.parent;
         }
     }
     // `$wpdb->get_var()` gives the slug back, and `0` reads as false.
-    if slug != b"0" && db!(act.slug_taken(&lossy(&slug), id)) {
+    if slug != b"0" && step!(steps, slug_taken(&lossy(&slug), id)) {
         let mut num = 2;
         loop {
             let alternative = [&slug[..], format!("-{num}").as_bytes()].concat();
             num += 1;
             // A failed read ends the loop, as a free slug would.
-            if !db!(act.slug_taken(&lossy(&alternative), 0)) {
+            if !step!(steps, slug_taken(&lossy(&alternative), 0)) {
                 return alternative;
             }
         }
@@ -191,20 +199,20 @@ async fn unique_slug(
 }
 
 /// `term_exists( $text )` in any taxonomy, for a text that is not empty.
-async fn text_exists(act: &mut Act<'_, '_>, text: &[u8]) -> bool {
+async fn text_exists(steps: &mut Steps<'_, '_, TermError>, text: &[u8]) -> bool {
     let text = stripslashes(text);
     let text = php_trim(&text);
     let name = lossy(&sanitize_name(text));
-    db!(act.term_matches(exists_slug(text).as_deref(), &name))
+    step!(steps, term_matches(exists_slug(text).as_deref(), &name))
 }
 
 async fn update(
-    act: &mut Act<'_, '_>,
+    steps: &mut Steps<'_, '_, TermError>,
     taxonomy: Taxonomy,
     term_id: u64,
     args: &TermArgs<'_>,
 ) -> Result<TermIds, TermError> {
-    let Some(term) = db!(act.term_in(taxonomy.name(), term_id)) else {
+    let Some(term) = step!(steps, term_in(taxonomy.name(), term_id)) else {
         return Err(TermError::InvalidTerm);
     };
     // The term's values are slashed, as the arguments are.
@@ -223,37 +231,45 @@ async fn update(
     if php_trim(&name).is_empty() {
         return Err(TermError::EmptyName);
     }
-    if parent > 0 && !db!(act.term_exists(parent)) {
+    if parent > 0 && !step!(steps, term_exists(parent)) {
         return Err(TermError::MissingParent);
     }
-    let empty_slug = is_empty(&slug);
+    let empty_slug = is_empty_string(&slug);
     let mut slug = if empty_slug {
         sanitize_title(&name)
     } else {
         slug
     };
-    let term_group = alias_group(act, taxonomy, args.alias_of, term_group).await;
-    let new_parent = wp_check_term_hierarchy_for_loops(act, taxonomy, parent, term_id).await;
+    let term_group = alias_group(steps, taxonomy, args.alias_of, term_group).await;
+    let new_parent = wp_check_term_hierarchy_for_loops(steps, taxonomy, parent, term_id).await;
 
-    let duplicate = term_by_slug(act, taxonomy, &slug).await;
+    let duplicate = term_by_slug(steps, taxonomy, &slug).await;
     if duplicate.is_some_and(|d| d.term_id != term_id) {
         // A new slug only when none was given or the term moves.
         if !empty_slug && new_parent == term.parent {
             return Err(TermError::DuplicateSlug(slug));
         }
-        slug = unique_slug(act, taxonomy, slug, (parent, term_id)).await;
+        slug = unique_slug(steps, taxonomy, slug, (parent, term_id)).await;
     }
-    if db!(act.term_taxonomy_count(term_id)) > 1 {
-        act.unported("splitting a term shared by taxonomies");
+    if step!(steps, term_taxonomy_count(term_id)) > 1 {
+        steps.keep::<()>(Err(TermError::Unported(
+            "splitting a term shared by taxonomies",
+        )));
     }
     let tt_id = term.term_taxonomy_id;
-    db!(act.update_term(term_id, &name, &slug, term_group));
+    step!(steps, update_term(term_id, &name, &slug, term_group));
     if slug.is_empty() {
-        db!(act.set_term_slug(term_id, term_id.to_string().as_bytes()));
+        step!(
+            steps,
+            set_term_slug(term_id, term_id.to_string().as_bytes())
+        );
     }
     let row = (term_id, taxonomy.name());
-    db!(act.update_term_taxonomy(tt_id, row, &description, new_parent));
-    clean_taxonomy(act, taxonomy).await;
+    step!(
+        steps,
+        update_term_taxonomy(tt_id, row, &description, new_parent)
+    );
+    clean_taxonomy(steps, taxonomy).await;
     Ok(TermIds {
         term_id,
         term_taxonomy_id: tt_id,
@@ -264,7 +280,7 @@ async fn update(
 /// filter: no parent when `parent` would close a loop through `term`; a
 /// loop above it is broken by moving its terms to the top.
 async fn wp_check_term_hierarchy_for_loops(
-    act: &mut Act<'_, '_>,
+    steps: &mut Steps<'_, '_, TermError>,
     taxonomy: Taxonomy,
     parent: u64,
     term: u64,
@@ -272,10 +288,10 @@ async fn wp_check_term_hierarchy_for_loops(
     // No parent, or the term itself, needs no check of PHP's: the walk finds
     // no loop, or one through the term.
     let start = (term, parent);
-    let Some(member) = tortoise_hare(act, taxonomy, start, term, false).await.0 else {
+    let Some(member) = tortoise_hare(steps, taxonomy, start, term, false).await.0 else {
         return parent;
     };
-    let members = tortoise_hare(act, taxonomy, start, member, true).await.1;
+    let members = tortoise_hare(steps, taxonomy, start, member, true).await.1;
     if members.contains(&term) {
         return 0;
     }
@@ -285,7 +301,7 @@ async fn wp_check_term_hierarchy_for_loops(
     };
     for member in members {
         // PHP ignores how each update went.
-        let _ = Box::pin(update(act, taxonomy, member, &top)).await;
+        let _ = Box::pin(update(steps, taxonomy, member, &top)).await;
     }
     parent
 }
@@ -294,7 +310,7 @@ async fn wp_check_term_hierarchy_for_loops(
 /// with `start`'s parent overridden: a term of a loop above `from`, and
 /// with `collect` the loop's terms, in the order PHP finds them.
 async fn tortoise_hare(
-    act: &mut Act<'_, '_>,
+    steps: &mut Steps<'_, '_, TermError>,
     taxonomy: Taxonomy,
     start: (u64, u64),
     from: u64,
@@ -303,11 +319,11 @@ async fn tortoise_hare(
     let mut members = Vec::new();
     let (mut tortoise, mut hare) = (from, from);
     while tortoise != 0 {
-        let evanescent = parent_of(act, taxonomy, start, hare).await;
+        let evanescent = parent_of(steps, taxonomy, start, hare).await;
         if evanescent == 0 {
             break;
         }
-        hare = parent_of(act, taxonomy, start, evanescent).await;
+        hare = parent_of(steps, taxonomy, start, evanescent).await;
         if hare == 0 {
             break;
         }
@@ -321,7 +337,7 @@ async fn tortoise_hare(
         if tortoise == evanescent || tortoise == hare {
             return (Some(tortoise), members);
         }
-        tortoise = parent_of(act, taxonomy, start, tortoise).await;
+        tortoise = parent_of(steps, taxonomy, start, tortoise).await;
     }
     (None, members)
 }
@@ -329,7 +345,7 @@ async fn tortoise_hare(
 /// `wp_get_term_taxonomy_parent_id()`, `start`'s parent overridden; 0 for
 /// no parent or no term.
 async fn parent_of(
-    act: &mut Act<'_, '_>,
+    steps: &mut Steps<'_, '_, TermError>,
     taxonomy: Taxonomy,
     (term, parent): (u64, u64),
     id: u64,
@@ -337,7 +353,7 @@ async fn parent_of(
     if id == term {
         return parent;
     }
-    let term = db!(act.term_in(taxonomy.name(), id));
+    let term = step!(steps, term_in(taxonomy.name(), id));
     term.map_or(0, |term| term.parent)
 }
 
@@ -360,40 +376,42 @@ pub async fn wp_delete_term(
     taxonomy: Taxonomy,
     term: u64,
 ) -> Result<Deletion, TermError> {
-    let mut act = Act::new(write);
-    let deletion = delete(&mut act, taxonomy, term).await;
-    act.finish(Ok(deletion))
+    let mut steps = Steps::new(write);
+    let deletion = delete(&mut steps, taxonomy, term).await;
+    steps.finish(Ok(deletion))
 }
 
-async fn delete(act: &mut Act<'_, '_>, taxonomy: Taxonomy, term: u64) -> Deletion {
-    let Some(row) = existing(act, taxonomy, TermRef::Id(term)).await else {
+async fn delete(steps: &mut Steps<'_, '_, TermError>, taxonomy: Taxonomy, term: u64) -> Deletion {
+    let Some(row) = existing(steps, taxonomy, TermRef::Id(term)).await else {
         return Deletion::Missing;
     };
     let mut default = None;
     if taxonomy == Taxonomy::Category {
-        let option = db!(act.option_value("default_category"));
+        let option = step!(steps, option_value("default_category"));
         let id = Value::String(option.unwrap_or_default()).to_int();
         if id == term as i64 {
             return Deletion::Default;
         }
         let id = id.unsigned_abs();
-        if existing(act, taxonomy, TermRef::Id(id)).await.is_some() {
+        if existing(steps, taxonomy, TermRef::Id(id)).await.is_some() {
             default = Some(id);
         }
     }
-    if db!(act.term_menu_items(term, taxonomy.name())) > 0 {
-        act.unported("deleting the menu items of a term");
+    if step!(steps, term_menu_items(term, taxonomy.name())) > 0 {
+        steps.keep::<()>(Err(TermError::Unported(
+            "deleting the menu items of a term",
+        )));
     }
     if taxonomy.hierarchical() {
-        db!(act.reparent_terms(taxonomy.name(), term, row.parent));
-        clean_taxonomy(act, taxonomy).await;
+        step!(steps, reparent_terms(taxonomy.name(), term, row.parent));
+        clean_taxonomy(steps, taxonomy).await;
     }
-    for object in db!(act.term_object_ids(row.term_taxonomy_id)) {
+    for object in step!(steps, term_object_ids(row.term_taxonomy_id)) {
         let Some(default) = default else {
-            remove_object_terms(act, object, &[TermRef::Id(term)], taxonomy).await;
+            remove_object_terms(steps, object, &[TermRef::Id(term)], taxonomy).await;
             continue;
         };
-        let terms = db!(act.object_terms(object, taxonomy.name()));
+        let terms = step!(steps, object_terms(object, taxonomy.name()));
         let terms: Vec<TermRef<'_>> = if terms.len() == 1 {
             vec![TermRef::Id(default)]
         } else {
@@ -401,14 +419,15 @@ async fn delete(act: &mut Act<'_, '_>, taxonomy: Taxonomy, term: u64) -> Deletio
             others.map(|(id, _)| TermRef::Id(id)).collect()
         };
         // Only IDs: no term is inserted, so nothing fails.
-        let _ = set_object_terms(act, object, &terms, taxonomy, false).await;
+        let _ = set_object_terms(steps, object, &terms, taxonomy, false).await;
     }
-    let meta = db!(act.object_meta_ids(Meta::Term, term));
-    db!(act.delete_meta(Meta::Term, &meta));
-    db!(act.delete_term_taxonomy(row.term_taxonomy_id));
-    if db!(act.term_taxonomy_count(term)) == 0 {
-        db!(act.delete_term(term));
+    steps
+        .run(async |w| delete_object_meta(w, Meta::Term, term).await)
+        .await;
+    step!(steps, delete_term_taxonomy(row.term_taxonomy_id));
+    if step!(steps, term_taxonomy_count(term)) == 0 {
+        step!(steps, delete_term(term));
     }
-    clean_taxonomy(act, taxonomy).await;
+    clean_taxonomy(steps, taxonomy).await;
     Deletion::Deleted
 }

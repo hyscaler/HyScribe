@@ -9,15 +9,7 @@ use hyscribe_db::{CommentFields, Connection, Writer};
 use hyscribe_testkit::{fixture_database, writes::check_writes};
 use std::result::Result as StdResult;
 
-use crate::tests::{MISSING, ONE_AT_A_TIME, admin};
-
-async fn writer() -> Writer {
-    let mode = hyscribe_config::Mode::Primary;
-    Writer::open(&fixture_database(), mode)
-        .await
-        .unwrap()
-        .unwrap()
-}
+use crate::tests::{MISSING, ONE_AT_A_TIME, admin, connection, writer};
 
 fn shown(err: impl std::fmt::Debug) -> String {
     format!("{err:?}")
@@ -948,18 +940,8 @@ async fn edge_cases_match_php() {
 /// Runs `f` as an action on the fixture inside a transaction that is
 /// rolled back.
 async fn rolled_back<T>(f: impl AsyncFnOnce(&mut Write<'_>, &Context) -> Result<T>) -> Result<T> {
-    let db = fixture_database();
-    let options = sqlx::mysql::MySqlConnectOptions::new()
-        .host(&db.host)
-        .port(db.port)
-        .database(&db.name)
-        .username(&db.user)
-        .password(db.password.expose())
-        .charset(&db.charset);
     let writer = writer().await;
-    let mut conn = <Connection as sqlx::Connection>::connect_with(&options)
-        .await
-        .unwrap();
+    let mut conn = connection().await;
     let mut outer = sqlx::Connection::begin(&mut conn).await.unwrap();
     let mut write = writer.begin_on(&mut outer).await.unwrap();
     f(&mut write, &admin()).await

@@ -4,11 +4,12 @@
 //! `wp_set_post_terms()`, `wp_set_post_categories()`, and the counts they
 //! recompute (`wp_update_term_count_now()`).
 
-use hyscribe_db::Write;
-use hyscribe_phpser::{Value, php_trim};
+use hyscribe_db::{DbError, Write};
+use hyscribe_phpser::{Value, is_empty_string, php_trim};
 
 use super::edit::insert;
-use super::{Act, Taxonomy, TermArgs, TermError, TermIds, db, existing, is_empty};
+use super::{Taxonomy, TermArgs, TermError, TermIds, existing};
+use crate::steps::{Steps, step};
 
 /// A term as the PHP functions take one: an ID, or a text matched as a
 /// slug, then as a name.
@@ -39,11 +40,17 @@ pub enum TermList<'a> {
 
 /// `wp_update_term_count_now()` for the core taxonomies, which count
 /// published posts: `_update_post_term_count()`.
-async fn update_term_count(act: &mut Act<'_, '_>, tt_ids: &[u64]) {
+pub(crate) async fn update_term_count(
+    write: &mut Write<'_>,
+    tt_ids: &[u64],
+) -> Result<(), DbError> {
     for &tt_id in tt_ids {
-        let count = db!(act.term_post_count(tt_id, &["publish"], &["post"]));
-        db!(act.set_term_count(tt_id, count));
+        let count = write
+            .term_post_count(tt_id, &["publish"], &["post"])
+            .await?;
+        write.set_term_count(tt_id, count).await?;
     }
+    Ok(())
 }
 
 /// `wp_set_object_terms( $object_id, $terms, $taxonomy, $append )`: the
@@ -56,13 +63,13 @@ pub async fn wp_set_object_terms(
     taxonomy: Taxonomy,
     append: bool,
 ) -> Result<Vec<u64>, TermError> {
-    let mut act = Act::new(write);
-    let set = set_object_terms(&mut act, object, terms, taxonomy, append).await;
-    act.finish(set)
+    let mut steps = Steps::new(write);
+    let set = set_object_terms(&mut steps, object, terms, taxonomy, append).await;
+    steps.finish(set)
 }
 
 pub(super) async fn set_object_terms(
-    act: &mut Act<'_, '_>,
+    steps: &mut Steps<'_, '_, TermError>,
     object: u64,
     terms: &[TermRef<'_>],
     taxonomy: Taxonomy,
@@ -71,28 +78,30 @@ pub(super) async fn set_object_terms(
     let old = if append {
         Vec::new()
     } else {
-        db!(act.object_terms(object, taxonomy.name()))
+        step!(steps, object_terms(object, taxonomy.name()))
     };
     let (mut tt_ids, mut added) = (Vec::new(), Vec::new());
     for &term in terms.iter().filter(|term| !term.is_blank()) {
-        let ids = match (existing(act, taxonomy, term).await, term) {
+        let ids = match (existing(steps, taxonomy, term).await, term) {
             (Some(row), _) => TermIds::from(&row),
             (None, TermRef::Id(_)) => continue,
             (None, TermRef::Text(text)) => {
-                insert(act, taxonomy, text, &TermArgs::default()).await?
+                insert(steps, taxonomy, text, &TermArgs::default()).await?
             }
         };
         let tt_id = ids.term_taxonomy_id;
         tt_ids.push(tt_id);
-        if !db!(act.has_relationship(object, tt_id)) {
-            db!(act.add_relationship(object, tt_id));
+        if !step!(steps, has_relationship(object, tt_id)) {
+            step!(steps, add_relationship(object, tt_id));
             added.push(tt_id);
         }
     }
-    update_term_count(act, &added).await;
+    steps
+        .run(async |w| update_term_count(w, &added).await)
+        .await;
     let gone = old.into_iter().filter(|(_, tt_id)| !tt_ids.contains(tt_id));
     let gone: Vec<TermRef<'_>> = gone.map(|(id, _)| TermRef::Id(id)).collect();
-    remove_object_terms(act, object, &gone, taxonomy).await;
+    remove_object_terms(steps, object, &gone, taxonomy).await;
     Ok(tt_ids)
 }
 
@@ -104,13 +113,13 @@ pub async fn wp_remove_object_terms(
     terms: &[TermRef<'_>],
     taxonomy: Taxonomy,
 ) -> Result<bool, TermError> {
-    let mut act = Act::new(write);
-    let removed = remove_object_terms(&mut act, object, terms, taxonomy).await;
-    act.finish(Ok(removed))
+    let mut steps = Steps::new(write);
+    let removed = remove_object_terms(&mut steps, object, terms, taxonomy).await;
+    steps.finish(Ok(removed))
 }
 
 pub(super) async fn remove_object_terms(
-    act: &mut Act<'_, '_>,
+    steps: &mut Steps<'_, '_, TermError>,
     object: u64,
     terms: &[TermRef<'_>],
     taxonomy: Taxonomy,
@@ -118,15 +127,17 @@ pub(super) async fn remove_object_terms(
     let mut tt_ids = Vec::new();
     // A text naming no term gives PHP a null ID, which matches nothing.
     for &term in terms.iter().filter(|term| !term.is_blank()) {
-        if let Some(row) = existing(act, taxonomy, term).await {
+        if let Some(row) = existing(steps, taxonomy, term).await {
             tt_ids.push(row.term_taxonomy_id);
         }
     }
     if tt_ids.is_empty() {
         return false;
     }
-    let deleted = db!(act.remove_relationships(object, &tt_ids));
-    update_term_count(act, &tt_ids).await;
+    let deleted = step!(steps, remove_relationships(object, &tt_ids));
+    steps
+        .run(async |w| update_term_count(w, &tt_ids).await)
+        .await;
     deleted > 0
 }
 
@@ -139,13 +150,13 @@ pub async fn wp_set_post_terms(
     taxonomy: Taxonomy,
     append: bool,
 ) -> Result<Option<Vec<u64>>, TermError> {
-    let mut act = Act::new(write);
-    let set = set_post_terms(&mut act, post, terms, taxonomy, append).await;
-    act.finish(set)
+    let mut steps = Steps::new(write);
+    let set = set_post_terms(&mut steps, post, terms, taxonomy, append).await;
+    steps.finish(set)
 }
 
 async fn set_post_terms(
-    act: &mut Act<'_, '_>,
+    steps: &mut Steps<'_, '_, TermError>,
     post: u64,
     terms: TermList<'_>,
     taxonomy: Taxonomy,
@@ -155,7 +166,7 @@ async fn set_post_terms(
         return Ok(None);
     }
     let mut list: Vec<TermRef<'_>> = match terms {
-        TermList::Text(text) if is_empty(text) => Vec::new(),
+        TermList::Text(text) if is_empty_string(text) => Vec::new(),
         TermList::Text(text) => trim_commas(text)
             .split(|&b| b == b',')
             .map(TermRef::Text)
@@ -176,7 +187,7 @@ async fn set_post_terms(
         }
         list = ids.into_iter().map(TermRef::Id).collect();
     }
-    let set = set_object_terms(act, post, &list, taxonomy, append).await;
+    let set = set_object_terms(steps, post, &list, taxonomy, append).await;
     set.map(Some)
 }
 
@@ -200,12 +211,12 @@ pub async fn wp_set_post_categories(
     categories: &[TermRef<'_>],
     append: bool,
 ) -> Result<Option<Vec<u64>>, TermError> {
-    let mut act = Act::new(write);
+    let mut steps = Steps::new(write);
     let default;
     let (list, append) = match categories {
-        [] => match db!(act.post_type_status(post)) {
-            Some((post_type, status)) if post_type == "post" && status != "auto-draft" => {
-                default = db!(act.option_value("default_category"));
+        [] => match step!(steps, post(post)) {
+            Some(row) if row.post_type == "post" && row.status != "auto-draft" => {
+                default = step!(steps, option_value("default_category"));
                 let id = default.as_deref().unwrap_or_default();
                 (vec![TermRef::Text(id)], false)
             }
@@ -215,6 +226,6 @@ pub async fn wp_set_post_categories(
         _ => (categories.to_vec(), append),
     };
     let list = TermList::List(&list);
-    let set = set_post_terms(&mut act, post, list, Taxonomy::Category, append).await;
-    act.finish(set)
+    let set = set_post_terms(&mut steps, post, list, Taxonomy::Category, append).await;
+    steps.finish(set)
 }

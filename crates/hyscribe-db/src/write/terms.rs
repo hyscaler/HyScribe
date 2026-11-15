@@ -5,8 +5,7 @@
 //! and the term counts.
 
 use super::{Query, Table, Write};
-use crate::dialect::Dialect;
-use crate::{Bind, Columns, DbError, Engine, Row, Sql, db_error, ids_or_none, list};
+use crate::{Bind, Columns, DbError, Row, Sql, db_error, ids_or_none, list};
 
 /// A term in a taxonomy, as the term functions read it inside an action.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,12 +105,6 @@ impl Write<'_> {
     pub async fn set_term_slug(&mut self, id: u64, slug: &[u8]) -> Result<u64, DbError> {
         let query = self.sql("UPDATE {prefix}terms SET slug = ? WHERE term_id = ?");
         self.change(Table::Terms, query.bind(slug).bind(id)).await
-    }
-
-    /// The group `wp_insert_term()` gives the term an alias joins.
-    pub async fn set_term_group(&mut self, id: u64, group: i64) -> Result<u64, DbError> {
-        let query = self.sql("UPDATE {prefix}terms SET term_group = ? WHERE term_id = ?");
-        self.change(Table::Terms, query.bind(group).bind(id)).await
     }
 
     /// `wp_delete_term()`'s `DELETE` of a term no taxonomy uses.
@@ -215,37 +208,6 @@ impl Write<'_> {
         self.count(query).await
     }
 
-    /// `_update_post_term_count()`'s count of the attachments with the term
-    /// taxonomy `id` in `statuses`, or inheriting them from their parent.
-    pub async fn term_attachment_count(
-        &mut self,
-        id: u64,
-        statuses: &[&str],
-    ) -> Result<u64, DbError> {
-        let mut sql = Sql::new(
-            "SELECT COUNT(*) FROM {prefix}term_relationships, {prefix}posts p1 \
-             WHERE p1.ID = {prefix}term_relationships.object_id AND ( post_status IN (",
-        );
-        list(&mut sql, texts_or_none(statuses));
-        sql.push(
-            " OR ( post_status = 'inherit' AND post_parent > 0 AND \
-             ( SELECT post_status FROM {prefix}posts WHERE ID = p1.post_parent ) IN (",
-        );
-        list(&mut sql, texts_or_none(statuses));
-        sql.push(" ) ) AND post_type = 'attachment' AND term_taxonomy_id = ?");
-        sql.bind(Bind::Int(id));
-        let query = sql.query(&self.writer.prefix);
-        self.count(query).await
-    }
-
-    /// `_update_generic_term_count()`'s count of the objects with the term
-    /// taxonomy `id`.
-    pub async fn term_object_count(&mut self, id: u64) -> Result<u64, DbError> {
-        let query =
-            self.sql("SELECT COUNT(*) FROM {prefix}term_relationships WHERE term_taxonomy_id = ?");
-        self.count(query.bind(id)).await
-    }
-
     /// `wp_set_object_terms()`'s `INSERT` of one relationship.
     pub async fn add_relationship(
         &mut self,
@@ -256,28 +218,6 @@ impl Write<'_> {
             "INSERT INTO {prefix}term_relationships (object_id, term_taxonomy_id) VALUES (?, ?)",
         );
         let query = query.bind(object).bind(term_taxonomy);
-        self.change(Table::TermRelationships, query).await
-    }
-
-    /// `wp_set_object_terms()` for a sorted taxonomy: each `(term taxonomy,
-    /// order)` of `orders` is written, or its order updated. `orders` must
-    /// not be empty.
-    pub async fn set_term_order(
-        &mut self,
-        object: u64,
-        orders: &[(u64, u64)],
-    ) -> Result<u64, DbError> {
-        let mut sql = Sql::new(
-            "INSERT INTO {prefix}term_relationships (object_id, term_taxonomy_id, term_order) VALUES ",
-        );
-        for (i, &(term_taxonomy, order)) in orders.iter().enumerate() {
-            sql.push(if i == 0 { "(?, ?, ?)" } else { ", (?, ?, ?)" });
-            for value in [object, term_taxonomy, order] {
-                sql.bind(Bind::Int(value));
-            }
-        }
-        Engine::insert_or_update(&mut sql, &["term_order"]);
-        let query = sql.query(&self.writer.prefix);
         self.change(Table::TermRelationships, query).await
     }
 
@@ -485,39 +425,5 @@ impl Write<'_> {
              AND k.meta_value = 'taxonomy' AND x.meta_value = ?",
         );
         self.count(query.bind(id.to_string()).bind(taxonomy)).await
-    }
-
-    /// `get_option()`'s value of option `name`, read inside the action.
-    pub async fn option_value(&mut self, name: &str) -> Result<Option<Vec<u8>>, DbError> {
-        self.spend()?;
-        let query =
-            self.sql("SELECT option_value FROM {prefix}options WHERE option_name = ? LIMIT 1");
-        let row = query
-            .bind(name)
-            .fetch_optional(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
-        row.map(|row| {
-            let mut c = Columns::new(&row);
-            let value = c.bytes("option_value");
-            c.finish(value)
-        })
-        .transpose()
-    }
-
-    /// `get_post_type()` and `get_post_status()` of post `id`.
-    pub async fn post_type_status(&mut self, id: u64) -> Result<Option<(String, String)>, DbError> {
-        let query = self.sql("SELECT post_type, post_status FROM {prefix}posts WHERE ID = ?");
-        let row = query
-            .bind(id)
-            .fetch_optional(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
-        Ok(row.map(|row| {
-            (
-                super::text(&row, "post_type"),
-                super::text(&row, "post_status"),
-            )
-        }))
     }
 }

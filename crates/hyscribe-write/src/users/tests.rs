@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use hyscribe_auth::check_password;
-use hyscribe_db::Connection;
 use hyscribe_phpser::Key;
 
 use super::*;
 use crate::options::delete_option;
-use crate::tests::{admin, check, fails_at_each_step, rolled_back, text, writer};
+use crate::tests::{admin, check, connection, fails_at_each_step, rolled_back, text, writer};
 
 fn some(text: &str) -> Option<Vec<u8>> {
     Some(text.as_bytes().to_vec())
@@ -377,9 +376,7 @@ async fn an_update_through_insert_keeps_the_given_hash() {
 async fn links_wait_for_their_port() {
     let _one = crate::tests::ONE_AT_A_TIME.lock().await;
     let writer = writer().await;
-    let mut conn = <Connection as sqlx::Connection>::connect_with(&options())
-        .await
-        .unwrap();
+    let mut conn = connection().await;
     let mut outer = sqlx::Connection::begin(&mut conn).await.unwrap();
     let mut write = writer.begin_on(&mut outer).await.unwrap();
     let author = insert_ok(&mut write, new_user("oracle-author")).await;
@@ -392,16 +389,6 @@ async fn links_wait_for_their_port() {
     let mut write = writer.begin_on(&mut outer).await.unwrap();
     let deleted = wp_delete_user(&mut write, author, None, &admin()).await;
     assert!(matches!(deleted, Err(Error::Unported("wp_delete_link"))));
-}
-
-fn options() -> sqlx::mysql::MySqlConnectOptions {
-    let db = hyscribe_testkit::fixture_database();
-    sqlx::mysql::MySqlConnectOptions::new()
-        .host(&db.host)
-        .port(db.port)
-        .database(&db.name)
-        .username(&db.user)
-        .password(db.password.expose())
 }
 
 #[tokio::test]

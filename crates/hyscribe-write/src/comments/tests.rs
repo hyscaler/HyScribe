@@ -19,8 +19,8 @@ const ADMIN: Commenter = Commenter {
     unfiltered_html: false,
 };
 
-/// One check at a time: each holds row locks until its rollback.
-static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+// One check at a time in the whole crate: each holds row locks until its rollback.
+use crate::tests::ONE_AT_A_TIME;
 
 fn context() -> Context<'static> {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);

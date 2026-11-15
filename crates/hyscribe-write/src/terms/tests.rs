@@ -9,8 +9,8 @@ use hyscribe_testkit::{fixture_database, writes::check_writes};
 
 use super::*;
 
-/// One check at a time, so no two wait on each other's rows.
-static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+// One check at a time in the whole crate, so no two wait on each other's rows.
+use crate::tests::ONE_AT_A_TIME;
 
 async fn writer() -> Writer {
     Writer::open(&fixture_database(), Mode::Primary)

@@ -42,7 +42,11 @@ struct Reply {
 }
 
 async fn request(site: &Arc<Site>, method: &str, uri: &str) -> Reply {
-    let response = router(site.clone())
+    answer(router(site.clone()), method, uri).await
+}
+
+async fn answer(app: Router, method: &str, uri: &str) -> Reply {
+    let response = app
         .oneshot(
             Request::builder()
                 .method(method)
@@ -239,14 +243,15 @@ async fn database_errors_show_no_details() {
             ("show_on_front".into(), b"posts".to_vec()),
         ]),
         home: String::new(),
-        theme: hyscribe_render::theme::twentytwentyfive(),
-        rewriter: rewrite::Rewriter::default(),
+        theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        rewriter: Arc::default(),
+        compiled: Arc::default(),
         salts: Vec::new(),
         sessions: None,
         writer: None,
-        reloaded: std::sync::RwLock::default(),
         defined: Vec::new(),
         public_users: true,
+        behind_proxy: false,
     });
     // The 404 page fails while rendering, reading an option it has not loaded.
     for uri in [
@@ -267,6 +272,12 @@ async fn database_errors_show_no_details() {
     ] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
+        // Served, the options fail to load first, with the same page.
+        let served = answer(live(site.clone()), "GET", uri).await;
+        assert_eq!(
+            (served.status, served.body),
+            (reply.status, reply.body.clone())
+        );
         assert!(
             reply
                 .body
@@ -866,14 +877,15 @@ async fn the_front_page_links_to_home() {
         db: base.db.clone(),
         options,
         home: base.home.clone(),
-        theme: hyscribe_render::theme::twentytwentyfive(),
-        rewriter: rewrite::Rewriter::default(),
+        theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        rewriter: Arc::default(),
+        compiled: Arc::default(),
         salts: Vec::new(),
         sessions: None,
         writer: None,
-        reloaded: std::sync::RwLock::default(),
         defined: Vec::new(),
         public_users: true,
+        behind_proxy: false,
     });
     // Search results list the front page with a link to it.
     let reply = request(&site, "GET", "/?s=sample").await;
@@ -996,14 +1008,15 @@ async fn failed_reads_answer_defaults() {
         db: Db::connect(&config).await.unwrap(),
         options: HashMap::new(),
         home: String::new(),
-        theme: hyscribe_render::theme::twentytwentyfive(),
-        rewriter: rewrite::Rewriter::default(),
+        theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        rewriter: Arc::default(),
+        compiled: Arc::default(),
         salts: Vec::new(),
         sessions: None,
         writer: None,
-        reloaded: std::sync::RwLock::default(),
         defined: Vec::new(),
         public_users: true,
+        behind_proxy: false,
     });
     let handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
@@ -2884,4 +2897,63 @@ async fn term_template_matches_php() {
     })
     .await
     .unwrap();
+}
+
+/// A change to the options, by PHP or anything else, shows on the next
+/// request (ADR 0012): the title, and a new permalink structure's rules.
+#[tokio::test(flavor = "multi_thread")]
+async fn each_request_reads_the_options_as_they_are_now() {
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let site = Site::load(Db::connect(&db).await.unwrap(), None, None);
+    let app = live(Arc::new(site.await.unwrap()));
+    let home = answer(app.clone(), "GET", "/").await;
+    assert!(title(&home.body).starts_with("HyScribe Default Install"));
+    // Plain permalinks have no rules: the path is the home page.
+    let pretty = answer(app.clone(), "GET", "/hello-world/").await;
+    assert_eq!(title(&pretty.body), title(&home.body));
+    let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary);
+    let writer = writer.await.unwrap().unwrap();
+    let mut write = writer.begin().await.unwrap();
+    write.update_option("blogname", b"Renamed").await.unwrap();
+    write
+        .update_option("home", b"http://moved.test")
+        .await
+        .unwrap();
+    let structure = b"/%postname%/";
+    write
+        .update_option("permalink_structure", structure)
+        .await
+        .unwrap();
+    write.commit().await.unwrap();
+    let home = answer(app.clone(), "GET", "/").await;
+    assert!(title(&home.body).starts_with("Renamed"), "{}", home.body);
+    let pretty = answer(app, "GET", "/hello-world/").await;
+    assert_eq!(title(&pretty.body), "Hello world! &#8211; Renamed");
+    assert!(
+        pretty
+            .body
+            .contains("href=\"http://moved.test/hello-world/\"")
+    );
+}
+
+/// The rules are compiled again only for other permalink options.
+#[test]
+fn the_rules_compile_once_per_options() {
+    let compiled = rewrite::Compiled::default();
+    let settings = |structure| rewrite::Settings {
+        structure,
+        ..rewrite::Settings::default()
+    };
+    let postname = compiled.rewriter(&settings("/%postname%/"));
+    let again = compiled.rewriter(&settings("/%postname%/"));
+    assert!(Arc::ptr_eq(&postname, &again));
+    let dated = compiled.rewriter(&settings("/%year%/%postname%/"));
+    assert!(!Arc::ptr_eq(&postname, &dated));
 }

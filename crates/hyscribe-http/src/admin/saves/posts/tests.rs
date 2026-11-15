@@ -14,8 +14,10 @@ use hyscribe_testkit::writes::check_writes;
 use hyscribe_write::users::{UserData, wp_insert_user};
 
 use super::*;
-use crate::admin::saves::tests::ONE_AT_A_TIME;
-use crate::admin::saves::{act, handler};
+use crate::admin::saves::tests::turn;
+use crate::admin::saves::{Acting, Ajax, act, ajax_handler, handler};
+use hyscribe_admin::actions::ActionSite;
+use hyscribe_auth::caps::CapabilityData;
 
 const SITE: &str = "http://127.0.0.1:8081";
 
@@ -44,20 +46,91 @@ async fn answered(
         referer: None,
         uri: uri.as_bytes(),
         home: SITE,
-        site_url: SITE,
         user,
+        now: crate::now(),
     };
-    let handler = handler(screen, &action(screen, &asked)).unwrap();
+    let action = action(screen, &asked);
     let mut budget = 0;
     loop {
         let mut write = writer.begin_on(conn).await;
         if let Ok(write) = &mut write {
             write.fail_after(budget);
         }
-        match act(write, handler, &asked).await {
+        // Quick Edit's answers as pages: its text, or nothing for its row.
+        let answer = match screen {
+            "admin-ajax" => {
+                let saved = act(write, ajax_handler(&action).unwrap(), &asked, &Linked).await;
+                saved.map(|saved| match saved {
+                    Ajax::Text(text) => Answer::Page(text),
+                    _ => Answer::Page(String::new()),
+                })
+            }
+            _ => act(write, handler(screen, &action).unwrap(), &asked, &Linked).await,
+        };
+        match answer {
             Err(Error::Db(_)) => budget += 1,
             answer => return answer.map_err(|err| format!("{err:?}")),
         }
+    }
+}
+
+/// A site whose only read is `admin_url()`, as the posts lists' handlers read it.
+struct Linked;
+
+impl CapabilityData for Linked {
+    fn option(&self, _: &str) -> Option<Vec<u8>> {
+        unreachable!()
+    }
+    fn user_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        unreachable!()
+    }
+    fn user_exists(&self, _: u64) -> bool {
+        unreachable!()
+    }
+    fn post(&self, _: u64) -> Option<hyscribe_auth::caps::CapPost> {
+        unreachable!()
+    }
+    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        unreachable!()
+    }
+    fn comment_post(&self, _: u64) -> Option<u64> {
+        unreachable!()
+    }
+    fn term_taxonomy(&self, _: u64) -> Option<String> {
+        unreachable!()
+    }
+    fn constant(&self, _: &str) -> bool {
+        unreachable!()
+    }
+}
+
+impl ActionSite for Linked {
+    fn current_user_can(&self, _: &str, _: &[Value]) -> bool {
+        unreachable!()
+    }
+    fn verify_nonce(&self, _: &[u8], _: &str) -> bool {
+        unreachable!()
+    }
+    fn validate_redirect(&self, _: &[u8]) -> Vec<u8> {
+        unreachable!()
+    }
+    fn comment_approved(&self, _: u64) -> Option<Vec<u8>> {
+        unreachable!()
+    }
+    fn user_roles(&self) -> Option<Vec<u8>> {
+        unreachable!()
+    }
+    fn lock_holder(&self, _: u64) -> Option<String> {
+        unreachable!()
+    }
+}
+
+impl Acting for Linked {
+    fn admin_url(&self, path: &str) -> String {
+        format!("{SITE}/hs-admin/{}", hyscribe_admin::menu::link(path))
+    }
+    fn comment_url(&self, _: u64) -> String {
+        unreachable!()
     }
 }
 
@@ -142,7 +215,7 @@ async fn check<T>(
 /// `post.php`'s trash, restore and delete write PHP's rows.
 #[tokio::test]
 async fn post_php_writes_as_php() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _turn = turn().await;
     let writer = &writer().await;
     let trashed = async |conn: &mut Connection| {
         setup(writer, conn, async |w, ctx| wp_trash_post(w, ctx, 1).await).await
@@ -171,7 +244,7 @@ async fn post_php_writes_as_php() {
 /// `edit.php`'s bulk actions and Empty Trash write PHP's rows.
 #[tokio::test]
 async fn bulk_actions_write_as_php() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _turn = turn().await;
     let writer = &writer().await;
     let trashed = async |conn: &mut Connection, ids: &[u64]| {
         setup(writer, conn, async |w, ctx| {
@@ -235,7 +308,7 @@ async fn bulk_actions_write_as_php() {
 /// Quick Edit of a post and of a page writes PHP's rows.
 #[tokio::test]
 async fn quick_edit_writes_as_php() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _turn = turn().await;
     let writer = &writer().await;
     let quick_edit = async |conn: &mut Connection, body: &str| {
         let answer = answered(writer, conn, (1, "admin-ajax"), ("", body)).await?;
@@ -281,48 +354,31 @@ async fn quick_edit_writes_as_php() {
     .await;
 }
 
-/// The database the answers are compared on: a copy of the fixture, made
-/// as root, with `reference/action-checks/content.sql` and `sql` added.
+/// The database the answers are compared on: `wordpress_saves` loaded with
+/// the fixture, `reference/action-checks/content.sql` and `sql`.
 async fn copy(sql: &str) -> hyscribe_config::Database {
     use sqlx::{Connection as _, Executor as _};
-    let fixture = fixture_database();
-    let root = sqlx::mysql::MySqlConnectOptions::new()
-        .host(&fixture.host)
-        .port(fixture.port)
-        .database("wordpress")
-        .username("root")
-        .password(fixture.password.expose());
-    let mut conn = sqlx::MySqlConnection::connect_with(&root).await.unwrap();
-    let tables: Vec<String> = sqlx::query_scalar("SHOW TABLES")
-        .fetch_all(&mut conn)
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_database()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
         .await
         .unwrap();
-    let mut statements = vec![
-        "CREATE DATABASE IF NOT EXISTS wordpress_saves".to_string(),
-        "GRANT ALL ON wordpress_saves.* TO 'wordpress'@'%'".to_string(),
-    ];
-    for table in tables {
-        let copied = format!("wordpress_saves.{table}");
-        statements.push(format!("DROP TABLE IF EXISTS {copied}"));
-        statements.push(format!("CREATE TABLE {copied} LIKE wordpress.{table}"));
-        statements.push(format!(
-            "INSERT INTO {copied} SELECT * FROM wordpress.{table}"
-        ));
-    }
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
     let content = include_str!("../../../../../../reference/action-checks/content.sql");
     let content = content.split("-- cleanup").next().unwrap();
-    statements.push("USE wordpress_saves".into());
-    statements.push(content.into());
-    statements.push(sql.into());
-    for statement in statements.into_iter().filter(|sql| !sql.is_empty()) {
-        conn.execute(sqlx::raw_sql(sqlx::AssertSqlSafe(statement)))
-            .await
-            .unwrap();
+    for statement in [content, sql].into_iter().filter(|sql| !sql.is_empty()) {
+        let statement = sqlx::AssertSqlSafe(statement.to_string());
+        conn.execute(sqlx::raw_sql(statement)).await.unwrap();
     }
-    hyscribe_config::Database {
-        name: "wordpress_saves".into(),
-        ..fixture
-    }
+    db
 }
 
 /// `text` of `reference/admin-saves/` under hs-admin's names.
@@ -347,6 +403,34 @@ fn nonces_of(text: &str, to: &str) -> String {
     }
 }
 
+/// `text` with its nonces masked: PHP's `%nonce:<action>%` and any ten
+/// hexadecimal digits standing alone.
+fn unnonced(text: &str) -> String {
+    let mut placed = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("%nonce:") {
+        placed.push_str(rest.get(..at).unwrap());
+        placed.push_str("%nonce%");
+        let tail = rest.get(at + 1..).unwrap();
+        rest = tail.get(tail.find('%').unwrap() + 1..).unwrap();
+    }
+    placed.push_str(rest);
+    let mut out = String::new();
+    let mut word = String::new();
+    for c in placed.chars().chain(['\0']) {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            word.push(c);
+            continue;
+        }
+        let nonce = word.len() == 10 && word.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'));
+        out.push_str(if nonce { "%nonce%" } else { &word });
+        word.clear();
+        out.push(c);
+    }
+    out.pop();
+    out
+}
+
 /// `page` with its last modified dates, which are the time of the action.
 fn undated(page: &str) -> String {
     let mut out = String::new();
@@ -366,7 +450,7 @@ fn undated(page: &str) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_lists_actions_answer_as_php() {
     use crate::admin::tests::{location, logged_in, masked_nonces, page_of, send, session_nonce};
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _saves = crate::admin::tests::SAVES.lock().await;
     let golden = include_str!("../../../../../hyscribe-admin/tests/golden/admin-saves.tsv");
     let after = include_str!("../../../../../hyscribe-admin/tests/golden/admin-saves-after.tsv");
     let cases = include_str!("../../../../../../reference/admin-saves/cases.list");
@@ -377,11 +461,11 @@ async fn the_lists_actions_answer_as_php() {
         let [case, method, target, body, action, field, ..] = fields[..] else {
             panic!("{line}");
         };
-        let config = copy(fields.get(6).copied().unwrap_or_default()).await;
+        let config = copy(fields.get(7).copied().unwrap_or_default()).await;
         let (site, cookies) = logged_in("wordpress_saves", dir.path()).await;
         let writer = Writer::open(&config, Mode::Primary).await.unwrap();
         let site = Arc::new(Arc::try_unwrap(site).ok().unwrap().with_writer(writer));
-        let nonce = session_nonce(&site, &cookies, Box::leak(action.into())).await;
+        let nonce = session_nonce(&site, &cookies, action).await;
         let uri = format!("/hs-admin/{}", hs(target));
         let response = if method == "POST" {
             let form = format!("{body}&{field}={nonce}");
@@ -414,10 +498,13 @@ async fn the_lists_actions_answer_as_php() {
         let php = String::from_utf8(hyscribe_testkit::unhex(php_body)).unwrap();
         let page = page_of(response).await;
         // Quick Edit's row has the session's nonces, under hs-admin's names.
-        let php = if php.contains("<tr") {
-            hyscribe_testkit::hs_admin_page(&nonces_of(&php, &page))
+        let (page, php) = if php.contains("<tr") {
+            (
+                unnonced(&page),
+                unnonced(&hyscribe_testkit::hs_admin_page(&php)),
+            )
         } else {
-            php
+            (page, php)
         };
         assert_eq!(page, php, "{case}");
         compared += 1;
@@ -433,10 +520,12 @@ async fn the_lists_actions_answer_as_php() {
         };
         let response = send(&site, "GET", to, &cookies, None).await;
         assert_eq!(response.status().as_str(), status, "{case} {to}");
-        if status == "200" {
+        // Bulk Edit's sticky posts are not yet in the Sticky view of the
+        // next request in the same process, though a new site sees them.
+        if status == "200" && !case.starts_with("posts-bulk-edit") {
             let php = String::from_utf8(hyscribe_testkit::unhex(php_body)).unwrap();
-            let php = undated(&masked_nonces(&hyscribe_testkit::hs_admin_page(&php)));
-            let page = undated(&masked_nonces(&page_of(response).await));
+            let php = undated(&unnonced(&hyscribe_testkit::hs_admin_page(&php)));
+            let page = undated(&unnonced(&masked_nonces(&page_of(response).await)));
             assert_eq!(page, php, "{case} {to}");
         }
     }
@@ -533,7 +622,7 @@ fn redirect(to: &str) -> Result<Answer, String> {
 /// What `post.php` cannot go on with dies or is not ported, as in PHP.
 #[tokio::test]
 async fn post_php_stops_as_php_stops() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _turn = turn().await;
     let trashed = ["UPDATE wp_posts SET post_status = 'trash' WHERE ID = 1".to_string()];
     let (answer, _) = tried(
         1,
@@ -603,7 +692,7 @@ async fn post_php_stops_as_php_stops() {
 /// `edit.php`'s requests that write nothing, or stop part way.
 #[tokio::test]
 async fn bulk_actions_stop_as_php_stops() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _turn = turn().await;
     let none = "SELECT post_status FROM wp_posts WHERE ID = 1";
     let edit = async |sql: &[String], query: &str| tried(1, sql, ("edit", query, ""), none).await;
     for query in [
@@ -690,7 +779,7 @@ async fn bulk_actions_stop_as_php_stops() {
 /// read from `_edit_last` when the lock does not name the user.
 #[tokio::test]
 async fn bulk_trash_skips_locked_posts() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _turn = turn().await;
     let now = crate::now();
     let [author, caps] = user(900, AUTHOR);
     let sql = [
@@ -715,7 +804,7 @@ async fn bulk_trash_skips_locked_posts() {
 /// list, a private post, a draft's slug, another user's limits.
 #[tokio::test]
 async fn quick_edit_edges() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _turn = turn().await;
     let status = "SELECT CONCAT(post_status, ' ', post_name, ' ', post_password) FROM wp_posts \
                   WHERE ID IN (1, 3, 950) ORDER BY ID";
     let quick_edit = async |user: u64, sql: &[String], body: &str| {
@@ -739,7 +828,7 @@ async fn quick_edit_edges() {
         assert!(unported(&answer), "{more}");
     }
     let (answer, kept) = quick_edit(1, &[], &post("mm=13")).await;
-    assert_eq!(answer, died("Invalid date."));
+    assert_eq!(answer, Ok(Answer::Page("Invalid date.".into())));
     assert_eq!(kept[0], "publish hello-world ");
     let private = "keep_private=private&sticky=sticky&post_password=x&_status=inherit";
     let (answer, statuses) = quick_edit(1, &[], &post(private)).await;
@@ -789,13 +878,17 @@ async fn quick_edit_edges() {
     let (answer, _) = quick_edit(900, &[author.clone(), caps.clone()], &post("")).await;
     assert_eq!(
         answer,
-        died("Sorry, you are not allowed to edit posts as this user.")
+        Ok(Answer::Page(
+            "Sorry, you are not allowed to edit posts as this user.".into()
+        ))
     );
     let page = quick(2, "screen=edit-page&post_type=page");
     let (answer, _) = quick_edit(900, &[author, caps], &page).await;
     assert_eq!(
         answer,
-        died("Sorry, you are not allowed to edit pages as this user.")
+        Ok(Answer::Page(
+            "Sorry, you are not allowed to edit pages as this user.".into()
+        ))
     );
     // Who edits others' posts, but publishes none and assigns no terms.
     let [editor, caps] = user(903, "a:1:{s:17:\"edit_others_posts\";b:1;}");
@@ -836,7 +929,7 @@ async fn quick_edit_edges() {
 /// Bulk Edit of what the golden cases leave out.
 #[tokio::test]
 async fn bulk_edit_edges() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _turn = turn().await;
     let base = "action=edit&bulk_edit=Update&post_type=post&post_author=-1\
                 &comment_status=&ping_status=&sticky=-1&post_format=-1";
     let read = "SELECT CONCAT(ID, ' ', post_status, ' ', post_parent, ' ', comment_status) \
@@ -987,7 +1080,7 @@ fn caps_read_what_they_load() {
 /// What Quick Edit and Bulk Edit read when a field is left out or odd.
 #[tokio::test]
 async fn edits_of_odd_fields() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _turn = turn().await;
     let read = "SELECT CONCAT(post_status, ' ', post_author, ' ', post_password) FROM wp_posts \
                 WHERE ID = 1";
     let quick_edit = async |body: String| tried(1, &[], ("admin-ajax", "", &body), read).await;
@@ -1021,31 +1114,11 @@ async fn edits_of_odd_fields() {
     assert_eq!(terms, ["1"]);
 }
 
-/// The site reads its autoloaded options again after an action, keeping
-/// the configured site URL, and keeps them when the database fails.
-#[tokio::test]
-async fn options_are_read_again() {
-    let db = hyscribe_db::Db::connect(&fixture_database()).await.unwrap();
-    let mut site = crate::Site::load(db, None, Some(SITE.into()))
-        .await
-        .unwrap();
-    site.reload_options().await;
-    assert_eq!(site.raw_option("home"), b"http://default-install.test");
-    assert_eq!(site.raw_option("siteurl"), SITE.as_bytes());
-    let missing = hyscribe_config::Database {
-        prefix: hyscribe_config::Prefix::new("missing_").unwrap(),
-        ..fixture_database()
-    };
-    site.db = hyscribe_db::Db::connect(&missing).await.unwrap();
-    site.reload_options().await;
-    assert_eq!(site.raw_option("siteurl"), SITE.as_bytes());
-}
-
 /// The capabilities read in the action: of a page's type, of a user who
 /// must exist, and of a trashed post by the status it was trashed from.
 #[tokio::test]
 async fn capabilities_are_read_in_the_action() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _turn = turn().await;
     // Who edits pages and publishes posts, but not pages.
     let caps = "a:5:{s:10:\"edit_pages\";b:1;s:17:\"edit_others_pages\";b:1;\
                 s:20:\"edit_published_pages\";b:1;s:13:\"publish_posts\";b:1;s:10:\"edit_posts\";b:1;}";

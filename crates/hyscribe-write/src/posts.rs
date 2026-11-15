@@ -20,6 +20,7 @@ use crate::terms::{
 mod cron;
 mod date;
 mod hooks;
+mod link;
 mod site;
 mod slug;
 mod trash;
@@ -232,6 +233,26 @@ pub async fn wp_unique_post_slug(
 ) -> Result<Vec<u8>> {
     let kind = Kind::of(post_type)?;
     slug::unique(write, slug, id, (status, kind, post_type), parent).await
+}
+
+/// `get_default_post_to_edit( 'post', true )`: a new `auto-draft`, with
+/// the daily deletion of old ones scheduled. A default post format is not ported.
+pub async fn get_default_post_to_edit(write: &mut Write<'_>, ctx: &Context) -> Result<u64> {
+    let args = PostArgs {
+        title: b"Auto Draft".to_vec(),
+        status: "auto-draft".into(),
+        ..PostArgs::default()
+    };
+    let id = wp_insert_post(write, ctx, args).await?;
+    let format = write.option_value("default_post_format").await?;
+    if format.is_some_and(|format| truthy(&format)) {
+        return Err(Error::Unported("a default post format"));
+    }
+    const HOOK: &str = "wp_scheduled_auto_draft_delete";
+    if !cron::scheduled(write, HOOK).await? {
+        cron::schedule_daily(write, ctx.now, HOOK).await?;
+    }
+    Ok(id)
 }
 
 /// `wp_publish_post( $post )`.
@@ -455,7 +476,7 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
         wp_set_post_categories(write, id, &terms, false).await?;
     }
     if before.is_none() {
-        let guid = hooks::permalink(write, ctx, id, &fields).await?;
+        let guid = link::permalink(write, ctx, id, &fields).await?;
         write.set_post_guid(id, &guid).await?;
     }
     if truthy(&args.page_template) {

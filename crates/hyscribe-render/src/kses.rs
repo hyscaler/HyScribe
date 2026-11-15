@@ -103,6 +103,11 @@ enum Check {
 /// An `$allowed_html` array: tag names, each with its allowed attributes.
 pub(crate) struct AllowedHtml(BTreeMap<Vec<u8>, BTreeMap<Vec<u8>, Vec<Check>>>);
 
+/// `isset( wp_kses_allowed_html( 'post' )[ $tag ] )`.
+pub(crate) fn post_allows(tag: &[u8]) -> bool {
+    POST.0.contains_key(tag)
+}
+
 impl AllowedHtml {
     /// Anything but a JSON object of tags allows nothing.
     pub(crate) fn from_json(json: &[u8]) -> AllowedHtml {
@@ -175,6 +180,11 @@ pub fn wp_kses_data(content: &[u8]) -> Vec<u8> {
 /// saved.
 pub fn wp_kses_user_description(content: &[u8]) -> Vec<u8> {
     wp_kses(content, &USER_DESCRIPTION, b"")
+}
+
+/// `wp_kses( $content, array() )`: no tags at all.
+pub(crate) fn wp_kses_no_tags(content: &[u8]) -> Vec<u8> {
+    wp_kses(content, &AllowedHtml(BTreeMap::new()), b"")
 }
 
 /// `wp_kses( $content, 'pre_comment_content' )`, as `wp_filter_kses()`

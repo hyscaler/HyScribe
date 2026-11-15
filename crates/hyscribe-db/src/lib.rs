@@ -980,6 +980,20 @@ impl Db {
         row.as_ref().map(comment).transpose()
     }
 
+    /// One comment by ID that is held for moderation, of any type.
+    pub async fn held_comment(&self, id: u64) -> Result<Option<Comment>, DbError> {
+        let mut sql = select_comments(
+            " FROM {prefix}comments WHERE comment_ID = ? AND comment_approved = '0'",
+        );
+        sql.bind(Bind::Int(id));
+        let row = sql
+            .query(&self.prefix)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.as_ref().map(comment).transpose()
+    }
+
     /// One approved comment by ID, of any type.
     pub async fn comment(&self, id: u64) -> Result<Option<Comment>, DbError> {
         let mut sql = select_comments(
@@ -1221,6 +1235,26 @@ impl Db {
             c.finish(credentials)
         })
         .transpose()
+    }
+
+    /// Whether the user is the author of a post of any type or status, or
+    /// the owner of a link, as `users.php` asks before a deletion.
+    pub async fn owns_content(&self, user: u64) -> Result<bool, DbError> {
+        for sql in [
+            "SELECT ID FROM {prefix}posts WHERE post_author = ? LIMIT 1",
+            "SELECT link_id FROM {prefix}links WHERE link_owner = ? LIMIT 1",
+        ] {
+            let query = sqlx::query(self.prefix.sql(sql)).bind(user);
+            if query
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(db_error)?
+                .is_some()
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// `get_user_meta( $user_id, $key, true )`: the first value stored.

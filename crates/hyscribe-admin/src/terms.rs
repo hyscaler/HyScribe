@@ -103,12 +103,10 @@ pub struct TermArgs {
     pub error: bool,
 }
 
-/// `edit-tag-messages.php`'s notice of `args`, if one: the message of an
-/// action on the taxonomy's terms.
-fn term_notice(args: &TermArgs) -> Option<String> {
-    let taxonomy = args.taxonomy;
+/// `edit-tag-messages.php`'s `$message` for `$_REQUEST['message']`, if one.
+fn term_message(taxonomy: Taxonomy, message: Option<&str>) -> Option<String> {
     let (singular, plural) = (taxonomy.singular, taxonomy.plural);
-    let message = match Value::String(args.message.clone()?.into_bytes()).to_int() {
+    let message = match Value::String(message?.into()).to_int() {
         1 => format!("{singular} added."),
         2 => format!("{singular} deleted."),
         3 => format!("{singular} updated."),
@@ -117,6 +115,13 @@ fn term_notice(args: &TermArgs) -> Option<String> {
         6 => format!("{plural} deleted."),
         _ => return None,
     };
+    Some(message)
+}
+
+/// `edit-tag-messages.php`'s notice of `args`, if one: the message of an
+/// action on the taxonomy's terms.
+fn term_notice(args: &TermArgs) -> Option<String> {
+    let message = term_message(args.taxonomy, args.message.as_deref())?;
     let class = if args.error { "error" } else { "updated" };
     let classes = format!("is-dismissible {class}");
     Some(wp_admin_notice(&message, "message", &classes, true, ""))
@@ -138,11 +143,16 @@ fn ancestors(by_id: &HashMap<u64, &Term>, term: &Term) -> Vec<u64> {
     ids
 }
 
+/// A description through `term_description`'s display filters, the admin's
+/// `wp_kses_data()` first.
+fn shown_description(text: &[u8]) -> Vec<u8> {
+    wpautop(&convert_chars(&wptexturize(&wp_kses_data(text), &[])), true)
+}
+
 /// `column_description()`: the description through `term_description`'s
 /// filters, the admin's `wp_kses_data()` first; shortcodes are not ported.
 fn column_description(text: &[u8]) -> String {
-    let text = convert_chars(&wptexturize(&wp_kses_data(text), &[]));
-    let text = wpautop(&text, true);
+    let text = shown_description(text);
     if is_empty_string(&text) {
         return "<span aria-hidden=\"true\">&#8212;</span><span class=\"screen-reader-text\">No description</span>".into();
     }
@@ -373,6 +383,148 @@ impl Listing<'_> {
         }
         out
     }
+}
+
+/// A term `wp_insert_term()` added, as `get_term()` reads it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Added {
+    /// The term.
+    pub term: Term,
+    /// `term_group`.
+    pub term_group: i64,
+    /// `term_taxonomy_id`.
+    pub term_taxonomy_id: u64,
+}
+
+/// `single_row( $tag, $level )` in an Ajax answer, for the list of the
+/// screen `edit-{$taxonomy}`; edit links come back to `referer`.
+fn ajax_row(
+    site: &dyn TermsSite,
+    taxonomy: Taxonomy,
+    term: &Term,
+    level: Option<usize>,
+    referer: &str,
+) -> String {
+    let terms = site.terms(taxonomy.name);
+    let hidden = hidden_columns(site, &format!("edit-{}", taxonomy.name));
+    let hidden: Vec<&str> = hidden.iter().map(String::as_str).collect();
+    let columns = columns(false);
+    let listing = Listing {
+        site,
+        taxonomy,
+        terms: &[],
+        by_id: terms.iter().map(|term| (term.id, term)).collect(),
+        cached: None,
+        columns: &columns,
+        hidden: &hidden,
+        request_uri: referer,
+    };
+    let level = level.unwrap_or_else(|| ancestors(&listing.by_id, term).len());
+    listing.row(term, level)
+}
+
+/// `wp_ajax_inline_save_tax()`'s answer: the row of the term saved, at
+/// the depth of its parents.
+pub fn saved_row(site: &dyn TermsSite, taxonomy: Taxonomy, term: &Term, referer: &str) -> String {
+    ajax_row(site, taxonomy, term, None, referer)
+}
+
+/// One response of `WP_Ajax_Response::add()` for `add-tag`: its data
+/// (an error's already) and supplemental fields.
+fn ajax_response(
+    what: &str,
+    position: usize,
+    data: &str,
+    supplemental: &[(&str, &[u8])],
+) -> String {
+    let fields: String = supplemental
+        .iter()
+        .map(|(key, value)| {
+            format!(
+                "<{key}><![CDATA[{}]]></{key}>",
+                String::from_utf8_lossy(value)
+            )
+        })
+        .collect();
+    format!(
+        "<response action='add-tag_0'><{what} id='0' position='{position}'>{data}<supplemental>{fields}</supplemental></{what}></response>"
+    )
+}
+
+/// `WP_Ajax_Response::send()`'s XML of `responses`.
+fn wp_ajax(responses: &[String]) -> String {
+    format!(
+        "<?xml version='1.0' encoding='UTF-8' standalone='yes'?><wp_ajax>{}</wp_ajax>",
+        responses.concat()
+    )
+}
+
+/// `wp_ajax_add_tag()`'s answer for a term not added: the error's code
+/// and message.
+pub fn add_failed(code: &str, message: &str) -> String {
+    let error = format!("<wp_error code='{code}'><![CDATA[{message}]]></wp_error>");
+    wp_ajax(&[ajax_response("taxonomy", 1, &error, &[])])
+}
+
+/// `wp_ajax_add_tag()`'s answer for the term added: its rows and notice,
+/// and the term.
+pub fn term_added(
+    site: &dyn TermsSite,
+    taxonomy: Taxonomy,
+    added: &Added,
+    referer: &str,
+) -> String {
+    let term = &added.term;
+    let level = if taxonomy.hierarchical() {
+        let terms = site.terms(taxonomy.name);
+        let by_id = terms.iter().map(|term| (term.id, term)).collect();
+        ancestors(&by_id, term).len()
+    } else {
+        0
+    };
+    let no_parents = if taxonomy.hierarchical() {
+        ajax_row(site, taxonomy, term, Some(level), referer)
+    } else {
+        String::new()
+    };
+    let parents = ajax_row(site, taxonomy, term, Some(0), referer);
+    let notice = format!("{} added.", taxonomy.singular);
+    let data = format!("<response_data><![CDATA[{notice}]]></response_data>");
+    let rows = [
+        ("parents", parents.as_bytes()),
+        ("noparents", no_parents.as_bytes()),
+        ("notice", notice.as_bytes()),
+    ];
+    let numbers = [
+        term.id.to_string(),
+        added.term_group.to_string(),
+        added.term_taxonomy_id.to_string(),
+        term.parent.to_string(),
+        term.count.to_string(),
+    ];
+    // The term as `single_row()` left it, sanitized for display.
+    let (name, description) = (term_name(&term.name), shown_description(&term.description));
+    let fields: [(&str, &[u8]); 10] = [
+        ("term_id", numbers[0].as_bytes()),
+        ("name", name.as_bytes()),
+        ("slug", &term.slug),
+        ("term_group", numbers[1].as_bytes()),
+        ("term_taxonomy_id", numbers[2].as_bytes()),
+        ("taxonomy", taxonomy.name.as_bytes()),
+        ("description", &description),
+        ("parent", numbers[3].as_bytes()),
+        ("count", numbers[4].as_bytes()),
+        ("filter", b"raw"),
+    ];
+    wp_ajax(&[
+        ajax_response("taxonomy", 1, &data, &rows),
+        ajax_response(
+            "term",
+            level,
+            "<response_data><![CDATA[]]></response_data>",
+            &fields,
+        ),
+    ])
 }
 
 /// `editable_slug`'s filters: the slug decoded, for a textarea.
@@ -797,6 +949,10 @@ pub fn edit_tags(site: &dyn TermsSite, args: &TermArgs, request: &Request) -> An
     // The menu lets in whoever may manage terms.
     Answer::from_page(admin_page(site, &page, browser))
 }
+
+mod edit;
+
+pub use edit::{TermEditArgs, TermEditSite, term_edit};
 
 #[cfg(test)]
 pub(crate) mod content;

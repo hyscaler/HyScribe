@@ -16,6 +16,8 @@ pub(crate) struct Loading {
     pub(crate) in_the_loop: bool,
     /// `doing_filter( 'the_content' )`.
     pub(crate) in_the_content: bool,
+    /// `doing_filter( 'widget_block_content' )`: a block widget's content.
+    pub(crate) in_widget_block_content: bool,
     shared: Rc<Shared>,
 }
 
@@ -25,6 +27,19 @@ struct Shared {
     media_count: Cell<u64>,
     /// `! wp_high_priority_element_flag()`.
     high_priority_taken: Cell<bool>,
+}
+
+/// The filter a `$context` of `wp_get_loading_optimization_attributes()`
+/// names, if any. While a filter runs, only its own context gets loading
+/// attributes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Filter {
+    /// A context of no filter, such as `wp_get_attachment_image`.
+    None,
+    /// `the_content`.
+    Content,
+    /// `widget_block_content`.
+    WidgetBlock,
 }
 
 /// The attributes `wp_get_loading_optimization_attributes()` adds.
@@ -56,22 +71,30 @@ impl Loading {
     /// `wp_get_loading_optimization_attributes( 'img', $attr, $context )`
     /// for an image with a width and height and none of `loading`,
     /// `fetchpriority` or `decoding` given, in a context that is neither
-    /// the header nor post content.
+    /// the header nor a filter's.
     pub(crate) fn img(&self, width: i64, height: i64) -> Optimization {
         let given = Given {
             width: Some(width),
             height: Some(height),
             ..Given::default()
         };
-        self.optimization(true, &given, false)
+        self.optimization(true, &given, Filter::None)
     }
 
     /// `wp_get_loading_optimization_attributes()` for an `img` or, when
-    /// `img` is false, an `iframe`; `content` is the `the_content` context,
-    /// which other images inside that filter are not.
-    pub(crate) fn optimization(&self, img: bool, given: &Given<'_>, content: bool) -> Optimization {
+    /// `img` is false, an `iframe`, in the context of `filter`: inside
+    /// `the_content` or `widget_block_content`, an element of another
+    /// context gets nothing.
+    pub(crate) fn optimization(
+        &self,
+        img: bool,
+        given: &Given<'_>,
+        filter: Filter,
+    ) -> Optimization {
         let mut attributes = Optimization::default();
-        if self.in_the_content && !content {
+        if (self.in_the_content && filter != Filter::Content)
+            || (self.in_widget_block_content && filter != Filter::WidgetBlock)
+        {
             return attributes;
         }
         if img {

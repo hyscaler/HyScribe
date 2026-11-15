@@ -69,7 +69,11 @@ impl CapabilityData for Oracle {
         }
     }
     fn comment_post(&self, id: u64) -> Option<u64> {
-        (id == 1).then_some(1)
+        match id {
+            1 => Some(1),
+            801 => Some(802),
+            _ => None,
+        }
     }
     fn term_taxonomy(&self, id: u64) -> Option<String> {
         match id {
@@ -101,6 +105,7 @@ impl ActionSite for Oracle {
             3 => Some(b"post-trashed".to_vec()),
             4 => Some(b"0".to_vec()),
             5 => Some(b"trash".to_vec()),
+            801 => Some(b"post-trashed".to_vec()),
             _ => None,
         }
     }
@@ -139,8 +144,8 @@ fn check(
         referer,
         uri: uri.as_bytes(),
         home: HOME,
-        site_url: HOME,
         user: 1,
+        now: 0,
     };
     let screen = path.strip_suffix(".php").unwrap();
     if screen == "admin-ajax" {
@@ -158,11 +163,12 @@ fn sent(refusal: &Refusal) -> Vec<u8> {
     }
 }
 
-/// Whether PHP's answer refuses: an error status, `wp_die()`'s page, or
-/// an Ajax `-1` or `0`.
+/// Whether PHP's answer refuses: an error status, `wp_die()`'s page, an
+/// Ajax `-1` or `0`, or `wp_send_json_error()`'s answer.
 fn is_refusal(status: u16, body: &[u8]) -> bool {
     status >= 400
         || matches!(body, b"-1" | b"0")
+        || body.starts_with(b"{\"success\":false")
         || String::from_utf8_lossy(body).contains("<body id=\"error-page\">")
 }
 
@@ -251,11 +257,35 @@ fn actions_are_named_as_php_names_them() {
         ("edit", "action=trash&filter_action=Filter", ""),
         ("post", "action=trash&deletepost=Delete", "delete"),
         ("post", "action=trash", "trash"),
+        ("edit-comments", "delete_all2=1&action=spam", "delete_all"),
+        ("edit-comments", "action=-1", ""),
+        ("comment", "action=cdc", "delete"),
+        ("comment", "action=mac&dt=x", "approve"),
+        ("comment", "action=approve&dt=spam", "spam"),
+        ("comment", "action=approve&dt=trash", "trash"),
+        (
+            "comment",
+            "action=approvecomment&deletecomment=1",
+            "deletecomment",
+        ),
+        ("options", "adminhash=x&action=update", "adminhash"),
+        ("options", "adminhash=&dismiss=new_admin_email", "dismiss"),
+        ("options", "dismiss=x&action=update", "update"),
+        ("options-privacy", "action=create-privacy-page", ""),
+        ("edit-tags", "action=delete&delete_tags[]=2", "bulk-delete"),
+        ("edit-tags", "action=-1", ""),
     ] {
-        // `post.php`'s Delete button is a field of the form.
+        // `post.php`'s and `comment.php`'s Delete buttons are posted.
         let (get, post) = match query.split_once("&deletepost") {
             Some((get, rest)) => (fields(get), fields(&format!("deletepost{rest}"))),
-            None => (fields(query), Vec::new()),
+            None => (
+                fields(query),
+                fields(
+                    query
+                        .strip_prefix("action=approvecomment&")
+                        .unwrap_or_default(),
+                ),
+            ),
         };
         let asked = Asked {
             get: &get,
@@ -263,8 +293,8 @@ fn actions_are_named_as_php_names_them() {
             referer: None,
             uri: b"/wp-admin/",
             home: HOME,
-            site_url: HOME,
             user: 1,
+            now: 0,
         };
         assert_eq!(
             action(screen, &asked),
@@ -272,6 +302,22 @@ fn actions_are_named_as_php_names_them() {
             "{screen} {query}"
         );
     }
+}
+
+/// The Privacy screen's actions are checked outside its policy guide, with
+/// their own nonces, for those who may manage privacy options.
+#[test]
+fn privacy_actions() {
+    let (admin, editor) = (role("administrator"), role("editor"));
+    let set = format!("action=set-privacy-page&{}", nonce("set-privacy-page"));
+    let file = "options-privacy.php";
+    assert_eq!(outcome(&admin, file, Some(&set)), Some(501));
+    let guide = "options-privacy.php?tab=policyguide";
+    assert_eq!(outcome(&admin, guide, Some(&set)), None);
+    assert_eq!(outcome(&admin, file, Some("x=1")), None);
+    let unsigned = "action=set-privacy-page";
+    assert_eq!(outcome(&admin, file, Some(unsigned)), Some(403));
+    assert_eq!(outcome(&editor, file, Some(&set)), Some(403));
 }
 
 /// Requests the goldens leave out: those that are not actions, those whose
@@ -283,6 +329,7 @@ fn what_is_not_ported_goes_on() {
     let update = format!("action=update&{}", nonce("update-options"));
     for (target, body, expected) in [
         ("edit.php".to_string(), None, None),
+        ("comment.php?action=editcomment&c=1".into(), None, None),
         ("edit.php?action=-1".into(), None, None),
         ("edit.php?action=".into(), None, None),
         (
@@ -619,8 +666,8 @@ fn ajax_shell() {
             referer: None,
             uri: b"/wp-admin/admin-ajax.php",
             home: HOME,
-            site_url: HOME,
             user: 1,
+            now: 0,
         };
         admin_ajax(site, &asked).map_or_else(|refusal| refusal.status, |()| 501)
     };
@@ -743,4 +790,68 @@ fn ajax_actions() {
         outcome(&role("contributor"), "admin-ajax.php", Some(dim)),
         Some(200)
     );
+}
+
+/// `post.php`'s Quick Draft: `exit` for who may not write posts, the form
+/// for a bad nonce or an empty form, else the referer of its post's type
+/// and `edit_post()`'s capability; and the Screen Options form on any screen.
+#[test]
+fn quick_drafts_and_screen_options() {
+    let draft = |id: &str, rest: &str| {
+        format!(
+            "action=post-quickdraft-save&post_ID={id}&post_title=T&_wpnonce=%nonce:add-post%{rest}"
+        )
+    };
+    for (who, body, expected) in [
+        ("subscriber", draft("1", ""), 200),
+        ("administrator", draft("1", "&_wpnonce=bad"), 501),
+        ("administrator", draft("99", ""), 403),
+        ("administrator", draft("2", ""), 403),
+        ("administrator", draft("1", "&post_type=post"), 501),
+        ("author", draft("801", ""), 500),
+        ("author", draft("801", "&post_title=+"), 501),
+        ("author", draft("801", "&content[]=x"), 501),
+        ("author", draft("801", "&post_title[]=x"), 501),
+    ] {
+        assert_eq!(
+            outcome(&role(who), "post.php", Some(&body)),
+            Some(expected),
+            "{who} {body}"
+        );
+    }
+    let admin = role("administrator");
+    assert_eq!(
+        outcome(
+            &admin,
+            "post.php?action=post-quickdraft-save&post_ID=1",
+            None
+        ),
+        None
+    );
+    let options = "wp_screen_options[option]=edit_per_page&screenoptionnonce=";
+    let valid = format!("{options}%nonce:screen-options-nonce%");
+    for (target, body, expected) in [
+        ("index.php", valid.as_str(), Some(501)),
+        ("edit.php", options, Some(403)),
+        ("index.php", "wp_screen_options=x", None),
+    ] {
+        assert_eq!(
+            outcome(&admin, target, Some(body)),
+            expected,
+            "{target} {body}"
+        );
+    }
+    let post = fields(&valid);
+    for (screen, expected) in [("edit", "screen-options"), ("admin-ajax", "")] {
+        let asked = Asked {
+            get: &[],
+            post: &post,
+            referer: None,
+            uri: b"/wp-admin/",
+            home: HOME,
+            user: 1,
+            now: 0,
+        };
+        assert_eq!(action(screen, &asked), expected.as_bytes(), "{screen}");
+    }
 }

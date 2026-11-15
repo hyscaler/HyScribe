@@ -18,7 +18,7 @@ use hyscribe_write::posts::{
 };
 use hyscribe_write::terms::{Taxonomy, TermList, TermRef, wp_set_post_terms};
 
-use super::{Saving, Stop};
+use super::{Acting, Ajax, Saving, Stop, referer};
 
 /// What the lists' forms never send and `edit_post()` or `wp_insert_post()`
 /// act on: custom fields, post format fields, the edit screen's buttons.
@@ -77,11 +77,11 @@ const TEXTS: [&str; 21] = [
 
 /// Refuses as not ported a request with a field of [`UNSENT`], or an array
 /// for a field of [`TEXTS`].
-fn sent_by_the_lists(fields: &Data) -> Result<(), Stop> {
+fn sent_by_the_lists(fields: &Data) -> Result<(), Error> {
     let unsent = UNSENT.iter().any(|name| fields.get(name).is_some());
     let array = |name: &&str| matches!(fields.get(name), Some(Value::Array(_)));
     match unsent || TEXTS.iter().any(array) {
-        true => Err(Error::Unported("a field the lists do not send").into()),
+        true => Err(Error::Unported("a field the lists do not send")),
         false => Ok(()),
     }
 }
@@ -217,16 +217,9 @@ impl CapabilityData for Caps {
     }
 }
 
-/// `admin_url( $path )` under hs-admin's names.
-fn admin_url(asked: &Asked, path: &str) -> Vec<u8> {
-    let link = hyscribe_admin::menu::link(path);
-    format!("{}/hs-admin/{link}", asked.site_url).into_bytes()
-}
-
-/// `wp_get_referer()`.
-fn referer(asked: &Asked) -> Option<Vec<u8>> {
-    let host = hyscribe_kses::url_host(asked.home.as_bytes()).unwrap_or_default();
-    asked.referer(&|location| crate::redirect::wp_validate_redirect(location, &host, b""))
+/// `admin_url( $path )`.
+fn admin_url(site: &dyn Acting, path: &str) -> Vec<u8> {
+    site.admin_url(path).into_bytes()
 }
 
 /// `str_contains( $url, $file )`, for hs-admin's path of `file` too.
@@ -262,26 +255,28 @@ async fn locked(write: &mut Write<'_>, id: u64, user: u64, now: i64) -> Result<b
 }
 
 /// The action's context for posts of `post_type`.
-fn context(asked: &Asked, caps: &Caps, post_type: &str) -> Context {
+fn context(asked: &Asked, site: &dyn Acting, (caps, post_type): (&Caps, &str)) -> Context {
     Context {
         user: asked.user,
         can_publish: caps.can_type("publish_posts", post_type),
         home: asked.home.as_bytes().to_vec(),
-        upload_host: hyscribe_render::link::host(asked.site_url.as_bytes()),
+        upload_host: hyscribe_render::link::host(site.admin_url("").as_bytes()),
         now: crate::now(),
     }
 }
 
 /// The post the request names, which its checks found.
-async fn existing(write: &mut Write<'_>, id: u64) -> Result<PostFields, Stop> {
+async fn existing(write: &mut Write<'_>, id: u64) -> Result<PostFields, Error> {
     let post = write.post(id).await?;
-    post.ok_or(Stop::Failed(Error::Unported(
-        "a post gone since its checks",
-    )))
+    post.ok_or(Error::Unported("a post gone since its checks"))
 }
 
 /// `post.php`'s action on the post the request names.
-async fn post_php(write: &mut Write<'_>, asked: &Asked<'_>, action: &str) -> Result<Answer, Stop> {
+async fn post_php(
+    write: &mut Write<'_>,
+    (asked, site): (&Asked<'_>, &dyn Acting),
+    action: &str,
+) -> Result<Answer, Stop> {
     let id = lookup(asked.get, "post").or_else(|| lookup(asked.post, "post_ID"));
     let id = u64::try_from(id.map_or(0, Value::to_int)).unwrap_or_default();
     let post = existing(write, id).await?;
@@ -294,11 +289,11 @@ async fn post_php(write: &mut Write<'_>, asked: &Asked<'_>, action: &str) -> Res
         }
         _ => add_query_arg(
             &[(b"post_type", Some(post.post_type.as_bytes()))],
-            &admin_url(asked, "edit.php"),
+            &admin_url(site, "edit.php"),
         ),
     };
     let caps = Caps::load(write, asked.user, None).await?;
-    let ctx = context(asked, &caps, &post.post_type);
+    let ctx = context(asked, site, (&caps, &post.post_type));
     let id_text = id.to_string();
     let ids = (b"ids".as_slice(), Some(id_text.as_bytes()));
     let (done, failed, args): (bool, _, &QueryArgs) = match action {
@@ -325,18 +320,30 @@ async fn post_php(write: &mut Write<'_>, asked: &Asked<'_>, action: &str) -> Res
 }
 
 /// `post.php?action=trash`.
-pub(super) fn trash<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
-    Box::pin(post_php(write, asked, "trash"))
+pub(super) fn trash<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    site: &'a dyn Acting,
+) -> Saving<'a> {
+    Box::pin(post_php(write, (asked, site), "trash"))
 }
 
 /// `post.php?action=untrash`.
-pub(super) fn untrash<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
-    Box::pin(post_php(write, asked, "untrash"))
+pub(super) fn untrash<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    site: &'a dyn Acting,
+) -> Saving<'a> {
+    Box::pin(post_php(write, (asked, site), "untrash"))
 }
 
 /// `post.php?action=delete`, and its Delete button.
-pub(super) fn delete<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
-    Box::pin(post_php(write, asked, "delete"))
+pub(super) fn delete<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    site: &'a dyn Acting,
+) -> Saving<'a> {
+    Box::pin(post_php(write, (asked, site), "delete"))
 }
 
 /// `edit.php`'s IDs of the request: Empty Trash's, `ids` or `post`.
@@ -455,7 +462,11 @@ async fn bulk_write(
 }
 
 /// `edit.php`'s bulk actions, Empty Trash and Bulk Edit.
-pub(super) fn bulk<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn bulk<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    site: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let post_type = match asked.request("post_type").map(Value::to_php_string) {
             None => "post",
@@ -467,7 +478,7 @@ pub(super) fn bulk<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving
         for name in ["p", "attachment_id", "page_id"] {
             if let Some(id) = asked.request(name).filter(|id| !id.is_empty()) {
                 let path = format!("edit-comments.php?p={}", absint(id));
-                return Ok(Answer::Redirect(text(&admin_url(asked, &path))));
+                return Ok(Answer::Redirect(text(&admin_url(site, &path))));
             }
         }
         // `remove_query_arg()` of no referer acts on the request's URI.
@@ -481,7 +492,7 @@ pub(super) fn bulk<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving
                 "post" => "post-new.php".to_string(),
                 _ => format!("post-new.php?post_type={post_type}"),
             };
-            sendback = admin_url(asked, &new);
+            sendback = admin_url(site, &new);
         }
         let doaction = action("edit", asked);
         let ids = bulk_ids(write, asked, (&doaction, post_type)).await?;
@@ -491,12 +502,12 @@ pub(super) fn bulk<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving
         let caps = Caps::load(write, asked.user, None).await?;
         match &doaction[..] {
             b"edit" if asked.request("bulk_edit").is_some() => {
-                let done = bulk_edit_posts(write, asked, (&caps, post_type)).await?;
+                let done = bulk_edit_posts(write, (asked, site), (&caps, post_type)).await?;
                 let names: [&[u8]; 3] = [b"updated", b"skipped", b"locked"];
                 sendback = with_counts(&names, done, &sendback);
             }
             b"trash" | b"untrash" | b"delete" | b"delete_all" => {
-                let ctx = context(asked, &caps, post_type);
+                let ctx = context(asked, site, (&caps, post_type));
                 sendback = bulk_write(write, asked, (&ctx, &doaction), &ids, &sendback).await?;
             }
             _ => {}
@@ -575,7 +586,7 @@ struct Saved<'a> {
 
 /// The date's parts, `aa` to `ss`: integers as PHP reads them, or none;
 /// a part that is not a whole number is not ported.
-fn units(data: &Data) -> Result<[Option<i64>; 6], Stop> {
+fn units(data: &Data) -> Result<[Option<i64>; 6], Error> {
     let parts = ["aa", "mm", "jj", "hh", "mn", "ss"].map(|name| data.text(name));
     let whole = |part: &Vec<u8>| {
         let trimmed = String::from_utf8_lossy(part).trim().to_string();
@@ -583,13 +594,17 @@ fn units(data: &Data) -> Result<[Option<i64>; 6], Stop> {
         !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
     };
     if !parts.iter().flatten().all(whole) {
-        return Err(Error::Unported("a date part that is not a whole number").into());
+        return Err(Error::Unported("a date part that is not a whole number"));
     }
     Ok(parts.map(|part| part.map(|part| Value::String(part).to_int())))
 }
 
 /// `_wp_translate_postdata( true, $data )`: the data, or its error message.
-fn translate(saved: &Saved, mut data: Data, user: u64) -> Result<Result<Data, &'static str>, Stop> {
+fn translate(
+    saved: &Saved,
+    mut data: Data,
+    user: u64,
+) -> Result<Result<Data, &'static str>, Error> {
     let (caps, post) = (saved.caps, saved.post);
     let page = post.post_type == "page";
     data.set(
@@ -700,7 +715,7 @@ async fn update(
     (ctx, id): (&Context, u64),
     data: &Data,
     terms: &[(Taxonomy, Vec<Value>)],
-) -> Result<(), Stop> {
+) -> Result<(), Error> {
     let field = |name| data.text(name);
     let int = |name: &str| data.get(name).map(Value::to_int);
     let (title, name, date, date_gmt) = (
@@ -798,11 +813,11 @@ async fn update(
 }
 
 /// `set_post_format( $id, $format )`: only a post left without one is ported.
-async fn set_post_format(write: &mut Write<'_>, id: u64, format: &Value) -> Result<(), Stop> {
+async fn set_post_format(write: &mut Write<'_>, id: u64, format: &Value) -> Result<(), Error> {
     let slug = hyscribe_kses::sanitize_key(&format.to_php_string());
     let chosen = !format.is_empty() && FORMATS.contains(&slug.as_str());
     if chosen || !write.object_terms(id, "post_format").await?.is_empty() {
-        return Err(Error::Unported("a post format").into());
+        return Err(Error::Unported("a post format"));
     }
     Ok(())
 }
@@ -813,7 +828,7 @@ async fn update_post_meta(
     id: u64,
     key: &str,
     value: Value,
-) -> Result<(), Stop> {
+) -> Result<(), Error> {
     let any = Value::String(Vec::new());
     update_metadata(write, Meta::Post, id, key, &value, &any).await?;
     Ok(())
@@ -832,10 +847,10 @@ async fn zone(write: &mut Write<'_>) -> Result<Zone, DbError> {
 /// `edit_post( $data )` of Quick Edit: its message when it dies.
 async fn edit_post(
     write: &mut Write<'_>,
-    asked: &Asked<'_>,
+    (asked, site): (&Asked<'_>, &dyn Acting),
     (post, id): (&PostFields, u64),
     mut data: Data,
-) -> Result<Option<&'static str>, Stop> {
+) -> Result<Option<&'static str>, Error> {
     let caps = Caps::load(write, asked.user, Some(id)).await?;
     data.unset("filter");
     data.set(
@@ -852,7 +867,7 @@ async fn edit_post(
             .or_else(|| name.split_once("-autosave-v"))
             .is_some_and(|(_, version)| version.parse::<u64>().is_ok_and(|v| v > 0));
         if !versioned {
-            return Err(Error::Unported("revisions from before WordPress 3.6").into());
+            return Err(Error::Unported("revisions from before WordPress 3.6"));
         }
     }
     // Quick Edit's only visibility, `private`, which it sets itself.
@@ -881,14 +896,14 @@ async fn edit_post(
             let taxonomy = match &taxonomy.to_php_string()[..] {
                 b"category" => Taxonomy::Category,
                 b"post_tag" => Taxonomy::PostTag,
-                _ => return Err(Error::Unported("a taxonomy but categories and tags").into()),
+                _ => return Err(Error::Unported("a taxonomy but categories and tags")),
             };
             let values = match (taxonomy, given) {
                 (Taxonomy::Category, Value::Array(ids)) => {
                     ids.iter().map(|(_, id)| Value::Int(id.to_int())).collect()
                 }
                 (Taxonomy::PostTag, Value::String(names)) => tag_names(names),
-                _ => return Err(Error::Unported("terms PHP cannot read").into()),
+                _ => return Err(Error::Unported("terms PHP cannot read")),
             };
             terms.push((taxonomy, values));
         }
@@ -900,10 +915,10 @@ async fn edit_post(
     // `wp_update_post()` is not ported yet.
     let me = i64::try_from(asked.user).unwrap_or_default();
     update_post_meta(write, id, "_edit_last", Value::Int(me)).await?;
-    let ctx = context(asked, &caps, &post.post_type);
+    let ctx = context(asked, site, (&caps, &post.post_type));
     match update(write, (&ctx, id), &data, &terms).await {
         // What `wp_update_post()` refuses is left undone, and the rest goes on.
-        Err(Stop::Failed(Error::Refused(_))) => {}
+        Err(Error::Refused(_)) => {}
         updated => updated?,
     }
     let lock = format!("{}:{}", ctx.now, asked.user);
@@ -922,7 +937,11 @@ async fn edit_post(
 
 /// `wp_ajax_inline_save()`: the row of the saved post is the answer, which
 /// hs-admin reads once the action is committed.
-pub(super) fn inline_save<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn inline_save<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    site: &'a dyn Acting,
+) -> Saving<'a, Ajax> {
     Box::pin(async move {
         let mut data = Data(asked.post.to_vec());
         sent_by_the_lists(&data)?;
@@ -970,9 +989,9 @@ pub(super) fn inline_save<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) ->
                 wp_unique_post_slug(write, name, unique, &post.post_type, post.parent).await?;
             data.set("post_name", Value::String(name));
         }
-        match edit_post(write, asked, (&post, id), data).await? {
-            Some(message) => Err(Stop::Died(Answer::Died(message))),
-            None => Ok(Answer::Page(String::new())),
+        match edit_post(write, (asked, site), (&post, id), data).await? {
+            Some(message) => Err(Stop::Died(Ajax::Text(message.into()))),
+            None => Ok(Ajax::PostRow(id)),
         }
     })
 }
@@ -1011,9 +1030,9 @@ fn tag_names(names: &[u8]) -> Vec<Value> {
 /// locked.
 async fn bulk_edit_posts(
     write: &mut Write<'_>,
-    asked: &Asked<'_>,
+    (asked, site): (&Asked<'_>, &dyn Acting),
     (list_caps, list_type): (&Caps, &str),
-) -> Result<[usize; 3], Stop> {
+) -> Result<[usize; 3], Error> {
     let mut shared = request(asked);
     sent_by_the_lists(&shared)?;
     // A `-1`, No Change, is unset with the other fields below.
@@ -1070,7 +1089,7 @@ async fn bulk_edit_posts(
                 }
                 (b"post_tag", Value::String(names)) => new_tags = tag_names(names),
                 (b"post_format", Value::String(_)) => {}
-                _ => return Err(Error::Unported("terms PHP cannot read").into()),
+                _ => return Err(Error::Unported("terms PHP cannot read")),
             }
         }
     }
@@ -1097,7 +1116,7 @@ async fn bulk_edit_posts(
             .as_ref()
             .is_some_and(|post| !["post", "page"].contains(&post.post_type.as_str()))
         {
-            return Err(Error::Unported("a post type other than post and page").into());
+            return Err(Error::Unported("a post type other than post and page"));
         }
         let caps = Caps::load(write, asked.user, Some(id)).await?;
         let editable = caps.can("edit_post", &[Value::Int(signed)]);
@@ -1186,14 +1205,12 @@ async fn bulk_edit_posts(
             data.set("post_date", Value::String(local.into_bytes()));
             data.set("post_date_gmt", Value::String(Vec::new()));
         }
-        let ctx = context(asked, &caps, &post.post_type);
+        let ctx = context(asked, site, (&caps, &post.post_type));
         update(write, (&ctx, id), &data, &terms)
             .await
-            .map_err(|stop| match stop {
-                Stop::Failed(Error::Refused(_)) => {
-                    Error::Unported("a save PHP leaves undone").into()
-                }
-                stop => stop,
+            .map_err(|err| match err {
+                Error::Refused(_) => Error::Unported("a save PHP leaves undone"),
+                err => err,
             })?;
         let me = i64::try_from(asked.user).unwrap_or_default();
         update_post_meta(write, id, "_edit_last", Value::Int(me)).await?;

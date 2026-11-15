@@ -285,6 +285,9 @@ impl Role {
         if self.terms_content() {
             return crate::terms::content::terms(taxonomy);
         }
+        if self.variant() == "t2saved" {
+            return crate::terms::content::saved(taxonomy);
+        }
         if self.listing() {
             return crate::posts::content::terms(taxonomy);
         }
@@ -323,6 +326,15 @@ impl Role {
         let value: &[u8] = match (self.variant(), name) {
             // `WP_SITEURL` and `WP_HOME`.
             (_, "siteurl" | "home") => SITE.as_bytes(),
+            (variant, "_transient_settings_errors") if variant.starts_with("o5") => {
+                let kept = crate::settings::tests::kept_errors(variant);
+                return kept.map(|kept| &*Box::leak(kept.into_boxed_slice()));
+            }
+            ("o5expired", "_transient_timeout_settings_errors") => b"1794499999",
+            ("o5now", "_transient_timeout_settings_errors") => b"1794500000",
+            (variant, "_transient_timeout_settings_errors") if variant.starts_with("o5") => {
+                b"4102444800"
+            }
             ("s1static" | "s1same" | "s1privacy" | "s1unset" | "s1hidden", "show_on_front") => {
                 b"page"
             }
@@ -1066,6 +1078,12 @@ impl crate::users::UsersSite for Role {
     fn author_url(&self, id: u64) -> String {
         format!("{SITE}/?author={id}")
     }
+    /// Those with posts.
+    fn owns_content(&self, id: u64) -> bool {
+        crate::users::content::users(self.users_content())
+            .iter()
+            .any(|listed| listed.user.id == id && listed.posts > 0)
+    }
 }
 
 impl crate::tools::ToolsSite for Role {
@@ -1651,9 +1669,17 @@ impl crate::posts::PostsSite for Role {
         if self.ttd() {
             return crate::media::content::user(id);
         }
+        let listed = || {
+            let users = crate::users::content::users(self.users_content());
+            users
+                .into_iter()
+                .map(|listed| listed.user)
+                .find(|user| user.id == id)
+        };
         self.authors("edit_posts")
             .into_iter()
             .find(|user| user.id == id)
+            .or_else(listed)
     }
     fn pending_comments(&self, post: &hyscribe_model::Post) -> u64 {
         u64::from(
@@ -1828,4 +1854,14 @@ fn icon_meta(id: u64, key: &str) -> Option<Vec<u8>> {
         _ => return None,
     };
     Some(value.to_vec())
+}
+
+/// `wp_die()`'s `back_link` goes after the message, which `wp-comments-post.php`'s
+/// errors show (hyscribe-http's comment post goldens).
+#[test]
+fn a_back_link_follows_the_message() {
+    let page = String::from_utf8(crate::die::page_with_back_link(true, "T", "<p>m</p>")).unwrap();
+    let back = "<div class=\"wp-die-message\"><p>m</p></div>\n<p><a href='javascript:history.back()'>&laquo; Back</a></p></body>";
+    assert!(page.contains(back), "{page}");
+    assert!(page.contains("<title>T</title>"));
 }

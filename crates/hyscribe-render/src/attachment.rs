@@ -10,7 +10,7 @@ use hyscribe_phpser::{
 };
 
 use crate::formatting::{contains, dirname, find, untrailingslashit};
-use crate::media::{Given, Loading};
+use crate::media::{Filter, Given, Loading};
 use crate::site::Site;
 use crate::template::replace;
 use hyscribe_model::Post;
@@ -30,6 +30,17 @@ pub(crate) enum Size<'a> {
         height: i64,
         original_ratio: bool,
     },
+}
+
+impl Size<'_> {
+    /// `array( $width, $height )`, each read through `(int)`.
+    pub(crate) fn from_sides(width: &Value, height: &Value) -> Size<'static> {
+        Size::Dimensions {
+            width: width.to_int(),
+            height: height.to_int(),
+            original_ratio: matches!(width, Value::Int(0)) || matches!(height, Value::Int(0)),
+        }
+    }
 }
 
 impl std::fmt::Display for Size<'_> {
@@ -100,7 +111,7 @@ pub(crate) fn attachment_image(
         loading: get(&attrs, "loading"),
         fetchpriority: get(&attrs, "fetchpriority"),
     };
-    let optimization = loading.optimization(true, &given, false);
+    let optimization = loading.optimization(true, &given, Filter::None);
     let extra = [
         ("decoding", optimization.decoding),
         ("fetchpriority", optimization.fetchpriority),

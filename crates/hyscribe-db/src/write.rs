@@ -85,6 +85,9 @@ pub struct Writer {
     prefix: Prefix,
     /// The tables written whose engine cannot roll back, with the engine.
     refused: Vec<(Table, String)>,
+    /// The `home` and `siteurl` the configuration sets (`WP_HOME`,
+    /// `WP_SITEURL`), which `get_option()` gives instead of the stored ones.
+    urls: Vec<(&'static str, String)>,
 }
 
 impl Writer {
@@ -125,7 +128,13 @@ impl Writer {
             pool,
             prefix,
             refused,
+            urls: Vec::new(),
         }))
+    }
+
+    /// The writer with the configuration's `home` and `siteurl`, by option name.
+    pub fn with_urls(self, urls: Vec<(&'static str, String)>) -> Writer {
+        Writer { urls, ..self }
     }
 
     /// What the writer refuses, as the service logs it at start: each table
@@ -239,6 +248,13 @@ impl<'w> Write<'w> {
     /// `{prefix}capabilities` and `{prefix}user_level`.
     pub fn prefix(&self) -> &str {
         self.writer.prefix.as_str()
+    }
+
+    /// The configuration's value of the option `name` (`home` or `siteurl`),
+    /// if it sets one.
+    pub fn configured(&self, name: &str) -> Option<&str> {
+        let url = self.writer.urls.iter().find(|(option, _)| *option == name);
+        url.map(|(_, url)| url.as_str())
     }
 
     fn sql(&self, query: &'static str) -> Query {
@@ -606,6 +622,36 @@ impl<'w> Write<'w> {
         self.count(query.bind(post)).await
     }
 
+    /// `get_comment_count( $post )`'s approved, held, spam, trashed and
+    /// post-trashed comments, notes left out, of every post for 0, counted
+    /// a status at a time as PHP counts them.
+    pub async fn comment_counts(&mut self, post: u64) -> Result<[u64; 5], DbError> {
+        let mut counts = [0; 5];
+        let statuses = ["1", "0", "spam", "trash", "post-trashed"];
+        for (count, status) in counts.iter_mut().zip(statuses) {
+            let query = self.sql(
+                "SELECT COUNT(*) FROM {prefix}comments WHERE comment_approved = ? \
+                 AND comment_type != 'note' AND ( ? = 0 OR comment_post_ID = ? )",
+            );
+            *count = self.count(query.bind(status).bind(post).bind(post)).await?;
+        }
+        Ok(counts)
+    }
+
+    /// The comments Empty Spam and Empty Trash delete: of `status`, older
+    /// than `before`, both compared as `edit-comments.php`'s text.
+    pub async fn comment_ids_before(
+        &mut self,
+        status: &str,
+        before: &str,
+    ) -> Result<Vec<u64>, DbError> {
+        let query = self.sql(
+            "SELECT comment_ID FROM {prefix}comments \
+             WHERE comment_approved = ? AND ? > comment_date_gmt",
+        );
+        self.ids(query.bind(status).bind(before)).await
+    }
+
     // Users.
 
     /// `wp_insert_user()`'s `INSERT` of a new user `login`: its ID.
@@ -891,7 +937,7 @@ impl PostFields {
 
 /// The columns of a comment `wp_insert_comment()` and
 /// `wp_update_comment()` write.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CommentFields {
     /// `comment_post_ID`.
     pub post_id: u64,

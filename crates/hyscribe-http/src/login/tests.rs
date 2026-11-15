@@ -775,3 +775,44 @@ async fn the_request_and_the_site_shape_the_screens() {
         "http://login.test/hs-admin/"
     );
 }
+
+/// `wp_update_user()` sets the cookies again, on the same session, when an
+/// action changed the current user's password: remembered when the logged
+/// in cookie outlasts two days; none when the password stands.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_changed_password_renews_the_cookies() {
+    let site = login_site(None).await;
+    let names = Names::new(&site);
+    let (site, handle) = (Arc::clone(&site), Handle::current());
+    tokio::task::spawn_blocking(move || {
+        let mut reads = LoginReads::new(&site, handle, now());
+        reads.act_as(1, b"token".to_vec());
+        assert!(renewed_cookies(&reads, &names, None, false).is_empty());
+        let user = reads.credentials(UserField::Login, b"admin").unwrap();
+        assert!(renewed_cookies(&reads, &names, None, false).is_empty());
+        reads.found.borrow_mut()[0].pass = b"the hash before".to_vec();
+        let cookies = renewed_cookies(&reads, &names, None, false);
+        assert_eq!(cookies.len(), 2);
+        let value = cookies[1]
+            .split(';')
+            .next()
+            .unwrap()
+            .split_once('=')
+            .unwrap()
+            .1;
+        let value = urldecode(value.as_bytes());
+        let parsed = parse_auth_cookie(&value).unwrap();
+        assert_eq!(parsed.token, b"token");
+        let salt = reads.salt("logged_in").unwrap();
+        assert!(parsed.is_valid(&user.pass, &salt, reads.now, false));
+        assert!(!cookies[0].contains("expires="));
+        let far = format!("admin|{}|token|x", reads.now + 3 * DAY);
+        let remembered = renewed_cookies(&reads, &names, Some(far.as_bytes()), true);
+        assert!(remembered[0].contains("expires=") && remembered[0].contains("secure"));
+        let near = format!("admin|{}|token|x", reads.now + 2 * DAY);
+        let kept = renewed_cookies(&reads, &names, Some(near.as_bytes()), false);
+        assert!(!kept[0].contains("expires="));
+    })
+    .await
+    .unwrap();
+}

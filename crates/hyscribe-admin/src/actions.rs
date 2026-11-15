@@ -6,9 +6,9 @@
 //! to its write's handler in the HTTP route ([`action`] names it), or is
 //! answered `501` when it has none, as is one whose next step is not ported.
 
-use hyscribe_auth::caps::{CapabilityData, post_type_exists, taxonomy_cap};
+use hyscribe_auth::caps::{CapPost, CapabilityData, post_type_exists, taxonomy_cap};
 use hyscribe_kses::{esc_html, esc_url, esc_url_raw, sanitize_key};
-use hyscribe_phpser::{Key, Value, addslashes, lookup, remove_query_arg};
+use hyscribe_phpser::{Key, Value, absint, addslashes, lookup, php_trim, remove_query_arg};
 use hyscribe_render::formatting::sanitize_text_field;
 
 use crate::users::role_names;
@@ -42,10 +42,10 @@ pub struct Asked<'a> {
     pub uri: &'a [u8],
     /// `home_url()`.
     pub home: &'a str,
-    /// `site_url()`.
-    pub site_url: &'a str,
     /// `get_current_user_id()`.
     pub user: u64,
+    /// `time()`, in Unix seconds.
+    pub now: i64,
 }
 
 impl Asked<'_> {
@@ -58,7 +58,8 @@ impl Asked<'_> {
         lookup(self.get, name)
     }
 
-    fn post(&self, name: &str) -> Option<&Value> {
+    /// `$_POST[ $name ]`.
+    pub fn post(&self, name: &str) -> Option<&Value> {
         lookup(self.post, name)
     }
 
@@ -86,8 +87,13 @@ impl Asked<'_> {
             .unwrap_or_default()
     }
 
-    /// `wp_get_referer()`, `validate` its `wp_validate_redirect()`.
-    pub fn referer(&self, validate: &dyn Fn(&[u8]) -> Vec<u8>) -> Option<Vec<u8>> {
+    /// `wp_get_referer()`.
+    fn referer(&self, site: &dyn ActionSite) -> Option<Vec<u8>> {
+        self.wp_get_referer(&|location| site.validate_redirect(location))
+    }
+
+    /// `wp_get_referer()`, with `validate` as `wp_validate_redirect( $location, '' )`.
+    pub fn wp_get_referer(&self, validate: &dyn Fn(&[u8]) -> Vec<u8>) -> Option<Vec<u8>> {
         let given = self
             .request("_wp_http_referer")
             .filter(|referer| !referer.is_empty())
@@ -171,7 +177,7 @@ pub type Checked = Result<(), Refusal>;
 /// `wp_nonce_ays( $action )`.
 fn nonce_ays(site: &dyn ActionSite, asked: &Asked) -> Refusal {
     let mut html = String::from("The link you followed has expired.");
-    if let Some(referer) = asked.referer(&|location| site.validate_redirect(location)) {
+    if let Some(referer) = asked.referer(site) {
         let back = site.validate_redirect(&esc_url_raw(&remove_query_arg(&[b"updated"], &referer)));
         html.push_str(&format!(
             "</p><p><a href=\"{}\">Please try again.</a>",
@@ -227,7 +233,7 @@ fn can_for(site: &dyn ActionSite, cap: &str, id: i64) -> bool {
 }
 
 /// `(array) $value`'s items.
-fn items(value: &Value) -> Vec<Value> {
+pub fn items(value: &Value) -> Vec<Value> {
     match value {
         Value::Array(entries) => entries.iter().map(|(_, item)| item.clone()).collect(),
         value => vec![value.clone()],
@@ -242,16 +248,27 @@ fn lock_holder(site: &dyn ActionSite, id: i64) -> Option<String> {
 /// The checks of an action on the admin screen `screen` (hs-admin's path
 /// without `/hs-admin/`); `None` for a request that is not one.
 pub fn admin(site: &dyn ActionSite, screen: &str, asked: &Asked, post: bool) -> Option<Checked> {
+    // `admin.php`'s `set_screen_options()`, before any screen's own.
+    if screen_options(asked) {
+        return Some(admin_referer(
+            site,
+            asked,
+            "screen-options-nonce",
+            "screenoptionnonce",
+        ));
+    }
     let checked = match screen {
         "edit" => posts_list(site, asked)?,
         "post" => post_action(site, asked, post)?,
         "edit-tags" => terms_list(site, asked)?,
         "edit-comments" => comments_list(site, asked)?,
+        "comment" => comment_action(site, asked)?,
         "users" => users_list(site, asked)?,
         "user-new" => user_new(site, asked)?,
         "profile" | "user-edit" => user_edit(site, asked, screen == "profile")?,
         "options" => options(site, asked),
         "options-permalink" => permalinks(site, asked)?,
+        "options-privacy" => privacy(site, asked)?,
         "themes" => themes(site, asked)?,
         _ => return None,
     };
@@ -403,6 +420,7 @@ fn post_action(site: &dyn ActionSite, asked: &Asked, post: bool) -> Option<Check
             "Sorry, you are not allowed to delete this item.",
             None,
         ),
+        b"post-quickdraft-save" if post => return Some(quickdraft(site, asked, found, id)),
         _ => return post.then_some(Ok(())),
     };
     let nonce = format!("{}-post_{id}", String::from_utf8_lossy(&action));
@@ -426,13 +444,55 @@ fn post_action(site: &dyn ActionSite, asked: &Asked, post: bool) -> Option<Check
     }))
 }
 
+/// `WP_Terms_List_Table::current_action()`: `bulk-delete` for the bulk action.
+fn terms_action(asked: &Asked) -> Option<Vec<u8>> {
+    if asked.is("action", "delete") && asked.request("delete_tags").is_some() {
+        return Some(b"bulk-delete".to_vec());
+    }
+    Some(asked.current_action(false)?.to_php_string())
+}
+
+/// `trim( $_POST[ $name ] )` of the Quick Draft form, on the slashed value
+/// as PHP trims it; `None` for an array, PHP's fatal error.
+pub fn quickdraft_field(asked: &Asked, name: &str) -> Option<Vec<u8>> {
+    let given = match asked.post(name) {
+        Some(Value::Array(_)) => return None,
+        given => given.map(Value::to_php_string).unwrap_or_default(),
+    };
+    Some(php_trim(&addslashes(&given)).to_vec())
+}
+
+/// Whether the Quick Draft form has a title or content, which a draft
+/// needs; `None` for a field PHP cannot trim.
+pub fn quickdraft_filled(asked: &Asked) -> Option<bool> {
+    let title = quickdraft_field(asked, "post_title")?;
+    let content = quickdraft_field(asked, "content")?;
+    Some(!Value::String(title).is_empty() || !Value::String(content).is_empty())
+}
+
+/// `post.php`'s Quick Draft: `exit` for who may not create posts, then,
+/// with a valid nonce, the referer of its post's type and, once the form is
+/// filled, `edit_post()`'s capability check. The rest answers with the form.
+fn quickdraft(site: &dyn ActionSite, asked: &Asked, found: Option<CapPost>, id: i64) -> Checked {
+    if !site.current_user_can("edit_posts", &[]) {
+        return Err(ajax(200, ""));
+    }
+    if !verified(site, asked.request("_wpnonce"), "add-post") {
+        return Ok(());
+    }
+    let kind = found.map(|post| post.post_type).unwrap_or_default();
+    referer(site, asked, &format!("add-{kind}"))?;
+    match quickdraft_filled(asked) {
+        Some(true) if !can_for(site, "edit_post", id) => {
+            Err(died(500, "Sorry, you are not allowed to edit this post."))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// `edit-tags.php`'s actions on categories and tags.
 fn terms_list(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
-    let doaction = if asked.is("action", "delete") && asked.request("delete_tags").is_some() {
-        b"bulk-delete".to_vec()
-    } else {
-        asked.current_action(false)?.to_php_string()
-    };
+    let doaction = terms_action(asked)?;
     // Without a taxonomy the screen is not ported.
     let taxonomy = asked.request("taxonomy").and_then(Value::as_bytes);
     let taxonomy = match taxonomy {
@@ -484,6 +544,62 @@ fn comments_list(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
     Some(referer(site, asked, "bulk-comments"))
 }
 
+/// `comment.php`'s `$action`.
+fn comment_php_action(asked: &Asked) -> Vec<u8> {
+    let action = match asked.action() {
+        _ if asked.post("deletecomment").is_some() => b"deletecomment".to_vec(),
+        action if action == b"cdc" => b"delete".to_vec(),
+        action if action == b"mac" => b"approve".to_vec(),
+        action => action,
+    };
+    match asked.get("dt").and_then(Value::as_bytes) {
+        Some(dt @ (b"spam" | b"trash")) => dt.to_vec(),
+        _ => action,
+    }
+}
+
+/// `comment.php`'s refusal of a comment on a trashed post, then the nonce
+/// of its moderations and of the edit screen's save; `None` for its pages.
+fn comment_action(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
+    let id = asked.request("c").map(absint);
+    let post = id.and_then(|id| site.comment_post(id));
+    if post
+        .and_then(|post| site.post(post))
+        .is_some_and(|post| post.status == "trash")
+    {
+        return Some(Err(died(
+            500,
+            "You cannot edit this comment because the associated post is in the Trash. Please restore the post first, then try again.",
+        )));
+    }
+    let id = id.unwrap_or_default();
+    let nonce = match comment_php_action(asked).as_slice() {
+        b"approvecomment" | b"unapprovecomment" => format!("approve-comment_{id}"),
+        b"deletecomment" | b"trashcomment" | b"untrashcomment" | b"spamcomment"
+        | b"unspamcomment" => format!("delete-comment_{id}"),
+        b"editedcomment" => {
+            let id = asked.post("comment_ID").map_or(0, Value::to_int);
+            // `edit_comment()`'s own check.
+            let checked = referer(
+                site,
+                asked,
+                &format!("update-comment_{}", id.unsigned_abs()),
+            );
+            return Some(
+                checked.and_then(|()| match can_for(site, "edit_comment", id) {
+                    true => Ok(()),
+                    false => Err(died(
+                        500,
+                        "Sorry, you are not allowed to edit comments on this post.",
+                    )),
+                }),
+            );
+        }
+        _ => return None,
+    };
+    Some(referer(site, asked, &nonce))
+}
+
 /// The user IDs of `$_REQUEST['users']`, `intval()`ed.
 pub fn user_ids(asked: &Asked) -> Vec<i64> {
     asked
@@ -504,18 +620,33 @@ fn users_action(asked: &Asked) -> Option<Vec<u8>> {
 }
 
 /// The action of a request whose checks passed, as its write's handler is
-/// registered: the lists' `current_action()`, `post.php`'s `delete` for its
-/// Delete button, else `$_REQUEST['action']`.
+/// registered: `screen-options` for the Screen Options form, the lists'
+/// `current_action()`, `post.php`'s `delete` for its Delete button,
+/// `options.php`'s email confirmation (`adminhash`) and dismissal, the
+/// Privacy screen's `$_POST['action']`, else `$_REQUEST['action']`.
 pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
     match screen {
+        "admin-ajax" => asked.action(),
+        _ if screen_options(asked) => b"screen-options".to_vec(),
         "users" => users_action(asked).unwrap_or_default(),
-        "edit" => asked
-            .current_action(true)
-            .map(|action| action.to_php_string())
+        "edit" | "edit-comments" => (asked.current_action(true).as_ref())
+            .map(Value::to_php_string)
             .unwrap_or_default(),
+        "comment" => comment_php_action(asked),
+        "options" if asked.get("adminhash").is_some_and(|hash| !hash.is_empty()) => {
+            b"adminhash".to_vec()
+        }
+        "options" if dismissed(asked) => b"dismiss".to_vec(),
+        "options-privacy" => privacy_action(asked).unwrap_or_default(),
+        "edit-tags" => terms_action(asked).unwrap_or_default(),
         "post" if asked.post("deletepost").is_some() => b"delete".to_vec(),
         _ => asked.action(),
     }
+}
+
+/// Whether the Screen Options form is posted: `$_POST['wp_screen_options']`, an array.
+fn screen_options(asked: &Asked) -> bool {
+    matches!(asked.post("wp_screen_options"), Some(Value::Array(_)))
 }
 
 /// `users.php`'s actions.
@@ -655,6 +786,22 @@ const OPTION_PAGES: [&str; 8] = [
     "privacy",
 ];
 
+/// `options.php`'s `$option_page`: `options` when not given.
+pub fn option_page(asked: &Asked) -> Vec<u8> {
+    let given = asked
+        .request("option_page")
+        .filter(|page| !page.is_empty())
+        .and_then(Value::as_bytes)
+        .map(|page| sanitize_text_field(&addslashes(page)))
+        .filter(|page| !Value::String(page.clone()).is_empty());
+    given.unwrap_or_else(|| b"options".to_vec())
+}
+
+/// `options.php`'s dismissal of a pending admin email change.
+fn dismissed(asked: &Asked) -> bool {
+    asked.get("dismiss").and_then(Value::as_bytes) == Some(b"new_admin_email")
+}
+
 /// `options.php`, which saves the Settings screens.
 fn options(site: &dyn ActionSite, asked: &Asked) -> Checked {
     if !site.current_user_can("manage_options", &[]) {
@@ -665,19 +812,13 @@ fn options(site: &dyn ActionSite, asked: &Asked) -> Checked {
     if asked.get("adminhash").is_some_and(|hash| !hash.is_empty()) {
         return Ok(());
     }
-    if asked.get("dismiss").and_then(Value::as_bytes) == Some(b"new_admin_email") {
+    if dismissed(asked) {
         return referer(site, asked, "dismiss-1-new_admin_email");
     }
     if asked.action() != b"update" {
         return Ok(());
     }
-    let given = asked
-        .request("option_page")
-        .filter(|page| !page.is_empty())
-        .and_then(Value::as_bytes)
-        .map(|page| sanitize_text_field(&addslashes(page)))
-        .filter(|page| !Value::String(page.clone()).is_empty());
-    let page = given.unwrap_or_else(|| b"options".to_vec());
+    let page = option_page(asked);
     let nonce = if page == b"options" && asked.post("option_page").is_none() {
         "update-options".to_string()
     } else {
@@ -705,6 +846,24 @@ fn permalinks(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
         return Some(Err(no_access()));
     }
     Some(referer(site, asked, "update-permalink"))
+}
+
+/// `options-privacy.php`'s `$_POST['action']`, when not empty.
+fn privacy_action(asked: &Asked) -> Option<Vec<u8>> {
+    let action = asked.post("action").filter(|action| !action.is_empty())?;
+    Some(action.to_php_string())
+}
+
+/// The Privacy screen's actions, outside its policy guide tab.
+fn privacy(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
+    if asked.get("tab").and_then(Value::as_bytes) == Some(b"policyguide") {
+        return None;
+    }
+    let action = privacy_action(asked)?;
+    if !site.current_user_can("manage_privacy_options", &[]) {
+        return Some(Err(no_access()));
+    }
+    Some(referer(site, asked, &String::from_utf8_lossy(&action)))
 }
 
 /// `themes.php`'s actions: only the nonce of a theme's activation is
@@ -884,7 +1043,7 @@ fn allowed(can: bool) -> Checked {
 }
 
 /// `$_POST[ $name ]` as `(int)` casts it, 0 when not set.
-fn post_int(asked: &Asked, name: &str) -> i64 {
+pub fn post_int(asked: &Asked, name: &str) -> i64 {
     asked.post(name).map_or(0, Value::to_int)
 }
 
@@ -995,6 +1154,40 @@ fn ajax_action(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
                 false => Err(Refusal {
                     status: 200,
                     body: Body::Json("{\"success\":false}"),
+                }),
+            }
+        }
+        "send-password-reset" => {
+            let id = post_int(asked, "user_id");
+            ajax_referer(
+                site,
+                asked,
+                &format!("reset-password-for-{id}"),
+                Some("nonce"),
+            )?;
+            match can_for(site, "edit_user", id) {
+                true => Ok(()),
+                false => Err(Refusal {
+                    status: 200,
+                    body: Body::Json(
+                        "{\"success\":false,\"data\":\"Cannot send password reset, permission denied.\"}",
+                    ),
+                }),
+            }
+        }
+        "destroy-sessions" => {
+            let id = post_int(asked, "user_id");
+            let user = u64::try_from(id).is_ok_and(|id| site.user_exists(id));
+            match user
+                && can_for(site, "edit_user", id)
+                && verified(site, asked.post("nonce"), &format!("update-user_{id}"))
+            {
+                true => Ok(()),
+                false => Err(Refusal {
+                    status: 200,
+                    body: Body::Json(
+                        "{\"success\":false,\"data\":{\"message\":\"Could not log out user sessions. Please try again.\"}}",
+                    ),
                 }),
             }
         }

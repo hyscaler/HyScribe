@@ -399,6 +399,13 @@ async fn any_comment_is_read() {
     let db = Db::connect(&fixture_config()).await.unwrap();
     assert_eq!(db.any_comment(1).await.unwrap().map(|c| c.id), Some(1));
     assert!(db.any_comment(999).await.unwrap().is_none());
+    // Held comments are in the Theme Test Data.
+    let ttd = named("wordpress_ttd").await;
+    assert_eq!(
+        ttd.held_comment(27).await.unwrap().map(|c| c.post_id),
+        Some(1148)
+    );
+    assert!(ttd.held_comment(1).await.unwrap().is_none());
     assert_eq!(db.comment_approved(1).await.unwrap().as_deref(), Some("1"));
     assert_eq!(db.comment_approved(999).await.unwrap(), None);
     assert!(db.has_comment_types(&["", "comment"]).await.unwrap());
@@ -510,6 +517,7 @@ async fn every_query() -> Vec<DbError> {
         db.term(1, "category").await.unwrap_err(),
         db.term_taxonomy(1).await.unwrap_err(),
         db.any_comment(1).await.unwrap_err(),
+        db.held_comment(1).await.unwrap_err(),
         db.comment_approved(1).await.unwrap_err(),
         db.has_comment_types(&["comment"]).await.unwrap_err(),
         db.count_terms("category", None).await.unwrap_err(),
@@ -525,6 +533,7 @@ async fn every_query() -> Vec<DbError> {
             .unwrap_err(),
         db.users_meta("wp_capabilities").await.unwrap_err(),
         db.post_authors("post").await.unwrap_err(),
+        db.owns_content(1).await.unwrap_err(),
         db.posts_of_type("page").await.unwrap_err(),
         db.revisions(1).await.unwrap_err(),
         db.user_post_counts(&[1], true, 1).await.unwrap_err(),
@@ -1487,6 +1496,7 @@ async fn dashboard_reads() {
     assert_eq!(caps, [(1, b"a:1:{s:13:\"administrator\";b:1;}".to_vec())]);
     assert_eq!(db.post_authors("page").await.unwrap(), [1]);
     assert!(db.post_authors("attachment").await.unwrap().is_empty());
+    assert!(db.owns_content(1).await.unwrap() && !db.owns_content(2).await.unwrap());
     assert_eq!(db.user_post_counts(&[1], false, 0).await.unwrap(), [(1, 1)]);
     let latest = db.list_comments(&PENDING, NEWEST, 5, 0).await.unwrap();
     let ids: Vec<(u64, String)> = latest.into_iter().map(|(c, a)| (c.id, a)).collect();

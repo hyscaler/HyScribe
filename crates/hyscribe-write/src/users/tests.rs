@@ -493,3 +493,48 @@ async fn an_update_keeps_the_reset_key_and_the_hash() {
     })
     .await;
 }
+
+/// A password reset key is kept as PHP keeps it, for the action of Edit
+/// User's link (the oracle's `admin-send-password-reset`).
+#[tokio::test]
+async fn keeps_a_password_reset_key() {
+    let setup = async |write: &mut Write<'_>| {
+        let user = UserData {
+            role: some("author"),
+            ..new_user("oracle-link")
+        };
+        setup_user(write, user).await
+    };
+    check("admin-send-password-reset", setup, async |write, id| {
+        get_password_reset_key(write, id).await.unwrap();
+    })
+    .await;
+}
+
+/// An email change waits under a random hash, and none waits when another
+/// user has the address; every failed statement fails the action.
+#[tokio::test]
+async fn an_email_change_waits_for_its_confirmation() {
+    rolled_back(async |write| {
+        let new = b"new\\'s@example.test";
+        request_email_change(write, 1, new).await.unwrap();
+        let waiting = get_metadata(write, Meta::User, 1, "_new_email").await;
+        let waiting = waiting.unwrap();
+        let [Value::Array(change)] = &waiting[..] else {
+            panic!("{waiting:?}");
+        };
+        let hash = change[0].1.as_bytes().unwrap();
+        assert!(hash.len() == 32 && hash.iter().all(u8::is_ascii_hexdigit));
+        assert_eq!(change[1].1.as_bytes(), Some(&b"new's@example.test"[..]));
+        let own = b" admin@default-install.test";
+        request_email_change(write, 1, own).await.unwrap();
+        let gone = get_metadata(write, Meta::User, 1, "_new_email").await;
+        assert!(gone.unwrap().is_empty());
+    })
+    .await;
+    let setup = async |_: &mut Write<'_>| {};
+    fails_at_each_step(setup, async |write, ()| {
+        request_email_change(write, 1, b"new@example.test").await
+    })
+    .await;
+}

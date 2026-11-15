@@ -103,5 +103,13 @@ pub fn wp_validate_redirect(location: &[u8], host: &[u8], fallback: &[u8]) -> Ve
     }
 }
 
+/// `wp_safe_redirect()`'s location: `location` kept on the site's host,
+/// else `fallback`, sanitized.
+pub(crate) fn wp_safe_redirect(site: &crate::Site, location: &[u8], fallback: &str) -> String {
+    let host = hyscribe_kses::url_host(site.home.as_bytes()).unwrap_or_default();
+    let location = wp_validate_redirect(location, &host, fallback.as_bytes());
+    String::from_utf8_lossy(&wp_sanitize_redirect(&location)).into_owned()
+}
+
 #[cfg(test)]
 mod tests;

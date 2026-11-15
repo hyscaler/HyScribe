@@ -22,7 +22,7 @@ use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
 use crate::reads::Reads;
-use crate::redirect::{wp_sanitize_redirect, wp_validate_redirect};
+use crate::redirect::{wp_safe_redirect, wp_sanitize_redirect, wp_validate_redirect};
 use crate::{Site, now};
 
 /// The login screen's path.
@@ -30,14 +30,15 @@ pub(crate) const PATH: &str = "/hs-login";
 
 const DAY: i64 = 86_400;
 
-const YEAR: i64 = 365 * DAY;
+pub(crate) const YEAR: i64 = 365 * DAY;
 
 /// HyScribe's cookie names, which never stand for a PHP WordPress login,
 /// and their paths.
 pub(crate) struct Names {
-    hash: String,
+    /// `COOKIEHASH`.
+    pub(crate) hash: String,
     /// `COOKIEPATH`, from the home URL.
-    path: String,
+    pub(crate) path: String,
     /// `SITECOOKIEPATH`, from the site URL.
     site_path: String,
 }
@@ -50,6 +51,11 @@ impl Names {
             path: cookie_path(&site.home),
             site_path: cookie_path(&siteurl),
         }
+    }
+
+    /// `SITECOOKIEPATH`.
+    pub(crate) fn site_path(&self) -> &str {
+        &self.site_path
     }
 
     fn test(&self) -> String {
@@ -81,9 +87,20 @@ impl Names {
     }
 }
 
-/// `setcookie()`, with `SameSite=Lax` added (docs/SECURITY_MODEL.md):
-/// `expires` 0 for a session cookie.
-fn set_cookie(
+/// `setcookie()`, with `HttpOnly` and `SameSite=Lax` added
+/// (docs/SECURITY_MODEL.md): `expires` 0 for a session cookie.
+pub(crate) fn set_cookie(
+    name: &str,
+    value: &[u8],
+    (expires, now): (i64, i64),
+    path: &str,
+    secure: bool,
+) -> String {
+    php_cookie(name, value, (expires, now), path, secure) + "; HttpOnly; SameSite=Lax"
+}
+
+/// `setcookie()` as PHP sends it, for a cookie scripts read.
+pub(crate) fn php_cookie(
     name: &str,
     value: &[u8],
     (expires, now): (i64, i64),
@@ -103,7 +120,6 @@ fn set_cookie(
     if secure {
         cookie.push_str("; secure");
     }
-    cookie.push_str("; HttpOnly; SameSite=Lax");
     cookie
 }
 
@@ -147,6 +163,9 @@ pub(crate) struct LoginReads<'a> {
     current: (u64, Vec<u8>),
     /// `user-profile`'s user: the request's `user_id`, cast to an integer.
     profile_user: i64,
+    /// A post as a writer action reads it, which capability checks see in
+    /// place of the site's.
+    pub(crate) action_post: Option<CapPost>,
 }
 
 impl<'a> LoginReads<'a> {
@@ -158,6 +177,7 @@ impl<'a> LoginReads<'a> {
             found: RefCell::default(),
             current: (0, Vec::new()),
             profile_user: 0,
+            action_post: None,
         }
     }
 
@@ -246,6 +266,11 @@ impl<'a> LoginReads<'a> {
         self.current = (user, token);
     }
 
+    /// `wp_get_session_token()`.
+    pub(crate) fn session_token(&self) -> &[u8] {
+        &self.current.1
+    }
+
     /// `wp_verify_nonce( $nonce, $action )` for the current user.
     pub(crate) fn verify_nonce(&self, nonce: &[u8], action: &str) -> bool {
         let (user, token) = &self.current;
@@ -301,7 +326,7 @@ impl LoginSite for LoginReads<'_> {
     }
 
     fn public(&self) -> bool {
-        !Value::String(self.site.raw_option("blog_public")).is_empty()
+        self.site.public()
     }
 
     /// `wp_create_nonce( $action )` for the current user.
@@ -329,7 +354,7 @@ impl LoginSite for LoginReads<'_> {
     }
 
     fn can_register(&self) -> bool {
-        !Value::String(self.site.raw_option("users_can_register")).is_empty()
+        !Value::String(self.site.raw_option("users_can_register").to_vec()).is_empty()
     }
 
     fn post_type(&self, id: u64) -> Option<String> {
@@ -360,6 +385,9 @@ impl CapabilityData for LoginReads<'_> {
     }
 
     fn post(&self, id: u64) -> Option<CapPost> {
+        if let Some(post) = self.action_post.as_ref().filter(|post| post.id == id) {
+            return Some(post.clone());
+        }
         self.reads.post(id).map(|post| CapPost {
             id: post.id,
             author: post.author,
@@ -645,10 +673,7 @@ fn logout(
                 .into_bytes()
         }
     };
-    // `wp_safe_redirect()`.
-    let host = hyscribe_kses::url_host(reads.site.home.as_bytes()).unwrap_or_default();
-    let location = wp_validate_redirect(&redirect_to, &host, reads.admin_url("").as_bytes());
-    let location = String::from_utf8_lossy(&wp_sanitize_redirect(&location)).into_owned();
+    let location = wp_safe_redirect(reads.site, &redirect_to, &reads.admin_url(""));
     headers.push((header::LOCATION, location));
     headers.push((
         header::HeaderName::from_static("x-redirect-by"),
@@ -657,47 +682,35 @@ fn logout(
     (StatusCode::FOUND, Vec::new())
 }
 
-/// `wp_set_auth_cookie()` and the redirect after a login: the cookies and
-/// where to go, or `None` when the session cannot be kept.
-fn logged_in(
+/// When a login's cookies and session expire: in two weeks when remembered,
+/// else in two days.
+fn expiration(now: i64, remember: bool) -> i64 {
+    now + if remember { 14 * DAY } else { 2 * DAY }
+}
+
+/// The salts of the auth cookie, the secure one's when `secure`, and of the
+/// logged in cookie.
+fn salts(reads: &LoginReads, secure: bool) -> Option<(Vec<u8>, Vec<u8>)> {
+    let scheme = if secure { "secure_auth" } else { "auth" };
+    reads.salt(scheme).zip(reads.salt("logged_in"))
+}
+
+/// `wp_set_auth_cookie()`'s cookies for `user` on the session `token`,
+/// remembered or not and secure or not, signed with `salts`.
+fn auth_cookies(
     reads: &LoginReads,
     names: &Names,
-    headers: &HeaderMap,
-    (id, remember, secure): (u64, bool, bool),
-    redirect_to: &[u8],
-) -> Option<(Vec<String>, String)> {
-    let site = reads.site;
-    let scheme = if secure { "secure_auth" } else { "auth" };
-    let found = reads
-        .found
-        .borrow()
-        .iter()
-        .find(|user| user.id == id)
-        .cloned();
-    let (Some(user), Some(sessions), Some(auth_salt), Some(logged_in_salt)) = (
-        found,
-        site.sessions.as_ref(),
-        reads.salt(scheme),
-        reads.salt("logged_in"),
-    ) else {
-        return None;
-    };
-    let expiration = reads.now + if remember { 14 * DAY } else { 2 * DAY };
+    (user, token): (&Credentials, &[u8]),
+    (remember, secure): (bool, bool),
+    (auth_salt, logged_in_salt): (Vec<u8>, Vec<u8>),
+) -> Vec<String> {
+    let expiration = expiration(reads.now, remember);
     let expires = if remember { expiration + DAY / 2 } else { 0 };
-    let agent = headers
-        .get(header::USER_AGENT)
-        .map_or(&b""[..], HeaderValue::as_bytes);
-    let origin = Origin {
-        ip: b"",
-        ua: agent,
-        login: reads.now,
-    };
-    let token = sessions.create(id, expiration, &origin).ok()?;
-    let cookie = |salt: &[u8]| {
-        generate_auth_cookie(&user.login, &user.pass, expiration, token.as_bytes(), salt)
-    };
+    let cookie =
+        |salt: &[u8]| generate_auth_cookie(&user.login, &user.pass, expiration, token, salt);
     let (auth, logged_in) = (cookie(&auth_salt), cookie(&logged_in_salt));
-    let secure_logged_in = secure && site.home.to_ascii_lowercase().starts_with("https:");
+    let home = reads.site.home.to_ascii_lowercase();
+    let secure_logged_in = secure && home.starts_with("https:");
     let admin_path = format!("{}hs-admin", names.site_path);
     let mut cookies = vec![set_cookie(
         &names.auth(secure),
@@ -715,6 +728,79 @@ fn logged_in(
             secure_logged_in,
         ));
     }
+    cookies
+}
+
+/// The cookies `wp_update_user()` sets again when an action changed the
+/// current user's password, on the session they came with, remembered when
+/// the logged in cookie outlasts two days; none when it did not.
+pub(crate) fn renewed_cookies(
+    reads: &LoginReads,
+    names: &Names,
+    logged_in: Option<&[u8]>,
+    secure: bool,
+) -> Vec<String> {
+    let (id, token) = &reads.current;
+    let before = reads
+        .found
+        .borrow()
+        .iter()
+        .find(|user| user.id == *id)
+        .cloned();
+    let after = before.and_then(|before| {
+        let after = reads.site.db.credentials(UserField::Login, &before.login);
+        reads
+            .reads
+            .wait(after)
+            .filter(|after| after.pass != before.pass)
+    });
+    let remember = logged_in.and_then(parse_auth_cookie).is_some_and(|cookie| {
+        Value::String(cookie.expiration.to_vec()).to_int() - reads.now > 2 * DAY
+    });
+    let renewed = after
+        .zip(salts(reads, secure))
+        .map(|(user, salts)| auth_cookies(reads, names, (&user, token), (remember, secure), salts));
+    renewed.unwrap_or_default()
+}
+
+/// `wp_set_auth_cookie()` and the redirect after a login: the cookies and
+/// where to go, or `None` when the session cannot be kept.
+fn logged_in(
+    reads: &LoginReads,
+    names: &Names,
+    headers: &HeaderMap,
+    (id, remember, secure): (u64, bool, bool),
+    redirect_to: &[u8],
+) -> Option<(Vec<String>, String)> {
+    let site = reads.site;
+    let found = reads
+        .found
+        .borrow()
+        .iter()
+        .find(|user| user.id == id)
+        .cloned();
+    let (Some(user), Some(sessions), Some(salts)) =
+        (found, site.sessions.as_ref(), salts(reads, secure))
+    else {
+        return None;
+    };
+    let expiration = expiration(reads.now, remember);
+    let agent = headers
+        .get(header::USER_AGENT)
+        .map_or(&b""[..], HeaderValue::as_bytes);
+    let origin = Origin {
+        ip: b"",
+        ua: agent,
+        login: reads.now,
+    };
+    let token = sessions.create(id, expiration, &origin).ok()?;
+    let cookies = auth_cookies(
+        reads,
+        names,
+        (&user, token.as_bytes()),
+        (remember, secure),
+        salts,
+    );
     let caps = Capabilities::load(reads, site.db.prefix(), id);
     let can = |cap: &str| caps.has_cap(reads, cap, &[]);
     Some((cookies, location(reads, &can, (id, secure), redirect_to)))

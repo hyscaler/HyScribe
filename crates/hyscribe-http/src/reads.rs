@@ -91,8 +91,8 @@ impl RenderSite for Reads<'_> {
     }
 
     fn option(&self, name: &str) -> Option<Vec<u8>> {
-        match self.site.autoloaded(name) {
-            Some(value) => Some(value),
+        match self.site.options.get(name) {
+            Some(value) => Some(value.clone()),
             None => self.memo(&self.options, name.to_string(), || {
                 self.wait(self.site.db.option(name))
             }),
@@ -172,6 +172,10 @@ impl RenderSite for Reads<'_> {
 
     fn comment(&self, id: u64) -> Option<Comment> {
         self.memo(&self.comment, id, || self.wait(self.site.db.comment(id)))
+    }
+
+    fn held_comment(&self, id: u64) -> Option<Comment> {
+        self.wait(self.site.db.held_comment(id))
     }
 
     fn user(&self, id: u64) -> Option<User> {

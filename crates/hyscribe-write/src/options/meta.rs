@@ -53,7 +53,7 @@ fn stored_value(value: &Value) -> Option<Vec<u8>> {
 
 /// `get_metadata_raw( $type, $object, $key )`: every value of `key`, in ID
 /// order, unserialized. Keys match exactly, as in PHP's meta cache.
-pub(crate) async fn get_metadata(
+pub async fn get_metadata(
     write: &mut Write<'_>,
     meta: Meta,
     object: u64,

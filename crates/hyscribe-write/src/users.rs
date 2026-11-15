@@ -414,11 +414,13 @@ pub async fn wp_update_user(write: &mut Write<'_>, data: &UserData) -> Result<u6
 }
 
 /// `wp_delete_user( $id, $reassign )`: the user and its meta, its posts and
-/// links passed to `reassign`, or deleted with it. False for no such user.
+/// links passed to `reassign`, or deleted with it as `request` deletes them
+/// (posts and pages to the trash). False for no such user.
 pub async fn wp_delete_user(
     write: &mut Write<'_>,
     id: u64,
     reassign: Option<u64>,
+    request: &crate::posts::Context,
 ) -> Result<bool, Error> {
     if write.user(id).await?.is_none() {
         return Ok(false);
@@ -429,15 +431,13 @@ pub async fn wp_delete_user(
             write.reassign_links(id, heir).await?;
         }
         None => {
-            // `wp_delete_post()` of each post, and `wp_delete_link()` of each
-            // link, once ported.
-            if !write
+            for post in write
                 .author_post_ids_of_types(id, &DELETED_WITH_USER)
                 .await?
-                .is_empty()
             {
-                return Err(Error::Unported("wp_delete_post"));
+                crate::posts::wp_delete_post(write, request, post, false).await?;
             }
+            // `wp_delete_link()` of each link, once ported.
             if !write.owner_link_ids(id).await?.is_empty() {
                 return Err(Error::Unported("wp_delete_link"));
             }

@@ -22,7 +22,7 @@ hyscribe-render.workspace = true
 hyscribe-config.workspace = true
 hyscribe-testkit.workspace = true
 sqlx = { version = "0.9", default-features = false, features = ["mysql", "runtime-tokio"] }
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 
 [lints]
 workspace = true

@@ -9,8 +9,7 @@ use hyscribe_db::{CommentFields, Connection, Writer};
 use hyscribe_testkit::{fixture_database, writes::check_writes};
 use std::result::Result as StdResult;
 
-/// The oracle's actions take locks on the same options: one at a time.
-static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+use crate::tests::{ONE_AT_A_TIME, admin};
 
 async fn writer() -> Writer {
     let mode = hyscribe_config::Mode::Primary;
@@ -18,20 +17,6 @@ async fn writer() -> Writer {
         .await
         .unwrap()
         .unwrap()
-}
-
-/// The oracle's request: user 1 on PHP's address, now.
-fn admin() -> Context {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap();
-    Context {
-        user: 1,
-        can_publish: true,
-        home: b"http://127.0.0.1:8081".to_vec(),
-        upload_host: b"127.0.0.1:8081".to_vec(),
-        now: i64::try_from(now.as_secs()).unwrap(),
-    }
 }
 
 fn shown(err: impl std::fmt::Debug) -> String {
@@ -1014,43 +999,19 @@ async fn the_last_published_post_matches_php() {
     .await;
 }
 
-mod faults;
-
-/// Runs `action` after `setup`, with the connection cut at each of the
-/// action's commands in turn until it runs through: each cut must come back
-/// as a database error.
+/// Runs `action` after `setup` with each statement budget in turn until
+/// it runs through: each spent budget must come back as a database error.
 async fn every_cut(
-    faults: &faults::Faults,
-    writer: &Writer,
     setup: impl AsyncFn(&mut Write<'_>, &Context) -> Result<u64>,
     action: impl AsyncFn(&mut Write<'_>, &Context, u64) -> Result<()>,
 ) {
     let ctx = admin();
-    for commands in 0.. {
-        let mut conn = faults.connect().await;
-        let mut outer = sqlx::Connection::begin(&mut conn).await.unwrap();
-        let mut write = writer.begin_on(&mut outer).await.unwrap();
-        let id = setup(&mut write, &ctx).await.unwrap();
-        write.commit().await.unwrap();
-        faults.arm(Some(commands));
-        let result = match writer.begin_on(&mut outer).await {
-            Ok(mut write) => action(&mut write, &ctx, id).await,
-            Err(err) => Err(Error::Db(err)),
-        };
-        faults.arm(None);
-        match result {
-            Ok(()) => return,
-            Err(Error::Db(_)) => {}
-            Err(other) => panic!("{other:?} after {commands} commands"),
-        }
-    }
+    let setup = async |w: &mut Write<'_>| setup(w, &ctx).await.unwrap();
+    crate::tests::fails_at_each_step(setup, async |w, id| action(w, &ctx, id).await).await;
 }
 
 #[tokio::test]
 async fn database_errors_end_every_function() {
-    let _one = ONE_AT_A_TIME.lock().await;
-    let faults = &faults::Faults::start().await;
-    let writer = &writer().await;
     let none = async |_: &mut Write<'_>, _: &Context| Ok(0);
     let publish = async |w: &mut Write<'_>, ctx: &Context| {
         wp_insert_post(w, ctx, oracle_post("publish")).await
@@ -1106,11 +1067,9 @@ async fn database_errors_end_every_function() {
         .await?;
         Ok(id)
     };
-    every_cut(faults, writer, none, inserting(oracle_post("publish"))).await;
-    every_cut(faults, writer, none, inserting(future_post())).await;
+    every_cut(none, inserting(oracle_post("publish"))).await;
+    every_cut(none, inserting(future_post())).await;
     every_cut(
-        faults,
-        writer,
         none,
         inserting(PostArgs {
             title: Vec::new(),
@@ -1118,10 +1077,8 @@ async fn database_errors_end_every_function() {
         }),
     )
     .await;
-    every_cut(faults, writer, none, inserting(page("Sample Page", 0))).await;
+    every_cut(none, inserting(page("Sample Page", 0))).await;
     every_cut(
-        faults,
-        writer,
         none,
         inserting(PostArgs {
             title: b"Hello world!".to_vec(),
@@ -1130,29 +1087,17 @@ async fn database_errors_end_every_function() {
     )
     .await;
     every_cut(
-        faults,
-        writer,
         publish,
         updating(|args| args.title = b"A renamed post".to_vec()),
     )
     .await;
+    every_cut(publish, updating(|args| args.name = Some(b"12".to_vec()))).await;
     every_cut(
-        faults,
-        writer,
-        publish,
-        updating(|args| args.name = Some(b"12".to_vec())),
-    )
-    .await;
-    every_cut(
-        faults,
-        writer,
         async |w, ctx| wp_insert_post(w, ctx, oracle_post("draft")).await,
         updating(|args| args.status = "publish".into()),
     )
     .await;
     every_cut(
-        faults,
-        writer,
         async |w, ctx| {
             let id = wp_insert_post(w, ctx, oracle_post("draft")).await?;
             w.set_post_guid(id, b"").await?;
@@ -1163,8 +1108,6 @@ async fn database_errors_end_every_function() {
     )
     .await;
     every_cut(
-        faults,
-        writer,
         async |w, ctx| {
             let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
             w.set_post_status(id, "trash").await?;
@@ -1174,8 +1117,6 @@ async fn database_errors_end_every_function() {
     )
     .await;
     every_cut(
-        faults,
-        writer,
         async |w, ctx| {
             let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
             wp_update_post(w, ctx, id, &|args| args.name = Some(b"second".to_vec())).await
@@ -1184,8 +1125,6 @@ async fn database_errors_end_every_function() {
     )
     .await;
     every_cut(
-        faults,
-        writer,
         async |w, ctx| {
             let a = wp_insert_post(w, ctx, page("A", 0)).await?;
             wp_insert_post(w, ctx, page("B", a)).await
@@ -1194,8 +1133,6 @@ async fn database_errors_end_every_function() {
     )
     .await;
     every_cut(
-        faults,
-        writer,
         async |w, ctx| {
             let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
             w.add_meta(hyscribe_db::Meta::Post, id, "footnotes", Some(b"[]"))
@@ -1206,10 +1143,8 @@ async fn database_errors_end_every_function() {
         updating(|args| args.title = b"Renamed again".to_vec()),
     )
     .await;
-    every_cut(faults, writer, with_comments, trashing).await;
+    every_cut(with_comments, trashing).await;
     every_cut(
-        faults,
-        writer,
         async |w, ctx| {
             let id = with_comments(w, ctx).await?;
             wp_trash_post(w, ctx, id).await?;
@@ -1218,17 +1153,13 @@ async fn database_errors_end_every_function() {
         async |w, ctx, id| wp_untrash_post(w, ctx, id).await.map(drop),
     )
     .await;
-    every_cut(faults, writer, with_comments, deleting).await;
+    every_cut(with_comments, deleting).await;
     every_cut(
-        faults,
-        writer,
         async |w, ctx| wp_insert_post(w, ctx, future_post()).await,
         trashing,
     )
     .await;
     every_cut(
-        faults,
-        writer,
         async |w, ctx| {
             let id = wp_insert_post(w, ctx, page("Front", 0)).await?;
             wp_insert_post(w, ctx, page("Kid", id)).await?;
@@ -1244,8 +1175,6 @@ async fn database_errors_end_every_function() {
     )
     .await;
     every_cut(
-        faults,
-        writer,
         async |w, ctx| {
             let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
             wp_trash_post(w, ctx, 1).await?;
@@ -1385,9 +1314,6 @@ async fn long_encoded_slugs_are_not_ported() {
 
 #[tokio::test]
 async fn database_errors_end_the_rarer_paths() {
-    let _one = ONE_AT_A_TIME.lock().await;
-    let faults = &faults::Faults::start().await;
-    let writer = &writer().await;
     let publish = async |w: &mut Write<'_>, ctx: &Context| {
         wp_insert_post(w, ctx, oracle_post("publish")).await
     };
@@ -1397,7 +1323,7 @@ async fn database_errors_end_the_rarer_paths() {
         parent,
         ..oracle_post("publish")
     };
-    every_cut(faults, writer, publish, async |w, ctx, id| {
+    every_cut(publish, async |w, ctx, id| {
         let args = PostArgs {
             id,
             title: b"Rewritten".to_vec(),
@@ -1408,8 +1334,6 @@ async fn database_errors_end_the_rarer_paths() {
     })
     .await;
     every_cut(
-        faults,
-        writer,
         async |_, _| Ok(0),
         async |w, ctx, _| {
             let args = PostArgs {
@@ -1423,8 +1347,6 @@ async fn database_errors_end_the_rarer_paths() {
     // A parent four steps from the top, and one that would make a loop.
     for loops in [false, true] {
         every_cut(
-            faults,
-            writer,
             async |w, ctx| {
                 let a = wp_insert_post(w, ctx, page("A", 0)).await?;
                 let mut parent = wp_insert_post(w, ctx, page("B", a)).await?;
@@ -1446,8 +1368,6 @@ async fn database_errors_end_the_rarer_paths() {
         .await;
     }
     every_cut(
-        faults,
-        writer,
         async |w, ctx| {
             let args = PostArgs {
                 name: Some(b"12".to_vec()),
@@ -1511,4 +1431,57 @@ async fn revisions_copy_footnotes_as_stored() {
         Some(b"x\\y".to_vec()),
     ];
     assert_eq!(copied.unwrap(), expected);
+}
+
+/// The user `wp_delete_user()` takes with its posts, and the posts.
+async fn poster(w: &mut Write<'_>, ctx: &Context) -> Result<u64> {
+    let login = b"oracle-poster";
+    let data = crate::users::UserData {
+        user_login: Some(login.to_vec()),
+        user_pass: Some(b"A pass phrase".to_vec()),
+        user_email: Some(b"oracle-poster@example.test".to_vec()),
+        ..crate::users::UserData::default()
+    };
+    let id = crate::users::wp_insert_user(w, &data).await?;
+    let post = PostArgs {
+        author: Some(id),
+        ..oracle_post("publish")
+    };
+    wp_insert_post(w, ctx, post.clone()).await?;
+    let page = PostArgs {
+        title: b"A page".to_vec(),
+        post_type: "page".into(),
+        ..post
+    };
+    wp_insert_post(w, ctx, page).await?;
+    Ok(id)
+}
+
+#[tokio::test]
+async fn a_users_posts_go_with_it_as_in_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    check(
+        "user-delete-with-posts",
+        async |conn| act(writer, conn, &admin(), async |w, ctx| poster(w, ctx).await).await,
+        async |conn, id| {
+            act(writer, conn, &admin(), async |w, ctx| {
+                crate::users::wp_delete_user(w, id, None, ctx)
+                    .await
+                    .map(drop)
+            })
+            .await
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn database_errors_end_a_users_post_deletion() {
+    every_cut(poster, async |w, ctx, id| {
+        crate::users::wp_delete_user(w, id, None, ctx)
+            .await
+            .map(drop)
+    })
+    .await;
 }

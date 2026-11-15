@@ -529,6 +529,11 @@ async fn reads_posts_inside_an_action() {
         [(1, "1".to_string())]
     );
     assert!(write.post_comments(2).await.unwrap().is_empty());
+    // A spent statement budget fails the reads too.
+    write.fail_after(0);
+    assert!(write.post(1).await.is_err());
+    assert!(write.post_comments(1).await.is_err());
+    assert!(write.object_terms(1, "category").await.is_err());
 }
 
 const COMMENT: &str = "SELECT JSON_ARRAY(comment_post_ID, comment_author, \

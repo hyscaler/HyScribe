@@ -550,4 +550,28 @@ return array(
 			wp_trash_post( $id );
 		},
 	),
+	'user-delete-with-posts'                 => array(
+		'setup'  => function () use ( $posts_insert ) {
+			require_once ABSPATH . 'wp-admin/includes/user.php';
+			$id = wp_insert_user(
+				array(
+					'user_login' => 'oracle-poster',
+					'user_pass'  => 'A pass phrase',
+					'user_email' => 'oracle-poster@example.test',
+				)
+			);
+			$posts_insert( array( 'post_author' => $id ) );
+			$posts_insert(
+				array(
+					'post_author' => $id,
+					'post_title'  => 'A page',
+					'post_type'   => 'page',
+				)
+			);
+			return $id;
+		},
+		'action' => function ( $id ) {
+			wp_delete_user( $id );
+		},
+	),
 );

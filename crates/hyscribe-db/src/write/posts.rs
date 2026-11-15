@@ -75,6 +75,7 @@ impl Write<'_> {
         Engine::integer(&mut sql, |sql| sql.push("menu_order"));
         sql.push(" AS menu_order FROM {prefix}posts WHERE ID = ?");
         sql.bind(Bind::Int(id));
+        self.spend()?;
         let row = sql
             .query(&self.writer.prefix)
             .fetch_optional(&mut *self.tx)
@@ -155,6 +156,7 @@ impl Write<'_> {
             "SELECT comment_ID, comment_approved FROM {prefix}comments \
              WHERE comment_post_ID = ? ORDER BY comment_ID",
         );
+        self.spend()?;
         let rows = query
             .bind(post)
             .fetch_all(&mut *self.tx)

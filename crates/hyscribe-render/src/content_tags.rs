@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `wp_filter_content_tags()` in the `the_content` context: the images and
-//! iframes of post content get their dimensions, `srcset` and `sizes` from
-//! the attachment a `wp-image-N` class names, and the loading attributes.
+//! `wp_filter_content_tags()` in the `the_content` and
+//! `widget_block_content` contexts: the images and iframes of post content
+//! or a block widget get their dimensions, `srcset` and `sizes` from the
+//! attachment a `wp-image-N` class names, and the loading attributes.
 
 use std::collections::HashSet;
 use std::num::NonZeroU64;
@@ -13,7 +14,7 @@ use hyscribe_phpser::{Value, isset, wp_basename};
 
 use crate::attachment::{edit_hash, metadata, srcset, upload_baseurl};
 use crate::formatting::find;
-use crate::media::{Given, Loading};
+use crate::media::{Filter, Given, Loading};
 use crate::site::Site;
 use crate::template::replace;
 
@@ -23,11 +24,23 @@ pub fn filter(site: &dyn Site, content: &[u8], in_the_loop: bool) -> Vec<u8> {
     wp_filter_content_tags(site, &Loading::in_the_loop(in_the_loop), content)
 }
 
-/// `wp_filter_content_tags( $content, 'the_content' )`.
+/// `wp_filter_content_tags( $content, 'the_content' )`, which the excerpts
+/// here share.
 pub(crate) fn wp_filter_content_tags(
     site: &dyn Site,
     loading: &Loading,
     content: &[u8],
+) -> Vec<u8> {
+    filter_content_tags(site, loading, content, Filter::Content)
+}
+
+/// `wp_filter_content_tags( $content, $context )` for the context of
+/// `filter`.
+pub(crate) fn filter_content_tags(
+    site: &dyn Site,
+    loading: &Loading,
+    content: &[u8],
+    filter: Filter,
 ) -> Vec<u8> {
     let matches = tags(content);
     let mut content = content.to_vec();
@@ -38,9 +51,9 @@ pub(crate) fn wp_filter_content_tags(
             continue;
         }
         let filtered = if img {
-            image(site, loading, tag)
+            image(site, loading, tag, filter)
         } else {
-            iframe(loading, tag)
+            iframe(loading, tag, filter)
         };
         if filtered != tag {
             content = replace(&content, tag, &filtered);
@@ -115,7 +128,7 @@ fn source(tag: &[u8]) -> &[u8] {
     src.split(|b| *b == b'?').next().unwrap_or_default()
 }
 
-fn image(site: &dyn Site, loading: &Loading, tag: &[u8]) -> Vec<u8> {
+fn image(site: &dyn Site, loading: &Loading, tag: &[u8], filter: Filter) -> Vec<u8> {
     let mut image = tag.to_vec();
     if let Some(id) = image_id(tag).map(NonZeroU64::get) {
         if find(&image, 0, b" width=").is_none() && find(&image, 0, b" height=").is_none() {
@@ -125,7 +138,7 @@ fn image(site: &dyn Site, loading: &Loading, tag: &[u8]) -> Vec<u8> {
             image = add_srcset_and_sizes(site, &image, id);
         }
     }
-    let image = add_loading(loading, &image);
+    let image = add_loading(loading, &image, filter);
     auto_sizes(&image)
 }
 
@@ -280,7 +293,7 @@ fn add_srcset_and_sizes(site: &dyn Site, image: &[u8], id: u64) -> Vec<u8> {
 }
 
 /// `wp_img_tag_add_loading_optimization_attrs()`.
-fn add_loading(loading: &Loading, image: &[u8]) -> Vec<u8> {
+fn add_loading(loading: &Loading, image: &[u8], filter: Filter) -> Vec<u8> {
     let letters = |prefix: &[u8]| attribute(image, prefix, b"\"'", u8::is_ascii_alphabetic);
     let (loading_value, fetchpriority, decoding) = (
         letters(b" loading="),
@@ -293,7 +306,7 @@ fn add_loading(loading: &Loading, image: &[u8]) -> Vec<u8> {
         loading: loading_value,
         fetchpriority,
     };
-    let optimization = loading.optimization(true, &given, true);
+    let optimization = loading.optimization(true, &given, filter);
     if find(image, 0, b" src=\"").is_none() {
         return image.to_vec();
     }
@@ -347,7 +360,7 @@ fn auto_sizes(image: &[u8]) -> Vec<u8> {
 }
 
 /// `wp_iframe_tag_add_loading_attr()` for an iframe without `loading`.
-fn iframe(loading: &Loading, tag: &[u8]) -> Vec<u8> {
+fn iframe(loading: &Loading, tag: &[u8], filter: Filter) -> Vec<u8> {
     if find(tag, 0, b" loading=").is_some() {
         return tag.to_vec();
     }
@@ -358,7 +371,7 @@ fn iframe(loading: &Loading, tag: &[u8]) -> Vec<u8> {
         height: known(b" height=\""),
         ..Given::default()
     };
-    let optimization = loading.optimization(false, &given, true);
+    let optimization = loading.optimization(false, &given, filter);
     let complete = [&b" src=\""[..], b" width=\"", b" height=\""]
         .iter()
         .all(|n| find(tag, 0, n).is_some());

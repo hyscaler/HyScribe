@@ -10,7 +10,7 @@ use hyscribe_phpser::{
 };
 
 use crate::formatting::{contains, dirname, find, untrailingslashit};
-use crate::media::{Given, Loading};
+use crate::media::{Filter, Given, Loading};
 use crate::site::Site;
 use crate::template::replace;
 use hyscribe_model::Post;
@@ -111,7 +111,7 @@ pub(crate) fn attachment_image(
         loading: get(&attrs, "loading"),
         fetchpriority: get(&attrs, "fetchpriority"),
     };
-    let optimization = loading.optimization(true, &given, false);
+    let optimization = loading.optimization(true, &given, Filter::None);
     let extra = [
         ("decoding", optimization.decoding),
         ("fetchpriority", optimization.fetchpriority),

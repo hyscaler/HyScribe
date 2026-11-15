@@ -515,13 +515,65 @@ fn pages_match_php() {
 struct Attached {
     install: crate::fixture::DefaultInstall,
     attachments: Vec<(hyscribe_model::Post, hyscribe_phpser::Value)>,
+    /// The options the oracle stored, as stored.
+    options: Vec<(String, Vec<u8>)>,
+}
+
+/// The site a golden's state describes: its attachments, each a row of ID,
+/// MIME type, excerpt and GUID, then title and status when it has seven
+/// fields, then its meta; and its options, if any.
+fn attached(state: &hyscribe_phpser::Value) -> Attached {
+    use hyscribe_phpser::{Key, Value};
+    let rows = state.get_str("attachments").unwrap().as_array().unwrap();
+    let attachments = rows
+        .iter()
+        .map(|(_, row)| {
+            let fields: Vec<&Value> = row.as_array().unwrap().iter().map(|(_, v)| v).collect();
+            let text = |i: usize| fields[i].to_php_string();
+            let (title, status) = match fields.len() {
+                7 => (text(4), String::from_utf8(text(5)).unwrap()),
+                _ => (Vec::new(), "inherit".to_string()),
+            };
+            let post = hyscribe_model::Post {
+                id: fields[0].to_int() as u64,
+                post_type: "attachment".into(),
+                mime_type: String::from_utf8(text(1)).unwrap(),
+                excerpt: text(2),
+                guid: text(3),
+                title,
+                status,
+                ..hyscribe_model::Post::default()
+            };
+            (post, fields[fields.len() - 1].clone())
+        })
+        .collect();
+    let options = state
+        .get(&Key::String(b"options".to_vec()))
+        .and_then(Value::as_array);
+    Attached {
+        install: crate::fixture::DefaultInstall {
+            home: b"http://127.0.0.1:8081".to_vec(),
+        },
+        attachments,
+        options: options
+            .unwrap_or_default()
+            .iter()
+            .map(|(name, value)| {
+                let name = String::from_utf8(name.to_php_string()).unwrap();
+                (name, value.to_php_string())
+            })
+            .collect(),
+    }
 }
 
 impl Site for Attached {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
+        let stored = self.options.iter().find(|(n, _)| n == name);
         match name {
             "siteurl" => Some(b"http://127.0.0.1:8081".to_vec()),
-            _ => self.install.option(name),
+            _ => stored
+                .map(|(_, value)| value.clone())
+                .or_else(|| self.install.option(name)),
         }
     }
     fn home_url(&self) -> Vec<u8> {
@@ -565,9 +617,6 @@ fn media_image_matches_php() {
     let mut thrown = 0;
     for f in &lines {
         let state = hyscribe_phpser::json_decode(&unhex(f[2])).unwrap();
-        let field = |row: &hyscribe_phpser::Value, i| {
-            row.get(&hyscribe_phpser::Key::Int(i)).unwrap().clone()
-        };
         let sizes = state.get_str("sizes").unwrap().as_array().unwrap();
         let sizes: Vec<Vec<u8>> = sizes.iter().map(|(_, size)| size.to_php_string()).collect();
         assert_eq!(
@@ -575,27 +624,7 @@ fn media_image_matches_php() {
             super::media::IMAGE_SIZES.map(|size| size.as_bytes().to_vec())
         );
         assert!(!state.get_str("html5").unwrap().is_empty());
-        let attachments = state.get_str("attachments").unwrap().as_array().unwrap();
-        let site = Attached {
-            install: crate::fixture::DefaultInstall {
-                home: b"http://127.0.0.1:8081".to_vec(),
-            },
-            attachments: attachments
-                .iter()
-                .map(|(_, row)| {
-                    let post = hyscribe_model::Post {
-                        id: field(row, 0).to_int() as u64,
-                        post_type: "attachment".into(),
-                        mime_type: String::from_utf8(field(row, 1).to_php_string()).unwrap(),
-                        excerpt: field(row, 2).to_php_string(),
-                        guid: field(row, 3).to_php_string(),
-                        status: "inherit".into(),
-                        ..hyscribe_model::Post::default()
-                    };
-                    (post, field(row, 4))
-                })
-                .collect(),
-        };
+        let site = attached(&state);
         let query = unhex(f[1]);
         let request = Request {
             singular: !query.is_empty(),
@@ -726,33 +755,8 @@ fn media_gallery_matches_php() {
     for line in golden.lines() {
         let f: Vec<&str> = line.split('\t').collect();
         let state = hyscribe_phpser::json_decode(&unhex(f[2])).unwrap();
-        let field = |row: &hyscribe_phpser::Value, i| {
-            row.get(&hyscribe_phpser::Key::Int(i)).unwrap().clone()
-        };
-        let text = |row: &hyscribe_phpser::Value, i| field(row, i).to_php_string();
-        let attachments = state.get_str("attachments").unwrap().as_array().unwrap();
         let site = Galleried {
-            attached: Attached {
-                install: crate::fixture::DefaultInstall {
-                    home: b"http://127.0.0.1:8081".to_vec(),
-                },
-                attachments: attachments
-                    .iter()
-                    .map(|(_, row)| {
-                        let post = hyscribe_model::Post {
-                            id: field(row, 0).to_int() as u64,
-                            post_type: "attachment".into(),
-                            mime_type: String::from_utf8(text(row, 1)).unwrap(),
-                            excerpt: text(row, 2),
-                            guid: text(row, 3),
-                            title: text(row, 4),
-                            status: String::from_utf8(text(row, 5)).unwrap(),
-                            ..hyscribe_model::Post::default()
-                        };
-                        (post, field(row, 6))
-                    })
-                    .collect(),
-            },
+            attached: attached(&state),
             per_page: state.get_str("posts_per_page").map(|n| n.to_php_string()),
         };
         let query = unhex(f[1]);
@@ -784,4 +788,60 @@ fn media_gallery_matches_php() {
         failures[..failures.len().min(3)].join("\n")
     );
     assert_eq!((golden.lines().count(), galleries), (85, 73));
+}
+
+/// Every case of `reference/block-widget/golden.sh`: the class names its
+/// first block gives, then the widgets in order, as `wp_unique_id()`
+/// numbers through the whole run.
+#[test]
+fn block_widget_matches_php() {
+    let golden = include_str!("../../tests/golden/block-widget.tsv");
+    let theme = twentytwentyfive();
+    let mut failures = Vec::new();
+    let (mut classes, mut unique) = (0, 0);
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        if f[0] == "class" {
+            let class = super::block_widget_class(&unhex(f[1]));
+            assert_eq!(class.as_bytes(), unhex(f[2]), "{:?}", unhex(f[1]));
+            classes += 1;
+            continue;
+        }
+        let state = hyscribe_phpser::json_decode(&unhex(f[2])).unwrap();
+        let site = attached(&state);
+        let mode = unhex(f[1]);
+        let request = Request {
+            singular: !mode.is_empty(),
+            queried_object_id: if mode.is_empty() { 0 } else { 1 },
+            ..Default::default()
+        };
+        let (markup, php) = (unhex(f[0]), unhex(f[3]));
+        let mut renderer = Renderer::new(&theme, &site, &request);
+        renderer.unique_id = unique;
+        let ours = if mode == b"content" {
+            renderer.the_content(&hyscribe_model::Post {
+                content: markup.clone(),
+                ..hyscribe_model::Post::default()
+            })
+        } else {
+            renderer.render(&markup)
+        };
+        unique = renderer.unique_id;
+        if ours != php {
+            failures.push(format!(
+                "{} {}\n  php:  {:?}\n  ours: {:?}",
+                String::from_utf8_lossy(&markup),
+                f[1],
+                String::from_utf8_lossy(&php),
+                String::from_utf8_lossy(&ours)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures[..failures.len().min(3)].join("\n")
+    );
+    assert_eq!((golden.lines().count(), classes, unique), (64, 19, 3));
 }

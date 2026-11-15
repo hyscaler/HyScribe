@@ -61,10 +61,10 @@ fn unknown_priorities_count() {
         ..Optimization::default()
     };
     for _ in 0..3 {
-        assert_eq!(looped.optimization(true, &given, true), expected);
+        assert_eq!(looped.optimization(true, &given, Filter::Content), expected);
     }
     assert_eq!(
-        looped.optimization(true, &given, true).loading,
+        looped.optimization(true, &given, Filter::Content).loading,
         Some("lazy")
     );
 }

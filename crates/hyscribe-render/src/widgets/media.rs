@@ -26,7 +26,7 @@ use crate::attachment::{
 use crate::blocks::is_pcre_space;
 use crate::formatting::{CORE_SHORTCODE_TAGS, wptexturize};
 use crate::kses::{post_allows, wp_kses_post};
-use crate::media::{Given, Loading};
+use crate::media::{Filter, Given, Loading};
 use crate::post::sanitize_html_class;
 use crate::query_loop::{order_by, query_limit};
 use crate::site::Site;
@@ -525,7 +525,7 @@ fn url_image(
         height: (!matches!(height, Value::Null)).then(|| height.to_int()),
         ..Given::default()
     };
-    let optimization = loading.optimization(true, &given, false);
+    let optimization = loading.optimization(true, &given, Filter::None);
     let mut attrs = vec![
         ("class", [&b"image "[..], &classes.to_php_string()].concat()),
         ("src", url.to_php_string()),

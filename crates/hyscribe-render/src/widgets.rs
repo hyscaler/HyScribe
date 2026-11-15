@@ -12,19 +12,21 @@ use hyscribe_phpser::{
 use crate::archives::Format;
 use crate::autop::wpautop;
 use crate::balance::force_balance_tags;
-use crate::blocks::{Block, is_pcre_space};
+use crate::blocks::{Block, is_pcre_space, parse_blocks};
 use crate::categories::{dropdown_select, terms};
+use crate::content_tags::filter_content_tags;
 use crate::core_blocks::calendar::request_calendar;
 use crate::core_blocks::tag_cloud::{TAXONOMIES, wp_tag_cloud};
 use crate::core_blocks::{comment_author_link, comment_link, prepared};
 use crate::date;
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, wptexturize};
 use crate::head::json_hex_tag;
+use crate::media::Filter;
 use crate::pages::wp_list_pages;
 use crate::permalinks;
 use crate::post::{listed_title, the_title};
 use crate::site::{Archive, Taxonomy};
-use crate::template::Renderer;
+use crate::template::{Renderer, replace};
 
 /// The classic widgets' dropdown script up to what a change does.
 const SCRIPT_START: &str = "( ( dropdownId ) => {
@@ -232,6 +234,7 @@ impl Renderer<'_> {
             "text" => self.text_widget(args, instance),
             "media_image" => self.media_image_widget(args, instance),
             "media_gallery" => self.media_gallery_widget(args, instance),
+            "block" => self.block_widget(args, instance),
             _ => Vec::new(),
         }
     }
@@ -573,7 +576,72 @@ fn option_value(site: &dyn crate::site::Site, name: &str) -> Value {
     }
 }
 
+/// The wrapper class `WP_Widget_Block` gives content whose first block is
+/// each of these; any other has `widget_block` alone.
+const BLOCK_WIDGET_CLASSES: [(&str, &str); 14] = [
+    ("core/paragraph", "widget_block widget_text"),
+    ("core/calendar", "widget_block widget_calendar"),
+    ("core/search", "widget_block widget_search"),
+    ("core/html", "widget_block widget_custom_html"),
+    ("core/archives", "widget_block widget_archive"),
+    ("core/latest-posts", "widget_block widget_recent_entries"),
+    (
+        "core/latest-comments",
+        "widget_block widget_recent_comments",
+    ),
+    ("core/tag-cloud", "widget_block widget_tag_cloud"),
+    ("core/categories", "widget_block widget_categories"),
+    ("core/audio", "widget_block widget_media_audio"),
+    ("core/video", "widget_block widget_media_video"),
+    ("core/image", "widget_block widget_media_image"),
+    ("core/gallery", "widget_block widget_media_gallery"),
+    ("core/rss", "widget_block widget_rss"),
+];
+
+/// `WP_Widget_Block::get_dynamic_classname()`: by the content's first
+/// block, which is no block when the content starts with anything else.
+fn block_widget_class(content: &[u8]) -> &'static str {
+    let blocks = parse_blocks(content);
+    let first = blocks.first().and_then(|block| block.name.as_deref());
+    BLOCK_WIDGET_CLASSES
+        .iter()
+        .find(|(name, _)| first == Some(*name))
+        .map_or("widget_block", |(_, class)| class)
+}
+
 impl Renderer<'_> {
+    /// `WP_Widget_Block::widget()`: the instance through `wp_parse_args()`,
+    /// its content through the `widget_block_content` filters, `do_blocks()`
+    /// and `wp_filter_content_tags()` (neither `WP_Embed`'s `[embed]` and
+    /// autoembed at priority 8 nor other shortcodes are run), in the wrapper
+    /// with the class of its first block. A `content` that is an array, which
+    /// `parse_blocks()` refuses with a `TypeError`, renders as `Array`.
+    fn block_widget(&mut self, args: &Args, instance: &Value) -> Vec<u8> {
+        // A stored instance comes as it was saved, an object or a string.
+        let instance = parse_args(instance.clone());
+        let content = instance
+            .get_str("content")
+            .map(Value::to_php_string)
+            .unwrap_or_default();
+        let class = block_widget_class(&content);
+        let outer = self.context.loading.in_widget_block_content;
+        self.context.loading.in_widget_block_content = true;
+        let html = self.render_top_level(&content);
+        let html = filter_content_tags(
+            self.context.site,
+            &self.context.loading,
+            &html,
+            Filter::WidgetBlock,
+        );
+        self.context.loading.in_widget_block_content = outer;
+        [
+            &replace(&args.before_widget, b"widget_block", class.as_bytes())[..],
+            &html,
+            &args.after_widget,
+        ]
+        .concat()
+    }
+
     /// `WP_Widget_Custom_HTML::widget()`.
     fn custom_html_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
         let title = widget_title(instance, b"");

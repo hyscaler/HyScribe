@@ -12,7 +12,6 @@ use hyscribe_db::Write;
 use hyscribe_phpser::{
     Key, Value, add_query_arg, addslashes, hash_equals, lookup, md5, php_trim, stripslashes,
 };
-use hyscribe_render::formatting::is_email;
 use hyscribe_render::permalinks::home_path;
 use hyscribe_write::Error;
 use hyscribe_write::options::{
@@ -266,7 +265,11 @@ async fn save(
     }
     let added = old == Value::Bool(false);
     match option {
-        "new_admin_email" => new_admin_email(write, &value).await,
+        "new_admin_email" => {
+            // `wp_rand()`'s number, as random letters: the key is a hash of it.
+            let random = hyscribe_auth::generate_password(12, false);
+            new_admin_email(write, &value, random).await
+        }
         _ if added => Ok(()),
         "home" => {
             https_migration(write, &old, &value).await?;
@@ -280,13 +283,17 @@ async fn save(
 
 /// `update_option_new_admin_email()`: the key that confirms a new admin
 /// email, kept with it until then.
-async fn new_admin_email(write: &mut Write<'_>, email: &Value) -> Result<(), Error> {
+async fn new_admin_email(
+    write: &mut Write<'_>,
+    email: &Value,
+    random: std::io::Result<String>,
+) -> Result<(), Error> {
+    // `sanitize_option()` let only an email through.
     let bytes = email.to_php_string();
-    if get_option(write, "admin_email").await? == *email || !is_email(&bytes) {
+    if get_option(write, "admin_email").await? == *email {
         return Ok(());
     }
-    // `wp_rand()`'s number, as random letters: the key is a hash of it.
-    let random = hyscribe_auth::generate_password(12, false).map_err(Error::Random)?;
+    let random = random.map_err(Error::Random)?;
     let time = crate::now();
     let hash = md5(&[&bytes[..], time.to_string().as_bytes(), random.as_bytes()].concat());
     let pending = Value::Array(vec![
@@ -515,9 +522,9 @@ pub(super) fn create_privacy_page<'a>(
             upload_host: hyscribe_render::link::host(&site),
             now: crate::now(),
         };
+        // A draft: `wp_insert_post()`'s status when none is given.
         let page = PostArgs {
             title: b"Privacy Policy".to_vec(),
-            status: "draft".into(),
             post_type: "page".into(),
             content: POLICY.replace("%s", &home).into_bytes(),
             ..PostArgs::default()

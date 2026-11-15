@@ -450,6 +450,19 @@ async fn unported_saves() {
         Value::Array(Vec::new()),
     ));
     assert_eq!(answer(&[], options, &[], &empty).await, back);
+    let named = general(&[("timezone_string", "Europe/London")]);
+    assert_eq!(answer(&[], options, &[], &named).await, back);
+    // A list where PHP saves any value is saved serialized.
+    let mut listed = page_form("discussion", &[]);
+    listed.push((
+        Key::String(b"comments_notify".to_vec()),
+        Value::Array(form(&[("0", "1")])),
+    ));
+    let discussed = "/hs-admin/options-discussion?settings-updated=true";
+    assert_eq!(
+        answer(&[], options, &[], &listed).await.as_deref(),
+        Some(discussed)
+    );
     let language = [("WPLANG", text("de_DE"))];
     let english = general(&[("WPLANG", "")]);
     assert_eq!(answer(&language, options, &[], &english).await, None);
@@ -503,6 +516,10 @@ async fn saves_fail_at_each_statement() {
             form(&[("permalink_structure", "/%postname%/")]),
         ),
         (
+            "/hs-admin/options-permalink",
+            form(&[("permalink_structure", "/archives/")]),
+        ),
+        (
             "/hs-admin/options-privacy",
             form(&[("action", "create-privacy-page")]),
         ),
@@ -547,4 +564,56 @@ async fn saves_fail_at_each_statement() {
             }
         }
     }
+}
+
+/// Sites installed before database 32453 also save the Writing screen's
+/// formatting options; later ones do not.
+#[tokio::test]
+async fn old_sites_save_formatting() {
+    let _one = ONE.lock().await;
+    let writer = writer().await;
+    let post = page_form("writing", &[("use_smilies", "0")]);
+    let asked = asked("/hs-admin/options", &[], &post);
+    for (initial, smilies) in [("32452", "0"), ("32453", "1")] {
+        let mut write = writer.begin().await.unwrap();
+        let version = Value::String(initial.as_bytes().to_vec());
+        update_option(&mut write, "initial_db_version", &version, None)
+            .await
+            .unwrap();
+        let saved = update(&mut write, &asked).await;
+        assert!(matches!(saved, Ok(Answer::Redirect(_))), "{initial}");
+        let stored = write.option_value("use_smilies").await.unwrap();
+        assert_eq!(stored.as_deref(), Some(smilies.as_bytes()), "{initial}");
+    }
+}
+
+/// The rest of the requests' shapes: an offset west of UTC, a site that
+/// pings nobody, a base PHP stops on, and a key that cannot be made.
+#[tokio::test]
+async fn other_requests() {
+    let _one = ONE.lock().await;
+    let text = |text: &str| Value::String(text.as_bytes().to_vec());
+    let options = "/hs-admin/options";
+    let west = page_form("general", &[("timezone_string", "UTC-3")]);
+    let general = "/hs-admin/options-general?settings-updated=true";
+    assert_eq!(
+        answer(&[], options, &[], &west).await.as_deref(),
+        Some(general)
+    );
+    let private = [("blog_public", text("0"))];
+    let writing = page_form("writing", &[]);
+    let back = "/hs-admin/options-writing?settings-updated=true";
+    assert_eq!(
+        answer(&private, options, &[], &writing).await.as_deref(),
+        Some(back)
+    );
+    let mut base = form(&[("permalink_structure", "/%postname%/")]);
+    base.push((Key::String(b"tag_base".to_vec()), Value::Array(Vec::new())));
+    let permalinks = "/hs-admin/options-permalink";
+    assert_eq!(answer(&[], permalinks, &[], &base).await, None);
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    let email = text("new@example.test");
+    let failed = new_admin_email(&mut write, &email, Err(std::io::Error::other("no"))).await;
+    assert!(matches!(failed, Err(Error::Random(_))));
 }

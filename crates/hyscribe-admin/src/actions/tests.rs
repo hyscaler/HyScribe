@@ -12,7 +12,7 @@ use crate::tests::options;
 /// `%nonce:<action>%`.
 struct Oracle {
     role: &'static str,
-    /// `_edit_lock` of every post.
+    /// A fresh edit lock of user 801's on every post.
     lock: bool,
 }
 
@@ -65,7 +65,6 @@ impl CapabilityData for Oracle {
     fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
         match (id, key) {
             (802, "_wp_trash_meta_status") => Some(b"publish".to_vec()),
-            (_, "_edit_lock") if self.lock => Some(b"1793750400:801".to_vec()),
             _ => None,
         }
     }
@@ -112,6 +111,9 @@ impl ActionSite for Oracle {
     }
     fn user_roles(&self) -> Option<Vec<u8>> {
         options().get("wp_user_roles").cloned()
+    }
+    fn lock_holder(&self, _: u64) -> Option<String> {
+        self.lock.then(|| "<b>other</b>".to_string())
     }
 }
 
@@ -251,6 +253,10 @@ fn actions_are_named_as_php_names_them() {
         ("users", "action=resetpassword", "resetpassword"),
         ("users", "action=-1", ""),
         ("edit", "changeit=Change&action=trash", "trash"),
+        ("edit", "action=-1&delete_all=Empty+Trash", "delete_all"),
+        ("edit", "action=trash&filter_action=Filter", ""),
+        ("post", "action=trash&deletepost=Delete", "delete"),
+        ("post", "action=trash", "trash"),
         ("edit-comments", "delete_all2=1&action=spam", "delete_all"),
         ("edit-comments", "action=-1", ""),
         ("comment", "action=cdc", "delete"),
@@ -269,13 +275,18 @@ fn actions_are_named_as_php_names_them() {
         ("edit-tags", "action=delete&delete_tags[]=2", "bulk-delete"),
         ("edit-tags", "action=-1", ""),
     ] {
-        let get = fields(query);
-        // `comment.php`'s Delete button is posted.
-        let post = fields(
-            query
-                .strip_prefix("action=approvecomment&")
-                .unwrap_or_default(),
-        );
+        // `post.php`'s and `comment.php`'s Delete buttons are posted.
+        let (get, post) = match query.split_once("&deletepost") {
+            Some((get, rest)) => (fields(get), fields(&format!("deletepost{rest}"))),
+            None => (
+                fields(query),
+                fields(
+                    query
+                        .strip_prefix("action=approvecomment&")
+                        .unwrap_or_default(),
+                ),
+            ),
+        };
         let asked = Asked {
             get: &get,
             post: &post,
@@ -579,7 +590,8 @@ fn what_is_not_ported_goes_on() {
     }
 }
 
-/// The checks that read a lock, which is not ported, or the role.
+/// The checks that read a lock or the role: a locked post is skipped by
+/// the bulk trash, refused by `post.php` and by Quick Edit.
 #[test]
 fn locks_and_roles() {
     let locked = Oracle {
@@ -592,12 +604,22 @@ fn locks_and_roles() {
     let untrash = format!("edit.php?action=untrash&post[]=1&{bulk}");
     assert_eq!(outcome(&locked, &untrash, None), Some(500));
     let single = format!("post.php?action=trash&post=1&{}", nonce("trash-post_1"));
-    assert_eq!(outcome(&locked, &single, None), Some(501));
+    let editing = "You cannot move this item to the Trash. <b>other</b> is currently editing.";
+    let refused = check(&locked, &single, None, None);
+    assert_eq!(refused, Some(Err(died(409, editing))));
     // The trashed post would refuse, were it not locked.
     let trashed = format!("edit.php?action=trash&post[]=802&{bulk}");
     assert_eq!(outcome(&locked, &trashed, None), Some(501));
     let trashed = format!("post.php?action=trash&post=802&{}", nonce("trash-post_802"));
-    assert_eq!(outcome(&locked, &trashed, None), Some(501));
+    assert_eq!(outcome(&locked, &trashed, None), Some(409));
+    for (kind, body) in [("post", "post_ID=1"), ("page", "post_ID=2&post_type=page")] {
+        let body = format!("action=inline-save&{body}&_inline_edit=%nonce:inlineeditnonce%");
+        let disabled = format!(
+            "Saving is disabled: &lt;b&gt;other&lt;/b&gt; is currently editing this {kind}."
+        );
+        let refused = check(&locked, "admin-ajax.php", Some(&body), None);
+        assert_eq!(refused, Some(Err(ajax(200, &disabled))));
+    }
     let untrash = format!("post.php?action=untrash&post=1&{}", nonce("untrash-post_1"));
     assert_eq!(outcome(&locked, &untrash, None), Some(500));
     let activate = "themes.php?action=activate";

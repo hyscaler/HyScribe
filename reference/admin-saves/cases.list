@@ -1,6 +1,6 @@
 # The admin actions reference/admin-saves/golden.sh sends past their checks,
 # as user 1, an administrator, with a valid nonce in the field given:
-# case	method	target	body (- for none)	nonce action	nonce field
+# case	method	target	body (- for none)	nonce action	nonce field	screen after (optional)	SQL run first (optional)
 # User 801 is reference/action-checks/content.sql's author.
 users-promote	GET	users.php?changeit=Change&new_role=editor&users[]=801	-	bulk-users	_wpnonce
 users-promote-self	GET	users.php?changeit=Change&new_role=administrator&users[]=1	-	bulk-users	_wpnonce
@@ -121,3 +121,30 @@ destroy-sessions-other	POST	admin-ajax.php	action=destroy-sessions&user_id=801	u
 destroy-sessions-missing	POST	admin-ajax.php	action=destroy-sessions&user_id=999	update-user_999	nonce
 send-password-reset	POST	admin-ajax.php	action=send-password-reset&user_id=801	reset-password-for-801	nonce
 send-password-reset-missing	POST	admin-ajax.php	action=send-password-reset&user_id=999	reset-password-for-999	nonce
+# The posts and pages lists: post 801 is the author's, 802 the
+# administrator's in the Trash; a lock is user 801's, fresh. Each case starts
+# from the database as it was, and its screen after is where it redirects.
+# Restored
+posts-trash	GET	post.php?post=1&action=trash	-	trash-post_1	_wpnonce	->
+posts-trash-referer	GET	post.php?post=1&action=trash&_wp_http_referer=%2Fwp-admin%2Fedit.php%3Fpost_status%3Dpublish%26trashed%3D3%26ids%3D9	-	trash-post_1	_wpnonce	->
+posts-trash-from-editor	GET	post.php?post=2&action=trash&_wp_http_referer=%2Fwp-admin%2Fpost.php%3Fpost%3D2%26action%3Dedit	-	trash-post_2	_wpnonce	->
+posts-trash-locked	GET	post.php?post=1&action=trash	-	trash-post_1	_wpnonce	->	INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES (1, '_edit_lock', CONCAT(UNIX_TIMESTAMP(), ':801'))
+posts-untrash	GET	post.php?post=802&action=untrash	-	untrash-post_802	_wpnonce	->
+posts-delete	POST	post.php	post_ID=802&deletepost=Delete	delete-post_802	_wpnonce	->
+posts-bulk-trash	GET	edit.php?action=trash&post[]=1&post[]=801&paged=2	-	bulk-posts	_wpnonce	->
+posts-bulk-trash-locked	GET	edit.php?action=trash&post[]=801&post[]=1	-	bulk-posts	_wpnonce	->	INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES (1, '_edit_lock', CONCAT(UNIX_TIMESTAMP(), ':801'))
+posts-bulk-undo	GET	edit.php?doaction=undo&action=untrash&ids=802	-	bulk-posts	_wpnonce	->
+posts-bulk-untrash	GET	edit.php?post_status=trash&action=untrash&post[]=802	-	bulk-posts	_wpnonce	->
+posts-bulk-delete	GET	edit.php?post_status=trash&action=delete&post[]=802&post[]=801	-	bulk-posts	_wpnonce	->
+posts-bulk-nothing	GET	edit.php?post_type=page&action=trash	-	bulk-posts	_wpnonce	->
+posts-bulk-other	GET	edit.php?action=export&post[]=1	-	bulk-posts	_wpnonce	->
+posts-empty-trash	GET	edit.php?post_status=trash&post_type=post&delete_all=Empty+Trash&action=-1	-	bulk-posts	_wpnonce	->
+posts-empty-trash-pages	GET	edit.php?post_status=trash&post_type=page&delete_all=Empty+Trash&action=-1	-	bulk-posts	_wpnonce	->
+posts-bulk-edit	GET	edit.php?s=&post_status=all&post_type=post&action=edit&m=0&cat=0&paged=1&post_view=list&screen=edit-post&mode=list&bulk_edit=Update&post[]=1&post[]=801&post_category[]=0&post_category[]=1&tax_input[post_tag]=Tagged,+Bulk+tag&post_author=-1&comment_status=closed&ping_status=&_status=-1&post_format=-1&sticky=sticky	-	bulk-posts	_wpnonce	->
+posts-bulk-edit-locked	GET	edit.php?s=&post_status=all&post_type=post&action=edit&m=0&cat=0&paged=1&post_view=list&screen=edit-post&mode=list&bulk_edit=Update&post[]=1&post[]=801&post_category[]=0&post_category[]=1&tax_input[post_tag]=Tagged,+Bulk+tag&post_author=-1&comment_status=closed&ping_status=&_status=-1&post_format=-1&sticky=sticky	-	bulk-posts	_wpnonce	->	INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES (1, '_edit_lock', CONCAT(UNIX_TIMESTAMP(), ':801'))
+posts-inline-save	POST	admin-ajax.php	action=inline-save&post_ID=1&post_type=post&screen=edit-post&post_view=list&post_status=&edit_date=true&post_title=Hello+again&post_name=hello-again&mm=10&jj=28&aa=2026&hh=08&mn=08&ss=15&hidden_mm=10&hidden_jj=27&hidden_aa=2026&hidden_hh=08&hidden_mn=08&post_author=1&post_password=&post_category[]=0&post_category[]=1&tax_input[post_tag]=Tagged,+New+tag&comment_status=open&ping_status=open&_status=publish&sticky=sticky&post_format=0	inlineeditnonce	_inline_edit	->
+posts-inline-save-locked	POST	admin-ajax.php	action=inline-save&post_ID=1&post_type=post&screen=edit-post&post_view=list&post_status=&edit_date=true&post_title=Hello+again&post_name=hello-again&mm=10&jj=28&aa=2026&hh=08&mn=08&ss=15&hidden_mm=10&hidden_jj=27&hidden_aa=2026&hidden_hh=08&hidden_mn=08&post_author=1&post_password=&post_category[]=0&post_category[]=1&tax_input[post_tag]=Tagged,+New+tag&comment_status=open&ping_status=open&_status=publish&sticky=sticky&post_format=0	inlineeditnonce	_inline_edit	->	INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES (1, '_edit_lock', CONCAT(UNIX_TIMESTAMP(), ':801'))
+posts-inline-save-page	POST	admin-ajax.php	action=inline-save&post_ID=2&post_type=page&screen=edit-page&post_view=list&post_status=&edit_date=true&post_title=Sample+Page&post_name=sample-page&mm=10&jj=27&aa=2026&hh=08&mn=08&ss=15&hidden_mm=10&hidden_jj=27&hidden_aa=2026&hidden_hh=08&hidden_mn=08&post_author=1&post_password=&post_parent=3&menu_order=4&page_template=default&_status=publish	inlineeditnonce	_inline_edit	->
+posts-inline-save-invalid-date	POST	admin-ajax.php	action=inline-save&post_ID=1&post_type=post&screen=edit-post&post_view=list&post_status=&edit_date=true&post_title=Hello+world%21&post_name=hello-world&mm=13&jj=27&aa=2026&hh=08&mn=08&ss=15&hidden_mm=10&hidden_jj=27&hidden_aa=2026&hidden_hh=08&hidden_mn=08&post_author=1&post_password=&post_category[]=0&post_category[]=1&tax_input[post_tag]=&comment_status=open&ping_status=open&_status=publish&post_format=0	inlineeditnonce	_inline_edit	->
+posts-inline-save-draft-name	POST	admin-ajax.php	action=inline-save&post_ID=3&post_type=page&screen=edit-page&post_view=list&post_status=&edit_date=true&post_title=Privacy+Policy&post_name=sample-page&mm=10&jj=27&aa=2026&hh=08&mn=08&ss=15&hidden_mm=10&hidden_jj=27&hidden_aa=2026&hidden_hh=08&hidden_mn=08&post_author=1&post_password=&post_parent=0&menu_order=0&page_template=default&_status=draft	inlineeditnonce	_inline_edit	->
+posts-bulk-edit-pages	GET	edit.php?post_type=page&action=edit&bulk_edit=Update&post[]=2&post[]=3&post_parent=2&post_author=-1&comment_status=&ping_status=&_status=-1&page_template=-1&mode=list	-	bulk-posts	_wpnonce	->

@@ -24,7 +24,7 @@ async fn get(site: &Arc<Site>, uri: &str, host: &str, cookie: &str) -> Response 
         .unwrap()
 }
 
-fn location(response: &Response) -> &str {
+pub(super) fn location(response: &Response) -> &str {
     response
         .headers()
         .get(header::LOCATION)
@@ -731,7 +731,7 @@ async fn attachment_edit_screen_is_php_s() {
 
 /// `page` with its nonces, ten hexadecimal digits standing alone, and its
 /// time masked, as the hashed goldens hold them.
-fn masked_nonces(page: &str) -> String {
+pub(super) fn masked_nonces(page: &str) -> String {
     let mut out = String::new();
     let mut word = String::new();
     for c in page.chars().chain(['\0']) {
@@ -1790,7 +1790,8 @@ pub(crate) async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &str)
 }
 
 /// An action is refused as PHP refuses it until its checks pass, then
-/// answered 501; a POST whose body only PHP reads is not answered.
+/// answered as shadow mode answers a write; a POST whose body only PHP
+/// reads is not answered.
 #[tokio::test(flavor = "multi_thread")]
 async fn actions_are_checked_first() {
     let dir = tempfile::tempdir().unwrap();
@@ -1804,7 +1805,7 @@ async fn actions_are_checked_first() {
     let nonce = session_nonce(&site, &cookies, "bulk-posts").await;
     let valid = format!("{trash}&_wpnonce={nonce}");
     let response = send(&site, "GET", &valid, &cookies, None).await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let form = "application/x-www-form-urlencoded";
     let body = format!("action=trash&post[]=1&_wpnonce={nonce}");
     let response = send(
@@ -1815,7 +1816,7 @@ async fn actions_are_checked_first() {
         Some((form, &body)),
     )
     .await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let response = send(
         &site,
         "POST",

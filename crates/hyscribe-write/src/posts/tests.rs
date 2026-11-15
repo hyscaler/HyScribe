@@ -495,7 +495,7 @@ async fn trash_and_delete_match_php() {
     };
     let untrash = async |conn: &mut Connection, id| {
         act(writer, conn, &admin(), async |w, ctx| {
-            wp_untrash_post(w, ctx, id).await
+            wp_untrash_post(w, ctx, id, false).await
         })
         .await
         .map(drop)
@@ -870,7 +870,7 @@ async fn edge_cases_match_php() {
         },
         async |conn, id| {
             act(writer, conn, &admin(), async |w, ctx| {
-                wp_untrash_post(w, ctx, id).await
+                wp_untrash_post(w, ctx, id, false).await
             })
             .await
             .map(drop)
@@ -1080,8 +1080,8 @@ async fn posts_that_are_not_there_or_already_done_write_nothing() {
         let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
         Ok([
             wp_trash_post(w, ctx, 999_999).await?,
-            wp_untrash_post(w, ctx, 999_999).await?,
-            wp_untrash_post(w, ctx, id).await?,
+            wp_untrash_post(w, ctx, 999_999, false).await?,
+            wp_untrash_post(w, ctx, id, false).await?,
             wp_delete_post(w, ctx, 999_999, true).await?,
             wp_trash_post(w, ctx, id).await?,
             wp_trash_post(w, ctx, id).await?,
@@ -1297,7 +1297,7 @@ async fn database_errors_end_every_function() {
             wp_trash_post(w, ctx, id).await?;
             Ok(id)
         },
-        async |w, ctx, id| wp_untrash_post(w, ctx, id).await.map(drop),
+        async |w, ctx, id| wp_untrash_post(w, ctx, id, false).await.map(drop),
     )
     .await;
     every_cut(with_comments, deleting).await;
@@ -1362,7 +1362,7 @@ async fn attachments_are_not_ported() {
         .await,
         rolled_back(async |w, ctx| {
             let id = attachment(w, "trash").await?;
-            wp_untrash_post(w, ctx, id).await.map(drop)
+            wp_untrash_post(w, ctx, id, false).await.map(drop)
         })
         .await,
         rolled_back(async |w, ctx| {
@@ -1430,7 +1430,7 @@ async fn rare_values_are_kept_as_php_keeps_them() {
         })
         .await?;
         wp_trash_post(w, ctx, id).await?;
-        wp_untrash_post(w, ctx, id).await?;
+        wp_untrash_post(w, ctx, id, false).await?;
         Ok(w.post_comments(id).await?)
     })
     .await;
@@ -1951,6 +1951,139 @@ async fn edge_values_are_read_as_php_reads_them() {
     })
     .await;
     assert!(unported(old));
+}
+
+/// What the posts list's actions need beyond the core functions: the
+/// trashed notice's Undo, sticky posts and the default page template.
+#[tokio::test]
+async fn list_actions_match_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    check(
+        "untrash-post-to-previous-status",
+        async |conn| {
+            let id = insert_post(writer, conn, oracle_post("publish")).await?;
+            act(writer, conn, &admin(), async |w, ctx| {
+                wp_trash_post(w, ctx, id).await
+            })
+            .await?;
+            Ok(id)
+        },
+        async |conn, id| {
+            act(writer, conn, &admin(), async |w, ctx| {
+                wp_untrash_post(w, ctx, id, true).await
+            })
+            .await
+            .map(drop)
+        },
+    )
+    .await;
+    check(
+        "stick-and-unstick-posts",
+        async |conn| {
+            let args = PostArgs {
+                import_id: 970,
+                ..oracle_post("publish")
+            };
+            insert_post(writer, conn, args).await
+        },
+        async |conn, id| {
+            act(writer, conn, &admin(), async |w, _| {
+                stick_post(w, id).await?;
+                stick_post(w, id).await?;
+                stick_post(w, 1).await?;
+                unstick_post(w, MISSING).await
+            })
+            .await
+        },
+    )
+    .await;
+    check(
+        "update-page-template",
+        async |conn| {
+            let args = PostArgs {
+                post_type: "page".into(),
+                ..oracle_post("publish")
+            };
+            insert_post(writer, conn, args).await
+        },
+        async |conn, id| {
+            act(writer, conn, &admin(), async |w, ctx| {
+                let template = |args: &mut PostArgs| args.page_template = b"default".to_vec();
+                wp_update_post(w, ctx, id, &template).await
+            })
+            .await
+            .map(drop)
+        },
+    )
+    .await;
+    // A theme's own template, and a sticky list that is not a list.
+    let themed = rolled_back(async |w, ctx| {
+        let template = |args: &mut PostArgs| args.page_template = b"page-no-title".to_vec();
+        wp_update_post(w, ctx, 2, &template).await
+    })
+    .await;
+    assert!(unported(themed));
+    let listed = rolled_back(async |w, _| {
+        set(w, "sticky_posts", b"none").await?;
+        unstick_post(w, 1).await?;
+        stick_post(w, 1).await?;
+        Ok(w.option_value("sticky_posts").await?.unwrap_or_default())
+    })
+    .await;
+    assert_eq!(listed.unwrap(), b"a:1:{i:0;i:1;}");
+    // Quick Edit's slug of a draft, made unique as if it were published.
+    let slugs = rolled_back(async |w, _| {
+        let slug = || b"hello-world".to_vec();
+        let taken = wp_unique_post_slug(w, slug(), (0, "publish"), "post", 0).await?;
+        let free = wp_unique_post_slug(w, slug(), (1, "publish"), "post", 0).await?;
+        Ok((taken, free))
+    })
+    .await;
+    assert_eq!(
+        slugs.unwrap(),
+        (b"hello-world-2".to_vec(), b"hello-world".to_vec())
+    );
+    let other = rolled_back(async |w, _| {
+        wp_unique_post_slug(w, b"x".to_vec(), (0, "publish"), "attachment", 0).await
+    })
+    .await;
+    assert!(unported(other));
+}
+
+#[tokio::test]
+async fn database_errors_end_the_list_actions() {
+    let publish = async |w: &mut Write<'_>, ctx: &Context| {
+        wp_insert_post(w, ctx, oracle_post("publish")).await
+    };
+    every_cut(
+        async |w, ctx| {
+            let id = publish(w, ctx).await?;
+            wp_trash_post(w, ctx, id).await?;
+            Ok(id)
+        },
+        async |w, ctx, id| wp_untrash_post(w, ctx, id, true).await.map(drop),
+    )
+    .await;
+    every_cut(publish, async |w, _, id| {
+        stick_post(w, id).await?;
+        unstick_post(w, id).await
+    })
+    .await;
+    every_cut(
+        async |w, ctx| {
+            let page = PostArgs {
+                post_type: "page".into(),
+                ..oracle_post("publish")
+            };
+            wp_insert_post(w, ctx, page).await
+        },
+        async |w, ctx, id| {
+            let template = |args: &mut PostArgs| args.page_template = b"default".to_vec();
+            wp_update_post(w, ctx, id, &template).await.map(drop)
+        },
+    )
+    .await;
 }
 
 /// `get_default_post_to_edit( 'post', true )` and the user option the Quick

@@ -352,6 +352,12 @@ impl ActionSite for Admin<'_> {
     fn user_roles(&self) -> Option<Vec<u8>> {
         UsersSite::user_roles(self)
     }
+    fn lock_holder(&self, post: u64) -> Option<String> {
+        // The checks ask only about a post they found.
+        let post = PostsSite::post(self, post).unwrap_or_default();
+        let holder = hyscribe_admin::posts::lock_holder(self, &post)?;
+        Some(String::from_utf8_lossy(&holder.display_name).into_owned())
+    }
 }
 
 impl MenuUser for Admin<'_> {
@@ -1112,6 +1118,20 @@ fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
                     None => {}
                 }
             }
+            // What a bulk action leaves of its request, which the list does not read.
+            (Key::String(key), _)
+                if [
+                    &b"_wpnonce"[..],
+                    b"doaction",
+                    b"screen",
+                    b"sticky",
+                    b"post_category",
+                    b"tax_input",
+                    b"post_parent",
+                    b"page_template",
+                    b"keep_private",
+                ]
+                .contains(&key.as_slice()) => {}
             _ => return None,
         }
     }
@@ -1345,7 +1365,7 @@ fn save(admin: &mut Admin, screen: &str, asked: &Asked) -> Response {
         let begun = async { saves::act(writer.begin().await, handler, asked, admin).await };
         Handle::current().block_on(begun)
     };
-    if screen == "post" {
+    if action == b"post-quickdraft-save" {
         return quick_draft(admin, writer, asked, act);
     }
     match act(admin) {

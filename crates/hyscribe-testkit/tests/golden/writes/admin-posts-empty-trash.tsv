@@ -1,0 +1,91 @@
+# The rows PHP WordPress writes for the action admin-posts-empty-trash (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 09:58:42 to 2026-11-15 09:58:42 UTC.
+# %wp_posts:1% is 12.
+# %wp_posts:2% is 13.
+# %wp_postmeta:1% is 33.
+# %wp_postmeta:2% is 34.
+# %wp_postmeta:3% is 35.
+# %wp_postmeta:4% is 36.
+# %wp_postmeta:5% is 37.
+# %wp_postmeta:6% is 38.
+# %wp_postmeta:7% is 39.
+wp_comments	1	-	comment_ID	1
+wp_comments	1	-	comment_agent	
+wp_comments	1	-	comment_approved	post-trashed
+wp_comments	1	-	comment_author	A WordPress Commenter
+wp_comments	1	-	comment_author_IP	
+wp_comments	1	-	comment_author_email	wapuu@wordpress.example
+wp_comments	1	-	comment_author_url	https://wordpress.org/
+wp_comments	1	-	comment_content	Hi, this is a comment.\nTo get started with moderating, editing, and deleting comments, please visit the Comments screen in the dashboard.\nCommenter avatars come from <a href="https://gravatar.com/">Gravatar</a>.
+wp_comments	1	-	comment_date	2026-10-27 08:08:15
+wp_comments	1	-	comment_date_gmt	2026-10-27 08:08:15
+wp_comments	1	-	comment_karma	0
+wp_comments	1	-	comment_parent	0
+wp_comments	1	-	comment_post_ID	1
+wp_comments	1	-	comment_type	comment
+wp_comments	1	-	user_id	0
+wp_postmeta	%wp_postmeta:1%	-	meta_id	%wp_postmeta:1%
+wp_postmeta	%wp_postmeta:1%	-	meta_key	_wp_trash_meta_status
+wp_postmeta	%wp_postmeta:1%	-	meta_value	publish
+wp_postmeta	%wp_postmeta:1%	-	post_id	1
+wp_postmeta	%wp_postmeta:2%	-	meta_id	%wp_postmeta:2%
+wp_postmeta	%wp_postmeta:2%	-	meta_key	_wp_trash_meta_time
+wp_postmeta	%wp_postmeta:2%	-	meta_value	%unix%
+wp_postmeta	%wp_postmeta:2%	-	post_id	1
+wp_postmeta	%wp_postmeta:3%	-	meta_id	%wp_postmeta:3%
+wp_postmeta	%wp_postmeta:3%	-	meta_key	_wp_desired_post_slug
+wp_postmeta	%wp_postmeta:3%	-	meta_value	hello-world
+wp_postmeta	%wp_postmeta:3%	-	post_id	1
+wp_postmeta	%wp_postmeta:4%	-	meta_id	%wp_postmeta:4%
+wp_postmeta	%wp_postmeta:4%	-	meta_key	_wp_trash_meta_comments_status
+wp_postmeta	%wp_postmeta:4%	-	meta_value	a:1:{i:1;s:1:"1";}
+wp_postmeta	%wp_postmeta:4%	-	post_id	1
+wp_posts	%wp_posts:1%	-	ID	%wp_posts:1%
+wp_posts	%wp_posts:1%	-	comment_count	0
+wp_posts	%wp_posts:1%	-	comment_status	closed
+wp_posts	%wp_posts:1%	-	guid	http://127.0.0.1:8081/?p=%wp_posts:1%
+wp_posts	%wp_posts:1%	-	menu_order	0
+wp_posts	%wp_posts:1%	-	ping_status	closed
+wp_posts	%wp_posts:1%	-	pinged	
+wp_posts	%wp_posts:1%	-	post_author	1
+wp_posts	%wp_posts:1%	-	post_content	<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->
+wp_posts	%wp_posts:1%	-	post_content_filtered	
+wp_posts	%wp_posts:1%	-	post_date	%now%
+wp_posts	%wp_posts:1%	-	post_date_gmt	%now%
+wp_posts	%wp_posts:1%	-	post_excerpt	
+wp_posts	%wp_posts:1%	-	post_mime_type	
+wp_posts	%wp_posts:1%	-	post_modified	%now%
+wp_posts	%wp_posts:1%	-	post_modified_gmt	%now%
+wp_posts	%wp_posts:1%	-	post_name	1-revision-v1
+wp_posts	%wp_posts:1%	-	post_parent	1
+wp_posts	%wp_posts:1%	-	post_password	
+wp_posts	%wp_posts:1%	-	post_status	inherit
+wp_posts	%wp_posts:1%	-	post_title	Hello world!
+wp_posts	%wp_posts:1%	-	post_type	revision
+wp_posts	%wp_posts:1%	-	to_ping	
+wp_posts	1	-	ID	1
+wp_posts	1	-	comment_count	1
+wp_posts	1	-	comment_status	open
+wp_posts	1	-	guid	http://default-install.test/?p=1
+wp_posts	1	-	menu_order	0
+wp_posts	1	-	ping_status	open
+wp_posts	1	-	pinged	
+wp_posts	1	-	post_author	1
+wp_posts	1	-	post_content	<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->
+wp_posts	1	-	post_content_filtered	
+wp_posts	1	-	post_date	2026-10-27 08:08:15
+wp_posts	1	-	post_date_gmt	2026-10-27 08:08:15
+wp_posts	1	-	post_excerpt	
+wp_posts	1	-	post_mime_type	
+wp_posts	1	-	post_modified	%now%
+wp_posts	1	-	post_modified_gmt	%now%
+wp_posts	1	-	post_name	hello-world__trashed
+wp_posts	1	-	post_parent	0
+wp_posts	1	-	post_password	
+wp_posts	1	-	post_status	trash
+wp_posts	1	-	post_title	Hello world!
+wp_posts	1	-	post_type	post
+wp_posts	1	-	to_ping	
+wp_term_relationships	1,1	-	object_id	1
+wp_term_relationships	1,1	-	term_order	0
+wp_term_relationships	1,1	-	term_taxonomy_id	1

@@ -1,0 +1,30 @@
+# The rows PHP WordPress writes for the action untrash-post-to-previous-status (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 09:58:44 to 2026-11-15 09:58:44 UTC.
+# %wp_posts:1% is 966.
+# %wp_posts:2% is 967.
+# %wp_postmeta:1% is 50.
+# %wp_postmeta:2% is 51.
+# %wp_postmeta:3% is 52.
+# %wp_postmeta:4% is 53.
+# %wp_postmeta:5% is 54.
+# %wp_postmeta:6% is 55.
+# %wp_options:1% is 131.
+wp_postmeta	%wp_postmeta:3%	-	meta_id	%wp_postmeta:3%
+wp_postmeta	%wp_postmeta:3%	-	meta_key	_wp_trash_meta_status
+wp_postmeta	%wp_postmeta:3%	-	meta_value	publish
+wp_postmeta	%wp_postmeta:3%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:4%	-	meta_id	%wp_postmeta:4%
+wp_postmeta	%wp_postmeta:4%	-	meta_key	_wp_trash_meta_time
+wp_postmeta	%wp_postmeta:4%	-	meta_value	%unix%
+wp_postmeta	%wp_postmeta:4%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:5%	-	meta_id	%wp_postmeta:5%
+wp_postmeta	%wp_postmeta:5%	-	meta_key	_wp_desired_post_slug
+wp_postmeta	%wp_postmeta:5%	-	meta_value	a-write-oracle-post
+wp_postmeta	%wp_postmeta:5%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:6%	+	meta_id	%wp_postmeta:6%
+wp_postmeta	%wp_postmeta:6%	+	meta_key	_wp_old_slug
+wp_postmeta	%wp_postmeta:6%	+	meta_value	a-write-oracle-post__trashed
+wp_postmeta	%wp_postmeta:6%	+	post_id	%wp_posts:1%
+wp_posts	%wp_posts:1%	~	post_name	a-write-oracle-post__trashed	a-write-oracle-post
+wp_posts	%wp_posts:1%	~	post_status	trash	publish
+wp_term_taxonomy	1	~	count	1	2

@@ -509,8 +509,10 @@ async fn reads_posts_inside_an_action() {
     );
 
     assert!(write.published_post_exists().await.unwrap());
+    assert_eq!(write.status_post_ids("page", "publish").await.unwrap(), [2]);
     write.set_post_status(1, "trash").await.unwrap();
     assert!(!write.published_post_exists().await.unwrap());
+    assert_eq!(write.status_post_ids("post", "trash").await.unwrap(), [1]);
     assert_eq!(
         write
             .trashed_post_ids_named(b"hello-world", 0)
@@ -1330,6 +1332,7 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.meta_ids_of_key_valued(meta, "k", b"v").await.err(),
         w.object_meta_ids(meta, 1).await.err(),
         w.trashed_post_ids_named(b"n", 1).await.err(),
+        w.status_post_ids("post", "trash").await.err(),
         w.revision_ids(1).await.err(),
         w.object_meta(meta, 1).await.err(),
         w.user(1).await.err(),

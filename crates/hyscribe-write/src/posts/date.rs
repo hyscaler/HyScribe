@@ -36,7 +36,7 @@ pub(super) fn canonical(date: &str) -> Result<&str> {
 }
 
 /// PHP's `checkdate( $month, $day, $year )`.
-fn checkdate(month: u32, day: u32, year: u32) -> bool {
+pub fn checkdate(month: u32, day: u32, year: u32) -> bool {
     let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
     let days = match month {
         2 if leap => 29,

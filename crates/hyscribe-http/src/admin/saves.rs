@@ -11,7 +11,11 @@ use std::pin::Pin;
 use axum::http::StatusCode;
 use axum::response::Response;
 use hyscribe_admin::actions::{ActionSite, Asked};
-use hyscribe_admin::posts::Answer;
+use hyscribe_admin::posts::{Answer, PAGE, POST, PostsSite};
+use hyscribe_phpser::{Value, lookup};
+use tokio::runtime::Handle;
+
+use crate::login::LoginReads;
 use hyscribe_admin::terms::{Added, Taxonomy, saved_row, term_added};
 use hyscribe_db::{DbError, Write};
 use hyscribe_kses::url_host;
@@ -23,6 +27,7 @@ use crate::redirect::wp_validate_redirect;
 mod comments;
 pub(super) mod dashboard;
 mod options;
+mod posts;
 pub(super) mod screen;
 mod terms;
 mod user_edit;
@@ -93,6 +98,8 @@ pub(super) enum Ajax {
     TermRow(Taxonomy, Term),
     /// `wp_ajax_add_tag()`'s answer for the term added.
     TermAdded(Taxonomy, Added),
+    /// Quick Edit's answer: the posts list's row of the post saved.
+    PostRow(u64),
 }
 
 /// The handler of `action` (as `hyscribe_admin::actions::action` names it)
@@ -100,6 +107,9 @@ pub(super) enum Ajax {
 pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
     match (screen, action) {
         ("users", b"promote") => Some(users::promote),
+        ("post", b"trash") => Some(posts::trash),
+        ("post", b"untrash") => Some(posts::untrash),
+        ("post", b"delete") => Some(posts::delete),
         ("users", b"dodelete") => Some(users::dodelete),
         ("users", b"resetpassword") => Some(users::resetpassword),
         ("user-new", b"createuser") => Some(user_edit::create),
@@ -123,6 +133,7 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         ("admin-ajax", b"hidden-columns") => Some(screen::hidden_columns),
         ("admin-ajax", b"meta-box-order") => Some(screen::meta_box_order),
         (_, b"screen-options") => Some(screen::options),
+        ("edit", _) => Some(posts::bulk),
         _ => None,
     }
 }
@@ -135,6 +146,7 @@ pub(super) fn ajax_handler(action: &[u8]) -> Option<Handler<Ajax>> {
         b"delete-tag" => Some(terms::ajax_delete_tag),
         b"dim-comment" => Some(comments::dim),
         b"delete-comment" => Some(comments::delete),
+        b"inline-save" => Some(posts::inline_save),
         _ => None,
     }
 }
@@ -155,8 +167,30 @@ pub(super) fn ajax_served(admin: &Admin, asked: &Asked, answer: Ajax) -> Respons
         Ajax::Xml(xml) => (XML, xml),
         Ajax::TermRow(taxonomy, term) => (HTML, saved_row(admin, taxonomy, &term, &referer())),
         Ajax::TermAdded(taxonomy, added) => (XML, term_added(admin, taxonomy, &added, &referer())),
+        Ajax::PostRow(id) => (HTML, post_row(admin, asked, id)),
     };
     ajax_text(StatusCode::OK, kind, body.into_bytes())
+}
+
+/// `wp_ajax_inline_save()`'s row of the post `id`, on the list `screen`
+/// names, over the options as the action left them (sticky posts).
+fn post_row(admin: &Admin, asked: &Asked, id: u64) -> String {
+    let reloaded = Handle::current().block_on(admin.site.reloaded());
+    let site = reloaded.as_ref().unwrap_or(admin.site);
+    let mut reads = LoginReads::new(site, Handle::current(), admin.reads.now);
+    reads.act_as(admin.user.id, admin.reads.session_token().to_vec());
+    let fresh = Admin::new(&reads, site, admin.user.clone());
+    let field = |name| lookup(asked.post, name).map_or_else(Vec::new, Value::to_php_string);
+    let kind = match &field("screen")[..] {
+        b"edit-page" => PAGE,
+        _ => POST,
+    };
+    let filter = text(&field("post_status"));
+    let excerpt = field("post_view") == b"excerpt";
+    let post = PostsSite::post(&fresh, id);
+    post.map_or_else(String::new, |post| {
+        hyscribe_admin::posts::saved_row(&fresh, &post, kind, &filter, excerpt)
+    })
 }
 
 fn text(bytes: &[u8]) -> String {

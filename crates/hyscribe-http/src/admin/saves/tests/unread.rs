@@ -54,6 +54,9 @@ impl ActionSite for Unread {
     fn user_roles(&self) -> Option<Vec<u8>> {
         unreachable!()
     }
+    fn lock_holder(&self, _: u64) -> Option<String> {
+        unreachable!()
+    }
 }
 
 impl Acting for Unread {

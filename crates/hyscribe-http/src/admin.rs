@@ -32,7 +32,7 @@ use hyscribe_admin::profile::{EditArgs, ProfileSite, profile, user_edit};
 use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
 use hyscribe_admin::settings_more;
 use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
-use hyscribe_admin::tools::{self, Requests, ToolsSite, privacy_requests};
+use hyscribe_admin::tools::{self, Requests, RequestsArgs, ToolsSite, privacy_requests};
 use hyscribe_admin::users::{ListedUser, UserArgs, UserQuery, UsersSite, user_order, users};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
 use hyscribe_db::{CommentFilter, StatusOrder, StatusQuery, UserFilter};
@@ -760,6 +760,9 @@ impl ToolsSite for Admin<'_> {
     fn post_authors(&self, post_type: &str) -> Vec<u64> {
         self.reads.reads.wait(self.site.db.post_authors(post_type))
     }
+    fn request_counts(&self, action: &str) -> Vec<(String, u64)> {
+        self.reads.reads.wait(self.site.db.request_counts(action))
+    }
 }
 
 impl MediaSite for Admin<'_> {
@@ -1120,26 +1123,31 @@ fn screen(
             screen(admin, &request)
         }
         "/hs-admin/tools" => Answer::from_page(tools::tools(admin, &request)),
+        // Their actions are not ported.
+        "/hs-admin/export-personal-data" => privacy_requests(
+            admin,
+            Requests::Export,
+            &RequestsArgs::parse(query)?,
+            &request,
+        )?,
+        "/hs-admin/erase-personal-data" => privacy_requests(
+            admin,
+            Requests::Erase,
+            &RequestsArgs::parse(query)?,
+            &request,
+        )?,
         // Their arguments and actions are not ported, but the Themes
         // screen's broken theme notice.
-        "/hs-admin/themes"
-        | "/hs-admin/import"
-        | "/hs-admin/export"
-        | "/hs-admin/export-personal-data"
-        | "/hs-admin/erase-personal-data" => {
+        "/hs-admin/themes" | "/hs-admin/import" | "/hs-admin/export" => {
             let broken = only_argument(query, "broken").filter(|_| path == "/hs-admin/themes");
             if request_uri.contains('?') && broken.is_none() {
                 return None;
             }
             match path {
-                "/hs-admin/themes" => themes(admin, &request, broken.flatten().is_some()),
-                "/hs-admin/import" => Some(tools::import(admin, &request)),
-                "/hs-admin/export" => Some(tools::export(admin, &request)),
-                "/hs-admin/export-personal-data" => {
-                    privacy_requests(admin, Requests::Export, &request)
-                }
-                _ => privacy_requests(admin, Requests::Erase, &request),
-            }?
+                "/hs-admin/themes" => themes(admin, &request, broken.flatten().is_some())?,
+                "/hs-admin/import" => tools::import(admin, &request),
+                _ => tools::export(admin, &request),
+            }
         }
         // Their actions are not ported.
         "/hs-admin/upload" => upload(admin, &LibraryArgs::parse(query)?, &request)?,

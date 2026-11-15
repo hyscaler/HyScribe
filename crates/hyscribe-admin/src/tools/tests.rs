@@ -91,7 +91,8 @@ fn personal_data_requests_are_php_s() {
         let rows = rows(file);
         pages += rows.len();
         for (role, php) in &rows {
-            let ours = privacy_requests(role, requests, &request(&canonical, &path, &BROWSER));
+            let request = request(&canonical, &path, &BROWSER);
+            let ours = privacy_requests(role, requests, &RequestsArgs::default(), &request);
             failures.extend(check(role, ours.unwrap(), php.as_ref()));
         }
     }
@@ -99,15 +100,55 @@ fn personal_data_requests_are_php_s() {
     assert_eq!(pages, 11);
 }
 
+/// Every page of `reference/privacy-requests/golden.sh`.
 #[test]
-fn listed_requests_are_not_ported() {
+fn listed_requests_are_php_s() {
+    let golden = include_str!("../../tests/golden/privacy-requests.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let (file, query) = f[1].split_once('?').unwrap_or((f[1], ""));
+        let requests = match file {
+            "export-personal-data.php" => Requests::Export,
+            _ => Requests::Erase,
+        };
+        let variant = f[0].replace("default", "j9req");
+        let role = Role(Box::leak(format!("{variant}:{}", f[2]).into_boxed_str()));
+        let path = format!("/hs-admin/{}?{query}", file.trim_end_matches(".php"));
+        let path = path.trim_end_matches('?');
+        let canonical = format!("{SITE}{path}");
+        let args = RequestsArgs::parse(query).unwrap();
+        let ours = privacy_requests(&role, requests, &args, &request(&canonical, path, &BROWSER));
+        let recorded = String::from_utf8(unhex(f[3])).unwrap();
+        let php = recorded
+            .strip_prefix("403\t")
+            .map_or_else(|| Some(hs_admin_page(&recorded)), |_| None);
+        failures.extend(
+            check(&role, ours.unwrap(), php.as_ref()).map(|failure| format!("{path} {failure}")),
+        );
+    }
+    assert!(
+        failures.is_empty(),
+        "{}",
+        failures[..failures.len().min(3)].join("\n")
+    );
+    assert_eq!(golden.lines().count(), 34);
+}
+
+/// A pending request older than a day, which PHP marks failed as the list
+/// shows, is not ported, nor is an action's argument.
+#[test]
+fn stale_requests_and_actions_are_not_ported() {
     let path = "/hs-admin/export-personal-data";
     let canonical = format!("{SITE}{path}");
     let request = request(&canonical, path, &BROWSER);
     let page = privacy_requests(
         &Role("a5requests:administrator"),
         Requests::Export,
+        &RequestsArgs::default(),
         &request,
     );
     assert!(page.is_none());
+    assert!(RequestsArgs::parse("action=delete&request_id[]=861").is_none());
+    assert!(RequestsArgs::parse("s[]=x").is_none());
 }

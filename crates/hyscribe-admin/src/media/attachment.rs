@@ -353,7 +353,7 @@ fn human_readable_duration(duration: &Value) -> String {
     let digits = |part: &str, sixty: bool| {
         !part.is_empty()
             && part.bytes().all(|b| b.is_ascii_digit())
-            && (!sixty || part.len() == 1 || part.len() == 2 && part.as_bytes()[0] < b'6')
+            && (!sixty || part.len() == 1 || part.len() == 2 && part < "6")
     };
     let valid = match parts[..] {
         [hour, minute, second] => {
@@ -370,10 +370,9 @@ fn human_readable_duration(duration: &Value) -> String {
         ("minute", "minutes"),
         ("second", "seconds"),
     ];
-    let units = &units[3 - parts.len()..];
     parts
         .iter()
-        .zip(units)
+        .zip(units.iter().skip(3 - parts.len()))
         .map(|(part, (one, many))| {
             let n = Value::String(part.as_bytes().to_vec()).to_int();
             format!("{n} {}", if n == 1 { one } else { many })
@@ -550,8 +549,8 @@ fn sample_permalink(
     let name = text(&urldecode(&unique_slug(site, post)?));
     let chars: Vec<char> = name.chars().collect();
     let abridged = if chars.len() > 34 {
-        let start: String = chars[..16].iter().collect();
-        let end: String = chars[chars.len() - 16..].iter().collect();
+        let start: String = chars.iter().take(16).collect();
+        let end: String = chars.iter().skip(chars.len() - 16).collect();
         format!("{start}&hellip;{end}")
     } else {
         name.clone()

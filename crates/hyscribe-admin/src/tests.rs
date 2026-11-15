@@ -225,6 +225,11 @@ impl Role {
         self.variant().starts_with("a8lock") || self.variant() == "g9attach" || self.j9_media()
     }
 
+    /// A variant of `reference/privacy-requests/golden.sh`, over its content.
+    fn j9_requests(&self) -> bool {
+        ["j9req", "j9hidden", "j9pp"].contains(&self.variant())
+    }
+
     /// A `j9` variant of `reference/attachment-edit/golden.sh`, all of
     /// which hold user 2's lock.
     fn j9_media(&self) -> bool {
@@ -550,6 +555,9 @@ impl Role {
             return crate::media::content::posts();
         }
         let mut posts = crate::posts::content::posts(self.listing(), self.variant() == "empty");
+        if self.j9_requests() {
+            posts.extend(crate::tools::content::posts());
+        }
         if self.a8() {
             posts.extend(crate::media::attachment::content::posts());
             posts.extend(crate::media::attachment::content::unported());
@@ -803,6 +811,22 @@ impl PageSite for Role {
             };
             return Some(value.to_vec());
         }
+        if matches!(self.variant(), "j9hidden" | "j9pp") {
+            let value: &[u8] = match (self.variant(), name) {
+                (
+                    "j9hidden",
+                    "manageexport-personal-datacolumnshidden"
+                    | "manageerase-personal-datacolumnshidden",
+                ) => b"a:2:{i:0;s:6:\"status\";i:1;s:10:\"next_steps\";}",
+                (
+                    "j9pp",
+                    "export_personal_data_requests_per_page"
+                    | "remove_personal_data_requests_per_page",
+                ) => b"2",
+                _ => return None,
+            };
+            return Some(value.to_vec());
+        }
         if self.variant() == "a5hidden" {
             let value: &[u8] = match name {
                 "manageexport-personal-datacolumnshidden" => b"a:1:{i:0;s:6:\"status\";}",
@@ -1021,6 +1045,23 @@ impl crate::tools::ToolsSite for Role {
         } else {
             vec![1]
         }
+    }
+    fn request_counts(&self, action: &str) -> Vec<(String, u64)> {
+        let mut counts: Vec<(String, u64)> = Vec::new();
+        let requests = self
+            .posts()
+            .into_iter()
+            .filter(|post| post.post_type == "user_request" && post.name == action.as_bytes());
+        for request in requests {
+            match counts
+                .iter_mut()
+                .find(|(status, _)| *status == request.status)
+            {
+                Some((_, count)) => *count += 1,
+                None => counts.push((request.status, 1)),
+            }
+        }
+        counts
     }
 }
 
@@ -1549,6 +1590,9 @@ impl crate::posts::PostsSite for Role {
         if self.a8() {
             return crate::media::attachment::content::meta(post.id, key);
         }
+        if self.j9_requests() {
+            return crate::tools::content::meta(post.id, key);
+        }
         // The edit locks `reference/posts-list/golden.sh` adds.
         let lock: &[u8] = match (self.variant(), post.id, key) {
             ("h9locks", 301 | 307, "_edit_lock") => b"9999999999:2",
@@ -1631,6 +1675,9 @@ impl crate::posts::PostsSite for Role {
                 ..hyscribe_model::Post::default()
             };
             return (vec![orphan], 1);
+        }
+        if query.post_types == ["user_request"] {
+            return crate::tools::content::list(self.posts(), query);
         }
         if query.post_types == ["attachment"] {
             MEDIA_QUERIES.with_borrow_mut(|queries| queries.push(query.clone()));

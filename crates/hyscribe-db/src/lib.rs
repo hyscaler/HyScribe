@@ -656,6 +656,22 @@ impl Db {
             );
             sql.bind(Bind::Int(author));
         }
+        self.counts_by_status(sql).await
+    }
+
+    /// `WP_Privacy_Requests_Table::get_request_counts()`: the personal data
+    /// requests of `action` of each status.
+    pub async fn request_counts(&self, action: &str) -> Result<Vec<(String, u64)>, DbError> {
+        let mut sql = Sql::new(
+            "SELECT post_status, COUNT(*) AS num_posts FROM {prefix}posts \
+             WHERE post_type = 'user_request' AND post_name = ?",
+        );
+        sql.bind(Bind::Text(action.into()));
+        self.counts_by_status(sql).await
+    }
+
+    /// The statuses and counts `sql` selects, grouped by status.
+    async fn counts_by_status(&self, mut sql: Sql) -> Result<Vec<(String, u64)>, DbError> {
         sql.push(" GROUP BY post_status");
         let rows = sql
             .query(&self.prefix)

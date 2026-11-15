@@ -37,7 +37,7 @@ cleanup() {
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
   if [ "$TTD" != wordpress_ttd ]; then
     echo "DELETE FROM wp_users WHERE ID IN (2, 3); DELETE FROM wp_usermeta WHERE umeta_id BETWEEN 801 AND 806;
-      DELETE FROM wp_posts WHERE ID BETWEEN 801 AND 816; DELETE FROM wp_postmeta WHERE meta_id BETWEEN 801 AND 824;
+      DELETE FROM wp_posts WHERE ID BETWEEN 801 AND 831; DELETE FROM wp_postmeta WHERE meta_id BETWEEN 801 AND 854;
       DELETE FROM wp_comments WHERE comment_ID = 801;" | sql
   fi
 }
@@ -48,9 +48,10 @@ if [ "$TTD" = wordpress_ttd ]; then
   ids="611 1692 827 1045 1686"
 else
   sql < "$ROOT/reference/attachment-edit/content.sql"
-  ids="801 802 803 805 807 808 810 811 812 813 815"
+  ids="801 802 803 805 807 808 810 811 812 813 815 817 818 819 820 821 822 823 824 825 826 828 829 830"
 fi
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce meta-box-order closedpostboxes
+  media-form media-send-to-editor set-attachment-thumbnail
   samplepermalink get-comments replyto-comment internal-linking fetch-list-WP_Post_Comments_List_Table"
 for id in $ids; do
   actions="$actions update-post_$id image_editor-$id delete-post_$id lock-post_$id post_preview_$id"
@@ -62,10 +63,10 @@ done
 # how the description is escaped.
 agent() {
   case "$1" in
-    a8lockchrome | a8locknorich) echo 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36' ;;
+    a8lockchrome | a8locknorich | j9lockchrome) echo 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36' ;;
     a8lockfirefox) echo 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0' ;;
     a8locksafari) echo 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15' ;;
-    a8lockiphone) echo 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1' ;;
+    a8lockiphone | j9lockiphone) echo 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1' ;;
     a8lockoldiphone) echo 'Mozilla/5.0 (iPhone; U; CPU iPhone OS 4_0 like Mac OS X) AppleWebKit/532.9 (KHTML, like Gecko) Mobile/8A293 Safari/6531.22.7' ;;
     a8lockedge) echo 'Mozilla/5.0 (Windows NT 10.0) Edg/140.0' ;;
     a8lockopera) echo 'Opera/9.80 (X11; Linux x86_64) Presto/2.12.388 Version/12.16' ;;
@@ -129,5 +130,26 @@ else
     record a8lock "post.php?post=801&action=edit&$query" administrator
   done
   record a8lock 'post.php?action=edit&post=802' administrator
+  for id in 817 818 819 820 821 825; do
+    record j9lock "post.php?post=$id&action=edit" administrator
+  done
+  for role in editor author; do
+    record j9lock 'post.php?post=817&action=edit' "$role"
+  done
+  record j9lock 'post.php?post=818&action=edit' editor
+  record j9lockchrome 'post.php?post=818&action=edit' administrator
+  record j9lockiphone 'post.php?post=817&action=edit' administrator
+  record j9noupload 'post.php?post=818&action=edit' administrator
+  for id in 801 802 803 805 807 808 811 812 813 817 818 822 823 824 826 828 829 830; do
+    record j9pretty "post.php?post=$id&action=edit" administrator
+  done
+  for role in editor author contributor; do
+    record j9pretty 'post.php?post=801&action=edit' "$role"
+  done
+  record j9pretty 'post.php?post=811&action=edit' contributor
+  record j9prettynoread 'post.php?post=801&action=edit' administrator
+  record j9prettynoread 'post.php?post=811&action=edit' administrator
+  record j9prettynoread 'post.php?post=803&action=edit' administrator
+  record j9front 'post.php?post=802&action=edit' administrator
 fi
 wc -l "$OUT"

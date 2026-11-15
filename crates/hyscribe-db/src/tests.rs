@@ -62,6 +62,9 @@ fn the_prefix_goes_into_sql() {
 #[tokio::test]
 async fn reads_the_default_install() {
     let db = fixture().await;
+    // Another post's slug, in any case, as `wp_unique_post_slug()` checks it.
+    assert!(db.post_name_taken("Hello-World", 2).await.unwrap());
+    assert!(!db.post_name_taken("hello-world", 1).await.unwrap());
     let options = db.autoload_options().await.unwrap();
     assert!(
         options
@@ -571,6 +574,7 @@ async fn every_query() -> Vec<DbError> {
         .await
         .unwrap_err(),
         db.status_counts("post", None).await.unwrap_err(),
+        db.post_name_taken("hello-world", 2).await.unwrap_err(),
         db.own_posts("post", 1).await.unwrap_err(),
         db.sticky_count("post", &[1]).await.unwrap_err(),
         db.post_months("post", true).await.unwrap_err(),
@@ -1634,6 +1638,17 @@ async fn posts_list_reads() {
     let counts: Vec<(&str, u64)> = counts.iter().map(|(s, n)| (s.as_str(), *n)).collect();
     assert_eq!(counts, [("draft", 1), ("future", 1), ("publish", 57)]);
     assert_eq!(ttd.status_counts("page", Some(2)).await.unwrap().len(), 2);
+    let named = ttd
+        .named_status_counts("post", "hello-world")
+        .await
+        .unwrap();
+    assert_eq!(named, [("publish".to_string(), 1)]);
+    assert!(
+        ttd.named_status_counts("page", "hello-world")
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(ttd.own_posts("post", 2).await.unwrap(), 39);
     assert_eq!(ttd.sticky_count("post", &[1241, 155]).await.unwrap(), 1);
     let months = ttd.post_months("post", false).await.unwrap();

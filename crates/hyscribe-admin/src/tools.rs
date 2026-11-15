@@ -5,13 +5,16 @@
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
 use hyscribe_model::Term;
+use hyscribe_phpser::{is_empty_string, remove_query_arg};
 use hyscribe_render::date::MONTHS;
 use hyscribe_render::formatting::wptexturize;
 
 use crate::admin_bar::BarSite;
 use crate::appearance::updates_settings;
-use crate::list_table::wp_referer_field;
-use crate::list_table::{Column, Order, Sort, column_headers, fill, screen_options};
+use crate::list_table::{
+    Column, Order, Sort, bulk_actions, column_headers, fill, pagenum, pagination, screen_options,
+    search_box, wp_referer_field,
+};
 use crate::menu::{Screen, link};
 use crate::page::{HelpTab, Page, PageSite, Request, admin_page};
 use crate::posts::{Answer, PostsSite, hidden_columns, per_page};
@@ -46,10 +49,12 @@ const ERASE_DATA: &str = "<p>WordPress collects (but <em>never</em> publishes) a
 
 const ERASE_PLUGINS: &str = "<p>Many plugins may collect or store personal data either in the WordPress database or remotely. Any Erase Personal Data request should delete data from plugins as well.</p><p>If you are not sure, check the plugin documentation or contact the plugin author to see if the plugin collects data and if it supports the Data Eraser tool. This information may be available in the <a href=\"%guide%\">Privacy Policy Guide</a>.</p><p>If you are a plugin author, you can learn more about <a href=\"https://developer.wordpress.org/plugins/privacy/adding-the-personal-data-eraser-to-your-plugin/\">how to add the Personal Data Eraser to a plugin</a>.</p>";
 
-/// What the Export screen asks of the site beyond its users.
+/// What the Tools screens ask of the site beyond its users.
 pub trait ToolsSite: UsersSite {
     /// The IDs of the authors of posts of `post_type`, of any status.
     fn post_authors(&self, post_type: &str) -> Vec<u64>;
+    /// The posts of `post_type` named `name` of each status.
+    fn named_status_counts(&self, post_type: &str, name: &str) -> Vec<(String, u64)>;
 }
 
 /// A screen under Tools: its file, title, help and markup.
@@ -280,14 +285,15 @@ pub enum Requests {
     Erase,
 }
 
-/// The screen of `requests` while there is no request, `None` once there
-/// is one, as their list is not ported.
+/// The screen of `requests` with `args`; `None` for a request of another
+/// status, or a pending one over a day old, which PHP marks failed.
 pub fn privacy_requests(
-    site: &dyn PostsSite,
+    site: &dyn ToolsSite,
     requests: Requests,
+    args: &RequestsArgs,
     request: &Request,
 ) -> Option<Answer> {
-    if !site.status_counts("user_request", None).is_empty() {
+    if requests::stale(site) {
         return None;
     }
     let (file, title, action, template, help) = match requests {
@@ -310,10 +316,10 @@ pub fn privacy_requests(
     let screen = file.trim_end_matches(".php");
     let hidden = hidden_columns(site, screen);
     let hidden: Vec<&str> = hidden.iter().map(String::as_str).collect();
-    let sort = |orderby| {
+    let sort = |orderby, desc_first| {
         Some(Sort {
             orderby,
-            desc_first: false,
+            desc_first,
             abbr: "",
             caption: "",
             initial: None,
@@ -327,37 +333,119 @@ pub fn privacy_requests(
     };
     let mut columns = [
         column("cb", "", None),
-        column("email", "Requester", sort("requester")),
+        column("email", "Requester", sort("requester", false)),
         column("status", "Status", None),
-        column("created_timestamp", "Requested", sort("requested")),
+        column(
+            "created_timestamp",
+            "Requested",
+            sort("requested", args.orderby.is_some()),
+        ),
         column("next_steps", "Next steps", None),
     ];
     // The Requester column holds the row actions, yet Screen Options can
     // hide it.
     let option = format!("{action}_requests_per_page");
+    let per_page = per_page(site, &option, 20);
     let options = screen_options(
         &columns,
         &hidden.iter().map(|h| (*h).to_string()).collect::<Vec<_>>(),
         &option,
-        per_page(site, &option, 20),
+        per_page,
         "",
         site.nonce("screen-options-nonce"),
     );
     columns[1].primary = true;
-    let headers = |counter, with_id| {
-        column_headers(&columns, &hidden, &Order::default(), &url, counter, with_id)
-    };
+    let listing = requests::listing(site, action, args, per_page);
+    let has_items = !listing.items.is_empty();
+    let rows = requests::rows(site, requests, file, (&columns, &hidden), &listing.items)?;
     let shown = columns.iter().filter(|c| !hidden.contains(&c.key)).count();
+    let rows = if has_items {
+        rows
+    } else {
+        format!(
+            "<tr class=\"no-items\"><td class=\"colspanchange\" colspan=\"{shown}\">No items found.</td></tr>"
+        )
+    };
+    let order = Order {
+        orderby: args.orderby.as_deref(),
+        desc: args.order.as_deref() == Some("desc"),
+    };
+    let unpaged = text(&remove_query_arg(&[b"paged"], request.canonical.as_bytes()));
+    let headers =
+        |counter, with_id| column_headers(&columns, &hidden, &order, &unpaged, counter, with_id);
+    let heading = match requests {
+        Requests::Export => "Export personal data list navigation",
+        Requests::Erase => "Erase personal data list navigation",
+    };
+    let pages = listing.total.div_ceil(per_page);
+    let current = pagenum(args.paged.as_deref()).min(pages).max(1);
+    let paging = |which| {
+        pagination(
+            which,
+            heading,
+            listing.total,
+            pages,
+            current,
+            request.canonical,
+        )
+    };
+    let bulk = [
+        ("resend", "Resend confirmation requests"),
+        ("complete", "Mark requests as completed"),
+        ("delete", "Delete requests"),
+    ];
+    let searched = args
+        .search
+        .as_deref()
+        .is_some_and(|s| !is_empty_string(s.as_bytes()));
+    let search = if !searched && !has_items {
+        String::new()
+    } else {
+        let order = [
+            ("orderby", args.orderby.as_deref().unwrap_or_default()),
+            ("order", args.order.as_deref().unwrap_or_default()),
+        ];
+        search_box(
+            "Search Requests",
+            "requests",
+            args.search.as_deref().unwrap_or_default(),
+            &order,
+        )
+    };
+    let bottom = if has_items {
+        format!(
+            "\t\t\t<div class=\"tablenav bottom\">\n\n\t\t\t\t<div class=\"alignleft actions bulkactions\">\n\t\t\t{}\t\t</div>\n\t\t{}\n\t\t<br class=\"clear\" />\n\t</div>\n",
+            bulk_actions("bottom", &bulk),
+            paging("bottom")
+        )
+    } else {
+        String::new()
+    };
     let content = fill(
         template,
         &[
             ("url", text(&esc_url(url.as_bytes()))),
             ("request_nonce", site.nonce("personal-data-request")),
+            ("views", requests::views(site, file, &listing)),
+            ("search", search),
+            ("filter_status", esc_attr(listing.filter.as_bytes())),
+            (
+                "orderby",
+                esc_attr(RequestsArgs::sanitized(args.orderby.as_ref()).as_bytes()),
+            ),
+            (
+                "order",
+                esc_attr(RequestsArgs::sanitized(args.order.as_ref()).as_bytes()),
+            ),
             ("bulk_nonce", site.nonce("bulk-privacy_requests")),
             ("referer", wp_referer_field(request.uri)),
+            ("bulk_class", if has_items { "" } else { " hidden" }.into()),
+            ("bulk_top", bulk_actions("top", &bulk)),
+            ("pages_top", paging("top")),
             ("head", headers(1, true)),
+            ("rows", rows),
             ("foot", headers(2, false)),
-            ("colspan", shown.to_string()),
+            ("bottom", bottom),
         ],
     );
     let guide = esc_url(BarSite::admin_url(site, "options-privacy.php?tab=policyguide").as_bytes());
@@ -397,5 +485,11 @@ pub fn privacy_requests(
     Some(Answer::from_page(tool_page(site, &tool, request)))
 }
 
+mod requests;
+
+pub use requests::RequestsArgs;
+
+#[cfg(test)]
+pub(crate) mod content;
 #[cfg(test)]
 mod tests;

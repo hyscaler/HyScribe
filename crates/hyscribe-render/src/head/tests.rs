@@ -586,12 +586,16 @@ fn the_admin_import_map_follows_imports() {
 }
 
 /// The admin's font faces: the theme's, then every style variation's, as
-/// `reference/admin-page/golden.sh` records them.
+/// `reference/admin-page/golden.sh` records them; a missing child's only
+/// the variations', as `reference/appearance/golden.sh` does.
 #[test]
 fn the_admin_font_faces() {
-    let faces = crate::theme::twentytwentyfive().admin_font_faces("http://h");
-    let faces = String::from_utf8(faces).unwrap();
-    let (theme, variations) = faces.split_once("</style>").unwrap();
+    let theme = crate::theme::twentytwentyfive();
+    let faces = String::from_utf8(theme.admin_font_faces("http://h", true)).unwrap();
+    let (theme_faces, variations) = faces.split_once("</style>").unwrap();
+    let child = theme.admin_font_faces("http://h", false);
+    assert_eq!(String::from_utf8(child).unwrap(), variations.trim_start());
+    let theme = theme_faces;
     assert_eq!(theme.matches("@font-face").count(), 2);
     assert_eq!(variations.matches("@font-face").count(), 192);
     assert!(variations.trim_end().ends_with(

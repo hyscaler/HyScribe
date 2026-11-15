@@ -585,6 +585,7 @@ dependencies = [
  "hyscribe-phpser",
  "hyscribe-render",
  "hyscribe-rest",
+ "hyscribe-write",
  "tokio",
 ]
 
@@ -629,6 +630,19 @@ name = "hyscribe-theme-json"
 version = "0.1.0"
 dependencies = [
  "hyscribe-phpser",
+]
+
+[[package]]
+name = "hyscribe-write"
+version = "0.1.0"
+dependencies = [
+ "hyscribe-auth",
+ "hyscribe-db",
+ "hyscribe-html",
+ "hyscribe-kses",
+ "hyscribe-model",
+ "hyscribe-phpser",
+ "hyscribe-render",
 ]
 
 [[package]]

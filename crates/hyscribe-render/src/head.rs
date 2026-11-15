@@ -463,14 +463,16 @@ impl Head<'_> {
 }
 
 impl Theme {
-    /// `wp_print_font_faces()` and `wp_print_font_faces_from_style_variations()`,
-    /// which the admin prints after its styles.
-    pub fn admin_font_faces(&self, siteurl: &str) -> Vec<u8> {
+    /// `wp_print_font_faces()` `with_theme` (not for a missing child), then
+    /// `wp_print_font_faces_from_style_variations()`, as the admin prints.
+    pub fn admin_font_faces(&self, siteurl: &str, with_theme: bool) -> Vec<u8> {
         let theme_uri = format!("{siteurl}/wp-content/themes/{}", self.slug);
-        let mut out = font_faces(
-            self.global.setting(&["typography", "fontFamilies"]),
-            &theme_uri,
-        );
+        let families = self.global.setting(&["typography", "fontFamilies"]);
+        let mut out = if with_theme {
+            font_faces(families, &theme_uri)
+        } else {
+            Vec::new()
+        };
         let mut fonts = Vec::new();
         for variation in crate::theme::style_variations() {
             let families = variation

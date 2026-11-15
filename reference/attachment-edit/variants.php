@@ -9,9 +9,12 @@
 // reference/attachment-edit/content.sql does not; a8locklayout gives the
 // user screen options and sorted meta boxes; a8locknorich turns rich editing
 // off; a8locknodelete takes away deleting attachment 801, a8locknoread
-// reading it.
+// reading it. The j9 variants hold user 2's lock too: j9pretty and
+// j9prettynoread turn pretty permalinks on, j9prettynoread takes away
+// reading attachments 801, 803 and 811, j9noupload uploading files, and j9front makes
+// attachment 802 the page on the front.
 $hyscribe_variant = $_COOKIE['hyscribe_variant'] ?? '';
-if ( str_starts_with( $hyscribe_variant, 'a8lock' ) ) {
+if ( str_starts_with( $hyscribe_variant, 'a8lock' ) || str_starts_with( $hyscribe_variant, 'j9' ) ) {
 	$hyscribe_holder = 'a8lock3' === $hyscribe_variant ? 3 : 2;
 	add_filter(
 		'get_post_metadata',
@@ -35,11 +38,11 @@ if ( 'a8locklayout' === $hyscribe_variant ) {
 		)
 	);
 }
-foreach ( array( 'a8locknodelete' => 'delete_post', 'a8locknoread' => 'read_post' ) as $hyscribe_name => $hyscribe_cap ) {
+foreach ( array( 'a8locknodelete' => 'delete_post', 'a8locknoread' => 'read_post', 'j9prettynoread' => 'read_post' ) as $hyscribe_name => $hyscribe_cap ) {
 	if ( $hyscribe_name === $hyscribe_variant ) {
 		add_filter(
 			'map_meta_cap',
-			fn( $caps, $cap, $user, $args ) => $hyscribe_cap === $cap && 801 === (int) ( $args[0] ?? 0 ) ? array( 'do_not_allow' ) : $caps,
+			fn( $caps, $cap, $user, $args ) => $hyscribe_cap === $cap && in_array( (int) ( $args[0] ?? 0 ), 'j9prettynoread' === $hyscribe_name ? array( 801, 803, 811 ) : array( 801 ), true ) ? array( 'do_not_allow' ) : $caps,
 			10,
 			4
 		);
@@ -47,4 +50,21 @@ foreach ( array( 'a8locknodelete' => 'delete_post', 'a8locknoread' => 'read_post
 }
 if ( 'a8locknorich' === $hyscribe_variant ) {
 	add_filter( 'get_user_option_rich_editing', fn() => 'false' );
+}
+if ( in_array( $hyscribe_variant, array( 'j9pretty', 'j9prettynoread' ), true ) ) {
+	add_filter( 'pre_option_permalink_structure', fn() => '/%postname%/' );
+}
+if ( 'j9front' === $hyscribe_variant ) {
+	add_filter( 'pre_option_show_on_front', fn() => 'page' );
+	add_filter( 'pre_option_page_on_front', fn() => '802' );
+}
+if ( 'j9noupload' === $hyscribe_variant ) {
+	add_filter(
+		'user_has_cap',
+		function ( $allcaps ) {
+			$allcaps['upload_files'] = false;
+			return $allcaps;
+		},
+		1
+	);
 }

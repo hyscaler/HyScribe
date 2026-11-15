@@ -3,17 +3,24 @@
 //! An attachment's edit screen, `post.php?post=N&action=edit`:
 //! `edit-form-advanced.php` with `edit_form_image_editor()` and meta boxes.
 
+use std::cell::Cell;
+
 use hyscribe_kses::{esc_attr, esc_html, esc_textarea, esc_url};
 use hyscribe_model::{Post, User};
-use hyscribe_phpser::{Value, add_query_arg, is_empty_string, wp_basename};
+use hyscribe_phpser::{Float, Value, add_query_arg, is_empty_string, urldecode, wp_basename};
 use hyscribe_render::attachment::is_image;
+use hyscribe_render::attachment::prepend::{
+    audio_shortcode, embedded, is_audio, is_video, video_shortcode,
+};
 use hyscribe_render::date::{self, Zone};
+use hyscribe_render::link::front_page;
+use hyscribe_render::permalinks::Permalinks;
 use hyscribe_render::post::admin_title;
 use hyscribe_render::template::replace;
 use hyscribe_render::user_avatar;
 
-use super::MediaSite;
-use super::image::{attachment_url, image_src, metadata};
+use super::image::{attachment_image, attachment_url, image_src, metadata};
+use super::{MEDIA_SCRIPTS, MEDIA_STYLES, MediaSite, enqueue_media};
 use crate::admin_bar::{BarSite, Browser};
 use crate::assets::cookie_path;
 use crate::comments::{CommentsSite, comment_reply, editor_css, editor_footer};
@@ -65,6 +72,35 @@ const HIDDEN: [&str; 8] = [
     "authordiv",
     "revisionsdiv",
 ];
+
+/// What `wp_attachment_is()` finds a file to be, in the order the screen
+/// asks.
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    Image,
+    Audio,
+    Video,
+    File,
+}
+
+impl Kind {
+    fn of(file: &[u8], mime: &str) -> Kind {
+        if is_image(file, mime) {
+            Kind::Image
+        } else if is_audio(file, mime) {
+            Kind::Audio
+        } else if is_video(file, mime) {
+            Kind::Video
+        } else {
+            Kind::File
+        }
+    }
+
+    /// Whether the screen has featured images and the media library.
+    fn plays(self) -> bool {
+        matches!(self, Kind::Audio | Kind::Video)
+    }
+}
 
 /// What the screen asks of the site: the media's, the comments' and the
 /// users'.
@@ -186,15 +222,39 @@ fn size_format(bytes: i64) -> String {
 }
 
 /// The attachment's preview: its image, with the image editor's button
-/// when the editor supports its type, or its type's icon.
-fn preview(site: &dyn AttachmentSite, post: &Post, image: bool) -> String {
+/// when the editor supports its type, its player, or its type's icon; and
+/// whether a player plays it.
+fn preview(site: &dyn AttachmentSite, post: &Post, kind: Kind, meta: &Value) -> (String, bool) {
     let id = post.id;
+    let url = attachment_url(site, post).unwrap_or_default();
+    let player = match kind {
+        Kind::Audio => Some(audio_shortcode(id, &url, &Cell::new(0)).ok_or("audio")),
+        Kind::Video => {
+            let side = |key| {
+                meta.get_str(key)
+                    .filter(|value| !value.is_empty())
+                    .map_or(0, Value::to_int)
+            };
+            let poster = featured(site, post)
+                .and_then(|thumbnail| attachment_url(site, &thumbnail))
+                .unwrap_or_default();
+            let size = (side("width"), side("height"));
+            Some(video_shortcode(id, &url, size, &poster).ok_or("video"))
+        }
+        Kind::Image | Kind::File => None,
+    };
+    if let Some(player) = player {
+        let played = player.is_ok();
+        let html = player.unwrap_or_else(|kind| embedded(kind, &url));
+        return (format!("\t{}", String::from_utf8_lossy(&html)), played);
+    }
     let (src, _, _) = image_src(site, post, (900, 450));
     let src = String::from_utf8_lossy(&src).into_owned();
-    if !image {
-        return format!(
-            "\t\t\t<div class=\"wp_attachment_image wp-clearfix\" id=\"media-head-{id}\">\n\t\t\t<p id=\"thumbnail-head-{id}\">\n\t\t\t\t<img class=\"thumbnail\" src=\"{src}\" style=\"max-width:100%\" alt=\"\" />\n\t\t\t</p>\n\t\t</div>\n"
+    if kind == Kind::File {
+        let html = format!(
+            "\t\t\t<div class=\"wp_attachment_image wp-clearfix\" id=\"media-head-{id}\">\n\t\t\t<p id=\"thumbnail-head-{id}\">\n\t\t\t\t<img class=\"thumbnail\" src=\"{src}\" style=\"max-width:100%\" alt=\"\" />\n\t\t\t</p>\n\t\t</div>\n\t\t"
         );
+        return (html, false);
     }
     let button = if EDITABLE.contains(&post.mime_type.as_str()) {
         format!(
@@ -204,38 +264,322 @@ fn preview(site: &dyn AttachmentSite, post: &Post, image: bool) -> String {
     } else {
         String::new()
     };
-    format!(
-        "\t\t\t<div class=\"imgedit-response\" id=\"imgedit-response-{id}\"></div>\n\n\t\t<div class=\"wp_attachment_image wp-clearfix\" id=\"media-head-{id}\">\n\t\t\t<p id=\"thumbnail-head-{id}\"><img class=\"thumbnail\" src=\"{src}\" style=\"max-width:100%\" alt=\"\" /></p>\n\t\t\t<p>{button}</p>\n\t\t</div>\n\t\t<div style=\"display:none\" class=\"image-editor\" id=\"image-editor-{id}\">\n\t\t\t\t</div>\n"
-    )
+    let html = format!(
+        "\t\t\t<div class=\"imgedit-response\" id=\"imgedit-response-{id}\"></div>\n\n\t\t<div class=\"wp_attachment_image wp-clearfix\" id=\"media-head-{id}\">\n\t\t\t<p id=\"thumbnail-head-{id}\"><img class=\"thumbnail\" src=\"{src}\" style=\"max-width:100%\" alt=\"\" /></p>\n\t\t\t<p>{button}</p>\n\t\t</div>\n\t\t<div style=\"display:none\" class=\"image-editor\" id=\"image-editor-{id}\">\n\t\t\t\t</div>\n\t\t"
+    );
+    (html, false)
 }
 
-/// `get_sample_permalink_html()` under plain permalinks.
-fn sample_permalink(site: &dyn AttachmentSite, post: &Post) -> String {
-    let permalink = site.permalink(post);
-    let mut html = String::from("<strong>Permalink:</strong>\n");
-    if site.can_post("read_post", post) {
-        let (link, target) = if is_empty_string(&post.name) {
-            let preview = add_query_arg(&[(b"preview", Some(b"true"))], permalink.as_bytes());
-            let preview = String::from_utf8_lossy(&preview).into_owned();
-            (preview, format!(" target='wp-preview-{}'", post.id))
-        } else {
-            (permalink, String::new())
+/// The stored `_thumbnail_id`, unless empty.
+fn thumbnail_id(site: &dyn AttachmentSite, post: &Post) -> Option<Vec<u8>> {
+    let stored = site.meta(post, "_thumbnail_id")?;
+    (!Value::String(stored.clone()).is_empty()).then_some(stored)
+}
+
+/// The post `get_post_thumbnail_id()` names, if there is one.
+fn featured(site: &dyn AttachmentSite, post: &Post) -> Option<Post> {
+    let thumbnail = Value::String(thumbnail_id(site, post)?).to_int();
+    u64::try_from(thumbnail).ok().and_then(|id| site.post(id))
+}
+
+/// Whether `id` is the page on the front.
+fn on_front(site: &dyn AttachmentSite, id: u64) -> bool {
+    let option = |name| site.option(name).unwrap_or_default();
+    front_page(&option("show_on_front"), &option("page_on_front")) == Some(id)
+}
+
+/// A song's or a video's type, as `preg_match( '#^(audio|video)/#' )` finds it.
+fn plays_by_type(post: &Post) -> bool {
+    ["audio/", "video/"]
+        .iter()
+        .any(|group| post.mime_type.starts_with(group))
+}
+
+/// `post_thumbnail_meta_box()`, `None` for a featured file that is not an
+/// image, whose image is not ported.
+fn featured_box(site: &dyn AttachmentSite, post: &Post) -> Option<String> {
+    let link = esc_url(
+        BarSite::admin_url(
+            site,
+            &format!(
+                "media-upload.php?post_id={}&type=image&TB_iframe=1",
+                post.id
+            ),
+        )
+        .as_bytes(),
+    );
+    let link = String::from_utf8_lossy(&link);
+    let image = match featured(site, post) {
+        Some(thumbnail) if thumbnail.post_type == "attachment" => {
+            let file = site
+                .meta(&thumbnail, "_wp_attached_file")
+                .unwrap_or_default();
+            if !is_image(&file, &thumbnail.mime_type) {
+                return None;
+            }
+            Some(attachment_image(site, &thumbnail, (266, 266)))
+        }
+        _ => None,
+    };
+    let anchor = |described: &str, text: &str| {
+        format!(
+            "<p class=\"hide-if-no-js\"><a href=\"{link}\" id=\"set-post-thumbnail\"{described} class=\"thickbox\" role=\"button\" aria-haspopup=\"dialog\" aria-controls=\"wp-media-modal\">{text}</a></p>"
+        )
+    };
+    let mut html = match image {
+        Some(image) => format!(
+            "{}<p class=\"hide-if-no-js howto\" id=\"set-post-thumbnail-desc\">Click the image to edit or update</p><p class=\"hide-if-no-js\"><a href=\"#\" id=\"remove-post-thumbnail\" role=\"button\">Remove featured image</a></p>",
+            anchor(" aria-describedby=\"set-post-thumbnail-desc\"", &image)
+        ),
+        None => anchor("", "Set featured image"),
+    };
+    let value = thumbnail_id(site, post).unwrap_or(b"-1".to_vec());
+    html.push_str(&format!(
+        "<input type=\"hidden\" id=\"_thumbnail_id\" name=\"_thumbnail_id\" value=\"{}\" />",
+        esc_attr(&value)
+    ));
+    Some(html)
+}
+
+/// `attachment_id3_data_meta_box()`.
+fn id3_box(meta: &Value) -> String {
+    [("artist", "Artist"), ("album", "Album")]
+        .iter()
+        .map(|(key, label)| {
+            let value = meta.get_str(key).filter(|value| !value.is_empty());
+            let value = value.map(Value::to_php_string).unwrap_or_default();
+            format!(
+                "\t<p>\n\t\t<label for=\"title\">{label}</label><br />\n\t\t<input type=\"text\" name=\"id3_{key}\" id=\"id3_{key}\" class=\"large-text\" value=\"{}\" />\n\t</p>\n\t\t",
+                esc_attr(&value)
+            )
+        })
+        .collect()
+}
+
+/// `human_readable_duration()`: `[H:]M:S` in words, empty for any other.
+fn human_readable_duration(duration: &Value) -> String {
+    let Value::String(duration) = duration else {
+        return String::new();
+    };
+    let duration = String::from_utf8_lossy(duration.trim_ascii());
+    let duration = duration.strip_prefix('-').unwrap_or(&duration);
+    let parts: Vec<&str> = duration.split(':').collect();
+    let digits = |part: &str, sixty: bool| {
+        !part.is_empty()
+            && part.bytes().all(|b| b.is_ascii_digit())
+            && (!sixty
+                || part.len() == 1
+                || part.len() == 2 && part.as_bytes().first() < Some(&b'6'))
+    };
+    let valid = match parts[..] {
+        [hour, minute, second] => {
+            digits(hour, false) && digits(minute, true) && digits(second, true)
+        }
+        [minute, second] => digits(minute, true) && digits(second, true),
+        _ => false,
+    };
+    if !valid {
+        return String::new();
+    }
+    let units = [
+        ("hour", "hours"),
+        ("minute", "minutes"),
+        ("second", "seconds"),
+    ];
+    parts
+        .iter()
+        .zip(units.iter().skip(3 - parts.len()))
+        .map(|(part, (one, many))| {
+            let n = Value::String(part.as_bytes().to_vec()).to_int();
+            format!("{n} {}", if n == 1 { one } else { many })
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// `attachment_submitbox_metadata()`'s length, bitrate and audio details
+/// of a song or video.
+fn media_details(meta: &Value) -> String {
+    let mut out = String::new();
+    for (key, label) in [("length_formatted", "Length:"), ("bitrate", "Bitrate:")] {
+        let Some(value) = meta.get_str(key).filter(|value| !value.is_empty()) else {
+            continue;
         };
-        let shown = hyscribe_phpser::urldecode(link.as_bytes());
-        html.push_str(&format!(
-            "<a id=\"sample-permalink\" href=\"{}\"{target}>{}</a>\n",
-            String::from_utf8_lossy(&esc_url(link.as_bytes())),
-            esc_html(&shown)
+        let shown = if key == "bitrate" {
+            let rate = Value::Float(Float::from_f64((value.to_float() / 1000.0).round()));
+            let rate = rate.to_php_string();
+            let mode = meta.get_str("bitrate_mode").filter(|mode| !mode.is_empty());
+            let mode = mode.map_or(String::new(), |mode| {
+                format!(" {}", esc_html(&mode.to_php_string()).to_ascii_uppercase())
+            });
+            format!("{}kb/s{mode}", String::from_utf8_lossy(&rate))
+        } else {
+            human_readable_duration(value)
+        };
+        out.push_str(&format!(
+            "\t\t\t<div class=\"misc-pub-section misc-pub-mime-meta misc-pub-{key}\">\n\t\t\t\t{label}\t\t\t\t<strong>\n\t\t\t\t{shown}\t\t\t\t</strong>\n\t\t\t</div>\n\t\t\t"
         ));
+    }
+    for (key, label) in [("dataformat", "Audio Format:"), ("codec", "Audio Codec:")] {
+        let value = meta
+            .get_path(&["audio", key])
+            .filter(|value| !value.is_empty());
+        if let Some(value) = value {
+            out.push_str(&format!(
+                "\t\t\t<div class=\"misc-pub-section misc-pub-audio misc-pub-{key}\">\n\t\t\t\t{label} <strong>{}</strong>\n\t\t\t</div>\n\t\t\t",
+                esc_html(&value.to_php_string())
+            ));
+        }
+    }
+    out
+}
+
+/// `get_permalink()` of an attachment's parent, `_get_page_link()` of a
+/// page; `None` for the page on the front, not ported.
+fn parent_link(site: &dyn AttachmentSite, parent: &Post) -> Option<String> {
+    if parent.post_type == "page" && on_front(site, parent.id) {
+        return None;
+    }
+    // A private parent of a shown attachment, which the user may read, has
+    // the link it would have published.
+    if parent.status == "private" {
+        let published = Post {
+            status: "publish".into(),
+            ..parent.clone()
+        };
+        return Some(site.permalink(&published));
+    }
+    Some(site.permalink(parent))
+}
+
+/// `get_attachment_link()` of an attachment of `status`, and the sample with
+/// `%postname%` left in; `None` where [`parent_link`] is, or under a file.
+fn attachment_links(
+    site: &dyn AttachmentSite,
+    post: &Post,
+    status: &str,
+) -> Option<(String, String)> {
+    let plain = site.permalink(post);
+    let structure = site.option("permalink_structure").unwrap_or_default();
+    if is_empty_string(&structure) {
+        return Some((plain.clone(), plain));
+    }
+    let parent = (post.parent != 0).then(|| site.post(post.parent)).flatten();
+    let attached = |parent: &Post| parent.id != post.id && parent.post_type == "attachment";
+    if parent.as_ref().is_some_and(attached) {
+        return None;
+    }
+    // `wp_force_plain_post_permalink()`, and a parent that is there.
+    let shown = status == "publish" || status == "private" && site.can_post("read_post", post);
+    let viewable = |parent: &Post| {
+        parent.id != post.id && ["post", "page"].contains(&parent.post_type.as_str())
+    };
+    let valid = post.parent == 0 || parent.as_ref().is_some_and(viewable);
+    if !shown || !valid {
+        return Some((plain.clone(), plain));
+    }
+    let parent_link = match parent {
+        Some(parent) => Some(parent_link(site, &parent)?),
+        None => None,
+    };
+    let option = |name| text(&site.option(name).unwrap_or_default());
+    let links = Permalinks::new(
+        &text(&structure),
+        &option("category_base"),
+        &option("tag_base"),
+    );
+    let home = BarSite::home_url(site);
+    let home = home.strip_suffix('/').unwrap_or(&home);
+    let link = |sample| {
+        let link = links.attachment_link(home, post, parent_link.as_deref(), sample);
+        link.unwrap_or_else(|| plain.clone())
+    };
+    Some((link(false), link(true)))
+}
+
+/// `wp_unique_post_slug()` of an attachment's slug: suffixed while another
+/// post has it; `None` where `_truncate_post_slug()` would cut it, not ported.
+fn unique_slug(site: &dyn AttachmentSite, post: &Post) -> Option<Vec<u8>> {
+    let slug = &post.name;
+    let reserved = ["feed", "rdf", "rss", "rss2", "atom", "embed"]
+        .iter()
+        .any(|name| name.as_bytes() == slug.as_slice());
+    if !reserved && !site.slug_taken(slug, post.id) {
+        return Some(slug.clone());
+    }
+    (2u64..)
+        .find_map(|n| {
+            let suffix = format!("-{n}");
+            if slug.len() + suffix.len() > 200 {
+                return Some(None);
+            }
+            let alt = [&slug[..], suffix.as_bytes()].concat();
+            (!site.slug_taken(&alt, post.id)).then_some(Some(alt))
+        })
+        .flatten()
+}
+
+/// `get_sample_permalink_html()` of the attachment's `view` and sample
+/// links; `None` where [`unique_slug`] is, or editable without a slug.
+fn sample_permalink(
+    site: &dyn AttachmentSite,
+    post: &Post,
+    (view, permalink): (&str, &str),
+) -> Option<String> {
+    let (view, target) = match site.can_post("read_post", post) {
+        false => (None, String::new()),
+        true if is_empty_string(&post.name) => {
+            let preview = add_query_arg(&[(b"preview", Some(b"true"))], view.as_bytes());
+            (
+                Some(text(&preview)),
+                format!(" target='wp-preview-{}'", post.id),
+            )
+        }
+        true => (Some(view.to_string()), String::new()),
+    };
+    let mut html = String::from("<strong>Permalink:</strong>\n");
+    if !permalink.contains("%postname%") {
+        match view {
+            Some(link) => html.push_str(&format!(
+                "<a id=\"sample-permalink\" href=\"{}\"{target}>{}</a>\n",
+                text(&esc_url(link.as_bytes())),
+                esc_html(&urldecode(link.as_bytes()))
+            )),
+            None => html.push_str(&format!(
+                "<span id=\"sample-permalink\">{permalink}</span>\n"
+            )),
+        }
+        let plain = site.option("permalink_structure").unwrap_or_default();
+        if is_empty_string(&plain) && site.can("manage_options") && !on_front(site, post.id) {
+            html.push_str("<span id=\"change-permalinks\"><a href=\"options-permalink\" class=\"button button-small\">Change Permalink Structure</a></span>\n");
+        }
+        return Some(html);
+    }
+    if is_empty_string(&post.name) {
+        return None;
+    }
+    let name = text(&urldecode(&unique_slug(site, post)?));
+    let chars: Vec<char> = name.chars().collect();
+    let abridged = if chars.len() > 34 {
+        let start: String = chars.iter().take(16).collect();
+        let end: String = chars.iter().skip(chars.len() - 16).collect();
+        format!("{start}&hellip;{end}")
     } else {
-        html.push_str(&format!(
-            "<span id=\"sample-permalink\">{permalink}</span>\n"
-        ));
-    }
-    if site.can("manage_options") {
-        html.push_str("<span id=\"change-permalinks\"><a href=\"options-permalink\" class=\"button button-small\">Change Permalink Structure</a></span>\n");
-    }
-    html
+        name.clone()
+    };
+    let display = esc_html(&urldecode(permalink.as_bytes())).replace(
+        "%postname%",
+        &format!(
+            "<span id=\"editable-post-name\">{}</span>",
+            esc_html(abridged.as_bytes())
+        ),
+    );
+    html.push_str(&format!(
+        "<span id=\"sample-permalink\"><a href=\"{}\"{target}>{display}</a></span>\n&lrm;<span id=\"edit-slug-buttons\"><button type=\"button\" class=\"edit-slug button button-small hide-if-no-js\" aria-label=\"Edit permalink\">Edit</button></span>\n<span id=\"editable-post-name-full\">{}</span>\n",
+        text(&esc_url(view.unwrap_or_default().as_bytes())),
+        esc_html(name.as_bytes())
+    ));
+    Some(html)
 }
 
 /// The extension `/^.*?\.(\w+)$/` finds in a file's name.
@@ -319,6 +663,9 @@ fn file_details(site: &dyn AttachmentSite, post: &Post, meta: &Value, size: i64)
         esc_html(&name),
         size_format(size)
     ));
+    if plays_by_type(post) {
+        out.push_str(&media_details(meta));
+    }
     if let (Some(width), Some(height)) = (meta.get_str("width"), meta.get_str("height")) {
         out.push_str(&format!(
             "\t\t<div class=\"misc-pub-section misc-pub-dimensions\">\n\t\t\tDimensions: <strong><span id='media-dims-{id}'>{} by {} pixels</span></strong>\n\t\t</div>\n\t\t",
@@ -451,7 +798,7 @@ fn author_box(site: &dyn AttachmentSite, post: &Post) -> String {
 fn lock_dialog(
     site: &dyn AttachmentSite,
     post: &Post,
-    holder: &User,
+    (holder, view): (&User, &str),
     referer: Option<&str>,
 ) -> String {
     // The editors, `post.php` and `post-new.php`, are at `/hs-admin/post` here.
@@ -476,7 +823,7 @@ fn lock_dialog(
         args.push((b"preview_id", Some(id.as_bytes())));
         args.push((b"preview_nonce", Some(nonce.as_bytes())));
     }
-    let preview = preview_link(site, post, &args);
+    let preview = preview_link(site, view, &args);
     let take_over = BarSite::admin_url(
         site,
         &format!(
@@ -527,57 +874,71 @@ pub fn attachment_edit(
             "You cannot edit this item because it is in the Trash. Please restore it and try again.",
         ));
     }
-    // Not ported: a media player, a file size read from disk, pretty
-    // permalinks' slug, a status but inherit or private, and a scaled
-    // original of a file that is not an image.
+    // Not ported: a file size read from disk, a status but inherit or
+    // private, and a scaled original of a file that is not an image.
     let file = site.meta(&post, "_wp_attached_file").unwrap_or_default();
+    let kind = Kind::of(&file, &post.mime_type);
     let original = meta
         .get_str("original_image")
         .is_some_and(|o| !o.is_empty());
-    let unported = post.mime_type.starts_with("audio/")
-        || !["inherit", "private"].contains(&post.status.as_str())
-        || original && !is_image(&file, &post.mime_type)
-        || post.mime_type.starts_with("video/")
-        || size <= 0
-        || site
-            .option("permalink_structure")
-            .is_some_and(|s| !is_empty_string(&s));
+    let unported = !["inherit", "private"].contains(&post.status.as_str())
+        || original && kind != Kind::Image
+        || size <= 0;
     if unported {
         return None;
     }
     let status = post_status(site, &post);
     let holder = lock_holder(site, &post)?;
+    let (view, sample) = attachment_links(site, &post, &status)?;
     let state = State {
         meta,
         size,
+        kind,
         status,
         holder,
+        view,
+        sample,
     };
-    Some(page(site, args, request, &post, &state))
+    page(site, args, request, &post, &state)
 }
 
-/// What the screen shows of an attachment beyond its post: its metadata
-/// and file size, `get_post_status()` and the lock's holder.
+/// What the screen shows of an attachment beyond its post: metadata, size,
+/// kind, `get_post_status()`, the lock's holder, its link and sample link.
 struct State {
     meta: Value,
     size: i64,
+    kind: Kind,
     status: String,
     holder: User,
+    view: String,
+    sample: String,
 }
 
-/// The form, its meta boxes and the lock dialog.
+/// The form, its meta boxes and the lock dialog; `None` where the parts are.
 fn page(
     site: &dyn AttachmentSite,
     args: &AttachmentArgs,
     request: &Request,
     post: &Post,
     state: &State,
-) -> Answer {
+) -> Option<Answer> {
     let (id, meta, size) = (post.id, &state.meta, state.size);
     // Without the right to publish, a pending attachment's slug is not shown.
     let slug_shown = state.status != "pending" || site.can("publish_posts");
-    let file = site.meta(post, "_wp_attached_file").unwrap_or_default();
-    let image = is_image(&file, &post.mime_type);
+    let image = state.kind == Kind::Image;
+    // Songs and videos have featured images, for a user who may upload.
+    let featured = state.kind.plays() && site.can("upload_files");
+    let featured = match featured {
+        true => Some(featured_box(site, post)?),
+        false => None,
+    };
+    let permalink_box = match slug_shown {
+        true => format!(
+            "\t\t<div id=\"edit-slug-box\" class=\"hide-if-no-js\">\n\t\t\t{}\t</div>\n\t\t",
+            sample_permalink(site, post, (&state.view, &state.sample))?
+        ),
+        false => String::new(),
+    };
     let referer = referer(site, args, request);
     let columns = site.user_option("screen_layout_attachment");
     let columns = if columns.is_some_and(|c| Value::String(c).to_int() == 1) {
@@ -599,6 +960,14 @@ fn page(
         context: "side".into(),
         inside: submit_box(site, post, meta, size),
     }];
+    if let Some(inside) = featured {
+        boxes.push(Widget {
+            id: "postimagediv",
+            title: "Featured image",
+            context: "side".into(),
+            inside,
+        });
+    }
     let mut add = |id, title, inside| {
         boxes.push(Widget {
             id,
@@ -607,6 +976,9 @@ fn page(
             inside,
         })
     };
+    if state.kind == Kind::Audio {
+        add("attachment-id3", "Metadata", id3_box(meta));
+    }
     add("commentstatusdiv", "Discussion", discussion_box(post));
     // Only a published or private attachment's comments are listed.
     let commented = ["publish", "private"].contains(&state.status.as_str());
@@ -620,7 +992,7 @@ fn page(
     }
     let slug = format!(
         "<label class=\"screen-reader-text\" for=\"post_name\">\n\tSlug</label><input name=\"post_name\" type=\"text\" class=\"large-text\" id=\"post_name\" value=\"{}\" />\n\t",
-        esc_attr(&post.name)
+        esc_attr(&urldecode(&post.name))
     );
     if slug_shown {
         add("slugdiv", "Slug", slug);
@@ -719,14 +1091,6 @@ fn page(
             esc_attr(&hyscribe_phpser::stripslashes(referer_url.as_bytes()))
         )
     };
-    let permalink_box = if slug_shown {
-        format!(
-            "\t\t<div id=\"edit-slug-box\" class=\"hide-if-no-js\">\n\t\t\t{}\t</div>\n\t\t",
-            sample_permalink(site, post)
-        )
-    } else {
-        String::new()
-    };
     let alt = if post.mime_type.starts_with("image") {
         let alt = site
             .meta(post, "_wp_attachment_image_alt")
@@ -735,6 +1099,7 @@ fn page(
     } else {
         "\t\n".into()
     };
+    let (preview, played) = preview(site, post, state.kind, meta);
     let content = fill(
         FORM,
         &[
@@ -757,7 +1122,7 @@ fn page(
             ("title", esc_attr(&raw_title)),
             ("permalink", permalink_box),
             ("permalink_nonce", site.nonce("samplepermalink")),
-            ("preview", preview(site, post, image)),
+            ("preview", preview),
             ("alt", alt),
             (
                 "caption_label",
@@ -773,6 +1138,15 @@ fn page(
                 String::from_utf8_lossy(&esc_textarea(&post.excerpt)).into_owned(),
             ),
             ("editor_css", editor_css(site)),
+            (
+                "displayed",
+                if plays_by_type(post) {
+                    ": Displayed on attachment pages."
+                } else {
+                    ""
+                }
+                .into(),
+            ),
             (
                 "description",
                 String::from_utf8_lossy(&description).into_owned(),
@@ -796,10 +1170,18 @@ fn page(
     );
     let users = Value::String(site.option("user_count").unwrap_or(b"-1".to_vec())).to_int();
     let mut footer = if users > 1 {
-        lock_dialog(site, post, &state.holder, referer.as_deref())
+        lock_dialog(site, post, (&state.holder, &state.view), referer.as_deref())
     } else {
         String::new()
     };
+    // `wp_enqueue_media()` for songs and videos, with their featured image.
+    let library = state.kind.plays().then(|| {
+        let featured = thumbnail_id(site, post).map_or(Value::Int(-1), Value::String);
+        enqueue_media(site, request.browser, Some((id, featured)))
+    });
+    if let Some((templates, _)) = &library {
+        footer.push_str(templates);
+    }
     footer.push_str("<div id=\"local-storage-notice\" class=\"notice is-dismissible hidden\"><p class=\"local-restore\">The backup of this post in your browser is different from the version below.<button type=\"button\" class=\"button restore-backup\">Restore the backup</button></p><p class=\"help\">This will replace the current editor content with the last backup version. You can use undo and redo in the editor to get the old content back or to return to the restored version.</p></div>");
     // `_js_vars()` of the comments box's list table and the reply form's.
     footer.push_str(&"<script>list_args = {\"class\":\"WP_Post_Comments_List_Table\",\"screen\":{\"id\":\"attachment\",\"base\":\"post\"}};</script>\n".repeat(1 + usize::from(commented)));
@@ -817,17 +1199,35 @@ fn page(
             String::from_utf8_lossy(&hyscribe_kses::strip_tags(&shown_title))
         )
     };
-    let permalink = site.permalink(post);
-    let scripts: &[&str] = if request.browser.is_mobile() {
-        &["admin-comments", "post", "jquery-touch-punch", "image-edit"]
-    } else {
-        &["admin-comments", "post", "image-edit"]
-    };
+    let mut scripts = vec!["admin-comments", "post"];
+    if request.browser.is_mobile() {
+        scripts.push("jquery-touch-punch");
+    }
+    let mut styles = vec!["imgareaselect"];
+    let mut script_data = vec![("word-count", WORD_COUNT.to_string())];
+    // The media library's scripts end with the image editor's.
+    match library {
+        Some((_, data)) => {
+            scripts.push("thickbox");
+            scripts.extend(MEDIA_SCRIPTS);
+            styles = [&["thickbox"][..], &MEDIA_STYLES].concat();
+            script_data.extend(data);
+        }
+        None => scripts.push("image-edit"),
+    }
+    // The video player's script, enqueued as the preview prints; the media
+    // library has the players' others.
+    let mut late_scripts = Vec::new();
+    if played && state.kind == Kind::Video {
+        late_scripts.push("mediaelement-vimeo");
+    }
+    late_scripts.extend(["quicktags", "wplink", "jquery-ui-autocomplete"]);
     // `wp_heartbeat_set_suspension()`: the editors keep the heartbeat.
     let heartbeat = format!(
         "var heartbeatSettings = {{\"nonce\":\"{}\",\"suspension\":\"disable\"}};",
         site.nonce("heartbeat-nonce")
     );
+    script_data.push(("heartbeat", heartbeat));
     let page = Page {
         screen: Screen {
             pagenow: "post.php",
@@ -841,10 +1241,10 @@ fn page(
         help: &HELP,
         sidebar: SIDEBAR,
         screen_options: &screen_options,
-        styles: &["imgareaselect"],
-        scripts,
-        late_scripts: &["quicktags", "wplink", "jquery-ui-autocomplete"],
-        script_data: &[("word-count", WORD_COUNT.into()), ("heartbeat", heartbeat)],
+        styles: &styles,
+        scripts: &scripts,
+        late_scripts: &late_scripts,
+        script_data: &script_data,
         script_after: &[],
         late_styles: &[],
         admin_head: "",
@@ -856,9 +1256,9 @@ fn page(
         // `wp_admin_bar_edit_menu()`, for a user who may read it.
         view: site
             .can_post("read_post", post)
-            .then_some(("View Media File", permalink.as_str())),
+            .then_some(("View Media File", state.view.as_str())),
     };
-    Answer::from_page(admin_page(site, &page, request.browser))
+    Some(Answer::from_page(admin_page(site, &page, request.browser)))
 }
 
 #[cfg(test)]

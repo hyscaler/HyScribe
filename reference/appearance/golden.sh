@@ -12,8 +12,8 @@
 # automatic update message as %auto-update%, which a last line keeps with
 # the time it was made:
 #   auto-update<TAB>time<TAB>message
-# The g9 variants record the Themes screen and the dashboard with an active
-# theme the site does not have: each sets stylesheet and template in the
+# The g9 and j9 variants record the Themes screen, the dashboard and Tools
+# with an active theme the site does not have, or its parent missing: each sets stylesheet and template in the
 # database, and the options table is put back from a dump after every view,
 # since the Themes screen then switches to the default theme.
 # Start from a fresh db.sh up, then php.sh up, and take both down after.
@@ -94,6 +94,14 @@ done
 missing g9noswitch gone gone themes.php administrator
 missing g9nooptions gone gone themes.php administrator
 missing g9kid kid gone themes.php administrator
+# A missing child of Twenty Twenty-Five, and Twenty Twenty-Five with a
+# missing parent.
+for screen in themes.php index.php tools.php; do
+  for role in administrator editor; do
+    missing j9child kid twentytwentyfive "$screen" "$role"
+    missing j9parent twentytwentyfive gone "$screen" "$role"
+  done
+done
 after=$(message)
 if [ "${before#*	}" != "${after#*	}" ]; then
   echo "The automatic update message changed while recording; run again" >&2

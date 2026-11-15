@@ -355,6 +355,17 @@ async fn logged_in_users_are_let_in() {
         let response = get(&site, &format!("{path}?x=1"), "127.0.0.1:8081", &auth).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
     }
+    // The request lists searched, which finds none here.
+    for file in ["export-personal-data", "erase-personal-data"] {
+        let path = format!(
+            "/hs-admin/{file}?s=nobody&filter-status=request-pending&orderby=requester&order=asc&paged=1"
+        );
+        let page = page_of(get(&site, &path, "127.0.0.1:8081", &cookies).await).await;
+        assert!(page.contains("name=\"s\" value=\"nobody\""), "{file}");
+        let path = format!("/hs-admin/{file}?s[]=nobody");
+        let response = get(&site, &path, "127.0.0.1:8081", &cookies).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
+    }
     for path in [
         "/hs-admin/plugins",
         "/hs-admin/site-health",
@@ -1123,6 +1134,14 @@ async fn a_missing_theme_is_php_s() {
     assert_eq!(with_values(&php("g9gone"), &page), page);
     let response = get(&gone, "/hs-admin/themes?broken=1&x=1", host, &cookies).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // A missing child of the bundled theme, with its parent's fonts.
+    let mut kid = Arc::try_unwrap(gone).ok().unwrap();
+    kid.options.insert("stylesheet".into(), b"kid".to_vec());
+    kid.options
+        .insert("template".into(), b"twentytwentyfive".to_vec());
+    let kid = Arc::new(kid);
+    let page = page_of(get(&kid, "/hs-admin/themes", host, &cookies).await).await;
+    assert_eq!(with_values(&php("j9child"), &page), page);
 }
 
 /// Paged comments link to their page, on the comments list and the
@@ -1193,9 +1212,8 @@ async fn dashboard_arguments_and_folding() {
     assert!(shown);
 }
 
-/// A Site Icon, a static homepage with neither page chosen, which PHP saves
-/// as the latest posts first, and a missing child of the bundled theme are
-/// not ported.
+/// A Site Icon and a static homepage with neither page chosen, which PHP
+/// saves as the latest posts first, are not ported.
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_not_ported() {
     let db = hyscribe_db::Db::connect(&hyscribe_testkit::fixture_database())
@@ -1205,14 +1223,8 @@ async fn settings_not_ported() {
     site.options.insert("site_icon".into(), b"5".to_vec());
     site.options
         .insert("show_on_front".into(), b"page".to_vec());
-    site.options
-        .insert("stylesheet".into(), b"twentytwentyfour".to_vec());
     let site = Arc::new(site);
-    for path in [
-        "/hs-admin/options-general",
-        "/hs-admin/options-reading",
-        "/hs-admin/themes",
-    ] {
+    for path in ["/hs-admin/options-general", "/hs-admin/options-reading"] {
         let site = Arc::clone(&site);
         let handle = Handle::current();
         let response = tokio::task::spawn_blocking(move || {
@@ -1429,6 +1441,10 @@ async fn the_user_s_data() {
         let first = admin(&terms, &reads, 1);
         assert_eq!(first.post_authors("post"), [1]);
         assert!(first.post_authors("attachment").is_empty());
+        // Another post's slug, in any case, as the database compares it.
+        assert!(first.slug_taken(b"Hello-World", 2) && !first.slug_taken(b"hello-world", 1));
+        let named = first.named_status_counts("post", "hello-world");
+        assert_eq!(named, [("publish".to_string(), 1)]);
         assert_eq!(first.admin_color().as_deref(), Some(&b"modern"[..]));
         assert!(
             first
@@ -1908,9 +1924,13 @@ async fn actions_read_the_site() {
     let promote = format!("/hs-admin/users?changeit=1&new_role=king&users[]=1&_wpnonce={nonce}");
     let response = send(&site, "GET", &promote, &cookies, None).await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    // Past its checks, in shadow mode: the site is read only.
     let promote = promote.replace("king", "editor");
     let response = send(&site, "GET", &promote, &cookies, None).await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let page = page_of(response).await;
+    let read_only = hyscribe_admin::die::page(true, "WordPress &rsaquo; Error", READ_ONLY);
+    assert_eq!(page.into_bytes(), read_only);
     let form = Some((
         "application/x-www-form-urlencoded",
         "action=dim-comment&id=1",
@@ -1956,4 +1976,98 @@ async fn the_site_icon_is_read_from_the_database() {
     assert!(page.contains(&format!("<link rel=\"icon\" href=\"{uploads}")));
     let page = page_of(get(&icon, "/hs-login", "127.0.0.1:8081", "").await).await;
     assert!(page.contains(&format!("<link rel=\"apple-touch-icon\" href=\"{uploads}")));
+}
+
+/// A writer as the fixture's read only user, with `prefix`: its actions
+/// run, and a write would fail, so a test never changes the fixture.
+async fn unwritable(site: Arc<Site>, prefix: &str) -> Arc<Site> {
+    let config = hyscribe_config::Database {
+        user: "wordpress_read".into(),
+        password: Secret::new("reference-only"),
+        prefix: hyscribe_config::Prefix::new(prefix).unwrap(),
+        ..hyscribe_testkit::fixture_database()
+    };
+    let writer = hyscribe_db::Writer::open(&config, hyscribe_config::Mode::Primary).await;
+    let site = Arc::try_unwrap(site).ok().unwrap();
+    Arc::new(site.with_writer(writer.unwrap()))
+}
+
+/// `wp-admin/users.php` under hs-admin's names.
+fn hs(text: &str) -> String {
+    let text = text.replace("wp-admin%2Fusers.php", "hs-admin%2Fusers");
+    text.replace("/wp-admin/users.php", "/hs-admin/users")
+        .replace("users.php", "users")
+}
+
+/// Past their checks, the role changes of `reference/admin-saves/golden.sh`
+/// answer as PHP's, but user 801's, whom the fixture lacks (its rows and
+/// answer are the write oracle's, in `saves`); what PHP cannot go on with
+/// is not ported, and a failed write is the database error page.
+#[tokio::test(flavor = "multi_thread")]
+async fn actions_answer_as_php_once_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let nonce = session_nonce(&site, &cookies, "bulk-users").await;
+    let site = unwritable(site, "wp_").await;
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
+    let cases = include_str!("../../../../reference/admin-saves/cases.list");
+    let rows = golden
+        .lines()
+        .filter(|row| !row.starts_with("users-promote\t"));
+    for row in rows {
+        let [case, status, php_location, body] = row.split('\t').collect::<Vec<_>>()[..] else {
+            panic!("{row}");
+        };
+        let line = cases
+            .lines()
+            .find(|line| line.starts_with(&format!("{case}\t")));
+        let fields: Vec<&str> = line.unwrap().split('\t').collect();
+        let [_, method, target, data, _, field] = fields[..] else {
+            panic!("{case}");
+        };
+        let uri = format!("/hs-admin/{}", hs(target));
+        let response = if method == "POST" {
+            let form = (
+                "application/x-www-form-urlencoded",
+                &*format!("{data}&{field}={nonce}"),
+            );
+            send(&site, "POST", &uri, &cookies, Some(form)).await
+        } else {
+            let uri = format!("{uri}&{field}={nonce}");
+            send(&site, "GET", &uri, &cookies, None).await
+        };
+        assert_eq!(response.status().as_str(), status, "{case}");
+        assert_eq!(location(&response), hs(php_location), "{case}");
+        let php = hyscribe_testkit::unhex(body);
+        assert_eq!(page_of(response).await.into_bytes(), php, "{case}");
+    }
+    let promote = format!("/hs-admin/users?changeit=1&new_role=editor&_wpnonce={nonce}");
+    for users in [
+        "users[]=1099511627776",
+        "users[]=-1",
+        "users[]=1&wp_http_referer[]=x",
+    ] {
+        let response = send(&site, "GET", &format!("{promote}&{users}"), &cookies, None).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{users}");
+    }
+    // An action whose write has no handler yet.
+    let reset = format!("/hs-admin/users?action=resetpassword&users[]=1&_wpnonce={nonce}");
+    let response = send(&site, "GET", &reset, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // A database whose `db_version` cannot be read takes no write.
+    let site = unwritable(site, "missing_").await;
+    let response = send(
+        &site,
+        "GET",
+        &format!("{promote}&users[]=1"),
+        &cookies,
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let page = page_of(response).await;
+    assert!(
+        page.contains("Error establishing a database connection"),
+        "{page}"
+    );
 }

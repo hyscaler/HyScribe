@@ -249,7 +249,7 @@ pub fn general(site: &dyn SettingsSite, request: &Request) -> Option<Answer> {
         "%home%",
         &json(&value_text(home.strip_suffix('/').unwrap_or(&home))),
     );
-    let (templates, script_data) = enqueue_media(site, request.browser);
+    let (templates, script_data) = enqueue_media(site, request.browser, None);
     let form = Form {
         file: "options-general.php",
         title: "General Settings",

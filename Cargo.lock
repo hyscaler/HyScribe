@@ -707,6 +707,7 @@ dependencies = [
  "hyscribe-render",
  "hyscribe-rest",
  "hyscribe-testkit",
+ "hyscribe-write",
  "sha2 0.11.1",
  "tempfile",
  "tokio",

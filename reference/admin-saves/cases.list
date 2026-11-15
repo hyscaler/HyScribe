@@ -39,6 +39,7 @@ ajax-delete-tag	POST	admin-ajax.php	action=delete-tag&tag_ID=801&taxonomy=post_t
 comments-referer	GET	edit-comments.php?action=approve&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php%3Fcomment_status%3Dmoderated	-	bulk-comments	_wpnonce
 comments-bulk-unknown	GET	edit-comments.php?action=bogus&delete_comments[]=1&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php	-	bulk-comments	_wpnonce
 comments-bulk-string	GET	edit-comments.php?action=approve&delete_comments=1&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php	-	bulk-comments	_wpnonce
+comments-bulk-missing	GET	edit-comments.php?action=approve&delete_comments[]=999&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php	-	bulk-comments	_wpnonce
 comments-empty-trash-bare	GET	edit-comments.php?delete_all=1&comment_status=trash&ids=1&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php	-	bulk-comments	_wpnonce
 moderate-bulk-bare	GET	edit-comments.php?action=approve	-	bulk-comments	_wpnonce
 moderate-bulk-unapprove	GET	edit-comments.php?action=unapprove&delete_comments[]=1&delete_comments[]=999&paged=2&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php%3Fapproved%3D1%26paged%3D3	-	bulk-comments	_wpnonce
@@ -77,5 +78,5 @@ comments-ajax-dim-negative	POST	admin-ajax.php	action=dim-comment&id=-1	approve-
 moderate-ajax-missing	POST	admin-ajax.php	action=delete-comment&id=999	delete-comment_999	_ajax_nonce
 moderate-ajax-negative	POST	admin-ajax.php	action=delete-comment&id=-1	delete-comment_-1	_ajax_nonce
 moderate-bulk-delete	GET	edit-comments.php?action=delete&delete_comments[]=1&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php	-	bulk-comments	_wpnonce
-moderate-ajax-delete	POST	admin-ajax.php	action=delete-comment&id=1&delete=1&_total=5&_per_page=1&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php%3Fcomment_status%3Dspam	delete-comment_1	_ajax_nonce
+moderate-ajax-delete	POST	admin-ajax.php	action=delete-comment&id=1&delete=1&_total=5&_per_page=1&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php%3Fcomment_status%3Dmine	delete-comment_1	_ajax_nonce
 moderate-empty-trash	GET	edit-comments.php?delete_all=Empty+Trash&action=-1&comment_status=trash&pagegen_timestamp=2099-01-01+00%3A00%3A00&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php%3Fcomment_status%3Dtrash	-	bulk-comments	_wpnonce

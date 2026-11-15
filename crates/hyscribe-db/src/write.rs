@@ -607,25 +607,17 @@ impl<'w> Write<'w> {
     }
 
     /// `get_comment_count( $post )`'s approved, held, spam, trashed and
-    /// post-trashed comments, notes left out, of every post for 0.
+    /// post-trashed comments, notes left out, of every post for 0, counted
+    /// a status at a time as PHP counts them.
     pub async fn comment_counts(&mut self, post: u64) -> Result<[u64; 5], DbError> {
-        let query = self.sql(
-            "SELECT COUNT(CASE WHEN comment_approved = '1' THEN 1 END), \
-             COUNT(CASE WHEN comment_approved = '0' THEN 1 END), \
-             COUNT(CASE WHEN comment_approved = 'spam' THEN 1 END), \
-             COUNT(CASE WHEN comment_approved = 'trash' THEN 1 END), \
-             COUNT(CASE WHEN comment_approved = 'post-trashed' THEN 1 END) \
-             FROM {prefix}comments WHERE comment_type != 'note' \
-             AND ( ? = 0 OR comment_post_ID = ? )",
-        );
-        self.spend()?;
-        let row = (query.bind(post).bind(post))
-            .fetch_one(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
         let mut counts = [0; 5];
-        for (n, count) in counts.iter_mut().enumerate() {
-            *count = row.try_get::<i64, _>(n).map_err(db_error)?.unsigned_abs();
+        let statuses = ["1", "0", "spam", "trash", "post-trashed"];
+        for (count, status) in counts.iter_mut().zip(statuses) {
+            let query = self.sql(
+                "SELECT COUNT(*) FROM {prefix}comments WHERE comment_approved = ? \
+                 AND comment_type != 'note' AND ( ? = 0 OR comment_post_ID = ? )",
+            );
+            *count = self.count(query.bind(status).bind(post).bind(post)).await?;
         }
         Ok(counts)
     }

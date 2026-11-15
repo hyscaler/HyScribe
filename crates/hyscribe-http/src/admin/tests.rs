@@ -2068,6 +2068,7 @@ async fn actions_answer_as_php_once_checked() {
             "edit-comments?delete_all=1&comment_status[]=trash&pagegen_timestamp=1&_wpnonce={comments}"
         ),
         format!("edit-comments?action=approve&ids[]=1&_wpnonce={comments}"),
+        format!("edit-comments?delete_all=1&pagegen_timestamp[]=1&_wpnonce={comments}"),
         format!("comment?action=approvecomment&c=999&_wpnonce={missing}"),
         format!("comment?action=spamcomment&c=1&_wp_original_http_referer[]=x&_wpnonce={comment}"),
     ] {

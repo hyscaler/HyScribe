@@ -16,7 +16,7 @@ use hyscribe_write::terms::{
     Deletion, Taxonomy, TermArgs, TermError, wp_delete_term, wp_insert_term, wp_update_term,
 };
 
-use super::{Ajax, Saving, Stop, referer};
+use super::{Acting, Ajax, Saving, Stop, referer};
 
 /// The taxonomy `name`, if hyscribe-write writes its terms.
 fn written(name: &[u8]) -> Result<(Taxonomy, Listed), Error> {
@@ -155,7 +155,11 @@ fn term_id(value: Option<&Value>) -> u64 {
 
 /// `add-tag`: the term of the list's form added, then the list with
 /// `message=1`, or `message=4` with `error`.
-pub(super) fn add_tag<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn add_tag<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let taxonomy = listed_taxonomy(asked)?;
         let fields = Fields::read(asked)?;
@@ -169,7 +173,11 @@ pub(super) fn add_tag<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Sav
 }
 
 /// `delete`, a row's Delete: the term deleted, then the list with `message=2`.
-pub(super) fn delete<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn delete<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let taxonomy = listed_taxonomy(asked)?;
         // Without a term the list is shown, which is not ported here.
@@ -190,7 +198,11 @@ pub(super) fn delete<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Savi
 
 /// `bulk-delete`: each term of `delete_tags` deleted, then the list with
 /// `message=6`.
-pub(super) fn bulk_delete<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn bulk_delete<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let taxonomy = listed_taxonomy(asked)?;
         let tags = asked.request("delete_tags").map(items).unwrap_or_default();
@@ -205,7 +217,11 @@ pub(super) fn bulk_delete<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) ->
 
 /// `editedtag`, the edit screen's Update: the term saved, then back with
 /// `message=3`, or `message=5` with `error`.
-pub(super) fn edited_tag<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn edited_tag<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let taxonomy = listed_taxonomy(asked)?;
         let id = term_id(lookup(asked.post, "tag_ID"));
@@ -246,7 +262,11 @@ fn posted_taxonomy(asked: &Asked) -> Result<Vec<u8>, Error> {
 
 /// `wp_ajax_add_tag()`: the term of the list's form added, answered with
 /// its rows, or the error.
-pub(super) fn ajax_add_tag<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a, Ajax> {
+pub(super) fn ajax_add_tag<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a, Ajax> {
     Box::pin(async move {
         let (taxonomy, listed) = written(&posted_taxonomy(asked)?)?;
         // The rows are the list's of the screen posted, its own here.
@@ -277,6 +297,7 @@ pub(super) fn ajax_add_tag<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -
 pub(super) fn inline_save_tax<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
 ) -> Saving<'a, Ajax> {
     Box::pin(async move {
         let name = lookup(asked.post, "taxonomy").and_then(Value::as_bytes);
@@ -302,6 +323,7 @@ pub(super) fn inline_save_tax<'a>(
 pub(super) fn ajax_delete_tag<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
 ) -> Saving<'a, Ajax> {
     Box::pin(async move {
         let id = term_id(lookup(asked.post, "tag_ID"));

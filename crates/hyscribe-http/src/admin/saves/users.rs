@@ -14,7 +14,7 @@ use hyscribe_write::Error;
 use hyscribe_write::posts::Context;
 use hyscribe_write::users::{get_password_reset_key, set_role, wp_delete_user};
 
-use super::{Saving, Stop, text};
+use super::{Acting, Saving, Stop, text};
 
 /// `$redirect`: the list's own `wp_http_referer` field, else the list.
 fn redirect(asked: &Asked) -> Result<Vec<u8>, Stop> {
@@ -31,7 +31,11 @@ fn redirect(asked: &Asked) -> Result<Vec<u8>, Stop> {
 
 /// `promote`, the bulk role change: each user but the current one gets
 /// `new_role` (no role for `none`), then the list is sent back with `update`.
-pub(super) fn promote<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn promote<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let redirect = redirect(asked)?;
         if asked.request("users").is_none_or(Value::is_empty) {
@@ -72,7 +76,11 @@ pub(super) fn promote<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Sav
 /// `dodelete`, the deletion the confirmation page asks for: each user but
 /// the current one deleted, their content with them or passed to the user
 /// `reassign_user` names; then the list with how many were.
-pub(super) fn dodelete<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn dodelete<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let redirect = redirect(asked)?;
         if asked.request("users").is_none_or(Value::is_empty) {
@@ -134,7 +142,11 @@ pub(super) fn dodelete<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Sa
 
 /// `resetpassword`: a password reset link for each user but the current
 /// one, the mails taken as sent; then the list with how many were.
-pub(super) fn resetpassword<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn resetpassword<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let redirect = redirect(asked)?;
         if asked.request("users").is_none_or(Value::is_empty) {

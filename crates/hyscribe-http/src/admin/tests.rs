@@ -1925,7 +1925,8 @@ async fn actions_read_the_site() {
         "action=dim-comment&id=99",
     ));
     let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(page_of(response).await, READ_ONLY);
     let own = format!("/hs-admin/users?changeit=1&new_role=none&users[]=1&_wpnonce={nonce}");
     let response = send(&site, "GET", &own, &cookies, None).await;
     assert!(
@@ -2015,7 +2016,9 @@ async fn actions_answer_as_php_once_checked() {
     // The cases that write nothing the read only user cannot.
     let rows = golden.lines().filter(|row| {
         let case = row.split('\t').next().unwrap_or_default();
-        case.starts_with("users-") && !ORACLE_CASES.contains(&case) || HTTP_CASES.contains(&case)
+        case.starts_with("users-") && !ORACLE_CASES.contains(&case)
+            || case.starts_with("comments-")
+            || HTTP_CASES.contains(&case)
     });
     for row in rows {
         let [case, status, php_location, body] = row.split('\t').collect::<Vec<_>>()[..] else {
@@ -2029,11 +2032,11 @@ async fn actions_answer_as_php_once_checked() {
             panic!("{case}");
         };
         let nonce = session_nonce(&site, &cookies, action).await;
-        let uri = format!("/hs-admin/{}", hs(target));
+        let (data, uri) = (hs(data), format!("/hs-admin/{}", hs(target)));
         let response = if method == "POST" {
             let form = (
                 "application/x-www-form-urlencoded",
-                &*format!("{}&{field}={nonce}", hs(data)),
+                &*format!("{data}&{field}={nonce}"),
             );
             send(&site, "POST", &uri, &cookies, Some(form)).await
         } else {
@@ -2041,9 +2044,9 @@ async fn actions_answer_as_php_once_checked() {
             send(&site, "GET", &uri, &cookies, None).await
         };
         assert_eq!(response.status().as_str(), status, "{case}");
-        let to = response.headers().get(header::LOCATION);
-        let to = to.map_or("", |to| to.to_str().unwrap());
-        assert_eq!(to, hs(php_location), "{case}");
+        let ours = response.headers().get(header::LOCATION);
+        let ours = ours.map_or("", |to| to.to_str().unwrap());
+        assert_eq!(ours, hs(php_location), "{case}");
         let php = hyscribe_testkit::unhex(body);
         if php.starts_with(b"{") {
             let kind = response.headers().get(header::CONTENT_TYPE).unwrap();
@@ -2062,6 +2065,22 @@ async fn actions_answer_as_php_once_checked() {
     ] {
         let response = send(&site, "GET", &format!("{promote}&{users}"), &cookies, None).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{users}");
+    }
+    // Arrays PHP cannot read, and `comment_footer_die()`'s page.
+    let comments = session_nonce(&site, &cookies, "bulk-comments").await;
+    let missing = session_nonce(&site, &cookies, "approve-comment_999").await;
+    let comment = session_nonce(&site, &cookies, "delete-comment_1").await;
+    for uri in [
+        format!(
+            "edit-comments?delete_all=1&comment_status[]=trash&pagegen_timestamp=1&_wpnonce={comments}"
+        ),
+        format!("edit-comments?action=approve&ids[]=1&_wpnonce={comments}"),
+        format!("edit-comments?delete_all=1&pagegen_timestamp[]=1&_wpnonce={comments}"),
+        format!("comment?action=approvecomment&c=999&_wpnonce={missing}"),
+        format!("comment?action=spamcomment&c=1&_wp_original_http_referer[]=x&_wpnonce={comment}"),
+    ] {
+        let response = send(&site, "GET", &format!("/hs-admin/{uri}"), &cookies, None).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{uri}");
     }
     // An action whose write has no handler.
     let nonce = session_nonce(&site, &cookies, "add-user").await;
@@ -2303,6 +2322,7 @@ async fn term_ajax_answers_are_sent_once_committed() {
             uri: b"/hs-admin/admin-ajax",
             home: &site.home,
             user: 1,
+            now: 0,
         };
         let category = Terms::named(b"category").unwrap();
         let term = admin.terms("category").into_iter().next().unwrap();
@@ -2544,7 +2564,7 @@ async fn page_views_and_screen_state_write_as_php() {
 }
 
 /// One test at a time over `wordpress_saves`, which each reloads.
-static SAVES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static SAVES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// In primary mode a Settings save's notice shows on the screen it sends
 /// back, which deletes it, so a reload shows none; shadow mode only reads.

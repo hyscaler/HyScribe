@@ -9,6 +9,7 @@ use hyscribe_testkit::writes::check_writes;
 use hyscribe_testkit::{fixture_database, hs_admin_page, unhex};
 use hyscribe_write::terms::TermIds;
 
+use super::super::tests::unread::Unread;
 use super::super::tests::{fields, writer};
 use super::super::{Handler, act, ajax_handler, handler};
 use super::*;
@@ -57,12 +58,13 @@ async fn run<T>(
         uri: sent.uri.as_bytes(),
         home: "http://127.0.0.1:8081",
         user: 1,
+        now: 0,
     };
     let mut write = writer.begin_on(conn).await;
     if let (Ok(write), Some(budget)) = (&mut write, budget) {
         write.fail_after(budget);
     }
-    act(write, handler, &asked).await
+    act(write, handler, &asked, &Unread).await
 }
 
 /// The answer of `handler` once every statement budget short of it has
@@ -436,8 +438,9 @@ async fn answer<T>(handler: Handler<T>, post: &str) -> Result<T, Stop<T>> {
         uri: b"/hs-admin/edit-tags",
         home: "http://127.0.0.1:8081",
         user: 1,
+        now: 0,
     };
-    handler(&mut write, &asked).await
+    handler(&mut write, &asked, &Unread).await
 }
 
 /// The answers of `reference/admin-saves/golden.sh` that need a tag the

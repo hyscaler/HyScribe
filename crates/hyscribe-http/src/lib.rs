@@ -78,6 +78,9 @@ const SECURITY_HEADERS: [(&str, &str); 3] = [
     ("content-security-policy", "frame-ancestors 'self'"),
 ];
 
+/// The options the `WP_HOME` and `WP_SITEURL` constants replace.
+const URL_CONSTANTS: [(&str, &str); 2] = [("home", "WP_HOME"), ("siteurl", "WP_SITEURL")];
+
 /// What a request needs: the database and the options WordPress loads on
 /// every request.
 #[derive(Debug)]
@@ -85,15 +88,17 @@ pub struct Site {
     db: Db,
     options: HashMap<String, Vec<u8>>,
     home: String,
-    theme: Theme,
-    /// The rewrite rules of the permalink options, built once.
-    rewriter: rewrite::Rewriter,
+    theme: Arc<Theme>,
+    /// The rewrite rules of the permalink options.
+    rewriter: Arc<rewrite::Rewriter>,
+    /// The rules compiled for an earlier request.
+    compiled: Arc<rewrite::Compiled>,
     /// The keys and salts set in the configuration.
     salts: Vec<(&'static str, hyscribe_config::Secret)>,
     /// The login sessions, in primary mode only.
-    sessions: Option<hyscribe_auth::sessions::Sessions>,
+    sessions: Option<Arc<hyscribe_auth::sessions::Sessions>>,
     /// The gated writer, in primary mode only (ADR 0010).
-    writer: Option<hyscribe_db::Writer>,
+    writer: Option<Arc<hyscribe_db::Writer>>,
     /// The constants of `home` and `siteurl` the configuration sets.
     defined: Vec<&'static str>,
     /// `REST_PUBLIC_USERS`: the public users REST endpoint is on.
@@ -115,34 +120,57 @@ impl Site {
         home: Option<String>,
         siteurl: Option<String>,
     ) -> Result<Site, DbError> {
-        let mut options: HashMap<String, Vec<u8>> =
-            db.autoload_options().await?.into_iter().collect();
-        let mut defined = Vec::new();
-        for (name, constant, url) in [
-            ("home", "WP_HOME", home),
-            ("siteurl", "WP_SITEURL", siteurl),
-        ] {
+        let mut site = Site {
+            db,
+            options: HashMap::new(),
+            home: String::new(),
+            theme: Arc::new(twentytwentyfive()),
+            rewriter: Arc::default(),
+            compiled: Arc::default(),
+            salts: Vec::new(),
+            sessions: None,
+            writer: None,
+            defined: Vec::new(),
+            public_users: true,
+            behind_proxy: false,
+        };
+        for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
             if let Some(url) = url {
                 let url = url.trim_end_matches(['/', '\\']).as_bytes().to_vec();
-                options.insert(name.to_string(), url);
-                defined.push(constant);
+                site.options.insert(name.to_string(), url);
+                site.defined.push(constant);
+            }
+        }
+        site.reloaded().await
+    }
+
+    /// The site as the database has it now, which every request reads
+    /// (ADR 0012): the autoloaded options in one query, as
+    /// `wp_load_alloptions()` reads them, under the configured addresses.
+    async fn reloaded(&self) -> Result<Site, DbError> {
+        let mut options: HashMap<String, Vec<u8>> =
+            self.db.autoload_options().await?.into_iter().collect();
+        for (name, constant) in URL_CONSTANTS {
+            if self.defined.contains(&constant) {
+                options.insert(name.to_string(), self.raw_option(name).to_vec());
             }
         }
         let home = String::from_utf8_lossy(options.get("home").map_or(&[][..], Vec::as_slice))
             .trim_end_matches('/')
             .to_string();
         let mut site = Site {
-            db,
+            db: self.db.clone(),
             options,
             home,
-            theme: twentytwentyfive(),
-            rewriter: rewrite::Rewriter::default(),
-            salts: Vec::new(),
-            sessions: None,
-            writer: None,
-            defined,
-            public_users: true,
-            behind_proxy: false,
+            theme: Arc::clone(&self.theme),
+            rewriter: Arc::default(),
+            compiled: Arc::clone(&self.compiled),
+            salts: self.salts.clone(),
+            sessions: self.sessions.clone(),
+            writer: self.writer.clone(),
+            defined: self.defined.clone(),
+            public_users: self.public_users,
+            behind_proxy: self.behind_proxy,
         };
         site.build_rewriter();
         Ok(site)
@@ -172,7 +200,7 @@ impl Site {
     /// The site in primary mode, keeping login sessions in `sessions`.
     pub fn with_sessions(self, sessions: hyscribe_auth::sessions::Sessions) -> Site {
         Site {
-            sessions: Some(sessions),
+            sessions: Some(Arc::new(sessions)),
             ..self
         }
     }
@@ -180,12 +208,12 @@ impl Site {
     /// The site with the writer `Writer::open` gave (none in shadow mode),
     /// which takes the addresses the configuration sets.
     pub fn with_writer(self, writer: Option<hyscribe_db::Writer>) -> Site {
-        let urls = [("home", "WP_HOME"), ("siteurl", "WP_SITEURL")]
+        let urls = URL_CONSTANTS
             .into_iter()
             .filter(|(_, constant)| self.defined.contains(constant))
             .map(|(name, _)| (name, self.option(name)))
             .collect();
-        let writer = writer.map(|writer| writer.with_urls(urls));
+        let writer = writer.map(|writer| Arc::new(writer.with_urls(urls)));
         Site { writer, ..self }
     }
 
@@ -215,7 +243,7 @@ impl Site {
 
     /// The rewrite rules for the permalink options as they are now.
     fn build_rewriter(&mut self) {
-        self.rewriter = rewrite::Rewriter::new(&rewrite::Settings {
+        self.rewriter = self.compiled.rewriter(&rewrite::Settings {
             structure: &self.option("permalink_structure"),
             category_base: &self.option("category_base"),
             tag_base: &self.option("tag_base"),
@@ -335,13 +363,49 @@ impl Site {
     }
 }
 
-/// The router for `site`.
-pub fn router(site: Arc<Site>) -> Router {
-    Router::new()
-        .fallback(page)
-        .with_state(site)
+/// The router [`serve`] runs: each request sees the site as the database
+/// has it now (ADR 0012).
+fn live(site: Arc<Site>) -> Router {
+    layered(Router::new().fallback(current).with_state(site))
+}
+
+/// The router for `site` as it is, whatever the database holds now.
+#[cfg(test)]
+fn router(site: Arc<Site>) -> Router {
+    layered(Router::new().fallback(page).with_state(site))
+}
+
+fn layered(router: Router) -> Router {
+    router
         .layer(axum::middleware::from_fn(request_line_limit))
         .layer(axum::middleware::map_response(security_headers))
+}
+
+/// [`page`] for the site as the database has it now.
+async fn current(
+    State(site): State<Arc<Site>>,
+    method: axum::http::Method,
+    uri: Uri,
+    headers: HeaderMap,
+    query: Query<HashMap<String, String>>,
+    peer: Option<axum::Extension<Peer>>,
+    body: axum::body::Bytes,
+) -> Response {
+    match site.reloaded().await {
+        Ok(now) => {
+            page(
+                State(Arc::new(now)),
+                method,
+                uri,
+                headers,
+                query,
+                peer,
+                body,
+            )
+            .await
+        }
+        Err(err) => html(database_error(&site, &err)),
+    }
 }
 
 /// The longest request line (method, URL and protocol with their spaces)
@@ -401,7 +465,7 @@ pub async fn serve(
     site: Arc<Site>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) {
-    serve_connections(listener, router(site), MAX_CONNECTIONS, shutdown).await;
+    serve_connections(listener, live(site), MAX_CONNECTIONS, shutdown).await;
 }
 
 /// [`serve`] with at most `limit` connections open.

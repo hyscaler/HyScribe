@@ -9,6 +9,7 @@ use hyscribe_testkit::fixture_database;
 use hyscribe_testkit::writes::check_writes;
 use hyscribe_write::options::{Autoload, add_option, update_option};
 
+use super::super::tests::unread::Unread;
 use super::super::tests::writer;
 use super::super::{Stop, act, handler};
 use super::*;
@@ -36,6 +37,7 @@ fn asked<'a>(screen: &'a str, get: &'a [(Key, Value)], post: &'a [(Key, Value)])
         uri: screen.as_bytes(),
         home: HOME,
         user: 1,
+        now: 0,
     }
 }
 
@@ -55,7 +57,7 @@ async fn saved(
         if let Ok(write) = &mut write {
             write.fail_after(budget);
         }
-        match act(write, handler, asked).await {
+        match act(write, handler, asked, &Unread).await {
             Err(hyscribe_write::Error::Db(_)) => {}
             saved => return saved,
         }
@@ -388,7 +390,7 @@ async fn saves_answer_as_php() {
         asked.home = base;
         let handler = handler(path, &hyscribe_admin::actions::action(path, &asked)).unwrap();
         let mut write = writer.begin().await.unwrap();
-        let Ok(Answer::Redirect(to)) = handler(&mut write, &asked).await else {
+        let Ok(Answer::Redirect(to)) = handler(&mut write, &asked, &Unread).await else {
             panic!("{case}: no redirect");
         };
         assert_eq!(to, hs(php_location), "{case}");
@@ -415,7 +417,7 @@ async fn answer(
     let asked = asked(screen, get, post);
     let name = screen.trim_start_matches("/hs-admin/");
     let handler = handler(name, &hyscribe_admin::actions::action(name, &asked)).unwrap();
-    match handler(&mut write, &asked).await {
+    match handler(&mut write, &asked, &Unread).await {
         Ok(Answer::Redirect(to)) => Some(to),
         Err(Stop::Failed(Error::Unported(_))) => None,
         Err(Stop::Failed(err)) => panic!("{screen}: {err:?}"),
@@ -531,7 +533,7 @@ async fn saves_fail_at_each_statement() {
         for budget in 0.. {
             let mut write = writer.begin().await.unwrap();
             write.fail_after(budget);
-            match handler(&mut write, &asked).await {
+            match handler(&mut write, &asked, &Unread).await {
                 Err(Stop::Failed(Error::Db(_))) => {}
                 Ok(_) => break,
                 Err(_) => panic!("{screen}: not a database error"),
@@ -557,7 +559,7 @@ async fn saves_fail_at_each_statement() {
                 .await
                 .unwrap();
             write.fail_after(budget);
-            match handler.unwrap()(&mut write, &asked).await {
+            match handler.unwrap()(&mut write, &asked, &Unread).await {
                 Err(Stop::Failed(Error::Db(_))) => {}
                 Ok(_) => break,
                 Err(_) => panic!("not a database error"),
@@ -580,7 +582,7 @@ async fn old_sites_save_formatting() {
         update_option(&mut write, "initial_db_version", &version, None)
             .await
             .unwrap();
-        let saved = update(&mut write, &asked).await;
+        let saved = update(&mut write, &asked, &Unread).await;
         assert!(matches!(saved, Ok(Answer::Redirect(_))), "{initial}");
         let stored = write.option_value("use_smilies").await.unwrap();
         assert_eq!(stored.as_deref(), Some(smilies.as_bytes()), "{initial}");

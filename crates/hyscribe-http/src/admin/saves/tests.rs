@@ -6,11 +6,26 @@
 use hyscribe_config::Mode;
 use hyscribe_db::{Connection, Writer};
 use hyscribe_phpser::{Key, Value, parse_str};
-use hyscribe_testkit::fixture_database;
 use hyscribe_testkit::writes::check_writes;
+use hyscribe_testkit::{fixture_database, hs_admin_page, unhex};
 use hyscribe_write::users::{UserData, wp_insert_user};
+use tokio::runtime::Handle;
 
+use super::super::Admin;
 use super::*;
+use crate::login::LoginReads;
+use crate::tests::oracle_site;
+
+mod comments;
+pub(super) mod unread;
+
+/// User 1's hs-admin on the fixture, as the handlers read it.
+fn admin<'a>(site: &'a crate::Site, reads: &'a LoginReads<'a>) -> Admin<'a> {
+    read(|| {
+        let user = reads.reads.wait(site.db.user(1)).unwrap();
+        Admin::new(reads, site, user)
+    })
+}
 
 /// One test at a time writes users: their count is one row, which
 /// concurrent actions would deadlock over.
@@ -56,13 +71,14 @@ pub(super) async fn acted(
         uri: b"/hs-admin/",
         home: "http://127.0.0.1:8081",
         user: request.user,
+        now: 0,
     };
     let mut write = writer.begin_on(conn).await;
     if let (Ok(write), Some(budget)) = (&mut write, budget) {
         write.fail_after(budget);
     }
     let handler = handler(request.screen, request.action).unwrap();
-    act(write, handler, &asked).await
+    act(write, handler, &asked, &unread::Unread).await
 }
 
 /// The answer to `request` once every statement budget short of it has
@@ -162,7 +178,7 @@ pub(super) async fn new_user(
 /// `users.php`'s role change writes PHP's rows and answers as PHP: a user
 /// made an editor, user 1 kept as an administrator, and nothing kept of a
 /// request that dies part way or meets a failed statement.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn the_role_change_is_php_s() {
     let _turn = turn().await;
     let writer = writer().await;

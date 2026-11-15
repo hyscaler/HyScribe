@@ -68,6 +68,8 @@ struct Rewrite<'a> {
     page_on_front: &'a str,
 }
 
+use std::sync::{Arc, Mutex, PoisonError};
+
 use crate::{Site, lossy, page_exists};
 use hyscribe_db::DbError;
 use hyscribe_phpser::{Pattern, Value, parse_str, urldecode, urlencode};
@@ -88,6 +90,33 @@ impl Rewriter {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.rules.is_empty()
+    }
+}
+
+/// The last rules compiled, with the options they were compiled from.
+#[derive(Debug, Default)]
+pub(crate) struct Compiled(Mutex<Option<(Vec<String>, Arc<Rewriter>)>>);
+
+impl Compiled {
+    /// The rules for `settings`, compiled again only when they change, as
+    /// compiling takes most of a millisecond.
+    pub(crate) fn rewriter(&self, settings: &Settings) -> Arc<Rewriter> {
+        let key: Vec<String> = [
+            settings.structure,
+            settings.category_base,
+            settings.tag_base,
+            settings.page_on_front,
+            settings.home_path,
+        ]
+        .map(String::from)
+        .into();
+        let last = || self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((_, rewriter)) = last().as_ref().filter(|(seen, _)| *seen == key) {
+            return Arc::clone(rewriter);
+        }
+        let rewriter = Arc::new(Rewriter::new(settings));
+        *last() = Some((key, Arc::clone(&rewriter)));
+        rewriter
     }
 }
 

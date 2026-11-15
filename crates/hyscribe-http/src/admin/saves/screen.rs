@@ -14,7 +14,7 @@ use hyscribe_phpser::{Key, Value, add_query_arg, addslashes, lookup, parse_str, 
 use hyscribe_write::Error;
 use hyscribe_write::options::{Meta, update_metadata};
 
-use super::{Saving, text};
+use super::{Acting, Saving, text};
 
 /// `update_user_meta( $user, $key, $value )`, `value` as PHP passes it.
 pub(in crate::admin) async fn update_user_meta(
@@ -207,7 +207,11 @@ fn done() -> Result<Answer, super::Stop> {
 }
 
 /// `wp_ajax_closed_postboxes()`: the boxes closed and hidden on a screen.
-pub(super) fn closed_postboxes<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn closed_postboxes<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         // A list not sent is empty, as the one item of an empty list is filtered out.
         let given = |name| -> Result<Vec<(Key, Value)>, Error> {
@@ -240,7 +244,11 @@ pub(super) fn closed_postboxes<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a
 }
 
 /// `wp_ajax_hidden_columns()`: the columns hidden on a list.
-pub(super) fn hidden_columns<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn hidden_columns<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let given = lookup(asked.post, "hidden").is_some_and(|hidden| !hidden.is_empty());
         let hidden = if given {
@@ -255,7 +263,11 @@ pub(super) fn hidden_columns<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>)
 }
 
 /// `wp_ajax_meta_box_order()`: the meta boxes' order and the screen's columns.
-pub(super) fn meta_box_order<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn meta_box_order<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let order = slashed(asked, "order").map(|order| match order {
             Value::Array(items) => Value::Array(items),
@@ -297,7 +309,11 @@ const PER_PAGE: [&str; 8] = [
 
 /// `set_screen_options()`: a number of items per page, then the screen
 /// again. What it does not save goes on to the screen's POST, not ported.
-pub(super) fn options<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn options<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let form = lookup(asked.post, "wp_screen_options");
         let field = |name| form.and_then(|form| form.get_str(name));

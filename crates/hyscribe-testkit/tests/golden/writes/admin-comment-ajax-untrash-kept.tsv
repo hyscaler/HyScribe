@@ -1,0 +1,14 @@
+# The rows PHP WordPress writes for the action admin-comment-ajax-untrash-kept (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 14:16:17 to 2026-11-15 14:16:17 UTC.
+# %wp_comments:1% is 2.
+# %wp_commentmeta:1% is 7.
+# %wp_commentmeta:2% is 8.
+wp_commentmeta	%wp_commentmeta:1%	+	comment_id	%wp_comments:1%
+wp_commentmeta	%wp_commentmeta:1%	+	meta_id	%wp_commentmeta:1%
+wp_commentmeta	%wp_commentmeta:1%	+	meta_key	_wp_trash_meta_status
+wp_commentmeta	%wp_commentmeta:1%	+	meta_value	post-trashed
+wp_commentmeta	%wp_commentmeta:2%	+	comment_id	%wp_comments:1%
+wp_commentmeta	%wp_commentmeta:2%	+	meta_id	%wp_commentmeta:2%
+wp_commentmeta	%wp_commentmeta:2%	+	meta_key	_wp_trash_meta_time
+wp_commentmeta	%wp_commentmeta:2%	+	meta_value	%unix%
+wp_comments	%wp_comments:1%	~	comment_approved	post-trashed	trash

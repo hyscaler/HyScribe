@@ -25,7 +25,7 @@ use hyscribe_write::users::{
 };
 
 use super::users::{can_promote, retrieve_password};
-use super::{Saving, Stop, text};
+use super::{Acting, Saving, Stop, text};
 
 /// The current user's capabilities, read through the action's `Write`.
 struct Current {
@@ -267,7 +267,11 @@ async fn edit_user(
 /// admin hook, their password reset key kept when they are to be told of
 /// the account; then the users list, or the form for one who may not list
 /// users.
-pub(super) fn create<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn create<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let current = Current::load(write, asked.user).await?;
         arrays_refused(asked)?;
@@ -289,7 +293,11 @@ pub(super) fn create<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Savi
 /// `update` of `profile.php` and `user-edit.php`: the user saved by
 /// `edit_user()`, after an email change of one's own waits for its
 /// confirmation; then their edit screen with `updated`.
-pub(super) fn update<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn update<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(updated(write, asked))
 }
 
@@ -351,7 +359,11 @@ fn json_body(success: bool, data: Value) -> Vec<u8> {
 
 /// `admin-ajax.php`'s `save-user-color-scheme`: the current user's scheme,
 /// registered as the checks found.
-pub(super) fn color_scheme<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn color_scheme<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let scheme = lookup(asked.post, "color_scheme").map(Value::to_php_string);
         let scheme = sanitize_key(&scheme.unwrap_or_default());
@@ -409,7 +421,11 @@ pub(in crate::admin) fn destroy_sessions(
 /// `admin-ajax.php`'s `send-password-reset` for a user the current one may
 /// edit, as the checks found: `retrieve_password()`'s key kept, the mail
 /// taken as sent.
-pub(super) fn password_reset<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn password_reset<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let id = lookup(asked.post, "user_id").map_or(0, Value::to_int);
         let user = write.user(u64::try_from(id).unwrap_or_default()).await?;

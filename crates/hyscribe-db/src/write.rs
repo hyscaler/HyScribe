@@ -622,6 +622,36 @@ impl<'w> Write<'w> {
         self.count(query.bind(post)).await
     }
 
+    /// `get_comment_count( $post )`'s approved, held, spam, trashed and
+    /// post-trashed comments, notes left out, of every post for 0, counted
+    /// a status at a time as PHP counts them.
+    pub async fn comment_counts(&mut self, post: u64) -> Result<[u64; 5], DbError> {
+        let mut counts = [0; 5];
+        let statuses = ["1", "0", "spam", "trash", "post-trashed"];
+        for (count, status) in counts.iter_mut().zip(statuses) {
+            let query = self.sql(
+                "SELECT COUNT(*) FROM {prefix}comments WHERE comment_approved = ? \
+                 AND comment_type != 'note' AND ( ? = 0 OR comment_post_ID = ? )",
+            );
+            *count = self.count(query.bind(status).bind(post).bind(post)).await?;
+        }
+        Ok(counts)
+    }
+
+    /// The comments Empty Spam and Empty Trash delete: of `status`, older
+    /// than `before`, both compared as `edit-comments.php`'s text.
+    pub async fn comment_ids_before(
+        &mut self,
+        status: &str,
+        before: &str,
+    ) -> Result<Vec<u64>, DbError> {
+        let query = self.sql(
+            "SELECT comment_ID FROM {prefix}comments \
+             WHERE comment_approved = ? AND ? > comment_date_gmt",
+        );
+        self.ids(query.bind(status).bind(before)).await
+    }
+
     // Users.
 
     /// `wp_insert_user()`'s `INSERT` of a new user `login`: its ID.

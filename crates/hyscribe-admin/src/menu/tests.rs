@@ -164,7 +164,7 @@ fn the_admin_menu_is_php_s() {
         let user = Role(role);
         let (screen, caps) = screen(&user, f[1]);
         let allowed = caps.is_empty() || caps.iter().any(|cap| user.can(cap));
-        let ours = admin_menu(&user, &screen, None).filter(|_| allowed);
+        let ours = admin_menu(&user, &screen, Look::Block).filter(|_| allowed);
         let php = String::from_utf8(unhex(f[3])).unwrap();
         match (f[2], ours) {
             ("403", None) => {}
@@ -240,15 +240,15 @@ fn counts_read_as_php_writes_them() {
     let menu = admin_menu(
         &Caps(caps, 1, Some(r#"{"good":5,"recommended":2,"critical":3}"#)),
         &dashboard(),
-        None,
+        Look::Block,
     )
     .unwrap();
     assert!(menu.contains("count-1\"><span class=\"pending-count\" aria-hidden=\"true\">1</span><span class=\"comments-in-moderation-text screen-reader-text\">1 Comment in moderation"));
     assert!(menu.contains("Site Health <span class=\"menu-counter site-health-counter count-3\"><span class=\"count\">3</span></span>"));
-    let menu = admin_menu(&Caps(caps, 123, None), &dashboard(), None).unwrap();
+    let menu = admin_menu(&Caps(caps, 123, None), &dashboard(), Look::Block).unwrap();
     assert!(menu.contains("aria-hidden=\"true\">123</span>"));
     for transient in [None, Some("[]"), Some("not json")] {
-        let menu = admin_menu(&Caps(caps, 1234, transient), &dashboard(), None).unwrap();
+        let menu = admin_menu(&Caps(caps, 1234, transient), &dashboard(), Look::Block).unwrap();
         assert!(menu.contains("aria-hidden=\"true\">1,234</span>"));
         assert!(menu.contains("site-health-counter count-0"));
     }
@@ -265,7 +265,7 @@ fn odd_site_health_counts() {
         (r#"{"good":1}"#, "", "0"),
         (r#"{"critical":"1\"><b>"}"#, "1&quot;&gt;&lt;b&gt;", "1"),
     ] {
-        let menu = admin_menu(&Caps(caps, 0, Some(json)), &dashboard(), None).unwrap();
+        let menu = admin_menu(&Caps(caps, 0, Some(json)), &dashboard(), Look::Block).unwrap();
         let expected =
             format!("site-health-counter count-{class}\"><span class=\"count\">{number}</span>");
         let at = menu.find("site-health-counter").unwrap();
@@ -281,12 +281,17 @@ fn odd_site_health_counts() {
 /// and one that may list them but not add them has no Add User.
 #[test]
 fn adding_users_without_listing_them() {
-    let menu = admin_menu(&Caps(&["read", "list_users"], 0, None), &dashboard(), None).unwrap();
+    let menu = admin_menu(
+        &Caps(&["read", "list_users"], 0, None),
+        &dashboard(),
+        Look::Block,
+    )
+    .unwrap();
     assert!(menu.contains("All Users</a></li><li><a href='profile'>Profile</a></li>"));
     let menu = admin_menu(
         &Caps(&["read", "create_users"], 0, None),
         &dashboard(),
-        None,
+        Look::Block,
     )
     .unwrap();
     assert!(menu.contains("<li class=\"wp-first-item\"><a href='profile' class=\"wp-first-item\">Profile</a></li><li><a href='user-new'>Add User</a></li>"));
@@ -296,7 +301,7 @@ fn adding_users_without_listing_them() {
 /// when the parent also lists it.
 #[test]
 fn a_denied_page_under_its_parent() {
-    let mut menu = build(&Caps(&["read", "edit_posts"], 0, None), None);
+    let mut menu = build(&Caps(&["read", "edit_posts"], 0, None), Look::Block);
     menu.submenu_nopriv
         .push(("tools.php".into(), "tools.php".into()));
     let screen = Screen {
@@ -330,7 +335,7 @@ fn screen_of(
 fn the_parent_is_found_as_php_finds_it() {
     let admin = Role("administrator");
     let current = |screen: &Screen| {
-        let menu = admin_menu(&admin, screen, None).unwrap();
+        let menu = admin_menu(&admin, screen, Look::Block).unwrap();
         let at = menu.find("wp-has-current-submenu").unwrap();
         menu.get(at..)
             .unwrap()
@@ -355,7 +360,7 @@ fn the_parent_is_found_as_php_finds_it() {
     let menu = admin_menu(
         &admin,
         &screen_of("edit.php", "", "edit.php?post_type=page"),
-        None,
+        Look::Block,
     )
     .unwrap();
     assert!(menu.contains(
@@ -368,7 +373,7 @@ fn the_parent_is_found_as_php_finds_it() {
 #[test]
 fn a_menu_moves_to_its_first_item_the_user_may_reach() {
     let user = Caps(&["read", "import", "export"], 0, None);
-    let menu = admin_menu(&user, &dashboard(), None).unwrap();
+    let menu = admin_menu(&user, &dashboard(), Look::Block).unwrap();
     let tools = menu
         .split("<li")
         .find(|item| item.contains("menu-icon-tools"))
@@ -376,7 +381,7 @@ fn a_menu_moves_to_its_first_item_the_user_may_reach() {
     assert!(tools.contains("<a href='import'"), "{tools}");
     let mut parent = String::new();
     let built = {
-        let mut menu = build(&user, None);
+        let mut menu = build(&user, Look::Block);
         prune(&mut menu, &user);
         menu
     };

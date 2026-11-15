@@ -60,14 +60,14 @@ fn themes_are_php_s() {
             "/hs-admin/themes"
         };
         let canonical = format!("{SITE}{path}");
-        let ours = themes(role, &request(&canonical, path, &BROWSER), broken).unwrap();
+        let ours = themes(role, &request(&canonical, path, &BROWSER), broken);
         failures.extend(check(role, ours, php.as_ref()));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(rows.len(), 14);
+    assert_eq!(rows.len(), 18);
 }
 
-/// The dashboard with an active theme the site does not have.
+/// The dashboard with an active theme or parent the site does not have.
 #[test]
 fn the_dashboard_of_a_missing_theme_is_php_s() {
     let mut failures = Vec::new();
@@ -80,19 +80,23 @@ fn the_dashboard_of_a_missing_theme_is_php_s() {
         failures.extend(check(role, ours, php.as_ref()));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.len(), 6);
 }
 
+/// The Tools screen's frame with a missing child or parent of the bundled
+/// theme: Design and the variations' fonts, or the block theme's frame.
 #[test]
-fn a_missing_parent_or_child_of_the_bundled_theme_is_not_ported() {
-    let canonical = format!("{SITE}/hs-admin/themes");
-    let request = request(&canonical, "/hs-admin/themes", &BROWSER);
-    for variant in ["g9parent", "g9child"] {
-        let role = Role(Box::leak(
-            format!("{variant}:administrator").into_boxed_str(),
-        ));
-        assert!(themes(&role, &request, false).is_none());
+fn tools_of_a_missing_child_or_parent_are_php_s() {
+    let mut failures = Vec::new();
+    let rows = rows("tools.php");
+    let canonical = format!("{SITE}/hs-admin/tools");
+    let request = request(&canonical, "/hs-admin/tools", &BROWSER);
+    for (role, php) in &rows {
+        let ours = Answer::from_page(crate::tools::tools(role, &request));
+        failures.extend(check(role, ours, php.as_ref()));
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(rows.len(), 4);
 }
 
 /// The message PHP made at the time it recorded, and the other schedules.

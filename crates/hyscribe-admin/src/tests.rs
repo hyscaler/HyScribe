@@ -333,10 +333,10 @@ impl Role {
             ("h9iconnone", "site_icon") => b"954",
             ("h9iconbig", "site_icon") => b"955",
             ("a5auto", "auto_update_themes") => b"a:1:{i:0;s:16:\"twentytwentyfive\";}",
-            ("g9parent", "template") => b"twentytwentyfour",
+            ("j9parent", "template") => b"gone",
             ("g9gone" | "g9noswitch" | "g9nooptions", "stylesheet" | "template")
             | ("g9kid", "template") => b"gone",
-            ("g9kid" | "g9child", "stylesheet") => b"kid",
+            ("g9kid" | "j9child", "stylesheet") => b"kid",
             ("g9pages" | "g9cpages" | "g9coldest", "page_comments" | "comments_per_page") => b"1",
             ("g9coldest", "default_comments_page") => b"oldest",
             ("s1static" | "s1same" | "s1privacy", "page_on_front") => b"2",
@@ -906,11 +906,13 @@ impl PageSite for Role {
         let stylesheet = CapabilityData::option(self, "stylesheet").unwrap_or_default();
         String::from_utf8(stylesheet).unwrap()
     }
-    fn font_faces(&self) -> Vec<u8> {
-        static FACES: OnceLock<Vec<u8>> = OnceLock::new();
-        FACES
-            .get_or_init(|| hyscribe_render::theme::twentytwentyfive().admin_font_faces(SITE))
-            .clone()
+    fn font_faces(&self, with_theme: bool) -> Vec<u8> {
+        static FACES: OnceLock<[Vec<u8>; 2]> = OnceLock::new();
+        let faces = FACES.get_or_init(|| {
+            let theme = hyscribe_render::theme::twentytwentyfive();
+            [false, true].map(|with_theme| theme.admin_font_faces(SITE, with_theme))
+        });
+        faces[usize::from(with_theme)].clone()
     }
 }
 

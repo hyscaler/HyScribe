@@ -14,7 +14,7 @@ use hyscribe_render::post::sanitize_html_class;
 
 use crate::admin_bar::{BarSite, Browser, admin_bar};
 use crate::assets::{Assets, Urls, cookie_path, site_icon_tags};
-use crate::menu::{Screen, admin_menu, commands};
+use crate::menu::{Look, Screen, admin_menu, commands};
 
 /// `wp_removable_query_args()`: what the canonical admin URL leaves out.
 pub const REMOVABLE: [&[u8]; 28] = [
@@ -83,6 +83,9 @@ pub(crate) fn wp_admin_notice(
 /// `$wp_version`.
 const VERSION: &str = include_str!("../../../wordpress/VERSION");
 
+/// The bundled theme, the only one a HyScribe installation has.
+pub(crate) const THEME: &str = "twentytwentyfive";
+
 const CUSTOMIZE: &str = include_str!("page/customize.html");
 const AUTH_CHECK: &str = include_str!("page/auth-check.html");
 const CANONICAL: &str = include_str!("page/canonical.html");
@@ -114,14 +117,15 @@ pub trait PageSite: BarSite + Urls {
     fn template(&self) -> String;
     /// `get_stylesheet()`.
     fn stylesheet(&self) -> String;
-    /// The bundled theme's font faces as the admin prints them.
-    fn font_faces(&self) -> Vec<u8>;
+    /// The bundled theme's font faces as the admin prints them, those of
+    /// its `theme.json` only `with_theme`, as its style variations' always.
+    fn font_faces(&self, with_theme: bool) -> Vec<u8>;
 }
 
 /// The Customize link of the Appearance menu, `None` while the active theme
 /// is the bundled block theme: any other is one the site does not have.
 fn customize_link(site: &dyn PageSite, page: &Page) -> Option<String> {
-    if site.stylesheet() == "twentytwentyfive" {
+    if site.stylesheet() == THEME {
         return None;
     }
     // `$_SERVER['REQUEST_URI']` without `wp_removable_query_args()`.
@@ -375,7 +379,12 @@ pub(crate) fn json(value: &Value) -> String {
 /// `user_can_access_admin_page()` turns them away.
 pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option<String> {
     let customize = customize_link(site, page);
-    let menu = admin_menu(site, &page.screen, customize.as_deref())?;
+    // A missing child of the bundled theme has its parent's `theme.json`.
+    let parent = site.template() == THEME;
+    let look = customize
+        .as_deref()
+        .map_or(Look::Block, |url| Look::Classic(url, parent));
+    let menu = admin_menu(site, &page.screen, look)?;
     let urls: &dyn Urls = site;
     let color = site.admin_color().unwrap_or_default();
     let scheme = SCHEMES
@@ -383,7 +392,7 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
         .find(|scheme| scheme.name.as_bytes() == color)
         .unwrap_or(&SCHEMES[0]);
     let mut assets = Assets::new(true);
-    enqueue(&mut assets, site, page, scheme, customize.as_deref());
+    enqueue(&mut assets, site, page, scheme, look);
     for (handle, data) in page.script_data {
         assets.set_script_data(handle, "data", Value::String(data.as_bytes().to_vec()));
     }
@@ -393,8 +402,10 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
     }
     let mut out = head(site, page);
     out.extend(assets.print_admin_styles(urls));
-    if customize.is_none() {
-        out.extend(site.font_faces());
+    match look {
+        Look::Block => out.extend(site.font_faces(true)),
+        Look::Classic(_, true) => out.extend(site.font_faces(false)),
+        Look::Classic(_, false) => {}
     }
     // `wp_page_reload_on_back_button_js()`, on the editors' screens.
     if matches!(page.screen.pagenow, "post.php" | "post-new.php") {
@@ -434,13 +445,7 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
 
 /// `admin_enqueue_scripts`: what every screen enqueues, with this
 /// request's data.
-fn enqueue(
-    assets: &mut Assets,
-    site: &dyn PageSite,
-    page: &Page,
-    scheme: &Scheme,
-    customize: Option<&str>,
-) {
+fn enqueue(assets: &mut Assets, site: &dyn PageSite, page: &Page, scheme: &Scheme, look: Look) {
     // `admin.php` enqueues the admin bar's, the screen its own, then
     // `admin-header.php` and its hooks the rest.
     assets.enqueue_style("admin-bar");
@@ -537,7 +542,7 @@ fn enqueue(
             json(&preferences)
         )]),
     );
-    let menu_commands = commands(site, customize)
+    let menu_commands = commands(site, look)
         .into_iter()
         .enumerate()
         .map(|(i, (label, url, name))| {

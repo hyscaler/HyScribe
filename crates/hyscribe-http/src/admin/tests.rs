@@ -1129,6 +1129,14 @@ async fn a_missing_theme_is_php_s() {
     assert_eq!(with_values(&php("g9gone"), &page), page);
     let response = get(&gone, "/hs-admin/themes?broken=1&x=1", host, &cookies).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // A missing child of the bundled theme, with its parent's fonts.
+    let mut kid = Arc::try_unwrap(gone).ok().unwrap();
+    kid.options.insert("stylesheet".into(), b"kid".to_vec());
+    kid.options
+        .insert("template".into(), b"twentytwentyfive".to_vec());
+    let kid = Arc::new(kid);
+    let page = page_of(get(&kid, "/hs-admin/themes", host, &cookies).await).await;
+    assert_eq!(with_values(&php("j9child"), &page), page);
 }
 
 /// Paged comments link to their page, on the comments list and the

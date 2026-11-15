@@ -420,8 +420,9 @@ impl PageSite for Admin<'_> {
     fn stylesheet(&self) -> String {
         self.site.option("stylesheet")
     }
-    fn font_faces(&self) -> Vec<u8> {
-        self.site.theme.admin_font_faces(&self.reads.site_url())
+    fn font_faces(&self, with_theme: bool) -> Vec<u8> {
+        let url = self.reads.site_url();
+        self.site.theme.admin_font_faces(&url, with_theme)
     }
 }
 
@@ -1144,7 +1145,7 @@ fn screen(
                 return None;
             }
             match path {
-                "/hs-admin/themes" => themes(admin, &request, broken.flatten().is_some())?,
+                "/hs-admin/themes" => themes(admin, &request, broken.flatten().is_some()),
                 "/hs-admin/import" => tools::import(admin, &request),
                 _ => tools::export(admin, &request),
             }

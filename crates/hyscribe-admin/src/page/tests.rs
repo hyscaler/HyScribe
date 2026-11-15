@@ -94,7 +94,7 @@ impl PageSite for Fake {
     fn stylesheet(&self) -> String {
         "a b".into()
     }
-    fn font_faces(&self) -> Vec<u8> {
+    fn font_faces(&self, _: bool) -> Vec<u8> {
         Vec::new()
     }
 }

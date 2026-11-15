@@ -285,6 +285,9 @@ impl Role {
         if self.terms_content() {
             return crate::terms::content::terms(taxonomy);
         }
+        if self.variant() == "t2saved" {
+            return crate::terms::content::saved(taxonomy);
+        }
         if self.listing() {
             return crate::posts::content::terms(taxonomy);
         }

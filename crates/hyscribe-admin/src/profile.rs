@@ -18,6 +18,23 @@ use crate::posts::Answer;
 use crate::text;
 use crate::users::{UsersSite, dropdown_roles, role_names};
 
+/// `wp_get_referer()` of a request to `uri` that sent the `Referer`
+/// `sent`: the page the browser came from, if not this one and on the site.
+pub(crate) fn wp_get_referer(
+    site: &dyn ProfileSite,
+    sent: Option<&str>,
+    uri: &str,
+) -> Option<String> {
+    let sent = sent?;
+    let home = BarSite::home_url(site);
+    let here = format!("{}{uri}", home.strip_suffix('/').unwrap_or(&home));
+    if sent == uri || sent == here {
+        return None;
+    }
+    let valid = site.validate_redirect(sent.as_bytes(), "");
+    (!valid.is_empty()).then(|| String::from_utf8_lossy(&valid).into_owned())
+}
+
 /// What the profile asks of the site beyond the users list's.
 pub trait ProfileSite: UsersSite {
     /// `get_userdata( $id )` with the user's name meta; `None` for none.

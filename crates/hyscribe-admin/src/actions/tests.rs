@@ -244,6 +244,8 @@ fn actions_are_named_as_php_names_them() {
         ("users", "action=resetpassword", "resetpassword"),
         ("users", "action=-1", ""),
         ("edit", "changeit=Change&action=trash", "trash"),
+        ("edit-tags", "action=delete&delete_tags[]=2", "bulk-delete"),
+        ("edit-tags", "action=-1", ""),
     ] {
         let get = fields(query);
         let asked = Asked {

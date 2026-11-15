@@ -284,3 +284,57 @@ fn a_search_pages_what_it_found() {
     };
     assert_eq!(listing.tree(3, 6, true).matches("<tr ").count(), 3);
 }
+
+/// The body of `case` in `reference/admin-saves/golden.sh`, under
+/// hs-admin's names.
+fn saved_answer(case: &str) -> String {
+    let golden = include_str!("../../tests/golden/admin-saves.tsv");
+    let row = golden
+        .lines()
+        .find(|row| row.starts_with(&format!("{case}\t")));
+    let body = row.unwrap().split('\t').nth(3).unwrap();
+    hs_admin_page(&String::from_utf8(unhex(body)).unwrap())
+}
+
+/// The Ajax answers of Quick Edit and the add form are PHP's: the rows of
+/// the term saved or added, with its fields and the notice.
+#[test]
+fn ajax_rows_are_php_s() {
+    let saved = Role("t2saved:administrator");
+    let term = |taxonomy, id| {
+        let terms = crate::posts::PostsSite::terms(&saved, taxonomy);
+        terms.into_iter().find(|term| term.id == id).unwrap()
+    };
+    let unchanged = saved_row(&Role("administrator"), CATEGORY, &term("category", 1), "");
+    assert_eq!(unchanged, saved_answer("ajax-inline-unchanged"));
+    let renamed = saved_row(&saved, POST_TAG, &term("post_tag", 801), "");
+    assert_eq!(renamed, saved_answer("ajax-inline-rename"));
+    let added = |id, term_taxonomy_id| Added {
+        term: term(if id == 803 { "category" } else { "post_tag" }, id),
+        term_group: 0,
+        term_taxonomy_id,
+    };
+    let tag = term_added(
+        &saved,
+        POST_TAG,
+        &added(802, 802),
+        "/hs-admin/edit-tags?taxonomy=post_tag",
+    );
+    assert_eq!(tag, saved_answer("ajax-add-tag"));
+    let child = term_added(&saved, CATEGORY, &added(803, 803), "");
+    assert_eq!(child, saved_answer("ajax-add-child"));
+    for (case, code, message) in [
+        (
+            "ajax-add-exists",
+            "term_exists",
+            "A term with the name provided already exists with this parent.",
+        ),
+        (
+            "ajax-add-empty",
+            "empty_term_name",
+            "A name is required for this term.",
+        ),
+    ] {
+        assert_eq!(add_failed(code, message), saved_answer(case));
+    }
+}

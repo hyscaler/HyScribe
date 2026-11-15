@@ -31,7 +31,9 @@ use hyscribe_admin::posts::{
 use hyscribe_admin::profile::{EditArgs, ProfileSite, profile, user_edit};
 use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
 use hyscribe_admin::settings_more;
-use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
+use hyscribe_admin::terms::{
+    Taxonomy as Terms, TermArgs, TermEditArgs, TermsSite, edit_tags, term_edit,
+};
 use hyscribe_admin::tools::{self, Requests, RequestsArgs, ToolsSite, privacy_requests};
 use hyscribe_admin::users::{ListedUser, UserArgs, UserQuery, UsersSite, user_order, users};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
@@ -1233,6 +1235,10 @@ fn screen(
             edit_comments(admin, &args, admin.settings.as_deref(), &request)?
         }
         "/hs-admin/edit-tags" => edit_tags(admin, &term_args(query)?, &request),
+        "/hs-admin/term" => {
+            let args = TermEditArgs::parse(query, admin.referer.clone())?;
+            term_edit(admin, &args, &request)
+        }
         "/hs-admin/edit" => {
             let args = list_args(admin, &raw)?;
             edit(admin, &args, &canonical, origin, request_uri, browser)?
@@ -1295,6 +1301,26 @@ fn save(admin: &mut Admin, screen: &str, asked: &Asked) -> Response {
         Err(err) => failed(admin, err),
     }
 }
+
+/// An `admin-ajax.php` action with a `saves::Ajax` handler past its checks,
+/// as [`save`]; shadow mode's `wp_die()` is the message alone. `None` for
+/// an action without one.
+fn ajax_save(admin: &Admin, asked: &Asked) -> Option<Response> {
+    let action = asked.request("action").map(Value::to_php_string);
+    let handler = saves::ajax_handler(&action.unwrap_or_default())?;
+    let Some(writer) = &admin.site.writer else {
+        return Some(ajax_text(StatusCode::FORBIDDEN, HTML, READ_ONLY.into()));
+    };
+    let saved = Handle::current()
+        .block_on(async { saves::act(writer.begin().await, handler, asked).await });
+    Some(match saved {
+        Ok(answer) => saves::ajax_served(admin, asked, answer),
+        Err(err) => failed(admin, err),
+    })
+}
+
+/// The type of `admin-ajax.php`'s answers but for XML and JSON.
+const HTML: &str = "text/html; charset=UTF-8";
 
 /// The answer to a write function's error: 501 for what is not ported,
 /// else the database error page.
@@ -1390,7 +1416,10 @@ fn ajax_answer(
             let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
             let mut admin = Admin::new(reads, site, user);
             match admin_ajax(Some(&admin), &asked) {
-                Ok(()) => return save(&mut admin, "admin-ajax", &asked),
+                Ok(()) => {
+                    let saved = ajax_save(&admin, &asked);
+                    return saved.unwrap_or_else(|| save(&mut admin, "admin-ajax", &asked));
+                }
                 refused => refused,
             }
         }

@@ -1,0 +1,21 @@
+# The rows PHP WordPress writes for the action admin-terms-delete (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 09:38:05 to 2026-11-15 09:38:05 UTC.
+# %wp_terms:1% is 8.
+# %wp_terms:2% is 9.
+# %wp_term_taxonomy:1% is 8.
+# %wp_term_taxonomy:2% is 9.
+# %wp_options:1% is 139.
+# %wp_options:2% is 141.
+wp_options	category_children	~	option_id	%wp_options:1%	%wp_options:2%
+wp_options	category_children	~	option_value	a:1:{i:%wp_terms:1%;a:1:{i:0;i:%wp_terms:2%;}}	a:0:{}
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	count	0
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	description	
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	term_id	%wp_terms:1%
+wp_term_taxonomy	%wp_term_taxonomy:1%	-	term_taxonomy_id	%wp_term_taxonomy:1%
+wp_term_taxonomy	%wp_term_taxonomy:2%	~	parent	%wp_terms:1%	0
+wp_terms	%wp_terms:1%	-	name	Oracle doomed
+wp_terms	%wp_terms:1%	-	slug	oracle-doomed
+wp_terms	%wp_terms:1%	-	term_group	0
+wp_terms	%wp_terms:1%	-	term_id	%wp_terms:1%

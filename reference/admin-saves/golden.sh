@@ -5,7 +5,9 @@
 # reference/admin-saves/cases.list once their checks pass, as they really
 # write, as crates/hyscribe-admin/tests/golden/admin-saves.tsv:
 #   case<TAB>status<TAB>Location<TAB>hex(body)
-# Each case is sent as user 1, an administrator
+# and the screen named in a case's seventh column, fetched after it, as
+# admin-saves-after.tsv: case<TAB>status<TAB>hex(page). Nonces in bodies and
+# pages are masked as %nonce:action%. Each case is sent as user 1, an administrator
 # (reference/admin-menu/as-role.php), with user 1's nonce, over the default
 # install and reference/action-checks/content.sql (added, and deleted
 # after). The actions write, so start from a fresh db.sh up and php.sh up,
@@ -19,6 +21,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HERE="$ROOT/reference/admin-saves"
 CONTENT="$ROOT/reference/action-checks/content.sql"
 OUT="$ROOT/crates/hyscribe-admin/tests/golden/admin-saves.tsv"
+AFTER="$ROOT/crates/hyscribe-admin/tests/golden/admin-saves-after.tsv"
 MU=/var/www/html/wp-content/mu-plugins
 TMP=$(mktemp -d)
 sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress "$@"; }
@@ -30,8 +33,26 @@ cleanup() {
 trap cleanup EXIT
 sed '/^-- cleanup$/,$d' "$CONTENT" | sql
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
+# The nonces masked: the cases', the screens' and those of terms 801 to 809.
+masked="log-out heartbeat-nonce wp_rest update_can_compress_scripts bulk-tags add-tag taxinlineeditnonce screen-options-nonce"
+masked="$masked $(grep -v '^#' "$HERE/cases.list" | cut -f5 | sort -u | tr '\n' ' ')"
+for id in 1 801 802 803 804 805 806 807 808 809; do masked="$masked delete-tag_$id update-tag_$id"; done
+# shellcheck disable=SC2086
+"$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 1 ); foreach ( array_slice( $argv, 1 ) as $action ) { echo wp_create_nonce( $action ), "\t", $action, "\n"; }' \
+  $masked > "$TMP/nonces"
+hex() {
+  php -r '
+    $p = file_get_contents( $argv[1] );
+    foreach ( file( $argv[2], FILE_IGNORE_NEW_LINES ) as $line ) {
+      list( $nonce, $action ) = explode( "\t", $line );
+      $p = str_replace( $nonce, "%nonce:$action%", $p );
+    }
+    $p = preg_replace( "/\"time\":\"[0-9]+\"/", "\"time\":\"%time%\"", $p );
+    echo bin2hex( $p );' "$1" "$TMP/nonces"
+}
 : > "$OUT"
-while IFS=$'\t' read -r case method target body action field; do
+: > "$AFTER"
+while IFS=$'\t' read -r case method target body action field after; do
   # User 1's nonce, without a session as the requests have none.
   nonce=$("$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 1 ); echo wp_create_nonce( $argv[1] );' "$action")
   url="$BASE/wp-admin/$target"
@@ -44,7 +65,11 @@ while IFS=$'\t' read -r case method target body action field; do
   fi
   status=$(curl "${args[@]}" "$url")
   location=$(grep -i '^location:' "$TMP/head" | cut -d' ' -f2- | tr -d '\r' || true)
-  printf '%s\t%s\t%s\t%s\n' "$case" "$status" "$location" "$(xxd -p < "$TMP/body" | tr -d '\n')" >> "$OUT"
+  printf '%s\t%s\t%s\t%s\n' "$case" "$status" "$location" "$(hex "$TMP/body")" >> "$OUT"
+  if [ -n "${after:-}" ]; then
+    status=$(curl -g -s -o "$TMP/after" -w '%{http_code}' -b hyscribe_role=administrator "$BASE/wp-admin/$after")
+    printf '%s\t%s\t%s\n' "$case" "$status" "$(hex "$TMP/after")" >> "$AFTER"
+  fi
 done < <(grep -v '^#' "$HERE/cases.list")
 # What PHP wrote, for a review: users-promote made user 801 an editor.
 echo "user 801: $(sql -N -e "SELECT meta_value FROM wp_usermeta WHERE user_id = 801 AND meta_key = 'wp_capabilities'" < /dev/null)" >&2

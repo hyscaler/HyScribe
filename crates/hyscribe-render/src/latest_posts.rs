@@ -124,11 +124,7 @@ impl Renderer<'_> {
         } else {
             per_page.to_int()
         };
-        let limit = match per_page {
-            -1 => u32::MAX,
-            0 => 1,
-            n => u32::try_from(n.unsigned_abs()).unwrap_or(u32::MAX),
-        };
+        let limit = crate::query_loop::query_limit(per_page);
         let ascending = matches!(get("order"), Value::String(o) if o.eq_ignore_ascii_case(b"asc"));
         let mut categories: Vec<u64> = get("categories")
             .as_array()

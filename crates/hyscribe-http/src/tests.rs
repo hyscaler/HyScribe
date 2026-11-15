@@ -251,6 +251,7 @@ async fn database_errors_show_no_details() {
         writer: None,
         defined: Vec::new(),
         public_users: true,
+        behind_proxy: false,
     });
     // The 404 page fails while rendering, reading an option it has not loaded.
     for uri in [
@@ -884,6 +885,7 @@ async fn the_front_page_links_to_home() {
         writer: None,
         defined: Vec::new(),
         public_users: true,
+        behind_proxy: false,
     });
     // Search results list the front page with a link to it.
     let reply = request(&site, "GET", "/?s=sample").await;
@@ -1014,6 +1016,7 @@ async fn failed_reads_answer_defaults() {
         writer: None,
         defined: Vec::new(),
         public_users: true,
+        behind_proxy: false,
     });
     let handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {

@@ -19,7 +19,7 @@ pub mod content_tags;
 mod core_blocks;
 pub use core_blocks::{
     admin_comment_text, avatar_url, comment_author_of, comment_author_url, comment_avatar,
-    default_avatar, front_comment_text, number_format, user_avatar, user_name,
+    comments_open_at, default_avatar, front_comment_text, number_format, user_avatar, user_name,
 };
 pub mod date;
 mod dimensions;

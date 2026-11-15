@@ -24,11 +24,25 @@ pub(crate) fn robots(public: bool, login: bool) -> String {
 /// The page for `wp_die( $message, $title )` on a site that is `public` or
 /// not; `message` is HTML.
 pub fn page(public: bool, title: &str, message: &str) -> Vec<u8> {
+    die(public, title, message, "")
+}
+
+/// [`page`] with its `back_link`, a link back in the browser's history.
+pub fn page_with_back_link(public: bool, title: &str, message: &str) -> Vec<u8> {
+    let back = "\n<p><a href='javascript:history.back()'>&laquo; Back</a></p>";
+    die(public, title, message, back)
+}
+
+/// The page with `after` past the message's `div`.
+fn die(public: bool, title: &str, message: &str, after: &str) -> Vec<u8> {
     let (head, rest) = PAGE.split_once("%robots%").unwrap_or_default();
     let (before, rest) = rest.split_once("%title%").unwrap_or_default();
     let (middle, tail) = rest.split_once("%message%").unwrap_or_default();
+    let (div, tail) = tail.split_at_checked("</div>".len()).unwrap_or_default();
     let robots = robots(public, false);
-    [head, &robots, before, title, middle, message, tail]
-        .concat()
-        .into_bytes()
+    [
+        head, &robots, before, title, middle, message, div, after, tail,
+    ]
+    .concat()
+    .into_bytes()
 }

@@ -1,0 +1,20 @@
+# The rows PHP WordPress writes for the action comment-post-flood-admin (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 09:35:16 to 2026-11-15 09:35:16 UTC.
+# %wp_comments:1% is 21.
+# %wp_comments:2% is 22.
+wp_comments	%wp_comments:2%	+	comment_ID	%wp_comments:2%
+wp_comments	%wp_comments:2%	+	comment_agent	HyScribe oracle
+wp_comments	%wp_comments:2%	+	comment_approved	1
+wp_comments	%wp_comments:2%	+	comment_author	admin
+wp_comments	%wp_comments:2%	+	comment_author_IP	192.0.2.1
+wp_comments	%wp_comments:2%	+	comment_author_email	admin@default-install.test
+wp_comments	%wp_comments:2%	+	comment_author_url	http://default-install.test
+wp_comments	%wp_comments:2%	+	comment_content	Another administrator's comment.
+wp_comments	%wp_comments:2%	+	comment_date	%now%
+wp_comments	%wp_comments:2%	+	comment_date_gmt	%now%
+wp_comments	%wp_comments:2%	+	comment_karma	0
+wp_comments	%wp_comments:2%	+	comment_parent	0
+wp_comments	%wp_comments:2%	+	comment_post_ID	1
+wp_comments	%wp_comments:2%	+	comment_type	comment
+wp_comments	%wp_comments:2%	+	user_id	1
+wp_posts	1	~	comment_count	2	3

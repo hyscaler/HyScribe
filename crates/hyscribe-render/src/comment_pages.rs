@@ -11,6 +11,7 @@ use hyscribe_model::Comment;
 use hyscribe_phpser::{Value, add_query_arg, is_empty_string};
 
 use crate::blocks::Block;
+use crate::comments::post_comments;
 use crate::core_blocks::{Context, prepared, render};
 use crate::formatting::encode_ampersands;
 use crate::permalinks::Permalinks;
@@ -197,7 +198,7 @@ impl Renderer<'_> {
         let all = self
             .context
             .post_id
-            .map(|id| site.comments(id))
+            .map(|id| post_comments(site, self.context.request, id))
             .unwrap_or_default();
         paging(site, self.context.request, listed(site, &all).len())
     }

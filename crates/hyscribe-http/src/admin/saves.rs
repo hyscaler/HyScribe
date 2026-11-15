@@ -110,7 +110,6 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         ("post", b"trash") => Some(posts::trash),
         ("post", b"untrash") => Some(posts::untrash),
         ("post", b"delete") => Some(posts::delete),
-        ("edit", _) => Some(posts::bulk),
         ("users", b"dodelete") => Some(users::dodelete),
         ("users", b"resetpassword") => Some(users::resetpassword),
         ("user-new", b"createuser") => Some(user_edit::create),
@@ -134,6 +133,7 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         ("admin-ajax", b"hidden-columns") => Some(screen::hidden_columns),
         ("admin-ajax", b"meta-box-order") => Some(screen::meta_box_order),
         (_, b"screen-options") => Some(screen::options),
+        ("edit", _) => Some(posts::bulk),
         _ => None,
     }
 }

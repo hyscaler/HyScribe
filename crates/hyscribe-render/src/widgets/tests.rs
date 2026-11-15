@@ -509,3 +509,128 @@ fn pages_match_php() {
     );
     assert_eq!(golden.lines().count(), 136);
 }
+
+/// The default install with `reference/media-image-widget/golden.sh`'s
+/// attachments and their meta.
+struct Attached {
+    install: crate::fixture::DefaultInstall,
+    attachments: Vec<(hyscribe_model::Post, hyscribe_phpser::Value)>,
+}
+
+impl Site for Attached {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        match name {
+            "siteurl" => Some(b"http://127.0.0.1:8081".to_vec()),
+            _ => self.install.option(name),
+        }
+    }
+    fn home_url(&self) -> Vec<u8> {
+        self.install.home_url()
+    }
+    fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        let attached = self.attachments.iter().find(|(post, _)| post.id == id);
+        attached
+            .map(|(post, _)| post.clone())
+            .or_else(|| self.install.post(id))
+    }
+    fn post_terms(&self, _: u64, _: &str) -> Vec<hyscribe_model::Term> {
+        Vec::new()
+    }
+    fn query(&self, _: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
+        Vec::new()
+    }
+    /// The first value `get_post_meta( $id )` gave, as stored.
+    fn post_meta(&self, post_id: u64, key: &str) -> Option<Vec<u8>> {
+        let (_, meta) = self
+            .attachments
+            .iter()
+            .find(|(post, _)| post.id == post_id)?;
+        let values = meta.get_str(key)?;
+        Some(values.get(&hyscribe_phpser::Key::Int(0))?.to_php_string())
+    }
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        Some(hyscribe_phpser::hash_hmac_md5(data, b"test-salt"))
+    }
+}
+
+/// Every case of `reference/media-image-widget/golden.sh`. Where PHP throws
+/// a `TypeError` (a URL's image with no width, in the loop, multiplied for
+/// its priority), the image is rendered as outside the loop but in view.
+#[test]
+fn media_image_matches_php() {
+    let golden = include_str!("../../tests/golden/media-image-widget.tsv");
+    let lines: Vec<Vec<&str>> = golden.lines().map(|l| l.split('\t').collect()).collect();
+    let theme = twentytwentyfive();
+    let mut failures = Vec::new();
+    let mut thrown = 0;
+    for f in &lines {
+        let state = hyscribe_phpser::json_decode(&unhex(f[2])).unwrap();
+        let field = |row: &hyscribe_phpser::Value, i| {
+            row.get(&hyscribe_phpser::Key::Int(i)).unwrap().clone()
+        };
+        let sizes = state.get_str("sizes").unwrap().as_array().unwrap();
+        let sizes: Vec<Vec<u8>> = sizes.iter().map(|(_, size)| size.to_php_string()).collect();
+        assert_eq!(
+            sizes,
+            super::media::IMAGE_SIZES.map(|size| size.as_bytes().to_vec())
+        );
+        assert!(!state.get_str("html5").unwrap().is_empty());
+        let attachments = state.get_str("attachments").unwrap().as_array().unwrap();
+        let site = Attached {
+            install: crate::fixture::DefaultInstall {
+                home: b"http://127.0.0.1:8081".to_vec(),
+            },
+            attachments: attachments
+                .iter()
+                .map(|(_, row)| {
+                    let post = hyscribe_model::Post {
+                        id: field(row, 0).to_int() as u64,
+                        post_type: "attachment".into(),
+                        mime_type: String::from_utf8(field(row, 1).to_php_string()).unwrap(),
+                        excerpt: field(row, 2).to_php_string(),
+                        guid: field(row, 3).to_php_string(),
+                        status: "inherit".into(),
+                        ..hyscribe_model::Post::default()
+                    };
+                    (post, field(row, 4))
+                })
+                .collect(),
+        };
+        let query = unhex(f[1]);
+        let request = Request {
+            singular: !query.is_empty(),
+            queried_object_id: if query.is_empty() { 0 } else { 1 },
+            ..Default::default()
+        };
+        let markup = unhex(f[0]);
+        let mut php = unhex(f[3]);
+        if php == b"TypeError" {
+            thrown += 1;
+            let outside = lines
+                .iter()
+                .find(|other| other[0] == f[0] && other[1].is_empty())
+                .unwrap();
+            php = String::from_utf8(unhex(outside[3]))
+                .unwrap()
+                .replace(" loading=\"lazy\"", "")
+                .into_bytes();
+        }
+        let ours = Renderer::new(&theme, &site, &request).render(&markup);
+        if ours != php {
+            failures.push(format!(
+                "{} {}\n  php:  {:?}\n  ours: {:?}",
+                String::from_utf8_lossy(&markup),
+                f[1],
+                String::from_utf8_lossy(&php),
+                String::from_utf8_lossy(&ours)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures[..failures.len().min(3)].join("\n")
+    );
+    assert_eq!((lines.len(), thrown), (100, 6));
+}

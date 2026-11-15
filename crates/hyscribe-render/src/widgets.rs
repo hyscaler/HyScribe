@@ -230,6 +230,7 @@ impl Renderer<'_> {
             "custom_html" => self.custom_html_widget(args, instance),
             "meta" => self.meta_widget(args, instance),
             "text" => self.text_widget(args, instance),
+            "media_image" => self.media_image_widget(args, instance),
             _ => Vec::new(),
         }
     }
@@ -834,6 +835,8 @@ fn titled(args: &Args, title: &[u8]) -> Vec<u8> {
     }
     [&args.before_title[..], title, &args.after_title].concat()
 }
+
+mod media;
 
 #[cfg(test)]
 mod tests;

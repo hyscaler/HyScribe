@@ -35,7 +35,7 @@ async fn sanitizes_as_php() {
             }
         }
         assert!(failures.is_empty(), "{failures:#?}");
-        assert_eq!(golden.lines().count(), 194);
+        assert_eq!(golden.lines().count(), 195);
     })
     .await;
 }

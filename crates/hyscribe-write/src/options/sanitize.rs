@@ -81,10 +81,12 @@ fn has_url(text: &[u8]) -> bool {
 
 /// `preg_match( '/%[^\/%]+%/', $value )`: a structure tag.
 fn has_tag(text: &[u8]) -> bool {
-    text.split(|&b| b == b'%')
-        .skip(1)
-        .zip(text.split(|&b| b == b'%').skip(2))
-        .any(|(tag, _)| !tag.is_empty() && !tag.contains(&b'/'))
+    let parts: Vec<&[u8]> = text.split(|&b| b == b'%').skip(1).collect();
+    // Each part but the last is closed by a `%`.
+    let closed = parts.split_last().map_or(&[][..], |(_, closed)| closed);
+    closed
+        .iter()
+        .any(|tag| !tag.is_empty() && !tag.contains(&b'/'))
 }
 
 /// Whether `role` is one of the roles stored in `{prefix}user_roles`.

@@ -159,6 +159,7 @@ permalink_structure	733a32303a22687474703a2f2f782f25706f73746e616d65252f223b	733
 permalink_structure	733a343a222f25252f223b	733a303a22223b	A structure tag is required when using custom permalinks. <a href="https://wordpress.org/documentation/article/customize-permalinks/#choosing-your-permalink-structure">Learn more</a>
 permalink_structure	733a32303a222f2579656172252fff25706f73746e616d65252f223b	733a31393a222f2579656172252f25706f73746e616d65252f223b	
 permalink_structure	733a373a222f25612f62252f223b	733a303a22223b	A structure tag is required when using custom permalinks. <a href="https://wordpress.org/documentation/article/customize-permalinks/#choosing-your-permalink-structure">Learn more</a>
+permalink_structure	733a31323a222f782f25706f73746e616d65223b	733a303a22223b	A structure tag is required when using custom permalinks. <a href="https://wordpress.org/documentation/article/customize-permalinks/#choosing-your-permalink-structure">Learn more</a>
 permalink_structure	613a313a7b693a303b733a313a2278223b7d	fatal	
 category_base	733a363a22746f70696373223b	733a363a22746f70696373223b	
 category_base	733a383a222f746f706963732f223b	733a383a222f746f706963732f223b	

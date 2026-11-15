@@ -1506,3 +1506,16 @@ async fn a_spent_budget_fails_every_statement() {
         );
     }
 }
+
+/// The addresses the configuration sets, by option name, and none for
+/// another option or a writer without them.
+#[tokio::test]
+async fn an_action_knows_the_configured_addresses() {
+    let urls = vec![("home", "http://h.test".to_string())];
+    let configured = writer().await.with_urls(urls);
+    let write = configured.begin().await.unwrap();
+    assert_eq!(write.configured("home"), Some("http://h.test"));
+    assert_eq!(write.configured("siteurl"), None);
+    let plain = writer().await;
+    assert_eq!(plain.begin().await.unwrap().configured("home"), None);
+}

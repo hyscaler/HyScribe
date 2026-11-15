@@ -149,7 +149,7 @@ pub(crate) fn kept_errors(variant: &str) -> Option<Vec<u8>> {
     };
     let saved = |message| error("general", "settings_updated", message, "success");
     let errors = match variant {
-        "o5saved" | "o5expired" => vec![saved("Settings saved.")],
+        "o5saved" | "o5expired" | "o5now" => vec![saved("Settings saved.")],
         "o5failed" => vec![error(
             "general",
             "settings_updated",
@@ -271,4 +271,6 @@ fn kept_notices_by_type() {
         assert!(kinds.contains(notice), "{notice}");
     }
     assert!(!page("o5bad:administrator").contains("settings-error"));
+    // A transient expires only after its timeout.
+    assert!(page("o5now:administrator").contains("Settings saved."));
 }

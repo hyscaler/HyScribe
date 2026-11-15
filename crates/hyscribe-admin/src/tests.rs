@@ -328,6 +328,7 @@ impl Role {
                 return kept.map(|kept| &*Box::leak(kept.into_boxed_slice()));
             }
             ("o5expired", "_transient_timeout_settings_errors") => b"1794499999",
+            ("o5now", "_transient_timeout_settings_errors") => b"1794500000",
             (variant, "_transient_timeout_settings_errors") if variant.starts_with("o5") => {
                 b"4102444800"
             }

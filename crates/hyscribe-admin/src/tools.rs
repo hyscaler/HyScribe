@@ -5,7 +5,7 @@
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
 use hyscribe_model::Term;
-use hyscribe_phpser::remove_query_arg;
+use hyscribe_phpser::{is_empty_string, remove_query_arg};
 use hyscribe_render::date::MONTHS;
 use hyscribe_render::formatting::wptexturize;
 
@@ -285,9 +285,8 @@ pub enum Requests {
     Erase,
 }
 
-/// The screen of `requests` with `args`; `None` when a pending request is
-/// older than a day, which PHP marks failed with a write, or for a request
-/// of another status.
+/// The screen of `requests` with `args`; `None` for a request of another
+/// status, or a pending one over a day old, which PHP marks failed.
 pub fn privacy_requests(
     site: &dyn ToolsSite,
     requests: Requests,
@@ -374,12 +373,11 @@ pub fn privacy_requests(
     let unpaged = text(&remove_query_arg(&[b"paged"], request.canonical.as_bytes()));
     let headers =
         |counter, with_id| column_headers(&columns, &hidden, &order, &unpaged, counter, with_id);
-    let filter = RequestsArgs::sanitized(args.filter.as_ref());
     let heading = match requests {
         Requests::Export => "Export personal data list navigation",
         Requests::Erase => "Erase personal data list navigation",
     };
-    let pages = listing.total.div_ceil(listing.per_page);
+    let pages = listing.total.div_ceil(per_page);
     let current = pagenum(args.paged.as_deref()).min(pages).max(1);
     let paging = |which| {
         pagination(
@@ -396,7 +394,11 @@ pub fn privacy_requests(
         ("complete", "Mark requests as completed"),
         ("delete", "Delete requests"),
     ];
-    let search = if requests::empty(args.search.as_ref()) && !has_items {
+    let searched = args
+        .search
+        .as_deref()
+        .is_some_and(|s| !is_empty_string(s.as_bytes()));
+    let search = if !searched && !has_items {
         String::new()
     } else {
         let order = [
@@ -424,9 +426,9 @@ pub fn privacy_requests(
         &[
             ("url", text(&esc_url(url.as_bytes()))),
             ("request_nonce", site.nonce("personal-data-request")),
-            ("views", requests::views(site, file, &listing, &filter)),
+            ("views", requests::views(site, file, &listing)),
             ("search", search),
-            ("filter_status", esc_attr(filter.as_bytes())),
+            ("filter_status", esc_attr(listing.filter.as_bytes())),
             (
                 "orderby",
                 esc_attr(RequestsArgs::sanitized(args.orderby.as_ref()).as_bytes()),

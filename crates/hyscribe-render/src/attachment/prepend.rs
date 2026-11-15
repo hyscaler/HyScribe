@@ -133,10 +133,8 @@ pub fn audio_shortcode(id: u64, url: &[u8], instances: &Cell<u64>) -> Option<Vec
     .into()
 }
 
-/// `edit_form_image_editor()`'s `wp_video_shortcode()`, the page's first,
-/// of attachment `id` at `url`: as large as its metadata's `size` (0 for a
-/// side not set) up to 640 pixels wide, with its `poster`; `None` for a
-/// file the player does not play.
+/// `edit_form_image_editor()`'s `wp_video_shortcode()` of attachment `id`:
+/// its `size` (0 unset) up to 640 wide, `poster`; `None` if it cannot play.
 pub fn video_shortcode(id: u64, url: &[u8], size: (i64, i64), poster: &[u8]) -> Option<Vec<u8>> {
     let extension = extension(url);
     let (_, mime) = VIDEO_TYPES.iter().find(|(ext, _)| *ext == extension)?;
@@ -204,7 +202,7 @@ mod tests {
 
     use hyscribe_model::{Post, PostQuery, Term};
 
-    use super::{file_is, is_video, prepend_attachment};
+    use super::{file_is, is_audio, is_video, prepend_attachment, video_shortcode};
     use crate::media::Loading;
     use crate::site::Site;
 
@@ -334,5 +332,39 @@ mod tests {
         assert!(is_video(b"a/clip.mov", "video/quicktime"));
         assert!(!is_video(b"", "video/mp4"));
         assert!(!file_is(b"a/x.mp3", "import", "audio", &[]));
+        assert!(is_audio(b"a/x.MP3", "import") && !is_audio(b"a/x.mp4", "import"));
+    }
+
+    /// The admin's video player, as `reference/attachment-edit/golden.sh`
+    /// records it: shrunk to 640 pixels wide, as large as a smaller video,
+    /// 640 by 360 without a side, with a poster; none for a file it cannot play.
+    #[test]
+    fn video_players_are_php_s() {
+        let player = |url: &str, size, poster: &[u8]| {
+            video_shortcode(7, url.as_bytes(), size, poster).map(|p| String::from_utf8(p).unwrap())
+        };
+        let src = |ext: &str| format!("<source type=\"video/{ext}\" src=\"/v.{ext}?_=1\" />");
+        assert_eq!(
+            player("/v.mp4", (1280, 721), b"/p&q.png").unwrap(),
+            format!(
+                "<div style=\"width: 640px;\" class=\"wp-video\"><video class=\"wp-video-shortcode\" id=\"video-7-1\" width=\"640\" height=\"361\" poster=\"/p&#038;q.png\" preload=\"metadata\" controls=\"controls\">{}<a href=\"/v.mp4\">/v.mp4</a></video></div>",
+                src("mp4")
+            )
+        );
+        let small = player("/v.webm", (320, 240), b"").unwrap();
+        assert!(small.contains("width: 320px;") && small.contains("height=\"240\" preload"));
+        for size in [(0, 240), (400, 0)] {
+            assert!(
+                player("/v.ogv", size, b"")
+                    .unwrap()
+                    .contains("width=\"640\" height=\"360\"")
+            );
+        }
+        assert!(
+            player("/v.ogv", (0, 0), b"")
+                .unwrap()
+                .contains(&src("ogg").replace("v.ogg", "v.ogv"))
+        );
+        assert!(player("/v.mov", (320, 240), b"").is_none());
     }
 }

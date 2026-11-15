@@ -233,7 +233,7 @@ impl Role {
     /// A `j9` variant of `reference/attachment-edit/golden.sh`, all of
     /// which hold user 2's lock.
     fn j9_media(&self) -> bool {
-        ["j9lock", "j9pretty", "j9noupload"]
+        ["j9lock", "j9pretty", "j9noupload", "j9front"]
             .iter()
             .any(|prefix| self.variant().starts_with(prefix))
     }
@@ -424,7 +424,10 @@ impl Role {
             ("s2day", "permalink_structure") => b"/%year%/%monthnum%/%day%/%postname%/",
             ("s2month", "permalink_structure") => b"/%year%/%monthnum%/%postname%/",
             ("s2numeric", "permalink_structure") => b"/archives/%post_id%",
-            ("s2postname" | "j9pretty" | "j9prettyfront", "permalink_structure") => b"/%postname%/",
+            (
+                "s2postname" | "j9pretty" | "j9prettyfront" | "j9prettynoread",
+                "permalink_structure",
+            ) => b"/%postname%/",
             ("s2custom", "permalink_structure") => b"/%category%/<%postname%>/",
             ("s2custom", "category_base") => b"topics",
             ("s2custom", "tag_base") => b"labels\"<",
@@ -1467,7 +1470,7 @@ impl crate::posts::PostsSite for Role {
         // `reference/attachment-edit/variants.php` takes these away.
         let denied = match self.variant() {
             "a8locknodelete" => "delete_post",
-            "a8locknoread" => "read_post",
+            "a8locknoread" | "j9prettynoread" => "read_post",
             _ => "",
         };
         if (cap, post.id) == (denied, 801) {
@@ -1526,8 +1529,9 @@ impl crate::posts::PostsSite for Role {
                 return Some(b"2".to_vec());
             }
             (variant, "user_count") if variant.starts_with("a8ttd") => return Some(b"3".to_vec()),
-            ("j9prettyfront", "show_on_front") => return Some(b"page".to_vec()),
+            ("j9prettyfront" | "j9front", "show_on_front") => return Some(b"page".to_vec()),
             ("j9prettyfront", "page_on_front") => return Some(b"2".to_vec()),
+            ("j9front", "page_on_front") => return Some(b"802".to_vec()),
             ("m4ttdpages", "wp_attachment_pages_enabled") => return Some(b"1".to_vec()),
             ("m4large", "large_size_h") => return Some(b"0".to_vec()),
             // Postponed at the clock's time, or long ago.

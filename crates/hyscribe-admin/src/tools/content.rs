@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! What `reference/privacy-requests/content.sql` adds to the default
-//! install, at the test site's clock: its requests and their meta, and the
-//! requests a query selects.
+//! What `reference/privacy-requests/content.sql` adds, at the test site's
+//! clock: its requests and their meta, and the requests a query selects.
 
 use hyscribe_model::{OrderBy, Post, PostQuery};
 

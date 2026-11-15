@@ -152,3 +152,38 @@ fn stale_requests_and_actions_are_not_ported() {
     assert!(RequestsArgs::parse("action=delete&request_id[]=861").is_none());
     assert!(RequestsArgs::parse("s[]=x").is_none());
 }
+
+/// `WP_Query`'s statuses for `filter-status`: the registered ones named,
+/// else every one, the Trash and auto-drafts left out by `any` or no filter.
+#[test]
+fn filters_take_wp_query_s_statuses() {
+    let present: Vec<(String, u64)> = ["request-pending", "trash", "auto-draft", "odd"]
+        .map(|status| (status.to_string(), 1))
+        .to_vec();
+    let all = ["request-pending", "trash", "auto-draft", "odd"].map(String::from);
+    assert_eq!(requests::statuses("", &present), ["request-pending", "odd"]);
+    assert_eq!(
+        requests::statuses("0", &present),
+        ["request-pending", "odd"]
+    );
+    assert_eq!(
+        requests::statuses("trash,any", &present),
+        ["request-pending", "odd"]
+    );
+    assert_eq!(
+        requests::statuses("odd,trash,draft", &present),
+        ["draft", "trash"]
+    );
+    assert_eq!(requests::statuses("odd", &present), all);
+}
+
+/// A request in a status not a request's lists no rows, which is not ported.
+#[test]
+fn other_statuses_are_not_ported() {
+    let trashed = hyscribe_model::Post {
+        status: "trash".into(),
+        ..hyscribe_model::Post::default()
+    };
+    let site = Role("j9req:administrator");
+    assert!(requests::rows(&site, Requests::Export, "x.php", (&[], &[]), &[trashed]).is_none());
+}

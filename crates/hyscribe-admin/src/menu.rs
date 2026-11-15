@@ -156,9 +156,8 @@ impl Menu {
 pub enum Look<'a> {
     /// The bundled block theme.
     Block,
-    /// A theme the site does not have, a classic theme without theme
-    /// supports: its Customize link, and whether the bundled theme is its
-    /// parent, whose `theme.json` it then has.
+    /// A missing theme, classic without supports: its Customize link, and
+    /// whether its parent is the bundled theme, whose `theme.json` it has.
     Classic(&'a str, bool),
 }
 

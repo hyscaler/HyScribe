@@ -172,6 +172,11 @@ pub(crate) fn posts() -> Vec<Post> {
             parent: 1,
             ..media(823, b"Cafe", "image/png")
         },
+        Post {
+            parent: 1,
+            ..media(824, b"Feed", "image/png")
+        },
+        media(825, b"Sizeless", "video/mp4"),
     ]
 }
 
@@ -200,10 +205,8 @@ fn media(id: u64, title: &[u8], mime_type: &str) -> Post {
     }
 }
 
-/// Attachments the screen does not port, which no golden records: a
-/// video featuring a PDF, published, a PDF with a scaled original, and
-/// sizeless; and under pretty permalinks, a file attached to a file, one
-/// without a slug, and two with a long slug they share.
+/// Attachments no golden records, the screen not porting their states; the
+/// last four under pretty permalinks only.
 pub(crate) fn unported() -> Vec<Post> {
     let long = vec![b'a'; 191];
     [
@@ -279,6 +282,10 @@ pub(crate) fn meta(id: u64, key: &str) -> Option<Vec<u8>> {
         (821, "_wp_attachment_metadata") => b"a:4:{s:8:\"filesize\";i:500;s:5:\"width\";i:320;s:6:\"height\";i:240;s:16:\"length_formatted\";s:7:\"1:00:01\";}",
         (822, "_wp_attached_file") => b"2026/06/hello.png",
         (822, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:17:\"2026/06/hello.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
+        (824, "_wp_attached_file") => b"2026/06/feed.png",
+        (824, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:16:\"2026/06/feed.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
+        (825, "_wp_attached_file") => b"2026/06/sizeless.mp4",
+        (825, "_wp_attachment_metadata") => b"a:2:{s:8:\"filesize\";i:700;s:5:\"width\";i:400;}",
         (823, "_wp_attached_file") => b"2026/06/cafe.png",
         (823, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:16:\"2026/06/cafe.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
         _ => return None,

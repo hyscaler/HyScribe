@@ -463,9 +463,8 @@ impl Head<'_> {
 }
 
 impl Theme {
-    /// `wp_print_font_faces()`, `with_theme`, and
-    /// `wp_print_font_faces_from_style_variations()`, which the admin prints
-    /// after its styles; a missing child of the theme has only the second.
+    /// `wp_print_font_faces()` `with_theme` (not for a missing child), then
+    /// `wp_print_font_faces_from_style_variations()`, as the admin prints.
     pub fn admin_font_faces(&self, siteurl: &str, with_theme: bool) -> Vec<u8> {
         let theme_uri = format!("{siteurl}/wp-content/themes/{}", self.slug);
         let families = self.global.setting(&["typography", "fontFamilies"]);

@@ -132,7 +132,7 @@ fn pages_are_php_s() {
         "{}",
         failures[..failures.len().min(3)].join("\n")
     );
-    assert_eq!(pages, 77);
+    assert_eq!(pages, 81);
 }
 
 /// Every page of `reference/attachment-edit/golden.sh` over the Theme Test
@@ -251,4 +251,17 @@ fn extensions_are_words() {
     assert_eq!(extension(b"a."), None);
     assert_eq!(extension(b"a.b-c"), None);
     assert_eq!(extension(b"notes"), None);
+}
+
+/// `human_readable_duration()`: hours, minutes and seconds in words, a sign
+/// dropped; nothing for another form or a value that is not a string.
+#[test]
+fn durations_read_as_php_s() {
+    let duration = |text: &str| human_readable_duration(&Value::String(text.into()));
+    assert_eq!(duration(" -1:00:01 "), "1 hour, 0 minutes, 1 second");
+    assert_eq!(duration("05:9"), "5 minutes, 9 seconds");
+    for bad in ["", "59", "60:00", "1:2:3:4", "a:01", "1:61:00"] {
+        assert_eq!(duration(bad), "", "{bad}");
+    }
+    assert_eq!(human_readable_duration(&Value::Int(61)), "");
 }

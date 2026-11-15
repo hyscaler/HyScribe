@@ -5,14 +5,14 @@
 
 use hyscribe_kses::{esc_attr, esc_url};
 use hyscribe_model::{OrderBy, Post, PostQuery, StatusFilter};
-use hyscribe_phpser::{Value, add_query_arg, is_empty_string};
+use hyscribe_phpser::{Value, add_query_arg};
 use hyscribe_render::date::{Zone, format, format_unix, human_time_diff};
 use hyscribe_render::formatting::sanitize_text_field;
 use hyscribe_render::{number_format, order_by, search_count, search_terms};
 
 use super::{Requests, ToolsSite};
 use crate::admin_bar::BarSite;
-use crate::list_table::{Column, View, row_actions, view_list};
+use crate::list_table::{Column, View, pagenum, row_actions, view_list};
 use crate::page::query_strings;
 use crate::text;
 
@@ -79,12 +79,12 @@ impl RequestsArgs {
 }
 
 /// What a list shows: its requests, how many match, the counts of each
-/// status and the page.
+/// status and the sanitized `filter-status`.
 pub(super) struct Listing {
     pub(super) items: Vec<Post>,
     pub(super) total: u64,
     pub(super) counts: Vec<(String, u64)>,
-    pub(super) per_page: u64,
+    pub(super) filter: String,
 }
 
 /// Whether a pending request is older than a day, which
@@ -104,10 +104,9 @@ pub(super) fn stale(site: &dyn ToolsSite) -> bool {
     pending.iter().any(|post| post.modified_gmt < before)
 }
 
-/// The statuses `WP_Query` lists for `filter-status`: those it names that
-/// are registered, or with none of them every status; `any` and no filter
-/// leave out the Trash and auto-drafts. `present` are those the requests have.
-fn statuses(filter: &str, present: &[(String, u64)]) -> Vec<String> {
+/// The statuses of `present` `WP_Query` lists for `filter-status`: the named
+/// registered ones, or all but `any` and none leave out the Trash and drafts.
+pub(super) fn statuses(filter: &str, present: &[(String, u64)]) -> Vec<String> {
     let named: Vec<&str> = filter.split(',').collect();
     let registered: Vec<String> = STATI
         .iter()
@@ -134,11 +133,7 @@ pub(super) fn listing(
 ) -> Listing {
     let counts = site.request_counts(action);
     let filter = RequestsArgs::sanitized(args.filter.as_ref());
-    let page = Value::String(args.paged.clone().unwrap_or_default().into_bytes()).to_int();
-    let offset = page
-        .unsigned_abs()
-        .saturating_sub(1)
-        .saturating_mul(per_page);
+    let offset = (pagenum(args.paged.as_deref()) - 1).saturating_mul(per_page);
     let mut query = PostQuery {
         post_types: vec!["user_request".into()],
         names: vec![action.into()],
@@ -183,12 +178,13 @@ pub(super) fn listing(
         items,
         total,
         counts,
-        per_page,
+        filter,
     }
 }
 
 /// `get_views()`: every request and each status that has some.
-pub(super) fn views(site: &dyn ToolsSite, file: &str, listing: &Listing, filter: &str) -> String {
+pub(super) fn views(site: &dyn ToolsSite, file: &str, listing: &Listing) -> String {
+    let filter = listing.filter.as_str();
     let url = BarSite::admin_url(site, file);
     let total: u64 = listing.counts.iter().map(|(_, count)| count).sum();
     let mut views = vec![View {
@@ -257,13 +253,9 @@ fn bulk_link(site: &dyn ToolsSite, file: &str, action: &str, id: u64) -> String 
 /// The markup that starts an export or an erasure of request `id` in the
 /// browser, `count` the exporters or erasers.
 fn handle(site: &dyn ToolsSite, requests: Requests, id: u64, class: &str) -> String {
-    let (kind, count) = match requests {
-        Requests::Export => ("export", 3),
-        Requests::Erase => ("erase", 1),
-    };
-    let counted = match requests {
-        Requests::Export => "exporters",
-        Requests::Erase => "erasers",
+    let (kind, counted, count) = match requests {
+        Requests::Export => ("export", "exporters", 3),
+        Requests::Erase => ("erase", "erasers", 1),
     };
     format!(
         "{class} data-{counted}-count=\"{count}\" data-request-id=\"{id}\" data-nonce=\"{}\">",
@@ -359,14 +351,11 @@ fn column_status(site: &dyn ToolsSite, item: &Post, label: &str, now: i64) -> St
         _ => "",
     };
     let stored = site.meta(item, key).unwrap_or_default();
-    let timestamp = Value::String(stored).to_int();
-    let date = if timestamp == 0 {
-        String::new()
+    let date = timestamp_as_date(Value::String(stored).to_int(), now);
+    let date = if date.is_empty() {
+        date
     } else {
-        format!(
-            "<span class=\"status-date\">{}</span>",
-            timestamp_as_date(timestamp, now)
-        )
+        format!("<span class=\"status-date\">{date}</span>")
     };
     format!(
         "<span class=\"status-label status-{}\">{label}{date}</span>",
@@ -429,9 +418,4 @@ pub(super) fn rows(
         out.push_str("</tr>");
     }
     Some(out)
-}
-
-/// Whether `value` is empty as PHP's `empty()` finds a string.
-pub(super) fn empty(value: Option<&String>) -> bool {
-    value.is_none_or(|value| is_empty_string(value.as_bytes()))
 }

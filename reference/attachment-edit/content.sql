@@ -100,7 +100,8 @@ INSERT INTO wp_comments (comment_ID, comment_post_ID, comment_author, comment_au
 -- QuickTime movie and an AAC recording no player plays (the recording's
 -- featured image is gone), a small WebM video, and two images for pretty
 -- permalinks: one whose slug Hello world already has, attached to Sample
--- Page, and one with a long encoded slug.
+-- Page, one with a long encoded slug and one named as a feed; and a video
+-- without its size.
 INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt, post_status,
   comment_status, ping_status, post_password, post_name, to_ping, pinged, post_modified, post_modified_gmt,
   post_content_filtered, post_parent, guid, menu_order, post_type, post_mime_type, comment_count) VALUES
@@ -124,7 +125,13 @@ INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, p
     0, 'attachment', 'image/png', 0),
   (823, 1, '2026-06-07 12:00:00', '2026-06-07 12:00:00', '', 'Cafe', '', 'inherit', 'open', 'closed', '',
     'a-rather-long-attachment-name-for-caf%c3%a9-photos', '', '', '2026-06-07 12:00:00', '2026-06-07 12:00:00', '', 1,
-    'http://default-install.test/wp-content/uploads/2026/06/cafe.png', 0, 'attachment', 'image/png', 0);
+    'http://default-install.test/wp-content/uploads/2026/06/cafe.png', 0, 'attachment', 'image/png', 0),
+  (824, 1, '2026-06-08 12:00:00', '2026-06-08 12:00:00', '', 'Feed', '', 'inherit', 'open', 'closed', '', 'feed', '', '',
+    '2026-06-08 12:00:00', '2026-06-08 12:00:00', '', 1, 'http://default-install.test/wp-content/uploads/2026/06/feed.png',
+    0, 'attachment', 'image/png', 0),
+  (825, 1, '2026-06-09 12:00:00', '2026-06-09 12:00:00', '', 'Sizeless', '', 'inherit', 'open', 'closed', '', 'sizeless', '',
+    '', '2026-06-09 12:00:00', '2026-06-09 12:00:00', '', 0,
+    'http://default-install.test/wp-content/uploads/2026/06/sizeless.mp4', 0, 'attachment', 'video/mp4', 0);
 INSERT INTO wp_postmeta (meta_id, post_id, meta_key, meta_value) VALUES
   (825, 817, '_wp_attached_file', '2026/06/song.mp3'),
   (826, 817, '_wp_attachment_metadata', 'a:12:{s:8:"filesize";i:4200000;s:9:"mime_type";s:10:"audio/mpeg";s:6:"length";i:215;s:16:"length_formatted";s:4:"3:35";s:7:"bitrate";d:128456.5;s:12:"bitrate_mode";s:3:"cbr";s:6:"artist";s:19:"The "Band" &amp; Co";s:5:"album";s:5:"First";s:4:"year";s:4:"2026";s:5:"genre";s:4:"Rock";s:10:"dataformat";s:3:"mp3";s:5:"audio";a:3:{s:10:"dataformat";s:3:"mp3";s:5:"codec";s:4:"LAME";s:11:"sample_rate";i:44100;}}'),
@@ -142,4 +149,8 @@ INSERT INTO wp_postmeta (meta_id, post_id, meta_key, meta_value) VALUES
   (838, 822, '_wp_attached_file', '2026/06/hello.png'),
   (839, 822, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:17:"2026/06/hello.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}'),
   (840, 823, '_wp_attached_file', '2026/06/cafe.png'),
-  (841, 823, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:16:"2026/06/cafe.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}');
+  (841, 823, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:16:"2026/06/cafe.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}'),
+  (842, 824, '_wp_attached_file', '2026/06/feed.png'),
+  (843, 824, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:16:"2026/06/feed.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}'),
+  (844, 825, '_wp_attached_file', '2026/06/sizeless.mp4'),
+  (845, 825, '_wp_attachment_metadata', 'a:2:{s:8:"filesize";i:700;s:5:"width";i:400;}');

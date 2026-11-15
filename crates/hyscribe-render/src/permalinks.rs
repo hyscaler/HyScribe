@@ -178,10 +178,8 @@ impl Permalinks {
         Some(self.trailing(&home_url(home, &path)))
     }
 
-    /// `get_attachment_link()` of `post`, which `wp_force_plain_post_permalink()`
-    /// lets have a pretty link and whose parent, if any, is valid, with
-    /// `parent_link`; `%postname%` left in a `sample` one. `None` for the
-    /// plain link.
+    /// `get_attachment_link()` of a shown `post` with a valid parent's
+    /// `parent_link`, `%postname%` in a `sample` one; `None` for the plain.
     pub fn attachment_link(
         &self,
         home: &str,

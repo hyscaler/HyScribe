@@ -201,9 +201,8 @@ pub(crate) const MEDIA_SCRIPTS: [&str; 4] =
 /// The styles `wp_enqueue_media()` adds.
 pub(crate) const MEDIA_STYLES: [&str; 2] = ["media-views", "imgareaselect"];
 
-/// `wp_enqueue_media()`, given a `post` of a type with featured images (its
-/// ID and `featuredImageId`): the templates `wp_print_media_templates()`
-/// prints in the footer, and the data of the scripts it adds.
+/// `wp_enqueue_media()` for a `post` with featured images (ID and image):
+/// the footer's media templates and the data of the scripts it adds.
 pub(crate) fn enqueue_media(
     site: &dyn PostsSite,
     browser: &Browser,

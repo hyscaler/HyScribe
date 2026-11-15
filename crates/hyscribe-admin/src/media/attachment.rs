@@ -13,6 +13,7 @@ use hyscribe_render::attachment::prepend::{
     audio_shortcode, embedded, is_audio, is_video, video_shortcode,
 };
 use hyscribe_render::date::{self, Zone};
+use hyscribe_render::link::front_page;
 use hyscribe_render::permalinks::Permalinks;
 use hyscribe_render::post::admin_title;
 use hyscribe_render::template::replace;
@@ -269,17 +270,34 @@ fn preview(site: &dyn AttachmentSite, post: &Post, kind: Kind, meta: &Value) -> 
     (html, false)
 }
 
+/// The stored `_thumbnail_id`, unless empty.
+fn thumbnail_id(site: &dyn AttachmentSite, post: &Post) -> Option<Vec<u8>> {
+    let stored = site.meta(post, "_thumbnail_id")?;
+    (!Value::String(stored.clone()).is_empty()).then_some(stored)
+}
+
 /// The post `get_post_thumbnail_id()` names, if there is one.
 fn featured(site: &dyn AttachmentSite, post: &Post) -> Option<Post> {
-    let thumbnail = site.meta(post, "_thumbnail_id").unwrap_or_default();
-    let thumbnail = u64::try_from(Value::String(thumbnail).to_int()).ok()?;
-    (thumbnail != 0).then(|| site.post(thumbnail)).flatten()
+    let thumbnail = Value::String(thumbnail_id(site, post)?).to_int();
+    u64::try_from(thumbnail).ok().and_then(|id| site.post(id))
+}
+
+/// Whether `id` is the page on the front.
+fn on_front(site: &dyn AttachmentSite, id: u64) -> bool {
+    let option = |name| site.option(name).unwrap_or_default();
+    front_page(&option("show_on_front"), &option("page_on_front")) == Some(id)
+}
+
+/// A song's or a video's type, as `preg_match( '#^(audio|video)/#' )` finds it.
+fn plays_by_type(post: &Post) -> bool {
+    ["audio/", "video/"]
+        .iter()
+        .any(|group| post.mime_type.starts_with(group))
 }
 
 /// `post_thumbnail_meta_box()`, `None` for a featured file that is not an
 /// image, whose image is not ported.
 fn featured_box(site: &dyn AttachmentSite, post: &Post) -> Option<String> {
-    let stored = site.meta(post, "_thumbnail_id").unwrap_or_default();
     let link = esc_url(
         BarSite::admin_url(
             site,
@@ -315,11 +333,7 @@ fn featured_box(site: &dyn AttachmentSite, post: &Post) -> Option<String> {
         ),
         None => anchor("", "Set featured image"),
     };
-    let value = if Value::String(stored.clone()).is_empty() {
-        b"-1".to_vec()
-    } else {
-        stored
-    };
+    let value = thumbnail_id(site, post).unwrap_or(b"-1".to_vec());
     html.push_str(&format!(
         "<input type=\"hidden\" id=\"_thumbnail_id\" name=\"_thumbnail_id\" value=\"{}\" />",
         esc_attr(&value)
@@ -421,10 +435,7 @@ fn media_details(meta: &Value) -> String {
 /// `get_permalink()` of an attachment's parent, `_get_page_link()` of a
 /// page; `None` for the page on the front, not ported.
 fn parent_link(site: &dyn AttachmentSite, parent: &Post) -> Option<String> {
-    let option = |name| site.option(name).unwrap_or_default();
-    let front = option("show_on_front") == b"page"
-        && Value::String(option("page_on_front")).to_int() == parent.id.cast_signed();
-    if parent.post_type == "page" && front {
+    if parent.post_type == "page" && on_front(site, parent.id) {
         return None;
     }
     // A private post the user may read has the link it would have published.
@@ -438,9 +449,8 @@ fn parent_link(site: &dyn AttachmentSite, parent: &Post) -> Option<String> {
     Some(site.permalink(parent))
 }
 
-/// `get_attachment_link()` of an attachment of status `status`, with
-/// `%postname%` left in a `sample` link; `None` where [`parent_link`] is
-/// and under pretty permalinks for a file attached to a file.
+/// `get_attachment_link()` of an attachment of `status`, `%postname%` left in
+/// a `sample` one; `None` where [`parent_link`] is, or attached to a file.
 fn attachment_link(
     site: &dyn AttachmentSite,
     post: &Post,
@@ -503,8 +513,7 @@ fn unique_slug(site: &dyn AttachmentSite, post: &Post) -> Option<Vec<u8>> {
 }
 
 /// `get_sample_permalink_html()` with the attachment's `view` link; `None`
-/// where [`attachment_link`] or [`unique_slug`] is, and for an editable
-/// link without a slug.
+/// where its parts are, or for an editable link without a slug.
 fn sample_permalink(
     site: &dyn AttachmentSite,
     post: &Post,
@@ -535,10 +544,8 @@ fn sample_permalink(
                 "<span id=\"sample-permalink\">{permalink}</span>\n"
             )),
         }
-        let option = |name| site.option(name).unwrap_or_default();
-        let front = option("show_on_front") == b"page"
-            && Value::String(option("page_on_front")).to_int() == post.id.cast_signed();
-        if is_empty_string(&option("permalink_structure")) && site.can("manage_options") && !front {
+        let plain = site.option("permalink_structure").unwrap_or_default();
+        if is_empty_string(&plain) && site.can("manage_options") && !on_front(site, post.id) {
             html.push_str("<span id=\"change-permalinks\"><a href=\"options-permalink\" class=\"button button-small\">Change Permalink Structure</a></span>\n");
         }
         return Some(html);
@@ -651,7 +658,7 @@ fn file_details(site: &dyn AttachmentSite, post: &Post, meta: &Value, size: i64)
         esc_html(&name),
         size_format(size)
     ));
-    if post.mime_type.starts_with("audio/") || post.mime_type.starts_with("video/") {
+    if plays_by_type(post) {
         out.push_str(&media_details(meta));
     }
     if let (Some(width), Some(height)) = (meta.get_str("width"), meta.get_str("height")) {
@@ -1087,9 +1094,6 @@ fn page(
         "\t\n".into()
     };
     let (preview, played) = preview(site, post, state.kind, meta);
-    let media = ["audio/", "video/"]
-        .iter()
-        .any(|group| post.mime_type.starts_with(group));
     let content = fill(
         FORM,
         &[
@@ -1130,7 +1134,7 @@ fn page(
             ("editor_css", editor_css(site)),
             (
                 "displayed",
-                if media {
+                if plays_by_type(post) {
                     ": Displayed on attachment pages."
                 } else {
                     ""
@@ -1166,10 +1170,7 @@ fn page(
     };
     // `wp_enqueue_media()` for songs and videos, with their featured image.
     let library = state.kind.plays().then(|| {
-        let featured = match site.meta(post, "_thumbnail_id") {
-            Some(stored) if !Value::String(stored.clone()).is_empty() => Value::String(stored),
-            _ => Value::Int(-1),
-        };
+        let featured = thumbnail_id(site, post).map_or(Value::Int(-1), Value::String);
         enqueue_media(site, request.browser, Some((id, featured)))
     });
     if let Some((templates, _)) = &library {

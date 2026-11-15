@@ -200,3 +200,6 @@ pub(super) fn viewed(
     }
     response
 }
+
+#[cfg(test)]
+mod tests;

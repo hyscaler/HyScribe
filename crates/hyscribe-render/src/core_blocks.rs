@@ -11,10 +11,11 @@ use hyscribe_phpser::{Key, Value, add_query_arg, is_empty_string, isset, php_tri
 use crate::autop::wpautop;
 use crate::balance::force_balance_tags;
 use crate::clickable::make_clickable;
+use crate::comments::held_preview;
 use crate::date::{self, Zone};
 use crate::excerpt::wp_trim_words;
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, convert_chars, wptexturize};
-use crate::kses::wp_kses_post;
+use crate::kses::{wp_kses_no_tags, wp_kses_post};
 use crate::link;
 use crate::media::Loading;
 use crate::post::{the_title, title_filters};
@@ -241,8 +242,8 @@ impl Context<'_> {
 }
 
 /// `render_block_core_comment_content()`: the comment's text through the
-/// `comment_text` filters. Only approved comments are read, so there is
-/// never a moderation note.
+/// `comment_text` filters; a held comment's without tags, after a note
+/// for its author, who has no commenter cookies.
 fn comment_content(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let Some(comment) = &context.comment else {
         return Vec::new();
@@ -250,17 +251,28 @@ fn comment_content(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     if is_empty_string(&comment.content) {
         return Vec::new();
     }
-    let text = comment_text(context.site, &comment.content);
+    let mut text = comment_text(context.site, &comment.content);
+    let mut note: &[u8] = b"";
+    if held(context, comment) {
+        note = b"<p><em class=\"comment-awaiting-moderation\">Your comment is awaiting moderation. This is a preview; your comment will be visible after it has been approved.</em></p>";
+        text = wp_kses_no_tags(&text);
+    }
     [
         format!(
             "<div {}>",
             block.wrapper(context, &align_link_classes(block, Vec::new()))
         )
         .as_bytes(),
+        note,
         &text,
         b"</div>",
     ]
     .concat()
+}
+
+/// Whether `comment` is the held comment the request previews.
+fn held(context: &Context<'_>, comment: &Comment) -> bool {
+    held_preview(context.site, context.request).is_some_and(|held| held.id == comment.id)
 }
 
 /// The `comment_text` filters over a comment's content.
@@ -446,6 +458,9 @@ fn comment_author_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         ]
         .concat();
     }
+    if held(context, comment) {
+        name = wp_kses_no_tags(&name);
+    }
     [
         format!(
             "<div {}>",
@@ -550,18 +565,29 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 
 /// `comments_open( $post )`, with `_close_comments_for_old_post()`.
 pub(crate) fn comments_open(context: &Context<'_>, post: &Post) -> bool {
-    let option = |name| context.site.option(name).unwrap_or_default();
-    if post.comment_status != "open" {
+    let option = |name: &str| context.site.option(name).unwrap_or_default();
+    let post = (&*post.comment_status, &*post.post_type, &*post.date_gmt);
+    comments_open_at(&option, post, context.request.now)
+}
+
+/// `comments_open()` at `now` of a post's `comment_status`, `post_type` and
+/// `post_date_gmt`, with `_close_comments_for_old_post()` over `option`.
+pub fn comments_open_at(
+    option: &dyn Fn(&str) -> Vec<u8>,
+    (status, post_type, date_gmt): (&str, &str, &str),
+    now: i64,
+) -> bool {
+    if status != "open" {
         return false;
     }
     if is_empty_string(&option("close_comments_for_old_posts")) {
         return true;
     }
     let days = Value::String(option("close_comments_days_old")).to_int();
-    if days == 0 || post.post_type != "post" || post.date_gmt == "0000-00-00 00:00:00" {
+    if days == 0 || post_type != "post" || date_gmt == "0000-00-00 00:00:00" {
         return true;
     }
-    let age = context.request.now - date::stored_unix(&post.date_gmt, Zone::Utc);
+    let age = now - date::stored_unix(date_gmt, Zone::Utc);
     age <= days.saturating_mul(86_400)
 }
 

@@ -19,6 +19,10 @@ struct WithComments {
     password: bool,
     closed: bool,
     siteurl: Vec<u8>,
+    /// The held comments.
+    held: Vec<Comment>,
+    /// PHP's `wp_hash()` of each date.
+    hashes: Value,
 }
 
 impl Site for WithComments {
@@ -66,14 +70,23 @@ impl Site for WithComments {
     fn comment(&self, id: u64) -> Option<Comment> {
         self.comments.iter().find(|c| c.id == id).cloned()
     }
+    fn held_comment(&self, id: u64) -> Option<Comment> {
+        self.held.iter().find(|c| c.id == id).cloned()
+    }
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        let hash = self
+            .hashes
+            .get(&hyscribe_phpser::Key::from_php_string(data.to_vec()));
+        hash.map(|hash| String::from_utf8_lossy(&hash.to_php_string()).into_owned())
+    }
     fn user(&self, id: u64) -> Option<User> {
         self.users.iter().find(|user| user.id == id).cloned()
     }
 }
 
-/// The approved comments among a golden's rows, notes included, in the
+/// The comments of `status` among a golden's rows, notes included, in the
 /// order the comment template lists them.
-fn approved(rows: &Value) -> Vec<Comment> {
+fn of_status(rows: &Value, status: &[u8]) -> Vec<Comment> {
     let text = |row: &Value, name| row.get_str(name).unwrap().to_php_string();
     let number = |row: &Value, name| row.get_str(name).unwrap().to_int() as u64;
     let mut comments: Vec<Comment> = rows
@@ -81,7 +94,7 @@ fn approved(rows: &Value) -> Vec<Comment> {
         .unwrap()
         .iter()
         .map(|(_, row)| row)
-        .filter(|row| text(row, "comment_approved") == b"1")
+        .filter(|row| text(row, "comment_approved") == status)
         .map(|row| Comment {
             id: number(row, "comment_ID"),
             post_id: number(row, "comment_post_ID"),
@@ -123,13 +136,39 @@ fn users(rows: &Value) -> Vec<User> {
 /// Every case of `reference/comments/golden.sh`.
 #[test]
 fn matches_php() {
-    let theme = twentytwentyfive();
     let golden = include_str!("../../tests/golden/comments.tsv");
+    let failures = differences(golden);
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures[..failures.len().min(3)].join("\n")
+    );
+    assert_eq!(golden.lines().count(), 2292);
+}
+
+/// A held comment shows only to its author, from the link
+/// `wp-comments-post.php` sends them to, while it is new
+/// (`reference/comments/held-golden.php`).
+#[test]
+fn held_comments_preview_as_php() {
+    let golden = include_str!("../../tests/golden/held-comments.tsv");
+    let failures = differences(golden);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(golden.lines().count(), 67);
+}
+
+/// Where a golden's cases differ from the renderer's.
+fn differences(golden: &str) -> Vec<String> {
+    let theme = twentytwentyfive();
     let (shared, cases) = golden.split_once('\n').unwrap();
     let shared = json_decode(&unhex(shared)).unwrap();
-    let comments = approved(shared.get_str("comments").unwrap());
-    let users = users(shared.get_str("users").unwrap());
-    let siteurl = shared.get_str("siteurl").unwrap().to_php_string();
+    let rows = shared.get_str("comments").unwrap();
+    let (comments, held) = (of_status(rows, b"1"), of_status(rows, b"0"));
+    let users = shared.get_str("users").map(users).unwrap_or_default();
+    let siteurl = shared
+        .get_str("siteurl")
+        .map_or(b"http://127.0.0.1:8081".to_vec(), Value::to_php_string);
     let mut failures = Vec::new();
     for line in cases.lines() {
         let mut fields = line.split('\t').map(unhex);
@@ -145,6 +184,8 @@ fn matches_php() {
             password: state.get_str("password") == Some(&Value::Bool(true)),
             closed: state.get_str("closed") == Some(&Value::Bool(true)),
             siteurl: siteurl.clone(),
+            held: held.clone(),
+            hashes: state.get_str("hashes").cloned().unwrap_or(Value::Null),
         };
         let uri = state
             .get_str("uri")
@@ -197,13 +238,7 @@ fn matches_php() {
             ));
         }
     }
-    assert!(
-        failures.is_empty(),
-        "{} differ:\n{}",
-        failures.len(),
-        failures[..failures.len().min(3)].join("\n")
-    );
-    assert_eq!(golden.lines().count(), 2292);
+    failures
 }
 
 /// A thread of replies far past `thread_comments_depth` renders on a 2 MiB
@@ -236,6 +271,8 @@ fn long_reply_chains_render_without_recursing() {
                 password: false,
                 closed: false,
                 siteurl: b"http://example.test".to_vec(),
+                held: Vec::new(),
+                hashes: Value::Null,
             };
             let request = Request {
                 post: Some(1),

@@ -891,7 +891,7 @@ impl PostFields {
 
 /// The columns of a comment `wp_insert_comment()` and
 /// `wp_update_comment()` write.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CommentFields {
     /// `comment_post_ID`.
     pub post_id: u64,

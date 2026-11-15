@@ -1410,4 +1410,4 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

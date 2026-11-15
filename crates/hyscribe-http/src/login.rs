@@ -30,12 +30,13 @@ pub(crate) const PATH: &str = "/hs-login";
 
 const DAY: i64 = 86_400;
 
-const YEAR: i64 = 365 * DAY;
+pub(crate) const YEAR: i64 = 365 * DAY;
 
 /// HyScribe's cookie names, which never stand for a PHP WordPress login,
 /// and their paths.
 pub(crate) struct Names {
-    hash: String,
+    /// `COOKIEHASH`.
+    pub(crate) hash: String,
     /// `COOKIEPATH`, from the home URL.
     path: String,
     /// `SITECOOKIEPATH`, from the site URL.
@@ -83,7 +84,7 @@ impl Names {
 
 /// `setcookie()`, with `SameSite=Lax` added (docs/SECURITY_MODEL.md):
 /// `expires` 0 for a session cookie.
-fn set_cookie(
+pub(crate) fn set_cookie(
     name: &str,
     value: &[u8],
     (expires, now): (i64, i64),
@@ -147,6 +148,9 @@ pub(crate) struct LoginReads<'a> {
     current: (u64, Vec<u8>),
     /// `user-profile`'s user: the request's `user_id`, cast to an integer.
     profile_user: i64,
+    /// A post as a writer action reads it, which capability checks see in
+    /// place of the site's.
+    pub(crate) action_post: Option<CapPost>,
 }
 
 impl<'a> LoginReads<'a> {
@@ -158,6 +162,7 @@ impl<'a> LoginReads<'a> {
             found: RefCell::default(),
             current: (0, Vec::new()),
             profile_user: 0,
+            action_post: None,
         }
     }
 
@@ -360,6 +365,9 @@ impl CapabilityData for LoginReads<'_> {
     }
 
     fn post(&self, id: u64) -> Option<CapPost> {
+        if let Some(post) = self.action_post.as_ref().filter(|post| post.id == id) {
+            return Some(post.clone());
+        }
         self.reads.post(id).map(|post| CapPost {
             id: post.id,
             author: post.author,

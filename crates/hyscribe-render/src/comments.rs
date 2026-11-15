@@ -1,20 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The comment template block: the post's approved comments, threaded, each
-//! rendering the template's inner blocks with the comment as context.
+//! rendering the template's inner blocks with the comment as context, and
+//! the held comment its author previews from the link they are sent to.
 //!
-//! The unapproved comments a visitor's cookie would show are not ported
-//! yet.
+//! The held comments the commenter cookies would show are not ported yet.
 
 use std::collections::HashMap;
 
 use hyscribe_model::Comment;
-use hyscribe_phpser::{Value, is_empty_string};
+use hyscribe_phpser::{Value, hash_equals, is_empty_string};
 
 use crate::blocks::Block;
 use crate::comment_pages::{listed, paging};
+use crate::date::{Zone, stored_unix};
 use crate::elements::elements_class;
 use crate::post::sanitize_html_class;
+use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
 
@@ -34,7 +36,7 @@ impl Renderer<'_> {
         }
         let option = |name| site.option(name).unwrap_or_default();
         let threaded = !is_empty_string(&option("thread_comments"));
-        let all = site.comments(post_id);
+        let all = post_comments(site, self.context.request, post_id);
         let mut listed = listed(site, &all);
         if let Some(paging) = paging(site, self.context.request, listed.len()) {
             // Pages below the first list the first.
@@ -178,6 +180,33 @@ impl Renderer<'_> {
             .collect();
         classes.join(" ")
     }
+}
+
+/// The comments a comment query lists on `post_id`: the approved ones and
+/// the held one [`held_preview`] shows, oldest first, then by ID.
+pub(crate) fn post_comments(site: &dyn Site, request: &Request, post_id: u64) -> Vec<Comment> {
+    let mut all = site.comments(post_id);
+    let held = held_preview(site, request);
+    if let Some(held) = held.filter(|c| c.post_id == post_id && c.comment_type != b"note") {
+        all.push(held);
+        all.sort_by(|a, b| (&a.date_gmt, a.id).cmp(&(&b.date_gmt, b.id)));
+    }
+    all
+}
+
+/// The held comment `wp_get_unapproved_comment_author_email()` shows its
+/// author: the request's `unapproved` comment, with an email address, when
+/// `moderation-hash` signs its date, for ten minutes after it.
+pub(crate) fn held_preview(site: &dyn Site, request: &Request) -> Option<Comment> {
+    let arg = |name| request.get.get_str(name).filter(|value| !value.is_empty());
+    let id = u64::try_from(arg("unapproved")?.to_int()).ok()?;
+    // An array is a fatal error in PHP's `hash_equals()`.
+    let hash = arg("moderation-hash")?.as_bytes()?;
+    let comment = site.held_comment(id)?;
+    let signed = site.wp_hash(comment.date_gmt.as_bytes())?;
+    let fresh = request.now < stored_unix(&comment.date_gmt, Zone::Utc) + 600;
+    let shown = fresh && hash_equals(signed.as_bytes(), hash);
+    (shown && !is_empty_string(&comment.author_email)).then_some(comment)
 }
 
 /// The replies to each comment, in the order of all the post's comments.

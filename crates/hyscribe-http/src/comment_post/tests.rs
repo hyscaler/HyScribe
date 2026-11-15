@@ -1,0 +1,422 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! `reference/comment-post/golden.sh`'s cases, each in a transaction on the
+//! fixture database that is rolled back: the answer compared with PHP's,
+//! and the rows with the write oracle's; then the route itself.
+
+use axum::body::Body;
+use hyscribe_config::Mode;
+use hyscribe_db::{Connection, Writer};
+use hyscribe_testkit::fixture_database;
+use hyscribe_testkit::writes::check_writes;
+use sqlx::Connection as _;
+use tower::ServiceExt;
+
+use super::*;
+use crate::admin::tests::{logged_in, page_of, send, session_nonce, unwritable};
+use crate::{Peer, router};
+
+const GOLDEN: &str = include_str!("../../tests/golden/comment-post.tsv");
+const CASES: &str = include_str!("../../../../reference/comment-post/cases.list");
+const FORM: &str = "application/x-www-form-urlencoded";
+
+/// A case of `cases.list`.
+struct Case {
+    name: &'static str,
+    method: &'static str,
+    admin: bool,
+    cookie: &'static str,
+    setup: &'static str,
+    first: &'static str,
+    body: &'static str,
+}
+
+fn cases() -> Vec<Case> {
+    let lines = CASES.lines().filter(|line| !line.starts_with('#'));
+    lines
+        .map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
+            let [name, method, user, cookie, setup, _, first, body] = fields[..] else {
+                panic!("{line}");
+            };
+            Case {
+                name,
+                method,
+                admin: user == "1",
+                cookie,
+                setup,
+                first,
+                body,
+            }
+        })
+        .collect()
+}
+
+/// PHP's answer to `case`: status, `Location`, cookies and body.
+fn php(case: &str) -> (u16, String, String, Vec<u8>) {
+    let row = GOLDEN
+        .lines()
+        .find(|row| row.starts_with(&format!("{case}\t")));
+    let fields: Vec<&str> = row.unwrap().split('\t').collect();
+    let [_, status, to, cookies, body] = fields[..] else {
+        panic!("{case}");
+    };
+    let body = hyscribe_testkit::unhex(body);
+    (status.parse().unwrap(), to.into(), cookies.into(), body)
+}
+
+/// A body with `%aN%` as N letters a and `%nonce%` as `nonce`.
+fn expand(body: &str, nonce: &str) -> String {
+    let mut out = String::new();
+    let mut rest = body.replace("%nonce%", nonce);
+    while let Some((before, tail)) = rest.split_once("%a") {
+        let (digits, after) = tail.split_once('%').unwrap();
+        out = out + before + &"a".repeat(digits.parse().unwrap());
+        rest = after.to_string();
+    }
+    out + &rest
+}
+
+/// A response as the golden records it: the new comment's ID as `%id%`,
+/// `hash` as `%hash%`, hs-admin as wp-admin, cookies' expiry as `%expires%`
+/// and without the attributes HyScribe adds.
+async fn recorded(response: Response, id: u64, hash: &str) -> (u16, String, String, Vec<u8>) {
+    let status = response.status().as_u16();
+    let to = response
+        .headers()
+        .get(header::LOCATION)
+        .map_or("", |to| to.to_str().unwrap());
+    let to = to
+        .replace(&format!("comment-{id}"), "comment-%id%")
+        .replace(&format!("unapproved={id}"), "unapproved=%id%")
+        .replace(&format!("moderation-hash={hash}"), "moderation-hash=%hash%")
+        .replace("/hs-admin/", "/wp-admin/");
+    let cookies: Vec<String> = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|cookie| {
+            let cookie = cookie
+                .to_str()
+                .unwrap()
+                .replace("; HttpOnly; SameSite=Lax", "");
+            let (name, rest) = cookie.split_once("expires=").unwrap();
+            let (_, path) = rest.split_once("; path=").unwrap();
+            format!("{name}%expires%; path={path}")
+        })
+        .collect();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await;
+    (status, to, cookies.join("|"), body.unwrap().to_vec())
+}
+
+/// The answer to `body` as one action on `conn`, whose statements after
+/// `budget` fail, from 192.0.2.1 with `cookie`.
+async fn post(
+    (site, writer): (&Site, &Writer),
+    conn: &mut Connection,
+    (body, cookie): (&str, &str),
+    budget: Option<usize>,
+) -> Response {
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(FORM));
+    headers.insert(
+        header::USER_AGENT,
+        HeaderValue::from_static("HyScribe oracle"),
+    );
+    headers.insert(header::COOKIE, HeaderValue::from_str(cookie).unwrap());
+    let asked = Asked {
+        post: true,
+        headers,
+        body: body.to_string().into(),
+        peer: Some([192, 0, 2, 1].into()),
+    };
+    let form = read_form(FORM.as_bytes(), body.as_bytes()).unwrap();
+    tokio::task::block_in_place(|| {
+        let begin = || -> Begin<'_> {
+            Box::pin(async move {
+                let mut write = writer.begin_on(conn).await?;
+                if let Some(budget) = budget {
+                    write.fail_after(budget);
+                }
+                Ok(write)
+            })
+        };
+        answer(site, &asked, &form, (now(), Handle::current()), begin)
+    })
+}
+
+/// The last comment's ID and moderation hash under the test salts.
+async fn last_comment(conn: &mut Connection) -> (u64, String) {
+    let sql = "SELECT comment_ID, CAST(comment_date_gmt AS CHAR) FROM wp_comments ORDER BY comment_ID DESC LIMIT 1";
+    let (id, date): (u64, String) = sqlx::query_as(sql).fetch_one(conn).await.unwrap();
+    let hash = hyscribe_phpser::hash_hmac_md5(date.as_bytes(), b"AUTH_KEYAUTH_SALT");
+    (id, hash)
+}
+
+async fn comment_count(conn: &mut Connection) -> i64 {
+    let sql = "SELECT COUNT(*) FROM wp_comments";
+    sqlx::query_scalar(sql).fetch_one(conn).await.unwrap()
+}
+
+/// Every POST of `cases.list` answers as PHP answered it, and writes the
+/// rows PHP wrote, from the state its setup SQL and first body leave; but
+/// the page of a comment on paged comments, which is not ported.
+#[tokio::test(flavor = "multi_thread")]
+async fn posts_answer_and_write_as_php() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, logged_in) = logged_in("wordpress", dir.path()).await;
+    let nonce = session_nonce(&site, &logged_in, "unfiltered-html-comment_1").await;
+    let writer = Writer::open(&fixture_database(), Mode::Primary).await;
+    let writer = writer.unwrap().unwrap();
+    let on = (&*site, &writer);
+    let mut failures = Vec::new();
+    for case in cases().iter().filter(|case| case.method == "POST") {
+        let mut cookie: Vec<&str> = Vec::new();
+        if case.admin {
+            cookie.push(&logged_in);
+        }
+        if case.cookie != "-" {
+            cookie.push(case.cookie);
+        }
+        let cookie = cookie.join("; ");
+        let body = expand(case.body, &nonce);
+        let setup = async |conn: &mut Connection| {
+            for query in case.setup.split("; ").filter(|_| case.setup != "-") {
+                sqlx::query(query).execute(&mut *conn).await.unwrap();
+            }
+            if case.first != "-" {
+                post(on, conn, (&expand(case.first, &nonce), &cookie), None).await;
+            }
+            Ok::<_, String>(())
+        };
+        let php = php(case.name);
+        let mut action = async |conn: &mut Connection, ()| {
+            let response = post(on, conn, (&body, &cookie), None).await;
+            let (id, hash) = last_comment(conn).await;
+            let ours = recorded(response, id, &hash).await;
+            if ours != php {
+                failures.push(format!("{}: {:?}\n  php {:?}", case.name, ours.0, php.0));
+                failures.push(format!(
+                    "  {}\n  {}\n  {}\n  {}",
+                    ours.1, php.1, ours.2, php.2
+                ));
+            }
+            Ok(())
+        };
+        if php.0 == 302 && case.name != "page-comments" {
+            let golden = format!("comment-post-{}", case.name);
+            let rows = check_writes(&fixture_database(), &golden, setup, action).await;
+            if let Err(rows) = rows {
+                failures.push(rows);
+            }
+            continue;
+        }
+        // A refusal writes nothing; so does the page of a comment, not ported.
+        let mut conn = connect().await;
+        let mut tx = conn.begin().await.unwrap();
+        setup(&mut tx).await.unwrap();
+        let before = comment_count(&mut tx).await;
+        if case.name == "page-comments" {
+            let response = post(on, &mut tx, (&body, &cookie), None).await;
+            assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+        } else {
+            action(&mut tx, ()).await.unwrap();
+        }
+        assert_eq!(comment_count(&mut tx).await, before, "{}", case.name);
+        tx.rollback().await.unwrap();
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+async fn connect() -> sqlx::MySqlConnection {
+    let db = fixture_database();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose())
+        .charset(&db.charset);
+    sqlx::MySqlConnection::connect_with(&options).await.unwrap()
+}
+
+/// A statement that fails part way keeps nothing and shows the database
+/// error page: a visitor's reply and an administrator's comment, under
+/// every budget short of success.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_statement_keeps_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, logged_in) = logged_in("wordpress", dir.path()).await;
+    let writer = Writer::open(&fixture_database(), Mode::Primary).await;
+    let writer = writer.unwrap().unwrap();
+    let held =
+        "comment_post_ID=1&author=Ann&email=ann%40example.test&comment=A+reply.&comment_parent=1";
+    let admin = "comment_post_ID=1&comment=An+administrator%27s+comment.";
+    for (body, cookie) in [(held, ""), (admin, logged_in.as_str())] {
+        let mut conn = connect().await;
+        let mut tx = conn.begin().await.unwrap();
+        let before = comment_count(&mut tx).await;
+        let mut budget = 0;
+        loop {
+            let response = post((&site, &writer), &mut tx, (body, cookie), Some(budget)).await;
+            if response.status() == StatusCode::FOUND {
+                break;
+            }
+            assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(comment_count(&mut tx).await, before, "{body} {budget}");
+            budget += 1;
+        }
+        assert_eq!(comment_count(&mut tx).await, before + 1);
+        tx.rollback().await.unwrap();
+    }
+}
+
+fn request(body: &str, kind: &str) -> axum::http::Request<Body> {
+    axum::http::Request::builder()
+        .method("POST")
+        .uri(PATH)
+        .header(header::CONTENT_TYPE, kind)
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+/// The route: any other method is not allowed; shadow mode refuses every
+/// post as read only; a body only PHP reads, or an array to redirect to,
+/// is not ported; a refusal is PHP's page; and a comment the database
+/// refuses, or a database HyScribe does not write to, is its error page.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_route_answers_as_php() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, _) = logged_in("wordpress", dir.path()).await;
+    for method in ["GET", "HEAD", "PUT"] {
+        let response = send(&site, method, PATH, "", None).await;
+        assert_eq!(response.status().as_u16(), php("get").0);
+        assert_eq!(response.headers()[header::ALLOW], "POST");
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "text/plain");
+        assert_eq!(page_of(response).await, "");
+    }
+    let closed = cases()
+        .into_iter()
+        .find(|case| case.name == "closed")
+        .unwrap();
+    let response = send(&site, "POST", PATH, "", Some((FORM, closed.body))).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(page_of(response).await.contains(READ_ONLY));
+    let site = unwritable(site, "wp_").await;
+    let response = send(&site, "POST", PATH, "", Some((FORM, closed.body))).await;
+    let (status, _, _, body) = php("closed");
+    assert_eq!(response.status().as_u16(), status);
+    assert_eq!(page_of(response).await.into_bytes(), body);
+    let multipart = "multipart/form-data; boundary=x";
+    for (body, kind) in [("--x--", multipart), ("redirect_to[]=x", FORM)] {
+        let response = send(&site, "POST", PATH, "", Some((kind, body))).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{body}");
+    }
+    // The connection's address is the comment's, which the database refuses.
+    let held = cases()
+        .into_iter()
+        .find(|case| case.name == "held")
+        .unwrap();
+    let mut held = request(held.body, FORM);
+    held.extensions_mut().insert(Peer([192, 0, 2, 1].into()));
+    let response = router(Arc::clone(&site)).oneshot(held).await.unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let site = unwritable(site, "missing_").await;
+    let response = send(&site, "POST", PATH, "", Some((FORM, closed.body))).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let page = page_of(response).await;
+    assert!(
+        page.contains("Error establishing a database connection"),
+        "{page}"
+    );
+}
+
+/// `REMOTE_ADDR` is the connection's address, or behind a proxy the last
+/// of `X-Forwarded-For`, when it is one.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_client_is_the_proxy_s_last_hop() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, _) = logged_in("wordpress", dir.path()).await;
+    let asked = |forwarded: &str, peer: Option<IpAddr>| {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", HeaderValue::from_str(forwarded).unwrap());
+        Asked {
+            post: true,
+            headers,
+            body: axum::body::Bytes::new(),
+            peer,
+        }
+    };
+    let peer = Some([192, 0, 2, 1].into());
+    let direct = asked("198.51.100.7", peer);
+    assert_eq!(remote_addr(&site, &direct), b"192.0.2.1");
+    assert_eq!(remote_addr(&site, &asked("", None)), b"");
+    let site = Arc::try_unwrap(site).ok().unwrap().with_proxy(true);
+    assert_eq!(remote_addr(&site, &direct), b"198.51.100.7");
+    let proxied = asked("203.0.113.9, 2001:db8::1 ", peer);
+    assert_eq!(remote_addr(&site, &proxied), b"2001:db8::1");
+    assert_eq!(remote_addr(&site, &asked("unknown", peer)), b"192.0.2.1");
+}
+
+/// A content type no header can carry reads as none, and a body without a
+/// form as only PHP reads it.
+#[test]
+fn a_form_needs_its_content_type() {
+    assert_eq!(read_form(b"\n", b"author=Ann"), None);
+    assert_eq!(
+        read_form(b"text/plain", b""),
+        Some(Value::Array(Vec::new()))
+    );
+}
+
+/// A read that fails on the way, here the current user's, shows the
+/// database error page.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_read_is_the_database_error_page() {
+    let mut config = crate::tests::fixture_config();
+    config.prefix = hyscribe_config::Prefix::new("missing_").unwrap();
+    let db = hyscribe_db::Db::connect(&config).await.unwrap();
+    let writer = Writer::open(&fixture_database(), Mode::Primary).await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = Arc::new(Site {
+        db,
+        options: std::collections::HashMap::new(),
+        home: String::new(),
+        theme: hyscribe_render::theme::twentytwentyfive(),
+        rewriter: crate::rewrite::Rewriter::default(),
+        salts: Vec::new(),
+        sessions: Some(hyscribe_auth::sessions::Sessions::new(dir.path())),
+        writer: writer.unwrap(),
+        defined: Vec::new(),
+        public_users: true,
+        behind_proxy: false,
+    });
+    let cookie = format!(
+        "hyscribe_logged_in_{}=admin%7C9999999999%7Ctoken%7Chmac",
+        hyscribe_phpser::md5(b"")
+    );
+    let closed = cases()
+        .into_iter()
+        .find(|case| case.name == "closed")
+        .unwrap();
+    let response = send(&site, "POST", PATH, &cookie, Some((FORM, closed.body))).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let page = page_of(response).await;
+    assert!(
+        page.contains("Error establishing a database connection"),
+        "{page}"
+    );
+}
+
+/// The link a held comment's author is sent to shows nothing held while
+/// its comment is not held (`hyscribe-render` renders a held one).
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_held_comment_is_previewed() {
+    let site = crate::tests::oracle_site().await;
+    let uri = "/?p=1&unapproved=1&moderation-hash=x";
+    let response = send(&site, "GET", uri, "", None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let page = page_of(response).await;
+    assert!(page.contains("id=\"comment-1\""), "{page}");
+    assert!(!page.contains("awaiting moderation"));
+}

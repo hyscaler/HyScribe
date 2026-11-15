@@ -67,7 +67,7 @@ fn add(crons: &mut Crons, (now, at): (i64, i64), hook: &str, post: Option<u64>) 
     let args = args(post);
     let key = key(&args);
     let min = if at < now + 600 { 0 } else { at - 600 };
-    let max = if at < now { now + 600 } else { at + 600 };
+    let max = at.max(now) + 600;
     for (stamp, cron) in crons.iter() {
         let stamp = Value::String(stamp.to_php_string()).to_int();
         if stamp < min {

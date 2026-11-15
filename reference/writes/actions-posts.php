@@ -440,12 +440,15 @@ return array(
 			return $id;
 		},
 		'action' => function ( $id ) use ( $posts_update ) {
-			$posts_update(
-				array(
-					'ID'        => $id,
-					'post_name' => '12',
-				)
-			);
+			// Only digits read as dates; "00" names no day.
+			foreach ( array( '12', 'plain-words', '00' ) as $name ) {
+				$posts_update(
+					array(
+						'ID'        => $id,
+						'post_name' => $name,
+					)
+				);
+			}
 		},
 	),
 	'update-post-slug-back'                  => array(
@@ -572,6 +575,222 @@ return array(
 		},
 		'action' => function ( $id ) {
 			wp_delete_user( $id );
+		},
+	),
+	'update-categorized-post'                => array(
+		'setup'  => function () use ( $posts_insert ) {
+			global $wpdb;
+			$wpdb->query( "INSERT INTO $wpdb->terms (term_id, name, slug, term_group) VALUES (950, 'Oracle', 'oracle', 0)" );
+			$wpdb->query( "INSERT INTO $wpdb->term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (950, 950, 'category', '', 0, 0)" );
+			return $posts_insert( array( 'post_category' => array( 950 ) ) );
+		},
+		'action' => function ( $id ) use ( $posts_update ) {
+			$posts_update(
+				array(
+					'ID'         => $id,
+					'post_title' => 'A renamed post',
+				)
+			);
+			wp_insert_post(
+				array(
+					'ID'           => $id,
+					'post_title'   => 'Rewritten',
+					'post_content' => 'New.',
+					'post_status'  => 'publish',
+				)
+			);
+		},
+	),
+	'publish-dated-drafts'                   => array(
+		'setup'  => function () use ( $posts_insert ) {
+			$draft = array(
+				'post_status' => 'draft',
+				'post_date'   => '2025-01-01 00:00:00',
+			);
+			return array( $posts_insert( $draft ), $posts_insert( $draft ) );
+		},
+		'action' => function ( $ids ) use ( $posts_update ) {
+			$posts_update(
+				array(
+					'ID'          => $ids[0],
+					'post_status' => 'publish',
+				)
+			);
+			$posts_update(
+				array(
+					'ID'          => $ids[1],
+					'post_status' => 'publish',
+					'edit_date'   => true,
+				)
+			);
+		},
+	),
+	'update-unpublished-post-keeps-date'     => array(
+		'setup'  => function () use ( $posts_insert, $posts_update ) {
+			$id = $posts_insert( array( 'post_date' => '2025-02-03 10:00:00' ) );
+			$posts_update(
+				array(
+					'ID'          => $id,
+					'post_status' => 'draft',
+				)
+			);
+			return $id;
+		},
+		'action' => function ( $id ) use ( $posts_update ) {
+			$posts_update(
+				array(
+					'ID'         => $id,
+					'post_title' => 'A renamed post',
+				)
+			);
+		},
+	),
+	'publish-draft-page'                     => array(
+		'setup'  => function () use ( $posts_insert ) {
+			return $posts_insert(
+				array(
+					'post_status' => 'draft',
+					'post_type'   => 'page',
+				)
+			);
+		},
+		'action' => function ( $id ) {
+			wp_publish_post( $id );
+		},
+	),
+	'insert-pending-post'                    => array(
+		'action' => function () use ( $posts_insert ) {
+			$posts_insert(
+				array(
+					'post_status' => 'pending',
+					'post_name'   => 'chosen',
+				)
+			);
+		},
+	),
+	'update-post-with-stray-desired-slug'    => array(
+		'setup'  => function () use ( $posts_publish ) {
+			$id = $posts_publish();
+			add_post_meta( $id, '_wp_desired_post_slug', 'elsewhere' );
+			return $id;
+		},
+		'action' => function ( $id ) use ( $posts_update ) {
+			$posts_update(
+				array(
+					'ID'         => $id,
+					'post_title' => 'A renamed post',
+				)
+			);
+		},
+	),
+	'trash-post-beside-trashed-namesake'     => array(
+		'setup'  => function () use ( $posts_insert ) {
+			global $wpdb;
+			$id      = $posts_insert( array( 'post_title' => 'Taken' ) );
+			$trashed = $posts_insert( array( 'post_title' => 'Other' ) );
+			$wpdb->update(
+				$wpdb->posts,
+				array(
+					'post_status' => 'trash',
+					'post_name'   => 'taken',
+				),
+				array( 'ID' => $trashed )
+			);
+			clean_post_cache( $trashed );
+			return $id;
+		},
+		'action' => function ( $id ) {
+			wp_trash_post( $id );
+		},
+	),
+	'publish-post-with-custom-guid'          => array(
+		'setup'  => function () use ( $posts_insert ) {
+			global $wpdb;
+			$id = $posts_insert( array( 'post_status' => 'draft' ) );
+			$wpdb->update( $wpdb->posts, array( 'guid' => 'urn:oracle:custom' ), array( 'ID' => $id ) );
+			clean_post_cache( $id );
+			return $id;
+		},
+		'action' => function ( $id ) use ( $posts_update ) {
+			$posts_update(
+				array(
+					'ID'          => $id,
+					'post_status' => 'publish',
+				)
+			);
+		},
+	),
+	'update-post-name-with-autosave'         => array(
+		'setup'  => function () use ( $posts_publish ) {
+			$id = $posts_publish();
+			_wp_put_post_revision( get_post( $id ), true );
+			return $id;
+		},
+		'action' => function ( $id ) use ( $posts_update ) {
+			$posts_update(
+				array(
+					'ID'        => $id,
+					'post_name' => 'renamed',
+				)
+			);
+		},
+	),
+	'update-post-twice'                      => array(
+		'setup'  => function () use ( $posts_publish, $posts_update ) {
+			$id = $posts_publish();
+			$posts_update(
+				array(
+					'ID'         => $id,
+					'post_title' => 'A renamed post',
+				)
+			);
+			return $id;
+		},
+		'action' => function ( $id ) use ( $posts_update ) {
+			$posts_update(
+				array(
+					'ID'         => $id,
+					'post_title' => 'Renamed again',
+				)
+			);
+		},
+	),
+	'delete-tagged-post'                     => array(
+		'setup'  => function () use ( $posts_publish ) {
+			global $wpdb;
+			$wpdb->query( "INSERT INTO $wpdb->terms (term_id, name, slug, term_group) VALUES (960, 'Tagged', 'tagged', 0)" );
+			$wpdb->query( "INSERT INTO $wpdb->term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (960, 960, 'post_tag', '', 0, 1)" );
+			$id = $posts_publish();
+			$wpdb->insert(
+				$wpdb->term_relationships,
+				array(
+					'object_id'        => $id,
+					'term_taxonomy_id' => 960,
+				)
+			);
+			clean_object_term_cache( $id, 'post' );
+			return $id;
+		},
+		'action' => function ( $id ) {
+			wp_delete_post( $id, true );
+		},
+	),
+	'insert-inherit-post'                    => array(
+		'action' => function () use ( $posts_insert ) {
+			$posts_insert(
+				array(
+					'post_title'  => 'Hello world!',
+					'post_status' => 'inherit',
+				)
+			);
+		},
+	),
+	'delete-draft-post'                      => array(
+		'setup'  => function () use ( $posts_insert ) {
+			return $posts_insert( array( 'post_status' => 'draft' ) );
+		},
+		'action' => function ( $id ) {
+			wp_delete_post( $id, true );
 		},
 	),
 );

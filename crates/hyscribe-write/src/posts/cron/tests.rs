@@ -129,3 +129,26 @@ fn keys_are_those_of_php_arguments() {
     };
     assert_eq!(post, b"f3dd847b0fa5d985c704d7471d9bdbf1");
 }
+
+#[test]
+fn the_duplicate_window_has_php_bounds() {
+    // Due within ten minutes, the window starts at 0; past that, ten minutes back.
+    let mut near = vec![at(Key::Int(NOW - 1), &[("do_pings", None)])];
+    assert!(added(&mut near, (NOW, NOW + 600), "do_pings", None));
+    let mut edge = vec![at(Key::Int(NOW + 4400), &[("do_pings", None)])];
+    assert!(!added(&mut edge, (NOW, NOW + 5000), "do_pings", None));
+}
+
+#[test]
+fn removing_leaves_other_hooks_with_the_same_arguments() {
+    let mut crons = vec![at(
+        Key::Int(1),
+        &[("publish_future_post", Some(7)), ("other", Some(7))],
+    )];
+    assert!(remove(
+        &mut crons,
+        "publish_future_post",
+        &key(&args(Some(7)))
+    ));
+    assert_eq!(crons, [at(Key::Int(1), &[("other", Some(7))])]);
+}

@@ -315,19 +315,15 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
     } else {
         args.status.clone()
     };
-    let mut category = match &args.category {
-        Some(given) if given.iter().any(|&term| term != 0) => {
-            given.iter().copied().filter(|&term| term != 0).collect()
-        }
-        None if before.is_some() => {
+    // An update keeps its categories, a new post (ID 0) has none; with
+    // none, wp_set_post_categories() gives the default one.
+    let category: Vec<u64> = match &args.category {
+        Some(given) => given.iter().copied().filter(|&term| term != 0).collect(),
+        None => {
             let terms = write.object_terms(post_id, "category").await?;
             terms.into_iter().map(|(term, _)| term).collect()
         }
-        _ => Vec::new(),
     };
-    if category.is_empty() && kind == Kind::Post && status != "auto-draft" {
-        category = vec![site::option_int(write, "default_category").await?];
-    }
     let mut name = match (&args.name, &before) {
         (Some(name), _) => name.clone(),
         (None, Some(before)) => before.name.clone(),

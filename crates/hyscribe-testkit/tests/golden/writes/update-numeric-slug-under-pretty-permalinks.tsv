@@ -1,13 +1,23 @@
 # The rows PHP WordPress writes for the action update-numeric-slug-under-pretty-permalinks (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 20:05:05 to 2026-11-14 20:05:05 UTC.
-# %wp_posts:1% is 945.
-# %wp_posts:2% is 946.
-# %wp_postmeta:1% is 38.
-# %wp_postmeta:2% is 39.
-# %wp_postmeta:3% is 40.
-# %wp_options:1% is 139.
+# %now% and %unix% stand for times from 2026-11-15 03:05:29 to 2026-11-15 03:05:29 UTC.
+# %wp_posts:1% is 5.
+# %wp_posts:2% is 6.
+# %wp_postmeta:1% is 3.
+# %wp_postmeta:2% is 4.
+# %wp_postmeta:3% is 5.
+# %wp_postmeta:4% is 6.
+# %wp_postmeta:5% is 7.
+# %wp_options:1% is 130.
 wp_postmeta	%wp_postmeta:3%	+	meta_id	%wp_postmeta:3%
 wp_postmeta	%wp_postmeta:3%	+	meta_key	_wp_old_slug
 wp_postmeta	%wp_postmeta:3%	+	meta_value	a-write-oracle-post
 wp_postmeta	%wp_postmeta:3%	+	post_id	%wp_posts:1%
-wp_posts	%wp_posts:1%	~	post_name	a-write-oracle-post	12-2
+wp_postmeta	%wp_postmeta:4%	+	meta_id	%wp_postmeta:4%
+wp_postmeta	%wp_postmeta:4%	+	meta_key	_wp_old_slug
+wp_postmeta	%wp_postmeta:4%	+	meta_value	12-2
+wp_postmeta	%wp_postmeta:4%	+	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:5%	+	meta_id	%wp_postmeta:5%
+wp_postmeta	%wp_postmeta:5%	+	meta_key	_wp_old_slug
+wp_postmeta	%wp_postmeta:5%	+	meta_value	plain-words
+wp_postmeta	%wp_postmeta:5%	+	post_id	%wp_posts:1%
+wp_posts	%wp_posts:1%	~	post_name	a-write-oracle-post	00

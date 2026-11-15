@@ -666,7 +666,12 @@ async fn edge_cases_match_php() {
             set_option(writer, conn, "permalink_structure", b"/%postname%/").await?;
             Ok(id)
         },
-        async |conn, id| update(conn, id, &|args| args.name = Some(b"12".to_vec())).await,
+        async |conn, id| {
+            for name in [&b"12"[..], b"plain-words", b"00"] {
+                update(conn, id, &|args| args.name = Some(name.to_vec())).await?;
+            }
+            Ok(())
+        },
     )
     .await;
     check(
@@ -1484,4 +1489,336 @@ async fn database_errors_end_a_users_post_deletion() {
             .map(drop)
     })
     .await;
+}
+
+/// Term `id` named `name` in `taxonomy`, written raw as the setups do.
+async fn raw_term(
+    conn: &mut Connection,
+    id: u64,
+    (name, taxonomy): (&str, &str),
+    count: u64,
+) -> StdResult<(), String> {
+    sqlx::query("INSERT INTO wp_terms (term_id, name, slug, term_group) VALUES (?, ?, ?, 0)")
+        .bind(id)
+        .bind(name)
+        .bind(name.to_lowercase())
+        .execute(&mut *conn)
+        .await
+        .map_err(shown)?;
+    sqlx::query(
+        "INSERT INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, \
+         parent, count) VALUES (?, ?, ?, '', 0, ?)",
+    )
+    .bind(id)
+    .bind(id)
+    .bind(taxonomy)
+    .bind(count)
+    .execute(&mut *conn)
+    .await
+    .map_err(shown)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rarer_saves_match_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    let update = async |conn: &mut Connection, id, change: &dyn Fn(&mut PostArgs)| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_update_post(w, ctx, id, change).await
+        })
+        .await
+        .map(drop)
+    };
+    let trash = async |conn: &mut Connection, id| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_trash_post(w, ctx, id).await
+        })
+        .await
+        .map(drop)
+    };
+    let delete = async |conn: &mut Connection, id| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_delete_post(w, ctx, id, true).await
+        })
+        .await
+        .map(drop)
+    };
+    let publish = async |conn: &mut Connection, id| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_publish_post(w, ctx, id).await
+        })
+        .await
+    };
+    let insert = async |conn: &mut Connection, args| insert_post(writer, conn, args).await;
+    check(
+        "update-categorized-post",
+        async |conn| {
+            raw_term(conn, 950, ("Oracle", "category"), 0).await?;
+            let args = PostArgs {
+                category: Some(vec![950]),
+                ..oracle_post("publish")
+            };
+            insert(conn, args).await
+        },
+        async |conn, id| {
+            update(conn, id, &|args| args.title = b"A renamed post".to_vec()).await?;
+            let args = PostArgs {
+                id,
+                title: b"Rewritten".to_vec(),
+                content: b"New.".to_vec(),
+                status: "publish".into(),
+                ..PostArgs::default()
+            };
+            insert(conn, args).await.map(drop)
+        },
+    )
+    .await;
+    check(
+        "publish-dated-drafts",
+        async |conn| {
+            let draft = || PostArgs {
+                date: "2025-01-01 00:00:00".into(),
+                ..oracle_post("draft")
+            };
+            Ok((insert(conn, draft()).await?, insert(conn, draft()).await?))
+        },
+        async |conn, (first, second)| {
+            update(conn, first, &|args| args.status = "publish".into()).await?;
+            update(conn, second, &|args| {
+                args.status = "publish".into();
+                args.edit_date = true;
+            })
+            .await
+        },
+    )
+    .await;
+    check(
+        "update-unpublished-post-keeps-date",
+        async |conn| {
+            let args = PostArgs {
+                date: "2025-02-03 10:00:00".into(),
+                ..oracle_post("publish")
+            };
+            let id = insert(conn, args).await?;
+            update(conn, id, &|args| args.status = "draft".into()).await?;
+            Ok(id)
+        },
+        async |conn, id| update(conn, id, &|args| args.title = b"A renamed post".to_vec()).await,
+    )
+    .await;
+    check(
+        "publish-draft-page",
+        async |conn| {
+            let args = PostArgs {
+                post_type: "page".into(),
+                ..oracle_post("draft")
+            };
+            insert(conn, args).await
+        },
+        publish,
+    )
+    .await;
+    check(
+        "insert-pending-post",
+        async |_| Ok(()),
+        async |conn, ()| {
+            let args = PostArgs {
+                name: Some(b"chosen".to_vec()),
+                ..oracle_post("pending")
+            };
+            insert(conn, args).await.map(drop)
+        },
+    )
+    .await;
+    check(
+        "update-post-with-stray-desired-slug",
+        async |conn| {
+            let id = insert(conn, oracle_post("publish")).await?;
+            act(writer, conn, &admin(), async |w, _| {
+                let meta = hyscribe_db::Meta::Post;
+                Ok(
+                    w.add_meta(meta, id, "_wp_desired_post_slug", Some(b"elsewhere"))
+                        .await?,
+                )
+            })
+            .await?;
+            Ok(id)
+        },
+        async |conn, id| update(conn, id, &|args| args.title = b"A renamed post".to_vec()).await,
+    )
+    .await;
+    check(
+        "trash-post-beside-trashed-namesake",
+        async |conn| {
+            let titled = |title: &[u8]| PostArgs {
+                title: title.to_vec(),
+                ..oracle_post("publish")
+            };
+            let id = insert(conn, titled(b"Taken")).await?;
+            let trashed = insert(conn, titled(b"Other")).await?;
+            act(writer, conn, &admin(), async |w, _| {
+                w.set_post_status(trashed, "trash").await?;
+                Ok(w.set_post_name(trashed, b"taken").await?)
+            })
+            .await?;
+            Ok(id)
+        },
+        trash,
+    )
+    .await;
+    check(
+        "publish-post-with-custom-guid",
+        async |conn| {
+            let id = insert(conn, oracle_post("draft")).await?;
+            act(writer, conn, &admin(), async |w, _| {
+                Ok(w.set_post_guid(id, b"urn:oracle:custom").await?)
+            })
+            .await?;
+            Ok(id)
+        },
+        async |conn, id| update(conn, id, &|args| args.status = "publish".into()).await,
+    )
+    .await;
+    check(
+        "update-post-name-with-autosave",
+        async |conn| {
+            let id = insert(conn, oracle_post("publish")).await?;
+            autosave(writer, conn, id).await?;
+            Ok(id)
+        },
+        async |conn, id| update(conn, id, &|args| args.name = Some(b"renamed".to_vec())).await,
+    )
+    .await;
+    check(
+        "update-post-twice",
+        async |conn| {
+            let id = insert(conn, oracle_post("publish")).await?;
+            update(conn, id, &|args| args.title = b"A renamed post".to_vec()).await?;
+            Ok(id)
+        },
+        async |conn, id| update(conn, id, &|args| args.title = b"Renamed again".to_vec()).await,
+    )
+    .await;
+    check(
+        "delete-tagged-post",
+        async |conn| {
+            raw_term(conn, 960, ("Tagged", "post_tag"), 1).await?;
+            let id = insert(conn, oracle_post("publish")).await?;
+            act(writer, conn, &admin(), async |w, _| {
+                Ok(w.add_relationship(id, 960).await?)
+            })
+            .await?;
+            Ok(id)
+        },
+        delete,
+    )
+    .await;
+    check(
+        "insert-inherit-post",
+        async |_| Ok(()),
+        async |conn, ()| {
+            let args = PostArgs {
+                title: b"Hello world!".to_vec(),
+                ..oracle_post("inherit")
+            };
+            insert(conn, args).await.map(drop)
+        },
+    )
+    .await;
+    check(
+        "delete-draft-post",
+        async |conn| insert(conn, oracle_post("draft")).await,
+        delete,
+    )
+    .await;
+}
+
+/// `_wp_put_post_revision( get_post( $id ), true )`.
+async fn autosave(writer: &Writer, conn: &mut Connection, id: u64) -> StdResult<(), String> {
+    act(writer, conn, &admin(), async |w, ctx| {
+        let post = existing(w, id).await?;
+        let args = PostArgs {
+            title: post.title,
+            content: post.content,
+            excerpt: post.excerpt,
+            parent: id,
+            status: "inherit".into(),
+            post_type: "revision".into(),
+            name: Some(format!("{id}-autosave-v1").into_bytes()),
+            date: post.modified,
+            date_gmt: post.modified_gmt,
+            ..PostArgs::default()
+        };
+        insert(w, ctx, args).await.map(drop)
+    })
+    .await
+}
+
+#[tokio::test]
+async fn edge_values_are_read_as_php_reads_them() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    // A future page under pretty permalinks would take a pretty GUID.
+    let page = rolled_back(async |w, ctx| {
+        set(w, "permalink_structure", b"/%postname%/").await?;
+        let args = PostArgs {
+            post_type: "page".into(),
+            date: "2030-01-01 10:00:00".into(),
+            ..oracle_post("publish")
+        };
+        wp_insert_post(w, ctx, args).await
+    })
+    .await;
+    assert!(unported(page));
+    // A new post cannot close a loop, even under a parent in one.
+    let looped = rolled_back(async |w, ctx| {
+        let page = || PostArgs {
+            post_type: "page".into(),
+            ..oracle_post("publish")
+        };
+        let a = wp_insert_post(w, ctx, page()).await?;
+        let b = wp_insert_post(
+            w,
+            ctx,
+            PostArgs {
+                parent: a,
+                ..page()
+            },
+        )
+        .await?;
+        let post = existing(w, a).await?;
+        w.update_post(a, &PostFields { parent: b, ..post }).await?;
+        let c = wp_insert_post(
+            w,
+            ctx,
+            PostArgs {
+                parent: a,
+                ..page()
+            },
+        )
+        .await?;
+        Ok(existing(w, c).await?.parent == a)
+    })
+    .await;
+    assert!(looped.unwrap());
+    // A do_pings event already due later is not scheduled again.
+    let later = rolled_back(async |w, ctx| {
+        let at = ctx.now + 3600;
+        let cron = format!(
+            "a:2:{{i:{at};a:1:{{s:8:\"do_pings\";a:1:{{s:32:\"40cd750bba9870f18aada2478b24840a\";\
+             a:2:{{s:8:\"schedule\";b:0;s:4:\"args\";a:0:{{}}}}}}}}s:7:\"version\";i:2;}}"
+        );
+        set(w, "cron", cron.as_bytes()).await?;
+        wp_insert_post(w, ctx, oracle_post("publish")).await?;
+        Ok(w.option_value("cron").await?.unwrap_or_default() == cron.as_bytes())
+    })
+    .await;
+    assert!(later.unwrap());
+    // A cron array without its version, but with events, is still old.
+    let old = rolled_back(async |w, ctx| {
+        set(w, "cron", b"a:1:{i:5;a:0:{}}").await?;
+        wp_insert_post(w, ctx, oracle_post("publish")).await
+    })
+    .await;
+    assert!(unported(old));
 }

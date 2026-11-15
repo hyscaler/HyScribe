@@ -1,0 +1,23 @@
+# The rows PHP WordPress writes for the action admin-options-general-errors (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 10:12:02 to 2026-11-15 10:12:02 UTC.
+# %wp_options:1% is 136.
+# %wp_options:2% is 137.
+# %wp_options:3% is 138.
+# %wp_options:4% is 139.
+wp_options	WPLANG	+	autoload	auto
+wp_options	WPLANG	+	option_id	%wp_options:2%
+wp_options	WPLANG	+	option_name	WPLANG
+wp_options	WPLANG	+	option_value	
+wp_options	_transient_settings_errors	+	autoload	off
+wp_options	_transient_settings_errors	+	option_id	%wp_options:4%
+wp_options	_transient_settings_errors	+	option_name	_transient_settings_errors
+wp_options	_transient_settings_errors	+	option_value	a:3:{i:0;a:4:{s:7:"setting";s:7:"general";s:4:"code";s:16:"settings_updated";s:7:"message";s:75:"The timezone you have entered is not valid. Please select a valid timezone.";s:4:"type";s:5:"error";}i:1;a:4:{s:7:"setting";s:15:"new_admin_email";s:4:"code";s:23:"invalid_new_admin_email";s:7:"message";s:105:"The email address entered did not appear to be a valid email address. Please enter a valid email address.";s:4:"type";s:5:"error";}i:2;a:4:{s:7:"setting";s:7:"siteurl";s:4:"code";s:15:"invalid_siteurl";s:7:"message";s:93:"The WordPress address you entered did not appear to be a valid URL. Please enter a valid URL.";s:4:"type";s:5:"error";}}
+wp_options	_transient_timeout_settings_errors	+	autoload	off
+wp_options	_transient_timeout_settings_errors	+	option_id	%wp_options:3%
+wp_options	_transient_timeout_settings_errors	+	option_name	_transient_timeout_settings_errors
+wp_options	_transient_timeout_settings_errors	+	option_value	%expiry%
+wp_options	home	~	option_value	http://default-install.test	http://example.test
+wp_options	https_migration_required	-	autoload	auto
+wp_options	https_migration_required	-	option_id	%wp_options:1%
+wp_options	https_migration_required	-	option_name	https_migration_required
+wp_options	https_migration_required	-	option_value	1

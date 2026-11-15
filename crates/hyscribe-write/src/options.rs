@@ -2,8 +2,9 @@
 
 //! Options and meta: `add_option()`, `update_option()`, `delete_option()`,
 //! the transients' database side without an object cache, and the meta
-//! functions. `sanitize_option()` and the hooks on single options (as
-//! `update_option_home`) are not ported: callers pass sanitized values.
+//! functions, and `sanitize_option()` for the Settings screens' options.
+//! `update_option()` takes sanitized values; the hooks on single options
+//! (as `update_option_home`) are their callers'.
 
 use hyscribe_db::{DbError, Write};
 use hyscribe_phpser::{Maybe, Value, encode, is_empty_string, is_serialized, maybe_unserialize};
@@ -11,10 +12,12 @@ use hyscribe_phpser::{Maybe, Value, encode, is_empty_string, is_serialized, mayb
 use crate::{Error, now};
 
 mod meta;
+mod sanitize;
 
 pub use hyscribe_db::Meta;
 pub use meta::{add_metadata, delete_metadata, update_metadata};
 pub(crate) use meta::{delete_object_meta, get_metadata};
+pub use sanitize::{INVALID_ZONE, Sanitized, is_zone, sanitize_option};
 
 /// An `$autoload` argument other than `null`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,8 +69,12 @@ fn option_name(name: &str) -> Result<Option<&str>, Error> {
 }
 
 /// `get_option( $name )`: `false` for a missing option. An empty `home` is
-/// the site URL, and the URL options lose their trailing slashes.
-pub(crate) async fn get_option(write: &mut Write<'_>, name: &str) -> Result<Value, DbError> {
+/// the site URL, the URL options lose their trailing slashes, and `home`
+/// and `siteurl` are the configuration's when it sets them (`WP_HOME`).
+pub async fn get_option(write: &mut Write<'_>, name: &str) -> Result<Value, DbError> {
+    if let Some(url) = write.configured(name) {
+        return Ok(Value::String(url.as_bytes().to_vec()));
+    }
     let raw = match write.option_value(name).await? {
         Some(raw) if name == "home" && raw.is_empty() => write.option_value("siteurl").await?,
         raw => raw,

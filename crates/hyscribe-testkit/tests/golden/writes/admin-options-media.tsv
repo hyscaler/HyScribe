@@ -1,0 +1,18 @@
+# The rows PHP WordPress writes for the action admin-options-media (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 10:12:03 to 2026-11-15 10:12:03 UTC.
+# %wp_options:1% is 146.
+# %wp_options:2% is 147.
+wp_options	_transient_settings_errors	+	autoload	off
+wp_options	_transient_settings_errors	+	option_id	%wp_options:2%
+wp_options	_transient_settings_errors	+	option_name	_transient_settings_errors
+wp_options	_transient_settings_errors	+	option_value	a:1:{i:0;a:4:{s:7:"setting";s:7:"general";s:4:"code";s:16:"settings_updated";s:7:"message";s:15:"Settings saved.";s:4:"type";s:7:"success";}}
+wp_options	_transient_timeout_settings_errors	+	autoload	off
+wp_options	_transient_timeout_settings_errors	+	option_id	%wp_options:1%
+wp_options	_transient_timeout_settings_errors	+	option_name	_transient_timeout_settings_errors
+wp_options	_transient_timeout_settings_errors	+	option_value	%expiry%
+wp_options	image_default_link_type	~	option_value	none	
+wp_options	large_size_w	~	option_value	1024	2048
+wp_options	thumbnail_crop	~	option_value	1	
+wp_options	thumbnail_size_h	~	option_value	150	0
+wp_options	thumbnail_size_w	~	option_value	150	200
+wp_options	uploads_use_yearmonth_folders	~	option_value	1	

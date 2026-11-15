@@ -8,3 +8,19 @@ users-promote-self-editor	GET	users.php?changeit=Change&new_role=editor&users[]=
 users-promote-nobody	GET	users.php?changeit=Change&new_role=editor	-	bulk-users	_wpnonce
 users-promote-referer	GET	users.php?changeit=Change&new_role=administrator&users[]=1&wp_http_referer=%2Fwp-admin%2Fusers.php%3Frole%3Dadministrator%26updated%3D1	-	bulk-users	_wpnonce
 users-promote-post	POST	users.php	action=promote&new_role=administrator&users[]=1	bulk-users	_wpnonce
+# The Settings saves (options.php, the Permalinks and Privacy screens' own),
+# the screens' fields sent as they show them; `follow` records the page after.
+options-adminhash-bad	GET	options.php?adminhash=0123	-	-	_wpnonce	follow
+options-dismiss	GET	options.php?dismiss=new_admin_email	-	dismiss-1-new_admin_email	_wpnonce	follow
+options-general	POST	options.php	option_page=general&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-general.php&blogname=HyScribe+Default+Install&blogdescription=&site_icon=0&new_admin_email=admin%40default-install.test&default_role=subscriber&WPLANG=&timezone_string=UTC%2B0&date_format=F+j%2C+Y&date_format_custom=F+j%2C+Y&time_format=g%3Ai+a&time_format_custom=g%3Ai+a&start_of_week=1	general-options	_wpnonce	follow
+options-general-email	POST	options.php	option_page=general&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-general.php&blogname=HyScribe+Default+Install&new_admin_email=not+an+email&timezone_string=Mars%2FBase&date_format=F+j%2C+Y&time_format=g%3Ai+a&start_of_week=1	general-options	_wpnonce	follow
+options-writing	POST	options.php	option_page=writing&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-writing.php&default_category=1&default_post_format=0&mailserver_url=mail.example.com&mailserver_port=110&mailserver_login=login%40example.com&mailserver_pass=&default_email_category=1&ping_sites=https%3A%2F%2Frpc.pingomatic.com%2F	writing-options	_wpnonce	follow
+options-reading	POST	options.php	option_page=reading&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-reading.php&show_on_front=posts&posts_per_page=10&posts_per_rss=10&rss_use_excerpt=0	reading-options	_wpnonce	follow
+options-discussion	POST	options.php	option_page=discussion&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-discussion.php&default_pingback_flag=1&default_ping_status=open&default_comment_status=open&require_name_email=1&close_comments_days_old=14&show_comments_cookies_opt_in=1&thread_comments=1&thread_comments_depth=5&comments_per_page=50&default_comments_page=newest&comment_order=asc&comments_notify=1&moderation_notify=1&wp_notes_notify=1&comment_previously_approved=1&comment_max_links=2&moderation_keys=&disallowed_keys=&show_avatars=1&avatar_rating=G&avatar_default=mystery	discussion-options	_wpnonce	follow
+options-media	POST	options.php	option_page=media&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-media.php&thumbnail_size_w=150&thumbnail_size_h=150&thumbnail_crop=1&medium_size_w=300&medium_size_h=300&large_size_w=1024&large_size_h=1024&uploads_use_yearmonth_folders=1	media-options	_wpnonce	follow
+options-privacy	POST	options.php	option_page=privacy&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-privacy.php	privacy-options	_wpnonce	follow
+options-misc	POST	options.php	option_page=misc&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-general.php	misc-options	_wpnonce
+options-noreferer	POST	options.php	option_page=media&action=update&thumbnail_size_w=150&thumbnail_size_h=150&thumbnail_crop=1&medium_size_w=300&medium_size_h=300&large_size_w=1024&large_size_h=1024&uploads_use_yearmonth_folders=1	media-options	_wpnonce
+options-permalink	POST	options-permalink.php	selection=&permalink_structure=&category_base=&tag_base=	update-permalink	_wpnonce	follow
+options-permalink-error	POST	options-permalink.php	selection=custom&permalink_structure=%2Farchives%2F&category_base=&tag_base=	update-permalink	_wpnonce	follow
+privacy-create	POST	options-privacy.php	action=create-privacy-page	create-privacy-page	_wpnonce

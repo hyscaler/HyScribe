@@ -1091,18 +1091,10 @@ fn screen(
     };
     let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
     let query = raw.split_once('?').map_or("", |(_, query)| query);
-    // The Settings screens are sent back with `settings-updated` alone.
+    // The Settings screens are sent back with `settings-updated` or `updated` alone.
     let settings = || {
-        let updated = only_argument(query, "settings-updated")?;
-        // `settings_errors()` would print and delete what the save left.
-        let left = [
-            "_transient_settings_errors",
-            "_transient_timeout_settings_errors",
-        ]
-        .iter()
-        .any(|name| admin.reads.reads.option(name).is_some());
-        let saved = updated.is_some_and(|updated| !Value::String(updated.into()).is_empty());
-        (!saved || !left).then_some(())
+        let back = only_argument(query, "settings-updated").or(only_argument(query, "updated"));
+        back.map(drop)
     };
     let answer = match path {
         "/hs-admin/options-general" | "/hs-admin/options-writing" | "/hs-admin/options-reading" => {

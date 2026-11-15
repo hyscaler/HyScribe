@@ -1,0 +1,12 @@
+# The rows PHP WordPress writes for the action admin-options-dismiss (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 10:12:05 to 2026-11-15 10:12:05 UTC.
+# %wp_options:1% is 154.
+# %wp_options:2% is 155.
+wp_options	adminhash	-	autoload	off
+wp_options	adminhash	-	option_id	%wp_options:1%
+wp_options	adminhash	-	option_name	adminhash
+wp_options	adminhash	-	option_value	a:2:{s:4:"hash";s:32:"%hash%";s:8:"newemail";s:16:"new@example.test";}
+wp_options	new_admin_email	-	autoload	auto
+wp_options	new_admin_email	-	option_id	%wp_options:2%
+wp_options	new_admin_email	-	option_name	new_admin_email
+wp_options	new_admin_email	-	option_value	new@example.test

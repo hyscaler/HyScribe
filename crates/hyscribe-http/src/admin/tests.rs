@@ -1289,51 +1289,32 @@ async fn notices_over_more_content() {
     assert!(page.contains("<p><a href=\"/hs-admin/users?role=editor\">&larr; Go to Users</a></p>"));
 }
 
-/// A save's `settings-updated` shows the screen as it is, unless the save
-/// left the errors PHP would print and delete.
+/// A save sends the screen back with `settings-updated` (`updated` from
+/// `options.php`'s email confirmation), which shows the notices it kept.
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_after_a_save() {
-    for (left, query, shown) in [
-        (None, "?settings-updated=true", true),
-        (
-            Some("_transient_settings_errors"),
-            "?settings-updated=true",
-            false,
-        ),
-        (
-            Some("_transient_timeout_settings_errors"),
-            "?settings-updated=1",
-            false,
-        ),
-        (
-            Some("_transient_settings_errors"),
-            "?settings-updated=0",
-            true,
-        ),
-        (Some("_transient_settings_errors"), "", true),
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let mut site = Arc::try_unwrap(site).ok().unwrap();
+    let kept = b"a:1:{i:0;a:4:{s:7:\"setting\";s:7:\"general\";s:4:\"code\";s:16:\"settings_updated\";s:7:\"message\";s:15:\"Settings saved.\";s:4:\"type\";s:7:\"success\";}}";
+    site.options
+        .insert("_transient_settings_errors".into(), kept.to_vec());
+    let site = Arc::new(site);
+    for (query, notice) in [
+        ("?settings-updated=true", Some(true)),
+        ("?settings-updated=0", Some(false)),
+        ("?updated=true", Some(false)),
+        ("", Some(false)),
+        ("?settings-updated=true&x", None),
     ] {
-        let db = hyscribe_db::Db::connect(&hyscribe_testkit::fixture_database())
-            .await
-            .unwrap();
-        let mut site = Site::load(db, None, None).await.unwrap();
-        if let Some(name) = left {
-            site.options.insert(name.into(), b"a:0:{}".to_vec());
-        }
-        let site = Arc::new(site);
         for file in ["options-writing", "options-media"] {
-            let site = Arc::clone(&site);
-            let handle = Handle::current();
-            let path = format!("/hs-admin/{file}");
-            let uri = format!("{path}{query}");
-            let response = tokio::task::spawn_blocking(move || {
-                let reads = LoginReads::new(&site, handle, now());
-                let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
-                let url = format!("http://h{uri}");
-                screen(&admin, &path, &uri, &url, "http://h", &Browser::default())
-            })
-            .await
-            .unwrap();
-            assert_eq!(response.is_some(), shown, "{left:?} {file}{query}");
+            let uri = format!("/hs-admin/{file}{query}");
+            let response = send(&site, "GET", &uri, &cookies, None).await;
+            let shown = match response.status() {
+                StatusCode::OK => Some(page_of(response).await.contains("Settings saved.")),
+                _ => None,
+            };
+            assert_eq!(shown, notice, "{file}{query}");
         }
     }
 }
@@ -1992,12 +1973,30 @@ async fn unwritable(site: Arc<Site>, prefix: &str) -> Arc<Site> {
     Arc::new(site.with_writer(writer.unwrap()))
 }
 
-/// `wp-admin/users.php` under hs-admin's names.
+/// `wp-admin`'s screens under hs-admin's names.
 fn hs(text: &str) -> String {
-    let text = text.replace("wp-admin%2Fusers.php", "hs-admin%2Fusers");
-    text.replace("/wp-admin/users.php", "/hs-admin/users")
-        .replace("users.php", "users")
+    let text = text.replace("wp-admin%2F", "hs-admin%2F");
+    text.replace("/wp-admin/", "/hs-admin/").replace(".php", "")
 }
+
+/// The cases of `reference/admin-saves/golden.sh` that write more than the
+/// fixture's read only user can: their rows and answers are the write
+/// oracle's, in `saves`.
+const WRITTEN: [&str; 13] = [
+    "users-promote",
+    "options-general",
+    "options-general-email",
+    "options-writing",
+    "options-reading",
+    "options-discussion",
+    "options-media",
+    "options-privacy",
+    "options-misc",
+    "options-noreferer",
+    "options-permalink",
+    "options-permalink-error",
+    "privacy-create",
+];
 
 /// Past their checks, the role changes of `reference/admin-saves/golden.sh`
 /// answer as PHP's, but user 801's, whom the fixture lacks (its rows and
@@ -2008,12 +2007,15 @@ async fn actions_answer_as_php_once_checked() {
     let dir = tempfile::tempdir().unwrap();
     let (site, cookies) = logged_in("wordpress", dir.path()).await;
     let nonce = session_nonce(&site, &cookies, "bulk-users").await;
+    let dismiss = session_nonce(&site, &cookies, "dismiss-1-new_admin_email").await;
     let site = unwritable(site, "wp_").await;
     let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
     let cases = include_str!("../../../../reference/admin-saves/cases.list");
-    let rows = golden
-        .lines()
-        .filter(|row| !row.starts_with("users-promote\t"));
+    let rows = golden.lines().filter(|row| {
+        !WRITTEN
+            .iter()
+            .any(|case| row.starts_with(&format!("{case}\t")))
+    });
     for row in rows {
         let [case, status, php_location, body] = row.split('\t').collect::<Vec<_>>()[..] else {
             panic!("{row}");
@@ -2022,8 +2024,13 @@ async fn actions_answer_as_php_once_checked() {
             .lines()
             .find(|line| line.starts_with(&format!("{case}\t")));
         let fields: Vec<&str> = line.unwrap().split('\t').collect();
-        let [_, method, target, data, _, field] = fields[..] else {
+        let [_, method, target, data, action, field, ..] = fields[..] else {
             panic!("{case}");
+        };
+        let nonce = if action == "dismiss-1-new_admin_email" {
+            &dismiss
+        } else {
+            &nonce
         };
         let uri = format!("/hs-admin/{}", hs(target));
         let response = if method == "POST" {

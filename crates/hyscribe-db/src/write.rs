@@ -85,6 +85,9 @@ pub struct Writer {
     prefix: Prefix,
     /// The tables written whose engine cannot roll back, with the engine.
     refused: Vec<(Table, String)>,
+    /// The `home` and `siteurl` the configuration sets (`WP_HOME`,
+    /// `WP_SITEURL`), which `get_option()` gives instead of the stored ones.
+    urls: Vec<(&'static str, String)>,
 }
 
 impl Writer {
@@ -125,7 +128,13 @@ impl Writer {
             pool,
             prefix,
             refused,
+            urls: Vec::new(),
         }))
+    }
+
+    /// The writer with the configuration's `home` and `siteurl`, by option name.
+    pub fn with_urls(self, urls: Vec<(&'static str, String)>) -> Writer {
+        Writer { urls, ..self }
     }
 
     /// What the writer refuses, as the service logs it at start: each table
@@ -239,6 +248,13 @@ impl<'w> Write<'w> {
     /// `{prefix}capabilities` and `{prefix}user_level`.
     pub fn prefix(&self) -> &str {
         self.writer.prefix.as_str()
+    }
+
+    /// The configuration's value of the option `name` (`home` or `siteurl`),
+    /// if it sets one.
+    pub fn configured(&self, name: &str) -> Option<&str> {
+        let url = self.writer.urls.iter().find(|(option, _)| *option == name);
+        url.map(|(_, url)| url.as_str())
     }
 
     fn sql(&self, query: &'static str) -> Query {

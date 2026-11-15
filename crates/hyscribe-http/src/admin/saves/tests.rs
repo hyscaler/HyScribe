@@ -12,7 +12,7 @@ use hyscribe_write::users::{UserData, wp_insert_user};
 
 use super::*;
 
-async fn writer() -> Writer {
+pub(super) async fn writer() -> Writer {
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
     writer.unwrap().unwrap()
 }

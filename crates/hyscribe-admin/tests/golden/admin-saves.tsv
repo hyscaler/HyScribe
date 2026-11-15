@@ -4,3 +4,17 @@ users-promote-self-editor	302	users.php?update=err_admin_role
 users-promote-nobody	302	users.php	
 users-promote-referer	302	/wp-admin/users.php?role=administrator&update=promote	
 users-promote-post	302	users.php?update=promote	
+options-adminhash-bad	302	http://127.0.0.1:8081/wp-admin/options-general.php?updated=false	
+options-dismiss	302	http://127.0.0.1:8081/wp-admin/options-general.php?updated=true	
+options-general	302	/wp-admin/options-general.php?settings-updated=true	
+options-general-email	302	/wp-admin/options-general.php?settings-updated=true	
+options-writing	302	/wp-admin/options-writing.php?settings-updated=true	
+options-reading	302	/wp-admin/options-reading.php?settings-updated=true	
+options-discussion	302	/wp-admin/options-discussion.php?settings-updated=true	
+options-media	302	/wp-admin/options-media.php?settings-updated=true	
+options-privacy	302	/wp-admin/options-privacy.php?settings-updated=true	
+options-misc	302	/wp-admin/options-general.php?settings-updated=true	
+options-noreferer	302	/wp-admin/options.php?settings-updated=true	
+options-permalink	302	http://127.0.0.1:8081/wp-admin/options-permalink.php?settings-updated=true	
+options-permalink-error	302	http://127.0.0.1:8081/wp-admin/options-permalink.php?settings-updated=true	
+privacy-create	302	http://127.0.0.1:8081/wp-admin/post.php?post=803&action=edit	

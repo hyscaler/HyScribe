@@ -2173,6 +2173,19 @@ async fn another_user_s_sessions_end() {
     assert!(page.contains("<strong>themedemos</strong> (ID #2): What should be done"));
 }
 
+/// The fixture's administrator owns content, and no other user does.
+#[tokio::test(flavor = "multi_thread")]
+async fn content_has_its_owners() {
+    let site = oracle_site().await;
+    let handle = Handle::current();
+    let owns = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, now());
+        let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+        (admin.owns_content(1), admin.owns_content(2))
+    });
+    assert_eq!(owns.await.unwrap(), (true, false));
+}
+
 /// An answer sets the cookies given, a cookie no header can carry left out.
 #[test]
 fn answers_set_the_cookies_given() {

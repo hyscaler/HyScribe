@@ -334,7 +334,8 @@ impl ActionSite for Admin<'_> {
         UsersSite::user_roles(self)
     }
     fn lock_holder(&self, post: u64) -> Option<String> {
-        let post = PostsSite::post(self, post)?;
+        // The checks ask only about a post they found.
+        let post = PostsSite::post(self, post).unwrap_or_default();
         let holder = hyscribe_admin::posts::lock_holder(self, &post)?;
         Some(String::from_utf8_lossy(&holder.display_name).into_owned())
     }

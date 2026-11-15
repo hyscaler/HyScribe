@@ -50,9 +50,37 @@ const UNSENT: [&str; 25] = [
     "_format_video_embed",
 ];
 
-/// Refuses a request with a field of [`UNSENT`] as not ported.
+/// The fields read as text, where PHP fails on an array.
+const TEXTS: [&str; 21] = [
+    "post_title",
+    "post_name",
+    "post_date",
+    "post_date_gmt",
+    "post_content",
+    "post_content_filtered",
+    "post_excerpt",
+    "post_status",
+    "_status",
+    "comment_status",
+    "ping_status",
+    "post_password",
+    "to_ping",
+    "pinged",
+    "page_template",
+    "aa",
+    "mm",
+    "jj",
+    "hh",
+    "mn",
+    "ss",
+];
+
+/// Refuses as not ported a request with a field of [`UNSENT`], or an array
+/// for a field of [`TEXTS`].
 fn sent_by_the_lists(fields: &Data) -> Result<(), Stop> {
-    match UNSENT.iter().any(|name| fields.get(name).is_some()) {
+    let unsent = UNSENT.iter().any(|name| fields.get(name).is_some());
+    let array = |name: &&str| matches!(fields.get(name), Some(Value::Array(_)));
+    match unsent || TEXTS.iter().any(array) {
         true => Err(Error::Unported("a field the lists do not send").into()),
         false => Ok(()),
     }
@@ -94,8 +122,8 @@ struct Caps {
     user: u64,
     exists: bool,
     capabilities: Option<Vec<u8>>,
-    /// The post, its parent for a revision, and each's trashed status.
-    posts: Vec<(CapPost, Option<Vec<u8>>)>,
+    /// The post and its trashed status, if loaded.
+    post: Option<(CapPost, Option<Vec<u8>>)>,
 }
 
 impl Caps {
@@ -115,18 +143,14 @@ impl Caps {
         let exists = write.user(user).await?.is_some();
         let key = format!("{prefix}capabilities");
         let capabilities = write.meta_value(Meta::User, user, &key).await?;
-        let mut posts = Vec::new();
-        let mut next = post;
-        while let Some(id) = next.take() {
-            let Some(post) = write.post(id).await? else {
-                break;
-            };
+        let mut loaded = None;
+        if let Some((id, Some(post))) = match post {
+            Some(id) => Some((id, write.post(id).await?)),
+            None => None,
+        } {
             let trashed = write
                 .meta_value(Meta::Post, id, "_wp_trash_meta_status")
                 .await?;
-            if post.post_type == "revision" && posts.is_empty() {
-                next = Some(post.parent);
-            }
             let post = CapPost {
                 id,
                 author: post.author,
@@ -134,7 +158,7 @@ impl Caps {
                 post_type: post.post_type,
                 parent: post.parent,
             };
-            posts.push((post, trashed));
+            loaded = Some((post, trashed));
         }
         Ok(Caps {
             prefix,
@@ -142,7 +166,7 @@ impl Caps {
             user,
             exists,
             capabilities,
-            posts,
+            post: loaded,
         })
     }
 
@@ -173,14 +197,14 @@ impl CapabilityData for Caps {
     fn user_exists(&self, _: u64) -> bool {
         self.exists
     }
+    /// The post loaded: no other, a revision's parent in particular.
     fn post(&self, id: u64) -> Option<CapPost> {
-        let found = self.posts.iter().find(|(post, _)| post.id == id);
+        let found = self.post.as_ref().filter(|(post, _)| post.id == id);
         found.map(|(post, _)| post.clone())
     }
     /// The only post meta read is `_wp_trash_meta_status`.
-    fn post_meta(&self, id: u64, _: &str) -> Option<Vec<u8>> {
-        let found = self.posts.iter().find(|(post, _)| post.id == id);
-        found.and_then(|(_, trashed)| trashed.clone())
+    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        self.post.as_ref().and_then(|(_, trashed)| trashed.clone())
     }
     fn comment_post(&self, _: u64) -> Option<u64> {
         None
@@ -509,13 +533,10 @@ impl Data {
         self.get(name).is_some_and(|value| !value.is_empty())
     }
 
-    /// `$data[ $name ]` as a string, if set; an array is not ported.
-    fn text(&self, name: &str) -> Result<Option<Vec<u8>>, Stop> {
-        match self.get(name) {
-            None => Ok(None),
-            Some(Value::Array(_)) => Err(Error::Unported("an array for a text field").into()),
-            Some(value) => Ok(Some(value.to_php_string())),
-        }
+    /// `$data[ $name ]` as a string, if set: one of [`TEXTS`], which
+    /// [`sent_by_the_lists`] keeps from being an array.
+    fn text(&self, name: &str) -> Option<Vec<u8>> {
+        self.get(name).map(Value::to_php_string)
     }
 
     fn set(&mut self, name: &str, value: Value) {
@@ -532,6 +553,17 @@ impl Data {
     }
 }
 
+/// The given status as a key, but `inherit`, which is left out.
+fn inherited(data: &mut Data) {
+    if data.filled("post_status") {
+        let status = hyscribe_kses::sanitize_key(&data.text("post_status").unwrap_or_default());
+        match status.as_str() {
+            "inherit" => data.unset("post_status"),
+            _ => data.set("post_status", Value::String(status.into_bytes())),
+        }
+    }
+}
+
 /// What `_wp_translate_postdata()` and `edit_post()` read beside the data.
 struct Saved<'a> {
     caps: &'a Caps,
@@ -541,17 +573,19 @@ struct Saved<'a> {
     now: i64,
 }
 
-/// A date unit of the data: an integer, as PHP reads one, or none.
-fn unit(data: &Data, name: &str) -> Result<Option<i64>, Stop> {
-    let Some(value) = data.text(name)? else {
-        return Ok(None);
+/// The date's parts, `aa` to `ss`: integers as PHP reads them, or none;
+/// a part that is not a whole number is not ported.
+fn units(data: &Data) -> Result<[Option<i64>; 6], Stop> {
+    let parts = ["aa", "mm", "jj", "hh", "mn", "ss"].map(|name| data.text(name));
+    let whole = |part: &Vec<u8>| {
+        let trimmed = String::from_utf8_lossy(part).trim().to_string();
+        let digits = trimmed.strip_prefix(['-', '+']).unwrap_or(&trimmed);
+        !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
     };
-    let trimmed = String::from_utf8_lossy(&value).trim().to_string();
-    let digits = trimmed.strip_prefix(['-', '+']).unwrap_or(&trimmed);
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+    if !parts.iter().flatten().all(whole) {
         return Err(Error::Unported("a date part that is not a whole number").into());
     }
-    Ok(Some(Value::String(value).to_int()))
+    Ok(parts.map(|part| part.map(|part| Value::String(part).to_int())))
 }
 
 /// `_wp_translate_postdata( true, $data )`: the data, or its error message.
@@ -584,19 +618,16 @@ fn translate(saved: &Saved, mut data: Data, user: u64) -> Result<Result<Data, &'
             "Sorry, you are not allowed to edit posts as this user."
         }));
     }
+    let mut status = data.text("post_status");
     if data.filled("post_status") {
-        let status = data.text("post_status")?.unwrap_or_default();
-        let mut status = hyscribe_kses::sanitize_key(&status);
-        if status == "auto-draft" {
-            status = "draft".into();
-        }
-        if STATUSES.contains(&status.as_str()) {
-            data.set("post_status", Value::String(status.into_bytes()));
+        let key = hyscribe_kses::sanitize_key(&status.take().unwrap_or_default());
+        let key = if key == "auto-draft" {
+            "draft".into()
         } else {
-            data.unset("post_status");
-        }
+            key
+        };
+        status = STATUSES.contains(&key.as_str()).then(|| key.into_bytes());
     }
-    let mut status = data.text("post_status")?;
     let previous = post.status.as_bytes();
     let publishes = caps.can_type("publish_posts", &post.post_type);
     if status.as_deref() == Some(b"private") && !publishes {
@@ -639,14 +670,11 @@ fn translate(saved: &Saved, mut data: Data, user: u64) -> Result<Result<Data, &'
         let wrapped = |value: Option<i64>, limit: i64| {
             value.map_or(0, |v| if v > limit { v - limit - 1 } else { v })
         };
-        let year = positive(unit(&data, "aa")?, "Y");
-        let month = positive(unit(&data, "mm")?, "n");
-        let day = positive(unit(&data, "jj")?.map(|day| day.min(31)), "j");
-        let (hour, minute, second) = (
-            wrapped(unit(&data, "hh")?, 23),
-            wrapped(unit(&data, "mn")?, 59),
-            wrapped(unit(&data, "ss")?, 59),
-        );
+        let [year, month, day, hour, minute, second] = units(&data)?;
+        let year = positive(year, "Y");
+        let month = positive(month, "n");
+        let day = positive(day.map(|day| day.min(31)), "j");
+        let (hour, minute, second) = (wrapped(hour, 23), wrapped(minute, 59), wrapped(second, 59));
         let date = format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}");
         let calendar = |value: i64| u32::try_from(value).unwrap_or_default();
         if !wp_checkdate(calendar(month), calendar(day), calendar(year)) {
@@ -680,24 +708,24 @@ async fn update(
     let field = |name| data.text(name);
     let int = |name: &str| data.get(name).map(Value::to_int);
     let (title, name, date, date_gmt) = (
-        field("post_title")?,
-        field("post_name")?,
-        field("post_date")?,
-        field("post_date_gmt")?,
+        field("post_title"),
+        field("post_name"),
+        field("post_date"),
+        field("post_date_gmt"),
     );
     let (content, filtered, excerpt, status) = (
-        field("post_content")?,
-        field("post_content_filtered")?,
-        field("post_excerpt")?,
-        field("post_status")?,
+        field("post_content"),
+        field("post_content_filtered"),
+        field("post_excerpt"),
+        field("post_status"),
     );
     let (comments, pings, password, to_ping, pinged, template) = (
-        field("comment_status")?,
-        field("ping_status")?,
-        field("post_password")?,
-        field("to_ping")?,
-        field("pinged")?,
-        field("page_template")?,
+        field("comment_status"),
+        field("ping_status"),
+        field("post_password"),
+        field("to_ping"),
+        field("pinged"),
+        field("page_template"),
     );
     let category = match data.get("post_category") {
         Some(Value::Array(ids)) => Some(
@@ -707,7 +735,9 @@ async fn update(
         ),
         _ => None,
     };
-    let (author, parent, order) = (int("post_author"), int("post_parent"), int("menu_order"));
+    // `_wp_translate_postdata()` set the author.
+    let author = data.get("post_author").map_or(0, Value::to_int);
+    let (parent, order) = (int("post_parent"), int("menu_order"));
     let edit_date = data.filled("edit_date");
     let lossy = |value: &Option<Vec<u8>>| value.as_deref().map(text);
     let (date, date_gmt, status, comments, pings) = (
@@ -744,9 +774,7 @@ async fn update(
         if let Some(name) = &name {
             args.name = Some(name.clone());
         }
-        if let Some(author) = author {
-            args.author = Some(u64::try_from(author).unwrap_or_default());
-        }
+        args.author = Some(u64::try_from(author).unwrap_or_default());
         if let Some(parent) = parent {
             args.parent = u64::try_from(parent).unwrap_or_default();
         }
@@ -821,14 +849,7 @@ async fn edit_post(
         "post_type",
         Value::String(post.post_type.clone().into_bytes()),
     );
-    if data.filled("post_status") {
-        let status = hyscribe_kses::sanitize_key(&data.text("post_status")?.unwrap_or_default());
-        if status == "inherit" {
-            data.unset("post_status");
-        } else {
-            data.set("post_status", Value::String(status.into_bytes()));
-        }
-    }
+    inherited(&mut data);
     // `_wp_upgrade_revisions_of_post()` for revisions older than version 1.
     if let Some(&oldest) = write.revision_ids(id).await?.last() {
         let name = existing(write, oldest).await?.name;
@@ -886,7 +907,7 @@ async fn edit_post(
         .content
         .windows(15)
         .position(|w| w == b"?attachment_id=");
-    let status = data.text("post_status")?.unwrap_or_default();
+    let status = data.text("post_status").unwrap_or_default();
     let linked = attachment_links.is_some_and(|at| at > 0)
         && [&b"publish"[..], b"future", b"private"].contains(&&status[..])
         && !write
@@ -931,6 +952,9 @@ pub(super) fn inline_save<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) ->
             return Err(Error::Unported("a list of another post type").into());
         }
         let post = existing(write, id).await?;
+        if !["post", "page"].contains(&post.post_type.as_str()) {
+            return Err(Error::Unported("a post type other than post and page").into());
+        }
         data.set("content", Value::String(post.content.clone()));
         data.set("excerpt", Value::String(post.excerpt.clone()));
         if let Some(parent) = data.get("post_parent").cloned() {
@@ -960,7 +984,7 @@ pub(super) fn inline_save<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) ->
         }
         // wp_unique_post_slug() of a draft's slug, as if it were published.
         if data.filled("post_name") && ["draft", "pending"].contains(&post.status.as_str()) {
-            let name = data.text("post_name")?.unwrap_or_default();
+            let name = data.text("post_name").unwrap_or_default();
             let unique = (id, "publish");
             let name =
                 wp_unique_post_slug(write, name, unique, &post.post_type, post.parent).await?;
@@ -1017,14 +1041,7 @@ async fn bulk_edit_posts(
         status => shared.set("post_status", status.unwrap_or(Value::Null)),
     }
     shared.unset("_status");
-    if shared.filled("post_status") {
-        let status = hyscribe_kses::sanitize_key(&shared.text("post_status")?.unwrap_or_default());
-        if status == "inherit" {
-            shared.unset("post_status");
-        } else {
-            shared.set("post_status", Value::String(status.into_bytes()));
-        }
-    }
+    inherited(&mut shared);
     // `edit.php` read the IDs as an array already.
     let ids = shared
         .get("post")
@@ -1097,6 +1114,12 @@ async fn bulk_edit_posts(
     for &signed in &ids {
         let id = u64::try_from(signed).unwrap_or_default();
         let post = write.post(id).await?;
+        if post
+            .as_ref()
+            .is_some_and(|post| !["post", "page"].contains(&post.post_type.as_str()))
+        {
+            return Err(Error::Unported("a post type other than post and page").into());
+        }
         let caps = Caps::load(write, asked.user, Some(id)).await?;
         let editable = caps.can("edit_post", &[Value::Int(signed)]);
         let Some(post) = post.filter(|_| editable && !children.contains(&signed)) else {

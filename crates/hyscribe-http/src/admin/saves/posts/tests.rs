@@ -602,11 +602,11 @@ async fn bulk_actions_stop_as_php_stops() {
     )
     .await;
     assert_eq!(answer, redirect("/hs-admin/post-new?post_type=page"));
-    let (answer, _) = edit(&[], "delete_all=1&post_status=gone").await;
+    let (answer, _) = edit(&[], "delete_all=1&post_status=g_o-ne!").await;
     assert_eq!(
         answer,
         Ok(Answer::Redirect(
-            "/hs-admin/edit?delete_all=1&post_status=gone&paged=1".into()
+            "/hs-admin/edit?delete_all=1&post_status=g_o-ne%21&paged=1".into()
         ))
     );
     let (answer, kept) = edit(&[], "action=edit&post[]=1").await;
@@ -701,6 +701,8 @@ async fn quick_edit_edges() {
         "post_format=aside",
         "post_title[]=x",
         "aa=x",
+        "aa[]=1",
+        "_status[]=publish",
     ] {
         let (answer, _) = quick_edit(1, &[], &post(more)).await;
         assert!(unported(&answer), "{more}");
@@ -728,6 +730,9 @@ async fn quick_edit_edges() {
     ];
     let (answer, _) = quick_edit(1, &revision, &post("")).await;
     assert_eq!(answer, Ok(Answer::Page(String::new())));
+    let body = quick(951, "screen=edit-post&post_type=post");
+    let (answer, _) = quick_edit(1, &revision, &body).await;
+    assert!(unported(&answer));
     let old = ["UPDATE wp_posts SET post_name = '1-revision' WHERE ID = 951".to_string()];
     let (answer, _) = quick_edit(1, &[revision[0].clone(), old[0].clone()], &post("")).await;
     assert!(unported(&answer));
@@ -808,6 +813,7 @@ async fn bulk_edit_edges() {
         "post[]=1&tax_input[category]=1",
         "post[]=1&tax_input[nav_menu]=x",
         "post[]=1&post_format=aside",
+        "post[]=1&aa=x&edit_date=1",
     ] {
         let (answer, _) = bulk_edit(1, &[], more).await;
         assert!(unported(&answer), "{more}");
@@ -865,6 +871,14 @@ async fn bulk_edit_edges() {
     let empty = [post_row(950, (1, "publish", "post"), ("", ""), 0)];
     let (answer, _) = bulk_edit(1, &empty, "post[]=950").await;
     assert!(unported(&answer));
+    let revision = [post_row(
+        951,
+        (1, "inherit", "revision"),
+        ("A revision", ""),
+        1,
+    )];
+    let (answer, _) = bulk_edit(1, &revision, "post[]=951").await;
+    assert!(unported(&answer));
     // Sticky posts: unstuck, and left as they are for an author; an
     // auto-draft becomes a draft.
     let stuck =
@@ -892,9 +906,63 @@ fn caps_read_what_they_load() {
         user: 1,
         exists: true,
         capabilities: None,
-        posts: Vec::new(),
+        post: None,
     };
     assert_eq!(caps.comment_post(1), None);
     assert_eq!(caps.term_taxonomy(1), None);
     assert!(!caps.constant("MULTISITE"));
+}
+
+/// What Quick Edit and Bulk Edit read when a field is left out or odd.
+#[tokio::test]
+async fn edits_of_odd_fields() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let read = "SELECT CONCAT(post_status, ' ', post_author) FROM wp_posts WHERE ID = 1";
+    let quick_edit = async |body: String| tried(1, &[], ("admin-ajax", "", &body), read).await;
+    let post = |more: &str| quick(1, &format!("screen=edit-post&post_type=post&{more}"));
+    for (more, status) in [
+        ("_status=auto-draft", "draft 1"),
+        ("_status=bogus", "publish 1"),
+    ] {
+        let (_, statuses) = quick_edit(post(more)).await;
+        assert_eq!(statuses, [status], "{more}");
+    }
+    // No author and only the list's empty status: the user, and a draft,
+    // as `wp_insert_post()` makes of an empty status.
+    let bare = post("")
+        .replace("&post_author=1", "")
+        .replace("&_status=publish", "");
+    let (answer, statuses) = quick_edit(bare).await;
+    assert_eq!(answer, Ok(Answer::Page(String::new())));
+    assert_eq!(statuses, ["draft 1"]);
+    // Bulk Edit sent as a form, a category given twice.
+    let categories = "SELECT CAST(term_taxonomy_id AS CHAR) FROM wp_term_relationships \
+                      WHERE object_id = 1 ORDER BY term_taxonomy_id";
+    let body = "post[]=1&post_category[]=1&post_category[]=1&indeterminate_post_category[]=1";
+    let query = "action=edit&bulk_edit=Update&post_type=post";
+    let (answer, terms) = tried(1, &[], ("edit", query, body), categories).await;
+    assert!(
+        matches!(answer, Ok(Answer::Redirect(to)) if to.ends_with("&updated=1&skipped=0&locked=0"))
+    );
+    assert_eq!(terms, ["1"]);
+}
+
+/// The site reads its autoloaded options again after an action, keeping
+/// the configured site URL, and keeps them when the database fails.
+#[tokio::test]
+async fn options_are_read_again() {
+    let db = hyscribe_db::Db::connect(&fixture_database()).await.unwrap();
+    let mut site = crate::Site::load(db, None, Some(SITE.into()))
+        .await
+        .unwrap();
+    site.reload_options().await;
+    assert_eq!(site.raw_option("home"), b"http://default-install.test");
+    assert_eq!(site.raw_option("siteurl"), SITE.as_bytes());
+    let missing = hyscribe_config::Database {
+        prefix: hyscribe_config::Prefix::new("missing_").unwrap(),
+        ..fixture_database()
+    };
+    site.db = hyscribe_db::Db::connect(&missing).await.unwrap();
+    site.reload_options().await;
+    assert_eq!(site.raw_option("siteurl"), SITE.as_bytes());
 }

@@ -40,6 +40,10 @@ pub struct Request<'a> {
     pub read_only: bool,
 }
 
+/// Shadow mode's answer to logging in and to every write.
+pub const READ_ONLY: &str =
+    "This site is read only: logging in needs HyScribe&#8217;s primary mode.";
+
 /// A user's ID and password hash.
 pub struct User {
     /// `ID`.
@@ -373,10 +377,7 @@ pub fn login(site: &dyn Site, request: &Request) -> Login {
         errors.push(message("authorize_application", text));
     }
     if request.read_only {
-        errors.push(message(
-            "read_only",
-            "This site is read only: logging in needs HyScribe&#8217;s primary mode.".into(),
-        ));
+        errors.push(message("read_only", READ_ONLY.into()));
     }
     // The reset password cookie's login, unless one was posted.
     let mut user_login = request.reset_cookie.map_or(Vec::new(), |cookie| {

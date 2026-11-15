@@ -1,0 +1,6 @@
+users-promote	302	users.php?update=promote	
+users-promote-self	302	users.php?update=promote	
+users-promote-self-editor	302	users.php?update=err_admin_role	
+users-promote-nobody	302	users.php	
+users-promote-referer	302	/wp-admin/users.php?role=administrator&update=promote	
+users-promote-post	302	users.php?update=promote	

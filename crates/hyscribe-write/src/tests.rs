@@ -19,6 +19,17 @@ pub(crate) async fn writer() -> Writer {
         .unwrap()
 }
 
+/// The oracle's request: user 1 on PHP's address, now.
+pub(crate) fn admin() -> crate::posts::Context {
+    crate::posts::Context {
+        user: 1,
+        can_publish: true,
+        home: b"http://127.0.0.1:8081".to_vec(),
+        upload_host: b"127.0.0.1:8081".to_vec(),
+        now: crate::now(),
+    }
+}
+
 /// `text` as a PHP string.
 pub(crate) fn text(text: &str) -> Value {
     Value::String(text.as_bytes().to_vec())

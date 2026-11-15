@@ -1,0 +1,49 @@
+# The rows PHP WordPress writes for the action trash-sticky-post (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 19:45:04 to 2026-11-14 19:45:04 UTC.
+# %wp_posts:1% is 930.
+# %wp_posts:2% is 931.
+# %wp_postmeta:1% is 53.
+# %wp_postmeta:2% is 54.
+# %wp_postmeta:3% is 55.
+# %wp_postmeta:4% is 56.
+# %wp_postmeta:5% is 57.
+# %wp_options:1% is 141.
+wp_options	sticky_posts	~	option_value	a:1:{i:0;i:930;}	a:0:{}
+wp_postmeta	%wp_postmeta:3%	+	meta_id	%wp_postmeta:3%
+wp_postmeta	%wp_postmeta:3%	+	meta_key	_wp_trash_meta_status
+wp_postmeta	%wp_postmeta:3%	+	meta_value	publish
+wp_postmeta	%wp_postmeta:3%	+	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:4%	+	meta_id	%wp_postmeta:4%
+wp_postmeta	%wp_postmeta:4%	+	meta_key	_wp_trash_meta_time
+wp_postmeta	%wp_postmeta:4%	+	meta_value	%unix%
+wp_postmeta	%wp_postmeta:4%	+	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:5%	+	meta_id	%wp_postmeta:5%
+wp_postmeta	%wp_postmeta:5%	+	meta_key	_wp_desired_post_slug
+wp_postmeta	%wp_postmeta:5%	+	meta_value	a-write-oracle-post
+wp_postmeta	%wp_postmeta:5%	+	post_id	%wp_posts:1%
+wp_posts	%wp_posts:1%	~	post_name	a-write-oracle-post	a-write-oracle-post__trashed
+wp_posts	%wp_posts:1%	~	post_status	publish	trash
+wp_posts	%wp_posts:2%	+	ID	%wp_posts:2%
+wp_posts	%wp_posts:2%	+	comment_count	0
+wp_posts	%wp_posts:2%	+	comment_status	closed
+wp_posts	%wp_posts:2%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:2%
+wp_posts	%wp_posts:2%	+	menu_order	0
+wp_posts	%wp_posts:2%	+	ping_status	closed
+wp_posts	%wp_posts:2%	+	pinged	
+wp_posts	%wp_posts:2%	+	post_author	1
+wp_posts	%wp_posts:2%	+	post_content	Its content.
+wp_posts	%wp_posts:2%	+	post_content_filtered	
+wp_posts	%wp_posts:2%	+	post_date	%now%
+wp_posts	%wp_posts:2%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:2%	+	post_excerpt	
+wp_posts	%wp_posts:2%	+	post_mime_type	
+wp_posts	%wp_posts:2%	+	post_modified	%now%
+wp_posts	%wp_posts:2%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:2%	+	post_name	%wp_posts:1%-revision-v1
+wp_posts	%wp_posts:2%	+	post_parent	%wp_posts:1%
+wp_posts	%wp_posts:2%	+	post_password	
+wp_posts	%wp_posts:2%	+	post_status	inherit
+wp_posts	%wp_posts:2%	+	post_title	A write oracle post
+wp_posts	%wp_posts:2%	+	post_type	revision
+wp_posts	%wp_posts:2%	+	to_ping	
+wp_term_taxonomy	1	~	count	2	1

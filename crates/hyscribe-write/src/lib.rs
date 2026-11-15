@@ -5,6 +5,10 @@
 
 use hyscribe_db::DbError;
 
+/// `EMPTY_TRASH_DAYS`: WordPress's default, until it is a `.env` key.
+/// Posts and comments go to the trash before they are deleted unless it is 0.
+pub const EMPTY_TRASH_DAYS: u64 = 30;
+
 pub mod comments;
 pub mod options;
 pub mod posts;

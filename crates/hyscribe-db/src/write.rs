@@ -15,6 +15,7 @@ use crate::dialect::{Access, Dialect};
 use crate::{Backend, Bind, Columns, DbError, Engine, PrefixSql, Sql, db_error, ids_or_none, list};
 
 mod meta;
+mod posts;
 mod terms;
 
 pub use meta::Meta;

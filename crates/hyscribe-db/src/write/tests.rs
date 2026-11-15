@@ -430,6 +430,112 @@ async fn writes_posts() {
     assert_eq!(write.child_ids(7, "revision").await.unwrap(), [second]);
 }
 
+/// A revision of the fixture's first post saved at `date`.
+fn revision(date: &str) -> PostFields {
+    PostFields {
+        parent: 1,
+        post_type: "revision".into(),
+        status: "inherit".into(),
+        name: b"1-revision-v1".to_vec(),
+        date: date.into(),
+        ..hello()
+    }
+}
+
+#[tokio::test]
+async fn reads_posts_inside_an_action() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    let shown = |post: Option<PostFields>| format!("{post:?}");
+    assert_eq!(shown(write.post(1).await.unwrap()), shown(Some(hello())));
+    assert!(write.post(999_999).await.unwrap().is_none());
+    assert_eq!(write.insert_post_with_id(990, &draft()).await.unwrap(), 990);
+    assert_eq!(shown(write.post(990).await.unwrap()), shown(Some(draft())));
+
+    assert!(
+        write
+            .post_name_used(b"hello-world", "post", 0)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !write
+            .post_name_used(b"hello-world", "post", 1)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !write
+            .post_name_used(b"hello-world", "page", 0)
+            .await
+            .unwrap()
+    );
+    let used = async |write: &mut Write<'_>, parent, id| {
+        write
+            .sibling_name_used(b"sample-page", ("page", parent), id)
+            .await
+            .unwrap()
+    };
+    assert!(used(&mut write, 0, 0).await);
+    assert!(!used(&mut write, 1, 0).await);
+    assert!(!used(&mut write, 0, 2).await);
+    assert!(
+        !write
+            .sibling_name_used(b"sample-page", ("post", 0), 0)
+            .await
+            .unwrap()
+    );
+
+    assert!(write.published_post_exists().await.unwrap());
+    write.set_post_status(1, "trash").await.unwrap();
+    assert!(!write.published_post_exists().await.unwrap());
+    assert_eq!(
+        write
+            .trashed_post_ids_named(b"hello-world", 0)
+            .await
+            .unwrap(),
+        [1]
+    );
+    assert!(
+        write
+            .trashed_post_ids_named(b"hello-world", 1)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let old = write
+        .insert_post(&revision("2026-01-01 00:00:00"))
+        .await
+        .unwrap();
+    let new = write
+        .insert_post(&revision("2026-02-01 00:00:00"))
+        .await
+        .unwrap();
+    let tie = write
+        .insert_post(&revision("2026-02-01 00:00:00"))
+        .await
+        .unwrap();
+    let other = PostFields {
+        status: "draft".into(),
+        ..revision("2026-03-01 00:00:00")
+    };
+    write.insert_post(&other).await.unwrap();
+    assert_eq!(write.revision_ids(1).await.unwrap(), [tie, new, old]);
+
+    assert_eq!(
+        write.post_comments(1).await.unwrap(),
+        [(1, "1".to_string())]
+    );
+    assert!(write.post_comments(2).await.unwrap().is_empty());
+    // A spent statement budget fails the reads too.
+    write.fail_after(0);
+    assert!(write.post(1).await.is_err());
+    assert!(write.post_comments(1).await.is_err());
+    assert!(write.object_terms(1, "category").await.is_err());
+}
+
 const COMMENT: &str = "SELECT JSON_ARRAY(comment_post_ID, comment_author, \
      comment_author_email, comment_author_url, comment_author_IP, comment_date, comment_date_gmt, \
      comment_content, comment_karma, comment_approved, comment_agent, comment_type, \
@@ -1215,6 +1321,8 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.meta_ids_of_key(meta, "k").await.err(),
         w.meta_ids_of_key_valued(meta, "k", b"v").await.err(),
         w.object_meta_ids(meta, 1).await.err(),
+        w.trashed_post_ids_named(b"n", 1).await.err(),
+        w.revision_ids(1).await.err(),
         w.object_meta(meta, 1).await.err(),
         w.user(1).await.err(),
         w.user_id_by_login(b"u").await.err(),
@@ -1222,6 +1330,14 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.nicename_owner(b"n", b"u").await.err(),
         w.author_post_ids_of_types(1, &["post"]).await.err(),
         w.owner_link_ids(1).await.err(),
+    ];
+    let post_reads = [
+        w.post(1).await.err(),
+        w.post_comments(1).await.err(),
+        w.post_name_used(b"n", "post", 1).await.err(),
+        w.sibling_name_used(b"n", ("page", 0), 1).await.err(),
+        w.published_post_exists().await.err(),
+        w.insert_post_with_id(990, &post).await.err(),
     ];
     let counts = [
         w.approved_comment_count(1).await.err(),
@@ -1314,7 +1430,13 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.option_value("o").await.err(),
         w.post_type_status(1).await.err(),
     ];
-    for error in ids.into_iter().chain(counts).chain(writes).chain(reads) {
+    for error in ids
+        .into_iter()
+        .chain(counts)
+        .chain(post_reads)
+        .chain(writes)
+        .chain(reads)
+    {
         errors.push(error.expect("a missing table fails"));
     }
     errors

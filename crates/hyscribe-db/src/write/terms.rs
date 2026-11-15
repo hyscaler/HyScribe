@@ -310,6 +310,7 @@ impl Write<'_> {
         query: Query,
         (first, second): (&str, &str),
     ) -> Result<Vec<(u64, u64)>, DbError> {
+        self.spend()?;
         let rows = query.fetch_all(&mut *self.tx).await.map_err(db_error)?;
         rows.iter().map(|row| pair(row, first, second)).collect()
     }

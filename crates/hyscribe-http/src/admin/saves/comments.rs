@@ -386,6 +386,7 @@ async fn delete_response(
             // `mt_rand( 1, $per_page )` is a fatal error.
             return Err(Error::Unported("a negative _per_page"));
         }
+        // Always counted again: PHP's `1 === mt_rand( 1, $per_page )` outcome.
         let query = url.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default();
         let query = query.split(|&b| b == b'#').next().unwrap_or_default();
         let vars = parse_str(query);

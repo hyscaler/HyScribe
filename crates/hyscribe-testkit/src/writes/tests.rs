@@ -430,3 +430,37 @@ fn compares_lines_with_golden() {
         ["short  ( ): PHP \"\", HyScribe nothing"]
     );
 }
+
+#[test]
+fn masks_admin_email_keys_and_a_new_policy_page() {
+    let new = NewIds::from([(("wp_posts", b"12".to_vec()), b"%wp_posts:1%".to_vec())]);
+    let masks = Masks {
+        start: (0, Vec::new()),
+        end: (0, Vec::new()),
+        new,
+    };
+    let value = |table: &Table, name: &str, value: &str| {
+        let row: Row = vec![
+            ("option_name".to_string(), name.as_bytes().to_vec()),
+            ("option_value".to_string(), value.as_bytes().to_vec()),
+        ];
+        let rows = masked(&masks, table, &BTreeMap::from([(b"k".to_vec(), row)]));
+        String::from_utf8(rows.into_values().next().unwrap()[1].1.clone()).unwrap()
+    };
+    let (options, users) = (&TABLES[8], &TABLES[9]);
+    let key = "a:2:{s:4:\"hash\";s:32:\"0123456789abcdef0123456789abcdef\";s:1:\"x\";s:32:\"0123456789abcdef0123456789abcdeF\";}";
+    assert_eq!(
+        value(options, "adminhash", key),
+        "a:2:{s:4:\"hash\";s:32:\"%hash%\";s:1:\"x\";s:32:\"0123456789abcdef0123456789abcdeF\";}"
+    );
+    let short = "s:32:\"0123456789abcdef0123456789abcdef";
+    assert_eq!(value(options, "adminhash", short), short);
+    assert_eq!(value(options, "other", key), key);
+    assert_eq!(value(users, "adminhash", key), key);
+    assert_eq!(
+        value(options, "wp_page_for_privacy_policy", "12"),
+        "%wp_posts:1%"
+    );
+    assert_eq!(value(options, "wp_page_for_privacy_policy", "3"), "3");
+    assert_eq!(value(options, "page_on_front", "12"), "12");
+}

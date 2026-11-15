@@ -1289,51 +1289,32 @@ async fn notices_over_more_content() {
     assert!(page.contains("<p><a href=\"/hs-admin/users?role=editor\">&larr; Go to Users</a></p>"));
 }
 
-/// A save's `settings-updated` shows the screen as it is, unless the save
-/// left the errors PHP would print and delete.
+/// A save sends the screen back with `settings-updated` (`updated` from
+/// `options.php`'s email confirmation), which shows the notices it kept.
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_after_a_save() {
-    for (left, query, shown) in [
-        (None, "?settings-updated=true", true),
-        (
-            Some("_transient_settings_errors"),
-            "?settings-updated=true",
-            false,
-        ),
-        (
-            Some("_transient_timeout_settings_errors"),
-            "?settings-updated=1",
-            false,
-        ),
-        (
-            Some("_transient_settings_errors"),
-            "?settings-updated=0",
-            true,
-        ),
-        (Some("_transient_settings_errors"), "", true),
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let mut site = Arc::try_unwrap(site).ok().unwrap();
+    let kept = b"a:1:{i:0;a:4:{s:7:\"setting\";s:7:\"general\";s:4:\"code\";s:16:\"settings_updated\";s:7:\"message\";s:15:\"Settings saved.\";s:4:\"type\";s:7:\"success\";}}";
+    site.options
+        .insert("_transient_settings_errors".into(), kept.to_vec());
+    let site = Arc::new(site);
+    for (query, notice) in [
+        ("?settings-updated=true", Some(true)),
+        ("?settings-updated=0", Some(false)),
+        ("?updated=true", Some(false)),
+        ("", Some(false)),
+        ("?settings-updated=true&x", None),
     ] {
-        let db = hyscribe_db::Db::connect(&hyscribe_testkit::fixture_database())
-            .await
-            .unwrap();
-        let mut site = Site::load(db, None, None).await.unwrap();
-        if let Some(name) = left {
-            site.options.insert(name.into(), b"a:0:{}".to_vec());
-        }
-        let site = Arc::new(site);
         for file in ["options-writing", "options-media"] {
-            let site = Arc::clone(&site);
-            let handle = Handle::current();
-            let path = format!("/hs-admin/{file}");
-            let uri = format!("{path}{query}");
-            let response = tokio::task::spawn_blocking(move || {
-                let reads = LoginReads::new(&site, handle, now());
-                let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
-                let url = format!("http://h{uri}");
-                screen(&admin, &path, &uri, &url, "http://h", &Browser::default())
-            })
-            .await
-            .unwrap();
-            assert_eq!(response.is_some(), shown, "{left:?} {file}{query}");
+            let uri = format!("/hs-admin/{file}{query}");
+            let response = send(&site, "GET", &uri, &cookies, None).await;
+            let shown = match response.status() {
+                StatusCode::OK => Some(page_of(response).await.contains("Settings saved.")),
+                _ => None,
+            };
+            assert_eq!(shown, notice, "{file}{query}");
         }
     }
 }
@@ -1993,15 +1974,10 @@ async fn unwritable(site: Arc<Site>, prefix: &str) -> Arc<Site> {
     Arc::new(site.with_writer(writer.unwrap()))
 }
 
-/// A target or Location of `reference/admin-saves/golden.sh` under
-/// hs-admin's names.
+/// `wp-admin`'s screens under hs-admin's names.
 fn hs(text: &str) -> String {
-    let text = hyscribe_testkit::hs_admin_page(text);
-    ["users", "edit-comments", "admin-ajax"]
-        .iter()
-        .fold(text, |text, screen| {
-            text.replace(&format!("{screen}.php"), screen)
-        })
+    let text = text.replace("wp-admin%2F", "hs-admin%2F");
+    text.replace("/wp-admin/", "/hs-admin/").replace(".php", "")
 }
 
 /// Past their checks, the role changes of `reference/admin-saves/golden.sh`
@@ -2016,9 +1992,12 @@ async fn actions_answer_as_php_once_checked() {
     let site = unwritable(site, "wp_").await;
     let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
     let cases = include_str!("../../../../reference/admin-saves/cases.list");
+    // The users', comments' and Settings' cases that write nothing the read only user cannot.
     let rows = golden.lines().filter(|row| {
-        let listed = row.starts_with("users-") || row.starts_with("comments-");
-        listed && !row.starts_with("users-promote\t")
+        let case = row.split('\t').next().unwrap_or_default();
+        case.starts_with("users-") && case != "users-promote"
+            || case.starts_with("comments-")
+            || ["options-adminhash-bad", "options-dismiss"].contains(&case)
     });
     for row in rows {
         let [case, status, php_location, body] = row.split('\t').collect::<Vec<_>>()[..] else {
@@ -2028,7 +2007,7 @@ async fn actions_answer_as_php_once_checked() {
             .lines()
             .find(|line| line.starts_with(&format!("{case}\t")));
         let fields: Vec<&str> = line.unwrap().split('\t').collect();
-        let [_, method, target, data, action, field] = fields[..] else {
+        let [_, method, target, data, action, field, ..] = fields[..] else {
             panic!("{case}");
         };
         let nonce = session_nonce(&site, &cookies, action).await;
@@ -2376,6 +2355,7 @@ fn set_cookies(response: &Response) -> String {
 /// answer, cookie and page is PHP's.
 #[tokio::test(flavor = "multi_thread")]
 async fn page_views_and_screen_state_write_as_php() {
+    let _saves = SAVES.lock().await;
     let db = hyscribe_config::Database {
         name: "wordpress_saves".into(),
         ..hyscribe_testkit::fixture_database()
@@ -2457,4 +2437,45 @@ async fn page_views_and_screen_state_write_as_php() {
         assert_eq!(with_values(&php, &page), page, "{case}");
     }
     assert_eq!(golden.lines().count(), 17);
+}
+
+/// One test at a time over `wordpress_saves`, which each reloads.
+static SAVES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// In primary mode a Settings save's notice shows on the screen it sends
+/// back, which deletes it, so a reload shows none; shadow mode only reads.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saved_notice_shows_once() {
+    let _saves = SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..hyscribe_testkit::fixture_database()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in(&db.name, dir.path()).await;
+    let nonce = session_nonce(&site, &cookies, "writing-options").await;
+    let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary).await;
+    let site = Arc::try_unwrap(site).ok().unwrap();
+    let site = Arc::new(site.with_writer(writer.unwrap()));
+    let form = format!(
+        "option_page=writing&action=update&_wp_http_referer=%2Fhs-admin%2Foptions-writing&default_category=1&_wpnonce={nonce}"
+    );
+    let form = ("application/x-www-form-urlencoded", form.as_str());
+    let saved = send(&site, "POST", "/hs-admin/options", &cookies, Some(form)).await;
+    let back = location(&saved).to_string();
+    assert_eq!(back, "/hs-admin/options-writing?settings-updated=true");
+    let notice = "<p><strong>Settings saved.</strong></p>";
+    // Other views leave the notice: a Settings screen not sent back, and a
+    // page that writes for another reason.
+    for other in ["/hs-admin/options-writing", "/hs-admin/edit?mode=excerpt"] {
+        let viewed = send(&site, "GET", other, &cookies, None).await;
+        assert_eq!(viewed.status(), StatusCode::OK, "{other}");
+    }
+    let first = page_of(send(&site, "GET", &back, &cookies, None).await).await;
+    assert!(first.contains(notice));
+    let again = page_of(send(&site, "GET", &back, &cookies, None).await).await;
+    assert!(!again.contains(notice));
 }

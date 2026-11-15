@@ -267,6 +267,7 @@ pub fn admin(site: &dyn ActionSite, screen: &str, asked: &Asked, post: bool) -> 
         "profile" | "user-edit" => user_edit(site, asked, screen == "profile")?,
         "options" => options(site, asked),
         "options-permalink" => permalinks(site, asked)?,
+        "options-privacy" => privacy(site, asked)?,
         "themes" => themes(site, asked)?,
         _ => return None,
     };
@@ -617,7 +618,9 @@ fn users_action(asked: &Asked) -> Option<Vec<u8>> {
 
 /// The action of a request whose checks passed, as its write's handler is
 /// registered: `screen-options` for the Screen Options form, the users
-/// and terms lists' `current_action()`, else `$_REQUEST['action']`.
+/// and terms lists' `current_action()`, `options.php`'s email confirmation
+/// (`adminhash`) and dismissal, the Privacy screen's `$_POST['action']`,
+/// else `$_REQUEST['action']`.
 pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
     match screen {
         "admin-ajax" => asked.action(),
@@ -627,6 +630,11 @@ pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
             .map(Value::to_php_string)
             .unwrap_or_default(),
         "comment" => comment_php_action(asked),
+        "options" if asked.get("adminhash").is_some_and(|hash| !hash.is_empty()) => {
+            b"adminhash".to_vec()
+        }
+        "options" if dismissed(asked) => b"dismiss".to_vec(),
+        "options-privacy" => privacy_action(asked).unwrap_or_default(),
         "edit-tags" => terms_action(asked).unwrap_or_default(),
         _ => asked.action(),
     }
@@ -774,6 +782,22 @@ const OPTION_PAGES: [&str; 8] = [
     "privacy",
 ];
 
+/// `options.php`'s `$option_page`: `options` when not given.
+pub fn option_page(asked: &Asked) -> Vec<u8> {
+    let given = asked
+        .request("option_page")
+        .filter(|page| !page.is_empty())
+        .and_then(Value::as_bytes)
+        .map(|page| sanitize_text_field(&addslashes(page)))
+        .filter(|page| !Value::String(page.clone()).is_empty());
+    given.unwrap_or_else(|| b"options".to_vec())
+}
+
+/// `options.php`'s dismissal of a pending admin email change.
+fn dismissed(asked: &Asked) -> bool {
+    asked.get("dismiss").and_then(Value::as_bytes) == Some(b"new_admin_email")
+}
+
 /// `options.php`, which saves the Settings screens.
 fn options(site: &dyn ActionSite, asked: &Asked) -> Checked {
     if !site.current_user_can("manage_options", &[]) {
@@ -784,19 +808,13 @@ fn options(site: &dyn ActionSite, asked: &Asked) -> Checked {
     if asked.get("adminhash").is_some_and(|hash| !hash.is_empty()) {
         return Ok(());
     }
-    if asked.get("dismiss").and_then(Value::as_bytes) == Some(b"new_admin_email") {
+    if dismissed(asked) {
         return referer(site, asked, "dismiss-1-new_admin_email");
     }
     if asked.action() != b"update" {
         return Ok(());
     }
-    let given = asked
-        .request("option_page")
-        .filter(|page| !page.is_empty())
-        .and_then(Value::as_bytes)
-        .map(|page| sanitize_text_field(&addslashes(page)))
-        .filter(|page| !Value::String(page.clone()).is_empty());
-    let page = given.unwrap_or_else(|| b"options".to_vec());
+    let page = option_page(asked);
     let nonce = if page == b"options" && asked.post("option_page").is_none() {
         "update-options".to_string()
     } else {
@@ -824,6 +842,24 @@ fn permalinks(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
         return Some(Err(no_access()));
     }
     Some(referer(site, asked, "update-permalink"))
+}
+
+/// `options-privacy.php`'s `$_POST['action']`, when not empty.
+fn privacy_action(asked: &Asked) -> Option<Vec<u8>> {
+    let action = asked.post("action").filter(|action| !action.is_empty())?;
+    Some(action.to_php_string())
+}
+
+/// The Privacy screen's actions, outside its policy guide tab.
+fn privacy(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
+    if asked.get("tab").and_then(Value::as_bytes) == Some(b"policyguide") {
+        return None;
+    }
+    let action = privacy_action(asked)?;
+    if !site.current_user_can("manage_privacy_options", &[]) {
+        return Some(Err(no_access()));
+    }
+    Some(referer(site, asked, &String::from_utf8_lossy(&action)))
 }
 
 /// `themes.php`'s actions: only the nonce of a theme's activation is

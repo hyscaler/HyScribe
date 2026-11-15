@@ -205,9 +205,61 @@ fn date_scripts(site: &dyn SettingsSite) -> Vec<(&'static str, String)> {
     ]
 }
 
+/// `settings_errors()`'s notices of `errors`, each `setting`, `code`,
+/// `message` and `type`.
+fn notices(errors: &[(Key, Value)]) -> String {
+    let mut out = String::new();
+    for (_, error) in errors {
+        let field = |name| {
+            text(
+                &error
+                    .get_str(name)
+                    .map(Value::to_php_string)
+                    .unwrap_or_default(),
+            )
+        };
+        let kind = match field("type").as_str() {
+            "updated" => "notice-success".to_string(),
+            kind @ ("error" | "success" | "warning" | "info") => format!("notice-{kind}"),
+            kind => kind.to_string(),
+        };
+        out.push_str(&format!(
+            "<div id='setting-error-{}' class='notice {} settings-error is-dismissible'> \n<p><strong>{}</strong></p></div> \n",
+            esc_attr(field("code").as_bytes()),
+            esc_attr(kind.as_bytes()),
+            field("message")
+        ));
+    }
+    out
+}
+
+/// What `options-head.php`'s `settings_errors()` prints after the screen's
+/// own `errors`: on the screen a save sends back to (`settings-updated`),
+/// the notices it kept. Only read here: the page view's writes delete
+/// them in primary mode, as PHP does.
+fn options_head(site: &dyn SettingsSite, errors: &str, uri: &str) -> String {
+    let query = uri.split_once('?').map_or("", |(_, query)| query);
+    let args = hyscribe_phpser::parse_str(query.as_bytes());
+    let updated = args
+        .get_str("settings-updated")
+        .is_some_and(|updated| !updated.is_empty());
+    let timeout = site.option("_transient_timeout_settings_errors");
+    let expired = timeout.is_some_and(|timeout| Value::String(timeout).to_int() < site.clock().1);
+    let kept = site
+        .option("_transient_settings_errors")
+        .filter(|_| updated && !expired);
+    let kept = kept.map(|kept| match hyscribe_phpser::maybe_unserialize(&kept) {
+        hyscribe_phpser::Maybe::Value(Value::Array(kept)) => kept,
+        _ => Vec::new(),
+    });
+    format!("{errors}{}", notices(&kept.unwrap_or_default()))
+}
+
 /// What a Settings screen adds to the frame.
 #[derive(Default)]
 pub(crate) struct Form<'a> {
+    /// The notices of the settings errors the screen adds itself.
+    pub(crate) errors: &'a str,
     pub(crate) file: &'a str,
     pub(crate) title: &'a str,
     pub(crate) help: &'a [HelpTab<'a>],
@@ -234,6 +286,7 @@ pub(crate) fn settings_page(site: &dyn SettingsSite, screen: &Form, request: &Re
         str::to_string,
     );
     let id = screen.file.trim_end_matches(".php");
+    let content = options_head(site, screen.errors, request.uri) + screen.content;
     let page = Page {
         screen: Screen {
             pagenow: screen.file,
@@ -256,7 +309,7 @@ pub(crate) fn settings_page(site: &dyn SettingsSite, screen: &Form, request: &Re
         admin_head: screen.admin_head,
         admin_footer: screen.admin_footer,
         footer_scripts: "",
-        content: screen.content,
+        content: &content,
         canonical: request.canonical,
         origin: request.origin,
         view: None,
@@ -279,4 +332,4 @@ pub(crate) fn url(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

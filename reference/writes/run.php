@@ -146,7 +146,7 @@ require '/var/www/html/wp-load.php';
 	};
 
 	// Masked rows by masked key.
-	$masked = function ( $table, $rows ) use ( $tables, $mask, $escape ) {
+	$masked = function ( $table, $rows ) use ( $tables, $mask, $escape, $new ) {
 		$out = array();
 		foreach ( $rows as $row ) {
 			foreach ( $row as $column => $value ) {
@@ -155,6 +155,14 @@ require '/var/www/html/wp-load.php';
 			// A transient's expiry is the time plus its lifetime.
 			if ( 'wp_options' === $table && preg_match( '/\A_(site_)?transient_timeout_/', $row['option_name'] ) ) {
 				$row['option_value'] = '%expiry%';
+			}
+			// update_option_new_admin_email()'s confirmation key is random.
+			if ( 'wp_options' === $table && 'adminhash' === $row['option_name'] ) {
+				$row['option_value'] = preg_replace( '/s:32:"[0-9a-f]{32}"/', 's:32:"%hash%"', $row['option_value'] );
+			}
+			// A new privacy policy page's ID.
+			if ( 'wp_options' === $table && 'wp_page_for_privacy_policy' === $row['option_name'] && isset( $new['wp_posts'][ $row['option_value'] ] ) ) {
+				$row['option_value'] = $new['wp_posts'][ $row['option_value'] ];
 			}
 			$out[ implode( ',', array_map( fn( $c ) => $row[ $c ], $tables[ $table ][1] ) ) ] = $row;
 		}

@@ -33,19 +33,24 @@ use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
 use hyscribe_admin::settings_more;
 use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
 use hyscribe_admin::tools::{self, Requests, RequestsArgs, ToolsSite, privacy_requests};
-use hyscribe_admin::users::{ListedUser, UserArgs, UserQuery, UsersSite, user_order, users};
+use hyscribe_admin::users::{
+    DeleteArgs, ListedUser, UserArgs, UserQuery, UsersSite, delete_users, user_order, users,
+};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
 use hyscribe_db::{CommentFilter, StatusOrder, StatusQuery, UserFilter};
 use hyscribe_model::{Post, PostQuery, Term, TermOrder, TermQuery, User};
 use hyscribe_phpser::{
-    Key, Value, addslashes, is_empty_string, parse_str, remove_query_arg, stripslashes, urlencode,
+    Key, Value, addslashes, is_empty_string, lookup, parse_str, remove_query_arg, stripslashes,
+    urlencode,
 };
 use hyscribe_render::comment_author_of;
 use hyscribe_render::date::Zone;
 use hyscribe_render::site::{Archive, Site as RenderSite, Taxonomy};
 use tokio::runtime::Handle;
 
-use crate::login::{LoginReads, Names, PATH, cookie, cookies, is_ssl, joined, nocache, response};
+use crate::login::{
+    LoginReads, Names, PATH, cookie, cookies, is_ssl, joined, nocache, renewed_cookies, response,
+};
 use crate::redirect::wp_sanitize_redirect;
 use crate::{Site, now};
 
@@ -107,9 +112,20 @@ fn refused(public: bool, refusal: Refusal) -> Response {
             let page = hyscribe_admin::die::page(public, title, &message);
             return response(status, screen_headers(), page);
         }
-        Body::Text(text) => ("text/html; charset=UTF-8", text.into_bytes()),
-        Body::Json(json) => ("application/json; charset=UTF-8", json.as_bytes().to_vec()),
+        Body::Text(text) => (HTML, text.into_bytes()),
+        Body::Json(json) => (JSON, json.as_bytes().to_vec()),
     };
+    ajax_response(status, kind, body)
+}
+
+/// The content type of `wp_die()` in an Ajax request.
+const HTML: &str = "text/html; charset=UTF-8";
+
+/// `wp_send_json()`'s content type.
+const JSON: &str = "application/json; charset=UTF-8";
+
+/// An `admin-ajax.php` answer of `kind`.
+fn ajax_response(status: StatusCode, kind: &str, body: Vec<u8>) -> Response {
     let mut headers = nocache();
     headers.push((header::CONTENT_TYPE, kind.to_string()));
     headers.push((header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()));
@@ -733,6 +749,9 @@ impl UsersSite for Admin<'_> {
         let url = hyscribe_render::permalinks::author_posts_url(&self.reads.reads, id);
         String::from_utf8_lossy(&url).into_owned()
     }
+    fn owns_content(&self, id: u64) -> bool {
+        self.reads.reads.wait(self.site.db.owns_content(id))
+    }
 }
 
 impl ProfileSite for Admin<'_> {
@@ -888,6 +907,58 @@ fn user_args(query: &str) -> Option<UserArgs> {
     let roles = !is_empty_string(role.as_bytes()) && role != "none";
     args.clauses = user_order(args.orderby.as_deref(), args.order.as_deref(), roles)?;
     Some(args)
+}
+
+/// Whether `users.php` is asked for its `delete` action.
+fn is_deletion(query: &str) -> bool {
+    parse_str(query.as_bytes())
+        .get_str("action")
+        .and_then(Value::as_bytes)
+        == Some(b"delete")
+}
+
+/// The arguments of the deletion's confirmation page, and those of the
+/// users list's bulk form it ignores; `None` for others.
+fn delete_args(query: &str) -> Option<DeleteArgs> {
+    const KNOWN: [&str; 10] = [
+        "action",
+        "action2",
+        "new_role",
+        "new_role2",
+        "users",
+        "user",
+        "error",
+        "wp_http_referer",
+        "_wpnonce",
+        "_wp_http_referer",
+    ];
+    let parsed = parse_str(query.as_bytes());
+    let request = parsed.as_array().unwrap_or_default();
+    let known = |key: &Key| KNOWN.contains(&&*String::from_utf8_lossy(&key.to_php_string()));
+    if !request.iter().all(|(key, _)| known(key)) {
+        return None;
+    }
+    let users = match lookup(request, "users").filter(|users| !users.is_empty()) {
+        Some(Value::Array(users)) => users.iter().map(|(_, id)| id.to_int()).collect(),
+        Some(user) => vec![user.to_int()],
+        None => lookup(request, "user")
+            .filter(|user| !user.is_empty())
+            .map(Value::to_int)
+            .into_iter()
+            .collect(),
+    };
+    let referer = match lookup(request, "wp_http_referer") {
+        // `remove_query_arg()` of an array is a fatal error.
+        Some(Value::Array(_)) => return None,
+        referer => {
+            referer.map(|referer| String::from_utf8_lossy(&referer.to_php_string()).into_owned())
+        }
+    };
+    Some(DeleteArgs {
+        users,
+        error: lookup(request, "error").is_some(),
+        referer,
+    })
 }
 
 /// The arguments of `user-edit.php` and `profile.php` ported so far;
@@ -1189,6 +1260,10 @@ fn screen(
             let args = (update.as_deref(), user_id.as_deref());
             hyscribe_admin::user_new::user_new(admin, args, &request)
         }
+        // Past its checks, the deletion asks for its confirmation.
+        "/hs-admin/users" if is_deletion(query) => {
+            delete_users(admin, &delete_args(query)?, &request)?
+        }
         "/hs-admin/users" => users(admin, &user_args(query)?, &request),
         "/hs-admin/" | "/hs-admin/index" => {
             // `welcome` saves the welcome panel's option for a user who sees it.
@@ -1256,15 +1331,33 @@ fn save(admin: &Admin, screen: &str, asked: &Asked) -> Response {
         return not_ported();
     };
     let Some(writer) = &admin.site.writer else {
-        return denied(admin, READ_ONLY);
+        // `wp_die()` in an Ajax request sends its message alone.
+        return match screen {
+            "admin-ajax" => ajax_response(StatusCode::FORBIDDEN, HTML, READ_ONLY.into()),
+            _ => denied(admin, READ_ONLY),
+        };
     };
     let saved = Handle::current()
         .block_on(async { saves::act(writer.begin().await, handler, asked).await });
     match saved {
+        // An Ajax action's JSON.
+        Ok(Answer::Page(json)) if screen == "admin-ajax" => {
+            ajax_response(StatusCode::OK, JSON, json.into_bytes())
+        }
         Ok(answer) => served(admin, answer),
         Err(hyscribe_write::Error::Unported(_)) => not_ported(),
         Err(err) => crate::html(crate::database_error(admin.site, &format!("{err:?}"))),
     }
+}
+
+/// `response` setting `cookies` too.
+fn with_cookies(mut response: Response, cookies: Vec<String>) -> Response {
+    for cookie in cookies {
+        if let Ok(value) = HeaderValue::from_str(&cookie) {
+            response.headers_mut().append(header::SET_COOKIE, value);
+        }
+    }
+    response
 }
 
 /// What an action reads of the request: `$_GET` and `$_POST`, unslashed.
@@ -1309,18 +1402,29 @@ fn ajax_answer(
         .as_bytes();
     let id = user.as_ref().map_or(0, |(id, _)| *id);
     let asked = action_request(site, asking, &get, uri, id);
-    let checked = match user {
-        Some((id, token)) => {
-            reads.act_as(id, token);
-            let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
-            admin_ajax(Some(&Admin::new(reads, site, user)), &asked)
-        }
-        None => admin_ajax(None, &asked),
+    let Some((id, token)) = user else {
+        return admin_ajax(None, &asked).map_or_else(
+            |refusal| refused(reads.public(), refusal),
+            |()| not_ported(),
+        );
     };
-    checked.map_or_else(
-        |refusal| refused(reads.public(), refusal),
-        |()| not_ported(),
-    )
+    reads.act_as(id, token);
+    let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
+    let admin = Admin::new(reads, site, user);
+    match admin_ajax(Some(&admin), &asked) {
+        Err(refusal) => refused(reads.public(), refusal),
+        Ok(()) if hyscribe_admin::actions::action("admin-ajax", &asked) == b"destroy-sessions" => {
+            let name = |id| {
+                PostsSite::userdata(&admin, id)
+                    .unwrap_or_default()
+                    .display_name
+            };
+            let sessions = site.sessions.as_ref();
+            let json = saves::destroy_sessions(sessions, &asked, reads.session_token(), name);
+            ajax_response(StatusCode::OK, JSON, json)
+        }
+        Ok(()) => save(&admin, "admin-ajax", &asked),
+    }
 }
 
 fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
@@ -1371,7 +1475,17 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 let name = uri.path().strip_prefix("/hs-admin/").unwrap_or_default();
                 match hyscribe_admin::actions::admin(&admin, name, &asked, post) {
                     Some(Err(refusal)) => return refused(reads.public(), refusal),
-                    Some(Ok(())) => return save(&admin, name, &asked),
+                    // The deletion's confirmation page, a screen.
+                    Some(Ok(()))
+                        if !post
+                            && name == "users"
+                            && is_deletion(uri.query().unwrap_or_default()) => {}
+                    Some(Ok(())) => {
+                        let saved = save(&admin, name, &asked);
+                        let logged_in = cookie(&cookies, &names.logged_in());
+                        let renewed = renewed_cookies(&reads, &names, logged_in, https);
+                        return with_cookies(saved, renewed);
+                    }
                     None if post => return not_ported(),
                     None => {}
                 }

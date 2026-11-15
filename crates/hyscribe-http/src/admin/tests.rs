@@ -1788,7 +1788,7 @@ async fn send(
 }
 
 /// The nonce of `action` for the session of the logged in cookie in `cookies`.
-async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &'static str) -> String {
+async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &str) -> String {
     let auth = cookies
         .split("; ")
         .find(|cookie| cookie.starts_with("hyscribe_logged_in_"))
@@ -1798,11 +1798,11 @@ async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &'static str) ->
         .unwrap()
         .token
         .to_vec();
-    let (site, handle) = (Arc::clone(site), Handle::current());
+    let (site, handle, action) = (Arc::clone(site), Handle::current(), action.to_string());
     tokio::task::spawn_blocking(move || {
         let mut reads = LoginReads::new(&site, handle, now());
         reads.act_as(1, token);
-        LoginSite::nonce(&reads, action)
+        LoginSite::nonce(&reads, &action)
     })
     .await
     .unwrap()
@@ -1893,9 +1893,11 @@ async fn ajax_actions_are_checked_first() {
         .clone();
     assert_eq!(kind, "application/json; charset=UTF-8");
     assert_eq!(page_of(response).await, "{\"success\":false}");
+    // Without a writer, the read only site's `wp_die()` of an Ajax request.
     let body = format!("action=save-user-color-scheme&color_scheme=ocean&nonce={nonce}");
     let response = send(&site, "POST", ajax, &cookies, Some((form, &body))).await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(page_of(response).await, READ_ONLY);
 }
 
 /// The checks read the referer, comments and roles from the site.
@@ -1992,28 +1994,54 @@ async fn unwritable(site: Arc<Site>, prefix: &str) -> Arc<Site> {
     Arc::new(site.with_writer(writer.unwrap()))
 }
 
-/// `wp-admin/users.php` under hs-admin's names.
+/// `text` under hs-admin's names.
 fn hs(text: &str) -> String {
-    let text = text.replace("wp-admin%2Fusers.php", "hs-admin%2Fusers");
-    text.replace("/wp-admin/users.php", "/hs-admin/users")
-        .replace("users.php", "users")
+    let text = text
+        .replace("wp-admin%2F", "hs-admin%2F")
+        .replace("/wp-admin/", "/hs-admin/");
+    ["users", "user-new", "user-edit", "profile", "admin-ajax"]
+        .iter()
+        .fold(text, |text, screen| {
+            text.replace(&format!("{screen}.php"), screen)
+        })
 }
 
-/// Past their checks, the role changes of `reference/admin-saves/golden.sh`
-/// answer as PHP's, but user 801's, whom the fixture lacks (its rows and
-/// answer are the write oracle's, in `saves`); what PHP cannot go on with
+/// The cases of `reference/admin-saves/golden.sh` whose rows and answers
+/// the write oracle compares, in `saves`: they write, or need rows the
+/// fixture lacks.
+const ORACLE_CASES: [&str; 16] = [
+    "users-promote",
+    "users-dodelete",
+    "users-dodelete-delete",
+    "users-resetpassword",
+    "user-new-create",
+    "user-new-quiet",
+    "user-edit-update",
+    "user-edit-self",
+    "profile-no-id",
+    "profile-update",
+    "profile-email",
+    "profile-email-taken",
+    "profile-password",
+    "color-scheme",
+    "destroy-sessions-other",
+    "send-password-reset",
+];
+
+/// Past their checks, the actions of `reference/admin-saves/golden.sh`
+/// answer as PHP's, but those of `ORACLE_CASES`; what PHP cannot go on with
 /// is not ported, and a failed write is the database error page.
 #[tokio::test(flavor = "multi_thread")]
 async fn actions_answer_as_php_once_checked() {
     let dir = tempfile::tempdir().unwrap();
     let (site, cookies) = logged_in("wordpress", dir.path()).await;
-    let nonce = session_nonce(&site, &cookies, "bulk-users").await;
     let site = unwritable(site, "wp_").await;
+    let nonce = session_nonce(&site, &cookies, "bulk-users").await;
     let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
     let cases = include_str!("../../../../reference/admin-saves/cases.list");
     let rows = golden
         .lines()
-        .filter(|row| !row.starts_with("users-promote\t"));
+        .filter(|row| !ORACLE_CASES.contains(&row.split('\t').next().unwrap()));
     for row in rows {
         let [case, status, php_location, body] = row.split('\t').collect::<Vec<_>>()[..] else {
             panic!("{row}");
@@ -2022,14 +2050,15 @@ async fn actions_answer_as_php_once_checked() {
             .lines()
             .find(|line| line.starts_with(&format!("{case}\t")));
         let fields: Vec<&str> = line.unwrap().split('\t').collect();
-        let [_, method, target, data, _, field] = fields[..] else {
+        let [_, method, target, data, action, field] = fields[..] else {
             panic!("{case}");
         };
+        let nonce = session_nonce(&site, &cookies, action).await;
         let uri = format!("/hs-admin/{}", hs(target));
         let response = if method == "POST" {
             let form = (
                 "application/x-www-form-urlencoded",
-                &*format!("{data}&{field}={nonce}"),
+                &*format!("{}&{field}={nonce}", hs(data)),
             );
             send(&site, "POST", &uri, &cookies, Some(form)).await
         } else {
@@ -2037,10 +2066,15 @@ async fn actions_answer_as_php_once_checked() {
             send(&site, "GET", &uri, &cookies, None).await
         };
         assert_eq!(response.status().as_str(), status, "{case}");
-        assert_eq!(location(&response), hs(php_location), "{case}");
+        let to = response.headers().get(header::LOCATION);
+        let to = to.map_or("", |to| to.to_str().unwrap());
+        assert_eq!(to, hs(php_location), "{case}");
         let php = hyscribe_testkit::unhex(body);
         assert_eq!(page_of(response).await.into_bytes(), php, "{case}");
     }
+    // The current session outlasts the others' end.
+    let response = send(&site, "GET", "/hs-admin/profile", &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::OK);
     let promote = format!("/hs-admin/users?changeit=1&new_role=editor&_wpnonce={nonce}");
     for users in [
         "users[]=1099511627776",
@@ -2050,9 +2084,11 @@ async fn actions_answer_as_php_once_checked() {
         let response = send(&site, "GET", &format!("{promote}&{users}"), &cookies, None).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{users}");
     }
-    // An action whose write has no handler yet.
-    let reset = format!("/hs-admin/users?action=resetpassword&users[]=1&_wpnonce={nonce}");
-    let response = send(&site, "GET", &reset, &cookies, None).await;
+    // An action whose write has no handler.
+    let nonce = session_nonce(&site, &cookies, "add-user").await;
+    let add = format!("action=adduser&email=x%40example.test&_wpnonce_add-user={nonce}");
+    let form = ("application/x-www-form-urlencoded", add.as_str());
+    let response = send(&site, "POST", "/hs-admin/user-new", &cookies, Some(form)).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     // A database whose `db_version` cannot be read takes no write.
     let site = unwritable(site, "missing_").await;
@@ -2070,4 +2106,82 @@ async fn actions_answer_as_php_once_checked() {
         page.contains("Error establishing a database connection"),
         "{page}"
     );
+}
+
+/// Past its checks, a deletion asks for its confirmation as PHP does (the
+/// page of `reference/users-list/golden.sh`), or goes back to the list
+/// with no user; arguments not ported, a referer PHP cannot read, a user
+/// missing and a POST are not answered.
+#[tokio::test(flavor = "multi_thread")]
+async fn deletions_are_confirmed_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let nonce = session_nonce(&site, &cookies, "bulk-users").await;
+    let base = format!("/hs-admin/users?action=delete&user=1&_wpnonce={nonce}");
+    let response = send(&site, "GET", &base, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/users-delete.tsv");
+    let row = golden
+        .lines()
+        .find(|row| row.starts_with("users?action=delete&user=1&"));
+    let php = hyscribe_testkit::unhex(row.unwrap().split('\t').nth(2).unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+    let page = page_of(response).await;
+    assert_eq!(with_values(&php, &page), page);
+    let back = format!("/hs-admin/users?action=delete&_wpnonce={nonce}");
+    let response = send(&site, "GET", &back, &cookies, None).await;
+    assert_eq!(location(&response), "users");
+    for more in ["&bogus=1", "&wp_http_referer[]=x", "&users[]=999"] {
+        let response = send(&site, "GET", &format!("{base}{more}"), &cookies, None).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{more}");
+    }
+    let form = ("application/x-www-form-urlencoded", "x=1");
+    let response = send(&site, "POST", &base, &cookies, Some(form)).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+}
+
+/// Another user's sessions all end, and PHP's answer names them.
+#[tokio::test(flavor = "multi_thread")]
+async fn another_user_s_sessions_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress_ttd", dir.path()).await;
+    let sessions = hyscribe_auth::sessions::Sessions::new(dir.path());
+    let origin = hyscribe_auth::sessions::Origin {
+        ip: b"",
+        ua: b"",
+        login: now(),
+    };
+    let token = sessions.create(2, now() + 60, &origin).unwrap();
+    let nonce = session_nonce(&site, &cookies, "update-user_2").await;
+    let body = format!("action=destroy-sessions&user_id=2&nonce={nonce}");
+    let form = ("application/x-www-form-urlencoded", body.as_str());
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, Some(form)).await;
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
+    let row = golden
+        .lines()
+        .find(|row| row.starts_with("destroy-sessions-other\t"));
+    let php = hyscribe_testkit::unhex(row.unwrap().split('\t').nth(3).unwrap());
+    let php = String::from_utf8(php)
+        .unwrap()
+        .replace("other", "Theme Buster");
+    assert_eq!(page_of(response).await, php);
+    assert!(!sessions.verify(2, token.as_bytes(), now()));
+    // The confirmation of their deletion asks what becomes of their posts.
+    let nonce = session_nonce(&site, &cookies, "bulk-users").await;
+    let delete = format!("/hs-admin/users?action=delete&users=2&_wpnonce={nonce}");
+    let page = page_of(send(&site, "GET", &delete, &cookies, None).await).await;
+    assert!(page.contains("<strong>themedemos</strong> (ID #2): What should be done"));
+}
+
+/// An answer sets the cookies given, a cookie no header can carry left out.
+#[test]
+fn answers_set_the_cookies_given() {
+    let cookies = vec!["a=1; path=/".to_string(), "b=\n".to_string()];
+    let response = with_cookies(not_ported(), cookies);
+    let set: Vec<_> = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .collect();
+    assert_eq!(set, ["a=1; path=/"]);
 }

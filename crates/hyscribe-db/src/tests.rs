@@ -525,6 +525,7 @@ async fn every_query() -> Vec<DbError> {
             .unwrap_err(),
         db.users_meta("wp_capabilities").await.unwrap_err(),
         db.post_authors("post").await.unwrap_err(),
+        db.owns_content(1).await.unwrap_err(),
         db.posts_of_type("page").await.unwrap_err(),
         db.revisions(1).await.unwrap_err(),
         db.user_post_counts(&[1], true, 1).await.unwrap_err(),
@@ -1487,6 +1488,7 @@ async fn dashboard_reads() {
     assert_eq!(caps, [(1, b"a:1:{s:13:\"administrator\";b:1;}".to_vec())]);
     assert_eq!(db.post_authors("page").await.unwrap(), [1]);
     assert!(db.post_authors("attachment").await.unwrap().is_empty());
+    assert!(db.owns_content(1).await.unwrap() && !db.owns_content(2).await.unwrap());
     assert_eq!(db.user_post_counts(&[1], false, 0).await.unwrap(), [(1, 1)]);
     let latest = db.list_comments(&PENDING, NEWEST, 5, 0).await.unwrap();
     let ids: Vec<(u64, String)> = latest.into_iter().map(|(c, a)| (c.id, a)).collect();

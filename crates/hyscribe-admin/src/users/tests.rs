@@ -77,6 +77,62 @@ fn pages_are_php_s() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// Every confirmation page of a deletion `reference/users-list/golden.sh`
+/// records; a redirect is `302`.
+#[test]
+fn deletions_are_confirmed_as_php_confirms_them() {
+    let golden = include_str!("../../tests/golden/users-delete.tsv");
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let query = f[0].split_once('?').unwrap().1;
+        // A nonce of letters, which the URLs rebuilt keep as it is.
+        let query = query.replace("%nonce%", "BULKNONCE");
+        let query = query.replace("%2Fwp-admin%2Fusers.php", "%2Fhs-admin%2Fusers");
+        let pairs: Vec<(String, String)> = query
+            .split('&')
+            .map(|pair| {
+                let (key, value) = pair.split_once('=').unwrap();
+                let value = String::from_utf8(urldecode(value.as_bytes())).unwrap();
+                (key.to_string(), value)
+            })
+            .collect();
+        let values = |name: &str| -> Vec<String> {
+            let named = pairs.iter().filter(|(key, _)| key == name);
+            named.map(|(_, value)| value.clone()).collect()
+        };
+        // `users`, else `user`.
+        let mut ids = [values("users[]"), values("users")].concat();
+        if ids.is_empty() {
+            ids = values("user");
+        }
+        let args = DeleteArgs {
+            users: ids.iter().map(|id| id.parse().unwrap()).collect(),
+            error: !values("error").is_empty(),
+            referer: values("wp_http_referer").first().cloned(),
+        };
+        let path = format!("/hs-admin/users?{query}");
+        let path = String::from_utf8(addslashes(path.as_bytes())).unwrap();
+        // `wp_removable_query_args()` leave the canonical URL.
+        let url = remove_query_arg(&[b"message", b"error"], format!("{SITE}{path}").as_bytes());
+        let url = String::from_utf8(url).unwrap();
+        let request = crate::tests::request(&url, &path, &crate::tests::BROWSER);
+        let ours = match delete_users(&Role("users:administrator"), &args, &request) {
+            Some(Answer::Page(page)) => page.replace("BULKNONCE", "%nonce:bulk-users%"),
+            Some(Answer::Redirect(to)) => format!("302\t{to}"),
+            _ => panic!("{query}"),
+        };
+        let php = hs_admin_page(&String::from_utf8(unhex(f[2])).unwrap());
+        let php = php.replacen("302\tusers.php", "302\tusers", 1);
+        assert!(ours == php, "{query}: {}", first_difference(&php, &ours));
+    }
+    let missing = DeleteArgs {
+        users: vec![999],
+        ..DeleteArgs::default()
+    };
+    let request = crate::tests::request(SITE, "/hs-admin/users", &crate::tests::BROWSER);
+    assert!(delete_users(&Role("users:administrator"), &missing, &request).is_none());
+}
+
 /// One who may list users but not change them sees no links to do so.
 #[test]
 fn listing_alone_offers_no_changes() {

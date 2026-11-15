@@ -12,6 +12,9 @@ use hyscribe_admin::actions::Asked;
 use hyscribe_admin::posts::Answer;
 use hyscribe_db::{DbError, Write};
 
+mod user_edit;
+
+pub(super) use user_edit::destroy_sessions;
 mod users;
 
 /// Why an action keeps nothing it wrote.
@@ -46,6 +49,13 @@ pub(super) type Handler = for<'a, 'w> fn(&'a mut Write<'w>, &'a Asked<'a>) -> Sa
 pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
     match (screen, action) {
         ("users", b"promote") => Some(users::promote),
+        ("users", b"dodelete") => Some(users::dodelete),
+        ("users", b"resetpassword") => Some(users::resetpassword),
+        ("user-new", b"createuser") => Some(user_edit::create),
+        ("profile", b"update") => Some(user_edit::profile),
+        ("user-edit", b"update") => Some(user_edit::user_edit),
+        ("admin-ajax", b"save-user-color-scheme") => Some(user_edit::color_scheme),
+        ("admin-ajax", b"send-password-reset") => Some(user_edit::password_reset),
         _ => None,
     }
 }

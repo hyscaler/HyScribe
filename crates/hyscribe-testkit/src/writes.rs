@@ -263,6 +263,7 @@ impl Masks {
         if Self::is_password(value) {
             return b"%password%".to_vec();
         }
+        let value = &random_hashes(value)[..];
         // Such dates sort as text in time order.
         if Self::is_date(value) && value >= &self.start.1[..] && value <= &self.end.1[..] {
             return b"%now%".to_vec();
@@ -283,6 +284,29 @@ impl Masks {
             TermMap => term_map(&value, token).unwrap_or(value),
         }
     }
+}
+
+/// `value` with the hashes of a password reset key (`$generic$` and up to
+/// 40 bytes) and of an email change (`_new_email`'s) masked: both random.
+fn random_hashes(value: &[u8]) -> Vec<u8> {
+    const NEW_EMAIL: &[u8] = b"a:2:{s:4:\"hash\";s:32:\"";
+    if let Some(rest) = value.strip_prefix(NEW_EMAIL)
+        && let Some((hash, tail)) = rest.split_at_checked(32)
+        && tail.starts_with(b"\"")
+        && hash.iter().all(|b| b"0123456789abcdef".contains(b))
+    {
+        return [NEW_EMAIL, b"%random%", tail].concat();
+    }
+    let mut out = Vec::new();
+    let mut rest = value;
+    while let Some(at) = rest.windows(9).position(|w| w == b"$generic$") {
+        let (head, _) = rest.split_at(at);
+        out.extend_from_slice(head);
+        out.extend_from_slice(b"%fasthash%");
+        rest = rest.get(at + 49..).unwrap_or_default();
+    }
+    out.extend_from_slice(rest);
+    out
 }
 
 /// A `{$taxonomy}_children` map, `a:n:{i:<parent>;a:m:{i:<n>;i:<child>;…}…}`,

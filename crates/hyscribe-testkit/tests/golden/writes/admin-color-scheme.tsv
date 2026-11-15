@@ -1,0 +1,3 @@
+# The rows PHP WordPress writes for the action admin-color-scheme (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 09:42:19 to 2026-11-15 09:42:19 UTC.
+wp_usermeta	9	~	meta_value	modern	ocean

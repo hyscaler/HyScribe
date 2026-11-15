@@ -7,7 +7,7 @@ use hyscribe_model::USER_ORDERBY;
 use hyscribe_model::User;
 use hyscribe_phpser::{
     Key, Maybe, Value, add_query_arg, addslashes, is_empty_string, maybe_unserialize, php_trim,
-    stripslashes, urlencode,
+    remove_query_arg, stripslashes, urlencode,
 };
 use hyscribe_render::formatting::{user_email_display, user_name_display};
 use hyscribe_render::{number_format, user_avatar};
@@ -19,7 +19,7 @@ use crate::list_table::{
     row_actions, screen_options, search_box, table_description, views, wp_nonce_field,
 };
 use crate::menu::{Screen, link};
-use crate::page::{HelpTab, Page, Request, admin_notice, admin_page};
+use crate::page::{HelpTab, Page, Request, admin_notice, admin_page, wp_admin_notice};
 use crate::posts::{Answer, hidden_columns, per_page};
 use crate::text;
 
@@ -36,6 +36,8 @@ pub trait UsersSite: DashboardSite {
     fn users_without_role(&self, regex: &str) -> Vec<u64>;
     /// `get_author_posts_url( $id )`.
     fn author_url(&self, id: u64) -> String;
+    /// Whether the user is a post's author or a link's owner.
+    fn owns_content(&self, id: u64) -> bool;
 }
 
 /// The users the list asks for.
@@ -243,6 +245,9 @@ pub struct ListedUser {
 }
 
 const PAGE: &str = include_str!("users/page.html");
+const DELETE_PAGE: &str = include_str!("users/delete.html");
+/// A user's choice of what becomes of their content.
+const CONTENT_CHOICE: &str = include_str!("users/content-choice.html");
 
 const HELP_OVERVIEW: &str = "<p>This screen lists all the existing users for your site. Each user has one of five defined roles as set by the site admin: Site Administrator, Editor, Author, Contributor, or Subscriber. Users with roles other than Administrator will see fewer options in the dashboard navigation when they are logged in, based on their role.</p><p>To add a new user for your site, click the Add User button at the top of the screen or Add User in the Users menu section.</p>";
 
@@ -542,7 +547,7 @@ pub fn users(site: &dyn UsersSite, args: &UserArgs, request: &Request) -> Answer
         canonical,
         origin,
         uri: request_uri,
-        browser,
+        ..
     } = request;
     if !site.can("list_users") {
         return Answer::Denied(
@@ -768,11 +773,17 @@ pub fn users(site: &dyn UsersSite, args: &UserArgs, request: &Request) -> Answer
             ),
         ],
     );
+    users_page(site, &content, request)
+}
+
+/// The users screen around `content`: its help and screen options, which
+/// the deletion's confirmation page shares.
+fn users_page(site: &dyn UsersSite, content: &str, request: &Request) -> Answer {
     let screen_options = screen_options(
-        &columns,
-        &hidden,
+        &columns(),
+        &hidden_columns(site, "users"),
         "users_per_page",
-        per_page,
+        per_page(site, "users_per_page", 20),
         "",
         site.nonce("screen-options-nonce"),
     );
@@ -820,12 +831,151 @@ pub fn users(site: &dyn UsersSite, args: &UserArgs, request: &Request) -> Answer
         admin_head: "",
         admin_footer: "",
         footer_scripts: "",
-        content: &content,
-        canonical,
-        origin,
+        content,
+        canonical: request.canonical,
+        origin: request.origin,
         view: None,
     };
-    Answer::from_page(admin_page(site, &page, browser))
+    Answer::from_page(admin_page(site, &page, request.browser))
+}
+
+/// What the deletion's confirmation page is asked.
+#[derive(Default)]
+pub struct DeleteArgs {
+    /// `$_REQUEST['users']`, `intval()`ed, else `$_REQUEST['user']`'s; empty
+    /// for neither.
+    pub users: Vec<i64>,
+    /// `error`, set when the form came back with no option chosen.
+    pub error: bool,
+    /// `wp_http_referer`, unslashed, if given.
+    pub referer: Option<String>,
+}
+
+/// `users.php`'s `delete`: the confirmation page, each user but the current
+/// one with a choice for their content when they own any; with no user,
+/// the list or the page `wp_http_referer` names. `None` for a user missing.
+pub fn delete_users(site: &dyn UsersSite, args: &DeleteArgs, request: &Request) -> Option<Answer> {
+    let removable = [&b"wp_http_referer"[..], b"updated", b"delete_count"];
+    let redirect = args
+        .referer
+        .as_ref()
+        .map(|referer| text(&remove_query_arg(&removable, referer.as_bytes())));
+    if args.users.is_empty() {
+        return Some(Answer::Redirect(redirect.unwrap_or_else(|| "users".into())));
+    }
+    let me = site.user_id();
+    let deleted: Vec<u64> = args
+        .users
+        .iter()
+        .filter_map(|id| u64::try_from(*id).ok())
+        .filter(|id| *id != me)
+        .collect();
+    let mut items = String::new();
+    for &id in &args.users {
+        let user = site.userdata(u64::try_from(id).ok()?)?;
+        let login = text(&user.login);
+        if user.id == me {
+            items.push_str(&format!(
+                "<li>ID #{id}: {login} <strong>The current user will not be deleted.</strong></li>\n"
+            ));
+            continue;
+        }
+        let choice = if site.owns_content(user.id) {
+            let others = reassign_dropdown(site, id, &deleted);
+            fill(
+                CONTENT_CHOICE,
+                &[("id", id.to_string()), ("login", login), ("users", others)],
+            )
+        } else {
+            format!(
+                "\t\t\t\t\t<input type=\"hidden\" name=\"delete_option[{id}]\" value=\"delete\" required />\n\t\t\t\t\t<p>\n\t\t\t\t\t<strong>{login}</strong> (ID #{id}): This user does not have any content.\t\t\t\t\t</p>\n\t\t\t\t\t"
+            )
+        };
+        items.push_str(&format!(
+            "<li><input type=\"hidden\" name=\"users[]\" value=\"{id}\" />{choice}</li>\n"
+        ));
+    }
+    let specified = if args.users.len() == 1 {
+        "this user"
+    } else {
+        "these users"
+    };
+    let confirm = if args
+        .users
+        .iter()
+        .any(|id| u64::try_from(*id).is_ok_and(|id| id != me))
+    {
+        "\t\t\t\t\t<input type=\"hidden\" name=\"action\" value=\"dodelete\" />\n\t\t\t<p class=\"submit\"><input type=\"submit\" name=\"submit\" id=\"submit\" class=\"button button-primary\" value=\"Confirm Deletion\"  /></p>\n"
+    } else {
+        "\t\t\n\t\t\t<p>There are no valid users selected for deletion.</p>\n\n"
+    };
+    let content = fill(
+        DELETE_PAGE,
+        &[
+            (
+                "nonce",
+                wp_nonce_field(site, "delete-users", "_wpnonce", request.uri),
+            ),
+            (
+                "referer",
+                redirect.map_or_else(String::new, |redirect| {
+                    format!(
+                        "<input type=\"hidden\" name=\"wp_http_referer\" value=\"{}\" />",
+                        esc_attr(redirect.as_bytes())
+                    )
+                }),
+            ),
+            (
+                "error",
+                if args.error {
+                    wp_admin_notice(
+                        "<strong>Error:</strong> Please select an option.",
+                        "",
+                        "error",
+                        true,
+                        "",
+                    )
+                } else {
+                    String::new()
+                },
+            ),
+            ("specified", specified.into()),
+            ("items", items),
+            ("confirm", confirm.into()),
+        ],
+    );
+    Some(users_page(site, &content, request))
+}
+
+/// `wp_dropdown_users()` of the users content of user `id` may pass to:
+/// all but those being deleted, by display name.
+fn reassign_dropdown(site: &dyn UsersSite, id: i64, deleted: &[u64]) -> String {
+    let query = UserQuery {
+        roles: &[],
+        include: &[],
+        search: None,
+        order: &[("display_name", false)],
+        offset: 0,
+        number: u64::MAX,
+    };
+    let options: String = site
+        .list_users(&query)
+        .0
+        .iter()
+        .filter(|listed| !deleted.contains(&listed.user.id))
+        .map(|listed| {
+            let user = &listed.user;
+            let name = [&user.display_name[..], b" (", &user.login, b")"].concat();
+            format!(
+                "\t<option value='{}'>{}</option>\n",
+                user.id,
+                esc_html(&name)
+            )
+        })
+        .collect();
+    format!(
+        "<select name='reassign_user[{id}]' id='reassign_user_{id}' class=''>\n\t<option value=''>Select a user</option>\n{options}</select>"
+    )
 }
 
 #[cfg(test)]

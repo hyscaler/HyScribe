@@ -29,13 +29,13 @@ cleanup() {
 trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/users-list/variants.php"
-actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce bulk-users"
+actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce bulk-users delete-users"
 # shellcheck disable=SC2086
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 1 ); foreach ( array_slice( $argv, 1 ) as $action ) { echo wp_create_nonce( $action ), "\t", $action, "\n"; }' \
   $actions > "$NONCES"
 record() {
   : > "$TMP"
-  status=$(curl -s -o "$TMP" -D "$TMP.head" -w '%{http_code}' -b "hyscribe_role=$2; hyscribe_variant=${1%%\?*}" "$BASE/wp-admin/users.php$3")
+  status=$(curl -s -o "$TMP" -D "$TMP.head" -w '%{http_code}' -b "hyscribe_role=$2; hyscribe_variant=${1%%\?*}" "$BASE/wp-admin/users.php${3//%nonce%/$(grep -P "\tbulk-users$" "$NONCES" | cut -f1)}")
   case "$status" in
     200) ;;
     302) printf '302\t%s' "$(grep -i '^location:' "$TMP.head" | cut -d' ' -f2 | tr -d '\r')" > "$TMP" ;;
@@ -70,6 +70,15 @@ for query in role=editor role=author role=subscriber role=administrator role=non
 done
 for query in paged=2 paged=4 paged=9 paged=-2 'role=editor&paged=2'; do
   record paged administrator "?$query"
+done
+wc -l "$OUT"
+# The deletion's confirmation page, with the list's nonce for %nonce%, as
+# crates/hyscribe-admin/tests/golden/users-delete.tsv.
+OUT="$ROOT/crates/hyscribe-admin/tests/golden/users-delete.tsv"
+: > "$OUT"
+for query in 'users[]=601&users[]=1' user=604 user=1 'users[]=605&users[]=607&error=true' \
+  'users[]=602&wp_http_referer=%2Fwp-admin%2Fusers.php%3Frole%3Dauthor%26updated%3D1' 'users=603&user=601' ''; do
+  record users administrator "?action=delete&${query:+$query&}_wpnonce=%nonce%"
 done
 rm -f "$TMP.head"
 wc -l "$OUT"

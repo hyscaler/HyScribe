@@ -979,6 +979,40 @@ fn ajax_action(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
                 }),
             }
         }
+        "send-password-reset" => {
+            let id = post_int(asked, "user_id");
+            ajax_referer(
+                site,
+                asked,
+                &format!("reset-password-for-{id}"),
+                Some("nonce"),
+            )?;
+            match can_for(site, "edit_user", id) {
+                true => Ok(()),
+                false => Err(Refusal {
+                    status: 200,
+                    body: Body::Json(
+                        "{\"success\":false,\"data\":\"Cannot send password reset, permission denied.\"}",
+                    ),
+                }),
+            }
+        }
+        "destroy-sessions" => {
+            let id = post_int(asked, "user_id");
+            let user = u64::try_from(id).is_ok_and(|id| site.user_exists(id));
+            match user
+                && can_for(site, "edit_user", id)
+                && verified(site, asked.post("nonce"), &format!("update-user_{id}"))
+            {
+                true => Ok(()),
+                false => Err(Refusal {
+                    status: 200,
+                    body: Body::Json(
+                        "{\"success\":false,\"data\":{\"message\":\"Could not log out user sessions. Please try again.\"}}",
+                    ),
+                }),
+            }
+        }
         _ => Ok(()),
     }
 }

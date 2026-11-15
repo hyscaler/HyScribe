@@ -1066,6 +1066,12 @@ impl crate::users::UsersSite for Role {
     fn author_url(&self, id: u64) -> String {
         format!("{SITE}/?author={id}")
     }
+    /// Those with posts.
+    fn owns_content(&self, id: u64) -> bool {
+        crate::users::content::users(self.users_content())
+            .iter()
+            .any(|listed| listed.user.id == id && listed.posts > 0)
+    }
 }
 
 impl crate::tools::ToolsSite for Role {
@@ -1651,9 +1657,17 @@ impl crate::posts::PostsSite for Role {
         if self.ttd() {
             return crate::media::content::user(id);
         }
+        let listed = || {
+            let users = crate::users::content::users(self.users_content());
+            users
+                .into_iter()
+                .map(|listed| listed.user)
+                .find(|user| user.id == id)
+        };
         self.authors("edit_posts")
             .into_iter()
             .find(|user| user.id == id)
+            .or_else(listed)
     }
     fn pending_comments(&self, post: &hyscribe_model::Post) -> u64 {
         u64::from(

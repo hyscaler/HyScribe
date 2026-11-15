@@ -117,6 +117,9 @@ require '/var/www/html/wp-load.php';
 		if ( preg_match( '/\A\$wp\$2y\$12\$[.\/A-Za-z0-9]{53}\z/', $value ) ) {
 			return '%password%';
 		}
+		// The hashes of a password reset key and of an email change: random.
+		$value = preg_replace( '/\$generic\$.{0,40}/s', '%fasthash%', $value );
+		$value = preg_replace( '/\A(a:2:\{s:4:"hash";s:32:")[0-9a-f]{32}"/', '$1%random%"', $value );
 		// Such dates sort as text in time order.
 		$is_date = preg_match( '/\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\z/', $value );
 		if ( $is_date && $value >= gmdate( 'Y-m-d H:i:s', $start ) && $value <= gmdate( 'Y-m-d H:i:s', $end ) ) {

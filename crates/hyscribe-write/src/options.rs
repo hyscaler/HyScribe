@@ -13,8 +13,8 @@ use crate::{Error, now};
 mod meta;
 
 pub use hyscribe_db::Meta;
-pub use meta::{add_metadata, delete_metadata, update_metadata};
-pub(crate) use meta::{delete_object_meta, get_metadata};
+pub(crate) use meta::delete_object_meta;
+pub use meta::{add_metadata, delete_metadata, get_metadata, update_metadata};
 
 /// An `$autoload` argument other than `null`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

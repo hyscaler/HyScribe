@@ -1,0 +1,10 @@
+# The admin actions reference/admin-saves/golden.sh sends past their checks,
+# as user 1, an administrator, with a valid nonce in the field given:
+# case	method	target	body (- for none)	nonce action	nonce field
+# User 801 is reference/action-checks/content.sql's author.
+users-promote	GET	users.php?changeit=Change&new_role=editor&users[]=801	-	bulk-users	_wpnonce
+users-promote-self	GET	users.php?changeit=Change&new_role=administrator&users[]=1	-	bulk-users	_wpnonce
+users-promote-self-editor	GET	users.php?changeit=Change&new_role=editor&users[]=1	-	bulk-users	_wpnonce
+users-promote-nobody	GET	users.php?changeit=Change&new_role=editor	-	bulk-users	_wpnonce
+users-promote-referer	GET	users.php?changeit=Change&new_role=administrator&users[]=1&wp_http_referer=%2Fwp-admin%2Fusers.php%3Frole%3Dadministrator%26updated%3D1	-	bulk-users	_wpnonce
+users-promote-post	POST	users.php	action=promote&new_role=administrator&users[]=1	bulk-users	_wpnonce

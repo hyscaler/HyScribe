@@ -431,6 +431,15 @@ fn compares_lines_with_golden() {
     );
 }
 
+/// A reset key's fast hash is `$generic$` and the 40 characters after it,
+/// as `reference/writes/run.php` masks it.
+#[test]
+fn fast_hashes_are_masked() {
+    let key = format!("1:$generic${}tail", "a".repeat(40));
+    assert_eq!(fast_hashes(key.as_bytes()), b"1:%fasthash%tail");
+    assert_eq!(fast_hashes(b"$generic$short"), b"%fasthash%");
+}
+
 #[test]
 fn masks_admin_email_keys_and_a_new_policy_page() {
     let new = NewIds::from([(("wp_posts", b"12".to_vec()), b"%wp_posts:1%".to_vec())]);

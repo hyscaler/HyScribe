@@ -1,0 +1,18 @@
+					<fieldset>
+					<legend>
+					<strong>%login%</strong> (ID #%id%): What should be done with the content owned by this user?					</legend>
+
+					<ul>
+						<li>
+							<input type="radio" id="delete_option_%id%" name="delete_option[%id%]" value="delete" required />
+							<label for="delete_option_%id%">Delete all content.</label>
+						</li>
+						<li>
+							<input type="radio" id="reassign_option_%id%" name="delete_option[%id%]" value="reassign" required />
+							<label for="reassign_option_%id%">Attribute all content to another user.</label>
+
+							<label for="reassign_user_%id%" class="screen-reader-text">Select a user to attribute the content to.</label>
+							%users%						</li>
+					</ul>
+					</fieldset>
+					

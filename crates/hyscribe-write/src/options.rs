@@ -15,8 +15,8 @@ mod meta;
 mod sanitize;
 
 pub use hyscribe_db::Meta;
-pub use meta::{add_metadata, delete_metadata, update_metadata};
-pub(crate) use meta::{delete_object_meta, get_metadata};
+pub(crate) use meta::delete_object_meta;
+pub use meta::{add_metadata, delete_metadata, get_metadata, update_metadata};
 pub use sanitize::{INVALID_ZONE, Sanitized, is_zone, sanitize_option};
 
 /// An `$autoload` argument other than `null`.

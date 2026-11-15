@@ -25,6 +25,9 @@ pub(super) mod dashboard;
 mod options;
 pub(super) mod screen;
 mod terms;
+mod user_edit;
+
+pub(super) use user_edit::destroy_sessions;
 mod users;
 
 /// Why an action keeps nothing it wrote.
@@ -97,6 +100,12 @@ pub(super) enum Ajax {
 pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
     match (screen, action) {
         ("users", b"promote") => Some(users::promote),
+        ("users", b"dodelete") => Some(users::dodelete),
+        ("users", b"resetpassword") => Some(users::resetpassword),
+        ("user-new", b"createuser") => Some(user_edit::create),
+        ("profile" | "user-edit", b"update") => Some(user_edit::update),
+        ("admin-ajax", b"save-user-color-scheme") => Some(user_edit::color_scheme),
+        ("admin-ajax", b"send-password-reset") => Some(user_edit::password_reset),
         ("edit-comments", _) => Some(comments::bulk),
         ("comment", action) => comments::moderation(action),
         ("options", b"update") => Some(options::update),

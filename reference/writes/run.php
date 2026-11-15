@@ -117,6 +117,8 @@ require '/var/www/html/wp-load.php';
 		if ( preg_match( '/\A\$wp\$2y\$12\$[.\/A-Za-z0-9]{53}\z/', $value ) ) {
 			return '%password%';
 		}
+		// The hash of a random password reset key.
+		$value = preg_replace( '/\$generic\$.{0,40}/s', '%fasthash%', $value );
 		// Such dates sort as text in time order.
 		$is_date = preg_match( '/\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\z/', $value );
 		if ( $is_date && $value >= gmdate( 'Y-m-d H:i:s', $start ) && $value <= gmdate( 'Y-m-d H:i:s', $end ) ) {
@@ -156,9 +158,13 @@ require '/var/www/html/wp-load.php';
 			if ( 'wp_options' === $table && preg_match( '/\A_(site_)?transient_timeout_/', $row['option_name'] ) ) {
 				$row['option_value'] = '%expiry%';
 			}
-			// update_option_new_admin_email()'s confirmation key is random.
+			// update_option_new_admin_email()'s confirmation key is random, as is
+			// send_confirmation_on_profile_email()'s.
 			if ( 'wp_options' === $table && 'adminhash' === $row['option_name'] ) {
 				$row['option_value'] = preg_replace( '/s:32:"[0-9a-f]{32}"/', 's:32:"%hash%"', $row['option_value'] );
+			}
+			if ( 'wp_usermeta' === $table && '_new_email' === $row['meta_key'] ) {
+				$row['meta_value'] = preg_replace( '/s:32:"[0-9a-f]{32}"/', 's:32:"%hash%"', $row['meta_value'] );
 			}
 			// A new privacy policy page's ID.
 			if ( 'wp_options' === $table && 'wp_page_for_privacy_policy' === $row['option_name'] && isset( $new['wp_posts'][ $row['option_value'] ] ) ) {

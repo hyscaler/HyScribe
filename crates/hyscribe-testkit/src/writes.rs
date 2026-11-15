@@ -265,6 +265,7 @@ impl Masks {
         if Self::is_password(value) {
             return b"%password%".to_vec();
         }
+        let value = &fast_hashes(value)[..];
         // Such dates sort as text in time order.
         if Self::is_date(value) && value >= &self.start.1[..] && value <= &self.end.1[..] {
             return b"%now%".to_vec();
@@ -286,6 +287,21 @@ impl Masks {
             TermMap => term_map(&value, token).unwrap_or(value),
         }
     }
+}
+
+/// `value` with the hashes of random password reset keys (`$generic$`
+/// and up to 40 bytes) masked.
+fn fast_hashes(value: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut rest = value;
+    while let Some(at) = rest.windows(9).position(|w| w == b"$generic$") {
+        let (head, _) = rest.split_at(at);
+        out.extend_from_slice(head);
+        out.extend_from_slice(b"%fasthash%");
+        rest = rest.get(at + 49..).unwrap_or_default();
+    }
+    out.extend_from_slice(rest);
+    out
 }
 
 /// A `{$taxonomy}_children` map, `a:n:{i:<parent>;a:m:{i:<n>;i:<child>;…}…}`,
@@ -393,7 +409,7 @@ fn is_timeout(table: &Table, row: &Row) -> bool {
 }
 
 /// `value` with each serialized string of 32 hexadecimal digits masked as
-/// `%hash%`: the random key of the `adminhash` option.
+/// `%hash%`: the random key of the `adminhash` option or `_new_email` meta.
 fn hash_masked(value: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut rest = value;
@@ -424,6 +440,7 @@ fn masked(masks: &Masks, table: &Table, rows: &BTreeMap<Vec<u8>, Row>) -> BTreeM
         .map(|row| {
             let timeout = is_timeout(table, row);
             let option = (table.name == "wp_options").then(|| value(row, "option_name"));
+            let new_email = table.name == "wp_usermeta" && value(row, "meta_key") == b"_new_email";
             let row: Row = row
                 .iter()
                 .map(|(column, value)| {
@@ -431,6 +448,8 @@ fn masked(masks: &Masks, table: &Table, rows: &BTreeMap<Vec<u8>, Row>) -> BTreeM
                     let masked = match (column.as_str(), option) {
                         ("option_value", _) if timeout => b"%expiry%".to_vec(),
                         ("option_value", Some(b"adminhash")) => hash_masked(&masked),
+                        // `send_confirmation_on_profile_email()`'s random key.
+                        ("meta_value", _) if new_email => hash_masked(&masked),
                         // A new privacy policy page's ID.
                         ("option_value", Some(b"wp_page_for_privacy_policy")) => {
                             let id = masks.new.get(&("wp_posts", masked.clone()));

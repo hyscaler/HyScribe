@@ -227,7 +227,7 @@ fn can_for(site: &dyn ActionSite, cap: &str, id: i64) -> bool {
 }
 
 /// `(array) $value`'s items.
-fn items(value: &Value) -> Vec<Value> {
+pub fn items(value: &Value) -> Vec<Value> {
     match value {
         Value::Array(entries) => entries.iter().map(|(_, item)| item.clone()).collect(),
         value => vec![value.clone()],
@@ -437,6 +437,14 @@ fn post_action(site: &dyn ActionSite, asked: &Asked, post: bool) -> Option<Check
     }))
 }
 
+/// `WP_Terms_List_Table::current_action()`: `bulk-delete` for the bulk action.
+fn terms_action(asked: &Asked) -> Option<Vec<u8>> {
+    if asked.is("action", "delete") && asked.request("delete_tags").is_some() {
+        return Some(b"bulk-delete".to_vec());
+    }
+    Some(asked.current_action(false)?.to_php_string())
+}
+
 /// `trim( $_POST[ $name ] )` of the Quick Draft form, on the slashed value
 /// as PHP trims it; `None` for an array, PHP's fatal error.
 pub fn quickdraft_field(asked: &Asked, name: &str) -> Option<Vec<u8>> {
@@ -477,11 +485,7 @@ fn quickdraft(site: &dyn ActionSite, asked: &Asked, found: Option<CapPost>, id: 
 
 /// `edit-tags.php`'s actions on categories and tags.
 fn terms_list(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
-    let doaction = if asked.is("action", "delete") && asked.request("delete_tags").is_some() {
-        b"bulk-delete".to_vec()
-    } else {
-        asked.current_action(false)?.to_php_string()
-    };
+    let doaction = terms_action(asked)?;
     // Without a taxonomy the screen is not ported.
     let taxonomy = asked.request("taxonomy").and_then(Value::as_bytes);
     let taxonomy = match taxonomy {
@@ -554,7 +558,7 @@ fn users_action(asked: &Asked) -> Option<Vec<u8>> {
 
 /// The action of a request whose checks passed, as its write's handler is
 /// registered: `screen-options` for the Screen Options form, the users
-/// list's `current_action()`, `options.php`'s email confirmation
+/// and terms lists' `current_action()`, `options.php`'s email confirmation
 /// (`adminhash`) and dismissal, the Privacy screen's `$_POST['action']`,
 /// else `$_REQUEST['action']`.
 pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
@@ -567,6 +571,7 @@ pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
         }
         "options" if dismissed(asked) => b"dismiss".to_vec(),
         "options-privacy" => privacy_action(asked).unwrap_or_default(),
+        "edit-tags" => terms_action(asked).unwrap_or_default(),
         _ => asked.action(),
     }
 }

@@ -196,8 +196,12 @@ pub(crate) fn kept_errors(variant: &str) -> Option<Vec<u8>> {
 fn pages_after_saves_are_php_s() {
     let golden = include_str!("../../tests/golden/admin-saves-after.tsv");
     let mut failures = Vec::new();
-    for line in golden.lines() {
-        let (case, page) = line.split_once('\t').unwrap();
+    let mut pages = 0;
+    for line in golden.lines().filter(|line| line.starts_with("options-")) {
+        let [case, "200", page] = line.split('\t').collect::<Vec<_>>()[..] else {
+            panic!("{line}");
+        };
+        pages += 1;
         let (variant, screen, query) = match case {
             "options-adminhash-bad" => ("default", "general", "?updated=false"),
             "options-dismiss" => ("default", "general", "?updated=true"),
@@ -241,6 +245,7 @@ fn pages_after_saves_are_php_s() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(pages, 11);
     let site = Role("o5expired:administrator");
     let path = "/hs-admin/options-writing?settings-updated=true";
     let Answer::Page(page) = writing(&site, &request(SITE, path, &BROWSER)) else {

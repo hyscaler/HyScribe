@@ -248,6 +248,8 @@ fn actions_are_named_as_php_names_them() {
         ("options", "adminhash=&dismiss=new_admin_email", "dismiss"),
         ("options", "dismiss=x&action=update", "update"),
         ("options-privacy", "action=create-privacy-page", ""),
+        ("edit-tags", "action=delete&delete_tags[]=2", "bulk-delete"),
+        ("edit-tags", "action=-1", ""),
     ] {
         let get = fields(query);
         let asked = Asked {

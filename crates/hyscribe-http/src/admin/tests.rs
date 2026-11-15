@@ -1979,25 +1979,6 @@ fn hs(text: &str) -> String {
     text.replace("/wp-admin/", "/hs-admin/").replace(".php", "")
 }
 
-/// The cases of `reference/admin-saves/golden.sh` that write more than the
-/// fixture's read only user can: their rows and answers are the write
-/// oracle's, in `saves`.
-const WRITTEN: [&str; 13] = [
-    "users-promote",
-    "options-general",
-    "options-general-email",
-    "options-writing",
-    "options-reading",
-    "options-discussion",
-    "options-media",
-    "options-privacy",
-    "options-misc",
-    "options-noreferer",
-    "options-permalink",
-    "options-permalink-error",
-    "privacy-create",
-];
-
 /// Past their checks, the role changes of `reference/admin-saves/golden.sh`
 /// answer as PHP's, but user 801's, whom the fixture lacks (its rows and
 /// answer are the write oracle's, in `saves`); what PHP cannot go on with
@@ -2011,10 +1992,11 @@ async fn actions_answer_as_php_once_checked() {
     let site = unwritable(site, "wp_").await;
     let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
     let cases = include_str!("../../../../reference/admin-saves/cases.list");
+    // The users' and the Settings' cases that write nothing the read only user cannot.
     let rows = golden.lines().filter(|row| {
-        !WRITTEN
-            .iter()
-            .any(|case| row.starts_with(&format!("{case}\t")))
+        let case = row.split('\t').next().unwrap_or_default();
+        case.starts_with("users-") && case != "users-promote"
+            || ["options-adminhash-bad", "options-dismiss"].contains(&case)
     });
     for row in rows {
         let [case, status, php_location, body] = row.split('\t').collect::<Vec<_>>()[..] else {
@@ -2077,6 +2059,159 @@ async fn actions_answer_as_php_once_checked() {
         page.contains("Error establishing a database connection"),
         "{page}"
     );
+}
+
+/// `text` of `reference/admin-saves/cases.list` under hs-admin's names.
+fn hs_case(text: &str) -> String {
+    let text = text.replace("wp-admin%252Fedit-tags.php", "hs-admin%252Fedit-tags");
+    let text = text.replace("wp-admin%2Fedit-tags.php", "hs-admin%2Fedit-tags");
+    text.replace("wp-admin%2Fterm.php", "hs-admin%2Fterm")
+        .replace(".php", "")
+}
+
+/// Past their checks, the categories and tags actions of
+/// `reference/admin-saves/golden.sh` that write nothing answer as PHP's, and
+/// the screens after them are PHP's; the others are the write oracle's, in
+/// `saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn term_actions_answer_as_php_once_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let mut nonces = Vec::new();
+    for action in ["add-tag", "bulk-tags", "update-tag_1", "taxinlineeditnonce"] {
+        nonces.push((action, session_nonce(&site, &cookies, action).await));
+    }
+    let site = unwritable(site, "wp_").await;
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
+    let after = include_str!("../../../hyscribe-admin/tests/golden/admin-saves-after.tsv");
+    let cases = include_str!("../../../../reference/admin-saves/cases.list");
+    for case in [
+        "terms-add-exists",
+        "terms-add-empty",
+        "terms-bulk-missing",
+        "terms-edited-empty",
+        "ajax-add-exists",
+        "ajax-add-empty",
+        "ajax-add-missing-parent",
+        "ajax-add-invalid-name",
+        "ajax-inline-empty",
+    ] {
+        let find = |text: &'static str| {
+            let row = text
+                .lines()
+                .find(|row| row.starts_with(&format!("{case}\t")));
+            row.map(|row| row.split('\t').collect::<Vec<_>>())
+        };
+        let [_, _, target, data, action, field, ..] = find(cases).unwrap()[..] else {
+            panic!("{case}");
+        };
+        let nonce = &nonces.iter().find(|(a, _)| *a == action).unwrap().1;
+        let form = (
+            "application/x-www-form-urlencoded",
+            &*format!("{}&{field}={nonce}", hs_case(data)),
+        );
+        let uri = format!("/hs-admin/{}", hs_case(target));
+        let response = send(&site, "POST", &uri, &cookies, Some(form)).await;
+        let php = find(golden).unwrap();
+        assert_eq!(response.status().as_str(), php[1], "{case}");
+        let to = response.headers().get(header::LOCATION);
+        let to = to.map_or(String::new(), |to| to.to_str().unwrap().to_string());
+        assert_eq!(to, hyscribe_testkit::hs_admin_page(php[2]), "{case}");
+        let body = String::from_utf8(hyscribe_testkit::unhex(php[3])).unwrap();
+        assert_eq!(page_of(response).await, body, "{case}");
+        let Some(screen) = find(after) else {
+            continue;
+        };
+        let response = send(&site, "GET", &to, &cookies, None).await;
+        assert_eq!(response.status().as_str(), screen[1], "{case}");
+        let page = page_of(response).await;
+        let php = String::from_utf8(hyscribe_testkit::unhex(screen[2])).unwrap();
+        let php = hyscribe_testkit::hs_admin_page(&php);
+        assert_eq!(page, with_values(&php, &page), "{case}");
+    }
+    // Not ported: the edit screen's other arguments, and the terms of a
+    // taxonomy hyscribe-write does not write.
+    let response = send(
+        &site,
+        "GET",
+        "/hs-admin/term?taxonomy=category&x=1",
+        &cookies,
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let add = &nonces[0].1;
+    let menu = format!(
+        "action=add-tag&taxonomy=nav_menu&screen=edit-nav_menu&tag-name=X&_wpnonce_add-tag={add}"
+    );
+    let form = ("application/x-www-form-urlencoded", &*menu);
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, Some(form)).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // A database whose `db_version` cannot be read takes no write.
+    let site = unwritable(site, "missing_").await;
+    let tag = format!(
+        "action=add-tag&taxonomy=post_tag&screen=edit-post_tag&tag-name=X&_wpnonce_add-tag={add}"
+    );
+    let form = ("application/x-www-form-urlencoded", &*tag);
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, Some(form)).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+/// Quick Edit's row is PHP's once committed, and the add form's answer is
+/// the terms list's XML; in shadow mode the Ajax actions are read only.
+#[tokio::test(flavor = "multi_thread")]
+async fn term_ajax_answers_are_sent_once_committed() {
+    let site = oracle_site().await;
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
+    let row = golden
+        .lines()
+        .find(|row| row.starts_with("ajax-inline-unchanged\t"));
+    let php = hyscribe_testkit::unhex(row.unwrap().split('\t').nth(3).unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+    let handle = Handle::current();
+    let (row, added) = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, now());
+        let user = hyscribe_model::User {
+            id: 1,
+            ..hyscribe_model::User::default()
+        };
+        let admin = Admin::new(&reads, &site, user);
+        let asked = Asked {
+            get: &[],
+            post: &[],
+            referer: None,
+            uri: b"/hs-admin/admin-ajax",
+            home: &site.home,
+            user: 1,
+        };
+        let category = Terms::named(b"category").unwrap();
+        let term = admin.terms("category").into_iter().next().unwrap();
+        let row = saves::ajax_served(&admin, &asked, saves::Ajax::TermRow(category, term.clone()));
+        let added = hyscribe_admin::terms::Added {
+            term,
+            term_group: 0,
+            term_taxonomy_id: 1,
+        };
+        let xml = hyscribe_admin::terms::term_added(&admin, category, &added, "");
+        let answer = saves::ajax_served(&admin, &asked, saves::Ajax::TermAdded(category, added));
+        (row, (answer, xml))
+    })
+    .await
+    .unwrap();
+    assert_eq!(page_of(row).await, php);
+    let (answer, xml) = added;
+    let kind = answer.headers().get(header::CONTENT_TYPE).unwrap();
+    assert_eq!(kind, "text/xml; charset=UTF-8");
+    assert_eq!(page_of(answer).await, xml);
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let nonce = session_nonce(&site, &cookies, "taxinlineeditnonce").await;
+    let form =
+        format!("action=inline-save-tax&taxonomy=category&tax_ID=1&name=X&_inline_edit={nonce}");
+    let form = Some(("application/x-www-form-urlencoded", &*form));
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(page_of(response).await, READ_ONLY);
 }
 
 /// A page view whose writes fail, before the page or after it, is the

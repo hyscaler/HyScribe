@@ -195,7 +195,6 @@ pub(crate) fn meta(id: u64, key: &str) -> Option<Vec<u8>> {
         (807, "_wp_attachment_metadata") => b"a:1:{s:8:\"filesize\";i:3072;}",
         (808, "_wp_attached_file") => b"2024/03/data.csv",
         (808, "_wp_attachment_metadata") => b"a:1:{s:8:\"filesize\";i:100;}",
-        (810, "_wp_attached_file") => b"2026/04/gone.png",
         (811, "_wp_attached_file") => b"2026/04/shot.png",
         (811, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:16:\"2026/04/shot.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
         (812, "_wp_attached_file") => b"2026/05/big-scaled.jpg",

@@ -353,11 +353,12 @@ async fn kept(write: &mut Write<'_>) {
 }
 
 /// The screen a save sends back deletes the notices it shows, and an
-/// expired transient; an empty one or none is left as it is.
+/// expired transient, even an empty one; an empty one still current, or
+/// one with no timeout, is left as it is.
 #[tokio::test]
 async fn shown_settings_errors_are_deleted() {
     check("admin-options-notice-shown", kept, async |write, ()| {
-        settings_errors_shown(write).await.unwrap();
+        settings_errors_shown(write, now()).await.unwrap();
     })
     .await;
     let expired = async |write: &mut Write<'_>| {
@@ -371,26 +372,44 @@ async fn shown_settings_errors_are_deleted() {
         "admin-options-notice-expired",
         expired,
         async |write, ()| {
-            settings_errors_shown(write).await.unwrap();
+            settings_errors_shown(write, now()).await.unwrap();
         },
     )
     .await;
-    rolled_back(async |write| {
-        settings_errors_shown(write).await.unwrap();
+    // An empty list, whose timeout is `at`, shown at `now`: whether it is left.
+    let left = async |write: &mut Write<'_>, at: Option<i64>, now: i64| {
         set_transient(write, "settings_errors", &list(&[]), 30)
             .await
             .unwrap();
-        settings_errors_shown(write).await.unwrap();
+        let timeout = "_transient_timeout_settings_errors";
+        match at {
+            Some(at) => {
+                update_option(write, timeout, &Value::Int(at), None)
+                    .await
+                    .unwrap();
+            }
+            None => {
+                delete_option(write, timeout).await.unwrap();
+            }
+        }
+        settings_errors_shown(write, now).await.unwrap();
         let left = write
             .option_value("_transient_settings_errors")
             .await
             .unwrap();
-        assert_eq!(left.as_deref(), Some(&b"a:0:{}"[..]));
+        delete_option(write, "_transient_settings_errors")
+            .await
+            .unwrap();
+        left.is_some()
+    };
+    rolled_back(async |write| {
+        settings_errors_shown(write, 100).await.unwrap();
+        assert!(left(write, Some(100), 100).await);
+        assert!(!left(write, Some(99), 100).await);
+        assert!(left(write, None, 100).await);
     })
     .await;
-    fails_at_each_step(kept, async |write, ()| settings_errors_shown(write).await).await;
-    fails_at_each_step(expired, async |write, ()| {
-        settings_errors_shown(write).await
-    })
-    .await;
+    let shown = async |write: &mut Write<'_>, ()| settings_errors_shown(write, now()).await;
+    fails_at_each_step(kept, shown).await;
+    fails_at_each_step(expired, shown).await;
 }

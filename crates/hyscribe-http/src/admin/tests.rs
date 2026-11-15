@@ -2317,6 +2317,12 @@ async fn a_saved_notice_shows_once() {
     let back = location(&saved).to_string();
     assert_eq!(back, "/hs-admin/options-writing?settings-updated=true");
     let notice = "<p><strong>Settings saved.</strong></p>";
+    // Other views leave the notice: a Settings screen not sent back, and a
+    // page that writes for another reason.
+    for other in ["/hs-admin/options-writing", "/hs-admin/edit?mode=excerpt"] {
+        let viewed = send(&site, "GET", other, &cookies, None).await;
+        assert_eq!(viewed.status(), StatusCode::OK, "{other}");
+    }
     let first = page_of(send(&site, "GET", &back, &cookies, None).await).await;
     assert!(first.contains(notice));
     let again = page_of(send(&site, "GET", &back, &cookies, None).await).await;

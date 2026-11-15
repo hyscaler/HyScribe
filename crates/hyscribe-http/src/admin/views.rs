@@ -127,7 +127,7 @@ pub(super) async fn written<'w>(
         None
     };
     if view.settings && page {
-        settings_errors_shown(&mut write).await?;
+        settings_errors_shown(&mut write, ctx.now).await?;
     }
     Ok((write, draft))
 }
@@ -153,8 +153,11 @@ pub(super) fn viewed(
     let mut response = render(admin);
     let page = response.status() == StatusCode::OK;
     let kept = page || response.status() == StatusCode::FOUND && view.synced.mode.is_some();
+    // Only a page, or `?mode=`'s redirect, is kept.
     let after = view.synced.mode.is_some()
-        || page && (view.synced.newer.is_some() || view.welcome.is_some() || view.settings);
+        || view.synced.newer.is_some()
+        || view.welcome.is_some()
+        || view.settings;
     let saved = match drafted {
         // The Quick Draft form is shown to all who may write posts.
         Some((write, _)) => handle.block_on(write.commit()).map_err(Error::from),

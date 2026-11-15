@@ -518,11 +518,12 @@ async fn the_lists_actions_answer_as_php() {
         let [_, status, php_body] = row.unwrap().split('\t').collect::<Vec<_>>()[..] else {
             panic!("{case}");
         };
-        let response = send(&site, "GET", to, &cookies, None).await;
+        // `send` serves `site` as it was loaded; a served site reads it
+        // afresh for each request, as `current` does.
+        let now = Arc::new(site.reloaded().await.unwrap());
+        let response = send(&now, "GET", to, &cookies, None).await;
         assert_eq!(response.status().as_str(), status, "{case} {to}");
-        // Bulk Edit's sticky posts are not yet in the Sticky view of the
-        // next request in the same process, though a new site sees them.
-        if status == "200" && !case.starts_with("posts-bulk-edit") {
+        if status == "200" {
             let php = String::from_utf8(hyscribe_testkit::unhex(php_body)).unwrap();
             let php = undated(&unnonced(&hyscribe_testkit::hs_admin_page(&php)));
             let page = undated(&unnonced(&masked_nonces(&page_of(response).await)));

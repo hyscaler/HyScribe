@@ -131,6 +131,18 @@ pub async fn update_metadata(
     Ok(matched > 0 && Some(previous) != new)
 }
 
+/// Every meta row of `object`, deleted by ID as `wp_delete_post()` and the
+/// other functions deleting an object delete its meta.
+pub(crate) async fn delete_object_meta(
+    write: &mut Write<'_>,
+    meta: Meta,
+    object: u64,
+) -> Result<(), DbError> {
+    let ids = write.object_meta_ids(meta, object).await?;
+    write.delete_meta(meta, &ids).await?;
+    Ok(())
+}
+
 /// `delete_metadata( $type, $object, $key, $value, $delete_all )`: the rows
 /// of `key` of `object`, or of every object with `delete_all`, those
 /// holding `value` unless it is `''`, `null` or `false`.

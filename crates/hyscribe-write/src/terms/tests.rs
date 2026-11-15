@@ -3,48 +3,10 @@
 //! The term functions against the write oracle's goldens
 //! (`reference/writes/actions-terms.php`).
 
-use hyscribe_config::Mode;
-use hyscribe_db::{Meta, PostFields, Write, Writer};
-use hyscribe_testkit::{fixture_database, writes::check_writes};
+use hyscribe_db::{Meta, PostFields, Write};
 
 use super::*;
-
-/// One check at a time, so no two wait on each other's rows.
-static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-async fn writer() -> Writer {
-    Writer::open(&fixture_database(), Mode::Primary)
-        .await
-        .unwrap()
-        .unwrap()
-}
-
-/// Checks the golden `golden`: `setup` and `action` each run as one action
-/// on the oracle's connection.
-async fn check<T>(
-    golden: &str,
-    setup: impl AsyncFnOnce(&mut Write<'_>) -> T,
-    action: impl AsyncFnOnce(&mut Write<'_>, T),
-) {
-    let _one = ONE_AT_A_TIME.lock().await;
-    let writer = writer().await;
-    let setup = async |conn: &mut hyscribe_db::Connection| {
-        let mut write = writer.begin_on(conn).await.unwrap();
-        let state = setup(&mut write).await;
-        write.commit().await.unwrap();
-        Ok(state)
-    };
-    let action = async |conn: &mut hyscribe_db::Connection, state| {
-        let mut write = writer.begin_on(conn).await.unwrap();
-        action(&mut write, state).await;
-        write.commit().await.unwrap();
-        Ok(())
-    };
-    let checked = check_writes(&fixture_database(), golden, setup, action).await;
-    checked.unwrap();
-}
-
-async fn none(_: &mut Write<'_>) {}
+use crate::tests::{MISSING, check, fails_at_each_step, nothing, rolled_back};
 
 async fn tag(write: &mut Write<'_>, name: &[u8]) -> TermIds {
     let args = TermArgs::default();
@@ -113,7 +75,7 @@ async fn inserts_a_category() {
             .await
             .unwrap();
     };
-    check("insert-category", none, action).await;
+    check("insert-category", nothing, action).await;
 }
 
 #[tokio::test]
@@ -124,7 +86,7 @@ async fn inserts_a_tag_on_a_post() {
         let set = wp_set_post_terms(write, 1, TermList::List(&terms), Taxonomy::PostTag, false);
         assert_eq!(set.await.unwrap(), Some(vec![term.term_taxonomy_id]));
     };
-    check("insert-tag-on-post", none, action).await;
+    check("insert-tag-on-post", nothing, action).await;
 }
 
 #[tokio::test]
@@ -138,7 +100,7 @@ async fn sanitizes_names_and_descriptions() {
         insert(write, Taxonomy::PostTag, name, args).await.unwrap();
         tag(write, b"!!!").await;
     };
-    check("insert-term-markup", none, action).await;
+    check("insert-term-markup", nothing, action).await;
 }
 
 #[tokio::test]
@@ -173,7 +135,7 @@ async fn refuses_duplicate_tags() {
         assert!(matches!(empty, Err(TermError::EmptyName)));
         let invalid = insert(write, tags, b"<b></b>", no_args()).await;
         assert!(matches!(invalid, Err(TermError::InvalidName)));
-        let orphan = insert(write, tags, b"Missing parent", parent(999)).await;
+        let orphan = insert(write, tags, b"Missing parent", parent(MISSING)).await;
         assert!(matches!(orphan, Err(TermError::MissingParent)));
         let other = slug(b"oracle-other");
         insert(write, tags, b"Oracle", other).await.unwrap();
@@ -276,11 +238,11 @@ async fn updates_a_term() {
             name: Some(name),
             ..TermArgs::default()
         };
-        let missing = update(write, cats, 999, name(b"Nothing")).await;
+        let missing = update(write, cats, MISSING, name(b"Nothing")).await;
         assert!(matches!(missing, Err(TermError::InvalidTerm)));
         let blank = update(write, cats, id, name(b" ")).await;
         assert!(matches!(blank, Err(TermError::EmptyName)));
-        let orphan = update(write, cats, id, parent(999)).await;
+        let orphan = update(write, cats, id, parent(MISSING)).await;
         assert!(matches!(orphan, Err(TermError::MissingParent)));
         let args = TermArgs {
             name: Some(b"Renamed & <i>new</i>"),
@@ -385,7 +347,7 @@ async fn deletes_a_tag() {
     };
     let action = async |write: &mut Write<'_>, id| {
         let tags = Taxonomy::PostTag;
-        let missing = wp_delete_term(write, tags, 999).await.unwrap();
+        let missing = wp_delete_term(write, tags, MISSING).await.unwrap();
         assert_eq!(missing, Deletion::Missing);
         let deleted = wp_delete_term(write, tags, id).await.unwrap();
         assert_eq!(deleted, Deletion::Deleted);
@@ -440,7 +402,8 @@ async fn deletes_a_category_without_a_default() {
         wp_set_post_categories(write, 1, &[TermRef::Id(news)], false)
             .await
             .unwrap();
-        let option = write.update_option("default_category", b"999");
+        let missing = MISSING.to_string();
+        let option = write.update_option("default_category", missing.as_bytes());
         option.await.unwrap();
         news
     };
@@ -522,7 +485,7 @@ async fn sets_post_tags() {
             .unwrap();
         let more = [
             TermRef::Text(b"delta"),
-            TermRef::Id(999),
+            TermRef::Id(MISSING),
             TermRef::Text(b""),
         ];
         wp_set_post_terms(write, 1, TermList::List(&more), tags, true)
@@ -539,7 +502,7 @@ async fn sets_post_tags() {
             .await
             .unwrap();
     };
-    check("set-post-tags", none, action).await;
+    check("set-post-tags", nothing, action).await;
 }
 
 #[tokio::test]
@@ -569,98 +532,89 @@ async fn removes_post_tags() {
 
 #[tokio::test]
 async fn refuses_what_is_not_ported() {
-    let _one = ONE_AT_A_TIME.lock().await;
-    let writer = writer().await;
-    let mut write = writer.begin().await.unwrap();
-    // A term shared by two taxonomies, from before WordPress 4.2.
-    let shared = tag(&mut write, b"Shared").await.term_id;
-    write
-        .insert_term_taxonomy((shared, "category"), b"", 0)
-        .await
-        .unwrap();
-    let args = TermArgs::default();
-    let split = wp_update_term(&mut write, Taxonomy::PostTag, shared, &args).await;
-    assert!(matches!(split, Err(TermError::Unported(_))));
-
-    // A term in a classic menu.
-    let id = tag(&mut write, b"Linked").await.term_id;
-    let item = PostFields {
-        author: 1,
-        date: "2026-01-01 00:00:00".into(),
-        date_gmt: "2026-01-01 00:00:00".into(),
-        content: Vec::new(),
-        content_filtered: Vec::new(),
-        title: Vec::new(),
-        excerpt: Vec::new(),
-        status: "publish".into(),
-        post_type: "nav_menu_item".into(),
-        comment_status: "closed".into(),
-        ping_status: "closed".into(),
-        password: Vec::new(),
-        name: b"linked".to_vec(),
-        to_ping: Vec::new(),
-        pinged: Vec::new(),
-        modified: "2026-01-01 00:00:00".into(),
-        modified_gmt: "2026-01-01 00:00:00".into(),
-        parent: 0,
-        menu_order: 1,
-        mime_type: String::new(),
-        guid: Vec::new(),
-    };
-    let item = write.insert_post(&item).await.unwrap();
-    let id_text = id.to_string();
-    for (key, value) in [
-        ("_menu_item_object_id", id_text.as_bytes()),
-        ("_menu_item_type", b"taxonomy"),
-        ("_menu_item_object", b"post_tag"),
-    ] {
+    rolled_back(async |write| {
+        // A term shared by two taxonomies, from before WordPress 4.2.
+        let shared = tag(write, b"Shared").await.term_id;
         write
-            .add_meta(Meta::Post, item, key, Some(value))
+            .insert_term_taxonomy((shared, "category"), b"", 0)
             .await
             .unwrap();
-    }
-    let menu = wp_delete_term(&mut write, Taxonomy::PostTag, id).await;
-    assert!(matches!(menu, Err(TermError::Unported(_))));
-}
+        let args = TermArgs::default();
+        let split = wp_update_term(write, Taxonomy::PostTag, shared, &args).await;
+        assert!(matches!(split, Err(TermError::Unported(_))));
 
-#[test]
-fn large_options_are_not_autoloaded() {
-    assert_eq!(default_autoload(&[b'x'; 150_000]), "auto");
-    assert_eq!(default_autoload(&[b'x'; 150_001]), "auto-off");
+        // A term in a classic menu.
+        let id = tag(write, b"Linked").await.term_id;
+        let item = PostFields {
+            author: 1,
+            date: "2026-01-01 00:00:00".into(),
+            date_gmt: "2026-01-01 00:00:00".into(),
+            content: Vec::new(),
+            content_filtered: Vec::new(),
+            title: Vec::new(),
+            excerpt: Vec::new(),
+            status: "publish".into(),
+            post_type: "nav_menu_item".into(),
+            comment_status: "closed".into(),
+            ping_status: "closed".into(),
+            password: Vec::new(),
+            name: b"linked".to_vec(),
+            to_ping: Vec::new(),
+            pinged: Vec::new(),
+            modified: "2026-01-01 00:00:00".into(),
+            modified_gmt: "2026-01-01 00:00:00".into(),
+            parent: 0,
+            menu_order: 1,
+            mime_type: String::new(),
+            guid: Vec::new(),
+        };
+        let item = write.insert_post(&item).await.unwrap();
+        let id_text = id.to_string();
+        for (key, value) in [
+            ("_menu_item_object_id", id_text.as_bytes()),
+            ("_menu_item_type", b"taxonomy"),
+            ("_menu_item_object", b"post_tag"),
+        ] {
+            write
+                .add_meta(Meta::Post, item, key, Some(value))
+                .await
+                .unwrap();
+        }
+        let menu = wp_delete_term(write, Taxonomy::PostTag, id).await;
+        assert!(matches!(menu, Err(TermError::Unported(_))));
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn a_new_term_that_fails_fails_the_assignment() {
-    let _one = ONE_AT_A_TIME.lock().await;
-    let writer = writer().await;
-    let mut write = writer.begin().await.unwrap();
-    // No tag yet, so no first tag stands in for a text without a slug.
-    let terms = [TermRef::Text(b"<b></b>")];
-    let set = wp_set_object_terms(&mut write, 1, &terms, Taxonomy::PostTag, false).await;
-    assert!(matches!(set, Err(TermError::InvalidName)));
+    rolled_back(async |write| {
+        // No tag yet, so no first tag stands in for a text without a slug.
+        let terms = [TermRef::Text(b"<b></b>")];
+        let set = wp_set_object_terms(write, 1, &terms, Taxonomy::PostTag, false).await;
+        assert!(matches!(set, Err(TermError::InvalidName)));
+    })
+    .await;
 }
 
 #[tokio::test]
-async fn a_failed_statement_fails_the_action() {
-    use sqlx::Connection as _;
-    let db = fixture_database();
-    let options = sqlx::mysql::MySqlConnectOptions::new()
-        .host(&db.host)
-        .port(db.port)
-        .database(&db.name)
-        .username(&db.user)
-        .password(db.password.expose());
-    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
-    let id: u64 = sqlx::query_scalar("SELECT CONNECTION_ID()")
-        .fetch_one(&mut conn)
-        .await
-        .unwrap();
-    let writer = writer().await;
-    let mut write = writer.begin_on(&mut conn).await.unwrap();
-    let mut killer = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
-    let kill = sqlx::query("KILL ?").bind(id);
-    kill.execute(&mut killer).await.unwrap();
-    let args = TermArgs::default();
-    let inserted = wp_insert_term(&mut write, Taxonomy::Category, b"News", &args).await;
-    assert!(matches!(inserted, Err(TermError::Db(_))));
+async fn every_failed_statement_fails_the_action() {
+    fails_at_each_step(nothing, async |write, ()| {
+        let args = TermArgs::default();
+        let news = wp_insert_term(write, Taxonomy::Category, b"News", &args).await?;
+        let child = insert(write, Taxonomy::Category, b"Child", parent(news.term_id)).await?;
+        update(
+            write,
+            Taxonomy::Category,
+            news.term_id,
+            parent(child.term_id),
+        )
+        .await?;
+        let tags = TermList::Text(b"alpha, beta");
+        wp_set_post_terms(write, 1, tags, Taxonomy::PostTag, false).await?;
+        wp_set_post_categories(write, 1, &[], false).await?;
+        wp_delete_term(write, Taxonomy::Category, news.term_id).await?;
+        Ok(())
+    })
+    .await;
 }

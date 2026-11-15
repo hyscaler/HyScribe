@@ -188,12 +188,12 @@ fn downsizes_files_that_are_not_images() {
 #[test]
 fn constrains_dimensions() {
     assert_eq!(
-        constrain_for_editor(&site(vec![]), 1000, 1000, "thumbnail"),
+        constrain_for_editor(&site(vec![]), 1000, 1000, Size::Named("thumbnail")),
         (96, 96)
     );
     let unlimited = site(vec![("medium_size_w", "0"), ("medium_size_h", "0")]);
     assert_eq!(
-        constrain_for_editor(&unlimited, 500, 400, "medium"),
+        constrain_for_editor(&unlimited, 500, 400, Size::Named("medium")),
         (500, 400)
     );
     // One pixel short of the limit rounds up to it.

@@ -796,6 +796,7 @@ dependencies = [
  "hyscribe-db",
  "hyscribe-html",
  "hyscribe-kses",
+ "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-render",
  "hyscribe-testkit",

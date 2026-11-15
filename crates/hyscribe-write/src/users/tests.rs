@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use hyscribe_auth::check_password;
-use hyscribe_db::Connection;
 use hyscribe_phpser::Key;
 
 use super::*;
 use crate::options::delete_option;
-use crate::tests::{check, fails_at_each_step, rolled_back, text, writer};
+use crate::tests::{admin, check, connection, fails_at_each_step, rolled_back, text, writer};
 
 fn some(text: &str) -> Option<Vec<u8>> {
     Some(text.as_bytes().to_vec())
@@ -249,7 +248,7 @@ async fn keeps_an_unknown_role_as_a_capability() {
 async fn deletes_a_user() {
     let setup = async |write: &mut Write<'_>| setup_user(write, new_user("oracle-delete")).await;
     check("user-delete", setup, async |write, id| {
-        assert!(wp_delete_user(write, id, None).await.unwrap());
+        assert!(wp_delete_user(write, id, None, &admin()).await.unwrap());
     })
     .await;
 }
@@ -258,7 +257,11 @@ async fn deletes_a_user() {
 async fn deletes_a_user_passing_its_posts_on() {
     let setup = async |write: &mut Write<'_>| setup_user(write, new_user("oracle-heir")).await;
     check("user-delete-reassign", setup, async |write, heir| {
-        assert!(wp_delete_user(write, 1, Some(heir)).await.unwrap());
+        assert!(
+            wp_delete_user(write, 1, Some(heir), &admin())
+                .await
+                .unwrap()
+        );
     })
     .await;
 }
@@ -303,7 +306,11 @@ async fn refuses_what_php_refuses() {
             wp_insert_user(write, &url).await,
             "user_url_too_long"
         ));
-        assert!(!wp_delete_user(write, 999_999, None).await.unwrap());
+        assert!(
+            !wp_delete_user(write, 999_999, None, &admin())
+                .await
+                .unwrap()
+        );
     })
     .await;
 }
@@ -366,19 +373,13 @@ async fn an_update_through_insert_keeps_the_given_hash() {
 }
 
 #[tokio::test]
-async fn posts_and_links_wait_for_their_ports() {
+async fn links_wait_for_their_port() {
     let _one = crate::tests::ONE_AT_A_TIME.lock().await;
     let writer = writer().await;
-    let mut conn = <Connection as sqlx::Connection>::connect_with(&options())
-        .await
-        .unwrap();
+    let mut conn = connection().await;
     let mut outer = sqlx::Connection::begin(&mut conn).await.unwrap();
     let mut write = writer.begin_on(&mut outer).await.unwrap();
     let author = insert_ok(&mut write, new_user("oracle-author")).await;
-    write.reassign_posts(1, author).await.unwrap();
-    let deleted = wp_delete_user(&mut write, author, None).await;
-    assert!(matches!(deleted, Err(Error::Unported("wp_delete_post"))));
-    write.reassign_posts(author, 1).await.unwrap();
     write.commit().await.unwrap();
     sqlx::query("INSERT INTO wp_links (link_url, link_name, link_owner, link_notes) VALUES ('u', 'n', ?, '')")
         .bind(author)
@@ -386,18 +387,8 @@ async fn posts_and_links_wait_for_their_ports() {
         .await
         .unwrap();
     let mut write = writer.begin_on(&mut outer).await.unwrap();
-    let deleted = wp_delete_user(&mut write, author, None).await;
+    let deleted = wp_delete_user(&mut write, author, None, &admin()).await;
     assert!(matches!(deleted, Err(Error::Unported("wp_delete_link"))));
-}
-
-fn options() -> sqlx::mysql::MySqlConnectOptions {
-    let db = hyscribe_testkit::fixture_database();
-    sqlx::mysql::MySqlConnectOptions::new()
-        .host(&db.host)
-        .port(db.port)
-        .database(&db.name)
-        .username(&db.user)
-        .password(db.password.expose())
 }
 
 #[tokio::test]
@@ -411,7 +402,7 @@ async fn the_user_count_stops_at_ten_thousand() {
             let id = insert_ok(write, new_user(&format!("oracle-count-{known}"))).await;
             let count = write.option_value("user_count").await.unwrap().unwrap();
             assert_eq!(count, expected.as_bytes(), "{known}");
-            assert!(wp_delete_user(write, id, None).await.unwrap());
+            assert!(wp_delete_user(write, id, None, &admin()).await.unwrap());
         }
         delete_option(write, "user_count").await.unwrap();
         insert_ok(write, new_user("oracle-uncounted")).await;
@@ -462,8 +453,8 @@ async fn changes_to_users_return_each_database_error() {
         wp_update_user(write, &new).await?;
         add_role(write, id, b"editor").await?;
         remove_role(write, id, b"editor").await?;
-        wp_delete_user(write, id, None).await?;
-        wp_delete_user(write, 1, Some(999_999)).await?;
+        wp_delete_user(write, id, None, &admin()).await?;
+        wp_delete_user(write, 1, Some(999_999), &admin()).await?;
         Ok(())
     })
     .await;

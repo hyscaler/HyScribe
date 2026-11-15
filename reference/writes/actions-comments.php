@@ -160,7 +160,7 @@ return array(
 			return array( $comment( 'spam' ), $comment( 0 ) );
 		},
 		'action' => function ( $ids ) use ( $submit ) {
-			foreach ( array( 1, $ids[0], $ids[1], 999 ) as $n => $parent ) {
+			foreach ( array( 1, $ids[0], $ids[1], HYSCRIBE_MISSING_ID ) as $n => $parent ) {
 				$submit(
 					array(
 						'user_id'         => 1,
@@ -250,7 +250,7 @@ return array(
 	),
 	'comment-missing'           => array(
 		'action' => function () {
-			foreach ( array( wp_trash_comment( 999 ), wp_spam_comment( 999 ), wp_untrash_comment( 999 ), wp_set_comment_status( 1, 'bogus' ), wp_delete_comment( 999 ) ) as $result ) {
+			foreach ( array( wp_trash_comment( HYSCRIBE_MISSING_ID ), wp_spam_comment( HYSCRIBE_MISSING_ID ), wp_untrash_comment( HYSCRIBE_MISSING_ID ), wp_set_comment_status( 1, 'bogus' ), wp_delete_comment( HYSCRIBE_MISSING_ID ) ) as $result ) {
 				if ( false !== $result ) {
 					throw new Exception( 'found' );
 				}
@@ -266,7 +266,7 @@ return array(
 			if ( 0 !== wp_update_comment( array( 'comment_ID' => $id ) ) ) {
 				throw new Exception( 'changed' );
 			}
-			if ( false !== wp_update_comment( array( 'comment_ID' => 999 ) ) || false !== wp_update_comment( array( 'comment_ID' => $id, 'comment_post_ID' => 999 ) ) ) {
+			if ( false !== wp_update_comment( array( 'comment_ID' => HYSCRIBE_MISSING_ID ) ) || false !== wp_update_comment( array( 'comment_ID' => $id, 'comment_post_ID' => HYSCRIBE_MISSING_ID ) ) ) {
 				throw new Exception( 'found' );
 			}
 			wp_update_comment(

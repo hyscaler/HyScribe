@@ -3,11 +3,8 @@
 //! Each port against the rows PHP WordPress wrote for the same action
 //! (`reference/writes/actions-comments.php`), as user 1 unless noted.
 
-use hyscribe_config::Mode;
-use hyscribe_db::{Connection, Writer};
-use hyscribe_testkit::{fixture_database, writes::check_writes};
-
 use super::*;
+use crate::tests::{MISSING, check, fails_at_each_step, nothing};
 
 /// The oracle's `home_url()`.
 const HOME: &[u8] = b"http://127.0.0.1:8081";
@@ -19,9 +16,6 @@ const ADMIN: Commenter = Commenter {
     unfiltered_html: false,
 };
 
-/// One check at a time: each holds row locks until its rollback.
-static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 fn context() -> Context<'static> {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
     Context {
@@ -29,41 +23,6 @@ fn context() -> Context<'static> {
         home: HOME,
     }
 }
-
-/// Runs `action` as one action on the oracle's connection.
-async fn on<T>(conn: &mut Connection, action: impl AsyncFnOnce(&mut Write<'_>) -> T) -> T {
-    let writer = Writer::open(&fixture_database(), Mode::Primary)
-        .await
-        .unwrap()
-        .unwrap();
-    let mut write = writer.begin_on(conn).await.unwrap();
-    let out = action(&mut write).await;
-    write.commit().await.unwrap();
-    out
-}
-
-/// Checks the port against the golden `name`: `setup` and `action` each
-/// run as one action.
-async fn check<T>(
-    name: &str,
-    setup: impl AsyncFnOnce(&mut Write<'_>) -> T,
-    action: impl AsyncFnOnce(&mut Write<'_>, T),
-) {
-    let _one = ONE_AT_A_TIME.lock().await;
-    let setup = async |conn: &mut Connection| Ok(on(conn, setup).await);
-    let action = async |conn: &mut Connection, state| {
-        on(conn, async |write: &mut Write<'_>| {
-            action(write, state).await
-        })
-        .await;
-        Ok(())
-    };
-    check_writes(&fixture_database(), name, setup, action)
-        .await
-        .unwrap();
-}
-
-async fn nothing(_: &mut Write<'_>) {}
 
 /// The actions' `$comment`: a comment on post 1 by a reader.
 fn reader(approved: &str) -> NewComment {
@@ -394,7 +353,7 @@ async fn new_comments_reply_and_are_refused() {
             )
         },
         async |write, (spam, held)| {
-            for (n, parent) in [1, spam, held, 999].into_iter().enumerate() {
+            for (n, parent) in [1, spam, held, MISSING].into_iter().enumerate() {
                 let reply = NewComment {
                     user_id: 1,
                     parent,
@@ -471,12 +430,12 @@ async fn updates() {
             };
             assert_eq!(update(write, same.clone()).await, Some(false));
             let missing = CommentEdit {
-                id: 999,
+                id: MISSING,
                 ..CommentEdit::default()
             };
             assert_eq!(update(write, missing).await, None);
             let nowhere = CommentEdit {
-                post_id: Some(999),
+                post_id: Some(MISSING),
                 ..same.clone()
             };
             assert_eq!(update(write, nowhere).await, None);
@@ -509,11 +468,15 @@ async fn updates() {
 #[tokio::test]
 async fn missing_comments_and_statuses() {
     check("comment-missing", nothing, async |write, ()| {
-        assert!(!trash_comment(write, context(), 999).await.unwrap());
-        assert!(!spam_comment(write, context(), 999).await.unwrap());
-        assert!(!restore_comment(write, 999).await.unwrap());
+        assert!(!trash_comment(write, context(), MISSING).await.unwrap());
+        assert!(!spam_comment(write, context(), MISSING).await.unwrap());
+        assert!(!restore_comment(write, MISSING).await.unwrap());
         assert!(!set_comment_status(write, 1, "bogus").await.unwrap());
-        assert!(!delete_comment(write, context(), 999, false).await.unwrap());
+        assert!(
+            !delete_comment(write, context(), MISSING, false)
+                .await
+                .unwrap()
+        );
         assert!(set_comment_status(write, 1, "0").await.unwrap());
     })
     .await;
@@ -645,5 +608,30 @@ async fn trash_and_delete() {
         },
         async |write, note| assert!(trash_comment(write, context(), note).await.unwrap()),
     )
+    .await;
+}
+
+#[tokio::test]
+async fn every_failed_statement_fails_the_action() {
+    fails_at_each_step(nothing, async |write, ()| {
+        let reply = NewComment {
+            parent: 1,
+            ..reader("1")
+        };
+        let id = insert_comment(write, context(), &reply).await?;
+        let _ = new_comment(write, context(), submitted(), ADMIN).await?;
+        let edit = CommentEdit {
+            id,
+            content: Some(b"Edited.".to_vec()),
+            ..CommentEdit::default()
+        };
+        update_comment(write, context(), &edit, true).await?;
+        set_comment_status(write, id, "hold").await?;
+        spam_comment(write, context(), id).await?;
+        restore_comment(write, id).await?;
+        trash_comment(write, context(), id).await?;
+        delete_comment(write, context(), id, true).await?;
+        Ok(())
+    })
     .await;
 }

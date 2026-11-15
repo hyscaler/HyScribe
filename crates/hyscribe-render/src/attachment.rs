@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `wp_get_attachment_image()` for a named size, and what it builds on: an
-//! attachment's URL and stored metadata, the size's dimensions, and
-//! `srcset` and `sizes` from the sizes stored.
+//! `wp_get_attachment_image()` for a named size or a width and height, and
+//! what it builds on: an attachment's URL and stored metadata, the size's
+//! dimensions, and `srcset` and `sizes` from the sizes stored.
 
 use hyscribe_kses::{esc_attr, strip_tags};
 use hyscribe_phpser::{
@@ -14,6 +14,34 @@ use crate::media::{Given, Loading};
 use crate::site::Site;
 use crate::template::replace;
 use hyscribe_model::Post;
+
+/// The `$size` of `image_downsize()` and `wp_get_attachment_image()`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Size<'a> {
+    /// A registered size's name.
+    Named(&'a str),
+    /// A width and height, the best stored size for them. `original_ratio`
+    /// is PHP's `0 === $size[0] || 0 === $size[1]`: a side that is the
+    /// integer 0, where a stored size's ratio is compared with the
+    /// original's rather than the size's; another zero (`'0'`, null) is
+    /// compared as the size.
+    Dimensions {
+        width: i64,
+        height: i64,
+        original_ratio: bool,
+    },
+}
+
+impl std::fmt::Display for Size<'_> {
+    /// The size's class name: its name, or `implode( 'x', $size )` of the
+    /// integer sides.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Size::Named(name) => f.write_str(name),
+            Size::Dimensions { width, height, .. } => write!(f, "{width}x{height}"),
+        }
+    }
+}
 
 /// What callers add around `wp_get_attachment_image()` with filters.
 #[derive(Default)]
@@ -36,7 +64,19 @@ pub(crate) fn wp_get_attachment_image(
     attr: &[(&str, Vec<u8>)],
     options: &ImageOptions<'_>,
 ) -> Vec<u8> {
-    let Some((src, width, height)) = image_downsize(site, id, size) else {
+    attachment_image(site, loading, id, Size::Named(size), attr, options)
+}
+
+/// `wp_get_attachment_image()` for any `size`.
+pub(crate) fn attachment_image(
+    site: &dyn Site,
+    loading: &Loading,
+    id: u64,
+    size: Size<'_>,
+    attr: &[(&str, Vec<u8>)],
+    options: &ImageOptions<'_>,
+) -> Vec<u8> {
+    let Some((src, width, height)) = downsize(site, id, size) else {
         return Vec::new();
     };
     let (width, height) = match options.resize {
@@ -232,6 +272,11 @@ pub fn is_image(file: &[u8], mime: &str) -> bool {
 
 /// `image_downsize()` for a named size: the URL, width and height.
 pub fn image_downsize(site: &dyn Site, id: u64, size: &str) -> Option<(Vec<u8>, i64, i64)> {
+    downsize(site, id, Size::Named(size))
+}
+
+/// `image_downsize()` for any `size`.
+pub(crate) fn downsize(site: &dyn Site, id: u64, size: Size<'_>) -> Option<(Vec<u8>, i64, i64)> {
     let post = site
         .post(id)
         .filter(|post| post.post_type == "attachment")?;
@@ -255,11 +300,25 @@ pub fn image_downsize(site: &dyn Site, id: u64, size: &str) -> Option<(Vec<u8>, 
             .filter(|full| !full.is_empty())?;
         (width, height) = use_size(full, &mut url, &mut name);
     }
-    if let Some(sized) = meta
-        .get_path(&["sizes", size])
-        .filter(|sized| !sized.is_empty())
-    {
-        (width, height) = use_size(sized, &mut url, &mut name);
+    match size {
+        Size::Named(size) => {
+            if let Some(sized) = meta
+                .get_path(&["sizes", size])
+                .filter(|sized| !sized.is_empty())
+            {
+                (width, height) = use_size(sized, &mut url, &mut name);
+            }
+        }
+        Size::Dimensions {
+            width: max_width,
+            height: max_height,
+            original_ratio,
+        } => {
+            if let Some(sized) = best_size(&meta, max_width, max_height, original_ratio) {
+                let (w, h) = use_size(sized, &mut url, &mut name);
+                (width, height) = constrain_dimensions(w, h, max_width, max_height);
+            }
+        }
     }
     let isset = |key| isset(meta.get_str(key));
     if width == 0 && height == 0 && isset("width") && isset("height") {
@@ -267,6 +326,46 @@ pub fn image_downsize(site: &dyn Site, id: u64, size: &str) -> Option<(Vec<u8>, 
     }
     let (width, height) = constrain_for_editor(site, width, height, size);
     Some((url, width, height))
+}
+
+/// `image_get_intermediate_size()` for a width and height: the stored size
+/// of exactly that size, else the smallest at least as large in the same
+/// ratio (or in the original's, for `original_ratio`), else the thumbnail
+/// when both fit within its width, as PHP compares them.
+fn best_size(meta: &Value, width: i64, height: i64, original_ratio: bool) -> Option<&Value> {
+    let sizes = meta.get_str("sizes").filter(|sizes| !sizes.is_empty())?;
+    let full = sizes.get_str("full");
+    let original = match full {
+        Some(full) if !isset(meta.get_str("file")) && isset(Some(full)) => dimensions(full),
+        _ => dimensions(meta),
+    };
+    let mut candidates = std::collections::BTreeMap::new();
+    for (_, sized) in sizes.as_array().unwrap_or_default() {
+        let (w, h) = dimensions(sized);
+        if (w, h) == (width, height) {
+            candidates.insert(w.saturating_mul(h), sized);
+            break;
+        }
+        if w >= width && h >= height {
+            let same_ratio = if original_ratio {
+                matches_ratio(w, h, original.0, original.1)
+            } else {
+                matches_ratio(w, h, width, height)
+            };
+            if same_ratio {
+                candidates.insert(w.saturating_mul(h), sized);
+            }
+        }
+    }
+    if let Some((_, best)) = candidates.pop_first() {
+        return Some(best);
+    }
+    let thumbnail = sizes
+        .get_str("thumbnail")
+        .filter(|thumbnail| !thumbnail.is_empty())?;
+    // PHP checks the height against the thumbnail's width too.
+    let thumbnail_width = dimensions(thumbnail).0;
+    (width <= thumbnail_width && height <= thumbnail_width).then_some(thumbnail)
 }
 
 /// An image's `width` and `height` as integers.
@@ -277,7 +376,17 @@ fn dimensions(image: &Value) -> (i64, i64) {
 
 /// `image_constrain_size_for_editor()` in the `display` context, with no
 /// `$content_width`.
-fn constrain_for_editor(site: &dyn Site, width: i64, height: i64, size: &str) -> (i64, i64) {
+fn constrain_for_editor(site: &dyn Site, width: i64, height: i64, size: Size<'_>) -> (i64, i64) {
+    let size = match size {
+        Size::Named(size) => size,
+        Size::Dimensions {
+            width: max_width,
+            height: max_height,
+            ..
+        } => {
+            return constrain_dimensions(width, height, max_width, max_height);
+        }
+    };
     let option = |name: &str| Value::String(site.option(name).unwrap_or_default()).to_int();
     let (max_width, max_height) = match size {
         "thumb" | "thumbnail" => match (option("thumbnail_size_w"), option("thumbnail_size_h")) {

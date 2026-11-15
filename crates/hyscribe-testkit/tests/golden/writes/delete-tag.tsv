@@ -1,7 +1,7 @@
 # The rows PHP WordPress writes for the action delete-tag (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 20:00:44 to 2026-11-14 20:00:44 UTC.
-# %wp_terms:1% is 39.
-# %wp_term_taxonomy:1% is 39.
+# %now% and %unix% stand for times from 2026-11-15 04:35:50 to 2026-11-15 04:35:50 UTC.
+# %wp_terms:1% is 952.
+# %wp_term_taxonomy:1% is 952.
 # %wp_termmeta:1% is 1.
 wp_term_relationships	1,%wp_term_taxonomy:1%	-	object_id	1
 wp_term_relationships	1,%wp_term_taxonomy:1%	-	term_order	0

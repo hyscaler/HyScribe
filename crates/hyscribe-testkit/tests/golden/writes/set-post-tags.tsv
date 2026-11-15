@@ -1,13 +1,13 @@
 # The rows PHP WordPress writes for the action set-post-tags (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 20:46:43 to 2026-11-14 20:46:43 UTC.
-# %wp_terms:1% is 2.
-# %wp_terms:2% is 3.
-# %wp_terms:3% is 4.
-# %wp_terms:4% is 5.
-# %wp_term_taxonomy:1% is 2.
-# %wp_term_taxonomy:2% is 3.
-# %wp_term_taxonomy:3% is 4.
-# %wp_term_taxonomy:4% is 5.
+# %now% and %unix% stand for times from 2026-11-15 04:35:50 to 2026-11-15 04:35:51 UTC.
+# %wp_terms:1% is 960.
+# %wp_terms:2% is 961.
+# %wp_terms:3% is 962.
+# %wp_terms:4% is 963.
+# %wp_term_taxonomy:1% is 960.
+# %wp_term_taxonomy:2% is 961.
+# %wp_term_taxonomy:3% is 962.
+# %wp_term_taxonomy:4% is 963.
 wp_term_relationships	1,%wp_term_taxonomy:1%	+	object_id	1
 wp_term_relationships	1,%wp_term_taxonomy:1%	+	term_order	0
 wp_term_relationships	1,%wp_term_taxonomy:1%	+	term_taxonomy_id	%wp_term_taxonomy:1%

@@ -9,6 +9,10 @@ use crate::dialect::WORDPRESS_SQL_MODE;
 use crate::tests::fixture_config;
 use hyscribe_config::Secret;
 
+/// An ID no row has: rolled back inserts still move the auto increment
+/// counters, so a small one is reached after enough tests.
+const MISSING: u64 = 1 << 40;
+
 /// Write tests run one at a time, so no action waits on another's rows
 /// and the engine test's table is never written meanwhile.
 static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -419,15 +423,124 @@ async fn writes_posts() {
         [first, second]
     );
 
-    let mine = sorted(write.author_post_ids(1).await.unwrap());
+    let types = ["post", "page", "attachment", "revision"];
+    let mine = sorted(write.author_post_ids_of_types(1, &types).await.unwrap());
     assert_eq!(mine, [1, 2, 3, first, second]);
     assert_eq!(write.reassign_posts(1, 6).await.unwrap(), 5);
-    assert_eq!(sorted(write.author_post_ids(6).await.unwrap()), mine);
-    assert!(write.author_post_ids(1).await.unwrap().is_empty());
+    let theirs = write.author_post_ids_of_types(6, &types).await.unwrap();
+    assert_eq!(sorted(theirs), mine);
+    let mine = write.author_post_ids_of_types(1, &types).await.unwrap();
+    assert!(mine.is_empty());
 
     assert_eq!(write.delete_post(first).await.unwrap(), 1);
     assert_eq!(write.delete_post(first).await.unwrap(), 0);
     assert_eq!(write.child_ids(7, "revision").await.unwrap(), [second]);
+}
+
+/// A revision of the fixture's first post saved at `date`.
+fn revision(date: &str) -> PostFields {
+    PostFields {
+        parent: 1,
+        post_type: "revision".into(),
+        status: "inherit".into(),
+        name: b"1-revision-v1".to_vec(),
+        date: date.into(),
+        ..hello()
+    }
+}
+
+#[tokio::test]
+async fn reads_posts_inside_an_action() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    let shown = |post: Option<PostFields>| format!("{post:?}");
+    assert_eq!(shown(write.post(1).await.unwrap()), shown(Some(hello())));
+    assert!(write.post(MISSING).await.unwrap().is_none());
+    assert_eq!(write.insert_post_with_id(990, &draft()).await.unwrap(), 990);
+    assert_eq!(shown(write.post(990).await.unwrap()), shown(Some(draft())));
+
+    assert!(
+        write
+            .post_name_used(b"hello-world", "post", 0)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !write
+            .post_name_used(b"hello-world", "post", 1)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !write
+            .post_name_used(b"hello-world", "page", 0)
+            .await
+            .unwrap()
+    );
+    let used = async |write: &mut Write<'_>, parent, id| {
+        write
+            .sibling_name_used(b"sample-page", ("page", parent), id)
+            .await
+            .unwrap()
+    };
+    assert!(used(&mut write, 0, 0).await);
+    assert!(!used(&mut write, 1, 0).await);
+    assert!(!used(&mut write, 0, 2).await);
+    assert!(
+        !write
+            .sibling_name_used(b"sample-page", ("post", 0), 0)
+            .await
+            .unwrap()
+    );
+
+    assert!(write.published_post_exists().await.unwrap());
+    write.set_post_status(1, "trash").await.unwrap();
+    assert!(!write.published_post_exists().await.unwrap());
+    assert_eq!(
+        write
+            .trashed_post_ids_named(b"hello-world", 0)
+            .await
+            .unwrap(),
+        [1]
+    );
+    assert!(
+        write
+            .trashed_post_ids_named(b"hello-world", 1)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let old = write
+        .insert_post(&revision("2026-01-01 00:00:00"))
+        .await
+        .unwrap();
+    let new = write
+        .insert_post(&revision("2026-02-01 00:00:00"))
+        .await
+        .unwrap();
+    let tie = write
+        .insert_post(&revision("2026-02-01 00:00:00"))
+        .await
+        .unwrap();
+    let other = PostFields {
+        status: "draft".into(),
+        ..revision("2026-03-01 00:00:00")
+    };
+    write.insert_post(&other).await.unwrap();
+    assert_eq!(write.revision_ids(1).await.unwrap(), [tie, new, old]);
+
+    assert_eq!(
+        write.post_comments(1).await.unwrap(),
+        [(1, "1".to_string())]
+    );
+    assert!(write.post_comments(2).await.unwrap().is_empty());
+    // A spent statement budget fails the reads too.
+    write.fail_after(0);
+    assert!(write.post(1).await.is_err());
+    assert!(write.post_comments(1).await.is_err());
+    assert!(write.object_terms(1, "category").await.is_err());
 }
 
 const COMMENT: &str = "SELECT JSON_ARRAY(comment_post_ID, comment_author, \
@@ -821,10 +934,9 @@ async fn writes_terms() {
     );
     assert_eq!(write.update_term(999_999, b"x", b"x", 0).await.unwrap(), 0);
     assert_eq!(write.set_term_slug(term, b"cafe-2").await.unwrap(), 1);
-    assert_eq!(write.set_term_group(term, 5).await.unwrap(), 1);
     assert_eq!(
         json(&mut write, TERM, term).await,
-        r#"["Café ✓", "cafe-2", 5]"#
+        r#"["Café ✓", "cafe-2", 2]"#
     );
     let update = write.update_term_taxonomy(tt, (term, "post_tag"), b"About", 1);
     assert_eq!(update.await.unwrap(), 1);
@@ -847,7 +959,6 @@ async fn writes_terms() {
     assert_eq!(write.term_taxonomy_count(term).await.unwrap(), 2);
 
     // The counts, as PHP recomputes them.
-    assert_eq!(write.term_object_count(1).await.unwrap(), 1);
     assert_eq!(
         write
             .term_post_count(1, &["publish"], &["post"])
@@ -856,7 +967,6 @@ async fn writes_terms() {
         1
     );
     assert_eq!(write.add_relationship(2, 1).await.unwrap(), 1);
-    assert_eq!(write.term_object_count(1).await.unwrap(), 2);
     assert_eq!(
         write
             .term_post_count(1, &["publish"], &["post"])
@@ -883,54 +993,14 @@ async fn writes_terms() {
         write.term_post_count(1, &["publish"], &[]).await.unwrap(),
         0
     );
-    let attachment = PostFields {
-        status: "inherit".into(),
-        post_type: "attachment".into(),
-        parent: 1,
-        ..hello()
-    };
-    let attachment = write.insert_post(&attachment).await.unwrap();
-    let orphan = PostFields {
-        status: "inherit".into(),
-        post_type: "attachment".into(),
-        ..hello()
-    };
-    let orphan = write.insert_post(&orphan).await.unwrap();
-    let published = PostFields {
-        post_type: "attachment".into(),
-        ..hello()
-    };
-    let published = write.insert_post(&published).await.unwrap();
-    for post in [attachment, orphan, published] {
-        write.add_relationship(post, 1).await.unwrap();
-    }
-    assert_eq!(
-        write.term_attachment_count(1, &["publish"]).await.unwrap(),
-        2
-    );
-    assert_eq!(
-        write.term_attachment_count(1, &["private"]).await.unwrap(),
-        0
-    );
-    assert_eq!(write.term_attachment_count(1, &[]).await.unwrap(), 0);
-
-    // A sorted taxonomy's orders: the existing relationship is updated.
-    assert_eq!(
-        write.set_term_order(1, &[(1, 2), (tt, 1)]).await.unwrap(),
-        3
-    );
-    assert_eq!(
-        json(&mut write, ORDERS, 1).await,
-        format!("[[1, 2],[{tt}, 1]]")
-    );
-    assert_eq!(write.set_term_order(1, &[(second, 3)]).await.unwrap(), 1);
-    assert!(write.set_term_order(1, &[]).await.is_err());
+    assert_eq!(write.add_relationship(1, tt).await.unwrap(), 1);
+    assert_eq!(write.add_relationship(1, second).await.unwrap(), 1);
     assert_eq!(
         write.remove_relationships(1, &[tt, second]).await.unwrap(),
         2
     );
     assert_eq!(write.remove_relationships(1, &[]).await.unwrap(), 0);
-    assert_eq!(json(&mut write, ORDERS, 1).await, "[[1, 2]]");
+    assert_eq!(json(&mut write, ORDERS, 1).await, "[[1, 0]]");
 
     assert_eq!(write.delete_term_taxonomy(tt).await.unwrap(), 1);
     assert_eq!(write.delete_term_taxonomy(tt).await.unwrap(), 0);
@@ -1017,7 +1087,7 @@ async fn reads_terms_inside_the_action() {
     }
 
     assert!(write.term_exists(1).await.unwrap());
-    assert!(!write.term_exists(999).await.unwrap());
+    assert!(!write.term_exists(MISSING).await.unwrap());
     for (slug, name, matches) in [
         (Some("uncategorized"), "x", true),
         (Some("x"), "Uncategorized", true),
@@ -1077,9 +1147,6 @@ async fn reads_terms_inside_the_action() {
     let default = write.option_value("default_category").await.unwrap();
     assert_eq!(default.as_deref(), Some(&b"1"[..]));
     assert_eq!(write.option_value("hyscribe_missing").await.unwrap(), None);
-    let post = write.post_type_status(2).await.unwrap();
-    assert_eq!(post, Some(("page".into(), "publish".into())));
-    assert_eq!(write.post_type_status(999).await.unwrap(), None);
 }
 
 #[tokio::test]
@@ -1176,14 +1243,6 @@ async fn writes_meta() {
             json(&mut write, row, two).await,
             r#"[1, "hyscribe_key", "both"]"#
         );
-        assert_eq!(
-            write
-                .update_meta_by_id(meta, one, "renamed", b"x")
-                .await
-                .unwrap(),
-            1
-        );
-        assert_eq!(json(&mut write, row, one).await, r#"[1, "renamed", "x"]"#);
         assert_eq!(write.delete_meta(meta, &[one, two]).await.unwrap(), 2);
         assert_eq!(write.delete_meta(meta, &[]).await.unwrap(), 0);
         assert_eq!(write.meta_ids_of_key(meta, key).await.unwrap(), [other]);
@@ -1208,13 +1267,14 @@ pub(crate) async fn every_write() -> Vec<DbError> {
     let meta = Meta::Post;
     let ids = [
         w.child_ids(1, "page").await.err(),
-        w.author_post_ids(1).await.err(),
         w.post_comment_ids(1).await.err(),
         w.meta_ids(meta, 1, "k").await.err(),
         w.meta_ids_valued(meta, (1, "k"), b"v").await.err(),
         w.meta_ids_of_key(meta, "k").await.err(),
         w.meta_ids_of_key_valued(meta, "k", b"v").await.err(),
         w.object_meta_ids(meta, 1).await.err(),
+        w.trashed_post_ids_named(b"n", 1).await.err(),
+        w.revision_ids(1).await.err(),
         w.object_meta(meta, 1).await.err(),
         w.user(1).await.err(),
         w.user_id_by_login(b"u").await.err(),
@@ -1223,12 +1283,18 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.author_post_ids_of_types(1, &["post"]).await.err(),
         w.owner_link_ids(1).await.err(),
     ];
+    let post_reads = [
+        w.post(1).await.err(),
+        w.post_comments(1).await.err(),
+        w.post_name_used(b"n", "post", 1).await.err(),
+        w.sibling_name_used(b"n", ("page", 0), 1).await.err(),
+        w.published_post_exists().await.err(),
+        w.insert_post_with_id(990, &post).await.err(),
+    ];
     let counts = [
         w.approved_comment_count(1).await.err(),
         w.term_taxonomy_count(1).await.err(),
         w.term_post_count(1, &["publish"], &["post"]).await.err(),
-        w.term_attachment_count(1, &["publish"]).await.err(),
-        w.term_object_count(1).await.err(),
         w.user_count().await.err(),
     ];
     let writes = [
@@ -1264,12 +1330,10 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.update_meta_from(meta, (1, "k"), b"p", Some(b"v"))
             .await
             .err(),
-        w.update_meta_by_id(meta, 1, "k", b"v").await.err(),
         w.delete_meta(meta, &[1]).await.err(),
         w.insert_term(b"n", b"s", 0).await.err(),
         w.update_term(1, b"n", b"s", 0).await.err(),
         w.set_term_slug(1, b"s").await.err(),
-        w.set_term_group(1, 1).await.err(),
         w.delete_term(1).await.err(),
         w.insert_term_taxonomy((1, "category"), b"", 0).await.err(),
         w.update_term_taxonomy(1, (1, "category"), b"", 0)
@@ -1279,7 +1343,6 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.set_term_count(1, 1).await.err(),
         w.delete_term_taxonomy(1).await.err(),
         w.add_relationship(1, 1).await.err(),
-        w.set_term_order(1, &[(1, 1)]).await.err(),
         w.remove_relationships(1, &[1]).await.err(),
     ];
     let since = "2026-01-01 00:00:00";
@@ -1312,9 +1375,14 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.term_parents("category").await.err(),
         w.term_menu_items(1, "category").await.err(),
         w.option_value("o").await.err(),
-        w.post_type_status(1).await.err(),
     ];
-    for error in ids.into_iter().chain(counts).chain(writes).chain(reads) {
+    for error in ids
+        .into_iter()
+        .chain(counts)
+        .chain(post_reads)
+        .chain(writes)
+        .chain(reads)
+    {
         errors.push(error.expect("a missing table fails"));
     }
     errors
@@ -1410,6 +1478,12 @@ async fn a_spent_budget_fails_every_statement() {
         w.user_count().await.err(),
         w.owner_link_ids(1).await.err(),
         w.delete_option("o").await.err(),
+        w.comment(1).await.err(),
+        w.last_comment_date("2026-01-01 00:00:00", (0, b""), b"")
+            .await
+            .err(),
+        w.meta_value(Meta::Comment, 1, "k").await.err(),
+        w.term_in("category", 1).await.err(),
     ];
     for err in spent {
         assert_eq!(

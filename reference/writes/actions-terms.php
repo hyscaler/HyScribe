@@ -45,7 +45,7 @@ return array(
 			$tag( 'Kid', array( 'parent' => 1 ) );
 			$tag( '   ' );
 			$tag( '<b></b>' );
-			$tag( 'Missing parent', array( 'parent' => 999 ) );
+			$tag( 'Missing parent', array( 'parent' => HYSCRIBE_MISSING_ID ) );
 			$tag( 'Oracle', array( 'slug' => 'oracle-other' ) );
 			$tag( 'Another', array( 'slug' => 'oracle' ) );
 			$tag( 'Yet another', array( 'slug' => 'oracle' ) );
@@ -101,9 +101,9 @@ return array(
 			return $category( 'News' )['term_id'];
 		},
 		'action' => function ( $id ) {
-			wp_update_term( 999, 'category', array( 'name' => 'Nothing' ) );
+			wp_update_term( HYSCRIBE_MISSING_ID, 'category', array( 'name' => 'Nothing' ) );
 			wp_update_term( $id, 'category', array( 'name' => ' ' ) );
-			wp_update_term( $id, 'category', array( 'parent' => 999 ) );
+			wp_update_term( $id, 'category', array( 'parent' => HYSCRIBE_MISSING_ID ) );
 			wp_update_term(
 				$id,
 				'category',
@@ -186,7 +186,7 @@ return array(
 			return $id;
 		},
 		'action' => function ( $id ) {
-			wp_delete_term( 999, 'post_tag' );
+			wp_delete_term( HYSCRIBE_MISSING_ID, 'post_tag' );
 			wp_delete_term( $id, 'post_tag' );
 		},
 	),
@@ -229,7 +229,7 @@ return array(
 		'setup'  => function () use ( $category ) {
 			$news = $category( 'News' )['term_id'];
 			wp_set_post_categories( 1, array( $news ) );
-			update_option( 'default_category', 999 );
+			update_option( 'default_category', HYSCRIBE_MISSING_ID );
 			return $news;
 		},
 		'action' => function ( $news ) {
@@ -283,7 +283,7 @@ return array(
 			wp_set_post_terms( 0, 'zero', 'post_tag' );
 			wp_set_post_terms( 1, ' alpha, Beta,,', 'post_tag' );
 			wp_set_post_terms( 1, array( 'alpha', 'gamma', 'beta ' ), 'post_tag' );
-			wp_set_post_terms( 1, array( 'delta', 999, '' ), 'post_tag', true );
+			wp_set_post_terms( 1, array( 'delta', HYSCRIBE_MISSING_ID, '' ), 'post_tag', true );
 			wp_set_post_terms( 2, '0', 'post_tag' );
 			wp_set_post_terms( 2, array( '???' ), 'post_tag' );
 			wp_set_post_terms( 2, 'delta,gamma', 'post_tag', true );

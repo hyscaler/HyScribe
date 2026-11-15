@@ -53,8 +53,8 @@ const ERASE_PLUGINS: &str = "<p>Many plugins may collect or store personal data 
 pub trait ToolsSite: UsersSite {
     /// The IDs of the authors of posts of `post_type`, of any status.
     fn post_authors(&self, post_type: &str) -> Vec<u64>;
-    /// The personal data requests of `action` of each status.
-    fn request_counts(&self, action: &str) -> Vec<(String, u64)>;
+    /// The posts of `post_type` named `name` of each status.
+    fn named_status_counts(&self, post_type: &str, name: &str) -> Vec<(String, u64)>;
 }
 
 /// A screen under Tools: its file, title, help and markup.

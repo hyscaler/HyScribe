@@ -1443,6 +1443,8 @@ async fn the_user_s_data() {
         assert!(first.post_authors("attachment").is_empty());
         // Another post's slug, in any case, as the database compares it.
         assert!(first.slug_taken(b"Hello-World", 2) && !first.slug_taken(b"hello-world", 1));
+        let named = first.named_status_counts("post", "hello-world");
+        assert_eq!(named, [("publish".to_string(), 1)]);
         assert_eq!(first.admin_color().as_deref(), Some(&b"modern"[..]));
         assert!(
             first

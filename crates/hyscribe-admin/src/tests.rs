@@ -1077,12 +1077,12 @@ impl crate::tools::ToolsSite for Role {
             vec![1]
         }
     }
-    fn request_counts(&self, action: &str) -> Vec<(String, u64)> {
+    fn named_status_counts(&self, post_type: &str, action: &str) -> Vec<(String, u64)> {
         let mut counts: Vec<(String, u64)> = Vec::new();
         let requests = self
             .posts()
             .into_iter()
-            .filter(|post| post.post_type == "user_request" && post.name == action.as_bytes());
+            .filter(|post| post.post_type == post_type && post.name == action.as_bytes());
         for request in requests {
             match counts
                 .iter_mut()
@@ -1499,7 +1499,7 @@ impl crate::posts::PostsSite for Role {
             "a8locknoread" | "j9prettynoread" => "read_post",
             _ => "",
         };
-        let noread = self.variant() == "j9prettynoread" && post.id == 811;
+        let noread = self.variant() == "j9prettynoread" && [803, 811].contains(&post.id);
         if cap == denied && (post.id == 801 || noread) {
             return false;
         }

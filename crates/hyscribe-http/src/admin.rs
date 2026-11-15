@@ -761,8 +761,8 @@ impl ToolsSite for Admin<'_> {
     fn post_authors(&self, post_type: &str) -> Vec<u64> {
         self.reads.reads.wait(self.site.db.post_authors(post_type))
     }
-    fn request_counts(&self, action: &str) -> Vec<(String, u64)> {
-        let counts = self.site.db.named_status_counts("user_request", action);
+    fn named_status_counts(&self, post_type: &str, name: &str) -> Vec<(String, u64)> {
+        let counts = self.site.db.named_status_counts(post_type, name);
         self.reads.reads.wait(counts)
     }
 }

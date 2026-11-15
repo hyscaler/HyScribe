@@ -149,6 +149,7 @@ else
   record j9pretty 'post.php?post=811&action=edit' contributor
   record j9prettynoread 'post.php?post=801&action=edit' administrator
   record j9prettynoread 'post.php?post=811&action=edit' administrator
+  record j9prettynoread 'post.php?post=803&action=edit' administrator
   record j9front 'post.php?post=802&action=edit' administrator
 fi
 wc -l "$OUT"

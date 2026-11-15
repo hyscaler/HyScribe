@@ -131,7 +131,7 @@ pub(super) fn listing(
     args: &RequestsArgs,
     per_page: u64,
 ) -> Listing {
-    let counts = site.request_counts(action);
+    let counts = site.named_status_counts("user_request", action);
     let filter = RequestsArgs::sanitized(args.filter.as_ref());
     let offset = (pagenum(args.paged.as_deref()) - 1).saturating_mul(per_page);
     let mut query = PostQuery {

@@ -74,6 +74,29 @@ $postname = function () {
 	create_initial_taxonomies();
 };
 
+// What options.php keeps after a save.
+$kept = function () {
+	set_transient(
+		'settings_errors',
+		array(
+			array(
+				'setting' => 'general',
+				'code'    => 'settings_updated',
+				'message' => 'Settings saved.',
+				'type'    => 'success',
+			),
+		),
+		30
+	);
+};
+
+// options-head.php's settings_errors() on the screen sent back.
+$shown = function () use ( $admin, $request ) {
+	$admin();
+	$request( array(), array( 'settings-updated' => 'true' ) );
+	get_settings_errors();
+};
+
 return array(
 	// Every General field changed: a custom date format, a UTC offset, a new
 	// admin email, which waits for its confirmation, and an HTTPS home on a
@@ -270,5 +293,18 @@ return array(
 			$action = $_POST['action'];
 			eval( $source( 'options-privacy.php', 'if ( ! empty( $action ) ) {', '// If a Privacy Policy page ID is available' ) );
 		},
+	),
+	// The screen a save sends back shows the notices it kept and deletes
+	// them, so a reload does not show them again; an expired one is deleted.
+	'admin-options-notice-shown'   => array(
+		'setup'  => $kept,
+		'action' => $shown,
+	),
+	'admin-options-notice-expired' => array(
+		'setup'  => function () use ( $kept ) {
+			$kept();
+			update_option( '_transient_timeout_settings_errors', time() - 60 );
+		},
+		'action' => $shown,
 	),
 );

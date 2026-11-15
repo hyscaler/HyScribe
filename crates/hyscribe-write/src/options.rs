@@ -203,6 +203,23 @@ pub async fn set_transient(
     update_option(write, &option, value, None).await
 }
 
+/// What `get_settings_errors()` writes on the screen a save sends back
+/// (`settings-updated`): an expired `settings_errors` transient is
+/// deleted by `get_transient()`, one it shows by `delete_transient()`.
+pub async fn settings_errors_shown(write: &mut Write<'_>) -> Result<(), Error> {
+    let timeout = get_option(write, "_transient_timeout_settings_errors").await?;
+    if timeout != Value::Bool(false) && timeout.to_int() < now() {
+        delete_option(write, "_transient_settings_errors").await?;
+        delete_option(write, "_transient_timeout_settings_errors").await?;
+    } else if !get_option(write, "_transient_settings_errors")
+        .await?
+        .is_empty()
+    {
+        delete_transient(write, "settings_errors").await?;
+    }
+    Ok(())
+}
+
 /// `delete_transient( $name )` without an object cache.
 pub async fn delete_transient(write: &mut Write<'_>, name: &str) -> Result<bool, Error> {
     delete_pair(write, "_transient_", name).await

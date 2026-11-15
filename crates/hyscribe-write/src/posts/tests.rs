@@ -1809,3 +1809,48 @@ async fn edge_values_are_read_as_php_reads_them() {
     .await;
     assert!(unported(old));
 }
+
+/// `get_default_post_to_edit( 'post', true )` and the user option the Quick
+/// Draft form keeps it in (`actions-dashboard.php`).
+async fn auto_draft(w: &mut Write<'_>, ctx: &Context) -> Result<u64> {
+    let id = get_default_post_to_edit(w, ctx).await?;
+    let key = "wp_dashboard_quick_press_last_post_id";
+    let option = Value::Int(id.cast_signed());
+    crate::options::update_metadata(w, Meta::User, 1, key, &option, &Value::Null).await?;
+    Ok(id)
+}
+
+/// The Quick Draft form's auto-draft, the first with the daily deletion of
+/// old ones scheduled; a default post format is not ported.
+#[tokio::test]
+async fn auto_drafts_match_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = writer().await;
+    let draft = async |conn: &mut Connection| act(&writer, conn, &admin(), auto_draft).await;
+    let again = async |conn: &mut Connection, _| draft(conn).await.map(drop);
+    check("admin-quick-press", async |_| Ok(()), again).await;
+    let stale = async |conn: &mut Connection| {
+        let id = draft(conn).await?;
+        act(&writer, conn, &admin(), async |w, ctx| {
+            wp_update_post(w, ctx, id, &|args| args.status = "draft".into()).await
+        })
+        .await
+        .map(drop)
+    };
+    check("admin-quick-press-stale", stale, again).await;
+    let format = rolled_back(async |w, ctx| {
+        set(w, "default_post_format", b"aside").await?;
+        get_default_post_to_edit(w, ctx).await
+    })
+    .await;
+    assert!(unported(format));
+}
+
+#[tokio::test]
+async fn database_errors_end_auto_drafts() {
+    every_cut(
+        async |_, _| Ok(0),
+        async |w, ctx, _| auto_draft(w, ctx).await.map(drop),
+    )
+    .await;
+}

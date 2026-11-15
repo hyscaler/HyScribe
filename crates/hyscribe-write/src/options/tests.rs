@@ -338,3 +338,59 @@ async fn options_return_each_database_error() {
     })
     .await;
 }
+
+/// The `settings_errors` transient a save keeps.
+async fn kept(write: &mut Write<'_>) {
+    let saved = entries(&[
+        ("setting", text("general")),
+        ("code", text("settings_updated")),
+        ("message", text("Settings saved.")),
+        ("type", text("success")),
+    ]);
+    set_transient(write, "settings_errors", &list(&[saved]), 30)
+        .await
+        .unwrap();
+}
+
+/// The screen a save sends back deletes the notices it shows, and an
+/// expired transient; an empty one or none is left as it is.
+#[tokio::test]
+async fn shown_settings_errors_are_deleted() {
+    check("admin-options-notice-shown", kept, async |write, ()| {
+        settings_errors_shown(write).await.unwrap();
+    })
+    .await;
+    let expired = async |write: &mut Write<'_>| {
+        kept(write).await;
+        let past = Value::Int(now() - 60);
+        update_option(write, "_transient_timeout_settings_errors", &past, None)
+            .await
+            .unwrap();
+    };
+    check(
+        "admin-options-notice-expired",
+        expired,
+        async |write, ()| {
+            settings_errors_shown(write).await.unwrap();
+        },
+    )
+    .await;
+    rolled_back(async |write| {
+        settings_errors_shown(write).await.unwrap();
+        set_transient(write, "settings_errors", &list(&[]), 30)
+            .await
+            .unwrap();
+        settings_errors_shown(write).await.unwrap();
+        let left = write
+            .option_value("_transient_settings_errors")
+            .await
+            .unwrap();
+        assert_eq!(left.as_deref(), Some(&b"a:0:{}"[..]));
+    })
+    .await;
+    fails_at_each_step(kept, async |write, ()| settings_errors_shown(write).await).await;
+    fails_at_each_step(expired, async |write, ()| {
+        settings_errors_shown(write).await
+    })
+    .await;
+}

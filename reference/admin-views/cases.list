@@ -1,0 +1,24 @@
+# The requests reference/admin-views/golden.sh sends in order, as user 1, an
+# administrator, PHP really writing (MVP 3.6):
+# case	method	target	body (- for none)	nonce action (- for a bad nonce, none for no field)	nonce field	cookie (- for none)
+# The Quick Draft form: its first auto-draft (ID 4), a bad nonce, an empty form and a save.
+dashboard-first	GET	index.php	-	none	-	-
+quickdraft-nonce	POST	post.php	action=post-quickdraft-save&post_ID=4&post_type=post&post_title=Kept&content=Kept	-	_wpnonce	-
+quickdraft-empty	POST	post.php	action=post-quickdraft-save&post_ID=4&post_type=post&post_title=+&content=	add-post	_wpnonce	-
+quickdraft-save	POST	post.php	action=post-quickdraft-save&post_ID=4&post_type=post&post_title=A+quick+draft&content=One+%26+%22two%22%0D%0Athree	add-post	_wpnonce	-
+# The user settings: a newer cookie saved, an older one replaced, a list's mode.
+dashboard-after	GET	index.php	-	none	-	wp-settings-1=mfold%3Df%26editor%3Dhtml; wp-settings-time-1=1
+tools-older	GET	tools.php	-	none	-	wp-settings-1=mfold%3Do; wp-settings-time-1=1
+posts-mode	GET	edit.php?mode=excerpt&post_status=publish	-	none	-	wp-settings-1=mfold%3Df; wp-settings-time-1=1
+comments-mode	GET	edit-comments.php?mode=list	-	none	-	-
+posts-past-last	GET	edit.php?mode=excerpt&paged=9	-	none	-	-
+# The welcome panel and the meta boxes.
+welcome-hide	GET	index.php?welcome=0	-	none	-	-
+ajax-welcome	POST	admin-ajax.php	action=update-welcome-panel&visible=1	welcome-panel-nonce	welcomepanelnonce	-
+ajax-closed	POST	admin-ajax.php	action=closed-postboxes&closed=dashboard_activity,,0&hidden=dashboard_primary,submitdiv&page=dashboard	closedpostboxes	closedpostboxesnonce	-
+ajax-order	POST	admin-ajax.php	action=meta-box-order&order[normal]=dashboard_quick_press,dashboard_site_health&order[side]=dashboard_right_now&page_columns=2&page=dashboard	meta-box-order	_ajax_nonce	-
+dashboard-boxes	GET	index.php	-	none	-	-
+# The posts list's columns and number per page.
+ajax-columns	POST	admin-ajax.php	action=hidden-columns&hidden=author,tags&page=edit-post	screen-options-nonce	screenoptionnonce	-
+screen-options	POST	edit.php?paged=2	wp_screen_options[option]=edit_post_per_page&wp_screen_options[value]=1&mode=excerpt	screen-options-nonce	screenoptionnonce	-
+posts-after	GET	edit.php?post_status=publish	-	none	-	-

@@ -17,7 +17,7 @@ pub(super) async fn writer() -> Writer {
     writer.unwrap().unwrap()
 }
 
-fn fields(query: &str) -> Vec<(Key, Value)> {
+pub(super) fn fields(query: &str) -> Vec<(Key, Value)> {
     parse_str(query.as_bytes()).as_array().unwrap().to_vec()
 }
 

@@ -235,8 +235,8 @@ fn notices(errors: &[(Key, Value)]) -> String {
 
 /// What `options-head.php`'s `settings_errors()` prints after the screen's
 /// own `errors`: on the screen a save sends back to (`settings-updated`),
-/// the notices it kept. The transient is left to expire: deleting it on
-/// view, as PHP does, would be a page view write.
+/// the notices it kept. Only read here: the page view's writes delete
+/// them in primary mode, as PHP does.
 fn options_head(site: &dyn SettingsSite, errors: &str, uri: &str) -> String {
     let query = uri.split_once('?').map_or("", |(_, query)| query);
     let args = hyscribe_phpser::parse_str(query.as_bytes());

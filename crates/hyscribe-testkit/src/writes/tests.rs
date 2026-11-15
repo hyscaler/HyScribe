@@ -2,6 +2,25 @@
 
 use super::*;
 
+/// The scratch database loads, and a database that cannot take the
+/// fixture, or cannot be reached, is an error.
+#[tokio::test]
+async fn the_default_install_loads_afresh() {
+    let saves = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..crate::fixture_database()
+    };
+    load_default_install(&saves).await.unwrap();
+    let read_only = hyscribe_config::Database {
+        user: "wordpress_read".into(),
+        name: "wordpress".into(),
+        ..saves.clone()
+    };
+    assert!(load_default_install(&read_only).await.is_err());
+    let closed = hyscribe_config::Database { port: 1, ..saves };
+    assert!(load_default_install(&closed).await.is_err());
+}
+
 async fn run(conn: &mut MySqlConnection, sql: &'static str) -> Result<(), String> {
     sqlx::raw_sql(sql)
         .execute(conn)
@@ -323,9 +342,9 @@ fn masks_times_and_new_ids() {
     assert_eq!(
         mask(
             "meta",
-            "1794000000:1 1794000002 1794000003 1793999999 01794000001"
+            "1794000000:1 1794000002 1794000003 1793999995 1793999994 01794000001"
         ),
-        "%unix%:1 %unix% 1794000003 1793999999 01794000001"
+        "%unix%:1 %unix% 1794000003 %unix% 1793999994 01794000001"
     );
     assert_eq!(mask("ID", "12"), "%wp_posts:1%");
     assert_eq!(mask("ID", "120"), "120");

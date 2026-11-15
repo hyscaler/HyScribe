@@ -12,7 +12,9 @@ use hyscribe_admin::actions::Asked;
 use hyscribe_admin::posts::Answer;
 use hyscribe_db::{DbError, Write};
 
+pub(super) mod dashboard;
 mod options;
+pub(super) mod screen;
 mod users;
 
 /// Why an action keeps nothing it wrote.
@@ -52,8 +54,18 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         ("options", b"dismiss") => Some(options::dismiss),
         ("options-permalink", b"") => Some(options::permalinks),
         ("options-privacy", b"create-privacy-page") => Some(options::create_privacy_page),
+        ("post", b"post-quickdraft-save") => Some(dashboard::quickdraft_save),
+        ("admin-ajax", b"update-welcome-panel") => Some(dashboard::update_welcome_panel),
+        ("admin-ajax", b"closed-postboxes") => Some(screen::closed_postboxes),
+        ("admin-ajax", b"hidden-columns") => Some(screen::hidden_columns),
+        ("admin-ajax", b"meta-box-order") => Some(screen::meta_box_order),
+        (_, b"screen-options") => Some(screen::options),
         _ => None,
     }
+}
+
+fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
 }
 
 /// Runs `handler` as one action in `write`, once begun: committed when

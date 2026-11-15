@@ -217,6 +217,26 @@ pub async fn wp_update_post(
     wp_insert_post(write, ctx, args).await
 }
 
+/// `get_default_post_to_edit( 'post', true )`: a new `auto-draft`, with
+/// the daily deletion of old ones scheduled. A default post format is not ported.
+pub async fn get_default_post_to_edit(write: &mut Write<'_>, ctx: &Context) -> Result<u64> {
+    let args = PostArgs {
+        title: b"Auto Draft".to_vec(),
+        status: "auto-draft".into(),
+        ..PostArgs::default()
+    };
+    let id = wp_insert_post(write, ctx, args).await?;
+    let format = write.option_value("default_post_format").await?;
+    if format.is_some_and(|format| truthy(&format)) {
+        return Err(Error::Unported("a default post format"));
+    }
+    const HOOK: &str = "wp_scheduled_auto_draft_delete";
+    if !cron::scheduled(write, HOOK).await? {
+        cron::schedule_daily(write, ctx.now, HOOK).await?;
+    }
+    Ok(id)
+}
+
 /// `wp_publish_post( $post )`.
 pub async fn wp_publish_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Result<()> {
     let Some(post) = write.post(id).await? else {

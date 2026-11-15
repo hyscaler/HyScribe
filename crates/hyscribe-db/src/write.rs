@@ -183,12 +183,16 @@ fn bytes(row: &crate::Row, name: &str) -> Vec<u8> {
 }
 
 /// One action's writes: committed together by [`Write::commit`], rolled
-/// back when dropped.
+/// back when dropped. Once a statement fails, none runs after it and the
+/// commit fails: a deadlock has rolled the whole transaction back, and
+/// what ran next would commit on its own.
 pub struct Write<'w> {
     writer: &'w Writer,
     tx: sqlx::Transaction<'w, Backend>,
     /// The statements left before each next one fails, if limited.
     budget: Option<usize>,
+    /// The first statement's error, which every later one returns.
+    failed: Option<DbError>,
 }
 
 impl<'w> Write<'w> {
@@ -210,6 +214,7 @@ impl<'w> Write<'w> {
                 writer,
                 tx,
                 budget: None,
+                failed: None,
             }),
             _ => Err(DbError(format!(
                 "the database's db_version ({}) is not one this release writes to ({} to {}), \
@@ -239,9 +244,12 @@ impl<'w> Write<'w> {
         }
     }
 
-    /// Commits every write of the action.
+    /// Commits every write of the action, unless a statement failed.
     pub async fn commit(self) -> Result<(), DbError> {
-        self.tx.commit().await.map_err(db_error)
+        match self.failed {
+            Some(err) => Err(err),
+            None => self.tx.commit().await.map_err(db_error),
+        }
     }
 
     /// The table prefix, which names the user meta keys of the site, as
@@ -261,16 +269,37 @@ impl<'w> Write<'w> {
         sqlx::query(self.writer.prefix.sql(query))
     }
 
+    /// Runs one statement of the action, unless one failed before: the
+    /// first error is kept and returned for every later statement.
+    async fn statement<T>(
+        &mut self,
+        run: impl AsyncFnOnce(&mut crate::Connection) -> Result<T, DbError>,
+    ) -> Result<T, DbError> {
+        if let Some(err) = &self.failed {
+            return Err(err.clone());
+        }
+        let result = match self.spend() {
+            Ok(()) => run(&mut self.tx).await,
+            Err(err) => Err(err),
+        };
+        if let Err(err) = &result {
+            self.failed = Some(err.clone());
+        }
+        result
+    }
+
     async fn run(
         &mut self,
         table: Table,
         query: Query,
     ) -> Result<<Backend as sqlx::Database>::QueryResult, DbError> {
-        self.spend()?;
-        if let Some((_, engine)) = self.writer.refused.iter().find(|(t, _)| *t == table) {
-            return Err(DbError(self.writer.refusal(table, engine)));
-        }
-        query.execute(&mut *self.tx).await.map_err(db_error)
+        let writer = self.writer;
+        let refused = writer.refused.iter().find(|(t, _)| *t == table);
+        self.statement(async |conn| match refused {
+            Some((_, engine)) => Err(DbError(writer.refusal(table, engine))),
+            None => query.execute(conn).await.map_err(db_error),
+        })
+        .await
     }
 
     /// Runs an `UPDATE` or `DELETE` on `table`: the rows it matched.
@@ -287,13 +316,22 @@ impl<'w> Write<'w> {
             .map(|done| Engine::inserted_id(&done))
     }
 
+    /// The rows `query` selects.
+    async fn rows(&mut self, query: Query) -> Result<Vec<crate::Row>, DbError> {
+        self.statement(async |conn| query.fetch_all(conn).await.map_err(db_error))
+            .await
+    }
+
+    /// The row `query` selects, if any.
+    async fn optional(&mut self, query: Query) -> Result<Option<crate::Row>, DbError> {
+        self.statement(async |conn| query.fetch_optional(conn).await.map_err(db_error))
+            .await
+    }
+
     /// The IDs `query` selects, as a column.
     async fn ids(&mut self, query: Query) -> Result<Vec<u64>, DbError> {
-        self.spend()?;
-        query
-            .fetch_all(&mut *self.tx)
-            .await
-            .map_err(db_error)?
+        self.rows(query)
+            .await?
             .iter()
             .map(|row| row.try_get::<u64, _>(0).map_err(db_error))
             .collect()
@@ -301,8 +339,9 @@ impl<'w> Write<'w> {
 
     /// The `COUNT(*)` `query` selects.
     async fn count(&mut self, query: Query) -> Result<u64, DbError> {
-        self.spend()?;
-        let row = query.fetch_one(&mut *self.tx).await.map_err(db_error)?;
+        let row = self
+            .statement(async |conn| query.fetch_one(conn).await.map_err(db_error))
+            .await?;
         row.try_get::<i64, _>(0)
             .map(i64::unsigned_abs)
             .map_err(db_error)
@@ -497,12 +536,7 @@ impl<'w> Write<'w> {
         crate::date_column(&mut sql, "comment_date_gmt");
         sql.push(" FROM {prefix}comments WHERE comment_ID = ?");
         sql.bind(Bind::Int(id));
-        self.spend()?;
-        let row = sql
-            .query(&self.writer.prefix)
-            .fetch_optional(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
+        let row = self.optional(sql.query(&self.writer.prefix)).await?;
         Ok(row.map(|row| CommentFields::read(&row)))
     }
 
@@ -592,12 +626,7 @@ impl<'w> Write<'w> {
         }
         sql.push(" ORDER BY comment_date_gmt DESC LIMIT 1");
         sql.bind(Bind::Bytes(email.to_vec()));
-        self.spend()?;
-        let row = sql
-            .query(&self.writer.prefix)
-            .fetch_optional(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
+        let row = self.optional(sql.query(&self.writer.prefix)).await?;
         Ok(row.map(|row| text(&row, "last")))
     }
 
@@ -677,7 +706,6 @@ impl<'w> Write<'w> {
     /// `get_userdata()`: the user's login and the columns `wp_insert_user()`
     /// writes.
     pub async fn user(&mut self, id: u64) -> Result<Option<(Vec<u8>, UserFields)>, DbError> {
-        self.spend()?;
         let mut sql =
             Sql::new("SELECT user_login, user_pass, user_nicename, user_email, user_url, ");
         Engine::date_text(&mut sql, "user_registered");
@@ -685,11 +713,7 @@ impl<'w> Write<'w> {
             " AS registered, user_activation_key, display_name FROM {prefix}users WHERE ID = ?",
         );
         sql.bind(Bind::Int(id));
-        let query = sql.query(&self.writer.prefix);
-        let row = query
-            .fetch_optional(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
+        let row = self.optional(sql.query(&self.writer.prefix)).await?;
         row.map_or(Ok(None), |row| {
             let mut c = Columns::new(&row);
             let login = c.bytes("user_login");
@@ -832,14 +856,9 @@ impl<'w> Write<'w> {
 
     /// `get_option()`'s value of option `name`, read inside the action.
     pub async fn option_value(&mut self, name: &str) -> Result<Option<Vec<u8>>, DbError> {
-        self.spend()?;
         let query =
             self.sql("SELECT option_value FROM {prefix}options WHERE option_name = ? LIMIT 1");
-        let row = query
-            .bind(name)
-            .fetch_optional(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
+        let row = self.optional(query.bind(name)).await?;
         row.map(|row| {
             let mut c = Columns::new(&row);
             let value = c.bytes("option_value");
@@ -850,13 +869,8 @@ impl<'w> Write<'w> {
 
     /// The autoload of option `name`, as `update_option()` reads it.
     pub async fn option_autoload(&mut self, name: &str) -> Result<Option<String>, DbError> {
-        self.spend()?;
         let query = self.sql("SELECT autoload FROM {prefix}options WHERE option_name = ? LIMIT 1");
-        let row = query
-            .bind(name)
-            .fetch_optional(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
+        let row = self.optional(query.bind(name)).await?;
         Ok(row.map(|row| text(&row, "autoload")))
     }
 }

@@ -139,11 +139,8 @@ pub fn video_shortcode(id: u64, url: &[u8], size: (i64, i64), poster: &[u8]) -> 
     let extension = extension(url);
     let (_, mime) = VIDEO_TYPES.iter().find(|(ext, _)| *ext == extension)?;
     let width = size.0.min(640);
-    let height = if size.1 != 0 && width < size.0 {
-        (size.1 as f64 * width as f64 / size.0 as f64).round() as i64
-    } else {
-        size.1
-    };
+    // Scaled with the width; without one the default size stands.
+    let height = (size.1 as f64 * width as f64 / size.0 as f64).round() as i64;
     let (width, height) = if width != 0 && height != 0 {
         (width, height)
     } else {
@@ -298,6 +295,11 @@ mod tests {
             ),
             (
                 attachment(5, "image/png", ""),
+                "<p class=\"attachment\">Missing Attachment</p>\n".to_string(),
+            ),
+            // A song without its file is no song.
+            (
+                attachment(5, "audio/mpeg", ""),
                 "<p class=\"attachment\">Missing Attachment</p>\n".to_string(),
             ),
             (

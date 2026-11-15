@@ -344,6 +344,21 @@ async fn writes_are_refused_unless_db_version_is_supported() {
     assert!(err.to_string().contains("closed"), "{err}");
 }
 
+/// The start checks: nothing refused on the fixture, and every write on a
+/// database whose `db_version` cannot be read.
+#[tokio::test]
+async fn the_writer_lists_what_it_refuses() {
+    assert!(writer().await.refusals().await.is_empty());
+    let config = Database {
+        prefix: Prefix::new("missing_").unwrap(),
+        ..fixture_config()
+    };
+    let missing = Writer::open(&config, Mode::Primary).await.unwrap().unwrap();
+    let refusals = missing.refusals().await;
+    assert_eq!(refusals.len(), 1);
+    assert!(refusals[0].contains("missing_options"), "{refusals:?}");
+}
+
 #[tokio::test]
 async fn writes_to_a_myisam_table_are_refused() {
     let _one = ONE_AT_A_TIME.lock().await;
@@ -352,27 +367,26 @@ async fn writes_to_a_myisam_table_are_refused() {
     engine("ALTER TABLE wp_links ENGINE=MyISAM").await.unwrap();
     let tried = async {
         let writer = writer().await;
+        let refusals = writer.refusals().await;
         let mut write = writer.begin().await.unwrap();
         let links = write.reassign_links(1, 2).await.map(|_| ());
         let posts = write.set_post_status(1, "publish").await;
         (
+            refusals,
             links.map_err(|err| err.to_string()),
             posts.map_err(|err| err.to_string()),
         )
     };
-    let (links, posts) = tokio::spawn(tried)
-        .await
-        .unwrap_or_else(|_| (Err("the attempt panicked".into()), Err(String::new())));
+    let (refusals, links, posts) = tokio::spawn(tried).await.unwrap_or_else(|_| {
+        let panicked = Err("the attempt panicked".into());
+        (Vec::new(), panicked, Err(String::new()))
+    });
     // Restore the fixture before anything is asserted.
     engine("ALTER TABLE wp_links ENGINE=InnoDB").await.unwrap();
-    assert_eq!(
-        links,
-        Err(
-            "wp_links uses the MyISAM engine, which cannot roll back, so HyScribe does not \
-             write to it; convert it with ALTER TABLE wp_links ENGINE=InnoDB"
-                .into()
-        )
-    );
+    let refused = "wp_links uses the MyISAM engine, which cannot roll back, so HyScribe does \
+                   not write to it; convert it with ALTER TABLE wp_links ENGINE=InnoDB";
+    assert_eq!(refusals, [refused]);
+    assert_eq!(links, Err(refused.into()));
     // The other tables still take writes.
     assert_eq!(posts, Ok(1));
 }

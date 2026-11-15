@@ -5,7 +5,7 @@
 
 #![no_main]
 
-use hyscribe_admin::actions::{ActionSite, Asked, admin, admin_ajax};
+use hyscribe_admin::actions::{ActionSite, Asked, action, admin, admin_ajax};
 use hyscribe_auth::caps::{CapPost, CapabilityData};
 use hyscribe_phpser::{Value, parse_str};
 use libfuzzer_sys::fuzz_target;
@@ -98,6 +98,7 @@ fuzz_target!(|data: &[u8]| {
     };
     let screen = SCREENS[usize::from(screen.first().copied().unwrap_or(0)) % SCREENS.len()];
     let _ = admin(&Open, screen, &asked, !body.is_empty());
+    let _ = action(screen, &asked);
     let _ = admin_ajax(Some(&Open), &asked);
     let _ = admin_ajax(None, &asked);
 });

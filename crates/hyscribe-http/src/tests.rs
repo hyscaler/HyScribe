@@ -243,6 +243,7 @@ async fn database_errors_show_no_details() {
         rewriter: rewrite::Rewriter::default(),
         salts: Vec::new(),
         sessions: None,
+        writer: None,
         defined: Vec::new(),
         public_users: true,
     });
@@ -868,6 +869,7 @@ async fn the_front_page_links_to_home() {
         rewriter: rewrite::Rewriter::default(),
         salts: Vec::new(),
         sessions: None,
+        writer: None,
         defined: Vec::new(),
         public_users: true,
     });
@@ -996,6 +998,7 @@ async fn failed_reads_answer_defaults() {
         rewriter: rewrite::Rewriter::default(),
         salts: Vec::new(),
         sessions: None,
+        writer: None,
         defined: Vec::new(),
         public_users: true,
     });

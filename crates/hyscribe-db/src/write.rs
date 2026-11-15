@@ -27,7 +27,7 @@ const DB_VERSIONS: std::ops::RangeInclusive<u64> = 61833..=61833;
 type Query = sqlx::query::Query<'static, Backend, <Backend as sqlx::Database>::Arguments>;
 
 /// A table the writer writes.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Table {
     Posts,
     Postmeta,
@@ -79,6 +79,7 @@ impl Table {
 
 /// The writable pool. Only [`Writer::open`] makes one, and only in primary
 /// mode, so shadow mode has no writer at all.
+#[derive(Debug)]
 pub struct Writer {
     pool: sqlx::Pool<Backend>,
     prefix: Prefix,
@@ -125,6 +126,24 @@ impl Writer {
             prefix,
             refused,
         }))
+    }
+
+    /// What the writer refuses, as the service logs it at start: each table
+    /// whose engine cannot roll back, and a `db_version` it does not write to.
+    pub async fn refusals(&self) -> Vec<String> {
+        let tables = self.refused.iter();
+        let mut refusals: Vec<String> = tables.map(|(t, e)| self.refusal(*t, e)).collect();
+        refusals.extend(self.begin().await.err().map(|err| err.0));
+        refusals
+    }
+
+    /// Why a write to `table`, whose engine is `engine`, is refused.
+    fn refusal(&self, table: Table, engine: &str) -> String {
+        let name = format!("{}{}", self.prefix.as_str(), table.name());
+        format!(
+            "{name} uses the {engine} engine, which cannot roll back, so HyScribe does not \
+             write to it; convert it with ALTER TABLE {name} ENGINE=InnoDB"
+        )
     }
 
     /// Starts an action. Refused when the database's `db_version` is not
@@ -233,11 +252,7 @@ impl<'w> Write<'w> {
     ) -> Result<<Backend as sqlx::Database>::QueryResult, DbError> {
         self.spend()?;
         if let Some((_, engine)) = self.writer.refused.iter().find(|(t, _)| *t == table) {
-            let name = format!("{}{}", self.writer.prefix.as_str(), table.name());
-            return Err(DbError(format!(
-                "{name} uses the {engine} engine, which cannot roll back, so HyScribe does not \
-                 write to it; convert it with ALTER TABLE {name} ENGINE=InnoDB"
-            )));
+            return Err(DbError(self.writer.refusal(table, engine)));
         }
         query.execute(&mut *self.tx).await.map_err(db_error)
     }

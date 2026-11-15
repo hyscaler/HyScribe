@@ -19,7 +19,7 @@ use hyscribe_admin::comments::{
 use hyscribe_admin::dashboard::{
     CommentCounts, DashboardSite, RecentComment, comment_status, dashboard,
 };
-use hyscribe_admin::login::Site as LoginSite;
+use hyscribe_admin::login::{READ_ONLY, Site as LoginSite};
 use hyscribe_admin::media::{
     AttachmentArgs, LibraryArgs, MediaSite, NewArgs, attachment_edit, media_new, upload,
 };
@@ -48,6 +48,8 @@ use tokio::runtime::Handle;
 use crate::login::{LoginReads, Names, PATH, cookie, cookies, is_ssl, joined, nocache, response};
 use crate::redirect::wp_sanitize_redirect;
 use crate::{Site, now};
+
+mod saves;
 
 /// Whether `path` is an hs-admin screen: its files have an extension and
 /// are served, or missing, as Apache serves `wp-admin`'s.
@@ -1233,6 +1235,25 @@ fn died(admin: &Admin, status: StatusCode, message: &str) -> Response {
     response(status, screen_headers(), body)
 }
 
+/// The answer to an action past its checks: 501 without a handler, shadow
+/// mode's `wp_die()` without a writer, else the handler's in one action.
+fn save(admin: &Admin, screen: &str, asked: &Asked) -> Response {
+    let action = hyscribe_admin::actions::action(screen, asked);
+    let Some(handler) = saves::handler(screen, &action) else {
+        return not_ported();
+    };
+    let Some(writer) = &admin.site.writer else {
+        return denied(admin, READ_ONLY);
+    };
+    let saved = Handle::current()
+        .block_on(async { saves::act(writer.begin().await, handler, asked).await });
+    match saved {
+        Ok(answer) => served(admin, answer),
+        Err(hyscribe_write::Error::Unported(_)) => not_ported(),
+        Err(err) => crate::html(crate::database_error(admin.site, &format!("{err:?}"))),
+    }
+}
+
 /// What an action reads of the request: `$_GET` and `$_POST`, unslashed.
 fn action_request<'a>(
     site: &'a Site,
@@ -1337,7 +1358,7 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 let name = uri.path().strip_prefix("/hs-admin/").unwrap_or_default();
                 match hyscribe_admin::actions::admin(&admin, name, &asked, post) {
                     Some(Err(refusal)) => return refused(reads.public(), refusal),
-                    Some(Ok(())) => return not_ported(),
+                    Some(Ok(())) => return save(&admin, name, &asked),
                     None if post => return not_ported(),
                     None => {}
                 }

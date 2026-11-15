@@ -2,9 +2,9 @@
 
 //! The checks admin actions make before they write, as WordPress makes
 //! them: `check_admin_referer()`, `check_ajax_referer()` and the
-//! capability checks of each action. An action that passes them all is
-//! answered `501` by the HTTP route, as its write is not ported; so is one
-//! whose next step is an answer not ported (a redirect, a page).
+//! capability checks of each action. An action that passes them all goes
+//! to its write's handler in the HTTP route ([`action`] names it), or is
+//! answered `501` when it has none, as is one whose next step is not ported.
 
 use hyscribe_auth::caps::{CapabilityData, post_type_exists, taxonomy_cap};
 use hyscribe_kses::{esc_html, esc_url, esc_url_raw, sanitize_key};
@@ -45,7 +45,7 @@ pub struct Asked<'a> {
 
 impl Asked<'_> {
     /// `$_REQUEST[ $name ]`: `$_POST`'s before `$_GET`'s.
-    fn request(&self, name: &str) -> Option<&Value> {
+    pub fn request(&self, name: &str) -> Option<&Value> {
         lookup(self.post, name).or_else(|| lookup(self.get, name))
     }
 
@@ -480,20 +480,36 @@ fn comments_list(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
 }
 
 /// The user IDs of `$_REQUEST['users']`, `intval()`ed.
-fn user_ids(asked: &Asked) -> Vec<i64> {
+pub fn user_ids(asked: &Asked) -> Vec<i64> {
     asked
         .request("users")
         .map(|users| items(users).iter().map(Value::to_int).collect())
         .unwrap_or_default()
 }
 
+/// `WP_Users_List_Table::current_action()`: `promote` for the role change.
+fn users_action(asked: &Asked) -> Option<Vec<u8>> {
+    if asked.request("changeit").is_some() {
+        return Some(b"promote".to_vec());
+    }
+    asked
+        .current_action(false)
+        .as_ref()
+        .map(Value::to_php_string)
+}
+
+/// The action of a request whose checks passed, as its write's handler is
+/// registered: the users list's `current_action()`, else `$_REQUEST['action']`.
+pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
+    match screen {
+        "users" => users_action(asked).unwrap_or_default(),
+        _ => asked.action(),
+    }
+}
+
 /// `users.php`'s actions.
 fn users_list(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
-    let doaction = if asked.request("changeit").is_some() {
-        b"promote".to_vec()
-    } else {
-        asked.current_action(false)?.to_php_string()
-    };
+    let doaction = users_action(asked)?;
     if !site.current_user_can("list_users", &[]) {
         return Some(Err(higher("Sorry, you are not allowed to list users.")));
     }

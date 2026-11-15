@@ -230,12 +230,14 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
             let db = hyscribe_db::Db::connect(&config.database)
                 .await
                 .map_err(|err| format!("cannot connect to the database: {err}"))?;
+            let writer = open_writer(&config.database, config.mode, out).await?;
             let site =
                 hyscribe_http::Site::load(db, config.home_url.clone(), config.site_url.clone())
                     .await
                     .map_err(|err| format!("cannot read the site options: {err}"))?
                     .with_salts(config.salts.clone())
-                    .with_public_users(config.rest_public_users);
+                    .with_public_users(config.rest_public_users)
+                    .with_writer(writer);
             // Logging in needs primary mode.
             let site = match config.mode {
                 Mode::Primary => site.with_sessions(Sessions::new(sessions_dir)),
@@ -273,6 +275,24 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
     let _ = out.flush();
     drop(lock);
     Ok(Reply::text(String::new()))
+}
+
+/// The writer of `mode`, none in shadow mode (ADR 0010), with a log line
+/// for each write it refuses: tables that cannot roll back, a `db_version` it does not write to.
+async fn open_writer(
+    database: &hyscribe_config::Database,
+    mode: Mode,
+    out: &mut dyn Write,
+) -> Result<Option<hyscribe_db::Writer>, String> {
+    let writer = hyscribe_db::Writer::open(database, mode)
+        .await
+        .map_err(|err| format!("cannot open the writer: {err}"))?;
+    if let Some(writer) = &writer {
+        for refusal in writer.refusals().await {
+            let _ = writeln!(out, "writes refused: {refusal}");
+        }
+    }
+    Ok(writer)
 }
 
 /// Formats an I/O failure with what was being done.

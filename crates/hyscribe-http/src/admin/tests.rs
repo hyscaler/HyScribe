@@ -282,16 +282,15 @@ async fn logged_in_users_are_let_in() {
     )
     .await;
     assert!(page.contains("<p><strong>Profile updated.</strong></p></div><div class=\"notice notice-error\"><p></p></div>"));
-    let path = "/hs-admin/user-new?update=add";
+    let path = "/hs-admin/user-new?update=add&user_id=1";
     let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
     assert!(page.contains("class=\"notice is-dismissible updated\"><p>User added.</p></div>"));
-    for path in [
-        "/hs-admin/profile?wp_http_referer=x",
-        "/hs-admin/profile?user_id=1",
-    ] {
-        let response = get(&site, path, "127.0.0.1:8081", &auth).await;
-        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
-    }
+    assert!(page.contains("var userProfileL10n = {\"user_id\":\"1\""));
+    // The profile of the user asked for, with the referer kept.
+    let path = "/hs-admin/profile?user_id=1&wp_http_referer=%2Fhs-admin%2Fusers";
+    let page = page_of(get(&site, path, "127.0.0.1:8081", &cookies).await).await;
+    assert!(page.contains("name=\"wp_http_referer\" value=\"/hs-admin/users\""));
+    assert!(page.contains("\t\t\t\t\tProfile\t\t\t</h1>"));
     // The Discussion, Media, Permalinks and Privacy settings, without
     // their arguments and actions.
     let list = include_str!("../../../hyscribe-admin/tests/golden/settings-more.tsv");
@@ -424,7 +423,7 @@ async fn logged_in_users_are_let_in() {
         "/hs-admin/user-edit?user_id=1&x=1",
         "/hs-admin/user-edit?user_id[]=1",
         "/hs-admin/user-edit?user_id=%FF",
-        "/hs-admin/user-new?update=add&user_id=1",
+        "/hs-admin/user-new?update=add&x=1",
         "/hs-admin/user-new?update[]=add",
         "/hs-admin/user-new?update=%FF",
         "/hs-admin/options-writing?x",
@@ -968,7 +967,8 @@ async fn refusals() {
     .await
     .unwrap()
     .unwrap();
-    assert_eq!(profile.status(), StatusCode::FORBIDDEN);
+    // No user may edit user 0's profile.
+    assert_eq!(profile.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let privacy = tokio::task::spawn_blocking({
         let (site, handle) = (Arc::clone(&site), handle.clone());
         move || {
@@ -989,6 +989,18 @@ async fn refusals() {
     .unwrap()
     .unwrap();
     assert_eq!(privacy.status(), StatusCode::FORBIDDEN);
+    // An item in the Trash is PHP's `409`.
+    let conflict = tokio::task::spawn_blocking({
+        let (site, handle) = (Arc::clone(&site), handle.clone());
+        move || {
+            let reads = LoginReads::new(&site, handle, now());
+            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+            served(&admin, Answer::Conflict("In the Trash.")).status()
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(conflict, StatusCode::CONFLICT);
     // Editing a user needs `edit_users`, adding one `create_users`; over
     // HTTPS the form offers application passwords.
     for (path, https, status) in [
@@ -999,6 +1011,8 @@ async fn refusals() {
         ),
         ("/hs-admin/user-edit?user_id=1", true, None),
         ("/hs-admin/user-new", false, Some(StatusCode::FORBIDDEN)),
+        ("/hs-admin/user-new?update[]=add", false, None),
+        ("/hs-admin/themes?broken[]=1", false, None),
         ("/hs-admin/themes", false, Some(StatusCode::FORBIDDEN)),
         ("/hs-admin/import", false, Some(StatusCode::FORBIDDEN)),
         ("/hs-admin/export", false, Some(StatusCode::FORBIDDEN)),
@@ -1529,7 +1543,7 @@ async fn dashboard_data() {
             assert_eq!(admin.months("post", false).first(), Some(&(2030, 1)));
             let page = admin.full_post(155).unwrap();
             assert_eq!(admin.pending_comments(&page), 1);
-            assert_eq!(admin.display_name(2).as_deref(), Some(&b"Theme Buster"[..]));
+            assert_eq!(admin.userdata(2).unwrap().display_name, b"Theme Buster");
             let authors: Vec<u64> = admin
                 .authors("edit_pages")
                 .iter()
@@ -1925,4 +1939,21 @@ async fn actions_read_the_site() {
     let missing = format!("/hs-admin/edit?action=trash&post[]=999&_wpnonce={posts}");
     let response = send(&site, "GET", &missing, &cookies, None).await;
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+/// A site icon from the database: in the admin bar and head, and on the
+/// login screen.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_site_icon_is_read_from_the_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress_ttd", dir.path()).await;
+    let mut icon = Arc::try_unwrap(site).ok().unwrap();
+    icon.options.insert("site_icon".into(), b"611".to_vec());
+    let icon = Arc::new(icon);
+    let uploads = "http://127.0.0.1:8081/wp-content/uploads/";
+    let page = page_of(get(&icon, "/hs-admin/tools", "127.0.0.1:8081", &cookies).await).await;
+    assert!(page.contains(&format!("<img class=\"site-icon\" src=\"{uploads}")));
+    assert!(page.contains(&format!("<link rel=\"icon\" href=\"{uploads}")));
+    let page = page_of(get(&icon, "/hs-login", "127.0.0.1:8081", "").await).await;
+    assert!(page.contains(&format!("<link rel=\"apple-touch-icon\" href=\"{uploads}")));
 }

@@ -137,7 +137,7 @@ pub(crate) fn cookie<'a>(cookies: &'a [(Vec<u8>, Vec<u8>)], name: &str) -> Optio
 /// What the login screen reads, on a blocking thread.
 pub(crate) struct LoginReads<'a> {
     pub(crate) reads: Reads<'a>,
-    site: &'a Site,
+    pub(crate) site: &'a Site,
     pub(crate) now: i64,
     /// The users found, for the cookies of the one who logs in and for the
     /// current user.
@@ -335,6 +335,10 @@ impl LoginSite for LoginReads<'_> {
     fn post_type(&self, id: u64) -> Option<String> {
         let post = self.reads.wait(self.site.db.post(id))?;
         Some(post.post_type)
+    }
+
+    fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
+        crate::admin::site_icon(self, size)
     }
 }
 

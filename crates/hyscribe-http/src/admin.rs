@@ -371,6 +371,9 @@ impl BarSite for Admin<'_> {
             hyscribe_render::user_avatar(&|name| self.reads.reads.option(name), &self.user, size);
         String::from_utf8_lossy(&avatar).into_owned()
     }
+    fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
+        hyscribe_admin::media::site_icon_url(self, size)
+    }
 }
 
 impl Urls for Admin<'_> {
@@ -535,9 +538,8 @@ impl PostsSite for Admin<'_> {
     fn meta(&self, post: &Post, key: &str) -> Option<Vec<u8>> {
         CapabilityData::post_meta(self, post.id, key)
     }
-    fn display_name(&self, id: u64) -> Option<Vec<u8>> {
-        let user = self.reads.reads.wait(self.site.db.user(id));
-        user.map(|user| user.display_name)
+    fn userdata(&self, id: u64) -> Option<hyscribe_model::User> {
+        self.reads.reads.wait(self.site.db.user(id))
     }
     fn pending_comments(&self, post: &Post) -> u64 {
         self.reads
@@ -732,7 +734,7 @@ impl UsersSite for Admin<'_> {
 
 impl ProfileSite for Admin<'_> {
     fn profile_user(&self, id: u64) -> Option<hyscribe_model::User> {
-        self.reads.reads.wait(self.site.db.user(id))
+        self.userdata(id)
     }
     fn user_option_of(&self, id: u64, name: &str) -> Option<Vec<u8>> {
         self.reads.user_option(id, name)
@@ -1051,6 +1053,12 @@ fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
     Some(list)
 }
 
+/// `get_site_icon_url( $size )` outside the admin, as the login screen asks.
+pub(crate) fn site_icon(reads: &LoginReads, size: i64) -> Option<Vec<u8>> {
+    let admin = Admin::new(reads, reads.site, hyscribe_model::User::default());
+    hyscribe_admin::media::site_icon_url(&admin, size)
+}
+
 /// The screen at `path` for `admin`, `None` for one not ported yet.
 fn screen(
     admin: &Admin,
@@ -1147,10 +1155,7 @@ fn screen(
         "/hs-admin/site-editor" if !admin.can("edit_theme_options") => Answer::from_page(None),
         // HTTPS offers application passwords, whose list is not ported.
         "/hs-admin/profile" => {
-            // Only the arguments of a save.
-            let args = edit_args(query).filter(|args| {
-                args.user_id.is_none() && args.referer.is_none() && !origin.starts_with("https://")
-            })?;
+            let args = edit_args(query).filter(|_| !origin.starts_with("https://"))?;
             profile(admin, &args, &request)
         }
         "/hs-admin/user-edit" => {
@@ -1158,8 +1163,16 @@ fn screen(
             user_edit(admin, &args, &request)
         }
         "/hs-admin/user-new" => {
-            let update = only_argument(query, "update")?;
-            hyscribe_admin::user_new::user_new(admin, update.as_deref(), &request)
+            let (mut update, mut user_id) = (None, None);
+            for (key, value) in query_strings(query)? {
+                match key.as_str() {
+                    "update" => update = Some(value),
+                    "user_id" => user_id = Some(value),
+                    _ => return None,
+                }
+            }
+            let args = (update.as_deref(), user_id.as_deref());
+            hyscribe_admin::user_new::user_new(admin, args, &request)
         }
         "/hs-admin/users" => users(admin, &user_args(query)?, &request),
         "/hs-admin/" | "/hs-admin/index" => {
@@ -1205,6 +1218,7 @@ fn served(admin: &Admin, answer: Answer) -> Response {
         Answer::Denied(message) => denied(admin, message),
         Answer::Died(message) => died(admin, StatusCode::INTERNAL_SERVER_ERROR, message),
         Answer::Missing(message) => died(admin, StatusCode::NOT_FOUND, message),
+        Answer::Conflict(message) => died(admin, StatusCode::CONFLICT, message),
     }
 }
 

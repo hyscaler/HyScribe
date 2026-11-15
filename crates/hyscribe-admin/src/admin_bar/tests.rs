@@ -7,8 +7,11 @@ use crate::menu::link;
 use crate::tests::{Role, SITE, first_difference};
 
 impl BarSite for Role {
+    fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
+        crate::media::site_icon_url(self, size)
+    }
     fn home_url(&self) -> String {
-        format!("{SITE}/")
+        format!("{}/", self.home())
     }
     fn admin_url(&self, path: &str) -> String {
         format!("{SITE}/hs-admin/{}", link(path))

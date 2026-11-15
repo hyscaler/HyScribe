@@ -228,14 +228,20 @@ fn variants_are_php_s() {
             let path = format!("/hs-admin/edit?{query}");
             String::from_utf8(hyscribe_phpser::addslashes(path.as_bytes())).unwrap()
         };
-        // The canonical URL, rebuilt as `remove_query_arg()` rebuilds it.
-        let url = format!("{}{path}", crate::tests::SITE);
+        // The canonical URL, rebuilt as `remove_query_arg()` rebuilds it,
+        // on the host `h9host` asks with.
+        let host = if variant == "h9host" {
+            "http://admin.test:8081"
+        } else {
+            crate::tests::SITE
+        };
+        let url = format!("{host}{path}");
         let canonical = hyscribe_phpser::remove_query_arg(&[b"message"], url.as_bytes());
         let ours = edit(
             &Role(role),
             &args,
             &String::from_utf8(canonical).unwrap(),
-            crate::tests::SITE,
+            host,
             &path,
             &crate::admin_bar::Browser {
                 user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
@@ -672,4 +678,18 @@ fn nothing_to_filter_shows_no_filter_button() {
     ));
     assert!(page.contains("No pages found in Trash."));
     assert!(!page.contains("post-query-submit"));
+}
+
+/// A preview link takes the site URL's scheme, as `set_url_scheme()` gives
+/// it the admin's (the other way round in the `h9home` golden).
+#[test]
+fn previews_take_the_admin_s_scheme() {
+    let draft = Post {
+        id: 301,
+        status: "draft".into(),
+        post_type: "post".into(),
+        ..Post::default()
+    };
+    let link = preview_link(&Role("h9ssl:administrator"), &draft, &[]);
+    assert_eq!(link, b"https://127.0.0.1:8081/?p=301&preview=true");
 }

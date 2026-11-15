@@ -583,6 +583,7 @@ pub(crate) fn authors() -> Vec<User> {
         id,
         display_name: name.as_bytes().to_vec(),
         login: login.as_bytes().to_vec(),
+        email: format!("{login}@default-install.test").into_bytes(),
         ..User::default()
     };
     vec![

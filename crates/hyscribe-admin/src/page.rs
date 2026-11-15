@@ -13,7 +13,7 @@ use hyscribe_render::kses::wp_kses_post;
 use hyscribe_render::post::sanitize_html_class;
 
 use crate::admin_bar::{BarSite, Browser, admin_bar};
-use crate::assets::{Assets, Urls, cookie_path};
+use crate::assets::{Assets, Urls, cookie_path, site_icon_tags};
 use crate::menu::{Screen, admin_menu, commands};
 
 /// `wp_removable_query_args()`: what the canonical admin URL leaves out.
@@ -417,6 +417,8 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
             .replace("%canonical%", &String::from_utf8_lossy(&canonical))
             .into_bytes(),
     );
+    out.push(b'\t');
+    out.extend(site_icon_tags(&|size| site.site_icon(size)).into_bytes());
     let mut html = String::from_utf8_lossy(&out).into_owned();
     let color = sanitize_html_class(&color, b"modern");
     html.push_str(&body(site, page, &String::from_utf8_lossy(&color), browser));
@@ -659,7 +661,7 @@ fn body(site: &dyn PageSite, page: &Page, color: &str, browser: &Browser) -> Str
         ));
     }
     let mut out = format!(
-        "\t<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">{}</head>\n<body class=\"wp-admin wp-core-ui no-js {}\">\n<script>\n\tdocument.body.className = document.body.className.replace('no-js','js');\n</script>\n\n",
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">{}</head>\n<body class=\"wp-admin wp-core-ui no-js {}\">\n<script>\n\tdocument.body.className = document.body.className.replace('no-js','js');\n</script>\n\n",
         page.admin_head,
         esc_attr(classes.as_bytes())
     );

@@ -571,7 +571,7 @@ async fn logged_in_users_are_let_in() {
 
 /// `database` seen from the oracle's address, with a login for `admin`:
 /// the site and its cookies.
-async fn logged_in(database: &str, dir: &std::path::Path) -> (Arc<Site>, String) {
+pub(crate) async fn logged_in(database: &str, dir: &std::path::Path) -> (Arc<Site>, String) {
     let config = hyscribe_config::Database {
         name: database.into(),
         ..hyscribe_testkit::fixture_database()
@@ -793,7 +793,7 @@ fn masked(page: &str) -> String {
     )
 }
 
-async fn page_of(response: Response) -> String {
+pub(crate) async fn page_of(response: Response) -> String {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
@@ -1745,7 +1745,7 @@ async fn the_posts_list_reads_its_arguments() {
 }
 
 /// `method` on `uri` with `cookie` and a body of `content_type`.
-async fn send(
+pub(crate) async fn send(
     site: &Arc<Site>,
     method: &str,
     uri: &str,
@@ -1769,7 +1769,7 @@ async fn send(
 }
 
 /// The nonce of `action` for the session of the logged in cookie in `cookies`.
-async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &'static str) -> String {
+pub(crate) async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &'static str) -> String {
     let auth = cookies
         .split("; ")
         .find(|cookie| cookie.starts_with("hyscribe_logged_in_"))
@@ -1961,7 +1961,7 @@ async fn the_site_icon_is_read_from_the_database() {
 
 /// A writer as the fixture's read only user, with `prefix`: its actions
 /// run, and a write would fail, so a test never changes the fixture.
-async fn unwritable(site: Arc<Site>, prefix: &str) -> Arc<Site> {
+pub(crate) async fn unwritable(site: Arc<Site>, prefix: &str) -> Arc<Site> {
     let config = hyscribe_config::Database {
         user: "wordpress_read".into(),
         password: Secret::new("reference-only"),

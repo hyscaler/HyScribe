@@ -44,6 +44,7 @@ use tokio::sync::Semaphore;
 
 mod admin;
 mod canonical;
+mod comment_post;
 mod feed;
 mod files;
 mod loaders;
@@ -60,6 +61,7 @@ mod trackback;
 /// from outside.
 #[doc(hidden)]
 pub mod fuzzing {
+    pub use crate::comment_post::read_form;
     pub use crate::files::http_date;
     pub use crate::login::cookies;
     pub use crate::redirect::{wp_sanitize_redirect, wp_validate_redirect};
@@ -96,7 +98,13 @@ pub struct Site {
     defined: Vec<&'static str>,
     /// `REST_PUBLIC_USERS`: the public users REST endpoint is on.
     public_users: bool,
+    /// `BEHIND_PROXY`: the proxy's `X-Forwarded-For` names the client.
+    behind_proxy: bool,
 }
+
+/// The address a connection comes from.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Peer(pub(crate) std::net::IpAddr);
 
 impl Site {
     /// Loads the autoloaded options. `home` and `siteurl` override those
@@ -134,6 +142,7 @@ impl Site {
             writer: None,
             defined,
             public_users: true,
+            behind_proxy: false,
         };
         site.build_rewriter();
         Ok(site)
@@ -148,6 +157,14 @@ impl Site {
     pub fn with_public_users(self, public_users: bool) -> Site {
         Site {
             public_users,
+            ..self
+        }
+    }
+
+    /// The site behind a proxy or not.
+    pub fn with_proxy(self, behind_proxy: bool) -> Site {
+        Site {
+            behind_proxy,
             ..self
         }
     }
@@ -170,6 +187,11 @@ impl Site {
             .collect();
         let writer = writer.map(|writer| writer.with_urls(urls));
         Site { writer, ..self }
+    }
+
+    /// `blog_public`: whether search engines may index the site.
+    fn public(&self) -> bool {
+        !Value::String(self.raw_option("blog_public").to_vec()).is_empty()
     }
 
     /// `wp_salt( $scheme )`: the configured keys and salts, else `option`'s.
@@ -389,7 +411,6 @@ async fn serve_connections(
     limit: usize,
     shutdown: impl Future<Output = ()>,
 ) {
-    let service = TowerToHyperService::new(app);
     let mut http = http1::Builder::new();
     http.timer(TokioTimer::new())
         .header_read_timeout(HEADER_READ_TIMEOUT);
@@ -403,12 +424,13 @@ async fn serve_connections(
             let permit = permits.clone().acquire_owned().await.ok();
             (permit, axum::serve::Listener::accept(&mut listener).await)
         };
-        let (permit, (stream, _)) = tokio::select! {
+        let (permit, (stream, addr)) = tokio::select! {
             accepted = accepted => accepted,
             () = &mut shutdown => break,
         };
-        let connection =
-            graceful.watch(http.serve_connection(TokioIo::new(stream), service.clone()));
+        let service = app.clone().layer(axum::Extension(Peer(addr.ip())));
+        let connection = graceful
+            .watch(http.serve_connection(TokioIo::new(stream), TowerToHyperService::new(service)));
         tokio::spawn(async move {
             let _ = connection.await;
             drop(permit);
@@ -477,6 +499,7 @@ async fn page(
     uri: Uri,
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
+    peer: Option<axum::Extension<Peer>>,
     body: axum::body::Bytes,
 ) -> Response {
     // Before the method check, so a login form's POST is redirected too.
@@ -502,6 +525,16 @@ async fn page(
             form,
         };
         return login::respond(&site, asked).await;
+    }
+    let siteurl = site.option("siteurl");
+    if uri.path().strip_prefix(home_path(&siteurl)) == Some(comment_post::PATH) {
+        let asked = comment_post::Asked {
+            post,
+            headers,
+            body,
+            peer: peer.map(|axum::Extension(Peer(ip))| ip),
+        };
+        return comment_post::respond(&site, asked).await;
     }
     // The loaders read only the query, whatever the method, as PHP's do.
     if let Some(loader) = loaders::Loader::at(uri.path()).filter(|_| page_method) {
@@ -658,10 +691,9 @@ fn asks_404(query: &HashMap<String, String>) -> bool {
 
 /// WordPress's own PHP files, which the web server runs without the
 /// rewrite rules.
-const PHP_FILES: [&str; 13] = [
+const PHP_FILES: [&str; 12] = [
     "/wp-activate.php",
     "/wp-blog-header.php",
-    "/wp-comments-post.php",
     "/wp-config-sample.php",
     "/wp-config.php",
     "/wp-cron.php",

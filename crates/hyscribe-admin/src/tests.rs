@@ -1841,3 +1841,13 @@ fn icon_meta(id: u64, key: &str) -> Option<Vec<u8>> {
     };
     Some(value.to_vec())
 }
+
+/// `wp_die()`'s `back_link` goes after the message, which `wp-comments-post.php`'s
+/// errors show (hyscribe-http's comment post goldens).
+#[test]
+fn a_back_link_follows_the_message() {
+    let page = String::from_utf8(crate::die::page_with_back_link(true, "T", "<p>m</p>")).unwrap();
+    let back = "<div class=\"wp-die-message\"><p>m</p></div>\n<p><a href='javascript:history.back()'>&laquo; Back</a></p></body>";
+    assert!(page.contains(back), "{page}");
+    assert!(page.contains("<title>T</title>"));
+}

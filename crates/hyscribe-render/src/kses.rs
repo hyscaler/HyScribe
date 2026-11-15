@@ -177,6 +177,11 @@ pub fn wp_kses_user_description(content: &[u8]) -> Vec<u8> {
     wp_kses(content, &USER_DESCRIPTION, b"")
 }
 
+/// `wp_kses( $content, array() )`: no tags at all.
+pub(crate) fn wp_kses_no_tags(content: &[u8]) -> Vec<u8> {
+    wp_kses(content, &AllowedHtml(BTreeMap::new()), b"")
+}
+
 /// `wp_kses( $content, 'pre_comment_content' )`, as `wp_filter_kses()`
 /// filters a comment's content.
 pub fn wp_kses_comment(content: &[u8]) -> Vec<u8> {

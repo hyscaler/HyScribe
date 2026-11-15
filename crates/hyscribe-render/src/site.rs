@@ -55,6 +55,12 @@ pub trait Site {
         None
     }
 
+    /// `get_comment( $id )` when that comment is held for moderation.
+    /// Sites without comment data have none.
+    fn held_comment(&self, _id: u64) -> Option<Comment> {
+        None
+    }
+
     /// `get_userdata( $id )`. Sites without user data have none.
     fn user(&self, _id: u64) -> Option<User> {
         None

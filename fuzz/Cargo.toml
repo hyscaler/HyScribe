@@ -138,6 +138,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "comment_post_form"
+path = "fuzz_targets/comment_post_form.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "content_tags"
 path = "fuzz_targets/content_tags.rs"
 test = false

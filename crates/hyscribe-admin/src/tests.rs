@@ -222,7 +222,15 @@ impl Role {
 
     /// A variant of `reference/attachment-edit/golden.sh` over its content.
     fn a8(&self) -> bool {
-        self.variant().starts_with("a8lock") || self.variant() == "g9attach"
+        self.variant().starts_with("a8lock") || self.variant() == "g9attach" || self.j9_media()
+    }
+
+    /// A `j9` variant of `reference/attachment-edit/golden.sh`, all of
+    /// which hold user 2's lock.
+    fn j9_media(&self) -> bool {
+        ["j9lock", "j9pretty", "j9noupload"]
+            .iter()
+            .any(|prefix| self.variant().starts_with(prefix))
     }
 
     /// A user of the content of a `reference/attachment-edit/golden.sh`
@@ -249,7 +257,8 @@ impl Role {
             (variant, _) if variant.ends_with("lock3") => "1794500000:3",
             _ => "1794500000:2",
         };
-        let locked = self.variant().starts_with("a8") && self.variant().contains("lock");
+        let locked =
+            self.variant().starts_with("a8") && self.variant().contains("lock") || self.j9_media();
         (locked && (key == "_edit_lock" || key == "_edit_last")).then_some(lock)
     }
 
@@ -410,7 +419,7 @@ impl Role {
             ("s2day", "permalink_structure") => b"/%year%/%monthnum%/%day%/%postname%/",
             ("s2month", "permalink_structure") => b"/%year%/%monthnum%/%postname%/",
             ("s2numeric", "permalink_structure") => b"/archives/%post_id%",
-            ("s2postname", "permalink_structure") => b"/%postname%/",
+            ("s2postname" | "j9pretty" | "j9prettyfront", "permalink_structure") => b"/%postname%/",
             ("s2custom", "permalink_structure") => b"/%category%/<%postname%>/",
             ("s2custom", "category_base") => b"topics",
             ("s2custom", "tag_base") => b"labels\"<",
@@ -623,6 +632,7 @@ impl CapabilityData for Role {
             "u3nopromote" => "promote_users",
             "a5nooptions" | "g9nooptions" => "edit_theme_options",
             "a5noswitch" | "g9noswitch" => "switch_themes",
+            "j9noupload" => "upload_files",
             _ => return Some(format!("a:1:{{s:{}:\"{role}\";b:1;}}", role.len()).into_bytes()),
         };
         Some(
@@ -762,7 +772,7 @@ impl PageSite for Role {
                 b"a:2:{s:4:\"side\";s:19:\"authordiv,submitdiv\";s:6:\"normal\";s:7:\"slugdiv\";}"
             }
             ("a8locknorich", "rich_editing") => b"false",
-            (variant, "rich_editing") if variant.starts_with("a8") => b"true",
+            (variant, "rich_editing") if variant.starts_with("a8") || self.j9_media() => b"true",
             _ => b"",
         };
         if !edit.is_empty() {
@@ -1033,6 +1043,10 @@ impl crate::media::MediaSite for Role {
         types.dedup();
         types
     }
+    fn slug_taken(&self, slug: &[u8], id: u64) -> bool {
+        let posts = self.posts();
+        posts.iter().any(|post| post.id != id && post.name == slug)
+    }
 }
 
 impl crate::settings::SettingsSite for Role {
@@ -1049,7 +1063,7 @@ impl crate::profile::ProfileSite for Role {
     /// The fixture's administrator, named in the options variant, or
     /// another user of the variant.
     fn profile_user(&self, id: u64) -> Option<hyscribe_model::User> {
-        if id != 1 && self.variant().starts_with("a8") {
+        if id != 1 && (self.variant().starts_with("a8") || self.j9_media()) {
             return self.a8_user(id);
         }
         if id != 1 {
@@ -1434,6 +1448,11 @@ impl crate::posts::PostsSite for Role {
             return format!("{SITE}/");
         }
         let home = self.home();
+        // Pretty links of published posts and pages, as their slugs give.
+        let pretty = self.variant().starts_with("j9pretty") && post.post_type != "attachment";
+        if pretty && post.status == "publish" {
+            return format!("{home}/{}/", String::from_utf8_lossy(&post.name));
+        }
         let query = match post.post_type.as_str() {
             "page" => "page_id",
             "attachment" => "attachment_id",
@@ -1464,7 +1483,8 @@ impl crate::posts::PostsSite for Role {
                 return Some(b"2".to_vec());
             }
             (variant, "user_count") if variant.starts_with("a8ttd") => return Some(b"3".to_vec()),
-            ("a8lockpretty", "permalink_structure") => return Some(b"/%postname%/".to_vec()),
+            ("j9prettyfront", "show_on_front") => return Some(b"page".to_vec()),
+            ("j9prettyfront", "page_on_front") => return Some(b"2".to_vec()),
             ("m4ttdpages", "wp_attachment_pages_enabled") => return Some(b"1".to_vec()),
             ("m4large", "large_size_h") => return Some(b"0".to_vec()),
             // Postponed at the clock's time, or long ago.
@@ -1587,7 +1607,7 @@ impl crate::posts::PostsSite for Role {
     }
     /// The content's author may edit posts, not pages.
     fn authors(&self, cap: &str) -> Vec<hyscribe_model::User> {
-        if self.variant().starts_with("a8") {
+        if self.variant().starts_with("a8") || self.j9_media() {
             return [1, 2]
                 .into_iter()
                 .filter_map(|id| self.a8_user(id))

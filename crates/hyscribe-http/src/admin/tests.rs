@@ -1429,6 +1429,8 @@ async fn the_user_s_data() {
         let first = admin(&terms, &reads, 1);
         assert_eq!(first.post_authors("post"), [1]);
         assert!(first.post_authors("attachment").is_empty());
+        // Another post's slug, in any case, as the database compares it.
+        assert!(first.slug_taken(b"Hello-World", 2) && !first.slug_taken(b"hello-world", 1));
         assert_eq!(first.admin_color().as_deref(), Some(&b"modern"[..]));
         assert!(
             first

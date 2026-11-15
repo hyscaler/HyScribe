@@ -178,6 +178,37 @@ impl Permalinks {
         Some(self.trailing(&home_url(home, &path)))
     }
 
+    /// `get_attachment_link()` of `post`, which `wp_force_plain_post_permalink()`
+    /// lets have a pretty link and whose parent, if any, is valid, with
+    /// `parent_link`; `%postname%` left in a `sample` one. `None` for the
+    /// plain link.
+    pub fn attachment_link(
+        &self,
+        home: &str,
+        post: &Post,
+        parent_link: Option<&str>,
+        sample: bool,
+    ) -> Option<String> {
+        if !self.pretty() {
+            return None;
+        }
+        let name = String::from_utf8_lossy(&post.name);
+        let Some(parent_link) = parent_link else {
+            return (!sample).then(|| self.trailing(&format!("{home}/{name}")));
+        };
+        if parent_link.contains('?') {
+            return None;
+        }
+        let numeric = !name.is_empty() && Value::String(post.name.clone()).is_numeric();
+        let name = match (sample, numeric || self.uses("%category%")) {
+            (true, _) => "%postname%".to_string(),
+            (false, true) => format!("attachment/{name}"),
+            (false, false) => name.into_owned(),
+        };
+        let base = parent_link.trim_end_matches(['/', '\\']);
+        Some(self.trailing(&format!("{base}/{name}")))
+    }
+
     /// `get_term_link()`: `slugs` from the top term down.
     pub fn term_link(&self, home: &str, taxonomy: &str, slugs: &[&str]) -> Option<String> {
         if !self.pretty() {

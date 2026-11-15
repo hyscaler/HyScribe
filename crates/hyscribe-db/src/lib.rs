@@ -763,6 +763,21 @@ impl Db {
             .collect()
     }
 
+    /// Whether a post other than `id` is named `name`, as
+    /// `wp_unique_post_slug()` checks an attachment's slug.
+    pub async fn post_name_taken(&self, name: &str, id: u64) -> Result<bool, DbError> {
+        let sql = self
+            .prefix
+            .sql("SELECT ID FROM {prefix}posts WHERE post_name = ? AND ID != ? LIMIT 1");
+        let row = sqlx::query(sql)
+            .bind(name)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        Ok(row.is_some())
+    }
+
     /// `get_pending_comments_num( $post_id )`.
     pub async fn pending_comments(&self, post_id: u64) -> Result<u64, DbError> {
         let sql = self.prefix.sql(

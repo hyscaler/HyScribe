@@ -973,7 +973,7 @@ fn grid(
         vars => json(&vars),
     };
     let admin = json(&text(admin.strip_suffix('/').unwrap_or(&admin)));
-    let (templates, media_data) = enqueue_media(site, request.browser);
+    let (templates, media_data) = enqueue_media(site, request.browser, None);
     let mut script_data = media_data.to_vec();
     script_data.push((
         "media-grid",

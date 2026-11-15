@@ -28,6 +28,8 @@ pub trait MediaSite: PostsSite {
     /// `get_available_post_mime_types( 'attachment' )`: the types of the
     /// attachments, each once.
     fn attachment_mime_types(&self) -> Vec<String>;
+    /// Whether a post other than `id` has the slug `slug`.
+    fn slug_taken(&self, slug: &[u8], id: u64) -> bool;
 }
 
 const MEDIA_TEMPLATES: &str = include_str!("media/media.html");
@@ -125,8 +127,9 @@ fn option(site: &dyn PostsSite, name: &str) -> String {
 }
 
 /// `wp_enqueue_media()`'s `_wpMediaViewsL10n`, its settings from the
-/// site: the months with attachments newest first among them.
-fn media_views(site: &dyn PostsSite) -> String {
+/// site: the months with attachments newest first among them, and the
+/// `post` it is given.
+fn media_views(site: &dyn PostsSite, post: Option<(u64, Value)>) -> String {
     let mut months = site.months("attachment", false);
     months.extend(site.months("attachment", true));
     months.sort_by(|a, b| b.cmp(a));
@@ -153,6 +156,14 @@ fn media_views(site: &dyn PostsSite) -> String {
         ("size", text(&option(site, "image_default_size"))),
     ]);
     let scrolling = site.user_option("infinite_scrolling").as_deref() != Some(b"false");
+    let post = match post {
+        None => object(vec![("id", Value::Int(0))]),
+        Some((id, featured)) => object(vec![
+            ("id", Value::Int(id.cast_signed())),
+            ("nonce", text(&site.nonce(&format!("update-post_{id}")))),
+            ("featuredImageId", featured),
+        ]),
+    };
     fill(
         MEDIA_VIEWS,
         &[
@@ -177,6 +188,7 @@ fn media_views(site: &dyn PostsSite) -> String {
                 json(&text(&site.fill("%rest_url%oembed/1.0/proxy"))),
             ),
             ("months", json(&months)),
+            ("post", json(&post)),
             ("scrolling", u8::from(scrolling).to_string()),
         ],
     )
@@ -189,11 +201,13 @@ pub(crate) const MEDIA_SCRIPTS: [&str; 4] =
 /// The styles `wp_enqueue_media()` adds.
 pub(crate) const MEDIA_STYLES: [&str; 2] = ["media-views", "imgareaselect"];
 
-/// `wp_enqueue_media()`: the templates `wp_print_media_templates()` prints
-/// in the footer, and the data of the scripts it adds.
+/// `wp_enqueue_media()`, given a `post` of a type with featured images (its
+/// ID and `featuredImageId`): the templates `wp_print_media_templates()`
+/// prints in the footer, and the data of the scripts it adds.
 pub(crate) fn enqueue_media(
     site: &dyn PostsSite,
     browser: &Browser,
+    post: Option<(u64, Value)>,
 ) -> (String, [(&'static str, String); 3]) {
     let upload = if can_upload(browser) {
         UPLOAD
@@ -208,7 +222,7 @@ pub(crate) fn enqueue_media(
         ],
     ));
     let script_data = [
-        ("media-views", media_views(site)),
+        ("media-views", media_views(site, post)),
         ("wp-plupload", plupload(site, browser)),
         // `wp_default_scripts()` lists the shortcodes core adds by then.
         (

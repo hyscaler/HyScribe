@@ -690,6 +690,7 @@ fn previews_take_the_admin_s_scheme() {
         post_type: "post".into(),
         ..Post::default()
     };
-    let link = preview_link(&Role("h9ssl:administrator"), &draft, &[]);
+    let site = Role("h9ssl:administrator");
+    let link = preview_link(&site, &site.permalink(&draft), &[]);
     assert_eq!(link, b"https://127.0.0.1:8081/?p=301&preview=true");
 }

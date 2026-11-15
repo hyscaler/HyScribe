@@ -11,14 +11,14 @@ use crate::tests::{Role, SITE, first_difference};
 /// The browser of a variant of `reference/attachment-edit/golden.sh`.
 fn agent(variant: &str) -> &'static [u8] {
     match variant.replacen("a8ttd", "a8", 1).as_str() {
-        "a8lockchrome" | "a8locknorich" => {
+        "a8lockchrome" | "a8locknorich" | "j9lockchrome" => {
             b"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
         }
         "a8lockfirefox" => b"Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0",
         "a8locksafari" => {
             b"Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         }
-        "a8lockiphone" => {
+        "a8lockiphone" | "j9lockiphone" => {
             b"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1"
         }
         "a8lockoldiphone" => {
@@ -132,7 +132,7 @@ fn pages_are_php_s() {
         "{}",
         failures[..failures.len().min(3)].join("\n")
     );
-    assert_eq!(pages, 49);
+    assert_eq!(pages, 77);
 }
 
 /// Every page of `reference/attachment-edit/golden.sh` over the Theme Test
@@ -163,8 +163,8 @@ fn other_arguments_are_not_ported() {
     }
 }
 
-/// Where PHP writes the user's own edit lock, or the attachment is not an
-/// image or file the screen ports, nothing is answered.
+/// Where PHP writes the user's own edit lock, or the screen does not port
+/// the attachment's state, nothing is answered.
 #[test]
 fn unported_states_answer_nothing() {
     for (variant, post) in [
@@ -174,12 +174,14 @@ fn unported_states_answer_nothing() {
         ("a8lockself", "801"),
         ("a8lockzero", "801"),
         ("a8lockgone", "801"),
-        ("a8lockpretty", "801"),
         ("a8lock", "901"),
-        ("a8lock", "902"),
         ("a8lock", "903"),
         ("a8lock", "904"),
         ("a8lock", "905"),
+        ("j9pretty", "902"),
+        ("j9pretty", "906"),
+        ("j9pretty", "907"),
+        ("j9prettyfront", "822"),
     ] {
         let screen = format!("post.php?post={post}&action=edit");
         assert!(

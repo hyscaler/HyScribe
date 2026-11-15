@@ -181,29 +181,14 @@ pub(crate) fn attachment_link(context: &Context, post: &Post, sample: bool) -> V
     let viewable = |parent: &Post| {
         parent.id != post.id && ["post", "page", "attachment"].contains(&parent.post_type.as_str())
     };
-    if !links.pretty() || !shown || post.parent != 0 && !parent.as_ref().is_some_and(viewable) {
+    if !shown || post.parent != 0 && !parent.as_ref().is_some_and(viewable) {
         return plain();
     }
-    let Some(parent) = parent else {
-        if sample {
-            return plain();
-        }
-        let name = String::from_utf8_lossy(&post.name).into_owned();
-        return links.trailing(&format!("{home}/{name}")).into_bytes();
-    };
-    let parent_link = String::from_utf8_lossy(&permalink(reads, &parent)).into_owned();
-    if parent_link.contains('?') {
-        return plain();
-    }
-    let name = String::from_utf8_lossy(&post.name).into_owned();
-    let numeric = !name.is_empty() && Value::String(post.name.clone()).is_numeric();
-    let name = match (sample, numeric || links.uses("%category%")) {
-        (true, _) => "%postname%".to_string(),
-        (false, true) => format!("attachment/{name}"),
-        (false, false) => name,
-    };
-    let base = parent_link.trim_end_matches(['/', '\\']);
-    links.trailing(&format!("{base}/{name}")).into_bytes()
+    let parent_link =
+        parent.map(|parent| String::from_utf8_lossy(&permalink(reads, &parent)).into_owned());
+    links
+        .attachment_link(&home, post, parent_link.as_deref(), sample)
+        .map_or_else(plain, String::into_bytes)
 }
 
 /// The attachment's parent, if it has one that is there.

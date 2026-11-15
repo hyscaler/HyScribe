@@ -766,6 +766,12 @@ impl MediaSite for Admin<'_> {
     fn attachment_mime_types(&self) -> Vec<String> {
         self.reads.reads.wait(self.site.db.mime_types("attachment"))
     }
+    fn slug_taken(&self, slug: &[u8], id: u64) -> bool {
+        let slug = String::from_utf8_lossy(slug);
+        self.reads
+            .reads
+            .wait(self.site.db.post_name_taken(&slug, id))
+    }
 }
 
 impl SettingsSite for Admin<'_> {

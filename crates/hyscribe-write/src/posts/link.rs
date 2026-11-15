@@ -174,9 +174,9 @@ async fn category_parents(write: &mut Write<'_>, id: u64) -> Result<Vec<u8>> {
         return Ok(Vec::new());
     };
     let (mut slugs, mut parent) = (vec![term.slug], term.parent);
-    // get_ancestors(): the parents, up to one already among them.
-    let mut ancestors = Vec::new();
-    while parent != 0 && !ancestors.contains(&parent) {
+    // get_ancestors(): the parents, up to none or one already among them.
+    let mut ancestors = vec![0];
+    while !ancestors.contains(&parent) {
         ancestors.push(parent);
         let term = write.term_in("category", parent).await?;
         let slug;
@@ -193,9 +193,9 @@ async fn category_parents(write: &mut Write<'_>, id: u64) -> Result<Vec<u8>> {
 /// `get_page_uri()`: the page's name after those of its ancestors that
 /// have one, as `get_post_ancestors()` finds them, the page ending a loop.
 async fn page_uri(write: &mut Write<'_>, id: u64, page: &PostFields) -> Result<String> {
-    let (mut ancestors, mut parent) = (vec![id], page.parent);
+    let (mut ancestors, mut parent) = (vec![0, id], page.parent);
     let mut names = Vec::new();
-    while parent != 0 && !ancestors.contains(&parent) {
+    while !ancestors.contains(&parent) {
         ancestors.push(parent);
         let ancestor = write.post(parent).await?;
         let name;

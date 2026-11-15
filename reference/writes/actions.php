@@ -6,6 +6,10 @@
 // needs; only `action`'s rows are recorded, though rows `setup` added are
 // new too (their IDs are masked). Both run as user 1 in one transaction.
 
+// An ID no row has: rolled back inserts still move the auto increment
+// counters, so a small one is reached after enough actions (`MISSING` in Rust).
+const HYSCRIBE_MISSING_ID = 1 << 40;
+
 $new_post = function ( $status ) {
 	return wp_insert_post(
 		array(

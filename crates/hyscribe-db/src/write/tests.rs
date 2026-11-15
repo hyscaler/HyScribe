@@ -9,6 +9,10 @@ use crate::dialect::WORDPRESS_SQL_MODE;
 use crate::tests::fixture_config;
 use hyscribe_config::Secret;
 
+/// An ID no row has: rolled back inserts still move the auto increment
+/// counters, so a small one is reached after enough tests.
+const MISSING: u64 = 1 << 40;
+
 /// Write tests run one at a time, so no action waits on another's rows
 /// and the engine test's table is never written meanwhile.
 static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -449,7 +453,7 @@ async fn reads_posts_inside_an_action() {
     let mut write = writer.begin().await.unwrap();
     let shown = |post: Option<PostFields>| format!("{post:?}");
     assert_eq!(shown(write.post(1).await.unwrap()), shown(Some(hello())));
-    assert!(write.post(999_999).await.unwrap().is_none());
+    assert!(write.post(MISSING).await.unwrap().is_none());
     assert_eq!(write.insert_post_with_id(990, &draft()).await.unwrap(), 990);
     assert_eq!(shown(write.post(990).await.unwrap()), shown(Some(draft())));
 
@@ -1123,7 +1127,7 @@ async fn reads_terms_inside_the_action() {
     }
 
     assert!(write.term_exists(1).await.unwrap());
-    assert!(!write.term_exists(999).await.unwrap());
+    assert!(!write.term_exists(MISSING).await.unwrap());
     for (slug, name, matches) in [
         (Some("uncategorized"), "x", true),
         (Some("x"), "Uncategorized", true),
@@ -1185,7 +1189,7 @@ async fn reads_terms_inside_the_action() {
     assert_eq!(write.option_value("hyscribe_missing").await.unwrap(), None);
     let post = write.post_type_status(2).await.unwrap();
     assert_eq!(post, Some(("page".into(), "publish".into())));
-    assert_eq!(write.post_type_status(999).await.unwrap(), None);
+    assert_eq!(write.post_type_status(MISSING).await.unwrap(), None);
 }
 
 #[tokio::test]

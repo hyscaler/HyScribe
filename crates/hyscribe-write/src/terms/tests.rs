@@ -10,7 +10,7 @@ use hyscribe_testkit::{fixture_database, writes::check_writes};
 use super::*;
 
 // One check at a time in the whole crate, so no two wait on each other's rows.
-use crate::tests::ONE_AT_A_TIME;
+use crate::tests::{MISSING, ONE_AT_A_TIME};
 
 async fn writer() -> Writer {
     Writer::open(&fixture_database(), Mode::Primary)
@@ -173,7 +173,7 @@ async fn refuses_duplicate_tags() {
         assert!(matches!(empty, Err(TermError::EmptyName)));
         let invalid = insert(write, tags, b"<b></b>", no_args()).await;
         assert!(matches!(invalid, Err(TermError::InvalidName)));
-        let orphan = insert(write, tags, b"Missing parent", parent(999)).await;
+        let orphan = insert(write, tags, b"Missing parent", parent(MISSING)).await;
         assert!(matches!(orphan, Err(TermError::MissingParent)));
         let other = slug(b"oracle-other");
         insert(write, tags, b"Oracle", other).await.unwrap();
@@ -276,11 +276,11 @@ async fn updates_a_term() {
             name: Some(name),
             ..TermArgs::default()
         };
-        let missing = update(write, cats, 999, name(b"Nothing")).await;
+        let missing = update(write, cats, MISSING, name(b"Nothing")).await;
         assert!(matches!(missing, Err(TermError::InvalidTerm)));
         let blank = update(write, cats, id, name(b" ")).await;
         assert!(matches!(blank, Err(TermError::EmptyName)));
-        let orphan = update(write, cats, id, parent(999)).await;
+        let orphan = update(write, cats, id, parent(MISSING)).await;
         assert!(matches!(orphan, Err(TermError::MissingParent)));
         let args = TermArgs {
             name: Some(b"Renamed & <i>new</i>"),
@@ -385,7 +385,7 @@ async fn deletes_a_tag() {
     };
     let action = async |write: &mut Write<'_>, id| {
         let tags = Taxonomy::PostTag;
-        let missing = wp_delete_term(write, tags, 999).await.unwrap();
+        let missing = wp_delete_term(write, tags, MISSING).await.unwrap();
         assert_eq!(missing, Deletion::Missing);
         let deleted = wp_delete_term(write, tags, id).await.unwrap();
         assert_eq!(deleted, Deletion::Deleted);
@@ -440,7 +440,8 @@ async fn deletes_a_category_without_a_default() {
         wp_set_post_categories(write, 1, &[TermRef::Id(news)], false)
             .await
             .unwrap();
-        let option = write.update_option("default_category", b"999");
+        let missing = MISSING.to_string();
+        let option = write.update_option("default_category", missing.as_bytes());
         option.await.unwrap();
         news
     };
@@ -522,7 +523,7 @@ async fn sets_post_tags() {
             .unwrap();
         let more = [
             TermRef::Text(b"delta"),
-            TermRef::Id(999),
+            TermRef::Id(MISSING),
             TermRef::Text(b""),
         ];
         wp_set_post_terms(write, 1, TermList::List(&more), tags, true)

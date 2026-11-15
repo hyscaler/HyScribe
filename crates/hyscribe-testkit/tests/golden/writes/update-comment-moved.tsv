@@ -1,6 +1,6 @@
 # The rows PHP WordPress writes for the action update-comment-moved (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 19:59:24 to 2026-11-14 19:59:24 UTC.
-# %wp_comments:1% is 6.
+# %now% and %unix% stand for times from 2026-11-15 04:35:49 to 2026-11-15 04:35:49 UTC.
+# %wp_comments:1% is 8.
 wp_comments	%wp_comments:1%	~	comment_agent	Oracle	New agent
 wp_comments	%wp_comments:1%	~	comment_approved	0	1
 wp_comments	%wp_comments:1%	~	comment_author_IP	192.0.2.1	192.0.2.9

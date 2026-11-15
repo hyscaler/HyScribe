@@ -20,7 +20,7 @@ const ADMIN: Commenter = Commenter {
 };
 
 // One check at a time in the whole crate: each holds row locks until its rollback.
-use crate::tests::ONE_AT_A_TIME;
+use crate::tests::{MISSING, ONE_AT_A_TIME};
 
 fn context() -> Context<'static> {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
@@ -394,7 +394,7 @@ async fn new_comments_reply_and_are_refused() {
             )
         },
         async |write, (spam, held)| {
-            for (n, parent) in [1, spam, held, 999].into_iter().enumerate() {
+            for (n, parent) in [1, spam, held, MISSING].into_iter().enumerate() {
                 let reply = NewComment {
                     user_id: 1,
                     parent,
@@ -471,12 +471,12 @@ async fn updates() {
             };
             assert_eq!(update(write, same.clone()).await, Some(false));
             let missing = CommentEdit {
-                id: 999,
+                id: MISSING,
                 ..CommentEdit::default()
             };
             assert_eq!(update(write, missing).await, None);
             let nowhere = CommentEdit {
-                post_id: Some(999),
+                post_id: Some(MISSING),
                 ..same.clone()
             };
             assert_eq!(update(write, nowhere).await, None);
@@ -509,11 +509,15 @@ async fn updates() {
 #[tokio::test]
 async fn missing_comments_and_statuses() {
     check("comment-missing", nothing, async |write, ()| {
-        assert!(!trash_comment(write, context(), 999).await.unwrap());
-        assert!(!spam_comment(write, context(), 999).await.unwrap());
-        assert!(!restore_comment(write, 999).await.unwrap());
+        assert!(!trash_comment(write, context(), MISSING).await.unwrap());
+        assert!(!spam_comment(write, context(), MISSING).await.unwrap());
+        assert!(!restore_comment(write, MISSING).await.unwrap());
         assert!(!set_comment_status(write, 1, "bogus").await.unwrap());
-        assert!(!delete_comment(write, context(), 999, false).await.unwrap());
+        assert!(
+            !delete_comment(write, context(), MISSING, false)
+                .await
+                .unwrap()
+        );
         assert!(set_comment_status(write, 1, "0").await.unwrap());
     })
     .await;

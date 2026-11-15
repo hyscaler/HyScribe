@@ -1,11 +1,11 @@
 # The rows PHP WordPress writes for the action new-comment-replies (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 19:41:01 to 2026-11-14 19:41:01 UTC.
-# %wp_comments:1% is 14.
-# %wp_comments:2% is 15.
-# %wp_comments:3% is 16.
-# %wp_comments:4% is 17.
-# %wp_comments:5% is 18.
-# %wp_comments:6% is 19.
+# %now% and %unix% stand for times from 2026-11-15 04:35:48 to 2026-11-15 04:35:48 UTC.
+# %wp_comments:1% is 2.
+# %wp_comments:2% is 3.
+# %wp_comments:3% is 4.
+# %wp_comments:4% is 5.
+# %wp_comments:5% is 6.
+# %wp_comments:6% is 7.
 wp_comments	%wp_comments:3%	+	comment_ID	%wp_comments:3%
 wp_comments	%wp_comments:3%	+	comment_agent	Oracle
 wp_comments	%wp_comments:3%	+	comment_approved	1

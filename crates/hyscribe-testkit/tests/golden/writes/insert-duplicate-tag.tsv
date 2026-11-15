@@ -1,19 +1,19 @@
 # The rows PHP WordPress writes for the action insert-duplicate-tag (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 20:34:52 to 2026-11-14 20:34:52 UTC.
-# %wp_terms:1% is 2.
-# %wp_terms:2% is 3.
-# %wp_terms:3% is 4.
-# %wp_terms:4% is 5.
-# %wp_terms:5% is 6.
-# %wp_terms:6% is 7.
-# %wp_terms:7% is 8.
-# %wp_term_taxonomy:1% is 2.
-# %wp_term_taxonomy:2% is 3.
-# %wp_term_taxonomy:3% is 4.
-# %wp_term_taxonomy:4% is 5.
-# %wp_term_taxonomy:5% is 6.
-# %wp_term_taxonomy:6% is 7.
-# %wp_term_taxonomy:7% is 8.
+# %now% and %unix% stand for times from 2026-11-15 04:35:50 to 2026-11-15 04:35:50 UTC.
+# %wp_terms:1% is 953.
+# %wp_terms:2% is 954.
+# %wp_terms:3% is 955.
+# %wp_terms:4% is 956.
+# %wp_terms:5% is 957.
+# %wp_terms:6% is 958.
+# %wp_terms:7% is 959.
+# %wp_term_taxonomy:1% is 953.
+# %wp_term_taxonomy:2% is 954.
+# %wp_term_taxonomy:3% is 955.
+# %wp_term_taxonomy:4% is 956.
+# %wp_term_taxonomy:5% is 957.
+# %wp_term_taxonomy:6% is 958.
+# %wp_term_taxonomy:7% is 959.
 wp_term_taxonomy	%wp_term_taxonomy:4%	+	count	0
 wp_term_taxonomy	%wp_term_taxonomy:4%	+	description	
 wp_term_taxonomy	%wp_term_taxonomy:4%	+	parent	1

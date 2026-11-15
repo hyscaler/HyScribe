@@ -9,7 +9,7 @@ use hyscribe_db::{CommentFields, Connection, Writer};
 use hyscribe_testkit::{fixture_database, writes::check_writes};
 use std::result::Result as StdResult;
 
-use crate::tests::{ONE_AT_A_TIME, admin};
+use crate::tests::{MISSING, ONE_AT_A_TIME, admin};
 
 async fn writer() -> Writer {
     let mode = hyscribe_config::Mode::Primary;
@@ -538,7 +538,12 @@ async fn edge_cases_match_php() {
             }
             publish(conn).await
         },
-        async |conn, id| update(conn, id, &|args| args.category = Some(vec![950, 999, 950])).await,
+        async |conn, id| {
+            update(conn, id, &|args| {
+                args.category = Some(vec![950, MISSING, 950])
+            })
+            .await
+        },
     )
     .await;
     check(

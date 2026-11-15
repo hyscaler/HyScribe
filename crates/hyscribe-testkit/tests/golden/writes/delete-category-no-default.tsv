@@ -1,9 +1,9 @@
 # The rows PHP WordPress writes for the action delete-category-no-default (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 20:00:45 to 2026-11-14 20:00:45 UTC.
-# %wp_terms:1% is 43.
-# %wp_term_taxonomy:1% is 43.
-# %wp_options:1% is 162.
-# %wp_options:2% is 164.
+# %now% and %unix% stand for times from 2026-11-15 04:35:49 to 2026-11-15 04:35:49 UTC.
+# %wp_terms:1% is 951.
+# %wp_term_taxonomy:1% is 951.
+# %wp_options:1% is 131.
+# %wp_options:2% is 133.
 wp_options	category_children	~	option_id	%wp_options:1%	%wp_options:2%
 wp_term_relationships	1,%wp_term_taxonomy:1%	-	object_id	1
 wp_term_relationships	1,%wp_term_taxonomy:1%	-	term_order	0

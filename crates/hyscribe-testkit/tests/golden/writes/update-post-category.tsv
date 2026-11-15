@@ -1,12 +1,12 @@
 # The rows PHP WordPress writes for the action update-post-category (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 20:05:02 to 2026-11-14 20:05:02 UTC.
-# %wp_posts:1% is 13.
-# %wp_posts:2% is 14.
-# %wp_postmeta:1% is 19.
-# %wp_postmeta:2% is 20.
+# %now% and %unix% stand for times from 2026-11-15 04:35:49 to 2026-11-15 04:35:49 UTC.
+# %wp_posts:1% is 5.
+# %wp_posts:2% is 6.
+# %wp_postmeta:1% is 3.
+# %wp_postmeta:2% is 4.
 # %wp_terms:1% is 950.
 # %wp_term_taxonomy:1% is 950.
-# %wp_options:1% is 134.
+# %wp_options:1% is 130.
 wp_posts	%wp_posts:2%	+	ID	%wp_posts:2%
 wp_posts	%wp_posts:2%	+	comment_count	0
 wp_posts	%wp_posts:2%	+	comment_status	closed

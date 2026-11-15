@@ -9,6 +9,10 @@ use hyscribe_phpser::Value;
 use hyscribe_testkit::fixture_database;
 use hyscribe_testkit::writes::check_writes;
 
+/// An ID no row has: rolled back inserts still move the auto increment
+/// counters, so a small one is reached after enough tests (PHP's `HYSCRIBE_MISSING_ID`).
+pub(crate) const MISSING: u64 = 1 << 40;
+
 /// One test at a time, so no test waits on another's locked rows.
 pub(crate) static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 

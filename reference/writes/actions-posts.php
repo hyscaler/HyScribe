@@ -318,7 +318,7 @@ return array(
 			$posts_update(
 				array(
 					'ID'            => $id,
-					'post_category' => array( 950, 999, 950 ),
+					'post_category' => array( 950, HYSCRIBE_MISSING_ID, 950 ),
 				)
 			);
 		},

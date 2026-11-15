@@ -6,7 +6,9 @@
 use hyscribe_db::Write;
 use hyscribe_phpser::{Key, Value, unserialize};
 
-use crate::options::{Meta, add_metadata, delete_metadata, get_metadata, update_option};
+use crate::options::{
+    Meta, add_metadata, delete_metadata, delete_object_meta, get_metadata, update_option,
+};
 
 use super::{Context, Error, Kind, Result, cron, hooks, site, wp_update_post};
 
@@ -167,8 +169,7 @@ async fn delete_one(
     for comment in write.post_comment_ids(id).await? {
         crate::comments::delete_comment(write, comments, comment, true).await?;
     }
-    let meta = write.object_meta_ids(Meta::Post, id).await?;
-    write.delete_meta(Meta::Post, &meta).await?;
+    delete_object_meta(write, Meta::Post, id).await?;
     // block_core_calendar_update_has_published_post_on_delete().
     if post.status == "publish" && kind == Kind::Post {
         hooks::update_has_published_posts(write).await?;

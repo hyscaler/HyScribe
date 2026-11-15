@@ -6,18 +6,18 @@
 
 use hyscribe_auth::hash_password;
 use hyscribe_db::{Meta, UserFields, Write};
-use hyscribe_kses::{esc_url_raw, wp_specialchars, wp_strip_all_tags};
+use hyscribe_kses::{esc_url_raw, wp_strip_all_tags};
 use hyscribe_phpser::{Value, addslashes, is_empty_string, php_trim, stripslashes};
 use hyscribe_render::date::{format_unix, site_zone};
-use hyscribe_render::formatting::{
-    sanitize_email, sanitize_text_field, sanitize_title, sanitize_user_strict,
-};
+use hyscribe_render::formatting::{sanitize_email, sanitize_title, sanitize_user_strict};
 use hyscribe_render::kses::{wp_kses_data, wp_kses_user_description};
 
 use crate::options::{
-    Autoload, add_metadata, get_metadata, get_option, update_metadata, update_option,
+    Autoload, add_metadata, delete_object_meta, get_metadata, get_option, update_metadata,
+    update_option,
 };
-use crate::{Error, now};
+use crate::steps::{Steps, step};
+use crate::{Error, MYSQL, name_filters, now, wp_filter_kses};
 
 mod roles;
 
@@ -106,26 +106,15 @@ fn mb_strlen(text: &[u8]) -> usize {
     String::from_utf8_lossy(text).chars().count()
 }
 
-/// `wp_filter_kses()`: kses over the unslashed text, slashed again.
-fn wp_filter_kses(text: &[u8], kses: fn(&[u8]) -> Vec<u8>) -> Vec<u8> {
-    addslashes(&kses(&stripslashes(text)))
-}
-
-/// The default `pre_user_{name}` filters of names: `sanitize_text_field()`,
-/// `wp_filter_kses()` and `_wp_specialchars()`.
-fn pre_user_name(text: &[u8]) -> Vec<u8> {
-    wp_specialchars(&wp_filter_kses(&sanitize_text_field(text), wp_kses_data))
-}
-
 /// The user meta `wp_insert_user()` writes, in its order, slashed.
 fn user_meta(
     data: &UserData,
     login: &[u8],
     update: bool,
 ) -> (Vec<u8>, Vec<(&'static str, Vec<u8>)>) {
-    let nickname = pre_user_name(&or(&data.nickname, login));
-    let first = pre_user_name(&or(&data.first_name, b""));
-    let last = pre_user_name(&or(&data.last_name, b""));
+    let nickname = name_filters(&or(&data.nickname, login));
+    let first = name_filters(&or(&data.first_name, b""));
+    let last = name_filters(&or(&data.last_name, b""));
     let display = match &data.display_name {
         Some(name) if !is_empty_string(name) => name.clone(),
         _ if update => login.to_vec(),
@@ -168,7 +157,7 @@ fn user_meta(
         ),
         ("locale", data.locale.clone().unwrap_or_default()),
     ];
-    (pre_user_name(&display), meta)
+    (name_filters(&display), meta)
 }
 
 /// The text of a column `wp_unslash()` gives.
@@ -186,7 +175,9 @@ pub async fn wp_insert_user(write: &mut Write<'_>, data: &UserData) -> Result<u6
         _ if is_empty_string(pass) => Pass::Kept,
         _ => Pass::Hashed(Ok(String::from_utf8_lossy(pass).into_owned())),
     };
-    insert(write, data, pass).await
+    let mut steps = Steps::new(write);
+    let id = insert(&mut steps, data, pass).await;
+    steps.finish(id)
 }
 
 /// The password `wp_insert_user()` stores.
@@ -200,20 +191,21 @@ enum Pass<'a> {
 }
 
 /// `wp_insert_user()` storing `pass`.
-async fn insert(write: &mut Write<'_>, data: &UserData, pass: Pass<'_>) -> Result<u64, Error> {
+async fn insert(
+    steps: &mut Steps<'_, '_, Error>,
+    data: &UserData,
+    pass: Pass<'_>,
+) -> Result<u64, Error> {
     let hash = match pass {
         Pass::Plain(pass) => hash_password(pass).map(Some),
         Pass::Hashed(hash) => hash.map(Some),
         Pass::Kept => Ok(None),
     };
     let found = match data.id {
-        0 => Ok(None),
-        id => write.user(id).await,
+        0 => None,
+        id => step!(steps, user(id)),
     };
-    // One `?` for either error.
-    let found = found.map_err(Error::Db);
-    let (found, hash) =
-        found.and_then(|found| hash.map(|hash| (found, hash)).map_err(Error::Random))?;
+    let hash = steps.keep(hash.map_err(Error::Random));
     let old = match data.id {
         0 => None,
         _ => Some(found.ok_or(Error::Refused("invalid_user_id"))?.1),
@@ -228,7 +220,7 @@ async fn insert(write: &mut Write<'_>, data: &UserData, pass: Pass<'_>) -> Resul
     if login.len() > 60 {
         return Err(Error::Refused("user_login_too_long"));
     }
-    if old.is_none() && write.user_id_by_login(&login).await?.is_some() {
+    if old.is_none() && step!(steps, user_id_by_login(&login)).is_some() {
         return Err(Error::Refused("existing_user_login"));
     }
     let nicename = match &data.user_nicename {
@@ -242,17 +234,13 @@ async fn insert(write: &mut Write<'_>, data: &UserData, pass: Pass<'_>) -> Resul
     if mb_strlen(&nicename) > 50 {
         return Err(Error::Refused("user_nicename_too_long"));
     }
-    if write.nicename_owner(&nicename, &login).await?.is_some() {
+    if step!(steps, nicename_owner(&nicename, &login)).is_some() {
         let base = String::from_utf8_lossy(&nicename).into_owned();
         let mut suffix = 2;
         nicename = loop {
             let length = 49 - suffix.to_string().len();
             let alt = format!("{}-{suffix}", base.chars().take(length).collect::<String>());
-            if write
-                .nicename_owner(alt.as_bytes(), &login)
-                .await?
-                .is_none()
-            {
+            if step!(steps, nicename_owner(alt.as_bytes(), &login)).is_none() {
                 break alt.into_bytes();
             }
             suffix += 1;
@@ -269,7 +257,7 @@ async fn insert(write: &mut Write<'_>, data: &UserData, pass: Pass<'_>) -> Resul
     let email_id = php_trim(&email);
     if changed_email
         && !is_empty_string(email_id)
-        && write.user_id_by_email(email_id).await?.is_some()
+        && step!(steps, user_id_by_email(email_id)).is_some()
     {
         return Err(Error::Refused("existing_user_email"));
     }
@@ -280,7 +268,7 @@ async fn insert(write: &mut Write<'_>, data: &UserData, pass: Pass<'_>) -> Resul
     }
     let registered = match &data.user_registered {
         Some(date) if !is_empty_string(date) => date.clone(),
-        _ => format_unix("Y-m-d H:i:s", now(), site_zone(b"", b"0")).into_bytes(),
+        _ => format_unix(MYSQL, now(), site_zone(b"", b"0")).into_bytes(),
     };
     let (display_name, meta) = user_meta(data, &login, old.is_some());
     let mut fields = UserFields {
@@ -297,31 +285,39 @@ async fn insert(write: &mut Write<'_>, data: &UserData, pass: Pass<'_>) -> Resul
             if old_email.as_deref() != Some(&email[..]) || fields.pass != old.pass {
                 fields.activation_key.clear();
             }
-            write.update_user(data.id, &fields).await?;
+            step!(steps, update_user(data.id, &fields));
             data.id
         }
-        None => write.insert_user(&login, &fields).await?,
+        None => step!(steps, insert_user(&login, &fields)),
     };
     let meta = meta
         .into_iter()
         .map(|(key, value)| (key.to_string(), Value::String(value)));
     for (key, value) in merge(meta.collect(), &data.meta_input) {
         if old.is_some() {
-            update_metadata(write, Meta::User, id, &key, &value, &Value::Null).await?;
+            let none = &Value::Null;
+            steps
+                .run(async |w| update_metadata(w, Meta::User, id, &key, &value, none).await)
+                .await;
         } else {
-            add_metadata(write, Meta::User, id, &key, &value, false).await?;
+            steps
+                .run(async |w| add_metadata(w, Meta::User, id, &key, &value, false).await)
+                .await;
         }
     }
-    match &data.role {
-        Some(role) => set_role(write, id, role).await?,
+    let role = match &data.role {
+        Some(role) => Some(role.clone()),
         None if old.is_none() => {
-            let role = get_option(write, "default_role").await?.to_php_string();
-            set_role(write, id, &role).await?;
+            let role = steps.run(async |w| get_option(w, "default_role").await);
+            Some(role.await.to_php_string())
         }
-        None => {}
+        None => None,
+    };
+    if let Some(role) = role {
+        steps.run(async |w| set_role(w, id, &role).await).await;
     }
     if old.is_none() {
-        update_user_count(write).await?;
+        update_user_count(steps).await;
     }
     Ok(id)
 }
@@ -340,14 +336,17 @@ fn merge(mut meta: Vec<(String, Value)>, more: &[(String, Value)]) -> Vec<(Strin
 
 /// `wp_maybe_update_user_counts()` after a user is added or deleted: the
 /// `user_count` option, unless it is over 10000.
-async fn update_user_count(write: &mut Write<'_>) -> Result<(), Error> {
+async fn update_user_count(steps: &mut Steps<'_, '_, Error>) {
     // A missing count reads as 0, where PHP's default is -1: both are small.
-    if get_option(write, "user_count").await?.to_int() <= 10_000 {
-        let count = write.user_count().await?;
+    let known = steps.run(async |w| get_option(w, "user_count").await);
+    if known.await.to_int() <= 10_000 {
+        let count = step!(steps, user_count());
         let count = Value::String(count.to_string().into_bytes());
-        update_option(write, "user_count", &count, Some(Autoload::Off)).await?;
+        let off = Some(Autoload::Off);
+        steps
+            .run(async |w| update_option(w, "user_count", &count, off).await)
+            .await;
     }
-    Ok(())
 }
 
 /// The meta `wp_update_user()` reads back into `$userdata`.
@@ -369,7 +368,13 @@ const ADDITIONAL_KEYS: [&str; 12] = [
 /// `wp_update_user( $userdata )`: `data`'s fields over the user's own, the
 /// new password hashed. The user's ID.
 pub async fn wp_update_user(write: &mut Write<'_>, data: &UserData) -> Result<u64, Error> {
-    let Some((login, user)) = write.user(data.id).await? else {
+    let mut steps = Steps::new(write);
+    let id = update(&mut steps, data).await;
+    steps.finish(id)
+}
+
+async fn update(steps: &mut Steps<'_, '_, Error>, data: &UserData) -> Result<u64, Error> {
+    let Some((login, user)) = step!(steps, user(data.id)) else {
         return Err(Error::Refused("invalid_user_id"));
     };
     let pass = match data.user_pass.as_deref() {
@@ -406,11 +411,12 @@ pub async fn wp_update_user(write: &mut Write<'_>, data: &UserData) -> Result<u6
         &mut merged.locale,
     ];
     for (key, field) in ADDITIONAL_KEYS.into_iter().zip(fields) {
-        let values = get_metadata(write, Meta::User, data.id, key).await?;
+        let values = steps.run(async |w| get_metadata(w, Meta::User, data.id, key).await);
+        let values = values.await;
         let value = values.first().map(Value::to_php_string).unwrap_or_default();
         fill(field, &value);
     }
-    insert(write, &merged, Pass::Hashed(pass)).await
+    insert(steps, &merged, Pass::Hashed(pass)).await
 }
 
 /// `wp_delete_user( $id, $reassign )`: the user and its meta, its posts and
@@ -422,31 +428,43 @@ pub async fn wp_delete_user(
     reassign: Option<u64>,
     request: &crate::posts::Context,
 ) -> Result<bool, Error> {
-    if write.user(id).await?.is_none() {
+    let mut steps = Steps::new(write);
+    let deleted = delete(&mut steps, id, reassign, request).await;
+    steps.finish(deleted)
+}
+
+async fn delete(
+    steps: &mut Steps<'_, '_, Error>,
+    id: u64,
+    reassign: Option<u64>,
+    request: &crate::posts::Context,
+) -> Result<bool, Error> {
+    if step!(steps, user(id)).is_none() {
         return Ok(false);
     }
     match reassign {
         Some(heir) => {
-            write.reassign_posts(id, heir).await?;
-            write.reassign_links(id, heir).await?;
+            step!(steps, reassign_posts(id, heir));
+            step!(steps, reassign_links(id, heir));
         }
         None => {
-            for post in write
-                .author_post_ids_of_types(id, &DELETED_WITH_USER)
-                .await?
-            {
-                crate::posts::wp_delete_post(write, request, post, false).await?;
+            for post in step!(steps, author_post_ids_of_types(id, &DELETED_WITH_USER)) {
+                let deleted = async |w: &mut Write<'_>| {
+                    crate::posts::wp_delete_post(w, request, post, false).await
+                };
+                steps.run(deleted).await;
             }
             // `wp_delete_link()` of each link, once ported.
-            if !write.owner_link_ids(id).await?.is_empty() {
+            if !step!(steps, owner_link_ids(id)).is_empty() {
                 return Err(Error::Unported("wp_delete_link"));
             }
         }
     }
-    let meta = write.object_meta_ids(Meta::User, id).await?;
-    write.delete_meta(Meta::User, &meta).await?;
-    write.delete_user(id).await?;
-    update_user_count(write).await?;
+    steps
+        .run(async |w| delete_object_meta(w, Meta::User, id).await)
+        .await;
+    step!(steps, delete_user(id));
+    update_user_count(steps).await;
     Ok(true)
 }
 

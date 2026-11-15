@@ -10,7 +10,7 @@ use hyscribe_phpser::{Value, unserialize};
 
 use crate::options::{Autoload, Meta, add_metadata, delete_metadata, get_metadata, update_option};
 
-use super::{Context, Error, Kind, PostArgs, Result, UNSLUGGED, cron, date, site, truthy};
+use super::{Context, Error, Kind, PostArgs, Result, UNSLUGGED, cron, date, truthy};
 
 /// `get_permalink( $id )` of a post saved as `post`: the GUID a new post
 /// gets. Only plain links are ported, as pretty ones are not yet.
@@ -205,7 +205,7 @@ pub(super) async fn transition(
         for taxonomy in kind.taxonomies() {
             let terms = write.object_terms(id, taxonomy).await?;
             let tt_ids: Vec<u64> = terms.into_iter().map(|(_, tt_id)| tt_id).collect();
-            site::update_term_counts(write, &tt_ids).await?;
+            crate::terms::update_term_count(write, &tt_ids).await?;
         }
     }
     // _wp_auto_add_pages_to_menu().

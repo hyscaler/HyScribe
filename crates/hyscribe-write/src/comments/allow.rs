@@ -5,13 +5,15 @@
 //! (`check_comment()` and `wp_check_comment_disallowed_list()`). PHP passes
 //! them slashed data, which the option checks match as it is.
 
+use hyscribe_db::DbError;
 use hyscribe_kses::{str_contains, wp_strip_all_tags};
 use hyscribe_phpser::{Value, addslashes, is_empty_string, php_trim, stripslashes};
 use hyscribe_render::date::{Zone, format_unix, stored_unix};
 use hyscribe_render::front_comment_text;
 
-use super::{Commenter, Context, MYSQL, NewComment, option, step};
-use crate::steps::Steps;
+use super::{Commenter, Context, NewComment, option};
+use crate::MYSQL;
+use crate::steps::{Steps, step};
 
 /// Why `wp_new_comment()` refused a comment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,7 +27,7 @@ pub enum Refused {
 /// `wp_allow_comment()`: the approval (`0`, `1` or `trash`), or why the
 /// comment is refused.
 pub(super) async fn allow_comment(
-    steps: &mut Steps<'_, '_>,
+    steps: &mut Steps<'_, '_, DbError>,
     context: Context<'_>,
     comment: &NewComment,
     commenter: Commenter,
@@ -57,7 +59,7 @@ pub(super) async fn allow_comment(
 /// approved; anyone else's comment is checked against the discussion
 /// options, and goes to the trash if it has a disallowed word.
 pub(super) async fn check_comment_data(
-    steps: &mut Steps<'_, '_>,
+    steps: &mut Steps<'_, '_, DbError>,
     context: Context<'_>,
     comment: &NewComment,
     commenter: Commenter,
@@ -111,7 +113,7 @@ struct Slashed {
 /// moderator. A pingback is always held (gap: PHP approves one from a
 /// published post of the site).
 async fn check_comment(
-    steps: &mut Steps<'_, '_>,
+    steps: &mut Steps<'_, '_, DbError>,
     context: Context<'_>,
     fields: &Slashed,
     comment_type: &str,

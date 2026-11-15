@@ -251,8 +251,8 @@ impl Write<'_> {
         object: u64,
         key: &str,
     ) -> Result<Option<Vec<u8>>, DbError> {
-        self.spend()?;
         let query = self.sql(meta.statements().value).bind(object).bind(key);
+        self.spend()?;
         let row = query
             .fetch_optional(&mut *self.tx)
             .await

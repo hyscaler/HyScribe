@@ -32,6 +32,17 @@ pub(crate) enum Size<'a> {
     },
 }
 
+impl Size<'_> {
+    /// `array( $width, $height )`, each read through `(int)`.
+    pub(crate) fn from_sides(width: &Value, height: &Value) -> Size<'static> {
+        Size::Dimensions {
+            width: width.to_int(),
+            height: height.to_int(),
+            original_ratio: matches!(width, Value::Int(0)) || matches!(height, Value::Int(0)),
+        }
+    }
+}
+
 impl std::fmt::Display for Size<'_> {
     /// The size's class name: its name, or `implode( 'x', $size )` of the
     /// integer sides.

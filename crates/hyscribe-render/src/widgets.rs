@@ -231,6 +231,7 @@ impl Renderer<'_> {
             "meta" => self.meta_widget(args, instance),
             "text" => self.text_widget(args, instance),
             "media_image" => self.media_image_widget(args, instance),
+            "media_gallery" => self.media_gallery_widget(args, instance),
             _ => Vec::new(),
         }
     }

@@ -634,3 +634,154 @@ fn media_image_matches_php() {
     );
     assert_eq!((lines.len(), thrown), (100, 6));
 }
+
+/// The default install with `reference/media-gallery-widget/golden.sh`'s
+/// attachments, answering `gallery_shortcode()`'s query.
+struct Galleried {
+    attached: Attached,
+    /// The `posts_per_page` option, when the case sets it.
+    per_page: Option<Vec<u8>>,
+}
+
+impl Site for Galleried {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        match (name, &self.per_page) {
+            ("posts_per_page", Some(per_page)) => Some(per_page.clone()),
+            _ => self.attached.option(name),
+        }
+    }
+    fn home_url(&self) -> Vec<u8> {
+        self.attached.home_url()
+    }
+    fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        self.attached.post(id)
+    }
+    fn post_terms(&self, _: u64, _: &str) -> Vec<hyscribe_model::Term> {
+        Vec::new()
+    }
+    fn post_meta(&self, post_id: u64, key: &str) -> Option<Vec<u8>> {
+        self.attached.post_meta(post_id, key)
+    }
+    /// Attachments of the statuses and MIME type asked, among those
+    /// included, in the orders the golden uses.
+    fn query(&self, query: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
+        use hyscribe_model::OrderBy;
+        assert_eq!(query.post_types, ["attachment"]);
+        assert_eq!(query.mime_types, ["image/%"]);
+        // No `post__in` lists them all, up to the option's.
+        let include = query.include.clone();
+        let per_page = match self.per_page.as_deref() {
+            None => 10,
+            Some(b"-1") => u32::MAX,
+            Some(b"0") => 1,
+            Some(b"-3") => 3,
+            Some(other) => panic!("no {other:?} posts_per_page in the golden"),
+        };
+        let limit = include.as_ref().map_or(per_page, |ids| ids.len() as u32);
+        assert_eq!(query.limit, limit);
+        let mut found: Vec<hyscribe_model::Post> = self
+            .attached
+            .attachments
+            .iter()
+            .map(|(post, _)| post.clone())
+            .filter(|post| {
+                include.as_ref().is_none_or(|ids| ids.contains(&post.id))
+                    && query.statuses.iter().any(|s| s.status == post.status)
+                    && post.mime_type.starts_with("image/")
+            })
+            .collect();
+        let [(by, ascending)] = query.order[..] else {
+            panic!("one order: {:?}", query.order)
+        };
+        match by {
+            OrderBy::Included => {
+                let include = include.unwrap();
+                found.sort_by_key(|post| include.iter().position(|id| *id == post.id))
+            }
+            // The attachments share a date, which MariaDB breaks by ID.
+            OrderBy::Id | OrderBy::Date => found.sort_by_key(|post| post.id),
+            OrderBy::Title => found.sort_by(|a, b| a.title.cmp(&b.title)),
+            OrderBy::Random => assert_eq!(found.len(), 1),
+            other => panic!("no {other:?} order in the golden"),
+        }
+        if !ascending && by != OrderBy::Included {
+            found.reverse();
+        }
+        found.truncate(limit as usize);
+        found
+    }
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        self.attached.wp_hash(data)
+    }
+}
+
+/// Every case of `reference/media-gallery-widget/golden.sh`, in order, as
+/// `gallery_shortcode()` numbers its galleries through the whole run.
+#[test]
+fn media_gallery_matches_php() {
+    let golden = include_str!("../../tests/golden/media-gallery-widget.tsv");
+    let theme = twentytwentyfive();
+    let mut failures = Vec::new();
+    let mut galleries = 0;
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let state = hyscribe_phpser::json_decode(&unhex(f[2])).unwrap();
+        let field = |row: &hyscribe_phpser::Value, i| {
+            row.get(&hyscribe_phpser::Key::Int(i)).unwrap().clone()
+        };
+        let text = |row: &hyscribe_phpser::Value, i| field(row, i).to_php_string();
+        let attachments = state.get_str("attachments").unwrap().as_array().unwrap();
+        let site = Galleried {
+            attached: Attached {
+                install: crate::fixture::DefaultInstall {
+                    home: b"http://127.0.0.1:8081".to_vec(),
+                },
+                attachments: attachments
+                    .iter()
+                    .map(|(_, row)| {
+                        let post = hyscribe_model::Post {
+                            id: field(row, 0).to_int() as u64,
+                            post_type: "attachment".into(),
+                            mime_type: String::from_utf8(text(row, 1)).unwrap(),
+                            excerpt: text(row, 2),
+                            guid: text(row, 3),
+                            title: text(row, 4),
+                            status: String::from_utf8(text(row, 5)).unwrap(),
+                            ..hyscribe_model::Post::default()
+                        };
+                        (post, field(row, 6))
+                    })
+                    .collect(),
+            },
+            per_page: state.get_str("posts_per_page").map(|n| n.to_php_string()),
+        };
+        let query = unhex(f[1]);
+        let request = Request {
+            singular: !query.is_empty(),
+            queried_object_id: if query.is_empty() { 0 } else { 1 },
+            post: Some(state.get_str("post").unwrap().to_int() as u64),
+            ..Default::default()
+        };
+        let (markup, php) = (unhex(f[0]), unhex(f[3]));
+        let mut renderer = Renderer::new(&theme, &site, &request);
+        renderer.gallery_instances = galleries;
+        let ours = renderer.render(&markup);
+        galleries = renderer.gallery_instances;
+        if ours != php {
+            failures.push(format!(
+                "{} {}\n  php:  {:?}\n  ours: {:?}",
+                String::from_utf8_lossy(&markup),
+                f[1],
+                String::from_utf8_lossy(&php),
+                String::from_utf8_lossy(&ours)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures[..failures.len().min(3)].join("\n")
+    );
+    assert_eq!((golden.lines().count(), galleries), (85, 73));
+}

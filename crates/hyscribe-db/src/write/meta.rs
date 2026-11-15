@@ -6,7 +6,7 @@
 use super::{Table, Write};
 use sqlx::Row as _;
 
-use crate::{Columns, DbError, Sql, db_error, ids_or_none, list};
+use crate::{Columns, DbError, Sql, ids_or_none, list};
 
 /// What a meta row belongs to, which names its table.
 #[derive(Clone, Copy, Debug)]
@@ -252,11 +252,7 @@ impl Write<'_> {
         key: &str,
     ) -> Result<Option<Vec<u8>>, DbError> {
         let query = self.sql(meta.statements().value).bind(object).bind(key);
-        self.spend()?;
-        let row = query
-            .fetch_optional(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
+        let row = self.optional(query).await?;
         Ok(row.map(|row| super::bytes(&row, "meta_value")))
     }
 
@@ -273,9 +269,8 @@ impl Write<'_> {
         meta: Meta,
         object: u64,
     ) -> Result<Vec<(Vec<u8>, Option<Vec<u8>>)>, DbError> {
-        self.spend()?;
         let query = self.sql(meta.statements().object_meta).bind(object);
-        let rows = query.fetch_all(&mut *self.tx).await.map_err(db_error)?;
+        let rows = self.rows(query).await?;
         rows.iter()
             .map(|row| {
                 let mut c = Columns::new(row);

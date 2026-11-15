@@ -1939,3 +1939,20 @@ async fn actions_read_the_site() {
     let response = send(&site, "GET", &missing, &cookies, None).await;
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
+
+/// A site icon from the database: in the admin bar and head, and on the
+/// login screen.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_site_icon_is_read_from_the_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress_ttd", dir.path()).await;
+    let mut icon = Arc::try_unwrap(site).ok().unwrap();
+    icon.options.insert("site_icon".into(), b"611".to_vec());
+    let icon = Arc::new(icon);
+    let uploads = "http://127.0.0.1:8081/wp-content/uploads/";
+    let page = page_of(get(&icon, "/hs-admin/tools", "127.0.0.1:8081", &cookies).await).await;
+    assert!(page.contains(&format!("<img class=\"site-icon\" src=\"{uploads}")));
+    assert!(page.contains(&format!("<link rel=\"icon\" href=\"{uploads}")));
+    let page = page_of(get(&icon, "/hs-login", "127.0.0.1:8081", "").await).await;
+    assert!(page.contains(&format!("<link rel=\"apple-touch-icon\" href=\"{uploads}")));
+}

@@ -90,6 +90,8 @@ pub struct Site {
     salts: Vec<(&'static str, hyscribe_config::Secret)>,
     /// The login sessions, in primary mode only.
     sessions: Option<hyscribe_auth::sessions::Sessions>,
+    /// The gated writer, in primary mode only (ADR 0010).
+    writer: Option<hyscribe_db::Writer>,
     /// The constants of `home` and `siteurl` the configuration sets.
     defined: Vec<&'static str>,
     /// `REST_PUBLIC_USERS`: the public users REST endpoint is on.
@@ -129,6 +131,7 @@ impl Site {
             rewriter: rewrite::Rewriter::default(),
             salts: Vec::new(),
             sessions: None,
+            writer: None,
             defined,
             public_users: true,
         };
@@ -155,6 +158,11 @@ impl Site {
             sessions: Some(sessions),
             ..self
         }
+    }
+
+    /// The site with the writer `Writer::open` gave: none in shadow mode.
+    pub fn with_writer(self, writer: Option<hyscribe_db::Writer>) -> Site {
+        Site { writer, ..self }
     }
 
     /// `wp_salt( $scheme )`: the configured keys and salts, else `option`'s.

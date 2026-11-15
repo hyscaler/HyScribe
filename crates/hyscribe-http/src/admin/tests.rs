@@ -1924,9 +1924,13 @@ async fn actions_read_the_site() {
     let promote = format!("/hs-admin/users?changeit=1&new_role=king&users[]=1&_wpnonce={nonce}");
     let response = send(&site, "GET", &promote, &cookies, None).await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    // Past its checks, in shadow mode: the site is read only.
     let promote = promote.replace("king", "editor");
     let response = send(&site, "GET", &promote, &cookies, None).await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let page = page_of(response).await;
+    let read_only = hyscribe_admin::die::page(true, "WordPress &rsaquo; Error", READ_ONLY);
+    assert_eq!(page.into_bytes(), read_only);
     let form = Some((
         "application/x-www-form-urlencoded",
         "action=dim-comment&id=1",
@@ -1972,4 +1976,98 @@ async fn the_site_icon_is_read_from_the_database() {
     assert!(page.contains(&format!("<link rel=\"icon\" href=\"{uploads}")));
     let page = page_of(get(&icon, "/hs-login", "127.0.0.1:8081", "").await).await;
     assert!(page.contains(&format!("<link rel=\"apple-touch-icon\" href=\"{uploads}")));
+}
+
+/// A writer as the fixture's read only user, with `prefix`: its actions
+/// run, and a write would fail, so a test never changes the fixture.
+async fn unwritable(site: Arc<Site>, prefix: &str) -> Arc<Site> {
+    let config = hyscribe_config::Database {
+        user: "wordpress_read".into(),
+        password: Secret::new("reference-only"),
+        prefix: hyscribe_config::Prefix::new(prefix).unwrap(),
+        ..hyscribe_testkit::fixture_database()
+    };
+    let writer = hyscribe_db::Writer::open(&config, hyscribe_config::Mode::Primary).await;
+    let site = Arc::try_unwrap(site).ok().unwrap();
+    Arc::new(site.with_writer(writer.unwrap()))
+}
+
+/// `wp-admin/users.php` under hs-admin's names.
+fn hs(text: &str) -> String {
+    let text = text.replace("wp-admin%2Fusers.php", "hs-admin%2Fusers");
+    text.replace("/wp-admin/users.php", "/hs-admin/users")
+        .replace("users.php", "users")
+}
+
+/// Past their checks, the role changes of `reference/admin-saves/golden.sh`
+/// answer as PHP's, but user 801's, whom the fixture lacks (its rows and
+/// answer are the write oracle's, in `saves`); what PHP cannot go on with
+/// is not ported, and a failed write is the database error page.
+#[tokio::test(flavor = "multi_thread")]
+async fn actions_answer_as_php_once_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let nonce = session_nonce(&site, &cookies, "bulk-users").await;
+    let site = unwritable(site, "wp_").await;
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
+    let cases = include_str!("../../../../reference/admin-saves/cases.list");
+    let rows = golden
+        .lines()
+        .filter(|row| !row.starts_with("users-promote\t"));
+    for row in rows {
+        let [case, status, php_location, body] = row.split('\t').collect::<Vec<_>>()[..] else {
+            panic!("{row}");
+        };
+        let line = cases
+            .lines()
+            .find(|line| line.starts_with(&format!("{case}\t")));
+        let fields: Vec<&str> = line.unwrap().split('\t').collect();
+        let [_, method, target, data, _, field] = fields[..] else {
+            panic!("{case}");
+        };
+        let uri = format!("/hs-admin/{}", hs(target));
+        let response = if method == "POST" {
+            let form = (
+                "application/x-www-form-urlencoded",
+                &*format!("{data}&{field}={nonce}"),
+            );
+            send(&site, "POST", &uri, &cookies, Some(form)).await
+        } else {
+            let uri = format!("{uri}&{field}={nonce}");
+            send(&site, "GET", &uri, &cookies, None).await
+        };
+        assert_eq!(response.status().as_str(), status, "{case}");
+        assert_eq!(location(&response), hs(php_location), "{case}");
+        let php = hyscribe_testkit::unhex(body);
+        assert_eq!(page_of(response).await.into_bytes(), php, "{case}");
+    }
+    let promote = format!("/hs-admin/users?changeit=1&new_role=editor&_wpnonce={nonce}");
+    for users in [
+        "users[]=1099511627776",
+        "users[]=-1",
+        "users[]=1&wp_http_referer[]=x",
+    ] {
+        let response = send(&site, "GET", &format!("{promote}&{users}"), &cookies, None).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{users}");
+    }
+    // An action whose write has no handler yet.
+    let reset = format!("/hs-admin/users?action=resetpassword&users[]=1&_wpnonce={nonce}");
+    let response = send(&site, "GET", &reset, &cookies, None).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // A database whose `db_version` cannot be read takes no write.
+    let site = unwritable(site, "missing_").await;
+    let response = send(
+        &site,
+        "GET",
+        &format!("{promote}&users[]=1"),
+        &cookies,
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let page = page_of(response).await;
+    assert!(
+        page.contains("Error establishing a database connection"),
+        "{page}"
+    );
 }

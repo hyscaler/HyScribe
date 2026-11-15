@@ -236,6 +236,32 @@ fn nonce(action: &str) -> String {
     format!("_wpnonce=%nonce:{action}%")
 }
 
+/// The action a request past its checks names for its handler.
+#[test]
+fn actions_are_named_as_php_names_them() {
+    for (screen, query, expected) in [
+        ("users", "changeit=Change&action=delete", "promote"),
+        ("users", "action=resetpassword", "resetpassword"),
+        ("users", "action=-1", ""),
+        ("edit", "changeit=Change&action=trash", "trash"),
+    ] {
+        let get = fields(query);
+        let asked = Asked {
+            get: &get,
+            post: &[],
+            referer: None,
+            uri: b"/wp-admin/",
+            home: HOME,
+            user: 1,
+        };
+        assert_eq!(
+            action(screen, &asked),
+            expected.as_bytes(),
+            "{screen} {query}"
+        );
+    }
+}
+
 /// Requests the goldens leave out: those that are not actions, those whose
 /// next step is not ported, and arguments PHP reads oddly.
 #[test]

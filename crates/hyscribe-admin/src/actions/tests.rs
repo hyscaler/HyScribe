@@ -155,11 +155,12 @@ fn sent(refusal: &Refusal) -> Vec<u8> {
     }
 }
 
-/// Whether PHP's answer refuses: an error status, `wp_die()`'s page, or
-/// an Ajax `-1` or `0`.
+/// Whether PHP's answer refuses: an error status, `wp_die()`'s page, an
+/// Ajax `-1` or `0`, or `wp_send_json_error()`'s answer.
 fn is_refusal(status: u16, body: &[u8]) -> bool {
     status >= 400
         || matches!(body, b"-1" | b"0")
+        || body.starts_with(b"{\"success\":false")
         || String::from_utf8_lossy(body).contains("<body id=\"error-page\">")
 }
 

@@ -565,24 +565,28 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 /// `comments_open( $post )`, with `_close_comments_for_old_post()`.
 pub(crate) fn comments_open(context: &Context<'_>, post: &Post) -> bool {
     let option = |name: &str| context.site.option(name).unwrap_or_default();
+    let close = (
+        &*option("close_comments_for_old_posts"),
+        &*option("close_comments_days_old"),
+    );
     let post = (&*post.comment_status, &*post.post_type, &*post.date_gmt);
-    comments_open_at(&option, post, context.request.now)
+    comments_open_at(close, post, context.request.now)
 }
 
 /// `comments_open()` at `now` of a post's `comment_status`, `post_type` and
-/// `post_date_gmt`, with `_close_comments_for_old_post()` over `option`.
+/// `post_date_gmt`, closed after `close_comments_days_old` if `close` asks.
 pub fn comments_open_at(
-    option: &dyn Fn(&str) -> Vec<u8>,
+    (close, days_old): (&[u8], &[u8]),
     (status, post_type, date_gmt): (&str, &str, &str),
     now: i64,
 ) -> bool {
     if status != "open" {
         return false;
     }
-    if is_empty_string(&option("close_comments_for_old_posts")) {
+    if is_empty_string(close) {
         return true;
     }
-    let days = Value::String(option("close_comments_days_old")).to_int();
+    let days = Value::String(days_old.to_vec()).to_int();
     if days == 0 || post_type != "post" || date_gmt == "0000-00-00 00:00:00" {
         return true;
     }

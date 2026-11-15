@@ -336,3 +336,40 @@ fn a_preview_needs_a_signed_held_comment() {
     }
     assert!(site.base.held_comment(3).is_none());
 }
+
+/// A signed held comment shows for ten minutes after its date, and only on
+/// its own post.
+#[test]
+fn a_preview_lasts_ten_minutes_on_its_post() {
+    let date = "2026-11-15 00:00:00";
+    let held = |id, post_id| Comment {
+        id,
+        post_id,
+        author_email: b"held@example.test".to_vec(),
+        date_gmt: date.into(),
+        ..Comment::default()
+    };
+    let site = WithComments {
+        base: DefaultInstall {
+            home: b"http://example.test".to_vec(),
+        },
+        options: Value::Null,
+        comments: Vec::new(),
+        users: Vec::new(),
+        password: false,
+        closed: false,
+        siteurl: b"http://example.test".to_vec(),
+        held: vec![held(3, 1), held(4, 2)],
+        hashes: json_decode(br#"{"2026-11-15 00:00:00":"signed"}"#).unwrap(),
+    };
+    let expiry = crate::date::stored_unix(date, crate::date::Zone::Utc) + 600;
+    let request = |id: u64, now| Request {
+        get: parse_str(format!("unapproved={id}&moderation-hash=signed").as_bytes()),
+        now,
+        ..Request::default()
+    };
+    let shown = |id, now| post_comments(&site, &request(id, now), 1).len();
+    assert_eq!(shown(3, expiry - 1), 1);
+    assert_eq!(shown(3, expiry), 0);
+    assert_eq!(shown(4, expiry - 1), 0);
+}

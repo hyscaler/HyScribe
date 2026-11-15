@@ -306,6 +306,14 @@ async fn the_route_answers_as_php() {
     let response = send(&site, "POST", PATH, "", Some((FORM, closed.body))).await;
     let (status, _, _, body) = php("closed");
     assert_eq!(response.status().as_u16(), status);
+    let headers = response.headers();
+    assert_eq!(headers[header::CONTENT_TYPE], "text/html; charset=UTF-8");
+    assert!(
+        headers[header::CACHE_CONTROL]
+            .to_str()
+            .unwrap()
+            .contains("no-store")
+    );
     assert_eq!(page_of(response).await.into_bytes(), body);
     let multipart = "multipart/form-data; boundary=x";
     for (body, kind) in [("--x--", multipart), ("redirect_to[]=x", FORM)] {
@@ -419,4 +427,84 @@ async fn only_a_held_comment_is_previewed() {
     let page = page_of(response).await;
     assert!(page.contains("id=\"comment-1\""), "{page}");
     assert!(!page.contains("awaiting moderation"));
+}
+
+/// A visitor who does not agree to cookies has them removed, else kept a
+/// year; a `redirect_to` of `0` is empty, so the comment's link is used.
+#[tokio::test(flavor = "multi_thread")]
+async fn cookies_last_a_year_or_go() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, _) = logged_in("wordpress", dir.path()).await;
+    let writer = Writer::open(&fixture_database(), Mode::Primary).await;
+    let writer = writer.unwrap().unwrap();
+    let body = "comment_post_ID=1&author=Ann&email=ann%40example.test&comment=Here.&redirect_to=0";
+    let consent = format!("{body}&wp-comment-cookies-consent=yes");
+    for (body, age) in [(body, "Max-Age=0;"), (&consent, "Max-Age=31536000;")] {
+        let mut conn = connect().await;
+        let mut tx = conn.begin().await.unwrap();
+        let response = post((&site, &writer), &mut tx, (body, ""), None).await;
+        let to = response.headers()[header::LOCATION].to_str().unwrap();
+        assert!(to.starts_with("http://127.0.0.1:8081/?p=1"), "{to}");
+        // The author's cookie: an empty URL's is deleted either way.
+        let author = response.headers().get(header::SET_COOKIE).unwrap();
+        assert!(author.to_str().unwrap().contains(age), "{author:?}");
+        tx.rollback().await.unwrap();
+    }
+}
+
+/// Capability checks see the post the action read in place of the site's.
+#[tokio::test(flavor = "multi_thread")]
+async fn capability_checks_see_the_action_s_post() {
+    let site = crate::tests::oracle_site().await;
+    let handle = Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let mut reads = LoginReads::new(&site, handle, now());
+        reads.action_post = Some(CapPost {
+            id: 1,
+            author: 1,
+            status: "private".into(),
+            post_type: "post".into(),
+            parent: 0,
+        });
+        let status = |id| hyscribe_auth::caps::CapabilityData::post(&reads, id).map(|p| p.status);
+        assert_eq!(status(1).as_deref(), Some("private"));
+        assert_eq!(status(2).as_deref(), Some("publish"));
+    })
+    .await
+    .unwrap();
+}
+
+/// The front end reads a held comment, here the Theme Test Data's.
+#[tokio::test(flavor = "multi_thread")]
+async fn held_comments_are_read() {
+    let config = hyscribe_config::Database {
+        name: "wordpress_ttd".into(),
+        ..fixture_database()
+    };
+    let db = hyscribe_db::Db::connect(&config).await.unwrap();
+    let site = Arc::new(Site::load(db, None, None).await.unwrap());
+    let handle = Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let reads = crate::reads::Reads::new(&site, handle);
+        assert_eq!(reads.held_comment(27).map(|c| c.post_id), Some(1148));
+        assert!(reads.held_comment(1).is_none());
+    })
+    .await
+    .unwrap();
+}
+
+/// Unpaged, a comment's link is its post's, with the trailing slash of a
+/// pretty permalink structure that has one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_comment_links_to_its_post() {
+    let writer = Writer::open(&fixture_database(), Mode::Primary).await;
+    let writer = writer.unwrap().unwrap();
+    let mut conn = connect().await;
+    let mut tx = conn.begin().await.unwrap();
+    let sql = "UPDATE wp_options SET option_value = '/%postname%/' WHERE option_name = 'permalink_structure'";
+    sqlx::query(sql).execute(&mut *tx).await.unwrap();
+    let mut write = writer.begin_on(&mut tx).await.unwrap();
+    let permalink = Some(b"http://127.0.0.1:8081/hello-world".to_vec());
+    let link = comment_link(&mut write, permalink, 5).await.unwrap();
+    assert_eq!(link, "http://127.0.0.1:8081/hello-world/#comment-5");
 }

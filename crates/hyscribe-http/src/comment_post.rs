@@ -260,9 +260,13 @@ async fn comment_link(
     id: u64,
 ) -> Result<String, hyscribe_write::Error> {
     let names = ["page_comments", "comments_per_page", "permalink_structure"];
-    let option = submit::options(write, &names).await?;
-    let paged = !is_empty_string(&option("page_comments"))
-        && !is_empty_string(&option("comments_per_page"));
+    let [page_comments, per_page, structure] = submit::options(write, names).await?;
+    let paged = !is_empty_string(&page_comments) && !is_empty_string(&per_page);
+    // Unpaged, the link reads only the permalink structure.
+    let option = |name: &str| match name {
+        "permalink_structure" => structure.clone(),
+        _ => Vec::new(),
+    };
     let Some(permalink) = permalink.filter(|_| !paged) else {
         return Err(hyscribe_write::Error::Unported("the page of a comment"));
     };

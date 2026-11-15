@@ -64,8 +64,8 @@ pub(super) async fn post(
         }
     }
     let post = match u64::try_from(fields.post_id) {
-        Ok(id) if id != 0 => write.post(id).await?,
-        _ => None,
+        Ok(id) => write.post(id).await?,
+        Err(_) => None,
     };
     Ok(Ok(post.filter(|post| {
         !is_empty_string(post.comment_status.as_bytes())
@@ -114,9 +114,9 @@ pub(super) async fn submit(
         return Ok(Err(Failure::Silent));
     }
     let names = ["close_comments_for_old_posts", "close_comments_days_old"];
-    let option = options(write, &names).await?;
+    let [close, days_old] = options(write, names).await?;
     let open = (&*post.comment_status, &*post.post_type, &*post.date_gmt);
-    if !comments_open_at(&option, open, poster.context.now) {
+    if !comments_open_at((&close, &days_old), open, poster.context.now) {
         return Ok(Err(Failure::Died(
             403,
             "Sorry, comments are closed for this item.",
@@ -202,20 +202,17 @@ pub(super) async fn submit(
     }))
 }
 
-/// `get_option()` of each of `names`, read in the action, as one lookup:
-/// empty for a missing option.
-pub(super) async fn options(
+/// `get_option()` of each of `names`, read in the action: empty for a
+/// missing option.
+pub(super) async fn options<const N: usize>(
     write: &mut Write<'_>,
-    names: &[&'static str],
-) -> Result<impl Fn(&str) -> Vec<u8> + use<>, DbError> {
-    let mut found = Vec::new();
-    for &name in names {
-        found.push((name, write.option_value(name).await?.unwrap_or_default()));
+    names: [&str; N],
+) -> Result<[Vec<u8>; N], DbError> {
+    let mut values = [const { Vec::new() }; N];
+    for (value, name) in values.iter_mut().zip(names) {
+        *value = write.option_value(name).await?.unwrap_or_default();
     }
-    Ok(move |name: &str| {
-        let value = found.iter().find(|(known, _)| *known == name);
-        value.map(|(_, value)| value.clone()).unwrap_or_default()
-    })
+    Ok(values)
 }
 
 /// `post_password_required()`: a password, unless the `wp-postpass_`

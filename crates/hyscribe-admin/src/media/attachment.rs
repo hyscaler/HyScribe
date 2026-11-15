@@ -449,18 +449,17 @@ fn parent_link(site: &dyn AttachmentSite, parent: &Post) -> Option<String> {
     Some(site.permalink(parent))
 }
 
-/// `get_attachment_link()` of an attachment of `status`, `%postname%` left in
-/// a `sample` one; `None` where [`parent_link`] is, or attached to a file.
-fn attachment_link(
+/// `get_attachment_link()` of an attachment of `status`, and the sample with
+/// `%postname%` left in; `None` where [`parent_link`] is, or under a file.
+fn attachment_links(
     site: &dyn AttachmentSite,
     post: &Post,
     status: &str,
-    sample: bool,
-) -> Option<String> {
+) -> Option<(String, String)> {
     let plain = site.permalink(post);
     let structure = site.option("permalink_structure").unwrap_or_default();
     if is_empty_string(&structure) {
-        return Some(plain);
+        return Some((plain.clone(), plain));
     }
     let parent = (post.parent != 0).then(|| site.post(post.parent)).flatten();
     if parent
@@ -476,7 +475,7 @@ fn attachment_link(
     };
     let valid = post.parent == 0 || parent.as_ref().is_some_and(viewable);
     if !shown || !valid {
-        return Some(plain);
+        return Some((plain.clone(), plain));
     }
     let parent_link = match parent {
         Some(parent) => Some(parent_link(site, &parent)?),
@@ -490,8 +489,11 @@ fn attachment_link(
     );
     let home = BarSite::home_url(site);
     let home = home.strip_suffix('/').unwrap_or(&home);
-    let link = links.attachment_link(home, post, parent_link.as_deref(), sample);
-    Some(link.unwrap_or(plain))
+    let link = |sample| {
+        let link = links.attachment_link(home, post, parent_link.as_deref(), sample);
+        link.unwrap_or_else(|| plain.clone())
+    };
+    Some((link(false), link(true)))
 }
 
 /// `wp_unique_post_slug()` of an attachment's slug: suffixed while another
@@ -512,15 +514,13 @@ fn unique_slug(site: &dyn AttachmentSite, post: &Post) -> Option<Vec<u8>> {
         .find(|alt| !site.slug_taken(alt, post.id))
 }
 
-/// `get_sample_permalink_html()` with the attachment's `view` link; `None`
-/// where its parts are, or for an editable link without a slug.
+/// `get_sample_permalink_html()` of the attachment's `view` and sample
+/// links; `None` where [`unique_slug`] is, or editable without a slug.
 fn sample_permalink(
     site: &dyn AttachmentSite,
     post: &Post,
-    status: &str,
-    view: &str,
+    (view, permalink): (&str, &str),
 ) -> Option<String> {
-    let permalink = attachment_link(site, post, status, true)?;
     let (view, target) = match site.can_post("read_post", post) {
         false => (None, String::new()),
         true if is_empty_string(&post.name) => {
@@ -884,7 +884,7 @@ pub fn attachment_edit(
     }
     let status = post_status(site, &post);
     let holder = lock_holder(site, &post)?;
-    let view = attachment_link(site, &post, &status, false)?;
+    let (view, sample) = attachment_links(site, &post, &status)?;
     let state = State {
         meta,
         size,
@@ -892,13 +892,13 @@ pub fn attachment_edit(
         status,
         holder,
         view,
+        sample,
     };
     page(site, args, request, &post, &state)
 }
 
-/// What the screen shows of an attachment beyond its post: its metadata
-/// and file size, its kind, `get_post_status()`, the lock's holder and the
-/// attachment's link.
+/// What the screen shows of an attachment beyond its post: metadata, size,
+/// kind, `get_post_status()`, the lock's holder, its link and sample link.
 struct State {
     meta: Value,
     size: i64,
@@ -906,6 +906,7 @@ struct State {
     status: String,
     holder: User,
     view: String,
+    sample: String,
 }
 
 /// The form, its meta boxes and the lock dialog; `None` where the parts are.
@@ -929,7 +930,7 @@ fn page(
     let permalink_box = match slug_shown {
         true => format!(
             "\t\t<div id=\"edit-slug-box\" class=\"hide-if-no-js\">\n\t\t\t{}\t</div>\n\t\t",
-            sample_permalink(site, post, &state.status, &state.view)?
+            sample_permalink(site, post, (&state.view, &state.sample))?
         ),
         false => String::new(),
     };

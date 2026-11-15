@@ -227,7 +227,7 @@ impl Role {
 
     /// A variant of `reference/privacy-requests/golden.sh`, over its content.
     fn j9_requests(&self) -> bool {
-        ["j9req", "j9hidden", "j9pp"].contains(&self.variant())
+        ["j9req", "j9hidden", "j9pp", "j9trash"].contains(&self.variant())
     }
 
     /// A `j9` variant of `reference/attachment-edit/golden.sh`, all of
@@ -560,6 +560,17 @@ impl Role {
         let mut posts = crate::posts::content::posts(self.listing(), self.variant() == "empty");
         if self.j9_requests() {
             posts.extend(crate::tools::content::posts());
+        }
+        // A request in the Trash, a status not a request's.
+        if self.variant() == "j9trash" {
+            posts.push(hyscribe_model::Post {
+                id: 899,
+                status: "trash".into(),
+                name: b"export_personal_data".to_vec(),
+                post_type: "user_request".into(),
+                modified_gmt: "2026-11-12 16:13:20".into(),
+                ..hyscribe_model::Post::default()
+            });
         }
         if self.a8() {
             posts.extend(crate::media::attachment::content::posts());

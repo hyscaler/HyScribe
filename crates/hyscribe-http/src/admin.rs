@@ -1125,18 +1125,15 @@ fn screen(
         }
         "/hs-admin/tools" => Answer::from_page(tools::tools(admin, &request)),
         // Their actions are not ported.
-        "/hs-admin/export-personal-data" => privacy_requests(
-            admin,
-            Requests::Export,
-            &RequestsArgs::parse(query)?,
-            &request,
-        )?,
-        "/hs-admin/erase-personal-data" => privacy_requests(
-            admin,
-            Requests::Erase,
-            &RequestsArgs::parse(query)?,
-            &request,
-        )?,
+        "/hs-admin/export-personal-data" | "/hs-admin/erase-personal-data" => {
+            let requests = match path {
+                "/hs-admin/export-personal-data" => Requests::Export,
+                _ => Requests::Erase,
+            };
+            let args = RequestsArgs::parse(query)?;
+            let answer = privacy_requests(admin, requests, &args, &request);
+            return answer.map(|answer| served(admin, answer));
+        }
         // Their arguments and actions are not ported, but the Themes
         // screen's broken theme notice.
         "/hs-admin/themes" | "/hs-admin/import" | "/hs-admin/export" => {

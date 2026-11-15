@@ -180,10 +180,14 @@ fn filters_take_wp_query_s_statuses() {
 /// A request in a status not a request's lists no rows, which is not ported.
 #[test]
 fn other_statuses_are_not_ported() {
-    let trashed = hyscribe_model::Post {
-        status: "trash".into(),
-        ..hyscribe_model::Post::default()
-    };
-    let site = Role("j9req:administrator");
-    assert!(requests::rows(&site, Requests::Export, "x.php", (&[], &[]), &[trashed]).is_none());
+    let path = "/hs-admin/export-personal-data?filter-status=trash";
+    let canonical = format!("{SITE}{path}");
+    let args = RequestsArgs::parse("filter-status=trash").unwrap();
+    let page = privacy_requests(
+        &Role("j9trash:administrator"),
+        Requests::Export,
+        &args,
+        &request(&canonical, path, &BROWSER),
+    );
+    assert!(page.is_none());
 }

@@ -85,14 +85,12 @@ pub(crate) fn posts() -> Vec<Post> {
     .collect()
 }
 
-/// The confirmation and completion times the content keeps.
+/// The confirmation and completion times the lists show.
 pub(crate) fn meta(id: u64, key: &str) -> Option<Vec<u8>> {
     let value = match (id, key) {
         (862, "_wp_user_request_confirmed_timestamp") => "1794492800",
-        (863, "_wp_user_request_confirmed_timestamp") => "1766620800",
         (863, "_wp_user_request_completed_timestamp") => "1766707200",
         (872, "_wp_user_request_confirmed_timestamp") => "1767744000",
-        (873, "_wp_user_request_confirmed_timestamp") => "1767830400",
         (873, "_wp_user_request_completed_timestamp") => "1767873600",
         _ => return None,
     };

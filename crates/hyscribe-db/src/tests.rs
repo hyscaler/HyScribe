@@ -571,6 +571,7 @@ async fn every_query() -> Vec<DbError> {
         .await
         .unwrap_err(),
         db.status_counts("post", None).await.unwrap_err(),
+        db.post_name_taken("hello-world", 2).await.unwrap_err(),
         db.own_posts("post", 1).await.unwrap_err(),
         db.sticky_count("post", &[1]).await.unwrap_err(),
         db.post_months("post", true).await.unwrap_err(),

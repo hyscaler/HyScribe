@@ -185,6 +185,8 @@ pub(crate) struct Renderer<'a> {
     /// `WP_Widget_Recent_Comments::widget()`'s `static $first_instance`,
     /// spent once a recent comments widget has printed `#recentcomments`.
     pub(crate) recent_comments_shown: bool,
+    /// `gallery_shortcode()`'s `static $instance`, counting its galleries.
+    pub(crate) gallery_instances: u64,
     /// The `layout` attribute of the block being rendered, `parentLayout`
     /// to its inner blocks.
     pub(crate) parent_layout: Option<Value>,
@@ -265,6 +267,7 @@ impl<'a> Renderer<'a> {
             categories_dropdown_used: false,
             calendar_widget_shown: false,
             recent_comments_shown: false,
+            gallery_instances: 0,
             parent_layout: None,
             unique_id: 0,
             elements_id: 0,

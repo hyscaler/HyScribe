@@ -275,7 +275,7 @@ fn merge(into: &mut Vec<(Key, Value)>, from: &[(Key, Value)]) {
 
 /// `get_post_status()`: an attachment's inherited status, from its parent.
 /// A loop of parents, which PHP never leaves, has no status.
-fn post_status(data: &dyn CapabilityData, post: &CapPost) -> String {
+pub fn post_status(data: &dyn CapabilityData, post: &CapPost) -> String {
     inherited_status(data, post, &mut Vec::new())
 }
 

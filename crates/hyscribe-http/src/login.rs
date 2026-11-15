@@ -22,7 +22,7 @@ use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
 use crate::reads::Reads;
-use crate::redirect::{wp_sanitize_redirect, wp_validate_redirect};
+use crate::redirect::{wp_safe_redirect, wp_sanitize_redirect, wp_validate_redirect};
 use crate::{Site, now};
 
 /// The login screen's path.
@@ -30,14 +30,15 @@ pub(crate) const PATH: &str = "/hs-login";
 
 const DAY: i64 = 86_400;
 
-const YEAR: i64 = 365 * DAY;
+pub(crate) const YEAR: i64 = 365 * DAY;
 
 /// HyScribe's cookie names, which never stand for a PHP WordPress login,
 /// and their paths.
 pub(crate) struct Names {
-    hash: String,
+    /// `COOKIEHASH`.
+    pub(crate) hash: String,
     /// `COOKIEPATH`, from the home URL.
-    path: String,
+    pub(crate) path: String,
     /// `SITECOOKIEPATH`, from the site URL.
     site_path: String,
 }
@@ -88,7 +89,7 @@ impl Names {
 
 /// `setcookie()`, with `HttpOnly` and `SameSite=Lax` added
 /// (docs/SECURITY_MODEL.md): `expires` 0 for a session cookie.
-fn set_cookie(
+pub(crate) fn set_cookie(
     name: &str,
     value: &[u8],
     (expires, now): (i64, i64),
@@ -162,6 +163,9 @@ pub(crate) struct LoginReads<'a> {
     current: (u64, Vec<u8>),
     /// `user-profile`'s user: the request's `user_id`, cast to an integer.
     profile_user: i64,
+    /// A post as a writer action reads it, which capability checks see in
+    /// place of the site's.
+    pub(crate) action_post: Option<CapPost>,
 }
 
 impl<'a> LoginReads<'a> {
@@ -173,6 +177,7 @@ impl<'a> LoginReads<'a> {
             found: RefCell::default(),
             current: (0, Vec::new()),
             profile_user: 0,
+            action_post: None,
         }
     }
 
@@ -321,7 +326,7 @@ impl LoginSite for LoginReads<'_> {
     }
 
     fn public(&self) -> bool {
-        !Value::String(self.site.raw_option("blog_public").to_vec()).is_empty()
+        self.site.public()
     }
 
     /// `wp_create_nonce( $action )` for the current user.
@@ -380,6 +385,9 @@ impl CapabilityData for LoginReads<'_> {
     }
 
     fn post(&self, id: u64) -> Option<CapPost> {
+        if let Some(post) = self.action_post.as_ref().filter(|post| post.id == id) {
+            return Some(post.clone());
+        }
         self.reads.post(id).map(|post| CapPost {
             id: post.id,
             author: post.author,
@@ -665,10 +673,7 @@ fn logout(
                 .into_bytes()
         }
     };
-    // `wp_safe_redirect()`.
-    let host = hyscribe_kses::url_host(reads.site.home.as_bytes()).unwrap_or_default();
-    let location = wp_validate_redirect(&redirect_to, &host, reads.admin_url("").as_bytes());
-    let location = String::from_utf8_lossy(&wp_sanitize_redirect(&location)).into_owned();
+    let location = wp_safe_redirect(reads.site, &redirect_to, &reads.admin_url(""));
     headers.push((header::LOCATION, location));
     headers.push((
         header::HeaderName::from_static("x-redirect-by"),

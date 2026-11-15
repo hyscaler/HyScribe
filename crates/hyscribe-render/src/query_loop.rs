@@ -423,6 +423,16 @@ fn search_matches(search: &str) -> Vec<&str> {
     matches
 }
 
+/// `WP_Query`'s limit for a `posts_per_page`: -1 for all, a lower number
+/// as its absolute value, 0 as 1.
+pub(crate) fn query_limit(per_page: i64) -> u32 {
+    match per_page {
+        -1 => u32::MAX,
+        0 => 1,
+        n => u32::try_from(n.unsigned_abs()).unwrap_or(u32::MAX),
+    }
+}
+
 /// The `orderby` of `WP_Query` for `orderBy`: each allowed key of a
 /// space separated list in `ascending` order, or of an array in its own.
 /// `post__in` and `post_parent__in` count only when `query` has the list.

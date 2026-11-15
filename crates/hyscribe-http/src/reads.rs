@@ -174,6 +174,10 @@ impl RenderSite for Reads<'_> {
         self.memo(&self.comment, id, || self.wait(self.site.db.comment(id)))
     }
 
+    fn held_comment(&self, id: u64) -> Option<Comment> {
+        self.wait(self.site.db.held_comment(id))
+    }
+
     fn user(&self, id: u64) -> Option<User> {
         self.memo(&self.users, id, || self.wait(self.site.db.user(id)))
     }

@@ -30,6 +30,7 @@ tokio = { version = "1", features = ["macros", "net", "rt", "sync"] }
 [dev-dependencies]
 hyscribe-testkit.workspace = true
 sha2.workspace = true
+sqlx = { version = "0.9", default-features = false, features = ["mysql", "runtime-tokio"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "test-util"] }
 tower = { version = "0.5", default-features = false, features = ["util"] }

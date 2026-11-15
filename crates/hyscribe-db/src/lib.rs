@@ -980,6 +980,20 @@ impl Db {
         row.as_ref().map(comment).transpose()
     }
 
+    /// One comment by ID that is held for moderation, of any type.
+    pub async fn held_comment(&self, id: u64) -> Result<Option<Comment>, DbError> {
+        let mut sql = select_comments(
+            " FROM {prefix}comments WHERE comment_ID = ? AND comment_approved = '0'",
+        );
+        sql.bind(Bind::Int(id));
+        let row = sql
+            .query(&self.prefix)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.as_ref().map(comment).transpose()
+    }
+
     /// One approved comment by ID, of any type.
     pub async fn comment(&self, id: u64) -> Result<Option<Comment>, DbError> {
         let mut sql = select_comments(

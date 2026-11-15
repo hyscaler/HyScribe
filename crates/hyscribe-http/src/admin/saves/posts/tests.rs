@@ -668,7 +668,7 @@ async fn bulk_trash_skips_locked_posts() {
         post_row(950, (1, "publish", "post"), ("Locked", "Text."), 0),
         meta(1, "_edit_lock", &now.to_string()),
         meta(1, "_edit_last", "900"),
-        meta(2, "_edit_lock", "1:900"),
+        meta(2, "_edit_lock", &format!("{}:900", now - 150)),
         meta(3, "_edit_lock", &format!("{now}:1")),
         meta(950, "_edit_lock", &format!("{now}:12345")),
     ];
@@ -965,4 +965,40 @@ async fn options_are_read_again() {
     site.db = hyscribe_db::Db::connect(&missing).await.unwrap();
     site.reload_options().await;
     assert_eq!(site.raw_option("siteurl"), SITE.as_bytes());
+}
+
+/// The capabilities read in the action: of a page's type, of a user who
+/// must exist, and of a trashed post by the status it was trashed from.
+#[tokio::test]
+async fn capabilities_are_read_in_the_action() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    // Who edits pages and publishes posts, but not pages.
+    let caps = "a:5:{s:10:\"edit_pages\";b:1;s:17:\"edit_others_pages\";b:1;\
+                s:20:\"edit_published_pages\";b:1;s:13:\"publish_posts\";b:1;s:10:\"edit_posts\";b:1;}";
+    let [editor, meta_caps] = user(905, caps);
+    let draft = quick(3, "screen=edit-page&post_type=page&_status=publish");
+    let read = "SELECT post_status FROM wp_posts WHERE ID = 3";
+    let (_, statuses) = tried(905, &[editor, meta_caps], ("admin-ajax", "", &draft), read).await;
+    assert_eq!(statuses, ["pending"]);
+    // An administrator's capabilities without the user are none.
+    let [_, orphan] = user(906, "a:1:{s:13:\"administrator\";b:1;}");
+    let (answer, _) = tried(906, &[orphan], ("edit", "action=trash&post[]=1", ""), read).await;
+    assert_eq!(
+        answer,
+        died("Sorry, you are not allowed to move this item to the Trash.")
+    );
+    // A contributor's own post trashed once published needs more to delete.
+    let [contributor, meta_caps] = user(907, "a:1:{s:11:\"contributor\";b:1;}");
+    let trashed = post_row(950, (907, "trash", "post"), ("Gone", "Text."), 0);
+    let sql = [
+        contributor,
+        meta_caps,
+        trashed,
+        meta(950, "_wp_trash_meta_status", "publish"),
+    ];
+    let (answer, _) = tried(907, &sql, ("edit", "action=delete&post[]=950", ""), read).await;
+    assert_eq!(
+        answer,
+        died("Sorry, you are not allowed to delete this item.")
+    );
 }

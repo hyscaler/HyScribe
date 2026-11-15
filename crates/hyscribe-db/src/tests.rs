@@ -62,6 +62,9 @@ fn the_prefix_goes_into_sql() {
 #[tokio::test]
 async fn reads_the_default_install() {
     let db = fixture().await;
+    // Another post's slug, in any case, as `wp_unique_post_slug()` checks it.
+    assert!(db.post_name_taken("Hello-World", 2).await.unwrap());
+    assert!(!db.post_name_taken("hello-world", 1).await.unwrap());
     let options = db.autoload_options().await.unwrap();
     assert!(
         options

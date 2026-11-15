@@ -357,9 +357,14 @@ async fn logged_in_users_are_let_in() {
     }
     // The request lists searched, which finds none here.
     for file in ["export-personal-data", "erase-personal-data"] {
-        let path = format!("/hs-admin/{file}?s=nobody&filter-status=request-pending");
+        let path = format!(
+            "/hs-admin/{file}?s=nobody&filter-status=request-pending&orderby=requester&order=asc&paged=1"
+        );
         let page = page_of(get(&site, &path, "127.0.0.1:8081", &cookies).await).await;
         assert!(page.contains("name=\"s\" value=\"nobody\""), "{file}");
+        let path = format!("/hs-admin/{file}?s[]=nobody");
+        let response = get(&site, &path, "127.0.0.1:8081", &cookies).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
     }
     for path in [
         "/hs-admin/plugins",

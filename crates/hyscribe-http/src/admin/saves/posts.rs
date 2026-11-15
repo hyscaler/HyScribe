@@ -646,11 +646,7 @@ fn translate(saved: &Saved, mut data: Data, user: u64) -> Result<Result<Data, &'
     if data.get("post_password").is_some() && !publishes {
         data.unset("post_password");
     }
-    for name in ["comment_status", "ping_status"] {
-        if data.get(name).is_none() {
-            data.set(name, Value::String(b"closed".to_vec()));
-        }
-    }
+    // The callers set `comment_status` and `ping_status` already.
     for name in ["aa", "mm", "jj", "hh", "mn"] {
         let hidden = data
             .get(&format!("hidden_{name}"))

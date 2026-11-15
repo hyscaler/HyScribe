@@ -938,7 +938,7 @@ async fn edits_of_odd_fields() {
     // Bulk Edit sent as a form, a category given twice.
     let categories = "SELECT CAST(term_taxonomy_id AS CHAR) FROM wp_term_relationships \
                       WHERE object_id = 1 ORDER BY term_taxonomy_id";
-    let body = "post[]=1&post_category[]=1&post_category[]=1&indeterminate_post_category[]=1";
+    let body = "post[]=1&post_category[]=1&post_category[]=1";
     let query = "action=edit&bulk_edit=Update&post_type=post";
     let (answer, terms) = tried(1, &[], ("edit", query, body), categories).await;
     assert!(

@@ -107,6 +107,14 @@ async fn new_parents_are_checked_as_php_checks_them() {
     assert_eq!(check(w, id(chain[1]), b, None).await, Some(MOVED));
     // A parent whose own parent is gone is at depth 2.
     assert_eq!(check(w, b, id(orphan), None).await, None);
+    // Two comments replying to each other: their subtree is measured until
+    // it cannot fit, which ends the loop.
+    let looped = w.insert_comment(&reply(0, "1")).await.unwrap();
+    let back = w.insert_comment(&reply(looped, "1")).await.unwrap();
+    let mut first = w.comment(looped).await.unwrap().unwrap();
+    first.parent = back;
+    w.update_comment(looped, &first).await.unwrap();
+    assert_eq!(check(w, id(looped), b, None).await, Some(MOVED));
     w.update_option("thread_comments_depth", b"0")
         .await
         .unwrap();

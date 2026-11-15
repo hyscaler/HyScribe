@@ -36,13 +36,11 @@ pub trait CommentEditSite: CommentsSite {
 }
 
 /// `get_comment_excerpt()` cut by `wp_html_excerpt()` for the parent
-/// dropdown.
+/// dropdown. Its line breaks to spaces change nothing, as `wp_trim_words()`
+/// joins the words with spaces.
 fn option_label(row: &RecentComment) -> String {
-    let content: Vec<u8> = (row.comment.content.iter())
-        .map(|&b| if b == b'\n' || b == b'\r' { b' ' } else { b })
-        .collect();
-    let words =
-        hyscribe_render::wp_trim_words(&hyscribe_kses::strip_tags(&content), 20, b"&hellip;");
+    let text_only = hyscribe_kses::strip_tags(&row.comment.content);
+    let words = hyscribe_render::wp_trim_words(&text_only, 20, b"&hellip;");
     let author = text(&comment_author_of(&row.comment, row.user.as_ref()));
     format!("{author}: {}", html_excerpt(&text(&words), 50, "\u{2026}"))
 }

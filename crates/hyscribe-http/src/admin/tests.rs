@@ -2424,7 +2424,7 @@ async fn page_views_and_screen_state_write_as_php() {
 }
 
 /// One test at a time over `wordpress_saves`, which each reloads.
-static SAVES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static SAVES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// In primary mode a Settings save's notice shows on the screen it sends
 /// back, which deletes it, so a reload shows none; shadow mode only reads.

@@ -92,4 +92,13 @@ fn arguments_are_parsed() {
     };
     let field = "name=\"_wp_original_http_referer\" value=\"http://127.0.0.1:8081/hs-admin/edit-tags?taxonomy=category\"";
     assert!(page.contains(field), "{page}");
+    // A page that is its own referer has none.
+    for referer in [path.to_string(), format!("{SITE}{path}")] {
+        let args = TermEditArgs::parse("taxonomy=category&tag_ID=1", Some(referer)).unwrap();
+        let request = crate::tests::request(path, path, &BROWSER);
+        let Answer::Page(page) = term_edit(&Role("administrator"), &args, &request) else {
+            panic!("no page");
+        };
+        assert!(page.contains("name=\"_wp_original_http_referer\" value=\"\""));
+    }
 }

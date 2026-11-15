@@ -20,6 +20,7 @@ use crate::terms::{
 mod cron;
 mod date;
 mod hooks;
+mod link;
 mod site;
 mod slug;
 mod trash;
@@ -458,7 +459,7 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
         wp_set_post_categories(write, id, &terms, false).await?;
     }
     if before.is_none() {
-        let guid = hooks::permalink(write, ctx, id, &fields).await?;
+        let guid = link::permalink(write, ctx, id, &fields).await?;
         write.set_post_guid(id, &guid).await?;
     }
     hooks::transition(write, ctx, kind, (&fields.status, &previous), id).await?;

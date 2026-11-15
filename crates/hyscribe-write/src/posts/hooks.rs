@@ -5,51 +5,11 @@
 //! `wp_save_post_revision()` makes, and the checks on the post's parent.
 
 use hyscribe_db::{PostFields, Write};
-use hyscribe_model::Post;
 use hyscribe_phpser::{Value, unserialize};
 
 use crate::options::{Autoload, Meta, add_metadata, delete_metadata, get_metadata, update_option};
 
-use super::{Context, Error, Kind, PostArgs, Result, UNSLUGGED, cron, date, truthy};
-
-/// `get_permalink( $id )` of a post saved as `post`: the GUID a new post
-/// gets. Only plain links are ported, as pretty ones are not yet.
-pub(super) async fn permalink(
-    write: &mut Write<'_>,
-    ctx: &Context,
-    id: u64,
-    post: &PostFields,
-) -> Result<Vec<u8>> {
-    let structure = write
-        .option_value("permalink_structure")
-        .await?
-        .unwrap_or_default();
-    // Pages in the future take pretty links; posts do not.
-    let plain_statuses: &[&str] = match post.post_type.as_str() {
-        "page" => &UNSLUGGED,
-        _ => &["draft", "pending", "auto-draft", "future"],
-    };
-    if !structure.is_empty() && !plain_statuses.contains(&post.status.as_str()) {
-        return Err(Error::Unported("a GUID under pretty permalinks"));
-    }
-    let show_on_front = write
-        .option_value("show_on_front")
-        .await?
-        .unwrap_or_default();
-    let page_on_front = write
-        .option_value("page_on_front")
-        .await?
-        .unwrap_or_default();
-    let front_page = hyscribe_render::link::front_page(&show_on_front, &page_on_front);
-    let post = Post {
-        id,
-        post_type: post.post_type.clone(),
-        ..Post::default()
-    };
-    Ok(hyscribe_render::link::permalink(
-        &ctx.home, front_page, &post,
-    ))
-}
+use super::{Context, Error, Kind, PostArgs, Result, cron, date, link, truthy};
 
 /// The ID `wp_get_post_parent_id()` gives, 0 for none.
 async fn parent_of(write: &mut Write<'_>, id: u64, link: (u64, u64)) -> Result<u64> {
@@ -195,7 +155,7 @@ pub(super) async fn transition(
     let post = super::existing(write, id).await?;
     // _transition_post_status().
     if old != "publish" && new == "publish" && post.guid.is_empty() {
-        let guid = permalink(write, ctx, id, &post).await?;
+        let guid = link::permalink(write, ctx, id, &post).await?;
         write.set_post_guid(id, &guid).await?;
     }
     cron::clear(write, "publish_future_post", id).await?;

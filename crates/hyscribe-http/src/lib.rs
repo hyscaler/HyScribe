@@ -160,8 +160,15 @@ impl Site {
         }
     }
 
-    /// The site with the writer `Writer::open` gave: none in shadow mode.
+    /// The site with the writer `Writer::open` gave (none in shadow mode),
+    /// which takes the addresses the configuration sets.
     pub fn with_writer(self, writer: Option<hyscribe_db::Writer>) -> Site {
+        let urls = [("home", "WP_HOME"), ("siteurl", "WP_SITEURL")]
+            .into_iter()
+            .filter(|(_, constant)| self.defined.contains(constant))
+            .map(|(name, _)| (name, self.option(name)))
+            .collect();
+        let writer = writer.map(|writer| writer.with_urls(urls));
         Site { writer, ..self }
     }
 

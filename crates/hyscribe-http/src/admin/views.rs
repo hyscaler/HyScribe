@@ -2,7 +2,8 @@
 
 //! A page view's writes in primary mode: the user settings synced with
 //! their cookie and a list's `?mode=`, the welcome panel's
-//! `?welcome=` and the Quick Draft form's auto-draft. They are kept
+//! `?welcome=`, the Quick Draft form's auto-draft and the Settings
+//! saves' notices, deleted once a screen shows them. They are kept
 //! with the page, and `?mode=`'s with the redirect past a list's last page.
 
 use axum::http::{HeaderValue, StatusCode, header};
@@ -12,6 +13,7 @@ use hyscribe_admin::menu::MenuUser;
 use hyscribe_db::{DbError, Write, Writer};
 use hyscribe_phpser::Value;
 use hyscribe_write::Error;
+use hyscribe_write::options::settings_errors_shown;
 use hyscribe_write::posts::Context;
 use tokio::runtime::Handle;
 
@@ -27,7 +29,20 @@ pub(super) struct View {
     welcome: Option<bool>,
     /// Whether the Quick Draft form needs a new auto-draft.
     draft: bool,
+    /// Whether a Settings screen shows what a save left (`settings-updated`).
+    settings: bool,
 }
+
+/// The Settings screens, whose `options-head.php` shows a save's notices.
+const SETTINGS: [&str; 7] = [
+    "/hs-admin/options-general",
+    "/hs-admin/options-writing",
+    "/hs-admin/options-reading",
+    "/hs-admin/options-discussion",
+    "/hs-admin/options-media",
+    "/hs-admin/options-permalink",
+    "/hs-admin/options-privacy",
+];
 
 /// What the view of `path` with the query `get` writes, and what the page
 /// reads after: the settings, the welcome panel's state.
@@ -64,10 +79,14 @@ pub(super) fn plan(
         .filter(|_| dashboard && admin.can("edit_theme_options"));
     let welcome = welcome.map(|shown| !shown.is_empty());
     admin.welcome = welcome.map(|shown| i64::from(shown).to_string().into_bytes());
+    let updated = get
+        .get_str("settings-updated")
+        .is_some_and(|updated| !updated.is_empty());
     View {
         synced,
         welcome,
         draft: dashboard && needs_draft(admin),
+        settings: updated && SETTINGS.contains(&path),
     }
 }
 
@@ -84,11 +103,13 @@ pub(super) fn quick_press(admin: &Admin) -> View {
         synced: Synced::default(),
         welcome: None,
         draft: needs_draft(admin),
+        settings: false,
     }
 }
 
 /// The view's writes in `write`, once begun, as PHP makes them: the
-/// settings, and with the page the welcome panel's state and the auto-draft.
+/// settings, and with the page the welcome panel's state, the auto-draft
+/// and the notices a save left, once shown.
 pub(super) async fn written<'w>(
     write: Result<Write<'w>, DbError>,
     ctx: &Context,
@@ -105,6 +126,9 @@ pub(super) async fn written<'w>(
     } else {
         None
     };
+    if view.settings && page {
+        settings_errors_shown(&mut write, ctx.now).await?;
+    }
     Ok((write, draft))
 }
 
@@ -129,8 +153,11 @@ pub(super) fn viewed(
     let mut response = render(admin);
     let page = response.status() == StatusCode::OK;
     let kept = page || response.status() == StatusCode::FOUND && view.synced.mode.is_some();
+    // Only a page, or `?mode=`'s redirect, is kept.
     let after = view.synced.mode.is_some()
-        || page && (view.synced.newer.is_some() || view.welcome.is_some());
+        || view.synced.newer.is_some()
+        || view.welcome.is_some()
+        || view.settings;
     let saved = match drafted {
         // The Quick Draft form is shown to all who may write posts.
         Some((write, _)) => handle.block_on(write.commit()).map_err(Error::from),
@@ -173,3 +200,6 @@ pub(super) fn viewed(
     }
     response
 }
+
+#[cfg(test)]
+mod tests;

@@ -326,6 +326,15 @@ impl Role {
         let value: &[u8] = match (self.variant(), name) {
             // `WP_SITEURL` and `WP_HOME`.
             (_, "siteurl" | "home") => SITE.as_bytes(),
+            (variant, "_transient_settings_errors") if variant.starts_with("o5") => {
+                let kept = crate::settings::tests::kept_errors(variant);
+                return kept.map(|kept| &*Box::leak(kept.into_boxed_slice()));
+            }
+            ("o5expired", "_transient_timeout_settings_errors") => b"1794499999",
+            ("o5now", "_transient_timeout_settings_errors") => b"1794500000",
+            (variant, "_transient_timeout_settings_errors") if variant.starts_with("o5") => {
+                b"4102444800"
+            }
             ("s1static" | "s1same" | "s1privacy" | "s1unset" | "s1hidden", "show_on_front") => {
                 b"page"
             }

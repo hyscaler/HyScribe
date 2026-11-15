@@ -6,8 +6,10 @@
 # write, as crates/hyscribe-admin/tests/golden/admin-saves.tsv:
 #   case<TAB>status<TAB>Location<TAB>hex(body)
 # and the screen named in a case's seventh column, fetched after it, as
-# admin-saves-after.tsv: case<TAB>status<TAB>hex(page). Nonces in bodies and
-# pages are masked as %nonce:action%. Each case is sent as user 1, an administrator
+# admin-saves-after.tsv: case<TAB>status<TAB>hex(page), dated at the test
+# clock (clock.php). Nonces in bodies and pages are masked as %nonce:action%,
+# and the Settings screens' times and paths of today as reference/settings/
+# and reference/settings-more/golden.sh mask them. Each case is sent as user 1, an administrator
 # (reference/admin-menu/as-role.php), with user 1's nonce, over the default
 # install and reference/action-checks/content.sql (added, and deleted
 # after). The actions write, so start from a fresh db.sh up and php.sh up,
@@ -28,13 +30,16 @@ sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress "$@"; 
 cleanup() {
   rm -rf "$TMP"
   sed -n '/^-- cleanup$/,$p' "$CONTENT" | sql
-  "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php"
+  "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-clock.php"
 }
 trap cleanup EXIT
 sed '/^-- cleanup$/,$d' "$CONTENT" | sql
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
+"$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-clock.php" < "$HERE/clock.php"
 # The nonces masked: the cases', the screens' and those of terms 801 to 809.
 masked="log-out heartbeat-nonce wp_rest update_can_compress_scripts bulk-tags add-tag taxinlineeditnonce screen-options-nonce"
+masked="$masked reset-password-for-0 general-options writing-options reading-options discussion-options media-options"
+masked="$masked update-permalink create-privacy-page set-privacy-page dismiss-1-new_admin_email media-form media-send-to-editor set-attachment-thumbnail"
 masked="$masked $(grep -v '^#' "$HERE/cases.list" | cut -f5 | sort -u | tr '\n' ' ')"
 for id in 1 801 802 803 804 805 806 807 808 809; do masked="$masked delete-tag_$id update-tag_$id"; done
 # shellcheck disable=SC2086
@@ -48,6 +53,9 @@ hex() {
       $p = str_replace( $nonce, "%nonce:$action%", $p );
     }
     $p = preg_replace( "/\"time\":\"[0-9]+\"/", "\"time\":\"%time%\"", $p );
+    $p = preg_replace( "/<kbd>[A-Za-z0-9]{8}<\/kbd>/", "<kbd>%password%</kbd>", $p );
+    $p = str_replace( "/" . gmdate( "Y/m/d" ) . "/", "/%ymd%/", $p );
+    $p = str_replace( "/" . gmdate( "Y/m" ) . "/", "/%ym%/", $p );
     echo bin2hex( $p );' "$1" "$TMP/nonces"
 }
 : > "$OUT"

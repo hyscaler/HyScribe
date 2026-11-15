@@ -21,6 +21,7 @@ use super::{Admin, HTML, ajax_text};
 use crate::redirect::wp_validate_redirect;
 
 pub(super) mod dashboard;
+mod options;
 pub(super) mod screen;
 mod terms;
 mod users;
@@ -71,6 +72,11 @@ pub(super) enum Ajax {
 pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
     match (screen, action) {
         ("users", b"promote") => Some(users::promote),
+        ("options", b"update") => Some(options::update),
+        ("options", b"adminhash") => Some(options::adminhash),
+        ("options", b"dismiss") => Some(options::dismiss),
+        ("options-permalink", b"") => Some(options::permalinks),
+        ("options-privacy", b"create-privacy-page") => Some(options::create_privacy_page),
         ("edit-tags", b"add-tag") => Some(terms::add_tag),
         ("edit-tags", b"delete") => Some(terms::delete),
         ("edit-tags", b"bulk-delete") => Some(terms::bulk_delete),

@@ -244,6 +244,10 @@ fn actions_are_named_as_php_names_them() {
         ("users", "action=resetpassword", "resetpassword"),
         ("users", "action=-1", ""),
         ("edit", "changeit=Change&action=trash", "trash"),
+        ("options", "adminhash=x&action=update", "adminhash"),
+        ("options", "adminhash=&dismiss=new_admin_email", "dismiss"),
+        ("options", "dismiss=x&action=update", "update"),
+        ("options-privacy", "action=create-privacy-page", ""),
         ("edit-tags", "action=delete&delete_tags[]=2", "bulk-delete"),
         ("edit-tags", "action=-1", ""),
     ] {
@@ -262,6 +266,22 @@ fn actions_are_named_as_php_names_them() {
             "{screen} {query}"
         );
     }
+}
+
+/// The Privacy screen's actions are checked outside its policy guide, with
+/// their own nonces, for those who may manage privacy options.
+#[test]
+fn privacy_actions() {
+    let (admin, editor) = (role("administrator"), role("editor"));
+    let set = format!("action=set-privacy-page&{}", nonce("set-privacy-page"));
+    let file = "options-privacy.php";
+    assert_eq!(outcome(&admin, file, Some(&set)), Some(501));
+    let guide = "options-privacy.php?tab=policyguide";
+    assert_eq!(outcome(&admin, guide, Some(&set)), None);
+    assert_eq!(outcome(&admin, file, Some("x=1")), None);
+    let unsigned = "action=set-privacy-page";
+    assert_eq!(outcome(&admin, file, Some(unsigned)), Some(403));
+    assert_eq!(outcome(&editor, file, Some(&set)), Some(403));
 }
 
 /// Requests the goldens leave out: those that are not actions, those whose

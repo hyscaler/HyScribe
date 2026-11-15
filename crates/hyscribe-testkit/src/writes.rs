@@ -392,16 +392,53 @@ fn is_timeout(table: &Table, row: &Row) -> bool {
             || name.starts_with(b"_site_transient_timeout_"))
 }
 
+/// `value` with each serialized string of 32 hexadecimal digits masked as
+/// `%hash%`: the random key of the `adminhash` option.
+fn hash_masked(value: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut rest = value;
+    while let Some((&first, tail)) = rest.split_first() {
+        let hash = rest
+            .strip_prefix(b"s:32:\"")
+            .and_then(|after| after.split_at_checked(32))
+            .filter(|(hash, after)| {
+                after.starts_with(b"\"") && hash.iter().all(|b| b"0123456789abcdef".contains(b))
+            });
+        match hash {
+            Some((_, after)) => {
+                out.extend_from_slice(b"s:32:\"%hash%");
+                rest = after;
+            }
+            None => {
+                out.push(first);
+                rest = tail;
+            }
+        }
+    }
+    out
+}
+
 /// Rows of `table` masked, by masked key.
 fn masked(masks: &Masks, table: &Table, rows: &BTreeMap<Vec<u8>, Row>) -> BTreeMap<Vec<u8>, Row> {
     rows.values()
         .map(|row| {
             let timeout = is_timeout(table, row);
+            let option = (table.name == "wp_options").then(|| value(row, "option_name"));
             let row: Row = row
                 .iter()
-                .map(|(column, value)| match column.as_str() {
-                    "option_value" if timeout => (column.clone(), b"%expiry%".to_vec()),
-                    _ => (column.clone(), masks.mask(table, column, value)),
+                .map(|(column, value)| {
+                    let masked = masks.mask(table, column, value);
+                    let masked = match (column.as_str(), option) {
+                        ("option_value", _) if timeout => b"%expiry%".to_vec(),
+                        ("option_value", Some(b"adminhash")) => hash_masked(&masked),
+                        // A new privacy policy page's ID.
+                        ("option_value", Some(b"wp_page_for_privacy_policy")) => {
+                            let id = masks.new.get(&("wp_posts", masked.clone()));
+                            id.cloned().unwrap_or(masked)
+                        }
+                        _ => masked,
+                    };
+                    (column.clone(), masked)
                 })
                 .collect();
             (key(&row, table.key), row)

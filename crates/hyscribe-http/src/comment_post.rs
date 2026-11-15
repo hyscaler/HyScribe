@@ -76,7 +76,7 @@ pub(crate) async fn respond(site: &Arc<Site>, asked: Asked) -> Response {
     joined(
         tokio::task::spawn_blocking(move || match &site.writer {
             Some(writer) => {
-                let begin = || -> Begin<'_> { Box::pin(writer.begin()) };
+                let begin: Begin<'_> = Box::pin(writer.begin());
                 answer(&site, &asked, &form, (now, handle), begin)
             }
             // Shadow mode, as an admin action there.
@@ -89,7 +89,7 @@ pub(crate) async fn respond(site: &Arc<Site>, asked: Asked) -> Response {
     )
 }
 
-/// The start of the writer action a comment is saved in.
+/// The start of the writer action a comment is saved in, run once needed.
 type Begin<'w> = Pin<Box<dyn Future<Output = Result<Write<'w>, DbError>> + Send + 'w>>;
 
 /// `nocache_headers()` and PHP's default content type.
@@ -106,7 +106,7 @@ fn answer<'w>(
     asked: &Asked,
     form: &Value,
     (now, handle): (i64, Handle),
-    begin: impl FnOnce() -> Begin<'w>,
+    begin: Begin<'w>,
 ) -> Response {
     let mut reads = LoginReads::new(site, handle.clone(), now);
     let jar = cookies(
@@ -191,9 +191,9 @@ fn save<'w>(
     reads: &mut LoginReads,
     caps: &Capabilities,
     saving: Saving,
-    (handle, begin): (&Handle, impl FnOnce() -> Begin<'w>),
+    (handle, begin): (&Handle, Begin<'w>),
 ) -> Result<Result<Saved, Failure>, hyscribe_write::Error> {
-    let mut write = handle.block_on(begin())?;
+    let mut write = handle.block_on(begin)?;
     let found = handle.block_on(submit::post(&mut write, &saving.fields))?;
     let post = match found {
         Ok(Some(post)) => post,

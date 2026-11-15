@@ -132,15 +132,13 @@ async fn post(
     };
     let form = read_form(FORM.as_bytes(), body.as_bytes()).unwrap();
     tokio::task::block_in_place(|| {
-        let begin = || -> Begin<'_> {
-            Box::pin(async move {
-                let mut write = writer.begin_on(conn).await?;
-                if let Some(budget) = budget {
-                    write.fail_after(budget);
-                }
-                Ok(write)
-            })
-        };
+        let begin: Begin<'_> = Box::pin(async move {
+            let mut write = writer.begin_on(conn).await?;
+            if let Some(budget) = budget {
+                write.fail_after(budget);
+            }
+            Ok(write)
+        });
         answer(site, &asked, &form, (now(), Handle::current()), begin)
     })
 }
@@ -316,6 +314,11 @@ async fn the_route_answers_as_php() {
     );
     assert_eq!(page_of(response).await.into_bytes(), body);
     let multipart = "multipart/form-data; boundary=x";
+    // `get_post( -1 )` finds nothing, and PHP exits.
+    let negative = "comment_post_ID=-1&author=Ann&email=ann%40example.test&comment=Hi.";
+    let response = send(&site, "POST", PATH, "", Some((FORM, negative))).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(page_of(response).await, "");
     for (body, kind) in [("--x--", multipart), ("redirect_to[]=x", FORM)] {
         let response = send(&site, "POST", PATH, "", Some((kind, body))).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{body}");
@@ -448,6 +451,8 @@ async fn cookies_last_a_year_or_go() {
         // The author's cookie: an empty URL's is deleted either way.
         let author = response.headers().get(header::SET_COOKIE).unwrap();
         assert!(author.to_str().unwrap().contains(age), "{author:?}");
+        // Removed a year back, as PHP's `time() - YEAR_IN_SECONDS`.
+        assert!(!author.to_str().unwrap().contains(" 1970 "), "{author:?}");
         tx.rollback().await.unwrap();
     }
 }

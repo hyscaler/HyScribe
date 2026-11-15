@@ -638,6 +638,19 @@ impl<'w> Write<'w> {
         Ok(counts)
     }
 
+    /// `edit_comment()`'s replies of `parents`, which are not empty, of any
+    /// status, notes left out: one level of the subtree that moves with a
+    /// comment.
+    pub async fn comment_child_ids(&mut self, parents: &[u64]) -> Result<Vec<u64>, DbError> {
+        let mut sql = Sql::new(
+            "SELECT comment_ID FROM {prefix}comments WHERE comment_type != 'note' \
+             AND comment_parent IN (",
+        );
+        list(&mut sql, parents.iter().copied().map(Bind::Int));
+        let query = sql.query(&self.writer.prefix);
+        self.ids(query).await
+    }
+
     /// The comments Empty Spam and Empty Trash delete: of `status`, older
     /// than `before`, both compared as `edit-comments.php`'s text.
     pub async fn comment_ids_before(

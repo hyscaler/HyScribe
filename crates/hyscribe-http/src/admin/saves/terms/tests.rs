@@ -59,6 +59,8 @@ async fn run<T>(
         home: "http://127.0.0.1:8081",
         user: 1,
         now: 0,
+        ip: b"",
+        agent: b"",
     };
     let mut write = writer.begin_on(conn).await;
     if let (Ok(write), Some(budget)) = (&mut write, budget) {
@@ -439,6 +441,8 @@ async fn answer<T>(handler: Handler<T>, post: &str) -> Result<T, Stop<T>> {
         home: "http://127.0.0.1:8081",
         user: 1,
         now: 0,
+        ip: b"",
+        agent: b"",
     };
     handler(&mut write, &asked, &Unread).await
 }

@@ -749,8 +749,10 @@ async fn reads_for_comment_writes() {
         comment_type: "comment".into(),
         ..note("1", "2026-01-01 00:00:04")
     };
-    write.insert_comment(&reply).await.unwrap();
+    let reply = write.insert_comment(&reply).await.unwrap();
     assert_eq!(write.child_note_ids(id).await.unwrap(), [newer, older]);
+    // The replies of comments, the notes left out.
+    assert_eq!(write.comment_child_ids(&[id, 2]).await.unwrap(), [reply]);
 
     // Each status counted on its post and on every post, notes left out.
     let (on_post, every) = (
@@ -1351,6 +1353,7 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         w.approved_comment_count(1).await.err(),
         w.comment_counts(1).await.err(),
         w.comment_ids_before("trash", "2001-01-01").await.err(),
+        w.comment_child_ids(&[1]).await.err(),
         w.term_taxonomy_count(1).await.err(),
         w.term_post_count(1, &["publish"], &["post"]).await.err(),
         w.user_count().await.err(),

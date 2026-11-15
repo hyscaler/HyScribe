@@ -613,7 +613,8 @@ async fn page(
         };
         let read = !post || body.is_empty() || form.as_array().is_some_and(|f| !f.is_empty());
         let form = read.then_some(form);
-        return admin::respond(&site, uri, headers, post, form).await;
+        let peer = peer.map(|axum::Extension(Peer(ip))| ip);
+        return admin::respond(&site, uri, headers, (post, peer), form).await;
     }
     // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.
     let original = uri.clone();

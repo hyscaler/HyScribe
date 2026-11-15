@@ -38,6 +38,8 @@ fn asked<'a>(screen: &'a str, get: &'a [(Key, Value)], post: &'a [(Key, Value)])
         home: HOME,
         user: 1,
         now: 0,
+        ip: b"",
+        agent: b"",
     }
 }
 

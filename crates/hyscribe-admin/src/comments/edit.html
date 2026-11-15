@@ -1,0 +1,126 @@
+<form name="post" action="comment.php" method="post" id="post">
+%nonce_field%<div class="wrap">
+<h1>Edit Comment</h1>
+
+<div id="poststuff">
+<input type="hidden" name="action" value="editedcomment" />
+<input type="hidden" name="comment_ID" value="%id%" />
+<input type="hidden" name="comment_post_ID" value="%post%" />
+
+<div id="post-body" class="metabox-holder columns-2">
+<div id="post-body-content" class="edit-form-section edit-comment-section">
+%permalink%<div id="namediv" class="stuffbox">
+<div class="inside">
+<h2 class="edit-comment-author">Author</h2>
+<fieldset>
+<legend class="screen-reader-text">
+	Comment Author</legend>
+<table class="form-table editcomment" role="presentation">
+<tbody>
+<tr>
+	<td class="first"><label for="name">Name</label></td>
+	<td><input type="text" name="newcomment_author" size="30" value="%author%" id="name" /></td>
+</tr>
+<tr>
+	<td class="first"><label for="email">Email</label></td>
+	<td>
+		<input type="text" name="newcomment_author_email" size="30" class="code" value="%email%" id="email" />
+	</td>
+</tr>
+<tr>
+	<td class="first"><label for="newcomment_author_url">URL</label></td>
+	<td>
+		<input type="text" id="newcomment_author_url" name="newcomment_author_url" size="30" class="code" value="%url%" />
+	</td>
+</tr>
+</tbody>
+</table>
+</fieldset>
+</div>
+</div>
+
+<div id="postdiv" class="postarea">
+<label for="content" class="screen-reader-text">
+	Comment</label>
+%editor%
+<input type="hidden" id="closedpostboxesnonce" name="closedpostboxesnonce" value="%closed_nonce%" /></div>
+</div><!-- /post-body-content -->
+
+<div id="postbox-container-1" class="postbox-container">
+<div id="submitdiv" class="stuffbox" >
+<h2>Save</h2>
+<div class="inside">
+<div class="submitbox" id="submitcomment">
+<div id="minor-publishing">
+
+<div id="misc-publishing-actions">
+
+<div class="misc-pub-section misc-pub-comment-status" id="comment-status">
+Status: <span id="comment-status-display">
+%status_display%</span>
+
+<fieldset id="comment-status-radio">
+<legend class="screen-reader-text">
+	Comment status</legend>
+<label><input type="radio"%checked_1% name="comment_status" value="1" />Approved</label><br />
+<label><input type="radio"%checked_0% name="comment_status" value="0" />Pending</label><br />
+<label><input type="radio"%checked_spam% name="comment_status" value="spam" />Spam</label>
+</fieldset>
+</div><!-- .misc-pub-section -->
+
+<div class="misc-pub-section curtime misc-pub-curtime">
+<span id="timestamp">
+Submitted on: <b>%submitted%</b></span>
+<a href="#edit_timestamp" class="edit-timestamp hide-if-no-js"><span aria-hidden="true">Edit</span> <span class="screen-reader-text">
+	Edit date and time</span></a>
+<fieldset id='timestampdiv' class='hide-if-js'>
+<legend class="screen-reader-text">
+	Date and time</legend>
+%touch_time%
+<p>
+<a href="#edit_timestamp" class="save-timestamp hide-if-no-js button">OK</a>
+<a href="#edit_timestamp" class="cancel-timestamp hide-if-no-js button-cancel">Cancel</a>
+</p>
+	</fieldset>
+</div>
+
+
+<div class="misc-pub-section misc-pub-response-to">
+	In response to: <b>%post_link%</b></div>
+
+<div class="misc-pub-section misc-pub-reply-to">
+<span id="comment-parent-display">
+In reply to: <b>%parent_display%</b></span>
+%parent_edit%</div>
+
+
+</div> <!-- misc actions -->
+<div class="clear"></div>
+</div>
+
+<div id="major-publishing-actions">
+<div id="delete-action">
+%delete%</div>
+<div id="publishing-action">
+<input type="submit" name="save" id="save" class="button button-primary button-large" value="Update"  /></div>
+<div class="clear"></div>
+</div>
+</div>
+</div>
+</div><!-- /submitdiv -->
+</div>
+
+<div id="postbox-container-2" class="postbox-container">
+<div id="normal-sortables" class="meta-box-sortables"></div></div>
+
+<input type="hidden" name="c" value="%id%" />
+<input type="hidden" name="p" value="%post%" />
+<input name="referredby" type="hidden" id="referredby" value="%referredby%" />
+<input type="hidden" name="_wp_original_http_referer" value="%original%" /><input type="hidden" name="noredir" value="1" />
+
+</div><!-- /post-body -->
+</div>
+</div>
+</form>
+
+%focus%	

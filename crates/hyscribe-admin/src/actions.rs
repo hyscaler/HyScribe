@@ -43,6 +43,10 @@ pub struct Asked<'a> {
     pub user: u64,
     /// `time()`, in Unix seconds.
     pub now: i64,
+    /// `$_SERVER['REMOTE_ADDR']`.
+    pub ip: &'a [u8],
+    /// `$_SERVER['HTTP_USER_AGENT']`, empty when not sent.
+    pub agent: &'a [u8],
 }
 
 impl Asked<'_> {
@@ -1097,6 +1101,17 @@ fn ajax_action(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
             }
         }
         "delete-comment" | "dim-comment" => comment_ajax(site, asked, action == "dim-comment"),
+        "edit-comment" | "replyto-comment" => {
+            let field = "_ajax_nonce-replyto-comment";
+            ajax_referer(site, asked, "replyto-comment", Some(field))?;
+            if action == "edit-comment" {
+                return allowed(can_for(site, "edit_comment", post_int(asked, "comment_ID")));
+            }
+            // `wp_ajax_replyto_comment()`: a post the user may edit.
+            let post = post_int(asked, "comment_post_ID");
+            let found = u64::try_from(post).ok().and_then(|id| site.post(id));
+            allowed(found.is_some() && can_for(site, "edit_post", post))
+        }
         "closed-postboxes" => {
             ajax_referer(site, asked, "closedpostboxes", Some("closedpostboxesnonce"))?;
             // A list given as an array is a fatal error in PHP.

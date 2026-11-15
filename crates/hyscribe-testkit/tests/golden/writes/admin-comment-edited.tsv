@@ -1,0 +1,8 @@
+# The rows PHP WordPress writes for the action admin-comment-edited (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 18:14:54 to 2026-11-15 18:14:54 UTC.
+wp_comments	1	~	comment_approved	1	spam
+wp_comments	1	~	comment_author	A WordPress Commenter	Ann B
+wp_comments	1	~	comment_content	Hi, this is a comment.\nTo get started with moderating, editing, and deleting comments, please visit the Comments screen in the dashboard.\nCommenter avatars come from <a href="https://gravatar.com/">Gravatar</a>.	On the screen.
+wp_comments	1	~	comment_date	2026-10-27 08:08:15	2026-02-03 04:05:06
+wp_comments	1	~	comment_date_gmt	2026-10-27 08:08:15	2026-02-03 04:05:06
+wp_posts	1	~	comment_count	1	0

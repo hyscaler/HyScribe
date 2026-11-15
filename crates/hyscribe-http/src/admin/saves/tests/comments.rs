@@ -42,6 +42,8 @@ impl Request<'_> {
             home: "http://127.0.0.1:8081",
             user: 1,
             now: self.now,
+            ip: b"",
+            agent: b"",
         };
         let action = action(self.screen, &asked);
         let begun = |write: &mut Result<Write<'_>, _>| {
@@ -55,6 +57,8 @@ impl Request<'_> {
             let handler = ajax_handler(&action).unwrap();
             return Ok(match act(write, handler, &asked, admin).await? {
                 Ajax::Text(text) | Ajax::Xml(text) => text,
+                // Its row is read once committed, outside the action.
+                Ajax::CommentRow(_) => "row".into(),
                 answer => panic!("{answer:?}"),
             });
         }
@@ -68,13 +72,13 @@ impl Request<'_> {
     /// Its answer, `302<TAB>Location` for a redirect, once every statement
     /// budget short of it has failed, each failure rolled back.
     async fn saved(&self, writer: &Writer, admin: &Admin<'_>, conn: &mut Connection) -> String {
-        let mut budget = 0;
-        loop {
+        for budget in 0..100 {
             match self.send(writer, admin, conn, Some(budget)).await {
-                Err(hyscribe_write::Error::Db(_)) => budget += 1,
+                Err(hyscribe_write::Error::Db(_)) => {}
                 saved => return saved.unwrap(),
             }
         }
+        panic!("every statement budget failed: {}", self.post)
     }
 }
 
@@ -119,6 +123,22 @@ async fn moderations_write_php_s_rows() {
         (
             "admin-comment-ajax-trash",
             vec![("admin-ajax", "", "action=delete-comment&id=1&trash=1")],
+        ),
+        (
+            "admin-comment-quick-edit",
+            vec![(
+                "admin-ajax",
+                "",
+                "action=edit-comment&comment_ID=1&comment_post_ID=1&newcomment_author=Ann&newcomment_author_email=ann%40example.test&newcomment_author_url=https%3A%2F%2Fexample.test&status=0&content=Edited+%3Cb%3Ereply%3C%2Fb%3E.&checkbox=1",
+            )],
+        ),
+        (
+            "admin-comment-edited",
+            vec![(
+                "comment",
+                "",
+                "action=editedcomment&comment_ID=1&comment_post_ID=1&newcomment_author=Ann+B&comment_status=spam&content=On+the+screen.&aa=2026&mm=02&jj=03&hh=04&mn=05&ss=06&hidden_aa=2025",
+            )],
         ),
     ];
     for (golden, requests) in cases {
@@ -292,4 +312,113 @@ fn the_list_s_views_are_counted() {
     ] {
         assert_eq!(count_of(&counts, view.as_bytes()), count, "{view}");
     }
+}
+
+/// A reply past what its checks read answers as `wp_ajax_replyto_comment()`
+/// goes on: `-1` for a post gone or a held parent the user may not
+/// approve, `1` for a post without a status, and a user gone is not logged
+/// in. Nothing is kept.
+#[tokio::test(flavor = "multi_thread")]
+async fn replies_past_what_the_checks_read() {
+    let writer = writer().await;
+    let site = oracle_site().await;
+    let reads = LoginReads::new(&site, Handle::current(), 0);
+    let admin = admin(&site, &reads);
+    let mut write = writer.begin().await.unwrap();
+    let held = hyscribe_db::CommentFields {
+        post_id: 1,
+        date: "2026-11-01 00:00:00".into(),
+        date_gmt: "2026-11-01 00:00:00".into(),
+        approved: "0".into(),
+        comment_type: "comment".into(),
+        ..hyscribe_db::CommentFields::default()
+    };
+    // Unseen by the site, which the user may not edit as far as it knows.
+    let held = write.insert_comment(&held).await.unwrap();
+    write.set_post_status(2, "").await.unwrap();
+    for (query, user, answer) in [
+        ("comment_post_ID=999999999&content=x".to_string(), 1, "-1"),
+        (
+            "comment_post_ID=1&content=x".to_string(),
+            99,
+            "Sorry, you must be logged in to reply to a comment.",
+        ),
+        ("comment_post_ID=2&content=x".to_string(), 1, "1"),
+        (
+            format!("comment_post_ID=1&comment_ID={held}&approve_parent=1&content=x"),
+            1,
+            "-1",
+        ),
+    ] {
+        let post = fields(&query);
+        let asked = Asked {
+            get: &[],
+            post: &post,
+            referer: None,
+            uri: b"/hs-admin/admin-ajax",
+            home: "http://127.0.0.1:8081",
+            user,
+            now: 0,
+            ip: b"",
+            agent: b"",
+        };
+        let replied = super::super::comments::reply(&mut write, &asked, &admin).await;
+        assert!(
+            matches!(replied, Ok(Ajax::Text(text)) if text == answer),
+            "{query}"
+        );
+    }
+    // A reply keeps the request's user agent and the type given.
+    let post = fields("comment_post_ID=1&comment_ID=1&content=Typed&comment_type=trackback");
+    let asked = Asked {
+        get: &[],
+        post: &post,
+        referer: None,
+        uri: b"/hs-admin/admin-ajax",
+        home: "http://127.0.0.1:8081",
+        user: 1,
+        now: 0,
+        ip: b"192.0.2.1",
+        agent: b"An agent",
+    };
+    let replied = super::super::comments::reply(&mut write, &asked, &admin).await;
+    assert!(matches!(replied, Ok(Ajax::CommentRow(_))));
+    let id = write.post_comment_ids(1).await.unwrap()[0];
+    let saved = write.comment(id).await.unwrap().unwrap();
+    let kept = (saved.agent, saved.comment_type, saved.author_ip);
+    assert_eq!(
+        kept,
+        (
+            b"An agent".to_vec(),
+            "trackback".into(),
+            b"192.0.2.1".to_vec()
+        )
+    );
+}
+
+/// A reply that approves its held parent writes PHP's rows, each statement
+/// failing in turn first.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reply_approves_its_held_parent() {
+    let writer = writer().await;
+    let site = oracle_site().await;
+    let reads = LoginReads::new(&site, Handle::current(), 0);
+    let admin = admin(&site, &reads);
+    let setup = async |conn: &mut Connection| {
+        let mut write = writer.begin_on(conn).await.unwrap();
+        hyscribe_write::comments::set_comment_status(&mut write, 1, "hold")
+            .await
+            .unwrap();
+        write.commit().await.unwrap();
+        Ok::<_, String>(())
+    };
+    let action = async |conn: &mut Connection, ()| {
+        let query = "action=replyto-comment&comment_ID=1&comment_post_ID=1&approve_parent=1&content=+A+%3Cb%3Ereply%3C%2Fb%3E+%3Cscript%3Ex%3C%2Fscript%3E.+";
+        request("admin-ajax", "", query)
+            .saved(&writer, &admin, conn)
+            .await;
+        Ok(())
+    };
+    let report = check_writes(&fixture_database(), "admin-comment-reply", setup, action).await;
+    report.unwrap();
 }

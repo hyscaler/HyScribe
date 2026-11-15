@@ -35,7 +35,8 @@ $submit = function ( $body, $cookie ) {
 	wp_handle_comment_submission( $post );
 };
 
-$actions = array();
+// Not `$actions`: actions.php requires this file in its own scope.
+$posts = array();
 foreach ( file( $cases, FILE_IGNORE_NEW_LINES ) as $line ) {
 	if ( '' === $line || '#' === $line[0] ) {
 		continue;
@@ -44,7 +45,7 @@ foreach ( file( $cases, FILE_IGNORE_NEW_LINES ) as $line ) {
 	if ( empty( $redirected[ $case ] ) ) {
 		continue;
 	}
-	$actions[ "comment-post-$case" ] = array(
+	$posts[ "comment-post-$case" ] = array(
 		'setup'  => function () use ( $submit, $user, $cookie, $setup, $first ) {
 			global $wpdb;
 			foreach ( '-' === $setup ? array() : explode( '; ', $setup ) as $query ) {
@@ -61,4 +62,4 @@ foreach ( file( $cases, FILE_IGNORE_NEW_LINES ) as $line ) {
 		},
 	);
 }
-return $actions;
+return $posts;

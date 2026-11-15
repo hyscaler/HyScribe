@@ -90,6 +90,8 @@ pub(super) enum Ajax {
     TermRow(Taxonomy, Term),
     /// `wp_ajax_add_tag()`'s answer for the term added.
     TermAdded(Taxonomy, Added),
+    /// A comment's row of the comments list in `WP_Ajax_Response` XML.
+    CommentRow(comments::Row),
 }
 
 /// The handler of `action` (as `hyscribe_admin::actions::action` names it)
@@ -98,6 +100,7 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
     match (screen, action) {
         ("users", b"promote") => Some(users::promote),
         ("edit-comments", _) => Some(comments::bulk),
+        ("comment", b"editedcomment") => Some(comments::edited),
         ("comment", action) => comments::moderation(action),
         ("options", b"update") => Some(options::update),
         ("options", b"adminhash") => Some(options::adminhash),
@@ -126,6 +129,8 @@ pub(super) fn ajax_handler(action: &[u8]) -> Option<Handler<Ajax>> {
         b"delete-tag" => Some(terms::ajax_delete_tag),
         b"dim-comment" => Some(comments::dim),
         b"delete-comment" => Some(comments::delete),
+        b"edit-comment" => Some(comments::quick_edit),
+        b"replyto-comment" => Some(comments::reply),
         _ => None,
     }
 }
@@ -146,6 +151,7 @@ pub(super) fn ajax_served(admin: &Admin, asked: &Asked, answer: Ajax) -> Respons
         Ajax::Xml(xml) => (XML, xml),
         Ajax::TermRow(taxonomy, term) => (HTML, saved_row(admin, taxonomy, &term, &referer())),
         Ajax::TermAdded(taxonomy, added) => (XML, term_added(admin, taxonomy, &added, &referer())),
+        Ajax::CommentRow(row) => (XML, row.sent(admin, asked)),
     };
     ajax_text(StatusCode::OK, kind, body.into_bytes())
 }

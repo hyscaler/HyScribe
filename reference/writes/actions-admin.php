@@ -45,7 +45,8 @@ $admin_ajax = function ( $action, $post ) {
 	add_filter( 'wp_die_ajax_handler', $die );
 	ob_start();
 	try {
-		call_user_func( 'wp_ajax_' . str_replace( '-', '_', $action ) );
+		// do_action() passes an empty argument when given none.
+		call_user_func( 'wp_ajax_' . str_replace( '-', '_', $action ), '' );
 	} catch ( RuntimeException $died ) {
 		unset( $died );
 	}
@@ -170,6 +171,68 @@ return array(
 					)
 				);
 			}
+		},
+	),
+	// The list's Reply to comment 1 by user 1, held, which the reply
+	// approves, with markup kses keeps and drops, through admin-ajax.php.
+	'admin-comment-reply'       => array(
+		'setup'  => function () {
+			wp_set_comment_status( 1, 'hold' );
+		},
+		'action' => function () use ( $admin_ajax ) {
+			$admin_ajax(
+				'replyto-comment',
+				array(
+					'comment_ID'                  => '1',
+					'comment_post_ID'             => '1',
+					'content'                     => ' A <b>reply</b> <script>x</script>. ',
+					'approve_parent'              => '1',
+					'_ajax_nonce-replyto-comment' => wp_create_nonce( 'replyto-comment' ),
+				)
+			);
+		},
+	),
+	// Quick Edit of comment 1: its author, status and text.
+	'admin-comment-quick-edit'  => array(
+		'action' => function () use ( $admin_ajax ) {
+			$admin_ajax(
+				'edit-comment',
+				array(
+					'comment_ID'                  => '1',
+					'comment_post_ID'             => '1',
+					'newcomment_author'           => 'Ann',
+					'newcomment_author_email'     => 'ann@example.test',
+					'newcomment_author_url'       => 'https://example.test',
+					'status'                      => '0',
+					'content'                     => 'Edited <b>reply</b>.',
+					'checkbox'                    => '1',
+					'_ajax_nonce-replyto-comment' => wp_create_nonce( 'replyto-comment' ),
+				)
+			);
+		},
+	),
+	// comment.php's Update of comment 1 from its edit screen, with a date.
+	'admin-comment-edited'      => array(
+		'action' => function () use ( $admin_case ) {
+			$_POST    = array(
+				'action'           => 'editedcomment',
+				'comment_ID'       => '1',
+				'comment_post_ID'  => '1',
+				'newcomment_author' => 'Ann B',
+				'comment_status'   => 'spam',
+				'content'          => 'On the screen.',
+				'aa'               => '2026',
+				'mm'               => '02',
+				'jj'               => '03',
+				'hh'               => '04',
+				'mn'               => '05',
+				'ss'               => '06',
+				'hidden_aa'        => '2025',
+				'_wpnonce'         => wp_create_nonce( 'update-comment_1' ),
+			);
+			$_REQUEST = $_POST;
+			$_POST    = wp_slash( $_POST );
+			eval( $admin_case( 'comment.php', 'editedcomment' ) );
 		},
 	),
 	// The list's Trash of comment 1, through admin-ajax.php.

@@ -509,6 +509,19 @@ fn start_reports_what_stops_it_serving() {
         "{}",
         output.err
     );
+    // Reads as the read only user, writes as a main user it cannot be.
+    let read_user = [
+        ("MODE", "primary"),
+        ("DB_READ_USER", "wordpress_read"),
+        ("DB_READ_PASSWORD", "reference-only"),
+        ("DB_PASSWORD", "wrong"),
+    ];
+    let output = start(&read_user, home.path());
+    assert!(
+        output.err.starts_with("error: cannot open the writer: "),
+        "{}",
+        output.err
+    );
     let output = start(&[("DB_PREFIX", "missing_")], home.path());
     assert!(
         output
@@ -561,4 +574,38 @@ fn primary_mode_serves_a_login_screen() {
     assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
     assert!(!page.contains("read only"), "{page}");
     assert_eq!(run("stop").code, 0);
+}
+
+/// Primary mode opens the writer and logs what it refuses; shadow mode
+/// opens none.
+#[test]
+fn the_writer_s_refusals_are_logged() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let database = hyscribe_testkit::fixture_database();
+    let mut out = Vec::new();
+    runtime.block_on(async {
+        let shadow = open_writer(&database, Mode::Shadow, &mut out).await;
+        assert!(shadow.unwrap().is_none());
+        let primary = open_writer(&database, Mode::Primary, &mut out).await;
+        assert!(primary.unwrap().is_some());
+        assert!(out.is_empty());
+        let missing = hyscribe_config::Database {
+            prefix: hyscribe_config::Prefix::new("missing_").unwrap(),
+            ..database.clone()
+        };
+        assert!(open_writer(&missing, Mode::Primary, &mut out).await.is_ok());
+        let unreachable = hyscribe_config::Database {
+            port: 1,
+            ..database.clone()
+        };
+        let err = open_writer(&unreachable, Mode::Primary, &mut out).await;
+        assert!(err.err().unwrap().starts_with("cannot open the writer: "));
+    });
+    let out = String::from_utf8(out).unwrap();
+    assert!(out.starts_with("writes refused: "), "{out}");
+    assert!(out.contains("missing_options"), "{out}");
+    assert_eq!(out.lines().count(), 1, "{out}");
 }

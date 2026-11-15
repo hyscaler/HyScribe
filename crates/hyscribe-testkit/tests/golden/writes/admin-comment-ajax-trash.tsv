@@ -1,7 +1,7 @@
 # The rows PHP WordPress writes for the action admin-comment-ajax-trash (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-15 09:36:23 to 2026-11-15 09:36:23 UTC.
-# %wp_commentmeta:1% is 1.
-# %wp_commentmeta:2% is 2.
+# %now% and %unix% stand for times from 2026-11-15 14:16:16 to 2026-11-15 14:16:16 UTC.
+# %wp_commentmeta:1% is 5.
+# %wp_commentmeta:2% is 6.
 wp_commentmeta	%wp_commentmeta:1%	+	comment_id	1
 wp_commentmeta	%wp_commentmeta:1%	+	meta_id	%wp_commentmeta:1%
 wp_commentmeta	%wp_commentmeta:1%	+	meta_key	_wp_trash_meta_status

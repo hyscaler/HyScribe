@@ -2091,10 +2091,6 @@ pub enum Answer {
     Missing(&'static str),
     /// `wp_die()`'s `409` with this message.
     Conflict(&'static str),
-    /// An Ajax action's `200` with this text, as `wp_die( $text )` sends it.
-    Ajax(String),
-    /// `WP_Ajax_Response::send()` of this XML.
-    Xml(String),
 }
 
 impl Answer {

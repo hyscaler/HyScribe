@@ -8,12 +8,38 @@ users-promote-self-editor	GET	users.php?changeit=Change&new_role=editor&users[]=
 users-promote-nobody	GET	users.php?changeit=Change&new_role=editor	-	bulk-users	_wpnonce
 users-promote-referer	GET	users.php?changeit=Change&new_role=administrator&users[]=1&wp_http_referer=%2Fwp-admin%2Fusers.php%3Frole%3Dadministrator%26updated%3D1	-	bulk-users	_wpnonce
 users-promote-post	POST	users.php	action=promote&new_role=administrator&users[]=1	bulk-users	_wpnonce
+# Categories and tags (MVP 3.2), those that write nothing first. Term 801 is the content's tag.
+terms-add-exists	POST	edit-tags.php	action=add-tag&screen=edit-category&taxonomy=category&post_type=post&_wp_http_referer=%2Fwp-admin%2Fedit-tags.php%3Ftaxonomy%3Dcategory&tag-name=Uncategorized&slug=&parent=-1&description=	add-tag	_wpnonce_add-tag	edit-tags.php?taxonomy=category&error=1&message=4
+terms-add-empty	POST	edit-tags.php	action=add-tag&screen=edit-post_tag&taxonomy=post_tag&post_type=post&_wp_http_referer=%2Fwp-admin%2Fedit-tags.php%3Ftaxonomy%3Dpost_tag%26paged%3D1&paged=2&tag-name=+&slug=&description=	add-tag	_wpnonce_add-tag
+terms-delete-other	GET	edit-tags.php?action=delete&taxonomy=category&tag_ID=801&paged=3	-	delete-tag_801	_wpnonce	edit-tags.php?taxonomy=category&message=2
+terms-bulk-missing	POST	edit-tags.php	action=delete&taxonomy=category&delete_tags%5B%5D=999&delete_tags%5B%5D=x&_wp_http_referer=%2Fwp-admin%2Fedit-tags.php%3Ftaxonomy%3Dcategory%26message%3D1%26error%3D1	bulk-tags	_wpnonce	edit-tags.php?taxonomy=category&message=6
+terms-edited-empty	POST	edit-tags.php	action=editedtag&tag_ID=1&taxonomy=category&_wp_http_referer=%2Fwp-admin%2Fterm.php%3Ftaxonomy%3Dcategory%26tag_ID%3D1%26post_type%3Dpost%26wp_http_referer%3D%252Fwp-admin%252Fedit-tags.php%253Ftaxonomy%253Dcategory&name=&slug=uncategorized&parent=-1&description=	update-tag_1	_wpnonce	term.php?taxonomy=category&tag_ID=1&post_type=post&wp_http_referer=%2Fwp-admin%2Fedit-tags.php%3Ftaxonomy%3Dcategory&error=1&message=5
+terms-edited-other	POST	edit-tags.php	action=editedtag&tag_ID=801&taxonomy=category&name=Other	update-tag_801	_wpnonce
+ajax-add-exists	POST	admin-ajax.php	action=add-tag&screen=edit-category&taxonomy=category&post_type=post&tag-name=Uncategorized&slug=&parent=-1&description=	add-tag	_wpnonce_add-tag
+ajax-add-empty	POST	admin-ajax.php	action=add-tag&screen=edit-post_tag&taxonomy=post_tag&tag-name=&slug=	add-tag	_wpnonce_add-tag
+ajax-add-missing-parent	POST	admin-ajax.php	action=add-tag&screen=edit-category&taxonomy=category&tag-name=Orphan&parent=999	add-tag	_wpnonce_add-tag
+ajax-add-invalid-name	POST	admin-ajax.php	action=add-tag&screen=edit-post_tag&taxonomy=post_tag&tag-name=%3Cb%3E%3C%2Fb%3E	add-tag	_wpnonce_add-tag
+ajax-add-tag-exists	POST	admin-ajax.php	action=add-tag&screen=edit-post_tag&taxonomy=post_tag&tag-name=tagged	add-tag	_wpnonce_add-tag
+ajax-inline-empty	POST	admin-ajax.php	action=inline-save-tax&taxonomy=category&tax_ID=1&name=&slug=uncategorized	taxinlineeditnonce	_inline_edit
+ajax-inline-other	POST	admin-ajax.php	action=inline-save-tax&taxonomy=category&tax_ID=801&name=Other&slug=other	taxinlineeditnonce	_inline_edit
+ajax-inline-unchanged	POST	admin-ajax.php	action=inline-save-tax&taxonomy=category&tax_ID=1&name=Uncategorized&slug=uncategorized	taxinlineeditnonce	_inline_edit
+ajax-delete-other	POST	admin-ajax.php	action=delete-tag&tag_ID=801&taxonomy=category	delete-tag_801	_ajax_nonce
+ajax-delete-unknown	POST	admin-ajax.php	action=delete-tag&tag_ID=801&taxonomy=nope	delete-tag_801	_ajax_nonce
+# Categories and tags that write, compared in the write oracle's tests.
+terms-edited	POST	edit-tags.php	action=editedtag&tag_ID=801&taxonomy=post_tag&_wp_http_referer=%2Fwp-admin%2Fterm.php%3Ftaxonomy%3Dpost_tag%26tag_ID%3D801%26post_type%3Dpost&name=Renamed+tag&slug=renamed-tag&description=Now+%3Cem%3Edescribed%3C%2Fem%3E	update-tag_801	_wpnonce
+ajax-inline-rename	POST	admin-ajax.php	action=inline-save-tax&taxonomy=post_tag&tax_ID=801&name=Quick+%26+named&slug=quick-named	taxinlineeditnonce	_inline_edit
+ajax-add-tag	POST	admin-ajax.php	action=add-tag&screen=edit-post_tag&taxonomy=post_tag&post_type=post&_wp_http_referer=%2Fwp-admin%2Fedit-tags.php%3Ftaxonomy%3Dpost_tag&tag-name=Fresh+tag&slug=&description=About+it	add-tag	_wpnonce_add-tag
+ajax-add-child	POST	admin-ajax.php	action=add-tag&screen=edit-category&taxonomy=category&post_type=post&tag-name=Child+category&slug=&parent=1&description=	add-tag	_wpnonce_add-tag
+ajax-inline-duplicate	POST	admin-ajax.php	action=inline-save-tax&taxonomy=category&tax_ID=1&name=Uncategorized&slug=child-category	taxinlineeditnonce	_inline_edit
+terms-add	POST	edit-tags.php	action=add-tag&screen=edit-category&taxonomy=category&post_type=post&_wp_http_referer=%2Fwp-admin%2Fedit-tags.php%3Ftaxonomy%3Dcategory&tag-name=Added+here&slug=&parent=-1&description=Some+%3Cb%3Etext%3C%2Fb%3E	add-tag	_wpnonce_add-tag
+ajax-delete-tag	POST	admin-ajax.php	action=delete-tag&tag_ID=801&taxonomy=post_tag	delete-tag_801	_ajax_nonce
 # Comment 1 moderated in turn: moderate-* cases write or answer with the
 # time or the request's nonce, so the Rust test replays them in order
 # (saves/tests/comments.rs); comments-* cases write nothing.
 comments-referer	GET	edit-comments.php?action=approve&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php%3Fcomment_status%3Dmoderated	-	bulk-comments	_wpnonce
 comments-bulk-unknown	GET	edit-comments.php?action=bogus&delete_comments[]=1&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php	-	bulk-comments	_wpnonce
 comments-bulk-string	GET	edit-comments.php?action=approve&delete_comments=1&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php	-	bulk-comments	_wpnonce
+comments-empty-trash-bare	GET	edit-comments.php?delete_all=1&comment_status=trash&ids=1&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php	-	bulk-comments	_wpnonce
 moderate-bulk-bare	GET	edit-comments.php?action=approve	-	bulk-comments	_wpnonce
 moderate-bulk-unapprove	GET	edit-comments.php?action=unapprove&delete_comments[]=1&delete_comments[]=999&paged=2&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php%3Fapproved%3D1%26paged%3D3	-	bulk-comments	_wpnonce
 moderate-bulk-approve	GET	edit-comments.php?action=approve&ids=1,999&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php	-	bulk-comments	_wpnonce
@@ -26,24 +52,25 @@ moderate-approve	GET	comment.php?action=approvecomment&c=1&_wp_http_referer=%2Fw
 moderate-spam	GET	comment.php?action=spamcomment&c=1&noredir=1&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php	-	delete-comment_1	_wpnonce
 moderate-unspam	GET	comment.php?action=unspamcomment&c=1&_wp_original_http_referer=%2Fwp-admin%2Fedit-comments.php%3Fp%3D1	-	delete-comment_1	_wpnonce
 moderate-trash	POST	comment.php	action=trashcomment&c=1&_wp_http_referer=%2Fwp-admin%2Fcomment.php%3Faction%3Dtrash%26c%3D1	delete-comment_1	_wpnonce
-moderate-untrash	GET	comment.php?action=untrashcomment&c=1	-	delete-comment_1	_wpnonce
+moderate-untrash	GET	comment.php?action=untrashcomment&c=1&_wp_original_http_referer=	-	delete-comment_1	_wpnonce
 moderate-delete	POST	comment.php	deletecomment=1&c=1&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php%3Ffrom%3Dcomment.php	delete-comment_1	_wpnonce
-moderate-untrash-again	GET	comment.php?action=untrashcomment&c=1&noredir=1	-	delete-comment_1	_wpnonce
-moderate-dim-hold	POST	admin-ajax.php	action=dim-comment&id=1&new=unapproved	approve-comment_1	_ajax_nonce
+moderate-untrash-again	GET	comment.php?action=untrashcomment&c=1&noredir=1&_wp_original_http_referer=%2Fwp-admin%2Fedit-comments.php%3Fp%3D1	-	delete-comment_1	_wpnonce
+moderate-dim-hold	POST	admin-ajax.php	action=dim-comment&id=1&new=unapproved&_total=4&_per_page=20&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php%3Fcomment_type%3Dcomment	approve-comment_1	_ajax_nonce
 moderate-dim-same	POST	admin-ajax.php	action=dim-comment&id=1&new=unapproved	approve-comment_1	_ajax_nonce
 moderate-dim-approve	POST	admin-ajax.php	action=dim-comment&id=1&new=approved	approve-comment_1	_ajax_nonce
-moderate-ajax-trash	POST	admin-ajax.php	action=delete-comment&id=1&trash=1&_total=21&_per_page=20&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php%3Fcomment_status%3Dall	delete-comment_1	_ajax_nonce
+moderate-dim-same-approved	POST	admin-ajax.php	action=dim-comment&id=1&new=approved	approve-comment_1	_ajax_nonce
+moderate-ajax-trash	POST	admin-ajax.php	action=delete-comment&id=1&trash=1&_total=21&_per_page=20&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php%3Fcomment_type%3Dcomment	delete-comment_1	_ajax_nonce
 moderate-ajax-trash-again	POST	admin-ajax.php	action=delete-comment&id=1&trash=1	delete-comment_1	_ajax_nonce
 moderate-ajax-untrash	POST	admin-ajax.php	action=delete-comment&id=1&untrash=1&comment_status=trash&_total=3&_per_page=1&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php%3Fcomment_status%3Dapproved%26p%3D1	delete-comment_1	_ajax_nonce
 moderate-ajax-spam	POST	admin-ajax.php	action=delete-comment&id=1&spam=1&_total=7&_per_page=20&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php%3Fcomment_type%3Dcomment	delete-comment_1	_ajax_nonce
 moderate-ajax-spam-again	POST	admin-ajax.php	action=delete-comment&id=1&spam=1	delete-comment_1	_ajax_nonce
 moderate-ajax-untrash-spam	POST	admin-ajax.php	action=delete-comment&id=1&untrash=1	delete-comment_1	_ajax_nonce
-moderate-ajax-unspam	POST	admin-ajax.php	action=delete-comment&id=1&unspam=1&_total=4&_per_page=20&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php%3Fcomment_type%3Dcomment	delete-comment_1	_ajax_nonce
+moderate-ajax-unspam	POST	admin-ajax.php	action=delete-comment&id=1&unspam=1&comment_status=spam&_total=4&_per_page=20&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php%3Fcomment_type%3Dcomment	delete-comment_1	_ajax_nonce
 moderate-ajax-unspam-live	POST	admin-ajax.php	action=delete-comment&id=1&unspam=1	delete-comment_1	_ajax_nonce
-moderate-ajax-spam-quiet	POST	admin-ajax.php	action=delete-comment&id=1&spam=1	delete-comment_1	_ajax_nonce
-moderate-dim-from-spam	POST	admin-ajax.php	action=dim-comment&id=1&new=approved	approve-comment_1	_ajax_nonce
-moderate-ajax-delete-to-trash	POST	admin-ajax.php	action=delete-comment&id=1&delete=1&_total=2&_per_page=1&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php%3Fcomment_status%3Dmoderated	delete-comment_1	_ajax_nonce
-moderate-ajax-untrash-quiet	POST	admin-ajax.php	action=delete-comment&id=1&untrash=1	delete-comment_1	_ajax_nonce
+moderate-ajax-spam-quiet	POST	admin-ajax.php	action=delete-comment&id=1&spam=1&_total=5&_per_page=-2&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php%3Fcomment_status%3Dspam	delete-comment_1	_ajax_nonce
+moderate-dim-from-spam	POST	admin-ajax.php	action=dim-comment&id=1&new=approved&_per_page=20&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php	approve-comment_1	_ajax_nonce
+moderate-ajax-delete-to-trash	POST	admin-ajax.php	action=delete-comment&id=1&delete=1&_total=2&_per_page=1&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php%3Fcomment_type%3Dcomment	delete-comment_1	_ajax_nonce
+moderate-ajax-untrash-quiet	POST	admin-ajax.php	action=delete-comment&id=1&untrash=1&_total=4&_per_page=20&_page=1&_url=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php%3Fcomment_type%3Dcomment	delete-comment_1	_ajax_nonce
 comments-ajax-none	POST	admin-ajax.php	action=delete-comment&id=1	delete-comment_1	_ajax_nonce
 comments-ajax-dim-missing	POST	admin-ajax.php	action=dim-comment&id=999	approve-comment_999	_ajax_nonce
 comments-ajax-dim-negative	POST	admin-ajax.php	action=dim-comment&id=-1	approve-comment_-1	_ajax_nonce

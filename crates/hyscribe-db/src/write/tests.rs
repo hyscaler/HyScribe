@@ -1077,6 +1077,7 @@ async fn reads_terms_inside_the_action() {
         term_taxonomy_id: 1,
         description: Vec::new(),
         parent: 0,
+        count: 1,
     };
     assert_eq!(
         write.term_in("category", 1).await.unwrap(),

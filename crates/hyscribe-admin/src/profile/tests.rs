@@ -76,9 +76,7 @@ fn edit_and_add_pages_are_php_s() {
             format!("{status}\t{}", String::from_utf8(page).unwrap())
         };
         let (php, ours) = match ours {
-            Answer::Page(page) | Answer::Ajax(page) | Answer::Xml(page) => {
-                (hs_admin_page(&recorded), page)
-            }
+            Answer::Page(page) => (hs_admin_page(&recorded), page),
             Answer::Denied(message) => (recorded, die(403, message)),
             Answer::Died(message) | Answer::Missing(message) | Answer::Conflict(message) => {
                 (recorded, die(500, message))

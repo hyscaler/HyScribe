@@ -17,6 +17,7 @@ use crate::login::LoginReads;
 use crate::tests::oracle_site;
 
 mod comments;
+pub(super) mod unread;
 
 /// User 1's hs-admin on the fixture, as the handlers read it.
 fn admin<'a>(site: &'a crate::Site, reads: &'a LoginReads<'a>) -> Admin<'a> {
@@ -26,12 +27,12 @@ fn admin<'a>(site: &'a crate::Site, reads: &'a LoginReads<'a>) -> Admin<'a> {
     })
 }
 
-async fn writer() -> Writer {
+pub(super) async fn writer() -> Writer {
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
     writer.unwrap().unwrap()
 }
 
-fn fields(query: &str) -> Vec<(Key, Value)> {
+pub(super) fn fields(query: &str) -> Vec<(Key, Value)> {
     parse_str(query.as_bytes()).as_array().unwrap().to_vec()
 }
 

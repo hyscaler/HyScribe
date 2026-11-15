@@ -15,7 +15,7 @@ use hyscribe_write::comments::{
     Context, delete_comment, restore_comment, set_comment_status, spam_comment, trash_comment,
 };
 
-use super::{Acting, Handler, Saving, Stop, read};
+use super::{Acting, Ajax, Handler, Saving, read, referer, text};
 
 /// A moderation, as the bulk actions name it.
 #[derive(Clone, Copy, PartialEq)]
@@ -99,10 +99,6 @@ fn can_edit(site: &dyn Acting, id: &Value) -> bool {
     read(|| site.current_user_can("edit_comment", std::slice::from_ref(id)))
 }
 
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
-
 /// `edit-comments.php`'s bulk actions, Empty Spam and Empty Trash: each
 /// comment the user may edit moderated, then the list sent back with the
 /// counts, or the referer when no comment is named.
@@ -114,7 +110,7 @@ pub(super) fn bulk<'a>(
     Box::pin(async move {
         let mut doaction = action("edit-comments", asked);
         let pagenum = asked.request("paged").map_or(0, absint).max(1);
-        let referer = read(|| asked.referer(site));
+        let referer = referer(asked);
         let ids: Vec<Value> = if doaction == b"delete_all"
             && asked
                 .request("pagegen_timestamp")
@@ -212,7 +208,7 @@ fn moderate<'a>(
             return Err(Error::Unported("comment_footer_die()'s page").into());
         };
         let noredir = asked.request("noredir").is_some();
-        let referer = read(|| asked.referer(site));
+        let referer = referer(asked);
         // Not back to `comment.php`'s pages.
         let referer = referer.filter(|referer| {
             let text = text(referer);
@@ -260,8 +256,8 @@ fn comment_status(approved: &str) -> Option<&'static str> {
 }
 
 /// `wp_die( time() )`.
-fn now(asked: &Asked) -> Answer {
-    Answer::Ajax(asked.now.to_string())
+fn now(asked: &Asked) -> Ajax {
+    Ajax::Text(asked.now.to_string())
 }
 
 /// The list's Approve and Unapprove (`wp_ajax_dim_comment()`): approved
@@ -270,7 +266,7 @@ pub(super) fn dim<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
     site: &'a dyn Acting,
-) -> Saving<'a> {
+) -> Saving<'a, Ajax> {
     Box::pin(async move {
         let id = post_int(asked, "id");
         let comment = match u64::try_from(id) {
@@ -294,7 +290,7 @@ pub(super) fn dim<'a>(
             _ => "hold",
         };
         set_comment_status(write, id, status).await?;
-        delete_response(write, asked, site, id, -1).await
+        Ok(delete_response(write, asked, site, id, -1).await?)
     })
 }
 
@@ -305,7 +301,7 @@ pub(super) fn delete<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
     site: &'a dyn Acting,
-) -> Saving<'a> {
+) -> Saving<'a, Ajax> {
     Box::pin(async move {
         let id = post_int(asked, "id");
         let comment = match u64::try_from(id) {
@@ -346,12 +342,12 @@ pub(super) fn delete<'a>(
         } else if asks("delete") {
             (Delete, -1)
         } else {
-            return Ok(Answer::Ajax("-1".into()));
+            return Ok(Ajax::Text("-1".into()));
         };
         if done.apply(write, asked, id).await? {
-            delete_response(write, asked, site, id, delta).await
+            Ok(delete_response(write, asked, site, id, delta).await?)
         } else {
-            Ok(Answer::Ajax("0".into()))
+            Ok(Ajax::Text("0".into()))
         }
     })
 }
@@ -365,10 +361,10 @@ async fn delete_response(
     site: &dyn Acting,
     id: u64,
     delta: i64,
-) -> Result<Answer, Stop> {
+) -> Result<Ajax, Error> {
     let url = match asked.post("_url") {
         // `sanitize_url()` of an array is a fatal error.
-        Some(Value::Array(_)) => return Err(Error::Unported("an array as _url").into()),
+        Some(Value::Array(_)) => return Err(Error::Unported("an array as _url")),
         Some(url) => esc_url_raw(&url.to_php_string()),
         None => Vec::new(),
     };
@@ -386,9 +382,9 @@ async fn delete_response(
     let mut supplemental = vec![("status", status.clone()), ("postId", post)];
     if paged {
         let mut total = total.saturating_add(delta).max(0);
-        if total % per_page != 0 && per_page < 1 {
+        if total % per_page != 0 && per_page.is_negative() {
             // `mt_rand( 1, $per_page )` is a fatal error.
-            return Err(Error::Unported("a negative _per_page").into());
+            return Err(Error::Unported("a negative _per_page"));
         }
         let query = url.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default();
         let query = query.split(|&b| b == b'#').next().unwrap_or_default();
@@ -404,8 +400,8 @@ async fn delete_response(
                 total = count.cast_signed();
             }
         }
-        // `(int) ceil( $total / $per_page )`, exact when a page breaks.
-        let pages = total / per_page + i64::from(total % per_page != 0);
+        // `(int) ceil( $total / $per_page )`, in floats as PHP divides.
+        let pages = (total as f64 / per_page as f64).ceil() as i64;
         let items = if total == 1 { "item" } else { "items" };
         supplemental.extend([
             (
@@ -463,12 +459,7 @@ pub(super) fn count_of(counts: &[u64; 5], view: &[u8]) -> Option<u64> {
 
 /// `WP_Ajax_Response::send()` of one comment response: `response` as the
 /// data, then `supplemental`.
-fn ajax_response(
-    asked: &Asked,
-    id: &str,
-    response: &str,
-    supplemental: &[(&str, String)],
-) -> Answer {
+fn ajax_response(asked: &Asked, id: &str, response: &str, supplemental: &[(&str, String)]) -> Ajax {
     let action = asked
         .post("action")
         .map(Value::to_php_string)
@@ -477,7 +468,7 @@ fn ajax_response(
         .iter()
         .map(|(name, value)| format!("<{name}><![CDATA[{value}]]></{name}>"))
         .collect();
-    Answer::Xml(format!(
+    Ajax::Xml(format!(
         "<?xml version='1.0' encoding='UTF-8' standalone='yes'?><wp_ajax><response action='{}_{id}'><comment id='{id}' position='1'>{response}<supplemental>{supplemental}</supplemental></comment></response></wp_ajax>",
         text(&action)
     ))

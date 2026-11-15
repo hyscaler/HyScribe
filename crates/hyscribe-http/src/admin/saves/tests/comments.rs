@@ -7,7 +7,9 @@ use hyscribe_admin::actions::action;
 use hyscribe_write::comments::{Context, NewComment, insert_comment};
 
 use super::super::comments::count_of;
+use super::super::{Ajax, ajax_handler};
 use super::*;
+use hyscribe_db::Write;
 
 /// An ID no comment has (PHP's `HYSCRIBE_MISSING_ID`).
 const MISSING: u64 = 1 << 40;
@@ -29,7 +31,7 @@ impl Request<'_> {
         admin: &Admin<'_>,
         conn: &mut Connection,
         budget: Option<usize>,
-    ) -> Result<Answer, hyscribe_write::Error> {
+    ) -> Result<String, hyscribe_write::Error> {
         let (get, post) = (fields(&self.get), fields(&self.post));
         let uri = format!("/hs-admin/{}?{}", self.screen, self.get);
         let asked = Asked {
@@ -41,17 +43,31 @@ impl Request<'_> {
             user: 1,
             now: self.now,
         };
-        let handler = handler(self.screen, &action(self.screen, &asked)).unwrap();
+        let action = action(self.screen, &asked);
+        let begun = |write: &mut Result<Write<'_>, _>| {
+            if let (Ok(write), Some(budget)) = (write, budget) {
+                write.fail_after(budget);
+            }
+        };
         let mut write = writer.begin_on(conn).await;
-        if let (Ok(write), Some(budget)) = (&mut write, budget) {
-            write.fail_after(budget);
+        begun(&mut write);
+        if self.screen == "admin-ajax" {
+            let handler = ajax_handler(&action).unwrap();
+            return Ok(match act(write, handler, &asked, admin).await? {
+                Ajax::Text(text) | Ajax::Xml(text) => text,
+                answer => panic!("{answer:?}"),
+            });
         }
-        act(write, handler, &asked, admin).await
+        let handler = handler(self.screen, &action).unwrap();
+        match act(write, handler, &asked, admin).await? {
+            Answer::Redirect(to) => Ok(format!("302\t{to}")),
+            _ => panic!("{}", self.get),
+        }
     }
 
-    /// Its answer once every statement budget short of it has failed, each
-    /// failure rolled back.
-    async fn saved(&self, writer: &Writer, admin: &Admin<'_>, conn: &mut Connection) -> Answer {
+    /// Its answer, `302<TAB>Location` for a redirect, once every statement
+    /// budget short of it has failed, each failure rolled back.
+    async fn saved(&self, writer: &Writer, admin: &Admin<'_>, conn: &mut Connection) -> String {
         let mut budget = 0;
         loop {
             match self.send(writer, admin, conn, Some(budget)).await {
@@ -182,11 +198,7 @@ async fn moderations_answer_as_php() {
         let rows = golden.lines().filter(|row| row.starts_with("moderate-"));
         for row in rows {
             let (request, php) = golden_case(row);
-            let ours = match request.saved(&writer, &admin, conn).await {
-                Answer::Redirect(to) => format!("302\t{to}"),
-                Answer::Ajax(text) | Answer::Xml(text) => text,
-                _ => panic!("{row}"),
-            };
+            let ours = request.saved(&writer, &admin, conn).await;
             assert_eq!(ours, php, "{row}");
         }
         Ok(())
@@ -231,7 +243,7 @@ async fn a_post_trashed_comment_stays_in_the_trash() {
         let kept = request("admin-ajax", "", &untrash)
             .saved(&writer, &admin, conn)
             .await;
-        assert!(matches!(kept, Answer::Ajax(text) if text == "0"));
+        assert_eq!(kept, "0");
         Ok(())
     };
     let golden = "admin-comment-ajax-untrash-kept";

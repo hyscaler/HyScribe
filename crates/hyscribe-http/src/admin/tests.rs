@@ -1942,10 +1942,8 @@ async fn actions_read_the_site() {
         "action=dim-comment&id=99",
     ));
     let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
-    assert_eq!(page_of(response).await.into_bytes(), read_only);
-    let form = Some(("application/x-www-form-urlencoded", "action=nope"));
-    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(page_of(response).await, READ_ONLY);
     let own = format!("/hs-admin/users?changeit=1&new_role=none&users[]=1&_wpnonce={nonce}");
     let response = send(&site, "GET", &own, &cookies, None).await;
     assert!(
@@ -2018,9 +2016,10 @@ async fn actions_answer_as_php_once_checked() {
     let site = unwritable(site, "wp_").await;
     let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
     let cases = include_str!("../../../../reference/admin-saves/cases.list");
-    let rows = golden
-        .lines()
-        .filter(|row| !row.starts_with("users-promote\t") && !row.starts_with("moderate-"));
+    let rows = golden.lines().filter(|row| {
+        let listed = row.starts_with("users-") || row.starts_with("comments-");
+        listed && !row.starts_with("users-promote\t")
+    });
     for row in rows {
         let [case, status, php_location, body] = row.split('\t').collect::<Vec<_>>()[..] else {
             panic!("{row}");
@@ -2095,4 +2094,366 @@ async fn actions_answer_as_php_once_checked() {
         page.contains("Error establishing a database connection"),
         "{page}"
     );
+}
+
+/// `text` of `reference/admin-saves/cases.list` under hs-admin's names.
+fn hs_case(text: &str) -> String {
+    let text = text.replace("wp-admin%252Fedit-tags.php", "hs-admin%252Fedit-tags");
+    let text = text.replace("wp-admin%2Fedit-tags.php", "hs-admin%2Fedit-tags");
+    text.replace("wp-admin%2Fterm.php", "hs-admin%2Fterm")
+        .replace(".php", "")
+}
+
+/// Past their checks, the categories and tags actions of
+/// `reference/admin-saves/golden.sh` that write nothing answer as PHP's, and
+/// the screens after them are PHP's; the others are the write oracle's, in
+/// `saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn term_actions_answer_as_php_once_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let mut nonces = Vec::new();
+    for action in ["add-tag", "bulk-tags", "update-tag_1", "taxinlineeditnonce"] {
+        nonces.push((action, session_nonce(&site, &cookies, action).await));
+    }
+    let site = unwritable(site, "wp_").await;
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
+    let after = include_str!("../../../hyscribe-admin/tests/golden/admin-saves-after.tsv");
+    let cases = include_str!("../../../../reference/admin-saves/cases.list");
+    for case in [
+        "terms-add-exists",
+        "terms-add-empty",
+        "terms-bulk-missing",
+        "terms-edited-empty",
+        "ajax-add-exists",
+        "ajax-add-empty",
+        "ajax-add-missing-parent",
+        "ajax-add-invalid-name",
+        "ajax-inline-empty",
+    ] {
+        let find = |text: &'static str| {
+            let row = text
+                .lines()
+                .find(|row| row.starts_with(&format!("{case}\t")));
+            row.map(|row| row.split('\t').collect::<Vec<_>>())
+        };
+        let [_, _, target, data, action, field, ..] = find(cases).unwrap()[..] else {
+            panic!("{case}");
+        };
+        let nonce = &nonces.iter().find(|(a, _)| *a == action).unwrap().1;
+        let form = (
+            "application/x-www-form-urlencoded",
+            &*format!("{}&{field}={nonce}", hs_case(data)),
+        );
+        let uri = format!("/hs-admin/{}", hs_case(target));
+        let response = send(&site, "POST", &uri, &cookies, Some(form)).await;
+        let php = find(golden).unwrap();
+        assert_eq!(response.status().as_str(), php[1], "{case}");
+        let to = response.headers().get(header::LOCATION);
+        let to = to.map_or(String::new(), |to| to.to_str().unwrap().to_string());
+        assert_eq!(to, hyscribe_testkit::hs_admin_page(php[2]), "{case}");
+        let body = String::from_utf8(hyscribe_testkit::unhex(php[3])).unwrap();
+        assert_eq!(page_of(response).await, body, "{case}");
+        let Some(screen) = find(after) else {
+            continue;
+        };
+        let response = send(&site, "GET", &to, &cookies, None).await;
+        assert_eq!(response.status().as_str(), screen[1], "{case}");
+        let page = page_of(response).await;
+        let php = String::from_utf8(hyscribe_testkit::unhex(screen[2])).unwrap();
+        let php = hyscribe_testkit::hs_admin_page(&php);
+        assert_eq!(page, with_values(&php, &page), "{case}");
+    }
+    // Not ported: the edit screen's other arguments, and the terms of a
+    // taxonomy hyscribe-write does not write.
+    let response = send(
+        &site,
+        "GET",
+        "/hs-admin/term?taxonomy=category&x=1",
+        &cookies,
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let add = &nonces[0].1;
+    let menu = format!(
+        "action=add-tag&taxonomy=nav_menu&screen=edit-nav_menu&tag-name=X&_wpnonce_add-tag={add}"
+    );
+    let form = ("application/x-www-form-urlencoded", &*menu);
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, Some(form)).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // A database whose `db_version` cannot be read takes no write.
+    let site = unwritable(site, "missing_").await;
+    let tag = format!(
+        "action=add-tag&taxonomy=post_tag&screen=edit-post_tag&tag-name=X&_wpnonce_add-tag={add}"
+    );
+    let form = ("application/x-www-form-urlencoded", &*tag);
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, Some(form)).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+/// Quick Edit's row is PHP's once committed, and the add form's answer is
+/// the terms list's XML; in shadow mode the Ajax actions are read only.
+#[tokio::test(flavor = "multi_thread")]
+async fn term_ajax_answers_are_sent_once_committed() {
+    let site = oracle_site().await;
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
+    let row = golden
+        .lines()
+        .find(|row| row.starts_with("ajax-inline-unchanged\t"));
+    let php = hyscribe_testkit::unhex(row.unwrap().split('\t').nth(3).unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+    let handle = Handle::current();
+    let (row, added) = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, now());
+        let user = hyscribe_model::User {
+            id: 1,
+            ..hyscribe_model::User::default()
+        };
+        let admin = Admin::new(&reads, &site, user);
+        let asked = Asked {
+            get: &[],
+            post: &[],
+            referer: None,
+            uri: b"/hs-admin/admin-ajax",
+            home: &site.home,
+            user: 1,
+            now: 0,
+        };
+        let category = Terms::named(b"category").unwrap();
+        let term = admin.terms("category").into_iter().next().unwrap();
+        let row = saves::ajax_served(&admin, &asked, saves::Ajax::TermRow(category, term.clone()));
+        let added = hyscribe_admin::terms::Added {
+            term,
+            term_group: 0,
+            term_taxonomy_id: 1,
+        };
+        let xml = hyscribe_admin::terms::term_added(&admin, category, &added, "");
+        let answer = saves::ajax_served(&admin, &asked, saves::Ajax::TermAdded(category, added));
+        (row, (answer, xml))
+    })
+    .await
+    .unwrap();
+    assert_eq!(page_of(row).await, php);
+    let (answer, xml) = added;
+    let kind = answer.headers().get(header::CONTENT_TYPE).unwrap();
+    assert_eq!(kind, "text/xml; charset=UTF-8");
+    assert_eq!(page_of(answer).await, xml);
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let nonce = session_nonce(&site, &cookies, "taxinlineeditnonce").await;
+    let form =
+        format!("action=inline-save-tax&taxonomy=category&tax_ID=1&name=X&_inline_edit={nonce}");
+    let form = Some(("application/x-www-form-urlencoded", &*form));
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(page_of(response).await, READ_ONLY);
+}
+
+/// A page view whose writes fail, before the page or after it, is the
+/// database error page; one with nothing to write sets the cookies alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn page_view_writes_that_fail() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let site = unwritable(site, "wp_").await;
+    let host = "127.0.0.1:8081";
+    let newer = format!("{cookies}; wp-settings-1=a%3D1; wp-settings-time-1=9999999999");
+    for (uri, cookie) in [
+        ("/hs-admin/", &cookies),
+        ("/hs-admin/?welcome=0", &cookies),
+        ("/hs-admin/tools", &newer),
+    ] {
+        let response = get(&site, uri, host, cookie).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{uri}"
+        );
+        let page = page_of(response).await;
+        assert!(
+            page.contains("Error establishing a database connection"),
+            "{uri}"
+        );
+    }
+    // Only a list's mode and the dashboard's `welcome` save.
+    for uri in [
+        "/hs-admin/tools",
+        "/hs-admin/tools?mode=excerpt",
+        "/hs-admin/tools?welcome=0",
+        "/hs-admin/edit?mode=",
+    ] {
+        let response = get(&site, uri, host, &cookies).await;
+        assert_eq!(response.status(), StatusCode::OK, "{uri}");
+        assert!(set_cookies(&response).starts_with("wp-settings-1=deleted;"));
+    }
+    // The Quick Draft: a field PHP cannot trim and a post that is not an
+    // auto-draft are not ported; the form after a bad nonce writes an auto-draft.
+    let nonce = session_nonce(&site, &cookies, "add-post").await;
+    let form = "application/x-www-form-urlencoded";
+    for (body, status) in [
+        ("post_ID=1&content[]=x", StatusCode::NOT_IMPLEMENTED),
+        ("post_ID=1&content=x", StatusCode::NOT_IMPLEMENTED),
+        (
+            "post_ID=1&content=x&_wpnonce=bad",
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+    ] {
+        let body = format!("action=post-quickdraft-save&_wpnonce={nonce}&{body}");
+        let response = send(
+            &site,
+            "POST",
+            "/hs-admin/post",
+            &cookies,
+            Some((form, &body)),
+        )
+        .await;
+        assert_eq!(response.status(), status, "{body}");
+    }
+    // A list's mode is not saved with a page that is not ported.
+    let unported = get(
+        &site,
+        "/hs-admin/edit?mode=excerpt&unknown=1",
+        host,
+        &cookies,
+    )
+    .await;
+    assert_eq!(unported.status(), StatusCode::NOT_IMPLEMENTED);
+    // A writer that refuses the database's version begins no view, and is
+    // not asked to where there is nothing to write.
+    let site = unwritable(site, "missing_").await;
+    let response = get(&site, "/hs-admin/", host, &cookies).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    for (uri, cookie, status) in [
+        ("/hs-admin/tools", &cookies, StatusCode::OK),
+        ("/hs-admin/edit?paged=9", &newer, StatusCode::FOUND),
+    ] {
+        assert_eq!(
+            get(&site, uri, host, cookie).await.status(),
+            status,
+            "{uri}"
+        );
+    }
+}
+
+/// `text` with each run from `start` to the next `end` replaced by `with`.
+fn replaced(text: &str, (start, end): (&str, &str), with: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some((at, to)) = rest
+        .find(start)
+        .and_then(|at| Some((at, at + rest.get(at..)?.find(end)? + end.len())))
+    {
+        out.push_str(rest.get(..at).unwrap());
+        out.push_str(with);
+        rest = rest.get(to..).unwrap();
+    }
+    out + rest
+}
+
+/// The Set-Cookie headers of `response` as `reference/admin-views/golden.sh`
+/// masks them.
+fn set_cookies(response: &Response) -> String {
+    let cookies = response.headers().get_all(header::SET_COOKIE).iter();
+    let cookies: Vec<String> = cookies
+        .map(|cookie| {
+            let cookie = cookie.to_str().unwrap();
+            let cookie = replaced(
+                cookie,
+                ("wp-settings-time-1=", ";"),
+                "wp-settings-time-1=%now%;",
+            );
+            let year = ("expires=", "; Max-Age=31536000");
+            replaced(&cookie, year, "expires=%expires%; Max-Age=31536000")
+        })
+        .collect();
+    cookies.join(" | ")
+}
+
+/// The requests of `reference/admin-views/golden.sh`, in order, in primary
+/// mode over a fresh copy of the default install, really writing: each
+/// answer, cookie and page is PHP's.
+#[tokio::test(flavor = "multi_thread")]
+async fn page_views_and_screen_state_write_as_php() {
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..hyscribe_testkit::fixture_database()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in(&db.name, dir.path()).await;
+    let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary).await;
+    let site = Arc::new(
+        Arc::try_unwrap(site)
+            .ok()
+            .unwrap()
+            .with_writer(writer.unwrap()),
+    );
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-views.tsv");
+    let cases = include_str!("../../../../reference/admin-views/cases.list");
+    let cases = cases.lines().filter(|line| !line.starts_with('#'));
+    for (row, line) in golden.lines().zip(cases) {
+        let [case, status, php_location, php_cookies, body] =
+            row.split('\t').collect::<Vec<_>>()[..]
+        else {
+            panic!("{row}");
+        };
+        let [_, method, target, data, action, field, cookie] =
+            line.split('\t').collect::<Vec<_>>()[..]
+        else {
+            panic!("{line}");
+        };
+        let uri = format!("/hs-admin/{}", target.replace(".php", ""));
+        let jar = match cookie {
+            "-" => cookies.clone(),
+            cookie => format!("{cookies}; {cookie}"),
+        };
+        let response = if method == "POST" {
+            let nonce = match action {
+                "-" => "bad".to_string(),
+                action => session_nonce(&site, &cookies, action).await,
+            };
+            let form = format!("{data}&{field}={nonce}");
+            let form = ("application/x-www-form-urlencoded", form.as_str());
+            send(&site, "POST", &uri, &jar, Some(form)).await
+        } else {
+            send(&site, "GET", &uri, &jar, None).await
+        };
+        assert_eq!(response.status().as_str(), status, "{case}");
+        let ours = response.headers().get(header::LOCATION);
+        let php_location = php_location
+            .replace("/wp-admin/", "/hs-admin/")
+            .replace(".php", "");
+        assert_eq!(
+            ours.map_or("", |l| l.to_str().unwrap()),
+            php_location,
+            "{case}"
+        );
+        assert_eq!(set_cookies(&response), php_cookies, "{case}");
+        // `admin-ajax.php`'s answers are not pages: JSON, or text.
+        if target == "admin-ajax.php" {
+            let kind = response.headers().get(header::CONTENT_TYPE).unwrap();
+            // The body is hex: `{` is `7b`.
+            let json = body.starts_with("7b");
+            assert_eq!(
+                kind.to_str().unwrap().starts_with("application/json"),
+                json,
+                "{case}"
+            );
+            assert!(response.headers().contains_key("x-robots-tag"), "{case}");
+        }
+        let dates = ("<time datetime=\"", "</time>");
+        let page = replaced(
+            &page_of(response).await,
+            dates,
+            "<time datetime=\"%date%\">%date%</time>",
+        );
+        let page = hyscribe_testkit::settled_page(&page);
+        let php = String::from_utf8(hyscribe_testkit::unhex(body)).unwrap();
+        let php = hyscribe_testkit::settled_page(&hyscribe_testkit::hs_admin_page(&php));
+        assert_eq!(with_values(&php, &page), page, "{case}");
+    }
+    assert_eq!(golden.lines().count(), 17);
 }

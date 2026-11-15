@@ -91,8 +91,8 @@ impl RenderSite for Reads<'_> {
     }
 
     fn option(&self, name: &str) -> Option<Vec<u8>> {
-        match self.site.options.get(name) {
-            Some(value) => Some(value.clone()),
+        match self.site.autoloaded(name) {
+            Some(value) => Some(value),
             None => self.memo(&self.options, name.to_string(), || {
                 self.wait(self.site.db.option(name))
             }),

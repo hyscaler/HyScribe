@@ -40,7 +40,15 @@ fn rows_are_php_s() {
         let rest = page.get(start..).unwrap();
         let php = rest.get(..rest.find("\t</tbody>").unwrap()).unwrap();
         let columns = columns(POST, "", false);
-        let ours = row(&Role(role), &hello(), &columns, &[], "", false, None);
+        let ours = row(
+            &Role(role),
+            &hello(),
+            &columns,
+            &[],
+            "",
+            false,
+            Level::Flat(0),
+        );
         assert!(ours == php, "{role}: {}", first_difference(php, &ours));
     }
 }

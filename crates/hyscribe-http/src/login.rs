@@ -301,7 +301,7 @@ impl LoginSite for LoginReads<'_> {
     }
 
     fn public(&self) -> bool {
-        !Value::String(self.site.raw_option("blog_public").to_vec()).is_empty()
+        !Value::String(self.site.raw_option("blog_public")).is_empty()
     }
 
     /// `wp_create_nonce( $action )` for the current user.
@@ -329,7 +329,7 @@ impl LoginSite for LoginReads<'_> {
     }
 
     fn can_register(&self) -> bool {
-        !Value::String(self.site.raw_option("users_can_register").to_vec()).is_empty()
+        !Value::String(self.site.raw_option("users_can_register")).is_empty()
     }
 
     fn post_type(&self, id: u64) -> Option<String> {

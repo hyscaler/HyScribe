@@ -12,6 +12,9 @@ use hyscribe_write::users::{UserData, wp_insert_user};
 
 use super::*;
 
+/// The write tests, one at a time: their actions lock the same rows.
+pub(super) static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn writer() -> Writer {
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
     writer.unwrap().unwrap()
@@ -36,6 +39,7 @@ async fn promote(
         referer: None,
         uri: b"/hs-admin/users",
         home: "http://127.0.0.1:8081",
+        site_url: "http://127.0.0.1:8081",
         user: 1,
     };
     let mut write = writer.begin_on(conn).await;
@@ -80,6 +84,7 @@ fn php_location(case: &str) -> String {
 /// request that dies part way or meets a failed statement.
 #[tokio::test]
 async fn the_role_change_is_php_s() {
+    let _one = ONE_AT_A_TIME.lock().await;
     let writer = writer().await;
     let setup = async |conn: &mut Connection| {
         let mut write = writer.begin_on(conn).await.unwrap();

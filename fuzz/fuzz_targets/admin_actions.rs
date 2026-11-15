@@ -63,6 +63,9 @@ impl ActionSite for Open {
     fn user_roles(&self) -> Option<Vec<u8>> {
         None
     }
+    fn lock_holder(&self, post: u64) -> Option<String> {
+        (post % 2 == 1).then(|| "<b>editor</b>".into())
+    }
 }
 
 const SCREENS: [&str; 11] = [
@@ -94,6 +97,7 @@ fuzz_target!(|data: &[u8]| {
         referer: Some(referer),
         uri: query,
         home: "http://example.test",
+        site_url: "http://example.test",
         user: 1,
     };
     let screen = SCREENS[usize::from(screen.first().copied().unwrap_or(0)) % SCREENS.len()];

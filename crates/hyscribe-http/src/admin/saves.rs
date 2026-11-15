@@ -12,6 +12,7 @@ use hyscribe_admin::actions::Asked;
 use hyscribe_admin::posts::Answer;
 use hyscribe_db::{DbError, Write};
 
+mod posts;
 mod users;
 
 /// Why an action keeps nothing it wrote.
@@ -46,6 +47,11 @@ pub(super) type Handler = for<'a, 'w> fn(&'a mut Write<'w>, &'a Asked<'a>) -> Sa
 pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
     match (screen, action) {
         ("users", b"promote") => Some(users::promote),
+        ("post", b"trash") => Some(posts::trash),
+        ("post", b"untrash") => Some(posts::untrash),
+        ("post", b"delete") => Some(posts::delete),
+        ("edit", _) => Some(posts::bulk),
+        ("admin-ajax", b"inline-save") => Some(posts::inline_save),
         _ => None,
     }
 }

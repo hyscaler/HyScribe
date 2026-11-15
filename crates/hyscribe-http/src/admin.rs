@@ -26,7 +26,7 @@ use hyscribe_admin::media::{
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::{PageSite, REMOVABLE, Request, query_strings};
 use hyscribe_admin::posts::{
-    Answer, BULK, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids,
+    Answer, BULK, ListArgs, PAGE, POST, PostType, PostsSite, edit, kept_ids, saved_row, sorted_ids,
 };
 use hyscribe_admin::profile::{EditArgs, ProfileSite, profile, user_edit};
 use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
@@ -215,7 +215,7 @@ impl<'a> Admin<'a> {
     /// `get_comment_link()` of `comment` on the post at `permalink`; only a
     /// site that pages comments reads the post's comments.
     fn comment_link(&self, comment: &hyscribe_model::Comment, permalink: Option<&str>) -> String {
-        let option = |name: &str| self.site.raw_option(name).to_vec();
+        let option = |name: &str| self.site.raw_option(name);
         let paged = !hyscribe_phpser::is_empty_string(&option("page_comments"));
         let mut cache = self.post_comments.borrow_mut();
         let all = cache.entry(comment.post_id).or_insert_with(|| {
@@ -332,6 +332,11 @@ impl ActionSite for Admin<'_> {
     }
     fn user_roles(&self) -> Option<Vec<u8>> {
         UsersSite::user_roles(self)
+    }
+    fn lock_holder(&self, post: u64) -> Option<String> {
+        let post = PostsSite::post(self, post)?;
+        let holder = hyscribe_admin::posts::lock_holder(self, &post)?;
+        Some(String::from_utf8_lossy(&holder.display_name).into_owned())
     }
 }
 
@@ -1034,6 +1039,20 @@ fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
                     None => {}
                 }
             }
+            // What a bulk action leaves of its request, which the list does not read.
+            (Key::String(key), _)
+                if [
+                    &b"_wpnonce"[..],
+                    b"doaction",
+                    b"screen",
+                    b"sticky",
+                    b"post_category",
+                    b"tax_input",
+                    b"post_parent",
+                    b"page_template",
+                    b"keep_private",
+                ]
+                .contains(&key.as_slice()) => {}
             _ => return None,
         }
     }
@@ -1258,13 +1277,45 @@ fn save(admin: &Admin, screen: &str, asked: &Asked) -> Response {
     let Some(writer) = &admin.site.writer else {
         return denied(admin, READ_ONLY);
     };
-    let saved = Handle::current()
-        .block_on(async { saves::act(writer.begin().await, handler, asked).await });
+    let saved = Handle::current().block_on(async {
+        let saved = saves::act(writer.begin().await, handler, asked).await;
+        admin.site.reload_options().await;
+        saved
+    });
     match saved {
+        Ok(answer) if screen == "admin-ajax" => ajax_saved(admin, asked, answer),
         Ok(answer) => served(admin, answer),
         Err(hyscribe_write::Error::Unported(_)) => not_ported(),
         Err(err) => crate::html(crate::database_error(admin.site, &format!("{err:?}"))),
     }
+}
+
+/// `admin-ajax.php`'s answer once its action ran: `wp_die()`'s message, or
+/// Quick Edit's row of the saved post, read anew.
+fn ajax_saved(admin: &Admin, asked: &Asked, answer: Answer) -> Response {
+    let text = match answer {
+        Answer::Died(message) => message.to_string(),
+        _ => {
+            let fresh = Admin::new(admin.reads, admin.site, admin.user.clone());
+            let field = |name| {
+                hyscribe_phpser::lookup(asked.post, name)
+                    .map_or_else(Vec::new, Value::to_php_string)
+            };
+            let id = Value::String(field("post_ID")).to_int();
+            let kind = match &field("screen")[..] {
+                b"edit-page" => PAGE,
+                _ => POST,
+            };
+            let filter = String::from_utf8_lossy(&field("post_status")).into_owned();
+            let excerpt = field("post_view") == b"excerpt";
+            let post = PostsSite::post(&fresh, u64::try_from(id).unwrap_or_default());
+            post.map_or_else(String::new, |post| {
+                saved_row(&fresh, &post, kind, &filter, excerpt)
+            })
+        }
+    };
+    let body = Body::Text(text);
+    refused(admin.reads.public(), Refusal { status: 200, body })
 }
 
 /// What an action reads of the request: `$_GET` and `$_POST`, unslashed.
@@ -1272,7 +1323,7 @@ fn action_request<'a>(
     site: &'a Site,
     asking: &'a Asking,
     get: &'a Value,
-    uri: &'a [u8],
+    (uri, site_url): (&'a [u8], &'a str),
     user: u64,
 ) -> Asked<'a> {
     Asked {
@@ -1284,6 +1335,7 @@ fn action_request<'a>(
             .map(HeaderValue::as_bytes),
         uri,
         home: &site.home,
+        site_url,
         user,
     }
 }
@@ -1308,19 +1360,21 @@ fn ajax_answer(
         .map_or("", |p| p.as_str())
         .as_bytes();
     let id = user.as_ref().map_or(0, |(id, _)| *id);
-    let asked = action_request(site, asking, &get, uri, id);
-    let checked = match user {
-        Some((id, token)) => {
-            reads.act_as(id, token);
-            let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
-            admin_ajax(Some(&Admin::new(reads, site, user)), &asked)
-        }
-        None => admin_ajax(None, &asked),
+    let site_url = site.option("siteurl");
+    let asked = action_request(site, asking, &get, (uri, &site_url), id);
+    let Some((id, token)) = user else {
+        return admin_ajax(None, &asked).map_or_else(
+            |refusal| refused(reads.public(), refusal),
+            |()| not_ported(),
+        );
     };
-    checked.map_or_else(
-        |refusal| refused(reads.public(), refusal),
-        |()| not_ported(),
-    )
+    reads.act_as(id, token);
+    let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
+    let admin = Admin::new(reads, site, user);
+    match admin_ajax(Some(&admin), &asked) {
+        Ok(()) => save(&admin, "admin-ajax", &asked),
+        Err(refusal) => refused(reads.public(), refusal),
+    }
 }
 
 fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
@@ -1367,7 +1421,9 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
                 let mut admin = Admin::new(&reads, site, user);
                 let get = parse_str(uri.query().unwrap_or_default().as_bytes());
-                let asked = action_request(site, asking, &get, raw_uri.as_bytes(), id);
+                let site_url = site.option("siteurl");
+                let at = (raw_uri.as_bytes(), site_url.as_str());
+                let asked = action_request(site, asking, &get, at, id);
                 let name = uri.path().strip_prefix("/hs-admin/").unwrap_or_default();
                 match hyscribe_admin::actions::admin(&admin, name, &asked, post) {
                     Some(Err(refusal)) => return refused(reads.public(), refusal),

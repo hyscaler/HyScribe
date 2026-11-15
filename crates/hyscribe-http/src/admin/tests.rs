@@ -24,7 +24,7 @@ async fn get(site: &Arc<Site>, uri: &str, host: &str, cookie: &str) -> Response 
         .unwrap()
 }
 
-fn location(response: &Response) -> &str {
+pub(super) fn location(response: &Response) -> &str {
     response
         .headers()
         .get(header::LOCATION)
@@ -571,7 +571,7 @@ async fn logged_in_users_are_let_in() {
 
 /// `database` seen from the oracle's address, with a login for `admin`:
 /// the site and its cookies.
-async fn logged_in(database: &str, dir: &std::path::Path) -> (Arc<Site>, String) {
+pub(super) async fn logged_in(database: &str, dir: &std::path::Path) -> (Arc<Site>, String) {
     let config = hyscribe_config::Database {
         name: database.into(),
         ..hyscribe_testkit::fixture_database()
@@ -731,7 +731,7 @@ async fn attachment_edit_screen_is_php_s() {
 
 /// `page` with its nonces, ten hexadecimal digits standing alone, and its
 /// time masked, as the hashed goldens hold them.
-fn masked_nonces(page: &str) -> String {
+pub(super) fn masked_nonces(page: &str) -> String {
     let mut out = String::new();
     let mut word = String::new();
     for c in page.chars().chain(['\0']) {
@@ -793,7 +793,7 @@ fn masked(page: &str) -> String {
     )
 }
 
-async fn page_of(response: Response) -> String {
+pub(super) async fn page_of(response: Response) -> String {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
@@ -1764,7 +1764,7 @@ async fn the_posts_list_reads_its_arguments() {
 }
 
 /// `method` on `uri` with `cookie` and a body of `content_type`.
-async fn send(
+pub(super) async fn send(
     site: &Arc<Site>,
     method: &str,
     uri: &str,
@@ -1788,7 +1788,7 @@ async fn send(
 }
 
 /// The nonce of `action` for the session of the logged in cookie in `cookies`.
-async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &'static str) -> String {
+pub(super) async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &'static str) -> String {
     let auth = cookies
         .split("; ")
         .find(|cookie| cookie.starts_with("hyscribe_logged_in_"))
@@ -1809,7 +1809,8 @@ async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &'static str) ->
 }
 
 /// An action is refused as PHP refuses it until its checks pass, then
-/// answered 501; a POST whose body only PHP reads is not answered.
+/// answered as shadow mode answers a write; a POST whose body only PHP
+/// reads is not answered.
 #[tokio::test(flavor = "multi_thread")]
 async fn actions_are_checked_first() {
     let dir = tempfile::tempdir().unwrap();
@@ -1823,7 +1824,7 @@ async fn actions_are_checked_first() {
     let nonce = session_nonce(&site, &cookies, "bulk-posts").await;
     let valid = format!("{trash}&_wpnonce={nonce}");
     let response = send(&site, "GET", &valid, &cookies, None).await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let form = "application/x-www-form-urlencoded";
     let body = format!("action=trash&post[]=1&_wpnonce={nonce}");
     let response = send(
@@ -1834,7 +1835,7 @@ async fn actions_are_checked_first() {
         Some((form, &body)),
     )
     .await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let response = send(
         &site,
         "POST",
@@ -2013,7 +2014,7 @@ async fn actions_answer_as_php_once_checked() {
     let cases = include_str!("../../../../reference/admin-saves/cases.list");
     let rows = golden
         .lines()
-        .filter(|row| !row.starts_with("users-promote\t"));
+        .filter(|row| !row.starts_with("users-promote\t") && !row.starts_with("posts-"));
     for row in rows {
         let [case, status, php_location, body] = row.split('\t').collect::<Vec<_>>()[..] else {
             panic!("{row}");

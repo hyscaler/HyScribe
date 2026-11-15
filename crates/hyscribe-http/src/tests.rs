@@ -244,6 +244,7 @@ async fn database_errors_show_no_details() {
         salts: Vec::new(),
         sessions: None,
         writer: None,
+        reloaded: std::sync::RwLock::default(),
         defined: Vec::new(),
         public_users: true,
     });
@@ -870,6 +871,7 @@ async fn the_front_page_links_to_home() {
         salts: Vec::new(),
         sessions: None,
         writer: None,
+        reloaded: std::sync::RwLock::default(),
         defined: Vec::new(),
         public_users: true,
     });
@@ -999,6 +1001,7 @@ async fn failed_reads_answer_defaults() {
         salts: Vec::new(),
         sessions: None,
         writer: None,
+        reloaded: std::sync::RwLock::default(),
         defined: Vec::new(),
         public_users: true,
     });

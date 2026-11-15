@@ -23,14 +23,14 @@ async fn delete_post_meta(write: &mut Write<'_>, id: u64, key: &str) -> Result<(
     Ok(())
 }
 
-/// `unstick_post( $id )`.
-async fn unstick(write: &mut Write<'_>, id: u64) -> Result<()> {
+/// The `sticky_posts` option's IDs, `intval()`ed and each once, if an array.
+async fn stickies(write: &mut Write<'_>) -> Result<Option<Vec<i64>>> {
     let stored = write
         .option_value("sticky_posts")
         .await?
         .unwrap_or_default();
     let Some(Value::Array(stickies)) = unserialize(&stored) else {
-        return Ok(());
+        return Ok(None);
     };
     let mut ids: Vec<i64> = Vec::new();
     for (_, sticky) in stickies {
@@ -39,13 +39,11 @@ async fn unstick(write: &mut Write<'_>, id: u64) -> Result<()> {
             ids.push(sticky);
         }
     }
-    let Some(at) = ids
-        .iter()
-        .position(|&sticky| u64::try_from(sticky) == Ok(id))
-    else {
-        return Ok(());
-    };
-    ids.remove(at);
+    Ok(Some(ids))
+}
+
+/// Stores `ids` as the `sticky_posts` option.
+async fn set_stickies(write: &mut Write<'_>, ids: Vec<i64>) -> Result<()> {
     let list = ids
         .into_iter()
         .zip(0..)
@@ -53,6 +51,32 @@ async fn unstick(write: &mut Write<'_>, id: u64) -> Result<()> {
         .collect();
     update_option(write, "sticky_posts", &Value::Array(list), None).await?;
     Ok(())
+}
+
+/// `stick_post( $id )`.
+pub async fn stick_post(write: &mut Write<'_>, id: u64) -> Result<()> {
+    let mut ids = stickies(write).await?.unwrap_or_default();
+    let id = i64::try_from(id).unwrap_or(i64::MAX);
+    if ids.contains(&id) {
+        return Ok(());
+    }
+    ids.push(id);
+    set_stickies(write, ids).await
+}
+
+/// `unstick_post( $id )`.
+pub async fn unstick_post(write: &mut Write<'_>, id: u64) -> Result<()> {
+    let Some(mut ids) = stickies(write).await? else {
+        return Ok(());
+    };
+    let Some(at) = ids
+        .iter()
+        .position(|&sticky| u64::try_from(sticky) == Ok(id))
+    else {
+        return Ok(());
+    };
+    ids.remove(at);
+    set_stickies(write, ids).await
 }
 
 /// `_reset_front_page_settings_for_post( $id )`.
@@ -67,7 +91,7 @@ async fn reset_front_page(write: &mut Write<'_>, id: u64, kind: Kind) -> Result<
             update_option(write, "page_for_posts", &Value::Int(0), None).await?;
         }
     }
-    unstick(write, id).await
+    unstick_post(write, id).await
 }
 
 /// `wp_trash_post( $id )`: whether the post went to the trash.
@@ -101,17 +125,31 @@ pub async fn wp_trash_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Res
     Ok(true)
 }
 
-/// `wp_untrash_post( $id )`: whether the post left the trash, as a draft.
-pub async fn wp_untrash_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Result<bool> {
+/// `wp_untrash_post( $id )`: whether the post left the trash, as a draft,
+/// or with the status it was trashed from when `previous`, as the
+/// trashed notice's Undo asks (`wp_untrash_post_set_previous_status()`).
+pub async fn wp_untrash_post(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    id: u64,
+    previous: bool,
+) -> Result<bool> {
     let Some(post) = write.post(id).await? else {
         return Ok(false);
     };
     if post.status != "trash" {
         return Ok(false);
     }
+    let status = if previous {
+        let stored = get_metadata(write, Meta::Post, id, TRASH_STATUS).await?;
+        let status = stored.first().map(Value::to_php_string);
+        String::from_utf8_lossy(&status.unwrap_or_default()).into_owned()
+    } else {
+        "draft".to_string()
+    };
     delete_post_meta(write, id, TRASH_STATUS).await?;
     delete_post_meta(write, id, TRASH_TIME).await?;
-    wp_update_post(write, ctx, id, &|args| args.status = "draft".into()).await?;
+    wp_update_post(write, ctx, id, &|args| args.status.clone_from(&status)).await?;
     // wp_untrash_post_comments().
     let stored = get_metadata(write, Meta::Post, id, COMMENTS_STATUS).await?;
     let statuses = stored.into_iter().next().unwrap_or_default();

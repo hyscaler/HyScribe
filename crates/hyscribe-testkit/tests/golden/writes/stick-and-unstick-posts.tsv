@@ -1,0 +1,7 @@
+# The rows PHP WordPress writes for the action stick-and-unstick-posts (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 09:58:44 to 2026-11-15 09:58:44 UTC.
+# %wp_posts:1% is 970.
+# %wp_postmeta:1% is 56.
+# %wp_postmeta:2% is 57.
+# %wp_options:1% is 132.
+wp_options	sticky_posts	~	option_value	a:0:{}	a:2:{i:0;i:970;i:1;i:1;}

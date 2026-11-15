@@ -25,6 +25,9 @@ pub trait ActionSite: CapabilityData {
     fn comment_approved(&self, id: u64) -> Option<Vec<u8>>;
     /// The roles as stored, `{prefix}user_roles`.
     fn user_roles(&self) -> Option<Vec<u8>>;
+    /// `wp_check_post_lock( $post )`: the display name of another user
+    /// whose edit lock on the post is fresh.
+    fn lock_holder(&self, post: u64) -> Option<String>;
 }
 
 /// The request an action is read from.
@@ -39,6 +42,8 @@ pub struct Asked<'a> {
     pub uri: &'a [u8],
     /// `home_url()`.
     pub home: &'a str,
+    /// `site_url()`.
+    pub site_url: &'a str,
     /// `get_current_user_id()`.
     pub user: u64,
 }
@@ -81,8 +86,8 @@ impl Asked<'_> {
             .unwrap_or_default()
     }
 
-    /// `wp_get_referer()`.
-    fn referer(&self, site: &dyn ActionSite) -> Option<Vec<u8>> {
+    /// `wp_get_referer()`, `validate` its `wp_validate_redirect()`.
+    pub fn referer(&self, validate: &dyn Fn(&[u8]) -> Vec<u8>) -> Option<Vec<u8>> {
         let given = self
             .request("_wp_http_referer")
             .filter(|referer| !referer.is_empty())
@@ -91,7 +96,7 @@ impl Asked<'_> {
             .referer
             .filter(|r| !Value::String(r.to_vec()).is_empty()))?;
         let here = [self.home.as_bytes(), self.uri].concat();
-        let validated = (raw != self.uri && raw != here).then(|| site.validate_redirect(raw));
+        let validated = (raw != self.uri && raw != here).then(|| validate(raw));
         validated.filter(|referer| !referer.is_empty())
     }
 
@@ -166,7 +171,7 @@ pub type Checked = Result<(), Refusal>;
 /// `wp_nonce_ays( $action )`.
 fn nonce_ays(site: &dyn ActionSite, asked: &Asked) -> Refusal {
     let mut html = String::from("The link you followed has expired.");
-    if let Some(referer) = asked.referer(site) {
+    if let Some(referer) = asked.referer(&|location| site.validate_redirect(location)) {
         let back = site.validate_redirect(&esc_url_raw(&remove_query_arg(&[b"updated"], &referer)));
         html.push_str(&format!(
             "</p><p><a href=\"{}\">Please try again.</a>",
@@ -229,11 +234,9 @@ fn items(value: &Value) -> Vec<Value> {
     }
 }
 
-/// The post's `_edit_lock`, whose check is not ported.
-fn locked(site: &dyn ActionSite, id: i64) -> bool {
-    let id = u64::try_from(id).unwrap_or_default();
-    site.post_meta(id, "_edit_lock")
-        .is_some_and(|lock| !Value::String(lock).is_empty())
+/// The display name of who holds a fresh edit lock on the post.
+fn lock_holder(site: &dyn ActionSite, id: i64) -> Option<String> {
+    site.lock_holder(u64::try_from(id).unwrap_or_default())
 }
 
 /// The checks of an action on the admin screen `screen` (hs-admin's path
@@ -344,12 +347,11 @@ fn posts_bulk(site: &dyn ActionSite, asked: &Asked, doaction: &Value, edit: &str
         Some(b"delete") => ("Sorry, you are not allowed to delete this item.", None),
         _ => return Ok(()),
     };
-    // The first post is written unless refused, or locked and skipped,
-    // which is not ported.
+    // The first post is written unless refused, or locked and skipped.
     if !can_for(site, "delete_post", first) {
         return Err(died(500, denied));
     }
-    if doaction.as_bytes() == Some(b"trash") && locked(site, first) {
+    if doaction.as_bytes() == Some(b"trash") && lock_holder(site, first).is_some() {
         return Ok(());
     }
     let error = check.and_then(|check| check(&post_status(site, first)));
@@ -412,9 +414,12 @@ fn post_action(site: &dyn ActionSite, asked: &Asked, post: bool) -> Option<Check
         if !can_for(site, "delete_post", id) {
             return Err(died(403, denied));
         }
-        // The lock's refusal is not ported.
-        if action == b"trash" && locked(site, id) {
-            return Ok(());
+        if action == b"trash"
+            && let Some(name) = lock_holder(site, id)
+        {
+            let message =
+                format!("You cannot move this item to the Trash. {name} is currently editing.");
+            return Err(died(409, message));
         }
         let error = check.and_then(|check| check(&found.status));
         error.map_or(Ok(()), |error| Err(died(500, error)))
@@ -499,10 +504,16 @@ fn users_action(asked: &Asked) -> Option<Vec<u8>> {
 }
 
 /// The action of a request whose checks passed, as its write's handler is
-/// registered: the users list's `current_action()`, else `$_REQUEST['action']`.
+/// registered: the lists' `current_action()`, `post.php`'s `delete` for its
+/// Delete button, else `$_REQUEST['action']`.
 pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
     match screen {
         "users" => users_action(asked).unwrap_or_default(),
+        "edit" => asked
+            .current_action(true)
+            .map(|action| action.to_php_string())
+            .unwrap_or_default(),
+        "post" if asked.post("deletepost").is_some() => b"delete".to_vec(),
         _ => asked.action(),
     }
 }
@@ -920,14 +931,22 @@ fn ajax_action(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
             if id == 0 {
                 return Err(ajax(200, ""));
             }
-            let (cap, message) = match asked.post("post_type").and_then(Value::as_bytes) {
-                Some(b"page") => ("edit_page", "Sorry, you are not allowed to edit this page."),
-                _ => ("edit_post", "Sorry, you are not allowed to edit this post."),
+            let (cap, kind) = match asked.post("post_type").and_then(Value::as_bytes) {
+                Some(b"page") => ("edit_page", "page"),
+                _ => ("edit_post", "post"),
             };
-            // The lock's answer is not ported.
-            match can_for(site, cap, id) {
-                true => Ok(()),
-                false => Err(ajax(200, message)),
+            if !can_for(site, cap, id) {
+                let message = format!("Sorry, you are not allowed to edit this {kind}.");
+                return Err(ajax(200, &message));
+            }
+            match lock_holder(site, id) {
+                Some(name) => {
+                    let name = esc_html(name.as_bytes());
+                    let message =
+                        format!("Saving is disabled: {name} is currently editing this {kind}.");
+                    Err(ajax(200, &message))
+                }
+                None => Ok(()),
             }
         }
         "delete-comment" | "dim-comment" => comment_ajax(site, asked, action == "dim-comment"),

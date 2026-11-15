@@ -1,0 +1,900 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! The posts lists' handlers through `act()` against the write oracle
+//! (`reference/writes/actions-posts-admin.php`): each setup writes what
+//! PHP's does, and the action must write PHP's rows.
+
+use std::sync::Arc;
+
+use hyscribe_config::Mode;
+use hyscribe_db::{Connection, Writer};
+use hyscribe_phpser::parse_str;
+use hyscribe_testkit::fixture_database;
+use hyscribe_testkit::writes::check_writes;
+use hyscribe_write::users::{UserData, wp_insert_user};
+
+use super::*;
+use crate::admin::saves::tests::ONE_AT_A_TIME;
+use crate::admin::saves::{act, handler};
+
+const SITE: &str = "http://127.0.0.1:8081";
+
+async fn writer() -> Writer {
+    let writer = Writer::open(&fixture_database(), Mode::Primary).await;
+    writer.unwrap().unwrap()
+}
+
+fn fields(query: &str) -> Vec<(Key, Value)> {
+    parse_str(query.as_bytes()).as_array().unwrap().to_vec()
+}
+
+/// What `screen`'s handler answers `user`'s `query` and `body`, as one
+/// action on `conn` once every statement budget short of it has failed.
+async fn answered(
+    writer: &Writer,
+    conn: &mut Connection,
+    (user, screen): (u64, &str),
+    (query, body): (&str, &str),
+) -> Result<Answer, String> {
+    let (get, post) = (fields(query), fields(body));
+    let uri = format!("/hs-admin/{screen}?{query}");
+    let asked = Asked {
+        get: &get,
+        post: &post,
+        referer: None,
+        uri: uri.as_bytes(),
+        home: SITE,
+        site_url: SITE,
+        user,
+    };
+    let handler = handler(screen, &action(screen, &asked)).unwrap();
+    let mut budget = 0;
+    loop {
+        let mut write = writer.begin_on(conn).await;
+        if let Ok(write) = &mut write {
+            write.fail_after(budget);
+        }
+        match act(write, handler, &asked).await {
+            Err(Error::Db(_)) => budget += 1,
+            answer => return answer.map_err(|err| format!("{err:?}")),
+        }
+    }
+}
+
+/// User 1's context, as the setups write.
+fn admin() -> Context {
+    Context {
+        user: 1,
+        can_publish: true,
+        home: SITE.as_bytes().to_vec(),
+        upload_host: b"127.0.0.1:8081".to_vec(),
+        now: crate::now(),
+    }
+}
+
+/// Runs `f` as one committed action on `conn`, as a setup does.
+async fn setup<T>(
+    writer: &Writer,
+    conn: &mut Connection,
+    f: impl AsyncFnOnce(&mut Write<'_>, &Context) -> Result<T, Error>,
+) -> Result<T, String> {
+    let mut write = writer
+        .begin_on(conn)
+        .await
+        .map_err(|err| format!("{err:?}"))?;
+    let value = f(&mut write, &admin())
+        .await
+        .map_err(|err| format!("{err:?}"))?;
+    write.commit().await.map_err(|err| format!("{err:?}"))?;
+    Ok(value)
+}
+
+/// `$posts_admin_lock( $id )`: another user's fresh edit lock.
+async fn lock(write: &mut Write<'_>, id: u64) -> Result<(), Error> {
+    let some = |text: &str| Some(text.as_bytes().to_vec());
+    let user = UserData {
+        user_login: some("oracle-editing"),
+        user_pass: some("A pass phrase"),
+        user_email: some("oracle-editing@example.test"),
+        ..UserData::default()
+    };
+    let user = wp_insert_user(write, &user).await?;
+    let lock = Value::String(format!("{}:{user}", crate::now()).into_bytes());
+    update_metadata(write, Meta::Post, id, "_edit_lock", &lock, &Value::Null).await?;
+    Ok(())
+}
+
+/// The post with `import_id`, `title`, `status` and `post_type`.
+fn oracle_post(import_id: u64, title: &str, (status, post_type): (&str, &str)) -> PostArgs {
+    PostArgs {
+        import_id,
+        title: title.as_bytes().to_vec(),
+        content: b"Its content.".to_vec(),
+        status: status.into(),
+        post_type: post_type.into(),
+        author: Some(1),
+        ..PostArgs::default()
+    }
+}
+
+/// `$posts_admin_quick( $id )`'s fields, `more` over them.
+fn quick(id: u64, more: &str) -> String {
+    let mut fields = format!(
+        "mm=10&jj=27&aa=2026&hh=08&mn=08&ss=15&post_author=1&post_password=&_status=publish\
+         &post_view=list&action=inline-save&post_ID={id}&edit_date=true&post_status=\
+         &hidden_mm=10&hidden_jj=27&hidden_aa=2026&hidden_hh=08&hidden_mn=08"
+    );
+    if id == 1 {
+        fields.push_str("&comment_status=open&ping_status=open&post_format=0");
+    }
+    format!("{fields}&{more}")
+}
+
+async fn check<T>(
+    golden: &str,
+    setup: impl AsyncFnOnce(&mut Connection) -> Result<T, String>,
+    action: impl AsyncFnOnce(&mut Connection, T) -> Result<(), String>,
+) {
+    let checked = check_writes(&fixture_database(), golden, setup, action).await;
+    checked.unwrap_or_else(|differences| panic!("{differences}"));
+}
+
+/// `post.php`'s trash, restore and delete write PHP's rows.
+#[tokio::test]
+async fn post_php_writes_as_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    let trashed = async |conn: &mut Connection| {
+        setup(writer, conn, async |w, ctx| wp_trash_post(w, ctx, 1).await).await
+    };
+    let post_php = async |conn: &mut Connection, query: &str| {
+        let answer = answered(writer, conn, (1, "post"), (query, "")).await?;
+        assert!(matches!(answer, Answer::Redirect(_)), "{query}");
+        Ok(())
+    };
+    check(
+        "admin-post-trash",
+        async |_| Ok(()),
+        async |conn, ()| post_php(conn, "post=1&action=trash").await,
+    )
+    .await;
+    check("admin-post-untrash", trashed, async |conn, _| {
+        post_php(conn, "post=1&action=untrash").await
+    })
+    .await;
+    check("admin-post-delete", trashed, async |conn, _| {
+        post_php(conn, "post=1&action=delete").await
+    })
+    .await;
+}
+
+/// `edit.php`'s bulk actions and Empty Trash write PHP's rows.
+#[tokio::test]
+async fn bulk_actions_write_as_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    let trashed = async |conn: &mut Connection, ids: &[u64]| {
+        setup(writer, conn, async |w, ctx| {
+            for &id in ids {
+                wp_trash_post(w, ctx, id).await?;
+            }
+            Ok(())
+        })
+        .await
+    };
+    let edit = async |conn: &mut Connection, query: &str| {
+        let answer = answered(writer, conn, (1, "edit"), (query, "")).await?;
+        assert!(matches!(answer, Answer::Redirect(_)), "{query}");
+        Ok(())
+    };
+    check(
+        "admin-posts-bulk-trash",
+        async |conn| setup(writer, conn, async |w, _| lock(w, 2).await).await,
+        async |conn, ()| edit(conn, "post_type=page&action=trash&post[]=2&post[]=3").await,
+    )
+    .await;
+    check(
+        "admin-posts-bulk-undo",
+        async |conn| trashed(conn, &[1]).await,
+        async |conn, ()| edit(conn, "doaction=undo&action=untrash&ids=1").await,
+    )
+    .await;
+    check(
+        "admin-posts-bulk-delete",
+        async |conn| trashed(conn, &[1]).await,
+        async |conn, ()| edit(conn, "action=delete&post[]=1&post[]=2").await,
+    )
+    .await;
+    check(
+        "admin-posts-empty-trash",
+        async |conn| trashed(conn, &[1, 2]).await,
+        async |conn, ()| edit(conn, "action=-1&delete_all=Empty+Trash&post_status=trash").await,
+    )
+    .await;
+    check(
+        "admin-posts-bulk-edit",
+        async |conn| {
+            setup(writer, conn, async |w, ctx| {
+                let post = oracle_post(960, "A bulk edited post", ("draft", "post"));
+                hyscribe_write::posts::wp_insert_post(w, ctx, post).await
+            })
+            .await
+        },
+        async |conn, id| {
+            let query = format!(
+                "post_type=post&action=edit&bulk_edit=Update&post[]=1&post[]={id}\
+                 &post_category[]=0&tax_input[post_tag]=Bulk+tag&post_author=-1\
+                 &comment_status=closed&ping_status=&_status=pending&post_format=-1&sticky=sticky"
+            );
+            edit(conn, &query).await
+        },
+    )
+    .await;
+}
+
+/// Quick Edit of a post and of a page writes PHP's rows.
+#[tokio::test]
+async fn quick_edit_writes_as_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    let quick_edit = async |conn: &mut Connection, body: &str| {
+        let answer = answered(writer, conn, (1, "admin-ajax"), ("", body)).await?;
+        assert_eq!(answer, Answer::Page(String::new()));
+        Ok(())
+    };
+    check(
+        "admin-posts-inline-save",
+        async |_| Ok(()),
+        async |conn, ()| {
+            let more = "post_title=Hello+again&post_name=hello-again&jj=28&screen=edit-post\
+                        &post_type=post&post_category[]=0&post_category[]=1\
+                        &tax_input[post_tag]=First+tag,+second+,+,&sticky=sticky";
+            quick_edit(conn, &quick(1, more)).await
+        },
+    )
+    .await;
+    check(
+        "admin-pages-inline-save",
+        async |conn| {
+            setup(writer, conn, async |w, ctx| {
+                let page = oracle_post(0, "A parent page", ("publish", "page"));
+                hyscribe_write::posts::wp_insert_post(
+                    w,
+                    ctx,
+                    PostArgs {
+                        content: Vec::new(),
+                        ..page
+                    },
+                )
+                .await
+            })
+            .await
+        },
+        async |conn, parent| {
+            let more = format!(
+                "post_title=Sample+Page&post_name=sample-page&post_type=page&screen=edit-page\
+                 &post_parent={parent}&menu_order=3&page_template=default"
+            );
+            quick_edit(conn, &quick(2, &more)).await
+        },
+    )
+    .await;
+}
+
+/// The database the answers are compared on: a copy of the fixture, made
+/// as root, with `reference/action-checks/content.sql` and `sql` added.
+async fn copy(sql: &str) -> hyscribe_config::Database {
+    use sqlx::{Connection as _, Executor as _};
+    let fixture = fixture_database();
+    let root = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&fixture.host)
+        .port(fixture.port)
+        .database("wordpress")
+        .username("root")
+        .password(fixture.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&root).await.unwrap();
+    let tables: Vec<String> = sqlx::query_scalar("SHOW TABLES")
+        .fetch_all(&mut conn)
+        .await
+        .unwrap();
+    let mut statements = vec![
+        "CREATE DATABASE IF NOT EXISTS wordpress_saves".to_string(),
+        "GRANT ALL ON wordpress_saves.* TO 'wordpress'@'%'".to_string(),
+    ];
+    for table in tables {
+        let copied = format!("wordpress_saves.{table}");
+        statements.push(format!("DROP TABLE IF EXISTS {copied}"));
+        statements.push(format!("CREATE TABLE {copied} LIKE wordpress.{table}"));
+        statements.push(format!(
+            "INSERT INTO {copied} SELECT * FROM wordpress.{table}"
+        ));
+    }
+    let content = include_str!("../../../../../../reference/action-checks/content.sql");
+    let content = content.split("-- cleanup").next().unwrap();
+    statements.push("USE wordpress_saves".into());
+    statements.push(content.into());
+    statements.push(sql.into());
+    for statement in statements.into_iter().filter(|sql| !sql.is_empty()) {
+        conn.execute(sqlx::raw_sql(sqlx::AssertSqlSafe(statement)))
+            .await
+            .unwrap();
+    }
+    hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture
+    }
+}
+
+/// `text` of `reference/admin-saves/` under hs-admin's names.
+fn hs(text: &str) -> String {
+    text.replace("/wp-admin/", "/hs-admin/")
+        .replace("%2Fwp-admin%2F", "%2Fhs-admin%2F")
+        .replace(".php", "")
+}
+
+/// `text` with the ten characters after each `_wpnonce=` of `from` those
+/// of `to`'s.
+fn nonces_of(text: &str, to: &str) -> String {
+    let at = |text: &str| text.find("_wpnonce=").map(|at| at + 9);
+    match (at(text), at(to)) {
+        (Some(from), Some(ours)) => format!(
+            "{}{}{}",
+            text.get(..from).unwrap(),
+            to.get(ours..ours + 10).unwrap(),
+            nonces_of(text.get(from + 10..).unwrap(), to.get(ours + 10..).unwrap())
+        ),
+        _ => text.to_string(),
+    }
+}
+
+/// `page` with its last modified dates, which are the time of the action.
+fn undated(page: &str) -> String {
+    let mut out = String::new();
+    let mut rest = page;
+    while let Some(at) = rest.find("Last Modified<br />") {
+        let (head, tail) = rest.split_at(at + 19);
+        out.push_str(head);
+        rest = tail.get(tail.find("</td>").unwrap()..).unwrap();
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The posts lists' actions of `reference/admin-saves/golden.sh`, sent to
+/// hs-admin on a copy of the fixture its writer writes, answer as PHP's,
+/// and so do the screens their redirects lead to.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_lists_actions_answer_as_php() {
+    use crate::admin::tests::{location, logged_in, masked_nonces, page_of, send, session_nonce};
+    let _one = ONE_AT_A_TIME.lock().await;
+    let golden = include_str!("../../../../../hyscribe-admin/tests/golden/admin-saves.tsv");
+    let after = include_str!("../../../../../hyscribe-admin/tests/golden/admin-saves-after.tsv");
+    let cases = include_str!("../../../../../../reference/admin-saves/cases.list");
+    let dir = tempfile::tempdir().unwrap();
+    let mut compared = 0;
+    for line in cases.lines().filter(|line| line.starts_with("posts-")) {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [case, method, target, body, action, field, ..] = fields[..] else {
+            panic!("{line}");
+        };
+        let config = copy(fields.get(6).copied().unwrap_or_default()).await;
+        let (site, cookies) = logged_in("wordpress_saves", dir.path()).await;
+        let writer = Writer::open(&config, Mode::Primary).await.unwrap();
+        let site = Arc::new(Arc::try_unwrap(site).ok().unwrap().with_writer(writer));
+        let nonce = session_nonce(&site, &cookies, Box::leak(action.into())).await;
+        let uri = format!("/hs-admin/{}", hs(target));
+        let response = if method == "POST" {
+            let form = format!("{body}&{field}={nonce}");
+            let form = ("application/x-www-form-urlencoded", form.as_str());
+            send(&site, "POST", &uri, &cookies, Some(form)).await
+        } else {
+            send(
+                &site,
+                "GET",
+                &format!("{uri}&{field}={nonce}"),
+                &cookies,
+                None,
+            )
+            .await
+        };
+        let row = golden
+            .lines()
+            .find(|row| row.starts_with(&format!("{case}\t")));
+        let [_, status, php_location, php_body] = row.unwrap().split('\t').collect::<Vec<_>>()[..]
+        else {
+            panic!("{case}");
+        };
+        assert_eq!(response.status().as_str(), status, "{case}");
+        let ours = response
+            .headers()
+            .get(axum::http::header::LOCATION)
+            .map(|_| location(&response).to_string());
+        let php_location = hs(&nonces_of(php_location, &format!("_wpnonce={nonce}")));
+        assert_eq!(ours.as_deref().unwrap_or_default(), php_location, "{case}");
+        let php = String::from_utf8(hyscribe_testkit::unhex(php_body)).unwrap();
+        let page = page_of(response).await;
+        // Quick Edit's row has the session's nonces, under hs-admin's names.
+        let php = if php.contains("<tr") {
+            hyscribe_testkit::hs_admin_page(&nonces_of(&php, &page))
+        } else {
+            php
+        };
+        assert_eq!(page, php, "{case}");
+        compared += 1;
+        let Some(to) = ours else {
+            continue;
+        };
+        let to = to.trim_start_matches(SITE);
+        let row = after
+            .lines()
+            .find(|row| row.starts_with(&format!("{case}\t")));
+        let [_, status, php_body] = row.unwrap().split('\t').collect::<Vec<_>>()[..] else {
+            panic!("{case}");
+        };
+        let response = send(&site, "GET", to, &cookies, None).await;
+        assert_eq!(response.status().as_str(), status, "{case} {to}");
+        if status == "200" {
+            let php = String::from_utf8(hyscribe_testkit::unhex(php_body)).unwrap();
+            let php = undated(&masked_nonces(&hyscribe_testkit::hs_admin_page(&php)));
+            let page = undated(&masked_nonces(&page_of(response).await));
+            assert_eq!(page, php, "{case} {to}");
+        }
+    }
+    assert_eq!(compared, 23);
+}
+
+/// What `screen`'s handler answers `user`'s `query` and `body` after `sql`,
+/// and the values `read` selects after it, all rolled back.
+async fn tried(
+    user: u64,
+    sql: &[String],
+    (screen, query, body): (&str, &str, &str),
+    read: &str,
+) -> (Result<Answer, String>, Vec<String>) {
+    use sqlx::{Acquire as _, Executor as _};
+    let fixture = fixture_database();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&fixture.host)
+        .port(fixture.port)
+        .database(&fixture.name)
+        .username(&fixture.user)
+        .password(fixture.password.expose());
+    let mut conn = <Connection as sqlx::Connection>::connect_with(&options)
+        .await
+        .unwrap();
+    let mut outer = conn.begin().await.unwrap();
+    for statement in sql {
+        let statement = sqlx::raw_sql(sqlx::AssertSqlSafe(statement.clone()));
+        outer.execute(statement).await.unwrap();
+    }
+    let conn = outer.acquire().await.unwrap();
+    let answer = answered(&writer().await, conn, (user, screen), (query, body)).await;
+    let read = sqlx::query_scalar(sqlx::AssertSqlSafe(read.to_string()));
+    (answer, read.fetch_all(&mut *conn).await.unwrap())
+}
+
+/// The user `id` with the serialized capabilities `caps`.
+fn user(id: u64, caps: &str) -> [String; 2] {
+    [
+        format!(
+            "INSERT INTO wp_users (ID, user_login, user_pass, user_nicename, user_email, \
+             user_url, user_registered, user_activation_key, user_status, display_name) VALUES \
+             ({id}, 'user{id}', '', 'user{id}', 'user{id}@example.test', '', \
+             '2026-11-01 00:00:00', '', 0, 'user{id}')"
+        ),
+        format!(
+            "INSERT INTO wp_usermeta (user_id, meta_key, meta_value) \
+             VALUES ({id}, 'wp_capabilities', '{caps}')"
+        ),
+    ]
+}
+
+const AUTHOR: &str = "a:1:{s:6:\"author\";b:1;}";
+
+/// The post `id` of `author`, `status` and `post_type`, titled `title`
+/// with `content`, under `parent`.
+fn post_row(
+    id: u64,
+    (author, status, post_type): (u64, &str, &str),
+    (title, content): (&str, &str),
+    parent: u64,
+) -> String {
+    format!(
+        "INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, \
+         post_title, post_excerpt, post_status, comment_status, ping_status, post_password, \
+         post_name, to_ping, pinged, post_modified, post_modified_gmt, post_content_filtered, \
+         post_parent, guid, menu_order, post_type, post_mime_type, comment_count) VALUES \
+         ({id}, {author}, '2026-11-02 00:00:00', '2026-11-02 00:00:00', '{content}', '{title}', \
+         '', '{status}', 'open', 'open', '', 'post-{id}', '', '', '2026-11-02 00:00:00', \
+         '2026-11-02 00:00:00', '', {parent}, 'http://127.0.0.1:8081/?p={id}', 0, '{post_type}', \
+         '', 0)"
+    )
+}
+
+/// `post`'s meta `key` set to `value`.
+fn meta(post: u64, key: &str, value: &str) -> String {
+    format!(
+        "INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES ({post}, '{key}', '{value}')"
+    )
+}
+
+fn died(message: &'static str) -> Result<Answer, String> {
+    Ok(Answer::Died(message))
+}
+
+fn unported(answer: &Result<Answer, String>) -> bool {
+    matches!(answer, Err(err) if err.starts_with("Unported"))
+}
+
+fn redirect(to: &str) -> Result<Answer, String> {
+    Ok(Answer::Redirect(format!("{SITE}{to}")))
+}
+
+/// What `post.php` cannot go on with dies or is not ported, as in PHP.
+#[tokio::test]
+async fn post_php_stops_as_php_stops() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let trashed = ["UPDATE wp_posts SET post_status = 'trash' WHERE ID = 1".to_string()];
+    let (answer, _) = tried(
+        1,
+        &trashed,
+        ("post", "post=1&action=trash", ""),
+        "SELECT post_status FROM wp_posts WHERE ID = 2",
+    )
+    .await;
+    assert_eq!(answer, died("Error in moving the item to Trash."));
+    let (answer, _) = tried(
+        1,
+        &[],
+        ("post", "post=1&action=untrash", ""),
+        "SELECT post_status FROM wp_posts WHERE ID = 2",
+    )
+    .await;
+    assert_eq!(answer, died("Error in restoring the item from Trash."));
+    let attachment = [post_row(
+        950,
+        (1, "inherit", "attachment"),
+        ("A file", ""),
+        0,
+    )];
+    let (answer, _) = tried(
+        1,
+        &attachment,
+        ("post", "post=950&action=delete", ""),
+        "SELECT post_status FROM wp_posts WHERE ID = 2",
+    )
+    .await;
+    assert!(unported(&answer));
+    let (answer, _) = tried(
+        1,
+        &[],
+        ("post", "post=999&action=delete", ""),
+        "SELECT post_status FROM wp_posts WHERE ID = 2",
+    )
+    .await;
+    assert!(unported(&answer));
+}
+
+/// `edit.php`'s requests that write nothing, or stop part way.
+#[tokio::test]
+async fn bulk_actions_stop_as_php_stops() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let none = "SELECT post_status FROM wp_posts WHERE ID = 1";
+    let edit = async |sql: &[String], query: &str| tried(1, sql, ("edit", query, ""), none).await;
+    for query in [
+        "post_type=attachment&action=trash&post[]=1",
+        "action=trash&media[]=1",
+        "action=trash&ids[]=1",
+        "action=trash&post=1",
+        "action=edit&bulk_edit=1&post[]=1&tags_input=a",
+    ] {
+        let (answer, _) = edit(&[], query).await;
+        assert!(unported(&answer), "{query}");
+    }
+    let (answer, _) = edit(&[], "action=trash&p=5").await;
+    assert_eq!(answer, redirect("/hs-admin/edit-comments?p=5"));
+    let from_editor = "_wp_http_referer=%2Fhs-admin%2Fpost%3Fpost%3D1";
+    let (answer, _) = edit(&[], &format!("action=trash&{from_editor}")).await;
+    assert_eq!(answer, redirect("/hs-admin/post-new"));
+    let (answer, _) = edit(
+        &[],
+        &format!("post_type=page&action=trash&post=&{from_editor}"),
+    )
+    .await;
+    assert_eq!(answer, redirect("/hs-admin/post-new?post_type=page"));
+    let (answer, _) = edit(&[], "delete_all=1&post_status=gone").await;
+    assert_eq!(
+        answer,
+        Ok(Answer::Redirect(
+            "/hs-admin/edit?delete_all=1&post_status=gone&paged=1".into()
+        ))
+    );
+    let (answer, kept) = edit(&[], "action=edit&post[]=1").await;
+    assert_eq!(
+        answer,
+        Ok(Answer::Redirect("/hs-admin/edit?paged=1".into()))
+    );
+    assert_eq!(kept, ["publish"]);
+    for (query, message) in [
+        (
+            "action=trash&post[]=999",
+            "Sorry, you are not allowed to move this item to the Trash.",
+        ),
+        (
+            "action=untrash&post[]=999",
+            "Sorry, you are not allowed to restore this item from the Trash.",
+        ),
+        (
+            "action=delete&ids=1,x",
+            "Sorry, you are not allowed to delete this item.",
+        ),
+        (
+            "action=trash&post[]=1&post[]=1",
+            "Error in moving the item to Trash.",
+        ),
+        (
+            "action=untrash&post[]=1",
+            "Error in restoring the item from Trash.",
+        ),
+    ] {
+        let (answer, kept) = edit(&[], query).await;
+        assert_eq!(answer, died(message), "{query}");
+        assert_eq!(kept, ["publish"], "{query}");
+    }
+    // A revision is never deleted from the list.
+    let revision = [post_row(
+        951,
+        (1, "inherit", "revision"),
+        ("A revision", ""),
+        1,
+    )];
+    let (answer, _) = edit(&revision, "action=delete&post[]=951").await;
+    assert_eq!(
+        answer,
+        died("Sorry, you are not allowed to delete this item.")
+    );
+}
+
+/// A post is locked by another user who exists and holds a fresh lock,
+/// read from `_edit_last` when the lock does not name the user.
+#[tokio::test]
+async fn bulk_trash_skips_locked_posts() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let now = crate::now();
+    let [author, caps] = user(900, AUTHOR);
+    let sql = [
+        author,
+        caps,
+        post_row(950, (1, "publish", "post"), ("Locked", "Text."), 0),
+        meta(1, "_edit_lock", &now.to_string()),
+        meta(1, "_edit_last", "900"),
+        meta(2, "_edit_lock", "1:900"),
+        meta(3, "_edit_lock", &format!("{now}:1")),
+        meta(950, "_edit_lock", &format!("{now}:12345")),
+    ];
+    let query = "action=trash&post[]=1&post[]=2&post[]=3&post[]=950";
+    let read = "SELECT post_status FROM wp_posts WHERE ID IN (1, 2, 3, 950) ORDER BY ID";
+    let (answer, statuses) = tried(1, &sql, ("edit", query, ""), read).await;
+    let to = "/hs-admin/edit?paged=1&trashed=3&ids=1%2C2%2C3%2C950&locked=1";
+    assert_eq!(answer, Ok(Answer::Redirect(to.into())));
+    assert_eq!(statuses, ["publish", "trash", "trash", "trash"]);
+}
+
+/// Quick Edit of what the golden cases leave out: refused fields, another
+/// list, a private post, a draft's slug, another user's limits.
+#[tokio::test]
+async fn quick_edit_edges() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let status = "SELECT CONCAT(post_status, ' ', post_name, ' ', post_password) FROM wp_posts \
+                  WHERE ID IN (1, 3, 950) ORDER BY ID";
+    let quick_edit = async |user: u64, sql: &[String], body: &str| {
+        tried(user, sql, ("admin-ajax", "", body), status).await
+    };
+    let post = |more: &str| quick(1, &format!("screen=edit-post&post_type=post&{more}"));
+    for more in [
+        "tags_input=a",
+        "screen=edit-attachment",
+        "post_ID=999",
+        "tax_input[post_format]=aside&tax_input[link_category]=x",
+        "tax_input[category]=1",
+        "tax_input[post_tag][]=a",
+        "post_format=aside",
+        "post_title[]=x",
+        "aa=x",
+    ] {
+        let (answer, _) = quick_edit(1, &[], &post(more)).await;
+        assert!(unported(&answer), "{more}");
+    }
+    let (answer, kept) = quick_edit(1, &[], &post("mm=13")).await;
+    assert_eq!(answer, died("Invalid date."));
+    assert_eq!(kept[0], "publish hello-world ");
+    let private = "keep_private=private&sticky=sticky&post_password=x&_status=inherit";
+    let (answer, statuses) = quick_edit(1, &[], &post(private)).await;
+    assert_eq!(answer, Ok(Answer::Page(String::new())));
+    assert_eq!(statuses[0], "private hello-world ");
+    let (_, statuses) = quick_edit(1, &[], &post("_status=inherit&tax_input[category][]=1")).await;
+    assert_eq!(statuses[0], "publish hello-world ");
+    // A draft's slug is made unique as a published one's.
+    let draft = quick(
+        3,
+        "screen=edit-page&post_type=page&post_name=sample-page&_status=draft",
+    );
+    let (_, statuses) = quick_edit(1, &[], &draft).await;
+    assert_eq!(statuses[1], "draft sample-page-2 ");
+    // Revisions from before 3.6, and a post format the post has.
+    let revision = [
+        post_row(951, (1, "inherit", "revision"), ("A revision", ""), 1),
+        "UPDATE wp_posts SET post_name = '1-autosave-v1' WHERE ID = 951".into(),
+    ];
+    let (answer, _) = quick_edit(1, &revision, &post("")).await;
+    assert_eq!(answer, Ok(Answer::Page(String::new())));
+    let old = ["UPDATE wp_posts SET post_name = '1-revision' WHERE ID = 951".to_string()];
+    let (answer, _) = quick_edit(1, &[revision[0].clone(), old[0].clone()], &post("")).await;
+    assert!(unported(&answer));
+    let formatted = [
+        "INSERT INTO wp_terms (term_id, name, slug) VALUES (960, 'Aside', 'post-format-aside')"
+            .to_string(),
+        "INSERT INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description) \
+         VALUES (960, 960, 'post_format', '')"
+            .into(),
+        "INSERT INTO wp_term_relationships (object_id, term_taxonomy_id) VALUES (1, 960)".into(),
+    ];
+    let (answer, _) = quick_edit(1, &formatted, &post("")).await;
+    assert!(unported(&answer));
+    // Attachment links to fix under pretty permalinks.
+    let linked = [
+        post_row(950, (1, "publish", "post"), ("Linked", "a <a href=\"x?attachment_id=5\">l</a>"), 0),
+        "UPDATE wp_options SET option_value = '/%postname%/' WHERE option_name = 'permalink_structure'".into(),
+    ];
+    let body = quick(950, "screen=edit-post&post_type=post");
+    let (answer, _) = quick_edit(1, &linked, &body).await;
+    assert!(unported(&answer));
+    // A post left with no title, content or excerpt keeps its title.
+    let blank = [post_row(950, (1, "publish", "post"), ("Titled", ""), 0)];
+    let body = quick(950, "screen=edit-post&post_type=post&post_title=");
+    let (answer, _) = quick_edit(1, &blank, &body).await;
+    assert_eq!(answer, Ok(Answer::Page(String::new())));
+    // An author may not give a post to another user.
+    let [author, caps] = user(900, AUTHOR);
+    let (answer, _) = quick_edit(900, &[author.clone(), caps.clone()], &post("")).await;
+    assert_eq!(
+        answer,
+        died("Sorry, you are not allowed to edit posts as this user.")
+    );
+    let page = quick(2, "screen=edit-page&post_type=page");
+    let (answer, _) = quick_edit(900, &[author, caps], &page).await;
+    assert_eq!(
+        answer,
+        died("Sorry, you are not allowed to edit pages as this user.")
+    );
+    // Who edits others' posts, but publishes none and assigns no terms.
+    let [editor, caps] = user(903, "a:1:{s:17:\"edit_others_posts\";b:1;}");
+    let draft = post_row(950, (1, "draft", "post"), ("Draft", "Text."), 0);
+    let sql = [editor, caps, draft];
+    let more = "screen=edit-post&post_type=post&_status=publish&post_password=x\
+                &post_category[]=0&tax_input[post_tag]=Unassigned&sticky=sticky";
+    let (answer, statuses) = quick_edit(903, &sql, &quick(950, more)).await;
+    assert_eq!(answer, Ok(Answer::Page(String::new())));
+    assert_eq!(statuses[2], "pending  ");
+    let more = "screen=edit-post&post_type=post&keep_private=private";
+    let (_, statuses) = quick_edit(903, &sql, &quick(950, more)).await;
+    assert_eq!(statuses[2], "draft post-950 ");
+    // The date's parts as PHP reads them: an hour past 23, a day past 31.
+    let dated = "SELECT CAST(post_date AS CHAR) FROM wp_posts WHERE ID = 1";
+    let (_, dates) = tried(1, &[], ("admin-ajax", "", &post("hh=25&jj=40")), dated).await;
+    assert_eq!(dates, ["2026-10-31 01:08:15"]);
+    let undated = quick(1, "screen=edit-post&post_type=post").replace("&aa=2026", "");
+    let (_, dates) = tried(1, &[], ("admin-ajax", "", &undated), dated).await;
+    let year = format_unix("Y", crate::now(), Zone::Utc);
+    assert_eq!(dates, [format!("{year}-10-27 08:08:15")]);
+}
+
+/// Bulk Edit of what the golden cases leave out.
+#[tokio::test]
+async fn bulk_edit_edges() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let base = "action=edit&bulk_edit=Update&post_type=post&post_author=-1\
+                &comment_status=&ping_status=&sticky=-1&post_format=-1";
+    let read = "SELECT CONCAT(ID, ' ', post_status, ' ', post_parent, ' ', comment_status) \
+                FROM wp_posts WHERE ID IN (1, 2, 3, 950) ORDER BY ID";
+    let bulk_edit = async |user: u64, sql: &[String], more: &str| {
+        tried(user, sql, ("edit", &format!("{base}&{more}"), ""), read).await
+    };
+    let counts = |answer: &Result<Answer, String>, (updated, skipped): (usize, usize)| {
+        let counted = format!("&updated={updated}&skipped={skipped}&locked=0");
+        matches!(answer, Ok(Answer::Redirect(to)) if to.ends_with(&counted))
+    };
+    for more in [
+        "post[]=1&tax_input[category]=1",
+        "post[]=1&tax_input[nav_menu]=x",
+        "post[]=1&post_format=aside",
+    ] {
+        let (answer, _) = bulk_edit(1, &[], more).await;
+        assert!(unported(&answer), "{more}");
+    }
+    let (answer, rows) = bulk_edit(
+        1,
+        &[],
+        "post[]=1&post_category=5&tax_input[post_format]=x&tax_input[post_tag]=",
+    )
+    .await;
+    assert!(counts(&answer, (1, 0)));
+    assert_eq!(rows[0], "1 publish 0 open");
+    let (_, rows) = bulk_edit(1, &[], "post[]=1&post[]=999&_status=inherit").await;
+    assert_eq!(rows[0], "1 publish 0 open");
+    let (answer, _) = bulk_edit(1, &[], "post[]=999&_status=draft").await;
+    assert!(counts(&answer, (0, 1)));
+    // A category added through `tax_input`, and one kept as indeterminate.
+    let category = [
+        "INSERT INTO wp_terms (term_id, name, slug) VALUES (961, 'Second', 'second')".to_string(),
+        "INSERT INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description) \
+         VALUES (961, 961, 'category', '')"
+            .into(),
+    ];
+    let categories = "SELECT CAST(term_taxonomy_id AS CHAR) FROM wp_term_relationships WHERE object_id = 1 ORDER BY term_taxonomy_id";
+    for more in [
+        "post[]=1&tax_input[category][]=961",
+        "post[]=1&post_category[]=0&post_category[]=961&indeterminate_post_category[]=1",
+    ] {
+        let query = format!("{base}&{more}");
+        let (_, terms) = tried(1, &category, ("edit", &query, ""), categories).await;
+        assert_eq!(terms, ["1", "961"], "{more}");
+    }
+    // Pages are not put under themselves or their children.
+    let pages = "action=edit&bulk_edit=Update&post_type=page&post_parent=2&post[]=2&post[]=3";
+    let (answer, rows) = tried(1, &[], ("edit", pages, ""), read).await;
+    let skipped =
+        "/hs-admin/edit?post_type=page&post_parent=2&paged=1&updated=1&skipped=1&locked=0";
+    assert_eq!(answer, Ok(Answer::Redirect(skipped.into())));
+    assert_eq!(rows[2], "3 draft 2 closed");
+    let pages = "action=edit&bulk_edit=Update&post_type=page&post_parent=1&post[]=3";
+    let (_, rows) = tried(1, &[], ("edit", pages, ""), read).await;
+    assert_eq!(rows[2], "3 draft 1 closed");
+    // An author's own post given to another user is skipped; a draft
+    // published gets the time of the action.
+    let [author, caps] = user(900, AUTHOR);
+    let own = post_row(950, (900, "draft", "post"), ("Own", "Text."), 0);
+    let sql = [author, caps, own];
+    let (answer, _) = bulk_edit(900, &sql, "post[]=950&post_author=1&_status=publish").await;
+    assert!(counts(&answer, (0, 1)));
+    let dated = "SELECT CAST(post_date AS CHAR) FROM wp_posts WHERE ID = 950";
+    let query = format!("{base}&post[]=950&_status=publish");
+    let (_, dates) = tried(1, &sql, ("edit", &query, ""), dated).await;
+    assert_ne!(dates, ["2026-11-02 00:00:00"]);
+    // A post with nothing in it is not saved by `wp_update_post()`.
+    let empty = [post_row(950, (1, "publish", "post"), ("", ""), 0)];
+    let (answer, _) = bulk_edit(1, &empty, "post[]=950").await;
+    assert!(unported(&answer));
+    // Sticky posts: unstuck, and left as they are for an author; an
+    // auto-draft becomes a draft.
+    let stuck =
+        "UPDATE wp_options SET option_value = 'a:1:{i:0;i:1;}' WHERE option_name = 'sticky_posts'";
+    let sticky = "SELECT option_value FROM wp_options WHERE option_name = 'sticky_posts'";
+    let query = format!("{base}&post[]=1&sticky=unsticky");
+    let (_, stickies) = tried(1, &[stuck.into()], ("edit", &query, ""), sticky).await;
+    assert_eq!(stickies, ["a:0:{}"]);
+    let mut sql = sql.to_vec();
+    sql.push(stuck.into());
+    sql[2] = post_row(950, (900, "auto-draft", "post"), ("Own", "Text."), 0);
+    let query = format!("{base}&post[]=950&sticky=unsticky");
+    let (_, stickies) = tried(900, &sql, ("edit", &query, ""), sticky).await;
+    assert_eq!(stickies, ["a:1:{i:0;i:1;}"]);
+    let (_, rows) = tried(900, &sql, ("edit", &query, ""), read).await;
+    assert_eq!(rows[3], "950 draft 0 open");
+}
+
+/// The capabilities read only the options, user and post they load.
+#[test]
+fn caps_read_what_they_load() {
+    let caps = Caps {
+        prefix: "wp_".into(),
+        options: Vec::new(),
+        user: 1,
+        exists: true,
+        capabilities: None,
+        posts: Vec::new(),
+    };
+    assert_eq!(caps.comment_post(1), None);
+    assert_eq!(caps.term_taxonomy(1), None);
+    assert!(!caps.constant("MULTISITE"));
+}

@@ -82,6 +82,9 @@ const SECURITY_HEADERS: [(&str, &str); 3] = [
 pub struct Site {
     db: Db,
     options: HashMap<String, Vec<u8>>,
+    /// The autoloaded options read again once an action committed, which
+    /// stand for `options` from then on.
+    reloaded: std::sync::RwLock<Option<HashMap<String, Vec<u8>>>>,
     home: String,
     theme: Theme,
     /// The rewrite rules of the permalink options, built once.
@@ -126,6 +129,7 @@ impl Site {
         let mut site = Site {
             db,
             options,
+            reloaded: std::sync::RwLock::default(),
             home,
             theme: twentytwentyfive(),
             rewriter: rewrite::Rewriter::default(),
@@ -196,26 +200,57 @@ impl Site {
     }
 
     fn option(&self, name: &str) -> String {
-        String::from_utf8_lossy(self.raw_option(name)).into_owned()
+        String::from_utf8_lossy(&self.raw_option(name)).into_owned()
     }
 
-    fn raw_option(&self, name: &str) -> &[u8] {
-        self.options.get(name).map_or(&[][..], Vec::as_slice)
+    fn raw_option(&self, name: &str) -> Vec<u8> {
+        self.autoloaded(name).unwrap_or_default()
+    }
+
+    /// The autoloaded option `name`, if it is one, as last read.
+    fn autoloaded(&self, name: &str) -> Option<Vec<u8>> {
+        let reloaded = self
+            .reloaded
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        reloaded
+            .as_ref()
+            .unwrap_or(&self.options)
+            .get(name)
+            .cloned()
+    }
+
+    /// Reads the autoloaded options again after an action, which may have
+    /// changed them, keeping the constants' `home` and `siteurl`.
+    async fn reload_options(&self) {
+        if let Ok(read) = self.db.autoload_options().await {
+            let mut options: HashMap<String, Vec<u8>> = read.into_iter().collect();
+            for (name, constant) in [("home", "WP_HOME"), ("siteurl", "WP_SITEURL")] {
+                if self.defined.contains(&constant) {
+                    options.insert(name.into(), self.raw_option(name));
+                }
+            }
+            let mut reloaded = self
+                .reloaded
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *reloaded = Some(options);
+        }
     }
 
     /// The site's time zone, `wp_timezone()`.
     fn zone(&self) -> Zone {
         date::site_zone(
-            self.raw_option("timezone_string"),
-            self.raw_option("gmt_offset"),
+            &self.raw_option("timezone_string"),
+            &self.raw_option("gmt_offset"),
         )
     }
 
     /// The page on the front page, if any.
     fn front_page(&self) -> Option<u64> {
         link::front_page(
-            self.raw_option("show_on_front"),
-            self.raw_option("page_on_front"),
+            &self.raw_option("show_on_front"),
+            &self.raw_option("page_on_front"),
         )
     }
 
@@ -228,8 +263,8 @@ impl Site {
     /// the posts.
     fn posts_page(&self) -> Option<u64> {
         link::front_page(
-            self.raw_option("show_on_front"),
-            self.raw_option("page_for_posts"),
+            &self.raw_option("show_on_front"),
+            &self.raw_option("page_for_posts"),
         )
         .filter(|&id| id != 0)
     }
@@ -1725,8 +1760,8 @@ async fn main_query(
     } else {
         site.db.find_terms(&slugs, &ids).await?
     };
-    let hierarchy = site.options.get("category_children");
-    let resolved = tax.resolve(&terms, hierarchy.map_or(&[][..], Vec::as_slice));
+    let hierarchy = site.raw_option("category_children");
+    let resolved = tax.resolve(&terms, &hierarchy);
     let term_archive = resolved.archive.is_some();
     let post_query = post_query(site, query, feed, resolved.filters.clone(), term_archive);
     Ok((post_query, resolved))
@@ -1771,11 +1806,7 @@ fn post_query(
     let home = search.is_none() && !feed && !date.archive && !term_archive;
     let paged = Paging::of(query).paged;
     let sticky = if home && paged <= 1 {
-        sticky_posts(
-            site.options
-                .get("sticky_posts")
-                .map_or(&[][..], Vec::as_slice),
-        )
+        sticky_posts(&site.raw_option("sticky_posts"))
     } else {
         vec![]
     };

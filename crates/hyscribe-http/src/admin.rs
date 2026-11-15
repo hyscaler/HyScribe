@@ -1273,13 +1273,14 @@ fn save(admin: &mut Admin, screen: &str, asked: &Asked) -> Response {
     let Some(writer) = &admin.site.writer else {
         return denied(admin, READ_ONLY);
     };
-    let act = || {
-        Handle::current().block_on(async { saves::act(writer.begin().await, handler, asked).await })
+    let act = |admin: &Admin| {
+        let begun = async { saves::act(writer.begin().await, handler, asked, admin).await };
+        Handle::current().block_on(begun)
     };
     if screen == "post" {
         return quick_draft(admin, writer, asked, act);
     }
-    match act() {
+    match act(admin) {
         // Only `admin-ajax.php`'s handlers answer with text: its `wp_die()`
         // and `wp_send_json()`.
         Ok(Answer::Page(body)) => {
@@ -1304,7 +1305,7 @@ fn ajax_save(admin: &Admin, asked: &Asked) -> Option<Response> {
         return Some(ajax_text(StatusCode::FORBIDDEN, HTML, READ_ONLY.into()));
     };
     let saved = Handle::current()
-        .block_on(async { saves::act(writer.begin().await, handler, asked).await });
+        .block_on(async { saves::act(writer.begin().await, handler, asked, admin).await });
     Some(match saved {
         Ok(answer) => saves::ajax_served(admin, asked, answer),
         Err(err) => failed(admin, err),
@@ -1329,7 +1330,7 @@ fn quick_draft(
     admin: &mut Admin,
     writer: &hyscribe_db::Writer,
     asked: &Asked,
-    act: impl FnOnce() -> Result<Answer, hyscribe_write::Error>,
+    act: impl FnOnce(&Admin) -> Result<Answer, hyscribe_write::Error>,
 ) -> Response {
     let nonce = asked.request("_wpnonce").map(Value::to_php_string);
     let verified = nonce.is_some_and(|nonce| ActionSite::verify_nonce(admin, &nonce, "add-post"));
@@ -1343,7 +1344,7 @@ fn quick_draft(
             "Cannot create a draft post with empty title and content.",
             "error",
         ),
-        Some(true) => match act() {
+        Some(true) => match act(admin) {
             Ok(_) => {
                 // The checks read the auto-draft the save made a draft.
                 admin.posts.borrow_mut().clear();
@@ -1366,7 +1367,7 @@ fn action_request<'a>(
     asking: &'a Asking,
     get: &'a Value,
     uri: &'a [u8],
-    user: u64,
+    (user, now): (u64, i64),
 ) -> Asked<'a> {
     Asked {
         get: entries(Some(get)),
@@ -1378,6 +1379,7 @@ fn action_request<'a>(
         uri,
         home: &site.home,
         user,
+        now,
     }
 }
 
@@ -1401,7 +1403,7 @@ fn ajax_answer(
         .map_or("", |p| p.as_str())
         .as_bytes();
     let id = user.as_ref().map_or(0, |(id, _)| *id);
-    let asked = action_request(site, asking, &get, uri, id);
+    let asked = action_request(site, asking, &get, uri, (id, reads.now));
     let checked = match user {
         Some((id, token)) => {
             reads.act_as(id, token);
@@ -1467,7 +1469,7 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
                 let mut admin = Admin::new(&reads, site, user);
                 let get = parse_str(uri.query().unwrap_or_default().as_bytes());
-                let asked = action_request(site, asking, &get, raw_uri.as_bytes(), id);
+                let asked = action_request(site, asking, &get, raw_uri.as_bytes(), (id, now));
                 let name = uri.path().strip_prefix("/hs-admin/").unwrap_or_default();
                 match hyscribe_admin::actions::admin(&admin, name, &asked, post) {
                     Some(Err(refusal)) => return refused(reads.public(), refusal),

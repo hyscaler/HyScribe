@@ -10,7 +10,7 @@ use std::pin::Pin;
 
 use axum::http::StatusCode;
 use axum::response::Response;
-use hyscribe_admin::actions::Asked;
+use hyscribe_admin::actions::{ActionSite, Asked};
 use hyscribe_admin::posts::Answer;
 use hyscribe_admin::terms::{Added, Taxonomy, saved_row, term_added};
 use hyscribe_db::{DbError, Write};
@@ -20,6 +20,7 @@ use hyscribe_model::Term;
 use super::{Admin, HTML, ajax_text};
 use crate::redirect::wp_validate_redirect;
 
+mod comments;
 pub(super) mod dashboard;
 mod options;
 pub(super) mod screen;
@@ -49,10 +50,34 @@ impl<T> From<DbError> for Stop<T> {
 /// A handler's work: the action's answer, or why it stopped.
 pub(super) type Saving<'a, T = Answer> = Pin<Box<dyn Future<Output = Result<T, Stop<T>>> + 'a>>;
 
-/// What PHP does once an action's checks pass, reading and writing only
-/// through the action's `Write`, so it sees its own writes.
+/// What a handler reads of the site and the current user as the checks
+/// read them, not seeing the action's writes; each call goes through [`read`].
+pub(super) trait Acting: ActionSite {
+    /// `admin_url( $path )`.
+    fn admin_url(&self, path: &str) -> String;
+    /// `get_comment_link()` of the comment `id`.
+    fn comment_url(&self, id: u64) -> String;
+}
+
+impl Acting for Admin<'_> {
+    fn admin_url(&self, path: &str) -> String {
+        hyscribe_admin::assets::Urls::admin_url(self, path)
+    }
+    fn comment_url(&self, id: u64) -> String {
+        let comment = hyscribe_admin::comments::CommentsSite::parent_comment(self, id);
+        comment.map(|(link, _)| link).unwrap_or_default()
+    }
+}
+
+/// A call to the [`Acting`] site from a handler, which blocks on its reads.
+pub(super) fn read<T>(call: impl FnOnce() -> T) -> T {
+    tokio::task::block_in_place(call)
+}
+
+/// What PHP does once an action's checks pass, reading and writing the
+/// database only through the action's `Write`, so it sees its own writes.
 pub(super) type Handler<T = Answer> =
-    for<'a, 'w> fn(&'a mut Write<'w>, &'a Asked<'a>) -> Saving<'a, T>;
+    for<'a, 'w> fn(&'a mut Write<'w>, &'a Asked<'a>, &'a dyn Acting) -> Saving<'a, T>;
 
 /// What an `admin-ajax.php` action answers, sent once committed.
 #[derive(Debug, PartialEq)]
@@ -72,6 +97,8 @@ pub(super) enum Ajax {
 pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
     match (screen, action) {
         ("users", b"promote") => Some(users::promote),
+        ("edit-comments", _) => Some(comments::bulk),
+        ("comment", action) => comments::moderation(action),
         ("options", b"update") => Some(options::update),
         ("options", b"adminhash") => Some(options::adminhash),
         ("options", b"dismiss") => Some(options::dismiss),
@@ -97,6 +124,8 @@ pub(super) fn ajax_handler(action: &[u8]) -> Option<Handler<Ajax>> {
         b"add-tag" => Some(terms::ajax_add_tag),
         b"inline-save-tax" => Some(terms::inline_save_tax),
         b"delete-tag" => Some(terms::ajax_delete_tag),
+        b"dim-comment" => Some(comments::dim),
+        b"delete-comment" => Some(comments::delete),
         _ => None,
     }
 }
@@ -131,9 +160,10 @@ pub(super) async fn act<'w, T>(
     write: Result<Write<'w>, DbError>,
     handler: Handler<T>,
     asked: &Asked<'_>,
+    site: &dyn Acting,
 ) -> Result<T, hyscribe_write::Error> {
     let mut write = write?;
-    match handler(&mut write, asked).await {
+    match handler(&mut write, asked, site).await {
         Ok(answer) => write.commit().await.map(|()| answer).map_err(Into::into),
         Err(Stop::Died(answer)) => Ok(answer),
         Err(Stop::Failed(err)) => Err(err),

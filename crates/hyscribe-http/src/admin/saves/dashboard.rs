@@ -13,7 +13,7 @@ use hyscribe_write::options::{Meta, update_metadata};
 use hyscribe_write::posts::{Context, get_default_post_to_edit, wp_update_post};
 
 use super::screen::{update_user_meta, update_user_option};
-use super::{Saving, text};
+use super::{Acting, Saving, text};
 
 /// The posts' context of `user` on the site at `home`, now; their
 /// capability to publish plays no part in the drafts written here.
@@ -80,7 +80,11 @@ async fn option_text(write: &mut Write<'_>, name: &str) -> Result<String, Error>
 /// `post-quickdraft-save` once checked: `edit_post()` of the form's
 /// auto-draft, its content wrapped in a paragraph block. The form that
 /// follows is a page view of its own.
-pub(super) fn quickdraft_save<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn quickdraft_save<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let id = lookup(asked.post, "post_ID").map_or(0, Value::to_int);
         let id = u64::try_from(id).unwrap_or_default();
@@ -130,6 +134,7 @@ pub(super) fn quickdraft_save<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>
 pub(super) fn update_welcome_panel<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
         let visible = lookup(asked.post, "visible").is_some_and(|v| !v.is_empty());

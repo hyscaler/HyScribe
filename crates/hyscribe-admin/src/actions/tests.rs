@@ -70,7 +70,11 @@ impl CapabilityData for Oracle {
         }
     }
     fn comment_post(&self, id: u64) -> Option<u64> {
-        (id == 1).then_some(1)
+        match id {
+            1 => Some(1),
+            801 => Some(802),
+            _ => None,
+        }
     }
     fn term_taxonomy(&self, id: u64) -> Option<String> {
         match id {
@@ -102,6 +106,7 @@ impl ActionSite for Oracle {
             3 => Some(b"post-trashed".to_vec()),
             4 => Some(b"0".to_vec()),
             5 => Some(b"trash".to_vec()),
+            801 => Some(b"post-trashed".to_vec()),
             _ => None,
         }
     }
@@ -138,6 +143,7 @@ fn check(
         uri: uri.as_bytes(),
         home: HOME,
         user: 1,
+        now: 0,
     };
     let screen = path.strip_suffix(".php").unwrap();
     if screen == "admin-ajax" {
@@ -244,6 +250,17 @@ fn actions_are_named_as_php_names_them() {
         ("users", "action=resetpassword", "resetpassword"),
         ("users", "action=-1", ""),
         ("edit", "changeit=Change&action=trash", "trash"),
+        ("edit-comments", "delete_all2=1&action=spam", "delete_all"),
+        ("edit-comments", "action=-1", ""),
+        ("comment", "action=cdc", "delete"),
+        ("comment", "action=mac&dt=x", "approve"),
+        ("comment", "action=approve&dt=spam", "spam"),
+        ("comment", "action=approve&dt=trash", "trash"),
+        (
+            "comment",
+            "action=approvecomment&deletecomment=1",
+            "deletecomment",
+        ),
         ("options", "adminhash=x&action=update", "adminhash"),
         ("options", "adminhash=&dismiss=new_admin_email", "dismiss"),
         ("options", "dismiss=x&action=update", "update"),
@@ -252,13 +269,20 @@ fn actions_are_named_as_php_names_them() {
         ("edit-tags", "action=-1", ""),
     ] {
         let get = fields(query);
+        // `comment.php`'s Delete button is posted.
+        let post = fields(
+            query
+                .strip_prefix("action=approvecomment&")
+                .unwrap_or_default(),
+        );
         let asked = Asked {
             get: &get,
-            post: &[],
+            post: &post,
             referer: None,
             uri: b"/wp-admin/",
             home: HOME,
             user: 1,
+            now: 0,
         };
         assert_eq!(
             action(screen, &asked),
@@ -293,6 +317,7 @@ fn what_is_not_ported_goes_on() {
     let update = format!("action=update&{}", nonce("update-options"));
     for (target, body, expected) in [
         ("edit.php".to_string(), None, None),
+        ("comment.php?action=editcomment&c=1".into(), None, None),
         ("edit.php?action=-1".into(), None, None),
         ("edit.php?action=".into(), None, None),
         (
@@ -619,6 +644,7 @@ fn ajax_shell() {
             uri: b"/wp-admin/admin-ajax.php",
             home: HOME,
             user: 1,
+            now: 0,
         };
         admin_ajax(site, &asked).map_or_else(|refusal| refusal.status, |()| 501)
     };
@@ -801,6 +827,7 @@ fn quick_drafts_and_screen_options() {
             uri: b"/wp-admin/",
             home: HOME,
             user: 1,
+            now: 0,
         };
         assert_eq!(action(screen, &asked), expected.as_bytes(), "{screen}");
     }

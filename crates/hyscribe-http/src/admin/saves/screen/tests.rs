@@ -8,6 +8,7 @@ use hyscribe_db::{Connection, Writer};
 use hyscribe_testkit::fixture_database;
 use hyscribe_testkit::writes::check_writes;
 
+use super::super::tests::unread::Unread;
 use super::super::tests::{fields, writer};
 use super::super::{Handler, act, handler};
 use super::*;
@@ -21,6 +22,7 @@ pub(in crate::admin::saves) fn asked(post: &[(Key, Value)]) -> Asked<'_> {
         uri: b"/hs-admin/edit?paged=2",
         home: "http://127.0.0.1:8081",
         user: 1,
+        now: 0,
     }
 }
 
@@ -39,7 +41,7 @@ pub(in crate::admin::saves) async fn answered(
         if let Ok(write) = &mut write {
             write.fail_after(budget);
         }
-        match act(write, handler, &asked(&post)).await {
+        match act(write, handler, &asked(&post), &Unread).await {
             Err(Error::Db(_)) => budget += 1,
             answer => return answer,
         }
@@ -228,7 +230,7 @@ pub(in crate::admin::saves) async fn run(
     query: &str,
 ) -> Result<Answer, super::super::Stop> {
     let post = fields(query);
-    handler(write, &asked(&post)).await
+    handler(write, &asked(&post), &Unread).await
 }
 
 /// User 1's meta `key`, as stored.

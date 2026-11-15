@@ -20,7 +20,7 @@ use hyscribe_write::options::{
 };
 use hyscribe_write::posts::{Context, PostArgs, wp_insert_post};
 
-use super::Saving;
+use super::{Acting, Saving};
 use crate::redirect::wp_validate_redirect;
 use crate::rewrite::{Settings, rules};
 
@@ -372,7 +372,11 @@ fn posted(post: &[(Key, Value)], option: &str) -> Value {
 
 /// `options.php`'s save of a Settings page, sent back with
 /// `settings-updated` and its notices kept in the `settings_errors` transient.
-pub(super) fn update<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn update<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let page = option_page(asked);
         if page == b"options" {
@@ -410,7 +414,11 @@ pub(super) fn update<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Savi
 }
 
 /// `options.php`'s confirmation of a pending admin email change by its key.
-pub(super) fn adminhash<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn adminhash<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let pending = get_option(write, "adminhash").await?;
         let mut redirect = "options-general.php?updated=false";
@@ -435,7 +443,11 @@ pub(super) fn adminhash<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> S
 }
 
 /// `options.php`'s dismissal of a pending admin email change.
-pub(super) fn dismiss<'a>(write: &'a mut Write<'_>, _: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn dismiss<'a>(
+    write: &'a mut Write<'_>,
+    _: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         delete_option(write, "adminhash").await?;
         delete_option(write, "new_admin_email").await?;
@@ -466,7 +478,11 @@ fn permalink_field(value: &Value) -> Result<Value, Error> {
 /// The Permalinks screen's save of its structure and bases, sent back with
 /// `settings-updated`. With no structure, PHP goes on to show the screen,
 /// which refreshes the rewrite rules: not ported.
-pub(super) fn permalinks<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn permalinks<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         let field = |name| lookup(asked.post, name).filter(|value| **value != Value::Null);
         let Some(given) = field("permalink_structure") else {
@@ -511,6 +527,7 @@ pub(super) fn permalinks<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> 
 pub(super) fn create_privacy_page<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
         let home = home_url(write).await?;

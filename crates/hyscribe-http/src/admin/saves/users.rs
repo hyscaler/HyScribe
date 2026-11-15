@@ -9,11 +9,15 @@ use hyscribe_phpser::{Key, Maybe, Value, add_query_arg, maybe_unserialize, remov
 use hyscribe_write::Error;
 use hyscribe_write::users::set_role;
 
-use super::{Saving, Stop, text};
+use super::{Acting, Saving, Stop, text};
 
 /// `promote`, the bulk role change: each user but the current one gets
 /// `new_role` (no role for `none`), then the list is sent back with `update`.
-pub(super) fn promote<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+pub(super) fn promote<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    _: &'a dyn Acting,
+) -> Saving<'a> {
     Box::pin(async move {
         // `$redirect`: the list's own `wp_http_referer` field, else the list.
         let redirect = match asked.request("wp_http_referer") {

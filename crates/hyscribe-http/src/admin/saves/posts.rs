@@ -358,13 +358,13 @@ async fn bulk_ids(
             .map(|id| Value::String(id.to_string().into_bytes()))
             .collect());
     }
-    // PHP's fatal errors: `explode()` and `array_map()` of what is not a string, or an array.
+    // The media list's IDs, and PHP's fatal errors: `explode()` and
+    // `array_map()` of what is not a string, or an array.
     let ids = match (
         asked.request("media"),
         asked.request("ids"),
         asked.request("post"),
     ) {
-        (Some(_), _, _) => return Err(Error::Unported("media IDs on the posts list").into()),
         (None, Some(Value::String(ids)), _) => ids
             .split(|&b| b == b',')
             .map(|id| Value::String(id.to_vec()))

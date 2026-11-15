@@ -609,6 +609,12 @@ async fn bulk_actions_stop_as_php_stops() {
             "/hs-admin/edit?delete_all=1&post_status=g_o-ne%21&paged=1".into()
         ))
     );
+    // Empty Trash's status is stripped to the characters a status has.
+    let draft = [post_row(950, (1, "auto-draft", "post"), ("Draft", ""), 0)];
+    let read = "SELECT post_status FROM wp_posts WHERE ID = 950";
+    let query = "delete_all=1&post_status=auto-draft%21";
+    let (_, statuses) = tried(1, &draft, ("edit", query, ""), read).await;
+    assert_eq!(statuses, ["trash"]);
     let (answer, kept) = edit(&[], "action=edit&post[]=1").await;
     assert_eq!(
         answer,

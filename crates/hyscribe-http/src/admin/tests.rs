@@ -2081,7 +2081,11 @@ async fn page_view_writes_that_fail() {
     let site = unwritable(site, "wp_").await;
     let host = "127.0.0.1:8081";
     let newer = format!("{cookies}; wp-settings-1=a%3D1; wp-settings-time-1=9999999999");
-    for (uri, cookie) in [("/hs-admin/", &cookies), ("/hs-admin/tools", &newer)] {
+    for (uri, cookie) in [
+        ("/hs-admin/", &cookies),
+        ("/hs-admin/?welcome=0", &cookies),
+        ("/hs-admin/tools", &newer),
+    ] {
         let response = get(&site, uri, host, cookie).await;
         assert_eq!(
             response.status(),
@@ -2094,9 +2098,17 @@ async fn page_view_writes_that_fail() {
             "{uri}"
         );
     }
-    let response = get(&site, "/hs-admin/tools", host, &cookies).await;
-    assert_eq!(response.status(), StatusCode::OK);
-    assert!(set_cookies(&response).starts_with("wp-settings-1=deleted;"));
+    // Only a list's mode and the dashboard's `welcome` save.
+    for uri in [
+        "/hs-admin/tools",
+        "/hs-admin/tools?mode=excerpt",
+        "/hs-admin/tools?welcome=0",
+        "/hs-admin/edit?mode=",
+    ] {
+        let response = get(&site, uri, host, &cookies).await;
+        assert_eq!(response.status(), StatusCode::OK, "{uri}");
+        assert!(set_cookies(&response).starts_with("wp-settings-1=deleted;"));
+    }
     // The Quick Draft: a field PHP cannot trim and a post that is not an
     // auto-draft are not ported; the form after a bad nonce writes an auto-draft.
     let nonce = session_nonce(&site, &cookies, "add-post").await;
@@ -2119,6 +2131,30 @@ async fn page_view_writes_that_fail() {
         )
         .await;
         assert_eq!(response.status(), status, "{body}");
+    }
+    // A list's mode is not saved with a page that is not ported.
+    let unported = get(
+        &site,
+        "/hs-admin/edit?mode=excerpt&unknown=1",
+        host,
+        &cookies,
+    )
+    .await;
+    assert_eq!(unported.status(), StatusCode::NOT_IMPLEMENTED);
+    // A writer that refuses the database's version begins no view, and is
+    // not asked to where there is nothing to write.
+    let site = unwritable(site, "missing_").await;
+    let response = get(&site, "/hs-admin/", host, &cookies).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    for (uri, cookie, status) in [
+        ("/hs-admin/tools", &cookies, StatusCode::OK),
+        ("/hs-admin/edit?paged=9", &newer, StatusCode::FOUND),
+    ] {
+        assert_eq!(
+            get(&site, uri, host, cookie).await.status(),
+            status,
+            "{uri}"
+        );
     }
 }
 
@@ -2218,6 +2254,18 @@ async fn page_views_and_screen_state_write_as_php() {
             "{case}"
         );
         assert_eq!(set_cookies(&response), php_cookies, "{case}");
+        // `admin-ajax.php`'s answers are not pages: JSON, or text.
+        if target == "admin-ajax.php" {
+            let kind = response.headers().get(header::CONTENT_TYPE).unwrap();
+            // The body is hex: `{` is `7b`.
+            let json = body.starts_with("7b");
+            assert_eq!(
+                kind.to_str().unwrap().starts_with("application/json"),
+                json,
+                "{case}"
+            );
+            assert!(response.headers().contains_key("x-robots-tag"), "{case}");
+        }
         let dates = ("<time datetime=\"", "</time>");
         let page = replaced(
             &page_of(response).await,

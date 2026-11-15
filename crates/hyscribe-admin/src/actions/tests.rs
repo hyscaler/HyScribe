@@ -728,7 +728,7 @@ fn ajax_actions() {
 fn quick_drafts_and_screen_options() {
     let draft = |id: &str, rest: &str| {
         format!(
-            "action=post-quickdraft-save&post_ID={id}&post_title=T{rest}&_wpnonce=%nonce:add-post%"
+            "action=post-quickdraft-save&post_ID={id}&post_title=T&_wpnonce=%nonce:add-post%{rest}"
         )
     };
     for (who, body, expected) in [
@@ -740,6 +740,7 @@ fn quick_drafts_and_screen_options() {
         ("author", draft("801", ""), 500),
         ("author", draft("801", "&post_title=+"), 501),
         ("author", draft("801", "&content[]=x"), 501),
+        ("author", draft("801", "&post_title[]=x"), 501),
     ] {
         assert_eq!(
             outcome(&role(who), "post.php", Some(&body)),

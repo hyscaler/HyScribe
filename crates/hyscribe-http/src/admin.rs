@@ -1282,8 +1282,9 @@ fn save(admin: &mut Admin, screen: &str, asked: &Asked) -> Response {
         return quick_draft(admin, writer, asked, act);
     }
     match act() {
-        // `admin-ajax.php`'s `wp_die()` and `wp_send_json()`.
-        Ok(Answer::Page(body)) if screen == "admin-ajax" => {
+        // Only `admin-ajax.php`'s handlers answer with text: its `wp_die()`
+        // and `wp_send_json()`.
+        Ok(Answer::Page(body)) => {
             let kind = match body.starts_with('{') {
                 true => "application/json; charset=UTF-8",
                 false => "text/html; charset=UTF-8",

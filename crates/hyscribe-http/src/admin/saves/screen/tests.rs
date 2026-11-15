@@ -203,7 +203,7 @@ fn settings_sync_as_php_s() {
     );
     assert_eq!(mode(&cookie, b"excerpt"), Some(Ok(joined.into())));
     assert_eq!(
-        mode(&found(Some(b"=a"), None, Some("z=9")), b"x"),
+        mode(&found(Some(b"=a&b=1"), None, Some("z=9")), b"x"),
         Some(Ok("posts_list_mode=list".into()))
     );
     assert_eq!(
@@ -246,6 +246,9 @@ async fn what_is_not_saved() {
     let unported = |saved| matches!(saved, Err(super::super::Stop::Failed(Error::Unported(_))));
     assert!(unported(
         run(&mut write, closed_postboxes, "closed[]=a&page=x").await
+    ));
+    assert!(unported(
+        run(&mut write, closed_postboxes, "closed=a&hidden[]=b&page=x").await
     ));
     assert!(unported(
         run(&mut write, hidden_columns, "hidden[]=a&page=x").await
@@ -292,6 +295,12 @@ async fn what_is_not_saved() {
     // No order, the columns left to the screen; a backslash kept, as PHP
     // slashes the request.
     assert!(run(&mut write, meta_box_order, "page=r").await.is_ok());
+    assert!(
+        run(&mut write, meta_box_order, "page_columns=auto&page=s")
+            .await
+            .is_ok()
+    );
+    assert_eq!(meta(&mut write, "screen_layout_s").await, order("auto"));
     assert_eq!(meta(&mut write, "meta-box-order_r").await, None);
     assert_eq!(meta(&mut write, "screen_layout_r").await, order("auto"));
     assert!(

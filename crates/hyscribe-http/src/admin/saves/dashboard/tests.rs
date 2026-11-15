@@ -100,4 +100,10 @@ async fn quick_drafts_php_keeps_as_they_are() {
         saved(&mut write, "post_title=Titled&content=0").await,
         titled
     );
+    let long = "A line longer than the mark of a block";
+    let wrapped = format!("<!-- wp:paragraph -->{long}<!-- /wp:paragraph -->");
+    let ours = saved(&mut write, &format!("content={long}")).await;
+    assert_eq!(ours, (b"Auto Draft".to_vec(), wrapped.into_bytes()));
+    let untouched = (b"Only".to_vec(), Vec::new());
+    assert_eq!(saved(&mut write, "post_title=Only").await, untouched);
 }

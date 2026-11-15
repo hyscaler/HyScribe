@@ -169,12 +169,12 @@ pub(in crate::admin) async fn save_settings(
 /// `$_POST[ $name ]`, slashed as PHP's is, items too.
 fn slashed(asked: &Asked, name: &str) -> Option<Value> {
     fn slash(value: &Value) -> Value {
+        // A request's values are strings and arrays.
         match value {
-            Value::String(text) => Value::String(addslashes(text)),
             Value::Array(items) => {
                 Value::Array(items.iter().map(|(k, v)| (k.clone(), slash(v))).collect())
             }
-            value => value.clone(),
+            text => Value::String(addslashes(&text.to_php_string())),
         }
     }
     lookup(asked.post, name).map(slash)

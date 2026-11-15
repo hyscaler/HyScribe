@@ -10,7 +10,7 @@ use axum::response::Response;
 use hyscribe_admin::dashboard::DashboardSite;
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_db::{DbError, Write, Writer};
-use hyscribe_phpser::{Maybe, Value, maybe_unserialize};
+use hyscribe_phpser::Value;
 use hyscribe_write::Error;
 use hyscribe_write::posts::Context;
 use tokio::runtime::Handle;
@@ -29,14 +29,6 @@ pub(super) struct View {
     draft: bool,
 }
 
-/// `get_user_option()`'s value of a stored meta value.
-fn stored(raw: Vec<u8>) -> Value {
-    match maybe_unserialize(&raw) {
-        Maybe::Value(value) => value,
-        _ => Value::String(raw),
-    }
-}
-
 /// What the view of `path` with the query `get` writes, and what the page
 /// reads after: the settings, the welcome panel's state.
 pub(super) fn plan(
@@ -47,7 +39,8 @@ pub(super) fn plan(
     now: i64,
 ) -> View {
     let id = admin.user.id;
-    let option = |name| admin.reads.user_option(id, name).map(stored);
+    // Both are saved as text, which `get_user_option()` gives as it is.
+    let option = |name| admin.reads.user_option(id, name).map(Value::String);
     let found = Found {
         cookie: cookie(cookies, &format!("wp-settings-{id}")),
         time: cookie(cookies, &format!("wp-settings-time-{id}")),
@@ -139,10 +132,11 @@ pub(super) fn viewed(
     let after = view.synced.mode.is_some()
         || page && (view.synced.newer.is_some() || view.welcome.is_some());
     let saved = match drafted {
-        Some((write, _)) if page => handle.block_on(write.commit()).map_err(Error::from),
+        // The Quick Draft form is shown to all who may write posts.
+        Some((write, _)) => handle.block_on(write.commit()).map_err(Error::from),
         None if kept && after => handle.block_on(async {
             let (write, _) = written(writer.begin().await, &ctx, &view, page).await?;
-            Ok(write.commit().await?)
+            write.commit().await.map_err(Error::from)
         }),
         _ => Ok(()),
     };
@@ -161,7 +155,7 @@ pub(super) fn viewed(
         let secure = is_ssl(admin.site);
         let path = names.site_path();
         let time = ctx.now.to_string();
-        for cookie in [
+        let cookies = [
             php_cookie(&format!("wp-settings-{id}"), value, expires, path, secure),
             php_cookie(
                 &format!("wp-settings-time-{id}"),
@@ -170,11 +164,12 @@ pub(super) fn viewed(
                 path,
                 secure,
             ),
-        ] {
-            if let Ok(cookie) = HeaderValue::from_str(&cookie) {
-                response.headers_mut().append(header::SET_COOKIE, cookie);
-            }
-        }
+        ];
+        // Their values are URL encoded, so always valid.
+        let cookies = cookies.iter().filter_map(|c| HeaderValue::from_str(c).ok());
+        response
+            .headers_mut()
+            .extend(cookies.map(|c| (header::SET_COOKIE, c)));
     }
     response
 }

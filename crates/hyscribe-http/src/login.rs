@@ -662,6 +662,12 @@ fn logout(
     (StatusCode::FOUND, Vec::new())
 }
 
+/// When a login's cookies and session expire: in two weeks when remembered,
+/// else in two days.
+fn expiration(now: i64, remember: bool) -> i64 {
+    now + if remember { 14 * DAY } else { 2 * DAY }
+}
+
 /// The salts of the auth cookie, the secure one's when `secure`, and of the
 /// logged in cookie.
 fn salts(reads: &LoginReads, secure: bool) -> Option<(Vec<u8>, Vec<u8>)> {
@@ -678,7 +684,7 @@ fn auth_cookies(
     (remember, secure): (bool, bool),
     (auth_salt, logged_in_salt): (Vec<u8>, Vec<u8>),
 ) -> Vec<String> {
-    let expiration = reads.now + if remember { 14 * DAY } else { 2 * DAY };
+    let expiration = expiration(reads.now, remember);
     let expires = if remember { expiration + DAY / 2 } else { 0 };
     let cookie =
         |salt: &[u8]| generate_auth_cookie(&user.login, &user.pass, expiration, token, salt);
@@ -758,7 +764,7 @@ fn logged_in(
     else {
         return None;
     };
-    let expiration = reads.now + if remember { 14 * DAY } else { 2 * DAY };
+    let expiration = expiration(reads.now, remember);
     let agent = headers
         .get(header::USER_AGENT)
         .map_or(&b""[..], HeaderValue::as_bytes);

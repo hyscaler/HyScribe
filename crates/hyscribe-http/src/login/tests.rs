@@ -809,7 +809,7 @@ async fn a_changed_password_renews_the_cookies() {
         let far = format!("admin|{}|token|x", reads.now + 3 * DAY);
         let remembered = renewed_cookies(&reads, &names, Some(far.as_bytes()), true);
         assert!(remembered[0].contains("expires=") && remembered[0].contains("secure"));
-        let near = format!("admin|{}|token|x", reads.now + DAY);
+        let near = format!("admin|{}|token|x", reads.now + 2 * DAY);
         let kept = renewed_cookies(&reads, &names, Some(near.as_bytes()), false);
         assert!(!kept[0].contains("expires="));
     })

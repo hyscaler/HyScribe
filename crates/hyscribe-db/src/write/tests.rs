@@ -1533,6 +1533,8 @@ async fn a_spent_budget_fails_every_statement() {
         w.option_autoload("o").await.err(),
         w.user(1).await.err(),
         w.object_meta(Meta::User, 1).await.err(),
+        w.meta_value(Meta::User, 1, "nickname").await.err(),
+        w.term_in("category", 1).await.err(),
         w.user_count().await.err(),
         w.owner_link_ids(1).await.err(),
         w.delete_option("o").await.err(),

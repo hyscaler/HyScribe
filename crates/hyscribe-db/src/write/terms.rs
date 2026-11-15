@@ -301,6 +301,7 @@ impl Write<'_> {
     // are text, so they compare under the column's collation, as in PHP.
 
     async fn term_rows(&mut self, query: Query) -> Result<Vec<TermRow>, DbError> {
+        self.spend()?;
         let rows = query.fetch_all(&mut *self.tx).await.map_err(db_error)?;
         rows.iter().map(term_row).collect()
     }

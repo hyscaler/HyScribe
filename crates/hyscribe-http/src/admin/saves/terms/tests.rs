@@ -10,7 +10,7 @@ use hyscribe_testkit::{fixture_database, hs_admin_page, unhex};
 use hyscribe_write::terms::TermIds;
 
 use super::super::tests::{fields, writer};
-use super::super::{Handler, act};
+use super::super::{Handler, act, ajax_handler, handler};
 use super::*;
 
 /// The term writes of these tests, which would wait on each other's locks.
@@ -132,7 +132,15 @@ async fn adding_is_php_s() {
     let action = async |conn: &mut Connection, ()| {
         let post = "action=add-tag&taxonomy=category&tag-name=Oracle%27s+added&slug=&parent=-1&description=Some+%3Cb%3Etext%3C%2Fb%3E+%5C+here&_wp_http_referer=%2Fhs-admin%2Fedit-tags%3Ftaxonomy%3Dcategory";
         let sent = Sent { post, ..POSTED };
-        let to = location(settled(&writer, conn, add_tag, &sent).await);
+        let to = location(
+            settled(
+                &writer,
+                conn,
+                handler("edit-tags", b"add-tag").unwrap(),
+                &sent,
+            )
+            .await,
+        );
         assert_eq!(to, golden("terms-add").1);
         Ok(())
     };
@@ -150,7 +158,13 @@ async fn adding_by_ajax_is_php_s() {
     let writer = writer().await;
     let action = async |conn: &mut Connection, ()| {
         let post = "screen=edit-category&taxonomy=category&tag-name=Child+category&slug=&parent=1&description=";
-        let answer = settled(&writer, conn, ajax_add_tag, &Sent { post, ..POSTED }).await;
+        let answer = settled(
+            &writer,
+            conn,
+            ajax_handler(b"add-tag").unwrap(),
+            &Sent { post, ..POSTED },
+        )
+        .await;
         let Ajax::TermAdded(listed, added) = answer else {
             panic!("{answer:?}");
         };
@@ -163,7 +177,13 @@ async fn adding_by_ajax_is_php_s() {
         assert_eq!((term.parent, term.count, added.term_group), (1, 0, 0));
         assert_ne!(added.term_taxonomy_id, 0);
         let post = "taxonomy=category&tax_ID=1&name=Uncategorized&slug=child-category";
-        let answer = settled(&writer, conn, inline_save_tax, &Sent { post, ..POSTED }).await;
+        let answer = settled(
+            &writer,
+            conn,
+            ajax_handler(b"inline-save-tax").unwrap(),
+            &Sent { post, ..POSTED },
+        )
+        .await;
         assert_eq!(answer, Ajax::Text(golden("ajax-inline-duplicate").2));
         Ok(())
     };
@@ -174,7 +194,13 @@ async fn adding_by_ajax_is_php_s() {
     let action = async |conn: &mut Connection, ()| {
         let post =
             "screen=edit-post_tag&taxonomy=post_tag&tag-name=Fresh+tag&slug=&description=About+it";
-        let answer = settled(&writer, conn, ajax_add_tag, &Sent { post, ..POSTED }).await;
+        let answer = settled(
+            &writer,
+            conn,
+            ajax_handler(b"add-tag").unwrap(),
+            &Sent { post, ..POSTED },
+        )
+        .await;
         let term = term_of(&answer);
         assert_eq!(
             (&term.name[..], &term.description[..]),
@@ -205,7 +231,7 @@ async fn quick_edit_is_php_s() {
         let answer = settled(
             &writer,
             conn,
-            inline_save_tax,
+            ajax_handler(b"inline-save-tax").unwrap(),
             &Sent {
                 post: &post,
                 ..POSTED
@@ -253,7 +279,15 @@ async fn editing_is_php_s() {
             post: &post,
             ..POSTED
         };
-        let to = location(settled(&writer, conn, edited_tag, &sent).await);
+        let to = location(
+            settled(
+                &writer,
+                conn,
+                handler("edit-tags", b"editedtag").unwrap(),
+                &sent,
+            )
+            .await,
+        );
         assert_eq!(to, golden("terms-edited").1);
         Ok(())
     };
@@ -282,7 +316,15 @@ async fn deleting_is_php_s() {
             post: "",
             uri: &uri,
         };
-        let to = location(settled(&writer, conn, delete, &sent).await);
+        let to = location(
+            settled(
+                &writer,
+                conn,
+                handler("edit-tags", b"delete").unwrap(),
+                &sent,
+            )
+            .await,
+        );
         assert_eq!(to, golden("terms-delete-other").1);
         Ok(())
     };
@@ -314,7 +356,7 @@ async fn bulk_deleting_is_php_s() {
             settled(
                 &writer,
                 conn,
-                bulk_delete,
+                handler("edit-tags", b"bulk-delete").unwrap(),
                 &Sent {
                     post: &post,
                     ..POSTED
@@ -349,7 +391,7 @@ async fn deleting_by_ajax_is_php_s() {
         let answer = settled(
             &writer,
             conn,
-            ajax_delete_tag,
+            ajax_handler(b"delete-tag").unwrap(),
             &Sent {
                 post: &post,
                 ..POSTED
@@ -357,6 +399,15 @@ async fn deleting_by_ajax_is_php_s() {
         )
         .await;
         assert_eq!(answer, Ajax::Text(golden("ajax-delete-tag").2));
+        // A taxonomy not registered: `wp_die( 1 )`, nothing written.
+        let post = format!("tag_ID={}&taxonomy=nope", ids[0]);
+        let delete = ajax_handler(b"delete-tag").unwrap();
+        let sent = Sent {
+            post: &post,
+            ..POSTED
+        };
+        let answer = settled(&writer, conn, delete, &sent).await;
+        assert_eq!(answer, Ajax::Text(golden("ajax-delete-unknown").2));
         Ok(())
     };
     check_writes(
@@ -409,16 +460,20 @@ async fn answers_for_another_taxonomy_are_php_s() {
     )
     .await;
     assert!(matches!(quick, Ok(Ajax::Text(text)) if text == golden("ajax-inline-other").2));
+    let post = "taxonomy=post_tag&screen=edit-post_tag&tag-name=answered";
+    let exists = answer(ajax_add_tag, post).await;
+    assert!(matches!(exists, Ok(Ajax::Xml(xml)) if xml == golden("ajax-add-tag-exists").2));
+    // The default category is never deleted: `wp_die( 0 )`.
+    let kept = answer(ajax_delete_tag, "tag_ID=1&taxonomy=category").await;
+    assert!(matches!(kept, Ok(Ajax::Text(text)) if text == "0"));
     for (taxonomy, case) in [
         ("category", "ajax-delete-other"),
         ("nope", "ajax-delete-unknown"),
     ] {
         let post = format!("tag_ID={{tag}}&taxonomy={taxonomy}");
         let deleted = answer(ajax_delete_tag, &post).await;
-        assert!(
-            matches!(deleted, Ok(Ajax::Text(text)) if text == golden(case).2),
-            "{case}"
-        );
+        let died = matches!(deleted, Err(Stop::Died(Ajax::Text(text))) if text == golden(case).2);
+        assert!(died, "{case}");
     }
 }
 
@@ -434,20 +489,30 @@ async fn unported_requests_write_nothing() {
         "taxonomy[]=post_tag&tag-name=X",
         "taxonomy=post_tag&screen=edit-category&tag-name=X",
         "taxonomy=post_tag&screen=edit-post_tag&tag-name[]=X",
-        "taxonomy=post_tag&screen=edit-post_tag&tag-name=X&slug[]=x",
+        "taxonomy=post_tag&screen=edit-post_tag&tag-name=X&alias_of[]=x",
     ] {
         assert!(unported(answer(ajax_add_tag, post).await), "{post}");
     }
-    assert!(unported(
-        answer(inline_save_tax, "taxonomy=link_category&tax_ID={tag}").await
-    ));
-    let deleted = answer(ajax_delete_tag, "tag_ID={tag}&taxonomy=nav_menu").await;
-    assert!(matches!(deleted, Ok(Ajax::Text(text)) if text == "1"));
-    let menu = answer(ajax_delete_tag, "tag_ID={tag}&taxonomy[]=post_tag").await;
-    assert!(unported(menu));
+    for post in [
+        "taxonomy=link_category&tax_ID={tag}",
+        "taxonomy=post_tag&tax_ID={tag}&description[]=x",
+    ] {
+        assert!(unported(answer(inline_save_tax, post).await), "{post}");
+    }
+    for post in [
+        "tag_ID={tag}&taxonomy=nav_menu",
+        "tag_ID={tag}&taxonomy[]=post_tag",
+    ] {
+        assert!(unported(answer(ajax_delete_tag, post).await), "{post}");
+    }
     for (handler, post) in [
         (delete as Handler, "taxonomy=post_tag"),
+        (delete, "taxonomy=nav_menu&tag_ID={tag}"),
+        (bulk_delete, "taxonomy=nav_menu&delete_tags[]={tag}"),
         (add_tag, "taxonomy=nav_menu&tag-name=X"),
+        (add_tag, "taxonomy=post_tag&tag-name=X&slug[]=x"),
+        (edited_tag, "taxonomy=nav_menu&tag_ID={tag}"),
+        (edited_tag, "taxonomy=post_tag&tag_ID={tag}&name[]=x"),
     ] {
         let refused = answer(handler, post).await;
         assert!(

@@ -2140,6 +2140,32 @@ async fn term_actions_answer_as_php_once_checked() {
         let php = hyscribe_testkit::hs_admin_page(&php);
         assert_eq!(page, with_values(&php, &page), "{case}");
     }
+    // Not ported: the edit screen's other arguments, and the terms of a
+    // taxonomy hyscribe-write does not write.
+    let response = send(
+        &site,
+        "GET",
+        "/hs-admin/term?taxonomy=category&x=1",
+        &cookies,
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    let add = &nonces[0].1;
+    let menu = format!(
+        "action=add-tag&taxonomy=nav_menu&screen=edit-nav_menu&tag-name=X&_wpnonce_add-tag={add}"
+    );
+    let form = ("application/x-www-form-urlencoded", &*menu);
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, Some(form)).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // A database whose `db_version` cannot be read takes no write.
+    let site = unwritable(site, "missing_").await;
+    let tag = format!(
+        "action=add-tag&taxonomy=post_tag&screen=edit-post_tag&tag-name=X&_wpnonce_add-tag={add}"
+    );
+    let form = ("application/x-www-form-urlencoded", &*tag);
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, Some(form)).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 /// Quick Edit's row is PHP's once committed, and the add form's answer is

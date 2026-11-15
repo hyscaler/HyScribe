@@ -8,7 +8,7 @@ use super::{Query, Table, Write};
 use crate::{Bind, Columns, DbError, Row, Sql, db_error, ids_or_none, list};
 
 /// A term in a taxonomy, as the term functions read it inside an action.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TermRow {
     /// `term_id`.
     pub term_id: u64,

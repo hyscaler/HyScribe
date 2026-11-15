@@ -28,18 +28,11 @@ fn written(name: &[u8]) -> Result<(Taxonomy, Listed), Error> {
     Ok((taxonomy, listed))
 }
 
-/// `$_POST[ $name ]`, slashed as the term functions take it; an array is
-/// not ported.
-fn slashed(asked: &Asked, name: &str) -> Result<Option<Vec<u8>>, Error> {
-    match lookup(asked.post, name) {
-        Some(Value::Array(_)) => Err(Error::Unported("an array as a term's field")),
-        value => Ok(value.map(|value| addslashes(&value.to_php_string()))),
-    }
-}
-
 /// The term fields of `$_POST`, as `wp_insert_term()` and
 /// `wp_update_term()` read their arguments.
 struct Fields {
+    /// `tag-name`, the name of a term to add.
+    tag_name: Option<Vec<u8>>,
     name: Option<Vec<u8>>,
     slug: Option<Vec<u8>>,
     description: Option<Vec<u8>>,
@@ -49,16 +42,35 @@ struct Fields {
 }
 
 impl Fields {
+    /// The fields, slashed as the term functions take them; an array as
+    /// a text is not ported.
     fn read(asked: &Asked) -> Result<Fields, Error> {
+        let [tag_name, name, slug, description, alias_of] =
+            ["tag-name", "name", "slug", "description", "alias_of"].map(|n| lookup(asked.post, n));
+        let texts = [tag_name, name, slug, description, alias_of];
+        if texts
+            .iter()
+            .flatten()
+            .any(|text| matches!(text, Value::Array(_)))
+        {
+            return Err(Error::Unported("an array as a term's field"));
+        }
+        let slashed = |text: Option<&Value>| text.map(|text| addslashes(&text.to_php_string()));
         let int = |name| lookup(asked.post, name).map(Value::to_int);
         Ok(Fields {
-            name: slashed(asked, "name")?,
-            slug: slashed(asked, "slug")?,
-            description: slashed(asked, "description")?,
-            alias_of: slashed(asked, "alias_of")?,
+            tag_name: slashed(tag_name),
+            name: slashed(name),
+            slug: slashed(slug),
+            description: slashed(description),
+            alias_of: slashed(alias_of),
             parent: int("parent"),
             term_group: int("term_group"),
         })
+    }
+
+    /// The name of a term to add: none is empty.
+    fn new_name(&self) -> &[u8] {
+        self.tag_name.as_deref().unwrap_or_default()
     }
 
     fn args(&self) -> TermArgs<'_> {
@@ -73,11 +85,6 @@ impl Fields {
     }
 }
 
-/// `$_POST['tag-name']`, the name of a term to add: none is empty.
-fn new_name(asked: &Asked) -> Result<Vec<u8>, Error> {
-    Ok(slashed(asked, "tag-name")?.unwrap_or_default())
-}
-
 /// A `WP_Error`'s code and message.
 type Failure = (&'static str, String);
 
@@ -86,8 +93,6 @@ type Failure = (&'static str, String);
 fn kept<T>(result: Result<T, TermError>, taxonomy: Taxonomy) -> Result<Result<T, Failure>, Error> {
     let (code, message) = match result {
         Ok(value) => return Ok(Ok(value)),
-        Err(TermError::Db(err)) => return Err(Error::Db(err)),
-        Err(TermError::Unported(what)) => return Err(Error::Unported(what)),
         Err(TermError::EmptyName) => ("empty_term_name", "A name is required for this term."),
         Err(TermError::MissingParent) => ("missing_parent", "Parent term does not exist."),
         Err(TermError::InvalidName) => ("invalid_term_name", "Invalid term name."),
@@ -106,6 +111,8 @@ fn kept<T>(result: Result<T, TermError>, taxonomy: Taxonomy) -> Result<Result<T,
                 format!("The slug &#8220;{slug}&#8221; is already in use by another term.");
             return Ok(Err(("duplicate_term_slug", message)));
         }
+        // The database's errors and what is not ported.
+        Err(err) => return Err(err.into()),
     };
     Ok(Err((code, message.into())))
 }
@@ -151,8 +158,8 @@ fn term_id(value: Option<&Value>) -> u64 {
 pub(super) fn add_tag<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
     Box::pin(async move {
         let taxonomy = listed_taxonomy(asked)?;
-        let (name, fields) = (new_name(asked)?, Fields::read(asked)?);
-        let added = wp_insert_term(write, taxonomy, &name, &fields.args()).await;
+        let fields = Fields::read(asked)?;
+        let added = wp_insert_term(write, taxonomy, fields.new_name(), &fields.args()).await;
         let notice: &[(&[u8], Option<&[u8]>)] = match kept(added, taxonomy)? {
             Ok(_) => &[(b"message", Some(b"1"))],
             Err(_) => &[(b"error", Some(b"1")), (b"message", Some(b"4"))],
@@ -247,14 +254,15 @@ pub(super) fn ajax_add_tag<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -
         if lookup(asked.post, "screen").and_then(Value::as_bytes) != Some(screen.as_bytes()) {
             return Err(Error::Unported("the rows of another screen").into());
         }
-        let (name, fields) = (new_name(asked)?, Fields::read(asked)?);
-        let added = wp_insert_term(write, taxonomy, &name, &fields.args()).await;
+        let fields = Fields::read(asked)?;
+        let added = wp_insert_term(write, taxonomy, fields.new_name(), &fields.args()).await;
         let ids = match kept(added, taxonomy)? {
             Ok(ids) => ids,
             Err((code, message)) => return Ok(Ajax::Xml(add_failed(code, &message))),
         };
+        // The action's own term, which it reads back.
         let row = write.term_in(taxonomy.name(), ids.term_id).await?;
-        let row = row.ok_or(Error::Unported("a term added and gone"))?;
+        let row = row.unwrap_or_default();
         let added = Added {
             term_group: row.term_group,
             term_taxonomy_id: row.term_taxonomy_id,
@@ -285,8 +293,7 @@ pub(super) fn inline_save_tax<'a>(
             return Ok(Ajax::Text(message));
         }
         let row = write.term_in(taxonomy.name(), id).await?;
-        let row = row.ok_or(Error::Unported("a term saved and gone"))?;
-        Ok(Ajax::TermRow(listed, shown(row)))
+        Ok(Ajax::TermRow(listed, shown(row.unwrap_or_default())))
     })
 }
 
@@ -300,22 +307,26 @@ pub(super) fn ajax_delete_tag<'a>(
         let id = term_id(lookup(asked.post, "tag_ID"));
         let name = posted_taxonomy(asked)?;
         let name = String::from_utf8_lossy(&name);
-        // `get_term()` fails for a taxonomy not registered.
-        if taxonomy_cap(&name, "delete_terms").is_none()
-            || write.term_in(&name, id).await?.is_none()
-        {
-            return Ok(Ajax::Text("1".into()));
-        }
-        let (taxonomy, _) = written(name.as_bytes())?;
+        // `get_term()` fails for a taxonomy not registered, or a term not in it.
+        let registered = taxonomy_cap(&name, "delete_terms").is_some();
+        let taxonomy = match registered {
+            true => Some(written(name.as_bytes())?.0),
+            false => None,
+        };
+        let term = match taxonomy {
+            Some(taxonomy) => write.term_in(taxonomy.name(), id).await?,
+            None => None,
+        };
+        let (Some(taxonomy), Some(_)) = (taxonomy, term) else {
+            return Err(Stop::Died(Ajax::Text("1".into())));
+        };
         let deleted = wp_delete_term(write, taxonomy, id)
             .await
             .map_err(Error::from)?;
-        let answer = if deleted == Deletion::Deleted {
-            "1"
-        } else {
-            "0"
-        };
-        Ok(Ajax::Text(answer.into()))
+        // `wp_die( 1 )` once deleted, else `wp_die( 0 )`.
+        Ok(Ajax::Text(
+            u8::from(deleted == Deletion::Deleted).to_string(),
+        ))
     })
 }
 

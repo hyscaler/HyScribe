@@ -11,7 +11,7 @@
 // off; a8locknodelete takes away deleting attachment 801, a8locknoread
 // reading it. The j9 variants hold user 2's lock too: j9pretty and
 // j9prettynoread turn pretty permalinks on, j9prettynoread takes away
-// reading attachment 801, j9noupload uploading files, and j9front makes
+// reading attachments 801 and 811, j9noupload uploading files, and j9front makes
 // attachment 802 the page on the front.
 $hyscribe_variant = $_COOKIE['hyscribe_variant'] ?? '';
 if ( str_starts_with( $hyscribe_variant, 'a8lock' ) || str_starts_with( $hyscribe_variant, 'j9' ) ) {
@@ -42,7 +42,7 @@ foreach ( array( 'a8locknodelete' => 'delete_post', 'a8locknoread' => 'read_post
 	if ( $hyscribe_name === $hyscribe_variant ) {
 		add_filter(
 			'map_meta_cap',
-			fn( $caps, $cap, $user, $args ) => $hyscribe_cap === $cap && 801 === (int) ( $args[0] ?? 0 ) ? array( 'do_not_allow' ) : $caps,
+			fn( $caps, $cap, $user, $args ) => $hyscribe_cap === $cap && in_array( (int) ( $args[0] ?? 0 ), 'j9prettynoread' === $hyscribe_name ? array( 801, 811 ) : array( 801 ), true ) ? array( 'do_not_allow' ) : $caps,
 			10,
 			4
 		);

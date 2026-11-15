@@ -37,7 +37,7 @@ cleanup() {
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
   if [ "$TTD" != wordpress_ttd ]; then
     echo "DELETE FROM wp_users WHERE ID IN (2, 3); DELETE FROM wp_usermeta WHERE umeta_id BETWEEN 801 AND 806;
-      DELETE FROM wp_posts WHERE ID BETWEEN 801 AND 825; DELETE FROM wp_postmeta WHERE meta_id BETWEEN 801 AND 845;
+      DELETE FROM wp_posts WHERE ID BETWEEN 801 AND 831; DELETE FROM wp_postmeta WHERE meta_id BETWEEN 801 AND 854;
       DELETE FROM wp_comments WHERE comment_ID = 801;" | sql
   fi
 }
@@ -48,7 +48,7 @@ if [ "$TTD" = wordpress_ttd ]; then
   ids="611 1692 827 1045 1686"
 else
   sql < "$ROOT/reference/attachment-edit/content.sql"
-  ids="801 802 803 805 807 808 810 811 812 813 815 817 818 819 820 821 822 823 824 825"
+  ids="801 802 803 805 807 808 810 811 812 813 815 817 818 819 820 821 822 823 824 825 826 828 829 830"
 fi
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce meta-box-order closedpostboxes
   media-form media-send-to-editor set-attachment-thumbnail
@@ -140,7 +140,7 @@ else
   record j9lockchrome 'post.php?post=818&action=edit' administrator
   record j9lockiphone 'post.php?post=817&action=edit' administrator
   record j9noupload 'post.php?post=818&action=edit' administrator
-  for id in 801 802 803 805 807 808 811 812 813 817 818 822 823 824; do
+  for id in 801 802 803 805 807 808 811 812 813 817 818 822 823 824 826 828 829 830; do
     record j9pretty "post.php?post=$id&action=edit" administrator
   done
   for role in editor author contributor; do
@@ -148,6 +148,7 @@ else
   done
   record j9pretty 'post.php?post=811&action=edit' contributor
   record j9prettynoread 'post.php?post=801&action=edit' administrator
+  record j9prettynoread 'post.php?post=811&action=edit' administrator
   record j9front 'post.php?post=802&action=edit' administrator
 fi
 wc -l "$OUT"

@@ -131,7 +131,7 @@ pub(crate) fn posts() -> Vec<Post> {
         post_type: "post".into(),
         ..post(id, 1, "2026-05-02 09:00:00", (b"Binned", b"", b""))
     };
-    vec![
+    let posts = vec![
         sunset,
         report,
         notes,
@@ -177,7 +177,42 @@ pub(crate) fn posts() -> Vec<Post> {
             ..media(824, b"Feed", "image/png")
         },
         media(825, b"Sizeless", "video/mp4"),
+    ];
+    let long = vec![b'b'; 198];
+    let more = [
+        (826, &b"Blocked"[..], &b"blocked"[..], 827, "attachment"),
+        (827, b"Block", b"block", 0, "wp_block"),
+        (828, b"Itself", b"itself", 828, "attachment"),
+        (
+            829,
+            b"Exact",
+            b"a-slug-of-exactly-thirty-four-char",
+            1,
+            "attachment",
+        ),
+        (830, b"Long", &long, 1, "attachment"),
+        (831, b"Long draft", &long, 0, "post"),
     ]
+    .map(|(id, title, name, parent, post_type)| {
+        let status = match post_type {
+            "wp_block" => "publish",
+            "post" => "draft",
+            _ => "inherit",
+        };
+        let mime_type = if post_type == "attachment" {
+            "image/png"
+        } else {
+            ""
+        };
+        Post {
+            name: name.to_vec(),
+            parent,
+            post_type: post_type.into(),
+            status: status.into(),
+            ..media(id, title, mime_type)
+        }
+    });
+    posts.into_iter().chain(more).collect()
 }
 
 /// A song, video or image of the `j9` variants: the administrator's, open
@@ -188,12 +223,12 @@ fn media(id: u64, title: &[u8], mime_type: &str) -> Post {
         823 => b"a-rather-long-attachment-name-for-caf%c3%a9-photos".to_vec(),
         _ => title.to_ascii_lowercase(),
     };
-    let day = id - 816;
+    let day = (id - 816).min(10);
     Post {
         id,
         author: 1,
-        date: format!("2026-06-0{day} 12:00:00"),
-        date_gmt: format!("2026-06-0{day} 12:00:00"),
+        date: format!("2026-06-{day:02} 12:00:00"),
+        date_gmt: format!("2026-06-{day:02} 12:00:00"),
         title: title.to_vec(),
         name,
         status: "inherit".into(),
@@ -208,7 +243,7 @@ fn media(id: u64, title: &[u8], mime_type: &str) -> Post {
 /// Attachments no golden records, the screen not porting their states; the
 /// last four under pretty permalinks only.
 pub(crate) fn unported() -> Vec<Post> {
-    let long = vec![b'a'; 191];
+    let long = vec![b'a'; 199];
     [
         (901, "video/mp4", ("inherit", 0), b"clip".to_vec()),
         (902, "image/png", ("inherit", 801), b"child".to_vec()),
@@ -285,6 +320,14 @@ pub(crate) fn meta(id: u64, key: &str) -> Option<Vec<u8>> {
         (824, "_wp_attached_file") => b"2026/06/feed.png",
         (824, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:16:\"2026/06/feed.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
         (825, "_wp_attached_file") => b"2026/06/sizeless.mp4",
+        (825, "_thumbnail_id") => b"1",
+        (826 | 828..=830, "_wp_attached_file") => return Some(format!("2026/06/{id}.png").into_bytes()),
+        (826 | 828..=830, "_wp_attachment_metadata") => {
+            return Some(
+                format!("a:6:{{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:15:\"2026/06/{id}.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{{}}s:10:\"image_meta\";a:0:{{}}}}")
+                    .into_bytes(),
+            );
+        }
         (825, "_wp_attachment_metadata") => b"a:2:{s:8:\"filesize\";i:700;s:5:\"width\";i:400;}",
         (823, "_wp_attached_file") => b"2026/06/cafe.png",
         (823, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:16:\"2026/06/cafe.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",

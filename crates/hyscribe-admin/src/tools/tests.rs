@@ -149,6 +149,14 @@ fn stale_requests_and_actions_are_not_ported() {
         &request,
     );
     assert!(page.is_none());
+    let stale = |variant: &'static str| {
+        let role = Role(Box::leak(
+            format!("{variant}:administrator").into_boxed_str(),
+        ));
+        privacy_requests(&role, Requests::Export, &RequestsArgs::default(), &request).is_none()
+    };
+    // Older than a day, not a day old.
+    assert!(stale("j9stale") && !stale("j9edge"));
     assert!(RequestsArgs::parse("action=delete&request_id[]=861").is_none());
     assert!(RequestsArgs::parse("s[]=x").is_none());
 }

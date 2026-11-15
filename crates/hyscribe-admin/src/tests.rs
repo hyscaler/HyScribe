@@ -561,6 +561,21 @@ impl Role {
         if self.j9_requests() {
             posts.extend(crate::tools::content::posts());
         }
+        // A pending request modified a day before the clock and two.
+        let modified = match self.variant() {
+            "j9edge" => Some("2026-11-11 16:13:20"),
+            "j9stale" => Some("2026-11-10 16:13:20"),
+            _ => None,
+        };
+        if let Some(modified) = modified {
+            posts.push(hyscribe_model::Post {
+                id: 898,
+                status: "request-pending".into(),
+                post_type: "user_request".into(),
+                modified_gmt: modified.into(),
+                ..hyscribe_model::Post::default()
+            });
+        }
         // A request in the Trash, a status not a request's.
         if self.variant() == "j9trash" {
             posts.push(hyscribe_model::Post {
@@ -1484,7 +1499,8 @@ impl crate::posts::PostsSite for Role {
             "a8locknoread" | "j9prettynoread" => "read_post",
             _ => "",
         };
-        if (cap, post.id) == (denied, 801) {
+        let noread = self.variant() == "j9prettynoread" && post.id == 811;
+        if cap == denied && (post.id == 801 || noread) {
             return false;
         }
         let known = WithPost(

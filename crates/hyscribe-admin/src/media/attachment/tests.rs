@@ -132,7 +132,7 @@ fn pages_are_php_s() {
         "{}",
         failures[..failures.len().min(3)].join("\n")
     );
-    assert_eq!(pages, 81);
+    assert_eq!(pages, 86);
 }
 
 /// Every page of `reference/attachment-edit/golden.sh` over the Theme Test

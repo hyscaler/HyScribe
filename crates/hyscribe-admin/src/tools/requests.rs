@@ -4,11 +4,11 @@
 //! the query of `prepare_items()` and the rows.
 
 use hyscribe_kses::{esc_attr, esc_url};
-use hyscribe_model::{OrderBy, Post, PostQuery, StatusFilter};
+use hyscribe_model::{Post, PostQuery, StatusFilter};
 use hyscribe_phpser::{Value, add_query_arg};
 use hyscribe_render::date::{Zone, format, format_unix, human_time_diff};
 use hyscribe_render::formatting::sanitize_text_field;
-use hyscribe_render::{number_format, order_by, search_count, search_terms};
+use hyscribe_render::{number_format, order_by, search_terms};
 
 use super::{Requests, ToolsSite};
 use crate::admin_bar::BarSite;
@@ -149,28 +149,21 @@ pub(super) fn listing(
         ..PostQuery::default()
     };
     let search = RequestsArgs::sanitized(args.search.as_ref());
-    // `parse_query()` empties a search over 1600 bytes.
-    if !search.is_empty() && search.len() <= 1600 {
+    // `parse_query()` empties a search over 1600 bytes. Addresses hold no
+    // spaces, so every request found ranks alike and relevance orders none.
+    if (1..=1600).contains(&search.len()) {
         query.search = search_terms(&search);
-        query.sentence = search.clone();
-        query.search_count = search_count(&search);
         query.logged_in = true;
     }
     let orderby = match args.orderby.as_deref() {
         Some("requester") => "post_title",
-        Some("requested") => "post_date",
-        _ => "",
+        _ => "post_date",
     };
     let ascending = args
         .order
         .as_deref()
         .is_some_and(|order| order.eq_ignore_ascii_case("asc"));
     query.order = order_by(&Value::String(orderby.into()), ascending, &query);
-    // A search with a term not left out is ordered by relevance first.
-    let titled = query.search.iter().any(|term| !term.starts_with('-'));
-    if titled && orderby.is_empty() {
-        query.order.insert(0, (OrderBy::Relevance, false));
-    }
     let (items, found) = site.list_posts(&query);
     // `WP_Query` counts nothing when the page is past the last.
     let total = if items.is_empty() { 0 } else { found };

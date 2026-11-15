@@ -367,7 +367,9 @@ fn human_readable_duration(duration: &Value) -> String {
     let digits = |part: &str, sixty: bool| {
         !part.is_empty()
             && part.bytes().all(|b| b.is_ascii_digit())
-            && (!sixty || part.len() == 1 || part.len() == 2 && part < "6")
+            && (!sixty
+                || part.len() == 1
+                || part.len() == 2 && part.as_bytes().first() < Some(&b'6'))
     };
     let valid = match parts[..] {
         [hour, minute, second] => {
@@ -438,8 +440,9 @@ fn parent_link(site: &dyn AttachmentSite, parent: &Post) -> Option<String> {
     if parent.post_type == "page" && on_front(site, parent.id) {
         return None;
     }
-    // A private post the user may read has the link it would have published.
-    if parent.status == "private" && site.can_post("read_post", parent) {
+    // A private parent of a shown attachment, which the user may read, has
+    // the link it would have published.
+    if parent.status == "private" {
         let published = Post {
             status: "publish".into(),
             ..parent.clone()
@@ -462,10 +465,8 @@ fn attachment_links(
         return Some((plain.clone(), plain));
     }
     let parent = (post.parent != 0).then(|| site.post(post.parent)).flatten();
-    if parent
-        .as_ref()
-        .is_some_and(|parent| parent.post_type == "attachment")
-    {
+    let attached = |parent: &Post| parent.id != post.id && parent.post_type == "attachment";
+    if parent.as_ref().is_some_and(attached) {
         return None;
     }
     // `wp_force_plain_post_permalink()`, and a parent that is there.
@@ -497,7 +498,7 @@ fn attachment_links(
 }
 
 /// `wp_unique_post_slug()` of an attachment's slug: suffixed while another
-/// post has it; `None` where the suffix would cut a long slug, not ported.
+/// post has it; `None` where `_truncate_post_slug()` would cut it, not ported.
 fn unique_slug(site: &dyn AttachmentSite, post: &Post) -> Option<Vec<u8>> {
     let slug = &post.name;
     let reserved = ["feed", "rdf", "rss", "rss2", "atom", "embed"]
@@ -506,12 +507,16 @@ fn unique_slug(site: &dyn AttachmentSite, post: &Post) -> Option<Vec<u8>> {
     if !reserved && !site.slug_taken(slug, post.id) {
         return Some(slug.clone());
     }
-    if slug.len() > 190 {
-        return None;
-    }
     (2u64..)
-        .map(|n| [&slug[..], format!("-{n}").as_bytes()].concat())
-        .find(|alt| !site.slug_taken(alt, post.id))
+        .find_map(|n| {
+            let suffix = format!("-{n}");
+            if slug.len() + suffix.len() > 200 {
+                return Some(None);
+            }
+            let alt = [&slug[..], suffix.as_bytes()].concat();
+            (!site.slug_taken(&alt, post.id)).then_some(Some(alt))
+        })
+        .flatten()
 }
 
 /// `get_sample_permalink_html()` of the attachment's `view` and sample

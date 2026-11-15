@@ -245,6 +245,12 @@ fn actions_are_named_as_php_names_them() {
         ("users", "action=resetpassword", "resetpassword"),
         ("users", "action=-1", ""),
         ("edit", "changeit=Change&action=trash", "trash"),
+        ("options", "adminhash=x&action=update", "adminhash"),
+        ("options", "adminhash=&dismiss=new_admin_email", "dismiss"),
+        ("options", "dismiss=x&action=update", "update"),
+        ("options-privacy", "action=create-privacy-page", ""),
+        ("edit-tags", "action=delete&delete_tags[]=2", "bulk-delete"),
+        ("edit-tags", "action=-1", ""),
     ] {
         let get = fields(query);
         let asked = Asked {
@@ -261,6 +267,22 @@ fn actions_are_named_as_php_names_them() {
             "{screen} {query}"
         );
     }
+}
+
+/// The Privacy screen's actions are checked outside its policy guide, with
+/// their own nonces, for those who may manage privacy options.
+#[test]
+fn privacy_actions() {
+    let (admin, editor) = (role("administrator"), role("editor"));
+    let set = format!("action=set-privacy-page&{}", nonce("set-privacy-page"));
+    let file = "options-privacy.php";
+    assert_eq!(outcome(&admin, file, Some(&set)), Some(501));
+    let guide = "options-privacy.php?tab=policyguide";
+    assert_eq!(outcome(&admin, guide, Some(&set)), None);
+    assert_eq!(outcome(&admin, file, Some("x=1")), None);
+    let unsigned = "action=set-privacy-page";
+    assert_eq!(outcome(&admin, file, Some(unsigned)), Some(403));
+    assert_eq!(outcome(&editor, file, Some(&set)), Some(403));
 }
 
 /// Requests the goldens leave out: those that are not actions, those whose
@@ -720,4 +742,67 @@ fn ajax_actions() {
         outcome(&role("contributor"), "admin-ajax.php", Some(dim)),
         Some(200)
     );
+}
+
+/// `post.php`'s Quick Draft: `exit` for who may not write posts, the form
+/// for a bad nonce or an empty form, else the referer of its post's type
+/// and `edit_post()`'s capability; and the Screen Options form on any screen.
+#[test]
+fn quick_drafts_and_screen_options() {
+    let draft = |id: &str, rest: &str| {
+        format!(
+            "action=post-quickdraft-save&post_ID={id}&post_title=T&_wpnonce=%nonce:add-post%{rest}"
+        )
+    };
+    for (who, body, expected) in [
+        ("subscriber", draft("1", ""), 200),
+        ("administrator", draft("1", "&_wpnonce=bad"), 501),
+        ("administrator", draft("99", ""), 403),
+        ("administrator", draft("2", ""), 403),
+        ("administrator", draft("1", "&post_type=post"), 501),
+        ("author", draft("801", ""), 500),
+        ("author", draft("801", "&post_title=+"), 501),
+        ("author", draft("801", "&content[]=x"), 501),
+        ("author", draft("801", "&post_title[]=x"), 501),
+    ] {
+        assert_eq!(
+            outcome(&role(who), "post.php", Some(&body)),
+            Some(expected),
+            "{who} {body}"
+        );
+    }
+    let admin = role("administrator");
+    assert_eq!(
+        outcome(
+            &admin,
+            "post.php?action=post-quickdraft-save&post_ID=1",
+            None
+        ),
+        None
+    );
+    let options = "wp_screen_options[option]=edit_per_page&screenoptionnonce=";
+    let valid = format!("{options}%nonce:screen-options-nonce%");
+    for (target, body, expected) in [
+        ("index.php", valid.as_str(), Some(501)),
+        ("edit.php", options, Some(403)),
+        ("index.php", "wp_screen_options=x", None),
+    ] {
+        assert_eq!(
+            outcome(&admin, target, Some(body)),
+            expected,
+            "{target} {body}"
+        );
+    }
+    let post = fields(&valid);
+    for (screen, expected) in [("edit", "screen-options"), ("admin-ajax", "")] {
+        let asked = Asked {
+            get: &[],
+            post: &post,
+            referer: None,
+            uri: b"/wp-admin/",
+            home: HOME,
+            user: 1,
+        };
+        assert_eq!(action(screen, &asked), expected.as_bytes(), "{screen}");
+    }
 }

@@ -16,14 +16,17 @@ use super::*;
 /// concurrent actions would deadlock over.
 static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// A writer, and the turn of the test that takes it.
-pub(super) async fn writer() -> (Writer, tokio::sync::MutexGuard<'static, ()>) {
-    let turn = SERIAL.lock().await;
-    let writer = Writer::open(&fixture_database(), Mode::Primary).await;
-    (writer.unwrap().unwrap(), turn)
+/// The turn of a test that writes users.
+pub(super) async fn turn() -> tokio::sync::MutexGuard<'static, ()> {
+    SERIAL.lock().await
 }
 
-fn fields(query: &str) -> Vec<(Key, Value)> {
+pub(super) async fn writer() -> Writer {
+    let writer = Writer::open(&fixture_database(), Mode::Primary).await;
+    writer.unwrap().unwrap()
+}
+
+pub(super) fn fields(query: &str) -> Vec<(Key, Value)> {
     parse_str(query.as_bytes()).as_array().unwrap().to_vec()
 }
 
@@ -161,7 +164,8 @@ pub(super) async fn new_user(
 /// request that dies part way or meets a failed statement.
 #[tokio::test]
 async fn the_role_change_is_php_s() {
-    let (writer, _turn) = writer().await;
+    let _turn = turn().await;
+    let writer = writer().await;
     let setup = async |conn: &mut Connection| {
         let promoted = new_user(&writer, conn, "oracle-promoted", "").await;
         let kept = new_user(&writer, conn, "oracle-kept", "").await;

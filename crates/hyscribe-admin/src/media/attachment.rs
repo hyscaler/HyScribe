@@ -30,7 +30,7 @@ use crate::menu::Screen;
 use crate::page::query_strings;
 use crate::page::{HelpTab, Page, Request, admin_page, wp_admin_notice};
 use crate::posts::{Answer, lock_holder, preview_link};
-use crate::profile::ProfileSite;
+use crate::profile::{ProfileSite, wp_get_referer};
 use crate::text;
 
 const FORM: &str = include_str!("attachment.html");
@@ -158,19 +158,6 @@ fn post_status(site: &dyn AttachmentSite, post: &Post) -> String {
         }
         Some(parent) => parent.status,
     }
-}
-
-/// `wp_get_referer()`: the page the browser came from, if not this one and
-/// on the site.
-fn referer(site: &dyn AttachmentSite, args: &AttachmentArgs, request: &Request) -> Option<String> {
-    let sent = args.referer.as_deref()?;
-    let home = BarSite::home_url(site);
-    let here = format!("{}{}", home.strip_suffix('/').unwrap_or(&home), request.uri);
-    if sent == request.uri || sent == here {
-        return None;
-    }
-    let valid = site.validate_redirect(sent.as_bytes(), "");
-    (!valid.is_empty()).then(|| String::from_utf8_lossy(&valid).into_owned())
 }
 
 /// `user_can_richedit()`: the user's choice, in a browser the visual
@@ -939,7 +926,7 @@ fn page(
         ),
         false => String::new(),
     };
-    let referer = referer(site, args, request);
+    let referer = wp_get_referer(site, args.referer.as_deref(), request.uri);
     let columns = site.user_option("screen_layout_attachment");
     let columns = if columns.is_some_and(|c| Value::String(c).to_int() == 1) {
         1

@@ -24,8 +24,8 @@ use hyscribe_write::users::{
     UserData, get_password_reset_key, request_email_change, wp_insert_user, wp_update_user,
 };
 
-use super::users::{can_promote, retrieve_password, text};
-use super::{Saving, Stop};
+use super::users::{can_promote, retrieve_password};
+use super::{Saving, Stop, text};
 
 /// The current user's capabilities, read through the action's `Write`.
 struct Current {
@@ -101,13 +101,35 @@ fn refused(err: Error) -> Stop {
     }
 }
 
-/// `$_POST[ $name ]`, slashed as PHP holds it; an array, which PHP's string
-/// functions cannot take, is not ported.
-fn posted(asked: &Asked, name: &str) -> Result<Option<Vec<u8>>, Stop> {
-    match lookup(asked.post, name) {
-        Some(Value::Array(_)) => Err(unported("an array as a field of the user form")),
-        value => Ok(value.map(|value| addslashes(&value.to_php_string()))),
+/// The fields of the user forms that PHP's string functions read.
+const FIELDS: [&str; 13] = [
+    "user_login",
+    "pass1",
+    "pass2",
+    "role",
+    "email",
+    "url",
+    "first_name",
+    "last_name",
+    "nickname",
+    "display_name",
+    "description",
+    "locale",
+    "admin_color",
+];
+
+/// An array as a field, which PHP's string functions cannot take: not ported.
+fn arrays_refused(asked: &Asked) -> Result<(), Stop> {
+    let array = |name| matches!(lookup(asked.post, name), Some(Value::Array(_)));
+    match FIELDS.into_iter().any(array) {
+        true => Err(unported("an array as a field of the user form")),
+        false => Ok(()),
     }
+}
+
+/// `$_POST[ $name ]`, slashed as PHP holds it.
+fn posted(asked: &Asked, name: &str) -> Option<Vec<u8>> {
+    lookup(asked.post, name).map(|value| addslashes(&value.to_php_string()))
 }
 
 /// `isset( $_POST[ $name ] ) && $text === $_POST[ $name ]`.
@@ -150,14 +172,12 @@ async fn edit_user(
     // `wp_insert_user()`.
     let mut wrong = false;
     if !update {
-        user.user_login = match lookup(asked.post, "user_login") {
-            Some(Value::Array(_)) => return Err(unported("an array as the new user's login")),
-            login => login.map(|login| sanitize_user_strict(&login.to_php_string())),
-        };
+        let login = lookup(asked.post, "user_login");
+        user.user_login = login.map(|login| sanitize_user_strict(&login.to_php_string()));
     }
-    let pass = |name| posted(asked, name).map(|pass| php_trim(&pass.unwrap_or_default()).to_vec());
-    let (pass1, pass2) = (pass("pass1")?, pass("pass2")?);
-    if let Some(role) = posted(asked, "role")?.filter(|_| current.can("promote_users")) {
+    let pass = |name| php_trim(&posted(asked, name).unwrap_or_default()).to_vec();
+    let (pass1, pass2) = (pass("pass1"), pass("pass2"));
+    if let Some(role) = posted(asked, "role").filter(|_| current.can("promote_users")) {
         let role = sanitize_text_field(&role);
         let roles = write
             .option_value(&format!("{}user_roles", write.prefix()))
@@ -178,15 +198,15 @@ async fn edit_user(
         wrong |= !is_email(email);
         user.user_email = Some(email.clone());
     }
-    user.user_url = posted(asked, "url")?.map(|url| user_url(&url));
-    let field = |name| posted(asked, name).map(|text| text.map(|text| sanitize_text_field(&text)));
-    user.first_name = field("first_name")?;
-    user.last_name = field("last_name")?;
-    user.nickname = field("nickname")?;
-    user.display_name = field("display_name")?;
-    user.description = posted(asked, "description")?.map(|text| php_trim(&text).to_vec());
+    user.user_url = posted(asked, "url").map(|url| user_url(&url));
+    let field = |name| posted(asked, name).map(|text| sanitize_text_field(&text));
+    user.first_name = field("first_name");
+    user.last_name = field("last_name");
+    user.nickname = field("nickname");
+    user.display_name = field("display_name");
+    user.description = posted(asked, "description").map(|text| php_trim(&text).to_vec());
     // No language is installed, and none is downloaded.
-    user.locale = field("locale")?.map(|locale| match &locale[..] {
+    user.locale = field("locale").map(|locale| match &locale[..] {
         b"" => b"en_US".to_vec(),
         _ => Vec::new(),
     });
@@ -201,7 +221,7 @@ async fn edit_user(
         user.rich_editing = Some(flag("rich_editing").into());
         user.syntax_highlighting = Some(flag("syntax_highlighting").into());
         user.infinite_scrolling = Some(flag("infinite_scrolling").into());
-        let color = field("admin_color")?;
+        let color = field("admin_color");
         user.admin_color = Some(color.unwrap_or_else(|| b"modern".to_vec()));
         let bar = lookup(asked.post, "admin_bar_front").is_some();
         user.show_admin_bar_front = Some(if bar { "true" } else { "false" }.into());
@@ -217,7 +237,7 @@ async fn edit_user(
     if !is_empty_string(&pass1) {
         user.user_pass = Some(pass1);
     }
-    if let (false, Some(posted)) = (update, posted(asked, "user_login")?) {
+    if let (false, Some(posted)) = (update, posted(asked, "user_login")) {
         // `validate_username()` of the login as posted.
         let valid = sanitize_user_strict(&posted);
         wrong |= valid != posted || is_empty_string(&valid);
@@ -250,7 +270,8 @@ async fn edit_user(
 pub(super) fn create<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
     Box::pin(async move {
         let current = Current::load(write, asked.user).await?;
-        let email = posted(asked, "email")?.map(|email| stripslashes(&email));
+        arrays_refused(asked)?;
+        let email = posted(asked, "email").map(|email| stripslashes(&email));
         let id = edit_user(write, asked, (0, &current), email).await?;
         let none = Value::String(Vec::new());
         add_metadata(write, Meta::User, id, "dismissed_wp_pointers", &none, false).await?;
@@ -283,7 +304,8 @@ async fn updated(write: &mut Write<'_>, asked: &Asked<'_>) -> Result<Answer, Sto
         referer => referer.map(|r| esc_url_raw(&addslashes(&r.to_php_string()))),
     };
     let referer = referer.map(|r| remove_query_arg(&[b"update", b"delete_count", b"user_id"], &r));
-    let mut email = posted(asked, "email")?;
+    arrays_refused(asked)?;
+    let mut email = posted(asked, "email");
     // `send_confirmation_on_profile_email()` of one's own save, the only
     // one it acts on (and always on the profile page).
     if id == asked.user {
@@ -371,13 +393,11 @@ pub(in crate::admin) fn destroy_sessions(
 ) -> Vec<u8> {
     let id = lookup(asked.post, "user_id").map_or(0, absint);
     let own = id == asked.user;
-    if let Some(sessions) = sessions {
-        // A session that cannot be removed expires all the same.
-        let _ = match own {
-            true => sessions.destroy_others(id, token, crate::now()),
-            false => sessions.destroy_all(id),
-        };
-    }
+    // A session that cannot be removed expires all the same.
+    let _ = sessions.map(|sessions| match own {
+        true => sessions.destroy_others(id, token, crate::now()),
+        false => sessions.destroy_all(id),
+    });
     let message = match own {
         true => b"You are now logged out everywhere else.".to_vec(),
         false => [&name(id)[..], b" has been logged out."].concat(),

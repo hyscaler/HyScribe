@@ -872,7 +872,7 @@ pub fn delete_users(site: &dyn UsersSite, args: &DeleteArgs, request: &Request) 
         .collect();
     let mut items = String::new();
     for &id in &args.users {
-        let user = site.userdata(u64::try_from(id).ok()?)?;
+        let user = site.userdata(u64::try_from(id).unwrap_or_default())?;
         let login = text(&user.login);
         if user.id == me {
             items.push_str(&format!(

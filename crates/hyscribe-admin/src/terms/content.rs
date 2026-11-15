@@ -86,3 +86,25 @@ pub(crate) fn query(terms: Vec<Term>, query: &TermQuery) -> Vec<Term> {
         .map_or(usize::MAX, |n| usize::try_from(n).unwrap());
     found.into_iter().skip(skip).take(take).collect()
 }
+
+/// Every term of `taxonomy` once `reference/admin-saves/golden.sh` has
+/// renamed tag 801 and added tag 802 and category 803, by name.
+pub(crate) fn saved(taxonomy: &str) -> Vec<Term> {
+    if taxonomy == "post_tag" {
+        return vec![
+            term(802, "Fresh tag", "fresh-tag", "About it", 0, 0),
+            term(
+                801,
+                "Quick &amp; named",
+                "quick-named",
+                "Now <em>described</em>",
+                0,
+                0,
+            ),
+        ];
+    }
+    vec![
+        term(803, "Child category", "child-category", "", 1, 0),
+        term(1, "Uncategorized", "uncategorized", "", 0, 1),
+    ]
+}

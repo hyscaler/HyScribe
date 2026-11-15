@@ -52,6 +52,11 @@ impl Names {
         }
     }
 
+    /// `SITECOOKIEPATH`.
+    pub(crate) fn site_path(&self) -> &str {
+        &self.site_path
+    }
+
     fn test(&self) -> String {
         "hyscribe_test_cookie".into()
     }
@@ -81,9 +86,20 @@ impl Names {
     }
 }
 
-/// `setcookie()`, with `SameSite=Lax` added (docs/SECURITY_MODEL.md):
-/// `expires` 0 for a session cookie.
+/// `setcookie()`, with `HttpOnly` and `SameSite=Lax` added
+/// (docs/SECURITY_MODEL.md): `expires` 0 for a session cookie.
 fn set_cookie(
+    name: &str,
+    value: &[u8],
+    (expires, now): (i64, i64),
+    path: &str,
+    secure: bool,
+) -> String {
+    php_cookie(name, value, (expires, now), path, secure) + "; HttpOnly; SameSite=Lax"
+}
+
+/// `setcookie()` as PHP sends it, for a cookie scripts read.
+pub(crate) fn php_cookie(
     name: &str,
     value: &[u8],
     (expires, now): (i64, i64),
@@ -103,7 +119,6 @@ fn set_cookie(
     if secure {
         cookie.push_str("; secure");
     }
-    cookie.push_str("; HttpOnly; SameSite=Lax");
     cookie
 }
 
@@ -672,7 +687,7 @@ fn expiration(now: i64, remember: bool) -> i64 {
 /// logged in cookie.
 fn salts(reads: &LoginReads, secure: bool) -> Option<(Vec<u8>, Vec<u8>)> {
     let scheme = if secure { "secure_auth" } else { "auth" };
-    Some((reads.salt(scheme)?, reads.salt("logged_in")?))
+    reads.salt(scheme).zip(reads.salt("logged_in"))
 }
 
 /// `wp_set_auth_cookie()`'s cookies for `user` on the session `token`,

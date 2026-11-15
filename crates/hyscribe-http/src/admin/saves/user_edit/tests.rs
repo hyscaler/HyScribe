@@ -8,7 +8,8 @@ use hyscribe_testkit::fixture_database;
 use hyscribe_testkit::writes::check_writes;
 
 use super::super::tests::{
-    Request, acted, answered, new_user, password_is, php_answer, php_location, redirected, writer,
+    Request, acted, answered, new_user, password_is, php_answer, php_location, redirected, turn,
+    writer,
 };
 use super::*;
 
@@ -37,7 +38,8 @@ async fn unported(writer: &hyscribe_db::Writer, conn: &mut Connection, request: 
 /// form with errors, is not ported.
 #[tokio::test]
 async fn new_users_are_php_s() {
-    let (writer, _turn) = writer().await;
+    let _turn = turn().await;
+    let writer = writer().await;
     let action = async |conn: &mut Connection, ()| {
         let long = format!(
             "user_login={}&email=long%40example.test&pass1=a&pass2=a",
@@ -88,7 +90,8 @@ async fn new_users_are_php_s() {
 /// user of the default role and is sent back to the form.
 #[tokio::test]
 async fn new_users_of_one_who_cannot_list_them_are_php_s() {
-    let (writer, _turn) = writer().await;
+    let _turn = turn().await;
+    let writer = writer().await;
     let setup = async |conn: &mut Connection| {
         let id = new_user(&writer, conn, "oracle-creator", "subscriber").await;
         let mut write = writer.begin_on(conn).await.unwrap();
@@ -132,7 +135,8 @@ async fn new_users_of_one_who_cannot_list_them_are_php_s() {
 /// may give dies, and a form with errors is not ported.
 #[tokio::test]
 async fn edited_users_are_php_s() {
-    let (writer, _turn) = writer().await;
+    let _turn = turn().await;
+    let writer = writer().await;
     let setup = async |conn: &mut Connection| {
         Ok::<_, String>(new_user(&writer, conn, "oracle-edited", "author").await)
     };
@@ -179,7 +183,8 @@ async fn edited_users_are_php_s() {
 /// for is not given, as it cannot promote users.
 #[tokio::test]
 async fn profiles_are_php_s() {
-    let (writer, _turn) = writer().await;
+    let _turn = turn().await;
+    let writer = writer().await;
     let action = async |conn: &mut Connection, ()| {
         for case in [
             "profile-no-id",
@@ -216,7 +221,8 @@ async fn profiles_are_php_s() {
 /// The color scheme is saved as PHP saves it and answered with PHP's JSON.
 #[tokio::test]
 async fn color_schemes_are_php_s() {
-    let (writer, _turn) = writer().await;
+    let _turn = turn().await;
+    let writer = writer().await;
     let action = async |conn: &mut Connection, ()| {
         let post = "color_scheme=ocean";
         let request = request("admin-ajax", b"save-user-color-scheme", post);
@@ -235,7 +241,8 @@ async fn color_schemes_are_php_s() {
 /// Edit User's password reset link keeps PHP's key and answers PHP's JSON.
 #[tokio::test]
 async fn password_reset_links_are_php_s() {
-    let (writer, _turn) = writer().await;
+    let _turn = turn().await;
+    let writer = writer().await;
     let setup = async |conn: &mut Connection| {
         Ok::<_, String>(new_user(&writer, conn, "oracle-link", "author").await)
     };

@@ -14,7 +14,7 @@ use hyscribe_write::Error;
 use hyscribe_write::posts::Context;
 use hyscribe_write::users::{get_password_reset_key, set_role, wp_delete_user};
 
-use super::{Saving, Stop};
+use super::{Saving, Stop, text};
 
 /// `$redirect`: the list's own `wp_http_referer` field, else the list.
 fn redirect(asked: &Asked) -> Result<Vec<u8>, Stop> {
@@ -202,10 +202,6 @@ pub(super) async fn can_promote(write: &mut Write<'_>, role: &[u8]) -> Result<bo
             .is_some_and(|granted| !granted.is_empty())
     };
     Ok(matches!(maybe_unserialize(&roles), Maybe::Value(roles) if granted(&roles)))
-}
-
-pub(super) fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
 }
 
 #[cfg(test)]

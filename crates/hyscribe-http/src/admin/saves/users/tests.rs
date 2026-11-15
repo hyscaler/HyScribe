@@ -9,7 +9,7 @@ use hyscribe_testkit::writes::check_writes;
 use hyscribe_write::posts::{PostArgs, wp_insert_post};
 use hyscribe_write::users::{UserData, wp_insert_user};
 
-use super::super::tests::{Request, acted, new_user, php_location, redirected, writer};
+use super::super::tests::{Request, acted, new_user, php_location, redirected, turn, writer};
 use super::*;
 
 fn dodelete(post: &str) -> Request<'_> {
@@ -28,7 +28,8 @@ fn dodelete(post: &str) -> Request<'_> {
 /// no user, is not ported, and an option PHP knows not deletes no one.
 #[tokio::test]
 async fn deletions_are_php_s() {
-    let (writer, _turn) = writer().await;
+    let _turn = turn().await;
+    let writer = writer().await;
     let setup = async |conn: &mut Connection| {
         let deleted = new_user(&writer, conn, "oracle-deleted", "author").await;
         let heir = new_user(&writer, conn, "oracle-heir", "author").await;
@@ -56,6 +57,7 @@ async fn deletions_are_php_s() {
     let action = async |conn: &mut Connection, (deleted, heir): (u64, u64)| {
         for post in [
             format!("users[]={deleted}"),
+            format!("users[]={deleted}&wp_http_referer[]=x"),
             format!("users[]={deleted}&delete_option=delete"),
             format!("users[]={heir}&delete_option[{heir}]=reassign&reassign_user[{heir}]=-1"),
             format!("users[]={heir}&delete_option[{heir}]=reassign&reassign_user[{heir}]=x"),
@@ -84,7 +86,8 @@ async fn deletions_are_php_s() {
 /// login is, and none for a login not found once sanitized.
 #[tokio::test]
 async fn password_reset_links_are_php_s() {
-    let (writer, _turn) = writer().await;
+    let _turn = turn().await;
+    let writer = writer().await;
     let setup = async |conn: &mut Connection| {
         let mut write = writer.begin_on(conn).await.unwrap();
         let odd = UserFields {
@@ -119,6 +122,13 @@ async fn password_reset_links_are_php_s() {
             post: "",
             user: 1,
         };
+        // `remove_query_arg()` of an array is a fatal error.
+        let array = Request {
+            get: "users[]=1&wp_http_referer[]=x",
+            ..request
+        };
+        let unported = acted(&writer, conn, &array, None).await;
+        assert!(matches!(unported, Err(Error::Unported(_))));
         let to = redirected(&writer, conn, &request).await;
         let php = php_location("users-resetpassword");
         assert_eq!(to, php.replace("reset_count=1", "reset_count=2"));

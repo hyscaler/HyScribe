@@ -2,8 +2,9 @@
 
 //! Options and meta: `add_option()`, `update_option()`, `delete_option()`,
 //! the transients' database side without an object cache, and the meta
-//! functions. `sanitize_option()` and the hooks on single options (as
-//! `update_option_home`) are not ported: callers pass sanitized values.
+//! functions, and `sanitize_option()` for the Settings screens' options.
+//! `update_option()` takes sanitized values; the hooks on single options
+//! (as `update_option_home`) are their callers'.
 
 use hyscribe_db::{DbError, Write};
 use hyscribe_phpser::{Maybe, Value, encode, is_empty_string, is_serialized, maybe_unserialize};
@@ -11,10 +12,12 @@ use hyscribe_phpser::{Maybe, Value, encode, is_empty_string, is_serialized, mayb
 use crate::{Error, now};
 
 mod meta;
+mod sanitize;
 
 pub use hyscribe_db::Meta;
 pub(crate) use meta::delete_object_meta;
 pub use meta::{add_metadata, delete_metadata, get_metadata, update_metadata};
+pub use sanitize::{INVALID_ZONE, Sanitized, is_zone, sanitize_option};
 
 /// An `$autoload` argument other than `null`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,8 +69,12 @@ fn option_name(name: &str) -> Result<Option<&str>, Error> {
 }
 
 /// `get_option( $name )`: `false` for a missing option. An empty `home` is
-/// the site URL, and the URL options lose their trailing slashes.
-pub(crate) async fn get_option(write: &mut Write<'_>, name: &str) -> Result<Value, DbError> {
+/// the site URL, the URL options lose their trailing slashes, and `home`
+/// and `siteurl` are the configuration's when it sets them (`WP_HOME`).
+pub async fn get_option(write: &mut Write<'_>, name: &str) -> Result<Value, DbError> {
+    if let Some(url) = write.configured(name) {
+        return Ok(Value::String(url.as_bytes().to_vec()));
+    }
     let raw = match write.option_value(name).await? {
         Some(raw) if name == "home" && raw.is_empty() => write.option_value("siteurl").await?,
         raw => raw,
@@ -194,6 +201,23 @@ pub async fn set_transient(
         update_option(write, &timeout, &expires, None).await?;
     }
     update_option(write, &option, value, None).await
+}
+
+/// What `get_settings_errors()` writes on the screen a save sends back
+/// (`settings-updated`): an expired `settings_errors` transient is
+/// deleted by `get_transient()` at `now`, one it shows by `delete_transient()`.
+pub async fn settings_errors_shown(write: &mut Write<'_>, now: i64) -> Result<(), Error> {
+    let timeout = get_option(write, "_transient_timeout_settings_errors").await?;
+    if timeout != Value::Bool(false) && timeout.to_int() < now {
+        delete_option(write, "_transient_settings_errors").await?;
+        delete_option(write, "_transient_timeout_settings_errors").await?;
+    } else if !get_option(write, "_transient_settings_errors")
+        .await?
+        .is_empty()
+    {
+        delete_transient(write, "settings_errors").await?;
+    }
+    Ok(())
 }
 
 /// `delete_transient( $name )` without an object cache.

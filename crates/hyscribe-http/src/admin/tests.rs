@@ -2070,6 +2070,10 @@ async fn actions_answer_as_php_once_checked() {
         let to = to.map_or("", |to| to.to_str().unwrap());
         assert_eq!(to, hs(php_location), "{case}");
         let php = hyscribe_testkit::unhex(body);
+        if php.starts_with(b"{") {
+            let kind = response.headers().get(header::CONTENT_TYPE).unwrap();
+            assert_eq!(kind, "application/json; charset=UTF-8", "{case}");
+        }
         assert_eq!(page_of(response).await.into_bytes(), php, "{case}");
     }
     // The current session outlasts the others' end.

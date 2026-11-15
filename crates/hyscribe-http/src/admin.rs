@@ -1340,10 +1340,8 @@ fn save(admin: &Admin, screen: &str, asked: &Asked) -> Response {
     let saved = Handle::current()
         .block_on(async { saves::act(writer.begin().await, handler, asked).await });
     match saved {
-        // An Ajax action's JSON.
-        Ok(Answer::Page(json)) if screen == "admin-ajax" => {
-            ajax_response(StatusCode::OK, JSON, json.into_bytes())
-        }
+        // Only Ajax actions answer with a page: their JSON.
+        Ok(Answer::Page(json)) => ajax_response(StatusCode::OK, JSON, json.into_bytes()),
         Ok(answer) => served(admin, answer),
         Err(hyscribe_write::Error::Unported(_)) => not_ported(),
         Err(err) => crate::html(crate::database_error(admin.site, &format!("{err:?}"))),

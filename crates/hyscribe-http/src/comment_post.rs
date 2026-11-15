@@ -132,7 +132,7 @@ fn answer<'w>(
     let commenter = Commenter {
         moderate_comments: can("moderate_comments"),
         manage_options: can("manage_options"),
-        unfiltered_html: can("unfiltered_html") && verified,
+        unfiltered_html: verified && can("unfiltered_html"),
     };
     let saving = Saving {
         fields,

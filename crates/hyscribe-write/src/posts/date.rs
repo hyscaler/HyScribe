@@ -5,11 +5,10 @@
 //! `get_date_from_gmt()` in the site's time zone.
 
 use hyscribe_db::Write;
-use hyscribe_render::date::{Zone, format_unix, site_zone, stored_unix};
+use hyscribe_render::date::{Zone, format_unix, stored_unix};
 
 use super::{Error, Result, ZERO_DATE, truthy};
-
-const MYSQL: &str = "Y-m-d H:i:s";
+use crate::{MYSQL, wp_timezone};
 
 /// The site's time zone and the time of the action.
 pub(super) struct Dates {
@@ -70,15 +69,8 @@ fn ymd(date: &str) -> (u32, u32, u32) {
 impl Dates {
     /// The site's time zone, from its options, at `now`.
     pub(super) async fn read(write: &mut Write<'_>, now: i64) -> Result<Dates> {
-        let zone = write
-            .option_value("timezone_string")
-            .await?
-            .unwrap_or_default();
-        let offset = write.option_value("gmt_offset").await?.unwrap_or_default();
-        Ok(Dates {
-            zone: site_zone(&zone, &offset),
-            now,
-        })
+        let zone = wp_timezone(write).await?;
+        Ok(Dates { zone, now })
     }
 
     /// `current_time( 'mysql' )`.

@@ -5,11 +5,13 @@
 //! `addslashes()` and the `wp_unslash()` that comes before the insert.
 
 use hyscribe_html::TagProcessor;
-use hyscribe_kses::{esc_url_raw, wp_specialchars, wp_strip_all_tags};
+use hyscribe_kses::{esc_url_raw, wp_strip_all_tags};
 use hyscribe_phpser::{addslashes, php_trim, stripslashes};
 use hyscribe_render::balance::force_balance_tags;
-use hyscribe_render::formatting::{sanitize_email, sanitize_text_field};
+use hyscribe_render::formatting::sanitize_email;
 use hyscribe_render::kses::{wp_kses_comment, wp_kses_data, wp_rel_ugc};
+
+use crate::{name_filters, wp_filter_kses};
 
 /// The fields `wp_filter_comment()` filters, unslashed; the user agent, IP
 /// address and user have no default filters.
@@ -28,31 +30,24 @@ impl Fields<'_> {
         let slashed = |field: &mut Vec<u8>, filters: &dyn Fn(Vec<u8>) -> Vec<u8>| {
             *field = stripslashes(&filters(addslashes(field)));
         };
-        slashed(self.author, &|name| {
-            wp_specialchars(&filter_kses(&sanitize_text_field(&name), wp_kses_data))
-        });
+        slashed(self.author, &|name| name_filters(&name));
         slashed(self.email, &|email| {
-            filter_kses(&sanitize_email(php_trim(&email)), wp_kses_data)
+            wp_filter_kses(&sanitize_email(php_trim(&email)), wp_kses_data)
         });
         slashed(self.url, &|url| {
             let url = esc_url_raw(&wp_strip_all_tags(&url, false));
-            filter_kses(&url, wp_kses_data)
+            wp_filter_kses(&url, wp_kses_data)
         });
         slashed(self.content, &|content| {
             let mut content = convert_invalid_entities(&content);
             if kses {
-                content = filter_kses(&content, wp_kses_comment);
+                content = wp_filter_kses(&content, wp_kses_comment);
                 content = addslashes(&note_mention_classes(&stripslashes(&content)));
             }
             let content = addslashes(&wp_rel_ugc(&stripslashes(&content), home));
             balance_tags(&content, balance)
         });
     }
-}
-
-/// `wp_filter_kses()` with the filter's list of allowed HTML.
-fn filter_kses(data: &[u8], kses: fn(&[u8]) -> Vec<u8>) -> Vec<u8> {
-    addslashes(&kses(&stripslashes(data)))
 }
 
 /// `_wp_kses_sanitize_note_mention_classes()`: a `span` keeps only the

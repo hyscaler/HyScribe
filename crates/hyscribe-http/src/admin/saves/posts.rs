@@ -784,16 +784,13 @@ async fn update(
     };
     wp_update_post(write, ctx, id, &change).await?;
     for (taxonomy, values) in terms {
-        let texts: Vec<Vec<u8>> = values.iter().map(Value::to_php_string).collect();
-        let refs: Vec<TermRef> = values
+        // A term ID as text is read as the ID, as `term_exists()` reads it.
+        let texts: Vec<Vec<u8>> = values
             .iter()
-            .zip(&texts)
-            .filter(|(value, _)| !value.is_empty())
-            .map(|(value, text)| match value {
-                Value::Int(term) => TermRef::Id(u64::try_from(*term).unwrap_or_default()),
-                _ => TermRef::Text(text),
-            })
+            .filter(|value| !value.is_empty())
+            .map(Value::to_php_string)
             .collect();
+        let refs: Vec<TermRef> = texts.iter().map(|text| TermRef::Text(text)).collect();
         let set = wp_set_post_terms(write, id, TermList::List(&refs), *taxonomy, false).await;
         set.map_err(Error::from)?;
     }

@@ -798,6 +798,16 @@ async fn quick_edit_edges() {
     let (_, dates) = tried(1, &[], ("admin-ajax", "", &undated), dated).await;
     let year = format_unix("Y", crate::now(), Zone::Utc);
     assert_eq!(dates, [format!("{year}-10-27 08:08:15")]);
+    // A month of 0 is this month's; the last hour, minute and second stay.
+    let (_, dates) = tried(
+        1,
+        &[],
+        ("admin-ajax", "", &post("mm=0&hh=23&mn=59&ss=59")),
+        dated,
+    )
+    .await;
+    let month = format_unix("m", crate::now(), Zone::Utc);
+    assert_eq!(dates, [format!("2026-{month}-27 23:59:59")]);
 }
 
 /// Bulk Edit of what the golden cases leave out.
@@ -852,6 +862,11 @@ async fn bulk_edit_edges() {
         let (_, terms) = tried(1, &category, ("edit", &query, ""), categories).await;
         assert_eq!(terms, ["1", "961"], "{more}");
     }
+    // A date part that differs from its hidden copy edits the date.
+    let dated = "SELECT CAST(post_date AS CHAR) FROM wp_posts WHERE ID = 1";
+    let query = format!("{base}&post[]=1&hidden_jj=27&jj=28&aa=2026&mm=10&hh=08&mn=08&ss=15");
+    let (_, dates) = tried(1, &[], ("edit", &query, ""), dated).await;
+    assert_eq!(dates, ["2026-10-28 08:08:15"]);
     // Pages are not put under themselves or their children.
     let pages = "action=edit&bulk_edit=Update&post_type=page&post_parent=2&post[]=2&post[]=3";
     let (answer, rows) = tried(1, &[], ("edit", pages, ""), read).await;
@@ -923,12 +938,14 @@ fn caps_read_what_they_load() {
 #[tokio::test]
 async fn edits_of_odd_fields() {
     let _one = ONE_AT_A_TIME.lock().await;
-    let read = "SELECT CONCAT(post_status, ' ', post_author) FROM wp_posts WHERE ID = 1";
+    let read = "SELECT CONCAT(post_status, ' ', post_author, ' ', post_password) FROM wp_posts \
+                WHERE ID = 1";
     let quick_edit = async |body: String| tried(1, &[], ("admin-ajax", "", &body), read).await;
     let post = |more: &str| quick(1, &format!("screen=edit-post&post_type=post&{more}"));
     for (more, status) in [
-        ("_status=auto-draft", "draft 1"),
-        ("_status=bogus", "publish 1"),
+        ("_status=auto-draft", "draft 1 "),
+        ("_status=bogus", "publish 1 "),
+        ("post_password=secret", "publish 1 secret"),
     ] {
         let (_, statuses) = quick_edit(post(more)).await;
         assert_eq!(statuses, [status], "{more}");
@@ -940,7 +957,7 @@ async fn edits_of_odd_fields() {
         .replace("&_status=publish", "");
     let (answer, statuses) = quick_edit(bare).await;
     assert_eq!(answer, Ok(Answer::Page(String::new())));
-    assert_eq!(statuses, ["draft 1"]);
+    assert_eq!(statuses, ["draft 1 "]);
     // Bulk Edit sent as a form, a category given twice.
     let categories = "SELECT CAST(term_taxonomy_id AS CHAR) FROM wp_term_relationships \
                       WHERE object_id = 1 ORDER BY term_taxonomy_id";

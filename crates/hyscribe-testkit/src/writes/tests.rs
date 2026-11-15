@@ -411,3 +411,17 @@ fn compares_lines_with_golden() {
         ["short  ( ): PHP \"\", HyScribe nothing"]
     );
 }
+
+/// A reset key's fast hash is the 40 characters after `$generic$`, and an
+/// email change's hash 32 hex digits, as `reference/writes/run.php` masks.
+#[test]
+fn random_hashes_are_masked() {
+    let key = format!("1:$generic${}tail", "a".repeat(40));
+    assert_eq!(random_hashes(key.as_bytes()), b"1:%fasthash%tail");
+    assert_eq!(random_hashes(b"$generic$short"), b"%fasthash%");
+    let change = format!("a:2:{{s:4:\"hash\";s:32:\"{}\";}}", "0f".repeat(16));
+    let masked = b"a:2:{s:4:\"hash\";s:32:\"%random%\";}";
+    assert_eq!(random_hashes(change.as_bytes()), masked);
+    let upper = change.replace("0f", "0F");
+    assert_eq!(random_hashes(upper.as_bytes()), upper.as_bytes());
+}

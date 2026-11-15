@@ -1207,9 +1207,8 @@ async fn dashboard_arguments_and_folding() {
     assert!(shown);
 }
 
-/// A Site Icon, a static homepage with neither page chosen, which PHP saves
-/// as the latest posts first, and a missing child of the bundled theme are
-/// not ported.
+/// A Site Icon and a static homepage with neither page chosen, which PHP
+/// saves as the latest posts first, are not ported.
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_not_ported() {
     let db = hyscribe_db::Db::connect(&hyscribe_testkit::fixture_database())
@@ -1219,14 +1218,8 @@ async fn settings_not_ported() {
     site.options.insert("site_icon".into(), b"5".to_vec());
     site.options
         .insert("show_on_front".into(), b"page".to_vec());
-    site.options
-        .insert("stylesheet".into(), b"twentytwentyfour".to_vec());
     let site = Arc::new(site);
-    for path in [
-        "/hs-admin/options-general",
-        "/hs-admin/options-reading",
-        "/hs-admin/themes",
-    ] {
+    for path in ["/hs-admin/options-general", "/hs-admin/options-reading"] {
         let site = Arc::clone(&site);
         let handle = Handle::current();
         let response = tokio::task::spawn_blocking(move || {

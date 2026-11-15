@@ -92,7 +92,7 @@ pub(crate) const BUILTIN_TYPES: [&str; 14] = [
 ];
 
 /// The host of `url`, with `:port`: `parse_url()`'s `host` and `port`.
-pub(crate) fn host(url: &[u8]) -> Vec<u8> {
+pub fn host(url: &[u8]) -> Vec<u8> {
     let after_scheme = crate::formatting::find(url, 0, b"://")
         .and_then(|at| url.get(at + 3..))
         .unwrap_or_default();

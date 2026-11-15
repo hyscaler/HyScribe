@@ -131,6 +131,8 @@ const TABLES: [Table; 12] = [
         ids: &[
             ("umeta_id", "wp_usermeta", Whole),
             ("user_id", "wp_users", Whole),
+            // A post ID a user option keeps, as the Quick Draft's auto-draft.
+            ("meta_value", "wp_posts", Whole),
         ],
     },
     Table {
@@ -269,7 +271,8 @@ impl Masks {
         }
         let value = digit_runs(value, |run| {
             let unix = number(run).filter(|_| run.len() == 10)?;
-            (self.start.0..=self.end.0)
+            // From five seconds before, as `wp_user_settings()` saves a newer cookie's time.
+            (self.start.0.saturating_sub(5)..=self.end.0)
                 .contains(&unix)
                 .then(|| b"%unix%".to_vec())
         });
@@ -389,16 +392,53 @@ fn is_timeout(table: &Table, row: &Row) -> bool {
             || name.starts_with(b"_site_transient_timeout_"))
 }
 
+/// `value` with each serialized string of 32 hexadecimal digits masked as
+/// `%hash%`: the random key of the `adminhash` option.
+fn hash_masked(value: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut rest = value;
+    while let Some((&first, tail)) = rest.split_first() {
+        let hash = rest
+            .strip_prefix(b"s:32:\"")
+            .and_then(|after| after.split_at_checked(32))
+            .filter(|(hash, after)| {
+                after.starts_with(b"\"") && hash.iter().all(|b| b"0123456789abcdef".contains(b))
+            });
+        match hash {
+            Some((_, after)) => {
+                out.extend_from_slice(b"s:32:\"%hash%");
+                rest = after;
+            }
+            None => {
+                out.push(first);
+                rest = tail;
+            }
+        }
+    }
+    out
+}
+
 /// Rows of `table` masked, by masked key.
 fn masked(masks: &Masks, table: &Table, rows: &BTreeMap<Vec<u8>, Row>) -> BTreeMap<Vec<u8>, Row> {
     rows.values()
         .map(|row| {
             let timeout = is_timeout(table, row);
+            let option = (table.name == "wp_options").then(|| value(row, "option_name"));
             let row: Row = row
                 .iter()
-                .map(|(column, value)| match column.as_str() {
-                    "option_value" if timeout => (column.clone(), b"%expiry%".to_vec()),
-                    _ => (column.clone(), masks.mask(table, column, value)),
+                .map(|(column, value)| {
+                    let masked = masks.mask(table, column, value);
+                    let masked = match (column.as_str(), option) {
+                        ("option_value", _) if timeout => b"%expiry%".to_vec(),
+                        ("option_value", Some(b"adminhash")) => hash_masked(&masked),
+                        // A new privacy policy page's ID.
+                        ("option_value", Some(b"wp_page_for_privacy_policy")) => {
+                            let id = masks.new.get(&("wp_posts", masked.clone()));
+                            id.cloned().unwrap_or(masked)
+                        }
+                        _ => masked,
+                    };
+                    (column.clone(), masked)
                 })
                 .collect();
             (key(&row, table.key), row)
@@ -550,6 +590,18 @@ fn options(db: &hyscribe_config::Database) -> MySqlConnectOptions {
         .username(&db.user)
         .password(db.password.expose())
         .charset(&db.charset)
+}
+
+/// Loads the default install fixture afresh into `db`, as
+/// `wordpress_saves`, the scratch database of the tests whose requests
+/// really write (`reference/default-install/db.sh` makes it).
+pub async fn load_default_install(db: &hyscribe_config::Database) -> Result<(), sqlx::Error> {
+    let mut conn = MySqlConnection::connect_with(&options(db)).await?;
+    let dump = include_str!("../../../fixtures/default-install/7.1.3/database.sql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(dump))
+        .execute(&mut conn)
+        .await?;
+    Ok(())
 }
 
 #[cfg(test)]

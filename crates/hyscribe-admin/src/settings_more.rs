@@ -423,32 +423,31 @@ pub fn privacy(site: &dyn SettingsSite, request: &Request) -> Answer {
         )
     };
     let admin_url = |path: &str| url(&BarSite::admin_url(site, path));
-    let content = error
-        + &fill(
-            PRIVACY,
-            &[
-                ("settings_url", admin_url("options-privacy.php")),
-                (
-                    "guide_url",
-                    admin_url("options-privacy.php?tab=policyguide"),
-                ),
-                ("links", links),
-                (
-                    "create",
-                    if pages.is_empty() {
-                        "There are no pages."
-                    } else {
-                        "Create a new Privacy Policy page"
-                    }
-                    .into(),
-                ),
-                (
-                    "create_nonce",
-                    wp_nonce_field(site, "create-privacy-page", "_wpnonce", request.uri),
-                ),
-                ("choose", choose),
-            ],
-        );
+    let content = fill(
+        PRIVACY,
+        &[
+            ("settings_url", admin_url("options-privacy.php")),
+            (
+                "guide_url",
+                admin_url("options-privacy.php?tab=policyguide"),
+            ),
+            ("links", links),
+            (
+                "create",
+                if pages.is_empty() {
+                    "There are no pages."
+                } else {
+                    "Create a new Privacy Policy page"
+                }
+                .into(),
+            ),
+            (
+                "create_nonce",
+                wp_nonce_field(site, "create-privacy-page", "_wpnonce", request.uri),
+            ),
+            ("choose", choose),
+        ],
+    );
     let help = [HelpTab {
         id: "overview",
         title: "Overview",
@@ -462,6 +461,7 @@ pub fn privacy(site: &dyn SettingsSite, request: &Request) -> Answer {
             "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/settings-privacy-screen/\">Documentation on Privacy Settings</a></p>",
         ),
         scripts: &["privacy-tools"],
+        errors: &error,
         content: &content,
         ..Form::default()
     };

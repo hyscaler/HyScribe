@@ -642,13 +642,21 @@ fn recent_comments(
     out
 }
 
-/// `wp_dashboard_quick_press()` for a user who may `edit_posts`, the
-/// page requested at `request_uri`.
-fn quick_press(site: &dyn DashboardSite, request_uri: &str) -> String {
+/// `wp_dashboard_quick_press( $message, $type )` for a user who may
+/// `edit_posts`, the page requested at `request_uri`: the notice of
+/// `notice`, a message and its type, first.
+pub fn quick_press(
+    site: &dyn DashboardSite,
+    request_uri: &str,
+    notice: Option<(&str, &str)>,
+) -> String {
     let action = String::from_utf8_lossy(&esc_url(BarSite::admin_url(site, "post.php").as_bytes()))
         .into_owned();
+    let notice = notice.map_or(String::new(), |(message, kind)| {
+        format!("<div class=\"notice notice-{kind}\" role=\"alert\"><p>{message}</p></div>")
+    });
     format!(
-        "\n\t<form name=\"post\" action=\"{action}\" method=\"post\" id=\"quick-press\" class=\"hide-if-no-js\">\n\n\t\t\n\t\t<div class=\"input-text-wrap\" id=\"title-wrap\">\n\t\t\t<label for=\"title\">\n\t\t\t\tTitle\t\t\t</label>\n\t\t\t<input type=\"text\" name=\"post_title\" id=\"title\" autocomplete=\"off\" />\n\t\t</div>\n\n\t\t<div class=\"textarea-wrap\" id=\"description-wrap\">\n\t\t\t<label for=\"content\">Content</label>\n\t\t\t<textarea name=\"content\" id=\"content\" placeholder=\"What&#8217;s on your mind?\" class=\"mceEditor\" rows=\"3\" cols=\"15\" autocomplete=\"off\"></textarea>\n\t\t</div>\n\n\t\t<p class=\"submit\">\n\t\t\t<input type=\"hidden\" name=\"action\" id=\"quickpost-action\" value=\"post-quickdraft-save\" />\n\t\t\t<input type=\"hidden\" name=\"post_ID\" value=\"{}\" />\n\t\t\t<input type=\"hidden\" name=\"post_type\" value=\"post\" />\n\t\t\t{}\t\t\t<input type=\"submit\" name=\"save\" id=\"save-post\" class=\"button button-primary\" value=\"Save Draft\"  />\t\t\t<br class=\"clear\" />\n\t\t</p>\n\n\t</form>\n\t{}",
+        "\n\t<form name=\"post\" action=\"{action}\" method=\"post\" id=\"quick-press\" class=\"hide-if-no-js\">\n\n\t\t{notice}\n\t\t<div class=\"input-text-wrap\" id=\"title-wrap\">\n\t\t\t<label for=\"title\">\n\t\t\t\tTitle\t\t\t</label>\n\t\t\t<input type=\"text\" name=\"post_title\" id=\"title\" autocomplete=\"off\" />\n\t\t</div>\n\n\t\t<div class=\"textarea-wrap\" id=\"description-wrap\">\n\t\t\t<label for=\"content\">Content</label>\n\t\t\t<textarea name=\"content\" id=\"content\" placeholder=\"What&#8217;s on your mind?\" class=\"mceEditor\" rows=\"3\" cols=\"15\" autocomplete=\"off\"></textarea>\n\t\t</div>\n\n\t\t<p class=\"submit\">\n\t\t\t<input type=\"hidden\" name=\"action\" id=\"quickpost-action\" value=\"post-quickdraft-save\" />\n\t\t\t<input type=\"hidden\" name=\"post_ID\" value=\"{}\" />\n\t\t\t<input type=\"hidden\" name=\"post_type\" value=\"post\" />\n\t\t\t{}\t\t\t<input type=\"submit\" name=\"save\" id=\"save-post\" class=\"button button-primary\" value=\"Save Draft\"  />\t\t\t<br class=\"clear\" />\n\t\t</p>\n\n\t</form>\n\t{}",
         site.quick_draft()
             .map(|id| id.to_string())
             .unwrap_or_default(),
@@ -757,7 +765,7 @@ fn widgets(site: &dyn DashboardSite, data: &Activity, request_uri: &str) -> Vec<
             "dashboard_quick_press",
             "<span class=\"hide-if-no-js\">Quick Draft</span> <span class=\"hide-if-js\">Your Recent Drafts</span>",
             "side",
-            quick_press(site, request_uri),
+            quick_press(site, request_uri, None),
         );
     }
     add(

@@ -75,6 +75,51 @@ $posts_with_comments = function () use ( $posts_insert, $posts_comment ) {
 	return $id;
 };
 
+// A setup that sets the permalink structure as Settings > Permalinks does.
+$posts_permalinks = function ( $structure ) {
+	return function () use ( $structure ) {
+		global $wp_rewrite;
+		$wp_rewrite->set_permalink_structure( $structure );
+	};
+};
+
+// Scheduled, published and private posts and pages, and a revision of each,
+// dated so their GUIDs never name the day of the run.
+$posts_every_status = function () use ( $posts_insert, $posts_update ) {
+	foreach ( array( 'post', 'page' ) as $n => $type ) {
+		$posts_insert(
+			array(
+				'import_id'  => 910 + $n,
+				'post_type'  => $type,
+				'post_title' => 'A scheduled post',
+				'post_date'  => '2030-01-01 10:00:00',
+			)
+		);
+	}
+	foreach ( array( 'post', 'page' ) as $type ) {
+		$id = $posts_insert(
+			array(
+				'post_type' => $type,
+				'post_date' => '2026-03-07 10:00:00',
+			)
+		);
+		$posts_insert(
+			array(
+				'post_type'   => $type,
+				'post_status' => 'private',
+				'post_title'  => 'A private post',
+				'post_date'   => '2026-03-07 10:00:00',
+			)
+		);
+		$posts_update(
+			array(
+				'ID'         => $id,
+				'post_title' => 'A renamed post',
+			)
+		);
+	}
+};
+
 return array(
 	'insert-colliding-slugs'                 => array(
 		'action' => function () use ( $posts_insert ) {
@@ -791,6 +836,63 @@ return array(
 		},
 		'action' => function ( $id ) {
 			wp_delete_post( $id, true );
+		},
+	),
+	'insert-posts-under-day-and-name-permalinks' => array(
+		'setup'  => $posts_permalinks( '/%year%/%monthnum%/%day%/%postname%/' ),
+		'action' => $posts_every_status,
+	),
+	'insert-posts-under-month-and-name-permalinks' => array(
+		'setup'  => $posts_permalinks( '/%year%/%monthnum%/%postname%/' ),
+		'action' => $posts_every_status,
+	),
+	'insert-posts-under-numeric-permalinks'  => array(
+		'setup'  => $posts_permalinks( '/archives/%post_id%' ),
+		'action' => $posts_every_status,
+	),
+	'insert-posts-under-post-name-permalinks' => array(
+		'setup'  => $posts_permalinks( '/%postname%/' ),
+		'action' => $posts_every_status,
+	),
+	'insert-posts-under-custom-permalinks'   => array(
+		'setup'  => $posts_permalinks( '/%category%/%author%/%postname%/' ),
+		'action' => $posts_every_status,
+	),
+	'insert-posts-in-categories-under-permalinks' => array(
+		'setup'  => $posts_permalinks( '/%category%/%author%/%postname%/' ),
+		'action' => function () use ( $posts_insert ) {
+			$parent = wp_insert_term( 'Parent', 'category' );
+			$child  = wp_insert_term( 'Child', 'category', array( 'parent' => $parent['term_id'] ) );
+			// The lowest ID names the link; a missing category leaves the default.
+			foreach ( array( array( $child['term_id'] ), array( $child['term_id'], 1 ), array( 1 << 40 ) ) as $categories ) {
+				$posts_insert( array( 'post_category' => $categories ) );
+			}
+			$posts_insert(
+				array(
+					'post_type'   => 'page',
+					'post_parent' => 2,
+				)
+			);
+			// A private post the current user may not read keeps its plain link.
+			wp_set_current_user( 0 );
+			$posts_insert( array( 'post_status' => 'private' ) );
+		},
+	),
+	'insert-posts-in-odd-categories-under-permalinks' => array(
+		'setup'  => function () use ( $posts_permalinks ) {
+			global $wpdb;
+			$posts_permalinks( '/%category%/%author%/%postname%/' )();
+			// 970 and 971 are each other's parents; 972's parent is missing.
+			foreach ( array( 970 => 971, 971 => 970, 972 => 1 << 40 ) as $id => $parent ) {
+				$wpdb->query( $wpdb->prepare( "INSERT INTO $wpdb->terms (term_id, name, slug, term_group) VALUES (%d, %s, %s, 0)", $id, "Odd $id", "odd-$id" ) );
+				$wpdb->query( $wpdb->prepare( "INSERT INTO $wpdb->term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (%d, %d, 'category', '', %d, 0)", $id, $id, $parent ) );
+			}
+			update_option( 'default_category', 1 << 40 );
+		},
+		'action' => function () use ( $posts_insert ) {
+			$posts_insert( array( 'post_category' => array( 971 ) ) );
+			$posts_insert( array( 'post_category' => array( 972 ) ) );
+			$posts_insert( array( 'post_author' => 1 << 40 ) );
 		},
 	),
 );

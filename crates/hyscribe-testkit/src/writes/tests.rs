@@ -2,6 +2,25 @@
 
 use super::*;
 
+/// The scratch database loads, and a database that cannot take the
+/// fixture, or cannot be reached, is an error.
+#[tokio::test]
+async fn the_default_install_loads_afresh() {
+    let saves = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..crate::fixture_database()
+    };
+    load_default_install(&saves).await.unwrap();
+    let read_only = hyscribe_config::Database {
+        user: "wordpress_read".into(),
+        name: "wordpress".into(),
+        ..saves.clone()
+    };
+    assert!(load_default_install(&read_only).await.is_err());
+    let closed = hyscribe_config::Database { port: 1, ..saves };
+    assert!(load_default_install(&closed).await.is_err());
+}
+
 async fn run(conn: &mut MySqlConnection, sql: &'static str) -> Result<(), String> {
     sqlx::raw_sql(sql)
         .execute(conn)
@@ -323,9 +342,9 @@ fn masks_times_and_new_ids() {
     assert_eq!(
         mask(
             "meta",
-            "1794000000:1 1794000002 1794000003 1793999999 01794000001"
+            "1794000000:1 1794000002 1794000003 1793999995 1793999994 01794000001"
         ),
-        "%unix%:1 %unix% 1794000003 1793999999 01794000001"
+        "%unix%:1 %unix% 1794000003 %unix% 1793999994 01794000001"
     );
     assert_eq!(mask("ID", "12"), "%wp_posts:1%");
     assert_eq!(mask("ID", "120"), "120");
@@ -410,4 +429,38 @@ fn compares_lines_with_golden() {
         differences(b"short", &[]),
         ["short  ( ): PHP \"\", HyScribe nothing"]
     );
+}
+
+#[test]
+fn masks_admin_email_keys_and_a_new_policy_page() {
+    let new = NewIds::from([(("wp_posts", b"12".to_vec()), b"%wp_posts:1%".to_vec())]);
+    let masks = Masks {
+        start: (0, Vec::new()),
+        end: (0, Vec::new()),
+        new,
+    };
+    let value = |table: &Table, name: &str, value: &str| {
+        let row: Row = vec![
+            ("option_name".to_string(), name.as_bytes().to_vec()),
+            ("option_value".to_string(), value.as_bytes().to_vec()),
+        ];
+        let rows = masked(&masks, table, &BTreeMap::from([(b"k".to_vec(), row)]));
+        String::from_utf8(rows.into_values().next().unwrap()[1].1.clone()).unwrap()
+    };
+    let (options, users) = (&TABLES[8], &TABLES[9]);
+    let key = "a:2:{s:4:\"hash\";s:32:\"0123456789abcdef0123456789abcdef\";s:1:\"x\";s:32:\"0123456789abcdef0123456789abcdeF\";}";
+    assert_eq!(
+        value(options, "adminhash", key),
+        "a:2:{s:4:\"hash\";s:32:\"%hash%\";s:1:\"x\";s:32:\"0123456789abcdef0123456789abcdeF\";}"
+    );
+    let short = "s:32:\"0123456789abcdef0123456789abcdef";
+    assert_eq!(value(options, "adminhash", short), short);
+    assert_eq!(value(options, "other", key), key);
+    assert_eq!(value(users, "adminhash", key), key);
+    assert_eq!(
+        value(options, "wp_page_for_privacy_policy", "12"),
+        "%wp_posts:1%"
+    );
+    assert_eq!(value(options, "wp_page_for_privacy_policy", "3"), "3");
+    assert_eq!(value(options, "page_on_front", "12"), "12");
 }

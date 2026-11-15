@@ -33,7 +33,7 @@ require '/var/www/html/wp-load.php';
 		'wp_termmeta'           => array( 'meta_id', array( 'meta_id' ), array( 'meta_id' => array( 'wp_termmeta', true ), 'term_id' => array( 'wp_terms', true ) ) ),
 		'wp_options'            => array( 'option_id', array( 'option_name' ), array( 'option_id' => array( 'wp_options', true ), 'option_value' => array( 'wp_terms', 'map' ) ) ),
 		'wp_users'              => array( 'ID', array( 'ID' ), array( 'ID' => array( 'wp_users', true ) ) ),
-		'wp_usermeta'           => array( 'umeta_id', array( 'umeta_id' ), array( 'umeta_id' => array( 'wp_usermeta', true ), 'user_id' => array( 'wp_users', true ) ) ),
+		'wp_usermeta'           => array( 'umeta_id', array( 'umeta_id' ), array( 'umeta_id' => array( 'wp_usermeta', true ), 'user_id' => array( 'wp_users', true ), 'meta_value' => array( 'wp_posts', true ) ) ),
 		'wp_links'              => array( 'link_id', array( 'link_id' ), array( 'link_id' => array( 'wp_links', true ), 'link_owner' => array( 'wp_users', true ) ) ),
 	);
 
@@ -122,9 +122,10 @@ require '/var/www/html/wp-load.php';
 		if ( $is_date && $value >= gmdate( 'Y-m-d H:i:s', $start ) && $value <= gmdate( 'Y-m-d H:i:s', $end ) ) {
 			return '%now%';
 		}
+		// From five seconds before, as wp_user_settings() saves a newer cookie's time.
 		$value = preg_replace_callback(
 			'/\d+/',
-			fn( $m ) => strlen( $m[0] ) === 10 && $m[0] >= $start && $m[0] <= $end ? '%unix%' : $m[0],
+			fn( $m ) => strlen( $m[0] ) === 10 && $m[0] >= $start - 5 && $m[0] <= $end ? '%unix%' : $m[0],
 			$value
 		);
 		if ( ! isset( $tables[ $table ][2][ $column ] ) ) {
@@ -145,7 +146,7 @@ require '/var/www/html/wp-load.php';
 	};
 
 	// Masked rows by masked key.
-	$masked = function ( $table, $rows ) use ( $tables, $mask, $escape ) {
+	$masked = function ( $table, $rows ) use ( $tables, $mask, $escape, $new ) {
 		$out = array();
 		foreach ( $rows as $row ) {
 			foreach ( $row as $column => $value ) {
@@ -154,6 +155,14 @@ require '/var/www/html/wp-load.php';
 			// A transient's expiry is the time plus its lifetime.
 			if ( 'wp_options' === $table && preg_match( '/\A_(site_)?transient_timeout_/', $row['option_name'] ) ) {
 				$row['option_value'] = '%expiry%';
+			}
+			// update_option_new_admin_email()'s confirmation key is random.
+			if ( 'wp_options' === $table && 'adminhash' === $row['option_name'] ) {
+				$row['option_value'] = preg_replace( '/s:32:"[0-9a-f]{32}"/', 's:32:"%hash%"', $row['option_value'] );
+			}
+			// A new privacy policy page's ID.
+			if ( 'wp_options' === $table && 'wp_page_for_privacy_policy' === $row['option_name'] && isset( $new['wp_posts'][ $row['option_value'] ] ) ) {
+				$row['option_value'] = $new['wp_posts'][ $row['option_value'] ];
 			}
 			$out[ implode( ',', array_map( fn( $c ) => $row[ $c ], $tables[ $table ][1] ) ) ] = $row;
 		}

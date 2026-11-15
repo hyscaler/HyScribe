@@ -244,6 +244,167 @@ async fn inserts_match_php() {
     .await;
 }
 
+/// `$posts_every_status()`.
+async fn every_status(w: &mut Write<'_>, ctx: &Context) -> Result<()> {
+    for (n, post_type) in ["post", "page"].into_iter().enumerate() {
+        let args = PostArgs {
+            import_id: 910 + n as u64,
+            post_type: post_type.into(),
+            title: b"A scheduled post".to_vec(),
+            date: "2030-01-01 10:00:00".into(),
+            ..oracle_post("publish")
+        };
+        wp_insert_post(w, ctx, args).await?;
+    }
+    for post_type in ["post", "page"] {
+        let dated = |status| PostArgs {
+            post_type: post_type.into(),
+            date: "2026-03-07 10:00:00".into(),
+            ..oracle_post(status)
+        };
+        let id = wp_insert_post(w, ctx, dated("publish")).await?;
+        let private = PostArgs {
+            title: b"A private post".to_vec(),
+            ..dated("private")
+        };
+        wp_insert_post(w, ctx, private).await?;
+        wp_update_post(w, ctx, id, &|args| args.title = b"A renamed post".to_vec()).await?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn guids_under_pretty_permalinks_match_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    let custom = b"/%category%/%author%/%postname%/";
+    for (golden, structure) in [
+        ("day-and-name", &b"/%year%/%monthnum%/%day%/%postname%/"[..]),
+        ("month-and-name", b"/%year%/%monthnum%/%postname%/"),
+        ("numeric", b"/archives/%post_id%"),
+        ("post-name", b"/%postname%/"),
+        ("custom", custom),
+    ] {
+        check(
+            &format!("insert-posts-under-{golden}-permalinks"),
+            async |conn| set_option(writer, conn, "permalink_structure", structure).await,
+            async |conn, ()| act(writer, conn, &admin(), every_status).await,
+        )
+        .await;
+    }
+    check(
+        "insert-posts-in-categories-under-permalinks",
+        async |conn| set_option(writer, conn, "permalink_structure", custom).await,
+        async |conn, ()| {
+            act(writer, conn, &admin(), async |w, ctx| {
+                let no = crate::terms::TermArgs::default();
+                let parent =
+                    crate::terms::wp_insert_term(w, Taxonomy::Category, b"Parent", &no).await?;
+                let args = crate::terms::TermArgs {
+                    parent: Some(parent.term_id as i64),
+                    ..no
+                };
+                let child =
+                    crate::terms::wp_insert_term(w, Taxonomy::Category, b"Child", &args).await?;
+                for category in [vec![child.term_id], vec![child.term_id, 1], vec![MISSING]] {
+                    let args = PostArgs {
+                        category: Some(category),
+                        ..oracle_post("publish")
+                    };
+                    wp_insert_post(w, ctx, args).await?;
+                }
+                let page = PostArgs {
+                    post_type: "page".into(),
+                    parent: 2,
+                    ..oracle_post("publish")
+                };
+                wp_insert_post(w, ctx, page).await?;
+                let visitor = Context {
+                    user: 0,
+                    can_publish: false,
+                    ..ctx.clone()
+                };
+                wp_insert_post(w, &visitor, oracle_post("private")).await
+            })
+            .await
+            .map(drop)
+        },
+    )
+    .await;
+    check(
+        "insert-posts-in-odd-categories-under-permalinks",
+        async |conn| {
+            set_option(writer, conn, "permalink_structure", custom).await?;
+            for (id, parent) in [(970, 971), (971, 970), (972, MISSING)] {
+                raw_term(conn, id, (&format!("Odd {id}"), "category"), 0).await?;
+                sqlx::query(
+                    "UPDATE wp_terms AS t INNER JOIN wp_term_taxonomy AS tt ON t.term_id = \
+                     tt.term_id SET t.slug = REPLACE(t.slug, ' ', '-'), tt.parent = ? WHERE \
+                     t.term_id = ?",
+                )
+                .bind(parent)
+                .bind(id)
+                .execute(&mut *conn)
+                .await
+                .map_err(shown)?;
+            }
+            set_option(
+                writer,
+                conn,
+                "default_category",
+                MISSING.to_string().as_bytes(),
+            )
+            .await
+        },
+        async |conn, ()| {
+            for (category, author) in [(Some(vec![971]), 1), (Some(vec![972]), 1), (None, MISSING)]
+            {
+                let args = PostArgs {
+                    category,
+                    author: Some(author),
+                    ..oracle_post("publish")
+                };
+                insert_post(writer, conn, args).await?;
+            }
+            Ok(())
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn database_errors_end_pretty_guids() {
+    let child = async |w: &mut Write<'_>, _: &Context| {
+        set(w, "permalink_structure", b"/%category%/%postname%/").await?;
+        let mut parent = 1;
+        for name in [&b"Child"[..], b"Grandchild"] {
+            let args = crate::terms::TermArgs {
+                parent: Some(parent),
+                ..crate::terms::TermArgs::default()
+            };
+            let term = crate::terms::wp_insert_term(w, Taxonomy::Category, name, &args).await?;
+            parent = term.term_id as i64;
+        }
+        Ok(parent as u64)
+    };
+    every_cut(child, async |w, ctx, child| {
+        for category in [vec![child], vec![MISSING]] {
+            let args = PostArgs {
+                category: Some(category),
+                ..oracle_post("private")
+            };
+            wp_insert_post(w, ctx, args).await?;
+        }
+        let page = PostArgs {
+            post_type: "page".into(),
+            parent: 2,
+            ..oracle_post("publish")
+        };
+        wp_insert_post(w, ctx, page).await.map(drop)
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn updates_match_php() {
     let _one = ONE_AT_A_TIME.lock().await;
@@ -861,12 +1022,6 @@ async fn what_hyscribe_does_not_port_is_refused() {
         };
         assert!(unported(insert_rolled_back(styles).await));
     }
-    let pretty = rolled_back(async |w, ctx| {
-        set(w, "permalink_structure", b"/%postname%/").await?;
-        wp_insert_post(w, ctx, oracle_post("publish")).await
-    })
-    .await;
-    assert!(unported(pretty));
     let page = || PostArgs {
         post_type: "page".into(),
         ..oracle_post("publish")
@@ -1745,18 +1900,6 @@ async fn autosave(writer: &Writer, conn: &mut Connection, id: u64) -> StdResult<
 #[tokio::test]
 async fn edge_values_are_read_as_php_reads_them() {
     let _one = ONE_AT_A_TIME.lock().await;
-    // A future page under pretty permalinks would take a pretty GUID.
-    let page = rolled_back(async |w, ctx| {
-        set(w, "permalink_structure", b"/%postname%/").await?;
-        let args = PostArgs {
-            post_type: "page".into(),
-            date: "2030-01-01 10:00:00".into(),
-            ..oracle_post("publish")
-        };
-        wp_insert_post(w, ctx, args).await
-    })
-    .await;
-    assert!(unported(page));
     // A new post cannot close a loop, even under a parent in one.
     let looped = rolled_back(async |w, ctx| {
         let page = || PostArgs {
@@ -1808,4 +1951,49 @@ async fn edge_values_are_read_as_php_reads_them() {
     })
     .await;
     assert!(unported(old));
+}
+
+/// `get_default_post_to_edit( 'post', true )` and the user option the Quick
+/// Draft form keeps it in (`actions-dashboard.php`).
+async fn auto_draft(w: &mut Write<'_>, ctx: &Context) -> Result<u64> {
+    let id = get_default_post_to_edit(w, ctx).await?;
+    let key = "wp_dashboard_quick_press_last_post_id";
+    let option = Value::Int(id.cast_signed());
+    crate::options::update_metadata(w, Meta::User, 1, key, &option, &Value::Null).await?;
+    Ok(id)
+}
+
+/// The Quick Draft form's auto-draft, the first with the daily deletion of
+/// old ones scheduled; a default post format is not ported.
+#[tokio::test]
+async fn auto_drafts_match_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = writer().await;
+    let draft = async |conn: &mut Connection| act(&writer, conn, &admin(), auto_draft).await;
+    let again = async |conn: &mut Connection, _| draft(conn).await.map(drop);
+    check("admin-quick-press", async |_| Ok(()), again).await;
+    let stale = async |conn: &mut Connection| {
+        let id = draft(conn).await?;
+        act(&writer, conn, &admin(), async |w, ctx| {
+            wp_update_post(w, ctx, id, &|args| args.status = "draft".into()).await
+        })
+        .await
+        .map(drop)
+    };
+    check("admin-quick-press-stale", stale, again).await;
+    let format = rolled_back(async |w, ctx| {
+        set(w, "default_post_format", b"aside").await?;
+        get_default_post_to_edit(w, ctx).await
+    })
+    .await;
+    assert!(unported(format));
+}
+
+#[tokio::test]
+async fn database_errors_end_auto_drafts() {
+    every_cut(
+        async |_, _| Ok(0),
+        async |w, ctx, _| auto_draft(w, ctx).await.map(drop),
+    )
+    .await;
 }

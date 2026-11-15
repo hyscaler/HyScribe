@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The meta functions' writes (`add_metadata()`, `update_metadata()`,
-//! `delete_metadata()` and the `_by_mid` ones), for the four meta tables.
+//! `delete_metadata()` and `delete_metadata_by_mid()`), for the four meta tables.
 
 use super::{Table, Write};
 use sqlx::Row as _;
@@ -27,7 +27,6 @@ struct Statements {
     add: &'static str,
     update: &'static str,
     update_from: &'static str,
-    update_by_id: &'static str,
     delete: &'static str,
     ids: &'static str,
     ids_valued: &'static str,
@@ -64,13 +63,6 @@ macro_rules! statements {
                 " SET meta_value = ? WHERE ",
                 $object,
                 " = ? AND meta_key = ? AND meta_value = ?"
-            ),
-            update_by_id: concat!(
-                "UPDATE {prefix}",
-                $name,
-                " SET meta_key = ?, meta_value = ? WHERE ",
-                $id,
-                " = ?"
             ),
             delete: concat!("DELETE FROM {prefix}", $name, " WHERE ", $id, " IN ("),
             ids: concat!(
@@ -193,19 +185,6 @@ impl Write<'_> {
         self.change(s.table, query.bind(previous)).await
     }
 
-    /// `update_metadata_by_mid()`'s `UPDATE`.
-    pub async fn update_meta_by_id(
-        &mut self,
-        meta: Meta,
-        id: u64,
-        key: &str,
-        value: &[u8],
-    ) -> Result<u64, DbError> {
-        let s = meta.statements();
-        let query = self.sql(s.update_by_id).bind(key).bind(value).bind(id);
-        self.change(s.table, query).await
-    }
-
     /// `delete_metadata()`'s and `delete_metadata_by_mid()`'s `DELETE` of
     /// the rows `ids`.
     pub async fn delete_meta(&mut self, meta: Meta, ids: &[u64]) -> Result<u64, DbError> {
@@ -273,6 +252,7 @@ impl Write<'_> {
         key: &str,
     ) -> Result<Option<Vec<u8>>, DbError> {
         let query = self.sql(meta.statements().value).bind(object).bind(key);
+        self.spend()?;
         let row = query
             .fetch_optional(&mut *self.tx)
             .await

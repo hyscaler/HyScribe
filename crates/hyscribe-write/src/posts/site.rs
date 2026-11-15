@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! What the post functions read of the options, the post term counts and
+//! What the post functions read of the options and
 //! `wp_delete_object_term_relationships()`, as far as posts use them.
 
 use hyscribe_db::Write;
@@ -28,18 +28,6 @@ pub(super) async fn default_status(
         }
         Kind::Page | Kind::Revision => "closed".into(),
     })
-}
-
-/// `wp_update_term_count( $tt_ids )` for the post taxonomies: published
-/// posts only.
-pub(super) async fn update_term_counts(write: &mut Write<'_>, tt_ids: &[u64]) -> Result<()> {
-    for &tt_id in tt_ids {
-        let count = write
-            .term_post_count(tt_id, &["publish"], &["post"])
-            .await?;
-        write.set_term_count(tt_id, count).await?;
-    }
-    Ok(())
 }
 
 /// `wp_delete_object_term_relationships( $object, $taxonomies )`. The

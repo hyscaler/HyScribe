@@ -370,12 +370,6 @@ impl<'w> Write<'w> {
         Ok(self.ids(query.bind(post)).await?.first().copied())
     }
 
-    /// The posts of `author`, as `wp_delete_user()` finds them.
-    pub async fn author_post_ids(&mut self, author: u64) -> Result<Vec<u64>, DbError> {
-        let query = self.sql("SELECT ID FROM {prefix}posts WHERE post_author = ?");
-        self.ids(query.bind(author)).await
-    }
-
     // Comments.
 
     /// `wp_insert_comment()`'s `INSERT`: the new comment's ID.
@@ -472,6 +466,7 @@ impl<'w> Write<'w> {
         crate::date_column(&mut sql, "comment_date_gmt");
         sql.push(" FROM {prefix}comments WHERE comment_ID = ?");
         sql.bind(Bind::Int(id));
+        self.spend()?;
         let row = sql
             .query(&self.writer.prefix)
             .fetch_optional(&mut *self.tx)
@@ -566,6 +561,7 @@ impl<'w> Write<'w> {
         }
         sql.push(" ORDER BY comment_date_gmt DESC LIMIT 1");
         sql.bind(Bind::Bytes(email.to_vec()));
+        self.spend()?;
         let row = sql
             .query(&self.writer.prefix)
             .fetch_optional(&mut *self.tx)
@@ -771,6 +767,24 @@ impl<'w> Write<'w> {
     pub async fn delete_option(&mut self, name: &str) -> Result<u64, DbError> {
         let query = self.sql("DELETE FROM {prefix}options WHERE option_name = ?");
         self.change(Table::Options, query.bind(name)).await
+    }
+
+    /// `get_option()`'s value of option `name`, read inside the action.
+    pub async fn option_value(&mut self, name: &str) -> Result<Option<Vec<u8>>, DbError> {
+        self.spend()?;
+        let query =
+            self.sql("SELECT option_value FROM {prefix}options WHERE option_name = ? LIMIT 1");
+        let row = query
+            .bind(name)
+            .fetch_optional(&mut *self.tx)
+            .await
+            .map_err(db_error)?;
+        row.map(|row| {
+            let mut c = Columns::new(&row);
+            let value = c.bytes("option_value");
+            c.finish(value)
+        })
+        .transpose()
     }
 
     /// The autoload of option `name`, as `update_option()` reads it.

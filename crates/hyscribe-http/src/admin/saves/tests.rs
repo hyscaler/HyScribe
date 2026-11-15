@@ -12,12 +12,12 @@ use hyscribe_write::users::{UserData, wp_insert_user};
 
 use super::*;
 
-async fn writer() -> Writer {
+pub(super) async fn writer() -> Writer {
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
     writer.unwrap().unwrap()
 }
 
-fn fields(query: &str) -> Vec<(Key, Value)> {
+pub(super) fn fields(query: &str) -> Vec<(Key, Value)> {
     parse_str(query.as_bytes()).as_array().unwrap().to_vec()
 }
 

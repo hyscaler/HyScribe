@@ -81,8 +81,8 @@ impl Asked<'_> {
             .unwrap_or_default()
     }
 
-    /// `wp_get_referer()`.
-    fn referer(&self, site: &dyn ActionSite) -> Option<Vec<u8>> {
+    /// `wp_get_referer()`, `validate` being `wp_validate_redirect()`.
+    pub fn referer(&self, validate: &dyn Fn(&[u8]) -> Vec<u8>) -> Option<Vec<u8>> {
         let given = self
             .request("_wp_http_referer")
             .filter(|referer| !referer.is_empty())
@@ -91,7 +91,7 @@ impl Asked<'_> {
             .referer
             .filter(|r| !Value::String(r.to_vec()).is_empty()))?;
         let here = [self.home.as_bytes(), self.uri].concat();
-        let validated = (raw != self.uri && raw != here).then(|| site.validate_redirect(raw));
+        let validated = (raw != self.uri && raw != here).then(|| validate(raw));
         validated.filter(|referer| !referer.is_empty())
     }
 
@@ -166,7 +166,7 @@ pub type Checked = Result<(), Refusal>;
 /// `wp_nonce_ays( $action )`.
 fn nonce_ays(site: &dyn ActionSite, asked: &Asked) -> Refusal {
     let mut html = String::from("The link you followed has expired.");
-    if let Some(referer) = asked.referer(site) {
+    if let Some(referer) = asked.referer(&|location| site.validate_redirect(location)) {
         let back = site.validate_redirect(&esc_url_raw(&remove_query_arg(&[b"updated"], &referer)));
         html.push_str(&format!(
             "</p><p><a href=\"{}\">Please try again.</a>",
@@ -222,7 +222,7 @@ fn can_for(site: &dyn ActionSite, cap: &str, id: i64) -> bool {
 }
 
 /// `(array) $value`'s items.
-fn items(value: &Value) -> Vec<Value> {
+pub fn items(value: &Value) -> Vec<Value> {
     match value {
         Value::Array(entries) => entries.iter().map(|(_, item)| item.clone()).collect(),
         value => vec![value.clone()],
@@ -421,13 +421,17 @@ fn post_action(site: &dyn ActionSite, asked: &Asked, post: bool) -> Option<Check
     }))
 }
 
+/// `WP_Terms_List_Table::current_action()`: `bulk-delete` for the bulk action.
+fn terms_action(asked: &Asked) -> Option<Vec<u8>> {
+    if asked.is("action", "delete") && asked.request("delete_tags").is_some() {
+        return Some(b"bulk-delete".to_vec());
+    }
+    Some(asked.current_action(false)?.to_php_string())
+}
+
 /// `edit-tags.php`'s actions on categories and tags.
 fn terms_list(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
-    let doaction = if asked.is("action", "delete") && asked.request("delete_tags").is_some() {
-        b"bulk-delete".to_vec()
-    } else {
-        asked.current_action(false)?.to_php_string()
-    };
+    let doaction = terms_action(asked)?;
     // Without a taxonomy the screen is not ported.
     let taxonomy = asked.request("taxonomy").and_then(Value::as_bytes);
     let taxonomy = match taxonomy {
@@ -499,10 +503,11 @@ fn users_action(asked: &Asked) -> Option<Vec<u8>> {
 }
 
 /// The action of a request whose checks passed, as its write's handler is
-/// registered: the users list's `current_action()`, else `$_REQUEST['action']`.
+/// registered: the lists' `current_action()`, else `$_REQUEST['action']`.
 pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
     match screen {
         "users" => users_action(asked).unwrap_or_default(),
+        "edit-tags" => terms_action(asked).unwrap_or_default(),
         _ => asked.action(),
     }
 }

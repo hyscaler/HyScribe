@@ -31,7 +31,9 @@ use hyscribe_admin::posts::{
 use hyscribe_admin::profile::{EditArgs, ProfileSite, profile, user_edit};
 use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
 use hyscribe_admin::settings_more;
-use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
+use hyscribe_admin::terms::{
+    Taxonomy as Terms, TermArgs, TermEditArgs, TermsSite, edit_tags, term_edit,
+};
 use hyscribe_admin::tools::{self, Requests, RequestsArgs, ToolsSite, privacy_requests};
 use hyscribe_admin::users::{ListedUser, UserArgs, UserQuery, UsersSite, user_order, users};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
@@ -107,9 +109,17 @@ fn refused(public: bool, refusal: Refusal) -> Response {
             let page = hyscribe_admin::die::page(public, title, &message);
             return response(status, screen_headers(), page);
         }
-        Body::Text(text) => ("text/html; charset=UTF-8", text.into_bytes()),
+        Body::Text(text) => (HTML, text.into_bytes()),
         Body::Json(json) => ("application/json; charset=UTF-8", json.as_bytes().to_vec()),
     };
+    ajax_response(status, kind, body)
+}
+
+/// The type of `admin-ajax.php`'s answers but for XML and JSON.
+const HTML: &str = "text/html; charset=UTF-8";
+
+/// An `admin-ajax.php` answer: `status` with `body`, of type `kind`.
+fn ajax_response(status: StatusCode, kind: &str, body: Vec<u8>) -> Response {
     let mut headers = nocache();
     headers.push((header::CONTENT_TYPE, kind.to_string()));
     headers.push((header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()));
@@ -1216,6 +1226,10 @@ fn screen(
             edit_comments(admin, &args, admin.settings.as_deref(), &request)?
         }
         "/hs-admin/edit-tags" => edit_tags(admin, &term_args(query)?, &request),
+        "/hs-admin/term" => {
+            let args = TermEditArgs::parse(query, admin.referer.clone())?;
+            term_edit(admin, &args, &request)
+        }
         "/hs-admin/edit" => {
             let args = list_args(admin, &raw)?;
             edit(admin, &args, &canonical, origin, request_uri, browser)?
@@ -1255,13 +1269,41 @@ fn save(admin: &Admin, screen: &str, asked: &Asked) -> Response {
     let Some(handler) = saves::handler(screen, &action) else {
         return not_ported();
     };
+    let read_only = || denied(admin, READ_ONLY);
+    acted(admin, handler, asked, read_only, |answer| {
+        served(admin, answer)
+    })
+}
+
+/// As [`save`], an `admin-ajax.php` action past its checks; shadow mode's
+/// `wp_die()` is the message alone.
+fn ajax_save(admin: &Admin, asked: &Asked) -> Response {
+    let action = asked.request("action").map(Value::to_php_string);
+    let Some(handler) = saves::ajax_handler(&action.unwrap_or_default()) else {
+        return not_ported();
+    };
+    let read_only = || ajax_response(StatusCode::FORBIDDEN, HTML, READ_ONLY.into());
+    acted(admin, handler, asked, read_only, |answer| {
+        saves::ajax_served(admin, asked, answer)
+    })
+}
+
+/// `handler` run as one action with the writer, its answer sent by
+/// `served`; `read_only` without a writer.
+fn acted<T>(
+    admin: &Admin,
+    handler: saves::Handler<T>,
+    asked: &Asked,
+    read_only: impl FnOnce() -> Response,
+    served: impl FnOnce(T) -> Response,
+) -> Response {
     let Some(writer) = &admin.site.writer else {
-        return denied(admin, READ_ONLY);
+        return read_only();
     };
     let saved = Handle::current()
         .block_on(async { saves::act(writer.begin().await, handler, asked).await });
     match saved {
-        Ok(answer) => served(admin, answer),
+        Ok(answer) => served(answer),
         Err(hyscribe_write::Error::Unported(_)) => not_ported(),
         Err(err) => crate::html(crate::database_error(admin.site, &format!("{err:?}"))),
     }
@@ -1309,18 +1351,20 @@ fn ajax_answer(
         .as_bytes();
     let id = user.as_ref().map_or(0, |(id, _)| *id);
     let asked = action_request(site, asking, &get, uri, id);
-    let checked = match user {
-        Some((id, token)) => {
-            reads.act_as(id, token);
-            let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
-            admin_ajax(Some(&Admin::new(reads, site, user)), &asked)
-        }
-        None => admin_ajax(None, &asked),
+    let Some((id, token)) = user else {
+        let checked = admin_ajax(None, &asked);
+        return checked.map_or_else(
+            |refusal| refused(reads.public(), refusal),
+            |()| not_ported(),
+        );
     };
-    checked.map_or_else(
-        |refusal| refused(reads.public(), refusal),
-        |()| not_ported(),
-    )
+    reads.act_as(id, token);
+    let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
+    let admin = Admin::new(reads, site, user);
+    match admin_ajax(Some(&admin), &asked) {
+        Ok(()) => ajax_save(&admin, &asked),
+        Err(refusal) => refused(reads.public(), refusal),
+    }
 }
 
 fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {

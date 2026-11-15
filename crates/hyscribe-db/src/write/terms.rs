@@ -24,6 +24,8 @@ pub struct TermRow {
     pub description: Vec<u8>,
     /// `parent`.
     pub parent: u64,
+    /// `count`, as stored.
+    pub count: i64,
 }
 
 fn term_row(row: &Row) -> Result<TermRow, DbError> {
@@ -36,6 +38,7 @@ fn term_row(row: &Row) -> Result<TermRow, DbError> {
         term_taxonomy_id: c.unsigned("term_taxonomy_id"),
         description: c.bytes("description"),
         parent: c.unsigned("parent"),
+        count: c.signed("count"),
     };
     c.finish(term)
 }
@@ -53,7 +56,7 @@ macro_rules! terms_where {
     ($where:literal) => {
         concat!(
             "SELECT t.term_id, t.name, t.slug, t.term_group, tt.term_taxonomy_id, \
-             tt.description, tt.parent FROM {prefix}terms AS t INNER JOIN \
+             tt.description, tt.parent, tt.count FROM {prefix}terms AS t INNER JOIN \
              {prefix}term_taxonomy AS tt ON t.term_id = tt.term_id WHERE ",
             $where
         )

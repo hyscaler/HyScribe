@@ -9,7 +9,7 @@ use hyscribe_phpser::{Key, Maybe, Value, add_query_arg, maybe_unserialize, remov
 use hyscribe_write::Error;
 use hyscribe_write::users::set_role;
 
-use super::{Saving, Stop};
+use super::{Saving, Stop, text};
 
 /// `promote`, the bulk role change: each user but the current one gets
 /// `new_role` (no role for `none`), then the list is sent back with `update`.
@@ -72,8 +72,4 @@ async fn can_promote(write: &mut Write<'_>, role: &[u8]) -> Result<bool, DbError
             .is_some_and(|granted| !granted.is_empty())
     };
     Ok(matches!(maybe_unserialize(&roles), Maybe::Value(roles) if granted(&roles)))
-}
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
 }

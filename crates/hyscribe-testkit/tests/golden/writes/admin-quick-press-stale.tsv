@@ -1,0 +1,30 @@
+# The rows PHP WordPress writes for the action admin-quick-press-stale (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 09:53:19 to 2026-11-15 09:53:19 UTC.
+# %wp_posts:1% is 6.
+# %wp_posts:2% is 7.
+# %wp_posts:3% is 8.
+# %wp_usermeta:1% is 18.
+wp_posts	%wp_posts:3%	+	ID	%wp_posts:3%
+wp_posts	%wp_posts:3%	+	comment_count	0
+wp_posts	%wp_posts:3%	+	comment_status	open
+wp_posts	%wp_posts:3%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:3%
+wp_posts	%wp_posts:3%	+	menu_order	0
+wp_posts	%wp_posts:3%	+	ping_status	open
+wp_posts	%wp_posts:3%	+	pinged	
+wp_posts	%wp_posts:3%	+	post_author	1
+wp_posts	%wp_posts:3%	+	post_content	
+wp_posts	%wp_posts:3%	+	post_content_filtered	
+wp_posts	%wp_posts:3%	+	post_date	%now%
+wp_posts	%wp_posts:3%	+	post_date_gmt	0000-00-00 00:00:00
+wp_posts	%wp_posts:3%	+	post_excerpt	
+wp_posts	%wp_posts:3%	+	post_mime_type	
+wp_posts	%wp_posts:3%	+	post_modified	%now%
+wp_posts	%wp_posts:3%	+	post_modified_gmt	0000-00-00 00:00:00
+wp_posts	%wp_posts:3%	+	post_name	
+wp_posts	%wp_posts:3%	+	post_parent	0
+wp_posts	%wp_posts:3%	+	post_password	
+wp_posts	%wp_posts:3%	+	post_status	auto-draft
+wp_posts	%wp_posts:3%	+	post_title	Auto Draft
+wp_posts	%wp_posts:3%	+	post_type	post
+wp_posts	%wp_posts:3%	+	to_ping	
+wp_usermeta	%wp_usermeta:1%	~	meta_value	%wp_posts:1%	%wp_posts:3%

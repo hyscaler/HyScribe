@@ -95,3 +95,95 @@ INSERT INTO wp_postmeta (meta_id, post_id, meta_key, meta_value) VALUES
 INSERT INTO wp_comments (comment_ID, comment_post_ID, comment_author, comment_author_email, comment_author_url, comment_author_IP,
   comment_date, comment_date_gmt, comment_content, comment_karma, comment_approved, comment_agent, comment_type, comment_parent, user_id) VALUES
   (801, 801, 'Visitor', 'visitor@example.test', '', '', '2026-03-05 10:00:00', '2026-03-05 10:00:00', 'Nice', 0, '1', '', 'comment', 0, 0);
+-- The j9 variants' media: a song of user 2's on Hello world with its tags
+-- and a featured image, a video of the administrator's with a poster, a
+-- QuickTime movie and an AAC recording no player plays (the recording's
+-- featured image is gone), a small WebM video, and two images for pretty
+-- permalinks: one whose slug Hello world already has, attached to Sample
+-- Page, one with a long encoded slug and one named as a feed; a video
+-- without its size featuring a post; and for pretty permalinks, an image
+-- attached to a synced pattern, one attached to itself, one with a slug of
+-- 34 characters and one with the 198 character slug of a draft.
+INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt, post_status,
+  comment_status, ping_status, post_password, post_name, to_ping, pinged, post_modified, post_modified_gmt,
+  post_content_filtered, post_parent, guid, menu_order, post_type, post_mime_type, comment_count) VALUES
+  (817, 2, '2026-06-01 12:00:00', '2026-06-01 12:00:00', 'Lyrics', 'Song &amp; dance', 'Sung', 'inherit', 'open', 'closed', '',
+    'song-dance', '', '', '2026-06-01 12:00:00', '2026-06-01 12:00:00', '', 1,
+    'http://default-install.test/wp-content/uploads/2026/06/song.mp3', 0, 'attachment', 'audio/mpeg', 0),
+  (818, 1, '2026-06-02 12:00:00', '2026-06-02 12:00:00', '', 'Clip', '', 'inherit', 'open', 'closed', '', 'clip', '', '',
+    '2026-06-02 12:00:00', '2026-06-02 12:00:00', '', 0, 'http://default-install.test/wp-content/uploads/2026/06/clip.mp4',
+    0, 'attachment', 'video/mp4', 0),
+  (819, 1, '2026-06-03 12:00:00', '2026-06-03 12:00:00', '', 'Movie', '', 'inherit', 'open', 'closed', '', 'movie', '', '',
+    '2026-06-03 12:00:00', '2026-06-03 12:00:00', '', 0, 'http://default-install.test/wp-content/uploads/2026/06/movie.mov',
+    0, 'attachment', 'video/quicktime', 0),
+  (820, 1, '2026-06-04 12:00:00', '2026-06-04 12:00:00', '', 'Voice', '', 'inherit', 'open', 'closed', '', 'voice', '', '',
+    '2026-06-04 12:00:00', '2026-06-04 12:00:00', '', 0, 'http://default-install.test/wp-content/uploads/2026/06/voice.aac',
+    0, 'attachment', 'audio/aac', 0),
+  (821, 1, '2026-06-05 12:00:00', '2026-06-05 12:00:00', '', 'Small', '', 'inherit', 'open', 'closed', '', 'small', '', '',
+    '2026-06-05 12:00:00', '2026-06-05 12:00:00', '', 0, 'http://default-install.test/wp-content/uploads/2026/06/small.webm',
+    0, 'attachment', 'video/webm', 0),
+  (822, 1, '2026-06-06 12:00:00', '2026-06-06 12:00:00', '', 'Hello', '', 'inherit', 'open', 'closed', '', 'hello-world', '',
+    '', '2026-06-06 12:00:00', '2026-06-06 12:00:00', '', 2, 'http://default-install.test/wp-content/uploads/2026/06/hello.png',
+    0, 'attachment', 'image/png', 0),
+  (823, 1, '2026-06-07 12:00:00', '2026-06-07 12:00:00', '', 'Cafe', '', 'inherit', 'open', 'closed', '',
+    'a-rather-long-attachment-name-for-caf%c3%a9-photos', '', '', '2026-06-07 12:00:00', '2026-06-07 12:00:00', '', 1,
+    'http://default-install.test/wp-content/uploads/2026/06/cafe.png', 0, 'attachment', 'image/png', 0),
+  (824, 1, '2026-06-08 12:00:00', '2026-06-08 12:00:00', '', 'Feed', '', 'inherit', 'open', 'closed', '', 'feed', '', '',
+    '2026-06-08 12:00:00', '2026-06-08 12:00:00', '', 1, 'http://default-install.test/wp-content/uploads/2026/06/feed.png',
+    0, 'attachment', 'image/png', 0),
+  (825, 1, '2026-06-09 12:00:00', '2026-06-09 12:00:00', '', 'Sizeless', '', 'inherit', 'open', 'closed', '', 'sizeless', '',
+    '', '2026-06-09 12:00:00', '2026-06-09 12:00:00', '', 0,
+    'http://default-install.test/wp-content/uploads/2026/06/sizeless.mp4', 0, 'attachment', 'video/mp4', 0);
+INSERT INTO wp_postmeta (meta_id, post_id, meta_key, meta_value) VALUES
+  (825, 817, '_wp_attached_file', '2026/06/song.mp3'),
+  (826, 817, '_wp_attachment_metadata', 'a:12:{s:8:"filesize";i:4200000;s:9:"mime_type";s:10:"audio/mpeg";s:6:"length";i:215;s:16:"length_formatted";s:4:"3:35";s:7:"bitrate";d:128456.5;s:12:"bitrate_mode";s:3:"cbr";s:6:"artist";s:19:"The "Band" &amp; Co";s:5:"album";s:5:"First";s:4:"year";s:4:"2026";s:5:"genre";s:4:"Rock";s:10:"dataformat";s:3:"mp3";s:5:"audio";a:3:{s:10:"dataformat";s:3:"mp3";s:5:"codec";s:4:"LAME";s:11:"sample_rate";i:44100;}}'),
+  (827, 817, '_thumbnail_id', '801'),
+  (828, 818, '_wp_attached_file', '2026/06/clip.mp4'),
+  (829, 818, '_wp_attachment_metadata', 'a:9:{s:8:"filesize";i:9000000;s:9:"mime_type";s:9:"video/mp4";s:6:"length";i:3723;s:16:"length_formatted";s:7:"1:02:03";s:5:"width";i:1280;s:6:"height";i:720;s:10:"fileformat";s:3:"mp4";s:7:"bitrate";i:2000000;s:5:"audio";a:2:{s:10:"dataformat";s:3:"mp4";s:5:"codec";s:19:"ISO/IEC 14496-3 AAC";}}'),
+  (830, 818, '_thumbnail_id', '805'),
+  (831, 819, '_wp_attached_file', '2026/06/movie.mov'),
+  (832, 819, '_wp_attachment_metadata', 'a:2:{s:8:"filesize";i:1000;s:16:"length_formatted";s:2:"59";}'),
+  (833, 820, '_wp_attached_file', '2026/06/voice.aac'),
+  (834, 820, '_wp_attachment_metadata', 'a:3:{s:8:"filesize";i:2048;s:16:"length_formatted";s:4:"0:01";s:6:"artist";s:0:"";}'),
+  (835, 820, '_thumbnail_id', '9999'),
+  (836, 821, '_wp_attached_file', '2026/06/small.webm'),
+  (837, 821, '_wp_attachment_metadata', 'a:4:{s:8:"filesize";i:500;s:5:"width";i:320;s:6:"height";i:240;s:16:"length_formatted";s:7:"1:00:01";}'),
+  (838, 822, '_wp_attached_file', '2026/06/hello.png'),
+  (839, 822, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:17:"2026/06/hello.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}'),
+  (840, 823, '_wp_attached_file', '2026/06/cafe.png'),
+  (841, 823, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:16:"2026/06/cafe.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}'),
+  (842, 824, '_wp_attached_file', '2026/06/feed.png'),
+  (843, 824, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:16:"2026/06/feed.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}'),
+  (844, 825, '_wp_attached_file', '2026/06/sizeless.mp4'),
+  (845, 825, '_wp_attachment_metadata', 'a:2:{s:8:"filesize";i:700;s:5:"width";i:400;}');
+INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt, post_status,
+  comment_status, ping_status, post_password, post_name, to_ping, pinged, post_modified, post_modified_gmt,
+  post_content_filtered, post_parent, guid, menu_order, post_type, post_mime_type, comment_count) VALUES
+  (826, 1, '2026-06-10 12:00:00', '2026-06-10 12:00:00', '', 'Blocked', '', 'inherit', 'open', 'closed', '',
+    'blocked', '', '', '2026-06-10 12:00:00', '2026-06-10 12:00:00', '', 827,
+    'http://default-install.test/wp-content/uploads/2026/06/826.png', 0, 'attachment', 'image/png', 0),
+  (827, 1, '2026-06-10 12:00:00', '2026-06-10 12:00:00', '', 'Block', '', 'publish', 'open', 'closed', '',
+    'block', '', '', '2026-06-10 12:00:00', '2026-06-10 12:00:00', '', 0,
+    'http://default-install.test/wp-content/uploads/2026/06/827.png', 0, 'wp_block', '', 0),
+  (828, 1, '2026-06-10 12:00:00', '2026-06-10 12:00:00', '', 'Itself', '', 'inherit', 'open', 'closed', '',
+    'itself', '', '', '2026-06-10 12:00:00', '2026-06-10 12:00:00', '', 828,
+    'http://default-install.test/wp-content/uploads/2026/06/828.png', 0, 'attachment', 'image/png', 0),
+  (829, 1, '2026-06-10 12:00:00', '2026-06-10 12:00:00', '', 'Exact', '', 'inherit', 'open', 'closed', '',
+    'a-slug-of-exactly-thirty-four-char', '', '', '2026-06-10 12:00:00', '2026-06-10 12:00:00', '', 1,
+    'http://default-install.test/wp-content/uploads/2026/06/829.png', 0, 'attachment', 'image/png', 0),
+  (830, 1, '2026-06-10 12:00:00', '2026-06-10 12:00:00', '', 'Long', '', 'inherit', 'open', 'closed', '',
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '', '', '2026-06-10 12:00:00', '2026-06-10 12:00:00', '', 1,
+    'http://default-install.test/wp-content/uploads/2026/06/830.png', 0, 'attachment', 'image/png', 0),
+  (831, 1, '2026-06-10 12:00:00', '2026-06-10 12:00:00', '', 'Long draft', '', 'draft', 'open', 'closed', '',
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '', '', '2026-06-10 12:00:00', '2026-06-10 12:00:00', '', 0,
+    'http://default-install.test/wp-content/uploads/2026/06/831.png', 0, 'post', '', 0);
+INSERT INTO wp_postmeta (meta_id, post_id, meta_key, meta_value) VALUES
+  (846, 826, '_wp_attached_file', '2026/06/826.png'),
+  (847, 826, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:15:"2026/06/826.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}'),
+  (848, 828, '_wp_attached_file', '2026/06/828.png'),
+  (849, 828, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:15:"2026/06/828.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}'),
+  (850, 829, '_wp_attached_file', '2026/06/829.png'),
+  (851, 829, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:15:"2026/06/829.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}'),
+  (852, 830, '_wp_attached_file', '2026/06/830.png'),
+  (853, 830, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:15:"2026/06/830.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}'),
+  (854, 825, '_thumbnail_id', '1');

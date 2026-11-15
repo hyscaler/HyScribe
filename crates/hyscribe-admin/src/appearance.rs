@@ -14,7 +14,7 @@ use crate::admin_bar::BarSite;
 use crate::list_table::wp_referer_field;
 use crate::list_table::{Column, Order, column_headers, fill, screen_options};
 use crate::menu::{Screen, link};
-use crate::page::{HelpTab, Page, Request, admin_page, json, text};
+use crate::page::{HelpTab, Page, Request, THEME, admin_page, json, text};
 use crate::posts::{Answer, PostsSite, hidden_columns, per_page};
 use crate::tools::NOTICES;
 
@@ -24,9 +24,6 @@ const THEME_JSON: &str = include_str!("appearance/theme.json");
 const THEME_BLOCK: &str = include_str!("appearance/theme.html");
 const PLUGINS: &str = include_str!("appearance/plugins.html");
 const UPDATE_ROWS: &str = include_str!("appearance/update-rows.html");
-
-/// The bundled theme, the only one a HyScribe installation has.
-const THEME: &str = "twentytwentyfive";
 
 const THEMES_OVERVIEW: &str = "<p>This screen is used for managing your installed themes. Aside from the default theme(s) included with your WordPress installation, themes are designed and developed by third parties.</p><p>From this screen you can:</p><ul><li>Hover or tap to see Activate and Live Preview buttons.</li><li>Click Customize for the active theme or Live Preview for any other theme to see a live preview.</li><li>Click on a theme to open the Theme Details dialog and see the theme name, version, author, description, tags, and the Delete link.</li><li>Use the buttons at the top of the dialog, or <code>alt</code>/<code>option</code> plus the left or right arrow keys on your keyboard, to navigate between themes quickly.</li></ul><p>The active theme is displayed highlighted as the first theme.</p><p>The search for installed themes will search for terms in their name, description, author, or tag. <span id=\"live-search-desc\">The search results will be updated as you type.</span></p>";
 
@@ -68,15 +65,11 @@ pub fn auto_update_message(cron: &[u8], now: i64) -> String {
 }
 
 /// `themes.php` for `request`, `broken` when it asks for the broken theme
-/// notice. An active theme the site does not have is shown as PHP shows
-/// it, without `switch_theme()`'s write; `None` for a missing parent
-/// or child of the bundled theme.
-pub fn themes(site: &dyn PostsSite, request: &Request, broken: bool) -> Option<Answer> {
+/// notice. An active theme or parent the site does not have is shown as PHP
+/// shows it, without `switch_theme()`'s write.
+pub fn themes(site: &dyn PostsSite, request: &Request, broken: bool) -> Answer {
     let bundled = |name| site.option(name).as_deref() == Some(THEME.as_bytes());
-    let active = bundled("stylesheet");
-    if active != bundled("template") {
-        return None;
-    }
+    let (active, parent) = (bundled("stylesheet"), bundled("template"));
     let screenshot = format!(
         "{}/wp-content/themes/{THEME}/screenshot.png",
         crate::assets::Urls::site_url(site)
@@ -180,13 +173,14 @@ pub fn themes(site: &dyn PostsSite, request: &Request, broken: bool) -> Option<A
             ("actions", buttons),
         ],
     );
-    let notice = if broken || !active {
+    let notice = if broken || !active || !parent {
         "<div id=\"message1\" class=\"notice is-dismissible updated\"><p>The active theme is broken. Reverting to the default theme.</p></div>"
     } else {
         ""
     };
-    // The Appearance submenu's items but the theme's own screens.
-    let actions = match (options, active) {
+    // The Appearance submenu's items but the theme's own screens, of which
+    // Design and Editor are.
+    let actions = match (options, active || parent) {
         (false, _) => String::new(),
         (true, true) => format!(
             "<a class='button button-compact' href='{}'>Fonts</a>",
@@ -262,7 +256,7 @@ pub fn themes(site: &dyn PostsSite, request: &Request, broken: bool) -> Option<A
         origin: request.origin,
         view: None,
     };
-    Some(Answer::from_page(admin_page(site, &page, request.browser)))
+    Answer::from_page(admin_page(site, &page, request.browser))
 }
 
 /// `_wpUpdatesSettings`, which `updates` gets, then the screen's

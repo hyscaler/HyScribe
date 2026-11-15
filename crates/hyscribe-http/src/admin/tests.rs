@@ -355,6 +355,17 @@ async fn logged_in_users_are_let_in() {
         let response = get(&site, &format!("{path}?x=1"), "127.0.0.1:8081", &auth).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
     }
+    // The request lists searched, which finds none here.
+    for file in ["export-personal-data", "erase-personal-data"] {
+        let path = format!(
+            "/hs-admin/{file}?s=nobody&filter-status=request-pending&orderby=requester&order=asc&paged=1"
+        );
+        let page = page_of(get(&site, &path, "127.0.0.1:8081", &cookies).await).await;
+        assert!(page.contains("name=\"s\" value=\"nobody\""), "{file}");
+        let path = format!("/hs-admin/{file}?s[]=nobody");
+        let response = get(&site, &path, "127.0.0.1:8081", &cookies).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
+    }
     for path in [
         "/hs-admin/plugins",
         "/hs-admin/site-health",
@@ -1123,6 +1134,14 @@ async fn a_missing_theme_is_php_s() {
     assert_eq!(with_values(&php("g9gone"), &page), page);
     let response = get(&gone, "/hs-admin/themes?broken=1&x=1", host, &cookies).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // A missing child of the bundled theme, with its parent's fonts.
+    let mut kid = Arc::try_unwrap(gone).ok().unwrap();
+    kid.options.insert("stylesheet".into(), b"kid".to_vec());
+    kid.options
+        .insert("template".into(), b"twentytwentyfive".to_vec());
+    let kid = Arc::new(kid);
+    let page = page_of(get(&kid, "/hs-admin/themes", host, &cookies).await).await;
+    assert_eq!(with_values(&php("j9child"), &page), page);
 }
 
 /// Paged comments link to their page, on the comments list and the
@@ -1193,9 +1212,8 @@ async fn dashboard_arguments_and_folding() {
     assert!(shown);
 }
 
-/// A Site Icon, a static homepage with neither page chosen, which PHP saves
-/// as the latest posts first, and a missing child of the bundled theme are
-/// not ported.
+/// A Site Icon and a static homepage with neither page chosen, which PHP
+/// saves as the latest posts first, are not ported.
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_not_ported() {
     let db = hyscribe_db::Db::connect(&hyscribe_testkit::fixture_database())
@@ -1205,14 +1223,8 @@ async fn settings_not_ported() {
     site.options.insert("site_icon".into(), b"5".to_vec());
     site.options
         .insert("show_on_front".into(), b"page".to_vec());
-    site.options
-        .insert("stylesheet".into(), b"twentytwentyfour".to_vec());
     let site = Arc::new(site);
-    for path in [
-        "/hs-admin/options-general",
-        "/hs-admin/options-reading",
-        "/hs-admin/themes",
-    ] {
+    for path in ["/hs-admin/options-general", "/hs-admin/options-reading"] {
         let site = Arc::clone(&site);
         let handle = Handle::current();
         let response = tokio::task::spawn_blocking(move || {
@@ -1429,6 +1441,10 @@ async fn the_user_s_data() {
         let first = admin(&terms, &reads, 1);
         assert_eq!(first.post_authors("post"), [1]);
         assert!(first.post_authors("attachment").is_empty());
+        // Another post's slug, in any case, as the database compares it.
+        assert!(first.slug_taken(b"Hello-World", 2) && !first.slug_taken(b"hello-world", 1));
+        let named = first.named_status_counts("post", "hello-world");
+        assert_eq!(named, [("publish".to_string(), 1)]);
         assert_eq!(first.admin_color().as_deref(), Some(&b"modern"[..]));
         assert!(
             first

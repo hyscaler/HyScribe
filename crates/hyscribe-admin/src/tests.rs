@@ -222,7 +222,20 @@ impl Role {
 
     /// A variant of `reference/attachment-edit/golden.sh` over its content.
     fn a8(&self) -> bool {
-        self.variant().starts_with("a8lock") || self.variant() == "g9attach"
+        self.variant().starts_with("a8lock") || self.variant() == "g9attach" || self.j9_media()
+    }
+
+    /// A variant of `reference/privacy-requests/golden.sh`, over its content.
+    fn j9_requests(&self) -> bool {
+        ["j9req", "j9hidden", "j9pp", "j9trash"].contains(&self.variant())
+    }
+
+    /// A `j9` variant of `reference/attachment-edit/golden.sh`, all of
+    /// which hold user 2's lock.
+    fn j9_media(&self) -> bool {
+        ["j9lock", "j9pretty", "j9noupload", "j9front"]
+            .iter()
+            .any(|prefix| self.variant().starts_with(prefix))
     }
 
     /// A user of the content of a `reference/attachment-edit/golden.sh`
@@ -249,7 +262,8 @@ impl Role {
             (variant, _) if variant.ends_with("lock3") => "1794500000:3",
             _ => "1794500000:2",
         };
-        let locked = self.variant().starts_with("a8") && self.variant().contains("lock");
+        let locked =
+            self.variant().starts_with("a8") && self.variant().contains("lock") || self.j9_media();
         (locked && (key == "_edit_lock" || key == "_edit_last")).then_some(lock)
     }
 
@@ -319,10 +333,10 @@ impl Role {
             ("h9iconnone", "site_icon") => b"954",
             ("h9iconbig", "site_icon") => b"955",
             ("a5auto", "auto_update_themes") => b"a:1:{i:0;s:16:\"twentytwentyfive\";}",
-            ("g9parent", "template") => b"twentytwentyfour",
+            ("j9parent", "template") => b"gone",
             ("g9gone" | "g9noswitch" | "g9nooptions", "stylesheet" | "template")
             | ("g9kid", "template") => b"gone",
-            ("g9kid" | "g9child", "stylesheet") => b"kid",
+            ("g9kid" | "j9child", "stylesheet") => b"kid",
             ("g9pages" | "g9cpages" | "g9coldest", "page_comments" | "comments_per_page") => b"1",
             ("g9coldest", "default_comments_page") => b"oldest",
             ("s1static" | "s1same" | "s1privacy", "page_on_front") => b"2",
@@ -410,7 +424,10 @@ impl Role {
             ("s2day", "permalink_structure") => b"/%year%/%monthnum%/%day%/%postname%/",
             ("s2month", "permalink_structure") => b"/%year%/%monthnum%/%postname%/",
             ("s2numeric", "permalink_structure") => b"/archives/%post_id%",
-            ("s2postname", "permalink_structure") => b"/%postname%/",
+            (
+                "s2postname" | "j9pretty" | "j9prettyfront" | "j9prettynoread",
+                "permalink_structure",
+            ) => b"/%postname%/",
             ("s2custom", "permalink_structure") => b"/%category%/<%postname%>/",
             ("s2custom", "category_base") => b"topics",
             ("s2custom", "tag_base") => b"labels\"<",
@@ -541,6 +558,35 @@ impl Role {
             return crate::media::content::posts();
         }
         let mut posts = crate::posts::content::posts(self.listing(), self.variant() == "empty");
+        if self.j9_requests() {
+            posts.extend(crate::tools::content::posts());
+        }
+        // A pending request modified a day before the clock and two.
+        let modified = match self.variant() {
+            "j9edge" => Some("2026-11-11 16:13:20"),
+            "j9stale" => Some("2026-11-10 16:13:20"),
+            _ => None,
+        };
+        if let Some(modified) = modified {
+            posts.push(hyscribe_model::Post {
+                id: 898,
+                status: "request-pending".into(),
+                post_type: "user_request".into(),
+                modified_gmt: modified.into(),
+                ..hyscribe_model::Post::default()
+            });
+        }
+        // A request in the Trash, a status not a request's.
+        if self.variant() == "j9trash" {
+            posts.push(hyscribe_model::Post {
+                id: 899,
+                status: "trash".into(),
+                name: b"export_personal_data".to_vec(),
+                post_type: "user_request".into(),
+                modified_gmt: "2026-11-12 16:13:20".into(),
+                ..hyscribe_model::Post::default()
+            });
+        }
         if self.a8() {
             posts.extend(crate::media::attachment::content::posts());
             posts.extend(crate::media::attachment::content::unported());
@@ -623,6 +669,7 @@ impl CapabilityData for Role {
             "u3nopromote" => "promote_users",
             "a5nooptions" | "g9nooptions" => "edit_theme_options",
             "a5noswitch" | "g9noswitch" => "switch_themes",
+            "j9noupload" => "upload_files",
             _ => return Some(format!("a:1:{{s:{}:\"{role}\";b:1;}}", role.len()).into_bytes()),
         };
         Some(
@@ -762,7 +809,7 @@ impl PageSite for Role {
                 b"a:2:{s:4:\"side\";s:19:\"authordiv,submitdiv\";s:6:\"normal\";s:7:\"slugdiv\";}"
             }
             ("a8locknorich", "rich_editing") => b"false",
-            (variant, "rich_editing") if variant.starts_with("a8") => b"true",
+            (variant, "rich_editing") if variant.starts_with("a8") || self.j9_media() => b"true",
             _ => b"",
         };
         if !edit.is_empty() {
@@ -789,6 +836,22 @@ impl PageSite for Role {
             let value: &[u8] = match name {
                 "manageedit-postcolumnshidden" => b"a:2:{i:0;s:4:\"tags\";i:1;s:8:\"comments\";}",
                 "edit_post_per_page" | "edit_page_per_page" => b"3",
+                _ => return None,
+            };
+            return Some(value.to_vec());
+        }
+        if matches!(self.variant(), "j9hidden" | "j9pp") {
+            let value: &[u8] = match (self.variant(), name) {
+                (
+                    "j9hidden",
+                    "manageexport-personal-datacolumnshidden"
+                    | "manageerase-personal-datacolumnshidden",
+                ) => b"a:2:{i:0;s:6:\"status\";i:1;s:10:\"next_steps\";}",
+                (
+                    "j9pp",
+                    "export_personal_data_requests_per_page"
+                    | "remove_personal_data_requests_per_page",
+                ) => b"2",
                 _ => return None,
             };
             return Some(value.to_vec());
@@ -872,11 +935,13 @@ impl PageSite for Role {
         let stylesheet = CapabilityData::option(self, "stylesheet").unwrap_or_default();
         String::from_utf8(stylesheet).unwrap()
     }
-    fn font_faces(&self) -> Vec<u8> {
-        static FACES: OnceLock<Vec<u8>> = OnceLock::new();
-        FACES
-            .get_or_init(|| hyscribe_render::theme::twentytwentyfive().admin_font_faces(SITE))
-            .clone()
+    fn font_faces(&self, with_theme: bool) -> Vec<u8> {
+        static FACES: OnceLock<[Vec<u8>; 2]> = OnceLock::new();
+        let faces = FACES.get_or_init(|| {
+            let theme = hyscribe_render::theme::twentytwentyfive();
+            [false, true].map(|with_theme| theme.admin_font_faces(SITE, with_theme))
+        });
+        faces[usize::from(with_theme)].clone()
     }
 }
 
@@ -1012,6 +1077,23 @@ impl crate::tools::ToolsSite for Role {
             vec![1]
         }
     }
+    fn named_status_counts(&self, post_type: &str, action: &str) -> Vec<(String, u64)> {
+        let mut counts: Vec<(String, u64)> = Vec::new();
+        let requests = self
+            .posts()
+            .into_iter()
+            .filter(|post| post.post_type == post_type && post.name == action.as_bytes());
+        for request in requests {
+            match counts
+                .iter_mut()
+                .find(|(status, _)| *status == request.status)
+            {
+                Some((_, count)) => *count += 1,
+                None => counts.push((request.status, 1)),
+            }
+        }
+        counts
+    }
 }
 
 impl crate::media::MediaSite for Role {
@@ -1033,6 +1115,10 @@ impl crate::media::MediaSite for Role {
         types.dedup();
         types
     }
+    fn slug_taken(&self, slug: &[u8], id: u64) -> bool {
+        let posts = self.posts();
+        posts.iter().any(|post| post.id != id && post.name == slug)
+    }
 }
 
 impl crate::settings::SettingsSite for Role {
@@ -1049,7 +1135,7 @@ impl crate::profile::ProfileSite for Role {
     /// The fixture's administrator, named in the options variant, or
     /// another user of the variant.
     fn profile_user(&self, id: u64) -> Option<hyscribe_model::User> {
-        if id != 1 && self.variant().starts_with("a8") {
+        if id != 1 && (self.variant().starts_with("a8") || self.j9_media()) {
             return self.a8_user(id);
         }
         if id != 1 {
@@ -1410,10 +1496,11 @@ impl crate::posts::PostsSite for Role {
         // `reference/attachment-edit/variants.php` takes these away.
         let denied = match self.variant() {
             "a8locknodelete" => "delete_post",
-            "a8locknoread" => "read_post",
+            "a8locknoread" | "j9prettynoread" => "read_post",
             _ => "",
         };
-        if (cap, post.id) == (denied, 801) {
+        let noread = self.variant() == "j9prettynoread" && [803, 811].contains(&post.id);
+        if cap == denied && (post.id == 801 || noread) {
             return false;
         }
         let known = WithPost(
@@ -1434,6 +1521,11 @@ impl crate::posts::PostsSite for Role {
             return format!("{SITE}/");
         }
         let home = self.home();
+        // Pretty links of published posts and pages, as their slugs give.
+        let pretty = self.variant().starts_with("j9pretty") && post.post_type != "attachment";
+        if pretty && post.status == "publish" {
+            return format!("{home}/{}/", String::from_utf8_lossy(&post.name));
+        }
         let query = match post.post_type.as_str() {
             "page" => "page_id",
             "attachment" => "attachment_id",
@@ -1464,7 +1556,9 @@ impl crate::posts::PostsSite for Role {
                 return Some(b"2".to_vec());
             }
             (variant, "user_count") if variant.starts_with("a8ttd") => return Some(b"3".to_vec()),
-            ("a8lockpretty", "permalink_structure") => return Some(b"/%postname%/".to_vec()),
+            ("j9prettyfront" | "j9front", "show_on_front") => return Some(b"page".to_vec()),
+            ("j9prettyfront", "page_on_front") => return Some(b"2".to_vec()),
+            ("j9front", "page_on_front") => return Some(b"802".to_vec()),
             ("m4ttdpages", "wp_attachment_pages_enabled") => return Some(b"1".to_vec()),
             ("m4large", "large_size_h") => return Some(b"0".to_vec()),
             // Postponed at the clock's time, or long ago.
@@ -1529,6 +1623,9 @@ impl crate::posts::PostsSite for Role {
         if self.a8() {
             return crate::media::attachment::content::meta(post.id, key);
         }
+        if self.j9_requests() {
+            return crate::tools::content::meta(post.id, key);
+        }
         // The edit locks `reference/posts-list/golden.sh` adds.
         let lock: &[u8] = match (self.variant(), post.id, key) {
             ("h9locks", 301 | 307, "_edit_lock") => b"9999999999:2",
@@ -1587,7 +1684,7 @@ impl crate::posts::PostsSite for Role {
     }
     /// The content's author may edit posts, not pages.
     fn authors(&self, cap: &str) -> Vec<hyscribe_model::User> {
-        if self.variant().starts_with("a8") {
+        if self.variant().starts_with("a8") || self.j9_media() {
             return [1, 2]
                 .into_iter()
                 .filter_map(|id| self.a8_user(id))
@@ -1611,6 +1708,9 @@ impl crate::posts::PostsSite for Role {
                 ..hyscribe_model::Post::default()
             };
             return (vec![orphan], 1);
+        }
+        if query.post_types == ["user_request"] {
+            return crate::tools::content::list(self.posts(), query);
         }
         if query.post_types == ["attachment"] {
             MEDIA_QUERIES.with_borrow_mut(|queries| queries.push(query.clone()));

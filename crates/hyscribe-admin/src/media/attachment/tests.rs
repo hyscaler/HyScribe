@@ -11,14 +11,14 @@ use crate::tests::{Role, SITE, first_difference};
 /// The browser of a variant of `reference/attachment-edit/golden.sh`.
 fn agent(variant: &str) -> &'static [u8] {
     match variant.replacen("a8ttd", "a8", 1).as_str() {
-        "a8lockchrome" | "a8locknorich" => {
+        "a8lockchrome" | "a8locknorich" | "j9lockchrome" => {
             b"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
         }
         "a8lockfirefox" => b"Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0",
         "a8locksafari" => {
             b"Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         }
-        "a8lockiphone" => {
+        "a8lockiphone" | "j9lockiphone" => {
             b"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1"
         }
         "a8lockoldiphone" => {
@@ -132,7 +132,7 @@ fn pages_are_php_s() {
         "{}",
         failures[..failures.len().min(3)].join("\n")
     );
-    assert_eq!(pages, 49);
+    assert_eq!(pages, 87);
 }
 
 /// Every page of `reference/attachment-edit/golden.sh` over the Theme Test
@@ -163,8 +163,8 @@ fn other_arguments_are_not_ported() {
     }
 }
 
-/// Where PHP writes the user's own edit lock, or the attachment is not an
-/// image or file the screen ports, nothing is answered.
+/// Where PHP writes the user's own edit lock, or the screen does not port
+/// the attachment's state, nothing is answered.
 #[test]
 fn unported_states_answer_nothing() {
     for (variant, post) in [
@@ -174,12 +174,14 @@ fn unported_states_answer_nothing() {
         ("a8lockself", "801"),
         ("a8lockzero", "801"),
         ("a8lockgone", "801"),
-        ("a8lockpretty", "801"),
         ("a8lock", "901"),
-        ("a8lock", "902"),
         ("a8lock", "903"),
         ("a8lock", "904"),
         ("a8lock", "905"),
+        ("j9pretty", "902"),
+        ("j9pretty", "906"),
+        ("j9pretty", "907"),
+        ("j9prettyfront", "822"),
     ] {
         let screen = format!("post.php?post={post}&action=edit");
         assert!(
@@ -249,4 +251,17 @@ fn extensions_are_words() {
     assert_eq!(extension(b"a."), None);
     assert_eq!(extension(b"a.b-c"), None);
     assert_eq!(extension(b"notes"), None);
+}
+
+/// `human_readable_duration()`: hours, minutes and seconds in words, a sign
+/// dropped; nothing for another form or a value that is not a string.
+#[test]
+fn durations_read_as_php_s() {
+    let duration = |text: &str| human_readable_duration(&Value::String(text.into()));
+    assert_eq!(duration(" -1:00:01 "), "1 hour, 0 minutes, 1 second");
+    assert_eq!(duration("05:9"), "5 minutes, 9 seconds");
+    for bad in ["", "59", "60:00", "1:2:3:4", "a:01", "1:61:00"] {
+        assert_eq!(duration(bad), "", "{bad}");
+    }
+    assert_eq!(human_readable_duration(&Value::Int(61)), "");
 }

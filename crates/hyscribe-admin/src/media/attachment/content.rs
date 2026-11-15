@@ -131,7 +131,7 @@ pub(crate) fn posts() -> Vec<Post> {
         post_type: "post".into(),
         ..post(id, 1, "2026-05-02 09:00:00", (b"Binned", b"", b""))
     };
-    vec![
+    let posts = vec![
         sunset,
         report,
         notes,
@@ -148,24 +148,120 @@ pub(crate) fn posts() -> Vec<Post> {
         binned(814, "trash", b"__trashed"),
         image(815, b"Binned post image", b"binned-2", ("inherit", 816)),
         binned(816, "trash", b"__trashed-2"),
+        Post {
+            name: b"song-dance".to_vec(),
+            comment_status: "open".into(),
+            parent: 1,
+            mime_type: "audio/mpeg".into(),
+            ..post(
+                817,
+                2,
+                "2026-06-01 12:00:00",
+                (b"Song &amp; dance", b"Sung", b"Lyrics"),
+            )
+        },
+        media(818, b"Clip", "video/mp4"),
+        media(819, b"Movie", "video/quicktime"),
+        media(820, b"Voice", "audio/aac"),
+        media(821, b"Small", "video/webm"),
+        Post {
+            parent: 2,
+            ..media(822, b"Hello", "image/png")
+        },
+        Post {
+            parent: 1,
+            ..media(823, b"Cafe", "image/png")
+        },
+        Post {
+            parent: 1,
+            ..media(824, b"Feed", "image/png")
+        },
+        media(825, b"Sizeless", "video/mp4"),
+    ];
+    let long = vec![b'b'; 198];
+    let more = [
+        (826, &b"Blocked"[..], &b"blocked"[..], 827, "attachment"),
+        (827, b"Block", b"block", 0, "wp_block"),
+        (828, b"Itself", b"itself", 828, "attachment"),
+        (
+            829,
+            b"Exact",
+            b"a-slug-of-exactly-thirty-four-char",
+            1,
+            "attachment",
+        ),
+        (830, b"Long", &long, 1, "attachment"),
+        (831, b"Long draft", &long, 0, "post"),
     ]
+    .map(|(id, title, name, parent, post_type)| {
+        let status = match post_type {
+            "wp_block" => "publish",
+            "post" => "draft",
+            _ => "inherit",
+        };
+        let mime_type = if post_type == "attachment" {
+            "image/png"
+        } else {
+            ""
+        };
+        Post {
+            name: name.to_vec(),
+            parent,
+            post_type: post_type.into(),
+            status: status.into(),
+            ..media(id, title, mime_type)
+        }
+    });
+    posts.into_iter().chain(more).collect()
 }
 
-/// Attachments the screen does not port, which no golden records: audio,
-/// video, published, a PDF with a scaled original, and sizeless.
-pub(crate) fn unported() -> Vec<Post> {
-    [
-        (901, "audio/mpeg", "inherit"),
-        (902, "video/mp4", "inherit"),
-        (903, "image/png", "publish"),
-        (904, "application/pdf", "inherit"),
-        (905, "application/pdf", "inherit"),
-    ]
-    .into_iter()
-    .map(|(id, mime_type, status)| Post {
+/// A song, video or image of the `j9` variants: the administrator's, open
+/// to comments, named after its title but for the last two.
+fn media(id: u64, title: &[u8], mime_type: &str) -> Post {
+    let name = match id {
+        822 => b"hello-world".to_vec(),
+        823 => b"a-rather-long-attachment-name-for-caf%c3%a9-photos".to_vec(),
+        _ => title.to_ascii_lowercase(),
+    };
+    let day = (id - 816).min(10);
+    Post {
         id,
         author: 1,
+        date: format!("2026-06-{day:02} 12:00:00"),
+        date_gmt: format!("2026-06-{day:02} 12:00:00"),
+        title: title.to_vec(),
+        name,
+        status: "inherit".into(),
+        comment_status: "open".into(),
+        ping_status: "closed".into(),
+        post_type: "attachment".into(),
+        mime_type: mime_type.into(),
+        ..Post::default()
+    }
+}
+
+/// Attachments no golden records, the screen not porting their states; the
+/// last four under pretty permalinks only.
+pub(crate) fn unported() -> Vec<Post> {
+    let long = vec![b'a'; 199];
+    [
+        (901, "video/mp4", ("inherit", 0), b"clip".to_vec()),
+        (902, "image/png", ("inherit", 801), b"child".to_vec()),
+        (903, "image/png", ("publish", 0), Vec::new()),
+        (904, "application/pdf", ("inherit", 0), Vec::new()),
+        (905, "application/pdf", ("inherit", 0), Vec::new()),
+        (906, "image/png", ("inherit", 1), Vec::new()),
+        (907, "image/png", ("inherit", 1), long.clone()),
+        (908, "image/png", ("inherit", 1), long),
+    ]
+    .into_iter()
+    .map(|(id, mime_type, (status, parent), name)| Post {
+        id,
+        author: 1,
+        date: "2026-06-01 12:00:00".into(),
+        name,
         status: status.into(),
+        parent,
         post_type: "attachment".into(),
         mime_type: mime_type.into(),
         ..Post::default()
@@ -176,7 +272,9 @@ pub(crate) fn unported() -> Vec<Post> {
 /// The post meta the content adds, and the unported attachments'.
 pub(crate) fn meta(id: u64, key: &str) -> Option<Vec<u8>> {
     let value: &[u8] = match (id, key) {
-        (901..=903, "_wp_attachment_metadata") => b"a:1:{s:8:\"filesize\";i:1;}",
+        (901..=903 | 906..=908, "_wp_attachment_metadata") => b"a:1:{s:8:\"filesize\";i:1;}",
+        (901, "_wp_attached_file") => b"2026/06/clip.mp4",
+        (901, "_thumbnail_id") => b"802",
         (904, "_wp_attachment_metadata") => {
             b"a:2:{s:8:\"filesize\";i:1;s:14:\"original_image\";s:5:\"a.pdf\";}"
         }
@@ -204,6 +302,35 @@ pub(crate) fn meta(id: u64, key: &str) -> Option<Vec<u8>> {
         (814, "_wp_trash_meta_status") => b"draft",
         (815, "_wp_attached_file") => b"2026/05/binned-2.png",
         (815, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:20:\"2026/05/binned-2.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
+        (817, "_wp_attached_file") => b"2026/06/song.mp3",
+        (817, "_wp_attachment_metadata") => b"a:12:{s:8:\"filesize\";i:4200000;s:9:\"mime_type\";s:10:\"audio/mpeg\";s:6:\"length\";i:215;s:16:\"length_formatted\";s:4:\"3:35\";s:7:\"bitrate\";d:128456.5;s:12:\"bitrate_mode\";s:3:\"cbr\";s:6:\"artist\";s:19:\"The \"Band\" &amp; Co\";s:5:\"album\";s:5:\"First\";s:4:\"year\";s:4:\"2026\";s:5:\"genre\";s:4:\"Rock\";s:10:\"dataformat\";s:3:\"mp3\";s:5:\"audio\";a:3:{s:10:\"dataformat\";s:3:\"mp3\";s:5:\"codec\";s:4:\"LAME\";s:11:\"sample_rate\";i:44100;}}",
+        (817, "_thumbnail_id") => b"801",
+        (818, "_wp_attached_file") => b"2026/06/clip.mp4",
+        (818, "_wp_attachment_metadata") => b"a:9:{s:8:\"filesize\";i:9000000;s:9:\"mime_type\";s:9:\"video/mp4\";s:6:\"length\";i:3723;s:16:\"length_formatted\";s:7:\"1:02:03\";s:5:\"width\";i:1280;s:6:\"height\";i:720;s:10:\"fileformat\";s:3:\"mp4\";s:7:\"bitrate\";i:2000000;s:5:\"audio\";a:2:{s:10:\"dataformat\";s:3:\"mp4\";s:5:\"codec\";s:19:\"ISO/IEC 14496-3 AAC\";}}",
+        (818, "_thumbnail_id") => b"805",
+        (819, "_wp_attached_file") => b"2026/06/movie.mov",
+        (819, "_wp_attachment_metadata") => b"a:2:{s:8:\"filesize\";i:1000;s:16:\"length_formatted\";s:2:\"59\";}",
+        (820, "_wp_attached_file") => b"2026/06/voice.aac",
+        (820, "_wp_attachment_metadata") => b"a:3:{s:8:\"filesize\";i:2048;s:16:\"length_formatted\";s:4:\"0:01\";s:6:\"artist\";s:0:\"\";}",
+        (820, "_thumbnail_id") => b"9999",
+        (821, "_wp_attached_file") => b"2026/06/small.webm",
+        (821, "_wp_attachment_metadata") => b"a:4:{s:8:\"filesize\";i:500;s:5:\"width\";i:320;s:6:\"height\";i:240;s:16:\"length_formatted\";s:7:\"1:00:01\";}",
+        (822, "_wp_attached_file") => b"2026/06/hello.png",
+        (822, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:17:\"2026/06/hello.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
+        (824, "_wp_attached_file") => b"2026/06/feed.png",
+        (824, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:16:\"2026/06/feed.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
+        (825, "_wp_attached_file") => b"2026/06/sizeless.mp4",
+        (825, "_thumbnail_id") => b"1",
+        (826 | 828..=830, "_wp_attached_file") => return Some(format!("2026/06/{id}.png").into_bytes()),
+        (826 | 828..=830, "_wp_attachment_metadata") => {
+            return Some(
+                format!("a:6:{{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:15:\"2026/06/{id}.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{{}}s:10:\"image_meta\";a:0:{{}}}}")
+                    .into_bytes(),
+            );
+        }
+        (825, "_wp_attachment_metadata") => b"a:2:{s:8:\"filesize\";i:700;s:5:\"width\";i:400;}",
+        (823, "_wp_attached_file") => b"2026/06/cafe.png",
+        (823, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:16:\"2026/06/cafe.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
         _ => return None,
     };
     Some(value.to_vec())

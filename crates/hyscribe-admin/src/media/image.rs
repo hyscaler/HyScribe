@@ -235,11 +235,17 @@ pub(super) fn thumbnail(site: &dyn PostsSite, id: u64) -> String {
 
 /// The comments list's thumbnail of attachment `post`, with its alt text.
 pub(crate) fn response_thumbnail(site: &dyn PostsSite, post: &Post) -> String {
+    attachment_image(site, post, (80, 60))
+}
+
+/// `wp_get_attachment_image( $id, $size )` of an image or icon `post` for
+/// the box `size`, with its alt text.
+pub(super) fn attachment_image(site: &dyn PostsSite, post: &Post, size: (i64, i64)) -> String {
     let alt = site
         .meta(post, "_wp_attachment_image_alt")
         .unwrap_or_default();
     let alt = strip_tags(&alt);
-    boxed(site, post, (80, 60), alt.trim_ascii())
+    boxed(site, post, size, alt.trim_ascii())
 }
 
 /// The `img` of `post` for the box `size`, with `alt`.

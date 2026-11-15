@@ -32,7 +32,7 @@ use hyscribe_admin::profile::{EditArgs, ProfileSite, profile, user_edit};
 use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
 use hyscribe_admin::settings_more;
 use hyscribe_admin::terms::{Taxonomy as Terms, TermArgs, TermsSite, edit_tags};
-use hyscribe_admin::tools::{self, Requests, ToolsSite, privacy_requests};
+use hyscribe_admin::tools::{self, Requests, RequestsArgs, ToolsSite, privacy_requests};
 use hyscribe_admin::users::{ListedUser, UserArgs, UserQuery, UsersSite, user_order, users};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities, roles_with};
 use hyscribe_db::{CommentFilter, StatusOrder, StatusQuery, UserFilter};
@@ -420,8 +420,9 @@ impl PageSite for Admin<'_> {
     fn stylesheet(&self) -> String {
         self.site.option("stylesheet")
     }
-    fn font_faces(&self) -> Vec<u8> {
-        self.site.theme.admin_font_faces(&self.reads.site_url())
+    fn font_faces(&self, with_theme: bool) -> Vec<u8> {
+        let url = self.reads.site_url();
+        self.site.theme.admin_font_faces(&url, with_theme)
     }
 }
 
@@ -760,11 +761,21 @@ impl ToolsSite for Admin<'_> {
     fn post_authors(&self, post_type: &str) -> Vec<u64> {
         self.reads.reads.wait(self.site.db.post_authors(post_type))
     }
+    fn named_status_counts(&self, post_type: &str, name: &str) -> Vec<(String, u64)> {
+        let counts = self.site.db.named_status_counts(post_type, name);
+        self.reads.reads.wait(counts)
+    }
 }
 
 impl MediaSite for Admin<'_> {
     fn attachment_mime_types(&self) -> Vec<String> {
         self.reads.reads.wait(self.site.db.mime_types("attachment"))
+    }
+    fn slug_taken(&self, slug: &[u8], id: u64) -> bool {
+        let slug = String::from_utf8_lossy(slug);
+        self.reads
+            .reads
+            .wait(self.site.db.post_name_taken(&slug, id))
     }
 }
 
@@ -1114,26 +1125,28 @@ fn screen(
             screen(admin, &request)
         }
         "/hs-admin/tools" => Answer::from_page(tools::tools(admin, &request)),
+        // Their actions are not ported.
+        "/hs-admin/export-personal-data" | "/hs-admin/erase-personal-data" => {
+            let requests = match path {
+                "/hs-admin/export-personal-data" => Requests::Export,
+                _ => Requests::Erase,
+            };
+            let args = RequestsArgs::parse(query)?;
+            let answer = privacy_requests(admin, requests, &args, &request);
+            return answer.map(|answer| served(admin, answer));
+        }
         // Their arguments and actions are not ported, but the Themes
         // screen's broken theme notice.
-        "/hs-admin/themes"
-        | "/hs-admin/import"
-        | "/hs-admin/export"
-        | "/hs-admin/export-personal-data"
-        | "/hs-admin/erase-personal-data" => {
+        "/hs-admin/themes" | "/hs-admin/import" | "/hs-admin/export" => {
             let broken = only_argument(query, "broken").filter(|_| path == "/hs-admin/themes");
             if request_uri.contains('?') && broken.is_none() {
                 return None;
             }
             match path {
                 "/hs-admin/themes" => themes(admin, &request, broken.flatten().is_some()),
-                "/hs-admin/import" => Some(tools::import(admin, &request)),
-                "/hs-admin/export" => Some(tools::export(admin, &request)),
-                "/hs-admin/export-personal-data" => {
-                    privacy_requests(admin, Requests::Export, &request)
-                }
-                _ => privacy_requests(admin, Requests::Erase, &request),
-            }?
+                "/hs-admin/import" => tools::import(admin, &request),
+                _ => tools::export(admin, &request),
+            }
         }
         // Their actions are not ported.
         "/hs-admin/upload" => upload(admin, &LibraryArgs::parse(query)?, &request)?,

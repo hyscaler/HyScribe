@@ -359,17 +359,17 @@ pub(crate) fn lock_holder(site: &dyn PostsSite, post: &Post) -> Option<User> {
     (time != 0 && time > now - 150 && user.id != site.user_id()).then_some(user)
 }
 
-/// `get_preview_post_link( $post, $args )`: the permalink in the admin's
-/// scheme, which is HTTPS with an HTTPS site URL.
+/// `get_preview_post_link( $post, $args )` of a post linked at `permalink`,
+/// in the admin's scheme, which is HTTPS with an HTTPS site URL.
 pub(crate) fn preview_link(
     site: &dyn PostsSite,
-    post: &Post,
+    permalink: &str,
     args: &[(&[u8], Option<&[u8]>)],
 ) -> Vec<u8> {
     let ssl = Urls::site_url(site)
         .to_ascii_lowercase()
         .starts_with("https:");
-    let link = set_url_scheme(&site.permalink(post), if ssl { "https" } else { "http" });
+    let link = set_url_scheme(permalink, if ssl { "https" } else { "http" });
     let args = [args, &[(b"preview", Some(b"true"))]].concat();
     add_query_arg(&args, link.as_bytes())
 }
@@ -535,7 +535,7 @@ fn title_actions(site: &dyn PostsSite, post: &Post, excerpt: bool) -> String {
     }
     if ["pending", "draft", "future"].contains(&post.status.as_str()) {
         if can_edit {
-            let preview = preview_link(site, post, &[]);
+            let preview = preview_link(site, &site.permalink(post), &[]);
             actions.push((
                 "view",
                 format!(

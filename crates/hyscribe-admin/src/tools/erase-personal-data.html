@@ -35,28 +35,19 @@
 	</form>
 	<hr />
 
-	<h2 class='screen-reader-text'>Filter erase personal data list</h2><ul class='subsubsub'>
-	<li class='all'><a href="%url%" class="current" aria-current="page">All <span class="count">(0)</span></a></li>
-</ul>
+	<h2 class='screen-reader-text'>Filter erase personal data list</h2>%views%
 	<form class="search-form wp-clearfix">
-				<input type="hidden" name="filter-status" value="" />
-		<input type="hidden" name="orderby" value="" />
-		<input type="hidden" name="order" value="" />
+		%search%		<input type="hidden" name="filter-status" value="%filter_status%" />
+		<input type="hidden" name="orderby" value="%orderby%" />
+		<input type="hidden" name="order" value="%order%" />
 	</form>
 
 	<form method="post">
 		<input type="hidden" id="_wpnonce" name="_wpnonce" value="%bulk_nonce%" />%referer%	<div class="tablenav top">
 
-				<div class="alignleft actions bulkactions hidden">
-			<label for="bulk-action-selector-top" class="screen-reader-text">Select bulk action</label><select name="action" id="bulk-action-selector-top">
-<option value="-1">Bulk actions</option>
-	<option value="resend">Resend confirmation requests</option>
-	<option value="complete">Mark requests as completed</option>
-	<option value="delete">Delete requests</option>
-</select>
-<input type="submit" name="bulk_action" id="doaction" class="button action button-compact" value="Apply"  />
-		</div>
-		<div class="tablenav-pages no-pages"><span class="displaying-num">0 items</span></div>
+				<div class="alignleft actions bulkactions%bulk_class%">
+			%bulk_top%		</div>
+		%pages_top%
 		<br class="clear" />
 	</div>
 		<h2 class='screen-reader-text'>Erase personal data list</h2><table class="wp-list-table widefat fixed striped table-view-list privacy_requests">
@@ -67,7 +58,7 @@
 
 	<tbody id="the-list"
 		 data-wp-lists='list:privacy_request'		>
-		<tr class="no-items"><td class="colspanchange" colspan="%colspan%">No items found.</td></tr>	</tbody>
+		%rows%	</tbody>
 
 	<tfoot>
 	<tr>
@@ -75,6 +66,6 @@
 	</tfoot>
 
 </table>
-			</form>
+%bottom%			</form>
 </div>
 

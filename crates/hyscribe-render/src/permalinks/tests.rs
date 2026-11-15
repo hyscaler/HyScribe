@@ -474,3 +474,41 @@ fn plain_term_feed_links() {
         format!("{HOME}/?feed=rss2&amp;post_format=post-format-aside")
     );
 }
+
+/// `get_attachment_link()`: under its parent's link, `attachment/` before a
+/// numeric slug or with `%category%`, the token in a sample, its own path
+/// without a parent, and none plain or under a parent's plain link.
+#[test]
+fn attachment_links() {
+    let post = |name: &str| Post {
+        name: name.as_bytes().to_vec(),
+        ..Post::default()
+    };
+    let link = |structure, name, parent: Option<&str>, sample| {
+        Permalinks::new(structure, "", "").attachment_link("http://h", &post(name), parent, sample)
+    };
+    let parent = Some("http://h/hello/");
+    assert_eq!(
+        link("/%postname%/", "a", parent, false).unwrap(),
+        "http://h/hello/a/"
+    );
+    assert_eq!(
+        link("/%postname%", "12", parent, false).unwrap(),
+        "http://h/hello/attachment/12"
+    );
+    assert_eq!(
+        link("/%category%/%postname%/", "a", parent, false).unwrap(),
+        "http://h/hello/attachment/a/"
+    );
+    assert_eq!(
+        link("/%postname%/", "a", parent, true).unwrap(),
+        "http://h/hello/%postname%/"
+    );
+    assert_eq!(
+        link("/%postname%/", "a", None, false).unwrap(),
+        "http://h/a/"
+    );
+    assert!(link("/%postname%/", "a", None, true).is_none());
+    assert!(link("/%postname%/", "a", Some("http://h/?p=1"), false).is_none());
+    assert!(link("", "a", parent, false).is_none());
+}

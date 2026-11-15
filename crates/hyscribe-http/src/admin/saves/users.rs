@@ -173,11 +173,8 @@ pub(super) async fn retrieve_password(
         ));
     }
     let mut found = None;
-    if login
-        .iter()
-        .position(|&b| b == b'@')
-        .is_some_and(|at| at > 0)
-    {
+    // `strpos( $user_login, '@' )`, true past the first character.
+    if login.get(1..).is_some_and(|rest| rest.contains(&b'@')) {
         found = write.user_id_by_email(login).await?;
     }
     if found.is_none() {

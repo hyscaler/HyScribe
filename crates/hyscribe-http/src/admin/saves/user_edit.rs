@@ -66,8 +66,9 @@ impl CapabilityData for Current {
     fn user_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
         self.caps.clone()
     }
-    fn user_exists(&self, id: u64) -> bool {
-        id == self.id
+    /// Only the current user, who is, is asked for.
+    fn user_exists(&self, _: u64) -> bool {
+        true
     }
     fn post(&self, _: u64) -> Option<CapPost> {
         None
@@ -145,14 +146,14 @@ async fn edit_user(
         id,
         ..UserData::default()
     };
+    // An empty login is refused below as invalid, one not posted by
+    // `wp_insert_user()`.
     let mut wrong = false;
     if !update {
         user.user_login = match lookup(asked.post, "user_login") {
             Some(Value::Array(_)) => return Err(unported("an array as the new user's login")),
             login => login.map(|login| sanitize_user_strict(&login.to_php_string())),
         };
-        // `'' === $user->user_login`; a login not posted, a WP_Error later.
-        wrong |= user.user_login.as_deref().is_none_or(<[u8]>::is_empty);
     }
     let pass = |name| posted(asked, name).map(|pass| php_trim(&pass.unwrap_or_default()).to_vec());
     let (pass1, pass2) = (pass("pass1")?, pass("pass2")?);
@@ -229,7 +230,8 @@ async fn edit_user(
     wrong |= is_empty_string(email);
     if is_email(email) {
         let owner = write.user_id_by_email(php_trim(email)).await?;
-        wrong |= owner.is_some_and(|owner| !update || owner != id);
+        // A new user's ID is 0, which no owner has.
+        wrong |= owner.is_some_and(|owner| owner != id);
     }
     if wrong {
         return Err(unported("the user form shown again with its errors"));
@@ -263,19 +265,14 @@ pub(super) fn create<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Savi
     })
 }
 
-/// `update` of `profile.php`.
-pub(super) fn profile<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
-    Box::pin(update(write, asked, true))
+/// `update` of `profile.php` and `user-edit.php`: the user saved by
+/// `edit_user()`, after an email change of one's own waits for its
+/// confirmation; then their edit screen with `updated`.
+pub(super) fn update<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
+    Box::pin(updated(write, asked))
 }
 
-/// `update` of `user-edit.php`.
-pub(super) fn user_edit<'a>(write: &'a mut Write<'_>, asked: &'a Asked<'a>) -> Saving<'a> {
-    Box::pin(update(write, asked, false))
-}
-
-/// The user saved by `edit_user()`, after an email change of one's own
-/// waits for its confirmation; then their edit screen with `updated`.
-async fn update(write: &mut Write<'_>, asked: &Asked<'_>, profile: bool) -> Result<Answer, Stop> {
+async fn updated(write: &mut Write<'_>, asked: &Asked<'_>) -> Result<Answer, Stop> {
     let given = asked
         .request("user_id")
         .filter(|id| !id.is_empty())
@@ -287,8 +284,9 @@ async fn update(write: &mut Write<'_>, asked: &Asked<'_>, profile: bool) -> Resu
     };
     let referer = referer.map(|r| remove_query_arg(&[b"update", b"delete_count", b"user_id"], &r));
     let mut email = posted(asked, "email")?;
-    // `send_confirmation_on_profile_email()`, on the profile page.
-    if (profile || given == asked.user) && id == asked.user {
+    // `send_confirmation_on_profile_email()` of one's own save, the only
+    // one it acts on (and always on the profile page).
+    if id == asked.user {
         let own = write.user(id).await?.map(|(_, user)| user.email);
         let own = own.unwrap_or_default();
         if email.as_deref() != Some(&own[..]) {

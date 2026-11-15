@@ -47,6 +47,8 @@ async fn new_users_are_php_s() {
             long.as_str(),
             "user_login[]=x&email=x%40example.test&pass1=a&pass2=a",
             "user_login=&email=x%40example.test&pass1=a&pass2=a",
+            "email=x%40example.test&pass1=a&pass2=a",
+            "user_login=bad%21login&email=x%40example.test&pass1=a&pass2=a",
             "user_login=x&email=x%40example.test&pass1=a&pass2=b",
             "user_login=x&email=bad&pass1=a&pass2=a",
             "user_login=x&email=admin%40default-install.test&pass1=a&pass2=a",

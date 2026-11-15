@@ -58,6 +58,7 @@ async fn deletions_are_php_s() {
             format!("users[]={deleted}"),
             format!("users[]={deleted}&delete_option=delete"),
             format!("users[]={heir}&delete_option[{heir}]=reassign&reassign_user[{heir}]=-1"),
+            format!("users[]={heir}&delete_option[{heir}]=reassign&reassign_user[{heir}]=x"),
         ] {
             let unported = acted(&writer, conn, &dodelete(&post), None).await;
             assert!(matches!(unported, Err(Error::Unported(_))), "{post}");

@@ -19,8 +19,8 @@
 # A logged in user sends the nonce admin-ajax.php's rest-nonce action gives
 # them as X-WP-Nonce, unless flags has nononce; %nonce% in a target, the
 # headers and the body stands for the user's nonce (a visitor's for a
-# visitor). Flags: origin and originnull send an Origin header, pretty serves
-# the request under /%postname%/ permalinks (reference/rewrite/permalinks.php),
+# visitor), and %preview_nonce% in a body for a preview link's. Flags:
+# origin and originnull send an Origin header, pretty serves the request under /%postname%/ permalinks (reference/rewrite/permalinks.php),
 # override sends X-HTTP-Method-Override: DELETE, ttd records the request on
 # the Theme Test Data fixture only, default on the default install only (as
 # one that PHP would write caches for there), skip=a+b sends the request
@@ -187,9 +187,9 @@ for who in "${WHO[@]}"; do
     headers=$(tr -d '\r' < "$TMP/head" | grep -iE '^(content-type|x-robots-tag|link|access-control-[a-z-]+|allow|vary|x-wp-[a-z]+|expires|cache-control):' |
       sed -E 's/^([^:]+):/\L\1:/; s/^(vary: .*),Accept-Encoding$/\1/' | grep -vx 'vary: Accept-Encoding' | sed "s/$nonce/%nonce%/g" || true)
     if [ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ]; then
-      body=$(sed "s/$nonce/%nonce%/g" "$TMP/body" | sha256sum | cut -c1-64 | tr -d '\n' | xxd -p | tr -d '\n')
+      body=$(sed "s/$nonce/%nonce%/g; s/preview_nonce=[0-9a-f]\{10\}/preview_nonce=%preview_nonce%/g" "$TMP/body" | sha256sum | cut -c1-64 | tr -d '\n' | xxd -p | tr -d '\n')
     else
-      body=$(sed "s/$nonce/%nonce%/g" "$TMP/body" | xxd -p | tr -d '\n')
+      body=$(sed "s/$nonce/%nonce%/g; s/preview_nonce=[0-9a-f]\{10\}/preview_nonce=%preview_nonce%/g" "$TMP/body" | xxd -p | tr -d '\n')
     fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$who" "$method" "$(printf '%s' "$target" | xxd -p | tr -d '\n')" "$flags" "$status" \
       "$(printf '%s' "$headers" | xxd -p | tr -d '\n')" "$body" >> "$OUT"

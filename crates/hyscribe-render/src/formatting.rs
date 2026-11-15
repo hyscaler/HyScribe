@@ -1032,6 +1032,16 @@ pub fn sanitize_text_field(text: &[u8]) -> Vec<u8> {
 /// `sanitize_user( $username )`, not strict: tags, accents, percent-encoded
 /// octets and entities removed, whitespace trimmed and collapsed.
 pub fn sanitize_user(username: &[u8]) -> Vec<u8> {
+    sanitize_user_as(username, false)
+}
+
+/// `sanitize_user( $username, true )`: as [`sanitize_user`], keeping only
+/// ASCII letters and digits, space, `_`, `.`, `-` and `@` before trimming.
+pub fn sanitize_user_strict(username: &[u8]) -> Vec<u8> {
+    sanitize_user_as(username, true)
+}
+
+fn sanitize_user_as(username: &[u8], strict: bool) -> Vec<u8> {
     let text = hyscribe_kses::wp_strip_all_tags(username, false);
     let text = remove_accents(&text);
     let mut octets = Vec::with_capacity(text.len());
@@ -1067,6 +1077,9 @@ pub fn sanitize_user(username: &[u8]) -> Vec<u8> {
                 tail
             }
         };
+    }
+    if strict {
+        out.retain(|b| b.is_ascii_alphanumeric() || b" _.-@".contains(b));
     }
     // `|\s+|` to one space.
     let mut collapsed = Vec::with_capacity(out.len());

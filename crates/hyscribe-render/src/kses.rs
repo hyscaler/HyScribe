@@ -65,6 +65,18 @@ static DATA: LazyLock<AllowedHtml> = LazyLock::new(|| {
     ))
 });
 
+/// `wp_kses_allowed_html( 'pre_user_description' )`: `$allowedtags` with
+/// `rel` and `target` on links.
+static USER_DESCRIPTION: LazyLock<AllowedHtml> = LazyLock::new(|| {
+    let mut allowed = AllowedHtml::from_json(include_bytes!(
+        "../../../wordpress/wp-includes/kses-data.json"
+    ));
+    let link = allowed.0.entry(b"a".to_vec()).or_default();
+    link.insert(b"rel".to_vec(), Vec::new());
+    link.insert(b"target".to_vec(), Vec::new());
+    allowed
+});
+
 /// `pre_comment_content`'s list: `$allowedtags`, and `class` on `span`
 /// from `_wp_kses_allow_note_mention_span()`.
 static COMMENT: LazyLock<AllowedHtml> = LazyLock::new(|| {
@@ -157,6 +169,12 @@ pub fn wp_kses_post(content: &[u8], upload_host: &[u8]) -> Vec<u8> {
 /// `wp_kses_data( $data )`: only the tags of `$allowedtags`.
 pub fn wp_kses_data(content: &[u8]) -> Vec<u8> {
     wp_kses(content, &DATA, b"")
+}
+
+/// `wp_kses( $data, 'pre_user_description' )`, as a user's biography is
+/// saved.
+pub fn wp_kses_user_description(content: &[u8]) -> Vec<u8> {
+    wp_kses(content, &USER_DESCRIPTION, b"")
 }
 
 /// `wp_kses( $content, 'pre_comment_content' )`, as `wp_filter_kses()`

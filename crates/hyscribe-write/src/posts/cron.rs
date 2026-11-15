@@ -7,7 +7,8 @@
 use hyscribe_db::Write;
 use hyscribe_phpser::{Key, Value, encode, md5, strnatcasecmp, unserialize};
 
-use super::{PostError, Result, site};
+use super::{Error, Result};
+use crate::options::{Autoload, update_option};
 
 /// The events by timestamp, without the `version` entry.
 type Crons = Vec<(Key, Value)>;
@@ -119,7 +120,7 @@ async fn crons(write: &mut Write<'_>) -> Result<Crons> {
     };
     let version = name("version");
     if !crons.iter().any(|(key, _)| *key == version) {
-        return Err(PostError::Unported("a cron array older than version 2"));
+        return Err(Error::Unported("a cron array older than version 2"));
     }
     crons.retain(|(key, _)| *key != version);
     Ok(crons)
@@ -128,7 +129,8 @@ async fn crons(write: &mut Write<'_>) -> Result<Crons> {
 /// `_set_cron_array( $crons )`.
 async fn set_crons(write: &mut Write<'_>, mut crons: Crons) -> Result<()> {
     crons.push((name("version"), Value::Int(2)));
-    site::update_option(write, "cron", &encode(&Value::Array(crons)), Some("on")).await
+    update_option(write, "cron", &Value::Array(crons), Some(Autoload::On)).await?;
+    Ok(())
 }
 
 /// `wp_next_scheduled( $hook )` for an event without arguments: whether

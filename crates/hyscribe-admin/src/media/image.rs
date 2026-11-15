@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `wp_get_attachment_image( $id, array( 60, 60 ), true, array( 'alt' =>
-//! '' ) )`, the media list's thumbnail: the smallest stored size that
-//! fits, or the icon of the file's type.
+//! '' ) )`, the media list's thumbnail, and the comments list's at 80 by 60
+//! with its alt text: the smallest stored size that fits, or the icon of
+//! the file's type.
 
-use hyscribe_kses::esc_attr;
+use hyscribe_kses::{esc_attr, strip_tags};
 use hyscribe_model::Post;
 use hyscribe_phpser::{Maybe, Value, isset, maybe_unserialize, wp_basename};
 use hyscribe_render::attachment::{
@@ -198,23 +199,42 @@ pub(super) fn image_src(
 /// The thumbnail of attachment `id`: its image, or its type's icon.
 pub(super) fn thumbnail(site: &dyn PostsSite, id: u64) -> String {
     let post = site.post(id).unwrap_or_default();
-    let (src, width, height) = image_src(site, &post, LIST_BOX);
+    boxed(site, &post, LIST_BOX, b"")
+}
+
+/// The comments list's thumbnail of attachment `post`, with its alt text.
+pub(crate) fn response_thumbnail(site: &dyn PostsSite, post: &Post) -> String {
+    let alt = site
+        .meta(post, "_wp_attachment_image_alt")
+        .unwrap_or_default();
+    let alt = strip_tags(&alt);
+    boxed(site, post, (80, 60), alt.trim_ascii())
+}
+
+/// The `img` of `post` for the box `size`, with `alt`.
+fn boxed(site: &dyn PostsSite, post: &Post, size: (i64, i64), alt: &[u8]) -> String {
+    let (src, width, height) = image_src(site, post, size);
     let options = |name: &str| site.option(name).unwrap_or_default();
+    let class = format!("{}x{}", size.0, size.1);
+    let meta = metadata(site, post);
     img(
         &src,
         (width, height),
-        &metadata(site, &post),
+        &meta,
         &upload_baseurl(&options),
+        &class,
+        alt,
     )
 }
 
 /// The `img` of `src` sized `size`, lazy as every image of the admin is,
 /// with a `srcset` of the sizes in `meta` under the uploads' `base` URL.
-fn img(src: &[u8], size: (i64, i64), meta: &Value, base: &[u8]) -> String {
+fn img(src: &[u8], size: (i64, i64), meta: &Value, base: &[u8], class: &str, alt: &[u8]) -> String {
     let (width, height) = size;
     let mut html = format!(
-        "<img width=\"{width}\" height=\"{height}\" src=\"{}\" class=\"attachment-60x60 size-60x60\" alt=\"\" decoding=\"async\" loading=\"lazy\"",
-        esc_attr(src)
+        "<img width=\"{width}\" height=\"{height}\" src=\"{}\" class=\"attachment-{class} size-{class}\" alt=\"{}\" decoding=\"async\" loading=\"lazy\"",
+        esc_attr(src),
+        esc_attr(alt)
     );
     let size = (width.abs(), height.abs());
     if let Some(set) = meta.as_array().and_then(|_| srcset(size, src, meta, base)) {

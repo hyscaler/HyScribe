@@ -4,11 +4,13 @@
 //! and its actions, `post_updated`'s old slugs and dates, the revision
 //! `wp_save_post_revision()` makes, and the checks on the post's parent.
 
-use hyscribe_db::{Meta, PostFields, Write};
+use hyscribe_db::{PostFields, Write};
 use hyscribe_model::Post;
 use hyscribe_phpser::{Value, unserialize};
 
-use super::{Context, Kind, PostArgs, PostError, Result, UNSLUGGED, cron, date, site, truthy};
+use crate::options::{Autoload, Meta, add_metadata, delete_metadata, get_metadata, update_option};
+
+use super::{Context, Error, Kind, PostArgs, Result, UNSLUGGED, cron, date, site, truthy};
 
 /// `get_permalink( $id )` of a post saved as `post`: the GUID a new post
 /// gets. Only plain links are ported, as pretty ones are not yet.
@@ -28,7 +30,7 @@ pub(super) async fn permalink(
         _ => &["draft", "pending", "auto-draft", "future"],
     };
     if !structure.is_empty() && !plain_statuses.contains(&post.status.as_str()) {
-        return Err(PostError::Unported("a GUID under pretty permalinks"));
+        return Err(Error::Unported("a GUID under pretty permalinks"));
     }
     let show_on_front = write
         .option_value("show_on_front")
@@ -105,19 +107,39 @@ pub(super) async fn parent_without_loop(
         return Ok(0);
     }
     // PHP breaks a loop the post is not in by updating its members.
-    Err(PostError::Unported("a parent already in a loop"))
+    Err(Error::Unported("a parent already in a loop"))
 }
 
 /// `block_core_calendar_update_has_published_posts()`.
 pub(super) async fn update_has_published_posts(write: &mut Write<'_>) -> Result<()> {
-    let name = "wp_calendar_block_has_published_posts";
-    if write.published_post_exists().await? {
-        site::update_option(write, name, b"1", None).await
-    } else if write.option_value(name).await?.is_some() {
-        site::update_option(write, name, b"", None).await
-    } else {
-        // false is a missing option's value already.
-        Ok(())
+    let has = Value::Bool(write.published_post_exists().await?);
+    update_option(write, "wp_calendar_block_has_published_posts", &has, None).await?;
+    Ok(())
+}
+
+/// `"1"`, the value of the flags `_publish_post_hook()` adds.
+fn one() -> Value {
+    Value::String(b"1".to_vec())
+}
+
+/// `_delete_option_fresh_site()`.
+async fn fresh_site_is_used(write: &mut Write<'_>) -> Result<()> {
+    let zero = Value::String(b"0".to_vec());
+    update_option(write, "fresh_site", &zero, Some(Autoload::Off)).await?;
+    Ok(())
+}
+
+/// `wp_slash( $value )`: `addslashes()` on every string, in arrays too.
+fn slash(value: Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(hyscribe_phpser::addslashes(&text)),
+        Value::Array(entries) => Value::Array(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key, slash(value)))
+                .collect(),
+        ),
+        other => other,
     }
 }
 
@@ -134,11 +156,11 @@ async fn publish_post(
             .await?
             .unwrap_or_default(),
     ) {
-        site::add_unique_post_meta(write, id, "_pingme", b"1").await?;
+        add_metadata(write, Meta::Post, id, "_pingme", &one(), true).await?;
     }
-    site::add_unique_post_meta(write, id, "_encloseme", b"1").await?;
+    add_metadata(write, Meta::Post, id, "_encloseme", &one(), true).await?;
     if !super::sanitize_trackback_urls(&post.to_ping).is_empty() {
-        write.add_meta(Meta::Post, id, "_trackbackme", b"1").await?;
+        add_metadata(write, Meta::Post, id, "_trackbackme", &one(), false).await?;
     }
     if !cron::scheduled(write, "do_pings").await? {
         cron::schedule(write, (ctx.now, ctx.now), "do_pings", None).await?;
@@ -193,19 +215,17 @@ pub(super) async fn transition(
         && post.parent == 0
         && auto_adds_pages(write).await?
     {
-        return Err(PostError::Unported("pages added to a classic menu"));
+        return Err(Error::Unported("pages added to a classic menu"));
     }
     if crosses_publish && kind == Kind::Post {
         update_has_published_posts(write).await?;
     }
     match (new, kind) {
         ("publish", Kind::Post) => {
-            site::update_option(write, "fresh_site", b"0", Some("off")).await?;
+            fresh_site_is_used(write).await?;
             publish_post(write, ctx, id, &post).await
         }
-        ("publish", Kind::Page) => {
-            site::update_option(write, "fresh_site", b"0", Some("off")).await
-        }
+        ("publish", Kind::Page) => fresh_site_is_used(write).await,
         // _future_post_hook().
         ("future", _) => {
             cron::clear(write, "publish_future_post", id).await?;
@@ -232,12 +252,13 @@ async fn remember_old(
     key: &str,
     (old, new): (&[u8], &[u8]),
 ) -> Result<()> {
-    let kept = write.post_meta_values(id, key).await?;
-    if truthy(old) && !kept.iter().any(|value| value == old) {
-        write.add_meta(Meta::Post, id, key, old).await?;
+    let kept = get_metadata(write, Meta::Post, id, key).await?;
+    let (old, new) = (Value::String(old.to_vec()), Value::String(new.to_vec()));
+    if !old.is_empty() && !kept.contains(&old) {
+        add_metadata(write, Meta::Post, id, key, &old, false).await?;
     }
-    if kept.iter().any(|value| value == new) {
-        site::delete_post_meta_value(write, id, key, new).await?;
+    if kept.contains(&new) {
+        delete_metadata(write, Meta::Post, id, key, &new, false).await?;
     }
     Ok(())
 }
@@ -291,7 +312,7 @@ pub(super) async fn save_revision(
     if kind == Kind::Revision || post.status == "auto-draft" {
         return Ok(());
     }
-    let footnotes = write.post_meta_values(id, "footnotes").await?;
+    let footnotes = get_metadata(write, Meta::Post, id, "footnotes").await?;
     let marker = format!("{id}-revision").into_bytes();
     for revision in write.revision_ids(id).await? {
         let latest = super::existing(write, revision).await?;
@@ -306,7 +327,7 @@ pub(super) async fn save_revision(
         let changed = fields
             .iter()
             .any(|(now, then)| normalize_whitespace(now) != normalize_whitespace(then));
-        if !changed && write.post_meta_values(revision, "footnotes").await? == footnotes {
+        if !changed && get_metadata(write, Meta::Post, revision, "footnotes").await? == footnotes {
             return Ok(());
         }
         break;
@@ -324,11 +345,11 @@ pub(super) async fn save_revision(
         ..PostArgs::default()
     };
     let (revision, ..) = super::insert(write, ctx, args).await?;
-    // wp_save_revisioned_meta_fields().
+    // wp_save_revisioned_meta_fields(), through _wp_copy_post_meta()'s
+    // wp_slash().
     for value in footnotes {
-        write
-            .add_meta(Meta::Post, revision, "footnotes", &value)
-            .await?;
+        let value = slash(value);
+        add_metadata(write, Meta::Post, revision, "footnotes", &value, false).await?;
     }
     Ok(())
 }

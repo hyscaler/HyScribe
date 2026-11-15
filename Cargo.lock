@@ -791,6 +791,7 @@ dependencies = [
 name = "hyscribe-write"
 version = "0.1.0"
 dependencies = [
+ "hyscribe-auth",
  "hyscribe-config",
  "hyscribe-db",
  "hyscribe-html",

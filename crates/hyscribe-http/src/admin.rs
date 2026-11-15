@@ -156,6 +156,11 @@ struct Admin<'a> {
     settings: Option<String>,
     /// The `Referer` header, if sent.
     referer: Option<String>,
+    /// `$_SERVER['REQUEST_URI']`, slashed.
+    uri: String,
+    /// The comments of each post, of every status, as paged comment links
+    /// read them.
+    post_comments: RefCell<HashMap<u64, Vec<(hyscribe_model::Comment, String)>>>,
 }
 
 impl<'a> Admin<'a> {
@@ -169,6 +174,8 @@ impl<'a> Admin<'a> {
             comment_counts: OnceCell::new(),
             settings: None,
             referer: None,
+            uri: String::new(),
+            post_comments: RefCell::default(),
         }
     }
 
@@ -189,8 +196,9 @@ impl<'a> Admin<'a> {
             .as_ref()
             .map(|post| self.permalink(post))
             .unwrap_or_default();
+        let link = self.comment_link(&comment, post.as_ref().map(|_| permalink.as_str()));
         RecentComment {
-            link: format!("{permalink}#comment-{}", comment.id),
+            link,
             permalink,
             status: comment_status(approved),
             user: (comment.user_id != 0)
@@ -200,6 +208,41 @@ impl<'a> Admin<'a> {
             post: post.filter(|_| comment.post_id != 0),
             comment,
         }
+    }
+
+    /// `get_comment_link()` of `comment` on the post at `permalink`; only a
+    /// site that pages comments reads the post's comments.
+    fn comment_link(&self, comment: &hyscribe_model::Comment, permalink: Option<&str>) -> String {
+        let option = |name: &str| self.site.raw_option(name).to_vec();
+        let paged = !hyscribe_phpser::is_empty_string(&option("page_comments"));
+        let mut cache = self.post_comments.borrow_mut();
+        let all = cache.entry(comment.post_id).or_insert_with(|| {
+            let filter = CommentFilter {
+                approved: &["0", "1", "spam", "trash", "post-trashed"],
+                user: None,
+                types: &[],
+                search: None,
+                post: comment.post_id,
+            };
+            let read = self.site.db.list_comments(&filter, &[], u32::MAX, 0);
+            if paged {
+                self.reads.reads.wait(read)
+            } else {
+                Vec::new()
+            }
+        });
+        let all: Vec<_> = all
+            .iter()
+            .map(|(c, approved)| (c, approved.as_str()))
+            .collect();
+        hyscribe_admin::comments::comment_link(
+            &option,
+            permalink,
+            &self.uri,
+            &all,
+            comment,
+            self.user.id,
+        )
     }
 
     /// `edit_comment` of a comment on `post`: `edit_posts` without one.
@@ -370,6 +413,9 @@ impl PageSite for Admin<'_> {
     }
     fn template(&self) -> String {
         self.site.option("template")
+    }
+    fn stylesheet(&self) -> String {
+        self.site.option("stylesheet")
     }
     fn font_faces(&self) -> Vec<u8> {
         self.site.theme.admin_font_faces(&self.reads.site_url())
@@ -1060,17 +1106,19 @@ fn screen(
             screen(admin, &request)
         }
         "/hs-admin/tools" => Answer::from_page(tools::tools(admin, &request)),
-        // Their arguments and actions are not ported.
+        // Their arguments and actions are not ported, but the Themes
+        // screen's broken theme notice.
         "/hs-admin/themes"
         | "/hs-admin/import"
         | "/hs-admin/export"
         | "/hs-admin/export-personal-data"
         | "/hs-admin/erase-personal-data" => {
-            if request_uri.contains('?') {
+            let broken = only_argument(query, "broken").filter(|_| path == "/hs-admin/themes");
+            if request_uri.contains('?') && broken.is_none() {
                 return None;
             }
             match path {
-                "/hs-admin/themes" => themes(admin, &request),
+                "/hs-admin/themes" => themes(admin, &request, broken.flatten().is_some()),
                 "/hs-admin/import" => Some(tools::import(admin, &request)),
                 "/hs-admin/export" => Some(tools::export(admin, &request)),
                 "/hs-admin/export-personal-data" => {
@@ -1124,15 +1172,16 @@ fn screen(
         }
         "/hs-admin/edit-comments" => {
             let args = comment_args(query)?;
-            // Only posts' and pages' comments are listed, and a draft's
-            // Preview link is not ported.
+            // Only posts', pages' and attachments' comments are listed, and
+            // a draft's Preview link is not ported.
             let post = args
                 .post
                 .as_deref()
                 .map(|p| Value::String(p.into()).to_int());
             let listed = post.and_then(|id| PostsSite::post(admin, id.unsigned_abs()));
             if listed.is_some_and(|post| {
-                !matches!(post.post_type.as_str(), "post" | "page") || post.status == "draft"
+                !["post", "page", "attachment"].contains(&post.post_type.as_str())
+                    || post.status == "draft"
             }) {
                 return None;
             }
@@ -1283,6 +1332,7 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 let header = |name: &str| headers.get(name).map(HeaderValue::as_bytes);
                 admin.referer =
                     header("referer").map(|value| String::from_utf8_lossy(value).into_owned());
+                admin.uri.clone_from(&requested);
                 let browser = Browser {
                     user_agent: header("user-agent").unwrap_or_default(),
                     mobile_hint: header("sec-ch-ua-mobile"),

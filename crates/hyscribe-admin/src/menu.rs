@@ -67,11 +67,12 @@ struct Item {
     icon: &'static str,
 }
 
-/// A `$submenu` entry: title, capability and slug.
+/// A `$submenu` entry: title, capability, slug and classes.
 struct Sub {
     title: String,
     cap: String,
     slug: String,
+    class: &'static str,
 }
 
 fn item(
@@ -101,6 +102,7 @@ fn sub(title: &str, cap: &str, slug: &str) -> Sub {
         title: title.into(),
         cap: cap.into(),
         slug: slug.into(),
+        class: "",
     }
 }
 
@@ -149,8 +151,9 @@ impl Menu {
     }
 }
 
-/// `wp-admin/menu.php`.
-fn build(user: &dyn MenuUser) -> Menu {
+/// `wp-admin/menu.php`, with the Customize link `customize` when the
+/// active theme is not a block theme.
+fn build(user: &dyn MenuUser, customize: Option<&str>) -> Menu {
     let mut items = Vec::new();
     let mut submenu = Submenu::default();
     items.push((
@@ -314,14 +317,28 @@ fn build(user: &dyn MenuUser) -> Menu {
         ),
     ));
     submenu.add("themes.php", sub("Themes ", appearance, "themes.php"));
-    submenu.add(
-        "themes.php",
-        sub("Editor", "edit_theme_options", "site-editor.php"),
-    );
+    // An active theme the site does not have is a classic theme without
+    // theme supports.
+    let editor = match customize {
+        None => sub("Editor", "edit_theme_options", "site-editor.php"),
+        Some(_) => sub(
+            "Patterns",
+            "edit_theme_options",
+            "site-editor.php?p=/pattern",
+        ),
+    };
+    submenu.add("themes.php", editor);
     submenu.add(
         "themes.php",
         sub("Fonts", "edit_theme_options", "font-library.php"),
     );
+    if let Some(url) = customize {
+        let entry = Sub {
+            class: "hide-if-no-customize",
+            ..sub("Customize", "customize", url)
+        };
+        submenu.add("themes.php", entry);
+    }
     items.push((
         65,
         item(
@@ -596,8 +613,8 @@ pub fn link(file: &str) -> String {
 
 /// `wp_enqueue_command_palette_assets()`'s menu commands: label, hs-admin
 /// URL and name of each menu item the user may reach and its submenu.
-pub fn commands(user: &dyn MenuUser) -> Vec<(String, String, String)> {
-    let mut menu = build(user);
+pub fn commands(user: &dyn MenuUser, customize: Option<&str>) -> Vec<(String, String, String)> {
+    let mut menu = build(user, customize);
     prune(&mut menu, user);
     let mut out = Vec::new();
     for (_, item) in &menu.items {
@@ -652,8 +669,8 @@ pub fn esc_link(php_url: &str) -> String {
 
 /// The admin menu, `#adminmenumain`, on `screen` for `user`; `None` when
 /// `user_can_access_admin_page()` turns them away.
-pub fn admin_menu(user: &dyn MenuUser, screen: &Screen) -> Option<String> {
-    let mut menu = build(user);
+pub fn admin_menu(user: &dyn MenuUser, screen: &Screen, customize: Option<&str>) -> Option<String> {
+    let mut menu = build(user, customize);
     prune(&mut menu, user);
     // `user_can_access_admin_page()` runs from `admin.php`, before the
     // screen sets its parent file; one it leaves unset keeps what was found.
@@ -759,6 +776,9 @@ fn output(menu: &Menu, user: &dyn MenuUser, screen: &Screen, parent_file: &str, 
                 if current {
                     class.push("current");
                     aria = " aria-current=\"page\"";
+                }
+                if !entry.class.is_empty() {
+                    class.push(entry.class);
                 }
                 let class = if class.is_empty() {
                     String::new()

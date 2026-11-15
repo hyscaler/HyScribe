@@ -10,7 +10,7 @@ fn slugs_truncate_as_php() {
     assert_eq!(truncate(b"ab-cd", 3).unwrap(), b"ab");
     assert!(matches!(
         truncate(b"%c3%a9%c3%a9", 6),
-        Err(PostError::Unported(_))
+        Err(Error::Unported(_))
     ));
 }
 

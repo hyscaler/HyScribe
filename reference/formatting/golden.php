@@ -257,10 +257,11 @@ if ( 'user' === $argv[1] ) {
 	$cases = array(
 		'', '0', 'admin', ' admin ', 'Ad Min', "a\tb\r\nc  d", "a\x0b\x0cb", "\xc2\xa0x\xc2\xa0", '<b>admin</b>', '<b>admin"', 'a<b', '%41dmin', '%%41', '%2541', '%4',
 		'a&amp;b', '&;', '&;;', 'a&b', "a&\n;b", "a&x\n;b", '&&x;', 'Ã©lise', 'Ελένη', "a\xc3", 'a@b.test', '<script>x</script>y', "\x00a\x00",
+		'  Oracle\\Full!  ', 'jane+doe', 'a ! b', 'a_b.c-d@e',
 	);
 	$atoms = array( '<', '>', '<b>', '</b>', ' ', "\t", "\n", "\r", "\x0b", "\x0c", '%', '4', 'a', 'G', '%41', '&', ';', '&amp;', 'é', "\xc3", "\xc2\xa0", '"', 'x', '@' );
 	foreach ( array_merge( $cases, random_cases( $atoms, 1500, 10 ) ) as $case ) {
-		echo bin2hex( $case ), "\t", bin2hex( sanitize_user( $case ) ), "\n";
+		echo bin2hex( $case ), "\t", bin2hex( sanitize_user( $case ) ), "\t", bin2hex( sanitize_user( $case, true ) ), "\n";
 	}
 	exit;
 }

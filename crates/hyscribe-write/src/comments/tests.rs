@@ -601,7 +601,9 @@ async fn trash_and_delete() {
             )
             .await;
             for value in [b"a", b"b"] {
-                let meta = write.add_meta(Meta::Comment, reply, "oracle", value).await;
+                let meta = write
+                    .add_meta(Meta::Comment, reply, "oracle", Some(value))
+                    .await;
                 meta.unwrap();
             }
             reply

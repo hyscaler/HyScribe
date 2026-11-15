@@ -12,7 +12,7 @@ use hyscribe_config::{Database, Mode, Prefix};
 use sqlx::Row as _;
 
 use crate::dialect::{Access, Dialect};
-use crate::{Backend, Bind, DbError, Engine, PrefixSql, Sql, db_error, ids_or_none, list};
+use crate::{Backend, Bind, Columns, DbError, Engine, PrefixSql, Sql, db_error, ids_or_none, list};
 
 mod meta;
 mod posts;
@@ -159,6 +159,8 @@ fn bytes(row: &crate::Row, name: &str) -> Vec<u8> {
 pub struct Write<'w> {
     writer: &'w Writer,
     tx: sqlx::Transaction<'w, Backend>,
+    /// The statements left before each next one fails, if limited.
+    budget: Option<usize>,
 }
 
 impl<'w> Write<'w> {
@@ -176,7 +178,11 @@ impl<'w> Write<'w> {
             .map_err(db_error)?;
         let version = row.map(|row| text(&row, "option_value"));
         match version.as_deref().map(str::parse::<u64>) {
-            Some(Ok(number)) if DB_VERSIONS.contains(&number) => Ok(Write { writer, tx }),
+            Some(Ok(number)) if DB_VERSIONS.contains(&number) => Ok(Write {
+                writer,
+                tx,
+                budget: None,
+            }),
             _ => Err(DbError(format!(
                 "the database's db_version ({}) is not one this release writes to ({} to {}), \
                  so HyScribe writes nothing to it",
@@ -187,9 +193,33 @@ impl<'w> Write<'w> {
         }
     }
 
+    /// Lets `statements` more statements run and fails each one after, so
+    /// tests reach every error path of an action.
+    pub fn fail_after(&mut self, statements: usize) {
+        self.budget = Some(statements);
+    }
+
+    /// Counts a statement against the budget [`Write::fail_after`] set.
+    fn spend(&mut self) -> Result<(), DbError> {
+        match &mut self.budget {
+            Some(0) => Err(DbError("the test's statement budget is spent".into())),
+            Some(left) => {
+                *left -= 1;
+                Ok(())
+            }
+            None => Ok(()),
+        }
+    }
+
     /// Commits every write of the action.
     pub async fn commit(self) -> Result<(), DbError> {
         self.tx.commit().await.map_err(db_error)
+    }
+
+    /// The table prefix, which names the user meta keys of the site, as
+    /// `{prefix}capabilities` and `{prefix}user_level`.
+    pub fn prefix(&self) -> &str {
+        self.writer.prefix.as_str()
     }
 
     fn sql(&self, query: &'static str) -> Query {
@@ -201,6 +231,7 @@ impl<'w> Write<'w> {
         table: Table,
         query: Query,
     ) -> Result<<Backend as sqlx::Database>::QueryResult, DbError> {
+        self.spend()?;
         if let Some((_, engine)) = self.writer.refused.iter().find(|(t, _)| *t == table) {
             let name = format!("{}{}", self.writer.prefix.as_str(), table.name());
             return Err(DbError(format!(
@@ -227,6 +258,7 @@ impl<'w> Write<'w> {
 
     /// The IDs `query` selects, as a column.
     async fn ids(&mut self, query: Query) -> Result<Vec<u64>, DbError> {
+        self.spend()?;
         query
             .fetch_all(&mut *self.tx)
             .await
@@ -238,6 +270,7 @@ impl<'w> Write<'w> {
 
     /// The `COUNT(*)` `query` selects.
     async fn count(&mut self, query: Query) -> Result<u64, DbError> {
+        self.spend()?;
         let row = query.fetch_one(&mut *self.tx).await.map_err(db_error)?;
         row.try_get::<i64, _>(0)
             .map(i64::unsigned_abs)
@@ -584,6 +617,84 @@ impl<'w> Write<'w> {
         self.change(Table::Users, query.bind(id)).await
     }
 
+    /// `get_userdata()`: the user's login and the columns `wp_insert_user()`
+    /// writes.
+    pub async fn user(&mut self, id: u64) -> Result<Option<(Vec<u8>, UserFields)>, DbError> {
+        self.spend()?;
+        let mut sql =
+            Sql::new("SELECT user_login, user_pass, user_nicename, user_email, user_url, ");
+        Engine::date_text(&mut sql, "user_registered");
+        sql.push(
+            " AS registered, user_activation_key, display_name FROM {prefix}users WHERE ID = ?",
+        );
+        sql.bind(Bind::Int(id));
+        let query = sql.query(&self.writer.prefix);
+        let row = query
+            .fetch_optional(&mut *self.tx)
+            .await
+            .map_err(db_error)?;
+        row.map_or(Ok(None), |row| {
+            let mut c = Columns::new(&row);
+            let login = c.bytes("user_login");
+            let fields = UserFields {
+                pass: c.text("user_pass"),
+                nicename: c.bytes("user_nicename"),
+                email: c.bytes("user_email"),
+                url: c.bytes("user_url"),
+                registered: c.text("registered"),
+                activation_key: c.text("user_activation_key"),
+                display_name: c.bytes("display_name"),
+            };
+            c.finish(Some((login, fields)))
+        })
+    }
+
+    /// `get_user_by( 'login' )`'s lookup.
+    pub async fn user_id_by_login(&mut self, login: &[u8]) -> Result<Option<u64>, DbError> {
+        let query = self.sql("SELECT ID FROM {prefix}users WHERE user_login = ? LIMIT 1");
+        Ok(self.ids(query.bind(login)).await?.into_iter().next())
+    }
+
+    /// `wp_insert_user()`'s check: a user other than `login` holding
+    /// `nicename`.
+    pub async fn nicename_owner(
+        &mut self,
+        nicename: &[u8],
+        login: &[u8],
+    ) -> Result<Option<u64>, DbError> {
+        let query = self.sql(
+            "SELECT ID FROM {prefix}users WHERE user_nicename = ? AND user_login != ? LIMIT 1",
+        );
+        let ids = self.ids(query.bind(nicename).bind(login)).await?;
+        Ok(ids.into_iter().next())
+    }
+
+    /// `wp_update_user_counts()`'s count of users.
+    pub async fn user_count(&mut self) -> Result<u64, DbError> {
+        self.count(self.sql("SELECT COUNT(ID) FROM {prefix}users"))
+            .await
+    }
+
+    /// `wp_delete_user()`: the posts of `author` of any of `types`.
+    pub async fn author_post_ids_of_types(
+        &mut self,
+        author: u64,
+        types: &[&str],
+    ) -> Result<Vec<u64>, DbError> {
+        let mut sql =
+            Sql::new("SELECT ID FROM {prefix}posts WHERE post_author = ? AND post_type IN (");
+        sql.bind(Bind::Int(author));
+        list(&mut sql, types.iter().map(|t| Bind::Text((*t).to_string())));
+        let query = sql.query(&self.writer.prefix);
+        self.ids(query).await
+    }
+
+    /// `wp_delete_user()`: the links of `owner`.
+    pub async fn owner_link_ids(&mut self, owner: u64) -> Result<Vec<u64>, DbError> {
+        let query = self.sql("SELECT link_id FROM {prefix}links WHERE link_owner = ?");
+        self.ids(query.bind(owner)).await
+    }
+
     /// `wp_set_password()`: the new hash, and no reset key.
     pub async fn set_user_password(&mut self, id: u64, hash: &str) -> Result<u64, DbError> {
         let query = self
@@ -664,6 +775,7 @@ impl<'w> Write<'w> {
 
     /// The autoload of option `name`, as `update_option()` reads it.
     pub async fn option_autoload(&mut self, name: &str) -> Result<Option<String>, DbError> {
+        self.spend()?;
         let query = self.sql("SELECT autoload FROM {prefix}options WHERE option_name = ? LIMIT 1");
         let row = query
             .bind(name)

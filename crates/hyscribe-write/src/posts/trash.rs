@@ -3,10 +3,23 @@
 //! `wp_trash_post()`, `wp_untrash_post()` and `wp_delete_post()`, with the
 //! comments, meta, terms and options that go with a post.
 
-use hyscribe_db::{Meta, Write};
-use hyscribe_phpser::{Key, Value, encode, unserialize};
+use hyscribe_db::Write;
+use hyscribe_phpser::{Key, Value, unserialize};
 
-use super::{Context, Kind, PostError, Result, cron, hooks, site, wp_update_post};
+use crate::options::{Meta, add_metadata, delete_metadata, get_metadata, update_option};
+
+use super::{Context, Error, Kind, Result, cron, hooks, site, wp_update_post};
+
+const TRASH_STATUS: &str = "_wp_trash_meta_status";
+const TRASH_TIME: &str = "_wp_trash_meta_time";
+const COMMENTS_STATUS: &str = "_wp_trash_meta_comments_status";
+
+/// `delete_post_meta( $id, $key )`.
+async fn delete_post_meta(write: &mut Write<'_>, id: u64, key: &str) -> Result<()> {
+    let any = Value::String(Vec::new());
+    delete_metadata(write, Meta::Post, id, key, &any, false).await?;
+    Ok(())
+}
 
 /// `unstick_post( $id )`.
 async fn unstick(write: &mut Write<'_>, id: u64) -> Result<()> {
@@ -36,18 +49,20 @@ async fn unstick(write: &mut Write<'_>, id: u64) -> Result<()> {
         .zip(0..)
         .map(|(sticky, n)| (Key::Int(n), Value::Int(sticky)))
         .collect();
-    site::update_option(write, "sticky_posts", &encode(&Value::Array(list)), None).await
+    update_option(write, "sticky_posts", &Value::Array(list), None).await?;
+    Ok(())
 }
 
 /// `_reset_front_page_settings_for_post( $id )`.
 async fn reset_front_page(write: &mut Write<'_>, id: u64, kind: Kind) -> Result<()> {
     if kind == Kind::Page {
         if site::option_int(write, "page_on_front").await? == id {
-            site::update_option(write, "show_on_front", b"posts", None).await?;
-            site::update_option(write, "page_on_front", b"0", None).await?;
+            let posts = Value::String(b"posts".to_vec());
+            update_option(write, "show_on_front", &posts, None).await?;
+            update_option(write, "page_on_front", &Value::Int(0), None).await?;
         }
         if site::option_int(write, "page_for_posts").await? == id {
-            site::update_option(write, "page_for_posts", b"0", None).await?;
+            update_option(write, "page_for_posts", &Value::Int(0), None).await?;
         }
     }
     unstick(write, id).await
@@ -62,18 +77,10 @@ pub async fn wp_trash_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Res
         return Ok(false);
     }
     reset_front_page(write, id, Kind::of(&post.post_type)?).await?;
-    let time = ctx.now.to_string();
-    write
-        .add_meta(
-            Meta::Post,
-            id,
-            "_wp_trash_meta_status",
-            post.status.as_bytes(),
-        )
-        .await?;
-    write
-        .add_meta(Meta::Post, id, "_wp_trash_meta_time", time.as_bytes())
-        .await?;
+    let status = Value::String(post.status.into_bytes());
+    add_metadata(write, Meta::Post, id, TRASH_STATUS, &status, false).await?;
+    let time = Value::Int(ctx.now);
+    add_metadata(write, Meta::Post, id, TRASH_TIME, &time, false).await?;
     wp_update_post(write, ctx, id, &|args| args.status = "trash".into()).await?;
     // wp_trash_post_comments().
     let comments = write.post_comments(id).await?;
@@ -85,10 +92,8 @@ pub async fn wp_trash_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Res
                 (Key::Int(comment), Value::String(approved.into_bytes()))
             })
             .collect();
-        let statuses = encode(&Value::Array(statuses));
-        write
-            .add_meta(Meta::Post, id, "_wp_trash_meta_comments_status", &statuses)
-            .await?;
+        let statuses = Value::Array(statuses);
+        add_metadata(write, Meta::Post, id, COMMENTS_STATUS, &statuses, false).await?;
         write.trash_post_comments(id).await?;
     }
     Ok(true)
@@ -102,14 +107,12 @@ pub async fn wp_untrash_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> R
     if post.status != "trash" {
         return Ok(false);
     }
-    site::delete_post_meta(write, id, "_wp_trash_meta_status").await?;
-    site::delete_post_meta(write, id, "_wp_trash_meta_time").await?;
+    delete_post_meta(write, id, TRASH_STATUS).await?;
+    delete_post_meta(write, id, TRASH_TIME).await?;
     wp_update_post(write, ctx, id, &|args| args.status = "draft".into()).await?;
     // wp_untrash_post_comments().
-    let key = "_wp_trash_meta_comments_status";
-    let stored = write.post_meta_values(id, key).await?;
-    let statuses = stored.first().and_then(|value| unserialize(value));
-    let statuses = statuses.unwrap_or_default();
+    let stored = get_metadata(write, Meta::Post, id, COMMENTS_STATUS).await?;
+    let statuses = stored.into_iter().next().unwrap_or_default();
     if statuses.is_empty() {
         return Ok(true);
     }
@@ -130,7 +133,7 @@ pub async fn wp_untrash_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> R
         let status = String::from_utf8_lossy(&status).into_owned();
         write.set_comments_status(&comments, &status).await?;
     }
-    site::delete_post_meta(write, id, key).await?;
+    delete_post_meta(write, id, COMMENTS_STATUS).await?;
     Ok(true)
 }
 
@@ -145,10 +148,10 @@ async fn delete_one(
     // before_delete_post.
     reset_front_page(write, id, kind).await?;
     if kind == Kind::Page && site::option_int(write, "wp_page_for_privacy_policy").await? == id {
-        site::update_option(write, "wp_page_for_privacy_policy", b"0", None).await?;
+        update_option(write, "wp_page_for_privacy_policy", &Value::Int(0), None).await?;
     }
-    site::delete_post_meta(write, id, "_wp_trash_meta_status").await?;
-    site::delete_post_meta(write, id, "_wp_trash_meta_time").await?;
+    delete_post_meta(write, id, TRASH_STATUS).await?;
+    delete_post_meta(write, id, TRASH_TIME).await?;
     site::delete_object_terms(write, id, kind.taxonomies()).await?;
     if kind.hierarchical() {
         write
@@ -200,7 +203,7 @@ pub async fn wp_delete_post(
         )
         .await?;
     if !menu_items.is_empty() {
-        return Err(PostError::Unported("a post in a classic menu"));
+        return Err(Error::Unported("a post in a classic menu"));
     }
     // Revisions go through wp_delete_post() too, after their parent's
     // terms and children; their order changes no row.

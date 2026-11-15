@@ -14,7 +14,7 @@ use crate::page::{esc_js, json, object, text};
 use crate::posts::PostsSite;
 
 pub(crate) mod attachment;
-mod image;
+pub(crate) mod image;
 mod library;
 mod upload_new;
 

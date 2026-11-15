@@ -5,11 +5,14 @@
 //! hooks a default install runs on them. Each runs inside the caller's
 //! [`Write`], which the caller commits. Posts and pages are ported; other
 //! types, and what a default install never reaches, answer
-//! [`PostError::Unported`], and the caller's action rolls back.
+//! [`Error::Unported`], and the caller's action rolls back.
 
-use hyscribe_db::{DbError, PostFields, Write};
+use hyscribe_db::{PostFields, Write};
+use hyscribe_phpser::Value;
 use hyscribe_render::formatting::sanitize_title;
 
+use crate::Error;
+use crate::options::{Meta, delete_metadata, get_metadata};
 use crate::terms::{
     Taxonomy, TermError, TermList, TermRef, wp_set_post_categories, wp_set_post_terms,
 };
@@ -90,36 +93,18 @@ pub struct PostArgs {
     pub edit_date: bool,
 }
 
-/// Why a post function wrote nothing.
-#[derive(Debug)]
-pub enum PostError {
-    /// The database failed.
-    Db(DbError),
-    /// The `WP_Error` code PHP returns: `invalid_post`, `empty_content` or
-    /// `invalid_date`.
-    Invalid(&'static str),
-    /// A case HyScribe does not port yet.
-    Unported(&'static str),
-}
-
-impl From<TermError> for PostError {
-    fn from(err: TermError) -> PostError {
+impl From<TermError> for Error {
+    fn from(err: TermError) -> Error {
         match err {
-            TermError::Db(err) => PostError::Db(err),
-            TermError::Unported(what) => PostError::Unported(what),
+            TermError::Db(err) => Error::Db(err),
+            TermError::Unported(what) => Error::Unported(what),
             // Terms given by ID that do not exist are skipped instead.
-            _ => PostError::Invalid("invalid_term"),
+            _ => Error::Refused("invalid_term"),
         }
     }
 }
 
-impl From<DbError> for PostError {
-    fn from(err: DbError) -> PostError {
-        PostError::Db(err)
-    }
-}
-
-type Result<T> = std::result::Result<T, PostError>;
+type Result<T> = std::result::Result<T, Error>;
 
 /// The statuses `wp_insert_post()` and `wp_unique_post_slug()` give no slug.
 const UNSLUGGED: [&str; 3] = ["draft", "pending", "auto-draft"];
@@ -141,7 +126,7 @@ impl Kind {
             "post" => Ok(Kind::Post),
             "page" => Ok(Kind::Page),
             "revision" => Ok(Kind::Revision),
-            _ => Err(PostError::Unported("a post type other than post and page")),
+            _ => Err(Error::Unported("a post type other than post and page")),
         }
     }
 
@@ -166,7 +151,7 @@ fn truthy(value: &[u8]) -> bool {
 /// `get_post( $id )` of a post the caller needs.
 async fn existing(write: &mut Write<'_>, id: u64) -> Result<PostFields> {
     let post = write.post(id).await?;
-    post.ok_or(PostError::Invalid("invalid_post"))
+    post.ok_or(Error::Refused("invalid_post"))
 }
 
 /// `wp_insert_post( $postarr )`: the post's ID.
@@ -262,7 +247,7 @@ fn sanitize(mut args: PostArgs, ctx: &Context) -> Result<PostArgs> {
     let styles = |text: &[u8]| {
         let marker = b"isGlobalStylesUserThemeJSON";
         if text.windows(marker.len()).any(|w| w == marker) {
-            return Err(PostError::Unported("global styles content"));
+            return Err(Error::Unported("global styles content"));
         }
         Ok(post_kses(text))
     };
@@ -323,7 +308,7 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
         && !truthy(&args.title)
         && !truthy(&args.excerpt)
     {
-        return Err(PostError::Invalid("empty_content"));
+        return Err(Error::Refused("empty_content"));
     }
     let mut status = if args.status.is_empty() {
         "draft".to_string()
@@ -395,12 +380,12 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
     };
     let parent = hooks::parent_without_loop(write, args.parent, post_id).await?;
     if previous == "trash" && status != "trash" {
-        let desired = write
-            .post_meta_values(post_id, "_wp_desired_post_slug")
-            .await?;
-        if let Some(desired) = desired.into_iter().next().filter(|slug| truthy(slug)) {
-            site::delete_post_meta(write, post_id, "_wp_desired_post_slug").await?;
-            name = desired;
+        let key = "_wp_desired_post_slug";
+        let desired = get_metadata(write, Meta::Post, post_id, key).await?;
+        if let Some(desired) = desired.first().filter(|slug| !slug.is_empty()) {
+            name = desired.to_php_string();
+            let any = Value::String(Vec::new());
+            delete_metadata(write, Meta::Post, post_id, key, &any, false).await?;
         }
     }
     if status != "trash" && truthy(&name) {

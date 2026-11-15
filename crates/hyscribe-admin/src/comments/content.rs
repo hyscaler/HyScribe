@@ -33,13 +33,19 @@ fn comment(
         comment_type: comment_type.into(),
         parent,
         user_id,
-        ..Comment::default()
+        date_gmt: format!("2026-11-{day:02} 10:00:00"),
     }
 }
 
 /// The content's posts: post 1 with its three approved comments, the
 /// Sample Page with one, and a protected post.
 pub(crate) fn post(id: u64) -> Post {
+    let attachment = crate::media::attachment::content::posts()
+        .into_iter()
+        .find(|post| post.id == id);
+    if let Some(attachment) = attachment {
+        return attachment;
+    }
     match id {
         1 => Post {
             comment_count: 3,
@@ -126,6 +132,7 @@ pub(crate) fn comments(role: &Role) -> Vec<RecentComment> {
         (
             Comment {
                 date: "2026-11-04 11:00:00".into(),
+                date_gmt: "2026-11-04 11:00:00".into(),
                 ..comment(
                     505,
                     1,
@@ -207,7 +214,48 @@ pub(crate) fn comments(role: &Role) -> Vec<RecentComment> {
             "unapproved",
         ),
     ];
-    found.extend(rows.into_iter().map(|(comment, status)| {
+    // The g9attach variant's comments on the attachments of
+    // `reference/attachment-edit/content.sql`.
+    let attached = [
+        (
+            Comment {
+                date: "2026-03-05 10:00:00".into(),
+                date_gmt: "2026-03-05 10:00:00".into(),
+                ..comment(
+                    801,
+                    801,
+                    ("Visitor", "visitor@example.test", "", ""),
+                    5,
+                    "Nice",
+                    "comment",
+                    0,
+                    0,
+                )
+            },
+            "approved",
+        ),
+        (
+            comment(
+                802,
+                802,
+                ("Reader", "", "", ""),
+                8,
+                "On the report",
+                "comment",
+                0,
+                0,
+            ),
+            "approved",
+        ),
+        (
+            comment(803, 805, ("Reader", "", "", ""), 9, "Tiny", "comment", 0, 0),
+            "unapproved",
+        ),
+    ];
+    let attached = attached
+        .into_iter()
+        .filter(|_| role.variant() == "g9attach");
+    found.extend(rows.into_iter().chain(attached).map(|(comment, status)| {
         let post = post(comment.post_id);
         let permalink = crate::posts::PostsSite::permalink(role, &post);
         RecentComment {

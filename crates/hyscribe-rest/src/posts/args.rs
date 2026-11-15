@@ -14,6 +14,15 @@ use crate::types::context_arg;
 
 const IDS: &str = r#"{"type":"array","items":{"type":"integer"},"default":[]}"#;
 const STATUSES: &str = r#"{"default":"publish","type":"array","items":{"enum":["publish","future","draft","pending","private","trash","auto-draft","inherit","request-pending","request-confirmed","request-failed","request-completed","any"],"type":"string"}}"#;
+const ATTACHMENT_STATUSES: &str = r#"{"default":"inherit","type":"array","items":{"enum":["inherit","private","trash"],"type":"string"}}"#;
+
+/// The `status` argument's schema for `kind`.
+fn statuses_schema(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Attachment => ATTACHMENT_STATUSES,
+        _ => STATUSES,
+    }
+}
 
 /// `get_collection_params()` of the type, and the menu items' changes.
 pub(super) fn collection(kind: Kind) -> Vec<Arg> {
@@ -77,7 +86,7 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
             &format!(r#"{{"type":"string","default":"{by}","enum":{orderby}]}}"#),
         ),
     ]);
-    if kind == Kind::Page {
+    if matches!(kind, Kind::Page | Kind::Attachment) {
         args.extend([typed("parent", IDS), typed("parent_exclude", IDS)]);
     }
     args.extend([
@@ -88,7 +97,7 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
         typed("slug", r#"{"type":"array","items":{"type":"string"}}"#),
         arg(
             "status",
-            STATUSES,
+            statuses_schema(kind),
             false,
             Sanitize::Site(match kind {
                 Kind::Post => |context, value| statuses(context, value, Kind::Post),
@@ -96,9 +105,13 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
                 Kind::Block => |context, value| statuses(context, value, Kind::Block),
                 Kind::Navigation => |context, value| statuses(context, value, Kind::Navigation),
                 Kind::MenuItem => |context, value| statuses(context, value, Kind::MenuItem),
+                Kind::Attachment => |context, value| statuses(context, value, Kind::Attachment),
             }),
         ),
     ]);
+    if kind == Kind::Attachment {
+        args.extend(crate::media::collection_args());
+    }
     if !kind.taxonomies().is_empty() {
         args.push(typed(
             "tax_relation",
@@ -128,7 +141,7 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
 }
 
 /// The `id` of a single item's route.
-pub(super) fn id() -> Arg {
+pub(crate) fn id() -> Arg {
     typed("id", r#"{"type":"integer"}"#)
 }
 
@@ -148,7 +161,7 @@ fn limits(kind: Kind) -> &'static [&'static str] {
         Kind::Post => &["categories", "categories_exclude", "tags", "tags_exclude"],
         Kind::Block => &["wp_pattern_category", "wp_pattern_category_exclude"],
         Kind::MenuItem => &["menus", "menus_exclude"],
-        Kind::Page | Kind::Navigation => &[],
+        Kind::Page | Kind::Navigation | Kind::Attachment => &[],
     }
 }
 
@@ -159,12 +172,16 @@ pub(super) fn not_ported(kind: Kind) -> impl Iterator<Item = &'static str> {
 }
 
 /// `sanitize_post_statuses()`: `wp_parse_slug_list()`, each status but
-/// the default allowed only to those who can edit the type's posts, or
+/// the type's default allowed only to those who can edit the type's posts, or
 /// read its private ones for `private`.
 fn statuses(context: &Context, statuses: &Value, kind: Kind) -> Checked<Value> {
     let parsed = crate::schema::parse_slug_list(statuses);
-    let schema = json_decode(STATUSES.as_bytes()).unwrap_or_default();
-    for status in parsed.iter().filter(|status| *status != b"publish") {
+    let schema = json_decode(statuses_schema(kind).as_bytes()).unwrap_or_default();
+    let default = schema.get_str("default").map(Value::to_php_string);
+    for status in parsed
+        .iter()
+        .filter(|status| Some(*status) != default.as_ref())
+    {
         let private = status == b"private" && context.can(&kind.cap("read_private_posts"));
         if !context.can(&kind.cap("edit_posts")) && !private {
             let error = context.forbidden("rest_forbidden_status", "Status is forbidden.");

@@ -25,10 +25,7 @@ fn only_stored_dates_are_ported() {
         "2026-01-02 03:04-05",
         "x026-01-02 03:04:05",
     ] {
-        assert!(
-            matches!(canonical(date), Err(PostError::Unported(_))),
-            "{date}"
-        );
+        assert!(matches!(canonical(date), Err(Error::Unported(_))), "{date}");
     }
 }
 
@@ -95,18 +92,15 @@ fn dates_resolve_in_the_site_zone() {
     );
     assert!(matches!(
         resolve("2026-02-30 00:00:00", ""),
-        Err(PostError::Invalid("invalid_date"))
+        Err(Error::Refused("invalid_date"))
     ));
     assert!(matches!(
         resolve("someday", ""),
-        Err(PostError::Invalid("invalid_date"))
+        Err(Error::Refused("invalid_date"))
     ));
     assert!(matches!(
         resolve("2026-1-1 00:00:00", ""),
-        Err(PostError::Unported(_))
+        Err(Error::Unported(_))
     ));
-    assert!(matches!(
-        resolve("", "2024-05-06"),
-        Err(PostError::Unported(_))
-    ));
+    assert!(matches!(resolve("", "2024-05-06"), Err(Error::Unported(_))));
 }

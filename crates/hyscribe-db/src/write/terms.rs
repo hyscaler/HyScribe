@@ -487,6 +487,7 @@ impl Write<'_> {
 
     /// `get_option()`'s value of option `name`, read inside the action.
     pub async fn option_value(&mut self, name: &str) -> Result<Option<Vec<u8>>, DbError> {
+        self.spend()?;
         let query =
             self.sql("SELECT option_value FROM {prefix}options WHERE option_name = ? LIMIT 1");
         let row = query

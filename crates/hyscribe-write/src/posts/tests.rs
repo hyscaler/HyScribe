@@ -320,8 +320,10 @@ async fn updates_match_php() {
             let id = insert_post(writer, conn, oracle_post("publish")).await?;
             let note = b"[{\"id\":\"n1\",\"content\":\"A note.\"}]";
             act(writer, conn, &admin(), async |w, _| {
-                Ok(w.add_meta(hyscribe_db::Meta::Post, id, "footnotes", note)
-                    .await?)
+                Ok(
+                    w.add_meta(hyscribe_db::Meta::Post, id, "footnotes", Some(note))
+                        .await?,
+                )
             })
             .await?;
             Ok(id)
@@ -414,7 +416,7 @@ async fn trash_and_delete_match_php() {
             };
             let id = insert_post(writer, conn, args).await?;
             act(writer, conn, &admin(), async |w, _| {
-                site::update_option(w, "sticky_posts", b"a:1:{i:0;i:930;}", None).await
+                set(w, "sticky_posts", b"a:1:{i:0;i:930;}").await
             })
             .await?;
             Ok(id)
@@ -457,8 +459,8 @@ async fn trash_and_delete_match_php() {
             let id = insert_post(writer, conn, parent).await?;
             insert_post(writer, conn, page(b"Kid", id)).await?;
             act(writer, conn, &admin(), async |w, _| {
-                site::update_option(w, "show_on_front", b"page", None).await?;
-                site::update_option(w, "page_on_front", b"910", None).await
+                set(w, "show_on_front", b"page").await?;
+                set(w, "page_on_front", b"910").await
             })
             .await?;
             Ok(id)
@@ -477,6 +479,13 @@ async fn trash_raw(writer: &Writer, conn: &mut Connection, id: u64) -> StdResult
     Ok(id)
 }
 
+/// `update_option()` of a value stored as `raw`, unserialized first.
+async fn set(w: &mut Write<'_>, name: &str, raw: &[u8]) -> Result<()> {
+    let value = hyscribe_phpser::unserialize(raw).unwrap_or_else(|| Value::String(raw.to_vec()));
+    crate::options::update_option(w, name, &value, None).await?;
+    Ok(())
+}
+
 /// `update_option()` as a setup makes it.
 async fn set_option(
     writer: &Writer,
@@ -485,7 +494,7 @@ async fn set_option(
     value: &[u8],
 ) -> StdResult<(), String> {
     act(writer, conn, &admin(), async |w, _| {
-        site::update_option(w, name, value, None).await
+        set(w, name, value).await
     })
     .await
 }
@@ -751,10 +760,7 @@ async fn edge_cases_match_php() {
             let id = publish(conn).await?;
             // _wp_put_post_revision( $post, true ).
             act(writer, conn, &admin(), async |w, ctx| {
-                let post = w
-                    .post(id)
-                    .await?
-                    .ok_or(PostError::Invalid("invalid_post"))?;
+                let post = w.post(id).await?.ok_or(Error::Refused("invalid_post"))?;
                 let args = PostArgs {
                     title: post.title,
                     content: post.content,
@@ -804,11 +810,11 @@ async fn rolled_back<T>(f: impl AsyncFnOnce(&mut Write<'_>, &Context) -> Result<
 }
 
 fn unported<T>(result: Result<T>) -> bool {
-    matches!(result, Err(PostError::Unported(_)))
+    matches!(result, Err(Error::Unported(_)))
 }
 
 fn invalid<T>(result: Result<T>, code: &str) -> bool {
-    matches!(result, Err(PostError::Invalid(found)) if found == code)
+    matches!(result, Err(Error::Refused(found)) if found == code)
 }
 
 async fn insert_rolled_back(args: PostArgs) -> Result<u64> {
@@ -848,7 +854,7 @@ async fn what_php_refuses_is_refused() {
     let Err(err) = Writer::open(&closed, hyscribe_config::Mode::Primary).await else {
         panic!("no database on port 1");
     };
-    assert!(matches!(PostError::from(err), PostError::Db(_)));
+    assert!(matches!(Error::from(err), Error::Db(_)));
 }
 
 #[tokio::test]
@@ -879,7 +885,7 @@ async fn what_hyscribe_does_not_port_is_refused() {
         assert!(unported(insert_rolled_back(styles).await));
     }
     let pretty = rolled_back(async |w, ctx| {
-        site::update_option(w, "permalink_structure", b"/%postname%/", None).await?;
+        set(w, "permalink_structure", b"/%postname%/").await?;
         wp_insert_post(w, ctx, oracle_post("publish")).await
     })
     .await;
@@ -890,14 +896,19 @@ async fn what_hyscribe_does_not_port_is_refused() {
     };
     let menus = rolled_back(async |w, ctx| {
         let options = b"a:1:{s:8:\"auto_add\";a:1:{i:0;i:5;}}";
-        site::update_option(w, "nav_menu_options", options, None).await?;
+        set(w, "nav_menu_options", options).await?;
         wp_insert_post(w, ctx, page()).await
     })
     .await;
     assert!(unported(menus));
     let menu_item = rolled_back(async |w, ctx| {
-        w.add_meta(hyscribe_db::Meta::Post, 2, "_menu_item_object_id", b"1")
-            .await?;
+        w.add_meta(
+            hyscribe_db::Meta::Post,
+            2,
+            "_menu_item_object_id",
+            Some(b"1"),
+        )
+        .await?;
         wp_delete_post(w, ctx, 1, true).await
     })
     .await;
@@ -914,14 +925,14 @@ async fn what_hyscribe_does_not_port_is_refused() {
         )
         .await?;
         let c = wp_insert_post(w, ctx, page()).await?;
-        let post = w.post(a).await?.ok_or(PostError::Invalid("invalid_post"))?;
+        let post = w.post(a).await?.ok_or(Error::Refused("invalid_post"))?;
         w.update_post(a, &PostFields { parent: b, ..post }).await?;
         wp_update_post(w, ctx, c, &|args| args.parent = a).await
     })
     .await;
     assert!(unported(looped));
     let old_cron = rolled_back(async |w, ctx| {
-        site::update_option(w, "cron", b"a:0:{}", None).await?;
+        set(w, "cron", b"a:0:{}").await?;
         wp_insert_post(w, ctx, oracle_post("publish")).await
     })
     .await;
@@ -953,7 +964,7 @@ async fn odd_stored_values_are_read_as_php_reads_them() {
     let _one = ONE_AT_A_TIME.lock().await;
     // A cron option that is not an array starts a new one.
     let cron = rolled_back(async |w, ctx| {
-        site::update_option(w, "cron", b"s:3:\"bad\";", None).await?;
+        set(w, "cron", b"s:3:\"bad\";").await?;
         wp_insert_post(w, ctx, oracle_post("publish")).await?;
         Ok(w.option_value("cron").await?.unwrap_or_default())
     })
@@ -967,7 +978,7 @@ async fn odd_stored_values_are_read_as_php_reads_them() {
     );
     // So does a sticky_posts option that is not an array.
     let sticky = rolled_back(async |w, ctx| {
-        site::update_option(w, "sticky_posts", b"s:1:\"x\";", None).await?;
+        set(w, "sticky_posts", b"s:1:\"x\";").await?;
         wp_trash_post(w, ctx, 1).await
     })
     .await;
@@ -978,37 +989,6 @@ async fn odd_stored_values_are_read_as_php_reads_them() {
         ..oracle_post("draft")
     };
     assert!(insert_rolled_back(taken).await.unwrap() > 3);
-    let autoload = rolled_back(async |w, _| {
-        site::update_option(w, "hyscribe_big", &[b'x'; 150_001], None).await?;
-        site::update_option(w, "hyscribe_small", b"x", None).await?;
-        site::update_option(w, "hyscribe_on", b"x", Some("on")).await?;
-        let names = ["hyscribe_big", "hyscribe_small", "hyscribe_on"];
-        for name in names {
-            w.update_option_autoload(name, b"x", "auto-on").await?;
-            site::update_option(w, name, b"y", None).await?;
-        }
-        w.update_option_autoload("hyscribe_on", b"x", "on").await?;
-        site::update_option(w, "hyscribe_on", b"z", None).await?;
-        let mut autoloads = Vec::new();
-        for name in names {
-            autoloads.push(w.option_autoload(name).await?.unwrap_or_default());
-        }
-        Ok(autoloads)
-    })
-    .await;
-    assert_eq!(autoload.unwrap(), ["auto", "auto", "on"]);
-    let sizes = rolled_back(async |w, _| {
-        site::update_option(w, "hyscribe_big", &[b'x'; 150_001], None).await?;
-        site::update_option(w, "hyscribe_edge", &[b'x'; 150_000], None).await?;
-        Ok([
-            w.option_autoload("hyscribe_big").await?.unwrap_or_default(),
-            w.option_autoload("hyscribe_edge")
-                .await?
-                .unwrap_or_default(),
-        ])
-    })
-    .await;
-    assert_eq!(sizes.unwrap(), ["auto-off", "auto"]);
 }
 
 #[tokio::test]
@@ -1055,12 +1035,12 @@ async fn every_cut(
         faults.arm(Some(commands));
         let result = match writer.begin_on(&mut outer).await {
             Ok(mut write) => action(&mut write, &ctx, id).await,
-            Err(err) => Err(PostError::Db(err)),
+            Err(err) => Err(Error::Db(err)),
         };
         faults.arm(None);
         match result {
             Ok(()) => return,
-            Err(PostError::Db(_)) => {}
+            Err(Error::Db(_)) => {}
             Err(other) => panic!("{other:?} after {commands} commands"),
         }
     }
@@ -1116,7 +1096,7 @@ async fn database_errors_end_every_function() {
             user_id: 0,
         };
         let first = w.insert_comment(&reply).await?;
-        w.add_meta(hyscribe_db::Meta::Comment, first, "oracle", b"1")
+        w.add_meta(hyscribe_db::Meta::Comment, first, "oracle", Some(b"1"))
             .await?;
         w.insert_comment(&CommentFields {
             parent: first,
@@ -1218,7 +1198,7 @@ async fn database_errors_end_every_function() {
         writer,
         async |w, ctx| {
             let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
-            w.add_meta(hyscribe_db::Meta::Post, id, "footnotes", b"[]")
+            w.add_meta(hyscribe_db::Meta::Post, id, "footnotes", Some(b"[]"))
                 .await?;
             wp_update_post(w, ctx, id, &|args| args.title = b"A renamed post".to_vec()).await?;
             Ok(id)
@@ -1253,17 +1233,11 @@ async fn database_errors_end_every_function() {
             let id = wp_insert_post(w, ctx, page("Front", 0)).await?;
             wp_insert_post(w, ctx, page("Kid", id)).await?;
             let front = id.to_string();
-            site::update_option(w, "show_on_front", b"page", None).await?;
-            site::update_option(w, "page_on_front", front.as_bytes(), None).await?;
-            site::update_option(w, "page_for_posts", front.as_bytes(), None).await?;
-            site::update_option(w, "wp_page_for_privacy_policy", front.as_bytes(), None).await?;
-            site::update_option(
-                w,
-                "sticky_posts",
-                format!("a:1:{{i:0;i:{id};}}").as_bytes(),
-                None,
-            )
-            .await?;
+            set(w, "show_on_front", b"page").await?;
+            set(w, "page_on_front", front.as_bytes()).await?;
+            set(w, "page_for_posts", front.as_bytes()).await?;
+            set(w, "wp_page_for_privacy_policy", front.as_bytes()).await?;
+            set(w, "sticky_posts", format!("a:1:{{i:0;i:{id};}}").as_bytes()).await?;
             Ok(id)
         },
         deleting,
@@ -1331,7 +1305,7 @@ async fn rare_values_are_kept_as_php_keeps_them() {
     let _one = ONE_AT_A_TIME.lock().await;
     // No default category: a published draft stays without one.
     let uncategorized = rolled_back(async |w, ctx| {
-        site::update_option(w, "default_category", b"0", None).await?;
+        set(w, "default_category", b"0").await?;
         let id = wp_insert_post(w, ctx, oracle_post("draft")).await?;
         w.remove_relationships(id, &[1]).await?;
         wp_publish_post(w, ctx, id).await?;
@@ -1353,7 +1327,7 @@ async fn rare_values_are_kept_as_php_keeps_them() {
     let sticky = rolled_back(async |w, ctx| {
         let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
         let list = format!("a:4:{{i:0;i:{id};i:1;i:7;i:2;s:1:\"7\";i:3;i:{id};}}");
-        site::update_option(w, "sticky_posts", list.as_bytes(), None).await?;
+        set(w, "sticky_posts", list.as_bytes()).await?;
         wp_trash_post(w, ctx, id).await?;
         Ok(w.option_value("sticky_posts").await?.unwrap_or_default())
     })
@@ -1489,18 +1463,6 @@ async fn database_errors_end_the_rarer_paths() {
         },
     )
     .await;
-    every_cut(
-        faults,
-        writer,
-        async |w, _| {
-            site::update_option(w, "hyscribe_auto", b"x", None).await?;
-            w.update_option_autoload("hyscribe_auto", b"x", "auto-on")
-                .await?;
-            Ok(0)
-        },
-        async |w, _, _| site::update_option(w, "hyscribe_auto", b"y", None).await,
-    )
-    .await;
 }
 
 #[tokio::test]
@@ -1521,8 +1483,32 @@ async fn post_formats_are_not_ported() {
 
 #[test]
 fn term_errors_are_post_errors() {
-    let unported = PostError::from(crate::terms::TermError::Unported("x"));
-    assert!(matches!(unported, PostError::Unported("x")));
-    let invalid = PostError::from(crate::terms::TermError::InvalidTerm);
-    assert!(matches!(invalid, PostError::Invalid("invalid_term")));
+    let unported = Error::from(crate::terms::TermError::Unported("x"));
+    assert!(matches!(unported, Error::Unported("x")));
+    let invalid = Error::from(crate::terms::TermError::InvalidTerm);
+    assert!(matches!(invalid, Error::Refused("invalid_term")));
+}
+
+#[tokio::test]
+async fn revisions_copy_footnotes_as_stored() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let copied = rolled_back(async |w, ctx| {
+        let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+        let meta = hyscribe_db::Meta::Post;
+        let values: [&[u8]; 3] = [b"a:1:{i:0;s:3:\"a\\b\";}", b"i:5;", b"x\\y"];
+        for value in values {
+            w.add_meta(meta, id, "footnotes", Some(value)).await?;
+        }
+        wp_update_post(w, ctx, id, &|args| args.title = b"Renamed".to_vec()).await?;
+        let revision = w.revision_ids(id).await?.first().copied().unwrap_or(0);
+        let rows = w.object_meta(meta, revision).await?;
+        Ok(rows.into_iter().map(|(_, value)| value).collect::<Vec<_>>())
+    })
+    .await;
+    let expected: Vec<Option<Vec<u8>>> = vec![
+        Some(b"a:1:{i:0;s:3:\"a\\b\";}".to_vec()),
+        Some(b"5".to_vec()),
+        Some(b"x\\y".to_vec()),
+    ];
+    assert_eq!(copied.unwrap(), expected);
 }

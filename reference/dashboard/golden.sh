@@ -7,7 +7,8 @@
 # Cached Site Health counts, a private site and a user's widget layout come
 # from filters (reference/dashboard/variants.php); the content variant adds
 # reference/dashboard/content.sql and deletes it after; the f9 variants add
-# a query string or the user's settings (reference/dashboard/variants.php). Masks as
+# a query string or the user's settings (reference/dashboard/variants.php),
+# and g9pages pages comments. Masks as
 # reference/admin-page/golden.sh. Start from a fresh db.sh up, then php.sh up,
 # and take both down after.
 set -euo pipefail
@@ -62,6 +63,7 @@ record f9remind administrator '?admin_email_remind_later=1'
 record f9old administrator '?admin_email_remind_later=1'
 record f9folded administrator
 record f9unfold editor
+record g9pages administrator
 remove_content
 sql < "$ROOT/reference/dashboard/content.sql"
 for role in administrator editor author subscriber; do

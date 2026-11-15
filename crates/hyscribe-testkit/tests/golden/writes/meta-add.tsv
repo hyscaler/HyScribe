@@ -1,0 +1,37 @@
+# The rows PHP WordPress writes for the action meta-add (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 19:47:50 to 2026-11-14 19:47:50 UTC.
+# %wp_postmeta:1% is 3.
+# %wp_postmeta:2% is 4.
+# %wp_postmeta:3% is 5.
+# %wp_commentmeta:1% is 1.
+# %wp_termmeta:1% is 1.
+# %wp_usermeta:1% is 45.
+# %wp_usermeta:2% is 46.
+wp_commentmeta	%wp_commentmeta:1%	+	comment_id	1
+wp_commentmeta	%wp_commentmeta:1%	+	meta_id	%wp_commentmeta:1%
+wp_commentmeta	%wp_commentmeta:1%	+	meta_key	oracle_list
+wp_commentmeta	%wp_commentmeta:1%	+	meta_value	a:1:{s:1:"a";s:2:"bc";}
+wp_postmeta	%wp_postmeta:1%	+	meta_id	%wp_postmeta:1%
+wp_postmeta	%wp_postmeta:1%	+	meta_key	oracle_key
+wp_postmeta	%wp_postmeta:1%	+	meta_value	one
+wp_postmeta	%wp_postmeta:1%	+	post_id	1
+wp_postmeta	%wp_postmeta:2%	+	meta_id	%wp_postmeta:2%
+wp_postmeta	%wp_postmeta:2%	+	meta_key	oracle_key
+wp_postmeta	%wp_postmeta:2%	+	meta_value	two
+wp_postmeta	%wp_postmeta:2%	+	post_id	1
+wp_postmeta	%wp_postmeta:3%	+	meta_id	%wp_postmeta:3%
+wp_postmeta	%wp_postmeta:3%	+	meta_key	oracle_unique
+wp_postmeta	%wp_postmeta:3%	+	meta_value	u
+wp_postmeta	%wp_postmeta:3%	+	post_id	1
+wp_termmeta	%wp_termmeta:1%	+	meta_id	%wp_termmeta:1%
+wp_termmeta	%wp_termmeta:1%	+	meta_key	oracle_slash
+wp_termmeta	%wp_termmeta:1%	+	meta_value	ab
+wp_termmeta	%wp_termmeta:1%	+	term_id	1
+wp_usermeta	%wp_usermeta:1%	+	meta_key	oracle_int
+wp_usermeta	%wp_usermeta:1%	+	meta_value	5
+wp_usermeta	%wp_usermeta:1%	+	umeta_id	%wp_usermeta:1%
+wp_usermeta	%wp_usermeta:1%	+	user_id	1
+wp_usermeta	%wp_usermeta:2%	+	meta_key	oracle_key
+wp_usermeta	%wp_usermeta:2%	+	meta_value	
+wp_usermeta	%wp_usermeta:2%	+	umeta_id	%wp_usermeta:2%
+wp_usermeta	%wp_usermeta:2%	+	user_id	1

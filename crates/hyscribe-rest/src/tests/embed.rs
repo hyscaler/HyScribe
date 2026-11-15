@@ -5,10 +5,9 @@
 
 use hyscribe_testkit::{RestCase, rest_cases};
 
-/// A post with a featured image, whose `wp:featuredmedia` link is to the
-/// media route, not ported, and term searches over every taxonomy.
+/// Term searches over every taxonomy.
 fn unported(case: &RestCase) -> bool {
-    case.target == "/?rest_route=/wp/v2/posts/1011&_embed" || case.target.contains("type=term")
+    case.target.contains("type=term")
 }
 
 #[test]

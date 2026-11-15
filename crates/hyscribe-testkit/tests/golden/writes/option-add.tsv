@@ -1,0 +1,37 @@
+# The rows PHP WordPress writes for the action option-add (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 19:47:48 to 2026-11-14 19:47:48 UTC.
+# %wp_options:1% is 130.
+# %wp_options:2% is 131.
+# %wp_options:3% is 132.
+# %wp_options:4% is 133.
+# %wp_options:5% is 134.
+# %wp_options:6% is 135.
+# %wp_options:7% is 136.
+wp_options	oracle_list	+	autoload	off
+wp_options	oracle_list	+	option_id	%wp_options:3%
+wp_options	oracle_list	+	option_name	oracle_list
+wp_options	oracle_list	+	option_value	a:2:{s:1:"a";i:1;s:1:"b";a:3:{i:0;b:1;i:1;N;i:2;d:1.5;}}
+wp_options	oracle_no	+	autoload	off
+wp_options	oracle_no	+	option_id	%wp_options:5%
+wp_options	oracle_no	+	option_name	oracle_no
+wp_options	oracle_no	+	option_value	x
+wp_options	oracle_serialized	+	autoload	auto
+wp_options	oracle_serialized	+	option_id	%wp_options:7%
+wp_options	oracle_serialized	+	option_name	oracle_serialized
+wp_options	oracle_serialized	+	option_value	s:14:"a:1:{i:0;i:1;}";
+wp_options	oracle_text	+	autoload	auto
+wp_options	oracle_text	+	option_id	%wp_options:1%
+wp_options	oracle_text	+	option_name	oracle_text
+wp_options	oracle_text	+	option_value	A value
+wp_options	oracle_trimmed	+	autoload	auto
+wp_options	oracle_trimmed	+	option_id	%wp_options:2%
+wp_options	oracle_trimmed	+	option_name	oracle_trimmed
+wp_options	oracle_trimmed	+	option_value	2
+wp_options	oracle_true	+	autoload	on
+wp_options	oracle_true	+	option_id	%wp_options:6%
+wp_options	oracle_true	+	option_name	oracle_true
+wp_options	oracle_true	+	option_value	x
+wp_options	oracle_yes	+	autoload	on
+wp_options	oracle_yes	+	option_id	%wp_options:4%
+wp_options	oracle_yes	+	option_name	oracle_yes
+wp_options	oracle_yes	+	option_value	x

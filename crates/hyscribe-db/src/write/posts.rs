@@ -130,31 +130,6 @@ impl Write<'_> {
         self.ids(query.bind(name).bind(id)).await
     }
 
-    /// `get_post_meta( $post, $key )`: the values in the order added.
-    pub async fn post_meta_values(
-        &mut self,
-        post: u64,
-        key: &str,
-    ) -> Result<Vec<Vec<u8>>, DbError> {
-        let query = self.sql(
-            "SELECT meta_value FROM {prefix}postmeta WHERE post_id = ? AND meta_key = ? \
-             ORDER BY meta_id",
-        );
-        let rows = query
-            .bind(post)
-            .bind(key)
-            .fetch_all(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
-        rows.iter()
-            .map(|row| {
-                let mut c = Columns::new(row);
-                let value = c.bytes("meta_value");
-                c.finish(value)
-            })
-            .collect()
-    }
-
     /// `block_core_calendar_update_has_published_posts()`'s query.
     pub async fn published_post_exists(&mut self) -> Result<bool, DbError> {
         let query = self.sql(

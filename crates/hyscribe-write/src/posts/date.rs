@@ -7,7 +7,7 @@
 use hyscribe_db::Write;
 use hyscribe_render::date::{Zone, format_unix, site_zone, stored_unix};
 
-use super::{PostError, Result, ZERO_DATE, truthy};
+use super::{Error, Result, ZERO_DATE, truthy};
 
 const MYSQL: &str = "Y-m-d H:i:s";
 
@@ -32,7 +32,7 @@ pub(super) fn canonical(date: &str) -> Result<&str> {
     if time {
         Ok(date)
     } else {
-        Err(PostError::Unported("a date not shaped YYYY-MM-DD hh:mm:ss"))
+        Err(Error::Unported("a date not shaped YYYY-MM-DD hh:mm:ss"))
     }
 }
 
@@ -118,7 +118,7 @@ impl Dates {
         };
         let (year, month, day) = ymd(&date);
         if !checkdate(month, day, year) {
-            return Err(PostError::Invalid("invalid_date"));
+            return Err(Error::Refused("invalid_date"));
         }
         canonical(&date)?;
         Ok(date)

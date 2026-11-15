@@ -3,10 +3,13 @@
 //! `wp_unique_post_slug()`, `_truncate_post_slug()` and the `__trashed`
 //! suffix trashed posts give up their slug with.
 
-use hyscribe_db::{Meta, Write};
+use hyscribe_db::Write;
+use hyscribe_phpser::Value;
 use hyscribe_render::formatting::sanitize_title_for_query;
 
-use super::{Kind, PostError, Result, UNSLUGGED};
+use crate::options::{Meta, add_metadata};
+
+use super::{Error, Kind, Result, UNSLUGGED};
 
 /// `$wp_rewrite->feeds`.
 const FEEDS: [&[u8]; 5] = [b"feed", b"rdf", b"rss", b"rss2", b"atom"];
@@ -16,7 +19,7 @@ fn truncate(slug: &[u8], length: usize) -> Result<Vec<u8>> {
     let mut slug = slug.to_vec();
     if slug.len() > length {
         if hyscribe_phpser::urldecode(&slug) != slug {
-            return Err(PostError::Unported("a long percent-encoded slug"));
+            return Err(Error::Unported("a long percent-encoded slug"));
         }
         slug.truncate(length);
     }
@@ -127,9 +130,16 @@ pub(super) async fn suffix_trashed(write: &mut Write<'_>, id: u64) -> Result<Vec
     if name.ends_with(b"__trashed") {
         return Ok(name);
     }
-    write
-        .add_meta(Meta::Post, id, "_wp_desired_post_slug", &name)
-        .await?;
+    let desired = Value::String(name.clone());
+    add_metadata(
+        write,
+        Meta::Post,
+        id,
+        "_wp_desired_post_slug",
+        &desired,
+        false,
+    )
+    .await?;
     let mut trashed = truncate(&name, 191)?;
     trashed.extend_from_slice(b"__trashed");
     write.set_post_name(id, &trashed).await?;

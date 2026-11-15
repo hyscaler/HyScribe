@@ -34,6 +34,9 @@ impl Site for Fuzzed<'_> {
     fn create_nonce(&self) -> String {
         "n".into()
     }
+    fn nonce(&self, action: &str) -> String {
+        action.into()
+    }
     fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
         user % 2 == 1 && (cap.len() + args.len()) % 2 == 0
     }

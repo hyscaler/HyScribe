@@ -4,7 +4,9 @@
 //! `delete_metadata()` and the `_by_mid` ones), for the four meta tables.
 
 use super::{Table, Write};
-use crate::{DbError, Sql, db_error, ids_or_none, list};
+use sqlx::Row as _;
+
+use crate::{Columns, DbError, Sql, db_error, ids_or_none, list};
 
 /// What a meta row belongs to, which names its table.
 #[derive(Clone, Copy, Debug)]
@@ -32,6 +34,7 @@ struct Statements {
     ids_of_key: &'static str,
     ids_of_key_valued: &'static str,
     object_ids: &'static str,
+    object_meta: &'static str,
     value: &'static str,
 }
 
@@ -111,6 +114,14 @@ macro_rules! statements {
                 $object,
                 " = ?"
             ),
+            object_meta: concat!(
+                "SELECT meta_key, meta_value FROM {prefix}",
+                $name,
+                " WHERE ",
+                $object,
+                " = ? ORDER BY ",
+                $id
+            ),
             value: concat!(
                 "SELECT meta_value FROM {prefix}",
                 $name,
@@ -141,13 +152,14 @@ impl Meta {
 }
 
 impl Write<'_> {
-    /// `add_metadata()`'s `INSERT`: the new row's ID.
+    /// `add_metadata()`'s `INSERT`: the new row's ID. `None` stores NULL,
+    /// as `wpdb` does for PHP's `null`.
     pub async fn add_meta(
         &mut self,
         meta: Meta,
         object: u64,
         key: &str,
-        value: &[u8],
+        value: Option<&[u8]>,
     ) -> Result<u64, DbError> {
         let s = meta.statements();
         let query = self.sql(s.add).bind(object).bind(key).bind(value);
@@ -160,7 +172,7 @@ impl Write<'_> {
         meta: Meta,
         object: u64,
         key: &str,
-        value: &[u8],
+        value: Option<&[u8]>,
     ) -> Result<u64, DbError> {
         let s = meta.statements();
         let query = self.sql(s.update).bind(value).bind(object).bind(key);
@@ -174,7 +186,7 @@ impl Write<'_> {
         meta: Meta,
         (object, key): (u64, &str),
         previous: &[u8],
-        value: &[u8],
+        value: Option<&[u8]>,
     ) -> Result<u64, DbError> {
         let s = meta.statements();
         let query = self.sql(s.update_from).bind(value).bind(object).bind(key);
@@ -272,5 +284,25 @@ impl Write<'_> {
     pub async fn object_meta_ids(&mut self, meta: Meta, object: u64) -> Result<Vec<u64>, DbError> {
         let query = self.sql(meta.statements().object_ids).bind(object);
         self.ids(query).await
+    }
+
+    /// Every meta row of `object`, keys and values in ID order, as
+    /// `update_meta_cache()` reads them; a NULL value is `None`.
+    pub async fn object_meta(
+        &mut self,
+        meta: Meta,
+        object: u64,
+    ) -> Result<Vec<(Vec<u8>, Option<Vec<u8>>)>, DbError> {
+        self.spend()?;
+        let query = self.sql(meta.statements().object_meta).bind(object);
+        let rows = query.fetch_all(&mut *self.tx).await.map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let key = c.bytes("meta_key");
+                let value = c.keep(row.try_get_unchecked::<Option<Vec<u8>>, _>("meta_value"));
+                c.finish((key, value))
+            })
+            .collect()
     }
 }

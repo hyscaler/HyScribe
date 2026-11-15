@@ -3,7 +3,9 @@
 #
 # Records the PHP oracle's Comments screen, then over
 # reference/comments-list/content.sql, which it adds and deletes after, with
-# filters from reference/comments-list/variants.php; the page's time masked
+# filters from reference/comments-list/variants.php, and, for the g9attach
+# variant, over reference/attachment-edit/content.sql with comments on its
+# attachments; the page's time masked
 # as %pagegen%, as
 # crates/hyscribe-admin/tests/golden/comments-list.tsv:
 #   variant?query<TAB>role<TAB>hex(page)
@@ -23,7 +25,9 @@ NONCES=$(mktemp)
 sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress; }
 cleanup() {
   rm -f "$TMP" "$NONCES"
-  echo "DELETE FROM wp_comments WHERE comment_ID BETWEEN 501 AND 508; DELETE FROM wp_posts WHERE ID = 501;
+  echo "DELETE FROM wp_comments WHERE comment_ID BETWEEN 501 AND 508 OR comment_ID BETWEEN 801 AND 803;
+    DELETE FROM wp_posts WHERE ID = 501 OR ID BETWEEN 801 AND 809; DELETE FROM wp_postmeta WHERE meta_id BETWEEN 801 AND 813;
+    DELETE FROM wp_users WHERE ID IN (2, 3); DELETE FROM wp_usermeta WHERE umeta_id BETWEEN 801 AND 806;
     DELETE FROM wp_commentmeta WHERE meta_id BETWEEN 501 AND 504;
     UPDATE wp_posts SET comment_count = 1 WHERE ID = 1; UPDATE wp_posts SET comment_count = 0 WHERE ID = 2;
     UPDATE wp_comments SET comment_approved = '1' WHERE comment_ID = 1;" | sql
@@ -33,7 +37,7 @@ trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/comments-list/variants.php"
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce bulk-comments replyto-comment fetch-list-WP_Comments_List_Table internal-linking bulk-destroy"
-for id in 1 501 502 503 504 505 506 507 508; do
+for id in 1 501 502 503 504 505 506 507 508 801 802 803; do
   actions="$actions approve-comment_$id delete-comment_$id"
 done
 # shellcheck disable=SC2086
@@ -68,6 +72,8 @@ for view in moderated trash; do
   record default administrator "?comment_status=$view"
 done
 record default administrator '?p=1'
+record g9keys administrator ''
+record g9pages administrator ''
 # With its only comment in the Trash the list is empty.
 echo "UPDATE wp_comments SET comment_approved = 'trash' WHERE comment_ID = 1;" | sql
 record empty administrator ''
@@ -101,5 +107,15 @@ for page in 2 4 -2 0 9; do
 done
 record paged administrator '?comment_status=approved&paged=2'
 record hidecols administrator ''
+record g9cpages administrator ''
+record g9coldest administrator ''
+# Comments on an image, a PDF and a tiny image.
+sql < "$ROOT/reference/attachment-edit/content.sql"
+echo "INSERT INTO wp_comments (comment_ID, comment_post_ID, comment_author, comment_date, comment_date_gmt, comment_content,
+  comment_approved, comment_type) VALUES (802, 802, 'Reader', '2026-11-08 10:00:00', '2026-11-08 10:00:00', 'On the report', '1', 'comment'),
+  (803, 805, 'Reader', '2026-11-09 10:00:00', '2026-11-09 10:00:00', 'Tiny', '0', 'comment');" | sql
+record g9attach administrator ''
+record g9attach administrator '?p=801'
+record g9attach editor ''
 rm -f "$TMP.head"
 wc -l "$OUT"

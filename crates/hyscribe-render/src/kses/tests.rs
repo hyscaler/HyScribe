@@ -143,6 +143,23 @@ fn data_keeps_the_allowed_tags() {
     );
 }
 
+/// A biography keeps links' `rel` and `target` too, as the write oracle's
+/// `user-insert-every-field` records.
+#[test]
+fn user_descriptions_keep_link_relations() {
+    assert_eq!(
+        wp_kses_user_description(
+            b"<a href=\"https://example.test\" rel=\"me\" target=\"_blank\" onclick=\"x()\">Me</a> \
+              & <b>bold</b> <script>x</script>"
+        ),
+        b"<a href=\"https://example.test\" rel=\"me\" target=\"_blank\">Me</a> &amp; <b>bold</b> x"
+    );
+    assert_eq!(
+        wp_kses_data(b"<a rel=\"me\" target=\"_blank\">l</a>"),
+        b"<a>l</a>"
+    );
+}
+
 /// What PHP saved for comments' content in the write oracle's
 /// `new-comment-unfiltered` and `new-comment-anonymous` (no kses) and
 /// `new-comment-by-admin` (kses, then `wp_rel_ugc()`).

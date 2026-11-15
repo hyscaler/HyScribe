@@ -14,6 +14,7 @@ use super::*;
 
 pub(crate) mod content;
 mod embed;
+mod media;
 mod people;
 mod posts;
 mod search;
@@ -120,6 +121,9 @@ impl Site for Oracle {
     }
     fn create_nonce(&self) -> String {
         "%nonce%".into()
+    }
+    fn nonce(&self, _: &str) -> String {
+        "%preview_nonce%".into()
     }
     fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
         user != 0 && Capabilities::load(self, "wp_", user).has_cap(self, cap, args)
@@ -767,7 +771,11 @@ fn self_links_hint_what_their_route_allows() {
         uri: b"/",
         parameters: false,
     };
-    for route in ["/nope", "/wp/v2/media", "/wp/v2/block-types/core/paragraph"] {
+    for route in [
+        "/nope",
+        "/wp/v2/plugins",
+        "/wp/v2/block-types/core/paragraph",
+    ] {
         let mut response = Response::new(Value::Array(Vec::new()), 200);
         self_link(&context, &mut response, route);
         let href = oracle.rest_url(route);

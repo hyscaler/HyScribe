@@ -606,6 +606,44 @@ impl<'w> Write<'w> {
         self.count(query.bind(post)).await
     }
 
+    /// `get_comment_count( $post )`'s approved, held, spam, trashed and
+    /// post-trashed comments, notes left out, of every post for 0.
+    pub async fn comment_counts(&mut self, post: u64) -> Result<[u64; 5], DbError> {
+        let query = self.sql(
+            "SELECT COUNT(CASE WHEN comment_approved = '1' THEN 1 END), \
+             COUNT(CASE WHEN comment_approved = '0' THEN 1 END), \
+             COUNT(CASE WHEN comment_approved = 'spam' THEN 1 END), \
+             COUNT(CASE WHEN comment_approved = 'trash' THEN 1 END), \
+             COUNT(CASE WHEN comment_approved = 'post-trashed' THEN 1 END) \
+             FROM {prefix}comments WHERE comment_type != 'note' \
+             AND ( ? = 0 OR comment_post_ID = ? )",
+        );
+        self.spend()?;
+        let row = (query.bind(post).bind(post))
+            .fetch_one(&mut *self.tx)
+            .await
+            .map_err(db_error)?;
+        let mut counts = [0; 5];
+        for (n, count) in counts.iter_mut().enumerate() {
+            *count = row.try_get::<i64, _>(n).map_err(db_error)?.unsigned_abs();
+        }
+        Ok(counts)
+    }
+
+    /// The comments Empty Spam and Empty Trash delete: of `status`, older
+    /// than `before`, both compared as `edit-comments.php`'s text.
+    pub async fn comment_ids_before(
+        &mut self,
+        status: &str,
+        before: &str,
+    ) -> Result<Vec<u64>, DbError> {
+        let query = self.sql(
+            "SELECT comment_ID FROM {prefix}comments \
+             WHERE comment_approved = ? AND ? > comment_date_gmt",
+        );
+        self.ids(query.bind(status).bind(before)).await
+    }
+
     // Users.
 
     /// `wp_insert_user()`'s `INSERT` of a new user `login`: its ID.

@@ -6,11 +6,25 @@
 use hyscribe_config::Mode;
 use hyscribe_db::{Connection, Writer};
 use hyscribe_phpser::{Key, Value, parse_str};
-use hyscribe_testkit::fixture_database;
 use hyscribe_testkit::writes::check_writes;
+use hyscribe_testkit::{fixture_database, hs_admin_page, unhex};
 use hyscribe_write::users::{UserData, wp_insert_user};
+use tokio::runtime::Handle;
 
+use super::super::Admin;
 use super::*;
+use crate::login::LoginReads;
+use crate::tests::oracle_site;
+
+mod comments;
+
+/// User 1's hs-admin on the fixture, as the handlers read it.
+fn admin<'a>(site: &'a crate::Site, reads: &'a LoginReads<'a>) -> Admin<'a> {
+    read(|| {
+        let user = reads.reads.wait(site.db.user(1)).unwrap();
+        Admin::new(reads, site, user)
+    })
+}
 
 async fn writer() -> Writer {
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
@@ -25,6 +39,7 @@ fn fields(query: &str) -> Vec<(Key, Value)> {
 /// action on `conn` whose statements after `budget` fail.
 async fn promote(
     writer: &Writer,
+    admin: &Admin<'_>,
     conn: &mut Connection,
     query: &str,
     budget: Option<usize>,
@@ -37,20 +52,26 @@ async fn promote(
         uri: b"/hs-admin/users",
         home: "http://127.0.0.1:8081",
         user: 1,
+        now: 0,
     };
     let mut write = writer.begin_on(conn).await;
     if let (Ok(write), Some(budget)) = (&mut write, budget) {
         write.fail_after(budget);
     }
-    act(write, handler("users", b"promote").unwrap(), &asked).await
+    act(write, handler("users", b"promote").unwrap(), &asked, admin).await
 }
 
 /// The redirect of `query` once every statement budget short of it has
 /// failed, each failure rolled back.
-async fn promoted(writer: &Writer, conn: &mut Connection, query: &str) -> String {
+async fn promoted(
+    writer: &Writer,
+    admin: &Admin<'_>,
+    conn: &mut Connection,
+    query: &str,
+) -> String {
     let mut budget = 0;
     loop {
-        match promote(writer, conn, query, Some(budget)).await {
+        match promote(writer, admin, conn, query, Some(budget)).await {
             Err(hyscribe_write::Error::Db(_)) => budget += 1,
             saved => {
                 let Ok(Answer::Redirect(to)) = saved else {
@@ -78,9 +99,12 @@ fn php_location(case: &str) -> String {
 /// `users.php`'s role change writes PHP's rows and answers as PHP: a user
 /// made an editor, user 1 kept as an administrator, and nothing kept of a
 /// request that dies part way or meets a failed statement.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn the_role_change_is_php_s() {
     let writer = writer().await;
+    let site = oracle_site().await;
+    let reads = LoginReads::new(&site, Handle::current(), 0);
+    let admin = admin(&site, &reads);
     let setup = async |conn: &mut Connection| {
         let mut write = writer.begin_on(conn).await.unwrap();
         let mut ids = Vec::new();
@@ -100,13 +124,13 @@ async fn the_role_change_is_php_s() {
     let action = async |conn: &mut Connection, ids: Vec<u64>| {
         let (promoted_id, kept) = (ids[0], ids[1]);
         let query = format!("new_role=none&users[]={kept}&users[]=1");
-        let died = promote(&writer, conn, &query, None).await;
+        let died = promote(&writer, &admin, conn, &query, None).await;
         let own = "Sorry, you cannot remove your own role.";
         assert!(matches!(died, Ok(Answer::Denied(message)) if message == own));
         let alone = format!("new_role=editor&users[]={promoted_id}");
-        let to = promoted(&writer, conn, &alone).await;
+        let to = promoted(&writer, &admin, conn, &alone).await;
         assert_eq!(to, php_location("users-promote"));
-        let to = promoted(&writer, conn, &format!("{alone}&users[]=1")).await;
+        let to = promoted(&writer, &admin, conn, &format!("{alone}&users[]=1")).await;
         assert_eq!(to, php_location("users-promote-self-editor"));
         Ok(())
     };

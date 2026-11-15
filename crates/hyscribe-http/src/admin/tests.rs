@@ -1788,7 +1788,7 @@ async fn send(
 }
 
 /// The nonce of `action` for the session of the logged in cookie in `cookies`.
-async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &'static str) -> String {
+async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &str) -> String {
     let auth = cookies
         .split("; ")
         .find(|cookie| cookie.starts_with("hyscribe_logged_in_"))
@@ -1798,11 +1798,11 @@ async fn session_nonce(site: &Arc<Site>, cookies: &str, action: &'static str) ->
         .unwrap()
         .token
         .to_vec();
-    let (site, handle) = (Arc::clone(site), Handle::current());
+    let (site, handle, action) = (Arc::clone(site), Handle::current(), action.to_string());
     tokio::task::spawn_blocking(move || {
         let mut reads = LoginReads::new(&site, handle, now());
         reads.act_as(1, token);
-        LoginSite::nonce(&reads, action)
+        LoginSite::nonce(&reads, &action)
     })
     .await
     .unwrap()
@@ -1942,7 +1942,10 @@ async fn actions_read_the_site() {
         "action=dim-comment&id=99",
     ));
     let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(page_of(response).await.into_bytes(), read_only);
+    let form = Some(("application/x-www-form-urlencoded", "action=nope"));
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let own = format!("/hs-admin/users?changeit=1&new_role=none&users[]=1&_wpnonce={nonce}");
     let response = send(&site, "GET", &own, &cookies, None).await;
     assert!(
@@ -1992,11 +1995,15 @@ async fn unwritable(site: Arc<Site>, prefix: &str) -> Arc<Site> {
     Arc::new(site.with_writer(writer.unwrap()))
 }
 
-/// `wp-admin/users.php` under hs-admin's names.
+/// A target or Location of `reference/admin-saves/golden.sh` under
+/// hs-admin's names.
 fn hs(text: &str) -> String {
-    let text = text.replace("wp-admin%2Fusers.php", "hs-admin%2Fusers");
-    text.replace("/wp-admin/users.php", "/hs-admin/users")
-        .replace("users.php", "users")
+    let text = hyscribe_testkit::hs_admin_page(text);
+    ["users", "edit-comments", "admin-ajax"]
+        .iter()
+        .fold(text, |text, screen| {
+            text.replace(&format!("{screen}.php"), screen)
+        })
 }
 
 /// Past their checks, the role changes of `reference/admin-saves/golden.sh`
@@ -2013,7 +2020,7 @@ async fn actions_answer_as_php_once_checked() {
     let cases = include_str!("../../../../reference/admin-saves/cases.list");
     let rows = golden
         .lines()
-        .filter(|row| !row.starts_with("users-promote\t"));
+        .filter(|row| !row.starts_with("users-promote\t") && !row.starts_with("moderate-"));
     for row in rows {
         let [case, status, php_location, body] = row.split('\t').collect::<Vec<_>>()[..] else {
             panic!("{row}");
@@ -2022,10 +2029,11 @@ async fn actions_answer_as_php_once_checked() {
             .lines()
             .find(|line| line.starts_with(&format!("{case}\t")));
         let fields: Vec<&str> = line.unwrap().split('\t').collect();
-        let [_, method, target, data, _, field] = fields[..] else {
+        let [_, method, target, data, action, field] = fields[..] else {
             panic!("{case}");
         };
-        let uri = format!("/hs-admin/{}", hs(target));
+        let nonce = session_nonce(&site, &cookies, action).await;
+        let (data, uri) = (hs(data), format!("/hs-admin/{}", hs(target)));
         let response = if method == "POST" {
             let form = (
                 "application/x-www-form-urlencoded",
@@ -2037,7 +2045,9 @@ async fn actions_answer_as_php_once_checked() {
             send(&site, "GET", &uri, &cookies, None).await
         };
         assert_eq!(response.status().as_str(), status, "{case}");
-        assert_eq!(location(&response), hs(php_location), "{case}");
+        let ours = response.headers().get(header::LOCATION);
+        let ours = ours.map_or("", |to| to.to_str().unwrap());
+        assert_eq!(ours, hs(php_location), "{case}");
         let php = hyscribe_testkit::unhex(body);
         assert_eq!(page_of(response).await.into_bytes(), php, "{case}");
     }
@@ -2049,6 +2059,21 @@ async fn actions_answer_as_php_once_checked() {
     ] {
         let response = send(&site, "GET", &format!("{promote}&{users}"), &cookies, None).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{users}");
+    }
+    // Arrays PHP cannot read, and `comment_footer_die()`'s page.
+    let comments = session_nonce(&site, &cookies, "bulk-comments").await;
+    let missing = session_nonce(&site, &cookies, "approve-comment_999").await;
+    let comment = session_nonce(&site, &cookies, "delete-comment_1").await;
+    for uri in [
+        format!(
+            "edit-comments?delete_all=1&comment_status[]=trash&pagegen_timestamp=1&_wpnonce={comments}"
+        ),
+        format!("edit-comments?action=approve&ids[]=1&_wpnonce={comments}"),
+        format!("comment?action=approvecomment&c=999&_wpnonce={missing}"),
+        format!("comment?action=spamcomment&c=1&_wp_original_http_referer[]=x&_wpnonce={comment}"),
+    ] {
+        let response = send(&site, "GET", &format!("/hs-admin/{uri}"), &cookies, None).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{uri}");
     }
     // An action whose write has no handler yet.
     let reset = format!("/hs-admin/users?action=resetpassword&users[]=1&_wpnonce={nonce}");

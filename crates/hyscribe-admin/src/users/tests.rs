@@ -57,7 +57,9 @@ fn pages_are_php_s() {
         );
         let recorded = String::from_utf8(unhex(f[2])).unwrap();
         let (php, ours) = match ours {
-            Answer::Page(page) => (hs_admin_page(&recorded), page),
+            Answer::Page(page) | Answer::Ajax(page) | Answer::Xml(page) => {
+                (hs_admin_page(&recorded), page)
+            }
             Answer::Denied(message)
             | Answer::Died(message)
             | Answer::Missing(message)

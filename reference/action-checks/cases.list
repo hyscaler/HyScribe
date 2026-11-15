@@ -30,6 +30,13 @@ tags-delete-default	GET	edit-tags.php?action=delete&taxonomy=category&tag_ID=1	-
 tags-bulk-delete	GET	edit-tags.php?action=delete&taxonomy=post_tag&delete_tags[]=801	-	bulk-tags	_wpnonce
 tags-edited	POST	edit-tags.php	action=editedtag&taxonomy=post_tag&tag_ID=801&name=Renamed	update-tag_801	_wpnonce
 comments-bulk	GET	edit-comments.php?action=unapprove&delete_comments[]=1	-	bulk-comments	_wpnonce
+comments-empty-trash	GET	edit-comments.php?delete_all=1&comment_status=trash&pagegen_timestamp=2099-01-01	-	bulk-comments	_wpnonce
+comment-approve	GET	comment.php?action=approvecomment&c=1	-	approve-comment_1	_wpnonce
+comment-delete	POST	comment.php	deletecomment=1&c=1	delete-comment_1	_wpnonce
+comment-spam-missing	GET	comment.php?action=spamcomment&c=999	-	delete-comment_999	_wpnonce
+comment-trashed-post	GET	comment.php?action=trashcomment&c=801	-	delete-comment_801	_wpnonce
+comment-trashed-post-edit	GET	comment.php?action=editcomment&c=801	-	delete-comment_801	_wpnonce
+comment-edited	POST	comment.php	action=editedcomment&comment_ID=1&comment_post_ID=1&content=Edited	update-comment_1	_wpnonce
 users-promote	GET	users.php?changeit=1&new_role=editor&users[]=801	-	bulk-users	_wpnonce
 users-promote-bad-role	GET	users.php?changeit=1&new_role=king&users[]=801	-	bulk-users	_wpnonce
 users-promote-own-none	GET	users.php?changeit=1&new_role=none&users[]=1	-	bulk-users	_wpnonce

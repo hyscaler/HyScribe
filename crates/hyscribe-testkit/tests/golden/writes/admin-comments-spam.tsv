@@ -1,0 +1,14 @@
+# The rows PHP WordPress writes for the action admin-comments-spam (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 09:34:33 to 2026-11-15 09:34:33 UTC.
+# %wp_commentmeta:1% is 1.
+# %wp_commentmeta:2% is 2.
+wp_commentmeta	%wp_commentmeta:1%	+	comment_id	1
+wp_commentmeta	%wp_commentmeta:1%	+	meta_id	%wp_commentmeta:1%
+wp_commentmeta	%wp_commentmeta:1%	+	meta_key	_wp_trash_meta_status
+wp_commentmeta	%wp_commentmeta:1%	+	meta_value	1
+wp_commentmeta	%wp_commentmeta:2%	+	comment_id	1
+wp_commentmeta	%wp_commentmeta:2%	+	meta_id	%wp_commentmeta:2%
+wp_commentmeta	%wp_commentmeta:2%	+	meta_key	_wp_trash_meta_time
+wp_commentmeta	%wp_commentmeta:2%	+	meta_value	%unix%
+wp_comments	1	~	comment_approved	1	spam
+wp_posts	1	~	comment_count	1	0

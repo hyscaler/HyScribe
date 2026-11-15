@@ -752,6 +752,47 @@ async fn reads_for_comment_writes() {
     write.insert_comment(&reply).await.unwrap();
     assert_eq!(write.child_note_ids(id).await.unwrap(), [newer, older]);
 
+    // Each status counted on its post and on every post, notes left out.
+    let (on_post, every) = (
+        write.comment_counts(2).await.unwrap(),
+        write.comment_counts(0).await.unwrap(),
+    );
+    let mut trashed = 0;
+    for approved in ["1", "0", "spam", "trash", "post-trashed"] {
+        let comment = CommentFields {
+            post_id: 2,
+            approved: approved.into(),
+            date_gmt: "2001-01-01 00:00:00".into(),
+            ..commenter()
+        };
+        trashed = write.insert_comment(&comment).await.unwrap();
+    }
+    let note = CommentFields {
+        post_id: 2,
+        ..note("1", "2001-01-01 00:00:00")
+    };
+    write.insert_comment(&note).await.unwrap();
+    assert_eq!(
+        write.comment_counts(2).await.unwrap(),
+        on_post.map(|n| n + 1)
+    );
+    assert_eq!(write.comment_counts(0).await.unwrap(), every.map(|n| n + 1));
+    assert_eq!(write.comment_counts(3).await.unwrap(), [0; 5]);
+    let trash = write
+        .comment_ids_before("TRASH", "2001-01-01 00:00:01")
+        .await
+        .unwrap();
+    let trash_id = trashed - 1;
+    assert!(
+        trash.contains(&trash_id) && !trash.contains(&trashed),
+        "{trash:?}"
+    );
+    let same = write
+        .comment_ids_before("trash", "2001-01-01 00:00:00")
+        .await
+        .unwrap();
+    assert!(!same.contains(&trash_id));
+
     assert_eq!(write.post_author(1).await.unwrap(), Some(1));
     assert_eq!(write.post_author(999_999).await.unwrap(), None);
     let admin = b"admin@default-install.test";
@@ -1307,6 +1348,8 @@ pub(crate) async fn every_write() -> Vec<DbError> {
     ];
     let counts = [
         w.approved_comment_count(1).await.err(),
+        w.comment_counts(1).await.err(),
+        w.comment_ids_before("trash", "2001-01-01").await.err(),
         w.term_taxonomy_count(1).await.err(),
         w.term_post_count(1, &["publish"], &["post"]).await.err(),
         w.user_count().await.err(),

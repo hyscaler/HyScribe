@@ -110,6 +110,11 @@ fn refused(public: bool, refusal: Refusal) -> Response {
         Body::Text(text) => ("text/html; charset=UTF-8", text.into_bytes()),
         Body::Json(json) => ("application/json; charset=UTF-8", json.as_bytes().to_vec()),
     };
+    ajax(status, kind, body)
+}
+
+/// An `admin-ajax.php` answer of `kind`.
+fn ajax(status: StatusCode, kind: &str, body: Vec<u8>) -> Response {
     let mut headers = nocache();
     headers.push((header::CONTENT_TYPE, kind.to_string()));
     headers.push((header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()));
@@ -1234,6 +1239,12 @@ fn served(admin: &Admin, answer: Answer) -> Response {
         Answer::Died(message) => died(admin, StatusCode::INTERNAL_SERVER_ERROR, message),
         Answer::Missing(message) => died(admin, StatusCode::NOT_FOUND, message),
         Answer::Conflict(message) => died(admin, StatusCode::CONFLICT, message),
+        Answer::Ajax(text) => ajax(
+            StatusCode::OK,
+            "text/html; charset=UTF-8",
+            text.into_bytes(),
+        ),
+        Answer::Xml(xml) => ajax(StatusCode::OK, "text/xml; charset=UTF-8", xml.into_bytes()),
     }
 }
 
@@ -1259,7 +1270,7 @@ fn save(admin: &Admin, screen: &str, asked: &Asked) -> Response {
         return denied(admin, READ_ONLY);
     };
     let saved = Handle::current()
-        .block_on(async { saves::act(writer.begin().await, handler, asked).await });
+        .block_on(async { saves::act(writer.begin().await, handler, asked, admin).await });
     match saved {
         Ok(answer) => served(admin, answer),
         Err(hyscribe_write::Error::Unported(_)) => not_ported(),
@@ -1273,7 +1284,7 @@ fn action_request<'a>(
     asking: &'a Asking,
     get: &'a Value,
     uri: &'a [u8],
-    user: u64,
+    (user, now): (u64, i64),
 ) -> Asked<'a> {
     Asked {
         get: entries(Some(get)),
@@ -1285,6 +1296,7 @@ fn action_request<'a>(
         uri,
         home: &site.home,
         user,
+        now,
     }
 }
 
@@ -1308,19 +1320,21 @@ fn ajax_answer(
         .map_or("", |p| p.as_str())
         .as_bytes();
     let id = user.as_ref().map_or(0, |(id, _)| *id);
-    let asked = action_request(site, asking, &get, uri, id);
-    let checked = match user {
-        Some((id, token)) => {
-            reads.act_as(id, token);
-            let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
-            admin_ajax(Some(&Admin::new(reads, site, user)), &asked)
-        }
-        None => admin_ajax(None, &asked),
+    let asked = action_request(site, asking, &get, uri, (id, reads.now));
+    let Some((id, token)) = user else {
+        let checked = admin_ajax(None, &asked);
+        return checked.map_or_else(
+            |refusal| refused(reads.public(), refusal),
+            |()| not_ported(),
+        );
     };
-    checked.map_or_else(
-        |refusal| refused(reads.public(), refusal),
-        |()| not_ported(),
-    )
+    reads.act_as(id, token);
+    let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
+    let admin = Admin::new(reads, site, user);
+    match admin_ajax(Some(&admin), &asked) {
+        Ok(()) => save(&admin, "admin-ajax", &asked),
+        Err(refusal) => refused(reads.public(), refusal),
+    }
 }
 
 fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
@@ -1367,7 +1381,7 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
                 let mut admin = Admin::new(&reads, site, user);
                 let get = parse_str(uri.query().unwrap_or_default().as_bytes());
-                let asked = action_request(site, asking, &get, raw_uri.as_bytes(), id);
+                let asked = action_request(site, asking, &get, raw_uri.as_bytes(), (id, now));
                 let name = uri.path().strip_prefix("/hs-admin/").unwrap_or_default();
                 match hyscribe_admin::actions::admin(&admin, name, &asked, post) {
                     Some(Err(refusal)) => return refused(reads.public(), refusal),

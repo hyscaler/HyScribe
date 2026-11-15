@@ -8,7 +8,7 @@
 
 use hyscribe_auth::caps::{CapabilityData, post_type_exists, taxonomy_cap};
 use hyscribe_kses::{esc_html, esc_url, esc_url_raw, sanitize_key};
-use hyscribe_phpser::{Key, Value, addslashes, lookup, remove_query_arg};
+use hyscribe_phpser::{Key, Value, absint, addslashes, lookup, remove_query_arg};
 use hyscribe_render::formatting::sanitize_text_field;
 
 use crate::users::role_names;
@@ -41,6 +41,8 @@ pub struct Asked<'a> {
     pub home: &'a str,
     /// `get_current_user_id()`.
     pub user: u64,
+    /// `time()`, in Unix seconds.
+    pub now: i64,
 }
 
 impl Asked<'_> {
@@ -53,7 +55,8 @@ impl Asked<'_> {
         lookup(self.get, name)
     }
 
-    fn post(&self, name: &str) -> Option<&Value> {
+    /// `$_POST[ $name ]`.
+    pub fn post(&self, name: &str) -> Option<&Value> {
         lookup(self.post, name)
     }
 
@@ -82,7 +85,7 @@ impl Asked<'_> {
     }
 
     /// `wp_get_referer()`.
-    fn referer(&self, site: &dyn ActionSite) -> Option<Vec<u8>> {
+    pub fn referer(&self, site: &dyn ActionSite) -> Option<Vec<u8>> {
         let given = self
             .request("_wp_http_referer")
             .filter(|referer| !referer.is_empty())
@@ -244,6 +247,7 @@ pub fn admin(site: &dyn ActionSite, screen: &str, asked: &Asked, post: bool) -> 
         "post" => post_action(site, asked, post)?,
         "edit-tags" => terms_list(site, asked)?,
         "edit-comments" => comments_list(site, asked)?,
+        "comment" => comment_action(site, asked)?,
         "users" => users_list(site, asked)?,
         "user-new" => user_new(site, asked)?,
         "profile" | "user-edit" => user_edit(site, asked, screen == "profile")?,
@@ -479,6 +483,62 @@ fn comments_list(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
     Some(referer(site, asked, "bulk-comments"))
 }
 
+/// `comment.php`'s `$action`.
+fn comment_php_action(asked: &Asked) -> Vec<u8> {
+    let action = match asked.action() {
+        _ if asked.post("deletecomment").is_some() => b"deletecomment".to_vec(),
+        action if action == b"cdc" => b"delete".to_vec(),
+        action if action == b"mac" => b"approve".to_vec(),
+        action => action,
+    };
+    match asked.get("dt").and_then(Value::as_bytes) {
+        Some(dt @ (b"spam" | b"trash")) => dt.to_vec(),
+        _ => action,
+    }
+}
+
+/// `comment.php`'s refusal of a comment on a trashed post, then the nonce
+/// of its moderations and of the edit screen's save; `None` for its pages.
+fn comment_action(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
+    let id = asked.request("c").map(absint);
+    let post = id.and_then(|id| site.comment_post(id));
+    if post
+        .and_then(|post| site.post(post))
+        .is_some_and(|post| post.status == "trash")
+    {
+        return Some(Err(died(
+            500,
+            "You cannot edit this comment because the associated post is in the Trash. Please restore the post first, then try again.",
+        )));
+    }
+    let id = id.unwrap_or_default();
+    let nonce = match comment_php_action(asked).as_slice() {
+        b"approvecomment" | b"unapprovecomment" => format!("approve-comment_{id}"),
+        b"deletecomment" | b"trashcomment" | b"untrashcomment" | b"spamcomment"
+        | b"unspamcomment" => format!("delete-comment_{id}"),
+        b"editedcomment" => {
+            let id = asked.post("comment_ID").map_or(0, Value::to_int);
+            // `edit_comment()`'s own check.
+            let checked = referer(
+                site,
+                asked,
+                &format!("update-comment_{}", id.unsigned_abs()),
+            );
+            return Some(
+                checked.and_then(|()| match can_for(site, "edit_comment", id) {
+                    true => Ok(()),
+                    false => Err(died(
+                        500,
+                        "Sorry, you are not allowed to edit comments on this post.",
+                    )),
+                }),
+            );
+        }
+        _ => return None,
+    };
+    Some(referer(site, asked, &nonce))
+}
+
 /// The user IDs of `$_REQUEST['users']`, `intval()`ed.
 pub fn user_ids(asked: &Asked) -> Vec<i64> {
     asked
@@ -503,6 +563,10 @@ fn users_action(asked: &Asked) -> Option<Vec<u8>> {
 pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
     match screen {
         "users" => users_action(asked).unwrap_or_default(),
+        "edit-comments" => (asked.current_action(true).as_ref())
+            .map(Value::to_php_string)
+            .unwrap_or_default(),
+        "comment" => comment_php_action(asked),
         _ => asked.action(),
     }
 }
@@ -873,7 +937,7 @@ fn allowed(can: bool) -> Checked {
 }
 
 /// `$_POST[ $name ]` as `(int)` casts it, 0 when not set.
-fn post_int(asked: &Asked, name: &str) -> i64 {
+pub fn post_int(asked: &Asked, name: &str) -> i64 {
     asked.post(name).map_or(0, Value::to_int)
 }
 

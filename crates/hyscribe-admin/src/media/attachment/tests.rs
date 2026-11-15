@@ -74,7 +74,9 @@ fn answer(
         format!("{status}\t{}", String::from_utf8(page).unwrap())
     };
     Some(match attachment_edit(&site, &args, &request)? {
-        Answer::Page(page) | Answer::Redirect(page) => page,
+        Answer::Page(page) | Answer::Redirect(page) | Answer::Ajax(page) | Answer::Xml(page) => {
+            page
+        }
         Answer::Missing(message) => die(404, message),
         Answer::Conflict(message) => die(409, message),
         Answer::Denied(message) | Answer::Died(message) => die(403, message),

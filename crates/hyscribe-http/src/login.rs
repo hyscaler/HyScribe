@@ -22,7 +22,7 @@ use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
 use crate::reads::Reads;
-use crate::redirect::{wp_sanitize_redirect, wp_validate_redirect};
+use crate::redirect::{wp_safe_redirect, wp_sanitize_redirect, wp_validate_redirect};
 use crate::{Site, now};
 
 /// The login screen's path.
@@ -38,7 +38,7 @@ pub(crate) struct Names {
     /// `COOKIEHASH`.
     pub(crate) hash: String,
     /// `COOKIEPATH`, from the home URL.
-    path: String,
+    pub(crate) path: String,
     /// `SITECOOKIEPATH`, from the site URL.
     site_path: String,
 }
@@ -306,7 +306,7 @@ impl LoginSite for LoginReads<'_> {
     }
 
     fn public(&self) -> bool {
-        !Value::String(self.site.raw_option("blog_public").to_vec()).is_empty()
+        self.site.public()
     }
 
     /// `wp_create_nonce( $action )` for the current user.
@@ -653,10 +653,7 @@ fn logout(
                 .into_bytes()
         }
     };
-    // `wp_safe_redirect()`.
-    let host = hyscribe_kses::url_host(reads.site.home.as_bytes()).unwrap_or_default();
-    let location = wp_validate_redirect(&redirect_to, &host, reads.admin_url("").as_bytes());
-    let location = String::from_utf8_lossy(&wp_sanitize_redirect(&location)).into_owned();
+    let location = wp_safe_redirect(reads.site, &redirect_to, &reads.admin_url(""));
     headers.push((header::LOCATION, location));
     headers.push((
         header::HeaderName::from_static("x-redirect-by"),

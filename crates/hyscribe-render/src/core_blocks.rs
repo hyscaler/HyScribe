@@ -242,8 +242,7 @@ impl Context<'_> {
 }
 
 /// `render_block_core_comment_content()`: the comment's text through the
-/// `comment_text` filters; a held comment's without tags, after a note
-/// for its author, who has no commenter cookies.
+/// `comment_text` filters; a held one's without tags, after a note.
 fn comment_content(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let Some(comment) = &context.comment else {
         return Vec::new();

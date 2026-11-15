@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `wp-comments-post.php`: a comment posted from the front end, checked as
-//! `wp_handle_comment_submission()` checks it and saved in one writer
-//! action (ADR 0010), with the commenter cookies and the redirect PHP
-//! sends. Without a writer (shadow mode) every post is refused as an admin
-//! action is. No mail is sent: the notifications wait for mail (MVP 8.2).
+//! `wp-comments-post.php`: a comment saved in one writer action (ADR 0010),
+//! refused in shadow mode; no mail is sent until mail exists (MVP 8.2).
 
 mod submit;
 
@@ -15,12 +12,12 @@ use std::sync::Arc;
 
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Response;
-use hyscribe_admin::assets::{Urls, cookie_path};
+use hyscribe_admin::assets::Urls;
 use hyscribe_admin::die::{page, page_with_back_link};
 use hyscribe_admin::login::READ_ONLY;
 use hyscribe_auth::caps::{CapPost, User as Capabilities, post_status};
 use hyscribe_db::{DbError, Write};
-use hyscribe_kses::{esc_url, url_host};
+use hyscribe_kses::esc_url;
 use hyscribe_phpser::{Value, add_query_arg, addslashes, is_empty_string};
 use hyscribe_render::site::Site as RenderSite;
 use hyscribe_write::comments::{Commenter, Context};
@@ -29,7 +26,7 @@ use tokio::runtime::Handle;
 use crate::login::{
     LoginReads, Names, YEAR, cookie, cookies, joined, nocache, response, set_cookie,
 };
-use crate::redirect::{wp_sanitize_redirect, wp_validate_redirect};
+use crate::redirect::wp_safe_redirect;
 use crate::{Site, now, trackback};
 use submit::{Failure, Fields, Poster};
 
@@ -84,7 +81,7 @@ pub(crate) async fn respond(site: &Arc<Site>, asked: Asked) -> Response {
             }
             // Shadow mode, as an admin action there.
             None => {
-                let body = page(public(&site), "WordPress &rsaquo; Error", READ_ONLY);
+                let body = page(site.public(), "WordPress &rsaquo; Error", READ_ONLY);
                 response(StatusCode::FORBIDDEN, html_headers(), body)
             }
         })
@@ -94,11 +91,6 @@ pub(crate) async fn respond(site: &Arc<Site>, asked: Asked) -> Response {
 
 /// The start of the writer action a comment is saved in.
 type Begin<'w> = Pin<Box<dyn Future<Output = Result<Write<'w>, DbError>> + Send + 'w>>;
-
-/// `blog_public`.
-fn public(site: &Site) -> bool {
-    !Value::String(site.raw_option("blog_public").to_vec()).is_empty()
-}
 
 /// `nocache_headers()` and PHP's default content type.
 fn html_headers() -> Vec<(header::HeaderName, String)> {
@@ -134,28 +126,30 @@ fn answer<'w>(
     let fields = Fields::read(form);
     let nonce = form.get_str("_wp_unfiltered_html_comment");
     let action = format!("unfiltered-html-comment_{}", fields.post_id);
+    let nonce = nonce.map(Value::to_php_string).unwrap_or_default();
+    let verified = reads.verify_nonce(&nonce, &action);
     let can = |cap| caps.has_cap(&reads, cap, &[]);
     let commenter = Commenter {
         moderate_comments: can("moderate_comments"),
         manage_options: can("manage_options"),
-        unfiltered_html: can("unfiltered_html")
-            && nonce.is_some_and(|nonce| reads.verify_nonce(&nonce.to_php_string(), &action)),
+        unfiltered_html: can("unfiltered_html") && verified,
     };
     let saving = Saving {
         fields,
         jar: &jar,
+        names: &names,
         asked,
         user: id,
         commenter,
     };
     let saved = save(&mut reads, &caps, saving, (&handle, begin));
     let answer = match saved {
-        Ok(Ok(saved)) => redirect(site, &reads, form, id, &saved),
+        Ok(Ok(saved)) => redirect(site, (&reads, &names), form, id, &saved),
         Ok(Err(Failure::Silent)) => response(StatusCode::OK, html_headers(), Vec::new()),
         Ok(Err(Failure::Died(status, message))) => {
             let status = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
             let message = format!("<p>{message}</p>");
-            let body = page_with_back_link(public(site), "Comment Submission Failure", &message);
+            let body = page_with_back_link(site.public(), "Comment Submission Failure", &message);
             response(status, html_headers(), body)
         }
         Err(hyscribe_write::Error::Unported(_)) => {
@@ -173,6 +167,7 @@ fn answer<'w>(
 struct Saving<'a> {
     fields: Fields,
     jar: &'a [(Vec<u8>, Vec<u8>)],
+    names: &'a Names,
     asked: &'a Asked,
     user: u64,
     commenter: Commenter,
@@ -220,7 +215,7 @@ fn save<'w>(
         .reads
         .post(id)
         .map(|post| hyscribe_render::permalinks::permalink(&reads.reads, &post));
-    let hash = Names::new(reads.site).hash;
+    let hash = &saving.names.hash;
     let home = reads.site.home.as_bytes();
     let agent = saving.asked.headers.get(header::USER_AGENT);
     let poster = Poster {
@@ -244,8 +239,7 @@ fn save<'w>(
         // Its row as saved, which the action has just written.
         let comment = write.comment(id).await?.unwrap_or_default();
         let link = comment_link(&mut write, permalink, id).await?;
-        write.commit().await?;
-        Ok(Ok(Saved {
+        let saved = Saved {
             id,
             author: comment.author,
             email: comment.author_email,
@@ -253,7 +247,8 @@ fn save<'w>(
             approved: comment.approved,
             date_gmt: comment.date_gmt,
             link,
-        }))
+        };
+        write.commit().await.map(|()| Ok(saved)).map_err(Into::into)
     })
 }
 
@@ -264,14 +259,8 @@ async fn comment_link(
     permalink: Option<Vec<u8>>,
     id: u64,
 ) -> Result<String, hyscribe_write::Error> {
-    let mut options = Vec::new();
-    for name in ["page_comments", "comments_per_page", "permalink_structure"] {
-        options.push((name, write.option_value(name).await?.unwrap_or_default()));
-    }
-    let option = |name: &str| {
-        let found = options.iter().find(|(known, _)| *known == name);
-        found.map(|(_, value)| value.clone()).unwrap_or_default()
-    };
+    let names = ["page_comments", "comments_per_page", "permalink_structure"];
+    let option = submit::options(write, &names).await?;
     let paged = !is_empty_string(&option("page_comments"))
         && !is_empty_string(&option("comments_per_page"));
     let Some(permalink) = permalink.filter(|_| !paged) else {
@@ -304,18 +293,24 @@ fn remote_addr(site: &Site, asked: &Asked) -> Vec<u8> {
 
 /// The redirect after a saved comment, with the commenter cookies of a
 /// visitor: kept for a year if they agree to them, else removed.
-fn redirect(site: &Site, reads: &LoginReads, form: &Value, user: u64, saved: &Saved) -> Response {
+fn redirect(
+    site: &Site,
+    (reads, names): (&LoginReads, &Names),
+    form: &Value,
+    user: u64,
+    saved: &Saved,
+) -> Response {
     let consent = form.get_str("wp-comment-cookies-consent").is_some();
-    let to = match form.get_str("redirect_to") {
-        Some(Value::String(to)) if !is_empty_string(to) => {
-            // `$_POST` is slashed.
-            let to = String::from_utf8_lossy(&addslashes(to)).into_owned();
-            format!("{to}#comment-{}", saved.id)
-        }
-        _ => saved.link.clone(),
+    let mut to = match form.get_str("redirect_to") {
+        // `$_POST` is slashed.
+        Some(Value::String(to)) if !is_empty_string(to) => [
+            addslashes(to),
+            format!("#comment-{}", saved.id).into_bytes(),
+        ]
+        .concat(),
+        _ => saved.link.clone().into_bytes(),
     };
-    let mut to = to.into_bytes();
-    if !consent && saved.approved == "0" && !saved.email.is_empty() {
+    if !consent && saved.approved == "0" && !is_empty_string(&saved.email) {
         let id = saved.id.to_string();
         let hash = reads
             .reads
@@ -329,8 +324,7 @@ fn redirect(site: &Site, reads: &LoginReads, form: &Value, user: u64, saved: &Sa
     }
     let mut headers = html_headers();
     if user == 0 {
-        let hash = Names::new(site).hash;
-        let path = cookie_path(&site.home);
+        let (hash, path) = (&names.hash, &names.path);
         let secure = site.home.starts_with("https:");
         let url = esc_url(&saved.url);
         for (name, value) in [
@@ -340,20 +334,17 @@ fn redirect(site: &Site, reads: &LoginReads, form: &Value, user: u64, saved: &Sa
         ] {
             let name = format!("{name}_{hash}");
             let cookie = match (consent, value.is_empty()) {
-                (false, _) => set_cookie(&name, b" ", (reads.now - YEAR, reads.now), &path, false),
+                (false, _) => set_cookie(&name, b" ", (reads.now - YEAR, reads.now), path, false),
                 // PHP's `setcookie()` of an empty value deletes the cookie.
-                (true, true) => set_cookie(&name, b"deleted", (1, reads.now), &path, secure),
+                (true, true) => set_cookie(&name, b"deleted", (1, reads.now), path, secure),
                 (true, false) => {
-                    set_cookie(&name, value, (reads.now + YEAR, reads.now), &path, secure)
+                    set_cookie(&name, value, (reads.now + YEAR, reads.now), path, secure)
                 }
             };
             headers.push((header::SET_COOKIE, cookie));
         }
     }
-    // `wp_safe_redirect()`.
-    let host = url_host(site.home.as_bytes()).unwrap_or_default();
-    let to = wp_validate_redirect(&to, &host, reads.admin_url("").as_bytes());
-    let to = String::from_utf8_lossy(&wp_sanitize_redirect(&to)).into_owned();
+    let to = wp_safe_redirect(site, &to, &reads.admin_url(""));
     headers.push((
         header::HeaderName::from_static("x-redirect-by"),
         "WordPress".into(),

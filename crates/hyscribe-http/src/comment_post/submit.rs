@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `wp_handle_comment_submission()` over the action's `Write`, in two parts
-//! around the post's status and `read_post`, which the capability checks
-//! work out on the blocking thread: the reply and the post found, then
-//! every other check and `wp_new_comment()`.
+//! around the post's status and `read_post`, worked out on the blocking thread.
 
 use hyscribe_db::{DbError, PostFields, Write};
 use hyscribe_kses::strip_tags;
@@ -115,14 +113,8 @@ pub(super) async fn submit(
     if status == "private" && !poster.read_post {
         return Ok(Err(Failure::Silent));
     }
-    let mut options = Vec::new();
-    for name in ["close_comments_for_old_posts", "close_comments_days_old"] {
-        options.push((name, write.option_value(name).await?.unwrap_or_default()));
-    }
-    let option = |name: &str| {
-        let found = options.iter().find(|(known, _)| *known == name);
-        found.map(|(_, value)| value.clone()).unwrap_or_default()
-    };
+    let names = ["close_comments_for_old_posts", "close_comments_days_old"];
+    let option = options(write, &names).await?;
     let open = (&*post.comment_status, &*post.post_type, &*post.date_gmt);
     if !comments_open_at(&option, open, poster.context.now) {
         return Ok(Err(Failure::Died(
@@ -208,6 +200,22 @@ pub(super) async fn submit(
         ),
         Refused::Flood => Failure::Died(429, "You are posting comments too quickly. Slow down."),
     }))
+}
+
+/// `get_option()` of each of `names`, read in the action, as one lookup:
+/// empty for a missing option.
+pub(super) async fn options(
+    write: &mut Write<'_>,
+    names: &[&'static str],
+) -> Result<impl Fn(&str) -> Vec<u8> + use<>, DbError> {
+    let mut found = Vec::new();
+    for &name in names {
+        found.push((name, write.option_value(name).await?.unwrap_or_default()));
+    }
+    Ok(move |name: &str| {
+        let value = found.iter().find(|(known, _)| *known == name);
+        value.map(|(_, value)| value.clone()).unwrap_or_default()
+    })
 }
 
 /// `post_password_required()`: a password, unless the `wp-postpass_`

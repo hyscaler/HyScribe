@@ -182,6 +182,11 @@ impl Site {
         Site { writer, ..self }
     }
 
+    /// `blog_public`: whether search engines may index the site.
+    fn public(&self) -> bool {
+        !Value::String(self.raw_option("blog_public").to_vec()).is_empty()
+    }
+
     /// `wp_salt( $scheme )`: the configured keys and salts, else `option`'s.
     fn salt(&self, scheme: &str, option: impl Fn(&str) -> Option<Vec<u8>>) -> Option<Vec<u8>> {
         let constants: Vec<(&str, &[u8])> = self

@@ -194,9 +194,8 @@ pub(crate) fn post_comments(site: &dyn Site, request: &Request, post_id: u64) ->
     all
 }
 
-/// The held comment `wp_get_unapproved_comment_author_email()` shows its
-/// author: the request's `unapproved` comment, with an email address, when
-/// `moderation-hash` signs its date, for ten minutes after it.
+/// `wp_get_unapproved_comment_author_email()`'s comment: the request's held
+/// `unapproved` one whose date `moderation-hash` signs, for ten minutes.
 pub(crate) fn held_preview(site: &dyn Site, request: &Request) -> Option<Comment> {
     let arg = |name| request.get.get_str(name).filter(|value| !value.is_empty());
     let id = u64::try_from(arg("unapproved")?.to_int()).ok()?;

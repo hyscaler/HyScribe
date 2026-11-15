@@ -298,3 +298,41 @@ fn long_reply_chains_render_without_recursing() {
     let end = ["</li>".repeat(REPLIES as usize - 4), "</ol></li>".repeat(4)].concat() + "</ol>";
     assert!(html.ends_with(&end));
 }
+
+/// No held comment is previewed for an ID no comment has, a hash that is
+/// not a string, or on a site without the salts to sign it.
+#[test]
+fn a_preview_needs_a_signed_held_comment() {
+    let held = Comment {
+        id: 3,
+        post_id: 1,
+        author_email: b"held@example.test".to_vec(),
+        date_gmt: "2026-11-15 00:00:00".into(),
+        ..Comment::default()
+    };
+    let site = WithComments {
+        base: DefaultInstall {
+            home: b"http://example.test".to_vec(),
+        },
+        options: Value::Null,
+        comments: Vec::new(),
+        users: Vec::new(),
+        password: false,
+        closed: false,
+        siteurl: b"http://example.test".to_vec(),
+        held: vec![held],
+        hashes: Value::Null,
+    };
+    for query in [
+        "unapproved=-3&moderation-hash=x",
+        "unapproved=3&moderation-hash[]=x",
+        "unapproved=3&moderation-hash=x",
+    ] {
+        let request = Request {
+            get: parse_str(query.as_bytes()),
+            ..Request::default()
+        };
+        assert!(held_preview(&site, &request).is_none(), "{query}");
+    }
+    assert!(site.base.held_comment(3).is_none());
+}

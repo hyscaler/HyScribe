@@ -17,9 +17,11 @@ use hyscribe_db::{DbError, Write};
 use hyscribe_kses::url_host;
 use hyscribe_model::Term;
 
-use super::{Admin, HTML, ajax_response};
+use super::{Admin, HTML, ajax_text};
 use crate::redirect::wp_validate_redirect;
 
+pub(super) mod dashboard;
+pub(super) mod screen;
 mod terms;
 mod users;
 
@@ -73,6 +75,12 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         ("edit-tags", b"delete") => Some(terms::delete),
         ("edit-tags", b"bulk-delete") => Some(terms::bulk_delete),
         ("edit-tags", b"editedtag") => Some(terms::edited_tag),
+        ("post", b"post-quickdraft-save") => Some(dashboard::quickdraft_save),
+        ("admin-ajax", b"update-welcome-panel") => Some(dashboard::update_welcome_panel),
+        ("admin-ajax", b"closed-postboxes") => Some(screen::closed_postboxes),
+        ("admin-ajax", b"hidden-columns") => Some(screen::hidden_columns),
+        ("admin-ajax", b"meta-box-order") => Some(screen::meta_box_order),
+        (_, b"screen-options") => Some(screen::options),
         _ => None,
     }
 }
@@ -90,7 +98,7 @@ pub(super) fn ajax_handler(action: &[u8]) -> Option<Handler<Ajax>> {
 /// `wp_get_referer()`.
 fn referer(asked: &Asked) -> Option<Vec<u8>> {
     let host = url_host(asked.home.as_bytes()).unwrap_or_default();
-    asked.referer(&|location| wp_validate_redirect(location, &host, b""))
+    asked.wp_get_referer(&|location| wp_validate_redirect(location, &host, b""))
 }
 
 /// The response of an Ajax action's `answer`, its rows read once committed.
@@ -104,7 +112,11 @@ pub(super) fn ajax_served(admin: &Admin, asked: &Asked, answer: Ajax) -> Respons
         Ajax::TermRow(taxonomy, term) => (HTML, saved_row(admin, taxonomy, &term, &referer())),
         Ajax::TermAdded(taxonomy, added) => (XML, term_added(admin, taxonomy, &added, &referer())),
     };
-    ajax_response(StatusCode::OK, kind, body.into_bytes())
+    ajax_text(StatusCode::OK, kind, body.into_bytes())
+}
+
+fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
 }
 
 /// Runs `handler` as one action in `write`, once begun: committed when

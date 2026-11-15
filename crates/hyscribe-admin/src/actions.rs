@@ -6,9 +6,9 @@
 //! to its write's handler in the HTTP route ([`action`] names it), or is
 //! answered `501` when it has none, as is one whose next step is not ported.
 
-use hyscribe_auth::caps::{CapabilityData, post_type_exists, taxonomy_cap};
+use hyscribe_auth::caps::{CapPost, CapabilityData, post_type_exists, taxonomy_cap};
 use hyscribe_kses::{esc_html, esc_url, esc_url_raw, sanitize_key};
-use hyscribe_phpser::{Key, Value, addslashes, lookup, remove_query_arg};
+use hyscribe_phpser::{Key, Value, addslashes, lookup, php_trim, remove_query_arg};
 use hyscribe_render::formatting::sanitize_text_field;
 
 use crate::users::role_names;
@@ -81,8 +81,13 @@ impl Asked<'_> {
             .unwrap_or_default()
     }
 
-    /// `wp_get_referer()`, `validate` being `wp_validate_redirect()`.
-    pub fn referer(&self, validate: &dyn Fn(&[u8]) -> Vec<u8>) -> Option<Vec<u8>> {
+    /// `wp_get_referer()`.
+    fn referer(&self, site: &dyn ActionSite) -> Option<Vec<u8>> {
+        self.wp_get_referer(&|location| site.validate_redirect(location))
+    }
+
+    /// `wp_get_referer()`, with `validate` as `wp_validate_redirect( $location, '' )`.
+    pub fn wp_get_referer(&self, validate: &dyn Fn(&[u8]) -> Vec<u8>) -> Option<Vec<u8>> {
         let given = self
             .request("_wp_http_referer")
             .filter(|referer| !referer.is_empty())
@@ -166,7 +171,7 @@ pub type Checked = Result<(), Refusal>;
 /// `wp_nonce_ays( $action )`.
 fn nonce_ays(site: &dyn ActionSite, asked: &Asked) -> Refusal {
     let mut html = String::from("The link you followed has expired.");
-    if let Some(referer) = asked.referer(&|location| site.validate_redirect(location)) {
+    if let Some(referer) = asked.referer(site) {
         let back = site.validate_redirect(&esc_url_raw(&remove_query_arg(&[b"updated"], &referer)));
         html.push_str(&format!(
             "</p><p><a href=\"{}\">Please try again.</a>",
@@ -239,6 +244,15 @@ fn locked(site: &dyn ActionSite, id: i64) -> bool {
 /// The checks of an action on the admin screen `screen` (hs-admin's path
 /// without `/hs-admin/`); `None` for a request that is not one.
 pub fn admin(site: &dyn ActionSite, screen: &str, asked: &Asked, post: bool) -> Option<Checked> {
+    // `admin.php`'s `set_screen_options()`, before any screen's own.
+    if screen_options(asked) {
+        return Some(admin_referer(
+            site,
+            asked,
+            "screen-options-nonce",
+            "screenoptionnonce",
+        ));
+    }
     let checked = match screen {
         "edit" => posts_list(site, asked)?,
         "post" => post_action(site, asked, post)?,
@@ -401,6 +415,7 @@ fn post_action(site: &dyn ActionSite, asked: &Asked, post: bool) -> Option<Check
             "Sorry, you are not allowed to delete this item.",
             None,
         ),
+        b"post-quickdraft-save" if post => return Some(quickdraft(site, asked, found, id)),
         _ => return post.then_some(Ok(())),
     };
     let nonce = format!("{}-post_{id}", String::from_utf8_lossy(&action));
@@ -427,6 +442,44 @@ fn terms_action(asked: &Asked) -> Option<Vec<u8>> {
         return Some(b"bulk-delete".to_vec());
     }
     Some(asked.current_action(false)?.to_php_string())
+}
+
+/// `trim( $_POST[ $name ] )` of the Quick Draft form, on the slashed value
+/// as PHP trims it; `None` for an array, PHP's fatal error.
+pub fn quickdraft_field(asked: &Asked, name: &str) -> Option<Vec<u8>> {
+    let given = match asked.post(name) {
+        Some(Value::Array(_)) => return None,
+        given => given.map(Value::to_php_string).unwrap_or_default(),
+    };
+    Some(php_trim(&addslashes(&given)).to_vec())
+}
+
+/// Whether the Quick Draft form has a title or content, which a draft
+/// needs; `None` for a field PHP cannot trim.
+pub fn quickdraft_filled(asked: &Asked) -> Option<bool> {
+    let title = quickdraft_field(asked, "post_title")?;
+    let content = quickdraft_field(asked, "content")?;
+    Some(!Value::String(title).is_empty() || !Value::String(content).is_empty())
+}
+
+/// `post.php`'s Quick Draft: `exit` for who may not create posts, then,
+/// with a valid nonce, the referer of its post's type and, once the form is
+/// filled, `edit_post()`'s capability check. The rest answers with the form.
+fn quickdraft(site: &dyn ActionSite, asked: &Asked, found: Option<CapPost>, id: i64) -> Checked {
+    if !site.current_user_can("edit_posts", &[]) {
+        return Err(ajax(200, ""));
+    }
+    if !verified(site, asked.request("_wpnonce"), "add-post") {
+        return Ok(());
+    }
+    let kind = found.map(|post| post.post_type).unwrap_or_default();
+    referer(site, asked, &format!("add-{kind}"))?;
+    match quickdraft_filled(asked) {
+        Some(true) if !can_for(site, "edit_post", id) => {
+            Err(died(500, "Sorry, you are not allowed to edit this post."))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// `edit-tags.php`'s actions on categories and tags.
@@ -503,13 +556,21 @@ fn users_action(asked: &Asked) -> Option<Vec<u8>> {
 }
 
 /// The action of a request whose checks passed, as its write's handler is
-/// registered: the lists' `current_action()`, else `$_REQUEST['action']`.
+/// registered: `screen-options` for the Screen Options form, the users
+/// and terms lists' `current_action()`, else `$_REQUEST['action']`.
 pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
     match screen {
+        "admin-ajax" => asked.action(),
+        _ if screen_options(asked) => b"screen-options".to_vec(),
         "users" => users_action(asked).unwrap_or_default(),
         "edit-tags" => terms_action(asked).unwrap_or_default(),
         _ => asked.action(),
     }
+}
+
+/// Whether the Screen Options form is posted: `$_POST['wp_screen_options']`, an array.
+fn screen_options(asked: &Asked) -> bool {
+    matches!(asked.post("wp_screen_options"), Some(Value::Array(_)))
 }
 
 /// `users.php`'s actions.

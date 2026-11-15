@@ -115,48 +115,70 @@ pub(crate) fn posts() -> Vec<Post> {
         post_type: "post".into(),
         ..post(809, 1, "2024-03-04 05:00:00", (b"Waiting", b"", b""))
     };
+    let image = |id, title: &[u8], name: &[u8], (status, parent): (&str, u64)| Post {
+        name: name.to_vec(),
+        comment_status: "open".into(),
+        status: status.into(),
+        parent,
+        mime_type: if id == 812 { "image/jpeg" } else { "image/png" }.into(),
+        ..post(id, 1, "2026-04-01 10:00:00", (title, b"", b""))
+    };
+    let binned = |id, status: &str, name: &[u8]| Post {
+        name: name.to_vec(),
+        status: status.into(),
+        comment_status: "open".into(),
+        ping_status: "open".into(),
+        post_type: "post".into(),
+        ..post(id, 1, "2026-05-02 09:00:00", (b"Binned", b"", b""))
+    };
     vec![
-        sunset, report, notes, secret, dot, draft, logo, data, waiting,
+        sunset,
+        report,
+        notes,
+        secret,
+        dot,
+        draft,
+        logo,
+        data,
+        waiting,
+        image(810, b"Gone", b"gone", ("trash", 0)),
+        image(811, b"Private shot", b"private-shot", ("private", 0)),
+        image(812, b"Big", b"big", ("inherit", 0)),
+        image(813, b"Binned draft image", b"binned", ("inherit", 814)),
+        binned(814, "trash", b"__trashed"),
+        image(815, b"Binned post image", b"binned-2", ("inherit", 816)),
+        binned(816, "trash", b"__trashed-2"),
     ]
 }
 
 /// Attachments the screen does not port, which no golden records: audio,
-/// video, trashed, scaled, sizeless, and one on a post in the Trash.
+/// video, published, a PDF with a scaled original, and sizeless.
 pub(crate) fn unported() -> Vec<Post> {
-    let mut posts: Vec<Post> = [
+    [
         (901, "audio/mpeg", "inherit"),
         (902, "video/mp4", "inherit"),
-        (903, "image/png", "trash"),
-        (904, "image/png", "inherit"),
+        (903, "image/png", "publish"),
+        (904, "application/pdf", "inherit"),
         (905, "application/pdf", "inherit"),
-        (906, "image/png", "inherit"),
     ]
     .into_iter()
     .map(|(id, mime_type, status)| Post {
         id,
         author: 1,
         status: status.into(),
-        parent: if id == 906 { 907 } else { 0 },
         post_type: "attachment".into(),
         mime_type: mime_type.into(),
         ..Post::default()
     })
-    .collect();
-    posts.push(Post {
-        id: 907,
-        status: "trash".into(),
-        post_type: "post".into(),
-        ..Post::default()
-    });
-    posts
+    .collect()
 }
 
 /// The post meta the content adds, and the unported attachments'.
 pub(crate) fn meta(id: u64, key: &str) -> Option<Vec<u8>> {
     let value: &[u8] = match (id, key) {
-        (901..=903 | 906, "_wp_attachment_metadata") => b"a:1:{s:8:\"filesize\";i:1;}",
+        (901..=903, "_wp_attachment_metadata") => b"a:1:{s:8:\"filesize\";i:1;}",
         (904, "_wp_attachment_metadata") => {
-            b"a:2:{s:8:\"filesize\";i:1;s:14:\"original_image\";s:5:\"a.png\";}"
+            b"a:2:{s:8:\"filesize\";i:1;s:14:\"original_image\";s:5:\"a.pdf\";}"
         }
         (801, "_wp_attached_file") => b"2026/03/sunset.jpg",
         (801, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:1200;s:6:\"height\";i:600;s:4:\"file\";s:18:\"2026/03/sunset.jpg\";s:8:\"filesize\";i:345678;s:5:\"sizes\";a:4:{s:6:\"medium\";a:5:{s:4:\"file\";s:18:\"sunset-300x150.jpg\";s:5:\"width\";i:300;s:6:\"height\";i:150;s:9:\"mime-type\";s:10:\"image/jpeg\";s:8:\"filesize\";i:12345;}s:5:\"large\";a:5:{s:4:\"file\";s:19:\"sunset-1024x512.jpg\";s:5:\"width\";i:1024;s:6:\"height\";i:512;s:9:\"mime-type\";s:10:\"image/jpeg\";s:8:\"filesize\";i:123456;}s:9:\"thumbnail\";a:5:{s:4:\"file\";s:18:\"sunset-150x150.jpg\";s:5:\"width\";i:150;s:6:\"height\";i:150;s:9:\"mime-type\";s:10:\"image/jpeg\";s:8:\"filesize\";i:5432;}s:12:\"medium_large\";a:5:{s:4:\"file\";s:18:\"sunset-768x384.jpg\";s:5:\"width\";i:768;s:6:\"height\";i:384;s:9:\"mime-type\";s:10:\"image/jpeg\";s:8:\"filesize\";i:65432;}}s:10:\"image_meta\";a:0:{}}",
@@ -173,6 +195,15 @@ pub(crate) fn meta(id: u64, key: &str) -> Option<Vec<u8>> {
         (807, "_wp_attachment_metadata") => b"a:1:{s:8:\"filesize\";i:3072;}",
         (808, "_wp_attached_file") => b"2024/03/data.csv",
         (808, "_wp_attachment_metadata") => b"a:1:{s:8:\"filesize\";i:100;}",
+        (811, "_wp_attached_file") => b"2026/04/shot.png",
+        (811, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:16:\"2026/04/shot.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
+        (812, "_wp_attached_file") => b"2026/05/big-scaled.jpg",
+        (812, "_wp_attachment_metadata") => b"a:7:{s:5:\"width\";i:2560;s:6:\"height\";i:1280;s:4:\"file\";s:22:\"2026/05/big-scaled.jpg\";s:8:\"filesize\";i:500000;s:5:\"sizes\";a:1:{s:9:\"thumbnail\";a:5:{s:4:\"file\";s:15:\"big-150x150.jpg\";s:5:\"width\";i:150;s:6:\"height\";i:150;s:9:\"mime-type\";s:10:\"image/jpeg\";s:8:\"filesize\";i:4000;}}s:10:\"image_meta\";a:0:{}s:14:\"original_image\";s:7:\"big.jpg\";}",
+        (813, "_wp_attached_file") => b"2026/05/binned.png",
+        (813, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:18:\"2026/05/binned.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
+        (814, "_wp_trash_meta_status") => b"draft",
+        (815, "_wp_attached_file") => b"2026/05/binned-2.png",
+        (815, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:10;s:6:\"height\";i:10;s:4:\"file\";s:20:\"2026/05/binned-2.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
         _ => return None,
     };
     Some(value.to_vec())

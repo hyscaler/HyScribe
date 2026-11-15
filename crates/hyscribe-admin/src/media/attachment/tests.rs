@@ -76,6 +76,7 @@ fn answer(
     Some(match attachment_edit(&site, &args, &request)? {
         Answer::Page(page) | Answer::Redirect(page) => page,
         Answer::Missing(message) => die(404, message),
+        Answer::Conflict(message) => die(409, message),
         Answer::Denied(message) | Answer::Died(message) => die(403, message),
     })
 }
@@ -131,7 +132,7 @@ fn pages_are_php_s() {
         "{}",
         failures[..failures.len().min(3)].join("\n")
     );
-    assert_eq!(pages, 43);
+    assert_eq!(pages, 49);
 }
 
 /// Every page of `reference/attachment-edit/golden.sh` over the Theme Test
@@ -179,7 +180,6 @@ fn unported_states_answer_nothing() {
         ("a8lock", "903"),
         ("a8lock", "904"),
         ("a8lock", "905"),
-        ("a8lock", "906"),
     ] {
         let screen = format!("post.php?post={post}&action=edit");
         assert!(

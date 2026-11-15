@@ -8,7 +8,10 @@
 -- administrator's on Hello world; a file without an extension of user 3's
 -- attached to a private post of user 2's; an image without a slug whose
 -- author is gone, attached to an untitled draft; an SVG image; and a CSV
--- file of the administrator's attached to their pending post.
+-- file of the administrator's attached to their pending post; and the
+-- administrator's images in the Trash, private, scaled from a larger
+-- original, and attached to a trashed draft and a trashed post without its
+-- earlier status.
 INSERT INTO wp_users (ID, user_login, user_pass, user_nicename, user_email, user_url, user_registered,
   user_activation_key, user_status, display_name) VALUES
   (2, 'locker', '', 'locker', 'locker@example.test', '', '2026-11-01 00:00:00', '', 0, 'Lock &amp; Holder'),
@@ -44,7 +47,26 @@ INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, p
     '2024-03-04 05:06:07', '2024-03-04 05:06:07', '', 809, 'http://default-install.test/wp-content/uploads/2024/03/data.csv',
     0, 'attachment', 'text/csv', 0),
   (809, 1, '2024-03-04 05:00:00', '0000-00-00 00:00:00', '', 'Waiting', '', 'pending', 'open', 'open', '', '', '', '',
-    '2024-03-04 05:00:00', '2024-03-04 05:00:00', '', 0, 'http://default-install.test/?p=809', 0, 'post', '', 0);
+    '2024-03-04 05:00:00', '2024-03-04 05:00:00', '', 0, 'http://default-install.test/?p=809', 0, 'post', '', 0),
+  (810, 1, '2026-04-01 10:00:00', '2026-04-01 10:00:00', '', 'Gone', '', 'trash', 'open', 'closed', '', 'gone', '', '',
+    '2026-04-01 10:00:00', '2026-04-01 10:00:00', '', 0, 'http://default-install.test/wp-content/uploads/2026/04/gone.png',
+    0, 'attachment', 'image/png', 0),
+  (811, 1, '2026-04-01 10:00:00', '2026-04-01 10:00:00', '', 'Private shot', '', 'private', 'open', 'closed', '', 'private-shot',
+    '', '', '2026-04-01 10:00:00', '2026-04-01 10:00:00', '', 0,
+    'http://default-install.test/wp-content/uploads/2026/04/shot.png', 0, 'attachment', 'image/png', 0),
+  (812, 1, '2026-04-01 10:00:00', '2026-04-01 10:00:00', '', 'Big', '', 'inherit', 'open', 'closed', '', 'big', '', '',
+    '2026-04-01 10:00:00', '2026-04-01 10:00:00', '', 0, 'http://default-install.test/wp-content/uploads/2026/05/big.jpg',
+    0, 'attachment', 'image/jpeg', 0),
+  (813, 1, '2026-04-01 10:00:00', '2026-04-01 10:00:00', '', 'Binned draft image', '', 'inherit', 'open', 'closed', '', 'binned',
+    '', '', '2026-04-01 10:00:00', '2026-04-01 10:00:00', '', 814,
+    'http://default-install.test/wp-content/uploads/2026/05/binned.png', 0, 'attachment', 'image/png', 0),
+  (814, 1, '2026-05-02 09:00:00', '2026-05-02 09:00:00', '', 'Binned', '', 'trash', 'open', 'open', '', '__trashed', '', '',
+    '2026-05-02 09:00:00', '2026-05-02 09:00:00', '', 0, 'http://default-install.test/?p=814', 0, 'post', '', 0),
+  (815, 1, '2026-04-01 10:00:00', '2026-04-01 10:00:00', '', 'Binned post image', '', 'inherit', 'open', 'closed', '', 'binned-2',
+    '', '', '2026-04-01 10:00:00', '2026-04-01 10:00:00', '', 816,
+    'http://default-install.test/wp-content/uploads/2026/05/binned-2.png', 0, 'attachment', 'image/png', 0),
+  (816, 1, '2026-05-02 09:00:00', '2026-05-02 09:00:00', '', 'Binned', '', 'trash', 'open', 'open', '', '__trashed-2', '', '',
+    '2026-05-02 09:00:00', '2026-05-02 09:00:00', '', 0, 'http://default-install.test/?p=816', 0, 'post', '', 0);
 INSERT INTO wp_postmeta (meta_id, post_id, meta_key, meta_value) VALUES
   (801, 801, '_wp_attached_file', '2026/03/sunset.jpg'),
   (802, 801, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:1200;s:6:"height";i:600;s:4:"file";s:18:"2026/03/sunset.jpg";s:8:"filesize";i:345678;s:5:"sizes";a:4:{s:6:"medium";a:5:{s:4:"file";s:18:"sunset-300x150.jpg";s:5:"width";i:300;s:6:"height";i:150;s:9:"mime-type";s:10:"image/jpeg";s:8:"filesize";i:12345;}s:5:"large";a:5:{s:4:"file";s:19:"sunset-1024x512.jpg";s:5:"width";i:1024;s:6:"height";i:512;s:9:"mime-type";s:10:"image/jpeg";s:8:"filesize";i:123456;}s:9:"thumbnail";a:5:{s:4:"file";s:18:"sunset-150x150.jpg";s:5:"width";i:150;s:6:"height";i:150;s:9:"mime-type";s:10:"image/jpeg";s:8:"filesize";i:5432;}s:12:"medium_large";a:5:{s:4:"file";s:18:"sunset-768x384.jpg";s:5:"width";i:768;s:6:"height";i:384;s:9:"mime-type";s:10:"image/jpeg";s:8:"filesize";i:65432;}}s:10:"image_meta";a:0:{}}'),
@@ -58,7 +80,18 @@ INSERT INTO wp_postmeta (meta_id, post_id, meta_key, meta_value) VALUES
   (810, 807, '_wp_attached_file', '2024/02/logo.svg'),
   (811, 807, '_wp_attachment_metadata', 'a:1:{s:8:"filesize";i:3072;}'),
   (812, 808, '_wp_attached_file', '2024/03/data.csv'),
-  (813, 808, '_wp_attachment_metadata', 'a:1:{s:8:"filesize";i:100;}');
+  (813, 808, '_wp_attachment_metadata', 'a:1:{s:8:"filesize";i:100;}'),
+  (814, 810, '_wp_attached_file', '2026/04/gone.png'),
+  (815, 810, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:16:"2026/04/gone.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}'),
+  (816, 811, '_wp_attached_file', '2026/04/shot.png'),
+  (817, 811, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:16:"2026/04/shot.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}'),
+  (818, 812, '_wp_attached_file', '2026/05/big-scaled.jpg'),
+  (819, 812, '_wp_attachment_metadata', 'a:7:{s:5:"width";i:2560;s:6:"height";i:1280;s:4:"file";s:22:"2026/05/big-scaled.jpg";s:8:"filesize";i:500000;s:5:"sizes";a:1:{s:9:"thumbnail";a:5:{s:4:"file";s:15:"big-150x150.jpg";s:5:"width";i:150;s:6:"height";i:150;s:9:"mime-type";s:10:"image/jpeg";s:8:"filesize";i:4000;}}s:10:"image_meta";a:0:{}s:14:"original_image";s:7:"big.jpg";}'),
+  (820, 813, '_wp_attached_file', '2026/05/binned.png'),
+  (821, 813, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:18:"2026/05/binned.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}'),
+  (822, 814, '_wp_trash_meta_status', 'draft'),
+  (823, 815, '_wp_attached_file', '2026/05/binned-2.png'),
+  (824, 815, '_wp_attachment_metadata', 'a:6:{s:5:"width";i:10;s:6:"height";i:10;s:4:"file";s:20:"2026/05/binned-2.png";s:8:"filesize";i:100;s:5:"sizes";a:0:{}s:10:"image_meta";a:0:{}}');
 INSERT INTO wp_comments (comment_ID, comment_post_ID, comment_author, comment_author_email, comment_author_url, comment_author_IP,
   comment_date, comment_date_gmt, comment_content, comment_karma, comment_approved, comment_agent, comment_type, comment_parent, user_id) VALUES
   (801, 801, 'Visitor', 'visitor@example.test', '', '', '2026-03-05 10:00:00', '2026-03-05 10:00:00', 'Nice', 0, '1', '', 'comment', 0, 0);

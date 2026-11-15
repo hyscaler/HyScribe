@@ -7,7 +7,7 @@ use hyscribe_kses::{esc_attr, esc_html, esc_url, str_contains, url_query};
 use hyscribe_phpser::{Value, addslashes, is_empty_string, parse_str, php_trim, urlencode};
 use hyscribe_render::formatting::{is_email, sanitize_user};
 
-use crate::assets::{Assets, Urls};
+use crate::assets::{Assets, Urls, site_icon_tags};
 
 pub mod actions;
 
@@ -74,6 +74,8 @@ pub trait Site: Urls {
     fn can_register(&self) -> bool;
     /// `get_post( $id )->post_type`, none for no post.
     fn post_type(&self, id: u64) -> Option<String>;
+    /// `get_site_icon_url( $size )`, `None` for no icon.
+    fn site_icon(&self, size: i64) -> Option<Vec<u8>>;
 }
 
 /// What the login screen answers.
@@ -122,17 +124,21 @@ fn as_text(value: Option<&Value>) -> Option<&[u8]> {
     value.and_then(Value::as_bytes)
 }
 
-/// `set_url_scheme( $url, 'https' )` of a URL the site made.
-fn https(url: &str) -> String {
+/// `set_url_scheme( $url, $scheme )` of a URL the site made.
+pub(crate) fn set_url_scheme(url: &str, scheme: &str) -> String {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    format!("https://{rest}")
+    format!("{scheme}://{rest}")
 }
 
 /// The login screen's URL with `query`, under `force_ssl_admin()` when
 /// `secure`.
 fn login_url(site: &dyn Site, query: &str, secure: bool) -> String {
     let url = site.login_url(query);
-    if secure { https(&url) } else { url }
+    if secure {
+        set_url_scheme(&url, "https")
+    } else {
+        url
+    }
 }
 
 impl Request<'_> {
@@ -285,7 +291,7 @@ pub fn login(site: &dyn Site, request: &Request) -> Login {
                 _ => to,
             }
         }
-        None if secure => https(&site.admin_url("")).into_bytes(),
+        None if secure => set_url_scheme(&site.admin_url(""), "https").into_bytes(),
         None => site.admin_url("").into_bytes(),
     };
     let reauth = request.request("reauth").is_some_and(|v| !v.is_empty());
@@ -488,8 +494,9 @@ impl Frame<'_> {
         for script in self.scripts {
             assets.enqueue_script(script);
         }
-        let mut out = String::from(
-            "\t<meta name='referrer' content='strict-origin-when-cross-origin' />\n\t\t<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n\t\t",
+        let mut out = format!(
+            "\t<meta name='referrer' content='strict-origin-when-cross-origin' />\n\t\t<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n\t{}\t",
+            site_icon_tags(&|size| site.site_icon(size))
         );
         let mut classes = vec![
             format!("login-action-{}", self.action),

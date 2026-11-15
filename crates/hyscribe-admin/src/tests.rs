@@ -44,6 +44,8 @@ pub struct Oracle {
     pub activation_key: &'static [u8],
     /// The ID of a `user_request` post.
     pub user_request: Option<u64>,
+    /// The variant of the test site whose site icon the site has.
+    pub icon: Option<&'static str>,
 }
 
 impl Urls for Oracle {
@@ -110,6 +112,9 @@ impl Site for Oracle {
     }
     fn post_type(&self, id: u64) -> Option<String> {
         (Some(id) == self.user_request).then(|| "user_request".into())
+    }
+    fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
+        crate::media::site_icon_url(&Role(self.icon?), size)
     }
 }
 
@@ -201,6 +206,14 @@ impl Role {
         self.0.split_once(':').map_or("", |(variant, _)| variant)
     }
 
+    /// The home URL, HTTPS in the `h9home` variant.
+    pub fn home(&self) -> String {
+        if self.variant() == "h9home" {
+            return SITE.replace("http:", "https:");
+        }
+        SITE.into()
+    }
+
     /// A variant of `reference/media/golden.sh` or
     /// `reference/attachment-edit/golden.sh` over the Theme Test Data.
     fn ttd(&self) -> bool {
@@ -242,7 +255,10 @@ impl Role {
 
     /// A variant of `reference/posts-list/golden.sh`, over its content.
     fn listing(&self) -> bool {
-        ["posts", "hidden", "excerpt", "front"].contains(&self.variant())
+        [
+            "posts", "hidden", "excerpt", "front", "h9locks", "h9home", "h9host",
+        ]
+        .contains(&self.variant())
     }
 
     /// A variant of `reference/terms-list/golden.sh` over its content.
@@ -297,6 +313,11 @@ impl Role {
                 b"page"
             }
             ("s1icon", "site_icon") => b"5",
+            ("h9icon", "site_icon") => b"951",
+            ("h9iconbare", "site_icon") => b"952",
+            ("h9iconpdf", "site_icon") => b"953",
+            ("h9iconnone", "site_icon") => b"954",
+            ("h9iconbig", "site_icon") => b"955",
             ("a5auto", "auto_update_themes") => b"a:1:{i:0;s:16:\"twentytwentyfive\";}",
             ("g9parent", "template") => b"twentytwentyfour",
             ("g9gone" | "g9noswitch" | "g9nooptions", "stylesheet" | "template")
@@ -701,7 +722,11 @@ impl MenuUser for Role {
 }
 
 impl Urls for Role {
+    /// The site URL, HTTPS in the `h9ssl` variant.
     fn site_url(&self) -> String {
+        if self.variant() == "h9ssl" {
+            return SITE.replace("http:", "https:");
+        }
         SITE.into()
     }
     fn admin_url(&self, path: &str) -> String {
@@ -710,7 +735,10 @@ impl Urls for Role {
     fn fill(&self, text: &str) -> String {
         let text = admin_links(text, "%admin_url%", &format!("{SITE}/hs-admin/"));
         admin_links(&text, "\"%admin_path%", "\"/hs-admin/")
-            .replace("%rest_url%", &format!("{SITE}/{}", self.rest_path()))
+            .replace(
+                "%rest_url%",
+                &format!("{}/{}", self.home(), self.rest_path()),
+            )
             .replace("%site_url%", SITE)
             .replace("%user_id%", "0")
             .replace(
@@ -1405,12 +1433,13 @@ impl crate::posts::PostsSite for Role {
         if self.variant() == "front" && post.id == 316 {
             return format!("{SITE}/");
         }
+        let home = self.home();
         let query = match post.post_type.as_str() {
             "page" => "page_id",
             "attachment" => "attachment_id",
             _ => "p",
         };
-        format!("{SITE}/?{query}={}", post.id)
+        format!("{home}/?{query}={}", post.id)
     }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         if name == "sticky_posts" && (self.listing() || self.variant() == "empty") {
@@ -1426,6 +1455,9 @@ impl crate::posts::PostsSite for Role {
             if !value.is_empty() {
                 return Some(value.to_vec());
             }
+        }
+        if let Some(icon) = self.variant_option(name).filter(|_| name == "site_icon") {
+            return Some(icon.to_vec());
         }
         match (self.variant(), name) {
             ("a8lockcount" | "a8lockref" | "a8lockrefpost", "user_count") => {
@@ -1488,11 +1520,27 @@ impl crate::posts::PostsSite for Role {
         }]
     }
     fn meta(&self, post: &hyscribe_model::Post, key: &str) -> Option<Vec<u8>> {
+        if self.variant().starts_with("h9icon") {
+            return icon_meta(post.id, key);
+        }
         if let Some(lock) = self.a8_lock(key) {
             return Some(lock.as_bytes().to_vec());
         }
         if self.a8() {
             return crate::media::attachment::content::meta(post.id, key);
+        }
+        // The edit locks `reference/posts-list/golden.sh` adds.
+        let lock: &[u8] = match (self.variant(), post.id, key) {
+            ("h9locks", 301 | 307, "_edit_lock") => b"9999999999:2",
+            ("h9locks", 302, "_edit_lock") => b"9999999999:1",
+            ("h9locks", 303, "_edit_lock") => b"1000:2",
+            ("h9locks", 304, "_edit_lock") => b"9999999999",
+            ("h9locks", 304, "_edit_last") => b"2",
+            ("h9locks", 305, "_edit_lock") => b"9999999999:99",
+            _ => b"",
+        };
+        if !lock.is_empty() {
+            return Some(lock.to_vec());
         }
         if self.variant() == "m4ttdrecent" && post.id == 1690 && key == "_thumbnail_id" {
             return Some(b"611".to_vec());
@@ -1502,14 +1550,13 @@ impl crate::posts::PostsSite for Role {
         }
         crate::posts::content::meta(post, key).filter(|_| self.listing())
     }
-    fn display_name(&self, id: u64) -> Option<Vec<u8>> {
+    fn userdata(&self, id: u64) -> Option<hyscribe_model::User> {
         if self.ttd() {
-            return crate::media::content::user(id).map(|user| user.display_name);
+            return crate::media::content::user(id);
         }
         self.authors("edit_posts")
             .into_iter()
             .find(|user| user.id == id)
-            .map(|user| user.display_name)
     }
     fn pending_comments(&self, post: &hyscribe_model::Post) -> u64 {
         u64::from(
@@ -1605,6 +1652,19 @@ impl crate::posts::PostsSite for Role {
         crate::posts::content::months(self.posts(), post_type, trash)
     }
     fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        if self.variant().starts_with("h9icon") && (951..=955).contains(&id) {
+            return Some(hyscribe_model::Post {
+                id,
+                post_type: "attachment".into(),
+                mime_type: if id < 953 || id == 955 {
+                    "image/png"
+                } else {
+                    "application/pdf"
+                }
+                .into(),
+                ..hyscribe_model::Post::default()
+            });
+        }
         if self.variant() == "m4ttdtemplate" && id == 9999 {
             return Some(hyscribe_model::Post {
                 id,
@@ -1648,4 +1708,24 @@ impl crate::posts::PostsSite for Role {
             .get_or_init(hyscribe_render::theme::twentytwentyfive)
             .post_formats()
     }
+}
+
+/// The post meta of the site icons `reference/site-icon/content.sql` adds.
+fn icon_meta(id: u64, key: &str) -> Option<Vec<u8>> {
+    let value: &[u8] = match (id, key) {
+        (951, "_wp_attached_file") => b"2026/11/icon.png",
+        (951, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:512;s:6:\"height\";i:512;s:4:\"file\";s:16:\"2026/11/icon.png\";s:8:\"filesize\";i:9000;s:5:\"sizes\";a:6:{s:6:\"medium\";a:4:{s:4:\"file\";s:16:\"icon-300x300.png\";s:5:\"width\";i:300;s:6:\"height\";i:300;s:9:\"mime-type\";s:9:\"image/png\";}s:9:\"thumbnail\";a:4:{s:4:\"file\";s:16:\"icon-150x150.png\";s:5:\"width\";i:150;s:6:\"height\";i:150;s:9:\"mime-type\";s:9:\"image/png\";}s:13:\"site_icon-270\";a:4:{s:4:\"file\";s:16:\"icon-270x270.png\";s:5:\"width\";i:270;s:6:\"height\";i:270;s:9:\"mime-type\";s:9:\"image/png\";}s:13:\"site_icon-192\";a:4:{s:4:\"file\";s:16:\"icon-192x192.png\";s:5:\"width\";i:192;s:6:\"height\";i:192;s:9:\"mime-type\";s:9:\"image/png\";}s:13:\"site_icon-180\";a:4:{s:4:\"file\";s:16:\"icon-180x180.png\";s:5:\"width\";i:180;s:6:\"height\";i:180;s:9:\"mime-type\";s:9:\"image/png\";}s:12:\"site_icon-32\";a:4:{s:4:\"file\";s:14:\"icon-32x32.png\";s:5:\"width\";i:32;s:6:\"height\";i:32;s:9:\"mime-type\";s:9:\"image/png\";}}s:10:\"image_meta\";a:0:{}}",
+        (952, "_wp_attached_file") => b"2026/11/tiny.png",
+        (952, "_wp_attachment_metadata") => b"a:6:{s:5:\"width\";i:40;s:6:\"height\";i:40;s:4:\"file\";s:16:\"2026/11/tiny.png\";s:8:\"filesize\";i:100;s:5:\"sizes\";a:0:{}s:10:\"image_meta\";a:0:{}}",
+        (953, "_wp_attached_file") => b"2026/11/doc.pdf",
+        (953, "_wp_attachment_metadata") => b"a:2:{s:8:\"filesize\";i:5000;s:5:\"sizes\";a:2:{s:4:\"full\";a:4:{s:4:\"file\";s:11:\"doc-pdf.jpg\";s:5:\"width\";i:1088;s:6:\"height\";i:1408;s:9:\"mime-type\";s:10:\"image/jpeg\";}s:9:\"thumbnail\";a:4:{s:4:\"file\";s:19:\"doc-pdf-116x150.jpg\";s:5:\"width\";i:116;s:6:\"height\";i:150;s:9:\"mime-type\";s:10:\"image/jpeg\";}}}",
+        (954, "_wp_attached_file") => b"2026/11/bare.pdf",
+        (954, "_wp_attachment_metadata") => b"a:1:{s:8:\"filesize\";i:5000;}",
+        (955, "_wp_attached_file") => b"2026/11/big.png",
+        (955, "_wp_attachment_metadata") => {
+            b"a:4:{s:5:\"width\";i:1024;s:6:\"height\";i:1024;s:4:\"file\";s:15:\"2026/11/big.png\";s:5:\"sizes\";a:1:{s:13:\"site_icon-512\";a:3:{s:4:\"file\";s:15:\"big-512x512.png\";s:5:\"width\";i:512;s:6:\"height\";i:512;}}}"
+        }
+        _ => return None,
+    };
+    Some(value.to_vec())
 }

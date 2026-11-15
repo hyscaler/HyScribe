@@ -55,6 +55,10 @@ pub trait BarSite: MenuUser {
     fn names(&self) -> (String, String);
     /// `get_avatar( $user_id, $size )`.
     fn avatar(&self, size: i64) -> String;
+    /// `get_site_icon_url( $size )`, `None` for no icon.
+    fn site_icon(&self, _size: i64) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 /// A node's `meta`.
@@ -369,11 +373,25 @@ pub fn admin_bar(site: &dyn BarSite, browser: &Browser, view: Option<(&str, &str
             .trim_start_matches("http://");
         blogname = bare.strip_prefix("www.").unwrap_or(bare).to_string();
     }
-    let title = html_excerpt(&blogname, 40, "&hellip;");
-    let meta = Meta {
+    let mut title = html_excerpt(&blogname, 40, "&hellip;");
+    let mut meta = Meta {
         menu_title: title.clone(),
         ..Meta::default()
     };
+    if site.site_icon(512).is_some() {
+        let url = |size| site.site_icon(size).unwrap_or_default();
+        let (one, two) = (url(32), url(64));
+        let srcset = if two.is_empty() || one == two {
+            String::new()
+        } else {
+            format!(" srcset=\"{} 2x\"", String::from_utf8_lossy(&esc_url(&two)))
+        };
+        title = format!(
+            "<img class=\"site-icon\" src=\"{}\"{srcset} alt=\"\" width=\"20\" height=\"20\" />{title}",
+            String::from_utf8_lossy(&esc_url(&one))
+        );
+        meta.class = "has-site-icon".into();
+    }
     bar.add("site-name", "", title, site.home_url(), meta);
     bar.add(
         "view-site",

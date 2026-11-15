@@ -573,6 +573,31 @@ async fn post_php_stops_as_php_stops() {
     )
     .await;
     assert!(unported(&answer));
+    // From the editor the list is the post type's; from a list, back to it.
+    let read = "SELECT post_status FROM wp_posts WHERE ID = 2";
+    for (referer, to) in [
+        (
+            "%2Fhs-admin%2Fpost-new",
+            "/hs-admin/edit?post_type=post&trashed=1&ids=1",
+        ),
+        (
+            "%2Fhs-admin%2Fpost%3Fpost%3D1",
+            "/hs-admin/edit?post_type=post&trashed=1&ids=1",
+        ),
+        (
+            "%2Fhs-admin%2Fedit%3Fids%3D9",
+            "/hs-admin/edit?trashed=1&ids=1",
+        ),
+    ] {
+        let query = format!("post=1&action=trash&_wp_http_referer={referer}");
+        let (answer, _) = tried(1, &[], ("post", &query, ""), read).await;
+        let to = if to.contains("post_type") {
+            format!("{SITE}{to}")
+        } else {
+            to.into()
+        };
+        assert_eq!(answer, Ok(Answer::Redirect(to)), "{referer}");
+    }
 }
 
 /// `edit.php`'s requests that write nothing, or stop part way.
@@ -720,7 +745,9 @@ async fn quick_edit_edges() {
     let (answer, statuses) = quick_edit(1, &[], &post(private)).await;
     assert_eq!(answer, Ok(Answer::Page(String::new())));
     assert_eq!(statuses[0], "private hello-world ");
-    let (_, statuses) = quick_edit(1, &[], &post("_status=inherit&tax_input[category][]=1")).await;
+    let (answer, statuses) =
+        quick_edit(1, &[], &post("_status=inherit&tax_input[category][]=1")).await;
+    assert_eq!(answer, Ok(Answer::Page(String::new())));
     assert_eq!(statuses[0], "publish hello-world ");
     // A draft's slug is made unique as a published one's.
     let draft = quick(
@@ -739,7 +766,7 @@ async fn quick_edit_edges() {
     let body = quick(951, "screen=edit-post&post_type=post");
     let (answer, _) = quick_edit(1, &revision, &body).await;
     assert!(unported(&answer));
-    let old = ["UPDATE wp_posts SET post_name = '1-revision' WHERE ID = 951".to_string()];
+    let old = ["UPDATE wp_posts SET post_name = '1-revision-v0' WHERE ID = 951".to_string()];
     let (answer, _) = quick_edit(1, &[revision[0].clone(), old[0].clone()], &post("")).await;
     assert!(unported(&answer));
     let formatted = [
@@ -751,14 +778,6 @@ async fn quick_edit_edges() {
         "INSERT INTO wp_term_relationships (object_id, term_taxonomy_id) VALUES (1, 960)".into(),
     ];
     let (answer, _) = quick_edit(1, &formatted, &post("")).await;
-    assert!(unported(&answer));
-    // Attachment links to fix under pretty permalinks.
-    let linked = [
-        post_row(950, (1, "publish", "post"), ("Linked", "a <a href=\"x?attachment_id=5\">l</a>"), 0),
-        "UPDATE wp_options SET option_value = '/%postname%/' WHERE option_name = 'permalink_structure'".into(),
-    ];
-    let body = quick(950, "screen=edit-post&post_type=post");
-    let (answer, _) = quick_edit(1, &linked, &body).await;
     assert!(unported(&answer));
     // A post left with no title, content or excerpt keeps its title.
     let blank = [post_row(950, (1, "publish", "post"), ("Titled", ""), 0)];
@@ -787,6 +806,10 @@ async fn quick_edit_edges() {
     let (answer, statuses) = quick_edit(903, &sql, &quick(950, more)).await;
     assert_eq!(answer, Ok(Answer::Page(String::new())));
     assert_eq!(statuses[2], "pending  ");
+    let sticky = "SELECT option_value FROM wp_options WHERE option_name = 'sticky_posts'";
+    let body = quick(950, more);
+    let (_, stickies) = tried(903, &sql, ("admin-ajax", "", &body), sticky).await;
+    assert_eq!(stickies, ["a:0:{}"]);
     let more = "screen=edit-post&post_type=post&keep_private=private";
     let (_, statuses) = quick_edit(903, &sql, &quick(950, more)).await;
     assert_eq!(statuses[2], "draft post-950 ");
@@ -862,6 +885,13 @@ async fn bulk_edit_edges() {
         let (_, terms) = tried(1, &category, ("edit", &query, ""), categories).await;
         assert_eq!(terms, ["1", "961"], "{more}");
     }
+    // A post another user is editing is counted as locked.
+    let [editing, caps] = user(900, AUTHOR);
+    let lock = meta(1, "_edit_lock", &format!("{}:900", crate::now()));
+    let (answer, _) = bulk_edit(1, &[editing, caps, lock], "post[]=1").await;
+    assert!(
+        matches!(answer, Ok(Answer::Redirect(to)) if to.ends_with("&updated=0&skipped=0&locked=1"))
+    );
     // A date part that differs from its hidden copy edits the date.
     let dated = "SELECT CAST(post_date AS CHAR) FROM wp_posts WHERE ID = 1";
     let query = format!("{base}&post[]=1&hidden_jj=27&jj=28&aa=2026&mm=10&hh=08&mn=08&ss=15");
@@ -874,6 +904,23 @@ async fn bulk_edit_edges() {
         "/hs-admin/edit?post_type=page&post_parent=2&paged=1&updated=1&skipped=1&locked=0";
     assert_eq!(answer, Ok(Answer::Redirect(skipped.into())));
     assert_eq!(rows[2], "3 draft 2 closed");
+    // Parents in a loop end the walk up.
+    let looped = [
+        post_row(950, (1, "publish", "page"), ("A", ""), 951),
+        post_row(951, (1, "publish", "page"), ("B", ""), 950),
+    ];
+    let pages = "action=edit&bulk_edit=Update&post_type=page&post_parent=950&post[]=951";
+    let (answer, _) = tried(1, &looped, ("edit", pages, ""), read).await;
+    let skipped =
+        "/hs-admin/edit?post_type=page&post_parent=950&paged=1&updated=0&skipped=1&locked=0";
+    assert_eq!(answer, Ok(Answer::Redirect(skipped.into())));
+    // Only pages are walked up: a post's own parent is not.
+    let under = [post_row(950, (1, "publish", "post"), ("Post", "Text."), 2)];
+    let pages = "action=edit&bulk_edit=Update&post_type=page&post_parent=950&post[]=2";
+    let (answer, _) = tried(1, &under, ("edit", pages, ""), read).await;
+    let updated =
+        "/hs-admin/edit?post_type=page&post_parent=950&paged=1&updated=1&skipped=0&locked=0";
+    assert_eq!(answer, Ok(Answer::Redirect(updated.into())));
     let pages = "action=edit&bulk_edit=Update&post_type=page&post_parent=1&post[]=3";
     let (_, rows) = tried(1, &[], ("edit", pages, ""), read).await;
     assert_eq!(rows[2], "3 draft 1 closed");
@@ -908,6 +955,9 @@ async fn bulk_edit_edges() {
     let query = format!("{base}&post[]=1&sticky=unsticky");
     let (_, stickies) = tried(1, &[stuck.into()], ("edit", &query, ""), sticky).await;
     assert_eq!(stickies, ["a:0:{}"]);
+    let query = format!("{base}&post[]=1");
+    let (_, stickies) = tried(1, &[stuck.into()], ("edit", &query, ""), sticky).await;
+    assert_eq!(stickies, ["a:1:{i:0;i:1;}"]);
     let mut sql = sql.to_vec();
     sql.push(stuck.into());
     sql[2] = post_row(950, (900, "auto-draft", "post"), ("Own", "Text."), 0);
@@ -946,6 +996,7 @@ async fn edits_of_odd_fields() {
         ("_status=auto-draft", "draft 1 "),
         ("_status=bogus", "publish 1 "),
         ("post_password=secret", "publish 1 secret"),
+        ("post_format=standard", "publish 1 "),
     ] {
         let (_, statuses) = quick_edit(post(more)).await;
         assert_eq!(statuses, [status], "{more}");

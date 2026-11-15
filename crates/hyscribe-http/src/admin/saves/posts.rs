@@ -896,21 +896,8 @@ async fn edit_post(
     if !caps.can("edit_posts", &[]) {
         terms.clear();
     }
-    let attachment_links = post
-        .content
-        .windows(15)
-        .position(|w| w == b"?attachment_id=");
-    let status = data.text("post_status").unwrap_or_default();
-    let linked = attachment_links.is_some_and(|at| at > 0)
-        && [&b"publish"[..], b"future", b"private"].contains(&&status[..])
-        && !write
-            .option_value("permalink_structure")
-            .await?
-            .unwrap_or_default()
-            .is_empty();
-    if linked {
-        return Err(Error::Unported("attachment links to fix").into());
-    }
+    // `_fix_attachment_links()` acts under pretty permalinks only, where
+    // `wp_update_post()` is not ported yet.
     let me = i64::try_from(asked.user).unwrap_or_default();
     update_post_meta(write, id, "_edit_last", Value::Int(me)).await?;
     let ctx = context(asked, &caps, &post.post_type);
@@ -1029,10 +1016,9 @@ async fn bulk_edit_posts(
 ) -> Result<[usize; 3], Stop> {
     let mut shared = request(asked);
     sent_by_the_lists(&shared)?;
-    match shared.get("_status").cloned() {
-        Some(Value::String(status)) if status == b"-1" => shared.unset("post_status"),
-        status => shared.set("post_status", status.unwrap_or(Value::Null)),
-    }
+    // A `-1`, No Change, is unset with the other fields below.
+    let status = shared.get("_status").cloned();
+    shared.set("post_status", status.unwrap_or(Value::Null));
     shared.unset("_status");
     inherited(&mut shared);
     // `edit.php` read the IDs as an array already.
@@ -1064,9 +1050,8 @@ async fn bulk_edit_posts(
         }
     }
     let new_cats: Option<Vec<i64>> = match shared.get("post_category") {
-        Some(Value::Array(ids)) if !ids.is_empty() => {
-            Some(ids.iter().map(|(_, id)| id.to_int().abs()).collect())
-        }
+        // A request's array is never empty.
+        Some(Value::Array(ids)) => Some(ids.iter().map(|(_, id)| id.to_int().abs()).collect()),
         Some(_) => {
             shared.unset("post_category");
             None
@@ -1092,7 +1077,8 @@ async fn bulk_edit_posts(
     // The page chosen as the parent and its ancestors are not moved under it.
     let mut children = Vec::new();
     let mut parent = shared.get("post_parent").map_or(0, Value::to_int);
-    while parent > 0 && !children.contains(&parent) {
+    // No post has ID 0, so no parent ends the walk at once.
+    while !children.contains(&parent) {
         children.push(parent);
         let page = write
             .post(u64::try_from(parent).unwrap_or_default())

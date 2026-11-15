@@ -249,12 +249,12 @@ fn actions_are_named_as_php_names_them() {
         ("edit", "changeit=Change&action=trash", "trash"),
         ("edit", "action=-1&delete_all=Empty+Trash", "delete_all"),
         ("edit", "action=trash&filter_action=Filter", ""),
-        ("post", "action=delete&deletepost=Delete", "delete"),
+        ("post", "action=trash&deletepost=Delete", "delete"),
         ("post", "action=trash", "trash"),
     ] {
         // `post.php`'s Delete button is a field of the form.
         let (get, post) = match query.split_once("&deletepost") {
-            Some((get, post)) => (fields(get), fields(post)),
+            Some((get, rest)) => (fields(get), fields(&format!("deletepost{rest}"))),
             None => (fields(query), Vec::new()),
         };
         let asked = Asked {

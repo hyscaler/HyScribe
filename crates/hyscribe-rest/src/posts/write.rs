@@ -540,15 +540,14 @@ fn finish(
     }
     let location = context.rest_url(&format!("/wp/v2/{}/{id}", kind.base()));
     // Its content was found ported before the write.
-    let response = prepared(context, params, kind, &post).map(|mut response| {
+    prepared(context, params, kind, &post).map(|mut response| {
         if created {
             response.status = 201;
             response.header("Location", &location);
         }
+        if let Write::Trash(_) = plan.write {
+            action("rest_delete", &[&post, &response, params]);
+        }
         response
-    })?;
-    if let Write::Trash(_) = plan.write {
-        action("rest_delete", &[&post, &response, params]);
-    }
-    Ok(response)
+    })
 }

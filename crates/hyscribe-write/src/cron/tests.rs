@@ -340,6 +340,8 @@ async fn due_events_are_those_of_hooks_hyscribe_runs_in_php_s_order() {
         // A key that is not a timestamp ends the due ones.
         set_crons(w, later).await.unwrap();
         assert_eq!(due(w, NOW).await.unwrap(), expected[..1]);
+        w.fail_after(0);
+        assert!(matches!(due(w, NOW).await, Err(Error::Db(_))));
     })
     .await;
 }

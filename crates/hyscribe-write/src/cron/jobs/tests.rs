@@ -429,6 +429,9 @@ async fn the_jobs_keep_to_php_s_ages() {
                 .await
                 .unwrap();
             assert_eq!(w.post(id).await.unwrap().unwrap().status, status);
+            // wp_delete_post() trashes only posts and pages.
+            assert!(wp_delete_post(w, &ctx, id, false).await.unwrap());
+            assert!(w.post(id).await.unwrap().is_none());
         }
     })
     .await;

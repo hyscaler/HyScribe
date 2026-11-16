@@ -720,7 +720,7 @@ fn order_follows_the_query() {
         ..PostQuery::default()
     });
     assert!(lists.text.ends_with(
-        "ORDER BY FIELD(ID, ?, ?, ?) ASC, FIELD(post_parent, ?, ?) DESC, RAND() ASC, RAND(?) DESC LIMIT ? OFFSET ?"
+        "ORDER BY FIELD(ID, ?, ?) ASC, FIELD(post_parent, ?) DESC, RAND() ASC, RAND(?) DESC LIMIT ? OFFSET ?"
     ));
     let ints: Vec<u64> = lists
         .binds
@@ -730,17 +730,13 @@ fn order_follows_the_query() {
             _ => None,
         })
         .collect();
-    // The WHERE parents and IDs (0 first), then the FIELD lists ending in 0.
-    assert_eq!(ints, [2, 0, 5, 3, 5, 3, 0, 2, 0, 7, 0, 0]);
+    // The WHERE parents and IDs (0 first), then the FIELD lists.
+    assert_eq!(ints, [2, 0, 5, 3, 5, 3, 2, 7, 0, 0]);
     let empty = posts_sql(&PostQuery {
         order: vec![(OrderBy::Included, true), (OrderBy::Parents, true)],
         ..PostQuery::default()
     });
-    assert!(
-        empty
-            .text
-            .contains("ORDER BY FIELD(ID, ?) ASC, FIELD(post_parent, ?) ASC")
-    );
+    assert!(empty.text.contains("ORDER BY post_date ASC LIMIT"));
 }
 
 /// `WP_Query`'s `RAND(n)` order of the published posts and pages, as
@@ -1428,6 +1424,41 @@ async fn term_queries_take_the_rest_arguments() {
         ..query
     };
     assert_eq!(db.term_query_count(&elsewhere).await.unwrap(), 0);
+}
+
+/// The order of an empty list, for which PHP writes no `FIELD()`: terms
+/// sort by name, and a post order leaves the key out, the date alone.
+#[tokio::test]
+async fn empty_list_orders_sort_as_php() {
+    let db = named("wordpress_ttd").await;
+    let ids = |terms: Vec<Term>| terms.iter().map(|t| t.id).collect::<Vec<_>>();
+    let terms = |order| TermQuery {
+        taxonomy: "category".into(),
+        order: Some((order, true)),
+        limit: Some(5),
+        ..TermQuery::default()
+    };
+    let by_name = ids(db.term_query(&terms(TermOrder::Name)).await.unwrap());
+    for order in [TermOrder::Include, TermOrder::Slugs] {
+        let listed = db.term_query(&terms(order)).await.unwrap();
+        assert_eq!(ids(listed), by_name, "{order:?}");
+    }
+    let posts = |order| PostQuery {
+        post_types: vec!["post".into()],
+        order,
+        limit: 5,
+        ..PostQuery::default()
+    };
+    let by_date = db.posts(&posts(vec![(OrderBy::Date, true)])).await.unwrap();
+    for list in [OrderBy::Included, OrderBy::Parents, OrderBy::Names] {
+        let listed = db.posts(&posts(vec![(list, true)])).await.unwrap();
+        assert_eq!(listed, by_date, "{list:?}");
+        let after = db
+            .posts(&posts(vec![(list, false), (OrderBy::Date, true)]))
+            .await
+            .unwrap();
+        assert_eq!(after, by_date, "{list:?}");
+    }
 }
 
 /// The dashboard's comment counts, latest comments and posts by status,

@@ -1,0 +1,96 @@
+<?php
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Run by golden.sh inside the PHP container: for each corpus file in
+// $argv[1] (copied into the uploads folder $argv[2] under 2026/11/), what
+// WordPress makes of it. Nothing is written to the database: the
+// attachment ID is 0, which update_attached_file() and
+// wp_update_attachment_metadata() refuse. Prints, tab separated:
+//   meta <file> <serialize( wp_create_image_subsizes() ) in hex>
+//   read <file> <serialize( wp_read_image_metadata() ) in hex>
+//   out  <file> <made file> <md5> <bytes>
+//   check <corpus file> <upload name> <ext> <type> <proper_filename>
+
+[, $corpus, $base] = $argv;
+define('WP_USE_THEMES', false);
+require '/var/www/html/wp-load.php';
+require_once ABSPATH . 'wp-admin/includes/image.php';
+require_once ABSPATH . 'wp-admin/includes/file.php';
+
+add_filter('upload_dir', function ($dirs) use ($base) {
+	$dirs['basedir'] = $base;
+	$dirs['path'] = "$base/2026/11";
+	$dirs['subdir'] = '/2026/11';
+	return $dirs;
+});
+$dir = "$base/2026/11";
+$names = array_map('basename', glob("$corpus/*"));
+sort($names);
+foreach ($names as $name) {
+	if (str_ends_with($name, '.php')) {
+		continue;
+	}
+	$file = "$dir/$name";
+	copy("$corpus/$name", $file);
+	$before = scandir($dir);
+	echo "read\t$name\t", bin2hex(serialize(wp_read_image_metadata($file))), "\n";
+	$meta = wp_create_image_subsizes($file, 0);
+	$meta = apply_filters('wp_generate_attachment_metadata', $meta, 0, 'create');
+	echo "meta\t$name\t", bin2hex(serialize($meta)), "\n";
+	foreach (array_diff(scandir($dir), $before) as $made) {
+		echo "out\t$name\t$made\t", md5_file("$dir/$made"), "\t", filesize("$dir/$made"), "\n";
+	}
+}
+// image_resize_dimensions() and wp_constrain_dimensions() over a grid.
+$sides = [0, 1, 99, 100, 101, 150, 299, 300, 301, 640, 1024, 2560];
+foreach ([[640, 480], [300, 300], [100, 2000], [1, 1], [0, 10]] as [$w, $h]) {
+	foreach ($sides as $dw) {
+		foreach ($sides as $dh) {
+			$crops = [false, true, ['left', 'top'], ['right', 'bottom'], ['center', 'top']];
+			foreach ($crops as $crop) {
+				$dims = image_resize_dimensions($w, $h, $dw, $dh, $crop);
+				echo "dims\t$w\t$h\t$dw\t$dh\t", json_encode($crop), "\t", $dims ? implode(',', $dims) : 'false', "\n";
+			}
+			echo "constrain\t$w\t$h\t$dw\t$dh\t", implode(',', wp_constrain_dimensions($w, $h, $dw, $dh)), "\n";
+		}
+	}
+}
+// sanitize_file_name() and wp_unique_filename(), in an empty folder and
+// one holding these files.
+$names = [
+	'photo.jpg', 'Photo.JPG', 'photo-150x150.jpg', 'photo-scaled.jpg', 'photo-rotated.png', 'pic.png', 'pic-scaled.png',
+	'upper.jpg', 'Upper.JPG', 'doc.jpg', 'doc.heic', 'doc.jpeg', 'img.jpg', 'img-1.jpg', 'a-1.jpg.jpg', 'my photo (1).jpg',
+	"caf\xC3\xA9.jpg", '.jpg', 'noext', 'a.b.c.jpg', 'file.php.jpg', 'x.tar.gz', '-_.hidden.jpg', 'JPG', 'jpg', 'gz',
+	'a..b...jpg', "tab\tname.png", "na\xC3\xAFve r\xC3\xA9sum\xC3\xA9.png", 'über file+name&x.jpg', 'a%20b.jpg',
+	"smart\xE2\x80\x99quote.jpg", "a\xE2\x80\x83b.jpg", "bad\xFF name.jpg", "bad\xFF", 'v1.data2.jpg', 'x.exe.jpg',
+	'x.html.jpg', 'x.mp3.jpg', 'x.abcdef.jpg', 'x.ab12.jpg', 'x.ab1.jpg', 'a - b  --  c.jpg', '0.jpg', 'video.MP4',
+	'IMG-1.JPG', 'q.heic', 'q.heif', 'r.jpg', 's.HEIC', "\x81\x82 odd.jpg", "\x9D", "\xC3.png",
+];
+$folder = "$base/unique";
+@mkdir($folder, 0777, true);
+$files = [
+	'photo.jpg', 'photo-1.jpg', 'photo-300x200.jpg', 'pic-scaled.png', 'Upper.JPG', 'doc.heic', 'doc.jpg', 'img-150x150.jpg',
+	'a-1.jpg.jpg', 'noext', 'noext-1', 'img-1.jpg', 'IMG-1.jpg', 'q.jpg', 'r-scaled.heic', 's.jpg', 'video.mp4', '0-1.jpg',
+];
+$empty = "$base/empty";
+@mkdir($empty, 0777, true);
+foreach ($files as $file) {
+	touch("$folder/$file");
+}
+foreach ($names as $name) {
+	echo "name\t", bin2hex($name), "\t", bin2hex(sanitize_file_name($name)), "\t", wp_unique_filename($empty, $name), "\t", wp_unique_filename($folder, $name), "\n";
+}
+echo "files\t", implode(',', $files), "\n";
+// The type checks of uploads named as their content or otherwise.
+$renamed = [
+	['photo.jpg', 'photo.jpg'], ['photo.jpg', 'photo.JPEG'], ['photo.jpg', 'photo.png'], ['photo.jpg', 'photo.gif'],
+	['rgb.png', 'rgb.jpg'], ['rgb.png', 'rgb.webp'], ['still.gif', 'still.bmp'], ['lossy.webp', 'lossy.jpg'],
+	['photo.avif', 'photo.avif'], ['photo.avif', 'photo.jpg'], ['photo.bmp', 'photo.bmp'], ['photo.tif', 'photo.tiff'],
+	['photo.tif', 'photo.jpg'], ['photo.jpg', 'photo.tar.jpg'], ['photo.jpg', 'photo.heic'], ['photo.jpg', 'photo.heif'],
+	['photo.jpg', 'photo.php'], ['photo.jpg', 'photo.svg'], ['photo.jpg', 'photo'], ['photo.jpg', 'photo.jpg.php'],
+	['photo.jpg', 'photo.php.jpg'], ['photo.jpg', 'photo.ico'], ['photo.jpg', 'photo.jpe'], ['rgb.png', 'rgb.PnG'], ['photo.bmp', 'photo.jpg'],
+];
+foreach ($renamed as [$name, $upload]) {
+	$checked = wp_check_filetype_and_ext("$corpus/$name", $upload);
+	echo implode("\t", ['check', $name, $upload, var_export($checked['ext'], true), var_export($checked['type'], true), var_export($checked['proper_filename'], true)]), "\n";
+}

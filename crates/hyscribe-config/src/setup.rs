@@ -161,10 +161,8 @@ pub fn render(values: &[(&str, String)]) -> Option<String> {
 pub fn write(dir: &Path, text: &str, replace: bool) -> std::io::Result<PathBuf> {
     let path = dir.join(ENV_FILE);
     let new = dir.join(format!("{ENV_FILE}.new"));
-    match std::fs::remove_file(&new) {
-        Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err),
-        _ => {}
-    }
+    // Left by an interrupted run; if it cannot go, creating it fails.
+    let _ = std::fs::remove_file(&new);
     let written = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)

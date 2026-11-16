@@ -323,7 +323,6 @@ async fn check(config: &Config) -> Result<String, String> {
         .map_err(db_failed("cannot read db_version".into()))?
         .map(|version| String::from_utf8_lossy(&version).into_owned());
     match version.as_deref().map(str::parse::<u64>) {
-        Some(Ok(number)) if DB_VERSIONS.contains(&number) => {}
         // docs/COMPATIBILITY.md: older sites are upgraded by PHP first.
         Some(Ok(number)) if number < *DB_VERSIONS.start() => {
             return Err(format!(
@@ -332,6 +331,7 @@ async fn check(config: &Config) -> Result<String, String> {
                 DB_VERSIONS.start()
             ));
         }
+        Some(Ok(number)) if DB_VERSIONS.contains(&number) => {}
         _ => {
             return Err(format!(
                 "the database's db_version ({}) is not one this release supports ({} to {}, \
@@ -354,12 +354,12 @@ async fn check(config: &Config) -> Result<String, String> {
         privileges
             .map_err(db_failed(format!("cannot read the privileges of {user}")))
             .and_then(|privileges| {
-                let reads = privileges.iter().any(|p| p == "SELECT");
-                if reads && privileges.iter().all(|p| p == "SELECT" || p == "USAGE") {
+                // Without SELECT, reading db_version has failed already.
+                if privileges.iter().all(|p| p == "SELECT" || p == "USAGE") {
                     Ok(())
                 } else {
                     Err(format!(
-                        "DB_READ_USER {user} must be granted SELECT and nothing more; it has {}",
+                        "DB_READ_USER {user} may only be granted SELECT; it has {}",
                         privileges.join(", ")
                     ))
                 }

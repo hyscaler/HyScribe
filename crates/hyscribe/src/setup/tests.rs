@@ -304,7 +304,7 @@ fn a_read_user_that_may_write_is_refused() {
     let ran = wizard(&install.home, "\n\nwordpress\nreference-only\n");
     let err = ran.result.unwrap_err();
     assert!(
-        err.starts_with("DB_READ_USER wordpress must be granted SELECT and nothing more; it has "),
+        err.starts_with("DB_READ_USER wordpress may only be granted SELECT; it has "),
         "{err}"
     );
     assert!(err.contains("INSERT"), "{err}");
@@ -603,7 +603,7 @@ fn stopped_anywhere(install: &Install, answers: &str, result: &Result<String, St
             "after {end} lines"
         );
     }
-    for writes in 0.. {
+    for writes in 0..200 {
         let mut input = Cursor::new(answers.as_bytes().to_vec());
         let mut out = FailAfter(writes);
         let ran = run(
@@ -616,9 +616,10 @@ fn stopped_anywhere(install: &Install, answers: &str, result: &Result<String, St
         );
         if ran != Err("closed".into()) {
             assert_eq!(&ran, result);
-            break;
+            return;
         }
     }
+    panic!("the output never ran out");
 }
 
 #[test]

@@ -194,8 +194,10 @@ fn what_php_computes_is_asked_for_or_left_safe() {
     let content = install.site.join("content");
     std::fs::create_dir(&content).unwrap();
     std::fs::write(content.join("object-cache.php"), "<?php").unwrap();
-    // WP_SITEURL left empty: the stored one.
-    let answers = format!("\n{}\nhttps://asked.example\n\n\n\n", content.display());
+    let answers = format!(
+        "\n{}\nhttps://asked.example\nhttps://asked.example/wp\n\n\n",
+        content.display()
+    );
     let ran = wizard(&install.home, &answers);
     assert_eq!(ran.result, Ok(install.written()));
     for expected in [
@@ -220,7 +222,7 @@ fn what_php_computes_is_asked_for_or_left_safe() {
     }
     let config = install.config();
     assert_eq!(config.home_url.as_deref(), Some("https://asked.example"));
-    assert_eq!(config.site_url, None);
+    assert_eq!(config.site_url.as_deref(), Some("https://asked.example/wp"));
     assert_eq!(config.constants, Constants::default());
 }
 
@@ -627,6 +629,7 @@ fn every_question_can_stop_the_wizard() {
     // Computed values, a read user and an object cache.
     let extra = "define( 'DB_CHARSET', getenv( 'CHARSET' ) );\n\
                  define( 'WP_HOME', 'https://' . $_SERVER['HTTP_HOST'] );\n\
+                 define( 'WP_SITEURL', WP_HOME );\n\
                  define( 'MULTISITE', getenv( 'MULTISITE' ) );\n\
                  define( 'WP_CONTENT_DIR', __DIR__ . '/content' );";
     let config = wp_config(extra).replacen("define( 'DB_CHARSET', 'utf8mb4' );", "", 1);
@@ -635,12 +638,13 @@ fn every_question_can_stop_the_wizard() {
     std::fs::create_dir(&content).unwrap();
     std::fs::write(content.join("object-cache.php"), "<?php").unwrap();
     let answers = format!(
-        "\n{}\nutf8mb4\nhttps://a.example\n\nwordpress_read\nreference-only\n",
+        "\n{}\nutf8mb4\nhttps://a.example\n\n\nwordpress_read\nreference-only\n",
         content.display()
     );
     stopped_anywhere(&install, &answers, &Ok(install.written()));
     let config = install.config();
     assert_eq!(config.home_url.as_deref(), Some("https://a.example"));
+    assert_eq!(config.site_url, None);
     assert_eq!(config.database.read_user.as_deref(), Some("wordpress_read"));
     // With `.env` there, kept after a wrong answer.
     let kept = Ok(format!(

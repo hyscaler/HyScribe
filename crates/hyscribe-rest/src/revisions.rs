@@ -543,8 +543,7 @@ fn meta(context: &Context, kind: Kind, id: u64) -> Value {
     match kind {
         Kind::Block => {
             // A status its enum does not take is null.
-            let status = context.site.post_meta(id, "wp_pattern_sync_status");
-            let status = status.filter(|s| matches!(s.as_slice(), b"partial" | b"unsynced"));
+            let status = crate::posts::prepare::sync_status(context, id);
             object([
                 ("wp_pattern_sync_status", status.map_or(Value::Null, text)),
                 ("footnotes", value("footnotes")),

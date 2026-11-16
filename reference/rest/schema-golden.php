@@ -85,7 +85,8 @@ $cases = array(
 	array( array( 'type' => 'string', 'oneOf' => array( array( 'minLength' => 3 ) ) ), array( 'ab', 'abc' ) ),
 	array( array( 'type' => 'string', 'oneOf' => array( array( 'title' => 'Long', 'minLength' => 5 ), array( 'title' => 'Short', 'maxLength' => 1 ), array( 'title' => 'Odd', 'enum' => array( 'z' ) ) ) ), array( 'abc', 'z' ) ),
 	array( array( 'type' => 'string', 'oneOf' => array( array( 'title' => 'Long', 'minLength' => 5 ), array( 'maxLength' => 1 ) ) ), array( 'abc', 'abcdef' ) ),
-	array( array( 'type' => 'array', 'oneOf' => array( array( 'items' => array( 'type' => 'integer' ), 'uniqueItems' => true ) ) ), array( array( '1', 2 ) ) ),
+	array( array( 'type' => 'array', 'oneOf' => array( array( 'items' => array( 'type' => 'integer' ), 'uniqueItems' => true ) ) ), array( array( '1', 2 ), array( '1', 1 ) ) ),
+	array( array( 'oneOf' => array( array( 'type' => 'object', 'properties' => array( 'x' => array( 'type' => 'integer' ) ), 'required' => array( 'x' ) ), array( 'type' => 'object', 'properties' => array( 'y' => array( 'type' => 'integer' ) ), 'required' => array( 'y' ) ) ) ), array( array( 'c' => 1 ) ) ),
 );
 foreach ( $cases as list( $schema, $values ) ) {
 	foreach ( $values as $value ) {

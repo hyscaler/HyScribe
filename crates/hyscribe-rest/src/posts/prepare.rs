@@ -511,9 +511,8 @@ pub(super) fn post(
         let status = data
             .iter()
             .any(|(name, _)| name.to_php_string() == b"meta")
-            .then(|| context.site.post_meta(post.id, "wp_pattern_sync_status"))
-            .flatten()
-            .filter(|status| matches!(status.as_slice(), b"partial" | b"unsynced"));
+            .then(|| sync_status(context, post.id))
+            .flatten();
         data.push((
             key("wp_pattern_sync_status"),
             text(status.unwrap_or_default()),
@@ -525,6 +524,12 @@ pub(super) fn post(
         actions(context, params, kind, post, &mut response);
     }
     Ok(response)
+}
+
+/// A pattern's `wp_pattern_sync_status`, if its enum takes it.
+pub(crate) fn sync_status(context: &Context, id: u64) -> Option<Vec<u8>> {
+    let status = context.site.post_meta(id, "wp_pattern_sync_status");
+    status.filter(|status| matches!(status.as_slice(), b"partial" | b"unsynced"))
 }
 
 /// Whether `the_content` of `content` does what is not ported: core's

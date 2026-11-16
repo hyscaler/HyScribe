@@ -332,10 +332,9 @@ fn with_type(schema: &Value, ty: Option<&Value>) -> Value {
     Value::Array(entries)
 }
 
-/// `wp_sprintf()`'s `%l`: the items joined, the last with `and`.
+/// `wp_sprintf()`'s `%l` of two items or more: joined, the last with `and`.
 fn listed(items: &[String]) -> String {
     match items {
-        [one] => one.clone(),
         [a, b] => format!("{a} and {b}"),
         _ => items
             .split_last()
@@ -345,14 +344,7 @@ fn listed(items: &[String]) -> String {
 }
 
 /// A `oneOf` schema that did not match: its index and itself, and why.
-type Mismatch = (Key, Value, RestError);
-
-fn position(index: &Key) -> Value {
-    match index {
-        Key::Int(i) => Value::Int(*i),
-        Key::String(s) => Value::String(s.clone()),
-    }
-}
+type Mismatch = (i64, Value, RestError);
 
 /// `rest_format_combining_operation_error()`.
 fn combining_format(param: &str, (index, schema, error): &Mismatch) -> Refusal {
@@ -367,7 +359,7 @@ fn combining_format(param: &str, (index, schema, error): &Mismatch) -> Refusal {
     Refusal(Some(RestError {
         code: "rest_no_matching_schema",
         message,
-        data: object([("position", position(index))]),
+        data: object([("position", Value::Int(*index))]),
     }))
 }
 
@@ -432,16 +424,16 @@ fn one_matching(value: &Value, schema: &Value, param: &str) -> Checked<Option<Va
     let Some(options) = get(schema, "oneOf") else {
         return Ok(None);
     };
-    let mut matching: Vec<(Key, Value)> = Vec::new();
+    let mut matching: Vec<(i64, Value)> = Vec::new();
     let mut errors: Vec<Mismatch> = Vec::new();
-    for (index, option) in entries(options) {
+    for (index, (_, option)) in (0..).zip(entries(options)) {
         let option = match (get(option, "type"), get(schema, "type")) {
             (None, Some(ty)) => with_type(option, Some(ty)),
             _ => option.clone(),
         };
         match validate_value_from_schema(value, &option, param) {
-            Ok(()) => matching.push((index.clone(), option)),
-            Err(Refusal(Some(error))) => errors.push((index.clone(), option, error)),
+            Ok(()) => matching.push((index, option)),
+            Err(Refusal(Some(error))) => errors.push((index, option, error)),
             Err(refusal) => return Err(refusal),
         }
     }
@@ -449,7 +441,10 @@ fn one_matching(value: &Value, schema: &Value, param: &str) -> Checked<Option<Va
         [] => Err(combining_error(value, param, &errors)),
         [(_, one)] => Ok(Some(one.clone())),
         _ => {
-            let positions = matching.iter().map(|(index, _)| position(index)).collect();
+            let positions = matching
+                .iter()
+                .map(|(index, _)| Value::Int(*index))
+                .collect();
             let titles: Vec<String> = matching
                 .iter()
                 .filter_map(|(_, schema)| get(schema, "title"))
@@ -771,7 +766,8 @@ pub fn sanitize_value_from_schema(value: &Value, schema: &Value, param: &str) ->
     let (typed, sanitized);
     let (value, schema) = match one_matching(value, schema, param)? {
         Some(one) => {
-            sanitized = sanitize_value_from_schema(value, &one, param)?;
+            // PHP goes on with an error, which arrays and objects sanitize as empty.
+            sanitized = sanitize_value_from_schema(value, &one, param).unwrap_or(Value::Null);
             let schema = match get(schema, "type") {
                 Some(_) => schema,
                 None => {

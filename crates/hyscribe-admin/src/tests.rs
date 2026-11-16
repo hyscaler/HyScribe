@@ -1215,6 +1215,16 @@ impl crate::profile::ProfileSite for Role {
     }
 }
 
+/// The comment edit screen's site: the fixture's comment, no referer.
+impl crate::comments::CommentEditSite for Role {
+    fn comment_to_edit(&self, id: u64) -> Option<crate::dashboard::RecentComment> {
+        (id == 1).then(|| crate::dashboard::tests::hello_comment(true))
+    }
+    fn referer(&self) -> Option<Vec<u8>> {
+        None
+    }
+}
+
 impl crate::comments::CommentsSite for Role {
     /// `comment_rows()` as `query` filters them.
     fn list_comments(

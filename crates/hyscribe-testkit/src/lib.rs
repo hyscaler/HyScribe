@@ -427,6 +427,14 @@ mod tests {
         );
     }
 
+    /// The socket is where `db.sh up` binds it for the fixture's port.
+    #[test]
+    fn the_socket_is_in_the_port_s_folder() {
+        let port = fixture_database().port;
+        let folder = std::env::temp_dir().join(format!("hyscribe-db-{port}"));
+        assert_eq!(fixture_socket(), folder.join("mysqld.sock"));
+    }
+
     #[test]
     fn unhex_reads_pairs_and_skips_malformed_ones() {
         assert_eq!(unhex("00ff7A"), vec![0, 255, 122]);

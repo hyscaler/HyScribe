@@ -332,3 +332,31 @@ fn comment_links_page_as_php_does() {
     let empty = [("page_comments", "1"), ("comments_per_page", "0")];
     assert_eq!(link(&empty, &second), "http://x.test/hello/#comment-2");
 }
+
+/// The edit screen's delete link moves to the Trash, or without it
+/// (`EMPTY_TRASH_DAYS=0`) deletes, as `edit-form-comment.php`'s; the pages
+/// themselves are matched over HTTP (`admin-views-comments.tsv`).
+#[test]
+fn the_edit_screen_deletes_without_the_trash() {
+    let uri = "/hs-admin/comment?action=editcomment&c=1";
+    let canonical = format!("{SITE}{uri}");
+    let request = crate::tests::request(&canonical, uri, &crate::tests::BROWSER);
+    let page = |role| match comment_edit(&Role(role), 1, &request) {
+        Some(Answer::Page(page)) => page,
+        _ => panic!("{role}"),
+    };
+    let link = |action: &str, label: &str| {
+        format!(
+            "'comment?action={action}&amp;c=1&amp;_wp_original_http_referer&amp;_wpnonce=%nonce:delete-comment_1%'>{label}</a>"
+        )
+    };
+    let trash = page("administrator");
+    assert!(
+        trash.contains(&link("trashcomment", "Move to Trash")),
+        "{trash}"
+    );
+    let delete = page("e0edit:administrator");
+    let expected = link("deletecomment", "Delete Permanently");
+    assert!(delete.contains(&expected), "{delete}");
+    assert!(comment_edit(&Role("administrator"), 2, &request).is_none());
+}

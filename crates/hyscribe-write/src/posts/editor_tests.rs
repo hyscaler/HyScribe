@@ -144,7 +144,8 @@ async fn the_custom_css_lookup_is_kept_as_php_keeps_it() {
     assert!(unported(looked_up(css).await));
 }
 
-/// The newest published global styles post of the theme is its own.
+/// The newest published global styles post of the theme is its own, the
+/// first of a tie.
 #[tokio::test]
 async fn the_newest_global_styles_post_is_the_theme_s() {
     let found = rolled_back(async |w| {
@@ -153,6 +154,8 @@ async fn the_newest_global_styles_post_is_the_theme_s() {
         let mut ids = vec![first];
         for (date, status) in [
             ("2001-01-01 00:00:00", "publish"),
+            ("2098-01-01 00:00:00", "publish"),
+            ("2098-01-01 00:00:00", "publish"),
             ("2099-01-01 00:00:00", "draft"),
         ] {
             let mut post = w.post(first).await?.unwrap();
@@ -167,7 +170,7 @@ async fn the_newest_global_styles_post_is_the_theme_s() {
     })
     .await
     .unwrap();
-    assert_eq!(found.1, found.0[0]);
+    assert_eq!(found.1, found.0[2]);
     // With only a draft, one is created.
     let created = rolled_back(async |w| {
         let ctx = admin();

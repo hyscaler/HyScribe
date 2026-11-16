@@ -1188,7 +1188,7 @@ impl Db {
         );
         sql.bind(Bind::Int(u64::from(all_private)));
         sql.bind(Bind::Int(me));
-        list(&mut sql, field_ids(ids));
+        list(&mut sql, ids_or_none(ids));
         sql.push(" GROUP BY post_author");
         let rows = sql
             .query(&self.prefix)
@@ -1389,6 +1389,12 @@ impl Db {
         let mut sql = term_where(Sql::new("SELECT t.term_id"), query);
         if let Some((order, descending)) = query.order {
             sql.push(" ORDER BY ");
+            // `parse_orderby()` takes the order of an empty list as the name.
+            let order = match order {
+                TermOrder::Include if query.include.is_empty() => TermOrder::Name,
+                TermOrder::Slugs if query.slugs.is_empty() => TermOrder::Name,
+                order => order,
+            };
             match (term_order_column(order), order) {
                 (Some(column), _) => sql.push(column),
                 (None, TermOrder::Slugs) => Engine::list_order(
@@ -1418,12 +1424,9 @@ impl Db {
             .await
             .map_err(db_error)?;
         let ids: Result<Vec<u64>, DbError> = rows.iter().map(term_id).collect();
-        let mut sql = Sql::new(concat!(
-            "SELECT ",
-            terms_from!(),
-            "WHERE tt.taxonomy = ? AND t.term_id IN ("
-        ));
-        sql.bind(Bind::Text(query.taxonomy.clone()));
+        let mut sql = Sql::new(concat!("SELECT ", terms_from!(), "WHERE tt.taxonomy IN ("));
+        taxonomies(&mut sql, query);
+        sql.push(" AND t.term_id IN (");
         list(&mut sql, ids_or_none(ids.as_deref().unwrap_or_default()));
         let rows = sql
             .query(&self.prefix)
@@ -1733,14 +1736,28 @@ fn posts_sql(query: &PostQuery) -> Sql {
     post_criteria(&mut sql, query);
     sql.push(" ORDER BY ");
     let ranked = ranked(query);
+    // `parse_orderby()` leaves out the order of an empty list.
+    let kept = |column: OrderBy| match column {
+        OrderBy::Relevance => ranked,
+        OrderBy::Included => query.include.as_ref().is_some_and(|ids| !ids.is_empty()),
+        OrderBy::Parents => !query.parents.is_empty(),
+        OrderBy::Names => !query.names.is_empty(),
+        _ => true,
+    };
     let order: Vec<(OrderBy, bool)> = query
         .order
         .iter()
         .copied()
-        .filter(|(column, _)| ranked || *column != OrderBy::Relevance)
+        .filter(|(column, _)| kept(*column))
         .collect();
     if order.is_empty() {
-        sql.push("post_date DESC");
+        // With no key left, the date in the order the first was asked.
+        let ascending = query.order.first().is_some_and(|(_, ascending)| *ascending);
+        sql.push(if ascending {
+            "post_date ASC"
+        } else {
+            "post_date DESC"
+        });
     }
     for (i, &(column, ascending)) in order.iter().enumerate() {
         if i > 0 {
@@ -1755,10 +1772,10 @@ fn posts_sql(query: &PostQuery) -> Sql {
             OrderBy::Included => Engine::list_order(
                 &mut sql,
                 "ID",
-                field_ids(query.include.as_deref().unwrap_or_default()),
+                people::ints(query.include.as_deref().unwrap_or_default()),
             ),
             OrderBy::Parents => {
-                Engine::list_order(&mut sql, "post_parent", field_ids(&query.parents));
+                Engine::list_order(&mut sql, "post_parent", people::ints(&query.parents));
             }
             OrderBy::Names => Engine::list_order(
                 &mut sql,
@@ -2089,12 +2106,6 @@ fn list(sql: &mut Sql, values: impl Iterator<Item = Bind>) {
     sql.push(")");
 }
 
-/// The list of an explicit order: `ids` and a 0 after them, which keeps the
-/// list valid when empty and, matching nothing earlier, changes no order.
-fn field_ids(ids: &[u64]) -> impl Iterator<Item = Bind> + '_ {
-    ids.iter().copied().chain(std::iter::once(0)).map(Bind::Int)
-}
-
 /// The column a term order sorts by; none for the order of `include`.
 fn term_order_column(order: TermOrder) -> Option<&'static str> {
     Some(match order {
@@ -2136,6 +2147,12 @@ fn search_terms(sql: &mut Sql, search: &str) {
 }
 
 /// The `FROM` and `WHERE` of a `WP_Term_Query` after `select`.
+/// The taxonomies of `query`, closing the parenthesis.
+fn taxonomies(sql: &mut Sql, query: &TermQuery) {
+    let names = std::iter::once(&query.taxonomy).chain(&query.taxonomies);
+    list(sql, names.map(|name| Bind::Text(name.clone())));
+}
+
 fn term_where(mut sql: Sql, query: &TermQuery) -> Sql {
     sql.push(
         " FROM {prefix}terms AS t \
@@ -2147,8 +2164,8 @@ fn term_where(mut sql: Sql, query: &TermQuery) -> Sql {
              ON tr.term_taxonomy_id = tt.term_taxonomy_id",
         );
     }
-    sql.push(" WHERE tt.taxonomy IN (?)");
-    sql.bind(Bind::Text(query.taxonomy.clone()));
+    sql.push(" WHERE tt.taxonomy IN (");
+    taxonomies(&mut sql, query);
     if !query.include.is_empty() {
         sql.push(" AND t.term_id IN (");
         list(&mut sql, query.include.iter().copied().map(Bind::Int));

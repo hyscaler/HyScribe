@@ -18,32 +18,15 @@ fn patterns() -> &'static Content {
     })
 }
 
-/// Requests PHP answers on routes or with arguments not ported: the
-/// revisions and autosaves of patterns, navigation menus and menu items,
-/// and the term limits whose schemas use `oneOf`.
-fn unported(case: &RestCase) -> bool {
-    let target = &case.target;
-    target.contains("/revisions")
-        || target.contains("/autosaves")
-        || target.contains("wp_pattern_category=")
-        || target.contains("menus=")
-}
-
 #[test]
 fn answers_match_php() {
     let cases = rest_cases(include_str!("../../tests/golden/patterns.tsv"));
-    let mut not_served = 0;
     for case in &cases {
         let served = serve_over(patterns(), case);
         let what = format!(
             "{} {} {} {}",
             case.who, case.method, case.target, case.flags
         );
-        if unported(case) {
-            assert_eq!((served.status, served.body.len()), (501, 0), "{what}");
-            not_served += 1;
-            continue;
-        }
         assert_eq!(served.status, case.status, "{what}");
         let mut php = case.headers.clone();
         php.sort();
@@ -51,7 +34,7 @@ fn answers_match_php() {
         let body = String::from_utf8_lossy(&case.body);
         assert_eq!(String::from_utf8_lossy(&served.body), body, "{what}");
     }
-    assert_eq!((cases.len(), not_served), (6 * 101, 6 * 9));
+    assert_eq!(cases.len(), 6 * 132);
 }
 
 /// `content` serves `target` to the administrator.

@@ -5,15 +5,10 @@
 
 use hyscribe_testkit::{RestCase, rest_cases};
 
-/// A term search over more than one taxonomy: any, or none left; a
-/// subtype not of the enum is refused first.
+/// A term search over every taxonomy, the term handler's subtypes none of
+/// those asked.
 fn unported(case: &RestCase) -> bool {
-    let one = [
-        "subtype=category",
-        "subtype=post_tag",
-        "subtype=post_format",
-    ];
-    case.target.contains("type=term") && !one.iter().any(|one| case.target.contains(one))
+    case.target.contains("type=term&subtype=post") && !case.target.contains("subtype=post_")
 }
 
 #[test]

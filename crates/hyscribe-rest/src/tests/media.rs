@@ -181,7 +181,7 @@ fn media_match_php() {
     replay(
         include_str!("../../tests/golden/media.tsv"),
         (false, true),
-        6 * 141,
+        6 * 148,
         &UNPORTED,
     );
 }
@@ -193,7 +193,7 @@ fn theme_test_data_media_match_php() {
     replay(
         include_str!("../../tests/golden/media-ttd.tsv"),
         (true, true),
-        6 * 14,
+        6 * 16,
         &[],
     );
 }

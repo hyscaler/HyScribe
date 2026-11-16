@@ -654,6 +654,18 @@ async fn errors_are_reported() {
     assert!(err.source().is_none());
 }
 
+/// The server's version and the connection's collation; an error once the
+/// connections are closed.
+#[tokio::test]
+async fn the_server_names_itself() {
+    let db = fixture().await;
+    let (version, collation) = db.server().await.unwrap();
+    assert!(version.contains("MariaDB"), "{version}");
+    assert!(collation.starts_with("utf8mb4_"), "{collation}");
+    db.pool.close().await;
+    assert!(db.server().await.is_err());
+}
+
 #[tokio::test]
 async fn a_row_without_the_columns_fails_to_decode() {
     let db = fixture().await;

@@ -228,6 +228,17 @@ fn server_config(home: &Path, env: &HashMap<String, String>, euid: u32) -> Resul
         .ok_or_else(|| NO_CONFIG.to_string())
 }
 
+/// The installation the admin describes: `binary`, and what `.env` sets.
+fn install(config: &Config, binary: &Path) -> hyscribe_http::Install {
+    hyscribe_http::Install {
+        binary: binary.display().to_string(),
+        upload_max_size: config.upload_max_size,
+        database_user: config.database.user.clone(),
+        database_name: config.database.name.clone(),
+        charset: config.database.charset.clone(),
+    }
+}
+
 /// `hyscribe start`: serves the site until SIGTERM or SIGINT.
 fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
     let config = server_config(site.paths.home(), site.env, site.euid)?;
@@ -260,6 +271,7 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
                     .with_constants(config.constants)
                     .with_proxy(config.server.behind_proxy)
                     .with_login_limits(config.login_limits)
+                    .with_install(install(&config, &site.server.0))
                     .with_writer(writer);
             // Logging in needs primary mode.
             let site = match config.mode {

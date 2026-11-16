@@ -177,6 +177,9 @@ impl Default for LoginLimits {
     }
 }
 
+/// `UPLOAD_MAX_SIZE`'s default, 64 MB.
+pub const DEFAULT_UPLOAD_MAX_SIZE: u64 = 64 << 20;
+
 /// The complete configuration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
@@ -201,6 +204,9 @@ pub struct Config {
     pub constants: Constants,
     /// The login rate limits.
     pub login_limits: LoginLimits,
+    /// `UPLOAD_MAX_SIZE`: the largest upload, in bytes, which the admin
+    /// prints where PHP prints `wp_max_upload_size()`.
+    pub upload_max_size: u64,
 }
 
 /// Why configuration could not be loaded.
@@ -351,6 +357,16 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         window: limit("LOGIN_LIMIT_WINDOW", limits.window, 86_400)?,
     };
 
+    let upload_max_size = match get("UPLOAD_MAX_SIZE") {
+        None => DEFAULT_UPLOAD_MAX_SIZE,
+        Some(value) => size(value).ok_or_else(|| {
+            invalid(
+                "UPLOAD_MAX_SIZE",
+                "must be a size in bytes, or with a K, M or G suffix, such as 64M",
+            )
+        })?,
+    };
+
     let salts = SALT_KEYS
         .iter()
         .filter_map(|&key| get(key).map(|value| (key, Secret::new(value))))
@@ -367,6 +383,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         rest_public_users,
         constants,
         login_limits,
+        upload_max_size,
     })
 }
 
@@ -403,6 +420,29 @@ fn number(
             .filter(|number| (1..=max).contains(number))
             .ok_or_else(|| invalid(key, &format!("must be a whole number from 1 to {max}"))),
     }
+}
+
+/// A size as PHP's shorthand writes it: digits, then `K`, `M` or `G` in
+/// either case; at least a byte, and within `i64`.
+fn size(value: &str) -> Option<u64> {
+    let (last, head) = value.as_bytes().split_last()?;
+    let (digits, shift) = match last.to_ascii_uppercase() {
+        b'K' => (head, 10),
+        b'M' => (head, 20),
+        b'G' => (head, 30),
+        _ => (value.as_bytes(), 0),
+    };
+    if digits.is_empty() {
+        return None;
+    }
+    let number = digits.iter().try_fold(0u64, |number, &digit| {
+        digit.is_ascii_digit().then_some(())?;
+        number.checked_mul(10)?.checked_add(u64::from(digit - b'0'))
+    })?;
+    let bytes = number.checked_mul(1 << shift)?;
+    (1..=i64::MAX.unsigned_abs())
+        .contains(&bytes)
+        .then_some(bytes)
 }
 
 fn boolean(value: Option<&str>, key: &'static str) -> Result<bool, ConfigError> {

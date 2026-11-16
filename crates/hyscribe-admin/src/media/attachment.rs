@@ -20,7 +20,7 @@ use hyscribe_render::template::replace;
 use hyscribe_render::user_avatar;
 
 use super::image::{attachment_image, attachment_url, image_src, metadata};
-use super::{MEDIA_SCRIPTS, MEDIA_STYLES, MediaSite, enqueue_media};
+use super::{MEDIA_SCRIPTS, MEDIA_STYLES, MediaSite, enqueue_media, size_format};
 use crate::admin_bar::{BarSite, Browser};
 use crate::assets::cookie_path;
 use crate::comments::{CommentsSite, comment_reply, editor_css, editor_footer};
@@ -190,22 +190,6 @@ fn rich_editing(site: &dyn AttachmentSite, browser: &Browser) -> bool {
         !(agent.contains("MSIE") && agent.contains("Mac")) && agent.contains("Gecko")
     };
     capable && site.user_option("rich_editing").as_deref() == Some(b"true")
-}
-
-/// `size_format( $bytes )`.
-fn size_format(bytes: i64) -> String {
-    let units = [
-        ("TB", 1i64 << 40),
-        ("GB", 1 << 30),
-        ("MB", 1 << 20),
-        ("KB", 1 << 10),
-    ];
-    let (unit, magnitude) = units
-        .into_iter()
-        .find(|(_, magnitude)| bytes >= *magnitude)
-        .unwrap_or(("B", 1));
-    let rounded = (bytes as f64 / magnitude as f64).round() as i64;
-    format!("{} {unit}", hyscribe_render::number_format(rounded))
 }
 
 /// The attachment's preview: its image, with the image editor's button

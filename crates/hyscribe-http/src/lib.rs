@@ -57,6 +57,8 @@ mod rewrite;
 mod sitemaps;
 mod trackback;
 
+pub use hyscribe_admin::site_health::Install;
+
 /// Parsers of request input that only the fuzz targets in `fuzz/` call
 /// from outside.
 #[doc(hidden)]
@@ -109,11 +111,24 @@ pub struct Site {
     constants: hyscribe_config::Constants,
     /// The login rate limits and their counts, kept across reloads.
     limiter: Arc<login::limits::Limiter>,
+    /// The installation as configured, which the admin shows.
+    install: Arc<Install>,
 }
 
 /// The address a connection comes from.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Peer(pub(crate) std::net::IpAddr);
+
+/// An installation before [`Site::with_install`]: `.env`'s defaults.
+pub(crate) fn unconfigured() -> Arc<Install> {
+    Arc::new(Install {
+        binary: String::new(),
+        upload_max_size: hyscribe_config::DEFAULT_UPLOAD_MAX_SIZE,
+        database_user: String::new(),
+        database_name: String::new(),
+        charset: String::new(),
+    })
+}
 
 impl Site {
     /// Loads the autoloaded options. `home` and `siteurl` override those
@@ -139,6 +154,7 @@ impl Site {
             behind_proxy: false,
             constants: hyscribe_config::Constants::default(),
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
+            install: unconfigured(),
         };
         for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
             if let Some(url) = url {
@@ -179,6 +195,7 @@ impl Site {
             behind_proxy: self.behind_proxy,
             constants: self.constants,
             limiter: Arc::clone(&self.limiter),
+            install: Arc::clone(&self.install),
         };
         site.build_rewriter();
         Ok(site)
@@ -206,6 +223,14 @@ impl Site {
     pub fn with_login_limits(self, limits: hyscribe_config::LoginLimits) -> Site {
         Site {
             limiter: Arc::new(login::limits::Limiter::new(limits)),
+            ..self
+        }
+    }
+
+    /// The site of the installation `install` describes.
+    pub fn with_install(self, install: Install) -> Site {
+        Site {
+            install: Arc::new(install),
             ..self
         }
     }

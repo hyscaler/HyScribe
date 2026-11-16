@@ -952,31 +952,7 @@ pub fn dashboard(site: &dyn DashboardSite, request: &Request) -> Option<String> 
         format!("var communityEventsData = {};", json(&community)),
     )];
     if site.can("view_site_health_checks") {
-        let health = object(vec![
-            ("screen", text("dashboard")),
-            (
-                "nonce",
-                object(vec![
-                    ("site_status", text(&site.nonce("health-check-site-status"))),
-                    (
-                        "site_status_result",
-                        text(&site.nonce("health-check-site-status-result")),
-                    ),
-                ]),
-            ),
-            (
-                "site_status",
-                object(vec![
-                    ("direct", Value::Array(Vec::new())),
-                    ("async", Value::Array(Vec::new())),
-                    ("issues", issue_counts(site)),
-                ]),
-            ),
-        ]);
-        script_data.push((
-            "site-health",
-            format!("var SiteHealth = {};", json(&health)),
-        ));
+        script_data.push(("site-health", site_health_data(site, "dashboard")));
     }
     let footer_scripts = if tables > 0 {
         editor_footer(site)
@@ -1054,6 +1030,32 @@ fn help_content(site: &dyn DashboardSite) -> String {
     }
     help.push_str("<p><strong>WordPress Events and News</strong> &mdash; Upcoming events near you as well as the latest news from the official WordPress project and the <a href=\"https://planet.wordpress.org/\">WordPress Planet</a>.</p>");
     help
+}
+
+/// The `site-health` script's `SiteHealth` on `screen`, with no test to run.
+pub(crate) fn site_health_data(site: &dyn DashboardSite, screen: &str) -> String {
+    let health = object(vec![
+        ("screen", text(screen)),
+        (
+            "nonce",
+            object(vec![
+                ("site_status", text(&site.nonce("health-check-site-status"))),
+                (
+                    "site_status_result",
+                    text(&site.nonce("health-check-site-status-result")),
+                ),
+            ]),
+        ),
+        (
+            "site_status",
+            object(vec![
+                ("direct", Value::Array(Vec::new())),
+                ("async", Value::Array(Vec::new())),
+                ("issues", issue_counts(site)),
+            ]),
+        ),
+    ]);
+    format!("var SiteHealth = {};", json(&health))
 }
 
 /// `SiteHealth.site_status.issues`: the last check's cached counts, or

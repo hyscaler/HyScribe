@@ -102,7 +102,7 @@ async fn the_permalinks_view_refreshes_the_rules_as_php() {
 }
 
 /// The block editor's first view writes before its page, which reads what
-/// it wrote, and answers 501 while a preload is not ported; what the write
+/// it wrote, and answers 501 while a preload is not ported or unanswered; what the write
 /// layer does not port answers 501 too.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_block_editor_s_view_writes_before_its_page() {
@@ -133,16 +133,21 @@ async fn the_block_editor_s_view_writes_before_its_page() {
             ..Post::default()
         };
         let cases = [
-            (Target::New("post".into()), true, StatusCode::OK),
+            (Target::New("post".into()), Some(true), StatusCode::OK),
             (
                 Target::Edit(Box::new(gone)),
-                true,
+                Some(true),
                 StatusCode::NOT_IMPLEMENTED,
             ),
-            (Target::Edit(Box::new(post)), false, StatusCode::OK),
+            (Target::Edit(Box::new(post)), None, StatusCode::OK),
             (
                 Target::New("nope".into()),
-                true,
+                Some(true),
+                StatusCode::NOT_IMPLEMENTED,
+            ),
+            (
+                Target::New("post".into()),
+                Some(false),
                 StatusCode::NOT_IMPLEMENTED,
             ),
         ];
@@ -159,11 +164,14 @@ async fn the_block_editor_s_view_writes_before_its_page() {
                     uri: "/hs-admin/post-new",
                     browser: &browser,
                 };
-                let preloads = |_: &[(&'static str, String)]| answered.then_some(Value::Null);
-                // Unanswered, the preloads are the REST API's.
+                // Without an answer given, the preloads are the REST API's.
                 let answer = match answered {
-                    true => super::super::block_editor_with(admin, &request, &preloads),
-                    false => super::super::block_editor(admin, &request),
+                    Some(answered) => {
+                        let preloads =
+                            |_: &[(&'static str, String)]| answered.then_some(Value::Null);
+                        super::super::block_editor_with(admin, &request, &preloads)
+                    }
+                    None => super::super::block_editor(admin, &request),
                 };
                 answer.map_or_else(super::super::not_ported, |answer| {
                     super::super::served(admin, answer)

@@ -18,7 +18,7 @@ use hyscribe_write::options::{
     Autoload, INVALID_ZONE, delete_option, get_option, is_zone, sanitize_option, set_transient,
     update_option,
 };
-use hyscribe_write::posts::{Context, PostArgs, wp_insert_post};
+use hyscribe_write::posts::{PostArgs, wp_insert_post};
 
 use super::dashboard::context;
 use super::{Acting, Saving, text};
@@ -529,11 +529,8 @@ pub(super) fn create_privacy_page<'a>(
     Box::pin(async move {
         let home = home_url(write).await?;
         let site = get_option(write, "siteurl").await?.to_php_string();
-        let ctx = Context {
-            unfiltered_html: super::posts::unfiltered_html(write, asked.user, acting.constants())
-                .await?,
-            ..context(asked.user, &home, &text(&site), acting.constants())
-        };
+        // The policy passes kses unchanged, so it is filtered whoever saves it.
+        let ctx = context(asked.user, &home, &text(&site), acting.constants());
         // A draft: `wp_insert_post()`'s status when none is given.
         let page = PostArgs {
             title: b"Privacy Policy".to_vec(),

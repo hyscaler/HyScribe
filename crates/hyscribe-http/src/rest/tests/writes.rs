@@ -832,6 +832,23 @@ async fn writes_refused_past_their_checks() {
     fresh().await;
 }
 
+/// A setting not stored reads as its registered default, which a value
+/// equal to it leaves unwritten, as `update_option()` compares them.
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_not_stored_read_as_their_default() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with("DELETE FROM wp_options WHERE option_name = 'use_smilies';").await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let body = r#"{"use_smilies":true}"#;
+    let pending = planned(&site, "POST", "/?rest_route=/wp/v2/settings", body).await;
+    let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+    let writer = site.writer.as_ref().unwrap();
+    let outcome = crate::rest::writes::act(writer.begin().await, &pending.plan, &ctx).await;
+    assert_eq!(outcome.unwrap(), Outcome::Cached(Vec::new()));
+    fresh().await;
+}
+
 /// The terms' and settings' writes leave the rows PHP's leave.
 #[tokio::test(flavor = "multi_thread")]
 async fn term_and_settings_writes_are_php_s() {

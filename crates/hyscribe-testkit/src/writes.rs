@@ -287,6 +287,22 @@ impl Masks {
             TermMap => term_map(&value, token).unwrap_or(value),
         }
     }
+
+    /// The `cron` option with the times `wp_reschedule_event()` moves an
+    /// event due during the run to, one of the core intervals on, masked.
+    fn rescheduled(&self, value: &[u8]) -> Vec<u8> {
+        digit_runs(value, |run| {
+            let unix = number(run).filter(|_| run.len() == 10)?;
+            let during = self.start.0.saturating_sub(5)..=self.end.0;
+            let interval = [3_600, 43_200, 86_400, 604_800]
+                .into_iter()
+                .find(|interval| {
+                    unix.checked_sub(*interval)
+                        .is_some_and(|at| during.contains(&at))
+                })?;
+            Some(format!("%unix+{interval}%").into_bytes())
+        })
+    }
 }
 
 /// `value` with the hashes of random password reset keys (`$generic$`
@@ -448,6 +464,7 @@ fn masked(masks: &Masks, table: &Table, rows: &BTreeMap<Vec<u8>, Row>) -> BTreeM
                     let masked = match (column.as_str(), option) {
                         ("option_value", _) if timeout => b"%expiry%".to_vec(),
                         ("option_value", Some(b"adminhash")) => hash_masked(&masked),
+                        ("option_value", Some(b"cron")) => masks.rescheduled(&masked),
                         // `send_confirmation_on_profile_email()`'s random key.
                         ("meta_value", _) if new_email => hash_masked(&masked),
                         // A new privacy policy page's ID.

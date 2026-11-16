@@ -22,6 +22,7 @@ pub const EMPTY_TRASH_DAYS: u64 = 30;
 
 pub mod caps;
 pub mod comments;
+pub mod cron;
 pub mod options;
 pub mod posts;
 mod steps;

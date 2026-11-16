@@ -151,7 +151,7 @@ require '/var/www/html/wp-load.php';
 	};
 
 	// Masked rows by masked key.
-	$masked = function ( $table, $rows ) use ( $tables, $mask, $escape, $new ) {
+	$masked = function ( $table, $rows ) use ( $tables, $mask, $escape, $new, $start, $end ) {
 		$out = array();
 		foreach ( $rows as $row ) {
 			foreach ( $row as $column => $value ) {
@@ -160,6 +160,21 @@ require '/var/www/html/wp-load.php';
 			// A transient's expiry is the time plus its lifetime.
 			if ( 'wp_options' === $table && preg_match( '/\A_(site_)?transient_timeout_/', $row['option_name'] ) ) {
 				$row['option_value'] = '%expiry%';
+			}
+			// wp_reschedule_event() moves an event due at a time of the run on by its interval.
+			if ( 'wp_options' === $table && 'cron' === $row['option_name'] ) {
+				$row['option_value'] = preg_replace_callback(
+					'/\d+/',
+					function ( $m ) use ( $start, $end ) {
+						foreach ( array( 3600, 43200, 86400, 604800 ) as $interval ) {
+							if ( strlen( $m[0] ) === 10 && $m[0] - $interval >= $start - 5 && $m[0] - $interval <= $end ) {
+								return "%unix+$interval%";
+							}
+						}
+						return $m[0];
+					},
+					$row['option_value']
+				);
 			}
 			// update_option_new_admin_email()'s confirmation key is random, as is
 			// send_confirmation_on_profile_email()'s.

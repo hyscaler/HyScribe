@@ -1265,11 +1265,13 @@ fn screen(
             let args = NewArgs::parse(query, admin.settings.clone())?;
             media_new(admin, &args, &request)
         }
-        // Only an attachment's edit screen is ported.
+        // An attachment's edit screen is ported, and of the block editor's
+        // only the refusals.
         "/hs-admin/post" => {
             let args = AttachmentArgs::parse(query, admin.referer.clone())?;
             attachment_edit(admin, &args, &request)?
         }
+        "/hs-admin/post-new" => hyscribe_admin::editor::post_new(admin, query)?,
         // Their pages print the PHP and web server details HyScribe has no
         // equivalent for: refused as PHP refuses, else not ported.
         "/hs-admin/plugins" if !admin.can("activate_plugins") => Answer::from_page(None),

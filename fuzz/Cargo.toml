@@ -23,6 +23,7 @@ hyscribe-model = { path = "../crates/hyscribe-model" }
 hyscribe-http = { path = "../crates/hyscribe-http" }
 hyscribe-html = { path = "../crates/hyscribe-html" }
 hyscribe-kses = { path = "../crates/hyscribe-kses" }
+hyscribe-mail = { path = "../crates/hyscribe-mail" }
 hyscribe-theme-json = { path = "../crates/hyscribe-theme-json" }
 
 [[bin]]
@@ -261,6 +262,13 @@ bench = false
 [[bin]]
 name = "admin_actions"
 path = "fuzz_targets/admin_actions.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mail_decode"
+path = "fuzz_targets/mail_decode.rs"
 test = false
 doc = false
 bench = false

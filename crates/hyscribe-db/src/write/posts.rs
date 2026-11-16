@@ -5,7 +5,7 @@
 
 use super::{PostFields, Table, Write};
 use crate::dialect::Dialect;
-use crate::{Bind, Columns, DbError, Engine, Row, Sql, date_column, db_error};
+use crate::{Bind, Columns, DbError, Engine, Row, Sql, date_column};
 
 fn post_fields(row: &Row) -> Result<PostFields, DbError> {
     let mut c = Columns::new(row);
@@ -75,12 +75,7 @@ impl Write<'_> {
         Engine::integer(&mut sql, |sql| sql.push("menu_order"));
         sql.push(" AS menu_order FROM {prefix}posts WHERE ID = ?");
         sql.bind(Bind::Int(id));
-        self.spend()?;
-        let row = sql
-            .query(&self.writer.prefix)
-            .fetch_optional(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
+        let row = self.optional(sql.query(&self.writer.prefix)).await?;
         row.as_ref().map(post_fields).transpose()
     }
 
@@ -168,12 +163,7 @@ impl Write<'_> {
             "SELECT comment_ID, comment_approved FROM {prefix}comments \
              WHERE comment_post_ID = ? ORDER BY comment_ID",
         );
-        self.spend()?;
-        let rows = query
-            .bind(post)
-            .fetch_all(&mut *self.tx)
-            .await
-            .map_err(db_error)?;
+        let rows = self.rows(query.bind(post)).await?;
         rows.iter()
             .map(|row| {
                 let mut c = Columns::new(row);

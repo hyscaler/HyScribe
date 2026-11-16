@@ -370,6 +370,13 @@ async fn writes_to_a_myisam_table_are_refused() {
         let refusals = writer.refusals().await;
         let mut write = writer.begin().await.unwrap();
         let links = write.reassign_links(1, 2).await.map(|_| ());
+        // The refusal ends the action.
+        let after = write.set_post_status(1, "publish").await;
+        assert_eq!(
+            after.err().map(|e| e.to_string()),
+            links.clone().err().map(|e| e.to_string())
+        );
+        let mut write = writer.begin().await.unwrap();
         let posts = write.set_post_status(1, "publish").await;
         (
             refusals,
@@ -1318,124 +1325,139 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         writer: &writer,
         tx: writer.pool.begin().await.unwrap(),
         budget: None,
+        failed: None,
     };
+    // Each statement runs: the error one leaves would stop the next.
+    macro_rules! alone {
+        ($call:expr) => {{
+            let err = $call;
+            w.failed = None;
+            err
+        }};
+    }
     let post = hello();
     let comment = commenter();
     let user = admin();
     let meta = Meta::Post;
     let ids = [
-        w.child_ids(1, "page").await.err(),
-        w.post_comment_ids(1).await.err(),
-        w.meta_ids(meta, 1, "k").await.err(),
-        w.meta_ids_valued(meta, (1, "k"), b"v").await.err(),
-        w.meta_ids_of_key(meta, "k").await.err(),
-        w.meta_ids_of_key_valued(meta, "k", b"v").await.err(),
-        w.object_meta_ids(meta, 1).await.err(),
-        w.trashed_post_ids_named(b"n", 1).await.err(),
-        w.status_post_ids("post", "trash").await.err(),
-        w.revision_ids(1).await.err(),
-        w.object_meta(meta, 1).await.err(),
-        w.user(1).await.err(),
-        w.user_id_by_login(b"u").await.err(),
-        w.user_id_by_email(b"e").await.err(),
-        w.nicename_owner(b"n", b"u").await.err(),
-        w.author_post_ids_of_types(1, &["post"]).await.err(),
-        w.owner_link_ids(1).await.err(),
+        alone!(w.child_ids(1, "page").await.err()),
+        alone!(w.post_comment_ids(1).await.err()),
+        alone!(w.meta_ids(meta, 1, "k").await.err()),
+        alone!(w.meta_ids_valued(meta, (1, "k"), b"v").await.err()),
+        alone!(w.meta_ids_of_key(meta, "k").await.err()),
+        alone!(w.meta_ids_of_key_valued(meta, "k", b"v").await.err()),
+        alone!(w.object_meta_ids(meta, 1).await.err()),
+        alone!(w.trashed_post_ids_named(b"n", 1).await.err()),
+        alone!(w.status_post_ids("post", "trash").await.err()),
+        alone!(w.revision_ids(1).await.err()),
+        alone!(w.object_meta(meta, 1).await.err()),
+        alone!(w.user(1).await.err()),
+        alone!(w.user_id_by_login(b"u").await.err()),
+        alone!(w.user_id_by_email(b"e").await.err()),
+        alone!(w.nicename_owner(b"n", b"u").await.err()),
+        alone!(w.author_post_ids_of_types(1, &["post"]).await.err()),
+        alone!(w.owner_link_ids(1).await.err()),
     ];
     let post_reads = [
-        w.post(1).await.err(),
-        w.post_comments(1).await.err(),
-        w.post_name_used(b"n", "post", 1).await.err(),
-        w.sibling_name_used(b"n", ("page", 0), 1).await.err(),
-        w.published_post_exists().await.err(),
-        w.insert_post_with_id(990, &post).await.err(),
+        alone!(w.post(1).await.err()),
+        alone!(w.post_comments(1).await.err()),
+        alone!(w.post_name_used(b"n", "post", 1).await.err()),
+        alone!(w.sibling_name_used(b"n", ("page", 0), 1).await.err()),
+        alone!(w.published_post_exists().await.err()),
+        alone!(w.insert_post_with_id(990, &post).await.err()),
     ];
     let counts = [
-        w.approved_comment_count(1).await.err(),
-        w.comment_counts(1).await.err(),
-        w.comment_ids_before("trash", "2001-01-01").await.err(),
-        w.term_taxonomy_count(1).await.err(),
-        w.term_post_count(1, &["publish"], &["post"]).await.err(),
-        w.user_count().await.err(),
+        alone!(w.approved_comment_count(1).await.err()),
+        alone!(w.comment_counts(1).await.err()),
+        alone!(w.comment_ids_before("trash", "2001-01-01").await.err()),
+        alone!(w.term_taxonomy_count(1).await.err()),
+        alone!(w.term_post_count(1, &["publish"], &["post"]).await.err()),
+        alone!(w.user_count().await.err()),
     ];
     let writes = [
-        w.insert_post(&post).await.err(),
-        w.update_post(1, &post).await.err(),
-        w.set_post_name(1, b"n").await.err(),
-        w.set_post_guid(1, b"g").await.err(),
-        w.set_post_status(1, "publish").await.err(),
-        w.set_comment_count(1, 1).await.err(),
-        w.reparent_posts(1, "page", 0).await.err(),
-        w.reassign_posts(1, 2).await.err(),
-        w.delete_post(1).await.err(),
-        w.insert_comment(&comment).await.err(),
-        w.update_comment(1, &comment).await.err(),
-        w.set_comment_status(1, "1").await.err(),
-        w.set_comments_status(&[1], "1").await.err(),
-        w.trash_post_comments(1).await.err(),
-        w.reparent_comments(1, 0).await.err(),
-        w.delete_comment(1).await.err(),
-        w.insert_user(b"u", &user).await.err(),
-        w.update_user(1, &user).await.err(),
-        w.set_user_password(1, "h").await.err(),
-        w.clear_activation_key(1).await.err(),
-        w.reassign_links(1, 2).await.err(),
-        w.delete_user(1).await.err(),
-        w.add_option("o", b"v", "on").await.err(),
-        w.update_option("o", b"v").await.err(),
-        w.update_option_autoload("o", b"v", "on").await.err(),
-        w.delete_option("o").await.err(),
-        w.option_autoload("o").await.err(),
-        w.add_meta(meta, 1, "k", Some(b"v")).await.err(),
-        w.update_meta(meta, 1, "k", Some(b"v")).await.err(),
-        w.update_meta_from(meta, (1, "k"), b"p", Some(b"v"))
-            .await
-            .err(),
-        w.delete_meta(meta, &[1]).await.err(),
-        w.insert_term(b"n", b"s", 0).await.err(),
-        w.update_term(1, b"n", b"s", 0).await.err(),
-        w.set_term_slug(1, b"s").await.err(),
-        w.delete_term(1).await.err(),
-        w.insert_term_taxonomy((1, "category"), b"", 0).await.err(),
-        w.update_term_taxonomy(1, (1, "category"), b"", 0)
-            .await
-            .err(),
-        w.reparent_terms("category", 1, 0).await.err(),
-        w.set_term_count(1, 1).await.err(),
-        w.delete_term_taxonomy(1).await.err(),
-        w.add_relationship(1, 1).await.err(),
-        w.remove_relationships(1, &[1]).await.err(),
+        alone!(w.insert_post(&post).await.err()),
+        alone!(w.update_post(1, &post).await.err()),
+        alone!(w.set_post_name(1, b"n").await.err()),
+        alone!(w.set_post_guid(1, b"g").await.err()),
+        alone!(w.set_post_status(1, "publish").await.err()),
+        alone!(w.set_comment_count(1, 1).await.err()),
+        alone!(w.reparent_posts(1, "page", 0).await.err()),
+        alone!(w.reassign_posts(1, 2).await.err()),
+        alone!(w.delete_post(1).await.err()),
+        alone!(w.insert_comment(&comment).await.err()),
+        alone!(w.update_comment(1, &comment).await.err()),
+        alone!(w.set_comment_status(1, "1").await.err()),
+        alone!(w.set_comments_status(&[1], "1").await.err()),
+        alone!(w.trash_post_comments(1).await.err()),
+        alone!(w.reparent_comments(1, 0).await.err()),
+        alone!(w.delete_comment(1).await.err()),
+        alone!(w.insert_user(b"u", &user).await.err()),
+        alone!(w.update_user(1, &user).await.err()),
+        alone!(w.set_user_password(1, "h").await.err()),
+        alone!(w.clear_activation_key(1).await.err()),
+        alone!(w.reassign_links(1, 2).await.err()),
+        alone!(w.delete_user(1).await.err()),
+        alone!(w.add_option("o", b"v", "on").await.err()),
+        alone!(w.update_option("o", b"v").await.err()),
+        alone!(w.update_option_autoload("o", b"v", "on").await.err()),
+        alone!(w.delete_option("o").await.err()),
+        alone!(w.option_autoload("o").await.err()),
+        alone!(w.add_meta(meta, 1, "k", Some(b"v")).await.err()),
+        alone!(w.update_meta(meta, 1, "k", Some(b"v")).await.err()),
+        alone!(
+            w.update_meta_from(meta, (1, "k"), b"p", Some(b"v"))
+                .await
+                .err()
+        ),
+        alone!(w.delete_meta(meta, &[1]).await.err()),
+        alone!(w.insert_term(b"n", b"s", 0).await.err()),
+        alone!(w.update_term(1, b"n", b"s", 0).await.err()),
+        alone!(w.set_term_slug(1, b"s").await.err()),
+        alone!(w.delete_term(1).await.err()),
+        alone!(w.insert_term_taxonomy((1, "category"), b"", 0).await.err()),
+        alone!(
+            w.update_term_taxonomy(1, (1, "category"), b"", 0)
+                .await
+                .err()
+        ),
+        alone!(w.reparent_terms("category", 1, 0).await.err()),
+        alone!(w.set_term_count(1, 1).await.err()),
+        alone!(w.delete_term_taxonomy(1).await.err()),
+        alone!(w.add_relationship(1, 1).await.err()),
+        alone!(w.remove_relationships(1, &[1]).await.err()),
     ];
     let since = "2026-01-01 00:00:00";
     let reads = [
-        w.comment(1).await.err(),
-        w.duplicate_comment((1, 0), b"a", Some(b"e"), b"c")
-            .await
-            .err(),
-        w.duplicate_comment((1, 0), b"a", None, b"c").await.err(),
-        w.user_has_approved_comment(1).await.err(),
-        w.author_has_approved_comment(b"a", b"e").await.err(),
-        w.last_comment_date(since, (0, b"ip"), b"e").await.err(),
-        w.last_comment_date(since, (1, b""), b"e").await.err(),
-        w.child_note_ids(1).await.err(),
-        w.post_author(1).await.err(),
-        w.user_id_by_email(b"e").await.err(),
-        w.meta_value(meta, 1, "k").await.err(),
-        w.term_in("category", 1).await.err(),
-        w.term_by_slug("category", None).await.err(),
-        w.term_by_name("category", "n").await.err(),
-        w.terms_under("category", 0, None).await.err(),
-        w.older_duplicate(("category", 0), "s", (2, 2)).await.err(),
-        w.term_exists(1).await.err(),
-        w.term_matches(None, "n").await.err(),
-        w.slug_taken("s", 0).await.err(),
-        w.object_terms(1, "category").await.err(),
-        w.has_relationship(1, 1).await.err(),
-        w.term_object_ids(1).await.err(),
-        w.max_term_group().await.err(),
-        w.term_parents("category").await.err(),
-        w.term_menu_items(1, "category").await.err(),
-        w.option_value("o").await.err(),
+        alone!(w.comment(1).await.err()),
+        alone!(
+            w.duplicate_comment((1, 0), b"a", Some(b"e"), b"c")
+                .await
+                .err()
+        ),
+        alone!(w.duplicate_comment((1, 0), b"a", None, b"c").await.err()),
+        alone!(w.user_has_approved_comment(1).await.err()),
+        alone!(w.author_has_approved_comment(b"a", b"e").await.err()),
+        alone!(w.last_comment_date(since, (0, b"ip"), b"e").await.err()),
+        alone!(w.last_comment_date(since, (1, b""), b"e").await.err()),
+        alone!(w.child_note_ids(1).await.err()),
+        alone!(w.post_author(1).await.err()),
+        alone!(w.user_id_by_email(b"e").await.err()),
+        alone!(w.meta_value(meta, 1, "k").await.err()),
+        alone!(w.term_in("category", 1).await.err()),
+        alone!(w.term_by_slug("category", None).await.err()),
+        alone!(w.term_by_name("category", "n").await.err()),
+        alone!(w.terms_under("category", 0, None).await.err()),
+        alone!(w.older_duplicate(("category", 0), "s", (2, 2)).await.err()),
+        alone!(w.term_exists(1).await.err()),
+        alone!(w.term_matches(None, "n").await.err()),
+        alone!(w.slug_taken("s", 0).await.err()),
+        alone!(w.object_terms(1, "category").await.err()),
+        alone!(w.has_relationship(1, 1).await.err()),
+        alone!(w.term_object_ids(1).await.err()),
+        alone!(w.max_term_group().await.err()),
+        alone!(w.term_parents("category").await.err()),
+        alone!(w.term_menu_items(1, "category").await.err()),
+        alone!(w.option_value("o").await.err()),
     ];
     for error in ids
         .into_iter()
@@ -1521,6 +1543,67 @@ async fn reads_inside_an_action() {
         meta.last().unwrap(),
         &(b"hyscribe_test".to_vec(), Some(b"v".to_vec()))
     );
+}
+
+/// An option's value in `wordpress_saves`, read outside any action.
+async fn saved_option(writer: &Writer, name: &str) -> String {
+    let query = sqlx::query_scalar("SELECT option_value FROM wp_options WHERE option_name = ?");
+    query.bind(name).fetch_one(&writer.pool).await.unwrap()
+}
+
+/// A deadlock with another client (as PHP WordPress writing the same
+/// rows) rolls the action's whole transaction back: no later statement of
+/// the action runs, so none commits on its own, and its connection is
+/// left with no transaction open.
+#[tokio::test]
+async fn a_deadlocked_action_runs_nothing_after() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let db = Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let writer = Writer::open(&db, Mode::Primary).await.unwrap().unwrap();
+    let mut conn = writer.pool.acquire().await.unwrap();
+    let mut write = writer.begin_on(&mut conn).await.unwrap();
+    write.update_option("blogname", b"action").await.unwrap();
+    // The other client: more rows written, so the engine rolls the action
+    // back rather than it.
+    let mut other = writer.pool.begin().await.unwrap();
+    let set = "UPDATE wp_options SET option_value = 'other' WHERE option_name = ?";
+    sqlx::query("UPDATE wp_posts SET post_content = 'other'")
+        .execute(&mut *other)
+        .await
+        .unwrap();
+    sqlx::query(set)
+        .bind("blogdescription")
+        .execute(&mut *other)
+        .await
+        .unwrap();
+    let (deadlocked, waited) = tokio::join!(
+        write.update_option("blogdescription", b"action"),
+        sqlx::query(set).bind("blogname").execute(&mut *other)
+    );
+    let err = deadlocked.unwrap_err().to_string();
+    assert!(err.contains("Deadlock found"), "{err}");
+    waited.unwrap();
+    drop(other);
+    // The same error, and nothing run.
+    let later = write.update_option("date_format", b"later").await;
+    assert_eq!(saved_option(&writer, "date_format").await, "F j, Y");
+    assert_eq!(later.unwrap_err().to_string(), err);
+    assert_eq!(write.commit().await.unwrap_err().to_string(), err);
+    assert_eq!(
+        saved_option(&writer, "blogname").await,
+        "HyScribe Default Install"
+    );
+    let state: (u64, i64) = sqlx::query_as("SELECT @@in_transaction, @@autocommit")
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap();
+    assert_eq!(state, (0, 1));
 }
 
 /// Each statement fails once the budget a test sets is spent.

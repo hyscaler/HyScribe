@@ -55,7 +55,7 @@ impl PrefixSql for Prefix {
 }
 
 /// Why a database call failed. Messages never contain the password.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DbError(String);
 
 impl fmt::Display for DbError {

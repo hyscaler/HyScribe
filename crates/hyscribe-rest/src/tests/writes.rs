@@ -632,11 +632,7 @@ fn deletes_trash_unless_forced() {
 /// What PHP refuses without writing is answered with its error.
 #[test]
 fn refusals_are_php_s() {
-    for (code, status) in [
-        ("empty_content", 400),
-        ("invalid_date", 400),
-        ("rest_cannot_delete", 500),
-    ] {
+    for (code, status) in [("empty_content", 400), ("rest_cannot_delete", 500)] {
         let asked = Asked::new(
             "administrator",
             "POST",
@@ -872,4 +868,39 @@ fn the_edit_context_renders_twice() {
         let body = text_of(&on(&site, &asked, Outcome::Written(1)).1);
         assert!(body.contains(id), "{context}: {body}");
     }
+}
+
+/// The checks the goldens make over HTTP, in this crate's tests too: terms
+/// the user may not assign, a sticky post with a password, an ID on a
+/// create, a `raw` not a string, a pending post's slug, and a forced
+/// delete whose answer is not ported.
+#[test]
+fn checks_refuse_as_php_refuses() {
+    let terms = oracle("administrator", &["assign_term"]);
+    let body = r#"{"title":"x","categories":[1]}"#;
+    let asked = Asked::new("administrator", "POST", "/wp/v2/posts", body);
+    let served = on(&terms, &asked, Outcome::Written(1)).1;
+    assert!(text_of(&served).contains("rest_cannot_assign_term"));
+    let both = r#"{"title":"x","password":"pw","sticky":true}"#;
+    let served = answered("administrator", "POST", "/wp/v2/posts", both);
+    assert!(text_of(&served).contains("A post can not be sticky and have a password."));
+    let served = answered(
+        "administrator",
+        "POST",
+        "/wp/v2/posts",
+        r#"{"title":"x","id":0}"#,
+    );
+    assert_eq!(served.status, 404);
+    for body in [
+        r#"{"title":{"raw":5}}"#,
+        r#"{"title":"x","excerpt":{"raw":5}}"#,
+    ] {
+        let served = answered("administrator", "POST", "/wp/v2/posts", body);
+        assert_eq!(served.status, 501, "{body}");
+    }
+    let body = r#"{"title":"x","status":"pending","slug":"p"}"#;
+    let save = plan("administrator", "POST", "/wp/v2/posts", body);
+    assert_eq!(save.unique_slug, Some(0));
+    let served = answered("administrator", "DELETE", "/wp/v2/posts/94&force=1", "");
+    assert_eq!(served.status, 501);
 }

@@ -46,7 +46,8 @@ pub(super) fn answer(
     let ctx = context(site, plan, now);
     let outcome = handle.block_on(async { act(writer.begin().await, plan, &ctx).await });
     let served = match outcome {
-        Err(Error::Unported(_)) => Ok(Served::not_ported()),
+        // What PHP refuses past the checks only as another write gets in.
+        Err(Error::Unported(_) | Error::Refused(_)) => Ok(Served::not_ported()),
         Err(err) => Err(err),
         Ok(outcome) => {
             let reloaded = handle.block_on(site.reloaded());
@@ -188,9 +189,7 @@ async fn saved(write: &mut Write<'_>, save: &Save, ctx: &Context) -> Result<Outc
     };
     let id = match saved {
         Ok(id) => id,
-        Err(Error::Refused(code @ ("empty_content" | "invalid_date"))) => {
-            return Ok(Outcome::Refused(code));
-        }
+        Err(Error::Refused("empty_content")) => return Ok(Outcome::Refused("empty_content")),
         Err(err) => return Err(err),
     };
     match save.sticky {

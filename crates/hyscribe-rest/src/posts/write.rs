@@ -102,7 +102,8 @@ pub enum Outcome {
     /// The post written: saved, trashed or deleted.
     Written(u64),
     /// What PHP refuses without writing, by its error code:
-    /// `wp_insert_post()`'s `empty_content` and `invalid_date`, or
+    /// `wp_insert_post()`'s `empty_content` (its `invalid_date` needs a day
+    /// the validated dates never have), or
     /// `rest_cannot_delete` where trashing or deleting did nothing.
     Refused(&'static str),
 }
@@ -179,17 +180,18 @@ fn raw(params: &Params, name: &str) -> Result<Option<Vec<u8>>, RestError> {
 }
 
 /// `rest_get_date_with_gmt( $date, $is_utc )`: the local and UTC dates.
-fn date_with_gmt(date: &[u8], utc: bool, zone: Zone) -> Option<(String, String)> {
+fn date_with_gmt(date: &[u8], utc: bool, zone: Zone) -> (String, String) {
     const MYSQL: &str = "Y-m-d H:i:s";
     let sign = |b: &u8| matches!(b, b'+' | b'-');
     let digits = |digits: &[&u8]| digits.iter().all(|b| b.is_ascii_digit());
+    // Validated as a date and time, which parses.
+    let unix = schema::parse_date(date).unwrap_or_default();
     // `#(Z|[+-]\d{2}(:\d{2})?)$#`, of a date sanitized of new lines.
-    let unix = schema::parse_date(date)?;
     let tail = |n: usize| date.get(date.len().saturating_sub(n)..).unwrap_or_default();
     let zoned = date.ends_with(b"Z")
         || matches!(tail(3), [s, a, b] if sign(s) && digits(&[a, b]))
         || matches!(tail(6), [s, a, b, b':', c, d] if sign(s) && digits(&[a, b, c, d]));
-    Some(if !utc && !zoned {
+    if !utc && !zoned {
         let local = format_unix(MYSQL, unix, Zone::Utc);
         let gmt = format_unix(MYSQL, stored_unix(&local, zone), Zone::Utc);
         (local, gmt)
@@ -198,7 +200,7 @@ fn date_with_gmt(date: &[u8], utc: bool, zone: Zone) -> Option<(String, String)>
             format_unix(MYSQL, unix, zone),
             format_unix(MYSQL, unix, Zone::Utc),
         )
-    })
+    }
 }
 
 /// `handle_status_param()` of a validated status.
@@ -320,9 +322,9 @@ fn dates(context: &Context, params: &Params, existing: Option<&Post>, save: &mut
     let zone = zone(context);
     let given = |name| params.get(name).filter(|date| !date.is_empty());
     let changed = match (given("date"), given("date_gmt")) {
-        (Some(date), _) => date_with_gmt(&date.to_php_string(), false, zone)
+        (Some(date), _) => Some(date_with_gmt(&date.to_php_string(), false, zone))
             .filter(|(local, _)| existing.is_none_or(|post| post.date != *local)),
-        (None, Some(date)) => date_with_gmt(&date.to_php_string(), true, zone)
+        (None, Some(date)) => Some(date_with_gmt(&date.to_php_string(), true, zone))
             .filter(|(_, gmt)| existing.is_none_or(|post| post.date_gmt != *gmt)),
         (None, None) => None,
     };
@@ -436,7 +438,8 @@ fn answerable(
 /// to the trash, which keeps it for `EMPTY_TRASH_DAYS`.
 fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
     let kind = Kind::of(params.route);
-    let post = get_post(context, params, kind)?;
+    // The permission check found the post.
+    let post = get_post(context, params, kind).unwrap_or_default();
     let force = params.get("force").is_some_and(|force| !force.is_empty());
     let (write, previous) = if force {
         let mut edit = params.clone();
@@ -489,7 +492,6 @@ fn finish(
             let message = "Content, title, and excerpt are empty.";
             return Err(invalid("empty_content", message));
         }
-        Outcome::Refused("invalid_date") => return Err(invalid("invalid_date", "Invalid date.")),
         Outcome::Refused(_) => {
             let message = "The post cannot be deleted.";
             return Err(RestError::status("rest_cannot_delete", message, 500));
@@ -502,11 +504,14 @@ fn finish(
     let kind = Kind::of(params.route);
     params.set("context", text("edit"));
     let post = context.site.post(id).unwrap_or_default();
-    let mut response = prepared(context, params, kind, &post)?;
-    if matches!(&plan.write, Write::Save(save) if save.id == 0) {
-        response.status = 201;
-        let route = format!("/wp/v2/{}/{id}", kind.base());
-        response.header("Location", &context.rest_url(&route));
-    }
-    Ok(response)
+    let created = matches!(&plan.write, Write::Save(save) if save.id == 0);
+    let location = context.rest_url(&format!("/wp/v2/{}/{id}", kind.base()));
+    // Its content was found ported before the write.
+    prepared(context, params, kind, &post).map(|mut response| {
+        if created {
+            response.status = 201;
+            response.header("Location", &location);
+        }
+        response
+    })
 }

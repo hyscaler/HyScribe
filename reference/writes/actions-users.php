@@ -5,22 +5,6 @@
 // 2.4), loaded beside actions.php. Option and meta names start with
 // `oracle_`, so they never clash with the fixture's.
 
-// wp_delete_user().
-require_once ABSPATH . 'wp-admin/includes/user.php';
-
-$new_user = function ( $login, $more = array() ) {
-	return wp_insert_user(
-		array_merge(
-			array(
-				'user_login' => $login,
-				'user_pass'  => 'A pass phrase',
-				'user_email' => "$login@example.test",
-			),
-			$more
-		)
-	);
-};
-
 // A meta row as stored, without add_metadata()'s serialization.
 $raw_meta = function ( $id, $key, $value ) {
 	global $wpdb;
@@ -44,9 +28,9 @@ $raw_options = function ( $rows ) {
 
 return array(
 	'user-insert-roles'      => array(
-		'action' => function () use ( $new_user ) {
-			$new_user( 'oracle-subscriber' );
-			$new_user(
+		'action' => function () use ( $oracle_user ) {
+			$oracle_user( 'oracle-subscriber' );
+			$oracle_user(
 				'oracle-editor',
 				array(
 					'role'       => 'editor',
@@ -54,21 +38,21 @@ return array(
 					'last_name'  => 'Lovelace',
 				)
 			);
-			$new_user(
+			$oracle_user(
 				'oracle-author',
 				array(
 					'role'       => 'author',
 					'first_name' => 'Only First',
 				)
 			);
-			$new_user(
+			$oracle_user(
 				'oracle-contributor',
 				array(
 					'role'      => 'contributor',
 					'last_name' => 'Only Last',
 				)
 			);
-			$new_user(
+			$oracle_user(
 				'oracle-admin',
 				array(
 					'role'         => 'administrator',
@@ -77,24 +61,24 @@ return array(
 				)
 			);
 			// The same nicename three times, and no role at all.
-			$new_user( 'Jane Doe', array( 'user_email' => 'jane@example.test' ) );
-			$new_user(
+			$oracle_user( 'Jane Doe', array( 'user_email' => 'jane@example.test' ) );
+			$oracle_user(
 				'jane.doe',
 				array(
 					'user_email' => 'jane.doe@example.test',
 					'role'       => '',
 				)
 			);
-			$new_user( 'jane-doe', array( 'user_email' => 'jane-doe@example.test' ) );
+			$oracle_user( 'jane-doe', array( 'user_email' => 'jane-doe@example.test' ) );
 			// Taken: nothing is written.
-			$new_user( 'oracle-editor', array( 'user_email' => 'other@example.test' ) );
-			$new_user( 'oracle-other', array( 'user_email' => 'oracle-editor@example.test' ) );
-			$new_user( '<b></b>' );
+			$oracle_user( 'oracle-editor', array( 'user_email' => 'other@example.test' ) );
+			$oracle_user( 'oracle-other', array( 'user_email' => 'oracle-editor@example.test' ) );
+			$oracle_user( '<b></b>' );
 		},
 	),
 	'user-insert-every-field' => array(
-		'action' => function () use ( $new_user ) {
-			$new_user(
+		'action' => function () use ( $oracle_user ) {
+			$oracle_user(
 				'  Oracle\\Full!  ',
 				array(
 					'user_email'           => ' full@example.test ',
@@ -125,8 +109,8 @@ return array(
 		},
 	),
 	'user-update'            => array(
-		'setup'  => function () use ( $new_user ) {
-			return $new_user(
+		'setup'  => function () use ( $oracle_user ) {
+			return $oracle_user(
 				'oracle-update',
 				array(
 					'first_name'          => 'Old',
@@ -148,8 +132,8 @@ return array(
 		},
 	),
 	'user-update-password'   => array(
-		'setup'  => function () use ( $new_user ) {
-			return $new_user( 'oracle-password', array( 'user_activation_key' => '1:key' ) );
+		'setup'  => function () use ( $oracle_user ) {
+			return $oracle_user( 'oracle-password', array( 'user_activation_key' => '1:key' ) );
 		},
 		'action' => function ( $id ) {
 			wp_update_user(
@@ -161,8 +145,8 @@ return array(
 		},
 	),
 	'user-insert-with-id'    => array(
-		'setup'  => function () use ( $new_user ) {
-			return $new_user( 'oracle-raw', array( 'user_activation_key' => '1:key' ) );
+		'setup'  => function () use ( $oracle_user ) {
+			return $oracle_user( 'oracle-raw', array( 'user_activation_key' => '1:key' ) );
 		},
 		'action' => function ( $id ) {
 			// An update's user_pass is taken for a hash and stored as given.
@@ -177,8 +161,8 @@ return array(
 		},
 	),
 	'user-set-role'          => array(
-		'setup'  => function () use ( $new_user ) {
-			return $new_user( 'oracle-role' );
+		'setup'  => function () use ( $oracle_user ) {
+			return $oracle_user( 'oracle-role' );
 		},
 		'action' => function ( $id ) {
 			$user = new WP_User( $id );
@@ -187,8 +171,8 @@ return array(
 		},
 	),
 	'user-add-remove-role'   => array(
-		'setup'  => function () use ( $new_user ) {
-			return $new_user( 'oracle-roles' );
+		'setup'  => function () use ( $oracle_user ) {
+			return $oracle_user( 'oracle-roles' );
 		},
 		'action' => function ( $id ) {
 			$user = new WP_User( $id );
@@ -199,8 +183,8 @@ return array(
 		},
 	),
 	'user-unknown-role'      => array(
-		'setup'  => function () use ( $new_user ) {
-			return $new_user( 'oracle-ghost' );
+		'setup'  => function () use ( $oracle_user ) {
+			return $oracle_user( 'oracle-ghost' );
 		},
 		'action' => function ( $id ) {
 			$user = new WP_User( $id );
@@ -210,16 +194,16 @@ return array(
 		},
 	),
 	'user-delete'            => array(
-		'setup'  => function () use ( $new_user ) {
-			return $new_user( 'oracle-delete' );
+		'setup'  => function () use ( $oracle_user ) {
+			return $oracle_user( 'oracle-delete' );
 		},
 		'action' => function ( $id ) {
 			wp_delete_user( $id );
 		},
 	),
 	'user-delete-reassign'   => array(
-		'setup'  => function () use ( $new_user ) {
-			return $new_user( 'oracle-heir' );
+		'setup'  => function () use ( $oracle_user ) {
+			return $oracle_user( 'oracle-heir' );
 		},
 		'action' => function ( $id ) {
 			wp_delete_user( 1, $id );

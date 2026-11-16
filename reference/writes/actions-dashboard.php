@@ -7,34 +7,10 @@
 // dropped and wp_die() and redirects ending them as exit would.
 
 // Runs `$run` as a request of the admin (or of admin-ajax.php with `$ajax`).
-$views_run = function ( $run, $ajax = false ) {
-	require_once ABSPATH . 'wp-admin/includes/admin.php';
+$views_run = function ( $run, $ajax = false ) use ( $admin_run ) {
 	require_once ABSPATH . 'wp-admin/includes/dashboard.php';
-	require_once ABSPATH . 'wp-admin/includes/ajax-actions.php';
 	$GLOBALS['current_screen'] = WP_Screen::get( 'dashboard' );
-	$stop = function () {
-		return function () {
-			throw new Exception( 'stopped' );
-		};
-	};
-	add_filter( 'wp_die_handler', $stop );
-	add_filter( 'wp_die_ajax_handler', $stop );
-	add_filter(
-		'wp_redirect',
-		function () {
-			throw new Exception( 'redirected' );
-		}
-	);
-	if ( $ajax ) {
-		add_filter( 'wp_doing_ajax', '__return_true' );
-	}
-	ob_start();
-	try {
-		$run();
-	} catch ( Exception $e ) {
-		unset( $e );
-	}
-	ob_end_clean();
+	$admin_run( $run, $ajax );
 };
 
 // The request's `$_POST`, slashed as wp_magic_quotes() leaves it, with
@@ -47,7 +23,6 @@ $views_post = function ( $fields, $action, $field ) {
 
 // An auto-draft as the dashboard writes it, kept as the user's.
 $views_draft = function () {
-	require_once ABSPATH . 'wp-admin/includes/post.php';
 	$post = get_default_post_to_edit( 'post', true );
 	update_user_option( 1, 'dashboard_quick_press_last_post_id', (int) $post->ID );
 	return $post->ID;
@@ -78,7 +53,7 @@ return array(
 	// post.php's Quick Draft save, then the form's new auto-draft.
 	'admin-quickdraft-save'        => array(
 		'setup'  => $views_draft,
-		'action' => function ( $id ) use ( $views_run, $views_post ) {
+		'action' => function ( $id ) use ( $views_run, $views_post, $admin_block ) {
 			$views_post(
 				array(
 					'action'     => 'post-quickdraft-save',
@@ -90,11 +65,10 @@ return array(
 				'add-post',
 				'_wpnonce'
 			);
-			$source = file_get_contents( ABSPATH . 'wp-admin/post.php' );
-			preg_match( "/\n\tcase 'post-quickdraft-save':\n(.*?)\n\tcase '/s", $source, $found );
+			$code = $admin_block( 'post.php', "\n\tcase 'post-quickdraft-save':\n", "\n\tcase '" );
 			$views_run(
-				function () use ( $found ) {
-					eval( str_replace( 'exit;', 'return;', $found[1] ) );
+				function () use ( $code ) {
+					eval( $code );
 				}
 			);
 		},
@@ -122,13 +96,12 @@ return array(
 	),
 	// The dashboard's ?welcome=0, from WP_Screen::render_screen_options().
 	'admin-welcome-hidden'         => array(
-		'action' => function () use ( $views_run ) {
+		'action' => function () use ( $views_run, $admin_block ) {
 			$_GET['welcome'] = '0';
-			$source          = file_get_contents( ABSPATH . 'wp-admin/includes/class-wp-screen.php' );
-			preg_match( "/if \( isset\( \\\$_GET\['welcome'\] \) \) \{(.*?)\} else/s", $source, $found );
+			$code            = $admin_block( 'includes/class-wp-screen.php', "if ( isset( \$_GET['welcome'] ) ) {", '} else' );
 			$views_run(
-				function () use ( $found ) {
-					eval( $found[1] );
+				function () use ( $code ) {
+					eval( $code );
 				}
 			);
 		},

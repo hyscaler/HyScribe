@@ -14,10 +14,17 @@ fn text(text: &str) -> Value {
     Value::String(text.as_bytes().to_vec())
 }
 
+/// The time the lock tests run at, fixed so no second passes between.
+const NOW: i64 = 1_800_000_000;
+
 /// A context for user 2, who does not exist, so the fixture's
 /// administrator can hold a lock against them.
 fn other() -> Context {
-    Context { user: 2, ..admin() }
+    Context {
+        user: 2,
+        now: NOW,
+        ..admin()
+    }
 }
 
 /// What user 2's autosave of their own draft writes with the `_edit_lock`
@@ -58,7 +65,7 @@ async fn in_place(lock: Option<String>, last: Option<&str>) -> Result<bool> {
 /// a lock time that is not a number is not ported.
 #[tokio::test]
 async fn locks_are_checked_as_php_checks_them() {
-    let now = admin().now;
+    let now = NOW;
     let lock = |time: i64, user: &str| Some(format!("{time}:{user}"));
     assert!(in_place(None, None).await.unwrap());
     assert!(in_place(Some(String::new()), None).await.unwrap());

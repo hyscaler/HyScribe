@@ -191,6 +191,9 @@ struct Admin<'a> {
     edited: Option<(u64, u64, String)>,
     /// `show_welcome_panel` as this view's `?welcome=` saves it.
     welcome: Option<Vec<u8>>,
+    /// `$GLOBALS['login_grace_period']`: the auth cookie expired within
+    /// its grace.
+    grace: bool,
 }
 
 impl<'a> Admin<'a> {
@@ -209,6 +212,7 @@ impl<'a> Admin<'a> {
             draft: None,
             edited: None,
             welcome: None,
+            grace: false,
         }
     }
 
@@ -1317,6 +1321,7 @@ fn screen(
         }
         "/hs-admin/post-new" => hyscribe_admin::editor::post_new(admin, query)
             .or_else(|| block_editor(admin, &request))?,
+        "/hs-admin/revision" => hyscribe_admin::revisions::revision(admin, query, &request)?,
         // Their pages print the PHP and web server details HyScribe has no
         // equivalent for: refused as PHP refuses, else not ported.
         "/hs-admin/plugins" if !admin.can("activate_plugins") => Answer::from_page(None),
@@ -1561,10 +1566,15 @@ fn ajax_answer(
     cookies: &[(Vec<u8>, Vec<u8>)],
 ) -> Response {
     let names = Names::new(site);
+    // `wp_doing_ajax()` gives every cookie an hour's grace.
     let auth = cookie(cookies, &names.auth(is_ssl(site)));
-    let user = reads.auth_user(auth, asking.post, is_ssl(site));
-    let user =
-        user.or_else(|| reads.logged_in_user(cookie(cookies, &names.logged_in()), asking.post));
+    let logged_in = cookie(cookies, &names.logged_in());
+    let (user, valid) = match reads.auth_user(auth, true, is_ssl(site)) {
+        Some(user) => (Some(user), auth),
+        None => (reads.logged_in_user(logged_in, true), logged_in),
+    };
+    let expiration = valid.and_then(hyscribe_auth::cookie::parse_auth_cookie);
+    let expiration = expiration.map_or(0, |c| Value::String(c.expiration.to_vec()).to_int());
     let get = parse_str(asking.uri.query().unwrap_or_default().as_bytes());
     let uri = asking
         .uri
@@ -1577,7 +1587,8 @@ fn ajax_answer(
         Some((id, token)) => {
             reads.act_as(id, token);
             let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
-            let admin = Admin::new(reads, site, user);
+            let mut admin = Admin::new(reads, site, user);
+            admin.grace = expiration < reads.now;
             match admin_ajax(Some(&admin), &asked) {
                 Ok(())
                     if hyscribe_admin::actions::action("admin-ajax", &asked)
@@ -1597,7 +1608,13 @@ fn ajax_answer(
                 refused => refused,
             }
         }
-        None => admin_ajax(None, &asked),
+        None => match admin_ajax(None, &asked) {
+            Ok(()) if hyscribe_admin::actions::action("admin-ajax", &asked) == b"heartbeat" => {
+                let json = saves::heartbeat::nopriv(reads.now).into_bytes();
+                return ajax_text(StatusCode::OK, JSON, json);
+            }
+            checked => checked,
+        },
     };
     checked.map_or_else(
         |refusal| refused(reads.public(), refusal),

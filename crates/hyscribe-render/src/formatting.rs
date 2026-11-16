@@ -27,6 +27,22 @@ type Match = Option<(usize, Vec<u8>)>;
 /// A pattern tried at one position of the subject.
 type Pattern = fn(&[u8], usize) -> Match;
 
+/// `normalize_whitespace( $text )`.
+pub fn normalize_whitespace(text: &[u8]) -> Vec<u8> {
+    let text = hyscribe_phpser::php_trim(text);
+    let mut out: Vec<u8> = Vec::with_capacity(text.len());
+    for &b in text {
+        let b = if b == b'\r' { b'\n' } else { b };
+        let blank = b == b' ' || b == b'\t';
+        match out.last() {
+            Some(b'\n') if b == b'\n' => {}
+            Some(b' ') if blank => {}
+            _ => out.push(if blank { b' ' } else { b }),
+        }
+    }
+    out
+}
+
 /// `wp_spaces_regexp()`: `[\r\n\t ]|\xC2\xA0|&nbsp;`.
 const SPACES: [&[u8]; 6] = [b"\r", b"\n", b"\t", b" ", b"\xC2\xA0", b"&nbsp;"];
 

@@ -259,6 +259,7 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
                     .with_public_users(config.rest_public_users)
                     .with_constants(config.constants)
                     .with_proxy(config.server.behind_proxy)
+                    .with_login_limits(config.login_limits)
                     .with_writer(writer);
             // Logging in needs primary mode.
             let site = match config.mode {

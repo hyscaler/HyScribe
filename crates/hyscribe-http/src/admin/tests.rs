@@ -34,7 +34,7 @@ pub(super) fn location(response: &Response) -> &str {
         .unwrap()
 }
 
-fn salted(site: Site) -> Site {
+pub(crate) fn salted(site: Site) -> Site {
     let names = [
         "AUTH_KEY",
         "AUTH_SALT",
@@ -847,7 +847,7 @@ pub(crate) async fn page_of(response: Response) -> String {
 
 /// `golden` with the ten characters `page` has where it has a nonce or time
 /// placeholder: equal to `page` when the rest is.
-fn with_values(golden: &str, page: &str) -> String {
+pub(crate) fn with_values(golden: &str, page: &str) -> String {
     let mut out = String::new();
     let (mut golden, mut page) = (golden, page);
     let next = |golden: &str| {
@@ -1901,7 +1901,16 @@ async fn ajax_actions_are_checked_first() {
     let response = send(&site, "POST", ajax, "", Some((form, "action=delete-tag"))).await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(page_of(response).await, "0");
+    // A visitor's heartbeat: `wp_ajax_nopriv_heartbeat()`.
     let response = send(&site, "POST", ajax, "", Some((form, "action=heartbeat"))).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        page_of(response)
+            .await
+            .starts_with("{\"wp-auth-check\":false,")
+    );
+    let generate = Some((form, "action=generate-password"));
+    let response = send(&site, "POST", ajax, "", generate).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     let logged_in = cookies
         .split("; ")
@@ -2679,3 +2688,4 @@ async fn the_permalinks_screen_refreshes_the_rules() {
 }
 
 mod comment_saves;
+mod revisions;

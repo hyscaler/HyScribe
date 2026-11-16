@@ -107,6 +107,9 @@ impl Site for Oracle {
             .eq_ignore_ascii_case(b"admin@default-install.test")
             .then(|| admin(self))
     }
+    fn check_password(&self, user: &User, password: &[u8]) -> bool {
+        hyscribe_auth::check_password(password, &user.pass)
+    }
     fn can_register(&self) -> bool {
         self.register
     }

@@ -596,3 +596,10 @@ fn user_fields_display_as_php_s() {
         failures.first()
     );
 }
+
+#[test]
+fn whitespace_normalizes_as_php() {
+    assert_eq!(normalize_whitespace(b" a\r\n\n b \t c\t"), b"a\n b c");
+    assert_eq!(normalize_whitespace(b"a\n\tb"), b"a\n b");
+    assert_eq!(normalize_whitespace(b"a  \n\nb"), b"a \nb");
+}

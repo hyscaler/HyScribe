@@ -30,12 +30,14 @@ fn oracle(role: &'static str, deny: &'static [&'static str]) -> Oracle {
     }
 }
 
-/// The oracle's site with `options`, post meta and posts changed.
+/// The oracle's site with `options`, post meta, posts and the Trash
+/// changed.
 struct Changed {
     oracle: Oracle,
     options: Vec<(&'static str, &'static [u8])>,
     meta: Vec<(u64, &'static str, &'static [u8])>,
     posts: Vec<Post>,
+    trash: bool,
 }
 
 impl Site for Changed {
@@ -126,6 +128,9 @@ impl Site for Changed {
     fn public_users(&self) -> bool {
         self.oracle.public_users()
     }
+    fn uses_trash(&self) -> bool {
+        self.trash
+    }
     fn reads(&self) -> &dyn Reads {
         self.oracle.reads()
     }
@@ -141,6 +146,7 @@ fn changed(options: Vec<(&'static str, &'static [u8])>, posts: Vec<Post>) -> Cha
         options,
         meta: Vec::new(),
         posts,
+        trash: true,
     }
 }
 
@@ -699,6 +705,29 @@ fn deletes_trash_unless_forced() {
         .status,
         501
     );
+}
+
+/// With `EMPTY_TRASH_DAYS` at 0, a delete is planned only when forced, of
+/// a trashed post too (`reference/rest/trash-off.list` has the refusals).
+#[test]
+fn deletes_without_the_trash_are_forced() {
+    let trashed = Post {
+        status: "trash".into(),
+        ..oracle("", &[]).post(1).unwrap()
+    };
+    let off = Changed {
+        trash: false,
+        ..changed(Vec::new(), vec![trashed])
+    };
+    for (target, write, status) in [
+        ("/wp/v2/posts/1", None, 501),
+        ("/wp/v2/posts/1&force=1", Some(Write::Delete(1)), 200),
+    ] {
+        let asked = Asked::new("administrator", "DELETE", target, "");
+        let (plan, served) = on(&off, &asked, Outcome::Written(1));
+        assert_eq!(plan.map(|plan| plan.write), write, "{target}");
+        assert_eq!(served.status, status, "{target}");
+    }
 }
 
 /// What PHP refuses without writing is answered with its error.

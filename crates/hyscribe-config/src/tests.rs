@@ -36,6 +36,7 @@ fn defaults_are_safe() {
             database: Database {
                 host: "localhost".into(),
                 port: 3306,
+                socket: None,
                 name: "wordpress".into(),
                 user: "wp".into(),
                 password: Secret::new(""),
@@ -181,6 +182,31 @@ fn reads_every_key() {
     assert_eq!(config.login_limits, limits);
     let on = from_map(&with(&[("REST_PUBLIC_USERS", "on")])).unwrap();
     assert!(on.rest_public_users);
+}
+
+/// A socket as `wp-config.php` gives one in `DB_HOST`, only for `localhost`.
+#[test]
+fn reads_a_socket_host() {
+    let database = |host| from_map(&with(&[("DB_HOST", host), ("DB_PORT", "3307")]));
+    let socket = database("localhost:/run/mysqld/mysqld.sock").unwrap();
+    assert_eq!(socket.database.host, "localhost");
+    assert_eq!(
+        socket.database.socket.as_deref(),
+        Some(Path::new("/run/mysqld/mysqld.sock"))
+    );
+    assert_eq!(
+        socket.database.address(),
+        "localhost:/run/mysqld/mysqld.sock"
+    );
+    let tcp = database("db.internal").unwrap();
+    assert_eq!(tcp.database.socket, None);
+    assert_eq!(tcp.database.address(), "db.internal:3307");
+    for host in ["127.0.0.1:/run/mysqld/mysqld.sock", ":/tmp/mysql.sock"] {
+        assert_eq!(
+            database(host).unwrap_err().to_string(),
+            "DB_HOST is invalid: a socket is given as localhost:/path/to/socket"
+        );
+    }
 }
 
 #[test]

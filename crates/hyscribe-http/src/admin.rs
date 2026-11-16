@@ -648,6 +648,9 @@ impl PostsSite for Admin<'_> {
     fn page_templates(&self, post_type: &str) -> Vec<(String, String)> {
         self.site.theme.page_templates(post_type)
     }
+    fn uses_trash(&self) -> bool {
+        self.site.constants.empty_trash_days != 0
+    }
 }
 
 impl CommentEditSite for Admin<'_> {

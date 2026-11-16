@@ -135,6 +135,8 @@ pub(crate) struct Found {
     pub source: String,
     /// `wp-content`, where `object-cache.php` and the uploads would be.
     pub content: Content,
+    /// The uploads folder a literal `UPLOADS` gives, `ABSPATH . UPLOADS`.
+    pub uploads: Option<String>,
 }
 
 /// Where `wp-content` is.
@@ -155,6 +157,7 @@ pub(crate) fn manual() -> Found {
         unread: vec!["DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PREFIX"],
         source: String::new(),
         content: Content::Unknown,
+        uploads: None,
     }
 }
 
@@ -168,7 +171,8 @@ pub(crate) fn from_file(answer: &str) -> Result<Found, String> {
         Setting::Unset => Content::Known(default),
         _ => Content::Asked(default),
     };
-    Ok(found(&config, format!("Read {}", file.display()), content))
+    let source = format!("Read {}", file.display());
+    Ok(found(&config, source, content, Some(&abspath)))
 }
 
 /// The site of the `wp-config.php` text `source`, given without its folder.
@@ -178,24 +182,49 @@ pub(crate) fn from_text(source: &[u8]) -> Result<Found, String> {
         Setting::Literal(Value::String(dir)) => Content::Known(PathBuf::from(dir)),
         _ => Content::Unknown,
     };
-    Ok(found(
-        &config,
-        "Read the wp-config.php given".into(),
-        content,
-    ))
+    let source = "Read the wp-config.php given".into();
+    Ok(found(&config, source, content, None))
 }
 
-fn found(config: &wpconfig::WpConfig, source: String, content: Content) -> Found {
-    let import = setup::import(config);
+/// What `config` gives, at `abspath` when the WordPress folder is known.
+fn found(
+    config: &wpconfig::WpConfig,
+    source: String,
+    content: Content,
+    abspath: Option<&Path>,
+) -> Found {
+    let mut import = setup::import(config);
+    // `wp_upload_dir()` takes `UPLOADS` relative to the WordPress folder.
+    let uploads = match (setup::setting(config, "UPLOADS"), abspath) {
+        (Setting::Unset, _) => None,
+        (Setting::Literal(Value::String(dir)), Some(abspath)) => {
+            Some(format!("{}/{dir}", abspath.display()))
+        }
+        _ => {
+            import.unread.push("UPLOADS");
+            None
+        }
+    };
     Found {
         values: import.values,
         unread: import.unread,
         source,
         content,
+        uploads,
     }
 }
 
 impl Found {
+    /// The site's uploads folder: `UPLOADS`'s, else the one in `content`,
+    /// its `wp-content`.
+    pub(crate) fn uploads(&self, content: Option<&Path>) -> String {
+        match (&self.uploads, content) {
+            (Some(uploads), _) => uploads.clone(),
+            (None, Some(dir)) => dir.join("uploads").display().to_string(),
+            (None, None) => String::new(),
+        }
+    }
+
     /// What was read and what was not, as lines to show.
     pub(crate) fn summary(&self) -> String {
         let mut text = String::new();
@@ -265,6 +294,10 @@ pub(crate) fn not_copied(key: &str) -> String {
         "EMPTY_TRASH_DAYS" => format!(
             "{key} is not a literal number of days, so it is not copied: WordPress's 30 holds"
         ),
+        "UPLOADS" => format!(
+            "{key} is not a literal in a WordPress folder given, so it is not copied: \
+             give the site's uploads folder"
+        ),
         _ => format!(
             "{key} is not a literal true or false, so it is not copied: the safer value holds"
         ),
@@ -306,11 +339,6 @@ impl Choices {
     }
 }
 
-/// The uploads folder of a site whose `wp-content` is `content`.
-pub(crate) fn uploads(content: Option<&Path>) -> String {
-    content.map_or_else(String::new, |dir| dir.join("uploads").display().to_string())
-}
-
 /// `hyscribe setup`: runs the wizard and says what it did.
 pub(crate) fn command(home: &Path, term: &mut Terminal<'_>) -> Result<String, String> {
     Ok(match run(home, term)? {
@@ -340,14 +368,15 @@ pub(crate) fn run(home: &Path, term: &mut Terminal<'_>) -> Result<Option<PathBuf
         from_file(&answer)?
     };
     term.say(&found.summary())?;
-    let content = match found.content {
+    let content = match &found.content {
         Content::Unknown => None,
-        Content::Known(dir) => Some(dir),
+        Content::Known(dir) => Some(dir.clone()),
         Content::Asked(default) => Some(PathBuf::from(term.ask(
             "Path to wp-content (WP_CONTENT_DIR is computed by PHP)",
             &default.display().to_string(),
         )?)),
     };
+    let site_uploads = found.uploads(content.as_deref());
     let mut values = found.values;
     for key in found.unread {
         for question in questions(key) {
@@ -379,7 +408,7 @@ pub(crate) fn run(home: &Path, term: &mut Terminal<'_>) -> Result<Option<PathBuf
     let port = term.ask("Port to listen on", "8080")?;
     let uploads = term.ask(
         "The site's uploads folder (empty for hyscribe/uploads)",
-        &uploads(content.as_deref()),
+        &site_uploads,
     )?;
     let choices = Choices {
         shadow,
@@ -522,8 +551,9 @@ async fn check(config: &Config) -> Result<String, String> {
     let database = &config.database;
     let reader = database.read_user.as_ref().unwrap_or(&database.user);
     let db = Db::connect(database).await.map_err(db_failed(format!(
-        "cannot connect to {} on {}:{} as {reader}",
-        database.name, database.host, database.port
+        "cannot connect to {} on {} as {reader}",
+        database.name,
+        database.address()
     )))?;
     let version = db
         .option("db_version")
@@ -551,10 +581,9 @@ async fn check(config: &Config) -> Result<String, String> {
         }
     }
     let mut report = format!(
-        "  Connected to {} on {}:{}, db_version {}\n",
+        "  Connected to {} on {}, db_version {}\n",
         database.name,
-        database.host,
-        database.port,
+        database.address(),
         version.unwrap_or_default()
     );
     if let Some(user) = &database.read_user {

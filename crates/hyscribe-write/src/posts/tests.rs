@@ -1924,6 +1924,19 @@ async fn rarer_saves_match_php() {
         },
     )
     .await;
+    // So does `wp_trash_post()`, which then calls it forced.
+    check(
+        "delete-draft-post",
+        async |conn| insert(conn, oracle_post("draft")).await,
+        async |conn, id| {
+            act(writer, conn, &no_trash, async |w, ctx| {
+                wp_trash_post(w, ctx, id).await
+            })
+            .await
+            .map(drop)
+        },
+    )
+    .await;
 }
 
 /// `_wp_put_post_revision( get_post( $id ), true )`.

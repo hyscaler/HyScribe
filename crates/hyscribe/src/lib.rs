@@ -444,14 +444,13 @@ fn describe(config: &Config) -> String {
     };
     format!(
         "Configuration OK\n\
-         Database: {user}@{host}:{port}/{name} (password {password}, prefix {prefix}, charset {charset})\n\
+         Database: {user}@{address}/{name} (password {password}, prefix {prefix}, charset {charset})\n\
          Listen: {bind}:{http_port}{proxy}\n\
          Mode: {mode}\n\
          Uploads: {uploads}\n\
          Keys and salts: {salts} of 8 set\n",
         user = db.user,
-        host = db.host,
-        port = db.port,
+        address = db.address(),
         name = db.name,
         prefix = db.prefix.as_str(),
         charset = db.charset,

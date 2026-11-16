@@ -108,7 +108,9 @@ if ( ! term_exists( (int) get_option( 'default_category' ), 'category' ) ) {
 // The rewrite rules as HyScribe left them (run.sh saves them before PHP's
 // first request regenerates empty ones) are what PHP generates, and load.
 $stored = maybe_unserialize( file_get_contents( '/tmp/hyscribe-rewrite-rules' ) );
-$fresh  = $wp_rewrite->rewrite_rules();
+// As refresh_rewrite_rules() generates them for the option: `$matches[1]`, not `$1`.
+$wp_rewrite->matches = 'matches';
+$fresh               = $wp_rewrite->rewrite_rules();
 if ( '' !== $stored && ! is_array( $stored ) ) {
 	$failures[] = 'rewrite_rules is neither empty nor an array';
 } elseif ( is_array( $stored ) && $stored !== $fresh ) {

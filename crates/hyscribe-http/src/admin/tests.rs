@@ -2632,4 +2632,51 @@ async fn a_saved_notice_shows_once() {
     assert!(!again.contains(notice));
 }
 
+/// In primary mode a view of the Permalinks screen refreshes the rewrite
+/// rules a structure change left stale; other screens' writes and
+/// shadow mode leave them.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_permalinks_screen_refreshes_the_rules() {
+    let _saves = SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..hyscribe_testkit::fixture_database()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let open = async || {
+        let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary).await;
+        writer.unwrap()
+    };
+    let writer = open().await.unwrap();
+    let mut write = writer.begin().await.unwrap();
+    let structure = hyscribe_phpser::Value::String(b"/%postname%/".to_vec());
+    hyscribe_write::options::update_option(&mut write, "permalink_structure", &structure, None)
+        .await
+        .unwrap();
+    write.commit().await.unwrap();
+    let rules = async || {
+        let mut write = writer.begin().await.unwrap();
+        let rules = write.option_value("rewrite_rules").await.unwrap().unwrap();
+        String::from_utf8(rules).unwrap()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let (shadow, cookies) = logged_in(&db.name, dir.path()).await;
+    let permalinks = "/hs-admin/options-permalink";
+    let viewed = send(&shadow, "GET", permalinks, &cookies, None).await;
+    assert_eq!(viewed.status(), StatusCode::OK);
+    assert_eq!(rules().await, "");
+    let site = Arc::try_unwrap(shadow).ok().unwrap();
+    let site = Arc::new(site.with_writer(open().await));
+    // A view that writes for another reason: the notices a save left.
+    let writing = "/hs-admin/options-writing?settings-updated=true";
+    let viewed = send(&site, "GET", writing, &cookies, None).await;
+    assert_eq!(viewed.status(), StatusCode::OK);
+    assert_eq!(rules().await, "");
+    let viewed = send(&site, "GET", permalinks, &cookies, None).await;
+    assert_eq!(viewed.status(), StatusCode::OK);
+    assert!(rules().await.starts_with("a:94:{"));
+}
+
 mod comment_saves;

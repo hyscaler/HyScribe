@@ -18,17 +18,7 @@ const FILTERED: Unfiltered = Unfiltered { authors: false };
 
 /// The request posting `query` as user 1.
 fn asked(post: &[(Key, Value)]) -> Asked<'_> {
-    Asked {
-        get: &[],
-        post,
-        referer: None,
-        uri: b"/hs-admin/comment",
-        home: "http://127.0.0.1:8081",
-        user: 1,
-        now: 0,
-        ip: b"",
-        agent: b"",
-    }
+    crate::admin::saves::tests::asked("/hs-admin/comment", &[], post)
 }
 
 /// A comment on post 1 under `parent`, approved as `approved`.

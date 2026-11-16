@@ -141,11 +141,14 @@ pub(super) fn viewed(
     render: impl FnOnce(&Admin) -> Response,
 ) -> Response {
     let handle = Handle::current();
-    let ctx = context(
-        admin.user.id,
-        &admin.site.home,
-        &admin.site.option("siteurl"),
-    );
+    let ctx = Context {
+        unfiltered_html: admin.can("unfiltered_html"),
+        ..context(
+            admin.user.id,
+            &admin.site.home,
+            &admin.site.option("siteurl"),
+        )
+    };
     let first = view
         .draft
         .then(|| handle.block_on(async { written(writer.begin().await, &ctx, &view, true).await }));

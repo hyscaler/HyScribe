@@ -46,6 +46,7 @@ pub(crate) fn admin() -> crate::posts::Context {
         can_publish: true,
         home: b"http://127.0.0.1:8081".to_vec(),
         upload_host: b"127.0.0.1:8081".to_vec(),
+        unfiltered_html: false,
         now: crate::now(),
     }
 }

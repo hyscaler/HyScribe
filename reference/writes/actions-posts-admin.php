@@ -231,6 +231,18 @@ return array(
 			);
 		},
 	),
+	// A title with HTML, filtered by kses, and as an owner's .env lets user 1
+	// post it unfiltered (run.php leaves DISALLOW_UNFILTERED_HTML undefined).
+	'admin-posts-inline-save-html' => array(
+		'action' => function () use ( $posts_admin_inline, $posts_admin_quick ) {
+			$posts_admin_inline( array( 'post_title' => '<b>Hi</b> <script>x()</script>' ) + $posts_admin_quick( 1 ) );
+		},
+	),
+	'admin-posts-inline-save-html-unfiltered-html' => array(
+		'action' => function () use ( $posts_admin_inline, $posts_admin_quick ) {
+			$posts_admin_inline( array( 'post_title' => '<b>Hi</b> <script>x()</script>' ) + $posts_admin_quick( 1 ) );
+		},
+	),
 	'admin-pages-inline-save'      => array(
 		'setup'  => function () {
 			return wp_insert_post(

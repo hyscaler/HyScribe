@@ -17,6 +17,14 @@ $posts_insert = function ( $args ) {
 	return wp_insert_post( wp_slash( $args ), true );
 };
 
+// HTML kses removes, with C1 references convert_invalid_entities() fixes.
+$posts_html = array(
+	'post_title'            => "  <b>Bold</b> <script>alert(1)</script>title\t ",
+	'post_content'          => '<p onclick="x()">Para &#128; &#150;</p><script>bad()</script><a href="javascript:x()">link</a>',
+	'post_content_filtered' => '<script>kept()</script>&#128;',
+	'post_excerpt'          => '<em>&#153;</em><iframe src="https://example.test/"></iframe>',
+);
+
 $posts_update = function ( $args ) {
 	return wp_update_post( wp_slash( $args ), true );
 };
@@ -237,6 +245,18 @@ return array(
 					'menu_order'     => '5',
 				)
 			);
+		},
+	),
+	// The same post filtered by kses, and as an owner's .env lets user 1 post
+	// it unfiltered (run.php leaves DISALLOW_UNFILTERED_HTML undefined).
+	'insert-html-post'                       => array(
+		'action' => function () use ( $posts_insert, $posts_html ) {
+			$posts_insert( $posts_html );
+		},
+	),
+	'insert-html-post-unfiltered-html'       => array(
+		'action' => function () use ( $posts_insert, $posts_html ) {
+			$posts_insert( $posts_html );
 		},
 	),
 	'insert-reclaims-trashed-slug'           => array(

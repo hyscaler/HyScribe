@@ -12,8 +12,9 @@ use super::super::Acting;
 use super::SITE;
 
 /// A site any other read of fails the test: the write oracle's
-/// `admin_url()`, and the default constants.
-pub(in crate::admin::saves) struct Unread;
+/// `admin_url()`, and its constants, by default HyScribe's.
+#[derive(Default)]
+pub(in crate::admin::saves) struct Unread(pub Constants);
 
 impl CapabilityData for Unread {
     fn option(&self, _: &str) -> Option<Vec<u8>> {
@@ -77,6 +78,6 @@ impl Acting for Unread {
         unreachable!()
     }
     fn constants(&self) -> Constants {
-        Constants::default()
+        self.0
     }
 }

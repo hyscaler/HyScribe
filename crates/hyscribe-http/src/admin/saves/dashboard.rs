@@ -17,13 +17,15 @@ use super::{Acting, Ajax, Saving, id_of, text};
 
 /// The posts' context of `user` on the site at `home`, now, its uploads
 /// on the host of `site`, a URL under `siteurl` (`wp_upload_dir()`). The
-/// capability to publish plays no part in what is written with it.
+/// capability to publish plays no part in what is written with it, and its
+/// fields are filtered unless the caller says the user has `unfiltered_html`.
 pub(in crate::admin) fn context(user: u64, home: &str, site: &str) -> Context {
     Context {
         user,
         can_publish: false,
         home: home.as_bytes().to_vec(),
         upload_host: hyscribe_render::link::host(site.as_bytes()),
+        unfiltered_html: false,
         now: crate::now(),
     }
 }
@@ -107,7 +109,11 @@ pub(super) fn quickdraft_save<'a>(
         let pings = option_text(write, "default_ping_status").await?;
         let user = Value::Int(asked.user.cast_signed());
         update_post_meta(write, id, "_edit_last", user).await?;
-        let ctx = context(asked.user, asked.home, &site.admin_url(""));
+        let ctx = Context {
+            unfiltered_html: super::posts::unfiltered_html(write, asked.user, site.constants())
+                .await?,
+            ..context(asked.user, asked.home, &site.admin_url(""))
+        };
         wp_update_post(write, &ctx, id, &|args| {
             args.author = Some(asked.user);
             args.status = "draft".into();

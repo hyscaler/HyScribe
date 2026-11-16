@@ -123,7 +123,11 @@ async fn quick_drafts_keep_pdfs_from_the_site_url() {
         home: "http://home.example.test",
         ..asked("/hs-admin/post", &[], &post)
     };
-    assert!(quickdraft_save(&mut write, &asked, &Unread).await.is_ok());
+    assert!(
+        quickdraft_save(&mut write, &asked, &Unread::default())
+            .await
+            .is_ok()
+    );
     let content = write.post(id).await.unwrap().unwrap().content;
     let paragraph = format!("<!-- wp:paragraph -->{pdf}<!-- /wp:paragraph -->");
     assert_eq!(String::from_utf8(content).unwrap(), paragraph);

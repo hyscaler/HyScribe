@@ -41,9 +41,20 @@ const UPLOAD: &str = "\t\t\t\t<h2 class=\"upload-instructions drop-instructions\
 /// What the uploader says to a browser that cannot upload.
 const NO_UPLOAD: &str = "\t\t\t\t<h2 class=\"upload-instructions\">Your browser cannot upload files</h2>\n\t\t\t\t<p>\n\t\t\t\tThe web browser on your device cannot be used to upload files. You may be able to use the <a href=\"https://apps.wordpress.org/\">native app for your device</a> instead.\t\t\t\t</p>\n\t\t\t</div>\n";
 
-/// The extensions `get_allowed_mime_types()` gives an administrator
-/// without unfiltered uploads.
+/// The extensions `get_allowed_mime_types()` gives a user who may not post
+/// unfiltered HTML.
 const EXTENSIONS: &str = "jpg,jpeg,jpe,gif,png,bmp,tiff,tif,webp,avif,ico,heic,heif,heics,heifs,asf,asx,wmv,wmx,wm,avi,divx,flv,mov,qt,mpeg,mpg,mpe,mp4,m4v,ogv,webm,mkv,3gp,3gpp,3g2,3gp2,txt,asc,c,cc,h,srt,csv,tsv,ics,rtx,css,vtt,dfxp,mp3,m4a,m4b,aac,ra,ram,wav,x-wav,ogg,oga,flac,mid,midi,wma,wax,mka,rtf,pdf,class,tar,zip,gz,gzip,rar,7z,psd,xcf,doc,pot,pps,ppt,wri,xla,xls,xlt,xlw,mdb,mpp,docx,docm,dotx,dotm,xlsx,xlsm,xlsb,xltx,xltm,xlam,pptx,pptm,ppsx,ppsm,potx,potm,ppam,sldx,sldm,onetoc,onetoc2,onetmp,onepkg,oxps,xps,odt,odp,ods,odg,odc,odb,odf,wp,wpd,key,numbers,pages";
+
+/// `get_allowed_mime_types()`'s extensions for the current user: `htm`,
+/// `html` and `js` too when they may post unfiltered HTML.
+fn extensions(site: &dyn PostsSite) -> String {
+    if !site.can("unfiltered_html") {
+        return EXTENSIONS.into();
+    }
+    EXTENSIONS
+        .replace(",css,", ",css,htm,html,")
+        .replace(",rtf,", ",rtf,js,")
+}
 
 /// `wp_max_upload_size()`, the oracle's `upload_max_filesize`.
 const MAX_UPLOAD: &str = "2097152b";
@@ -87,7 +98,7 @@ fn plupload(site: &dyn PostsSite, browser: &Browser) -> String {
                     "mime_types",
                     Value::Array(vec![(
                         Key::Int(0),
-                        object(vec![("extensions", text(EXTENSIONS))]),
+                        object(vec![("extensions", text(&extensions(site)))]),
                     )]),
                 ),
             ]),

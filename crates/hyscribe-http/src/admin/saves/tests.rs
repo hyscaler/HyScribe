@@ -126,7 +126,7 @@ pub(super) async fn answered(
         ..asked("/hs-admin/", &get, &post)
     };
     let handler = handler(request.screen, request.action).unwrap();
-    acted(writer, conn, (handler, &unread::Unread), &asked).await
+    acted(writer, conn, (handler, &unread::Unread::default()), &asked).await
 }
 
 /// The redirect of `request`, once every budget short of it has failed.

@@ -155,7 +155,7 @@ fn compare(golden: &str, ttd: bool) -> (Vec<String>, usize) {
 fn pages_are_php_s() {
     let (failures, pages) = compare(include_str!("../../tests/golden/media.tsv"), false);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(pages, 37);
+    assert_eq!(pages, 40);
 }
 
 /// Every page of `reference/media/golden.sh` over the Theme Test Data.

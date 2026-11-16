@@ -18,7 +18,7 @@ use hyscribe_write::options::{
     Autoload, INVALID_ZONE, delete_option, get_option, is_zone, sanitize_option, set_transient,
     update_option,
 };
-use hyscribe_write::posts::{PostArgs, wp_insert_post};
+use hyscribe_write::posts::{Context, PostArgs, wp_insert_post};
 
 use super::dashboard::context;
 use super::{Acting, Saving, text};
@@ -524,12 +524,16 @@ pub(super) fn permalinks<'a>(
 pub(super) fn create_privacy_page<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
-    _: &'a dyn Acting,
+    acting: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
         let home = home_url(write).await?;
         let site = get_option(write, "siteurl").await?.to_php_string();
-        let ctx = context(asked.user, &home, &text(&site));
+        let ctx = Context {
+            unfiltered_html: super::posts::unfiltered_html(write, asked.user, acting.constants())
+                .await?,
+            ..context(asked.user, &home, &text(&site))
+        };
         // A draft: `wp_insert_post()`'s status when none is given.
         let page = PostArgs {
             title: b"Privacy Policy".to_vec(),

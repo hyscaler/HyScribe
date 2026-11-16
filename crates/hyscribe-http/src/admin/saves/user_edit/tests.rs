@@ -34,7 +34,7 @@ async fn ajax(
 ) -> Ajax {
     let (handler, post) = (ajax_handler(action).unwrap(), fields(post));
     let asked = asked("/hs-admin/admin-ajax", &[], &post);
-    acted(writer, conn, (handler, &Unread), &asked)
+    acted(writer, conn, (handler, &Unread::default()), &asked)
         .await
         .unwrap()
 }

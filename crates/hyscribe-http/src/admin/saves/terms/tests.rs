@@ -41,7 +41,7 @@ async fn settled<T>(
     let answer = acted(
         writer,
         conn,
-        (handler, &Unread),
+        (handler, &Unread::default()),
         &asked(sent.uri, &get, &post),
     )
     .await;
@@ -398,7 +398,7 @@ async fn answer<T>(handler: Handler<T>, post: &str) -> Result<T, Stop<T>> {
     handler(
         &mut write,
         &asked("/hs-admin/edit-tags", &[], &post),
-        &Unread,
+        &Unread::default(),
     )
     .await
 }

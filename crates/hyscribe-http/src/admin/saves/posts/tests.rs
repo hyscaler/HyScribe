@@ -18,12 +18,13 @@ use crate::admin::saves::tests::{SITE, acted, asked, fields, turn, writer};
 use crate::admin::saves::{Ajax, ajax_handler, handler};
 use hyscribe_auth::caps::CapabilityData;
 
-/// What `screen`'s handler answers `user`'s `query` and `body`, as one
-/// action on `conn` once every statement budget short of it has failed.
+/// What `screen`'s handler answers `user`'s `query` and `body` on a site
+/// with `constants`, as one action on `conn` once every statement budget
+/// short of it has failed.
 async fn answered(
     writer: &Writer,
     conn: &mut Connection,
-    (user, screen): (u64, &str),
+    (user, screen, constants): (u64, &str, Constants),
     (query, body): (&str, &str),
 ) -> Result<Answer, String> {
     let (get, post) = (fields(query), fields(body));
@@ -38,7 +39,7 @@ async fn answered(
         // Quick Edit's answers as pages: its text, or nothing for its row.
         "admin-ajax" => {
             let handler = ajax_handler(&action).unwrap();
-            let saved = acted(writer, conn, (handler, &Unread), &asked).await;
+            let saved = acted(writer, conn, (handler, &Unread(constants)), &asked).await;
             saved.map(|saved| match saved {
                 Ajax::Text(text) => Answer::Page(text),
                 _ => Answer::Page(String::new()),
@@ -46,7 +47,7 @@ async fn answered(
         }
         _ => {
             let handler = handler(screen, &action).unwrap();
-            acted(writer, conn, (handler, &Unread), &asked).await
+            acted(writer, conn, (handler, &Unread(constants)), &asked).await
         }
     };
     answer.map_err(|err| format!("{err:?}"))
@@ -136,7 +137,7 @@ async fn post_php_writes_as_php() {
         setup(writer, conn, async |w, ctx| wp_trash_post(w, ctx, 1).await).await
     };
     let post_php = async |conn: &mut Connection, query: &str| {
-        let answer = answered(writer, conn, (1, "post"), (query, "")).await?;
+        let answer = answered(writer, conn, (1, "post", Constants::default()), (query, "")).await?;
         assert!(matches!(answer, Answer::Redirect(_)), "{query}");
         Ok(())
     };
@@ -171,7 +172,7 @@ async fn bulk_actions_write_as_php() {
         .await
     };
     let edit = async |conn: &mut Connection, query: &str| {
-        let answer = answered(writer, conn, (1, "edit"), (query, "")).await?;
+        let answer = answered(writer, conn, (1, "edit", Constants::default()), (query, "")).await?;
         assert!(matches!(answer, Answer::Redirect(_)), "{query}");
         Ok(())
     };
@@ -225,8 +226,8 @@ async fn bulk_actions_write_as_php() {
 async fn quick_edit_writes_as_php() {
     let _turn = turn().await;
     let writer = &writer().await;
-    let quick_edit = async |conn: &mut Connection, body: &str| {
-        let answer = answered(writer, conn, (1, "admin-ajax"), ("", body)).await?;
+    let quick_edit = async |conn: &mut Connection, body: &str, constants| {
+        let answer = answered(writer, conn, (1, "admin-ajax", constants), ("", body)).await?;
         assert_eq!(answer, Answer::Page(String::new()));
         Ok(())
     };
@@ -237,7 +238,7 @@ async fn quick_edit_writes_as_php() {
             let more = "post_title=Hello+again&post_name=hello-again&jj=28&screen=edit-post\
                         &post_type=post&post_category[]=0&post_category[]=1\
                         &tax_input[post_tag]=First+tag,+second+,+,&sticky=sticky";
-            quick_edit(conn, &quick(1, more)).await
+            quick_edit(conn, &quick(1, more), Constants::default()).await
         },
     )
     .await;
@@ -263,10 +264,31 @@ async fn quick_edit_writes_as_php() {
                 "post_title=Sample+Page&post_name=sample-page&post_type=page&screen=edit-page\
                  &post_parent={parent}&menu_order=3&page_template=default"
             );
-            quick_edit(conn, &quick(2, &more)).await
+            quick_edit(conn, &quick(2, &more), Constants::default()).await
         },
     )
     .await;
+    // A title with HTML, filtered, then as an owner's .env lets user 1 post
+    // it unfiltered.
+    let open = Constants {
+        disallow_unfiltered_html: false,
+        ..Constants::default()
+    };
+    for (golden, constants) in [
+        ("admin-posts-inline-save-html", Constants::default()),
+        ("admin-posts-inline-save-html-unfiltered-html", open),
+    ] {
+        check(
+            golden,
+            async |_| Ok(()),
+            async |conn, ()| {
+                let more = "post_title=%3Cb%3EHi%3C%2Fb%3E+%3Cscript%3Ex()%3C%2Fscript%3E\
+                            &post_name=hello-world&screen=edit-post&post_type=post";
+                quick_edit(conn, &quick(1, more), constants).await
+            },
+        )
+        .await;
+    }
 }
 
 /// The database the answers are compared on: `wordpress_saves` loaded with
@@ -457,7 +479,13 @@ async fn tried(
         outer.execute(statement).await.unwrap();
     }
     let conn = outer.acquire().await.unwrap();
-    let answer = answered(&writer().await, conn, (user, screen), (query, body)).await;
+    let answer = answered(
+        &writer().await,
+        conn,
+        (user, screen, Constants::default()),
+        (query, body),
+    )
+    .await;
     let read = sqlx::query_scalar(sqlx::AssertSqlSafe(read.to_string()));
     (answer, read.fetch_all(&mut *conn).await.unwrap())
 }
@@ -959,6 +987,24 @@ async fn bulk_edit_edges() {
     assert_eq!(stickies, ["a:1:{i:0;i:1;}"]);
     let (_, rows) = tried(900, &sql, ("edit", &query, ""), read).await;
     assert_eq!(rows[3], "950 draft 0 open");
+}
+
+/// An administrator posts unfiltered HTML only on a site whose constants
+/// allow it; a visitor never does.
+#[tokio::test]
+async fn unfiltered_html_follows_the_constants() {
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    let open = Constants {
+        disallow_unfiltered_html: false,
+        ..Constants::default()
+    };
+    let can = [(1, Constants::default()), (1, open), (0, open)];
+    let mut found = Vec::new();
+    for (user, constants) in can {
+        found.push(unfiltered_html(&mut write, user, constants).await.unwrap());
+    }
+    assert_eq!(found, [false, true, false]);
 }
 
 /// The capabilities read only the options, user, post and constants they load.

@@ -26,7 +26,7 @@ pub(in crate::admin::saves) async fn answered<T>(
     query: &str,
 ) -> Result<T, Error> {
     let post = fields(query);
-    acted(writer, conn, (handler, &Unread), &posted(&post)).await
+    acted(writer, conn, (handler, &Unread::default()), &posted(&post)).await
 }
 
 /// `f` as one action on `conn` once every shorter statement budget failed.
@@ -208,7 +208,7 @@ pub(in crate::admin::saves) async fn run<T>(
     query: &str,
 ) -> Result<T, super::super::Stop<T>> {
     let post = fields(query);
-    handler(write, &posted(&post), &Unread).await
+    handler(write, &posted(&post), &Unread::default()).await
 }
 
 /// User 1's meta `key`, as stored.

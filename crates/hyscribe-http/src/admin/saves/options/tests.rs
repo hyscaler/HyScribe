@@ -52,7 +52,7 @@ async fn saved(
     acted(
         writer,
         conn,
-        (screen_handler(screen, asked), &Unread),
+        (screen_handler(screen, asked), &Unread::default()),
         asked,
     )
     .await
@@ -369,7 +369,7 @@ async fn saves_answer_as_php() {
         let asked = super::super::tests::asked(&screen, &get, &post);
         let handler = screen_handler(&screen, &asked);
         let mut write = writer.begin().await.unwrap();
-        let Ok(Answer::Redirect(to)) = handler(&mut write, &asked, &Unread).await else {
+        let Ok(Answer::Redirect(to)) = handler(&mut write, &asked, &Unread::default()).await else {
             panic!("{case}: no redirect");
         };
         assert_eq!(to, hs(php_location), "{case}");
@@ -394,7 +394,7 @@ async fn answer(
             .unwrap();
     }
     let asked = asked(screen, get, post);
-    match screen_handler(screen, &asked)(&mut write, &asked, &Unread).await {
+    match screen_handler(screen, &asked)(&mut write, &asked, &Unread::default()).await {
         Ok(Answer::Redirect(to)) => Some(to),
         Err(Stop::Failed(Error::Unported(_))) => None,
         Err(Stop::Failed(err)) => panic!("{screen}: {err:?}"),
@@ -517,7 +517,9 @@ async fn saves_fail_at_each_statement() {
         let saved = settled(async |budget| {
             let mut write = writer.begin().await?;
             write.fail_after(budget);
-            handler(&mut write, &asked, &Unread).await.map_err(failed)
+            handler(&mut write, &asked, &Unread::default())
+                .await
+                .map_err(failed)
         });
         assert!(saved.await.is_ok(), "{screen}");
     }
@@ -535,7 +537,9 @@ async fn saves_fail_at_each_statement() {
             ]));
             update_option(&mut write, "adminhash", &pending, None).await?;
             write.fail_after(budget);
-            handler(&mut write, &asked, &Unread).await.map_err(failed)
+            handler(&mut write, &asked, &Unread::default())
+                .await
+                .map_err(failed)
         });
         assert!(saved.await.is_ok());
     }
@@ -555,7 +559,7 @@ async fn old_sites_save_formatting() {
         update_option(&mut write, "initial_db_version", &version, None)
             .await
             .unwrap();
-        let saved = update(&mut write, &asked, &Unread).await;
+        let saved = update(&mut write, &asked, &Unread::default()).await;
         assert!(matches!(saved, Ok(Answer::Redirect(_))), "{initial}");
         let stored = write.option_value("use_smilies").await.unwrap();
         assert_eq!(stored.as_deref(), Some(smilies.as_bytes()), "{initial}");

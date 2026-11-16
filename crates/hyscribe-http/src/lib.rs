@@ -640,6 +640,7 @@ async fn page(
                 headers,
                 body,
                 route,
+                peer: peer.map(|axum::Extension(Peer(ip))| ip),
             };
             return rest::respond(&site, asked).await;
         }

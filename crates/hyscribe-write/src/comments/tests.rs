@@ -611,6 +611,35 @@ async fn trash_and_delete() {
     .await;
 }
 
+/// The REST API's create, as user 1, then held: approved as a moderator's
+/// and filtered, with the address and agent given; a duplicate refused.
+#[tokio::test]
+async fn rest_comments_are_allowed_then_inserted() {
+    check("rest-comments-create", nothing, async |write, ()| {
+        let comment = NewComment {
+            post_id: 1,
+            parent: 1,
+            author: b"Named <b>one</b>".to_vec(),
+            author_email: b"named@example.test".to_vec(),
+            author_url: b"https://named.example.test/".to_vec(),
+            author_ip: b"127.0.0.1".to_vec(),
+            date: Some("2026-01-02 03:04:05".into()),
+            date_gmt: Some("2026-01-02 03:04:05".into()),
+            content: b"<p onclick=\"x()\">Hi</p> <a href=\"https://example.test/\">link</a>"
+                .to_vec(),
+            ..NewComment::default()
+        };
+        let inserted = allow_and_insert_comment(write, context(), comment, ADMIN).await;
+        let id = inserted.unwrap().unwrap();
+        // Held already: no moderator's comment by name is approved.
+        assert!(!set_comment_status(write, id, "hold").await.unwrap());
+        let fixture = write.comment(1).await.unwrap().unwrap();
+        let refused = allow_and_insert_comment(write, context(), known(&fixture.content), ADMIN);
+        assert_eq!(refused.await.unwrap(), Err(Refused::Duplicate));
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn every_failed_statement_fails_the_action() {
     fails_at_each_step(nothing, async |write, ()| {
@@ -620,6 +649,7 @@ async fn every_failed_statement_fails_the_action() {
         };
         let id = insert_comment(write, context(), &reply).await?;
         let _ = new_comment(write, context(), submitted(), ADMIN).await?;
+        let _ = allow_and_insert_comment(write, context(), reader(""), ADMIN).await?;
         let edit = CommentEdit {
             id,
             content: Some(b"Edited.".to_vec()),

@@ -12,6 +12,7 @@ use hyscribe_render::date::{Zone, stored_unix};
 use hyscribe_rest::{Outcome, Pending, Plan};
 use hyscribe_testkit::writes::{check_writes, load_default_install};
 use hyscribe_testkit::{fixture_database, rest_cases};
+use hyscribe_write::terms::Taxonomy::PostTag;
 use sqlx::Connection as _;
 
 use super::*;
@@ -25,8 +26,9 @@ fn saves() -> Database {
 }
 
 /// `wordpress_saves` as the default install with `reference/rest/users.sql`'s
-/// users, as the oracle recorded over it.
-async fn fresh() {
+/// users and `state`'s rows (a list's `.sql` up to its cleanup), as the
+/// oracle recorded over it.
+async fn fresh_with(state: &str) {
     let db = saves();
     load_default_install(&db).await.unwrap();
     let options = sqlx::mysql::MySqlConnectOptions::new()
@@ -37,10 +39,18 @@ async fn fresh() {
         .password(db.password.expose());
     let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
     let users = include_str!("../../../../../reference/rest/users.sql");
-    sqlx::raw_sql(sqlx::AssertSqlSafe(users))
-        .execute(&mut conn)
-        .await
-        .unwrap();
+    let state = state.split("-- cleanup").next().unwrap_or_default();
+    for sql in [users, state].into_iter().filter(|sql| !sql.is_empty()) {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+}
+
+/// [`fresh_with`] no rows of a list's own.
+async fn fresh() {
+    fresh_with("").await;
 }
 
 /// The oracle's site over `wordpress_saves`, with sessions in `dir` and a
@@ -93,8 +103,22 @@ const UNPORTED: [&str; 2] = [
 /// tests below), so the next request starts from the database afresh.
 #[tokio::test(flavor = "multi_thread")]
 async fn post_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/post-writes.tsv");
+    let unported = UNPORTED.map(|body| (body, &[][..]));
+    assert_eq!(replay_writes(golden, "", &unported).await, 6 * 31);
+}
+
+/// PHP's answers to `golden`'s writes over the default install with the
+/// rows of `state`, as [`post_writes_match_php`] replays them: the bodies
+/// of `unported` answer 501 to the identities listed with them, or to all
+/// for none. The number of cases.
+pub(super) async fn replay_writes(
+    golden: &str,
+    state: &str,
+    unported: &[(&str, &[&str])],
+) -> usize {
     let _saves = crate::admin::tests::SAVES.lock().await;
-    fresh().await;
+    fresh_with(state).await;
     let dir = tempfile::tempdir().unwrap();
     let mut site = saves_site(dir.path()).await;
     let mut logins = Vec::new();
@@ -107,10 +131,8 @@ async fn post_writes_match_php() {
     ] {
         logins.push((who, log_in_as(&site, login, id).await));
     }
-    let golden = include_str!("../../../../hyscribe-rest/tests/golden/post-writes.tsv");
     let cases = rest_cases(golden);
-    assert_eq!(cases.len(), 6 * 31);
-    let mut unported = 0;
+    let mut skipped = 0;
     for case in &cases {
         let sent = String::from_utf8(case.sent.clone()).unwrap();
         let mut request = axum::http::Request::builder()
@@ -138,9 +160,12 @@ async fn post_writes_match_php() {
         let start = now();
         let response = send(&site, request, &sent).await;
         let what = format!("{} {} {} {sent}", case.who, case.method, case.target);
-        if UNPORTED.contains(&sent.as_str()) {
+        let unported = unported.iter().any(|(body, whos)| {
+            *body == sent && (whos.is_empty() || whos.contains(&case.who.as_str()))
+        });
+        if unported {
             assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{what}");
-            unported += 1;
+            skipped += 1;
             continue;
         }
         let status = response.status();
@@ -161,11 +186,16 @@ async fn post_writes_match_php() {
         // Connections opened before the tables were loaded again can
         // refuse them (1412), so the site connects afresh too.
         if status.is_success() {
-            fresh().await;
+            fresh_with(state).await;
             site = saves_site(dir.path()).await;
         }
     }
-    assert_eq!(unported, 6 * UNPORTED.len());
+    let listed: usize = unported
+        .iter()
+        .map(|(_, whos)| if whos.is_empty() { 6 } else { whos.len() })
+        .sum();
+    assert_eq!(skipped, listed);
+    cases.len()
 }
 
 /// `target` asked of `site` by user 1 with the JSON `body`, past its
@@ -197,6 +227,8 @@ async fn planned(site: &Arc<Site>, method: &'static str, target: &str, body: &st
             cookie_user: 1,
             origin: None,
             nonce: Some(nonce.as_bytes()),
+            remote_addr: b"",
+            user_agent: None,
             method_override: None,
             content_type: Some(b"application/json"),
             body: body.as_bytes(),
@@ -301,18 +333,147 @@ async fn post_writes_are_php_s() {
             "",
         ),
     ];
-    for (golden, method, target, body) in writes {
-        let pending = planned(&site, method, target, body).await;
-        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+    oracle_writes(&site, &writes).await;
+}
+
+/// Each of `writes`, a golden of the write oracle and the request that
+/// makes it, leaves the rows PHP's leaves, and nothing when a statement
+/// fails part way.
+async fn oracle_writes(site: &Arc<Site>, writes: &[(&str, &'static str, &str, &str)]) {
+    for &(golden, method, target, body) in writes {
+        let pending = planned(site, method, target, body).await;
+        let ctx = crate::rest::writes::context(site, &pending.plan, now());
         let nothing = async |_: &mut hyscribe_db::Connection| Ok::<_, String>(());
         let action = async |conn: &mut hyscribe_db::Connection, ()| {
             let outcome = acted(conn, &pending.plan, &ctx).await;
-            assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
+            let written = matches!(outcome, Outcome::Written(_) | Outcome::Cached(_));
+            assert!(written, "{golden}");
             Ok(())
         };
         let report = check_writes(&fixture_database(), golden, nothing, action).await;
         report.unwrap();
     }
+}
+
+/// PHP's answers to the categories' and tags' writes, as
+/// [`post_writes_match_php`] replays them.
+#[tokio::test(flavor = "multi_thread")]
+async fn term_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/term-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/term-writes.sql");
+    let unported = [(r#"{"name":"Meta","meta":{}}"#, &[][..])];
+    assert_eq!(replay_writes(golden, state, &unported).await, 6 * 31);
+}
+
+/// PHP's answers to the comments' writes, as [`post_writes_match_php`]
+/// replays them, from 127.0.0.1 with no user agent.
+#[tokio::test(flavor = "multi_thread")]
+async fn comment_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/comment-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/comment-writes.sql");
+    let unported = [
+        r#"{"post":1,"content":"Note","type":"note"}"#,
+        r#"{"post":1,"content":"Addressed","author_ip":"10.0.0.1"}"#,
+        r#"{"post":1,"content":"Meta","meta":{"_wp_note_status":"resolved"}}"#,
+    ];
+    let unported = unported.map(|body| (body, &[][..]));
+    assert_eq!(replay_writes(golden, state, &unported).await, 6 * 37);
+}
+
+/// PHP's answers to the settings' writes, as [`post_writes_match_php`]
+/// replays them.
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/settings-writes.tsv");
+    assert_eq!(replay_writes(golden, "", &[]).await, 6 * 17);
+}
+
+/// The comments' writes leave the rows PHP's leave.
+#[tokio::test(flavor = "multi_thread")]
+async fn comment_writes_are_php_s() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let writes = [
+        (
+            "rest-comments-create",
+            "POST",
+            "/?rest_route=/wp/v2/comments",
+            r#"{"post":1,"parent":1,"content":"<p onclick=\"x()\">Hi</p> <a href=\"https://example.test/\">link</a>","author_name":"Named <b>one</b>","author_email":"named@example.test","author_url":"https://named.example.test/","date":"2026-01-02T03:04:05","status":"hold"}"#,
+        ),
+        (
+            "rest-comments-update",
+            "POST",
+            "/?rest_route=/wp/v2/comments/1",
+            r#"{"content":"Edited <script>x()</script>","author_name":"Renamed","status":"spam","date_gmt":"2026-02-03T04:05:06Z"}"#,
+        ),
+        (
+            "rest-comments-trash",
+            "DELETE",
+            "/?rest_route=/wp/v2/comments/1",
+            "",
+        ),
+        (
+            "rest-comments-delete",
+            "DELETE",
+            "/?rest_route=/wp/v2/comments/1&force=true",
+            "",
+        ),
+    ];
+    oracle_writes(&site, &writes).await;
+}
+
+/// The terms' and settings' writes leave the rows PHP's leave.
+#[tokio::test(flavor = "multi_thread")]
+async fn term_and_settings_writes_are_php_s() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let writes = [
+        (
+            "rest-categories-create",
+            "POST",
+            "/?rest_route=/wp/v2/categories",
+            r#"{"name":"News","description":"<b>Fresh</b> <script>x()</script>","slug":"the news","parent":1}"#,
+        ),
+        (
+            "rest-categories-update",
+            "PUT",
+            "/?rest_route=/wp/v2/categories/1",
+            r#"{"name":"Renamed","description":"Desc","slug":"renamed"}"#,
+        ),
+        (
+            "rest-settings-update",
+            "POST",
+            "/?rest_route=/wp/v2/settings",
+            r#"{"title":"New <b>title</b> & co","posts_per_page":null,"use_smilies":false,"start_of_week":"3","timezone":"Europe/Paris","site_logo":5,"language":""}"#,
+        ),
+    ];
+    oracle_writes(&site, &writes).await;
+    // A tag the setup adds to post 1, deleted.
+    let mut pending = planned(&site, "PUT", "/?rest_route=/wp/v2/categories/1", "{}").await;
+    let writer = Writer::open(&fixture_database(), Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    let setup = async |conn: &mut hyscribe_db::Connection| {
+        let mut write = writer.begin_on(conn).await.unwrap();
+        let args = hyscribe_write::terms::TermArgs::default();
+        let tag = hyscribe_write::terms::wp_insert_term(&mut write, PostTag, b"Tagged", &args);
+        let tag = tag.await.unwrap().term_id;
+        let terms = [hyscribe_write::terms::TermRef::Id(tag)];
+        let set = hyscribe_write::terms::wp_set_object_terms(&mut write, 1, &terms, PostTag, false);
+        set.await.unwrap();
+        write.commit().await.unwrap();
+        Ok::<_, String>(tag)
+    };
+    let action = async |conn: &mut hyscribe_db::Connection, tag| {
+        pending.plan.write = hyscribe_rest::Write::DeleteTerm("post_tag", tag);
+        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+        let outcome = acted(conn, &pending.plan, &ctx).await;
+        assert_eq!(outcome, Outcome::Written(tag));
+        Ok(())
+    };
+    let report = check_writes(&fixture_database(), "rest-tags-delete", setup, action).await;
+    report.unwrap();
 }
 
 /// Without a writer, a write past its checks is refused as hs-admin

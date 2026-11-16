@@ -42,7 +42,10 @@ use hyscribe_render::theme::Theme;
 use request::{Arg, Params, Sanitize, defaults, has_valid_params, sanitize_params};
 use response::{Response, RestError, object, text};
 
+pub use comments::write::CommentSave;
 pub use posts::write::{Outcome, Plan, Save, Write};
+pub use settings::{Setting, SettingsSave};
+pub use terms::write::TermSave;
 
 /// What the REST API reads from the site.
 pub trait Site {
@@ -137,6 +140,10 @@ pub struct Request<'a> {
     pub origin: Option<&'a [u8]>,
     /// The `X-WP-Nonce` header.
     pub nonce: Option<&'a [u8]>,
+    /// `$_SERVER['REMOTE_ADDR']`, empty for none.
+    pub remote_addr: &'a [u8],
+    /// The `User-Agent` header.
+    pub user_agent: Option<&'a [u8]>,
     /// The `X-HTTP-Method-Override` header.
     pub method_override: Option<&'a [u8]>,
     /// The `Content-Type` header.
@@ -229,6 +236,10 @@ pub(crate) struct Context<'a> {
     pub(crate) uri: &'a [u8],
     /// The request gives parameters a write's arguments would check.
     pub(crate) parameters: bool,
+    /// `$_SERVER['REMOTE_ADDR']`, empty for none.
+    pub(crate) remote_addr: &'a [u8],
+    /// The `User-Agent` header.
+    pub(crate) user_agent: Option<&'a [u8]>,
 }
 
 impl Context<'_> {
@@ -292,6 +303,14 @@ fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         .or_else(|| navigation::endpoints(regex))
         .or_else(|| media::endpoints(regex))
         .or_else(|| revisions::endpoints(regex))
+}
+
+/// The ported write of the route `regex`'s endpoint `index`, if any.
+fn writing(regex: &str, index: usize) -> Option<posts::write::Writing> {
+    posts::write::writing(regex, index)
+        .or_else(|| terms::write::writing(regex, index))
+        .or_else(|| settings::writing(regex, index))
+        .or_else(|| comments::write::writing(regex, index))
 }
 
 /// `maybe_unserialize()` of a stored option or meta value: `false` where
@@ -485,6 +504,8 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
         parameters: [&params.json, &params.post, &params.get]
             .into_iter()
             .any(|source| given(source)),
+        remote_addr: request.remote_addr,
+        user_agent: request.user_agent,
     };
     let response = match verified {
         Some(false) => RestError::status("rest_cookie_invalid_nonce", "Cookie check failed", 403)
@@ -803,7 +824,7 @@ fn checked(
 ) -> Result<(Result<Response, RestError>, Params), Halt> {
     let writing = match endpoint.callback {
         Some(_) => None,
-        None => posts::write::writing(matched.regex, matched.endpoint),
+        None => writing(matched.regex, matched.endpoint),
     };
     // The arguments of a write not ported are not ported either: one given
     // any is not answered, and one given none is checked, then answered 501.
@@ -833,6 +854,9 @@ fn checked(
     let answered = match (endpoint.callback, writing) {
         (Some(callback), _) => checked.and_then(|()| callback(context, &params)),
         (None, Some(writing)) => match checked.and_then(|()| (writing.plan)(context, &params)) {
+            Ok(plan) if plan.writes_nothing() => {
+                (writing.finish)(context, &mut params, plan, Outcome::Written(0))
+            }
             Ok(plan) => {
                 let finish = writing.finish;
                 let pending = Pending {

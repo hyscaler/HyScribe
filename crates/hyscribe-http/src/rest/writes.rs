@@ -10,14 +10,28 @@ use std::cell::OnceCell;
 
 use hyscribe_db::{DbError, Meta, Write};
 use hyscribe_phpser::Value;
-use hyscribe_rest::{Outcome, Pending, Plan, Request, Save, Served};
+use hyscribe_phpser::addslashes;
+use hyscribe_render::date::Zone;
+use hyscribe_rest::{
+    CommentSave, Outcome, Pending, Plan, Request, Save, Served, Setting, SettingsSave, TermSave,
+};
 use hyscribe_write::Error;
-use hyscribe_write::options::{delete_metadata, update_metadata};
+use hyscribe_write::comments::{
+    CommentEdit, Commenter, NewComment, Refused, allow_and_insert_comment, delete_comment,
+    restore_comment, set_comment_status, spam_comment, trash_comment, update_comment,
+};
+use hyscribe_write::options::{
+    add_option, delete_metadata, delete_option, get_option, sanitize_option, update_metadata,
+    update_option,
+};
 use hyscribe_write::posts::{
     Context, PostArgs, stick_post, unstick_post, wp_delete_post, wp_insert_post, wp_trash_post,
     wp_unique_post_slug, wp_update_post,
 };
-use hyscribe_write::terms::{Taxonomy, TermRef, wp_set_object_terms};
+use hyscribe_write::terms::{
+    Deletion, Taxonomy, TermArgs, TermError, TermRef, wp_delete_term, wp_insert_term,
+    wp_set_object_terms, wp_update_term,
+};
 use tokio::runtime::Handle;
 
 use axum::response::Response;
@@ -111,8 +125,10 @@ pub(super) async fn act(
     let mut write = write?;
     let outcome = written(&mut write, plan, ctx).await?;
     match outcome {
-        Outcome::Written(_) => write.commit().await.map(|()| outcome).map_err(Into::into),
-        Outcome::Refused(_) => Ok(outcome),
+        Outcome::Written(_) | Outcome::Cached(_) => {
+            write.commit().await.map(|()| outcome).map_err(Into::into)
+        }
+        _ => Ok(outcome),
     }
 }
 
@@ -129,7 +145,221 @@ async fn written(write: &mut Write<'_>, plan: &Plan, ctx: &Context) -> Result<Ou
         hyscribe_rest::Write::Delete(id) => {
             Ok(done(wp_delete_post(write, ctx, *id, true).await?, *id))
         }
+        hyscribe_rest::Write::Term(save) => term_saved(write, save).await,
+        hyscribe_rest::Write::DeleteTerm(taxonomy, id) => {
+            let deleted = wp_delete_term(write, taxonomy_of(taxonomy), *id).await;
+            Ok(done(term_kept(deleted)? == Ok(Deletion::Deleted), *id))
+        }
+        hyscribe_rest::Write::Settings(save) => settings_saved(write, save).await,
+        hyscribe_rest::Write::Comment(save) => comment_saved(write, save, plan, ctx).await,
+        hyscribe_rest::Write::TrashComment(id) => {
+            let trashed = trash_comment(write, comments_context(ctx), *id).await?;
+            Ok(done(trashed, *id))
+        }
+        hyscribe_rest::Write::DeleteComment(id) => {
+            let deleted = delete_comment(write, comments_context(ctx), *id, true).await?;
+            Ok(done(deleted, *id))
+        }
     }
+}
+
+/// The comment functions' context: the request's time and `home_url()`.
+fn comments_context(ctx: &Context) -> hyscribe_write::comments::Context<'_> {
+    hyscribe_write::comments::Context {
+        now: ctx.now,
+        home: &ctx.home,
+    }
+}
+
+/// `create_item()` of a comment from `wp_allow_comment()` on, or
+/// `update_item()` from `wp_update_comment()` on, then
+/// `handle_status_param()`.
+async fn comment_saved(
+    write: &mut Write<'_>,
+    save: &CommentSave,
+    plan: &Plan,
+    ctx: &Context,
+) -> Result<Outcome, Error> {
+    let context = comments_context(ctx);
+    let text = |field: &Option<Vec<u8>>| field.clone().unwrap_or_default();
+    let id = if save.id == 0 {
+        let now = hyscribe_render::date::format_unix("Y-m-d H:i:s", ctx.now, Zone::Utc);
+        let (date, date_gmt) = match &save.date {
+            Some((date, gmt)) => (Some(date.clone()), gmt.clone()),
+            None => (None, now),
+        };
+        let comment = NewComment {
+            post_id: save.post_id.unwrap_or_default(),
+            parent: save.parent.unwrap_or_default(),
+            user_id: save.user_id.unwrap_or_default(),
+            author: text(&save.author),
+            author_email: text(&save.author_email),
+            author_url: text(&save.author_url),
+            author_ip: save.author_ip.clone(),
+            agent: text(&save.agent),
+            content: text(&save.content),
+            date,
+            date_gmt: Some(date_gmt),
+            comment_type: save.comment_type.clone(),
+            ..NewComment::default()
+        };
+        let commenter = Commenter {
+            moderate_comments: save.moderate_comments,
+            manage_options: save.manage_options,
+            unfiltered_html: plan.unfiltered_html,
+        };
+        match allow_and_insert_comment(write, context, comment, commenter).await? {
+            Ok(id) => id,
+            Err(Refused::Duplicate) => return Ok(Outcome::Refused("comment_duplicate")),
+            Err(Refused::Flood) => return Ok(Outcome::Refused("comment_flood")),
+        }
+    } else {
+        let edit = CommentEdit {
+            id: save.id,
+            post_id: save.post_id,
+            author: save.author.clone(),
+            author_email: save.author_email.clone(),
+            author_url: save.author_url.clone(),
+            author_ip: Some(save.author_ip.clone()),
+            date: save.date.as_ref().map(|(date, _)| date.clone()),
+            content: save.content.clone(),
+            agent: save.agent.clone(),
+            parent: save.parent,
+            user_id: save.user_id,
+            ..CommentEdit::default()
+        };
+        if update_comment(write, context, &edit, save.kses)
+            .await?
+            .is_none()
+        {
+            return Ok(Outcome::Refused("rest_comment_failed_edit"));
+        }
+        save.id
+    };
+    if let Some(status) = &save.status {
+        status_changed(write, context, id, status).await?;
+    }
+    Ok(Outcome::Written(id))
+}
+
+/// `handle_status_param()`: the comment given `status`, unless it has it.
+async fn status_changed(
+    write: &mut Write<'_>,
+    context: hyscribe_write::comments::Context<'_>,
+    id: u64,
+    status: &[u8],
+) -> Result<(), Error> {
+    // `wp_get_comment_status()`; the comment was just written.
+    let approved = write.comment(id).await?.unwrap_or_default().approved;
+    let old: &[u8] = match approved.as_str() {
+        "1" => b"approved",
+        "0" => b"unapproved",
+        other => other.as_bytes(),
+    };
+    if old == status {
+        return Ok(());
+    }
+    match status {
+        b"approved" | b"approve" | b"1" => set_comment_status(write, id, "approve").await?,
+        b"hold" | b"0" => set_comment_status(write, id, "hold").await?,
+        b"spam" => spam_comment(write, context, id).await?,
+        b"trash" => trash_comment(write, context, id).await?,
+        b"unspam" | b"untrash" => restore_comment(write, id).await?,
+        _ => false,
+    };
+    Ok(())
+}
+
+/// The taxonomy named `name`, of those whose terms are written.
+fn taxonomy_of(name: &str) -> Taxonomy {
+    match name {
+        "category" => Taxonomy::Category,
+        _ => Taxonomy::PostTag,
+    }
+}
+
+/// A term function's result: its database and unported errors stop the
+/// write, the others are what PHP answers.
+fn term_kept<T>(result: Result<T, TermError>) -> Result<Result<T, Outcome>, Error> {
+    let refused = match result {
+        Ok(value) => return Ok(Ok(value)),
+        Err(TermError::EmptyName) => Outcome::Refused("empty_term_name"),
+        Err(TermError::InvalidName) => Outcome::Refused("invalid_term_name"),
+        Err(TermError::MissingParent) => Outcome::Refused("missing_parent"),
+        Err(TermError::InvalidTerm) => Outcome::Refused("invalid_term"),
+        Err(TermError::Exists(id)) => Outcome::Exists(id),
+        Err(TermError::DuplicateSlug(slug)) => Outcome::Duplicate(slug),
+        Err(err) => return Err(err.into()),
+    };
+    Ok(Err(refused))
+}
+
+/// `create_item()` or `update_item()` of a term from `wp_insert_term()` or
+/// `wp_update_term()` on, its texts slashed as `wp_slash()` gives them.
+async fn term_saved(write: &mut Write<'_>, save: &TermSave) -> Result<Outcome, Error> {
+    let slashed = |text: &Option<Vec<u8>>| text.as_deref().map(addslashes);
+    let (name, slug, description) = (
+        slashed(&save.name),
+        slashed(&save.slug),
+        slashed(&save.description),
+    );
+    let args = TermArgs {
+        name: name.as_deref(),
+        slug: slug.as_deref(),
+        description: description.as_deref(),
+        parent: save.parent.map(|parent| parent as i64),
+        ..TermArgs::default()
+    };
+    let taxonomy = taxonomy_of(save.taxonomy);
+    let saved = match save.id {
+        0 => wp_insert_term(write, taxonomy, args.name.unwrap_or_default(), &args).await,
+        id => wp_update_term(write, taxonomy, id, &args).await,
+    };
+    Ok(match term_kept(saved)? {
+        Ok(ids) => Outcome::Written(ids.term_id),
+        Err(refused) => refused,
+    })
+}
+
+/// `update_item()` of the settings: each option given its sanitized value,
+/// or deleted. An option not stored reads as its registered default, so
+/// `update_option()` adds it only when the value is another. The values
+/// of the rows that changed, as PHP's options cache keeps them.
+async fn settings_saved(write: &mut Write<'_>, save: &SettingsSave) -> Result<Outcome, Error> {
+    let mut cached = Vec::new();
+    for Setting {
+        option,
+        value,
+        default,
+    } in &save.options
+    {
+        let Some(value) = value else {
+            delete_option(write, option).await?;
+            continue;
+        };
+        let missing = get_option(write, option).await? == Value::Bool(false);
+        let given = value.clone();
+        let mut value = sanitize_option(write, option, value.clone()).await?.value;
+        // `sanitize_option()` falls back on `get_option()`, which reads the
+        // default for an option not stored.
+        if let Some(default) = default.as_ref().filter(|_| missing)
+            && value == Value::Bool(false)
+            && given != Value::Bool(false)
+        {
+            value = default.clone();
+        }
+        let changed = match default {
+            Some(default) if missing && *default != value => {
+                add_option(write, option, &value, None).await?
+            }
+            Some(_) if missing => false,
+            _ => update_option(write, option, &value, None).await?,
+        };
+        if changed {
+            cached.push((option.clone(), value));
+        }
+    }
+    Ok(Outcome::Cached(cached))
 }
 
 /// The fields `save` gives, on `wp_insert_post()`'s arguments.

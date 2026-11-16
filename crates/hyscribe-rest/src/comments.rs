@@ -17,6 +17,8 @@ use crate::types::{context_arg, items_route};
 use crate::users::{avatar_urls, rfc3339};
 use crate::{Context, Endpoint};
 
+pub(crate) mod write;
+
 const ALL: &[&str] = &["view", "edit", "embed"];
 
 /// The schema's properties and their contexts; `author_avatar_urls` only
@@ -105,26 +107,31 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                 callback: Some(items),
             },
             Endpoint {
-                args: Vec::new(),
+                args: write::save_args(true),
                 permission: create_permission,
                 callback: None,
             },
         ]),
         "/wp/v2/comments/(?P<id>[\\d]+)" => {
             let password = string_arg("password");
-            let write = |permission| Endpoint {
-                args: vec![id()],
-                permission,
-                callback: None,
-            };
+            let mut update = vec![id()];
+            update.extend(write::save_args(false));
             Some(vec![
                 Endpoint {
                     args: vec![id(), context_arg(), password],
                     permission: item_permission,
                     callback: Some(item),
                 },
-                write(edit_permission),
-                write(delete_permission),
+                Endpoint {
+                    args: update,
+                    permission: edit_permission,
+                    callback: None,
+                },
+                Endpoint {
+                    args: write::delete_args(),
+                    permission: delete_permission,
+                    callback: None,
+                },
             ])
         }
         _ => None,
@@ -270,6 +277,15 @@ fn readable(context: &Context, post: &Post) -> bool {
     }
 }
 
+/// The comment `id`.
+fn find(context: &Context, id: u64) -> Option<CommentRow> {
+    let query = CommentQuery {
+        include: vec![id],
+        ..CommentQuery::default()
+    };
+    context.site.comments(&query).into_iter().next()
+}
+
 /// `get_comment()`: the comment of the route's ID, and its post there.
 fn get_comment(context: &Context, params: &Params) -> Result<CommentRow, RestError> {
     let invalid = || RestError::status("rest_comment_invalid_id", "Invalid comment ID.", 404);
@@ -277,16 +293,7 @@ fn get_comment(context: &Context, params: &Params) -> Result<CommentRow, RestErr
     if id <= 0 {
         return Err(invalid());
     }
-    let query = CommentQuery {
-        include: vec![id.unsigned_abs()],
-        ..CommentQuery::default()
-    };
-    let row = context
-        .site
-        .comments(&query)
-        .into_iter()
-        .next()
-        .ok_or_else(invalid)?;
+    let row = find(context, id.unsigned_abs()).ok_or_else(invalid)?;
     let post = row.comment.post_id;
     if post != 0 && context.site.post(post).is_none() {
         return Err(RestError::status(
@@ -434,7 +441,9 @@ fn create_permission(context: &Context, params: &Params) -> Result<(), RestError
         return Err(login());
     }
     // The collection's `author` is a list, never the user's ID.
-    if params.get("author").is_some() && !context.can("moderate_comments") {
+    let user = Value::Int(i64::try_from(context.user).unwrap_or_default());
+    let others = params.get("author").is_some_and(|author| *author != user);
+    if others && !context.can("moderate_comments") {
         let message = "Sorry, you are not allowed to edit 'author' for comments.";
         return Err(context.forbidden("rest_comment_invalid_author", message));
     }

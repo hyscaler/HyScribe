@@ -93,6 +93,8 @@ pub(crate) enum Sanitize {
     Schema,
     /// `rest_sanitize_request_arg()`: sanitized by its schema.
     Value,
+    /// A setting's: null as given, else as [`Sanitize::Schema`].
+    Nullable,
     /// `urldecode()` of a URL parameter, a string.
     Urldecode,
     /// Left as given, for the endpoint to check: a schema whose keywords
@@ -242,10 +244,13 @@ pub(crate) fn sanitize_params(
                 Sanitize::TextField => Ok(text(sanitize_text_field(&value.to_php_string()))),
                 Sanitize::Urldecode => Ok(text(urldecode(&value.to_php_string()))),
                 Sanitize::Endpoint | Sanitize::NotPorted => Ok(value.clone()),
+                Sanitize::Nullable if *value == Value::Null => Ok(Value::Null),
                 Sanitize::Site(sanitize) => sanitize(context, value),
                 Sanitize::Params(sanitize) => sanitize(&given, value),
-                Sanitize::Schema => validate_value_from_schema(value, &arg.schema, arg.name)
-                    .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name)),
+                Sanitize::Schema | Sanitize::Nullable => {
+                    validate_value_from_schema(value, &arg.schema, arg.name)
+                        .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name))
+                }
                 Sanitize::Value => sanitize_value_from_schema(value, &arg.schema, arg.name),
             };
             if let Some(sanitized) = refused(sanitized, arg.name, &mut invalid) {

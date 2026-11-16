@@ -188,6 +188,8 @@ fn serve_case(site: &Site, handle: &Handle, case: &RestCase) -> hyscribe_rest::S
         cookie_user: user,
         origin: None,
         nonce: (user != 0).then_some(b"%nonce%"),
+        remote_addr: b"",
+        user_agent: None,
         method_override: None,
         content_type: None,
         body: b"",

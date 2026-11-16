@@ -215,6 +215,8 @@ fuzz_target!(|data: &[u8]| {
         cookie_user: u64::from(header.first().copied().unwrap_or(0) % 3),
         origin: header.get(1..).filter(|origin| !origin.is_empty()),
         nonce: header.get(..1),
+        remote_addr: b"",
+        user_agent: None,
         method_override: None,
         content_type,
         body,

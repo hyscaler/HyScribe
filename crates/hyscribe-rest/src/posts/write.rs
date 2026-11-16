@@ -77,6 +77,19 @@ pub enum Write {
     Trash(u64),
     /// `wp_delete_post( $id, true )`.
     Delete(u64),
+    /// Creates or updates a term.
+    Term(Box<crate::terms::write::TermSave>),
+    /// `wp_delete_term( $id, $taxonomy )`.
+    DeleteTerm(&'static str, u64),
+    /// Creates or updates a comment.
+    Comment(Box<crate::comments::write::CommentSave>),
+    /// `wp_trash_comment( $id )`.
+    TrashComment(u64),
+    /// `wp_delete_comment( $id, true )`.
+    DeleteComment(u64),
+    /// `update_option()` of each setting's option, `delete_option()` for
+    /// none.
+    Settings(Box<crate::settings::SettingsSave>),
 }
 
 /// A write whose checks passed.
@@ -92,12 +105,19 @@ pub struct Plan {
     pub unfiltered_html: bool,
     /// What to write.
     pub write: Write,
-    /// A deleted post's answer, prepared before it is deleted.
-    previous: Value,
+    /// A deleted item's answer, prepared before it is deleted.
+    pub(crate) previous: Value,
+}
+
+impl Plan {
+    /// Whether the plan writes nothing: an update giving no setting.
+    pub(crate) fn writes_nothing(&self) -> bool {
+        matches!(&self.write, Write::Settings(save) if save.options.is_empty())
+    }
 }
 
 /// What a write came to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
     /// The post written: saved, trashed or deleted.
     Written(u64),
@@ -106,6 +126,13 @@ pub enum Outcome {
     /// the validated dates never have), or
     /// `rest_cannot_delete` where trashing or deleting did nothing.
     Refused(&'static str),
+    /// `wp_insert_term()`'s `term_exists`, with the term that has the name.
+    Exists(u64),
+    /// `wp_update_term()`'s `duplicate_term_slug`, with the slug.
+    Duplicate(Vec<u8>),
+    /// The settings written, with each option whose row changed and its
+    /// value as PHP's options cache holds it for the rest of the request.
+    Cached(Vec<(String, Value)>),
 }
 
 /// Makes a write's answer once it is written.
@@ -180,7 +207,7 @@ fn raw(params: &Params, name: &str) -> Result<Option<Vec<u8>>, RestError> {
 }
 
 /// `rest_get_date_with_gmt( $date, $is_utc )`: the local and UTC dates.
-fn date_with_gmt(date: &[u8], utc: bool, zone: Zone) -> (String, String) {
+pub(crate) fn date_with_gmt(date: &[u8], utc: bool, zone: Zone) -> (String, String) {
     const MYSQL: &str = "Y-m-d H:i:s";
     let sign = |b: &u8| matches!(b, b'+' | b'-');
     let digits = |digits: &[&u8]| digits.iter().all(|b| b.is_ascii_digit());
@@ -486,7 +513,7 @@ fn finish(
             let message = "Content, title, and excerpt are empty.";
             return Err(invalid("empty_content", message));
         }
-        Outcome::Refused(_) => {
+        _ => {
             let message = "The post cannot be deleted.";
             return Err(RestError::status("rest_cannot_delete", message, 500));
         }

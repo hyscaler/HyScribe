@@ -223,7 +223,7 @@ fn a_counter_is_spent_after_its_window_and_a_day_without_refusal() {
         failures: 1,
         since: T,
         strikes: 1,
-        until: T - MAX_LOCKOUT + WINDOW,
+        until: T - MAX_LOCKOUT,
     };
     assert!(!counter.spent(T + WINDOW - 1, WINDOW));
     assert!(counter.spent(T + WINDOW, WINDOW));

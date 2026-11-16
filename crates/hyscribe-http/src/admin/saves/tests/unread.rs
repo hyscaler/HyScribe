@@ -80,4 +80,10 @@ impl Acting for Unread {
     fn constants(&self) -> Constants {
         self.0
     }
+    fn nonce_state(&self, _: &[u8], _: &str) -> u8 {
+        unreachable!()
+    }
+    fn logged_in(&self) -> bool {
+        unreachable!()
+    }
 }

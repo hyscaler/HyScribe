@@ -27,6 +27,7 @@ use crate::redirect::wp_validate_redirect;
 
 mod comments;
 pub(super) mod dashboard;
+pub(super) mod heartbeat;
 pub(super) mod options;
 mod posts;
 pub(super) mod screen;
@@ -72,6 +73,11 @@ pub(super) trait Acting: ActionSite {
     fn create_nonce(&self, action: &str) -> String;
     /// The capability constants of the configuration.
     fn constants(&self) -> Constants;
+    /// `wp_verify_nonce( $nonce, $action )`: 1 for this tick's, 2 for the
+    /// tick before's, else 0.
+    fn nonce_state(&self, nonce: &[u8], action: &str) -> u8;
+    /// `is_user_logged_in()` past the auth cookie's grace period.
+    fn logged_in(&self) -> bool;
 }
 
 impl Acting for Admin<'_> {
@@ -90,6 +96,12 @@ impl Acting for Admin<'_> {
     }
     fn create_nonce(&self, action: &str) -> String {
         hyscribe_admin::page::PageSite::nonce(self, action)
+    }
+    fn nonce_state(&self, nonce: &[u8], action: &str) -> u8 {
+        self.reads.nonce_state(nonce, action)
+    }
+    fn logged_in(&self) -> bool {
+        !self.grace
     }
 }
 
@@ -132,6 +144,7 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         ("post", b"trash") => Some(posts::trash),
         ("post", b"untrash") => Some(posts::untrash),
         ("post", b"delete") => Some(posts::delete),
+        ("revision", b"restore") => Some(posts::restore),
         ("users", b"dodelete") => Some(users::dodelete),
         ("users", b"resetpassword") => Some(users::resetpassword),
         ("user-new", b"createuser") => Some(user_edit::create),
@@ -171,6 +184,7 @@ pub(super) fn ajax_handler(action: &[u8]) -> Option<Handler<Ajax>> {
         b"closed-postboxes" => Some(screen::closed_postboxes),
         b"hidden-columns" => Some(screen::hidden_columns),
         b"meta-box-order" => Some(screen::meta_box_order),
+        b"heartbeat" => Some(heartbeat::heartbeat),
         _ => None,
     }
 }

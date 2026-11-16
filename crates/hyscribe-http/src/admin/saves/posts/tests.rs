@@ -1100,3 +1100,5 @@ async fn capabilities_are_read_in_the_action() {
         died("Sorry, you are not allowed to delete this item.")
     );
 }
+
+mod restore;

@@ -283,10 +283,15 @@ impl<'a> LoginReads<'a> {
 
     /// `wp_verify_nonce( $nonce, $action )` for the current user.
     pub(crate) fn verify_nonce(&self, nonce: &[u8], action: &str) -> bool {
+        self.nonce_state(nonce, action) > 0
+    }
+
+    /// `wp_verify_nonce()`'s answer: 1 for this tick's nonce, 2 for the
+    /// tick before's, else 0.
+    pub(crate) fn nonce_state(&self, nonce: &[u8], action: &str) -> u8 {
         let (user, token) = &self.current;
-        self.salt("nonce").is_some_and(|salt| {
+        self.salt("nonce").map_or(0, |salt| {
             hyscribe_auth::verify_nonce(nonce, &salt, nonce_tick(self.now), action, *user, token)
-                > 0
         })
     }
 }

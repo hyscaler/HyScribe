@@ -86,10 +86,7 @@ async fn uploaded(
         .await
         .map_err(|e| format!("{e:?}"))?;
     write.commit().await.map_err(|e| e.to_string())?;
-    let generated = uploads
-        .generate(site, &prepared.handled, id)
-        .unwrap()
-        .unwrap();
+    let generated = uploads.generate(site, &prepared.handled, id).unwrap();
     let mut write = writer.begin_on(conn).await.map_err(|e| e.to_string())?;
     save(&mut write, id, &generated)
         .await

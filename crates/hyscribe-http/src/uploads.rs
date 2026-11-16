@@ -365,7 +365,7 @@ impl Uploads {
         site: &Site,
         handled: &Handled,
         id: u64,
-    ) -> std::io::Result<Option<Generated>> {
+    ) -> std::io::Result<Generated> {
         let sizes = hyscribe_image::subsizes::wp_get_registered_image_subsizes(&|name| {
             site.raw_option(name).to_vec()
         });
@@ -385,10 +385,10 @@ impl Uploads {
             let hooks: &dyn Hooks = &*hooks;
             wp_generate_attachment_metadata(upload, &mime, sizes, &limits, hooks, &host)
         });
-        // Only a job the pool drops, or metadata not ported, which the
-        // routes read before the insert, leaves the attachment without any.
+        // A job the pool drops, or metadata not ported, which the routes
+        // read before the insert, leaves the attachment without metadata.
         let Some(Ok(generated)) = generated else {
-            return Ok(None);
+            return Err(std::io::Error::other("no metadata was made"));
         };
         let folder = self.dir.join(&handled.file);
         let folder = folder.parent().unwrap_or(&self.dir);
@@ -396,7 +396,7 @@ impl Uploads {
             let name = saved.path.rsplit('/').next().unwrap_or_default();
             place(folder, name, &saved.bytes, true)?;
         }
-        Ok(Some(generated))
+        Ok(generated)
     }
 
     /// `add_attachment`, once the attachment's action is committed.

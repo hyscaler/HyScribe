@@ -299,7 +299,9 @@ fn request(line: &str, login: Option<&Login>) -> axum::http::Request<Body> {
         if let Some(kind) = kind.filter(|_| !flag("notype")) {
             request = request.header(header::CONTENT_TYPE, kind);
         }
-        if !flag("nodisposition") {
+        if flag("baddisposition") {
+            request = request.header(header::CONTENT_DISPOSITION, "attachment");
+        } else if !flag("nodisposition") {
             let disposition = format!("attachment; filename={sent}");
             request = request.header(header::CONTENT_DISPOSITION, disposition);
         }
@@ -506,11 +508,27 @@ async fn uploads_stop_short() {
         format!("{rest}\trestfile,kind=image/x-unknown\tsmall.jpg\t-"),
         format!("{rest}\traw,type=image/jpeg\tbig.jpg\t-"),
         format!("{rest}\traw,type=image/jpeg\torient-6.jpg\t-"),
+        format!("{async_upload}\tform,nonce\tnotes.txt\tshort=1"),
+        format!("{media_new}\tform,nonce\tnotes.txt\thtml-upload=Upload"),
     ] {
         let (status, _) = sent_case(&site, &line, admin).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{line}");
         assert!(files(uploads.path()).is_empty(), "{line}");
     }
+    let disposition = format!("{rest}\traw,type=image/jpeg,baddisposition\tsmall.jpg\t-");
+    let (status, refused) = sent_case(&site, &disposition, admin).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        refused.contains("rest_upload_invalid_disposition"),
+        "{refused}"
+    );
+    // A tall image's sizes are portraits.
+    let tall = format!("{async_upload}\tform,nonce\ttall.jpg\taction=upload-attachment");
+    let (status, json) = sent_case(&site, &tall, admin).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(json.contains("\"orientation\":\"portrait\""), "{json}");
+    emptied(uploads.path());
+    reset().await;
     let small = format!("{async_upload}\tform,nonce\tsmall.jpg\taction=upload-attachment");
     let photo = format!("{async_upload}\tform,nonce\tphoto.jpg\taction=upload-attachment");
     let raw = format!("{rest}\traw,type=image/jpeg\tphoto.jpg\t-");

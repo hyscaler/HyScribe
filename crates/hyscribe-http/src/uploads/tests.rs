@@ -220,6 +220,37 @@ async fn uploads_are_written_by_month_with_unique_names() {
     uploads.added(1);
 }
 
+/// An image with XMP PHP would read in a way not ported.
+fn with_xmp() -> Bytes {
+    let mut bytes = corpus("small.jpg").to_vec();
+    bytes.extend(b"<x:xmpmeta><Iptc4xmpCore:AltTextAccessibility/></x:xmpmeta>");
+    bytes.into()
+}
+
+/// What stops an upload once it is written: metadata not ported deletes it
+/// again and gives none, and a write refused is not ported or failed.
+#[tokio::test(flavor = "multi_thread")]
+async fn metadata_not_ported_stops_an_upload() {
+    let dir = tempfile::tempdir().unwrap();
+    let uploads = uploads(dir.path());
+    assert!(format!("{uploads:?}").contains("Uploads"));
+    let site = site_with(&[]).await;
+    let time = ("2026-11-17 00:00:00", WHO);
+    let prepared = uploads.media_handle_upload(&site, sent("x.jpg", with_xmp()), 0, time);
+    assert_eq!(prepared.unwrap_err(), Refused::Unported);
+    assert!(!dir.path().join("2026/11/x.jpg").exists());
+    let handled = uploads.handle(&site, sent("x.jpg", with_xmp()), time, false);
+    assert!(uploads.generate(&site, &handled.unwrap(), 5).is_err());
+    for err in [
+        hyscribe_write::Error::Refused("x"),
+        hyscribe_write::Error::Unported("x"),
+    ] {
+        assert_eq!(Refused::from(err), Refused::Unported);
+    }
+    let random = hyscribe_write::Error::Random(std::io::ErrorKind::Other.into());
+    assert!(matches!(Refused::from(random), Refused::Failed(_)));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn sizes_are_made_on_the_pool_and_written_beside_the_upload() {
     let dir = tempfile::tempdir().unwrap();
@@ -228,7 +259,7 @@ async fn sizes_are_made_on_the_pool_and_written_beside_the_upload() {
     let time = ("2026-11-17 00:00:00", WHO);
     let handled = uploads.handle(&site, sent("photo.jpg", corpus("photo.jpg")), time, false);
     let handled = handled.unwrap();
-    let generated = uploads.generate(&site, &handled, 5).unwrap().unwrap();
+    let generated = uploads.generate(&site, &handled, 5).unwrap();
     assert_eq!(generated.files.len(), 2);
     for size in ["photo-150x150.jpg", "photo-300x225.jpg"] {
         assert!(dir.path().join("2026/11").join(size).is_file(), "{size}");

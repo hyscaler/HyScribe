@@ -200,14 +200,12 @@ impl Uploads {
         let generated = self
             .generate(site, &prepared.handled, id)
             .map_err(|err| Refused::Failed(err.to_string()))?;
-        if let Some(generated) = generated {
-            let saved = handle.block_on(async {
-                let mut write = writer.begin().await?;
-                save(&mut write, id, &generated).await?;
-                write.commit().await.map_err(hyscribe_write::Error::from)
-            });
-            saved.map_err(Refused::from)?;
-        }
+        let saved = handle.block_on(async {
+            let mut write = writer.begin().await?;
+            save(&mut write, id, &generated).await?;
+            write.commit().await.map_err(hyscribe_write::Error::from)
+        });
+        saved.map_err(Refused::from)?;
         Ok(id)
     }
 }
@@ -216,17 +214,17 @@ impl Uploads {
 /// copy of an upload with `meta`: an image over the
 /// `big_image_size_threshold`, or a JPEG its EXIF turns.
 fn makes_copy(uploads: &Uploads, handled: &Handled, meta: Option<&[(Key, Value)]>) -> bool {
-    let Some(size) = getimagesize(&handled.bytes) else {
-        return false;
-    };
-    let dimensions = (size.width, size.height);
-    let threshold = uploads
-        .hooks
-        .big_image_size_threshold(2560, dimensions, &handled.file, 0);
-    let over = threshold > 0 && i64::from(size.width.max(size.height)) > threshold;
     let orientation = meta.and_then(|meta| lookup(meta, "orientation"));
     let turned = orientation.is_some_and(|o| (2..=8).contains(&o.to_int()));
-    over || size.kind == ImageType::Jpeg && turned
+    // The type check found the upload an image.
+    getimagesize(&handled.bytes).is_some_and(|size| {
+        let dimensions = (size.width, size.height);
+        let threshold = uploads
+            .hooks
+            .big_image_size_threshold(2560, dimensions, &handled.file, 0);
+        let over = threshold > 0 && i64::from(size.width.max(size.height)) > threshold;
+        over || size.kind == ImageType::Jpeg && turned
+    })
 }
 
 /// `wp_insert_attachment()` of `prepared` in `write`, then its alt text:

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The wp-config.php reader never panics, and DB_HOST splitting is total.
+//! The wp-config.php reader never panics, DB_HOST splitting is total, and
+//! the setup wizard's import and `.env` rendering of what it read never
+//! panic either.
 
 #![no_main]
 
@@ -13,5 +15,7 @@ fuzz_target!(|data: &[u8]| {
                 let _ = hyscribe_config::wpconfig::parse_db_host(host);
             }
         }
+        let import = hyscribe_config::setup::import(&config);
+        let _ = hyscribe_config::setup::render(&import.values);
     }
 });

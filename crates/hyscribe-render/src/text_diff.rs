@@ -84,7 +84,10 @@ fn diff<'a>(from: &[&'a [u8]], to: &[&'a [u8]]) -> Vec<Op<'a>> {
     };
     let skip = from.iter().zip(to).take_while(|(x, y)| x == y).count();
     // `--$xi > $skip && --$yi > $skip`, which leaves the skipped lines.
-    let tails = [from, to].map(|lines| lines.get(skip + 1..).unwrap_or_default());
+    let tails = [from, to].map(|lines| {
+        let past = lines.get(skip..).and_then(|rest| rest.get(1..));
+        past.unwrap_or_default()
+    });
     let endskip = (tails[0].iter().rev().zip(tails[1].iter().rev()))
         .take_while(|(x, y)| x == y)
         .count();
@@ -115,32 +118,30 @@ fn diff<'a>(from: &[&'a [u8]], to: &[&'a [u8]]) -> Vec<Op<'a>> {
     shift_boundaries(from, &mut e.xchanged, &e.ychanged);
     shift_boundaries(to, &mut e.ychanged, &e.xchanged);
     let mut edits = Vec::new();
-    let (mut xi, mut yi) = (0, 0);
-    while xi < n_from || yi < n_to {
+    let mut x = from.iter().copied().zip(e.xchanged).peekable();
+    let mut y = to.iter().copied().zip(e.ychanged).peekable();
+    loop {
         let mut copy = Vec::new();
-        while xi < n_from && yi < n_to && !get(&e.xchanged, xi) && !get(&e.ychanged, yi) {
-            copy.push(get(from, xi));
-            xi += 1;
-            yi += 1;
+        while let (Some((line, false)), Some((_, false))) = (x.peek(), y.peek()) {
+            copy.push(*line);
+            x.next();
+            y.next();
         }
+        let changed = |lines: &mut std::iter::Peekable<_>| {
+            std::iter::from_fn(|| lines.next_if(|(_, changed)| *changed))
+                .map(|(line, _)| line)
+                .collect::<Vec<&[u8]>>()
+        };
+        let (delete, add) = (changed(&mut x), changed(&mut y));
         if !copy.is_empty() {
             edits.push(Op::Copy(copy));
-        }
-        let mut delete = Vec::new();
-        while xi < n_from && get(&e.xchanged, xi) {
-            delete.push(get(from, xi));
-            xi += 1;
-        }
-        let mut add = Vec::new();
-        while yi < n_to && get(&e.ychanged, yi) {
-            add.push(get(to, yi));
-            yi += 1;
         }
         match (delete.is_empty(), add.is_empty()) {
             (false, false) => edits.push(Op::Change(delete, add)),
             (false, true) => edits.push(Op::Delete(delete)),
             (true, false) => edits.push(Op::Add(add)),
-            (true, true) => {}
+            // Both lists are done: PHP asserts nothing else is left.
+            (true, true) => break,
         }
     }
     edits
@@ -301,13 +302,13 @@ fn shift_boundaries(lines: &[&[u8]], changed: &mut [bool], other: &[bool]) {
     };
     let (mut i, mut j) = (0, 0i64);
     loop {
-        while j < other_len && other_at(j) {
+        while other_at(j) {
             j += 1;
         }
-        while i < len && !get(changed, i) {
+        while changed.get(i) == Some(&false) {
             i += 1;
             j += 1;
-            while j < other_len && other_at(j) {
+            while other_at(j) {
                 j += 1;
             }
         }
@@ -316,7 +317,7 @@ fn shift_boundaries(lines: &[&[u8]], changed: &mut [bool], other: &[bool]) {
         }
         let mut start = i;
         i += 1;
-        while i < len && get(changed, i) {
+        while get(changed, i) {
             i += 1;
         }
         let mut corresponding;
@@ -338,13 +339,13 @@ fn shift_boundaries(lines: &[&[u8]], changed: &mut [bool], other: &[bool]) {
                 start += 1;
                 put(changed, i, true);
                 i += 1;
-                while i < len && get(changed, i) {
+                while get(changed, i) {
                     i += 1;
                 }
                 j += 1;
-                if j < other_len && other_at(j) {
+                if other_at(j) {
                     corresponding = i;
-                    while j < other_len && other_at(j) {
+                    while other_at(j) {
                         j += 1;
                     }
                 }
@@ -515,13 +516,20 @@ fn without(diff: &str, tag: &str) -> String {
 /// `compute_string_distance()`: how differently two lines use each byte,
 /// per byte of the first.
 fn distance(a: &[u8], b: &[u8]) -> f64 {
-    let mut counts = [0i64; 256];
-    for (&byte, step) in a.iter().map(|b| (b, 1)).chain(b.iter().map(|b| (b, -1))) {
-        let _ = counts
-            .get_mut(usize::from(byte))
-            .map(|count| *count += step);
-    }
-    let difference = counts.iter().map(|c| c.abs()).sum::<i64>() as f64;
+    // `count_chars()` of each.
+    let counts = |text: &[u8]| {
+        let mut counts = [0i64; 256];
+        for &byte in text {
+            let _ = counts.get_mut(usize::from(byte)).map(|count| *count += 1);
+        }
+        counts
+    };
+    let (of_a, of_b) = (counts(a), counts(b));
+    let difference = of_a
+        .iter()
+        .zip(&of_b)
+        .map(|(x, y)| (x - y).abs())
+        .sum::<i64>() as f64;
     if a.is_empty() || a == b"0" {
         difference
     } else {
@@ -561,15 +569,16 @@ fn interleave(orig: &[&[u8]], fin: &[&[u8]]) -> (Vec<Option<usize>>, Vec<i64>, V
         let final_pos = matched.and_then(|f| final_rows.iter().position(|&r| r == f as i64));
         let orig_pos = orig_rows.iter().position(|&r| r == row).unwrap_or_default();
         let blanks = |n: usize| (1..=n as i64).map(|n| -n).collect::<Vec<_>>();
-        match final_pos {
-            None => splice(&mut final_rows, orig_pos, &[-1]),
-            Some(pos) if pos < orig_pos => {
-                splice(&mut final_rows, orig_pos, &blanks(orig_pos - pos))
-            }
-            Some(pos) if pos > orig_pos => {
+        let Some(pos) = final_pos else {
+            splice(&mut final_rows, orig_pos, &[-1]);
+            continue;
+        };
+        match pos.cmp(&orig_pos) {
+            std::cmp::Ordering::Less => splice(&mut final_rows, orig_pos, &blanks(orig_pos - pos)),
+            std::cmp::Ordering::Greater => {
                 splice(&mut orig_rows, orig_pos, &blanks(pos - orig_pos))
             }
-            Some(_) => {}
+            std::cmp::Ordering::Equal => {}
         }
     }
     let pad = |rows: &mut Vec<i64>, to: usize| {
@@ -631,19 +640,18 @@ fn changed(orig: &[&[u8]], fin: &[&[u8]]) -> Option<String> {
         };
         // `!(<ins>.*?</ins>|<del>.*?</del>)!`'s matches: each span, which
         // the inline renderer closes; their text, joined by spaces.
+        // Without one, the ratio is negative, as PHP skips it.
         let found = (diff.matches("<ins>").count() + diff.matches("<del>").count()) as i64;
-        if found > 0 {
-            let stripped = ["<ins>", "</ins>", "<del>", "</del>"]
-                .iter()
-                .fold(diff.clone(), |text, tag| text.replace(tag, ""))
-                .len() as i64;
-            let outside = without(&without(&diff, "ins"), "del").len() as i64;
-            let matched = stripped - outside + found - 1;
-            // Never 0: the diff holds more than its spans.
-            let whole = stripped * 2 - matched;
-            if matched as f64 / whole as f64 > 0.6 {
-                continue;
-            }
+        let stripped = ["<ins>", "</ins>", "<del>", "</del>"]
+            .iter()
+            .fold(diff.clone(), |text, tag| text.replace(tag, ""))
+            .len() as i64;
+        let outside = without(&without(&diff, "ins"), "del").len() as i64;
+        let matched = stripped - outside + found - 1;
+        // Never 0: the diff holds more than its spans.
+        let whole = stripped * 2 - matched;
+        if matched as f64 / whole as f64 > 0.6 {
+            continue;
         }
         orig_diffs.insert(o as i64, without(&diff, "ins"));
         final_diffs.insert(f as i64, without(&diff, "del"));

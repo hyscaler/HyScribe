@@ -31,10 +31,10 @@ fn diffs_are_php_s() {
             ));
         }
     }
-    assert_eq!(golden.lines().count(), 646);
+    assert_eq!(golden.lines().count(), 3148);
     assert!(
         failures.is_empty(),
-        "{} of 646:\n{}",
+        "{} of 3148:\n{}",
         failures.len(),
         failures.join("\n\n")
     );

@@ -3,7 +3,8 @@
 //
 // Prints wp_text_diff()'s table, with the revisions screen's arguments, for
 // a set of text pairs: hex(left)<TAB>hex(right)<TAB>hex(table), the table
-// FATAL where PHP stops with an error, and a long one as sha256:<its hash>.
+// FATAL where PHP stops with an error, and a long one, or one of the
+// longer random pairs, as sha256:<its hash>.
 // Run in the oracle's image, whose PCRE decides what \w matches
 // (reference/text-diff/golden.sh).
 define( 'ABSPATH', '/usr/src/wordpress/' );
@@ -68,6 +69,8 @@ $cases = array(
 	array( "9223372036854775808\nz", "9223372036854775808.0\nz" ),
 	// More unchanged lines than the 10000 of context each side keeps.
 	array( "a\n" . str_repeat( "x\n", 20001 ) . 'b', "c\n" . str_repeat( "x\n", 20001 ) . 'd' ),
+	array( "a\n" . str_repeat( "x\n", 15000 ) . 'b', "c\n" . str_repeat( "x\n", 15000 ) . 'd' ),
+	array( "a\n" . str_repeat( "\nx", 15000 ), "c\n" . str_repeat( "\nx", 15000 ) ),
 );
 // Random pairs over a few lines and words, for the engine's edge cases.
 mt_srand( 713 );
@@ -83,7 +86,21 @@ for ( $n = 0; $n < 600; $n++ ) {
 	}
 	$cases[] = $pair;
 }
-foreach ( $cases as list( $left, $right ) ) {
+// Longer pairs over lines PHP compares as numbers, kept as hashes.
+$hashed = count( $cases );
+$pieces = array( 'a', 'b', 'c', 'd', '1', '1.0', '1e3', '1000', '9007199254740993', '9007199254740992', '', 'x y' );
+for ( $n = 0; $n < 2500; $n++ ) {
+	$pair = array();
+	foreach ( array( 0, 1 ) as $side ) {
+		$lines = array();
+		for ( $i = mt_rand( 0, 24 ); $i > 0; $i-- ) {
+			$lines[] = $pieces[ mt_rand( 0, count( $pieces ) - 1 ) ];
+		}
+		$pair[] = implode( "\n", $lines );
+	}
+	$cases[] = $pair;
+}
+foreach ( $cases as $n => list( $left, $right ) ) {
 	try {
 		$diff = wp_text_diff(
 			$left,
@@ -98,7 +115,7 @@ foreach ( $cases as list( $left, $right ) ) {
 		$diff = 'FATAL';
 	}
 	// A long table is kept as its hash.
-	if ( strlen( $diff ) > 100000 ) {
+	if ( strlen( $diff ) > 100000 || $n >= $hashed ) {
 		$diff = 'sha256:' . hash( 'sha256', $diff );
 	}
 	echo bin2hex( $left ), "\t", bin2hex( $right ), "\t", bin2hex( $diff ), "\n";

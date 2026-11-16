@@ -201,11 +201,6 @@ fn page(asked: &Asked) -> String {
     )
 }
 
-/// `wp_die( 1 )`.
-fn done() -> Result<Ajax, super::Stop<Ajax>> {
-    Ok(Ajax::Text("1".into()))
-}
-
 /// `wp_ajax_closed_postboxes()`: the boxes closed and hidden on a screen.
 pub(super) fn closed_postboxes<'a>(
     write: &'a mut Write<'_>,
@@ -239,7 +234,8 @@ pub(super) fn closed_postboxes<'a>(
             .filter(|(_, item)| !shown.contains(&&*item.to_php_string()));
         let hidden = Value::Array(hidden.collect());
         update_user_meta(write, asked.user, &format!("metaboxhidden_{page}"), &hidden).await?;
-        done()
+        // `wp_die( 1 )`.
+        Ok(Ajax::Text("1".into()))
     })
 }
 
@@ -258,7 +254,8 @@ pub(super) fn hidden_columns<'a>(
         };
         let key = format!("manage{}columnshidden", page(asked));
         update_user_meta(write, asked.user, &key, &Value::Array(hidden)).await?;
-        done()
+        // `wp_die( 1 )`.
+        Ok(Ajax::Text("1".into()))
     })
 }
 

@@ -9,10 +9,11 @@
 # for each key of the editor's settings, `edits` (the initial edits),
 # `categories`, `bindings` and `blocks` (the inline scripts of wp-blocks),
 # `body` (hex of the page's `block-editor` div, with the meta boxes area),
-# and `head`, `footer` (the style and script handles printed, in order).
-# A value over 2000 bytes, but those three, is kept as `sha256:<hex>
-# <length>`. Nonces become %nonce:<action>% and the edit lock's time %time%. With RAW=<dir> each page
-# is kept there. The views write (the auto-drafts, the edit locks, the
+# `preloads` (the paths PHP preloads) and `html` (hex of the page, its
+# preloads' data left out). Another value over 2000 bytes is kept as
+# `sha256:<hex> <length>`. Nonces become %nonce:<action>%, the edit lock's
+# and the user settings' times %time%. With RAW=<dir> each page is kept
+# there, also masked. The views write (the auto-drafts, the edit locks, the
 # theme's global styles post): start from a fresh db.sh up and php.sh up,
 # and take both down after.
 set -euo pipefail
@@ -42,8 +43,9 @@ record() {
   "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 1 ); foreach ( array_slice( $argv, 1 ) as $action ) { echo wp_create_nonce( $action ), "\t", $action, "\n"; }' \
     "lock-post_$id" "update-post_$id" meta-box-loader meta-box-order closedpostboxes samplepermalink \
     toggle-custom-fields install-plugin_classic-editor wp_rest heartbeat-nonce log-out media-form \
-    "media-send-to-editor" "image_editor-$id" update-post_ "set_post_thumbnail-$id" > "$TMP/nonces"
-  php "$ROOT/reference/post-edit/editor-parts.php" "$TMP/page" "$TMP/nonces" "$case" >> "$OUT"
+    media-send-to-editor set-attachment-thumbnail internal-linking update_can_compress_scripts \
+    screen-options-nonce "image_editor-$id" "set_post_thumbnail-$id" > "$TMP/nonces"
+  php "$ROOT/reference/post-edit/editor-parts.php" "$TMP/page" "$TMP/nonces" "$case" ${RAW:+"$RAW"} >> "$OUT"
 }
 for role in administrator editor author contributor; do
   record "new-post-$role" post-new.php "$role" "$DESKTOP"

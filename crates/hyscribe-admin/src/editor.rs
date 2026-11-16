@@ -8,6 +8,7 @@
 mod assets;
 pub mod blocks;
 pub mod form;
+pub mod page;
 pub mod settings;
 
 use hyscribe_auth::caps::post_type_exists;

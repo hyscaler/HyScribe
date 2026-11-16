@@ -366,6 +366,17 @@ pub(crate) fn editor_footer(site: &dyn DashboardSite) -> String {
         .replace("%nonce%", &site.nonce("internal-linking"))
 }
 
+/// The link dialog `_WP_Editors::wp_link_dialog()` prints, which the block
+/// editor's default editor prints too.
+pub(crate) fn link_dialog(site: &dyn crate::page::PageSite) -> String {
+    let at = EDITOR.find(LINK_DIALOG).unwrap_or_default();
+    let dialog = EDITOR.get(at..).unwrap_or_default();
+    dialog.replace("%nonce%", &site.nonce("internal-linking"))
+}
+
+/// Where the link dialog starts in the editor's footer.
+const LINK_DIALOG: &str = "<div id=\"wp-link-backdrop\"";
+
 /// `wp_comment_reply( $position, $checkbox, $mode )` and
 /// `wp_comment_trashnotice()`: in a table row of `colspan` columns, or in
 /// the dashboard's `<div>`s without one; `styled` when its editor is the

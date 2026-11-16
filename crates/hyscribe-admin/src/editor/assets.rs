@@ -16,7 +16,7 @@ const THEME_REGISTERED: &[u8] =
 
 /// The inline styles of the block styles the theme registers, which
 /// `enqueue_block_styles_assets()` adds to `wp-block-library`.
-fn block_style_css() -> &'static [(Key, Value)] {
+pub(crate) fn block_style_css() -> &'static [(Key, Value)] {
     static CSS: OnceLock<Value> = OnceLock::new();
     let css = CSS.get_or_init(|| {
         let registered = json_decode(THEME_REGISTERED).unwrap_or_default();

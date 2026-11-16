@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use hyscribe_kses::{esc_attr, esc_url, esc_url_raw};
-use hyscribe_phpser::{Value, json_decode, rawurlencode};
+use hyscribe_phpser::{Key, Value, json_decode, rawurlencode};
 use hyscribe_render::head::tag;
 
 /// What a request registers, with placeholders for its URLs and nonces.
@@ -138,7 +138,10 @@ pub(crate) fn registered_script_data(handle: &str, key: &str) -> String {
 
 /// What a request registers with no source, as `wp_register_style( $handle,
 /// false )` does before adding inline styles.
-static ALIAS: Item = Item {
+static ALIAS: Item = ALIAS_ITEM;
+
+/// [`ALIAS`]'s fields.
+const ALIAS_ITEM: Item = Item {
     src: None,
     color_scheme: false,
     deps: Vec::new(),
@@ -147,6 +150,17 @@ static ALIAS: Item = Item {
     extra: Value::Null,
     textdomain: false,
 };
+
+/// `wp-block-styles`, the script alias `enqueue_editor_block_styles_assets()`
+/// registers for its inline script, in the footer after `wp-blocks`.
+fn block_styles() -> &'static Item {
+    static ITEM: OnceLock<Item> = OnceLock::new();
+    ITEM.get_or_init(|| Item {
+        deps: vec!["wp-blocks".into()],
+        footer: true,
+        ..ALIAS_ITEM
+    })
+}
 
 /// The queue and printing state of `WP_Styles` or `WP_Scripts`.
 #[derive(Default)]
@@ -195,6 +209,22 @@ impl Assets {
     /// A style taken as printed already, as `$wp_styles->done` lists it.
     pub fn style_done(&mut self, handle: &str) {
         self.styles.done.push(handle.to_string());
+    }
+
+    /// `wp_add_inline_script( $handle, $script, $position )`, after what is
+    /// registered and added before.
+    pub fn add_inline_script(&mut self, handle: &str, position: &str, script: &str) {
+        let mut list = self
+            .scripts
+            .data(handle, position)
+            .and_then(Value::as_array)
+            .unwrap_or_default()
+            .to_vec();
+        list.push((
+            Key::Int(list.len() as i64),
+            Value::String(script.as_bytes().to_vec()),
+        ));
+        self.set_script_data(handle, position, Value::Array(list));
     }
 
     /// `wp_enqueue_script()` of a registered handle.
@@ -287,6 +317,7 @@ impl Dependencies {
                 let added = !self.scripts && self.extra.keys().any(|(h, _)| h == handle);
                 added.then_some(&ALIAS)
             })
+            .or_else(|| (self.scripts && handle == "wp-block-styles").then(block_styles))
     }
 
     /// `get_data( $handle, $key )`.
@@ -584,8 +615,9 @@ impl Dependencies {
             );
             out.extend(script);
         }
-        // Core's aliases have no inline scripts.
+        // An alias prints its inline scripts alone.
         let Some(src) = &item.src else {
+            self.emit(out, &[&before[..], &after[..]].concat());
             return true;
         };
         let src = self.versioned(urls, item, src, esc_url_raw);

@@ -562,10 +562,10 @@ fn script_module_data_needs_the_interactivity_api() {
 #[test]
 fn the_admin_import_map() {
     let worker = "@wordpress/vips/worker".to_string();
-    let map = admin_import_map("http://h", &[worker.clone(), "x".into(), worker]);
+    let map = admin_script_modules("http://h", &[worker.clone(), "x".into(), worker], &[]);
     let map = String::from_utf8(map).unwrap();
     assert_eq!(map.matches("vips/worker").count(), 2, "{map}");
-    assert!(admin_import_map("http://h", &["x".into()]).is_empty());
+    assert!(admin_script_modules("http://h", &["x".into()], &[]).is_empty());
 }
 
 /// A module classic scripts import and one it imports are listed once.
@@ -575,8 +575,8 @@ fn the_admin_import_map_follows_imports() {
         "@wordpress/block-editor/utils/fit-text-frontend".to_string(),
         "@wordpress/interactivity".into(),
     ];
-    let one = String::from_utf8(admin_import_map("http://h", &ids[..1])).unwrap();
-    let both = String::from_utf8(admin_import_map("http://h", &ids)).unwrap();
+    let one = String::from_utf8(admin_script_modules("http://h", &ids[..1], &[])).unwrap();
+    let both = String::from_utf8(admin_script_modules("http://h", &ids, &[])).unwrap();
     assert_eq!(one, both);
     assert_eq!(
         one.matches("@wordpress/interactivity\"").count(),

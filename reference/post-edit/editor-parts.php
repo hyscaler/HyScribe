@@ -13,6 +13,7 @@ foreach ( file( $nonces, FILE_IGNORE_NEW_LINES ) as $line ) {
 	$page = str_replace( $nonce, "%nonce:$action%", $page );
 }
 $page = preg_replace( '/"activePostLock":"\d+:/', '"activePostLock":"%time%:', $page );
+$page = preg_replace( '/"time":"\d+"/', '"time":"%time%"', $page );
 
 // The end of the JSON value starting at $at.
 function json_end( $text, $at ) {
@@ -67,7 +68,7 @@ function members( $object ) {
 }
 
 function row( $case, $part, $value ) {
-	if ( strlen( $value ) > 2000 && ! in_array( $part, array( 'body', 'head', 'footer' ), true ) ) {
+	if ( strlen( $value ) > 2000 && ! in_array( $part, array( 'body', 'html' ), true ) ) {
 		$value = 'sha256:' . hash( 'sha256', $value ) . ' ' . strlen( $value );
 	}
 	echo "$case\t$part\t$value\n";
@@ -88,22 +89,17 @@ $from = strpos( $page, '<div class="block-editor">' );
 $to   = strpos( $page, '<div class="clear"></div></div><!-- wpbody-content -->' );
 row( $case, 'body', bin2hex( substr( $page, $from, $to - $from ) ) );
 
-// The style and script handles printed, in order: a concatenated file's
-// handles, a tag's handle, and an inline tag's handle and position.
-function handles( $html ) {
-	preg_match_all( '/<(link|style|script)\b[^>]*>/', $html, $tags );
-	$out = array();
-	foreach ( $tags[0] as $tag ) {
-		if ( preg_match( '/load-(styles|scripts)\.php\?[^\'"]*/', $tag, $m ) ) {
-			preg_match_all( '/load%5Bchunk_\d+%5D=([^&]*)/', html_entity_decode( $m[0] ), $chunks );
-			$out[] = $m[1] . ':' . rtrim( implode( '', $chunks[1] ), ',' );
-		} elseif ( preg_match( '/ id=[\'"]([^\'"]+?)(-css|-js|-inline-css|-js-extra|-js-before|-js-after|-js-module)[\'"]/', $tag, $m ) ) {
-			$out[] = $m[1] . $m[2];
-		}
-	}
-	return implode( ' ', $out );
+// The preloaded responses, which depend on the moment, by path; the page
+// with them left out, kept in the directory $argv[4] names if any.
+$marker   = 'wp.apiFetch.createPreloadingMiddleware( ';
+$preloads = json_after( $page, $marker );
+$keys     = array();
+foreach ( members( $preloads ) as $key => $value ) {
+	$keys = array_merge( $keys, 'OPTIONS' === $key ? array_map( fn( $k ) => "OPTIONS $k", array_keys( members( $value ) ) ) : array( "GET $key" ) );
 }
-$head = strpos( $page, '</head>' );
-$foot = strpos( $page, '<div id="wpfooter"' );
-row( $case, 'head', handles( substr( $page, 0, $head ) ) );
-row( $case, 'footer', handles( substr( $page, $foot ) ) );
+row( $case, 'preloads', implode( ' ', $keys ) );
+$whole = str_replace( $marker . $preloads, $marker . '%preloads%', $page );
+row( $case, 'html', bin2hex( $whole ) );
+if ( isset( $argv[4] ) ) {
+	file_put_contents( "$argv[4]/$case.masked.html", $whole );
+}

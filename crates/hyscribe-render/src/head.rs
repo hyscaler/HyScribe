@@ -1335,13 +1335,14 @@ pub fn tag(name: &[u8], attributes: &[(&[u8], Option<&[u8]>)], text: Option<&[u8
     [tags.get_updated_html(), b"\n"].concat()
 }
 
-/// The admin's `print_import_map()`, where no script module is enqueued:
-/// the registered modules classic scripts import, and what they import.
-pub fn admin_import_map(siteurl: &str, imports: &[String]) -> Vec<u8> {
+/// The admin's `print_import_map()`: the registered modules classic scripts
+/// import, those `queue` enqueues need, and what they import; then the
+/// script modules of `queue`, as the admin's footer prints them.
+pub fn admin_script_modules(siteurl: &str, imports: &[String], queue: &[String]) -> Vec<u8> {
     let registry = registered_modules(siteurl);
     let modules = Modules {
         registry: &registry,
-        queue: &[],
+        queue,
     };
     let mut ids: Vec<String> = Vec::new();
     for id in imports.iter().filter(|id| modules.module(id).is_some()) {
@@ -1349,12 +1350,19 @@ pub fn admin_import_map(siteurl: &str, imports: &[String]) -> Vec<u8> {
             ids.push(id.clone());
         }
     }
-    for id in modules.dependencies(&ids, false) {
+    for id in modules.dependencies(&[queue, &ids].concat(), false) {
         if !ids.contains(&id) {
             ids.push(id);
         }
     }
-    modules.import_map(&ids)
+    let mut out = modules.import_map(&ids);
+    // The admin prints every enqueued module in its footer.
+    for id in modules.sorted(queue, false) {
+        if let Some(module) = modules.module(&id).filter(|_| queue.contains(&id)) {
+            out.extend(modules.script(module));
+        }
+    }
+    out
 }
 
 /// `wp_json_encode( $value, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES )`:

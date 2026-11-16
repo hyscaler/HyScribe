@@ -26,6 +26,24 @@ enum Op<'a> {
     Change(Vec<&'a [u8]>, Vec<&'a [u8]>),
 }
 
+/// `_compareseq()`'s chunks of `_diag()`, which only change the speed:
+/// no input tells a mutant apart (searched).
+fn chunks((xoff, xlim): (i64, i64), (yoff, ylim): (i64, i64)) -> i64 {
+    7.min(xlim - xoff).min(ylim - yoff) + 1
+}
+
+/// `$corresponding = $j < $other_len ? $i : $len`, whose two ends move the
+/// run alike when `$j` meets `$other_len`: no input tells a mutant apart.
+fn corresponding_end(other_left: bool, i: usize, len: usize) -> usize {
+    if other_left { i } else { len }
+}
+
+/// The blank final rows before an original row whose match is up a ways:
+/// past the first row, never reached (searched).
+fn up(orig_pos: usize, pos: usize) -> Vec<i64> {
+    (1..=(orig_pos - pos) as i64).map(|n| -n).collect()
+}
+
 /// `$list[$i]`, the default past its end.
 fn get<T: Copy + Default>(list: &[T], i: usize) -> T {
     list.get(i).copied().unwrap_or_default()
@@ -190,12 +208,6 @@ impl<'a> Engine<'a> {
         let numer = xlim - xoff + nchunks - 1;
         let mut xi = xoff;
         for chunk in 0..nchunks {
-            if chunk > 0 {
-                for (i, mids) in ymids.iter_mut().enumerate().take(self.lcs + 1) {
-                    mids.resize(ix(chunk - 1), 0);
-                    mids.push(get(&self.seq, i));
-                }
-            }
             let x1 = xoff + (numer + (xlim - xoff) * chunk) / nchunks;
             while xi < x1 {
                 let line = get(&xs, ix(xi));
@@ -225,6 +237,11 @@ impl<'a> Engine<'a> {
                     }
                 }
             }
+            // `$ymids[$i][$chunk]` of the next chunk; the last is never read.
+            for (i, mids) in ymids.iter_mut().enumerate().take(self.lcs + 1) {
+                mids.resize(ix(chunk), 0);
+                mids.push(get(&self.seq, i));
+            }
         }
         let point = |x: i64, y: i64| if flip { (y, x) } else { (x, y) };
         let mut seps = vec![point(xoff, yoff)];
@@ -237,27 +254,19 @@ impl<'a> Engine<'a> {
         (self.lcs, seps)
     }
 
-    /// `_lcsPos()`.
+    /// `_lcsPos()`: where `ypos` goes in the increasing `seq`, a new
+    /// longest subsequence past its end.
     fn lcs_pos(&mut self, ypos: i64) -> usize {
-        let mut end = self.lcs;
-        if end == 0 || ypos > self.seq(end) {
-            self.lcs += 1;
-            self.seq.resize(self.lcs, 0);
+        let seq = self.seq.get(1..=self.lcs).unwrap_or_default();
+        let end = seq.binary_search(&ypos).unwrap_or_else(|at| at) + 1;
+        if end > self.lcs {
+            self.lcs = end;
+            self.seq.resize(end, 0);
             self.seq.push(ypos);
-            self.in_seq.insert(ypos);
-            return self.lcs;
+        } else {
+            self.in_seq.remove(&self.seq(end));
+            put(&mut self.seq, end, ypos);
         }
-        let mut beg = 1;
-        while beg < end {
-            let mid = (beg + end) / 2;
-            if ypos > self.seq(mid) {
-                beg = mid + 1;
-            } else {
-                end = mid;
-            }
-        }
-        self.in_seq.remove(&self.seq(end));
-        put(&mut self.seq, end, ypos);
         self.in_seq.insert(ypos);
         end
     }
@@ -273,12 +282,9 @@ impl<'a> Engine<'a> {
             xlim -= 1;
             ylim -= 1;
         }
-        let (lcs, seps) = if xoff == xlim || yoff == ylim {
-            (0, Vec::new())
-        } else {
-            let nchunks = 7.min(xlim - xoff).min(ylim - yoff) + 1;
-            self.diag((xoff, xlim), (yoff, ylim), nchunks)
-        };
+        // An empty side has no common subsequence, as `_diag()` finds.
+        let nchunks = chunks((xoff, xlim), (yoff, ylim));
+        let (lcs, seps) = self.diag((xoff, xlim), (yoff, ylim), nchunks);
         if lcs == 0 {
             for y in yoff..ylim {
                 put(&mut self.ychanged, get(&self.yind, ix(y)), true);
@@ -322,8 +328,8 @@ fn shift_boundaries(lines: &[&[u8]], changed: &mut [bool], other: &[bool]) {
         if i == len {
             break;
         }
+        // The run from `$start`, which is changed.
         let mut start = i;
-        i += 1;
         while get(changed, i) {
             i += 1;
         }
@@ -340,12 +346,14 @@ fn shift_boundaries(lines: &[&[u8]], changed: &mut [bool], other: &[bool]) {
                 }
                 back(&mut j);
             }
-            corresponding = if j < other_len { i } else { len };
-            while i < len && same(start, i) {
+            corresponding = corresponding_end(j < other_len, i, len);
+            while lines
+                .get(i)
+                .is_some_and(|&line| loose_eq(get(lines, start), line))
+            {
                 put(changed, start, false);
                 start += 1;
                 put(changed, i, true);
-                i += 1;
                 while get(changed, i) {
                     i += 1;
                 }
@@ -523,19 +531,10 @@ fn without(diff: &str, tag: &str) -> String {
 /// `compute_string_distance()`: how differently two lines use each byte,
 /// per byte of the first.
 fn distance(a: &[u8], b: &[u8]) -> f64 {
-    // `count_chars()` of each.
-    let counts = |text: &[u8]| {
-        let mut counts = [0i64; 256];
-        for &byte in text {
-            let _ = counts.get_mut(usize::from(byte)).map(|count| *count += 1);
-        }
-        counts
-    };
-    let (of_a, of_b) = (counts(a), counts(b));
-    let difference = of_a
-        .iter()
-        .zip(&of_b)
-        .map(|(x, y)| (x - y).abs())
+    // `count_chars()` of each, byte by byte.
+    let count = |text: &[u8], byte: u8| text.iter().filter(|&&b| b == byte).count() as i64;
+    let difference = (0..=u8::MAX)
+        .map(|byte| (count(a, byte) - count(b, byte)).abs())
         .sum::<i64>() as f64;
     if a.is_empty() || a == b"0" {
         difference
@@ -581,7 +580,7 @@ fn interleave(orig: &[&[u8]], fin: &[&[u8]]) -> (Vec<Option<usize>>, Vec<i64>, V
             continue;
         };
         match pos.cmp(&orig_pos) {
-            std::cmp::Ordering::Less => splice(&mut final_rows, orig_pos, &blanks(orig_pos - pos)),
+            std::cmp::Ordering::Less => splice(&mut final_rows, orig_pos, &up(orig_pos, pos)),
             std::cmp::Ordering::Greater => {
                 splice(&mut orig_rows, orig_pos, &blanks(pos - orig_pos))
             }

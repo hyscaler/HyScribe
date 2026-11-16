@@ -65,6 +65,9 @@ $cases = array(
 	array( '!a  !', 'a a ! ' ),
 	array( "x\na! b a", "x\n !a a!" ),
 	array( "keep\ngood one", "keep\nbad \xfe two" ),
+	// Lines whose words differ by exactly the share that keeps their diff.
+	array( "x\naa", "x\n c aa a" ),
+	array( "x\nb", "x\n aacb b" ),
 	array( "99999999999999999999\n+99999999999999999999", "+99999999999999999999\n99999999999999999999" ),
 	array( "9223372036854775808\nz", "9223372036854775808.0\nz" ),
 	// More unchanged lines than the 10000 of context each side keeps.

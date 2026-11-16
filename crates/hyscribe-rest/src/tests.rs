@@ -446,6 +446,13 @@ fn mismatches(
                 not_served += 1;
                 continue;
             }
+            // PHP stopped once its permission check passed; the callback's
+            // own refusal is checked by the golden of its writes.
+            let refused = served.status >= 400 && served.status != 401 && served.status != 403;
+            if case.body == b"hyscribe-accepted" && refused {
+                not_served += 1;
+                continue;
+            }
             let body = if hashed {
                 sha256_hex(&served.body)
             } else {

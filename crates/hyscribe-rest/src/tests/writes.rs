@@ -582,17 +582,11 @@ fn navigation_and_patterns_save_their_fields() {
         let closed = format!("a<!-- /wp:{wrapper} -->b<!-- wp:c /-->");
         assert_eq!(save.content, Some(closed.into_bytes()), "{post_type}");
     }
-    // Neither a pattern's categories nor an autosave is ported, and a
-    // format is checked against its schema.
+    // Media and menu items are not written, and a format is checked
+    // against its schema.
     for (method, target, body) in [
         ("POST", "/wp/v2/media", ""),
         ("DELETE", "/wp/v2/menu-items/1&force=1", ""),
-        (
-            "POST",
-            "/wp/v2/blocks",
-            r#"{"title":"x","wp_pattern_category":[]}"#,
-        ),
-        ("POST", "/wp/v2/posts/1/autosaves", r#"{"title":"x"}"#),
     ] {
         let served = answered("administrator", method, target, body);
         assert_eq!(served.status, 501, "{target}");

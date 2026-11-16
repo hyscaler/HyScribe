@@ -142,6 +142,8 @@ fn changes(
     template: Option<&Template>,
 ) -> Result<Save, RestError> {
     let file = template.filter(|template| template.source != "custom");
+    // `tax_input` needs `edit_posts`, which those who may edit theme
+    // options have in every core role.
     let mut save = Save {
         post_type: kind.name().into(),
         status: Some("publish".into()),

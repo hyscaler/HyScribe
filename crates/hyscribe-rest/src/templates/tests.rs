@@ -164,11 +164,6 @@ fn what_is_not_ported_answers_501() {
             "GET",
             "/?rest_route=/wp/v2/templates/twentytwentyfive//index/revisions",
         ),
-        ("POST", "/?rest_route=/wp/v2/templates&slug=x"),
-        (
-            "DELETE",
-            "/?rest_route=/wp/v2/template-parts/twentytwentyfive//header",
-        ),
     ];
     for (method, target) in targets {
         let case = RestCase {

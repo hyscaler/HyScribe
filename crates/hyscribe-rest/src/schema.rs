@@ -7,7 +7,7 @@
 //! schema using them is refused for.
 
 use hyscribe_kses::esc_url_raw;
-use hyscribe_phpser::{Key, Value, encode, json_encode};
+use hyscribe_phpser::{Key, Pattern, Value, encode, json_encode};
 use hyscribe_render::date::strtotime;
 use hyscribe_render::formatting::{is_email, sanitize_text_field};
 
@@ -212,9 +212,37 @@ fn resolve(value: &Value, schema: &Value) -> Result<String, String> {
 /// The formats ported.
 const FORMATS: [&[u8]; 3] = [b"date-time", b"email", b"uri"];
 
+/// A `pattern` the byte matcher reads as PCRE's `u` mode does: literals
+/// and classes of ASCII, with no anchor or Unicode-aware escape.
+fn pattern(schema: &Value) -> Option<Pattern> {
+    let pattern = schema.get_str("pattern")?.as_bytes()?;
+    let simple = pattern.is_ascii()
+        && !pattern
+            .windows(2)
+            .any(|w| matches!(w, [b'\\', c] if b"wWsSdDbB".contains(c)))
+        && !pattern.iter().any(|b| b".^$#".contains(b));
+    let pattern = std::str::from_utf8(pattern).ok().filter(|_| simple)?;
+    Pattern::new(pattern)
+}
+
+/// `rest_validate_json_schema_pattern()`: `pattern` matches somewhere in
+/// `text`, which must be UTF-8.
+fn matches(pattern: &Pattern, text: &[u8]) -> bool {
+    std::str::from_utf8(text).is_ok()
+        && (0..=text.len()).any(|at| {
+            pattern
+                .captures(text.get(at..).unwrap_or_default())
+                .is_some()
+        })
+}
+
 fn unported(schema: &Value) -> Checked<()> {
     let format = schema.get_str("format").and_then(Value::as_bytes);
-    let ported = |key: &&str| *key == "format" && format.is_some_and(|f| FORMATS.contains(&f));
+    let ported = |key: &&str| match *key {
+        "format" => format.is_some_and(|f| FORMATS.contains(&f)),
+        "pattern" => pattern(schema).is_some(),
+        _ => false,
+    };
     if UNPORTED
         .iter()
         .any(|key| schema.get_str(key).is_some() && !ported(key))
@@ -675,6 +703,14 @@ fn validate_string(value: &Value, schema: &Value, param: &str) -> Checked<()> {
                 "{param} must be at most {} {noun} long.",
                 number_format(max)
             ),
+        );
+    }
+    if pattern(schema).is_some_and(|pattern| !matches(&pattern, text)) {
+        let source = schema.get_str("pattern").map(Value::to_php_string);
+        let source = String::from_utf8_lossy(&source.unwrap_or_default()).into_owned();
+        return invalid(
+            "rest_invalid_pattern",
+            format!("{param} does not match pattern {source}."),
         );
     }
     Ok(())

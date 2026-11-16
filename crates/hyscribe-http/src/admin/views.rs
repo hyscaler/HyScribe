@@ -147,6 +147,7 @@ pub(super) fn viewed(
             admin.user.id,
             &admin.site.home,
             &admin.site.option("siteurl"),
+            admin.site.constants,
         )
     };
     let first = view

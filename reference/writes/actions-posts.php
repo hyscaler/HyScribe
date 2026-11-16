@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // The write oracle's post actions (MVP 2.4): wp_insert_post(),
-// wp_update_post(), wp_publish_post(), wp_trash_post(), wp_untrash_post() and
+// wp_update_post(), wp_trash_post(), wp_untrash_post() and
 // wp_delete_post(). A post whose ID ends up inside a value no mask reaches (a
 // cron key, sticky_posts, page_on_front) is inserted with an import_id, and
 // comments with a fixed ID, so both sides write the same values.
@@ -152,12 +152,6 @@ return array(
 	'insert-future-post'                     => array(
 		'action' => function () use ( $posts_future ) {
 			$posts_future();
-		},
-	),
-	'publish-future-post'                    => array(
-		'setup'  => $posts_future,
-		'action' => function ( $id ) {
-			wp_publish_post( $id );
 		},
 	),
 	'trash-future-post'                      => array(
@@ -412,18 +406,6 @@ return array(
 					)
 				);
 			}
-		},
-	),
-	'publish-uncategorized-draft'            => array(
-		'setup'  => function () use ( $posts_insert ) {
-			global $wpdb;
-			$id = $posts_insert( array( 'post_status' => 'draft' ) );
-			$wpdb->delete( $wpdb->term_relationships, array( 'object_id' => $id ) );
-			clean_object_term_cache( $id, 'post' );
-			return $id;
-		},
-		'action' => function ( $id ) {
-			wp_publish_post( $id );
 		},
 	),
 	'insert-dated-posts'                     => array(
@@ -701,19 +683,6 @@ return array(
 					'post_title' => 'A renamed post',
 				)
 			);
-		},
-	),
-	'publish-draft-page'                     => array(
-		'setup'  => function () use ( $posts_insert ) {
-			return $posts_insert(
-				array(
-					'post_status' => 'draft',
-					'post_type'   => 'page',
-				)
-			);
-		},
-		'action' => function ( $id ) {
-			wp_publish_post( $id );
 		},
 	),
 	'insert-pending-post'                    => array(

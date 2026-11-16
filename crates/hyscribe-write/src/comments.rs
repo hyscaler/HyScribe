@@ -136,7 +136,8 @@ async fn balance_tags(steps: &mut Steps<'_, '_, DbError>) -> bool {
 
 /// `wp_insert_comment()`: the new comment's ID. An approved comment
 /// recounts its post's comments.
-pub async fn insert_comment(
+#[cfg(test)]
+pub(crate) async fn insert_comment(
     write: &mut Write<'_>,
     context: Context<'_>,
     comment: &NewComment,

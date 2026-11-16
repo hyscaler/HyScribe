@@ -14,7 +14,7 @@ async fn a_shown_notice_fails_with_its_statement() {
         draft: false,
         settings: true,
     };
-    let ctx = context(1, SITE, SITE);
+    let ctx = context(1, SITE, SITE, Default::default());
     let saved = settled(async |budget| {
         let mut write = writer.begin().await;
         if let Ok(write) = &mut write {

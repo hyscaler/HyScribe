@@ -222,22 +222,9 @@ async fn sets_a_role() {
 }
 
 #[tokio::test]
-async fn adds_and_removes_roles() {
-    let setup = async |write: &mut Write<'_>| setup_user(write, new_user("oracle-roles")).await;
-    check("user-add-remove-role", setup, async |write, id| {
-        add_role(write, id, b"editor").await.unwrap();
-        add_role(write, id, b"editor").await.unwrap();
-        remove_role(write, id, b"subscriber").await.unwrap();
-        remove_role(write, id, b"author").await.unwrap();
-    })
-    .await;
-}
-
-#[tokio::test]
 async fn keeps_an_unknown_role_as_a_capability() {
     let setup = async |write: &mut Write<'_>| setup_user(write, new_user("oracle-ghost")).await;
     check("user-unknown-role", setup, async |write, id| {
-        add_role(write, id, b"").await.unwrap();
         set_role(write, id, b"ghost").await.unwrap();
         set_role(write, id, b"ghost").await.unwrap();
     })
@@ -451,8 +438,6 @@ async fn changes_to_users_return_each_database_error() {
             ..UserData::default()
         };
         wp_update_user(write, &new).await?;
-        add_role(write, id, b"editor").await?;
-        remove_role(write, id, b"editor").await?;
         wp_delete_user(write, id, None, &admin()).await?;
         wp_delete_user(write, 1, Some(999_999), &admin()).await?;
         Ok(())
@@ -485,11 +470,6 @@ async fn an_update_keeps_the_reset_key_and_the_hash() {
         let caps = get_metadata(write, Meta::User, id, "wp_capabilities").await;
         let editor = Value::Array(vec![(Key::String(b"editor".to_vec()), Value::Bool(true))]);
         assert_eq!(caps.unwrap(), [editor]);
-        add_role(write, id, b"author").await.unwrap();
-        let caps = get_metadata(write, Meta::User, id, "wp_capabilities").await;
-        let author = (Key::String(b"author".to_vec()), Value::Bool(true));
-        let both = vec![(Key::String(b"editor".to_vec()), Value::Bool(true)), author];
-        assert_eq!(caps.unwrap(), [Value::Array(both)]);
     })
     .await;
 }

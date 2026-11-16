@@ -4,7 +4,6 @@
 //! answers `reference/admin-saves/golden.sh` recorded from PHP writing.
 
 use hyscribe_admin::actions::action;
-use hyscribe_write::comments::{Context, NewComment, insert_comment};
 
 use super::super::comments::count_of;
 use super::super::{Ajax, ajax_handler};
@@ -213,18 +212,17 @@ async fn a_post_trashed_comment_stays_in_the_trash() {
     let admin = admin(&site, &reads);
     let setup = async |conn: &mut Connection| {
         let mut write = writer.begin_on(conn).await.unwrap();
-        let comment = NewComment {
+        let comment = hyscribe_db::CommentFields {
             post_id: 1,
             author: b"A reader".to_vec(),
+            date: "2026-11-01 00:00:00".into(),
+            date_gmt: "2026-11-01 00:00:00".into(),
             content: b"A comment.".to_vec(),
-            approved: Some("post-trashed".into()),
-            ..NewComment::default()
+            approved: "post-trashed".into(),
+            comment_type: "comment".into(),
+            ..hyscribe_db::CommentFields::default()
         };
-        let context = Context {
-            now: crate::now(),
-            home: b"http://127.0.0.1:8081",
-        };
-        let id = insert_comment(&mut write, context, &comment).await.unwrap();
+        let id = write.insert_comment(&comment).await.unwrap();
         write.commit().await.unwrap();
         Ok::<_, String>(id)
     };
@@ -309,7 +307,9 @@ async fn replies_past_what_the_checks_read() {
     };
     // Unseen by the site, which the user may not edit as far as it knows.
     let held = write.insert_comment(&held).await.unwrap();
-    write.set_post_status(2, "").await.unwrap();
+    let mut statusless = write.post(2).await.unwrap().unwrap();
+    statusless.status = String::new();
+    write.update_post(2, &statusless).await.unwrap();
     for (query, user, answer) in [
         ("comment_post_ID=999999999&content=x".to_string(), 1, "-1"),
         (

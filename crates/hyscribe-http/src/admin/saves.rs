@@ -27,7 +27,7 @@ use crate::redirect::wp_validate_redirect;
 
 mod comments;
 pub(super) mod dashboard;
-mod options;
+pub(super) mod options;
 mod posts;
 pub(super) mod screen;
 mod terms;

@@ -322,7 +322,7 @@ async fn https_migration(write: &mut Write<'_>, old: &Value, new: &Value) -> Res
 
 /// `flush_rewrite_rules()`'s `rewrite_rules` option. The `.htaccess` it
 /// also writes on Apache is not written.
-async fn flush_rewrite_rules(write: &mut Write<'_>) -> Result<(), Error> {
+pub(in crate::admin) async fn flush_rewrite_rules(write: &mut Write<'_>) -> Result<(), Error> {
     let mut option = async |name| -> Result<String, Error> {
         Ok(text(&get_option(write, name).await?.to_php_string()))
     };

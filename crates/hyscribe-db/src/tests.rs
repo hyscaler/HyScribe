@@ -1463,8 +1463,9 @@ async fn empty_list_orders_sort_as_php() {
         let listed = db.term_query(&terms(order)).await.unwrap();
         assert_eq!(ids(listed), by_name, "{order:?}");
     }
-    // Lists that are not empty keep their own order.
-    let reversed: Vec<u64> = by_name.iter().rev().copied().collect();
+    // Lists that are not empty keep their own order, here neither name order.
+    let mut reversed: Vec<u64> = by_name.iter().rev().copied().collect();
+    reversed.swap(0, 1);
     let included = TermQuery {
         include: reversed.clone(),
         order: Some((TermOrder::Include, false)),
@@ -1472,7 +1473,10 @@ async fn empty_list_orders_sort_as_php() {
     };
     assert_eq!(ids(db.term_query(&included).await.unwrap()), reversed);
     let slugged = TermQuery {
-        slugs: named.iter().rev().map(|t| t.slug.clone()).collect(),
+        slugs: reversed
+            .iter()
+            .map(|id| named.iter().find(|t| t.id == *id).unwrap().slug.clone())
+            .collect(),
         order: Some((TermOrder::Slugs, false)),
         ..terms(TermOrder::Slugs)
     };

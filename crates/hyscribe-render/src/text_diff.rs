@@ -34,8 +34,8 @@ fn chunks((xoff, xlim): (i64, i64), (yoff, ylim): (i64, i64)) -> i64 {
 
 /// `$corresponding = $j < $other_len ? $i : $len`, whose two ends move the
 /// run alike when `$j` meets `$other_len`: no input tells a mutant apart.
-fn corresponding_end(other_left: bool, i: usize, len: usize) -> usize {
-    if other_left { i } else { len }
+fn corresponding_end((j, other_len): (i64, i64), i: usize, len: usize) -> usize {
+    if j < other_len { i } else { len }
 }
 
 /// The blank final rows before an original row whose match is up a ways:
@@ -346,7 +346,7 @@ fn shift_boundaries(lines: &[&[u8]], changed: &mut [bool], other: &[bool]) {
                 }
                 back(&mut j);
             }
-            corresponding = corresponding_end(j < other_len, i, len);
+            corresponding = corresponding_end((j, other_len), i, len);
             while lines
                 .get(i)
                 .is_some_and(|&line| loose_eq(get(lines, start), line))

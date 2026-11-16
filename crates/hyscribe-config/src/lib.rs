@@ -96,6 +96,9 @@ pub struct Database {
     pub host: String,
     /// `DB_PORT`, default 3306.
     pub port: u16,
+    /// The Unix socket of a `DB_HOST` given as `localhost:/path/to/socket`,
+    /// as in `wp-config.php`; the port is then not used.
+    pub socket: Option<PathBuf>,
     /// `DB_NAME`, required.
     pub name: String,
     /// `DB_USER`, required.
@@ -111,6 +114,16 @@ pub struct Database {
     pub prefix: Prefix,
     /// `DB_CHARSET`, default `utf8mb4`.
     pub charset: String,
+}
+
+impl Database {
+    /// Where the server is: the host and its socket or port.
+    pub fn address(&self) -> String {
+        match &self.socket {
+            Some(socket) => format!("{}:{}", self.host, socket.display()),
+            None => format!("{}:{}", self.host, self.port),
+        }
+    }
 }
 
 /// HTTP listener settings.
@@ -299,9 +312,11 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
     if get("DB_READ_PASSWORD").is_some() && get("DB_READ_USER").is_none() {
         return Err(invalid("DB_READ_PASSWORD", "is set without DB_READ_USER"));
     }
+    let (host, socket) = db_host(get("DB_HOST").unwrap_or("localhost"))?;
     let database = Database {
-        host: get("DB_HOST").unwrap_or("localhost").to_string(),
+        host,
         port: port(get("DB_PORT"), "DB_PORT", 3306)?,
+        socket,
         name: required("DB_NAME")?,
         user: required("DB_USER")?,
         password: Secret::new(get("DB_PASSWORD").unwrap_or_default()),
@@ -396,6 +411,19 @@ pub fn server(values: &HashMap<String, String>) -> Result<Server, ConfigError> {
         port: port(get("PORT"), "PORT", 8080)?,
         behind_proxy: boolean(get("BEHIND_PROXY"), "BEHIND_PROXY")?,
     })
+}
+
+/// `DB_HOST` and its socket: `localhost:/path/to/socket` connects through the
+/// socket, as `wpdb` splits it; as for `mysqli`, only `localhost` takes one.
+fn db_host(value: &str) -> Result<(String, Option<PathBuf>), ConfigError> {
+    match value.split_once(":/") {
+        None => Ok((value.to_string(), None)),
+        Some(("localhost", path)) => Ok(("localhost".into(), Some(format!("/{path}").into()))),
+        Some(_) => Err(invalid(
+            "DB_HOST",
+            "a socket is given as localhost:/path/to/socket",
+        )),
+    }
 }
 
 fn invalid(key: &'static str, reason: &str) -> ConfigError {

@@ -95,6 +95,9 @@ impl hyscribe_rest::Site for Rest<'_> {
     fn public_users(&self) -> bool {
         self.site.public_users
     }
+    fn uses_trash(&self) -> bool {
+        self.site.constants.empty_trash_days != 0
+    }
 
     fn reads(&self) -> &dyn RenderSite {
         &self.reads.reads

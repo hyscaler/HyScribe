@@ -13,6 +13,10 @@ define( 'DISALLOW_FILE_MODS', true );
 if ( ! isset( $_COOKIE['hyscribe_unfiltered_html'] ) ) {
 	define( 'DISALLOW_UNFILTERED_HTML', true );
 }
+// A variant named e0... is an owner's .env with EMPTY_TRASH_DAYS=0.
+if ( 0 === strpos( $_COOKIE['hyscribe_variant'] ?? '', 'e0' ) ) {
+	define( 'EMPTY_TRASH_DAYS', 0 );
+}
 
 function auth_redirect() {}
 

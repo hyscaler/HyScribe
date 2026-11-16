@@ -71,17 +71,21 @@ pub fn import(config: &WpConfig) -> Import {
             _ => import.unread.push(key),
         }
     }
-    // A socket, or a port outside 1 to 65535, is not something `.env` holds.
+    // A port outside 1 to 65535 is not something `.env` holds. `mysqli`
+    // takes the socket for `localhost` only, else the host and port.
     let host = string("DB_HOST").ok().flatten().and_then(|host| {
-        let host = parse_db_host(&host).filter(|host| host.socket.is_none())?;
-        let port = match host.port {
-            Some(port) => Some(u16::try_from(port).ok().filter(|&port| port != 0)?),
-            None => None,
-        };
+        let host = parse_db_host(&host)?;
         let name = if host.host.is_empty() {
             "localhost".to_string()
         } else {
             host.host
+        };
+        if let Some(socket) = host.socket.filter(|_| name == "localhost") {
+            return Some((format!("{name}:{socket}"), None));
+        }
+        let port = match host.port {
+            Some(port) => Some(u16::try_from(port).ok().filter(|&port| port != 0)?),
+            None => None,
         };
         Some((name, port))
     });

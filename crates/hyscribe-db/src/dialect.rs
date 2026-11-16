@@ -110,9 +110,12 @@ impl Dialect for MySql {
             (Access::Read, Some(user)) => (user, &config.read_password),
             _ => (&config.user, &config.password),
         };
-        let options = MySqlConnectOptions::new()
-            .host(&config.host)
-            .port(config.port)
+        let options = MySqlConnectOptions::new();
+        let options = match &config.socket {
+            Some(socket) => options.socket(socket),
+            None => options.host(&config.host).port(config.port),
+        };
+        let options = options
             .database(&config.name)
             .username(user)
             .password(password.expose())

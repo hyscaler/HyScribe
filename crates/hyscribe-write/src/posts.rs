@@ -12,11 +12,12 @@ use hyscribe_db::{PostFields, Write};
 use hyscribe_phpser::Value;
 use hyscribe_render::formatting::sanitize_title;
 
-use crate::Error;
-use crate::options::{Meta, delete_metadata, get_metadata, update_metadata};
-use crate::terms::{TermError, TermRef, wp_set_post_categories};
+use crate::options::{Meta, add_metadata, delete_metadata, get_metadata, update_metadata};
+use crate::terms::{
+    Taxonomy, TermError, TermList, TermRef, wp_set_post_categories, wp_set_post_terms,
+};
+use crate::{Error, cron};
 
-mod cron;
 mod date;
 mod hooks;
 mod link;
@@ -127,6 +128,8 @@ enum Kind {
     Post,
     Page,
     Revision,
+    /// A privacy request, which `_wp_personal_data_cleanup_requests()` updates.
+    UserRequest,
 }
 
 impl Kind {
@@ -135,6 +138,7 @@ impl Kind {
             "post" => Ok(Kind::Post),
             "page" => Ok(Kind::Page),
             "revision" => Ok(Kind::Revision),
+            "user_request" => Ok(Kind::UserRequest),
             _ => Err(Error::Unported("a post type other than post and page")),
         }
     }
@@ -147,7 +151,7 @@ impl Kind {
     fn taxonomies(self) -> &'static [&'static str] {
         match self {
             Kind::Post => &["category", "post_tag", "post_format"],
-            Kind::Page | Kind::Revision => &[],
+            Kind::Page | Kind::Revision | Kind::UserRequest => &[],
         }
     }
 }
@@ -257,6 +261,55 @@ pub async fn get_default_post_to_edit(write: &mut Write<'_>, ctx: &Context) -> R
         cron::schedule_daily(write, ctx.now, HOOK).await?;
     }
     Ok(id)
+}
+
+/// `wp_restore_post_revision( $revision )` of a revision: its post given
+/// the revision's title, content, excerpt and footnotes.
+pub async fn wp_restore_post_revision(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    revision_id: u64,
+) -> Result<u64> {
+    let revision = existing(write, revision_id).await?;
+    let (title, content, excerpt) = (revision.title, revision.content, revision.excerpt);
+    let id = wp_update_post(write, ctx, revision.parent, &|args| {
+        args.title.clone_from(&title);
+        args.content.clone_from(&content);
+        args.excerpt.clone_from(&excerpt);
+    })
+    .await?;
+    let user = Value::Int(ctx.user.cast_signed());
+    update_metadata(write, Meta::Post, id, "_edit_last", &user, &Value::Null).await?;
+    // The `wp_restore_post_revision` action: wp_restore_post_revision_meta().
+    let none = Value::String(Vec::new());
+    delete_metadata(write, Meta::Post, id, "footnotes", &none, false).await?;
+    for value in get_metadata(write, Meta::Post, revision_id, "footnotes").await? {
+        let value = hooks::slash(value);
+        add_metadata(write, Meta::Post, id, "footnotes", &value, false).await?;
+    }
+    Ok(id)
+}
+
+/// `wp_publish_post( $post )`, which cron's `publish_future_post` runs.
+pub async fn wp_publish_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Result<()> {
+    let Some(post) = write.post(id).await? else {
+        return Ok(());
+    };
+    if post.status == "publish" {
+        return Ok(());
+    }
+    // Only categories have a default term on a default install.
+    let kind = Kind::of(&post.post_type)?;
+    if kind == Kind::Post && write.object_terms(id, "category").await?.is_empty() {
+        let default = site::option_int(write, "default_category").await?;
+        if default != 0 {
+            let terms = TermList::List(&[TermRef::Id(default)]);
+            wp_set_post_terms(write, id, terms, Taxonomy::Category, false).await?;
+        }
+    }
+    write.set_post_status(id, "publish").await?;
+    hooks::transition(write, ctx, kind, ("publish", &post.status), id).await?;
+    hooks::save_revision(write, ctx, kind, id).await
 }
 
 /// `sanitize_post( $postarr, 'db' )` with a default install's filters:
@@ -482,4 +535,4 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

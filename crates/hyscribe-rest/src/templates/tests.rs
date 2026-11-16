@@ -30,6 +30,7 @@ fn a_plugin_source_is_the_theme_file() {
         status: 200,
         headers: Vec::new(),
         body: Vec::new(),
+        sent: Vec::new(),
     };
     let theme = serve_over(content, &ask("theme"));
     assert_eq!(serve_over(content, &ask("plugin")), theme);
@@ -178,6 +179,7 @@ fn what_is_not_ported_answers_501() {
             status: 501,
             headers: Vec::new(),
             body: Vec::new(),
+            sent: Vec::new(),
         };
         let served = serve_over(content, &case);
         assert_eq!(served.status, 501, "{method} {target}");

@@ -692,6 +692,7 @@ dependencies = [
  "hyscribe-phpser",
  "hyscribe-theme-json",
  "icu_normalizer",
+ "icu_properties",
  "jiff-tzdb",
  "sha2 0.11.1",
 ]

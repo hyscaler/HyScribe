@@ -260,6 +260,9 @@ impl Site for AnyEmail {
     fn user_by_email(&self, _: &[u8]) -> Option<User> {
         self.0.user_by_email(b"admin@default-install.test")
     }
+    fn check_password(&self, user: &User, password: &[u8]) -> bool {
+        self.0.check_password(user, password)
+    }
     fn can_register(&self) -> bool {
         self.0.can_register()
     }

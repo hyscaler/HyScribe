@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The posts' and pages' writes (MVP 4.3) that reference/rest/golden.sh
+# records as post-writes.tsv, over the default install as
+# post-writes.sql leaves it: each request sent with its body as every
+# identity, the database put back after each. Creates, updates (POST, PUT,
+# PATCH, a form, `_method`), trashes and deletes, with the checks of
+# prepare_item_for_database() and the arguments a client sends that HyScribe
+# does not port (meta, a JSON body PHP refuses).
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"A REST draft","content":"<!-- wp:paragraph -->\n<p>Drafted</p>\n<!-- /wp:paragraph -->","status":"draft"}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Published","status":"publish","excerpt":"Short","slug":"rest slug","comment_status":"closed","ping_status":"closed","categories":[1],"tags":[],"date":"2026-01-02T03:04:05"}
+POST	/?rest_route=/wp/v2/posts	json,restore	{}
+POST	/?rest_route=/wp/v2/posts	form,restore	title=A+form+post&status=pending&slug=hello-world
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Later","status":"future","date_gmt":"2030-01-01T00:00:00Z"}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Private","status":"private","password":"secret","date":"2026-03-04T05:06:07+02:00"}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Both","password":"secret","sticky":true}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Odd","status":"bogus","date":"yesterday"}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Theirs","author":999}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Mine","author":1,"sticky":true,"date":"2026-01-02T03:04:05"}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"<b>Bold</b> <script>x()</script>title","content":"<p onclick=\"y()\">Para</p><script>bad()</script>","excerpt":"<em>Kept</em><iframe src=\"https://example.test/\"></iframe>","date":"2026-01-02T03:04:05"}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":{"raw":"Raw title"},"content":{"raw":"Raw content"},"excerpt":{"raw":""},"featured_media":0,"template":"","date":"2026-01-02T03:04:05"}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Meta","meta":{"footnotes":""}}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":
+POST	/?rest_route=/wp/v2/posts&_fields=id,title,status	json,restore	{"title":"Fields","id":0}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Exists","id":1}
+POST	/?rest_route=/wp/v2/pages	json,restore	{"title":"A REST page","parent":2,"menu_order":3,"status":"publish","content":"<!-- wp:template-part {\"slug\":\"header\"} /-->","date":"2026-01-02T03:04:05"}
+POST	/?rest_route=/wp/v2/pages	json,restore	{"title":"Orphan","parent":999}
+POST	/?rest_route=/wp/v2/posts/1	json,restore	{"title":"Hello again","content":"<!-- wp:paragraph -->\n<p>Changed</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:core/template-part {\"slug\":\"footer\"}   /-->"}
+PUT	/?rest_route=/wp/v2/posts/1	json,restore	{"sticky":true,"tags":[],"categories":[1,999],"date_gmt":"2026-02-03T04:05:06Z"}
+PATCH	/?rest_route=/wp/v2/posts/1	json,restore	{"status":"draft","slug":"sample-page","date":null}
+POST	/?rest_route=/wp/v2/posts/1	json,restore	{"title":"","content":"","excerpt":""}
+POST	/?rest_route=/wp/v2/posts/1	json,restore	{"password":"pw","status":"publish"}
+POST	/?rest_route=/wp/v2/posts/999	json,restore	{"title":"Gone"}
+PUT	/?rest_route=/wp/v2/pages/2	form,restore	title=Sample+renamed&menu_order=5&parent=0&status=private&featured_media=1
+POST	/?rest_route=/wp/v2/pages/3	json,restore	{"status":"draft","password":"pw"}
+DELETE	/?rest_route=/wp/v2/posts/1	restore
+DELETE	/?rest_route=/wp/v2/posts/1&force=true	restore
+DELETE	/?rest_route=/wp/v2/pages/2	restore
+DELETE	/?rest_route=/wp/v2/pages/3&force=1	restore
+POST	/?rest_route=/wp/v2/posts/1&_method=DELETE	restore

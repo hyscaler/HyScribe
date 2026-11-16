@@ -60,6 +60,11 @@ fn defaults_are_safe() {
                 allow_unfiltered_uploads: false,
                 empty_trash_days: 30,
             },
+            login_limits: LoginLimits {
+                address: 5,
+                account: 10,
+                window: 900,
+            },
         }
     );
 }
@@ -136,6 +141,9 @@ fn reads_every_key() {
         ("NONCE_SALT", "z"),
         ("REST_PUBLIC_USERS", "off"),
         ("EMPTY_TRASH_DAYS", "0"),
+        ("LOGIN_LIMIT_ADDRESS", "1"),
+        ("LOGIN_LIMIT_ACCOUNT", "1000"),
+        ("LOGIN_LIMIT_WINDOW", "86400"),
     ]))
     .unwrap();
     assert_eq!(config.database.host, "db.internal");
@@ -165,6 +173,12 @@ fn reads_every_key() {
     assert!(!config.rest_public_users);
     assert_eq!(config.constants.empty_trash_days, 0);
     assert_eq!(server(&with(&[("PORT", "80")])).map(|s| s.port), Ok(80));
+    let limits = LoginLimits {
+        address: 1,
+        account: 1000,
+        window: 86_400,
+    };
+    assert_eq!(config.login_limits, limits);
     let on = from_map(&with(&[("REST_PUBLIC_USERS", "on")])).unwrap();
     assert!(on.rest_public_users);
 }
@@ -200,6 +214,26 @@ fn rejects_bad_values() {
             "EMPTY_TRASH_DAYS",
             "7 days",
             "must be a number of days, 0 or more",
+        ),
+        (
+            "LOGIN_LIMIT_ADDRESS",
+            "0",
+            "must be a whole number from 1 to 1000",
+        ),
+        (
+            "LOGIN_LIMIT_ACCOUNT",
+            "1001",
+            "must be a whole number from 1 to 1000",
+        ),
+        (
+            "LOGIN_LIMIT_WINDOW",
+            "86401",
+            "must be a whole number from 1 to 86400",
+        ),
+        (
+            "LOGIN_LIMIT_WINDOW",
+            "15m",
+            "must be a whole number from 1 to 86400",
         ),
     ];
     for &(key, value, reason) in cases {

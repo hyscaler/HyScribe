@@ -9,7 +9,8 @@ use hyscribe_phpser::{Value, unserialize};
 
 use crate::options::{Autoload, Meta, add_metadata, delete_metadata, get_metadata, update_option};
 
-use super::{Context, Error, Kind, PostArgs, Result, cron, date, link, truthy};
+use super::{Context, Error, Kind, PostArgs, Result, date, link, truthy};
+use crate::cron;
 
 /// The ID `wp_get_post_parent_id()` gives, 0 for none.
 async fn parent_of(write: &mut Write<'_>, id: u64, link: (u64, u64)) -> Result<u64> {
@@ -90,7 +91,7 @@ async fn fresh_site_is_used(write: &mut Write<'_>) -> Result<()> {
 }
 
 /// `wp_slash( $value )`: `addslashes()` on every string, in arrays too.
-fn slash(value: Value) -> Value {
+pub(super) fn slash(value: Value) -> Value {
     match value {
         Value::String(text) => Value::String(hyscribe_phpser::addslashes(&text)),
         Value::Array(entries) => Value::Array(
@@ -244,22 +245,6 @@ pub(super) async fn post_updated(
     Ok(())
 }
 
-/// `normalize_whitespace( $text )`.
-fn normalize_whitespace(text: &[u8]) -> Vec<u8> {
-    let text = hyscribe_phpser::php_trim(text);
-    let mut out: Vec<u8> = Vec::with_capacity(text.len());
-    for &b in text {
-        let b = if b == b'\r' { b'\n' } else { b };
-        let blank = b == b' ' || b == b'\t';
-        match out.last() {
-            Some(b'\n') if b == b'\n' => {}
-            Some(b' ') if blank => {}
-            _ => out.push(if blank { b' ' } else { b }),
-        }
-    }
-    out
-}
-
 /// `wp_save_post_revision( $id )`: a revision of the post unless its last
 /// one has the same title, content, excerpt and footnotes.
 pub(super) async fn save_revision(
@@ -269,7 +254,8 @@ pub(super) async fn save_revision(
     id: u64,
 ) -> Result<()> {
     let post = super::existing(write, id).await?;
-    if kind == Kind::Revision || post.status == "auto-draft" {
+    // Only posts and pages support revisions.
+    if matches!(kind, Kind::Revision | Kind::UserRequest) || post.status == "auto-draft" {
         return Ok(());
     }
     let footnotes = get_metadata(write, Meta::Post, id, "footnotes").await?;
@@ -284,9 +270,10 @@ pub(super) async fn save_revision(
             (&post.content, &latest.content),
             (&post.excerpt, &latest.excerpt),
         ];
-        let changed = fields
-            .iter()
-            .any(|(now, then)| normalize_whitespace(now) != normalize_whitespace(then));
+        let changed = fields.iter().any(|(now, then)| {
+            hyscribe_render::formatting::normalize_whitespace(now)
+                != hyscribe_render::formatting::normalize_whitespace(then)
+        });
         if !changed && get_metadata(write, Meta::Post, revision, "footnotes").await? == footnotes {
             return Ok(());
         }

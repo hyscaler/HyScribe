@@ -19,6 +19,7 @@ mod people;
 mod posts;
 mod search;
 mod site;
+mod writes;
 
 use content::Content;
 
@@ -326,7 +327,8 @@ pub(super) fn serve_with(site: &dyn Site, case: &RestCase) -> Served {
         },
         nonce: (user != 0 && !flag("nononce")).then_some(b"%nonce%"),
         method_override: flag("override").then_some(b"DELETE"),
-        unread_body: false,
+        content_type: None,
+        body: b"",
     };
     serve(site, &request)
 }
@@ -555,6 +557,7 @@ fn get(content: &'static Content, who: &str, target: &str) -> Served {
         status: 0,
         headers: Vec::new(),
         body: Vec::new(),
+        sent: Vec::new(),
     };
     serve_over(content, &case)
 }

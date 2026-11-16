@@ -135,7 +135,7 @@ pub fn import(config: &WpConfig) -> Import {
         _ => Some(String::new()),
     };
     match days {
-        Some(days) if days.parse::<u64>().is_ok() => import.values.push(("EMPTY_TRASH_DAYS", days)),
+        Some(days) if days.parse::<u32>().is_ok() => import.values.push(("EMPTY_TRASH_DAYS", days)),
         Some(_) => import.unread.push("EMPTY_TRASH_DAYS"),
         None => {}
     }

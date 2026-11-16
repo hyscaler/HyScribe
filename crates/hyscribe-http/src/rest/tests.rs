@@ -15,6 +15,7 @@ use tower::ServiceExt;
 use super::*;
 
 mod golden;
+mod writes;
 use crate::router;
 use crate::tests::oracle_site;
 
@@ -90,11 +91,17 @@ async fn nonce(site: &Arc<Site>, user: u64, token: Vec<u8>) -> String {
 /// The administrator's logged in cookie, from logging in at `/hs-login`,
 /// and their REST nonce.
 async fn log_in(site: &Arc<Site>) -> (String, String) {
-    let login = axum::http::Request::builder()
+    log_in_as(site, "admin", 1).await
+}
+
+/// [`log_in`] as the user `id`, whose login is `login`.
+async fn log_in_as(site: &Arc<Site>, login: &str, id: u64) -> (String, String) {
+    let request = axum::http::Request::builder()
         .method("POST")
         .uri("/hs-login")
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
-    let response = send(site, login, "log=admin&pwd=reference-only-password").await;
+    let form = format!("log={login}&pwd=reference-only-password");
+    let response = send(site, request, &form).await;
     let cookie = response
         .headers()
         .get_all(header::SET_COOKIE)
@@ -112,7 +119,7 @@ async fn log_in(site: &Arc<Site>) -> (String, String) {
         .unwrap();
     let value = urldecode(cookie.split_once('=').unwrap().1.as_bytes());
     let token = parse_auth_cookie(&value).unwrap().token.to_vec();
-    (cookie, nonce(site, 1, token).await)
+    (cookie, nonce(site, id, token).await)
 }
 
 /// The headers the golden keeps, sorted.
@@ -122,6 +129,7 @@ fn kept(headers: &HeaderMap, nonce: &str) -> Vec<String> {
             "content-type",
             "x-robots-tag",
             "link",
+            "location",
             "allow",
             "vary",
             "expires",
@@ -472,10 +480,10 @@ async fn posts_are_read_for_the_routes() {
     .unwrap();
 }
 
-/// A write action's body is read when it is a form; any other body, which
-/// only PHP reads, leaves the write unanswered.
+/// A write's body is read as a form or JSON, and a multipart form, which
+/// only PHP reads, leaves the request unanswered.
 #[tokio::test(flavor = "multi_thread")]
-async fn write_actions_read_only_forms() {
+async fn write_bodies_are_read() {
     let dir = tempfile::tempdir().unwrap();
     let site = site(false, dir.path()).await;
     let post = |kind: &'static str| {
@@ -490,7 +498,10 @@ async fn write_actions_read_only_forms() {
     let response = send(&site, post(form), "_wpnonce=x").await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let response = send(&site, post(form), "title=x").await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let response = send(&site, post("application/json"), "{}").await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let multipart = "multipart/form-data; boundary=x";
+    let response = send(&site, post(multipart), "--x--").await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
 }

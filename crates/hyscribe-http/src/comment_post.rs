@@ -289,6 +289,11 @@ fn remote_addr(site: &Site, asked: &Asked) -> Vec<u8> {
 
 /// [`remote_addr`] of a request's `headers` and connection `peer`.
 pub(crate) fn client_addr(site: &Site, headers: &HeaderMap, peer: Option<IpAddr>) -> Vec<u8> {
+    client_ip(site, headers, peer).map_or_else(Vec::new, |ip| ip.to_string().into_bytes())
+}
+
+/// The client's address as [`client_addr`] finds it.
+pub(crate) fn client_ip(site: &Site, headers: &HeaderMap, peer: Option<IpAddr>) -> Option<IpAddr> {
     let forwarded = site
         .behind_proxy
         .then(|| headers.get("x-forwarded-for"))
@@ -296,9 +301,7 @@ pub(crate) fn client_addr(site: &Site, headers: &HeaderMap, peer: Option<IpAddr>
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.rsplit(',').next())
         .and_then(|last| last.trim().parse::<IpAddr>().ok());
-    forwarded
-        .or(peer)
-        .map_or_else(Vec::new, |ip| ip.to_string().into_bytes())
+    forwarded.or(peer)
 }
 
 /// The redirect after a saved comment, with the commenter cookies of a

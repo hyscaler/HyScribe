@@ -29,7 +29,7 @@ pub struct Context<'a> {
     /// `home_url()`, whose host makes a link internal.
     pub home: &'a [u8],
     /// `EMPTY_TRASH_DAYS`: comments are deleted without the trash at 0.
-    pub empty_trash_days: u64,
+    pub empty_trash_days: u32,
 }
 
 /// The capabilities of the user who writes a comment, who is also its

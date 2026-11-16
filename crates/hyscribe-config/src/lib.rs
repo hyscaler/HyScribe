@@ -134,7 +134,7 @@ pub struct Constants {
     pub allow_unfiltered_uploads: bool,
     /// `EMPTY_TRASH_DAYS`, default 30: posts and comments go to the trash
     /// before they are deleted unless it is 0.
-    pub empty_trash_days: u64,
+    pub empty_trash_days: u32,
 }
 
 impl Default for Constants {
@@ -155,6 +155,28 @@ impl Constants {
             "DISALLOW_UNFILTERED_HTML" => self.disallow_unfiltered_html,
             "ALLOW_UNFILTERED_UPLOADS" => self.allow_unfiltered_uploads,
             _ => false,
+        }
+    }
+}
+
+/// Login rate limits (docs/SECURITY_MODEL.md): the failed logins one client
+/// address, or one account, may make in a window before guesses are refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LoginLimits {
+    /// `LOGIN_LIMIT_ADDRESS`, default 5.
+    pub address: u32,
+    /// `LOGIN_LIMIT_ACCOUNT`, default 10.
+    pub account: u32,
+    /// `LOGIN_LIMIT_WINDOW`, in seconds, default 900.
+    pub window: u32,
+}
+
+impl Default for LoginLimits {
+    fn default() -> LoginLimits {
+        LoginLimits {
+            address: 5,
+            account: 10,
+            window: 900,
         }
     }
 }
@@ -181,6 +203,8 @@ pub struct Config {
     pub rest_public_users: bool,
     /// The capability constants.
     pub constants: Constants,
+    /// The login rate limits.
+    pub login_limits: LoginLimits,
 }
 
 /// Why configuration could not be loaded.
@@ -319,6 +343,14 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         },
     };
 
+    let limits = LoginLimits::default();
+    let limit = |key: &'static str, default, max| number(get(key), key, default, max);
+    let login_limits = LoginLimits {
+        address: limit("LOGIN_LIMIT_ADDRESS", limits.address, 1000)?,
+        account: limit("LOGIN_LIMIT_ACCOUNT", limits.account, 1000)?,
+        window: limit("LOGIN_LIMIT_WINDOW", limits.window, 86_400)?,
+    };
+
     let salts = SALT_KEYS
         .iter()
         .filter_map(|&key| get(key).map(|value| (key, Secret::new(value))))
@@ -334,6 +366,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         salts,
         rest_public_users,
         constants,
+        login_limits,
     })
 }
 
@@ -373,6 +406,23 @@ fn port(value: Option<&str>, key: &'static str, default: u16) -> Result<u16, Con
             .ok()
             .filter(|&port| port != 0)
             .ok_or_else(|| invalid(key, "must be a port number from 1 to 65535")),
+    }
+}
+
+/// A whole number from 1 to `max`.
+fn number(
+    value: Option<&str>,
+    key: &'static str,
+    default: u32,
+    max: u32,
+) -> Result<u32, ConfigError> {
+    match value {
+        None => Ok(default),
+        Some(value) => value
+            .parse()
+            .ok()
+            .filter(|number| (1..=max).contains(number))
+            .ok_or_else(|| invalid(key, &format!("must be a whole number from 1 to {max}"))),
     }
 }
 

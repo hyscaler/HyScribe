@@ -142,6 +142,10 @@ impl RenderSite for Reads<'_> {
         })
     }
 
+    fn older_comments(&self, post_id: u64, date_gmt: &str) -> u64 {
+        self.wait(self.site.db.older_comments(post_id, date_gmt))
+    }
+
     fn cloud_terms(&self, taxonomy: &str, limit: u64) -> Vec<Term> {
         self.wait(self.site.db.cloud_terms(taxonomy, limit))
     }

@@ -67,6 +67,10 @@ impl Site for WithComments {
             .cloned()
             .collect()
     }
+    fn older_comments(&self, post_id: u64, date_gmt: &str) -> u64 {
+        let older = |c: &&Comment| c.post_id == post_id && c.parent == 0 && *c.date_gmt < *date_gmt;
+        self.comments.iter().filter(older).count() as u64
+    }
     fn comment(&self, id: u64) -> Option<Comment> {
         self.comments.iter().find(|c| c.id == id).cloned()
     }
@@ -144,7 +148,7 @@ fn matches_php() {
         failures.len(),
         failures[..failures.len().min(3)].join("\n")
     );
-    assert_eq!(golden.lines().count(), 2292);
+    assert_eq!(golden.lines().count(), 2310);
 }
 
 /// A held comment shows only to its author, from the link
@@ -156,6 +160,52 @@ fn held_comments_preview_as_php() {
     let failures = differences(golden);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert_eq!(golden.lines().count(), 67);
+}
+
+/// A site without notes counts its comments' top level ones from before
+/// a date, as `get_page_of_comment()` does.
+#[test]
+fn older_comments_count_the_top_level() {
+    let site = DefaultInstall {
+        home: b"http://127.0.0.1:8081".to_vec(),
+    };
+    // The fixture's one comment is from 2026-10-27 08:08:15.
+    assert_eq!(site.older_comments(1, "2026-10-27 08:08:16"), 1);
+    assert_eq!(site.older_comments(1, "2026-10-27 08:08:15"), 0);
+}
+
+/// On paged comments, a reply whose thread has no top, as its parent is
+/// missing or the parents loop, links to no page, where PHP fails.
+#[test]
+fn comments_without_a_thread_top_link_to_no_page() {
+    let comment = |id, parent| Comment {
+        id,
+        post_id: 1,
+        parent,
+        ..Comment::default()
+    };
+    let site = WithComments {
+        base: DefaultInstall {
+            home: b"http://127.0.0.1:8081".to_vec(),
+        },
+        options: parse_str(b"page_comments=1&comments_per_page=1"),
+        comments: vec![comment(10, 11), comment(11, 10), comment(12, 99)],
+        users: Vec::new(),
+        password: false,
+        closed: false,
+        siteurl: b"http://127.0.0.1:8081".to_vec(),
+        held: Vec::new(),
+        hashes: Value::Null,
+    };
+    let (theme, request) = (twentytwentyfive(), Request::default());
+    let renderer = Renderer::new(&theme, &site, &request);
+    for (id, parent) in [(10, 11), (12, 99)] {
+        let link = crate::core_blocks::comment_link(&renderer.context, &comment(id, parent));
+        assert_eq!(
+            link,
+            format!("http://127.0.0.1:8081/?p=1#comment-{id}").into_bytes()
+        );
+    }
 }
 
 /// Where a golden's cases differ from the renderer's.

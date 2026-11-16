@@ -7,6 +7,7 @@
 #   reference/default-install/db.sh down
 # Then: DB_HOST=127.0.0.1 DB_PORT=33061 DB_NAME=wordpress DB_USER=wordpress
 #       DB_PASSWORD=reference-only
+# or DB_HOST=localhost:${TMPDIR:-/tmp}/hyscribe-db-33061/mysqld.sock, its socket.
 # The wordpress_terms database holds the same install with terms.sql added,
 # wordpress_saves nothing until a test loads the install into it, and
 # wordpress_ttd the Theme Test Data fixture when it has been built
@@ -20,6 +21,7 @@ NAME="${HYSCRIBE_DB_CONTAINER:-hyscribe-default-install-db}"
 PORT="${HYSCRIBE_DB_PORT:-33061}"
 # php.sh joins this network to reach the database as "db".
 NETWORK="${HYSCRIBE_REF_NETWORK:-hyscribe-ref}"
+SOCKETS="${TMPDIR:-/tmp}/hyscribe-db-$PORT"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 case "${1:-}" in
@@ -29,7 +31,10 @@ case "${1:-}" in
     test -f "$dump" || { echo "no fixture for $version" >&2; exit 1; }
     "$DOCKER" rm -f "$NAME" >/dev/null 2>&1 || true
     "$DOCKER" network inspect "$NETWORK" >/dev/null 2>&1 || "$DOCKER" network create "$NETWORK" >/dev/null
+    # The server's Unix socket, for the tests of a socket DB_HOST.
+    mkdir -p "$SOCKETS"
     "$DOCKER" run -d --name "$NAME" --network "$NETWORK" --network-alias db -p "127.0.0.1:$PORT:3306" \
+      -v "$SOCKETS:/run/mysqld" \
       -e MARIADB_ROOT_PASSWORD=reference-only -e MARIADB_DATABASE=wordpress \
       -e MARIADB_USER=wordpress -e MARIADB_PASSWORD=reference-only "$IMAGE" >/dev/null
     # Over TCP: the image's first, initialising server listens on the socket only.

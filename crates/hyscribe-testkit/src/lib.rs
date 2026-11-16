@@ -290,6 +290,7 @@ pub fn fixture_database() -> hyscribe_config::Database {
         port: env("HYSCRIBE_TEST_DB_PORT", "33061")
             .parse()
             .unwrap_or(33061),
+        socket: None,
         name: "wordpress".into(),
         user: "wordpress".into(),
         password: hyscribe_config::Secret::new("reference-only"),
@@ -298,6 +299,13 @@ pub fn fixture_database() -> hyscribe_config::Database {
         prefix: hyscribe_config::Prefix::default(),
         charset: "utf8mb4".into(),
     }
+}
+
+/// The fixture database's Unix socket, which `db.sh up` puts in a folder
+/// named after its port.
+pub fn fixture_socket() -> std::path::PathBuf {
+    let port = fixture_database().port;
+    std::env::temp_dir().join(format!("hyscribe-db-{port}/mysqld.sock"))
 }
 
 /// The bytes a golden file's hex field spells. Golden files hex encode

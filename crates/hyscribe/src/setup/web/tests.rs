@@ -452,6 +452,50 @@ async fn step_3_checks_then_writes_env() {
     assert_eq!(answer.location(), STEP_1);
 }
 
+/// A socket host and a literal `UPLOADS` are copied in the browser too;
+/// pasted, `UPLOADS` has no WordPress folder to be in.
+#[tokio::test]
+async fn a_socket_host_and_uploads_are_copied() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("hyscribe");
+    let site = dir.path().join("site");
+    std::fs::create_dir(&home).unwrap();
+    std::fs::create_dir_all(site.join("files")).unwrap();
+    let (text, socket) = crate::setup::tests::socket_wp_config("define( 'UPLOADS', 'files' );");
+    std::fs::write(site.join("wp-config.php"), &text).unwrap();
+    let shared = shared(&home);
+    sign_in(&shared).await;
+    let csrf = ("_csrf", "csrf-token");
+    let pasted = [csrf, ("contents", text.as_str())];
+    ask(&shared, "POST", STEP_2, SIGNED_IN, &pasted).await;
+    let answer = ask(&shared, "GET", STEP_3, SIGNED_IN, &[]).await;
+    for shown in [
+        "  UPLOADS is not a literal in a WordPress folder given, so it is not copied: ",
+        "name=\"UPLOADS_DIR\" value=\"\"",
+    ] {
+        assert!(answer.body.contains(shown), "{shown}\n{}", answer.body);
+    }
+    let path = site.display().to_string();
+    ask(&shared, "POST", STEP_2, SIGNED_IN, &[csrf, ("path", &path)]).await;
+    let answer = ask(&shared, "GET", STEP_3, SIGNED_IN, &[]).await;
+    let uploads = format!("{path}/files");
+    let shown = format!("name=\"UPLOADS_DIR\" value=\"{uploads}\"");
+    assert!(answer.body.contains(&shown), "{}", answer.body);
+    assert!(!answer.body.contains("DB_HOST"), "{}", answer.body);
+    let accepted = [csrf, ("MODE", "shadow"), ("UPLOADS_DIR", &uploads)];
+    let answer = ask(&shared, "POST", STEP_3, SIGNED_IN, &accepted).await;
+    let connected = format!(
+        "  Connected to wordpress on localhost:{}, ",
+        socket.display()
+    );
+    assert!(answer.body.contains(&connected), "{}", answer.body);
+    let config = hyscribe_config::load(&home, &HashMap::new())
+        .unwrap()
+        .unwrap();
+    assert_eq!(config.database.socket, Some(socket));
+    assert_eq!(config.uploads_dir, Some(PathBuf::from(uploads)));
+}
+
 /// The wp-content answered is the one checked for an object cache.
 #[tokio::test]
 async fn the_wp_content_answered_is_used() {

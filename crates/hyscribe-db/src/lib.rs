@@ -1424,12 +1424,9 @@ impl Db {
             .await
             .map_err(db_error)?;
         let ids: Result<Vec<u64>, DbError> = rows.iter().map(term_id).collect();
-        let mut sql = Sql::new(concat!(
-            "SELECT ",
-            terms_from!(),
-            "WHERE tt.taxonomy = ? AND t.term_id IN ("
-        ));
-        sql.bind(Bind::Text(query.taxonomy.clone()));
+        let mut sql = Sql::new(concat!("SELECT ", terms_from!(), "WHERE tt.taxonomy IN ("));
+        taxonomies(&mut sql, query);
+        sql.push(" AND t.term_id IN (");
         list(&mut sql, ids_or_none(ids.as_deref().unwrap_or_default()));
         let rows = sql
             .query(&self.prefix)
@@ -2150,6 +2147,12 @@ fn search_terms(sql: &mut Sql, search: &str) {
 }
 
 /// The `FROM` and `WHERE` of a `WP_Term_Query` after `select`.
+/// The taxonomies of `query`, closing the parenthesis.
+fn taxonomies(sql: &mut Sql, query: &TermQuery) {
+    let names = std::iter::once(&query.taxonomy).chain(&query.taxonomies);
+    list(sql, names.map(|name| Bind::Text(name.clone())));
+}
+
 fn term_where(mut sql: Sql, query: &TermQuery) -> Sql {
     sql.push(
         " FROM {prefix}terms AS t \
@@ -2161,8 +2164,8 @@ fn term_where(mut sql: Sql, query: &TermQuery) -> Sql {
              ON tr.term_taxonomy_id = tt.term_taxonomy_id",
         );
     }
-    sql.push(" WHERE tt.taxonomy IN (?)");
-    sql.bind(Bind::Text(query.taxonomy.clone()));
+    sql.push(" WHERE tt.taxonomy IN (");
+    taxonomies(&mut sql, query);
     if !query.include.is_empty() {
         sql.push(" AND t.term_id IN (");
         list(&mut sql, query.include.iter().copied().map(Bind::Int));

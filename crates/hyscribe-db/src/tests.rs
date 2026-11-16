@@ -1426,6 +1426,25 @@ async fn term_queries_take_the_rest_arguments() {
     assert_eq!(db.term_query_count(&elsewhere).await.unwrap(), 0);
 }
 
+/// A term query over several taxonomies finds the terms of each.
+#[tokio::test]
+async fn term_queries_take_several_taxonomies() {
+    let db = named("wordpress_ttd").await;
+    let count = |taxonomy: &str, taxonomies: Vec<String>| TermQuery {
+        taxonomy: taxonomy.into(),
+        taxonomies,
+        order: Some((TermOrder::Name, false)),
+        ..TermQuery::default()
+    };
+    let categories = db.term_query_count(&count("category", Vec::new())).await;
+    let tags = db.term_query_count(&count("post_tag", Vec::new())).await;
+    let both = count("category", vec!["post_tag".into()]);
+    let total = categories.unwrap() + tags.unwrap();
+    assert_eq!(db.term_query_count(&both).await.unwrap(), total);
+    let found = db.term_query(&both).await.unwrap();
+    assert_eq!(found.len() as u64, total);
+}
+
 /// The order of an empty list, for which PHP writes no `FIELD()`: terms
 /// sort by name, and a post order leaves the key out, the date alone.
 #[tokio::test]

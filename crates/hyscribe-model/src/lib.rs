@@ -268,6 +268,8 @@ pub struct StatusFilter {
 pub struct TermQuery {
     /// `tt.taxonomy`.
     pub taxonomy: String,
+    /// More taxonomies a term may be in: `tt.taxonomy IN (taxonomy, ...)`.
+    pub taxonomies: Vec<String>,
     /// `include`: `t.term_id IN (...)` when not empty.
     pub include: Vec<u64>,
     /// `tt.parent = n`.

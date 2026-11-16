@@ -3,13 +3,6 @@
 //! `_embed` answered as PHP answers it for a visitor and each role, over
 //! the default install and, by hash, the Theme Test Data fixture.
 
-use hyscribe_testkit::{RestCase, rest_cases};
-
-/// Term searches over every taxonomy.
-fn unported(case: &RestCase) -> bool {
-    case.target.contains("type=term")
-}
-
 #[test]
 fn embedding_answers_as_php() {
     let goldens = [
@@ -24,13 +17,12 @@ fn embedding_answers_as_php() {
             true,
         ),
     ];
-    let (failures, not_served) = super::mismatches(&goldens, true, &unported);
+    let (failures, not_served) = super::mismatches(&goldens, true, &|_| false);
     assert!(
         failures.is_empty(),
         "{} failures\n{}",
         failures.len(),
         failures.join("\n")
     );
-    let cases = goldens.iter().flat_map(|(_, golden, _)| rest_cases(golden));
-    assert_eq!(not_served, cases.filter(unported).count());
+    assert_eq!(not_served, 0);
 }

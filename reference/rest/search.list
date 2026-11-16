@@ -54,8 +54,13 @@ GET	/?rest_route=/wp/v2/search&search=private	ttd
 GET	/?rest_route=/wp/v2/search&search=a&per_page=100	ttd
 GET	/?rest_route=/wp/v2/search&subtype=page&per_page=100	ttd
 GET	/?rest_route=/wp/v2/search&per_page=100&page=2	ttd
-GET	/?rest_route=/wp/v2/search&type=term&per_page=100	ttd
-GET	/?rest_route=/wp/v2/search&type=term&search=post	ttd
+GET	/?rest_route=/wp/v2/search&type=term&per_page=30	ttd
+GET	/?rest_route=/wp/v2/search&type=term&per_page=20&page=7	ttd
+GET	/?rest_route=/wp/v2/search&type=term&per_page=24&page=8	ttd
+GET	/?rest_route=/wp/v2/search&type=term&subtype=post_tag,category&search=pa&per_page=3&page=2	ttd
+GET	/?rest_route=/wp/v2/search&type=term&subtype=category,post_tag&include=1,89&_fields=id,type
+GET	/?rest_route=/wp/v2/search&type=term&subtype=any&exclude=1
+GET	/?rest_route=/wp/v2/search&type=term&search=pa	ttd
 GET	/?rest_route=/wp/v2/search&type=post-format&per_page=100	ttd
 GET	/?rest_route=/wp/v2/search&type=post-format&search=Image	ttd
 GET	/wp-json/wp/v2/search?type=post-format	pretty,ttd

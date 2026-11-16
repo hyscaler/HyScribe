@@ -55,7 +55,7 @@ impl<'a> Rendering<'a> {
         let site = renderer.context.site;
         let excerpt = wptexturize(&excerpt, &CORE_SHORTCODE_TAGS);
         let excerpt = convert_chars(&site_smilies(site, &excerpt));
-        let excerpt = replace_insecure_home_url(&site.home_url(), &wpautop(&excerpt, true));
+        let excerpt = replace_insecure_home_url(site, &wpautop(&excerpt, true));
         wp_filter_content_tags(site, &renderer.context.loading, &excerpt)
     }
 }

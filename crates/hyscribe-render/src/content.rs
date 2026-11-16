@@ -6,9 +6,9 @@
 //! Not ported yet: shortcodes, `wp_link_pages()`, `force_balance_tags()` on
 //! a teaser, attachments and `wp_filter_content_tags()`.
 
-use hyscribe_kses::{esc_attr, esc_url};
+use hyscribe_kses::{esc_attr, esc_url, url_host, url_scheme};
 use hyscribe_model::Post;
-use hyscribe_phpser::{Value, is_empty_string};
+use hyscribe_phpser::{Maybe, Value, is_empty_string, maybe_unserialize, php_trim};
 
 use crate::attachment::prepend::prepend_attachment;
 use crate::autop::wpautop;
@@ -17,7 +17,7 @@ use crate::content_tags::wp_filter_content_tags;
 use crate::core_blocks::prepared;
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, contains, wptexturize};
 use crate::post::the_title;
-use crate::site::Request;
+use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::{Renderer, replace, site_smilies};
 
@@ -113,7 +113,7 @@ impl Renderer<'_> {
             .concat(),
             None => content,
         };
-        let content = replace_insecure_home_url(&site.home_url(), &content);
+        let content = replace_insecure_home_url(site, &content);
         let content = capital_p_dangit(&autop_at(true, content));
         let content = if tags {
             wp_filter_content_tags(site, &self.context.loading, &content)
@@ -335,20 +335,48 @@ pub(crate) fn password_form(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
     .into_bytes()
 }
 
-/// `wp_replace_insecure_home_url()`: on an HTTPS site, links to its HTTP
-/// address become HTTPS, escaped slashes included.
-pub(crate) fn replace_insecure_home_url(home: &[u8], content: &[u8]) -> Vec<u8> {
-    let Some(rest) = home.strip_prefix(b"https://") else {
+/// `wp_replace_insecure_home_url()`: links to the site's HTTP address
+/// become HTTPS, escaped slashes included, when
+/// `wp_should_replace_insecure_home_url()` says so.
+pub(crate) fn replace_insecure_home_url(site: &dyn Site, content: &[u8]) -> Vec<u8> {
+    let Some(https) = https_home_url(site) else {
         return content.to_vec();
     };
-    let https = home.to_vec();
-    let http = [b"http://", rest].concat();
+    let http = replace(&https, b"https://", b"http://");
     let escaped = |url: &[u8]| replace(url, b"/", b"\\/");
     replace(
         &replace(content, &http, &https),
         &escaped(&http),
         &escaped(&https),
     )
+}
+
+/// `home_url( '', 'https' )` when `wp_should_replace_insecure_home_url()`:
+/// home and siteurl on HTTPS, on the same host, and the
+/// `https_migration_required` option set. `home_url()` is the home as
+/// rendering reads it everywhere, with its stored scheme: as PHP builds it
+/// when `is_ssl()` is false, so a stored `http://` home on a request PHP
+/// sees as HTTPS is the one difference. It is trimmed, as `site_url()`
+/// trims siteurl; `wp_is_site_url_using_https()` reads siteurl's scheme as
+/// stored.
+fn https_home_url(site: &dyn Site) -> Option<Vec<u8>> {
+    let home = site.home_url();
+    let siteurl = site.option("siteurl").unwrap_or_default();
+    let https = |url: &[u8]| url_scheme(url).as_deref() == Some(b"https".as_slice());
+    let required = || match site.option("https_migration_required") {
+        None => false,
+        Some(stored) => match maybe_unserialize(&stored) {
+            Maybe::Plain(text) => !is_empty_string(text),
+            Maybe::Value(value) => !value.is_empty(),
+            Maybe::Invalid(_) => false,
+        },
+    };
+    let trimmed = php_trim(&home);
+    (https(&home)
+        && https(&siteurl)
+        && url_host(trimmed) == url_host(php_trim(&siteurl))
+        && required())
+    .then(|| trimmed.to_vec())
 }
 
 #[cfg(test)]

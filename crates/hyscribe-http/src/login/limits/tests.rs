@@ -154,34 +154,67 @@ fn the_state_stays_bounded_under_many_addresses() {
     assert_eq!(limiter.state().addresses.len(), 2);
     let limiter = self::limiter();
     guess(&limiter, attacker, 1, 5, T);
-    let home = ip("192.0.2.2");
-    limiter.record(home, &[(1, true)], T);
+    limiter.record(ip("192.0.2.2"), &[(1, true)], T);
     let client = |n: usize| Some(IpAddr::from([10, (n >> 16) as u8, (n >> 8) as u8, n as u8]));
+    // A flood in one second: a full map drops its oldest sixteenth, and
+    // everything that ties with it, but keeps a refusal.
     for n in 0..TRACKED {
         limiter.record(client(n), &[(n as u64 + 10, false)], T + 1);
     }
+    {
+        let state = limiter.state();
+        assert_eq!(state.addresses.len(), 2);
+        assert!(state.addresses.contains_key(&network(attacker)));
+        assert_eq!(state.accounts.len(), 1);
+    }
+    assert!(!limiter.allows(attacker, 1, T + 1));
+    // Logins a second apart: exactly the oldest sixteenth goes.
     for n in 0..TRACKED {
-        limiter.record(client(n), &[(n as u64 + 10, true)], T + 2);
+        limiter.record(client(n), &[(n as u64 + 10, true)], T + 1 + n as i64);
     }
     {
         let state = limiter.state();
-        assert_eq!(state.addresses.len(), TRACKED);
-        assert_eq!(state.accounts.len(), TRACKED);
-        assert_eq!(state.trusted.len(), TRACKED);
-        // The oldest went to make room.
-        assert!(!state.accounts.contains_key(&1));
-        assert!(!state.trusted.contains_key(&(1, network(home))));
+        assert_eq!(state.trusted.len(), TRACKED - TRACKED / 16);
+        assert!(!state.trusted.contains_key(&1));
     }
-    assert!(limiter.allows(attacker, 1, T + 2));
     // Spent entries go before any other.
+    let limiter = self::limiter();
+    for n in 0..TRACKED {
+        limiter.record(client(n), &[], T);
+    }
     limiter.record(attacker, &[], late);
     assert_eq!(limiter.state().addresses.len(), 1);
-    for n in 0..TRACKED + 10 {
-        limiter.record(client(n), &[], late + 1);
+}
+
+#[test]
+fn an_account_is_trusted_from_its_last_eight_addresses() {
+    let limiter = limiter();
+    for n in 0..9 {
+        limiter.record(ip(&format!("192.0.2.{n}")), &[(1, true)], T + n);
     }
-    let state = limiter.state();
-    assert_eq!(state.addresses.len(), TRACKED);
-    assert!(!state.addresses.contains_key(&network(attacker)));
+    // Again from the second: it becomes the latest.
+    limiter.record(ip("192.0.2.1"), &[(1, true)], T + 9);
+    limiter.record(ip("192.0.2.9"), &[(1, true)], T + 10);
+    for n in 0..10 {
+        guess(&limiter, ip(&format!("198.51.100.{n}")), 1, 1, T + 10);
+    }
+    let trusted = |n: u8| limiter.allows(ip(&format!("192.0.2.{n}")), 1, T + 10);
+    assert_eq!(
+        (0..10).map(trusted).collect::<Vec<_>>(),
+        [false, true, false, true, true, true, true, true, true, true]
+    );
+}
+
+#[test]
+fn an_address_checks_one_password_at_a_time() {
+    let limiter = Arc::new(limiter());
+    let turn = limiter.turn(ip("2001:db8::1"));
+    assert!(turn.is_some());
+    assert!(limiter.turn(ip("2001:db8::2")).is_none());
+    assert!(limiter.turn(ip("192.0.2.1")).is_some());
+    assert!(limiter.turn(ip("192.0.2.1")).is_some());
+    drop(turn);
+    assert!(limiter.turn(ip("2001:db8::2")).is_some());
 }
 
 #[test]

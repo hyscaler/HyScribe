@@ -257,10 +257,12 @@ async fn a_limited_address_is_answered_as_a_wrong_password() {
             .contains("The username <strong>nobody</strong> is not registered")
     );
     assert_eq!(limited.body, fresh.body);
-    // An empty password is no guess.
-    for _ in 0..5 {
-        post_from(&site, "192.0.2.3", "", "log=admin&pwd=&testcookie=1").await;
+    // A blank password is no guess.
+    for pwd in ["", "%20", "0", "%200"] {
+        let form = format!("log=admin&pwd={pwd}&testcookie=1");
+        post_from(&site, "192.0.2.3", "", &form).await;
     }
+    post_from(&site, "192.0.2.3", "", "log=admin&testcookie=1").await;
     let other = post_from(&site, "192.0.2.3", "", RIGHT).await;
     assert_eq!(other.status, StatusCode::FOUND);
 }
@@ -316,20 +318,32 @@ async fn a_limited_guess_never_reaches_the_hash() {
     }
     let handle = Handle::current();
     tokio::task::spawn_blocking(move || {
-        let mut reads = LoginReads::new(&site, handle, now());
         let user = User {
             id: 1,
             pass: md5(b"right").into_bytes(),
             use_ssl: false,
             activation_key: Vec::new(),
         };
-        reads.client = client;
-        assert!(!LoginSite::check_password(&reads, &user, b"right"));
-        assert!(reads.checked.borrow().is_empty());
-        reads.client = Some("192.0.2.2".parse().unwrap());
+        let reads_from = |client| {
+            let mut reads = LoginReads::new(&site, handle.clone(), now());
+            reads.client = client;
+            reads
+        };
+        let refused = reads_from(client);
+        assert!(!LoginSite::check_password(&refused, &user, b"right"));
+        assert!(refused.checked.borrow().is_empty());
+        // One request checks twice; another of its address meanwhile none.
+        let other = Some("192.0.2.2".parse().unwrap());
+        let reads = reads_from(other);
         assert!(LoginSite::check_password(&reads, &user, b"right"));
         assert!(!LoginSite::check_password(&reads, &user, b"wrong"));
         assert_eq!(*reads.checked.borrow(), [(1, true), (1, false)]);
+        let meanwhile = reads_from(other);
+        assert!(!LoginSite::check_password(&meanwhile, &user, b"right"));
+        drop(reads);
+        let after = reads_from(other);
+        assert!(LoginSite::check_password(&after, &user, b"right"));
+        assert!(meanwhile.checked.borrow().is_empty());
     })
     .await
     .unwrap();

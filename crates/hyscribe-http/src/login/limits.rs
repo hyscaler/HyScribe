@@ -4,10 +4,10 @@
 //! client address and per account, in memory only, so that a limited guess
 //! is answered as a wrong password before its hash is checked.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use hyscribe_config::LoginLimits;
 
@@ -15,8 +15,12 @@ use hyscribe_config::LoginLimits;
 /// remembered for the next one to double.
 const MAX_LOCKOUT: i64 = 86_400;
 
-/// How many addresses, accounts and trusted logins each map keeps.
+/// How many addresses, accounts and accounts' trusted addresses each map
+/// keeps.
 pub(crate) const TRACKED: usize = 65_536;
+
+/// How many addresses an account is trusted from, the latest kept.
+const TRUSTED: usize = 8;
 
 /// One address's or account's failures in its window, and its refusals.
 #[derive(Clone, Copy, Debug, Default)]
@@ -59,18 +63,33 @@ impl Counter {
     fn spent(&self, now: i64, window: i64) -> bool {
         now - self.since >= window && now - self.until >= MAX_LOCKOUT
     }
+
+    /// When it last mattered, so that a full map keeps refusals longest.
+    fn age(&self) -> i64 {
+        self.since.max(self.until)
+    }
+}
+
+/// The addresses an account logged in from, latest last, and when it last
+/// did.
+#[derive(Debug, Default)]
+struct Trust {
+    at: i64,
+    addresses: Vec<IpAddr>,
 }
 
 #[derive(Debug, Default)]
 struct State {
     addresses: HashMap<IpAddr, Counter>,
     accounts: HashMap<u64, Counter>,
-    /// When an account last logged in from an address.
-    trusted: HashMap<(u64, IpAddr), i64>,
+    trusted: HashMap<u64, Trust>,
+    /// The addresses with a password check under way.
+    busy: HashSet<IpAddr>,
 }
 
 /// The value of `key` in `map`; a new key in a full map first drops the
-/// `spent` entries and, when it is still full, the one of the lowest `age`.
+/// `spent` entries and, when it is still full, the sixteenth of the lowest
+/// `age`, so that a flood pays for a sweep only once in thousands.
 fn slot<K: Hash + Eq + Copy, V: Default>(
     map: &mut HashMap<K, V>,
     key: K,
@@ -80,10 +99,9 @@ fn slot<K: Hash + Eq + Copy, V: Default>(
     if map.len() >= TRACKED && !map.contains_key(&key) {
         map.retain(|_, value| !spent(value));
         if map.len() >= TRACKED {
-            let oldest = map.iter().min_by_key(|(_, value)| age(value));
-            if let Some(oldest) = oldest.map(|(key, _)| *key) {
-                map.remove(&oldest);
-            }
+            let mut ages: Vec<i64> = map.values().map(&age).collect();
+            let cut = *ages.select_nth_unstable(TRACKED / 16).1;
+            map.retain(|_, value| age(value) > cut);
         }
     }
     map.entry(key).or_default()
@@ -106,6 +124,18 @@ pub(crate) struct Limiter {
     state: Mutex<State>,
 }
 
+/// A client's one password check at a time, until dropped.
+pub(crate) struct Turn {
+    limiter: Arc<Limiter>,
+    key: IpAddr,
+}
+
+impl Drop for Turn {
+    fn drop(&mut self) {
+        self.limiter.state().busy.remove(&self.key);
+    }
+}
+
 impl Limiter {
     pub(crate) fn new(limits: LoginLimits) -> Limiter {
         Limiter {
@@ -119,14 +149,27 @@ impl Limiter {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// `client`'s turn to check passwords, none while another request of
+    /// its address checks one, so that guesses sent at once count as well.
+    pub(crate) fn turn(self: &Arc<Self>, client: Option<IpAddr>) -> Option<Turn> {
+        let key = network(client);
+        let free = self.state().busy.insert(key);
+        free.then(|| Turn {
+            limiter: Arc::clone(self),
+            key,
+        })
+    }
+
     /// Whether `user`'s password may be checked for `client`: neither is
     /// refused, unless the account logged in from that address before.
     pub(crate) fn allows(&self, client: Option<IpAddr>, user: u64, now: i64) -> bool {
         let key = network(client);
         let state = self.state();
         let refused = |counter: Option<&Counter>| counter.is_some_and(|c| c.refused(now));
+        let trusted = state.trusted.get(&user);
         !refused(state.addresses.get(&key))
-            && (!refused(state.accounts.get(&user)) || state.trusted.contains_key(&(user, key)))
+            && (!refused(state.accounts.get(&user))
+                || trusted.is_some_and(|trust| trust.addresses.contains(&key)))
     }
 
     /// A guess from `client`, with the accounts whose password was checked
@@ -138,18 +181,23 @@ impl Limiter {
         let mut state = self.state();
         let matched: Vec<u64> = checked.iter().filter(|c| c.1).map(|c| c.0).collect();
         for user in &matched {
-            *slot(&mut state.trusted, (*user, key), |_| false, |at| *at) = now;
+            let trust = slot(&mut state.trusted, *user, |_| false, |trust| trust.at);
+            trust.at = now;
+            trust.addresses.retain(|address| *address != key);
+            trust.addresses.push(key);
+            if trust.addresses.len() > TRUSTED {
+                trust.addresses.remove(0);
+            }
         }
         if !matched.is_empty() {
             return;
         }
         let spent = |counter: &Counter| counter.spent(now, window);
-        let age = |counter: &Counter| counter.since;
         let address = (self.limits.address, window, MAX_LOCKOUT);
-        slot(&mut state.addresses, key, spent, age).fail(now, address);
+        slot(&mut state.addresses, key, spent, Counter::age).fail(now, address);
         for (user, _) in checked {
             let account = (self.limits.account, window, window);
-            slot(&mut state.accounts, *user, spent, age).fail(now, account);
+            slot(&mut state.accounts, *user, spent, Counter::age).fail(now, account);
         }
     }
 }

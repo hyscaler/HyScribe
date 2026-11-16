@@ -1092,7 +1092,8 @@ async fn edits_of_odd_fields() {
         ("post_password=secret", "publish 1 secret"),
         ("post_format=standard", "publish 1 "),
     ] {
-        let (_, statuses) = quick_edit(post(more)).await;
+        let (answer, statuses) = quick_edit(post(more)).await;
+        assert_eq!(answer, Ok(Answer::Page(String::new())), "{more}");
         assert_eq!(statuses, [status], "{more}");
     }
     // No author and only the list's empty status: the user, and a draft,

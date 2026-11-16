@@ -2,7 +2,6 @@
 
 //! The login screen, `wp-login.php`'s login action, at `/hs-login`.
 
-use hyscribe_auth::check_password;
 use hyscribe_kses::{esc_attr, esc_html, esc_url, str_contains, url_query};
 use hyscribe_phpser::{Value, addslashes, is_empty_string, parse_str, php_trim, urlencode};
 use hyscribe_render::formatting::{is_email, sanitize_user};
@@ -74,6 +73,9 @@ pub trait Site: Urls {
     fn user_by_login(&self, login: &[u8]) -> Option<User>;
     /// `get_user_by( 'email', $email )`.
     fn user_by_email(&self, email: &[u8]) -> Option<User>;
+    /// `wp_check_password()` of `user`'s hash, where the site may refuse a
+    /// guess without checking it.
+    fn check_password(&self, user: &User, password: &[u8]) -> bool;
     /// `get_option( 'users_can_register' )`.
     fn can_register(&self) -> bool;
     /// `get_post( $id )->post_type`, none for no post.
@@ -210,7 +212,7 @@ fn authenticate(
     let password = php_trim(password);
     let check = |user: Option<User>, missing: Notice, kind: &str| match user {
         None => Err(vec![missing]),
-        Some(user) if check_password(password, &user.pass) => Ok(user.id),
+        Some(user) if site.check_password(&user, password) => Ok(user.id),
         Some(_) => Err(vec![error(
             "incorrect_password",
             format!(

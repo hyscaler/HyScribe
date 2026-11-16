@@ -8,7 +8,7 @@
 // print_script_module_data() passes, for json_encode_script_data, and pretty
 // printed, as the REST API sends it for `_pretty`, for json_encode_pretty. Each line
 // is
-//   hex(serialize(value))<TAB>hex(json_encode(value))<TAB>hex(json_encode(value, flags))<TAB>hex(json_encode(value, script flags))<TAB>hex(json_encode(value, JSON_PRETTY_PRINT))
+//   hex(serialize(value))<TAB>hex(json_encode(value))<TAB>hex(json_encode(value, flags))<TAB>hex(json_encode(value, script flags))<TAB>hex(json_encode(value, JSON_PRETTY_PRINT))<TAB>hex(json_encode(value, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES)), as wp_localize_script() encodes
 //
 // Usage: php reference/phpser/json-golden.php > crates/hyscribe-phpser/tests/golden/json-encode.tsv
 
@@ -32,5 +32,5 @@ $values = array(
 	new stdClass(), (object) array( 'a' => 'x/y', 'b' => array() ), new Golden_Props(), $numbered, array( 'isOpen' => new stdClass() ),
 );
 foreach ( $values as $value ) {
-	echo bin2hex( serialize( $value ) ), "\t", bin2hex( json_encode( $value ) ), "\t", bin2hex( json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ), "\t", bin2hex( json_encode( $value, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS ) ), "\t", bin2hex( json_encode( $value, JSON_PRETTY_PRINT ) ), "\n";
+	echo bin2hex( serialize( $value ) ), "\t", bin2hex( json_encode( $value ) ), "\t", bin2hex( json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ), "\t", bin2hex( json_encode( $value, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS ) ), "\t", bin2hex( json_encode( $value, JSON_PRETTY_PRINT ) ), "\t", bin2hex( json_encode( $value, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES ) ), "\n";
 }

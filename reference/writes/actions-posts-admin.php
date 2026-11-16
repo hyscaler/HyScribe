@@ -99,7 +99,57 @@ $posts_admin_quick = function ( $id ) {
 	return $fields;
 };
 
+// revision.php's restore case for the revision `$id`, over its request.
+$revision_restore = function ( $id ) use ( $admin_block, $admin_run ) {
+	$_GET     = array(
+		'revision' => (string) $id,
+		'action'   => 'restore',
+		'_wpnonce' => wp_create_nonce( "restore-post_$id" ),
+	);
+	$_POST    = array();
+	$_REQUEST = $_GET;
+	$code     = $admin_block( 'revision.php', "\n\tcase 'restore':\n", "\n\tcase '" );
+	$admin_run(
+		function () use ( $id, $code ) {
+			$revision_id = $id;
+			$redirect    = 'edit.php';
+			// The case's `break` leaves this switch.
+			eval( 'switch ( 1 ) { default: ' . $code . ' }' );
+		}
+	);
+};
+
+// Post 1 edited twice, its first revision with footnotes and the post with
+// others: the first revision's ID.
+$revised_post = function () {
+	wp_update_post(
+		array(
+			'ID'           => 1,
+			'post_content' => 'First edit.',
+		)
+	);
+	$first = array_key_last( wp_get_post_revisions( 1 ) );
+	add_metadata( 'post', $first, 'footnotes', '[{"id":"n1","content":"A note."}]' );
+	wp_update_post(
+		array(
+			'ID'           => 1,
+			'post_title'   => 'Hello again',
+			'post_content' => 'Second edit.',
+			'post_excerpt' => 'Its excerpt.',
+		)
+	);
+	add_post_meta( 1, 'footnotes', '[]' );
+	return $first;
+};
+
 return array(
+	// revision.php's restore of post 1's first revision.
+	'admin-revision-restore'       => array(
+		'setup'  => $revised_post,
+		'action' => function ( $first ) use ( $revision_restore ) {
+			$revision_restore( $first );
+		},
+	),
 	// post.php's trash of the post with a comment, and its restore and
 	// delete from the Trash.
 	'admin-post-trash'             => array(

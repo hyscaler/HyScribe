@@ -86,4 +86,10 @@ impl Acting for Unfiltered {
             ..hyscribe_config::Constants::default()
         }
     }
+    fn nonce_state(&self, _: &[u8], _: &str) -> u8 {
+        unreachable!()
+    }
+    fn logged_in(&self) -> bool {
+        unreachable!()
+    }
 }

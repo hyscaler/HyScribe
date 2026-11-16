@@ -687,7 +687,10 @@ fn ajax_shell() {
     assert_eq!(ajax(site, "", "action=check_plugin_dependencies"), 501);
     assert_eq!(ajax(site, "action=rest-nonce", ""), 501);
     assert_eq!(ajax(site, "action=heartbeat", ""), 400);
-    assert_eq!(ajax(site, "action=rest-nonce", "action=heartbeat"), 501);
+    // A heartbeat without its nonce is `wp_send_json_error()`'s.
+    assert_eq!(ajax(site, "action=rest-nonce", "action=heartbeat"), 200);
+    assert_eq!(ajax(site, "", "action=heartbeat&_nonce=0"), 200);
+    assert_eq!(ajax(site, "", "action=heartbeat&_nonce=x"), 501);
 }
 
 /// No other branch lets a write past its own checks: the Customizer's

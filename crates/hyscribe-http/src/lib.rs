@@ -107,6 +107,8 @@ pub struct Site {
     behind_proxy: bool,
     /// The capability constants of the configuration.
     constants: hyscribe_config::Constants,
+    /// The login rate limits and their counts, kept across reloads.
+    limiter: Arc<login::limits::Limiter>,
 }
 
 /// The address a connection comes from.
@@ -136,6 +138,7 @@ impl Site {
             public_users: true,
             behind_proxy: false,
             constants: hyscribe_config::Constants::default(),
+            limiter: Arc::new(login::limits::Limiter::new(Default::default())),
         };
         for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
             if let Some(url) = url {
@@ -175,6 +178,7 @@ impl Site {
             public_users: self.public_users,
             behind_proxy: self.behind_proxy,
             constants: self.constants,
+            limiter: Arc::clone(&self.limiter),
         };
         site.build_rewriter();
         Ok(site)
@@ -196,6 +200,14 @@ impl Site {
     /// The site with the capability constants of the configuration.
     pub fn with_constants(self, constants: hyscribe_config::Constants) -> Site {
         Site { constants, ..self }
+    }
+
+    /// The site with the login rate limits of the configuration.
+    pub fn with_login_limits(self, limits: hyscribe_config::LoginLimits) -> Site {
+        Site {
+            limiter: Arc::new(login::limits::Limiter::new(limits)),
+            ..self
+        }
     }
 
     /// The site behind a proxy or not.
@@ -585,6 +597,7 @@ async fn page(
     if let Some(response) = file.filter(|_| page_method && !post) {
         return response;
     }
+    let peer = peer.map(|axum::Extension(Peer(ip))| ip);
     if uri.path() == login::PATH && page_method {
         let form = if post {
             trackback::form(&headers, &body)
@@ -596,6 +609,7 @@ async fn page(
             query: uri.query().map(String::from),
             headers,
             form,
+            peer,
         };
         return login::respond(&site, asked).await;
     }
@@ -605,7 +619,7 @@ async fn page(
             post,
             headers,
             body,
-            peer: peer.map(|axum::Extension(Peer(ip))| ip),
+            peer,
         };
         return comment_post::respond(&site, asked).await;
     }
@@ -622,7 +636,6 @@ async fn page(
         };
         let read = !post || body.is_empty() || form.as_array().is_some_and(|f| !f.is_empty());
         let form = read.then_some(form);
-        let peer = peer.map(|axum::Extension(Peer(ip))| ip);
         return admin::respond(&site, uri, headers, (post, peer), form).await;
     }
     // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.

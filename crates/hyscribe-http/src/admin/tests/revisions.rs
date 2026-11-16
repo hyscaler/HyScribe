@@ -168,3 +168,53 @@ async fn a_restore_is_php_s() {
     let restored = answered(&site, &cookies, &query).await;
     assert_eq!(restored, hyscribe_testkit::hs_admin_page(&php));
 }
+
+/// Arguments that are not strings, a revision whose changed lines are not
+/// UTF-8, which PHP's word diff fails on, and a title JSON cannot encode,
+/// are not ported.
+#[tokio::test(flavor = "multi_thread")]
+async fn what_the_screen_does_not_port() {
+    let _saves = SAVES.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let row = |id: u64, title: &str, content: &str, parent: u64, kind: &str| {
+        format!(
+            "INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, post_title, \
+             post_excerpt, post_status, comment_status, ping_status, post_password, post_name, to_ping, \
+             pinged, post_modified, post_modified_gmt, post_content_filtered, post_parent, guid, \
+             menu_order, post_type, post_mime_type, comment_count) VALUES ({id}, 1, \
+             '2026-10-20 06:00:00', '2026-10-20 06:00:00', {content}, {title}, '', 'inherit', 'closed', \
+             'closed', '', '{parent}-revision-v1', '', '', '2026-10-20 06:00:00', '2026-10-20 06:00:00', \
+             '', {parent}, '', 0, '{kind}', '', 0);"
+        )
+    };
+    // Text that is not UTF-8, which only columns of bytes hold.
+    let bytes = "ALTER TABLE wp_posts MODIFY post_content LONGBLOB NOT NULL, \
+                 MODIFY post_title BLOB NOT NULL;";
+    let sql = [
+        bytes.to_string(),
+        row(1340, "'Bytes'", "'Line one.'", 0, "post"),
+        row(1341, "'Bytes'", "'Line one.'", 1340, "revision"),
+        row(
+            1342,
+            "'Bytes'",
+            "CONCAT('Line ', UNHEX('FF'))",
+            1340,
+            "revision",
+        ),
+        row(1343, "UNHEX('FF')", "'Text.'", 0, "post"),
+        row(1344, "UNHEX('FF')", "'Text.'", 1343, "revision"),
+    ]
+    .concat();
+    loaded(&sql).await;
+    let (site, cookies) = logged_in("wordpress_saves", dir.path()).await;
+    for query in [
+        "revision=1342",
+        "revision=1344",
+        "to[]=1303",
+        "revision=1303&from[]=1302",
+        "revision=1303&action[]=view",
+    ] {
+        let answer = answered(&site, &cookies, query).await;
+        assert!(answer.starts_with("501\t"), "{query}");
+    }
+}

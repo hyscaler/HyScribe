@@ -26,9 +26,7 @@ fn get<T: Copy + Default>(list: &[T], i: usize) -> T {
 
 /// `$list[$i] = $value`, within the list.
 fn put<T>(list: &mut [T], i: usize, value: T) {
-    if let Some(slot) = list.get_mut(i) {
-        *slot = value;
-    }
+    let _ = list.get_mut(i).map(|slot| *slot = value);
 }
 
 /// An engine index as a list's; it is never negative where read.
@@ -282,10 +280,8 @@ impl<'a> Engine<'a> {
             }
             return;
         }
-        for pair in seps.windows(2) {
-            if let [from, to] = pair {
-                self.compareseq((from.0, to.0), (from.1, to.1));
-            }
+        for (from, to) in seps.iter().zip(seps.iter().skip(1)) {
+            self.compareseq((from.0, to.0), (from.1, to.1));
         }
     }
 }
@@ -368,13 +364,10 @@ fn shift_boundaries(lines: &[&[u8]], changed: &mut [bool], other: &[bool]) {
 }
 
 /// `Text_Diff_Renderer::render()`'s blocks with 10000 lines of context on
-/// each side, each rendered by `block`.
-fn blocks<'a>(
-    ops: Vec<Op<'a>>,
-    mut block: impl FnMut(&[Op<'a>]) -> Option<String>,
-) -> Option<String> {
+/// each side, for the renderer's `_block()`.
+fn blocks(ops: Vec<Op<'_>>) -> Vec<Vec<Op<'_>>> {
     const CONTEXT: usize = 10_000;
-    let mut output = String::new();
+    let mut done = Vec::new();
     let (mut open, mut context): (Option<Vec<Op>>, Vec<&[u8]>) = (None, Vec::new());
     let last = ops.len().saturating_sub(1);
     for (i, op) in ops.into_iter().enumerate() {
@@ -387,7 +380,7 @@ fn blocks<'a>(
                         open = Some(edits);
                     } else {
                         edits.push(Op::Copy(lines.iter().copied().take(CONTEXT).collect()));
-                        output.push_str(&block(&edits)?);
+                        done.push(edits);
                     }
                 }
                 context = lines;
@@ -406,10 +399,8 @@ fn blocks<'a>(
             }
         }
     }
-    if let Some(edits) = open {
-        output.push_str(&block(&edits)?);
-    }
-    Some(output)
+    done.extend(open);
+    done
 }
 
 /// `htmlspecialchars( $text )`, PHP 8's defaults: quotes encoded and
@@ -500,29 +491,11 @@ fn inline_words(edits: &[Op]) -> String {
 /// differs: words diffed, `None` when PHP fails.
 fn inline(orig: &[u8], fin: &[u8]) -> Option<String> {
     let (from, to) = (split_words(orig)?, split_words(fin)?);
-    let words = blocks(diff(&from, &to), |edits| Some(inline_words(edits)))?;
+    let words: String = blocks(diff(&from, &to))
+        .iter()
+        .map(|b| inline_words(b))
+        .collect();
     Some(format!("{words}\n"))
-}
-
-/// The spans `!(<ins>.*?</ins>|<del>.*?</del>)!` matches, in order.
-fn spans(diff: &str) -> Vec<String> {
-    let mut found = Vec::new();
-    let mut rest = diff;
-    loop {
-        let next = [("<ins>", "</ins>"), ("<del>", "</del>")]
-            .iter()
-            .filter_map(|(open, close)| {
-                let at = rest.find(open)?;
-                let end = rest.get(at..)?.find(close)? + at + close.len();
-                Some((at, end))
-            })
-            .min();
-        let Some((at, end)) = next else {
-            return found;
-        };
-        found.push(rest.get(at..end).unwrap_or_default().to_string());
-        rest = rest.get(end..).unwrap_or_default();
-    }
 }
 
 /// `diff` without its `tag` spans.
@@ -544,9 +517,9 @@ fn without(diff: &str, tag: &str) -> String {
 fn distance(a: &[u8], b: &[u8]) -> f64 {
     let mut counts = [0i64; 256];
     for (&byte, step) in a.iter().map(|b| (b, 1)).chain(b.iter().map(|b| (b, -1))) {
-        if let Some(count) = counts.get_mut(usize::from(byte)) {
-            *count += step;
-        }
+        let _ = counts
+            .get_mut(usize::from(byte))
+            .map(|count| *count += step);
     }
     let difference = counts.iter().map(|c| c.abs()).sum::<i64>() as f64;
     if a.is_empty() || a == b"0" {
@@ -656,17 +629,18 @@ fn changed(orig: &[&[u8]], fin: &[&[u8]]) -> Option<String> {
         } else {
             inline(left, right)?
         };
-        let found = spans(&diff);
-        if !found.is_empty() {
-            let stripped = |text: &str| {
-                ["<ins>", "</ins>", "<del>", "</del>"]
-                    .iter()
-                    .fold(text.to_string(), |text, tag| text.replace(tag, ""))
-                    .len() as i64
-            };
-            let matched = stripped(&found.join(" "));
+        // `!(<ins>.*?</ins>|<del>.*?</del>)!`'s matches: each span, which
+        // the inline renderer closes; their text, joined by spaces.
+        let found = (diff.matches("<ins>").count() + diff.matches("<del>").count()) as i64;
+        if found > 0 {
+            let stripped = ["<ins>", "</ins>", "<del>", "</del>"]
+                .iter()
+                .fold(diff.clone(), |text, tag| text.replace(tag, ""))
+                .len() as i64;
+            let outside = without(&without(&diff, "ins"), "del").len() as i64;
+            let matched = stripped - outside + found - 1;
             // Never 0: the diff holds more than its spans.
-            let whole = stripped(&diff) * 2 - matched;
+            let whole = stripped * 2 - matched;
             if matched as f64 / whole as f64 > 0.6 {
                 continue;
             }
@@ -725,7 +699,11 @@ pub fn wp_text_diff(left: &[u8], right: &[u8]) -> Option<String> {
     let (left, right) = (normalize_whitespace(left), normalize_whitespace(right));
     let from: Vec<&[u8]> = left.split(|&b| b == b'\n').collect();
     let to: Vec<&[u8]> = right.split(|&b| b == b'\n').collect();
-    let rows = blocks(diff(&from, &to), table_block)?;
+    let blocks = blocks(diff(&from, &to));
+    let rows: String = blocks
+        .iter()
+        .map(|b| table_block(b))
+        .collect::<Option<_>>()?;
     if rows.is_empty() {
         return Some(String::new());
     }

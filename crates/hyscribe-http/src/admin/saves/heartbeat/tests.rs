@@ -180,3 +180,46 @@ async fn heartbeat_edges() {
     let response = beat(&unwritten, &cookies, &body).await;
     assert_eq!(response.status().as_u16(), 403);
 }
+
+/// A heartbeat on the fixture past each statement budget, rolled back:
+/// the lock renewed and the posts' locks read stop at a database error;
+/// a holder whose name JSON cannot encode, and a post ID given as a string,
+/// are not ported.
+#[tokio::test(flavor = "multi_thread")]
+async fn heartbeats_past_database_errors() {
+    use crate::admin::saves::tests::{acted, admin, asked, fields, turn, writer};
+    use sqlx::Acquire as _;
+    let _turn = turn().await;
+    let site = crate::tests::oracle_site().await;
+    let site = crate::admin::tests::salted(Arc::try_unwrap(site).ok().unwrap());
+    let reads = LoginReads::new(&site, Handle::current(), 0);
+    let admin = admin(&site, &reads);
+    let nonce = super::read(|| super::Acting::create_nonce(&admin, "heartbeat-nonce"));
+    let fixture = hyscribe_testkit::fixture_database();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&fixture.host)
+        .port(fixture.port)
+        .database(&fixture.name)
+        .username(&fixture.user)
+        .password(fixture.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let outer = sqlx::Connection::begin(&mut conn).await;
+    let mut outer = outer.unwrap();
+    let conn = outer.acquire().await.unwrap();
+    let writer = writer().await;
+    let mut beat = async |body: &str| {
+        let post = fields(&format!("action=heartbeat&{body}"));
+        let asked = asked("/hs-admin/admin-ajax", &[], &post);
+        let handler = super::heartbeat;
+        acted(&writer, conn, (handler, &admin), &asked).await
+    };
+    let fresh = |data: &str| format!("_nonce={nonce}&{data}");
+    let renew = fresh("data[wp-check-locked-posts][]=post-1&data[wp-refresh-post-lock][post_id]=1");
+    let renewed = beat(&renew).await;
+    match renewed {
+        Ok(super::Ajax::Json(json)) => assert!(json.contains("new_lock"), "{json}"),
+        other => panic!("{:?}", other.err()),
+    }
+    let string = beat("_nonce=bad&data[wp-refresh-metabox-loader-nonces]=2").await;
+    assert!(matches!(string, Err(hyscribe_write::Error::Unported(_))));
+}

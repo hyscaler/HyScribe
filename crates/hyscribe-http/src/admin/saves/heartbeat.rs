@@ -37,11 +37,10 @@ fn set(response: &mut Response, name: &str, value: Value) {
     }
 }
 
-/// `wp_send_json( $response )`.
-fn sent(response: Response) -> Result<Ajax, Error> {
-    let json = json_encode(&Value::Array(response));
-    let json = json.ok_or(Error::Unported("a response JSON cannot encode"))?;
-    Ok(Ajax::Json(String::from_utf8_lossy(&json).into_owned()))
+/// `wp_send_json( $response )`, whose text is all UTF-8.
+fn sent(response: Response) -> Ajax {
+    let json = json_encode(&Value::Array(response)).unwrap_or_default();
+    Ajax::Json(String::from_utf8_lossy(&json).into_owned())
 }
 
 /// `$received['post_id']` of a part of the data, sent as an array or a
@@ -206,7 +205,7 @@ pub(super) fn heartbeat<'a>(
                 .ok_or(Error::Unported("a post ID read from a string"))?;
             if state == 0 {
                 set(&mut response, "nonces_expired", Value::Bool(true));
-                return Ok(sent(response)?);
+                return Ok(sent(response));
             }
         }
         if !data.is_empty() {
@@ -220,7 +219,7 @@ pub(super) fn heartbeat<'a>(
         let logged_in = read(|| site.logged_in());
         set(&mut response, "wp-auth-check", Value::Bool(logged_in));
         set(&mut response, "server_time", Value::Int(asked.now));
-        Ok(sent(response)?)
+        Ok(sent(response))
     })
 }
 

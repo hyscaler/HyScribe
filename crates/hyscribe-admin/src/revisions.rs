@@ -5,7 +5,7 @@
 
 use hyscribe_kses::{esc_html, esc_url};
 use hyscribe_model::{Post, PostQuery, StatusFilter};
-use hyscribe_phpser::{Key, Value, absint, is_empty_string, json_encode_localized};
+use hyscribe_phpser::{Key, Value, absint, is_empty_string, json_encode_localized, parse_str};
 use hyscribe_render::date::{self, Zone, human_time_diff, stored_unix};
 use hyscribe_render::formatting::sanitize_text_field;
 use hyscribe_render::post::admin_title;
@@ -14,7 +14,7 @@ use hyscribe_render::user_avatar;
 
 use crate::admin_bar::BarSite;
 use crate::menu::Screen;
-use crate::page::{HelpTab, Page, Request, admin_page, query_strings};
+use crate::page::{HelpTab, Page, Request, admin_page};
 use crate::posts::{Answer, PostsSite, draft_or_post_title, edit_link, lock_holder};
 
 const TEMPLATES: &str = include_str!("revisions.html");
@@ -59,7 +59,7 @@ impl RevisionArgs {
             } else {
                 revision
             },
-            action: String::from_utf8(action).ok()?,
+            action: String::from_utf8_lossy(&action).into_owned(),
             from,
         })
     }
@@ -77,12 +77,8 @@ fn is_autosave(revision: &Post) -> bool {
 /// `revision.php`, but a restore past its checks: the screen, or where it
 /// sends the user; `None` for what is not ported.
 pub fn revision(site: &dyn PostsSite, query: &str, request: &Request) -> Option<Answer> {
-    let parsed = query_strings(query)?;
-    let get = |name: &str| {
-        let found = parsed.iter().find(|(key, _)| key == name);
-        found.map(|(_, value)| Value::String(value.clone().into_bytes()))
-    };
-    let args = RevisionArgs::read(&get)?;
+    let parsed = parse_str(query.as_bytes());
+    let args = RevisionArgs::read(&|name| parsed.get_str(name).cloned())?;
     let back = || Some(Answer::Redirect("edit".into()));
     // A restore that reaches the screen failed one of its checks.
     if args.action == "restore" {
@@ -206,21 +202,24 @@ fn prepare(
     let (revisions, _) = site.list_posts(&query);
     let title = string(admin_title(post));
     let mut authors: Vec<(u64, Value)> = Vec::new();
+    let mut author = Value::Null;
     let mut entries: Vec<(u64, Vec<(&str, Value)>)> = Vec::new();
     let mut current_id: Option<u64> = None;
     for revision in &revisions {
-        if !authors.iter().any(|(id, _)| *id == revision.author) {
-            let user = site.userdata(revision.author)?;
-            let avatar = user_avatar(&|name| site.option(name), &user, 32);
-            let author = object(vec![
-                ("id", Value::Int(revision.author.cast_signed())),
-                ("avatar", string(avatar)),
-                ("name", string(user.display_name)),
-            ]);
-            authors.push((revision.author, author));
-        }
-        let author = authors.iter().find(|(id, _)| *id == revision.author);
-        let author = author.map(|(_, author)| author.clone())?;
+        author = match authors.iter().find(|(id, _)| *id == revision.author) {
+            Some((_, known)) => known.clone(),
+            None => {
+                let user = site.userdata(revision.author)?;
+                let avatar = user_avatar(&|name| site.option(name), &user, 32);
+                let known = object(vec![
+                    ("id", Value::Int(revision.author.cast_signed())),
+                    ("avatar", string(avatar)),
+                    ("name", string(user.display_name)),
+                ]);
+                authors.push((revision.author, known.clone()));
+                known
+            }
+        };
         let autosave = is_autosave(revision);
         let mut current = !autosave && revision.modified_gmt == post.modified_gmt;
         // Of revisions saved at once, the highest ID is current.
@@ -247,7 +246,7 @@ fn prepare(
             vec![
                 ("id", Value::Int(revision.id.cast_signed())),
                 ("title", title.clone()),
-                ("author", author),
+                ("author", author.clone()),
                 (
                     "date",
                     string(date::format("M j, Y @ H:i", &revision.modified, zone)),
@@ -266,9 +265,8 @@ fn prepare(
             ],
         ));
     }
-    // With one revision, the post itself is the first.
-    if let [(_, only)] = &entries[..] {
-        let author = only.iter().find(|(key, _)| *key == "author")?.1.clone();
+    // With one revision, the post itself is the first, by its author.
+    if entries.len() == 1 {
         let modified = stored_unix(&post.modified_gmt, Zone::Utc);
         entries.push((
             post.id,
@@ -349,10 +347,11 @@ fn prepare(
 }
 
 fn set_current(entries: &mut [(u64, Vec<(&str, Value)>)], id: u64, current: bool) {
-    let entry = entries.iter_mut().find(|(at, _)| *at == id);
-    let field = entry.and_then(|(_, entry)| entry.iter_mut().find(|(key, _)| *key == "current"));
-    if let Some((_, value)) = field {
-        *value = Value::Bool(current);
+    let entries = entries.iter_mut().filter(|(at, _)| *at == id);
+    for (key, value) in entries.flat_map(|(_, entry)| entry.iter_mut()) {
+        if *key == "current" {
+            *value = Value::Bool(current);
+        }
     }
 }
 
@@ -372,8 +371,8 @@ fn ui_diff(site: &dyn PostsSite, post: &Post, from: u64, mut compare_to: Post) -
         return none;
     }
     if let Some(from) = &mut compare_from {
-        let time = |p: &Post| date::strtotime(&p.date_gmt);
-        if time(from)? > time(&compare_to)? {
+        // Dates as MySQL stores them compare as `strtotime()` would.
+        if from.date_gmt > compare_to.date_gmt {
             std::mem::swap(from, &mut compare_to);
         }
         if is_empty_string(&from.title) {

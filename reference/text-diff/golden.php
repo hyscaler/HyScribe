@@ -62,6 +62,8 @@ $cases = array(
 	array( '_under_score', '_under-score' ),
 	array( ' a ! ', '  !' ),
 	array( '!a  !', 'a a ! ' ),
+	array( "x\na! b a", "x\n !a a!" ),
+	array( "keep\ngood one", "keep\nbad \xfe two" ),
 	array( "99999999999999999999\n+99999999999999999999", "+99999999999999999999\n99999999999999999999" ),
 	array( "9223372036854775808\nz", "9223372036854775808.0\nz" ),
 	// More unchanged lines than the 10000 of context each side keeps.

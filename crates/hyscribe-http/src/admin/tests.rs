@@ -34,7 +34,7 @@ pub(super) fn location(response: &Response) -> &str {
         .unwrap()
 }
 
-fn salted(site: Site) -> Site {
+pub(crate) fn salted(site: Site) -> Site {
     let names = [
         "AUTH_KEY",
         "AUTH_SALT",

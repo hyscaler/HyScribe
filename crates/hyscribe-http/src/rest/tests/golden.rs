@@ -186,17 +186,20 @@ fn serve_case(site: &Site, handle: &Handle, case: &RestCase) -> hyscribe_rest::S
         get: &get,
         post: &[],
         cookie_user: user,
-        origin: None,
+        origin: case.flag("origin").then_some(b"http://example.test"),
         nonce: (user != 0).then_some(b"%nonce%"),
         method_override: None,
         content_type: None,
         body: b"",
+        host: case.flag("localhost").then_some(b"localhost:8081"),
+        now: now(),
     };
     hyscribe_rest::serve(&as_role, &request)
 }
 
 /// Every case of `golden` over `database`, its bodies compared whole or by
-/// their sha256 when `hashed`, but those `unported`, answered 501.
+/// their sha256 when `hashed`, but those `unported` or flagged `refused`,
+/// answered 501.
 async fn replay(
     database: &str,
     golden: &'static str,
@@ -214,9 +217,12 @@ async fn replay(
             let site = if case.flag("pretty") { &pretty } else { &plain };
             let served = serve_case(site, &handle, case);
             let what = format!("{} {} {}", case.who, case.method, case.target);
-            if unported.iter().any(|(who, target)| {
-                *target == case.target && (*who == "*" || *who == "user" && case.who != "visitor")
-            }) {
+            if case.flag("refused")
+                || unported.iter().any(|(who, target)| {
+                    *target == case.target
+                        && (*who == "*" || *who == "user" && case.who != "visitor")
+                })
+            {
                 assert_eq!(served.status, 501, "{what}");
                 assert!(served.headers.is_empty() && served.body.is_empty());
                 continue;
@@ -269,6 +275,14 @@ async fn unported(database: &str, requests: &'static [(&str, &str, &str)]) {
     })
     .await
     .unwrap();
+}
+
+/// The index over the site's options and theme, as PHP gives it
+/// (`reference/rest/index.list`), but where it keeps its routes.
+#[tokio::test]
+async fn index_matches_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/index.tsv");
+    replay("wordpress", golden, false, 6 * 47, &[]).await;
 }
 
 /// Writes answer 501, as do the arguments whose schemas use keywords not

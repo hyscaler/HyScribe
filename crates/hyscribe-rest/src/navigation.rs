@@ -62,7 +62,7 @@ fn locations_permission(context: &Context, _: &Params) -> Result<(), RestError> 
 }
 
 /// The entry `name` of an array option, if both are set.
-fn option_entry(context: &Context, option: &str, name: &str) -> Option<Value> {
+pub(crate) fn option_entry(context: &Context, option: &str, name: &str) -> Option<Value> {
     let stored = unserialized(&context.option(option)?);
     stored.get_str(name).cloned()
 }

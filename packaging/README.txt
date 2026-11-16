@@ -7,11 +7,15 @@ installation: everything HyScribe writes stays inside it.
 Start
 -----
 
-  cp .env.example .env && chmod 600 .env    then fill in the database
-  ./hyscribe service start
+  ./hyscribe service start      without .env, starts the setup wizard
+  ./hyscribe service log        shows the wizard's address and secret
   ./hyscribe service status
   ./hyscribe service log -f
   ./hyscribe service stop
+
+The wizard reads an existing site's wp-config.php and writes .env. It
+also runs in the terminal (./hyscribe setup), or copy .env.example to
+.env, chmod 600 it and fill in the database.
 
 HyScribe refuses to run as root. By default it listens on 127.0.0.1:8080
 and runs in shadow mode (read only).

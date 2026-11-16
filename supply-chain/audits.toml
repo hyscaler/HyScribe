@@ -1,6 +1,12 @@
 
 # cargo-vet audits file
 
+[[audits.blake2]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.10.6"
+notes = "Reviewed every source file of the crate. no_std; std only forwards to digest/std. No build script, proc macros, or filesystem, network, process or environment access; the tests, benches and .blb test vectors are dev only. The only unsafe code outside feature gated SIMD is as_bytes.rs, which views [T] as bytes for an unsafe marker trait implemented only on primitive integers and repr(C) tuples of one integer type, so no padding or invalid values; finalize copies two u64x4 (64 bytes) into a 64 byte output. The simd, simd_opt and simd_asm features (platform intrinsics, transmuted shuffles and an inline asm path for 32 bit ARM NEON) need a nightly compiler and stay off with default features off. The portable path matches RFC 7693: IV, sigma, rotations 32, 24, 16 and 63, twelve rounds for BLAKE2b, the parameter block with key and output lengths, and the MAC's zero padded key block hashed as the first block. Its panics are asserts on key, output, salt and persona sizes, which Blake2bMac checks first and answers with InvalidLength, an unreachable! for block sizes other than BLAKE2b's and BLAKE2s's, and copy_from_slice between equal lengths. Dependency: digest 0.10 with its mac feature, which pulls in subtle (covered by imported audits)."
+
 [[audits.blowfish]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"

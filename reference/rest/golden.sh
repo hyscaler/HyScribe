@@ -24,7 +24,10 @@
 # headers and the body stands for the user's nonce (a visitor's for a
 # visitor), and %preview_nonce% in a body for a preview link's. Flags:
 # origin and originnull send an Origin header, pretty serves the request under /%postname%/ permalinks (reference/rewrite/permalinks.php),
-# override sends X-HTTP-Method-Override: DELETE, restore lets the request
+# override sends X-HTTP-Method-Override: DELETE, localhost sends Host:
+# localhost:8081, which wp_is_client_side_media_processing_enabled() takes
+# as a secure context, refused marks a request HyScribe answers 501 (sent
+# as any other), restore lets the request
 # write and puts the database back after it as it was once the users logged
 # in (dates of the request's own time in its answer read %now%), ttd records the request on
 # the Theme Test Data fixture only, default on the default install only (as
@@ -152,13 +155,20 @@ curl_args() {
   local who="$1" flags="$2" nonce="$3"
   args=(-g)
   if [ "$who" != visitor ]; then
-    args+=(-b "$TMP/$who.jar")
+    local jar="$TMP/$who.jar"
+    # curl matches cookies to the Host header sent.
+    if [[ ",$flags," == *,localhost,* ]]; then
+      sed 's/127\.0\.0\.1/localhost/' "$jar" > "$TMP/$who.localhost.jar"
+      jar="$TMP/$who.localhost.jar"
+    fi
+    args+=(-b "$jar")
     [[ "$flags" == *nononce* ]] || args+=(-H "X-WP-Nonce: $nonce")
   fi
   [[ "$flags" == *originnull* ]] && args+=(-H "Origin: null")
   [[ "$flags" == *origin* && "$flags" != *originnull* ]] && args+=(-H "Origin: http://example.test")
   [[ "$flags" == *pretty* ]] && args+=(-H "X-HyScribe-Permalinks: /%postname%/|||")
   [[ "$flags" == *override* ]] && args+=(-H "X-HTTP-Method-Override: DELETE")
+  [[ ",$flags," == *,localhost,* ]] && args+=(-H "Host: localhost:8081")
   [[ ",$flags," == *,json,* ]] && args+=(-H "Content-Type: application/json")
   [[ ",$flags," == *,form,* ]] && args+=(-H "Content-Type: application/x-www-form-urlencoded")
   [ -z "$4" ] || args+=(--data-binary "$4")

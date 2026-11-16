@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `WP_REST_Themes_Controller`'s permission checks: `/wp/v2/themes` and
-//! `/wp/v2/themes/<stylesheet>`. Every answer they let through is not
-//! ported: the active theme's links name its `wp_global_styles` post, which
-//! reading them creates when there is none, and the other themes
-//! are not installed in HyScribe.
+//! `WP_REST_Themes_Controller`: `/wp/v2/themes` and
+//! `/wp/v2/themes/<stylesheet>`, served for the active theme, the bundled
+//! Twenty Twenty-Five, as `reference/rest/registered.php` exports it. Its
+//! links name its `wp_global_styles` post, which reading them creates when
+//! there is none: such a read is not ported, nor are the other
+//! themes, which HyScribe does not have.
 
 use hyscribe_phpser::{Key, Value};
 
+use crate::fields::{is_field_included, links_wanted, narrowed};
 use crate::request::{Arg, Params, Sanitize};
-use crate::response::{RestError, list, object, text};
+use crate::response::{Response, RestError, list, object, text};
 use crate::types::can_edit_any;
-use crate::{Context, Endpoint};
+use crate::{Context, Endpoint, placed, self_link};
+
+/// The bundled theme's stylesheet.
+const STYLESHEET: &str = "twentytwentyfive";
 
 pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     match regex {
@@ -32,7 +37,7 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                 sanitize: Sanitize::Schema,
             }],
             permission: items_permission,
-            callback: Some(|_, _| Err(RestError::not_ported())),
+            callback: Some(items),
         }]),
         "/wp/v2/themes/(?P<stylesheet>[^\\/:<>\\*\\?\"\\|]+(?:\\/[^\\/:<>\\*\\?\"\\|]+)?)" => {
             Some(vec![Endpoint {
@@ -43,7 +48,7 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                     sanitize: Sanitize::Urldecode,
                 }],
                 permission: item_permission,
-                callback: Some(|_, _| Err(RestError::not_ported())),
+                callback: Some(item),
             }])
         }
         _ => None,
@@ -91,4 +96,110 @@ fn item_permission(context: &Context, params: &Params) -> Result<(), RestError> 
         return read_active_theme(context);
     }
     Err(cannot_view(context))
+}
+
+/// Whether the bundled theme is the site's.
+fn bundled(context: &Context) -> bool {
+    context.option("stylesheet").as_deref() == Some(STYLESHEET.as_bytes())
+}
+
+/// `get_items()`: the active theme alone.
+fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
+    let active = [(Key::Int(0), text("active"))];
+    if params.get("status") != Some(&Value::Array(active.to_vec())) {
+        return Err(RestError::not_ported());
+    }
+    let theme = prepared(context, params)?.into_data();
+    let mut response = Response::new(list(vec![theme]), 200);
+    response.header("X-WP-Total", "1");
+    response.header("X-WP-TotalPages", "1");
+    Ok(response)
+}
+
+/// `get_item()`.
+fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
+    if params.text("stylesheet") != STYLESHEET.as_bytes() {
+        return Err(RestError::not_ported());
+    }
+    prepared(context, params)
+}
+
+/// The fields given part by part: the headers' `raw` and `rendered`, and
+/// each theme support.
+const PARTED: [&str; 7] = [
+    "author",
+    "author_uri",
+    "description",
+    "name",
+    "tags",
+    "theme_uri",
+    "theme_supports",
+];
+
+/// `prepare_item_for_response()` of the active theme: the fields wanted,
+/// and of those given part by part, the parts wanted.
+fn prepared(context: &Context, params: &Params) -> Result<Response, RestError> {
+    if !bundled(context) {
+        return Err(RestError::not_ported());
+    }
+    let theme = super::theme("rest");
+    let fields = narrowed(
+        params,
+        theme.iter().map(|(key, _)| key.to_php_string()).collect(),
+    );
+    let siteurl = context.option("siteurl").unwrap_or_default();
+    let siteurl = String::from_utf8_lossy(&siteurl);
+    let data = theme.iter().filter_map(|(key, value)| {
+        let name = String::from_utf8_lossy(&key.to_php_string()).into_owned();
+        let value = if PARTED.contains(&name.as_str()) {
+            let parts = value.as_array().unwrap_or_default().iter();
+            let wanted = parts.filter(|(part, _)| {
+                let part = String::from_utf8_lossy(&part.to_php_string()).into_owned();
+                is_field_included(&format!("{name}.{part}"), &fields)
+            });
+            Some(Value::Array(wanted.cloned().collect())).filter(|parts| !parts.is_empty())
+        } else {
+            is_field_included(&name, &fields).then(|| value.clone())
+        }?;
+        let value = placed(value, b"%siteurl%", &|path| format!("{siteurl}{path}"));
+        Some((key.clone(), value))
+    });
+    let mut response = Response::new(Value::Array(data.collect()), 200);
+    if links_wanted(&fields) {
+        let id = styles_post(context).ok_or_else(RestError::not_ported)?;
+        self_link(
+            context,
+            &mut response,
+            &format!("/wp/v2/themes/{STYLESHEET}"),
+        );
+        response.add_link("collection", context.rest_url("/wp/v2/themes"));
+        let styles = context.rest_url(&format!("/wp/v2/global-styles/{id}"));
+        response.add_link("https://api.w.org/user-global-styles", styles);
+        let allow = if context.can("export") {
+            vec![text("GET")]
+        } else {
+            Vec::new()
+        };
+        response.add_link_with(
+            "https://api.w.org/export-theme",
+            context.rest_url("/wp-block-editor/v1/export"),
+            vec![("targetHints", object([("allow", list(allow))]))],
+        );
+    }
+    Ok(response)
+}
+
+/// `get_user_global_styles_post_id()` without the post it creates: the
+/// newest published `wp_global_styles` post of the theme's `wp_theme` term.
+fn styles_post(context: &Context) -> Option<u64> {
+    let posts = context.site.posts_of_type("wp_global_styles").into_iter();
+    let mut published = posts.filter(|post| post.status == "publish");
+    let found = published.find(|post| {
+        let terms = context.site.post_terms(post.id, "wp_theme");
+        let name = STYLESHEET.as_bytes();
+        terms
+            .iter()
+            .any(|term| term.name.eq_ignore_ascii_case(name))
+    });
+    found.map(|post| post.id)
 }

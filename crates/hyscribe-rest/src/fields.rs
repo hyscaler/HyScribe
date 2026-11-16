@@ -141,11 +141,17 @@ fn shown(contexts: &[&str], context: &[u8]) -> bool {
 pub(crate) fn fields_for_response(params: &Params, properties: &Properties) -> Vec<Vec<u8>> {
     let context = params.context();
     let all = is_empty_string(&context);
-    let mut fields: Vec<Vec<u8>> = properties
+    let fields = properties
         .iter()
         .filter(|(_, contexts)| all || shown(contexts, &context))
         .map(|(name, _)| name.as_bytes().to_vec())
         .collect();
+    narrowed(params, fields)
+}
+
+/// `get_fields_for_response()` of a schema whose properties, `fields`, name
+/// no context: all of them in every context.
+pub(crate) fn narrowed(params: &Params, mut fields: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
     fields.push(b"_links".to_vec());
     if params.has("_embed") {
         fields.push(b"_embedded".to_vec());

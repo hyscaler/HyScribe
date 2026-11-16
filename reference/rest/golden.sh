@@ -26,7 +26,8 @@
 # one that PHP would write caches for there), skip=a+b sends the request
 # as every identity but those listed, and writes
 # sends it once as the administrator after the others, fails the run unless
-# it writes to the database, and records the status as writes. The headers kept are
+# it writes to the database, and records the status as writes; hash keeps the
+# body's SHA-256, as on the Theme Test Data fixture. The headers kept are
 # WordPress's own, one "name: value" a line in the order sent, with Apache's
 # Accept-Encoding left out of Vary. Cron is off for the run, no one may post
 # unfiltered HTML, as in HyScribe, and every
@@ -186,7 +187,7 @@ for who in "${WHO[@]}"; do
     fi
     headers=$(tr -d '\r' < "$TMP/head" | grep -iE '^(content-type|x-robots-tag|link|access-control-[a-z-]+|allow|vary|x-wp-[a-z]+|expires|cache-control):' |
       sed -E 's/^([^:]+):/\L\1:/; s/^(vary: .*),Accept-Encoding$/\1/' | grep -vx 'vary: Accept-Encoding' | sed "s/$nonce/%nonce%/g" || true)
-    if [ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ]; then
+    if [ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ] || [[ ",$flags," == *,hash,* ]]; then
       body=$(sed "s/$nonce/%nonce%/g; s/preview_nonce=[0-9a-f]\{10\}/preview_nonce=%preview_nonce%/g" "$TMP/body" | sha256sum | cut -c1-64 | tr -d '\n' | xxd -p | tr -d '\n')
     else
       body=$(sed "s/$nonce/%nonce%/g; s/preview_nonce=[0-9a-f]\{10\}/preview_nonce=%preview_nonce%/g" "$TMP/body" | xxd -p | tr -d '\n')

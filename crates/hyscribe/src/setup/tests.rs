@@ -652,6 +652,14 @@ fn every_question_can_stop_the_wizard() {
         install.env().display()
     ));
     stopped_anywhere(&install, "maybe\nn\n", &kept);
+    // Three answers that are neither yes nor no stop it.
+    let question = format!("{} exists. Replace it?", install.env().display());
+    assert_eq!(
+        wizard(&install.home, "maybe\nperhaps\n?\ny\n").result,
+        Err(format!(
+            "setup stopped: \"{question}\" was not answered yes or no"
+        ))
+    );
     // Everything asked.
     let install = Install::new(None);
     let db = hyscribe_testkit::fixture_database();

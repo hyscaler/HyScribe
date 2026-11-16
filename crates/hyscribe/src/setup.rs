@@ -84,10 +84,10 @@ impl Terminal<'_> {
         answer
     }
 
-    /// Asks a yes or no question until it is answered.
+    /// Asks a yes or no question, three times at most.
     fn yes(&mut self, question: &str, default: bool) -> Result<bool, String> {
         let hint = if default { "Y/n" } else { "y/N" };
-        loop {
+        for _ in 0..3 {
             let answer = self.ask(&format!("{question}? [{hint}]"), "")?;
             match answer.to_ascii_lowercase().as_str() {
                 "" => return Ok(default),
@@ -96,6 +96,9 @@ impl Terminal<'_> {
                 _ => self.say("  Answer yes or no.\n")?,
             }
         }
+        Err(format!(
+            "setup stopped: \"{question}?\" was not answered yes or no"
+        ))
     }
 }
 

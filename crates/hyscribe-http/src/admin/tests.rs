@@ -1981,12 +1981,19 @@ async fn actions_read_the_site() {
     let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     assert_eq!(page_of(response).await, READ_ONLY);
-    // A Customizer action passes its checks and has no handler.
-    let form = Some((
-        "application/x-www-form-urlencoded",
+    // The Customizer is not ported, whatever the action.
+    for body in [
         "action=customize_save&wp_customize=on",
-    ));
-    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
+        "action=delete-tag&tag_ID=1&wp_customize=on",
+    ] {
+        let form = Some(("application/x-www-form-urlencoded", body));
+        let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{body}");
+        assert!(page_of(response).await.is_empty(), "{body}");
+    }
+    // An action past its checks with no handler.
+    let ajax = "/hs-admin/admin-ajax?action=rest-nonce";
+    let response = send(&site, "GET", ajax, &cookies, None).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     let own = format!("/hs-admin/users?changeit=1&new_role=none&users[]=1&_wpnonce={nonce}");
     let response = send(&site, "GET", &own, &cookies, None).await;

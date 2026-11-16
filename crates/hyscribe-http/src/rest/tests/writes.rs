@@ -226,7 +226,7 @@ async fn writes_match_php(golden: &str, state: &str, unported: &[&str]) -> (usiz
 /// `target` asked of `site` by user 1 with the JSON `body`, past its
 /// checks: the write it plans.
 async fn planned(site: &Arc<Site>, method: &'static str, target: &str, body: &str) -> Pending {
-    asked(site, (method, target, body), None).await.unwrap_err()
+    *asked(site, (method, target, body), None).await.unwrap_err()
 }
 
 /// `target` asked of `site` by user 1 with the JSON `body`, past its
@@ -236,7 +236,7 @@ async fn asked(
     site: &Arc<Site>,
     (method, target, body): (&'static str, &str, &str),
     outcome: Option<Outcome>,
-) -> Result<hyscribe_rest::Served, Pending> {
+) -> Result<hyscribe_rest::Served, Box<Pending>> {
     let (site, handle) = (Arc::clone(site), Handle::current());
     let (target, body) = (target.to_string(), body.to_string());
     tokio::task::spawn_blocking(move || {
@@ -273,7 +273,7 @@ async fn asked(
             (hyscribe_rest::Answer::Write(pending), Some(outcome)) => {
                 Ok(hyscribe_rest::written(&rest, &request, *pending, outcome))
             }
-            (hyscribe_rest::Answer::Write(pending), None) => Err(*pending),
+            (hyscribe_rest::Answer::Write(pending), None) => Err(pending),
             (hyscribe_rest::Answer::Served(served), _) => {
                 panic!("{}", String::from_utf8_lossy(&served.body))
             }

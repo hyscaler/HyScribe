@@ -162,6 +162,12 @@ fn fields(save: &Save, slug: Option<&Vec<u8>>, args: &mut PostArgs) {
     args.author = save.author.or(args.author);
     args.parent = save.parent.unwrap_or(args.parent);
     args.menu_order = save.menu_order.unwrap_or(args.menu_order);
+    // Only flat taxonomies are given by name, which `Taxonomy` ports.
+    let tax_input = save.tax_input.iter().filter_map(|(taxonomy, terms)| {
+        Taxonomy::named(taxonomy).map(|taxonomy| (taxonomy, terms.clone()))
+    });
+    args.tax_input = tax_input.collect();
+    args.meta_input.clone_from(&save.meta_input);
 }
 
 /// `create_item()` or `update_item()` from `wp_insert_post()` on.
@@ -208,11 +214,15 @@ async fn saved(write: &mut Write<'_>, save: &Save, ctx: &Context) -> Result<Outc
     for (taxonomy, ids) in [
         (Taxonomy::Category, &save.categories),
         (Taxonomy::PostTag, &save.tags),
+        (Taxonomy::PatternCategory, &save.pattern_categories),
     ] {
         if let Some(ids) = ids {
             let terms: Vec<TermRef> = ids.iter().map(|&id| TermRef::Id(id)).collect();
             wp_set_object_terms(write, id, &terms, taxonomy, false).await?;
         }
+    }
+    for (key, value) in &save.meta {
+        update_metadata(write, Meta::Post, id, key, value, &Value::Null).await?;
     }
     Ok(Outcome::Written(id))
 }

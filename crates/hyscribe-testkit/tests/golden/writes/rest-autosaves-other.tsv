@@ -1,0 +1,34 @@
+# The rows PHP WordPress writes for the action rest-autosaves-other (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-16 22:06:21 to 2026-11-16 22:06:21 UTC.
+# %wp_posts:1% is 861.
+# %wp_posts:2% is 862.
+# %wp_posts:3% is 863.
+# %wp_posts:4% is 864.
+# %wp_posts:5% is 865.
+# %wp_posts:6% is 866.
+# %wp_posts:7% is 867.
+# %wp_postmeta:1% is 861.
+# %wp_postmeta:2% is 862.
+wp_posts	%wp_posts:7%	+	ID	%wp_posts:7%
+wp_posts	%wp_posts:7%	+	comment_count	0
+wp_posts	%wp_posts:7%	+	comment_status	closed
+wp_posts	%wp_posts:7%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:7%
+wp_posts	%wp_posts:7%	+	menu_order	0
+wp_posts	%wp_posts:7%	+	ping_status	closed
+wp_posts	%wp_posts:7%	+	pinged	
+wp_posts	%wp_posts:7%	+	post_author	1
+wp_posts	%wp_posts:7%	+	post_content	<!-- wp:paragraph -->\n<p>Later words</p>\n<!-- /wp:paragraph -->
+wp_posts	%wp_posts:7%	+	post_content_filtered	
+wp_posts	%wp_posts:7%	+	post_date	%now%
+wp_posts	%wp_posts:7%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:7%	+	post_excerpt	
+wp_posts	%wp_posts:7%	+	post_mime_type	
+wp_posts	%wp_posts:7%	+	post_modified	%now%
+wp_posts	%wp_posts:7%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:7%	+	post_name	%wp_posts:1%-autosave-v1
+wp_posts	%wp_posts:7%	+	post_parent	%wp_posts:1%
+wp_posts	%wp_posts:7%	+	post_password	
+wp_posts	%wp_posts:7%	+	post_status	inherit
+wp_posts	%wp_posts:7%	+	post_title	Draft autosaved
+wp_posts	%wp_posts:7%	+	post_type	revision
+wp_posts	%wp_posts:7%	+	to_ping	

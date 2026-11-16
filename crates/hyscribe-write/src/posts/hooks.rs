@@ -11,6 +11,7 @@ use crate::options::{Autoload, Meta, add_metadata, delete_metadata, get_metadata
 
 use super::{Context, Error, Kind, PostArgs, Result, date, link, truthy};
 use crate::cron;
+use crate::terms::Taxonomy;
 
 /// The ID `wp_get_post_parent_id()` gives, 0 for none.
 async fn parent_of(write: &mut Write<'_>, id: u64, link: (u64, u64)) -> Result<u64> {
@@ -163,10 +164,12 @@ pub(super) async fn transition(
     let crosses_publish = new != old && (new == "publish") != (old == "publish");
     // _update_term_count_on_transition_post_status().
     if crosses_publish {
-        for taxonomy in kind.taxonomies() {
-            let terms = write.object_terms(id, taxonomy).await?;
+        for name in kind.taxonomies() {
+            let terms = write.object_terms(id, name).await?;
             let tt_ids: Vec<u64> = terms.into_iter().map(|(_, tt_id)| tt_id).collect();
-            crate::terms::update_term_count(write, &tt_ids).await?;
+            // Post formats, which count posts too.
+            let types = Taxonomy::named(name).map_or(&["post"][..], Taxonomy::object_types);
+            crate::terms::update_term_count(write, &tt_ids, types).await?;
         }
     }
     // _wp_auto_add_pages_to_menu().

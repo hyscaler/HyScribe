@@ -87,6 +87,9 @@ pub(super) async fn unique(
     if UNSLUGGED.contains(&status) || revision || kind == Kind::UserRequest {
         return Ok(slug);
     }
+    if matches!(kind, Kind::Template | Kind::TemplatePart) {
+        return template_unique(write, slug, id, post_type).await;
+    }
     let reserved = FEEDS.contains(&&slug[..]) || slug == b"embed";
     let taken = if kind.hierarchical() {
         let used = write
@@ -118,6 +121,40 @@ pub(super) async fn unique(
         }
         number += 1;
     }
+}
+
+/// `wp_filter_wp_template_unique_post_slug()`, the `pre_wp_unique_post_slug`
+/// filter of templates and parts: unique within the post's theme, else the
+/// active one's.
+async fn template_unique(
+    write: &mut Write<'_>,
+    slug: Vec<u8>,
+    id: u64,
+    post_type: &str,
+) -> Result<Vec<u8>> {
+    let mut theme = write.option_value("stylesheet").await?.unwrap_or_default();
+    // `get_the_terms()` orders them by name.
+    let mut names = Vec::new();
+    for (term, _) in write.object_terms(id, "wp_theme").await? {
+        names.extend(write.term_in("wp_theme", term).await?.map(|term| term.name));
+    }
+    names.sort();
+    if let Some(name) = names.into_iter().next() {
+        theme = name;
+    }
+    let mut alt = slug.clone();
+    let mut number = 2_u64;
+    while write
+        .template_name_used(&alt, (post_type, &theme), id)
+        .await?
+    {
+        let suffix = number.to_string();
+        alt = truncate(&slug, 200 - (suffix.len() + 1))?;
+        alt.push(b'-');
+        alt.extend_from_slice(suffix.as_bytes());
+        number += 1;
+    }
+    Ok(alt)
 }
 
 /// `wp_add_trashed_suffix_to_post_name_for_post( $id )`: the post's new

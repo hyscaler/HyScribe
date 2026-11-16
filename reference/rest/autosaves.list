@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The block editor's autosaves (MVP 4.3) that reference/rest/golden.sh
+# records as autosaves.tsv, over autosaves.sql: each request sent with its
+# body as every identity, the database put back after each. The author of a
+# draft no one else holds updates the draft itself; anyone else writes their
+# own autosave, a new one or their old one updated, or none when nothing
+# changed; and the checks PHP makes first. `meta` is not ported.
+POST	/?rest_route=/wp/v2/posts/861/autosaves	json,restore	{"title":"Draft autosaved","content":"<!-- wp:paragraph -->\n<p>Later words</p>\n<!-- /wp:paragraph -->","excerpt":""}
+POST	/?rest_route=/wp/v2/posts/864/autosaves	json,restore	{"title":"Locked autosaved","content":"<!-- wp:paragraph -->\n<p>Locked words, later</p>\n<!-- /wp:paragraph -->","excerpt":""}
+POST	/?rest_route=/wp/v2/posts/862/autosaves	json,restore	{"title":"Published","content":"<!-- wp:paragraph -->\n<p>Out there, changed</p>\n<!-- /wp:paragraph -->","excerpt":""}
+POST	/?rest_route=/wp/v2/posts/862/autosaves	json,restore	{"title":"Published","content":"<!-- wp:paragraph -->\n<p>Out there</p>\n<!-- /wp:paragraph -->","excerpt":""}
+POST	/?rest_route=/wp/v2/posts/866/autosaves	json,restore	{"title":"Held, autosaved","content":"<!-- wp:paragraph -->\n<p>Held</p>\n<!-- /wp:paragraph -->"}
+POST	/?rest_route=/wp/v2/pages/863/autosaves	json,restore	{"title":"Page autosaved","content":"<!-- wp:paragraph -->\n<p>Page words</p>\n<!-- /wp:paragraph -->"}
+POST	/?rest_route=/wp/v2/pages/863/autosaves	json,restore	{"title":"Draft page"}
+POST	/?rest_route=/wp/v2/posts/999/autosaves	json,restore	{"title":"Gone"}
+POST	/?rest_route=/wp/v2/pages/861/autosaves	json,restore	{"title":"Not a page"}
+POST	/?rest_route=/wp/v2/posts/861/autosaves	json,restore,refused	{"title":"With meta","meta":{"footnotes":""}}

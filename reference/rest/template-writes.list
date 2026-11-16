@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The site editor's templates' and template parts' writes (MVP 4.3) that
+# reference/rest/golden.sh records as template-writes.tsv, over
+# templates-custom.sql (template-writes.sql links to it): each request
+# sent with its body as every identity, the database put back after each.
+# Creates, theme files customised, customised templates updated, reverted
+# (`source` theme), trashed and deleted, and the checks PHP makes first.
+POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"my-template","title":"My template","content":"<!-- wp:paragraph -->\n<p>Mine</p>\n<!-- /wp:paragraph -->","description":"Made here"}
+POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"page-about","title":{"raw":"About"},"content":{"raw":"<!-- wp:post-content /-->"},"status":"draft","author":702,"is_wp_suggestion":true}
+POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"my-custom","title":"Again","content":"<!-- wp:post-title /-->"}
+POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"for-four","theme":"twentytwentyfour","title":"Four"}
+POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"plain"}
+POST	/?rest_route=/wp/v2/templates	json,restore	{}
+POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"bad slug"}
+POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"by-nobody","title":"Nobody","author":999}
+POST	/?rest_route=/wp/v2/template-parts	json,restore	{"slug":"my-sidebar","title":"My sidebar","area":"header","content":"<!-- wp:paragraph -->\n<p>Side</p>\n<!-- /wp:paragraph -->"}
+POST	/?rest_route=/wp/v2/template-parts	json,restore	{"slug":"odd-part","title":"Odd","area":"bogus"}
+POST	/?rest_route=/wp/v2/template-parts	json,restore	{"slug":"no-area","title":"No area"}
+POST	/?rest_route=/wp/v2/templates/twentytwentyfive//page	json,restore	{"content":"<!-- wp:paragraph -->\n<p>Customised</p>\n<!-- /wp:paragraph -->"}
+POST	/?rest_route=/wp/v2/templates/twentytwentyfive//search	json,restore	{"title":"Search results"}
+PUT	/?rest_route=/wp/v2/template-parts/twentytwentyfive//footer	json,restore	{"content":"<!-- wp:paragraph -->\n<p>Foot</p>\n<!-- /wp:paragraph -->"}
+POST	/?rest_route=/wp/v2/templates/twentytwentyfive//index	json,restore	{"title":"Index again","content":"<!-- wp:paragraph -->\n<p>Changed</p>\n<!-- /wp:paragraph -->"}
+PATCH	/?rest_route=/wp/v2/template-parts/twentytwentyfive//header	json,restore	{"area":"footer","description":"Moved"}
+POST	/?rest_route=/wp/v2/templates/twentytwentyfive//page-no-title	json,restore	{"source":"theme"}
+POST	/?rest_route=/wp/v2/templates/twentytwentyfive//nope	json,restore	{"title":"Nope"}
+DELETE	/?rest_route=/wp/v2/templates/twentytwentyfive//my-custom	restore
+DELETE	/?rest_route=/wp/v2/templates/twentytwentyfive//my-custom&force=true	restore
+DELETE	/?rest_route=/wp/v2/templates/twentytwentyfive//page	restore
+DELETE	/?rest_route=/wp/v2/templates/twentytwentyfive//archive	restore
+DELETE	/?rest_route=/wp/v2/template-parts/twentytwentyfive//header&force=1	restore

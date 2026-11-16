@@ -33,6 +33,12 @@ pub enum Taxonomy {
     Category,
     /// `post_tag`.
     PostTag,
+    /// `wp_pattern_category`, the synced patterns' categories.
+    PatternCategory,
+    /// `wp_theme`, the theme a template, part or global styles post is of.
+    Theme,
+    /// `wp_template_part_area`.
+    TemplatePartArea,
 }
 
 impl Taxonomy {
@@ -41,6 +47,33 @@ impl Taxonomy {
         match self {
             Taxonomy::Category => "category",
             Taxonomy::PostTag => "post_tag",
+            Taxonomy::PatternCategory => "wp_pattern_category",
+            Taxonomy::Theme => "wp_theme",
+            Taxonomy::TemplatePartArea => "wp_template_part_area",
+        }
+    }
+
+    /// The taxonomy named `name`, if ported.
+    pub fn named(name: &str) -> Option<Taxonomy> {
+        [
+            Taxonomy::Category,
+            Taxonomy::PostTag,
+            Taxonomy::PatternCategory,
+            Taxonomy::Theme,
+            Taxonomy::TemplatePartArea,
+        ]
+        .into_iter()
+        .find(|taxonomy| taxonomy.name() == name)
+    }
+
+    /// The post types the taxonomy is registered for, whose published
+    /// posts its terms count (`_update_post_term_count()`).
+    pub(crate) fn object_types(self) -> &'static [&'static str] {
+        match self {
+            Taxonomy::Category | Taxonomy::PostTag => &["post"],
+            Taxonomy::PatternCategory => &["wp_block"],
+            Taxonomy::Theme => &["wp_template", "wp_template_part", "wp_global_styles"],
+            Taxonomy::TemplatePartArea => &["wp_template_part"],
         }
     }
 

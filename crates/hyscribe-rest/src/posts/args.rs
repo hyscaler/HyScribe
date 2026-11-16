@@ -147,7 +147,7 @@ pub(crate) fn id() -> Arg {
 /// The arguments of a create and update, `get_endpoint_args_for_item_schema()`,
 /// for the types whose writes are ported, as each type's supports give them.
 /// `title`, `content` and `excerpt` are neither validated nor sanitized, and
-/// `meta` and the pattern categories are not ported; `status` is validated by
+/// `meta` is ported for synced patterns alone; `status` is validated by
 /// `check_status()` (`write::status_args`), `template` by
 /// `check_template()`, which the empty template alone passes unported.
 pub(super) fn save(kind: Kind) -> Vec<Arg> {
@@ -156,6 +156,7 @@ pub(super) fn save(kind: Kind) -> Vec<Arg> {
     const OPEN: &str = r#"{"type":"string","enum":["open","closed"]}"#;
     const RAW: &str = r#"{"type":"object","properties":{"raw":{"type":"string"}}}"#;
     const IDS: &str = r#"{"type":"array","items":{"type":"integer"}}"#;
+    const PATTERN_META: &str = r#"{"type":"object","properties":{"footnotes":{"type":"string"},"wp_pattern_sync_status":{"type":"string","enum":["partial","unsynced"]}}}"#;
     if !kind.writes() {
         return Vec::new();
     }
@@ -198,8 +199,10 @@ pub(super) fn save(kind: Kind) -> Vec<Arg> {
         )),
         _ => {}
     }
-    if kind != Kind::Navigation {
-        args.push(arg("meta", RAW, false, Sanitize::NotPorted));
+    match kind {
+        Kind::Block => args.push(arg("meta", PATTERN_META, true, Sanitize::IsArray)),
+        Kind::Navigation => {}
+        _ => args.push(arg("meta", RAW, false, Sanitize::NotPorted)),
     }
     if kind == Kind::Post {
         args.push(value("sticky", r#"{"type":"boolean"}"#));
@@ -212,7 +215,7 @@ pub(super) fn save(kind: Kind) -> Vec<Arg> {
     ));
     match kind {
         Kind::Post => args.extend([value("categories", IDS), value("tags", IDS)]),
-        Kind::Block => args.push(arg("wp_pattern_category", IDS, true, Sanitize::NotPorted)),
+        Kind::Block => args.push(value("wp_pattern_category", IDS)),
         _ => {}
     }
     args

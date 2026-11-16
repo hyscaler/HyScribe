@@ -5,8 +5,9 @@
 # default install as site-writes.sql leaves it: each request sent with its
 # body as every identity, the database put back after each. Creates,
 # updates, trashes and deletes, the fields a type's schema does not have
-# left alone, a synced pattern's empty content, and what HyScribe does not
-# port (meta, pattern categories, a template), flagged refused.
+# left alone, a synced pattern's empty content, its sync status and
+# categories, and what HyScribe does not port (a template, meta PHP refuses
+# only after the write, `footnotes`), flagged refused.
 POST	/?rest_route=/wp/v2/navigation	json,restore	{"title":"Footer","content":"<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"http://127.0.0.1:8081/\",\"kind\":\"custom\"} /-->","status":"publish"}
 POST	/?rest_route=/wp/v2/navigation	json,restore	{"title":"Draft nav","status":"draft","slug":"header"}
 POST	/?rest_route=/wp/v2/navigation	json,restore	{}
@@ -20,10 +21,20 @@ DELETE	/?rest_route=/wp/v2/navigation/852&force=true	restore
 POST	/?rest_route=/wp/v2/blocks	json,restore	{"title":"A pattern","content":"<!-- wp:paragraph -->\n<p>Reused</p>\n<!-- /wp:paragraph -->","status":"publish","date":"2026-01-02T03:04:05"}
 POST	/?rest_route=/wp/v2/blocks	json,restore	{}
 POST	/?rest_route=/wp/v2/blocks	json,restore	{"title":"Excerpted","excerpt":"Short","status":"draft","slug":"call-to-action","author":1}
-POST	/?rest_route=/wp/v2/blocks	json,restore,refused	{"title":"Unsynced","meta":{"wp_pattern_sync_status":"unsynced"}}
-POST	/?rest_route=/wp/v2/blocks	json,restore,refused	{"title":"Categorised","wp_pattern_category":[]}
+POST	/?rest_route=/wp/v2/blocks	json,restore	{"title":"Unsynced","meta":{"wp_pattern_sync_status":"unsynced"}}
+POST	/?rest_route=/wp/v2/blocks	json,restore	{"title":"Categorised","wp_pattern_category":[]}
+POST	/?rest_route=/wp/v2/blocks	json,restore	{"title":"In two","content":"<!-- wp:paragraph -->\n<p>Two</p>\n<!-- /wp:paragraph -->","status":"publish","wp_pattern_category":[861,862,999],"meta":{"other":"x","wp_pattern_sync_status":"partial"}}
+POST	/?rest_route=/wp/v2/blocks	json,restore	{"title":"Not meta","meta":"nope"}
+POST	/?rest_route=/wp/v2/blocks	json,restore	{"title":"Not categories","wp_pattern_category":"861"}
+POST	/?rest_route=/wp/v2/blocks/853	json,restore	{"wp_pattern_category":[862]}
+POST	/?rest_route=/wp/v2/blocks/853	json,restore	{"meta":{"wp_pattern_sync_status":"unsynced"}}
+POST	/?rest_route=/wp/v2/blocks/854	json,restore	{"meta":{"wp_pattern_sync_status":"partial"},"wp_pattern_category":[861]}
+POST	/?rest_route=/wp/v2/blocks/853	json,restore,refused	{"meta":{"wp_pattern_sync_status":"bogus"}}
+POST	/?rest_route=/wp/v2/blocks/853	json,restore,refused	{"meta":{"wp_pattern_sync_status":null}}
+POST	/?rest_route=/wp/v2/blocks/853	json,restore,refused	{"meta":{"footnotes":""}}
 POST	/?rest_route=/wp/v2/blocks/853	json,restore	{"title":"Renamed pattern","content":"<!-- wp:paragraph -->\n<p>Changed</p>\n<!-- /wp:paragraph -->"}
 PATCH	/?rest_route=/wp/v2/blocks/854	json,restore	{"status":"publish"}
 POST	/?rest_route=/wp/v2/blocks/853	json,restore	{"title":"","content":"","excerpt":""}
 DELETE	/?rest_route=/wp/v2/blocks/853	restore
 DELETE	/?rest_route=/wp/v2/blocks/854&force=1	restore
+DELETE	/?rest_route=/wp/v2/blocks/853&force=true	restore

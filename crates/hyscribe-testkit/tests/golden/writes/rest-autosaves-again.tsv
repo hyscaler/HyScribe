@@ -1,0 +1,15 @@
+# The rows PHP WordPress writes for the action rest-autosaves-again (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-16 22:06:21 to 2026-11-16 22:06:21 UTC.
+# %wp_posts:1% is 861.
+# %wp_posts:2% is 862.
+# %wp_posts:3% is 863.
+# %wp_posts:4% is 864.
+# %wp_posts:5% is 865.
+# %wp_posts:6% is 866.
+# %wp_postmeta:1% is 861.
+# %wp_postmeta:2% is 862.
+wp_posts	%wp_posts:5%	~	post_content	<!-- wp:paragraph -->\n<p>Autosaved before</p>\n<!-- /wp:paragraph -->	<!-- wp:paragraph -->\n<p>Out there, changed</p>\n<!-- /wp:paragraph -->
+wp_posts	%wp_posts:5%	~	post_date	2026-11-06 14:00:00	%now%
+wp_posts	%wp_posts:5%	~	post_date_gmt	2026-11-06 14:00:00	%now%
+wp_posts	%wp_posts:5%	~	post_modified	2026-11-06 14:00:00	%now%
+wp_posts	%wp_posts:5%	~	post_modified_gmt	2026-11-06 14:00:00	%now%

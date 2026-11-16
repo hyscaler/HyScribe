@@ -18,6 +18,7 @@ use super::prepare::writes_or_unported;
 use super::{Kind, get_post, is_sticky, prepare, render_request, set};
 use crate::request::{Arg, Params};
 use crate::response::{Response, RestError, object, text};
+use crate::templates::Template;
 use crate::{Context, schema};
 
 /// What a create or update saves: `wp_insert_post()`'s fields where the
@@ -67,6 +68,16 @@ pub struct Save {
     pub categories: Option<Vec<u64>>,
     /// After the save: `wp_set_object_terms()` of these tags' IDs.
     pub tags: Option<Vec<u64>>,
+    /// After the save: `wp_set_object_terms()` of these pattern categories' IDs.
+    pub pattern_categories: Option<Vec<u64>>,
+    /// After the terms: the meta `WP_REST_Meta_Fields::update_value()`
+    /// updates, each key with its value.
+    pub meta: Vec<(&'static str, Value)>,
+    /// `tax_input`: a flat taxonomy's terms, by name, for
+    /// `wp_set_post_terms()`.
+    pub tax_input: Vec<(&'static str, Vec<u8>)>,
+    /// `meta_input`, which `wp_insert_post()` updates.
+    pub meta_input: Vec<(&'static str, Value)>,
 }
 
 /// What a write does.
@@ -94,7 +105,9 @@ pub struct Plan {
     /// What to write.
     pub write: Write,
     /// A deleted post and its answer, prepared before it is deleted.
-    previous: Option<(Post, Value)>,
+    pub(crate) previous: Option<(Post, Value)>,
+    /// A template as it was found before its write, which a trash answers.
+    pub(crate) template: Option<Box<Template>>,
 }
 
 /// What a write came to.
@@ -335,6 +348,7 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
         unfiltered_html,
         write: Write::Save(Box::new(save)),
         previous: None,
+        template: None,
     })
 }
 
@@ -400,21 +414,24 @@ fn after_save(
     kind: Kind,
     save: &mut Save,
 ) -> Result<(), RestError> {
+    let ids = |name| {
+        let ids = params.get(name)?.as_array().unwrap_or_default();
+        // The terms check refused 0, which no user may assign.
+        let ids = ids.iter();
+        Some(
+            ids.filter_map(|(_, id)| u64::try_from(id.to_int()).ok())
+                .collect(),
+        )
+    };
     if kind == Kind::Post {
         let sticky = params.get("sticky").map(|sticky| !sticky.is_empty());
         save.sticky = sticky.or((save.id == 0).then_some(false));
-        let ids = |name| {
-            let ids = params
-                .get(name)
-                .and_then(Value::as_array)
-                .unwrap_or_default();
-            // The terms check refused 0, which no user may assign.
-            let ids = ids.iter();
-            ids.filter_map(|(_, id)| u64::try_from(id.to_int()).ok())
-                .collect()
-        };
-        save.categories = params.get("categories").map(|_| ids("categories"));
-        save.tags = params.get("tags").map(|_| ids("tags"));
+        save.categories = ids("categories");
+        save.tags = ids("tags");
+    }
+    if kind == Kind::Block {
+        save.pattern_categories = ids("wp_pattern_category");
+        save.meta = pattern_meta(params)?;
     }
     // `set_post_thumbnail()` of a post that is not an attachment deletes
     // the meta, as `delete_post_thumbnail()` does for none.
@@ -433,6 +450,24 @@ fn after_save(
     }
     save.clear_template = params.get("template").is_some();
     Ok(())
+}
+
+/// `update_value()` of a synced pattern's `meta`, an array: its
+/// `wp_pattern_sync_status` where it is one of the enum's strings. PHP
+/// checks the meta after the post is written, so a value it refuses, or
+/// resets (`null`), and `footnotes`, revisioned with the post, are not
+/// ported.
+fn pattern_meta(params: &Params) -> Result<Vec<(&'static str, Value)>, RestError> {
+    let meta = params.get("meta").and_then(Value::as_array);
+    let given = |key| meta.and_then(|meta| lookup(meta, key));
+    match given("wp_pattern_sync_status") {
+        _ if given("footnotes").is_some() => Err(RestError::not_ported()),
+        None => Ok(Vec::new()),
+        Some(status @ Value::String(text)) if text == b"partial" || text == b"unsynced" => {
+            Ok(vec![("wp_pattern_sync_status", status.clone())])
+        }
+        Some(_) => Err(RestError::not_ported()),
+    }
 }
 
 /// The answer after the save renders the content as stored, for the
@@ -487,6 +522,7 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
         unfiltered_html: false,
         write,
         previous,
+        template: None,
     })
 }
 

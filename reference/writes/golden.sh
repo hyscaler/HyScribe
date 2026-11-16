@@ -26,7 +26,9 @@ done
 # The front end comment posts' cases and answers (actions-comment-post.php).
 "$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/comment-post-cases.list" < "$ROOT/reference/comment-post/cases.list"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/comment-post.tsv" < "$ROOT/crates/hyscribe-http/tests/golden/comment-post.tsv"
-"$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/site-writes.sql" < "$ROOT/reference/rest/site-writes.sql"
+for state in site-writes template-writes autosaves; do
+  "$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/$state.sql" < "$ROOT/reference/rest/$state.sql"
+done
 mkdir -p "$OUT"
 if [ $# -eq 0 ]; then
   set -- $("$DOCKER" exec "$NAME" php "$DIR/run.php")

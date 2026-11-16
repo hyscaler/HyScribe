@@ -1010,7 +1010,7 @@ async fn what_php_refuses_is_refused() {
 /// (`rest-navigation-*`, `rest-blocks-*`): a pattern with nothing in it is
 /// refused as a post is, a menu is not, and both are core types, whose
 /// GUIDs follow the posts' permalink structure, their slugs unique per type;
-/// a pattern in a category is not deleted, as its categories are not ported.
+/// a pattern in a category leaves it when deleted, its count recomputed.
 #[tokio::test]
 async fn navigation_menus_and_patterns() {
     let _one = ONE_AT_A_TIME.lock().await;
@@ -1043,7 +1043,6 @@ async fn navigation_menus_and_patterns() {
         assert_eq!(typed.comment_status, "closed", "{post_type}");
     }
     assert!(insert_rolled_back(empty("wp_navigation")).await.is_ok());
-    // A pattern's categories are not ported, so one in a category stays.
     let categorised = rolled_back(async |w, ctx| {
         let args = PostArgs {
             post_type: "wp_block".into(),
@@ -1054,10 +1053,17 @@ async fn navigation_menus_and_patterns() {
         let taxonomy = (term, "wp_pattern_category");
         let term_taxonomy = w.insert_term_taxonomy(taxonomy, b"", 0).await?;
         w.add_relationship(id, term_taxonomy).await?;
-        wp_delete_post(w, ctx, id, true).await
+        w.set_term_count(term_taxonomy, 1).await?;
+        let deleted = wp_delete_post(w, ctx, id, true).await?;
+        let left = w.term_post_count(term_taxonomy, &["publish"], &["wp_block"]);
+        Ok((
+            deleted,
+            left.await?,
+            w.object_terms(id, "wp_pattern_category").await?,
+        ))
     })
     .await;
-    assert!(unported(categorised));
+    assert_eq!(categorised.unwrap(), (true, 0, Vec::new()));
 }
 
 #[tokio::test]

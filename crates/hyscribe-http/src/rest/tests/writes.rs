@@ -104,7 +104,19 @@ async fn post_writes_match_php() {
 async fn site_writes_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/site-writes.tsv");
     let state = include_str!("../../../../../reference/rest/site-writes.sql");
-    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 20, 6 * 3));
+    assert_eq!(
+        writes_match_php(golden, state, &[]).await,
+        (6 * 30, 6 + 2 * 3)
+    );
+}
+
+/// PHP's answers to the templates' and template parts' writes, over
+/// `reference/rest/templates-custom.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn template_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/template-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/template-writes.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 23, 0));
 }
 
 /// The cases of `golden`, recorded over `state`, sent over HTTP as each
@@ -154,8 +166,12 @@ async fn writes_match_php(golden: &str, state: &str, unported: &[&str]) -> (usiz
         let start = now();
         let response = send(&site, request, &sent).await;
         let what = format!("{} {} {} {sent}", case.who, case.method, case.target);
-        if case.flag("refused") || unported.contains(&sent.as_str()) {
-            assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{what}");
+        // A request refused past its permission check is PHP's before it.
+        if response.status() == StatusCode::NOT_IMPLEMENTED {
+            assert!(
+                case.flag("refused") || unported.contains(&sent.as_str()),
+                "{what}"
+            );
             refused += 1;
             continue;
         }
@@ -333,78 +349,36 @@ async fn post_writes_are_php_s() {
     }
 }
 
-/// The navigation menus' and synced patterns' writes leave the rows PHP's
-/// leave, planned over `wordpress_saves` and written on the fixture, each
-/// with `reference/rest/site-writes.sql`'s posts.
-#[tokio::test(flavor = "multi_thread")]
-async fn site_writes_are_php_s() {
-    let state = include_str!("../../../../../reference/rest/site-writes.sql");
-    let insert = state
-        .lines()
-        .find(|line| line.starts_with("INSERT INTO `wp_posts`"))
-        .unwrap();
-    let footer = r#"{"title":"Footer","content":"<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"http://127.0.0.1:8081/\",\"kind\":\"custom\"} /-->","status":"publish"}"#;
-    let header = r#"{"title":"Header renamed","content":"<!-- wp:navigation-link {\"label\":\"Only\",\"url\":\"https://example.test/\",\"kind\":\"custom\"} /-->"}"#;
-    let pattern = r#"{"title":"A pattern","content":"<!-- wp:paragraph -->\n<p>Reused</p>\n<!-- /wp:paragraph -->","status":"publish","date":"2026-01-02T03:04:05"}"#;
-    let renamed = r#"{"title":"Renamed pattern","content":"<!-- wp:paragraph -->\n<p>Changed</p>\n<!-- /wp:paragraph -->"}"#;
-    let navigation = "/?rest_route=/wp/v2/navigation";
-    let blocks = "/?rest_route=/wp/v2/blocks";
-    let writes = [
-        ("rest-navigation-create", "POST", navigation.into(), footer),
-        (
-            "rest-navigation-update",
-            "POST",
-            format!("{navigation}/851"),
-            header,
-        ),
-        (
-            "rest-navigation-publish",
-            "PUT",
-            format!("{navigation}/852"),
-            r#"{"status":"publish","slug":"header"}"#,
-        ),
-        (
-            "rest-navigation-trash",
-            "DELETE",
-            format!("{navigation}/851"),
-            "",
-        ),
-        (
-            "rest-navigation-delete",
-            "DELETE",
-            format!("{navigation}/852&force=true"),
-            "",
-        ),
-        ("rest-blocks-create", "POST", blocks.into(), pattern),
-        (
-            "rest-blocks-update",
-            "POST",
-            format!("{blocks}/853"),
-            renamed,
-        ),
-        (
-            "rest-blocks-publish",
-            "PATCH",
-            format!("{blocks}/854"),
-            r#"{"status":"publish"}"#,
-        ),
-        ("rest-blocks-trash", "DELETE", format!("{blocks}/853"), ""),
-        (
-            "rest-blocks-delete",
-            "DELETE",
-            format!("{blocks}/854&force=1"),
-            "",
-        ),
-    ];
+/// What a write oracle action inserts of its list's state first.
+#[derive(Clone, Copy, PartialEq)]
+enum Setup {
+    Nothing,
+    Posts,
+    All,
+}
+
+/// Each of `writes` leaves the rows PHP's leaves, planned over
+/// `wordpress_saves` with `state` and written on the fixture after the
+/// INSERTs of `state` its [`Setup`] names.
+async fn writes_are_php_s(state: &str, writes: Vec<(&str, &'static str, String, &str, Setup)>) {
     let _saves = crate::admin::tests::SAVES.lock().await;
     fresh_with(state).await;
     let dir = tempfile::tempdir().unwrap();
     let site = saves_site(dir.path()).await;
-    for (golden, method, target, body) in writes {
+    for (golden, method, target, body, inserted) in writes {
         let pending = planned(&site, method, &target, body).await;
         let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+        let inserts: Vec<String> = state
+            .lines()
+            .filter(|line| match inserted {
+                Setup::Nothing => false,
+                Setup::Posts => line.starts_with("INSERT INTO `wp_posts`"),
+                Setup::All => line.starts_with("INSERT INTO "),
+            })
+            .map(String::from)
+            .collect();
         let setup = async |conn: &mut hyscribe_db::Connection| {
-            if !golden.ends_with("-create") {
+            for insert in inserts {
                 let insert = sqlx::raw_sql(sqlx::AssertSqlSafe(insert));
                 insert.execute(&mut *conn).await.unwrap();
             }
@@ -418,6 +392,212 @@ async fn site_writes_are_php_s() {
         let report = check_writes(&fixture_database(), golden, setup, action).await;
         report.unwrap();
     }
+}
+
+/// The navigation menus' and synced patterns' writes leave the rows PHP's
+/// leave, over `reference/rest/site-writes.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn site_writes_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/site-writes.sql");
+    let footer = r#"{"title":"Footer","content":"<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"http://127.0.0.1:8081/\",\"kind\":\"custom\"} /-->","status":"publish"}"#;
+    let header = r#"{"title":"Header renamed","content":"<!-- wp:navigation-link {\"label\":\"Only\",\"url\":\"https://example.test/\",\"kind\":\"custom\"} /-->"}"#;
+    let pattern = r#"{"title":"A pattern","content":"<!-- wp:paragraph -->\n<p>Reused</p>\n<!-- /wp:paragraph -->","status":"publish","date":"2026-01-02T03:04:05"}"#;
+    let renamed = r#"{"title":"Renamed pattern","content":"<!-- wp:paragraph -->\n<p>Changed</p>\n<!-- /wp:paragraph -->"}"#;
+    let in_two = r#"{"title":"In two","content":"<!-- wp:paragraph -->\n<p>Two</p>\n<!-- /wp:paragraph -->","status":"publish","wp_pattern_category":[861,862,999],"meta":{"other":"x","wp_pattern_sync_status":"partial"}}"#;
+    let navigation = |path: &str| format!("/?rest_route=/wp/v2/navigation{path}");
+    let blocks = |path: &str| format!("/?rest_route=/wp/v2/blocks{path}");
+    let (nothing, posts, all) = (Setup::Nothing, Setup::Posts, Setup::All);
+    let writes = vec![
+        (
+            "rest-navigation-create",
+            "POST",
+            navigation(""),
+            footer,
+            nothing,
+        ),
+        (
+            "rest-navigation-update",
+            "POST",
+            navigation("/851"),
+            header,
+            posts,
+        ),
+        (
+            "rest-navigation-publish",
+            "PUT",
+            navigation("/852"),
+            r#"{"status":"publish","slug":"header"}"#,
+            posts,
+        ),
+        (
+            "rest-navigation-trash",
+            "DELETE",
+            navigation("/851"),
+            "",
+            posts,
+        ),
+        (
+            "rest-navigation-delete",
+            "DELETE",
+            navigation("/852&force=true"),
+            "",
+            posts,
+        ),
+        ("rest-blocks-create", "POST", blocks(""), pattern, nothing),
+        ("rest-blocks-update", "POST", blocks("/853"), renamed, posts),
+        (
+            "rest-blocks-publish",
+            "PATCH",
+            blocks("/854"),
+            r#"{"status":"publish"}"#,
+            posts,
+        ),
+        ("rest-blocks-trash", "DELETE", blocks("/853"), "", posts),
+        (
+            "rest-blocks-delete",
+            "DELETE",
+            blocks("/854&force=1"),
+            "",
+            posts,
+        ),
+        (
+            "rest-blocks-create-unsynced",
+            "POST",
+            blocks(""),
+            r#"{"title":"Unsynced","meta":{"wp_pattern_sync_status":"unsynced"}}"#,
+            nothing,
+        ),
+        (
+            "rest-blocks-create-categorised",
+            "POST",
+            blocks(""),
+            in_two,
+            all,
+        ),
+        (
+            "rest-blocks-categories",
+            "POST",
+            blocks("/853"),
+            r#"{"wp_pattern_category":[862]}"#,
+            all,
+        ),
+        (
+            "rest-blocks-draft-meta",
+            "POST",
+            blocks("/854"),
+            r#"{"meta":{"wp_pattern_sync_status":"partial"},"wp_pattern_category":[861]}"#,
+            all,
+        ),
+        (
+            "rest-blocks-delete-categorised",
+            "DELETE",
+            blocks("/853&force=true"),
+            "",
+            all,
+        ),
+    ];
+    writes_are_php_s(state, writes).await;
+}
+
+/// The templates' and parts' writes leave the rows PHP's leave, over
+/// `reference/rest/templates-custom.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn template_writes_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/template-writes.sql");
+    let paragraph =
+        |text: &str| format!(r#""<!-- wp:paragraph -->\n<p>{text}</p>\n<!-- /wp:paragraph -->""#);
+    let templates = |path: &str| format!("/?rest_route=/wp/v2/templates{path}");
+    let parts = |path: &str| format!("/?rest_route=/wp/v2/template-parts{path}");
+    let mine = format!(
+        r#"{{"slug":"my-template","title":"My template","content":{},"description":"Made here"}}"#,
+        paragraph("Mine")
+    );
+    let side = format!(
+        r#"{{"slug":"my-sidebar","title":"My sidebar","area":"header","content":{}}}"#,
+        paragraph("Side")
+    );
+    let customised = format!(r#"{{"content":{}}}"#, paragraph("Customised"));
+    let foot = format!(r#"{{"content":{}}}"#, paragraph("Foot"));
+    let again = format!(
+        r#"{{"title":"Index again","content":{}}}"#,
+        paragraph("Changed")
+    );
+    let index = "/twentytwentyfive//index";
+    let writes = vec![
+        (
+            "rest-templates-create",
+            "POST",
+            templates(""),
+            mine.as_str(),
+        ),
+        (
+            "rest-templates-create-suggested",
+            "POST",
+            templates(""),
+            r#"{"slug":"page-about","title":{"raw":"About"},"content":{"raw":"<!-- wp:post-content /-->"},"author":1,"is_wp_suggestion":true}"#,
+        ),
+        (
+            "rest-templates-create-taken",
+            "POST",
+            templates(""),
+            r#"{"slug":"my-custom","title":"Again","content":"<!-- wp:post-title /-->"}"#,
+        ),
+        ("rest-template-parts-create", "POST", parts(""), &side),
+        (
+            "rest-template-parts-create-area",
+            "POST",
+            parts(""),
+            r#"{"slug":"odd-part","title":"Odd","area":"bogus"}"#,
+        ),
+        (
+            "rest-templates-customise",
+            "POST",
+            templates("/twentytwentyfive//page"),
+            &customised,
+        ),
+        (
+            "rest-template-parts-customise",
+            "PUT",
+            parts("/twentytwentyfive//footer"),
+            &foot,
+        ),
+        ("rest-templates-update", "POST", templates(index), &again),
+        (
+            "rest-template-parts-update",
+            "PATCH",
+            parts("/twentytwentyfive//header"),
+            r#"{"area":"footer","description":"Moved"}"#,
+        ),
+        (
+            "rest-templates-revert",
+            "POST",
+            templates("/twentytwentyfive//page-no-title"),
+            r#"{"source":"theme"}"#,
+        ),
+        (
+            "rest-templates-trash",
+            "DELETE",
+            templates("/twentytwentyfive//my-custom"),
+            "",
+        ),
+        (
+            "rest-templates-delete",
+            "DELETE",
+            templates("/twentytwentyfive//my-custom&force=true"),
+            "",
+        ),
+        (
+            "rest-template-parts-delete",
+            "DELETE",
+            parts("/twentytwentyfive//header&force=1"),
+            "",
+        ),
+    ];
+    let writes = writes
+        .into_iter()
+        .map(|(golden, method, target, body)| (golden, method, target, body, Setup::All))
+        .collect();
+    writes_are_php_s(state, writes).await;
 }
 
 /// Without a writer, a write past its checks is refused as hs-admin

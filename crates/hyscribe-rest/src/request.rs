@@ -100,6 +100,8 @@ pub(crate) enum Sanitize {
     Endpoint,
     /// Not ported: a request that has it is answered 501 before its checks.
     NotPorted,
+    /// `check_meta_is_array()` validates it, and it is left as given.
+    IsArray,
     /// The endpoint's own sanitizer, which reads the site.
     Site(fn(&Context, &Value) -> Checked<Value>),
     /// The endpoint's own sanitizer, which reads the other parameters as
@@ -130,9 +132,10 @@ pub(crate) fn defaults(args: &[Arg]) -> Vec<(Key, Value)> {
         .collect()
 }
 
-/// The invalid parameters and the errors each gives.
+/// The invalid parameters and the errors each gives, none for a validate
+/// callback's `false`.
 #[derive(Default)]
-struct Invalid(Vec<(String, RestError)>);
+struct Invalid(Vec<(String, Option<RestError>)>);
 
 impl Invalid {
     /// `rest_invalid_param` of them all, if any.
@@ -145,11 +148,15 @@ impl Invalid {
         let params = self
             .0
             .iter()
-            .map(|(name, error)| (key(name), text(error.message.clone())))
+            .map(|(name, error)| {
+                let message = error.as_ref().map(|error| error.message.as_str());
+                (key(name), text(message.unwrap_or("Invalid parameter.")))
+            })
             .collect();
         let details = self
             .0
             .iter()
+            .filter_map(|(name, error)| error.as_ref().map(|error| (name, error)))
             .map(|(name, error)| {
                 let detail = object([
                     ("code", text(error.code)),
@@ -176,7 +183,11 @@ impl Invalid {
 /// its error.
 fn refused<T>(result: Result<T, Refusal>, name: &str, invalid: &mut Invalid) -> Option<T> {
     result
-        .map_err(|Refusal(error)| invalid.0.extend(error.map(|error| (name.into(), error))))
+        .map_err(|Refusal(error)| {
+            invalid
+                .0
+                .extend(error.map(|error| (name.into(), Some(error))))
+        })
         .ok()
 }
 
@@ -206,6 +217,12 @@ pub(crate) fn has_valid_params(params: &Params, args: &[Arg]) -> Result<(), Rest
         .filter(|arg| arg.validate)
         .filter_map(|arg| params.get(arg.name).map(|value| (arg, value)));
     for (arg, value) in set {
+        if matches!(arg.sanitize, Sanitize::IsArray) {
+            if !matches!(value, Value::Array(_)) {
+                invalid.0.push((arg.name.into(), None));
+            }
+            continue;
+        }
         let checked = validate_value_from_schema(value, &arg.schema, arg.name);
         refused(checked, arg.name, &mut invalid);
     }
@@ -241,7 +258,7 @@ pub(crate) fn sanitize_params(
                 }
                 Sanitize::TextField => Ok(text(sanitize_text_field(&value.to_php_string()))),
                 Sanitize::Urldecode => Ok(text(urldecode(&value.to_php_string()))),
-                Sanitize::Endpoint | Sanitize::NotPorted => Ok(value.clone()),
+                Sanitize::Endpoint | Sanitize::NotPorted | Sanitize::IsArray => Ok(value.clone()),
                 Sanitize::Site(sanitize) => sanitize(context, value),
                 Sanitize::Params(sanitize) => sanitize(&given, value),
                 Sanitize::Schema => validate_value_from_schema(value, &arg.schema, arg.name)

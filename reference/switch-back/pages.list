@@ -24,9 +24,8 @@ admin	/wp-admin/options-media.php	200	value="160"
 admin	/wp-admin/options-permalink.php	200	/%postname%/
 admin	/wp-admin/options-privacy.php	200	Privacy Policy
 switchback	/wp-admin/profile.php	200	Switcher
-visitor	/	200	Switch Back Site
+visitor	/	200	Sample Page Edited
 visitor	/hello-again/	200	edited on the screen
-visitor	/sample-page/	200	Sample Page Edited
 visitor	/category/switch-category/	200	Hello again
 visitor	/tag/bulk-tag/	200	Hello again
 visitor	/feed/	200	Hello again

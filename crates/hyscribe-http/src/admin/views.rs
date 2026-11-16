@@ -2,9 +2,10 @@
 
 //! A page view's writes in primary mode: the user settings synced with
 //! their cookie and a list's `?mode=`, the welcome panel's
-//! `?welcome=`, the Quick Draft form's auto-draft and the Settings
-//! saves' notices, deleted once a screen shows them. They are kept
-//! with the page, and `?mode=`'s with the redirect past a list's last page.
+//! `?welcome=`, the Quick Draft form's auto-draft, the Settings
+//! saves' notices, deleted once a screen shows them, and the Permalinks
+//! screen's rewrite rules. They are kept with the page, and
+//! `?mode=`'s with the redirect past a list's last page.
 
 use axum::http::StatusCode;
 use axum::response::Response;
@@ -18,6 +19,7 @@ use hyscribe_write::posts::Context;
 use tokio::runtime::Handle;
 
 use super::saves::dashboard::{context, quick_press_draft, welcome};
+use super::saves::options::flush_rewrite_rules;
 use super::saves::screen::{Found, Synced, save_settings, sync};
 use super::{Admin, failed, with_cookies};
 use crate::login::{Names, cookie, is_ssl, php_cookie};
@@ -31,6 +33,8 @@ pub(super) struct View {
     draft: bool,
     /// Whether a Settings screen shows what a save left (`settings-updated`).
     settings: bool,
+    /// Whether the view is the Permalinks screen's, which refreshes the rules.
+    rules: bool,
 }
 
 /// The Settings screens, whose `options-head.php` shows a save's notices.
@@ -87,6 +91,7 @@ pub(super) fn plan(
         welcome,
         draft: dashboard && needs_draft(admin),
         settings: updated && SETTINGS.contains(&path),
+        rules: path == "/hs-admin/options-permalink",
     }
 }
 
@@ -104,12 +109,13 @@ pub(super) fn quick_press(admin: &Admin) -> View {
         welcome: None,
         draft: needs_draft(admin),
         settings: false,
+        rules: false,
     }
 }
 
 /// The view's writes in `write`, once begun, as PHP makes them: the
-/// settings, and with the page the welcome panel's state, the auto-draft
-/// and the notices a save left, once shown.
+/// settings, and with the page the rewrite rules, the welcome panel's
+/// state, the auto-draft and the notices a save left, once shown.
 pub(super) async fn written<'w>(
     write: Result<Write<'w>, DbError>,
     ctx: &Context,
@@ -117,6 +123,10 @@ pub(super) async fn written<'w>(
     page: bool,
 ) -> Result<(Write<'w>, Option<u64>), Error> {
     let mut write = write?;
+    // `options-permalink.php` flushes before its header syncs the settings.
+    if view.rules && page {
+        flush_rewrite_rules(&mut write).await?;
+    }
     save_settings(&mut write, ctx.user, &view.synced, (ctx.now, page)).await?;
     if let Some(shown) = view.welcome.filter(|_| page) {
         welcome(&mut write, ctx.user, shown).await?;
@@ -165,7 +175,8 @@ pub(super) fn viewed(
     let after = view.synced.mode.is_some()
         || view.synced.newer.is_some()
         || view.welcome.is_some()
-        || view.settings;
+        || view.settings
+        || view.rules;
     let saved = match drafted {
         // The Quick Draft form is shown to all who may write posts.
         Some((write, _)) => handle.block_on(write.commit()).map_err(Error::from),

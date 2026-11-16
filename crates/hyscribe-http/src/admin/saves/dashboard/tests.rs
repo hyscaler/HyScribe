@@ -56,7 +56,7 @@ async fn the_welcome_panel_s_state_is_php_s() {
         "update-welcome-panel",
         "admin-ajax-welcome-panel",
         "visible=",
-        "1",
+        super::super::Ajax::Text("1".into()),
     )
     .await;
 }

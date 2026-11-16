@@ -22,7 +22,7 @@ use hyscribe_db::{DbError, Write};
 use hyscribe_kses::url_host;
 use hyscribe_model::Term;
 
-use super::{Admin, HTML, ajax_text};
+use super::{Admin, HTML, JSON, ajax_text};
 use crate::redirect::wp_validate_redirect;
 
 mod comments;
@@ -108,6 +108,8 @@ pub(super) type Handler<T = Answer> =
 pub(super) enum Ajax {
     /// `wp_die( $text )`, or the text echoed before `wp_die()`.
     Text(String),
+    /// `wp_send_json()`'s JSON.
+    Json(String),
     /// `WP_Ajax_Response::send()`'s XML.
     Xml(String),
     /// The terms list's row of a term saved (`single_row()`).
@@ -132,8 +134,6 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         ("users", b"resetpassword") => Some(users::resetpassword),
         ("user-new", b"createuser") => Some(user_edit::create),
         ("profile" | "user-edit", b"update") => Some(user_edit::update),
-        ("admin-ajax", b"save-user-color-scheme") => Some(user_edit::color_scheme),
-        ("admin-ajax", b"send-password-reset") => Some(user_edit::password_reset),
         ("edit-comments", _) => Some(comments::bulk),
         ("comment", b"editedcomment") => Some(comments::edited),
         ("comment", action) => comments::moderation(action),
@@ -147,10 +147,6 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         ("edit-tags", b"bulk-delete") => Some(terms::bulk_delete),
         ("edit-tags", b"editedtag") => Some(terms::edited_tag),
         ("post", b"post-quickdraft-save") => Some(dashboard::quickdraft_save),
-        ("admin-ajax", b"update-welcome-panel") => Some(dashboard::update_welcome_panel),
-        ("admin-ajax", b"closed-postboxes") => Some(screen::closed_postboxes),
-        ("admin-ajax", b"hidden-columns") => Some(screen::hidden_columns),
-        ("admin-ajax", b"meta-box-order") => Some(screen::meta_box_order),
         (_, b"screen-options") => Some(screen::options),
         ("edit", _) => Some(posts::bulk),
         _ => None,
@@ -168,6 +164,12 @@ pub(super) fn ajax_handler(action: &[u8]) -> Option<Handler<Ajax>> {
         b"edit-comment" => Some(comments::quick_edit),
         b"replyto-comment" => Some(comments::reply),
         b"inline-save" => Some(posts::inline_save),
+        b"save-user-color-scheme" => Some(user_edit::color_scheme),
+        b"send-password-reset" => Some(user_edit::password_reset),
+        b"update-welcome-panel" => Some(dashboard::update_welcome_panel),
+        b"closed-postboxes" => Some(screen::closed_postboxes),
+        b"hidden-columns" => Some(screen::hidden_columns),
+        b"meta-box-order" => Some(screen::meta_box_order),
         _ => None,
     }
 }
@@ -185,6 +187,7 @@ pub(super) fn ajax_served(admin: &Admin, asked: &Asked, answer: Ajax) -> Respons
     let referer = || String::from_utf8_lossy(&referer(asked).unwrap_or_default()).into_owned();
     let (kind, body) = match answer {
         Ajax::Text(text) => (HTML, text),
+        Ajax::Json(json) => (JSON, json),
         Ajax::Xml(xml) => (XML, xml),
         Ajax::TermRow(taxonomy, term) => (HTML, saved_row(admin, taxonomy, &term, &referer())),
         Ajax::TermAdded(taxonomy, added) => (XML, term_added(admin, taxonomy, &added, &referer())),
@@ -236,4 +239,4 @@ pub(super) async fn act<'w, T>(
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

@@ -7,10 +7,12 @@ use hyscribe_db::Connection;
 use hyscribe_testkit::fixture_database;
 use hyscribe_testkit::writes::check_writes;
 
+use super::super::tests::unread::Unread;
 use super::super::tests::{
-    Request, acted, answered, new_user, password_is, php_answer, php_location, redirected, turn,
+    Request, acted, answered, asked, fields, new_user, password_is, php_answer, redirected, turn,
     writer,
 };
+use super::super::{Ajax, ajax_handler};
 use super::*;
 
 fn request<'q>(screen: &'q str, action: &'q [u8], post: &'q str) -> Request<'q> {
@@ -23,9 +25,23 @@ fn request<'q>(screen: &'q str, action: &'q [u8], post: &'q str) -> Request<'q> 
     }
 }
 
+/// What user 1's Ajax action `action` answers `post`, as [`acted`].
+async fn ajax(
+    writer: &hyscribe_db::Writer,
+    conn: &mut Connection,
+    action: &[u8],
+    post: &str,
+) -> Ajax {
+    let (handler, post) = (ajax_handler(action).unwrap(), fields(post));
+    let asked = asked("/hs-admin/admin-ajax", &[], &post);
+    acted(writer, conn, (handler, &Unread), &asked)
+        .await
+        .unwrap()
+}
+
 /// What PHP cannot go on with, or shows again: not ported.
 async fn unported(writer: &hyscribe_db::Writer, conn: &mut Connection, request: &Request<'_>) {
-    let answer = acted(writer, conn, request, None).await;
+    let answer = answered(writer, conn, request).await;
     assert!(
         matches!(answer, Err(Error::Unported(_))),
         "{}",
@@ -59,7 +75,7 @@ async fn new_users_are_php_s() {
         ] {
             unported(&writer, conn, &request("user-new", b"createuser", post)).await;
         }
-        let php = php_location("user-new-create");
+        let php = php_answer("user-new-create").1;
         let php = php.rsplit_once('=').unwrap().0;
         // The password is hashed trimmed and slashed, as PHP hashes it.
         for (post, password) in [
@@ -151,11 +167,10 @@ async fn edited_users_are_php_s() {
         ] {
             unported(&writer, conn, &request("user-edit", b"update", &post)).await;
         }
-        let died = acted(
+        let died = answered(
             &writer,
             conn,
             &request("user-edit", b"update", &format!("{user}&role=bogus")),
-            None,
         )
         .await;
         let message = "Sorry, you are not allowed to give users that role.";
@@ -169,7 +184,9 @@ async fn edited_users_are_php_s() {
              &use_ssl=1&pass1=A+new+pass&pass2=A+new+pass"
         );
         let to = redirected(&writer, conn, &request("user-edit", b"update", &post)).await;
-        let php = php_location("user-edit-update").replace("801", &id.to_string());
+        let php = php_answer("user-edit-update")
+            .1
+            .replace("801", &id.to_string());
         assert_eq!(to, php);
         assert!(password_is(&writer, conn, id, b"A new pass").await);
         Ok(())
@@ -201,16 +218,16 @@ async fn profiles_are_php_s() {
             let screen = fields[2].trim_end_matches(".php");
             let post = fields[3].replace("other%40example.test", "ADMIN%40default-install.test");
             let to = redirected(&writer, conn, &request(screen, b"update", &post)).await;
-            assert_eq!(to, php_location(case), "{case}");
+            assert_eq!(to, php_answer(case).1, "{case}");
         }
         let post = "user_id=1&email=not-an-email&nickname=admin&display_name=admin&pass1=&pass2=";
         let to = redirected(&writer, conn, &request("profile", b"update", post)).await;
-        assert_eq!(to, php_location("profile-email"));
+        assert_eq!(to, php_answer("profile-email").1);
         let post = "user_id=1&email=new-admin%40example.test&url=&nickname=admin&display_name=admin\
                     &admin_color=fresh&role=editor&admin_bar_front=1&locale=\
                     &pass1=Another+pass&pass2=Another+pass";
         let to = redirected(&writer, conn, &request("profile", b"update", post)).await;
-        assert_eq!(to, php_location("profile-password"));
+        assert_eq!(to, php_answer("profile-password").1);
         assert!(password_is(&writer, conn, 1, b"Another pass").await);
         Ok(())
     };
@@ -225,12 +242,14 @@ async fn color_schemes_are_php_s() {
     let _turn = turn().await;
     let writer = writer().await;
     let action = async |conn: &mut Connection, ()| {
-        let post = "color_scheme=ocean";
-        let request = request("admin-ajax", b"save-user-color-scheme", post);
-        let Ok(Answer::Page(json)) = answered(&writer, conn, &request).await else {
-            panic!("no JSON");
-        };
-        assert_eq!(json.into_bytes(), php_answer("color-scheme").2);
+        let json = ajax(
+            &writer,
+            conn,
+            b"save-user-color-scheme",
+            "color_scheme=ocean",
+        )
+        .await;
+        assert_eq!(json, Ajax::Json(php_answer("color-scheme").2));
         Ok(())
     };
     let golden = "admin-color-scheme";
@@ -249,12 +268,9 @@ async fn password_reset_links_are_php_s() {
     };
     let action = async |conn: &mut Connection, id: u64| {
         let post = format!("user_id={id}");
-        let request = request("admin-ajax", b"send-password-reset", &post);
-        let Ok(Answer::Page(json)) = answered(&writer, conn, &request).await else {
-            panic!("no JSON");
-        };
-        let php = String::from_utf8(php_answer("send-password-reset").2).unwrap();
-        assert_eq!(json, php.replace("other", "oracle-link"));
+        let json = ajax(&writer, conn, b"send-password-reset", &post).await;
+        let php = php_answer("send-password-reset").2;
+        assert_eq!(json, Ajax::Json(php.replace("other", "oracle-link")));
         Ok(())
     };
     let golden = "admin-send-password-reset";

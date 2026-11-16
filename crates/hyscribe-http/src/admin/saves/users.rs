@@ -176,7 +176,7 @@ pub(super) fn resetpassword<'a>(
 pub(super) async fn retrieve_password(
     write: &mut Write<'_>,
     login: &[u8],
-) -> Result<Option<&'static str>, Stop> {
+) -> Result<Option<&'static str>, Error> {
     let login = stripslashes(login);
     let login = php_trim(&login);
     if is_empty_string(login) {

@@ -5,28 +5,17 @@
 
 use hyscribe_admin::terms::Taxonomy as Listed;
 use hyscribe_db::{Connection, Writer};
+use hyscribe_testkit::fixture_database;
 use hyscribe_testkit::writes::check_writes;
-use hyscribe_testkit::{fixture_database, hs_admin_page, unhex};
 use hyscribe_write::terms::TermIds;
 
 use super::super::tests::unread::Unread;
-use super::super::tests::{fields, writer};
-use super::super::{Handler, act, ajax_handler, handler};
+use super::super::tests::{acted, asked, fields, php_answer, writer};
+use super::super::{Handler, ajax_handler, handler};
 use super::*;
 
 /// The term writes of these tests, which would wait on each other's locks.
 static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-/// The golden's status, `Location` under hs-admin's names, and body of `case`.
-fn golden(case: &str) -> (String, String, String) {
-    let golden = include_str!("../../../../../hyscribe-admin/tests/golden/admin-saves.tsv");
-    let row = golden
-        .lines()
-        .find(|row| row.starts_with(&format!("{case}\t")));
-    let row: Vec<&str> = row.unwrap().split('\t').collect();
-    let body = String::from_utf8(unhex(row[3])).unwrap();
-    (row[1].into(), hs_admin_page(row[2]), body)
-}
 
 /// A request to `uri` by user 1, with `get` and `post` as query strings.
 struct Sent<'a> {
@@ -41,49 +30,22 @@ const POSTED: Sent = Sent {
     uri: "/hs-admin/edit-tags",
 };
 
-/// `handler` asked `sent` as one action on `conn` whose statements after
-/// `budget` fail.
-async fn run<T>(
-    writer: &Writer,
-    conn: &mut Connection,
-    handler: Handler<T>,
-    sent: &Sent<'_>,
-    budget: Option<usize>,
-) -> Result<T, Error> {
-    let (get, post) = (fields(sent.get), fields(sent.post));
-    let asked = Asked {
-        get: &get,
-        post: &post,
-        referer: None,
-        uri: sent.uri.as_bytes(),
-        home: "http://127.0.0.1:8081",
-        user: 1,
-        now: 0,
-        ip: b"",
-        agent: b"",
-    };
-    let mut write = writer.begin_on(conn).await;
-    if let (Ok(write), Some(budget)) = (&mut write, budget) {
-        write.fail_after(budget);
-    }
-    act(write, handler, &asked, &Unread).await
-}
-
-/// The answer of `handler` once every statement budget short of it has
-/// failed, each failure rolled back.
+/// The answer of `handler` to `sent`, as [`acted`].
 async fn settled<T>(
     writer: &Writer,
     conn: &mut Connection,
     handler: Handler<T>,
     sent: &Sent<'_>,
 ) -> T {
-    let mut budget = 0;
-    loop {
-        match run(writer, conn, handler, sent, Some(budget)).await {
-            Err(Error::Db(_)) => budget += 1,
-            answer => return answer.map_err(|err| format!("{err:?}")).unwrap(),
-        }
-    }
+    let (get, post) = (fields(sent.get), fields(sent.post));
+    let answer = acted(
+        writer,
+        conn,
+        (handler, &Unread),
+        &asked(sent.uri, &get, &post),
+    )
+    .await;
+    answer.map_err(|err| format!("{err:?}")).unwrap()
 }
 
 /// The location `answer` redirects to.
@@ -145,7 +107,7 @@ async fn adding_is_php_s() {
             )
             .await,
         );
-        assert_eq!(to, golden("terms-add").1);
+        assert_eq!(to, php_answer("terms-add").1);
         Ok(())
     };
     let ok = async |_: &mut Connection| Ok(());
@@ -188,7 +150,7 @@ async fn adding_by_ajax_is_php_s() {
             &Sent { post, ..POSTED },
         )
         .await;
-        assert_eq!(answer, Ajax::Text(golden("ajax-inline-duplicate").2));
+        assert_eq!(answer, Ajax::Text(php_answer("ajax-inline-duplicate").2));
         Ok(())
     };
     let ok = async |_: &mut Connection| Ok(());
@@ -292,7 +254,7 @@ async fn editing_is_php_s() {
             )
             .await,
         );
-        assert_eq!(to, golden("terms-edited").1);
+        assert_eq!(to, php_answer("terms-edited").1);
         Ok(())
     };
     check_writes(&fixture_database(), "admin-terms-edited", setup, action)
@@ -329,7 +291,7 @@ async fn deleting_is_php_s() {
             )
             .await,
         );
-        assert_eq!(to, golden("terms-delete-other").1);
+        assert_eq!(to, php_answer("terms-delete-other").1);
         Ok(())
     };
     check_writes(&fixture_database(), "admin-terms-delete", setup, action)
@@ -368,7 +330,7 @@ async fn bulk_deleting_is_php_s() {
             )
             .await,
         );
-        assert_eq!(to, golden("terms-bulk-missing").1);
+        assert_eq!(to, php_answer("terms-bulk-missing").1);
         Ok(())
     };
     check_writes(
@@ -402,7 +364,7 @@ async fn deleting_by_ajax_is_php_s() {
             },
         )
         .await;
-        assert_eq!(answer, Ajax::Text(golden("ajax-delete-tag").2));
+        assert_eq!(answer, Ajax::Text(php_answer("ajax-delete-tag").2));
         // A taxonomy not registered: `wp_die( 1 )`, nothing written.
         let post = format!("tag_ID={}&taxonomy=nope", ids[0]);
         let delete = ajax_handler(b"delete-tag").unwrap();
@@ -411,7 +373,7 @@ async fn deleting_by_ajax_is_php_s() {
             ..POSTED
         };
         let answer = settled(&writer, conn, delete, &sent).await;
-        assert_eq!(answer, Ajax::Text(golden("ajax-delete-unknown").2));
+        assert_eq!(answer, Ajax::Text(php_answer("ajax-delete-unknown").2));
         Ok(())
     };
     check_writes(
@@ -433,18 +395,12 @@ async fn answer<T>(handler: Handler<T>, post: &str) -> Result<T, Stop<T>> {
     let args = TermArgs::default();
     let tag = wp_insert_term(&mut write, Taxonomy::PostTag, b"Answered", &args).await;
     let post = fields(&post.replace("{tag}", &tag.unwrap().term_id.to_string()));
-    let asked = Asked {
-        get: &[],
-        post: &post,
-        referer: None,
-        uri: b"/hs-admin/edit-tags",
-        home: "http://127.0.0.1:8081",
-        user: 1,
-        now: 0,
-        ip: b"",
-        agent: b"",
-    };
-    handler(&mut write, &asked, &Unread).await
+    handler(
+        &mut write,
+        &asked("/hs-admin/edit-tags", &[], &post),
+        &Unread,
+    )
+    .await
 }
 
 /// The answers of `reference/admin-saves/golden.sh` that need a tag the
@@ -459,17 +415,17 @@ async fn answers_for_another_taxonomy_are_php_s() {
     let page = hyscribe_admin::die::page(true, "WordPress &rsaquo; Error", message);
     assert_eq!(
         String::from_utf8(page).unwrap(),
-        golden("terms-edited-other").2
+        php_answer("terms-edited-other").2
     );
     let quick = answer(
         inline_save_tax,
         "taxonomy=category&tax_ID={tag}&name=Other&slug=other",
     )
     .await;
-    assert!(matches!(quick, Ok(Ajax::Text(text)) if text == golden("ajax-inline-other").2));
+    assert!(matches!(quick, Ok(Ajax::Text(text)) if text == php_answer("ajax-inline-other").2));
     let post = "taxonomy=post_tag&screen=edit-post_tag&tag-name=answered";
     let exists = answer(ajax_add_tag, post).await;
-    assert!(matches!(exists, Ok(Ajax::Xml(xml)) if xml == golden("ajax-add-tag-exists").2));
+    assert!(matches!(exists, Ok(Ajax::Xml(xml)) if xml == php_answer("ajax-add-tag-exists").2));
     // The default category is never deleted: `wp_die( 0 )`.
     let kept = answer(ajax_delete_tag, "tag_ID=1&taxonomy=category").await;
     assert!(matches!(kept, Ok(Ajax::Text(text)) if text == "0"));
@@ -479,7 +435,8 @@ async fn answers_for_another_taxonomy_are_php_s() {
     ] {
         let post = format!("tag_ID={{tag}}&taxonomy={taxonomy}");
         let deleted = answer(ajax_delete_tag, &post).await;
-        let died = matches!(deleted, Err(Stop::Died(Ajax::Text(text))) if text == golden(case).2);
+        let died =
+            matches!(deleted, Err(Stop::Died(Ajax::Text(text))) if text == php_answer(case).2);
         assert!(died, "{case}");
     }
 }

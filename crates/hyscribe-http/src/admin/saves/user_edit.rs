@@ -26,7 +26,7 @@ use hyscribe_write::users::{
 };
 
 use super::users::{can_promote, retrieve_password};
-use super::{Acting, Saving, Stop, text};
+use super::{Acting, Ajax, Saving, Stop, text};
 
 /// The current user's capabilities, read through the action's `Write`.
 struct Current {
@@ -354,9 +354,9 @@ async fn updated(
 }
 
 /// `wp_send_json_success( $data )` or `wp_send_json_error( $data )`, an
-/// Ajax action's answer: its JSON as the page.
-fn json(success: bool, data: Value) -> Answer {
-    Answer::Page(text(&json_body(success, data)))
+/// Ajax action's answer.
+fn json(success: bool, data: Value) -> Ajax {
+    Ajax::Json(text(&json_body(success, data)))
 }
 
 /// The JSON of `json()`.
@@ -374,7 +374,7 @@ pub(super) fn color_scheme<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
     _: &'a dyn Acting,
-) -> Saving<'a> {
+) -> Saving<'a, Ajax> {
     Box::pin(async move {
         let scheme = lookup(asked.post, "color_scheme").map(Value::to_php_string);
         let scheme = sanitize_key(&scheme.unwrap_or_default());
@@ -436,7 +436,7 @@ pub(super) fn password_reset<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
     _: &'a dyn Acting,
-) -> Saving<'a> {
+) -> Saving<'a, Ajax> {
     Box::pin(async move {
         let id = lookup(asked.post, "user_id").map_or(0, Value::to_int);
         let user = write.user(u64::try_from(id).unwrap_or_default()).await?;

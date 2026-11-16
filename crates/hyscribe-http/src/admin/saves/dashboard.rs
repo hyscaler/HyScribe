@@ -13,7 +13,7 @@ use hyscribe_write::options::{Meta, update_metadata};
 use hyscribe_write::posts::{Context, get_default_post_to_edit, wp_update_post};
 
 use super::screen::{update_user_meta, update_user_option};
-use super::{Acting, Saving, text};
+use super::{Acting, Ajax, Saving, text};
 
 /// The posts' context of `user` on the site at `home`, now; their
 /// capability to publish plays no part in the drafts written here.
@@ -135,11 +135,11 @@ pub(super) fn update_welcome_panel<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
     _: &'a dyn Acting,
-) -> Saving<'a> {
+) -> Saving<'a, Ajax> {
     Box::pin(async move {
         let visible = lookup(asked.post, "visible").is_some_and(|v| !v.is_empty());
         welcome(write, asked.user, visible).await?;
-        Ok(Answer::Page("1".into()))
+        Ok(Ajax::Text("1".into()))
     })
 }
 

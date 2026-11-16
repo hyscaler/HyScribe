@@ -9,7 +9,7 @@ use hyscribe_testkit::writes::check_writes;
 use hyscribe_write::posts::{PostArgs, wp_insert_post};
 use hyscribe_write::users::{UserData, wp_insert_user};
 
-use super::super::tests::{Request, acted, new_user, php_location, redirected, turn, writer};
+use super::super::tests::{Request, answered, new_user, php_answer, redirected, turn, writer};
 use super::*;
 
 fn dodelete(post: &str) -> Request<'_> {
@@ -62,7 +62,7 @@ async fn deletions_are_php_s() {
             format!("users[]={heir}&delete_option[{heir}]=reassign&reassign_user[{heir}]=-1"),
             format!("users[]={heir}&delete_option[{heir}]=reassign&reassign_user[{heir}]=x"),
         ] {
-            let unported = acted(&writer, conn, &dodelete(&post), None).await;
+            let unported = answered(&writer, conn, &dodelete(&post)).await;
             assert!(matches!(unported, Err(Error::Unported(_))), "{post}");
         }
         let kept = format!("users[]={deleted}&delete_option[{deleted}]=keep");
@@ -73,7 +73,7 @@ async fn deletions_are_php_s() {
              &delete_option[{heir}]=reassign&reassign_user[{heir}]=1&delete_option[1]=delete"
         );
         let to = redirected(&writer, conn, &dodelete(&post)).await;
-        let php = php_location("users-dodelete-delete");
+        let php = php_answer("users-dodelete-delete").1;
         assert_eq!(to, php.replace("delete_count=1", "delete_count=2"));
         Ok(())
     };
@@ -127,10 +127,10 @@ async fn password_reset_links_are_php_s() {
             get: "users[]=1&wp_http_referer[]=x",
             ..request
         };
-        let unported = acted(&writer, conn, &array, None).await;
+        let unported = answered(&writer, conn, &array).await;
         assert!(matches!(unported, Err(Error::Unported(_))));
         let to = redirected(&writer, conn, &request).await;
-        let php = php_location("users-resetpassword");
+        let php = php_answer("users-resetpassword").1;
         assert_eq!(to, php.replace("reset_count=1", "reset_count=2"));
         Ok(())
     };

@@ -9,45 +9,24 @@ use hyscribe_testkit::fixture_database;
 use hyscribe_testkit::writes::check_writes;
 
 use super::super::tests::unread::Unread;
-use super::super::tests::{fields, writer};
-use super::super::{Handler, act, handler};
+use super::super::tests::{acted, asked, fields, settled, writer};
+use super::super::{Ajax, Handler, ajax_handler};
 use super::*;
 
 /// The request of `query`, posted by user 1 to the posts list.
-pub(in crate::admin::saves) fn asked(post: &[(Key, Value)]) -> Asked<'_> {
-    Asked {
-        get: &[],
-        post,
-        referer: None,
-        uri: b"/hs-admin/edit?paged=2",
-        home: "http://127.0.0.1:8081",
-        user: 1,
-        now: 0,
-        ip: b"",
-        agent: b"",
-    }
+fn posted(post: &[(Key, Value)]) -> Asked<'_> {
+    asked("/hs-admin/edit?paged=2", &[], post)
 }
 
-/// `handler` over the POST `query` as one action on `conn`, once every
-/// statement budget short of it has failed, each failure rolled back.
-pub(in crate::admin::saves) async fn answered(
+/// `handler` over the POST `query`, as [`acted`].
+pub(in crate::admin::saves) async fn answered<T>(
     writer: &Writer,
     conn: &mut Connection,
-    handler: Handler,
+    handler: Handler<T>,
     query: &str,
-) -> Result<Answer, Error> {
+) -> Result<T, Error> {
     let post = fields(query);
-    let mut budget = 0;
-    loop {
-        let mut write = writer.begin_on(conn).await;
-        if let Ok(write) = &mut write {
-            write.fail_after(budget);
-        }
-        match act(write, handler, &asked(&post), &Unread).await {
-            Err(Error::Db(_)) => budget += 1,
-            answer => return answer,
-        }
-    }
+    acted(writer, conn, (handler, &Unread), &posted(&post)).await
 }
 
 /// `f` as one action on `conn` once every shorter statement budget failed.
@@ -56,27 +35,23 @@ pub(in crate::admin::saves) async fn cut<T>(
     conn: &mut Connection,
     f: impl AsyncFn(&mut Write<'_>) -> Result<T, Error>,
 ) -> Result<T, Error> {
-    let mut budget = 0;
-    loop {
+    settled(async |budget| {
         let mut write = writer.begin_on(conn).await?;
         write.fail_after(budget);
-        match f(&mut write).await {
-            Err(Error::Db(_)) => budget += 1,
-            done => return Ok((done?, write.commit().await?).0),
-        }
-    }
+        let done = f(&mut write).await?;
+        write.commit().await?;
+        Ok(done)
+    })
+    .await
 }
 
 /// The oracle's case `golden` of `query` posted to the action `name`.
-pub(in crate::admin::saves) async fn ajax(name: &str, golden: &str, query: &str, answer: &str) {
+pub(in crate::admin::saves) async fn ajax(name: &str, golden: &str, query: &str, answer: Ajax) {
     let writer = writer().await;
     let action = async |conn: &mut Connection, ()| {
-        let handler = handler("admin-ajax", name.as_bytes()).unwrap();
+        let handler = ajax_handler(name.as_bytes()).unwrap();
         let saved = answered(&writer, conn, handler, query).await;
-        assert!(
-            matches!(saved, Ok(Answer::Page(body)) if body == answer),
-            "{name}"
-        );
+        assert_eq!(saved.ok(), Some(answer), "{name}");
         Ok(())
     };
     let report = check_writes(&fixture_database(), golden, async |_| Ok(()), action).await;
@@ -90,14 +65,15 @@ async fn the_scripts_saves_are_php_s() {
         "closed-postboxes",
         "admin-ajax-closed-postboxes",
         closed,
-        "1",
+        Ajax::Text("1".into()),
     )
     .await;
     let hidden = "hidden=author,tags&page=edit-post";
-    ajax("hidden-columns", "admin-ajax-hidden-columns", hidden, "1").await;
+    let one = Ajax::Text("1".into());
+    ajax("hidden-columns", "admin-ajax-hidden-columns", hidden, one).await;
     let order = "order[normal]=dashboard_quick_press,dashboard_site_health\
         &order[side]=dashboard_right_now&page_columns=2&page=dashboard";
-    let success = "{\"success\":true}";
+    let success = Ajax::Json("{\"success\":true}".into());
     ajax(
         "meta-box-order",
         "admin-ajax-meta-box-order",
@@ -226,13 +202,13 @@ fn settings_sync_as_php_s() {
 }
 
 /// `handler` over the POST `query` in `write`, which is rolled back with it.
-pub(in crate::admin::saves) async fn run(
+pub(in crate::admin::saves) async fn run<T>(
     write: &mut Write<'_>,
-    handler: Handler,
+    handler: Handler<T>,
     query: &str,
-) -> Result<Answer, super::super::Stop> {
+) -> Result<T, super::super::Stop<T>> {
     let post = fields(query);
-    handler(write, &asked(&post), &Unread).await
+    handler(write, &posted(&post), &Unread).await
 }
 
 /// User 1's meta `key`, as stored.
@@ -247,7 +223,9 @@ pub(in crate::admin::saves) async fn meta(write: &mut Write<'_>, key: &str) -> O
 async fn what_is_not_saved() {
     let writer = writer().await;
     let mut write = writer.begin().await.unwrap();
-    let unported = |saved| matches!(saved, Err(super::super::Stop::Failed(Error::Unported(_))));
+    fn unported<T>(saved: Result<T, super::super::Stop<T>>) -> bool {
+        matches!(saved, Err(super::super::Stop::Failed(Error::Unported(_))))
+    }
     assert!(unported(
         run(&mut write, closed_postboxes, "closed[]=a&page=x").await
     ));

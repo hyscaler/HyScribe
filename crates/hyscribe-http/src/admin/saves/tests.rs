@@ -37,13 +37,71 @@ pub(super) async fn turn() -> tokio::sync::MutexGuard<'static, ()> {
     SERIAL.lock().await
 }
 
-pub(super) async fn writer() -> Writer {
+pub(in crate::admin) async fn writer() -> Writer {
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
     writer.unwrap().unwrap()
 }
 
-pub(super) fn fields(query: &str) -> Vec<(Key, Value)> {
+pub(in crate::admin) fn fields(query: &str) -> Vec<(Key, Value)> {
     parse_str(query.as_bytes()).as_array().unwrap().to_vec()
+}
+
+/// The write oracle's site address, which `reference/admin-saves/` keeps.
+pub(super) const SITE: &str = "http://127.0.0.1:8081";
+
+/// A request to `uri` past its checks, by user 1 at time 0, with `get`
+/// and `post` as `$_GET` and `$_POST`.
+pub(in crate::admin) fn asked<'a>(
+    uri: &'a str,
+    get: &'a [(Key, Value)],
+    post: &'a [(Key, Value)],
+) -> Asked<'a> {
+    Asked {
+        get,
+        post,
+        referer: None,
+        uri: uri.as_bytes(),
+        home: SITE,
+        user: 1,
+        now: 0,
+        ip: b"",
+        agent: b"",
+    }
+}
+
+/// What `attempt` answers once each statement budget short of it, which
+/// it is given, has failed.
+pub(in crate::admin) async fn settled<T>(
+    mut attempt: impl AsyncFnMut(usize) -> Result<T, hyscribe_write::Error>,
+) -> Result<T, hyscribe_write::Error> {
+    let mut budget = 0;
+    loop {
+        match attempt(budget).await {
+            // Any other error ends the test's transaction too.
+            Err(hyscribe_write::Error::Db(err)) if err.to_string().contains("budget is spent") => {
+                budget += 1;
+            }
+            answer => return answer,
+        }
+    }
+}
+
+/// `handler` asked `asked` by `site` as one action on `conn`, once every
+/// statement budget short of it has failed, each failure rolled back.
+pub(super) async fn acted<T>(
+    writer: &Writer,
+    conn: &mut Connection,
+    (handler, site): (Handler<T>, &dyn Acting),
+    asked: &Asked<'_>,
+) -> Result<T, hyscribe_write::Error> {
+    settled(async |budget| {
+        let mut write = writer.begin_on(conn).await;
+        if let Ok(write) = &mut write {
+            write.fail_after(budget);
+        }
+        act(write, handler, asked, site).await
+    })
+    .await
 }
 
 /// A request to a handler: its screen and action, `$_GET` and `$_POST` as
@@ -56,51 +114,19 @@ pub(super) struct Request<'q> {
     pub user: u64,
 }
 
-/// The handler `request` names, asked by it as one action on `conn` whose
-/// statements after `budget` fail.
-pub(super) async fn acted(
-    writer: &Writer,
-    conn: &mut Connection,
-    request: &Request<'_>,
-    budget: Option<usize>,
-) -> Result<Answer, hyscribe_write::Error> {
-    let (get, post) = (fields(request.get), fields(request.post));
-    let asked = Asked {
-        get: &get,
-        post: &post,
-        referer: None,
-        uri: b"/hs-admin/",
-        home: "http://127.0.0.1:8081",
-        user: request.user,
-        now: 0,
-        ip: b"",
-        agent: b"",
-    };
-    let mut write = writer.begin_on(conn).await;
-    if let (Ok(write), Some(budget)) = (&mut write, budget) {
-        write.fail_after(budget);
-    }
-    let handler = handler(request.screen, request.action).unwrap();
-    act(write, handler, &asked, &unread::Unread).await
-}
-
-/// The answer to `request` once every statement budget short of it has
-/// failed, each failure rolled back.
+/// The answer of the handler `request` names, as [`acted`].
 pub(super) async fn answered(
     writer: &Writer,
     conn: &mut Connection,
     request: &Request<'_>,
 ) -> Result<Answer, hyscribe_write::Error> {
-    let mut budget = 0;
-    loop {
-        match acted(writer, conn, request, Some(budget)).await {
-            // Any other error ends the test's transaction too.
-            Err(hyscribe_write::Error::Db(err)) if err.to_string().contains("budget is spent") => {
-                budget += 1;
-            }
-            answer => return answer,
-        }
-    }
+    let (get, post) = (fields(request.get), fields(request.post));
+    let asked = Asked {
+        user: request.user,
+        ..asked("/hs-admin/", &get, &post)
+    };
+    let handler = handler(request.screen, request.action).unwrap();
+    acted(writer, conn, (handler, &unread::Unread), &asked).await
 }
 
 /// The redirect of `request`, once every budget short of it has failed.
@@ -115,33 +141,42 @@ pub(super) async fn redirected(
     }
 }
 
-/// `text` under hs-admin's names.
-pub(super) fn hs_names(text: &str) -> String {
-    let text = text
-        .replace("wp-admin/", "hs-admin/")
-        .replace("wp-admin%2F", "hs-admin%2F");
-    ["users", "user-new", "user-edit", "profile"]
-        .iter()
-        .fold(text, |text, screen| {
-            text.replace(&format!("{screen}.php"), screen)
-        })
+/// `reference/admin-saves/golden.sh`'s answers: a case, its status, its
+/// `Location` and its body in hexadecimal.
+pub(in crate::admin) const ANSWERS: &str =
+    include_str!("../../../../hyscribe-admin/tests/golden/admin-saves.tsv");
+
+/// The requests of `reference/admin-saves/golden.sh`.
+pub(in crate::admin) const CASES: &str =
+    include_str!("../../../../../reference/admin-saves/cases.list");
+
+/// The pages PHP answers after them, a case, its status and its page in
+/// hexadecimal.
+pub(in crate::admin) const AFTER: &str =
+    include_str!("../../../../hyscribe-admin/tests/golden/admin-saves-after.tsv");
+
+/// The fields of the row of `case` in `rows`, a golden or [`CASES`].
+pub(in crate::admin) fn case_row(rows: &'static str, case: &str) -> Option<Vec<&'static str>> {
+    let row = rows
+        .lines()
+        .find(|row| row.starts_with(&format!("{case}\t")));
+    row.map(|row| row.split('\t').collect())
+}
+
+/// `text` of `reference/admin-saves/` under hs-admin's names.
+pub(in crate::admin) fn hs(text: &str) -> String {
+    text.replace("wp-admin/", "hs-admin/")
+        .replace("wp-admin%2F", "hs-admin%2F")
+        .replace("wp-admin%252F", "hs-admin%252F")
+        .replace(".php", "")
 }
 
 /// The golden's status, `Location` under hs-admin's names and body of
 /// PHP's `case`.
-pub(super) fn php_answer(case: &str) -> (String, String, Vec<u8>) {
-    let golden = include_str!("../../../../hyscribe-admin/tests/golden/admin-saves.tsv");
-    let row = golden
-        .lines()
-        .find(|row| row.starts_with(&format!("{case}\t")));
-    let fields: Vec<&str> = row.unwrap().split('\t').collect();
-    let body = hyscribe_testkit::unhex(fields[3]);
-    (fields[1].into(), hs_names(fields[2]), body)
-}
-
-/// The golden's `Location` of PHP's `case`, under hs-admin's names.
-pub(super) fn php_location(case: &str) -> String {
-    php_answer(case).1
+pub(super) fn php_answer(case: &str) -> (String, String, String) {
+    let fields = case_row(ANSWERS, case).unwrap();
+    let body = String::from_utf8(unhex(fields[3])).unwrap();
+    (fields[1].into(), hs(fields[2]), body)
 }
 
 /// Whether the user `id`'s stored hash is of `password`, which the write
@@ -201,14 +236,14 @@ async fn the_role_change_is_php_s() {
             }
         }
         let none = format!("new_role=none&users[]={kept}&users[]=1");
-        let died = acted(&writer, conn, &promote(&none), None).await;
+        let died = answered(&writer, conn, &promote(&none)).await;
         let own = "Sorry, you cannot remove your own role.";
         assert!(matches!(died, Ok(Answer::Denied(message)) if message == own));
         let alone = format!("new_role=editor&users[]={promoted}");
         let to = redirected(&writer, conn, &promote(&alone)).await;
-        assert_eq!(to, php_location("users-promote"));
+        assert_eq!(to, php_answer("users-promote").1);
         let to = redirected(&writer, conn, &promote(&format!("{alone}&users[]=1"))).await;
-        assert_eq!(to, php_location("users-promote-self-editor"));
+        assert_eq!(to, php_answer("users-promote-self-editor").1);
         Ok(())
     };
     let report = check_writes(&fixture_database(), "admin-users-promote", setup, action).await;

@@ -182,7 +182,7 @@ const NAVIGATION_PARTS: &Properties = &[
 ];
 
 /// The properties of the type's schema.
-pub(super) fn properties(kind: Kind) -> &'static Properties {
+pub(crate) fn properties(kind: Kind) -> &'static Properties {
     match kind {
         Kind::Post => POST,
         Kind::Page => PAGE,
@@ -194,7 +194,7 @@ pub(super) fn properties(kind: Kind) -> &'static Properties {
 }
 
 /// The contexts of the parts of the property `name`.
-fn parts(kind: Kind, name: &[u8]) -> &'static Properties {
+pub(crate) fn parts(kind: Kind, name: &[u8]) -> &'static Properties {
     match (kind, name) {
         (Kind::Block, b"title" | b"content") => BLOCK_PARTS,
         (Kind::Navigation, b"title" | b"content") => NAVIGATION_PARTS,

@@ -270,18 +270,22 @@ async fn unported(database: &str, requests: &'static [(&str, &str, &str)]) {
 }
 
 /// Writes answer 501, as do the arguments whose schemas use keywords not
-/// ported (`format`, `oneOf`).
+/// ported (`format`), and term limits with children.
 #[tokio::test]
 async fn posts_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/posts.tsv");
-    replay("wordpress", golden, false, 6 * 89, &[]).await;
+    replay("wordpress", golden, false, 6 * 101, &[]).await;
     unported(
         "wordpress",
         &[
             ("administrator", "POST", "/?rest_route=/wp/v2/posts"),
             ("administrator", "PUT", "/?rest_route=/wp/v2/posts/1"),
             ("visitor", "DELETE", "/?rest_route=/wp/v2/pages/2&force=1"),
-            ("visitor", "GET", "/?rest_route=/wp/v2/posts&categories=1"),
+            (
+                "visitor",
+                "GET",
+                "/?rest_route=/wp/v2/posts&categories[terms]=1&categories[include_children]=1",
+            ),
             (
                 "editor",
                 "GET",
@@ -303,7 +307,7 @@ async fn theme_test_data_posts_match_php() {
         ("*", "/?rest_route=/wp/v2/posts/555&excerpt_length=5"),
         ("user", "/?rest_route=/wp/v2/posts/51"),
     ];
-    replay("wordpress_ttd", golden, true, 6 * 39, skipped).await;
+    replay("wordpress_ttd", golden, true, 6 * 42, skipped).await;
     unported(
         "wordpress_ttd",
         &[

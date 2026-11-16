@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `WP_REST_Revisions_Controller` and `WP_REST_Autosaves_Controller` of
-//! posts and pages, read only: their revisions, autosaves and single
-//! ones. Writes answer 501 but their permission checks give `Allow`.
+//! posts, pages, synced patterns, navigation menus and menu items, read
+//! only: their revisions, autosaves and single ones. Writes answer 501
+//! but their permission checks give `Allow`.
 
 use hyscribe_model::{OrderBy, Post, PostQuery, StatusFilter};
 use hyscribe_phpser::{Key, Value, add_query_arg};
@@ -13,7 +14,7 @@ use hyscribe_render::rest::Rendering;
 
 use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
 use crate::posts::args::id;
-use crate::posts::prepare::{PARTS, UNSET, rfc3339, writes_or_unported};
+use crate::posts::prepare::{UNSET, properties, rfc3339, writes_or_unported};
 use crate::posts::{self, Kind, ids, render_request};
 use crate::request::{Arg, Params, Sanitize, arg, typed};
 use crate::response::{Response, RestError, int, object, paginate, text};
@@ -37,11 +38,24 @@ const REVISION: &Properties = &[
     ("preview_link", &["edit"]),
 ];
 
+/// A pattern's title and content: raw in view too, and rendered, which its
+/// schema leaves out, in every context.
+const BLOCK_PARTS: &Properties = &[
+    ("raw", &["view", "edit"]),
+    ("rendered", &["view", "edit", "embed"]),
+];
+
+/// The revision's own GUID, a string in its schema: whole in any context.
+const UNFILTERED_PARTS: &Properties = &[
+    ("raw", &["view", "edit", "embed"]),
+    ("rendered", &["view", "edit", "embed"]),
+];
+
 /// The endpoints of the route `regex`, if one of these.
 pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
-    let route = regex
-        .strip_prefix("/wp/v2/posts/")
-        .or_else(|| regex.strip_prefix("/wp/v2/pages/"))?;
+    let route = ["posts", "pages", "blocks", "navigation", "menu-items"]
+        .iter()
+        .find_map(|base| regex.strip_prefix(&format!("/wp/v2/{base}/")))?;
     let get = |args, permission, callback| Endpoint {
         args,
         permission,
@@ -404,7 +418,10 @@ fn prepare(
     if context.head {
         return Ok(Response::new(Value::Array(Vec::new()), 200));
     }
-    let fields = fields_for_response(params, REVISION);
+    let kind = Kind::of(params.route);
+    let properties = revision_properties(kind);
+    let own_properties = crate::posts::prepare::properties(kind);
+    let fields = fields_for_response(params, &properties);
     let has = |field: &str| is_field_included(field, &fields);
     let renders = has("content.rendered");
     // Only those who may edit a post see its revisions.
@@ -475,37 +492,75 @@ fn prepare(
         put("excerpt", parts(&revision.excerpt, rendered));
     }
     if has("meta") {
-        let footnotes = context.site.post_meta(revision.id, "footnotes");
-        put(
-            "meta",
-            object([("footnotes", text(footnotes.unwrap_or_default()))]),
-        );
+        put("meta", meta(context, kind, revision.id));
     }
     if let Some(parent) = parent.filter(|_| has("preview_link")) {
-        put("preview_link", text(preview_link(context, parent)));
+        put("preview_link", text(preview_link(context, kind, parent)));
     }
     let shown = params.context();
-    let data: Vec<(Key, Value)> = filter_by_context(data, REVISION, &shown)
+    let data: Vec<(Key, Value)> = filter_by_context(data, &properties, &shown)
         .into_iter()
         .map(|(name, value)| match value {
-            Value::Array(parts) => (name, Value::Array(filter_by_context(parts, PARTS, &shown))),
+            Value::Array(found) if name.to_php_string() != b"meta" => {
+                let property = name.to_php_string();
+                let own = own_properties.iter().any(|(n, _)| n.as_bytes() == property);
+                let parts = match (kind, property.as_slice()) {
+                    (Kind::Block, b"title" | b"content") => BLOCK_PARTS,
+                    _ if !own => UNFILTERED_PARTS,
+                    _ => crate::posts::prepare::parts(kind, &property),
+                };
+                (name, Value::Array(filter_by_context(found, parts, &shown)))
+            }
             value => (name, value),
         })
         .collect();
     let mut response = Response::new(Value::Array(data), 200);
     if has("parent") {
-        let route = format!(
-            "/wp/v2/{}/{}",
-            Kind::of(params.route).base(),
-            revision.parent
-        );
+        let route = format!("/wp/v2/{}/{}", kind.base(), revision.parent);
         response.add_link("parent", context.rest_url(&route));
     }
     Ok(response)
 }
 
-/// `get_preview_post_link()` of an autosave's parent.
-fn preview_link(context: &Context, parent: &Post) -> Vec<u8> {
+/// The revision schema's properties: the parent type's title, content and
+/// excerpt, with their contexts, where it has them.
+fn revision_properties(kind: Kind) -> Vec<(&'static str, &'static [&'static str])> {
+    let own = properties(kind);
+    let inherited = ["title", "content", "excerpt"];
+    let take = |property: &(&'static str, &'static [&'static str])| match inherited
+        .contains(&property.0)
+    {
+        true => own.iter().find(|(name, _)| *name == property.0).copied(),
+        false => Some(*property),
+    };
+    REVISION.iter().filter_map(take).collect()
+}
+
+/// `WP_REST_Post_Meta_Fields::get_value()` of a revision with the meta
+/// its parent's type registers.
+fn meta(context: &Context, kind: Kind, id: u64) -> Value {
+    let value = |key| text(context.site.post_meta(id, key).unwrap_or_default());
+    match kind {
+        Kind::Block => {
+            // A status its enum does not take is null.
+            let status = context.site.post_meta(id, "wp_pattern_sync_status");
+            let status = status.filter(|s| matches!(s.as_slice(), b"partial" | b"unsynced"));
+            object([
+                ("wp_pattern_sync_status", status.map_or(Value::Null, text)),
+                ("footnotes", value("footnotes")),
+            ])
+        }
+        Kind::Post | Kind::Page => object([("footnotes", value("footnotes"))]),
+        _ => Value::Array(Vec::new()),
+    }
+}
+
+/// `get_preview_post_link()` of an autosave's parent: empty for a type
+/// that is not viewable.
+fn preview_link(context: &Context, kind: Kind, parent: &Post) -> Vec<u8> {
+    if !matches!(kind, Kind::Post | Kind::Page) {
+        return Vec::new();
+    }
     let id = parent.id.to_string();
     let nonce = context.site.nonce(&format!("post_preview_{id}"));
     let link = permalink(context.site.reads(), parent);

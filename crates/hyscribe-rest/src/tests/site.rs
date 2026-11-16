@@ -425,8 +425,13 @@ fn matches(site: &Fixture, query: &PostQuery, post: &Post) -> bool {
                 .iter()
                 .any(|t| formats.slugs.contains(&string_of(&t.slug)))
     });
+    let terms = query.terms.iter().all(|filter| {
+        let terms = site.post_terms(post.id, &filter.taxonomy);
+        terms.iter().any(|t| filter.terms.contains(&t.id)) != filter.exclude
+    });
     types
         && status
+        && terms
         && query
             .include
             .as_ref()

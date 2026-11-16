@@ -678,6 +678,16 @@ fn start_reports_what_stops_it_serving() {
     );
 }
 
+/// Stops the service in its folder when dropped, so a failing test leaves
+/// no server writing to the scratch database.
+struct Stopping<'a>(&'a std::path::Path);
+
+impl Drop for Stopping<'_> {
+    fn drop(&mut self) {
+        service(&["stop"], self.0);
+    }
+}
+
 /// In primary mode the login screen lets people log in: it has no read
 /// only notice. The cron task runs the default install's due events.
 #[test]
@@ -699,6 +709,7 @@ fn primary_mode_serves_a_login_screen() {
         )
     };
     let started = run("start");
+    let _stop = Stopping(home);
     assert_eq!(started.code, 0, "{}", started.err);
     let log = home.join("logs/hyscribe.log");
     let deadline = std::time::Instant::now() + Duration::from_secs(30);

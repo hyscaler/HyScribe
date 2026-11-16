@@ -96,6 +96,38 @@ fn allows_html_and_scripts_only_with_unfiltered_html() {
         (Some(("heic".into(), "image/heic")), Some("a.heic"))
     );
     assert_eq!(default_extension("image/x-unknown"), None);
+    // A name "0" is PHP's empty(): its copies are not looked for.
+    assert_eq!(
+        wp_unique_filename(b"0.jpg", &["0-150x150.jpg".into()], false),
+        "0.jpg"
+    );
+    assert_eq!(
+        wp_unique_filename(b"a.jpg", &["a-150x150.jpg".into()], false),
+        "a-1.jpg"
+    );
+    let copies = ["a-150x150.jpg".into(), "a-1-150x150.jpg".into()];
+    assert_eq!(wp_unique_filename(b"a.jpg", &copies, false), "a-2.jpg");
+    let kin = ["h.heic".into(), "h-1.heif".into()];
+    assert_eq!(wp_unique_filename(b"h.jpg", &kin, false), "h-2.jpg");
+    // Only a JPEG and the HEIC family have kin.
+    assert_eq!(
+        wp_unique_filename(b"p.png", &["p.jpg".into(), "p.heic".into()], false),
+        "p.png"
+    );
+    // A size is digits on both sides of the x.
+    assert_eq!(
+        wp_unique_filename(
+            b"a.jpg",
+            &["a-150xab.jpg".into(), "a-x150.jpg".into()],
+            false
+        ),
+        "a.jpg"
+    );
+    // Without an extension, no copies are looked for.
+    assert_eq!(
+        wp_unique_filename(b"noext", &["noext-150x150".into()], false),
+        "noext"
+    );
     // Found by fuzzing: a name ending in a character of two bytes.
     assert_eq!(sanitize_file_name("\u{7ce}\n".as_bytes(), false), "\u{7ce}");
     assert_eq!(wp_check_filetype("\u{7ce}", false), None);

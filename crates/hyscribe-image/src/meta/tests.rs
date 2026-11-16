@@ -193,11 +193,16 @@ fn takes_text_as_wp_read_image_metadata_does() {
         (field(&meta, "credit"), field(&meta, "copyright")),
         (&text("Credit"), &text("Owner"))
     );
+    // An IPTC caption is kept over an EXIF comment.
+    let comment = ascii("Comment");
+    let comment = tiff(&[(0x9286, 7, comment.len() as u32, &comment)]);
+    let meta = read(&with_both(&[(120, b"Caption")], &comment)).unwrap();
+    assert_eq!(field(&meta, "caption"), &text("Caption"));
     let meta = read(&with_both(&[(60, b"070809")], &tiff(&[]))).unwrap();
     assert_eq!(field(&meta, "created_timestamp"), &text("0"));
     // XMP without an alternative text reads as none.
     let mut xmp = corpus("small.jpg");
-    xmp.extend(b"<x:xmpmeta>hello</x:xmpmeta>");
+    xmp.extend(b"<x:xmpmeta>a description without the alternative</x:xmpmeta>");
     assert_eq!(field(&read(&xmp).unwrap(), "alt"), &text(""));
 }
 

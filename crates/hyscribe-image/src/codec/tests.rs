@@ -116,6 +116,32 @@ fn holds_a_gif_frame_larger_than_its_screen_to_the_limits() {
         decode(&gif, ImageType::Gif, &small),
         Err(Error::Undecodable)
     );
+    let mut twenty = Vec::new();
+    let mut encoder = gif::Encoder::new(&mut twenty, 1, 1, &[0, 0, 0, 255, 255, 255]).unwrap();
+    let frame = gif::Frame {
+        width: 20,
+        height: 1,
+        buffer: vec![1; 20].into(),
+        ..gif::Frame::default()
+    };
+    encoder.write_frame(&frame).unwrap();
+    drop(encoder);
+    assert!(decode(&twenty, ImageType::Gif, &small).is_ok());
+    // The area limit bounds it too.
+    let few = Limits {
+        area: 10,
+        ..Limits::default()
+    };
+    assert_eq!(
+        decode(&twenty, ImageType::Gif, &few),
+        Err(Error::Undecodable)
+    );
+}
+
+/// The transparent index of a GIF's first frame.
+fn transparent(gif: &[u8]) -> Option<u8> {
+    let mut decoder = gif::DecodeOptions::new().read_info(gif).unwrap();
+    decoder.read_next_frame().unwrap().unwrap().transparent
 }
 
 #[test]
@@ -145,6 +171,7 @@ fn keeps_grey_and_half_transparency_in_a_gif() {
         .unwrap()
         .pixels;
     assert_eq!((back.data[3], back.data[7]), (0, 255));
+    assert_eq!(transparent(&gif), Some(255));
     let opaque = Pixels {
         width: 1,
         height: 1,
@@ -152,6 +179,7 @@ fn keeps_grey_and_half_transparency_in_a_gif() {
         data: vec![50, 128],
     };
     let gif = encode(&opaque, "image/gif", 82, &Kept::default()).unwrap();
+    assert_eq!(transparent(&gif), None);
     assert_eq!(
         decode(&gif, ImageType::Gif, &Limits::default())
             .unwrap()

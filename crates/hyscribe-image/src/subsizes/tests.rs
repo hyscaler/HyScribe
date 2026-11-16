@@ -348,6 +348,37 @@ fn applies_the_hooks() {
         &Moved(-1, false),
     );
     assert_eq!((none.files.len(), none.attached_file), (0, None));
+    // At the threshold an image is not scaled: a sideways one is turned.
+    let at = with(
+        "orient-6.jpg",
+        "image/jpeg",
+        &Limits::default(),
+        &Moved(320, false),
+    );
+    assert_eq!(
+        at.attached_file.as_deref(),
+        Some("2026/11/orient-6-rotated.jpg")
+    );
+    // So for its height: a tall JPEG turned by its EXIF.
+    let tall = corpus("tall.jpg");
+    let exif =
+        b"\xFF\xE1\x00\x22Exif\0\0MM\0*\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01\0\x06\0\0\0\0\0\0";
+    let turned = [&tall[..2], exif.as_slice(), &tall[2..]].concat();
+    let upload = Upload {
+        bytes: &turned,
+        file: "tall.jpg",
+        attachment: 0,
+    };
+    let made = wp_generate_attachment_metadata(
+        upload,
+        "image/jpeg",
+        Vec::new(),
+        &Limits::default(),
+        &Moved(2700, false),
+        b"",
+    )
+    .unwrap();
+    assert_eq!(made.attached_file.as_deref(), Some("tall-rotated.jpg"));
     // Off, a big image keeps its size, and a sideways one is still turned.
     let big = with(
         "big-orient-6.jpg",

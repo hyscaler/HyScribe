@@ -104,14 +104,8 @@ pub fn image_resize_dimensions(
     if orig_w == 0 || orig_h == 0 || (dest_w == 0 && dest_h == 0) {
         return None;
     }
-    let larger = match (dest_w, dest_h) {
-        (_, 0) => orig_w < dest_w,
-        (0, _) => orig_h < dest_h,
-        _ => orig_w < dest_w && orig_h < dest_h,
-    };
-    if larger {
-        return None;
-    }
+    // PHP's refusal of a size larger than the image is left to the check of
+    // the same size below, which gives the same answer.
     let (s_x, s_y, new_w, new_h, crop_w, crop_h) = match crop {
         Crop::At(x, y) => {
             let aspect = f64::from(orig_w) / f64::from(orig_h);

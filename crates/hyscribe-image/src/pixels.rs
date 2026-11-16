@@ -35,6 +35,13 @@ fn triangle(x: f64) -> f64 {
     (1.0 - x.abs()).max(0.0)
 }
 
+/// The samples ImageMagick weighs about `bisect`. A wider window adds
+/// only weights of 0, so mutants that widen it are excluded (`.cargo/mutants.toml`).
+fn window(bisect: f64, scale: f64, from: usize) -> (usize, usize) {
+    let start = (bisect - scale + 0.5).max(0.0) as usize;
+    (start, ((bisect + scale + 0.5) as usize).min(from))
+}
+
 /// Each output position's contributions along a side of `from` samples
 /// resized to `to`.
 fn contributions(from: usize, to: usize) -> Vec<Contribution> {
@@ -45,8 +52,7 @@ fn contributions(from: usize, to: usize) -> Vec<Contribution> {
     (0..to)
         .map(|x| {
             let bisect = (x as f64 + 0.5) / factor + EPSILON;
-            let start = (bisect - scale + 0.5).max(0.0) as usize;
-            let stop = ((bisect + scale + 0.5) as usize).min(from);
+            let (start, stop) = window(bisect, scale, from);
             let weights: Vec<f64> = (start..stop)
                 .map(|n| triangle((n as f64 - bisect + 0.5) / scale))
                 .collect();
@@ -97,14 +103,19 @@ impl Pixels {
     /// `filter:support` 2.0: the two passes in ImageMagick's order, the
     /// horizontal first unless the image shrinks to under 0.265 of its area.
     pub fn resize(&self, width: u32, height: u32) -> Pixels {
-        let area =
-            f64::from(width) / f64::from(self.width) * (f64::from(height) / f64::from(self.height));
-        let floats = if area > 0.265 {
+        let floats = if self.horizontal_first(width, height) {
             vertical(&horizontal(self, width), height)
         } else {
             horizontal(&vertical(self, height), width)
         };
         floats.into_pixels()
+    }
+
+    /// Whether ImageMagick filters across first: unless the image shrinks to
+    /// 0.265 of its area or less.
+    fn horizontal_first(&self, width: u32, height: u32) -> bool {
+        f64::from(width) / f64::from(self.width) * (f64::from(height) / f64::from(self.height))
+            > 0.265
     }
 
     /// `cropImage( $width, $height, $x, $y )`, within the image.
@@ -274,7 +285,8 @@ impl Floats {
                 255.0
             };
             for (i, &v) in pixel.iter().enumerate() {
-                let v = if alpha && i + 1 < self.channels && a > 0.0 {
+                // Fully transparent: 0 / 0, which the cast to u8 makes 0.
+                let v = if alpha && i + 1 < self.channels {
                     v * 255.0 / a
                 } else {
                     v

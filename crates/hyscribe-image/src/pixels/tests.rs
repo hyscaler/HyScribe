@@ -106,3 +106,10 @@ fn weighs_colour_by_alpha() {
     assert!(clear.has_alpha());
     assert!(!counting(1, 1, 3).has_alpha());
 }
+
+#[test]
+fn filters_down_first_from_a_quarter_of_the_area() {
+    let image = grey(200, 200, &[0; 40_000]);
+    assert!(!image.horizontal_first(53, 200));
+    assert!(image.horizontal_first(54, 200));
+}

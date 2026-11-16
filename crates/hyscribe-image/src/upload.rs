@@ -171,10 +171,10 @@ pub fn sanitize_file_name(filename: &[u8], unfiltered_html: bool) -> String {
         name = format!("unnamed-file.{ext}");
     }
     let parts: Vec<&str> = name.split('.').collect();
-    let (Some((first, rest)), true) = (parts.split_first(), parts.len() > 2) else {
+    // Two parts come back as they are, with no middle part to mark.
+    let [first, middle @ .., last] = parts.as_slice() else {
         return name;
     };
-    let (last, middle) = rest.split_last().unwrap_or((first, &[]));
     let mut out = (*first).to_string();
     for part in middle {
         out.push('.');
@@ -250,7 +250,6 @@ pub fn wp_unique_filename(filename: &[u8], files: &[String], unfiltered_html: bo
         stem.to_string(),
         ext.map_or(String::new(), |ext| format!(".{ext}")),
     );
-    let named = filename != ext;
     let ending = |number: Option<u64>| number.map_or(String::new(), |n| n.to_string());
     if !stem.is_empty() && stem != "0" && size_suffixed(&stem) {
         number = Some(1);
@@ -299,15 +298,13 @@ pub fn wp_unique_filename(filename: &[u8], files: &[String], unfiltered_html: bo
             &format!("-{next}{ext}"),
         )
     };
-    // PHP's bound on the loops below (10,000 for an empty folder, where
-    // they never run).
-    let count = files.len();
-    if named && !ext.is_empty() {
-        let mut i = 0;
-        while i <= count && existing_copy(&filename, files) {
+    // Each number the loops below try frees one file at most, so they end
+    // within PHP's bound of the folder's file count.
+    // A sanitized name never starts with a dot: it is never only `$ext`.
+    if !ext.is_empty() {
+        while existing_copy(&filename, files) {
             filename = bump(&filename, number, &lc_ext);
             number = Some(number.unwrap_or(0) + 1);
-            i += 1;
         }
     }
     // A HEIC's JPEG, and a JPEG's HEIC kin, may not take a name in use.
@@ -345,14 +342,12 @@ pub fn wp_unique_filename(filename: &[u8], files: &[String], unfiltered_html: bo
             alts.iter()
                 .any(|(_, name)| exists(name) || existing_copy(name, files))
         };
-        let mut i = 0;
-        while i <= count && taken(&alts) {
+        while taken(&alts) {
             for (alt, name) in &mut alts {
                 *name = bump(name, number, alt);
             }
             filename = bump(&filename, number, &lc_ext);
             number = Some(number.unwrap_or(0) + 1);
-            i += 1;
         }
     }
     filename

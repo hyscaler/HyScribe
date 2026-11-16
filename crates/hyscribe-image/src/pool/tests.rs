@@ -45,3 +45,16 @@ fn runs_no_more_jobs_at_once_than_workers() {
     }
     assert_eq!(most.load(Ordering::SeqCst), 2);
 }
+
+#[test]
+fn waits_for_its_jobs_when_dropped() {
+    let pool = Pool::new(1, 1);
+    let done = Arc::new(AtomicUsize::new(0));
+    let job = Arc::clone(&done);
+    let _ = pool.jobs.send(Box::new(move || {
+        thread::sleep(std::time::Duration::from_millis(50));
+        job.store(1, Ordering::SeqCst);
+    }));
+    drop(pool);
+    assert_eq!(done.load(Ordering::SeqCst), 1);
+}

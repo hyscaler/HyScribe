@@ -134,8 +134,8 @@ impl<'a> Editor<'a> {
 
     /// `rotate( $angle )`, counter-clockwise in quarter turns.
     pub fn rotate(&mut self, angle: u32) {
-        let quarters = 4 - angle / 90 % 4;
-        self.image = self.image.rotate(quarters as u8);
+        let quarters = (angle / 90 % 4) as u8;
+        self.image = self.image.rotate(4 - quarters);
     }
 
     /// `flip( $horz, $vert )`: `$horz` upside down, `$vert` left to right.

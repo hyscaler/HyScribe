@@ -562,36 +562,43 @@ fn navigation_and_patterns_save_their_fields() {
         ..footer
     };
     assert_eq!(pattern, excerpted);
-    // A closer of the wrapper ends it early, so each type's differs.
-    let theme = b"twentytwentyfive";
+    // A stray closer ends the wrapper early, which serializes it under its
+    // own name.
     for (post_type, base, wrapper) in [
         ("wp_navigation", "navigation", "navigation"),
         ("wp_block", "blocks", "block"),
     ] {
-        let content = format!("a<!-- /wp:{wrapper} -->b<!-- wp:c /-->");
-        let body = format!(r#"{{"content":"{content}"}}"#);
+        let body = r#"{"content":"a<!-- /wp:x -->b<!-- wp:c /-->"}"#;
         let post = Post {
             post_type: post_type.into(),
             ..oracle("", &[]).post(1).unwrap()
         };
         let site = changed(Vec::new(), vec![post]);
-        let asked = Asked::new("administrator", "POST", &format!("/wp/v2/{base}/1"), &body);
+        let asked = Asked::new("administrator", "POST", &format!("/wp/v2/{base}/1"), body);
         let (plan, served) = on(&site, &asked, Outcome::Written(1));
         let Some(Write::Save(save)) = plan.map(|plan| plan.write) else {
             panic!("{post_type} {}", text_of(&served));
         };
-        let wrapped = templates::content::in_parent(content.as_bytes(), wrapper.as_bytes(), theme);
-        let other = templates::content::in_parent(content.as_bytes(), b"post-content", theme);
-        assert_eq!(save.content, Some(wrapped.clone()), "{post_type}");
-        assert_ne!(wrapped, other, "{post_type}");
+        let closed = format!("a<!-- /wp:{wrapper} -->b<!-- wp:c /-->");
+        assert_eq!(save.content, Some(closed.into_bytes()), "{post_type}");
     }
-    for (method, target) in [
-        ("POST", "/wp/v2/media"),
-        ("DELETE", "/wp/v2/menu-items/1&force=1"),
+    // Neither a pattern's categories nor an autosave is ported, and a
+    // format is checked against its schema.
+    for (method, target, body) in [
+        ("POST", "/wp/v2/media", ""),
+        ("DELETE", "/wp/v2/menu-items/1&force=1", ""),
+        (
+            "POST",
+            "/wp/v2/blocks",
+            r#"{"title":"x","wp_pattern_category":[]}"#,
+        ),
+        ("POST", "/wp/v2/posts/1/autosaves", r#"{"title":"x"}"#),
     ] {
-        let served = answered("administrator", method, target, "");
+        let served = answered("administrator", method, target, body);
         assert_eq!(served.status, 501, "{target}");
     }
+    let format = answered("administrator", "POST", "/wp/v2/posts", r#"{"format":"x"}"#);
+    assert!(text_of(&format).contains("rest_invalid_param"));
 }
 
 /// Content whose answer is not ported, as stored after kses or unfiltered,

@@ -132,17 +132,19 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
         plan: plan_save,
         finish,
     };
-    match index {
-        _ if !kind.writes() => None,
-        1 if regex == collection || regex == item => Some(save),
-        2 if regex == item => Some(Writing {
+    if !kind.writes() || regex != collection && regex != item {
+        return None;
+    }
+    // Only writes ask: the second endpoint saves, an item's third deletes.
+    Some(match index {
+        1 => save,
+        _ => Writing {
             unported: |_| false,
             args: |_, _, args| args,
             plan: plan_delete,
             finish,
-        }),
-        _ => None,
-    }
+        },
+    })
 }
 
 /// `check_status()`: the post's own status is valid whatever the schema

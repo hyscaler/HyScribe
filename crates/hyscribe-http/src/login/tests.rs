@@ -403,6 +403,58 @@ async fn failures_are_server_errors() {
 /// A user's capability check.
 type Can = dyn Fn(&str) -> bool;
 
+/// The capability constants come from the configuration. By default
+/// an administrator may not post unfiltered HTML, as in the goldens recorded
+/// with HyScribe's `DISALLOW_UNFILTERED_HTML`; set to false, PHP's default
+/// install answers, as `reference/capabilities/golden.sh` recorded it.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_configuration_sets_the_capability_constants() {
+    let golden = include_str!("../../../hyscribe-auth/tests/golden/capabilities.tsv");
+    let names = ["unfiltered_html", "edit_css", "unfiltered_upload"];
+    let php: Vec<(&str, bool)> = golden
+        .lines()
+        .map(|line| line.split('\t').collect::<Vec<_>>())
+        .filter(|f| f[0] == "can" && f[1] == "1" && f[3] == "613a303a7b7d")
+        .filter(|f| names.contains(&f[2]))
+        .map(|f| (f[2], f[4] == "1"))
+        .collect();
+    let php: Vec<bool> = names
+        .iter()
+        .map(|name| php.iter().any(|(cap, can)| cap == name && *can))
+        .collect();
+    assert_eq!(php, [true, true, false]);
+    let configured = |disallow_unfiltered_html, allow_unfiltered_uploads| async move {
+        let site = Arc::try_unwrap(login_site(None).await).unwrap();
+        let constants = hyscribe_config::Constants {
+            disallow_unfiltered_html,
+            allow_unfiltered_uploads,
+        };
+        site.with_constants(constants)
+    };
+    let sites = [
+        (login_site(None).await, [false, false, false]),
+        (
+            Arc::new(configured(false, false).await),
+            [true, true, false],
+        ),
+        (Arc::new(configured(true, true).await), [false, false, true]),
+    ];
+    let handle = Handle::current();
+    tokio::task::spawn_blocking(move || {
+        for (site, expected) in sites {
+            let reads = LoginReads::new(&site, handle.clone(), 1_900_000_000);
+            let admin = Capabilities::load(&reads, "wp_", 1);
+            let ours: Vec<bool> = names
+                .iter()
+                .map(|cap| admin.has_cap(&reads, cap, &[]))
+                .collect();
+            assert_eq!(ours, expected);
+        }
+    })
+    .await
+    .unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn logged_in_users_go_where_they_may() {
     let site = login_site(None).await;

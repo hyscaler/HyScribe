@@ -17,6 +17,7 @@ use tokio::runtime::Handle;
 
 use crate::login::LoginReads;
 use hyscribe_admin::terms::{Added, Taxonomy, saved_row, term_added};
+use hyscribe_config::Constants;
 use hyscribe_db::{DbError, Write};
 use hyscribe_kses::url_host;
 use hyscribe_model::Term;
@@ -65,11 +66,16 @@ pub(super) trait Acting: ActionSite {
     fn admin_url(&self, path: &str) -> String;
     /// `get_comment_link()` of the comment `id`.
     fn comment_url(&self, id: u64) -> String;
+    /// The capability constants of the configuration.
+    fn constants(&self) -> Constants;
 }
 
 impl Acting for Admin<'_> {
     fn admin_url(&self, path: &str) -> String {
         hyscribe_admin::assets::Urls::admin_url(self, path)
+    }
+    fn constants(&self) -> Constants {
+        self.site.constants
     }
     fn comment_url(&self, id: u64) -> String {
         let comment = hyscribe_admin::comments::CommentsSite::parent_comment(self, id);

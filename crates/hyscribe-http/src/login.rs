@@ -411,7 +411,7 @@ impl CapabilityData for LoginReads<'_> {
     }
 
     fn constant(&self, name: &str) -> bool {
-        name == "DISALLOW_UNFILTERED_HTML"
+        self.site.constants.defined(name)
     }
 }
 

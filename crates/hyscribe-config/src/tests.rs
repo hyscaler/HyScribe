@@ -55,8 +55,63 @@ fn defaults_are_safe() {
             site_url: None,
             salts: Vec::new(),
             rest_public_users: true,
+            constants: Constants {
+                disallow_unfiltered_html: true,
+                allow_unfiltered_uploads: false,
+            },
         }
     );
+}
+
+/// The capability constants as `define()` gives them, the safer value when
+/// a key is missing or empty, and a multisite network refused.
+#[test]
+fn reads_the_capability_constants() {
+    let constants = |pairs: &[(&str, &str)]| from_map(&with(pairs)).map(|c| c.constants);
+    let set = constants(&[
+        ("DISALLOW_UNFILTERED_HTML", "False"),
+        ("ALLOW_UNFILTERED_UPLOADS", "TRUE"),
+        ("MULTISITE", "false"),
+    ])
+    .unwrap();
+    assert!(!set.disallow_unfiltered_html && set.allow_unfiltered_uploads);
+    assert!(!set.defined("DISALLOW_UNFILTERED_HTML") && set.defined("ALLOW_UNFILTERED_UPLOADS"));
+    let numbers = constants(&[
+        ("DISALLOW_UNFILTERED_HTML", "0"),
+        ("ALLOW_UNFILTERED_UPLOADS", "1"),
+        ("MULTISITE", "0"),
+    ]);
+    assert_eq!(numbers, Ok(set));
+    let reset = constants(&[
+        ("DISALLOW_UNFILTERED_HTML", "1"),
+        ("ALLOW_UNFILTERED_UPLOADS", "false"),
+    ]);
+    assert_eq!(reset, Ok(Constants::default()));
+    let empty = constants(&[("DISALLOW_UNFILTERED_HTML", ""), ("MULTISITE", "")]);
+    assert_eq!(empty, Ok(Constants::default()));
+    let safer = Constants::default();
+    assert!(
+        safer.defined("DISALLOW_UNFILTERED_HTML") && !safer.defined("ALLOW_UNFILTERED_UPLOADS")
+    );
+    assert!(!set.defined("MULTISITE") && !safer.defined("MULTISITE"));
+    for key in [
+        "MULTISITE",
+        "DISALLOW_UNFILTERED_HTML",
+        "ALLOW_UNFILTERED_UPLOADS",
+    ] {
+        for value in ["yes", "no", "2", "'true'", " true"] {
+            assert_eq!(
+                constants(&[(key, value)]).unwrap_err().to_string(),
+                format!("{key} is invalid: must be true or false")
+            );
+        }
+    }
+    for value in ["true", "TRUE", "1"] {
+        assert_eq!(
+            constants(&[("MULTISITE", value)]).unwrap_err().to_string(),
+            "MULTISITE is invalid: multisite networks are not supported"
+        );
+    }
 }
 
 #[test]

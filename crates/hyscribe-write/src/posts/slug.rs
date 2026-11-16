@@ -83,7 +83,8 @@ pub(super) async fn unique(
     (status, kind, post_type): (&str, Kind, &str),
     parent: u64,
 ) -> Result<Vec<u8>> {
-    if UNSLUGGED.contains(&status) || (status == "inherit" && kind == Kind::Revision) {
+    let revision = status == "inherit" && kind == Kind::Revision;
+    if UNSLUGGED.contains(&status) || revision || kind == Kind::UserRequest {
         return Ok(slug);
     }
     let reserved = FEEDS.contains(&&slug[..]) || slug == b"embed";

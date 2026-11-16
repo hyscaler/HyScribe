@@ -21,6 +21,7 @@ use hyscribe_render::kses::wp_kses_data;
 pub const EMPTY_TRASH_DAYS: u64 = 30;
 
 pub mod comments;
+pub mod cron;
 pub mod options;
 pub mod posts;
 mod steps;

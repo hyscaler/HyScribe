@@ -14,6 +14,7 @@ use sqlx::Row as _;
 use crate::dialect::{Access, Dialect};
 use crate::{Backend, Bind, Columns, DbError, Engine, PrefixSql, Sql, db_error, ids_or_none, list};
 
+mod cron;
 mod meta;
 mod posts;
 mod terms;

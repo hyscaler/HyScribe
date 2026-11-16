@@ -11,13 +11,12 @@ use hyscribe_db::{PostFields, Write};
 use hyscribe_phpser::Value;
 use hyscribe_render::formatting::sanitize_title;
 
-use crate::Error;
 use crate::options::{Meta, delete_metadata, get_metadata, update_metadata};
 use crate::terms::{
     Taxonomy, TermError, TermList, TermRef, wp_set_post_categories, wp_set_post_terms,
 };
+use crate::{Error, cron};
 
-mod cron;
 mod date;
 mod hooks;
 mod link;
@@ -126,6 +125,8 @@ enum Kind {
     Post,
     Page,
     Revision,
+    /// A privacy request, which `_wp_personal_data_cleanup_requests()` updates.
+    UserRequest,
 }
 
 impl Kind {
@@ -134,6 +135,7 @@ impl Kind {
             "post" => Ok(Kind::Post),
             "page" => Ok(Kind::Page),
             "revision" => Ok(Kind::Revision),
+            "user_request" => Ok(Kind::UserRequest),
             _ => Err(Error::Unported("a post type other than post and page")),
         }
     }
@@ -146,7 +148,7 @@ impl Kind {
     fn taxonomies(self) -> &'static [&'static str] {
         match self {
             Kind::Post => &["category", "post_tag", "post_format"],
-            Kind::Page | Kind::Revision => &[],
+            Kind::Page | Kind::Revision | Kind::UserRequest => &[],
         }
     }
 }
@@ -503,4 +505,4 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

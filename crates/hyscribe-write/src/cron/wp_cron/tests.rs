@@ -315,9 +315,11 @@ async fn database_errors_stop_a_run() {
         .unwrap()
         .unwrap();
     let no_lock = "DELETE FROM wp_options WHERE option_name = '_transient_doing_cron'";
-    for action in 0.. {
-        let mut begun = 0;
-        for budget in std::iter::once(None).chain((0..).map(Some)) {
+    // A run begins seven actions: the eighth "failure" is never reached.
+    let mut begun = 0;
+    for action in 0..8 {
+        let mut worked = false;
+        for budget in std::iter::once(None).chain((0..40).map(Some)) {
             let writer = saves(&[no_lock]).await;
             let count = std::cell::Cell::new(0);
             let begin = async || {
@@ -337,12 +339,13 @@ async fn database_errors_stop_a_run() {
             begun = count.get();
             match ran {
                 Err(err) => assert!(matches!(err, crate::Error::Db(_)), "{err:?}"),
-                Ok(_) => break,
+                Ok(_) => {
+                    worked = true;
+                    break;
+                }
             }
         }
-        if action >= begun {
-            assert_eq!(action, 7);
-            break;
-        }
+        assert!(worked, "action {action}");
     }
+    assert_eq!(begun, 7);
 }

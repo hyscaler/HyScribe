@@ -446,7 +446,8 @@ async fn new_users_return_each_database_error() {
             ..new_user("jane.doe")
         };
         wp_insert_user(write, &jane).await?;
-        wp_insert_user(write, &new_user("oracle-default")).await?;
+        let id = wp_insert_user(write, &new_user("oracle-default")).await?;
+        add_role(write, id, b"author").await?;
         Ok(())
     })
     .await;

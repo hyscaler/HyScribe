@@ -284,8 +284,11 @@ fn plan_update(context: &Context, params: &Params) -> Result<Plan, RestError> {
     // `wp_update_comment()` filters the content unless the user and the
     // comment's author may post unfiltered HTML.
     let author = save.user_id.unwrap_or(comment.user_id);
-    save.kses =
-        !context.can("unfiltered_html") || !context.site.can(author, "unfiltered_html", &[]);
+    let unfiltered = [
+        context.can("unfiltered_html"),
+        context.site.can(author, "unfiltered_html", &[]),
+    ];
+    save.kses = unfiltered.contains(&false);
     Ok(Plan::new(
         context,
         Write::Comment(Box::new(save)),

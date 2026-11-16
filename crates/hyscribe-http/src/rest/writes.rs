@@ -299,15 +299,15 @@ async fn status_changed(
     if old == status {
         return Ok(());
     }
-    match status {
-        b"approved" | b"approve" | b"1" => set_comment_status(write, id, "approve").await?,
-        b"hold" | b"0" => set_comment_status(write, id, "hold").await?,
-        b"spam" => spam_comment(write, context, id).await?,
-        b"trash" => trash_comment(write, context, id).await?,
-        b"unspam" | b"untrash" => restore_comment(write, id).await?,
-        _ => false,
+    let changed = match status {
+        b"approved" | b"approve" | b"1" => set_comment_status(write, id, "approve").await,
+        b"hold" | b"0" => set_comment_status(write, id, "hold").await,
+        b"spam" => spam_comment(write, context, id).await,
+        b"trash" => trash_comment(write, context, id).await,
+        b"unspam" | b"untrash" => restore_comment(write, id).await,
+        _ => Ok(false),
     };
-    Ok(())
+    changed.map(|_| ()).map_err(Error::Db)
 }
 
 /// The taxonomy named `name`, of those whose terms are written.

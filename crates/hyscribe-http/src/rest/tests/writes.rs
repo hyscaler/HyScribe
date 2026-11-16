@@ -554,15 +554,24 @@ fn plan_of(rest: &Rest, request: &hyscribe_rest::Request) -> hyscribe_rest::Writ
     }
 }
 
+/// A comment stored without a type.
+const UNTYPED: &str = "INSERT INTO wp_comments (comment_ID, comment_post_ID, comment_author, comment_author_email, comment_author_url, comment_author_IP, comment_date, comment_date_gmt, comment_content, comment_approved, comment_agent, comment_type) VALUES (90, 1, '', '', '', '', '2026-11-02 00:00:00', '2026-11-02 00:00:00', 'Untyped', '1', '', '');";
+
+/// A comment's author URL longer than its column takes.
+const LONG_URL: &str = concat!(
+    r#"{"author_url":"https://x.test/"#,
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    r#""}"#
+);
+
 /// The errors PHP answers where a write function refused, which no
 /// request of the goldens reaches.
 #[tokio::test(flavor = "multi_thread")]
 async fn refused_writes_are_answered_as_php_answers_them() {
     let _saves = crate::admin::tests::SAVES.lock().await;
-    fresh_with(include_str!(
-        "../../../../../reference/rest/term-writes.sql"
-    ))
-    .await;
+    let terms = include_str!("../../../../../reference/rest/term-writes.sql");
+    fresh_with(&format!("{terms}\n{UNTYPED}")).await;
     let dir = tempfile::tempdir().unwrap();
     let site = saves_site(dir.path()).await;
     let error = |code: &str, message: &str, status: Option<u16>| {
@@ -679,6 +688,26 @@ async fn refused_writes_are_answered_as_php_answers_them() {
             ),
             "rest_user_invalid_slug",
         ),
+        (
+            (
+                "POST",
+                "/?rest_route=/wp/v2/comments/1",
+                r#"{"author":999}"#,
+            ),
+            "rest_comment_author_invalid",
+        ),
+        (
+            ("POST", "/?rest_route=/wp/v2/comments/1", LONG_URL),
+            "comment_author_url_column_length",
+        ),
+        (
+            (
+                "POST",
+                "/?rest_route=/wp/v2/categories",
+                r#"{"name":"x","parent":-1}"#,
+            ),
+            "rest_term_invalid",
+        ),
     ] {
         let served = |rest: &Rest, request: &hyscribe_rest::Request| match hyscribe_rest::answer(
             rest, request,
@@ -689,6 +718,20 @@ async fn refused_writes_are_answered_as_php_answers_them() {
         let body = as_admin(&site, asked, (b"", None), served).await;
         assert!(body.contains(code), "{body}");
     }
+    // One's own role may be a role that edits users.
+    let roles = (
+        "POST",
+        "/?rest_route=/wp/v2/users/1",
+        r#"{"roles":["administrator"]}"#,
+    );
+    as_admin(&site, roles, (b"", None), plan_of).await;
+    // A comment stored without a type is a comment.
+    let untyped = (
+        "POST",
+        "/?rest_route=/wp/v2/comments/90",
+        r#"{"type":"comment"}"#,
+    );
+    as_admin(&site, untyped, (b"", None), plan_of).await;
     // A comment takes the request's address and user agent.
     let client = (&b"192.0.2.1"[..], Some(&b"Agent/2.0"[..]));
     let plan = |rest: &Rest, request: &hyscribe_rest::Request| match hyscribe_rest::answer(
@@ -767,6 +810,21 @@ async fn writes_refused_past_their_checks() {
     }
     let flood = Outcome::Refused("comment_flood");
     assert_eq!(act(comment(0, "hold")).await, flood);
+    // A text setting given an array, which sanitize_option() does not port.
+    let setting = hyscribe_rest::Setting {
+        option: "date_format".into(),
+        value: Some(hyscribe_phpser::Value::Array(Vec::new())),
+        default: None,
+    };
+    let save = hyscribe_rest::SettingsSave {
+        options: vec![setting],
+        invalid: None,
+    };
+    let mut plan = pending.plan.clone();
+    plan.write = hyscribe_rest::Write::Settings(Box::new(save));
+    let ctx = crate::rest::writes::context(&site, &plan, now());
+    let unported = crate::rest::writes::act(writer.begin().await, &plan, &ctx).await;
+    assert!(matches!(unported, Err(hyscribe_write::Error::Unported(_))));
     fresh().await;
 }
 

@@ -13,7 +13,7 @@ struct Ran {
 fn wizard(home: &Path, answers: &str) -> Ran {
     let mut input = Cursor::new(answers.as_bytes().to_vec());
     let mut out = Vec::new();
-    let result = run(
+    let result = command(
         home,
         &mut Terminal {
             input: &mut input,
@@ -41,7 +41,7 @@ impl Install {
         let home = dir.path().join("hyscribe");
         let site = dir.path().join("site");
         std::fs::create_dir(&home).unwrap();
-        std::fs::create_dir(&site).unwrap();
+        std::fs::create_dir_all(site.join("wp-content/uploads")).unwrap();
         if let Some(text) = wp_config {
             std::fs::write(site.join("wp-config.php"), text).unwrap();
         }
@@ -70,13 +70,13 @@ impl Install {
     }
 }
 
-fn salt(key: &str) -> String {
+pub(crate) fn salt(key: &str) -> String {
     format!("{key} $alt\"#\\")
 }
 
 /// A `wp-config.php` for the default install fixture database `name`, as
 /// `wp config create` writes one, with `extra` before the prefix.
-fn wp_config_for(name: &str, salts: bool, extra: &str) -> String {
+pub(crate) fn wp_config_for(name: &str, salts: bool, extra: &str) -> String {
     let db = hyscribe_testkit::fixture_database();
     let mut text = format!(
         "<?php\ndefine( 'DB_NAME', '{name}' );\ndefine( 'DB_USER', '{}' );\n\
@@ -106,13 +106,17 @@ fn wp_config_for(name: &str, salts: bool, extra: &str) -> String {
     text
 }
 
-fn wp_config(extra: &str) -> String {
+pub(crate) fn wp_config(extra: &str) -> String {
     wp_config_for("wordpress", true, extra)
 }
 
 const CONSTANTS_SET: &str = "define( 'DISALLOW_UNFILTERED_HTML', false );\n\
     define( 'ALLOW_UNFILTERED_UPLOADS', true );\ndefine( 'MULTISITE', false );\n\
-    define( 'WP_HOME', 'https://example.com' );\ndefine( 'WP_SITEURL', 'https://example.com/wp' );";
+    define( 'WP_HOME', 'https://example.com' );\ndefine( 'WP_SITEURL', 'https://example.com/wp' );\n\
+    define( 'EMPTY_TRASH_DAYS', 7 );";
+
+/// Every answer the default, with a `wp-config.php` and no `.env`.
+pub(crate) const DEFAULTS: &str = "\n\n\n\n\n\n\n";
 
 /// Nothing secret reaches the terminal.
 fn assert_no_secrets(out: &str) {
@@ -123,8 +127,9 @@ fn assert_no_secrets(out: &str) {
 #[test]
 fn an_existing_site_is_copied() {
     let install = Install::new(Some(&wp_config(CONSTANTS_SET)));
-    // The folder found, shadow mode, no read user.
-    let ran = wizard(&install.home, "\n\n\n");
+    // The folder found, shadow mode, no read user, the default network
+    // and uploads folder.
+    let ran = wizard(&install.home, DEFAULTS);
     assert_eq!(ran.result, Ok(install.written()));
     let db = hyscribe_testkit::fixture_database();
     let site = install.site.display();
@@ -132,9 +137,13 @@ fn an_existing_site_is_copied() {
         ran.out,
         format!(
             "? Path to the WordPress folder or its wp-config.php (none if there is none) \
-             [{site}]:   Read {site}/wp-config.php\n  Keys and salts: 8 copied, 0 generated\n\
+             [{site}]:   Read {site}/wp-config.php\n\
              ? Start in shadow mode (read only) first? [Y/n]: \
              ? Database user granted only SELECT, for every read (empty for none): \
+             ? Running HyScribe behind a proxy? [y/N]: ? Address to listen on [127.0.0.1]: \
+             ? Port to listen on [8080]: \
+             ? The site's uploads folder (empty for hyscribe/uploads) [{site}/wp-content/uploads]: \
+             \x20 Keys and salts: 8 copied, 0 generated\n\
              \x20 Connected to wordpress on {}:{}, db_version 61833\n",
             db.host, db.port
         )
@@ -148,6 +157,14 @@ fn an_existing_site_is_copied() {
     let config = install.config();
     assert_eq!(config.database, db);
     assert_eq!(config.mode, Mode::Shadow);
+    assert_eq!(
+        config.server,
+        hyscribe_config::server(&HashMap::new()).unwrap()
+    );
+    assert_eq!(
+        config.uploads_dir,
+        Some(install.site.join("wp-content/uploads"))
+    );
     assert_eq!(config.home_url.as_deref(), Some("https://example.com"));
     assert_eq!(config.site_url.as_deref(), Some("https://example.com/wp"));
     assert_eq!(
@@ -155,6 +172,7 @@ fn an_existing_site_is_copied() {
         Constants {
             disallow_unfiltered_html: false,
             allow_unfiltered_uploads: true,
+            empty_trash_days: 7,
         }
     );
     let salts: Vec<_> = SALT_KEYS
@@ -167,7 +185,7 @@ fn an_existing_site_is_copied() {
 #[test]
 fn unset_constants_keep_the_safer_values() {
     let install = Install::new(Some(&wp_config_for("wordpress", false, "")));
-    let ran = wizard(&install.home, "\n\n\n");
+    let ran = wizard(&install.home, DEFAULTS);
     assert_eq!(ran.result, Ok(install.written()));
     assert!(ran.out.contains("Keys and salts: 0 copied, 8 generated"));
     let text = std::fs::read_to_string(install.env()).unwrap();
@@ -189,20 +207,21 @@ fn what_php_computes_is_asked_for_or_left_safe() {
                  define( 'ALLOW_UNFILTERED_UPLOADS', 1 );\n\
                  define( 'WP_HOME', 'https://' . $_SERVER['HTTP_HOST'] );\n\
                  define( 'WP_SITEURL', WP_HOME . '/wp' );\n\
-                 define( 'WP_CONTENT_DIR', __DIR__ . '/content' );";
+                 define( 'WP_CONTENT_DIR', __DIR__ . '/content' );\n\
+                 define( 'EMPTY_TRASH_DAYS', 7 * 2 );";
     let install = Install::new(Some(&wp_config(extra)));
     let content = install.site.join("content");
     std::fs::create_dir(&content).unwrap();
     std::fs::write(content.join("object-cache.php"), "<?php").unwrap();
     let answers = format!(
-        "\n{}\nhttps://asked.example\nhttps://asked.example/wp\n\n\n",
+        "\n{}\nhttps://asked.example\nhttps://asked.example/wp\n\n\n\n\n\n\n",
         content.display()
     );
     let ran = wizard(&install.home, &answers);
     assert_eq!(ran.result, Ok(install.written()));
     for expected in [
         "  Not a literal there, or missing: WP_HOME, WP_SITEURL, DISALLOW_UNFILTERED_HTML, \
-         ALLOW_UNFILTERED_UPLOADS\n"
+         ALLOW_UNFILTERED_UPLOADS, EMPTY_TRASH_DAYS\n"
             .to_string(),
         format!(
             "? Path to wp-content (WP_CONTENT_DIR is computed by PHP) [{}/wp-content]: ",
@@ -213,6 +232,13 @@ fn what_php_computes_is_asked_for_or_left_safe() {
          the safer value holds\n"
             .into(),
         "  ALLOW_UNFILTERED_UPLOADS is not a literal".into(),
+        "  EMPTY_TRASH_DAYS is not a literal number of days, so it is not copied: \
+         WordPress's 30 holds\n"
+            .into(),
+        format!(
+            "  Warning: UPLOADS_DIR {}/uploads is not a folder yet\n",
+            content.display()
+        ),
         format!(
             "  Warning: {}/object-cache.php is a persistent object cache.",
             content.display()
@@ -235,20 +261,19 @@ fn literal_content_dirs_are_used() {
         content.path().display()
     );
     let install = Install::new(Some(&wp_config(&extra)));
-    let ran = wizard(&install.home, "\n\n\n");
+    let ran = wizard(&install.home, DEFAULTS);
     assert_eq!(ran.result, Ok(install.written()));
-    assert!(ran.out.contains("Warning: "), "{}", ran.out);
+    assert!(ran.out.contains("object cache"), "{}", ran.out);
     // The default wp-content has none.
     let install = Install::new(Some(&wp_config("")));
-    std::fs::create_dir(install.site.join("wp-content")).unwrap();
-    let ran = wizard(&install.home, "\n\n\n");
+    let ran = wizard(&install.home, DEFAULTS);
     assert!(!ran.out.contains("Warning"), "{}", ran.out);
 }
 
 #[test]
 fn multisite_is_refused() {
     let install = Install::new(Some(&wp_config("define( 'MULTISITE', true );")));
-    let ran = wizard(&install.home, "\n\n\n");
+    let ran = wizard(&install.home, DEFAULTS);
     assert_eq!(
         ran.result,
         Err("MULTISITE is invalid: multisite networks are not supported".into())
@@ -260,14 +285,16 @@ fn multisite_is_refused() {
 fn everything_is_asked_without_wp_config() {
     let install = Install::new(None);
     let db = hyscribe_testkit::fixture_database();
+    let uploads = tempfile::tempdir().unwrap();
     let answers = format!(
-        "\n{}\n{}\n{}\n{}\n{}\n\nn\nwordpress_read\n{}\n",
+        "\n{}\n{}\n{}\n{}\n{}\n\nn\nwordpress_read\n{}\ny\n::1\n8081\n{}\n",
         db.name,
         db.user,
         db.password.expose(),
         db.host,
         db.port,
-        db.password.expose()
+        db.password.expose(),
+        uploads.path().display()
     );
     let ran = wizard(&install.home, &answers);
     assert_eq!(ran.result, Ok(install.written()));
@@ -283,6 +310,7 @@ fn everything_is_asked_without_wp_config() {
         "? Start in shadow mode (read only) first? [Y/n]: ",
         "? Its password: ",
         "  DB_READ_USER wordpress_read may only read\n",
+        "? The site's uploads folder (empty for hyscribe/uploads): ",
     ] {
         assert!(ran.out.contains(expected), "{expected}\n{}", ran.out);
     }
@@ -291,6 +319,13 @@ fn everything_is_asked_without_wp_config() {
     assert_eq!(config.database.read_user.as_deref(), Some("wordpress_read"));
     assert_eq!(config.database.read_password, db.password);
     assert_eq!(config.database.prefix.as_str(), "wp_");
+    let listen = hyscribe_config::Server {
+        bind_host: "::1".parse().unwrap(),
+        port: 8081,
+        behind_proxy: true,
+    };
+    assert_eq!(config.server, listen);
+    assert_eq!(config.uploads_dir.as_deref(), Some(uploads.path()));
 }
 
 #[test]
@@ -303,7 +338,7 @@ fn none_skips_a_wp_config_found() {
 #[test]
 fn a_read_user_that_may_write_is_refused() {
     let install = Install::new(Some(&wp_config("")));
-    let ran = wizard(&install.home, "\n\nwordpress\nreference-only\n");
+    let ran = wizard(&install.home, "\n\nwordpress\nreference-only\n\n\n\n\n");
     let err = ran.result.unwrap_err();
     assert!(
         err.starts_with("DB_READ_USER wordpress may only be granted SELECT; it has "),
@@ -320,7 +355,7 @@ fn unreachable_databases_are_reported() {
         ":1'",
     );
     let install = Install::new(Some(&config));
-    let err = wizard(&install.home, "\n\n\n").result.unwrap_err();
+    let err = wizard(&install.home, DEFAULTS).result.unwrap_err();
     assert!(
         err.starts_with("cannot connect to wordpress on 127.0.0.1:1 as wordpress: "),
         "{err}"
@@ -328,7 +363,7 @@ fn unreachable_databases_are_reported() {
     assert!(!err.contains("reference-only"), "{err}");
     let config = wp_config("").replace("'wp_'", "'missing_'");
     let install = Install::new(Some(&config));
-    let err = wizard(&install.home, "\n\n\n").result.unwrap_err();
+    let err = wizard(&install.home, DEFAULTS).result.unwrap_err();
     assert!(err.starts_with("cannot read db_version: "), "{err}");
 }
 
@@ -389,7 +424,7 @@ fn unsupported_db_versions_are_refused() {
         ),
     ] {
         saves_with(&[statement]);
-        let ran = wizard(&install.home, "\n\n\n");
+        let ran = wizard(&install.home, DEFAULTS);
         assert_eq!(ran.result, Err(refusal));
         assert!(!install.env().exists());
     }
@@ -403,7 +438,7 @@ fn myisam_tables_refuse_primary_mode() {
     let refused = "writes refused: wp_links uses the MyISAM engine, which cannot roll back, so \
                    HyScribe does not write to it; convert it with ALTER TABLE wp_links \
                    ENGINE=InnoDB";
-    let ran = wizard(&install.home, "\nn\n\n");
+    let ran = wizard(&install.home, "\nn\n\n\n\n\n\n");
     assert_eq!(
         ran.result,
         Err(format!(
@@ -411,7 +446,7 @@ fn myisam_tables_refuse_primary_mode() {
         ))
     );
     assert!(!install.env().exists());
-    let ran = wizard(&install.home, "\n\n\n");
+    let ran = wizard(&install.home, DEFAULTS);
     assert_eq!(ran.result, Ok(install.written()));
     assert!(
         ran.out
@@ -443,7 +478,7 @@ fn an_existing_env_is_kept_unless_replaced() {
     assert_eq!(std::fs::read_to_string(&env).unwrap(), "OLD=1\n");
     let ran = wizard(&install.home, "\n");
     assert!(ran.result.unwrap().starts_with("Kept "));
-    let ran = wizard(&install.home, "YES\n\n\n\n");
+    let ran = wizard(&install.home, &format!("YES\n{DEFAULTS}"));
     assert_eq!(ran.result, Ok(install.written()));
     assert_eq!(install.config().database.name, "wordpress");
 }
@@ -511,7 +546,7 @@ fn unreadable_wp_configs_are_reported() {
 fn a_carriage_return_cannot_go_into_env() {
     let extra = "define( 'WP_HOME', 'https://' . $_SERVER['HTTP_HOST'] );";
     let install = Install::new(Some(&wp_config(extra)));
-    let ran = wizard(&install.home, "\na\rb\n\n\n");
+    let ran = wizard(&install.home, "\na\rb\n\n\n\n\n\n\n");
     assert_eq!(
         ran.result,
         Err("an answer holds a carriage return, which .env cannot hold".into())
@@ -522,7 +557,7 @@ fn a_carriage_return_cannot_go_into_env() {
 fn a_folder_that_cannot_be_written_is_reported() {
     let install = Install::new(Some(&wp_config("")));
     std::fs::set_permissions(&install.home, std::fs::Permissions::from_mode(0o500)).unwrap();
-    let err = wizard(&install.home, "\n\n\n").result.unwrap_err();
+    let err = wizard(&install.home, DEFAULTS).result.unwrap_err();
     std::fs::set_permissions(&install.home, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(
         err,
@@ -548,7 +583,7 @@ fn input_and_output_failures_stop_the_wizard() {
     let ended: Result<String, String> =
         Err("setup stopped: the input ended before every question was answered".into());
     assert_eq!(wizard(&install.home, "").result, ended);
-    // Ended at the last question, the read user.
+    // Ended before the network questions.
     let site = Install::new(Some(&wp_config("")));
     assert_eq!(wizard(&site.home, "\n\n").result, ended);
     let mut out = Vec::new();
@@ -558,7 +593,7 @@ fn input_and_output_failures_stop_the_wizard() {
         tty: None,
     };
     assert_eq!(
-        run(&install.home, &mut terminal),
+        command(&install.home, &mut terminal),
         Err("setup stopped: broken".into())
     );
     let mut full: &mut [u8] = &mut [];
@@ -568,13 +603,13 @@ fn input_and_output_failures_stop_the_wizard() {
         tty: None,
     };
     assert_eq!(
-        run(&install.home, &mut terminal),
+        command(&install.home, &mut terminal),
         Err("failed to write whole buffer".into())
     );
 }
 
 /// Output that fails after `0` more writes.
-struct FailAfter(usize);
+pub(crate) struct FailAfter(pub(crate) usize);
 
 impl Write for FailAfter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -608,7 +643,7 @@ fn stopped_anywhere(install: &Install, answers: &str, result: &Result<String, St
     for writes in 0..200 {
         let mut input = Cursor::new(answers.as_bytes().to_vec());
         let mut out = FailAfter(writes);
-        let ran = run(
+        let ran = command(
             &install.home,
             &mut Terminal {
                 input: &mut input,
@@ -638,7 +673,7 @@ fn every_question_can_stop_the_wizard() {
     std::fs::create_dir(&content).unwrap();
     std::fs::write(content.join("object-cache.php"), "<?php").unwrap();
     let answers = format!(
-        "\n{}\nutf8mb4\nhttps://a.example\n\n\nwordpress_read\nreference-only\n",
+        "\n{}\nutf8mb4\nhttps://a.example\n\n\nwordpress_read\nreference-only\n\n\n\n\n",
         content.display()
     );
     stopped_anywhere(&install, &answers, &Ok(install.written()));
@@ -664,7 +699,7 @@ fn every_question_can_stop_the_wizard() {
     let install = Install::new(None);
     let db = hyscribe_testkit::fixture_database();
     let answers = format!(
-        "\n{}\n{}\n{}\n{}\n{}\n\n\n\n",
+        "\n{}\n{}\n{}\n{}\n{}\n\n\n\n\n\n\n\n",
         db.name,
         db.user,
         db.password.expose(),
@@ -679,9 +714,12 @@ fn every_question_can_stop_the_wizard() {
 fn the_main_user_must_connect_too() {
     let config = wp_config("").replace("'reference-only'", "'wrong'");
     let install = Install::new(Some(&config));
-    let err = wizard(&install.home, "\n\nwordpress_read\nreference-only\n")
-        .result
-        .unwrap_err();
+    let err = wizard(
+        &install.home,
+        "\n\nwordpress_read\nreference-only\n\n\n\n\n",
+    )
+    .result
+    .unwrap_err();
     assert!(err.starts_with("cannot open the writer: "), "{err}");
     assert!(!err.contains("wrong"), "{err}");
 }

@@ -9,6 +9,7 @@ pub mod assets;
 pub mod comments;
 pub mod dashboard;
 pub mod die;
+pub mod editor;
 pub mod list_table;
 pub mod login;
 pub mod media;

@@ -1006,6 +1006,44 @@ async fn what_php_refuses_is_refused() {
     assert!(matches!(Error::from(err), Error::Db(_)));
 }
 
+/// Navigation menus and synced patterns, whose rows the REST goldens check
+/// (`rest-navigation-*`, `rest-blocks-*`): a pattern with nothing in it is
+/// refused as a post is, a menu is not, and both are core types, whose
+/// GUIDs follow the posts' permalink structure, their slugs unique per type.
+#[tokio::test]
+async fn navigation_menus_and_patterns() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let empty = |post_type: &str| PostArgs {
+        post_type: post_type.into(),
+        title: Vec::new(),
+        content: Vec::new(),
+        ..oracle_post("publish")
+    };
+    assert!(invalid(
+        insert_rolled_back(empty("wp_block")).await,
+        "empty_content"
+    ));
+    for post_type in ["wp_navigation", "wp_block"] {
+        let (post, typed, id) = rolled_back(async |w, ctx| {
+            set(w, "permalink_structure", b"/%postname%/").await?;
+            let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+            let args = PostArgs {
+                post_type: post_type.into(),
+                ..oracle_post("publish")
+            };
+            let typed = wp_insert_post(w, ctx, args).await?;
+            Ok((w.post(id).await?, w.post(typed).await?, typed))
+        })
+        .await
+        .unwrap();
+        let (post, typed) = (post.unwrap(), typed.unwrap());
+        assert!(post.guid.ends_with(b"/a-write-oracle-post/"), "{post_type}");
+        assert_eq!(typed.guid, post.guid, "{post_type} {id}");
+        assert_eq!(typed.comment_status, "closed", "{post_type}");
+    }
+    assert!(insert_rolled_back(empty("wp_navigation")).await.is_ok());
+}
+
 #[tokio::test]
 async fn what_hyscribe_does_not_port_is_refused() {
     let _one = ONE_AT_A_TIME.lock().await;

@@ -12,6 +12,7 @@ mod comments;
 mod editor;
 mod embed;
 mod fields;
+mod hooks;
 mod index;
 mod media;
 mod navigation;
@@ -268,6 +269,19 @@ impl Context<'_> {
     }
 
     /// `wp_timezone()`.
+    /// `get_option( 'gmt_offset' )`: `wp_timezone_override_offset()`'s
+    /// offset now for a named zone, else the stored one.
+    pub(crate) fn gmt_offset(&self) -> Value {
+        let zone = self.option("timezone_string").unwrap_or_default();
+        hyscribe_render::date::override_offset(&zone, self.now).map_or_else(
+            || {
+                let stored = self.option("gmt_offset");
+                stored.map_or(Value::Bool(false), |stored| unserialized(&stored))
+            },
+            |hours| Value::Float(hyscribe_phpser::Float::from_f64(hours)),
+        )
+    }
+
     pub(crate) fn zone(&self) -> hyscribe_render::date::Zone {
         let option = |name| self.option(name).unwrap_or_default();
         hyscribe_render::date::site_zone(&option("timezone_string"), &option("gmt_offset"))
@@ -510,7 +524,17 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
             if verified.is_some() {
                 served.send("X-WP-Nonce", site.create_nonce());
             }
-            match dispatch(&context, (&method, route), (params, json.err()), resumed) {
+            // `rest_pre_dispatch`, given the request's method and route: a
+            // result it gives is the answer.
+            let route_bytes = route.to_vec();
+            let request_line: [&dyn std::any::Any; 2] = [&method, &route_bytes];
+            let early: Option<Response> =
+                hooks::apply_filters("rest_pre_dispatch", None, &request_line);
+            let dispatched = early.map_or_else(
+                || dispatch(&context, (&method, route), (params, json.err()), resumed),
+                Ok,
+            );
+            match dispatched {
                 Ok(response) => response,
                 Err(Halt::NotPorted) => return Answer::Served(Served::not_ported()),
                 Err(Halt::Write(pending)) => return Answer::Write(pending),

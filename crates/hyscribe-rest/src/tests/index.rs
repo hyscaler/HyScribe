@@ -49,6 +49,16 @@ fn icon_logo_and_zone_match_php() {
     );
 }
 
+/// A draft's unset GMT dates in a named time zone, which overrides the
+/// stored `gmt_offset` as it does the index's (`zone.list`).
+#[test]
+fn zoned_draft_matches_php() {
+    static CONTENT: OnceLock<Content> = OnceLock::new();
+    let content = CONTENT
+        .get_or_init(|| default_install_with(include_str!("../../../../reference/rest/zone.sql")));
+    replay(content, include_str!("../../tests/golden/zone.tsv"), 6);
+}
+
 /// The Site Logo block's option before the theme's logo, and a post and a
 /// page as the logo and icon.
 #[test]

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The posts' and pages' writes (MVP 4.3) where the goldens of
-//! `reference/rest/post-writes.list` cannot reach: the plans the checks
-//! give, the request bodies read, and the answers once written, over the
-//! default install with the extra posts, a site changed where a case needs
-//! it.
+//! The posts controller's writes (MVP 4.3) where the goldens of
+//! `reference/rest/post-writes.list` and `site-writes.list` cannot reach:
+//! the plans the checks give, the request bodies read, and the answers once
+//! written, over the default install with the extra posts, a site changed
+//! where a case needs it.
 
 use hyscribe_model::{Comment, CommentQuery, CommentRow, Term, TermQuery, User, UserQuery};
 use hyscribe_phpser::parse_str;
@@ -531,6 +531,69 @@ fn featured_images_are_cleared() {
     assert_eq!(served.status, 501);
 }
 
+/// Navigation menus and synced patterns save the fields their schemas
+/// have and leave the others; an update's content is wrapped in the type's
+/// own block for the block hooks, and the other types' writes are not
+/// ported.
+#[test]
+fn navigation_and_patterns_save_their_fields() {
+    let ignored = r#""excerpt":"Short","author":1,"featured_media":2,"comment_status":"open""#;
+    let navigation = plan(
+        "administrator",
+        "POST",
+        "/wp/v2/navigation",
+        &format!(r#"{{"title":"Footer",{ignored}}}"#),
+    );
+    let footer = Save {
+        post_type: "wp_navigation".into(),
+        title: Some(b"Footer".to_vec()),
+        ..Save::default()
+    };
+    assert_eq!(navigation, footer);
+    let pattern = plan(
+        "administrator",
+        "POST",
+        "/wp/v2/blocks",
+        &format!(r#"{{"title":"Footer",{ignored}}}"#),
+    );
+    let excerpted = Save {
+        post_type: "wp_block".into(),
+        excerpt: Some(b"Short".to_vec()),
+        ..footer
+    };
+    assert_eq!(pattern, excerpted);
+    // A closer of the wrapper ends it early, so each type's differs.
+    let theme = b"twentytwentyfive";
+    for (post_type, base, wrapper) in [
+        ("wp_navigation", "navigation", "navigation"),
+        ("wp_block", "blocks", "block"),
+    ] {
+        let content = format!("a<!-- /wp:{wrapper} -->b<!-- wp:c /-->");
+        let body = format!(r#"{{"content":"{content}"}}"#);
+        let post = Post {
+            post_type: post_type.into(),
+            ..oracle("", &[]).post(1).unwrap()
+        };
+        let site = changed(Vec::new(), vec![post]);
+        let asked = Asked::new("administrator", "POST", &format!("/wp/v2/{base}/1"), &body);
+        let (plan, served) = on(&site, &asked, Outcome::Written(1));
+        let Some(Write::Save(save)) = plan.map(|plan| plan.write) else {
+            panic!("{post_type} {}", text_of(&served));
+        };
+        let wrapped = templates::content::in_parent(content.as_bytes(), wrapper.as_bytes(), theme);
+        let other = templates::content::in_parent(content.as_bytes(), b"post-content", theme);
+        assert_eq!(save.content, Some(wrapped.clone()), "{post_type}");
+        assert_ne!(wrapped, other, "{post_type}");
+    }
+    for (method, target) in [
+        ("POST", "/wp/v2/media"),
+        ("DELETE", "/wp/v2/menu-items/1&force=1"),
+    ] {
+        let served = answered("administrator", method, target, "");
+        assert_eq!(served.status, 501, "{target}");
+    }
+}
+
 /// Content whose answer is not ported, as stored after kses or unfiltered,
 /// is not written; nor `format`, a template, `meta`, or content with
 /// ignored hooked blocks.
@@ -915,16 +978,16 @@ fn checks_refuse_as_php_refuses() {
     assert_eq!(served.status, 501);
 }
 
-/// Only the posts' and pages' deletes are planned: a synced pattern's is
-/// checked, then not ported.
+/// Only the ported types' deletes are planned: a menu item's is checked,
+/// then not ported.
 #[test]
 fn other_types_plan_no_delete() {
     let pattern = Post {
-        post_type: "wp_block".into(),
+        post_type: "nav_menu_item".into(),
         ..oracle("", &[]).post(1).unwrap()
     };
     let site = changed(Vec::new(), vec![pattern]);
-    let asked = Asked::new("administrator", "DELETE", "/wp/v2/blocks/1", "");
+    let asked = Asked::new("administrator", "DELETE", "/wp/v2/menu-items/1", "");
     let (plan, served) = on(&site, &asked, Outcome::Written(1));
     assert_eq!((plan, served.status), (None, 501));
 }

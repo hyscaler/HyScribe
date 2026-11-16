@@ -26,12 +26,15 @@ pub(super) async fn default_status(
             let value = write.option_value(option).await?.unwrap_or_default();
             String::from_utf8_lossy(&value).into_owned()
         }
-        Kind::Page | Kind::Revision | Kind::UserRequest => "closed".into(),
+        Kind::Page | Kind::Revision | Kind::UserRequest | Kind::Navigation | Kind::Block => {
+            "closed".into()
+        }
     })
 }
 
 /// `wp_delete_object_term_relationships( $object, $taxonomies )`. The
-/// terms port has no post formats, so a post with one is refused.
+/// terms port has no post formats or pattern categories, so a post with one
+/// is refused.
 pub(super) async fn delete_object_terms(
     write: &mut Write<'_>,
     object: u64,
@@ -44,7 +47,11 @@ pub(super) async fn delete_object_terms(
             "category" => Taxonomy::Category,
             "post_tag" => Taxonomy::PostTag,
             _ if terms.is_empty() => continue,
-            _ => return Err(Error::Unported("a post with a post format")),
+            _ => {
+                return Err(Error::Unported(
+                    "a post with terms of a taxonomy not ported",
+                ));
+            }
         };
         wp_remove_object_terms(write, object, &terms, taxonomy).await?;
     }

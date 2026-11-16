@@ -372,19 +372,29 @@ pub(super) fn post(
     let length = params.get("excerpt_length").map_or(55, Value::to_int);
     let excerpt = (unlocked && has("excerpt")).then(|| rendering.the_excerpt(&open, length));
     let hooked = edit && has("content.raw") && !text(post.content.clone()).is_empty();
+    // Its block hooks serialize the raw content's blocks again, each
+    // template part named after the theme, as the content renders them.
+    let blocks = post.content.windows(8).any(|w| w == b"<!-- wp:");
+    let raw = if hooked && blocks {
+        let theme = context.site.theme().slug().as_bytes();
+        crate::templates::content::in_parent(&post.content, b"post-content", theme)
+    } else {
+        post.content.clone()
+    };
     let rendered = match rendered {
         Some(first) if hooked && !text(first.clone()).is_empty() => {
-            Some(rendering.the_content(&open))
+            let content = raw.clone();
+            Some(rendering.the_content(&Post { content, ..open }))
         }
         rendered => rendered,
     };
     if has("content") {
-        let version = i64::from(post.content.windows(8).any(|w| w == b"<!-- wp:"));
+        let version = i64::from(blocks);
         put(
             "content",
             part(
                 vec![
-                    ("raw", text(post.content.clone())),
+                    ("raw", text(raw)),
                     ("rendered", text(rendered.unwrap_or_default())),
                     ("protected", protected.clone()),
                     ("block_version", Value::Int(version)),

@@ -189,7 +189,8 @@ fn serve_case(site: &Site, handle: &Handle, case: &RestCase) -> hyscribe_rest::S
         origin: None,
         nonce: (user != 0).then_some(b"%nonce%"),
         method_override: None,
-        unread_body: false,
+        content_type: None,
+        body: b"",
     };
     hyscribe_rest::serve(&as_role, &request)
 }
@@ -260,6 +261,7 @@ async fn unported(database: &str, requests: &'static [(&str, &str, &str)]) {
                 status: 501,
                 headers: Vec::new(),
                 body: Vec::new(),
+                sent: Vec::new(),
             };
             let served = serve_case(&site, &handle, &case);
             assert_eq!(served.status, 501, "{who} {method} {target}");
@@ -280,7 +282,7 @@ async fn posts_match_php() {
         &[
             ("administrator", "POST", "/?rest_route=/wp/v2/posts"),
             ("administrator", "PUT", "/?rest_route=/wp/v2/posts/1"),
-            ("visitor", "DELETE", "/?rest_route=/wp/v2/pages/2&force=1"),
+            ("visitor", "DELETE", "/?rest_route=/wp/v2/blocks/1&force=1"),
             ("visitor", "GET", "/?rest_route=/wp/v2/posts&categories=1"),
             (
                 "editor",

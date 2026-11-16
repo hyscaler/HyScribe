@@ -6,6 +6,7 @@
 
 use hyscribe_phpser::{Key, Value, parse_str};
 
+use crate::request::Params;
 use crate::response::Response;
 use crate::{Context, NotPorted, dispatch, ported, routes, schema};
 
@@ -133,7 +134,11 @@ pub(crate) fn serve(context: &Context, href: &[u8]) -> Result<Value, NotPorted> 
             set(&mut get, "per_page", Value::Int(maximum));
         }
     }
-    let response = dispatch(context, "GET", route, &get)?;
+    let params = Params {
+        get,
+        ..Params::default()
+    };
+    let response = dispatch(context, ("GET", route), (params, true), None)?;
     Ok(response.into_data())
 }
 

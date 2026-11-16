@@ -20,6 +20,7 @@ fn as_who(case: &RestCase, who: &str) -> RestCase {
         status: case.status,
         headers: Vec::new(),
         body: Vec::new(),
+        sent: Vec::new(),
     }
 }
 

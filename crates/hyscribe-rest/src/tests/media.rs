@@ -117,7 +117,8 @@ fn embedding_what_is_not_ported() {
             origin: None,
             nonce: (user != 0).then_some(b"%nonce%"),
             method_override: None,
-            unread_body: false,
+            content_type: None,
+            body: b"",
         };
         crate::serve(&oracle, &request).status
     };

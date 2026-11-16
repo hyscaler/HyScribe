@@ -18,6 +18,7 @@ use hyscribe_phpser::{Key, Value, addslashes, is_empty_string, parse_str};
 use hyscribe_render::link::rest_url;
 use hyscribe_render::permalinks::{Permalinks, author_posts_url, permalink};
 use hyscribe_render::site::Site as RenderSite;
+use hyscribe_rest::{Answer, Served};
 use tokio::runtime::Handle;
 
 use crate::login::{LoginReads, Names, cookie, cookies, joined};
@@ -196,10 +197,10 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             .map(HeaderValue::as_bytes),
     );
     let post = asked.method == Method::POST;
-    let mut reads = LoginReads::new(site, handle, now);
+    let mut reads = LoginReads::new(site, handle.clone(), now);
     let logged_in = cookie(&cookies, &Names::new(site).logged_in());
     let (user, token) = reads.logged_in_user(logged_in, post).unwrap_or_default();
-    reads.act_as(user, token);
+    reads.act_as(user, token.clone());
     let rest = Rest {
         reads,
         site,
@@ -213,9 +214,6 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     } else {
         Vec::new()
     };
-    // A form's fields are read; any other body, and a form sent with
-    // another method, only PHP reads.
-    let unread_body = !asked.body.is_empty() && form.is_empty();
     let request = hyscribe_rest::Request {
         method: asked.method.as_str(),
         route: &asked.route,
@@ -229,13 +227,24 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
         origin: header("origin"),
         nonce: header("x-wp-nonce"),
         method_override: header("x-http-method-override"),
-        unread_body,
+        content_type: header("content-type"),
+        body: &asked.body,
     };
-    let served = hyscribe_rest::serve(&rest, &request);
+    let answered = hyscribe_rest::answer(&rest, &request);
     let Rest { reads, .. } = rest;
     if let Err(err) = reads.reads.finish() {
         return crate::html(crate::database_error(site, &err));
     }
+    match answered {
+        Answer::Served(served) => sent(served),
+        Answer::Write(pending) => {
+            writes::answer(site, &request, *pending, (user, token, now, handle))
+        }
+    }
+}
+
+/// The answer the API served.
+fn sent(served: Served) -> Response {
     let response = served.headers.into_iter().fold(
         Response::builder().status(served.status),
         |response, (name, value)| response.header(name, value),
@@ -244,6 +253,8 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     // fixed text, which HTTP carries.
     response.body(Body::from(served.body)).unwrap_or_default()
 }
+
+mod writes;
 
 #[cfg(test)]
 mod tests;

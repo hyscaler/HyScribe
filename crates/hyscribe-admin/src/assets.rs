@@ -138,25 +138,28 @@ pub(crate) fn registered_script_data(handle: &str, key: &str) -> String {
 
 /// What a request registers with no source, as `wp_register_style( $handle,
 /// false )` does before adding inline styles.
-static ALIAS: Item = alias(false);
+static ALIAS: Item = Item {
+    src: None,
+    color_scheme: false,
+    deps: Vec::new(),
+    ver: String::new(),
+    footer: false,
+    extra: Value::Null,
+    textdomain: false,
+};
 
 /// `wp-block-styles`, the script alias `enqueue_editor_block_styles_assets()`
 /// registers for its inline script, in the footer; `wp-blocks`, which it
 /// needs, is printed before by the editor's scripts.
-static BLOCK_STYLES: Item = alias(true);
-
-/// An alias, printed in the footer if `footer`.
-const fn alias(footer: bool) -> Item {
-    Item {
-        src: None,
-        color_scheme: false,
-        deps: Vec::new(),
-        ver: String::new(),
-        footer,
-        extra: Value::Null,
-        textdomain: false,
-    }
-}
+static BLOCK_STYLES: Item = Item {
+    src: None,
+    color_scheme: false,
+    deps: Vec::new(),
+    ver: String::new(),
+    footer: true,
+    extra: Value::Null,
+    textdomain: false,
+};
 
 /// The queue and printing state of `WP_Styles` or `WP_Scripts`.
 #[derive(Default)]

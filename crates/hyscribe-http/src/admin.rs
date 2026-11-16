@@ -1205,10 +1205,7 @@ pub(crate) fn site_icon(reads: &LoginReads, size: i64) -> Option<Vec<u8>> {
 /// once every preload is answered; `None` before.
 fn block_editor(admin: &Admin, request: &Request) -> Option<Answer> {
     block_editor_with(admin, request, &|paths| {
-        let host = request
-            .origin
-            .split_once("://")
-            .map_or(request.origin, |(_, host)| host);
+        let host = request.origin.rsplit("//").next().unwrap_or_default();
         crate::rest::preloads(admin.reads, (admin.user.id, host), paths)
     })
 }

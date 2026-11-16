@@ -189,8 +189,8 @@ fn serve_case(site: &Site, handle: &Handle, case: &RestCase) -> hyscribe_rest::S
         origin: case.flag("origin").then_some(b"http://example.test"),
         nonce: (user != 0).then_some(b"%nonce%"),
         method_override: None,
-        content_type: None,
-        body: b"",
+        content_type: case.flag("json").then_some(b"application/json"),
+        body: &case.sent,
         host: case.flag("localhost").then_some(b"localhost:8081"),
         now: now(),
     };
@@ -343,4 +343,12 @@ async fn theme_test_data_posts_match_php() {
         ],
     )
     .await;
+}
+
+/// The block renderer (MVP 4.4), but the blocks whose rendering here is
+/// not PHP's, flagged `refused`.
+#[tokio::test]
+async fn block_renderer_matches_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/renderer.tsv");
+    replay("wordpress", golden, false, 6 * 45, &[]).await;
 }

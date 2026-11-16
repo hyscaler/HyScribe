@@ -194,6 +194,61 @@ async fn updates_transients() {
 }
 
 #[tokio::test]
+async fn sets_site_transients() {
+    let setup = async |write: &mut Write<'_>| {
+        set_site_transient(write, "oracle_kept", &text("one"), 3600)
+            .await
+            .unwrap();
+        set_site_transient(write, "oracle_lasting", &text("one"), 0)
+            .await
+            .unwrap();
+    };
+    check("site-transient-set", setup, async |write, ()| {
+        let mut set = async |name, value, expiration| {
+            set_site_transient(write, name, &text(value), expiration)
+                .await
+                .unwrap()
+        };
+        assert!(set("oracle_new", "<html>a page</html>", 3600).await);
+        assert!(set("oracle_plain", "a:1:{i:0;i:1;}", 0).await);
+        assert!(set("oracle_kept", "two", 7200).await);
+        assert!(set("oracle_lasting", "two", 0).await);
+        let expiry = lifetime(write, "_site_transient_timeout_oracle_kept").await;
+        assert!((7199..=7200).contains(&expiry), "{expiry}");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn expires_site_transients() {
+    let setup = async |write: &mut Write<'_>| {
+        for name in ["oracle_old", "oracle_fresh"] {
+            set_site_transient(
+                write,
+                name,
+                &text(name.strip_prefix("oracle_").unwrap()),
+                3600,
+            )
+            .await
+            .unwrap();
+        }
+        let past = Value::Int(now() - 10);
+        let off = Some(Autoload::Off);
+        update_option(write, "_site_transient_timeout_oracle_old", &past, off)
+            .await
+            .unwrap();
+        add_option(write, "_site_transient_timeout_oracle_lone", &past, off)
+            .await
+            .unwrap();
+    };
+    check("site-transient-expired", setup, async |write, ()| {
+        expire_site_transient(write, "oracle_old").await.unwrap();
+        expire_site_transient(write, "oracle_lone").await.unwrap();
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn deletes_transients() {
     let setup = async |write: &mut Write<'_>| {
         set_transient(write, "oracle_a", &text("one"), 0)
@@ -294,6 +349,9 @@ async fn options_return_each_database_error() {
         set_transient(write, "oracle_a", &text("two"), 60).await?;
         set_transient(write, "oracle_b", &text("two"), 60).await?;
         delete_transient(write, "oracle_b").await?;
+        set_site_transient(write, "oracle_s", &text("one"), 60).await?;
+        set_site_transient(write, "oracle_s", &text("two"), 60).await?;
+        expire_site_transient(write, "oracle_s").await?;
         Ok(())
     })
     .await;

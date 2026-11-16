@@ -1,0 +1,46 @@
+# The block renderer (MVP 4.4) for reference/rest/golden.sh (method, target, flags, body).
+GET	/?rest_route=/wp/v2/block-renderer/core/archives&context=edit	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/archives	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/archives&context=edit&attributes[showPostCounts]=1	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/archives&context=edit&attributes[displayAsDropdown]=true&attributes[type]=yearly	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/calendar&context=edit	refused,restore
+GET	/?rest_route=/wp/v2/block-renderer/core/latest-comments&context=edit	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/latest-comments&context=edit&attributes[commentsToShow]=2&attributes[displayAvatar]=false&attributes[displayDate]=false	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/latest-posts&context=edit	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/latest-posts&context=edit&attributes[displayPostDate]=1&attributes[postsToShow]=1	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/tag-cloud&context=edit	refused,restore
+GET	/?rest_route=/wp/v2/block-renderer/core/tag-cloud&context=edit&attributes[taxonomy]=category&attributes[showTagCounts]=true	refused,restore
+GET	/?rest_route=/wp/v2/block-renderer/core/categories&context=edit	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/categories&context=edit&attributes[displayAsDropdown]=1&attributes[showPostCounts]=1	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/page-list&context=edit	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/search&context=edit&attributes[label]=Find&attributes[buttonText]=Go	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/site-title&context=edit	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/site-tagline&context=edit	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/loginout&context=edit	refused,restore
+GET	/?rest_route=/wp/v2/block-renderer/core/home-link&context=edit&attributes[label]=Start	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/post-title&context=edit&post_id=1	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/post-title&context=edit&post_id=1&attributes[level]=3&attributes[isLink]=true	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/post-date&context=edit&post_id=1	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/post-excerpt&context=edit&post_id=1	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/post-author-name&context=edit&post_id=1	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/post-terms&context=edit&post_id=1&attributes[term]=category	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/post-title&context=edit&post_id=2	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/post-title&context=edit	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/rss&context=edit&attributes[feedURL]=http://127.0.0.1:8081/?feed=rss2	refused,restore
+GET	/?rest_route=/wp/v2/block-renderer/core/paragraph&context=edit	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/nope&context=edit	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/Archives&context=edit	restore
+GET	/?rest_route=/wp/v2/block-renderer/core	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/archives&context=view	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/archives&context=edit&attributes[nope]=1	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/archives&context=edit&attributes[showPostCounts]=maybe	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/archives&context=edit&attributes=x	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/nope&context=edit&attributes=x	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/archives&context=edit&post_id=999	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/archives&context=edit&post_id=abc	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/archives&context=edit&post_id=0	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/archives&context=edit&post_id=-1	restore
+POST	/?rest_route=/wp/v2/block-renderer/core/archives&context=edit	json,restore	{"attributes":{"showPostCounts":true,"type":"monthly"}}
+POST	/?rest_route=/wp/v2/block-renderer/core/archives&context=edit	json,restore	{"attributes":"x"}
+OPTIONS	/?rest_route=/wp/v2/block-renderer/core/archives	restore
+GET	/?rest_route=/wp/v2/block-renderer/core/archives&context=edit&_fields=rendered	restore

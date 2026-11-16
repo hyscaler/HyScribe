@@ -61,6 +61,11 @@ impl<'a> Reads<'a> {
     }
 
     /// The query's result, or its type's default after an error.
+    /// `future` run to its end on the runtime.
+    pub(crate) fn block_on<T>(&self, future: impl Future<Output = T>) -> T {
+        self.handle.block_on(future)
+    }
+
     pub(crate) fn wait<T: Default>(&self, query: impl Future<Output = Result<T, DbError>>) -> T {
         self.handle.block_on(query).unwrap_or_else(|err| {
             self.error.borrow_mut().get_or_insert(err);

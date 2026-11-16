@@ -111,6 +111,8 @@ pub struct Site {
     constants: hyscribe_config::Constants,
     /// The login rate limits and their counts, kept across reloads.
     limiter: Arc<login::limits::Limiter>,
+    /// The outbound client, when `HTTP_OUTBOUND` is on (ADR 0019).
+    fetch: Option<Arc<hyscribe_fetch::Client>>,
 }
 
 /// The address a connection comes from.
@@ -141,6 +143,7 @@ impl Site {
             behind_proxy: false,
             constants: hyscribe_config::Constants::default(),
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
+            fetch: None,
         };
         for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
             if let Some(url) = url {
@@ -181,6 +184,7 @@ impl Site {
             behind_proxy: self.behind_proxy,
             constants: self.constants,
             limiter: Arc::clone(&self.limiter),
+            fetch: self.fetch.clone(),
         };
         site.build_rewriter();
         Ok(site)
@@ -226,6 +230,12 @@ impl Site {
             sessions: Some(Arc::new(sessions)),
             ..self
         }
+    }
+
+    /// The site with the outbound client, none while `HTTP_OUTBOUND` is off.
+    pub fn with_fetch(self, fetch: Option<hyscribe_fetch::Client>) -> Site {
+        let fetch = fetch.map(Arc::new);
+        Site { fetch, ..self }
     }
 
     /// The site with the writer `Writer::open` gave (none in shadow mode),

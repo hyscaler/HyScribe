@@ -127,8 +127,18 @@ async fn the_block_editor_s_view_writes_before_its_page() {
         let user = reads.reads.wait(site.db.user(1)).unwrap();
         let mut admin = Admin::new(&reads, &site, user);
         let post = admin.full_post(1).unwrap();
+        let gone = Post {
+            id: 999,
+            post_type: "post".into(),
+            ..Post::default()
+        };
         let cases = [
             (Target::New("post".into()), true, StatusCode::OK),
+            (
+                Target::Edit(Box::new(gone)),
+                true,
+                StatusCode::NOT_IMPLEMENTED,
+            ),
             (
                 Target::Edit(Box::new(post)),
                 false,
@@ -154,7 +164,11 @@ async fn the_block_editor_s_view_writes_before_its_page() {
                     browser: &browser,
                 };
                 let preloads = |_: &[(&'static str, String)]| answered.then_some(Value::Null);
-                let answer = super::super::block_editor_with(admin, &request, &preloads);
+                // Unanswered, the preloads are the REST API's.
+                let answer = match answered {
+                    true => super::super::block_editor_with(admin, &request, &preloads),
+                    false => super::super::block_editor(admin, &request),
+                };
                 answer.map_or_else(super::super::not_ported, |answer| {
                     super::super::served(admin, answer)
                 })
@@ -208,4 +222,17 @@ async fn the_block_editor_writes_only_for_a_page_it_serves() {
         .await
         .unwrap();
     assert!(lock.is_none());
+}
+
+/// A database that fails before the editor's view begins ends it.
+#[tokio::test]
+async fn a_failed_begin_ends_the_editor_s_view() {
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    write.fail_after(0);
+    let err = write.option_value("home").await.unwrap_err();
+    let ctx = context(1, SITE, SITE, Default::default());
+    let target = Target::New("post".into());
+    let written = editor_written(Err(err), &ctx, &target, ("twentytwentyfive", "")).await;
+    assert!(matches!(written, Err(Error::Db(_))));
 }

@@ -186,6 +186,23 @@ pub(super) async fn written<'w>(
     Ok((write, draft))
 }
 
+/// The block editor's first view of `target`, written from `write` and
+/// committed: the post's ID and the global styles post's.
+async fn editor_written(
+    write: Result<Write<'_>, DbError>,
+    ctx: &Context,
+    target: &Target,
+    theme: (&str, &str),
+) -> Result<(u64, u64), Error> {
+    let mut write = write?;
+    let edited = match target {
+        Target::New(post_type) => Edited::New(post_type),
+        Target::Edit(post) => Edited::Existing(post.id),
+    };
+    let ids = block_editor_view(&mut write, ctx, edited, theme).await?;
+    write.commit().await.map(|()| ids).map_err(Error::from)
+}
+
 /// The page `render` answers with the view's writes: the dashboard's
 /// first, as the page shows its auto-draft, the others' after it.
 pub(super) fn viewed(
@@ -206,20 +223,13 @@ pub(super) fn viewed(
     };
     // The block editor's view writes before its page reads what it wrote.
     if let Some(target) = &view.editor {
-        let edited = match target {
-            Target::New(post_type) => Edited::New(post_type),
-            Target::Edit(post) => Edited::Existing(post.id),
-        };
         let theme = (admin.site.option("stylesheet"), admin.site.theme.name());
-        let viewed = handle.block_on(async {
-            let mut write = writer.begin().await?;
-            let ids = block_editor_view(&mut write, &ctx, edited, (&theme.0, &theme.1)).await?;
-            write.commit().await?;
-            Ok::<_, Error>(ids)
-        });
+        let theme = (theme.0.as_str(), theme.1.as_str());
+        let viewed = handle
+            .block_on(async { editor_written(writer.begin().await, &ctx, target, theme).await });
         match viewed {
             Ok((id, styles)) => {
-                admin.edited = Some((id, styles, format!("{}:{}", ctx.now, ctx.user)))
+                admin.edited = Some((id, styles, format!("{}:{}", ctx.now, ctx.user)));
             }
             Err(err) => return failed(admin, err),
         }

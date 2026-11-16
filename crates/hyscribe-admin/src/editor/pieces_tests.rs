@@ -259,6 +259,9 @@ fn preloads_are_kept_by_path() {
         r#"{"/a":{"body":"GET /a","headers":null},"OPTIONS":{"/b":{"body":"OPTIONS /b","headers":null}}}"#
     );
     assert_eq!(page::preloaded(&paths, &|_, _| None), None);
+    let gets = [("GET", "/a".to_string())];
+    let memo = page::preloaded(&gets, &answered).unwrap();
+    assert_eq!(memo.as_array().unwrap().len(), 1);
 }
 
 /// The page each screen and query asks for, once PHP's refusals pass.
@@ -268,7 +271,12 @@ fn editor_targets() {
     let new = |kind: &str| Some(Target::New(kind.into()));
     assert_eq!(target(&site, "post-new.php", ""), new("post"));
     assert_eq!(target(&site, "post-new.php", "post_type=page"), new("page"));
-    for refused in ["post_type=attachment", "post_type=nope", "x=1"] {
+    for refused in [
+        "post_type=attachment",
+        "post_type=nope",
+        "x=1",
+        "post_type[]=x",
+    ] {
         assert_eq!(target(&site, "post-new.php", refused), None, "{refused}");
     }
     let edit = target(&site, "post.php", "post=1&action=edit");
@@ -286,4 +294,38 @@ fn editor_targets() {
     for refused in ["post=816&action=edit", "post=801&action=edit"] {
         assert_eq!(target(&locks, "post.php", refused), None, "{refused}");
     }
+}
+
+/// A draft's page: its preview in the admin bar, no original referer in
+/// its meta boxes area, and no author's preload without an author.
+#[test]
+fn a_draft_s_page() {
+    let (site, browser) = site_of("x-administrator");
+    let draft = Post {
+        id: 1,
+        post_type: "post".into(),
+        status: "draft".into(),
+        title: b"Hello world!".to_vec(),
+        ..Post::default()
+    };
+    let uri = uri_of(&draft);
+    let editing = form::Editing {
+        post: &draft,
+        lock: "%time%:1",
+        browser,
+        uri: &uri,
+    };
+    let canonical = format!("{}{uri}", crate::tests::SITE);
+    let request = crate::tests::request(&canonical, &uri, browser);
+    let html = page::editor_page(&site, &editing, &Value::Null, &request).unwrap();
+    assert!(html.contains(">Preview Post</a>"));
+    assert!(html.contains("preview=true"));
+    assert!(!html.contains("_wp_original_http_referer"));
+    let paths = page::preload_paths(&draft, 6, true, "twentytwentyfive");
+    assert!(
+        paths
+            .iter()
+            .all(|(_, path)| !path.starts_with("/wp/v2/users/0"))
+    );
+    assert_eq!(paths.len(), 23);
 }

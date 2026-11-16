@@ -379,10 +379,8 @@ pub fn preload(site: &dyn Site, user: u64, method: &str, path: &[u8]) -> Preload
         ),
         None => (path, &b""[..]),
     };
-    let get = match hyscribe_phpser::parse_str(query) {
-        Value::Array(entries) => entries,
-        _ => Vec::new(),
-    };
+    let get = hyscribe_phpser::parse_str(query);
+    let get = get.as_array().unwrap_or_default().to_vec();
     let params = Params {
         get: get.clone(),
         ..Params::default()
@@ -401,10 +399,8 @@ pub fn preload(site: &dyn Site, user: u64, method: &str, path: &[u8]) -> Preload
     };
     let headers = header_values(&response);
     let embed = lookup(&get, "_embed").map(embed::relations);
-    match embed::to_data(&context, response, embed.as_ref()) {
-        Ok(data) => Preloaded::Kept(data, headers),
-        Err(NotPorted) => Preloaded::NotPorted,
-    }
+    let data = embed::to_data(&context, response, embed.as_ref());
+    data.map_or(Preloaded::NotPorted, |data| Preloaded::Kept(data, headers))
 }
 
 /// A response's headers as its data: the collections set their totals as

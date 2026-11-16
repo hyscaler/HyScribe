@@ -544,7 +544,19 @@ async fn the_editor_s_preloads_but_the_index_are_answered() {
             assert_eq!(missing[0], "/wp/v2/themes?context=edit&status=active");
             assert!(missing[1].starts_with("/?_fields="), "{missing:?}");
         }
-        // Another answer is left out; an embedded one is kept.
+        // Another answer is left out of the memo; an embedded one is kept.
+        let paths = [
+            ("GET", "/wp/v2/posts/999".to_string()),
+            ("GET", "/wp/v2/types".to_string()),
+        ];
+        let memo = preloads(&rest.reads, 1, &paths).unwrap();
+        let keys: Vec<Vec<u8>> = memo
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|(k, _)| k.to_php_string())
+            .collect();
+        assert_eq!(keys, [b"/wp/v2/types".to_vec()]);
         assert_eq!(
             preload(&rest, 1, "GET", b"/wp/v2/posts/999"),
             Preloaded::Left

@@ -266,8 +266,8 @@ pub(crate) fn preloads(
     };
     let memo = hyscribe_admin::editor::page::preloaded(paths, &answered);
     let Rest { reads, .. } = rest;
-    reads.reads.finish().ok()?;
-    memo
+    let finished = reads.reads.finish().is_ok();
+    memo.filter(|_| finished)
 }
 
 /// The answer the API served.

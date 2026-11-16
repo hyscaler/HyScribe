@@ -31,6 +31,7 @@ hyscribe-write = { path = "crates/hyscribe-write" }
 clap = { version = "4.5", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 dotenvy = "0.15"
 icu_normalizer = { version = "2.4", default-features = false, features = ["compiled_data"] }
+icu_properties = { version = "2.4", default-features = false, features = ["compiled_data"] }
 # IANA 2026e, the release the oracle PHP bundles.
 jiff-tzdb = "=0.1.9"
 proptest = "1.7"

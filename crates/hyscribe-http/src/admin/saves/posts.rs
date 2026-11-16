@@ -6,15 +6,16 @@
 
 use hyscribe_admin::actions::{Asked, action};
 use hyscribe_admin::posts::Answer;
+use hyscribe_admin::revisions::RevisionArgs;
 use hyscribe_config::Constants;
-use hyscribe_db::{DbError, Meta, PostFields, Write};
+use hyscribe_db::{DbError, Meta, PostFields, UserFields, Write};
 use hyscribe_phpser::{Key, Value, absint, add_query_arg, addslashes, lookup, remove_query_arg};
 use hyscribe_render::date::{Zone, format_unix, stored_unix};
 use hyscribe_write::caps::Caps;
 use hyscribe_write::options::update_metadata;
 use hyscribe_write::posts::{
-    Context, PostArgs, stick_post, unstick_post, wp_checkdate, wp_delete_post, wp_trash_post,
-    wp_unique_post_slug, wp_untrash_post, wp_update_post,
+    Context, PostArgs, stick_post, unstick_post, wp_checkdate, wp_delete_post,
+    wp_restore_post_revision, wp_trash_post, wp_unique_post_slug, wp_untrash_post, wp_update_post,
 };
 use hyscribe_write::terms::{Taxonomy, TermList, TermRef, wp_set_post_terms};
 use hyscribe_write::{Error, wp_timezone};
@@ -122,8 +123,14 @@ fn mentions(url: &[u8], file: &str) -> bool {
     has(file.as_bytes()) || matches!(ends, Some(None | Some(b'?' | b'#')))
 }
 
-/// `wp_check_post_lock( $id )` for `user`: another user's fresh lock.
-async fn locked(write: &mut Write<'_>, id: u64, user: u64, now: i64) -> Result<bool, DbError> {
+/// `wp_check_post_lock( $id )` for `user`: the other user whose lock is
+/// fresh, with their fields.
+pub(super) async fn locked(
+    write: &mut Write<'_>,
+    id: u64,
+    user: u64,
+    now: i64,
+) -> Result<Option<UserFields>, DbError> {
     let lock = write.meta_value(Meta::Post, id, "_edit_lock").await?;
     let lock = lock.unwrap_or_default();
     let int = |text: &[u8]| Value::String(text.to_vec()).to_int();
@@ -138,9 +145,9 @@ async fn locked(write: &mut Write<'_>, id: u64, user: u64, now: i64) -> Result<b
     };
     let holder = u64::try_from(holder).unwrap_or_default();
     if time == 0 || time <= now - 150 || holder == user {
-        return Ok(false);
+        return Ok(None);
     }
-    Ok(write.user(holder).await?.is_some())
+    Ok(write.user(holder).await?.map(|(_, fields)| fields))
 }
 
 /// `current_user_can( 'unfiltered_html' )` of `user` in the action, which
@@ -220,6 +227,34 @@ async fn post_php(
         return Err(Stop::Died(Answer::Died(failed)));
     }
     Ok(Answer::Redirect(text(&add_query_arg(args, &sendback))))
+}
+
+/// `revision.php?action=restore`: `wp_restore_post_revision()`, then the
+/// post's edit screen with its notice.
+pub(super) fn restore<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    site: &'a dyn Acting,
+) -> Saving<'a> {
+    Box::pin(async move {
+        let args = RevisionArgs::read(&|name| asked.request(name).cloned());
+        let id = args.map_or(0, |args| args.revision);
+        let revision = existing(write, id).await?;
+        let post = existing(write, revision.parent).await?;
+        if !["post", "page"].contains(&post.post_type.as_str()) {
+            return Err(Error::Unported("revisions of a type that may turn them off").into());
+        }
+        let caps = Caps::load(write, asked.user, None, site.constants()).await?;
+        let ctx = context(asked, site, (&caps, &post.post_type));
+        wp_restore_post_revision(write, &ctx, id).await?;
+        let edit = site.admin_url(&format!("post.php?post={}&action=edit", revision.parent));
+        let id = id.to_string();
+        let args: &QueryArgs = &[(b"message", Some(b"5")), (b"revision", Some(id.as_bytes()))];
+        Ok(Answer::Redirect(text(&add_query_arg(
+            args,
+            edit.as_bytes(),
+        ))))
+    })
 }
 
 /// `post.php?action=trash`.
@@ -338,7 +373,7 @@ async fn bulk_write(
         // Past its capability, the post is there.
         let id = u64::try_from(id.to_int()).unwrap_or_default();
         let written = match doaction {
-            b"trash" if locked(write, id, asked.user, ctx.now).await? => {
+            b"trash" if locked(write, id, asked.user, ctx.now).await?.is_some() => {
                 skipped += 1;
                 continue;
             }
@@ -1018,7 +1053,7 @@ async fn bulk_edit_posts(
             skipped += 1;
             continue;
         };
-        if locked(write, id, asked.user, now).await? {
+        if locked(write, id, asked.user, now).await?.is_some() {
             locked_count += 1;
             continue;
         }

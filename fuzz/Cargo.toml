@@ -272,3 +272,10 @@ path = "fuzz_targets/mail_decode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "text_diff"
+path = "fuzz_targets/text_diff.rs"
+test = false
+doc = false
+bench = false

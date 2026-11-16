@@ -70,6 +70,8 @@ fn request<'a>(screen: &'a str, get: &str, post: &str) -> Request<'a> {
 /// Unapprove from `comment.php`, and the list's Ajax Unapprove and Trash.
 #[tokio::test(flavor = "multi_thread")]
 async fn moderations_write_php_s_rows() {
+    // Comment writes take turns, or their gap locks deadlock.
+    let _turn = turn().await;
     let writer = writer().await;
     let site = oracle_site().await;
     let reads = LoginReads::new(&site, Handle::current(), 0);
@@ -182,6 +184,7 @@ fn golden_case(row: &str) -> (Request<'static>, String) {
 /// those Empty Trash leaves.
 #[tokio::test(flavor = "multi_thread")]
 async fn moderations_answer_as_php() {
+    let _turn = turn().await;
     let writer = writer().await;
     let site = oracle_site().await;
     let reads = LoginReads::new(&site, Handle::current(), 0);
@@ -206,6 +209,7 @@ async fn moderations_answer_as_php() {
 /// `wp_ajax_delete_comment()` answers `0`.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_post_trashed_comment_stays_in_the_trash() {
+    let _turn = turn().await;
     let writer = writer().await;
     let site = oracle_site().await;
     let reads = LoginReads::new(&site, Handle::current(), 0);
@@ -247,6 +251,7 @@ async fn a_post_trashed_comment_stays_in_the_trash() {
 /// array as the list's URL, or a page size `mt_rand()` refuses.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fatal_error_keeps_nothing() {
+    let _turn = turn().await;
     let writer = writer().await;
     let site = oracle_site().await;
     let reads = LoginReads::new(&site, Handle::current(), 0);
@@ -292,6 +297,7 @@ fn the_list_s_views_are_counted() {
 /// in. Nothing is kept.
 #[tokio::test(flavor = "multi_thread")]
 async fn replies_past_what_the_checks_read() {
+    let _turn = turn().await;
     let writer = writer().await;
     let site = oracle_site().await;
     let reads = LoginReads::new(&site, Handle::current(), 0);
@@ -361,6 +367,7 @@ async fn replies_past_what_the_checks_read() {
 /// failing in turn first.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reply_approves_its_held_parent() {
+    let _turn = turn().await;
     let writer = writer().await;
     let site = oracle_site().await;
     let reads = LoginReads::new(&site, Handle::current(), 0);
@@ -390,6 +397,7 @@ async fn a_reply_approves_its_held_parent() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reply_is_unfiltered_with_its_nonce() {
     use super::unfiltered::{NONCE, Unfiltered};
+    let _turn = turn().await;
     let writer = writer().await;
     let mut write = writer.begin().await.unwrap();
     let site = Unfiltered { authors: false };
@@ -416,6 +424,7 @@ async fn a_reply_is_unfiltered_with_its_nonce() {
 /// still filtered.
 #[tokio::test(flavor = "multi_thread")]
 async fn administrators_post_unfiltered_html_when_the_site_allows_it() {
+    let _turn = turn().await;
     let writer = writer().await;
     let open = hyscribe_config::Constants {
         disallow_unfiltered_html: false,

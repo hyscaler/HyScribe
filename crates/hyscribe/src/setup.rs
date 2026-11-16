@@ -409,18 +409,21 @@ pub(crate) async fn checked(
         .iter()
         .filter(|key| values.iter().any(|(k, _)| k == *key))
         .count();
-    let salts: Vec<_> = SALT_KEYS
+    let salts: std::io::Result<Vec<_>> = SALT_KEYS
         .into_iter()
         .filter(|key| !values.iter().any(|(k, _)| k == key))
         .map(|key| hyscribe_auth::generate_password(64, true).map(|salt| (key, salt)))
-        .collect::<Result<_, _>>()
-        .map_err(failed("cannot generate keys and salts".into()))?;
-    values.extend(salts);
-    let map: HashMap<String, String> = values
-        .iter()
-        .map(|(key, value)| (key.to_string(), value.clone()))
         .collect();
-    let config = hyscribe_config::from_map(&map).map_err(|err| err.to_string())?;
+    let config = salts
+        .map_err(failed("cannot generate keys and salts".into()))
+        .and_then(|salts| {
+            values.extend(salts);
+            let map: HashMap<String, String> = values
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.clone()))
+                .collect();
+            hyscribe_config::from_map(&map).map_err(|err| err.to_string())
+        })?;
     let mut report = format!(
         "  Keys and salts: {copied} copied, {} generated\n",
         SALT_KEYS.len() - copied

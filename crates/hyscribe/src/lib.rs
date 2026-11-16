@@ -233,8 +233,8 @@ fn server_config(
     // No `.env` to keep, so the wizard writes one.
     let written = setup::run(home, term)?;
     let written = written.map(|path| format!("Wrote {} (mode 600)\n", path.display()));
-    term.say(&written.unwrap_or_default())?;
-    hyscribe_config::load(home, site.env).map_err(|err| err.to_string())
+    term.say(&written.unwrap_or_default())
+        .and_then(|()| hyscribe_config::load(home, site.env).map_err(|err| err.to_string()))
 }
 
 /// `hyscribe start`: serves the site until SIGTERM or SIGINT, after setup

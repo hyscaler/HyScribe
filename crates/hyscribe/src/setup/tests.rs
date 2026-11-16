@@ -609,7 +609,7 @@ fn input_and_output_failures_stop_the_wizard() {
 }
 
 /// Output that fails after `0` more writes.
-struct FailAfter(usize);
+pub(crate) struct FailAfter(pub(crate) usize);
 
 impl Write for FailAfter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {

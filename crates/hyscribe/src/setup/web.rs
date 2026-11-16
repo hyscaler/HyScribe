@@ -78,18 +78,22 @@ pub(crate) async fn setup_mode(
     stopped: &mut oneshot::Receiver<i32>,
     timeout: Duration,
 ) -> Result<Ended, String> {
-    let server = hyscribe_config::server(env).map_err(|err| err.to_string())?;
-    let random = |length| hyscribe_auth::generate_password(length, false);
-    let (secret, tokens) = random(SECRET_LENGTH)
-        .and_then(|secret| {
-            let tokens = Tokens {
-                form: random(TOKEN_LENGTH)?,
-                cookie: random(TOKEN_LENGTH)?,
-                csrf: random(TOKEN_LENGTH)?,
-            };
-            Ok((secret, tokens))
-        })
-        .map_err(failed("cannot generate the setup secret".into()))?;
+    // One draw from the kernel, cut into the secret and the tokens.
+    let (server, drawn) = hyscribe_config::server(env)
+        .map_err(|err| err.to_string())
+        .and_then(|server| {
+            hyscribe_auth::generate_password(SECRET_LENGTH + 3 * TOKEN_LENGTH, false)
+                .map(|drawn| (server, drawn))
+                .map_err(failed("cannot generate the setup secret".into()))
+        })?;
+    let (secret, drawn) = drawn.split_at(SECRET_LENGTH);
+    let (form, drawn) = drawn.split_at(TOKEN_LENGTH);
+    let (cookie, csrf) = drawn.split_at(TOKEN_LENGTH);
+    let tokens = Tokens {
+        form: form.into(),
+        cookie: cookie.into(),
+        csrf: csrf.into(),
+    };
     let address = SocketAddr::new(server.bind_host, server.port);
     let listener = tokio::net::TcpListener::bind(address)
         .await
@@ -106,7 +110,7 @@ pub(crate) async fn setup_mode(
         wizard: Mutex::new(Wizard {
             home: home.to_path_buf(),
             listen: server,
-            secret: Some(secret),
+            secret: Some(secret.into()),
             tokens,
             signed_in: false,
             found: None,
@@ -313,7 +317,9 @@ impl Wizard {
         choices.push(&mut values);
         let written = checked(values, content.as_deref())
             .await
-            .and_then(|(report, text)| Ok((report, write_env(&self.home, &text, false)?)));
+            .and_then(|(report, text)| {
+                write_env(&self.home, &text, false).map(|path| (report, path))
+            });
         match written {
             Ok((report, path)) => {
                 self.signed_in = false;
@@ -395,9 +401,10 @@ fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a [u8]> {
 fn set_cookie(response: &mut Response, name: &str, value: &str) {
     let age = if value.is_empty() { "; Max-Age=0" } else { "" };
     let cookie = format!("{name}={value}; Path=/installation; HttpOnly; SameSite=Strict{age}");
-    if let Ok(cookie) = HeaderValue::from_str(&cookie) {
-        response.headers_mut().append(header::SET_COOKIE, cookie);
-    }
+    // Names and tokens are letters, digits and underscores, always valid.
+    let cookie = HeaderValue::from_str(&cookie).ok();
+    let cookie = cookie.map(|cookie| (header::SET_COOKIE, cookie));
+    response.headers_mut().extend(cookie);
 }
 
 fn redirect(to: &'static str) -> Response {

@@ -396,6 +396,8 @@ fn servers_without_a_configuration_start_in_setup_mode() {
     // Configuration errors are reported before anything starts.
     let output = run_with(&["start"], &[("DB_NAME", "x")], home.path());
     assert_eq!(output.err, "error: DB_USER is not set\n");
+    let output = run_with(&["service", "restart"], &[("DB_NAME", "x")], home.path());
+    assert_eq!(output.err, "error: DB_USER is not set\n");
 }
 
 /// An open pseudo terminal's answering end.
@@ -465,6 +467,36 @@ fn a_terminal_is_asked_where_to_set_up() {
         (Ok(false), String::new())
     );
     assert_eq!(ask("terminal\n", None), (Ok(false), String::new()));
+    // The answers can end, or the terminal close, on the way.
+    let ended = Err("setup stopped: the input ended before every question was answered".into());
+    assert_eq!(ask("", Some(tty.as_fd())).0, ended);
+    assert_eq!(ask("terminal\n", Some(tty.as_fd())).0, ended);
+    let mut term = setup::Terminal {
+        input: &mut std::io::Cursor::new(b"maybe\n".to_vec()),
+        out: &mut setup::tests::FailAfter(1),
+        tty: Some(tty.as_fd()),
+    };
+    assert_eq!(server_config(&site, &mut term), Err("closed".into()));
+    // An environment the wizard's .env does not override still counts.
+    let bogus = HashMap::from([("MODE".to_string(), "bogus".to_string())]);
+    let mut out = Vec::new();
+    let answers = format!("terminal\n{}", setup::tests::DEFAULTS);
+    let mut term = setup::Terminal {
+        input: &mut std::io::Cursor::new(answers.into_bytes()),
+        out: &mut out,
+        tty: Some(tty.as_fd()),
+    };
+    let overridden = Site {
+        paths: Paths::new(&home),
+        env: &bogus,
+        euid: USER,
+        server: &server,
+    };
+    assert_eq!(
+        server_config(&overridden, &mut term),
+        Err("MODE is invalid: must be shadow or primary".into())
+    );
+    std::fs::remove_file(home.join(".env")).unwrap();
     let answers = format!("Terminal\n{}", setup::tests::DEFAULTS);
     let (config, out) = ask(&answers, Some(tty.as_fd()));
     assert_eq!(config, Ok(true), "{out}");
@@ -773,27 +805,49 @@ fn setup_mode_hands_over_to_the_site() {
         .into_iter()
         .filter(|(key, _)| !key.starts_with("DB_"))
         .collect();
-    let service = |command: &str| {
+    let service = |command: &str, env: &HashMap<String, String>| {
         let args = ["service", command];
         run_as(&args, env.clone(), &home, USER, child_server())
     };
     let setup = "Setup mode: the address to open and the one-time setup secret are in the log \
                  (./hyscribe service log)\n";
+    let fresh = || std::fs::remove_file(home.join("logs/hyscribe.log")).unwrap();
+    // Written, `.env` still loses to an environment it does not override.
+    let mut bogus = env.clone();
+    bogus.insert("MODE".into(), "bogus".into());
+    let started = service("start", &bogus);
+    assert!(started.out.ends_with(setup), "{}", started.err);
+    through_the_wizard(&home, port, &wordpress);
+    logged(&home, "error: MODE is invalid: must be shadow or primary");
+    std::fs::remove_file(home.join(".env")).unwrap();
+    fresh();
+    // Stopped in setup mode, as any server is.
+    let started = service("start", &env);
+    assert!(started.out.ends_with(setup), "{}", started.err);
+    logged(&home, "setup secret ");
+    assert_eq!(service("stop", &env).code, 0);
+    logged(&home, "stopped on signal 15");
+    fresh();
+
+    let started = service("start", &env);
+    assert!(started.out.ends_with(setup), "{}", started.err);
+    through_the_wizard(&home, port, &wordpress);
+    logged(
+        &home,
+        &format!("in shadow (read only) mode, listening on http://127.0.0.1:{port}"),
+    );
+    let page = http_get(port, "/?p=1");
+    assert!(page.contains("Hello world!"), "{page}");
+    assert_eq!(service("stop", &env).code, 0);
+}
+
+/// Answers setup mode's pages in `home`, listening on `port`, for the site
+/// in `wordpress`.
+fn through_the_wizard(home: &std::path::Path, port: u16, wordpress: &std::path::Path) {
     let secret = format!(
         "Open http://127.0.0.1:{port}/installation/step-1 and enter the one-time setup secret "
     );
-    // Stopped in setup mode, as any server is.
-    let started = service("start");
-    assert!(started.out.ends_with(setup), "{}", started.err);
-    logged(&home, &secret);
-    assert_eq!(service("stop").code, 0);
-    logged(&home, "stopped on signal 15");
-    // The next start's secret is the only one in the log.
-    std::fs::remove_file(home.join("logs/hyscribe.log")).unwrap();
-
-    let started = service("start");
-    assert!(started.out.ends_with(setup), "{}", started.err);
-    let log = logged(&home, &secret);
+    let log = logged(home, &secret);
     let secret = between(&log, &secret, '\n');
     let page = http_get(port, "/installation/step-1");
     assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
@@ -811,11 +865,4 @@ fn setup_mode_hands_over_to_the_site() {
     let sent = format!("_csrf={csrf}&MODE=shadow&PORT={port}");
     let page = http_form(port, "POST", "/installation/step-3", &session, &sent);
     assert!(page.contains("<h1>HyScribe is set up</h1>"), "{page}");
-    logged(
-        &home,
-        &format!("in shadow (read only) mode, listening on http://127.0.0.1:{port}"),
-    );
-    let page = http_get(port, "/?p=1");
-    assert!(page.contains("Hello world!"), "{page}");
-    assert_eq!(service("stop").code, 0);
 }

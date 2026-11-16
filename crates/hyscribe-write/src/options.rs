@@ -220,47 +220,12 @@ pub async fn settings_errors_shown(write: &mut Write<'_>, now: i64) -> Result<()
     Ok(())
 }
 
-/// `delete_transient( $name )` without an object cache.
+/// `delete_transient( $name )` without an object cache: the option, and
+/// its timeout when there was one.
 pub async fn delete_transient(write: &mut Write<'_>, name: &str) -> Result<bool, Error> {
-    delete_pair(write, "_transient_", name).await
-}
-
-/// `set_site_transient( $name, $value, $expiration )` on a single site:
-/// `_site_transient_` options, never autoloaded.
-pub async fn set_site_transient(
-    write: &mut Write<'_>,
-    name: &str,
-    value: &Value,
-    expiration: i64,
-) -> Result<bool, Error> {
-    let timeout = format!("_site_transient_timeout_{name}");
-    let option = format!("_site_transient_{name}");
-    let expires = Value::Int(now() + expiration);
-    // `add_site_option()` and `update_site_option()` on a single site.
-    let off = Some(Autoload::Off);
-    if get_option(write, &option).await? == Value::Bool(false) {
-        if expiration != 0 {
-            add_option(write, &timeout, &expires, off).await?;
-        }
-        return add_option(write, &option, value, off).await;
-    }
-    if expiration != 0 {
-        update_option(write, &timeout, &expires, off).await?;
-    }
-    update_option(write, &option, value, off).await
-}
-
-/// `delete_site_transient( $name )` on a single site.
-pub async fn delete_site_transient(write: &mut Write<'_>, name: &str) -> Result<bool, Error> {
-    delete_pair(write, "_site_transient_", name).await
-}
-
-/// Deletes a transient's option, and its timeout when there was one.
-async fn delete_pair(write: &mut Write<'_>, prefix: &str, name: &str) -> Result<bool, Error> {
-    let deleted = delete_option(write, &format!("{prefix}{name}")).await?;
+    let deleted = delete_option(write, &format!("_transient_{name}")).await?;
     if deleted {
-        let timeout = format!("{prefix}timeout_{name}");
-        delete_option(write, &timeout).await?;
+        delete_option(write, &format!("_transient_timeout_{name}")).await?;
     }
     Ok(deleted)
 }

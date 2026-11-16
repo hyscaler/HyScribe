@@ -80,6 +80,7 @@ pub(super) fn context(site: &Site, plan: &Plan, now: i64) -> Context {
         home: site.home.as_bytes().to_vec(),
         upload_host: hyscribe_render::link::host(site.raw_option("siteurl")),
         unfiltered_html: plan.unfiltered_html,
+        constants: site.constants,
         now,
     }
 }

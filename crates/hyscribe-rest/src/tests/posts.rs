@@ -240,7 +240,7 @@ fn posts_match_php() {
     replay(
         include_str!("../../tests/golden/posts.tsv"),
         (false, false),
-        6 * 89,
+        6 * 103,
         &[],
     );
 }
@@ -252,7 +252,7 @@ fn theme_test_data_posts_match_php() {
     replay(
         include_str!("../../tests/golden/posts-ttd.tsv"),
         (true, false),
-        6 * 39,
+        6 * 42,
         &TTD_UNPORTED,
     );
 }
@@ -276,7 +276,19 @@ fn writes_and_unported_content_answer_501() {
             false,
             "visitor",
             "GET",
-            "/?rest_route=/wp/v2/posts&categories=1",
+            "/?rest_route=/wp/v2/posts&categories[terms]=1&categories[include_children]=1",
+        ),
+        (
+            false,
+            "visitor",
+            "GET",
+            "/?rest_route=/wp/v2/posts&categories[terms]=1&categories[operator]=AND",
+        ),
+        (
+            false,
+            "visitor",
+            "GET",
+            "/?rest_route=/wp/v2/posts&categories=1&tags=2&tax_relation=OR",
         ),
         (
             false,

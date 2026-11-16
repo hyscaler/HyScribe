@@ -234,7 +234,7 @@ fn text_of(served: &Served) -> String {
 /// `Location`.
 #[test]
 fn a_create_plans_its_fields() {
-    let body = r#"{"title":"T","content":"C","excerpt":{"raw":"E"},"status":"draft","slug":"A Slug","author":1,"comment_status":"closed","ping_status":"open","categories":[1,-3,0],"tags":[],"featured_media":0,"template":"","date":"2026-01-02T03:04:05"}"#;
+    let body = r#"{"title":"T","content":"C","excerpt":{"raw":"E"},"status":"draft","slug":"A Slug","author":1,"comment_status":"closed","ping_status":"open","categories":[1,-3],"tags":[],"featured_media":0,"template":"","date":"2026-01-02T03:04:05"}"#;
     let save = plan("administrator", "POST", "/wp/v2/posts", body);
     let some = |text: &str| Some(text.as_bytes().to_vec());
     assert_eq!(

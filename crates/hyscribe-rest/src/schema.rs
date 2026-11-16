@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `rest_validate_value_from_schema()` and `rest_sanitize_value_from_schema()`
-//! for every type and keyword but `anyOf`, `oneOf`, `pattern`,
+//! for every type and keyword but `anyOf`, `pattern`,
 //! `patternProperties` and a `format` other than `date-time`, `email` and
 //! `uri`, which a
 //! schema using them is refused for.
@@ -21,7 +21,7 @@ pub struct Refusal(pub Option<RestError>);
 /// The outcome of a check.
 pub type Checked<T> = Result<T, Refusal>;
 
-pub(crate) const UNPORTED: [&str; 5] = ["anyOf", "oneOf", "pattern", "patternProperties", "format"];
+pub(crate) const UNPORTED: [&str; 4] = ["anyOf", "pattern", "patternProperties", "format"];
 const TYPES: [&str; 7] = [
     "array", "object", "string", "number", "integer", "boolean", "null",
 ];
@@ -321,9 +321,163 @@ fn sizes(
     Ok(())
 }
 
+/// `schema` with the type `ty` set.
+fn with_type(schema: &Value, ty: Option<&Value>) -> Value {
+    let mut entries = entries(schema).to_vec();
+    entries.retain(|(key, _)| key.to_php_string() != b"type");
+    entries.push((
+        Key::String(b"type".to_vec()),
+        ty.cloned().unwrap_or(Value::Null),
+    ));
+    Value::Array(entries)
+}
+
+/// `wp_sprintf()`'s `%l` of two items or more: joined, the last with `and`.
+fn listed(items: &[String]) -> String {
+    match items {
+        [a, b] => format!("{a} and {b}"),
+        _ => items
+            .split_last()
+            .map(|(last, rest)| format!("{}, and {last}", rest.join(", ")))
+            .unwrap_or_default(),
+    }
+}
+
+/// A `oneOf` schema that did not match: its index and itself, and why.
+type Mismatch = (i64, Value, RestError);
+
+/// `rest_format_combining_operation_error()`.
+fn combining_format(param: &str, (index, schema, error): &Mismatch) -> Refusal {
+    let reason = &error.message;
+    let message = match get(schema, "title") {
+        Some(title) => {
+            let title = lossy(&title.to_php_string());
+            format!("{param} is not a valid {title}. Reason: {reason}")
+        }
+        None => format!("{param} does not match the expected format. Reason: {reason}"),
+    };
+    Refusal(Some(RestError {
+        code: "rest_no_matching_schema",
+        message,
+        data: object([("position", Value::Int(*index))]),
+    }))
+}
+
+/// `rest_get_combining_operation_error()`.
+fn combining_error(value: &Value, param: &str, errors: &[Mismatch]) -> Refusal {
+    if let [error] = errors {
+        return combining_format(param, error);
+    }
+    let filtered: Vec<&Mismatch> = errors
+        .iter()
+        .filter(|(_, _, error)| {
+            let other = error.data.get_str("param").map(Value::to_php_string);
+            error.code != "rest_invalid_type"
+                || other.is_some_and(|other| other != param.as_bytes())
+        })
+        .collect();
+    if let [error] = filtered.as_slice() {
+        return combining_format(param, error);
+    }
+    let objects = filtered
+        .first()
+        .is_some_and(|(_, schema, _)| schema.get_str("type") == Some(&text("object")));
+    if objects {
+        // The schema sharing the most properties with the value.
+        let mut best: Option<&Mismatch> = None;
+        let mut most = 0;
+        for error in &filtered {
+            let properties = entries(get(&error.1, "properties").unwrap_or(&Value::Null));
+            let shared = properties
+                .iter()
+                .filter(|(name, _)| entries(value).iter().any(|(key, _)| key == name))
+                .count();
+            if shared > most {
+                best = Some(error);
+                most = shared;
+            }
+        }
+        if let Some(best) = best {
+            return combining_format(param, best);
+        }
+    }
+    let titles: Vec<String> = errors
+        .iter()
+        .filter_map(|(_, schema, _)| get(schema, "title"))
+        .map(|title| lossy(&title.to_php_string()))
+        .collect();
+    let message = if titles.len() == errors.len() {
+        format!("{param} is not a valid {}.", listed(&titles))
+    } else {
+        format!("{param} does not match any of the expected formats.")
+    };
+    Refusal(Some(RestError {
+        code: "rest_no_matching_schema",
+        message,
+        data: Value::Null,
+    }))
+}
+
+/// `rest_find_one_matching_schema()`: the one schema of `oneOf` that
+/// `value` matches, none without the keyword.
+fn one_matching(value: &Value, schema: &Value, param: &str) -> Checked<Option<Value>> {
+    let Some(options) = get(schema, "oneOf") else {
+        return Ok(None);
+    };
+    let mut matching: Vec<(i64, Value)> = Vec::new();
+    let mut errors: Vec<Mismatch> = Vec::new();
+    for (index, (_, option)) in (0..).zip(entries(options)) {
+        let option = match (get(option, "type"), get(schema, "type")) {
+            (None, Some(ty)) => with_type(option, Some(ty)),
+            _ => option.clone(),
+        };
+        match validate_value_from_schema(value, &option, param) {
+            Ok(()) => matching.push((index, option)),
+            Err(Refusal(Some(error))) => errors.push((index, option, error)),
+            Err(refusal) => return Err(refusal),
+        }
+    }
+    match matching.as_slice() {
+        [] => Err(combining_error(value, param, &errors)),
+        [(_, one)] => Ok(Some(one.clone())),
+        _ => {
+            let positions = matching
+                .iter()
+                .map(|(index, _)| Value::Int(*index))
+                .collect();
+            let titles: Vec<String> = matching
+                .iter()
+                .filter_map(|(_, schema)| get(schema, "title"))
+                .map(|title| lossy(&title.to_php_string()))
+                .collect();
+            let message = if titles.len() == matching.len() {
+                format!(
+                    "{param} matches {}, but should match only one.",
+                    listed(&titles)
+                )
+            } else {
+                format!("{param} matches more than one of the expected formats.")
+            };
+            Err(Refusal(Some(RestError {
+                code: "rest_one_of_multiple_matches",
+                message,
+                data: object([("positions", crate::response::list(positions))]),
+            })))
+        }
+    }
+}
+
 /// `rest_validate_value_from_schema( $value, $schema, $param )`.
 pub fn validate_value_from_schema(value: &Value, schema: &Value, param: &str) -> Checked<()> {
     unported(schema)?;
+    let typed;
+    let schema = match one_matching(value, schema, param)? {
+        Some(one) if get(schema, "type").is_none() && get(&one, "type").is_some() => {
+            typed = with_type(schema, get(&one, "type"));
+            &typed
+        }
+        _ => schema,
+    };
     let ty = match resolve(value, schema) {
         Ok(ty) => ty,
         Err(types) => return invalid_type(param, &types),
@@ -566,13 +720,7 @@ fn not_in_enum(choices: &[(Key, Value)], param: &str) -> Checked<()> {
         .collect();
     let message = match shown.len() {
         1 => format!("{param} is not {}.", shown.concat()),
-        2 => format!("{param} is not one of {}.", shown.join(" and ")),
-        _ => {
-            let list = shown
-                .split_last()
-                .map(|(last, rest)| format!("{}, and {last}", rest.join(", ")));
-            format!("{param} is not one of {}.", list.unwrap_or_default())
-        }
+        _ => format!("{param} is not one of {}.", listed(&shown)),
     };
     invalid("rest_not_in_enum", message)
 }
@@ -615,6 +763,22 @@ pub(crate) fn prepare_value(value: &Value, schema: &Value, param: &str) -> Value
 /// `rest_sanitize_value_from_schema( $value, $schema, $param )`.
 pub fn sanitize_value_from_schema(value: &Value, schema: &Value, param: &str) -> Checked<Value> {
     unported(schema)?;
+    let (typed, sanitized);
+    let (value, schema) = match one_matching(value, schema, param)? {
+        Some(one) => {
+            // PHP goes on with an error, which arrays and objects sanitize as empty.
+            sanitized = sanitize_value_from_schema(value, &one, param).unwrap_or(Value::Null);
+            let schema = match get(schema, "type") {
+                Some(_) => schema,
+                None => {
+                    typed = with_type(schema, get(&one, "type"));
+                    &typed
+                }
+            };
+            (&sanitized, schema)
+        }
+        None => (value, schema),
+    };
     match resolve(value, schema) {
         Ok(ty) => sanitize_as(value, schema, &ty, param),
         Err(_) => Ok(Value::Null),

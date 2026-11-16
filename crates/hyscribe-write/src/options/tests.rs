@@ -143,20 +143,8 @@ async fn sets_transients() {
                     .await
                     .unwrap()
             );
-            assert!(
-                set_site_transient(write, "oracle", &text("v"), 0)
-                    .await
-                    .unwrap()
-            );
-            assert!(
-                set_site_transient(write, "oracle_expiring", &text("v"), 60)
-                    .await
-                    .unwrap()
-            );
             let expiry = lifetime(write, "_transient_timeout_oracle_expiring").await;
             assert!((3599..=3600).contains(&expiry), "{expiry}");
-            let expiry = lifetime(write, "_site_transient_timeout_oracle_expiring").await;
-            assert!((59..=60).contains(&expiry), "{expiry}");
         },
     )
     .await;
@@ -172,12 +160,6 @@ async fn updates_transients() {
             .await
             .unwrap();
         set_transient(write, "oracle_c", &text("one"), 0)
-            .await
-            .unwrap();
-        set_site_transient(write, "oracle_s", &text("one"), 60)
-            .await
-            .unwrap();
-        set_site_transient(write, "oracle_t", &text("one"), 0)
             .await
             .unwrap();
     };
@@ -197,20 +179,9 @@ async fn updates_transients() {
                 .await
                 .unwrap()
         );
-        assert!(
-            set_site_transient(write, "oracle_s", &text("two"), 120)
-                .await
-                .unwrap()
-        );
-        assert!(
-            set_site_transient(write, "oracle_t", &text("two"), 0)
-                .await
-                .unwrap()
-        );
         for (name, expected) in [
             ("_transient_timeout_oracle_b", 7200),
             ("_transient_timeout_oracle_c", 60),
-            ("_site_transient_timeout_oracle_s", 120),
         ] {
             let expiry = lifetime(write, name).await;
             assert!(
@@ -231,16 +202,11 @@ async fn deletes_transients() {
         set_transient(write, "oracle_b", &text("one"), 3600)
             .await
             .unwrap();
-        set_site_transient(write, "oracle_s", &text("one"), 60)
-            .await
-            .unwrap();
     };
     check("transient-delete", setup, async |write, ()| {
         assert!(delete_transient(write, "oracle_a").await.unwrap());
         assert!(delete_transient(write, "oracle_b").await.unwrap());
-        assert!(delete_site_transient(write, "oracle_s").await.unwrap());
         assert!(!delete_transient(write, "oracle_none").await.unwrap());
-        assert!(!delete_site_transient(write, "oracle_none").await.unwrap());
     })
     .await;
 }
@@ -316,9 +282,6 @@ async fn options_return_each_database_error() {
         set_transient(write, "oracle_b", &text("one"), 60)
             .await
             .unwrap();
-        set_site_transient(write, "oracle_s", &text("one"), 60)
-            .await
-            .unwrap();
     };
     fails_at_each_step(setup, async |write, ()| {
         update_option(write, "home", &text("http://127.0.0.1:8081"), None).await?;
@@ -330,10 +293,7 @@ async fn options_return_each_database_error() {
         set_transient(write, "oracle_n", &text("one"), 60).await?;
         set_transient(write, "oracle_a", &text("two"), 60).await?;
         set_transient(write, "oracle_b", &text("two"), 60).await?;
-        set_site_transient(write, "oracle_t", &text("one"), 60).await?;
-        set_site_transient(write, "oracle_s", &text("two"), 60).await?;
         delete_transient(write, "oracle_b").await?;
-        delete_site_transient(write, "oracle_s").await?;
         Ok(())
     })
     .await;

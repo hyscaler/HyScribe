@@ -18,7 +18,7 @@ fn texts<'a>(values: impl IntoIterator<Item = &'a String>) -> impl Iterator<Item
     values.into_iter().map(|value| Bind::Text(value.clone()))
 }
 
-fn ints(ids: &[u64]) -> impl Iterator<Item = Bind> + '_ {
+pub(crate) fn ints(ids: &[u64]) -> impl Iterator<Item = Bind> + '_ {
     ids.iter().copied().map(Bind::Int)
 }
 

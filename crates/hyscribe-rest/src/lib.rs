@@ -253,6 +253,12 @@ impl Context<'_> {
     pub(crate) fn rest_url(&self, path: &str) -> String {
         self.site.rest_url(path)
     }
+
+    /// `wp_timezone()`.
+    pub(crate) fn zone(&self) -> hyscribe_render::date::Zone {
+        let option = |name| self.option(name).unwrap_or_default();
+        hyscribe_render::date::site_zone(&option("timezone_string"), &option("gmt_offset"))
+    }
 }
 
 pub(crate) type Permission = fn(&Context, &Params) -> Result<(), RestError>;
@@ -352,8 +358,8 @@ pub fn written(site: &dyn Site, request: &Request, pending: Pending, outcome: Ou
 type Entries = Vec<(Key, Value)>;
 
 /// The request's body as `get_parameter_order()` reads it: the JSON body's
-/// parameters, `None` where it is not JSON PHP decodes, and a form body's,
-/// which a method other than POST reads itself.
+/// parameters, `None` for JSON PHP refuses or a multipart form, which only
+/// PHP reads, and a form body's, which a method other than POST reads itself.
 fn body_params(request: &Request, method: &str) -> (Option<Entries>, Entries) {
     let entries = |value: Value| match value {
         Value::Array(entries) => entries,
@@ -361,7 +367,12 @@ fn body_params(request: &Request, method: &str) -> (Option<Entries>, Entries) {
     };
     let kind = request::content_type(request.content_type);
     let empty = is_empty_string(request.body);
+    // A multipart form is read by PHP alone.
+    let multipart = request.method == "POST"
+        && !request.body.is_empty()
+        && kind.as_deref() == Some(b"multipart/form-data");
     let json = match &kind {
+        _ if multipart => None,
         Some(kind) if request::is_json(kind) && !empty => {
             hyscribe_phpser::json_decode(request.body).map(entries)
         }
@@ -452,10 +463,6 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
         })
     };
     let (json, post) = body_params(request, &method);
-    // A multipart form is read by PHP alone.
-    let unread = request.method == "POST"
-        && !request.body.is_empty()
-        && request::content_type(request.content_type).as_deref() == Some(b"multipart/form-data");
     let params = Params {
         json: json.clone().unwrap_or_default(),
         post: if body_method(&method) {
@@ -482,7 +489,7 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
             if verified.is_some() {
                 served.send("X-WP-Nonce", site.create_nonce());
             }
-            let readable = json.is_some() && !unread;
+            let readable = json.is_some();
             match dispatch(&context, (&method, route), (params, readable), resumed) {
                 Ok(response) => response,
                 Err(Halt::NotPorted) => return Answer::Served(Served::not_ported()),

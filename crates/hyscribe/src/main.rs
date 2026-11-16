@@ -15,12 +15,15 @@ fn main() -> ExitCode {
     let env = std::env::vars_os()
         .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
         .collect();
+    let stdin = std::io::stdin();
     ExitCode::from(hyscribe::run(hyscribe::Context {
         args: std::env::args_os().collect(),
         env,
         home,
         euid: hyscribe_service::effective_uid(),
         server: (exe, vec!["start".into()]),
+        input: &mut stdin.lock(),
+        terminal: Some(std::os::fd::AsFd::as_fd(&stdin)),
         out: &mut std::io::stdout(),
         err: &mut std::io::stderr(),
     }))

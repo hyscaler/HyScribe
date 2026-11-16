@@ -10,7 +10,7 @@
 
 use hyscribe_model::Post;
 use hyscribe_phpser::{Value, is_empty_string, lookup};
-use hyscribe_render::date::{Zone, format_unix, site_zone, stored_unix};
+use hyscribe_render::date::{Zone, format_unix, stored_unix};
 use hyscribe_render::rest::Rendering;
 
 use super::prepare::writes_or_unported;
@@ -216,12 +216,6 @@ fn status(context: &Context, kind: Kind, status: String) -> Result<String, RestE
     Err(context.forbidden("rest_cannot_publish", message))
 }
 
-/// The site's time zone.
-fn zone(context: &Context) -> Zone {
-    let option = |name| context.option(name).unwrap_or_default();
-    site_zone(&option("timezone_string"), &option("gmt_offset"))
-}
-
 /// `create_item()` and `update_item()` up to their writes, with
 /// `prepare_item_for_database()`.
 fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
@@ -319,7 +313,7 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
 /// The dates of `prepare_item_for_database()`: `date`, else `date_gmt`,
 /// where it changes the post's; either sent as null resets both.
 fn dates(context: &Context, params: &Params, existing: Option<&Post>, save: &mut Save) {
-    let zone = zone(context);
+    let zone = context.zone();
     let given = |name| params.get(name).filter(|date| !date.is_empty());
     let changed = match (given("date"), given("date_gmt")) {
         (Some(date), _) => Some(date_with_gmt(&date.to_php_string(), false, zone))

@@ -22,10 +22,13 @@ hyscribe-config.workspace = true
 hyscribe-db.workspace = true
 hyscribe-http.workspace = true
 hyscribe-service.workspace = true
+rustix = { version = "1.1", default-features = false, features = ["std", "termios"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync"] }
 
 [dev-dependencies]
 hyscribe-testkit.workspace = true
+rustix = { version = "1.1", default-features = false, features = ["std", "termios", "pty"] }
+sqlx = { version = "0.9", default-features = false, features = ["mysql", "runtime-tokio"] }
 tempfile = "3"
 
 [lints]

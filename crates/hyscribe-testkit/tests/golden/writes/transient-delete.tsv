@@ -1,18 +1,8 @@
 # The rows PHP WordPress writes for the action transient-delete (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 19:47:50 to 2026-11-14 19:47:50 UTC.
-# %wp_options:1% is 161.
-# %wp_options:2% is 162.
-# %wp_options:3% is 163.
-# %wp_options:4% is 164.
-# %wp_options:5% is 165.
-wp_options	_site_transient_oracle_s	-	autoload	off
-wp_options	_site_transient_oracle_s	-	option_id	%wp_options:5%
-wp_options	_site_transient_oracle_s	-	option_name	_site_transient_oracle_s
-wp_options	_site_transient_oracle_s	-	option_value	one
-wp_options	_site_transient_timeout_oracle_s	-	autoload	off
-wp_options	_site_transient_timeout_oracle_s	-	option_id	%wp_options:4%
-wp_options	_site_transient_timeout_oracle_s	-	option_name	_site_transient_timeout_oracle_s
-wp_options	_site_transient_timeout_oracle_s	-	option_value	%expiry%
+# %now% and %unix% stand for times from 2026-11-16 07:27:52 to 2026-11-16 07:27:52 UTC.
+# %wp_options:1% is 139.
+# %wp_options:2% is 140.
+# %wp_options:3% is 141.
 wp_options	_transient_oracle_a	-	autoload	on
 wp_options	_transient_oracle_a	-	option_id	%wp_options:1%
 wp_options	_transient_oracle_a	-	option_name	_transient_oracle_a

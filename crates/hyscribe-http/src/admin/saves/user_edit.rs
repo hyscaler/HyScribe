@@ -7,10 +7,9 @@
 
 use hyscribe_admin::actions::Asked;
 use hyscribe_admin::posts::Answer;
-use hyscribe_auth::caps::{CapPost, CapabilityData, User};
 use hyscribe_auth::sessions::Sessions;
 use hyscribe_config::Constants;
-use hyscribe_db::{DbError, Meta, Write};
+use hyscribe_db::{Meta, Write};
 use hyscribe_kses::{ALLOWED_PROTOCOLS, esc_url_raw, sanitize_key};
 use hyscribe_phpser::{
     Key, Maybe, Value, absint, add_query_arg, addslashes, is_empty_string, json_encode, lookup,
@@ -20,6 +19,7 @@ use hyscribe_render::formatting::{
     is_email, sanitize_text_field, sanitize_user, sanitize_user_strict,
 };
 use hyscribe_write::Error;
+use hyscribe_write::caps::Caps;
 use hyscribe_write::options::{add_metadata, get_metadata};
 use hyscribe_write::users::{
     UserData, get_password_reset_key, request_email_change, wp_insert_user, wp_update_user,
@@ -28,72 +28,6 @@ use hyscribe_write::users::{
 use super::screen::update_user_meta;
 use super::users::{can_promote, retrieve_password};
 use super::{Acting, Ajax, Saving, Stop, id_of, text};
-
-/// The current user's capabilities, read through the action's `Write`.
-struct Current {
-    id: u64,
-    prefix: String,
-    /// `{prefix}user_roles`.
-    roles: Option<Vec<u8>>,
-    /// The user's `{prefix}capabilities`.
-    caps: Option<Vec<u8>>,
-    constants: Constants,
-}
-
-impl Current {
-    async fn load(
-        write: &mut Write<'_>,
-        id: u64,
-        constants: Constants,
-    ) -> Result<Current, DbError> {
-        let prefix = write.prefix().to_string();
-        let roles = write.option_value(&format!("{prefix}user_roles")).await?;
-        let key = format!("{prefix}capabilities");
-        let meta = write.object_meta(Meta::User, id).await?;
-        let caps = meta.into_iter().find(|(name, _)| *name == key.as_bytes());
-        Ok(Current {
-            id,
-            prefix,
-            roles,
-            caps: caps.and_then(|(_, caps)| caps),
-            constants,
-        })
-    }
-
-    /// `current_user_can( $cap )`.
-    fn can(&self, cap: &str) -> bool {
-        User::load(self, &self.prefix, self.id).has_cap(self, cap, &[])
-    }
-}
-
-/// Only the roles, the current user's capabilities and the constants are read.
-impl CapabilityData for Current {
-    fn option(&self, _: &str) -> Option<Vec<u8>> {
-        self.roles.clone()
-    }
-    fn user_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        self.caps.clone()
-    }
-    /// Only the current user, who is, is asked for.
-    fn user_exists(&self, _: u64) -> bool {
-        true
-    }
-    fn post(&self, _: u64) -> Option<CapPost> {
-        None
-    }
-    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        None
-    }
-    fn comment_post(&self, _: u64) -> Option<u64> {
-        None
-    }
-    fn term_taxonomy(&self, _: u64) -> Option<String> {
-        None
-    }
-    fn constant(&self, name: &str) -> bool {
-        self.constants.defined(name)
-    }
-}
 
 /// What PHP cannot go on with, or shows again: not ported.
 fn unported(what: &'static str) -> Stop {
@@ -168,7 +102,7 @@ fn user_url(url: &[u8]) -> Vec<u8> {
 async fn edit_user(
     write: &mut Write<'_>,
     asked: &Asked<'_>,
-    (id, current): (u64, &Current),
+    (id, current): (u64, &Caps),
     email: Option<Vec<u8>>,
 ) -> Result<u64, Stop> {
     let update = id != 0;
@@ -185,7 +119,7 @@ async fn edit_user(
     }
     let pass = |name| php_trim(&posted(asked, name).unwrap_or_default()).to_vec();
     let (pass1, pass2) = (pass("pass1"), pass("pass2"));
-    if let Some(role) = posted(asked, "role").filter(|_| current.can("promote_users")) {
+    if let Some(role) = posted(asked, "role").filter(|_| current.can("promote_users", &[])) {
         let role = sanitize_text_field(&role);
         let roles = write
             .option_value(&format!("{}user_roles", write.prefix()))
@@ -281,7 +215,7 @@ pub(super) fn create<'a>(
     site: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
-        let current = Current::load(write, asked.user, site.constants()).await?;
+        let current = Caps::load(write, asked.user, None, site.constants()).await?;
         arrays_refused(asked)?;
         let email = posted(asked, "email").map(|email| stripslashes(&email));
         let id = edit_user(write, asked, (0, &current), email).await?;
@@ -290,7 +224,7 @@ pub(super) fn create<'a>(
         if lookup(asked.post, "send_user_notification").is_some() {
             get_password_reset_key(write, id).await?;
         }
-        Ok(Answer::Redirect(if current.can("list_users") {
+        Ok(Answer::Redirect(if current.can("list_users", &[]) {
             format!("users?update=add&id={id}")
         } else {
             "user-new?update=add".into()
@@ -338,7 +272,7 @@ async fn updated(
             email = Some(own);
         }
     }
-    let current = Current::load(write, asked.user, constants).await?;
+    let current = Caps::load(write, asked.user, None, constants).await?;
     let email = email.map(|email| stripslashes(&email));
     edit_user(write, asked, (id, &current), email).await?;
     let link = if id == asked.user {

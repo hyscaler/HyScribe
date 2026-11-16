@@ -7,6 +7,7 @@
 //! types, and what a default install never reaches, answer
 //! [`Error::Unported`], and the caller's action rolls back.
 
+use hyscribe_config::Constants;
 use hyscribe_db::{PostFields, Write};
 use hyscribe_phpser::Value;
 use hyscribe_render::formatting::sanitize_title;
@@ -45,6 +46,8 @@ pub struct Context {
     /// `current_user_can( 'unfiltered_html' )`: `kses_init()` leaves the
     /// post's fields unfiltered for such a user.
     pub unfiltered_html: bool,
+    /// The configuration's constants capability checks read.
+    pub constants: Constants,
     /// `time()`.
     pub now: i64,
 }

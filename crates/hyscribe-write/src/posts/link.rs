@@ -4,14 +4,14 @@
 //! `_transition_post_status()` give it: the front end's links over what
 //! the action reads of the post's category, author and parents.
 
-use hyscribe_auth::caps::{CapPost, CapabilityData, User};
-use hyscribe_db::{DbError, Meta, PostFields, Write};
+use hyscribe_db::{DbError, PostFields, Write};
 use hyscribe_model::Post;
 use hyscribe_phpser::Value;
 use hyscribe_render::link::{front_page, permalink as plain_link};
 use hyscribe_render::permalinks::{Permalinks, PostParts};
 
 use super::{Context, Result, site, truthy};
+use crate::caps::Caps;
 
 /// `get_permalink( $id )` of post `id`, saved as `post`.
 pub(super) async fn permalink(
@@ -65,84 +65,12 @@ async fn force_plain(
 ) -> Result<bool> {
     match post.status.as_str() {
         "publish" => Ok(false),
-        "private" => Ok(!Reader::read(write, ctx.user, id, post).await?.can_read()),
+        "private" => {
+            let caps = Caps::load(write, ctx.user, Some(id), ctx.constants).await?;
+            let id = Value::Int(i64::try_from(id).unwrap_or(0));
+            Ok(!caps.can("read_post", &[id]))
+        }
         _ => Ok(true),
-    }
-}
-
-/// What `current_user_can( 'read_post', $id )` reads, read before it asks.
-struct Reader {
-    prefix: String,
-    user: u64,
-    exists: bool,
-    roles: Option<Vec<u8>>,
-    caps: Option<Vec<u8>>,
-    post: CapPost,
-}
-
-impl Reader {
-    async fn read(write: &mut Write<'_>, user: u64, id: u64, post: &PostFields) -> Result<Reader> {
-        let prefix = write.prefix().to_string();
-        let exists = write.user(user).await?.is_some();
-        let roles = write.option_value(&format!("{prefix}user_roles")).await?;
-        let key = format!("{prefix}capabilities");
-        let caps = write.meta_value(Meta::User, user, &key).await?;
-        let post = CapPost {
-            id,
-            author: post.author,
-            status: post.status.clone(),
-            post_type: post.post_type.clone(),
-            parent: post.parent,
-        };
-        Ok(Reader {
-            prefix,
-            user,
-            exists,
-            roles,
-            caps,
-            post,
-        })
-    }
-
-    fn can_read(&self) -> bool {
-        let id = Value::Int(i64::try_from(self.post.id).unwrap_or(0));
-        User::load(self, &self.prefix, self.user).has_cap(self, "read_post", &[id])
-    }
-}
-
-/// `read_post` of a private post asks only for the roles, the user's
-/// capabilities and the post, so each is answered whatever its name.
-impl CapabilityData for Reader {
-    fn option(&self, _: &str) -> Option<Vec<u8>> {
-        self.roles.clone()
-    }
-
-    fn user_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        self.caps.clone()
-    }
-
-    fn user_exists(&self, _: u64) -> bool {
-        self.exists
-    }
-
-    fn post(&self, _: u64) -> Option<CapPost> {
-        Some(self.post.clone())
-    }
-
-    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        None
-    }
-
-    fn comment_post(&self, _: u64) -> Option<u64> {
-        None
-    }
-
-    fn term_taxonomy(&self, _: u64) -> Option<String> {
-        None
-    }
-
-    fn constant(&self, _: &str) -> bool {
-        false
     }
 }
 
@@ -206,6 +134,3 @@ async fn page_uri(write: &mut Write<'_>, id: u64, page: &PostFields) -> Result<S
     let uri: Vec<u8> = names.flat_map(|name| [&name[..], b"/"].concat()).collect();
     Ok(String::from_utf8_lossy(&[uri, page.name.clone()].concat()).into_owned())
 }
-
-#[cfg(test)]
-mod tests;

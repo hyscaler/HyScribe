@@ -532,7 +532,7 @@ pub(super) fn create_privacy_page<'a>(
         let ctx = Context {
             unfiltered_html: super::posts::unfiltered_html(write, asked.user, acting.constants())
                 .await?,
-            ..context(asked.user, &home, &text(&site))
+            ..context(asked.user, &home, &text(&site), acting.constants())
         };
         // A draft: `wp_insert_post()`'s status when none is given.
         let page = PostArgs {

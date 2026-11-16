@@ -6,8 +6,10 @@
 //! globals count them through a request.
 
 use hyscribe_model::Post;
+use hyscribe_phpser::{Key, Value};
 
 use crate::autop::wpautop;
+use crate::blocks::Block;
 use crate::content::replace_insecure_home_url;
 use crate::content_tags::wp_filter_content_tags;
 use crate::excerpt::EXCERPT_MORE;
@@ -43,6 +45,26 @@ impl<'a> Rendering<'a> {
         let rendered = renderer.content_filters(&rendered, !blocks, true);
         renderer.autop_restored |= blocks;
         rendered
+    }
+
+    /// `render_block()` of the block `name` with `attributes` and nothing
+    /// inside, as the block renderer builds it, with the post `post` the
+    /// global one.
+    pub fn render_block(
+        &mut self,
+        name: &str,
+        attributes: Vec<(Key, Value)>,
+        post: Option<u64>,
+    ) -> Vec<u8> {
+        self.renderer.context.post_id = post;
+        let block = Block {
+            name: Some(name.into()),
+            attrs: Some(attributes),
+            inner_blocks: Vec::new(),
+            inner_html: Vec::new(),
+            inner_content: Vec::new(),
+        };
+        self.renderer.block(&block)
     }
 
     /// The `get_the_excerpt` filters of `$post->post_excerpt`, with

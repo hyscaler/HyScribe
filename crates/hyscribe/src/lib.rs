@@ -261,6 +261,9 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
                     .with_proxy(config.server.behind_proxy)
                     .with_login_limits(config.login_limits)
                     .with_writer(writer);
+            let fetch = config.http_outbound.then(outbound);
+            let fetching = outbound_line(fetch.as_ref());
+            let site = site.with_fetch(fetch);
             // Logging in needs primary mode.
             let site = match config.mode {
                 Mode::Primary => site.with_sessions(Sessions::new(sessions_dir)),
@@ -278,6 +281,7 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
                 std::process::id(),
                 mode_name(config.mode),
             );
+            let _ = writeln!(out, "{fetching}");
             let _ = out.flush();
             hyscribe_http::serve(listener, std::sync::Arc::new(site), async move {
                 // The sender only goes away after sending.
@@ -319,6 +323,22 @@ async fn open_writer(
 }
 
 /// Formats an I/O failure with what was being done.
+/// The outbound client (ADR 0019) over the host's certificate store.
+fn outbound() -> hyscribe_fetch::Client {
+    let net = std::sync::Arc::new(hyscribe_fetch::System);
+    hyscribe_fetch::Client::new(hyscribe_fetch::host_roots(), net, std::sync::Arc::new(()))
+}
+
+/// What the start log says of outbound fetches: a host without a
+/// certificate store fetches nothing over HTTPS.
+fn outbound_line(client: Option<&hyscribe_fetch::Client>) -> &'static str {
+    match client {
+        None => "outbound fetches off",
+        Some(client) if client.has_roots() => "outbound fetches on",
+        Some(_) => "outbound fetches on over HTTP only: no certificate store was found",
+    }
+}
+
 fn failed(context: String) -> impl FnOnce(std::io::Error) -> String {
     move |err| format!("{context}: {err}")
 }

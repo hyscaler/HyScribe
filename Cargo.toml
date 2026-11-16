@@ -17,6 +17,7 @@ hyscribe-assets = { path = "crates/hyscribe-assets" }
 hyscribe-auth = { path = "crates/hyscribe-auth" }
 hyscribe-config = { path = "crates/hyscribe-config" }
 hyscribe-db = { path = "crates/hyscribe-db" }
+hyscribe-fetch = { path = "crates/hyscribe-fetch" }
 hyscribe-html = { path = "crates/hyscribe-html" }
 hyscribe-http = { path = "crates/hyscribe-http" }
 hyscribe-kses = { path = "crates/hyscribe-kses" }

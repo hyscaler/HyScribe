@@ -279,3 +279,10 @@ path = "fuzz_targets/text_diff.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "url_details"
+path = "fuzz_targets/url_details.rs"
+test = false
+doc = false
+bench = false

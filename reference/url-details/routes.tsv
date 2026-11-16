@@ -1,0 +1,19 @@
+# The test site url-details is recorded against: path, status, then the
+# file served from pages/ or the Location sent; any other path is 404.
+/page.html	200	page.html
+/quotes.html	200	quotes.html
+/nohead.html	200	nohead.html
+/bodyonly.html	200	bodyonly.html
+/entities.html	200	entities.html
+/zero.html	200	zero.html
+/big.html	200	big.html
+/agent	200	agent.html
+/empty	200	-
+/gone	410	page.html
+/redirect	302	/page.html
+/redirect-twice	301	/redirect
+/redirect-metadata	302	http://169.254.169.254/latest/meta-data/
+/redirect-loopback	307	http://127.0.0.1:8080/page.html
+/loop	302	/loop
+/cached	404	-
+/expired	200	quotes.html

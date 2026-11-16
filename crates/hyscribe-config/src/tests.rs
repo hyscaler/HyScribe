@@ -55,6 +55,7 @@ fn defaults_are_safe() {
             site_url: None,
             salts: Vec::new(),
             rest_public_users: true,
+            http_outbound: false,
             constants: Constants {
                 disallow_unfiltered_html: true,
                 allow_unfiltered_uploads: false,
@@ -139,6 +140,7 @@ fn reads_every_key() {
         ("AUTH_KEY", "a"),
         ("NONCE_SALT", "z"),
         ("REST_PUBLIC_USERS", "off"),
+        ("HTTP_OUTBOUND", "on"),
         ("LOGIN_LIMIT_ADDRESS", "1"),
         ("LOGIN_LIMIT_ACCOUNT", "1000"),
         ("LOGIN_LIMIT_WINDOW", "86400"),
@@ -169,14 +171,20 @@ fn reads_every_key() {
         ]
     );
     assert!(!config.rest_public_users);
+    assert!(config.http_outbound);
     let limits = LoginLimits {
         address: 1,
         account: 1000,
         window: 86_400,
     };
     assert_eq!(config.login_limits, limits);
-    let on = from_map(&with(&[("REST_PUBLIC_USERS", "on")])).unwrap();
+    let on = from_map(&with(&[
+        ("REST_PUBLIC_USERS", "on"),
+        ("HTTP_OUTBOUND", "off"),
+    ]))
+    .unwrap();
     assert!(on.rest_public_users);
+    assert!(!on.http_outbound);
 }
 
 #[test]
@@ -201,6 +209,7 @@ fn rejects_bad_values() {
         ("DB_READ_PASSWORD", "hunter3", "is set without DB_READ_USER"),
         ("MODE", "write", "must be shadow or primary"),
         ("REST_PUBLIC_USERS", "true", "must be on or off"),
+        ("HTTP_OUTBOUND", "yes", "must be on or off"),
         (
             "LOGIN_LIMIT_ADDRESS",
             "0",

@@ -632,3 +632,16 @@ fn the_writer_s_refusals_are_logged() {
     assert!(out.contains("missing_options"), "{out}");
     assert_eq!(out.lines().count(), 1, "{out}");
 }
+
+#[test]
+fn the_start_log_says_whether_fetches_are_on() {
+    assert_eq!(outbound_line(None), "outbound fetches off");
+    assert_eq!(outbound_line(Some(&outbound())), "outbound fetches on");
+    let net = std::sync::Arc::new(hyscribe_fetch::System);
+    let bare = hyscribe_fetch::Client::new(
+        hyscribe_fetch::RootCertStore::empty(),
+        net,
+        std::sync::Arc::new(()),
+    );
+    assert!(outbound_line(Some(&bare)).ends_with("no certificate store was found"));
+}

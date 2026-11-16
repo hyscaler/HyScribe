@@ -723,6 +723,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyscribe-mail"
+version = "0.1.0"
+dependencies = [
+ "hyscribe-kses",
+ "hyscribe-phpser",
+ "hyscribe-render",
+ "hyscribe-testkit",
+]
+
+[[package]]
 name = "hyscribe-model"
 version = "0.1.0"
 

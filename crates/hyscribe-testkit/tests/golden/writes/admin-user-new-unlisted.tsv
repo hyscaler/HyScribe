@@ -1,36 +1,36 @@
 # The rows PHP WordPress writes for the action admin-user-new-unlisted (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-15 09:55:04 to 2026-11-15 09:55:04 UTC.
+# %now% and %unix% stand for times from 2026-11-16 07:08:10 to 2026-11-16 07:08:10 UTC.
 # %wp_users:1% is 9.
 # %wp_users:2% is 10.
-# %wp_usermeta:1% is 103.
-# %wp_usermeta:2% is 104.
-# %wp_usermeta:3% is 105.
-# %wp_usermeta:4% is 106.
-# %wp_usermeta:5% is 107.
-# %wp_usermeta:6% is 108.
-# %wp_usermeta:7% is 109.
-# %wp_usermeta:8% is 110.
-# %wp_usermeta:9% is 111.
-# %wp_usermeta:10% is 112.
-# %wp_usermeta:11% is 113.
-# %wp_usermeta:12% is 114.
-# %wp_usermeta:13% is 115.
-# %wp_usermeta:14% is 116.
-# %wp_usermeta:15% is 117.
-# %wp_usermeta:16% is 118.
-# %wp_usermeta:17% is 119.
-# %wp_usermeta:18% is 120.
-# %wp_usermeta:19% is 121.
-# %wp_usermeta:20% is 122.
-# %wp_usermeta:21% is 123.
-# %wp_usermeta:22% is 124.
-# %wp_usermeta:23% is 125.
-# %wp_usermeta:24% is 126.
-# %wp_usermeta:25% is 127.
-# %wp_usermeta:26% is 128.
-# %wp_usermeta:27% is 129.
-# %wp_usermeta:28% is 130.
-# %wp_usermeta:29% is 131.
+# %wp_usermeta:1% is 104.
+# %wp_usermeta:2% is 105.
+# %wp_usermeta:3% is 106.
+# %wp_usermeta:4% is 107.
+# %wp_usermeta:5% is 108.
+# %wp_usermeta:6% is 109.
+# %wp_usermeta:7% is 110.
+# %wp_usermeta:8% is 111.
+# %wp_usermeta:9% is 112.
+# %wp_usermeta:10% is 113.
+# %wp_usermeta:11% is 114.
+# %wp_usermeta:12% is 115.
+# %wp_usermeta:13% is 116.
+# %wp_usermeta:14% is 117.
+# %wp_usermeta:15% is 118.
+# %wp_usermeta:16% is 119.
+# %wp_usermeta:17% is 120.
+# %wp_usermeta:18% is 121.
+# %wp_usermeta:19% is 122.
+# %wp_usermeta:20% is 123.
+# %wp_usermeta:21% is 124.
+# %wp_usermeta:22% is 125.
+# %wp_usermeta:23% is 126.
+# %wp_usermeta:24% is 127.
+# %wp_usermeta:25% is 128.
+# %wp_usermeta:26% is 129.
+# %wp_usermeta:27% is 130.
+# %wp_usermeta:28% is 131.
+# %wp_usermeta:29% is 132.
 wp_options	user_count	~	option_value	2	3
 wp_usermeta	%wp_usermeta:15%	+	meta_key	nickname
 wp_usermeta	%wp_usermeta:15%	+	meta_value	oracle-created

@@ -6,11 +6,11 @@
 
 use hyscribe_admin::actions::{Asked, action};
 use hyscribe_admin::posts::Answer;
-use hyscribe_auth::caps::{CapPost, CapabilityData, User};
 use hyscribe_config::Constants;
 use hyscribe_db::{DbError, Meta, PostFields, Write};
 use hyscribe_phpser::{Key, Value, absint, add_query_arg, addslashes, lookup, remove_query_arg};
 use hyscribe_render::date::{Zone, format_unix, stored_unix};
+use hyscribe_write::caps::Caps;
 use hyscribe_write::options::update_metadata;
 use hyscribe_write::posts::{
     Context, PostArgs, stick_post, unstick_post, wp_checkdate, wp_delete_post, wp_trash_post,
@@ -111,117 +111,6 @@ const FORMATS: [&str; 9] = [
 /// `add_query_arg()`'s arguments.
 type QueryArgs<'a> = [(&'a [u8], Option<&'a [u8]>)];
 
-/// What `current_user_can()` reads, as it is now in the action: the
-/// options `map_meta_cap()` reads, the user's capabilities, one post and
-/// the configuration's constants.
-struct Caps {
-    prefix: String,
-    options: Vec<(String, Vec<u8>)>,
-    user: u64,
-    exists: bool,
-    capabilities: Option<Vec<u8>>,
-    /// The post and its trashed status, if loaded.
-    post: Option<(CapPost, Option<Vec<u8>>)>,
-    constants: Constants,
-}
-
-impl Caps {
-    async fn load(
-        write: &mut Write<'_>,
-        user: u64,
-        post: Option<u64>,
-        constants: Constants,
-    ) -> Result<Caps, DbError> {
-        let prefix = write.prefix().to_string();
-        let mut options = Vec::new();
-        let roles = format!("{prefix}user_roles");
-        for name in [
-            roles.as_str(),
-            "page_for_posts",
-            "page_on_front",
-            "wp_page_for_privacy_policy",
-        ] {
-            let value = write.option_value(name).await?.unwrap_or_default();
-            options.push((name.to_string(), value));
-        }
-        let exists = write.user(user).await?.is_some();
-        let key = format!("{prefix}capabilities");
-        let capabilities = write.meta_value(Meta::User, user, &key).await?;
-        let mut loaded = None;
-        if let Some((id, Some(post))) = match post {
-            Some(id) => Some((id, write.post(id).await?)),
-            None => None,
-        } {
-            let trashed = write
-                .meta_value(Meta::Post, id, "_wp_trash_meta_status")
-                .await?;
-            let post = CapPost {
-                id,
-                author: post.author,
-                status: post.status,
-                post_type: post.post_type,
-                parent: post.parent,
-            };
-            loaded = Some((post, trashed));
-        }
-        Ok(Caps {
-            prefix,
-            options,
-            user,
-            exists,
-            capabilities,
-            post: loaded,
-            constants,
-        })
-    }
-
-    /// `current_user_can( $cap, ...$args )`.
-    fn can(&self, cap: &str, args: &[Value]) -> bool {
-        User::load(self, &self.prefix, self.user).has_cap(self, cap, args)
-    }
-
-    /// The capability `name` of posts of `post_type`, as `$ptype->cap` names it.
-    fn can_type(&self, name: &str, post_type: &str) -> bool {
-        let cap = match post_type {
-            "page" => name.replace("posts", "pages"),
-            _ => name.to_string(),
-        };
-        self.can(&cap, &[])
-    }
-}
-
-impl CapabilityData for Caps {
-    fn option(&self, name: &str) -> Option<Vec<u8>> {
-        let found = self.options.iter().find(|(option, _)| option == name);
-        found.map(|(_, value)| value.clone())
-    }
-    /// The only user meta read is the user's own capabilities.
-    fn user_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        self.capabilities.clone()
-    }
-    fn user_exists(&self, _: u64) -> bool {
-        self.exists
-    }
-    /// The post loaded: no other, a revision's parent in particular.
-    fn post(&self, id: u64) -> Option<CapPost> {
-        let found = self.post.as_ref().filter(|(post, _)| post.id == id);
-        found.map(|(post, _)| post.clone())
-    }
-    /// The only post meta read is `_wp_trash_meta_status`.
-    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        self.post.as_ref().and_then(|(_, trashed)| trashed.clone())
-    }
-    fn comment_post(&self, _: u64) -> Option<u64> {
-        None
-    }
-    fn term_taxonomy(&self, _: u64) -> Option<String> {
-        None
-    }
-    fn constant(&self, name: &str) -> bool {
-        self.constants.defined(name)
-    }
-}
-
 /// `str_contains( $url, $file )`, for hs-admin's path of `file` too.
 fn mentions(url: &[u8], file: &str) -> bool {
     let has = |part: &[u8]| url.windows(part.len()).any(|window| window == part);
@@ -270,7 +159,12 @@ fn context(asked: &Asked, site: &dyn Acting, (caps, post_type): (&Caps, &str)) -
     Context {
         can_publish: caps.can_type("publish_posts", post_type),
         unfiltered_html: caps.can("unfiltered_html", &[]),
-        ..super::dashboard::context(asked.user, asked.home, &site.admin_url(""))
+        ..super::dashboard::context(
+            asked.user,
+            asked.home,
+            &site.admin_url(""),
+            site.constants(),
+        )
     }
 }
 
@@ -412,7 +306,7 @@ fn with_counts(names: &[&[u8]], counts: impl IntoIterator<Item = usize>, url: &[
 async fn bulk_write(
     write: &mut Write<'_>,
     asked: &Asked<'_>,
-    (ctx, doaction, constants): (&Context, &[u8], Constants),
+    (ctx, doaction): (&Context, &[u8]),
     ids: &[Value],
     sendback: &[u8],
 ) -> Result<Vec<u8>, Stop> {
@@ -437,7 +331,7 @@ async fn bulk_write(
     let (mut count, mut skipped) = (0, 0);
     for id in ids {
         let post = id.is_numeric().then(|| u64::try_from(id.to_int()).ok());
-        let caps = Caps::load(write, asked.user, post.flatten(), constants).await?;
+        let caps = Caps::load(write, asked.user, post.flatten(), ctx.constants).await?;
         if !caps.can("delete_post", std::slice::from_ref(id)) {
             return Err(Stop::Died(Answer::Died(denied)));
         }
@@ -517,7 +411,7 @@ pub(super) fn bulk<'a>(
             }
             b"trash" | b"untrash" | b"delete" | b"delete_all" => {
                 let ctx = context(asked, site, (&caps, post_type));
-                let acting = (&ctx, &doaction[..], caps.constants);
+                let acting = (&ctx, &doaction[..]);
                 sendback = bulk_write(write, asked, acting, &ids, &sendback).await?;
             }
             _ => {}

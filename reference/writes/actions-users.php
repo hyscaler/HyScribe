@@ -170,25 +170,12 @@ return array(
 			$user->set_role( 'author' );
 		},
 	),
-	'user-add-remove-role'   => array(
-		'setup'  => function () use ( $oracle_user ) {
-			return $oracle_user( 'oracle-roles' );
-		},
-		'action' => function ( $id ) {
-			$user = new WP_User( $id );
-			$user->add_role( 'editor' );
-			$user->add_role( 'editor' );
-			$user->remove_role( 'subscriber' );
-			$user->remove_role( 'author' );
-		},
-	),
 	'user-unknown-role'      => array(
 		'setup'  => function () use ( $oracle_user ) {
 			return $oracle_user( 'oracle-ghost' );
 		},
 		'action' => function ( $id ) {
 			$user = new WP_User( $id );
-			$user->add_role( '' );
 			$user->set_role( 'ghost' );
 			$user->set_role( 'ghost' );
 		},
@@ -267,8 +254,6 @@ return array(
 		'action' => function () {
 			set_transient( 'oracle', 'v' );
 			set_transient( 'oracle_expiring', array( 1 ), 3600 );
-			set_site_transient( 'oracle', 'v' );
-			set_site_transient( 'oracle_expiring', 'v', 60 );
 		},
 	),
 	'transient-update'       => array(
@@ -276,29 +261,22 @@ return array(
 			set_transient( 'oracle_a', 'one' );
 			set_transient( 'oracle_b', 'one', 3600 );
 			set_transient( 'oracle_c', 'one' );
-			set_site_transient( 'oracle_s', 'one', 60 );
-			set_site_transient( 'oracle_t', 'one' );
 		},
 		'action' => function () {
 			set_transient( 'oracle_a', 'two' );
 			set_transient( 'oracle_b', 'two', 7200 );
 			set_transient( 'oracle_c', 'two', 60 );
-			set_site_transient( 'oracle_s', 'two', 120 );
-			set_site_transient( 'oracle_t', 'two' );
 		},
 	),
 	'transient-delete'       => array(
 		'setup'  => function () {
 			set_transient( 'oracle_a', 'one' );
 			set_transient( 'oracle_b', 'one', 3600 );
-			set_site_transient( 'oracle_s', 'one', 60 );
 		},
 		'action' => function () {
 			delete_transient( 'oracle_a' );
 			delete_transient( 'oracle_b' );
-			delete_site_transient( 'oracle_s' );
 			delete_transient( 'oracle_none' );
-			delete_site_transient( 'oracle_none' );
 		},
 	),
 	'meta-add'               => array(

@@ -1,7 +1,7 @@
 # The rows PHP WordPress writes for the action admin-options-adminhash (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-15 10:12:05 to 2026-11-15 10:12:05 UTC.
-# %wp_options:1% is 152.
-# %wp_options:2% is 153.
+# %now% and %unix% stand for times from 2026-11-16 07:08:52 to 2026-11-16 07:08:52 UTC.
+# %wp_options:1% is 170.
+# %wp_options:2% is 171.
 wp_options	admin_email	~	option_value	admin@default-install.test	new@example.test
 wp_options	adminhash	-	autoload	off
 wp_options	adminhash	-	option_id	%wp_options:1%

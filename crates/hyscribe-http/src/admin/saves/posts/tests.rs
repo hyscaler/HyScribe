@@ -16,7 +16,6 @@ use super::*;
 use crate::admin::saves::tests::unread::Unread;
 use crate::admin::saves::tests::{SITE, acted, asked, fields, turn, writer};
 use crate::admin::saves::{Ajax, ajax_handler, handler};
-use hyscribe_auth::caps::CapabilityData;
 
 /// What `screen`'s handler answers `user`'s `query` and `body` on a site
 /// with `constants`, as one action on `conn` once every statement budget
@@ -57,7 +56,7 @@ async fn answered(
 fn admin() -> Context {
     Context {
         can_publish: true,
-        ..crate::admin::saves::dashboard::context(1, SITE, SITE)
+        ..crate::admin::saves::dashboard::context(1, SITE, SITE, Default::default())
     }
 }
 
@@ -1026,25 +1025,6 @@ async fn unfiltered_html_follows_the_constants() {
         found.push(unfiltered_html(&mut write, user, constants).await.unwrap());
     }
     assert_eq!(found, [false, true, false]);
-}
-
-/// The capabilities read only the options, user, post and constants they load.
-#[test]
-fn caps_read_what_they_load() {
-    let mut caps = Caps {
-        prefix: "wp_".into(),
-        options: Vec::new(),
-        user: 1,
-        exists: true,
-        capabilities: None,
-        post: None,
-        constants: Constants::default(),
-    };
-    assert_eq!(caps.comment_post(1), None);
-    assert_eq!(caps.term_taxonomy(1), None);
-    assert!(!caps.constant("MULTISITE") && caps.constant("DISALLOW_UNFILTERED_HTML"));
-    caps.constants.disallow_unfiltered_html = false;
-    assert!(!caps.constant("DISALLOW_UNFILTERED_HTML"));
 }
 
 /// What Quick Edit and Bulk Edit read when a field is left out or odd.

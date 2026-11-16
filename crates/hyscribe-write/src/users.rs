@@ -21,7 +21,7 @@ use crate::{Error, MYSQL, name_filters, now, wp_filter_kses};
 
 mod roles;
 
-pub use roles::set_role;
+pub use roles::{add_role, set_role};
 
 /// The post types whose posts `wp_delete_user()` deletes with their author:
 /// those with `delete_with_user`, or with it unset and supporting authors.

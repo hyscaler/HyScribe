@@ -14,6 +14,7 @@ use hyscribe_phpser::addslashes;
 use hyscribe_render::date::Zone;
 use hyscribe_rest::{
     CommentSave, Outcome, Pending, Plan, Request, Save, Served, Setting, SettingsSave, TermSave,
+    UserSave,
 };
 use hyscribe_write::Error;
 use hyscribe_write::comments::{
@@ -32,6 +33,7 @@ use hyscribe_write::terms::{
     Deletion, Taxonomy, TermArgs, TermError, TermRef, wp_delete_term, wp_insert_term,
     wp_set_object_terms, wp_update_term,
 };
+use hyscribe_write::users::{UserData, add_role, wp_delete_user, wp_insert_user, wp_update_user};
 use tokio::runtime::Handle;
 
 use axum::response::Response;
@@ -160,7 +162,47 @@ async fn written(write: &mut Write<'_>, plan: &Plan, ctx: &Context) -> Result<Ou
             let deleted = delete_comment(write, comments_context(ctx), *id, true).await?;
             Ok(done(deleted, *id))
         }
+        hyscribe_rest::Write::User(save) => user_saved(write, save).await,
+        hyscribe_rest::Write::DeleteUser(id, reassign) => {
+            Ok(done(wp_delete_user(write, *id, *reassign, ctx).await?, *id))
+        }
     }
+}
+
+/// `create_item()` or `update_item()` of a user from `wp_insert_user()` or
+/// `wp_update_user()` on, its fields slashed as `wp_slash()` gives them,
+/// then each role added; PHP's refusals by their codes.
+async fn user_saved(write: &mut Write<'_>, save: &UserSave) -> Result<Outcome, Error> {
+    let slashed = |field: &Option<Vec<u8>>| field.as_deref().map(addslashes);
+    let data = UserData {
+        id: save.id,
+        user_login: slashed(&save.login),
+        user_pass: slashed(&save.pass),
+        user_email: slashed(&save.email),
+        display_name: slashed(&save.display_name),
+        first_name: slashed(&save.first_name),
+        last_name: slashed(&save.last_name),
+        nickname: slashed(&save.nickname),
+        user_nicename: slashed(&save.nicename),
+        description: slashed(&save.description),
+        user_url: slashed(&save.url),
+        locale: slashed(&save.locale),
+        role: save.roles.as_ref().map(|_| Vec::new()),
+        ..UserData::default()
+    };
+    let saved = match save.id {
+        0 => wp_insert_user(write, &data).await,
+        _ => wp_update_user(write, &data).await,
+    };
+    let id = match saved {
+        Ok(id) => id,
+        Err(Error::Refused(code)) => return Ok(Outcome::Refused(code)),
+        Err(err) => return Err(err),
+    };
+    for role in save.roles.iter().flatten() {
+        add_role(write, id, role).await?;
+    }
+    Ok(Outcome::Written(id))
 }
 
 /// The comment functions' context: the request's time and `home_url()`.

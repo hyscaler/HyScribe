@@ -380,6 +380,30 @@ async fn comment_writes_match_php() {
     assert_eq!(replay_writes(golden, state, &unported).await, 6 * 37);
 }
 
+/// PHP's answers to the users' writes, as [`post_writes_match_php`]
+/// replays them: `meta` and a password of one's own answer 501.
+#[tokio::test(flavor = "multi_thread")]
+async fn user_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/user-writes.tsv");
+    let logged_in = [
+        "administrator",
+        "editor",
+        "author",
+        "contributor",
+        "subscriber",
+    ];
+    let unported = [
+        (
+            r#"{"username":"meta","email":"meta@example.test","password":"pw","meta":{}}"#,
+            &[][..],
+        ),
+        (r#"{"meta":{"persisted_preferences":{}}}"#, &[][..]),
+        (r#"{"password":"my-new-secret"}"#, &logged_in[..]),
+        (r#"{"password":"new-secret"}"#, &["author"][..]),
+    ];
+    assert_eq!(replay_writes(golden, "", &unported).await, 6 * 33);
+}
+
 /// PHP's answers to the settings' writes, as [`post_writes_match_php`]
 /// replays them.
 #[tokio::test(flavor = "multi_thread")]
@@ -420,6 +444,73 @@ async fn comment_writes_are_php_s() {
         ),
     ];
     oracle_writes(&site, &writes).await;
+}
+
+/// The users' writes leave the rows PHP's leave; the update and delete
+/// are of an author the setup adds, the delete's post passed to user 1.
+#[tokio::test(flavor = "multi_thread")]
+async fn user_writes_are_php_s() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let create = (
+        "rest-users-create",
+        "POST",
+        "/?rest_route=/wp/v2/users",
+        r#"{"username":"newbie","email":"newbie@example.test","password":"secret-pass","name":"New Bie","first_name":"New","description":"<b>Hi</b><script>x()</script>","slug":"New Bie","roles":["editor","author"]}"#,
+    );
+    oracle_writes(&site, &[create]).await;
+    let writer = Writer::open(&fixture_database(), Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    // The oracle's author, the author of post 1 for the delete.
+    let author = async |conn: &mut hyscribe_db::Connection, post: bool| {
+        let mut write = writer.begin_on(conn).await.unwrap();
+        let some = |text: &str| Some(text.as_bytes().to_vec());
+        let data = hyscribe_write::users::UserData {
+            user_login: some("oracle-author"),
+            user_pass: some("A pass phrase"),
+            user_email: some("oracle-author@example.test"),
+            role: some("author"),
+            ..hyscribe_write::users::UserData::default()
+        };
+        let id = hyscribe_write::users::wp_insert_user(&mut write, &data);
+        let id = id.await.unwrap();
+        write.commit().await.unwrap();
+        if post {
+            let author = sqlx::query("UPDATE wp_posts SET post_author = ? WHERE ID = 1").bind(id);
+            author.execute(&mut *conn).await.unwrap();
+        }
+        Ok::<_, String>(id)
+    };
+    let pending = planned(&site, "PUT", "/?rest_route=/wp/v2/categories/1", "{}").await;
+    let some = |text: &str| Some(text.as_bytes().to_vec());
+    let update = |id| hyscribe_rest::UserSave {
+        id,
+        display_name: some("Author Renamed"),
+        nickname: some("Nick"),
+        email: some("renamed@example.test"),
+        url: some("https://a.example.test"),
+        description: some("Bio <em>here</em>"),
+        pass: some("new-secret"),
+        roles: Some(vec![b"subscriber".to_vec()]),
+        ..hyscribe_rest::UserSave::default()
+    };
+    for (golden, post) in [("rest-users-update", false), ("rest-users-delete", true)] {
+        let mut plan = pending.plan.clone();
+        let action = async |conn: &mut hyscribe_db::Connection, id| {
+            plan.write = match post {
+                false => hyscribe_rest::Write::User(Box::new(update(id))),
+                true => hyscribe_rest::Write::DeleteUser(id, Some(1)),
+            };
+            let ctx = crate::rest::writes::context(&site, &plan, now());
+            assert_eq!(acted(conn, &plan, &ctx).await, Outcome::Written(id));
+            Ok(())
+        };
+        let setup = async |conn: &mut hyscribe_db::Connection| author(conn, post).await;
+        let report = check_writes(&fixture_database(), golden, setup, action).await;
+        report.unwrap();
+    }
 }
 
 /// The terms' and settings' writes leave the rows PHP's leave.

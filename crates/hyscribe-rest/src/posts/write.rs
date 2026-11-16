@@ -87,6 +87,10 @@ pub enum Write {
     TrashComment(u64),
     /// `wp_delete_comment( $id, true )`.
     DeleteComment(u64),
+    /// Creates or updates a user.
+    User(Box<crate::users::write::UserSave>),
+    /// `wp_delete_user( $id, $reassign )`.
+    DeleteUser(u64, Option<u64>),
     /// `update_option()` of each setting's option, `delete_option()` for
     /// none.
     Settings(Box<crate::settings::SettingsSave>),

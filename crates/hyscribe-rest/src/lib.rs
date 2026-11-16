@@ -46,6 +46,7 @@ pub use comments::write::CommentSave;
 pub use posts::write::{Outcome, Plan, Save, Write};
 pub use settings::{Setting, SettingsSave};
 pub use terms::write::TermSave;
+pub use users::write::UserSave;
 
 /// What the REST API reads from the site.
 pub trait Site {
@@ -311,6 +312,7 @@ fn writing(regex: &str, index: usize) -> Option<posts::write::Writing> {
         .or_else(|| terms::write::writing(regex, index))
         .or_else(|| settings::writing(regex, index))
         .or_else(|| comments::write::writing(regex, index))
+        .or_else(|| users::write::writing(regex, index))
 }
 
 /// `maybe_unserialize()` of a stored option or meta value: `false` where

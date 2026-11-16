@@ -62,6 +62,10 @@ ajax-inline-save	POST	admin-ajax.php	action=inline-save&post_ID=801&post_type=po
 ajax-inline-save-page	POST	admin-ajax.php	action=inline-save&post_ID=2&post_type=page&post_title=Renamed&screen=edit-page	inlineeditnonce	_inline_edit
 ajax-delete-comment	POST	admin-ajax.php	action=delete-comment&id=1&trash=1	delete-comment_1	_ajax_nonce
 ajax-dim-comment	POST	admin-ajax.php	action=dim-comment&id=1	approve-comment_1	_ajax_nonce
+ajax-edit-comment	POST	admin-ajax.php	action=edit-comment&comment_ID=1&comment_post_ID=1&content=Edited&checkbox=1	replyto-comment	_ajax_nonce-replyto-comment
+ajax-replyto-comment	POST	admin-ajax.php	action=replyto-comment&comment_ID=1&comment_post_ID=1&content=Reply	replyto-comment	_ajax_nonce-replyto-comment
+ajax-replyto-other	POST	admin-ajax.php	action=replyto-comment&comment_post_ID=801&content=Reply	replyto-comment	_ajax_nonce-replyto-comment
+ajax-replyto-missing	POST	admin-ajax.php	action=replyto-comment&comment_post_ID=999&content=Reply	replyto-comment	_ajax_nonce-replyto-comment
 ajax-closed-postboxes	POST	admin-ajax.php	action=closed-postboxes&page=dashboard&closed=dashboard_activity	closedpostboxes	closedpostboxesnonce
 ajax-closed-postboxes-page	POST	admin-ajax.php	action=closed-postboxes&page=Dash+board&closed=dashboard_activity	closedpostboxes	closedpostboxesnonce
 ajax-hidden-columns	POST	admin-ajax.php	action=hidden-columns&page=edit-post&hidden=tags	screen-options-nonce	screenoptionnonce

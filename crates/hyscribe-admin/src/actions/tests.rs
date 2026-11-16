@@ -146,6 +146,8 @@ fn check(
         home: HOME,
         user: 1,
         now: 0,
+        ip: b"",
+        agent: b"",
     };
     let screen = path.strip_suffix(".php").unwrap();
     if screen == "admin-ajax" {
@@ -295,6 +297,8 @@ fn actions_are_named_as_php_names_them() {
             home: HOME,
             user: 1,
             now: 0,
+            ip: b"",
+            agent: b"",
         };
         assert_eq!(
             action(screen, &asked),
@@ -668,6 +672,8 @@ fn ajax_shell() {
             home: HOME,
             user: 1,
             now: 0,
+            ip: b"",
+            agent: b"",
         };
         admin_ajax(site, &asked).map_or_else(|refusal| refusal.status, |()| 501)
     };
@@ -851,6 +857,8 @@ fn quick_drafts_and_screen_options() {
             home: HOME,
             user: 1,
             now: 0,
+            ip: b"",
+            agent: b"",
         };
         assert_eq!(action(screen, &asked), expected.as_bytes(), "{screen}");
     }

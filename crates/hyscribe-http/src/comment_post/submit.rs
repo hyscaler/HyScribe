@@ -193,13 +193,21 @@ pub(super) async fn submit(
         ..NewComment::default()
     };
     let saved = new_comment(write, poster.context, comment, poster.commenter).await?;
-    Ok(saved.map_err(|refused| match refused {
-        Refused::Duplicate => Failure::Died(
+    Ok(saved.map_err(|refused| {
+        let (status, message) = refusal(refused);
+        Failure::Died(status, message)
+    }))
+}
+
+/// `wp_allow_comment()`'s `WP_Error` for `refused`: its status and message.
+pub(crate) fn refusal(refused: Refused) -> (u16, &'static str) {
+    match refused {
+        Refused::Duplicate => (
             409,
             "Duplicate comment detected; it looks as though you&#8217;ve already said that!",
         ),
-        Refused::Flood => Failure::Died(429, "You are posting comments too quickly. Slow down."),
-    }))
+        Refused::Flood => (429, "You are posting comments too quickly. Slow down."),
+    }
 }
 
 /// `get_option()` of each of `names`, read in the action: empty for a

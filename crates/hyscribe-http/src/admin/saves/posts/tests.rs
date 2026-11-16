@@ -8,27 +8,15 @@ use std::sync::Arc;
 
 use hyscribe_config::Mode;
 use hyscribe_db::{Connection, Writer};
-use hyscribe_phpser::parse_str;
 use hyscribe_testkit::fixture_database;
 use hyscribe_testkit::writes::check_writes;
 use hyscribe_write::users::{UserData, wp_insert_user};
 
 use super::*;
-use crate::admin::saves::tests::turn;
-use crate::admin::saves::{Acting, Ajax, act, ajax_handler, handler};
-use hyscribe_admin::actions::ActionSite;
+use crate::admin::saves::tests::unread::Unread;
+use crate::admin::saves::tests::{SITE, acted, asked, fields, turn, writer};
+use crate::admin::saves::{Ajax, ajax_handler, handler};
 use hyscribe_auth::caps::CapabilityData;
-
-const SITE: &str = "http://127.0.0.1:8081";
-
-async fn writer() -> Writer {
-    let writer = Writer::open(&fixture_database(), Mode::Primary).await;
-    writer.unwrap().unwrap()
-}
-
-fn fields(query: &str) -> Vec<(Key, Value)> {
-    parse_str(query.as_bytes()).as_array().unwrap().to_vec()
-}
 
 /// What `screen`'s handler answers `user`'s `query` and `body` on a site
 /// with `constants`, as one action on `conn` once every statement budget
@@ -42,126 +30,34 @@ async fn answered(
     let (get, post) = (fields(query), fields(body));
     let uri = format!("/hs-admin/{screen}?{query}");
     let asked = Asked {
-        get: &get,
-        post: &post,
-        referer: None,
-        uri: uri.as_bytes(),
-        home: SITE,
         user,
         now: crate::now(),
+        ..asked(&uri, &get, &post)
     };
     let action = action(screen, &asked);
-    let mut budget = 0;
-    loop {
-        let mut write = writer.begin_on(conn).await;
-        if let Ok(write) = &mut write {
-            write.fail_after(budget);
-        }
+    let answer = match screen {
         // Quick Edit's answers as pages: its text, or nothing for its row.
-        let answer = match screen {
-            "admin-ajax" => {
-                let saved = act(
-                    write,
-                    ajax_handler(&action).unwrap(),
-                    &asked,
-                    &Linked(constants),
-                )
-                .await;
-                saved.map(|saved| match saved {
-                    Ajax::Text(text) => Answer::Page(text),
-                    _ => Answer::Page(String::new()),
-                })
-            }
-            _ => {
-                act(
-                    write,
-                    handler(screen, &action).unwrap(),
-                    &asked,
-                    &Linked(constants),
-                )
-                .await
-            }
-        };
-        match answer {
-            Err(Error::Db(_)) => budget += 1,
-            answer => return answer.map_err(|err| format!("{err:?}")),
+        "admin-ajax" => {
+            let handler = ajax_handler(&action).unwrap();
+            let saved = acted(writer, conn, (handler, &Unread(constants)), &asked).await;
+            saved.map(|saved| match saved {
+                Ajax::Text(text) => Answer::Page(text),
+                _ => Answer::Page(String::new()),
+            })
         }
-    }
-}
-
-/// A site whose only reads are `admin_url()` and its constants, as the
-/// posts lists' handlers read it.
-struct Linked(Constants);
-
-impl CapabilityData for Linked {
-    fn option(&self, _: &str) -> Option<Vec<u8>> {
-        unreachable!()
-    }
-    fn user_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        unreachable!()
-    }
-    fn user_exists(&self, _: u64) -> bool {
-        unreachable!()
-    }
-    fn post(&self, _: u64) -> Option<hyscribe_auth::caps::CapPost> {
-        unreachable!()
-    }
-    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
-        unreachable!()
-    }
-    fn comment_post(&self, _: u64) -> Option<u64> {
-        unreachable!()
-    }
-    fn term_taxonomy(&self, _: u64) -> Option<String> {
-        unreachable!()
-    }
-    fn constant(&self, _: &str) -> bool {
-        unreachable!()
-    }
-}
-
-impl ActionSite for Linked {
-    fn current_user_can(&self, _: &str, _: &[Value]) -> bool {
-        unreachable!()
-    }
-    fn verify_nonce(&self, _: &[u8], _: &str) -> bool {
-        unreachable!()
-    }
-    fn validate_redirect(&self, _: &[u8]) -> Vec<u8> {
-        unreachable!()
-    }
-    fn comment_approved(&self, _: u64) -> Option<Vec<u8>> {
-        unreachable!()
-    }
-    fn user_roles(&self) -> Option<Vec<u8>> {
-        unreachable!()
-    }
-    fn lock_holder(&self, _: u64) -> Option<String> {
-        unreachable!()
-    }
-}
-
-impl Acting for Linked {
-    fn admin_url(&self, path: &str) -> String {
-        format!("{SITE}/hs-admin/{}", hyscribe_admin::menu::link(path))
-    }
-    fn comment_url(&self, _: u64) -> String {
-        unreachable!()
-    }
-    fn constants(&self) -> Constants {
-        self.0
-    }
+        _ => {
+            let handler = handler(screen, &action).unwrap();
+            acted(writer, conn, (handler, &Unread(constants)), &asked).await
+        }
+    };
+    answer.map_err(|err| format!("{err:?}"))
 }
 
 /// User 1's context, as the setups write.
 fn admin() -> Context {
     Context {
-        user: 1,
         can_publish: true,
-        home: SITE.as_bytes().to_vec(),
-        upload_host: b"127.0.0.1:8081".to_vec(),
-        unfiltered_html: false,
-        now: crate::now(),
+        ..crate::admin::saves::dashboard::context(1, SITE, SITE)
     }
 }
 
@@ -422,13 +318,6 @@ async fn copy(sql: &str) -> hyscribe_config::Database {
     db
 }
 
-/// `text` of `reference/admin-saves/` under hs-admin's names.
-fn hs(text: &str) -> String {
-    text.replace("/wp-admin/", "/hs-admin/")
-        .replace("%2Fwp-admin%2F", "%2Fhs-admin%2F")
-        .replace(".php", "")
-}
-
 /// `text` with the ten characters after each `_wpnonce=` of `from` those
 /// of `to`'s.
 fn nonces_of(text: &str, to: &str) -> String {
@@ -492,12 +381,10 @@ fn undated(page: &str) -> String {
 async fn the_lists_actions_answer_as_php() {
     use crate::admin::tests::{location, logged_in, masked_nonces, page_of, send, session_nonce};
     let _saves = crate::admin::tests::SAVES.lock().await;
-    let golden = include_str!("../../../../../hyscribe-admin/tests/golden/admin-saves.tsv");
-    let after = include_str!("../../../../../hyscribe-admin/tests/golden/admin-saves-after.tsv");
-    let cases = include_str!("../../../../../../reference/admin-saves/cases.list");
+    use crate::admin::saves::tests::{AFTER, ANSWERS, CASES, case_row, hs};
     let dir = tempfile::tempdir().unwrap();
     let mut compared = 0;
-    for line in cases.lines().filter(|line| line.starts_with("posts-")) {
+    for line in CASES.lines().filter(|line| line.starts_with("posts-")) {
         let fields: Vec<&str> = line.split('\t').collect();
         let [case, method, target, body, action, field, ..] = fields[..] else {
             panic!("{line}");
@@ -522,11 +409,7 @@ async fn the_lists_actions_answer_as_php() {
             )
             .await
         };
-        let row = golden
-            .lines()
-            .find(|row| row.starts_with(&format!("{case}\t")));
-        let [_, status, php_location, php_body] = row.unwrap().split('\t').collect::<Vec<_>>()[..]
-        else {
+        let [_, status, php_location, php_body] = case_row(ANSWERS, case).unwrap()[..] else {
             panic!("{case}");
         };
         assert_eq!(response.status().as_str(), status, "{case}");
@@ -553,10 +436,7 @@ async fn the_lists_actions_answer_as_php() {
             continue;
         };
         let to = to.trim_start_matches(SITE);
-        let row = after
-            .lines()
-            .find(|row| row.starts_with(&format!("{case}\t")));
-        let [_, status, php_body] = row.unwrap().split('\t').collect::<Vec<_>>()[..] else {
+        let [_, status, php_body] = case_row(AFTER, case).unwrap()[..] else {
             panic!("{case}");
         };
         // `send` serves `site` as it was loaded; a served site reads it

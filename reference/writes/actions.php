@@ -118,6 +118,9 @@ $actions = array(
 	),
 );
 
+// What the actions-*.php files share.
+require __DIR__ . '/helpers.php';
+
 // Each area's actions live in their own file beside this one (actions-posts.php,
 // actions-terms.php and so on), so they can be added side by side.
 foreach ( glob( __DIR__ . '/actions-*.php' ) as $more ) {

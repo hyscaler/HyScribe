@@ -4,18 +4,22 @@
 //! `comment.php`'s row actions and the list's Ajax actions, from
 //! `wp-admin/includes/ajax-actions.php`. WordPress mails nothing here.
 
-use hyscribe_admin::actions::{Asked, action, post_int};
+use hyscribe_admin::actions::{Asked, action, ajax_response, post_int, wp_ajax};
 use hyscribe_admin::posts::Answer;
 use hyscribe_db::{DbError, Write};
 use hyscribe_kses::esc_url_raw;
-use hyscribe_phpser::{Value, absint, add_query_arg, parse_str, remove_query_arg};
+use hyscribe_phpser::{Value, absint, add_query_arg, parse_str, php_trim, remove_query_arg};
 use hyscribe_render::number_format;
 use hyscribe_write::Error;
 use hyscribe_write::comments::{
-    Context, delete_comment, restore_comment, set_comment_status, spam_comment, trash_comment,
+    Commenter, Context, NewComment, delete_comment, new_comment, restore_comment,
+    set_comment_status, spam_comment, trash_comment,
 };
 
-use super::{Acting, Ajax, Handler, Saving, read, referer, text};
+use super::super::Admin;
+use super::{Acting, Ajax, Handler, Saving, Stop, read, referer, text};
+
+mod edit;
 
 /// A moderation, as the bulk actions name it.
 #[derive(Clone, Copy, PartialEq)]
@@ -246,13 +250,7 @@ fn moderate<'a>(
 
 /// `wp_get_comment_status()`, `None` for false.
 fn comment_status(approved: &str) -> Option<&'static str> {
-    Some(match approved {
-        "1" => "approved",
-        "0" => "unapproved",
-        "spam" => "spam",
-        "trash" => "trash",
-        _ => return None,
-    })
+    Some(hyscribe_admin::dashboard::comment_status(approved)).filter(|status| !status.is_empty())
 }
 
 /// `wp_die( time() )`.
@@ -277,7 +275,7 @@ pub(super) fn dim<'a>(
             let error = format!(
                 "<wp_error code='invalid_comment'><![CDATA[Comment {id} does not exist]]></wp_error>"
             );
-            return Ok(ajax_response(asked, "0", &error, &[]));
+            return Ok(Ajax::Xml(ajax_xml(asked, ("comment", 0, "1"), &error, &[])));
         };
         let current = comment_status(&comment.approved);
         let new = asked.post("new").and_then(Value::as_bytes);
@@ -414,33 +412,27 @@ async fn delete_response(
             ("total", total.to_string()),
         ]);
     }
-    let counts = write.comment_counts(0).await?;
-    let [approved, moderated, ..] = counts;
+    let [approved, moderated, ..] = write.comment_counts(0).await?;
     supplemental.push(("time", asked.now.to_string()));
-    supplemental.push(("in_moderation", moderated.to_string()));
-    let comments = if approved == 1 { "Comment" } else { "Comments" };
-    let pending = if moderated == 1 {
-        "Comment"
+    let mut counts = counts_text(approved, moderated);
+    if paged {
+        // The list's total stands for the comments' count.
+        counts.remove(1);
     } else {
-        "Comments"
-    };
-    let moderation = format!("{} {pending} in moderation", number_format(moderated));
-    if !paged {
         let link = match Value::String(status.into_bytes()).to_int() {
             1 => read(|| site.comment_url(id)),
             _ => String::new(),
         };
-        supplemental.push((
-            "i18n_comments_text",
-            format!("{} {comments}", number_format(approved)),
-        ));
-        supplemental.push(("i18n_moderation_text", moderation));
-        supplemental.push(("comment_link", link));
-    } else {
-        supplemental.push(("i18n_moderation_text", moderation));
+        counts.push(("comment_link", link));
     }
+    supplemental.extend(counts);
     let data = "<response_data><![CDATA[]]></response_data>";
-    Ok(ajax_response(asked, &id.to_string(), data, &supplemental))
+    Ok(Ajax::Xml(ajax_xml(
+        asked,
+        ("comment", id, "1"),
+        data,
+        &supplemental,
+    )))
 }
 
 /// `wp_count_comments()`'s count named `view`, if it has one.
@@ -458,19 +450,261 @@ pub(super) fn count_of(counts: &[u64; 5], view: &[u8]) -> Option<u64> {
     })
 }
 
-/// `WP_Ajax_Response::send()` of one comment response: `response` as the
-/// data, then `supplemental`.
-fn ajax_response(asked: &Asked, id: &str, response: &str, supplemental: &[(&str, String)]) -> Ajax {
-    let action = asked
-        .post("action")
-        .map(Value::to_php_string)
-        .unwrap_or_default();
-    let supplemental: String = supplemental
-        .iter()
-        .map(|(name, value)| format!("<{name}><![CDATA[{value}]]></{name}>"))
+/// `WP_Ajax_Response::send()` of one comment response to the request's
+/// action: `response` as the data, then `supplemental`.
+fn ajax_xml(
+    asked: &Asked,
+    object: (&str, u64, &str),
+    response: &str,
+    supplemental: &[(&str, String)],
+) -> String {
+    let action = asked.post("action").map(Value::to_php_string);
+    let action = text(&action.unwrap_or_default());
+    let supplemental: Vec<_> = (supplemental.iter())
+        .map(|(name, value)| (*name, value.as_bytes()))
         .collect();
-    Ajax::Xml(format!(
-        "<?xml version='1.0' encoding='UTF-8' standalone='yes'?><wp_ajax><response action='{}_{id}'><comment id='{id}' position='1'>{response}<supplemental>{supplemental}</supplemental></comment></response></wp_ajax>",
-        text(&action)
-    ))
+    wp_ajax(&[ajax_response(&action, object, response, &supplemental)])
+}
+
+/// `comment.php`'s `editedcomment`, the edit screen's Update: back to the
+/// screen it came from, else the post's comments, at the comment.
+pub(super) fn edited<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    site: &'a dyn Acting,
+) -> Saving<'a> {
+    Box::pin(async move {
+        let referred = match asked.post("referredby") {
+            Some(Value::Array(_)) => return Err(Error::Unported("an array as referredby").into()),
+            referred => referred.filter(|r| !r.is_empty()).map(Value::to_php_string),
+        };
+        if let Err(message) = edit::edit_comment(write, asked, site, None).await? {
+            return Err(Stop::Died(Answer::Died(message)));
+        }
+        let id = asked.post("comment_ID").map_or(0, absint);
+        let post = asked.post("comment_post_ID").map_or(0, absint);
+        let list = hyscribe_admin::menu::link(&format!("edit-comments.php?p={post}"));
+        let back = referred.unwrap_or_else(|| list.into_bytes());
+        Ok(Answer::Redirect(format!("{}#comment-{id}", text(&back))))
+    })
+}
+
+/// A comment's row sent once committed, as `WP_Ajax_Response` adds it.
+#[derive(Debug, PartialEq)]
+pub(in crate::admin) struct Row {
+    /// The response's `what`.
+    what: &'static str,
+    /// The comment.
+    id: u64,
+    /// `position`, sanitized.
+    position: String,
+    /// The `supplemental` fields.
+    supplemental: Vec<(&'static str, String)>,
+    /// The dashboard's Activity row rather than the list's.
+    dashboard: bool,
+}
+
+impl Row {
+    /// The XML with the comments list's row of the comment as it is now.
+    pub(in crate::admin) fn sent(&self, admin: &Admin, asked: &Asked) -> String {
+        let post = asked.request("p").map_or(0, absint);
+        let row = list_row(admin, self.id, post, self.dashboard);
+        let data = format!("<response_data><![CDATA[{row}]]></response_data>");
+        let response = (self.what, self.id, self.position.as_str());
+        ajax_xml(asked, response, &data, &self.supplemental)
+    }
+}
+
+/// `position`: the `(int)` of the request's, else `-1`, as
+/// `WP_Ajax_Response::add()` keeps it.
+fn position(asked: &Asked) -> String {
+    match post_int(asked, "position") {
+        0 => "-1".into(),
+        n => n.to_string(),
+    }
+}
+
+/// The list's Quick Edit (`wp_ajax_edit_comment()`): the comment saved,
+/// then its row.
+pub(super) fn quick_edit<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    site: &'a dyn Acting,
+) -> Saving<'a, Ajax> {
+    Box::pin(async move {
+        if asked.post("content").and_then(Value::as_bytes) == Some(b"") {
+            return Ok(Ajax::Text("Please type your comment text.".into()));
+        }
+        // The post screen's list (`WP_Post_Comments_List_Table`) is not ported.
+        if asked.post("checkbox").and_then(Value::as_bytes) != Some(b"1") {
+            return Err(Error::Unported("the post screen's comments").into());
+        }
+        let status = match asked.post("status") {
+            Some(Value::Array(_)) => return Err(Error::Unported("an array as status").into()),
+            status => status.map(Value::to_php_string),
+        };
+        if let Err(message) = edit::edit_comment(write, asked, site, status).await? {
+            return Err(Stop::Died(Ajax::Text(message.into())));
+        }
+        let id = post_int(asked, "comment_ID").unsigned_abs();
+        Ok(Ajax::CommentRow(Row {
+            what: "edit_comment",
+            id,
+            position: position(asked),
+            supplemental: Vec::new(),
+            dashboard: false,
+        }))
+    })
+}
+
+/// The comments list's row of the comment `id` as it is now, or the
+/// dashboard's.
+fn list_row(admin: &Admin, id: u64, post: u64, dashboard: bool) -> String {
+    use hyscribe_admin::comments::CommentEditSite;
+    // The posts the checks read are older than the action.
+    admin.posts.borrow_mut().clear();
+    admin
+        .comment_to_edit(id)
+        .map_or_else(String::new, |row| match dashboard {
+            true => hyscribe_admin::dashboard::ajax_comment_row(admin, &row),
+            false => hyscribe_admin::comments::ajax_row(admin, &row, post),
+        })
+}
+
+/// `trim()` of the `$_POST` field `name`, empty when not sent; `None` for
+/// an array, PHP's fatal error.
+fn trimmed(asked: &Asked, name: &str) -> Option<Vec<u8>> {
+    match asked.post(name) {
+        Some(Value::Array(_)) => None,
+        given => Some(php_trim(&given.map(Value::to_php_string).unwrap_or_default()).to_vec()),
+    }
+}
+
+/// The list's and the dashboard's Reply (`wp_ajax_replyto_comment()`): a
+/// comment by the user on the post, approving a held parent if asked,
+/// then its row and the counts.
+pub(super) fn reply<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    site: &'a dyn Acting,
+) -> Saving<'a, Ajax> {
+    Box::pin(async move {
+        let post_id = post_int(asked, "comment_post_ID").unsigned_abs();
+        // The checks' answer, for a post deleted since.
+        let Some(post) = write.post(post_id).await? else {
+            return Ok(Ajax::Text("-1".into()));
+        };
+        match post.status.as_str() {
+            "" => return Ok(Ajax::Text("1".into())),
+            "draft" | "pending" | "trash" => {
+                let message = "You cannot reply to a comment on a draft post.";
+                return Ok(Ajax::Text(message.into()));
+            }
+            _ => {}
+        }
+        let mode = asked.request("mode").and_then(Value::as_bytes);
+        // The post screen's list (`WP_Post_Comments_List_Table`) is not ported.
+        if mode == Some(b"single") {
+            return Err(Error::Unported("the post screen's comments").into());
+        }
+        let Some((_, user)) = write.user(asked.user).await? else {
+            return Ok(Ajax::Text(
+                "Sorry, you must be logged in to reply to a comment.".into(),
+            ));
+        };
+        let (Some(content), Some(kind)) =
+            (trimmed(asked, "content"), trimmed(asked, "comment_type"))
+        else {
+            return Err(Error::Unported("an array to trim").into());
+        };
+        if content.is_empty() {
+            return Ok(Ajax::Text("Please type your comment text.".into()));
+        }
+        let kind = asked
+            .post("comment_type")
+            .map_or(b"comment".to_vec(), |_| kind);
+        let parent = asked.post("comment_ID").map_or(0, absint);
+        // A held parent on the post approved with the reply.
+        let mut approved_parent = None;
+        if asked.post("approve_parent").is_some_and(|a| !a.is_empty())
+            && let Some(found) = write.comment(parent).await?
+            && found.approved == "0"
+            && found.post_id == post_id
+        {
+            if !can_edit(site, &Value::Int(parent.cast_signed())) {
+                return Ok(Ajax::Text("-1".into()));
+            }
+            let approved = set_comment_status(write, parent, "approve").await?;
+            approved_parent = approved.then_some(found.post_id);
+        }
+        let comment = NewComment {
+            post_id,
+            author: user.display_name,
+            author_email: user.email,
+            author_url: user.url,
+            author_ip: asked.ip.to_vec(),
+            content,
+            agent: asked.agent.to_vec(),
+            comment_type: text(&kind),
+            parent,
+            user_id: asked.user,
+            ..NewComment::default()
+        };
+        // Unfiltered for a user who may post unfiltered HTML only with the
+        // form's own nonce, PHP's `wp_create_nonce()` compared as it is now.
+        let given = asked.post("_wp_unfiltered_html_comment");
+        let given = given.map(Value::to_php_string).unwrap_or_default();
+        let commenter = read(|| {
+            let own = site.create_nonce("unfiltered-html-comment").into_bytes() == given;
+            Commenter {
+                moderate_comments: site.current_user_can("moderate_comments", &[]),
+                manage_options: site.current_user_can("manage_options", &[]),
+                unfiltered_html: site.current_user_can("unfiltered_html", &[]) & own,
+            }
+        });
+        let context = Context {
+            now: asked.now,
+            home: asked.home.as_bytes(),
+        };
+        // `wp_die()` of the refusal's message, without its status.
+        let id = new_comment(write, context, comment, commenter).await?;
+        let id = id.map_err(|refused| {
+            let (_, message) = crate::comment_post::submit::refusal(refused);
+            Stop::Died(Ajax::Text(message.into()))
+        })?;
+        let [approved, moderated, ..] = write.comment_counts(0).await?;
+        let mut supplemental = counts_text(approved, moderated);
+        if let Some(parent_post) = approved_parent {
+            supplemental.push(("parent_approved", parent.to_string()));
+            supplemental.push(("parent_post_id", parent_post.to_string()));
+        }
+        Ok(Ajax::CommentRow(Row {
+            what: "comment",
+            id,
+            position: position(asked),
+            supplemental,
+            dashboard: mode == Some(b"dashboard"),
+        }))
+    })
+}
+
+/// The supplemental counts of a reply: `in_moderation` and their texts.
+fn counts_text(approved: u64, moderated: u64) -> Vec<(&'static str, String)> {
+    let comments = if approved == 1 { "Comment" } else { "Comments" };
+    let pending = if moderated == 1 {
+        "Comment"
+    } else {
+        "Comments"
+    };
+    vec![
+        ("in_moderation", moderated.to_string()),
+        (
+            "i18n_comments_text",
+            format!("{} {comments}", number_format(approved)),
+        ),
+        (
+            "i18n_moderation_text",
+            format!("{} {pending} in moderation", number_format(moderated)),
+        ),
+    ]
 }

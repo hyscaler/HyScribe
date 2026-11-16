@@ -14,7 +14,8 @@ use hyscribe_admin::admin_bar::{BarSite, Browser};
 use hyscribe_admin::appearance::themes;
 use hyscribe_admin::assets::Urls;
 use hyscribe_admin::comments::{
-    CommentArgs, CommentQuery, CommentsSite, MODERATED, comment_order, edit_comments,
+    CommentArgs, CommentEditSite, CommentQuery, CommentsSite, MODERATED, comment_edit,
+    comment_order, edit_comments,
 };
 use hyscribe_admin::dashboard::{
     CommentCounts, DashboardSite, RecentComment, comment_status, dashboard,
@@ -69,24 +70,26 @@ pub(crate) fn is_admin(path: &str) -> bool {
     (path == "/hs-admin" || path.starts_with("/hs-admin/")) && screen
 }
 
-/// The answer to a request for an admin screen; `form` is `$_POST`, `None`
-/// for a body only PHP reads.
+/// The answer to a request for an admin screen, a POST or not, from the
+/// connection's `peer`; `form` is `$_POST`, `None` for a body only PHP reads.
 pub(crate) async fn respond(
     site: &Arc<Site>,
     uri: Uri,
     headers: HeaderMap,
-    post: bool,
+    (post, peer): (bool, Option<std::net::IpAddr>),
     form: Option<Value>,
 ) -> Response {
     let site = Arc::clone(site);
     let (now, handle) = (now(), Handle::current());
     joined(
         tokio::task::spawn_blocking(move || {
+            let ip = crate::comment_post::client_addr(&site, &headers, peer);
             let asked = Asking {
                 uri: &uri,
                 headers: &headers,
                 post,
                 form: form.as_ref(),
+                ip,
             };
             answer(&site, &asked, now, handle)
         })
@@ -100,6 +103,8 @@ struct Asking<'a> {
     headers: &'a HeaderMap,
     post: bool,
     form: Option<&'a Value>,
+    /// `$_SERVER['REMOTE_ADDR']`.
+    ip: Vec<u8>,
 }
 
 /// `entries` of `$_GET` or `$_POST`.
@@ -116,7 +121,7 @@ fn refused(public: bool, refusal: Refusal) -> Response {
             return response(status, screen_headers(), page);
         }
         Body::Text(text) => ("text/html; charset=UTF-8", text.into_bytes()),
-        Body::Json(json) => ("application/json; charset=UTF-8", json.as_bytes().to_vec()),
+        Body::Json(json) => (JSON, json.as_bytes().to_vec()),
     };
     ajax_text(status, kind, body)
 }
@@ -635,6 +640,20 @@ impl PostsSite for Admin<'_> {
     }
     fn page_templates(&self, post_type: &str) -> Vec<(String, String)> {
         self.site.theme.page_templates(post_type)
+    }
+}
+
+impl CommentEditSite for Admin<'_> {
+    fn comment_to_edit(&self, id: u64) -> Option<hyscribe_admin::dashboard::RecentComment> {
+        let comment = self.reads.reads.wait(self.site.db.any_comment(id))?;
+        let approved = CommentsSite::comment_approved(self, id).unwrap_or_default();
+        let post = self.full_post(comment.post_id);
+        Some(self.comment_row(comment, &approved, post))
+    }
+    fn referer(&self) -> Option<Vec<u8>> {
+        let referer =
+            hyscribe_admin::profile::wp_get_referer(self, self.referer.as_deref(), &self.uri);
+        referer.map(String::into_bytes)
     }
 }
 
@@ -1293,6 +1312,18 @@ fn screen(
             }
             Answer::from_page(dashboard(admin, &request))
         }
+        // Only the edit screen is ported of `comment.php`'s pages.
+        "/hs-admin/comment" => {
+            let mut id = None;
+            for (key, value) in query_strings(query)? {
+                match (key.as_str(), value.as_str()) {
+                    ("action", "editcomment") => {}
+                    ("c", _) => id = Some(crate::query::absint(&value)),
+                    _ => return None,
+                }
+            }
+            comment_edit(admin, id?, &request)?
+        }
         "/hs-admin/edit-comments" => {
             let args = comment_args(query)?;
             // Only posts', pages' and attachments' comments are listed, and
@@ -1355,11 +1386,7 @@ fn save(admin: &mut Admin, screen: &str, asked: &Asked) -> Response {
         return not_ported();
     };
     let Some(writer) = &admin.site.writer else {
-        // `wp_die()` in an Ajax request sends its message alone.
-        return match screen {
-            "admin-ajax" => ajax_text(StatusCode::FORBIDDEN, HTML, READ_ONLY.into()),
-            _ => denied(admin, READ_ONLY),
-        };
+        return denied(admin, READ_ONLY);
     };
     let act = |admin: &Admin| {
         let begun = async { saves::act(writer.begin().await, handler, asked, admin).await };
@@ -1369,39 +1396,34 @@ fn save(admin: &mut Admin, screen: &str, asked: &Asked) -> Response {
         return quick_draft(admin, writer, asked, act);
     }
     match act(admin) {
-        // Only `admin-ajax.php`'s handlers answer with text: its `wp_die()`
-        // and `wp_send_json()`.
-        Ok(Answer::Page(body)) => {
-            let kind = match body.starts_with('{') {
-                true => "application/json; charset=UTF-8",
-                false => "text/html; charset=UTF-8",
-            };
-            ajax_text(StatusCode::OK, kind, body.into_bytes())
-        }
         Ok(answer) => served(admin, answer),
         Err(err) => failed(admin, err),
     }
 }
 
-/// An `admin-ajax.php` action with a `saves::Ajax` handler past its checks,
-/// as [`save`]; shadow mode's `wp_die()` is the message alone. `None` for
-/// an action without one.
-fn ajax_save(admin: &Admin, asked: &Asked) -> Option<Response> {
+/// An `admin-ajax.php` action past its checks, as [`save`]: 501 without a
+/// handler, and shadow mode's `wp_die()` is the message alone.
+fn ajax_save(admin: &Admin, asked: &Asked) -> Response {
     let action = asked.request("action").map(Value::to_php_string);
-    let handler = saves::ajax_handler(&action.unwrap_or_default())?;
+    let Some(handler) = saves::ajax_handler(&action.unwrap_or_default()) else {
+        return not_ported();
+    };
     let Some(writer) = &admin.site.writer else {
-        return Some(ajax_text(StatusCode::FORBIDDEN, HTML, READ_ONLY.into()));
+        return ajax_text(StatusCode::FORBIDDEN, HTML, READ_ONLY.into());
     };
     let saved = Handle::current()
         .block_on(async { saves::act(writer.begin().await, handler, asked, admin).await });
-    Some(match saved {
+    match saved {
         Ok(answer) => saves::ajax_served(admin, asked, answer),
         Err(err) => failed(admin, err),
-    })
+    }
 }
 
 /// The type of `admin-ajax.php`'s answers but for XML and JSON.
 const HTML: &str = "text/html; charset=UTF-8";
+
+/// The type of `wp_send_json()`'s answers.
+const JSON: &str = "application/json; charset=UTF-8";
 
 /// The answer to a write function's error: 501 for what is not ported,
 /// else the database error page.
@@ -1478,6 +1500,8 @@ fn action_request<'a>(
         home: &site.home,
         user,
         now,
+        ip: &asking.ip,
+        agent: (asking.headers.get(header::USER_AGENT)).map_or(b"", HeaderValue::as_bytes),
     }
 }
 
@@ -1506,7 +1530,7 @@ fn ajax_answer(
         Some((id, token)) => {
             reads.act_as(id, token);
             let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
-            let mut admin = Admin::new(reads, site, user);
+            let admin = Admin::new(reads, site, user);
             match admin_ajax(Some(&admin), &asked) {
                 Ok(())
                     if hyscribe_admin::actions::action("admin-ajax", &asked)
@@ -1520,12 +1544,9 @@ fn ajax_answer(
                     let sessions = site.sessions.as_deref();
                     let json =
                         saves::destroy_sessions(sessions, &asked, reads.session_token(), name);
-                    return ajax_text(StatusCode::OK, "application/json; charset=UTF-8", json);
+                    return ajax_text(StatusCode::OK, JSON, json);
                 }
-                Ok(()) => {
-                    let saved = ajax_save(&admin, &asked);
-                    return saved.unwrap_or_else(|| save(&mut admin, "admin-ajax", &asked));
-                }
+                Ok(()) => return ajax_save(&admin, &asked),
                 refused => refused,
             }
         }

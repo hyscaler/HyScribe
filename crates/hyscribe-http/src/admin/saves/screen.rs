@@ -14,7 +14,7 @@ use hyscribe_phpser::{Key, Value, add_query_arg, addslashes, lookup, parse_str, 
 use hyscribe_write::Error;
 use hyscribe_write::options::{Meta, update_metadata};
 
-use super::{Acting, Saving, text};
+use super::{Acting, Ajax, Saving, text};
 
 /// `update_user_meta( $user, $key, $value )`, `value` as PHP passes it.
 pub(in crate::admin) async fn update_user_meta(
@@ -201,17 +201,12 @@ fn page(asked: &Asked) -> String {
     )
 }
 
-/// `wp_die( 1 )`.
-fn done() -> Result<Answer, super::Stop> {
-    Ok(Answer::Page("1".into()))
-}
-
 /// `wp_ajax_closed_postboxes()`: the boxes closed and hidden on a screen.
 pub(super) fn closed_postboxes<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
     _: &'a dyn Acting,
-) -> Saving<'a> {
+) -> Saving<'a, Ajax> {
     Box::pin(async move {
         // A list not sent is empty, as the one item of an empty list is filtered out.
         let given = |name| -> Result<Vec<(Key, Value)>, Error> {
@@ -239,7 +234,8 @@ pub(super) fn closed_postboxes<'a>(
             .filter(|(_, item)| !shown.contains(&&*item.to_php_string()));
         let hidden = Value::Array(hidden.collect());
         update_user_meta(write, asked.user, &format!("metaboxhidden_{page}"), &hidden).await?;
-        done()
+        // `wp_die( 1 )`.
+        Ok(Ajax::Text("1".into()))
     })
 }
 
@@ -248,7 +244,7 @@ pub(super) fn hidden_columns<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
     _: &'a dyn Acting,
-) -> Saving<'a> {
+) -> Saving<'a, Ajax> {
     Box::pin(async move {
         let given = lookup(asked.post, "hidden").is_some_and(|hidden| !hidden.is_empty());
         let hidden = if given {
@@ -258,7 +254,8 @@ pub(super) fn hidden_columns<'a>(
         };
         let key = format!("manage{}columnshidden", page(asked));
         update_user_meta(write, asked.user, &key, &Value::Array(hidden)).await?;
-        done()
+        // `wp_die( 1 )`.
+        Ok(Ajax::Text("1".into()))
     })
 }
 
@@ -267,7 +264,7 @@ pub(super) fn meta_box_order<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
     _: &'a dyn Acting,
-) -> Saving<'a> {
+) -> Saving<'a, Ajax> {
     Box::pin(async move {
         let order = slashed(asked, "order").map(|order| match order {
             Value::Array(items) => Value::Array(items),
@@ -291,7 +288,7 @@ pub(super) fn meta_box_order<'a>(
             )
             .await?;
         }
-        Ok(Answer::Page("{\"success\":true}".into()))
+        Ok(Ajax::Json("{\"success\":true}".into()))
     })
 }
 
@@ -336,10 +333,7 @@ pub(super) fn options<'a>(
             return Err(Error::Unported("a screen option not saved").into());
         }
         update_user_meta(write, asked.user, &key, &Value::Int(value)).await?;
-        let referer = asked.wp_get_referer(&|location| {
-            let host = hyscribe_kses::url_host(asked.home.as_bytes()).unwrap_or_default();
-            crate::redirect::wp_validate_redirect(location, &host, b"")
-        });
+        let referer = super::referer(asked);
         let back = remove_query_arg(
             &[b"pagenum", b"apage", b"paged"],
             &referer.unwrap_or_else(|| asked.uri.to_vec()),

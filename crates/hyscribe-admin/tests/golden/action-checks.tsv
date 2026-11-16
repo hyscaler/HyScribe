@@ -238,6 +238,22 @@ administrator	ajax-dim-comment	none	403	2d31
 administrator	ajax-dim-comment	wrong	403	2d31
 administrator	ajax-dim-comment	other	403	2d31
 administrator	ajax-dim-comment	valid	accepted	
+administrator	ajax-edit-comment	none	403	2d31
+administrator	ajax-edit-comment	wrong	403	2d31
+administrator	ajax-edit-comment	other	403	2d31
+administrator	ajax-edit-comment	valid	accepted	
+administrator	ajax-replyto-comment	none	403	2d31
+administrator	ajax-replyto-comment	wrong	403	2d31
+administrator	ajax-replyto-comment	other	403	2d31
+administrator	ajax-replyto-comment	valid	accepted	
+administrator	ajax-replyto-other	none	403	2d31
+administrator	ajax-replyto-other	wrong	403	2d31
+administrator	ajax-replyto-other	other	403	2d31
+administrator	ajax-replyto-other	valid	accepted	
+administrator	ajax-replyto-missing	none	403	2d31
+administrator	ajax-replyto-missing	wrong	403	2d31
+administrator	ajax-replyto-missing	other	403	2d31
+administrator	ajax-replyto-missing	valid	200	2d31
 administrator	ajax-closed-postboxes	none	403	2d31
 administrator	ajax-closed-postboxes	wrong	403	2d31
 administrator	ajax-closed-postboxes	other	403	2d31
@@ -518,6 +534,22 @@ editor	ajax-dim-comment	none	403	2d31
 editor	ajax-dim-comment	wrong	403	2d31
 editor	ajax-dim-comment	other	403	2d31
 editor	ajax-dim-comment	valid	accepted	
+editor	ajax-edit-comment	none	403	2d31
+editor	ajax-edit-comment	wrong	403	2d31
+editor	ajax-edit-comment	other	403	2d31
+editor	ajax-edit-comment	valid	accepted	
+editor	ajax-replyto-comment	none	403	2d31
+editor	ajax-replyto-comment	wrong	403	2d31
+editor	ajax-replyto-comment	other	403	2d31
+editor	ajax-replyto-comment	valid	accepted	
+editor	ajax-replyto-other	none	403	2d31
+editor	ajax-replyto-other	wrong	403	2d31
+editor	ajax-replyto-other	other	403	2d31
+editor	ajax-replyto-other	valid	accepted	
+editor	ajax-replyto-missing	none	403	2d31
+editor	ajax-replyto-missing	wrong	403	2d31
+editor	ajax-replyto-missing	other	403	2d31
+editor	ajax-replyto-missing	valid	200	2d31
 editor	ajax-closed-postboxes	none	403	2d31
 editor	ajax-closed-postboxes	wrong	403	2d31
 editor	ajax-closed-postboxes	other	403	2d31
@@ -798,6 +830,22 @@ author	ajax-dim-comment	none	403	2d31
 author	ajax-dim-comment	wrong	403	2d31
 author	ajax-dim-comment	other	403	2d31
 author	ajax-dim-comment	valid	accepted	
+author	ajax-edit-comment	none	403	2d31
+author	ajax-edit-comment	wrong	403	2d31
+author	ajax-edit-comment	other	403	2d31
+author	ajax-edit-comment	valid	accepted	
+author	ajax-replyto-comment	none	403	2d31
+author	ajax-replyto-comment	wrong	403	2d31
+author	ajax-replyto-comment	other	403	2d31
+author	ajax-replyto-comment	valid	accepted	
+author	ajax-replyto-other	none	403	2d31
+author	ajax-replyto-other	wrong	403	2d31
+author	ajax-replyto-other	other	403	2d31
+author	ajax-replyto-other	valid	200	2d31
+author	ajax-replyto-missing	none	403	2d31
+author	ajax-replyto-missing	wrong	403	2d31
+author	ajax-replyto-missing	other	403	2d31
+author	ajax-replyto-missing	valid	200	2d31
 author	ajax-closed-postboxes	none	403	2d31
 author	ajax-closed-postboxes	wrong	403	2d31
 author	ajax-closed-postboxes	other	403	2d31
@@ -1078,6 +1126,22 @@ contributor	ajax-dim-comment	none	200	2d31
 contributor	ajax-dim-comment	wrong	200	2d31
 contributor	ajax-dim-comment	other	200	2d31
 contributor	ajax-dim-comment	valid	200	2d31
+contributor	ajax-edit-comment	none	403	2d31
+contributor	ajax-edit-comment	wrong	403	2d31
+contributor	ajax-edit-comment	other	403	2d31
+contributor	ajax-edit-comment	valid	200	2d31
+contributor	ajax-replyto-comment	none	403	2d31
+contributor	ajax-replyto-comment	wrong	403	2d31
+contributor	ajax-replyto-comment	other	403	2d31
+contributor	ajax-replyto-comment	valid	200	2d31
+contributor	ajax-replyto-other	none	403	2d31
+contributor	ajax-replyto-other	wrong	403	2d31
+contributor	ajax-replyto-other	other	403	2d31
+contributor	ajax-replyto-other	valid	200	2d31
+contributor	ajax-replyto-missing	none	403	2d31
+contributor	ajax-replyto-missing	wrong	403	2d31
+contributor	ajax-replyto-missing	other	403	2d31
+contributor	ajax-replyto-missing	valid	200	2d31
 contributor	ajax-closed-postboxes	none	403	2d31
 contributor	ajax-closed-postboxes	wrong	403	2d31
 contributor	ajax-closed-postboxes	other	403	2d31
@@ -1358,6 +1422,22 @@ subscriber	ajax-dim-comment	none	200	2d31
 subscriber	ajax-dim-comment	wrong	200	2d31
 subscriber	ajax-dim-comment	other	200	2d31
 subscriber	ajax-dim-comment	valid	200	2d31
+subscriber	ajax-edit-comment	none	403	2d31
+subscriber	ajax-edit-comment	wrong	403	2d31
+subscriber	ajax-edit-comment	other	403	2d31
+subscriber	ajax-edit-comment	valid	200	2d31
+subscriber	ajax-replyto-comment	none	403	2d31
+subscriber	ajax-replyto-comment	wrong	403	2d31
+subscriber	ajax-replyto-comment	other	403	2d31
+subscriber	ajax-replyto-comment	valid	200	2d31
+subscriber	ajax-replyto-other	none	403	2d31
+subscriber	ajax-replyto-other	wrong	403	2d31
+subscriber	ajax-replyto-other	other	403	2d31
+subscriber	ajax-replyto-other	valid	200	2d31
+subscriber	ajax-replyto-missing	none	403	2d31
+subscriber	ajax-replyto-missing	wrong	403	2d31
+subscriber	ajax-replyto-missing	other	403	2d31
+subscriber	ajax-replyto-missing	valid	200	2d31
 subscriber	ajax-closed-postboxes	none	403	2d31
 subscriber	ajax-closed-postboxes	wrong	403	2d31
 subscriber	ajax-closed-postboxes	other	403	2d31

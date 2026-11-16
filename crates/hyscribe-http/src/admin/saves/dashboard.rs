@@ -9,28 +9,23 @@ use hyscribe_admin::posts::Answer;
 use hyscribe_db::Write;
 use hyscribe_phpser::{Value, lookup, stripslashes};
 use hyscribe_write::Error;
-use hyscribe_write::options::{Meta, update_metadata};
 use hyscribe_write::posts::{Context, get_default_post_to_edit, wp_update_post};
 
+use super::posts::update_post_meta;
 use super::screen::{update_user_meta, update_user_option};
-use super::{Acting, Saving, text};
+use super::{Acting, Ajax, Saving, id_of, text};
 
-/// The posts' context of `user` on the site at `home`, now, with their
-/// `unfiltered_html`; their capability to publish plays no part in the
-/// drafts written here.
-pub(in crate::admin) fn context(user: u64, home: &str, unfiltered_html: bool) -> Context {
-    let host = home.split_once("://").map_or(home, |(_, rest)| rest);
+/// The posts' context of `user` on the site at `home`, now, its uploads
+/// on the host of `site`, a URL under `siteurl` (`wp_upload_dir()`). The
+/// capability to publish plays no part in what is written with it, and its
+/// fields are filtered unless the caller says the user has `unfiltered_html`.
+pub(in crate::admin) fn context(user: u64, home: &str, site: &str) -> Context {
     Context {
         user,
         can_publish: false,
         home: home.as_bytes().to_vec(),
-        upload_host: host
-            .split('/')
-            .next()
-            .unwrap_or_default()
-            .as_bytes()
-            .to_vec(),
-        unfiltered_html,
+        upload_host: hyscribe_render::link::host(site.as_bytes()),
+        unfiltered_html: false,
         now: crate::now(),
     }
 }
@@ -88,8 +83,7 @@ pub(super) fn quickdraft_save<'a>(
     site: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
-        let id = lookup(asked.post, "post_ID").map_or(0, Value::to_int);
-        let id = u64::try_from(id).unwrap_or_default();
+        let id = id_of(lookup(asked.post, "post_ID"));
         let post = write.post(id).await?;
         // The form only ever names an auto-draft.
         if post.is_none_or(|post| post.status != "auto-draft") {
@@ -114,9 +108,12 @@ pub(super) fn quickdraft_save<'a>(
         let comments = option_text(write, "default_comment_status").await?;
         let pings = option_text(write, "default_ping_status").await?;
         let user = Value::Int(asked.user.cast_signed());
-        update_metadata(write, Meta::Post, id, "_edit_last", &user, &Value::Null).await?;
-        let unfiltered = super::posts::unfiltered_html(write, asked.user, site.constants()).await?;
-        let ctx = context(asked.user, asked.home, unfiltered);
+        update_post_meta(write, id, "_edit_last", user).await?;
+        let ctx = Context {
+            unfiltered_html: super::posts::unfiltered_html(write, asked.user, site.constants())
+                .await?,
+            ..context(asked.user, asked.home, &site.admin_url(""))
+        };
         wp_update_post(write, &ctx, id, &|args| {
             args.author = Some(asked.user);
             args.status = "draft".into();
@@ -128,7 +125,7 @@ pub(super) fn quickdraft_save<'a>(
         .await?;
         // `wp_set_post_lock()`.
         let lock = Value::String(format!("{}:{}", ctx.now, asked.user).into_bytes());
-        update_metadata(write, Meta::Post, id, "_edit_lock", &lock, &Value::Null).await?;
+        update_post_meta(write, id, "_edit_lock", lock).await?;
         Ok(Answer::Page(String::new()))
     })
 }
@@ -138,11 +135,11 @@ pub(super) fn update_welcome_panel<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
     _: &'a dyn Acting,
-) -> Saving<'a> {
+) -> Saving<'a, Ajax> {
     Box::pin(async move {
         let visible = lookup(asked.post, "visible").is_some_and(|v| !v.is_empty());
         welcome(write, asked.user, visible).await?;
-        Ok(Answer::Page("1".into()))
+        Ok(Ajax::Text("1".into()))
     })
 }
 

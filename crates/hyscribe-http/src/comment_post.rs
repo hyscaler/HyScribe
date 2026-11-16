@@ -3,7 +3,7 @@
 //! `wp-comments-post.php`: a comment saved in one writer action (ADR 0010),
 //! refused in shadow mode; no mail is sent until mail exists (MVP 8.2).
 
-mod submit;
+pub(crate) mod submit;
 
 use std::future::Future;
 use std::net::IpAddr;
@@ -283,15 +283,20 @@ async fn comment_link(
 /// `$_SERVER['REMOTE_ADDR']`: the connection's address, or behind a proxy
 /// the last address of `X-Forwarded-For`, the one the proxy added.
 fn remote_addr(site: &Site, asked: &Asked) -> Vec<u8> {
+    client_addr(site, &asked.headers, asked.peer)
+}
+
+/// [`remote_addr`] of a request's `headers` and connection `peer`.
+pub(crate) fn client_addr(site: &Site, headers: &HeaderMap, peer: Option<IpAddr>) -> Vec<u8> {
     let forwarded = site
         .behind_proxy
-        .then(|| asked.headers.get("x-forwarded-for"))
+        .then(|| headers.get("x-forwarded-for"))
         .flatten()
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.rsplit(',').next())
         .and_then(|last| last.trim().parse::<IpAddr>().ok());
     forwarded
-        .or(asked.peer)
+        .or(peer)
         .map_or_else(Vec::new, |ip| ip.to_string().into_bytes())
 }
 

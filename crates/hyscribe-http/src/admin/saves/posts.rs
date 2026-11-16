@@ -10,16 +10,16 @@ use hyscribe_auth::caps::{CapPost, CapabilityData, User};
 use hyscribe_config::Constants;
 use hyscribe_db::{DbError, Meta, PostFields, Write};
 use hyscribe_phpser::{Key, Value, absint, add_query_arg, addslashes, lookup, remove_query_arg};
-use hyscribe_render::date::{Zone, format_unix, site_zone, stored_unix};
-use hyscribe_write::Error;
+use hyscribe_render::date::{Zone, format_unix, stored_unix};
 use hyscribe_write::options::update_metadata;
 use hyscribe_write::posts::{
     Context, PostArgs, stick_post, unstick_post, wp_checkdate, wp_delete_post, wp_trash_post,
     wp_unique_post_slug, wp_untrash_post, wp_update_post,
 };
 use hyscribe_write::terms::{Taxonomy, TermList, TermRef, wp_set_post_terms};
+use hyscribe_write::{Error, wp_timezone};
 
-use super::{Acting, Ajax, Saving, Stop, referer};
+use super::{Acting, Ajax, Saving, Stop, id_of, referer, text};
 
 /// What the lists' forms never send and `edit_post()` or `wp_insert_post()`
 /// act on: custom fields, post format fields, the edit screen's buttons.
@@ -110,10 +110,6 @@ const FORMATS: [&str; 9] = [
 
 /// `add_query_arg()`'s arguments.
 type QueryArgs<'a> = [(&'a [u8], Option<&'a [u8]>)];
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
 
 /// What `current_user_can()` reads, as it is now in the action: the
 /// options `map_meta_cap()` reads, the user's capabilities, one post and
@@ -226,11 +222,6 @@ impl CapabilityData for Caps {
     }
 }
 
-/// `admin_url( $path )`.
-fn admin_url(site: &dyn Acting, path: &str) -> Vec<u8> {
-    site.admin_url(path).into_bytes()
-}
-
 /// `str_contains( $url, $file )`, for hs-admin's path of `file` too.
 fn mentions(url: &[u8], file: &str) -> bool {
     let has = |part: &[u8]| url.windows(part.len()).any(|window| window == part);
@@ -277,12 +268,9 @@ pub(super) async fn unfiltered_html(
 /// The action's context for posts of `post_type`.
 fn context(asked: &Asked, site: &dyn Acting, (caps, post_type): (&Caps, &str)) -> Context {
     Context {
-        user: asked.user,
         can_publish: caps.can_type("publish_posts", post_type),
-        home: asked.home.as_bytes().to_vec(),
-        upload_host: hyscribe_render::link::host(site.admin_url("").as_bytes()),
         unfiltered_html: caps.can("unfiltered_html", &[]),
-        now: crate::now(),
+        ..super::dashboard::context(asked.user, asked.home, &site.admin_url(""))
     }
 }
 
@@ -299,7 +287,7 @@ async fn post_php(
     action: &str,
 ) -> Result<Answer, Stop> {
     let id = lookup(asked.get, "post").or_else(|| lookup(asked.post, "post_ID"));
-    let id = u64::try_from(id.map_or(0, Value::to_int)).unwrap_or_default();
+    let id = id_of(id);
     let post = existing(write, id).await?;
     if post.post_type == "attachment" {
         return Err(Error::Unported("an attachment, which the media library handles").into());
@@ -310,7 +298,7 @@ async fn post_php(
         }
         _ => add_query_arg(
             &[(b"post_type", Some(post.post_type.as_bytes()))],
-            &admin_url(site, "edit.php"),
+            site.admin_url("edit.php").as_bytes(),
         ),
     };
     let caps = Caps::load(write, asked.user, None, site.constants()).await?;
@@ -499,7 +487,7 @@ pub(super) fn bulk<'a>(
         for name in ["p", "attachment_id", "page_id"] {
             if let Some(id) = asked.request(name).filter(|id| !id.is_empty()) {
                 let path = format!("edit-comments.php?p={}", absint(id));
-                return Ok(Answer::Redirect(text(&admin_url(site, &path))));
+                return Ok(Answer::Redirect(site.admin_url(&path)));
             }
         }
         // `remove_query_arg()` of no referer acts on the request's URI.
@@ -513,7 +501,7 @@ pub(super) fn bulk<'a>(
                 "post" => "post-new.php".to_string(),
                 _ => format!("post-new.php?post_type={post_type}"),
             };
-            sendback = admin_url(site, &new);
+            sendback = site.admin_url(&new).into_bytes();
         }
         let doaction = action("edit", asked);
         let ids = bulk_ids(write, asked, (&doaction, post_type)).await?;
@@ -845,7 +833,7 @@ async fn set_post_format(write: &mut Write<'_>, id: u64, format: &Value) -> Resu
 }
 
 /// `update_post_meta( $id, $key, $value )` of a value with no slashes.
-async fn update_post_meta(
+pub(super) async fn update_post_meta(
     write: &mut Write<'_>,
     id: u64,
     key: &str,
@@ -854,16 +842,6 @@ async fn update_post_meta(
     let any = Value::String(Vec::new());
     update_metadata(write, Meta::Post, id, key, &value, &any).await?;
     Ok(())
-}
-
-/// The site's time zone, `wp_timezone()`.
-async fn zone(write: &mut Write<'_>) -> Result<Zone, DbError> {
-    let name = write
-        .option_value("timezone_string")
-        .await?
-        .unwrap_or_default();
-    let offset = write.option_value("gmt_offset").await?.unwrap_or_default();
-    Ok(site_zone(&name, &offset))
 }
 
 /// `edit_post( $data )` of Quick Edit: its message when it dies.
@@ -902,7 +880,7 @@ async fn edit_post(
         caps: &caps,
         post,
         id,
-        zone: zone(write).await?,
+        zone: wp_timezone(write).await?,
         now: crate::now(),
     };
     let data = match translate(&saved, data, asked.user)? {
@@ -967,7 +945,7 @@ pub(super) fn inline_save<'a>(
     Box::pin(async move {
         let mut data = Data(asked.post.to_vec());
         sent_by_the_lists(&data)?;
-        let id = u64::try_from(data.get("post_ID").map_or(0, Value::to_int)).unwrap_or_default();
+        let id = id_of(data.get("post_ID"));
         let screen = data.get("screen").and_then(Value::as_bytes);
         if !matches!(screen, Some(b"edit-post" | b"edit-page")) {
             return Err(Error::Unported("a list of another post type").into());
@@ -1130,7 +1108,7 @@ async fn bulk_edit_posts(
         }
     }
     let (mut updated, mut skipped, mut locked_count) = (0, 0, 0);
-    let (now, zone) = (crate::now(), zone(write).await?);
+    let (now, zone) = (crate::now(), wp_timezone(write).await?);
     for &signed in &ids {
         let id = u64::try_from(signed).unwrap_or_default();
         let post = write.post(id).await?;

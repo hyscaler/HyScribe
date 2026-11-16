@@ -653,7 +653,9 @@ impl Listing<'_> {
                 row.comment.post_id
             )
         };
-        let all = self.view == "all";
+        // `admin-ajax.php` lists no view, and shows the actions as `all` does.
+        let ajax = self.view.is_empty();
+        let all = self.view == "all" || ajax;
         let approve = |new: &str, class: &str, label: &str, text: &str| {
             let action = if new == "approved" {
                 "approvecomment"
@@ -759,7 +761,7 @@ impl Listing<'_> {
                 let first = i == 0 || i == 1 && matches!(action, "approve" | "unapprove");
                 let separator = if first { "" } else { " | " };
                 let class = match action {
-                    "reply" | "quickedit" => format!("{action} hide-if-no-js"),
+                    "reply" | "quickedit" if !ajax => format!("{action} hide-if-no-js"),
                     "untrash" | "unspam" if site.approved_before(id) => format!("{action} approve"),
                     "untrash" | "unspam" => format!("{action} unapprove"),
                     _ => action.to_string(),
@@ -937,6 +939,28 @@ const HELP_OVERVIEW: &str = "<p>You can manage comments made on your site simila
 const HELP_MODERATING: &str = "<p>A red bar on the left means the comment is waiting for you to moderate it.</p><p>In the <strong>Author</strong> column, in addition to the author&#8217;s name, email address, and site URL, the commenter&#8217;s IP address is shown. Clicking on this link will show you all the comments made from this IP address.</p><p>In the <strong>Comment</strong> column, hovering over any comment gives you options to approve, reply (and approve), quick edit, edit, spam mark, or trash that comment.</p><p>In the <strong>In response to</strong> column, there are three elements. The text is the name of the post that inspired the comment, and links to the post editor for that entry. The View Post link leads to that post on your live site. The small bubble with the number in it shows the number of approved comments that post has received. If there are pending comments, a red notification circle with the number of pending comments is displayed. Clicking the notification circle will filter the comments screen to show only pending comments on that post.</p><p>In the <strong>Submitted on</strong> column, the date and time the comment was left on your site appears. Clicking on the date/time link will take you to that comment on your live site.</p><p>Many people take advantage of keyboard shortcuts to moderate their comments more quickly. Use the link to the side to learn more.</p>";
 
 const HELP_SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/comments-screen/\">Documentation on Comments</a></p><p><a href=\"https://wordpress.org/documentation/article/understand-comment-spam/\">Documentation on Comment Spam</a></p><p><a href=\"https://wordpress.org/documentation/article/keyboard-shortcuts-classic-editor/#keyboard-shortcuts-for-comments\">Documentation on Keyboard Shortcuts</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
+
+/// `(int) get_option( $name )`.
+fn option_int(site: &dyn CommentsSite, name: &str) -> i64 {
+    Value::String(site.option(name).unwrap_or_default()).to_int()
+}
+
+/// `single_row()` of `row` as `admin-ajax.php` prints a comment it saved:
+/// the comments list of the post `post` (every post for 0), with no mode
+/// or view chosen.
+pub fn ajax_row(site: &dyn CommentsSite, row: &RecentComment, post: u64) -> String {
+    let columns = columns(post == 0);
+    let hidden = hidden_columns(site, "edit-comments");
+    let hidden: Vec<&str> = hidden.iter().map(String::as_str).collect();
+    let listing = Listing {
+        site,
+        columns: &columns,
+        hidden: &hidden,
+        excerpt: false,
+        view: "",
+    };
+    listing.row(row, &mut 0)
+}
 
 /// `edit-comments.php`: the comments `args` ask for, in the view mode of
 /// `settings` (the cookie) or the user's; `None` where PHP fails.
@@ -1284,5 +1308,8 @@ pub fn edit_comments(
 
 #[cfg(test)]
 pub(crate) mod content;
+mod edit;
+pub use edit::{CommentEditSite, comment_edit};
+
 #[cfg(test)]
 mod tests;

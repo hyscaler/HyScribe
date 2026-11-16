@@ -46,6 +46,10 @@ pub struct Asked<'a> {
     pub user: u64,
     /// `time()`, in Unix seconds.
     pub now: i64,
+    /// `$_SERVER['REMOTE_ADDR']`.
+    pub ip: &'a [u8],
+    /// `$_SERVER['HTTP_USER_AGENT']`, empty when not sent.
+    pub agent: &'a [u8],
 }
 
 impl Asked<'_> {
@@ -160,6 +164,34 @@ fn higher(message: &str) -> Refusal {
     died(
         403,
         format!("<h1>You need a higher level of permission.</h1><p>{message}</p>"),
+    )
+}
+
+/// One response of `WP_Ajax_Response::add()`, to the action `action` on
+/// the object `id`: `data` (XML already), then the `supplemental` fields.
+pub fn ajax_response(
+    action: &str,
+    (what, id, position): (&str, u64, &str),
+    data: &str,
+    supplemental: &[(&str, &[u8])],
+) -> String {
+    let fields: String = supplemental
+        .iter()
+        .map(|(key, value)| {
+            let value = String::from_utf8_lossy(value);
+            format!("<{key}><![CDATA[{value}]]></{key}>")
+        })
+        .collect();
+    format!(
+        "<response action='{action}_{id}'><{what} id='{id}' position='{position}'>{data}<supplemental>{fields}</supplemental></{what}></response>"
+    )
+}
+
+/// `WP_Ajax_Response::send()`'s XML of `responses`.
+pub fn wp_ajax(responses: &[String]) -> String {
+    format!(
+        "<?xml version='1.0' encoding='UTF-8' standalone='yes'?><wp_ajax>{}</wp_ajax>",
+        responses.concat()
     )
 }
 
@@ -1109,6 +1141,17 @@ fn ajax_action(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
             }
         }
         "delete-comment" | "dim-comment" => comment_ajax(site, asked, action == "dim-comment"),
+        "edit-comment" | "replyto-comment" => {
+            let field = "_ajax_nonce-replyto-comment";
+            ajax_referer(site, asked, "replyto-comment", Some(field))?;
+            if action == "edit-comment" {
+                return allowed(can_for(site, "edit_comment", post_int(asked, "comment_ID")));
+            }
+            // `wp_ajax_replyto_comment()`: a post the user may edit.
+            let post = post_int(asked, "comment_post_ID");
+            let found = u64::try_from(post).ok().and_then(|id| site.post(id));
+            allowed(found.is_some() && can_for(site, "edit_post", post))
+        }
         "closed-postboxes" => {
             ajax_referer(site, asked, "closedpostboxes", Some("closedpostboxesnonce"))?;
             // A list given as an array is a fatal error in PHP.

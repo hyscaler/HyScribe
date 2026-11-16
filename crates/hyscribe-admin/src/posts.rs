@@ -710,14 +710,25 @@ const MONTHS: [&str; 12] = [
 
 /// `touch_time( 1, 1, 0, 1 )` for `post`, the global post: the fields of
 /// its date, or of the time now for a draft never dated.
-fn touch_time(post: &Post, zone: Zone, now: i64) -> String {
+fn post_touch_time(post: &Post, zone: Zone, now: i64) -> String {
     let undated = ["draft", "pending"].contains(&post.status.as_str())
         && (post.date_gmt.is_empty() || post.date_gmt == "0000-00-00 00:00:00");
-    let field = |format: &str| {
-        if undated {
-            date::format_unix(format, now, zone)
+    touch_time((!undated).then_some(post.date.as_str()), zone, now, true)
+}
+
+/// `touch_time()`: the fields of the stored local `date`, else of the
+/// time now; `multi` for the inline editors, without the IDs and the copies
+/// of the date and of now the single form compares.
+pub(crate) fn touch_time(date: Option<&str>, zone: Zone, now: i64, multi: bool) -> String {
+    let field = |format: &str| match date {
+        Some(date) => date::format(format, date, Zone::Utc),
+        None => date::format_unix(format, now, zone),
+    };
+    let id = |name: &str| {
+        if multi {
+            String::new()
         } else {
-            date::format(format, &post.date, Zone::Utc)
+            format!("id=\"{name}\" ")
         }
     };
     let mm = field("m");
@@ -734,25 +745,46 @@ fn touch_time(post: &Post, zone: Zone, now: i64) -> String {
             format!("\t\t\t<option value=\"{number}\" data-text=\"{text}\" {selected}>{number}-{text}</option>\n")
         })
         .collect();
+    let units = [("jj", "d"), ("aa", "Y"), ("hh", "H"), ("mn", "i")];
+    let format_of = |name: &str| {
+        units
+            .iter()
+            .find(|(unit, _)| *unit == name)
+            .map_or("i", |(_, f)| f)
+    };
     let input = |label: &str, name: &str, size: u8| {
         format!(
-            "<label><span class=\"screen-reader-text\">{label}</span><input type=\"text\" name=\"{name}\" value=\"{}\" size=\"{size}\" maxlength=\"{size}\" autocomplete=\"off\" class=\"form-required\" inputmode=\"numeric\" /></label>",
-            field(match name {
-                "jj" => "d",
-                "aa" => "Y",
-                "hh" => "H",
-                _ => "i",
-            })
+            "<label><span class=\"screen-reader-text\">{label}</span><input type=\"text\" {}name=\"{name}\" value=\"{}\" size=\"{size}\" maxlength=\"{size}\" autocomplete=\"off\" class=\"form-required\" inputmode=\"numeric\" /></label>",
+            id(name),
+            field(format_of(name))
         )
     };
-    format!(
-        "<div class=\"timestamp-wrap\"><label><span class=\"screen-reader-text\">Month</span><select class=\"form-required\" name=\"mm\">\n{options}</select></label> {}, {} at {}:{}</div><input type=\"hidden\" id=\"ss\" name=\"ss\" value=\"{}\" />",
+    let mut out = format!(
+        "<div class=\"timestamp-wrap\"><label><span class=\"screen-reader-text\">Month</span><select class=\"form-required\" {}name=\"mm\">\n{options}</select></label> {}, {} at {}:{}</div><input type=\"hidden\" id=\"ss\" name=\"ss\" value=\"{}\" />",
+        id("mm"),
         input("Day", "jj", 2),
         input("Year", "aa", 4),
         input("Hour", "hh", 2),
         input("Minute", "mn", 2),
         field("s")
-    )
+    );
+    if !multi {
+        out.push_str("\n\n");
+        for (unit, format) in [
+            ("mm", "m"),
+            ("jj", "d"),
+            ("aa", "Y"),
+            ("hh", "H"),
+            ("mn", "i"),
+        ] {
+            out.push_str(&format!(
+                "<input type=\"hidden\" id=\"hidden_{unit}\" name=\"hidden_{unit}\" value=\"{}\" />\n<input type=\"hidden\" id=\"cur_{unit}\" name=\"cur_{unit}\" value=\"{}\" />\n",
+                field(format),
+                date::format_unix(format, now, zone)
+            ));
+        }
+    }
+    out
 }
 
 /// `wp_dropdown_users()` of `users` in the inline editors, `selected` the
@@ -1028,7 +1060,7 @@ fn inline_edit(
             ("type", kind.name.into()),
             ("view", if excerpt { "excerpt" } else { "list" }.into()),
             ("columns", columns.to_string()),
-            ("date", touch_time(first, zone, now)),
+            ("date", post_touch_time(first, zone, now)),
             ("authors", authors),
             ("bulk_authors", bulk_authors),
             ("password", when(can_publish, PASSWORD)),

@@ -8,9 +8,8 @@
 // oracle defines WP_HOME and WP_SITEURL; these cases run as a site without
 // them, as HyScribe's tests do, so the addresses can be saved.
 
-// The admin's functions and hooks: add_settings_error(), update_home_siteurl().
+// The addresses as the options hold them.
 $admin = function () {
-	require_once ABSPATH . 'wp-admin/includes/admin.php';
 	remove_filter( 'option_home', '_config_wp_home' );
 	remove_filter( 'option_siteurl', '_config_wp_siteurl' );
 };
@@ -23,12 +22,9 @@ $request = function ( $post, $get = array() ) {
 };
 
 // The part of wp-admin/$file from $from up to $to.
-$source = function ( $file, $from, $to ) {
-	$text  = file_get_contents( ABSPATH . "wp-admin/$file" );
-	$start = strpos( $text, $from );
-	$code  = substr( $text, $start, strpos( $text, $to, $start ) - $start );
-	$code  = str_replace( array( "! defined( 'WP_SITEURL' )", "! defined( 'WP_HOME' )" ), 'true', $code );
-	return str_replace( 'exit;', 'return;', $code );
+$source = function ( $file, $from, $to ) use ( $admin_code ) {
+	$code = $admin_code( $file, '/(' . preg_quote( $from, '/' ) . '.*?)' . preg_quote( $to, '/' ) . '/s' );
+	return str_replace( array( "! defined( 'WP_SITEURL' )", "! defined( 'WP_HOME' )" ), 'true', $code );
 };
 
 // options.php's handling of its request, up to its page.

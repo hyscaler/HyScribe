@@ -7,32 +7,11 @@
 // its `exit` and `die()` a return. Mail is taken as sent, as hs-admin
 // answers (MVP phase 8 sends it).
 
-// The code of `wp-admin/$screen` from the line after `$from` up to `$to`.
-$admin_block = function ( $screen, $from, $to ) {
-	$source = file_get_contents( ABSPATH . "wp-admin/$screen" );
-	$start  = strpos( $source, $from ) + strlen( $from );
-	$code   = substr( $source, $start, strpos( $source, $to, $start ) - $start );
-	return str_replace( array( 'exit;', 'die();' ), 'return;', $code );
-};
-
-// The admin's code and hooks, which an admin request loads.
+// What an admin request sets up: mail taken as sent, and user 1's cookie.
 $admin = function () {
-	require_once ABSPATH . 'wp-admin/includes/admin.php';
-	require_once ABSPATH . 'wp-admin/includes/ajax-actions.php';
 	add_filter( 'pre_wp_mail', '__return_true' );
 	// User 1's logged in cookie, whose session wp_set_auth_cookie() keeps.
 	$_COOKIE[ LOGGED_IN_COOKIE ] = wp_generate_auth_cookie( 1, time() + HOUR_IN_SECONDS, 'logged_in', 'oracle-token' );
-};
-
-$new_user = function ( $login, $role = 'author' ) {
-	return wp_insert_user(
-		array(
-			'user_login' => $login,
-			'user_pass'  => 'A pass phrase',
-			'user_email' => "$login@example.test",
-			'role'       => $role,
-		)
-	);
 };
 
 // users.php's switch case `$name`, up to the next case.
@@ -50,29 +29,12 @@ $user_update = function ( $screen ) use ( $admin_block ) {
 	eval( $admin_block( 'user-edit.php', "\n\tcase 'update':\n", "\n\t\t// Intentional fall-through" ) );
 };
 
-// The Ajax action `$action`, its JSON answer printed nowhere.
-$ajax = function ( $action ) {
-	add_filter( 'wp_doing_ajax', '__return_true' );
-	add_filter(
-		'wp_die_ajax_handler',
-		fn() => function () {
-			throw new Exception( 'answered' );
-		}
-	);
-	ob_start();
-	try {
-		call_user_func( 'wp_ajax_' . str_replace( '-', '_', $action ) );
-	} catch ( Exception $answered ) {
-		ob_end_clean();
-	}
-};
-
 return array(
 	// users.php's deletion: a user's posts deleted with them, another's
 	// passed to user 1, and user 1 kept.
 	'admin-users-dodelete'       => array(
-		'setup'  => function () use ( $new_user ) {
-			$ids = array( $new_user( 'oracle-deleted' ), $new_user( 'oracle-heir' ) );
+		'setup'  => function () use ( $oracle_user ) {
+			$ids = array( $oracle_user( 'oracle-deleted', array( 'role' => 'author' ) ), $oracle_user( 'oracle-heir', array( 'role' => 'author' ) ) );
 			foreach ( array_combine( array( 'Deleted post', 'Passed post' ), $ids ) as $title => $id ) {
 				wp_insert_post(
 					array(
@@ -108,7 +70,7 @@ return array(
 	// whose login, an address, is its email) and one whose login is
 	// not found once sanitized.
 	'admin-users-resetpassword'  => array(
-		'setup'  => function () use ( $new_user ) {
+		'setup'  => function () use ( $oracle_user ) {
 			global $wpdb;
 			$wpdb->insert(
 				$wpdb->users,
@@ -128,7 +90,7 @@ return array(
 					'role'       => 'author',
 				)
 			);
-			return array( $new_user( 'oracle-reset' ), $at, $odd );
+			return array( $oracle_user( 'oracle-reset', array( 'role' => 'author' ) ), $at, $odd );
 		},
 		'action' => function ( $ids ) use ( $admin, $users_case ) {
 			$admin();
@@ -184,8 +146,8 @@ return array(
 	),
 	// user-new.php's new user by one who may create users but not list them.
 	'admin-user-new-unlisted'    => array(
-		'setup'  => function () use ( $new_user ) {
-			$id = $new_user( 'oracle-creator', 'subscriber' );
+		'setup'  => function () use ( $oracle_user ) {
+			$id = $oracle_user( 'oracle-creator', array( 'role' => 'subscriber' ) );
 			( new WP_User( $id ) )->add_cap( 'create_users' );
 			return $id;
 		},
@@ -209,8 +171,8 @@ return array(
 	),
 	// user-edit.php's save of another user: every field, a role and a password.
 	'admin-user-edit'            => array(
-		'setup'  => function () use ( $new_user ) {
-			return $new_user( 'oracle-edited' );
+		'setup'  => function () use ( $oracle_user ) {
+			return $oracle_user( 'oracle-edited', array( 'role' => 'author' ) );
 		},
 		'action' => function ( $id ) use ( $admin, $user_update ) {
 			$admin();
@@ -269,7 +231,7 @@ return array(
 	),
 	// admin-ajax.php's color scheme of user 1.
 	'admin-color-scheme'         => array(
-		'action' => function () use ( $admin, $ajax ) {
+		'action' => function () use ( $admin, $admin_run ) {
 			$admin();
 			// What admin_init registers.
 			register_admin_color_schemes();
@@ -279,15 +241,15 @@ return array(
 				'nonce'        => wp_create_nonce( 'save-color-scheme' ),
 			);
 			$_REQUEST = $_POST;
-			$ajax( 'save-user-color-scheme' );
+			$admin_run( 'wp_ajax_save_user_color_scheme', true );
 		},
 	),
 	// admin-ajax.php's password reset link from Edit User.
 	'admin-send-password-reset'  => array(
-		'setup'  => function () use ( $new_user ) {
-			return $new_user( 'oracle-link' );
+		'setup'  => function () use ( $oracle_user ) {
+			return $oracle_user( 'oracle-link', array( 'role' => 'author' ) );
 		},
-		'action' => function ( $id ) use ( $admin, $ajax ) {
+		'action' => function ( $id ) use ( $admin, $admin_run ) {
 			$admin();
 			$_POST    = array(
 				'action'  => 'send-password-reset',
@@ -295,7 +257,7 @@ return array(
 				'nonce'   => wp_create_nonce( "reset-password-for-$id" ),
 			);
 			$_REQUEST = $_POST;
-			$ajax( 'send-password-reset' );
+			$admin_run( 'wp_ajax_send_password_reset', true );
 		},
 	),
 );

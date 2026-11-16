@@ -7,28 +7,8 @@
 // actions block, and wp_ajax_inline_save(). An `exit` is a return, a
 // wp_die() an exception, and what the code prints is dropped.
 
-// The admin's includes, loaded only when such an action runs.
-$posts_admin_load = function () {
-	require_once ABSPATH . 'wp-admin/includes/admin.php';
-	require_once ABSPATH . 'wp-admin/includes/ajax-actions.php';
-	add_filter( 'wp_die_handler', fn() => fn() => throw new RuntimeException( 'wp_die' ) );
-	add_filter( 'wp_die_ajax_handler', fn() => fn() => throw new RuntimeException( 'wp_die' ) );
-};
-
-// Runs `$code` with its output dropped and a wp_die() ending it.
-$posts_admin_run = function ( $code ) {
-	ob_start();
-	try {
-		$code();
-	} catch ( RuntimeException $died ) {
-		unset( $died );
-	}
-	ob_end_clean();
-};
-
 // post.php's case `$action` on the post `$id`, with post.php's globals.
-$posts_admin_post = function ( $id, $action ) use ( $posts_admin_load, $posts_admin_run ) {
-	$posts_admin_load();
+$posts_admin_post = function ( $id, $action ) use ( $admin_block, $admin_run ) {
 	$_GET     = array(
 		'post'     => (string) $id,
 		'action'   => $action,
@@ -36,61 +16,50 @@ $posts_admin_post = function ( $id, $action ) use ( $posts_admin_load, $posts_ad
 	);
 	$_POST    = array();
 	$_REQUEST = $_GET;
-	$source   = file_get_contents( ABSPATH . 'wp-admin/post.php' );
-	preg_match( "/\n\tcase '$action':\n(.*?)\n\tcase '/s", $source, $found );
-	$posts_admin_run(
-		function () use ( $id, $found ) {
+	$code     = $admin_block( 'post.php', "\n\tcase '$action':\n", "\n\tcase '" );
+	$admin_run(
+		function () use ( $id, $code ) {
 			global $post_type, $post_type_object, $post;
 			$post_id          = $id;
 			$post             = get_post( $id );
 			$post_type        = $post->post_type;
 			$post_type_object = get_post_type_object( $post_type );
 			$sendback         = admin_url( 'edit.php' );
-			eval( str_replace( 'exit;', 'return;', $found[1] ) );
+			eval( $code );
 		}
 	);
 };
 
 // edit.php's bulk actions over `$request`, as the posts list sends it.
-$posts_admin_edit = function ( $request ) use ( $posts_admin_load, $posts_admin_run ) {
-	$posts_admin_load();
+$posts_admin_edit = function ( $request ) use ( $admin_code, $admin_run ) {
 	$_GET     = $request + array( '_wpnonce' => wp_create_nonce( 'bulk-posts' ) );
 	$_POST    = array();
 	$_REQUEST = $_GET;
-	$source   = file_get_contents( ABSPATH . 'wp-admin/edit.php' );
-	preg_match( "/\nif \( \\\$doaction \) \{\n(.*?)\n\} elseif/s", $source, $found );
-	$posts_admin_run(
-		function () use ( $found ) {
+	$code     = $admin_code( 'edit.php', "/\nif \( \\\$doaction \) \{\n(.*?)\n\} elseif/s" );
+	$admin_run(
+		function () use ( $code ) {
 			$post_type     = $_REQUEST['post_type'] ?? 'post';
 			$parent_file   = 'post' === $post_type ? 'edit.php' : "edit.php?post_type=$post_type";
 			$post_new_file = 'post' === $post_type ? 'post-new.php' : "post-new.php?post_type=$post_type";
 			$pagenum       = 1;
 			// WP_Posts_List_Table::current_action().
 			$doaction = isset( $_REQUEST['delete_all'] ) ? 'delete_all' : $_REQUEST['action'];
-			eval( str_replace( 'exit;', 'return;', $found[1] ) );
+			eval( $code );
 		}
 	);
 };
 
 // admin-ajax.php's inline-save over `$fields`, as Quick Edit sends them.
-$posts_admin_inline = function ( $fields ) use ( $posts_admin_load, $posts_admin_run ) {
-	$posts_admin_load();
-	add_filter( 'wp_doing_ajax', '__return_true' );
+$posts_admin_inline = function ( $fields ) use ( $admin_run ) {
 	$_GET     = array();
 	$_POST    = wp_slash( $fields + array( '_inline_edit' => wp_create_nonce( 'inlineeditnonce' ) ) );
 	$_REQUEST = $_POST;
-	$posts_admin_run( 'wp_ajax_inline_save' );
+	$admin_run( 'wp_ajax_inline_save', true );
 };
 
 // Another user's fresh edit lock on the post `$id`.
-$posts_admin_lock = function ( $id ) {
-	$user = wp_insert_user(
-		array(
-			'user_login' => 'oracle-editing',
-			'user_pass'  => 'A pass phrase',
-			'user_email' => 'oracle-editing@example.test',
-		)
-	);
+$posts_admin_lock = function ( $id ) use ( $oracle_user ) {
+	$user = $oracle_user( 'oracle-editing' );
 	update_post_meta( $id, '_edit_lock', time() . ":$user" );
 };
 

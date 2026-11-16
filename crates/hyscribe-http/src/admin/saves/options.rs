@@ -20,7 +20,8 @@ use hyscribe_write::options::{
 };
 use hyscribe_write::posts::{Context, PostArgs, wp_insert_post};
 
-use super::{Acting, Saving};
+use super::dashboard::context;
+use super::{Acting, Saving, text};
 use crate::redirect::wp_validate_redirect;
 use crate::rewrite::{Settings, rules};
 
@@ -52,10 +53,6 @@ impl Errors {
         set_transient(write, "settings_errors", &Value::Array(list.collect()), 30).await?;
         Ok(())
     }
-}
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
 }
 
 /// `home_url()` as the options are now.
@@ -533,13 +530,9 @@ pub(super) fn create_privacy_page<'a>(
         let home = home_url(write).await?;
         let site = get_option(write, "siteurl").await?.to_php_string();
         let ctx = Context {
-            user: asked.user,
-            can_publish: false,
-            home: home.clone().into_bytes(),
-            upload_host: hyscribe_render::link::host(&site),
             unfiltered_html: super::posts::unfiltered_html(write, asked.user, acting.constants())
                 .await?,
-            now: crate::now(),
+            ..context(asked.user, &home, &text(&site))
         };
         // A draft: `wp_insert_post()`'s status when none is given.
         let page = PostArgs {

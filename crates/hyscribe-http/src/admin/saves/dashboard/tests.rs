@@ -10,12 +10,13 @@ use hyscribe_testkit::writes::check_writes;
 
 use super::super::Stop;
 use super::super::screen::tests::{ajax, answered, cut, run};
-use super::super::tests::writer;
+use super::super::tests::unread::Unread;
+use super::super::tests::{SITE, asked, fields, writer};
 use super::*;
 
 /// `$views_draft()`: the Quick Draft form's auto-draft, user 1's.
 async fn drafted(write: &mut Write<'_>) -> Result<u64, Error> {
-    quick_press_draft(write, &context(1, "http://127.0.0.1:8081", false)).await
+    quick_press_draft(write, &context(1, SITE, SITE)).await
 }
 
 fn shown(err: Error) -> String {
@@ -56,7 +57,7 @@ async fn the_welcome_panel_s_state_is_php_s() {
         "update-welcome-panel",
         "admin-ajax-welcome-panel",
         "visible=",
-        "1",
+        super::super::Ajax::Text("1".into()),
     )
     .await;
 }
@@ -106,4 +107,28 @@ async fn quick_drafts_php_keeps_as_they_are() {
     assert_eq!(ours, (b"Auto Draft".to_vec(), wrapped.into_bytes()));
     let untouched = (b"Only".to_vec(), Vec::new());
     assert_eq!(saved(&mut write, "post_title=Only").await, untouched);
+}
+
+/// A Quick Draft keeps a PDF from the uploads, which `wp_upload_dir()`
+/// puts under `siteurl` (the site's `admin_url()`), not under a home URL
+/// elsewhere.
+#[tokio::test]
+async fn quick_drafts_keep_pdfs_from_the_site_url() {
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    let id = drafted(&mut write).await.unwrap();
+    let pdf = "<object type=\"application/pdf\" data=\"http://127.0.0.1:8081/a.pdf\"></object>";
+    let post = fields(&format!("post_ID={id}&content={}", pdf.replace(' ', "+")));
+    let asked = Asked {
+        home: "http://home.example.test",
+        ..asked("/hs-admin/post", &[], &post)
+    };
+    assert!(
+        quickdraft_save(&mut write, &asked, &Unread::default())
+            .await
+            .is_ok()
+    );
+    let content = write.post(id).await.unwrap().unwrap().content;
+    let paragraph = format!("<!-- wp:paragraph -->{pdf}<!-- /wp:paragraph -->");
+    assert_eq!(String::from_utf8(content).unwrap(), paragraph);
 }

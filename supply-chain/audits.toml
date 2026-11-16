@@ -25,6 +25,12 @@ criteria = "safe-to-deploy"
 delta = "0.4.4 -> 0.5.2"
 notes = "Trait restructuring for 0.5 (block and mode backends, tweakable ciphers, stream wrapper behind a feature). The crate now declares #![forbid(unsafe_code)], removing the two unsafe blocks 0.4.4 had. No build script, proc macros, or I/O; include_bytes appears only in feature gated test macros."
 
+[[audits.getrandom]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.2.17"
+notes = "Reviewed the Linux and Android path HyScribe builds: the getrandom syscall through libc::syscall, falling back to /dev/urandom (opened O_CLOEXEC once, after polling /dev/random until the pool is ready, behind a pthread mutex) when the kernel lacks the syscall or seccomp blocks it; sys_fill_exact loops on EINTR and bounds every advance with get_mut. The unsafe code is the libc calls and the MaybeUninit slice casts, each sound as written. The other platforms' backends were read for I/O: each calls only its system's RNG. No build script, proc macros, network, process or environment access; std only for io::Error conversions."
+
 [[audits.gif]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
@@ -79,6 +85,12 @@ criteria = "safe-to-deploy"
 version = "2.0.1"
 notes = "A single macro_rules! macro generating error enums with Display, Error and From implementations. No unsafe code, build script, proc macros, dependencies or I/O; std::fs and std::env appear only in doc comments and examples."
 
+[[audits.rustls-webpki]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.103.16 -> 0.103.17"
+notes = "Adds a certificate transparency SCT list parser (src/sct.rs) over untrusted::Reader with bounds checked reads and no unsafe code, records the SCT extension instead of treating it as unknown, and adds spki_for_anchor and VerifiedPath::issuer_spki, which rewrap the anchor's SubjectPublicKeyInfo. No new dependencies, build script, I/O or unsafe code."
+
 [[audits.weezl]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
@@ -96,3 +108,111 @@ who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
 version = "0.5.15"
 notes = "Pure Rust baseline and progressive JPEG decoder over a caller supplied byte source. All unsafe code is SIMD intrinsics compiled only with the x86 or neon feature; with default features off lib.rs applies forbid(unsafe_code), so the crate builds with no unsafe at all. Certified for use without x86 and neon. Width and height are checked against the options' limits before buffers are allocated. No build script, filesystem, network, process or environment access. Depends only on zune-core."
+
+[[trusted.cc]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2022-10-29"
+end = "2027-11-16"
+
+[[trusted.find-msvc-tools]]
+criteria = "safe-to-deploy"
+user-id = 539 # Josh Stone (cuviper)
+start = "2025-08-29"
+end = "2027-11-16"
+
+[[trusted.openssl-probe]]
+criteria = "safe-to-deploy"
+user-id = 4556 # Dirkjan Ochtman (djc)
+start = "2025-12-29"
+end = "2027-11-16"
+
+[[trusted.ring]]
+criteria = "safe-to-deploy"
+user-id = 2751 # Joe Birr-Pixton (ctz)
+start = "2025-02-22"
+end = "2027-11-16"
+
+[[trusted.rustls]]
+criteria = "safe-to-deploy"
+user-id = 2751 # Joe Birr-Pixton (ctz)
+start = "2019-04-02"
+end = "2027-11-16"
+
+[[trusted.rustls-pki-types]]
+criteria = "safe-to-deploy"
+user-id = 2751 # Joe Birr-Pixton (ctz)
+start = "2023-09-07"
+end = "2027-11-16"
+
+[[trusted.rustls-webpki]]
+criteria = "safe-to-deploy"
+user-id = 2751 # Joe Birr-Pixton (ctz)
+start = "2023-01-09"
+end = "2027-11-16"
+
+[[trusted.tokio-rustls]]
+criteria = "safe-to-deploy"
+user-id = 4556 # Dirkjan Ochtman (djc)
+start = "2023-06-09"
+end = "2027-11-16"
+
+[[trusted.windows-sys]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-15"
+end = "2027-11-16"
+
+[[trusted.windows-targets]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-09"
+end = "2027-11-16"
+
+[[trusted.windows_aarch64_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-01"
+end = "2027-11-16"
+
+[[trusted.windows_aarch64_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-05"
+end = "2027-11-16"
+
+[[trusted.windows_i686_gnu]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-28"
+end = "2027-11-16"
+
+[[trusted.windows_i686_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2024-04-02"
+end = "2027-11-16"
+
+[[trusted.windows_i686_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-27"
+end = "2027-11-16"
+
+[[trusted.windows_x86_64_gnu]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-28"
+end = "2027-11-16"
+
+[[trusted.windows_x86_64_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-01"
+end = "2027-11-16"
+
+[[trusted.windows_x86_64_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-27"
+end = "2027-11-16"

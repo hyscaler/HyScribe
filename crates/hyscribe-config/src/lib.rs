@@ -214,6 +214,9 @@ pub struct Config {
     /// `REST_PUBLIC_USERS`: `on` (default) answers visitors' REST users
     /// requests as WordPress does, `off` as if no user had published posts.
     pub rest_public_users: bool,
+    /// `HTTP_OUTBOUND`: `on` lets the server fetch from other sites through
+    /// the outbound client (ADR 0019); `off` (default) fetches nothing.
+    pub http_outbound: bool,
     /// The capability constants.
     pub constants: Constants,
     /// The login rate limits.
@@ -335,6 +338,12 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         Some(_) => return Err(invalid("REST_PUBLIC_USERS", "must be on or off")),
     };
 
+    let http_outbound = match get("HTTP_OUTBOUND") {
+        None | Some("off") => false,
+        Some("on") => true,
+        Some(_) => return Err(invalid("HTTP_OUTBOUND", "must be on or off")),
+    };
+
     if constant(get("MULTISITE"), "MULTISITE", false)? {
         return Err(invalid("MULTISITE", "multisite networks are not supported"));
     }
@@ -380,6 +389,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         site_url: get("WP_SITEURL").map(String::from),
         salts,
         rest_public_users,
+        http_outbound,
         constants,
         login_limits,
     })

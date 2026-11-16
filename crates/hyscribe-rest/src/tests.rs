@@ -18,6 +18,7 @@ mod index;
 mod media;
 mod people;
 mod posts;
+mod previews;
 mod search;
 mod site;
 mod writes;

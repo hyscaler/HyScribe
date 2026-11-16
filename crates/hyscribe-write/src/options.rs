@@ -230,5 +230,38 @@ pub async fn delete_transient(write: &mut Write<'_>, name: &str) -> Result<bool,
     Ok(deleted)
 }
 
+/// `set_site_transient( $name, $value, $expiration )` on a single site
+/// without an object cache: the `_site_transient_` option, and a
+/// `_site_transient_timeout_` one when it expires, neither autoloaded.
+pub async fn set_site_transient(
+    write: &mut Write<'_>,
+    name: &str,
+    value: &Value,
+    expiration: i64,
+) -> Result<bool, Error> {
+    let timeout = format!("_site_transient_timeout_{name}");
+    let option = format!("_site_transient_{name}");
+    let expires = Value::Int(now() + expiration);
+    let off = Some(Autoload::Off);
+    if get_option(write, &option).await? == Value::Bool(false) {
+        if expiration != 0 {
+            add_option(write, &timeout, &expires, off).await?;
+        }
+        return add_option(write, &option, value, off).await;
+    }
+    if expiration != 0 {
+        update_option(write, &timeout, &expires, off).await?;
+    }
+    update_option(write, &option, value, off).await
+}
+
+/// What `get_site_transient( $name )` writes for a transient whose timeout
+/// has passed: both options deleted.
+pub async fn expire_site_transient(write: &mut Write<'_>, name: &str) -> Result<(), Error> {
+    delete_option(write, &format!("_site_transient_{name}")).await?;
+    delete_option(write, &format!("_site_transient_timeout_{name}")).await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;

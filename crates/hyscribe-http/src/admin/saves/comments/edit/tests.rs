@@ -7,10 +7,14 @@ use hyscribe_db::CommentFields;
 use hyscribe_phpser::Key;
 
 use super::*;
+use crate::admin::saves::tests::unfiltered::Unfiltered;
 use crate::admin::saves::tests::{fields, writer};
 
 const MOVED: &str = "The comment cannot be moved there because it or its replies would exceed the maximum threading depth.";
 const INVALID: &str = "Invalid parent comment.";
+
+/// A site whose comment authors may not post unfiltered HTML.
+const FILTERED: Unfiltered = Unfiltered { authors: false };
 
 /// The request posting `query` as user 1.
 fn asked(post: &[(Key, Value)]) -> Asked<'_> {
@@ -198,23 +202,23 @@ async fn odd_requests_save_nothing() {
         "comment_ID=1&comment_date[]=x",
     ] {
         let post = fields(query);
-        let edited = edit_comment(&mut write, &asked(&post), None).await;
+        let edited = edit_comment(&mut write, &asked(&post), &FILTERED, None).await;
         assert!(matches!(edited, Err(Error::Unported(_))), "{query}");
     }
     for query in ["comment_ID=-1", "comment_ID=999999999"] {
         let post = fields(query);
-        let edited = edit_comment(&mut write, &asked(&post), None).await;
+        let edited = edit_comment(&mut write, &asked(&post), &FILTERED, None).await;
         assert_eq!(edited.unwrap(), Err("Invalid comment ID."), "{query}");
     }
     // `comment_status` before `comment_approved`, Quick Edit's `status` first.
     let post = fields("comment_ID=1&comment_status=0&comment_approved=spam");
-    edit_comment(&mut write, &asked(&post), None)
+    edit_comment(&mut write, &asked(&post), &FILTERED, None)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(write.comment(1).await.unwrap().unwrap().approved, "0");
     let status = Some(b"spam".to_vec());
-    edit_comment(&mut write, &asked(&post), status)
+    edit_comment(&mut write, &asked(&post), &FILTERED, status)
         .await
         .unwrap()
         .unwrap();
@@ -236,10 +240,29 @@ async fn a_failed_statement_moves_nothing() {
         let post = fields(&format!(
             "comment_ID={moved}&comment_parent={under}&content=Moved"
         ));
-        match edit_comment(&mut write, &asked(&post), None).await {
+        match edit_comment(&mut write, &asked(&post), &FILTERED, None).await {
             Err(Error::Db(_)) => {}
             edited => return assert_eq!(edited.unwrap(), Ok(())),
         }
     }
     panic!("every statement budget failed");
+}
+
+/// With `DISALLOW_UNFILTERED_HTML` false, an administrator's edit is saved
+/// unfiltered when the comment's author may post unfiltered HTML too, else
+/// through kses, as `wp_update_comment()` adds `wp_filter_kses`.
+#[tokio::test(flavor = "multi_thread")]
+async fn unfiltered_html_needs_both_the_user_and_the_author() {
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    let post = fields("comment_ID=1&content=%3Cscript%3Ex%3C%2Fscript%3E+%3Cb%3Ey%3C%2Fb%3E");
+    for (authors, saved) in [(true, "<script>x</script> <b>y</b>"), (false, "x <b>y</b>")] {
+        let site = Unfiltered { authors };
+        edit_comment(&mut write, &asked(&post), &site, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let comment = write.comment(1).await.unwrap().unwrap();
+        assert_eq!(comment.content, saved.as_bytes(), "{authors}");
+    }
 }

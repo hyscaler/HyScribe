@@ -54,6 +54,9 @@ impl ActionSite for Unread {
     fn user_roles(&self) -> Option<Vec<u8>> {
         unreachable!()
     }
+    fn lock_holder(&self, _: u64) -> Option<String> {
+        unreachable!()
+    }
 }
 
 impl Acting for Unread {
@@ -61,6 +64,12 @@ impl Acting for Unread {
         unreachable!()
     }
     fn comment_url(&self, _: u64) -> String {
+        unreachable!()
+    }
+    fn user_can(&self, _: u64, _: &str) -> bool {
+        unreachable!()
+    }
+    fn create_nonce(&self, _: &str) -> String {
         unreachable!()
     }
 }

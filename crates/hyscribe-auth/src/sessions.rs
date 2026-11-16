@@ -173,6 +173,22 @@ impl Sessions {
         sessions.retain(|(key, _)| *key != verifier);
         self.save(user, sessions)
     }
+
+    /// `WP_Session_Tokens::destroy_others()`: every session but the
+    /// token's ends; all of them when the token's has.
+    pub fn destroy_others(&self, user: u64, token: &[u8], now: i64) -> io::Result<()> {
+        let verifier = Key::String(verifier(token));
+        let _held = self.lock.lock();
+        let mut sessions = self.sessions(user, now);
+        sessions.retain(|(key, _)| *key == verifier);
+        self.save(user, sessions)
+    }
+
+    /// `WP_Session_Tokens::destroy_all()`: every session of `user` ends.
+    pub fn destroy_all(&self, user: u64) -> io::Result<()> {
+        let _held = self.lock.lock();
+        self.save(user, Vec::new())
+    }
 }
 
 #[cfg(test)]

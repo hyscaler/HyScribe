@@ -9,7 +9,7 @@ use hyscribe_phpser::Value;
 use hyscribe_write::Error;
 use hyscribe_write::comments::{CommentEdit, Context, update_comment};
 
-use super::super::text;
+use super::super::{Acting, read, text};
 use super::comment_status;
 
 /// The `$_POST` field `name`, a string; an array PHP's filters cannot take.
@@ -50,6 +50,7 @@ fn unsigned(asked: &Asked, name: &str) -> Result<Option<u64>, Error> {
 pub(super) async fn edit_comment(
     write: &mut Write<'_>,
     asked: &Asked<'_>,
+    site: &dyn Acting,
     status: Option<Vec<u8>>,
 ) -> Result<Result<(), &'static str>, Error> {
     if asked.post("comment_meta").is_some() {
@@ -71,9 +72,9 @@ pub(super) async fn edit_comment(
     {
         return Ok(Err(invalid));
     }
-    if comment.is_none() {
+    let Some(comment) = comment else {
         return Ok(Err("Invalid comment ID."));
-    }
+    };
     let id = id.unsigned_abs();
     let text = |bytes: Vec<u8>| text(&bytes);
     let edit = CommentEdit {
@@ -99,8 +100,13 @@ pub(super) async fn edit_comment(
         now: asked.now,
         home: asked.home.as_bytes(),
     };
-    // Through kses: `DISALLOW_UNFILTERED_HTML` is always set.
-    match update_comment(write, context, &edit, true).await? {
+    // Through kses unless both the user and the comment's author may post
+    // unfiltered HTML.
+    let kses = read(|| {
+        let theirs = site.user_can(comment.user_id, "unfiltered_html");
+        !(site.current_user_can("unfiltered_html", &[]) & theirs)
+    });
+    match update_comment(write, context, &edit, kses).await? {
         Some(_) => Ok(Ok(())),
         None => Ok(Err("Invalid post ID.")),
     }

@@ -55,7 +55,7 @@ impl PrefixSql for Prefix {
 }
 
 /// Why a database call failed. Messages never contain the password.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DbError(String);
 
 impl fmt::Display for DbError {
@@ -1235,6 +1235,26 @@ impl Db {
             c.finish(credentials)
         })
         .transpose()
+    }
+
+    /// Whether the user is the author of a post of any type or status, or
+    /// the owner of a link, as `users.php` asks before a deletion.
+    pub async fn owns_content(&self, user: u64) -> Result<bool, DbError> {
+        for sql in [
+            "SELECT ID FROM {prefix}posts WHERE post_author = ? LIMIT 1",
+            "SELECT link_id FROM {prefix}links WHERE link_owner = ? LIMIT 1",
+        ] {
+            let query = sqlx::query(self.prefix.sql(sql)).bind(user);
+            if query
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(db_error)?
+                .is_some()
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// `get_user_meta( $user_id, $key, true )`: the first value stored.

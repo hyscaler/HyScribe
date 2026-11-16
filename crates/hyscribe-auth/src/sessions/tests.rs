@@ -39,6 +39,24 @@ fn a_session_lives_until_it_expires_or_ends() {
 }
 
 #[test]
+fn others_or_all_sessions_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let sessions = Sessions::new(dir.path().join("sessions"));
+    let kept = sessions.create(1, NOW + 60, &origin()).unwrap();
+    let ended = sessions.create(1, NOW + 60, &origin()).unwrap();
+    let other = sessions.create(2, NOW + 60, &origin()).unwrap();
+    sessions.destroy_others(1, kept.as_bytes(), NOW).unwrap();
+    assert!(sessions.verify(1, kept.as_bytes(), NOW));
+    assert!(!sessions.verify(1, ended.as_bytes(), NOW));
+    // A token with no session keeps none.
+    sessions.destroy_others(1, ended.as_bytes(), NOW).unwrap();
+    assert_eq!(sessions.count(1, NOW), 0);
+    sessions.destroy_all(2).unwrap();
+    assert!(!sessions.verify(2, other.as_bytes(), NOW));
+    assert!(!dir.path().join("sessions/2").exists());
+}
+
+#[test]
 fn files_are_private_and_hold_what_session_tokens_holds() {
     let dir = tempfile::tempdir().unwrap();
     let sessions = Sessions::new(dir.path().join("sessions"));

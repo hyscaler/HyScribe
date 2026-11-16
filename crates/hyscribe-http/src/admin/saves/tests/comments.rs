@@ -422,3 +422,39 @@ async fn a_reply_approves_its_held_parent() {
     let report = check_writes(&fixture_database(), "admin-comment-reply", setup, action).await;
     report.unwrap();
 }
+
+/// With `DISALLOW_UNFILTERED_HTML` false, a reply is saved unfiltered only
+/// with the form's `unfiltered-html-comment` nonce, else through
+/// `wp_filter_kses`, as `wp_ajax_replyto_comment()` sets the filters.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reply_is_unfiltered_with_its_nonce() {
+    use super::unfiltered::{NONCE, Unfiltered};
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    let site = Unfiltered { authors: false };
+    for (nonce, saved) in [
+        (NONCE, "<script>x</script> <b>y</b>"),
+        ("9876543210", "x <b>y</b>"),
+    ] {
+        let query = format!(
+            "comment_post_ID=1&comment_ID=1&content=%3Cscript%3Ex%3C%2Fscript%3E+%3Cb%3Ey%3C%2Fb%3E+{nonce}&_wp_unfiltered_html_comment={nonce}"
+        );
+        let post = fields(&query);
+        let asked = Asked {
+            get: &[],
+            post: &post,
+            referer: None,
+            uri: b"/hs-admin/admin-ajax",
+            home: "http://127.0.0.1:8081",
+            user: 1,
+            now: 0,
+            ip: b"",
+            agent: b"",
+        };
+        let replied = super::super::comments::reply(&mut write, &asked, &site).await;
+        assert!(matches!(replied, Ok(Ajax::CommentRow(_))), "{nonce}");
+        let id = write.post_comment_ids(1).await.unwrap()[0];
+        let comment = write.comment(id).await.unwrap().unwrap();
+        assert_eq!(comment.content, format!("{saved} {nonce}").into_bytes());
+    }
+}

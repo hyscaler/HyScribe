@@ -12,7 +12,7 @@ use hyscribe_phpser::Value;
 use hyscribe_render::formatting::sanitize_title;
 
 use crate::Error;
-use crate::options::{Meta, delete_metadata, get_metadata};
+use crate::options::{Meta, delete_metadata, get_metadata, update_metadata};
 use crate::terms::{
     Taxonomy, TermError, TermList, TermRef, wp_set_post_categories, wp_set_post_terms,
 };
@@ -25,7 +25,8 @@ mod site;
 mod slug;
 mod trash;
 
-pub use trash::{wp_delete_post, wp_trash_post, wp_untrash_post};
+pub use date::checkdate as wp_checkdate;
+pub use trash::{stick_post, unstick_post, wp_delete_post, wp_trash_post, wp_untrash_post};
 
 /// Who writes and where: what the PHP functions read from the request and
 /// the configuration rather than the database.
@@ -92,6 +93,9 @@ pub struct PostArgs {
     pub import_id: u64,
     /// `edit_date`: `wp_update_post()` keeps a draft's date only with it.
     pub edit_date: bool,
+    /// `page_template`: `default`, or empty for none given; the theme's own
+    /// templates are not ported.
+    pub page_template: Vec<u8>,
 }
 
 impl From<TermError> for Error {
@@ -204,6 +208,7 @@ pub async fn wp_update_post(
         category: Some(category.clone()),
         import_id: 0,
         edit_date: false,
+        page_template: Vec::new(),
     };
     change(&mut args);
     // Passed categories replace the post's only when there are some.
@@ -216,6 +221,18 @@ pub async fn wp_update_post(
         args.date_gmt = String::new();
     }
     wp_insert_post(write, ctx, args).await
+}
+
+/// `wp_unique_post_slug( $slug, $id, $status, $post_type, $parent )`.
+pub async fn wp_unique_post_slug(
+    write: &mut Write<'_>,
+    slug: Vec<u8>,
+    (id, status): (u64, &str),
+    post_type: &str,
+    parent: u64,
+) -> Result<Vec<u8>> {
+    let kind = Kind::of(post_type)?;
+    slug::unique(write, slug, id, (status, kind, post_type), parent).await
 }
 
 /// `get_default_post_to_edit( 'post', true )`: a new `auto-draft`, with
@@ -461,6 +478,14 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
     if before.is_none() {
         let guid = link::permalink(write, ctx, id, &fields).await?;
         write.set_post_guid(id, &guid).await?;
+    }
+    if truthy(&args.page_template) {
+        if args.page_template != b"default" {
+            return Err(Error::Unported("a page template of the theme"));
+        }
+        let template = Value::String(args.page_template);
+        let any = Value::String(Vec::new());
+        update_metadata(write, Meta::Post, id, "_wp_page_template", &template, &any).await?;
     }
     hooks::transition(write, ctx, kind, (&fields.status, &previous), id).await?;
     if let Some(before) = before {

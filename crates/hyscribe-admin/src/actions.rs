@@ -25,6 +25,9 @@ pub trait ActionSite: CapabilityData {
     fn comment_approved(&self, id: u64) -> Option<Vec<u8>>;
     /// The roles as stored, `{prefix}user_roles`.
     fn user_roles(&self) -> Option<Vec<u8>>;
+    /// `wp_check_post_lock( $post )`: the display name of another user
+    /// whose edit lock on the post is fresh.
+    fn lock_holder(&self, post: u64) -> Option<String>;
 }
 
 /// The request an action is read from.
@@ -241,11 +244,9 @@ pub fn items(value: &Value) -> Vec<Value> {
     }
 }
 
-/// The post's `_edit_lock`, whose check is not ported.
-fn locked(site: &dyn ActionSite, id: i64) -> bool {
-    let id = u64::try_from(id).unwrap_or_default();
-    site.post_meta(id, "_edit_lock")
-        .is_some_and(|lock| !Value::String(lock).is_empty())
+/// The display name of who holds a fresh edit lock on the post.
+fn lock_holder(site: &dyn ActionSite, id: i64) -> Option<String> {
+    site.lock_holder(u64::try_from(id).unwrap_or_default())
 }
 
 /// The checks of an action on the admin screen `screen` (hs-admin's path
@@ -367,12 +368,11 @@ fn posts_bulk(site: &dyn ActionSite, asked: &Asked, doaction: &Value, edit: &str
         Some(b"delete") => ("Sorry, you are not allowed to delete this item.", None),
         _ => return Ok(()),
     };
-    // The first post is written unless refused, or locked and skipped,
-    // which is not ported.
+    // The first post is written unless refused, or locked and skipped.
     if !can_for(site, "delete_post", first) {
         return Err(died(500, denied));
     }
-    if doaction.as_bytes() == Some(b"trash") && locked(site, first) {
+    if doaction.as_bytes() == Some(b"trash") && lock_holder(site, first).is_some() {
         return Ok(());
     }
     let error = check.and_then(|check| check(&post_status(site, first)));
@@ -436,9 +436,12 @@ fn post_action(site: &dyn ActionSite, asked: &Asked, post: bool) -> Option<Check
         if !can_for(site, "delete_post", id) {
             return Err(died(403, denied));
         }
-        // The lock's refusal is not ported.
-        if action == b"trash" && locked(site, id) {
-            return Ok(());
+        if action == b"trash"
+            && let Some(name) = lock_holder(site, id)
+        {
+            let message =
+                format!("You cannot move this item to the Trash. {name} is currently editing.");
+            return Err(died(409, message));
         }
         let error = check.and_then(|check| check(&found.status));
         error.map_or(Ok(()), |error| Err(died(500, error)))
@@ -621,16 +624,16 @@ fn users_action(asked: &Asked) -> Option<Vec<u8>> {
 }
 
 /// The action of a request whose checks passed, as its write's handler is
-/// registered: `screen-options` for the Screen Options form, the users
-/// and terms lists' `current_action()`, `options.php`'s email confirmation
-/// (`adminhash`) and dismissal, the Privacy screen's `$_POST['action']`,
-/// else `$_REQUEST['action']`.
+/// registered: `screen-options` for the Screen Options form, the lists'
+/// `current_action()`, `post.php`'s `delete` for its Delete button,
+/// `options.php`'s email confirmation (`adminhash`) and dismissal, the
+/// Privacy screen's `$_POST['action']`, else `$_REQUEST['action']`.
 pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
     match screen {
         "admin-ajax" => asked.action(),
         _ if screen_options(asked) => b"screen-options".to_vec(),
         "users" => users_action(asked).unwrap_or_default(),
-        "edit-comments" => (asked.current_action(true).as_ref())
+        "edit" | "edit-comments" => (asked.current_action(true).as_ref())
             .map(Value::to_php_string)
             .unwrap_or_default(),
         "comment" => comment_php_action(asked),
@@ -640,6 +643,7 @@ pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
         "options" if dismissed(asked) => b"dismiss".to_vec(),
         "options-privacy" => privacy_action(asked).unwrap_or_default(),
         "edit-tags" => terms_action(asked).unwrap_or_default(),
+        "post" if asked.post("deletepost").is_some() => b"delete".to_vec(),
         _ => asked.action(),
     }
 }
@@ -1090,14 +1094,22 @@ fn ajax_action(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
             if id == 0 {
                 return Err(ajax(200, ""));
             }
-            let (cap, message) = match asked.post("post_type").and_then(Value::as_bytes) {
-                Some(b"page") => ("edit_page", "Sorry, you are not allowed to edit this page."),
-                _ => ("edit_post", "Sorry, you are not allowed to edit this post."),
+            let (cap, kind) = match asked.post("post_type").and_then(Value::as_bytes) {
+                Some(b"page") => ("edit_page", "page"),
+                _ => ("edit_post", "post"),
             };
-            // The lock's answer is not ported.
-            match can_for(site, cap, id) {
-                true => Ok(()),
-                false => Err(ajax(200, message)),
+            if !can_for(site, cap, id) {
+                let message = format!("Sorry, you are not allowed to edit this {kind}.");
+                return Err(ajax(200, &message));
+            }
+            match lock_holder(site, id) {
+                Some(name) => {
+                    let name = esc_html(name.as_bytes());
+                    let message =
+                        format!("Saving is disabled: {name} is currently editing this {kind}.");
+                    Err(ajax(200, &message))
+                }
+                None => Ok(()),
             }
         }
         "delete-comment" | "dim-comment" => comment_ajax(site, asked, action == "dim-comment"),
@@ -1157,6 +1169,40 @@ fn ajax_action(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
                 false => Err(Refusal {
                     status: 200,
                     body: Body::Json("{\"success\":false}"),
+                }),
+            }
+        }
+        "send-password-reset" => {
+            let id = post_int(asked, "user_id");
+            ajax_referer(
+                site,
+                asked,
+                &format!("reset-password-for-{id}"),
+                Some("nonce"),
+            )?;
+            match can_for(site, "edit_user", id) {
+                true => Ok(()),
+                false => Err(Refusal {
+                    status: 200,
+                    body: Body::Json(
+                        "{\"success\":false,\"data\":\"Cannot send password reset, permission denied.\"}",
+                    ),
+                }),
+            }
+        }
+        "destroy-sessions" => {
+            let id = post_int(asked, "user_id");
+            let user = u64::try_from(id).is_ok_and(|id| site.user_exists(id));
+            match user
+                && can_for(site, "edit_user", id)
+                && verified(site, asked.post("nonce"), &format!("update-user_{id}"))
+            {
+                true => Ok(()),
+                false => Err(Refusal {
+                    status: 200,
+                    body: Body::Json(
+                        "{\"success\":false,\"data\":{\"message\":\"Could not log out user sessions. Please try again.\"}}",
+                    ),
                 }),
             }
         }

@@ -53,7 +53,8 @@ pub fn generate_auth_cookie(
 pub struct AuthCookie<'a> {
     /// The user's login.
     pub username: &'a [u8],
-    expiration: &'a [u8],
+    /// The expiration, as given.
+    pub expiration: &'a [u8],
     /// The session token.
     pub token: &'a [u8],
     hmac: &'a [u8],

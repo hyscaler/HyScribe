@@ -838,6 +838,42 @@ return array(
 			wp_delete_post( $id, true );
 		},
 	),
+	// The trashed notice's Undo: the status the post was trashed from.
+	'untrash-post-to-previous-status'        => array(
+		'setup'  => function () use ( $posts_insert ) {
+			$id = $posts_insert( array() );
+			wp_trash_post( $id );
+			return $id;
+		},
+		'action' => function ( $id ) {
+			add_filter( 'wp_untrash_post_status', 'wp_untrash_post_set_previous_status', 10, 3 );
+			wp_untrash_post( $id );
+		},
+	),
+	'stick-and-unstick-posts'                => array(
+		'setup'  => function () use ( $posts_insert ) {
+			return $posts_insert( array( 'import_id' => 970 ) );
+		},
+		'action' => function ( $id ) {
+			stick_post( $id );
+			stick_post( $id );
+			stick_post( 1 );
+			unstick_post( HYSCRIBE_MISSING_ID );
+		},
+	),
+	'update-page-template'                   => array(
+		'setup'  => function () use ( $posts_insert ) {
+			return $posts_insert( array( 'post_type' => 'page' ) );
+		},
+		'action' => function ( $id ) use ( $posts_update ) {
+			$posts_update(
+				array(
+					'ID'            => $id,
+					'page_template' => 'default',
+				)
+			);
+		},
+	),
 	'insert-posts-under-day-and-name-permalinks' => array(
 		'setup'  => $posts_permalinks( '/%year%/%monthnum%/%day%/%postname%/' ),
 		'action' => $posts_every_status,

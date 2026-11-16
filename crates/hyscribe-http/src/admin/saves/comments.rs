@@ -482,14 +482,14 @@ fn ajax_response(
 pub(super) fn edited<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
-    _: &'a dyn Acting,
+    site: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
         let referred = match asked.post("referredby") {
             Some(Value::Array(_)) => return Err(Error::Unported("an array as referredby").into()),
             referred => referred.filter(|r| !r.is_empty()).map(Value::to_php_string),
         };
-        if let Err(message) = edit::edit_comment(write, asked, None).await? {
+        if let Err(message) = edit::edit_comment(write, asked, site, None).await? {
             return Err(Stop::Died(Answer::Died(message)));
         }
         let id = asked.post("comment_ID").map_or(0, absint);
@@ -540,7 +540,7 @@ fn position(asked: &Asked) -> String {
 pub(super) fn quick_edit<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
-    _: &'a dyn Acting,
+    site: &'a dyn Acting,
 ) -> Saving<'a, Ajax> {
     Box::pin(async move {
         if asked.post("content").and_then(Value::as_bytes) == Some(b"") {
@@ -554,7 +554,7 @@ pub(super) fn quick_edit<'a>(
             Some(Value::Array(_)) => return Err(Error::Unported("an array as status").into()),
             status => status.map(Value::to_php_string),
         };
-        if let Err(message) = edit::edit_comment(write, asked, status).await? {
+        if let Err(message) = edit::edit_comment(write, asked, site, status).await? {
             return Err(Stop::Died(Ajax::Text(message.into())));
         }
         let id = post_int(asked, "comment_ID").unsigned_abs();
@@ -661,11 +661,17 @@ pub(super) fn reply<'a>(
             user_id: asked.user,
             ..NewComment::default()
         };
-        let commenter = read(|| Commenter {
-            moderate_comments: site.current_user_can("moderate_comments", &[]),
-            manage_options: site.current_user_can("manage_options", &[]),
-            // `DISALLOW_UNFILTERED_HTML` is always set.
-            unfiltered_html: false,
+        // Unfiltered for a user who may post unfiltered HTML only with the
+        // form's own nonce, PHP's `wp_create_nonce()` compared as it is now.
+        let given = asked.post("_wp_unfiltered_html_comment");
+        let given = given.map(Value::to_php_string).unwrap_or_default();
+        let commenter = read(|| {
+            let own = site.create_nonce("unfiltered-html-comment").into_bytes() == given;
+            Commenter {
+                moderate_comments: site.current_user_can("moderate_comments", &[]),
+                manage_options: site.current_user_can("manage_options", &[]),
+                unfiltered_html: site.current_user_can("unfiltered_html", &[]) & own,
+            }
         });
         let context = Context {
             now: asked.now,

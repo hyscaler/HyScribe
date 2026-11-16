@@ -40,9 +40,39 @@ fn rows_are_php_s() {
         let rest = page.get(start..).unwrap();
         let php = rest.get(..rest.find("\t</tbody>").unwrap()).unwrap();
         let columns = columns(POST, "", false);
-        let ours = row(&Role(role), &hello(), &columns, &[], "", false, None);
+        let ours = row(
+            &Role(role),
+            &hello(),
+            &columns,
+            &[],
+            "",
+            false,
+            Level::Flat(0),
+        );
         assert!(ours == php, "{role}: {}", first_difference(php, &ours));
+        // Quick Edit's answer is the same row.
+        assert_eq!(saved_row(&Role(role), &hello(), POST, "", false), ours);
     }
+    // A page is as deep as its parents, a missing one counted.
+    let page = Post {
+        post_type: "page".into(),
+        parent: 999,
+        ..hello()
+    };
+    let columns = columns(PAGE, "", false);
+    let deep = row(
+        &Role("administrator"),
+        &page,
+        &columns,
+        &[],
+        "",
+        false,
+        Level::Flat(1),
+    );
+    assert_eq!(
+        saved_row(&Role("administrator"), &page, PAGE, "", false),
+        deep
+    );
 }
 
 #[test]

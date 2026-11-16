@@ -4,17 +4,17 @@
 //! `WP_User`'s role methods, on a single site. The hooks of an admin request
 //! (new user pointers) and the mails of `wp_update_user()` are not ported.
 
-use hyscribe_auth::hash_password;
+use hyscribe_auth::{generate_password, hash_password, wp_fast_hash};
 use hyscribe_db::{Meta, UserFields, Write};
 use hyscribe_kses::{esc_url_raw, wp_strip_all_tags};
-use hyscribe_phpser::{Value, addslashes, is_empty_string, php_trim, stripslashes};
+use hyscribe_phpser::{Key, Value, addslashes, is_empty_string, md5, php_trim, stripslashes};
 use hyscribe_render::date::{format_unix, site_zone};
 use hyscribe_render::formatting::{sanitize_email, sanitize_title, sanitize_user_strict};
 use hyscribe_render::kses::{wp_kses_data, wp_kses_user_description};
 
 use crate::options::{
-    Autoload, add_metadata, delete_object_meta, get_metadata, get_option, update_metadata,
-    update_option,
+    Autoload, add_metadata, delete_metadata, delete_object_meta, get_metadata, get_option,
+    update_metadata, update_option,
 };
 use crate::steps::{Steps, step};
 use crate::{Error, MYSQL, name_filters, now, wp_filter_kses};
@@ -417,6 +417,60 @@ async fn update(steps: &mut Steps<'_, '_, Error>, data: &UserData) -> Result<u64
         fill(field, &value);
     }
     insert(steps, &merged, Pass::Hashed(pass)).await
+}
+
+/// `get_password_reset_key()` of the user `id`: a new key's fast hash
+/// stored after the time as its `user_activation_key`. The mail that
+/// would carry the key is not sent (MVP phase 8), so the key is dropped.
+pub async fn get_password_reset_key(write: &mut Write<'_>, id: u64) -> Result<(), Error> {
+    let mut steps = Steps::new(write);
+    let key = steps.keep(generate_password(20, false).map_err(Error::Random));
+    let hashed = format!("{}:{}", now(), wp_fast_hash(key.as_bytes()));
+    let data = UserData {
+        id,
+        user_activation_key: Some(hashed.into_bytes()),
+        ..UserData::default()
+    };
+    steps.run(async |w| wp_update_user(w, &data).await).await;
+    steps.finish(Ok(()))
+}
+
+/// `send_confirmation_on_profile_email()`'s rows for the user `id` asking
+/// for `email`, valid and not its own, slashed as `$_POST` holds it: the
+/// change waits in `_new_email` under a random hash for its confirmation,
+/// or none waits when another user has the address. No mail is sent (MVP
+/// phase 8).
+pub async fn request_email_change(
+    write: &mut Write<'_>,
+    id: u64,
+    email: &[u8],
+) -> Result<(), Error> {
+    let mut steps = Steps::new(write);
+    let key = "_new_email";
+    if step!(steps, user_id_by_email(php_trim(email))).is_some() {
+        let none = &Value::Null;
+        let deleted =
+            async |w: &mut Write<'_>| delete_metadata(w, Meta::User, id, key, none, false).await;
+        steps.run(deleted).await;
+    } else {
+        let random = steps.keep(generate_password(20, false).map_err(Error::Random));
+        let seed = [email, now().to_string().as_bytes(), random.as_bytes()].concat();
+        let change = Value::Array(vec![
+            (
+                Key::String(b"hash".to_vec()),
+                Value::String(md5(&seed).into_bytes()),
+            ),
+            (
+                Key::String(b"newemail".to_vec()),
+                Value::String(email.to_vec()),
+            ),
+        ]);
+        let none = &Value::Null;
+        let kept =
+            async |w: &mut Write<'_>| update_metadata(w, Meta::User, id, key, &change, none).await;
+        steps.run(kept).await;
+    }
+    steps.finish(Ok(()))
 }
 
 /// `wp_delete_user( $id, $reassign )`: the user and its meta, its posts and

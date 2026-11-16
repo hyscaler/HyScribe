@@ -345,7 +345,7 @@ fn ancestors(lookup: &dyn Fn(u64) -> Option<Post>, post: &Post) -> Vec<u64> {
 
 /// `wp_check_post_lock()`: the other user whose edit lock on `post` is
 /// fresh.
-pub(crate) fn lock_holder(site: &dyn PostsSite, post: &Post) -> Option<User> {
+pub fn lock_holder(site: &dyn PostsSite, post: &Post) -> Option<User> {
     let lock = site.meta(post, "_edit_lock").unwrap_or_default();
     let int = |text: &[u8]| Value::String(text.to_vec()).to_int();
     let mut parts = lock.split(|b| *b == b':');
@@ -387,7 +387,7 @@ fn column_title(
     classes: &str,
     filter: &str,
     excerpt: bool,
-    (level, lock): (Option<usize>, Option<&User>),
+    (level, lock): (Level, Option<&User>),
 ) -> String {
     let aria_label = if is_empty_string(&post.title) {
         "no title".to_string()
@@ -397,9 +397,9 @@ fn column_title(
     let mut out = format!(
         "<th scope=\"row\" class=\"{classes} page-title\" data-colname=\"Title\" aria-label=\"{aria_label}\">"
     );
-    let mut depth = level.unwrap_or_default();
+    let (Level::Flat(mut depth) | Level::Tree(mut depth)) = level;
     let mut parent_name = None;
-    if level == Some(0) {
+    if matches!(level, Level::Tree(0)) {
         // The ancestors there are, which PHP walks forever round a loop.
         let found: Vec<Post> = ancestors(&|id| site.post(id), post)
             .into_iter()
@@ -1085,8 +1085,18 @@ fn inline_edit(
     )
 }
 
+/// How deep a row is: `_display_rows()`'s, at a depth (Quick Edit's answer
+/// for a page under others), or a tree's, which counts no pending comments.
+#[derive(Clone, Copy)]
+pub enum Level {
+    /// A flat list's row, padded this deep.
+    Flat(usize),
+    /// A tree's row at this level.
+    Tree(usize),
+}
+
 /// `single_row( $post, $level )` of `columns` but `hidden`, in the view of
-/// `filter` and `excerpt`; a tree's rows have a `level`, no pending count.
+/// `filter` and `excerpt`.
 pub fn row(
     site: &dyn PostsSite,
     post: &Post,
@@ -1094,7 +1104,7 @@ pub fn row(
     hidden: &[&str],
     filter: &str,
     excerpt: bool,
-    level: Option<usize>,
+    level: Level,
 ) -> String {
     let author = if site.user_id() == post.author {
         "self"
@@ -1145,7 +1155,10 @@ pub fn row(
                 comments_bubble(
                     site,
                     post,
-                    level.map_or_else(|| site.pending_comments(post), |_| 0)
+                    match level {
+                        Level::Flat(_) => site.pending_comments(post),
+                        Level::Tree(_) => 0,
+                    }
                 )
             ),
             _ => column_date(site, post),
@@ -1158,6 +1171,35 @@ pub fn row(
     }
     out.push_str("\t\t</tr>\n\t\t");
     out
+}
+
+/// `wp_ajax_inline_save()`'s answer once saved: `display_rows()` of `post`
+/// on the list of `kind`, whose `post_status` is `filter`, a page as deep
+/// as it has parents.
+pub fn saved_row(
+    site: &dyn PostsSite,
+    post: &Post,
+    kind: PostType,
+    filter: &str,
+    excerpt: bool,
+) -> String {
+    let depth = if kind.hierarchical() {
+        ancestors(&|id| site.post(id), post).len()
+    } else {
+        0
+    };
+    let hidden = hidden_columns(site, &format!("edit-{}", kind.name));
+    let hidden: Vec<&str> = hidden.iter().map(String::as_str).collect();
+    let columns = columns(kind, filter, false);
+    row(
+        site,
+        post,
+        &columns,
+        &hidden,
+        filter,
+        excerpt,
+        Level::Flat(depth),
+    )
 }
 
 /// The columns of a list of `kind` in the view of `filter`, without
@@ -1504,7 +1546,7 @@ fn list_content(
                 hidden,
                 &listing.filter,
                 extended,
-                level,
+                level.map_or(Level::Flat(0), Level::Tree),
             );
             match level {
                 Some(_) => format!("\t{row}"),
@@ -2110,6 +2152,7 @@ pub(crate) fn author_ids(raw: &str) -> Option<Vec<i64>> {
 }
 
 /// What a screen answers: its page, or a redirect to the URL given.
+#[derive(Debug, PartialEq)]
 pub enum Answer {
     /// The page.
     Page(String),

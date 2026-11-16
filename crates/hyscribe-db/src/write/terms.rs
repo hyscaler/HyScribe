@@ -5,7 +5,7 @@
 //! and the term counts.
 
 use super::{Query, Table, Write};
-use crate::{Bind, Columns, DbError, Row, Sql, db_error, ids_or_none, list};
+use crate::{Bind, Columns, DbError, Row, Sql, ids_or_none, list};
 
 /// A term in a taxonomy, as the term functions read it inside an action.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -244,8 +244,7 @@ impl Write<'_> {
     // are text, so they compare under the column's collation, as in PHP.
 
     async fn term_rows(&mut self, query: Query) -> Result<Vec<TermRow>, DbError> {
-        self.spend()?;
-        let rows = query.fetch_all(&mut *self.tx).await.map_err(db_error)?;
+        let rows = self.rows(query).await?;
         rows.iter().map(term_row).collect()
     }
 
@@ -254,8 +253,7 @@ impl Write<'_> {
         query: Query,
         (first, second): (&str, &str),
     ) -> Result<Vec<(u64, u64)>, DbError> {
-        self.spend()?;
-        let rows = query.fetch_all(&mut *self.tx).await.map_err(db_error)?;
+        let rows = self.rows(query).await?;
         rows.iter().map(|row| pair(row, first, second)).collect()
     }
 

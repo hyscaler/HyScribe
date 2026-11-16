@@ -256,13 +256,11 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
     save.slug = params.get("slug").map(Value::to_php_string);
     if set(params, "author") {
         let author = params.get("author").map_or(0, Value::to_int);
-        let other = u64::try_from(author)
+        let author = u64::try_from(author)
             .ok()
-            .filter(|&author| author != context.user);
-        if other.is_some_and(|author| context.site.user(author).is_none()) || author < 0 {
-            return Err(invalid("rest_invalid_author", "Invalid author ID."));
-        }
-        save.author = Some(author.unsigned_abs());
+            .filter(|&author| author == context.user || context.site.user(author).is_some());
+        let invalid = || invalid("rest_invalid_author", "Invalid author ID.");
+        save.author = Some(author.ok_or_else(invalid)?);
     }
     protection(context, params, (kind, id), &mut save)?;
     if kind == Kind::Page {
@@ -410,8 +408,9 @@ fn after_save(
     Ok(())
 }
 
-/// The answer after the save renders the content as stored, which must be
-/// ported: kses filters it unless the user may post unfiltered HTML.
+/// The answer after the save renders the content as stored, for the
+/// logged in user every write has, which must be ported: kses filters it
+/// unless the user may post unfiltered HTML.
 fn answerable(
     context: &Context,
     save: &Save,
@@ -427,7 +426,7 @@ fn answerable(
         let host = hyscribe_render::link::host(&site);
         hyscribe_render::kses::wp_kses_post(&content, &host)
     };
-    if writes_or_unported(&content, context.user != 0) {
+    if writes_or_unported(&content, true) {
         return Err(RestError::not_ported());
     }
     Ok(())
@@ -449,7 +448,7 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
     } else if post.status == "trash" {
         let message = "The post has already been deleted.";
         return Err(RestError::status("rest_already_trashed", message, 410));
-    } else if writes_or_unported(&post.content, context.user != 0) {
+    } else if writes_or_unported(&post.content, true) {
         return Err(RestError::not_ported());
     } else {
         (Write::Trash(post.id), Value::Null)

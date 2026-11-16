@@ -375,16 +375,28 @@ pub(super) fn post(
     // Its block hooks serialize the raw content's blocks again, each
     // template part named after the theme, as the content renders them.
     let blocks = post.content.windows(8).any(|w| w == b"<!-- wp:");
-    let raw = if hooked && blocks {
-        let theme = context.site.theme().slug().as_bytes();
-        crate::templates::content::in_parent(&post.content, b"post-content", theme)
-    } else {
-        post.content.clone()
+    // Content without `<!-- wp:` goes in a freeform block, then out again
+    // where it serializes as it was.
+    let theme = context.site.theme().slug().as_bytes();
+    let hooks =
+        |content: &[u8]| crate::templates::content::in_parent(content, b"post-content", theme);
+    let raw = match (hooked, blocks) {
+        (false, _) => post.content.clone(),
+        (true, true) => hooks(&post.content),
+        (true, false) => {
+            let freeform = [
+                &b"<!-- wp:freeform -->"[..],
+                &post.content,
+                b"<!-- /wp:freeform -->",
+            ]
+            .concat();
+            hyscribe_kses::str_replace(&hooks(&freeform), &freeform, &post.content)
+        }
     };
     let rendered = match rendered {
+        // The hooks' raw content renders as the content it was serialized from.
         Some(first) if hooked && !text(first.clone()).is_empty() => {
-            let content = raw.clone();
-            Some(rendering.the_content(&Post { content, ..open }))
+            Some(rendering.the_content(&open))
         }
         rendered => rendered,
     };

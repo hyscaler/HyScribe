@@ -471,11 +471,9 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
         user,
         head: method == "HEAD",
         uri: request.uri,
-        parameters: unread
-            || json.is_none()
-            || [&params.json, &params.post, &params.get]
-                .into_iter()
-                .any(|source| given(source)),
+        parameters: [&params.json, &params.post, &params.get]
+            .into_iter()
+            .any(|source| given(source)),
     };
     let response = match verified {
         Some(false) => RestError::status("rest_cookie_invalid_nonce", "Cookie check failed", 403)

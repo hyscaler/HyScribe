@@ -322,6 +322,10 @@ fn texts_are_strings_or_raw() {
     let save = plan("administrator", "POST", "/wp/v2/posts/1", body);
     assert_eq!((save.title, save.content, save.excerpt), (None, None, None));
     assert_eq!(save.unique_slug, None);
+    let body = r#"{"title":{"raw":"R"},"content":{"raw":""}}"#;
+    let save = plan("administrator", "POST", "/wp/v2/posts/1", body);
+    let texts = (save.title.as_deref(), save.content.as_deref());
+    assert_eq!(texts, (Some(&b"R"[..]), Some(&b""[..])));
     let served = answered(
         "administrator",
         "POST",
@@ -353,6 +357,25 @@ fn statuses_need_their_capabilities() {
         r#"{"title":"x","status":"future"}"#,
     );
     assert_eq!(save.status.as_deref(), Some("future"));
+    let body = r#"{"title":"x","status":"publish"}"#;
+    let refused = answered("contributor", "POST", "/wp/v2/posts", body);
+    assert!(
+        text_of(&refused).contains("publish posts"),
+        "{}",
+        text_of(&refused)
+    );
+    // A draft is given no unique slug without one asked for.
+    let save = plan(
+        "author",
+        "POST",
+        "/wp/v2/posts",
+        r#"{"title":"x","status":"draft"}"#,
+    );
+    assert_eq!(save.unique_slug, None);
+    // An author may publish a new post, `publish_posts`, as no post yet.
+    let asked = Asked::new("author", "POST", "/wp/v2/posts", r#"{"title":"x"}"#);
+    let (planned, _) = on(&oracle("author", &[]), &asked, Outcome::Written(1));
+    assert!(planned.is_some_and(|planned| planned.can_publish));
     let save = plan(
         "administrator",
         "POST",
@@ -406,6 +429,23 @@ fn sticky_posts_have_no_password() {
     );
     let (_, served) = on(&sticky, &asked, Outcome::Written(1));
     assert!(text_of(&served).contains("A sticky post can not be password protected."));
+    // No password, or a new post, is no matter: not even with 0 among the
+    // sticky posts.
+    let asked = Asked::new(
+        "administrator",
+        "POST",
+        "/wp/v2/posts/1",
+        r#"{"password":""}"#,
+    );
+    assert!(on(&sticky, &asked, Outcome::Written(1)).0.is_some());
+    let zero = changed(vec![("sticky_posts", b"a:1:{i:0;i:0;}")], Vec::new());
+    let asked = Asked::new(
+        "administrator",
+        "POST",
+        "/wp/v2/posts",
+        r#"{"password":"pw"}"#,
+    );
+    assert!(on(&zero, &asked, Outcome::Written(1)).0.is_some());
     let protected = Post {
         password: b"pw".to_vec(),
         ..oracle("", &[]).post(1).unwrap()
@@ -418,6 +458,20 @@ fn sticky_posts_have_no_password() {
         r#"{"sticky":true}"#,
     );
     assert_eq!(on(&site, &asked, Outcome::Written(1)).1.status, 501);
+    let asked = Asked::new(
+        "administrator",
+        "POST",
+        "/wp/v2/posts/1",
+        r#"{"title":"x"}"#,
+    );
+    assert!(on(&site, &asked, Outcome::Written(1)).0.is_some());
+    let save = plan(
+        "administrator",
+        "POST",
+        "/wp/v2/posts/1",
+        r#"{"password":"","sticky":true}"#,
+    );
+    assert_eq!(save.sticky, Some(true));
     let save = plan(
         "administrator",
         "POST",
@@ -480,6 +534,19 @@ fn featured_images_are_cleared() {
 /// ignored hooked blocks.
 #[test]
 fn unported_writes_are_not_planned() {
+    // A login block shows the logged in user more, as every writer is.
+    let login = r#"{"title":"x","content":"<!-- wp:loginout /-->"}"#;
+    assert_eq!(
+        answered("administrator", "POST", "/wp/v2/posts", login).status,
+        501
+    );
+    let post = Post {
+        content: b"<!-- wp:loginout /-->".to_vec(),
+        ..oracle("", &[]).post(1).unwrap()
+    };
+    let site = changed(Vec::new(), vec![post]);
+    let asked = Asked::new("administrator", "DELETE", "/wp/v2/posts/1", "");
+    assert_eq!(on(&site, &asked, Outcome::Written(1)).1.status, 501);
     let gallery = r#"{"title":"x","content":"[gallery]"}"#;
     assert_eq!(
         answered("administrator", "POST", "/wp/v2/posts", gallery).status,
@@ -613,7 +680,7 @@ fn bodies_are_read_as_php_reads_them() {
             post_type: "post".into(),
             ..Save::default()
         }))));
-    for body in ["5", "0", "null"] {
+    for body in ["", "5", "0", "null"] {
         assert!(
             status("POST", Some(b"application/json"), body).0.is_some(),
             "{body}"
@@ -622,6 +689,24 @@ fn bodies_are_read_as_php_reads_them() {
     assert_eq!(status("POST", Some(b"application/json"), "{").1.status, 501);
     let multipart = Some(&b"multipart/form-data; boundary=x"[..]);
     assert_eq!(status("POST", multipart, "--x--").1.status, 501);
+    // An empty multipart form gives `$_POST` nothing.
+    assert!(status("POST", multipart, "").0.is_some());
+    // `$_POST` of a request PHP reads as a GET is not among its parameters.
+    let mut asked = Asked::new("", "POST", "/wp/v2/posts/1&_method=GET", "");
+    asked.post = vec![(Key::String(b"context".to_vec()), text_value("edit"))];
+    asked.kind = form;
+    assert_eq!(
+        on(&oracle("", &[]), &asked, Outcome::Written(1)).1.status,
+        200
+    );
+    // A body "0" is empty: a write not ported is checked without arguments,
+    // not refused as given some.
+    let mut asked = Asked::new("", "PUT", "/wp/v2/categories/1", "0");
+    asked.kind = None;
+    assert_ne!(
+        on(&oracle("", &[]), &asked, Outcome::Written(1)).1.status,
+        501
+    );
     // A write not ported is not answered with a body either.
     let mut asked = Asked::new(
         "administrator",
@@ -654,6 +739,7 @@ fn json_types_are_php_s() {
         ("x, application/vnd.api+json;", true),
         ("application/a+b+json+oembed", true),
         ("application/json+oembed,", true),
+        ("a,application/a-b+json", true),
         ("application/+json", false),
         ("xapplication/json", false),
         ("application/jsonx", false),
@@ -678,4 +764,112 @@ fn arrays_merge_as_php_merges_them() {
         (Key::Int(1), Value::Int(4)),
     ];
     assert_eq!(merged, expected);
+}
+
+fn text_value(text: &str) -> Value {
+    Value::String(text.as_bytes().to_vec())
+}
+
+/// The answer once written is in the `edit` context, which the request
+/// need not give.
+#[test]
+fn answers_are_in_the_edit_context() {
+    let served = answered(
+        "administrator",
+        "POST",
+        "/wp/v2/posts/1",
+        r#"{"title":"x"}"#,
+    );
+    assert!(
+        text_of(&served).contains(r#""raw":"#),
+        "{}",
+        text_of(&served)
+    );
+}
+
+/// Each type's own arguments are checked by their schemas: a post's
+/// `sticky` and terms, a page's `parent` and `menu_order`, and `force`.
+#[test]
+fn each_type_checks_its_own_arguments() {
+    for (target, body, param) in [
+        ("/wp/v2/pages", r#"{"title":"x","parent":"abc"}"#, "parent"),
+        (
+            "/wp/v2/pages",
+            r#"{"title":"x","menu_order":"abc"}"#,
+            "menu_order",
+        ),
+        (
+            "/wp/v2/posts",
+            r#"{"title":"x","sticky":"maybe"}"#,
+            "sticky",
+        ),
+        (
+            "/wp/v2/posts",
+            r#"{"title":"x","categories":"abc"}"#,
+            "categories",
+        ),
+        ("/wp/v2/posts", r#"{"title":"x","tags":["abc"]}"#, "tags"),
+    ] {
+        let served = answered("administrator", "POST", target, body);
+        let text = text_of(&served);
+        assert!(
+            text.contains(&format!("Invalid parameter(s): {param}")),
+            "{text}"
+        );
+    }
+    let served = answered("administrator", "DELETE", "/wp/v2/posts/1&force=maybe", "");
+    assert!(text_of(&served).contains("Invalid parameter(s): force"));
+}
+
+/// The `edit` context's raw content has its blocks serialized again, a
+/// template part named after the theme, where it has blocks.
+#[test]
+fn raw_content_gets_its_block_hooks() {
+    let raw = |content: &str| {
+        let post = Post {
+            content: content.as_bytes().to_vec(),
+            ..oracle("", &[]).post(1).unwrap()
+        };
+        let site = changed(Vec::new(), vec![post]);
+        let target = "/wp/v2/posts/1&context=edit&_fields=content.raw,content.block_version";
+        let asked = Asked::new("administrator", "GET", target, "");
+        text_of(&on(&site, &asked, Outcome::Written(1)).1)
+    };
+    let hooked = raw(r#"<!-- wp:core/template-part {"slug":"footer"} /-->"#);
+    let theme = r#"{\"slug\":\"footer\",\"theme\":\"twentytwentyfive\"}"#;
+    assert!(hooked.contains(theme), "{hooked}");
+    assert!(hooked.contains(r#""block_version":1"#), "{hooked}");
+    // A block PHP's `has_blocks()` misses stays in its freeform block, as
+    // PHP leaves it (`apply_block_hooks_to_content_from_post_object()`).
+    let missed = raw(r#"<!--  wp:core/template-part {"slug":"footer"} /-->"#);
+    let freeform =
+        format!(r#"<!-- wp:freeform --><!-- wp:template-part {theme} \/--><!-- \/wp:freeform -->"#);
+    assert!(missed.contains(&freeform), "{missed}");
+    assert!(missed.contains(r#""block_version":0"#), "{missed}");
+    let classic = raw("<p>Classic</p>");
+    assert!(
+        classic.contains(r#""raw":"<p>Classic<\/p>","block_version":0"#),
+        "{classic}"
+    );
+}
+
+/// The `edit` context renders the content again, as
+/// `insert_hooked_blocks_into_rest_response()` does: a block's unique ID
+/// is the second one there, the first in the `view` context.
+#[test]
+fn the_edit_context_renders_twice() {
+    let post = Post {
+        content: br#"<!-- wp:archives {"displayAsDropdown":true} /-->"#.to_vec(),
+        ..oracle("", &[]).post(1).unwrap()
+    };
+    let site = changed(Vec::new(), vec![post]);
+    for (context, id) in [
+        ("edit", "wp-block-archives-2"),
+        ("view", "wp-block-archives-1"),
+    ] {
+        let target = format!("/wp/v2/posts/1&context={context}&_fields=content");
+        let asked = Asked::new("administrator", "GET", &target, "");
+        let body = text_of(&on(&site, &asked, Outcome::Written(1)).1);
+        assert!(body.contains(id), "{context}: {body}");
+    }
 }

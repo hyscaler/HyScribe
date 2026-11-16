@@ -241,43 +241,55 @@ fn plan_update(context: &Context, params: &Params) -> Result<Plan, RestError> {
     let params = &as_me_if(context, params);
     // The permission check found the user.
     let user = get_user(context, params).unwrap_or_default();
-    if let Some(Value::String(email)) = params.get("email") {
-        // `email_exists()`, whose query compares without case.
+    // `email_exists()`, whose query compares without case.
+    let email_taken = || {
+        let Some(Value::String(email)) = params.get("email") else {
+            return false;
+        };
+        let search = (
+            vec!["user_email".into()],
+            String::from_utf8_lossy(email).into_owned(),
+        );
         let query = UserQuery {
-            search: Some((
-                vec!["user_email".into()],
-                String::from_utf8_lossy(email).into_owned(),
-            )),
+            search: Some(search),
             ..UserQuery::default()
         };
         let users = context.site.users(&query);
         let owner = users
             .iter()
             .find(|other| other.email.eq_ignore_ascii_case(email));
-        if owner.is_some_and(|owner| owner.id != user.id) {
-            return Err(invalid("rest_user_invalid_email", "Invalid email address."));
-        }
-    }
-    let filled = |name| {
-        params
-            .get(name)
-            .filter(|value| !value.is_empty())
-            .map(Value::to_php_string)
+        owner.is_some_and(|owner| owner.id != user.id)
     };
-    if filled("username").is_some_and(|login| login != user.login) {
-        return Err(invalid(
+    let filled = |name| {
+        let value = params.get(name).filter(|value| !value.is_empty());
+        value.map(Value::to_php_string)
+    };
+    let renamed = || filled("username").is_some_and(|login| login != user.login);
+    let slug_taken = || {
+        let slug = filled("slug").filter(|slug| *slug != user.nicename);
+        slug.is_some_and(|slug| {
+            let query = UserQuery {
+                nicenames: vec![slug],
+                ..UserQuery::default()
+            };
+            !context.site.users(&query).is_empty()
+        })
+    };
+    let checks: [(&dyn Fn() -> bool, &'static str, &str); 3] = [
+        (
+            &email_taken,
+            "rest_user_invalid_email",
+            "Invalid email address.",
+        ),
+        (
+            &renamed,
             "rest_user_invalid_argument",
             "Username is not editable.",
-        ));
-    }
-    if let Some(slug) = filled("slug").filter(|slug| *slug != user.nicename) {
-        let query = UserQuery {
-            nicenames: vec![slug],
-            ..UserQuery::default()
-        };
-        if !context.site.users(&query).is_empty() {
-            return Err(invalid("rest_user_invalid_slug", "Invalid slug."));
-        }
+        ),
+        (&slug_taken, "rest_user_invalid_slug", "Invalid slug."),
+    ];
+    if let Some((_, code, message)) = checks.iter().find(|(refused, ..)| refused()) {
+        return Err(invalid(code, message));
     }
     let roles = roles(params).filter(|roles| !roles.is_empty());
     check_roles(context, Some(user.id), &roles.unwrap_or_default())?;

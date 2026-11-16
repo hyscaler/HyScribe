@@ -6,14 +6,13 @@
 //! Templates and parts are `wp_template` and `wp_template_part` posts with
 //! their `wp_theme` term, and a part its `wp_template_part_area`.
 
-use hyscribe_phpser::{Value, is_empty_string, lookup, php_trim};
-use hyscribe_render::kses::{wp_kses_data, wp_kses_post};
+use hyscribe_phpser::{Value, is_empty_string, lookup};
 
 use super::content::{hooked, resolve_patterns};
 use super::query::{self, Kind, Query, Template, names_an_entity, stylesheet};
 use super::{base, prepare, template_id};
 use crate::Context;
-use crate::posts::write::{Outcome, Plan, Save, Write, Writing};
+use crate::posts::write::{Outcome, Plan, Save, Write, Writing, as_stored};
 use crate::request::{Arg, Params, Sanitize, arg};
 use crate::response::{Response, RestError, object, text};
 
@@ -91,14 +90,14 @@ fn kind_of(params: &Params) -> Kind {
 pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
     let (_, rest) = route(regex)?;
     let unchanged = |_: &Context, _: &Params, args: Vec<Arg>| args;
+    // Only write endpoints, which have no callback, ask.
     Some(match (rest, index) {
-        ("", 1) => Writing {
+        ("", _) => Writing {
             unported: |_| false,
             args: unchanged,
             plan: plan_create,
             finish: finish_create,
         },
-        ("" | "/lookup", _) => return None,
         (_, 1) => Writing {
             unported: |_| false,
             args: unchanged,
@@ -223,14 +222,13 @@ fn answerable(
     let content = save.content.clone().or_else(|| stored(|t| &t.content));
     let title = save.title.clone().or_else(|| stored(|t| &t.title));
     let description = save.excerpt.clone().or_else(|| stored(|t| &t.description));
-    let (content, mut title) = (content.unwrap_or_default(), title.unwrap_or_default());
-    let content = if context.can("unfiltered_html") {
-        content
-    } else {
-        title = wp_kses_data(php_trim(&title));
-        let site = context.option("siteurl").unwrap_or_default();
-        wp_kses_post(&content, &hyscribe_render::link::host(&site))
-    };
+    let unfiltered = context.can("unfiltered_html");
+    let (content, title) = as_stored(
+        context,
+        unfiltered,
+        content.unwrap_or_default(),
+        &title.unwrap_or_default(),
+    );
     resolve_patterns(&hooked(&content, kind == Kind::Part, &stylesheet(context)))?;
     let slug = save.slug.clone().unwrap_or_default();
     let untitled = is_empty_string(&title) || title == slug;

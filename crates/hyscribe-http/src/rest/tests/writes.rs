@@ -226,6 +226,17 @@ async fn writes_match_php(golden: &str, state: &str, unported: &[&str]) -> (usiz
 /// `target` asked of `site` by user 1 with the JSON `body`, past its
 /// checks: the write it plans.
 async fn planned(site: &Arc<Site>, method: &'static str, target: &str, body: &str) -> Pending {
+    asked(site, (method, target, body), None).await.unwrap_err()
+}
+
+/// `target` asked of `site` by user 1 with the JSON `body`, past its
+/// checks: the answer once its write came to `outcome`, if given, else the
+/// write it plans.
+async fn asked(
+    site: &Arc<Site>,
+    (method, target, body): (&'static str, &str, &str),
+    outcome: Option<Outcome>,
+) -> Result<hyscribe_rest::Served, Pending> {
     let (site, handle) = (Arc::clone(site), Handle::current());
     let (target, body) = (target.to_string(), body.to_string());
     tokio::task::spawn_blocking(move || {
@@ -258,9 +269,12 @@ async fn planned(site: &Arc<Site>, method: &'static str, target: &str, body: &st
             host: None,
             now: 0,
         };
-        match hyscribe_rest::answer(&rest, &request) {
-            hyscribe_rest::Answer::Write(pending) => *pending,
-            hyscribe_rest::Answer::Served(served) => {
+        match (hyscribe_rest::answer(&rest, &request), outcome) {
+            (hyscribe_rest::Answer::Write(pending), Some(outcome)) => {
+                Ok(hyscribe_rest::written(&rest, &request, *pending, outcome))
+            }
+            (hyscribe_rest::Answer::Write(pending), None) => Err(*pending),
+            (hyscribe_rest::Answer::Served(served), _) => {
                 panic!("{}", String::from_utf8_lossy(&served.body))
             }
         }
@@ -650,6 +664,128 @@ async fn autosaves_are_php_s() {
         .map(|(golden, target, body)| (golden, "POST", target, body.as_str(), Setup::All))
         .collect();
     writes_are_php_s(state, writes).await;
+}
+
+/// The answers to what a write comes to past the goldens: a created
+/// template not found, a template gone before its answer, a refusal of an
+/// update, a revert or a delete, and an autosave of an empty draft, which
+/// PHP refuses with an error of no status; and the plans not ported.
+#[tokio::test(flavor = "multi_thread")]
+async fn written_answers_past_the_goldens() {
+    let state = include_str!("../../../../../reference/rest/template-writes.sql");
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with(state).await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let templates = |path: &str| format!("/?rest_route=/wp/v2/templates{path}");
+    let index = templates("/twentytwentyfive//index");
+    let cases = [
+        (
+            ("POST", templates(""), r#"{"slug":"lost","title":"Lost"}"#),
+            Outcome::Written(1),
+            (400, "rest_template_insert_error"),
+        ),
+        (
+            ("POST", templates(""), r#"{"slug":"plain"}"#),
+            Outcome::Refused("empty_content"),
+            (400, "empty_content"),
+        ),
+        (
+            (
+                "POST",
+                templates("/twentytwentyfive//my-custom"),
+                r#"{"title":"x"}"#,
+            ),
+            Outcome::Refused("rest_cannot_delete"),
+            (500, "rest_cannot_delete"),
+        ),
+        (
+            ("DELETE", templates("/twentytwentyfive//my-custom"), ""),
+            Outcome::Refused("rest_cannot_delete"),
+            (500, "rest_cannot_delete"),
+        ),
+        (
+            ("POST", index.clone(), r#"{"source":"theme"}"#),
+            Outcome::Written(711),
+            (200, r#""source":"custom""#),
+        ),
+    ];
+    for ((method, target, body), outcome, (status, code)) in cases {
+        let served = asked(&site, (method, &target, body), Some(outcome)).await;
+        let served = served.unwrap_or_else(|_| panic!("planned"));
+        let what = format!("{method} {target} {body}");
+        assert_eq!(served.status, status, "{what}");
+        assert!(
+            String::from_utf8_lossy(&served.body).contains(code),
+            "{what}"
+        );
+    }
+    let unported = [
+        // A template its slug would title after the page it names.
+        (
+            "POST",
+            templates(""),
+            r#"{"slug":"page-sample-page","content":"x"}"#,
+        ),
+        // Reverting a template with no customised post, or no theme file.
+        (
+            "POST",
+            templates("/twentytwentyfive//search"),
+            r#"{"source":"theme"}"#,
+        ),
+        (
+            "POST",
+            templates("/twentytwentyfive//my-custom"),
+            r#"{"source":"theme"}"#,
+        ),
+        // A pattern the theme does not have.
+        (
+            "POST",
+            templates(""),
+            r#"{"slug":"x","content":"<!-- wp:pattern {\"slug\":\"other/x\"} /-->"}"#,
+        ),
+    ];
+    let (cookie, nonce) = log_in(&site).await;
+    for (method, target, body) in unported {
+        let request = axum::http::Request::builder()
+            .method(method)
+            .uri(&target)
+            .header(header::COOKIE, &cookie)
+            .header("x-wp-nonce", &nonce)
+            .header(header::CONTENT_TYPE, "application/json");
+        let response = send(&site, request, body).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_IMPLEMENTED,
+            "{target} {body}"
+        );
+    }
+    let autosaves = include_str!("../../../../../reference/rest/autosaves.sql");
+    fresh_with(autosaves).await;
+    let site = saves_site(dir.path()).await;
+    let page = "/?rest_route=/wp/v2/pages/863/autosaves";
+    let empty = asked(
+        &site,
+        ("POST", page, "{}"),
+        Some(Outcome::Refused("empty_content")),
+    );
+    let empty = empty.await.unwrap_or_else(|_| panic!("planned"));
+    assert_eq!(empty, hyscribe_rest::Served::not_ported());
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/?rest_route=/wp/v2/blocks/853/autosaves")
+        .header(header::COOKIE, &cookie)
+        .header("x-wp-nonce", &nonce)
+        .header(header::CONTENT_TYPE, "application/json");
+    let meta = r#"{"meta":{"wp_pattern_sync_status":"partial"}}"#;
+    fresh_with(include_str!(
+        "../../../../../reference/rest/site-writes.sql"
+    ))
+    .await;
+    let site = saves_site(dir.path()).await;
+    let response = send(&site, request, meta).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    fresh().await;
 }
 
 /// Without a writer, a write past its checks is refused as hs-admin

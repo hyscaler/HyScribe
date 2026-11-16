@@ -493,17 +493,32 @@ fn answerable(
 ) -> Result<(), RestError> {
     let stored = existing.map(|post| post.content.clone());
     let content = save.content.clone().or(stored).unwrap_or_default();
-    let content = if unfiltered_html {
-        content
-    } else {
-        let site = context.option("siteurl").unwrap_or_default();
-        let host = hyscribe_render::link::host(&site);
-        hyscribe_render::kses::wp_kses_post(&content, &host)
-    };
+    let (content, _) = as_stored(context, unfiltered_html, content, b"");
     if writes_or_unported(&content, true) {
         return Err(RestError::not_ported());
     }
     Ok(())
+}
+
+/// `content` and `title` as `sanitize_post()` stores them: the title
+/// trimmed, and both filtered by kses unless the user may post unfiltered
+/// HTML.
+pub(crate) fn as_stored(
+    context: &Context,
+    unfiltered_html: bool,
+    content: Vec<u8>,
+    title: &[u8],
+) -> (Vec<u8>, Vec<u8>) {
+    let title = hyscribe_phpser::php_trim(title);
+    if unfiltered_html {
+        return (content, title.to_vec());
+    }
+    let site = context.option("siteurl").unwrap_or_default();
+    let host = hyscribe_render::link::host(&site);
+    (
+        hyscribe_render::kses::wp_kses_post(&content, &host),
+        hyscribe_render::kses::wp_kses_data(title),
+    )
 }
 
 /// `delete_item()` up to its write: `force` deletes, else the post goes

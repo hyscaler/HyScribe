@@ -652,8 +652,8 @@ fn refusals_are_php_s() {
 }
 
 /// The body read as `get_parameter_order()` reads it: JSON for a JSON type,
-/// a form for a method other than POST, a multipart form and JSON PHP
-/// refuses not at all.
+/// a form for a method other than POST, a multipart form not at all; JSON
+/// PHP refuses is answered `rest_invalid_json` before any check.
 #[test]
 fn bodies_are_read_as_php_reads_them() {
     let status = |method: &'static str, kind: Option<&'static [u8]>, body: &str| {
@@ -684,7 +684,15 @@ fn bodies_are_read_as_php_reads_them() {
             "{body}"
         );
     }
-    assert_eq!(status("POST", Some(b"application/json"), "{").1.status, 501);
+    let invalid = status("POST", Some(b"application/json"), "[1}").1;
+    assert_eq!(invalid.status, 400);
+    let error = r#"{"code":"rest_invalid_json","message":"Invalid JSON body passed.","data":{"status":400,"json_error_code":2,"json_error_message":"State mismatch (invalid or malformed JSON)"}}"#;
+    assert_eq!(String::from_utf8_lossy(&invalid.body), error);
+    // Before any check, on a write not ported too.
+    let mut asked = Asked::new("", "PUT", "/wp/v2/categories/1", "{");
+    asked.kind = Some(b"application/json");
+    let refused = on(&oracle("", &[]), &asked, Outcome::Written(1)).1;
+    assert_eq!(refused.status, 400);
     let multipart = Some(&b"multipart/form-data; boundary=x"[..]);
     assert_eq!(status("POST", multipart, "--x--").1.status, 501);
     // An empty multipart form gives `$_POST` nothing.

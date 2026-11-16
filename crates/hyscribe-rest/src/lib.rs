@@ -35,7 +35,7 @@ use std::sync::OnceLock;
 use hyscribe_kses::esc_url_raw;
 use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, Term, TermQuery, User, UserQuery};
 use hyscribe_phpser::{
-    Key, Value, is_empty_string, json_decode, json_encode, json_encode_pretty, lookup,
+    JsonError, Key, Value, is_empty_string, json_decode, json_encode, json_encode_pretty, lookup,
 };
 use hyscribe_render::site::Site as Reads;
 use hyscribe_render::theme::Theme;
@@ -371,10 +371,13 @@ pub fn written(site: &dyn Site, request: &Request, pending: Pending, outcome: Ou
 /// A PHP array's entries.
 type Entries = Vec<(Key, Value)>;
 
+/// The JSON body's parameters, or why there are none: JSON PHP refuses
+/// with its error, `None` for a multipart form, which only PHP reads.
+type Json = Result<Entries, Option<JsonError>>;
+
 /// The request's body as `get_parameter_order()` reads it: the JSON body's
-/// parameters, `None` for JSON PHP refuses or a multipart form, which only
-/// PHP reads, and a form body's, which a method other than POST reads itself.
-fn body_params(request: &Request, method: &str) -> (Option<Entries>, Entries) {
+/// parameters, and a form body's, which a method other than POST reads itself.
+fn body_params(request: &Request, method: &str) -> (Json, Entries) {
     let entries = |value: Value| match value {
         Value::Array(entries) => entries,
         _ => Vec::new(),
@@ -386,11 +389,13 @@ fn body_params(request: &Request, method: &str) -> (Option<Entries>, Entries) {
         && !request.body.is_empty()
         && kind.as_deref() == Some(b"multipart/form-data");
     let json = match &kind {
-        _ if multipart => None,
+        _ if multipart => Err(None),
         Some(kind) if request::is_json(kind) && !empty => {
-            hyscribe_phpser::json_decode(request.body).map(entries)
+            hyscribe_phpser::json_decode_checked(request.body)
+                .map(entries)
+                .map_err(Some)
         }
-        _ => Some(Vec::new()),
+        _ => Ok(Vec::new()),
     };
     let form = kind
         .as_deref()
@@ -505,8 +510,7 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
             if verified.is_some() {
                 served.send("X-WP-Nonce", site.create_nonce());
             }
-            let readable = json.is_some();
-            match dispatch(&context, (&method, route), (params, readable), resumed) {
+            match dispatch(&context, (&method, route), (params, json.err()), resumed) {
                 Ok(response) => response,
                 Err(Halt::NotPorted) => return Answer::Served(Served::not_ported()),
                 Err(Halt::Write(pending)) => return Answer::Write(pending),
@@ -697,7 +701,7 @@ pub(crate) fn self_link_with(
 fn dispatch(
     context: &Context,
     (method, route): (&str, &[u8]),
-    (params, readable): (Params, bool),
+    (params, refused): (Params, Option<Option<JsonError>>),
     resumed: Option<(Pending, Outcome)>,
 ) -> Result<Response, Halt> {
     if method == "OPTIONS" {
@@ -737,7 +741,7 @@ fn dispatch(
             let answered = (pending.finish)(context, &mut params, pending.plan, outcome);
             (answered, params)
         }
-        None => checked(context, &matched, endpoint, params, readable)?,
+        None => checked(context, &matched, endpoint, params, refused)?,
     };
     if answered
         .as_ref()
@@ -802,32 +806,49 @@ pub(crate) fn placed(value: Value, placeholder: &[u8], url: &dyn Fn(&str) -> Str
     }
 }
 
+/// `parse_json_params()`'s `rest_invalid_json`, with PHP's JSON error.
+fn invalid_json(error: JsonError) -> RestError {
+    RestError {
+        data: object([
+            ("status", Value::Int(400)),
+            ("json_error_code", Value::Int(error.0.into())),
+            ("json_error_message", text(error.message())),
+        ]),
+        ..RestError::status("rest_invalid_json", "Invalid JSON body passed.", 400)
+    }
+}
+
 /// The request checked by the matched endpoint's arguments and permission,
 /// then its callback's answer, or the write a ported write plans. A body
-/// not `readable`, a multipart form or JSON PHP refuses
-/// (`rest_invalid_json`), is not ported.
+/// `refused`, JSON PHP refuses, is answered `rest_invalid_json` before any
+/// check; a multipart form is not ported.
 fn checked(
     context: &Context,
     matched: &routes::Matched,
     endpoint: Endpoint,
     params: Params,
-    readable: bool,
+    refused: Option<Option<JsonError>>,
 ) -> Result<(Result<Response, RestError>, Params), Halt> {
-    let writing = match endpoint.callback {
-        Some(_) => None,
-        None => posts::write::writing(matched.regex, matched.endpoint),
-    };
-    // The arguments of a write not ported are not ported either: one given
-    // any is not answered, and one given none is checked, then answered 501.
-    if endpoint.callback.is_none() && writing.is_none() && context.parameters || !readable {
-        return Err(Halt::NotPorted);
-    }
     let mut params = Params {
         route: matched.regex,
         url: matched.params.clone(),
         defaults: defaults(&endpoint.args),
         ..params
     };
+    match refused {
+        Some(Some(error)) => return Ok((Err(invalid_json(error)), params)),
+        Some(None) => return Err(Halt::NotPorted),
+        None => {}
+    }
+    let writing = match endpoint.callback {
+        Some(_) => None,
+        None => posts::write::writing(matched.regex, matched.endpoint),
+    };
+    // The arguments of a write not ported are not ported either: one given
+    // any is not answered, and one given none is checked, then answered 501.
+    if endpoint.callback.is_none() && writing.is_none() && context.parameters {
+        return Err(Halt::NotPorted);
+    }
     let mut args = endpoint.args;
     let unported = |arg: &Arg| matches!(arg.sanitize, Sanitize::NotPorted) && params.has(arg.name);
     if args.iter().any(unported) {

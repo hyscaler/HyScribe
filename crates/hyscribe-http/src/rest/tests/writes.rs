@@ -81,12 +81,8 @@ fn now_masked(body: &str, (start, end): (i64, i64)) -> String {
     out + rest
 }
 
-/// The bodies PHP takes that HyScribe answers 501: `meta`, and JSON PHP
-/// refuses (`rest_invalid_json`).
-const UNPORTED: [&str; 2] = [
-    r#"{"title":"Meta","meta":{"footnotes":""}}"#,
-    r#"{"title":"#,
-];
+/// The bodies PHP takes that HyScribe answers 501: `meta`.
+const UNPORTED: [&str; 1] = [r#"{"title":"Meta","meta":{"footnotes":""}}"#];
 
 /// PHP's answers to the posts' and pages' writes, for a visitor and every
 /// role: those that write leave the rows PHP leaves (the write oracle

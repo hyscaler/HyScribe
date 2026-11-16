@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `WP_REST_Request`'s parameters for a request without a body: the
+//! `WP_REST_Request`'s parameters: the JSON body's, the form's, the
 //! query's, the URL's and the defaults, in that order, checked and
 //! sanitized by their route's arguments.
 
 use hyscribe_kses::sanitize_key;
-use hyscribe_phpser::{Key, Value, absint, urldecode};
+use hyscribe_phpser::{Key, Value, absint, is_empty_string, php_trim, urldecode};
 use hyscribe_render::formatting::sanitize_text_field;
 
 use crate::Context;
@@ -17,6 +17,10 @@ use crate::schema::{Checked, Refusal, sanitize_value_from_schema, validate_value
 pub(crate) struct Params {
     /// The regex of the route matched.
     pub(crate) route: &'static str,
+    /// The JSON body's, for a JSON content type.
+    pub(crate) json: Vec<(Key, Value)>,
+    /// `$_POST` and a form body's, for a method that takes a body.
+    pub(crate) post: Vec<(Key, Value)>,
     pub(crate) get: Vec<(Key, Value)>,
     pub(crate) url: Vec<(Key, Value)>,
     pub(crate) defaults: Vec<(Key, Value)>,
@@ -31,8 +35,24 @@ fn find<'a>(source: &'a [(Key, Value)], key: &str) -> Option<&'a Value> {
 }
 
 impl Params {
-    fn sources(&self) -> [&[(Key, Value)]; 3] {
-        [&self.get, &self.url, &self.defaults]
+    fn sources(&self) -> [&[(Key, Value)]; 5] {
+        [&self.json, &self.post, &self.get, &self.url, &self.defaults]
+    }
+
+    /// `set_param( $key, $value )`: in each source but the defaults that
+    /// has it, else in the first.
+    pub(crate) fn set(&mut self, key: &str, value: Value) {
+        let name = Key::String(key.as_bytes().to_vec());
+        let mut found = false;
+        for source in [&mut self.json, &mut self.post, &mut self.get, &mut self.url] {
+            for (_, held) in source.iter_mut().filter(|(known, _)| *known == name) {
+                *held = value.clone();
+                found = true;
+            }
+        }
+        if !found {
+            self.json.push((name, value));
+        }
     }
 
     /// `get_param( $key )`: the first set.
@@ -71,11 +91,15 @@ pub(crate) enum Sanitize {
     TextField,
     /// `rest_parse_request_arg()`: validated, then sanitized, by its schema.
     Schema,
+    /// `rest_sanitize_request_arg()`: sanitized by its schema.
+    Value,
     /// `urldecode()` of a URL parameter, a string.
     Urldecode,
     /// Left as given, for the endpoint to check: a schema whose keywords
     /// are not ported.
     Endpoint,
+    /// Not ported: a request that has it is answered 501 before its checks.
+    NotPorted,
     /// The endpoint's own sanitizer, which reads the site.
     Site(fn(&Context, &Value) -> Checked<Value>),
     /// The endpoint's own sanitizer, which reads the other parameters as
@@ -196,7 +220,14 @@ pub(crate) fn sanitize_params(
 ) -> Result<(), RestError> {
     let mut invalid = Invalid::default();
     let given = params.clone();
-    for source in [&mut params.get, &mut params.url, &mut params.defaults] {
+    let sources = [
+        &mut params.json,
+        &mut params.post,
+        &mut params.get,
+        &mut params.url,
+        &mut params.defaults,
+    ];
+    for source in sources {
         for (key, value) in source.iter_mut() {
             let name = key.to_php_string();
             let Some(arg) = args.iter().find(|arg| arg.name.as_bytes() == name) else {
@@ -210,11 +241,12 @@ pub(crate) fn sanitize_params(
                 }
                 Sanitize::TextField => Ok(text(sanitize_text_field(&value.to_php_string()))),
                 Sanitize::Urldecode => Ok(text(urldecode(&value.to_php_string()))),
-                Sanitize::Endpoint => Ok(value.clone()),
+                Sanitize::Endpoint | Sanitize::NotPorted => Ok(value.clone()),
                 Sanitize::Site(sanitize) => sanitize(context, value),
                 Sanitize::Params(sanitize) => sanitize(&given, value),
                 Sanitize::Schema => validate_value_from_schema(value, &arg.schema, arg.name)
                     .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name)),
+                Sanitize::Value => sanitize_value_from_schema(value, &arg.schema, arg.name),
             };
             if let Some(sanitized) = refused(sanitized, arg.name, &mut invalid) {
                 *value = sanitized;
@@ -270,4 +302,70 @@ pub(crate) fn collection_args() -> Vec<Arg> {
         ),
         arg("search", r#"{"type":"string"}"#, true, Sanitize::TextField),
     ]
+}
+
+/// `get_content_type()`'s value: the header up to a `;` past its start,
+/// lower case and trimmed, if it has a `/`.
+pub(crate) fn content_type(header: Option<&[u8]>) -> Option<Vec<u8>> {
+    let value = header.filter(|value| !is_empty_string(value))?;
+    let value = match value.iter().position(|&b| b == b';') {
+        Some(at) if at > 0 => value.get(..at).unwrap_or_default(),
+        _ => value,
+    };
+    let value = value.to_ascii_lowercase();
+    value.contains(&b'/').then(|| php_trim(&value).to_vec())
+}
+
+/// `wp_is_json_media_type()`: `application/json`, or a `+json` subtype,
+/// with `+oembed` or not, after the start, white space or a comma.
+pub(crate) fn is_json(media: &[u8]) -> bool {
+    // PCRE's `\s`, and its class `[\w!#\$&-\^\.\+]`.
+    let space = |b: u8| matches!(b, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
+    let class =
+        |b: u8| b.is_ascii_alphanumeric() || b"_!#$.+".contains(&b) || (b'&'..=b'^').contains(&b);
+    let ends = |rest: &[u8]| {
+        rest.first()
+            .is_none_or(|&b| space(b) || b == b';' || b == b',')
+    };
+    let json = |rest: &[u8]| {
+        rest.strip_prefix(b"json")
+            .is_some_and(|rest| ends(rest) || rest.strip_prefix(b"+oembed").is_some_and(ends))
+    };
+    let lower = media.to_ascii_lowercase();
+    (0..lower.len()).any(|at| {
+        let before = at.checked_sub(1).and_then(|before| lower.get(before));
+        let start = before.is_none_or(|&b| space(b) || b == b',');
+        let rest = lower.get(at..).unwrap_or_default();
+        let subtype = rest.strip_prefix(b"application/").filter(|_| start);
+        subtype.is_some_and(|subtype| {
+            (0..subtype.len()).any(|cut| {
+                let (prefix, rest) = subtype.split_at(cut);
+                let suffixed =
+                    prefix.len() > 1 && prefix.ends_with(b"+") && prefix.iter().all(|&b| class(b));
+                (cut == 0 || suffixed) && json(rest)
+            })
+        })
+    })
+}
+
+/// `array_merge( $first, $second )`: string keys of `second` replace
+/// `first`'s, integer keys are numbered afresh.
+pub(crate) fn array_merge(
+    first: Vec<(Key, Value)>,
+    second: Vec<(Key, Value)>,
+) -> Vec<(Key, Value)> {
+    let mut merged: Vec<(Key, Value)> = Vec::new();
+    let mut next = 0;
+    for (key, value) in first.into_iter().chain(second) {
+        if let Key::Int(_) = key {
+            merged.push((Key::Int(next), value));
+            next += 1;
+            continue;
+        }
+        match merged.iter_mut().find(|(known, _)| *known == key) {
+            Some((_, held)) => *held = value,
+            None => merged.push((key, value)),
+        }
+    }
+    merged
 }

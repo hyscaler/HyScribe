@@ -1,0 +1,33 @@
+# The rows PHP WordPress writes for the action rest-posts-update-draft (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-16 08:52:57 to 2026-11-16 08:52:57 UTC.
+# %wp_posts:1% is 9.
+wp_posts	%wp_posts:1%	+	ID	%wp_posts:1%
+wp_posts	%wp_posts:1%	+	comment_count	0
+wp_posts	%wp_posts:1%	+	comment_status	closed
+wp_posts	%wp_posts:1%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:1%
+wp_posts	%wp_posts:1%	+	menu_order	0
+wp_posts	%wp_posts:1%	+	ping_status	closed
+wp_posts	%wp_posts:1%	+	pinged	
+wp_posts	%wp_posts:1%	+	post_author	1
+wp_posts	%wp_posts:1%	+	post_content	<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->
+wp_posts	%wp_posts:1%	+	post_content_filtered	
+wp_posts	%wp_posts:1%	+	post_date	%now%
+wp_posts	%wp_posts:1%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:1%	+	post_excerpt	
+wp_posts	%wp_posts:1%	+	post_mime_type	
+wp_posts	%wp_posts:1%	+	post_modified	%now%
+wp_posts	%wp_posts:1%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:1%	+	post_name	1-revision-v1
+wp_posts	%wp_posts:1%	+	post_parent	1
+wp_posts	%wp_posts:1%	+	post_password	
+wp_posts	%wp_posts:1%	+	post_status	inherit
+wp_posts	%wp_posts:1%	+	post_title	Hello world!
+wp_posts	%wp_posts:1%	+	post_type	revision
+wp_posts	%wp_posts:1%	+	to_ping	
+wp_posts	1	~	post_date	2026-10-27 08:08:15	%now%
+wp_posts	1	~	post_date_gmt	2026-10-27 08:08:15	0000-00-00 00:00:00
+wp_posts	1	~	post_modified	2026-10-27 08:08:15	%now%
+wp_posts	1	~	post_modified_gmt	2026-10-27 08:08:15	%now%
+wp_posts	1	~	post_name	hello-world	sample-page
+wp_posts	1	~	post_status	publish	draft
+wp_term_taxonomy	1	~	count	1	0

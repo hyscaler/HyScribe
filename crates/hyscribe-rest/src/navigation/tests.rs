@@ -47,6 +47,7 @@ fn get(content: &'static Content, target: &str) -> crate::Served {
         status: 0,
         headers: Vec::new(),
         body: Vec::new(),
+        sent: Vec::new(),
     };
     serve_over(content, &case)
 }

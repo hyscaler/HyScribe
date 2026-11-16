@@ -5,7 +5,7 @@
 
 use hyscribe_model::{Comment, CommentOrder, CommentQuery, CommentRow, Post};
 use hyscribe_phpser::{Key, Value, add_query_arg};
-use hyscribe_render::date::{Zone, format_unix, site_zone, stored_unix};
+use hyscribe_render::date::{Zone, format_unix, stored_unix};
 use hyscribe_render::{front_comment_text, user_name};
 
 use crate::fields::{Properties, fields_for_response, item_response, links_wanted};
@@ -503,8 +503,7 @@ fn id_list(params: &Params, name: &str) -> Vec<u64> {
 /// `WP_Date_Query::build_mysql_datetime()` of a date the schema took, in
 /// the site's time zone: read in it unless it gives its own.
 fn local_time(context: &Context, date: &[u8]) -> String {
-    let option = |name| context.option(name).unwrap_or_default();
-    let zone = site_zone(&option("timezone_string"), &option("gmt_offset"));
+    let zone = context.zone();
     // The schema took the date, so it parses.
     let unix = parse_date(date).unwrap_or_default();
     let zone_given = |rest: &[u8]| rest.iter().any(|b| matches!(b, b'Z' | b'+' | b'-'));

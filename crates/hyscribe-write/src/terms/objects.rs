@@ -56,8 +56,7 @@ pub(crate) async fn update_term_count(
 /// `wp_set_object_terms( $object_id, $terms, $taxonomy, $append )`: the
 /// term taxonomy IDs of `terms`. A text naming no term becomes a new term;
 /// without `append`, the object's other terms of `taxonomy` are removed.
-#[cfg(test)]
-pub(crate) async fn wp_set_object_terms(
+pub async fn wp_set_object_terms(
     write: &mut Write<'_>,
     object: u64,
     terms: &[TermRef<'_>],

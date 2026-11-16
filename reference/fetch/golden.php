@@ -59,12 +59,12 @@ foreach ( $urls as $url ) {
 	echo "validate\t", bin2hex( $url ), "\t", false === wp_http_validate_url( $url ) ? 0 : 1, "\n";
 }
 
-$bases     = array( 'http://example.com/dir/page.html?q=1#f', 'https://example.com:8443', 'http://example.com/', '', '0', '//example.com/x/y', 'http://example.com/a/b/c/' );
+$bases     = array( 'http://example.com/dir/page.html?q=1#f', 'https://example.com:8443', 'http://example.com/', '', '0', '//example.com/x/y', 'http://example.com/a/b/c/', 'a:0' );
 $relatives = array(
 	'/favicon.ico', 'favicon.ico', '../icons/a.png', '../../../../x.png', 'a/b/../../c/./d.png', '/a/b/../c.png',
 	'?x=1', '#top', '?0', '#0', '0', '', '//cdn.example.com/a.jpg', '//cdn.example.com:8080/a.jpg', 'https://other.example/x',
 	'data:image/png;base64,AAAA', 'mailto:x@example.com', 'x/../../y/../z', '..', '../', './', 'a/..b/../c',
-	'/../a', '/../../a', 'img.png?v=1#frag', 'http:///bad', 'a//b/../c', 'a../b',
+	'/../a', '/../../a', 'img.png?v=1#frag', 'http:///bad', 'a//b/../c', 'a../b', '../a/../x', 'a//../x',
 );
 foreach ( $bases as $base ) {
 	foreach ( $relatives as $relative ) {

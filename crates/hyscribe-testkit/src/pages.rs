@@ -48,7 +48,6 @@ fn route(path: &str, agent: &str) -> (u16, Option<String>, Vec<u8>) {
     match found {
         None => (404, None, b"Not Found".to_vec()),
         Some((status, what)) if (300..400).contains(&status) => (status, Some(what), Vec::new()),
-        Some((status, what)) if what == "-" => (status, None, Vec::new()),
         Some((status, file)) => {
             let page = std::fs::read(folder().join("pages").join(file)).unwrap_or_default();
             let page = String::from_utf8_lossy(&page).replace("%agent%", agent);

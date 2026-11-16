@@ -254,6 +254,36 @@ async fn answering(answer: &'static [u8]) -> SocketAddr {
     address
 }
 
+/// A body read to its limit stops there: no more is awaited, and the
+/// connection is closed, however much more the server says it sends.
+#[tokio::test]
+async fn reading_stops_at_the_limit_and_closes() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (closed, seen) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut buffer = [0; 1024];
+        let _ = stream.read(&mut buffer).await;
+        let head = b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n";
+        stream
+            .write_all(&[&head[..], &[b'x'; 100]].concat())
+            .await
+            .unwrap();
+        let read = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buffer)).await;
+        let _ = closed.send(matches!(read, Ok(Ok(0))));
+    });
+    let client = client(Table::new(address));
+    let mut limited = args();
+    limited.limit_response_size = Some(100);
+    let page = client
+        .get(b"http://pages.test/", b"", limited)
+        .await
+        .unwrap();
+    assert_eq!(page.body, vec![b'x'; 100]);
+    assert!(seen.await.unwrap(), "the connection stayed open");
+}
+
 #[tokio::test]
 async fn answers_that_are_not_http_fail() {
     let garbage = client(Table::new(answering(b"SSH-2.0-OpenSSH\r\n").await));

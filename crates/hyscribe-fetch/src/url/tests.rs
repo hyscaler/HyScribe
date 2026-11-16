@@ -87,7 +87,7 @@ fn relative_urls_are_made_absolute_as_php_makes_them() {
         );
         count += 1;
     }
-    assert_eq!(count, 7 * 28);
+    assert_eq!(count, 8 * 30);
 }
 
 #[test]
@@ -119,8 +119,11 @@ fn targets_carry_what_the_request_sends() {
 
 #[test]
 fn hostile_dot_segments_stop() {
-    let path = "a/".repeat(5000) + &"../".repeat(5000) + "x";
-    let made = make_absolute_url(path.as_bytes(), b"http://h.test/");
-    assert!(made.starts_with(b"http://h.test/a/"));
-    assert!(made.ends_with(b"/x"));
+    let started = std::time::Instant::now();
+    for (open, close) in [("a/", "../"), ("a/", "x/../../"), ("ab/c/../", "../")] {
+        let path = open.repeat(20_000) + &close.repeat(20_000) + "x";
+        let made = make_absolute_url(path.as_bytes(), b"http://h.test/");
+        assert!(made.ends_with(b"x"));
+    }
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
 }

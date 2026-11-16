@@ -12,9 +12,6 @@ use crate::address::is_public;
 /// The ports `http_allowed_safe_ports` allows by default.
 const SAFE_PORTS: [u16; 3] = [80, 443, 8080];
 
-/// How many levels of `../` [`make_absolute_url`] removes.
-const MAX_PASSES: usize = 1000;
-
 /// Where a valid URL is fetched from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Target {
@@ -153,12 +150,10 @@ pub fn make_absolute_url(relative: &[u8], url: &[u8]) -> Vec<u8> {
 
 /// The relative path's `../` stripped as `make_absolute_url()` strips
 /// them: `[^/]+/../` removed while `../` is found past the start, then a
-/// leading `/../` run. Each pass removes one level, so a hostile path
-/// stops after [`MAX_PASSES`] levels rather than taking quadratic time.
+/// leading `/../` run. A pass removes `../` runs as well as the segments
+/// they follow, so nesting of any depth takes few passes.
 fn dot_segments(mut path: Vec<u8>) -> Vec<u8> {
-    let mut passes = 0;
-    while passes < MAX_PASSES && find(&path, b"../").is_some_and(|at| at > 1) {
-        passes += 1;
+    while find(&path, b"../").is_some_and(|at| at > 1) {
         let mut out = Vec::new();
         let (mut at, mut replaced) = (0, false);
         while let Some(rest) = path.get(at..).filter(|rest| !rest.is_empty()) {

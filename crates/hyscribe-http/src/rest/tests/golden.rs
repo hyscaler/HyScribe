@@ -296,7 +296,11 @@ async fn posts_match_php() {
         &[
             ("administrator", "POST", "/?rest_route=/wp/v2/posts"),
             ("administrator", "PUT", "/?rest_route=/wp/v2/posts/1"),
-            ("visitor", "DELETE", "/?rest_route=/wp/v2/menu-items/1&force=1"),
+            (
+                "visitor",
+                "DELETE",
+                "/?rest_route=/wp/v2/menu-items/1&force=1",
+            ),
             (
                 "visitor",
                 "GET",

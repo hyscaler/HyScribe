@@ -380,10 +380,10 @@ fn after_save(
                 .get(name)
                 .and_then(Value::as_array)
                 .unwrap_or_default();
-            let ids = ids
-                .iter()
-                .filter_map(|(_, id)| u64::try_from(id.to_int()).ok());
-            ids.filter(|&id| id > 0).collect()
+            // The terms check refused 0, which no user may assign.
+            let ids = ids.iter();
+            ids.filter_map(|(_, id)| u64::try_from(id.to_int()).ok())
+                .collect()
         };
         save.categories = params.get("categories").map(|_| ids("categories"));
         save.tags = params.get("tags").map(|_| ids("tags"));

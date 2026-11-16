@@ -66,17 +66,18 @@ impl Terminal<'_> {
     /// Asks for a password with the terminal's echo off.
     fn secret(&mut self, question: &str) -> Result<String, String> {
         self.say(&format!("? {question}: "))?;
+        // The terminal's settings, when it is one and took echo off.
         let saved = self
             .tty
-            .and_then(|fd| tcgetattr(fd).ok().map(|termios| (fd, termios)));
-        if let Some((fd, termios)) = &saved {
-            let mut quiet = termios.clone();
-            quiet.local_modes.remove(LocalModes::ECHO);
-            tcsetattr(fd, OptionalActions::Now, &quiet).map_err(failed_tty)?;
-        }
+            .and_then(|fd| tcgetattr(fd).ok().map(|termios| (fd, termios)))
+            .filter(|(fd, termios)| {
+                let mut quiet = termios.clone();
+                quiet.local_modes.remove(LocalModes::ECHO);
+                tcsetattr(fd, OptionalActions::Now, &quiet).is_ok()
+            });
         let answer = self.line();
         if let Some((fd, termios)) = saved {
-            tcsetattr(fd, OptionalActions::Now, &termios).map_err(failed_tty)?;
+            let _ = tcsetattr(fd, OptionalActions::Now, &termios);
             // The Enter that ended the answer was not echoed either.
             self.say("\n")?;
         }
@@ -96,10 +97,6 @@ impl Terminal<'_> {
             }
         }
     }
-}
-
-fn failed_tty(err: rustix::io::Errno) -> String {
-    format!("cannot turn the terminal's echo off: {err}")
 }
 
 /// Runs the wizard for the installation in `home` and says where `.env`
@@ -139,13 +136,11 @@ pub(crate) fn run(home: &Path, term: &mut Terminal<'_>) -> Result<String, String
         .iter()
         .filter(|key| values.iter().any(|(k, _)| k == *key))
         .count();
-    for key in SALT_KEYS {
-        if !values.iter().any(|(k, _)| *k == key) {
-            let salt = hyscribe_auth::generate_password(64, true)
-                .map_err(failed("cannot generate keys and salts".into()))?;
-            values.push((key, salt));
-        }
-    }
+    let salts: Result<Vec<_>, _> = SALT_KEYS
+        .into_iter()
+        .filter(|key| !values.iter().any(|(k, _)| k == key))
+        .map(|key| hyscribe_auth::generate_password(64, true).map(|salt| (key, salt)))
+        .collect();
     term.say(&format!(
         "  Keys and salts: {copied} copied, {} generated\n",
         SALT_KEYS.len() - copied
@@ -161,16 +156,21 @@ pub(crate) fn run(home: &Path, term: &mut Terminal<'_>) -> Result<String, String
         values.push(("DB_READ_USER", read_user));
         values.push(("DB_READ_PASSWORD", password));
     }
-    let map: HashMap<String, String> = values
-        .iter()
-        .map(|(key, value)| (key.to_string(), value.clone()))
-        .collect();
-    let config = hyscribe_config::from_map(&map).map_err(|err| err.to_string())?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let config = salts
+        .map_err(failed("cannot generate keys and salts".into()))
+        .and_then(|salts| {
+            values.extend(salts);
+            let map: HashMap<String, String> = values
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.clone()))
+                .collect();
+            hyscribe_config::from_map(&map).map_err(|err| err.to_string())
+        })?;
+    let report = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(failed("cannot start the runtime".into()))?;
-    let report = runtime.block_on(check(&config))?;
+        .map_err(failed("cannot start the runtime".into()))
+        .and_then(|runtime| runtime.block_on(check(&config)))?;
     term.say(&report)?;
     if let Some(content) = content
         && content.join("object-cache.php").exists()
@@ -350,17 +350,20 @@ async fn check(config: &Config) -> Result<String, String> {
         version.unwrap_or_default()
     );
     if let Some(user) = &database.read_user {
-        let privileges = db
-            .privileges()
-            .await
-            .map_err(db_failed(format!("cannot read the privileges of {user}")))?;
-        let reads = privileges.iter().any(|p| p == "SELECT");
-        if !reads || privileges.iter().any(|p| p != "SELECT" && p != "USAGE") {
-            return Err(format!(
-                "DB_READ_USER {user} must be granted SELECT and nothing more; it has {}",
-                privileges.join(", ")
-            ));
-        }
+        let privileges = db.privileges().await;
+        privileges
+            .map_err(db_failed(format!("cannot read the privileges of {user}")))
+            .and_then(|privileges| {
+                let reads = privileges.iter().any(|p| p == "SELECT");
+                if reads && privileges.iter().all(|p| p == "SELECT" || p == "USAGE") {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "DB_READ_USER {user} must be granted SELECT and nothing more; it has {}",
+                        privileges.join(", ")
+                    ))
+                }
+            })?;
         report.push_str(&format!("  DB_READ_USER {user} may only read\n"));
     }
     let mut refusals = Vec::new();

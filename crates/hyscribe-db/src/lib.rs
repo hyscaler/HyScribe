@@ -450,18 +450,16 @@ impl Db {
     pub async fn privileges(&self) -> Result<Vec<String>, DbError> {
         let mut sql = Sql::new("");
         Engine::privileges(&mut sql);
-        let rows = sql
-            .query(&self.prefix)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(db_error)?;
-        rows.iter()
-            .map(|row| {
-                let mut c = Columns::new(row);
-                let privilege = c.text("privilege");
-                c.finish(privilege)
-            })
-            .collect()
+        let rows = sql.query(&self.prefix).fetch_all(&self.pool).await;
+        rows.map_err(db_error).and_then(|rows| {
+            rows.iter()
+                .map(|row| {
+                    let mut c = Columns::new(row);
+                    let privilege = c.text("privilege");
+                    c.finish(privilege)
+                })
+                .collect()
+        })
     }
 
     /// `get_post_meta( $post_id, $key, true )`: the first value stored.

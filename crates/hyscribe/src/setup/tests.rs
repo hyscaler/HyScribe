@@ -188,16 +188,18 @@ fn what_php_computes_is_asked_for_or_left_safe() {
     let extra = "define( 'DISALLOW_UNFILTERED_HTML', getenv( 'X' ) );\n\
                  define( 'ALLOW_UNFILTERED_UPLOADS', 1 );\n\
                  define( 'WP_HOME', 'https://' . $_SERVER['HTTP_HOST'] );\n\
+                 define( 'WP_SITEURL', WP_HOME . '/wp' );\n\
                  define( 'WP_CONTENT_DIR', __DIR__ . '/content' );";
     let install = Install::new(Some(&wp_config(extra)));
     let content = install.site.join("content");
     std::fs::create_dir(&content).unwrap();
     std::fs::write(content.join("object-cache.php"), "<?php").unwrap();
-    let answers = format!("\n{}\nhttps://asked.example\n\n\n", content.display());
+    // WP_SITEURL left empty: the stored one.
+    let answers = format!("\n{}\nhttps://asked.example\n\n\n\n", content.display());
     let ran = wizard(&install.home, &answers);
     assert_eq!(ran.result, Ok(install.written()));
     for expected in [
-        "  Not a literal there, or missing: WP_HOME, DISALLOW_UNFILTERED_HTML, \
+        "  Not a literal there, or missing: WP_HOME, WP_SITEURL, DISALLOW_UNFILTERED_HTML, \
          ALLOW_UNFILTERED_UPLOADS\n"
             .to_string(),
         format!(
@@ -218,6 +220,7 @@ fn what_php_computes_is_asked_for_or_left_safe() {
     }
     let config = install.config();
     assert_eq!(config.home_url.as_deref(), Some("https://asked.example"));
+    assert_eq!(config.site_url, None);
     assert_eq!(config.constants, Constants::default());
 }
 
@@ -540,11 +543,12 @@ impl std::io::Read for Broken {
 #[test]
 fn input_and_output_failures_stop_the_wizard() {
     let install = Install::new(None);
-    let ran = wizard(&install.home, "");
-    assert_eq!(
-        ran.result,
-        Err("setup stopped: the input ended before every question was answered".into())
-    );
+    let ended: Result<String, String> =
+        Err("setup stopped: the input ended before every question was answered".into());
+    assert_eq!(wizard(&install.home, "").result, ended);
+    // Ended at the last question, the read user.
+    let site = Install::new(Some(&wp_config("")));
+    assert_eq!(wizard(&site.home, "\n\n").result, ended);
     let mut out = Vec::new();
     let mut terminal = Terminal {
         input: &mut std::io::BufReader::new(Broken),
@@ -565,10 +569,108 @@ fn input_and_output_failures_stop_the_wizard() {
         run(&install.home, &mut terminal),
         Err("failed to write whole buffer".into())
     );
-    assert_eq!(
-        failed_tty(rustix::io::Errno::NOTTY),
-        "cannot turn the terminal's echo off: Inappropriate ioctl for device (os error 25)"
+}
+
+/// Output that fails after `0` more writes.
+struct FailAfter(usize);
+
+impl Write for FailAfter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self.0.checked_sub(1) {
+            Some(left) => {
+                self.0 = left;
+                Ok(buf.len())
+            }
+            None => Err(std::io::Error::other("closed")),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Every way `answers` can stop early: the input ending after each line,
+/// and the output failing at each write. Then the whole run, which must
+/// succeed with `result`.
+fn stopped_anywhere(install: &Install, answers: &str, result: &Result<String, String>) {
+    let lines: Vec<&str> = answers.split_inclusive('\n').collect();
+    for end in 0..lines.len() {
+        let ran = wizard(&install.home, &lines[..end].concat());
+        assert_eq!(
+            ran.result,
+            Err("setup stopped: the input ended before every question was answered".into()),
+            "after {end} lines"
+        );
+    }
+    for writes in 0.. {
+        let mut input = Cursor::new(answers.as_bytes().to_vec());
+        let mut out = FailAfter(writes);
+        let ran = run(
+            &install.home,
+            &mut Terminal {
+                input: &mut input,
+                out: &mut out,
+                tty: None,
+            },
+        );
+        if ran != Err("closed".into()) {
+            assert_eq!(&ran, result);
+            break;
+        }
+    }
+}
+
+#[test]
+fn every_question_can_stop_the_wizard() {
+    // Computed values, a read user and an object cache.
+    let extra = "define( 'DB_CHARSET', getenv( 'CHARSET' ) );\n\
+                 define( 'WP_HOME', 'https://' . $_SERVER['HTTP_HOST'] );\n\
+                 define( 'MULTISITE', getenv( 'MULTISITE' ) );\n\
+                 define( 'WP_CONTENT_DIR', __DIR__ . '/content' );";
+    let config = wp_config(extra).replacen("define( 'DB_CHARSET', 'utf8mb4' );", "", 1);
+    let install = Install::new(Some(&config));
+    let content = install.site.join("content");
+    std::fs::create_dir(&content).unwrap();
+    std::fs::write(content.join("object-cache.php"), "<?php").unwrap();
+    let answers = format!(
+        "\n{}\nutf8mb4\nhttps://a.example\n\nwordpress_read\nreference-only\n",
+        content.display()
     );
+    stopped_anywhere(&install, &answers, &Ok(install.written()));
+    let config = install.config();
+    assert_eq!(config.home_url.as_deref(), Some("https://a.example"));
+    assert_eq!(config.database.read_user.as_deref(), Some("wordpress_read"));
+    // With `.env` there, kept after a wrong answer.
+    let kept = Ok(format!(
+        "Kept {}; nothing written.\n",
+        install.env().display()
+    ));
+    stopped_anywhere(&install, "maybe\nn\n", &kept);
+    // Everything asked.
+    let install = Install::new(None);
+    let db = hyscribe_testkit::fixture_database();
+    let answers = format!(
+        "\n{}\n{}\n{}\n{}\n{}\n\n\n\n",
+        db.name,
+        db.user,
+        db.password.expose(),
+        db.host,
+        db.port
+    );
+    stopped_anywhere(&install, &answers, &Ok(install.written()));
+}
+
+/// The read user connects, but the main user cannot.
+#[test]
+fn the_main_user_must_connect_too() {
+    let config = wp_config("").replace("'reference-only'", "'wrong'");
+    let install = Install::new(Some(&config));
+    let err = wizard(&install.home, "\n\nwordpress_read\nreference-only\n")
+        .result
+        .unwrap_err();
+    assert!(err.starts_with("cannot open the writer: "), "{err}");
+    assert!(!err.contains("wrong"), "{err}");
 }
 
 /// Input that notes whether the terminal echoed while it was read.
@@ -632,6 +734,15 @@ fn passwords_are_read_with_echo_off() {
     assert_eq!(input.echoed, Some(false));
     assert!(echo());
     assert_eq!(out, b"? Password: \n");
+    // The newline after the hidden answer cannot be written.
+    let mut input = Cursor::new(b"s3cret\n".to_vec());
+    let mut terminal = Terminal {
+        input: &mut input,
+        out: &mut FailAfter(1),
+        tty: Some(tty),
+    };
+    assert_eq!(terminal.secret("Password"), Err("closed".into()));
+    assert!(echo());
     // Input that is no terminal is read as it is.
     let null = std::fs::File::open("/dev/null").unwrap();
     let mut terminal = Terminal {

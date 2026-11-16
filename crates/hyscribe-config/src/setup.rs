@@ -171,8 +171,8 @@ pub fn write(dir: &Path, text: &str, replace: bool) -> std::io::Result<PathBuf> 
         .mode(0o600)
         .open(&new)
         .and_then(|mut file| {
-            file.write_all(text.as_bytes())?;
-            file.sync_all()
+            file.write_all(text.as_bytes())
+                .and_then(|()| file.sync_all())
         });
     // A hard link fails if `.env` exists, so nothing is replaced unasked.
     let placed = written.and_then(|()| {

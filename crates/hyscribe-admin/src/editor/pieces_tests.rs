@@ -319,6 +319,18 @@ fn a_draft_s_page() {
     let request = crate::tests::request(&canonical, &uri, browser);
     let html = page::editor_page(&site, &editing, &Value::Null, &request).unwrap();
     assert!(html.contains(">Preview Post</a>"));
+    // A new post's stored title, "Auto Draft", is not the page's.
+    let new = Post {
+        status: "auto-draft".into(),
+        title: b"Auto Draft".to_vec(),
+        ..draft.clone()
+    };
+    let editing_new = form::Editing {
+        post: &new,
+        ..editing
+    };
+    let added = page::editor_page(&site, &editing_new, &Value::Null, &request).unwrap();
+    assert!(added.contains("<title>Add Post &lsaquo;"));
     assert!(html.contains("preview=true"));
     assert!(!html.contains("_wp_original_http_referer"));
     let paths = page::preload_paths(&draft, 6, true, "twentytwentyfive");

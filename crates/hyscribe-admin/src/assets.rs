@@ -138,28 +138,24 @@ pub(crate) fn registered_script_data(handle: &str, key: &str) -> String {
 
 /// What a request registers with no source, as `wp_register_style( $handle,
 /// false )` does before adding inline styles.
-static ALIAS: Item = ALIAS_ITEM;
-
-/// [`ALIAS`]'s fields.
-const ALIAS_ITEM: Item = Item {
-    src: None,
-    color_scheme: false,
-    deps: Vec::new(),
-    ver: String::new(),
-    footer: false,
-    extra: Value::Null,
-    textdomain: false,
-};
+static ALIAS: Item = alias(false);
 
 /// `wp-block-styles`, the script alias `enqueue_editor_block_styles_assets()`
-/// registers for its inline script, in the footer after `wp-blocks`.
-fn block_styles() -> &'static Item {
-    static ITEM: OnceLock<Item> = OnceLock::new();
-    ITEM.get_or_init(|| Item {
-        deps: vec!["wp-blocks".into()],
-        footer: true,
-        ..ALIAS_ITEM
-    })
+/// registers for its inline script, in the footer; `wp-blocks`, which it
+/// needs, is printed before by the editor's scripts.
+static BLOCK_STYLES: Item = alias(true);
+
+/// An alias, printed in the footer if `footer`.
+const fn alias(footer: bool) -> Item {
+    Item {
+        src: None,
+        color_scheme: false,
+        deps: Vec::new(),
+        ver: String::new(),
+        footer,
+        extra: Value::Null,
+        textdomain: false,
+    }
 }
 
 /// The queue and printing state of `WP_Styles` or `WP_Scripts`.
@@ -317,7 +313,7 @@ impl Dependencies {
                 let added = !self.scripts && self.extra.keys().any(|(h, _)| h == handle);
                 added.then_some(&ALIAS)
             })
-            .or_else(|| (self.scripts && handle == "wp-block-styles").then(block_styles))
+            .or_else(|| (self.scripts && handle == "wp-block-styles").then_some(&BLOCK_STYLES))
     }
 
     /// `get_data( $handle, $key )`.

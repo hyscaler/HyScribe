@@ -15,6 +15,7 @@ struct Fixture {
     home: Vec<u8>,
     siteurl: Vec<u8>,
     smilies: bool,
+    migration: Option<Vec<u8>>,
 }
 
 impl Site for Fixture {
@@ -26,6 +27,7 @@ impl Site for Fixture {
                 b"0".to_vec()
             }),
             "siteurl" => Some(self.siteurl.clone()),
+            "https_migration_required" => self.migration.clone(),
             _ => None,
         }
     }
@@ -82,6 +84,7 @@ fn case(state: &[u8], row: &[u8]) -> (Fixture, Request) {
         home: state.get_str("home").unwrap().to_php_string(),
         siteurl: state.get_str("siteurl").unwrap().to_php_string(),
         smilies: true,
+        migration: None,
     };
     (site, request)
 }
@@ -140,17 +143,38 @@ fn post_content_matches_php() {
     assert!(count >= 146);
 }
 
+/// `reference/insecure-home-url/golden.sh`: its content, then each home,
+/// siteurl and `https_migration_required` state with the result.
 #[test]
-fn insecure_home_urls_become_https() {
-    let content = br#"<a href="http://example.test/x">x</a> "http:\/\/example.test\/y""#;
-    assert_eq!(
-        String::from_utf8(replace_insecure_home_url(b"https://example.test", content)).unwrap(),
-        r#"<a href="https://example.test/x">x</a> "https:\/\/example.test\/y""#
-    );
-    assert_eq!(
-        replace_insecure_home_url(b"http://example.test", content),
-        content
-    );
+fn insecure_home_urls_match_php() {
+    let mut lines = include_str!("../../tests/golden/insecure-home-url.tsv").lines();
+    let content = unhex(lines.next().unwrap());
+    let mut count = 0;
+    for line in lines {
+        let [home, siteurl, stored, set, expected] =
+            <[&str; 5]>::try_from(line.split('\t').collect::<Vec<_>>()).unwrap();
+        let site = Fixture {
+            post: Post::default(),
+            home: unhex(home),
+            siteurl: unhex(siteurl),
+            smilies: false,
+            migration: (set == "1").then(|| unhex(stored)),
+        };
+        assert_eq!(
+            String::from_utf8_lossy(&replace_insecure_home_url(&site, &content)),
+            String::from_utf8_lossy(&if expected == "=" {
+                content.clone()
+            } else {
+                unhex(expected)
+            }),
+            "home {:?} siteurl {:?} option {:?}",
+            String::from_utf8_lossy(&site.home),
+            String::from_utf8_lossy(&site.siteurl),
+            site.migration.as_deref().map(String::from_utf8_lossy),
+        );
+        count += 1;
+    }
+    assert_eq!(count, 384);
 }
 
 #[test]

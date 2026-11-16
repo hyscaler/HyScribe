@@ -651,7 +651,7 @@ impl Renderer<'_> {
     fn widget_text_content(&self, text: &[u8]) -> Vec<u8> {
         let site = self.context.site;
         let text = wpautop(&wptexturize(text, &CORE_SHORTCODE_TAGS), true);
-        let text = capital_p_dangit(&replace_insecure_home_url(&site.home_url(), &text));
+        let text = capital_p_dangit(&replace_insecure_home_url(site, &text));
         let text = filter_content_tags(site, &self.context.loading, &text, Filter::WidgetText);
         site_smilies(site, &text)
     }

@@ -115,6 +115,9 @@ fn entries(value: Option<&Value>) -> &[(Key, Value)] {
 /// The answer to a refused action.
 fn refused(public: bool, refusal: Refusal) -> Response {
     let status = StatusCode::from_u16(refusal.status).unwrap_or(StatusCode::FORBIDDEN);
+    if status == StatusCode::NOT_IMPLEMENTED {
+        return not_ported();
+    }
     let (kind, body) = match refusal.body {
         Body::Page(title, message) => {
             let page = hyscribe_admin::die::page(public, title, &message);

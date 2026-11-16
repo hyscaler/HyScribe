@@ -16,7 +16,7 @@ use hyscribe_write::terms::{
     Deletion, Taxonomy, TermArgs, TermError, wp_delete_term, wp_insert_term, wp_update_term,
 };
 
-use super::{Acting, Ajax, Saving, Stop, referer};
+use super::{Acting, Ajax, Saving, Stop, id_of, referer};
 
 /// The taxonomy `name`, if hyscribe-write writes its terms.
 fn written(name: &[u8]) -> Result<(Taxonomy, Listed), Error> {
@@ -148,11 +148,6 @@ fn listed_taxonomy(asked: &Asked) -> Result<Taxonomy, Error> {
     Ok(written(name.unwrap_or_default())?.0)
 }
 
-/// A term ID as `(int)` casts it, none below 1.
-fn term_id(value: Option<&Value>) -> u64 {
-    u64::try_from(value.map_or(0, Value::to_int)).unwrap_or_default()
-}
-
 /// `add-tag`: the term of the list's form added, then the list with
 /// `message=1`, or `message=4` with `error`.
 pub(super) fn add_tag<'a>(
@@ -185,7 +180,7 @@ pub(super) fn delete<'a>(
             .request("tag_ID")
             .ok_or(Error::Unported("the list after a delete of no term"))?;
         // What it returns is not looked at.
-        wp_delete_term(write, taxonomy, term_id(Some(id)))
+        wp_delete_term(write, taxonomy, id_of(Some(id)))
             .await
             .map_err(Error::from)?;
         let location = noticed(asked, &[(b"message", Some(b"2"))]);
@@ -207,7 +202,7 @@ pub(super) fn bulk_delete<'a>(
         let taxonomy = listed_taxonomy(asked)?;
         let tags = asked.request("delete_tags").map(items).unwrap_or_default();
         for tag in tags {
-            wp_delete_term(write, taxonomy, term_id(Some(&tag)))
+            wp_delete_term(write, taxonomy, id_of(Some(&tag)))
                 .await
                 .map_err(Error::from)?;
         }
@@ -224,7 +219,7 @@ pub(super) fn edited_tag<'a>(
 ) -> Saving<'a> {
     Box::pin(async move {
         let taxonomy = listed_taxonomy(asked)?;
-        let id = term_id(lookup(asked.post, "tag_ID"));
+        let id = id_of(lookup(asked.post, "tag_ID"));
         if write.term_in(taxonomy.name(), id).await?.is_none() {
             let message =
                 "You attempted to edit an item that does not exist. Perhaps it was deleted?";
@@ -302,7 +297,7 @@ pub(super) fn inline_save_tax<'a>(
     Box::pin(async move {
         let name = lookup(asked.post, "taxonomy").and_then(Value::as_bytes);
         let (taxonomy, listed) = written(sanitize_key(name.unwrap_or_default()).as_bytes())?;
-        let id = term_id(lookup(asked.post, "tax_ID"));
+        let id = id_of(lookup(asked.post, "tax_ID"));
         let mut fields = Fields::read(asked)?;
         // `$_POST['description'] = $tag->description`, unslashed.
         fields.description = write
@@ -326,7 +321,7 @@ pub(super) fn ajax_delete_tag<'a>(
     _: &'a dyn Acting,
 ) -> Saving<'a, Ajax> {
     Box::pin(async move {
-        let id = term_id(lookup(asked.post, "tag_ID"));
+        let id = id_of(lookup(asked.post, "tag_ID"));
         let name = posted_taxonomy(asked)?;
         let name = String::from_utf8_lossy(&name);
         // `get_term()` fails for a taxonomy not registered, or a term not in it.

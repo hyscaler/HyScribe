@@ -10,8 +10,8 @@ use hyscribe_testkit::writes::check_writes;
 use hyscribe_write::options::{Autoload, add_option, update_option};
 
 use super::super::tests::unread::Unread;
-use super::super::tests::writer;
-use super::super::{Stop, act, handler};
+use super::super::tests::{ANSWERS, CASES, SITE, acted, case_row, hs, settled, writer};
+use super::super::{Handler, Stop, handler};
 use super::*;
 
 /// The fixture's home URL, which the write oracle's site keeps.
@@ -31,40 +31,31 @@ fn form(pairs: &[(&str, &str)]) -> Vec<(Key, Value)> {
 /// A request to hs-admin's `screen` past its checks, as user 1.
 fn asked<'a>(screen: &'a str, get: &'a [(Key, Value)], post: &'a [(Key, Value)]) -> Asked<'a> {
     Asked {
-        get,
-        post,
-        referer: None,
-        uri: screen.as_bytes(),
         home: HOME,
-        user: 1,
-        now: 0,
-        ip: b"",
-        agent: b"",
+        ..super::super::tests::asked(screen, get, post)
     }
 }
 
-/// The handler of `asked` on `screen` run as one action on `conn`, with
-/// each statement budget short of success failing first.
+/// The handler of `screen` (hs-admin's path) for `asked`.
+fn screen_handler(screen: &str, asked: &Asked) -> Handler {
+    let name = screen.trim_start_matches("/hs-admin/");
+    handler(name, &hyscribe_admin::actions::action(name, asked)).unwrap()
+}
+
+/// The handler of `asked` on `screen`, as [`acted`].
 async fn saved(
     writer: &Writer,
     conn: &mut Connection,
     screen: &str,
     asked: &Asked<'_>,
 ) -> Result<Answer, hyscribe_write::Error> {
-    let name = screen.trim_start_matches("/hs-admin/");
-    let action = hyscribe_admin::actions::action(name, asked);
-    let handler = handler(name, &action).unwrap();
-    for budget in 0.. {
-        let mut write = writer.begin_on(conn).await;
-        if let Ok(write) = &mut write {
-            write.fail_after(budget);
-        }
-        match act(write, handler, asked, &Unread).await {
-            Err(hyscribe_write::Error::Db(_)) => {}
-            saved => return saved,
-        }
-    }
-    unreachable!()
+    acted(
+        writer,
+        conn,
+        (screen_handler(screen, asked), &Unread),
+        asked,
+    )
+    .await
 }
 
 /// A save in `screen` of `post` (and `get`) after `setup`, checked against
@@ -355,42 +346,28 @@ async fn the_privacy_policy_draft_is_php_s() {
     report.unwrap();
 }
 
-/// PHP's `wp-admin` names under hs-admin's.
-fn hs(text: &str) -> String {
-    let text = text.replace("/wp-admin/", "/hs-admin/");
-    text.replace("%2Fwp-admin%2F", "%2Fhs-admin%2F")
-        .replace(".php", "")
-}
-
 /// The Settings saves of `reference/admin-saves/golden.sh` answer as PHP
 /// did on the oracle, whose configuration sets the addresses; its new
 /// policy page's ID is the oracle's, so that one is checked above.
 #[tokio::test]
 async fn saves_answer_as_php() {
     let _one = ONE.lock().await;
-    let golden = include_str!("../../../../../hyscribe-admin/tests/golden/admin-saves.tsv");
-    let cases = include_str!("../../../../../../reference/admin-saves/cases.list");
-    let base = "http://127.0.0.1:8081";
-    let urls = vec![("home", base.to_string()), ("siteurl", base.to_string())];
+    let urls = vec![("home", SITE.to_string()), ("siteurl", SITE.to_string())];
     let writer = writer().await.with_urls(urls);
     let mut answered = 0;
-    for row in golden.lines().filter(|row| row.starts_with("options-")) {
+    for row in ANSWERS.lines().filter(|row| row.starts_with("options-")) {
         let [case, _, php_location, _] = row.split('\t').collect::<Vec<_>>()[..] else {
             panic!("{row}");
         };
-        let line = cases
-            .lines()
-            .find(|line| line.starts_with(&format!("{case}\t")));
-        let fields: Vec<&str> = line.unwrap().split('\t').collect();
+        let fields = case_row(CASES, case).unwrap();
         let (target, body) = (hs(fields[2]), hs(fields[3]));
         let (path, query) = target.split_once('?').unwrap_or((&target, ""));
         let get = parse_str(query.as_bytes()).as_array().unwrap().to_vec();
         let body = if body == "-" { "" } else { &body };
         let post = parse_str(body.as_bytes()).as_array().unwrap().to_vec();
         let screen = format!("/hs-admin/{path}");
-        let mut asked = asked(&screen, &get, &post);
-        asked.home = base;
-        let handler = handler(path, &hyscribe_admin::actions::action(path, &asked)).unwrap();
+        let asked = super::super::tests::asked(&screen, &get, &post);
+        let handler = screen_handler(&screen, &asked);
         let mut write = writer.begin().await.unwrap();
         let Ok(Answer::Redirect(to)) = handler(&mut write, &asked, &Unread).await else {
             panic!("{case}: no redirect");
@@ -417,9 +394,7 @@ async fn answer(
             .unwrap();
     }
     let asked = asked(screen, get, post);
-    let name = screen.trim_start_matches("/hs-admin/");
-    let handler = handler(name, &hyscribe_admin::actions::action(name, &asked)).unwrap();
-    match handler(&mut write, &asked, &Unread).await {
+    match screen_handler(screen, &asked)(&mut write, &asked, &Unread).await {
         Ok(Answer::Redirect(to)) => Some(to),
         Err(Stop::Failed(Error::Unported(_))) => None,
         Err(Stop::Failed(err)) => panic!("{screen}: {err:?}"),
@@ -501,6 +476,14 @@ async fn unported_saves() {
     assert_eq!(answer(&[], permalinks, &[], &listed).await, None);
 }
 
+/// The error a save stopped with; PHP's `wp_die()` fails the test.
+fn failed(stop: Stop) -> Error {
+    match stop {
+        Stop::Failed(err) => err,
+        Stop::Died(_) => panic!("died"),
+    }
+}
+
 /// A save's statements fail one at a time: each answers the database's error.
 #[tokio::test]
 async fn saves_fail_at_each_statement() {
@@ -530,43 +513,31 @@ async fn saves_fail_at_each_statement() {
     ];
     for (screen, post) in saves {
         let asked = asked(screen, &[], &post);
-        let name = screen.trim_start_matches("/hs-admin/");
-        let handler = handler(name, &hyscribe_admin::actions::action(name, &asked)).unwrap();
-        for budget in 0.. {
-            let mut write = writer.begin().await.unwrap();
+        let handler = screen_handler(screen, &asked);
+        let saved = settled(async |budget| {
+            let mut write = writer.begin().await?;
             write.fail_after(budget);
-            match handler(&mut write, &asked, &Unread).await {
-                Err(Stop::Failed(Error::Db(_))) => {}
-                Ok(_) => break,
-                Err(_) => panic!("{screen}: not a database error"),
-            }
-        }
+            handler(&mut write, &asked, &Unread).await.map_err(failed)
+        });
+        assert!(saved.await.is_ok(), "{screen}");
     }
     for get in [
         form(&[("adminhash", "0123456789abcdef0123456789abcdef")]),
         form(&[("dismiss", "new_admin_email")]),
     ] {
         let asked = asked("/hs-admin/options", &get, &[]);
-        let handler = handler(
-            "options",
-            &hyscribe_admin::actions::action("options", &asked),
-        );
-        for budget in 0.. {
-            let mut write = writer.begin().await.unwrap();
+        let handler = screen_handler("options", &asked);
+        let saved = settled(async |budget| {
+            let mut write = writer.begin().await?;
             let pending = Value::Array(form(&[
                 ("hash", "0123456789abcdef0123456789abcdef"),
                 ("newemail", "new@example.test"),
             ]));
-            update_option(&mut write, "adminhash", &pending, None)
-                .await
-                .unwrap();
+            update_option(&mut write, "adminhash", &pending, None).await?;
             write.fail_after(budget);
-            match handler.unwrap()(&mut write, &asked, &Unread).await {
-                Err(Stop::Failed(Error::Db(_))) => {}
-                Ok(_) => break,
-                Err(_) => panic!("not a database error"),
-            }
-        }
+            handler(&mut write, &asked, &Unread).await.map_err(failed)
+        });
+        assert!(saved.await.is_ok());
     }
 }
 

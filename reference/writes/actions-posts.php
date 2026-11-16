@@ -599,15 +599,8 @@ return array(
 		},
 	),
 	'user-delete-with-posts'                 => array(
-		'setup'  => function () use ( $posts_insert ) {
-			require_once ABSPATH . 'wp-admin/includes/user.php';
-			$id = wp_insert_user(
-				array(
-					'user_login' => 'oracle-poster',
-					'user_pass'  => 'A pass phrase',
-					'user_email' => 'oracle-poster@example.test',
-				)
-			);
+		'setup'  => function () use ( $posts_insert, $oracle_user ) {
+			$id = $oracle_user( 'oracle-poster' );
 			$posts_insert( array( 'post_author' => $id ) );
 			$posts_insert(
 				array(

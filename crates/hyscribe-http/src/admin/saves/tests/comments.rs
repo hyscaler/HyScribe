@@ -9,7 +9,6 @@ use hyscribe_write::comments::{Context, NewComment, insert_comment};
 use super::super::comments::count_of;
 use super::super::{Ajax, ajax_handler};
 use super::*;
-use hyscribe_db::Write;
 
 /// An ID no comment has (PHP's `HYSCRIBE_MISSING_ID`).
 const MISSING: u64 = 1 << 40;
@@ -23,39 +22,28 @@ struct Request<'a> {
 }
 
 impl Request<'_> {
-    /// Its answer, as one action on `conn` whose statements after `budget`
-    /// fail.
+    /// Its answer, `302<TAB>Location` for a redirect, as [`acted`].
+    async fn saved(&self, writer: &Writer, admin: &Admin<'_>, conn: &mut Connection) -> String {
+        self.send(writer, admin, conn).await.unwrap()
+    }
+
+    /// Its answer, or the error that stopped it, as [`acted`].
     async fn send(
         &self,
         writer: &Writer,
         admin: &Admin<'_>,
         conn: &mut Connection,
-        budget: Option<usize>,
     ) -> Result<String, hyscribe_write::Error> {
         let (get, post) = (fields(&self.get), fields(&self.post));
         let uri = format!("/hs-admin/{}?{}", self.screen, self.get);
         let asked = Asked {
-            get: &get,
-            post: &post,
-            referer: None,
-            uri: uri.as_bytes(),
-            home: "http://127.0.0.1:8081",
-            user: 1,
             now: self.now,
-            ip: b"",
-            agent: b"",
+            ..asked(&uri, &get, &post)
         };
         let action = action(self.screen, &asked);
-        let begun = |write: &mut Result<Write<'_>, _>| {
-            if let (Ok(write), Some(budget)) = (write, budget) {
-                write.fail_after(budget);
-            }
-        };
-        let mut write = writer.begin_on(conn).await;
-        begun(&mut write);
         if self.screen == "admin-ajax" {
             let handler = ajax_handler(&action).unwrap();
-            return Ok(match act(write, handler, &asked, admin).await? {
+            return Ok(match acted(writer, conn, (handler, admin), &asked).await? {
                 Ajax::Text(text) | Ajax::Xml(text) => text,
                 // Its row is read once committed, outside the action.
                 Ajax::CommentRow(_) => "row".into(),
@@ -63,22 +51,10 @@ impl Request<'_> {
             });
         }
         let handler = handler(self.screen, &action).unwrap();
-        match act(write, handler, &asked, admin).await? {
+        match acted(writer, conn, (handler, admin), &asked).await? {
             Answer::Redirect(to) => Ok(format!("302\t{to}")),
             _ => panic!("{}", self.get),
         }
-    }
-
-    /// Its answer, `302<TAB>Location` for a redirect, once every statement
-    /// budget short of it has failed, each failure rolled back.
-    async fn saved(&self, writer: &Writer, admin: &Admin<'_>, conn: &mut Connection) -> String {
-        for budget in 0..100 {
-            match self.send(writer, admin, conn, Some(budget)).await {
-                Err(hyscribe_write::Error::Db(_)) => {}
-                saved => return saved.unwrap(),
-            }
-        }
-        panic!("every statement budget failed: {}", self.post)
     }
 }
 
@@ -157,12 +133,10 @@ async fn moderations_write_php_s_rows() {
 /// The golden's `case`: its request, with PHP's time and nonce, and what
 /// PHP answered under hs-admin's names, `302<TAB>Location` for a redirect.
 fn golden_case(row: &str) -> (Request<'static>, String) {
-    let cases = include_str!("../../../../../../reference/admin-saves/cases.list");
     let [case, status, location, body] = row.split('\t').collect::<Vec<_>>()[..] else {
         panic!("{row}");
     };
-    let line = cases.lines().find(|l| l.starts_with(&format!("{case}\t")));
-    let [_, _, target, data, _, field] = line.unwrap().split('\t').collect::<Vec<_>>()[..] else {
+    let [_, _, target, data, _, field] = case_row(CASES, case).unwrap()[..] else {
         panic!("{case}");
     };
     let body = String::from_utf8(unhex(body)).unwrap();
@@ -213,9 +187,9 @@ async fn moderations_answer_as_php() {
     let site = oracle_site().await;
     let reads = LoginReads::new(&site, Handle::current(), 0);
     let admin = admin(&site, &reads);
-    let golden = include_str!("../../../../../hyscribe-admin/tests/golden/admin-saves.tsv");
+
     let action = async |conn: &mut Connection, ()| {
-        let rows = golden.lines().filter(|row| row.starts_with("moderate-"));
+        let rows = ANSWERS.lines().filter(|row| row.starts_with("moderate-"));
         for row in rows {
             let (request, php) = golden_case(row);
             let ours = request.saved(&writer, &admin, conn).await;
@@ -283,7 +257,7 @@ async fn a_fatal_error_keeps_nothing() {
         let trash = "action=delete-comment&id=1&trash=1";
         for more in ["_url[]=x", "_total=4&_per_page=-2&_page=1&_url=x"] {
             let fatal = request("admin-ajax", "", &format!("{trash}&{more}"));
-            let answer = fatal.send(&writer, &admin, conn, None).await;
+            let answer = fatal.send(&writer, &admin, conn).await;
             assert!(matches!(answer, Err(hyscribe_write::Error::Unported(_))));
         }
         request("admin-ajax", "", trash)
@@ -352,15 +326,8 @@ async fn replies_past_what_the_checks_read() {
     ] {
         let post = fields(&query);
         let asked = Asked {
-            get: &[],
-            post: &post,
-            referer: None,
-            uri: b"/hs-admin/admin-ajax",
-            home: "http://127.0.0.1:8081",
             user,
-            now: 0,
-            ip: b"",
-            agent: b"",
+            ..asked("/hs-admin/admin-ajax", &[], &post)
         };
         let replied = super::super::comments::reply(&mut write, &asked, &admin).await;
         assert!(
@@ -371,15 +338,9 @@ async fn replies_past_what_the_checks_read() {
     // A reply keeps the request's user agent and the type given.
     let post = fields("comment_post_ID=1&comment_ID=1&content=Typed&comment_type=trackback");
     let asked = Asked {
-        get: &[],
-        post: &post,
-        referer: None,
-        uri: b"/hs-admin/admin-ajax",
-        home: "http://127.0.0.1:8081",
-        user: 1,
-        now: 0,
         ip: b"192.0.2.1",
         agent: b"An agent",
+        ..asked("/hs-admin/admin-ajax", &[], &post)
     };
     let replied = super::super::comments::reply(&mut write, &asked, &admin).await;
     assert!(matches!(replied, Ok(Ajax::CommentRow(_))));
@@ -440,17 +401,7 @@ async fn a_reply_is_unfiltered_with_its_nonce() {
             "comment_post_ID=1&comment_ID=1&content=%3Cscript%3Ex%3C%2Fscript%3E+%3Cb%3Ey%3C%2Fb%3E+{nonce}&_wp_unfiltered_html_comment={nonce}"
         );
         let post = fields(&query);
-        let asked = Asked {
-            get: &[],
-            post: &post,
-            referer: None,
-            uri: b"/hs-admin/admin-ajax",
-            home: "http://127.0.0.1:8081",
-            user: 1,
-            now: 0,
-            ip: b"",
-            agent: b"",
-        };
+        let asked = asked("/hs-admin/admin-ajax", &[], &post);
         let replied = super::super::comments::reply(&mut write, &asked, &site).await;
         assert!(matches!(replied, Ok(Ajax::CommentRow(_))), "{nonce}");
         let id = write.post_comment_ids(1).await.unwrap()[0];
@@ -490,20 +441,8 @@ async fn administrators_post_unfiltered_html_when_the_site_allows_it() {
         "comment_post_ID=1&comment_ID=1&content={markup}&_wp_unfiltered_html_comment={nonce}"
     );
     let post = fields(&query);
-    fn asked(post: &[(Key, Value)]) -> Asked<'_> {
-        Asked {
-            get: &[],
-            post,
-            referer: None,
-            uri: b"/hs-admin/admin-ajax",
-            home: "http://127.0.0.1:8081",
-            user: 1,
-            now: 0,
-            ip: b"",
-            agent: b"",
-        }
-    }
-    let replied = super::super::comments::reply(&mut write, &asked(&post), &admin).await;
+    const AJAX: &str = "/hs-admin/admin-ajax";
+    let replied = super::super::comments::reply(&mut write, &asked(AJAX, &[], &post), &admin).await;
     assert!(matches!(replied, Ok(Ajax::CommentRow(_))));
     let reply = write.post_comment_ids(1).await.unwrap()[0];
     let saved = write.comment(reply).await.unwrap().unwrap().content;
@@ -511,7 +450,8 @@ async fn administrators_post_unfiltered_html_when_the_site_allows_it() {
     // The reply is user 1's; comment 1 is a visitor's.
     for (id, content) in [(reply, "<script>x</script>"), (1, "x")] {
         let post = fields(&format!("comment_ID={id}&content={markup}&checkbox=1"));
-        let edited = super::super::comments::quick_edit(&mut write, &asked(&post), &admin).await;
+        let edited =
+            super::super::comments::quick_edit(&mut write, &asked(AJAX, &[], &post), &admin).await;
         assert!(matches!(edited, Ok(Ajax::CommentRow(_))), "{id}");
         let saved = write.comment(id).await.unwrap().unwrap().content;
         assert_eq!(saved, content.as_bytes(), "{id}");

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The site of a handler that reads nothing of it but the configuration's
-//! constants.
+//! The site of a handler that reads nothing of it but `admin_url()` and
+//! the configuration's constants.
 
 use hyscribe_admin::actions::ActionSite;
 use hyscribe_auth::caps::{CapPost, CapabilityData};
@@ -9,8 +9,10 @@ use hyscribe_config::Constants;
 use hyscribe_phpser::Value;
 
 use super::super::Acting;
+use super::SITE;
 
-/// A site any read of fails the test; its constants are the defaults.
+/// A site any other read of fails the test: the write oracle's
+/// `admin_url()`, and the default constants.
 pub(in crate::admin::saves) struct Unread;
 
 impl CapabilityData for Unread {
@@ -62,8 +64,8 @@ impl ActionSite for Unread {
 }
 
 impl Acting for Unread {
-    fn admin_url(&self, _: &str) -> String {
-        unreachable!()
+    fn admin_url(&self, path: &str) -> String {
+        format!("{SITE}/hs-admin/{}", hyscribe_admin::menu::link(path))
     }
     fn comment_url(&self, _: u64) -> String {
         unreachable!()

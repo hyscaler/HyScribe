@@ -18,9 +18,10 @@ use hyscribe_write::options::{
     Autoload, INVALID_ZONE, delete_option, get_option, is_zone, sanitize_option, set_transient,
     update_option,
 };
-use hyscribe_write::posts::{Context, PostArgs, wp_insert_post};
+use hyscribe_write::posts::{PostArgs, wp_insert_post};
 
-use super::{Acting, Saving};
+use super::dashboard::context;
+use super::{Acting, Saving, text};
 use crate::redirect::wp_validate_redirect;
 use crate::rewrite::{Settings, rules};
 
@@ -52,10 +53,6 @@ impl Errors {
         set_transient(write, "settings_errors", &Value::Array(list.collect()), 30).await?;
         Ok(())
     }
-}
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
 }
 
 /// `home_url()` as the options are now.
@@ -532,13 +529,7 @@ pub(super) fn create_privacy_page<'a>(
     Box::pin(async move {
         let home = home_url(write).await?;
         let site = get_option(write, "siteurl").await?.to_php_string();
-        let ctx = Context {
-            user: asked.user,
-            can_publish: false,
-            home: home.clone().into_bytes(),
-            upload_host: hyscribe_render::link::host(&site),
-            now: crate::now(),
-        };
+        let ctx = context(asked.user, &home, &text(&site));
         // A draft: `wp_insert_post()`'s status when none is given.
         let page = PostArgs {
             title: b"Privacy Policy".to_vec(),

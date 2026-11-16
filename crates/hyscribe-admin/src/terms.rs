@@ -16,6 +16,7 @@ use hyscribe_render::kses::wp_kses_data;
 use hyscribe_render::number_format;
 use hyscribe_render::term_template::parse_orderby;
 
+use crate::actions::{ajax_response, wp_ajax};
 use crate::admin_bar::BarSite;
 use crate::list_table::{
     Column, Order, Sort, bulk_actions, column_headers, fill, pagination, row_actions,
@@ -429,41 +430,11 @@ pub fn saved_row(site: &dyn TermsSite, taxonomy: Taxonomy, term: &Term, referer:
     ajax_row(site, taxonomy, term, None, referer)
 }
 
-/// One response of `WP_Ajax_Response::add()` for `add-tag`: its data
-/// (an error's already) and supplemental fields.
-fn ajax_response(
-    what: &str,
-    position: usize,
-    data: &str,
-    supplemental: &[(&str, &[u8])],
-) -> String {
-    let fields: String = supplemental
-        .iter()
-        .map(|(key, value)| {
-            format!(
-                "<{key}><![CDATA[{}]]></{key}>",
-                String::from_utf8_lossy(value)
-            )
-        })
-        .collect();
-    format!(
-        "<response action='add-tag_0'><{what} id='0' position='{position}'>{data}<supplemental>{fields}</supplemental></{what}></response>"
-    )
-}
-
-/// `WP_Ajax_Response::send()`'s XML of `responses`.
-fn wp_ajax(responses: &[String]) -> String {
-    format!(
-        "<?xml version='1.0' encoding='UTF-8' standalone='yes'?><wp_ajax>{}</wp_ajax>",
-        responses.concat()
-    )
-}
-
 /// `wp_ajax_add_tag()`'s answer for a term not added: the error's code
 /// and message.
 pub fn add_failed(code: &str, message: &str) -> String {
     let error = format!("<wp_error code='{code}'><![CDATA[{message}]]></wp_error>");
-    wp_ajax(&[ajax_response("taxonomy", 1, &error, &[])])
+    wp_ajax(&[ajax_response("add-tag", ("taxonomy", 0, "1"), &error, &[])])
 }
 
 /// `wp_ajax_add_tag()`'s answer for the term added: its rows and notice,
@@ -517,10 +488,10 @@ pub fn term_added(
         ("filter", b"raw"),
     ];
     wp_ajax(&[
-        ajax_response("taxonomy", 1, &data, &rows),
+        ajax_response("add-tag", ("taxonomy", 0, "1"), &data, &rows),
         ajax_response(
-            "term",
-            level,
+            "add-tag",
+            ("term", 0, &level.to_string()),
             "<response_data><![CDATA[]]></response_data>",
             &fields,
         ),

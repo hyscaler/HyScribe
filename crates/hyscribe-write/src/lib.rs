@@ -62,7 +62,7 @@ pub(crate) fn name_filters(name: &[u8]) -> Vec<u8> {
 pub(crate) const MYSQL: &str = "Y-m-d H:i:s";
 
 /// `wp_timezone()`, from the site's options inside the action.
-pub(crate) async fn wp_timezone(write: &mut Write<'_>) -> Result<Zone, DbError> {
+pub async fn wp_timezone(write: &mut Write<'_>) -> Result<Zone, DbError> {
     let name = write.option_value("timezone_string").await?;
     let offset = write.option_value("gmt_offset").await?;
     Ok(site_zone(

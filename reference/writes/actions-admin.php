@@ -6,53 +6,30 @@
 // and run over the request hs-admin's handler gets, past the checks, with
 // the case's `exit` a return. docs/ADMIN.md, "Actions", says how to add one.
 
-// get_editable_roles(), the Ajax handlers and set_current_screen().
-require_once ABSPATH . 'wp-admin/includes/admin.php';
-require_once ABSPATH . 'wp-admin/includes/ajax-actions.php';
-
 // The case `$name` of `wp-admin/$screen`, up to the next case or the default.
-$admin_case = function ( $screen, $name ) {
-	$source = file_get_contents( ABSPATH . "wp-admin/$screen" );
-	preg_match( "/\n\tcase '$name':\n(.*?)\n\t(case '|default:)/s", $source, $found );
-	return str_replace( 'exit;', 'return;', $found[1] );
+$admin_case = function ( $screen, $name ) use ( $admin_code ) {
+	return $admin_code( $screen, "/\n\tcase '$name':\n(.*?)\n\t(case '|default:)/s" );
 };
 
 // edit-comments.php's bulk actions, from its `if ( $doaction )` to its end,
 // over the request in $_GET, with what the screen sets before them.
-$comments_bulk = function ( $get ) {
+$comments_bulk = function ( $get ) use ( $admin_code ) {
 	$_GET     = $get;
 	$_REQUEST = $_GET;
-	$source   = file_get_contents( ABSPATH . 'wp-admin/edit-comments.php' );
-	preg_match( "/\nif \( \\\$doaction \) \{\n(.*?)\n\} elseif/s", $source, $found );
 	set_current_screen( 'edit-comments' );
 	$wp_list_table = _get_list_table( 'WP_Comments_List_Table' );
 	$pagenum       = $wp_list_table->get_pagenum();
 	$doaction      = $wp_list_table->current_action();
-	eval( str_replace( 'exit;', 'return;', $found[1] ) );
+	eval( $admin_code( 'edit-comments.php', "/\nif \( \\\$doaction \) \{\n(.*?)\n\} elseif/s" ) );
 };
 
 // `wp_ajax_$action()` over `$post` (unslashed, as sent), its answer
-// thrown away: wp_die() ends it by an exception instead of the process.
-$admin_ajax = function ( $action, $post ) {
+// thrown away.
+$admin_ajax = function ( $action, $post ) use ( $admin_run ) {
 	$_POST    = wp_slash( $post + array( 'action' => $action ) );
 	$_REQUEST = $_POST;
-	add_filter( 'wp_doing_ajax', '__return_true' );
-	$die = function () {
-		return function () {
-			throw new RuntimeException( 'wp_die' );
-		};
-	};
-	add_filter( 'wp_die_ajax_handler', $die );
-	ob_start();
-	try {
-		// do_action() passes an empty argument when given none.
-		call_user_func( 'wp_ajax_' . str_replace( '-', '_', $action ), '' );
-	} catch ( RuntimeException $died ) {
-		unset( $died );
-	}
-	ob_end_clean();
-	remove_filter( 'wp_die_ajax_handler', $die );
-	remove_filter( 'wp_doing_ajax', '__return_true' );
+	// do_action() passes an empty argument when given none.
+	$admin_run( fn() => call_user_func( 'wp_ajax_' . str_replace( '-', '_', $action ), '' ), true );
 };
 
 // The case `$name` of edit-tags.php over `$request` (unslashed), with the
@@ -72,16 +49,6 @@ $terms_case = function ( $name, $request, $post = true ) use ( $admin_case ) {
 
 $oracle_term = function ( $name, $taxonomy, $args = array() ) {
 	return wp_insert_term( $name, $taxonomy, $args )['term_id'];
-};
-
-$oracle_user = function ( $login ) {
-	return wp_insert_user(
-		array(
-			'user_login' => $login,
-			'user_pass'  => 'A pass phrase',
-			'user_email' => "$login@example.test",
-		)
-	);
 };
 
 return array(

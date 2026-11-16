@@ -155,16 +155,10 @@ fn blake2b(message: &[u8]) -> [u8; OUT] {
 /// base64 of the hash.
 pub fn wp_fast_hash(message: &[u8]) -> String {
     const URL_SAFE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::from("$generic$");
-    // 30 bytes are 10 groups of three, so no padding is left out.
-    for [a, b, c] in blake2b(message).as_chunks::<3>().0 {
-        let n = u32::from_be_bytes([0, *a, *b, *c]);
-        for shift in [18, 12, 6, 0] {
-            let digit = URL_SAFE.get((n >> shift & 63) as usize);
-            out.push(char::from(digit.copied().unwrap_or_default()));
-        }
-    }
-    out
+    format!(
+        "$generic${}",
+        crate::encode(&blake2b(message), URL_SAFE, false)
+    )
 }
 
 #[cfg(test)]

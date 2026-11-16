@@ -7,6 +7,7 @@ use axum::body::Body;
 use hyscribe_config::Secret;
 use tower::ServiceExt;
 
+use super::saves::tests::{AFTER, ANSWERS, CASES, asked, case_row, hs};
 use super::*;
 use crate::router;
 use crate::tests::oracle_site;
@@ -1936,6 +1937,13 @@ async fn actions_read_the_site() {
     let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     assert_eq!(page_of(response).await, READ_ONLY);
+    // A Customizer action passes its checks and has no handler.
+    let form = Some((
+        "application/x-www-form-urlencoded",
+        "action=customize_save&wp_customize=on",
+    ));
+    let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, form).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     let own = format!("/hs-admin/users?changeit=1&new_role=none&users[]=1&_wpnonce={nonce}");
     let response = send(&site, "GET", &own, &cookies, None).await;
     assert!(
@@ -1985,12 +1993,6 @@ pub(crate) async fn unwritable(site: Arc<Site>, prefix: &str) -> Arc<Site> {
     Arc::new(site.with_writer(writer.unwrap()))
 }
 
-/// `wp-admin`'s screens under hs-admin's names.
-fn hs(text: &str) -> String {
-    let text = text.replace("wp-admin%2F", "hs-admin%2F");
-    text.replace("/wp-admin/", "/hs-admin/").replace(".php", "")
-}
-
 /// The users list's cases of `reference/admin-saves/golden.sh` whose rows
 /// and answers the write oracle compares, in `saves`: they write, or need
 /// rows the fixture lacks.
@@ -2020,10 +2022,8 @@ async fn actions_answer_as_php_once_checked() {
     let (site, cookies) = logged_in("wordpress", dir.path()).await;
     let site = unwritable(site, "wp_").await;
     let nonce = session_nonce(&site, &cookies, "bulk-users").await;
-    let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
-    let cases = include_str!("../../../../reference/admin-saves/cases.list");
     // The cases that write nothing the read only user cannot.
-    let rows = golden.lines().filter(|row| {
+    let rows = ANSWERS.lines().filter(|row| {
         let case = row.split('\t').next().unwrap_or_default();
         case.starts_with("users-") && !ORACLE_CASES.contains(&case)
             || case.starts_with("comments-")
@@ -2033,11 +2033,8 @@ async fn actions_answer_as_php_once_checked() {
         let [case, status, php_location, body] = row.split('\t').collect::<Vec<_>>()[..] else {
             panic!("{row}");
         };
-        let line = cases
-            .lines()
-            .find(|line| line.starts_with(&format!("{case}\t")));
-        let fields: Vec<&str> = line.unwrap().split('\t').collect();
-        let [_, method, target, data, action, field, ..] = fields[..] else {
+        let [_, method, target, data, action, field, ..] = case_row(CASES, case).unwrap()[..]
+        else {
             panic!("{case}");
         };
         let nonce = session_nonce(&site, &cookies, action).await;
@@ -2166,11 +2163,7 @@ async fn another_user_s_sessions_end() {
     let body = format!("action=destroy-sessions&user_id=2&nonce={nonce}");
     let form = ("application/x-www-form-urlencoded", body.as_str());
     let response = send(&site, "POST", "/hs-admin/admin-ajax", &cookies, Some(form)).await;
-    let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
-    let row = golden
-        .lines()
-        .find(|row| row.starts_with("destroy-sessions-other\t"));
-    let php = hyscribe_testkit::unhex(row.unwrap().split('\t').nth(3).unwrap());
+    let php = hyscribe_testkit::unhex(case_row(ANSWERS, "destroy-sessions-other").unwrap()[3]);
     let php = String::from_utf8(php)
         .unwrap()
         .replace("other", "Theme Buster");
@@ -2209,14 +2202,6 @@ fn answers_set_the_cookies_given() {
     assert_eq!(set, ["a=1; path=/"]);
 }
 
-/// `text` of `reference/admin-saves/cases.list` under hs-admin's names.
-fn hs_case(text: &str) -> String {
-    let text = text.replace("wp-admin%252Fedit-tags.php", "hs-admin%252Fedit-tags");
-    let text = text.replace("wp-admin%2Fedit-tags.php", "hs-admin%2Fedit-tags");
-    text.replace("wp-admin%2Fterm.php", "hs-admin%2Fterm")
-        .replace(".php", "")
-}
-
 /// Past their checks, the categories and tags actions of
 /// `reference/admin-saves/golden.sh` that write nothing answer as PHP's, and
 /// the screens after them are PHP's; the others are the write oracle's, in
@@ -2230,9 +2215,6 @@ async fn term_actions_answer_as_php_once_checked() {
         nonces.push((action, session_nonce(&site, &cookies, action).await));
     }
     let site = unwritable(site, "wp_").await;
-    let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
-    let after = include_str!("../../../hyscribe-admin/tests/golden/admin-saves-after.tsv");
-    let cases = include_str!("../../../../reference/admin-saves/cases.list");
     for case in [
         "terms-add-exists",
         "terms-add-empty",
@@ -2244,30 +2226,24 @@ async fn term_actions_answer_as_php_once_checked() {
         "ajax-add-invalid-name",
         "ajax-inline-empty",
     ] {
-        let find = |text: &'static str| {
-            let row = text
-                .lines()
-                .find(|row| row.starts_with(&format!("{case}\t")));
-            row.map(|row| row.split('\t').collect::<Vec<_>>())
-        };
-        let [_, _, target, data, action, field, ..] = find(cases).unwrap()[..] else {
+        let [_, _, target, data, action, field, ..] = case_row(CASES, case).unwrap()[..] else {
             panic!("{case}");
         };
         let nonce = &nonces.iter().find(|(a, _)| *a == action).unwrap().1;
         let form = (
             "application/x-www-form-urlencoded",
-            &*format!("{}&{field}={nonce}", hs_case(data)),
+            &*format!("{}&{field}={nonce}", hs(data)),
         );
-        let uri = format!("/hs-admin/{}", hs_case(target));
+        let uri = format!("/hs-admin/{}", hs(target));
         let response = send(&site, "POST", &uri, &cookies, Some(form)).await;
-        let php = find(golden).unwrap();
+        let php = case_row(ANSWERS, case).unwrap();
         assert_eq!(response.status().as_str(), php[1], "{case}");
         let to = response.headers().get(header::LOCATION);
         let to = to.map_or(String::new(), |to| to.to_str().unwrap().to_string());
         assert_eq!(to, hyscribe_testkit::hs_admin_page(php[2]), "{case}");
         let body = String::from_utf8(hyscribe_testkit::unhex(php[3])).unwrap();
         assert_eq!(page_of(response).await, body, "{case}");
-        let Some(screen) = find(after) else {
+        let Some(screen) = case_row(AFTER, case) else {
             continue;
         };
         let response = send(&site, "GET", &to, &cookies, None).await;
@@ -2310,11 +2286,7 @@ async fn term_actions_answer_as_php_once_checked() {
 #[tokio::test(flavor = "multi_thread")]
 async fn term_ajax_answers_are_sent_once_committed() {
     let site = oracle_site().await;
-    let golden = include_str!("../../../hyscribe-admin/tests/golden/admin-saves.tsv");
-    let row = golden
-        .lines()
-        .find(|row| row.starts_with("ajax-inline-unchanged\t"));
-    let php = hyscribe_testkit::unhex(row.unwrap().split('\t').nth(3).unwrap());
+    let php = hyscribe_testkit::unhex(case_row(ANSWERS, "ajax-inline-unchanged").unwrap()[3]);
     let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
     let handle = Handle::current();
     let (row, added) = tokio::task::spawn_blocking(move || {
@@ -2325,15 +2297,8 @@ async fn term_ajax_answers_are_sent_once_committed() {
         };
         let admin = Admin::new(&reads, &site, user);
         let asked = Asked {
-            get: &[],
-            post: &[],
-            referer: None,
-            uri: b"/hs-admin/admin-ajax",
             home: &site.home,
-            user: 1,
-            now: 0,
-            ip: b"",
-            agent: b"",
+            ..asked("/hs-admin/admin-ajax", &[], &[])
         };
         let category = Terms::named(b"category").unwrap();
         let term = admin.terms("category").into_iter().next().unwrap();

@@ -200,6 +200,8 @@ async fn planned(site: &Arc<Site>, method: &'static str, target: &str, body: &st
             method_override: None,
             content_type: Some(b"application/json"),
             body: body.as_bytes(),
+            host: None,
+            now: 0,
         };
         match hyscribe_rest::answer(&rest, &request) {
             hyscribe_rest::Answer::Write(pending) => *pending,

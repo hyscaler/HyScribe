@@ -14,6 +14,7 @@ use super::*;
 
 pub(crate) mod content;
 mod embed;
+mod index;
 mod media;
 mod people;
 mod posts;
@@ -329,6 +330,12 @@ pub(super) fn serve_with(site: &dyn Site, case: &RestCase) -> Served {
         method_override: flag("override").then_some(b"DELETE"),
         content_type: None,
         body: b"",
+        host: Some(if flag("localhost") {
+            b"localhost:8081"
+        } else {
+            b"127.0.0.1:8081"
+        }),
+        now: 0,
     };
     serve(site, &request)
 }
@@ -617,6 +624,8 @@ fn links_are_served_as_from_url_reads_them() {
         head: false,
         uri: b"/",
         parameters: false,
+        host: b"",
+        now: 0,
     };
     let served = |href: &str| crate::embed::serve(&context, href.as_bytes()).ok().unwrap();
     let rest = "http://127.0.0.1:8081/index.php?rest_route=";
@@ -772,6 +781,8 @@ fn self_links_hint_what_their_route_allows() {
         head: false,
         uri: b"/",
         parameters: false,
+        host: b"",
+        now: 0,
     };
     for route in [
         "/nope",

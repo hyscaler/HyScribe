@@ -50,7 +50,9 @@ $save = function ( $page, $fields ) use ( $admin, $request, $options_php ) {
 };
 
 // A pending change of the admin email, as update_option_new_admin_email() leaves it.
+// Its admin hook is off here: it would replace the known hash with a random one.
 $pending = function () {
+	remove_action( 'add_option_new_admin_email', 'update_option_new_admin_email' );
 	add_option(
 		'adminhash',
 		array(

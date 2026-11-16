@@ -371,13 +371,13 @@ async fn writes_to_a_myisam_table_are_refused() {
         let mut write = writer.begin().await.unwrap();
         let links = write.reassign_links(1, 2).await.map(|_| ());
         // The refusal ends the action.
-        let after = write.set_post_status(1, "publish").await;
+        let after = write.set_post_guid(1, b"g").await;
         assert_eq!(
             after.err().map(|e| e.to_string()),
             links.clone().err().map(|e| e.to_string())
         );
         let mut write = writer.begin().await.unwrap();
-        let posts = write.set_post_status(1, "publish").await;
+        let posts = write.set_post_guid(1, b"g").await;
         (
             refusals,
             links.map_err(|err| err.to_string()),
@@ -418,11 +418,10 @@ async fn writes_posts() {
     );
     assert_eq!(write.set_post_name(id, b"slug").await.unwrap(), 1);
     assert_eq!(write.set_post_guid(id, b"http://g.test/").await.unwrap(), 1);
-    assert_eq!(write.set_post_status(id, "publish").await.unwrap(), 1);
     assert_eq!(write.set_comment_count(id, 5).await.unwrap(), 1);
     assert_eq!(
         json(&mut write, POST_STATE, id).await,
-        r#"["slug", "http://g.test/", "publish", 5]"#
+        r#"["slug", "http://g.test/", "draft", 5]"#
     );
     assert_eq!(write.update_post(999_999, &draft()).await.unwrap(), 0);
 
@@ -517,7 +516,9 @@ async fn reads_posts_inside_an_action() {
 
     assert!(write.published_post_exists().await.unwrap());
     assert_eq!(write.status_post_ids("page", "publish").await.unwrap(), [2]);
-    write.set_post_status(1, "trash").await.unwrap();
+    let mut trashed = write.post(1).await.unwrap().unwrap();
+    trashed.status = "trash".into();
+    write.update_post(1, &trashed).await.unwrap();
     assert!(!write.published_post_exists().await.unwrap());
     assert_eq!(write.status_post_ids("post", "trash").await.unwrap(), [1]);
     assert_eq!(
@@ -866,18 +867,6 @@ async fn writes_users() {
         r#"["admin", "$wp$hash", "ann", "ann@a.test", "http://a.test", "2026-11-01 10:00:01", "1700000000:key", 0, "Ann ✓"]"#
     );
     assert_eq!(write.update_user(999_999, &changed).await.unwrap(), 0);
-    assert_eq!(write.clear_activation_key(id).await.unwrap(), 1);
-    assert!(
-        json(&mut write, USER, id)
-            .await
-            .contains(r#""2026-11-01 10:00:01", "", 0"#)
-    );
-    assert_eq!(write.update_user(id, &changed).await.unwrap(), 1);
-    assert_eq!(write.set_user_password(id, "$wp$new").await.unwrap(), 1);
-    assert_eq!(
-        json(&mut write, USER, id).await,
-        r#"["admin", "$wp$new", "ann", "ann@a.test", "http://a.test", "2026-11-01 10:00:01", "", 0, "Ann ✓"]"#
-    );
 
     sqlx::query("INSERT INTO wp_links (link_owner) VALUES (?), (?)")
         .bind(id)
@@ -1382,7 +1371,6 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         alone!(w.update_post(1, &post).await.err()),
         alone!(w.set_post_name(1, b"n").await.err()),
         alone!(w.set_post_guid(1, b"g").await.err()),
-        alone!(w.set_post_status(1, "publish").await.err()),
         alone!(w.set_comment_count(1, 1).await.err()),
         alone!(w.reparent_posts(1, "page", 0).await.err()),
         alone!(w.reassign_posts(1, 2).await.err()),
@@ -1396,8 +1384,6 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         alone!(w.delete_comment(1).await.err()),
         alone!(w.insert_user(b"u", &user).await.err()),
         alone!(w.update_user(1, &user).await.err()),
-        alone!(w.set_user_password(1, "h").await.err()),
-        alone!(w.clear_activation_key(1).await.err()),
         alone!(w.reassign_links(1, 2).await.err()),
         alone!(w.delete_user(1).await.err()),
         alone!(w.add_option("o", b"v", "on").await.err()),

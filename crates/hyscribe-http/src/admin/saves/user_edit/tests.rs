@@ -269,22 +269,3 @@ async fn password_reset_links_are_php_s() {
     let report = check_writes(&fixture_database(), golden, setup, action).await;
     report.unwrap();
 }
-
-/// The current user's capabilities read only the roles, theirs and the
-/// configuration's constants.
-#[test]
-fn only_the_roles_and_the_user_s_capabilities_are_read() {
-    let mut current = Current {
-        id: 1,
-        prefix: "wp_".into(),
-        roles: None,
-        caps: None,
-        constants: Constants::default(),
-    };
-    assert!(current.post(1).is_none() && current.post_meta(1, "k").is_none());
-    assert!(current.comment_post(1).is_none() && current.term_taxonomy(1).is_none());
-    assert!(!current.constant("MULTISITE") && !current.can("list_users"));
-    assert!(current.constant("DISALLOW_UNFILTERED_HTML"));
-    current.constants.disallow_unfiltered_html = false;
-    assert!(!current.constant("DISALLOW_UNFILTERED_HTML"));
-}

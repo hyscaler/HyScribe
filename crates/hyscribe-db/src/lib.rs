@@ -445,6 +445,23 @@ impl Db {
         .transpose()
     }
 
+    /// The privileges of the connected user (the read user when there is
+    /// one) and its roles as `role <name>`, which the setup wizard checks.
+    pub async fn privileges(&self) -> Result<Vec<String>, DbError> {
+        let mut sql = Sql::new("");
+        Engine::privileges(&mut sql);
+        let rows = sql.query(&self.prefix).fetch_all(&self.pool).await;
+        rows.map_err(db_error).and_then(|rows| {
+            rows.iter()
+                .map(|row| {
+                    let mut c = Columns::new(row);
+                    let privilege = c.text("privilege");
+                    c.finish(privilege)
+                })
+                .collect()
+        })
+    }
+
     /// `get_post_meta( $post_id, $key, true )`: the first value stored.
     pub async fn post_meta(&self, post_id: u64, key: &str) -> Result<Option<Vec<u8>>, DbError> {
         self.first_meta(
@@ -2410,4 +2427,4 @@ mod dialect;
 mod people;
 mod write;
 
-pub use write::{CommentFields, Meta, PostFields, TermRow, UserFields, Write, Writer};
+pub use write::{CommentFields, DB_VERSIONS, Meta, PostFields, TermRow, UserFields, Write, Writer};

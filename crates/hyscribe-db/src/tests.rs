@@ -412,6 +412,21 @@ async fn any_comment_is_read() {
     assert!(!db.has_comment_types(&["pingback"]).await.unwrap());
 }
 
+/// The fixture's read user may only select; the main user may write.
+#[tokio::test]
+async fn privileges_are_those_of_the_connected_user() {
+    let read = Database {
+        read_user: Some("wordpress_read".into()),
+        read_password: hyscribe_config::Secret::new("reference-only"),
+        ..fixture_config()
+    };
+    let db = Db::connect(&read).await.unwrap();
+    assert_eq!(db.privileges().await.unwrap(), ["SELECT", "USAGE"]);
+    let privileges = fixture().await.privileges().await.unwrap();
+    assert!(privileges.contains(&"INSERT".to_string()), "{privileges:?}");
+    assert!(privileges.contains(&"USAGE".to_string()), "{privileges:?}");
+}
+
 #[tokio::test]
 async fn a_term_s_taxonomy_is_its_only_one() {
     let db = Db::connect(&fixture_config()).await.unwrap();
@@ -2385,7 +2400,7 @@ fn mysql_only(sql: &str) -> Option<&'static str> {
 /// of it in the portable text.
 #[test]
 fn the_guard_finds_only_the_dialect() {
-    let pieces: [fn(&mut Sql); 14] = [
+    let pieces: [fn(&mut Sql); 15] = [
         Engine::random,
         |sql| Engine::seeded_random(sql, 1),
         |sql| Engine::list_order(sql, "ID", std::iter::once(Bind::Int(1))),
@@ -2400,6 +2415,7 @@ fn the_guard_finds_only_the_dialect() {
         |sql| Engine::not_matching(sql, "meta_value", "^a$".into()),
         |sql| Engine::rollback_less(sql, std::iter::once(Bind::Text("wp_posts".into()))),
         |sql| Engine::insert_or_update(sql, &["option_value"]),
+        Engine::privileges,
     ];
     for piece in pieces {
         let mut sql = Sql::new("SELECT ");

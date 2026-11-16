@@ -43,6 +43,10 @@ pub(crate) trait Dialect {
     /// roll back.
     fn rollback_less(sql: &mut Sql, tables: impl Iterator<Item = Bind>);
 
+    /// The privileges of the connected user, as `privilege`, with each role
+    /// it may take as `role <name>`.
+    fn privileges(sql: &mut Sql);
+
     /// Ends an `INSERT`: a row whose key exists already takes `columns` from
     /// the row inserted instead.
     fn insert_or_update(sql: &mut Sql, columns: &[&'static str]);
@@ -141,6 +145,22 @@ impl Dialect for MySql {
              WHERE TABLE_SCHEMA = DATABASE() AND ENGINE <> 'InnoDB' AND TABLE_NAME IN (",
         );
         list(sql, tables);
+    }
+
+    fn privileges(sql: &mut Sql) {
+        // `GRANTEE` is `'user'@'host'`; the host is what follows the last `@`.
+        sql.dialect(
+            "SELECT p.PRIVILEGE_TYPE AS privilege FROM (\
+             SELECT GRANTEE, PRIVILEGE_TYPE FROM information_schema.USER_PRIVILEGES \
+             UNION ALL SELECT GRANTEE, PRIVILEGE_TYPE FROM information_schema.SCHEMA_PRIVILEGES \
+             UNION ALL SELECT GRANTEE, PRIVILEGE_TYPE FROM information_schema.TABLE_PRIVILEGES \
+             UNION ALL SELECT GRANTEE, PRIVILEGE_TYPE FROM information_schema.COLUMN_PRIVILEGES\
+             ) p WHERE p.GRANTEE = CONCAT('''', SUBSTRING(CURRENT_USER(), 1, \
+             CHAR_LENGTH(CURRENT_USER()) - CHAR_LENGTH(SUBSTRING_INDEX(CURRENT_USER(), '@', -1)) - 1), \
+             '''@''', SUBSTRING_INDEX(CURRENT_USER(), '@', -1), '''') \
+             UNION SELECT CONCAT('role ', ROLE_NAME) FROM information_schema.APPLICABLE_ROLES \
+             ORDER BY privilege",
+        );
     }
 
     fn insert_or_update(sql: &mut Sql, columns: &[&'static str]) {

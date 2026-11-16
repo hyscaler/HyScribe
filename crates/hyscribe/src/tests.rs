@@ -44,6 +44,8 @@ fn run_as(
         home: home.to_path_buf(),
         euid,
         server,
+        input: &mut std::io::empty(),
+        terminal: None,
         out: &mut out,
         err: &mut err,
     });
@@ -175,6 +177,8 @@ fn closed_stdout_is_an_error() {
             home: home.path().to_path_buf(),
             euid: USER,
             server: (PathBuf::from("/bin/false"), Vec::new()),
+            input: &mut std::io::empty(),
+            terminal: None,
             out: &mut Closed,
             err: &mut err,
         });
@@ -201,6 +205,8 @@ fn child_server_main() {
         home: PathBuf::from(home),
         euid: USER,
         server: (PathBuf::from("/bin/false"), Vec::new()),
+        input: &mut std::io::empty(),
+        terminal: None,
         out: &mut std::io::stdout(),
         err: &mut std::io::stderr(),
     });
@@ -358,6 +364,7 @@ fn servers_refuse_root() {
         &["start"][..],
         &["service", "start"],
         &["service", "restart"],
+        &["setup"],
     ] {
         let output = run_as(args, HashMap::new(), home.path(), 0, child_server());
         assert_eq!(output.code, 1);
@@ -384,6 +391,20 @@ fn servers_need_a_configuration() {
     // Configuration errors are reported before anything starts.
     let output = run_with(&["start"], &[("DB_NAME", "x")], home.path());
     assert_eq!(output.err, "error: DB_USER is not set\n");
+}
+
+/// The wizard reads standard input (its answers are tested in
+/// `setup::tests`).
+#[test]
+fn setup_reads_standard_input() {
+    let home = tempfile::tempdir().unwrap();
+    let output = run_with(&["setup"], &[], home.path());
+    assert_eq!(output.code, 1);
+    assert!(output.out.starts_with("? Path to the WordPress folder"));
+    assert_eq!(
+        output.err,
+        "error: setup stopped: the input ended before every question was answered\n"
+    );
 }
 
 #[test]
@@ -469,6 +490,8 @@ fn log_follow_reports_problems() {
         home: home.path().to_path_buf(),
         euid: USER,
         server: child_server(),
+        input: &mut std::io::empty(),
+        terminal: None,
         out: &mut Closed,
         err: &mut err,
     });

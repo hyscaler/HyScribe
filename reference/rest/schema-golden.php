@@ -10,6 +10,10 @@
 // sanitized is the error as JSON or serialize() of the value. Only reads.
 require '/var/www/html/wp-load.php';
 
+// The schema of the posts route's `categories` argument.
+$terms = ( new WP_REST_Posts_Controller( 'post' ) )->get_collection_params()['categories'];
+unset( $terms['description'] );
+
 $cases = array(
 	array( array( 'type' => 'string', 'enum' => array( 'view', 'embed', 'edit' ) ), array( 'view', 'bogus', '', array( 'edit' ), 'EDIT', 5 ) ),
 	array( array( 'type' => 'string', 'enum' => array( 'only' ) ), array( 'only', 'x' ) ),
@@ -73,6 +77,15 @@ $cases = array(
 	array( array( 'type' => 'integer', 'minimum' => 1 ), array( ' 2 ', "\x0b3" ) ),
 	array( array( 'type' => 'string', 'format' => 'email' ), array( 'a@example.test', 'not an email', ' a@b.test ', '<b>x</b>@y.test', '' ) ),
 	array( array( 'type' => 'string', 'format' => 'uri' ), array( 'http://example.test/a b', 'javascript:alert(1)', '' ) ),
+	// The posts controller's term limits, and oneOf's other errors.
+	array( $terms, array( array( '1', 2 ), '3, 4', '', array( 'terms' => array( '1' ) ), array( 'terms' => '5', 'include_children' => 'true', 'operator' => 'AND' ), array( 'terms' => array( 'x' ) ), array( 'bogus' => 1 ), array( 'operator' => 'NOT' ), 'x', 5, null, array( 'a', 'b' ) ) ),
+	array( array( 'oneOf' => array( array( 'type' => 'integer' ), array( 'type' => 'string' ) ) ), array( 5, '5', 'x', null ) ),
+	array( array( 'oneOf' => array( array( 'type' => 'object', 'properties' => array( 'a' => array( 'type' => 'integer' ) ) ), array( 'type' => 'object', 'properties' => array( 'a' => array( 'type' => 'integer' ), 'b' => array( 'type' => 'integer' ) ) ) ) ), array( array( 'a' => 'x', 'b' => 'y' ), array( 'c' => 1 ) ) ),
+	array( array( 'oneOf' => array( array( 'type' => 'object', 'properties' => array( 'a' => array( 'type' => 'integer' ) ) ), array( 'type' => 'object', 'additionalProperties' => false ) ) ), array( array( 'b' => 'y' ) ) ),
+	array( array( 'type' => 'string', 'oneOf' => array( array( 'minLength' => 3 ) ) ), array( 'ab', 'abc' ) ),
+	array( array( 'type' => 'string', 'oneOf' => array( array( 'title' => 'Long', 'minLength' => 5 ), array( 'title' => 'Short', 'maxLength' => 1 ), array( 'title' => 'Odd', 'enum' => array( 'z' ) ) ) ), array( 'abc', 'z' ) ),
+	array( array( 'type' => 'string', 'oneOf' => array( array( 'title' => 'Long', 'minLength' => 5 ), array( 'maxLength' => 1 ) ) ), array( 'abc', 'abcdef' ) ),
+	array( array( 'type' => 'array', 'oneOf' => array( array( 'items' => array( 'type' => 'integer' ), 'uniqueItems' => true ) ) ), array( array( '1', 2 ) ) ),
 );
 foreach ( $cases as list( $schema, $values ) ) {
 	foreach ( $values as $value ) {

@@ -334,13 +334,16 @@ async fn a_limited_guess_never_reaches_the_hash() {
     tokio::task::spawn_blocking(move || {
         let user = User {
             id: 1,
+            login: b"admin".to_vec(),
             pass: md5(b"right").into_bytes(),
             use_ssl: false,
             activation_key: Vec::new(),
         };
+        // A request whose guess took its turn, as the limits' callback does.
         let reads_from = |client| {
             let mut reads = LoginReads::new(&site, handle.clone(), now());
             reads.client = client;
+            *reads.turn.borrow_mut() = site.limiter.turn(client);
             reads
         };
         let refused = reads_from(client);
@@ -361,6 +364,57 @@ async fn a_limited_guess_never_reaches_the_hash() {
     })
     .await
     .unwrap();
+}
+
+/// A clock that moves on by the whole wait each time it is read, so that a
+/// check waits for none.
+fn hurried() -> std::time::Instant {
+    static READS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let reads = READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    *EPOCH.get_or_init(std::time::Instant::now) + limits::checks::WAIT * reads
+}
+
+/// With every check of the site taken past the wait, a guess fails as a
+/// wrong password: the right one too, so its hash was never checked. Such
+/// a guess is not counted against its address.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_capped_guess_fails_without_its_hash_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut site = Arc::try_unwrap(login_site(Some(dir.path())).await).unwrap();
+    let limiter = Arc::get_mut(&mut site.limiter).unwrap();
+    limiter.checks = limits::checks::Checks::new(1, hurried);
+    let site = Arc::new(site);
+    let held = site.limiter.checks.start();
+    assert!(held.is_some());
+    for _ in 0..5 {
+        let capped = post_from(&site, "192.0.2.1", "", RIGHT).await;
+        let expected = golden_page("POST", WRONG, "1", &nonce(&capped.body));
+        assert_eq!((capped.status, capped.body), (StatusCode::OK, expected));
+    }
+    drop(held);
+    let free = post_from(&site, "192.0.2.1", "", RIGHT).await;
+    assert_eq!(free.status, StatusCode::FOUND);
+}
+
+/// Neither a guess with no name, answered before any account is looked
+/// up, nor an expired session, which also fires `wp_login_failed`, counts.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_guess_is_counted() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = login_site(Some(dir.path())).await;
+    let expired = format!(
+        "hyscribe_{}=admin%7C1%7Cx%7Cy",
+        md5(b"http://127.0.0.1:8081")
+    );
+    for _ in 0..5 {
+        send(&site, "POST", "/hs-login", "", "log=&pwd=x").await;
+        let reply = send(&site, "GET", "/hs-login", &expired, "").await;
+        assert!(reply.body.contains("<p>Please log in again.</p>"));
+    }
+    let form = "log=admin&pwd=reference-only-password";
+    let reply = send(&site, "POST", "/hs-login", "", form).await;
+    assert_eq!(reply.status, StatusCode::FOUND);
 }
 
 #[tokio::test(flavor = "multi_thread")]

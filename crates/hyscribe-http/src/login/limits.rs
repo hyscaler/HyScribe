@@ -2,7 +2,8 @@
 
 //! Login rate limits (docs/SECURITY_MODEL.md): failed logins counted per
 //! client address and per account, in memory only, so that a limited guess
-//! is answered as a wrong password before its hash is checked.
+//! is answered as a wrong password before its hash is checked, and the
+//! site wide cap on checks at once.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
@@ -10,6 +11,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use hyscribe_config::LoginLimits;
+
+pub(crate) mod checks;
 
 /// The longest an address is refused, and how long its refusals are
 /// remembered for the next one to double.
@@ -122,6 +125,8 @@ fn network(client: Option<IpAddr>) -> IpAddr {
 pub(crate) struct Limiter {
     limits: LoginLimits,
     state: Mutex<State>,
+    /// The password checks running at once, site wide.
+    pub(crate) checks: checks::Checks,
 }
 
 /// A client's one password check at a time, until dropped.
@@ -141,6 +146,7 @@ impl Limiter {
         Limiter {
             limits,
             state: Mutex::default(),
+            checks: checks::Checks::per_cpu(),
         }
     }
 

@@ -3,7 +3,7 @@
 //! `/hs-login`: `wp-login.php`'s login action (hyscribe-admin) over the
 //! database, with HyScribe's own cookies and sessions (an open question, ADR 0011).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
@@ -12,7 +12,8 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_admin::assets::{Urls, admin_links, cookie_path};
 use hyscribe_admin::login::actions::{self, Action, Reset};
-use hyscribe_admin::login::{self, Login, Request, Session, Site as LoginSite, User};
+use hyscribe_admin::login::authenticate::{Account, Authenticate};
+use hyscribe_admin::login::{self, Login, Notice, Request, Session, Site as LoginSite, User};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
 use hyscribe_auth::cookie::{generate_auth_cookie, parse_auth_cookie};
 use hyscribe_auth::sessions::Origin;
@@ -30,6 +31,10 @@ use crate::{Site, now};
 pub(crate) const PATH: &str = "/hs-login";
 
 const DAY: i64 = 86_400;
+
+/// The login limits' `authenticate` callback and its priority, ahead of
+/// core's password checks at 20 (ADR 0018).
+const LIMITS: (&str, i32) = ("hyscribe_login_limits", 10);
 
 pub(crate) const YEAR: i64 = 365 * DAY;
 
@@ -171,8 +176,12 @@ pub(crate) struct LoginReads<'a> {
     client: Option<IpAddr>,
     /// The accounts whose password was checked, and whether it matched.
     checked: RefCell<Vec<(u64, bool)>>,
-    /// The client's turn to check passwords, once one is checked.
+    /// The request guesses a password: a non-blank one.
+    guess: Cell<bool>,
+    /// The guess's turn to check passwords, which the login limits give.
     turn: RefCell<Option<limits::Turn>>,
+    /// A check found no free one in time, so the guess is not counted.
+    capped: Cell<bool>,
 }
 
 impl<'a> LoginReads<'a> {
@@ -187,7 +196,9 @@ impl<'a> LoginReads<'a> {
             action_post: None,
             client: None,
             checked: RefCell::default(),
+            guess: Cell::default(),
             turn: RefCell::default(),
+            capped: Cell::default(),
         }
     }
 
@@ -205,6 +216,15 @@ impl<'a> LoginReads<'a> {
         Some(found)
     }
 
+    /// A user found before, by ID.
+    fn found(&self, id: u64) -> Option<Credentials> {
+        self.found
+            .borrow()
+            .iter()
+            .find(|user| user.id == id)
+            .cloned()
+    }
+
     /// `wp_salt( $scheme )`.
     fn salt(&self, scheme: &str) -> Option<Vec<u8>> {
         self.site.salt(scheme, |name| self.reads.option(name))
@@ -220,6 +240,7 @@ impl<'a> LoginReads<'a> {
 
     fn user(&self, found: Option<Credentials>) -> Option<User> {
         found.map(|user| User {
+            login: user.login,
             use_ssl: self
                 .user_option(user.id, "use_ssl")
                 .is_some_and(|v| !Value::String(v).is_empty()),
@@ -235,8 +256,15 @@ impl<'a> LoginReads<'a> {
         if cookie.is_none_or(<[u8]>::is_empty) {
             return Session::None;
         }
-        self.auth_user(cookie, post, https)
-            .map_or(Session::Expired, |(id, _)| Session::User(id))
+        let user = self
+            .auth_user(cookie, post, https)
+            .and_then(|(id, _)| self.found(id));
+        user.map_or(Session::Expired, |user| {
+            Session::User(Account {
+                id: user.id,
+                login: user.login,
+            })
+        })
     }
 
     /// The user of a valid auth cookie, the secure one over HTTPS, and its
@@ -368,17 +396,17 @@ impl LoginSite for LoginReads<'_> {
         self.user(self.credentials(UserField::Email, email))
     }
 
-    /// A guess the login limits refuse fails as a wrong password would,
-    /// without checking the hash.
+    /// `wp_check_password()` on the guess's turn; without one, for a refused
+    /// account or with no free check in time, a wrong password, unhashed.
     fn check_password(&self, user: &User, password: &[u8]) -> bool {
         let limiter = &self.site.limiter;
-        let mut turn = self.turn.borrow_mut();
-        if turn.is_none() {
-            *turn = limiter.turn(self.client);
-        }
-        if turn.is_none() || !limiter.allows(self.client, user.id, self.now) {
+        if self.turn.borrow().is_none() || !limiter.allows(self.client, user.id, self.now) {
             return false;
         }
+        let Some(_check) = limiter.checks.start() else {
+            self.capped.set(true);
+            return false;
+        };
         let matched = hyscribe_auth::check_password(password, &user.pass);
         self.checked.borrow_mut().push((user.id, matched));
         matched
@@ -395,6 +423,34 @@ impl LoginSite for LoginReads<'_> {
 
     fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
         crate::admin::site_icon(self, size)
+    }
+
+    /// The login limits: a guess takes its address's one turn to check
+    /// passwords, which a concurrent guess of the address finds taken.
+    fn authenticate<'a>(&'a self, filters: &mut Authenticate<'a>) {
+        let (name, priority) = LIMITS;
+        let limits = move |user, _: &[u8], password: &[u8]| {
+            if !hyscribe_phpser::is_empty_string(password) {
+                self.guess.set(true);
+                *self.turn.borrow_mut() = self.site.limiter.turn(self.client);
+            }
+            user
+        };
+        filters.add(name, priority, Box::new(limits));
+    }
+
+    /// A failed guess counts for its address and the accounts checked.
+    fn wp_login_failed(&self, _: &[u8], _: &[Notice]) {
+        if self.guess.get() && !self.capped.get() {
+            let checked = self.checked.borrow();
+            self.site.limiter.record(self.client, &checked, self.now);
+        }
+    }
+
+    /// A login trusts its address for its account.
+    fn wp_login(&self, _: &[u8], user: &Account) {
+        let login = [(user.id, true)];
+        self.site.limiter.record(self.client, &login, self.now);
     }
 }
 
@@ -560,17 +616,7 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             let (status, body) = logout(&reads, &names, &request, &mut headers);
             return response(status, headers, body);
         }
-        "login" | "entered_recovery_mode" => {
-            let outcome = login::login(&reads, &request);
-            // A posted password is a guess, whether or not its account exists.
-            let guess = asked.form.get_str("pwd").and_then(Value::as_bytes);
-            let blank = |pwd| hyscribe_phpser::is_empty_string(hyscribe_phpser::php_trim(pwd));
-            if guess.is_some_and(|pwd| !blank(pwd)) {
-                site.limiter
-                    .record(reads.client, &reads.checked.borrow(), now);
-            }
-            outcome
-        }
+        "login" | "entered_recovery_mode" => login::login(&reads, &request),
         // What the other actions' forms post is not ported.
         _ if asked.post => return response(StatusCode::NOT_IMPLEMENTED, headers, Vec::new()),
         _ => {
@@ -785,12 +831,7 @@ pub(crate) fn renewed_cookies(
     secure: bool,
 ) -> Vec<String> {
     let (id, token) = &reads.current;
-    let before = reads
-        .found
-        .borrow()
-        .iter()
-        .find(|user| user.id == *id)
-        .cloned();
+    let before = reads.found(*id);
     let after = before.and_then(|before| {
         let after = reads.site.db.credentials(UserField::Login, &before.login);
         reads
@@ -817,15 +858,11 @@ fn logged_in(
     redirect_to: &[u8],
 ) -> Option<(Vec<String>, String)> {
     let site = reads.site;
-    let found = reads
-        .found
-        .borrow()
-        .iter()
-        .find(|user| user.id == id)
-        .cloned();
-    let (Some(user), Some(sessions), Some(salts)) =
-        (found, site.sessions.as_ref(), salts(reads, secure))
-    else {
+    let (Some(user), Some(sessions), Some(salts)) = (
+        reads.found(id),
+        site.sessions.as_ref(),
+        salts(reads, secure),
+    ) else {
         return None;
     };
     let expiration = expiration(reads.now, remember);

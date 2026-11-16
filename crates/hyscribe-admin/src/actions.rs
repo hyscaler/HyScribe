@@ -167,6 +167,34 @@ fn higher(message: &str) -> Refusal {
     )
 }
 
+/// One response of `WP_Ajax_Response::add()`, to the action `action` on
+/// the object `id`: `data` (XML already), then the `supplemental` fields.
+pub fn ajax_response(
+    action: &str,
+    (what, id, position): (&str, u64, &str),
+    data: &str,
+    supplemental: &[(&str, &[u8])],
+) -> String {
+    let fields: String = supplemental
+        .iter()
+        .map(|(key, value)| {
+            let value = String::from_utf8_lossy(value);
+            format!("<{key}><![CDATA[{value}]]></{key}>")
+        })
+        .collect();
+    format!(
+        "<response action='{action}_{id}'><{what} id='{id}' position='{position}'>{data}<supplemental>{fields}</supplemental></{what}></response>"
+    )
+}
+
+/// `WP_Ajax_Response::send()`'s XML of `responses`.
+pub fn wp_ajax(responses: &[String]) -> String {
+    format!(
+        "<?xml version='1.0' encoding='UTF-8' standalone='yes'?><wp_ajax>{}</wp_ajax>",
+        responses.concat()
+    )
+}
+
 fn ajax(status: u16, body: &str) -> Refusal {
     Refusal {
         status,

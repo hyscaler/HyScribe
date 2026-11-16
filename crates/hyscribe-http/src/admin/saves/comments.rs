@@ -4,7 +4,7 @@
 //! `comment.php`'s row actions and the list's Ajax actions, from
 //! `wp-admin/includes/ajax-actions.php`. WordPress mails nothing here.
 
-use hyscribe_admin::actions::{Asked, action, post_int};
+use hyscribe_admin::actions::{Asked, action, ajax_response, post_int, wp_ajax};
 use hyscribe_admin::posts::Answer;
 use hyscribe_db::{DbError, Write};
 use hyscribe_kses::esc_url_raw;
@@ -275,12 +275,7 @@ pub(super) fn dim<'a>(
             let error = format!(
                 "<wp_error code='invalid_comment'><![CDATA[Comment {id} does not exist]]></wp_error>"
             );
-            return Ok(Ajax::Xml(ajax_response(
-                asked,
-                ("comment", 0, "1"),
-                &error,
-                &[],
-            )));
+            return Ok(Ajax::Xml(ajax_xml(asked, ("comment", 0, "1"), &error, &[])));
         };
         let current = comment_status(&comment.approved);
         let new = asked.post("new").and_then(Value::as_bytes);
@@ -432,7 +427,7 @@ async fn delete_response(
     }
     supplemental.extend(counts);
     let data = "<response_data><![CDATA[]]></response_data>";
-    Ok(Ajax::Xml(ajax_response(
+    Ok(Ajax::Xml(ajax_xml(
         asked,
         ("comment", id, "1"),
         data,
@@ -455,26 +450,20 @@ pub(super) fn count_of(counts: &[u64; 5], view: &[u8]) -> Option<u64> {
     })
 }
 
-/// `WP_Ajax_Response::send()` of one comment response: `response` as the
-/// data, then `supplemental`.
-fn ajax_response(
+/// `WP_Ajax_Response::send()` of one comment response to the request's
+/// action: `response` as the data, then `supplemental`.
+fn ajax_xml(
     asked: &Asked,
-    (what, id, position): (&str, u64, &str),
+    object: (&str, u64, &str),
     response: &str,
     supplemental: &[(&str, String)],
 ) -> String {
-    let action = asked
-        .post("action")
-        .map(Value::to_php_string)
-        .unwrap_or_default();
-    let supplemental: String = supplemental
-        .iter()
-        .map(|(name, value)| format!("<{name}><![CDATA[{value}]]></{name}>"))
+    let action = asked.post("action").map(Value::to_php_string);
+    let action = text(&action.unwrap_or_default());
+    let supplemental: Vec<_> = (supplemental.iter())
+        .map(|(name, value)| (*name, value.as_bytes()))
         .collect();
-    format!(
-        "<?xml version='1.0' encoding='UTF-8' standalone='yes'?><wp_ajax><response action='{}_{id}'><{what} id='{id}' position='{position}'>{response}<supplemental>{supplemental}</supplemental></{what}></response></wp_ajax>",
-        text(&action)
-    )
+    wp_ajax(&[ajax_response(&action, object, response, &supplemental)])
 }
 
 /// `comment.php`'s `editedcomment`, the edit screen's Update: back to the
@@ -522,7 +511,7 @@ impl Row {
         let row = list_row(admin, self.id, post, self.dashboard);
         let data = format!("<response_data><![CDATA[{row}]]></response_data>");
         let response = (self.what, self.id, self.position.as_str());
-        ajax_response(asked, response, &data, &self.supplemental)
+        ajax_xml(asked, response, &data, &self.supplemental)
     }
 }
 

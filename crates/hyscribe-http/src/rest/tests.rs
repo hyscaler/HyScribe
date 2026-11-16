@@ -163,7 +163,7 @@ async fn answers_match_php() {
     let dir = tempfile::tempdir().unwrap();
     let sites = (site(false, dir.path()).await, site(true, dir.path()).await);
     let golden = include_str!("../../../hyscribe-rest/tests/golden/rest.tsv");
-    assert_eq!(replay(&sites, golden, false).await, (2 * 67, 2 * 6));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 68, 2 * 5));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/content.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 89 + 5, 1));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/templates.tsv");

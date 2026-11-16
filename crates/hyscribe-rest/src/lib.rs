@@ -29,9 +29,13 @@ mod terms;
 mod types;
 mod users;
 
+use std::sync::OnceLock;
+
 use hyscribe_kses::esc_url_raw;
 use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, Term, TermQuery, User, UserQuery};
-use hyscribe_phpser::{Key, Value, is_empty_string, json_encode, json_encode_pretty, lookup};
+use hyscribe_phpser::{
+    Key, Value, is_empty_string, json_decode, json_encode, json_encode_pretty, lookup,
+};
 use hyscribe_render::site::Site as Reads;
 use hyscribe_render::theme::Theme;
 
@@ -685,14 +689,29 @@ fn dispatch(
     resumed: Option<(Pending, Outcome)>,
 ) -> Result<Response, Halt> {
     if method == "OPTIONS" {
-        // `rest_handle_options_request()`: a route's description is not
-        // ported.
-        if routes::any_matches(route) {
-            return Err(Halt::NotPorted);
-        }
-        return Ok(Response::new(
-            fields::filter_fields(Value::Array(Vec::new()), &params),
-            200,
+        // `rest_handle_options_request()`: the description of the first
+        // route matched, with its URL parameters unchecked.
+        let Some(matched) = routes::described(route) else {
+            let data = fields::filter_fields(Value::Array(Vec::new()), &params);
+            return Ok(Response::new(data, 200));
+        };
+        let permissions: Vec<Permission> = endpoints(matched.regex)
+            .ok_or(Halt::NotPorted)?
+            .iter()
+            .map(|endpoint| endpoint.permission)
+            .collect();
+        let params = Params {
+            route: matched.regex,
+            url: matched.params,
+            ..params
+        };
+        let response = Response::new(describe(context, matched.regex), 200);
+        return Ok(finish(
+            context,
+            response,
+            &permissions,
+            matched.methods,
+            &params,
         ));
     }
     let Some(matched) = routes::match_request(method, route) else {
@@ -714,15 +733,61 @@ fn dispatch(
     {
         return Err(Halt::NotPorted);
     }
-    let mut response = answered.unwrap_or_else(RestError::into_response);
-    let allowed = allowed(context, &permissions, matched.methods, &params);
+    let response = answered.unwrap_or_else(RestError::into_response);
+    Ok(finish(
+        context,
+        response,
+        &permissions,
+        matched.methods,
+        &params,
+    ))
+}
+
+/// The filters after dispatching: the `Allow` header, then `_fields`.
+fn finish(
+    context: &Context,
+    mut response: Response,
+    permissions: &[Permission],
+    methods: &'static [Vec<String>],
+    params: &Params,
+) -> Response {
+    let allowed = allowed(context, permissions, methods, params);
     if !allowed.is_empty() {
         response.header("Allow", &allowed.join(", "));
     }
     if !response.is_error() {
-        response.data = fields::filter_fields(response.data, &params);
+        response.data = fields::filter_fields(response.data, params);
     }
-    Ok(response)
+    response
+}
+
+/// The description of the route `regex`, as `get_data_for_route()` gives
+/// it in the `help` context, exported by `reference/wordpress/export.sh`.
+fn describe(context: &Context, regex: &str) -> Value {
+    const DESCRIPTIONS: &[u8] =
+        include_bytes!("../../../wordpress/wp-includes/rest-descriptions.json");
+    static DATA: OnceLock<Value> = OnceLock::new();
+    let data = DATA.get_or_init(|| json_decode(DESCRIPTIONS).unwrap_or_default());
+    let description = data.get_str(regex).cloned().unwrap_or_default();
+    placed(description, b"%rest_url%", &|path| context.rest_url(path))
+}
+
+/// `value` with each string that starts with `placeholder` given the URL
+/// `url` makes of the rest, as exported data marks a site's URLs.
+pub(crate) fn placed(value: Value, placeholder: &[u8], url: &dyn Fn(&str) -> String) -> Value {
+    match value {
+        Value::String(string) => match string.strip_prefix(placeholder) {
+            Some(rest) => text(url(&String::from_utf8_lossy(rest))),
+            None => Value::String(string),
+        },
+        Value::Array(entries) => Value::Array(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key, placed(value, placeholder, url)))
+                .collect(),
+        ),
+        value => value,
+    }
 }
 
 /// The request checked by the matched endpoint's arguments and permission,

@@ -139,18 +139,18 @@ fn handles(html: &str) -> String {
     ];
     let mut out = Vec::new();
     let mut rest = html;
-    while let Some(at) = rest.find('<') {
-        rest = &rest[at + 1..];
-        let end = rest.find('>').unwrap_or(rest.len());
-        let tag = &rest[..end];
+    while let Some((_, after)) = rest.split_once('<') {
+        rest = after;
+
+        let tag = rest.split('>').next().unwrap_or_default();
         if !["link", "style", "script"]
             .iter()
             .any(|t| tag.starts_with(t))
         {
             continue;
         }
-        if let Some(at) = tag.find("/load-s") {
-            let kind = if tag[at..].starts_with("/load-styles") {
+        if let Some((_, load)) = tag.split_once("/load-s") {
+            let kind = if load.starts_with("tyles") {
                 "styles"
             } else {
                 "scripts"
@@ -226,8 +226,8 @@ fn editor_closure_is_php_s() {
         view: None,
     };
     let html = crate::page::admin_page(&site, &page, browser).unwrap();
-    let head = handles(&html[..html.find("</head>").unwrap()]);
-    let footer = handles(&html[html.find("<div id=\"wpfooter\"").unwrap()..]);
+    let head = handles(html.split("</head>").next().unwrap());
+    let footer = handles(html.split_once("<div id=\"wpfooter\"").unwrap().1);
     let golden = |part: &str| php.iter().find(|(p, _)| p == part).unwrap().1.clone();
     // The page adds the global stylesheet's variables inline itself.
     let php_head = golden("head").replace(" global-styles-css-custom-properties-inline-css", "");

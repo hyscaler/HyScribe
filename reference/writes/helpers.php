@@ -45,9 +45,12 @@ $admin_run = function ( $run, $ajax = false ) {
 	remove_filter( 'wp_doing_ajax', '__return_true' );
 };
 
-// A user named `$login`, with `$more` of wp_insert_user()'s fields.
+// A user named `$login`, with `$more` of wp_insert_user()'s fields, made as
+// outside the admin: without the admin's `dismissed_wp_pointers` hook.
 $oracle_user = function ( $login, $more = array() ) {
-	return wp_insert_user(
+	$pointers = array( 'WP_Internal_Pointers', 'dismiss_pointers_for_new_users' );
+	remove_action( 'user_register', $pointers );
+	$id = wp_insert_user(
 		array_merge(
 			array(
 				'user_login' => $login,
@@ -57,4 +60,6 @@ $oracle_user = function ( $login, $more = array() ) {
 			$more
 		)
 	);
+	add_action( 'user_register', $pointers );
+	return $id;
 };

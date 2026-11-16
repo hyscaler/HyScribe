@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `WP_User::set_role()`, `add_role()` and `remove_role()`: the user's
-//! `{prefix}capabilities` meta, and the `{prefix}user_level` its roles give.
+//! `WP_User::set_role()`: the user's `{prefix}capabilities` meta, and the
+//! `{prefix}user_level` its roles give.
 
 use hyscribe_db::{DbError, Meta, Write};
 use hyscribe_phpser::{Key, Value, is_empty_string};
@@ -98,30 +98,5 @@ pub async fn set_role(write: &mut Write<'_>, id: u64, role: &[u8]) -> Result<(),
     if !is_empty_string(&role.to_php_string()) {
         user.grant(role);
     }
-    user.save(write).await
-}
-
-/// `WP_User::add_role( $role )`, unless the user has it.
-pub async fn add_role(write: &mut Write<'_>, id: u64, role: &[u8]) -> Result<(), DbError> {
-    if is_empty_string(role) {
-        return Ok(());
-    }
-    let mut user = User::load(write, id).await?;
-    let role = Key::from_php_string(role.to_vec());
-    if user.roles().contains(&role) {
-        return Ok(());
-    }
-    user.grant(role);
-    user.save(write).await
-}
-
-/// `WP_User::remove_role( $role )`, if the user has it.
-pub async fn remove_role(write: &mut Write<'_>, id: u64, role: &[u8]) -> Result<(), DbError> {
-    let mut user = User::load(write, id).await?;
-    let role = Key::from_php_string(role.to_vec());
-    if !user.roles().contains(&role) {
-        return Ok(());
-    }
-    user.caps.retain(|(key, _)| *key != role);
     user.save(write).await
 }

@@ -172,7 +172,9 @@ async fn the_newest_global_styles_post_is_the_theme_s() {
     let created = rolled_back(async |w| {
         let ctx = admin();
         let first = get_user_global_styles_post_id(w, &ctx, THEME.0).await?;
-        w.set_post_status(first, "draft").await?;
+        let mut draft = w.post(first).await?.unwrap();
+        draft.status = "draft".into();
+        w.update_post(first, &draft).await?;
         let again = get_user_global_styles_post_id(w, &ctx, THEME.0).await?;
         Ok((first, again))
     })

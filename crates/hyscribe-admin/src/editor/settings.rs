@@ -268,7 +268,7 @@ fn filter_svg(id: &str, colors: &[Vec<u8>]) -> String {
     let table = |i: usize| {
         parsed
             .iter()
-            .map(|c| c[i].as_str())
+            .filter_map(|c| c.get(i).map(String::as_str))
             .collect::<Vec<_>>()
             .join(" ")
     };

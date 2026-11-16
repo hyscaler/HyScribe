@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Posts: `wp_insert_post()`, `wp_update_post()`, `wp_publish_post()`,
-//! `wp_trash_post()`, `wp_untrash_post()` and `wp_delete_post()`, with the
-//! hooks a default install runs on them. Each runs inside the caller's
-//! [`Write`], which the caller commits. Posts and pages are ported; other
-//! types, and what a default install never reaches, answer
-//! [`Error::Unported`], and the caller's action rolls back.
+//! Posts: `wp_insert_post()`, `wp_update_post()`, `wp_trash_post()`,
+//! `wp_untrash_post()` and `wp_delete_post()`, with the hooks a default
+//! install runs on them. Each runs inside the caller's [`Write`], which the
+//! caller commits. Posts and pages are ported; other types, and what a
+//! default install never reaches, answer [`Error::Unported`], and the
+//! caller's action rolls back.
 
+use hyscribe_config::Constants;
 use hyscribe_db::{PostFields, Write};
 use hyscribe_phpser::{Key, Value};
 use hyscribe_render::formatting::sanitize_title;
@@ -45,6 +46,8 @@ pub struct Context {
     /// `current_user_can( 'unfiltered_html' )`: `kses_init()` leaves the
     /// post's fields unfiltered for such a user.
     pub unfiltered_html: bool,
+    /// The configuration's constants capability checks read.
+    pub constants: Constants,
     /// `time()`.
     pub now: i64,
 }
@@ -399,28 +402,6 @@ pub async fn block_editor_view(
     .await?;
     custom_css_post_lookup(write, stylesheet, name).await?;
     Ok(id)
-}
-
-/// `wp_publish_post( $post )`.
-pub async fn wp_publish_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Result<()> {
-    let Some(post) = write.post(id).await? else {
-        return Ok(());
-    };
-    if post.status == "publish" {
-        return Ok(());
-    }
-    // Only categories have a default term on a default install.
-    let kind = Kind::of(&post.post_type)?;
-    if kind == Kind::Post && write.object_terms(id, "category").await?.is_empty() {
-        let default = site::option_int(write, "default_category").await?;
-        if default != 0 {
-            let terms = TermList::List(&[TermRef::Id(default)]);
-            wp_set_post_terms(write, id, terms, Taxonomy::Category, false).await?;
-        }
-    }
-    write.set_post_status(id, "publish").await?;
-    hooks::transition(write, ctx, kind, ("publish", &post.status), id).await?;
-    hooks::save_revision(write, ctx, kind, id).await
 }
 
 /// `sanitize_post( $postarr, 'db' )` with a default install's filters:

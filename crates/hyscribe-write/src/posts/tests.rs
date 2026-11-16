@@ -9,6 +9,7 @@ use hyscribe_db::{CommentFields, Connection, Writer};
 use hyscribe_testkit::{fixture_database, writes::check_writes};
 use std::result::Result as StdResult;
 
+use crate::terms::Taxonomy;
 use crate::tests::{MISSING, ONE_AT_A_TIME, admin, connection, writer};
 
 fn shown(err: impl std::fmt::Debug) -> String {
@@ -266,7 +267,7 @@ async fn inserts_match_php() {
             };
             let id = insert_post(writer, conn, taken()).await?;
             act(writer, conn, &admin(), async |w, _| {
-                Ok(w.set_post_status(id, "trash").await?)
+                trash_status(w, id).await
             })
             .await?;
             Ok(taken())
@@ -501,17 +502,6 @@ async fn updates_match_php() {
         async |conn, id| update(conn, id, |args| args.title = b"A renamed post".to_vec()).await,
     )
     .await;
-    check(
-        "publish-future-post",
-        async |conn| insert_post(writer, conn, future_post()).await,
-        async |conn, id| {
-            act(writer, conn, &admin(), async |w, ctx| {
-                wp_publish_post(w, ctx, id).await
-            })
-            .await
-        },
-    )
-    .await;
 }
 
 #[tokio::test]
@@ -640,10 +630,17 @@ async fn trash_and_delete_match_php() {
     .await;
 }
 
+/// A post's status made `trash` with no other write.
+async fn trash_status(w: &mut Write<'_>, id: u64) -> Result<u64> {
+    let mut post = existing(w, id).await?;
+    post.status = "trash".into();
+    Ok(w.update_post(id, &post).await?)
+}
+
 /// `$posts_trash_raw()`: the status changed without wp_trash_post().
 async fn trash_raw(writer: &Writer, conn: &mut Connection, id: u64) -> StdResult<u64, String> {
     act(writer, conn, &admin(), async |w, _| {
-        Ok(w.set_post_status(id, "trash").await?)
+        trash_status(w, id).await
     })
     .await?;
     Ok(id)
@@ -750,24 +747,6 @@ async fn edge_cases_match_php() {
                 update(conn, id, &|args| args.parent = parent).await?;
             }
             Ok(())
-        },
-    )
-    .await;
-    check(
-        "publish-uncategorized-draft",
-        async |conn| {
-            let id = insert_post(writer, conn, oracle_post("draft")).await?;
-            act(writer, conn, &admin(), async |w, _| {
-                Ok(w.remove_relationships(id, &[1]).await?)
-            })
-            .await?;
-            Ok(id)
-        },
-        async |conn, id| {
-            act(writer, conn, &admin(), async |w, ctx| {
-                wp_publish_post(w, ctx, id).await
-            })
-            .await
         },
     )
     .await;
@@ -1107,8 +1086,6 @@ async fn what_hyscribe_does_not_port_is_refused() {
 async fn posts_that_are_not_there_or_already_done_write_nothing() {
     let _one = ONE_AT_A_TIME.lock().await;
     let done = rolled_back(async |w, ctx| {
-        wp_publish_post(w, ctx, 999_999).await?;
-        wp_publish_post(w, ctx, 1).await?;
         let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
         Ok([
             wp_trash_post(w, ctx, 999_999).await?,
@@ -1276,20 +1253,20 @@ async fn database_errors_end_every_function() {
         updating(|args| args.status = "publish".into()),
     )
     .await;
+    // Published without a GUID: the transition gives it one.
     every_cut(
         async |w, ctx| {
             let id = wp_insert_post(w, ctx, oracle_post("draft")).await?;
             w.set_post_guid(id, b"").await?;
-            w.remove_relationships(id, &[1]).await?;
             Ok(id)
         },
-        async |w, ctx, id| wp_publish_post(w, ctx, id).await,
+        updating(|args| args.status = "publish".into()),
     )
     .await;
     every_cut(
         async |w, ctx| {
             let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
-            w.set_post_status(id, "trash").await?;
+            trash_status(w, id).await?;
             Ok(id)
         },
         inserting(oracle_post("publish")),
@@ -1384,11 +1361,6 @@ async fn attachments_are_not_ported() {
         .await,
         rolled_back(async |w, ctx| {
             let id = attachment(w, "inherit").await?;
-            wp_publish_post(w, ctx, id).await
-        })
-        .await,
-        rolled_back(async |w, ctx| {
-            let id = attachment(w, "inherit").await?;
             wp_trash_post(w, ctx, id).await.map(drop)
         })
         .await,
@@ -1411,16 +1383,6 @@ async fn attachments_are_not_ported() {
 #[tokio::test]
 async fn rare_values_are_kept_as_php_keeps_them() {
     let _one = ONE_AT_A_TIME.lock().await;
-    // No default category: a published draft stays without one.
-    let uncategorized = rolled_back(async |w, ctx| {
-        set(w, "default_category", b"0").await?;
-        let id = wp_insert_post(w, ctx, oracle_post("draft")).await?;
-        w.remove_relationships(id, &[1]).await?;
-        wp_publish_post(w, ctx, id).await?;
-        Ok(w.object_terms(id, "category").await?)
-    })
-    .await;
-    assert!(uncategorized.unwrap().is_empty());
     let mime = rolled_back(async |w, ctx| {
         let args = PostArgs {
             mime_type: "Text/pl ain<+*.-".into(),
@@ -1718,12 +1680,6 @@ async fn rarer_saves_match_php() {
         .await
         .map(drop)
     };
-    let publish = async |conn: &mut Connection, id| {
-        act(writer, conn, &admin(), async |w, ctx| {
-            wp_publish_post(w, ctx, id).await
-        })
-        .await
-    };
     let insert = async |conn: &mut Connection, args| insert_post(writer, conn, args).await;
     check(
         "update-categorized-post",
@@ -1782,18 +1738,6 @@ async fn rarer_saves_match_php() {
     )
     .await;
     check(
-        "publish-draft-page",
-        async |conn| {
-            let args = PostArgs {
-                post_type: "page".into(),
-                ..oracle_post("draft")
-            };
-            insert(conn, args).await
-        },
-        publish,
-    )
-    .await;
-    check(
         "insert-pending-post",
         async |_| Ok(()),
         async |conn, ()| {
@@ -1832,7 +1776,7 @@ async fn rarer_saves_match_php() {
             let id = insert(conn, titled(b"Taken")).await?;
             let trashed = insert(conn, titled(b"Other")).await?;
             act(writer, conn, &admin(), async |w, _| {
-                w.set_post_status(trashed, "trash").await?;
+                trash_status(w, trashed).await?;
                 Ok(w.set_post_name(trashed, b"taken").await?)
             })
             .await?;

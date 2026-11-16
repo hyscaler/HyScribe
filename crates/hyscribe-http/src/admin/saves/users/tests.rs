@@ -38,7 +38,7 @@ async fn deletions_are_php_s() {
         let mut write = writer.begin_on(conn).await.unwrap();
         let ctx = hyscribe_write::posts::Context {
             can_publish: true,
-            ..context(1, SITE, SITE)
+            ..context(1, SITE, SITE, Default::default())
         };
         for (title, author) in [("Deleted post", deleted), ("Passed post", heir)] {
             let post = PostArgs {

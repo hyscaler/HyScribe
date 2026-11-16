@@ -47,6 +47,7 @@ pub(crate) fn admin() -> crate::posts::Context {
         home: b"http://127.0.0.1:8081".to_vec(),
         upload_host: b"127.0.0.1:8081".to_vec(),
         unfiltered_html: false,
+        constants: hyscribe_config::Constants::default(),
         now: crate::now(),
     }
 }

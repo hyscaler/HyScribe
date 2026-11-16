@@ -13,7 +13,7 @@ use hyscribe_phpser::Value;
 use hyscribe_render::formatting::sanitize_title;
 
 use crate::Error;
-use crate::options::{Meta, delete_metadata, get_metadata, update_metadata};
+use crate::options::{Meta, add_metadata, delete_metadata, get_metadata, update_metadata};
 use crate::terms::{TermError, TermRef, wp_set_post_categories};
 
 mod cron;
@@ -257,6 +257,39 @@ pub async fn get_default_post_to_edit(write: &mut Write<'_>, ctx: &Context) -> R
         cron::schedule_daily(write, ctx.now, HOOK).await?;
     }
     Ok(id)
+}
+
+/// `wp_restore_post_revision( $revision )`: its post given the revision's
+/// title, content, excerpt and footnotes; `None` without the revision.
+pub async fn wp_restore_post_revision(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    revision_id: u64,
+) -> Result<Option<u64>> {
+    let Some(revision) = write
+        .post(revision_id)
+        .await?
+        .filter(|r| r.post_type == "revision")
+    else {
+        return Ok(None);
+    };
+    let (title, content, excerpt) = (revision.title, revision.content, revision.excerpt);
+    let id = wp_update_post(write, ctx, revision.parent, &|args| {
+        args.title.clone_from(&title);
+        args.content.clone_from(&content);
+        args.excerpt.clone_from(&excerpt);
+    })
+    .await?;
+    let user = Value::Int(ctx.user.cast_signed());
+    update_metadata(write, Meta::Post, id, "_edit_last", &user, &Value::Null).await?;
+    // The `wp_restore_post_revision` action: wp_restore_post_revision_meta().
+    let none = Value::String(Vec::new());
+    delete_metadata(write, Meta::Post, id, "footnotes", &none, false).await?;
+    for value in get_metadata(write, Meta::Post, revision_id, "footnotes").await? {
+        let value = hooks::slash(value);
+        add_metadata(write, Meta::Post, id, "footnotes", &value, false).await?;
+    }
+    Ok(Some(id))
 }
 
 /// `sanitize_post( $postarr, 'db' )` with a default install's filters:

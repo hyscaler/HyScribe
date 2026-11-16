@@ -292,6 +292,8 @@ enum Flags {
     Unescaped,
     /// Those with `JSON_HEX_TAG | JSON_UNESCAPED_LINE_TERMINATORS`.
     ScriptData,
+    /// `JSON_HEX_TAG | JSON_UNESCAPED_SLASHES`.
+    Localized,
 }
 
 /// `json_encode( $value )` with no flags, as `wp_json_encode()` calls it:
@@ -329,6 +331,14 @@ pub fn json_encode_unescaped(value: &Value) -> Option<Vec<u8>> {
 pub fn json_encode_script_data(value: &Value) -> Option<Vec<u8>> {
     let mut out = Vec::new();
     encode_value(value, Flags::ScriptData, &mut out)?;
+    Some(out)
+}
+
+/// `json_encode()` with `JSON_HEX_TAG | JSON_UNESCAPED_SLASHES`, as
+/// `wp_localize_script()` calls it: non-ASCII characters stay escaped.
+pub fn json_encode_localized(value: &Value) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    encode_value(value, Flags::Localized, &mut out)?;
     Some(out)
 }
 
@@ -430,8 +440,12 @@ fn encode_string(text: &[u8], flags: Flags, out: &mut Vec<u8>) -> Option<()> {
             '"' => out.extend_from_slice(b"\\\""),
             '\\' => out.extend_from_slice(b"\\\\"),
             '/' if flags == Flags::Default => out.extend_from_slice(b"\\/"),
-            '<' if flags == Flags::ScriptData => out.extend_from_slice(b"\\u003C"),
-            '>' if flags == Flags::ScriptData => out.extend_from_slice(b"\\u003E"),
+            '<' if matches!(flags, Flags::ScriptData | Flags::Localized) => {
+                out.extend_from_slice(b"\\u003C");
+            }
+            '>' if matches!(flags, Flags::ScriptData | Flags::Localized) => {
+                out.extend_from_slice(b"\\u003E");
+            }
             '\u{8}' => out.extend_from_slice(b"\\b"),
             '\u{c}' => out.extend_from_slice(b"\\f"),
             '\n' => out.extend_from_slice(b"\\n"),
@@ -632,12 +646,13 @@ mod tests {
             let mut fields = line.split('\t').map(hyscribe_testkit::unhex);
             let mut field = || fields.next().unwrap();
             let (value, php, unescaped, script) = (field(), field(), field(), field());
-            let pretty = field();
+            let (pretty, localized) = (field(), field());
             let value = crate::decode(&value).unwrap();
             assert_eq!(json_encode(&value), Some(php), "{value:?}");
             assert_eq!(json_encode_pretty(&value), Some(pretty), "{value:?}");
             assert_eq!(json_encode_unescaped(&value), Some(unescaped), "{value:?}");
             assert_eq!(json_encode_script_data(&value), Some(script), "{value:?}");
+            assert_eq!(json_encode_localized(&value), Some(localized), "{value:?}");
         }
         assert!(golden.lines().count() > 30);
     }

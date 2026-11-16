@@ -302,9 +302,38 @@ pub fn admin(site: &dyn ActionSite, screen: &str, asked: &Asked, post: bool) -> 
         "options-permalink" => permalinks(site, asked)?,
         "options-privacy" => privacy(site, asked)?,
         "themes" => themes(site, asked)?,
+        "revision" => restore(site, asked)?,
         _ => return None,
     };
     Some(checked)
+}
+
+/// `revision.php`'s restore of a revision the user may edit the post of,
+/// unlocked; the screen sends any other back. Other types' revisions,
+/// which may be turned off, go on to what is not ported.
+fn restore(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
+    let args = crate::revisions::RevisionArgs::read(&|name| asked.request(name).cloned())?;
+    if args.action != "restore" {
+        return None;
+    }
+    let revision = site
+        .post(args.revision)
+        .filter(|r| r.post_type == "revision")?;
+    let post = site.post(revision.parent)?;
+    if !can_for(site, "edit_post", post.id.cast_signed()) {
+        return None;
+    }
+    if !["post", "page"].contains(&post.post_type.as_str()) {
+        return Some(Ok(()));
+    }
+    if site.lock_holder(post.id).is_some() {
+        return None;
+    }
+    Some(referer(
+        site,
+        asked,
+        &format!("restore-post_{}", args.revision),
+    ))
 }
 
 /// `admin.php`'s refusal of a screen the menu does not offer the user.
@@ -1141,6 +1170,11 @@ fn ajax_action(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
             }
         }
         "delete-comment" | "dim-comment" => comment_ajax(site, asked, action == "dim-comment"),
+        // `wp_send_json_error()` without a nonce.
+        "heartbeat" if asked.post("_nonce").is_none_or(Value::is_empty) => Err(Refusal {
+            status: 200,
+            body: Body::Json("{\"success\":false}"),
+        }),
         "edit-comment" | "replyto-comment" => {
             let field = "_ajax_nonce-replyto-comment";
             ajax_referer(site, asked, "replyto-comment", Some(field))?;

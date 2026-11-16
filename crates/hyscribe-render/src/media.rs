@@ -40,6 +40,10 @@ pub(crate) enum Filter {
     Content,
     /// `widget_block_content`.
     WidgetBlock,
+    /// `widget_text_content`, which renders no blocks or shortcodes, so no
+    /// image of another context is made inside it and [`Loading`] needs no
+    /// flag for it.
+    WidgetText,
 }
 
 /// The attributes `wp_get_loading_optimization_attributes()` adds.

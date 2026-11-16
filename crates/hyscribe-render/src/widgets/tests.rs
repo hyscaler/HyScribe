@@ -845,3 +845,57 @@ fn block_widget_matches_php() {
     );
     assert_eq!((golden.lines().count(), classes, unique), (64, 19, 3));
 }
+
+/// Every case of `reference/text-widget/golden.sh`: `do_blocks()` outside
+/// and in the loop, and `the_content` of a post and of an attachment, whose
+/// own content `prepend_attachment()` adds to and the widget does not.
+#[test]
+fn text_widget_matches_php() {
+    let golden = include_str!("../../tests/golden/text-widget.tsv");
+    let theme = twentytwentyfive();
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let state = hyscribe_phpser::json_decode(&unhex(f[2])).unwrap();
+        let site = attached(&state);
+        let photo = site.attachments[0].0.id;
+        let mode = unhex(f[1]);
+        let queried = match mode.as_slice() {
+            b"" => 0,
+            b"attachment" => photo,
+            _ => 1,
+        };
+        let request = Request {
+            singular: !mode.is_empty(),
+            queried_object_id: queried,
+            ..Default::default()
+        };
+        let (markup, php) = (unhex(f[0]), unhex(f[3]));
+        let ours = match mode.as_slice() {
+            b"content" | b"attachment" => {
+                let post = hyscribe_model::Post {
+                    content: markup.clone(),
+                    ..site.post(queried).unwrap()
+                };
+                crate::rest::Rendering::new(&theme, &site, &request).the_content(&post)
+            }
+            _ => Renderer::new(&theme, &site, &request).render(&markup),
+        };
+        if ours != php {
+            failures.push(format!(
+                "{} {}\n  php:  {:?}\n  ours: {:?}",
+                String::from_utf8_lossy(&markup),
+                f[1],
+                String::from_utf8_lossy(&php),
+                String::from_utf8_lossy(&ours)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures[..failures.len().min(3)].join("\n")
+    );
+    assert_eq!(golden.lines().count(), 28);
+}

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `wp_filter_content_tags()` in the `the_content` and
-//! `widget_block_content` contexts: the images and iframes of post content
-//! or a block widget get their dimensions, `srcset` and `sizes` from the
+//! `wp_filter_content_tags()` in the `the_content`, `widget_block_content`
+//! and `widget_text_content` contexts: the images and iframes of post
+//! content or a widget get their dimensions, `srcset` and `sizes` from the
 //! attachment a `wp-image-N` class names, and the loading attributes.
 
 use std::collections::HashSet;

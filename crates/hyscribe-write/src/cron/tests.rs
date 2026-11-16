@@ -222,8 +222,14 @@ fn unscheduling_takes_the_event_from_its_timestamp_only() {
         at(Key::Int(2), &[("wp_scheduled_delete", None)]),
         (Key::Int(3), Value::String(b"broken".to_vec())),
     ];
+    // Other empty entries, which PHP only drops at the event's own place.
+    crons.push(at(Key::Int(4), &[]));
+    let extra = [
+        (name("wp_scheduled_delete"), Value::String(b"x".to_vec())),
+        (name("empty"), Value::Array(Vec::new())),
+    ];
     if let Value::Array(hooks) = &mut crons[0].1 {
-        hooks.push((name("wp_scheduled_delete"), Value::String(b"x".to_vec())));
+        hooks.extend(extra.clone());
     }
     let event = |at| recurring(Job::ScheduledDelete, at, ("daily", 86_400));
     unschedule(&mut crons, &event(1));
@@ -232,14 +238,15 @@ fn unscheduling_takes_the_event_from_its_timestamp_only() {
         at(Key::Int(1), &[("other", None)]),
         at(Key::Int(2), &[("wp_scheduled_delete", None)]),
         (Key::Int(3), Value::String(b"broken".to_vec())),
+        at(Key::Int(4), &[]),
     ];
     if let Value::Array(hooks) = &mut expected[0].1 {
-        hooks.push((name("wp_scheduled_delete"), Value::String(b"x".to_vec())));
+        hooks.extend(extra);
     }
     assert_eq!(crons, expected);
     // A timestamp left empty goes, and another key of the hook stays.
     unschedule(&mut crons, &event(2));
-    assert_eq!(crons.len(), 2);
+    assert_eq!(crons.len(), 3);
     let mut two = vec![at(Key::Int(2), &[("publish_future_post", Some(7))])];
     let post = Event {
         args: args(Some(8)),

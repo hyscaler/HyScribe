@@ -278,11 +278,9 @@ fn reschedule(crons: &mut Crons, now: i64, event: &Event) {
     let Some((recurrence, interval)) = event.recurrence else {
         return;
     };
-    let at = if event.at >= now {
-        now + interval
-    } else {
-        now + (interval - (now - event.at) % interval)
-    };
+    // An event not yet due moves a whole interval on from now.
+    let behind = (now - event.at).max(0);
+    let at = now + interval - behind % interval;
     let hook = event.job.hook();
     put_recurring(crons, at, hook, event.args.clone(), (recurrence, interval));
 }

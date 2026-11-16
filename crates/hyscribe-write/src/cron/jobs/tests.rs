@@ -381,3 +381,55 @@ fn files_are_listed_a_hundred_folders_deep() {
     assert_eq!(list_files(&top, 0, &[]), Vec::<PathBuf>::new());
     std::fs::remove_dir_all(&top).unwrap();
 }
+
+#[tokio::test]
+async fn the_jobs_keep_to_php_s_ages() {
+    rolled_back(async |w| {
+        let ctx = cron();
+        // A post is published at its very time.
+        let admin = admin();
+        let id = crate::posts::wp_insert_post(w, &admin, future_post());
+        let id = id.await.unwrap();
+        let at = Context {
+            now: 1_893_492_000,
+            ..cron()
+        };
+        check_and_publish_future_post(w, &at, id).await.unwrap();
+        assert_eq!(w.post(id).await.unwrap().unwrap().status, "publish");
+        // A comment two days in the trash stays; one past thirty days goes.
+        let comments = comments::Context {
+            now: ctx.now,
+            home: &ctx.home,
+        };
+        comments::trash_comment(w, comments, 1).await.unwrap();
+        let key = "_wp_trash_meta_time";
+        let any = Value::String(Vec::new());
+        for (age, kept) in [(2 * DAY, true), (30 * DAY + 1, false)] {
+            let time = Value::Int(ctx.now - age);
+            update_metadata(w, Meta::Comment, 1, key, &time, &any)
+                .await
+                .unwrap();
+            wp_scheduled_delete(w, &ctx).await.unwrap();
+            assert_eq!(w.comment(1).await.unwrap().is_some(), kept);
+        }
+        // A request changed two hours ago stays pending; a day and more fails.
+        let zone = wp_timezone(w).await.unwrap();
+        for (age, status) in [(7_200, "request-pending"), (DAY + 10, "request-failed")] {
+            let request = PostArgs {
+                title: b"reader@example.test".to_vec(),
+                status: "request-pending".into(),
+                post_type: "user_request".into(),
+                date: format_unix(MYSQL, ctx.now - age, zone),
+                ..PostArgs::default()
+            };
+            let id = crate::posts::wp_insert_post(w, &admin, request)
+                .await
+                .unwrap();
+            wp_privacy_personal_data_cleanup_requests(w, &ctx)
+                .await
+                .unwrap();
+            assert_eq!(w.post(id).await.unwrap().unwrap().status, status);
+        }
+    })
+    .await;
+}

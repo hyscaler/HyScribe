@@ -343,7 +343,7 @@ fn prepare(
         ("compareTwoMode", string(if compare { "1" } else { "0" })),
         ("revisionIds", list(ids)),
     ]);
-    String::from_utf8(json_encode_localized(&settings)?).ok()
+    json_encode_localized(&settings).and_then(|json| String::from_utf8(json).ok())
 }
 
 fn set_current(entries: &mut [(u64, Vec<(&str, Value)>)], id: u64, current: bool) {

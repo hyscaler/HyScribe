@@ -12,6 +12,7 @@ mod comments;
 mod editor;
 mod embed;
 mod fields;
+mod index;
 mod media;
 mod navigation;
 pub(crate) mod posts;
@@ -143,6 +144,10 @@ pub struct Request<'a> {
     pub content_type: Option<&'a [u8]>,
     /// The body.
     pub body: &'a [u8],
+    /// The `Host` header, `$_SERVER['HTTP_HOST']`.
+    pub host: Option<&'a [u8]>,
+    /// The request's time, `time()`.
+    pub now: i64,
 }
 
 /// What a request comes to: its answer, or a write to make first.
@@ -229,6 +234,10 @@ pub(crate) struct Context<'a> {
     pub(crate) uri: &'a [u8],
     /// The request gives parameters a write's arguments would check.
     pub(crate) parameters: bool,
+    /// `$_SERVER['HTTP_HOST']`.
+    pub(crate) host: &'a [u8],
+    /// `time()`.
+    pub(crate) now: i64,
 }
 
 impl Context<'_> {
@@ -279,6 +288,7 @@ pub(crate) struct Endpoint {
 /// The ported endpoints of the route `regex`.
 fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     types::endpoints(regex)
+        .or_else(|| index::endpoints(regex))
         .or_else(|| editor::endpoints(regex))
         .or_else(|| taxonomies::endpoints(regex))
         .or_else(|| terms::endpoints(regex))
@@ -485,6 +495,8 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
         parameters: [&params.json, &params.post, &params.get]
             .into_iter()
             .any(|source| given(source)),
+        host: request.host.unwrap_or_default(),
+        now: request.now,
     };
     let response = match verified {
         Some(false) => RestError::status("rest_cookie_invalid_nonce", "Cookie check failed", 403)

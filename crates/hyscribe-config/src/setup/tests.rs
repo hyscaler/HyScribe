@@ -50,6 +50,7 @@ fn literals_are_copied() {
         define('MULTISITE', TRUE);
         define('DISABLE_WP_CRON', true);
         define('ALTERNATE_WP_CRON', false);
+        define('EMPTY_TRASH_DAYS', 7);
         $table_prefix = 'site_';
     "#);
     assert_eq!(
@@ -73,6 +74,7 @@ fn literals_are_copied() {
                 ("MULTISITE", "true"),
                 ("DISABLE_WP_CRON", "true"),
                 ("ALTERNATE_WP_CRON", "false"),
+                ("EMPTY_TRASH_DAYS", "7"),
             ]),
             unread: Vec::new(),
         }
@@ -94,6 +96,7 @@ fn what_only_php_can_tell_is_left_to_ask() {
         defined('MULTISITE') || define('MULTISITE', false);
         define('ALLOW_UNFILTERED_UPLOADS', getenv('UPLOADS') === 'on');
         define('DISABLE_WP_CRON', getenv('CRON'));
+        define('EMPTY_TRASH_DAYS', getenv('DAYS'));
         $table_prefix = getenv('PREFIX');
     "#);
     assert_eq!(
@@ -113,6 +116,7 @@ fn what_only_php_can_tell_is_left_to_ask() {
                 "ALLOW_UNFILTERED_UPLOADS",
                 "MULTISITE",
                 "DISABLE_WP_CRON",
+                "EMPTY_TRASH_DAYS",
             ],
         }
     );
@@ -157,6 +161,20 @@ fn an_empty_charset_is_left_to_the_default() {
     assert!(import(&config).values.is_empty());
     let config = php("define('DB_CHARSET', 'latin1');");
     assert_eq!(import(&config).values, pairs(&[("DB_CHARSET", "latin1")]));
+}
+
+/// `EMPTY_TRASH_DAYS` is copied when it is a whole number of days, as a
+/// number or a string.
+#[test]
+fn empty_trash_days_is_copied_when_a_number() {
+    let days = |value: &str| import(&php(&format!("define('EMPTY_TRASH_DAYS', {value});")));
+    assert_eq!(days("0").values, pairs(&[("EMPTY_TRASH_DAYS", "0")]));
+    assert_eq!(days("'14'").values, pairs(&[("EMPTY_TRASH_DAYS", "14")]));
+    for value in ["-1", "'a week'", "''", "true", "null"] {
+        let import = days(value);
+        assert_eq!(import.values, Vec::new(), "{value}");
+        assert_eq!(import.unread.last(), Some(&"EMPTY_TRASH_DAYS"), "{value}");
+    }
 }
 
 #[test]

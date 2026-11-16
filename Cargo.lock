@@ -628,6 +628,7 @@ dependencies = [
 name = "hyscribe"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "clap",
  "hyscribe-auth",
  "hyscribe-config",
@@ -641,6 +642,7 @@ dependencies = [
  "sqlx",
  "tempfile",
  "tokio",
+ "tower",
 ]
 
 [[package]]

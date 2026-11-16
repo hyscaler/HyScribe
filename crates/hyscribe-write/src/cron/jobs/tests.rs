@@ -355,6 +355,7 @@ async fn each_job_stops_at_a_database_error() {
             let comments = comments::Context {
                 now: ctx.now,
                 home: &ctx.home,
+                empty_trash_days: ctx.constants.empty_trash_days,
             };
             comments::trash_comment(w, comments, 1).await.unwrap();
             update_metadata(w, Meta::Comment, 1, key, &time, &any)
@@ -473,6 +474,7 @@ async fn the_jobs_keep_to_php_s_ages() {
         let comments = comments::Context {
             now: ctx.now,
             home: &ctx.home,
+            empty_trash_days: ctx.constants.empty_trash_days,
         };
         comments::trash_comment(w, comments, 1).await.unwrap();
         let key = "_wp_trash_meta_time";

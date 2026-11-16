@@ -375,22 +375,135 @@ fn servers_refuse_root() {
     }
 }
 
+/// With no configuration the server starts in setup mode, on the address
+/// the environment gives (the wizard itself is tested in `setup::web`).
 #[test]
-fn servers_need_a_configuration() {
+fn servers_without_a_configuration_start_in_setup_mode() {
     let home = tempfile::tempdir().unwrap();
-    let expected = format!("error: {NO_CONFIG}\n");
-    let output = run_with(&["start"], &[], home.path());
-    assert_eq!(output.err, expected);
-    let output = run_with(&[], &[], home.path());
-    assert_eq!(output.err, expected);
-    let output = run_with(&["service", "start"], &[], home.path());
-    assert_eq!(output.err, expected);
-    // Restart stops (nothing runs), then cannot start.
-    let output = run_with(&["service", "restart"], &[], home.path());
-    assert_eq!(output.err, expected);
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = taken.local_addr().unwrap().port().to_string();
+    for args in [&["start"][..], &[]] {
+        let output = run_with(args, &[("PORT", &port)], home.path());
+        assert_eq!(output.code, 1);
+        assert!(
+            output
+                .err
+                .starts_with(&format!("error: cannot listen on 127.0.0.1:{port}: ")),
+            "{}",
+            output.err
+        );
+    }
     // Configuration errors are reported before anything starts.
     let output = run_with(&["start"], &[("DB_NAME", "x")], home.path());
     assert_eq!(output.err, "error: DB_USER is not set\n");
+    let output = run_with(&["service", "restart"], &[("DB_NAME", "x")], home.path());
+    assert_eq!(output.err, "error: DB_USER is not set\n");
+}
+
+/// An open pseudo terminal's answering end.
+fn pty() -> std::fs::File {
+    use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+    let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).unwrap();
+    grantpt(&master).unwrap();
+    unlockpt(&master).unwrap();
+    let name = ptsname(&master, Vec::new()).unwrap();
+    // The master stays open as long as the test runs.
+    std::mem::forget(master);
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(name.to_str().unwrap())
+        .unwrap()
+}
+
+/// At a terminal, a server without a configuration asks where to set up.
+#[test]
+fn a_terminal_is_asked_where_to_set_up() {
+    use std::os::fd::AsFd;
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("hyscribe");
+    let wordpress = dir.path().join("site");
+    std::fs::create_dir(&home).unwrap();
+    std::fs::create_dir_all(wordpress.join("wp-content/uploads")).unwrap();
+    std::fs::write(wordpress.join("wp-config.php"), setup::tests::wp_config("")).unwrap();
+    let env = HashMap::new();
+    let server = child_server();
+    let site = Site {
+        paths: Paths::new(&home),
+        env: &env,
+        euid: USER,
+        server: &server,
+    };
+    let tty = pty();
+    let ask = |answers: &str, tty: Option<std::os::fd::BorrowedFd<'_>>| {
+        let mut out = Vec::new();
+        let mut term = setup::Terminal {
+            input: &mut std::io::Cursor::new(answers.as_bytes().to_vec()),
+            out: &mut out,
+            tty,
+        };
+        let config = server_config(&site, &mut term).map(|config| config.is_some());
+        (config, String::from_utf8(out).unwrap())
+    };
+    let question =
+        "? No .env found. Set up in the browser or in the terminal? [browser/terminal]: ";
+    let (config, out) = ask("maybe\nbrowser\n", Some(tty.as_fd()));
+    assert_eq!(config, Ok(false));
+    assert_eq!(
+        out,
+        format!("{question}  Answer browser or terminal.\n{question}")
+    );
+    let (config, _) = ask("\n", Some(tty.as_fd()));
+    assert_eq!(config, Ok(false));
+    let (config, _) = ask("x\ny\nz\nterminal\n", Some(tty.as_fd()));
+    assert_eq!(
+        config,
+        Err("setup stopped: neither browser nor terminal was chosen".into())
+    );
+    // Not a terminal: setup mode, without a question.
+    let null = std::fs::File::open("/dev/null").unwrap();
+    assert_eq!(
+        ask("terminal\n", Some(null.as_fd())),
+        (Ok(false), String::new())
+    );
+    assert_eq!(ask("terminal\n", None), (Ok(false), String::new()));
+    // The answers can end, or the terminal close, on the way.
+    let ended = Err("setup stopped: the input ended before every question was answered".into());
+    assert_eq!(ask("", Some(tty.as_fd())).0, ended);
+    assert_eq!(ask("terminal\n", Some(tty.as_fd())).0, ended);
+    let mut term = setup::Terminal {
+        input: &mut std::io::Cursor::new(b"maybe\n".to_vec()),
+        out: &mut setup::tests::FailAfter(1),
+        tty: Some(tty.as_fd()),
+    };
+    assert_eq!(server_config(&site, &mut term), Err("closed".into()));
+    // An environment the wizard's .env does not override still counts.
+    let bogus = HashMap::from([("MODE".to_string(), "bogus".to_string())]);
+    let mut out = Vec::new();
+    let answers = format!("terminal\n{}", setup::tests::DEFAULTS);
+    let mut term = setup::Terminal {
+        input: &mut std::io::Cursor::new(answers.into_bytes()),
+        out: &mut out,
+        tty: Some(tty.as_fd()),
+    };
+    let overridden = Site {
+        paths: Paths::new(&home),
+        env: &bogus,
+        euid: USER,
+        server: &server,
+    };
+    assert_eq!(
+        server_config(&overridden, &mut term),
+        Err("MODE is invalid: must be shadow or primary".into())
+    );
+    std::fs::remove_file(home.join(".env")).unwrap();
+    let answers = format!("Terminal\n{}", setup::tests::DEFAULTS);
+    let (config, out) = ask(&answers, Some(tty.as_fd()));
+    assert_eq!(config, Ok(true), "{out}");
+    let wrote = format!("Wrote {} (mode 600)\n", home.join(".env").display());
+    assert!(out.ends_with(&wrote), "{out}");
+    // With .env, nothing is asked.
+    assert_eq!(ask("", Some(tty.as_fd())), (Ok(true), String::new()));
 }
 
 /// The wizard reads standard input (its answers are tested in
@@ -718,4 +831,129 @@ fn cron_run_runs_the_due_events_once() {
         "{}",
         root.err
     );
+    let none = run_with(&["cron", "run"], &[], home);
+    assert_eq!(none.err, "error: no configuration: run ./hyscribe setup\n");
+    let invalid = run_with(&["cron", "run"], &[("DB_NAME", "x")], home);
+    assert_eq!(invalid.err, "error: DB_USER is not set\n");
+}
+
+/// A raw HTTP/1.1 request to the local server, returning the raw response.
+fn http(port: u16, request: &str) -> String {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response
+}
+
+/// `method` of `path` with `cookie` and a form body.
+fn http_form(port: u16, method: &str, path: &str, cookie: &str, form: &str) -> String {
+    http(
+        port,
+        &format!(
+            "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\
+             Cookie: {cookie}\r\nContent-Type: application/x-www-form-urlencoded\r\n\
+             Content-Length: {}\r\n\r\n{form}",
+            form.len()
+        ),
+    )
+}
+
+/// The text after the last `start` in `text`, up to `end`.
+fn between<'a>(text: &'a str, start: &str, end: char) -> &'a str {
+    let at = text.rfind(start).unwrap() + start.len();
+    let rest = text.get(at..).unwrap();
+    rest.get(..rest.find(end).unwrap()).unwrap()
+}
+
+/// Waits until the log in `home` holds `text`, and returns the log.
+fn logged(home: &std::path::Path, text: &str) -> String {
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let log = std::fs::read_to_string(home.join("logs/hyscribe.log")).unwrap_or_default();
+        if log.contains(text) {
+            return log;
+        }
+        assert!(std::time::Instant::now() < deadline, "never logged {text}");
+        std::thread::sleep(hyscribe_service::POLL);
+    }
+}
+
+/// `service start` without `.env` serves the browser wizard, which writes
+/// it; the same process then serves the site.
+#[test]
+fn setup_mode_hands_over_to_the_site() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("hyscribe");
+    let wordpress = dir.path().join("site");
+    std::fs::create_dir(&home).unwrap();
+    std::fs::create_dir_all(wordpress.join("wp-content/uploads")).unwrap();
+    let wp_config = setup::tests::wp_config("");
+    std::fs::write(wordpress.join("wp-config.php"), wp_config).unwrap();
+    let port = site_port(&home);
+    let env: HashMap<String, String> = site_env(&home)
+        .into_iter()
+        .filter(|(key, _)| !key.starts_with("DB_"))
+        .collect();
+    let service = |command: &str, env: &HashMap<String, String>| {
+        let args = ["service", command];
+        run_as(&args, env.clone(), &home, USER, child_server())
+    };
+    let setup = "Setup mode: the address to open and the one-time setup secret are in the log \
+                 (./hyscribe service log)\n";
+    let fresh = || std::fs::remove_file(home.join("logs/hyscribe.log")).unwrap();
+    // Written, `.env` still loses to an environment it does not override.
+    let mut bogus = env.clone();
+    bogus.insert("MODE".into(), "bogus".into());
+    let started = service("start", &bogus);
+    assert!(started.out.ends_with(setup), "{}", started.err);
+    through_the_wizard(&home, port, &wordpress);
+    logged(&home, "error: MODE is invalid: must be shadow or primary");
+    std::fs::remove_file(home.join(".env")).unwrap();
+    fresh();
+    // Stopped in setup mode, as any server is.
+    let started = service("start", &env);
+    assert!(started.out.ends_with(setup), "{}", started.err);
+    logged(&home, "setup secret ");
+    assert_eq!(service("stop", &env).code, 0);
+    logged(&home, "stopped on signal 15");
+    fresh();
+
+    let started = service("start", &env);
+    assert!(started.out.ends_with(setup), "{}", started.err);
+    through_the_wizard(&home, port, &wordpress);
+    logged(
+        &home,
+        &format!("in shadow (read only) mode, listening on http://127.0.0.1:{port}"),
+    );
+    let page = http_get(port, "/?p=1");
+    assert!(page.contains("Hello world!"), "{page}");
+    assert_eq!(service("stop", &env).code, 0);
+}
+
+/// Answers setup mode's pages in `home`, listening on `port`, for the site
+/// in `wordpress`.
+fn through_the_wizard(home: &std::path::Path, port: u16, wordpress: &std::path::Path) {
+    let secret = format!(
+        "Open http://127.0.0.1:{port}/installation/step-1 and enter the one-time setup secret "
+    );
+    let log = logged(home, &secret);
+    let secret = between(&log, &secret, '\n');
+    let page = http_get(port, "/installation/step-1");
+    assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
+    let token = between(&page, "name=\"_csrf\" value=\"", '"');
+    let form = format!("hyscribe_setup_form={token}");
+    let sent = format!("_csrf={token}&secret={secret}");
+    let page = http_form(port, "POST", "/installation/step-1", &form, &sent);
+    assert!(page.starts_with("HTTP/1.1 303 See Other"), "{page}");
+    let session = format!("hyscribe_setup={}", between(&page, "hyscribe_setup=", ';'));
+    let page = http_form(port, "GET", "/installation/step-2", &session, "");
+    let csrf = between(&page, "name=\"_csrf\" value=\"", '"');
+    let sent = format!("_csrf={csrf}&path={}", wordpress.display());
+    let page = http_form(port, "POST", "/installation/step-2", &session, &sent);
+    assert!(page.contains("location: /installation/step-3"), "{page}");
+    let sent = format!("_csrf={csrf}&MODE=shadow&PORT={port}");
+    let page = http_form(port, "POST", "/installation/step-3", &session, &sent);
+    assert!(page.contains("<h1>HyScribe is set up</h1>"), "{page}");
 }

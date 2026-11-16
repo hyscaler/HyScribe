@@ -16,7 +16,7 @@ use super::{Result, wp_clear_scheduled_hook, wp_schedule_single_event};
 use crate::comments::{self, delete_comment};
 use crate::options::{Meta, delete_metadata};
 use crate::posts::{Context, wp_delete_post, wp_publish_post, wp_update_post};
-use crate::{EMPTY_TRASH_DAYS, MYSQL, wp_timezone};
+use crate::{MYSQL, wp_timezone};
 
 const DAY: i64 = 86_400;
 
@@ -46,7 +46,7 @@ pub async fn check_and_publish_future_post(
 /// than `EMPTY_TRASH_DAYS` deleted, and the trash meta of those since taken
 /// out of it dropped.
 pub async fn wp_scheduled_delete(write: &mut Write<'_>, ctx: &Context) -> Result<()> {
-    let before = ctx.now - DAY * EMPTY_TRASH_DAYS as i64;
+    let before = ctx.now - DAY * i64::from(ctx.constants.empty_trash_days);
     let any = Value::String(Vec::new());
     for id in write.posts_trashed_before(before).await? {
         match write.post(id).await? {
@@ -63,6 +63,7 @@ pub async fn wp_scheduled_delete(write: &mut Write<'_>, ctx: &Context) -> Result
     let context = comments::Context {
         now: ctx.now,
         home: &ctx.home,
+        empty_trash_days: ctx.constants.empty_trash_days,
     };
     for id in write.comments_trashed_before(before).await? {
         match write.comment(id).await? {

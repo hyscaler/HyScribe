@@ -904,3 +904,17 @@ fn checks_refuse_as_php_refuses() {
     let served = answered("administrator", "DELETE", "/wp/v2/posts/94&force=1", "");
     assert_eq!(served.status, 501);
 }
+
+/// Only the posts' and pages' deletes are planned: a synced pattern's is
+/// checked, then not ported.
+#[test]
+fn other_types_plan_no_delete() {
+    let pattern = Post {
+        post_type: "wp_block".into(),
+        ..oracle("", &[]).post(1).unwrap()
+    };
+    let site = changed(Vec::new(), vec![pattern]);
+    let asked = Asked::new("administrator", "DELETE", "/wp/v2/blocks/1", "");
+    let (plan, served) = on(&site, &asked, Outcome::Written(1));
+    assert_eq!((plan, served.status), (None, 501));
+}

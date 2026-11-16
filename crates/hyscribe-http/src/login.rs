@@ -4,6 +4,7 @@
 //! database, with HyScribe's own cookies and sessions (an open question, ADR 0011).
 
 use std::cell::RefCell;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -166,6 +167,10 @@ pub(crate) struct LoginReads<'a> {
     /// A post as a writer action reads it, which capability checks see in
     /// place of the site's.
     pub(crate) action_post: Option<CapPost>,
+    /// The client's address, which the login limits count.
+    client: Option<IpAddr>,
+    /// The accounts whose password was checked, and whether it matched.
+    checked: RefCell<Vec<(u64, bool)>>,
 }
 
 impl<'a> LoginReads<'a> {
@@ -178,6 +183,8 @@ impl<'a> LoginReads<'a> {
             current: (0, Vec::new()),
             profile_user: 0,
             action_post: None,
+            client: None,
+            checked: RefCell::default(),
         }
     }
 
@@ -353,6 +360,17 @@ impl LoginSite for LoginReads<'_> {
         self.user(self.credentials(UserField::Email, email))
     }
 
+    /// A guess the login limits refuse fails as a wrong password would,
+    /// without checking the hash.
+    fn check_password(&self, user: &User, password: &[u8]) -> bool {
+        if !self.site.limiter.allows(self.client, user.id, self.now) {
+            return false;
+        }
+        let matched = hyscribe_auth::check_password(password, &user.pass);
+        self.checked.borrow_mut().push((user.id, matched));
+        matched
+    }
+
     fn can_register(&self) -> bool {
         !Value::String(self.site.raw_option("users_can_register").to_vec()).is_empty()
     }
@@ -429,6 +447,8 @@ pub(crate) struct Asked {
     pub(crate) query: Option<String>,
     pub(crate) headers: HeaderMap,
     pub(crate) form: Value,
+    /// The connection's address.
+    pub(crate) peer: Option<IpAddr>,
 }
 
 /// The login screen's response.
@@ -503,6 +523,7 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     );
     let mut reads = LoginReads::new(site, handle, now);
     reads.profile_user = query.get_str("user_id").map_or(0, Value::to_int);
+    reads.client = crate::comment_post::client_ip(site, &asked.headers, asked.peer);
     if let Some(current) = cookie(&cookies, &names.logged_in())
         .and_then(|cookie| reads.validate(cookie, asked.post, "logged_in"))
     {
@@ -526,7 +547,16 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             let (status, body) = logout(&reads, &names, &request, &mut headers);
             return response(status, headers, body);
         }
-        "login" | "entered_recovery_mode" => login::login(&reads, &request),
+        "login" | "entered_recovery_mode" => {
+            let outcome = login::login(&reads, &request);
+            // A posted password is a guess, whether or not its account exists.
+            let guess = asked.form.get_str("pwd").and_then(Value::as_bytes);
+            if guess.is_some_and(|pwd| !pwd.is_empty()) {
+                site.limiter
+                    .record(reads.client, &reads.checked.borrow(), now);
+            }
+            outcome
+        }
         // What the other actions' forms post is not ported.
         _ if asked.post => return response(StatusCode::NOT_IMPLEMENTED, headers, Vec::new()),
         _ => {
@@ -861,6 +891,8 @@ fn location(
     };
     String::from_utf8_lossy(&wp_sanitize_redirect(&location)).into_owned()
 }
+
+pub(crate) mod limits;
 
 #[cfg(test)]
 mod tests;

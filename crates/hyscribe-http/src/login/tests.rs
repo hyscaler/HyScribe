@@ -57,6 +57,25 @@ async fn send(site: &Arc<Site>, method: &str, uri: &str, cookie: &str, form: &st
         .header(header::USER_AGENT, "Agent/1.0")
         .body(Body::from(form.to_string()))
         .unwrap();
+    reply(site, request).await
+}
+
+/// A login form posted from the connection `peer`, through a proxy that
+/// names `forwarded` as the client.
+async fn post_from(site: &Arc<Site>, peer: &str, forwarded: &str, form: &str) -> Reply {
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/hs-login")
+        .header(header::COOKIE, "hyscribe_test_cookie=WP%20Cookie%20check")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header("x-forwarded-for", forwarded)
+        .extension(crate::Peer(peer.parse().unwrap()))
+        .body(Body::from(form.to_string()))
+        .unwrap();
+    reply(site, request).await
+}
+
+async fn reply(site: &Arc<Site>, request: axum::http::Request<Body>) -> Reply {
     let response = router(Arc::clone(site)).oneshot(request).await.unwrap();
     let status = response.status();
     let headers = response.headers().clone();
@@ -211,6 +230,109 @@ async fn a_login_keeps_a_session_and_sets_its_cookies() {
     assert_eq!((reply.status, reply.body.as_str()), (StatusCode::OK, ""));
     let cookies = all(&reply.headers, header::SET_COOKIE);
     assert!(!cookies[2].contains("expires="));
+}
+
+const WRONG: &str = "log=admin&pwd=wrong&testcookie=1";
+const RIGHT: &str = "log=admin&pwd=reference-only-password&testcookie=1";
+
+/// Past its limit an address's guesses, the right one too, are answered as
+/// PHP answers a wrong password, and an unknown account as always.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_limited_address_is_answered_as_a_wrong_password() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = login_site(Some(dir.path())).await;
+    for _ in 0..5 {
+        let wrong = post_from(&site, "192.0.2.1", "", WRONG).await;
+        assert_eq!(wrong.status, StatusCode::OK);
+    }
+    let limited = post_from(&site, "192.0.2.1", "", RIGHT).await;
+    let expected = golden_page("POST", WRONG, "1", &nonce(&limited.body));
+    assert_eq!((limited.status, limited.body), (StatusCode::OK, expected));
+    let unknown = "log=nobody&pwd=x&testcookie=1";
+    let limited = post_from(&site, "192.0.2.1", "", unknown).await;
+    let fresh = post_from(&site, "192.0.2.2", "", unknown).await;
+    assert!(
+        limited
+            .body
+            .contains("The username <strong>nobody</strong> is not registered")
+    );
+    assert_eq!(limited.body, fresh.body);
+    // An empty password is no guess.
+    for _ in 0..5 {
+        post_from(&site, "192.0.2.3", "", "log=admin&pwd=&testcookie=1").await;
+    }
+    let other = post_from(&site, "192.0.2.3", "", RIGHT).await;
+    assert_eq!(other.status, StatusCode::FOUND);
+}
+
+/// An account guessed at from many addresses is refused from new ones, but
+/// still logs in from an address it logged in from before.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_limited_account_logs_in_where_it_did_before() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = login_site(Some(dir.path())).await;
+    let home = post_from(&site, "198.51.100.1", "", RIGHT).await;
+    assert_eq!(home.status, StatusCode::FOUND);
+    for n in 0..10 {
+        post_from(&site, &format!("192.0.2.{n}"), "", WRONG).await;
+    }
+    let limited = post_from(&site, "203.0.113.1", "", RIGHT).await;
+    let expected = golden_page("POST", WRONG, "1", &nonce(&limited.body));
+    assert_eq!((limited.status, limited.body), (StatusCode::OK, expected));
+    let home = post_from(&site, "198.51.100.1", "", RIGHT).await;
+    assert_eq!(home.status, StatusCode::FOUND);
+}
+
+/// `X-Forwarded-For` names the client only under `BEHIND_PROXY`.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_forwarded_client_is_counted_only_behind_a_proxy() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = login_site(Some(dir.path())).await;
+    for _ in 0..5 {
+        post_from(&site, "192.0.2.1", "203.0.113.9", WRONG).await;
+    }
+    let other_peer = post_from(&site, "192.0.2.2", "203.0.113.9", RIGHT).await;
+    assert_eq!(other_peer.status, StatusCode::FOUND);
+    let same_peer = post_from(&site, "192.0.2.1", "203.0.113.8", RIGHT).await;
+    assert_eq!(same_peer.status, StatusCode::OK);
+    let site = login_site(Some(dir.path())).await;
+    let site = Arc::new(Arc::try_unwrap(site).unwrap().with_proxy(true));
+    for _ in 0..5 {
+        post_from(&site, "192.0.2.1", "198.51.100.1, 203.0.113.9", WRONG).await;
+    }
+    let same_client = post_from(&site, "192.0.2.2", "203.0.113.9", RIGHT).await;
+    assert_eq!(same_client.status, StatusCode::OK);
+    let other_client = post_from(&site, "192.0.2.1", "203.0.113.8", RIGHT).await;
+    assert_eq!(other_client.status, StatusCode::FOUND);
+}
+
+/// A refused guess is never checked: even the right password fails.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_limited_guess_never_reaches_the_hash() {
+    let site = login_site(None).await;
+    let client = Some("192.0.2.1".parse().unwrap());
+    for _ in 0..5 {
+        site.limiter.record(client, &[], now());
+    }
+    let handle = Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let mut reads = LoginReads::new(&site, handle, now());
+        let user = User {
+            id: 1,
+            pass: md5(b"right").into_bytes(),
+            use_ssl: false,
+            activation_key: Vec::new(),
+        };
+        reads.client = client;
+        assert!(!LoginSite::check_password(&reads, &user, b"right"));
+        assert!(reads.checked.borrow().is_empty());
+        reads.client = Some("192.0.2.2".parse().unwrap());
+        assert!(LoginSite::check_password(&reads, &user, b"right"));
+        assert!(!LoginSite::check_password(&reads, &user, b"wrong"));
+        assert_eq!(*reads.checked.borrow(), [(1, true), (1, false)]);
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

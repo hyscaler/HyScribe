@@ -27,9 +27,6 @@ struct Contribution {
     weights: Vec<f32>,
 }
 
-/// ImageMagick's `MagickEpsilon`.
-const EPSILON: f64 = 1.0e-12;
-
 /// The triangle filter, `max( 0, 1 - |x| )`.
 fn triangle(x: f64) -> f64 {
     (1.0 - x.abs()).max(0.0)
@@ -51,7 +48,8 @@ fn contributions(from: usize, to: usize) -> Vec<Contribution> {
     let scale = (1.0 / factor).max(1.0);
     (0..to)
         .map(|x| {
-            let bisect = (x as f64 + 0.5) / factor + EPSILON;
+            // ImageMagick adds 1e-12, which moves only weights of 0.
+            let bisect = (x as f64 + 0.5) / factor;
             let (start, stop) = window(bisect, scale, from);
             let weights: Vec<f64> = (start..stop)
                 .map(|n| triangle((n as f64 - bisect + 0.5) / scale))

@@ -274,7 +274,7 @@ async fn unported(database: &str, requests: &'static [(&str, &str, &str)]) {
 #[tokio::test]
 async fn posts_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/posts.tsv");
-    replay("wordpress", golden, false, 6 * 102, &[]).await;
+    replay("wordpress", golden, false, 6 * 103, &[]).await;
     unported(
         "wordpress",
         &[

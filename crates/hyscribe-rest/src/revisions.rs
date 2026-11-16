@@ -501,7 +501,7 @@ fn prepare(
     let data: Vec<(Key, Value)> = filter_by_context(data, &properties, &shown)
         .into_iter()
         .map(|(name, value)| match value {
-            Value::Array(found) if name.to_php_string() != b"meta" => {
+            Value::Array(found) => {
                 let property = name.to_php_string();
                 let own = own_properties.iter().any(|(n, _)| n.as_bytes() == property);
                 let parts = match (kind, property.as_slice()) {

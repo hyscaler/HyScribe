@@ -240,7 +240,7 @@ fn posts_match_php() {
     replay(
         include_str!("../../tests/golden/posts.tsv"),
         (false, false),
-        6 * 102,
+        6 * 103,
         &[],
     );
 }

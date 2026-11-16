@@ -144,6 +144,7 @@ GET	/?rest_route=/wp/v2/posts&categories=x	default
 GET	/?rest_route=/wp/v2/posts&categories[bogus]=1	default
 GET	/?rest_route=/wp/v2/posts&categories[operator]=NOT	default
 GET	/?rest_route=/wp/v2/posts&categories[include_children]=0&_fields=id	default
+GET	/?rest_route=/wp/v2/posts&categories=1&tax_relation=OR&_fields=id	default
 GET	/?rest_route=/wp/v2/posts&tags_exclude[terms][]=x	default
 GET	/?rest_route=/wp/v2/posts&categories=1&tags_exclude=999&tax_relation=AND&_fields=id	default
 GET	/?rest_route=/wp/v2/posts&categories=33&orderby=id&per_page=50&_fields=id	ttd

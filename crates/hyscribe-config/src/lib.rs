@@ -124,14 +124,17 @@ pub struct Server {
     pub behind_proxy: bool,
 }
 
-/// The `wp-config.php` constants capability checks read, as `.env` keys of
-/// the same names; a missing key takes the safer value.
+/// The `wp-config.php` constants HyScribe reads, as `.env` keys of the same
+/// names; a missing key takes the safer value, or WordPress's default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Constants {
     /// `DISALLOW_UNFILTERED_HTML`, default true.
     pub disallow_unfiltered_html: bool,
     /// `ALLOW_UNFILTERED_UPLOADS`, default false.
     pub allow_unfiltered_uploads: bool,
+    /// `EMPTY_TRASH_DAYS`, default 30: posts and comments go to the trash
+    /// before they are deleted unless it is 0.
+    pub empty_trash_days: u32,
 }
 
 impl Default for Constants {
@@ -139,6 +142,7 @@ impl Default for Constants {
         Constants {
             disallow_unfiltered_html: true,
             allow_unfiltered_uploads: false,
+            empty_trash_days: 30,
         }
     }
 }
@@ -308,17 +312,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         charset: get("DB_CHARSET").unwrap_or("utf8mb4").to_string(),
     };
 
-    let bind_host = match get("BIND_HOST") {
-        Some(value) => value
-            .parse()
-            .map_err(|_| invalid("BIND_HOST", "not an IP address"))?,
-        None => IpAddr::from([127, 0, 0, 1]),
-    };
-    let server = Server {
-        bind_host,
-        port: port(get("PORT"), "PORT", 8080)?,
-        behind_proxy: boolean(get("BEHIND_PROXY"), "BEHIND_PROXY")?,
-    };
+    let server = server(values)?;
 
     let mode = match get("MODE") {
         None | Some("shadow") => Mode::Shadow,
@@ -347,6 +341,12 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
             "ALLOW_UNFILTERED_UPLOADS",
             safer.allow_unfiltered_uploads,
         )?,
+        empty_trash_days: match get("EMPTY_TRASH_DAYS") {
+            None => safer.empty_trash_days,
+            Some(days) => days
+                .parse()
+                .map_err(|_| invalid("EMPTY_TRASH_DAYS", "must be a number of days, 0 or more"))?,
+        },
     };
 
     let limits = LoginLimits::default();
@@ -384,6 +384,27 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         constants,
         login_limits,
         upload_max_size,
+    })
+}
+
+/// The HTTP listener settings of `values`, which setup mode listens on too.
+pub fn server(values: &HashMap<String, String>) -> Result<Server, ConfigError> {
+    let get = |key: &str| {
+        values
+            .get(key)
+            .map(String::as_str)
+            .filter(|v| !v.is_empty())
+    };
+    let bind_host = match get("BIND_HOST") {
+        Some(value) => value
+            .parse()
+            .map_err(|_| invalid("BIND_HOST", "not an IP address"))?,
+        None => IpAddr::from([127, 0, 0, 1]),
+    };
+    Ok(Server {
+        bind_host,
+        port: port(get("PORT"), "PORT", 8080)?,
+        behind_proxy: boolean(get("BEHIND_PROXY"), "BEHIND_PROXY")?,
     })
 }
 

@@ -578,6 +578,7 @@ async fn the_configuration_sets_the_capability_constants() {
         let constants = hyscribe_config::Constants {
             disallow_unfiltered_html,
             allow_unfiltered_uploads,
+            ..hyscribe_config::Constants::default()
         };
         site.with_constants(constants)
     };

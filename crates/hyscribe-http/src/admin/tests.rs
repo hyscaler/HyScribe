@@ -1526,6 +1526,7 @@ async fn dashboard_data() {
     let open = hyscribe_config::Constants {
         disallow_unfiltered_html: false,
         allow_unfiltered_uploads: true,
+        ..hyscribe_config::Constants::default()
     };
     let ttd = ttd.with_constants(open);
     let handle = Handle::current();

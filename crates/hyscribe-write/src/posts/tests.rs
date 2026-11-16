@@ -1006,6 +1006,60 @@ async fn what_php_refuses_is_refused() {
     assert!(matches!(Error::from(err), Error::Db(_)));
 }
 
+/// Navigation menus and synced patterns, whose rows the REST goldens check
+/// (`rest-navigation-*`, `rest-blocks-*`): a pattern with nothing in it is
+/// refused as a post is, a menu is not, and both are core types, whose
+/// GUIDs follow the posts' permalink structure, their slugs unique per type;
+/// a pattern in a category is not deleted, as its categories are not ported.
+#[tokio::test]
+async fn navigation_menus_and_patterns() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let empty = |post_type: &str| PostArgs {
+        post_type: post_type.into(),
+        title: Vec::new(),
+        content: Vec::new(),
+        ..oracle_post("publish")
+    };
+    assert!(invalid(
+        insert_rolled_back(empty("wp_block")).await,
+        "empty_content"
+    ));
+    for post_type in ["wp_navigation", "wp_block"] {
+        let (post, typed, id) = rolled_back(async |w, ctx| {
+            set(w, "permalink_structure", b"/%postname%/").await?;
+            let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+            let args = PostArgs {
+                post_type: post_type.into(),
+                ..oracle_post("publish")
+            };
+            let typed = wp_insert_post(w, ctx, args).await?;
+            Ok((w.post(id).await?, w.post(typed).await?, typed))
+        })
+        .await
+        .unwrap();
+        let (post, typed) = (post.unwrap(), typed.unwrap());
+        assert!(post.guid.ends_with(b"/a-write-oracle-post/"), "{post_type}");
+        assert_eq!(typed.guid, post.guid, "{post_type} {id}");
+        assert_eq!(typed.comment_status, "closed", "{post_type}");
+    }
+    assert!(insert_rolled_back(empty("wp_navigation")).await.is_ok());
+    // A pattern's categories are not ported, so one in a category stays.
+    let categorised = rolled_back(async |w, ctx| {
+        let args = PostArgs {
+            post_type: "wp_block".into(),
+            ..oracle_post("publish")
+        };
+        let id = wp_insert_post(w, ctx, args).await?;
+        let term = w.insert_term(b"Headers", b"headers", 0).await?;
+        let taxonomy = (term, "wp_pattern_category");
+        let term_taxonomy = w.insert_term_taxonomy(taxonomy, b"", 0).await?;
+        w.add_relationship(id, term_taxonomy).await?;
+        wp_delete_post(w, ctx, id, true).await
+    })
+    .await;
+    assert!(unported(categorised));
+}
+
 #[tokio::test]
 async fn what_hyscribe_does_not_port_is_refused() {
     let _one = ONE_AT_A_TIME.lock().await;
@@ -1848,6 +1902,26 @@ async fn rarer_saves_match_php() {
         "delete-draft-post",
         async |conn| insert(conn, oracle_post("draft")).await,
         delete,
+    )
+    .await;
+    // `EMPTY_TRASH_DAYS` 0 deletes unforced as `wp_delete_post()` forced.
+    let no_trash = Context {
+        constants: hyscribe_config::Constants {
+            empty_trash_days: 0,
+            ..hyscribe_config::Constants::default()
+        },
+        ..admin()
+    };
+    check(
+        "delete-draft-post",
+        async |conn| insert(conn, oracle_post("draft")).await,
+        async |conn, id| {
+            act(writer, conn, &no_trash, async |w, ctx| {
+                wp_delete_post(w, ctx, id, false).await
+            })
+            .await
+            .map(drop)
+        },
     )
     .await;
 }

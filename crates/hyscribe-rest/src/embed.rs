@@ -35,6 +35,8 @@ pub(crate) fn to_data(
         head: false,
         uri: context.uri,
         parameters: false,
+        host: context.host,
+        now: context.now,
     };
     let mut cache = Vec::new();
     let mut embed = |item| embed_links(&inner, item, rels.as_deref(), &mut cache);
@@ -138,7 +140,7 @@ pub(crate) fn serve(context: &Context, href: &[u8]) -> Result<Value, NotPorted> 
         get,
         ..Params::default()
     };
-    let response = dispatch(context, ("GET", route), (params, true), None)?;
+    let response = dispatch(context, ("GET", route), (params, None), None)?;
     Ok(response.into_data())
 }
 

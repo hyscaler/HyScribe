@@ -16,10 +16,6 @@ use hyscribe_render::date::{Zone, site_zone};
 use hyscribe_render::formatting::sanitize_text_field;
 use hyscribe_render::kses::wp_kses_data;
 
-/// `EMPTY_TRASH_DAYS`: WordPress's default, until it is a `.env` key.
-/// Posts and comments go to the trash before they are deleted unless it is 0.
-pub const EMPTY_TRASH_DAYS: u64 = 30;
-
 pub mod caps;
 pub mod comments;
 pub mod cron;

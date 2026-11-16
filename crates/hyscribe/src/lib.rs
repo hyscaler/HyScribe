@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use hyscribe_auth::sessions::Sessions;
-use hyscribe_config::{Config, Mode};
+use hyscribe_config::{Config, ConfigError, Mode};
 use hyscribe_service::{Paths, Spawn, Status};
 
 /// Source code location, offered to every user as AGPL section 13 requires.
@@ -25,9 +25,6 @@ pub const START_TIMEOUT: Duration = Duration::from_secs(30);
 pub const STOP_GRACE: Duration = Duration::from_secs(15);
 /// Exit code of `service status` when nothing runs, as in LSB init scripts.
 pub const EXIT_NOT_RUNNING: u8 = 3;
-
-const NO_CONFIG: &str = "no configuration: run ./hyscribe setup, or copy .env.example to .env, \
-                         fill it in and chmod 600 it";
 
 #[derive(Debug, Parser)]
 #[command(name = "hyscribe", about = "Rust drop-in replacement for WordPress")]
@@ -44,7 +41,7 @@ enum Command {
     /// Run the server in the foreground.
     Start,
     /// Write .env in the terminal: read an existing site's wp-config.php,
-    /// check the database and choose the mode.
+    /// check the database and choose the mode and the network.
     Setup,
     /// Run the server as a background service.
     Service {
@@ -142,22 +139,22 @@ pub fn run(ctx: Context<'_>) -> u8 {
         euid,
         server: &server,
     };
+    let mut term = setup::Terminal {
+        input,
+        out: &mut *out,
+        tty: terminal,
+    };
     let result = match cli.command.unwrap_or(Command::Start) {
         Command::Version => Ok(Reply::text(version())),
         Command::Config {
             command: ConfigCommand::Check { dir },
         } => config_check(dir.as_ref().unwrap_or(&home), &env).map(Reply::text),
-        Command::Start => serve(&site, out),
+        Command::Start => serve(&site, &mut term),
         // The `.env` it writes would be root's, which no server may run as.
-        Command::Setup => refuse_root(euid).and_then(|()| {
-            let mut terminal = setup::Terminal {
-                input,
-                out: &mut *out,
-                tty: terminal,
-            };
-            setup::run(&home, &mut terminal).map(Reply::text)
-        }),
-        Command::Service { command } => service(command, &site, out),
+        Command::Setup => {
+            refuse_root(euid).and_then(|()| setup::command(&home, &mut term).map(Reply::text))
+        }
+        Command::Service { command } => service(command, &site, &mut term),
     };
     let written = result.and_then(|reply| {
         out.write_all(reply.text.as_bytes())
@@ -220,12 +217,24 @@ fn refuse_root(euid: u32) -> Result<(), String> {
     }
 }
 
-/// Loads the configuration a server needs before it can run.
-fn server_config(home: &Path, env: &HashMap<String, String>, euid: u32) -> Result<Config, String> {
-    refuse_root(euid)?;
-    hyscribe_config::load(home, env)
-        .map_err(|err| err.to_string())?
-        .ok_or_else(|| NO_CONFIG.to_string())
+/// Loads the configuration a server needs before it can run, `None` for
+/// none yet. Asked at a terminal, the terminal wizard may write it first;
+/// otherwise the server starts in setup mode.
+fn server_config(
+    site: &Site<'_>,
+    term: &mut setup::Terminal<'_>,
+) -> Result<Option<Config>, String> {
+    refuse_root(site.euid)?;
+    let home = site.paths.home();
+    let config = hyscribe_config::load(home, site.env).map_err(|err| err.to_string())?;
+    if config.is_some() || !term.interactive() || !term.in_terminal()? {
+        return Ok(config);
+    }
+    // No `.env` to keep, so the wizard writes one.
+    let written = setup::run(home, term)?;
+    let written = written.map(|path| format!("Wrote {} (mode 600)\n", path.display()));
+    term.say(&written.unwrap_or_default())
+        .and_then(|()| hyscribe_config::load(home, site.env).map_err(|err| err.to_string()))
 }
 
 /// The installation the admin describes: `binary`, and what `.env` sets.
@@ -239,9 +248,11 @@ fn install(config: &Config, binary: &Path) -> hyscribe_http::Install {
     }
 }
 
-/// `hyscribe start`: serves the site until SIGTERM or SIGINT.
-fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
-    let config = server_config(site.paths.home(), site.env, site.euid)?;
+/// `hyscribe start`: serves the site until SIGTERM or SIGINT, after setup
+/// mode when there is no configuration yet.
+fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, String> {
+    let config = server_config(site, term)?;
+    let out = &mut *term.out;
     let (mut shutdown, lock) =
         hyscribe_service::claim(&site.paths).map_err(|err| err.to_string())?;
     // The blocking signal wait runs on its own thread and wakes the server.
@@ -256,8 +267,23 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
         .enable_all()
         .build()
         .map_err(failed("cannot start the runtime".into()));
+    let home = site.paths.home();
     runtime.and_then(|runtime| {
         runtime.block_on(async {
+            let mut stopped = stopped;
+            let config = match config {
+                Some(config) => config,
+                None => match setup_mode(home, site.env, out, &mut stopped, SETUP_TIMEOUT).await? {
+                    // An `.env` gone again since is no configuration.
+                    Ended::Written => hyscribe_config::load(home, site.env)
+                        .and_then(|config| config.ok_or(ConfigError::Missing("DB_NAME")))
+                        .map_err(|err| err.to_string())?,
+                    Ended::Stopped(number) => {
+                        seen.store(number, std::sync::atomic::Ordering::SeqCst);
+                        return Ok(());
+                    }
+                },
+            };
             let db = hyscribe_db::Db::connect(&config.database)
                 .await
                 .map_err(|err| format!("cannot connect to the database: {err}"))?;
@@ -314,10 +340,10 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
 
 /// The writer of `mode`, none in shadow mode (ADR 0010), with a log line
 /// for each write it refuses: tables that cannot roll back, a `db_version` it does not write to.
-async fn open_writer(
+async fn open_writer<W: Write + ?Sized>(
     database: &hyscribe_config::Database,
     mode: Mode,
-    out: &mut dyn Write,
+    out: &mut W,
 ) -> Result<Option<hyscribe_db::Writer>, String> {
     let writer = hyscribe_db::Writer::open(database, mode)
         .await
@@ -335,11 +361,22 @@ fn failed(context: String) -> impl FnOnce(std::io::Error) -> String {
     move |err| format!("{context}: {err}")
 }
 
-fn service(command: ServiceCommand, site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
+fn service(
+    command: ServiceCommand,
+    site: &Site<'_>,
+    term: &mut setup::Terminal<'_>,
+) -> Result<Reply, String> {
     let paths = &site.paths;
     let error = |err: hyscribe_service::Error| err.to_string();
-    let start = || -> Result<String, String> {
-        server_config(site.paths.home(), site.env, site.euid)?;
+    let start = |term: &mut setup::Terminal<'_>| -> Result<String, String> {
+        // Without a configuration the server starts in setup mode.
+        let setup = match server_config(site, term)? {
+            Some(_) => "",
+            None => {
+                "Setup mode: the address to open and the one-time setup secret are in the log \
+                     (./hyscribe service log)\n"
+            }
+        };
         let spawn = Spawn {
             program: site.server.0.clone(),
             args: site.server.1.clone(),
@@ -350,7 +387,10 @@ fn service(command: ServiceCommand, site: &Site<'_>, out: &mut dyn Write) -> Res
                 .collect(),
         };
         let started = hyscribe_service::start(paths, &spawn, START_TIMEOUT).map_err(error)?;
-        Ok(format!("{started}\nlogs: {}\n", paths.log_file().display()))
+        Ok(format!(
+            "{started}\nlogs: {}\n{setup}",
+            paths.log_file().display()
+        ))
     };
     let stop = || {
         hyscribe_service::stop(paths, STOP_GRACE)
@@ -358,12 +398,12 @@ fn service(command: ServiceCommand, site: &Site<'_>, out: &mut dyn Write) -> Res
             .map_err(error)
     };
     match command {
-        ServiceCommand::Start => start().map(Reply::text),
+        ServiceCommand::Start => start(term).map(Reply::text),
         ServiceCommand::Stop => stop().map(Reply::text),
         ServiceCommand::Restart => {
             refuse_root(site.euid)?;
             let stopped = stop()?;
-            Ok(Reply::text(stopped + &start()?))
+            Ok(Reply::text(stopped + &start(term)?))
         }
         ServiceCommand::Status => {
             let status = hyscribe_service::status(paths).map_err(error)?;
@@ -383,7 +423,8 @@ fn service(command: ServiceCommand, site: &Site<'_>, out: &mut dyn Write) -> Res
             lines,
             follow: true,
         } => {
-            hyscribe_service::follow(paths, lines, out, hyscribe_service::POLL).map_err(error)?;
+            hyscribe_service::follow(paths, lines, term.out, hyscribe_service::POLL)
+                .map_err(error)?;
             Ok(Reply::text(String::new()))
         }
         ServiceCommand::Log { lines, .. } => {
@@ -442,6 +483,15 @@ fn describe(config: &Config) -> String {
 }
 
 mod setup;
+
+use setup::web::{Ended, SETUP_TIMEOUT, setup_mode};
+
+/// Parsers of request input that only the fuzz targets in `fuzz/` call
+/// from outside.
+#[doc(hidden)]
+pub mod fuzzing {
+    pub use crate::setup::web::read_form;
+}
 
 #[cfg(test)]
 mod tests;

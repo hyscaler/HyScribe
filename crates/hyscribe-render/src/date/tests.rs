@@ -80,6 +80,28 @@ fn site_zones_like_wp_timezone() {
     assert_eq!(site_zone(b"Europe/\xff", b"1"), Zone::Utc);
 }
 
+/// `wp_timezone_override_offset()`: a named zone's offset at the time, in
+/// hours, and none without a zone that `timezone_open()` opens.
+#[test]
+fn named_zones_override_the_stored_offset() {
+    // 2026-07-01 and 2026-01-01 in New York, in and out of daylight time.
+    assert_eq!(
+        override_offset(b"America/New_York", 1_782_878_400),
+        Some(-4.0)
+    );
+    assert_eq!(
+        override_offset(b"America/New_York", 1_767_243_600),
+        Some(-5.0)
+    );
+    assert_eq!(override_offset(b"Asia/Kathmandu", 0), Some(5.5));
+    assert_eq!(
+        override_offset(b"Asia/Kathmandu", 1_767_243_600),
+        Some(5.75)
+    );
+    assert_eq!(override_offset(b"", 0), None);
+    assert_eq!(override_offset(b"Bogus/Zone", 0), None);
+}
+
 #[test]
 fn strtotime_reads_iso_dates_like_php() {
     // PHP's strtotime() in UTC, for the forms both read.

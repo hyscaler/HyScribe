@@ -99,6 +99,7 @@ pub(super) async fn edit_comment(
     let context = Context {
         now: asked.now,
         home: asked.home.as_bytes(),
+        empty_trash_days: site.constants().empty_trash_days,
     };
     // Through kses unless both the user and the comment's author may post
     // unfiltered HTML.

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `json_decode` against PHP's own `json_decode($json, true)`: for every
-//! case, serializing our result gives PHP's bytes, and errors match.
-//! Goldens come from `reference/blocks/golden.sh`.
+//! case, serializing our result gives PHP's bytes, and errors match
+//! `json_last_error()` and `json_last_error_msg()`. Goldens come from
+//! `reference/blocks/golden.sh`.
 
 // Tests fail by panicking.
 #![allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)]
@@ -14,16 +15,21 @@ fn matches_php_json_decode() {
     let mut failures = Vec::new();
     let mut count = 0;
     for line in golden.lines() {
-        let (input, expected) = line.split_once('\t').unwrap();
-        let (input, expected) = (unhex(input), unhex(expected));
-        let ours = match hyscribe_phpser::json_decode(&input) {
-            Some(value) => hyscribe_phpser::encode(&value),
-            // PHP returns null on errors.
-            None => b"N;".to_vec(),
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [input, expected, code, message] = fields[..] else {
+            panic!("{line}");
         };
-        if ours != expected {
+        let (input, expected) = (unhex(input), unhex(expected));
+        let decoded = hyscribe_phpser::json_decode_checked(&input);
+        let (ours, error) = match &decoded {
+            Ok(value) => (hyscribe_phpser::encode(value), (0, "No error")),
+            // PHP returns null on errors.
+            Err(error) => (b"N;".to_vec(), (error.0, error.message())),
+        };
+        assert_eq!(hyscribe_phpser::json_decode(&input), decoded.ok());
+        if ours != expected || error != (code.parse().unwrap(), message) {
             failures.push(format!(
-                "{:?}\n  php:  {}\n  ours: {}",
+                "{:?}\n  php:  {} {code} {message}\n  ours: {} {error:?}",
                 String::from_utf8_lossy(&input)
                     .chars()
                     .take(80)
@@ -46,5 +52,5 @@ fn matches_php_json_decode() {
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(count, 713);
+    assert_eq!(count, 718);
 }

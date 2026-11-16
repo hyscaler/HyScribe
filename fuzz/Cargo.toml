@@ -13,6 +13,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+hyscribe = { path = "../crates/hyscribe" }
 hyscribe-admin = { path = "../crates/hyscribe-admin" }
 hyscribe-auth = { path = "../crates/hyscribe-auth" }
 hyscribe-phpser = { path = "../crates/hyscribe-phpser" }
@@ -22,6 +23,7 @@ hyscribe-rest = { path = "../crates/hyscribe-rest" }
 hyscribe-model = { path = "../crates/hyscribe-model" }
 hyscribe-http = { path = "../crates/hyscribe-http" }
 hyscribe-html = { path = "../crates/hyscribe-html" }
+hyscribe-image = { path = "../crates/hyscribe-image" }
 hyscribe-kses = { path = "../crates/hyscribe-kses" }
 hyscribe-mail = { path = "../crates/hyscribe-mail" }
 hyscribe-theme-json = { path = "../crates/hyscribe-theme-json" }
@@ -274,8 +276,43 @@ doc = false
 bench = false
 
 [[bin]]
+name = "setup_form"
+path = "fuzz_targets/setup_form.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "text_diff"
 path = "fuzz_targets/text_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "image_header"
+path = "fuzz_targets/image_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "image_iptc"
+path = "fuzz_targets/image_iptc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "image_pipeline"
+path = "fuzz_targets/image_pipeline.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "upload_name"
+path = "fuzz_targets/upload_name.rs"
 test = false
 doc = false
 bench = false

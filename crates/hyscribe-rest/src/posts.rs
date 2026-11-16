@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `WP_REST_Posts_Controller` for posts and pages: `/wp/v2/posts`,
-//! `/wp/v2/pages` and their single items, read only, and for the types
-//! whose controllers extend it. Writes answer 501 but their permission
-//! checks give `Allow` and `targetHints`.
+//! `/wp/v2/pages` and their single items, and for the types whose
+//! controllers extend it. The posts' and pages' writes are planned in
+//! `write`; the other types' answer 501, but their permission checks give
+//! `Allow` and `targetHints`.
 
 pub(crate) mod args;
 mod menu_items;
 pub(crate) mod prepare;
+pub(crate) mod write;
 
-use hyscribe_model::{FormatFilter, OrderBy, Post, PostQuery, StatusFilter};
+use hyscribe_model::{FormatFilter, OrderBy, Post, PostQuery, StatusFilter, TermFilter};
 use hyscribe_phpser::{Value, decode};
 use hyscribe_render::formatting::sanitize_title_for_query;
 use hyscribe_render::rest::Rendering;
@@ -120,16 +122,22 @@ pub(crate) fn type_endpoints(kind: Kind, single: bool) -> Vec<Endpoint> {
                 callback: Some(|c, p| items(c, p, Kind::of(p.route))),
             },
             Endpoint {
-                args: Vec::new(),
+                args: args::save(kind),
                 permission: |c, p| create_permission(c, p, Kind::of(p.route)),
                 callback: None,
             },
         ];
     }
-    let write = |permission| Endpoint {
-        args: vec![args::id()],
+    let write = |args, permission| Endpoint {
+        args,
         permission,
         callback: None,
+    };
+    let ported = matches!(kind, Kind::Post | Kind::Page);
+    let delete = if ported {
+        args::delete()
+    } else {
+        vec![args::id()]
     };
     vec![
         Endpoint {
@@ -137,16 +145,15 @@ pub(crate) fn type_endpoints(kind: Kind, single: bool) -> Vec<Endpoint> {
             permission: |c, p| item_permission(c, p, Kind::of(p.route)),
             callback: Some(|c, p| item(c, p, Kind::of(p.route))),
         },
-        write(|c, p| update_permission(c, p, Kind::of(p.route))),
-        write(|c, p| delete_permission(c, p, Kind::of(p.route))),
+        write([vec![args::id()], args::save(kind)].concat(), |c, p| {
+            update_permission(c, p, Kind::of(p.route))
+        }),
+        write(delete, |c, p| delete_permission(c, p, Kind::of(p.route))),
     ]
 }
 
 /// `get_items_permissions_check()`.
 fn items_permission(context: &Context, params: &Params, kind: Kind) -> Result<(), RestError> {
-    if args::not_ported(kind).any(|name| params.has(name)) {
-        return Err(RestError::not_ported());
-    }
     if params.context() == b"edit" && !context.can(&kind.cap("edit_posts")) {
         let message = "Sorry, you are not allowed to edit posts in this post type.";
         return Err(context.forbidden("rest_forbidden_context", message));
@@ -181,17 +188,23 @@ fn other_author(context: &Context, params: &Params) -> bool {
 }
 
 /// `check_assign_terms_permission()`: each term of the type's taxonomies
-/// the request names, that exists, can be assigned.
+/// the request names, that exists, can be assigned. An empty value, of a
+/// list or of a term query's fields, is `get_term()`'s error, checked as 0.
 fn can_assign_terms(context: &Context, params: &Params, kind: Kind) -> bool {
     kind.taxonomies().iter().all(|(taxonomy, base)| {
-        let ids = match params.get(base) {
-            Some(Value::Array(ids)) => ids.iter().map(|(_, id)| id.to_int()).collect(),
-            Some(id) => vec![id.to_int()],
+        let values = match params.get(base) {
+            Some(Value::Array(values)) => values.iter().map(|(_, v)| v.clone()).collect(),
+            Some(value) => vec![value.clone()],
             None => Vec::new(),
         };
-        ids.into_iter().all(|id| {
-            let id = id.unsigned_abs();
-            context.site.reads().term(id, taxonomy).is_none() || context.can_for("assign_term", id)
+        values.into_iter().all(|value| {
+            // No term has an ID below 1.
+            let id = value.to_int();
+            let found = u64::try_from(id)
+                .ok()
+                .and_then(|id| context.site.reads().term(id, taxonomy));
+            !value.is_empty() && found.is_none()
+                || context.can_for("assign_term", id.unsigned_abs())
         })
     })
 }
@@ -214,11 +227,13 @@ fn create_permission(context: &Context, params: &Params, kind: Kind) -> Result<(
         let message = "Sorry, you are not allowed to make posts sticky.";
         return Err(context.forbidden("rest_cannot_assign_sticky", message));
     }
-    // The terms check after it never fails here: the collection's
-    // `categories` and `tags` are not ported.
     if !context.can(&kind.cap("create_posts")) {
         let message = "Sorry, you are not allowed to create posts as this user.";
         return Err(context.forbidden("rest_cannot_create", message));
+    }
+    if !can_assign_terms(context, params, kind) {
+        let message = "Sorry, you are not allowed to assign the provided terms.";
+        return Err(context.forbidden("rest_cannot_assign_term", message));
     }
     if kind == Kind::Attachment {
         crate::media::create_permission(context, params)?;
@@ -511,6 +526,7 @@ fn query(
         by => by,
     };
     query.order = order_by(&Value::String(by.to_vec()), ascending, &query);
+    query.terms = tax_query(params, kind)?;
     if let Some(search) = search {
         searched(&mut query, &search);
         if orderby == b"relevance" {
@@ -527,6 +543,46 @@ fn query(
         query.sticky = sticky(context);
     }
     Ok((query, page, u32::try_from(per_page).unwrap_or(u32::MAX)))
+}
+
+/// `prepare_tax_query()`: each taxonomy's terms to include and leave out.
+/// Children of terms, every term required and either of several clauses
+/// are not ported.
+fn tax_query(params: &Params, kind: Kind) -> Result<Vec<TermFilter>, RestError> {
+    let mut filters = Vec::new();
+    for (taxonomy, base) in kind.taxonomies() {
+        for (name, exclude) in [(*base, false), (args::exclude_name(base), true)] {
+            let Some(limit) = params.get(name).filter(|limit| !limit.is_empty()) else {
+                continue;
+            };
+            let field = |key: &str| limit.get_str(key).filter(|value| !value.is_empty());
+            let terms = match crate::schema::is_list(limit) {
+                true => Some(limit),
+                false => field("terms"),
+            };
+            let all = !exclude && field("operator").is_some_and(|op| op.as_bytes() == Some(b"AND"));
+            if field("include_children").is_some() || all {
+                return Err(RestError::not_ported());
+            }
+            let terms: Vec<u64> = terms
+                .and_then(Value::as_array)
+                .unwrap_or_default()
+                .iter()
+                .map(|(_, id)| id.to_int().unsigned_abs())
+                .collect();
+            if !terms.is_empty() {
+                filters.push(TermFilter {
+                    taxonomy: (*taxonomy).into(),
+                    terms,
+                    exclude,
+                });
+            }
+        }
+    }
+    if filters.len() > 1 && params.text("tax_relation") == b"OR" {
+        return Err(RestError::not_ported());
+    }
+    Ok(filters)
 }
 
 /// `WP_Query`'s search for `s`, not empty.

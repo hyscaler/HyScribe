@@ -152,6 +152,14 @@ pub struct Refusal {
 /// `wp_die()`'s default title.
 const ERROR: &str = "WordPress &rsaquo; Error";
 
+/// A request whose checks are not ported: answered 501, and no handler runs.
+fn not_ported() -> Refusal {
+    Refusal {
+        status: 501,
+        body: Body::Text(String::new()),
+    }
+}
+
 fn died(status: u16, message: impl Into<String>) -> Refusal {
     Refusal {
         status,
@@ -732,8 +740,8 @@ fn promote(site: &dyn ActionSite, asked: &Asked, me: i64) -> Checked {
     let role = match asked.request("new_role") {
         Some(Value::String(role)) => role.clone(),
         None => Vec::new(),
-        // An array is a fatal error in PHP.
-        Some(_) => return Ok(()),
+        // An array is a fatal error in PHP, which writes nothing.
+        Some(_) => return Err(not_ported()),
     };
     let roles = role_names(&site.user_roles().unwrap_or_default());
     let editable = role == b"none" || roles.iter().any(|(slug, _)| slug.as_bytes() == role);
@@ -780,9 +788,12 @@ fn user_edit(site: &dyn ActionSite, asked: &Asked, profile: bool) -> Option<Chec
     let own = profile || given == me;
     let dismiss = asked.get("dismiss").and_then(Value::as_bytes)
         == Some(format!("{me}_new_email").as_bytes());
-    // A confirmed email change is not ported.
-    let confirmed = own && asked.get("newuseremail").is_some();
-    if asked.action() != b"update" && !(own && dismiss) && !confirmed {
+    // A confirmed email change is not ported. Either branch goes on to an
+    // update only after its own checks, as PHP's does when the hash fails.
+    let update = asked.action() == b"update";
+    let confirmed = own && !update && asked.get("newuseremail").is_some();
+    let dismiss = own && !update && dismiss;
+    if !update && !dismiss && !confirmed {
         return None;
     }
     let id = if given == 0 && own { me } else { given };
@@ -792,7 +803,7 @@ fn user_edit(site: &dyn ActionSite, asked: &Asked, profile: bool) -> Option<Chec
     if confirmed {
         return Some(Ok(()));
     }
-    if own && dismiss {
+    if dismiss {
         return Some(referer(site, asked, &format!("dismiss-{me}_new_email")));
     }
     let id = i64::try_from(id).unwrap_or_default();
@@ -1050,12 +1061,13 @@ pub fn admin_ajax(site: Option<&dyn ActionSite>, asked: &Asked) -> Checked {
             _ => Err(ajax(400, "0")),
         };
     };
-    // The Customizer's actions, registered when it loads.
+    // The Customizer, which checks its own nonce first, is not ported:
+    // none of its requests goes on to a handler.
     if ["wp_customize", "customize_changeset_uuid"]
         .iter()
         .any(|n| asked.request(n).is_some())
     {
-        return Ok(());
+        return Err(not_ported());
     }
     let registered = |given: Option<&Value>, list: &[&str]| {
         given.and_then(Value::as_bytes) == Some(action.as_bytes()) && list.contains(&&*action)

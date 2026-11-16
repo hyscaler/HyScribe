@@ -14,6 +14,7 @@ use sqlx::Row as _;
 use crate::dialect::{Access, Dialect};
 use crate::{Backend, Bind, Columns, DbError, Engine, PrefixSql, Sql, db_error, ids_or_none, list};
 
+mod cron;
 mod meta;
 mod posts;
 mod terms;
@@ -21,8 +22,9 @@ mod terms;
 pub use meta::Meta;
 pub use terms::TermRow;
 
-/// The `db_version`s this release writes to: WordPress 7.0 and 7.1.
-const DB_VERSIONS: std::ops::RangeInclusive<u64> = 61833..=61833;
+/// The `db_version`s this release supports and writes to: WordPress 7.0
+/// and 7.1.
+pub const DB_VERSIONS: std::ops::RangeInclusive<u64> = 61833..=61833;
 
 type Query = sqlx::query::Query<'static, Backend, <Backend as sqlx::Database>::Arguments>;
 
@@ -384,6 +386,12 @@ impl<'w> Write<'w> {
     pub async fn set_post_guid(&mut self, id: u64, guid: &[u8]) -> Result<u64, DbError> {
         let query = self.sql("UPDATE {prefix}posts SET guid = ? WHERE ID = ?");
         self.change(Table::Posts, query.bind(guid).bind(id)).await
+    }
+
+    /// `wp_publish_post()`'s status change.
+    pub async fn set_post_status(&mut self, id: u64, status: &str) -> Result<u64, DbError> {
+        let query = self.sql("UPDATE {prefix}posts SET post_status = ? WHERE ID = ?");
+        self.change(Table::Posts, query.bind(status).bind(id)).await
     }
 
     /// `wp_update_comment_count_now()`'s `UPDATE`.

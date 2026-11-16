@@ -133,13 +133,18 @@ pub(crate) fn regexes() -> impl Iterator<Item = &'static str> {
     table().routes.iter().map(|route| route.regex.as_str())
 }
 
-/// Whether any route matches `path`, as `rest_handle_options_request()`
-/// looks for one.
-pub(crate) fn any_matches(path: &[u8]) -> bool {
-    table()
-        .routes
-        .iter()
-        .any(|route| captures(route, path).is_some())
+/// The first route `path` matches, of every namespace and whatever its
+/// methods, as `rest_handle_options_request()` looks for one; no endpoint
+/// is dispatched.
+pub(crate) fn described(path: &[u8]) -> Option<Matched> {
+    table().routes.iter().find_map(|route| {
+        Some(Matched {
+            params: captures(route, path)?,
+            regex: &route.regex,
+            methods: &route.endpoints,
+            endpoint: 0,
+        })
+    })
 }
 
 #[cfg(test)]

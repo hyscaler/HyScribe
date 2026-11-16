@@ -12,12 +12,12 @@ use std::result::Result as StdResult;
 use crate::terms::Taxonomy;
 use crate::tests::{MISSING, ONE_AT_A_TIME, admin, connection, writer};
 
-fn shown(err: impl std::fmt::Debug) -> String {
+pub(crate) fn shown(err: impl std::fmt::Debug) -> String {
     format!("{err:?}")
 }
 
 /// Runs `f` as one action on the oracle's connection, as `ctx`.
-async fn act<T>(
+pub(crate) async fn act<T>(
     writer: &Writer,
     conn: &mut Connection,
     ctx: &Context,
@@ -31,7 +31,7 @@ async fn act<T>(
 
 /// `$posts_insert( $args )` of actions-posts.php, and actions.php's
 /// `$new_post( $status )` with `status`.
-fn oracle_post(status: &str) -> PostArgs {
+pub(crate) fn oracle_post(status: &str) -> PostArgs {
     PostArgs {
         title: b"A write oracle post".to_vec(),
         content: b"Its content.".to_vec(),
@@ -41,7 +41,7 @@ fn oracle_post(status: &str) -> PostArgs {
     }
 }
 
-async fn insert_post(
+pub(crate) async fn insert_post(
     writer: &Writer,
     conn: &mut Connection,
     args: PostArgs,
@@ -91,7 +91,7 @@ async fn with_comments(writer: &Writer, conn: &mut Connection) -> StdResult<u64,
 }
 
 /// `$posts_future()`.
-fn future_post() -> PostArgs {
+pub(crate) fn future_post() -> PostArgs {
     PostArgs {
         import_id: 900,
         date: "2030-01-01 10:00:00".into(),
@@ -99,7 +99,7 @@ fn future_post() -> PostArgs {
     }
 }
 
-async fn check<T>(
+pub(crate) async fn check<T>(
     golden: &str,
     setup: impl AsyncFnOnce(&mut Connection) -> StdResult<T, String>,
     action: impl AsyncFnOnce(&mut Connection, T) -> StdResult<(), String>,

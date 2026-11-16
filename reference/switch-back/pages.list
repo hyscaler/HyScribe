@@ -1,0 +1,33 @@
+# The screens and pages reference/switch-back/run.sh asks PHP WordPress for
+# once HyScribe has written reference/switch-back/actions.list, and a text
+# each must show (as the HTML has it):
+# user (admin, switchback or visitor)	path	status	text
+admin	/wp-admin/	200	Switch back draft
+admin	/wp-admin/edit.php	200	Hello again
+admin	/wp-admin/edit.php?post_status=draft	200	Switch back draft
+admin	/wp-admin/edit.php?post_type=page	200	Sample Page Edited
+admin	/wp-admin/edit.php?post_type=page&post_status=draft	200	Privacy Policy
+admin	/wp-admin/edit-tags.php?taxonomy=category	200	Switch Category
+admin	/wp-admin/edit-tags.php?taxonomy=post_tag	200	Renamed tag
+admin	/wp-admin/term.php?taxonomy=category&tag_ID=2	200	Described in HyScribe
+admin	/wp-admin/edit-comments.php	200	edited on the screen
+admin	/wp-admin/edit-comments.php?comment_status=moderated	200	A reply edited in Quick Edit.
+admin	/wp-admin/comment.php?action=editcomment&c=2	200	Ann B
+admin	/wp-admin/users.php	200	switchback
+admin	/wp-admin/user-edit.php?user_id=2	200	Edited in HyScribe.
+admin	/wp-admin/profile.php	200	Saved in HyScribe.
+admin	/wp-admin/options-general.php	200	Switch Back Site
+admin	/wp-admin/options-writing.php	200	mail.example.com
+admin	/wp-admin/options-reading.php	200	id="posts_per_rss" value="7"
+admin	/wp-admin/options-discussion.php	200	identicon
+admin	/wp-admin/options-media.php	200	value="160"
+admin	/wp-admin/options-permalink.php	200	/%postname%/
+admin	/wp-admin/options-privacy.php	200	Privacy Policy
+switchback	/wp-admin/profile.php	200	Switcher
+visitor	/	200	Sample Page Edited
+visitor	/hello-again/	200	edited on the screen
+visitor	/category/switch-category/	200	Hello again
+visitor	/tag/bulk-tag/	200	Hello again
+visitor	/feed/	200	Hello again
+visitor	/comments/feed/	200	edited on the screen
+visitor	/tag/switch/	200	Hello again

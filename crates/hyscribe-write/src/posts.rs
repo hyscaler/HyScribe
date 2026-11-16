@@ -12,13 +12,12 @@ use hyscribe_db::{PostFields, Write};
 use hyscribe_phpser::{Key, Value};
 use hyscribe_render::formatting::sanitize_title;
 
-use crate::Error;
 use crate::options::{Meta, delete_metadata, get_metadata, update_metadata};
 use crate::terms::{
     Taxonomy, TermError, TermList, TermRef, wp_set_post_categories, wp_set_post_terms,
 };
+use crate::{Error, cron};
 
-mod cron;
 mod date;
 mod hooks;
 mod link;
@@ -131,6 +130,8 @@ enum Kind {
     Revision,
     /// `wp_global_styles`, which only the theme's first one is created of.
     GlobalStyles,
+    /// A privacy request, which `_wp_personal_data_cleanup_requests()` updates.
+    UserRequest,
 }
 
 impl Kind {
@@ -140,6 +141,7 @@ impl Kind {
             "page" => Ok(Kind::Page),
             "revision" => Ok(Kind::Revision),
             "wp_global_styles" => Ok(Kind::GlobalStyles),
+            "user_request" => Ok(Kind::UserRequest),
             _ => Err(Error::Unported("a post type other than post and page")),
         }
     }
@@ -152,7 +154,7 @@ impl Kind {
     fn taxonomies(self) -> &'static [&'static str] {
         match self {
             Kind::Post => &["category", "post_tag", "post_format"],
-            Kind::Page | Kind::Revision => &[],
+            Kind::Page | Kind::Revision | Kind::UserRequest => &[],
             Kind::GlobalStyles => &["wp_theme"],
         }
     }
@@ -404,6 +406,28 @@ pub async fn block_editor_view(
     Ok(id)
 }
 
+/// `wp_publish_post( $post )`, which cron's `publish_future_post` runs.
+pub async fn wp_publish_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Result<()> {
+    let Some(post) = write.post(id).await? else {
+        return Ok(());
+    };
+    if post.status == "publish" {
+        return Ok(());
+    }
+    // Only categories have a default term on a default install.
+    let kind = Kind::of(&post.post_type)?;
+    if kind == Kind::Post && write.object_terms(id, "category").await?.is_empty() {
+        let default = site::option_int(write, "default_category").await?;
+        if default != 0 {
+            let terms = TermList::List(&[TermRef::Id(default)]);
+            wp_set_post_terms(write, id, terms, Taxonomy::Category, false).await?;
+        }
+    }
+    write.set_post_status(id, "publish").await?;
+    hooks::transition(write, ctx, kind, ("publish", &post.status), id).await?;
+    hooks::save_revision(write, ctx, kind, id).await
+}
+
 /// `sanitize_post( $postarr, 'db' )` with a default install's filters:
 /// kses only for a user who may not post unfiltered HTML.
 fn sanitize(mut args: PostArgs, ctx: &Context) -> Result<PostArgs> {
@@ -631,7 +655,7 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 mod editor_tests;

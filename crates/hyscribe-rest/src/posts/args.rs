@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The arguments `WP_REST_Posts_Controller` registers: the collection's
-//! (`get_collection_params()`) and a single item's.
+//! (`get_collection_params()`), a single item's, and a write's.
 
 use hyscribe_phpser::{Value, json_decode};
+use hyscribe_render::formatting::sanitize_title;
 
 use super::Kind;
 use crate::Context;
@@ -31,7 +32,7 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
         json_decode(br#"{"type":"string","enum":["view","embed","edit"],"default":"view"}"#)
             .unwrap_or(Value::Null);
     // `format` (`date-time`) is not ported: the endpoint answers 501.
-    let date = |name| arg(name, "{}", false, Sanitize::Endpoint);
+    let date = |name| arg(name, "{}", false, Sanitize::NotPorted);
     let mut args = vec![
         context,
         arg(
@@ -118,12 +119,10 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
             r#"{"type":"string","enum":["AND","OR"]}"#,
         ));
     }
-    // `oneOf` is not ported: the endpoint answers 501.
-    args.extend(
-        limits(kind)
-            .iter()
-            .map(|name| arg(name, "{}", false, Sanitize::Endpoint)),
-    );
+    for (_, base) in kind.taxonomies() {
+        args.push(typed(base, &limit_schema(true)));
+        args.push(typed(exclude_name(base), &limit_schema(false)));
+    }
     if kind == Kind::MenuItem {
         args.push(typed("menu_order", r#"{"type":"integer"}"#));
     }
@@ -145,6 +144,77 @@ pub(crate) fn id() -> Arg {
     typed("id", r#"{"type":"integer"}"#)
 }
 
+/// The arguments of a post's or page's create and update,
+/// `get_endpoint_args_for_item_schema()`, none for the other types, whose
+/// writes are not ported. `title`, `content` and `excerpt` are neither
+/// validated nor sanitized, and `meta` is not ported; `status` is validated by
+/// `check_status()` (`write::status_args`), `template` by
+/// `check_template()`, which the empty template alone passes unported.
+pub(super) fn save(kind: Kind) -> Vec<Arg> {
+    const INTEGER: &str = r#"{"type":"integer"}"#;
+    const DATE: &str = r#"{"type":["string","null"],"format":"date-time"}"#;
+    const OPEN: &str = r#"{"type":"string","enum":["open","closed"]}"#;
+    const RAW: &str = r#"{"type":"object","properties":{"raw":{"type":"string"}}}"#;
+    if !matches!(kind, Kind::Post | Kind::Page) {
+        return Vec::new();
+    }
+    let value = |name, schema| arg(name, schema, true, Sanitize::Value);
+    let given = |name| arg(name, RAW, false, Sanitize::Endpoint);
+    let slug = |_: &Context, slug: &Value| Ok(text(sanitize_title(&slug.to_php_string())));
+    let mut args = vec![
+        value("date", DATE),
+        value("date_gmt", DATE),
+        arg("slug", r#"{"type":"string"}"#, true, Sanitize::Site(slug)),
+        value(
+            "status",
+            r#"{"type":"string","enum":["publish","future","draft","pending","private"]}"#,
+        ),
+        value("password", r#"{"type":"string"}"#),
+    ];
+    if kind == Kind::Page {
+        args.push(value("parent", INTEGER));
+    }
+    args.extend([
+        given("title"),
+        given("content"),
+        value("author", INTEGER),
+        given("excerpt"),
+        value("featured_media", INTEGER),
+        value("comment_status", OPEN),
+        value("ping_status", OPEN),
+    ]);
+    args.push(match kind {
+        Kind::Page => value("menu_order", INTEGER),
+        _ => value(
+            "format",
+            r#"{"type":"string","enum":["standard","aside","chat","gallery","link","image","quote","status","video","audio"]}"#,
+        ),
+    });
+    args.push(arg("meta", RAW, false, Sanitize::NotPorted));
+    if kind == Kind::Post {
+        args.push(value("sticky", r#"{"type":"boolean"}"#));
+    }
+    args.push(arg(
+        "template",
+        r#"{"type":"string"}"#,
+        false,
+        Sanitize::Value,
+    ));
+    if kind == Kind::Post {
+        let ids = r#"{"type":"array","items":{"type":"integer"}}"#;
+        args.extend([value("categories", ids), value("tags", ids)]);
+    }
+    args
+}
+
+/// A post's or page's delete: `force`, false unless given.
+pub(super) fn delete() -> Vec<Arg> {
+    vec![
+        id(),
+        typed("force", r#"{"type":"boolean","default":false}"#),
+    ]
+}
+
 /// A single item's arguments for GET.
 pub(super) fn item() -> Vec<Arg> {
     vec![
@@ -155,20 +225,27 @@ pub(super) fn item() -> Vec<Arg> {
     ]
 }
 
-/// The type's arguments that limit it to terms, each taxonomy's.
-fn limits(kind: Kind) -> &'static [&'static str] {
-    match kind {
-        Kind::Post => &["categories", "categories_exclude", "tags", "tags_exclude"],
-        Kind::Block => &["wp_pattern_category", "wp_pattern_category_exclude"],
-        Kind::MenuItem => &["menus", "menus_exclude"],
-        Kind::Page | Kind::Navigation | Kind::Attachment => &[],
+/// The argument that leaves out the terms of the taxonomy `base`.
+pub(super) fn exclude_name(base: &str) -> &'static str {
+    match base {
+        "categories" => "categories_exclude",
+        "tags" => "tags_exclude",
+        "wp_pattern_category" => "wp_pattern_category_exclude",
+        _ => "menus_exclude",
     }
 }
 
-/// The type's arguments whose schemas use keywords not ported.
-pub(super) fn not_ported(kind: Kind) -> impl Iterator<Item = &'static str> {
-    let dates = ["after", "modified_after", "before", "modified_before"];
-    dates.into_iter().chain(limits(kind).iter().copied())
+/// `prepare_taxonomy_limit_schema()`'s schema of a taxonomy's terms, with
+/// `operator` for those to `include`.
+fn limit_schema(include: bool) -> String {
+    let operator = if include {
+        r#","operator":{"type":"string","enum":["AND","OR"],"default":"OR"}"#
+    } else {
+        ""
+    };
+    format!(
+        r#"{{"type":["object","array"],"oneOf":[{{"title":"Term ID List","type":"array","items":{{"type":"integer"}}}},{{"title":"Term ID Taxonomy Query","type":"object","properties":{{"terms":{{"type":"array","items":{{"type":"integer"}},"default":[]}},"include_children":{{"type":"boolean","default":false}}{operator}}},"additionalProperties":false}}]}}"#
+    )
 }
 
 /// `sanitize_post_statuses()`: `wp_parse_slug_list()`, each status but

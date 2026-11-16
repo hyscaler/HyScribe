@@ -10,7 +10,8 @@ use crate::options::{
     Meta, add_metadata, delete_metadata, delete_object_meta, get_metadata, update_option,
 };
 
-use super::{Context, Error, Kind, Result, cron, hooks, site, wp_update_post};
+use super::{Context, Error, Kind, Result, hooks, site, wp_update_post};
+use crate::cron;
 
 const TRASH_STATUS: &str = "_wp_trash_meta_status";
 const TRASH_TIME: &str = "_wp_trash_meta_time";
@@ -230,7 +231,7 @@ pub async fn wp_delete_post(
     };
     let kind = Kind::of(&post.post_type)?;
     let to_trash = !force && crate::EMPTY_TRASH_DAYS != 0;
-    if to_trash && kind != Kind::Revision && post.status != "trash" {
+    if to_trash && matches!(kind, Kind::Post | Kind::Page) && post.status != "trash" {
         return wp_trash_post(write, ctx, id).await;
     }
     // _wp_delete_post_menu_item() deletes the classic menu items to it.

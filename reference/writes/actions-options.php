@@ -95,6 +95,25 @@ $shown = function () use ( $admin, $request ) {
 	get_settings_errors();
 };
 
+// A permalink structure and bases as the Permalinks screen's save sets
+// them, the taxonomies registered again as the next request registers them.
+$permalinks_set = function ( $structure, $category_base = '', $tag_base = '' ) {
+	return function () use ( $structure, $category_base, $tag_base ) {
+		global $wp_rewrite;
+		$wp_rewrite->set_permalink_structure( $structure );
+		$wp_rewrite->set_category_base( $category_base );
+		$wp_rewrite->set_tag_base( $tag_base );
+		create_initial_taxonomies();
+	};
+};
+
+// A view of the Permalinks screen, whose flush_rewrite_rules() refreshes
+// the rules; soft, as the .htaccess a hard flush writes is no row.
+$permalinks_view = function () use ( $admin ) {
+	$admin();
+	flush_rewrite_rules( false );
+};
+
 return array(
 	// Every General field changed: a custom date format, a UTC offset, a new
 	// admin email, which waits for its confirmation, and an HTTPS home on a
@@ -304,5 +323,45 @@ return array(
 			update_option( '_transient_timeout_settings_errors', time() - 60 );
 		},
 		'action' => $shown,
+	),
+	// The Permalinks screen's view under each structure it offers but plain
+	// (whose rules stay empty), the rules left as the default install keeps
+	// them: none.
+	'admin-permalink-view-day'     => array(
+		'setup'  => $permalinks_set( '/%year%/%monthnum%/%day%/%postname%/' ),
+		'action' => $permalinks_view,
+	),
+	'admin-permalink-view-month'   => array(
+		'setup'  => $permalinks_set( '/%year%/%monthnum%/%postname%/' ),
+		'action' => $permalinks_view,
+	),
+	'admin-permalink-view-numeric' => array(
+		'setup'  => $permalinks_set( '/archives/%post_id%' ),
+		'action' => $permalinks_view,
+	),
+	'admin-permalink-view-postname' => array(
+		'setup'  => $permalinks_set( '/%postname%/' ),
+		'action' => $permalinks_view,
+	),
+	'admin-permalink-view-custom'  => array(
+		'setup'  => $permalinks_set( '/%category%/%author%/%postname%/', '/topics', '/labels' ),
+		'action' => $permalinks_view,
+	),
+	// A structure change after rules were stored: numeric permalinks with a
+	// static front page, whose update_home_siteurl() flushes, then post names.
+	'admin-permalink-view-changed' => array(
+		'setup'  => function () use ( $permalinks_set, $admin ) {
+			global $wp_rewrite;
+			$admin();
+			$permalinks_set( '/archives/%post_id%' )();
+			$top = $wp_rewrite->extra_rules_top;
+			update_option( 'show_on_front', 'page' );
+			update_option( 'page_on_front', '2' );
+			// rewrite_rules() merged the old taxonomy rules into extra_rules_top,
+			// which the next request, the view, starts without.
+			$wp_rewrite->extra_rules_top = $top;
+			$permalinks_set( '/%postname%/' )();
+		},
+		'action' => $permalinks_view,
 	),
 );

@@ -412,6 +412,21 @@ async fn any_comment_is_read() {
     assert!(!db.has_comment_types(&["pingback"]).await.unwrap());
 }
 
+/// The fixture's read user may only select; the main user may write.
+#[tokio::test]
+async fn privileges_are_those_of_the_connected_user() {
+    let read = Database {
+        read_user: Some("wordpress_read".into()),
+        read_password: hyscribe_config::Secret::new("reference-only"),
+        ..fixture_config()
+    };
+    let db = Db::connect(&read).await.unwrap();
+    assert_eq!(db.privileges().await.unwrap(), ["SELECT", "USAGE"]);
+    let privileges = fixture().await.privileges().await.unwrap();
+    assert!(privileges.contains(&"INSERT".to_string()), "{privileges:?}");
+    assert!(privileges.contains(&"USAGE".to_string()), "{privileges:?}");
+}
+
 #[tokio::test]
 async fn a_term_s_taxonomy_is_its_only_one() {
     let db = Db::connect(&fixture_config()).await.unwrap();
@@ -720,7 +735,7 @@ fn order_follows_the_query() {
         ..PostQuery::default()
     });
     assert!(lists.text.ends_with(
-        "ORDER BY FIELD(ID, ?, ?, ?) ASC, FIELD(post_parent, ?, ?) DESC, RAND() ASC, RAND(?) DESC LIMIT ? OFFSET ?"
+        "ORDER BY FIELD(ID, ?, ?) ASC, FIELD(post_parent, ?) DESC, RAND() ASC, RAND(?) DESC LIMIT ? OFFSET ?"
     ));
     let ints: Vec<u64> = lists
         .binds
@@ -730,17 +745,13 @@ fn order_follows_the_query() {
             _ => None,
         })
         .collect();
-    // The WHERE parents and IDs (0 first), then the FIELD lists ending in 0.
-    assert_eq!(ints, [2, 0, 5, 3, 5, 3, 0, 2, 0, 7, 0, 0]);
+    // The WHERE parents and IDs (0 first), then the FIELD lists.
+    assert_eq!(ints, [2, 0, 5, 3, 5, 3, 2, 7, 0, 0]);
     let empty = posts_sql(&PostQuery {
         order: vec![(OrderBy::Included, true), (OrderBy::Parents, true)],
         ..PostQuery::default()
     });
-    assert!(
-        empty
-            .text
-            .contains("ORDER BY FIELD(ID, ?) ASC, FIELD(post_parent, ?) ASC")
-    );
+    assert!(empty.text.contains("ORDER BY post_date ASC LIMIT"));
 }
 
 /// `WP_Query`'s `RAND(n)` order of the published posts and pages, as
@@ -1428,6 +1439,79 @@ async fn term_queries_take_the_rest_arguments() {
         ..query
     };
     assert_eq!(db.term_query_count(&elsewhere).await.unwrap(), 0);
+}
+
+/// A term query over several taxonomies finds the terms of each.
+#[tokio::test]
+async fn term_queries_take_several_taxonomies() {
+    let db = named("wordpress_ttd").await;
+    let count = |taxonomy: &str, taxonomies: Vec<String>| TermQuery {
+        taxonomy: taxonomy.into(),
+        taxonomies,
+        order: Some((TermOrder::Name, false)),
+        ..TermQuery::default()
+    };
+    let categories = db.term_query_count(&count("category", Vec::new())).await;
+    let tags = db.term_query_count(&count("post_tag", Vec::new())).await;
+    let both = count("category", vec!["post_tag".into()]);
+    let total = categories.unwrap() + tags.unwrap();
+    assert_eq!(db.term_query_count(&both).await.unwrap(), total);
+    let found = db.term_query(&both).await.unwrap();
+    assert_eq!(found.len() as u64, total);
+}
+
+/// The order of an empty list, for which PHP writes no `FIELD()`: terms
+/// sort by name, and a post order leaves the key out, the date alone.
+#[tokio::test]
+async fn empty_list_orders_sort_as_php() {
+    let db = named("wordpress_ttd").await;
+    let ids = |terms: Vec<Term>| terms.iter().map(|t| t.id).collect::<Vec<_>>();
+    let terms = |order| TermQuery {
+        taxonomy: "category".into(),
+        order: Some((order, true)),
+        limit: Some(5),
+        ..TermQuery::default()
+    };
+    let named = db.term_query(&terms(TermOrder::Name)).await.unwrap();
+    let by_name = ids(named.clone());
+    for order in [TermOrder::Include, TermOrder::Slugs] {
+        let listed = db.term_query(&terms(order)).await.unwrap();
+        assert_eq!(ids(listed), by_name, "{order:?}");
+    }
+    // Lists that are not empty keep their own order, here neither name order.
+    let mut reversed: Vec<u64> = by_name.iter().rev().copied().collect();
+    reversed.swap(0, 1);
+    let included = TermQuery {
+        include: reversed.clone(),
+        order: Some((TermOrder::Include, false)),
+        ..terms(TermOrder::Include)
+    };
+    assert_eq!(ids(db.term_query(&included).await.unwrap()), reversed);
+    let slugged = TermQuery {
+        slugs: reversed
+            .iter()
+            .map(|id| named.iter().find(|t| t.id == *id).unwrap().slug.clone())
+            .collect(),
+        order: Some((TermOrder::Slugs, false)),
+        ..terms(TermOrder::Slugs)
+    };
+    assert_eq!(ids(db.term_query(&slugged).await.unwrap()), reversed);
+    let posts = |order| PostQuery {
+        post_types: vec!["post".into()],
+        order,
+        limit: 5,
+        ..PostQuery::default()
+    };
+    let by_date = db.posts(&posts(vec![(OrderBy::Date, true)])).await.unwrap();
+    for list in [OrderBy::Included, OrderBy::Parents, OrderBy::Names] {
+        let listed = db.posts(&posts(vec![(list, true)])).await.unwrap();
+        assert_eq!(listed, by_date, "{list:?}");
+        let after = db
+            .posts(&posts(vec![(list, false), (OrderBy::Date, true)]))
+            .await
+            .unwrap();
+        assert_eq!(after, by_date, "{list:?}");
+    }
 }
 
 /// The dashboard's comment counts, latest comments and posts by status,
@@ -2316,7 +2400,7 @@ fn mysql_only(sql: &str) -> Option<&'static str> {
 /// of it in the portable text.
 #[test]
 fn the_guard_finds_only_the_dialect() {
-    let pieces: [fn(&mut Sql); 14] = [
+    let pieces: [fn(&mut Sql); 15] = [
         Engine::random,
         |sql| Engine::seeded_random(sql, 1),
         |sql| Engine::list_order(sql, "ID", std::iter::once(Bind::Int(1))),
@@ -2331,6 +2415,7 @@ fn the_guard_finds_only_the_dialect() {
         |sql| Engine::not_matching(sql, "meta_value", "^a$".into()),
         |sql| Engine::rollback_less(sql, std::iter::once(Bind::Text("wp_posts".into()))),
         |sql| Engine::insert_or_update(sql, &["option_value"]),
+        Engine::privileges,
     ];
     for piece in pieces {
         let mut sql = Sql::new("SELECT ");

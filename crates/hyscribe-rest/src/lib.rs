@@ -4,7 +4,9 @@
 //! routes ported so far, pure and synchronous. The site and the current
 //! user are read through [`Site`]; `hyscribe-http` reads the request,
 //! checks the logged in cookie and sends the answer. A request that
-//! reaches a route, method or keyword not ported is answered `501`.
+//! reaches a route, method or keyword not ported is answered `501`. A
+//! ported write is answered in two steps: [`answer`] checks it and gives
+//! the [`Plan`] to write, and [`written`] answers once it is written.
 
 mod comments;
 mod editor;
@@ -27,14 +29,20 @@ mod terms;
 mod types;
 mod users;
 
+use std::sync::OnceLock;
+
 use hyscribe_kses::esc_url_raw;
 use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, Term, TermQuery, User, UserQuery};
-use hyscribe_phpser::{Key, Value, is_empty_string, json_encode, json_encode_pretty, lookup};
+use hyscribe_phpser::{
+    Key, Value, is_empty_string, json_decode, json_encode, json_encode_pretty, lookup,
+};
 use hyscribe_render::site::Site as Reads;
 use hyscribe_render::theme::Theme;
 
-use request::{Arg, Params, defaults, has_valid_params, sanitize_params};
+use request::{Arg, Params, Sanitize, defaults, has_valid_params, sanitize_params};
 use response::{Response, RestError, object, text};
+
+pub use posts::write::{Outcome, Plan, Save, Write};
 
 /// What the REST API reads from the site.
 pub trait Site {
@@ -131,8 +139,37 @@ pub struct Request<'a> {
     pub nonce: Option<&'a [u8]>,
     /// The `X-HTTP-Method-Override` header.
     pub method_override: Option<&'a [u8]>,
-    /// The request has a body that is not a form, which is not read.
-    pub unread_body: bool,
+    /// The `Content-Type` header.
+    pub content_type: Option<&'a [u8]>,
+    /// The body.
+    pub body: &'a [u8],
+}
+
+/// What a request comes to: its answer, or a write to make first.
+pub enum Answer {
+    /// The answer.
+    Served(Served),
+    /// The write the request asks for, its checks passed.
+    Write(Box<Pending>),
+}
+
+impl Answer {
+    /// The answer, if nothing is to be written first.
+    pub fn served(self) -> Option<Served> {
+        match self {
+            Answer::Served(served) => Some(served),
+            Answer::Write(_) => None,
+        }
+    }
+}
+
+/// A write whose checks passed, and what its answer is made from once
+/// it is written.
+pub struct Pending {
+    /// What to write.
+    pub plan: Plan,
+    params: Params,
+    finish: posts::write::Finish,
 }
 
 /// The answer: its status, headers and body.
@@ -148,7 +185,7 @@ pub struct Served {
 
 impl Served {
     /// `501`, for what is not ported.
-    fn not_ported() -> Served {
+    pub fn not_ported() -> Served {
         Served {
             status: 501,
             headers: Vec::new(),
@@ -166,6 +203,21 @@ impl Served {
 
 /// The request reaches what is not ported.
 struct NotPorted;
+
+/// Why dispatching stops before an answer.
+enum Halt {
+    /// What is not ported, answered 501.
+    NotPorted,
+    /// A write to make first.
+    Write(Box<Pending>),
+}
+
+/// An embedded request, a GET, plans no write.
+impl From<Halt> for NotPorted {
+    fn from(_: Halt) -> NotPorted {
+        NotPorted
+    }
+}
 
 /// A request on its way through a route: the site and the current user.
 pub(crate) struct Context<'a> {
@@ -204,6 +256,12 @@ impl Context<'_> {
     /// `rest_url( $path )`.
     pub(crate) fn rest_url(&self, path: &str) -> String {
         self.site.rest_url(path)
+    }
+
+    /// `wp_timezone()`.
+    pub(crate) fn zone(&self) -> hyscribe_render::date::Zone {
+        let option = |name| self.option(name).unwrap_or_default();
+        hyscribe_render::date::site_zone(&option("timezone_string"), &option("gmt_offset"))
     }
 }
 
@@ -278,8 +336,64 @@ const GLOBAL_PARAMETERS: [&str; 8] = [
     "_embed",
 ];
 
-/// `serve_request()`, from `rest_api_loaded()`: the route untrailingslashed.
+/// `serve_request()`, from `rest_api_loaded()`, for a site without a
+/// writer: a write whose checks pass is answered 501.
 pub fn serve(site: &dyn Site, request: &Request) -> Served {
+    answer(site, request)
+        .served()
+        .unwrap_or_else(Served::not_ported)
+}
+
+/// `serve_request()`, from `rest_api_loaded()`: the answer, or the write a
+/// request asks for once its checks pass.
+pub fn answer(site: &dyn Site, request: &Request) -> Answer {
+    run(site, request, None)
+}
+
+/// The answer to `request` once `pending`, which [`answer`] gave for it,
+/// is written: `site` is the site as it is after the write.
+pub fn written(site: &dyn Site, request: &Request, pending: Pending, outcome: Outcome) -> Served {
+    run(site, request, Some((pending, outcome)))
+        .served()
+        .unwrap_or_else(Served::not_ported)
+}
+
+/// A PHP array's entries.
+type Entries = Vec<(Key, Value)>;
+
+/// The request's body as `get_parameter_order()` reads it: the JSON body's
+/// parameters, `None` for JSON PHP refuses or a multipart form, which only
+/// PHP reads, and a form body's, which a method other than POST reads itself.
+fn body_params(request: &Request, method: &str) -> (Option<Entries>, Entries) {
+    let entries = |value: Value| match value {
+        Value::Array(entries) => entries,
+        _ => Vec::new(),
+    };
+    let kind = request::content_type(request.content_type);
+    let empty = is_empty_string(request.body);
+    // A multipart form is read by PHP alone.
+    let multipart = request.method == "POST"
+        && !request.body.is_empty()
+        && kind.as_deref() == Some(b"multipart/form-data");
+    let json = match &kind {
+        _ if multipart => None,
+        Some(kind) if request::is_json(kind) && !empty => {
+            hyscribe_phpser::json_decode(request.body).map(entries)
+        }
+        _ => Some(Vec::new()),
+    };
+    let form = kind
+        .as_deref()
+        .is_none_or(|kind| kind == b"application/x-www-form-urlencoded");
+    let mut post = request.post.to_vec();
+    if method != "POST" && !empty && form {
+        post = request::array_merge(entries(hyscribe_phpser::parse_str(request.body)), post);
+    }
+    (json, post)
+}
+
+/// [`answer`], or with `resumed` the answer once a write is made.
+fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) -> Answer {
     let get = |key| lookup(request.get, key);
     let jsonp = get("_jsonp").filter(|callback| !callback.is_empty());
     let charset =
@@ -306,7 +420,7 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
         ]);
         served.status = 400;
         served.body = encode(&error, false);
-        return served;
+        return Answer::Served(served);
     }
     let end = request
         .route
@@ -319,7 +433,7 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
     let route: &[u8] = if is_empty_string(route) { b"/" } else { route };
     let (method, overridden) = match (get("_method"), request.method_override) {
         (Some(Value::String(method)), _) => (method.to_ascii_uppercase(), false),
-        (Some(_), _) => return Served::not_ported(),
+        (Some(_), _) => return Answer::Served(Served::not_ported()),
         (None, Some(method)) => (method.to_ascii_uppercase(), true),
         (None, None) => (request.method.as_bytes().to_vec(), false),
     };
@@ -352,12 +466,25 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
                 .any(|known| known.as_bytes() == name)
         })
     };
+    let (json, post) = body_params(request, &method);
+    let params = Params {
+        json: json.clone().unwrap_or_default(),
+        post: if body_method(&method) {
+            post
+        } else {
+            Vec::new()
+        },
+        get: request.get.to_vec(),
+        ..Params::default()
+    };
     let context = Context {
         site,
         user,
         head: method == "HEAD",
         uri: request.uri,
-        parameters: request.unread_body || given(request.get) || given(request.post),
+        parameters: [&params.json, &params.post, &params.get]
+            .into_iter()
+            .any(|source| given(source)),
     };
     let response = match verified {
         Some(false) => RestError::status("rest_cookie_invalid_nonce", "Cookie check failed", 403)
@@ -366,9 +493,11 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
             if verified.is_some() {
                 served.send("X-WP-Nonce", site.create_nonce());
             }
-            match dispatch(&context, &method, route, request.get) {
+            let readable = json.is_some();
+            match dispatch(&context, (&method, route), (params, readable), resumed) {
                 Ok(response) => response,
-                Err(NotPorted) => return Served::not_ported(),
+                Err(Halt::NotPorted) => return Answer::Served(Served::not_ported()),
+                Err(Halt::Write(pending)) => return Answer::Write(pending),
             }
         }
     };
@@ -387,7 +516,7 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
                 .collect();
             let status = Value::Int(i64::from(response.status));
             let Ok(body) = embed::to_data(&context, response, embed.as_ref()) else {
-                return Served::not_ported();
+                return Answer::Served(Served::not_ported());
             };
             let envelope = object([
                 ("body", body),
@@ -434,10 +563,10 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
         served.send("Vary", "Origin");
     }
     if method == "HEAD" {
-        return served;
+        return Answer::Served(served);
     }
     let Ok(data) = embed::to_data(&context, response, embed.as_ref()) else {
-        return Served::not_ported();
+        return Answer::Served(Served::not_ported());
     };
     let json = encode(
         &data,
@@ -457,7 +586,12 @@ pub fn serve(site: &dyn Site, request: &Request) -> Served {
         .concat(),
         None => json,
     };
-    served
+    Answer::Served(served)
+}
+
+/// The methods `get_parameter_order()` reads a body's parameters for.
+fn body_method(method: &str) -> bool {
+    matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
 }
 
 /// The permission checks of a matched route's endpoints and the endpoint
@@ -547,66 +681,172 @@ pub(crate) fn self_link_with(
 
 /// `dispatch()` with the filters core adds: OPTIONS requests, the route's
 /// arguments checked, its permission and callback, then the `Allow`
-/// header and `_fields`.
+/// header and `_fields`; with `resumed`, the answer of a write once made.
 fn dispatch(
     context: &Context,
-    method: &str,
-    route: &[u8],
-    get: &[(Key, Value)],
-) -> Result<Response, NotPorted> {
-    let params = Params {
-        get: get.to_vec(),
-        ..Params::default()
-    };
+    (method, route): (&str, &[u8]),
+    (params, readable): (Params, bool),
+    resumed: Option<(Pending, Outcome)>,
+) -> Result<Response, Halt> {
     if method == "OPTIONS" {
-        // `rest_handle_options_request()`: a route's description is not
-        // ported.
-        if routes::any_matches(route) {
-            return Err(NotPorted);
-        }
-        return Ok(Response::new(
-            fields::filter_fields(Value::Array(Vec::new()), &params),
-            200,
+        // `rest_handle_options_request()`: the description of the first
+        // route matched, with its URL parameters unchecked.
+        let Some(matched) = routes::described(route) else {
+            let data = fields::filter_fields(Value::Array(Vec::new()), &params);
+            return Ok(Response::new(data, 200));
+        };
+        let permissions: Vec<Permission> = endpoints(matched.regex)
+            .ok_or(Halt::NotPorted)?
+            .iter()
+            .map(|endpoint| endpoint.permission)
+            .collect();
+        let params = Params {
+            route: matched.regex,
+            url: matched.params,
+            ..params
+        };
+        let response = Response::new(describe(context, matched.regex), 200);
+        return Ok(finish(
+            context,
+            response,
+            &permissions,
+            matched.methods,
+            &params,
         ));
     }
     let Some(matched) = routes::match_request(method, route) else {
         let message = "No route was found matching the URL and request method.";
         return Ok(RestError::status("rest_no_route", message, 404).into_response());
     };
-    let (permissions, endpoint) = ported(&matched).ok_or(NotPorted)?;
-    // A write's arguments are not ported: one given any is not answered,
-    // and one given none is checked, then answered 501.
-    let callback = match endpoint.callback {
-        None if context.parameters => return Err(NotPorted),
-        None => |_: &Context, _: &Params| Err(RestError::not_ported()),
-        Some(callback) => callback,
+    let (permissions, endpoint) = ported(&matched).ok_or(Halt::NotPorted)?;
+    let (answered, params) = match resumed {
+        Some((pending, outcome)) => {
+            let mut params = pending.params;
+            let answered = (pending.finish)(context, &mut params, pending.plan, outcome);
+            (answered, params)
+        }
+        None => checked(context, &matched, endpoint, params, readable)?,
     };
+    if answered
+        .as_ref()
+        .is_err_and(|error| error.code == response::NOT_PORTED)
+    {
+        return Err(Halt::NotPorted);
+    }
+    let response = answered.unwrap_or_else(RestError::into_response);
+    Ok(finish(
+        context,
+        response,
+        &permissions,
+        matched.methods,
+        &params,
+    ))
+}
+
+/// The filters after dispatching: the `Allow` header, then `_fields`.
+fn finish(
+    context: &Context,
+    mut response: Response,
+    permissions: &[Permission],
+    methods: &'static [Vec<String>],
+    params: &Params,
+) -> Response {
+    let allowed = allowed(context, permissions, methods, params);
+    if !allowed.is_empty() {
+        response.header("Allow", &allowed.join(", "));
+    }
+    if !response.is_error() {
+        response.data = fields::filter_fields(response.data, params);
+    }
+    response
+}
+
+/// The description of the route `regex`, as `get_data_for_route()` gives
+/// it in the `help` context, exported by `reference/wordpress/export.sh`.
+fn describe(context: &Context, regex: &str) -> Value {
+    const DESCRIPTIONS: &[u8] =
+        include_bytes!("../../../wordpress/wp-includes/rest-descriptions.json");
+    static DATA: OnceLock<Value> = OnceLock::new();
+    let data = DATA.get_or_init(|| json_decode(DESCRIPTIONS).unwrap_or_default());
+    let description = data.get_str(regex).cloned().unwrap_or_default();
+    placed(description, b"%rest_url%", &|path| context.rest_url(path))
+}
+
+/// `value` with each string that starts with `placeholder` given the URL
+/// `url` makes of the rest, as exported data marks a site's URLs.
+pub(crate) fn placed(value: Value, placeholder: &[u8], url: &dyn Fn(&str) -> String) -> Value {
+    match value {
+        Value::String(string) => match string.strip_prefix(placeholder) {
+            Some(rest) => text(url(&String::from_utf8_lossy(rest))),
+            None => Value::String(string),
+        },
+        Value::Array(entries) => Value::Array(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key, placed(value, placeholder, url)))
+                .collect(),
+        ),
+        value => value,
+    }
+}
+
+/// The request checked by the matched endpoint's arguments and permission,
+/// then its callback's answer, or the write a ported write plans. A body
+/// not `readable`, a multipart form or JSON PHP refuses
+/// (`rest_invalid_json`), is not ported.
+fn checked(
+    context: &Context,
+    matched: &routes::Matched,
+    endpoint: Endpoint,
+    params: Params,
+    readable: bool,
+) -> Result<(Result<Response, RestError>, Params), Halt> {
+    let writing = match endpoint.callback {
+        Some(_) => None,
+        None => posts::write::writing(matched.regex, matched.endpoint),
+    };
+    // The arguments of a write not ported are not ported either: one given
+    // any is not answered, and one given none is checked, then answered 501.
+    if endpoint.callback.is_none() && writing.is_none() && context.parameters || !readable {
+        return Err(Halt::NotPorted);
+    }
     let mut params = Params {
         route: matched.regex,
         url: matched.params.clone(),
         defaults: defaults(&endpoint.args),
         ..params
     };
-    let checked = has_valid_params(&params, &endpoint.args)
-        .and_then(|()| sanitize_params(context, &mut params, &endpoint.args));
-    let answered = checked.and_then(|()| {
-        (endpoint.permission)(context, &params).and_then(|()| callback(context, &params))
-    });
-    if answered
-        .as_ref()
-        .is_err_and(|error| error.code == response::NOT_PORTED)
-    {
-        return Err(NotPorted);
+    let mut args = endpoint.args;
+    let unported = |arg: &Arg| matches!(arg.sanitize, Sanitize::NotPorted) && params.has(arg.name);
+    if args.iter().any(unported) {
+        return Err(Halt::NotPorted);
     }
-    let mut response = answered.unwrap_or_else(RestError::into_response);
-    let allowed = allowed(context, &permissions, matched.methods, &params);
-    if !allowed.is_empty() {
-        response.header("Allow", &allowed.join(", "));
+    if let Some(writing) = &writing {
+        if (writing.unported)(&params) {
+            return Err(Halt::NotPorted);
+        }
+        args = (writing.args)(context, &params, args);
     }
-    if !response.is_error() {
-        response.data = fields::filter_fields(response.data, &params);
-    }
-    Ok(response)
+    let checked = has_valid_params(&params, &args)
+        .and_then(|()| sanitize_params(context, &mut params, &args))
+        .and_then(|()| (endpoint.permission)(context, &params));
+    let answered = match (endpoint.callback, writing) {
+        (Some(callback), _) => checked.and_then(|()| callback(context, &params)),
+        (None, Some(writing)) => match checked.and_then(|()| (writing.plan)(context, &params)) {
+            Ok(plan) => {
+                let finish = writing.finish;
+                let pending = Pending {
+                    plan,
+                    params,
+                    finish,
+                };
+                return Err(Halt::Write(Box::new(pending)));
+            }
+            Err(error) => Err(error),
+        },
+        (None, None) => checked.and_then(|()| Err(RestError::not_ported())),
+    };
+    Ok((answered, params))
 }
 
 #[cfg(test)]

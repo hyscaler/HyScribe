@@ -240,7 +240,7 @@ fn posts_match_php() {
     replay(
         include_str!("../../tests/golden/posts.tsv"),
         (false, false),
-        6 * 89,
+        6 * 103,
         &[],
     );
 }
@@ -252,12 +252,13 @@ fn theme_test_data_posts_match_php() {
     replay(
         include_str!("../../tests/golden/posts-ttd.tsv"),
         (true, false),
-        6 * 39,
+        6 * 42,
         &TTD_UNPORTED,
     );
 }
 
-/// Writes answer 501 once allowed or given arguments, as do arguments of
+/// Writes answer 501 once allowed without a writer (`serve()`), and those
+/// not ported when given arguments, as do arguments of
 /// keywords not ported and content PHP would write caches of or that uses
 /// the duotone filter: `(fixture is TTD, who, method, target)`.
 #[test]
@@ -269,13 +270,25 @@ fn writes_and_unported_content_answer_501() {
             false,
             "visitor",
             "DELETE",
-            "/?rest_route=/wp/v2/pages/2&force=1",
+            "/?rest_route=/wp/v2/blocks/1&force=1",
         ),
         (
             false,
             "visitor",
             "GET",
-            "/?rest_route=/wp/v2/posts&categories=1",
+            "/?rest_route=/wp/v2/posts&categories[terms]=1&categories[include_children]=1",
+        ),
+        (
+            false,
+            "visitor",
+            "GET",
+            "/?rest_route=/wp/v2/posts&categories[terms]=1&categories[operator]=AND",
+        ),
+        (
+            false,
+            "visitor",
+            "GET",
+            "/?rest_route=/wp/v2/posts&categories=1&tags=2&tax_relation=OR",
         ),
         (
             false,
@@ -308,6 +321,7 @@ fn writes_and_unported_content_answer_501() {
             status: 501,
             headers: Vec::new(),
             body: Vec::new(),
+            sent: Vec::new(),
         };
         assert_eq!(
             serve_case(&case, ttd, false).status,
@@ -345,7 +359,8 @@ fn revisions_are_linked() {
         origin: None,
         nonce: None,
         method_override: None,
-        unread_body: false,
+        content_type: None,
+        body: b"",
     };
     let body = String::from_utf8(serve(&oracle, &request).body).unwrap();
     let base =
@@ -395,7 +410,8 @@ fn served(who: &'static str, target: &str, ttd: bool, deny: &'static [&'static s
         origin: None,
         nonce: (user != 0).then_some(b"%nonce%"),
         method_override: None,
-        unread_body: false,
+        content_type: None,
+        body: b"",
     };
     serve(&oracle, &request)
 }

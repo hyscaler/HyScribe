@@ -19,6 +19,7 @@ mod people;
 mod posts;
 mod search;
 mod site;
+mod writes;
 
 use content::Content;
 
@@ -326,19 +327,19 @@ pub(super) fn serve_with(site: &dyn Site, case: &RestCase) -> Served {
         },
         nonce: (user != 0 && !flag("nononce")).then_some(b"%nonce%"),
         method_override: flag("override").then_some(b"DELETE"),
-        unread_body: false,
+        content_type: None,
+        body: b"",
     };
     serve(site, &request)
 }
 
 /// Requests PHP answers on routes or with arguments not ported.
-const UNPORTED: [(&str, &str); 6] = [
+const UNPORTED: [(&str, &str); 5] = [
     ("GET", "/?rest_route=/"),
     ("GET", "/?rest_route=0/"),
     ("GET", "/?rest_route=/wp/v2"),
     ("GET", "/?rest_route=/wp-abilities/v1/categories/a-b"),
     ("GET", "/?rest_route=/wp/v2/types&_method[]=x"),
-    ("OPTIONS", "/?rest_route=/wp/v2/types"),
 ];
 
 /// Every recorded request is answered as PHP answers it, for every role,
@@ -398,7 +399,7 @@ fn a_single_page_has_no_links() {
 const CONTENT_UNPORTED: [&str; 1] = ["/?rest_route=/wp/v2/categories/68&_embed=up"];
 
 /// The SHA-256 of `body` in hex, as the Theme Test Data goldens keep it.
-pub(super) fn sha256_hex(body: &[u8]) -> Vec<u8> {
+pub(crate) fn sha256_hex(body: &[u8]) -> Vec<u8> {
     use sha2::Digest;
     let digest = sha2::Sha256::digest(body);
     digest
@@ -556,6 +557,7 @@ fn get(content: &'static Content, who: &str, target: &str) -> Served {
         status: 0,
         headers: Vec::new(),
         body: Vec::new(),
+        sent: Vec::new(),
     };
     serve_over(content, &case)
 }

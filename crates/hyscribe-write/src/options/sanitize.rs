@@ -224,12 +224,12 @@ pub async fn sanitize_option(
         }
         "moderation_keys" | "disallowed_keys" => {
             let keys = strip_invalid(&text(&value)?);
-            let mut unique: Vec<&[u8]> = Vec::new();
-            for key in lines(&keys) {
-                if !unique.contains(&key) {
-                    unique.push(key);
-                }
-            }
+            // `array_unique()` in linear time: a long list costs no more.
+            let mut seen = std::collections::HashSet::new();
+            let unique: Vec<&[u8]> = lines(&keys)
+                .into_iter()
+                .filter(|key| seen.insert(*key))
+                .collect();
             string(unique.join(&b'\n'))
         }
         _ => value,

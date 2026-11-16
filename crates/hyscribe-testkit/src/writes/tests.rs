@@ -473,3 +473,28 @@ fn masks_admin_email_keys_and_a_new_policy_page() {
     assert_eq!(value(options, "wp_page_for_privacy_policy", "3"), "3");
     assert_eq!(value(options, "page_on_front", "12"), "12");
 }
+
+#[test]
+fn masks_the_times_events_are_rescheduled_to() {
+    let masks = Masks {
+        start: (1_794_000_000, Vec::new()),
+        end: (1_794_000_002, Vec::new()),
+        new: NewIds::new(),
+    };
+    let value = |name: &str, value: &str| {
+        let row: Row = vec![
+            ("option_name".to_string(), name.as_bytes().to_vec()),
+            ("option_value".to_string(), value.as_bytes().to_vec()),
+        ];
+        let rows = masked(&masks, &TABLES[8], &BTreeMap::from([(b"k".to_vec(), row)]));
+        String::from_utf8(rows.into_values().next().unwrap()[1].1.clone()).unwrap()
+    };
+    let times = "i:1794003600;i:1794043202;i:1794086395;i:1794604800;\
+                 i:1794003603;i:1794003594;i:3600;i:17940036000;";
+    assert_eq!(
+        value("cron", times),
+        "i:%unix+3600%;i:%unix+43200%;i:%unix+86400%;i:%unix+604800%;\
+         i:1794003603;i:1794003594;i:3600;i:17940036000;"
+    );
+    assert_eq!(value("other", "i:1794003600;"), "i:1794003600;");
+}

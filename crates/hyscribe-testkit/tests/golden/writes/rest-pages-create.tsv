@@ -1,0 +1,27 @@
+# The rows PHP WordPress writes for the action rest-pages-create (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-16 08:52:56 to 2026-11-16 08:52:56 UTC.
+# %wp_posts:1% is 7.
+wp_options	fresh_site	~	option_value	1	0
+wp_posts	%wp_posts:1%	+	ID	%wp_posts:1%
+wp_posts	%wp_posts:1%	+	comment_count	0
+wp_posts	%wp_posts:1%	+	comment_status	closed
+wp_posts	%wp_posts:1%	+	guid	http://127.0.0.1:8081/?page_id=%wp_posts:1%
+wp_posts	%wp_posts:1%	+	menu_order	3
+wp_posts	%wp_posts:1%	+	ping_status	closed
+wp_posts	%wp_posts:1%	+	pinged	
+wp_posts	%wp_posts:1%	+	post_author	1
+wp_posts	%wp_posts:1%	+	post_content	<!-- wp:template-part {"slug":"header"} /-->
+wp_posts	%wp_posts:1%	+	post_content_filtered	
+wp_posts	%wp_posts:1%	+	post_date	%now%
+wp_posts	%wp_posts:1%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:1%	+	post_excerpt	
+wp_posts	%wp_posts:1%	+	post_mime_type	
+wp_posts	%wp_posts:1%	+	post_modified	%now%
+wp_posts	%wp_posts:1%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:1%	+	post_name	a-rest-page
+wp_posts	%wp_posts:1%	+	post_parent	2
+wp_posts	%wp_posts:1%	+	post_password	
+wp_posts	%wp_posts:1%	+	post_status	publish
+wp_posts	%wp_posts:1%	+	post_title	A REST page
+wp_posts	%wp_posts:1%	+	post_type	page
+wp_posts	%wp_posts:1%	+	to_ping	

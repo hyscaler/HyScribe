@@ -189,7 +189,8 @@ fn serve_case(site: &Site, handle: &Handle, case: &RestCase) -> hyscribe_rest::S
         origin: None,
         nonce: (user != 0).then_some(b"%nonce%"),
         method_override: None,
-        unread_body: false,
+        content_type: None,
+        body: b"",
     };
     hyscribe_rest::serve(&as_role, &request)
 }
@@ -260,6 +261,7 @@ async fn unported(database: &str, requests: &'static [(&str, &str, &str)]) {
                 status: 501,
                 headers: Vec::new(),
                 body: Vec::new(),
+                sent: Vec::new(),
             };
             let served = serve_case(&site, &handle, &case);
             assert_eq!(served.status, 501, "{who} {method} {target}");
@@ -270,18 +272,22 @@ async fn unported(database: &str, requests: &'static [(&str, &str, &str)]) {
 }
 
 /// Writes answer 501, as do the arguments whose schemas use keywords not
-/// ported (`format`, `oneOf`).
+/// ported (`format`), and term limits with children.
 #[tokio::test]
 async fn posts_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/posts.tsv");
-    replay("wordpress", golden, false, 6 * 89, &[]).await;
+    replay("wordpress", golden, false, 6 * 103, &[]).await;
     unported(
         "wordpress",
         &[
             ("administrator", "POST", "/?rest_route=/wp/v2/posts"),
             ("administrator", "PUT", "/?rest_route=/wp/v2/posts/1"),
-            ("visitor", "DELETE", "/?rest_route=/wp/v2/pages/2&force=1"),
-            ("visitor", "GET", "/?rest_route=/wp/v2/posts&categories=1"),
+            ("visitor", "DELETE", "/?rest_route=/wp/v2/blocks/1&force=1"),
+            (
+                "visitor",
+                "GET",
+                "/?rest_route=/wp/v2/posts&categories[terms]=1&categories[include_children]=1",
+            ),
             (
                 "editor",
                 "GET",
@@ -303,7 +309,7 @@ async fn theme_test_data_posts_match_php() {
         ("*", "/?rest_route=/wp/v2/posts/555&excerpt_length=5"),
         ("user", "/?rest_route=/wp/v2/posts/51"),
     ];
-    replay("wordpress_ttd", golden, true, 6 * 39, skipped).await;
+    replay("wordpress_ttd", golden, true, 6 * 42, skipped).await;
     unported(
         "wordpress_ttd",
         &[

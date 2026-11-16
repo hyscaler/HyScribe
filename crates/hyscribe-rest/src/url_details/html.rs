@@ -204,7 +204,8 @@ pub(crate) fn metas(head: &[u8]) -> Vec<Meta<'_>> {
             element: head.get(start..=end).unwrap_or_default(),
             content,
         });
-        at = end + 1;
+        // The `>` ending the element starts no other.
+        at = end;
     }
     found
 }

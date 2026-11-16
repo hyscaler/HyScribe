@@ -47,3 +47,35 @@ fn previews_are_not_served_while_fetches_are_off() {
     oracle.set_site_transient("unused", b"", 0);
     oracle.expire_site_transient("unused");
 }
+
+/// A cached page is read until its timeout has passed, as
+/// `get_site_transient()` compares `$timeout < time()`, then deleted.
+#[test]
+fn cached_pages_last_until_their_timeout() {
+    static CONTENT: std::sync::OnceLock<content::Content> = std::sync::OnceLock::new();
+    let content = CONTENT.get_or_init(|| {
+        let mut content = content::default_install_with("");
+        let key = "g_url_details_response_68fb6b339d66b07e2b438f2f08e7ab24";
+        let mut set = |name: String, value: &[u8]| content.options.insert(name, value.to_vec());
+        set(format!("_site_transient_timeout_{key}"), b"4102444800");
+        set(
+            format!("_site_transient_{key}"),
+            b"<html><head><title>Cached</title>",
+        );
+        content
+    });
+    let oracle = Oracle::over(content, false);
+    let key = "g_url_details_response_68fb6b339d66b07e2b438f2f08e7ab24";
+    let at = |now: i64| Context {
+        site: &oracle,
+        user: 0,
+        head: false,
+        uri: b"",
+        parameters: false,
+        host: b"",
+        now,
+    };
+    let page = crate::url_details::cached(&at(4_102_444_800), key);
+    assert!(page.unwrap().starts_with(b"<html><head><title>Cached"));
+    assert_eq!(crate::url_details::cached(&at(4_102_444_801), key), None);
+}

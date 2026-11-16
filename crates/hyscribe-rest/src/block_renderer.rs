@@ -126,7 +126,8 @@ fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
     // Sanitized as an object, an array.
     let attributes = params.get("attributes").and_then(Value::as_array);
     let attributes = attributes.unwrap_or_default().to_vec();
-    let post = u64::try_from(post_id(params)).ok().filter(|&id| id > 0);
+    // No post has the ID 0, so it renders as none.
+    let post = u64::try_from(post_id(params)).ok();
     let request = render_request(context);
     let mut rendering = Rendering::new(context.site.theme(), context.site.reads(), &request);
     let rendered = rendering.render_block(&name, attributes, post);

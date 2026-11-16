@@ -199,6 +199,16 @@ async fn shadow_mode_fetches_without_caching() {
     }
     assert_eq!(pages.dialed.load(Ordering::SeqCst), 2);
     assert_eq!(cached(&site, page).await, (None, None));
+    // 150 KB are read: a description some kilobytes in is found.
+    let request = axum::http::Request::builder()
+        .uri("/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/mid.html")
+        .header(header::COOKIE, &cookie)
+        .header("x-wp-nonce", &nonce);
+    let mid = body(send(&site, request, "").await).await;
+    assert!(
+        mid.contains("\"description\":\"within the limit\""),
+        "{mid}"
+    );
     // The expired page stays: shadow mode deletes nothing either.
     let expired = "/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/expired";
     let request = axum::http::Request::builder()

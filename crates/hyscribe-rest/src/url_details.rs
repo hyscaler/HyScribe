@@ -113,7 +113,7 @@ pub fn details(body: &[u8], url: &[u8]) -> [Vec<u8>; 4] {
 
 /// `get_site_transient( $key )` when not `empty()`: a transient past its
 /// timeout is deleted, as PHP deletes it.
-fn cached(context: &Context, key: &str) -> Option<Vec<u8>> {
+pub(crate) fn cached(context: &Context, key: &str) -> Option<Vec<u8>> {
     let timeout = context.option(&format!("_site_transient_timeout_{key}"));
     if timeout.is_some_and(|timeout| Value::String(timeout).to_int() < context.now) {
         context.site.expire_site_transient(key);

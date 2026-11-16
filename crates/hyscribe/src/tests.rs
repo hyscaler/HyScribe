@@ -788,6 +788,8 @@ fn setup_mode_hands_over_to_the_site() {
     logged(&home, &secret);
     assert_eq!(service("stop").code, 0);
     logged(&home, "stopped on signal 15");
+    // The next start's secret is the only one in the log.
+    std::fs::remove_file(home.join("logs/hyscribe.log")).unwrap();
 
     let started = service("start");
     assert!(started.out.ends_with(setup), "{}", started.err);

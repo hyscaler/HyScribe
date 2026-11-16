@@ -264,7 +264,10 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                 None => match setup_mode(home, site.env, out, &mut stopped, SETUP_TIMEOUT).await? {
                     Ended::Written => hyscribe_config::load(home, site.env)
                         .map_err(|err| err.to_string())?
-                        .ok_or(format!("{} went missing", home.join(".env").display()))?,
+                        .ok_or(format!(
+                            "{} went missing",
+                            home.join(hyscribe_config::ENV_FILE).display()
+                        ))?,
                     Ended::Stopped(number) => {
                         seen.store(number, std::sync::atomic::Ordering::SeqCst);
                         return Ok(());

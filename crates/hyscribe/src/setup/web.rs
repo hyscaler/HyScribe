@@ -204,15 +204,18 @@ async fn answer(
         let Some(form) = form_of(&headers, &body) else {
             return bad_form();
         };
-        // Step 1's token must also be in its cookie, the others' are the
-        // session's.
+        // Step 1's token must also be in its cookie, as there is no session
+        // yet; the others' is the session's.
         let tokens = &wizard.tokens;
-        let (token, cookie_too) = match step {
-            STEP_1 => (&tokens.form, cookie(&headers, FORM_COOKIE)),
-            _ => (&tokens.csrf, Some(tokens.csrf.as_bytes())),
+        let (token, fresh) = match step {
+            STEP_1 => {
+                let given = cookie(&headers, FORM_COOKIE);
+                let fresh = given.is_some_and(|value| hash_equals(tokens.form.as_bytes(), value));
+                (&tokens.form, fresh)
+            }
+            _ => (&tokens.csrf, true),
         };
         let sent = field(&form, "_csrf").as_bytes();
-        let fresh = cookie_too.is_some_and(|value| hash_equals(token.as_bytes(), value));
         if !fresh || !hash_equals(token.as_bytes(), sent) {
             return expired(step);
         }
@@ -283,7 +286,11 @@ impl Wizard {
         let content = match &found.content {
             Content::Unknown => None,
             Content::Known(dir) => Some(dir.clone()),
-            Content::Asked(_) => Some(PathBuf::from(value("WP_CONTENT_DIR"))),
+            // An empty answer takes the default, as in the terminal.
+            Content::Asked(default) => Some(match value("WP_CONTENT_DIR") {
+                dir if dir.is_empty() => default.clone(),
+                dir => PathBuf::from(dir),
+            }),
         };
         let mut values = found.values.clone();
         for key in &found.unread {
@@ -310,7 +317,6 @@ impl Wizard {
         match written {
             Ok((report, path)) => {
                 self.signed_in = false;
-                self.found = None;
                 let body = format!(
                     "<pre>{}</pre>\n<p>Wrote {} (mode 600). HyScribe now serves the site at the \
                      address it sets; this setup page will not answer again.</p>\n",

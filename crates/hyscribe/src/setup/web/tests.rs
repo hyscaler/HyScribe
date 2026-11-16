@@ -259,10 +259,28 @@ async fn the_site_is_found_by_path_by_contents_or_not_at_all() {
         "{}",
         answer.body
     );
+    // Pasted, only a literal WP_CONTENT_DIR tells where wp-content is.
+    let source = "<?php define( 'DB_NAME', 'x' . 'y' ); define( 'WP_CONTENT_DIR', '/srv/c' );";
+    let answer = ask(
+        &shared,
+        "POST",
+        STEP_2,
+        SIGNED_IN,
+        &[csrf, ("contents", source)],
+    )
+    .await;
+    assert_eq!(answer.location(), STEP_3);
+    let answer = ask(&shared, "GET", STEP_3, SIGNED_IN, &[]).await;
+    assert!(
+        answer
+            .body
+            .contains("name=\"UPLOADS_DIR\" value=\"/srv/c/uploads\"")
+    );
     let pasted = [csrf, ("contents", "<?php define( 'DB_NAME', 'x' . 'y' );")];
     let answer = ask(&shared, "POST", STEP_2, SIGNED_IN, &pasted).await;
     assert_eq!(answer.location(), STEP_3);
     let answer = ask(&shared, "GET", STEP_3, SIGNED_IN, &[]).await;
+    assert!(answer.body.contains("name=\"UPLOADS_DIR\" value=\"\""));
     assert!(
         answer.body.contains(
             "  Read the wp-config.php given\n  Not a literal there, or missing: DB_NAME, "
@@ -280,6 +298,7 @@ async fn the_site_is_found_by_path_by_contents_or_not_at_all() {
         let answer = ask(&shared, "GET", STEP_3, SIGNED_IN, &[]).await;
         assert!(answer.body.contains("id=\"DB_NAME\""), "{}", answer.body);
         assert!(!answer.body.contains("Read "), "{}", answer.body);
+        assert!(!answer.body.contains("Not a literal"), "{}", answer.body);
         // No wp-content, so no default uploads folder.
         assert!(answer.body.contains("name=\"UPLOADS_DIR\" value=\"\""));
     }
@@ -359,7 +378,8 @@ async fn step_3_checks_then_writes_env() {
     let uploads = format!("{content}/uploads");
     let accepted = [
         csrf,
-        ("WP_CONTENT_DIR", &content),
+        // Cleared, the asked wp-content takes its default.
+        ("WP_CONTENT_DIR", ""),
         ("MODE", "shadow"),
         ("UPLOADS_DIR", &uploads),
     ];
@@ -389,6 +409,7 @@ async fn step_3_checks_then_writes_env() {
     );
     assert_eq!(config.server.port, 8080);
     assert!(!config.server.behind_proxy);
+    assert_eq!(config.mode, hyscribe_config::Mode::Shadow);
     let answer = ask(&shared, "GET", STEP_3, SIGNED_IN, &[]).await;
     assert_eq!(answer.location(), STEP_1);
 }

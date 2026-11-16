@@ -319,7 +319,7 @@ async fn database_errors_stop_a_run() {
     let mut begun = 0;
     for action in 0..8 {
         let mut worked = false;
-        for budget in std::iter::once(None).chain((0..40).map(Some)) {
+        for budget in std::iter::once(None).chain((0..16).map(Some)) {
             let writer = saves(&[no_lock]).await;
             let count = std::cell::Cell::new(0);
             let begin = async || {

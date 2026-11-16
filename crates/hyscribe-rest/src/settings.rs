@@ -65,10 +65,10 @@ fn args() -> Vec<Arg> {
             .collect()
     });
     let arg = |(name, (_, setting)): (&'static String, &'static (Key, Value))| {
-        let mut schema = option_and_schema(setting).1;
-        if let Value::Array(entries) = &mut schema {
-            entries.retain(|(key, _)| key.to_php_string() != b"default");
-        }
+        let schema = option_and_schema(setting).1;
+        let entries = schema.as_array().unwrap_or_default().iter();
+        let kept = entries.filter(|(key, _)| key.to_php_string() != b"default");
+        let schema = Value::Array(kept.cloned().collect());
         Arg {
             name: name.as_str(),
             schema,

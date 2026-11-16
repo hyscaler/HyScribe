@@ -544,6 +544,16 @@ async fn user_writes_are_php_s() {
     }
 }
 
+/// The write a request plans.
+fn plan_of(rest: &Rest, request: &hyscribe_rest::Request) -> hyscribe_rest::Write {
+    match hyscribe_rest::answer(rest, request) {
+        hyscribe_rest::Answer::Write(pending) => pending.plan.write,
+        hyscribe_rest::Answer::Served(served) => {
+            panic!("{}", String::from_utf8_lossy(&served.body))
+        }
+    }
+}
+
 /// The errors PHP answers where a write function refused, which no
 /// request of the goldens reaches.
 #[tokio::test(flavor = "multi_thread")]
@@ -640,6 +650,45 @@ async fn refused_writes_are_answered_as_php_answers_them() {
     );
     let refused = answered(&site, delete, Outcome::Refused("rest_cannot_delete")).await;
     assert_eq!(refused, cannot("user"));
+    // Content without a raw text gives none, so an update keeps its own.
+    let raw = (
+        "POST",
+        "/?rest_route=/wp/v2/comments/1",
+        r#"{"content":{"rendered":"x"}}"#,
+    );
+    let write = as_admin(&site, raw, (b"", None), plan_of).await;
+    let hyscribe_rest::Write::Comment(save) = write else {
+        unreachable!()
+    };
+    assert_eq!(save.content, None);
+    // Answered at once: an author by URL alone, and a slug another user has.
+    for (asked, code) in [
+        (
+            (
+                "POST",
+                "/?rest_route=/wp/v2/comments",
+                r#"{"post":1,"content":"x","author_name":"","author_url":"https://x.test"}"#,
+            ),
+            "rest_comment_author_data_required",
+        ),
+        (
+            (
+                "PATCH",
+                "/?rest_route=/wp/v2/users/702",
+                r#"{"slug":"editor"}"#,
+            ),
+            "rest_user_invalid_slug",
+        ),
+    ] {
+        let served = |rest: &Rest, request: &hyscribe_rest::Request| match hyscribe_rest::answer(
+            rest, request,
+        ) {
+            hyscribe_rest::Answer::Served(served) => String::from_utf8(served.body).unwrap(),
+            hyscribe_rest::Answer::Write(_) => unreachable!(),
+        };
+        let body = as_admin(&site, asked, (b"", None), served).await;
+        assert!(body.contains(code), "{body}");
+    }
     // A comment takes the request's address and user agent.
     let client = (&b"192.0.2.1"[..], Some(&b"Agent/2.0"[..]));
     let plan = |rest: &Rest, request: &hyscribe_rest::Request| match hyscribe_rest::answer(
@@ -711,7 +760,9 @@ async fn writes_refused_past_their_checks() {
     let Outcome::Written(id) = act(comment(0, "trash")).await else {
         panic!("not written")
     };
-    for status in ["untrash", "spam", "unspam", "approved", "approve", "bogus"] {
+    for status in [
+        "untrash", "spam", "unspam", "approved", "approved", "approve", "bogus",
+    ] {
         assert_eq!(act(comment(id, status)).await, Outcome::Written(id));
     }
     let flood = Outcome::Refused("comment_flood");

@@ -129,7 +129,7 @@ pub(crate) fn replace_each(
 }
 
 /// PHP's `str_replace()` for one string; an empty `needle` finds nothing.
-pub(crate) fn str_replace(subject: &[u8], needle: &[u8], with: &[u8]) -> Vec<u8> {
+pub fn str_replace(subject: &[u8], needle: &[u8], with: &[u8]) -> Vec<u8> {
     if needle.is_empty() {
         return subject.to_vec();
     }

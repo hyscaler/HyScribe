@@ -552,6 +552,7 @@ dependencies = [
  "hyscribe-html",
  "hyscribe-http",
  "hyscribe-kses",
+ "hyscribe-mail",
  "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-render",
@@ -592,6 +593,15 @@ dependencies = [
 [[package]]
 name = "hyscribe-kses"
 version = "0.1.0"
+
+[[package]]
+name = "hyscribe-mail"
+version = "0.1.0"
+dependencies = [
+ "hyscribe-kses",
+ "hyscribe-phpser",
+ "hyscribe-render",
+]
 
 [[package]]
 name = "hyscribe-model"

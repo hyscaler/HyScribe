@@ -15,9 +15,10 @@ use hyscribe_write::posts::{Context, get_default_post_to_edit, wp_update_post};
 use super::screen::{update_user_meta, update_user_option};
 use super::{Acting, Saving, text};
 
-/// The posts' context of `user` on the site at `home`, now; their
-/// capability to publish plays no part in the drafts written here.
-pub(in crate::admin) fn context(user: u64, home: &str) -> Context {
+/// The posts' context of `user` on the site at `home`, now, with their
+/// `unfiltered_html`; their capability to publish plays no part in the
+/// drafts written here.
+pub(in crate::admin) fn context(user: u64, home: &str, unfiltered_html: bool) -> Context {
     let host = home.split_once("://").map_or(home, |(_, rest)| rest);
     Context {
         user,
@@ -29,6 +30,7 @@ pub(in crate::admin) fn context(user: u64, home: &str) -> Context {
             .unwrap_or_default()
             .as_bytes()
             .to_vec(),
+        unfiltered_html,
         now: crate::now(),
     }
 }
@@ -83,7 +85,7 @@ async fn option_text(write: &mut Write<'_>, name: &str) -> Result<String, Error>
 pub(super) fn quickdraft_save<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
-    _: &'a dyn Acting,
+    site: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
         let id = lookup(asked.post, "post_ID").map_or(0, Value::to_int);
@@ -113,7 +115,8 @@ pub(super) fn quickdraft_save<'a>(
         let pings = option_text(write, "default_ping_status").await?;
         let user = Value::Int(asked.user.cast_signed());
         update_metadata(write, Meta::Post, id, "_edit_last", &user, &Value::Null).await?;
-        let ctx = context(asked.user, asked.home);
+        let unfiltered = super::posts::unfiltered_html(write, asked.user, site.constants()).await?;
+        let ctx = context(asked.user, asked.home, unfiltered);
         wp_update_post(write, &ctx, id, &|args| {
             args.author = Some(asked.user);
             args.status = "draft".into();

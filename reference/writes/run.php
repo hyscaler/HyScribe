@@ -8,8 +8,11 @@
 // the two must stay alike.
 
 define( 'DISABLE_WP_CRON', true );
-// HyScribe's safer value until the open question's .env keys exist.
-define( 'DISALLOW_UNFILTERED_HTML', true );
+// HyScribe's default; an action named `*-unfiltered-html` runs as an
+// owner's .env that allows unfiltered HTML.
+if ( ! str_ends_with( $argv[1] ?? '', '-unfiltered-html' ) ) {
+	define( 'DISALLOW_UNFILTERED_HTML', true );
+}
 require '/var/www/html/wp-load.php';
 
 // A function's scope, so no variable here overwrites a WordPress global.

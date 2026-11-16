@@ -39,6 +39,7 @@ async fn deletions_are_php_s() {
             can_publish: true,
             home: b"http://127.0.0.1:8081".to_vec(),
             upload_host: b"127.0.0.1:8081".to_vec(),
+            unfiltered_html: false,
             now: crate::now(),
         };
         for (title, author) in [("Deleted post", deleted), ("Passed post", heir)] {

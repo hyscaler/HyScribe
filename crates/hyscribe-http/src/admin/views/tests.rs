@@ -17,7 +17,7 @@ async fn a_shown_notice_fails_with_its_statement() {
         draft: false,
         settings: true,
     };
-    let ctx = context(1, "http://127.0.0.1:8081");
+    let ctx = context(1, "http://127.0.0.1:8081", false);
     for budget in 0.. {
         let mut write = writer.begin().await;
         if let Ok(write) = &mut write {

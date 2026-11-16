@@ -225,6 +225,38 @@ async fn inserts_match_php() {
         },
     )
     .await;
+    // `$posts_html`, filtered, then as a user with `unfiltered_html`.
+    for (golden, unfiltered_html) in [
+        ("insert-html-post", false),
+        ("insert-html-post-unfiltered-html", true),
+    ] {
+        let ctx = Context {
+            unfiltered_html,
+            ..admin()
+        };
+        check(
+            golden,
+            async |_| Ok(()),
+            async |conn, ()| {
+                let args = PostArgs {
+                    title: b"  <b>Bold</b> <script>alert(1)</script>title\t ".to_vec(),
+                    content: b"<p onclick=\"x()\">Para &#128; &#150;</p><script>bad()</script>\
+                        <a href=\"javascript:x()\">link</a>"
+                        .to_vec(),
+                    content_filtered: b"<script>kept()</script>&#128;".to_vec(),
+                    excerpt: b"<em>&#153;</em><iframe src=\"https://example.test/\"></iframe>"
+                        .to_vec(),
+                    ..oracle_post("publish")
+                };
+                act(writer, conn, &ctx, async |w, ctx| {
+                    wp_insert_post(w, ctx, args).await
+                })
+                .await
+                .map(drop)
+            },
+        )
+        .await;
+    }
     check(
         "insert-reclaims-trashed-slug",
         async |conn| {

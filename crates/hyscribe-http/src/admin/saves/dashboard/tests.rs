@@ -15,7 +15,7 @@ use super::*;
 
 /// `$views_draft()`: the Quick Draft form's auto-draft, user 1's.
 async fn drafted(write: &mut Write<'_>) -> Result<u64, Error> {
-    quick_press_draft(write, &context(1, "http://127.0.0.1:8081")).await
+    quick_press_draft(write, &context(1, "http://127.0.0.1:8081", false)).await
 }
 
 fn shown(err: Error) -> String {

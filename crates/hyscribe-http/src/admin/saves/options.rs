@@ -527,7 +527,7 @@ pub(super) fn permalinks<'a>(
 pub(super) fn create_privacy_page<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
-    _: &'a dyn Acting,
+    acting: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
         let home = home_url(write).await?;
@@ -537,6 +537,8 @@ pub(super) fn create_privacy_page<'a>(
             can_publish: false,
             home: home.clone().into_bytes(),
             upload_host: hyscribe_render::link::host(&site),
+            unfiltered_html: super::posts::unfiltered_html(write, asked.user, acting.constants())
+                .await?,
             now: crate::now(),
         };
         // A draft: `wp_insert_post()`'s status when none is given.

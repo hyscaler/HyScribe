@@ -295,7 +295,7 @@ async fn update(
     }
     .filter(kses, context.home, balance);
     // `comment_save_pre`.
-    let content = filter::convert_invalid_entities(&fields.content);
+    let content = crate::convert_invalid_entities(&fields.content);
     fields.content = filter::balance_tags(&content, balance);
     fields.date_gmt = gmt_from_date(&fields.date, zone(steps).await);
     step!(steps, update_comment(edit.id, &fields));

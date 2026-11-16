@@ -100,6 +100,8 @@ pub(super) fn dodelete<'a>(
             can_publish: false,
             home: asked.home.as_bytes().to_vec(),
             upload_host: host.split('/').next().unwrap_or_default().into(),
+            // Deleting a user saves no post's fields.
+            unfiltered_html: false,
             now: crate::now(),
         };
         let me = i64::try_from(asked.user).unwrap_or_default();

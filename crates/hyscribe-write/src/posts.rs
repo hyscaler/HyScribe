@@ -42,6 +42,9 @@ pub struct Context {
     /// The host of `wp_upload_dir()`'s URL, with `:port` where it has one,
     /// as `wp_kses_post()` takes it.
     pub upload_host: Vec<u8>,
+    /// `current_user_can( 'unfiltered_html' )`: `kses_init()` leaves the
+    /// post's fields unfiltered for such a user.
+    pub unfiltered_html: bool,
     /// `time()`.
     pub now: i64,
 }
@@ -277,22 +280,27 @@ pub async fn wp_publish_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> R
     hooks::save_revision(write, ctx, kind, id).await
 }
 
-/// `sanitize_post( $postarr, 'db' )` with a default install's filters,
-/// under `DISALLOW_UNFILTERED_HTML`.
+/// `sanitize_post( $postarr, 'db' )` with a default install's filters:
+/// kses only for a user who may not post unfiltered HTML.
 fn sanitize(mut args: PostArgs, ctx: &Context) -> Result<PostArgs> {
-    let post_kses = |text: &[u8]| hyscribe_render::kses::wp_kses_post(text, &ctx.upload_host);
-    // wp_filter_global_styles_post() rewrites a global styles post first.
-    let styles = |text: &[u8]| {
-        let marker = b"isGlobalStylesUserThemeJSON";
-        if text.windows(marker.len()).any(|w| w == marker) {
-            return Err(Error::Unported("global styles content"));
-        }
-        Ok(post_kses(text))
-    };
-    args.title = hyscribe_render::kses::wp_kses_data(hyscribe_phpser::php_trim(&args.title));
-    args.content = styles(&args.content)?;
-    args.content_filtered = styles(&args.content_filtered)?;
-    args.excerpt = post_kses(&args.excerpt);
+    args.title = hyscribe_phpser::php_trim(&args.title).to_vec();
+    args.content = crate::convert_invalid_entities(&args.content);
+    args.excerpt = crate::convert_invalid_entities(&args.excerpt);
+    if !ctx.unfiltered_html {
+        let post_kses = |text: &[u8]| hyscribe_render::kses::wp_kses_post(text, &ctx.upload_host);
+        // wp_filter_global_styles_post() rewrites a global styles post first.
+        let styles = |text: &[u8]| {
+            let marker = b"isGlobalStylesUserThemeJSON";
+            if text.windows(marker.len()).any(|w| w == marker) {
+                return Err(Error::Unported("global styles content"));
+            }
+            Ok(post_kses(text))
+        };
+        args.title = hyscribe_render::kses::wp_kses_data(&args.title);
+        args.content = styles(&args.content)?;
+        args.content_filtered = styles(&args.content_filtered)?;
+        args.excerpt = post_kses(&args.excerpt);
+    }
     for key in [
         &mut args.status,
         &mut args.post_type,

@@ -718,8 +718,9 @@ impl CapabilityData for Role {
             .find(|taxonomy| self.all_terms(taxonomy).iter().any(|term| term.id == id))
             .map(String::from)
     }
+    /// HyScribe's default, without `DISALLOW_UNFILTERED_HTML` in `u5html`.
     fn constant(&self, name: &str) -> bool {
-        name == "DISALLOW_UNFILTERED_HTML"
+        name == "DISALLOW_UNFILTERED_HTML" && self.variant() != "u5html"
     }
 }
 

@@ -263,6 +263,17 @@ async fn locked(write: &mut Write<'_>, id: u64, user: u64, now: i64) -> Result<b
     Ok(write.user(holder).await?.is_some())
 }
 
+/// `current_user_can( 'unfiltered_html' )` of `user` in the action, which
+/// `kses_init()` asks.
+pub(super) async fn unfiltered_html(
+    write: &mut Write<'_>,
+    user: u64,
+    constants: Constants,
+) -> Result<bool, DbError> {
+    let caps = Caps::load(write, user, None, constants).await?;
+    Ok(caps.can("unfiltered_html", &[]))
+}
+
 /// The action's context for posts of `post_type`.
 fn context(asked: &Asked, site: &dyn Acting, (caps, post_type): (&Caps, &str)) -> Context {
     Context {
@@ -270,6 +281,7 @@ fn context(asked: &Asked, site: &dyn Acting, (caps, post_type): (&Caps, &str)) -
         can_publish: caps.can_type("publish_posts", post_type),
         home: asked.home.as_bytes().to_vec(),
         upload_host: hyscribe_render::link::host(site.admin_url("").as_bytes()),
+        unfiltered_html: caps.can("unfiltered_html", &[]),
         now: crate::now(),
     }
 }

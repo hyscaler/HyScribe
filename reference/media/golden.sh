@@ -55,6 +55,8 @@ record() {
   esac
   settings=
   [ "$1" = m4uploader ] && settings="; wp-settings-1=uploader%3D1"
+  # Without DISALLOW_UNFILTERED_HTML: the uploader allows HTML and scripts.
+  [ "$1" = u5html ] && settings="; hyscribe_unfiltered_html=1"
   status=$(curl -s -A "$agent" -o "$TMP" -D "$TMP.head" -w '%{http_code}' -b "hyscribe_role=$3; hyscribe_variant=$1$settings" "$BASE/wp-admin/$2")
   case "$status" in
     200) ;;
@@ -90,6 +92,11 @@ record m4ios7 upload.php administrator
 record m4large media-new.php administrator
 record m4uploader media-new.php administrator
 record default upload.php?post_mime_type=bogus administrator
+if [ "$TTD" != wordpress_ttd ]; then
+  for role in administrator editor author; do
+    record u5html upload.php "$role"
+  done
+fi
 if [ "$TTD" = wordpress_ttd ]; then
   for query in 'paged=2' 'attachment-filter=post_mime_type:image' 'attachment-filter=post_mime_type:audio' \
     'attachment-filter=post_mime_type:video' 'attachment-filter=detached' 'attachment-filter=mine' \

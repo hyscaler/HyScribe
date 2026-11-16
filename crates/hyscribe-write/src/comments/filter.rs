@@ -11,7 +11,7 @@ use hyscribe_render::balance::force_balance_tags;
 use hyscribe_render::formatting::sanitize_email;
 use hyscribe_render::kses::{wp_kses_comment, wp_kses_data, wp_rel_ugc};
 
-use crate::{name_filters, wp_filter_kses};
+use crate::{convert_invalid_entities, name_filters, wp_filter_kses};
 
 /// The fields `wp_filter_comment()` filters, unslashed; the user agent, IP
 /// address and user have no default filters.
@@ -75,44 +75,4 @@ pub(super) fn balance_tags(text: &[u8], balance: bool) -> Vec<u8> {
     } else {
         text.to_vec()
     }
-}
-
-/// `convert_invalid_entities()`: the numeric references to the C1 controls
-/// `&#128;` to `&#159;` become the Windows-1252 characters they meant.
-pub(super) fn convert_invalid_entities(content: &[u8]) -> Vec<u8> {
-    const WINDOWS_1252: [&[u8]; 32] = [
-        b"&#8364;", b"", b"&#8218;", b"&#402;", b"&#8222;", b"&#8230;", b"&#8224;", b"&#8225;",
-        b"&#710;", b"&#8240;", b"&#352;", b"&#8249;", b"&#338;", b"", b"&#381;", b"", b"",
-        b"&#8216;", b"&#8217;", b"&#8220;", b"&#8221;", b"&#8226;", b"&#8211;", b"&#8212;",
-        b"&#732;", b"&#8482;", b"&#353;", b"&#8250;", b"&#339;", b"", b"&#382;", b"&#376;",
-    ];
-    let mut out = Vec::with_capacity(content.len());
-    let mut at = 0;
-    while let Some(byte) = content.get(at) {
-        let reference = content.get(at..at + 6).and_then(|entity| match entity {
-            [
-                b'&',
-                b'#',
-                b'1',
-                tens @ b'0'..=b'9',
-                ones @ b'0'..=b'9',
-                b';',
-            ] => {
-                let n = usize::from(tens - b'0') * 10 + usize::from(ones - b'0');
-                WINDOWS_1252.get(n.checked_sub(28)?)
-            }
-            _ => None,
-        });
-        match reference {
-            Some(replacement) => {
-                out.extend_from_slice(replacement);
-                at += 6;
-            }
-            None => {
-                out.push(*byte);
-                at += 1;
-            }
-        }
-    }
-    out
 }

@@ -5,10 +5,14 @@
 // 1's, with the capabilities of the role in the hyscribe_role cookie (set
 // before core's own user_has_cap filters add to them), on a
 // site with HyScribe's constants: no file changes from the browser
-// (DISALLOW_FILE_MODS) and no unfiltered HTML. It writes nothing,
-// and offers no WordPress update, which hs-admin does not show.
+// (DISALLOW_FILE_MODS) and no unfiltered HTML, unless the
+// hyscribe_unfiltered_html cookie asks for an owner's .env that allows it.
+// It writes nothing, and offers no WordPress update, which hs-admin does not
+// show.
 define( 'DISALLOW_FILE_MODS', true );
-define( 'DISALLOW_UNFILTERED_HTML', true );
+if ( ! isset( $_COOKIE['hyscribe_unfiltered_html'] ) ) {
+	define( 'DISALLOW_UNFILTERED_HTML', true );
+}
 
 function auth_redirect() {}
 

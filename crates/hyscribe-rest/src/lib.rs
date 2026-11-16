@@ -380,8 +380,14 @@ pub enum Preloaded {
 }
 
 /// `rest_preload_api_request()`'s request of `path` (its query included)
-/// with `method`, as `user`: the data `response_to_data()` gives.
-pub fn preload(site: &dyn Site, user: u64, method: &str, path: &[u8]) -> Preloaded {
+/// with `method`, as `user` on `host` at `now`: the data
+/// `response_to_data()` gives.
+pub fn preload(
+    site: &dyn Site,
+    (user, host, now): (u64, &[u8], i64),
+    method: &str,
+    path: &[u8],
+) -> Preloaded {
     let (route, query) = match path.iter().position(|&b| b == b'?') {
         Some(at) => (
             path.get(..at).unwrap_or_default(),
@@ -401,6 +407,8 @@ pub fn preload(site: &dyn Site, user: u64, method: &str, path: &[u8]) -> Preload
         head: false,
         uri: path,
         parameters: false,
+        host,
+        now,
     };
     let response = match dispatch(&context, (method, route), (params, true), None) {
         Ok(response) if response.status == 200 => response,

@@ -139,11 +139,7 @@ async fn the_block_editor_s_view_writes_before_its_page() {
                 true,
                 StatusCode::NOT_IMPLEMENTED,
             ),
-            (
-                Target::Edit(Box::new(post)),
-                false,
-                StatusCode::NOT_IMPLEMENTED,
-            ),
+            (Target::Edit(Box::new(post)), false, StatusCode::OK),
             (
                 Target::New("nope".into()),
                 true,
@@ -181,10 +177,10 @@ async fn the_block_editor_s_view_writes_before_its_page() {
     .unwrap();
 }
 
-/// In primary mode the editor's view writes nothing while a preload that
-/// does not need its writes is not ported: it answers 501.
+/// In primary mode the editor's first view writes, then serves its page
+/// with the preloads PHP's has: the paths `post-editor.tsv` lists.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_block_editor_writes_only_for_a_page_it_serves() {
+async fn the_block_editor_s_page_is_served() {
     let _saves = crate::admin::tests::SAVES.lock().await;
     let db = hyscribe_config::Database {
         name: "wordpress_saves".into(),
@@ -204,24 +200,68 @@ async fn the_block_editor_writes_only_for_a_page_it_serves() {
             .unwrap()
             .with_writer(writer),
     );
-    for path in [
-        "/hs-admin/post-new?post_type=page",
-        "/hs-admin/post?post=1&action=edit",
+    let golden = include_str!("../../../../hyscribe-admin/tests/golden/post-editor.tsv");
+    let php_paths = |case: &str| {
+        let row = golden
+            .lines()
+            .find(|line| line.starts_with(&format!("{case}\tpreloads\t")))
+            .unwrap();
+        let tokens: Vec<&str> = row.rsplit('\t').next().unwrap().split(' ').collect();
+        let pairs = tokens.chunks(2).map(|pair| pair.join(" "));
+        // PHP's global styles post was 6, the scratch database's is 5.
+        let pairs = pairs.map(|path| path.replace("/global-styles/6", "/global-styles/5"));
+        pairs.collect::<Vec<String>>()
+    };
+    for (path, case) in [
+        (
+            "/hs-admin/post-new?post_type=page",
+            "new-page-administrator",
+        ),
+        (
+            "/hs-admin/post?post=1&action=edit",
+            "edit-post-administrator",
+        ),
     ] {
         let response = crate::admin::tests::send(&site, "GET", path, &cookies, None).await;
-        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let page = crate::admin::tests::page_of(response).await;
+        let marker = "wp.apiFetch.createPreloadingMiddleware( ";
+        let json = page
+            .split_once(marker)
+            .unwrap()
+            .1
+            .split(" ) );")
+            .next()
+            .unwrap();
+        let memo = hyscribe_phpser::json_decode(json.as_bytes()).unwrap();
+        let mut ours = Vec::new();
+        for (key, value) in memo.as_array().unwrap() {
+            let key = String::from_utf8(key.to_php_string()).unwrap();
+            match key.as_str() {
+                "OPTIONS" => ours.extend(value.as_array().unwrap().iter().map(|(path, _)| {
+                    format!("OPTIONS {}", String::from_utf8_lossy(&path.to_php_string()))
+                })),
+                _ => ours.push(format!("GET {key}")),
+            }
+        }
+        // The new page's ID is the scratch database's.
+        let php: Vec<String> = php_paths(case)
+            .into_iter()
+            .map(|p| p.replace("/pages/11", "/pages/4"))
+            .collect();
+        assert_eq!(ours, php, "{path}");
     }
     let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary)
         .await
         .unwrap()
         .unwrap();
     let mut write = writer.begin().await.unwrap();
-    assert!(write.post(4).await.unwrap().is_none());
+    assert_eq!(write.post(4).await.unwrap().unwrap().post_type, "page");
     let lock = write
         .meta_value(hyscribe_db::Meta::Post, 1, "_edit_lock")
         .await
         .unwrap();
-    assert!(lock.is_none());
+    assert!(lock.is_some());
 }
 
 /// A database that fails before the editor's view begins ends it.

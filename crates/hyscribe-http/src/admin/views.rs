@@ -53,12 +53,12 @@ const SETTINGS: [&str; 7] = [
     "/hs-admin/options-privacy",
 ];
 
-/// What the view of `path` with `query` (`get` parsed) writes, and what the page
+/// What the view of `path` with `query` (`get` parsed) on `host` writes, and what the page
 /// reads after: the settings, the welcome panel's state.
 pub(super) fn plan(
     admin: &mut Admin,
     cookies: &[(Vec<u8>, Vec<u8>)],
-    (path, query): (&str, &str),
+    (path, query, host): (&str, &str, &str),
     get: &Value,
     now: i64,
 ) -> View {
@@ -103,14 +103,14 @@ pub(super) fn plan(
         draft: dashboard && needs_draft(admin),
         settings: updated && SETTINGS.contains(&path),
         rules: path == "/hs-admin/options-permalink",
-        editor: editor.filter(|target| answered_before(admin, target)),
+        editor: editor.filter(|target| answered_before(admin, target, host)),
     }
 }
 
 /// Whether the block editor's preloads that do not name its post or the
 /// theme's global styles post, which its view may write first, are all
 /// answered: only then does the view write.
-fn answered_before(admin: &Admin, target: &Target) -> bool {
+fn answered_before(admin: &Admin, target: &Target, host: &str) -> bool {
     let post = match target {
         Target::Edit(post) => (**post).clone(),
         Target::New(post_type) => Post {
@@ -135,7 +135,7 @@ fn answered_before(admin: &Admin, target: &Target) -> bool {
         "/wp/v2/themes?".to_string(),
     ];
     paths.retain(|(_, path)| !named.iter().any(|name| path.contains(name.as_str())));
-    crate::rest::preloads(admin.reads, admin.user.id, &paths).is_some()
+    crate::rest::preloads(admin.reads, (admin.user.id, host), &paths).is_some()
 }
 
 /// Whether the Quick Draft form needs a new auto-draft: the user may

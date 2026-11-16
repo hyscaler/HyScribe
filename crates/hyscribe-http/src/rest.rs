@@ -250,7 +250,7 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
 /// `None` where one is not ported.
 pub(crate) fn preloads(
     admin: &LoginReads,
-    user: u64,
+    (user, host): (u64, &str),
     paths: &[(&'static str, String)],
 ) -> Option<Value> {
     let mut reads = LoginReads::new(admin.site, Handle::current(), admin.now);
@@ -261,7 +261,12 @@ pub(crate) fn preloads(
         user,
         caps: OnceCell::new(),
     };
-    let answered = |method: &str, path: &str| match preload(&rest, user, method, path.as_bytes()) {
+    let answered = |method: &str, path: &str| match preload(
+        &rest,
+        (user, host.as_bytes(), admin.now),
+        method,
+        path.as_bytes(),
+    ) {
         Preloaded::Kept(data, headers) => Some(Some((data, headers))),
         Preloaded::Left => Some(None),
         Preloaded::NotPorted => None,

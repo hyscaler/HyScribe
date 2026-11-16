@@ -507,10 +507,10 @@ async fn write_bodies_are_read() {
 }
 
 /// The block editor's preloads for a post and a page as the administrator
-/// on the default install, which has no global styles post: what is not
-/// ported yet is the REST index.
+/// on the default install, which has no global styles post for the active
+/// theme to link: each is answered.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_editor_s_preloads_but_the_index_are_answered() {
+async fn the_editor_s_preloads_are_answered() {
     let dir = tempfile::tempdir().unwrap();
     let site = site(false, dir.path()).await;
     let handle = Handle::current();
@@ -535,21 +535,29 @@ async fn the_editor_s_preloads_but_the_index_are_answered() {
             let missing: Vec<&str> = paths
                 .iter()
                 .filter(|(method, path)| {
-                    preload(&rest, 1, method, path.as_bytes()) == Preloaded::NotPorted
+                    preload(
+                        &rest,
+                        (1, b"127.0.0.1:8081", now()),
+                        method,
+                        path.as_bytes(),
+                    ) == Preloaded::NotPorted
                 })
                 .map(|(_, path)| path.as_str())
                 .collect();
             // The active theme links the global styles post the view writes.
-            assert_eq!(missing.len(), 2, "{missing:?}");
-            assert_eq!(missing[0], "/wp/v2/themes?context=edit&status=active");
-            assert!(missing[1].starts_with("/?_fields="), "{missing:?}");
+            assert_eq!(missing, ["/wp/v2/themes?context=edit&status=active"]);
         }
         // Another answer is left out of the memo; an embedded one is kept.
         let paths = [
             ("GET", "/wp/v2/posts/999".to_string()),
             ("GET", "/wp/v2/types".to_string()),
         ];
-        let memo = preloads(&rest.reads, 1, &paths).unwrap();
+        let unported = [("GET", "/wp/v2/themes?status=inactive".to_string())];
+        assert_eq!(
+            preloads(&rest.reads, (1, "127.0.0.1:8081"), &unported),
+            None
+        );
+        let memo = preloads(&rest.reads, (1, "127.0.0.1:8081"), &paths).unwrap();
         let keys: Vec<Vec<u8>> = memo
             .as_array()
             .unwrap()
@@ -558,10 +566,20 @@ async fn the_editor_s_preloads_but_the_index_are_answered() {
             .collect();
         assert_eq!(keys, [b"/wp/v2/types".to_vec()]);
         assert_eq!(
-            preload(&rest, 1, "GET", b"/wp/v2/posts/999"),
+            preload(
+                &rest,
+                (1, b"127.0.0.1:8081", now()),
+                "GET",
+                b"/wp/v2/posts/999"
+            ),
             Preloaded::Left
         );
-        let embedded = preload(&rest, 1, "GET", b"/wp/v2/posts/1?_embed=author");
+        let embedded = preload(
+            &rest,
+            (1, b"127.0.0.1:8081", now()),
+            "GET",
+            b"/wp/v2/posts/1?_embed=author",
+        );
         assert!(
             matches!(embedded, Preloaded::Kept(data, _) if data.get_str("_embedded").is_some())
         );

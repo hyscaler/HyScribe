@@ -1205,7 +1205,11 @@ pub(crate) fn site_icon(reads: &LoginReads, size: i64) -> Option<Vec<u8>> {
 /// once every preload is answered; `None` before.
 fn block_editor(admin: &Admin, request: &Request) -> Option<Answer> {
     block_editor_with(admin, request, &|paths| {
-        crate::rest::preloads(admin.reads, admin.user.id, paths)
+        let host = request
+            .origin
+            .split_once("://")
+            .map_or(request.origin, |(_, host)| host);
+        crate::rest::preloads(admin.reads, (admin.user.id, host), paths)
     })
 }
 
@@ -1706,7 +1710,11 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                         let view = views::plan(
                             &mut admin,
                             &cookies,
-                            (uri.path(), uri.query().unwrap_or_default()),
+                            (
+                                uri.path(),
+                                uri.query().unwrap_or_default(),
+                                &String::from_utf8_lossy(host),
+                            ),
                             &get,
                             now,
                         );

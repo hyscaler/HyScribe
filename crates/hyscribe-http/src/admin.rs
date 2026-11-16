@@ -186,6 +186,9 @@ struct Admin<'a> {
     post_comments: RefCell<HashMap<u64, Vec<(hyscribe_model::Comment, String)>>>,
     /// The Quick Draft form's auto-draft this view wrote, if it did.
     draft: Option<u64>,
+    /// The block editor's post and global styles post this view wrote its
+    /// edit lock and first view for, and the lock.
+    edited: Option<(u64, u64, String)>,
     /// `show_welcome_panel` as this view's `?welcome=` saves it.
     welcome: Option<Vec<u8>>,
 }
@@ -204,6 +207,7 @@ impl<'a> Admin<'a> {
             uri: String::new(),
             post_comments: RefCell::default(),
             draft: None,
+            edited: None,
             welcome: None,
         }
     }
@@ -1193,6 +1197,43 @@ pub(crate) fn site_icon(reads: &LoginReads, size: i64) -> Option<Vec<u8>> {
 }
 
 /// The screen at `path` for `admin`, `None` for one not ported yet.
+/// The block editor's page of the post the view wrote its edit lock for,
+/// once every preload is answered; `None` before.
+fn block_editor(admin: &Admin, request: &Request) -> Option<Answer> {
+    block_editor_with(admin, request, &|paths| {
+        crate::rest::preloads(admin.reads, admin.user.id, paths)
+    })
+}
+
+/// What answers the block editor's preloads, `None` where one is not
+/// ported.
+type Preloads<'a> = dyn Fn(&[(&'static str, String)]) -> Option<Value> + 'a;
+
+/// [`block_editor`] with the preloads `preloads` answers.
+fn block_editor_with(admin: &Admin, request: &Request, preloads: &Preloads) -> Option<Answer> {
+    let (id, styles, lock) = admin.edited.as_ref()?;
+    let post = admin.full_post(*id)?;
+    let stylesheet = admin.site.option("stylesheet");
+    let edit_theme = admin.can("edit_theme_options");
+    let paths =
+        hyscribe_admin::editor::page::preload_paths(&post, *styles, edit_theme, &stylesheet);
+    let preloads = preloads(&paths)?;
+    let editing = hyscribe_admin::editor::form::Editing {
+        post: &post,
+        lock,
+        browser: request.browser,
+        uri: request.uri,
+    };
+    let page = hyscribe_admin::editor::page::editor_page(admin, &editing, &preloads, request);
+    Some(Answer::from_page(page))
+}
+
+impl hyscribe_admin::editor::EditorSite for Admin<'_> {
+    fn theme(&self) -> &hyscribe_render::theme::Theme {
+        &self.site.theme
+    }
+}
+
 fn screen(
     admin: &Admin,
     path: &str,
@@ -1272,9 +1313,10 @@ fn screen(
         // only the refusals.
         "/hs-admin/post" => {
             let args = AttachmentArgs::parse(query, admin.referer.clone())?;
-            attachment_edit(admin, &args, &request)?
+            attachment_edit(admin, &args, &request).or_else(|| block_editor(admin, &request))?
         }
-        "/hs-admin/post-new" => hyscribe_admin::editor::post_new(admin, query)?,
+        "/hs-admin/post-new" => hyscribe_admin::editor::post_new(admin, query)
+            .or_else(|| block_editor(admin, &request))?,
         // Their pages print the PHP and web server details HyScribe has no
         // equivalent for: refused as PHP refuses, else not ported.
         "/hs-admin/plugins" if !admin.can("activate_plugins") => Answer::from_page(None),
@@ -1644,7 +1686,13 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 };
                 match &site.writer {
                     Some(writer) => {
-                        let view = views::plan(&mut admin, &cookies, uri.path(), &get, now);
+                        let view = views::plan(
+                            &mut admin,
+                            &cookies,
+                            (uri.path(), uri.query().unwrap_or_default()),
+                            &get,
+                            now,
+                        );
                         views::viewed(&mut admin, writer, view, render)
                     }
                     None => render(&admin),

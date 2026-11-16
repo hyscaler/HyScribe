@@ -505,3 +505,46 @@ async fn write_bodies_are_read() {
     let response = send(&site, post(multipart), "--x--").await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
 }
+
+/// The block editor's preloads for a post and a page as the administrator
+/// on the default install, which has no global styles post: what is not
+/// ported yet is the REST index.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_editor_s_preloads_but_the_index_are_answered() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let handle = Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let mut reads = LoginReads::new(&site, handle, now());
+        reads.act_as(1, Vec::new());
+        let rest = Rest {
+            reads,
+            site: &site,
+            user: 1,
+            caps: OnceCell::new(),
+        };
+        for (id, kind) in [(1, "post"), (2, "page")] {
+            let post = Post {
+                id,
+                author: 1,
+                post_type: kind.into(),
+                ..Post::default()
+            };
+            let paths =
+                hyscribe_admin::editor::page::preload_paths(&post, 0, true, "twentytwentyfive");
+            let missing: Vec<&str> = paths
+                .iter()
+                .filter(|(method, path)| {
+                    preload(&rest, 1, method, path.as_bytes()) == Preloaded::NotPorted
+                })
+                .map(|(_, path)| path.as_str())
+                .collect();
+            // The active theme links the global styles post the view writes.
+            assert_eq!(missing.len(), 2, "{missing:?}");
+            assert_eq!(missing[0], "/wp/v2/themes?context=edit&status=active");
+            assert!(missing[1].starts_with("/?_fields="), "{missing:?}");
+        }
+    })
+    .await
+    .unwrap();
+}

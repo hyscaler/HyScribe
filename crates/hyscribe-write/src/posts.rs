@@ -378,19 +378,20 @@ pub enum Edited<'a> {
 
 /// What a view of the block editor writes, in PHP's order: a new post's
 /// auto-draft, the theme's global styles post its preloads name, the edit
-/// lock, and the custom CSS lookup; the edited post's ID. `theme` is the
-/// active theme's stylesheet and name.
+/// lock, and the custom CSS lookup; the edited post's ID and the global
+/// styles post's. `theme` is the active theme's stylesheet and name.
 pub async fn block_editor_view(
     write: &mut Write<'_>,
     ctx: &Context,
     edited: Edited<'_>,
     (stylesheet, name): (&str, &str),
-) -> Result<u64> {
+) -> Result<(u64, u64)> {
+    // The theme pattern cache transient PHP also writes is skipped.
     let id = match edited {
         Edited::New(post_type) => get_default_post_to_edit(write, ctx, post_type).await?,
         Edited::Existing(id) => id,
     };
-    get_user_global_styles_post_id(write, ctx, stylesheet).await?;
+    let styles = get_user_global_styles_post_id(write, ctx, stylesheet).await?;
     // `wp_set_post_lock()`.
     let lock = Value::String(format!("{}:{}", ctx.now, ctx.user).into_bytes());
     update_metadata(
@@ -403,7 +404,7 @@ pub async fn block_editor_view(
     )
     .await?;
     custom_css_post_lookup(write, stylesheet, name).await?;
-    Ok(id)
+    Ok((id, styles))
 }
 
 /// `wp_publish_post( $post )`, which cron's `publish_future_post` runs.

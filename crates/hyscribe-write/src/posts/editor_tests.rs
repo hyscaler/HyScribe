@@ -15,7 +15,7 @@ async fn view(
     conn: &mut Connection,
     ctx: &Context,
     edited: Edited<'_>,
-) -> std::result::Result<u64, String> {
+) -> std::result::Result<(u64, u64), String> {
     let writer = writer().await;
     let mut write = writer.begin_on(conn).await.map_err(|e| format!("{e:?}"))?;
     let id = block_editor_view(&mut write, ctx, edited, THEME)

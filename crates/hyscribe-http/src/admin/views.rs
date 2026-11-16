@@ -10,12 +10,15 @@
 use axum::http::StatusCode;
 use axum::response::Response;
 use hyscribe_admin::dashboard::DashboardSite;
+use hyscribe_admin::editor::page::preload_paths;
+use hyscribe_admin::editor::{Target, target};
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_db::{DbError, Write, Writer};
+use hyscribe_model::Post;
 use hyscribe_phpser::Value;
 use hyscribe_write::Error;
 use hyscribe_write::options::settings_errors_shown;
-use hyscribe_write::posts::Context;
+use hyscribe_write::posts::{Context, Edited, block_editor_view};
 use tokio::runtime::Handle;
 
 use super::saves::dashboard::{context, quick_press_draft, welcome};
@@ -35,6 +38,8 @@ pub(super) struct View {
     settings: bool,
     /// Whether the view is the Permalinks screen's, which refreshes the rules.
     rules: bool,
+    /// The block editor's post, for a page whose preloads are all answered.
+    editor: Option<Target>,
 }
 
 /// The Settings screens, whose `options-head.php` shows a save's notices.
@@ -48,12 +53,12 @@ const SETTINGS: [&str; 7] = [
     "/hs-admin/options-privacy",
 ];
 
-/// What the view of `path` with the query `get` writes, and what the page
+/// What the view of `path` with `query` (`get` parsed) writes, and what the page
 /// reads after: the settings, the welcome panel's state.
 pub(super) fn plan(
     admin: &mut Admin,
     cookies: &[(Vec<u8>, Vec<u8>)],
-    path: &str,
+    (path, query): (&str, &str),
     get: &Value,
     now: i64,
 ) -> View {
@@ -86,13 +91,51 @@ pub(super) fn plan(
     let updated = get
         .get_str("settings-updated")
         .is_some_and(|updated| !updated.is_empty());
+    let screen = match path {
+        "/hs-admin/post-new" => Some("post-new.php"),
+        "/hs-admin/post" => Some("post.php"),
+        _ => None,
+    };
+    let editor = screen.and_then(|screen| target(&*admin, screen, query));
     View {
         synced,
         welcome,
         draft: dashboard && needs_draft(admin),
         settings: updated && SETTINGS.contains(&path),
         rules: path == "/hs-admin/options-permalink",
+        editor: editor.filter(|target| answered_before(admin, target)),
     }
+}
+
+/// Whether the block editor's preloads that do not name its post or the
+/// theme's global styles post, which its view may write first, are all
+/// answered: only then does the view write.
+fn answered_before(admin: &Admin, target: &Target) -> bool {
+    let post = match target {
+        Target::Edit(post) => (**post).clone(),
+        Target::New(post_type) => Post {
+            post_type: post_type.clone(),
+            author: admin.user.id,
+            ..Post::default()
+        },
+    };
+    let stylesheet = admin.site.option("stylesheet");
+    let edit_theme = admin.can("edit_theme_options");
+    let mut paths = preload_paths(&post, 0, edit_theme, &stylesheet);
+    // A new post's routes, and the active theme's, which links the global
+    // styles post.
+    let route = if post.post_type == "page" {
+        "pages"
+    } else {
+        "posts"
+    };
+    let named = [
+        format!("/wp/v2/{route}/0"),
+        "/wp/v2/global-styles/0".to_string(),
+        "/wp/v2/themes?".to_string(),
+    ];
+    paths.retain(|(_, path)| !named.iter().any(|name| path.contains(name.as_str())));
+    crate::rest::preloads(admin.reads, admin.user.id, &paths).is_some()
 }
 
 /// Whether the Quick Draft form needs a new auto-draft: the user may
@@ -110,6 +153,7 @@ pub(super) fn quick_press(admin: &Admin) -> View {
         draft: needs_draft(admin),
         settings: false,
         rules: false,
+        editor: None,
     }
 }
 
@@ -160,6 +204,26 @@ pub(super) fn viewed(
             admin.site.constants,
         )
     };
+    // The block editor's view writes before its page reads what it wrote.
+    if let Some(target) = &view.editor {
+        let edited = match target {
+            Target::New(post_type) => Edited::New(post_type),
+            Target::Edit(post) => Edited::Existing(post.id),
+        };
+        let theme = (admin.site.option("stylesheet"), admin.site.theme.name());
+        let viewed = handle.block_on(async {
+            let mut write = writer.begin().await?;
+            let ids = block_editor_view(&mut write, &ctx, edited, (&theme.0, &theme.1)).await?;
+            write.commit().await?;
+            Ok::<_, Error>(ids)
+        });
+        match viewed {
+            Ok((id, styles)) => {
+                admin.edited = Some((id, styles, format!("{}:{}", ctx.now, ctx.user)))
+            }
+            Err(err) => return failed(admin, err),
+        }
+    }
     let first = view
         .draft
         .then(|| handle.block_on(async { written(writer.begin().await, &ctx, &view, true).await }));

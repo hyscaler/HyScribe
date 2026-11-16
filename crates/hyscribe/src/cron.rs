@@ -112,6 +112,8 @@ pub(crate) async fn task(
 ) {
     let mut failed = Vec::new();
     let mut ticks = tokio::time::interval(period);
+    // A run longer than the period is not followed by a burst of runs.
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
             _ = ticks.tick() => once(writer, settings, &microtime, &mut failed, out).await,

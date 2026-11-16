@@ -95,9 +95,10 @@ pub async fn wp_cron<'w>(
     if held + LOCK_TIMEOUT > gmt {
         return Ok(Ran::Locked);
     }
-    let ours = Some(lock_value(gmt));
-    let value = Value::String(ours.clone().unwrap_or_default());
+    let ours = lock_value(gmt);
+    let value = Value::String(ours.clone());
     set_transient(&mut write, "doing_cron", &value, 0).await?;
+    let ours = Some(ours);
     write.commit().await?;
     let mut done = Vec::new();
     for event in events {
@@ -116,10 +117,9 @@ pub async fn wp_cron<'w>(
         }
         done.push((event.job, result));
         if cron_lock(&mut begin().await?).await? != ours {
-            let stolen = true;
             return Ok(Ran::Done {
                 events: done,
-                stolen,
+                stolen: true,
             });
         }
     }
@@ -128,10 +128,9 @@ pub async fn wp_cron<'w>(
         delete_transient(&mut write, "doing_cron").await?;
     }
     write.commit().await?;
-    let stolen = false;
     Ok(Ran::Done {
         events: done,
-        stolen,
+        stolen: false,
     })
 }
 

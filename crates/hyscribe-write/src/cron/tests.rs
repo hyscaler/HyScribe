@@ -360,11 +360,13 @@ fn no_uploads() -> std::path::PathBuf {
 async fn the_loop_runs_hyscribe_s_hooks_and_leaves_the_rest_as_php_does() {
     let _one = ONE_AT_A_TIME.lock().await;
     let writer = &writer().await;
+    // One second for both, as PHP's run had: the loop's events are due at the setup's time.
+    let now = crate::now();
     let setup = async |conn: &mut Connection| {
         let id = missed(writer, conn).await?;
         trash(writer, conn).await?;
         transients(writer, conn).await?;
-        act(writer, conn, &admin(), async |w, ctx| {
+        act(writer, conn, &Context { now, ..admin() }, async |w, ctx| {
             let mut crons = Vec::new();
             for (hook, every) in [
                 ("wp_scheduled_delete", ("daily", 86_400)),
@@ -396,7 +398,7 @@ async fn the_loop_runs_hyscribe_s_hooks_and_leaves_the_rest_as_php_does() {
         .await
     };
     let action = async |conn: &mut Connection, ()| {
-        act(writer, conn, &cron(), async |w, ctx| {
+        act(writer, conn, &Context { now, ..cron() }, async |w, ctx| {
             for event in due(w, ctx.now).await? {
                 run(w, ctx, &no_uploads(), &event).await?;
             }

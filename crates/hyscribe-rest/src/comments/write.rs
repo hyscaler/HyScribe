@@ -12,9 +12,9 @@ use hyscribe_phpser::{Value, lookup, php_trim};
 
 use super::{ROUTE, get_comment, prepare};
 use crate::Context;
-use crate::posts::write::{Outcome, Plan, Write, Writing, date_with_gmt};
-use crate::request::{Arg, Params, Sanitize, arg, typed};
-use crate::response::{Response, RestError, object, text};
+use crate::posts::write::{Outcome, Plan, Write, Writing, date_with_gmt, invalid};
+use crate::request::{Arg, Params, Sanitize, arg, force_arg, typed};
+use crate::response::{Response, RestError, text};
 use crate::schema::validate_value_from_schema;
 
 /// What a create or update writes, unslashed: `$prepared_comment` where the
@@ -51,19 +51,19 @@ pub struct CommentSave {
     /// Whether the comment's user has `moderate_comments`, which approves
     /// a new comment.
     pub moderate_comments: bool,
-    /// Whether the current user has `manage_options` or `moderate_comments`,
-    /// which skips the flood check.
-    pub manage_options: bool,
+    /// Whether the current user may moderate or manage options, which
+    /// skips the flood check.
+    pub skip_flood: bool,
     /// Whether `wp_update_comment()` filters the content through kses.
     pub kses: bool,
 }
 
 /// `wp_get_comment_fields_max_lengths()` of the core tables.
 const MAX_LENGTHS: [(&str, usize); 4] = [
-    ("comment_author", 245),
-    ("comment_author_email", 100),
-    ("comment_author_url", 200),
-    ("comment_content", 65525),
+    ("comment_author_column_length", 245),
+    ("comment_author_email_column_length", 100),
+    ("comment_author_url_column_length", 200),
+    ("comment_content_column_length", 65525),
 ];
 
 /// The ported write of the route `regex`'s endpoint `index`, if any.
@@ -77,15 +77,12 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
     };
     Some(Writing {
         unported,
-        args: |_, _, args| args,
-        plan,
-        finish,
+        ..Writing::plain(plan, finish)
     })
 }
 
-/// `get_endpoint_args_for_item_schema()` of a create (with the defaults of
-/// `parent` and `post`) or an update; `author_ip`, whose format is not
-/// ported, and `meta` are not ported.
+/// `get_endpoint_args_for_item_schema()` of a create (with defaults) or an
+/// update; `author_ip`, whose format is not ported, and `meta` are not.
 pub(super) fn save_args(create: bool) -> Vec<Arg> {
     let string = r#"{"type":"string"}"#;
     let date = r#"{"type":"string","format":"date-time"}"#;
@@ -117,7 +114,7 @@ pub(super) fn save_args(create: bool) -> Vec<Arg> {
 pub(super) fn delete_args() -> Vec<Arg> {
     vec![
         typed("id", r#"{"type":"integer"}"#),
-        typed("force", r#"{"type":"boolean","default":false}"#),
+        force_arg(),
         typed("password", r#"{"type":"string"}"#),
     ]
 }
@@ -131,11 +128,6 @@ fn author_email(_: &Context, email: &Value) -> crate::schema::Checked<Value> {
         validate_value_from_schema(&email, &schema.unwrap_or_default(), "author_email")?;
     }
     Ok(email)
-}
-
-/// `WP_Error( $code, $message, array( 'status' => 400 ) )`.
-fn invalid(code: &'static str, message: &str) -> RestError {
-    RestError::status(code, message, 400)
 }
 
 /// `prepare_item_for_database()`, with the request's address and user
@@ -210,14 +202,8 @@ fn max_lengths(save: &CommentSave) -> Result<(), RestError> {
         &save.author_url,
         &save.content,
     ];
-    for ((field, max), value) in MAX_LENGTHS.into_iter().zip(fields) {
+    for ((code, max), value) in MAX_LENGTHS.into_iter().zip(fields) {
         if value.as_ref().is_some_and(|value| value.len() > max) {
-            let code = match field {
-                "comment_author" => "comment_author_column_length",
-                "comment_author_email" => "comment_author_email_column_length",
-                "comment_author_url" => "comment_author_url_column_length",
-                _ => "comment_content_column_length",
-            };
             return Err(invalid(
                 code,
                 "Comment field exceeds maximum length allowed.",
@@ -225,17 +211,6 @@ fn max_lengths(save: &CommentSave) -> Result<(), RestError> {
         }
     }
     Ok(())
-}
-
-/// The plan of `write` for the current user.
-fn plan(context: &Context, write: Write, previous: Value) -> Plan {
-    Plan {
-        user: context.user,
-        can_publish: false,
-        unfiltered_html: context.can("unfiltered_html"),
-        write,
-        previous,
-    }
 }
 
 /// `create_item()` up to `wp_allow_comment()`, which is written with it.
@@ -278,8 +253,12 @@ fn plan_create(context: &Context, params: &Params) -> Result<Plan, RestError> {
     max_lengths(&save)?;
     let user = save.user_id.unwrap_or_default();
     save.moderate_comments = user != 0 && context.site.can(user, "moderate_comments", &[]);
-    save.manage_options = context.can("manage_options") || context.can("moderate_comments");
-    Ok(plan(context, Write::Comment(Box::new(save)), Value::Null))
+    save.skip_flood = context.can("manage_options") || context.can("moderate_comments");
+    Ok(Plan::new(
+        context,
+        Write::Comment(Box::new(save)),
+        Value::Null,
+    ))
 }
 
 /// `update_item()` up to `wp_update_comment()`.
@@ -307,7 +286,11 @@ fn plan_update(context: &Context, params: &Params) -> Result<Plan, RestError> {
     let author = save.user_id.unwrap_or(comment.user_id);
     save.kses =
         !context.can("unfiltered_html") || !context.site.can(author, "unfiltered_html", &[]);
-    Ok(plan(context, Write::Comment(Box::new(save)), Value::Null))
+    Ok(Plan::new(
+        context,
+        Write::Comment(Box::new(save)),
+        Value::Null,
+    ))
 }
 
 /// `delete_item()` up to its write: deleted with `force`, else to the
@@ -319,7 +302,7 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
     edit.set("context", text("edit"));
     if params.get("force").is_some_and(|force| !force.is_empty()) {
         let previous = prepare(context, &edit, &row).data;
-        return Ok(plan(
+        return Ok(Plan::new(
             context,
             Write::DeleteComment(row.comment.id),
             previous,
@@ -329,15 +312,14 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
         let message = "The comment has already been trashed.";
         return Err(RestError::status("rest_already_trashed", message, 410));
     }
-    Ok(plan(
+    Ok(Plan::new(
         context,
         Write::TrashComment(row.comment.id),
         Value::Null,
     ))
 }
 
-/// The answer once written: the comment, a new one with `201` and its
-/// `Location` in the `edit` context only for moderators; a deleted
+/// The answer once written: the comment, a new one with `201`; a deleted
 /// comment's answer as it was; or PHP's error where it refused.
 fn finish(
     context: &Context,
@@ -366,8 +348,7 @@ fn finish(
         }
     };
     if let Write::DeleteComment(_) = plan.write {
-        let deleted = object([("deleted", Value::Bool(true)), ("previous", plan.previous)]);
-        return Ok(Response::new(deleted, 200));
+        return Ok(plan.deleted());
     }
     let created = matches!(&plan.write, Write::Comment(save) if save.id == 0);
     let edit = !created || context.can("moderate_comments");

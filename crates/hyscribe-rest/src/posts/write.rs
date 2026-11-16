@@ -114,6 +114,23 @@ pub struct Plan {
 }
 
 impl Plan {
+    /// The plan of `write` for the current user, `previous` its answer.
+    pub(crate) fn new(context: &Context, write: Write, previous: Value) -> Plan {
+        Plan {
+            user: context.user,
+            can_publish: false,
+            unfiltered_html: context.can("unfiltered_html"),
+            write,
+            previous,
+        }
+    }
+
+    /// A delete's answer: `deleted`, and the item as it was.
+    pub(crate) fn deleted(self) -> Response {
+        let deleted = object([("deleted", Value::Bool(true)), ("previous", self.previous)]);
+        Response::new(deleted, 200)
+    }
+
     /// Whether the plan writes nothing: an update giving no setting.
     pub(crate) fn writes_nothing(&self) -> bool {
         matches!(&self.write, Write::Settings(save) if save.options.is_empty())
@@ -151,6 +168,21 @@ pub(crate) struct Writing {
     pub(crate) finish: Finish,
 }
 
+impl Writing {
+    /// A write without arguments of its own to leave out or check.
+    pub(crate) fn plain(
+        plan: fn(&Context, &Params) -> Result<Plan, RestError>,
+        finish: Finish,
+    ) -> Writing {
+        Writing {
+            unported: |_| false,
+            args: |_, _, args| args,
+            plan,
+            finish,
+        }
+    }
+}
+
 /// The ported write of the route `regex`'s endpoint `index`, if any.
 pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
     let posts = ["/wp/v2/posts", "/wp/v2/pages"];
@@ -163,12 +195,7 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
     };
     match index {
         1 if posts.contains(&regex) || items.contains(&regex) => Some(save),
-        2 if items.contains(&regex) => Some(Writing {
-            unported: |_| false,
-            args: |_, _, args| args,
-            plan: plan_delete,
-            finish,
-        }),
+        2 if items.contains(&regex) => Some(Writing::plain(plan_delete, finish)),
         _ => None,
     }
 }
@@ -189,7 +216,7 @@ fn status_args(context: &Context, params: &Params, mut args: Vec<Arg>) -> Vec<Ar
 }
 
 /// `WP_Error( $code, $message, array( 'status' => 400 ) )`.
-fn invalid(code: &'static str, message: &str) -> RestError {
+pub(crate) fn invalid(code: &'static str, message: &str) -> RestError {
     RestError::status(code, message, 400)
 }
 
@@ -523,8 +550,7 @@ fn finish(
         }
     };
     if let Write::Delete(_) = plan.write {
-        let deleted = object([("deleted", Value::Bool(true)), ("previous", plan.previous)]);
-        return Ok(Response::new(deleted, 200));
+        return Ok(plan.deleted());
     }
     let kind = Kind::of(params.route);
     params.set("context", text("edit"));

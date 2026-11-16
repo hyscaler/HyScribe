@@ -4,11 +4,10 @@
 //! (`get_collection_params()`), a single item's, and a write's.
 
 use hyscribe_phpser::{Value, json_decode};
-use hyscribe_render::formatting::sanitize_title;
 
 use super::Kind;
 use crate::Context;
-use crate::request::{Arg, Sanitize, arg, string_arg, typed};
+use crate::request::{Arg, Sanitize, arg, force_arg, slug, string_arg, typed};
 use crate::response::{list, text};
 use crate::schema::{Checked, Refusal, validate_value_from_schema};
 use crate::types::context_arg;
@@ -160,7 +159,6 @@ pub(super) fn save(kind: Kind) -> Vec<Arg> {
     }
     let value = |name, schema| arg(name, schema, true, Sanitize::Value);
     let given = |name| arg(name, RAW, false, Sanitize::Endpoint);
-    let slug = |_: &Context, slug: &Value| Ok(text(sanitize_title(&slug.to_php_string())));
     let mut args = vec![
         value("date", DATE),
         value("date_gmt", DATE),
@@ -209,10 +207,7 @@ pub(super) fn save(kind: Kind) -> Vec<Arg> {
 
 /// A post's or page's delete: `force`, false unless given.
 pub(super) fn delete() -> Vec<Arg> {
-    vec![
-        id(),
-        typed("force", r#"{"type":"boolean","default":false}"#),
-    ]
+    vec![id(), force_arg()]
 }
 
 /// A single item's arguments for GET.

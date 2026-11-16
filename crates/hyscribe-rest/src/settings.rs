@@ -57,24 +57,26 @@ fn option_and_schema(setting: &Value) -> (String, Value) {
 /// `get_endpoint_args_for_item_schema( WP_REST_Server::EDITABLE )`: each
 /// setting by its schema, without its default; null is taken as given.
 fn args() -> Vec<Arg> {
-    let names: &'static [(Key, Value)] = settings();
-    let arg = |(name, setting): &'static (Key, Value)| {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    let names = NAMES.get_or_init(|| {
+        let names = settings().iter().map(|(name, _)| name.to_php_string());
+        names
+            .map(|name| String::from_utf8_lossy(&name).into_owned())
+            .collect()
+    });
+    let arg = |(name, (_, setting)): (&'static String, &'static (Key, Value))| {
         let mut schema = option_and_schema(setting).1;
         if let Value::Array(entries) = &mut schema {
             entries.retain(|(key, _)| key.to_php_string() != b"default");
         }
-        let name = match name {
-            Key::String(name) => std::str::from_utf8(name).unwrap_or_default(),
-            Key::Int(_) => "",
-        };
         Arg {
-            name,
+            name: name.as_str(),
             schema,
             validate: true,
             sanitize: Sanitize::Nullable,
         }
     };
-    names.iter().map(arg).collect()
+    names.iter().zip(settings()).map(arg).collect()
 }
 
 /// A setting an update writes.
@@ -101,12 +103,7 @@ pub struct SettingsSave {
 
 /// The ported write of the route `regex`'s endpoint `index`, if any.
 pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
-    (regex == "/wp/v2/settings" && index == 1).then_some(Writing {
-        unported: |_| false,
-        args: |_, _, args| args,
-        plan,
-        finish,
-    })
+    (regex == "/wp/v2/settings" && index == 1).then(|| Writing::plain(plan, finish))
 }
 
 /// `update_item()` up to its writes: each setting the request gives, in
@@ -139,13 +136,11 @@ fn plan(context: &Context, params: &Params) -> Result<Plan, RestError> {
             default: default.cloned(),
         });
     }
-    Ok(Plan {
-        user: context.user,
-        can_publish: false,
-        unfiltered_html: false,
-        write: Write::Settings(Box::new(save)),
-        previous: Value::Null,
-    })
+    Ok(Plan::new(
+        context,
+        Write::Settings(Box::new(save)),
+        Value::Null,
+    ))
 }
 
 /// The answer once written: the settings as they are, or PHP's error for
@@ -168,7 +163,7 @@ fn finish(
         });
     }
     match outcome {
-        Outcome::Cached(cached) => cached_item(context, params, &cached),
+        Outcome::Cached(cached) => cached_item(context, &cached),
         _ => item(context, params),
     }
 }
@@ -183,17 +178,13 @@ fn permission(context: &Context, _: &Params) -> Result<(), RestError> {
 }
 
 /// `get_item()`: each option, or its default, as its schema takes it.
-fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
-    cached_item(context, params, &[])
+fn item(context: &Context, _: &Params) -> Result<Response, RestError> {
+    cached_item(context, &[])
 }
 
 /// [`item`] with the values of `cached` for their options, as PHP's
 /// options cache holds them once written.
-fn cached_item(
-    context: &Context,
-    _: &Params,
-    cached: &[(String, Value)],
-) -> Result<Response, RestError> {
+fn cached_item(context: &Context, cached: &[(String, Value)]) -> Result<Response, RestError> {
     let data = settings().iter().map(|(name, setting)| {
         let (option, schema) = option_and_schema(setting);
         let written = cached.iter().find(|(known, _)| *known == option);

@@ -288,6 +288,18 @@ pub(crate) fn required(name: &'static str) -> Arg {
     arg(name, r#"{"required":true}"#, false, Sanitize::Endpoint)
 }
 
+/// `sanitize_title()` of a slug, as the controllers' `sanitize_slug()`.
+pub(crate) fn slug(_: &Context, slug: &Value) -> Checked<Value> {
+    Ok(text(hyscribe_render::formatting::sanitize_title(
+        &slug.to_php_string(),
+    )))
+}
+
+/// A delete's `force`, false unless given.
+pub(crate) fn force_arg() -> Arg {
+    typed("force", r#"{"type":"boolean","default":false}"#)
+}
+
 /// `get_collection_params()`: the context, the page, its size and the
 /// search.
 pub(crate) fn collection_args() -> Vec<Arg> {

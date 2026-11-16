@@ -198,9 +198,14 @@ pub(super) async fn replay_writes(
     cases.len()
 }
 
-/// `target` asked of `site` by user 1 with the JSON `body`, past its
-/// checks: the write it plans.
-async fn planned(site: &Arc<Site>, method: &'static str, target: &str, body: &str) -> Pending {
+/// `target` asked of `site` by user 1 with the JSON `body`, from the
+/// address and user agent of `client`: what `then` makes of the request.
+async fn as_admin<T: Send + 'static>(
+    site: &Arc<Site>,
+    (method, target, body): (&'static str, &str, &str),
+    client: (&'static [u8], Option<&'static [u8]>),
+    then: impl FnOnce(&Rest, &hyscribe_rest::Request) -> T + Send + 'static,
+) -> T {
     let (site, handle) = (Arc::clone(site), Handle::current());
     let (target, body) = (target.to_string(), body.to_string());
     tokio::task::spawn_blocking(move || {
@@ -227,21 +232,47 @@ async fn planned(site: &Arc<Site>, method: &'static str, target: &str, body: &st
             cookie_user: 1,
             origin: None,
             nonce: Some(nonce.as_bytes()),
-            remote_addr: b"",
-            user_agent: None,
+            remote_addr: client.0,
+            user_agent: client.1,
             method_override: None,
             content_type: Some(b"application/json"),
             body: body.as_bytes(),
         };
-        match hyscribe_rest::answer(&rest, &request) {
-            hyscribe_rest::Answer::Write(pending) => *pending,
-            hyscribe_rest::Answer::Served(served) => {
-                panic!("{}", String::from_utf8_lossy(&served.body))
-            }
-        }
+        then(&rest, &request)
     })
     .await
     .unwrap()
+}
+
+/// `target` asked of `site` by user 1 with the JSON `body`, past its
+/// checks: the write it plans.
+async fn planned(site: &Arc<Site>, method: &'static str, target: &str, body: &str) -> Pending {
+    let then = |rest: &Rest, request: &hyscribe_rest::Request| match hyscribe_rest::answer(
+        rest, request,
+    ) {
+        hyscribe_rest::Answer::Write(pending) => *pending,
+        hyscribe_rest::Answer::Served(served) => {
+            panic!("{}", String::from_utf8_lossy(&served.body))
+        }
+    };
+    as_admin(site, (method, target, body), (b"", None), then).await
+}
+
+/// The answer to `target` asked as [`planned`] once the write came to
+/// `outcome`: its status and body.
+async fn answered(
+    site: &Arc<Site>,
+    asked: (&'static str, &str, &str),
+    outcome: Outcome,
+) -> (u16, String) {
+    let then = move |rest: &Rest, request: &hyscribe_rest::Request| {
+        let hyscribe_rest::Answer::Write(pending) = hyscribe_rest::answer(rest, request) else {
+            panic!("served at once")
+        };
+        let served = hyscribe_rest::written(rest, request, *pending, outcome);
+        (served.status, String::from_utf8(served.body).unwrap())
+    };
+    as_admin(site, asked, (b"", None), then).await
 }
 
 /// What `plan` writes on `conn`, once each statement budget short of it
@@ -511,6 +542,181 @@ async fn user_writes_are_php_s() {
         let report = check_writes(&fixture_database(), golden, setup, action).await;
         report.unwrap();
     }
+}
+
+/// The errors PHP answers where a write function refused, which no
+/// request of the goldens reaches.
+#[tokio::test(flavor = "multi_thread")]
+async fn refused_writes_are_answered_as_php_answers_them() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with(include_str!(
+        "../../../../../reference/rest/term-writes.sql"
+    ))
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let error = |code: &str, message: &str, status: Option<u16>| {
+        let data = status.map_or("null".to_string(), |status| {
+            format!(r#"{{"status":{status}}}"#)
+        });
+        let code = format!(r#"{{"code":"{code}","message":"{message}","data":{data}}}"#);
+        (status.unwrap_or(500), code)
+    };
+    let term = ("POST", "/?rest_route=/wp/v2/tags/2", r#"{"name":"x"}"#);
+    for (code, message) in [
+        ("invalid_term_name", "Invalid term name."),
+        ("missing_parent", "Parent term does not exist."),
+        ("invalid_term", "Empty Term."),
+    ] {
+        let refused = answered(&site, term, Outcome::Refused(code)).await;
+        assert_eq!(refused, error(code, message, None));
+    }
+    let deleted = ("DELETE", "/?rest_route=/wp/v2/tags/2&force=1", "");
+    let cannot = |what: &str| {
+        error(
+            "rest_cannot_delete",
+            &format!("The {what} cannot be deleted."),
+            Some(500),
+        )
+    };
+    let refused = answered(&site, deleted, Outcome::Refused("rest_cannot_delete")).await;
+    assert_eq!(refused, cannot("term"));
+    let comment = (
+        "POST",
+        "/?rest_route=/wp/v2/comments",
+        r#"{"post":1,"content":"x"}"#,
+    );
+    let flood = "You are posting comments too quickly. Slow down.";
+    let refused = answered(&site, comment, Outcome::Refused("comment_flood")).await;
+    assert_eq!(refused, error("comment_flood", flood, Some(400)));
+    let edit = (
+        "POST",
+        "/?rest_route=/wp/v2/comments/1",
+        r#"{"content":"x"}"#,
+    );
+    let refused = answered(&site, edit, Outcome::Refused("rest_comment_failed_edit")).await;
+    assert_eq!(
+        refused,
+        error(
+            "rest_comment_failed_edit",
+            "Updating comment failed.",
+            Some(500)
+        )
+    );
+    let trash = ("DELETE", "/?rest_route=/wp/v2/comments/1", "");
+    let refused = answered(&site, trash, Outcome::Refused("rest_cannot_delete")).await;
+    assert_eq!(refused, cannot("comment"));
+    let user = ("POST", "/?rest_route=/wp/v2/users/702", r#"{"name":"x"}"#);
+    for (code, message) in [
+        (
+            "empty_user_login",
+            "Cannot create a user with an empty login name.",
+        ),
+        (
+            "user_login_too_long",
+            "Username may not be longer than 60 characters.",
+        ),
+        (
+            "empty_user_nicename",
+            "Cannot create a user with an empty nicename.",
+        ),
+        (
+            "user_nicename_too_long",
+            "Nicename may not be longer than 50 characters.",
+        ),
+        (
+            "user_url_too_long",
+            "User URL may not be longer than 100 characters.",
+        ),
+        ("invalid_user_id", "Invalid user ID."),
+    ] {
+        let refused = answered(&site, user, Outcome::Refused(code)).await;
+        assert_eq!(refused, error(code, message, None));
+    }
+    let delete = (
+        "DELETE",
+        "/?rest_route=/wp/v2/users/704&force=1&reassign=1",
+        "",
+    );
+    let refused = answered(&site, delete, Outcome::Refused("rest_cannot_delete")).await;
+    assert_eq!(refused, cannot("user"));
+    // A comment takes the request's address and user agent.
+    let client = (&b"192.0.2.1"[..], Some(&b"Agent/2.0"[..]));
+    let plan = |rest: &Rest, request: &hyscribe_rest::Request| match hyscribe_rest::answer(
+        rest, request,
+    ) {
+        hyscribe_rest::Answer::Write(pending) => pending.plan.write,
+        hyscribe_rest::Answer::Served(_) => unreachable!(),
+    };
+    let write = as_admin(&site, comment, client, plan).await;
+    let hyscribe_rest::Write::Comment(save) = write else {
+        unreachable!()
+    };
+    assert_eq!(
+        (&save.author_ip[..], save.agent.as_deref()),
+        (&b"192.0.2.1"[..], Some(&b"Agent/2.0"[..]))
+    );
+}
+
+/// What the write functions refuse past the checks, as another request
+/// gets in first, and each status a comment's write may ask for.
+#[tokio::test(flavor = "multi_thread")]
+async fn writes_refused_past_their_checks() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh().await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let pending = planned(&site, "PUT", "/?rest_route=/wp/v2/categories/1", "{}").await;
+    let writer = site.writer.as_ref().unwrap();
+    let act = async |write: hyscribe_rest::Write| {
+        let mut plan = pending.plan.clone();
+        plan.write = write;
+        let ctx = crate::rest::writes::context(&site, &plan, now());
+        crate::rest::writes::act(writer.begin().await, &plan, &ctx)
+            .await
+            .unwrap()
+    };
+    let term = |id, name: &str, parent| {
+        let save = hyscribe_rest::TermSave {
+            taxonomy: "category",
+            id,
+            name: Some(name.as_bytes().to_vec()),
+            parent,
+            ..hyscribe_rest::TermSave::default()
+        };
+        hyscribe_rest::Write::Term(Box::new(save))
+    };
+    for (write, refused) in [
+        (term(0, "<b></b>", None), "invalid_term_name"),
+        (term(0, "Orphan", Some(999)), "missing_parent"),
+        (term(999, "Gone", None), "invalid_term"),
+    ] {
+        assert_eq!(act(write).await, Outcome::Refused(refused));
+    }
+    let comment = |id, status: &str| {
+        let save = hyscribe_rest::CommentSave {
+            id,
+            post_id: Some(1),
+            author: Some(b"Reader".to_vec()),
+            author_email: Some(b"reader@example.test".to_vec()),
+            author_ip: b"192.0.2.9".to_vec(),
+            content: (id == 0).then(|| format!("A comment to {status}").into_bytes()),
+            status: Some(status.as_bytes().to_vec()),
+            ..hyscribe_rest::CommentSave::default()
+        };
+        hyscribe_rest::Write::Comment(Box::new(save))
+    };
+    let failed = Outcome::Refused("rest_comment_failed_edit");
+    assert_eq!(act(comment(999, "hold")).await, failed);
+    let Outcome::Written(id) = act(comment(0, "trash")).await else {
+        panic!("not written")
+    };
+    for status in ["untrash", "spam", "unspam", "approved", "approve", "bogus"] {
+        assert_eq!(act(comment(id, status)).await, Outcome::Written(id));
+    }
+    let flood = Outcome::Refused("comment_flood");
+    assert_eq!(act(comment(0, "hold")).await, flood);
+    fresh().await;
 }
 
 /// The terms' and settings' writes leave the rows PHP's leave.

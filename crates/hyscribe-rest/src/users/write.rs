@@ -9,13 +9,13 @@
 
 use hyscribe_model::UserQuery;
 use hyscribe_phpser::{Key, Value};
-use hyscribe_render::formatting::{sanitize_title, sanitize_user_strict};
+use hyscribe_render::formatting::sanitize_user_strict;
 
 use super::{ITEM, ME, ROUTE, as_me, get_user, prepare};
 use crate::Context;
-use crate::posts::write::{Outcome, Plan, Write, Writing};
-use crate::request::{Arg, Params, Sanitize, arg, typed};
-use crate::response::{Response, RestError, object, text};
+use crate::posts::write::{Outcome, Plan, Write, Writing, invalid};
+use crate::request::{Arg, Params, Sanitize, arg, force_arg, slug, typed};
+use crate::response::{Response, RestError, text};
 use crate::schema::{Checked, Refusal};
 
 /// What a create or update saves, unslashed: `$prepared_user` where the
@@ -58,12 +58,7 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
         (ITEM | ME, 2) => plan_delete,
         _ => return None,
     };
-    Some(Writing {
-        unported: |_| false,
-        args: |_, _, args| args,
-        plan,
-        finish,
-    })
+    Some(Writing::plain(plan, finish))
 }
 
 /// `get_endpoint_args_for_item_schema()` of a create (`required` names)
@@ -75,7 +70,6 @@ pub(super) fn save_args(create: bool) -> Vec<Arg> {
     };
     let string = r#"{"type":"string"}"#;
     let field = |name| arg(name, string, true, Sanitize::TextField);
-    let slug = |_: &Context, slug: &Value| Ok(text(sanitize_title(&slug.to_php_string())));
     vec![
         arg(
             "username",
@@ -129,7 +123,7 @@ pub(super) fn delete_args(me: bool) -> Vec<Arg> {
     if !me {
         args.push(typed("id", r#"{"type":"integer"}"#));
     }
-    args.push(typed("force", r#"{"type":"boolean","default":false}"#));
+    args.push(force_arg());
     let reassign = r#"{"type":"integer","required":true}"#;
     args.push(arg(
         "reassign",
@@ -148,7 +142,8 @@ fn refused<T>(code: &'static str, message: &str) -> Checked<T> {
 /// `check_username()`: `validate_username()`, with no login made illegal.
 fn username(_: &Context, value: &Value) -> Checked<Value> {
     let username = value.to_php_string();
-    if username.is_empty() || sanitize_user_strict(&username) != username {
+    // `validate_username()`, whose `empty()` refuses `0` too.
+    if Value::String(username.clone()).is_empty() || sanitize_user_strict(&username) != username {
         let message = "This username is invalid because it uses illegal characters. Please enter a valid username.";
         return refused("rest_user_invalid_username", message);
     }
@@ -177,11 +172,6 @@ fn reassign_param(_: &Context, value: &Value) -> Checked<Value> {
         return Ok(Value::Bool(false));
     }
     refused("rest_invalid_param", "Invalid user parameter(s).")
-}
-
-/// `WP_Error( $code, $message, array( 'status' => 400 ) )`.
-fn invalid(code: &'static str, message: &str) -> RestError {
-    RestError::status(code, message, 400)
 }
 
 /// The roles the request gives, as strings.
@@ -235,17 +225,6 @@ fn prepared(params: &Params, id: u64) -> UserSave {
     }
 }
 
-/// The plan of `write` for the current user.
-fn plan(context: &Context, write: Write, previous: Value) -> Plan {
-    Plan {
-        user: context.user,
-        can_publish: false,
-        unfiltered_html: false,
-        write,
-        previous,
-    }
-}
-
 /// `create_item()` up to `wp_insert_user()`.
 fn plan_create(context: &Context, params: &Params) -> Result<Plan, RestError> {
     if params.get("id").is_some_and(|id| !id.is_empty()) {
@@ -254,17 +233,7 @@ fn plan_create(context: &Context, params: &Params) -> Result<Plan, RestError> {
     let roles = roles(params).unwrap_or_default();
     check_roles(context, None, &roles)?;
     let save = prepared(params, 0);
-    Ok(plan(context, Write::User(Box::new(save)), Value::Null))
-}
-
-/// The users `query` finds, by ID.
-fn found(context: &Context, query: UserQuery) -> Vec<u64> {
-    context
-        .site
-        .users(&query)
-        .iter()
-        .map(|user| user.id)
-        .collect()
+    Ok(Plan::new(context, Write::User(Box::new(save)), Value::Null))
 }
 
 /// `update_item()` up to `wp_update_user()`, `me` as the current user.
@@ -306,7 +275,7 @@ fn plan_update(context: &Context, params: &Params) -> Result<Plan, RestError> {
             nicenames: vec![slug],
             ..UserQuery::default()
         };
-        if !found(context, query).is_empty() {
+        if !context.site.users(&query).is_empty() {
             return Err(invalid("rest_user_invalid_slug", "Invalid slug."));
         }
     }
@@ -317,7 +286,7 @@ fn plan_update(context: &Context, params: &Params) -> Result<Plan, RestError> {
         return Err(RestError::not_ported());
     }
     let save = prepared(params, user.id);
-    Ok(plan(context, Write::User(Box::new(save)), Value::Null))
+    Ok(Plan::new(context, Write::User(Box::new(save)), Value::Null))
 }
 
 /// The parameters of `me` as the current user's, others as they are.
@@ -350,7 +319,7 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
     let mut edit = params.clone();
     edit.set("context", text("edit"));
     let previous = prepare(context, &edit, &user).data;
-    Ok(plan(
+    Ok(Plan::new(
         context,
         Write::DeleteUser(user.id, reassign),
         previous,
@@ -387,9 +356,8 @@ fn refusal(plan: &Plan, outcome: Outcome) -> RestError {
     }
 }
 
-/// The answer once written: the user in the `edit` context, a new one with
-/// `201` and its `Location`; a deleted user's answer as it was; or PHP's
-/// error where it refused.
+/// The answer once written: the user, a new one with `201`; a deleted
+/// user's answer as it was; or PHP's error where it refused.
 fn finish(
     context: &Context,
     params: &mut Params,
@@ -400,8 +368,7 @@ fn finish(
         return Err(refusal(&plan, outcome));
     };
     if let Write::DeleteUser(..) = plan.write {
-        let deleted = object([("deleted", Value::Bool(true)), ("previous", plan.previous)]);
-        return Ok(Response::new(deleted, 200));
+        return Ok(plan.deleted());
     }
     params.set("context", text("edit"));
     let user = context.site.user(id).unwrap_or_default();

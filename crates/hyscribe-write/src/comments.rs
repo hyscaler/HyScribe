@@ -235,9 +235,8 @@ pub async fn new_comment(
     steps.finish(Ok(Ok(id)))
 }
 
-/// The REST API's create: `wp_allow_comment()` of `comment` as given, then
-/// `wp_insert_comment( wp_filter_comment() )`, without `wp_new_comment()`'s
-/// checks of the parent, address and user agent or its second approval.
+/// The REST API's create: `wp_allow_comment()`, then `wp_insert_comment(
+/// wp_filter_comment() )`, without `wp_new_comment()`'s other checks.
 pub async fn allow_and_insert_comment(
     write: &mut Write<'_>,
     context: Context<'_>,

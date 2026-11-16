@@ -8,12 +8,11 @@
 
 use hyscribe_model::{Term, TermQuery};
 use hyscribe_phpser::Value;
-use hyscribe_render::formatting::sanitize_title;
 
 use super::{get_term, hierarchical, items_route_of, prepare, taxonomy};
 use crate::Context;
-use crate::posts::write::{Outcome, Plan, Write, Writing};
-use crate::request::{Arg, Params, Sanitize, arg, typed};
+use crate::posts::write::{Outcome, Plan, Write, Writing, invalid};
+use crate::request::{Arg, Params, Sanitize, arg, force_arg, slug, typed};
 use crate::response::{Response, RestError, int, object, text};
 
 /// What a create or update saves, unslashed: `wp_insert_term()`'s or
@@ -39,27 +38,21 @@ const WRITTEN: [&str; 2] = ["category", "post_tag"];
 
 /// The ported write of the route `regex`'s endpoint `index`, if any.
 pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
-    let single = match regex {
-        "/wp/v2/categories" | "/wp/v2/tags" => false,
-        "/wp/v2/categories/(?P<id>[\\d]+)" | "/wp/v2/tags/(?P<id>[\\d]+)" => true,
+    let items = ["/wp/v2/categories", "/wp/v2/tags"];
+    let single = [
+        "/wp/v2/categories/(?P<id>[\\d]+)",
+        "/wp/v2/tags/(?P<id>[\\d]+)",
+    ];
+    let plan = match index {
+        1 if items.contains(&regex) || single.contains(&regex) => plan_save,
+        2 if single.contains(&regex) => plan_delete,
         _ => return None,
     };
-    let plan = match (single, index) {
-        (_, 1) => plan_save,
-        (true, 2) => plan_delete,
-        _ => return None,
-    };
-    Some(Writing {
-        unported: |_| false,
-        args: |_, _, args| args,
-        plan,
-        finish,
-    })
+    Some(Writing::plain(plan, finish))
 }
 
-/// `get_endpoint_args_for_item_schema()` of a create (`required` names)
-/// or an update of `taxonomy`'s terms, which only categories and tags
-/// take; `meta` is not ported.
+/// `get_endpoint_args_for_item_schema()` of a create or update, for
+/// categories and tags only; `meta` is not ported.
 pub(super) fn save_args(taxonomy: &str, create: bool) -> Vec<Arg> {
     if !WRITTEN.contains(&taxonomy) {
         return create
@@ -73,7 +66,6 @@ pub(super) fn save_args(taxonomy: &str, create: bool) -> Vec<Arg> {
     } else {
         string
     };
-    let slug = |_: &Context, slug: &Value| Ok(text(sanitize_title(&slug.to_php_string())));
     let mut args = vec![
         arg("description", string, true, Sanitize::Value),
         arg("name", name, true, Sanitize::TextField),
@@ -98,10 +90,7 @@ pub(super) fn save_args(taxonomy: &str, create: bool) -> Vec<Arg> {
 
 /// A term's delete: `force`, false unless given.
 pub(super) fn delete_args() -> Vec<Arg> {
-    vec![
-        typed("id", r#"{"type":"integer"}"#),
-        typed("force", r#"{"type":"boolean","default":false}"#),
-    ]
+    vec![typed("id", r#"{"type":"integer"}"#), force_arg()]
 }
 
 /// `get_term( $id, $taxonomy )` of an ID the request gives.
@@ -112,11 +101,6 @@ fn find(context: &Context, taxonomy: &str, id: i64) -> Option<Term> {
         ..TermQuery::default()
     };
     context.site.terms(&query).into_iter().next()
-}
-
-/// `WP_Error( $code, $message, array( 'status' => 400 ) )`.
-fn invalid(code: &'static str, message: &str) -> RestError {
-    RestError::status(code, message, 400)
 }
 
 /// `create_item()` and `update_item()` up to their writes, with
@@ -148,18 +132,7 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
         description: given("description"),
         parent: parent.map(|parent| u64::try_from(parent).unwrap_or_default()),
     };
-    Ok(plan(context, Write::Term(Box::new(save)), Value::Null))
-}
-
-/// The plan of `write` for the current user.
-fn plan(context: &Context, write: Write, previous: Value) -> Plan {
-    Plan {
-        user: context.user,
-        can_publish: false,
-        unfiltered_html: false,
-        write,
-        previous,
-    }
+    Ok(Plan::new(context, Write::Term(Box::new(save)), Value::Null))
 }
 
 /// `delete_item()` up to its write: terms are deleted only with `force`.
@@ -174,12 +147,11 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
     view.set("context", text("view"));
     let previous = prepare(context, &view, &term).data;
     let write = Write::DeleteTerm(taxonomy(params), term.id);
-    Ok(plan(context, write, previous))
+    Ok(Plan::new(context, write, previous))
 }
 
-/// The answer once written: the term in the `edit` context, a new one
-/// with `201` and its `Location`; a deleted term's answer as it was; or
-/// the error `wp_insert_term()` or `wp_update_term()` gave.
+/// The answer once written: the term, a new one with `201`; a deleted
+/// term's answer as it was; or a term function's error.
 fn finish(
     context: &Context,
     params: &mut Params,
@@ -212,11 +184,11 @@ fn finish(
         }
     };
     if let Write::DeleteTerm(..) = plan.write {
-        let deleted = object([("deleted", Value::Bool(true)), ("previous", plan.previous)]);
-        return Ok(Response::new(deleted, 200));
+        return Ok(plan.deleted());
     }
     params.set("context", text("edit"));
-    let term = get_term_by_id(context, params, id);
+    let id_param = i64::try_from(id).unwrap_or_default();
+    let term = find(context, taxonomy(params), id_param).unwrap_or_default();
     let mut response = prepare(context, params, &term);
     if matches!(plan.write, Write::Term(save) if save.id == 0) {
         response.status = 201;
@@ -224,12 +196,6 @@ fn finish(
         response.header("Location", &context.rest_url(&format!("{route}/{id}")));
     }
     Ok(response)
-}
-
-/// The term `id` of the route's taxonomy, written.
-fn get_term_by_id(context: &Context, params: &Params, id: u64) -> Term {
-    let id = i64::try_from(id).unwrap_or_default();
-    find(context, taxonomy(params), id).unwrap_or_default()
 }
 
 /// A `WP_Error` a term function gave, with no data: sent with 500.

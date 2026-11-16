@@ -169,9 +169,8 @@ async fn written(write: &mut Write<'_>, plan: &Plan, ctx: &Context) -> Result<Ou
     }
 }
 
-/// `create_item()` or `update_item()` of a user from `wp_insert_user()` or
-/// `wp_update_user()` on, its fields slashed as `wp_slash()` gives them,
-/// then each role added; PHP's refusals by their codes.
+/// A user's create or update from `wp_insert_user()` or `wp_update_user()`
+/// on, its fields slashed, then each role added.
 async fn user_saved(write: &mut Write<'_>, save: &UserSave) -> Result<Outcome, Error> {
     let slashed = |field: &Option<Vec<u8>>| field.as_deref().map(addslashes);
     let data = UserData {
@@ -213,9 +212,8 @@ fn comments_context(ctx: &Context) -> hyscribe_write::comments::Context<'_> {
     }
 }
 
-/// `create_item()` of a comment from `wp_allow_comment()` on, or
-/// `update_item()` from `wp_update_comment()` on, then
-/// `handle_status_param()`.
+/// A comment's create from `wp_allow_comment()` on, or update from
+/// `wp_update_comment()` on, then `handle_status_param()`.
 async fn comment_saved(
     write: &mut Write<'_>,
     save: &CommentSave,
@@ -247,7 +245,7 @@ async fn comment_saved(
         };
         let commenter = Commenter {
             moderate_comments: save.moderate_comments,
-            manage_options: save.manage_options,
+            manage_options: save.skip_flood,
             unfiltered_html: plan.unfiltered_html,
         };
         match allow_and_insert_comment(write, context, comment, commenter).await? {
@@ -363,10 +361,8 @@ async fn term_saved(write: &mut Write<'_>, save: &TermSave) -> Result<Outcome, E
     })
 }
 
-/// `update_item()` of the settings: each option given its sanitized value,
-/// or deleted. An option not stored reads as its registered default, so
-/// `update_option()` adds it only when the value is another. The values
-/// of the rows that changed, as PHP's options cache keeps them.
+/// The settings' update: each option sanitized and updated, or deleted;
+/// the changed rows' values, as PHP's options cache keeps them.
 async fn settings_saved(write: &mut Write<'_>, save: &SettingsSave) -> Result<Outcome, Error> {
     let mut cached = Vec::new();
     for Setting {

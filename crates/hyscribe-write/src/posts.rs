@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Posts: `wp_insert_post()`, `wp_update_post()`, `wp_publish_post()`,
-//! `wp_trash_post()`, `wp_untrash_post()` and `wp_delete_post()`, with the
-//! hooks a default install runs on them. Each runs inside the caller's
-//! [`Write`], which the caller commits. Posts and pages are ported; other
-//! types, and what a default install never reaches, answer
-//! [`Error::Unported`], and the caller's action rolls back.
+//! Posts: `wp_insert_post()`, `wp_update_post()`, `wp_trash_post()`,
+//! `wp_untrash_post()` and `wp_delete_post()`, with the hooks a default
+//! install runs on them. Each runs inside the caller's [`Write`], which the
+//! caller commits. Posts and pages are ported; other types, and what a
+//! default install never reaches, answer [`Error::Unported`], and the
+//! caller's action rolls back.
 
+use hyscribe_config::Constants;
 use hyscribe_db::{PostFields, Write};
 use hyscribe_phpser::Value;
 use hyscribe_render::formatting::sanitize_title;
@@ -44,6 +45,8 @@ pub struct Context {
     /// `current_user_can( 'unfiltered_html' )`: `kses_init()` leaves the
     /// post's fields unfiltered for such a user.
     pub unfiltered_html: bool,
+    /// The configuration's constants capability checks read.
+    pub constants: Constants,
     /// `time()`.
     pub now: i64,
 }
@@ -260,7 +263,7 @@ pub async fn get_default_post_to_edit(write: &mut Write<'_>, ctx: &Context) -> R
     Ok(id)
 }
 
-/// `wp_publish_post( $post )`.
+/// `wp_publish_post( $post )`, which cron's `publish_future_post` runs.
 pub async fn wp_publish_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Result<()> {
     let Some(post) = write.post(id).await? else {
         return Ok(());

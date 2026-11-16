@@ -9,7 +9,7 @@ pub(crate) mod args;
 mod menu_items;
 pub(crate) mod prepare;
 
-use hyscribe_model::{FormatFilter, OrderBy, Post, PostQuery, StatusFilter};
+use hyscribe_model::{FormatFilter, OrderBy, Post, PostQuery, StatusFilter, TermFilter};
 use hyscribe_phpser::{Value, decode};
 use hyscribe_render::formatting::sanitize_title_for_query;
 use hyscribe_render::rest::Rendering;
@@ -144,7 +144,7 @@ pub(crate) fn type_endpoints(kind: Kind, single: bool) -> Vec<Endpoint> {
 
 /// `get_items_permissions_check()`.
 fn items_permission(context: &Context, params: &Params, kind: Kind) -> Result<(), RestError> {
-    if args::not_ported(kind).any(|name| params.has(name)) {
+    if args::not_ported().iter().any(|name| params.has(name)) {
         return Err(RestError::not_ported());
     }
     if params.context() == b"edit" && !context.can(&kind.cap("edit_posts")) {
@@ -181,17 +181,19 @@ fn other_author(context: &Context, params: &Params) -> bool {
 }
 
 /// `check_assign_terms_permission()`: each term of the type's taxonomies
-/// the request names, that exists, can be assigned.
+/// the request names, that exists, can be assigned. An empty value, of a
+/// list or of a term query's fields, is `get_term()`'s error, checked as 0.
 fn can_assign_terms(context: &Context, params: &Params, kind: Kind) -> bool {
     kind.taxonomies().iter().all(|(taxonomy, base)| {
-        let ids = match params.get(base) {
-            Some(Value::Array(ids)) => ids.iter().map(|(_, id)| id.to_int()).collect(),
-            Some(id) => vec![id.to_int()],
+        let values = match params.get(base) {
+            Some(Value::Array(values)) => values.iter().map(|(_, v)| v.clone()).collect(),
+            Some(value) => vec![value.clone()],
             None => Vec::new(),
         };
-        ids.into_iter().all(|id| {
-            let id = id.unsigned_abs();
-            context.site.reads().term(id, taxonomy).is_none() || context.can_for("assign_term", id)
+        values.into_iter().all(|value| {
+            let id = value.to_int().unsigned_abs();
+            let missing = context.site.reads().term(id, taxonomy).is_none();
+            !value.is_empty() && missing || context.can_for("assign_term", id)
         })
     })
 }
@@ -214,11 +216,13 @@ fn create_permission(context: &Context, params: &Params, kind: Kind) -> Result<(
         let message = "Sorry, you are not allowed to make posts sticky.";
         return Err(context.forbidden("rest_cannot_assign_sticky", message));
     }
-    // The terms check after it never fails here: the collection's
-    // `categories` and `tags` are not ported.
     if !context.can(&kind.cap("create_posts")) {
         let message = "Sorry, you are not allowed to create posts as this user.";
         return Err(context.forbidden("rest_cannot_create", message));
+    }
+    if !can_assign_terms(context, params, kind) {
+        let message = "Sorry, you are not allowed to assign the provided terms.";
+        return Err(context.forbidden("rest_cannot_assign_term", message));
     }
     if kind == Kind::Attachment {
         crate::media::create_permission(context, params)?;
@@ -511,6 +515,7 @@ fn query(
         by => by,
     };
     query.order = order_by(&Value::String(by.to_vec()), ascending, &query);
+    query.terms = tax_query(params, kind)?;
     if let Some(search) = search {
         searched(&mut query, &search);
         if orderby == b"relevance" {
@@ -527,6 +532,46 @@ fn query(
         query.sticky = sticky(context);
     }
     Ok((query, page, u32::try_from(per_page).unwrap_or(u32::MAX)))
+}
+
+/// `prepare_tax_query()`: each taxonomy's terms to include and leave out.
+/// Children of terms, every term required and either of several clauses
+/// are not ported.
+fn tax_query(params: &Params, kind: Kind) -> Result<Vec<TermFilter>, RestError> {
+    let mut filters = Vec::new();
+    for (taxonomy, base) in kind.taxonomies() {
+        for (name, exclude) in [(*base, false), (args::exclude_name(base), true)] {
+            let Some(limit) = params.get(name).filter(|limit| !limit.is_empty()) else {
+                continue;
+            };
+            let field = |key: &str| limit.get_str(key).filter(|value| !value.is_empty());
+            let terms = match crate::schema::is_list(limit) {
+                true => Some(limit),
+                false => field("terms"),
+            };
+            let all = !exclude && field("operator").is_some_and(|op| op.as_bytes() == Some(b"AND"));
+            if field("include_children").is_some() || all {
+                return Err(RestError::not_ported());
+            }
+            let terms: Vec<u64> = terms
+                .and_then(Value::as_array)
+                .unwrap_or_default()
+                .iter()
+                .map(|(_, id)| id.to_int().unsigned_abs())
+                .collect();
+            if !terms.is_empty() {
+                filters.push(TermFilter {
+                    taxonomy: (*taxonomy).into(),
+                    terms,
+                    exclude,
+                });
+            }
+        }
+    }
+    if filters.len() > 1 && params.text("tax_relation") == b"OR" {
+        return Err(RestError::not_ported());
+    }
+    Ok(filters)
 }
 
 /// `WP_Query`'s search for `s`, not empty.

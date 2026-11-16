@@ -1,23 +1,8 @@
 # The rows PHP WordPress writes for the action transient-set (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 19:47:49 to 2026-11-14 19:47:49 UTC.
-# %wp_options:1% is 146.
-# %wp_options:2% is 147.
-# %wp_options:3% is 148.
-# %wp_options:4% is 149.
-# %wp_options:5% is 150.
-# %wp_options:6% is 151.
-wp_options	_site_transient_oracle	+	autoload	off
-wp_options	_site_transient_oracle	+	option_id	%wp_options:4%
-wp_options	_site_transient_oracle	+	option_name	_site_transient_oracle
-wp_options	_site_transient_oracle	+	option_value	v
-wp_options	_site_transient_oracle_expiring	+	autoload	off
-wp_options	_site_transient_oracle_expiring	+	option_id	%wp_options:6%
-wp_options	_site_transient_oracle_expiring	+	option_name	_site_transient_oracle_expiring
-wp_options	_site_transient_oracle_expiring	+	option_value	v
-wp_options	_site_transient_timeout_oracle_expiring	+	autoload	off
-wp_options	_site_transient_timeout_oracle_expiring	+	option_id	%wp_options:5%
-wp_options	_site_transient_timeout_oracle_expiring	+	option_name	_site_transient_timeout_oracle_expiring
-wp_options	_site_transient_timeout_oracle_expiring	+	option_value	%expiry%
+# %now% and %unix% stand for times from 2026-11-16 07:27:49 to 2026-11-16 07:27:49 UTC.
+# %wp_options:1% is 130.
+# %wp_options:2% is 131.
+# %wp_options:3% is 132.
 wp_options	_transient_oracle	+	autoload	on
 wp_options	_transient_oracle	+	option_id	%wp_options:1%
 wp_options	_transient_oracle	+	option_name	_transient_oracle

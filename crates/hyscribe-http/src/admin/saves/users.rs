@@ -93,7 +93,12 @@ pub(super) fn dodelete<'a>(
             return Err(Error::Unported("a deletion with no option chosen").into());
         };
         let heirs = asked.request("reassign_user");
-        let request = context(asked.user, asked.home, &site.admin_url(""));
+        let request = context(
+            asked.user,
+            asked.home,
+            &site.admin_url(""),
+            site.constants(),
+        );
         let me = i64::try_from(asked.user).unwrap_or_default();
         let (mut update, mut count): (&[u8], u64) = (b"del", 0);
         for id in user_ids(asked) {

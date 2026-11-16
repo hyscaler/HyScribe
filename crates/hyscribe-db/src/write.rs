@@ -22,8 +22,9 @@ mod terms;
 pub use meta::Meta;
 pub use terms::TermRow;
 
-/// The `db_version`s this release writes to: WordPress 7.0 and 7.1.
-const DB_VERSIONS: std::ops::RangeInclusive<u64> = 61833..=61833;
+/// The `db_version`s this release supports and writes to: WordPress 7.0
+/// and 7.1.
+pub const DB_VERSIONS: std::ops::RangeInclusive<u64> = 61833..=61833;
 
 type Query = sqlx::query::Query<'static, Backend, <Backend as sqlx::Database>::Arguments>;
 
@@ -788,19 +789,6 @@ impl<'w> Write<'w> {
     pub async fn owner_link_ids(&mut self, owner: u64) -> Result<Vec<u64>, DbError> {
         let query = self.sql("SELECT link_id FROM {prefix}links WHERE link_owner = ?");
         self.ids(query.bind(owner)).await
-    }
-
-    /// `wp_set_password()`: the new hash, and no reset key.
-    pub async fn set_user_password(&mut self, id: u64, hash: &str) -> Result<u64, DbError> {
-        let query = self
-            .sql("UPDATE {prefix}users SET user_pass = ?, user_activation_key = '' WHERE ID = ?");
-        self.change(Table::Users, query.bind(hash).bind(id)).await
-    }
-
-    /// `wp_signon()`: a successful login ends a pending password reset.
-    pub async fn clear_activation_key(&mut self, id: u64) -> Result<u64, DbError> {
-        let query = self.sql("UPDATE {prefix}users SET user_activation_key = '' WHERE ID = ?");
-        self.change(Table::Users, query.bind(id)).await
     }
 
     /// `get_user_by( 'email', $email )`'s user.

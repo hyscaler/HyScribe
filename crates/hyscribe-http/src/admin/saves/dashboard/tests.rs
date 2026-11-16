@@ -16,7 +16,7 @@ use super::*;
 
 /// `$views_draft()`: the Quick Draft form's auto-draft, user 1's.
 async fn drafted(write: &mut Write<'_>) -> Result<u64, Error> {
-    quick_press_draft(write, &context(1, SITE, SITE)).await
+    quick_press_draft(write, &context(1, SITE, SITE, Default::default())).await
 }
 
 fn shown(err: Error) -> String {
@@ -130,5 +130,23 @@ async fn quick_drafts_keep_pdfs_from_the_site_url() {
     );
     let content = write.post(id).await.unwrap().unwrap().content;
     let paragraph = format!("<!-- wp:paragraph -->{pdf}<!-- /wp:paragraph -->");
+    assert_eq!(String::from_utf8(content).unwrap(), paragraph);
+}
+
+/// An administrator's Quick Draft is saved unfiltered where the `.env`
+/// allows unfiltered HTML.
+#[tokio::test]
+async fn quick_drafts_follow_unfiltered_html() {
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    let id = drafted(&mut write).await.unwrap();
+    let post = fields(&format!(
+        "post_ID={id}&content=%3Cscript%3Ex%3C%2Fscript%3E"
+    ));
+    let asked = asked("/hs-admin/post", &[], &post);
+    let site = crate::admin::saves::tests::unfiltered::Unfiltered { authors: false };
+    assert!(quickdraft_save(&mut write, &asked, &site).await.is_ok());
+    let content = write.post(id).await.unwrap().unwrap().content;
+    let paragraph = "<!-- wp:paragraph --><script>x</script><!-- /wp:paragraph -->";
     assert_eq!(String::from_utf8(content).unwrap(), paragraph);
 }

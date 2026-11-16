@@ -11,6 +11,7 @@ publish.workspace = true
 
 [dependencies]
 hyscribe-auth.workspace = true
+hyscribe-config.workspace = true
 hyscribe-db.workspace = true
 hyscribe-html.workspace = true
 hyscribe-kses.workspace = true
@@ -19,7 +20,6 @@ hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true
 
 [dev-dependencies]
-hyscribe-config.workspace = true
 hyscribe-testkit.workspace = true
 sqlx = { version = "0.9", default-features = false, features = ["mysql", "runtime-tokio"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }

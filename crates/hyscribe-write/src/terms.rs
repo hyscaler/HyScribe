@@ -21,9 +21,10 @@ mod objects;
 
 pub use edit::{Deletion, wp_delete_term, wp_insert_term, wp_update_term};
 pub(crate) use objects::update_term_count;
+#[cfg(test)]
+use objects::wp_set_object_terms;
 pub use objects::{
-    TermList, TermRef, wp_remove_object_terms, wp_set_object_terms, wp_set_post_categories,
-    wp_set_post_terms,
+    TermList, TermRef, wp_remove_object_terms, wp_set_post_categories, wp_set_post_terms,
 };
 
 /// A core taxonomy whose terms these functions write.

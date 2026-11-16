@@ -196,6 +196,35 @@ $cron_run = function ( $hook, $args = array() ) {
 };
 
 return array(
+	// wp_publish_post(), which check_and_publish_future_post() calls.
+	'publish-future-post'         => array(
+		'setup'  => fn() => $cron_post(
+			array(
+				'import_id' => 900,
+				'post_date' => '2030-01-01 10:00:00',
+			)
+		),
+		'action' => fn( $id ) => wp_publish_post( $id ),
+	),
+	'publish-uncategorized-draft' => array(
+		'setup'  => function () use ( $cron_post ) {
+			global $wpdb;
+			$id = $cron_post( array( 'post_status' => 'draft' ) );
+			$wpdb->delete( $wpdb->term_relationships, array( 'object_id' => $id ) );
+			clean_object_term_cache( $id, 'post' );
+			return $id;
+		},
+		'action' => fn( $id ) => wp_publish_post( $id ),
+	),
+	'publish-draft-page'          => array(
+		'setup'  => fn() => $cron_post(
+			array(
+				'post_status' => 'draft',
+				'post_type'   => 'page',
+			)
+		),
+		'action' => fn( $id ) => wp_publish_post( $id ),
+	),
 	'cron-publish-missed'     => array(
 		'setup'  => $cron_missed,
 		'action' => fn( $id ) => $cron_run( 'publish_future_post', array( $id ) ),

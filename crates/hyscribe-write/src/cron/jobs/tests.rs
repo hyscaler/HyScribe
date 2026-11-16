@@ -8,9 +8,7 @@ use super::*;
 use hyscribe_db::{Connection, Writer};
 use std::result::Result as StdResult;
 
-use crate::options::{
-    add_metadata, add_option, set_site_transient, set_transient, update_metadata,
-};
+use crate::options::{Autoload, add_metadata, add_option, set_transient, update_metadata};
 use crate::posts::tests::{act, check, future_post, insert_post, oracle_post, shown};
 use crate::posts::{PostArgs, wp_trash_post};
 use crate::tests::{MISSING, ONE_AT_A_TIME, admin, fails_at_each_step, rolled_back, text, writer};
@@ -111,7 +109,11 @@ pub(crate) async fn transients(writer: &Writer, conn: &mut Connection) -> StdRes
     act(writer, conn, &admin(), async |w, _| {
         set_transient(w, "oracle_old", &text("old"), 3_600).await?;
         set_transient(w, "oracle_fresh", &text("fresh"), 3_600).await?;
-        set_site_transient(w, "oracle_site_old", &text("old"), 3_600).await?;
+        // set_site_transient() on a single site: the timeout, then the value.
+        let off = Some(Autoload::Off);
+        let timeout = Value::Int(crate::now() + 3_600);
+        add_option(w, "_site_transient_timeout_oracle_site_old", &timeout, off).await?;
+        add_option(w, "_site_transient_oracle_site_old", &text("old"), off).await?;
         add_option(w, "_transient_oracle_lone", &text("lone"), None).await?;
         Ok(())
     })
@@ -119,6 +121,67 @@ pub(crate) async fn transients(writer: &Writer, conn: &mut Connection) -> StdRes
     let sql = "UPDATE wp_options SET option_value = '1000000000' WHERE option_name IN \
                ('_transient_timeout_oracle_old', '_site_transient_timeout_oracle_site_old')";
     raw(conn, sql, &[]).await
+}
+
+#[tokio::test]
+async fn posts_are_published_as_php_publishes_them() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    // These goldens were recorded as user 1.
+    let publish = async |conn: &mut Connection, id: u64| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_publish_post(w, ctx, id).await
+        })
+        .await
+    };
+    let future = async |conn: &mut Connection| insert_post(writer, conn, future_post()).await;
+    check("publish-future-post", future, publish).await;
+    let uncategorized = async |conn: &mut Connection| {
+        let id = insert_post(writer, conn, oracle_post("draft")).await?;
+        act(writer, conn, &admin(), async |w, _| {
+            Ok(w.remove_relationships(id, &[1]).await?)
+        })
+        .await?;
+        Ok(id)
+    };
+    check("publish-uncategorized-draft", uncategorized, publish).await;
+    let page = PostArgs {
+        post_type: "page".into(),
+        ..oracle_post("draft")
+    };
+    let page = async |conn: &mut Connection| insert_post(writer, conn, page).await;
+    check("publish-draft-page", page, publish).await;
+}
+
+#[tokio::test]
+async fn publishing_what_is_missing_published_or_unported_writes_nothing() {
+    rolled_back(async |w| {
+        let ctx = cron();
+        wp_publish_post(w, &ctx, MISSING).await.unwrap();
+        wp_publish_post(w, &ctx, 1).await.unwrap();
+        // No default category: a published draft stays without one.
+        let zero = text("0");
+        crate::options::update_option(w, "default_category", &zero, None)
+            .await
+            .unwrap();
+        let admin = admin();
+        let id = crate::posts::wp_insert_post(w, &admin, oracle_post("draft"));
+        let id = id.await.unwrap();
+        w.remove_relationships(id, &[1]).await.unwrap();
+        wp_publish_post(w, &ctx, id).await.unwrap();
+        assert!(w.object_terms(id, "category").await.unwrap().is_empty());
+        // An attachment is not a ported type.
+        let post = w.post(1).await.unwrap().unwrap();
+        let attachment = hyscribe_db::PostFields {
+            post_type: "attachment".into(),
+            status: "inherit".into(),
+            ..post
+        };
+        let id = w.insert_post(&attachment).await.unwrap();
+        let refused = wp_publish_post(w, &ctx, id).await;
+        assert!(matches!(refused, Err(crate::Error::Unported(_))));
+    })
+    .await;
 }
 
 #[tokio::test]

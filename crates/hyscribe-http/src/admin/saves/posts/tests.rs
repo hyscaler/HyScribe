@@ -74,7 +74,8 @@ async fn answered(
     }
 }
 
-/// A site whose only read is `admin_url()`, as the posts lists' handlers read it.
+/// A site whose only reads are `admin_url()` and the default constants, as
+/// the posts lists' handlers read it.
 struct Linked;
 
 impl CapabilityData for Linked {
@@ -131,6 +132,9 @@ impl Acting for Linked {
     }
     fn comment_url(&self, _: u64) -> String {
         unreachable!()
+    }
+    fn constants(&self) -> Constants {
+        Constants::default()
     }
 }
 
@@ -1062,20 +1066,23 @@ async fn bulk_edit_edges() {
     assert_eq!(rows[3], "950 draft 0 open");
 }
 
-/// The capabilities read only the options, user and post they load.
+/// The capabilities read only the options, user, post and constants they load.
 #[test]
 fn caps_read_what_they_load() {
-    let caps = Caps {
+    let mut caps = Caps {
         prefix: "wp_".into(),
         options: Vec::new(),
         user: 1,
         exists: true,
         capabilities: None,
         post: None,
+        constants: Constants::default(),
     };
     assert_eq!(caps.comment_post(1), None);
     assert_eq!(caps.term_taxonomy(1), None);
-    assert!(!caps.constant("MULTISITE"));
+    assert!(!caps.constant("MULTISITE") && caps.constant("DISALLOW_UNFILTERED_HTML"));
+    caps.constants.disallow_unfiltered_html = false;
+    assert!(!caps.constant("DISALLOW_UNFILTERED_HTML"));
 }
 
 /// What Quick Edit and Bulk Edit read when a field is left out or odd.

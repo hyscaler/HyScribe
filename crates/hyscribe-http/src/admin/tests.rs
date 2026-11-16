@@ -1464,6 +1464,12 @@ async fn dashboard_data() {
         }
     };
     let (terms, ttd) = (load("wordpress_terms").await, load("wordpress_ttd").await);
+    // An owner who lets administrators post unfiltered HTML.
+    let open = hyscribe_config::Constants {
+        disallow_unfiltered_html: false,
+        allow_unfiltered_uploads: true,
+    };
+    let ttd = ttd.with_constants(open);
     let handle = Handle::current();
     tokio::task::spawn_blocking(move || {
         let check = |site: &Site, (id, login): (u64, &[u8]), test: &dyn Fn(&Admin)| {
@@ -1521,6 +1527,8 @@ async fn dashboard_data() {
             assert!(admin.constant("DISALLOW_UNFILTERED_HTML"));
         });
         check(&ttd, (1, b"admin"), &|admin| {
+            assert_eq!(saves::Acting::constants(admin), open);
+            assert!(!admin.constant("DISALLOW_UNFILTERED_HTML"));
             assert_eq!(admin.users_without_role("administrator"), [2, 3]);
             // The one post draft is by another user.
             assert!(admin.drafts().is_empty());

@@ -402,6 +402,7 @@ async fn a_failed_read_is_the_database_error_page() {
         defined: Vec::new(),
         public_users: true,
         behind_proxy: false,
+        constants: hyscribe_config::Constants::default(),
     });
     let cookie = format!(
         "hyscribe_logged_in_{}=admin%7C9999999999%7Ctoken%7Chmac",

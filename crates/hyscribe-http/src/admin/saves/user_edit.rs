@@ -9,6 +9,7 @@ use hyscribe_admin::actions::Asked;
 use hyscribe_admin::posts::Answer;
 use hyscribe_auth::caps::{CapPost, CapabilityData, User};
 use hyscribe_auth::sessions::Sessions;
+use hyscribe_config::Constants;
 use hyscribe_db::{DbError, Meta, Write};
 use hyscribe_kses::{ALLOWED_PROTOCOLS, esc_url_raw, sanitize_key};
 use hyscribe_phpser::{
@@ -35,10 +36,15 @@ struct Current {
     roles: Option<Vec<u8>>,
     /// The user's `{prefix}capabilities`.
     caps: Option<Vec<u8>>,
+    constants: Constants,
 }
 
 impl Current {
-    async fn load(write: &mut Write<'_>, id: u64) -> Result<Current, DbError> {
+    async fn load(
+        write: &mut Write<'_>,
+        id: u64,
+        constants: Constants,
+    ) -> Result<Current, DbError> {
         let prefix = write.prefix().to_string();
         let roles = write.option_value(&format!("{prefix}user_roles")).await?;
         let key = format!("{prefix}capabilities");
@@ -49,6 +55,7 @@ impl Current {
             prefix,
             roles,
             caps: caps.and_then(|(_, caps)| caps),
+            constants,
         })
     }
 
@@ -58,7 +65,7 @@ impl Current {
     }
 }
 
-/// Only the roles and the current user's capabilities are read.
+/// Only the roles, the current user's capabilities and the constants are read.
 impl CapabilityData for Current {
     fn option(&self, _: &str) -> Option<Vec<u8>> {
         self.roles.clone()
@@ -82,8 +89,8 @@ impl CapabilityData for Current {
     fn term_taxonomy(&self, _: u64) -> Option<String> {
         None
     }
-    fn constant(&self, _: &str) -> bool {
-        false
+    fn constant(&self, name: &str) -> bool {
+        self.constants.defined(name)
     }
 }
 
@@ -270,10 +277,10 @@ async fn edit_user(
 pub(super) fn create<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
-    _: &'a dyn Acting,
+    site: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
-        let current = Current::load(write, asked.user).await?;
+        let current = Current::load(write, asked.user, site.constants()).await?;
         arrays_refused(asked)?;
         let email = posted(asked, "email").map(|email| stripslashes(&email));
         let id = edit_user(write, asked, (0, &current), email).await?;
@@ -296,12 +303,16 @@ pub(super) fn create<'a>(
 pub(super) fn update<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
-    _: &'a dyn Acting,
+    site: &'a dyn Acting,
 ) -> Saving<'a> {
-    Box::pin(updated(write, asked))
+    Box::pin(updated(write, asked, site.constants()))
 }
 
-async fn updated(write: &mut Write<'_>, asked: &Asked<'_>) -> Result<Answer, Stop> {
+async fn updated(
+    write: &mut Write<'_>,
+    asked: &Asked<'_>,
+    constants: Constants,
+) -> Result<Answer, Stop> {
     let given = asked
         .request("user_id")
         .filter(|id| !id.is_empty())
@@ -326,7 +337,7 @@ async fn updated(write: &mut Write<'_>, asked: &Asked<'_>) -> Result<Answer, Sto
             email = Some(own);
         }
     }
-    let current = Current::load(write, asked.user).await?;
+    let current = Current::load(write, asked.user, constants).await?;
     let email = email.map(|email| stripslashes(&email));
     edit_user(write, asked, (id, &current), email).await?;
     let link = if id == asked.user {

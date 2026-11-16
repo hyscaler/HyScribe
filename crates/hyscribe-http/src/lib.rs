@@ -105,6 +105,8 @@ pub struct Site {
     public_users: bool,
     /// `BEHIND_PROXY`: the proxy's `X-Forwarded-For` names the client.
     behind_proxy: bool,
+    /// The capability constants of the configuration.
+    constants: hyscribe_config::Constants,
 }
 
 /// The address a connection comes from.
@@ -133,6 +135,7 @@ impl Site {
             defined: Vec::new(),
             public_users: true,
             behind_proxy: false,
+            constants: hyscribe_config::Constants::default(),
         };
         for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
             if let Some(url) = url {
@@ -171,6 +174,7 @@ impl Site {
             defined: self.defined.clone(),
             public_users: self.public_users,
             behind_proxy: self.behind_proxy,
+            constants: self.constants,
         };
         site.build_rewriter();
         Ok(site)
@@ -187,6 +191,11 @@ impl Site {
             public_users,
             ..self
         }
+    }
+
+    /// The site with the capability constants of the configuration.
+    pub fn with_constants(self, constants: hyscribe_config::Constants) -> Site {
+        Site { constants, ..self }
     }
 
     /// The site behind a proxy or not.

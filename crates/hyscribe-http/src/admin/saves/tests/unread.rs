@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The site of a handler that reads nothing of it.
+//! The site of a handler that reads nothing of it but the configuration's
+//! constants.
 
 use hyscribe_admin::actions::ActionSite;
 use hyscribe_auth::caps::{CapPost, CapabilityData};
+use hyscribe_config::Constants;
 use hyscribe_phpser::Value;
 
 use super::super::Acting;
 
-/// A site any read of fails the test.
+/// A site any read of fails the test; its constants are the defaults.
 pub(in crate::admin::saves) struct Unread;
 
 impl CapabilityData for Unread {
@@ -65,5 +67,8 @@ impl Acting for Unread {
     }
     fn comment_url(&self, _: u64) -> String {
         unreachable!()
+    }
+    fn constants(&self) -> Constants {
+        Constants::default()
     }
 }

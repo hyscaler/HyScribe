@@ -41,7 +41,7 @@ const PLAIN: &str = "text/plain; charset=UTF-8";
 fn plain(status: StatusCode, body: Vec<u8>, id: Option<u64>) -> Response {
     let mut headers = nocache();
     headers.extend(id.map(|id| {
-        let name = header::HeaderName::from_static("x-wp-upload-attachment-id");
+        let name = header::HeaderName::from_static(crate::uploads::ATTACHMENT_ID);
         (name, id.to_string())
     }));
     headers.push((header::CONTENT_TYPE, PLAIN.into()));
@@ -243,7 +243,7 @@ fn media_new(admin: &Admin, asked: &Asked, files: &[(Vec<u8>, Sent)]) -> Respons
     match media_handle_upload(admin, sent, post_id) {
         Ok(id) => {
             let mut answer = library();
-            let name = header::HeaderName::from_static("x-wp-upload-attachment-id");
+            let name = header::HeaderName::from_static(crate::uploads::ATTACHMENT_ID);
             answer.headers_mut().insert(name, id.into());
             answer
         }

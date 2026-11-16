@@ -29,6 +29,9 @@ pub(crate) mod serve;
 /// `UPLOAD_ERR_INI_SIZE`'s message: the file is over `UPLOAD_MAX_SIZE`.
 const TOO_LARGE: &str = "The uploaded file exceeds the upload_max_filesize directive in php.ini.";
 
+/// The header that names a new attachment, so a client can resume its sizes.
+pub(crate) const ATTACHMENT_ID: &str = "x-wp-upload-attachment-id";
+
 /// `UPLOAD_ERR_NO_FILE`'s message: a file field sent without a file.
 const NO_FILE: &str = "No file was uploaded.";
 
@@ -382,7 +385,8 @@ impl Uploads {
             let hooks: &dyn Hooks = &*hooks;
             wp_generate_attachment_metadata(upload, &mime, sizes, &limits, hooks, &host)
         });
-        // The metadata was read once before the upload was written.
+        // Only a job the pool drops, or metadata not ported, which the
+        // routes read before the insert, leaves the attachment without any.
         let Some(Ok(generated)) = generated else {
             return Ok(None);
         };

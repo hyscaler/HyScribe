@@ -210,10 +210,7 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     let entries = |value: Value| value.as_array().unwrap_or_default().to_vec();
     let get = entries(parse_str(asked.uri.query().unwrap_or_default().as_bytes()));
     // An upload's form is `$_POST` and `$_FILES`, as PHP reads it.
-    let max = site
-        .uploads
-        .as_ref()
-        .map_or(0, |uploads| uploads.max_size());
+    let max = site.upload_max();
     let upload = (post && crate::uploads::takes_upload(&asked.uri))
         .then(|| crate::uploads::form(&asked.headers, &asked.body, max))
         .flatten();

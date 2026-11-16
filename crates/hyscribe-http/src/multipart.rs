@@ -43,13 +43,6 @@ impl Form<'_> {
             .collect();
         parse_str(&pairs.join(&b'&'))
     }
-
-    /// The file of the field `field`, if one was sent.
-    pub fn file(&self, field: &str) -> Option<&File<'_>> {
-        self.files
-            .iter()
-            .find(|file| file.field == field.as_bytes())
-    }
 }
 
 /// The boundary of a `multipart/form-data` `Content-Type`, quoted or not.

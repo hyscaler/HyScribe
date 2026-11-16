@@ -31,6 +31,13 @@ fn part(headers: &str, body: &[u8]) -> Vec<u8> {
     [b"--B\r\n", headers.as_bytes(), b"\r\n\r\n", body, b"\r\n"].concat()
 }
 
+/// The file of the field `field`, if one was sent.
+fn find<'a>(form: &'a Form<'_>, field: &str) -> Option<&'a File<'a>> {
+    form.files
+        .iter()
+        .find(|file| file.field == field.as_bytes())
+}
+
 #[test]
 fn forms_give_fields_and_files() {
     let body = [
@@ -59,16 +66,16 @@ fn forms_give_fields_and_files() {
             (b"post_data[context]".to_vec(), &b"x&y=z"[..]),
         ]
     );
-    let file = form.file("async-upload").unwrap();
+    let file = find(&form, "async-upload").unwrap();
     assert_eq!(file.name, b"a b.jpg");
     assert_eq!(file.kind, b"image/jpeg");
     assert_eq!(file.bytes, b"\xff\xd8bytes\r\n--C");
-    let other = form.file("file").unwrap();
+    let other = find(&form, "file").unwrap();
     assert_eq!(
         (&other.name[..], &other.kind[..], other.bytes),
         (&b"n.png"[..], &b""[..], &b""[..])
     );
-    assert!(form.file("missing").is_none());
+    assert!(find(&form, "missing").is_none());
     let post = form.post();
     assert_eq!(
         post.get_str("action"),

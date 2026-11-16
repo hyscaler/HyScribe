@@ -720,6 +720,7 @@ dependencies = [
  "hyscribe-auth",
  "hyscribe-config",
  "hyscribe-db",
+ "hyscribe-image",
  "hyscribe-kses",
  "hyscribe-model",
  "hyscribe-phpser",
@@ -784,6 +785,7 @@ dependencies = [
 name = "hyscribe-rest"
 version = "0.1.0"
 dependencies = [
+ "hyscribe-image",
  "hyscribe-kses",
  "hyscribe-model",
  "hyscribe-phpser",

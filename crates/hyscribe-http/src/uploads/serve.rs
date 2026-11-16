@@ -39,10 +39,7 @@ pub(crate) fn serve(site: &Site, path: &str, headers: &HeaderMap, now: u64) -> O
     // Apache decodes the path, a `+` staying a `+`.
     let decoded = urldecode(relative.replace('+', "%2B").as_bytes());
     let decoded = String::from_utf8(decoded).ok()?;
-    let plain = decoded
-        .split('/')
-        .all(|part| !part.is_empty() && !part.starts_with('.') && !part.contains(['\\', '\0']));
-    if !plain {
+    if !decoded.split('/').all(super::stays) {
         return None;
     }
     let dir = uploads.dir.canonicalize().ok()?;

@@ -5,7 +5,7 @@
 //! (`upload_from_data()`), or as a multipart form's `file`
 //! (`upload_from_file()`), then the attachment, its sizes and metadata,
 //! and the answer the attachments controller prepares. An image that gets
-//! a `-scaled` or `-rotated` copy answers 501 before it is written, as its
+//! a `-scaled` or `-rotated` copy answers 501 before its insert, as its
 //! answer reads the original's size from its file; so does a
 //! `Content-MD5`, and an image type no editor here is known to take.
 
@@ -142,7 +142,7 @@ pub(super) fn answer(
     };
     let mut answer = finished(site, request, pending, outcome, asker);
     if let Some(id) = id.filter(|_| answer.status().is_success()) {
-        let name = HeaderName::from_static("x-wp-upload-attachment-id");
+        let name = HeaderName::from_static(crate::uploads::ATTACHMENT_ID);
         answer.headers_mut().insert(name, HeaderValue::from(id));
     }
     answer

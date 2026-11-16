@@ -229,6 +229,13 @@ impl Site {
         }
     }
 
+    /// `UPLOAD_MAX_SIZE`, 0 without an uploads folder.
+    fn upload_max(&self) -> u64 {
+        self.uploads
+            .as_ref()
+            .map_or(0, |uploads| uploads.max_size())
+    }
+
     /// The site behind a proxy or not.
     pub fn with_proxy(self, behind_proxy: bool) -> Site {
         Site {
@@ -419,10 +426,7 @@ fn router(site: Arc<Site>) -> Router {
 
 /// The body an upload may send: `UPLOAD_MAX_SIZE` and its form around it.
 fn upload_limit(site: &Site) -> usize {
-    let max = site
-        .uploads
-        .as_ref()
-        .map_or(0, |uploads| uploads.max_size());
+    let max = site.upload_max();
     usize::try_from(max)
         .unwrap_or(usize::MAX)
         .saturating_add(FORM_ALLOWANCE)
@@ -712,10 +716,7 @@ async fn page(
         return loaders::load(loader, uri.query(), &headers, now() as u64);
     }
     if admin::is_admin(uri.path()) && page_method {
-        let max = site
-            .uploads
-            .as_ref()
-            .map_or(0, |uploads| uploads.max_size());
+        let max = site.upload_max();
         let multipart = uploads::takes_upload(&uri)
             .then(|| uploads::form(&headers, &body, max))
             .flatten();

@@ -6,6 +6,7 @@
 
 use hyscribe_admin::actions::{Asked, quickdraft_field};
 use hyscribe_admin::posts::Answer;
+use hyscribe_config::Constants;
 use hyscribe_db::Write;
 use hyscribe_phpser::{Value, lookup, stripslashes};
 use hyscribe_write::Error;
@@ -19,13 +20,19 @@ use super::{Acting, Ajax, Saving, id_of, text};
 /// on the host of `site`, a URL under `siteurl` (`wp_upload_dir()`). The
 /// capability to publish plays no part in what is written with it, and its
 /// fields are filtered unless the caller says the user has `unfiltered_html`.
-pub(in crate::admin) fn context(user: u64, home: &str, site: &str) -> Context {
+pub(in crate::admin) fn context(
+    user: u64,
+    home: &str,
+    site: &str,
+    constants: Constants,
+) -> Context {
     Context {
         user,
         can_publish: false,
         home: home.as_bytes().to_vec(),
         upload_host: hyscribe_render::link::host(site.as_bytes()),
         unfiltered_html: false,
+        constants,
         now: crate::now(),
     }
 }
@@ -112,7 +119,12 @@ pub(super) fn quickdraft_save<'a>(
         let ctx = Context {
             unfiltered_html: super::posts::unfiltered_html(write, asked.user, site.constants())
                 .await?,
-            ..context(asked.user, asked.home, &site.admin_url(""))
+            ..context(
+                asked.user,
+                asked.home,
+                &site.admin_url(""),
+                site.constants(),
+            )
         };
         wp_update_post(write, &ctx, id, &|args| {
             args.author = Some(asked.user);

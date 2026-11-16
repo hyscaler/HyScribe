@@ -830,8 +830,9 @@ fn lock_dialog(
     )
 }
 
-/// The screen for the attachment `args` names: `None` for what is not
-/// ported, which a view that would write its own edit lock is.
+/// The screen for the attachment `args` names, or PHP's refusals for a
+/// post or page: `None` for what is not ported, which a view that would
+/// write its own edit lock and the block editor's page are.
 pub fn attachment_edit(
     site: &dyn AttachmentSite,
     args: &AttachmentArgs,
@@ -846,7 +847,9 @@ pub fn attachment_edit(
             "You attempted to edit an item that does not exist. Perhaps it was deleted?",
         ));
     };
-    if post.post_type != "attachment" {
+    // The block editor's page is not ported, but its refusals are.
+    let editor = ["post", "page"].contains(&post.post_type.as_str());
+    if post.post_type != "attachment" && !editor {
         return None;
     }
     if !site.can_post("edit_post", &post) {
@@ -854,13 +857,16 @@ pub fn attachment_edit(
             "Sorry, you are not allowed to edit this item.",
         ));
     }
-    let meta = metadata(site, &post);
-    let size = meta.get_str("filesize").map_or(0, Value::to_int);
     if post.status == "trash" {
         return Some(Answer::Conflict(
             "You cannot edit this item because it is in the Trash. Please restore it and try again.",
         ));
     }
+    if editor {
+        return None;
+    }
+    let meta = metadata(site, &post);
+    let size = meta.get_str("filesize").map_or(0, Value::to_int);
     // Not ported: a file size read from disk, a status but inherit or
     // private, and a scaled original of a file that is not an image.
     let file = site.meta(&post, "_wp_attached_file").unwrap_or_default();

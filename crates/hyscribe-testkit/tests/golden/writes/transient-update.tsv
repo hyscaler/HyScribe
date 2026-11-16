@@ -1,22 +1,17 @@
 # The rows PHP WordPress writes for the action transient-update (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-14 19:47:50 to 2026-11-14 19:47:50 UTC.
-# %wp_options:1% is 152.
-# %wp_options:2% is 153.
-# %wp_options:3% is 154.
-# %wp_options:4% is 155.
-# %wp_options:5% is 156.
-# %wp_options:6% is 157.
-# %wp_options:7% is 158.
-# %wp_options:8% is 159.
-# %wp_options:9% is 160.
-wp_options	_site_transient_oracle_s	~	option_value	one	two
-wp_options	_site_transient_oracle_t	~	option_value	one	two
+# %now% and %unix% stand for times from 2026-11-16 07:27:50 to 2026-11-16 07:27:50 UTC.
+# %wp_options:1% is 133.
+# %wp_options:2% is 134.
+# %wp_options:3% is 135.
+# %wp_options:4% is 136.
+# %wp_options:5% is 137.
+# %wp_options:6% is 138.
 wp_options	_transient_oracle_a	~	option_value	one	two
 wp_options	_transient_oracle_b	~	option_value	one	two
 wp_options	_transient_oracle_c	~	autoload	on	off
-wp_options	_transient_oracle_c	~	option_id	%wp_options:4%	%wp_options:9%
+wp_options	_transient_oracle_c	~	option_id	%wp_options:4%	%wp_options:6%
 wp_options	_transient_oracle_c	~	option_value	one	two
 wp_options	_transient_timeout_oracle_c	+	autoload	off
-wp_options	_transient_timeout_oracle_c	+	option_id	%wp_options:8%
+wp_options	_transient_timeout_oracle_c	+	option_id	%wp_options:5%
 wp_options	_transient_timeout_oracle_c	+	option_name	_transient_timeout_oracle_c
 wp_options	_transient_timeout_oracle_c	+	option_value	%expiry%

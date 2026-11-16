@@ -68,8 +68,8 @@ impl ActionSite for Unfiltered {
 }
 
 impl Acting for Unfiltered {
-    fn admin_url(&self, _: &str) -> String {
-        unreachable!()
+    fn admin_url(&self, path: &str) -> String {
+        format!("{}/hs-admin/{path}", super::SITE)
     }
     fn comment_url(&self, _: u64) -> String {
         unreachable!()

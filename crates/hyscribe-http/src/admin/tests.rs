@@ -730,6 +730,50 @@ async fn attachment_edit_screen_is_php_s() {
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
 }
 
+/// The block editor's screens of `reference/post-edit/golden.sh`: PHP's
+/// refusals and the redirect of attachments; the editor's page, which
+/// writes the auto-draft or the edit lock, answers 501.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_block_editor_s_refusals() {
+    let dir = tempfile::tempdir().unwrap();
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/post-edit.tsv");
+    let invalid = golden
+        .lines()
+        .find(|line| line.starts_with("default\tpost-new.php?post_type=nope\tadministrator\t"))
+        .unwrap();
+    let invalid = hyscribe_testkit::unhex(invalid.rsplit('\t').next().unwrap());
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let response = get(
+        &site,
+        "/hs-admin/post-new?post_type=nope",
+        "127.0.0.1:8081",
+        &cookies,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let page = page_of(response).await;
+    assert_eq!(format!("500\t{page}").into_bytes(), invalid);
+    let response = get(
+        &site,
+        "/hs-admin/post-new?post_type=attachment",
+        "127.0.0.1:8081",
+        &cookies,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    let location = &response.headers()[header::LOCATION];
+    assert_eq!(location, "http://127.0.0.1:8081/hs-admin/media-new");
+    for path in [
+        "/hs-admin/post-new",
+        "/hs-admin/post-new?post_type=page",
+        "/hs-admin/post?post=1&action=edit",
+        "/hs-admin/post?post=2&action=edit",
+    ] {
+        let response = get(&site, path, "127.0.0.1:8081", &cookies).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+    }
+}
+
 /// `page` with its nonces, ten hexadecimal digits standing alone, and its
 /// time masked, as the hashed goldens hold them.
 pub(super) fn masked_nonces(page: &str) -> String {

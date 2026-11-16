@@ -656,18 +656,21 @@ dependencies = [
 name = "hyscribe"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "clap",
  "hyscribe-auth",
  "hyscribe-config",
  "hyscribe-db",
  "hyscribe-fetch",
  "hyscribe-http",
+ "hyscribe-phpser",
  "hyscribe-service",
  "hyscribe-testkit",
  "rustix",
  "sqlx",
  "tempfile",
  "tokio",
+ "tower",
 ]
 
 [[package]]

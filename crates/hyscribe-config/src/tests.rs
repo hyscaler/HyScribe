@@ -59,6 +59,7 @@ fn defaults_are_safe() {
             constants: Constants {
                 disallow_unfiltered_html: true,
                 allow_unfiltered_uploads: false,
+                empty_trash_days: 30,
             },
             login_limits: LoginLimits {
                 address: 5,
@@ -141,6 +142,7 @@ fn reads_every_key() {
         ("NONCE_SALT", "z"),
         ("REST_PUBLIC_USERS", "off"),
         ("HTTP_OUTBOUND", "on"),
+        ("EMPTY_TRASH_DAYS", "0"),
         ("LOGIN_LIMIT_ADDRESS", "1"),
         ("LOGIN_LIMIT_ACCOUNT", "1000"),
         ("LOGIN_LIMIT_WINDOW", "86400"),
@@ -172,6 +174,8 @@ fn reads_every_key() {
     );
     assert!(!config.rest_public_users);
     assert!(config.http_outbound);
+    assert_eq!(config.constants.empty_trash_days, 0);
+    assert_eq!(server(&with(&[("PORT", "80")])).map(|s| s.port), Ok(80));
     let limits = LoginLimits {
         address: 1,
         account: 1000,
@@ -210,6 +214,16 @@ fn rejects_bad_values() {
         ("MODE", "write", "must be shadow or primary"),
         ("REST_PUBLIC_USERS", "true", "must be on or off"),
         ("HTTP_OUTBOUND", "yes", "must be on or off"),
+        (
+            "EMPTY_TRASH_DAYS",
+            "-1",
+            "must be a number of days, 0 or more",
+        ),
+        (
+            "EMPTY_TRASH_DAYS",
+            "7 days",
+            "must be a number of days, 0 or more",
+        ),
         (
             "LOGIN_LIMIT_ADDRESS",
             "0",

@@ -499,6 +499,16 @@ pub async fn serve(
     serve_connections(listener, live(site), MAX_CONNECTIONS, shutdown).await;
 }
 
+/// Serves `app` as [`serve`] serves a site, with its own headers: setup
+/// mode's wizard, before there is a site.
+pub async fn serve_app(
+    listener: TcpListener,
+    app: Router,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) {
+    serve_connections(listener, app, MAX_CONNECTIONS, shutdown).await;
+}
+
 /// [`serve`] with at most `limit` connections open.
 async fn serve_connections(
     mut listener: TcpListener,

@@ -43,7 +43,7 @@ use hyscribe_render::theme::Theme;
 use request::{Arg, Params, Sanitize, defaults, has_valid_params, sanitize_params};
 use response::{Response, RestError, object, text};
 
-pub use posts::write::{Outcome, Plan, Save, Write};
+pub use posts::write::{Outcome, Plan, Save, Upload, Write};
 
 /// What the REST API reads from the site.
 pub trait Site {

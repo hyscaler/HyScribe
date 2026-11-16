@@ -88,7 +88,11 @@ pub(super) async fn unique(
         return Ok(slug);
     }
     let reserved = FEEDS.contains(&&slug[..]) || slug == b"embed";
-    let taken = if kind.hierarchical() {
+    // Attachment slugs are unique across all types.
+    let attachment = kind == Kind::Attachment;
+    let taken = if attachment {
+        write.any_post_name_used(&slug, id).await? || reserved
+    } else if kind.hierarchical() {
         let used = write
             .sibling_name_used(&slug, (post_type, parent), id)
             .await?;
@@ -106,7 +110,9 @@ pub(super) async fn unique(
         let mut alt = truncate(&slug, 200 - (suffix.len() + 1))?;
         alt.push(b'-');
         alt.extend_from_slice(suffix.as_bytes());
-        let used = if kind.hierarchical() {
+        let used = if attachment {
+            write.any_post_name_used(&alt, id).await?
+        } else if kind.hierarchical() {
             write
                 .sibling_name_used(&alt, (post_type, parent), id)
                 .await?

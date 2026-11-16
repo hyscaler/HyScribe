@@ -932,7 +932,7 @@ async fn edge_cases_match_php() {
                     date_gmt: post.modified_gmt,
                     ..PostArgs::default()
                 };
-                insert(w, ctx, args).await.map(drop)
+                insert(w, ctx, args, None).await.map(drop)
             })
             .await?;
             Ok(id)
@@ -1378,6 +1378,66 @@ async fn attachments_are_not_ported() {
     for result in refused {
         assert!(unported(result));
     }
+}
+
+/// `wp_insert_attachment()`'s own rules, which the uploads' write oracle
+/// tests in `hyscribe-http` match row for row: a status other than the
+/// kept ones becomes `inherit`, the slug is unique across every type and
+/// no feed's, comments take the default and pings are closed, the GUID is
+/// the file's URL, and the file is `_wp_attached_file`.
+#[tokio::test]
+async fn attachments_are_inserted_as_php_inserts_them() {
+    let one = ONE_AT_A_TIME.lock().await;
+    let args = |title: &str, status: &str| PostArgs {
+        title: title.as_bytes().to_vec(),
+        status: status.into(),
+        mime_type: "image/jpeg".into(),
+        guid: b"http://example.test/wp-content/uploads/a.jpg".to_vec(),
+        ..PostArgs::default()
+    };
+    rolled_back(async |w, ctx| {
+        let id =
+            wp_insert_attachment(w, ctx, args("Sample Page", "publish"), "2026/11/a.jpg").await?;
+        let post = existing(w, id).await?;
+        assert_eq!(post.post_type, "attachment");
+        assert_eq!(
+            (post.status.as_str(), &post.name[..]),
+            ("inherit", &b"sample-page-2"[..])
+        );
+        assert_eq!(
+            (post.comment_status.as_str(), post.ping_status.as_str()),
+            ("open", "closed")
+        );
+        assert_eq!(post.guid, b"http://example.test/wp-content/uploads/a.jpg");
+        let file = get_metadata(w, Meta::Post, id, "_wp_attached_file").await?;
+        assert_eq!(file, [Value::String(b"2026/11/a.jpg".to_vec())]);
+        let kept = wp_insert_attachment(w, ctx, args("feed", "private"), "b.jpg").await?;
+        let post = existing(w, kept).await?;
+        assert_eq!(
+            (post.status.as_str(), &post.name[..]),
+            ("private", &b"feed-2"[..])
+        );
+        // A future date does not schedule an attachment.
+        let dated = PostArgs {
+            date: "2099-01-01 00:00:00".into(),
+            ..args("Later", "future")
+        };
+        let later = wp_insert_attachment(w, ctx, dated, "c.jpg").await?;
+        assert_eq!(existing(w, later).await?.status, "inherit");
+        Ok(())
+    })
+    .await
+    .unwrap();
+    drop(one);
+    every_cut(
+        async |_: &mut Write<'_>, _: &Context| Ok(0),
+        async |w: &mut Write<'_>, ctx: &Context, _| {
+            wp_insert_attachment(w, ctx, args("Hello world!", ""), "d.jpg")
+                .await
+                .map(drop)
+        },
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -1888,7 +1948,7 @@ async fn autosave(writer: &Writer, conn: &mut Connection, id: u64) -> StdResult<
             date_gmt: post.modified_gmt,
             ..PostArgs::default()
         };
-        insert(w, ctx, args).await.map(drop)
+        insert(w, ctx, args, None).await.map(drop)
     })
     .await
 }

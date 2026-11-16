@@ -181,6 +181,9 @@ impl Default for LoginLimits {
     }
 }
 
+/// `UPLOAD_MAX_SIZE`'s default, 64 MB.
+pub const DEFAULT_UPLOAD_MAX_SIZE: u64 = 64 << 20;
+
 /// The complete configuration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
@@ -205,6 +208,39 @@ pub struct Config {
     pub constants: Constants,
     /// The login rate limits.
     pub login_limits: LoginLimits,
+    /// `UPLOAD_MAX_SIZE`: the largest upload, in bytes, which the admin
+    /// prints where PHP prints `wp_max_upload_size()`.
+    pub upload_max_size: u64,
+    /// The limits uploaded images are decoded within.
+    pub image_limits: ImageLimits,
+}
+
+/// The limits an uploaded image is decoded within (ADR 0015); the defaults
+/// are the oracle's ImageMagick policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImageLimits {
+    /// `IMAGE_MAX_BYTES`: the largest file decoded, default 64 MB.
+    pub bytes: u64,
+    /// `IMAGE_MAX_WIDTH`, default 32,000 pixels.
+    pub width: u32,
+    /// `IMAGE_MAX_HEIGHT`, default 32,000 pixels.
+    pub height: u32,
+    /// `IMAGE_MAX_AREA`: width times height, default 256,000,000 pixels.
+    pub area: u64,
+    /// `IMAGE_MAX_MEMORY`: one image's buffers in bytes, default 1 GB.
+    pub memory: u64,
+}
+
+impl Default for ImageLimits {
+    fn default() -> ImageLimits {
+        ImageLimits {
+            bytes: 64 << 20,
+            width: 32_000,
+            height: 32_000,
+            area: 256_000_000,
+            memory: 1 << 30,
+        }
+    }
 }
 
 /// Why configuration could not be loaded.
@@ -351,6 +387,34 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         window: limit("LOGIN_LIMIT_WINDOW", limits.window, 86_400)?,
     };
 
+    let upload_max_size = match get("UPLOAD_MAX_SIZE") {
+        None => DEFAULT_UPLOAD_MAX_SIZE,
+        Some(value) => size(value).ok_or_else(|| {
+            invalid(
+                "UPLOAD_MAX_SIZE",
+                "must be a size in bytes, or with a K, M or G suffix, such as 64M",
+            )
+        })?,
+    };
+
+    let image = ImageLimits::default();
+    let bytes = |key: &'static str, default| match get(key) {
+        None => Ok(default),
+        Some(value) => size(value).ok_or_else(|| {
+            invalid(
+                key,
+                "must be a size in bytes, or with a K, M or G suffix, such as 64M",
+            )
+        }),
+    };
+    let image_limits = ImageLimits {
+        bytes: bytes("IMAGE_MAX_BYTES", image.bytes)?,
+        width: limit("IMAGE_MAX_WIDTH", image.width, u32::MAX)?,
+        height: limit("IMAGE_MAX_HEIGHT", image.height, u32::MAX)?,
+        area: bytes("IMAGE_MAX_AREA", image.area)?,
+        memory: bytes("IMAGE_MAX_MEMORY", image.memory)?,
+    };
+
     let salts = SALT_KEYS
         .iter()
         .filter_map(|&key| get(key).map(|value| (key, Secret::new(value))))
@@ -367,6 +431,8 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         rest_public_users,
         constants,
         login_limits,
+        upload_max_size,
+        image_limits,
     })
 }
 
@@ -424,6 +490,28 @@ fn number(
             .filter(|number| (1..=max).contains(number))
             .ok_or_else(|| invalid(key, &format!("must be a whole number from 1 to {max}"))),
     }
+}
+
+/// A size as PHP's shorthand writes it: digits, then `K`, `M` or `G` in
+/// either case; at least a byte, and within `i64`.
+fn size(value: &str) -> Option<u64> {
+    let (digits, shift) = match value.as_bytes().split_last() {
+        Some((b'K' | b'k', head)) => (head, 10),
+        Some((b'M' | b'm', head)) => (head, 20),
+        Some((b'G' | b'g', head)) => (head, 30),
+        _ => (value.as_bytes(), 0),
+    };
+    if digits.is_empty() {
+        return None;
+    }
+    let number = digits.iter().try_fold(0u64, |number, &digit| {
+        digit.is_ascii_digit().then_some(())?;
+        number.checked_mul(10)?.checked_add(u64::from(digit - b'0'))
+    })?;
+    let bytes = number.checked_mul(1 << shift)?;
+    (1..=i64::MAX.unsigned_abs())
+        .contains(&bytes)
+        .then_some(bytes)
 }
 
 fn boolean(value: Option<&str>, key: &'static str) -> Result<bool, ConfigError> {

@@ -9,7 +9,7 @@
 //! that is an attachment, and content whose answer would be 501.
 
 use hyscribe_model::Post;
-use hyscribe_phpser::{Value, is_empty_string, lookup};
+use hyscribe_phpser::{Key, Value, is_empty_string, lookup};
 use hyscribe_render::date::{Zone, format_unix, stored_unix};
 use hyscribe_render::rest::Rendering;
 
@@ -68,11 +68,29 @@ pub struct Save {
     pub tags: Option<Vec<u64>>,
 }
 
+/// What an upload to the media collection saves besides its file: the
+/// attachment's fields the request gives.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Upload {
+    /// `post_title`.
+    pub title: Option<Vec<u8>>,
+    /// `post_excerpt`, from `caption`.
+    pub caption: Option<Vec<u8>>,
+    /// `post_content`, from `description`.
+    pub description: Option<Vec<u8>>,
+    /// `_wp_attachment_image_alt`, from `alt_text`.
+    pub alt_text: Option<Vec<u8>>,
+    /// `post_parent`, from `post`.
+    pub post: u64,
+}
+
 /// What a write does.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Write {
     /// Creates or updates a post.
     Save(Box<Save>),
+    /// Uploads a file to the media collection.
+    Upload(Box<Upload>),
     /// `wp_trash_post( $id )`.
     Trash(u64),
     /// `wp_delete_post( $id, true )`.
@@ -97,7 +115,7 @@ pub struct Plan {
 }
 
 /// What a write came to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
     /// The post written: saved, trashed or deleted.
     Written(u64),
@@ -106,6 +124,8 @@ pub enum Outcome {
     /// the validated dates never have), or
     /// `rest_cannot_delete` where trashing or deleting did nothing.
     Refused(&'static str),
+    /// An upload's refusal: its code, message and status.
+    Failed(&'static str, String, u16),
 }
 
 /// Makes a write's answer once it is written.
@@ -131,6 +151,12 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
         finish,
     };
     match index {
+        1 if regex == "/wp/v2/media" => Some(Writing {
+            unported: |params| UNPORTED_UPLOAD.iter().any(|name| given(params, name)),
+            args: |_, _, args| args,
+            plan: plan_upload,
+            finish,
+        }),
         1 if posts.contains(&regex) || items.contains(&regex) => Some(save),
         2 if items.contains(&regex) => Some(Writing {
             unported: |_| false,
@@ -140,6 +166,57 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
         }),
         _ => None,
     }
+}
+
+/// The arguments of an upload not ported: what the post's own fields would
+/// set beyond its texts and parent, and the block editor's own processing.
+const UNPORTED_UPLOAD: [&str; 13] = [
+    "date",
+    "date_gmt",
+    "slug",
+    "status",
+    "author",
+    "comment_status",
+    "ping_status",
+    "meta",
+    "template",
+    "featured_media",
+    "generate_sub_sizes",
+    "convert_format",
+    "url",
+];
+
+/// Whether the request itself gives `name`, not its default.
+fn given(params: &Params, name: &str) -> bool {
+    let name = Key::String(name.as_bytes().to_vec());
+    [&params.json, &params.post, &params.get]
+        .iter()
+        .any(|source| source.iter().any(|(key, _)| *key == name))
+}
+
+/// `create_item()` of the media collection up to its upload: the parent
+/// checked, and the fields `prepare_item_for_database()` takes.
+fn plan_upload(context: &Context, params: &Params) -> Result<Plan, RestError> {
+    let post = params.get("post").map_or(0, Value::to_int).unsigned_abs();
+    let parent = (post != 0).then(|| context.site.post(post)).flatten();
+    if parent.is_some_and(|parent| ["revision", "attachment"].contains(&parent.post_type.as_str()))
+    {
+        return Err(invalid("rest_invalid_param", "Invalid parent type."));
+    }
+    let upload = Upload {
+        title: raw(params, "title")?,
+        caption: raw(params, "caption")?,
+        description: raw(params, "description")?,
+        alt_text: params.get("alt_text").map(Value::to_php_string),
+        post,
+    };
+    Ok(Plan {
+        user: context.user,
+        can_publish: false,
+        unfiltered_html: context.can("unfiltered_html"),
+        write: Write::Upload(Box::new(upload)),
+        previous: Value::Null,
+    })
 }
 
 /// `check_status()`: the post's own status is valid whatever the schema
@@ -490,6 +567,9 @@ fn finish(
             let message = "The post cannot be deleted.";
             return Err(RestError::status("rest_cannot_delete", message, 500));
         }
+        Outcome::Failed(code, message, status) => {
+            return Err(RestError::status(code, &message, status));
+        }
     };
     if let Write::Delete(_) = plan.write {
         let deleted = object([("deleted", Value::Bool(true)), ("previous", plan.previous)]);
@@ -498,7 +578,11 @@ fn finish(
     let kind = Kind::of(params.route);
     params.set("context", text("edit"));
     let post = context.site.post(id).unwrap_or_default();
-    let created = matches!(&plan.write, Write::Save(save) if save.id == 0);
+    let created = match &plan.write {
+        Write::Save(save) => save.id == 0,
+        Write::Upload(_) => true,
+        Write::Trash(_) | Write::Delete(_) => false,
+    };
     let location = context.rest_url(&format!("/wp/v2/{}/{id}", kind.base()));
     // Its content was found ported before the write.
     prepared(context, params, kind, &post).map(|mut response| {

@@ -245,7 +245,7 @@ fn admin_referer(site: &dyn ActionSite, asked: &Asked, action: &str, field: &str
 }
 
 /// `check_admin_referer( $action )`.
-fn referer(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
+pub fn referer(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
     admin_referer(site, asked, action, "_wpnonce")
 }
 

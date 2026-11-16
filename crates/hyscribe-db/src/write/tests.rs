@@ -498,6 +498,8 @@ async fn reads_posts_inside_an_action() {
             .await
             .unwrap()
     );
+    assert!(write.any_post_name_used(b"sample-page", 0).await.unwrap());
+    assert!(!write.any_post_name_used(b"sample-page", 2).await.unwrap());
     let used = async |write: &mut Write<'_>, parent, id| {
         write
             .sibling_name_used(b"sample-page", ("page", parent), id)
@@ -1353,6 +1355,7 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         alone!(w.post(1).await.err()),
         alone!(w.post_comments(1).await.err()),
         alone!(w.post_name_used(b"n", "post", 1).await.err()),
+        alone!(w.any_post_name_used(b"n", 1).await.err()),
         alone!(w.sibling_name_used(b"n", ("page", 0), 1).await.err()),
         alone!(w.published_post_exists().await.err()),
         alone!(w.insert_post_with_id(990, &post).await.err()),

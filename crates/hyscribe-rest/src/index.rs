@@ -83,16 +83,17 @@ fn index(context: &Context, params: &Params) -> Result<Response, RestError> {
         ("authentication", Value::Array(Vec::new())),
     ];
     if client_side_media(context) && context.can("upload_files") {
-        let sizes = crate::media::registered_sizes(context).into_iter().map(
-            |(name, width, height, crop)| {
-                let size = object([
-                    ("width", Value::Int(width)),
-                    ("height", Value::Int(height)),
+        let sizes = crate::media::registered_sizes(context)
+            .into_iter()
+            .map(|size| {
+                let crop = size.crop != hyscribe_image::subsizes::Crop::No;
+                let entry = object([
+                    ("width", Value::Int(size.width.into())),
+                    ("height", Value::Int(size.height.into())),
                     ("crop", Value::Bool(crop)),
                 ]);
-                (Key::String(name.as_bytes().to_vec()), size)
-            },
-        );
+                (Key::String(size.name.into_bytes()), entry)
+            });
         data.extend([
             ("image_sizes", Value::Array(sizes.collect())),
             ("image_size_threshold", Value::Int(2560)),

@@ -45,6 +45,19 @@ pub(super) fn answer(
     let plan = &pending.plan;
     let ctx = context(site, plan, now);
     let outcome = handle.block_on(async { act(writer.begin().await, plan, &ctx).await });
+    finished(site, request, pending, outcome, (user, token, now, handle))
+}
+
+/// The answer to a write that came to `outcome`: made from the site
+/// reloaded, 501 for what `hyscribe-write` does not port, and the database
+/// error page for an error, the write rolled back.
+pub(super) fn finished(
+    site: &Site,
+    request: &Request,
+    pending: Pending,
+    outcome: Result<Outcome, Error>,
+    (user, token, now, handle): Asker,
+) -> Response {
     let served = match outcome {
         // What PHP refuses past the checks only as another write gets in.
         Err(Error::Unported(_) | Error::Refused(_)) => Ok(Served::not_ported()),
@@ -86,7 +99,7 @@ pub(super) fn context(site: &Site, plan: &Plan, now: i64) -> Context {
 }
 
 /// Shadow mode's refusal, `wp_die()`'s JSON as a REST request gets it.
-fn read_only() -> Served {
+pub(super) fn read_only() -> Served {
     let error = format!(
         r#"{{"code":"wp_die","message":"{}","data":{{"status":403}},"additional_errors":[]}}"#,
         hyscribe_admin::login::READ_ONLY
@@ -112,7 +125,7 @@ pub(super) async fn act(
     let outcome = written(&mut write, plan, ctx).await?;
     match outcome {
         Outcome::Written(_) => write.commit().await.map(|()| outcome).map_err(Into::into),
-        Outcome::Refused(_) => Ok(outcome),
+        Outcome::Refused(_) | Outcome::Failed(..) => Ok(outcome),
     }
 }
 
@@ -129,6 +142,8 @@ async fn written(write: &mut Write<'_>, plan: &Plan, ctx: &Context) -> Result<Ou
         hyscribe_rest::Write::Delete(id) => {
             Ok(done(wp_delete_post(write, ctx, *id, true).await?, *id))
         }
+        // Its file is written first, by `rest::uploads`.
+        hyscribe_rest::Write::Upload(_) => Err(Error::Unported("an upload's file")),
     }
 }
 

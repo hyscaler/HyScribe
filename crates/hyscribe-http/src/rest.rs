@@ -209,10 +209,26 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     };
     let entries = |value: Value| value.as_array().unwrap_or_default().to_vec();
     let get = entries(parse_str(asked.uri.query().unwrap_or_default().as_bytes()));
-    let form = if post {
-        entries(trackback::form(&asked.headers, &asked.body))
-    } else {
-        Vec::new()
+    // An upload's form is `$_POST` and `$_FILES`, as PHP reads it.
+    let max = site
+        .uploads
+        .as_ref()
+        .map_or(0, |uploads| uploads.max_size());
+    let upload = (post && crate::uploads::takes_upload(&asked.uri))
+        .then(|| crate::uploads::form(&asked.headers, &asked.body, max))
+        .flatten();
+    let (form, files) = match upload {
+        Some((form, files)) => (entries(form), files),
+        None if post => (
+            entries(trackback::form(&asked.headers, &asked.body)),
+            Vec::new(),
+        ),
+        None => (Vec::new(), Vec::new()),
+    };
+    // Read as a form, which PHP has made of it.
+    let content_type = match files.is_empty() {
+        true => header("content-type"),
+        false => Some(&b"application/x-www-form-urlencoded"[..]),
     };
     let request = hyscribe_rest::Request {
         method: asked.method.as_str(),
@@ -227,21 +243,35 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
         origin: header("origin"),
         nonce: header("x-wp-nonce"),
         method_override: header("x-http-method-override"),
-        content_type: header("content-type"),
+        content_type,
         body: &asked.body,
         host: header("host"),
         now,
     };
     let answered = hyscribe_rest::answer(&rest, &request);
+    let unfiltered_upload = hyscribe_rest::Site::can(&rest, user, "unfiltered_upload", &[]);
     let Rest { reads, .. } = rest;
     if let Err(err) = reads.reads.finish() {
         return crate::html(crate::database_error(site, &err));
     }
     match answered {
         Answer::Served(served) => sent(served),
-        Answer::Write(pending) => {
-            writes::answer(site, &request, *pending, (user, token, now, handle))
-        }
+        Answer::Write(pending) => match &pending.plan.write {
+            hyscribe_rest::Write::Upload(upload) => {
+                let upload = upload.as_ref().clone();
+                let incoming = (&asked.headers, &asked.body, &files[..]);
+                let asker = (user, token, now, handle);
+                uploads::answer(
+                    site,
+                    &request,
+                    (*pending, &upload),
+                    asker,
+                    incoming,
+                    unfiltered_upload,
+                )
+            }
+            _ => writes::answer(site, &request, *pending, (user, token, now, handle)),
+        },
     }
 }
 
@@ -256,6 +286,7 @@ fn sent(served: Served) -> Response {
     response.body(Body::from(served.body)).unwrap_or_default()
 }
 
+mod uploads;
 mod writes;
 
 #[cfg(test)]

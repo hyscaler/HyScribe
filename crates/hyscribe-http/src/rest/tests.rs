@@ -15,6 +15,7 @@ use tower::ServiceExt;
 use super::*;
 
 mod golden;
+mod uploads;
 mod writes;
 use crate::router;
 use crate::tests::oracle_site;

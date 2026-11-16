@@ -193,7 +193,7 @@ fn rich_editing(site: &dyn AttachmentSite, browser: &Browser) -> bool {
 }
 
 /// `size_format( $bytes )`.
-fn size_format(bytes: i64) -> String {
+pub fn size_format(bytes: i64) -> String {
     let units = [
         ("TB", 1i64 << 40),
         ("GB", 1 << 30),

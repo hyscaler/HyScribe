@@ -291,7 +291,7 @@ pub(super) async fn save_revision(
         date_gmt: post.modified_gmt,
         ..PostArgs::default()
     };
-    let (revision, ..) = super::insert(write, ctx, args).await?;
+    let (revision, ..) = super::insert(write, ctx, args, None).await?;
     // wp_save_revisioned_meta_fields(), through _wp_copy_post_meta()'s
     // wp_slash().
     for value in footnotes {

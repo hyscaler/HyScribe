@@ -18,8 +18,8 @@ pub(crate) mod image;
 mod library;
 mod upload_new;
 
-pub use attachment::{AttachmentArgs, AttachmentSite, attachment_edit};
-pub use image::site_icon_url;
+pub use attachment::{AttachmentArgs, AttachmentSite, attachment_edit, size_format};
+pub use image::{icon_name, site_icon_url};
 pub use library::{LibraryArgs, upload};
 pub use upload_new::{NewArgs, media_new};
 

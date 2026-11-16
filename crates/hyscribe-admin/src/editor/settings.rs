@@ -180,31 +180,36 @@ fn styles(site: &dyn EditorSite) -> Value {
         ("__unstableType", text("theme")),
         ("isGlobalStyles", Value::Bool(false)),
     ]));
-    let duotone = duotone_presets(global.settings());
-    if !duotone.is_empty() {
-        let svgs: String = duotone
-            .iter()
-            .map(|(id, colors)| filter_svg(id, colors))
-            .collect();
-        styles.push(object(vec![
+    styles.extend(duotone_styles(global.settings()));
+    list(styles)
+}
+
+/// `WP_Duotone::add_editor_settings()`'s styles: the filters' SVG and
+/// their custom properties, none without duotone presets.
+fn duotone_styles(settings: &Value) -> Vec<Value> {
+    let duotone = duotone_presets(settings);
+    if duotone.is_empty() {
+        return Vec::new();
+    }
+    let svgs: String = duotone
+        .iter()
+        .map(|(id, colors)| filter_svg(id, colors))
+        .collect();
+    let properties: String = duotone
+        .iter()
+        .map(|(id, _)| {
+            let slug = id.trim_start_matches("wp-duotone-");
+            format!("--wp--preset--duotone--{slug}:url(#{id});")
+        })
+        .collect();
+    vec![
+        object(vec![
             ("assets", text(&svgs)),
             ("__unstableType", text("svgs")),
             ("isGlobalStyles", Value::Bool(false)),
-        ]));
-        let properties: String = duotone
-            .iter()
-            .map(|(id, _)| {
-                let slug = id.trim_start_matches("wp-duotone-");
-                format!("--wp--preset--duotone--{slug}:url(#{id});")
-            })
-            .collect();
-        styles.push(style(
-            text(&format!(":root{{{properties}}}")),
-            "presets",
-            false,
-        ));
-    }
-    list(styles)
+        ]),
+        style(text(&format!(":root{{{properties}}}")), "presets", false),
+    ]
 }
 
 /// `WP_Duotone::get_all_global_styles_presets()`: each origin's duotone
@@ -313,19 +318,21 @@ fn take(features: &mut Value, path: &[&str]) -> Option<Value> {
     Some(entries.remove(at).1)
 }
 
+/// `get_page_template_slug()`, else the template a post of `post_type`
+/// falls back to in the bundled theme.
+fn template_slug(stored: &[u8], post_type: &str) -> String {
+    match stored {
+        b"" | b"default" if post_type == "page" => "page".into(),
+        b"" | b"default" => "single".into(),
+        slug => String::from_utf8_lossy(slug).into_owned(),
+    }
+}
+
 /// `wp_get_post_content_block_attributes()`: the attributes of the first
 /// post content block of the template the post would show with.
 fn post_content_attributes(site: &dyn EditorSite, post: &Post) -> Option<Value> {
     let template = site.meta(post, "_wp_page_template").unwrap_or_default();
-    let fallback = if post.post_type == "page" {
-        "page"
-    } else {
-        "single"
-    };
-    let slug = match String::from_utf8_lossy(&template).into_owned() {
-        slug if slug.is_empty() || slug == "default" => fallback.to_string(),
-        slug => slug,
-    };
+    let slug = template_slug(&template, &post.post_type);
     let blocks = parse_blocks(site.theme().template(&[slug])?.1);
     let block = first_block(&blocks, "core/post-content")?;
     block.attrs.clone().map(Value::Array)
@@ -430,3 +437,6 @@ pub fn get_block_editor_settings(site: &dyn EditorSite, custom: Settings, post: 
     settings.set("canEditCSS", Value::Bool(site.can("unfiltered_html")));
     Value::Array(settings.0)
 }
+
+#[cfg(test)]
+mod tests;

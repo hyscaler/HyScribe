@@ -280,3 +280,6 @@ pub fn body(site: &dyn EditorSite, editing: &Editing) -> String {
         nonce("install-plugin_classic-editor"),
     )
 }
+
+#[cfg(test)]
+mod tests;

@@ -202,6 +202,17 @@ pub(super) async fn replay_writes(
 /// address and user agent of `client`: what `then` makes of the request.
 async fn as_admin<T: Send + 'static>(
     site: &Arc<Site>,
+    asked: (&'static str, &str, &str),
+    client: (&'static [u8], Option<&'static [u8]>),
+    then: impl FnOnce(&Rest, &hyscribe_rest::Request) -> T + Send + 'static,
+) -> T {
+    as_user(site, 1, asked, client, then).await
+}
+
+/// [`as_admin`], asked by the user `user`.
+async fn as_user<T: Send + 'static>(
+    site: &Arc<Site>,
+    user: u64,
     (method, target, body): (&'static str, &str, &str),
     client: (&'static [u8], Option<&'static [u8]>),
     then: impl FnOnce(&Rest, &hyscribe_rest::Request) -> T + Send + 'static,
@@ -210,12 +221,12 @@ async fn as_admin<T: Send + 'static>(
     let (target, body) = (target.to_string(), body.to_string());
     tokio::task::spawn_blocking(move || {
         let mut reads = LoginReads::new(&site, handle, now());
-        reads.act_as(1, Vec::new());
+        reads.act_as(user, Vec::new());
         let nonce = reads.nonce("wp_rest");
         let rest = Rest {
             reads,
             site: &site,
-            user: 1,
+            user,
             caps: OnceCell::new(),
         };
         let (path, query) = target.split_once('?').unwrap_or((&target, ""));
@@ -229,7 +240,7 @@ async fn as_admin<T: Send + 'static>(
             uri: path.as_bytes(),
             get: &get,
             post: &[],
-            cookie_user: 1,
+            cookie_user: user,
             origin: None,
             nonce: Some(nonce.as_bytes()),
             remote_addr: client.0,
@@ -693,6 +704,18 @@ async fn refused_writes_are_answered_as_php_answers_them() {
             "rest_invalid_param",
         ),
         (
+            ("DELETE", "/?rest_route=/wp/v2/comments/1&force=maybe", ""),
+            "rest_invalid_param",
+        ),
+        (
+            (
+                "POST",
+                "/?rest_route=/wp/v2/comments",
+                r#"{"post":1,"content":"x","author_name":"","author_email":"e@example.test"}"#,
+            ),
+            "rest_comment_author_data_required",
+        ),
+        (
             (
                 "POST",
                 "/?rest_route=/wp/v2/comments/1",
@@ -729,6 +752,22 @@ async fn refused_writes_are_answered_as_php_answers_them() {
         r#"{"roles":["administrator"]}"#,
     );
     as_admin(&site, roles, (b"", None), plan_of).await;
+    // An author URL as long as its column takes is planned.
+    let url = format!(r#"{{"author_url":"https://x.test/{}"}}"#, "a".repeat(185));
+    let long = ("POST", "/?rest_route=/wp/v2/comments/1", url.as_str());
+    as_admin(&site, long, (b"", None), plan_of).await;
+    // An editor's comment skips the flood check, as a moderator's.
+    let comment = (
+        "POST",
+        "/?rest_route=/wp/v2/comments",
+        r#"{"post":1,"content":"x"}"#,
+    );
+    let hyscribe_rest::Write::Comment(save) =
+        as_user(&site, 701, comment, (b"", None), plan_of).await
+    else {
+        unreachable!()
+    };
+    assert!(save.skip_flood);
     // A comment stored without a type is a comment.
     let untyped = (
         "POST",

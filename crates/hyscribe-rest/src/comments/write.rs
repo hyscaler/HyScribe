@@ -235,7 +235,8 @@ fn plan_create(context: &Context, params: &Params) -> Result<Plan, RestError> {
             .as_ref()
             .is_none_or(|field| Value::String(field.clone()).is_empty())
     };
-    let missing = save.user_id.is_none_or(|id| id == 0)
+    // `user_id` is set only for an author who exists, never 0.
+    let missing = save.user_id.is_none()
         && empty(&save.author)
         && empty(&save.author_email)
         && empty(&save.author_url);

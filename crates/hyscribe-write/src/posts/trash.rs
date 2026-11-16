@@ -204,6 +204,7 @@ async fn delete_one(
     let comments = crate::comments::Context {
         now: ctx.now,
         home: &ctx.home,
+        empty_trash_days: ctx.constants.empty_trash_days,
     };
     for comment in write.post_comment_ids(id).await? {
         crate::comments::delete_comment(write, comments, comment, true).await?;
@@ -230,7 +231,7 @@ pub async fn wp_delete_post(
         return Ok(false);
     };
     let kind = Kind::of(&post.post_type)?;
-    let to_trash = !force && crate::EMPTY_TRASH_DAYS != 0;
+    let to_trash = !force && ctx.constants.empty_trash_days != 0;
     if to_trash && matches!(kind, Kind::Post | Kind::Page) && post.status != "trash" {
         return wp_trash_post(write, ctx, id).await;
     }

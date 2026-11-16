@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `hyscribe setup`, the terminal setup wizard (docs/SETUP_WIZARD.md)
-//! without the compatibility scan: it reads an existing site's
-//! `wp-config.php`, asks for what it cannot read, checks the database and
-//! writes `.env`. It never writes to the database, and never prints a
-//! password, key or salt.
+//! The setup wizard (docs/SETUP_WIZARD.md) without the compatibility scan:
+//! it reads an existing site's `wp-config.php`, asks for what it cannot
+//! read, checks the database and writes `.env`. `hyscribe setup` asks in
+//! the terminal, setup mode ([`web`]) in the browser, through the same
+//! steps. It never writes to the database, and never shows a password, key
+//! or salt.
 
 use std::collections::HashMap;
 use std::io::{BufRead, Read as _, Write};
@@ -15,9 +16,11 @@ use hyscribe_config::setup::{self, Setting};
 use hyscribe_config::wpconfig::{self, Value};
 use hyscribe_config::{Config, ENV_FILE, Mode, SALT_KEYS};
 use hyscribe_db::{DB_VERSIONS, Db, DbError};
-use rustix::termios::{LocalModes, OptionalActions, tcgetattr, tcsetattr};
+use rustix::termios::{LocalModes, OptionalActions, isatty, tcgetattr, tcsetattr};
 
 use crate::failed;
+
+pub(crate) mod web;
 
 /// The terminal the wizard talks to.
 pub(crate) struct Terminal<'a> {
@@ -30,7 +33,7 @@ pub(crate) struct Terminal<'a> {
 }
 
 impl Terminal<'_> {
-    fn say(&mut self, text: &str) -> Result<(), String> {
+    pub(crate) fn say(&mut self, text: &str) -> Result<(), String> {
         self.out
             .write_all(text.as_bytes())
             .and_then(|()| self.out.flush())
@@ -100,65 +103,317 @@ impl Terminal<'_> {
             "setup stopped: \"{question}?\" was not answered yes or no"
         ))
     }
+
+    /// Whether someone answers at a terminal.
+    pub(crate) fn interactive(&self) -> bool {
+        self.tty.is_some_and(isatty)
+    }
+
+    /// Asks where to set up, three times at most: true for the terminal.
+    pub(crate) fn in_terminal(&mut self) -> Result<bool, String> {
+        let question =
+            "No .env found. Set up in the browser or in the terminal? [browser/terminal]";
+        for _ in 0..3 {
+            match self.ask(question, "")?.to_ascii_lowercase().as_str() {
+                "" | "b" | "browser" => return Ok(false),
+                "t" | "terminal" => return Ok(true),
+                _ => self.say("  Answer browser or terminal.\n")?,
+            }
+        }
+        Err("setup stopped: neither browser nor terminal was chosen".into())
+    }
 }
 
-/// Runs the wizard for the installation in `home` and says where `.env`
-/// went.
-pub(crate) fn run(home: &Path, term: &mut Terminal<'_>) -> Result<String, String> {
+/// What the wizard read about an existing site.
+#[derive(Clone)]
+pub(crate) struct Found {
+    /// The keys copied.
+    pub values: Vec<(&'static str, String)>,
+    /// The keys to ask for, and the constants not copied.
+    pub unread: Vec<&'static str>,
+    /// What was read, to say so.
+    pub source: String,
+    /// `wp-content`, where `object-cache.php` and the uploads would be.
+    pub content: Content,
+}
+
+/// Where `wp-content` is.
+#[derive(Clone)]
+pub(crate) enum Content {
+    /// No WordPress folder was read.
+    Unknown,
+    /// Found.
+    Known(PathBuf),
+    /// Computed by PHP: asked for, with this answer by default.
+    Asked(PathBuf),
+}
+
+/// The details asked for when there is no `wp-config.php`.
+pub(crate) fn manual() -> Found {
+    Found {
+        values: Vec::new(),
+        unread: vec!["DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PREFIX"],
+        source: String::new(),
+        content: Content::Unknown,
+    }
+}
+
+/// The site whose WordPress folder or `wp-config.php` is `answer`.
+pub(crate) fn from_file(answer: &str) -> Result<Found, String> {
+    let (file, abspath) = locate(Path::new(answer))?;
+    let config = read_wp_config(&file)?;
+    let default = abspath.join("wp-content");
+    let content = match setup::setting(&config, "WP_CONTENT_DIR") {
+        Setting::Literal(Value::String(dir)) => Content::Known(PathBuf::from(dir)),
+        Setting::Unset => Content::Known(default),
+        _ => Content::Asked(default),
+    };
+    Ok(found(&config, format!("Read {}", file.display()), content))
+}
+
+/// The site of the `wp-config.php` text `source`, given without its folder.
+pub(crate) fn from_text(source: &[u8]) -> Result<Found, String> {
+    let config = wpconfig::parse(source).map_err(|err| err.to_string())?;
+    let content = match setup::setting(&config, "WP_CONTENT_DIR") {
+        Setting::Literal(Value::String(dir)) => Content::Known(PathBuf::from(dir)),
+        _ => Content::Unknown,
+    };
+    Ok(found(
+        &config,
+        "Read the wp-config.php given".into(),
+        content,
+    ))
+}
+
+fn found(config: &wpconfig::WpConfig, source: String, content: Content) -> Found {
+    let import = setup::import(config);
+    Found {
+        values: import.values,
+        unread: import.unread,
+        source,
+        content,
+    }
+}
+
+impl Found {
+    /// What was read and what was not, as lines to show.
+    pub(crate) fn summary(&self) -> String {
+        let mut text = String::new();
+        if !self.source.is_empty() {
+            text.push_str(&format!("  {}\n", self.source));
+        }
+        if !self.unread.is_empty() && !self.source.is_empty() {
+            text.push_str(&format!(
+                "  Not a literal there, or missing: {}\n",
+                self.unread.join(", ")
+            ));
+        }
+        text
+    }
+}
+
+/// A question for a `.env` key.
+pub(crate) struct Question {
+    /// The key the answer goes to.
+    pub key: &'static str,
+    /// The question.
+    pub text: &'static str,
+    /// The answer an empty one takes.
+    pub default: &'static str,
+    /// Whether the answer is a password, never shown.
+    pub secret: bool,
+}
+
+/// The questions for `key`, which `wp-config.php` did not give; none for a
+/// constant, which is not asked for but noted.
+pub(crate) fn questions(key: &'static str) -> Vec<Question> {
+    let (text, default) = match key {
+        "DB_NAME" => ("Database name", ""),
+        "DB_USER" => ("Database user", ""),
+        "DB_PASSWORD" => ("Database password", ""),
+        "DB_HOST" => ("Database host", "localhost"),
+        "DB_CHARSET" => ("Database charset", "utf8mb4"),
+        "DB_PREFIX" => ("Table prefix", "wp_"),
+        "WP_HOME" => ("WP_HOME, the site address (empty for the stored one)", ""),
+        "WP_SITEURL" => (
+            "WP_SITEURL, the WordPress address (empty for the stored one)",
+            "",
+        ),
+        _ => return Vec::new(),
+    };
+    let mut asked = vec![Question {
+        key,
+        text,
+        default,
+        secret: key == "DB_PASSWORD",
+    }];
+    // `DB_HOST` comes with its port.
+    if key == "DB_HOST" {
+        asked.push(Question {
+            key: "DB_PORT",
+            text: "Database port",
+            default: "3306",
+            secret: false,
+        });
+    }
+    asked
+}
+
+/// Why a constant of `wp-config.php` was not copied.
+pub(crate) fn not_copied(key: &str) -> String {
+    match key {
+        "EMPTY_TRASH_DAYS" => format!(
+            "{key} is not a literal number of days, so it is not copied: WordPress's 30 holds"
+        ),
+        _ => format!(
+            "{key} is not a literal true or false, so it is not copied: the safer value holds"
+        ),
+    }
+}
+
+/// What both wizards ask after the database details.
+pub(crate) struct Choices {
+    /// Shadow mode, or primary.
+    pub shadow: bool,
+    /// `DB_READ_USER` and its password, when given.
+    pub read_user: Option<(String, String)>,
+    /// `BEHIND_PROXY`.
+    pub behind_proxy: bool,
+    /// `BIND_HOST`.
+    pub bind_host: String,
+    /// `PORT`.
+    pub port: String,
+    /// `UPLOADS_DIR`, empty for none.
+    pub uploads: String,
+}
+
+impl Choices {
+    fn push(self, values: &mut Vec<(&'static str, String)>) {
+        values.push((
+            "MODE",
+            if self.shadow { "shadow" } else { "primary" }.into(),
+        ));
+        if let Some((user, password)) = self.read_user {
+            values.push(("DB_READ_USER", user));
+            values.push(("DB_READ_PASSWORD", password));
+        }
+        values.push(("BIND_HOST", self.bind_host));
+        values.push(("PORT", self.port));
+        values.push(("BEHIND_PROXY", self.behind_proxy.to_string()));
+        if !self.uploads.is_empty() {
+            values.push(("UPLOADS_DIR", self.uploads));
+        }
+    }
+}
+
+/// The uploads folder of a site whose `wp-content` is `content`.
+pub(crate) fn uploads(content: Option<&Path>) -> String {
+    content.map_or_else(String::new, |dir| dir.join("uploads").display().to_string())
+}
+
+/// `hyscribe setup`: runs the wizard and says what it did.
+pub(crate) fn command(home: &Path, term: &mut Terminal<'_>) -> Result<String, String> {
+    Ok(match run(home, term)? {
+        Some(path) => format!(
+            "Wrote {} (mode 600)\nStart the site with: ./hyscribe service start\n",
+            path.display()
+        ),
+        None => format!("Kept {}; nothing written.\n", home.join(ENV_FILE).display()),
+    })
+}
+
+/// Runs the wizard for the installation in `home`: where `.env` went, or
+/// `None` when an existing one is kept.
+pub(crate) fn run(home: &Path, term: &mut Terminal<'_>) -> Result<Option<PathBuf>, String> {
     let env = home.join(ENV_FILE);
     let replace = env.symlink_metadata().is_ok();
     if replace && !term.yes(&format!("{} exists. Replace it", env.display()), false)? {
-        return Ok(format!("Kept {}; nothing written.\n", env.display()));
+        return Ok(None);
     }
-    let found = find_wordpress(home);
     let answer = term.ask(
         "Path to the WordPress folder or its wp-config.php (none if there is none)",
-        &found,
+        &find_wordpress(home),
     )?;
-    let (mut values, unread, content) = if answer.is_empty() || answer == "none" {
-        let keys = vec!["DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PREFIX"];
-        (Vec::new(), keys, None)
+    let found = if answer.is_empty() || answer == "none" {
+        manual()
     } else {
-        let (file, abspath) = locate(Path::new(&answer))?;
-        let config = read_wp_config(&file)?;
-        let import = setup::import(&config);
-        term.say(&format!("  Read {}\n", file.display()))?;
-        if !import.unread.is_empty() {
-            term.say(&format!(
-                "  Not a literal there, or missing: {}\n",
-                import.unread.join(", ")
-            ))?;
-        }
-        let content = content_dir(&config, &abspath, term)?;
-        (import.values, import.unread, Some(content))
+        from_file(&answer)?
     };
-    for key in unread {
-        ask_for(key, &mut values, term)?;
+    term.say(&found.summary())?;
+    let content = match found.content {
+        Content::Unknown => None,
+        Content::Known(dir) => Some(dir),
+        Content::Asked(default) => Some(PathBuf::from(term.ask(
+            "Path to wp-content (WP_CONTENT_DIR is computed by PHP)",
+            &default.display().to_string(),
+        )?)),
+    };
+    let mut values = found.values;
+    for key in found.unread {
+        for question in questions(key) {
+            let answer = if question.secret {
+                term.secret(question.text)?
+            } else {
+                term.ask(question.text, question.default)?
+            };
+            if !answer.is_empty() {
+                values.push((question.key, answer));
+            }
+        }
+        if questions(key).is_empty() {
+            term.say(&format!("  {}\n", not_copied(key)))?;
+        }
     }
-    let copied = SALT_KEYS
-        .iter()
-        .filter(|key| values.iter().any(|(k, _)| k == *key))
-        .count();
-    let salts: Result<Vec<_>, _> = SALT_KEYS
-        .into_iter()
-        .filter(|key| !values.iter().any(|(k, _)| k == key))
-        .map(|key| hyscribe_auth::generate_password(64, true).map(|salt| (key, salt)))
-        .collect();
-    term.say(&format!(
-        "  Keys and salts: {copied} copied, {} generated\n",
-        SALT_KEYS.len() - copied
-    ))?;
     let shadow = term.yes("Start in shadow mode (read only) first", true)?;
-    values.push(("MODE", if shadow { "shadow" } else { "primary" }.into()));
     let read_user = term.ask(
         "Database user granted only SELECT, for every read (empty for none)",
         "",
     )?;
-    if !read_user.is_empty() {
-        let password = term.secret("Its password")?;
-        values.push(("DB_READ_USER", read_user));
-        values.push(("DB_READ_PASSWORD", password));
-    }
+    let read_user = if read_user.is_empty() {
+        None
+    } else {
+        Some((read_user, term.secret("Its password")?))
+    };
+    let behind_proxy = term.yes("Running HyScribe behind a proxy", false)?;
+    let bind_host = term.ask("Address to listen on", "127.0.0.1")?;
+    let port = term.ask("Port to listen on", "8080")?;
+    let uploads = term.ask(
+        "The site's uploads folder (empty for hyscribe/uploads)",
+        &uploads(content.as_deref()),
+    )?;
+    let choices = Choices {
+        shadow,
+        read_user,
+        behind_proxy,
+        bind_host,
+        port,
+        uploads,
+    };
+    choices.push(&mut values);
+    let (report, text) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(failed("cannot start the runtime".into()))
+        .and_then(|runtime| runtime.block_on(checked(values, content.as_deref())))?;
+    term.say(&report)?;
+    write_env(home, &text, replace).map(Some)
+}
+
+/// Generates the keys and salts not copied and checks the configuration:
+/// what the checks found, and the text of `.env`.
+pub(crate) async fn checked(
+    mut values: Vec<(&'static str, String)>,
+    content: Option<&Path>,
+) -> Result<(String, String), String> {
+    let copied = SALT_KEYS
+        .iter()
+        .filter(|key| values.iter().any(|(k, _)| k == *key))
+        .count();
+    let salts: std::io::Result<Vec<_>> = SALT_KEYS
+        .into_iter()
+        .filter(|key| !values.iter().any(|(k, _)| k == key))
+        .map(|key| hyscribe_auth::generate_password(64, true).map(|salt| (key, salt)))
+        .collect();
     let config = salts
         .map_err(failed("cannot generate keys and salts".into()))
         .and_then(|salts| {
@@ -169,75 +424,44 @@ pub(crate) fn run(home: &Path, term: &mut Terminal<'_>) -> Result<String, String
                 .collect();
             hyscribe_config::from_map(&map).map_err(|err| err.to_string())
         })?;
-    let report = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(failed("cannot start the runtime".into()))
-        .and_then(|runtime| runtime.block_on(check(&config)))?;
-    term.say(&report)?;
-    if let Some(content) = content
-        && content.join("object-cache.php").exists()
+    let mut report = format!(
+        "  Keys and salts: {copied} copied, {} generated\n",
+        SALT_KEYS.len() - copied
+    );
+    report.push_str(&check(&config).await?);
+    // A site that never had an upload has no uploads folder yet.
+    if let Some(dir) = config.uploads_dir.as_ref().filter(|dir| !dir.is_dir()) {
+        report.push_str(&format!(
+            "  Warning: UPLOADS_DIR {} is not a folder yet\n",
+            dir.display()
+        ));
+    }
+    if let Some(cache) = content
+        .map(|dir| dir.join("object-cache.php"))
+        .filter(|cache| cache.exists())
     {
-        term.say(&format!(
+        report.push_str(&format!(
             "  Warning: {} is a persistent object cache. HyScribe's writes do not clear it, \
              so PHP WordPress may show stale data until it expires.\n",
-            content.join("object-cache.php").display()
-        ))?;
+            cache.display()
+        ));
     }
     let text = setup::render(&values)
         .ok_or("an answer holds a carriage return, which .env cannot hold")?;
-    let path = setup::write(home, &text, replace)
-        .map_err(failed(format!("cannot write {}", env.display())))?;
-    Ok(format!(
-        "Wrote {} (mode 600)\nStart the site with: ./hyscribe service start\n",
-        path.display()
-    ))
+    Ok((report, text))
 }
 
-/// Asks for a key `wp-config.php` did not give, or notes why a capability
-/// constant was not copied.
-fn ask_for(
-    key: &'static str,
-    values: &mut Vec<(&'static str, String)>,
-    term: &mut Terminal<'_>,
-) -> Result<(), String> {
-    let mut answer = |question: &str, default: &str| -> Result<(), String> {
-        let value = term.ask(question, default)?;
-        if !value.is_empty() {
-            values.push((key, value));
-        }
-        Ok(())
-    };
-    match key {
-        "DB_NAME" => answer("Database name", ""),
-        "DB_USER" => answer("Database user", ""),
-        "DB_CHARSET" => answer("Database charset", "utf8mb4"),
-        "DB_PREFIX" => answer("Table prefix", "wp_"),
-        "WP_HOME" => answer("WP_HOME, the site address (empty for the stored one)", ""),
-        "WP_SITEURL" => answer(
-            "WP_SITEURL, the WordPress address (empty for the stored one)",
-            "",
-        ),
-        "DB_HOST" => {
-            answer("Database host", "localhost")?;
-            let port = term.ask("Database port", "3306")?;
-            values.push(("DB_PORT", port));
-            Ok(())
-        }
-        "DB_PASSWORD" => {
-            let password = term.secret("Database password")?;
-            values.push((key, password));
-            Ok(())
-        }
-        _ => term.say(&format!(
-            "  {key} is not a literal true or false, so it is not copied: the safer value holds\n"
-        )),
-    }
+/// Writes `text` to `home`'s `.env`, replacing one only when `replace`.
+pub(crate) fn write_env(home: &Path, text: &str, replace: bool) -> Result<PathBuf, String> {
+    setup::write(home, text, replace).map_err(failed(format!(
+        "cannot write {}",
+        home.join(ENV_FILE).display()
+    )))
 }
 
 /// The first `wp-config.php` beside the installation: in its parent folder,
 /// or in a folder next to it.
-fn find_wordpress(home: &Path) -> String {
+pub(crate) fn find_wordpress(home: &Path) -> String {
     let parent = home.parent().unwrap_or(home);
     let mut folders: Vec<PathBuf> = std::fs::read_dir(parent)
         .into_iter()
@@ -284,25 +508,6 @@ fn read_wp_config(file: &Path) -> Result<wpconfig::WpConfig, String> {
         })
         .map_err(failed(format!("cannot read {}", file.display())))?;
     wpconfig::parse(&source).map_err(|err| err.to_string())
-}
-
-/// `wp-content`, where `object-cache.php` would be.
-fn content_dir(
-    config: &wpconfig::WpConfig,
-    abspath: &Path,
-    term: &mut Terminal<'_>,
-) -> Result<PathBuf, String> {
-    let default = abspath.join("wp-content");
-    match setup::setting(config, "WP_CONTENT_DIR") {
-        Setting::Literal(Value::String(dir)) => Ok(PathBuf::from(dir)),
-        Setting::Unset => Ok(default),
-        _ => term
-            .ask(
-                "Path to wp-content (WP_CONTENT_DIR is computed by PHP)",
-                &default.display().to_string(),
-            )
-            .map(PathBuf::from),
-    }
 }
 
 /// Formats a database failure with what was being done.
@@ -386,4 +591,4 @@ async fn check(config: &Config) -> Result<String, String> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

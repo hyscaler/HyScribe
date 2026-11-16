@@ -68,12 +68,13 @@ impl Moderation {
     async fn apply(
         self,
         write: &mut Write<'_>,
-        asked: &Asked<'_>,
+        (asked, site): (&Asked<'_>, &dyn Acting),
         id: u64,
     ) -> Result<bool, DbError> {
         let context = Context {
             now: asked.now,
             home: asked.home.as_bytes(),
+            empty_trash_days: site.constants().empty_trash_days,
         };
         match self {
             Approve => set_comment_status(write, id, "approve").await,
@@ -160,7 +161,7 @@ pub(super) fn bulk<'a>(
             }
             if let Some(moderation) = moderation {
                 moderation
-                    .apply(write, asked, id.to_int().unsigned_abs())
+                    .apply(write, (asked, site), id.to_int().unsigned_abs())
                     .await?;
                 done += 1;
             }
@@ -237,7 +238,7 @@ fn moderate<'a>(
             _ => read(|| site.admin_url("edit-comments.php")).into_bytes(),
         };
         let back = remove_query_arg(&COUNTS, &back);
-        moderation.apply(write, asked, id).await?;
+        moderation.apply(write, (asked, site), id).await?;
         let id = id.to_string();
         let mut args: Vec<(&[u8], Option<&[u8]>)> =
             vec![(moderation.count().as_bytes(), Some(b"1"))];
@@ -342,7 +343,7 @@ pub(super) fn delete<'a>(
         } else {
             return Ok(Ajax::Text("-1".into()));
         };
-        if done.apply(write, asked, id).await? {
+        if done.apply(write, (asked, site), id).await? {
             Ok(delete_response(write, asked, site, id, delta).await?)
         } else {
             Ok(Ajax::Text("0".into()))
@@ -665,6 +666,7 @@ pub(super) fn reply<'a>(
         let context = Context {
             now: asked.now,
             home: asked.home.as_bytes(),
+            empty_trash_days: site.constants().empty_trash_days,
         };
         // `wp_die()` of the refusal's message, without its status.
         let id = new_comment(write, context, comment, commenter).await?;

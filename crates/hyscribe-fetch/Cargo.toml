@@ -16,7 +16,6 @@ hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"
 hyscribe-kses.workspace = true
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 openssl-probe = "0.2.2"
-rustls-pki-types = { version = "1.16", features = ["std"] }
 tokio = { version = "1", features = ["net", "rt", "time"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 

@@ -11,7 +11,7 @@
 
 use hyscribe_fetch::{Args, Error, Kind, validate_url};
 use hyscribe_kses::esc_url_raw;
-use hyscribe_phpser::{Value, md5};
+use hyscribe_phpser::{Value, is_empty_string, md5};
 
 use crate::request::{Arg, Params, Sanitize, invalid_param};
 use crate::response::{Response, RestError, object, text};
@@ -152,7 +152,7 @@ fn remote(context: &Context, url: &[u8]) -> Result<Vec<u8>, RestError> {
     if fetched.status != 200 {
         return Err(not_found());
     }
-    if matches!(fetched.body.as_slice(), b"" | b"0") {
+    if is_empty_string(&fetched.body) {
         let message = "Unable to retrieve body from response at this URL.";
         return Err(RestError::status("no_content", message, 404));
     }

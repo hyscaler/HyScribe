@@ -6,7 +6,7 @@
 //! next is looked up in tables, so hostile pages cannot make it quadratic.
 
 use hyscribe_kses::{parse_url, wp_strip_all_tags};
-use hyscribe_phpser::php_trim;
+use hyscribe_phpser::{is_empty_string, php_trim};
 use hyscribe_render::formatting::html_entity_decode_quotes;
 
 /// PCRE's `\s` without the `u` modifier.
@@ -42,11 +42,6 @@ fn find(text: &[u8], needle: &[u8]) -> Option<usize> {
     text.windows(needle.len()).position(|w| w == needle)
 }
 
-/// PHP's `empty()` of a string.
-fn empty(text: &[u8]) -> bool {
-    matches!(text, b"" | b"0")
-}
-
 /// `get_document_head()`: from `<head` for as many bytes as `</head>`, or
 /// else `<body`, is from the start, then `</head>`; the whole page without
 /// either.
@@ -77,7 +72,7 @@ pub(crate) fn title(head: &[u8]) -> Vec<u8> {
             head.get(from..close)
         });
     match found {
-        Some(title) if !empty(title) => prepare(php_trim(title)),
+        Some(title) if !is_empty_string(title) => prepare(php_trim(title)),
         _ => Vec::new(),
     }
 }
@@ -104,7 +99,7 @@ pub(crate) fn icon(head: &[u8], url: &[u8]) -> Vec<u8> {
         return Vec::new();
     };
     let href = href(element);
-    if empty(href) {
+    if is_empty_string(href) {
         return Vec::new();
     }
     let icon = php_trim(href);
@@ -211,7 +206,7 @@ pub(crate) fn metas(head: &[u8]) -> Vec<Meta<'_>> {
 
 /// `get_metadata_from_meta_element()`: the trimmed content of the first
 /// element whose `attr` is one of `values`, quoted or not.
-pub(crate) fn metadata<'a>(metas: &[Meta<'a>], attr: &str, values: &[&str]) -> &'a [u8] {
+fn metadata<'a>(metas: &[Meta<'a>], attr: &str, values: &[&str]) -> &'a [u8] {
     let names = |element: &[u8]| {
         let attr = format!("{attr}=");
         (0..element.len())

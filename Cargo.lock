@@ -736,7 +736,6 @@ dependencies = [
  "hyscribe-testkit",
  "openssl-probe",
  "rustls",
- "rustls-pki-types",
  "tokio",
  "tokio-rustls",
 ]

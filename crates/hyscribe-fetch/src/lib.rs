@@ -25,7 +25,7 @@ use rustls::pki_types::ServerName;
 use tokio::time::{Instant, timeout_at};
 use tokio_rustls::TlsConnector;
 
-pub use address::is_public;
+use address::is_public;
 pub use net::{Boxed, Net, System, host_roots};
 pub use rustls::RootCertStore;
 pub use url::{Target, make_absolute_url, validate_url};

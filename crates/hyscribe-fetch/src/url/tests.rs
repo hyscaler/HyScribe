@@ -2,7 +2,7 @@
 
 use std::net::Ipv4Addr;
 
-use crate::is_public;
+use crate::address::is_public;
 
 use super::*;
 

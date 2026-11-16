@@ -7,7 +7,7 @@ use std::net::Ipv4Addr;
 
 use hyscribe_kses::{parse_url, wp_kses_bad_protocol, wp_parse_url};
 
-use crate::is_public;
+use crate::address::is_public;
 
 /// The ports `http_allowed_safe_ports` allows by default.
 const SAFE_PORTS: [u16; 3] = [80, 443, 8080];
@@ -19,15 +19,15 @@ const MAX_PASSES: usize = 1000;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Target {
     /// `https` rather than `http`.
-    pub https: bool,
+    pub(crate) https: bool,
     /// The host, as the URL gives it.
-    pub host: String,
+    pub(crate) host: String,
     /// The port connected to.
-    pub port: u16,
+    pub(crate) port: u16,
     /// The `Host` header: the host, and the port the URL gives.
-    pub authority: String,
+    pub(crate) authority: String,
     /// The path and query, percent-encoded where HTTP needs it.
-    pub path: String,
+    pub(crate) path: String,
 }
 
 /// `wp_http_validate_url( $url )` with the site's `home`, where the target

@@ -127,7 +127,7 @@ fn icon_link(head: &[u8]) -> Option<&[u8]> {
             return None;
         }
         let end = lookup(&gt, at + 6)?;
-        lookup(&rel, at + 6).filter(|&rel| rel < end)?;
+        lookup(&rel, at + 6).filter(|rel| (..end).contains(rel))?;
         head.get(at..=end)
     })
 }
@@ -180,7 +180,7 @@ pub(crate) fn metas(head: &[u8]) -> Vec<Meta<'_>> {
     let single = next(head, |at| head.get(at) == Some(&b'\''));
     let mut found = Vec::new();
     let mut at = 0;
-    while at < head.len() {
+    while head.get(at).is_some() {
         let start = at;
         at += 1;
         if !at_word(head, start, b"<meta") || !head.get(start + 5).is_some_and(|&b| space(b)) {
@@ -189,14 +189,15 @@ pub(crate) fn metas(head: &[u8]) -> Vec<Meta<'_>> {
         let Some(end) = lookup(&gt, start + 6) else {
             break;
         };
-        let Some(open) = lookup(&content, start + 6).filter(|&open| open < end) else {
+        let Some(open) = lookup(&content, start + 6).filter(|open| (..end).contains(open)) else {
             continue;
         };
         let value = open + 8;
         // The quoted value ends at the first such quote that a `>` follows.
         let closed = quote(head, value).and_then(|q| {
             let close = lookup(if q == b'"' { &double } else { &single }, value + 1)?;
-            let end = lookup(&gt, close + 1)?;
+            // The quote at `close` is no `>`.
+            let end = lookup(&gt, close)?;
             Some((head.get(value + 1..close).unwrap_or_default(), end))
         });
         let (content, end) = closed.unwrap_or((&[], end));

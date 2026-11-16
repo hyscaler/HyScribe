@@ -79,6 +79,8 @@ $pages = array(
 	'<linkrel="icon" href="s.ico">',
 	'<link rel="icon" href="t.ico"/>',
 	'<link rel=">icon" href="u.ico">',
+	'<link rel=" icon" href="w.ico">',
+	'<meta rel="icon" href="v.ico">',
 	'<meta name="description" content="Plain">',
 	'<meta content="Reversed" name="description">',
 	'<meta name="og:description" content="OG">',

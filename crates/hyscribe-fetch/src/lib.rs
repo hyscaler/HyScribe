@@ -265,7 +265,8 @@ async fn exchange<T>(
 where
     T: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
 {
-    let _driver = Driver(tokio::spawn(connection));
+    // The connection ends once the sender and the body are dropped.
+    tokio::spawn(connection);
     let response = sender
         .send_request(request)
         .await
@@ -287,15 +288,6 @@ where
     }
     read.truncate(limit);
     Ok(Hop::Done(Fetched { status, body: read }))
-}
-
-/// The task driving a connection, stopped when the request is done.
-struct Driver<T>(tokio::task::JoinHandle<T>);
-
-impl<T> Drop for Driver<T> {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
 }
 
 #[cfg(test)]

@@ -100,6 +100,23 @@ async fn previews(dir: &std::path::Path, pages: Arc<Pages>, writes: bool) -> Arc
     Arc::new(site.with_fetch(Some(client)).with_writer(writer))
 }
 
+/// The cached page of `/expired`, past its timeout in the fixture.
+const EXPIRED: &str = "_site_transient_g_url_details_response_a752d9f881141719d6ebb4aa1fd73009";
+
+/// The `option_id` of the option `name` in `wordpress_saves`.
+async fn option_id(name: &str) -> u64 {
+    let db = saves();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let query = sqlx::query_scalar("SELECT option_id FROM wp_options WHERE option_name = ?");
+    query.bind(name).fetch_one(&mut conn).await.unwrap()
+}
+
 /// The cached page of `url` and its timeout, as stored.
 async fn cached(site: &Site, url: &str) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
     let key = format!("g_url_details_response_{}", md5(url.as_bytes()));
@@ -126,6 +143,7 @@ async fn previews_match_php_and_are_cached() {
     for (id, role) in (701..).zip(["editor", "author", "contributor", "subscriber"]) {
         users.push((role, log_in_as(&site, role, id).await));
     }
+    let seeded = option_id(EXPIRED).await;
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/url-details.tsv");
     let cases = rest_cases(golden);
     assert_eq!(cases.len(), 6 * 31 - 2);
@@ -170,9 +188,10 @@ async fn previews_match_php_and_are_cached() {
         .header("x-wp-nonce", nonce);
     assert_eq!(send(&site, request, "").await.status(), StatusCode::OK);
     assert_eq!(pages.dialed.load(Ordering::SeqCst), fetched);
-    // The expired page was deleted and fetched again.
+    // The expired page was deleted and added again, as a new row.
     let (stale, _) = cached(&site, "http://pages.test:8080/expired").await;
     assert!(stale.unwrap().starts_with(b"<HTML>"));
+    assert!(option_id(EXPIRED).await > seeded);
     fresh().await;
 }
 

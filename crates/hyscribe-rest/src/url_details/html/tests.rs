@@ -33,7 +33,7 @@ fn pages_are_read_as_php_reads_them() {
         );
         count += 1;
     }
-    assert_eq!(count, 84);
+    assert_eq!(count, 86);
 }
 
 #[test]

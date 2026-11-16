@@ -119,10 +119,8 @@ pub fn make_absolute_url(relative: &[u8], url: &[u8]) -> Vec<u8> {
     if let Some(port) = port {
         absolute.extend(format!(":{port}").into_bytes());
     }
-    let mut path = match base.path {
-        Some(path) if !empty(Some(&path)) => path,
-        _ => b"/".to_vec(),
-    };
+    let base_path = base.path.filter(|path| !empty(Some(path)));
+    let mut path = base_path.unwrap_or(b"/".to_vec());
     match rel.path {
         Some(rel) if rel.first() == Some(&b'/') => path = rel,
         Some(rel) if !empty(Some(&rel)) => {

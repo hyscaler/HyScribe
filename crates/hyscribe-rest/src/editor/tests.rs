@@ -25,6 +25,7 @@ fn as_who(case: &RestCase, who: &str) -> RestCase {
         status: case.status,
         headers: Vec::new(),
         body: Vec::new(),
+        sent: Vec::new(),
     }
 }
 
@@ -153,6 +154,7 @@ fn another_theme_is_not_ported() {
             status: 0,
             headers: Vec::new(),
             body: Vec::new(),
+            sent: Vec::new(),
         };
         assert_eq!(serve_over(content, &case).status, 501, "{target}");
     }

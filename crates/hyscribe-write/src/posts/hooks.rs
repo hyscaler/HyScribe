@@ -9,7 +9,8 @@ use hyscribe_phpser::{Value, unserialize};
 
 use crate::options::{Autoload, Meta, add_metadata, delete_metadata, get_metadata, update_option};
 
-use super::{Context, Error, Kind, PostArgs, Result, cron, date, link, truthy};
+use super::{Context, Error, Kind, PostArgs, Result, date, link, truthy};
+use crate::cron;
 
 /// The ID `wp_get_post_parent_id()` gives, 0 for none.
 async fn parent_of(write: &mut Write<'_>, id: u64, link: (u64, u64)) -> Result<u64> {
@@ -253,7 +254,8 @@ pub(super) async fn save_revision(
     id: u64,
 ) -> Result<()> {
     let post = super::existing(write, id).await?;
-    if kind == Kind::Revision || post.status == "auto-draft" {
+    // Only posts and pages support revisions.
+    if matches!(kind, Kind::Revision | Kind::UserRequest) || post.status == "auto-draft" {
         return Ok(());
     }
     let footnotes = get_metadata(write, Meta::Post, id, "footnotes").await?;

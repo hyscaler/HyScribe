@@ -14,6 +14,7 @@ use sqlx::Row as _;
 use crate::dialect::{Access, Dialect};
 use crate::{Backend, Bind, Columns, DbError, Engine, PrefixSql, Sql, db_error, ids_or_none, list};
 
+mod cron;
 mod meta;
 mod posts;
 mod terms;
@@ -385,6 +386,12 @@ impl<'w> Write<'w> {
     pub async fn set_post_guid(&mut self, id: u64, guid: &[u8]) -> Result<u64, DbError> {
         let query = self.sql("UPDATE {prefix}posts SET guid = ? WHERE ID = ?");
         self.change(Table::Posts, query.bind(guid).bind(id)).await
+    }
+
+    /// `wp_publish_post()`'s status change.
+    pub async fn set_post_status(&mut self, id: u64, status: &str) -> Result<u64, DbError> {
+        let query = self.sql("UPDATE {prefix}posts SET post_status = ? WHERE ID = ?");
+        self.change(Table::Posts, query.bind(status).bind(id)).await
     }
 
     /// `wp_update_comment_count_now()`'s `UPDATE`.

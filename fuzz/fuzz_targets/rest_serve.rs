@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The REST API answers any route, query, method and headers without
-//! panicking: route matching, `_fields`, `_jsonp`, `_envelope`, the
-//! arguments' schemas and the routes all take input from the request, and
+//! The REST API answers any route, query, method, headers and body without
+//! panicking: route matching, the JSON and form bodies, `_fields`,
+//! `_jsonp`, `_envelope`, the arguments' schemas, the routes and the
+//! writes' plans and answers all take input from the request, and
 //! the site's one template, template part and global styles post, its one
 //! comment and its one user have the input's content.
 
@@ -13,7 +14,7 @@ use std::sync::OnceLock;
 use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, PostQuery, Term, TermQuery, User, UserQuery};
 use hyscribe_phpser::{Key, Value, parse_str};
 use hyscribe_render::theme::{Theme, twentytwentyfive};
-use hyscribe_rest::{Request, Site, serve};
+use hyscribe_rest::{Answer, Outcome, Request, Site, answer, written};
 use libfuzzer_sys::fuzz_target;
 
 /// A site whose posts have the fuzzed content.
@@ -186,8 +187,21 @@ fuzz_target!(|data: &[u8]| {
     let mut parts = data.split(|&b| b == 0);
     let mut next = || parts.next().unwrap_or_default();
     let (verb, route, query, header, content) = (next(), next(), next(), next(), next());
-    let methods = ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"];
+    let body = next();
+    let methods = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
     let method = methods[usize::from(verb.first().copied().unwrap_or(0)) % methods.len()];
+    let types: [Option<&[u8]>; 5] = [
+        None,
+        Some(b"application/json"),
+        Some(b"application/x-www-form-urlencoded"),
+        Some(b"multipart/form-data; boundary=x"),
+        Some(b"text/plain"),
+    ];
+    let content_type = types[usize::from(verb.get(1).copied().unwrap_or(0)) % types.len()];
+    let post = match parse_str(body) {
+        Value::Array(post) if method == "POST" && content_type == types[2] => post,
+        _ => Vec::new(),
+    };
     let get = match parse_str(query) {
         Value::Array(get) => get,
         _ => Vec::new(),
@@ -197,13 +211,19 @@ fuzz_target!(|data: &[u8]| {
         route,
         uri: query,
         get: &get,
-        post: &[],
+        post: &post,
         cookie_user: u64::from(header.first().copied().unwrap_or(0) % 3),
         origin: header.get(1..).filter(|origin| !origin.is_empty()),
         nonce: header.get(..1),
         method_override: None,
-        unread_body: verb.first().is_some_and(|b| b & 0x80 != 0),
+        content_type,
+        body,
     };
-    let served = serve(&Fuzzed { content }, &request);
+    let site = Fuzzed { content };
+    let served = match answer(&site, &request) {
+        Answer::Served(served) => served,
+        // The write made, the post written is the fuzzed one.
+        Answer::Write(pending) => written(&site, &request, *pending, Outcome::Written(4)),
+    };
     assert!((200..600).contains(&served.status));
 });

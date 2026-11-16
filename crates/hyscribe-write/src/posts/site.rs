@@ -26,7 +26,7 @@ pub(super) async fn default_status(
             let value = write.option_value(option).await?.unwrap_or_default();
             String::from_utf8_lossy(&value).into_owned()
         }
-        Kind::Page | Kind::Revision => "closed".into(),
+        Kind::Page | Kind::Revision | Kind::UserRequest => "closed".into(),
     })
 }
 

@@ -45,22 +45,34 @@ fn inject_theme(blocks: &mut [Block], theme: &[u8]) {
 /// in a template part block that `remove_serialized_parent_block()` takes
 /// off again.
 pub(crate) fn hooked(content: &[u8], part: bool, theme: &[u8]) -> Vec<u8> {
-    let wrapped = match (part, is_empty_string(content)) {
-        (false, _) => content.to_vec(),
-        (true, true) => b"<!-- wp:template-part /-->".to_vec(),
-        (true, false) => [
-            &b"<!-- wp:template-part -->"[..],
+    if part {
+        return in_parent(content, b"template-part", theme);
+    }
+    let mut blocks = parse_blocks(content);
+    inject_theme(&mut blocks, theme);
+    serialize_blocks(&blocks)
+}
+
+/// `apply_block_hooks_to_content()` of `content` in a `parent` block, which
+/// `remove_serialized_parent_block()` takes off again.
+pub(crate) fn in_parent(content: &[u8], parent: &[u8], theme: &[u8]) -> Vec<u8> {
+    let wrapped = if is_empty_string(content) {
+        [&b"<!-- wp:"[..], parent, b" /-->"].concat()
+    } else {
+        [
+            &b"<!-- wp:"[..],
+            parent,
+            b" -->",
             content,
-            b"<!-- /wp:template-part -->",
+            b"<!-- /wp:",
+            parent,
+            b" -->",
         ]
-        .concat(),
+        .concat()
     };
     let mut blocks = parse_blocks(&wrapped);
     inject_theme(&mut blocks, theme);
     let serialized = serialize_blocks(&blocks);
-    if !part {
-        return serialized;
-    }
     let find = |needle: &[u8]| serialized.windows(needle.len()).position(|w| w == needle);
     let start = find(b"-->").map_or(3, |at| at + 3);
     let end = serialized

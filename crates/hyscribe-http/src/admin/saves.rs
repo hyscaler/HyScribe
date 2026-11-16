@@ -28,7 +28,7 @@ use crate::redirect::wp_validate_redirect;
 mod comments;
 pub(super) mod dashboard;
 pub(super) mod heartbeat;
-mod options;
+pub(super) mod options;
 mod posts;
 pub(super) mod screen;
 mod terms;
@@ -138,6 +138,8 @@ pub(super) enum Ajax {
 /// on `screen` (hs-admin's path without `/hs-admin/`); none while not ported.
 pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
     match (screen, action) {
+        // Checked by its own nonce alone, so no screen's action may take it.
+        (_, b"screen-options") => Some(screen::options),
         ("users", b"promote") => Some(users::promote),
         ("post", b"trash") => Some(posts::trash),
         ("post", b"untrash") => Some(posts::untrash),
@@ -160,7 +162,6 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         ("edit-tags", b"bulk-delete") => Some(terms::bulk_delete),
         ("edit-tags", b"editedtag") => Some(terms::edited_tag),
         ("post", b"post-quickdraft-save") => Some(dashboard::quickdraft_save),
-        (_, b"screen-options") => Some(screen::options),
         ("edit", _) => Some(posts::bulk),
         _ => None,
     }

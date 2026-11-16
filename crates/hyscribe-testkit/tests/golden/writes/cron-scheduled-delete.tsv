@@ -1,0 +1,144 @@
+# The rows PHP WordPress writes for the action cron-scheduled-delete (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-16 08:27:22 to 2026-11-16 08:27:22 UTC.
+# %wp_posts:1% is 902.
+# %wp_posts:2% is 903.
+# %wp_posts:3% is 904.
+# %wp_posts:4% is 905.
+# %wp_posts:5% is 906.
+# %wp_postmeta:1% is 5.
+# %wp_postmeta:2% is 6.
+# %wp_postmeta:3% is 7.
+# %wp_postmeta:4% is 8.
+# %wp_postmeta:5% is 9.
+# %wp_postmeta:6% is 10.
+# %wp_postmeta:7% is 11.
+# %wp_postmeta:8% is 12.
+# %wp_postmeta:9% is 13.
+# %wp_postmeta:10% is 14.
+# %wp_postmeta:11% is 15.
+# %wp_postmeta:12% is 16.
+# %wp_postmeta:13% is 17.
+# %wp_postmeta:14% is 18.
+# %wp_postmeta:15% is 19.
+# %wp_comments:1% is 901.
+# %wp_comments:2% is 902.
+# %wp_comments:3% is 903.
+# %wp_commentmeta:1% is 1.
+# %wp_commentmeta:2% is 2.
+# %wp_commentmeta:3% is 3.
+# %wp_commentmeta:4% is 4.
+# %wp_commentmeta:5% is 5.
+# %wp_commentmeta:6% is 6.
+# %wp_options:1% is 131.
+wp_commentmeta	%wp_commentmeta:1%	-	comment_id	%wp_comments:1%
+wp_commentmeta	%wp_commentmeta:1%	-	meta_id	%wp_commentmeta:1%
+wp_commentmeta	%wp_commentmeta:1%	-	meta_key	_wp_trash_meta_status
+wp_commentmeta	%wp_commentmeta:1%	-	meta_value	1
+wp_commentmeta	%wp_commentmeta:2%	-	comment_id	%wp_comments:1%
+wp_commentmeta	%wp_commentmeta:2%	-	meta_id	%wp_commentmeta:2%
+wp_commentmeta	%wp_commentmeta:2%	-	meta_key	_wp_trash_meta_time
+wp_commentmeta	%wp_commentmeta:2%	-	meta_value	1000000000
+wp_commentmeta	%wp_commentmeta:3%	-	comment_id	%wp_comments:2%
+wp_commentmeta	%wp_commentmeta:3%	-	meta_id	%wp_commentmeta:3%
+wp_commentmeta	%wp_commentmeta:3%	-	meta_key	_wp_trash_meta_status
+wp_commentmeta	%wp_commentmeta:3%	-	meta_value	1
+wp_commentmeta	%wp_commentmeta:4%	-	comment_id	%wp_comments:2%
+wp_commentmeta	%wp_commentmeta:4%	-	meta_id	%wp_commentmeta:4%
+wp_commentmeta	%wp_commentmeta:4%	-	meta_key	_wp_trash_meta_time
+wp_commentmeta	%wp_commentmeta:4%	-	meta_value	1000000000
+wp_comments	%wp_comments:1%	-	comment_ID	%wp_comments:1%
+wp_comments	%wp_comments:1%	-	comment_agent	
+wp_comments	%wp_comments:1%	-	comment_approved	trash
+wp_comments	%wp_comments:1%	-	comment_author	A reader
+wp_comments	%wp_comments:1%	-	comment_author_IP	
+wp_comments	%wp_comments:1%	-	comment_author_email	
+wp_comments	%wp_comments:1%	-	comment_author_url	
+wp_comments	%wp_comments:1%	-	comment_content	A comment.
+wp_comments	%wp_comments:1%	-	comment_date	2026-01-01 00:00:00
+wp_comments	%wp_comments:1%	-	comment_date_gmt	2026-01-01 00:00:00
+wp_comments	%wp_comments:1%	-	comment_karma	0
+wp_comments	%wp_comments:1%	-	comment_parent	0
+wp_comments	%wp_comments:1%	-	comment_post_ID	1
+wp_comments	%wp_comments:1%	-	comment_type	comment
+wp_comments	%wp_comments:1%	-	user_id	0
+wp_postmeta	%wp_postmeta:1%	-	meta_id	%wp_postmeta:1%
+wp_postmeta	%wp_postmeta:1%	-	meta_key	_pingme
+wp_postmeta	%wp_postmeta:1%	-	meta_value	1
+wp_postmeta	%wp_postmeta:1%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:13%	-	meta_id	%wp_postmeta:13%
+wp_postmeta	%wp_postmeta:13%	-	meta_key	_wp_trash_meta_status
+wp_postmeta	%wp_postmeta:13%	-	meta_value	publish
+wp_postmeta	%wp_postmeta:13%	-	post_id	%wp_posts:5%
+wp_postmeta	%wp_postmeta:14%	-	meta_id	%wp_postmeta:14%
+wp_postmeta	%wp_postmeta:14%	-	meta_key	_wp_trash_meta_time
+wp_postmeta	%wp_postmeta:14%	-	meta_value	1000000000
+wp_postmeta	%wp_postmeta:14%	-	post_id	%wp_posts:5%
+wp_postmeta	%wp_postmeta:15%	-	meta_id	%wp_postmeta:15%
+wp_postmeta	%wp_postmeta:15%	-	meta_key	_wp_trash_meta_time
+wp_postmeta	%wp_postmeta:15%	-	meta_value	1000000000
+wp_postmeta	%wp_postmeta:15%	-	post_id	1099511627776
+wp_postmeta	%wp_postmeta:2%	-	meta_id	%wp_postmeta:2%
+wp_postmeta	%wp_postmeta:2%	-	meta_key	_encloseme
+wp_postmeta	%wp_postmeta:2%	-	meta_value	1
+wp_postmeta	%wp_postmeta:2%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:3%	-	meta_id	%wp_postmeta:3%
+wp_postmeta	%wp_postmeta:3%	-	meta_key	_wp_trash_meta_status
+wp_postmeta	%wp_postmeta:3%	-	meta_value	publish
+wp_postmeta	%wp_postmeta:3%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:4%	-	meta_id	%wp_postmeta:4%
+wp_postmeta	%wp_postmeta:4%	-	meta_key	_wp_trash_meta_time
+wp_postmeta	%wp_postmeta:4%	-	meta_value	1000000000
+wp_postmeta	%wp_postmeta:4%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:5%	-	meta_id	%wp_postmeta:5%
+wp_postmeta	%wp_postmeta:5%	-	meta_key	_wp_desired_post_slug
+wp_postmeta	%wp_postmeta:5%	-	meta_value	a-write-oracle-post
+wp_postmeta	%wp_postmeta:5%	-	post_id	%wp_posts:1%
+wp_posts	%wp_posts:1%	-	ID	%wp_posts:1%
+wp_posts	%wp_posts:1%	-	comment_count	0
+wp_posts	%wp_posts:1%	-	comment_status	open
+wp_posts	%wp_posts:1%	-	guid	http://127.0.0.1:8081/?p=%wp_posts:1%
+wp_posts	%wp_posts:1%	-	menu_order	0
+wp_posts	%wp_posts:1%	-	ping_status	open
+wp_posts	%wp_posts:1%	-	pinged	
+wp_posts	%wp_posts:1%	-	post_author	1
+wp_posts	%wp_posts:1%	-	post_content	Its content.
+wp_posts	%wp_posts:1%	-	post_content_filtered	
+wp_posts	%wp_posts:1%	-	post_date	%now%
+wp_posts	%wp_posts:1%	-	post_date_gmt	%now%
+wp_posts	%wp_posts:1%	-	post_excerpt	
+wp_posts	%wp_posts:1%	-	post_mime_type	
+wp_posts	%wp_posts:1%	-	post_modified	%now%
+wp_posts	%wp_posts:1%	-	post_modified_gmt	%now%
+wp_posts	%wp_posts:1%	-	post_name	a-write-oracle-post__trashed
+wp_posts	%wp_posts:1%	-	post_parent	0
+wp_posts	%wp_posts:1%	-	post_password	
+wp_posts	%wp_posts:1%	-	post_status	trash
+wp_posts	%wp_posts:1%	-	post_title	A write oracle post
+wp_posts	%wp_posts:1%	-	post_type	post
+wp_posts	%wp_posts:1%	-	to_ping	
+wp_posts	%wp_posts:2%	-	ID	%wp_posts:2%
+wp_posts	%wp_posts:2%	-	comment_count	0
+wp_posts	%wp_posts:2%	-	comment_status	closed
+wp_posts	%wp_posts:2%	-	guid	http://127.0.0.1:8081/?p=%wp_posts:2%
+wp_posts	%wp_posts:2%	-	menu_order	0
+wp_posts	%wp_posts:2%	-	ping_status	closed
+wp_posts	%wp_posts:2%	-	pinged	
+wp_posts	%wp_posts:2%	-	post_author	1
+wp_posts	%wp_posts:2%	-	post_content	Its content.
+wp_posts	%wp_posts:2%	-	post_content_filtered	
+wp_posts	%wp_posts:2%	-	post_date	%now%
+wp_posts	%wp_posts:2%	-	post_date_gmt	%now%
+wp_posts	%wp_posts:2%	-	post_excerpt	
+wp_posts	%wp_posts:2%	-	post_mime_type	
+wp_posts	%wp_posts:2%	-	post_modified	%now%
+wp_posts	%wp_posts:2%	-	post_modified_gmt	%now%
+wp_posts	%wp_posts:2%	-	post_name	%wp_posts:1%-revision-v1
+wp_posts	%wp_posts:2%	-	post_parent	%wp_posts:1%
+wp_posts	%wp_posts:2%	-	post_password	
+wp_posts	%wp_posts:2%	-	post_status	inherit
+wp_posts	%wp_posts:2%	-	post_title	A write oracle post
+wp_posts	%wp_posts:2%	-	post_type	revision
+wp_posts	%wp_posts:2%	-	to_ping	
+wp_term_relationships	%wp_posts:1%,1	-	object_id	%wp_posts:1%
+wp_term_relationships	%wp_posts:1%,1	-	term_order	0
+wp_term_relationships	%wp_posts:1%,1	-	term_taxonomy_id	1

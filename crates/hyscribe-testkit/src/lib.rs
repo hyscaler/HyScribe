@@ -326,6 +326,8 @@ pub struct RestCase {
     pub headers: Vec<String>,
     /// The body, or for the Theme Test Data fixture its SHA-256 in hex.
     pub body: Vec<u8>,
+    /// The body sent, if any.
+    pub sent: Vec<u8>,
 }
 
 impl RestCase {
@@ -351,6 +353,7 @@ pub fn rest_cases(golden: &str) -> Vec<RestCase> {
                 status: field(4).parse().unwrap_or_default(),
                 headers: text(5).lines().map(String::from).collect(),
                 body: unhex(field(6)),
+                sent: unhex(field(7)),
             }
         })
         .collect()
@@ -363,6 +366,7 @@ pub fn rest_headers(headers: &[(String, String)]) -> Vec<String> {
             "content-type",
             "x-robots-tag",
             "link",
+            "location",
             "allow",
             "vary",
             "expires",

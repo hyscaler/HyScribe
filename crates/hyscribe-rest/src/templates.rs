@@ -5,7 +5,7 @@
 //! their templates by `theme//slug`, read from the active theme's files and
 //! the site's template posts.
 
-mod content;
+pub(crate) mod content;
 mod query;
 
 use hyscribe_model::Post;

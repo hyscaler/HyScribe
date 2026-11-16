@@ -15,13 +15,18 @@
 # is one (added for the run and removed after); on the Theme Test Data fixture
 # (HYSCRIBE_PHP_DB=wordpress_ttd), whose content is not ours to commit, as
 # <list name>-ttd.tsv with each body's SHA-256:
-#   who<TAB>method<TAB>hex(target)<TAB>flags<TAB>status<TAB>hex(headers)<TAB>hex(body)
+#   who<TAB>method<TAB>hex(target)<TAB>flags<TAB>status<TAB>hex(headers)<TAB>hex(body)[<TAB>hex(sent)]
+# A list's line is method<TAB>target<TAB>flags, and a body to send as a
+# fourth column, recorded as sent: JSON with the flag json, a URL-encoded
+# form with form.
 # A logged in user sends the nonce admin-ajax.php's rest-nonce action gives
 # them as X-WP-Nonce, unless flags has nononce; %nonce% in a target, the
 # headers and the body stands for the user's nonce (a visitor's for a
 # visitor), and %preview_nonce% in a body for a preview link's. Flags:
 # origin and originnull send an Origin header, pretty serves the request under /%postname%/ permalinks (reference/rewrite/permalinks.php),
-# override sends X-HTTP-Method-Override: DELETE, ttd records the request on
+# override sends X-HTTP-Method-Override: DELETE, restore lets the request
+# write and puts the database back after it as it was once the users logged
+# in (dates of the request's own time in its answer read %now%), ttd records the request on
 # the Theme Test Data fixture only, default on the default install only (as
 # one that PHP would write caches for there), skip=a+b sends the request
 # as every identity but those listed, and writes
@@ -50,6 +55,7 @@ cleanup() {
   rm -rf "$TMP"
   echo "DELETE FROM wp_users WHERE ID BETWEEN 701 AND 704; DELETE FROM wp_usermeta WHERE user_id BETWEEN 701 AND 704;" | sql
   sed -n '/^-- cleanup$/,$p' "$STATE" | sql
+  "$DOCKER" exec "$DB" rm -f /tmp/rest-golden.sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-permalinks.php" "$MU/hyscribe-no-cron.php" "$MU/hyscribe-list.php"
 }
 trap cleanup EXIT
@@ -153,7 +159,15 @@ curl_args() {
   [[ "$flags" == *origin* && "$flags" != *originnull* ]] && args+=(-H "Origin: http://example.test")
   [[ "$flags" == *pretty* ]] && args+=(-H "X-HyScribe-Permalinks: /%postname%/|||")
   [[ "$flags" == *override* ]] && args+=(-H "X-HTTP-Method-Override: DELETE")
+  [[ ",$flags," == *,json,* ]] && args+=(-H "Content-Type: application/json")
+  [[ ",$flags," == *,form,* ]] && args+=(-H "Content-Type: application/x-www-form-urlencoded")
+  [ -z "$4" ] || args+=(--data-binary "$4")
   return 0
+}
+
+# The dates in an answer from $2 to $3 (Unix times) as %now%.
+mask_now() {
+  php -r 'echo preg_replace_callback( "/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/", fn( $m ) => strtotime( $m[0] . "Z" ) >= $argv[2] && strtotime( $m[0] . "Z" ) <= $argv[3] ? "%now%" : $m[0], file_get_contents( $argv[1] ) );' "$1" "$2" "$3"
 }
 
 declare -A NONCE
@@ -169,37 +183,47 @@ for who in "${WHO[@]:1}"; do
 done
 
 before=$(checksums)
+if grep -q $'^[^\t]*\t[^\t]*\t[^\t]*restore' <<< "$REQUESTS"; then
+  "$DOCKER" exec "$DB" sh -c "mariadb-dump -uroot -preference-only ${HYSCRIBE_PHP_DB:-wordpress} > /tmp/rest-golden.sql"
+fi
 : > "$OUT"
 for who in "${WHO[@]}"; do
   nonce=${NONCE[$who]}
-  while IFS=$'\t' read -r method target flags; do
+  while IFS=$'\t' read -r method target flags sent; do
     [[ "$flags" == *writes* ]] && continue
     [[ "$flags" == *ttd* && "${HYSCRIBE_PHP_DB:-}" != wordpress_ttd ]] && continue
     [[ ",$flags," == *,default,* && "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ]] && continue
     [[ "+${flags#*skip=}+" == *"+$who+"* && "$flags" == *skip=* ]] && continue
-    curl_args "$who" "$flags" "$nonce"
+    curl_args "$who" "$flags" "$nonce" "${sent:-}"
     url="$BASE${target//%nonce%/$nonce}"
+    start=$(date +%s)
     if [ "$method" = HEAD ]; then
       status=$(curl -s -I -o "$TMP/head" -w '%{http_code}' "${args[@]}" "$url")
       : > "$TMP/body"
     else
       status=$(curl -s -X "$method" -o "$TMP/body" -D "$TMP/head" -w '%{http_code}' "${args[@]}" "$url")
     fi
-    headers=$(tr -d '\r' < "$TMP/head" | grep -iE '^(content-type|x-robots-tag|link|access-control-[a-z-]+|allow|vary|x-wp-[a-z]+|expires|cache-control):' |
+    if [[ "$flags" == *restore* ]]; then
+      mask_now "$TMP/body" "$start" "$(date +%s)" > "$TMP/masked"
+      mv "$TMP/masked" "$TMP/body"
+      [ "$(checksums)" = "$before" ] ||
+        "$DOCKER" exec "$DB" sh -c "mariadb -uroot -preference-only ${HYSCRIBE_PHP_DB:-wordpress} < /tmp/rest-golden.sql"
+    fi
+    headers=$(tr -d '\r' < "$TMP/head" | grep -iE '^(content-type|x-robots-tag|link|location|access-control-[a-z-]+|allow|vary|x-wp-[a-z]+|expires|cache-control):' |
       sed -E 's/^([^:]+):/\L\1:/; s/^(vary: .*),Accept-Encoding$/\1/' | grep -vx 'vary: Accept-Encoding' | sed "s/$nonce/%nonce%/g" || true)
     if [ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ] || [[ ",$flags," == *,hash,* ]]; then
       body=$(sed "s/$nonce/%nonce%/g; s/preview_nonce=[0-9a-f]\{10\}/preview_nonce=%preview_nonce%/g" "$TMP/body" | sha256sum | cut -c1-64 | tr -d '\n' | xxd -p | tr -d '\n')
     else
       body=$(sed "s/$nonce/%nonce%/g; s/preview_nonce=[0-9a-f]\{10\}/preview_nonce=%preview_nonce%/g" "$TMP/body" | xxd -p | tr -d '\n')
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$who" "$method" "$(printf '%s' "$target" | xxd -p | tr -d '\n')" "$flags" "$status" \
-      "$(printf '%s' "$headers" | xxd -p | tr -d '\n')" "$body" >> "$OUT"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n' "$who" "$method" "$(printf '%s' "$target" | xxd -p | tr -d '\n')" "$flags" "$status" \
+      "$(printf '%s' "$headers" | xxd -p | tr -d '\n')" "$body" "${sent:+$'\t'$(printf '%s' "$sent" | xxd -p | tr -d '\n')}" >> "$OUT"
   done <<< "$REQUESTS"
 done
 if [ $# -gt 0 ]; then
   after=$(checksums)
   [ "$before" = "$after" ] || { echo "a REST request wrote to the database" >&2; diff <(echo "$before") <(echo "$after") >&2; exit 1; }
-  while IFS=$'\t' read -r method target flags; do
+  while IFS=$'\t' read -r method target flags _; do
     [[ "$flags" == *writes* ]] || continue
     curl_args administrator "$flags" "${NONCE[administrator]}"
     curl -s -o /dev/null -X "$method" "${args[@]}" "$BASE$target"

@@ -693,6 +693,39 @@ fn ajax_shell() {
     assert_eq!(ajax(site, "", "action=heartbeat&_nonce=x"), 501);
 }
 
+/// No other branch lets a write past its own checks: the Customizer's
+/// flags, an email change's confirmation or dismissal, an array role.
+#[test]
+fn no_branch_skips_a_write_s_checks() {
+    let (subscriber, admin) = (role("subscriber"), role("administrator"));
+    let passed = |site: &Oracle, target: &str, body: Option<&str>| {
+        check(site, target, body, None).is_some_and(|checked| checked.is_ok())
+    };
+    for body in [
+        "action=delete-tag&tag_ID=1&wp_customize=on",
+        "action=destroy-sessions&user_id=801&customize_changeset_uuid=x",
+        "action=customize_save&wp_customize=on",
+    ] {
+        assert!(!passed(&subscriber, "admin-ajax.php", Some(body)), "{body}");
+        assert!(!passed(&admin, "admin-ajax.php", Some(body)), "{body}");
+        let refused = outcome(&subscriber, "admin-ajax.php", Some(body));
+        assert_eq!(refused, Some(501), "{body}");
+    }
+    let dismiss = nonce("dismiss-1_new_email");
+    for target in [
+        "profile.php?newuseremail=x".to_string(),
+        "user-edit.php?user_id=1&newuseremail=x".to_string(),
+        format!("profile.php?dismiss=1_new_email&{dismiss}"),
+    ] {
+        let update = Some("action=update");
+        assert_eq!(outcome(&admin, &target, update), Some(403), "{target}");
+    }
+    let users = nonce("bulk-users");
+    let array = format!("users.php?changeit=1&new_role[]=editor&users[]=801&{users}");
+    assert!(!passed(&admin, &array, None));
+    assert_eq!(outcome(&admin, &array, None), Some(501));
+}
+
 /// The users list's refusals of a role that may list users but not change
 /// them, which no core role is, and of a term that does not exist.
 #[test]

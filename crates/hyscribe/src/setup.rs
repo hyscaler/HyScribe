@@ -224,54 +224,39 @@ pub(crate) struct Question {
     pub secret: bool,
 }
 
-const fn question(key: &'static str, text: &'static str, default: &'static str) -> Question {
-    Question {
+/// The questions for `key`, which `wp-config.php` did not give; none for a
+/// constant, which is not asked for but noted.
+pub(crate) fn questions(key: &'static str) -> Vec<Question> {
+    let (text, default) = match key {
+        "DB_NAME" => ("Database name", ""),
+        "DB_USER" => ("Database user", ""),
+        "DB_PASSWORD" => ("Database password", ""),
+        "DB_HOST" => ("Database host", "localhost"),
+        "DB_CHARSET" => ("Database charset", "utf8mb4"),
+        "DB_PREFIX" => ("Table prefix", "wp_"),
+        "WP_HOME" => ("WP_HOME, the site address (empty for the stored one)", ""),
+        "WP_SITEURL" => (
+            "WP_SITEURL, the WordPress address (empty for the stored one)",
+            "",
+        ),
+        _ => return Vec::new(),
+    };
+    let mut asked = vec![Question {
         key,
         text,
         default,
-        secret: false,
+        secret: key == "DB_PASSWORD",
+    }];
+    // `DB_HOST` comes with its port.
+    if key == "DB_HOST" {
+        asked.push(Question {
+            key: "DB_PORT",
+            text: "Database port",
+            default: "3306",
+            secret: false,
+        });
     }
-}
-
-const DB_HOST: [Question; 2] = [
-    question("DB_HOST", "Database host", "localhost"),
-    question("DB_PORT", "Database port", "3306"),
-];
-const DB_PASSWORD: [Question; 1] = [Question {
-    key: "DB_PASSWORD",
-    text: "Database password",
-    default: "",
-    secret: true,
-}];
-
-/// The questions for `key`, which `wp-config.php` did not give; none for a
-/// constant, which is not asked for but noted.
-pub(crate) fn questions(key: &str) -> &'static [Question] {
-    const NAME: [Question; 1] = [question("DB_NAME", "Database name", "")];
-    const USER: [Question; 1] = [question("DB_USER", "Database user", "")];
-    const CHARSET: [Question; 1] = [question("DB_CHARSET", "Database charset", "utf8mb4")];
-    const PREFIX: [Question; 1] = [question("DB_PREFIX", "Table prefix", "wp_")];
-    const HOME: [Question; 1] = [question(
-        "WP_HOME",
-        "WP_HOME, the site address (empty for the stored one)",
-        "",
-    )];
-    const SITEURL: [Question; 1] = [question(
-        "WP_SITEURL",
-        "WP_SITEURL, the WordPress address (empty for the stored one)",
-        "",
-    )];
-    match key {
-        "DB_NAME" => &NAME,
-        "DB_USER" => &USER,
-        "DB_PASSWORD" => &DB_PASSWORD,
-        "DB_HOST" => &DB_HOST,
-        "DB_CHARSET" => &CHARSET,
-        "DB_PREFIX" => &PREFIX,
-        "WP_HOME" => &HOME,
-        "WP_SITEURL" => &SITEURL,
-        _ => &[],
-    }
+    asked
 }
 
 /// Why a constant of `wp-config.php` was not copied.

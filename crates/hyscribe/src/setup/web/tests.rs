@@ -292,6 +292,44 @@ async fn the_site_is_found_by_path_by_contents_or_not_at_all() {
     let broken = [csrf, ("contents", large.as_str())];
     let answer = ask(&shared, "POST", STEP_2, SIGNED_IN, &broken).await;
     assert_eq!(answer.status, StatusCode::UNPROCESSABLE_ENTITY);
+    // By hand: the answers given are checked, an empty one is left out.
+    ask(
+        &shared,
+        "POST",
+        STEP_2,
+        SIGNED_IN,
+        &[csrf, ("path", "none")],
+    )
+    .await;
+    let by_hand = [
+        csrf,
+        ("DB_NAME", "wordpress"),
+        ("DB_USER", ""),
+        ("DB_PORT", "0"),
+    ];
+    let answer = ask(&shared, "POST", STEP_3, SIGNED_IN, &by_hand).await;
+    assert_eq!(answer.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        answer
+            .body
+            .contains("<p class=\"error\">DB_PORT is invalid: "),
+        "{}",
+        answer.body
+    );
+    assert!(answer.body.contains("name=\"DB_NAME\" value=\"wordpress\""));
+    let answer = ask(
+        &shared,
+        "POST",
+        STEP_3,
+        SIGNED_IN,
+        &[csrf, ("DB_NAME", "x")],
+    )
+    .await;
+    assert!(
+        answer.body.contains("DB_USER is not set"),
+        "{}",
+        answer.body
+    );
     for path in ["", "none"] {
         let answer = ask(&shared, "POST", STEP_2, SIGNED_IN, &[csrf, ("path", path)]).await;
         assert_eq!(answer.location(), STEP_3);

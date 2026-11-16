@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use hyscribe_auth::sessions::Sessions;
-use hyscribe_config::{Config, Mode};
+use hyscribe_config::{Config, ConfigError, Mode};
 use hyscribe_service::{Paths, Spawn, Status};
 
 /// Source code location, offered to every user as AGPL section 13 requires.
@@ -230,9 +230,10 @@ fn server_config(
     if config.is_some() || !term.interactive() || !term.in_terminal()? {
         return Ok(config);
     }
-    if let Some(path) = setup::run(home, term)? {
-        term.say(&format!("Wrote {} (mode 600)\n", path.display()))?;
-    }
+    // No `.env` to keep, so the wizard writes one.
+    let written = setup::run(home, term)?;
+    let written = written.map(|path| format!("Wrote {} (mode 600)\n", path.display()));
+    term.say(&written.unwrap_or_default())?;
     hyscribe_config::load(home, site.env).map_err(|err| err.to_string())
 }
 
@@ -262,12 +263,10 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
             let config = match config {
                 Some(config) => config,
                 None => match setup_mode(home, site.env, out, &mut stopped, SETUP_TIMEOUT).await? {
+                    // An `.env` gone again since is no configuration.
                     Ended::Written => hyscribe_config::load(home, site.env)
-                        .map_err(|err| err.to_string())?
-                        .ok_or(format!(
-                            "{} went missing",
-                            home.join(hyscribe_config::ENV_FILE).display()
-                        ))?,
+                        .and_then(|config| config.ok_or(ConfigError::Missing("DB_NAME")))
+                        .map_err(|err| err.to_string())?,
                     Ended::Stopped(number) => {
                         seen.store(number, std::sync::atomic::Ordering::SeqCst);
                         return Ok(());

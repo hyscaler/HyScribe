@@ -50,8 +50,6 @@ pub struct Install {
 
 /// What the Info tab asks of the site beyond the dashboard's.
 pub trait HealthSite: DashboardSite {
-    /// `is_ssl()`.
-    fn is_ssl(&self) -> bool;
     /// The installation as configured.
     fn install(&self) -> Install;
     /// `MODE` is `primary`.
@@ -111,7 +109,6 @@ struct Section {
     id: &'static str,
     label: &'static str,
     description: &'static str,
-    show_count: bool,
     fields: Vec<Field>,
 }
 
@@ -121,17 +118,14 @@ impl Section {
             id,
             label,
             description: "",
-            show_count: false,
             fields,
         }
     }
 
-    /// A list of what HyScribe has none of: drop-ins, plugins, other themes.
+    /// A counted list of what HyScribe has none of, drop-ins, plugins or
+    /// other themes, which prints nothing, so no count.
     fn none(id: &'static str, label: &'static str) -> Section {
-        Section {
-            show_count: true,
-            ..Section::new(id, label, Vec::new())
-        }
+        Section::new(id, label, Vec::new())
     }
 }
 
@@ -172,7 +166,10 @@ fn core(site: &dyn HealthSite) -> Section {
         .map_or(locale.clone(), |locale| text(&locale));
     let home = BarSite::home_url(site);
     let permalink = option(site, "permalink_structure");
-    let ssl = site.is_ssl();
+    // `is_ssl()`: HyScribe serves HTTP, so an https address is a TLS proxy's.
+    let ssl = Urls::site_url(site)
+        .to_ascii_lowercase()
+        .starts_with("https:");
     let register = option(site, "users_can_register");
     let public = option(site, "blog_public");
     let comments = option(site, "default_comment_status");
@@ -333,12 +330,7 @@ fn debug_data(site: &dyn HealthSite) -> Vec<Section> {
 fn format(sections: &[Section]) -> String {
     let mut out = String::from("`\n");
     for section in sections.iter().filter(|section| !section.fields.is_empty()) {
-        let count = if section.show_count {
-            format!(" ({})", section.fields.len())
-        } else {
-            String::new()
-        };
-        out.push_str(&format!("### {}{count} ###\n\n", section.id));
+        out.push_str(&format!("### {} ###\n\n", section.id));
         for field in section.fields.iter().filter(|field| !field.private) {
             let value = match &field.debug {
                 Some(Debug::Bool(true)) => "true",
@@ -360,11 +352,6 @@ fn accordion(sections: &[Section]) -> String {
     let mut out = String::new();
     for section in sections.iter().filter(|section| !section.fields.is_empty()) {
         let id = esc_attr(section.id.as_bytes());
-        let count = if section.show_count {
-            format!("({})", section.fields.len())
-        } else {
-            String::new()
-        };
         let description = if section.description.is_empty() {
             String::new()
         } else {
@@ -382,7 +369,7 @@ fn accordion(sections: &[Section]) -> String {
             })
             .collect();
         out.push_str(&format!(
-            "\t\t\t\t\t<h3 class=\"health-check-accordion-heading\">\n\t\t\t\t<button id=\"health-check-section-{id}\" aria-expanded=\"false\" class=\"health-check-accordion-trigger\" aria-controls=\"health-check-accordion-block-{id}\" type=\"button\">\n\t\t\t\t\t<span class=\"title\">\n\t\t\t\t\t\t{}\t\t\t\t\t\t{count}\t\t\t\t\t</span>\n\t\t\t\t\t\t\t\t\t\t<span class=\"icon\"></span>\n\t\t\t\t</button>\n\t\t\t</h3>\n\n\t\t\t<div id=\"health-check-accordion-block-{id}\" class=\"health-check-accordion-panel\" hidden=\"hidden\">\n\t\t\t\t{description}\t\t\t\t<table class=\"widefat striped health-check-table\">\n\t\t\t\t\t<tbody>\n\t\t\t\t\t{rows}\t\t\t\t\t</tbody>\n\t\t\t\t</table>\n\t\t\t</div>\n",
+            "\t\t\t\t\t<h3 class=\"health-check-accordion-heading\">\n\t\t\t\t<button id=\"health-check-section-{id}\" aria-expanded=\"false\" class=\"health-check-accordion-trigger\" aria-controls=\"health-check-accordion-block-{id}\" type=\"button\">\n\t\t\t\t\t<span class=\"title\">\n\t\t\t\t\t\t{}\t\t\t\t\t\t\t\t\t\t\t</span>\n\t\t\t\t\t\t\t\t\t\t<span class=\"icon\"></span>\n\t\t\t\t</button>\n\t\t\t</h3>\n\n\t\t\t<div id=\"health-check-accordion-block-{id}\" class=\"health-check-accordion-panel\" hidden=\"hidden\">\n\t\t\t\t{description}\t\t\t\t<table class=\"widefat striped health-check-table\">\n\t\t\t\t\t<tbody>\n\t\t\t\t\t{rows}\t\t\t\t\t</tbody>\n\t\t\t\t</table>\n\t\t\t</div>\n",
             esc_html(section.label.as_bytes())
         ));
     }

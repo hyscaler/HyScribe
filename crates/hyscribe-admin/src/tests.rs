@@ -787,7 +787,7 @@ impl MenuUser for Role {
 impl Urls for Role {
     /// The site URL, HTTPS in the `h9ssl` variant.
     fn site_url(&self) -> String {
-        if self.variant() == "h9ssl" {
+        if self.variant() == "h9ssl" || self.variant().starts_with("o35") {
             return SITE.replace("http:", "https:");
         }
         SITE.into()
@@ -1858,9 +1858,6 @@ impl crate::posts::PostsSite for Role {
 /// The oracle's database, and in the `o35` variants an installation in
 /// primary mode over HTTPS with limits of its own.
 impl crate::site_health::HealthSite for Role {
-    fn is_ssl(&self) -> bool {
-        self.variant().starts_with("o35")
-    }
     fn install(&self) -> crate::site_health::Install {
         crate::site_health::Install {
             binary: "/srv/hyscribe/hyscribe".into(),

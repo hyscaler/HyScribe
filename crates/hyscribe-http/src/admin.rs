@@ -844,9 +844,6 @@ impl MediaSite for Admin<'_> {
 }
 
 impl HealthSite for Admin<'_> {
-    fn is_ssl(&self) -> bool {
-        is_ssl(self.site)
-    }
     fn install(&self) -> Install {
         Install::clone(&self.site.install)
     }

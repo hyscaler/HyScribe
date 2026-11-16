@@ -238,35 +238,33 @@ fn offsets_are_php_s() {
     }
 }
 
-/// `format()` and the accordion: counts, booleans, empty values and private
+/// `format()` and the accordion: booleans, empty values and private
 /// fields as `WP_Debug_Data` prints them.
 #[test]
 fn sections_print_as_php_s() {
     let sections = [
         Section::new("empty", "Empty", Vec::new()),
-        Section {
-            show_count: true,
-            ..Section::new(
-                "listed",
-                "A & B",
-                vec![
-                    Field::new("a", "<A>", "x & y"),
-                    Field::new("b", "B", "Yes").debug(Debug::Bool(true)),
-                    Field::new("c", "C", "No").debug(Debug::Bool(false)),
-                    Field::new("d", "D", "").debug(Debug::Text(String::new())),
-                    Field::new("e", "E", "0"),
-                    Field::new("f", "F", "secret").private(),
-                ],
-            )
-        },
+        Section::new(
+            "listed",
+            "A & B",
+            vec![
+                Field::new("a", "<A>", "x & y"),
+                Field::new("b", "B", "Yes").debug(Debug::Bool(true)),
+                Field::new("c", "C", "No").debug(Debug::Bool(false)),
+                Field::new("d", "D", "").debug(Debug::Text(String::new())),
+                Field::new("e", "E", "0"),
+                Field::new("f", "F", "secret").private(),
+            ],
+        ),
+        Section::none("wp-dropins", "Drop-ins"),
     ];
     assert_eq!(
         format(&sections),
-        "`\n### listed (6) ###\n\na: x & y\nb: true\nc: false\nd: undefined\ne: 0\n\n`"
+        "`\n### listed ###\n\na: x & y\nb: true\nc: false\nd: undefined\ne: 0\n\n`"
     );
     let html = accordion(&sections);
     assert!(!html.contains("health-check-section-empty"));
-    assert!(html.contains("\t\t\t\t\t\tA &amp; B\t\t\t\t\t\t(6)\t\t\t\t\t</span>"));
+    assert!(html.contains("\t\t\t\t\t\tA &amp; B\t\t\t\t\t\t\t\t\t\t\t</span>"));
     assert!(html.contains("<tr><th scope=\"row\">&lt;A&gt;</th><td>x &amp; y</td></tr>"));
     assert!(html.contains("<tr><th scope=\"row\">F</th><td>secret</td></tr>"));
 }

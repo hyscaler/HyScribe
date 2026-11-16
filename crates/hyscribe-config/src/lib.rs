@@ -425,11 +425,10 @@ fn number(
 /// A size as PHP's shorthand writes it: digits, then `K`, `M` or `G` in
 /// either case; at least a byte, and within `i64`.
 fn size(value: &str) -> Option<u64> {
-    let (last, head) = value.as_bytes().split_last()?;
-    let (digits, shift) = match last.to_ascii_uppercase() {
-        b'K' => (head, 10),
-        b'M' => (head, 20),
-        b'G' => (head, 30),
+    let (digits, shift) = match value.as_bytes().split_last() {
+        Some((b'K' | b'k', head)) => (head, 10),
+        Some((b'M' | b'm', head)) => (head, 20),
+        Some((b'G' | b'g', head)) => (head, 30),
         _ => (value.as_bytes(), 0),
     };
     if digits.is_empty() {

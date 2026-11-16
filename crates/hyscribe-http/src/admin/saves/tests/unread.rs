@@ -68,6 +68,12 @@ impl Acting for Unread {
     fn comment_url(&self, _: u64) -> String {
         unreachable!()
     }
+    fn user_can(&self, _: u64, _: &str) -> bool {
+        unreachable!()
+    }
+    fn create_nonce(&self, _: &str) -> String {
+        unreachable!()
+    }
     fn constants(&self) -> Constants {
         Constants::default()
     }

@@ -17,10 +17,11 @@ use crate::login::LoginReads;
 use crate::tests::oracle_site;
 
 mod comments;
+pub(super) mod unfiltered;
 pub(super) mod unread;
 
 /// User 1's hs-admin on the fixture, as the handlers read it.
-fn admin<'a>(site: &'a crate::Site, reads: &'a LoginReads<'a>) -> Admin<'a> {
+pub(super) fn admin<'a>(site: &'a crate::Site, reads: &'a LoginReads<'a>) -> Admin<'a> {
     read(|| {
         let user = reads.reads.wait(site.db.user(1)).unwrap();
         Admin::new(reads, site, user)
@@ -72,6 +73,8 @@ pub(super) async fn acted(
         home: "http://127.0.0.1:8081",
         user: request.user,
         now: 0,
+        ip: b"",
+        agent: b"",
     };
     let mut write = writer.begin_on(conn).await;
     if let (Ok(write), Some(budget)) = (&mut write, budget) {

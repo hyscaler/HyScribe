@@ -378,6 +378,11 @@ fn recent_posts(site: &dyn DashboardSite, posts: &[Post], title: &str, id: &str)
     out
 }
 
+/// `_wp_dashboard_recent_comments_row()` of a reply `admin-ajax.php` saved.
+pub fn ajax_comment_row(site: &dyn DashboardSite, row: &RecentComment) -> String {
+    comment_row(site, row, 0, None)
+}
+
 /// `_wp_dashboard_recent_comments_row()`, the `index`th row.
 /// `global` is the last post the Activity widget listed, which PHP leaves as
 /// the global post the rows' classes and a postless comment read.

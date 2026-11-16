@@ -2332,6 +2332,8 @@ async fn term_ajax_answers_are_sent_once_committed() {
             home: &site.home,
             user: 1,
             now: 0,
+            ip: b"",
+            agent: b"",
         };
         let category = Terms::named(b"category").unwrap();
         let term = admin.terms("category").into_iter().next().unwrap();
@@ -2612,3 +2614,5 @@ async fn a_saved_notice_shows_once() {
     let again = page_of(send(&site, "GET", &back, &cookies, None).await).await;
     assert!(!again.contains(notice));
 }
+
+mod comment_saves;

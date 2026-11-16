@@ -1,0 +1,40 @@
+# The comment saves of reference/admin-views/golden.sh comments, in order,
+# as user 1, PHP really writing (MVP 3.3): replies and Quick Edit from the
+# list, the edit screen and its Update.
+# case	method	target	body (- for none)	nonce action (- for a bad nonce, none for no field)	nonce field	cookie (- for none)
+reply	POST	admin-ajax.php	action=replyto-comment&comment_ID=1&comment_post_ID=1&content=+A+reply+with+%3Cb%3Ebold%3C%2Fb%3E+and+%3Cscript%3Ex%3C%2Fscript%3E.+&position=-1&checkbox=1&mode=detail&p=	replyto-comment	_ajax_nonce-replyto-comment	-
+reply-duplicate	POST	admin-ajax.php	action=replyto-comment&comment_ID=1&comment_post_ID=1&content=A+reply+with+%3Cb%3Ebold%3C%2Fb%3E+and+%3Cscript%3Ex%3C%2Fscript%3E.&position=-1&checkbox=1&mode=detail&p=	replyto-comment	_ajax_nonce-replyto-comment	-
+reply-empty	POST	admin-ajax.php	action=replyto-comment&comment_ID=1&comment_post_ID=1&content=+++&mode=detail	replyto-comment	_ajax_nonce-replyto-comment	-
+reply-draft	POST	admin-ajax.php	action=replyto-comment&comment_ID=0&comment_post_ID=3&content=On+a+draft&mode=detail	replyto-comment	_ajax_nonce-replyto-comment	-
+reply-nonce	POST	admin-ajax.php	action=replyto-comment&comment_ID=1&comment_post_ID=1&content=Refused	-	_ajax_nonce-replyto-comment	-
+quick-edit	POST	admin-ajax.php	action=edit-comment&comment_ID=2&comment_post_ID=1&newcomment_author=Ann&newcomment_author_email=ann%40example.test&newcomment_author_url=https%3A%2F%2Fexample.test&status=0&content=Edited+reply.&position=-1&checkbox=1&mode=detail&p=	replyto-comment	_ajax_nonce-replyto-comment	-
+quick-edit-empty	POST	admin-ajax.php	action=edit-comment&comment_ID=2&comment_post_ID=1&content=&status=0&checkbox=1	replyto-comment	_ajax_nonce-replyto-comment	-
+quick-edit-self	POST	admin-ajax.php	action=edit-comment&comment_ID=2&comment_post_ID=1&comment_parent=2&content=Self&status=0&checkbox=1	replyto-comment	_ajax_nonce-replyto-comment	-
+reply-approve-parent	POST	admin-ajax.php	action=replyto-comment&comment_ID=2&comment_post_ID=1&content=Reply+to+Ann&approve_parent=1&position=1&mode=dashboard	replyto-comment	_ajax_nonce-replyto-comment	-
+list-after	GET	edit-comments.php	-	none	-	-
+edited	POST	comment.php	action=editedcomment&comment_ID=2&comment_post_ID=1&newcomment_author=Ann+B&newcomment_author_email=ann%40example.test&newcomment_author_url=&content=Edited+on+the+screen.&comment_status=1&aa=2026&mm=11&jj=01&hh=09&mn=30&ss=00&hidden_aa=2025&hidden_mm=11&hidden_jj=01&hidden_hh=09&hidden_mn=30&referredby=http%3A%2F%2F127.0.0.1%3A8081%2Fwp-admin%2Fedit-comments.php	update-comment_2	_wpnonce	-
+edited-own-reply	POST	comment.php	action=editedcomment&comment_ID=2&comment_post_ID=1&comment_parent=4&content=Moved	update-comment_2	_wpnonce	-
+edit-screen	GET	comment.php?action=editcomment&c=2	-	none	-	-
+list-final	GET	edit-comments.php	-	none	-	-
+# The edit's refusals: a post or parent missing, a parent too deep or held,
+# and threading turned off on the Discussion screen.
+quick-edit-post-missing	POST	admin-ajax.php	action=edit-comment&comment_ID=2&comment_post_ID=999&content=Moved&status=1&checkbox=1	replyto-comment	_ajax_nonce-replyto-comment	-
+edited-parent-missing	POST	comment.php	action=editedcomment&comment_ID=2&comment_post_ID=1&comment_parent=999&content=Moved	update-comment_2	_wpnonce	-
+reply-deep	POST	admin-ajax.php	action=replyto-comment&comment_ID=3&comment_post_ID=1&content=Deeper&position=-1&checkbox=1&mode=detail&p=	replyto-comment	_ajax_nonce-replyto-comment	-
+reply-deepest	POST	admin-ajax.php	action=replyto-comment&comment_ID=5&comment_post_ID=1&content=Deepest&position=-1&checkbox=1&mode=detail&p=	replyto-comment	_ajax_nonce-replyto-comment	-
+reply-again	POST	admin-ajax.php	action=replyto-comment&comment_ID=3&comment_post_ID=1&content=Deeper&position=-1&checkbox=1&mode=detail&p=	replyto-comment	_ajax_nonce-replyto-comment	-
+edited-parent-deep	POST	comment.php	action=editedcomment&comment_ID=2&comment_post_ID=1&comment_parent=6&content=Moved	update-comment_2	_wpnonce	-
+edit-screen-deep	GET	comment.php?action=editcomment&c=2	-	none	-	-
+quick-edit-hold	POST	admin-ajax.php	action=edit-comment&comment_ID=4&comment_post_ID=1&content=Held&status=0&position=-1&checkbox=1&mode=detail&p=	replyto-comment	_ajax_nonce-replyto-comment	-
+edited-date-held	POST	comment.php	action=editedcomment&comment_ID=4&comment_post_ID=1&content=Held&comment_status=0&aa=2026&mm=11&jj=02&hh=10&mn=00&ss=00&hidden_aa=2026&hidden_mm=11&hidden_jj=01&hidden_hh=10&hidden_mn=00	update-comment_4	_wpnonce	-
+edited-parent-held	POST	comment.php	action=editedcomment&comment_ID=3&comment_post_ID=1&comment_parent=4&content=Moved	update-comment_3	_wpnonce	-
+edit-screen-held	GET	comment.php?action=editcomment&c=4	-	none	-	-
+edited-plain	POST	comment.php	action=editedcomment&comment_ID=3&comment_post_ID=1&content=Plain+%3Cb%3Ebold%3C%2Fb%3E+%26+more&aa=2026&mm=11&jj=03&hh=11&mn=15&ss=00&hidden_aa=2026&hidden_mm=11&hidden_jj=01&hidden_hh=11&hidden_mn=15	update-comment_3	_wpnonce	-
+edit-screen-markup	GET	comment.php?action=editcomment&c=3	-	none	-	-
+edit-screen-top	GET	comment.php?action=editcomment&c=1	-	none	-	-
+quick-edit-spam	POST	admin-ajax.php	action=edit-comment&comment_ID=5&comment_post_ID=1&content=Deeper&status=spam&position=-1&checkbox=1&mode=detail&p=	replyto-comment	_ajax_nonce-replyto-comment	-
+edited-under-spam	POST	comment.php	action=editedcomment&comment_ID=6&comment_post_ID=1&content=Deepest&comment_status=spam&aa=2026&mm=11&jj=04&hh=12&mn=00&ss=00&hidden_aa=2026&hidden_mm=11&hidden_jj=01&hidden_hh=12&hidden_mn=00	update-comment_6	_wpnonce	-
+edit-screen-under-spam	GET	comment.php?action=editcomment&c=6	-	none	-	-
+discussion-unthreaded	POST	options.php	option_page=discussion&action=update&default_comment_status=open&comment_registration=0&comments_per_page=50&default_comments_page=newest&comment_order=asc&thread_comments_depth=5&show_avatars=1&avatar_rating=G&avatar_default=mystery&_wp_http_referer=%2Fwp-admin%2Foptions-discussion.php	discussion-options	_wpnonce	-
+edited-unthreaded	POST	comment.php	action=editedcomment&comment_ID=2&comment_post_ID=1&comment_parent=3&content=Moved	update-comment_2	_wpnonce	-
+edit-screen-unthreaded	GET	comment.php?action=editcomment&c=2	-	none	-	-

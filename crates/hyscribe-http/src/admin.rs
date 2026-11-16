@@ -14,7 +14,8 @@ use hyscribe_admin::admin_bar::{BarSite, Browser};
 use hyscribe_admin::appearance::themes;
 use hyscribe_admin::assets::Urls;
 use hyscribe_admin::comments::{
-    CommentArgs, CommentQuery, CommentsSite, MODERATED, comment_order, edit_comments,
+    CommentArgs, CommentEditSite, CommentQuery, CommentsSite, MODERATED, comment_edit,
+    comment_order, edit_comments,
 };
 use hyscribe_admin::dashboard::{
     CommentCounts, DashboardSite, RecentComment, comment_status, dashboard,
@@ -69,24 +70,26 @@ pub(crate) fn is_admin(path: &str) -> bool {
     (path == "/hs-admin" || path.starts_with("/hs-admin/")) && screen
 }
 
-/// The answer to a request for an admin screen; `form` is `$_POST`, `None`
-/// for a body only PHP reads.
+/// The answer to a request for an admin screen, a POST or not, from the
+/// connection's `peer`; `form` is `$_POST`, `None` for a body only PHP reads.
 pub(crate) async fn respond(
     site: &Arc<Site>,
     uri: Uri,
     headers: HeaderMap,
-    post: bool,
+    (post, peer): (bool, Option<std::net::IpAddr>),
     form: Option<Value>,
 ) -> Response {
     let site = Arc::clone(site);
     let (now, handle) = (now(), Handle::current());
     joined(
         tokio::task::spawn_blocking(move || {
+            let ip = crate::comment_post::client_addr(&site, &headers, peer);
             let asked = Asking {
                 uri: &uri,
                 headers: &headers,
                 post,
                 form: form.as_ref(),
+                ip,
             };
             answer(&site, &asked, now, handle)
         })
@@ -100,6 +103,8 @@ struct Asking<'a> {
     headers: &'a HeaderMap,
     post: bool,
     form: Option<&'a Value>,
+    /// `$_SERVER['REMOTE_ADDR']`.
+    ip: Vec<u8>,
 }
 
 /// `entries` of `$_GET` or `$_POST`.
@@ -635,6 +640,20 @@ impl PostsSite for Admin<'_> {
     }
     fn page_templates(&self, post_type: &str) -> Vec<(String, String)> {
         self.site.theme.page_templates(post_type)
+    }
+}
+
+impl CommentEditSite for Admin<'_> {
+    fn comment_to_edit(&self, id: u64) -> Option<hyscribe_admin::dashboard::RecentComment> {
+        let comment = self.reads.reads.wait(self.site.db.any_comment(id))?;
+        let approved = CommentsSite::comment_approved(self, id).unwrap_or_default();
+        let post = self.full_post(comment.post_id);
+        Some(self.comment_row(comment, &approved, post))
+    }
+    fn referer(&self) -> Option<Vec<u8>> {
+        let referer =
+            hyscribe_admin::profile::wp_get_referer(self, self.referer.as_deref(), &self.uri);
+        referer.map(String::into_bytes)
     }
 }
 
@@ -1293,6 +1312,18 @@ fn screen(
             }
             Answer::from_page(dashboard(admin, &request))
         }
+        // Only the edit screen is ported of `comment.php`'s pages.
+        "/hs-admin/comment" => {
+            let mut id = None;
+            for (key, value) in query_strings(query)? {
+                match (key.as_str(), value.as_str()) {
+                    ("action", "editcomment") => {}
+                    ("c", _) => id = Some(crate::query::absint(&value)),
+                    _ => return None,
+                }
+            }
+            comment_edit(admin, id?, &request)?
+        }
         "/hs-admin/edit-comments" => {
             let args = comment_args(query)?;
             // Only posts', pages' and attachments' comments are listed, and
@@ -1478,6 +1509,8 @@ fn action_request<'a>(
         home: &site.home,
         user,
         now,
+        ip: &asking.ip,
+        agent: (asking.headers.get(header::USER_AGENT)).map_or(b"", HeaderValue::as_bytes),
     }
 }
 

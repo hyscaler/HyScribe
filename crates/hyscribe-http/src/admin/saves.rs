@@ -66,6 +66,10 @@ pub(super) trait Acting: ActionSite {
     fn admin_url(&self, path: &str) -> String;
     /// `get_comment_link()` of the comment `id`.
     fn comment_url(&self, id: u64) -> String;
+    /// `user_can( $user, $cap )`.
+    fn user_can(&self, user: u64, cap: &str) -> bool;
+    /// `wp_create_nonce( $action )` for the current user.
+    fn create_nonce(&self, action: &str) -> String;
     /// The capability constants of the configuration.
     fn constants(&self) -> Constants;
 }
@@ -80,6 +84,12 @@ impl Acting for Admin<'_> {
     fn comment_url(&self, id: u64) -> String {
         let comment = hyscribe_admin::comments::CommentsSite::parent_comment(self, id);
         comment.map(|(link, _)| link).unwrap_or_default()
+    }
+    fn user_can(&self, user: u64, cap: &str) -> bool {
+        hyscribe_admin::profile::ProfileSite::user_can(self, user, cap)
+    }
+    fn create_nonce(&self, action: &str) -> String {
+        hyscribe_admin::page::PageSite::nonce(self, action)
     }
 }
 
@@ -104,6 +114,8 @@ pub(super) enum Ajax {
     TermRow(Taxonomy, Term),
     /// `wp_ajax_add_tag()`'s answer for the term added.
     TermAdded(Taxonomy, Added),
+    /// A comment's row of the comments list in `WP_Ajax_Response` XML.
+    CommentRow(comments::Row),
     /// Quick Edit's answer: the posts list's row of the post saved.
     PostRow(u64),
 }
@@ -123,6 +135,7 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         ("admin-ajax", b"save-user-color-scheme") => Some(user_edit::color_scheme),
         ("admin-ajax", b"send-password-reset") => Some(user_edit::password_reset),
         ("edit-comments", _) => Some(comments::bulk),
+        ("comment", b"editedcomment") => Some(comments::edited),
         ("comment", action) => comments::moderation(action),
         ("options", b"update") => Some(options::update),
         ("options", b"adminhash") => Some(options::adminhash),
@@ -152,6 +165,8 @@ pub(super) fn ajax_handler(action: &[u8]) -> Option<Handler<Ajax>> {
         b"delete-tag" => Some(terms::ajax_delete_tag),
         b"dim-comment" => Some(comments::dim),
         b"delete-comment" => Some(comments::delete),
+        b"edit-comment" => Some(comments::quick_edit),
+        b"replyto-comment" => Some(comments::reply),
         b"inline-save" => Some(posts::inline_save),
         _ => None,
     }
@@ -173,6 +188,7 @@ pub(super) fn ajax_served(admin: &Admin, asked: &Asked, answer: Ajax) -> Respons
         Ajax::Xml(xml) => (XML, xml),
         Ajax::TermRow(taxonomy, term) => (HTML, saved_row(admin, taxonomy, &term, &referer())),
         Ajax::TermAdded(taxonomy, added) => (XML, term_added(admin, taxonomy, &added, &referer())),
+        Ajax::CommentRow(row) => (XML, row.sent(admin, asked)),
         Ajax::PostRow(id) => (HTML, post_row(admin, asked, id)),
     };
     ajax_text(StatusCode::OK, kind, body.into_bytes())

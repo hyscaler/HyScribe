@@ -331,7 +331,7 @@ fn undated_drafts_take_the_time_now() {
         date_gmt: "0000-00-00 00:00:00".into(),
         ..Post::default()
     };
-    let fields = touch_time(&draft, Zone::Utc, 1_794_500_000);
+    let fields = post_touch_time(&draft, Zone::Utc, 1_794_500_000);
     for field in [
         "value=\"11\" data-text=\"Nov\"  selected='selected'",
         "name=\"jj\" value=\"12\"",
@@ -346,7 +346,7 @@ fn undated_drafts_take_the_time_now() {
         date_gmt: String::new(),
         ..draft
     };
-    assert_eq!(touch_time(&empty, Zone::Utc, 1_794_500_000), fields);
+    assert_eq!(post_touch_time(&empty, Zone::Utc, 1_794_500_000), fields);
 }
 
 /// Moving to the Trash is offered only to those who may delete posts.
@@ -397,7 +397,7 @@ fn dated_drafts_keep_their_date() {
         date_gmt: "2026-01-02 03:04:05".into(),
         ..Post::default()
     };
-    assert!(touch_time(&draft, Zone::Utc, 1_794_500_000).contains("name=\"jj\" value=\"02\""));
+    assert!(post_touch_time(&draft, Zone::Utc, 1_794_500_000).contains("name=\"jj\" value=\"02\""));
 }
 
 /// A user without posts gets no Mine link.

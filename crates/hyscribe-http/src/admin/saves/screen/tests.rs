@@ -23,6 +23,8 @@ pub(in crate::admin::saves) fn asked(post: &[(Key, Value)]) -> Asked<'_> {
         home: "http://127.0.0.1:8081",
         user: 1,
         now: 0,
+        ip: b"",
+        agent: b"",
     }
 }
 

@@ -83,6 +83,17 @@ async fn the_scripts_saves_are_php_s() {
     .await;
 }
 
+/// The Screen Options form saves its option on every screen, and only it:
+/// its nonce never lets a screen's own action through.
+#[test]
+fn screen_options_go_first() {
+    for screen in ["edit", "edit-comments", "edit-tags", "users", "comment"] {
+        let handler = super::super::handler(screen, b"screen-options");
+        let first = handler.is_some_and(|h| std::ptr::fn_addr_eq(h, options as Handler));
+        assert!(first, "{screen}");
+    }
+}
+
 #[tokio::test]
 async fn the_screen_options_form_is_php_s() {
     let writer = writer().await;

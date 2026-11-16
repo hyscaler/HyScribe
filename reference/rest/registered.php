@@ -10,7 +10,10 @@
 //          "pattern_categories": [the categories core registers]}
 //   theme: {"block_styles": [[block, style], ...] registered with the theme
 //           active, "partial_styles": [[block, style], ...] its style
-//           partials register, "pattern_categories": [those it registers]}
+//           partials register, "pattern_categories": [those it registers],
+//           "rest": the theme as the themes route gives it, without links
+//           (reading them creates its global styles post), with the site
+//           URL as %siteurl%}
 
 require '/var/www/html/wp-load.php';
 
@@ -48,7 +51,12 @@ if ( 'theme' === $argv[1] ) {
 	WP_Theme_JSON_Resolver::get_theme_data();
 	$partial_styles = array_slice( hyscribe_styles( $styles ), count( $block_styles ) );
 	$theme = array_values( array_filter( $registered, fn( $c ) => ! in_array( $c['name'], $core_names, true ) ) );
-	$out   = array( 'block_styles' => $block_styles, 'partial_styles' => $partial_styles, 'pattern_categories' => $theme );
+	$controller = new WP_REST_Themes_Controller();
+	$request    = new WP_REST_Request( 'GET', '/wp/v2/themes' );
+	$request->set_param( '_fields', array_keys( $controller->get_item_schema()['properties'] ) );
+	$rest = $controller->prepare_item_for_response( wp_get_theme(), $request )->get_data();
+	$rest = json_decode( str_replace( site_url(), '%siteurl%', wp_json_encode( $rest, JSON_UNESCAPED_SLASHES ) ), true );
+	$out  = array( 'block_styles' => $block_styles, 'partial_styles' => $partial_styles, 'pattern_categories' => $theme, 'rest' => $rest );
 } else {
 	$controller = new WP_REST_Block_Types_Controller();
 	$request    = new WP_REST_Request( 'GET', '/wp/v2/block-types' );

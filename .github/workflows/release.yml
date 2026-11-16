@@ -40,6 +40,9 @@ jobs:
         run: |
           reference/default-install/db.sh up
           scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
+      - name: Switch back to PHP WordPress (MVP 8.5, GOALS S7)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: reference/switch-back/run.sh
       - name: Runs under emulation
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: |

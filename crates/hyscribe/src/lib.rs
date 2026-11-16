@@ -6,7 +6,8 @@
 
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{BufRead, Write};
+use std::os::fd::BorrowedFd;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -25,8 +26,8 @@ pub const STOP_GRACE: Duration = Duration::from_secs(15);
 /// Exit code of `service status` when nothing runs, as in LSB init scripts.
 pub const EXIT_NOT_RUNNING: u8 = 3;
 
-const NO_CONFIG: &str = "no configuration: the setup wizard is not available yet, \
-                         so copy .env.example to .env, fill it in and chmod 600 it";
+const NO_CONFIG: &str = "no configuration: run ./hyscribe setup, or copy .env.example to .env, \
+                         fill it in and chmod 600 it";
 
 #[derive(Debug, Parser)]
 #[command(name = "hyscribe", about = "Rust drop-in replacement for WordPress")]
@@ -42,6 +43,9 @@ enum Command {
     Version,
     /// Run the server in the foreground.
     Start,
+    /// Write .env in the terminal: read an existing site's wp-config.php,
+    /// check the database and choose the mode.
+    Setup,
     /// Run the server as a background service.
     Service {
         #[command(subcommand)]
@@ -99,6 +103,11 @@ pub struct Context<'a> {
     /// The program `service start` runs in the background, and its
     /// arguments: this binary and `start`.
     pub server: (PathBuf, Vec<OsString>),
+    /// Standard input, which answers the setup wizard.
+    pub input: &'a mut dyn BufRead,
+    /// Standard input's terminal, if it is one: the wizard turns its echo
+    /// off for passwords.
+    pub terminal: Option<BorrowedFd<'a>>,
     /// Standard output.
     pub out: &'a mut dyn Write,
     /// Standard error.
@@ -113,6 +122,8 @@ pub fn run(ctx: Context<'_>) -> u8 {
         home,
         euid,
         server,
+        input,
+        terminal,
         out,
         err: err_out,
     } = ctx;
@@ -137,6 +148,15 @@ pub fn run(ctx: Context<'_>) -> u8 {
             command: ConfigCommand::Check { dir },
         } => config_check(dir.as_ref().unwrap_or(&home), &env).map(Reply::text),
         Command::Start => serve(&site, out),
+        // The `.env` it writes would be root's, which no server may run as.
+        Command::Setup => refuse_root(euid).and_then(|()| {
+            let mut terminal = setup::Terminal {
+                input,
+                out: &mut *out,
+                tty: terminal,
+            };
+            setup::run(&home, &mut terminal).map(Reply::text)
+        }),
         Command::Service { command } => service(command, &site, out),
     };
     let written = result.and_then(|reply| {
@@ -407,6 +427,8 @@ fn describe(config: &Config) -> String {
         salts = config.salts.len(),
     )
 }
+
+mod setup;
 
 #[cfg(test)]
 mod tests;

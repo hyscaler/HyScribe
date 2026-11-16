@@ -1067,7 +1067,12 @@ async fn bulk_edit_posts(
                     .collect()
             };
             let cats = ids(write.object_terms(id, "category").await?);
-            let mut tags = ids(write.object_terms(id, "post_tag").await?);
+            // Tags are kept by name, which `wp_set_post_terms()` reads back.
+            let mut tags = Vec::new();
+            for (term, _) in write.object_terms(id, "post_tag").await? {
+                let row = write.term_in("post_tag", term).await?;
+                tags.extend(row.map(|row| Value::String(row.name)));
+            }
             tags.extend(new_tags.iter().filter(|_| assign).cloned());
             match &new_cats {
                 Some(new_cats) => {

@@ -39,6 +39,11 @@ fn rich_editing_by_browser() {
             false,
             true,
         ),
+        (
+            "Mozilla/5.0 (Windows NT 10.0; rv:120.0) Gecko/20100101 Firefox/120.0",
+            false,
+            true,
+        ),
         ("Opera/9.80 (X11)", false, true),
         ("Opera/9.80 (X11)", true, false),
         ("curl/8", false, false),

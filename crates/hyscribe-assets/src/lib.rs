@@ -57,7 +57,7 @@ fn lookup(
 
 #[cfg(test)]
 mod tests {
-    use super::{release_file, wp_includes};
+    use super::{release_file, wp_includes, wp_includes_read};
 
     #[test]
     fn release_dates_and_digests() {
@@ -83,5 +83,17 @@ mod tests {
         for missing in ["js/jquery/jquery.js", "version.php", "nope.js", ""] {
             assert!(wp_includes(missing).is_none(), "{missing}");
         }
+    }
+
+    /// The default editor styles, which `get_default_block_editor_settings()`
+    /// reads though no URL serves them.
+    #[test]
+    fn files_php_reads() {
+        let css = wp_includes_read("css/dist/block-editor/default-editor-styles.css");
+        let css = css.unwrap_or_default();
+        assert_eq!(css.len(), 1310);
+        assert!(css.starts_with(b"/**\n * SCSS Variables."));
+        assert!(wp_includes("css/dist/block-editor/default-editor-styles.css").is_none());
+        assert!(wp_includes_read("css/dist/block-editor/content.css").is_none());
     }
 }

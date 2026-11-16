@@ -150,7 +150,7 @@ pub(crate) fn id() -> Arg {
 /// `meta` is ported for synced patterns alone; `status` is validated by
 /// `check_status()` (`write::status_args`), `template` by
 /// `check_template()`, which the empty template alone passes unported.
-pub(super) fn save(kind: Kind) -> Vec<Arg> {
+pub(crate) fn save(kind: Kind) -> Vec<Arg> {
     const INTEGER: &str = r#"{"type":"integer"}"#;
     const DATE: &str = r#"{"type":["string","null"],"format":"date-time"}"#;
     const OPEN: &str = r#"{"type":"string","enum":["open","closed"]}"#;

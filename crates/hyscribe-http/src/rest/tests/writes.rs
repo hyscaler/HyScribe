@@ -87,6 +87,20 @@ fn now_masked(body: &str, (start, end): (i64, i64)) -> String {
     out + rest
 }
 
+/// `body` with each preview link's nonce as `%preview_nonce%`, as the
+/// golden keeps it.
+fn preview_masked(body: &str) -> String {
+    let key = "preview_nonce=";
+    let mut parts = body.split(key);
+    let mut out = parts.next().unwrap_or_default().to_string();
+    for part in parts {
+        out.push_str(key);
+        out.push_str("%preview_nonce%");
+        out.push_str(part.get(10..).unwrap_or_default());
+    }
+    out
+}
+
 /// PHP's answers to the posts' and pages' writes, for a visitor and every
 /// role: those that write leave the rows PHP leaves (the write oracle
 /// tests below), so the next request starts from the database afresh. The
@@ -108,6 +122,15 @@ async fn site_writes_match_php() {
         writes_match_php(golden, state, &[]).await,
         (6 * 30, 6 + 2 * 3)
     );
+}
+
+/// PHP's answers to the autosaves, over `reference/rest/autosaves.sql`,
+/// with `meta`, not ported for posts, answered 501.
+#[tokio::test(flavor = "multi_thread")]
+async fn autosaves_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/autosaves.tsv");
+    let state = include_str!("../../../../../reference/rest/autosaves.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 10, 6));
 }
 
 /// PHP's answers to the templates' and template parts' writes, over
@@ -181,7 +204,7 @@ async fn writes_match_php(golden: &str, state: &str, unported: &[&str]) -> (usiz
         php.sort();
         assert_eq!(kept(response.headers(), &nonce), php, "{what}");
         let ours = body(response).await.replace(&nonce, "%nonce%");
-        let ours = now_masked(&ours, (start, now()));
+        let ours = preview_masked(&now_masked(&ours, (start, now())));
         let php = String::from_utf8_lossy(&case.body).replace(CREDIT[0], CREDIT[1]);
         let at = ours
             .bytes()
@@ -596,6 +619,35 @@ async fn template_writes_are_php_s() {
     let writes = writes
         .into_iter()
         .map(|(golden, method, target, body)| (golden, method, target, body, Setup::All))
+        .collect();
+    writes_are_php_s(state, writes).await;
+}
+
+/// The autosaves leave the rows PHP's leave, over
+/// `reference/rest/autosaves.sql`: a draft of the user's updated, their
+/// old autosave updated, and a new one.
+#[tokio::test(flavor = "multi_thread")]
+async fn autosaves_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/autosaves.sql");
+    let saved = |title: &str, text: &str, excerpt: &str| {
+        format!(
+            r#"{{"title":"{title}","content":"<!-- wp:paragraph -->\n<p>{text}</p>\n<!-- /wp:paragraph -->"{excerpt}}}"#
+        )
+    };
+    let autosaves = |path: &str| format!("/?rest_route=/wp/v2/{path}/autosaves");
+    let page = saved("Page autosaved", "Page words", "");
+    let held = saved("Held, autosaved", "Held", "");
+    let other = saved("Draft autosaved", "Later words", r#","excerpt":"""#);
+    let again = saved("Published", "Out there, changed", r#","excerpt":"""#);
+    let writes = vec![
+        ("rest-autosaves-draft", autosaves("pages/863"), &page),
+        ("rest-autosaves-new", autosaves("posts/866"), &held),
+        ("rest-autosaves-other", autosaves("posts/861"), &other),
+        ("rest-autosaves-again", autosaves("posts/862"), &again),
+    ];
+    let writes = writes
+        .into_iter()
+        .map(|(golden, target, body)| (golden, "POST", target, body.as_str(), Setup::All))
         .collect();
     writes_are_php_s(state, writes).await;
 }

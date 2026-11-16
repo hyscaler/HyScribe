@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `WP_REST_Revisions_Controller` and `WP_REST_Autosaves_Controller` of
-//! posts, pages, synced patterns, navigation menus and menu items, read
-//! only: their revisions, autosaves and single ones. Writes answer 501
-//! but their permission checks give `Allow`.
+//! posts, pages, synced patterns, navigation menus and menu items: their
+//! revisions, autosaves and single ones, and a new autosave of the types
+//! whose writes are ported. Deleting a revision answers 501, but its
+//! permission check gives `Allow`.
 
 use hyscribe_model::{OrderBy, Post, PostQuery, StatusFilter};
 use hyscribe_phpser::{Key, Value, add_query_arg};
@@ -15,6 +16,7 @@ use hyscribe_render::rest::Rendering;
 use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
 use crate::posts::args::id;
 use crate::posts::prepare::{UNSET, properties, rfc3339, writes_or_unported};
+use crate::posts::write::{Outcome, Plan, Save, Write, Writing, planned_save, status_args};
 use crate::posts::{self, Kind, ids, render_request};
 use crate::request::{Arg, Params, Sanitize, arg, typed};
 use crate::response::{Response, RestError, int, object, paginate, text};
@@ -82,7 +84,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                 autosaves,
             ),
             Endpoint {
-                args: vec![parent()],
+                args: [vec![parent()], posts::args::save(Kind::of(regex))].concat(),
                 permission: create_permission,
                 callback: None,
             },
@@ -495,7 +497,11 @@ fn prepare(
         put("meta", meta(context, kind, revision.id));
     }
     if let Some(parent) = parent.filter(|_| has("preview_link")) {
-        put("preview_link", text(preview_link(context, kind, parent)));
+        let autosave = revision.id != parent.id;
+        put(
+            "preview_link",
+            text(preview_link(context, kind, parent, autosave)),
+        );
     }
     let shown = params.context();
     let data: Vec<(Key, Value)> = filter_by_context(data, &properties, &shown)
@@ -515,7 +521,7 @@ fn prepare(
         })
         .collect();
     let mut response = Response::new(Value::Array(data), 200);
-    if has("parent") {
+    if has("parent") && revision.parent != 0 {
         let route = format!("/wp/v2/{}/{}", kind.base(), revision.parent);
         response.add_link("parent", context.rest_url(&route));
     }
@@ -554,21 +560,88 @@ fn meta(context: &Context, kind: Kind, id: u64) -> Value {
     }
 }
 
-/// `get_preview_post_link()` of an autosave's parent: empty for a type
-/// that is not viewable.
-fn preview_link(context: &Context, kind: Kind, parent: &Post) -> Vec<u8> {
+/// `get_preview_post_link()` of an autosave's parent, or of the post an
+/// autosave updated itself: empty for a type that is not viewable.
+fn preview_link(context: &Context, kind: Kind, parent: &Post, autosave: bool) -> Vec<u8> {
     if !matches!(kind, Kind::Post | Kind::Page) {
         return Vec::new();
     }
     let id = parent.id.to_string();
     let nonce = context.site.nonce(&format!("post_preview_{id}"));
     let link = permalink(context.site.reads(), parent);
-    add_query_arg(
-        &[
-            (b"preview_id", Some(id.as_bytes())),
-            (b"preview_nonce", Some(nonce.as_bytes())),
-            (b"preview", Some(b"true")),
-        ],
-        &link,
-    )
+    let mut args: Vec<(&[u8], Option<&[u8]>)> = vec![(b"preview", Some(b"true"))];
+    if autosave {
+        args.splice(
+            0..0,
+            [
+                (&b"preview_id"[..], Some(id.as_bytes())),
+                (b"preview_nonce", Some(nonce.as_bytes())),
+            ],
+        );
+    }
+    add_query_arg(&args, &link)
+}
+
+/// The autosave of the route `regex`'s endpoint `index`, if it is the
+/// autosaves' second endpoint of a type whose writes are ported.
+pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
+    let kind = Kind::of(regex);
+    let route = format!("/wp/v2/{}/(?P<id>[\\d]+)/autosaves", kind.base());
+    if regex != route || index != 1 || !kind.writes() {
+        return None;
+    }
+    Some(Writing {
+        unported: |params| params.get("template").is_some_and(|t| *t != text("")),
+        args: status_args,
+        plan: plan_autosave,
+        finish: finish_autosave,
+    })
+}
+
+/// `create_item()` up to its write: the parent's
+/// `prepare_item_for_database()`, of which an autosave writes the fields
+/// alone. Its `meta`, which an autosave compares with the revisioned
+/// meta, is not ported.
+fn plan_autosave(context: &Context, params: &Params) -> Result<Plan, RestError> {
+    if params.get("meta").is_some() {
+        return Err(RestError::not_ported());
+    }
+    planned_save(context, params, |save| {
+        // What the controller does after the save.
+        Write::Autosave(Box::new(Save {
+            sticky: None,
+            unset_thumbnail: false,
+            clear_template: false,
+            categories: None,
+            tags: None,
+            pattern_categories: None,
+            meta: Vec::new(),
+            ..save
+        }))
+    })
+}
+
+/// The autosave, or the post it updated, in the `edit` context, through
+/// `rest_prepare_revision` and `rest_prepare_autosave`.
+fn finish_autosave(
+    context: &Context,
+    params: &mut Params,
+    _: Plan,
+    outcome: Outcome,
+) -> Result<Response, RestError> {
+    // `wp_update_post()` refuses an empty draft with an error of no status.
+    let Outcome::Written(id) = outcome else {
+        return Err(RestError::not_ported());
+    };
+    params.set("context", text("edit"));
+    let parent = get_parent(context, params, "id").unwrap_or_default();
+    let autosave = context.site.post(id).unwrap_or_default();
+    let response = single(context, params, &autosave, Some(&parent))?;
+    let args: [&dyn std::any::Any; 2] = [&autosave, params];
+    let response = crate::hooks::apply_filters("rest_prepare_revision", response, &args);
+    Ok(crate::hooks::apply_filters(
+        "rest_prepare_autosave",
+        response,
+        &args,
+    ))
 }

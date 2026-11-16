@@ -89,6 +89,9 @@ pub enum Write {
     Trash(u64),
     /// `wp_delete_post( $id, true )`.
     Delete(u64),
+    /// `WP_REST_Autosaves_Controller::create_item()`'s autosave of the post
+    /// the save names, with the fields it gives.
+    Autosave(Box<Save>),
 }
 
 /// A write whose checks passed.
@@ -162,7 +165,7 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
 
 /// `check_status()`: the post's own status is valid whatever the schema
 /// says.
-fn status_args(context: &Context, params: &Params, mut args: Vec<Arg>) -> Vec<Arg> {
+pub(crate) fn status_args(context: &Context, params: &Params, mut args: Vec<Arg>) -> Vec<Arg> {
     let post = set(params, "id")
         .then(|| get_post(context, params, Kind::of(params.route)).ok())
         .flatten();
@@ -253,6 +256,15 @@ fn status(context: &Context, kind: Kind, status: String) -> Result<String, RestE
 /// `create_item()` and `update_item()` up to their writes, with
 /// `prepare_item_for_database()`.
 fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
+    planned_save(context, params, |save| Write::Save(Box::new(save)))
+}
+
+/// [`plan_save`], its save written as `write` says.
+pub(crate) fn planned_save(
+    context: &Context,
+    params: &Params,
+    write: fn(Save) -> Write,
+) -> Result<Plan, RestError> {
     let kind = Kind::of(params.route);
     let existing = match params.get("id") {
         Some(_) => Some(get_post(context, params, kind)?),
@@ -346,7 +358,7 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
         user: context.user,
         can_publish,
         unfiltered_html,
-        write: Write::Save(Box::new(save)),
+        write: write(save),
         previous: None,
         template: None,
     })

@@ -867,7 +867,8 @@ fn checked(
     let writing = match endpoint.callback {
         Some(_) => None,
         None => posts::write::writing(matched.regex, matched.endpoint)
-            .or_else(|| templates::writing(matched.regex, matched.endpoint)),
+            .or_else(|| templates::writing(matched.regex, matched.endpoint))
+            .or_else(|| revisions::writing(matched.regex, matched.endpoint)),
     };
     // The arguments of a write not ported are not ported either: one given
     // any is not answered, and one given none is checked, then answered 501.

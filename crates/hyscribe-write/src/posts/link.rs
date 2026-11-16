@@ -67,8 +67,7 @@ async fn force_plain(
         "publish" => Ok(false),
         "private" => {
             let caps = Caps::load(write, ctx.user, Some(id), ctx.constants).await?;
-            let id = Value::Int(i64::try_from(id).unwrap_or(0));
-            Ok(!caps.can("read_post", &[id]))
+            Ok(!caps.can("read_post", &[Value::Int(id.cast_signed())]))
         }
         _ => Ok(true),
     }

@@ -386,12 +386,6 @@ impl<'w> Write<'w> {
         self.change(Table::Posts, query.bind(guid).bind(id)).await
     }
 
-    /// `wp_publish_post()`'s status change.
-    pub async fn set_post_status(&mut self, id: u64, status: &str) -> Result<u64, DbError> {
-        let query = self.sql("UPDATE {prefix}posts SET post_status = ? WHERE ID = ?");
-        self.change(Table::Posts, query.bind(status).bind(id)).await
-    }
-
     /// `wp_update_comment_count_now()`'s `UPDATE`.
     pub async fn set_comment_count(&mut self, id: u64, count: u64) -> Result<u64, DbError> {
         let query = self.sql("UPDATE {prefix}posts SET comment_count = ? WHERE ID = ?");
@@ -787,19 +781,6 @@ impl<'w> Write<'w> {
     pub async fn owner_link_ids(&mut self, owner: u64) -> Result<Vec<u64>, DbError> {
         let query = self.sql("SELECT link_id FROM {prefix}links WHERE link_owner = ?");
         self.ids(query.bind(owner)).await
-    }
-
-    /// `wp_set_password()`: the new hash, and no reset key.
-    pub async fn set_user_password(&mut self, id: u64, hash: &str) -> Result<u64, DbError> {
-        let query = self
-            .sql("UPDATE {prefix}users SET user_pass = ?, user_activation_key = '' WHERE ID = ?");
-        self.change(Table::Users, query.bind(hash).bind(id)).await
-    }
-
-    /// `wp_signon()`: a successful login ends a pending password reset.
-    pub async fn clear_activation_key(&mut self, id: u64) -> Result<u64, DbError> {
-        let query = self.sql("UPDATE {prefix}users SET user_activation_key = '' WHERE ID = ?");
-        self.change(Table::Users, query.bind(id)).await
     }
 
     /// `get_user_by( 'email', $email )`'s user.

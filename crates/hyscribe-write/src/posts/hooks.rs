@@ -128,7 +128,7 @@ async fn publish_post(
         .await?
         .is_none()
     {
-        cron::schedule(write, (ctx.now, ctx.now), "do_pings", None).await?;
+        cron::wp_schedule_single_event(write, (ctx.now, ctx.now), "do_pings", None).await?;
     }
     Ok(())
 }
@@ -163,7 +163,7 @@ pub(super) async fn transition(
         let guid = link::permalink(write, ctx, id, &post).await?;
         write.set_post_guid(id, &guid).await?;
     }
-    cron::clear(write, "publish_future_post", id).await?;
+    cron::wp_clear_scheduled_hook(write, "publish_future_post", id).await?;
     let crosses_publish = new != old && (new == "publish") != (old == "publish");
     // _update_term_count_on_transition_post_status().
     if crosses_publish {
@@ -193,9 +193,10 @@ pub(super) async fn transition(
         ("publish", Kind::Page) => fresh_site_is_used(write).await,
         // _future_post_hook().
         ("future", _) => {
-            cron::clear(write, "publish_future_post", id).await?;
+            cron::wp_clear_scheduled_hook(write, "publish_future_post", id).await?;
             let at = date::Dates::read(write, ctx.now).await?.unix(&post.date);
-            cron::schedule(write, (ctx.now, at), "publish_future_post", Some(id)).await
+            cron::wp_schedule_single_event(write, (ctx.now, at), "publish_future_post", Some(id))
+                .await
         }
         _ => Ok(()),
     }

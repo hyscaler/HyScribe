@@ -19,10 +19,9 @@ use crate::posts::Context;
 mod jobs;
 mod wp_cron;
 
-pub use jobs::{
-    check_and_publish_future_post, delete_expired_transients, wp_delete_auto_drafts,
-    wp_privacy_delete_old_export_files, wp_privacy_personal_data_cleanup_requests,
-    wp_scheduled_delete,
+use jobs::{
+    check_and_publish_future_post, wp_delete_auto_drafts, wp_privacy_delete_old_export_files,
+    wp_privacy_personal_data_cleanup_requests, wp_scheduled_delete,
 };
 pub use wp_cron::{Ran, microtime, wp_cron};
 
@@ -39,7 +38,7 @@ pub enum Job {
     PublishFuturePost,
     /// `wp_scheduled_delete`: [`wp_scheduled_delete`].
     ScheduledDelete,
-    /// `delete_expired_transients`: [`delete_expired_transients`].
+    /// `delete_expired_transients`: `delete_expired_transients()`.
     DeleteExpiredTransients,
     /// `wp_scheduled_auto_draft_delete`: [`wp_delete_auto_drafts`].
     AutoDraftDelete,
@@ -208,29 +207,36 @@ fn put(crons: &mut Crons, at: i64, hook: &str, key: Key, event: Crons) {
     crons.sort_by(|(a, _), (b, _)| strnatcasecmp(&a.to_php_string(), &b.to_php_string()));
 }
 
-/// `wp_unschedule_event()` of each event of `hook` with `key`, dropping
-/// what it leaves empty: whether there was one.
-fn remove(crons: &mut Crons, hook: &str, key: &Key) -> bool {
-    let mut removed = false;
-    crons.retain_mut(|(_, cron)| match cron {
-        Value::Array(hooks) if has(hooks, hook, key) => {
-            removed = true;
-            hooks.retain_mut(|(at, events)| match events {
-                Value::Array(list) if *at == name(hook) => {
-                    list.retain(|(k, _)| k != key);
-                    !list.is_empty()
-                }
-                _ => true,
-            });
-            !hooks.is_empty()
+/// `wp_unschedule_event()` on `crons` of the event of `hook` with `key`
+/// at `at`, or at each timestamp that has it (`wp_clear_scheduled_hook()`),
+/// dropping what that leaves empty: whether there was one.
+fn remove(crons: &mut Crons, at: Option<i64>, hook: &str, key: &Key) -> bool {
+    let (mut removed, named) = (false, name(hook));
+    crons.retain_mut(|(stamp, cron)| {
+        let Value::Array(hooks) = cron else {
+            return true;
+        };
+        let found = has(hooks, hook, key);
+        if at.map_or(!found, |at| *stamp != Key::Int(at)) {
+            return true;
         }
-        _ => true,
+        removed |= found;
+        hooks.retain_mut(|(name, events)| {
+            if *name != named {
+                return true;
+            }
+            if let Value::Array(events) = events {
+                events.retain(|(k, _)| k != key);
+            }
+            !events.is_empty()
+        });
+        !hooks.is_empty()
     });
     removed
 }
 
 /// `_get_cron_array()`.
-async fn crons(write: &mut Write<'_>) -> Result<Crons> {
+async fn _get_cron_array(write: &mut Write<'_>) -> Result<Crons> {
     let stored = write.option_value("cron").await?.unwrap_or_default();
     let Some(Value::Array(mut crons)) = unserialize(&stored) else {
         return Ok(Vec::new());
@@ -244,7 +250,7 @@ async fn crons(write: &mut Write<'_>) -> Result<Crons> {
 }
 
 /// `_set_cron_array( $crons )`: whether the option changed.
-async fn set_crons(write: &mut Write<'_>, mut crons: Crons) -> Result<bool> {
+async fn _set_cron_array(write: &mut Write<'_>, mut crons: Crons) -> Result<bool> {
     crons.push((name("version"), Value::Int(2)));
     update_option(write, "cron", &Value::Array(crons), Some(Autoload::On)).await
 }
@@ -257,7 +263,7 @@ pub async fn wp_next_scheduled(
     args: &Value,
 ) -> Result<Option<i64>> {
     let key = key(args);
-    let crons = crons(write).await?;
+    let crons = _get_cron_array(write).await?;
     let next = crons.iter().find(|(_, cron)| has_value(cron, hook, &key));
     // `! $next`: a timestamp of 0 is none.
     let next = next.map(|(stamp, _)| Value::String(stamp.to_php_string()).to_int());
@@ -265,16 +271,16 @@ pub async fn wp_next_scheduled(
 }
 
 /// `wp_schedule_single_event( $at, $hook, $args )` at `now`.
-pub(crate) async fn schedule(
+pub(crate) async fn wp_schedule_single_event(
     write: &mut Write<'_>,
     times: (i64, i64),
     hook: &str,
     post: Option<u64>,
 ) -> Result<()> {
-    let mut crons = crons(write).await?;
+    let mut crons = _get_cron_array(write).await?;
     // A duplicate leaves the option as it is, which writes nothing.
     add(&mut crons, times, hook, post);
-    set_crons(write, crons).await.map(drop)
+    _set_cron_array(write, crons).await.map(drop)
 }
 
 /// `wp_schedule_event( $at, $recurrence, $hook, $args )` on `crons`.
@@ -303,9 +309,9 @@ pub async fn wp_schedule_event(
     let Some((name, interval)) = every.filter(|_| at > 0) else {
         return Ok(false);
     };
-    let mut crons = crons(write).await?;
+    let mut crons = _get_cron_array(write).await?;
     put_recurring(&mut crons, at, hook, args.clone(), (name, *interval));
-    set_crons(write, crons).await
+    _set_cron_array(write, crons).await
 }
 
 /// `wp_unschedule_event( $at, $hook, $args )`: false for a timestamp
@@ -319,16 +325,20 @@ pub async fn wp_unschedule_event(
     if at <= 0 {
         return Ok(false);
     }
-    let mut crons = crons(write).await?;
-    unschedule(&mut crons, at, hook, &key(args));
-    set_crons(write, crons).await
+    let mut crons = _get_cron_array(write).await?;
+    remove(&mut crons, Some(at), hook, &key(args));
+    _set_cron_array(write, crons).await
 }
 
 /// `wp_clear_scheduled_hook( $hook, array( $post ) )`.
-pub(crate) async fn clear(write: &mut Write<'_>, hook: &str, post: u64) -> Result<()> {
-    let mut crons = crons(write).await?;
-    if remove(&mut crons, hook, &key(&args(Some(post)))) {
-        set_crons(write, crons).await?;
+pub(crate) async fn wp_clear_scheduled_hook(
+    write: &mut Write<'_>,
+    hook: &str,
+    post: u64,
+) -> Result<()> {
+    let mut crons = _get_cron_array(write).await?;
+    if remove(&mut crons, None, hook, &key(&args(Some(post)))) {
+        _set_cron_array(write, crons).await?;
     }
     Ok(())
 }
@@ -346,34 +356,13 @@ fn reschedule(crons: &mut Crons, now: i64, event: &Event) {
     put_recurring(crons, at, hook, event.args.clone(), (recurrence, *interval));
 }
 
-/// `wp_unschedule_event()` on `crons` of the event of `hook` with `key` at
-/// `at`: out of its timestamp, dropping what that leaves empty.
-fn unschedule(crons: &mut Crons, at: i64, hook: &str, key: &Key) {
-    let (stamp, hook) = (Key::Int(at), name(hook));
-    crons.retain_mut(|(at, hooks)| {
-        if *at == stamp
-            && let Value::Array(hooks) = hooks
-        {
-            hooks.retain_mut(|(name, events)| {
-                if *name == hook
-                    && let Value::Array(events) = events
-                {
-                    events.retain(|(k, _)| k != key);
-                }
-                *name != hook || !events.is_empty()
-            });
-        }
-        *at != stamp || !hooks.is_empty()
-    });
-}
-
 /// `wp_get_ready_cron_jobs()` at `now` as `wp-cron.php` goes through them:
 /// the due events of the hooks HyScribe runs, in PHP's order. An event of
 /// a recurrence a plugin adds, or with no arguments array, is left for PHP.
-pub async fn due(write: &mut Write<'_>, now: i64) -> Result<Vec<Event>> {
+pub async fn wp_get_ready_cron_jobs(write: &mut Write<'_>, now: i64) -> Result<Vec<Event>> {
     let schedules = wp_get_schedules();
     let mut due = Vec::new();
-    for (stamp, hooks) in crons(write).await? {
+    for (stamp, hooks) in _get_cron_array(write).await? {
         // A timestamp is an integer key; others sort after them.
         let Key::Int(at) = stamp else { break };
         if at > now {
@@ -421,10 +410,15 @@ pub async fn run(
     uploads: &Path,
     event: &Event,
 ) -> Result<()> {
-    let mut crons = crons(write).await?;
+    let mut crons = _get_cron_array(write).await?;
     reschedule(&mut crons, ctx.now, event);
-    unschedule(&mut crons, event.at, event.job.hook(), &key(&event.args));
-    set_crons(write, crons).await?;
+    remove(
+        &mut crons,
+        Some(event.at),
+        event.job.hook(),
+        &key(&event.args),
+    );
+    _set_cron_array(write, crons).await?;
     match event.job {
         Job::PublishFuturePost => {
             // do_action_ref_array() passes the arguments' values in order.
@@ -434,7 +428,7 @@ pub async fn run(
             check_and_publish_future_post(write, ctx, post).await
         }
         Job::ScheduledDelete => wp_scheduled_delete(write, ctx).await,
-        Job::DeleteExpiredTransients => delete_expired_transients(write, ctx.now).await,
+        Job::DeleteExpiredTransients => Ok(write.delete_expired_transients(ctx.now).await?),
         Job::AutoDraftDelete => wp_delete_auto_drafts(write, ctx).await,
         Job::DeleteOldExportFiles => {
             wp_privacy_delete_old_export_files(uploads, ctx.now);

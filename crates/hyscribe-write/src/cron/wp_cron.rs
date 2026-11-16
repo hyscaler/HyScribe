@@ -10,7 +10,7 @@ use hyscribe_config::Constants;
 use hyscribe_db::{DbError, Write};
 use hyscribe_phpser::Value;
 
-use super::{Job, Result, due, run};
+use super::{Job, Result, run, wp_get_ready_cron_jobs};
 use crate::options::{delete_transient, get_option, set_transient};
 use crate::posts::Context;
 
@@ -79,7 +79,7 @@ pub async fn wp_cron<'w>(
     failed: &mut Vec<Job>,
 ) -> Result<Ran> {
     let gmt = clock();
-    let events = due(&mut begin().await?, gmt.floor() as i64).await?;
+    let events = wp_get_ready_cron_jobs(&mut begin().await?, gmt.floor() as i64).await?;
     let events: Vec<_> = events
         .into_iter()
         .filter(|event| !failed.contains(&event.job))

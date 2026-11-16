@@ -37,8 +37,8 @@ pub(crate) async fn missed(writer: &Writer, conn: &mut Connection) -> StdResult<
     let sql = "UPDATE wp_posts SET post_date = ?, post_date_gmt = ? WHERE ID = ?";
     raw(conn, sql, &[date, date, &id.to_string()]).await?;
     act(writer, conn, &admin(), async |w, ctx| {
-        clear(w, "publish_future_post", id).await?;
-        schedule(w, (ctx.now, 1_767_261_600), "publish_future_post", Some(id)).await
+        wp_clear_scheduled_hook(w, "publish_future_post", id).await?;
+        wp_schedule_single_event(w, (ctx.now, 1_767_261_600), "publish_future_post", Some(id)).await
     })
     .await?;
     Ok(id)
@@ -203,8 +203,8 @@ async fn missed_posts_are_published_and_early_events_moved_as_php_does() {
     let early = async |conn: &mut Connection| {
         let id = insert_post(writer, conn, future_post()).await?;
         act(writer, conn, &admin(), async |w, ctx| {
-            clear(w, "publish_future_post", id).await?;
-            schedule(w, (ctx.now, OLD), "publish_future_post", Some(id)).await
+            wp_clear_scheduled_hook(w, "publish_future_post", id).await?;
+            wp_schedule_single_event(w, (ctx.now, OLD), "publish_future_post", Some(id)).await
         })
         .await?;
         Ok(id)
@@ -252,7 +252,7 @@ async fn expired_transients_are_deleted_as_php_does() {
         async |conn| transients(writer, conn).await,
         async |conn, ()| {
             act(writer, conn, &cron(), async |w, ctx| {
-                delete_expired_transients(w, ctx.now).await
+                Ok(w.delete_expired_transients(ctx.now).await?)
             })
             .await
         },
@@ -369,7 +369,7 @@ async fn each_job_stops_at_a_database_error() {
         },
         async |w, ()| {
             wp_scheduled_delete(w, &ctx).await?;
-            delete_expired_transients(w, ctx.now).await?;
+            w.delete_expired_transients(ctx.now).await?;
             wp_delete_auto_drafts(w, &ctx).await?;
             wp_privacy_personal_data_cleanup_requests(w, &ctx).await
         },

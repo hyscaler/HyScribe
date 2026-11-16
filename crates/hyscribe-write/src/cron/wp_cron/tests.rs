@@ -4,7 +4,7 @@
 //! commits its lock and its events as PHP's `wp-cron.php` does.
 
 use super::*;
-use crate::cron::{Event, args, schedule, wp_next_scheduled, wp_schedule_event};
+use crate::cron::{Event, args, wp_next_scheduled, wp_schedule_event, wp_schedule_single_event};
 use hyscribe_config::{Database, Mode};
 use hyscribe_db::{Write, Writer};
 
@@ -227,7 +227,7 @@ async fn a_failing_job_keeps_its_event_and_its_hook_waits() {
     let now = FIRST + 100;
     act(&writer, async |w| {
         for (post, at) in [(1, FIRST - 2), (2, FIRST - 1)] {
-            schedule(w, (now, at), "publish_future_post", Some(post))
+            wp_schedule_single_event(w, (now, at), "publish_future_post", Some(post))
                 .await
                 .unwrap();
         }
@@ -259,7 +259,9 @@ async fn a_failing_job_keeps_its_event_and_its_hook_waits() {
     );
     assert_eq!(failed, [Job::PublishFuturePost]);
     let mut write = writer.begin().await.unwrap();
-    let left = crate::cron::due(&mut write, now).await.unwrap();
+    let left = crate::cron::wp_get_ready_cron_jobs(&mut write, now)
+        .await
+        .unwrap();
     let posts: Vec<_> = left.iter().map(|e: &Event| e.args.clone()).collect();
     assert_eq!(posts, [args(Some(1)), args(Some(2))]);
     drop(write);
@@ -291,7 +293,7 @@ async fn a_lock_taken_at_the_end_is_left() {
     };
     let settings = (Constants::default(), uploads.as_path());
     let ran = wp_cron(begin, settings, &|| PHP_TIME + 60.0, &mut Vec::new()).await;
-    assert_eq!(done(ran.unwrap()).1, false);
+    assert!(!done(ran.unwrap()).1);
     assert_eq!(count.get(), 7);
     let lock = option(&writer, "_transient_doing_cron").await;
     assert_eq!(lock.as_deref(), Some(&b"theirs"[..]));

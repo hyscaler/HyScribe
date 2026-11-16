@@ -214,7 +214,7 @@ async fn delete_one(
         hooks::update_has_published_posts(write).await?;
     }
     write.delete_post(id).await?;
-    cron::clear(write, "publish_future_post", id).await?;
+    cron::wp_clear_scheduled_hook(write, "publish_future_post", id).await?;
     Ok(revisions)
 }
 

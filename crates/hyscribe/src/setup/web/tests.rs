@@ -452,6 +452,31 @@ async fn step_3_checks_then_writes_env() {
     assert_eq!(answer.location(), STEP_1);
 }
 
+/// The wp-content answered is the one checked for an object cache.
+#[tokio::test]
+async fn the_wp_content_answered_is_used() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("hyscribe");
+    let site = dir.path().join("site");
+    let other = dir.path().join("other");
+    std::fs::create_dir(&home).unwrap();
+    std::fs::create_dir(&site).unwrap();
+    std::fs::create_dir(&other).unwrap();
+    std::fs::write(other.join("object-cache.php"), "<?php").unwrap();
+    let extra = "define( 'WP_CONTENT_DIR', __DIR__ . '/wp-content' );";
+    std::fs::write(site.join("wp-config.php"), wp_config(extra)).unwrap();
+    let shared = shared(&home);
+    sign_in(&shared).await;
+    let csrf = ("_csrf", "csrf-token");
+    let path = site.display().to_string();
+    ask(&shared, "POST", STEP_2, SIGNED_IN, &[csrf, ("path", &path)]).await;
+    let other = other.display().to_string();
+    let fields = [csrf, ("WP_CONTENT_DIR", other.as_str())];
+    let answer = ask(&shared, "POST", STEP_3, SIGNED_IN, &fields).await;
+    let warned = format!("  Warning: {other}/object-cache.php is a persistent object cache.");
+    assert!(answer.body.contains(&warned), "{}", answer.body);
+}
+
 #[tokio::test]
 async fn large_bodies_are_refused() {
     let home = tempfile::tempdir().unwrap();
@@ -459,7 +484,7 @@ async fn large_bodies_are_refused() {
     let request = Request::builder()
         .method("POST")
         .uri(STEP_1)
-        .body(Body::from(vec![b'a'; MAX_BODY + 1]))
+        .body(Body::from(vec![b'a'; 3 * (1 << 20) + 4097]))
         .unwrap();
     let answer = answered(&shared, request).await;
     assert_eq!(answer.status, StatusCode::PAYLOAD_TOO_LARGE);
@@ -502,8 +527,12 @@ fn forms_are_read_strictly() {
     );
     let more = format!("{}&last=", most.join("&"));
     assert_eq!(read_form(kind, more.as_bytes()), None);
+    // The largest wp-config.php, each byte percent encoded, fits with the
+    // other fields; 3 MiB and 4 KiB is the most.
+    let pasted = format!("_csrf=x&contents={}", "%41".repeat(wpconfig::MAX_SIZE));
+    assert!(read_form(kind, pasted.as_bytes()).is_some());
     let mut largest = b"a=".to_vec();
-    largest.resize(MAX_BODY, b'b');
+    largest.resize(3 * (1 << 20) + 4096, b'b');
     assert!(read_form(kind, &largest).is_some());
     largest.push(b'b');
     assert_eq!(read_form(kind, &largest), None);

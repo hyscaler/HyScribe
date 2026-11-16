@@ -82,11 +82,12 @@ pub(crate) async fn setup_mode(
     let (server, drawn) = hyscribe_config::server(env)
         .map_err(|err| err.to_string())
         .and_then(|server| {
-            hyscribe_auth::generate_password(SECRET_LENGTH + 3 * TOKEN_LENGTH, false)
+            hyscribe_auth::generate_password(4 * TOKEN_LENGTH, false)
                 .map(|drawn| (server, drawn))
                 .map_err(failed("cannot generate the setup secret".into()))
         })?;
-    let (secret, drawn) = drawn.split_at(SECRET_LENGTH);
+    let (secret, drawn) = drawn.split_at(TOKEN_LENGTH);
+    let (secret, _) = secret.split_at(SECRET_LENGTH);
     let (form, drawn) = drawn.split_at(TOKEN_LENGTH);
     let (cookie, csrf) = drawn.split_at(TOKEN_LENGTH);
     let tokens = Tokens {

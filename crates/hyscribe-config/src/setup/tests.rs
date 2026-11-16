@@ -48,6 +48,8 @@ fn literals_are_copied() {
         define('DISALLOW_UNFILTERED_HTML', true);
         define('ALLOW_UNFILTERED_UPLOADS', false);
         define('MULTISITE', TRUE);
+        define('DISABLE_WP_CRON', true);
+        define('ALTERNATE_WP_CRON', false);
         $table_prefix = 'site_';
     "#);
     assert_eq!(
@@ -69,6 +71,8 @@ fn literals_are_copied() {
                 ("DISALLOW_UNFILTERED_HTML", "true"),
                 ("ALLOW_UNFILTERED_UPLOADS", "false"),
                 ("MULTISITE", "true"),
+                ("DISABLE_WP_CRON", "true"),
+                ("ALTERNATE_WP_CRON", "false"),
             ]),
             unread: Vec::new(),
         }
@@ -89,6 +93,7 @@ fn what_only_php_can_tell_is_left_to_ask() {
         define('DISALLOW_UNFILTERED_HTML', 1);
         defined('MULTISITE') || define('MULTISITE', false);
         define('ALLOW_UNFILTERED_UPLOADS', getenv('UPLOADS') === 'on');
+        define('DISABLE_WP_CRON', getenv('CRON'));
         $table_prefix = getenv('PREFIX');
     "#);
     assert_eq!(
@@ -107,6 +112,7 @@ fn what_only_php_can_tell_is_left_to_ask() {
                 "DISALLOW_UNFILTERED_HTML",
                 "ALLOW_UNFILTERED_UPLOADS",
                 "MULTISITE",
+                "DISABLE_WP_CRON",
             ],
         }
     );

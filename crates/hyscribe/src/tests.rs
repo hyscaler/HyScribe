@@ -566,13 +566,16 @@ fn start_reports_what_stops_it_serving() {
 }
 
 /// In primary mode the login screen lets people log in: it has no read
-/// only notice.
+/// only notice. The cron task runs the default install's due events.
 #[test]
 fn primary_mode_serves_a_login_screen() {
+    let _saves = SAVES.lock().unwrap_or_else(|e| e.into_inner());
+    saves_with(&[]);
     let home = tempfile::tempdir().unwrap();
     let home = home.path();
     let mut env = site_env(home);
     env.insert("MODE".into(), "primary".into());
+    env.insert("DB_NAME".into(), "wordpress_saves".into());
     let run = |command: &str| {
         run_as(
             &["service", command],
@@ -588,7 +591,7 @@ fn primary_mode_serves_a_login_screen() {
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     while !std::fs::read_to_string(&log)
         .unwrap_or_default()
-        .contains("in primary mode")
+        .contains("cron: wp_privacy_personal_data_cleanup_requests ran")
     {
         assert!(std::time::Instant::now() < deadline, "server never logged");
         std::thread::sleep(hyscribe_service::POLL);
@@ -631,4 +634,88 @@ fn the_writer_s_refusals_are_logged() {
     assert!(out.starts_with("writes refused: "), "{out}");
     assert!(out.contains("missing_options"), "{out}");
     assert_eq!(out.lines().count(), 1, "{out}");
+}
+
+/// `wordpress_saves`, the scratch database, is changed one test at a time.
+pub(crate) static SAVES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Loads the default install into `wordpress_saves` and runs `statements`.
+pub(crate) fn saves_with(statements: &[String]) {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        use sqlx::Connection as _;
+        let db = hyscribe_config::Database {
+            name: "wordpress_saves".into(),
+            ..hyscribe_testkit::fixture_database()
+        };
+        hyscribe_testkit::writes::load_default_install(&db)
+            .await
+            .unwrap();
+        let options = sqlx::mysql::MySqlConnectOptions::new()
+            .host(&db.host)
+            .port(db.port)
+            .database(&db.name)
+            .username(&db.user)
+            .password(db.password.expose());
+        let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+        for statement in statements {
+            sqlx::raw_sql(sqlx::AssertSqlSafe(statement.clone()))
+                .execute(&mut conn)
+                .await
+                .unwrap();
+        }
+    });
+}
+
+/// `hyscribe cron run` runs the due events once in primary mode, with the
+/// configuration's checks.
+#[test]
+fn cron_run_runs_the_due_events_once() {
+    let _saves = SAVES.lock().unwrap_or_else(|e| e.into_inner());
+    saves_with(&[]);
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let cron = |extra: &[(&str, &str)]| {
+        let mut env = site_env(home);
+        env.insert("DB_NAME".into(), "wordpress_saves".into());
+        env.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        run_as(&["cron", "run"], env, home, USER, child_server())
+    };
+    let shadow = cron(&[]);
+    assert_eq!(
+        shadow.err,
+        "error: cron: off in shadow mode, which writes nothing\n"
+    );
+    assert_eq!(shadow.code, 1);
+    let primary = [
+        ("MODE", "primary"),
+        ("DISABLE_WP_CRON", "true"),
+        ("ALTERNATE_WP_CRON", "1"),
+    ];
+    let ran = cron(&primary);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out,
+        "cron: ALTERNATE_WP_CRON is ignored; HyScribe makes no loopback request\n\
+         cron: wp_privacy_delete_old_export_files ran\n\
+         cron: wp_privacy_personal_data_cleanup_requests ran\n"
+    );
+    assert_eq!(cron(&primary[..1]).out, "");
+    let unreachable = cron(&[("MODE", "primary"), ("DB_PORT", "1")]);
+    assert!(
+        unreachable
+            .err
+            .starts_with("error: cannot open the writer: "),
+        "{}",
+        unreachable.err
+    );
+    let root = run_as(&["cron", "run"], site_env(home), home, 0, child_server());
+    assert!(
+        root.err.starts_with("error: refusing to run as root"),
+        "{}",
+        root.err
+    );
 }

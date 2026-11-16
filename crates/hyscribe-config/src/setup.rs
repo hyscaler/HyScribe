@@ -14,12 +14,14 @@ use crate::{ENV_FILE, SALT_KEYS};
 /// `wp_salt()` treats as unset.
 const UNSET_SALT: &str = "put your unique phrase here";
 
-/// The capability constants the wizard copies when they are literal `true`
-/// or `false`.
-pub const CONSTANTS: [&str; 3] = [
+/// The constants the wizard copies when they are literal `true` or `false`:
+/// the capability constants and the cron ones (ADR 0017).
+pub const CONSTANTS: [&str; 5] = [
     "DISALLOW_UNFILTERED_HTML",
     "ALLOW_UNFILTERED_UPLOADS",
     "MULTISITE",
+    "DISABLE_WP_CRON",
+    "ALTERNATE_WP_CRON",
 ];
 
 /// How `wp-config.php` defines a constant.

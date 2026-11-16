@@ -56,6 +56,18 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
+    /// WP-Cron, for DISABLE_WP_CRON sites whose system cron runs it.
+    Cron {
+        #[command(subcommand)]
+        command: CronCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CronCommand {
+    /// Run the due events of the hooks HyScribe runs once, as
+    /// wp-cron.php does, then exit.
+    Run,
 }
 
 #[derive(Debug, Subcommand)]
@@ -158,6 +170,11 @@ pub fn run(ctx: Context<'_>) -> u8 {
             setup::run(&home, &mut terminal).map(Reply::text)
         }),
         Command::Service { command } => service(command, &site, out),
+        Command::Cron {
+            command: CronCommand::Run,
+        } => server_config(&home, &env, euid)
+            .and_then(|config| cron::run(&config, &home, out))
+            .map(Reply::text),
     };
     let written = result.and_then(|reply| {
         out.write_all(reply.text.as_bytes())
@@ -241,6 +258,7 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
     let signal = std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0));
     let seen = signal.clone();
     let sessions_dir = site.paths.home().join("sessions");
+    let site_paths = &site.paths;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -266,6 +284,7 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
                 Mode::Primary => site.with_sessions(Sessions::new(sessions_dir)),
                 Mode::Shadow => site,
             };
+            let site = std::sync::Arc::new(site);
             let address = std::net::SocketAddr::new(config.server.bind_host, config.server.port);
             let listener = tokio::net::TcpListener::bind(address)
                 .await
@@ -278,13 +297,26 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
                 std::process::id(),
                 mode_name(config.mode),
             );
+            let (lines, cron) = cron::service(&config, site_paths.home());
+            for line in lines {
+                let _ = writeln!(out, "{line}");
+            }
             let _ = out.flush();
-            hyscribe_http::serve(listener, std::sync::Arc::new(site), async move {
+            let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+            let stopping = stop.clone();
+            let server = hyscribe_http::serve(listener, site.clone(), async move {
                 // The sender only goes away after sending.
                 let number = stopped.await.unwrap_or(0);
                 seen.store(number, std::sync::atomic::Ordering::SeqCst);
-            })
-            .await;
+                stopping.notify_one();
+            });
+            match (cron, site.writer()) {
+                (Some(cron), Some(writer)) => {
+                    let task = cron::task(&writer, &cron, (cron::EVERY, &stop), out);
+                    tokio::join!(server, task);
+                }
+                _ => server.await,
+            }
             Ok(())
         })
     })?;
@@ -429,6 +461,7 @@ fn describe(config: &Config) -> String {
     )
 }
 
+mod cron;
 mod setup;
 
 #[cfg(test)]

@@ -64,8 +64,29 @@ fn defaults_are_safe() {
                 account: 10,
                 window: 900,
             },
+            disable_wp_cron: false,
+            alternate_wp_cron: false,
         }
     );
+}
+
+/// The cron constants read as the capability constants, false by default.
+#[test]
+fn reads_the_cron_constants() {
+    let cron = |pairs: &[(&str, &str)]| {
+        let config = from_map(&with(pairs))?;
+        Ok::<_, ConfigError>((config.disable_wp_cron, config.alternate_wp_cron))
+    };
+    let set = [("DISABLE_WP_CRON", "TRUE"), ("ALTERNATE_WP_CRON", "1")];
+    assert_eq!(cron(&set).unwrap(), (true, true));
+    let unset = [("DISABLE_WP_CRON", "0"), ("ALTERNATE_WP_CRON", "")];
+    assert_eq!(cron(&unset).unwrap(), (false, false));
+    for key in ["DISABLE_WP_CRON", "ALTERNATE_WP_CRON"] {
+        assert_eq!(
+            cron(&[(key, "yes")]).unwrap_err().to_string(),
+            format!("{key} is invalid: must be true or false")
+        );
+    }
 }
 
 /// The capability constants as `define()` gives them, the safer value when

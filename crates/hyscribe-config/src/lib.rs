@@ -201,6 +201,11 @@ pub struct Config {
     pub constants: Constants,
     /// The login rate limits.
     pub login_limits: LoginLimits,
+    /// `DISABLE_WP_CRON`: the service runs no cron task, `hyscribe cron
+    /// run` does (ADR 0017). Default false.
+    pub disable_wp_cron: bool,
+    /// `ALTERNATE_WP_CRON`: accepted and ignored, with a line in the log.
+    pub alternate_wp_cron: bool,
 }
 
 /// Why configuration could not be loaded.
@@ -367,6 +372,8 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         rest_public_users,
         constants,
         login_limits,
+        disable_wp_cron: constant(get("DISABLE_WP_CRON"), "DISABLE_WP_CRON", false)?,
+        alternate_wp_cron: constant(get("ALTERNATE_WP_CRON"), "ALTERNATE_WP_CRON", false)?,
     })
 }
 

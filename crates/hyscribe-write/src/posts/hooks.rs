@@ -123,7 +123,11 @@ async fn publish_post(
     if !super::sanitize_trackback_urls(&post.to_ping).is_empty() {
         add_metadata(write, Meta::Post, id, "_trackbackme", &one(), false).await?;
     }
-    if !cron::scheduled(write, "do_pings").await? {
+    let none = Value::Array(Vec::new());
+    if cron::wp_next_scheduled(write, "do_pings", &none)
+        .await?
+        .is_none()
+    {
         cron::schedule(write, (ctx.now, ctx.now), "do_pings", None).await?;
     }
     Ok(())

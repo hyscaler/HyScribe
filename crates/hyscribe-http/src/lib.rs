@@ -238,6 +238,11 @@ impl Site {
         Site { writer, ..self }
     }
 
+    /// The writer, with the configured addresses, for the service's tasks.
+    pub fn writer(&self) -> Option<Arc<hyscribe_db::Writer>> {
+        self.writer.clone()
+    }
+
     /// `blog_public`: whether search engines may index the site.
     fn public(&self) -> bool {
         !Value::String(self.raw_option("blog_public").to_vec()).is_empty()

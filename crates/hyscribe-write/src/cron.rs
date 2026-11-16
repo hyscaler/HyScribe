@@ -17,12 +17,14 @@ use crate::options::{Autoload, update_option};
 use crate::posts::Context;
 
 mod jobs;
+mod wp_cron;
 
 pub use jobs::{
     check_and_publish_future_post, delete_expired_transients, wp_delete_auto_drafts,
     wp_privacy_delete_old_export_files, wp_privacy_personal_data_cleanup_requests,
     wp_scheduled_delete,
 };
+pub use wp_cron::{Ran, microtime, wp_cron};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -78,13 +80,37 @@ impl Job {
     }
 }
 
-/// `wp_get_schedules()`' core recurrences and their intervals.
-const SCHEDULES: [(&str, i64); 4] = [
-    ("hourly", 3_600),
-    ("twicedaily", 43_200),
-    ("daily", 86_400),
-    ("weekly", 604_800),
-];
+/// A recurrence's name and interval in seconds.
+pub type Schedule = (String, i64);
+
+/// The `cron_schedules` filter: the recurrences extensions add, none until
+/// the extension runtime exists (docs/EXTENSIONS.md).
+pub fn cron_schedules(schedules: Vec<Schedule>) -> Vec<Schedule> {
+    schedules
+}
+
+/// `wp_get_schedules()`: the filter's recurrences, then core's.
+pub fn wp_get_schedules() -> Vec<Schedule> {
+    with_core_schedules(cron_schedules(Vec::new()))
+}
+
+/// `array_merge( $filtered, $core )`: a core name keeps the filter's place
+/// but core's interval.
+fn with_core_schedules(mut schedules: Vec<Schedule>) -> Vec<Schedule> {
+    let core = [
+        ("hourly", 3_600),
+        ("twicedaily", 43_200),
+        ("daily", 86_400),
+        ("weekly", 604_800),
+    ];
+    for (name, interval) in core {
+        match schedules.iter_mut().find(|(known, _)| known == name) {
+            Some(known) => known.1 = interval,
+            None => schedules.push((name.to_string(), interval)),
+        }
+    }
+    schedules
+}
 
 /// A due event of a hook HyScribe runs, as `wp-cron.php` reads it.
 #[derive(Clone, Debug, PartialEq)]
@@ -96,7 +122,7 @@ pub struct Event {
     /// Its arguments, an array.
     pub args: Value,
     /// The recurrence and interval of a recurring event.
-    pub recurrence: Option<(&'static str, i64)>,
+    pub recurrence: Option<Schedule>,
 }
 
 /// An event's arguments: none, or one post ID.
@@ -217,19 +243,25 @@ async fn crons(write: &mut Write<'_>) -> Result<Crons> {
     Ok(crons)
 }
 
-/// `_set_cron_array( $crons )`.
-async fn set_crons(write: &mut Write<'_>, mut crons: Crons) -> Result<()> {
+/// `_set_cron_array( $crons )`: whether the option changed.
+async fn set_crons(write: &mut Write<'_>, mut crons: Crons) -> Result<bool> {
     crons.push((name("version"), Value::Int(2)));
-    update_option(write, "cron", &Value::Array(crons), Some(Autoload::On)).await?;
-    Ok(())
+    update_option(write, "cron", &Value::Array(crons), Some(Autoload::On)).await
 }
 
-/// `wp_next_scheduled( $hook )` for an event without arguments: whether
-/// one is scheduled.
-pub(crate) async fn scheduled(write: &mut Write<'_>, hook: &str) -> Result<bool> {
-    let key = key(&args(None));
+/// `wp_next_scheduled( $hook, $args )`: the timestamp of the first event
+/// of `hook` with `args`, an array.
+pub async fn wp_next_scheduled(
+    write: &mut Write<'_>,
+    hook: &str,
+    args: &Value,
+) -> Result<Option<i64>> {
+    let key = key(args);
     let crons = crons(write).await?;
-    Ok(crons.iter().any(|(_, cron)| has_value(cron, hook, &key)))
+    let next = crons.iter().find(|(_, cron)| has_value(cron, hook, &key));
+    // `! $next`: a timestamp of 0 is none.
+    let next = next.map(|(stamp, _)| Value::String(stamp.to_php_string()).to_int());
+    Ok(next.filter(|&at| at != 0))
 }
 
 /// `wp_schedule_single_event( $at, $hook, $args )` at `now`.
@@ -242,7 +274,7 @@ pub(crate) async fn schedule(
     let mut crons = crons(write).await?;
     // A duplicate leaves the option as it is, which writes nothing.
     add(&mut crons, times, hook, post);
-    set_crons(write, crons).await
+    set_crons(write, crons).await.map(drop)
 }
 
 /// `wp_schedule_event( $at, $recurrence, $hook, $args )` on `crons`.
@@ -256,10 +288,39 @@ fn put_recurring(crons: &mut Crons, at: i64, hook: &str, args: Value, every: (&s
     put(crons, at, hook, key, event);
 }
 
-/// `wp_schedule_event( $now, 'daily', $hook )` of an event without arguments.
-pub(crate) async fn schedule_daily(write: &mut Write<'_>, now: i64, hook: &str) -> Result<()> {
+/// `wp_schedule_event( $at, $recurrence, $hook, $args )`: false for a
+/// timestamp below 1 or a recurrence [`wp_get_schedules`] does not know,
+/// else whether the option changed.
+pub async fn wp_schedule_event(
+    write: &mut Write<'_>,
+    at: i64,
+    recurrence: &str,
+    hook: &str,
+    args: &Value,
+) -> Result<bool> {
+    let schedules = wp_get_schedules();
+    let every = schedules.iter().find(|(name, _)| name == recurrence);
+    let Some((name, interval)) = every.filter(|_| at > 0) else {
+        return Ok(false);
+    };
     let mut crons = crons(write).await?;
-    put_recurring(&mut crons, now, hook, args(None), ("daily", 86_400));
+    put_recurring(&mut crons, at, hook, args.clone(), (name, *interval));
+    set_crons(write, crons).await
+}
+
+/// `wp_unschedule_event( $at, $hook, $args )`: false for a timestamp
+/// below 1, else whether the option changed.
+pub async fn wp_unschedule_event(
+    write: &mut Write<'_>,
+    at: i64,
+    hook: &str,
+    args: &Value,
+) -> Result<bool> {
+    if at <= 0 {
+        return Ok(false);
+    }
+    let mut crons = crons(write).await?;
+    unschedule(&mut crons, at, hook, &key(args));
     set_crons(write, crons).await
 }
 
@@ -275,20 +336,20 @@ pub(crate) async fn clear(write: &mut Write<'_>, hook: &str, post: u64) -> Resul
 /// `wp_reschedule_event()` of a recurring `event` at `now`: again at the
 /// first of its interval's steps from its time that is after `now`.
 fn reschedule(crons: &mut Crons, now: i64, event: &Event) {
-    let Some((recurrence, interval)) = event.recurrence else {
+    let Some((recurrence, interval)) = &event.recurrence else {
         return;
     };
     // An event not yet due moves a whole interval on from now.
     let behind = (now - event.at).max(0);
     let at = now + interval - behind % interval;
     let hook = event.job.hook();
-    put_recurring(crons, at, hook, event.args.clone(), (recurrence, interval));
+    put_recurring(crons, at, hook, event.args.clone(), (recurrence, *interval));
 }
 
-/// `wp_unschedule_event()` of `event`: out of its timestamp, dropping what
-/// that leaves empty.
-fn unschedule(crons: &mut Crons, event: &Event) {
-    let (stamp, hook, key) = (Key::Int(event.at), name(event.job.hook()), key(&event.args));
+/// `wp_unschedule_event()` on `crons` of the event of `hook` with `key` at
+/// `at`: out of its timestamp, dropping what that leaves empty.
+fn unschedule(crons: &mut Crons, at: i64, hook: &str, key: &Key) {
+    let (stamp, hook) = (Key::Int(at), name(hook));
     crons.retain_mut(|(at, hooks)| {
         if *at == stamp
             && let Value::Array(hooks) = hooks
@@ -297,7 +358,7 @@ fn unschedule(crons: &mut Crons, event: &Event) {
                 if *name == hook
                     && let Value::Array(events) = events
                 {
-                    events.retain(|(k, _)| *k != key);
+                    events.retain(|(k, _)| k != key);
                 }
                 *name != hook || !events.is_empty()
             });
@@ -310,6 +371,7 @@ fn unschedule(crons: &mut Crons, event: &Event) {
 /// the due events of the hooks HyScribe runs, in PHP's order. An event of
 /// a recurrence a plugin adds, or with no arguments array, is left for PHP.
 pub async fn due(write: &mut Write<'_>, now: i64) -> Result<Vec<Event>> {
+    let schedules = wp_get_schedules();
     let mut due = Vec::new();
     for (stamp, hooks) in crons(write).await? {
         // A timestamp is an integer key; others sort after them.
@@ -323,11 +385,11 @@ pub async fn due(write: &mut Write<'_>, now: i64) -> Result<Vec<Event>> {
                 let recurrence = match event.get_str("schedule").filter(|s| !s.is_empty()) {
                     Some(schedule) => {
                         let schedule = schedule.to_php_string();
-                        let known = SCHEDULES
+                        let known = schedules
                             .iter()
                             .find(|(name, _)| name.as_bytes() == schedule);
-                        let Some(&every) = known else { continue };
-                        Some(every)
+                        let Some(every) = known else { continue };
+                        Some(every.clone())
                     }
                     None => None,
                 };
@@ -361,7 +423,7 @@ pub async fn run(
 ) -> Result<()> {
     let mut crons = crons(write).await?;
     reschedule(&mut crons, ctx.now, event);
-    unschedule(&mut crons, event);
+    unschedule(&mut crons, event.at, event.job.hook(), &key(&event.args));
     set_crons(write, crons).await?;
     match event.job {
         Job::PublishFuturePost => {

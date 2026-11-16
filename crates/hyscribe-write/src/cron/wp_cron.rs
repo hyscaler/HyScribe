@@ -52,6 +52,25 @@ async fn cron_lock(write: &mut Write<'_>) -> Result<Option<Vec<u8>>> {
     Ok(write.option_value("_transient_doing_cron").await?)
 }
 
+/// The lock taken at `gmt` and committed, unless another process holds it:
+/// one younger than a minute, and not over ten minutes ahead (`spawn_cron()`).
+async fn take_lock(mut write: Write<'_>, gmt: f64) -> Result<Option<Vec<u8>>> {
+    let held = cron_lock(&mut write).await?;
+    // `(float) get_transient()`.
+    let held = Value::String(held.unwrap_or_default()).to_float();
+    let held = if held > gmt + 600.0 { 0.0 } else { held };
+    if held + LOCK_TIMEOUT > gmt {
+        return Ok(None);
+    }
+    let ours = lock_value(gmt);
+    set_transient(&mut write, "doing_cron", &Value::String(ours.clone()), 0).await?;
+    write
+        .commit()
+        .await
+        .map(|()| Some(ours))
+        .map_err(Into::into)
+}
+
 /// The posts' context of a job at `now`, with no user, the site's
 /// addresses read in its action.
 async fn context(write: &mut Write<'_>, constants: Constants, now: i64) -> Result<Context> {
@@ -87,19 +106,10 @@ pub async fn wp_cron<'w>(
     if events.is_empty() {
         return Ok(Ran::Idle);
     }
-    let mut write = begin().await?;
-    let held = cron_lock(&mut write).await?;
-    // `(float) get_transient()`, none when over ten minutes ahead (`spawn_cron()`).
-    let held = Value::String(held.unwrap_or_default()).to_float();
-    let held = if held > gmt + 600.0 { 0.0 } else { held };
-    if held + LOCK_TIMEOUT > gmt {
+    let Some(ours) = take_lock(begin().await?, gmt).await? else {
         return Ok(Ran::Locked);
-    }
-    let ours = lock_value(gmt);
-    let value = Value::String(ours.clone());
-    set_transient(&mut write, "doing_cron", &value, 0).await?;
+    };
     let ours = Some(ours);
-    write.commit().await?;
     let mut done = Vec::new();
     for event in events {
         // An earlier event of the hook failed in this run.
@@ -127,11 +137,11 @@ pub async fn wp_cron<'w>(
     if cron_lock(&mut write).await? == ours {
         delete_transient(&mut write, "doing_cron").await?;
     }
-    write.commit().await?;
-    Ok(Ran::Done {
+    let done = Ran::Done {
         events: done,
         stolen: false,
-    })
+    };
+    write.commit().await.map(|()| done).map_err(Into::into)
 }
 
 #[cfg(test)]

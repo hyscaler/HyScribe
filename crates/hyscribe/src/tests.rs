@@ -831,6 +831,18 @@ fn cron_run_runs_the_due_events_once() {
         "{}",
         root.err
     );
+    let site = tempfile::tempdir().unwrap();
+    std::fs::write(site.path().join("object-cache.php"), "<?php").unwrap();
+    let uploads = site.path().join("uploads");
+    let cached = cron(&[
+        ("MODE", "primary"),
+        ("UPLOADS_DIR", uploads.to_str().unwrap()),
+    ]);
+    assert!(
+        cached.err.starts_with("error: cron: off, since "),
+        "{}",
+        cached.err
+    );
     let none = run_with(&["cron", "run"], &[], home);
     assert_eq!(none.err, "error: no configuration: run ./hyscribe setup\n");
     let invalid = run_with(&["cron", "run"], &[("DB_NAME", "x")], home);

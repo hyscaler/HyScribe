@@ -132,15 +132,17 @@ pub(crate) fn run(config: &Config, home: &Path, out: &mut dyn Write) -> Result<S
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|err| format!("cannot start the runtime: {err}"))?;
-    runtime.block_on(async {
-        let writer = Writer::open(&config.database, config.mode).await;
-        let writer = writer.map_err(|err| format!("cannot open the writer: {err}"))?;
-        let Some(writer) = writer else {
-            return Err(SHADOW.to_string());
-        };
-        once(&writer, &settings, &microtime, &mut Vec::new(), out).await;
-        Ok(String::new())
+        .map_err(crate::failed("cannot start the runtime".into()));
+    runtime.and_then(|runtime| {
+        runtime.block_on(async {
+            let writer = Writer::open(&config.database, config.mode).await;
+            let writer = writer.map_err(|err| format!("cannot open the writer: {err}"))?;
+            let Some(writer) = writer else {
+                return Err(SHADOW.to_string());
+            };
+            once(&writer, &settings, &microtime, &mut Vec::new(), out).await;
+            Ok(String::new())
+        })
     })
 }
 

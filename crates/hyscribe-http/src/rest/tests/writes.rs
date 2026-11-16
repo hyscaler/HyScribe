@@ -96,7 +96,7 @@ async fn post_writes_match_php() {
     let _saves = crate::admin::tests::SAVES.lock().await;
     fresh().await;
     let dir = tempfile::tempdir().unwrap();
-    let site = saves_site(dir.path()).await;
+    let mut site = saves_site(dir.path()).await;
     let mut logins = Vec::new();
     for (who, login, id) in [
         ("administrator", "admin", 1),
@@ -158,8 +158,11 @@ async fn post_writes_match_php() {
             .count();
         let from = at.saturating_sub(80);
         assert_eq!(ours.get(from..), php.get(from..), "{what}");
+        // Connections opened before the tables were loaded again can
+        // refuse them (1412), so the site connects afresh too.
         if status.is_success() {
             fresh().await;
+            site = saves_site(dir.path()).await;
         }
     }
     assert_eq!(unported, 6 * UNPORTED.len());

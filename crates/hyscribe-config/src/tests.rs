@@ -59,6 +59,11 @@ fn defaults_are_safe() {
                 disallow_unfiltered_html: true,
                 allow_unfiltered_uploads: false,
             },
+            login_limits: LoginLimits {
+                address: 5,
+                account: 10,
+                window: 900,
+            },
         }
     );
 }
@@ -134,6 +139,9 @@ fn reads_every_key() {
         ("AUTH_KEY", "a"),
         ("NONCE_SALT", "z"),
         ("REST_PUBLIC_USERS", "off"),
+        ("LOGIN_LIMIT_ADDRESS", "1"),
+        ("LOGIN_LIMIT_ACCOUNT", "1000"),
+        ("LOGIN_LIMIT_WINDOW", "86400"),
     ]))
     .unwrap();
     assert_eq!(config.database.host, "db.internal");
@@ -161,6 +169,12 @@ fn reads_every_key() {
         ]
     );
     assert!(!config.rest_public_users);
+    let limits = LoginLimits {
+        address: 1,
+        account: 1000,
+        window: 86_400,
+    };
+    assert_eq!(config.login_limits, limits);
     let on = from_map(&with(&[("REST_PUBLIC_USERS", "on")])).unwrap();
     assert!(on.rest_public_users);
 }
@@ -187,6 +201,26 @@ fn rejects_bad_values() {
         ("DB_READ_PASSWORD", "hunter3", "is set without DB_READ_USER"),
         ("MODE", "write", "must be shadow or primary"),
         ("REST_PUBLIC_USERS", "true", "must be on or off"),
+        (
+            "LOGIN_LIMIT_ADDRESS",
+            "0",
+            "must be a whole number from 1 to 1000",
+        ),
+        (
+            "LOGIN_LIMIT_ACCOUNT",
+            "1001",
+            "must be a whole number from 1 to 1000",
+        ),
+        (
+            "LOGIN_LIMIT_WINDOW",
+            "86401",
+            "must be a whole number from 1 to 86400",
+        ),
+        (
+            "LOGIN_LIMIT_WINDOW",
+            "15m",
+            "must be a whole number from 1 to 86400",
+        ),
     ];
     for &(key, value, reason) in cases {
         assert_eq!(

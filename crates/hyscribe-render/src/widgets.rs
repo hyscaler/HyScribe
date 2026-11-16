@@ -14,19 +14,20 @@ use crate::autop::wpautop;
 use crate::balance::force_balance_tags;
 use crate::blocks::{Block, is_pcre_space, parse_blocks};
 use crate::categories::{dropdown_select, terms};
+use crate::content::replace_insecure_home_url;
 use crate::content_tags::filter_content_tags;
 use crate::core_blocks::calendar::request_calendar;
 use crate::core_blocks::tag_cloud::{TAXONOMIES, wp_tag_cloud};
 use crate::core_blocks::{comment_author_link, comment_link, prepared};
 use crate::date;
-use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, wptexturize};
+use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, convert_chars, wptexturize};
 use crate::head::json_hex_tag;
 use crate::media::Filter;
 use crate::pages::wp_list_pages;
 use crate::permalinks;
 use crate::post::{listed_title, the_title};
 use crate::site::{Archive, Taxonomy};
-use crate::template::{Renderer, replace};
+use crate::template::{Renderer, replace, site_smilies};
 
 /// The classic widgets' dropdown script up to what a change does.
 const SCRIPT_START: &str = "( ( dropdownId ) => {
@@ -642,6 +643,19 @@ impl Renderer<'_> {
         .concat()
     }
 
+    /// The `widget_text_content` filters: `the_content`'s without
+    /// `do_blocks()` and `prepend_attachment()`, with `wpautop()` always in
+    /// its place at priority 10 and `wp_filter_content_tags()` in their own
+    /// context. `WP_Embed`'s `[embed]` and autoembed, `shortcode_unautop()`
+    /// and `do_shortcode()` are not ported.
+    fn widget_text_content(&self, text: &[u8]) -> Vec<u8> {
+        let site = self.context.site;
+        let text = wpautop(&wptexturize(text, &CORE_SHORTCODE_TAGS), true);
+        let text = capital_p_dangit(&replace_insecure_home_url(&site.home_url(), &text));
+        let text = filter_content_tags(site, &self.context.loading, &text, Filter::WidgetText);
+        site_smilies(site, &text)
+    }
+
     /// `WP_Widget_Custom_HTML::widget()`.
     fn custom_html_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
         let title = widget_title(instance, b"");
@@ -688,8 +702,10 @@ impl Renderer<'_> {
         .concat()
     }
 
-    /// `WP_Widget_Text::widget()`: a visual widget's text gets the content
-    /// filters, a legacy one `wpautop()` when it asks for it.
+    /// `WP_Widget_Text::widget()`: a visual widget's text gets the
+    /// `widget_text_content` filters, a legacy one `wpautop()` when it asks
+    /// for it (its `shortcode_unautop()` and `do_shortcode()` are not
+    /// ported).
     fn text_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
         let title = widget_title(instance, b"");
         let set = |name| checked(instance, name);
@@ -698,7 +714,7 @@ impl Renderer<'_> {
         let text = instance.get_str("text").filter(|text| !text.is_empty());
         let text = self.balance_tags(&text.map(Value::to_php_string).unwrap_or_default());
         let text = if visual {
-            self.content_filters(&text, true, true)
+            self.widget_text_content(&text)
         } else if set("filter") {
             wpautop(&text, true)
         } else {

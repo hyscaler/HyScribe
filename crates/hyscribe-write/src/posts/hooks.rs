@@ -90,7 +90,7 @@ async fn fresh_site_is_used(write: &mut Write<'_>) -> Result<()> {
 }
 
 /// `wp_slash( $value )`: `addslashes()` on every string, in arrays too.
-fn slash(value: Value) -> Value {
+pub(super) fn slash(value: Value) -> Value {
     match value {
         Value::String(text) => Value::String(hyscribe_phpser::addslashes(&text)),
         Value::Array(entries) => Value::Array(
@@ -244,22 +244,6 @@ pub(super) async fn post_updated(
     Ok(())
 }
 
-/// `normalize_whitespace( $text )`.
-fn normalize_whitespace(text: &[u8]) -> Vec<u8> {
-    let text = hyscribe_phpser::php_trim(text);
-    let mut out: Vec<u8> = Vec::with_capacity(text.len());
-    for &b in text {
-        let b = if b == b'\r' { b'\n' } else { b };
-        let blank = b == b' ' || b == b'\t';
-        match out.last() {
-            Some(b'\n') if b == b'\n' => {}
-            Some(b' ') if blank => {}
-            _ => out.push(if blank { b' ' } else { b }),
-        }
-    }
-    out
-}
-
 /// `wp_save_post_revision( $id )`: a revision of the post unless its last
 /// one has the same title, content, excerpt and footnotes.
 pub(super) async fn save_revision(
@@ -284,9 +268,10 @@ pub(super) async fn save_revision(
             (&post.content, &latest.content),
             (&post.excerpt, &latest.excerpt),
         ];
-        let changed = fields
-            .iter()
-            .any(|(now, then)| normalize_whitespace(now) != normalize_whitespace(then));
+        let changed = fields.iter().any(|(now, then)| {
+            hyscribe_render::formatting::normalize_whitespace(now)
+                != hyscribe_render::formatting::normalize_whitespace(then)
+        });
         if !changed && get_metadata(write, Meta::Post, revision, "footnotes").await? == footnotes {
             return Ok(());
         }

@@ -621,6 +621,7 @@ dependencies = [
  "hyscribe-phpser",
  "hyscribe-theme-json",
  "icu_normalizer",
+ "icu_properties",
  "jiff-tzdb",
  "sha2 0.11.1",
 ]
@@ -647,6 +648,7 @@ name = "hyscribe-write"
 version = "0.1.0"
 dependencies = [
  "hyscribe-auth",
+ "hyscribe-config",
  "hyscribe-db",
  "hyscribe-html",
  "hyscribe-kses",

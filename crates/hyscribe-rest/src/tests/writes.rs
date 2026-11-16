@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The posts' and pages' writes (MVP 4.3) where the goldens of
-//! `reference/rest/post-writes.list` cannot reach: the plans the checks
-//! give, the request bodies read, and the answers once written, over the
-//! default install with the extra posts, a site changed where a case needs
-//! it.
+//! The posts controller's writes (MVP 4.3) where the goldens of
+//! `reference/rest/post-writes.list` and `site-writes.list` cannot reach:
+//! the plans the checks give, the request bodies read, and the answers once
+//! written, over the default install with the extra posts, a site changed
+//! where a case needs it.
 
 use hyscribe_model::{Comment, CommentQuery, CommentRow, Term, TermQuery, User, UserQuery};
 use hyscribe_phpser::parse_str;
@@ -531,6 +531,76 @@ fn featured_images_are_cleared() {
     assert_eq!(served.status, 501);
 }
 
+/// Navigation menus and synced patterns save the fields their schemas
+/// have and leave the others; an update's content is wrapped in the type's
+/// own block for the block hooks, and the other types' writes are not
+/// ported.
+#[test]
+fn navigation_and_patterns_save_their_fields() {
+    let ignored = r#""excerpt":"Short","author":1,"featured_media":2,"comment_status":"open""#;
+    let navigation = plan(
+        "administrator",
+        "POST",
+        "/wp/v2/navigation",
+        &format!(r#"{{"title":"Footer",{ignored}}}"#),
+    );
+    let footer = Save {
+        post_type: "wp_navigation".into(),
+        title: Some(b"Footer".to_vec()),
+        ..Save::default()
+    };
+    assert_eq!(navigation, footer);
+    let pattern = plan(
+        "administrator",
+        "POST",
+        "/wp/v2/blocks",
+        &format!(r#"{{"title":"Footer",{ignored}}}"#),
+    );
+    let excerpted = Save {
+        post_type: "wp_block".into(),
+        excerpt: Some(b"Short".to_vec()),
+        ..footer
+    };
+    assert_eq!(pattern, excerpted);
+    // A stray closer ends the wrapper early, which serializes it under its
+    // own name.
+    for (post_type, base, wrapper) in [
+        ("wp_navigation", "navigation", "navigation"),
+        ("wp_block", "blocks", "block"),
+    ] {
+        let body = r#"{"content":"a<!-- /wp:x -->b<!-- wp:c /-->"}"#;
+        let post = Post {
+            post_type: post_type.into(),
+            ..oracle("", &[]).post(1).unwrap()
+        };
+        let site = changed(Vec::new(), vec![post]);
+        let asked = Asked::new("administrator", "POST", &format!("/wp/v2/{base}/1"), body);
+        let (plan, served) = on(&site, &asked, Outcome::Written(1));
+        let Some(Write::Save(save)) = plan.map(|plan| plan.write) else {
+            panic!("{post_type} {}", text_of(&served));
+        };
+        let closed = format!("a<!-- /wp:{wrapper} -->b<!-- wp:c /-->");
+        assert_eq!(save.content, Some(closed.into_bytes()), "{post_type}");
+    }
+    // Neither a pattern's categories nor an autosave is ported, and a
+    // format is checked against its schema.
+    for (method, target, body) in [
+        ("POST", "/wp/v2/media", ""),
+        ("DELETE", "/wp/v2/menu-items/1&force=1", ""),
+        (
+            "POST",
+            "/wp/v2/blocks",
+            r#"{"title":"x","wp_pattern_category":[]}"#,
+        ),
+        ("POST", "/wp/v2/posts/1/autosaves", r#"{"title":"x"}"#),
+    ] {
+        let served = answered("administrator", method, target, body);
+        assert_eq!(served.status, 501, "{target}");
+    }
+    let format = answered("administrator", "POST", "/wp/v2/posts", r#"{"format":"x"}"#);
+    assert!(text_of(&format).contains("rest_invalid_param"));
+}
+
 /// Content whose answer is not ported, as stored after kses or unfiltered,
 /// is not written; nor `format`, a template, `meta`, or content with
 /// ignored hooked blocks.
@@ -652,8 +722,8 @@ fn refusals_are_php_s() {
 }
 
 /// The body read as `get_parameter_order()` reads it: JSON for a JSON type,
-/// a form for a method other than POST, a multipart form and JSON PHP
-/// refuses not at all.
+/// a form for a method other than POST, a multipart form not at all; JSON
+/// PHP refuses is answered `rest_invalid_json` before any check.
 #[test]
 fn bodies_are_read_as_php_reads_them() {
     let status = |method: &'static str, kind: Option<&'static [u8]>, body: &str| {
@@ -684,7 +754,15 @@ fn bodies_are_read_as_php_reads_them() {
             "{body}"
         );
     }
-    assert_eq!(status("POST", Some(b"application/json"), "{").1.status, 501);
+    let invalid = status("POST", Some(b"application/json"), "[1}").1;
+    assert_eq!(invalid.status, 400);
+    let error = r#"{"code":"rest_invalid_json","message":"Invalid JSON body passed.","data":{"status":400,"json_error_code":2,"json_error_message":"State mismatch (invalid or malformed JSON)"}}"#;
+    assert_eq!(String::from_utf8_lossy(&invalid.body), error);
+    // Before any check, on a write not ported too.
+    let mut asked = Asked::new("", "PUT", "/wp/v2/categories/1", "{");
+    asked.kind = Some(b"application/json");
+    let refused = on(&oracle("", &[]), &asked, Outcome::Written(1)).1;
+    assert_eq!(refused.status, 400);
     let multipart = Some(&b"multipart/form-data; boundary=x"[..]);
     assert_eq!(status("POST", multipart, "--x--").1.status, 501);
     // An empty multipart form gives `$_POST` nothing.
@@ -907,16 +985,16 @@ fn checks_refuse_as_php_refuses() {
     assert_eq!(served.status, 501);
 }
 
-/// Only the posts' and pages' deletes are planned: a synced pattern's is
-/// checked, then not ported.
+/// Only the ported types' deletes are planned: a menu item's is checked,
+/// then not ported.
 #[test]
 fn other_types_plan_no_delete() {
     let pattern = Post {
-        post_type: "wp_block".into(),
+        post_type: "nav_menu_item".into(),
         ..oracle("", &[]).post(1).unwrap()
     };
     let site = changed(Vec::new(), vec![pattern]);
-    let asked = Asked::new("administrator", "DELETE", "/wp/v2/blocks/1", "");
+    let asked = Asked::new("administrator", "DELETE", "/wp/v2/menu-items/1", "");
     let (plan, served) = on(&site, &asked, Outcome::Written(1));
     assert_eq!((plan, served.status), (None, 501));
 }

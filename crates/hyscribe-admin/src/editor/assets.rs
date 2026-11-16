@@ -21,10 +21,12 @@ fn block_style_css() -> &'static [(Key, Value)] {
     let css = CSS.get_or_init(|| {
         let registered = json_decode(THEME_REGISTERED).unwrap_or_default();
         let styles = registered.get_str("block_styles").and_then(Value::as_array);
-        let inline = styles
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|(_, entry)| entry.get(&Key::Int(1))?.get_str("inline_style").cloned());
+        let inline = styles.unwrap_or_default().iter().filter_map(|(_, entry)| {
+            let style = entry.get(&Key::Int(1));
+            style
+                .and_then(|style| style.get_str("inline_style"))
+                .cloned()
+        });
         Value::Array(inline.zip(0..).map(|(css, i)| (Key::Int(i), css)).collect())
     });
     css.as_array().unwrap_or_default()

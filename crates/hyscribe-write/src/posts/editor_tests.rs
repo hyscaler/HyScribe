@@ -200,3 +200,30 @@ async fn a_page_takes_no_default_format() {
     .unwrap();
     assert_eq!(drafted, (true, true));
 }
+
+/// A database error at any statement of an editor's first view, or of a
+/// later one with the theme's posts and mods in place, ends it.
+#[tokio::test]
+async fn database_errors_end_editor_views() {
+    let new = async |w: &mut Write<'_>, ()| {
+        block_editor_view(w, &admin(), Edited::New("post"), THEME)
+            .await
+            .map(drop)
+    };
+    crate::tests::fails_at_each_step(async |_: &mut Write<'_>| (), new).await;
+    let seen = async |w: &mut Write<'_>| {
+        get_user_global_styles_post_id(w, &admin(), THEME.0)
+            .await
+            .unwrap();
+        let mods = b"a:1:{s:18:\"custom_css_post_id\";i:1;}";
+        w.add_option("theme_mods_twentytwentyfive", mods, "auto")
+            .await
+            .unwrap();
+    };
+    let edit = async |w: &mut Write<'_>, ()| {
+        block_editor_view(w, &admin(), Edited::Existing(1), THEME)
+            .await
+            .map(drop)
+    };
+    crate::tests::fails_at_each_step(seen, edit).await;
+}

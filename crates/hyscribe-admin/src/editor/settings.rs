@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, float_to_string, json_decode};
 use hyscribe_render::blocks::{Block, parse_blocks};
+use hyscribe_render::theme::Theme;
 
 use super::EditorSite;
 use super::blocks::{bindings_supported_attributes, block_categories};
@@ -46,20 +47,21 @@ fn list(items: impl IntoIterator<Item = Value>) -> Value {
 fn allowed_mime_types(unfiltered: bool) -> Value {
     static TYPES: OnceLock<Value> = OnceLock::new();
     let types = TYPES.get_or_init(|| json_decode(MIME_TYPES).unwrap_or_default());
-    let mut out = Vec::new();
-    for (key, mime) in types.as_array().unwrap_or_default() {
-        out.push((key.clone(), mime.clone()));
-        let after: &[u8] = &key.to_php_string();
-        let added = match after {
-            b"css" => ("htm|html", "text/html"),
-            b"rtf" => ("js", "application/javascript"),
-            _ => continue,
-        };
-        if unfiltered {
-            out.push((Key::String(added.0.as_bytes().to_vec()), text(added.1)));
-        }
-    }
-    Value::Array(out)
+    let added = |key: &Key| match key.to_php_string().as_slice() {
+        b"css" => vec![("htm|html", "text/html")],
+        b"rtf" => vec![("js", "application/javascript")],
+        _ => Vec::new(),
+    };
+    let entries = types
+        .as_array()
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|(key, mime)| {
+            let more = added(key).into_iter().filter(|_| unfiltered);
+            let more = more.map(|(key, mime)| (Key::String(key.as_bytes().to_vec()), text(mime)));
+            std::iter::once((key.clone(), mime.clone())).chain(more)
+        });
+    Value::Array(entries.collect())
 }
 
 /// `get_default_block_editor_settings()` with the bundled theme's supports.
@@ -149,16 +151,16 @@ fn style(css: Value, kind: &str, global: bool) -> Value {
 fn styles(site: &dyn EditorSite) -> Value {
     let global = site.theme().global_styles();
     let mut styles = Vec::new();
-    for kind in ["variables", "presets"] {
-        let css = global.stylesheet_of(kind);
-        if !css.is_empty() {
-            styles.push(style(text(&css), "presets", true));
-        }
-    }
-    let css = global.stylesheet_of("styles");
-    if !css.is_empty() {
-        styles.push(style(text(&css), "theme", true));
-    }
+    let parts = [
+        ("variables", "presets"),
+        ("presets", "presets"),
+        ("styles", "theme"),
+    ];
+    let parts = parts
+        .iter()
+        .map(|(part, kind)| (global.stylesheet_of(part), kind));
+    let parts = parts.filter(|(css, _)| !css.is_empty());
+    styles.extend(parts.map(|(css, kind)| style(text(&css), kind, true)));
     // The Customizer's CSS, which the site has none of.
     styles.push(style(text(""), "user", false));
     styles.push(style(
@@ -246,23 +248,30 @@ fn duotone_presets(settings: &Value) -> Vec<(String, Vec<Vec<u8>>)> {
 /// `WP_Duotone::colord_parse_hex()` of a hex color: red, green, blue and
 /// alpha as `get_filter_svg()` prints them; `None` for any other color.
 fn channels(color: &[u8]) -> Option<[String; 4]> {
-    let hex = std::str::from_utf8(color.strip_prefix(b"#")?).ok()?;
-    let byte = |s: &str| u8::from_str_radix(s, 16).ok();
-    let doubled = |i: usize| byte(&hex.get(i..=i)?.repeat(2));
-    let pair = |i: usize| byte(hex.get(i..i + 2)?);
-    let (rgb, alpha) = match hex.len() {
-        3 => ([doubled(0)?, doubled(1)?, doubled(2)?], None),
-        4 => ([doubled(0)?, doubled(1)?, doubled(2)?], Some(doubled(3)?)),
-        6 => ([pair(0)?, pair(2)?, pair(4)?], None),
-        8 => ([pair(0)?, pair(2)?, pair(4)?], Some(pair(6)?)),
-        _ => return None,
+    let hex = color
+        .strip_prefix(b"#")
+        .filter(|hex| hex.iter().all(u8::is_ascii_hexdigit));
+    let hex = hex.filter(|hex| [3, 4, 6, 8].contains(&hex.len()))?;
+    let digit = |i: usize| {
+        hex.get(i)
+            .and_then(|d| char::from(*d).to_digit(16))
+            .unwrap_or(0)
     };
+    // A short color doubles each digit.
+    let short = hex.len() < 6;
+    let values: Vec<u32> = match short {
+        true => (0..hex.len()).map(|i| digit(i) * 17).collect(),
+        false => (0..hex.len() / 2)
+            .map(|i| digit(2 * i) * 16 + digit(2 * i + 1))
+            .collect(),
+    };
+    let value = |i: usize| values.get(i).copied().unwrap_or(0);
     // An integer divided by 255 is an integer only at 0 and 255.
-    let share = |n: u8| float_to_string(f64::from(n) / 255.0);
-    let alpha = alpha.map_or("1".into(), |a| {
+    let share = |n: u32| float_to_string(f64::from(n) / 255.0);
+    let alpha = values.get(3).map_or("1".into(), |&a| {
         float_to_string((f64::from(a) / 255.0 * 100.0).round() / 100.0)
     });
-    Some([share(rgb[0]), share(rgb[1]), share(rgb[2]), alpha])
+    Some([share(value(0)), share(value(1)), share(value(2)), alpha])
 }
 
 /// `WP_Duotone::get_filter_svg()`, its white space collapsed.
@@ -321,9 +330,13 @@ fn take(features: &mut Value, path: &[&str]) -> Option<Value> {
 /// `get_page_template_slug()`, else the template a post of `post_type`
 /// falls back to in the bundled theme.
 fn template_slug(stored: &[u8], post_type: &str) -> String {
+    let fallback = if post_type == "page" {
+        "page"
+    } else {
+        "single"
+    };
     match stored {
-        b"" | b"default" if post_type == "page" => "page".into(),
-        b"" | b"default" => "single".into(),
+        b"" | b"default" => fallback.into(),
         slug => String::from_utf8_lossy(slug).into_owned(),
     }
 }
@@ -332,10 +345,20 @@ fn template_slug(stored: &[u8], post_type: &str) -> String {
 /// post content block of the template the post would show with.
 fn post_content_attributes(site: &dyn EditorSite, post: &Post) -> Option<Value> {
     let template = site.meta(post, "_wp_page_template").unwrap_or_default();
-    let slug = template_slug(&template, &post.post_type);
-    let blocks = parse_blocks(site.theme().template(&[slug])?.1);
-    let block = first_block(&blocks, "core/post-content")?;
-    block.attrs.clone().map(Value::Array)
+    content_attributes(site.theme(), &template_slug(&template, &post.post_type))
+}
+
+/// The attributes of the first post content block of the theme's template
+/// `slug`.
+fn content_attributes(theme: &Theme, slug: &str) -> Option<Value> {
+    let template = theme.template(&[slug.to_string()]);
+    let blocks = template
+        .map(|(_, content)| parse_blocks(content))
+        .unwrap_or_default();
+    let block = first_block(&blocks, "core/post-content");
+    block
+        .and_then(|block| block.attrs.clone())
+        .map(Value::Array)
 }
 
 /// `wp_get_first_block()`.
@@ -370,9 +393,9 @@ pub fn get_block_editor_settings(site: &dyn EditorSite, custom: Settings, post: 
         ("fontSizes", &["typography", "fontSizes"]),
     ];
     for (key, path) in presets {
-        if let Some(value) = by_origin(&features, path) {
-            settings.set(key, value);
-        }
+        by_origin(&features, path)
+            .into_iter()
+            .for_each(|value| settings.set(key, value));
     }
     let negated = |value: Value| Value::Bool(value.is_empty());
     let moved: [(&str, &[&str], bool); 7] = [
@@ -398,14 +421,15 @@ pub fn get_block_editor_settings(site: &dyn EditorSite, custom: Settings, post: 
     ];
     let found: Vec<(&str, Value, bool)> = moved
         .iter()
-        .filter_map(|(key, path, negate)| Some((*key, take(&mut features, path)?, *negate)))
+        .filter_map(|(key, path, negate)| take(&mut features, path).map(|v| (*key, v, *negate)))
         .collect();
     for (key, value, negate) in found {
         settings.set(key, if negate { negated(value) } else { value });
     }
-    if let Some(value) = by_origin(&features, &["spacing", "spacingSizes"]) {
-        settings.set("spacingSizes", value);
-    }
+    let spacing = by_origin(&features, &["spacing", "spacingSizes"]);
+    spacing
+        .into_iter()
+        .for_each(|value| settings.set("spacingSizes", value));
     settings.set("__experimentalFeatures", features);
     settings.set(
         "__unstableResolvedAssets",
@@ -427,9 +451,10 @@ pub fn get_block_editor_settings(site: &dyn EditorSite, custom: Settings, post: 
         ("avatarURL", Value::String(avatar)),
     ]);
     settings.set("__experimentalDiscussionSettings", discussion);
-    if let Some(attributes) = post_content_attributes(site, post) {
-        settings.set("postContentAttributes", attributes);
-    }
+    let attributes = post_content_attributes(site, post);
+    attributes
+        .into_iter()
+        .for_each(|value| settings.set("postContentAttributes", value));
     // The `edit_block_binding` capability maps to `edit_post` of the post.
     settings.set(
         "canUpdateBlockBindings",

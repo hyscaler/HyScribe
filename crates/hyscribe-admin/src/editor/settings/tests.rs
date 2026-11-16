@@ -79,6 +79,9 @@ fn features_missing_are_left() {
         take(&mut features, &["color", "custom"]),
         Some(Value::Bool(true))
     );
+    assert_eq!(take(&mut features, &["nope", "x"]), None);
+    assert_eq!(take(&mut features, &["color", "nope"]), None);
+    assert_eq!(by_origin(&Value::Null, &["p"]), None);
     let by = json_decode(br#"{"p":{"default":[1]}}"#).unwrap();
     assert_eq!(
         by_origin(&by, &["p"]),
@@ -95,4 +98,8 @@ fn templates_by_slug() {
     assert_eq!(template_slug(b"", "page"), "page");
     assert_eq!(template_slug(b"default", "post"), "single");
     assert_eq!(template_slug(b"page-no-title", "page"), "page-no-title");
+    let theme = hyscribe_render::theme::twentytwentyfive();
+    assert!(content_attributes(&theme, "single").is_some());
+    assert_eq!(content_attributes(&theme, "404"), None);
+    assert_eq!(content_attributes(&theme, "nope"), None);
 }

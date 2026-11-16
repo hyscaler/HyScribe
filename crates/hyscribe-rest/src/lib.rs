@@ -112,6 +112,11 @@ pub trait Site {
     /// Whether the public users endpoint answers visitors as WordPress
     /// does; off, a visitor sees no user as having published posts.
     fn public_users(&self) -> bool;
+    /// Whether `EMPTY_TRASH_DAYS` is not 0, WordPress's default of 30:
+    /// without the Trash, a delete must be forced.
+    fn uses_trash(&self) -> bool {
+        true
+    }
     /// The site's content as `hyscribe-render` reads it, for the post
     /// routes.
     fn reads(&self) -> &dyn Reads;

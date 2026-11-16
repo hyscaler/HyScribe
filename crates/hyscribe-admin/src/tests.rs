@@ -273,7 +273,7 @@ impl Role {
     /// A variant of `reference/posts-list/golden.sh`, over its content.
     fn listing(&self) -> bool {
         [
-            "posts", "hidden", "excerpt", "front", "h9locks", "h9home", "h9host",
+            "posts", "hidden", "excerpt", "front", "h9locks", "h9home", "h9host", "e0posts",
         ]
         .contains(&self.variant())
     }
@@ -513,6 +513,7 @@ impl Role {
             "g9cpages",
             "g9coldest",
             "g9attach",
+            "e0comments",
         ]
         .contains(&self.variant())
     }
@@ -1831,6 +1832,11 @@ impl crate::posts::PostsSite for Role {
             return Vec::new();
         }
         vec![("page-no-title".into(), "Page No Title".into())]
+    }
+    /// `EMPTY_TRASH_DAYS` is 0 in the `e0` variants, as the
+    /// `hyscribe_empty_trash` cookie asks PHP.
+    fn uses_trash(&self) -> bool {
+        !self.variant().starts_with("e0")
     }
     fn post_formats(&self) -> &'static [&'static str] {
         static THEME: OnceLock<hyscribe_render::theme::Theme> = OnceLock::new();

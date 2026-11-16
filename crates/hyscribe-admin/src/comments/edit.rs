@@ -211,8 +211,13 @@ pub fn comment_edit(site: &dyn CommentEditSite, id: u64, request: &Request) -> O
         String::new()
     };
     let referer = site.referer();
+    let (action, label) = if site.uses_trash() {
+        ("trashcomment", "Move to Trash")
+    } else {
+        ("deletecomment", "Delete Permanently")
+    };
     let delete_url = format!(
-        "comment.php?action=trashcomment&c={id}&_wp_original_http_referer={}",
+        "comment.php?action={action}&c={id}&_wp_original_http_referer={}",
         text(&urlencode(referer.as_deref().unwrap_or_default()))
     );
     let nonce = site.nonce(&format!("delete-comment_{id}"));
@@ -221,7 +226,7 @@ pub fn comment_edit(site: &dyn CommentEditSite, id: u64, request: &Request) -> O
         delete_url.as_bytes(),
     );
     let delete = format!(
-        "<a class='submitdelete deletion' href='{}'>Move to Trash</a>\n",
+        "<a class='submitdelete deletion' href='{}'>{label}</a>\n",
         link(&esc_html(&delete_url))
     );
     let referred = referer

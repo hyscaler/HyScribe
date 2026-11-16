@@ -625,6 +625,8 @@ dependencies = [
  "hyscribe-http",
  "hyscribe-service",
  "hyscribe-testkit",
+ "rustix",
+ "sqlx",
  "tempfile",
  "tokio",
 ]
@@ -665,6 +667,7 @@ name = "hyscribe-config"
 version = "0.1.0"
 dependencies = [
  "dotenvy",
+ "proptest",
  "tempfile",
 ]
 

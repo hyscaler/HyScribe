@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The posts and pages controller's writes (MVP 4.3): `create_item()`,
-//! `update_item()` and `delete_item()`. A request whose checks pass gives
-//! the [`Plan`] `hyscribe-http` writes in one action, then its answer is
-//! made from the site as the write left it, as PHP prepares the post it
-//! has just written. What is not ported answers 501 before anything is
-//! written: `format`, `meta`, a template other than none, a featured image
-//! that is an attachment, and content whose answer would be 501.
+//! The posts controller's writes (MVP 4.3) for posts, pages, navigation
+//! menus and synced patterns: `create_item()`, `update_item()` and
+//! `delete_item()`. A request whose checks pass gives the [`Plan`]
+//! `hyscribe-http` writes in one action, then its answer is made from the
+//! site as the write left it, as PHP prepares the post it has just written.
+//! What is not ported answers 501 before anything is written: `format`,
+//! `meta`, pattern categories, a template other than none, a featured
+//! image that is an attachment, and content whose answer would be 501.
 
 use hyscribe_model::Post;
 use hyscribe_phpser::{Value, is_empty_string, lookup};
@@ -111,6 +112,8 @@ pub struct Plan {
     pub write: Write,
     /// A deleted item's answer, prepared before it is deleted.
     pub(crate) previous: Value,
+    /// A deleted post, which the post type's hooks are given.
+    deleted: Option<Post>,
 }
 
 impl Plan {
@@ -122,6 +125,7 @@ impl Plan {
             unfiltered_html: context.can("unfiltered_html"),
             write,
             previous,
+            deleted: None,
         }
     }
 
@@ -185,19 +189,23 @@ impl Writing {
 
 /// The ported write of the route `regex`'s endpoint `index`, if any.
 pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
-    let posts = ["/wp/v2/posts", "/wp/v2/pages"];
-    let items = ["/wp/v2/posts/(?P<id>[\\d]+)", "/wp/v2/pages/(?P<id>[\\d]+)"];
+    let kind = Kind::of(regex);
+    let collection = format!("/wp/v2/{}", kind.base());
+    let item = format!("{collection}/(?P<id>[\\d]+)");
     let save = Writing {
         unported: |params| params.get("template").is_some_and(|t| *t != text("")),
         args: status_args,
         plan: plan_save,
         finish,
     };
-    match index {
-        1 if posts.contains(&regex) || items.contains(&regex) => Some(save),
-        2 if items.contains(&regex) => Some(Writing::plain(plan_delete, finish)),
-        _ => None,
+    if !kind.writes() || regex != collection && regex != item {
+        return None;
     }
+    // Only writes ask: the second endpoint saves, an item's third deletes.
+    Some(match index {
+        1 => save,
+        _ => Writing::plain(plan_delete, finish),
+    })
 }
 
 /// `check_status()`: the post's own status is valid whatever the schema
@@ -213,6 +221,22 @@ fn status_args(context: &Context, params: &Params, mut args: Vec<Arg>) -> Vec<Ar
             .for_each(|arg| arg.validate = false);
     }
     args
+}
+
+/// Whether the type's schema has the field `name`, without which
+/// `prepare_item_for_database()` and the callbacks leave it alone.
+fn field(kind: Kind, name: &str) -> bool {
+    super::args::save(kind).iter().any(|arg| arg.name == name)
+}
+
+/// The block `update_ignored_hooked_blocks_postmeta()` wraps the type's
+/// content in.
+fn wrapper(kind: Kind) -> &'static [u8] {
+    match kind {
+        Kind::Navigation => b"navigation",
+        Kind::Block => b"block",
+        _ => b"post-content",
+    }
 }
 
 /// `WP_Error( $code, $message, array( 'status' => 400 ) )`.
@@ -291,7 +315,10 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
         post_type: kind.name().into(),
         title: raw(params, "title")?,
         content: raw(params, "content")?,
-        excerpt: raw(params, "excerpt")?,
+        excerpt: match field(kind, "excerpt") {
+            true => raw(params, "excerpt")?,
+            false => None,
+        },
         ..Save::default()
     };
     let can_publish = if id == 0 {
@@ -308,7 +335,7 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
     }
     dates(context, params, existing.as_ref(), &mut save);
     save.slug = params.get("slug").map(Value::to_php_string);
-    if set(params, "author") {
+    if field(kind, "author") && set(params, "author") {
         let author = params.get("author").map_or(0, Value::to_int);
         let author = u64::try_from(author)
             .ok()
@@ -328,7 +355,9 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
         save.menu_order = params.get("menu_order").map(Value::to_int);
     }
     let status_of = |name| {
-        let given = params.get(name).filter(|status| !status.is_empty());
+        let given = params
+            .get(name)
+            .filter(|status| field(kind, name) && !status.is_empty());
         given.map(|status| String::from_utf8_lossy(&status.to_php_string()).into_owned())
     };
     save.comment_status = status_of("comment_status");
@@ -342,7 +371,7 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
         let theme = context.site.theme().slug().as_bytes();
         save.content = Some(crate::templates::content::in_parent(
             content,
-            b"post-content",
+            wrapper(kind),
             theme,
         ));
     }
@@ -357,6 +386,8 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
         save.unique_slug = Some(save.parent.unwrap_or_default());
     }
     after_save(context, params, kind, &mut save)?;
+    let hook = format!("rest_pre_insert_{}", kind.name());
+    let save = crate::hooks::apply_filters(&hook, save, &[params]);
     let unfiltered_html = context.can("unfiltered_html");
     answerable(context, &save, existing.as_ref(), unfiltered_html)?;
     Ok(Plan {
@@ -365,6 +396,7 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
         unfiltered_html,
         write: Write::Save(Box::new(save)),
         previous: Value::Null,
+        deleted: None,
     })
 }
 
@@ -448,7 +480,10 @@ fn after_save(
     }
     // `set_post_thumbnail()` of a post that is not an attachment deletes
     // the meta, as `delete_post_thumbnail()` does for none.
-    if let Some(media) = params.get("featured_media").map(Value::to_int) {
+    let media = params
+        .get("featured_media")
+        .filter(|_| field(kind, "featured_media"));
+    if let Some(media) = media.map(Value::to_int) {
         let post = context.site.post(media.unsigned_abs());
         if post
             .as_ref()
@@ -498,7 +533,7 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
         edit.set("context", text("edit"));
         (
             Write::Delete(post.id),
-            prepared(context, &edit, kind, &post)?.data,
+            Some((post.clone(), prepared(context, &edit, kind, &post)?.data)),
         )
     } else if post.status == "trash" {
         let message = "The post has already been deleted.";
@@ -506,14 +541,16 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
     } else if writes_or_unported(&post.content, true) {
         return Err(RestError::not_ported());
     } else {
-        (Write::Trash(post.id), Value::Null)
+        (Write::Trash(post.id), None)
     };
+    let (deleted, previous) = previous.unzip();
     Ok(Plan {
         user: context.user,
         can_publish: false,
         unfiltered_html: false,
         write,
-        previous,
+        previous: previous.unwrap_or_default(),
+        deleted,
     })
 }
 
@@ -531,7 +568,8 @@ fn prepared(
 
 /// The answer once written: the post as saved or trashed, in the `edit`
 /// context, a new one with `201` and its `Location`; a deleted post's
-/// answer as it was; or PHP's error where it refused.
+/// answer as it was; or PHP's error where it refused. The type's REST
+/// actions fire as the write leaves the post, before its answer.
 fn finish(
     context: &Context,
     params: &mut Params,
@@ -549,19 +587,31 @@ fn finish(
             return Err(RestError::status("rest_cannot_delete", message, 500));
         }
     };
-    if let Write::Delete(_) = plan.write {
-        return Ok(plan.deleted());
-    }
     let kind = Kind::of(params.route);
+    let action = |name: &str, args: &[&dyn std::any::Any]| {
+        crate::hooks::do_action(&format!("{name}_{}", kind.name()), args);
+    };
+    if let (Write::Delete(_), Some(post)) = (&plan.write, plan.deleted.clone()) {
+        let response = plan.deleted();
+        action("rest_delete", &[&post, &response, params]);
+        return Ok(response);
+    }
     params.set("context", text("edit"));
     let post = context.site.post(id).unwrap_or_default();
     let created = matches!(&plan.write, Write::Save(save) if save.id == 0);
+    if let Write::Save(_) = plan.write {
+        action("rest_insert", &[&post, params, &created]);
+        action("rest_after_insert", &[&post, params, &created]);
+    }
     let location = context.rest_url(&format!("/wp/v2/{}/{id}", kind.base()));
     // Its content was found ported before the write.
     prepared(context, params, kind, &post).map(|mut response| {
         if created {
             response.status = 201;
             response.header("Location", &location);
+        }
+        if let Write::Trash(_) = plan.write {
+            action("rest_delete", &[&post, &response, params]);
         }
         response
     })

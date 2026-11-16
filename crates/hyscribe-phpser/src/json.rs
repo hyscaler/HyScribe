@@ -23,12 +23,48 @@ pub const JSON_MAX_DEPTH: usize = 512;
 /// Decodes `json` as `json_decode($json, true)` does. `None` where PHP
 /// returns `null` because of an error; JSON `null` is `Some(Value::Null)`.
 pub fn json_decode(json: &[u8]) -> Option<Value> {
+    json_decode_checked(json).ok()
+}
+
+/// `json_last_error()` after a `json_decode()` that failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JsonError(pub u8);
+
+impl JsonError {
+    const DEPTH: JsonError = JsonError(1);
+    const STATE_MISMATCH: JsonError = JsonError(2);
+    const CTRL_CHAR: JsonError = JsonError(3);
+    const SYNTAX: JsonError = JsonError(4);
+    const UTF8: JsonError = JsonError(5);
+    const UTF16: JsonError = JsonError(10);
+
+    /// `json_last_error_msg()`.
+    pub fn message(self) -> &'static str {
+        match self.0 {
+            1 => "Maximum stack depth exceeded",
+            2 => "State mismatch (invalid or malformed JSON)",
+            3 => "Control character error, possibly incorrectly encoded",
+            5 => "Malformed UTF-8 characters, possibly incorrectly encoded",
+            10 => "Single unpaired UTF-16 surrogate in unicode escape",
+            _ => "Syntax error",
+        }
+    }
+}
+
+/// [`json_decode`], or the error PHP's scanner and parser stop at first.
+pub fn json_decode_checked(json: &[u8]) -> Result<Value, JsonError> {
     let mut parser = Parser { src: json, pos: 0 };
     parser.whitespace();
     let value = parser.value(0)?;
     parser.whitespace();
-    (parser.pos == json.len()).then_some(value)
+    match parser.pos == json.len() {
+        true => Ok(value),
+        false => Err(parser.unexpected()),
+    }
 }
+
+/// What a parse step gives.
+type Parsed<T> = Result<T, JsonError>;
 
 struct Parser<'a> {
     src: &'a [u8],
@@ -42,6 +78,17 @@ impl Parser<'_> {
 
     fn rest(&self) -> &[u8] {
         self.src.get(self.pos..).unwrap_or_default()
+    }
+
+    /// The error of a token the parser does not expect here, once PHP's
+    /// scanner has read it: its own error first, a NUL byte before the end
+    /// a control character, anything else bad syntax.
+    fn unexpected(&mut self) -> JsonError {
+        match self.peek() {
+            Some(0) => JsonError::CTRL_CHAR,
+            Some(b'"') => self.string().err().unwrap_or(JsonError::SYNTAX),
+            _ => JsonError::SYNTAX,
+        }
     }
 
     fn whitespace(&mut self) {
@@ -59,69 +106,85 @@ impl Parser<'_> {
         found
     }
 
-    fn literal(&mut self, word: &[u8], value: Value) -> Option<Value> {
-        self.rest().starts_with(word).then(|| {
-            self.pos += word.len();
-            value
-        })
+    fn literal(&mut self, word: &[u8], value: Value) -> Parsed<Value> {
+        if !self.rest().starts_with(word) {
+            return Err(JsonError::SYNTAX);
+        }
+        self.pos += word.len();
+        Ok(value)
     }
 
     /// One value; `depth` counts the arrays and objects around it.
-    fn value(&mut self, depth: usize) -> Option<Value> {
-        match self.peek()? {
-            b'{' | b'[' if depth + 1 >= JSON_MAX_DEPTH => None,
-            b'{' => self.object(depth + 1),
-            b'[' => self.array(depth + 1),
-            b'"' => self.string().map(Value::String),
-            b't' => self.literal(b"true", Value::Bool(true)),
-            b'f' => self.literal(b"false", Value::Bool(false)),
-            b'n' => self.literal(b"null", Value::Null),
-            _ => self.number(),
+    fn value(&mut self, depth: usize) -> Parsed<Value> {
+        match self.peek() {
+            Some(b'{' | b'[') if depth + 1 >= JSON_MAX_DEPTH => Err(JsonError::DEPTH),
+            Some(b'{') => self.object(depth + 1),
+            Some(b'[') => self.array(depth + 1),
+            Some(b'"') => self.string().map(Value::String),
+            Some(b't') => self.literal(b"true", Value::Bool(true)),
+            Some(b'f') => self.literal(b"false", Value::Bool(false)),
+            Some(b'n') => self.literal(b"null", Value::Null),
+            Some(b'-' | b'0'..=b'9') => self.number(),
+            _ => Err(self.unexpected()),
         }
     }
 
-    fn array(&mut self, depth: usize) -> Option<Value> {
+    /// Whether `close` ends the array or object next, else a `,` goes on;
+    /// the other kind's closing bracket is PHP's state mismatch.
+    fn closes(&mut self, close: u8, other: u8) -> Parsed<bool> {
+        self.whitespace();
+        match self.peek() {
+            Some(b',') => {
+                self.pos += 1;
+                Ok(false)
+            }
+            Some(found) if found == close => {
+                self.pos += 1;
+                Ok(true)
+            }
+            Some(found) if found == other => Err(JsonError::STATE_MISMATCH),
+            _ => Err(self.unexpected()),
+        }
+    }
+
+    fn array(&mut self, depth: usize) -> Parsed<Value> {
         self.pos += 1;
         self.whitespace();
         let mut items = Vec::new();
-        let mut closed = self.eat(b']');
+        if self.peek() == Some(b']') || self.peek() == Some(b'}') {
+            return self.closes(b']', b'}').map(|_| Value::Array(items));
+        }
         // Every item consumes input; the bound only rules out a hang.
         for _ in 0..self.src.len() {
-            if closed {
-                break;
-            }
             self.whitespace();
             let index = i64::try_from(items.len()).unwrap_or(i64::MAX);
             items.push((Key::Int(index), self.value(depth)?));
-            self.whitespace();
-            closed = self.eat(b']');
-            if !closed && !self.eat(b',') {
-                return None;
+            if self.closes(b']', b'}')? {
+                break;
             }
         }
-        closed.then_some(Value::Array(items))
+        Ok(Value::Array(items))
     }
 
-    fn object(&mut self, depth: usize) -> Option<Value> {
+    fn object(&mut self, depth: usize) -> Parsed<Value> {
         self.pos += 1;
         self.whitespace();
         let mut entries: Vec<(Key, Value)> = Vec::new();
         // Where each key sits, so repeated keys stay linear.
         let mut index: HashMap<Key, usize> = HashMap::new();
-        let mut closed = self.eat(b'}');
+        if self.peek() == Some(b'}') || self.peek() == Some(b']') {
+            return self.closes(b'}', b']').map(|_| Value::Array(entries));
+        }
         // Every entry consumes input; the bound only rules out a hang.
         for _ in 0..self.src.len() {
-            if closed {
-                break;
-            }
             self.whitespace();
             if self.peek() != Some(b'"') {
-                return None;
+                return Err(self.unexpected());
             }
             let key = Key::from_php_string(self.string()?);
             self.whitespace();
             if !self.eat(b':') {
-                return None;
+                return Err(self.unexpected());
             }
             self.whitespace();
             let value = self.value(depth)?;
@@ -132,30 +195,28 @@ impl Parser<'_> {
                     entries.push((key, value));
                 }
             }
-            self.whitespace();
-            closed = self.eat(b'}');
-            if !closed && !self.eat(b',') {
-                return None;
+            if self.closes(b'}', b']')? {
+                break;
             }
         }
-        closed.then_some(Value::Array(entries))
+        Ok(Value::Array(entries))
     }
 
     /// `-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`
-    fn number(&mut self) -> Option<Value> {
+    fn number(&mut self) -> Parsed<Value> {
         let start = self.pos;
         let digits = |p: &Parser<'_>| p.rest().iter().take_while(|b| b.is_ascii_digit()).count();
         self.eat(b'-');
         let int_len = digits(self);
         if int_len == 0 || (int_len > 1 && self.peek() == Some(b'0')) {
-            return None;
+            return Err(JsonError::SYNTAX);
         }
         self.pos += int_len;
         let mut float = false;
         if self.eat(b'.') {
             let frac = digits(self);
             if frac == 0 {
-                return None;
+                return Err(JsonError::SYNTAX);
             }
             self.pos += frac;
             float = true;
@@ -164,7 +225,7 @@ impl Parser<'_> {
             let _ = self.eat(b'+') || self.eat(b'-');
             let exp = digits(self);
             if exp == 0 {
-                return None;
+                return Err(JsonError::SYNTAX);
             }
             self.pos += exp;
             float = true;
@@ -180,18 +241,18 @@ impl Parser<'_> {
         if !float {
             // Integers that do not fit become floats, as in PHP.
             if let Ok(n) = text.parse::<i64>() {
-                return Some(Value::Int(n));
+                return Ok(Value::Int(n));
             }
         }
-        text.parse::<f64>()
-            .ok()
-            .map(|f| Value::Float(Float::from_f64(f)))
+        // JSON's numbers always parse as floats, if only to infinity.
+        let f = text.parse::<f64>().unwrap_or_default();
+        Ok(Value::Float(Float::from_f64(f)))
     }
 
     /// A string after its opening quote is next, with escapes decoded and
     /// UTF-8 checked. The scan is driven by an iterator over the input, so
-    /// it always ends.
-    fn string(&mut self) -> Option<Vec<u8>> {
+    /// it always ends; an unclosed one meets PHP's NUL terminator.
+    fn string(&mut self) -> Parsed<Vec<u8>> {
         let rest = self.src.get(self.pos + 1..).unwrap_or_default();
         let mut out = Vec::new();
         let mut bytes = rest.iter().enumerate();
@@ -200,16 +261,17 @@ impl Parser<'_> {
             let skip = match b {
                 b'"' => {
                     self.pos += i + 2;
-                    return Some(out);
+                    return Ok(out);
                 }
                 b'\\' => escape(after, &mut out)?,
                 0x20..=0x7f => {
                     out.push(b);
                     0
                 }
-                // Control characters and invalid UTF-8 fail here too.
+                ..0x20 => return Err(JsonError::CTRL_CHAR),
                 _ => {
-                    let sequence = utf8_sequence(rest.get(i..).unwrap_or_default())?;
+                    let sequence = utf8_sequence(rest.get(i..).unwrap_or_default());
+                    let sequence = sequence.ok_or(JsonError::UTF8)?;
                     out.extend_from_slice(sequence);
                     sequence.len() - 1
                 }
@@ -218,49 +280,48 @@ impl Parser<'_> {
                 bytes.next();
             }
         }
-        None
+        Err(JsonError::CTRL_CHAR)
     }
 }
 
 /// Decodes the escape after a backslash (`after` starts right after it)
 /// into `out`, and returns how many bytes of `after` it used.
-fn escape(after: &[u8], out: &mut Vec<u8>) -> Option<usize> {
-    let simple = match after.first()? {
-        b'"' => b'"',
-        b'\\' => b'\\',
-        b'/' => b'/',
-        b'b' => 0x08,
-        b'f' => 0x0c,
-        b'n' => b'\n',
-        b'r' => b'\r',
-        b't' => b'\t',
-        b'u' => {
-            let unit = hex4(after.get(1..).unwrap_or_default())?;
+fn escape(after: &[u8], out: &mut Vec<u8>) -> Parsed<usize> {
+    let simple = match after.first() {
+        Some(b'"') => b'"',
+        Some(b'\\') => b'\\',
+        Some(b'/') => b'/',
+        Some(b'b') => 0x08,
+        Some(b'f') => 0x0c,
+        Some(b'n') => b'\n',
+        Some(b'r') => b'\r',
+        Some(b't') => b'\t',
+        Some(b'u') => {
+            let unit = hex4(after.get(1..).unwrap_or_default()).ok_or(JsonError::SYNTAX)?;
             let (code, used) = match unit {
                 0xd800..=0xdbff => {
                     // A high surrogate needs a low one right after.
                     let low = after
                         .get(5..)
                         .and_then(|next| next.strip_prefix(b"\\u"))
-                        .and_then(hex4)?;
-                    if !(0xdc00..=0xdfff).contains(&low) {
-                        return None;
-                    }
+                        .and_then(hex4)
+                        .filter(|low| (0xdc00..=0xdfff).contains(low))
+                        .ok_or(JsonError::UTF16)?;
                     (0x10000 + ((unit - 0xd800) << 10) + (low - 0xdc00), 11)
                 }
-                0xdc00..=0xdfff => return None,
+                0xdc00..=0xdfff => return Err(JsonError::UTF16),
                 unit => (unit, 5),
             };
             // Surrogates were combined above, so every code is a char.
             let c = char::from_u32(code).unwrap_or(char::REPLACEMENT_CHARACTER);
             let mut buf = [0; 4];
             out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
-            return Some(used);
+            return Ok(used);
         }
-        _ => return None,
+        _ => return Err(JsonError::SYNTAX),
     };
     out.push(simple);
-    Some(1)
+    Ok(1)
 }
 
 /// Four hex digits at the start of `text`.

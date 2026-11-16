@@ -21,6 +21,7 @@ fn context() -> Context<'static> {
     Context {
         now: i64::try_from(now.unwrap().as_secs()).unwrap(),
         home: HOME,
+        empty_trash_days: 30,
     }
 }
 
@@ -544,35 +545,43 @@ async fn trash_and_delete() {
         },
     )
     .await;
-    check(
-        "delete-comment",
-        async |write| {
-            let reply = insert(
-                write,
-                NewComment {
-                    parent: 1,
-                    ..reader("1")
-                },
-            )
-            .await;
-            insert(
-                write,
-                NewComment {
-                    parent: reply,
-                    ..reader("0")
-                },
-            )
-            .await;
-            for value in [b"a", b"b"] {
-                let meta = write
-                    .add_meta(Meta::Comment, reply, "oracle", Some(value))
-                    .await;
-                meta.unwrap();
-            }
-            reply
-        },
-        async |write, reply| assert!(delete_comment(write, context(), reply, true).await.unwrap()),
-    )
+    let replied = async |write: &mut Write<'_>| {
+        let reply = insert(
+            write,
+            NewComment {
+                parent: 1,
+                ..reader("1")
+            },
+        )
+        .await;
+        insert(
+            write,
+            NewComment {
+                parent: reply,
+                ..reader("0")
+            },
+        )
+        .await;
+        for value in [b"a", b"b"] {
+            let meta = write
+                .add_meta(Meta::Comment, reply, "oracle", Some(value))
+                .await;
+            meta.unwrap();
+        }
+        reply
+    };
+    check("delete-comment", replied, async |write, reply| {
+        assert!(delete_comment(write, context(), reply, true).await.unwrap());
+    })
+    .await;
+    // `EMPTY_TRASH_DAYS` 0 deletes unforced as `wp_delete_comment()` forced.
+    check("delete-comment", replied, async |write, reply| {
+        let no_trash = Context {
+            empty_trash_days: 0,
+            ..context()
+        };
+        assert!(delete_comment(write, no_trash, reply, false).await.unwrap());
+    })
     .await;
     check("delete-comment-to-trash", nothing, async |write, ()| {
         assert!(delete_comment(write, context(), 1, false).await.unwrap());

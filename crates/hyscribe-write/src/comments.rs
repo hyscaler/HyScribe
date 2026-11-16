@@ -6,7 +6,7 @@
 //! trash, spam and their undoing), `wp_delete_comment()` and comment counts.
 //! Each writes through the action's [`Write`]; what PHP reads from the
 //! request or the clock is an argument. Comments go to the trash before
-//! they are deleted while [`crate::EMPTY_TRASH_DAYS`] is not 0.
+//! they are deleted while `EMPTY_TRASH_DAYS` is not 0.
 
 mod allow;
 mod filter;
@@ -28,6 +28,8 @@ pub struct Context<'a> {
     pub now: i64,
     /// `home_url()`, whose host makes a link internal.
     pub home: &'a [u8],
+    /// `EMPTY_TRASH_DAYS`: comments are deleted without the trash at 0.
+    pub empty_trash_days: u32,
 }
 
 /// The capabilities of the user who writes a comment, who is also its
@@ -471,7 +473,7 @@ async fn delete(
     let Some(comment) = step!(steps, comment(id)) else {
         return false;
     };
-    let to_trash = !force && crate::EMPTY_TRASH_DAYS != 0;
+    let to_trash = !force && context.empty_trash_days != 0;
     if to_trash && !matches!(comment.approved.as_str(), "trash" | "spam") {
         return trash(steps, context, id).await;
     }

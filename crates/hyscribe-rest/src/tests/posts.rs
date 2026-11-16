@@ -270,7 +270,7 @@ fn writes_and_unported_content_answer_501() {
             false,
             "visitor",
             "DELETE",
-            "/?rest_route=/wp/v2/blocks/1&force=1",
+            "/?rest_route=/wp/v2/menu-items/1&force=1",
         ),
         (
             false,
@@ -363,6 +363,8 @@ fn revisions_are_linked() {
         method_override: None,
         content_type: None,
         body: b"",
+        host: None,
+        now: 0,
     };
     let body = String::from_utf8(serve(&oracle, &request).body).unwrap();
     let base =
@@ -416,6 +418,8 @@ fn served(who: &'static str, target: &str, ttd: bool, deny: &'static [&'static s
         method_override: None,
         content_type: None,
         body: b"",
+        host: None,
+        now: 0,
     };
     serve(&oracle, &request)
 }

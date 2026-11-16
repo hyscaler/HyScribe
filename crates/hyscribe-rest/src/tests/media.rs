@@ -33,6 +33,8 @@ fn context(oracle: &Oracle) -> Context<'_> {
         parameters: false,
         remote_addr: b"",
         user_agent: None,
+        host: b"",
+        now: 0,
     }
 }
 
@@ -123,6 +125,8 @@ fn embedding_what_is_not_ported() {
             method_override: None,
             content_type: None,
             body: b"",
+            host: None,
+            now: 0,
         };
         crate::serve(&oracle, &request).status
     };

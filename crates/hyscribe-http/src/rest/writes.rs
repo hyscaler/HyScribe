@@ -209,6 +209,7 @@ fn comments_context(ctx: &Context) -> hyscribe_write::comments::Context<'_> {
     hyscribe_write::comments::Context {
         now: ctx.now,
         home: &ctx.home,
+        empty_trash_days: ctx.constants.empty_trash_days,
     }
 }
 

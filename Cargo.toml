@@ -19,6 +19,7 @@ hyscribe-config = { path = "crates/hyscribe-config" }
 hyscribe-db = { path = "crates/hyscribe-db" }
 hyscribe-html = { path = "crates/hyscribe-html" }
 hyscribe-http = { path = "crates/hyscribe-http" }
+hyscribe-image = { path = "crates/hyscribe-image" }
 hyscribe-kses = { path = "crates/hyscribe-kses" }
 hyscribe-model = { path = "crates/hyscribe-model" }
 hyscribe-service = { path = "crates/hyscribe-service" }
@@ -62,3 +63,30 @@ strip = true
 # bcrypt at cost 12 takes seconds unoptimized.
 [profile.dev.package.blowfish]
 opt-level = 3
+
+# The codecs decode and quantise the image goldens' corpus (hyscribe-image).
+[profile.dev.package.color_quant]
+opt-level = 3
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+
+[profile.dev.package.jpeg-encoder]
+opt-level = 3
+
+[profile.dev.package.png]
+opt-level = 3
+
+[profile.dev.package.image-webp]
+opt-level = 3
+
+[profile.dev.package.gif]
+opt-level = 3
+
+# Mutation runs of the image crate replay its corpus: optimised, its
+# overflow checks kept (cargo-mutants --profile mutants).
+[profile.mutants]
+inherits = "dev"
+
+[profile.mutants.package.hyscribe-image]
+opt-level = 2

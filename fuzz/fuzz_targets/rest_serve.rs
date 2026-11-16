@@ -220,6 +220,8 @@ fuzz_target!(|data: &[u8]| {
         method_override: None,
         content_type,
         body,
+        host: header.get(1..),
+        now: i64::from(header.first().copied().unwrap_or(0)) << 24,
     };
     let site = Fuzzed { content };
     let served = match answer(&site, &request) {

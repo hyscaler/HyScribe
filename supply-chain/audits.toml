@@ -1,17 +1,41 @@
 
 # cargo-vet audits file
 
+[[audits.blake2]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.10.6"
+notes = "Reviewed every source file of the crate. no_std; std only forwards to digest/std. No build script, proc macros, or filesystem, network, process or environment access; the tests, benches and .blb test vectors are dev only. The only unsafe code outside feature gated SIMD is as_bytes.rs, which views [T] as bytes for an unsafe marker trait implemented only on primitive integers and repr(C) tuples of one integer type, so no padding or invalid values; finalize copies two u64x4 (64 bytes) into a 64 byte output. The simd, simd_opt and simd_asm features (platform intrinsics, transmuted shuffles and an inline asm path for 32 bit ARM NEON) need a nightly compiler and stay off with default features off. The portable path matches RFC 7693: IV, sigma, rotations 32, 24, 16 and 63, twelve rounds for BLAKE2b, the parameter block with key and output lengths, and the MAC's zero padded key block hashed as the first block. Its panics are asserts on key, output, salt and persona sizes, which Blake2bMac checks first and answers with InvalidLength, an unreachable! for block sizes other than BLAKE2b's and BLAKE2s's, and copy_from_slice between equal lengths. Dependency: digest 0.10 with its mac feature, which pulls in subtle (covered by imported audits)."
+
 [[audits.blowfish]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
 version = "0.10.0"
 notes = "Pure Rust Blowfish with #![deny(unsafe_code)] and no unsafe blocks. No build script, proc macros, or filesystem, network, process or environment access. The P and S tables are the standard Blowfish constants, and the bcrypt key schedule helpers use bounds checked indexing only."
 
+[[audits.byteorder-lite]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.1.0"
+notes = "Fork of byteorder keeping the ReadBytesExt and WriteBytesExt traits and the endian conversions, without the methods that needed unsafe. #![forbid(unsafe_code)] and no unsafe. No build script, dependencies or I/O beyond the std::io Read and Write values the caller passes in."
+
 [[audits.cipher]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
 delta = "0.4.4 -> 0.5.2"
 notes = "Trait restructuring for 0.5 (block and mode backends, tweakable ciphers, stream wrapper behind a feature). The crate now declares #![forbid(unsafe_code)], removing the two unsafe blocks 0.4.4 had. No build script, proc macros, or I/O; include_bytes appears only in feature gated test macros."
+
+[[audits.gif]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.14.2"
+notes = "Pure Rust GIF decoder and encoder with #![forbid(unsafe_code)]. No build script or proc macros; the only extern block is an empty documentation include under the optional color_quant feature. No filesystem, network, process or environment access: it reads and writes only the Read, BufRead and Write values passed in. The decoder caps buffer growth with a MemoryLimit (50 MB by default) and fallible try_reserve. Depends on weezl, and on color_quant only with that feature."
+
+[[audits.image-webp]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.2.4"
+notes = "Pure Rust WebP decoder and lossless encoder with #![forbid(unsafe_code)] and no unsafe anywhere. No build script, proc macros, or file, network, process or environment access: it reads and writes through the caller's Read, Seek and Write. Depends on byteorder-lite and quick-error. Simple VP8 and VP8L frames are limited to 16384 a side and the extended canvas to a u32 area; the memory limit defaults to unbounded, so callers must check the dimensions before decoding, as hyscribe-image does."
 
 [[audits.inout]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
@@ -24,3 +48,51 @@ who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
 version = "0.1.9"
 notes = "A no_std lookup over the IANA Time Zone Database 2026e: a sorted table of zone names and byte ranges into concatenated TZif data embedded with include_bytes, found by an ASCII case insensitive binary search. No unsafe code, build script, proc macros, dependencies, or filesystem, network, process or environment access."
+
+[[audits.jpeg-encoder]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.7.1"
+notes = "Pure Rust JPEG encoder. Without the simd feature lib.rs applies forbid(unsafe_code), so the crate has no unsafe code; the only unsafe is the AVX2 module compiled with simd on x86, entered after runtime feature detection with loads and stores on slices of known length. No build script, proc macros or dependencies. Its only filesystem access is Encoder::new_file at a path the caller gives; otherwise output goes to the Write passed in. It encodes pixels and parses no untrusted input. Licensed (MIT OR Apache-2.0) AND IJG."
+
+[[audits.kamadak-exif]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.6.2"
+notes = "Exif parser for TIFF, JPEG, HEIF, PNG and WebP over a caller supplied BufRead. One unsafe block in value.rs casts &Value to &UIntValue, a repr(transparent) wrapper, after checking the variant is Byte, Short or Long: sound. Entry counts use checked_mul and are checked against the remaining data before value buffers are allocated, lengths are read through take(len), IFD chains are capped at 8. Depends on mutate_once. No build script, filesystem, network, process or environment access outside tests and docs."
+
+[[audits.mutate_once]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.1.2"
+notes = "A write once, read many interior mutability cell. Three unsafe blocks turn its UnsafeCell into a reference; a Cell state machine panics on a second mutable borrow, refuses mutation once a shared reference is out and resets in the guard's Drop, so they are sound, and the type is not Sync. No dependencies, build script or I/O."
+
+[[audits.png]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.18.0-rc -> 0.18.1"
+notes = "Still #![forbid(unsafe_code)], no unsafe added, no build script and no I/O beyond caller supplied readers and writers. Runtime dependencies unchanged; only dev dependencies changed. New target_arch code is safe scalar Paeth unfiltering, and core::simd only behind the opt in unstable feature. Chunk buffers now grow by doubling, capped by and charged to Limits::bytes (64 MiB by default), and more output size calculations fail on overflow: the limits tighten."
+
+[[audits.quick-error]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "2.0.1"
+notes = "A single macro_rules! macro generating error enums with Display, Error and From implementations. No unsafe code, build script, proc macros, dependencies or I/O; std::fs and std::env appear only in doc comments and examples."
+
+[[audits.weezl]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.1.12"
+notes = "Pure Rust LZW encoder and decoder with #![forbid(unsafe_code)] in the library and its lzw binary. No build script or proc macros. No I/O except through the Read, Write or futures streams passed in; file access only in the binary and benches, include_bytes only in test modules. The code table is bounded at 4096 entries, so memory stays fixed whatever the input."
+
+[[audits.zune-core]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.5.3"
+notes = "Shared types for the zune decoders: decoder options, colour spaces, bit depths and the byte reader and writer traits. No unsafe code (use_unsafe is only a flag decoders read), no build script, no I/O beyond the Read and Write abstractions it defines. Its log and serde dependencies are optional."
+
+[[audits.zune-jpeg]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.5.15"
+notes = "Pure Rust baseline and progressive JPEG decoder over a caller supplied byte source. All unsafe code is SIMD intrinsics compiled only with the x86 or neon feature; with default features off lib.rs applies forbid(unsafe_code), so the crate builds with no unsafe at all. Certified for use without x86 and neon. Width and height are checked against the options' limits before buffers are allocated. No build script, filesystem, network, process or environment access. Depends only on zune-core."

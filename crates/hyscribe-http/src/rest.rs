@@ -239,6 +239,8 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
         method_override: header("x-http-method-override"),
         content_type: header("content-type"),
         body: &asked.body,
+        host: header("host"),
+        now,
     };
     let answered = hyscribe_rest::answer(&rest, &request);
     let Rest { reads, .. } = rest;

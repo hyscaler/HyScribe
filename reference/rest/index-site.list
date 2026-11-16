@@ -1,0 +1,9 @@
+# The REST index for reference/rest/golden.sh over index-site.sql: a site
+# icon, a theme's logo and a named time zone.
+GET	/?rest_route=/&_fields=description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front
+GET	/?rest_route=/&_fields=description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front	localhost
+GET	/?rest_route=/&_fields=_links
+GET	/?rest_route=/&_fields=site_logo,site_icon,_links	pretty
+GET	/?rest_route=/&_fields=site_logo,_embedded&_embed
+GET	/?rest_route=/&_fields=site_icon_url,_embedded&_embed=wp:featuredmedia
+GET	/?rest_route=/&_fields=gmt_offset,timezone_string

@@ -17,6 +17,8 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    # For jpeg-encoder only (ADR 0015); the FSF lists it as GPL compatible.
+    "IJG",
     "ISC",
     "MIT",
     "MPL-2.0",

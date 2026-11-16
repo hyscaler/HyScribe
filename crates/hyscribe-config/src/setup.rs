@@ -54,7 +54,8 @@ pub struct Import {
 }
 
 /// The `.env` keys `config` gives: the database details, the table prefix,
-/// the keys and salts, `WP_HOME`, `WP_SITEURL` and the capability constants.
+/// the keys and salts, `WP_HOME`, `WP_SITEURL`, the capability constants and
+/// `EMPTY_TRASH_DAYS` when it is a whole number of days.
 pub fn import(config: &WpConfig) -> Import {
     let mut import = Import::default();
     let string = |name: &str| match setting(config, name) {
@@ -126,6 +127,17 @@ pub fn import(config: &WpConfig) -> Import {
             Setting::Unset => {}
             _ => import.unread.push(key),
         }
+    }
+    let days = match setting(config, "EMPTY_TRASH_DAYS") {
+        Setting::Literal(Value::Int(days)) => Some(days.to_string()),
+        Setting::Literal(Value::String(days)) => Some(days.clone()),
+        Setting::Unset => None,
+        _ => Some(String::new()),
+    };
+    match days {
+        Some(days) if days.parse::<u32>().is_ok() => import.values.push(("EMPTY_TRASH_DAYS", days)),
+        Some(_) => import.unread.push("EMPTY_TRASH_DAYS"),
+        None => {}
     }
     import
 }

@@ -7,7 +7,7 @@ use hyscribe_auth::caps::post_type_exists;
 
 use crate::admin_bar::BarSite;
 use crate::menu::{Look, Screen, admin_menu};
-use crate::page::{THEME, query_strings};
+use crate::page::query_strings;
 use crate::posts::{Answer, PostsSite};
 
 /// `post-new.php` with the query `query`: the redirect of attachments to Add
@@ -34,11 +34,8 @@ pub fn post_new(site: &dyn PostsSite, query: &str) -> Option<Answer> {
         parent_file: None,
         submenu_file: None,
     };
-    let look = match site.stylesheet() == THEME {
-        true => Look::Block,
-        false => Look::Classic("", site.template() == THEME),
-    };
-    if admin_menu(site, &screen, look).is_none() {
+    // The theme changes the Appearance menu only, not this screen's access.
+    if admin_menu(site, &screen, Look::Block).is_none() {
         return Some(Answer::from_page(None));
     }
     let cap = match post_type.as_str() {

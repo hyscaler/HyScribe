@@ -9,7 +9,9 @@ use hyscribe_testkit::writes::check_writes;
 use hyscribe_write::posts::{PostArgs, wp_insert_post};
 use hyscribe_write::users::{UserData, wp_insert_user};
 
-use super::super::tests::{Request, answered, new_user, php_answer, redirected, turn, writer};
+use super::super::tests::{
+    Request, SITE, answered, new_user, php_answer, redirected, turn, writer,
+};
 use super::*;
 
 fn dodelete(post: &str) -> Request<'_> {
@@ -34,12 +36,9 @@ async fn deletions_are_php_s() {
         let deleted = new_user(&writer, conn, "oracle-deleted", "author").await;
         let heir = new_user(&writer, conn, "oracle-heir", "author").await;
         let mut write = writer.begin_on(conn).await.unwrap();
-        let ctx = Context {
-            user: 1,
+        let ctx = hyscribe_write::posts::Context {
             can_publish: true,
-            home: b"http://127.0.0.1:8081".to_vec(),
-            upload_host: b"127.0.0.1:8081".to_vec(),
-            now: crate::now(),
+            ..context(1, SITE, SITE)
         };
         for (title, author) in [("Deleted post", deleted), ("Passed post", heir)] {
             let post = PostArgs {

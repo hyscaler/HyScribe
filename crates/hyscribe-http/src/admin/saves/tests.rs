@@ -47,7 +47,7 @@ pub(in crate::admin) fn fields(query: &str) -> Vec<(Key, Value)> {
 }
 
 /// The write oracle's site address, which `reference/admin-saves/` keeps.
-pub(super) const SITE: &str = "http://127.0.0.1:8081";
+pub(in crate::admin) const SITE: &str = "http://127.0.0.1:8081";
 
 /// A request to `uri` past its checks, by user 1 at time 0, with `get`
 /// and `post` as `$_GET` and `$_POST`.

@@ -11,9 +11,9 @@ use hyscribe_phpser::{
 };
 use hyscribe_render::formatting::sanitize_user;
 use hyscribe_write::Error;
-use hyscribe_write::posts::Context;
 use hyscribe_write::users::{get_password_reset_key, set_role, wp_delete_user};
 
+use super::dashboard::context;
 use super::{Acting, Saving, Stop, text};
 
 /// `$redirect`: the list's own `wp_http_referer` field, else the list.
@@ -79,7 +79,7 @@ pub(super) fn promote<'a>(
 pub(super) fn dodelete<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
-    _: &'a dyn Acting,
+    site: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
         let redirect = redirect(asked)?;
@@ -93,15 +93,7 @@ pub(super) fn dodelete<'a>(
             return Err(Error::Unported("a deletion with no option chosen").into());
         };
         let heirs = asked.request("reassign_user");
-        // The uploads are under the home URL, whose host has its port.
-        let host = asked.home.split_once("://").map_or("", |(_, rest)| rest);
-        let request = Context {
-            user: asked.user,
-            can_publish: false,
-            home: asked.home.as_bytes().to_vec(),
-            upload_host: host.split('/').next().unwrap_or_default().into(),
-            now: crate::now(),
-        };
+        let request = context(asked.user, asked.home, &site.admin_url(""));
         let me = i64::try_from(asked.user).unwrap_or_default();
         let (mut update, mut count): (&[u8], u64) = (b"del", 0);
         for id in user_ids(asked) {

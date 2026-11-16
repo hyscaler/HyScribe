@@ -55,11 +55,8 @@ async fn answered(
 /// User 1's context, as the setups write.
 fn admin() -> Context {
     Context {
-        user: 1,
         can_publish: true,
-        home: SITE.as_bytes().to_vec(),
-        upload_host: b"127.0.0.1:8081".to_vec(),
-        now: crate::now(),
+        ..crate::admin::saves::dashboard::context(1, SITE, SITE)
     }
 }
 

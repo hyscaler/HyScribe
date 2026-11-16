@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use super::*;
-use crate::admin::saves::tests::{settled, writer};
+use crate::admin::saves::tests::{SITE, settled, writer};
 
 /// A Settings screen's view fails at the statement that fails while it
 /// deletes the notices it showed, and so writes nothing.
@@ -14,7 +14,7 @@ async fn a_shown_notice_fails_with_its_statement() {
         draft: false,
         settings: true,
     };
-    let ctx = context(1, "http://127.0.0.1:8081");
+    let ctx = context(1, SITE, SITE);
     let saved = settled(async |budget| {
         let mut write = writer.begin().await;
         if let Ok(write) = &mut write {

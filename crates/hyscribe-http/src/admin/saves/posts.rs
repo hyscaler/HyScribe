@@ -19,7 +19,7 @@ use hyscribe_write::posts::{
 };
 use hyscribe_write::terms::{Taxonomy, TermList, TermRef, wp_set_post_terms};
 
-use super::{Acting, Ajax, Saving, Stop, referer};
+use super::{Acting, Ajax, Saving, Stop, referer, text};
 
 /// What the lists' forms never send and `edit_post()` or `wp_insert_post()`
 /// act on: custom fields, post format fields, the edit screen's buttons.
@@ -110,10 +110,6 @@ const FORMATS: [&str; 9] = [
 
 /// `add_query_arg()`'s arguments.
 type QueryArgs<'a> = [(&'a [u8], Option<&'a [u8]>)];
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
 
 /// What `current_user_can()` reads, as it is now in the action: the
 /// options `map_meta_cap()` reads, the user's capabilities, one post and
@@ -266,11 +262,8 @@ async fn locked(write: &mut Write<'_>, id: u64, user: u64, now: i64) -> Result<b
 /// The action's context for posts of `post_type`.
 fn context(asked: &Asked, site: &dyn Acting, (caps, post_type): (&Caps, &str)) -> Context {
     Context {
-        user: asked.user,
         can_publish: caps.can_type("publish_posts", post_type),
-        home: asked.home.as_bytes().to_vec(),
-        upload_host: hyscribe_render::link::host(site.admin_url("").as_bytes()),
-        now: crate::now(),
+        ..super::dashboard::context(asked.user, asked.home, &site.admin_url(""))
     }
 }
 

@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# A draft's unset GMT dates for reference/rest/golden.sh over zone.sql: a
+# named time zone, which `wp_timezone_override_offset()` puts in place of
+# the stored `gmt_offset`.
+GET	/?rest_route=/wp/v2/posts/961&context=edit&_fields=id,date,date_gmt,modified,modified_gmt

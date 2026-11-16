@@ -86,12 +86,19 @@ async fn heartbeats_answer_as_php() {
     let _saves = SAVES.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let mut compared = 0;
-    for role in ["-", "administrator", "author", "contributor"] {
-        let caps = format!(
-            "UPDATE wp_usermeta SET meta_value = 'a:1:{{s:{}:\"{role}\";b:1;}}' WHERE user_id = 1 AND meta_key = 'wp_capabilities'",
-            role.len()
-        );
-        let db = loaded(if role == "-" { "" } else { &caps }).await;
+    // `noavatars`: the administrator, with avatars turned off.
+    for role in ["-", "administrator", "author", "contributor", "noavatars"] {
+        let sql = match role {
+            "-" | "administrator" => String::new(),
+            "noavatars" => {
+                "UPDATE wp_options SET option_value = '' WHERE option_name = 'show_avatars'".into()
+            }
+            role => format!(
+                "UPDATE wp_usermeta SET meta_value = 'a:1:{{s:{}:\"{role}\";b:1;}}' WHERE user_id = 1 AND meta_key = 'wp_capabilities'",
+                role.len()
+            ),
+        };
+        let db = loaded(&sql).await;
         let (site, cookies) = writing(&db, dir.path()).await;
         let now = crate::now();
         let (fresh, old) = (
@@ -119,7 +126,7 @@ async fn heartbeats_answer_as_php() {
             compared += 1;
         }
     }
-    assert_eq!(compared, 23);
+    assert_eq!(compared, 26);
 }
 
 /// A logged in user whose auth cookie expired within its grace is told

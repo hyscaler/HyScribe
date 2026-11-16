@@ -3,7 +3,8 @@
 #
 # Records the PHP oracle's admin-ajax.php heartbeat answers over
 # reference/revisions/content.sql (which it adds and deletes after), each
-# screen's heartbeat data sent by user 1 in a role, and two by a visitor,
+# screen's heartbeat data sent by user 1 in a role (noavatars: the
+# administrator without avatars), and two by a visitor,
 # as crates/hyscribe-http/tests/golden/heartbeat.tsv, one row each:
 #   role (- for a visitor)<TAB>body<TAB>status<TAB>answer
 # The body's nonces are named %nonce% (this tick's heartbeat nonce),
@@ -41,7 +42,9 @@ old=$("$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; echo s
 record() {
   body=${2//%nonce%/$nonce}
   body=${body//%old_nonce%/$old}
-  status=$(curl -s -o "$TMP" -w '%{http_code}' -b "hyscribe_role=$1" --data "$body" "$BASE/wp-admin/admin-ajax.php")
+  role=$1
+  [ "$role" = noavatars ] && role=administrator
+  status=$(curl -s -o "$TMP" -w '%{http_code}' -b "hyscribe_role=$role" --data "$body" "$BASE/wp-admin/admin-ajax.php")
   sed -i -E 's/"server_time":[0-9]+/"server_time":%time%/; s/"new_lock":"[0-9]+:/"new_lock":"%time%:/' "$TMP"
   printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$status" "$(php -r '$page = file_get_contents( $argv[1] ); foreach ( file( $argv[2], FILE_IGNORE_NEW_LINES ) as $line ) { list( $n, $a ) = explode( "\t", $line ); $page = str_replace( $n, "%nonce:$a%", $page ); } echo $page;' "$TMP" "$NONCES")" >> "$OUT"
 }
@@ -63,10 +66,16 @@ for body in 'action=heartbeat' 'action=heartbeat&_nonce=' 'action=heartbeat&_non
   "action=heartbeat&_nonce=%nonce%&screen_id=post&$lock=1319" "action=heartbeat&_nonce=%nonce%&screen_id=post&$lock=1309" \
   "action=heartbeat&_nonce=%nonce%&$lock=0" "action=heartbeat&_nonce=%nonce%&$lock=9999" \
   "action=heartbeat&_nonce=%nonce%&data[wp-refresh-post-lock][other]=1" "action=heartbeat&_nonce=%nonce%&data[wp-check-locked-posts]=post-1319" \
-  'action=heartbeat&_nonce=%nonce%&data=x' 'action=heartbeat&_nonce=%nonce%&data=' 'action=heartbeat&_nonce=%nonce%&screen_id=dashboard'; do
+  'action=heartbeat&_nonce=%nonce%&data=x' 'action=heartbeat&_nonce=%nonce%&data=' 'action=heartbeat&_nonce=%nonce%&screen_id=dashboard' \
+  "action=heartbeat&_nonce=%nonce%&data[wp-check-locked-posts][0][]=post-1319" \
+  "action=heartbeat&_nonce=%nonce%&data[wp-refresh-post-lock]=1319"; do
   record administrator "$body"
 done
 for role in author contributor; do
   record "$role" "action=heartbeat&_nonce=%nonce%&screen_id=edit-post&$locked=post-1319&$lock=1301&$nonces=1301"
 done
+# Without avatars (the noavatars rows), as the Discussion settings turn them off.
+echo "UPDATE wp_options SET option_value = '' WHERE option_name = 'show_avatars';" | sql
+record noavatars "action=heartbeat&_nonce=%nonce%&screen_id=edit-post&$locked=post-1319&$lock=1319"
+echo "UPDATE wp_options SET option_value = '1' WHERE option_name = 'show_avatars';" | sql
 wc -l "$OUT"

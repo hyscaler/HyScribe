@@ -60,7 +60,7 @@ for query in 'from=1302&to=1304' 'to=1303' 'revision=1304&from=1302' 'from=1318&
   'action=restore&revision=1303' 'action=restore&revision=1321' 'action=restore&revision=9999' \
   'action=restore&revision=1301' 'action=restore&to=1303' 'revision=1322' 'revision=1324' 'revision=1326' \
   'revision=1328' 'revision=1331' 'revision=1335' 'revision[]=1303' 'action=restore&revision=1322' \
-  'action=restore&revision=1324'; do
+  'action=restore&revision=1324' 'from=99999&to=1304'; do
   record "revision.php?$query" administrator
 done
 for role in editor author contributor subscriber; do

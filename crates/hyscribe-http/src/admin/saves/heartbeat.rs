@@ -44,14 +44,12 @@ fn sent(response: Response) -> Result<Ajax, Error> {
     Ok(Ajax::Json(String::from_utf8_lossy(&json).into_owned()))
 }
 
-/// `$received['post_id']` of a part of the data: `None` where PHP fails,
-/// reading an offset of a string.
+/// `$received['post_id']` of a part of the data, sent as an array or a
+/// string: `None` where PHP fails, reading an offset of a string.
 fn post_id(received: &Value) -> Option<Option<&Value>> {
-    match received {
-        Value::Array(entries) => Some(lookup(entries, "post_id")),
-        Value::String(_) => None,
-        _ => Some(None),
-    }
+    received
+        .as_array()
+        .map(|entries| lookup(entries, "post_id"))
 }
 
 /// The holder's name, text and avatars, as the lock filters send them.

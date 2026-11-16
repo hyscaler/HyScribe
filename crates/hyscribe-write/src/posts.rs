@@ -259,20 +259,14 @@ pub async fn get_default_post_to_edit(write: &mut Write<'_>, ctx: &Context) -> R
     Ok(id)
 }
 
-/// `wp_restore_post_revision( $revision )`: its post given the revision's
-/// title, content, excerpt and footnotes; `None` without the revision.
+/// `wp_restore_post_revision( $revision )` of a revision: its post given
+/// the revision's title, content, excerpt and footnotes.
 pub async fn wp_restore_post_revision(
     write: &mut Write<'_>,
     ctx: &Context,
     revision_id: u64,
-) -> Result<Option<u64>> {
-    let Some(revision) = write
-        .post(revision_id)
-        .await?
-        .filter(|r| r.post_type == "revision")
-    else {
-        return Ok(None);
-    };
+) -> Result<u64> {
+    let revision = existing(write, revision_id).await?;
     let (title, content, excerpt) = (revision.title, revision.content, revision.excerpt);
     let id = wp_update_post(write, ctx, revision.parent, &|args| {
         args.title.clone_from(&title);
@@ -289,7 +283,7 @@ pub async fn wp_restore_post_revision(
         let value = hooks::slash(value);
         add_metadata(write, Meta::Post, id, "footnotes", &value, false).await?;
     }
-    Ok(Some(id))
+    Ok(id)
 }
 
 /// `sanitize_post( $postarr, 'db' )` with a default install's filters:

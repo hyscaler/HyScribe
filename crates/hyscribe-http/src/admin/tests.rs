@@ -1909,6 +1909,9 @@ async fn ajax_actions_are_checked_first() {
             .await
             .starts_with("{\"wp-auth-check\":false,")
     );
+    let generate = Some((form, "action=generate-password"));
+    let response = send(&site, "POST", ajax, "", generate).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     let logged_in = cookies
         .split("; ")
         .find(|cookie| cookie.contains("logged_in"))

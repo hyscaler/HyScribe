@@ -3,8 +3,9 @@
 //
 // Prints wp_text_diff()'s table, with the revisions screen's arguments, for
 // a set of text pairs: hex(left)<TAB>hex(right)<TAB>hex(table), the table
-// FATAL where PHP stops with an error. Run in the oracle's image, whose PCRE
-// decides what \w matches (reference/text-diff/golden.sh).
+// FATAL where PHP stops with an error, and a long one as sha256:<its hash>.
+// Run in the oracle's image, whose PCRE decides what \w matches
+// (reference/text-diff/golden.sh).
 define( 'ABSPATH', '/usr/src/wordpress/' );
 define( 'WPINC', 'wp-includes' );
 function __( $text ) {
@@ -59,6 +60,12 @@ $cases = array(
 	array( 'The quick brown fox jumps over the lazy dog', 'The quick red fox leaps over the lazy cat' ),
 	array( "short\nlonger line of text", "longer line of text!\nshort?" ),
 	array( '_under_score', '_under-score' ),
+	array( ' a ! ', '  !' ),
+	array( '!a  !', 'a a ! ' ),
+	array( "99999999999999999999\n+99999999999999999999", "+99999999999999999999\n99999999999999999999" ),
+	array( "9223372036854775808\nz", "9223372036854775808.0\nz" ),
+	// More unchanged lines than the 10000 of context each side keeps.
+	array( "a\n" . str_repeat( "x\n", 20001 ) . 'b', "c\n" . str_repeat( "x\n", 20001 ) . 'd' ),
 );
 // Random pairs over a few lines and words, for the engine's edge cases.
 mt_srand( 713 );
@@ -87,6 +94,10 @@ foreach ( $cases as list( $left, $right ) ) {
 		);
 	} catch ( Throwable $e ) {
 		$diff = 'FATAL';
+	}
+	// A long table is kept as its hash.
+	if ( strlen( $diff ) > 100000 ) {
+		$diff = 'sha256:' . hash( 'sha256', $diff );
 	}
 	echo bin2hex( $left ), "\t", bin2hex( $right ), "\t", bin2hex( $diff ), "\n";
 }

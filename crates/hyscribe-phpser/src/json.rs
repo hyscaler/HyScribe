@@ -666,6 +666,7 @@ mod tests {
         );
         assert_eq!(json_encode(&Value::Enum(b"Suit:Hearts".to_vec())), None);
         assert_eq!(json_encode_script_data(&Value::String(vec![0xff])), None);
+        assert_eq!(json_encode_localized(&Value::String(vec![0xff])), None);
         assert_eq!(json_encode_pretty(&Value::String(vec![0xff])), None);
         for properties in [
             vec![(Key::String(vec![0xff]), Value::Null)],

@@ -11,7 +11,16 @@ fn diffs_are_php_s() {
     for line in golden.lines() {
         let f: Vec<&str> = line.split('\t').collect();
         let (left, right, php) = (unhex(f[0]), unhex(f[1]), unhex(f[2]));
-        let ours = wp_text_diff(&left, &right).map_or(b"FATAL".to_vec(), String::into_bytes);
+        let mut ours = wp_text_diff(&left, &right).map_or(b"FATAL".to_vec(), String::into_bytes);
+        // A long table is kept as its hash.
+        if php.starts_with(b"sha256:") {
+            use sha2::{Digest, Sha256};
+            let hash: String = Sha256::digest(&ours)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            ours = format!("sha256:{hash}").into_bytes();
+        }
         if ours != php {
             failures.push(format!(
                 "{:?} -> {:?}\nphp:  {}\nours: {}",
@@ -22,10 +31,10 @@ fn diffs_are_php_s() {
             ));
         }
     }
-    assert_eq!(golden.lines().count(), 639);
+    assert_eq!(golden.lines().count(), 644);
     assert!(
         failures.is_empty(),
-        "{} of 639:\n{}",
+        "{} of 644:\n{}",
         failures.len(),
         failures.join("\n\n")
     );

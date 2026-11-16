@@ -530,12 +530,10 @@ fn without(diff: &str, tag: &str) -> String {
     let (open, close) = (format!("<{tag}>"), format!("</{tag}>"));
     let mut out = String::new();
     let mut rest = diff;
+    // The inline renderer closes each span it opens.
     while let Some((head, tail)) = rest.split_once(&open) {
-        let Some((_, after)) = tail.split_once(&close) else {
-            break;
-        };
         out.push_str(head);
-        rest = after;
+        rest = tail.split_once(&close).map_or("", |(_, after)| after);
     }
     out.push_str(rest);
     out
@@ -667,10 +665,8 @@ fn changed(orig: &[&[u8]], fin: &[&[u8]]) -> Option<String> {
                     .len() as i64
             };
             let matched = stripped(&found.join(" "));
+            // Never 0: the diff holds more than its spans.
             let whole = stripped(&diff) * 2 - matched;
-            if whole == 0 {
-                return None;
-            }
             if matched as f64 / whole as f64 > 0.6 {
                 continue;
             }

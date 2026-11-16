@@ -130,7 +130,7 @@ async fn the_revisions_screen_is_php_s() {
             );
         }
     }
-    assert_eq!(compared, 60);
+    assert_eq!(compared, 61);
 }
 
 /// A restore with its nonce writes, as PHP's does, then sends the user to

@@ -104,7 +104,7 @@ pub fn revision(site: &dyn PostsSite, query: &str, request: &Request) -> Option<
     if !["post", "page"].contains(&post.post_type.as_str()) {
         return None;
     }
-    let settings = prepare(site, &post, args.revision, args.from)?;
+    let settings = prepare(site, &post, &revision, args.from)?;
     let link = String::from_utf8_lossy(&esc_url(edit_link(site, &post).as_bytes())).into_owned();
     let disabled = if lock_holder(site, &post).is_some() {
         "disabled=\"disabled\""
@@ -181,7 +181,13 @@ fn string(text: impl Into<Vec<u8>>) -> Value {
 
 /// `wp_prepare_revisions_for_js( $post, $selected, $from )`, as
 /// `wp_localize_script()` encodes it; `None` where PHP goes wrong.
-fn prepare(site: &dyn PostsSite, post: &Post, selected: u64, from: Option<u64>) -> Option<String> {
+fn prepare(
+    site: &dyn PostsSite,
+    post: &Post,
+    revision: &Post,
+    from: Option<u64>,
+) -> Option<String> {
+    let selected = revision.id;
     let (zone, now) = site.clock();
     let query = PostQuery {
         post_types: vec!["revision".into()],
@@ -198,7 +204,6 @@ fn prepare(site: &dyn PostsSite, post: &Post, selected: u64, from: Option<u64>) 
         ..PostQuery::default()
     };
     let (revisions, _) = site.list_posts(&query);
-    let can_restore = site.can_post("edit_post", post);
     let title = string(admin_title(post));
     let mut authors: Vec<(u64, Value)> = Vec::new();
     let mut entries: Vec<(u64, Vec<(&str, Value)>)> = Vec::new();
@@ -229,16 +234,13 @@ fn prepare(site: &dyn PostsSite, post: &Post, selected: u64, from: Option<u64>) 
         } else if current {
             current_id = Some(revision.id);
         }
-        let restore = if can_restore {
-            let url = BarSite::admin_url(site, "revision.php");
-            let nonce = site.nonce(&format!("restore-post_{}", revision.id));
-            string(format!(
-                "{url}?revision={}&action=restore&_wpnonce={nonce}",
-                revision.id
-            ))
-        } else {
-            Value::Bool(false)
-        };
+        // The screen is the post's editors', who may restore.
+        let url = BarSite::admin_url(site, "revision.php");
+        let nonce = site.nonce(&format!("restore-post_{}", revision.id));
+        let restore = string(format!(
+            "{url}?revision={}&action=restore&_wpnonce={nonce}",
+            revision.id
+        ));
         let modified = stored_unix(&revision.modified_gmt, Zone::Utc);
         entries.push((
             revision.id,
@@ -311,7 +313,7 @@ fn prepare(site: &dyn PostsSite, post: &Post, selected: u64, from: Option<u64>) 
             _ => 0,
         },
     };
-    let fields = ui_diff(site, post, from, selected)?;
+    let fields = ui_diff(site, post, from, revision.clone())?;
     let data = entries
         .into_iter()
         .map(|(_, entry)| object(entry))
@@ -356,7 +358,7 @@ fn set_current(entries: &mut [(u64, Vec<(&str, Value)>)], id: u64, current: bool
 
 /// `wp_get_revision_ui_diff( $post, $from, $to )`: each field that
 /// differs, with its diff, or `false`.
-fn ui_diff(site: &dyn PostsSite, post: &Post, from: u64, to: u64) -> Option<Value> {
+fn ui_diff(site: &dyn PostsSite, post: &Post, from: u64, mut compare_to: Post) -> Option<Value> {
     let none = Some(Value::Bool(false));
     let mut compare_from = match from {
         0 => None,
@@ -364,9 +366,6 @@ fn ui_diff(site: &dyn PostsSite, post: &Post, from: u64, to: u64) -> Option<Valu
             Some(found) => Some(found),
             None => return none,
         },
-    };
-    let Some(mut compare_to) = site.post(to) else {
-        return none;
     };
     let ours = |p: &Post| p.parent == post.id || p.id == post.id;
     if compare_from.as_ref().is_some_and(|from| !ours(from)) || !ours(&compare_to) {

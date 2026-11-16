@@ -202,14 +202,12 @@ impl hyscribe_rest::Site for Rest<'_> {
 
     fn set_site_transient(&self, name: &str, value: &[u8], expiration: i64) {
         let value = Value::String(value.to_vec());
-        // PHP goes on whether the cache is written or not.
+        // PHP goes on whether the cache is written or not; after a failed
+        // statement the commit fails too.
         if let Some(writer) = &self.site.writer {
             self.reads.reads.block_on(async {
-                if let Ok(mut write) = writer.begin().await
-                    && set_site_transient(&mut write, name, &value, expiration)
-                        .await
-                        .is_ok()
-                {
+                for mut write in writer.begin().await.into_iter() {
+                    let _ = set_site_transient(&mut write, name, &value, expiration).await;
                     let _ = write.commit().await;
                 }
             });
@@ -219,9 +217,8 @@ impl hyscribe_rest::Site for Rest<'_> {
     fn expire_site_transient(&self, name: &str) {
         if let Some(writer) = &self.site.writer {
             self.reads.reads.block_on(async {
-                if let Ok(mut write) = writer.begin().await
-                    && expire_site_transient(&mut write, name).await.is_ok()
-                {
+                for mut write in writer.begin().await.into_iter() {
+                    let _ = expire_site_transient(&mut write, name).await;
                     let _ = write.commit().await;
                 }
             });

@@ -22,13 +22,18 @@ fn at_word(text: &[u8], at: usize, word: &[u8]) -> bool {
 
 /// For each position, the next at or after it where `found` holds.
 fn next(text: &[u8], found: impl Fn(usize) -> bool) -> Vec<Option<usize>> {
-    let mut next = vec![None; text.len() + 1];
-    for at in (0..text.len()).rev() {
-        let after = next.get(at + 1).copied().flatten();
-        if let Some(slot) = next.get_mut(at) {
-            *slot = if found(at) { Some(at) } else { after };
-        }
-    }
+    let mut after = None;
+    let mut next: Vec<Option<usize>> = (0..text.len())
+        .rev()
+        .map(|at| {
+            if found(at) {
+                after = Some(at);
+            }
+            after
+        })
+        .collect();
+    next.reverse();
+    next.push(None);
     next
 }
 

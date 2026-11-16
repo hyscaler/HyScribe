@@ -689,6 +689,10 @@ async fn refused_writes_are_answered_as_php_answers_them() {
             "rest_user_invalid_slug",
         ),
         (
+            ("DELETE", "/?rest_route=/wp/v2/tags/2&force=maybe", ""),
+            "rest_invalid_param",
+        ),
+        (
             (
                 "POST",
                 "/?rest_route=/wp/v2/comments/1",

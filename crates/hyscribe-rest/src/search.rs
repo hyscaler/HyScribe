@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `WP_REST_Search_Controller`: `/wp/v2/search` over its three handlers,
-//! posts, terms and post formats. A term search over more than one
-//! taxonomy is not ported.
+//! posts, terms and post formats. A term search over every taxonomy is
+//! not ported.
 
 use hyscribe_model::{OrderBy, Post, PostQuery, Term, TermOrder, TermQuery};
 use hyscribe_phpser::Value;
@@ -213,7 +213,8 @@ fn posts(
     )
 }
 
-/// `WP_REST_Term_Search_Handler::search_items()` in one taxonomy, by name.
+/// `WP_REST_Term_Search_Handler::search_items()`, by name. With no
+/// taxonomy left, every taxonomy's terms are not ported.
 fn terms(
     context: &Context,
     params: &Params,
@@ -221,11 +222,11 @@ fn terms(
     per_page: u64,
     offset: u64,
 ) -> Result<(Vec<Found>, u64), RestError> {
-    let [taxonomy] = asked(params, &TAXONOMIES)
-        .try_into()
-        .map_err(|_| RestError::not_ported())?;
+    let mut taxonomies = asked(params, &TAXONOMIES).into_iter();
+    let taxonomy = taxonomies.next().ok_or_else(RestError::not_ported)?;
     let query = TermQuery {
-        taxonomy: taxonomy.clone(),
+        taxonomy,
+        taxonomies: taxonomies.collect(),
         include: ids(params, "include"),
         exclude: ids(params, "exclude"),
         search: search.map(|search| String::from_utf8_lossy(&search).into_owned()),
@@ -234,10 +235,23 @@ fn terms(
         offset,
         ..TermQuery::default()
     };
-    let found = context.site.terms(&query);
+    let ids: Vec<u64> = context.site.terms(&query).iter().map(|t| t.id).collect();
+    // Each term with its taxonomy, as `get_term()` finds it, in order.
+    let mut found = Vec::new();
+    for taxonomy in std::iter::once(&query.taxonomy).chain(&query.taxonomies) {
+        let within = TermQuery {
+            taxonomy: taxonomy.clone(),
+            include: ids.clone(),
+            limit: Some(ids.len() as u64),
+            ..TermQuery::default()
+        };
+        let terms = context.site.terms(&within).into_iter();
+        found.extend(terms.map(|term| (taxonomy.clone(), term)));
+    }
+    found.sort_by_key(|(_, term)| ids.iter().position(|id| *id == term.id));
     let found = found
         .into_iter()
-        .map(|term| Found::Term(taxonomy.clone(), term));
+        .map(|(taxonomy, term)| Found::Term(taxonomy, term));
     Ok((found.collect(), context.site.count_terms(&query)))
 }
 

@@ -163,9 +163,9 @@ async fn answers_match_php() {
     let golden = fixture_users(include_str!(
         "../../../hyscribe-rest/tests/golden/embed.tsv"
     ));
-    assert_eq!(replay(&sites, &golden, false).await, (60, 4));
+    assert_eq!(replay(&sites, &golden, false).await, (64, 0));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/search.tsv");
-    assert_eq!(replay(&sites, golden, false).await, (2 * 41, 2 * 7));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 49, 2));
 }
 
 /// With `REST_PUBLIC_USERS=off`, a visitor sees no user as having
@@ -197,9 +197,9 @@ async fn content_matches_php() {
     let golden = fixture_users(include_str!(
         "../../../hyscribe-rest/tests/golden/embed-ttd.tsv"
     ));
-    assert_eq!(replay(&sites, &golden, true).await, (70, 4));
+    assert_eq!(replay(&sites, &golden, true).await, (74, 0));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/search-ttd.tsv");
-    assert_eq!(replay(&sites, golden, true).await, (2 * 50, 2 * 9));
+    assert_eq!(replay(&sites, golden, true).await, (2 * 63, 2));
 }
 
 /// `golden` but for the requests of the users `reference/rest/users.sql`

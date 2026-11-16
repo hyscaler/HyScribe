@@ -48,10 +48,15 @@ fn keywords_not_ported_are_refused() {
             sanitize_value_from_schema(&text("a"), &schema, "p"),
             Err(Refusal(None))
         );
-        let nested = object([("type", text("array")), ("items", schema)]);
+        let nested = object([("type", text("array")), ("items", schema.clone())]);
         let value = Value::Array(vec![(Key::Int(0), text("a"))]);
         assert_eq!(
             validate_value_from_schema(&value, &nested, "p"),
+            Err(Refusal(None))
+        );
+        let one_of = object([("oneOf", Value::Array(vec![(Key::Int(0), schema)]))]);
+        assert_eq!(
+            sanitize_value_from_schema(&text("a"), &one_of, "p"),
             Err(Refusal(None))
         );
     }

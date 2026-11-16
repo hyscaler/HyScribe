@@ -270,7 +270,7 @@ impl Content {
             .iter()
             .filter(|row| {
                 let term = &row.term;
-                row.taxonomy == query.taxonomy
+                (row.taxonomy == query.taxonomy || query.taxonomies.contains(&row.taxonomy))
                     && (query.include.is_empty() || query.include.contains(&term.id))
                     && !query.exclude.contains(&term.id)
                     && (query.slugs.is_empty()

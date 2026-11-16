@@ -160,3 +160,12 @@ GET	/?rest_route=/wp/v2/media/1690	ttd
 GET	/?rest_route=/wp/v2/media/1692&context=edit	ttd
 GET	/?rest_route=/wp/v2/media/1023	ttd
 GET	/wp-json/wp/v2/media/611	ttd,pretty
+GET	/?rest_route=/wp/v2/posts/1&_embed=wp:featuredmedia	default
+GET	/?rest_route=/wp/v2/posts/1&_embed=wp:featuredmedia&_fields=id,_links,_embedded	default
+GET	/?rest_route=/wp/v2/pages&_embed=wp:featuredmedia&_fields=id,featured_media,_embedded	default
+GET	/?rest_route=/wp/v2/posts&_embed=wp:featuredmedia&status=draft,publish&_fields=id,_embedded	default
+GET	/?rest_route=/wp/v2/posts/9102&_embed=wp:featuredmedia	default
+GET	/?rest_route=/wp/v2/posts/9106&_embed=wp:featuredmedia&context=edit&_fields=id,_embedded	default
+GET	/wp-json/wp/v2/posts/1?_embed=wp:featuredmedia	default,pretty
+GET	/?rest_route=/wp/v2/posts&_embed=wp:featuredmedia&per_page=50&orderby=id&_fields=id,featured_media,_embedded	ttd
+GET	/?rest_route=/wp/v2/pages&_embed=wp:featuredmedia&per_page=50&orderby=id&_fields=id,featured_media,_embedded	ttd

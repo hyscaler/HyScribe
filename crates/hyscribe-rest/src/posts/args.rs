@@ -118,12 +118,10 @@ pub(super) fn collection(kind: Kind) -> Vec<Arg> {
             r#"{"type":"string","enum":["AND","OR"]}"#,
         ));
     }
-    // `oneOf` is not ported: the endpoint answers 501.
-    args.extend(
-        limits(kind)
-            .iter()
-            .map(|name| arg(name, "{}", false, Sanitize::Endpoint)),
-    );
+    for (_, base) in kind.taxonomies() {
+        args.push(typed(base, &limit_schema(true)));
+        args.push(typed(exclude_name(base), &limit_schema(false)));
+    }
     if kind == Kind::MenuItem {
         args.push(typed("menu_order", r#"{"type":"integer"}"#));
     }
@@ -155,20 +153,32 @@ pub(super) fn item() -> Vec<Arg> {
     ]
 }
 
-/// The type's arguments that limit it to terms, each taxonomy's.
-fn limits(kind: Kind) -> &'static [&'static str] {
-    match kind {
-        Kind::Post => &["categories", "categories_exclude", "tags", "tags_exclude"],
-        Kind::Block => &["wp_pattern_category", "wp_pattern_category_exclude"],
-        Kind::MenuItem => &["menus", "menus_exclude"],
-        Kind::Page | Kind::Navigation | Kind::Attachment => &[],
+/// The argument that leaves out the terms of the taxonomy `base`.
+pub(super) fn exclude_name(base: &str) -> &'static str {
+    match base {
+        "categories" => "categories_exclude",
+        "tags" => "tags_exclude",
+        "wp_pattern_category" => "wp_pattern_category_exclude",
+        _ => "menus_exclude",
     }
 }
 
+/// `prepare_taxonomy_limit_schema()`'s schema of a taxonomy's terms, with
+/// `operator` for those to `include`.
+fn limit_schema(include: bool) -> String {
+    let operator = if include {
+        r#","operator":{"type":"string","enum":["AND","OR"],"default":"OR"}"#
+    } else {
+        ""
+    };
+    format!(
+        r#"{{"type":["object","array"],"oneOf":[{{"title":"Term ID List","type":"array","items":{{"type":"integer"}}}},{{"title":"Term ID Taxonomy Query","type":"object","properties":{{"terms":{{"type":"array","items":{{"type":"integer"}},"default":[]}},"include_children":{{"type":"boolean","default":false}}{operator}}},"additionalProperties":false}}]}}"#
+    )
+}
+
 /// The type's arguments whose schemas use keywords not ported.
-pub(super) fn not_ported(kind: Kind) -> impl Iterator<Item = &'static str> {
-    let dates = ["after", "modified_after", "before", "modified_before"];
-    dates.into_iter().chain(limits(kind).iter().copied())
+pub(super) fn not_ported() -> [&'static str; 4] {
+    ["after", "modified_after", "before", "modified_before"]
 }
 
 /// `sanitize_post_statuses()`: `wp_parse_slug_list()`, each status but

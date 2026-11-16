@@ -156,7 +156,7 @@ async fn the_block_editor_s_view_writes_before_its_page() {
                 ..view(false, false)
             };
             let browser = hyscribe_admin::admin_bar::Browser::default();
-            let response = viewed(&mut admin, &writer, view, |admin| {
+            let response = viewed(&mut admin, &writer, view, &|admin| {
                 let request = hyscribe_admin::page::Request {
                     canonical: "http://127.0.0.1:8081/hs-admin/post-new",
                     origin: "http://127.0.0.1:8081",

@@ -1512,7 +1512,7 @@ fn quick_draft(
     };
     let view = views::quick_press(admin);
     let uri = String::from_utf8_lossy(asked.uri).into_owned();
-    views::viewed(admin, writer, view, |admin| {
+    views::viewed(admin, writer, view, &|admin| {
         let form = hyscribe_admin::dashboard::quick_press(admin, &uri, Some(notice));
         response(StatusCode::OK, screen_headers(), form.into_bytes())
     })
@@ -1693,7 +1693,7 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                             &get,
                             now,
                         );
-                        views::viewed(&mut admin, writer, view, render)
+                        views::viewed(&mut admin, writer, view, &render)
                     }
                     None => render(&admin),
                 }

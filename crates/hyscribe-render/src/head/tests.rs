@@ -585,6 +585,21 @@ fn the_admin_import_map_follows_imports() {
     );
 }
 
+/// An enqueued module prints after the import map, which holds what it
+/// imports, as the block editor's footer has the LaTeX loader; one the
+/// registry lacks prints nothing.
+#[test]
+fn the_admin_prints_enqueued_modules() {
+    let queue = [
+        "@wordpress/latex-to-mathml/loader".to_string(),
+        "nope".to_string(),
+    ];
+    let printed = String::from_utf8(admin_script_modules("http://h", &[], &queue)).unwrap();
+    let id = "id=\"@wordpress/latex-to-mathml/loader-js-module\"";
+    assert_eq!(printed.matches(id).count(), 1, "{printed}");
+    assert!(!printed.contains("nope"), "{printed}");
+}
+
 /// The admin's font faces: the theme's, then every style variation's, as
 /// `reference/admin-page/golden.sh` records them; a missing child's only
 /// the variations', as `reference/appearance/golden.sh` does.

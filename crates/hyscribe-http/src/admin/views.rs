@@ -209,7 +209,7 @@ pub(super) fn viewed(
     admin: &mut Admin,
     writer: &Writer,
     view: View,
-    render: impl FnOnce(&Admin) -> Response,
+    render: &dyn Fn(&Admin) -> Response,
 ) -> Response {
     let handle = Handle::current();
     let ctx = Context {

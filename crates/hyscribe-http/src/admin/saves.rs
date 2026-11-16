@@ -218,6 +218,11 @@ fn post_row(admin: &Admin, asked: &Asked, id: u64) -> String {
     })
 }
 
+/// An ID as `(int)` casts it, none below 1.
+fn id_of(value: Option<&Value>) -> u64 {
+    u64::try_from(value.map_or(0, Value::to_int)).unwrap_or_default()
+}
+
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }

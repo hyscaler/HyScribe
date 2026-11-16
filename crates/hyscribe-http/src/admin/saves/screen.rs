@@ -336,10 +336,7 @@ pub(super) fn options<'a>(
             return Err(Error::Unported("a screen option not saved").into());
         }
         update_user_meta(write, asked.user, &key, &Value::Int(value)).await?;
-        let referer = asked.wp_get_referer(&|location| {
-            let host = hyscribe_kses::url_host(asked.home.as_bytes()).unwrap_or_default();
-            crate::redirect::wp_validate_redirect(location, &host, b"")
-        });
+        let referer = super::referer(asked);
         let back = remove_query_arg(
             &[b"pagenum", b"apage", b"paged"],
             &referer.unwrap_or_else(|| asked.uri.to_vec()),

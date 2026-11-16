@@ -6,7 +6,7 @@
 //! saves' notices, deleted once a screen shows them. They are kept
 //! with the page, and `?mode=`'s with the redirect past a list's last page.
 
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::StatusCode;
 use axum::response::Response;
 use hyscribe_admin::dashboard::DashboardSite;
 use hyscribe_admin::menu::MenuUser;
@@ -19,7 +19,7 @@ use tokio::runtime::Handle;
 
 use super::saves::dashboard::{context, quick_press_draft, welcome};
 use super::saves::screen::{Found, Synced, save_settings, sync};
-use super::{Admin, failed};
+use super::{Admin, failed, with_cookies};
 use crate::login::{Names, cookie, is_ssl, php_cookie};
 
 /// What a page view writes.
@@ -154,7 +154,7 @@ pub(super) fn viewed(
         Err(err) => return failed(admin, err),
     };
     admin.draft = drafted.as_ref().and_then(|(_, id)| *id);
-    let mut response = render(admin);
+    let response = render(admin);
     let page = response.status() == StatusCode::OK;
     let kept = page || response.status() == StatusCode::FOUND && view.synced.mode.is_some();
     // Only a page, or `?mode=`'s redirect, is kept.
@@ -186,7 +186,7 @@ pub(super) fn viewed(
         let secure = is_ssl(admin.site);
         let path = names.site_path();
         let time = ctx.now.to_string();
-        let cookies = [
+        let cookies = vec![
             php_cookie(&format!("wp-settings-{id}"), value, expires, path, secure),
             php_cookie(
                 &format!("wp-settings-time-{id}"),
@@ -196,11 +196,7 @@ pub(super) fn viewed(
                 secure,
             ),
         ];
-        // Their values are URL encoded, so always valid.
-        let cookies = cookies.iter().filter_map(|c| HeaderValue::from_str(c).ok());
-        response
-            .headers_mut()
-            .extend(cookies.map(|c| (header::SET_COOKIE, c)));
+        return with_cookies(response, cookies);
     }
     response
 }

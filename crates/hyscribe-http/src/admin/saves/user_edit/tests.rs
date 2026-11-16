@@ -115,17 +115,9 @@ async fn new_users_of_one_who_cannot_list_them_are_php_s() {
         let caps = hyscribe_phpser::unserialize(
             b"a:2:{s:10:\"subscriber\";b:1;s:12:\"create_users\";b:1;}",
         );
-        let none = Value::Null;
-        update_metadata(
-            &mut write,
-            Meta::User,
-            id,
-            "wp_capabilities",
-            &caps.unwrap(),
-            &none,
-        )
-        .await
-        .unwrap();
+        update_user_meta(&mut write, id, "wp_capabilities", &caps.unwrap())
+            .await
+            .unwrap();
         write.commit().await.unwrap();
         Ok::<_, String>(id)
     };

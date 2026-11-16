@@ -229,6 +229,7 @@ fn save<'w>(
         context: Context {
             now: reads.now,
             home,
+            empty_trash_days: reads.site.constants.empty_trash_days,
         },
     };
     handle.block_on(async {

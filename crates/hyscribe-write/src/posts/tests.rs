@@ -1850,6 +1850,26 @@ async fn rarer_saves_match_php() {
         delete,
     )
     .await;
+    // `EMPTY_TRASH_DAYS` 0 deletes unforced as `wp_delete_post()` forced.
+    let no_trash = Context {
+        constants: hyscribe_config::Constants {
+            empty_trash_days: 0,
+            ..hyscribe_config::Constants::default()
+        },
+        ..admin()
+    };
+    check(
+        "delete-draft-post",
+        async |conn| insert(conn, oracle_post("draft")).await,
+        async |conn, id| {
+            act(writer, conn, &no_trash, async |w, ctx| {
+                wp_delete_post(w, ctx, id, false).await
+            })
+            .await
+            .map(drop)
+        },
+    )
+    .await;
 }
 
 /// `_wp_put_post_revision( get_post( $id ), true )`.

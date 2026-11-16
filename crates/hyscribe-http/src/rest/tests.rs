@@ -544,6 +544,15 @@ async fn the_editor_s_preloads_but_the_index_are_answered() {
             assert_eq!(missing[0], "/wp/v2/themes?context=edit&status=active");
             assert!(missing[1].starts_with("/?_fields="), "{missing:?}");
         }
+        // Another answer is left out; an embedded one is kept.
+        assert_eq!(
+            preload(&rest, 1, "GET", b"/wp/v2/posts/999"),
+            Preloaded::Left
+        );
+        let embedded = preload(&rest, 1, "GET", b"/wp/v2/posts/1?_embed=author");
+        assert!(
+            matches!(embedded, Preloaded::Kept(data, _) if data.get_str("_embedded").is_some())
+        );
     })
     .await
     .unwrap();

@@ -12,6 +12,7 @@ use super::*;
 use crate::admin_bar::Browser;
 use hyscribe_testkit::{hs_admin_page, unhex};
 
+use crate::page::text;
 use crate::tests::{BROWSER, Role, first_difference};
 
 /// The bundled theme, as the editor reads it.
@@ -236,4 +237,53 @@ fn editor_pages_are_php_s() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// `rest_preload_api_request()`'s memo: 200 answers kept by path, the
+/// `OPTIONS` ones under the place of the first, a path asked twice once.
+#[test]
+fn preloads_are_kept_by_path() {
+    let paths: Vec<(&'static str, String)> = ["/a", "/b", "/a", "/c", "/b"]
+        .iter()
+        .zip(["GET", "OPTIONS", "GET", "GET", "OPTIONS"])
+        .map(|(path, method)| (method, path.to_string()))
+        .collect();
+    let answered = |method: &str, path: &str| {
+        let kept = path != "/c";
+        Some(kept.then(|| (text(&format!("{method} {path}")), Value::Null)))
+    };
+    let memo = page::preloaded(&paths, &answered).unwrap();
+    let json = String::from_utf8(json_hex_tag(&memo)).unwrap();
+    assert_eq!(
+        json,
+        r#"{"/a":{"body":"GET /a","headers":null},"OPTIONS":{"/b":{"body":"OPTIONS /b","headers":null}}}"#
+    );
+    assert_eq!(page::preloaded(&paths, &|_, _| None), None);
+}
+
+/// The page each screen and query asks for, once PHP's refusals pass.
+#[test]
+fn editor_targets() {
+    let site = Role("default:administrator");
+    let new = |kind: &str| Some(Target::New(kind.into()));
+    assert_eq!(target(&site, "post-new.php", ""), new("post"));
+    assert_eq!(target(&site, "post-new.php", "post_type=page"), new("page"));
+    for refused in ["post_type=attachment", "post_type=nope", "x=1"] {
+        assert_eq!(target(&site, "post-new.php", refused), None, "{refused}");
+    }
+    let edit = target(&site, "post.php", "post=1&action=edit");
+    assert!(matches!(edit, Some(Target::Edit(post)) if post.id == 1));
+    for refused in [
+        "post=1&action=edit&message=1",
+        "post=999&action=edit",
+        "post=-1&action=edit",
+    ] {
+        assert_eq!(target(&site, "post.php", refused), None, "{refused}");
+    }
+    let subscriber = Role("default:subscriber");
+    assert_eq!(target(&subscriber, "post.php", "post=1&action=edit"), None);
+    let locks = Role("a8lock:administrator");
+    for refused in ["post=816&action=edit", "post=801&action=edit"] {
+        assert_eq!(target(&locks, "post.php", refused), None, "{refused}");
+    }
 }

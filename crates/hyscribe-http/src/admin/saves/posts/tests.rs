@@ -854,6 +854,27 @@ async fn quick_edit_edges() {
     assert_eq!(dates, [format!("2026-{month}-27 23:59:59")]);
 }
 
+/// Bulk Edit keeps a post's tags by name, as `bulk_edit_posts()` reads
+/// them, so none is added named by its ID (found by the switch-back suite).
+#[tokio::test]
+async fn bulk_edit_keeps_tags() {
+    let _turn = turn().await;
+    let tagged = [
+        "INSERT INTO wp_terms (term_id, name, slug) VALUES (962, 'Kept', 'kept')".to_string(),
+        "INSERT INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, count) \
+         VALUES (962, 962, 'post_tag', '', 1)"
+            .into(),
+        "INSERT INTO wp_term_relationships (object_id, term_taxonomy_id) VALUES (1, 962)".into(),
+    ];
+    let names = "SELECT t.name FROM wp_terms AS t \
+                 INNER JOIN wp_term_taxonomy AS tt ON tt.term_id = t.term_id \
+                 INNER JOIN wp_term_relationships AS tr ON tr.term_taxonomy_id = tt.term_taxonomy_id \
+                 WHERE tr.object_id = 1 AND tt.taxonomy = 'post_tag' ORDER BY t.name";
+    let query = "action=edit&bulk_edit=Update&post_type=post&post[]=1&tax_input[post_tag]=Added";
+    let (_, tags) = tried(1, &tagged, ("edit", query, ""), names).await;
+    assert_eq!(tags, ["Added", "Kept"]);
+}
+
 /// Bulk Edit of what the golden cases leave out.
 #[tokio::test]
 async fn bulk_edit_edges() {

@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Ported from Text_Diff (wp-includes/Text/Diff.php, Diff/Engine/native.php,
+// Diff/Renderer.php and Diff/Renderer/inline.php):
+//   Copyright 2004 Geoffrey T. Dairiki <dairiki@dairiki.org>
+//   Copyright 2004-2010 The Horde Project (http://www.horde.org/)
+// Licensed under the LGPL-2.1, taken under its section 3 as the GPL version 2
+// or any later version (docs/adr/0004-licensing.md).
 
 //! `wp_text_diff()` as the revisions screen calls it: Text_Diff's native
-//! engine (Geoffrey T. Dairiki's, LGPL-2.1, which permits GPL terms) and
-//! WordPress's table and inline renderers, over bytes as PHP compares them.
+//! engine and WordPress's table and inline renderers, over bytes as PHP
+//! compares them.
 
 use std::collections::{HashMap, HashSet};
 

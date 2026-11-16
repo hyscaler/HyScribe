@@ -308,6 +308,20 @@ async fn the_forwarded_client_is_counted_only_behind_a_proxy() {
     assert_eq!(other_client.status, StatusCode::FOUND);
 }
 
+/// The configured limits replace the defaults.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_site_takes_the_configured_limits() {
+    let site = Arc::try_unwrap(login_site(None).await).unwrap();
+    let limits = hyscribe_config::LoginLimits {
+        address: 1,
+        ..Default::default()
+    };
+    let site = site.with_login_limits(limits);
+    let client = Some("192.0.2.1".parse().unwrap());
+    site.limiter.record(client, &[], now());
+    assert!(!site.limiter.allows(client, 1, now()));
+}
+
 /// A refused guess is never checked: even the right password fails.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_limited_guess_never_reaches_the_hash() {

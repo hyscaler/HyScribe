@@ -88,6 +88,14 @@ impl Kind {
         self.field(&["supports", feature]) == Some(&Value::Bool(true))
     }
 
+    /// Whether the type's creates, updates and deletes are ported.
+    pub(crate) fn writes(self) -> bool {
+        matches!(
+            self,
+            Kind::Post | Kind::Page | Kind::Navigation | Kind::Block
+        )
+    }
+
     /// The REST taxonomies of the type: their names and REST bases.
     pub(crate) fn taxonomies(self) -> &'static [(&'static str, &'static str)] {
         match self {
@@ -133,8 +141,7 @@ pub(crate) fn type_endpoints(kind: Kind, single: bool) -> Vec<Endpoint> {
         permission,
         callback: None,
     };
-    let ported = matches!(kind, Kind::Post | Kind::Page);
-    let delete = if ported {
+    let delete = if kind.writes() {
         args::delete()
     } else {
         vec![args::id()]

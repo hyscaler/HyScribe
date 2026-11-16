@@ -212,10 +212,9 @@ pub(crate) const UNSET: &str = "0000-00-00 00:00:00";
 /// A draft's unset GMT date: `get_gmt_from_date( $post_date )` for the
 /// date, `$post_modified` less `gmt_offset` for the modified date.
 fn gmt_of(context: &Context, local: &str, modified: bool) -> Value {
-    let option = |name| context.site.option(name).unwrap_or_default();
     let utc = site_zone(b"", b"0");
     let unix = if modified {
-        let offset = Value::String(option("gmt_offset")).to_float();
+        let offset = context.gmt_offset().to_float();
         stored_unix(local, utc) - (offset * 3600.0) as i64
     } else {
         stored_unix(local, context.zone())
@@ -257,8 +256,25 @@ fn sample_permalink(context: &Context, post: &Post) -> (Vec<u8>, Vec<u8>) {
     (link, hyscribe_phpser::urldecode(&slug))
 }
 
-/// `prepare_item_for_response()`.
+/// `prepare_item_for_response()`, through `rest_prepare_{$post_type}`.
 pub(super) fn post(
+    context: &Context,
+    params: &Params,
+    kind: Kind,
+    post: &Post,
+    rendering: &mut Rendering,
+) -> Result<Response, RestError> {
+    let response = prepared(context, params, kind, post, rendering)?;
+    let hook = format!("rest_prepare_{}", kind.name());
+    Ok(crate::hooks::apply_filters(
+        &hook,
+        response,
+        &[post, params],
+    ))
+}
+
+/// [`post`] before its filter.
+fn prepared(
     context: &Context,
     params: &Params,
     kind: Kind,

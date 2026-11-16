@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Oracle for hyscribe-phpser's json_decode and hyscribe-render's block
-// parser. Prints "hex(input)<TAB>hex(serialize(result))" lines:
+// parser. Prints "hex(input)<TAB>hex(serialize(result))" lines, for JSON
+// followed by json_last_error() and json_last_error_msg():
 //   php golden.php json   > crates/hyscribe-phpser/tests/golden/json-decode.tsv
 //   php golden.php blocks <wordpress> > crates/hyscribe-render/tests/golden/parse-blocks.tsv
 // Run through reference/blocks/golden.sh. Cases are generated with a fixed
@@ -30,7 +31,7 @@ function json_cases() {
 		'{"9223372036854775807":1}', '{"9223372036854775808":1}', '{"-9223372036854775808":1}',
 		'{"-9223372036854775809":1}', '{"":1}', '{"a":1,"b":2,"a":3}', '{"1":1,"01":2,"1":3}', '{"-":1}',
 		'{"1a":1}', '{" 1":1}', '{"\\u0031":1}', '{"a":true,"b":false,"c":null,"d":1.5,"e":"x"}',
-		'["a","b"]', '[null,true]', '{"x":[{"y":{}}]}',
+		'["a","b"]', '[null,true]', '{"x":[{"y":{}}]}', "1\x00", "[1]\x00", "\x00", "\"a\x00\"", "[\x00]",
 	);
 	foreach ( array( 511, 512, 513 ) as $depth ) {
 		$cases[] = str_repeat( '[', $depth ) . str_repeat( ']', $depth );
@@ -127,7 +128,8 @@ function block_cases( $wordpress ) {
 
 if ( 'json' === $argv[1] ) {
 	foreach ( json_cases() as $case ) {
-		emit( $case, json_decode( $case, true ) );
+		$result = json_decode( $case, true );
+		echo bin2hex( $case ), "\t", bin2hex( serialize( $result ) ), "\t", json_last_error(), "\t", json_last_error_msg(), "\n";
 	}
 } else {
 	define( 'ABSPATH', rtrim( $argv[2], '/' ) . '/' );

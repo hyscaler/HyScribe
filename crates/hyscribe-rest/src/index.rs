@@ -9,7 +9,6 @@
 
 use hyscribe_phpser::{Key, Value};
 use hyscribe_render::attachment::image_downsize;
-use hyscribe_render::date::override_offset;
 
 use crate::fields::{filter_fields, is_field_included, links_wanted};
 use crate::request::Params;
@@ -65,17 +64,12 @@ fn index(context: &Context, params: &Params) -> Result<Response, RestError> {
         return Err(RestError::not_ported());
     }
     let int = |name| Value::Int(option(context, name).to_int());
-    let zone = context.option("timezone_string").unwrap_or_default();
-    let gmt_offset = override_offset(&zone, context.now).map_or_else(
-        || option(context, "gmt_offset"),
-        |hours| Value::Float(hyscribe_phpser::Float::from_f64(hours)),
-    );
     let mut data = vec![
         ("name", option(context, "blogname")),
         ("description", option(context, "blogdescription")),
         ("url", option(context, "siteurl")),
         ("home", text(context.site.reads().home_url())),
-        ("gmt_offset", gmt_offset),
+        ("gmt_offset", context.gmt_offset()),
         ("timezone_string", option(context, "timezone_string")),
         ("page_for_posts", int("page_for_posts")),
         ("page_on_front", int("page_on_front")),

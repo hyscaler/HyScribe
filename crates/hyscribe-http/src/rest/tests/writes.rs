@@ -27,6 +27,11 @@ pub(super) fn saves() -> Database {
 /// `wordpress_saves` as the default install with `reference/rest/users.sql`'s
 /// users, as the oracle recorded over it.
 pub(super) async fn fresh() {
+    fresh_with("").await;
+}
+
+/// [`fresh`] with a list's `state`, its statements before `-- cleanup`.
+async fn fresh_with(state: &str) {
     let db = saves();
     load_default_install(&db).await.unwrap();
     let options = sqlx::mysql::MySqlConnectOptions::new()
@@ -37,7 +42,8 @@ pub(super) async fn fresh() {
         .password(db.password.expose());
     let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
     let users = include_str!("../../../../../reference/rest/users.sql");
-    sqlx::raw_sql(sqlx::AssertSqlSafe(users))
+    let state = state.split("\n-- cleanup\n").next().unwrap();
+    sqlx::raw_sql(sqlx::AssertSqlSafe([users, state].concat()))
         .execute(&mut conn)
         .await
         .unwrap();
@@ -81,20 +87,32 @@ pub(super) fn now_masked(body: &str, (start, end): (i64, i64)) -> String {
     out + rest
 }
 
-/// The bodies PHP takes that HyScribe answers 501: `meta`, and JSON PHP
-/// refuses (`rest_invalid_json`).
-const UNPORTED: [&str; 2] = [
-    r#"{"title":"Meta","meta":{"footnotes":""}}"#,
-    r#"{"title":"#,
-];
-
 /// PHP's answers to the posts' and pages' writes, for a visitor and every
 /// role: those that write leave the rows PHP leaves (the write oracle
-/// tests below), so the next request starts from the database afresh.
+/// tests below), so the next request starts from the database afresh. The
+/// body PHP takes with `meta` HyScribe answers 501.
 #[tokio::test(flavor = "multi_thread")]
 async fn post_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/post-writes.tsv");
+    let meta = r#"{"title":"Meta","meta":{"footnotes":""}}"#;
+    assert_eq!(writes_match_php(golden, "", &[meta]).await, (6 * 31, 6));
+}
+
+/// PHP's answers to the navigation menus' and synced patterns' writes, over
+/// `reference/rest/site-writes.sql`, those flagged `refused` answered 501.
+#[tokio::test(flavor = "multi_thread")]
+async fn site_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/site-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/site-writes.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 20, 6 * 3));
+}
+
+/// The cases of `golden`, recorded over `state`, sent over HTTP as each
+/// identity: how many there are and how many answered 501, as those
+/// `unported` and flagged `refused` must.
+async fn writes_match_php(golden: &str, state: &str, unported: &[&str]) -> (usize, usize) {
     let _saves = crate::admin::tests::SAVES.lock().await;
-    fresh().await;
+    fresh_with(state).await;
     let dir = tempfile::tempdir().unwrap();
     let mut site = saves_site(dir.path()).await;
     let mut logins = Vec::new();
@@ -107,10 +125,8 @@ async fn post_writes_match_php() {
     ] {
         logins.push((who, log_in_as(&site, login, id).await));
     }
-    let golden = include_str!("../../../../hyscribe-rest/tests/golden/post-writes.tsv");
     let cases = rest_cases(golden);
-    assert_eq!(cases.len(), 6 * 31);
-    let mut unported = 0;
+    let mut refused = 0;
     for case in &cases {
         let sent = String::from_utf8(case.sent.clone()).unwrap();
         let mut request = axum::http::Request::builder()
@@ -138,9 +154,9 @@ async fn post_writes_match_php() {
         let start = now();
         let response = send(&site, request, &sent).await;
         let what = format!("{} {} {} {sent}", case.who, case.method, case.target);
-        if UNPORTED.contains(&sent.as_str()) {
+        if case.flag("refused") || unported.contains(&sent.as_str()) {
             assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{what}");
-            unported += 1;
+            refused += 1;
             continue;
         }
         let status = response.status();
@@ -161,11 +177,11 @@ async fn post_writes_match_php() {
         // Connections opened before the tables were loaded again can
         // refuse them (1412), so the site connects afresh too.
         if status.is_success() {
-            fresh().await;
+            fresh_with(state).await;
             site = saves_site(dir.path()).await;
         }
     }
-    assert_eq!(unported, 6 * UNPORTED.len());
+    (cases.len(), refused)
 }
 
 /// `target` asked of `site` by user 1 with the JSON `body`, past its
@@ -313,6 +329,93 @@ async fn post_writes_are_php_s() {
             Ok(())
         };
         let report = check_writes(&fixture_database(), golden, nothing, action).await;
+        report.unwrap();
+    }
+}
+
+/// The navigation menus' and synced patterns' writes leave the rows PHP's
+/// leave, planned over `wordpress_saves` and written on the fixture, each
+/// with `reference/rest/site-writes.sql`'s posts.
+#[tokio::test(flavor = "multi_thread")]
+async fn site_writes_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/site-writes.sql");
+    let insert = state
+        .lines()
+        .find(|line| line.starts_with("INSERT INTO `wp_posts`"))
+        .unwrap();
+    let footer = r#"{"title":"Footer","content":"<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"http://127.0.0.1:8081/\",\"kind\":\"custom\"} /-->","status":"publish"}"#;
+    let header = r#"{"title":"Header renamed","content":"<!-- wp:navigation-link {\"label\":\"Only\",\"url\":\"https://example.test/\",\"kind\":\"custom\"} /-->"}"#;
+    let pattern = r#"{"title":"A pattern","content":"<!-- wp:paragraph -->\n<p>Reused</p>\n<!-- /wp:paragraph -->","status":"publish","date":"2026-01-02T03:04:05"}"#;
+    let renamed = r#"{"title":"Renamed pattern","content":"<!-- wp:paragraph -->\n<p>Changed</p>\n<!-- /wp:paragraph -->"}"#;
+    let navigation = "/?rest_route=/wp/v2/navigation";
+    let blocks = "/?rest_route=/wp/v2/blocks";
+    let writes = [
+        ("rest-navigation-create", "POST", navigation.into(), footer),
+        (
+            "rest-navigation-update",
+            "POST",
+            format!("{navigation}/851"),
+            header,
+        ),
+        (
+            "rest-navigation-publish",
+            "PUT",
+            format!("{navigation}/852"),
+            r#"{"status":"publish","slug":"header"}"#,
+        ),
+        (
+            "rest-navigation-trash",
+            "DELETE",
+            format!("{navigation}/851"),
+            "",
+        ),
+        (
+            "rest-navigation-delete",
+            "DELETE",
+            format!("{navigation}/852&force=true"),
+            "",
+        ),
+        ("rest-blocks-create", "POST", blocks.into(), pattern),
+        (
+            "rest-blocks-update",
+            "POST",
+            format!("{blocks}/853"),
+            renamed,
+        ),
+        (
+            "rest-blocks-publish",
+            "PATCH",
+            format!("{blocks}/854"),
+            r#"{"status":"publish"}"#,
+        ),
+        ("rest-blocks-trash", "DELETE", format!("{blocks}/853"), ""),
+        (
+            "rest-blocks-delete",
+            "DELETE",
+            format!("{blocks}/854&force=1"),
+            "",
+        ),
+    ];
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with(state).await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    for (golden, method, target, body) in writes {
+        let pending = planned(&site, method, &target, body).await;
+        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+        let setup = async |conn: &mut hyscribe_db::Connection| {
+            if !golden.ends_with("-create") {
+                let insert = sqlx::raw_sql(sqlx::AssertSqlSafe(insert));
+                insert.execute(&mut *conn).await.unwrap();
+            }
+            Ok::<_, String>(())
+        };
+        let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            let outcome = acted(conn, &pending.plan, &ctx).await;
+            assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
+            Ok(())
+        };
+        let report = check_writes(&fixture_database(), golden, setup, action).await;
         report.unwrap();
     }
 }

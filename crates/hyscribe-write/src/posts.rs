@@ -132,6 +132,10 @@ enum Kind {
     Revision,
     /// A privacy request, which `_wp_personal_data_cleanup_requests()` updates.
     UserRequest,
+    /// `wp_navigation`, the navigation block's menus.
+    Navigation,
+    /// `wp_block`, a synced pattern.
+    Block,
     /// A new attachment, which only [`wp_insert_attachment`] makes.
     Attachment,
 }
@@ -143,6 +147,8 @@ impl Kind {
             "page" => Ok(Kind::Page),
             "revision" => Ok(Kind::Revision),
             "user_request" => Ok(Kind::UserRequest),
+            "wp_navigation" => Ok(Kind::Navigation),
+            "wp_block" => Ok(Kind::Block),
             _ => Err(Error::Unported("a post type other than post and page")),
         }
     }
@@ -155,7 +161,12 @@ impl Kind {
     fn taxonomies(self) -> &'static [&'static str] {
         match self {
             Kind::Post => &["category", "post_tag", "post_format"],
-            Kind::Page | Kind::Revision | Kind::UserRequest | Kind::Attachment => &[],
+            Kind::Block => &["wp_pattern_category"],
+            Kind::Page
+            | Kind::Revision
+            | Kind::UserRequest
+            | Kind::Navigation
+            | Kind::Attachment => &[],
         }
     }
 }
@@ -413,7 +424,8 @@ async fn insert(
         Some(_) => Kind::Attachment,
         None => Kind::of(&post_type)?,
     };
-    if kind == Kind::Post
+    // The types that support the editor, a title and an excerpt.
+    if matches!(kind, Kind::Post | Kind::Block)
         && !truthy(&args.content)
         && !truthy(&args.title)
         && !truthy(&args.excerpt)

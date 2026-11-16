@@ -310,6 +310,19 @@ pub fn site_zone(timezone_string: &[u8], gmt_offset: &[u8]) -> Zone {
     }
 }
 
+/// `wp_timezone_override_offset()`, `gmt_offset`'s `pre_option` filter: the
+/// offset at `unix` of the zone `timezone_string` names, in hours to two
+/// places, `None` without one.
+pub fn override_offset(timezone_string: &[u8], unix: i64) -> Option<f64> {
+    match site_zone(timezone_string, b"") {
+        Zone::Named(named) => {
+            let seconds = named.tz.period(unix).0.offset as f64;
+            Some((seconds / 36.0).round() / 100.0)
+        }
+        _ => None,
+    }
+}
+
 /// `wp_date( $format, strtotime( $stored ) )` for a time stored in `zone`.
 pub fn format(format: &str, stored: &str, zone: Zone) -> String {
     format_time(format, &Time::parse(stored, zone))

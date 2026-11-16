@@ -5,7 +5,7 @@
 
 use hyscribe_kses::{esc_attr, esc_url};
 use hyscribe_phpser::{Float, Key, Value};
-use hyscribe_render::date::{DAYS, MONTHS, Zone, site_zone};
+use hyscribe_render::date::{DAYS, MONTHS, Zone, override_offset, site_zone};
 
 use crate::list_table::{checked, wp_nonce_field};
 use crate::menu::Screen;
@@ -68,13 +68,11 @@ pub(crate) fn pages_dropdown(name: &str, options: &str) -> String {
 /// `get_option( 'gmt_offset' )` through `wp_timezone_override_offset()`:
 /// a named zone's offset now in hours, else the stored one.
 fn gmt_offset(site: &dyn SettingsSite) -> Value {
-    match site_zone(option(site, "timezone_string").as_bytes(), b"") {
-        Zone::Named(named) => {
-            let seconds = named.tz.period(site.clock().1).0.offset as f64;
-            Value::Float(Float::from_f64((seconds / 36.0).round() / 100.0))
-        }
-        _ => Value::String(option(site, "gmt_offset").into_bytes()),
-    }
+    let zone = option(site, "timezone_string");
+    override_offset(zone.as_bytes(), site.clock().1).map_or_else(
+        || Value::String(option(site, "gmt_offset").into_bytes()),
+        |hours| Value::Float(Float::from_f64(hours)),
+    )
 }
 
 /// The site's time zone, as `wp_timezone()` reads the options.

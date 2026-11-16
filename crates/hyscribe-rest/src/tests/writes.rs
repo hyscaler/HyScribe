@@ -183,6 +183,8 @@ impl Asked {
             method_override: None,
             content_type: self.kind,
             body: &self.body,
+            host: None,
+            now: 0,
         }
     }
 }

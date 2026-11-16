@@ -76,7 +76,8 @@ async fn answered(
     }
 }
 
-/// A site whose only read is `admin_url()`, as the posts lists' handlers read it.
+/// A site whose only reads are `admin_url()` and the default constants, as
+/// the posts lists' handlers read it.
 struct Linked;
 
 impl CapabilityData for Linked {
@@ -139,6 +140,9 @@ impl Acting for Linked {
     }
     fn create_nonce(&self, _: &str) -> String {
         unreachable!()
+    }
+    fn constants(&self) -> Constants {
+        Constants::default()
     }
 }
 
@@ -526,11 +530,12 @@ async fn the_lists_actions_answer_as_php() {
         let [_, status, php_body] = row.unwrap().split('\t').collect::<Vec<_>>()[..] else {
             panic!("{case}");
         };
-        let response = send(&site, "GET", to, &cookies, None).await;
+        // `send` serves `site` as it was loaded; a served site reads it
+        // afresh for each request, as `current` does.
+        let now = Arc::new(site.reloaded().await.unwrap());
+        let response = send(&now, "GET", to, &cookies, None).await;
         assert_eq!(response.status().as_str(), status, "{case} {to}");
-        // Bulk Edit's sticky posts are not yet in the Sticky view of the
-        // next request in the same process, though a new site sees them.
-        if status == "200" && !case.starts_with("posts-bulk-edit") {
+        if status == "200" {
             let php = String::from_utf8(hyscribe_testkit::unhex(php_body)).unwrap();
             let php = undated(&unnonced(&hyscribe_testkit::hs_admin_page(&php)));
             let page = undated(&unnonced(&masked_nonces(&page_of(response).await)));
@@ -1069,20 +1074,23 @@ async fn bulk_edit_edges() {
     assert_eq!(rows[3], "950 draft 0 open");
 }
 
-/// The capabilities read only the options, user and post they load.
+/// The capabilities read only the options, user, post and constants they load.
 #[test]
 fn caps_read_what_they_load() {
-    let caps = Caps {
+    let mut caps = Caps {
         prefix: "wp_".into(),
         options: Vec::new(),
         user: 1,
         exists: true,
         capabilities: None,
         post: None,
+        constants: Constants::default(),
     };
     assert_eq!(caps.comment_post(1), None);
     assert_eq!(caps.term_taxonomy(1), None);
-    assert!(!caps.constant("MULTISITE"));
+    assert!(!caps.constant("MULTISITE") && caps.constant("DISALLOW_UNFILTERED_HTML"));
+    caps.constants.disallow_unfiltered_html = false;
+    assert!(!caps.constant("DISALLOW_UNFILTERED_HTML"));
 }
 
 /// What Quick Edit and Bulk Edit read when a field is left out or odd.
@@ -1099,7 +1107,8 @@ async fn edits_of_odd_fields() {
         ("post_password=secret", "publish 1 secret"),
         ("post_format=standard", "publish 1 "),
     ] {
-        let (_, statuses) = quick_edit(post(more)).await;
+        let (answer, statuses) = quick_edit(post(more)).await;
+        assert_eq!(answer, Ok(Answer::Page(String::new())), "{more}");
         assert_eq!(statuses, [status], "{more}");
     }
     // No author and only the list's empty status: the user, and a draft,

@@ -80,4 +80,10 @@ impl Acting for Unfiltered {
     fn create_nonce(&self, _: &str) -> String {
         NONCE.into()
     }
+    fn constants(&self) -> hyscribe_config::Constants {
+        hyscribe_config::Constants {
+            disallow_unfiltered_html: false,
+            ..hyscribe_config::Constants::default()
+        }
+    }
 }

@@ -7,6 +7,7 @@
 use hyscribe_admin::actions::{Asked, action};
 use hyscribe_admin::posts::Answer;
 use hyscribe_auth::caps::{CapPost, CapabilityData, User};
+use hyscribe_config::Constants;
 use hyscribe_db::{DbError, Meta, PostFields, Write};
 use hyscribe_phpser::{Key, Value, absint, add_query_arg, addslashes, lookup, remove_query_arg};
 use hyscribe_render::date::{Zone, format_unix, site_zone, stored_unix};
@@ -115,7 +116,8 @@ fn text(bytes: &[u8]) -> String {
 }
 
 /// What `current_user_can()` reads, as it is now in the action: the
-/// options `map_meta_cap()` reads, the user's capabilities and one post.
+/// options `map_meta_cap()` reads, the user's capabilities, one post and
+/// the configuration's constants.
 struct Caps {
     prefix: String,
     options: Vec<(String, Vec<u8>)>,
@@ -124,10 +126,16 @@ struct Caps {
     capabilities: Option<Vec<u8>>,
     /// The post and its trashed status, if loaded.
     post: Option<(CapPost, Option<Vec<u8>>)>,
+    constants: Constants,
 }
 
 impl Caps {
-    async fn load(write: &mut Write<'_>, user: u64, post: Option<u64>) -> Result<Caps, DbError> {
+    async fn load(
+        write: &mut Write<'_>,
+        user: u64,
+        post: Option<u64>,
+        constants: Constants,
+    ) -> Result<Caps, DbError> {
         let prefix = write.prefix().to_string();
         let mut options = Vec::new();
         let roles = format!("{prefix}user_roles");
@@ -167,6 +175,7 @@ impl Caps {
             exists,
             capabilities,
             post: loaded,
+            constants,
         })
     }
 
@@ -212,8 +221,8 @@ impl CapabilityData for Caps {
     fn term_taxonomy(&self, _: u64) -> Option<String> {
         None
     }
-    fn constant(&self, _: &str) -> bool {
-        false
+    fn constant(&self, name: &str) -> bool {
+        self.constants.defined(name)
     }
 }
 
@@ -292,7 +301,7 @@ async fn post_php(
             &admin_url(site, "edit.php"),
         ),
     };
-    let caps = Caps::load(write, asked.user, None).await?;
+    let caps = Caps::load(write, asked.user, None, site.constants()).await?;
     let ctx = context(asked, site, (&caps, &post.post_type));
     let id_text = id.to_string();
     let ids = (b"ids".as_slice(), Some(id_text.as_bytes()));
@@ -403,7 +412,7 @@ fn with_counts(names: &[&[u8]], counts: impl IntoIterator<Item = usize>, url: &[
 async fn bulk_write(
     write: &mut Write<'_>,
     asked: &Asked<'_>,
-    (ctx, doaction): (&Context, &[u8]),
+    (ctx, doaction, constants): (&Context, &[u8], Constants),
     ids: &[Value],
     sendback: &[u8],
 ) -> Result<Vec<u8>, Stop> {
@@ -428,7 +437,7 @@ async fn bulk_write(
     let (mut count, mut skipped) = (0, 0);
     for id in ids {
         let post = id.is_numeric().then(|| u64::try_from(id.to_int()).ok());
-        let caps = Caps::load(write, asked.user, post.flatten()).await?;
+        let caps = Caps::load(write, asked.user, post.flatten(), constants).await?;
         if !caps.can("delete_post", std::slice::from_ref(id)) {
             return Err(Stop::Died(Answer::Died(denied)));
         }
@@ -499,7 +508,7 @@ pub(super) fn bulk<'a>(
         if ids.is_empty() {
             return Ok(Answer::Redirect(text(&sendback)));
         }
-        let caps = Caps::load(write, asked.user, None).await?;
+        let caps = Caps::load(write, asked.user, None, site.constants()).await?;
         match &doaction[..] {
             b"edit" if asked.request("bulk_edit").is_some() => {
                 let done = bulk_edit_posts(write, (asked, site), (&caps, post_type)).await?;
@@ -508,7 +517,8 @@ pub(super) fn bulk<'a>(
             }
             b"trash" | b"untrash" | b"delete" | b"delete_all" => {
                 let ctx = context(asked, site, (&caps, post_type));
-                sendback = bulk_write(write, asked, (&ctx, &doaction), &ids, &sendback).await?;
+                let acting = (&ctx, &doaction[..], caps.constants);
+                sendback = bulk_write(write, asked, acting, &ids, &sendback).await?;
             }
             _ => {}
         }
@@ -851,7 +861,7 @@ async fn edit_post(
     (post, id): (&PostFields, u64),
     mut data: Data,
 ) -> Result<Option<&'static str>, Error> {
-    let caps = Caps::load(write, asked.user, Some(id)).await?;
+    let caps = Caps::load(write, asked.user, Some(id), site.constants()).await?;
     data.unset("filter");
     data.set(
         "post_type",
@@ -1118,7 +1128,7 @@ async fn bulk_edit_posts(
         {
             return Err(Error::Unported("a post type other than post and page"));
         }
-        let caps = Caps::load(write, asked.user, Some(id)).await?;
+        let caps = Caps::load(write, asked.user, Some(id), site.constants()).await?;
         let editable = caps.can("edit_post", &[Value::Int(signed)]);
         let Some(post) = post.filter(|_| editable && !children.contains(&signed)) else {
             skipped += 1;

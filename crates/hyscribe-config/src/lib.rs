@@ -123,6 +123,37 @@ pub struct Server {
     pub behind_proxy: bool,
 }
 
+/// The `wp-config.php` constants capability checks read, as `.env` keys of
+/// the same names; a missing key takes the safer value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Constants {
+    /// `DISALLOW_UNFILTERED_HTML`, default true.
+    pub disallow_unfiltered_html: bool,
+    /// `ALLOW_UNFILTERED_UPLOADS`, default false.
+    pub allow_unfiltered_uploads: bool,
+}
+
+impl Default for Constants {
+    fn default() -> Constants {
+        Constants {
+            disallow_unfiltered_html: true,
+            allow_unfiltered_uploads: false,
+        }
+    }
+}
+
+impl Constants {
+    /// Whether `wp-config.php` would define `name` as true. `MULTISITE`
+    /// never is: HyScribe refuses to start with it.
+    pub fn defined(&self, name: &str) -> bool {
+        match name {
+            "DISALLOW_UNFILTERED_HTML" => self.disallow_unfiltered_html,
+            "ALLOW_UNFILTERED_UPLOADS" => self.allow_unfiltered_uploads,
+            _ => false,
+        }
+    }
+}
+
 /// The complete configuration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
@@ -143,6 +174,8 @@ pub struct Config {
     /// `REST_PUBLIC_USERS`: `on` (default) answers visitors' REST users
     /// requests as WordPress does, `off` as if no user had published posts.
     pub rest_public_users: bool,
+    /// The capability constants.
+    pub constants: Constants,
 }
 
 /// Why configuration could not be loaded.
@@ -268,6 +301,23 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         Some(_) => return Err(invalid("REST_PUBLIC_USERS", "must be on or off")),
     };
 
+    if constant(get("MULTISITE"), "MULTISITE", false)? {
+        return Err(invalid("MULTISITE", "multisite networks are not supported"));
+    }
+    let safer = Constants::default();
+    let constants = Constants {
+        disallow_unfiltered_html: constant(
+            get("DISALLOW_UNFILTERED_HTML"),
+            "DISALLOW_UNFILTERED_HTML",
+            safer.disallow_unfiltered_html,
+        )?,
+        allow_unfiltered_uploads: constant(
+            get("ALLOW_UNFILTERED_UPLOADS"),
+            "ALLOW_UNFILTERED_UPLOADS",
+            safer.allow_unfiltered_uploads,
+        )?,
+    };
+
     let salts = SALT_KEYS
         .iter()
         .filter_map(|&key| get(key).map(|value| (key, Secret::new(value))))
@@ -282,6 +332,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         site_url: get("WP_SITEURL").map(String::from),
         salts,
         rest_public_users,
+        constants,
     })
 }
 
@@ -307,6 +358,17 @@ fn boolean(value: Option<&str>, key: &'static str) -> Result<bool, ConfigError> 
     match value.map(str::to_ascii_lowercase).as_deref() {
         None | Some("false" | "0" | "no") => Ok(false),
         Some("true" | "1" | "yes") => Ok(true),
+        Some(_) => Err(invalid(key, "must be true or false")),
+    }
+}
+
+/// A constant the setup wizard copies from a literal `true` or `false`
+/// `define()`; 1 and 0 are read too.
+fn constant(value: Option<&str>, key: &'static str, default: bool) -> Result<bool, ConfigError> {
+    match value.map(str::to_ascii_lowercase).as_deref() {
+        None => Ok(default),
+        Some("true" | "1") => Ok(true),
+        Some("false" | "0") => Ok(false),
         Some(_) => Err(invalid(key, "must be true or false")),
     }
 }

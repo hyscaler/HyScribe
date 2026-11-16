@@ -237,6 +237,7 @@ fn serve(site: &Site<'_>, out: &mut dyn Write) -> Result<Reply, String> {
                     .map_err(|err| format!("cannot read the site options: {err}"))?
                     .with_salts(config.salts.clone())
                     .with_public_users(config.rest_public_users)
+                    .with_constants(config.constants)
                     .with_proxy(config.server.behind_proxy)
                     .with_writer(writer);
             // Logging in needs primary mode.

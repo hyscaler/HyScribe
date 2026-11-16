@@ -458,3 +458,62 @@ async fn a_reply_is_unfiltered_with_its_nonce() {
         assert_eq!(comment.content, format!("{saved} {nonce}").into_bytes());
     }
 }
+
+/// On a site whose `.env` sets `DISALLOW_UNFILTERED_HTML=false`, user 1, an
+/// administrator, replies unfiltered with the nonce the site creates and
+/// keeps an edit of their own comment unfiltered; a visitor's comment is
+/// still filtered.
+#[tokio::test(flavor = "multi_thread")]
+async fn administrators_post_unfiltered_html_when_the_site_allows_it() {
+    let writer = writer().await;
+    let open = hyscribe_config::Constants {
+        disallow_unfiltered_html: false,
+        ..hyscribe_config::Constants::default()
+    };
+    let site = std::sync::Arc::try_unwrap(oracle_site().await)
+        .ok()
+        .unwrap()
+        .with_constants(open)
+        // A nonce salt, so the nonce is not empty.
+        .with_salts(vec![
+            ("NONCE_KEY", hyscribe_config::Secret::new("key")),
+            ("NONCE_SALT", hyscribe_config::Secret::new("salt")),
+        ]);
+    let reads = LoginReads::new(&site, Handle::current(), crate::now());
+    let admin = admin(&site, &reads);
+    // The session's nonce, as the reply form prints it.
+    let nonce = read(|| hyscribe_admin::login::Site::nonce(&reads, "unfiltered-html-comment"));
+    assert!(!nonce.is_empty());
+    let mut write = writer.begin().await.unwrap();
+    let markup = "%3Cscript%3Ex%3C%2Fscript%3E";
+    let query = format!(
+        "comment_post_ID=1&comment_ID=1&content={markup}&_wp_unfiltered_html_comment={nonce}"
+    );
+    let post = fields(&query);
+    fn asked(post: &[(Key, Value)]) -> Asked<'_> {
+        Asked {
+            get: &[],
+            post,
+            referer: None,
+            uri: b"/hs-admin/admin-ajax",
+            home: "http://127.0.0.1:8081",
+            user: 1,
+            now: 0,
+            ip: b"",
+            agent: b"",
+        }
+    }
+    let replied = super::super::comments::reply(&mut write, &asked(&post), &admin).await;
+    assert!(matches!(replied, Ok(Ajax::CommentRow(_))));
+    let reply = write.post_comment_ids(1).await.unwrap()[0];
+    let saved = write.comment(reply).await.unwrap().unwrap().content;
+    assert_eq!(saved, b"<script>x</script>");
+    // The reply is user 1's; comment 1 is a visitor's.
+    for (id, content) in [(reply, "<script>x</script>"), (1, "x")] {
+        let post = fields(&format!("comment_ID={id}&content={markup}&checkbox=1"));
+        let edited = super::super::comments::quick_edit(&mut write, &asked(&post), &admin).await;
+        assert!(matches!(edited, Ok(Ajax::CommentRow(_))), "{id}");
+        let saved = write.comment(id).await.unwrap().unwrap().content;
+        assert_eq!(saved, content.as_bytes(), "{id}");
+    }
+}

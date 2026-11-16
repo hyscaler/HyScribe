@@ -383,6 +383,16 @@ async fn each_job_stops_at_a_database_error() {
         async |w, id| check_and_publish_future_post(w, &ctx, id).await,
     )
     .await;
+    fails_at_each_step(
+        async |w| {
+            let id = crate::posts::wp_insert_post(w, &admin(), oracle_post("draft")).await;
+            let id = id.unwrap();
+            w.remove_relationships(id, &[1]).await.unwrap();
+            id
+        },
+        async |w, id| wp_publish_post(w, &ctx, id).await,
+    )
+    .await;
 }
 
 /// A new folder of `name` in the system's temporary folder.

@@ -36,11 +36,15 @@ pub fn page_server() -> Option<SocketAddr> {
 /// agent `agent`: 404 for a path with no route.
 fn route(path: &str, agent: &str) -> (u16, Option<String>, Vec<u8>) {
     let routes = std::fs::read_to_string(folder().join("routes.tsv")).unwrap_or_default();
-    let found = routes.lines().find_map(|line| {
-        let mut fields = line.split('\t');
-        let (route, status, what) = (fields.next()?, fields.next()?, fields.next()?);
-        (route == path).then(|| (status.parse().unwrap_or(500), what.to_string()))
-    });
+    let found =
+        routes.lines().find_map(
+            |line| match line.split('\t').collect::<Vec<_>>().as_slice() {
+                [route, status, what] if *route == path => {
+                    Some((status.parse().unwrap_or(500), what.to_string()))
+                }
+                _ => None,
+            },
+        );
     match found {
         None => (404, None, b"Not Found".to_vec()),
         Some((status, what)) if (300..400).contains(&status) => (status, Some(what), Vec::new()),

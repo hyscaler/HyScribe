@@ -193,9 +193,11 @@ impl hyscribe_rest::Site for Rest<'_> {
     }
 
     fn fetch(&self, url: &[u8], args: Args) -> Option<Result<Fetched, FetchError>> {
-        let client = self.site.fetch.as_ref()?;
         let home = self.site.home.as_bytes();
-        Some(self.reads.reads.block_on(client.get(url, home, args)))
+        let reads = &self.reads.reads;
+        let fetch =
+            |client: &Arc<hyscribe_fetch::Client>| reads.block_on(client.get(url, home, args));
+        self.site.fetch.as_ref().map(fetch)
     }
 
     fn set_site_transient(&self, name: &str, value: &[u8], expiration: i64) {

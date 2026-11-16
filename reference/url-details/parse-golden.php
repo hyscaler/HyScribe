@@ -92,6 +92,7 @@ $pages = array(
 	'<meta name="description" content="Has > inside">',
 	'<meta name="description" content="Unclosed>',
 	'<meta name="description" content="Unclosed>">',
+	'<meta name="description" content="Unclosed>"',
 	'<meta name="description" content="a"b">',
 	"<meta name='description' content='it's'>",
 	'<meta content="abc><meta name="description" content="real">',

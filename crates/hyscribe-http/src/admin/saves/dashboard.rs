@@ -36,7 +36,7 @@ pub(in crate::admin) async fn quick_press_draft(
     write: &mut Write<'_>,
     ctx: &Context,
 ) -> Result<u64, Error> {
-    let id = get_default_post_to_edit(write, ctx).await?;
+    let id = get_default_post_to_edit(write, ctx, "post").await?;
     let option = "dashboard_quick_press_last_post_id";
     update_user_option(write, ctx.user, option, &Value::Int(id.cast_signed())).await?;
     Ok(id)

@@ -8,7 +8,7 @@
 //! [`Error::Unported`], and the caller's action rolls back.
 
 use hyscribe_db::{PostFields, Write};
-use hyscribe_phpser::Value;
+use hyscribe_phpser::{Key, Value};
 use hyscribe_render::formatting::sanitize_title;
 
 use crate::Error;
@@ -126,6 +126,8 @@ enum Kind {
     Post,
     Page,
     Revision,
+    /// `wp_global_styles`, which only the theme's first one is created of.
+    GlobalStyles,
 }
 
 impl Kind {
@@ -134,6 +136,7 @@ impl Kind {
             "post" => Ok(Kind::Post),
             "page" => Ok(Kind::Page),
             "revision" => Ok(Kind::Revision),
+            "wp_global_styles" => Ok(Kind::GlobalStyles),
             _ => Err(Error::Unported("a post type other than post and page")),
         }
     }
@@ -147,6 +150,7 @@ impl Kind {
         match self {
             Kind::Post => &["category", "post_tag", "post_format"],
             Kind::Page | Kind::Revision => &[],
+            Kind::GlobalStyles => &["wp_theme"],
         }
     }
 }
@@ -238,23 +242,162 @@ pub async fn wp_unique_post_slug(
     slug::unique(write, slug, id, (status, kind, post_type), parent).await
 }
 
-/// `get_default_post_to_edit( 'post', true )`: a new `auto-draft`, with
+/// `get_default_post_to_edit( $post_type, true )`: a new `auto-draft`, with
 /// the daily deletion of old ones scheduled. A default post format is not ported.
-pub async fn get_default_post_to_edit(write: &mut Write<'_>, ctx: &Context) -> Result<u64> {
+pub async fn get_default_post_to_edit(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    post_type: &str,
+) -> Result<u64> {
     let args = PostArgs {
         title: b"Auto Draft".to_vec(),
         status: "auto-draft".into(),
+        post_type: post_type.into(),
         ..PostArgs::default()
     };
     let id = wp_insert_post(write, ctx, args).await?;
     let format = write.option_value("default_post_format").await?;
-    if format.is_some_and(|format| truthy(&format)) {
+    if post_type == "post" && format.is_some_and(|format| truthy(&format)) {
         return Err(Error::Unported("a default post format"));
     }
     const HOOK: &str = "wp_scheduled_auto_draft_delete";
     if !cron::scheduled(write, HOOK).await? {
         cron::schedule_daily(write, ctx.now, HOOK).await?;
     }
+    Ok(id)
+}
+
+/// The content a theme's first global styles post is created with.
+const GLOBAL_STYLES: &[u8] = br#"{"version": 3, "isGlobalStylesUserThemeJSON": true }"#;
+
+/// `WP_Theme_JSON_Resolver::get_user_global_styles_post_id()` for the theme
+/// `stylesheet`: its newest published `wp_global_styles` post, created
+/// when it has none.
+pub async fn get_user_global_styles_post_id(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    stylesheet: &str,
+) -> Result<u64> {
+    if let Some(term) = write.term_by_slug("wp_theme", Some(stylesheet)).await? {
+        let mut newest: Option<(String, u64)> = None;
+        for id in write.term_object_ids(term.term_taxonomy_id).await? {
+            let post = existing(write, id).await?;
+            let styles = post.post_type == "wp_global_styles" && post.status == "publish";
+            if styles && newest.as_ref().is_none_or(|(date, _)| post.date > *date) {
+                newest = Some((post.date, id));
+            }
+        }
+        if let Some((_, id)) = newest {
+            return Ok(id);
+        }
+    }
+    let args = PostArgs {
+        content: GLOBAL_STYLES.to_vec(),
+        status: "publish".into(),
+        title: b"Custom Styles".to_vec(),
+        post_type: "wp_global_styles".into(),
+        name: Some(
+            format!(
+                "wp-global-styles-{}",
+                String::from_utf8_lossy(&hyscribe_phpser::urlencode(stylesheet.as_bytes()))
+            )
+            .into_bytes(),
+        ),
+        ..PostArgs::default()
+    };
+    let id = wp_insert_post(write, ctx, args).await?;
+    // `tax_input`, which every user who may edit posts may assign.
+    let theme = [TermRef::Text(stylesheet.as_bytes())];
+    wp_set_post_terms(write, id, TermList::List(&theme), Taxonomy::WpTheme, false).await?;
+    Ok(id)
+}
+
+/// `wp_get_custom_css_post()`'s lookup for the active theme `stylesheet`
+/// (named `name`), kept in its theme mod `custom_css_post_id`: `-1` once
+/// it found no `custom_css` post. Finding one is not ported.
+pub async fn custom_css_post_lookup(
+    write: &mut Write<'_>,
+    stylesheet: &str,
+    name: &str,
+) -> Result<()> {
+    let option = format!("theme_mods_{stylesheet}");
+    let mut mods = match crate::options::get_option(write, &option).await? {
+        Value::Array(mods) => mods,
+        Value::Bool(false) => {
+            // get_theme_mods() moves the mods kept under the theme's name.
+            let current = crate::options::get_option(write, "current_theme").await?;
+            let current = match current {
+                Value::Bool(false) => name.as_bytes().to_vec(),
+                current => current.to_php_string(),
+            };
+            let legacy = format!("mods_{}", String::from_utf8_lossy(&current));
+            if write.option_value(&legacy).await?.is_some() {
+                return Err(Error::Unported("theme mods kept under the theme's name"));
+            }
+            Vec::new()
+        }
+        _ => return Err(Error::Unported("theme mods that are not an array")),
+    };
+    let key = Key::String(b"custom_css_post_id".to_vec());
+    let found = mods.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone());
+    let kept = match found {
+        Some(Value::Int(-1)) => true,
+        Some(Value::Int(id)) if id > 0 => write.post(id.unsigned_abs()).await?.is_some(),
+        _ => false,
+    };
+    if kept {
+        return Ok(());
+    }
+    if write
+        .post_name_used(&sanitize_title(stylesheet.as_bytes()), "custom_css", 0)
+        .await?
+    {
+        return Err(Error::Unported("a custom CSS post"));
+    }
+    match mods.iter_mut().find(|(k, _)| *k == key) {
+        Some((_, value)) => *value = Value::Int(-1),
+        None => mods.push((key, Value::Int(-1))),
+    }
+    crate::options::update_option(write, &option, &Value::Array(mods), None).await?;
+    Ok(())
+}
+
+/// The post a block editor's view is of.
+#[derive(Clone, Copy, Debug)]
+pub enum Edited<'a> {
+    /// `post-new.php` of a post type: a new auto-draft.
+    New(&'a str),
+    /// `post.php?action=edit` of a post.
+    Existing(u64),
+}
+
+/// What a view of the block editor writes, in PHP's order: a new post's
+/// auto-draft, the theme's global styles post its preloads name, the edit
+/// lock, and the custom CSS lookup; the edited post's ID. `theme` is the
+/// active theme's stylesheet and name.
+pub async fn block_editor_view(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    edited: Edited<'_>,
+    (stylesheet, name): (&str, &str),
+) -> Result<u64> {
+    let id = match edited {
+        Edited::New(post_type) => get_default_post_to_edit(write, ctx, post_type).await?,
+        Edited::Existing(id) => id,
+    };
+    get_user_global_styles_post_id(write, ctx, stylesheet).await?;
+    // `wp_set_post_lock()`.
+    let lock = Value::String(format!("{}:{}", ctx.now, ctx.user).into_bytes());
+    update_metadata(
+        write,
+        Meta::Post,
+        id,
+        "_edit_lock",
+        &lock,
+        &Value::String(Vec::new()),
+    )
+    .await?;
+    custom_css_post_lookup(write, stylesheet, name).await?;
     Ok(id)
 }
 
@@ -288,8 +431,12 @@ fn sanitize(mut args: PostArgs, ctx: &Context) -> Result<PostArgs> {
     args.excerpt = crate::convert_invalid_entities(&args.excerpt);
     if !ctx.unfiltered_html {
         let post_kses = |text: &[u8]| hyscribe_render::kses::wp_kses_post(text, &ctx.upload_host);
-        // wp_filter_global_styles_post() rewrites a global styles post first.
+        // wp_filter_global_styles_post() rewrites a global styles post first:
+        // ported for the empty one a theme's first is created with.
         let styles = |text: &[u8]| {
+            if text == GLOBAL_STYLES {
+                return Ok(br#"{"version":3,"isGlobalStylesUserThemeJSON":true}"#.to_vec());
+            }
             let marker = b"isGlobalStylesUserThemeJSON";
             if text.windows(marker.len()).any(|w| w == marker) {
                 return Err(Error::Unported("global styles content"));
@@ -504,3 +651,6 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod editor_tests;

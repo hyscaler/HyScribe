@@ -192,6 +192,11 @@ impl Assets {
         self.styles.queue.push(handle.to_string());
     }
 
+    /// A style taken as printed already, as `$wp_styles->done` lists it.
+    pub fn style_done(&mut self, handle: &str) {
+        self.styles.done.push(handle.to_string());
+    }
+
     /// `wp_enqueue_script()` of a registered handle.
     pub fn enqueue_script(&mut self, handle: &str) {
         self.scripts.queue.push(handle.to_string());
@@ -403,7 +408,7 @@ impl Dependencies {
         }
     }
 
-    /// `WP_Styles::do_item()`; core's inline styles are all on aliases.
+    /// `WP_Styles::do_item()`.
     fn do_style(&mut self, urls: &dyn Urls, handle: &str, item: &Item, out: &mut Vec<u8>) -> bool {
         if self.data(handle, "conditional").is_some() {
             return false;
@@ -420,16 +425,7 @@ impl Dependencies {
             return true;
         }
         let Some(src) = &item.src else {
-            if let Some(css) = self.inline_style(urls, handle) {
-                let id = format!("{handle}-inline-css");
-                let text = format!("\n{css}\n");
-                let style = tag(
-                    b"style",
-                    &[(b"id", Some(id.as_bytes()))],
-                    Some(text.as_bytes()),
-                );
-                self.emit(out, &style);
-            }
+            self.inline_style_tag(urls, handle, out);
             return true;
         };
         if self.do_concat && self.in_default_dir(src) {
@@ -445,7 +441,22 @@ impl Dependencies {
             String::from_utf8_lossy(&href)
         );
         self.emit(out, link.as_bytes());
+        self.inline_style_tag(urls, handle, out);
         true
+    }
+
+    /// The `<style>` of `handle`'s inline styles, if it has any.
+    fn inline_style_tag(&mut self, urls: &dyn Urls, handle: &str, out: &mut Vec<u8>) {
+        if let Some(css) = self.inline_style(urls, handle) {
+            let id = format!("{handle}-inline-css");
+            let text = format!("\n{css}\n");
+            let style = tag(
+                b"style",
+                &[(b"id", Some(id.as_bytes()))],
+                Some(text.as_bytes()),
+            );
+            self.emit(out, &style);
+        }
     }
 
     /// `print_inline_style( $handle, false )`: the `after` styles, with their

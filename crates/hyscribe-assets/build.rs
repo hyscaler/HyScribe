@@ -18,6 +18,8 @@ const VERSION: &str = "7.1.3";
 const SHA256: &str = "d2a09acb6a15e3b9c471d72557753c266d6f41a79ed19bfe04cbfe49e283b2a5";
 const TARBALL_ENV: &str = "HYSCRIBE_WORDPRESS_TARBALL";
 const THEME: &str = "wp-content/themes/twentytwentyfive";
+/// Files with a `.min` twin that PHP reads as they are, so they are kept.
+const READ: [&str; 1] = ["wp-includes/css/dist/block-editor/default-editor-styles.css"];
 /// As the web server sends them; a file with no extension gets no type.
 const CONTENT_TYPES: [(&str, &str); 15] = [
     ("css", "text/css"),
@@ -82,7 +84,11 @@ fn main() -> io::Result<()> {
         files.sort();
         let mut entries = String::new();
         let named = |file: &str| registered.contains(&format!("/{dir}/{file}").as_str());
-        for file in files.iter().filter(|f| named(f) || served(f, &root)) {
+        let read = |file: &str| READ.contains(&format!("{dir}/{file}").as_str());
+        for file in files
+            .iter()
+            .filter(|f| named(f) || served(f, &root) || read(f))
+        {
             release.push(format!("{dir}/{file}"));
             let name = file.rsplit('/').next().unwrap_or_default();
             let extension = name.rsplit_once('.').map_or("", |(_, e)| e);

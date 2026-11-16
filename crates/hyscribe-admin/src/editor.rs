@@ -1,14 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `post-new.php` for posts and pages: the refusals `admin.php` and the
-//! screen make before the block editor's page, which is not ported.
+//! `post-new.php` and `post.php?action=edit` for posts and pages: the
+//! refusals `admin.php` and the screens make, and the pieces of the block
+//! editor's page (`edit-form-blocks.php`) that need no REST response. The
+//! page itself waits on its preloads.
+
+mod assets;
+pub mod blocks;
+pub mod form;
+pub mod settings;
 
 use hyscribe_auth::caps::post_type_exists;
+use hyscribe_render::theme::Theme;
 
 use crate::admin_bar::BarSite;
 use crate::menu::{Look, Screen, admin_menu};
 use crate::page::query_strings;
 use crate::posts::{Answer, PostsSite};
+
+/// What the block editor reads beyond the posts screens.
+pub trait EditorSite: PostsSite {
+    /// The active theme.
+    fn theme(&self) -> &Theme;
+}
 
 /// `post-new.php` with the query `query`: the redirect of attachments to Add
 /// New Media and PHP's refusals; `None` for the editor's page, the other
@@ -55,5 +69,7 @@ pub fn post_new(site: &dyn PostsSite, query: &str) -> Option<Answer> {
     None
 }
 
+#[cfg(test)]
+mod pieces_tests;
 #[cfg(test)]
 mod tests;

@@ -323,6 +323,11 @@ pub fn avatar_url(
     gravatar(option, email, name, size, false).0
 }
 
+/// `get_avatar_url( '', array( 'size' => $size, 'force_default' => true ) )`.
+pub fn forced_avatar_url(option: &dyn Fn(&str) -> Option<Vec<u8>>, size: i64) -> Vec<u8> {
+    gravatar(option, b"", b"", size, true).0
+}
+
 /// The name a user's avatar initials come from.
 pub fn user_name(user: &User) -> Vec<u8> {
     if !user.display_name.is_empty() {

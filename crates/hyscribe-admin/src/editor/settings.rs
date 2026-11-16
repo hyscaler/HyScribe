@@ -92,9 +92,7 @@ fn defaults(site: &dyn EditorSite) -> Settings {
         ]);
         (Key::String(slug.as_bytes().to_vec()), size)
     });
-    let css = hyscribe_assets::wp_includes(DEFAULT_EDITOR_STYLES)
-        .unwrap_or_default()
-        .1;
+    let css = hyscribe_assets::wp_includes_read(DEFAULT_EDITOR_STYLES).unwrap_or_default();
     let upload = if site.can("upload_files") {
         2_097_152
     } else {

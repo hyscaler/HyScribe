@@ -9,6 +9,16 @@ const FILES: &[(&str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/wp_inc
 /// The files by path under `wp-admin/`, its CSS, scripts and images.
 const ADMIN_FILES: &[(&str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/wp_admin.rs"));
 
+/// The files under `wp-includes/` that PHP reads but that are not served.
+const READ: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/read.rs"));
+
+/// A file under `wp-includes/` that PHP reads though it is not served.
+pub fn wp_includes_read(path: &str) -> Option<&'static [u8]> {
+    READ.iter()
+        .find(|(name, _)| *name == path)
+        .map(|(_, bytes)| *bytes)
+}
+
 /// Every file served from the release, by path under `wordpress/`, with
 /// its modification time and SHA-256 in hex.
 const RELEASE: &[(&str, u64, &str)] = include!(concat!(env!("OUT_DIR"), "/release.rs"));

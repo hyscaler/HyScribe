@@ -18,8 +18,8 @@ const VERSION: &str = "7.1.3";
 const SHA256: &str = "d2a09acb6a15e3b9c471d72557753c266d6f41a79ed19bfe04cbfe49e283b2a5";
 const TARBALL_ENV: &str = "HYSCRIBE_WORDPRESS_TARBALL";
 const THEME: &str = "wp-content/themes/twentytwentyfive";
-/// Files with a `.min` twin that PHP reads as they are, so they are kept.
-const READ: [&str; 1] = ["wp-includes/css/dist/block-editor/default-editor-styles.css"];
+/// Files with a `.min` twin, so not served, that PHP reads as they are.
+const READ: [&str; 1] = ["css/dist/block-editor/default-editor-styles.css"];
 /// As the web server sends them; a file with no extension gets no type.
 const CONTENT_TYPES: [(&str, &str); 15] = [
     ("css", "text/css"),
@@ -84,11 +84,7 @@ fn main() -> io::Result<()> {
         files.sort();
         let mut entries = String::new();
         let named = |file: &str| registered.contains(&format!("/{dir}/{file}").as_str());
-        let read = |file: &str| READ.contains(&format!("{dir}/{file}").as_str());
-        for file in files
-            .iter()
-            .filter(|f| named(f) || served(f, &root) || read(f))
-        {
+        for file in files.iter().filter(|f| named(f) || served(f, &root)) {
             release.push(format!("{dir}/{file}"));
             let name = file.rsplit('/').next().unwrap_or_default();
             let extension = name.rsplit_once('.').map_or("", |(_, e)| e);
@@ -104,6 +100,17 @@ fn main() -> io::Result<()> {
         let name = dir.replace('-', "_");
         std::fs::write(out.join(format!("{name}.rs")), format!("&[\n{entries}]\n"))?;
     }
+    let includes = tree.join("wordpress").join("wp-includes");
+    let read: String = READ
+        .iter()
+        .map(|file| {
+            format!(
+                "    ({file:?}, include_bytes!({:?})),\n",
+                includes.join(file)
+            )
+        })
+        .collect();
+    std::fs::write(out.join("read.rs"), format!("&[\n{read}]\n"))?;
     let mut theme = Vec::new();
     collect(&tree.join("wordpress").join(THEME), "", &mut theme)?;
     release.extend(

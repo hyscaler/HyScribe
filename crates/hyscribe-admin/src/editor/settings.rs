@@ -396,10 +396,12 @@ pub fn get_block_editor_settings(site: &dyn EditorSite, custom: Settings, post: 
             true,
         ),
     ];
-    for (key, path, negate) in moved {
-        if let Some(value) = take(&mut features, path) {
-            settings.set(key, if negate { negated(value) } else { value });
-        }
+    let found: Vec<(&str, Value, bool)> = moved
+        .iter()
+        .filter_map(|(key, path, negate)| Some((*key, take(&mut features, path)?, *negate)))
+        .collect();
+    for (key, value, negate) in found {
+        settings.set(key, if negate { negated(value) } else { value });
     }
     if let Some(value) = by_origin(&features, &["spacing", "spacingSizes"]) {
         settings.set("spacingSizes", value);

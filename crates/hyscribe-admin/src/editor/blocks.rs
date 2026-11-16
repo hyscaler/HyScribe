@@ -124,21 +124,23 @@ pub fn server_block_settings() -> Value {
 /// description is PHP's `$template->description || $area_description`, a
 /// boolean the route gives as the string `"1"` or `""`.
 fn instance_descriptions(variations: &Value) -> Value {
-    let mut variations = variations.clone();
-    if let Value::Array(list) = &mut variations {
-        for (_, variation) in list.iter_mut() {
-            let name = variation.get_str("name").map(Value::to_php_string);
-            let instance = name.is_some_and(|name| name.starts_with(b"instance_"));
-            if let (true, Value::Array(fields)) = (instance, variation) {
-                for (key, value) in fields.iter_mut() {
-                    if key.to_php_string() == b"description" {
-                        *value = Value::Bool(!value.is_empty());
-                    }
-                }
-            }
-        }
-    }
-    variations
+    let list = variations.as_array().unwrap_or_default().iter();
+    let list = list.map(|(i, variation)| {
+        let name = variation.get_str("name").map(Value::to_php_string);
+        let instance = name.is_some_and(|name| name.starts_with(b"instance_"));
+        let fields = variation.as_array().unwrap_or_default().iter();
+        let fields = fields.map(|(key, value)| {
+            let boolean = instance && key.to_php_string() == b"description";
+            let value = if boolean {
+                Value::Bool(!value.is_empty())
+            } else {
+                value.clone()
+            };
+            (key.clone(), value)
+        });
+        (i.clone(), Value::Array(fields.collect()))
+    });
+    Value::Array(list.collect())
 }
 
 fn name(block: &Value) -> Key {

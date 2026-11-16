@@ -71,6 +71,7 @@ fn duotone_presets_by_filter() {
 fn features_missing_are_left() {
     let mut features = json_decode(br#"{"color":{"custom":true},"spacing":1}"#).unwrap();
     assert_eq!(take(&mut features, &["spacing", "units"]), None);
+    assert_eq!(take(&mut features, &["spacing", "units", "px"]), None);
     assert_eq!(take(&mut features, &["spacing"]), Some(Value::Int(1)));
     assert_eq!(take(&mut Value::Null, &["color"]), None);
     assert_eq!(take(&mut features, &[]), None);

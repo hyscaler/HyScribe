@@ -36,7 +36,6 @@ GET	/wp-json/wp/v2/block-patterns/categories	pretty
 GET	/?rest_route=/wp/v2/block-patterns/patterns	skip=administrator+editor+author+contributor
 GET	/?rest_route=/wp/v2/block-patterns/patterns	writes
 GET	/?rest_route=/wp/v2/themes	skip=administrator
-GET	/?rest_route=/wp/v2/themes&status=active&_fields=stylesheet	skip=administrator+editor+author+contributor
 GET	/?rest_route=/wp/v2/themes&status=inactive	skip=administrator
 GET	/?rest_route=/wp/v2/themes&status=bogus
 GET	/?rest_route=/wp/v2/themes/twentytwentyfive	skip=administrator+editor+author+contributor

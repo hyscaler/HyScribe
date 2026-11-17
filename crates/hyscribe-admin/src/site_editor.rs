@@ -166,11 +166,12 @@ pub fn context_post(site: &dyn PostsSite, query: &str) -> Option<Option<Post>> {
 }
 
 /// The ID `preg_match( '/^\/page\/(\d+)$/', $path )` takes from `path`,
-/// whose `$` also matches before a last line break.
+/// whose `$` also matches before a last line break. No digits give 0, of
+/// no post, as no match does.
 fn page_of(path: &[u8]) -> Option<i64> {
     let path = path.strip_suffix(b"\n").unwrap_or(path);
     let digits = path.strip_prefix(b"/page/")?;
-    let numeric = !digits.is_empty() && digits.iter().all(u8::is_ascii_digit);
+    let numeric = digits.iter().all(u8::is_ascii_digit);
     numeric.then(|| Value::String(digits.to_vec()).to_int())
 }
 

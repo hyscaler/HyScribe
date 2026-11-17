@@ -30,6 +30,43 @@ fn redirects_and_refusals_are_php_s() {
     assert_eq!(cases, 31);
 }
 
+/// The post the arguments name: a numeric, non-empty `postId` before `p`'s
+/// page; only posts and pages are ported.
+#[test]
+fn context_posts() {
+    let site = crate::tests::Role("default:administrator");
+    let id = |query: &str| context_post(&site, query).map(|post| post.map(|post| post.id));
+    for (query, expected) in [
+        ("postId=0&p=/page/2", Some(Some(2))),
+        ("postId=x&p=/page/2", Some(Some(2))),
+        ("postId=%202", Some(Some(2))),
+        ("postId=1.9", Some(Some(1))),
+        ("postId=-1", Some(None)),
+        ("p=/page/2%0A", Some(Some(2))),
+        ("p=/page/2x", Some(None)),
+        ("p=/page/", Some(None)),
+        ("p=/pages/2", Some(None)),
+        ("postId[]=2", None),
+    ] {
+        assert_eq!(id(query), expected, "{query}");
+    }
+    let templates = crate::tests::Role("m4ttdtemplate:administrator");
+    assert_eq!(context_post(&templates, "postId=9999"), None);
+}
+
+/// A page without a name looks its template up as `page`.
+#[test]
+fn a_nameless_page_s_lookup() {
+    let page = Post {
+        id: 7,
+        post_type: "page".into(),
+        ..Post::default()
+    };
+    let paths = preload_paths(Some(&page), 4, "twentytwentyfive");
+    let last = paths.last().map(|(_, path)| path.as_str());
+    assert_eq!(last, Some("/wp/v2/templates/lookup?slug=page"));
+}
+
 /// The editor's page, and arguments that are not strings, are left to
 /// the page, which answers only once its view wrote.
 #[test]

@@ -1235,15 +1235,20 @@ pub(crate) fn site_icon(reads: &LoginReads, size: i64) -> Option<Vec<u8>> {
 /// The block editor's page of the post the view wrote its edit lock for,
 /// once every preload is answered; `None` before.
 fn block_editor(admin: &Admin, request: &Request) -> Option<Answer> {
-    block_editor_with(admin, request, &|paths| {
-        let host = request.origin.rsplit("//").next().unwrap_or_default();
-        crate::rest::preloads(admin.reads, (admin.user.id, host), paths)
-    })
+    block_editor_with(admin, request, &rest_preloads(admin, request))
 }
 
-/// What answers the block editor's preloads, `None` where one is not
-/// ported.
+/// What answers the editors' preloads, `None` where one is not ported.
 pub(super) type Preloads<'a> = dyn Fn(&[(&'static str, String)]) -> Option<Value> + 'a;
+
+/// The REST API's answers to the editors' preloads for `admin`.
+fn rest_preloads<'a>(
+    admin: &'a Admin,
+    request: &'a Request,
+) -> impl Fn(&[(&'static str, String)]) -> Option<Value> + 'a {
+    let host = request.origin.rsplit("//").next().unwrap_or_default();
+    move |paths| crate::rest::preloads(admin.reads, (admin.user.id, host), paths)
+}
 
 /// [`block_editor`] with the preloads `preloads` answers.
 fn block_editor_with(admin: &Admin, request: &Request, preloads: &Preloads) -> Option<Answer> {
@@ -1268,13 +1273,22 @@ fn block_editor_with(admin: &Admin, request: &Request, preloads: &Preloads) -> O
 /// the theme's global styles post and every preload is answered; `None`
 /// before.
 fn site_editor_page(admin: &Admin, query: &str, request: &Request) -> Option<Answer> {
+    site_editor_with(admin, query, request, &rest_preloads(admin, request))
+}
+
+/// [`site_editor_page`] with the preloads `preloads` answers.
+fn site_editor_with(
+    admin: &Admin,
+    query: &str,
+    request: &Request,
+    preloads: &Preloads,
+) -> Option<Answer> {
     use hyscribe_admin::site_editor::{context_post, preload_paths, site_editor_page};
     let styles = admin.styles?;
     let post = context_post(admin, query)?;
     let stylesheet = admin.site.option("stylesheet");
     let paths = preload_paths(post.as_ref(), styles, &stylesheet);
-    let host = request.origin.rsplit("//").next().unwrap_or_default();
-    let preloads = crate::rest::preloads(admin.reads, (admin.user.id, host), &paths)?;
+    let preloads = preloads(&paths)?;
     let page = site_editor_page(admin, post.as_ref(), &preloads, request);
     Some(Answer::from_page(page))
 }

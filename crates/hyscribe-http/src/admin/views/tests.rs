@@ -446,9 +446,31 @@ async fn the_site_editor_s_view_waits_for_its_preloads() {
             };
             assert_eq!(site_editor_before(&admin, "", &preloads), answered);
             assert!(!site_editor_before(&admin, "postType=page", &preloads));
+            assert!(!site_editor_before(&admin, "p[]=/", &preloads));
         }
         let nobody = Admin::new(&reads, &site, hyscribe_model::User::default());
         assert!(!site_editor_before(&nobody, "", &|_| Some(Value::Null)));
+        // The page, once the view found the global styles post: none for
+        // arguments not ported or a preload not answered.
+        let mut admin = admin;
+        admin.styles = Some(4);
+        let browser = hyscribe_admin::admin_bar::Browser::default();
+        let request = hyscribe_admin::page::Request {
+            canonical: "http://127.0.0.1:8081/hs-admin/site-editor",
+            origin: "http://127.0.0.1:8081",
+            uri: "/hs-admin/site-editor",
+            browser: &browser,
+        };
+        let with = |query: &str, answered: bool| {
+            let preloads = |_: &[(&'static str, String)]| answered.then_some(Value::Null);
+            super::super::site_editor_with(&admin, query, &request, &preloads)
+        };
+        assert!(with("p[]=/", true).is_none());
+        assert!(with("", false).is_none());
+        assert!(matches!(
+            with("", true),
+            Some(hyscribe_admin::posts::Answer::Page(_))
+        ));
     })
     .await
     .unwrap();

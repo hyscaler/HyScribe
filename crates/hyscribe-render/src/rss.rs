@@ -258,7 +258,7 @@ fn fetch_feed(site: &dyn Site, url: &[u8], now: i64) -> Result<Value, Vec<u8>> {
             .into_bytes(),
     };
     let declared = body.starts_with(b"<?xml");
-    let mut tree = simplepie::parse(&body).map_err(|error| {
+    let mut entries = simplepie::parse(&body).map_err(|error| {
         format!(
             "{} is invalid XML, likely due to invalid characters. XML error: {} at line {}, column {}",
             String::from_utf8_lossy(url),
@@ -268,7 +268,7 @@ fn fetch_feed(site: &dyn Site, url: &[u8], now: i64) -> Result<Value, Vec<u8>> {
         )
         .into_bytes()
     })?;
-    let kind = Feed::kind(&tree);
+    let kind = Feed::kind(&entries);
     if kind == 0 {
         return Err(format!(
             "A feed could not be found at `{}`. This does not appear to be a valid RSS or Atom feed.",
@@ -276,23 +276,20 @@ fn fetch_feed(site: &dyn Site, url: &[u8], now: i64) -> Result<Value, Vec<u8>> {
         )
         .into_bytes());
     }
-    let mut names: Vec<&str> = Vec::new();
-    for (name, _) in &response.headers {
-        if !names.contains(&name.as_str()) {
-            names.push(name);
-        }
-    }
+    // Each name once, where it first came.
+    let mut seen = std::collections::HashSet::new();
+    let mut names: Vec<&str> = response.headers.iter().map(|(n, _)| n.as_str()).collect();
+    names.retain(|name| seen.insert(*name));
     let headers = names
         .into_iter()
         .map(|name| (key(name.as_bytes()), Value::String(header(name))))
         .collect();
-    if let Value::Array(entries) = &mut tree {
-        entries.push((Key::String(b"type".to_vec()), Value::Int(kind)));
-        entries.push((Key::String(b"headers".to_vec()), Value::Array(headers)));
-        entries.push((Key::String(b"build".to_vec()), Value::Int(BUILD)));
-        entries.push((key(b"cache_expiration_time"), Value::Int(duration + now)));
-        entries.push((key(b"__cache_expiration_time"), Value::Int(now + duration)));
-    }
+    entries.push((Key::String(b"type".to_vec()), Value::Int(kind)));
+    entries.push((Key::String(b"headers".to_vec()), Value::Array(headers)));
+    entries.push((Key::String(b"build".to_vec()), Value::Int(BUILD)));
+    entries.push((key(b"cache_expiration_time"), Value::Int(duration + now)));
+    entries.push((key(b"__cache_expiration_time"), Value::Int(now + duration)));
+    let tree = Value::Array(entries);
     site.set_site_transient(&feed, &encode(&tree), lifetime);
     site.set_site_transient(&modified, &encode(&Value::Int(now)), lifetime);
     Ok(tree)

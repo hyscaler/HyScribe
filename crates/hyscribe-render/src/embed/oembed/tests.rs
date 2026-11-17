@@ -40,7 +40,7 @@ fn hooks_change_results() {
 
 #[test]
 fn reads_link_attributes_as_shortcodes_do() {
-    let atts = attributes(br#" a="1" B='2' c=3 "quoted" d=  e=5 f"#);
+    let atts = attributes(br#" a="1" B='2' c=3 "quoted" d=  e=5 f g="x"#);
     let names: Vec<_> = atts
         .iter()
         .map(|(k, v)| (k.as_slice(), v.as_slice()))
@@ -95,4 +95,31 @@ fn only_known_types_make_html() {
         data2html(&site, &data(r#"{"type":"other","html":"x"}"#), b"u"),
         None
     );
+}
+
+#[test]
+fn incomplete_answers_make_no_html() {
+    let site = Embeds::new();
+    for json in [
+        r#"{"a":1}"#,
+        r#"{"type":"photo","width":1,"height":1}"#,
+        r#"{"type":"photo","url":"u","width":1,"height":"x"}"#,
+        r#"{"type":"rich"}"#,
+        r#"{"type":"link"}"#,
+    ] {
+        let data = parse_json(json.as_bytes()).unwrap();
+        assert_eq!(data2html(&site, &data, b"u"), None, "{json}");
+    }
+    assert!(parse_json(b"{x").is_none());
+    let data = parse_json(br#"{"title":"T"}"#).unwrap();
+    let titled = iframe_title(b"<iframe src=x".to_vec(), &data);
+    assert_eq!(titled, b"<iframe title=\"T\" src=x");
+    for html in [&b"<a></iframe>"[..], b"<b>x</b></iframe>"] {
+        assert_eq!(filter_oembed_result(&site, html.to_vec(), b"u"), None);
+    }
+    let bare = filter_oembed_result(&site, b"<iframe></iframe>".to_vec(), b"u").unwrap();
+    assert!(bare.starts_with(b"<iframe class=\"wp-embedded-content\""));
+    for html in [&b" src=x"[..], b" src=\"abc", b" src=\"a\nb\""] {
+        assert_eq!(source(html), None);
+    }
 }

@@ -153,7 +153,7 @@ pub(crate) fn specialchars(text: &[u8], quotes: bool) -> Vec<u8> {
 }
 
 /// `Parser::parse()`'s data tree of `xml`, or the reader's error.
-pub(crate) fn parse(xml: &[u8]) -> Result<Value, Error> {
+pub(crate) fn parse(xml: &[u8]) -> Result<Vec<(Key, Value)>, Error> {
     let mut parser = Parser::new(xml, true);
     let mut root = Node::default();
     // The open elements: the node each one opened (none inside a construct).
@@ -298,7 +298,7 @@ pub(crate) fn parse(xml: &[u8]) -> Result<Value, Error> {
         }
     }
     // A well formed document has a root element.
-    Ok(Value::Array(vec![(key(b"child"), children(root.child))]))
+    Ok(vec![(key(b"child"), children(root.child))])
 }
 
 /// `$value[ $key ]` for a string or integer key.
@@ -344,18 +344,28 @@ pub(crate) struct Feed<'a> {
 
 impl Feed<'_> {
     /// `get_type()`, as the tree's `type` holds it or as it is found.
-    pub(crate) fn kind(data: &Value) -> i64 {
-        if let Some(kind) = at(data, b"type") {
+    pub(crate) fn kind(data: &[(Key, Value)]) -> i64 {
+        let entry = |name: &[u8]| {
+            data.iter()
+                .find(|(key, _)| key.to_php_string() == name)
+                .map(|(_, value)| value)
+        };
+        if let Some(kind) = entry(b"type") {
             return kind.to_int();
         }
-        let root = |ns: &[u8], tag: &[u8]| tags(data, ns, tag).is_some();
-        if root(ATOM_10, b"feed") {
+        let child = entry(b"child");
+        let root = |ns: &[u8], tag: &[u8]| {
+            child
+                .and_then(|child| path(child, &[ns, tag]))
+                .filter(|list| !list.is_empty())
+        };
+        if root(ATOM_10, b"feed").is_some() {
             return TYPE_ALL & TYPE_ATOM_10;
         }
-        if root(ATOM_03, b"feed") {
+        if root(ATOM_03, b"feed").is_some() {
             return TYPE_ALL & TYPE_ATOM_03;
         }
-        if let Some(rdf) = first(tags(data, RDF, b"RDF")) {
+        if let Some(rdf) = first(root(RDF, b"RDF")) {
             let mut kind = TYPE_ALL;
             let has = |ns: &[u8]| {
                 [&b"channel"[..], b"image", b"item", b"textinput"]
@@ -370,7 +380,7 @@ impl Feed<'_> {
             }
             return kind;
         }
-        let Some(rss) = first(tags(data, RSS_20, b"rss")) else {
+        let Some(rss) = first(root(RSS_20, b"rss")) else {
             return 0;
         };
         let mut kind = TYPE_ALL & TYPE_RSS_ALL;
@@ -388,7 +398,7 @@ impl Feed<'_> {
 
     /// `get_feed_tags( $ns, $tag )`.
     fn feed_tags(&self, ns: &[u8], tag: &[u8]) -> Option<&Value> {
-        let kind = Feed::kind(self.data);
+        let kind = Feed::kind(self.data.as_array().unwrap_or_default());
         let root = |root_ns: &[u8], root: &[u8]| first(tags(self.data, root_ns, root));
         let element = if kind & TYPE_ATOM_10 != 0 {
             root(ATOM_10, b"feed")
@@ -406,7 +416,7 @@ impl Feed<'_> {
 
     /// `get_channel_tags( $ns, $tag )`.
     fn channel_tags(&self, ns: &[u8], tag: &[u8]) -> Option<&Value> {
-        let kind = Feed::kind(self.data);
+        let kind = Feed::kind(self.data.as_array().unwrap_or_default());
         if kind & TYPE_ATOM_ALL != 0
             && let Some(found) = self.feed_tags(ns, tag)
         {
@@ -799,7 +809,7 @@ fn looks_like_html(data: &[u8]) -> bool {
 pub(crate) fn absolutize(relative: &[u8], base: &[u8]) -> Vec<u8> {
     let scheme = |url: &[u8]| {
         let colon = url.iter().position(|&b| b == b':')?;
-        let name = url.get(..colon)?;
+        let name = url.get(..colon).unwrap_or_default();
         (name.first().is_some_and(u8::is_ascii_alphabetic)
             && name
                 .iter()

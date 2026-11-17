@@ -14,10 +14,8 @@
 
 mod oembed;
 
-use std::sync::LazyLock;
-
 use hyscribe_kses::url_host;
-use hyscribe_phpser::{Key, Pattern, Value, is_empty_string, md5, urlencode};
+use hyscribe_phpser::{Key, Value, is_empty_string, md5, urlencode};
 
 use crate::autop::replace_in_html_tags;
 use crate::outbound::Size;
@@ -38,10 +36,6 @@ const DEFAULTS: Size = Size {
 const MEDIA: [&[u8]; 10] = [
     b"mp3", b"ogg", b"flac", b"m4a", b"wav", b"mp4", b"m4v", b"webm", b"ogv", b"flv",
 ];
-
-/// The YouTube embed URL handler's pattern, unanchored.
-static YOUTUBE: LazyLock<Option<Pattern>> =
-    LazyLock::new(|| Pattern::caseless(r"https?://(www.)?youtube\.com/(v|embed)/([^/]+)"));
 
 /// A pattern's match at a position: the ends of its leading part, its URL
 /// and the whole.
@@ -65,10 +59,11 @@ fn scheme(text: &[u8]) -> Option<usize> {
 
 /// The end of `https?://[^\s<>"]+` at `at` in `text`, ignoring case.
 fn url_end(text: &[u8], at: usize) -> Option<usize> {
-    let rest = text.get(at..)?;
+    let rest = text.get(at..).unwrap_or_default();
     let scheme = scheme(rest)?;
     let length = rest
-        .get(scheme..)?
+        .get(scheme..)
+        .unwrap_or_default()
         .iter()
         .take_while(|&&b| !is_space(b) && !matches!(b, b'<' | b'>' | b'"'))
         .count();
@@ -92,28 +87,63 @@ fn alone(text: &[u8], start: usize) -> Found {
     // what follows its last newline otherwise.
     let end = match text.get(trail) {
         None | Some(b'\n') => trail,
-        Some(_) => url + text.get(url..trail)?.iter().rposition(|&b| b == b'\n')?,
+        Some(_) => {
+            let run = text.get(url..trail).unwrap_or_default();
+            url + run.iter().rposition(|&b| b == b'\n')?
+        }
     };
     Some((lead, url, end))
 }
 
 /// `|(<p(?: [^>]*)?>\s*)(https?://[^\s<>"]+)(\s*<\/p>)|i` at `start`.
 fn paragraph(text: &[u8], start: usize) -> Found {
-    let rest = text.get(start..)?;
+    let rest = text.get(start..).unwrap_or_default();
     if !rest.get(..2)?.eq_ignore_ascii_case(b"<p") {
         return None;
     }
     let open = match rest.get(2)? {
         b'>' => start + 3,
-        b' ' => start + 4 + rest.get(3..)?.iter().position(|&b| b == b'>')?,
+        b' ' => {
+            let attributes = rest.get(3..).unwrap_or_default();
+            start + 4 + attributes.iter().position(|&b| b == b'>')?
+        }
         _ => return None,
     };
     let lead = spaces(text, open);
     let url = url_end(text, lead)?;
     let close = spaces(text, url);
-    text.get(close..close + 4)?
-        .eq_ignore_ascii_case(b"</p>")
-        .then_some((lead, url, close + 4))
+    let end = text.get(close..).unwrap_or_default();
+    let closed = end
+        .get(..4)
+        .is_some_and(|tag| tag.eq_ignore_ascii_case(b"</p>"));
+    closed.then_some((lead, url, close + 4))
+}
+
+/// The video ID `#https?://(www.)?youtube\.com/(?:v|embed)/([^/]+)#i`
+/// finds first in `url`.
+fn youtube_id(url: &[u8]) -> Option<&[u8]> {
+    (0..url.len()).find_map(|at| {
+        let rest = url.get(at..).unwrap_or_default();
+        let after = rest.get(scheme(rest)?..).unwrap_or_default();
+        // `(www.)?` takes four bytes when what follows still matches.
+        let www = after
+            .get(..3)
+            .is_some_and(|w| w.eq_ignore_ascii_case(b"www"));
+        let tries = [after.get(4..).filter(|_| www), Some(after)];
+        tries.into_iter().flatten().find_map(|rest| {
+            let host = rest
+                .get(..12)
+                .filter(|h| h.eq_ignore_ascii_case(b"youtube.com/"))?;
+            let path = rest.get(host.len()..).unwrap_or_default();
+            let lower = path.to_ascii_lowercase();
+            let skip = [&b"v/"[..], b"embed/"]
+                .into_iter()
+                .find(|p| lower.starts_with(p))?;
+            let id = path.get(skip.len()..).unwrap_or_default();
+            let id = id.split(|&b| b == b'/').next().unwrap_or_default();
+            (!id.is_empty()).then_some(id)
+        })
+    })
 }
 
 /// `/<blockquote\s[^>]*?wp-embedded-content/`
@@ -222,18 +252,13 @@ impl Renderer<'_> {
     /// `get_embed_handler_html()`: the YouTube embed URL handler's embed of
     /// the video's page; a media URL, whose handlers are not ported, as is.
     fn handler(&mut self, url: &[u8]) -> Option<Vec<u8>> {
-        let youtube = YOUTUBE.as_ref()?;
-        let found = (0..url.len()).find_map(|at| {
-            let captures = youtube.captures(url.get(at..)?)?;
-            let (from, to) = (*captures.get(3)?)?;
-            url.get(at + from..at + to)
-        });
-        if let Some(id) = found {
+        if let Some(id) = youtube_id(url) {
             let page = [&b"https://youtube.com/watch?v="[..], &urlencode(id)].concat();
             return Some(self.autoembed(&page));
         }
         // `#^https?://.+?\.(mp3|...)$#i`
-        let body = url.get(scheme(url)?..)?.to_ascii_lowercase();
+        let start = scheme(url).unwrap_or_default();
+        let body = url.get(start..).unwrap_or_default().to_ascii_lowercase();
         let media = MEDIA.iter().any(|extension| {
             let dot = body.len().saturating_sub(extension.len() + 1);
             dot > 0 && body.ends_with(extension) && body.get(dot) == Some(&b'.')

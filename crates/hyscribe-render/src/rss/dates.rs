@@ -79,7 +79,7 @@ fn w3cdtf(date: &[u8]) -> Option<i64> {
         if let Some(tail) = rest.strip_prefix(b"Z") {
             rest = tail;
         } else if let Some(sign) = rest.first().filter(|s| matches!(s, b'+' | b'-')).copied() {
-            let (hours, tail) = digits(rest.get(1..)?, 2);
+            let (hours, tail) = digits(rest.get(1..).unwrap_or_default(), 2);
             if hours.len() != 2 {
                 return None;
             }
@@ -152,8 +152,8 @@ fn rfc2822(date: &[u8]) -> Option<i64> {
     let zone = match rest.first().map(|z| z.to_ascii_uppercase()) {
         None => 0,
         Some(zone) if zone.starts_with(['+', '-']) && zone.len() == 5 => {
-            let hours: i64 = zone.get(1..3)?.parse().ok()?;
-            let minutes: i64 = zone.get(3..5)?.parse().ok()?;
+            let hours: i64 = zone.get(1..3).unwrap_or_default().parse().ok()?;
+            let minutes: i64 = zone.get(3..5).unwrap_or_default().parse().ok()?;
             let offset = hours * 3600 + minutes * 60;
             if zone.starts_with('-') {
                 -offset
@@ -171,7 +171,7 @@ fn rfc2822(date: &[u8]) -> Option<i64> {
             _ => return None,
         },
     };
-    let month = i64::try_from(month).ok()? + 1;
+    let month = i64::try_from(month).unwrap_or_default() + 1;
     Some(gmmktime(year, month, day, hour, minute, second) - zone)
 }
 

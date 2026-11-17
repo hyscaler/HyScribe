@@ -459,9 +459,7 @@ impl<'a> Parser<'a> {
     /// The end of the innermost element, its bindings dropped.
     fn close(&mut self) -> Event {
         for prefix in self.open.pop().map(|(_, bound)| bound).unwrap_or_default() {
-            if let Some(uris) = self.bindings.get_mut(prefix) {
-                uris.pop();
-            }
+            self.bindings.entry(prefix).or_default().pop();
         }
         Event::End
     }
@@ -636,7 +634,10 @@ impl<'a> Parser<'a> {
     /// `qname` with its prefix bound; unprefixed attributes have none.
     fn resolve(&self, qname: &[u8], element: bool) -> Option<Name> {
         let (prefix, local) = match qname.iter().position(|&b| b == b':') {
-            Some(colon) => (qname.get(..colon)?, qname.get(colon + 1..)?),
+            Some(colon) => (
+                qname.get(..colon).unwrap_or_default(),
+                qname.get(colon + 1..).unwrap_or_default(),
+            ),
             None if !element => {
                 return Some(Name {
                     namespace: Vec::new(),

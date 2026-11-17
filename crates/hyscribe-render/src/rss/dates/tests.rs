@@ -24,7 +24,20 @@ fn reads_feed_dates() {
         ("Thu 5 Nov 2026 11", None),
         ("Thu 5 Nope 2026 11:00", None),
         ("2026/11/05", None),
+        ("2026-11-05T11:00:00.", None),
+        ("Thu, x Nov 2026 11:00", None),
+        ("5 Nov year 11:00", None),
+        ("5 Nov 2026 11:xx", None),
+        ("5 Nov 2026 11:00 +00ab", None),
+        ("5 Nov 2026 11:00 +ab00", None),
+        ("5 Nov 2026 11:00 EDT", Some(1_793_890_800)),
+        ("5 Nov 2026 11:00 PST", Some(1_793_905_200)),
     ] {
         assert_eq!(parse(date.as_bytes()), unix, "{date}");
     }
+}
+
+#[test]
+fn reads_no_date_from_other_bytes() {
+    assert_eq!(parse(b"\xff"), None);
 }

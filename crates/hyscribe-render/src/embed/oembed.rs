@@ -29,17 +29,22 @@ static PROVIDERS: LazyLock<Vec<Provider>> = LazyLock::new(|| {
     let json = include_bytes!("../../../../wordpress/wp-includes/oembed-providers.json");
     let entries = json_decode(json).unwrap_or_default();
     let provider = |entry: &Value| {
-        let regex = entry.get_str("0")?.as_bytes()?;
-        let regex = std::str::from_utf8(regex).ok()?;
         // `#...#` or `#...#i`.
-        let (body, flags) = regex.strip_prefix('#')?.rsplit_once('#')?;
-        let endpoint = entry.get_str("1")?.as_bytes()?;
-        let endpoint = String::from_utf8_lossy(endpoint).into_owned();
-        let pattern = match flags {
-            "i" => Pattern::caseless(body),
-            _ => Pattern::new(body),
-        };
-        pattern.map(|pattern| Provider { pattern, endpoint })
+        let regex = entry
+            .get_str("0")
+            .and_then(Value::as_bytes)
+            .and_then(|regex| std::str::from_utf8(regex).ok())
+            .and_then(|regex| regex.strip_prefix('#'))
+            .and_then(|regex| regex.rsplit_once('#'));
+        let endpoint = entry.get_str("1").and_then(Value::as_bytes);
+        regex.zip(endpoint).and_then(|((body, flags), endpoint)| {
+            let pattern = match flags {
+                "i" => Pattern::caseless(body),
+                _ => Pattern::new(body),
+            };
+            let endpoint = String::from_utf8_lossy(endpoint).into_owned();
+            pattern.map(|pattern| Provider { pattern, endpoint })
+        })
     };
     entries
         .as_array()
@@ -229,20 +234,24 @@ fn attributes(text: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
         let value = (name > 0 && after.get(gap) == Some(&b'='))
             .then(|| {
                 let start = gap + 1;
-                let start = start + after.get(start..)?.iter().take_while(|b| space(b)).count();
+                let run = after.get(start..).unwrap_or_default();
+                let start = start + run.iter().take_while(|b| space(b)).count();
                 let quoted = after.get(start).filter(|q| matches!(q, b'"' | b'\''));
                 let (value, end) = match quoted {
                     Some(&quote) => {
-                        let close = after.get(start + 1..)?.iter().position(|&b| b == quote)?;
-                        (after.get(start + 1..start + 1 + close)?, start + close + 2)
+                        let inside = after.get(start + 1..).unwrap_or_default();
+                        let close = inside.iter().position(|&b| b == quote)?;
+                        (inside.get(..close).unwrap_or_default(), start + close + 2)
                     }
                     None => {
                         let length = after
-                            .get(start..)?
+                            .get(start..)
+                            .unwrap_or_default()
                             .iter()
                             .take_while(|b| !space(b) && !matches!(b, b'"' | b'\''))
                             .count();
-                        (after.get(start..start + length)?, start + length)
+                        let value = after.get(start..start + length);
+                        (value.unwrap_or_default(), start + length)
                     }
                 };
                 // Each alternative ends at white space or the end.
@@ -334,8 +343,9 @@ fn parse_json(body: &[u8]) -> Option<Data> {
         return None;
     }
     let decoded = json_decode(body)?;
-    let entries = decoded.as_array()?;
-    let data: Data = entries
+    let data: Data = decoded
+        .as_array()
+        .unwrap_or_default()
         .iter()
         .map(|(key, value)| (key.to_php_string(), value.clone()))
         .collect();
@@ -347,36 +357,37 @@ fn parse_json(body: &[u8]) -> Option<Data> {
 /// for a document without a doctype.
 fn parse_xml(body: &[u8]) -> Option<Data> {
     let mut parser = Parser::new(body, false);
-    let mut data: Data = Vec::new();
+    let mut data: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
     let mut depth = 0;
-    let mut current = 0;
+    let (mut current, mut text) = (Vec::new(), Vec::new());
     loop {
         match parser.read().ok()? {
             Event::Doctype => return None,
             Event::Start { name, .. } => {
                 depth += 1;
                 if depth == 2 {
-                    // A repeated name keeps its place and takes the last text.
-                    current = match data.iter().position(|(key, _)| *key == name.local) {
-                        Some(at) => at,
-                        None => {
-                            data.push((name.local, Value::Null));
-                            data.len() - 1
-                        }
-                    };
-                    if let Some((_, value)) = data.get_mut(current) {
-                        *value = Value::String(Vec::new());
+                    (current, text) = (name.local, Vec::new());
+                }
+            }
+            Event::Text(chunk) if depth == 2 => text.extend(chunk),
+            Event::Text(_) => {}
+            Event::End => {
+                // A repeated name keeps its place and takes the last text.
+                if depth == 2 {
+                    let text = std::mem::take(&mut text);
+                    match data.iter_mut().find(|(key, _)| *key == current) {
+                        Some((_, value)) => *value = text,
+                        None => data.push((std::mem::take(&mut current), text)),
                     }
                 }
+                depth -= 1;
             }
-            Event::Text(chunk) if depth == 2 => {
-                if let Some((_, Value::String(text))) = data.get_mut(current) {
-                    text.extend(chunk);
-                }
+            Event::Eof => {
+                let data = data
+                    .into_iter()
+                    .map(|(key, text)| (key, Value::String(text)));
+                return Some(data.collect());
             }
-            Event::Text(_) => {}
-            Event::End => depth -= 1,
-            Event::Eof => return Some(data),
         }
     }
 }
@@ -423,7 +434,8 @@ fn data2html(site: &dyn Site, data: &Data, url: &[u8]) -> Option<Vec<u8>> {
 fn iframe_title(html: Vec<u8>, data: &Data) -> Vec<u8> {
     let lower = html.to_ascii_lowercase();
     let tag = find(&lower, b"<iframe").and_then(|start| {
-        let end = start + html.get(start..)?.iter().position(|&b| b == b'>')?;
+        let tag = html.get(start..).unwrap_or_default();
+        let end = start + tag.iter().position(|&b| b == b'>')?;
         Some((start, end))
     });
     let attrs = tag.map(|(start, end)| {
@@ -496,7 +508,9 @@ fn filter_oembed_result(site: &dyn Site, html: Vec<u8>, url: &[u8]) -> Option<Ve
         .windows(7)
         .take(last_close.checked_sub(6)?)
         .rposition(|w| w == b"<iframe")?;
-    let close = start + 7 + find(html.get(start + 7..)?, b"></iframe>")?;
+    let after = html.get(start + 7..).unwrap_or_default();
+    // The last `></iframe>` follows, so a first one does.
+    let close = start + 7 + find(after, b"></iframe>").unwrap_or_default();
     let frame = (start, close + 10);
     let quote = html
         .starts_with(b"<blockquote>")
@@ -544,12 +558,12 @@ fn filter_oembed_result(site: &dyn Site, html: Vec<u8>, url: &[u8]) -> Option<Ve
 /// `/ src=([\'"])(.*?)\1/`: the whole match, the quote and the URL.
 fn source(html: &[u8]) -> Option<(Vec<u8>, u8, Vec<u8>)> {
     (0..html.len()).find_map(|at| {
-        let rest = html.get(at..)?;
+        let rest = html.get(at..).unwrap_or_default();
         let quote = *rest
             .strip_prefix(b" src=")?
             .first()
             .filter(|q| matches!(q, b'"' | b'\''))?;
-        let value = rest.get(6..)?;
+        let value = rest.get(6..).unwrap_or_default();
         let end = value.iter().position(|&b| b == quote || b == b'\n')?;
         (value.get(end) == Some(&quote)).then(|| {
             (

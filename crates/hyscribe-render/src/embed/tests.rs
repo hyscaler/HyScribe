@@ -250,3 +250,34 @@ fn unported_embeds_fetch_nothing() {
     assert!(site.asked.borrow().is_empty());
     assert!(site.meta.borrow().is_empty());
 }
+
+/// What autoembed's patterns leave alone, and the YouTube handler's IDs.
+#[test]
+fn leaves_urls_that_are_not_alone() {
+    let theme = twentytwentyfive();
+    let site = Embeds::new();
+    let request = Request {
+        post: Some(1),
+        ..Request::default()
+    };
+    let link = "http://pages.test:8080/oembed/link.html";
+    for content in [
+        format!("{link} here"),
+        "x http://a.test/ <p".to_string(),
+        "x http://a.test/ <p class".to_string(),
+        format!("<p>{link}"),
+    ] {
+        let ours = Renderer::new(&theme, &site, &request).autoembed(content.as_bytes());
+        assert_eq!(ours, content.as_bytes());
+    }
+    assert_eq!(
+        super::youtube_id(b"http://www.youtube.com/v/ID/x"),
+        Some(&b"ID"[..])
+    );
+    assert_eq!(
+        super::youtube_id(b"xhttp://wwwXyoutube.com/EMBED/a"),
+        Some(&b"a"[..])
+    );
+    assert_eq!(super::youtube_id(b"https://youtube.com/embed/"), None);
+    assert_eq!(super::youtube_id(b"http://www.youtube.com/watch"), None);
+}

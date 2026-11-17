@@ -113,6 +113,7 @@ fn refuses_what_is_not_well_formed() {
         "Namespace prefix is not defined"
     );
     assert_eq!(message(b"<a>&x</a>"), "EntityRef: expecting ';'");
+    assert_eq!(message(b"<a b=\"&x;\"/>"), "Undeclared entity");
     assert_eq!(
         message(b"<a>&#0;</a>"),
         "xmlParseCharRef: invalid xmlChar value"
@@ -159,4 +160,10 @@ fn bindings_end_with_their_element() {
         events(b"<a>\r</a>", false).unwrap().get(1),
         Some(&Event::Text(b"\n".to_vec()))
     );
+}
+
+#[test]
+fn reads_the_apostrophe() {
+    let found = events(b"<a>&apos;</a>", false).unwrap();
+    assert_eq!(found.get(1), Some(&Event::Text(b"'".to_vec())));
 }

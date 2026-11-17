@@ -64,7 +64,7 @@ fn reads_items_of_older_feeds() {
 <item><dc:title>Dc</dc:title><i:author>Pod</i:author><i:summary>Sum</i:summary></item>
 <item><i:subtitle>Sub</i:subtitle></item>
 </r:RDF>"#;
-    let data = parse(rdf).unwrap();
+    let data = Value::Array(parse(rdf).unwrap());
     let feed = Feed { data: &data };
     let items = feed.items();
     let titles: Vec<_> = items.iter().map(Item::title).collect();
@@ -83,7 +83,7 @@ fn reads_items_of_older_feeds() {
         Some(b"Feed".to_vec())
     );
     let atom = br#"<feed xmlns="http://purl.org/atom/ns#"><entry><title type="text/html" mode="escaped">&lt;b&gt;x&lt;/b&gt;</title><link rel="alternate" href="http://e.test/"/><author><name>A</name><url>http://a.test/</url></author><issued>2026-01-01T00:00:00Z</issued><content type="application/xhtml+xml" mode="xml"><div xmlns="http://www.w3.org/1999/xhtml"><p class="c">P<br/></p></div></content></entry></feed>"#;
-    let data = parse(atom).unwrap();
+    let data = Value::Array(parse(atom).unwrap());
     let feed = Feed { data: &data };
     let item = &feed.items()[0];
     assert_eq!(item.title(), Some(b"<b>x</b>".to_vec()));
@@ -112,4 +112,61 @@ fn sanitizes_by_construct() {
     for kept in [&b"010"[..], b"-0", b"1a", b"", b"99999999999999999999"] {
         assert_eq!(key(kept), Key::String(kept.to_vec()));
     }
+}
+
+#[test]
+fn reads_what_feeds_leave_out() {
+    assert_eq!(at(&Value::Int(1), b"x"), None);
+    assert_eq!(first(Some(&Value::Int(1))), None);
+    assert_eq!(absolutize(b"y", b"svn+ssh://h/x"), b"svn+ssh://h/y");
+    assert_eq!(absolutize(b"y", b"a.b-c://h/x"), b"a.b-c://h/y");
+    let items = |xml: &[u8]| {
+        let data = Value::Array(parse(xml).unwrap());
+        let feed = Feed { data: &data };
+        let found: Vec<_> = feed
+            .items()
+            .iter()
+            .map(|item| {
+                (
+                    item.title(),
+                    item.link(),
+                    item.author().and_then(|a| a.name),
+                )
+            })
+            .collect();
+        found
+    };
+    assert!(items(b"<rss version='2.0'/>").is_empty());
+    let rdf = |ns: &str, channel: &str| {
+        format!(
+            "<r:RDF xmlns:r='http://www.w3.org/1999/02/22-rdf-syntax-ns#' xmlns='{ns}'>{channel}<item><title>T</title><link>one</link></item></r:RDF>"
+        )
+    };
+    for ns in [
+        "http://purl.org/rss/1.0/",
+        "http://my.netscape.com/rdf/simple/0.9/",
+    ] {
+        let bare = rdf(ns, "");
+        assert_eq!(items(bare.as_bytes())[0].1, Some(b"one".to_vec()));
+    }
+    let old = rdf(
+        "http://my.netscape.com/rdf/simple/0.9/",
+        "<channel><link>http://o.test/</link></channel>",
+    );
+    assert_eq!(
+        items(old.as_bytes())[0].1,
+        Some(b"http://o.test/one".to_vec())
+    );
+    let atom = br#"<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<link rel="self" href="http://f.test/self"/><link rel="alternate" href="http://f.test/"/>
+<entry><title>A</title><link rel="edit" href="e"/><link href="one"/><author><email>e@x</email></author></entry>
+<entry><title>B</title><author><uri>http://u.test/</uri></author><author/></entry>
+<entry><title>C</title><dc:creator>D</dc:creator><dc:creator>D</dc:creator></entry>
+</feed>"#;
+    let found = items(atom);
+    assert_eq!(found[0].1, Some(b"http://f.test/one".to_vec()));
+    assert_eq!(found[0].2, None);
+    assert_eq!(found[2].2, Some(b"D".to_vec()));
+    let old_atom = br#"<feed xmlns="http://purl.org/atom/ns#"><entry><title>Plain &amp; text</title></entry></feed>"#;
+    assert_eq!(items(old_atom)[0].0, Some(b"Plain &amp; text".to_vec()));
 }

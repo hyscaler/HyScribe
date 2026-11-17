@@ -1048,3 +1048,19 @@ fn through_the_wizard(home: &std::path::Path, port: u16, wordpress: &std::path::
     let page = http_form(port, "POST", "/installation/step-3", &session, &sent);
     assert!(page.contains("<h1>HyScribe is set up</h1>"), "{page}");
 }
+
+/// Uploads go to `UPLOADS_DIR`, else to `uploads/` in the installation's folder.
+#[test]
+fn uploads_go_to_their_folder() {
+    let keys = |extra: &[(&str, &str)]| {
+        let mut keys = vec![("DB_NAME", "wordpress"), ("DB_USER", "wp")];
+        keys.extend_from_slice(extra);
+        let keys = keys.iter().map(|(k, v)| (k.to_string(), v.to_string()));
+        hyscribe_config::from_map(&keys.collect()).unwrap()
+    };
+    let home = std::path::Path::new("/opt/hyscribe");
+    let new = uploads_dir(&keys(&[]), home);
+    assert_eq!(new, home.join("uploads"));
+    let existing = uploads_dir(&keys(&[("UPLOADS_DIR", "/srv/site/uploads")]), home);
+    assert_eq!(existing, std::path::Path::new("/srv/site/uploads"));
+}

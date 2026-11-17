@@ -13,7 +13,8 @@ use hyscribe_testkit::SqlValue;
 
 use crate::admin_bar::Browser;
 use crate::assets::{Urls, admin_links};
-use crate::login::{Site, User};
+use crate::login::authenticate::Account;
+use crate::login::{Notice, Site, User};
 use crate::menu::{MenuUser, link};
 use crate::page::{PageSite, Request};
 
@@ -46,6 +47,8 @@ pub struct Oracle {
     pub user_request: Option<u64>,
     /// The variant of the test site whose site icon the site has.
     pub icon: Option<&'static str>,
+    /// The login hooks fired, with their arguments.
+    pub fired: std::cell::RefCell<Vec<String>>,
 }
 
 impl Urls for Oracle {
@@ -74,6 +77,7 @@ fn admin(oracle: &Oracle) -> User {
     });
     User {
         id: 1,
+        login: b"admin".to_vec(),
         pass: hash.clone().into_bytes(),
         use_ssl: oracle.use_ssl,
         activation_key: oracle.activation_key.to_vec(),
@@ -118,6 +122,24 @@ impl Site for Oracle {
     }
     fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
         crate::media::site_icon_url(&Role(self.icon?), size)
+    }
+    fn wp_login_failed(&self, username: &[u8], error: &[Notice]) {
+        let codes: Vec<&str> = error.iter().map(|e| e.code).collect();
+        let fired = format!(
+            "wp_login_failed {} {codes:?}",
+            String::from_utf8_lossy(username)
+        );
+        self.fired.borrow_mut().push(fired);
+    }
+    fn wp_login(&self, user_login: &[u8], user: &Account) {
+        let text = String::from_utf8_lossy;
+        let fired = format!(
+            "wp_login {} {} {}",
+            text(user_login),
+            user.id,
+            text(&user.login)
+        );
+        self.fired.borrow_mut().push(fired);
     }
 }
 

@@ -443,6 +443,8 @@ async fn upload_routes_match_php() {
 /// An upload's plan is written by `rest::uploads`, never by `act()`.
 #[tokio::test(flavor = "multi_thread")]
 async fn upload_plans_are_never_acted() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh().await;
     let dir = tempfile::tempdir().unwrap();
     let site = saves_site(dir.path()).await;
     let upload = planned(&site, "POST", "/?rest_route=/wp/v2/media", "{}").await;

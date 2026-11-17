@@ -812,7 +812,7 @@ pub(super) fn masked_nonces(page: &str) -> String {
     )
 }
 
-fn sha256(text: &str) -> String {
+pub(crate) fn sha256(text: &str) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(text.as_bytes())
         .iter()
@@ -2780,5 +2780,6 @@ async fn the_site_health_info_tab() {
     }
 }
 
+mod clean_urls;
 mod comment_saves;
 mod revisions;

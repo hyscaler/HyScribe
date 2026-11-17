@@ -20,6 +20,7 @@ fn theme(parts: &[(&'static str, &'static [u8])], patterns: &[(&str, &str)]) -> 
             .collect(),
         global: twentytwentyfive().global,
         style_handles: HashMap::new(),
+        inline_block_styles: Vec::new(),
         stylesheet: "",
         version: String::new(),
     }

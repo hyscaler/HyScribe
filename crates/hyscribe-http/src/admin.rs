@@ -1238,7 +1238,7 @@ fn block_editor(admin: &Admin, request: &Request) -> Option<Answer> {
 
 /// What answers the block editor's preloads, `None` where one is not
 /// ported.
-type Preloads<'a> = dyn Fn(&[(&'static str, String)]) -> Option<Value> + 'a;
+pub(super) type Preloads<'a> = dyn Fn(&[(&'static str, String)]) -> Option<Value> + 'a;
 
 /// [`block_editor`] with the preloads `preloads` answers.
 fn block_editor_with(admin: &Admin, request: &Request, preloads: &Preloads) -> Option<Answer> {

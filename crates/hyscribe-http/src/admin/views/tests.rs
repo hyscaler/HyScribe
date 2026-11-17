@@ -272,6 +272,34 @@ async fn the_block_editor_s_page_is_served() {
     assert!(lock.is_some());
 }
 
+/// The editor's view writes only once the preloads it does not write are
+/// answered: all but the global styles post's and the active theme's.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_editor_s_view_waits_for_its_preloads() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, _) = crate::admin::tests::logged_in(&fixture_database().name, dir.path()).await;
+    let handle = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let mut reads = crate::login::LoginReads::new(&site, handle, crate::now());
+        reads.act_as(1, Vec::new());
+        let user = reads.reads.wait(site.db.user(1)).unwrap();
+        let admin = Admin::new(&reads, &site, user);
+        let target = Target::New("page".into());
+        for answered in [true, false] {
+            let preloads = |paths: &[(&'static str, String)]| {
+                let paths: Vec<&str> = paths.iter().map(|(_, path)| path.as_str()).collect();
+                assert!(paths.contains(&"/wp/v2/pages/0?context=edit"));
+                assert!(!paths.iter().any(|path| path.contains("/wp/v2/themes?")));
+                assert!(!paths.iter().any(|path| path.contains("/global-styles/0")));
+                answered.then_some(Value::Null)
+            };
+            assert_eq!(answered_before(&admin, &target, &preloads), answered);
+        }
+    })
+    .await
+    .unwrap();
+}
+
 /// A database that fails before the editor's view begins ends it.
 #[tokio::test]
 async fn a_failed_begin_ends_the_editor_s_view() {

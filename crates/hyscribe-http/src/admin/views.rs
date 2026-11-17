@@ -24,7 +24,7 @@ use tokio::runtime::Handle;
 use super::saves::dashboard::{context, quick_press_draft, welcome};
 use super::saves::options::flush_rewrite_rules;
 use super::saves::screen::{Found, Synced, save_settings, sync};
-use super::{Admin, failed, with_cookies};
+use super::{Admin, Preloads, failed, with_cookies};
 use crate::login::{Names, cookie, is_ssl, php_cookie};
 
 /// What a page view writes.
@@ -103,18 +103,21 @@ pub(super) fn plan(
         draft: dashboard && needs_draft(admin),
         settings: updated && SETTINGS.contains(&path),
         rules: path == "/hs-admin/options-permalink",
-        editor: editor.filter(|target| answered_before(admin, target, host)),
+        editor: editor.filter(|target| {
+            let preloads =
+                |paths: &[_]| crate::rest::preloads(admin.reads, (admin.user.id, host), paths);
+            answered_before(admin, target, &preloads)
+        }),
     }
 }
 
-/// Whether the block editor's preloads that do not name its post or the
-/// theme's global styles post, which its view may write first, are all
-/// answered: only then does the view write.
-fn answered_before(admin: &Admin, target: &Target, host: &str) -> bool {
+/// Whether the block editor's preloads that do not name the theme's global
+/// styles post, which its view may write first, are all answered: only
+/// then does the view write. A new post's routes, of ID 0 until the view
+/// writes it, answer as a missing post's. `preloads` answers the paths.
+fn answered_before(admin: &Admin, target: &Target, preloads: &Preloads) -> bool {
     let post = match target {
         Target::Edit(post) => (**post).clone(),
-        // The new post's paths but its type's are left out below, and a
-        // route of no type answers as one of the type's would.
         Target::New(post_type) => {
             let mut post = Post::default();
             post.post_type.clone_from(post_type);
@@ -124,20 +127,10 @@ fn answered_before(admin: &Admin, target: &Target, host: &str) -> bool {
     let stylesheet = admin.site.option("stylesheet");
     let edit_theme = admin.can("edit_theme_options");
     let mut paths = preload_paths(&post, 0, edit_theme, &stylesheet);
-    // A new post's routes, and the active theme's, which links the global
-    // styles post.
-    let route = if post.post_type == "page" {
-        "pages"
-    } else {
-        "posts"
-    };
-    let named = [
-        format!("/wp/v2/{route}/0"),
-        "/wp/v2/global-styles/0".to_string(),
-        "/wp/v2/themes?".to_string(),
-    ];
-    paths.retain(|(_, path)| !named.iter().any(|name| path.contains(name.as_str())));
-    crate::rest::preloads(admin.reads, (admin.user.id, host), &paths).is_some()
+    // The active theme's route links the global styles post.
+    let named = ["/wp/v2/global-styles/0", "/wp/v2/themes?"];
+    paths.retain(|(_, path)| !named.iter().any(|name| path.contains(name)));
+    preloads(&paths).is_some()
 }
 
 /// Whether the Quick Draft form needs a new auto-draft: the user may

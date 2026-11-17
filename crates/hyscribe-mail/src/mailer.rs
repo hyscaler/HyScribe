@@ -25,7 +25,7 @@ use crate::transport::{LIMIT, Relay, message};
 /// The one log line of a message: its kind, the recipient's domain, the
 /// outcome and the time taken since `started`; never a subject, body or address.
 macro_rules! log {
-    ($kind:expr, $domain:expr, $outcome:expr, $started:expr) => {
+    ($kind:expr, $domain:expr, $outcome:expr, $started:expr $(,)?) => {
         eprintln!(
             "mail {} to {}: {} in {} ms",
             $kind,

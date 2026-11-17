@@ -401,8 +401,9 @@ fn wait_for_server(
             return Ok(Started::Now(child.id()));
         }
         if Instant::now() >= deadline {
+            // An unreadable log only loses the reason; the timeout stands.
             return Err(Error::Timeout {
-                tail: tail(log_path, 20)?,
+                tail: tail(log_path, 20).unwrap_or_default(),
             });
         }
         sleep(POLL);

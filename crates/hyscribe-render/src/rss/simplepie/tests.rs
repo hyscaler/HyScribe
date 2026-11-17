@@ -98,9 +98,10 @@ fn reads_items_of_older_feeds() {
 #[test]
 fn sanitizes_by_construct() {
     assert_eq!(sanitize(b" a < b ", TEXT, b""), b"a &lt; b");
-    assert_eq!(sanitize(b"a &amp b", MAYBE_HTML, b""), b"a &amp; b");
-    assert_eq!(sanitize(b"x</b >", MAYBE_HTML, b""), b"x");
-    assert_eq!(sanitize(b"&#x41;", MAYBE_HTML, b""), b"&#x41;");
+    // An entity or an end tag makes it HTML, through wp_kses_post().
+    for html in [&b"a &amp b"[..], b"x</b >", b"&#x41;"] {
+        assert_eq!(sanitize(html, MAYBE_HTML, b""), wp_kses_post(html, b""));
+    }
     assert_eq!(sanitize(b"a & b", MAYBE_HTML, b""), b"a &amp; b");
     assert_eq!(sanitize(b"  ", TEXT, b""), b"");
     assert_eq!(sanitize(b"", IRI, b"http://a.test/"), b"http://a.test/");

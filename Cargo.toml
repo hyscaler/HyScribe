@@ -58,7 +58,8 @@ unimplemented = "deny"
 [profile.release]
 lto = true
 codegen-units = 1
-panic = "abort"
+# Unwind, so a decoder panic ends only its image job (hyscribe-image's pool).
+panic = "unwind"
 strip = true
 
 # bcrypt at cost 12 takes seconds unoptimized.

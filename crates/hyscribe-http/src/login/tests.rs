@@ -61,14 +61,17 @@ async fn send(site: &Arc<Site>, method: &str, uri: &str, cookie: &str, form: &st
 }
 
 /// A login form posted from the connection `peer`, through a proxy that
-/// names `forwarded` as the client.
+/// names `forwarded` as the client, each of its lines a header line.
 async fn post_from(site: &Arc<Site>, peer: &str, forwarded: &str, form: &str) -> Reply {
-    let request = axum::http::Request::builder()
+    let mut request = axum::http::Request::builder()
         .method("POST")
         .uri("/hs-login")
         .header(header::COOKIE, "hyscribe_test_cookie=WP%20Cookie%20check")
-        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .header("x-forwarded-for", forwarded)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    for line in forwarded.split('\n').filter(|line| !line.is_empty()) {
+        request = request.header("x-forwarded-for", line);
+    }
+    let request = request
         .extension(crate::Peer(peer.parse().unwrap()))
         .body(Body::from(form.to_string()))
         .unwrap();
@@ -308,6 +311,28 @@ async fn the_forwarded_client_is_counted_only_behind_a_proxy() {
     assert_eq!(other_client.status, StatusCode::FOUND);
 }
 
+/// Behind a proxy that appends its own `X-Forwarded-For` line, a line the
+/// client forged names no new address; an entry that names none refuses
+/// the guess, without counting it against the proxy every client shares.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_proxy_s_own_line_names_the_client() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = login_site(Some(dir.path())).await;
+    let site = Arc::new(Arc::try_unwrap(site).unwrap().with_proxy(true));
+    for forged in 0..5 {
+        let lines = format!("198.51.100.{forged}\n203.0.113.9:4321");
+        post_from(&site, "192.0.2.1", &lines, WRONG).await;
+    }
+    let limited = post_from(&site, "192.0.2.1", "198.51.100.9\n203.0.113.9", RIGHT).await;
+    assert_eq!(limited.status, StatusCode::OK);
+    for _ in 0..5 {
+        let unnamed = post_from(&site, "192.0.2.1", "unknown", RIGHT).await;
+        assert_eq!(unnamed.status, StatusCode::OK);
+    }
+    let other = post_from(&site, "192.0.2.1", "[2001:db8::1]:443", RIGHT).await;
+    assert_eq!(other.status, StatusCode::FOUND);
+}
+
 /// The configured limits replace the defaults.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_site_takes_the_configured_limits() {
@@ -340,7 +365,7 @@ async fn a_limited_guess_never_reaches_the_hash() {
         };
         let reads_from = |client| {
             let mut reads = LoginReads::new(&site, handle.clone(), now());
-            reads.client = client;
+            reads.client = Ok(client);
             reads
         };
         let refused = reads_from(client);

@@ -167,8 +167,9 @@ pub(crate) struct LoginReads<'a> {
     /// A post as a writer action reads it, which capability checks see in
     /// place of the site's.
     pub(crate) action_post: Option<CapPost>,
-    /// The client's address, which the login limits count.
-    client: Option<IpAddr>,
+    /// The client's address, which the login limits count; behind a proxy
+    /// whose entry names none, no password is checked.
+    client: Result<Option<IpAddr>, crate::comment_post::Unnamed>,
     /// The accounts whose password was checked, and whether it matched.
     checked: RefCell<Vec<(u64, bool)>>,
     /// The client's turn to check passwords, once one is checked.
@@ -185,7 +186,7 @@ impl<'a> LoginReads<'a> {
             current: (0, Vec::new()),
             profile_user: 0,
             action_post: None,
-            client: None,
+            client: Ok(None),
             checked: RefCell::default(),
             turn: RefCell::default(),
         }
@@ -371,12 +372,15 @@ impl LoginSite for LoginReads<'_> {
     /// A guess the login limits refuse fails as a wrong password would,
     /// without checking the hash.
     fn check_password(&self, user: &User, password: &[u8]) -> bool {
+        let Ok(client) = self.client.as_ref().map(|client| *client) else {
+            return false;
+        };
         let limiter = &self.site.limiter;
         let mut turn = self.turn.borrow_mut();
         if turn.is_none() {
-            *turn = limiter.turn(self.client);
+            *turn = limiter.turn(client);
         }
-        if turn.is_none() || !limiter.allows(self.client, user.id, self.now) {
+        if turn.is_none() || !limiter.allows(client, user.id, self.now) {
             return false;
         }
         let matched = hyscribe_auth::check_password(password, &user.pass);
@@ -566,8 +570,13 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             let guess = asked.form.get_str("pwd").and_then(Value::as_bytes);
             let blank = |pwd| hyscribe_phpser::is_empty_string(hyscribe_phpser::php_trim(pwd));
             if guess.is_some_and(|pwd| !blank(pwd)) {
-                site.limiter
-                    .record(reads.client, &reads.checked.borrow(), now);
+                match &reads.client {
+                    Ok(client) => site.limiter.record(*client, &reads.checked.borrow(), now),
+                    Err(unnamed) => eprintln!(
+                        "login refused: the proxy's last X-Forwarded-For entry {:?} names no address",
+                        unnamed.0
+                    ),
+                }
             }
             outcome
         }

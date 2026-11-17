@@ -15,11 +15,9 @@ INSERT INTO `wp_postmeta` VALUES (9601,9605,'_wp_attached_file','2026/11/photo.j
 INSERT INTO `wp_terms` VALUES (9601,'Foo','foo',0),(9602,'News','news',0),(9603,'post-format-aside','post-format-aside',0);
 INSERT INTO `wp_term_taxonomy` VALUES (9601,9601,'post_tag','',0,0),(9602,9602,'category','',0,0),(9603,9603,'post_format','',0,1);
 INSERT INTO `wp_term_relationships` VALUES (9606,1,0),(9606,9603,0),(9603,1,0),(9604,1,0);
-UPDATE wp_term_taxonomy SET count = 2 WHERE term_taxonomy_id = 1;
 -- cleanup
 DELETE FROM wp_posts WHERE ID BETWEEN 9601 AND 9699;
 DELETE FROM wp_postmeta WHERE meta_id BETWEEN 9601 AND 9699;
 DELETE FROM wp_terms WHERE term_id BETWEEN 9601 AND 9699;
 DELETE FROM wp_term_taxonomy WHERE term_taxonomy_id BETWEEN 9601 AND 9699;
 DELETE FROM wp_term_relationships WHERE object_id BETWEEN 9601 AND 9699;
-UPDATE wp_term_taxonomy SET count = 1 WHERE term_taxonomy_id = 1;

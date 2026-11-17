@@ -431,7 +431,6 @@ async fn oracle_writes(
     let site = saves_site(dir.path()).await;
     for &(golden, method, ref target, body) in writes {
         let pending = planned(&site, method, target, body).await;
-        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
         let setup = async |conn: &mut hyscribe_db::Connection| {
             if !bare(golden) {
                 let setup = sqlx::raw_sql(sqlx::AssertSqlSafe(setup));
@@ -440,6 +439,8 @@ async fn oracle_writes(
             Ok::<_, String>(())
         };
         let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            // Timed within the oracle's run, however long the plan took.
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
             let outcome = acted(conn, &pending.plan, &ctx).await;
             assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
             Ok(())

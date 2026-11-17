@@ -36,7 +36,8 @@
 # as every identity but those listed, and writes
 # sends it once as the administrator after the others, fails the run unless
 # it writes to the database, and records the status as writes; hash keeps the
-# body's SHA-256, as on the Theme Test Data fixture. The headers kept are
+# body's SHA-256, as on the Theme Test Data fixture; secret has the random
+# secret of an oEmbed answer's HTML read 0123456789. The headers kept are
 # WordPress's own, one "name: value" a line in the order sent, with Apache's
 # Accept-Encoding left out of Vary. Cron is off for the run, no one may post
 # unfiltered HTML, as in HyScribe, and every
@@ -222,6 +223,13 @@ for who in "${WHO[@]}"; do
     fi
     headers=$(tr -d '\r' < "$TMP/head" | grep -iE '^(content-type|x-robots-tag|link|location|access-control-[a-z-]+|allow|vary|x-wp-[a-z]+|expires|cache-control):' |
       sed -E 's/^([^:]+):/\L\1:/; s/^(vary: .*),Accept-Encoding$/\1/' | grep -vx 'vary: Accept-Encoding' | sed "s/$nonce/%nonce%/g" || true)
+    if [[ ",$flags," == *,secret,* ]]; then
+      python3 -I -c '
+import re, sys
+s = open(sys.argv[1], "rb").read()
+m = re.search(rb"#\?secret=([A-Za-z0-9]{10})", s)
+open(sys.argv[1], "wb").write(s.replace(m.group(1), b"0123456789") if m else s)' "$TMP/body"
+    fi
     if [ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ] || [[ ",$flags," == *,hash,* ]]; then
       body=$(sed "s/$nonce/%nonce%/g; s/preview_nonce=[0-9a-f]\{10\}/preview_nonce=%preview_nonce%/g" "$TMP/body" | sha256sum | cut -c1-64 | tr -d '\n' | xxd -p | tr -d '\n')
     else

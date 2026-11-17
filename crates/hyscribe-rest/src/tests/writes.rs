@@ -203,7 +203,8 @@ fn on(site: &dyn Site, asked: &Asked, outcome: Outcome) -> (Option<Plan>, Served
         Answer::Served(served) => (None, served),
         Answer::Write(pending) => {
             let plan = pending.plan.clone();
-            (Some(plan), written(site, &request, *pending, outcome))
+            let served = written(site, &request, *pending, outcome).served();
+            (Some(plan), served.unwrap())
         }
     }
 }

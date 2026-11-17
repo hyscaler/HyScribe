@@ -10,7 +10,7 @@ use std::cell::OnceCell;
 
 use hyscribe_db::{DbError, Meta, Write};
 use hyscribe_phpser::Value;
-use hyscribe_rest::{Outcome, Pending, Plan, Request, Save, Served};
+use hyscribe_rest::{Answer, Outcome, Pending, Plan, Request, Save, Served};
 use hyscribe_write::Error;
 use hyscribe_write::options::{delete_metadata, update_metadata};
 use hyscribe_write::posts::{
@@ -42,32 +42,37 @@ pub(super) fn answer(
     let Some(writer) = &site.writer else {
         return sent(read_only());
     };
-    let plan = &pending.plan;
-    let ctx = context(site, plan, now);
-    let outcome = handle.block_on(async { act(writer.begin().await, plan, &ctx).await });
-    let served = match outcome {
-        // What PHP refuses past the checks only as another write gets in.
-        Err(Error::Unported(_) | Error::Refused(_)) => Ok(Served::not_ported()),
-        Err(err) => Err(err),
-        Ok(outcome) => {
-            let reloaded = handle.block_on(site.reloaded());
-            let fresh = reloaded.as_ref().unwrap_or(site);
-            let mut reads = LoginReads::new(fresh, handle, now);
-            reads.act_as(user, token);
-            let rest = Rest {
-                reads,
-                site: fresh,
-                user,
-                caps: OnceCell::new(),
-            };
-            let served = hyscribe_rest::written(&rest, request, pending, outcome);
-            let Rest { reads, .. } = rest;
-            reads.reads.finish().map(|()| served).map_err(Error::Db)
+    // A batch's writes are made one after the other, each in its action.
+    let mut pending = pending;
+    loop {
+        let plan = &pending.plan;
+        let ctx = context(site, plan, now);
+        let outcome = handle.block_on(async { act(writer.begin().await, plan, &ctx).await });
+        let answered = match outcome {
+            // What PHP refuses past the checks only as another write gets in.
+            Err(Error::Unported(_) | Error::Refused(_)) => Ok(Answer::Served(Served::not_ported())),
+            Err(err) => Err(err),
+            Ok(outcome) => {
+                let reloaded = handle.block_on(site.reloaded());
+                let fresh = reloaded.as_ref().unwrap_or(site);
+                let mut reads = LoginReads::new(fresh, handle.clone(), now);
+                reads.act_as(user, token.clone());
+                let rest = Rest {
+                    reads,
+                    site: fresh,
+                    user,
+                    caps: OnceCell::new(),
+                };
+                let answered = hyscribe_rest::written(&rest, request, pending, outcome);
+                let Rest { reads, .. } = rest;
+                reads.reads.finish().map(|()| answered).map_err(Error::Db)
+            }
+        };
+        match answered {
+            Ok(Answer::Served(served)) => return sent(served),
+            Ok(Answer::Write(next)) => pending = *next,
+            Err(err) => return crate::html(crate::database_error(site, &format!("{err:?}"))),
         }
-    };
-    match served {
-        Ok(served) => sent(served),
-        Err(err) => crate::html(crate::database_error(site, &format!("{err:?}"))),
     }
 }
 

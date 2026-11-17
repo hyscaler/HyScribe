@@ -12,15 +12,18 @@ use crate::response::paginate;
 
 use super::*;
 
+mod batch;
 pub(crate) mod content;
 mod embed;
 mod index;
 mod media;
+mod oembed;
 mod people;
 mod posts;
 mod previews;
 mod search;
 mod site;
+mod widgets;
 mod writes;
 
 use content::Content;
@@ -28,12 +31,14 @@ use content::Content;
 const SITE: &str = "http://127.0.0.1:8081";
 
 /// The oracle over `content` and its fixture, under plain or pretty
-/// permalinks, with the public users endpoint and the Trash on or off.
+/// permalinks, with the public users endpoint and the Trash on or off, and
+/// with or without the salts `wp_hash()` signs with.
 struct Oracle {
     content: &'static Content,
     fixture: site::Fixture,
     public_users: bool,
     trash: bool,
+    salts: bool,
 }
 
 impl Oracle {
@@ -51,6 +56,7 @@ impl Oracle {
             ),
             public_users: true,
             trash: true,
+            salts: true,
         }
     }
 }
@@ -272,6 +278,15 @@ impl Site for Oracle {
     fn has_posts(&self, author: u64, types: &[(String, bool)]) -> bool {
         self.content.has_posts(author, types)
     }
+    /// The salt `reference/rest/widgets.php` gives the oracle.
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        let salt = self.salts.then_some(b"test-salt");
+        salt.map(|salt| hyscribe_phpser::hash_hmac_md5(data, salt))
+    }
+    /// The secret `reference/rest/golden.sh` masks oEmbed answers with.
+    fn embed_secret(&self) -> String {
+        "0123456789".into()
+    }
 }
 
 fn cases() -> Vec<RestCase> {
@@ -318,12 +333,17 @@ pub(super) fn serve_with(site: &dyn Site, case: &RestCase) -> Served {
     let (_, user) = role(&case.who);
     let flag = |name: &str| case.flag(name);
     let route = route(path, &get);
+    // `$_POST`, which PHP reads from a form it is sent.
+    let form = match parse_str(&case.sent) {
+        Value::Array(form) if flag("form") => form,
+        _ => Vec::new(),
+    };
     let request = Request {
         method: &case.method,
         route: &route,
         uri: case.target.as_bytes(),
         get: &get,
-        post: &[],
+        post: &form,
         cookie_user: user,
         origin: if flag("origin") {
             Some(b"http://example.test")
@@ -334,8 +354,14 @@ pub(super) fn serve_with(site: &dyn Site, case: &RestCase) -> Served {
         },
         nonce: (user != 0 && !flag("nononce")).then_some(b"%nonce%"),
         method_override: flag("override").then_some(b"DELETE"),
-        content_type: None,
-        body: b"",
+        content_type: if flag("json") {
+            Some(b"application/json")
+        } else if flag("form") {
+            Some(b"application/x-www-form-urlencoded")
+        } else {
+            None
+        },
+        body: &case.sent,
         host: Some(if flag("localhost") {
             b"localhost:8081"
         } else {
@@ -347,10 +373,9 @@ pub(super) fn serve_with(site: &dyn Site, case: &RestCase) -> Served {
 }
 
 /// Requests PHP answers on routes or with arguments not ported.
-const UNPORTED: [(&str, &str); 5] = [
+const UNPORTED: [(&str, &str); 4] = [
     ("GET", "/?rest_route=/"),
     ("GET", "/?rest_route=0/"),
-    ("GET", "/?rest_route=/wp/v2"),
     ("GET", "/?rest_route=/wp-abilities/v1/categories/a-b"),
     ("GET", "/?rest_route=/wp/v2/types&_method[]=x"),
 ];
@@ -454,7 +479,7 @@ fn mismatches(
                 not_served += 1;
                 continue;
             }
-            let body = if hashed {
+            let body = if hashed || case.flag("hash") {
                 sha256_hex(&served.body)
             } else {
                 served.body.clone()

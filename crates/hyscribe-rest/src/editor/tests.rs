@@ -87,8 +87,7 @@ fn preloads() -> &'static Content {
 }
 
 /// Descriptions of routes not ported, which PHP gives.
-const UNDESCRIBED: [&str; 3] = [
-    "/?rest_route=/wp/v2",
+const UNDESCRIBED: [&str; 2] = [
     "/?rest_route=/wp/v2/plugins",
     "/?rest_route=/wp/v2/global-styles/901/revisions",
 ];

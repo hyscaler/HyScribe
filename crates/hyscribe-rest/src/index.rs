@@ -4,28 +4,70 @@
 //! image settings for users who may upload, and its logo, icon and theme.
 //! Its `namespaces` and `routes` would list routes HyScribe does not port,
 //! so a request whose `_fields` keeps either, or that gives none, is
-//! answered 501 (ADR 0013); as are the namespace indexes, none of whose
-//! namespaces is ported whole.
+//! answered 501 (ADR 0013). The namespace indexes, `get_namespace_index()`,
+//! describe their routes from the exported descriptions.
 
 use hyscribe_phpser::{Key, Value};
 use hyscribe_render::attachment::image_downsize;
 
 use crate::fields::{filter_fields, is_field_included, links_wanted};
-use crate::request::Params;
+use crate::request::{Arg, Params, Sanitize};
 use crate::response::{Response, RestError, object, text};
 use crate::schema::parse_list;
-use crate::{Context, Endpoint, unserialized};
+use crate::{Context, Endpoint, describe, routes, unserialized};
 
-/// The endpoints of the route `regex`, if `/`.
+/// The endpoints of the route `regex`, if `/` or a namespace's index.
 pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
-    // Its one argument, `context`, describes the routes alone.
-    (regex == "/").then(|| {
-        vec![Endpoint {
+    if regex == "/" {
+        // Its one argument, `context`, describes the routes alone.
+        return Some(vec![Endpoint {
             args: Vec::new(),
             permission: |_, _| Ok(()),
             callback: Some(index),
-        }]
-    })
+        }]);
+    }
+    let namespace = regex.strip_prefix('/')?;
+    routes::namespace_routes(namespace.as_bytes())?;
+    let default = |name, value: &str| Arg {
+        name,
+        schema: object([("default", text(value))]),
+        validate: false,
+        sanitize: Sanitize::Endpoint,
+    };
+    Some(vec![Endpoint {
+        args: vec![default("namespace", namespace), default("context", "view")],
+        permission: |_, _| Ok(()),
+        callback: Some(namespace_index),
+    }])
+}
+
+/// `get_namespace_index()`: the routes of the namespace its argument names,
+/// described as `get_data_for_routes()` describes them, with their schemas
+/// in the `help` context only.
+fn namespace_index(context: &Context, params: &Params) -> Result<Response, RestError> {
+    // A namespace that is not a string is an offset PHP fails on.
+    let Some(Value::String(namespace)) = params.get("namespace") else {
+        return Err(RestError::not_ported());
+    };
+    let Some(regexes) = routes::namespace_routes(namespace) else {
+        let message = "The specified namespace could not be found.";
+        return Err(RestError::status("rest_invalid_namespace", message, 404));
+    };
+    let help = params.get("context") == Some(&text("help"));
+    let routes = regexes.into_iter().map(|regex| {
+        let mut description = describe(context, regex);
+        if let (false, Value::Array(entries)) = (help, &mut description) {
+            entries.retain(|(key, _)| *key != Key::String(b"schema".to_vec()));
+        }
+        (Key::String(regex.as_bytes().to_vec()), description)
+    });
+    let data = object([
+        ("namespace", Value::String(namespace.clone())),
+        ("routes", Value::Array(routes.collect())),
+    ]);
+    let mut response = Response::new(data, 200);
+    response.add_link("up", context.rest_url("/"));
+    Ok(response)
 }
 
 /// `get_option( $name )`: `false` when not stored.

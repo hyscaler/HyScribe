@@ -17,6 +17,7 @@
 #   wordpress/wp-includes/rest-post-types.json      the post types, as the REST API types route describes those it shows
 #   wordpress/wp-includes/rest-taxonomies.json      the taxonomies, as the REST API taxonomies route describes those it shows
 #   wordpress/wp-includes/rest-settings.json        the settings the REST API settings route shows, with their options and schemas
+#   wordpress/wp-includes/rest-widget-types.json    the widget types, as the REST API widget types route gives them
 #   wordpress/wp-includes/rest-registered.json      the block types and core pattern categories, as the REST API gives them (reference/rest/registered.php)
 #   wordpress/wp-includes/dependencies.json         the styles and scripts load-styles.php and load-scripts.php serve
 #   wordpress/wp-includes/registry.json             the styles and scripts an admin request registers, with placeholders for its URLs and nonces
@@ -88,6 +89,9 @@ mkdir -p "$OUT"
 # The settings the settings route shows, in its order: each one's option and
 # schema.
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; rest_get_server(); class HyScribe_Settings extends WP_REST_Settings_Controller { public function options() { return $this->get_registered_options(); } } $out = array(); foreach ( ( new HyScribe_Settings() )->options() as $name => $args ) { unset( $args["schema"]["title"], $args["schema"]["description"] ); $out[ $name ] = array( "option" => $args["option_name"], "schema" => $args["schema"] ); } echo wp_json_encode( $out, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ), "\n";' > "$OUT/wp-includes/rest-settings.json"
+# The widget types the widget types route gives, in its order, in the edit
+# context, without links.
+"$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 1 ); $request = new WP_REST_Request( "GET", "/wp/v2/widget-types" ); $request->set_param( "context", "edit" ); echo wp_json_encode( array_map( function ( $type ) { unset( $type["_links"] ); return $type; }, rest_do_request( $request )->get_data() ), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ), "\n";' > "$OUT/wp-includes/rest-widget-types.json"
 # The styles and scripts as load-styles.php and load-scripts.php register
 # them, booted as they boot, without the rest of WordPress: each handle's
 # file, version and, for styles, whether it has an RTL twin.

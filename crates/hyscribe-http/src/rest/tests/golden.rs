@@ -282,7 +282,7 @@ async fn unported(database: &str, requests: &'static [(&str, &str, &str)]) {
 #[tokio::test]
 async fn index_matches_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/index.tsv");
-    replay("wordpress", golden, false, 6 * 47, &[]).await;
+    replay("wordpress", golden, false, 6 * 41, &[]).await;
 }
 
 /// Writes answer 501, as do the arguments whose schemas use keywords not

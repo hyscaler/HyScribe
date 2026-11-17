@@ -1,7 +1,7 @@
 # The REST index for reference/rest/golden.sh (method, target, flags): the
 # block editor's preload of WordPress 7.1.3 (edit-form-blocks.php), its
 # fields without the image settings, other fields clients ask for; then, refused, those HyScribe answers 501
-# as they keep the routes or namespaces (ADR 0013), and the namespace indexes.
+# as they keep the routes or namespaces (ADR 0013). The namespace indexes are in namespaces.list.
 GET	/?rest_route=/&_fields=description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front
 GET	/?rest_route=/&_fields=description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front	localhost
 GET	/wp-json/?_fields=description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front	pretty,localhost
@@ -43,9 +43,3 @@ GET	/?rest_route=/&_fields=name,namespaces	localhost,refused
 GET	/?rest_route=/&_embed	refused
 HEAD	/?rest_route=/	refused
 GET	/wp-json/	pretty,refused
-GET	/?rest_route=/wp/v2	refused
-GET	/?rest_route=/wp/v2&_fields=namespace	refused
-GET	/?rest_route=/oembed/1.0	refused
-GET	/?rest_route=/wp-block-editor/v1	refused
-GET	/?rest_route=/wp-site-health/v1	refused
-GET	/?rest_route=/wp-abilities/v1	refused

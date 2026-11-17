@@ -107,6 +107,23 @@ async fn site_writes_match_php() {
     assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 20, 6 * 3));
 }
 
+/// PHP's answers to batches (`reference/rest/batch.list`) as a visitor, an
+/// author and the administrator, their writes made one after the other,
+/// those flagged `refused` answered 501; `hyscribe-rest` replays every role.
+#[tokio::test(flavor = "multi_thread")]
+async fn batches_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/batch.tsv");
+    let who = ["visitor\t", "author\t", "administrator\t"];
+    let golden: Vec<&str> = golden
+        .lines()
+        .filter(|line| who.iter().any(|who| line.starts_with(who)))
+        .collect();
+    assert_eq!(
+        writes_match_php(&golden.join("\n"), "", &[]).await,
+        (3 * 28, 3)
+    );
+}
+
 /// The cases of `golden`, recorded over `state`, sent over HTTP as each
 /// identity: how many there are and how many answered 501, as those
 /// `unported` and flagged `refused` must.

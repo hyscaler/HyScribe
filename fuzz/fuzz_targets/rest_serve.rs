@@ -2,8 +2,9 @@
 
 //! The REST API answers any route, query, method, headers and body without
 //! panicking: route matching, the JSON and form bodies, `_fields`,
-//! `_jsonp`, `_envelope`, the arguments' schemas, the routes and the
-//! writes' plans and answers all take input from the request, and
+//! `_jsonp`, `_envelope`, the arguments' schemas, the routes, a batch's
+//! nested requests and the writes' plans and answers all take input from
+//! the request, and
 //! the site's one template, template part and global styles post, its one
 //! comment and its one user have the input's content.
 
@@ -222,10 +223,16 @@ fuzz_target!(|data: &[u8]| {
         now: i64::from(header.first().copied().unwrap_or(0)) << 24,
     };
     let site = Fuzzed { content };
-    let served = match answer(&site, &request) {
-        Answer::Served(served) => served,
-        // The write made, the post written is the fuzzed one.
-        Answer::Write(pending) => written(&site, &request, *pending, Outcome::Written(4)),
+    // Each write made, a batch's one after the other, the post written is
+    // the fuzzed one.
+    let mut answered = answer(&site, &request);
+    let served = loop {
+        match answered {
+            Answer::Served(served) => break served,
+            Answer::Write(pending) => {
+                answered = written(&site, &request, *pending, Outcome::Written(4));
+            }
+        }
     };
     assert!((200..600).contains(&served.status));
 });

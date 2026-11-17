@@ -1272,25 +1272,13 @@ fn render_page(
     Ok(document)
 }
 
-/// The embed sharing dialog's secret, ten letters and digits, and ID
-/// suffix, as large as `wp_rand()`'s: drawn from the standard library's
-/// randomly keyed hasher, as they guard nothing.
+/// The embed sharing dialog's secret and ID suffix, as large as
+/// `wp_rand()`'s: drawn from the standard library's randomly keyed hasher,
+/// as they guard nothing.
 fn share() -> Share {
     use std::hash::{BuildHasher, RandomState};
-    let mut draw = RandomState::new().hash_one(0_u8);
-    let mut secret = String::new();
-    for _ in 0..10 {
-        // Base 62: digits and lower case letters, then upper case ones.
-        let digit = u32::try_from(draw % 62).unwrap_or_default();
-        secret.push(char::from_digit(digit, 36).unwrap_or_else(|| {
-            char::from_digit(digit - 26, 36)
-                .unwrap_or_default()
-                .to_ascii_uppercase()
-        }));
-        draw /= 62;
-    }
     Share {
-        secret,
+        secret: hyscribe_render::head::embed_secret(),
         // Truncated to `wp_rand()`'s 32 bits.
         suffix: (RandomState::new().hash_one(1_u8) as u32).to_string(),
     }

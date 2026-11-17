@@ -67,3 +67,4 @@ mod widgets;
 
 pub use categories::{Walk, walk};
 pub use query_loop::{order_by, search_count, search_terms, sticky_posts};
+pub use widgets::core_widgets;

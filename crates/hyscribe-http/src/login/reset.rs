@@ -98,10 +98,8 @@ pub(super) fn lost_password(
         let mut write = writer.begin().await?;
         let retrieved = retrieve_password(&mut write, &login).await?;
         // A refusal wrote nothing, so committing it changes nothing.
-        if !fatal {
-            write.commit().await?;
-        }
-        Ok::<_, hyscribe_write::Error>(retrieved)
+        let committed = if fatal { Ok(()) } else { write.commit().await };
+        committed.map(|()| retrieved).map_err(Into::into)
     });
     let key = match retrieved {
         Ok(Ok(_)) if fatal => return ((StatusCode::NOT_IMPLEMENTED, Vec::new()), Vec::new()),
@@ -136,19 +134,15 @@ pub(super) fn reset(
     let reset = reads.reads.block_on(async {
         let mut write = writer.begin().await?;
         let user = reset_password(&mut write, id, password).await?;
-        write.commit().await?;
-        Ok::<_, hyscribe_write::Error>(user)
+        write.commit().await.map(|()| user).map_err(Into::into)
     });
     let (login, email) = match reset {
         Ok(user) => user,
         Err(err) => return failed(reads, &err),
     };
     // The new password's fragment ends every cookie, as in PHP; the
-    // sessions they were for end with them.
-    if let Some(sessions) = &reads.site.sessions {
-        // A session that cannot be removed fails all the same.
-        let _ = sessions.destroy_all(id);
-    }
+    // sessions they were for end with them, or fail all the same.
+    let _ = reads.site.sessions.as_ref().map(|s| s.destroy_all(id));
     let texts = mail_texts(reads);
     let user = User {
         login: &login,

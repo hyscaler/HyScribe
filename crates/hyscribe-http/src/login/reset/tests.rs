@@ -22,6 +22,9 @@ use hyscribe_admin::login::{Session, Site as _};
 
 const URL: &str = "http://127.0.0.1:8081";
 
+/// lost-reset's stored key in `reference/lost-password/content.sql`.
+const RESET_KEY: &[u8] = b"4102444800:$generic$2OXFKFqn5zqNAyOyU3N8wD1O8ES-1FwtFHRdHfnk";
+
 /// `wordpress_saves` loaded with the fixture, the users of
 /// `reference/lost-password/content.sql` and `sql`.
 async fn loaded(sql: &str) -> Database {
@@ -273,20 +276,26 @@ async fn the_mails_carry_the_key_and_a_reset_ends_the_sessions() {
 #[tokio::test(flavor = "multi_thread")]
 async fn shadow_mode_and_failed_writes_write_nothing() {
     let _saves = crate::admin::tests::SAVES.lock().await;
-    let db = loaded("DROP TABLE wp_usermeta").await;
     let dir = tempfile::tempdir().unwrap();
-    for primary in [false, true] {
+    // A table the writes need gone, then a database HyScribe writes nothing to.
+    let dropped = "DROP TABLE wp_usermeta";
+    let version = "UPDATE wp_options SET option_value = '1' WHERE option_name = 'db_version'";
+    for (primary, sql) in [(false, dropped), (true, dropped), (true, version)] {
+        let db = loaded(sql).await;
         let site = site(&db, dir.path(), primary).await;
         let handle = Handle::current();
-        let (lost, reset) = tokio::task::spawn_blocking(move || {
+        let answers = tokio::task::spawn_blocking(move || {
             let reads = LoginReads::new(&site, handle, crate::now());
             let (query, form) = (parse_str(b""), parse_str(b"user_login=admin"));
             let request = posted(&query, &form);
             let lost = lost_password(&reads, &request, "lostpassword", &mut Vec::new());
-            (lost, reset(&reads, &request, "resetpass", (706, b"new")))
+            let reset = reset(&reads, &request, "resetpass", (706, b"new"));
+            let key = |login: &[u8]| reads.user_by_login(login).unwrap().activation_key;
+            ((lost, reset), (key(b"admin"), key(b"lost-reset")))
         })
         .await
         .unwrap();
+        let ((lost, reset), keys) = answers;
         let status = match primary {
             true => StatusCode::INTERNAL_SERVER_ERROR,
             false => StatusCode::FORBIDDEN,
@@ -301,7 +310,6 @@ async fn shadow_mode_and_failed_writes_write_nothing() {
             };
             assert!(page.contains(text), "{what} {primary}");
         }
+        assert_eq!(keys, (Vec::new(), RESET_KEY.to_vec()), "{sql}");
     }
-    let (_, key) = stored(&db, 1).await;
-    assert_eq!(key, "");
 }

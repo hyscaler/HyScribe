@@ -404,8 +404,8 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         http_outbound,
         constants,
         login_limits,
-        disable_wp_cron: constant(get("DISABLE_WP_CRON"), "DISABLE_WP_CRON", false)?,
-        alternate_wp_cron: constant(get("ALTERNATE_WP_CRON"), "ALTERNATE_WP_CRON", false)?,
+        disable_wp_cron: boolean(get("DISABLE_WP_CRON"), "DISABLE_WP_CRON", false)?,
+        alternate_wp_cron: boolean(get("ALTERNATE_WP_CRON"), "ALTERNATE_WP_CRON", false)?,
         upload_max_size,
     })
 }

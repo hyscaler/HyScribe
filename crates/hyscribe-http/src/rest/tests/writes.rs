@@ -310,6 +310,28 @@ async fn acted(
     }
 }
 
+/// The write oracle's `%now%` spans its action alone, so a write dated
+/// when it was planned, a second or more before its action, is not PHP's:
+/// the rows tests date each write as its action runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn writes_are_dated_as_their_action_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let body = r#"{"title":"A REST draft","status":"draft","slug":"hello-world"}"#;
+    let pending = planned(&site, "POST", "/?rest_route=/wp/v2/posts", body).await;
+    for (shift, dated) in [(-2, false), (0, true)] {
+        let nothing = async |_: &mut hyscribe_db::Connection| Ok::<_, String>(());
+        let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now() + shift);
+            acted(conn, &pending.plan, &ctx).await;
+            Ok(())
+        };
+        let golden = "rest-posts-create-draft";
+        let report = check_writes(&fixture_database(), golden, nothing, action).await;
+        assert_eq!(report.is_ok(), dated, "{shift}");
+    }
+}
+
 /// Each write leaves the rows PHP's leaves (`reference/writes/actions-rest.php`),
 /// and nothing when a statement fails part way.
 #[tokio::test(flavor = "multi_thread")]

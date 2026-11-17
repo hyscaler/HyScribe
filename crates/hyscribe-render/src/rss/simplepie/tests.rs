@@ -1,0 +1,114 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+use super::*;
+
+#[test]
+fn absolutizes_as_rfc_3986_resolves() {
+    let base = b"http://a.test/b/c/d;p?q#f";
+    for (relative, resolved) in [
+        (&b"g"[..], &b"http://a.test/b/c/g"[..]),
+        (b"./g", b"http://a.test/b/c/g"),
+        (b"g/", b"http://a.test/b/c/g/"),
+        (b"/g", b"http://a.test/g"),
+        (b"//g.test/x", b"http://g.test/x"),
+        (b"?y", b"http://a.test/b/c/d;p?y"),
+        (b"#s", b"http://a.test/b/c/d;p?q#s"),
+        (b"", b"http://a.test/b/c/d;p?q"),
+        (b"../g?x#y", b"http://a.test/b/g?x#y"),
+        (b"../../../g", b"http://a.test/g"),
+        (b".", b"http://a.test/b/c/"),
+        (b"..", b"http://a.test/b/"),
+        (b"https://other.test/x", b"https://other.test/x"),
+    ] {
+        assert_eq!(absolutize(relative, base), resolved, "{relative:?}");
+    }
+    assert_eq!(absolutize(b"x", b"http://a.test"), b"http://a.test/x");
+    assert_eq!(absolutize(b"x", b"urn:a"), b"urn:x");
+    assert_eq!(absolutize(b"x", b"not a base"), b"x");
+    assert_eq!(absolutize(b"x", b"1a:b"), b"x");
+}
+
+#[test]
+fn finds_each_feed_type() {
+    let kind = |xml: &str| Feed::kind(&parse(xml.as_bytes()).unwrap());
+    assert_eq!(
+        kind("<feed xmlns='http://purl.org/atom/ns#'/>"),
+        TYPE_ATOM_03
+    );
+    let rdf = "<r:RDF xmlns:r='http://www.w3.org/1999/02/22-rdf-syntax-ns#' xmlns='NS'><channel/></r:RDF>";
+    assert_eq!(
+        kind(&rdf.replace("NS", "http://purl.org/rss/1.0/")),
+        TYPE_RSS_10
+    );
+    assert_eq!(
+        kind(&rdf.replace("NS", "http://my.netscape.com/rdf/simple/0.9/")),
+        TYPE_RSS_090
+    );
+    for (version, expected) in [
+        ("0.91", TYPE_RSS_091),
+        ("0.92", TYPE_RSS_092),
+        ("0.93", TYPE_RSS_093),
+        ("0.94", TYPE_RSS_094),
+        ("9", TYPE_RSS_ALL),
+    ] {
+        assert_eq!(kind(&format!("<rss version=' {version} '/>")), expected);
+    }
+    assert_eq!(kind("<html/>"), 0);
+}
+
+#[test]
+fn reads_items_of_older_feeds() {
+    let rdf = br#"<r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/" xmlns:dc="http://purl.org/dc/elements/1.0/" xmlns:i="http://www.itunes.com/dtds/podcast-1.0.dtd">
+<channel><link>http://f.test/</link><dc:creator>Feed</dc:creator></channel>
+<item><title>One &amp; two</title><link>one</link><dc:date>2026-01-02T03:04Z</dc:date><description>Text</description></item>
+<item><dc:title>Dc</dc:title><i:author>Pod</i:author><i:summary>Sum</i:summary></item>
+<item><i:subtitle>Sub</i:subtitle></item>
+</r:RDF>"#;
+    let data = parse(rdf).unwrap();
+    let feed = Feed { data: &data };
+    let items = feed.items();
+    let titles: Vec<_> = items.iter().map(Item::title).collect();
+    assert_eq!(titles[2], Some(b"One &amp; two".to_vec()));
+    assert_eq!(titles[0], Some(b"Dc".to_vec()));
+    assert_eq!(items[2].link(), Some(b"http://f.test/one".to_vec()));
+    assert_eq!(items[2].date(), Some(1_767_323_040));
+    assert_eq!(items[0].description(), Some(b"Sum".to_vec()));
+    assert_eq!(items[1].description(), Some(b"Sub".to_vec()));
+    assert_eq!(
+        items[0].author().and_then(|a| a.name),
+        Some(b"Pod".to_vec())
+    );
+    assert_eq!(
+        items[1].author().and_then(|a| a.name),
+        Some(b"Feed".to_vec())
+    );
+    let atom = br#"<feed xmlns="http://purl.org/atom/ns#"><entry><title type="text/html" mode="escaped">&lt;b&gt;x&lt;/b&gt;</title><link rel="alternate" href="http://e.test/"/><author><name>A</name><url>http://a.test/</url></author><issued>2026-01-01T00:00:00Z</issued><content type="application/xhtml+xml" mode="xml"><div xmlns="http://www.w3.org/1999/xhtml"><p class="c">P<br/></p></div></content></entry></feed>"#;
+    let data = parse(atom).unwrap();
+    let feed = Feed { data: &data };
+    let item = &feed.items()[0];
+    assert_eq!(item.title(), Some(b"<b>x</b>".to_vec()));
+    assert_eq!(item.link(), Some(b"http://e.test/".to_vec()));
+    assert_eq!(item.author().and_then(|a| a.name), Some(b"A".to_vec()));
+    assert_eq!(
+        item.description(),
+        Some(b"<div><p class=\"c\">P<br></p></div>".to_vec())
+    );
+}
+
+#[test]
+fn sanitizes_by_construct() {
+    assert_eq!(sanitize(b" a < b ", TEXT, b""), b"a &lt; b");
+    assert_eq!(sanitize(b"a &amp b", MAYBE_HTML, b""), b"a &amp; b");
+    assert_eq!(sanitize(b"x</b >", MAYBE_HTML, b""), b"x");
+    assert_eq!(sanitize(b"&#x41;", MAYBE_HTML, b""), b"&#x41;");
+    assert_eq!(sanitize(b"a & b", MAYBE_HTML, b""), b"a &amp; b");
+    assert_eq!(sanitize(b"  ", TEXT, b""), b"");
+    assert_eq!(sanitize(b"", IRI, b"http://a.test/"), b"http://a.test/");
+    assert_eq!(sanitize(b"<i>", 0, b""), b"<i>");
+    assert!(!looks_like_html(b"&# &#x a&"));
+    assert_eq!(key(b"10"), Key::Int(10));
+    assert_eq!(key(b"-3"), Key::Int(-3));
+    for kept in [&b"010"[..], b"-0", b"1a", b"", b"99999999999999999999"] {
+        assert_eq!(key(kept), Key::String(kept.to_vec()));
+    }
+}

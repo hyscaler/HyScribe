@@ -43,6 +43,10 @@ const MEDIA: [&[u8]; 10] = [
 static YOUTUBE: LazyLock<Option<Pattern>> =
     LazyLock::new(|| Pattern::caseless(r"https?://(www.)?youtube\.com/(v|embed)/([^/]+)"));
 
+/// A pattern's match at a position: the ends of its leading part, its URL
+/// and the whole.
+type Found = Option<(usize, usize, usize)>;
+
 /// PCRE's `\s`.
 pub(crate) fn is_space(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r')
@@ -79,7 +83,7 @@ fn spaces(text: &[u8], at: usize) -> usize {
 
 /// `|^(\s*)(https?://[^\s<>"]+)(\s*)$|im` at `start`, a line's start: the
 /// ends of the leading space, the URL and the match.
-fn alone(text: &[u8], start: usize) -> Option<(usize, usize, usize)> {
+fn alone(text: &[u8], start: usize) -> Found {
     let line = start == 0 || text.get(start - 1) == Some(&b'\n');
     let lead = spaces(text, start);
     let url = url_end(text, lead).filter(|_| line)?;
@@ -94,7 +98,7 @@ fn alone(text: &[u8], start: usize) -> Option<(usize, usize, usize)> {
 }
 
 /// `|(<p(?: [^>]*)?>\s*)(https?://[^\s<>"]+)(\s*<\/p>)|i` at `start`.
-fn paragraph(text: &[u8], start: usize) -> Option<(usize, usize, usize)> {
+fn paragraph(text: &[u8], start: usize) -> Found {
     let rest = text.get(start..)?;
     if !rest.get(..2)?.eq_ignore_ascii_case(b"<p") {
         return None;
@@ -144,11 +148,7 @@ impl Renderer<'_> {
 
     /// `preg_replace_callback()` of a pattern `matcher` finds at a position,
     /// with `autoembed_callback()`.
-    fn each(
-        &mut self,
-        text: &[u8],
-        matcher: fn(&[u8], usize) -> Option<(usize, usize, usize)>,
-    ) -> Vec<u8> {
+    fn each(&mut self, text: &[u8], matcher: fn(&[u8], usize) -> Found) -> Vec<u8> {
         let mut out = Vec::with_capacity(text.len());
         let mut copied = 0;
         let mut at = 0;

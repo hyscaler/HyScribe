@@ -12,7 +12,7 @@ impl crate::outbound::Hooks for Dropping {
     }
 
     fn embed_oembed_html(&self, html: Vec<u8>, _: &[u8], _: Size, post: u64) -> Vec<u8> {
-        [&format!("<!-- {post} -->")[..].as_bytes(), &html[..]].concat()
+        [format!("<!-- {post} -->").into_bytes(), html].concat()
     }
 }
 

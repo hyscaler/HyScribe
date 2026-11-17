@@ -14,7 +14,7 @@ fuzz_target!(|data: &[u8]| {
         let mut parser = Parser::new(data, html);
         let mut steps = 0;
         let mut text = 0;
-        while let Ok(event) = parser.next() {
+        while let Ok(event) = parser.read() {
             steps += 1;
             assert!(steps <= data.len() + 1);
             match event {

@@ -47,15 +47,22 @@ const XHTML_CONSTRUCT: u8 = 4;
 const MAYBE_HTML: u8 = 16;
 const IRI: u8 = 64;
 
+/// Lists grouped by namespace, then by name.
+type Grouped<T> = Vec<(Vec<u8>, Vec<(Vec<u8>, T)>)>;
+
+/// An open element: its name, whether it opened a node of the tree, and
+/// its `xml:base`, whether that was set, and `xml:lang`.
+type Open = (Name, bool, Vec<u8>, bool, Vec<u8>);
+
 /// An element of the tree, as `Parser` keeps it.
 #[derive(Default)]
 struct Node {
     data: Vec<u8>,
-    attribs: Vec<(Vec<u8>, Vec<(Vec<u8>, Vec<u8>)>)>,
+    attribs: Grouped<Vec<u8>>,
     base: Vec<u8>,
     explicit: bool,
     lang: Vec<u8>,
-    child: Vec<(Vec<u8>, Vec<(Vec<u8>, Vec<Value>)>)>,
+    child: Grouped<Vec<Value>>,
 }
 
 impl Node {
@@ -91,7 +98,7 @@ impl Node {
 }
 
 /// `array( namespace => array( name => value ) )`.
-fn groups<T>(groups: Vec<(Vec<u8>, Vec<(Vec<u8>, T)>)>, value: fn(T) -> Value) -> Value {
+fn groups<T>(groups: Grouped<T>, value: fn(T) -> Value) -> Value {
     Value::Array(
         groups
             .into_iter()
@@ -107,7 +114,7 @@ fn groups<T>(groups: Vec<(Vec<u8>, Vec<(Vec<u8>, T)>)>, value: fn(T) -> Value) -
 }
 
 /// A node's children, each list indexed from 0.
-fn children(child: Vec<(Vec<u8>, Vec<(Vec<u8>, Vec<Value>)>)>) -> Value {
+fn children(child: Grouped<Vec<Value>>) -> Value {
     groups(child, |list: Vec<Value>| {
         Value::Array(
             list.into_iter()
@@ -153,11 +160,11 @@ pub(crate) fn parse(xml: &[u8]) -> Result<Value, Error> {
     let mut parser = Parser::new(xml, true);
     let mut root = Node::default();
     // The open elements: the node each one opened (none inside a construct).
-    let mut stack: Vec<(Name, Option<Node>, Vec<u8>, bool, Vec<u8>)> = Vec::new();
+    let mut stack: Vec<Open> = Vec::new();
     let mut construct: i64 = -1;
     let mut current: Vec<Node> = Vec::new();
     loop {
-        match parser.next()? {
+        match parser.read()? {
             Event::Eof => break,
             Event::Doctype => {}
             Event::Start { name, attributes } => {
@@ -165,7 +172,7 @@ pub(crate) fn parse(xml: &[u8]) -> Result<Value, Error> {
                     .last()
                     .map(|(_, _, base, explicit, lang)| (base.clone(), *explicit, lang.clone()))
                     .unwrap_or_default();
-                let mut attribs: Vec<(Vec<u8>, Vec<(Vec<u8>, Vec<u8>)>)> = Vec::new();
+                let mut attribs: Grouped<Vec<u8>> = Vec::new();
                 for (attribute, value) in attributes {
                     match attribs
                         .iter_mut()
@@ -189,24 +196,24 @@ pub(crate) fn parse(xml: &[u8]) -> Result<Value, Error> {
                 let lang = xml(b"lang").unwrap_or(parent_lang);
                 if construct >= 0 {
                     construct += 1;
-                    if name.namespace == XHTML {
-                        if let Some(node) = current.last_mut() {
-                            node.data.push(b'<');
-                            node.data.extend_from_slice(&name.local);
-                            let plain = attribs.iter().find(|(ns, _)| ns.is_empty());
-                            for (attribute, value) in
-                                plain.map(|(_, l)| l.as_slice()).unwrap_or_default()
-                            {
-                                node.data.extend_from_slice(b" ");
-                                node.data.extend_from_slice(attribute);
-                                node.data.extend_from_slice(b"=\"");
-                                node.data.extend(specialchars(value, false));
-                                node.data.extend_from_slice(b"\"");
-                            }
-                            node.data.push(b'>');
+                    if name.namespace == XHTML
+                        && let Some(node) = current.last_mut()
+                    {
+                        node.data.push(b'<');
+                        node.data.extend_from_slice(&name.local);
+                        let plain = attribs.iter().find(|(ns, _)| ns.is_empty());
+                        for (attribute, value) in
+                            plain.map(|(_, l)| l.as_slice()).unwrap_or_default()
+                        {
+                            node.data.extend_from_slice(b" ");
+                            node.data.extend_from_slice(attribute);
+                            node.data.extend_from_slice(b"=\"");
+                            node.data.extend(specialchars(value, false));
+                            node.data.extend_from_slice(b"\"");
                         }
+                        node.data.push(b'>');
                     }
-                    stack.push((name, None, base, explicit, lang));
+                    stack.push((name, false, base, explicit, lang));
                     continue;
                 }
                 let attribute = |local: &[u8]| {
@@ -246,7 +253,7 @@ pub(crate) fn parse(xml: &[u8]) -> Result<Value, Error> {
                     lang: lang.clone(),
                     child: Vec::new(),
                 });
-                stack.push((name, Some(Node::default()), base, explicit, lang));
+                stack.push((name, true, base, explicit, lang));
             }
             Event::Text(text) => {
                 let node = current.last_mut().unwrap_or(&mut root);
@@ -277,17 +284,19 @@ pub(crate) fn parse(xml: &[u8]) -> Result<Value, Error> {
                         b"meta",
                         b"param",
                     ];
-                    if name.namespace == XHTML && !VOID.contains(&name.local.as_slice()) {
-                        if let Some(node) = current.last_mut() {
-                            node.data.extend([&b"</"[..], &name.local, b">"].concat());
-                        }
+                    if name.namespace == XHTML
+                        && !VOID.contains(&name.local.as_slice())
+                        && let Some(node) = current.last_mut()
+                    {
+                        node.data.extend([&b"</"[..], &name.local, b">"].concat());
                     }
                 }
-                if construct == -1 && opened.is_some() {
-                    if let Some(node) = current.pop() {
-                        let parent = current.last_mut().unwrap_or(&mut root);
-                        parent.adopt(&name, node.into_value());
-                    }
+                if construct == -1
+                    && opened
+                    && let Some(node) = current.pop()
+                {
+                    let parent = current.last_mut().unwrap_or(&mut root);
+                    parent.adopt(&name, node.into_value());
                 }
             }
         }
@@ -404,13 +413,13 @@ impl Feed<'_> {
     /// `get_channel_tags( $ns, $tag )`.
     fn channel_tags(&self, ns: &[u8], tag: &[u8]) -> Option<&Value> {
         let kind = Feed::kind(self.data);
-        if kind & TYPE_ATOM_ALL != 0 {
-            if let Some(found) = self.feed_tags(ns, tag) {
-                return Some(found);
-            }
+        if kind & TYPE_ATOM_ALL != 0
+            && let Some(found) = self.feed_tags(ns, tag)
+        {
+            return Some(found);
         }
         let channel = |channel_ns: &[u8]| first(self.feed_tags(channel_ns, b"channel"));
-        let found = (kind & TYPE_RSS_10 != 0)
+        (kind & TYPE_RSS_10 != 0)
             .then(|| tags(channel(RSS_10)?, ns, tag))
             .flatten()
             .or_else(|| {
@@ -422,8 +431,7 @@ impl Feed<'_> {
                 (kind & TYPE_RSS_SYNDICATION != 0)
                     .then(|| tags(channel(RSS_20)?, ns, tag))
                     .flatten()
-            });
-        found
+            })
     }
 
     /// `get_link()`: the feed's first alternate link.
@@ -435,16 +443,18 @@ impl Feed<'_> {
                 .unwrap_or_default()
             {
                 let rel = attribute(link, b"rel").map(Value::to_php_string);
-                if let Some(href) = attribute(link, b"href") {
-                    if rel.as_deref().is_none_or(|rel| rel == b"alternate") {
-                        return Some(sanitize(&href.to_php_string(), IRI, &own_base(link, self)));
-                    }
+                if let Some(href) = attribute(link, b"href")
+                    && rel.as_deref().is_none_or(|rel| rel == b"alternate")
+                {
+                    let base = explicit_base(link).unwrap_or_default();
+                    return Some(sanitize(&href.to_php_string(), IRI, &base));
                 }
             }
         }
         for ns in [RSS_10, RSS_090, RSS_20] {
             if let Some(link) = first(self.channel_tags(ns, b"link")) {
-                return Some(sanitize(&data(link), IRI, &own_base(link, self)));
+                let base = explicit_base(link).unwrap_or_default();
+                return Some(sanitize(&data(link), IRI, &base));
             }
         }
         None
@@ -460,16 +470,13 @@ impl Feed<'_> {
     /// `get_authors()` of the feed.
     fn authors(&self) -> Vec<Author> {
         let mut authors = atom_authors(self.feed_tags(ATOM_10, b"author"), ATOM_10, b"uri");
-        authors.extend(
-            atom_authors(
-                first(self.feed_tags(ATOM_03, b"author"))
-                    .map(single)
-                    .as_ref(),
-                ATOM_03,
-                b"url",
-            )
-            .into_iter(),
-        );
+        authors.extend(atom_authors(
+            first(self.feed_tags(ATOM_03, b"author"))
+                .map(single)
+                .as_ref(),
+            ATOM_03,
+            b"url",
+        ));
         for ns in [DC_11, DC_10, ITUNES] {
             let names = if ns == ITUNES {
                 b"author" as &[u8]
@@ -522,11 +529,6 @@ fn explicit_base(element: &Value) -> Option<Vec<u8>> {
     explicit
         .then(|| at(element, b"xml_base").map(Value::to_php_string))
         .flatten()
-}
-
-/// `get_own_base()` for a link of the feed.
-fn own_base(element: &Value, _feed: &Feed<'_>) -> Vec<u8> {
-    explicit_base(element).unwrap_or_default()
 }
 
 /// An author: name, link and email.
@@ -659,10 +661,10 @@ impl Item<'_> {
                 .unwrap_or_default()
             {
                 let rel = attribute(link, b"rel").map(Value::to_php_string);
-                if let Some(href) = attribute(link, b"href") {
-                    if rel.as_deref().is_none_or(|rel| rel == b"alternate") {
-                        links.push(sanitize(&href.to_php_string(), IRI, &self.own_base(link)));
-                    }
+                if let Some(href) = attribute(link, b"href")
+                    && rel.as_deref().is_none_or(|rel| rel == b"alternate")
+                {
+                    links.push(sanitize(&href.to_php_string(), IRI, &self.own_base(link)));
                 }
             }
         }
@@ -813,74 +815,49 @@ pub(crate) fn absolutize(relative: &[u8], base: &[u8]) -> Vec<u8> {
             && name
                 .iter()
                 .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.')))
-        .then_some(colon)
+        .then_some(colon + 1)
     };
-    let Some(base_colon) = scheme(base).filter(|_| scheme(relative).is_none()) else {
+    let Some(after_scheme) = scheme(base).filter(|_| scheme(relative).is_none()) else {
         return relative.to_vec();
     };
-    let base_scheme = base.get(..=base_colon).unwrap_or_default();
-    let base_rest = base.get(base_colon + 1..).unwrap_or_default();
-    let (authority, base_path) = match base_rest.strip_prefix(b"//") {
-        Some(rest) => {
-            let end = rest
-                .iter()
-                .position(|&b| matches!(b, b'/' | b'?' | b'#'))
-                .unwrap_or(rest.len());
-            (
-                rest.get(..end + 2.min(end + 2))
-                    .map(|_| [&b"//"[..], rest.get(..end).unwrap_or_default()].concat()),
-                rest.get(end..).unwrap_or_default(),
-            )
+    // The base without its fragment, and where its query starts.
+    let base = base.split(|&b| b == b'#').next().unwrap_or_default();
+    let query = base.iter().position(|&b| b == b'?').unwrap_or(base.len());
+    let rest = base.get(after_scheme..query).unwrap_or_default();
+    let authority = match rest.strip_prefix(b"//") {
+        Some(host) => 2 + host.iter().position(|&b| b == b'/').unwrap_or(host.len()),
+        None => 0,
+    };
+    let origin = base.get(..after_scheme + authority).unwrap_or_default();
+    let path = rest.get(authority..).unwrap_or_default();
+    match relative.first() {
+        None => base.to_vec(),
+        Some(b'#') => [base, relative].concat(),
+        Some(b'?') => [base.get(..query).unwrap_or_default(), relative].concat(),
+        Some(b'/') if relative.starts_with(b"//") => {
+            [base.get(..after_scheme).unwrap_or_default(), relative].concat()
         }
-        None => (None, base_rest),
-    };
-    let base_path = base_path
-        .split(|&b| b == b'?' || b == b'#')
-        .next()
-        .unwrap_or_default();
-    let target = if relative.starts_with(b"//") {
-        return [base_scheme, relative].concat();
-    } else if relative.is_empty() {
-        return base
-            .split(|&b| b == b'#')
-            .next()
-            .unwrap_or_default()
-            .to_vec();
-    } else if relative.starts_with(b"?") || relative.starts_with(b"#") {
-        let query_from = base
-            .iter()
-            .position(|&b| b == b'?' || b == b'#')
-            .unwrap_or(base.len());
-        let keep = if relative.starts_with(b"#") {
-            base.iter().position(|&b| b == b'#').unwrap_or(base.len())
-        } else {
-            query_from
-        };
-        return [base.get(..keep).unwrap_or_default(), relative].concat();
-    } else if relative.starts_with(b"/") {
-        relative.to_vec()
-    } else {
-        let directory = match base_path.iter().rposition(|&b| b == b'/') {
-            Some(slash) => base_path.get(..=slash).unwrap_or_default().to_vec(),
-            None if authority.is_some() => b"/".to_vec(),
-            None => Vec::new(),
-        };
-        [&directory[..], relative].concat()
-    };
-    let (path, tail) = match target.iter().position(|&b| b == b'?' || b == b'#') {
-        Some(at) => (
-            target.get(..at).unwrap_or_default(),
-            target.get(at..).unwrap_or_default(),
-        ),
-        None => (&target[..], &b""[..]),
-    };
-    [
-        base_scheme,
-        &authority.unwrap_or_default(),
-        &remove_dot_segments(path),
-        tail,
-    ]
-    .concat()
+        _ => {
+            let target = match relative.first() {
+                Some(b'/') => relative.to_vec(),
+                _ => {
+                    let slash = path.iter().rposition(|&b| b == b'/');
+                    let directory: &[u8] = match slash {
+                        Some(slash) => path.get(..=slash).unwrap_or_default(),
+                        None if authority > 0 => b"/",
+                        None => b"",
+                    };
+                    [directory, relative].concat()
+                }
+            };
+            let end = target
+                .iter()
+                .position(|&b| b == b'?' || b == b'#')
+                .unwrap_or(target.len());
+            let (path, tail) = target.split_at(end);
+            [origin, &remove_dot_segments(path), tail].concat()
+        }
+    }
 }
 
 /// RFC 3986's `remove_dot_segments`.
@@ -905,3 +882,6 @@ fn remove_dot_segments(path: &[u8]) -> Vec<u8> {
     }
     output.join(&b'/')
 }
+
+#[cfg(test)]
+mod tests;

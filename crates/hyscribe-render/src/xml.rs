@@ -379,7 +379,7 @@ impl<'a> Parser<'a> {
     }
 
     /// The next event.
-    pub fn next(&mut self) -> Result<Event, Error> {
+    pub fn read(&mut self) -> Result<Event, Error> {
         if self.pending_end {
             self.pending_end = false;
             return Ok(self.close());

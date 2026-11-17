@@ -121,18 +121,18 @@ impl Renderer<'_> {
             let mut entry = format!(
                 "<li class='wp-block-rss__item'><div class='wp-block-rss__item-title'>{title}</div>"
             );
-            if !attribute("displayDate").is_empty() {
-                if let Some(timestamp) = item.date() {
-                    let local = timestamp + offset;
-                    let zone_offset = format_unix("P", timestamp, zone);
-                    let datetime = format_unix("Y-m-d\\TH:i:s", local, Zone::Utc) + &zone_offset;
-                    let shown = format_unix(&date_format, local, Zone::Utc);
-                    entry.push_str(&format!(
-                        "<time datetime=\"{}\" class=\"wp-block-rss__item-publish-date\">{}</time> ",
-                        esc_attr(datetime.as_bytes()),
-                        esc_html(shown.as_bytes())
-                    ));
-                }
+            if !attribute("displayDate").is_empty()
+                && let Some(timestamp) = item.date()
+            {
+                let local = timestamp + offset;
+                let zone_offset = format_unix("P", timestamp, zone);
+                let datetime = format_unix("Y-m-d\\TH:i:s", local, Zone::Utc) + &zone_offset;
+                let shown = format_unix(&date_format, local, Zone::Utc);
+                entry.push_str(&format!(
+                    "<time datetime=\"{}\" class=\"wp-block-rss__item-publish-date\">{}</time> ",
+                    esc_attr(datetime.as_bytes()),
+                    esc_html(shown.as_bytes())
+                ));
             }
             if !attribute("displayAuthor").is_empty() {
                 let name = item.author().and_then(|author| author.name);

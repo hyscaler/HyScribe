@@ -53,7 +53,7 @@ static PROVIDERS: LazyLock<Vec<Provider>> = LazyLock::new(|| {
 
 /// The tags and attributes `wp_filter_oembed_result()` keeps, before and
 /// after the secret is added.
-static SANDBOXED: LazyLock<[AllowedHtml; 2]> = LazyLock::new(|| {
+static SANDBOXED: LazyLock<(AllowedHtml, AllowedHtml)> = LazyLock::new(|| {
     let frame = r#""src":true,"width":true,"height":true,"frameborder":true,"marginwidth":true,"marginheight":true,"scrolling":true,"title":true"#;
     let list = |secret: &str| {
         let json = format!(
@@ -63,7 +63,7 @@ static SANDBOXED: LazyLock<[AllowedHtml; 2]> = LazyLock::new(|| {
         );
         AllowedHtml::from_json(json.as_bytes())
     };
-    [list(""), list(r#","data-secret":true"#)]
+    (list(""), list(r#","data-secret":true"#))
 });
 
 /// What `wp_oembed_get()` gave.
@@ -353,7 +353,7 @@ fn parse_xml(body: &[u8]) -> Option<Data> {
     let mut depth = 0;
     let mut current = 0;
     loop {
-        match parser.next().ok()? {
+        match parser.read().ok()? {
             Event::Doctype => return None,
             Event::Start { name, .. } => {
                 depth += 1;
@@ -490,7 +490,7 @@ fn filter_oembed_result(site: &dyn Site, html: Vec<u8>, url: &[u8]) -> Option<Ve
     if get_provider(site, url).is_some() {
         return Some(html);
     }
-    let html = wp_kses(&html, &SANDBOXED[0], b"");
+    let html = wp_kses(&html, &SANDBOXED.0, b"");
     // `|(<blockquote>.*?</blockquote>)?.*(<iframe.*?></iframe>)|ms`
     // The greedy `.*` takes the last `<iframe` a `></iframe>` follows.
     let last_close = html.windows(10).rposition(|w| w == b"></iframe>")?;
@@ -523,7 +523,7 @@ fn filter_oembed_result(site: &dyn Site, html: Vec<u8>, url: &[u8]) -> Option<Ve
         let quote = format!("<blockquote data-secret=\"{secret}\"");
         html = replace(&html, b"<blockquote", quote.as_bytes());
     }
-    let mut html = wp_kses(&html, &SANDBOXED[1], b"");
+    let mut html = wp_kses(&html, &SANDBOXED.1, b"");
     if quote.is_some_and(|quote| !quote.is_empty()) {
         html = replace(
             &html,

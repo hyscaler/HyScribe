@@ -182,3 +182,6 @@ pub(crate) fn parse(date: &[u8]) -> Option<i64> {
         .or_else(|| rfc2822(date))
         .or_else(|| strtotime(std::str::from_utf8(date).ok()?))
 }
+
+#[cfg(test)]
+mod tests;

@@ -7,7 +7,7 @@ fn events(xml: &[u8], html: bool) -> Result<Vec<Event>, Error> {
     let mut parser = Parser::new(xml, html);
     let mut events = Vec::new();
     loop {
-        let event = parser.next()?;
+        let event = parser.read()?;
         if event == Event::Eof {
             return Ok(events);
         }

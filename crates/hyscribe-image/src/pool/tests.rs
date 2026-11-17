@@ -16,6 +16,16 @@ fn runs_jobs_and_answers() {
 }
 
 #[test]
+fn keeps_serving_after_a_decoder_panics() {
+    // One worker: the one whose decoder panicked answers the next request.
+    let pool = Arc::new(Pool::new(1, 2));
+    let upload = Arc::clone(&pool);
+    let request = thread::spawn(move || upload.run(|| -> Vec<u8> { panic!("decoder") }));
+    assert_eq!(request.join().unwrap(), None);
+    assert_eq!(pool.run(|| "served"), Some("served"));
+}
+
+#[test]
 fn runs_no_more_jobs_at_once_than_workers() {
     let pool = Arc::new(Pool::new(2, 8));
     let running = Arc::new(AtomicUsize::new(0));

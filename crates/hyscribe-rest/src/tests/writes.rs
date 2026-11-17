@@ -262,8 +262,8 @@ fn a_create_plans_its_fields() {
             comment_status: Some("closed".into()),
             ping_status: Some("open".into()),
             sticky: Some(false),
-            unset_thumbnail: true,
-            clear_template: true,
+            thumbnail: Some(0),
+            template: Some(Vec::new()),
             categories: Some(vec![1]),
             tags: Some(Vec::new()),
             ..Save::default()
@@ -519,22 +519,115 @@ fn parents_are_checked() {
     }
 }
 
-/// A featured image that is an attachment is not ported; any other post
-/// or none clears it, an ID with no post leaves it.
+/// A post that is not an image `wp_get_attachment_image()` shows, an
+/// attachment without a file included, or none clears the featured image;
+/// an ID with no post leaves it.
 #[test]
 fn featured_images_are_cleared() {
     let featured = |media: &str| {
         let body = format!(r#"{{"featured_media":{media}}}"#);
-        plan("administrator", "POST", "/wp/v2/posts/1", &body).unset_thumbnail
+        plan("administrator", "POST", "/wp/v2/posts/1", &body).thumbnail
     };
-    assert!(featured("2") && featured("-2") && !featured("12345"));
-    let served = answered(
+    for media in ["0", "2", "-2", "97"] {
+        assert_eq!(featured(media), Some(0), "{media}");
+    }
+    assert_eq!(featured("12345"), None);
+    // An image of the Theme Test Data, with its file, is kept.
+    let ttd = Oracle {
+        role: "administrator",
+        fixture: site::Fixture {
+            ttd: true,
+            pretty: false,
+            extra: false,
+            state: None,
+        },
+        deny: &[],
+    };
+    let asked = Asked::new(
         "administrator",
         "POST",
-        "/wp/v2/posts/1",
-        r#"{"featured_media":97}"#,
+        "/wp/v2/posts",
+        r#"{"featured_media":611}"#,
     );
-    assert_eq!(served.status, 501);
+    let plan = on(&ttd, &asked, Outcome::Written(1))
+        .0
+        .map(|plan| plan.write);
+    assert!(matches!(plan, Some(Write::Save(save)) if save.thumbnail == Some(611)));
+}
+
+/// A post format is set as its term's slug, `standard` as none, and a page
+/// has none to set.
+#[test]
+fn formats_are_terms() {
+    let format = |route: &str, format: &str| {
+        let body = format!(r#"{{"format":"{format}"}}"#);
+        plan("administrator", "POST", route, &body).format
+    };
+    let aside = Some(b"post-format-aside".to_vec());
+    assert_eq!(format("/wp/v2/posts/1", "aside"), aside);
+    assert_eq!(format("/wp/v2/posts/1", "standard"), Some(Vec::new()));
+    assert_eq!(format("/wp/v2/pages/2", "aside"), None);
+}
+
+/// `check_template()`: none, the post's own or the theme's custom
+/// templates for its type pass; a list is not ported.
+#[test]
+fn templates_are_checked() {
+    let template = |route: &str, template: &str| {
+        let body = format!(r#"{{"template":{template}}}"#);
+        answered("administrator", "POST", route, &body)
+    };
+    for (route, value) in [
+        ("/wp/v2/pages/2", r#""page-no-title""#),
+        ("/wp/v2/pages", r#""page-no-title""#),
+        ("/wp/v2/posts/1", r#""0""#),
+        ("/wp/v2/posts/1", "[]"),
+    ] {
+        let status = template(route, value).status;
+        assert!(matches!(status, 200 | 201), "{route} {value}");
+    }
+    // A post's own type, whatever the route's, and a type without them.
+    let none = r#""template is not one of .""#;
+    for route in ["/wp/v2/posts/1", "/wp/v2/pages/1", "/wp/v2/navigation"] {
+        let refused = template(route, r#""page-no-title""#);
+        assert!(text_of(&refused).contains(none), "{route}");
+    }
+    let refused = template("/wp/v2/pages/2", r#""bogus""#);
+    assert!(text_of(&refused).contains(r#""template is not one of page-no-title.""#));
+    assert_eq!(template("/wp/v2/posts/1", r#"["x"]"#).status, 501);
+    // The post's own template passes, though the theme has none such.
+    let own = |stored: &'static [u8], template: &str| {
+        let site = Changed {
+            meta: vec![(2, "_wp_page_template", stored)],
+            ..changed(Vec::new(), Vec::new())
+        };
+        let body = format!(r#"{{"template":"{template}"}}"#);
+        let asked = Asked::new("administrator", "POST", "/wp/v2/pages/2", &body);
+        on(&site, &asked, Outcome::Written(2)).1.status
+    };
+    assert_eq!(own(b"retired", "retired"), 200);
+    assert_eq!(own(b"default", "default"), 400);
+}
+
+/// A template the theme's custom templates cannot be listed past answers
+/// 501 before the other checks.
+#[test]
+fn templates_not_listed_are_not_ported() {
+    let content = super::content::default_install_with(concat!(
+        "INSERT INTO `wp_terms` VALUES (761,'twentytwentyfive','twentytwentyfive',0);\n",
+        "INSERT INTO `wp_term_taxonomy` VALUES (761,761,'wp_theme','',0,1);\n",
+        "INSERT INTO `wp_posts` VALUES (762,1,'2026-11-10 10:00:00','2026-11-10 10:00:00','x','Plugged','','publish','closed','closed','','plugged','','','2026-11-10 10:00:00','2026-11-10 10:00:00','',0,'',0,'wp_template','',0);\n",
+        "INSERT INTO `wp_term_relationships` VALUES (762,761,0);\n",
+        "INSERT INTO `wp_postmeta` VALUES (761,762,'origin','plugin');\n",
+    ));
+    let site = Oracle {
+        role: "administrator",
+        fixture: content.reads.unwrap()[0],
+        deny: &[],
+    };
+    let body = r#"{"template":"bogus","status":"bogus"}"#;
+    let asked = Asked::new("administrator", "POST", "/wp/v2/pages/2", body);
+    assert_eq!(on(&site, &asked, Outcome::Written(2)).1.status, 501);
 }
 
 /// Navigation menus and synced patterns save the fields their schemas
@@ -608,8 +701,7 @@ fn navigation_and_patterns_save_their_fields() {
 }
 
 /// Content whose answer is not ported, as stored after kses or unfiltered,
-/// is not written; nor `format`, a template, `meta`, or content with
-/// ignored hooked blocks.
+/// is not written; nor `meta`, or content with ignored hooked blocks.
 #[test]
 fn unported_writes_are_not_planned() {
     // A login block shows the logged in user more, as every writer is.
@@ -640,17 +732,11 @@ fn unported_writes_are_not_planned() {
     let asked = Asked::new("administrator", "POST", "/wp/v2/posts", hidden);
     let (plan, _) = on(&unfiltered, &asked, Outcome::Written(1));
     assert!(plan.is_some_and(|plan| plan.unfiltered_html));
-    for body in [
-        r#"{"format":"aside"}"#,
-        r#"{"template":"x"}"#,
-        r#"{"meta":null}"#,
-    ] {
-        assert_eq!(
-            answered("administrator", "POST", "/wp/v2/posts/1", body).status,
-            501,
-            "{body}"
-        );
-    }
+    let meta = r#"{"meta":null}"#;
+    assert_eq!(
+        answered("administrator", "POST", "/wp/v2/posts/1", meta).status,
+        501
+    );
     let mut site = changed(Vec::new(), Vec::new());
     site.meta
         .push((1, "_wp_ignored_hooked_blocks", b"[\"core/x\"]"));
@@ -704,6 +790,39 @@ fn deletes_trash_unless_forced() {
         .1
         .status,
         501
+    );
+}
+
+/// A trashed post's sample permalink is plain under pretty permalinks, as
+/// `get_sample_permalink()` fakes only drafts as published (found by the
+/// switch-back suite, its `rest-trash` case).
+#[test]
+fn trashed_posts_have_plain_templates() {
+    let trashed = Post {
+        status: "trash".into(),
+        ..oracle("", &[]).post(1).unwrap()
+    };
+    let target = "/wp/v2/posts/1&context=edit&_fields=permalink_template";
+    let asked = Asked::new("administrator", "GET", target, "");
+    let template = |posts| {
+        let plain = oracle("administrator", &[]);
+        let fixture = site::Fixture {
+            pretty: true,
+            ..plain.fixture
+        };
+        let site = Changed {
+            oracle: Oracle { fixture, ..plain },
+            ..changed(Vec::new(), posts)
+        };
+        text_of(&on(&site, &asked, Outcome::Written(1)).1)
+    };
+    assert_eq!(
+        template(Vec::new()),
+        r#"{"permalink_template":"http:\/\/127.0.0.1:8081\/%postname%\/"}"#
+    );
+    assert_eq!(
+        template(vec![trashed]),
+        r#"{"permalink_template":"http:\/\/127.0.0.1:8081\/?p=1"}"#
     );
 }
 

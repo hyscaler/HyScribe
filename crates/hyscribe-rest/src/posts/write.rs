@@ -5,12 +5,13 @@
 //! `delete_item()`. A request whose checks pass gives the [`Plan`]
 //! `hyscribe-http` writes in one action, then its answer is made from the
 //! site as the write left it, as PHP prepares the post it has just written.
-//! What is not ported answers 501 before anything is written: `format`,
-//! `meta`, pattern categories, a template other than none, a featured
-//! image that is an attachment, and content whose answer would be 501.
+//! What is not ported answers 501 before anything is written: `meta`,
+//! pattern categories, a template that is a list, and content whose answer
+//! would be 501.
 
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, is_empty_string, lookup};
+use hyscribe_render::attachment::image_downsize;
 use hyscribe_render::date::{Zone, format_unix, stored_unix};
 use hyscribe_render::rest::Rendering;
 
@@ -59,10 +60,14 @@ pub struct Save {
     pub ping_status: Option<String>,
     /// After the save: `stick_post()` or `unstick_post()`.
     pub sticky: Option<bool>,
-    /// After the save: `delete_post_meta( $id, '_thumbnail_id' )`.
-    pub unset_thumbnail: bool,
-    /// After the save: `update_post_meta( $id, '_wp_page_template', '' )`.
-    pub clear_template: bool,
+    /// After the save: `set_post_thumbnail()` of this image, or for 0
+    /// `delete_post_thumbnail()`.
+    pub thumbnail: Option<u64>,
+    /// After the save: `set_post_format()`, the format's term slug, empty
+    /// for none.
+    pub format: Option<Vec<u8>>,
+    /// After the save: `update_post_meta( $id, '_wp_page_template', $template )`.
+    pub template: Option<Vec<u8>>,
     /// After the save: `wp_set_object_terms()` of these categories' IDs.
     pub categories: Option<Vec<u64>>,
     /// After the save: `wp_set_object_terms()` of these tags' IDs.
@@ -130,7 +135,12 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
     let collection = format!("/wp/v2/{}", kind.base());
     let item = format!("{collection}/(?P<id>[\\d]+)");
     let save = Writing {
-        unported: |params| params.get("template").is_some_and(|t| *t != text("")),
+        // `check_template()` takes a list as an array key, which PHP refuses.
+        unported: |params| {
+            params
+                .get("template")
+                .is_some_and(|t| t.as_array().is_some_and(|t| !t.is_empty()))
+        },
         args: status_args,
         plan: plan_save,
         finish,
@@ -248,9 +258,6 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
         Some(_) => Some(get_post(context, params, kind)?),
         None => None,
     };
-    if kind == Kind::Post && set(params, "format") {
-        return Err(RestError::not_ported());
-    }
     let id = existing.as_ref().map_or(0, |post| post.id);
     let mut save = Save {
         id,
@@ -327,7 +334,7 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
     if slug && matches!(slugged, Some("draft" | "pending")) {
         save.unique_slug = Some(save.parent.unwrap_or_default());
     }
-    after_save(context, params, kind, &mut save)?;
+    after_save(context, params, kind, &mut save);
     let hook = format!("rest_pre_insert_{}", kind.name());
     let save = crate::hooks::apply_filters(&hook, save, &[params]);
     let unfiltered_html = context.can("unfiltered_html");
@@ -397,12 +404,7 @@ fn protection(
 /// What `create_item()` and `update_item()` do once the post is saved:
 /// stickiness (a create always), the featured image, the template and the
 /// terms.
-fn after_save(
-    context: &Context,
-    params: &Params,
-    kind: Kind,
-    save: &mut Save,
-) -> Result<(), RestError> {
+fn after_save(context: &Context, params: &Params, kind: Kind, save: &mut Save) {
     if kind == Kind::Post {
         let sticky = params.get("sticky").map(|sticky| !sticky.is_empty());
         save.sticky = sticky.or((save.id == 0).then_some(false));
@@ -419,23 +421,77 @@ fn after_save(
         save.categories = params.get("categories").map(|_| ids("categories"));
         save.tags = params.get("tags").map(|_| ids("tags"));
     }
-    // `set_post_thumbnail()` of a post that is not an attachment deletes
-    // the meta, as `delete_post_thumbnail()` does for none.
+    // `set_post_thumbnail()` keeps an image `wp_get_attachment_image()`
+    // shows and deletes the meta for any other post, as
+    // `delete_post_thumbnail()` does for none.
     let media = params
         .get("featured_media")
         .filter(|_| field(kind, "featured_media"));
-    if let Some(media) = media.map(Value::to_int) {
-        let post = context.site.post(media.unsigned_abs());
-        if post
-            .as_ref()
-            .is_some_and(|post| post.post_type == "attachment")
-        {
-            return Err(RestError::not_ported());
-        }
-        save.unset_thumbnail = media == 0 || post.is_some();
+    if let Some(media) = media.map(|media| media.to_int().unsigned_abs()) {
+        let shown = image_downsize(context.site.reads(), media, "thumbnail").is_some();
+        save.thumbnail = match context.site.post(media) {
+            Some(_) if shown => Some(media),
+            Some(_) => Some(0),
+            None => (media == 0).then_some(0),
+        };
     }
-    save.clear_template = params.get("template").is_some();
-    Ok(())
+    if kind == Kind::Post {
+        // Validated as one of `get_post_format_slugs()`, so never empty.
+        save.format = params
+            .get("format")
+            .map(|format| match format.to_php_string() {
+                standard if standard == b"standard" => Vec::new(),
+                format => [&b"post-format-"[..], &format].concat(),
+            });
+    }
+    save.template = params.get("template").map(Value::to_php_string);
+}
+
+/// `check_template()`: no template, the post's own, or one of
+/// `get_page_templates()` for the post's type; the theme's PHP templates
+/// are not ported, as the active theme is a block theme.
+pub(super) fn check_template(
+    context: &Context,
+    params: &Params,
+    template: &Value,
+) -> Result<(), RestError> {
+    if template.is_empty() {
+        return Ok(());
+    }
+    let post = params
+        .get("id")
+        .filter(|id| !id.is_empty())
+        .and_then(|id| u64::try_from(id.to_int()).ok())
+        .and_then(|id| context.site.post(id));
+    if let Some(post) = &post {
+        // `get_page_template_slug()`.
+        let current = context.site.post_meta(post.id, "_wp_page_template");
+        let current = current.filter(|current| !is_empty_string(current) && current != b"default");
+        if *template == text(current.unwrap_or_default()) {
+            return Ok(());
+        }
+    }
+    let post_type = match &post {
+        Some(post) => post.post_type.clone(),
+        None => Kind::of(params.route).name().to_string(),
+    };
+    let allowed = crate::templates::post_templates(context, post_type.as_bytes())?;
+    let args: [&dyn std::any::Any; 2] = [&post, &post_type];
+    let allowed = crate::hooks::apply_filters("theme_templates", allowed, &args);
+    let hook = format!("theme_{post_type}_templates");
+    let allowed = crate::hooks::apply_filters(&hook, allowed, &args);
+    if allowed.contains(&template.to_php_string()) {
+        return Ok(());
+    }
+    let names: Vec<_> = allowed
+        .iter()
+        .map(|slug| String::from_utf8_lossy(slug))
+        .collect();
+    Err(RestError {
+        code: "rest_invalid_param",
+        message: format!("template is not one of {}.", names.join(", ")),
+        data: Value::Null,
+    })
 }
 
 /// The answer after the save renders the content as stored, for the

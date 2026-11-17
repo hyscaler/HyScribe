@@ -1,14 +1,64 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `post-new.php` for posts and pages: the refusals `admin.php` and the
-//! screen make before the block editor's page, which is not ported.
+//! `post-new.php` and `post.php?action=edit` for posts and pages: the
+//! refusals `admin.php` and the screens make, and the pieces of the block
+//! editor's page (`edit-form-blocks.php`) that need no REST response. The
+//! page itself waits on its preloads.
+
+mod assets;
+pub mod blocks;
+pub mod form;
+pub mod page;
+pub mod settings;
 
 use hyscribe_auth::caps::post_type_exists;
+use hyscribe_phpser::Value;
+use hyscribe_render::theme::Theme;
 
 use crate::admin_bar::BarSite;
+use crate::media::attachment::{AttachmentArgs, AttachmentSite};
 use crate::menu::{Look, Screen, admin_menu};
 use crate::page::query_strings;
 use crate::posts::{Answer, PostsSite};
+
+/// The post the block editor's page is of, once PHP's refusals pass.
+#[derive(Debug, PartialEq)]
+pub enum Target {
+    /// `post-new.php`'s new post of a type.
+    New(String),
+    /// `post.php?action=edit`'s post.
+    Edit(Box<hyscribe_model::Post>),
+}
+
+/// The block editor's page `post-new.php` or `post.php` (`screen`) with
+/// `query` asks for: `None` for a refusal or what is not ported.
+pub fn target(site: &dyn AttachmentSite, screen: &str, query: &str) -> Option<Target> {
+    if screen == "post-new.php" {
+        if post_new(site, query).is_some() {
+            return None;
+        }
+        let mut kind = "post".to_string();
+        for (_, value) in query_strings(query)? {
+            kind = value;
+        }
+        return ["post", "page"]
+            .contains(&kind.as_str())
+            .then_some(Target::New(kind));
+    }
+    let args = AttachmentArgs::parse(query, None).filter(|args| args.message.is_none())?;
+    let id = Value::String(args.post.into_bytes()).to_int();
+    let post = u64::try_from(id).ok().and_then(|id| site.post(id))?;
+    let editable = ["post", "page"].contains(&post.post_type.as_str())
+        && site.can_post("edit_post", &post)
+        && post.status != "trash";
+    editable.then(|| Target::Edit(Box::new(post)))
+}
+
+/// What the block editor reads beyond the posts screens.
+pub trait EditorSite: PostsSite {
+    /// The active theme.
+    fn theme(&self) -> &Theme;
+}
 
 /// `post-new.php` with the query `query`: the redirect of attachments to Add
 /// New Media and PHP's refusals; `None` for the editor's page, the other
@@ -55,5 +105,7 @@ pub fn post_new(site: &dyn PostsSite, query: &str) -> Option<Answer> {
     None
 }
 
+#[cfg(test)]
+mod pieces_tests;
 #[cfg(test)]
 mod tests;

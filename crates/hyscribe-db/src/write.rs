@@ -1027,7 +1027,7 @@ impl CommentFields {
 
 /// The columns of a user `wp_insert_user()` writes, but the login, which
 /// only an insert writes.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct UserFields {
     /// `user_pass`, the password hash.
     pub pass: String,

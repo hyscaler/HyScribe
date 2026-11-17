@@ -319,3 +319,23 @@ fn block_names_from_paths() {
     );
     assert_eq!(block_name_from_path(&path(&["styles", "x", "a/b"])), "");
 }
+
+/// `wp_get_global_stylesheet()` of one type at a time, as the block
+/// editor's settings take them: together the whole stylesheet.
+#[test]
+fn stylesheets_by_type() {
+    let fixture = fixture();
+    let styles = GlobalStyles::resolve(&fixture.sources());
+    let parts = ["variables", "styles", "presets"].map(|kind| styles.stylesheet_of(kind));
+    assert!(parts.iter().all(|part| !part.is_empty()));
+    assert_eq!(parts.concat(), styles.stylesheet());
+    assert_eq!(styles.stylesheet_of("custom-css"), "");
+    let user =
+        br#"{"version":3,"isGlobalStylesUserThemeJSON":true,"styles":{"css":"p{color:red}"}}"#;
+    let sources = Sources {
+        user: Some(user),
+        ..fixture.sources()
+    };
+    let custom = GlobalStyles::resolve(&sources).stylesheet_of("custom-css");
+    assert_eq!(custom, "p{color:red}");
+}

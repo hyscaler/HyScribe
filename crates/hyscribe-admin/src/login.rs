@@ -3,12 +3,15 @@
 //! The login screen, `wp-login.php`'s login action, at `/hs-login`.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url, str_contains, url_query};
-use hyscribe_phpser::{Value, addslashes, is_empty_string, parse_str, php_trim, urlencode};
-use hyscribe_render::formatting::{is_email, sanitize_user};
+use hyscribe_phpser::{Value, addslashes, is_empty_string, parse_str, urlencode};
+use hyscribe_render::formatting::sanitize_user;
 
 use crate::assets::{Assets, Urls, site_icon_tags};
 
 pub mod actions;
+pub mod authenticate;
+
+use authenticate::{Account, Authenticate};
 
 /// The auth cookie a request carries, as `wp_validate_auth_cookie()` finds it.
 pub enum Session {
@@ -17,7 +20,7 @@ pub enum Session {
     /// A cookie that does not validate.
     Expired,
     /// A valid session of this user.
-    User(u64),
+    User(Account),
 }
 
 /// A request to the login screen. Its values are as PHP sees them before
@@ -47,6 +50,8 @@ pub const READ_ONLY: &str =
 pub struct User {
     /// `ID`.
     pub id: u64,
+    /// `user_login`.
+    pub login: Vec<u8>,
     /// `user_pass`.
     pub pass: Vec<u8>,
     /// The `use_ssl` user option.
@@ -82,6 +87,13 @@ pub trait Site: Urls {
     fn post_type(&self, id: u64) -> Option<String>;
     /// `get_site_icon_url( $size )`, `None` for no icon.
     fn site_icon(&self, size: i64) -> Option<Vec<u8>>;
+    /// The site's own `authenticate` callbacks, added to core's or
+    /// replacing them: none by default.
+    fn authenticate<'a>(&'a self, _filters: &mut Authenticate<'a>) {}
+    /// `do_action( 'wp_login_failed', $username, $error )`.
+    fn wp_login_failed(&self, username: &[u8], error: &[Notice]);
+    /// `do_action( 'wp_login', $user_login, $user )`.
+    fn wp_login(&self, user_login: &[u8], user: &Account);
 }
 
 /// What the login screen answers.
@@ -103,8 +115,8 @@ pub enum Login {
 
 /// A `WP_Error` entry: its code, message and whether it is a message
 /// rather than an error.
-struct Notice {
-    code: &'static str,
+pub struct Notice {
+    pub(crate) code: &'static str,
     text: String,
     info: bool,
 }
@@ -155,7 +167,8 @@ impl Request<'_> {
             .or_else(|| self.query.get_str(key))
     }
 
-    fn posted(&self, key: &str) -> Option<&Value> {
+    /// `$_POST[ $key ]`, none for a GET.
+    pub fn posted(&self, key: &str) -> Option<&Value> {
         self.form.and_then(|form| form.get_str(key))
     }
 
@@ -199,75 +212,19 @@ fn lost_password(site: &dyn Site, secure: bool) -> String {
     )
 }
 
-/// `wp_authenticate()` over core's `authenticate` filters, with the
-/// session standing in for `wp_authenticate_cookie()`.
-fn authenticate(
+/// `wp_signon()` up to its cookies, which the caller sets: `wp_login` for
+/// the user the `authenticate` filters find.
+fn wp_signon(
     site: &dyn Site,
-    login: &[u8],
-    password: &[u8],
     session: &Session,
+    (login, password): (&[u8], &[u8]),
     secure: bool,
 ) -> Result<u64, Vec<Notice>> {
-    let username = sanitize_user(login);
-    let password = php_trim(password);
-    let check = |user: Option<User>, missing: Notice, kind: &str| match user {
-        None => Err(vec![missing]),
-        Some(user) if site.check_password(&user, password) => Ok(user.id),
-        Some(_) => Err(vec![error(
-            "incorrect_password",
-            format!(
-                "<strong>Error:</strong> The password you entered for the {kind} <strong>{}</strong> is incorrect.{}",
-                esc_html(&username),
-                lost_password(site, secure)
-            ),
-        )]),
-    };
-    let blank = is_empty_string(&username) || is_empty_string(password);
-    let mut result = if blank {
-        let mut errors = Vec::new();
-        if is_empty_string(&username) {
-            errors.push(error(
-                "empty_username",
-                "<strong>Error:</strong> The username field is empty.".into(),
-            ));
-        }
-        if is_empty_string(password) {
-            errors.push(error(
-                "empty_password",
-                "<strong>Error:</strong> The password field is empty.".into(),
-            ));
-        }
-        Err(errors)
-    } else {
-        let missing = error(
-            "invalid_username",
-            format!(
-                "<strong>Error:</strong> The username <strong>{}</strong> is not registered on this site. If you are unsure of your username, try your email address instead.",
-                esc_html(&username)
-            ),
-        );
-        check(site.user_by_login(&username), missing, "username")
-    };
-    if result.is_err() && !blank && is_email(&username) {
-        let missing = error(
-            "invalid_email",
-            "Unknown email address. Check again or try your username.".into(),
-        );
-        result = check(site.user_by_email(&username), missing, "email address");
-    }
-    if is_empty_string(&username) && is_empty_string(password) {
-        match session {
-            Session::User(id) => result = Ok(*id),
-            Session::Expired => {
-                result = Err(vec![error(
-                    "expired_session",
-                    "Please log in again.".into(),
-                )])
-            }
-            Session::None => {}
-        }
-    }
-    result
+    let mut filters = authenticate::core(site, session, secure);
+    site.authenticate(&mut filters);
+    let user = authenticate::wp_authenticate(site, &filters, login, password)?;
+    site.wp_login(&user.login, &user);
+    Ok(user.id)
 }
 
 /// The login action: a login, or the screen with what went wrong.
@@ -304,7 +261,7 @@ pub fn login(site: &dyn Site, request: &Request) -> Login {
     let login = posted("log").unwrap_or_default();
     let password = addslashes(posted("pwd").unwrap_or_default());
     let remember = request.posted("rememberme").is_some_and(|v| !v.is_empty());
-    let mut user = authenticate(site, login, &password, &request.session, secure);
+    let mut user = wp_signon(site, &request.session, (login, &password), secure);
     if !request.logged_in_cookie && request.posted("testcookie").is_some() && !request.test_cookie {
         user = Err(vec![error(
             "test_cookie",
@@ -464,6 +421,8 @@ struct Frame<'a> {
     /// `login_header()`'s `$message`, as markup.
     message: &'a str,
     errors: &'a [Notice],
+    /// The scripts the action enqueues before `login_header()`.
+    head_scripts: &'a [&'a str],
     /// The scripts the action enqueues after `login_header()`.
     scripts: &'a [&'a str],
     /// The action's markup between the notices and `login_footer()`.
@@ -476,6 +435,9 @@ impl Frame<'_> {
     fn render(&self, site: &dyn Site) -> Vec<u8> {
         let mut assets = Assets::new(true);
         assets.enqueue_style("login");
+        for script in self.head_scripts {
+            assets.enqueue_script(script);
+        }
         if self.customize {
             assets.enqueue_script("customize-base");
         }
@@ -600,6 +562,7 @@ impl Screen<'_> {
             loggedout: self.loggedout,
             message: "",
             errors: self.errors,
+            head_scripts: &[],
             scripts: &["user-profile", "wp-tooltip"],
             body: &body,
             input_id: "",

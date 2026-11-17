@@ -33,6 +33,10 @@ pub enum Taxonomy {
     Category,
     /// `post_tag`.
     PostTag,
+    /// `post_format`, whose terms `set_post_format()` names.
+    PostFormat,
+    /// `wp_theme`, the theme a template or global styles post belongs to.
+    WpTheme,
 }
 
 impl Taxonomy {
@@ -41,6 +45,17 @@ impl Taxonomy {
         match self {
             Taxonomy::Category => "category",
             Taxonomy::PostTag => "post_tag",
+            Taxonomy::PostFormat => "post_format",
+            Taxonomy::WpTheme => "wp_theme",
+        }
+    }
+
+    /// The post types `_update_post_term_count()` counts of the taxonomy
+    /// named `name`.
+    pub(crate) fn counted(name: &str) -> &'static [&'static str] {
+        match name {
+            "wp_theme" => &["wp_template", "wp_template_part", "wp_global_styles"],
+            _ => &["post"],
         }
     }
 

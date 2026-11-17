@@ -39,13 +39,19 @@ async fn login_site(dir: Option<&std::path::Path>) -> Arc<Site> {
     })
 }
 
-struct Reply {
-    status: StatusCode,
-    headers: HeaderMap,
-    body: String,
+pub(super) struct Reply {
+    pub(super) status: StatusCode,
+    pub(super) headers: HeaderMap,
+    pub(super) body: String,
 }
 
-async fn send(site: &Arc<Site>, method: &str, uri: &str, cookie: &str, form: &str) -> Reply {
+pub(super) async fn send(
+    site: &Arc<Site>,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    form: &str,
+) -> Reply {
     let mut request = axum::http::Request::builder().method(method).uri(uri);
     if !cookie.is_empty() {
         request = request.header(header::COOKIE, cookie);
@@ -92,7 +98,7 @@ async fn reply(site: &Arc<Site>, request: axum::http::Request<Body>) -> Reply {
     }
 }
 
-fn all(headers: &HeaderMap, name: header::HeaderName) -> Vec<String> {
+pub(super) fn all(headers: &HeaderMap, name: header::HeaderName) -> Vec<String> {
     headers
         .get_all(name)
         .iter()
@@ -109,15 +115,19 @@ fn golden_page(method: &str, body: &str, state: &str, nonce: &str) -> String {
         .find(|line| line.starts_with(&format!("{method}\t\t{body}\t{state}\t")))
         .unwrap();
     let page = String::from_utf8(unhex(line.rsplit('\t').next().unwrap())).unwrap();
+    hs_login(&page).replace("%nonce:reset-password-for-user%", nonce)
+}
+
+/// A PHP login page under HyScribe's URLs.
+pub(super) fn hs_login(page: &str) -> String {
     page.replace("/wp-login.php", "/hs-login")
         .replace("/wp-admin/load-styles.php", "/hs-admin/load-styles")
         .replace("/wp-admin/load-scripts.php", "/hs-admin/load-scripts")
         .replace("/wp-admin/admin-ajax.php", "/hs-admin/admin-ajax")
         .replace("/wp-admin/", "/hs-admin/")
-        .replace("%nonce:reset-password-for-user%", nonce)
 }
 
-fn nonce(page: &str) -> String {
+pub(super) fn nonce(page: &str) -> String {
     let at = page.find("\"nonce\":\"").unwrap() + 9;
     page.get(at..at + 10).unwrap().to_string()
 }
@@ -359,13 +369,16 @@ async fn a_limited_guess_never_reaches_the_hash() {
     tokio::task::spawn_blocking(move || {
         let user = User {
             id: 1,
+            login: b"admin".to_vec(),
             pass: md5(b"right").into_bytes(),
             use_ssl: false,
             activation_key: Vec::new(),
         };
+        // A request whose guess took its turn, as the limits' callback does.
         let reads_from = |client| {
             let mut reads = LoginReads::new(&site, handle.clone(), now());
             reads.client = Ok(client);
+            *reads.turn.borrow_mut() = site.limiter.turn(client);
             reads
         };
         let refused = reads_from(client);
@@ -386,6 +399,57 @@ async fn a_limited_guess_never_reaches_the_hash() {
     })
     .await
     .unwrap();
+}
+
+/// A clock that moves on by the whole wait each time it is read, so that a
+/// check waits for none.
+fn hurried() -> std::time::Instant {
+    static READS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let reads = READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    *EPOCH.get_or_init(std::time::Instant::now) + limits::checks::WAIT * reads
+}
+
+/// With every check of the site taken past the wait, a guess fails as a
+/// wrong password: the right one too, so its hash was never checked. Such
+/// a guess is not counted against its address.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_capped_guess_fails_without_its_hash_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut site = Arc::try_unwrap(login_site(Some(dir.path())).await).unwrap();
+    let limiter = Arc::get_mut(&mut site.limiter).unwrap();
+    limiter.checks = limits::checks::Checks::new(1, hurried);
+    let site = Arc::new(site);
+    let held = site.limiter.checks.start();
+    assert!(held.is_some());
+    for _ in 0..5 {
+        let capped = post_from(&site, "192.0.2.1", "", RIGHT).await;
+        let expected = golden_page("POST", WRONG, "1", &nonce(&capped.body));
+        assert_eq!((capped.status, capped.body), (StatusCode::OK, expected));
+    }
+    drop(held);
+    let free = post_from(&site, "192.0.2.1", "", RIGHT).await;
+    assert_eq!(free.status, StatusCode::FOUND);
+}
+
+/// Neither a guess with no name, answered before any account is looked
+/// up, nor an expired session, which also fires `wp_login_failed`, counts.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_guess_is_counted() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = login_site(Some(dir.path())).await;
+    let expired = format!(
+        "hyscribe_{}=admin%7C1%7Cx%7Cy",
+        md5(b"http://127.0.0.1:8081")
+    );
+    for _ in 0..5 {
+        send(&site, "POST", "/hs-login", "", "log=&pwd=x").await;
+        let reply = send(&site, "GET", "/hs-login", &expired, "").await;
+        assert!(reply.body.contains("<p>Please log in again.</p>"));
+    }
+    let form = "log=admin&pwd=reference-only-password";
+    let reply = send(&site, "POST", "/hs-login", "", form).await;
+    assert_eq!(reply.status, StatusCode::FOUND);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -514,9 +578,9 @@ async fn other_actions_show_their_forms_and_links() {
         })
         .collect();
     assert!(cookies.iter().any(|c| dates.iter().any(|d| c.contains(d))));
-    // What the forms post, and the post password form, are not ported.
+    // The registration and post password forms are not ported.
     for (method, uri) in [
-        ("POST", "/hs-login?action=lostpassword"),
+        ("POST", "/hs-login?action=register"),
         ("GET", "/hs-login?action=postpass"),
     ] {
         let reply = send(&site, method, uri, "", "user_login=admin").await;
@@ -642,7 +706,7 @@ async fn logged_in_users_go_where_they_may() {
         let reader = |cap: &str| cap == "read";
         let nothing = |_: &str| false;
         let https = "https://127.0.0.1:8081/hs-admin/";
-        let cases: [(&Can, bool, &str, &str); 11] = [
+        let cases: [(&Can, bool, &str, &str); 12] = [
             // Past the admin email's lifespan, an administrator confirms it.
             (&everything, false, admin, "http://127.0.0.1:8081/hs-login?redirect_to=http%3A%2F%2F127.0.0.1%3A8081%2Fhs-admin%2F&action=confirm_admin_email&wp_lang=en_US"),
             (&everything, false, "", "http://127.0.0.1:8081/hs-login?action=confirm_admin_email&wp_lang=en_US"),
@@ -655,6 +719,8 @@ async fn logged_in_users_go_where_they_may() {
             (&nothing, false, "http://example.test/x", admin),
             (&nothing, true, "http://example.test/x", https),
             (&nothing, false, "/hs-admin/edit?post_type=page", "/hs-admin/edit?post_type=page"),
+            // Into hs-admin by its clean URLs (ADR 0008).
+            (&nothing, false, "/hs-admin/edit.php?post_type=page", "/hs-admin/edit?post_type=page"),
         ];
         for (can, secure, to, expected) in cases {
             assert_eq!(location(&reads, can, (1, secure), to.as_bytes()), expected, "{to}");

@@ -5,7 +5,8 @@
 //! the writes of `reference/switch-back/actions.list` as real HTTP
 //! requests, logged in with its own sessions. `reference/switch-back/run.sh`
 //! runs it over a fresh `db.sh up`, then serves the same database with PHP
-//! WordPress and checks it there. Ignored: it writes to the fixture.
+//! WordPress and checks it there. Ignored: it writes to the fixture. The
+//! answers of its REST writes go to `$HYSCRIBE_SWITCH_BACK_OUT/rest.tsv`.
 
 // Tests fail by panicking.
 #![allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)]
@@ -28,9 +29,12 @@ const SALTS: [(&str, &str); 8] = [
     ("NONCE_SALT", "switch-back-nonce-salt"),
 ];
 
-/// The site's address as PHP WordPress serves it afterwards, so every URL
-/// HyScribe writes is the oracle's.
-const HOME: &str = "http://127.0.0.1:8081";
+/// The site's address as PHP WordPress serves it afterwards (run.sh's
+/// `HYSCRIBE_PHP_PORT`), so every URL HyScribe writes is the oracle's.
+fn host() -> String {
+    let port = std::env::var("HYSCRIBE_PHP_PORT").unwrap_or_else(|_| "8081".into());
+    format!("127.0.0.1:{port}")
+}
 
 struct Answer {
     status: u16,
@@ -38,23 +42,35 @@ struct Answer {
     body: String,
 }
 
-/// One HTTP/1.1 request to `port`, read to the end of the connection.
-fn send(port: u16, method: &str, path: &str, cookies: &str, body: Option<&str>) -> Answer {
+/// One HTTP/1.1 request to `port` with `headers`, read to the end of the
+/// connection: a body starting with `{` is sent as JSON, else as a form.
+fn send(
+    port: u16,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+) -> Answer {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(120)))
         .unwrap();
     let mut request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:8081\r\nConnection: close\r\n\
-         User-Agent: switch-back\r\n"
+        "{method} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\
+         User-Agent: switch-back\r\n",
+        host()
     );
-    if !cookies.is_empty() {
-        request.push_str(&format!("Cookie: {cookies}\r\n"));
+    for (name, value) in headers.iter().filter(|(_, value)| !value.is_empty()) {
+        request.push_str(&format!("{name}: {value}\r\n"));
     }
     let body = body.unwrap_or_default();
-    if method == "POST" {
+    if ["POST", "PUT", "PATCH"].contains(&method) {
+        let kind = match body.starts_with('{') {
+            true => "application/json",
+            false => "application/x-www-form-urlencoded",
+        };
         request.push_str(&format!(
-            "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n",
+            "Content-Type: {kind}\r\nContent-Length: {}\r\n",
             body.len()
         ));
     }
@@ -136,7 +152,8 @@ struct Server {
 }
 
 impl Server {
-    fn start() -> Server {
+    /// Started with the `.env` lines `extra` besides the database's.
+    fn start(extra: &str) -> Server {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("hyscribe");
@@ -148,10 +165,11 @@ impl Server {
             .unwrap()
             .port();
         let db_port = std::env::var("HYSCRIBE_TEST_DB_PORT").unwrap_or_else(|_| "33061".into());
+        let url = format!("http://{}", host());
         let mut env = format!(
             "DB_HOST=127.0.0.1\nDB_PORT={db_port}\nDB_NAME=wordpress\nDB_USER=wordpress\n\
-             DB_PASSWORD=reference-only\nPORT={port}\nMODE=primary\nWP_HOME={HOME}\n\
-             WP_SITEURL={HOME}\n"
+             DB_PASSWORD=reference-only\nPORT={port}\nMODE=primary\nWP_HOME={url}\n\
+             WP_SITEURL={url}\n{extra}"
         );
         for (name, value) in SALTS {
             env.push_str(&format!("{name}={value}\n"));
@@ -202,7 +220,7 @@ fn log_in(port: u16) -> (String, String) {
         port,
         "POST",
         "/hs-login",
-        "",
+        &[],
         Some("log=admin&pwd=reference-only-password"),
     );
     assert_eq!(answer.status, 302, "login: {}", answer.body);
@@ -236,16 +254,28 @@ fn nonce(action: &str, token: &str) -> String {
     hyscribe_auth::create_nonce(salt.as_bytes(), tick, action, 1, token.as_bytes())
 }
 
+/// The first `"id":` number of a JSON answer: the object's, or a list's
+/// first object's.
+fn first_id(body: &str) -> Option<String> {
+    let (_, rest) = body.split_once("\"id\":")?;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    (!digits.is_empty()).then_some(digits)
+}
+
 /// What no answer of HyScribe's may show.
 const BROKEN: [&str; 4] = ["database error", "Fatal error", "Warning:", "Notice:"];
 
 #[test]
 #[ignore = "writes to the fixture database: run by reference/switch-back/run.sh"]
 fn writes_for_php_to_read() {
-    let server = Server::start();
-    let (cookies, token) = log_in(server.port);
+    let mut server = Server::start("");
+    let (mut cookies, mut token) = log_in(server.port);
     let list = include_str!("../../../reference/switch-back/actions.list");
     let mut failures = Vec::new();
+    // The REST writes' answers, for check.php to compare with PHP's reads.
+    let mut rest = String::new();
+    // The ID each REST answer gives first, which `%case%` in a later line names.
+    let mut ids: Vec<(String, String)> = Vec::new();
     for line in list
         .lines()
         .filter(|l| !l.starts_with('#') && !l.is_empty())
@@ -254,16 +284,33 @@ fn writes_for_php_to_read() {
         let [case, user, method, path, body, action, field, status] = f[..] else {
             panic!("bad line: {line}");
         };
-        let signed = |text: &str| match action {
-            "-" => text.to_string(),
-            _ => {
+        let named = |text: &str| {
+            ids.iter().fold(text.to_string(), |text, (case, id)| {
+                text.replace(&format!("%{case}%"), id)
+            })
+        };
+        let (path, body, action) = (named(path), named(body), named(action));
+        let (path, body, action) = (path.as_str(), body.as_str(), action.as_str());
+        if method == "RESTART" {
+            server.service("stop");
+            server = Server::start(&format!("{}\n", path.replace(' ', "\n")));
+            (cookies, token) = log_in(server.port);
+            eprintln!("{case}\trestarted with {path}");
+            continue;
+        }
+        // A nonce in a field, or in the header `field` names (`X-WP-Nonce`).
+        let nonce = (action != "-").then(|| nonce(action, &token));
+        let header = field.starts_with("X-");
+        let signed = |text: &str| match &nonce {
+            Some(nonce) if !header => {
                 let sep = if text.is_empty() { "" } else { "&" };
-                format!("{text}{sep}{field}={}", nonce(action, &token))
+                format!("{text}{sep}{field}={nonce}")
             }
+            _ => text.to_string(),
         };
         let body = if body == "-" { "" } else { body };
         let (path, body) = match method {
-            "GET" => {
+            "GET" | "DELETE" => {
                 let (bare, query) = path.split_once('?').unwrap_or((path, ""));
                 let query = signed(query);
                 (
@@ -273,12 +320,26 @@ fn writes_for_php_to_read() {
             }
             _ => (path.to_string(), Some(signed(body))),
         };
-        let sent = if user == "admin" {
-            cookies.as_str()
-        } else {
-            ""
-        };
-        let answer = send(server.port, method, &path, sent, body.as_deref());
+        let mut headers = vec![(
+            "Cookie",
+            if user == "admin" {
+                cookies.as_str()
+            } else {
+                ""
+            },
+        )];
+        if let Some(nonce) = nonce.as_deref().filter(|_| header) {
+            headers.push((field, nonce));
+        }
+        let answer = send(server.port, method, &path, &headers, body.as_deref());
+        if path.contains("rest_route=") && [200, 201].contains(&answer.status) {
+            if let Some(id) = first_id(&answer.body) {
+                ids.push((case.to_string(), id));
+            }
+            if method != "GET" {
+                rest.push_str(&format!("{case}\t{path}\t{}\n", answer.body));
+            }
+        }
         let location = answer
             .headers
             .iter()
@@ -301,6 +362,9 @@ fn writes_for_php_to_read() {
         if let Some(text) = BROKEN.iter().find(|t| answer.body.contains(*t)) {
             failures.push(format!("{case}: the answer shows {text:?}"));
         }
+    }
+    if let Ok(out) = std::env::var("HYSCRIBE_SWITCH_BACK_OUT") {
+        std::fs::write(format!("{out}/rest.tsv"), rest).unwrap();
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

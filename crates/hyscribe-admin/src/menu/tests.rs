@@ -430,3 +430,66 @@ fn root_text_leaves_tags_out() {
     assert_eq!(root_text("A <b>x</b> B "), "A  B");
     assert_eq!(root_text("a <b>c"), "a");
 }
+
+/// Links to hs-admin's screens lose `.php` in every form a page prints
+/// them; other `.php` names and paths are kept.
+#[test]
+fn links_name_screens_without_php() {
+    for (html, clean) in [
+        (
+            "<a href=\"/hs-admin/edit.php?post_type=page\">",
+            "<a href=\"/hs-admin/edit?post_type=page\">",
+        ),
+        (
+            "<a href='/hs-admin/users.php'>",
+            "<a href='/hs-admin/users'>",
+        ),
+        (
+            "/hs-admin/post.php#x /hs-admin/index.php",
+            "/hs-admin/post#x /hs-admin/index",
+        ),
+        (
+            "{\"url\":\"http:\\/\\/x\\/hs-admin\\/async-upload.php\"}",
+            "{\"url\":\"http:\\/\\/x\\/hs-admin\\/async-upload\"}",
+        ),
+        (
+            "redirect_to=http%3A%2F%2Fx%2Fhs-admin%2Fedit.php%3Fpost_type%3Dpage&amp;a=1",
+            "redirect_to=http%3A%2F%2Fx%2Fhs-admin%2Fedit%3Fpost_type%3Dpage&amp;a=1",
+        ),
+        (
+            "<form action=\"options.php\" method=\"post\">",
+            "<form action=\"options\" method=\"post\">",
+        ),
+        ("<form action='comment.php'>", "<form action='comment'>"),
+        (
+            "<a href=\"edit-tags.php?taxonomy=category\">",
+            "<a href=\"edit-tags?taxonomy=category\">",
+        ),
+        ("<a href='user-edit.php'>", "<a href='user-edit'>"),
+        // Not a screen: other folders, longer names, another extension.
+        (
+            "/hs-admin/css/x.php /hs-admin/.php",
+            "/hs-admin/css/x.php /hs-admin/.php",
+        ),
+        (
+            "/hs-admin/a.phpx /hs-admin/a.php_ /hs-admin/a.php-b",
+            "/hs-admin/a.phpx /hs-admin/a.php_ /hs-admin/a.php-b",
+        ),
+        (
+            "/hs-admin/a.php.bak /hs-admin/a.php/b",
+            "/hs-admin/a.php.bak /hs-admin/a.php/b",
+        ),
+        (
+            "href=\"http://x/wp-comments-post.php\" action=\"/wp-cron.php\"",
+            "href=\"http://x/wp-comments-post.php\" action=\"/wp-cron.php\"",
+        ),
+        (
+            "/wp-admin/edit.php hs-admin/edit.php",
+            "/wp-admin/edit.php hs-admin/edit.php",
+        ),
+        ("é/hs-admin/edit.phpé", "é/hs-admin/edité"),
+        ("/hs-admin/edit.php", "/hs-admin/edit"),
+    ] {
+        assert_eq!(clean_links(html), clean, "{html}");
+    }
+}

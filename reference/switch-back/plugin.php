@@ -7,6 +7,8 @@
 // run.sh turns WP_DEBUG and WP_DEBUG_LOG on in wp-config.php, which
 // defines WP_DEBUG before any plugin loads.
 define( 'DISABLE_WP_CRON', true );
+// HyScribe's default, under which its REST answers were made (their links).
+define( 'DISALLOW_UNFILTERED_HTML', true );
 
 foreach ( array( 'update_core', 'update_plugins', 'update_themes' ) as $transient ) {
 	add_filter(

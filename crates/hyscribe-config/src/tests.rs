@@ -74,7 +74,7 @@ fn defaults_are_safe() {
     );
 }
 
-/// The cron constants read as the capability constants, false by default.
+/// The cron constants read as every yes or no key, false by default.
 #[test]
 fn reads_the_cron_constants() {
     let cron = |pairs: &[(&str, &str)]| {
@@ -83,11 +83,13 @@ fn reads_the_cron_constants() {
     };
     let set = [("DISABLE_WP_CRON", "TRUE"), ("ALTERNATE_WP_CRON", "1")];
     assert_eq!(cron(&set).unwrap(), (true, true));
+    let words = [("DISABLE_WP_CRON", "yes"), ("ALTERNATE_WP_CRON", "On")];
+    assert_eq!(cron(&words).unwrap(), (true, true));
     let unset = [("DISABLE_WP_CRON", "0"), ("ALTERNATE_WP_CRON", "")];
     assert_eq!(cron(&unset).unwrap(), (false, false));
     for key in ["DISABLE_WP_CRON", "ALTERNATE_WP_CRON"] {
         assert_eq!(
-            cron(&[(key, "yes")]).unwrap_err().to_string(),
+            cron(&[(key, "maybe")]).unwrap_err().to_string(),
             format!("{key} is invalid: must be true or false")
         );
     }

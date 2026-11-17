@@ -108,7 +108,7 @@ async fn the_custom_css_lookup_is_kept_as_php_keeps_it() {
         assert_eq!(found.unwrap(), parsed(kept), "{kept}");
     }
     // One of a missing post, or not an ID, is looked up again.
-    for again in ["i:999;", "i:0;", "s:2:\"-1\";"] {
+    for again in ["i:999;", "i:0;", "i:-2;", "s:2:\"-1\";"] {
         let found = looked_up(async |w| {
             set(w, "theme_mods_twentytwentyfive", mods(again).as_bytes()).await
         })
@@ -142,6 +142,12 @@ async fn the_custom_css_lookup_is_kept_as_php_keeps_it() {
         w.insert_post(&post).await.unwrap();
     };
     assert!(unported(looked_up(css).await));
+    // Unless the lookup was kept.
+    let kept = async |w: &mut Write<'_>| {
+        css(w).await;
+        set(w, "theme_mods_twentytwentyfive", mods("i:-1;").as_bytes()).await;
+    };
+    assert_eq!(looked_up(kept).await.unwrap(), parsed("i:-1;"));
 }
 
 /// The newest published global styles post of the theme is its own, the

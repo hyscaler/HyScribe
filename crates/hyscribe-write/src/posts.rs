@@ -347,7 +347,11 @@ pub async fn custom_css_post_lookup(
     let found = mods.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone());
     let kept = match found {
         Some(Value::Int(-1)) => true,
-        Some(Value::Int(id)) if id > 0 => write.post(id.unsigned_abs()).await?.is_some(),
+        // No post has the ID 0, so `$post_id > 0` is the conversion's.
+        Some(Value::Int(id)) => match u64::try_from(id) {
+            Ok(id) => write.post(id).await?.is_some(),
+            Err(_) => false,
+        },
         _ => false,
     };
     if kept {

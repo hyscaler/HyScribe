@@ -330,9 +330,10 @@ async fn post_writes_are_php_s() {
     ];
     for (golden, method, target, body) in writes {
         let pending = planned(&site, method, target, body).await;
-        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
         let nothing = async |_: &mut hyscribe_db::Connection| Ok::<_, String>(());
         let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            // The clock is read once the oracle's has started, as `%now%` counts from it.
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
             let outcome = acted(conn, &pending.plan, &ctx).await;
             assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
             Ok(())
@@ -411,7 +412,6 @@ async fn site_writes_are_php_s() {
     let site = saves_site(dir.path()).await;
     for (golden, method, target, body) in writes {
         let pending = planned(&site, method, &target, body).await;
-        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
         let setup = async |conn: &mut hyscribe_db::Connection| {
             if !golden.ends_with("-create") {
                 let insert = sqlx::raw_sql(sqlx::AssertSqlSafe(insert));
@@ -420,6 +420,8 @@ async fn site_writes_are_php_s() {
             Ok::<_, String>(())
         };
         let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            // The clock is read once the oracle's has started, as `%now%` counts from it.
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
             let outcome = acted(conn, &pending.plan, &ctx).await;
             assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
             Ok(())

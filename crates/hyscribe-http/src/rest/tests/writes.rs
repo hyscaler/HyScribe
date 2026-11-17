@@ -374,9 +374,10 @@ async fn post_writes_are_php_s() {
     ];
     for (golden, method, target, body) in writes {
         let pending = planned(&site, method, target, body).await;
-        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
         let nothing = async |_: &mut hyscribe_db::Connection| Ok::<_, String>(());
+        // Dated as the action runs, which the golden's `%now%` spans.
         let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
             let outcome = acted(conn, &pending.plan, &ctx).await;
             assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
             Ok(())
@@ -404,7 +405,6 @@ async fn writes_are_php_s(state: &str, writes: Vec<(&str, &'static str, String, 
     let site = saves_site(dir.path()).await;
     for (golden, method, target, body, inserted) in writes {
         let pending = planned(&site, method, &target, body).await;
-        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
         let inserts: Vec<String> = state
             .lines()
             .filter(|line| match inserted {
@@ -421,7 +421,9 @@ async fn writes_are_php_s(state: &str, writes: Vec<(&str, &'static str, String, 
             }
             Ok::<_, String>(())
         };
+        // Dated as the action runs, which the golden's `%now%` spans.
         let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
             let outcome = acted(conn, &pending.plan, &ctx).await;
             assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
             Ok(())

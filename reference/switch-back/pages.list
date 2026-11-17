@@ -3,7 +3,7 @@
 # each must show (as the HTML has it):
 # user (admin, switchback or visitor)	path	status	text
 admin	/wp-admin/	200	Switch back draft
-admin	/wp-admin/edit.php	200	Hello again
+admin	/wp-admin/edit.php?s=Hello	200	Hello again
 admin	/wp-admin/edit.php?post_status=draft	200	Switch back draft
 admin	/wp-admin/edit.php?post_type=page	200	Sample Page Edited
 admin	/wp-admin/edit.php?post_type=page&post_status=draft	200	Privacy Policy
@@ -31,3 +31,27 @@ visitor	/tag/bulk-tag/	200	Hello again
 visitor	/feed/	200	Hello again
 visitor	/comments/feed/	200	edited on the screen
 visitor	/tag/switch/	200	Hello again
+# What the REST API wrote: the synced pattern in the post, the page under
+# Sample Page, the navigation menu in the theme's header.
+visitor	/a-rest-post/	200	Synced from REST.
+visitor	/a-rest-post/	200	A REST post, updated
+visitor	/sample-page/a-rest-page/	200	A page written over REST.
+visitor	/	200	REST link
+visitor	/tag/bulk-tag/	200	A REST post, updated
+visitor	/revised-over-rest/	200	Second version.
+visitor	/scratch-c/	404	Page not found
+admin	/wp-admin/edit.php?post_status=draft	200	Scratch B
+admin	/wp-admin/edit.php?post_type=wp_block	200	A REST pattern, renamed
+admin	/wp-admin/edit.php?post_type=wp_block&post_status=trash	200	Trashed pattern
+admin	/wp-admin/edit.php?post_status=trash	200	Trashed over REST
+admin	/wp-admin/edit.php?post_status=future	200	A REST future post
+admin	/wp-admin/edit.php?post_status=draft	200	A REST draft
+admin	/wp-admin/edit.php?post_type=page	200	A REST page, updated
+admin	/wp-admin/edit.php?show_sticky=1	200	A REST post, updated
+admin	/wp-admin/post.php?post=1&action=edit	200	Hello again
+# The administrator's list mode, the comments moderated, the pending email.
+admin	/wp-admin/edit.php	200	table-view-excerpt
+admin	/wp-admin/edit-comments.php?comment_status=moderated	200	Moderated twice.
+admin	/wp-admin/edit-comments.php?comment_status=approved	200	Spammed and back.
+admin	/wp-admin/options-general.php	200	new-admin@example.test
+admin	/wp-admin/edit-tags.php?taxonomy=post_tag	200	Bulk tag

@@ -620,3 +620,27 @@ fn entity_decoding_leaves_controls_and_quotes_as_php_does() {
         format!("{kept}''\"")
     );
 }
+
+/// Entity decoding is linear: a reference is read only up to its first
+/// byte that is neither a letter, a digit nor `#`, so a megabyte with no
+/// `;` decodes at once, where reading to the next `;` took minutes.
+#[test]
+fn entity_decoding_is_linear() {
+    let started = std::time::Instant::now();
+    let size = 1 << 20;
+    for text in [
+        b"a".repeat(size),
+        b"&".repeat(size),
+        b"&a".repeat(size / 2),
+        b"&#1".repeat(size / 3),
+    ] {
+        assert_eq!(html_entity_decode(&text), text);
+        assert_eq!(html_entity_decode_quotes(&text), text);
+        assert_eq!(ent2ncr(&text), text);
+    }
+    assert!(started.elapsed().as_secs() < 10, "{:?}", started.elapsed());
+    // A reference ends at its `;`; another byte before it leaves it as is.
+    let decoded = html_entity_decode(b"&amp;&am p;&a#mp;&#65;&#x;&");
+    assert_eq!(decoded, b"&&am p;&a#mp;A&#x;&");
+    assert_eq!(ent2ncr(b"&nbsp;x&nbsp"), b"&#160;x&nbsp");
+}

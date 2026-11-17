@@ -112,7 +112,7 @@ pub(super) async fn act(
     let outcome = written(&mut write, plan, ctx).await?;
     match outcome {
         Outcome::Written(_) => write.commit().await.map(|()| outcome).map_err(Into::into),
-        Outcome::Refused(_) => Ok(outcome),
+        Outcome::Refused(_) | Outcome::InvalidText(_) => Ok(outcome),
     }
 }
 
@@ -191,6 +191,7 @@ async fn saved(write: &mut Write<'_>, save: &Save, ctx: &Context) -> Result<Outc
     let id = match saved {
         Ok(id) => id,
         Err(Error::Refused("empty_content")) => return Ok(Outcome::Refused("empty_content")),
+        Err(Error::InvalidText(last_error)) => return Ok(Outcome::InvalidText(last_error)),
         Err(err) => return Err(err),
     };
     match save.sticky {

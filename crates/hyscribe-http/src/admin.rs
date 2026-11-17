@@ -1473,10 +1473,10 @@ const HTML: &str = "text/html; charset=UTF-8";
 const JSON: &str = "application/json; charset=UTF-8";
 
 /// The answer to a write function's error: 501 for what is not ported,
-/// else the database error page.
+/// text `wpdb` refuses among it, else the database error page.
 fn failed(admin: &Admin, err: hyscribe_write::Error) -> Response {
     match err {
-        hyscribe_write::Error::Unported(_) => not_ported(),
+        hyscribe_write::Error::Unported(_) | hyscribe_write::Error::InvalidText(_) => not_ported(),
         err => crate::html(crate::database_error(admin.site, &format!("{err:?}"))),
     }
 }

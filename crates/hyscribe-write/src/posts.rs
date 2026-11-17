@@ -369,6 +369,40 @@ fn sanitize_trackback_urls(to_ping: &[u8]) -> Vec<u8> {
     urls.join(&b'\n')
 }
 
+/// `wpdb::process_fields()`'s check of a post row: each text column must be
+/// valid UTF-8, as `strip_invalid_text()` would leave it, else PHP writes nothing.
+fn valid_text(fields: &PostFields) -> Result<()> {
+    let columns: [(&str, &[u8]); 9] = [
+        ("post_content", &fields.content),
+        ("post_content_filtered", &fields.content_filtered),
+        ("post_title", &fields.title),
+        ("post_excerpt", &fields.excerpt),
+        ("post_password", &fields.password),
+        ("post_name", &fields.name),
+        ("to_ping", &fields.to_ping),
+        ("pinged", &fields.pinged),
+        ("guid", &fields.guid),
+    ];
+    let invalid: Vec<&str> = columns
+        .iter()
+        .filter(|(_, text)| std::str::from_utf8(text).is_err())
+        .map(|(column, _)| *column)
+        .collect();
+    let last_error = match invalid.as_slice() {
+        [] => return Ok(()),
+        [column] => format!(
+            "WordPress database error: Processing the value for the following field failed: \
+             {column}. The supplied value may be too long or contains invalid data."
+        ),
+        columns => format!(
+            "WordPress database error: Processing the values for the following fields failed: \
+             {}. The supplied values may be too long or contain invalid data.",
+            columns.join(", ")
+        ),
+    };
+    Err(Error::InvalidText(last_error))
+}
+
 /// `wp_insert_post()` up to its `wp_insert_post` action: the post's ID and
 /// kind, and whether it was an update.
 async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<(u64, Kind, bool)> {
@@ -503,6 +537,7 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
             .map(|post| post.guid.clone())
             .unwrap_or_default(),
     };
+    valid_text(&fields)?;
     let id = if before.is_some() {
         write.update_post(post_id, &fields).await?;
         post_id

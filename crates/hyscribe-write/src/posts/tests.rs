@@ -1434,6 +1434,41 @@ async fn attachments_are_not_ported() {
     }
 }
 
+/// Text that is not valid UTF-8 is refused as `wpdb::process_fields()`
+/// refuses it, its `$last_error` naming each column in the row's order.
+#[tokio::test]
+async fn invalid_text_is_refused_as_wpdb_refuses_it() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let last_error = |args: PostArgs| async {
+        match insert_rolled_back(args).await {
+            Err(Error::InvalidText(last_error)) => last_error,
+            other => panic!("{other:?}"),
+        }
+    };
+    let one = PostArgs {
+        content: b"x\xffy".to_vec(),
+        ..oracle_post("draft")
+    };
+    assert_eq!(
+        last_error(one).await,
+        "WordPress database error: Processing the value for the following field failed: \
+         post_content. The supplied value may be too long or contains invalid data."
+    );
+    let many = PostArgs {
+        title: b"a\xedb".to_vec(),
+        excerpt: b"\xc0\xaf".to_vec(),
+        password: b"\xfe".to_vec(),
+        pinged: b"\xf5\x80\x80\x80".to_vec(),
+        ..oracle_post("draft")
+    };
+    assert_eq!(
+        last_error(many).await,
+        "WordPress database error: Processing the values for the following fields failed: \
+         post_title, post_excerpt, post_password, pinged. The supplied values may be too long \
+         or contain invalid data."
+    );
+}
+
 #[tokio::test]
 async fn rare_values_are_kept_as_php_keeps_them() {
     let _one = ONE_AT_A_TIME.lock().await;

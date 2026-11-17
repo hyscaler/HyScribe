@@ -32,6 +32,9 @@ pub enum Error {
     Db(DbError),
     /// What PHP refuses: its `WP_Error` code, or why it would `wp_die()`.
     Refused(&'static str),
+    /// `wpdb::process_fields()` refused a row whose text is not valid
+    /// UTF-8: its `$last_error`, which names the columns.
+    InvalidText(String),
     /// A PHP function this write needs is not ported yet.
     Unported(&'static str),
     /// The kernel's random source failed, so no password was hashed.

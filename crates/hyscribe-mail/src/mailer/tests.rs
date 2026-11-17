@@ -476,6 +476,15 @@ async fn the_filters_run_in_wordpress_order() {
         id.starts_with('<') && id.ends_with(".0@example.test>"),
         "{id}"
     );
+    // The system clock's nanoseconds, so IDs differ across restarts.
+    let nanos: u128 = id
+        .trim_start_matches('<')
+        .split('.')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(nanos > 1_700_000_000_000_000_000, "{id}");
 }
 
 #[tokio::test]

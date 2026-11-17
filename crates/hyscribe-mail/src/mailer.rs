@@ -22,6 +22,20 @@ use crate::headers::{breaks_line, parse};
 use crate::hooks::Hooks;
 use crate::transport::{LIMIT, Relay, message};
 
+/// The one log line of a message: its kind, the recipient's domain, the
+/// outcome and the time taken since `started`; never a subject, body or address.
+macro_rules! log {
+    ($kind:expr, $domain:expr, $outcome:expr, $started:expr) => {
+        eprintln!(
+            "mail {} to {}: {} in {} ms",
+            $kind,
+            $domain,
+            $outcome,
+            $started.elapsed().as_millis()
+        )
+    };
+}
+
 /// How many messages leave, wait and are waited for.
 #[derive(Clone, Copy)]
 struct Limits {
@@ -199,7 +213,7 @@ impl Mailer {
                     started,
                 );
             }
-            log(kind, &domain, "sent by phpmailer_init", started);
+            log!(kind, &domain, "sent by phpmailer_init", started);
             self.hooks.wp_mail_succeeded(&atts);
             return true;
         }
@@ -237,7 +251,7 @@ impl Mailer {
             .unwrap_or_else(PoisonError::into_inner)
             .allow(account, address, Instant::now());
         if let Err(limit) = allowed {
-            log(
+            log!(
                 kind,
                 &domain(&mail.to),
                 &format!("not sent: {limit}"),
@@ -255,7 +269,7 @@ impl Mailer {
             return Err("refused: a line break in the subject or recipient");
         }
         let headers = parse(&atts.headers).ok_or("refused: a line break in the headers")?;
-        if !headers.dropped.is_empty() {
+        if let [_, ..] = headers.dropped.as_slice() {
             eprintln!("mail {kind}: {} headers dropped", headers.dropped.len());
         }
         // The address is always `MAIL_FROM`'s: the filter sets nothing.
@@ -314,7 +328,7 @@ impl Mailer {
         why: &str,
         started: Instant,
     ) -> bool {
-        log(kind, domain, why, started);
+        log!(kind, domain, why, started);
         self.hooks.wp_mail_failed(atts, why);
         false
     }
@@ -365,13 +379,6 @@ fn domain(to: &[u8]) -> String {
     kept.map(|&b| char::from(b)).collect()
 }
 
-/// The one log line of a message: its kind, the recipient's domain, the
-/// outcome and the time taken; never a subject, body or address.
-fn log(kind: &str, domain: &str, outcome: &str, started: Instant) {
-    let took = started.elapsed().as_millis();
-    eprintln!("mail {kind} to {domain}: {outcome} in {took} ms");
-}
-
 /// The relay's task: each message in turn, at most `limits.per_window` in
 /// a window; one whose waiting caller has given up is dropped.
 async fn work(mut jobs: mpsc::Receiver<Job>, relay: Relay, hooks: Arc<dyn Hooks>, limits: Limits) {
@@ -391,11 +398,11 @@ async fn work(mut jobs: mpsc::Receiver<Job>, relay: Relay, hooks: Arc<dyn Hooks>
         let sent = outcome.is_ok();
         match outcome {
             Ok(code) => {
-                log(job.kind, &job.domain, &format!("sent, {code}"), job.queued);
+                log!(job.kind, &job.domain, &format!("sent, {code}"), job.queued);
                 hooks.wp_mail_succeeded(&job.data);
             }
             Err(why) => {
-                log(
+                log!(
                     job.kind,
                     &job.domain,
                     &format!("not sent: {why}"),

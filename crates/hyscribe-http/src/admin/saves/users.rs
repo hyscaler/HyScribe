@@ -206,7 +206,7 @@ pub(super) async fn retrieve_password_mail(
 impl Mailed for Answer {
     fn mailed(self, waited: usize, sent: usize) -> Answer {
         match self {
-            Answer::Redirect(to) if sent < waited => {
+            Answer::Redirect(to) if waited > 0 => {
                 let count = sent.to_string();
                 let args: [(&[u8], Option<&[u8]>); 1] = [(b"reset_count", Some(count.as_bytes()))];
                 Answer::Redirect(text(&add_query_arg(&args, to.as_bytes())))

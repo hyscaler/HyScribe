@@ -321,9 +321,10 @@ async fn post_writes_are_php_s() {
     ];
     for (golden, method, target, body) in writes {
         let pending = planned(&site, method, target, body).await;
-        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
         let nothing = async |_: &mut hyscribe_db::Connection| Ok::<_, String>(());
         let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            // The clock read once the run has started, as the golden masks it.
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
             let outcome = acted(conn, &pending.plan, &ctx).await;
             assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
             Ok(())

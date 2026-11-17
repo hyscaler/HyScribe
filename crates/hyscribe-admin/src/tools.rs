@@ -58,21 +58,21 @@ pub trait ToolsSite: UsersSite {
 }
 
 /// A screen under Tools: its file, title, help and markup.
-struct Tool<'a> {
-    file: &'a str,
-    title: &'a str,
-    help: &'a [HelpTab<'a>],
-    sidebar: &'a str,
-    screen_options: &'a str,
-    styles: &'a [&'a str],
-    scripts: &'a [&'a str],
-    script_data: &'a [(&'a str, String)],
-    admin_head: &'a str,
-    content: &'a str,
+pub(crate) struct Tool<'a> {
+    pub(crate) file: &'a str,
+    pub(crate) title: &'a str,
+    pub(crate) help: &'a [HelpTab<'a>],
+    pub(crate) sidebar: &'a str,
+    pub(crate) screen_options: &'a str,
+    pub(crate) styles: &'a [&'a str],
+    pub(crate) scripts: &'a [&'a str],
+    pub(crate) script_data: &'a [(&'a str, String)],
+    pub(crate) admin_head: &'a str,
+    pub(crate) content: &'a str,
 }
 
 /// The page of a screen under Tools, or `None` for one who may not see it.
-fn tool_page(site: &dyn PageSite, tool: &Tool, request: &Request) -> Option<String> {
+pub(crate) fn tool_page(site: &dyn PageSite, tool: &Tool, request: &Request) -> Option<String> {
     let page = Page {
         screen: Screen {
             pagenow: tool.file,

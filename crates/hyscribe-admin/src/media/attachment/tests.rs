@@ -232,7 +232,7 @@ fn locks_referers_and_ids_are_php_s() {
     );
 }
 
-/// `size_format()`'s units, from bytes to terabytes.
+/// `size_format()`'s units, from bytes to exabytes.
 #[test]
 fn sizes_are_php_s() {
     for (bytes, size) in [
@@ -241,6 +241,12 @@ fn sizes_are_php_s() {
         (1536, "2 KB"),
         (5 << 30, "5 GB"),
         (3 << 40, "3 TB"),
+        (1 << 50, "1 PB"),
+        ((1 << 50) - 1, "1,024 TB"),
+        // PHP compares as floats, which round this up to an exabyte.
+        ((1 << 60) - 1, "1 EB"),
+        (7 << 60, "7 EB"),
+        (i64::MAX, "8 EB"),
     ] {
         assert_eq!(size_format(bytes), size);
     }

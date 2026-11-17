@@ -46,6 +46,8 @@ pub trait PostsSite: PageSite {
     fn clock(&self) -> (Zone, i64);
     /// `get_option( $name )`, as stored.
     fn option(&self, name: &str) -> Option<Vec<u8>>;
+    /// `wp_max_upload_size()`: `UPLOAD_MAX_SIZE`, in bytes.
+    fn max_upload_size(&self) -> u64;
     /// `get_post_class( $class, $post )` in the admin, joined by spaces.
     fn post_class(&self, class: &str, post: &Post) -> String;
     /// `get_the_terms( $post, $taxonomy )`.

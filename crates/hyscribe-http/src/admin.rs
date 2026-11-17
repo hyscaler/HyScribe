@@ -32,6 +32,7 @@ use hyscribe_admin::posts::{
 use hyscribe_admin::profile::{EditArgs, ProfileSite, profile, user_edit};
 use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
 use hyscribe_admin::settings_more;
+use hyscribe_admin::site_health::{HealthSite, Install, info};
 use hyscribe_admin::terms::{
     Taxonomy as Terms, TermArgs, TermEditArgs, TermsSite, edit_tags, term_edit,
 };
@@ -574,6 +575,9 @@ impl PostsSite for Admin<'_> {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         CapabilityData::option(self.reads, name)
     }
+    fn max_upload_size(&self) -> u64 {
+        self.site.install.upload_max_size
+    }
     fn post_class(&self, class: &str, post: &Post) -> String {
         let classes = hyscribe_render::post::post_class(&self.reads.reads, None, class, post);
         String::from_utf8_lossy(&classes).into_owned()
@@ -841,6 +845,25 @@ impl MediaSite for Admin<'_> {
         self.reads
             .reads
             .wait(self.site.db.post_name_taken(&slug, id))
+    }
+}
+
+impl HealthSite for Admin<'_> {
+    fn install(&self) -> Install {
+        Install::clone(&self.site.install)
+    }
+    fn primary(&self) -> bool {
+        self.site.writer.is_some()
+    }
+    fn login_limits(&self) -> [u32; 3] {
+        let limits = self.site.limiter.limits();
+        [limits.address, limits.account, limits.window]
+    }
+    fn table_prefix(&self) -> String {
+        self.site.db.prefix().into()
+    }
+    fn database_server(&self) -> (String, String) {
+        self.reads.reads.wait(self.site.db.server())
     }
 }
 
@@ -1285,10 +1308,21 @@ fn screen(
         }
         "/hs-admin/post-new" => hyscribe_admin::editor::post_new(admin, query)?,
         "/hs-admin/revision" => hyscribe_admin::revisions::revision(admin, query, &request)?,
-        // Their pages print the PHP and web server details HyScribe has no
+        // Its page prints the PHP and web server details HyScribe has no
         // equivalent for: refused as PHP refuses, else not ported.
         "/hs-admin/plugins" if !admin.can("activate_plugins") => Answer::from_page(None),
         "/hs-admin/site-health" if !admin.can("view_site_health_checks") => Answer::from_page(None),
+        // The Info tab of the bundled theme; the Status tab's checks
+        // are not decided.
+        "/hs-admin/site-health" => {
+            only_argument(query, "tab").filter(|tab| tab.as_deref() == Some("debug"))?;
+            let bundled =
+                |name| PostsSite::option(admin, name).as_deref() == Some(&b"twentytwentyfive"[..]);
+            if !bundled("stylesheet") || !bundled("template") {
+                return None;
+            }
+            Answer::from_page(info(admin, &request))
+        }
         // Its page preloads REST responses not served yet, and its first view
         // writes the theme's `wp_global_styles` post.
         "/hs-admin/site-editor" if !admin.can("edit_theme_options") => Answer::from_page(None),

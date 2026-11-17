@@ -82,6 +82,7 @@ async fn screens_print_no_php_links() {
         ("user-new", "user-new.php"),
         ("profile", "profile.php"),
         ("tools", "tools.php"),
+        ("site-health?tab=debug", "site-health.php?tab=debug"),
         ("import", "import.php"),
         ("export", "export.php"),
         ("options-general", "options-general.php"),

@@ -113,11 +113,13 @@ pub(super) fn plan(
 fn answered_before(admin: &Admin, target: &Target, host: &str) -> bool {
     let post = match target {
         Target::Edit(post) => (**post).clone(),
-        Target::New(post_type) => Post {
-            post_type: post_type.clone(),
-            author: admin.user.id,
-            ..Post::default()
-        },
+        // The new post's paths but its type's are left out below, and a
+        // route of no type answers as one of the type's would.
+        Target::New(post_type) => {
+            let mut post = Post::default();
+            post.post_type.clone_from(post_type);
+            post
+        }
     };
     let stylesheet = admin.site.option("stylesheet");
     let edit_theme = admin.can("edit_theme_options");

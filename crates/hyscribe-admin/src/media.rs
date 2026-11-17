@@ -36,7 +36,7 @@ const MEDIA_TEMPLATES: &str = include_str!("media/media.html");
 const MEDIA_VIEWS: &str = include_str!("media/media-views.js");
 
 /// The uploader's buttons and limits, for a browser that can upload.
-const UPLOAD: &str = "\t\t\t\t<h2 class=\"upload-instructions drop-instructions\">Drop files to upload</h2>\n\t\t\t\t<p class=\"upload-instructions drop-instructions\">or</p>\n\t\t\t\t<button type=\"button\" class=\"browser button button-hero\" aria-describedby=\"post-upload-info\">Select Files</button>\n\t\t\t</div>\n\n\t\t\t<div class=\"upload-inline-status\"></div>\n\n\t\t\t<div class=\"post-upload-ui\" id=\"post-upload-info\">\n\t\t\t\t\n\t\t\t\t<p class=\"max-upload-size\">\n\t\t\t\tMaximum upload file size: 2 MB.\t\t\t\t</p>\n\n\t\t\t\t<# if ( data.suggestedWidth && data.suggestedHeight ) { #>\n\t\t\t\t\t<p class=\"suggested-dimensions\">\n\t\t\t\t\t\tSuggested image dimensions: {{data.suggestedWidth}} by {{data.suggestedHeight}} pixels.\t\t\t\t\t</p>\n\t\t\t\t<# } #>\n\n\t\t\t\t\t\t\t</div>\n";
+const UPLOAD: &str = "\t\t\t\t<h2 class=\"upload-instructions drop-instructions\">Drop files to upload</h2>\n\t\t\t\t<p class=\"upload-instructions drop-instructions\">or</p>\n\t\t\t\t<button type=\"button\" class=\"browser button button-hero\" aria-describedby=\"post-upload-info\">Select Files</button>\n\t\t\t</div>\n\n\t\t\t<div class=\"upload-inline-status\"></div>\n\n\t\t\t<div class=\"post-upload-ui\" id=\"post-upload-info\">\n\t\t\t\t\n\t\t\t\t<p class=\"max-upload-size\">\n\t\t\t\t%max_upload%\t\t\t\t</p>\n\n\t\t\t\t<# if ( data.suggestedWidth && data.suggestedHeight ) { #>\n\t\t\t\t\t<p class=\"suggested-dimensions\">\n\t\t\t\t\t\tSuggested image dimensions: {{data.suggestedWidth}} by {{data.suggestedHeight}} pixels.\t\t\t\t\t</p>\n\t\t\t\t<# } #>\n\n\t\t\t\t\t\t\t</div>\n";
 
 /// What the uploader says to a browser that cannot upload.
 const NO_UPLOAD: &str = "\t\t\t\t<h2 class=\"upload-instructions\">Your browser cannot upload files</h2>\n\t\t\t\t<p>\n\t\t\t\tThe web browser on your device cannot be used to upload files. You may be able to use the <a href=\"https://apps.wordpress.org/\">native app for your device</a> instead.\t\t\t\t</p>\n\t\t\t</div>\n";
@@ -56,8 +56,43 @@ fn extensions(site: &dyn PostsSite) -> String {
         .replace(",rtf,", ",rtf,js,")
 }
 
-/// `wp_max_upload_size()`, the oracle's `upload_max_filesize`.
-const MAX_UPLOAD: &str = "2097152b";
+/// `size_format( $bytes )`, from bytes to exabytes, as far as `i64` goes,
+/// comparing as PHP does, in floats.
+pub(crate) fn size_format(bytes: i64) -> String {
+    let units = [
+        ("EB", 1i64 << 60),
+        ("PB", 1 << 50),
+        ("TB", 1 << 40),
+        ("GB", 1 << 30),
+        ("MB", 1 << 20),
+        ("KB", 1 << 10),
+    ];
+    let (unit, magnitude) = units
+        .into_iter()
+        .find(|(_, magnitude)| bytes as f64 >= *magnitude as f64)
+        .unwrap_or(("B", 1));
+    let rounded = (bytes as f64 / magnitude as f64).round() as i64;
+    format!("{} {unit}", hyscribe_render::number_format(rounded))
+}
+
+/// `wp_max_upload_size()`: `UPLOAD_MAX_SIZE`.
+pub(crate) fn max_upload(site: &dyn PostsSite) -> i64 {
+    i64::try_from(site.max_upload_size()).unwrap_or(i64::MAX)
+}
+
+/// `max_file_size` of plupload's settings: `wp_max_upload_size()` in bytes.
+fn max_file_size(site: &dyn PostsSite) -> Value {
+    text(&format!("{}b", max_upload(site)))
+}
+
+/// The uploader's "Maximum upload file size" line, as
+/// `media_upload_form()` and the media templates print it.
+fn max_upload_line(site: &dyn PostsSite) -> String {
+    format!(
+        "Maximum upload file size: {}.",
+        size_format(max_upload(site))
+    )
+}
 
 /// `_device_can_upload()`: not on iOS before 6.
 pub(crate) fn can_upload(browser: &Browser) -> bool {
@@ -93,7 +128,7 @@ fn plupload(site: &dyn PostsSite, browser: &Browser) -> String {
         (
             "filters",
             object(vec![
-                ("max_file_size", text(MAX_UPLOAD)),
+                ("max_file_size", max_file_size(site)),
                 (
                     "mime_types",
                     Value::Array(vec![(
@@ -220,15 +255,15 @@ pub(crate) fn enqueue_media(
     post: Option<(u64, Value)>,
 ) -> (String, [(&'static str, String); 3]) {
     let upload = if can_upload(browser) {
-        UPLOAD
+        UPLOAD.replace("%max_upload%", &max_upload_line(site))
     } else {
-        NO_UPLOAD
+        NO_UPLOAD.into()
     };
     let templates = site.fill(&fill(
         MEDIA_TEMPLATES,
         &[
             ("title", esc_js(&option(site, "blogname"))),
-            ("upload", upload.into()),
+            ("upload", upload),
         ],
     ));
     let script_data = [

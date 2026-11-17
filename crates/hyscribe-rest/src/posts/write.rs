@@ -438,11 +438,10 @@ fn after_save(
         };
     }
     if kind == Kind::Post {
+        // Validated as one of `get_post_format_slugs()`, so never empty.
         save.format = params
             .get("format")
-            .filter(|format| !format.is_empty())
             .map(|format| match format.to_php_string() {
-                // Validated as one of `get_post_format_slugs()`.
                 standard if standard == b"standard" => Vec::new(),
                 format => [&b"post-format-"[..], &format].concat(),
             });

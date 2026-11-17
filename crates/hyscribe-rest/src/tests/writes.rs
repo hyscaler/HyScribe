@@ -566,7 +566,6 @@ fn formats_are_terms() {
     let aside = Some(b"post-format-aside".to_vec());
     assert_eq!(format("/wp/v2/posts/1", "aside"), aside);
     assert_eq!(format("/wp/v2/posts/1", "standard"), Some(Vec::new()));
-    assert_eq!(format("/wp/v2/posts/1", ""), None);
     assert_eq!(format("/wp/v2/pages/2", "aside"), None);
 }
 
@@ -702,8 +701,7 @@ fn navigation_and_patterns_save_their_fields() {
 }
 
 /// Content whose answer is not ported, as stored after kses or unfiltered,
-/// is not written; nor `format`, a template, `meta`, or content with
-/// ignored hooked blocks.
+/// is not written; nor `meta`, or content with ignored hooked blocks.
 #[test]
 fn unported_writes_are_not_planned() {
     // A login block shows the logged in user more, as every writer is.
@@ -734,17 +732,11 @@ fn unported_writes_are_not_planned() {
     let asked = Asked::new("administrator", "POST", "/wp/v2/posts", hidden);
     let (plan, _) = on(&unfiltered, &asked, Outcome::Written(1));
     assert!(plan.is_some_and(|plan| plan.unfiltered_html));
-    for body in [
-        r#"{"format":"aside"}"#,
-        r#"{"template":"x"}"#,
-        r#"{"meta":null}"#,
-    ] {
-        assert_eq!(
-            answered("administrator", "POST", "/wp/v2/posts/1", body).status,
-            501,
-            "{body}"
-        );
-    }
+    let meta = r#"{"meta":null}"#;
+    assert_eq!(
+        answered("administrator", "POST", "/wp/v2/posts/1", meta).status,
+        501
+    );
     let mut site = changed(Vec::new(), Vec::new());
     site.meta
         .push((1, "_wp_ignored_hooked_blocks", b"[\"core/x\"]"));

@@ -8,7 +8,7 @@ use hyscribe_phpser::{
     Key, Maybe, Value, add_query_arg, is_empty_string, maybe_unserialize, parse_str, stripslashes,
     urlencode,
 };
-use hyscribe_render::head::{admin_import_map, emoji_detection_script, json_hex_tag};
+use hyscribe_render::head::{admin_script_modules, emoji_detection_script, json_hex_tag};
 use hyscribe_render::kses::wp_kses_post;
 use hyscribe_render::post::sanitize_html_class;
 
@@ -378,6 +378,32 @@ pub(crate) fn json(value: &Value) -> String {
 /// The page `site` shows its user, or `None` when
 /// `user_can_access_admin_page()` turns them away.
 pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option<String> {
+    admin_page_with(site, page, browser, &Extras::default())
+}
+
+/// What a screen adds to [`Page`]: the block editor's.
+#[derive(Default)]
+pub struct Extras<'a> {
+    /// What the `admin_body_class` filter returns.
+    pub body_class: &'a str,
+    /// `$current_screen->is_block_editor()`.
+    pub block_editor: bool,
+    /// The script modules the screen enqueues.
+    pub modules: &'a [String],
+    /// The screen's inline scripts and styles, added to what is registered.
+    pub assets: Option<&'a dyn Fn(&mut Assets)>,
+    /// What the screen prints after the footer scripts, in place of the
+    /// emoji detection script it removes.
+    pub footer: Option<&'a str>,
+}
+
+/// [`admin_page`] with what `extras` adds.
+pub fn admin_page_with(
+    site: &dyn PageSite,
+    page: &Page,
+    browser: &Browser,
+    extras: &Extras,
+) -> Option<String> {
     let customize = customize_link(site, page);
     // A missing child of the bundled theme has its parent's `theme.json`.
     let parent = site.template() == THEME;
@@ -399,6 +425,9 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
     for (handle, script) in page.script_after {
         let after = Value::Array(vec![(Key::Int(0), text(script))]);
         assets.set_script_data(handle, "after", after);
+    }
+    if let Some(more) = extras.assets {
+        more(&mut assets);
     }
     let mut out = head(site, page);
     out.extend(assets.print_admin_styles(urls));
@@ -432,14 +461,19 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
     out.extend(site_icon_tags(&|size| site.site_icon(size)).into_bytes());
     let mut html = String::from_utf8_lossy(&out).into_owned();
     let color = sanitize_html_class(&color, b"modern");
-    html.push_str(&body(site, page, &String::from_utf8_lossy(&color), browser));
+    html.push_str(&body(
+        site,
+        (page, extras),
+        &String::from_utf8_lossy(&color),
+        browser,
+    ));
     html.push_str(&menu);
     html.push_str("<div id=\"wpcontent\">\n\n\t\t");
     html.push_str(&admin_bar(site, browser, page.view));
     html.push_str("<div id=\"wpbody\" role=\"main\">\n\n<div id=\"wpbody-content\">\n");
     html.push_str(&screen_meta(page));
     html.push_str(page.content);
-    html.push_str(&footer(site, page, &mut assets));
+    html.push_str(&footer(site, (page, extras), &mut assets));
     Some(clean_links(&html))
 }
 
@@ -634,11 +668,22 @@ fn version_classes(version: &str) -> (String, String) {
 }
 
 /// From `</head>` to the menu.
-fn body(site: &dyn PageSite, page: &Page, color: &str, browser: &Browser) -> String {
+fn body(
+    site: &dyn PageSite,
+    (page, extras): (&Page, &Extras),
+    color: &str,
+    browser: &Browser,
+) -> String {
     let (branch, version) = version_classes(VERSION.trim());
     let cookie = site.settings_cookie();
     let setting = |name| user_setting(site, cookie.as_deref(), name);
-    let mut classes = admin_page_class(page.screen.pagenow);
+    // The filter's classes come first.
+    let mut classes = format!(
+        "{} {}",
+        extras.body_class,
+        admin_page_class(page.screen.pagenow)
+    );
+    classes = classes.trim_start().to_string();
     // `WP_Site_Health::admin_body_class()` comes first, as a filter's class.
     if page.id == "site-health" {
         classes.insert_str(0, "site-health ");
@@ -659,7 +704,8 @@ fn body(site: &dyn PageSite, page: &Page, color: &str, browser: &Browser) -> Str
     let template = site.template();
     let mobile = if browser.is_mobile() { " mobile" } else { "" };
     classes.push_str(&format!(
-        " branch-{branch} version-{version} admin-color-{color} locale-en-us{mobile} no-customize-support svg wp-theme-{}",
+        " branch-{branch} version-{version} admin-color-{color} locale-en-us{mobile} no-customize-support svg{} wp-theme-{}",
+        if extras.block_editor { " block-editor-page wp-embed-responsive" } else { "" },
         String::from_utf8_lossy(&sanitize_html_class(template.as_bytes(), b""))
     ));
     let stylesheet = site.stylesheet();
@@ -748,7 +794,7 @@ fn screen_meta(page: &Page) -> String {
 }
 
 /// From the end of the screen's markup to `</html>`.
-fn footer(site: &dyn PageSite, page: &Page, assets: &mut Assets) -> String {
+fn footer(site: &dyn PageSite, (page, extras): (&Page, &Extras), assets: &mut Assets) -> String {
     let urls: &dyn Urls = site;
     let mut out = format!(
         "\n<div class=\"clear\"></div></div><!-- wpbody-content -->\n<div class=\"clear\"></div></div><!-- wpbody -->\n<div class=\"clear\"></div></div><!-- wpcontent -->\n\n<div id=\"wpfooter\" role=\"contentinfo\">\n\t\t<p id=\"footer-left\" class=\"alignleft\">\n\t\t<span id=\"footer-thankyou\">Thank you for creating with <a href=\"https://wordpress.org/\">WordPress</a>.</span>\t</p>\n\t<p id=\"footer-upgrade\" class=\"alignright\">\n\t\tVersion {}\t</p>\n\t<div class=\"clear\"></div>\n</div>\n",
@@ -784,13 +830,16 @@ fn footer(site: &dyn PageSite, page: &Page, assets: &mut Assets) -> String {
         assets.enqueue_script(script);
     }
     let imports = assets.module_dependencies();
-    let mut tail = admin_import_map(&siteurl, &imports);
+    let mut tail = admin_script_modules(&siteurl, &imports, extras.modules);
     for style in page.late_styles {
         assets.enqueue_style(style);
     }
     tail.extend(assets.print_admin_styles(urls));
     tail.extend(assets.print_footer_scripts(urls));
-    tail.extend(emoji_detection_script(&siteurl));
+    match extras.footer {
+        Some(footer) => tail.extend(footer.as_bytes()),
+        None => tail.extend(emoji_detection_script(&siteurl)),
+    }
     tail.extend(page.footer_scripts.as_bytes());
     out.push_str(&String::from_utf8_lossy(&tail));
     if !site.compression_tested() {

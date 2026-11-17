@@ -10,11 +10,13 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+hyscribe-assets.workspace = true
 hyscribe-auth.workspace = true
 hyscribe-kses.workspace = true
 hyscribe-model.workspace = true
 hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true
+hyscribe-theme-json.workspace = true
 
 [dev-dependencies]
 hyscribe-testkit.workspace = true

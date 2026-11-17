@@ -123,7 +123,7 @@ impl Site for Oracle {
         let mut lost = lost.filter(|(_, name, _)| login.eq_ignore_ascii_case(name.as_bytes()));
         let lost = lost.next().map(|(id, name, key)| User {
             id,
-            login: name.into_bytes(),
+            login: name.as_bytes().to_vec(),
             pass: Vec::new(),
             use_ssl: false,
             activation_key: key.into_bytes(),
@@ -872,7 +872,11 @@ impl PageSite for Role {
                 b"a:2:{s:4:\"side\";s:19:\"authordiv,submitdiv\";s:6:\"normal\";s:7:\"slugdiv\";}"
             }
             ("a8locknorich", "rich_editing") => b"false",
-            (variant, "rich_editing") if variant.starts_with("a8") || self.j9_media() => b"true",
+            (variant, "rich_editing")
+                if variant.starts_with("a8") || variant == "e5" || self.j9_media() =>
+            {
+                b"true"
+            }
             _ => b"",
         };
         if !edit.is_empty() {

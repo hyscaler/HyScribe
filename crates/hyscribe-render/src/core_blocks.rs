@@ -1665,7 +1665,9 @@ fn footnotes(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 
 mod author;
 mod avatar;
-pub use avatar::{avatar_url, comment_avatar, default_avatar, user_avatar, user_name};
+pub use avatar::{
+    avatar_url, comment_avatar, default_avatar, forced_avatar_url, user_avatar, user_name,
+};
 mod breadcrumbs;
 mod button;
 pub(crate) mod calendar;

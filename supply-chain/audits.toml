@@ -11,7 +11,7 @@ notes = "Proc macro only: rewrites async fns in traits and impls into methods re
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
 version = "0.23.1"
-notes = "Reviewed the scalar engine, the decoders and the new SIMD engine, which the default simd-unsafe feature turns on (lettre takes the defaults, for SMTP AUTH). Without that feature the crate is #![forbid(unsafe_code)]. The unsafe code is engine/simd.rs: AVX2 and NEON kernels behind #[target_feature], reached only after is_x86_feature_detected!(\"avx2\") or is_aarch64_feature_detected!(\"neon\") selected the backend at construction (the *_unchecked constructors are unsafe fns HyScribe never calls). Each loop is guarded so every unaligned 32 or 16 byte load stays inside the input (decode stops at the complete non-terminal quads length, which decode_helper derives from the input) and every store inside the output; an invalid block falls back to the scalar decoder. No build script, proc macros, or filesystem, network, process or environment access."
+notes = 'Reviewed the scalar engine, the decoders and the new SIMD engine, which the default simd-unsafe feature turns on (lettre takes the defaults, for SMTP AUTH). Without that feature the crate is #![forbid(unsafe_code)]. The unsafe code is engine/simd.rs: AVX2 and NEON kernels behind #[target_feature], reached only after is_x86_feature_detected!("avx2") or is_aarch64_feature_detected!("neon") selected the backend at construction (the *_unchecked constructors are unsafe fns HyScribe never calls). Each loop is guarded so every unaligned 32 or 16 byte load stays inside the input (decode stops at the complete non-terminal quads length, which decode_helper derives from the input) and every store inside the output; an invalid block falls back to the scalar decoder. No build script, proc macros, or filesystem, network, process or environment access.'
 
 [[audits.blake2]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
@@ -138,6 +138,12 @@ who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
 delta = "0.103.16 -> 0.103.17"
 notes = "Adds a certificate transparency SCT list parser (src/sct.rs) over untrusted::Reader with bounds checked reads and no unsafe code, records the SCT extension instead of treating it as unknown, and adds spki_for_anchor and VerifiedPath::issuer_spki, which rewrap the anchor's SubjectPublicKeyInfo. No new dependencies, build script, I/O or unsafe code."
+
+[[audits.webpki-roots]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "1.0.11"
+notes = "Data only: src/lib.rs is #![no_std] and #![forbid(unsafe_code)], and holds one const, TLS_SERVER_ROOTS, a slice of rustls-pki-types TrustAnchor values (subject, public key info, name constraints as byte strings) generated from Mozilla's root store, each commented with its PEM. No functions, build script, proc macros or I/O. Depends on rustls-pki-types only. lettre's rustls build check requires the feature; the mail transport passes CertificateStore::None, so these roots are never loaded (ADR 0016)."
 
 [[audits.weezl]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"

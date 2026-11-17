@@ -12,6 +12,8 @@ yanked = "deny"
 version = 2
 # Licenses compatible with distributing HyScribe under AGPL-3.0-or-later.
 allow = [
+    # For quoted_printable, lettre's (ADR 0016): public domain equivalent.
+    "0BSD",
     "AGPL-3.0-or-later",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",

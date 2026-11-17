@@ -23,9 +23,7 @@ use hyscribe_config::{Server, wpconfig};
 use hyscribe_phpser::{hash_equals, urldecode};
 use tokio::sync::{Mutex, Notify, oneshot};
 
-use super::{
-    Choices, Content, Found, checked, from_file, from_text, manual, questions, uploads, write_env,
-};
+use super::{Choices, Content, Found, checked, from_file, from_text, manual, questions, write_env};
 use crate::failed;
 
 /// How long setup mode waits for `.env` before it stops.
@@ -532,7 +530,7 @@ fn details_page(
         input(
             "UPLOADS_DIR",
             "The site's uploads folder (empty for hyscribe/uploads)",
-            &value("UPLOADS_DIR", &uploads(content.as_deref())),
+            &value("UPLOADS_DIR", &found.uploads(content.as_deref())),
             false
         ),
     );

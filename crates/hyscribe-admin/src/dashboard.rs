@@ -448,13 +448,23 @@ fn comment_row(
                     url("spamcomment", "delete-comment")
                 ),
             ),
-            (
-                "trash",
-                format!(
-                    "<a href=\"{}\" data-wp-lists=\"delete:the-comment-list:comment-{id}::trash=1\" class=\"delete vim-d vim-destructive aria-button-if-js\" aria-label=\"Move this comment to the Trash\">Trash</a>",
-                    url("trashcomment", "delete-comment")
-                ),
-            ),
+            if site.uses_trash() {
+                (
+                    "trash",
+                    format!(
+                        "<a href=\"{}\" data-wp-lists=\"delete:the-comment-list:comment-{id}::trash=1\" class=\"delete vim-d vim-destructive aria-button-if-js\" aria-label=\"Move this comment to the Trash\">Trash</a>",
+                        url("trashcomment", "delete-comment")
+                    ),
+                )
+            } else {
+                (
+                    "delete",
+                    format!(
+                        "<a href=\"{}\" data-wp-lists=\"delete:the-comment-list:comment-{id}::trash=1\" class=\"delete vim-d vim-destructive aria-button-if-js\" aria-label=\"Delete this comment permanently\">Delete Permanently</a>",
+                        url("deletecomment", "delete-comment")
+                    ),
+                )
+            },
             (
                 "view",
                 format!(

@@ -113,6 +113,8 @@ pub struct Site {
     limiter: Arc<login::limits::Limiter>,
     /// The installation as configured, which the admin shows.
     install: Arc<Install>,
+    /// The outbound client, when `HTTP_OUTBOUND` is on (ADR 0019).
+    fetch: Option<Arc<hyscribe_fetch::Client>>,
 }
 
 /// The address a connection comes from.
@@ -155,6 +157,7 @@ impl Site {
             constants: hyscribe_config::Constants::default(),
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
             install: unconfigured(),
+            fetch: None,
         };
         for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
             if let Some(url) = url {
@@ -196,6 +199,7 @@ impl Site {
             constants: self.constants,
             limiter: Arc::clone(&self.limiter),
             install: Arc::clone(&self.install),
+            fetch: self.fetch.clone(),
         };
         site.build_rewriter();
         Ok(site)
@@ -249,6 +253,12 @@ impl Site {
             sessions: Some(Arc::new(sessions)),
             ..self
         }
+    }
+
+    /// The site with the outbound client, none while `HTTP_OUTBOUND` is off.
+    pub fn with_fetch(self, fetch: Option<hyscribe_fetch::Client>) -> Site {
+        let fetch = fetch.map(Arc::new);
+        Site { fetch, ..self }
     }
 
     /// The site with the writer `Writer::open` gave (none in shadow mode),

@@ -351,6 +351,11 @@ pub async fn trash_comment(
 }
 
 async fn trash(steps: &mut Steps<'_, '_, DbError>, context: Context<'_>, id: u64) -> bool {
+    // Without the Trash it deletes; a note's replies are moved up first, so
+    // its query for them after finds none.
+    if context.empty_trash_days == 0 {
+        return Box::pin(delete(steps, context, id, true)).await;
+    }
     let Some(comment) = put_away(steps, context, id, "trash").await else {
         return false;
     };

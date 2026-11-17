@@ -64,6 +64,9 @@ record f9old administrator '?admin_email_remind_later=1'
 record f9folded administrator
 record f9unfold editor
 record g9pages administrator
+# Without the Trash (EMPTY_TRASH_DAYS=0, the e0 variants of as-role.php).
+record e0dash administrator
+record e0dash editor
 remove_content
 sql < "$ROOT/reference/dashboard/content.sql"
 for role in administrator editor author subscriber; do

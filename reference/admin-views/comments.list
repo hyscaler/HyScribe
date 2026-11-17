@@ -38,3 +38,5 @@ edit-screen-under-spam	GET	comment.php?action=editcomment&c=6	-	none	-	-
 discussion-unthreaded	POST	options.php	option_page=discussion&action=update&default_comment_status=open&comment_registration=0&comments_per_page=50&default_comments_page=newest&comment_order=asc&thread_comments_depth=5&show_avatars=1&avatar_rating=G&avatar_default=mystery&_wp_http_referer=%2Fwp-admin%2Foptions-discussion.php	discussion-options	_wpnonce	-
 edited-unthreaded	POST	comment.php	action=editedcomment&comment_ID=2&comment_post_ID=1&comment_parent=3&content=Moved	update-comment_2	_wpnonce	-
 edit-screen-unthreaded	GET	comment.php?action=editcomment&c=2	-	none	-	-
+# Without the Trash (EMPTY_TRASH_DAYS=0, the e0 variants of as-role.php).
+edit-screen-trash-off	GET	comment.php?action=editcomment&c=1	-	none	-	hyscribe_variant=e0edit

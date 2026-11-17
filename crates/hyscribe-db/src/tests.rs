@@ -375,6 +375,23 @@ async fn connections_are_read_only() {
     assert!(err.to_string().contains("READ ONLY"), "{err}");
 }
 
+/// A socket `DB_HOST` connects through the socket, whatever the port: the
+/// fixture's MariaDB exposes it on a bind mount.
+#[tokio::test]
+async fn connects_through_a_socket() {
+    let config = Database {
+        host: "localhost".into(),
+        port: 1,
+        socket: Some(hyscribe_testkit::fixture_socket()),
+        ..fixture_config()
+    };
+    let db = Db::connect(&config).await.unwrap();
+    assert_eq!(
+        db.option("blogname").await.unwrap().unwrap(),
+        b"HyScribe Default Install"
+    );
+}
+
 #[tokio::test]
 async fn terms_are_searched_paged_and_counted() {
     let db = Db::connect(&fixture_config()).await.unwrap();

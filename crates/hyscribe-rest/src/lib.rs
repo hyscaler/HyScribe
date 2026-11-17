@@ -8,6 +8,7 @@
 //! ported write is answered in two steps: [`answer`] checks it and gives
 //! the [`Plan`] to write, and [`written`] answers once it is written.
 
+mod block_renderer;
 mod comments;
 mod editor;
 mod embed;
@@ -29,10 +30,17 @@ mod taxonomies;
 mod templates;
 mod terms;
 mod types;
+mod url_details;
 mod users;
+
+/// What the fuzz targets reach.
+pub mod fuzzing {
+    pub use crate::url_details::details;
+}
 
 use std::sync::OnceLock;
 
+use hyscribe_fetch::{Args, Error as FetchError, Fetched};
 use hyscribe_kses::esc_url_raw;
 use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, Term, TermQuery, User, UserQuery};
 use hyscribe_phpser::{
@@ -113,11 +121,31 @@ pub trait Site {
     /// Whether the public users endpoint answers visitors as WordPress
     /// does; off, a visitor sees no user as having published posts.
     fn public_users(&self) -> bool;
+    /// Whether `EMPTY_TRASH_DAYS` is not 0, WordPress's default of 30:
+    /// without the Trash, a delete must be forced.
+    fn uses_trash(&self) -> bool {
+        true
+    }
     /// The site's content as `hyscribe-render` reads it, for the post
     /// routes.
     fn reads(&self) -> &dyn Reads;
     /// The active theme, which renders posts' content.
     fn theme(&self) -> &Theme;
+    /// Whether outbound fetches are on (`HTTP_OUTBOUND`, ADR 0019).
+    fn outbound(&self) -> bool {
+        false
+    }
+    /// `wp_safe_remote_get( $url, $args )` through the outbound client,
+    /// `None` while fetches are off.
+    fn fetch(&self, _url: &[u8], _args: Args) -> Option<Result<Fetched, FetchError>> {
+        None
+    }
+    /// `set_site_transient( $name, $value, $expiration )`, where the site
+    /// writes.
+    fn set_site_transient(&self, _name: &str, _value: &[u8], _expiration: i64) {}
+    /// What `get_site_transient( $name )` writes for a transient past its
+    /// timeout, where the site writes: both its options deleted.
+    fn expire_site_transient(&self, _name: &str) {}
 }
 
 /// A request for the API.
@@ -316,6 +344,8 @@ fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         .or_else(|| navigation::endpoints(regex))
         .or_else(|| media::endpoints(regex))
         .or_else(|| revisions::endpoints(regex))
+        .or_else(|| block_renderer::endpoints(regex))
+        .or_else(|| url_details::endpoints(regex))
 }
 
 /// `maybe_unserialize()` of a stored option or meta value: `false` where
@@ -759,6 +789,10 @@ fn dispatch(
         return Ok(RestError::status("rest_no_route", message, 404).into_response());
     };
     let (permissions, endpoint) = ported(&matched).ok_or(Halt::NotPorted)?;
+    // The link previews fetch, which waits on ADR 0019.
+    if matched.regex == url_details::ROUTE && !context.site.outbound() {
+        return Err(Halt::NotPorted);
+    }
     let (answered, params) = match resumed {
         Some((pending, outcome)) => {
             let mut params = pending.params;

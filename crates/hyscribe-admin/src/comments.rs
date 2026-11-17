@@ -688,6 +688,7 @@ impl Listing<'_> {
             anchor(url(action, "approve"), lists, &class, label, text)
         };
         let shown = !matches!(status, "spam" | "trash");
+        let trash = shown && site.uses_trash();
         let destroy = |action: &str, lists: &str, class: &str, label: &str, text: &str| {
             anchor(
                 url(action, "delete"),
@@ -743,7 +744,7 @@ impl Listing<'_> {
             ),
             (
                 "trash",
-                shown
+                trash
                     .then(|| {
                         destroy("trashcomment", ":trash=1", "delete vim-d vim-destructive", "Move this comment to the Trash", "Trash")
                     }),
@@ -757,7 +758,7 @@ impl Listing<'_> {
             ),
             (
                 "delete",
-                (!shown)
+                (!trash)
                     .then(|| {
                         destroy("deletecomment", ":delete=1", "delete vim-d vim-destructive", "Delete this comment permanently", "Delete Permanently")
                     }),
@@ -922,6 +923,7 @@ pub(crate) fn comment_views(
         ("trash", "Trash", "trash", counts.trash),
     ]
     .iter()
+    .filter(|(status, ..)| *status != "trash" || site.uses_trash())
     .map(|(status, label, class, count)| {
         link = if *status == "mine" {
             add_query_arg(&[(b"user_id", Some(user.to_string().as_bytes()))], &link)
@@ -1077,6 +1079,7 @@ pub fn edit_comments(
     let rows = if empty { none.clone() } else { rows };
     let extra_rows = if extra.is_empty() { none } else { extra_rows };
     let moderate = site.can("moderate_comments");
+    let delete = matches!(view, "spam" | "trash") || !site.uses_trash();
     // `get_bulk_actions()`, none for those who may not moderate.
     let actions: Vec<(&str, &str)> = [
         ("unapprove", "Unapprove", matches!(view, "all" | "approved")),
@@ -1084,12 +1087,8 @@ pub fn edit_comments(
         ("spam", "Mark as spam", !matches!(view, "mine" | "spam")),
         ("untrash", "Restore", view == "trash"),
         ("unspam", "Not spam", view == "spam"),
-        (
-            "delete",
-            "Delete permanently",
-            matches!(view, "spam" | "trash"),
-        ),
-        ("trash", "Move to Trash", !matches!(view, "spam" | "trash")),
+        ("delete", "Delete permanently", delete),
+        ("trash", "Move to Trash", !delete),
     ]
     .into_iter()
     .filter(|(_, _, offered)| moderate && *offered)

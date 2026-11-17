@@ -270,7 +270,7 @@ fn writes_and_unported_content_answer_501() {
             false,
             "visitor",
             "DELETE",
-            "/?rest_route=/wp/v2/blocks/1&force=1",
+            "/?rest_route=/wp/v2/menu-items/1&force=1",
         ),
         (
             false,

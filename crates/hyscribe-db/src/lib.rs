@@ -559,6 +559,25 @@ impl Db {
         rows.iter().map(comment).collect()
     }
 
+    /// How many approved top level comments of every type, notes too,
+    /// `post_id` has from before `date_gmt`: `get_page_of_comment()`'s count.
+    pub async fn older_comments(&self, post_id: u64, date_gmt: &str) -> Result<u64, DbError> {
+        let mut sql = Sql::new(
+            "SELECT COUNT(*) AS found FROM {prefix}comments WHERE comment_post_ID = ? \
+             AND comment_approved = '1' AND comment_parent = 0 AND comment_date_gmt < ?",
+        );
+        sql.bind(Bind::Int(post_id));
+        sql.bind(Bind::Text(date_gmt.into()));
+        let row = sql
+            .query(&self.prefix)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        row.try_get::<i64, _>("found")
+            .map(i64::unsigned_abs)
+            .map_err(db_error)
+    }
+
     /// The comments a comment feed lists, newest first: `post`'s, or
     /// those on published posts and attachments.
     pub async fn feed_comments(
@@ -1308,6 +1327,18 @@ impl Db {
     /// The table prefix, which some meta keys begin with.
     pub fn prefix(&self) -> &str {
         self.prefix.as_str()
+    }
+
+    /// The server's `VERSION()` and the connection's collation, as Site
+    /// Health's Info tab shows them.
+    pub async fn server(&self) -> Result<(String, String), DbError> {
+        let row = sqlx::query("SELECT VERSION() AS version, @@collation_connection AS collation")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        let mut c = Columns::new(&row);
+        let server = (c.text("version"), c.text("collation"));
+        c.finish(server)
     }
 
     /// The terms of `slugs`, `(taxonomy, slug)` pairs, and the categories

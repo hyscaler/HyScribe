@@ -81,7 +81,7 @@ pub(crate) fn wp_admin_notice(
 }
 
 /// `$wp_version`.
-const VERSION: &str = include_str!("../../../wordpress/VERSION");
+pub(crate) const VERSION: &str = include_str!("../../../wordpress/VERSION");
 
 /// The bundled theme, the only one a HyScribe installation has.
 pub(crate) const THEME: &str = "twentytwentyfive";
@@ -684,6 +684,10 @@ fn body(
         admin_page_class(page.screen.pagenow)
     );
     classes = classes.trim_start().to_string();
+    // `WP_Site_Health::admin_body_class()` comes first, as a filter's class.
+    if page.id == "site-health" {
+        classes.insert_str(0, "site-health ");
+    }
     if setting("mfold").as_deref() == Some("f") {
         classes.push_str(" folded");
     }

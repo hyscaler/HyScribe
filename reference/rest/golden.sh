@@ -27,7 +27,8 @@
 # override sends X-HTTP-Method-Override: DELETE, localhost sends Host:
 # localhost:8081, which wp_is_client_side_media_processing_enabled() takes
 # as a secure context, refused marks a request HyScribe answers 501 (sent
-# as any other), restore lets the request
+# as any other), notrash marks a request recorded with EMPTY_TRASH_DAYS at
+# 0 by the list's must-use plugin, for the tests to serve it so, restore lets the request
 # write and puts the database back after it as it was once the users logged
 # in (dates of the request's own time in its answer read %now%), ttd records the request on
 # the Theme Test Data fixture only, default on the default install only (as

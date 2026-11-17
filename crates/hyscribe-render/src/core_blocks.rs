@@ -18,6 +18,7 @@ use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, convert_chars, wp
 use crate::kses::{wp_kses_no_tags, wp_kses_post};
 use crate::link;
 use crate::media::Loading;
+use crate::permalinks::Permalinks;
 use crate::post::{the_title, title_filters};
 use crate::query_loop::{inherits, own_counts, own_page, query_posts};
 use crate::registry::block_type;
@@ -360,15 +361,62 @@ fn comment_date(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     .concat()
 }
 
-/// `get_comment_link( $comment )` with comment paging off: the post's
-/// permalink and the comment's anchor.
+/// `get_comment_link( $comment )`: the post's permalink, on paged comments
+/// the comment's page past the first newest one, and the comment's anchor.
 pub(crate) fn comment_link(context: &Context<'_>, comment: &Comment) -> Vec<u8> {
-    let permalink = context
-        .site
+    let site = context.site;
+    let permalink = site
         .post(comment.post_id)
         .map(|post| context.permalink(&post))
         .unwrap_or_default();
-    [permalink, format!("#comment-{}", comment.id).into_bytes()].concat()
+    let mut page = page_of_comment(context, comment);
+    if page == 1 && site.option("default_comments_page").unwrap_or_default() == b"oldest" {
+        page = 0;
+    }
+    let links = Permalinks::of(site);
+    let link = if links.pretty() {
+        let permalink = String::from_utf8_lossy(&permalink);
+        match page {
+            0 => links.trailing(&permalink),
+            _ => links.under(&permalink, &format!("comment-page-{page}")),
+        }
+        .into_bytes()
+    } else if page == 0 {
+        permalink
+    } else {
+        add_query_arg(&[(b"cpage", Some(page.to_string().as_bytes()))], &permalink)
+    };
+    [link, format!("#comment-{}", comment.id).into_bytes()].concat()
+}
+
+/// `get_page_of_comment()` as `get_comment_link()` asks it: 0 when comments
+/// are not paged, else the page of the comment's thread among the post's
+/// top level comments, oldest first. Not ported: a held comment's author
+/// counting their own held comments.
+fn page_of_comment(context: &Context<'_>, comment: &Comment) -> i64 {
+    let option = |name| context.site.option(name).unwrap_or_default();
+    let per_page = option("comments_per_page");
+    if is_empty_string(&option("page_comments")) || is_empty_string(&per_page) {
+        return 0;
+    }
+    let per_page = Value::String(per_page).to_int();
+    if per_page < 1 {
+        return 1;
+    }
+    let threaded = !is_empty_string(&option("thread_comments"));
+    let mut top = comment.clone();
+    if threaded && Value::String(option("thread_comments_depth")).to_int() > 1 {
+        // A loop of parents, which PHP recurses on until it fails, has no page.
+        let mut seen = std::collections::HashSet::from([top.id]);
+        while top.parent != 0 {
+            match context.site.comment(top.parent) {
+                Some(parent) if seen.insert(parent.id) => top = parent,
+                _ => return 0,
+            }
+        }
+    }
+    let older = context.site.older_comments(top.post_id, &top.date_gmt);
+    i64::try_from(older).unwrap_or(i64::MAX) / per_page + 1
 }
 
 /// `get_comment_author( $comment )`: the author, else the commenting
@@ -500,7 +548,13 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     else {
         return Vec::new();
     };
-    let permalink = context.permalink(&post);
+    // On paged comments, the link to the comment's page.
+    let permalink = if is_empty_string(&option("page_comments")) {
+        context.permalink(&post)
+    } else {
+        let anchor = format!("#comment-{}", comment.id);
+        replace(&comment_link(context, comment), anchor.as_bytes(), b"")
+    };
     let author = comment_author(context, comment);
     let reply_to = [&b"Reply to "[..], &author].concat();
     let link = if Value::String(option("comment_registration")).is_empty() {

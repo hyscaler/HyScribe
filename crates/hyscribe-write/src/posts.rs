@@ -132,6 +132,10 @@ enum Kind {
     GlobalStyles,
     /// A privacy request, which `_wp_personal_data_cleanup_requests()` updates.
     UserRequest,
+    /// `wp_navigation`, the navigation block's menus.
+    Navigation,
+    /// `wp_block`, a synced pattern.
+    Block,
 }
 
 impl Kind {
@@ -142,6 +146,8 @@ impl Kind {
             "revision" => Ok(Kind::Revision),
             "wp_global_styles" => Ok(Kind::GlobalStyles),
             "user_request" => Ok(Kind::UserRequest),
+            "wp_navigation" => Ok(Kind::Navigation),
+            "wp_block" => Ok(Kind::Block),
             _ => Err(Error::Unported("a post type other than post and page")),
         }
     }
@@ -154,8 +160,9 @@ impl Kind {
     fn taxonomies(self) -> &'static [&'static str] {
         match self {
             Kind::Post => &["category", "post_tag", "post_format"],
-            Kind::Page | Kind::Revision | Kind::UserRequest => &[],
             Kind::GlobalStyles => &["wp_theme"],
+            Kind::Block => &["wp_pattern_category"],
+            Kind::Page | Kind::Revision | Kind::UserRequest | Kind::Navigation => &[],
         }
     }
 }
@@ -533,7 +540,8 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
         args.post_type.clone()
     };
     let kind = Kind::of(&post_type)?;
-    if kind == Kind::Post
+    // The types that support the editor, a title and an excerpt.
+    if matches!(kind, Kind::Post | Kind::Block)
         && !truthy(&args.content)
         && !truthy(&args.title)
         && !truthy(&args.excerpt)

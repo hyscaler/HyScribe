@@ -23,14 +23,16 @@ use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::server::graceful::GracefulShutdown;
 use hyper_util::service::TowerToHyperService;
 use hyscribe_db::{Db, DbError};
-use hyscribe_kses::{esc_attr, esc_html, esc_url_raw};
+use hyscribe_kses::{esc_attr, esc_html, esc_url_raw, strip_tags};
 use hyscribe_model::{OrderBy, Post, PostQuery, Term, TermFilter, TimeCondition};
 use hyscribe_phpser::{
     Key, Value, add_query_values, is_empty_string, parse_str, php_trim, rawurlencode,
     rawurlencode_deep, remove_query_arg, urldecode, urlencode,
 };
 use hyscribe_render::date::{self, Zone};
-use hyscribe_render::formatting::sanitize_title_for_query;
+use hyscribe_render::formatting::{
+    CORE_SHORTCODE_TAGS, capital_p_dangit, convert_chars, sanitize_title_for_query, wptexturize,
+};
 use hyscribe_render::head::{Share, embed_page, wp_footer, wp_head};
 use hyscribe_render::link;
 use hyscribe_render::permalinks::{self, Permalinks, home_path};
@@ -56,6 +58,8 @@ mod rest;
 mod rewrite;
 mod sitemaps;
 mod trackback;
+
+pub use hyscribe_admin::site_health::Install;
 
 /// Parsers of request input that only the fuzz targets in `fuzz/` call
 /// from outside.
@@ -109,11 +113,26 @@ pub struct Site {
     constants: hyscribe_config::Constants,
     /// The login rate limits and their counts, kept across reloads.
     limiter: Arc<login::limits::Limiter>,
+    /// The installation as configured, which the admin shows.
+    install: Arc<Install>,
+    /// The outbound client, when `HTTP_OUTBOUND` is on (ADR 0019).
+    fetch: Option<Arc<hyscribe_fetch::Client>>,
 }
 
 /// The address a connection comes from.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Peer(pub(crate) std::net::IpAddr);
+
+/// An installation before [`Site::with_install`]: `.env`'s defaults.
+pub(crate) fn unconfigured() -> Arc<Install> {
+    Arc::new(Install {
+        binary: String::new(),
+        upload_max_size: hyscribe_config::DEFAULT_UPLOAD_MAX_SIZE,
+        database_user: String::new(),
+        database_name: String::new(),
+        charset: String::new(),
+    })
+}
 
 impl Site {
     /// Loads the autoloaded options. `home` and `siteurl` override those
@@ -139,6 +158,8 @@ impl Site {
             behind_proxy: false,
             constants: hyscribe_config::Constants::default(),
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
+            install: unconfigured(),
+            fetch: None,
         };
         for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
             if let Some(url) = url {
@@ -179,6 +200,8 @@ impl Site {
             behind_proxy: self.behind_proxy,
             constants: self.constants,
             limiter: Arc::clone(&self.limiter),
+            install: Arc::clone(&self.install),
+            fetch: self.fetch.clone(),
         };
         site.build_rewriter();
         Ok(site)
@@ -210,6 +233,14 @@ impl Site {
         }
     }
 
+    /// The site of the installation `install` describes.
+    pub fn with_install(self, install: Install) -> Site {
+        Site {
+            install: Arc::new(install),
+            ..self
+        }
+    }
+
     /// The site behind a proxy or not.
     pub fn with_proxy(self, behind_proxy: bool) -> Site {
         Site {
@@ -224,6 +255,12 @@ impl Site {
             sessions: Some(Arc::new(sessions)),
             ..self
         }
+    }
+
+    /// The site with the outbound client, none while `HTTP_OUTBOUND` is off.
+    pub fn with_fetch(self, fetch: Option<hyscribe_fetch::Client>) -> Site {
+        let fetch = fetch.map(Arc::new);
+        Site { fetch, ..self }
     }
 
     /// The site with the writer `Writer::open` gave (none in shadow mode),
@@ -1662,7 +1699,7 @@ fn posts_page_titled(
     if let Some(post) = found {
         page.request.queried_object_id = id;
         page.title = document_title([
-            Some(esc_html(&post.title)),
+            Some(single_post_title(post)),
             paging.title(),
             Some(site.name()),
         ]);
@@ -1697,13 +1734,23 @@ impl Paging {
     }
 }
 
-/// `wp_get_document_title()`: the parts there are, joined by dashes.
+/// `single_post_title()`: the title through its filters.
+fn single_post_title(post: &Post) -> String {
+    lossy(&strip_tags(&wptexturize(&post.title, &CORE_SHORTCODE_TAGS)))
+}
+
+/// `wp_get_document_title()`: the parts that are not empty, joined by
+/// dashes, through the `document_title` filters.
 fn document_title(parts: [Option<String>; 3]) -> String {
-    parts
+    let title = parts
         .into_iter()
         .flatten()
+        .filter(|part| !is_empty_string(part.as_bytes()))
         .collect::<Vec<_>>()
-        .join(" &#8211; ")
+        .join(" - ");
+    let title = wptexturize(title.as_bytes(), &CORE_SHORTCODE_TAGS);
+    let title = esc_html(&convert_chars(&title));
+    lossy(&capital_p_dangit(title.as_bytes()))
 }
 
 /// A singular page with the `page` var: the page if `(int)` of it is within
@@ -1808,7 +1855,7 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
             document_title([Some(site.name()), paging.title(), tagline])
         } else {
             document_title([
-                Some(esc_html(&post.title)),
+                Some(single_post_title(&post)),
                 paging.title(),
                 Some(site.name()),
             ])
@@ -2096,8 +2143,9 @@ async fn list(
     candidates.retain(|name| front || name != "front-page");
     let queried_object_id = term.map_or(0, |term| term.id);
     let archive = term_archive.or(dated.then(|| date.kind.clone().unwrap_or(Archive::Date)));
-    // The home page lists the latest posts, the default install's setting.
-    let home = archive.is_none() && search.is_none();
+    // The home page lists the latest posts, the default install's setting;
+    // a feed is never `is_home()`.
+    let home = archive.is_none() && search.is_none() && !feed;
     let request = Request {
         front_page: home && front,
         home,

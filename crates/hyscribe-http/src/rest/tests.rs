@@ -15,6 +15,7 @@ use tower::ServiceExt;
 use super::*;
 
 mod golden;
+mod url_details;
 mod writes;
 use crate::router;
 use crate::tests::oracle_site;
@@ -192,6 +193,23 @@ async fn public_users_off_match_php() {
     assert_eq!(replay(&sites, &golden, false).await, (14, 0));
 }
 
+/// With `EMPTY_TRASH_DAYS=0`, deletes must be forced.
+#[tokio::test(flavor = "multi_thread")]
+async fn trash_off_matches_php() {
+    let dir = tempfile::tempdir().unwrap();
+    let constants = hyscribe_config::Constants {
+        empty_trash_days: 0,
+        ..hyscribe_config::Constants::default()
+    };
+    let off = |site: Arc<Site>| Arc::new(Arc::into_inner(site).unwrap().with_constants(constants));
+    let sites = (
+        off(site(false, dir.path()).await),
+        off(site(true, dir.path()).await),
+    );
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/trash-off.tsv");
+    assert_eq!(replay(&sites, golden, false).await, (2 * 7, 0));
+}
+
 /// The content routes over the Theme Test Data fixture, by hash.
 #[tokio::test(flavor = "multi_thread")]
 async fn content_matches_php() {
@@ -327,7 +345,8 @@ async fn replay(sites: &(Arc<Site>, Arc<Site>), golden: &str, hashed: bool) -> (
         }
         let response = send(site, request, "").await;
         let what = format!("{who} {method} {target} {flags}");
-        if response.status() == StatusCode::NOT_IMPLEMENTED {
+        // PHP answers 501 too where a type does not support the Trash.
+        if response.status() == StatusCode::NOT_IMPLEMENTED && fields[4] != "501" {
             assert!(
                 !String::from_utf8(unhex(fields[6]))
                     .unwrap()

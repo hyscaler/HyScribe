@@ -3,7 +3,7 @@
 //! `/hs-login`: `wp-login.php`'s login action (hyscribe-admin) over the
 //! database, with HyScribe's own cookies and sessions (an open question, ADR 0011).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
@@ -12,7 +12,8 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_admin::assets::{Urls, admin_links, cookie_path};
 use hyscribe_admin::login::actions::{self, Action, Reset};
-use hyscribe_admin::login::{self, Login, Request, Session, Site as LoginSite, User};
+use hyscribe_admin::login::authenticate::{Account, Authenticate};
+use hyscribe_admin::login::{self, Login, Notice, Request, Session, Site as LoginSite, User};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
 use hyscribe_auth::cookie::{generate_auth_cookie, parse_auth_cookie};
 use hyscribe_auth::sessions::Origin;
@@ -30,6 +31,10 @@ use crate::{Site, now};
 pub(crate) const PATH: &str = "/hs-login";
 
 const DAY: i64 = 86_400;
+
+/// The login limits' `authenticate` callback and its priority, ahead of
+/// core's password checks at 20 (ADR 0018).
+const LIMITS: (&str, i32) = ("hyscribe_login_limits", 10);
 
 pub(crate) const YEAR: i64 = 365 * DAY;
 
@@ -167,15 +172,26 @@ pub(crate) struct LoginReads<'a> {
     /// A post as a writer action reads it, which capability checks see in
     /// place of the site's.
     pub(crate) action_post: Option<CapPost>,
-    /// The client's address, which the login limits count.
-    client: Option<IpAddr>,
+    /// The client's address, which the login limits count; behind a proxy
+    /// whose entry names none, no password is checked.
+    client: Result<Option<IpAddr>, crate::comment_post::Unnamed>,
     /// The accounts whose password was checked, and whether it matched.
     checked: RefCell<Vec<(u64, bool)>>,
-    /// The client's turn to check passwords, once one is checked.
+    /// The request guesses a password: a non-blank one.
+    guess: Cell<bool>,
+    /// The guess's turn to check passwords, which the login limits give.
     turn: RefCell<Option<limits::Turn>>,
+    /// A check found no free one in time, so the guess is not counted.
+    capped: Cell<bool>,
 }
 
 impl<'a> LoginReads<'a> {
+    /// The address the login limits count, which a proxy entry that names
+    /// none never reaches: such a guess takes no turn.
+    fn address(&self) -> Option<IpAddr> {
+        self.client.as_ref().ok().copied().flatten()
+    }
+
     pub(crate) fn new(site: &'a Site, handle: Handle, now: i64) -> LoginReads<'a> {
         LoginReads {
             reads: Reads::new(site, handle),
@@ -185,9 +201,11 @@ impl<'a> LoginReads<'a> {
             current: (0, Vec::new()),
             profile_user: 0,
             action_post: None,
-            client: None,
+            client: Ok(None),
             checked: RefCell::default(),
+            guess: Cell::default(),
             turn: RefCell::default(),
+            capped: Cell::default(),
         }
     }
 
@@ -205,6 +223,15 @@ impl<'a> LoginReads<'a> {
         Some(found)
     }
 
+    /// A user found before, by ID.
+    fn found(&self, id: u64) -> Option<Credentials> {
+        self.found
+            .borrow()
+            .iter()
+            .find(|user| user.id == id)
+            .cloned()
+    }
+
     /// `wp_salt( $scheme )`.
     fn salt(&self, scheme: &str) -> Option<Vec<u8>> {
         self.site.salt(scheme, |name| self.reads.option(name))
@@ -220,6 +247,7 @@ impl<'a> LoginReads<'a> {
 
     fn user(&self, found: Option<Credentials>) -> Option<User> {
         found.map(|user| User {
+            login: user.login,
             use_ssl: self
                 .user_option(user.id, "use_ssl")
                 .is_some_and(|v| !Value::String(v).is_empty()),
@@ -235,8 +263,15 @@ impl<'a> LoginReads<'a> {
         if cookie.is_none_or(<[u8]>::is_empty) {
             return Session::None;
         }
-        self.auth_user(cookie, post, https)
-            .map_or(Session::Expired, |(id, _)| Session::User(id))
+        let user = self
+            .auth_user(cookie, post, https)
+            .and_then(|(id, _)| self.found(id));
+        user.map_or(Session::Expired, |user| {
+            Session::User(Account {
+                id: user.id,
+                login: user.login,
+            })
+        })
     }
 
     /// The user of a valid auth cookie, the secure one over HTTPS, and its
@@ -368,17 +403,17 @@ impl LoginSite for LoginReads<'_> {
         self.user(self.credentials(UserField::Email, email))
     }
 
-    /// A guess the login limits refuse fails as a wrong password would,
-    /// without checking the hash.
+    /// `wp_check_password()` on the guess's turn; without one, for a refused
+    /// account or with no free check in time, a wrong password, unhashed.
     fn check_password(&self, user: &User, password: &[u8]) -> bool {
         let limiter = &self.site.limiter;
-        let mut turn = self.turn.borrow_mut();
-        if turn.is_none() {
-            *turn = limiter.turn(self.client);
-        }
-        if turn.is_none() || !limiter.allows(self.client, user.id, self.now) {
+        if self.turn.borrow().is_none() || !limiter.allows(self.address(), user.id, self.now) {
             return false;
         }
+        let Some(_check) = limiter.checks.start() else {
+            self.capped.set(true);
+            return false;
+        };
         let matched = hyscribe_auth::check_password(password, &user.pass);
         self.checked.borrow_mut().push((user.id, matched));
         matched
@@ -395,6 +430,41 @@ impl LoginSite for LoginReads<'_> {
 
     fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
         crate::admin::site_icon(self, size)
+    }
+
+    /// The login limits: a guess takes its address's one turn to check
+    /// passwords, which a concurrent guess of the address finds taken.
+    fn authenticate<'a>(&'a self, filters: &mut Authenticate<'a>) {
+        let (name, priority) = LIMITS;
+        let limits = move |user, _: &[u8], password: &[u8]| {
+            if !hyscribe_phpser::is_empty_string(password) {
+                self.guess.set(true);
+                match &self.client {
+                    Ok(client) => *self.turn.borrow_mut() = self.site.limiter.turn(*client),
+                    // No turn: refused for this request alone, never as the proxy.
+                    Err(unnamed) => eprintln!(
+                        "login refused: the proxy's last X-Forwarded-For entry {:?} names no address",
+                        unnamed.0
+                    ),
+                }
+            }
+            user
+        };
+        filters.add(name, priority, Box::new(limits));
+    }
+
+    /// A failed guess counts for its address and the accounts checked.
+    fn wp_login_failed(&self, _: &[u8], _: &[Notice]) {
+        if self.guess.get() && !self.capped.get() && self.client.is_ok() {
+            let checked = self.checked.borrow();
+            self.site.limiter.record(self.address(), &checked, self.now);
+        }
+    }
+
+    /// A login trusts its address for its account.
+    fn wp_login(&self, _: &[u8], user: &Account) {
+        let login = [(user.id, true)];
+        self.site.limiter.record(self.address(), &login, self.now);
     }
 }
 
@@ -560,19 +630,16 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             let (status, body) = logout(&reads, &names, &request, &mut headers);
             return response(status, headers, body);
         }
-        "login" | "entered_recovery_mode" => {
-            let outcome = login::login(&reads, &request);
-            // A posted password is a guess, whether or not its account exists.
-            let guess = asked.form.get_str("pwd").and_then(Value::as_bytes);
-            let blank = |pwd| hyscribe_phpser::is_empty_string(hyscribe_phpser::php_trim(pwd));
-            if guess.is_some_and(|pwd| !blank(pwd)) {
-                site.limiter
-                    .record(reads.client, &reads.checked.borrow(), now);
-            }
-            outcome
+        "login" | "entered_recovery_mode" => login::login(&reads, &request),
+        "lostpassword" | "retrievepassword" if asked.post => {
+            // The transport sends the mail once wired (ADR 0016).
+            let (answer, _mail) = reset::lost_password(&reads, &request, &action, &mut headers);
+            return finished(site, reads, Some(answer), headers);
         }
         // What the other actions' forms post is not ported.
-        _ if asked.post => return response(StatusCode::NOT_IMPLEMENTED, headers, Vec::new()),
+        _ if asked.post && action != "resetpass" && action != "rp" => {
+            return response(StatusCode::NOT_IMPLEMENTED, headers, Vec::new());
+        }
         _ => {
             let answer = other_action(&reads, &names, &request, asked, &mut headers);
             return finished(site, reads, Some(answer), headers);
@@ -600,15 +667,23 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             if hyscribe_phpser::is_empty_string(location.as_bytes()) {
                 return (StatusCode::OK, Vec::new());
             }
-            headers.push((header::LOCATION, location));
-            headers.push((
-                header::HeaderName::from_static("x-redirect-by"),
-                "WordPress".into(),
-            ));
-            (StatusCode::FOUND, Vec::new())
+            redirected(&mut headers, location)
         }),
     };
     finished(site, reads, answer, headers)
+}
+
+/// `wp_redirect( $location )`'s 302.
+pub(crate) fn redirected(
+    headers: &mut Vec<(header::HeaderName, String)>,
+    location: String,
+) -> (StatusCode, Vec<u8>) {
+    headers.push((header::LOCATION, location));
+    headers.push((
+        header::HeaderName::from_static("x-redirect-by"),
+        "WordPress".into(),
+    ));
+    (StatusCode::FOUND, Vec::new())
 }
 
 /// The response once the reads are done: the database's error page if one
@@ -626,8 +701,9 @@ fn finished(
     }
 }
 
-/// A GET of an action other than logging in or out; the reset password
-/// cookie goes to the login screen's path only.
+/// A GET of an action other than logging in or out, or the reset password
+/// form posted; the reset password cookie goes to the login screen's path
+/// only.
 fn other_action(
     reads: &LoginReads,
     names: &Names,
@@ -641,7 +717,7 @@ fn other_action(
         .map_or(String::new(), |q| format!("?{q}"));
     let uri = addslashes(format!("{PATH}{query}").as_bytes());
     let secure = is_ssl(reads.site);
-    match actions::action(reads, request, &request.action(), &uri) {
+    match actions::action(reads, request, &request.action(), (&uri, reads.now)) {
         Action::Page(page) => (StatusCode::OK, page),
         Action::Died(page) => (StatusCode::INTERNAL_SERVER_ERROR, page),
         Action::Redirect(to, reset) => {
@@ -657,12 +733,13 @@ fn other_action(
             let host = hyscribe_kses::url_host(reads.site.home.as_bytes()).unwrap_or_default();
             let fallback = reads.admin_url("");
             let to = wp_validate_redirect(&wp_sanitize_redirect(&to), &host, fallback.as_bytes());
-            headers.push((header::LOCATION, String::from_utf8_lossy(&to).into_owned()));
-            headers.push((
-                header::HeaderName::from_static("x-redirect-by"),
-                "WordPress".into(),
-            ));
-            (StatusCode::FOUND, Vec::new())
+            redirected(headers, String::from_utf8_lossy(&to).into_owned())
+        }
+        Action::ResetPassword(id, password) => {
+            // The transport sends the notice once wired (ADR 0016).
+            let (answer, _notice) =
+                reset::reset(reads, request, &request.action(), (id, &password));
+            answer
         }
         Action::NotPorted => (StatusCode::NOT_IMPLEMENTED, Vec::new()),
     }
@@ -718,12 +795,7 @@ fn logout(
         }
     };
     let location = wp_safe_redirect(reads.site, &redirect_to, &reads.admin_url(""));
-    headers.push((header::LOCATION, location));
-    headers.push((
-        header::HeaderName::from_static("x-redirect-by"),
-        "WordPress".into(),
-    ));
-    (StatusCode::FOUND, Vec::new())
+    redirected(headers, location)
 }
 
 /// When a login's cookies and session expire: in two weeks when remembered,
@@ -785,12 +857,7 @@ pub(crate) fn renewed_cookies(
     secure: bool,
 ) -> Vec<String> {
     let (id, token) = &reads.current;
-    let before = reads
-        .found
-        .borrow()
-        .iter()
-        .find(|user| user.id == *id)
-        .cloned();
+    let before = reads.found(*id);
     let after = before.and_then(|before| {
         let after = reads.site.db.credentials(UserField::Login, &before.login);
         reads
@@ -817,15 +884,11 @@ fn logged_in(
     redirect_to: &[u8],
 ) -> Option<(Vec<String>, String)> {
     let site = reads.site;
-    let found = reads
-        .found
-        .borrow()
-        .iter()
-        .find(|user| user.id == id)
-        .cloned();
-    let (Some(user), Some(sessions), Some(salts)) =
-        (found, site.sessions.as_ref(), salts(reads, secure))
-    else {
+    let (Some(user), Some(sessions), Some(salts)) = (
+        reads.found(id),
+        site.sessions.as_ref(),
+        salts(reads, secure),
+    ) else {
         return None;
     };
     let expiration = expiration(reads.now, remember);
@@ -903,10 +966,12 @@ fn location(
     } else {
         reads.home_url().into_bytes()
     };
-    String::from_utf8_lossy(&wp_sanitize_redirect(&location)).into_owned()
+    // Into hs-admin by its screens' clean URLs (ADR 0008).
+    hyscribe_admin::menu::clean_links(&String::from_utf8_lossy(&wp_sanitize_redirect(&location)))
 }
 
 pub(crate) mod limits;
+mod reset;
 
 #[cfg(test)]
 mod tests;

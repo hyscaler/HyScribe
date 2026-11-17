@@ -33,10 +33,12 @@ pub enum Taxonomy {
     Category,
     /// `post_tag`.
     PostTag,
+    /// `post_format`, whose terms `set_post_format()` names.
+    PostFormat,
+    /// `wp_theme`, the theme a template or global styles post belongs to.
+    WpTheme,
     /// `wp_pattern_category`, the synced patterns' categories.
     PatternCategory,
-    /// `wp_theme`, the theme a template, part or global styles post is of.
-    Theme,
     /// `wp_template_part_area`.
     TemplatePartArea,
 }
@@ -47,33 +49,35 @@ impl Taxonomy {
         match self {
             Taxonomy::Category => "category",
             Taxonomy::PostTag => "post_tag",
+            Taxonomy::PostFormat => "post_format",
+            Taxonomy::WpTheme => "wp_theme",
             Taxonomy::PatternCategory => "wp_pattern_category",
-            Taxonomy::Theme => "wp_theme",
             Taxonomy::TemplatePartArea => "wp_template_part_area",
         }
     }
 
-    /// The taxonomy named `name`, if ported.
+    /// The taxonomy named `name`, if its terms are written as they are;
+    /// post formats are not.
     pub fn named(name: &str) -> Option<Taxonomy> {
         [
             Taxonomy::Category,
             Taxonomy::PostTag,
+            Taxonomy::WpTheme,
             Taxonomy::PatternCategory,
-            Taxonomy::Theme,
             Taxonomy::TemplatePartArea,
         ]
         .into_iter()
         .find(|taxonomy| taxonomy.name() == name)
     }
 
-    /// The post types the taxonomy is registered for, whose published
-    /// posts its terms count (`_update_post_term_count()`).
-    pub(crate) fn object_types(self) -> &'static [&'static str] {
-        match self {
-            Taxonomy::Category | Taxonomy::PostTag => &["post"],
-            Taxonomy::PatternCategory => &["wp_block"],
-            Taxonomy::Theme => &["wp_template", "wp_template_part", "wp_global_styles"],
-            Taxonomy::TemplatePartArea => &["wp_template_part"],
+    /// The post types `_update_post_term_count()` counts of the taxonomy
+    /// named `name`.
+    pub(crate) fn counted(name: &str) -> &'static [&'static str] {
+        match name {
+            "wp_theme" => &["wp_template", "wp_template_part", "wp_global_styles"],
+            "wp_pattern_category" => &["wp_block"],
+            "wp_template_part_area" => &["wp_template_part"],
+            _ => &["post"],
         }
     }
 

@@ -9,7 +9,7 @@
 //! Where each one will be called, once the transport is decided:
 //! - [`retrieve_password`]: hs-admin's password reset for users (bulk and
 //!   Ajax, `hyscribe-http`'s `saves/users.rs` and `saves/user_edit.rs`) and
-//!   the lost password form (MVP 8.3)
+//!   the lost password form (`login/reset.rs`, which builds it already)
 //! - [`new_user_to_admin`], [`new_user_to_user`]: Add User
 //!   (`edit_user_created_user`) and registration (`register_new_user`)
 //! - [`email_change_request`]: one's own profile save (`saves/user_edit.rs`)
@@ -17,7 +17,7 @@
 //!   (`saves/options.rs`) and the `adminhash` confirmation
 //! - [`password_changed`], [`email_changed`]: `wp_update_user()` of another
 //!   user's edit and of a confirmed email change; [`password_reset_to_admin`]:
-//!   `after_password_reset` (MVP 8.3)
+//!   `after_password_reset` (`login/reset.rs`, which builds it already)
 //! - [`notify_postauthor`], [`notify_moderator`]: a new comment
 //!   (`comment_post`) and a comment approved in the admin
 //!   (`comment_unapproved_to_approved`)

@@ -124,8 +124,12 @@ async fn publish_post(
     if !super::sanitize_trackback_urls(&post.to_ping).is_empty() {
         add_metadata(write, Meta::Post, id, "_trackbackme", &one(), false).await?;
     }
-    if !cron::scheduled(write, "do_pings").await? {
-        cron::schedule(write, (ctx.now, ctx.now), "do_pings", None).await?;
+    let none = Value::Array(Vec::new());
+    if cron::wp_next_scheduled(write, "do_pings", &none)
+        .await?
+        .is_none()
+    {
+        cron::wp_schedule_single_event(write, (ctx.now, ctx.now), "do_pings", None).await?;
     }
     Ok(())
 }
@@ -160,16 +164,14 @@ pub(super) async fn transition(
         let guid = link::permalink(write, ctx, id, &post).await?;
         write.set_post_guid(id, &guid).await?;
     }
-    cron::clear(write, "publish_future_post", id).await?;
+    cron::wp_clear_scheduled_hook(write, "publish_future_post", id).await?;
     let crosses_publish = new != old && (new == "publish") != (old == "publish");
     // _update_term_count_on_transition_post_status().
     if crosses_publish {
         for name in kind.taxonomies() {
             let terms = write.object_terms(id, name).await?;
             let tt_ids: Vec<u64> = terms.into_iter().map(|(_, tt_id)| tt_id).collect();
-            // Post formats, which count posts too.
-            let types = Taxonomy::named(name).map_or(&["post"][..], Taxonomy::object_types);
-            crate::terms::update_term_count(write, &tt_ids, types).await?;
+            crate::terms::update_term_count(write, &tt_ids, taxonomy).await?;
         }
     }
     // _wp_auto_add_pages_to_menu().
@@ -192,9 +194,10 @@ pub(super) async fn transition(
         ("publish", Kind::Page) => fresh_site_is_used(write).await,
         // _future_post_hook().
         ("future", _) => {
-            cron::clear(write, "publish_future_post", id).await?;
+            cron::wp_clear_scheduled_hook(write, "publish_future_post", id).await?;
             let at = date::Dates::read(write, ctx.now).await?.unix(&post.date);
-            cron::schedule(write, (ctx.now, at), "publish_future_post", Some(id)).await
+            cron::wp_schedule_single_event(write, (ctx.now, at), "publish_future_post", Some(id))
+                .await
         }
         _ => Ok(()),
     }

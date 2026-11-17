@@ -148,8 +148,7 @@ pub(crate) fn id() -> Arg {
 /// for the types whose writes are ported, as each type's supports give them.
 /// `title`, `content` and `excerpt` are neither validated nor sanitized, and
 /// `meta` is ported for synced patterns alone; `status` is validated by
-/// `check_status()` (`write::status_args`), `template` by
-/// `check_template()`, which the empty template alone passes unported.
+/// `check_status()` (`write::status_args`), `template` by `check_template()`.
 pub(crate) fn save(kind: Kind) -> Vec<Arg> {
     const INTEGER: &str = r#"{"type":"integer"}"#;
     const DATE: &str = r#"{"type":["string","null"],"format":"date-time"}"#;
@@ -211,7 +210,7 @@ pub(crate) fn save(kind: Kind) -> Vec<Arg> {
         "template",
         r#"{"type":"string"}"#,
         false,
-        Sanitize::Value,
+        Sanitize::Validated(super::write::check_template),
     ));
     match kind {
         Kind::Post => args.extend([value("categories", IDS), value("tags", IDS)]),

@@ -12,7 +12,7 @@ pub(crate) mod prepare;
 pub(crate) mod write;
 
 use hyscribe_model::{FormatFilter, OrderBy, Post, PostQuery, StatusFilter, TermFilter};
-use hyscribe_phpser::{Value, decode};
+use hyscribe_phpser::{Value, decode, hash_equals};
 use hyscribe_render::formatting::sanitize_title_for_query;
 use hyscribe_render::rest::Rendering;
 use hyscribe_render::site::Request;
@@ -250,8 +250,8 @@ fn create_permission(context: &Context, params: &Params, kind: Kind) -> Result<(
 
 /// `get_post()`: the post of the type with the request's `id`.
 fn get_post(context: &Context, params: &Params, kind: Kind) -> Result<Post, RestError> {
-    // The route takes digits only, and no post has ID 0.
-    let id = params.get("id").map_or(0, Value::to_int).unsigned_abs();
+    // The body or query can name any `id`; PHP refuses one of 0 or less.
+    let id = u64::try_from(params.get("id").map_or(0, Value::to_int)).unwrap_or_default();
     let post = context.site.post(id);
     let post = post.filter(|post| post.post_type == kind.name());
     post.ok_or_else(|| RestError::status("rest_post_invalid_id", "Invalid post ID.", 404))
@@ -301,7 +301,8 @@ fn item_permission(context: &Context, params: &Params, kind: Kind) -> Result<(),
     }
     let password =
         hyscribe_phpser::lookup(&params.get, "password").filter(|password| !password.is_empty());
-    if password.is_some_and(|password| password.to_php_string() != post.password) {
+    let matches = |given: &Value| hash_equals(&post.password, &given.to_php_string());
+    if password.is_some_and(|password| !matches(password)) {
         return Err(RestError::status(
             "rest_post_incorrect_password",
             "Incorrect post password.",

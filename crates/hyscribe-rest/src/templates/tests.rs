@@ -68,7 +68,7 @@ fn theme_parts_need_no_wrapper() {
 }
 
 /// The theme footer's credit, which names HyScribe, as JSON.
-const CREDIT: [&str; 2] = [
+pub(crate) const CREDIT: [&str; 2] = [
     "Designed with <a href=\\\"https:\\/\\/wordpress.org\\\" rel=\\\"nofollow\\\">WordPress<\\/a>",
     "Designed with <a href=\\\"https:\\/\\/github.com\\/hyscaler\\/HyScribe\\\" rel=\\\"nofollow\\\">HyScribe<\\/a>",
 ];

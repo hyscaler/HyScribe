@@ -112,16 +112,31 @@ async fn post_writes_match_php() {
     assert_eq!(writes_match_php(golden, "", &[meta]).await, (6 * 31, 6));
 }
 
+/// Form posts whose text is not valid UTF-8 are refused as PHP's `wpdb`
+/// refuses them, and an `id` below 1 is not found
+/// (`reference/rest/invalid-input.list`).
+#[tokio::test(flavor = "multi_thread")]
+async fn invalid_input_is_refused_as_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/invalid-input.tsv");
+    assert_eq!(writes_match_php(golden, "", &[]).await, (6 * 10, 0));
+}
+
 /// PHP's answers to the navigation menus' and synced patterns' writes, over
 /// `reference/rest/site-writes.sql`, those flagged `refused` answered 501.
 #[tokio::test(flavor = "multi_thread")]
 async fn site_writes_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/site-writes.tsv");
     let state = include_str!("../../../../../reference/rest/site-writes.sql");
-    assert_eq!(
-        writes_match_php(golden, state, &[]).await,
-        (6 * 30, 6 + 2 * 3)
-    );
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 30, 2 * 3));
+}
+
+/// PHP's answers to the block editor's saves as its JavaScript sends them,
+/// over `reference/rest/editor-saves.sql` (MVP 5.2).
+#[tokio::test(flavor = "multi_thread")]
+async fn editor_saves_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/editor-saves.tsv");
+    let state = include_str!("../../../../../reference/rest/editor-saves.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 34, 0));
 }
 
 /// PHP's answers to the autosaves, over `reference/rest/autosaves.sql`,
@@ -178,6 +193,11 @@ async fn writes_match_php(golden: &str, state: &str, unported: &[&str]) -> (usiz
             }
             None => String::from("%nonce%"),
         };
+        for (flag, method) in [("override", "DELETE"), ("put", "PUT")] {
+            if case.flag(flag) {
+                request = request.header("x-http-method-override", method);
+            }
+        }
         for (flag, kind) in [
             ("json", "application/json"),
             ("form", "application/x-www-form-urlencoded"),
@@ -336,6 +356,8 @@ async fn writes_are_dated_as_their_action_runs() {
 /// and nothing when a statement fails part way.
 #[tokio::test(flavor = "multi_thread")]
 async fn post_writes_are_php_s() {
+    // The editor's saves write the same rows of the fixture.
+    let _saves = crate::admin::tests::SAVES.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let site = site(false, dir.path()).await;
     let writes = [
@@ -557,6 +579,95 @@ async fn site_writes_are_php_s() {
             all,
         ),
     ];
+    writes_are_php_s(state, writes).await;
+}
+
+/// The block editor's saves leave the rows PHP's leave
+/// (`reference/writes/actions-editor.php`), each over
+/// `reference/rest/editor-saves.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn editor_saves_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/editor-saves.sql");
+    let para =
+        |text: &str| format!(r#"<!-- wp:paragraph -->\n<p>{text}</p>\n<!-- /wp:paragraph -->"#);
+    let hello = para(
+        "Welcome to WordPress. This is your first post. Edit or delete it, then start writing!",
+    );
+    let (drafted, friends) = (para("Drafted in the editor."), para("For friends."));
+    let post = |id: u64| format!("/?rest_route=/wp/v2/posts/{id}");
+    let saves = [
+        (
+            "editor-save-draft",
+            post(9601),
+            format!(
+                r#"{{"id":9601,"title":"First draft","content":"{drafted}","status":"draft"}}"#
+            ),
+        ),
+        (
+            "editor-publish",
+            post(9601),
+            format!(
+                r#"{{"id":9601,"title":"Published from the editor","content":"{drafted}","status":"publish"}}"#
+            ),
+        ),
+        (
+            "editor-schedule",
+            post(9601),
+            format!(
+                r#"{{"id":9601,"title":"Scheduled","content":"{drafted}","date":"2030-06-01T09:30:00","status":"future"}}"#
+            ),
+        ),
+        (
+            "editor-update",
+            post(1),
+            format!(
+                r#"{{"id":1,"title":"Hello edited","content":"{}"}}"#,
+                para("Edited in the editor.")
+            ),
+        ),
+        (
+            "editor-unschedule",
+            post(9604),
+            format!(
+                r#"{{"id":9604,"status":"draft","date":null,"content":"{}"}}"#,
+                para("Coming up.")
+            ),
+        ),
+        (
+            "editor-private",
+            post(9606),
+            format!(r#"{{"id":9606,"status":"private","password":"","content":"{friends}"}}"#),
+        ),
+        (
+            "editor-featured-image",
+            post(1),
+            format!(r#"{{"id":1,"featured_media":9605,"content":"{hello}"}}"#),
+        ),
+        (
+            "editor-format",
+            post(1),
+            format!(r#"{{"id":1,"format":"gallery","content":"{hello}"}}"#),
+        ),
+        (
+            "editor-format-standard",
+            post(9606),
+            format!(r#"{{"id":9606,"format":"standard","content":"{friends}"}}"#),
+        ),
+        (
+            "editor-terms",
+            post(1),
+            format!(r#"{{"id":1,"categories":[1,9602],"tags":[9601],"content":"{hello}"}}"#),
+        ),
+        (
+            "editor-page-template",
+            "/?rest_route=/wp/v2/pages/2".into(),
+            r#"{"id":2,"template":"page-no-title","parent":9607}"#.into(),
+        ),
+    ];
+    let writes = saves
+        .iter()
+        .map(|(golden, target, body)| (*golden, "PUT", target.clone(), body.as_str(), Setup::All))
+        .collect();
     writes_are_php_s(state, writes).await;
 }
 

@@ -64,3 +64,88 @@ reading-front	admin	POST	/hs-admin/options	option_page=reading&action=update&_wp
 permalinks	admin	POST	/hs-admin/options-permalink	selection=%2F%25postname%25%2F&permalink_structure=%2F%25postname%25%2F&category_base=&tag_base=	update-permalink	_wpnonce	302
 # The screen the save sends back to, which flushes the rewrite rules.
 permalinks-screen	admin	GET	/hs-admin/options-permalink?settings-updated=true	-	-	-	200
+# The REST API's writes: synced patterns, posts, pages and navigation menus
+# created, updated, trashed and deleted. check.php reads each object with
+# PHP's REST API and compares it with HyScribe's last answer; %case% names
+# the ID a case's answer gave, and objects made for later admin actions
+# (cases named scratch-) are not compared.
+rest-pattern	admin	POST	/?rest_route=/wp/v2/blocks	{"title":"A REST pattern","content":"<!-- wp:paragraph -->\n<p>Synced from REST.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+rest-pattern-update	admin	PATCH	/?rest_route=/wp/v2/blocks/%rest-pattern%	{"title":"A REST pattern, renamed"}	wp_rest	X-WP-Nonce	200
+rest-pattern-trashed	admin	POST	/?rest_route=/wp/v2/blocks	{"title":"Trashed pattern","content":"<!-- wp:paragraph -->\n<p>Gone soon.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+rest-pattern-trash	admin	DELETE	/?rest_route=/wp/v2/blocks/%rest-pattern-trashed%	-	wp_rest	X-WP-Nonce	200
+rest-post	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A REST post","content":"<!-- wp:paragraph -->\n<p>Written over REST.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:block {\"ref\":%rest-pattern%} /-->","excerpt":"Its excerpt","status":"publish","categories":[2],"tags":[3,8],"comment_status":"open","ping_status":"closed"}	wp_rest	X-WP-Nonce	201
+rest-post-update	admin	PUT	/?rest_route=/wp/v2/posts/%rest-post%	{"title":"A REST post, updated","sticky":true,"date":"2026-11-01T10:00:00"}	wp_rest	X-WP-Nonce	200
+rest-draft	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A REST draft","status":"draft"}	wp_rest	X-WP-Nonce	201
+rest-draft-patch	admin	PATCH	/?rest_route=/wp/v2/posts/%rest-draft%	{"excerpt":"Patched","slug":"rest-draft-slug","password":"pw"}	wp_rest	X-WP-Nonce	200
+rest-future	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A REST future post","status":"future","date_gmt":"2030-01-01T00:00:00Z"}	wp_rest	X-WP-Nonce	201
+rest-trashed	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Trashed over REST","status":"publish"}	wp_rest	X-WP-Nonce	201
+rest-trash	admin	DELETE	/?rest_route=/wp/v2/posts/%rest-trashed%	-	wp_rest	X-WP-Nonce	200
+rest-deleted	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Deleted over REST"}	wp_rest	X-WP-Nonce	201
+rest-delete	admin	DELETE	/?rest_route=/wp/v2/posts/%rest-deleted%&force=true	-	wp_rest	X-WP-Nonce	200
+rest-page	admin	POST	/?rest_route=/wp/v2/pages	{"title":"A REST page","parent":2,"menu_order":4,"status":"publish","content":"<!-- wp:paragraph -->\n<p>A page written over REST.</p>\n<!-- /wp:paragraph -->"}	wp_rest	X-WP-Nonce	201
+rest-page-update	admin	POST	/?rest_route=/wp/v2/pages/%rest-page%	{"title":"A REST page, updated","comment_status":"closed"}	wp_rest	X-WP-Nonce	200
+rest-nav	admin	POST	/?rest_route=/wp/v2/navigation	{"title":"REST menu","status":"publish","content":"<!-- wp:navigation-link {\"label\":\"REST link\",\"url\":\"https://example.test/\",\"kind\":\"custom\"} /-->"}	wp_rest	X-WP-Nonce	201
+rest-nav-update	admin	PUT	/?rest_route=/wp/v2/navigation/%rest-nav%	{"title":"REST menu, renamed"}	wp_rest	X-WP-Nonce	200
+rest-nav-draft	admin	POST	/?rest_route=/wp/v2/navigation	{"title":"REST draft menu","status":"draft"}	wp_rest	X-WP-Nonce	201
+rest-nav-delete	admin	DELETE	/?rest_route=/wp/v2/navigation/%rest-nav-draft%&force=true	-	wp_rest	X-WP-Nonce	200
+# Posts made over REST for the admin's actions: post.php's delete, the
+# bulk trash, restore and delete, and a revision restored (the older of two).
+scratch-a	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Scratch A","status":"publish"}	wp_rest	X-WP-Nonce	201
+scratch-b	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Scratch B","status":"publish"}	wp_rest	X-WP-Nonce	201
+scratch-c	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Scratch C","status":"publish"}	wp_rest	X-WP-Nonce	201
+trash-a	admin	GET	/hs-admin/post?post=%scratch-a%&action=trash	-	trash-post_%scratch-a%	_wpnonce	302
+delete-a	admin	GET	/hs-admin/post?post=%scratch-a%&action=delete	-	delete-post_%scratch-a%	_wpnonce	302
+bulk-trash	admin	GET	/hs-admin/edit?action=trash&post[]=%scratch-b%&post[]=%scratch-c%	-	bulk-posts	_wpnonce	302
+bulk-untrash	admin	GET	/hs-admin/edit?post_status=trash&action=untrash&post[]=%scratch-b%	-	bulk-posts	_wpnonce	302
+bulk-delete	admin	GET	/hs-admin/edit?post_status=trash&action=delete&post[]=%scratch-c%	-	bulk-posts	_wpnonce	302
+scratch-rev	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Revised over REST","content":"<!-- wp:paragraph -->\n<p>First version.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+scratch-rev-2	admin	POST	/?rest_route=/wp/v2/posts/%scratch-rev%	{"content":"<!-- wp:paragraph -->\n<p>Second version.</p>\n<!-- /wp:paragraph -->"}	wp_rest	X-WP-Nonce	200
+scratch-rev-3	admin	POST	/?rest_route=/wp/v2/posts/%scratch-rev%	{"content":"<!-- wp:paragraph -->\n<p>Third version.</p>\n<!-- /wp:paragraph -->"}	wp_rest	X-WP-Nonce	200
+older-revision	admin	GET	/?rest_route=/wp/v2/posts/%scratch-rev%/revisions&per_page=1&page=2	-	wp_rest	X-WP-Nonce	200
+restore-revision	admin	GET	/hs-admin/revision?revision=%older-revision%&action=restore	-	restore-post_%older-revision%	_wpnonce	302
+# Post 1's edit lock, renewed by the heartbeat.
+heartbeat-lock	admin	POST	/hs-admin/admin-ajax	action=heartbeat&data[wp-refresh-post-lock][post_id]=1&interval=60&screen_id=post&has_focus=true	heartbeat-nonce	_nonce	200
+# More comments from the administrator (5 to 8), each moderated every way.
+comment-5	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Moderated+twice.	-	-	302
+comment-6	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Spammed+and+back.	-	-	302
+comment-7	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Trashed+for+good.	-	-	302
+comment-8	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Spam+emptied.	-	-	302
+bulk-spam	admin	POST	/hs-admin/edit-comments	action=spam&delete_comments[]=5&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php	bulk-comments	_wpnonce	302
+bulk-unspam	admin	GET	/hs-admin/edit-comments?doaction=undo&action=unspam&ids=5	-	bulk-comments	_wpnonce	302
+unapprove-comment	admin	GET	/hs-admin/comment?action=unapprovecomment&c=5	-	approve-comment_5	_wpnonce	302
+bulk-approve	admin	GET	/hs-admin/edit-comments?action=approve&delete_comments[]=5	-	bulk-comments	_wpnonce	302
+dim-unapprove	admin	POST	/hs-admin/admin-ajax	action=dim-comment&id=5&new=unapproved	approve-comment_5	_ajax_nonce	200
+spam-comment	admin	GET	/hs-admin/comment?action=spamcomment&c=6	-	delete-comment_6	_wpnonce	302
+unspam-comment	admin	GET	/hs-admin/comment?action=unspamcomment&c=6	-	delete-comment_6	_wpnonce	302
+trash-comment-6	admin	GET	/hs-admin/comment?action=trashcomment&c=6	-	delete-comment_6	_wpnonce	302
+untrash-comment	admin	GET	/hs-admin/comment?action=untrashcomment&c=6	-	delete-comment_6	_wpnonce	302
+bulk-trash-comment	admin	GET	/hs-admin/edit-comments?action=trash&delete_comments[]=7	-	bulk-comments	_wpnonce	302
+bulk-untrash-comment	admin	GET	/hs-admin/edit-comments?action=untrash&ids=7	-	bulk-comments	_wpnonce	302
+ajax-trash-comment	admin	POST	/hs-admin/admin-ajax	action=delete-comment&id=7&trash=1	delete-comment_7	_ajax_nonce	200
+ajax-untrash-comment	admin	POST	/hs-admin/admin-ajax	action=delete-comment&id=7&untrash=1	delete-comment_7	_ajax_nonce	200
+ajax-delete-to-trash	admin	POST	/hs-admin/admin-ajax	action=delete-comment&id=7&delete=1	delete-comment_7	_ajax_nonce	200
+bulk-delete-comment	admin	GET	/hs-admin/edit-comments?action=delete&delete_comments[]=7	-	bulk-comments	_wpnonce	302
+ajax-spam-comment	admin	POST	/hs-admin/admin-ajax	action=delete-comment&id=8&spam=1	delete-comment_8	_ajax_nonce	200
+empty-spam	admin	GET	/hs-admin/edit-comments?delete_all=Empty+Spam&action=-1&comment_status=spam&pagegen_timestamp=2099-01-01+00%3A00%3A00	-	bulk-comments	_wpnonce	302
+# A tag deleted from its row link (term 9).
+add-row-doomed	admin	POST	/hs-admin/admin-ajax	action=add-tag&screen=edit-post_tag&taxonomy=post_tag&post_type=post&tag-name=Row+doomed&slug=&description=	add-tag	_wpnonce_add-tag	200
+delete-tag-row	admin	GET	/hs-admin/edit-tags?action=delete&taxonomy=post_tag&tag_ID=9	-	delete-tag_9	_wpnonce	302
+# User 2's reset link from its edit screen; the administrator's list mode
+# and welcome panel; a change of the admin email, dismissed, then made again.
+password-reset	admin	POST	/hs-admin/admin-ajax	action=send-password-reset&user_id=2	reset-password-for-2	nonce	200
+list-mode	admin	GET	/hs-admin/edit?mode=excerpt	-	-	-	200
+welcome-shown	admin	GET	/hs-admin/?welcome=1	-	-	-	200
+admin-email	admin	POST	/hs-admin/options	option_page=general&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-general.php&blogname=Switch+Back+Site&blogdescription=Saved+by+HyScribe&site_icon=0&new_admin_email=new-admin%40example.test&default_role=subscriber&WPLANG=&timezone_string=UTC%2B0&date_format=F+j%2C+Y&date_format_custom=F+j%2C+Y&time_format=g%3Ai+a&time_format_custom=g%3Ai+a&start_of_week=1	general-options	_wpnonce	302
+general-notices	admin	GET	/hs-admin/options-general?settings-updated=true	-	-	-	200
+dismiss-email	admin	GET	/hs-admin/options?dismiss=new_admin_email	-	dismiss-1-new_admin_email	_wpnonce	302
+admin-email-again	admin	POST	/hs-admin/options	option_page=general&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-general.php&blogname=Switch+Back+Site&blogdescription=Saved+by+HyScribe&site_icon=0&new_admin_email=new-admin%40example.test&default_role=subscriber&WPLANG=&timezone_string=UTC%2B0&date_format=F+j%2C+Y&date_format_custom=F+j%2C+Y&time_format=g%3Ai+a&time_format_custom=g%3Ai+a&start_of_week=1	general-options	_wpnonce	302
+# The Trash off (EMPTY_TRASH_DAYS=0 in .env): trashing deletes for good.
+trash-off	-	RESTART	EMPTY_TRASH_DAYS=0	-	-	-	-
+scratch-d	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Scratch D","status":"publish"}	wp_rest	X-WP-Nonce	201
+scratch-e	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Scratch E","status":"draft"}	wp_rest	X-WP-Nonce	201
+trash-off-post	admin	GET	/hs-admin/post?post=%scratch-d%&action=trash	-	trash-post_%scratch-d%	_wpnonce	302
+trash-off-bulk	admin	GET	/hs-admin/edit?action=trash&post[]=%scratch-e%	-	bulk-posts	_wpnonce	302
+comment-9	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Trash+off%2C+deleted.	-	-	302
+comment-10	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Trash+off%2C+deleted+with+Ajax.	-	-	302
+trash-off-comment	admin	GET	/hs-admin/comment?action=trashcomment&c=9	-	delete-comment_9	_wpnonce	302
+trash-off-ajax	admin	POST	/hs-admin/admin-ajax	action=delete-comment&id=10&trash=1	delete-comment_10	_ajax_nonce	200

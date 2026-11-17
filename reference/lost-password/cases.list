@@ -1,0 +1,47 @@
+# The requests of reference/lost-password/golden.sh, in order:
+#   method<TAB>query<TAB>reset password cookie<TAB>form
+# Keys and logins are reference/lost-password/content.sql's; a reset only
+# changes the password of lost-reset, and of lost-fresh when the passwords
+# match once trimmed, so these come last.
+GET	action=rp	lost-fresh:freshkey0123456789AB
+GET	action=resetpass	lost-fresh:freshkey0123456789AB
+GET	action=rp	lost-fresh:fresh-key-0123456789-AB
+GET	action=rp	LOST-FRESH:freshkey0123456789AB
+GET	action=rp	%20lost-fresh%20:freshkey0123456789AB
+GET	action=rp	lost-fresh:freshkey0123456789AC
+GET	action=rp	lost-expired:expiredkey0123456789
+GET	action=rp	lost-bare:barekey0123456789ABC
+GET	action=rp	lost-plain:plainkey0123456789AB
+GET	action=rp	lost-plain:plainkey0123456789AC
+GET	action=rp	lost-phpass:phpasskey0123456789A
+GET	action=rp	lost-phpass:phpasskey0123456789B
+GET	action=rp&interim-login=1	lost-fresh:freshkey0123456789AB
+GET	action=rp	lost-empty:-
+GET	action=rp	lost-empty:%20
+GET	action=rp	0:zerokey0123456789ABC
+POST	action=resetpass	lost-fresh:freshkey0123456789AB	rp_key=freshkey0123456789AB
+POST	action=resetpass	lost-fresh:freshkey0123456789AB	pass1=one&pass2=two&rp_key=freshkey0123456789AB
+POST	action=resetpass	lost-fresh:freshkey0123456789AB	pass1=%20%20%20&pass2=%20%20%20&rp_key=freshkey0123456789AB
+POST	action=resetpass	lost-fresh:freshkey0123456789AB	pass1=0&pass2=0&rp_key=freshkey0123456789AB
+POST	action=resetpass	lost-fresh:freshkey0123456789AB	pass1=one&rp_key=freshkey0123456789AB
+POST	action=resetpass	lost-fresh:freshkey0123456789AB	pass1=one&pass2=one&rp_key=freshkey0123456789AC
+POST	action=resetpass	lost-fresh:freshkey0123456789AB	pass1=&pass2=x&rp_key=x
+POST	action=resetpass	lost-expired:expiredkey0123456789	pass1=one&pass2=one&rp_key=expiredkey0123456789
+POST	action=resetpass		pass1=one&pass2=one&rp_key=freshkey0123456789AB
+POST	action=lostpassword		user_login=admin
+POST	action=retrievepassword		user_login=%20admin%20
+POST	action=lostpassword		user_login=admin%40default-install.test
+POST	action=lostpassword		user_login=admin&redirect_to=%2Fsample-page%2F
+POST	action=lostpassword		user_login=admin&redirect_to=http%3A%2F%2Felsewhere.test%2F
+POST	action=lostpassword		user_login=admin&redirect_to=0
+POST	action=lostpassword		user_login=
+POST	action=lostpassword		user_login=0
+POST	action=lostpassword		user_login%5B%5D=admin
+POST	action=lostpassword
+POST	action=lostpassword		user_login=nobody%22%3Cb%3E
+POST	action=lostpassword		user_login=nobody%40default-install.test
+POST	action=lostpassword		user_login=%40admin
+POST	action=lostpassword&error=expiredkey		user_login=nobody&redirect_to=%2Fx%22
+POST	action=lostpassword&interim-login=1		user_login=nobody
+POST	action=resetpass	lost-fresh:freshkey0123456789AB	pass1=%20one%20&pass2=one&rp_key=freshkey0123456789AB
+POST	action=resetpass	lost-reset:resetkey0123456789AB	pass1=%20It%27s%20new%20&pass2=It%27s%20new&rp_key=resetkey0123456789AB

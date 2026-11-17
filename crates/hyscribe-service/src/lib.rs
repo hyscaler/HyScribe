@@ -4,10 +4,11 @@
 //! `hyscribe service start|status|log|restart|stop` (ADR 0005).
 //!
 //! The running server holds an exclusive lock on `run/hyscribe.pid` for its
-//! whole life and writes its pid into it. Holding the lock is what "running"
-//! means: a pid file left behind by a crash is never mistaken for a live
-//! server, and signals only go to the pid written by the lock holder, so a
-//! recycled pid is never signalled.
+//! whole life and writes its pid into it, then a `listening` line once it
+//! accepts connections. Holding the lock is what "running" means: a pid file
+//! left behind by a crash is never mistaken for a live server, and signals
+//! only go to the pid written by the lock holder, so a recycled pid is never
+//! signalled.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -70,6 +71,12 @@ impl Paths {
     pub fn log_file(&self) -> PathBuf {
         self.logs_dir().join(LOG_FILE)
     }
+
+    /// `logs/setup-secret`: setup mode's one-time secret while it runs
+    /// without a terminal.
+    pub fn setup_secret_file(&self) -> PathBuf {
+        self.logs_dir().join("setup-secret")
+    }
 }
 
 /// Why a service command failed.
@@ -86,8 +93,11 @@ pub enum Error {
         /// The last lines of the log.
         tail: Vec<String>,
     },
-    /// The spawned server did not come up in time and was killed.
-    Timeout,
+    /// The spawned server was not listening in time and was killed.
+    Timeout {
+        /// The last lines of the log.
+        tail: Vec<String>,
+    },
     /// The server is still running after SIGKILL.
     StillRunning(u32),
     /// A file or process operation failed.
@@ -108,17 +118,15 @@ impl fmt::Display for Error {
             }
             Error::ExitedEarly { code, tail } => {
                 let code = code.map_or("a signal".to_string(), |code| format!("code {code}"));
-                let mut text = format!("the server exited with {code} while starting");
-                if !tail.is_empty() {
-                    text.push_str("; last log lines:");
-                    for line in tail {
-                        text.push_str("\n  ");
-                        text.push_str(line);
-                    }
-                }
-                text
+                with_tail(
+                    format!("the server exited with {code} while starting"),
+                    tail,
+                )
             }
-            Error::Timeout => "the server did not start in time and was stopped".to_string(),
+            Error::Timeout { tail } => with_tail(
+                "the server was not listening in time and was stopped".to_string(),
+                tail,
+            ),
             Error::StillRunning(pid) => format!("pid {pid} is still running after SIGKILL"),
             Error::Io { action, source } => format!("cannot {action}: {source}"),
         };
@@ -128,6 +136,18 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// `text`, then the log lines that say why.
+fn with_tail(mut text: String, tail: &[String]) -> String {
+    if !tail.is_empty() {
+        text.push_str("; last log lines:");
+        for line in tail {
+            text.push_str("\n  ");
+            text.push_str(line);
+        }
+    }
+    text
+}
+
 fn io_error(action: impl fmt::Display) -> impl FnOnce(io::Error) -> Error {
     let action = action.to_string();
     move |source| Error::Io { action, source }
@@ -136,8 +156,11 @@ fn io_error(action: impl fmt::Display) -> impl FnOnce(io::Error) -> Error {
 /// Whether a server is running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
-    /// A server holds the pid file; the pid is `None` while it starts.
-    Running(Option<u32>),
+    /// A server holds the pid file and listens.
+    Running(u32),
+    /// A server holds the pid file and does not listen yet; the pid is
+    /// `None` until it is written.
+    Starting(Option<u32>),
     /// No server holds the pid file.
     Stopped,
 }
@@ -145,12 +168,16 @@ pub enum Status {
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Status::Running(Some(pid)) => write!(f, "running (pid {pid})"),
-            Status::Running(None) => f.write_str("starting"),
+            Status::Running(pid) => write!(f, "running (pid {pid})"),
+            Status::Starting(Some(pid)) => write!(f, "starting (pid {pid})"),
+            Status::Starting(None) => f.write_str("starting"),
             Status::Stopped => f.write_str("not running"),
         }
     }
 }
+
+/// The pid file's second line once the server listens.
+const LISTENING: &str = "listening";
 
 /// Reads the service state from the pid file lock.
 pub fn status(paths: &Paths) -> Result<Status, Error> {
@@ -170,8 +197,15 @@ pub fn status(paths: &Paths) -> Result<Status, Error> {
     let mut text = String::new();
     file.read_to_string(&mut text)
         .map_err(io_error(format_args!("read {}", path.display())))?;
-    let pid = text.trim().parse().ok().filter(|_| is_held(&lock));
-    Ok(Status::Running(pid))
+    let mut lines = text.lines();
+    let pid = lines
+        .next()
+        .and_then(|line| line.parse().ok())
+        .filter(|_| is_held(&lock));
+    Ok(match (pid, lines.next()) {
+        (Some(pid), Some(LISTENING)) => Status::Running(pid),
+        (pid, _) => Status::Starting(pid),
+    })
 }
 
 /// Whether a lock attempt failed because someone else holds the lock.
@@ -184,6 +218,17 @@ fn is_held(lock: &io::Result<()>) -> bool {
 #[derive(Debug)]
 pub struct PidLock {
     file: File,
+}
+
+impl PidLock {
+    /// Marks the server as listening, which `service start` waits for. A
+    /// failed write leaves it starting, which that wait reports.
+    pub fn listening(&self) {
+        use std::os::unix::fs::FileExt;
+        let text = format!("{}\n{LISTENING}\n", std::process::id());
+        // The pid line is rewritten as it was, so no reader sees it missing.
+        let _ = self.file.write_all_at(text.as_bytes(), 0);
+    }
 }
 
 impl Drop for PidLock {
@@ -214,7 +259,8 @@ pub fn hold(paths: &Paths) -> Result<PidLock, Error> {
             // never signalled.
             let mut text = String::new();
             let _ = file.read_to_string(&mut text);
-            return Err(Error::AlreadyRunning(text.trim().parse().ok()));
+            let pid = text.lines().next().and_then(|line| line.parse().ok());
+            return Err(Error::AlreadyRunning(pid));
         }
         sleep(Duration::from_millis(10));
     }
@@ -283,27 +329,27 @@ pub struct Spawn {
 /// What `service start` did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Started {
-    /// A new server is up.
+    /// A new server listens.
     Now(u32),
-    /// A server was already running.
-    Already(Option<u32>),
+    /// A server was already running or starting.
+    Already(Status),
 }
 
 impl fmt::Display for Started {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Started::Now(pid) => write!(f, "started (pid {pid})"),
-            Started::Already(Some(pid)) => write!(f, "already running (pid {pid})"),
-            Started::Already(None) => f.write_str("already starting"),
+            Started::Already(status) => write!(f, "already {status}"),
         }
     }
 }
 
 /// Starts `spawn` in the background with output to the log, and waits until
-/// it holds the pid file, exits, or `timeout` passes.
+/// it listens, exits, or `timeout` passes.
 pub fn start(paths: &Paths, spawn: &Spawn, timeout: Duration) -> Result<Started, Error> {
-    if let Status::Running(pid) = status(paths)? {
-        return Ok(Started::Already(pid));
+    let status = status(paths)?;
+    if status != Status::Stopped {
+        return Ok(Started::Already(status));
     }
     let log_path = paths.log_file();
     create_private_dir(&paths.logs_dir())?;
@@ -351,11 +397,14 @@ fn wait_for_server(
                 tail: tail(log_path, 20)?,
             });
         }
-        if status(paths)? == Status::Running(Some(child.id())) {
+        if status(paths)? == Status::Running(child.id()) {
             return Ok(Started::Now(child.id()));
         }
         if Instant::now() >= deadline {
-            return Err(Error::Timeout);
+            // An unreadable log only loses the reason; the timeout stands.
+            return Err(Error::Timeout {
+                tail: tail(log_path, 20).unwrap_or_default(),
+            });
         }
         sleep(POLL);
     }
@@ -386,8 +435,8 @@ impl fmt::Display for Stopped {
 pub fn stop(paths: &Paths, grace: Duration) -> Result<Stopped, Error> {
     let pid = match status(paths)? {
         Status::Stopped => return Ok(Stopped::NotRunning),
-        Status::Running(None) => return Err(Error::Starting),
-        Status::Running(Some(pid)) => pid,
+        Status::Starting(None) => return Err(Error::Starting),
+        Status::Starting(Some(pid)) | Status::Running(pid) => pid,
     };
     let target = i32::try_from(pid)
         .ok()

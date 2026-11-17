@@ -25,7 +25,12 @@ pub(super) async fn default_status(
     let supported = match kind {
         Kind::Post => true,
         Kind::Attachment => option == "default_comment_status",
-        Kind::Page | Kind::Revision | Kind::UserRequest | Kind::Navigation | Kind::Block => false,
+        Kind::Page
+        | Kind::Revision
+        | Kind::GlobalStyles
+        | Kind::UserRequest
+        | Kind::Navigation
+        | Kind::Block => false,
     };
     if !supported {
         return Ok("closed".into());

@@ -9,7 +9,7 @@ pub mod cookie;
 mod fast_hash;
 pub mod sessions;
 
-pub use fast_hash::wp_fast_hash;
+pub use fast_hash::{wp_fast_hash, wp_verify_fast_hash};
 
 use blowfish::Blowfish;
 use hyscribe_phpser::{hash_equals, hash_hmac_md5, md5, md5_raw, php_trim};

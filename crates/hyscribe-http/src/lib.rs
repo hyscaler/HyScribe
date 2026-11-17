@@ -23,14 +23,16 @@ use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::server::graceful::GracefulShutdown;
 use hyper_util::service::TowerToHyperService;
 use hyscribe_db::{Db, DbError};
-use hyscribe_kses::{esc_attr, esc_html, esc_url_raw};
+use hyscribe_kses::{esc_attr, esc_html, esc_url_raw, strip_tags};
 use hyscribe_model::{OrderBy, Post, PostQuery, Term, TermFilter, TimeCondition};
 use hyscribe_phpser::{
     Key, Value, add_query_values, is_empty_string, parse_str, php_trim, rawurlencode,
     rawurlencode_deep, remove_query_arg, urldecode, urlencode,
 };
 use hyscribe_render::date::{self, Zone};
-use hyscribe_render::formatting::sanitize_title_for_query;
+use hyscribe_render::formatting::{
+    CORE_SHORTCODE_TAGS, capital_p_dangit, convert_chars, sanitize_title_for_query, wptexturize,
+};
 use hyscribe_render::head::{Share, embed_page, wp_footer, wp_head};
 use hyscribe_render::link;
 use hyscribe_render::permalinks::{self, Permalinks, home_path};
@@ -297,6 +299,11 @@ impl Site {
             .collect();
         let writer = writer.map(|writer| Arc::new(writer.with_urls(urls)));
         Site { writer, ..self }
+    }
+
+    /// The writer, with the configured addresses, for the service's tasks.
+    pub fn writer(&self) -> Option<Arc<hyscribe_db::Writer>> {
+        self.writer.clone()
     }
 
     /// `blog_public`: whether search engines may index the site.
@@ -707,9 +714,11 @@ async fn page(
     body: axum::body::Bytes,
 ) -> Response {
     // Before the method check, so a login form's POST is redirected too.
-    if let Some((status, location)) = admin_redirect(&site, uri.path(), uri.query()) {
+    let read = method == Method::GET || method == Method::HEAD;
+    if let Some((status, location)) = admin_redirect(&site, uri.path(), uri.query(), read) {
         return (status, [(header::LOCATION, location)]).into_response();
     }
+    let uri = in_place(uri);
     let (head, post) = (method == Method::HEAD, method == Method::POST);
     let page_method = method == Method::GET || head || post;
     if !post && page_method {
@@ -1419,11 +1428,13 @@ fn canonical_path(site: &Site, path: &str, raw_query: Option<&str>) -> Option<St
 ///
 /// Those redirects are 307: browsers do not cache them, so a site switched
 /// back to PHP WordPress gets its own admin back, and a POST stays a POST.
-/// HyScribe's own URLs with `.php` get a permanent 308 to the clean form.
+/// `/hs-login.php` gets a permanent 308; `/hs-admin/<screen>.php` a 301 when
+/// `read` (GET or HEAD), else it is served [`in_place`].
 fn admin_redirect(
     site: &Site,
     path: &str,
     raw_query: Option<&str>,
+    read: bool,
 ) -> Option<(StatusCode, String)> {
     let (status, target) = match path {
         "/wp-login.php" => (StatusCode::TEMPORARY_REDIRECT, "/hs-login".to_string()),
@@ -1435,8 +1446,8 @@ fn admin_redirect(
                 path.strip_prefix("/hs-admin/"),
             ) {
                 (Some(screen), _) => (StatusCode::TEMPORARY_REDIRECT, screen),
-                (None, Some(screen)) if screen.ends_with(".php") => {
-                    (StatusCode::PERMANENT_REDIRECT, screen)
+                (None, Some(screen)) if read && screen.ends_with(".php") => {
+                    (StatusCode::MOVED_PERMANENTLY, screen)
                 }
                 _ => return None,
             };
@@ -1447,6 +1458,20 @@ fn admin_redirect(
     };
     let query = raw_query.map(|q| format!("?{q}")).unwrap_or_default();
     Some((status, format!("{}{target}{query}", site.home)))
+}
+
+/// `uri` with `/hs-admin/<screen>.php` as `/hs-admin/<screen>`: a request
+/// other than a GET or HEAD is served there, as a redirect would drop its body.
+fn in_place(uri: Uri) -> Uri {
+    let Some(screen) = uri
+        .path()
+        .strip_prefix("/hs-admin/")
+        .and_then(|screen| screen.strip_suffix(".php"))
+    else {
+        return uri;
+    };
+    let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
+    format!("/hs-admin/{screen}{query}").parse().unwrap_or(uri)
 }
 
 /// Paths no canonical redirect touches: the static trees, the login screen
@@ -1785,7 +1810,7 @@ fn posts_page_titled(
     if let Some(post) = found {
         page.request.queried_object_id = id;
         page.title = document_title([
-            Some(esc_html(&post.title)),
+            Some(single_post_title(post)),
             paging.title(),
             Some(site.name()),
         ]);
@@ -1820,13 +1845,23 @@ impl Paging {
     }
 }
 
-/// `wp_get_document_title()`: the parts there are, joined by dashes.
+/// `single_post_title()`: the title through its filters.
+fn single_post_title(post: &Post) -> String {
+    lossy(&strip_tags(&wptexturize(&post.title, &CORE_SHORTCODE_TAGS)))
+}
+
+/// `wp_get_document_title()`: the parts that are not empty, joined by
+/// dashes, through the `document_title` filters.
 fn document_title(parts: [Option<String>; 3]) -> String {
-    parts
+    let title = parts
         .into_iter()
         .flatten()
+        .filter(|part| !is_empty_string(part.as_bytes()))
         .collect::<Vec<_>>()
-        .join(" &#8211; ")
+        .join(" - ");
+    let title = wptexturize(title.as_bytes(), &CORE_SHORTCODE_TAGS);
+    let title = esc_html(&convert_chars(&title));
+    lossy(&capital_p_dangit(title.as_bytes()))
 }
 
 /// A singular page with the `page` var: the page if `(int)` of it is within
@@ -1931,7 +1966,7 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
             document_title([Some(site.name()), paging.title(), tagline])
         } else {
             document_title([
-                Some(esc_html(&post.title)),
+                Some(single_post_title(&post)),
                 paging.title(),
                 Some(site.name()),
             ])
@@ -2219,8 +2254,9 @@ async fn list(
     candidates.retain(|name| front || name != "front-page");
     let queried_object_id = term.map_or(0, |term| term.id);
     let archive = term_archive.or(dated.then(|| date.kind.clone().unwrap_or(Archive::Date)));
-    // The home page lists the latest posts, the default install's setting.
-    let home = archive.is_none() && search.is_none();
+    // The home page lists the latest posts, the default install's setting;
+    // a feed is never `is_home()`.
+    let home = archive.is_none() && search.is_none() && !feed;
     let request = Request {
         front_page: home && front,
         home,

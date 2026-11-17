@@ -389,6 +389,51 @@ foreach ( array( '/%postname%/', '/%year%/%postname%' ) as $structure ) {
 	unset( $options['permalink_structure'] );
 	$GLOBALS['wp_rewrite']->init();
 }
+// On paged comments, a comment's date and reply links go to its thread's
+// page, from get_page_of_comment().
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'open' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$link_markup = '<!-- wp:comment-template --><!-- wp:comment-date /--><!-- wp:comment-reply-link /--><!-- /wp:comment-template -->';
+foreach ( array(
+	array( 'page_comments' => '1', 'comments_per_page' => '2' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '2', 'default_comments_page' => 'oldest' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '3', 'thread_comments' => '0' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '3', 'thread_comments_depth' => '1' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '0' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '-1' ),
+	array( 'page_comments' => '0', 'comments_per_page' => '2' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '2', 'permalink_structure' => '/%postname%/' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '2', 'permalink_structure' => '/%year%/%postname%' ),
+) as $link_options ) {
+	foreach ( array_merge( $option_names, array( 'permalink_structure' ) ) as $name ) {
+		remove_all_filters( "pre_option_$name" );
+	}
+	foreach ( $link_options as $name => $value ) {
+		add_filter( "pre_option_$name", static fn() => $value );
+	}
+	$GLOBALS['wp_rewrite']->init();
+	foreach ( array( '', '2' ) as $cpage ) {
+		$GLOBALS['wp_query']->set( 'cpage', $cpage );
+		$uri                    = '' === $cpage ? '/?p=1' : "/?p=1&cpage=$cpage";
+		$_SERVER['REQUEST_URI'] = $uri;
+		$reset();
+		$counter = $elements();
+		$html    = $render( $link_markup, array( 'postId' => 1 ) );
+		$html   .= $render( $link_markup, array( 'postId' => 1 ) );
+		$state   = array( 'options' => $link_options, 'elements' => $counter, 'post' => 1, 'password' => false, 'closed' => false, 'now' => time(), 'uri' => $uri, 'global' => 1, 'singular' => true );
+		echo bin2hex( $link_markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+	}
+}
+foreach ( array_merge( $option_names, array( 'permalink_structure' ) ) as $name ) {
+	remove_all_filters( "pre_option_$name" );
+}
+foreach ( $options as $name => $value ) {
+	add_filter( "pre_option_$name", static fn() => $value );
+}
+$GLOBALS['wp_rewrite']->init();
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'closed' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+
 // Outside a singular page there are no links.
 $GLOBALS['wp_query']->is_singular = false;
 $GLOBALS['wp_query']->set( 'cpage', '2' );

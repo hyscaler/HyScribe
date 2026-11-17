@@ -60,10 +60,10 @@ fn exif_segment(b: &[u8]) -> Option<&[u8]> {
             return None;
         }
         let length = usize::from(u16::from_be_bytes([*b.get(at + 2)?, *b.get(at + 3)?]));
-        // The TIFF block to the file's end: its reader takes what it needs.
+        // The TIFF block within its segment, as PHP reads it.
         if let (0xE1, Some(tiff)) = (
             marker,
-            b.get(at + 4..)
+            b.get(at + 4..at + 2 + length)
                 .unwrap_or_default()
                 .strip_prefix(b"Exif\0\0"),
         ) {

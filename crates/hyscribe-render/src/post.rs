@@ -4,7 +4,7 @@
 //! the classes of a post and of the page body.
 
 use hyscribe_kses::esc_attr;
-use hyscribe_model::Post;
+use hyscribe_model::{Post, PostQuery};
 use hyscribe_phpser::{Value, decode, is_empty_string, php_trim};
 
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit_title, convert_chars, wptexturize};
@@ -211,8 +211,7 @@ fn archive_class(taxonomy: Taxonomy) -> &'static str {
 }
 
 /// `get_body_class()` for a visitor, with `template` as `get_template()`.
-/// Pages with child pages and page templates other than the default are
-/// not told apart yet.
+/// Page templates other than the default are not told apart yet.
 pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8> {
     let mut classes: Vec<Vec<u8>> = Vec::new();
     let mut push = |class: &[u8]| classes.push(class.to_vec());
@@ -261,6 +260,16 @@ pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8>
         } else {
             push(b"page");
             push(format!("page-id-{}", post.id).as_bytes());
+            // get_pages( array( 'parent' => $page_id, 'number' => 1 ) )
+            let children = site.query(&PostQuery {
+                post_types: vec!["page".into()],
+                parents: vec![post.id],
+                limit: 1,
+                ..PostQuery::default()
+            });
+            if !children.is_empty() {
+                push(b"page-parent");
+            }
             if post.parent != 0 {
                 push(b"page-child");
                 push(format!("parent-pageid-{}", post.parent).as_bytes());

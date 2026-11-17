@@ -22,6 +22,7 @@ hyscribe-db.workspace = true
 hyscribe-fetch.workspace = true
 hyscribe-image.workspace = true
 hyscribe-kses.workspace = true
+hyscribe-mail.workspace = true
 hyscribe-model.workspace = true
 hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true

@@ -870,4 +870,8 @@ fn avatar_urls_are_gravatars() {
     let hash = "d98fb7ed563d6a2727d2de61d3ec97dbdf76dbc88916a54cefb32e3f54d531fa";
     let expected = format!("https://secure.gravatar.com/avatar/{hash}?s=24&d=mm&r=g");
     assert_eq!(String::from_utf8(url).unwrap(), expected);
+    // The editor's discussion settings' avatar, as `post-editor.tsv` has it.
+    let forced = forced_avatar_url(&options, 96);
+    let expected = "https://secure.gravatar.com/avatar/?s=96&d=mm&f=y&r=g";
+    assert_eq!(String::from_utf8(forced).unwrap(), expected);
 }

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use hyscribe_kses::{esc_attr, esc_url, esc_url_raw};
-use hyscribe_phpser::{Value, json_decode, rawurlencode};
+use hyscribe_phpser::{Key, Value, json_decode, rawurlencode};
 use hyscribe_render::head::tag;
 
 /// What a request registers, with placeholders for its URLs and nonces.
@@ -148,6 +148,19 @@ static ALIAS: Item = Item {
     textdomain: false,
 };
 
+/// `wp-block-styles`, the script alias `enqueue_editor_block_styles_assets()`
+/// registers for its inline script, in the footer; `wp-blocks`, which it
+/// needs, is printed before by the editor's scripts.
+static BLOCK_STYLES: Item = Item {
+    src: None,
+    color_scheme: false,
+    deps: Vec::new(),
+    ver: String::new(),
+    footer: true,
+    extra: Value::Null,
+    textdomain: false,
+};
+
 /// The queue and printing state of `WP_Styles` or `WP_Scripts`.
 #[derive(Default)]
 struct Dependencies {
@@ -190,6 +203,27 @@ impl Assets {
     /// `wp_enqueue_style()` of a registered handle.
     pub fn enqueue_style(&mut self, handle: &str) {
         self.styles.queue.push(handle.to_string());
+    }
+
+    /// A style taken as printed already, as `$wp_styles->done` lists it.
+    pub fn style_done(&mut self, handle: &str) {
+        self.styles.done.push(handle.to_string());
+    }
+
+    /// `wp_add_inline_script( $handle, $script, $position )`, after what is
+    /// registered and added before.
+    pub fn add_inline_script(&mut self, handle: &str, position: &str, script: &str) {
+        let mut list = self
+            .scripts
+            .data(handle, position)
+            .and_then(Value::as_array)
+            .unwrap_or_default()
+            .to_vec();
+        list.push((
+            Key::Int(list.len() as i64),
+            Value::String(script.as_bytes().to_vec()),
+        ));
+        self.set_script_data(handle, position, Value::Array(list));
     }
 
     /// `wp_enqueue_script()` of a registered handle.
@@ -282,6 +316,7 @@ impl Dependencies {
                 let added = !self.scripts && self.extra.keys().any(|(h, _)| h == handle);
                 added.then_some(&ALIAS)
             })
+            .or_else(|| (self.scripts && handle == "wp-block-styles").then_some(&BLOCK_STYLES))
     }
 
     /// `get_data( $handle, $key )`.
@@ -403,7 +438,7 @@ impl Dependencies {
         }
     }
 
-    /// `WP_Styles::do_item()`; core's inline styles are all on aliases.
+    /// `WP_Styles::do_item()`.
     fn do_style(&mut self, urls: &dyn Urls, handle: &str, item: &Item, out: &mut Vec<u8>) -> bool {
         if self.data(handle, "conditional").is_some() {
             return false;
@@ -420,16 +455,7 @@ impl Dependencies {
             return true;
         }
         let Some(src) = &item.src else {
-            if let Some(css) = self.inline_style(urls, handle) {
-                let id = format!("{handle}-inline-css");
-                let text = format!("\n{css}\n");
-                let style = tag(
-                    b"style",
-                    &[(b"id", Some(id.as_bytes()))],
-                    Some(text.as_bytes()),
-                );
-                self.emit(out, &style);
-            }
+            self.inline_style_tag(urls, handle, out);
             return true;
         };
         if self.do_concat && self.in_default_dir(src) {
@@ -445,7 +471,22 @@ impl Dependencies {
             String::from_utf8_lossy(&href)
         );
         self.emit(out, link.as_bytes());
+        self.inline_style_tag(urls, handle, out);
         true
+    }
+
+    /// The `<style>` of `handle`'s inline styles, if it has any.
+    fn inline_style_tag(&mut self, urls: &dyn Urls, handle: &str, out: &mut Vec<u8>) {
+        if let Some(css) = self.inline_style(urls, handle) {
+            let id = format!("{handle}-inline-css");
+            let text = format!("\n{css}\n");
+            let style = tag(
+                b"style",
+                &[(b"id", Some(id.as_bytes()))],
+                Some(text.as_bytes()),
+            );
+            self.emit(out, &style);
+        }
     }
 
     /// `print_inline_style( $handle, false )`: the `after` styles, with their
@@ -573,8 +614,9 @@ impl Dependencies {
             );
             out.extend(script);
         }
-        // Core's aliases have no inline scripts.
+        // An alias prints its inline scripts alone.
         let Some(src) = &item.src else {
+            self.emit(out, &[&before[..], &after[..]].concat());
             return true;
         };
         let src = self.versioned(urls, item, src, esc_url_raw);

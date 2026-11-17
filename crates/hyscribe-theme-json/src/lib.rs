@@ -177,6 +177,22 @@ impl GlobalStyles {
         self.main_stylesheet(true)
     }
 
+    /// `wp_get_global_stylesheet( array( $kind ) )` in the admin, block
+    /// styles included: `variables`, `styles`, `presets` or `custom-css`.
+    pub fn stylesheet_of(&self, kind: &str) -> String {
+        let types = Types {
+            variables: kind == "variables",
+            styles: kind == "styles",
+            presets: kind == "presets",
+            custom_css: kind == "custom-css",
+        };
+        let options = Options {
+            blocks: true,
+            ..Options::default()
+        };
+        self.tree().stylesheet(types, &STYLESHEET_ORIGINS, options)
+    }
+
     fn main_stylesheet(&self, blocks: bool) -> String {
         let tree = self.tree();
         let variables = Types {

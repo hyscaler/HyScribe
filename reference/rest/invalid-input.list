@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Post requests for reference/rest/golden.sh (method, target, flags, body)
+# that PHP refuses for their input. Form-encoded writes whose text is not
+# valid UTF-8: wpdb's strip_invalid_text() refuses the row, so PHP answers
+# db_insert_error or db_update_error and writes nothing. An `id` of 0 or
+# less, from the body or the query, which overrides the route's: 404.
+POST	/?rest_route=/wp/v2/posts	form,restore	title=Bad&content=%3Ca+title%3D%22x%FFy%22%3Ez%3C%2Fa%3E
+POST	/?rest_route=/wp/v2/posts	form,restore	title=a%FFb&excerpt=c%C0%AFd&password=%FE
+POST	/?rest_route=/wp/v2/pages	form,restore	title=p%EDq
+POST	/?rest_route=/wp/v2/posts/1	form,restore	content=x%F5%80%80%80y
+PUT	/?rest_route=/wp/v2/posts/1	form,restore	title=x%FFy&excerpt=fine
+PATCH	/?rest_route=/wp/v2/pages/2	form,restore	content=%E2%82
+PUT	/?rest_route=/wp/v2/posts/1	json,restore	{"id":-1,"title":"Negative"}
+GET	/?rest_route=/wp/v2/posts/1&id=-1
+GET	/?rest_route=/wp/v2/pages/2&id=-2&context=edit
+DELETE	/?rest_route=/wp/v2/posts/1&id=-1	restore

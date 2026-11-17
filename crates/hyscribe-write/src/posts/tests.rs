@@ -1494,6 +1494,41 @@ async fn attachments_are_inserted_as_php_inserts_them() {
     .await;
 }
 
+/// Text that is not valid UTF-8 is refused as `wpdb::process_fields()`
+/// refuses it, its `$last_error` naming each column in the row's order.
+#[tokio::test]
+async fn invalid_text_is_refused_as_wpdb_refuses_it() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let last_error = |args: PostArgs| async {
+        match insert_rolled_back(args).await {
+            Err(Error::InvalidText(last_error)) => last_error,
+            other => panic!("{other:?}"),
+        }
+    };
+    let one = PostArgs {
+        content: b"x\xffy".to_vec(),
+        ..oracle_post("draft")
+    };
+    assert_eq!(
+        last_error(one).await,
+        "WordPress database error: Processing the value for the following field failed: \
+         post_content. The supplied value may be too long or contains invalid data."
+    );
+    let many = PostArgs {
+        title: b"a\xedb".to_vec(),
+        excerpt: b"\xc0\xaf".to_vec(),
+        password: b"\xfe".to_vec(),
+        pinged: b"\xf5\x80\x80\x80".to_vec(),
+        ..oracle_post("draft")
+    };
+    assert_eq!(
+        last_error(many).await,
+        "WordPress database error: Processing the values for the following fields failed: \
+         post_title, post_excerpt, post_password, pinged. The supplied values may be too long \
+         or contain invalid data."
+    );
+}
+
 #[tokio::test]
 async fn rare_values_are_kept_as_php_keeps_them() {
     let _one = ONE_AT_A_TIME.lock().await;
@@ -2212,7 +2247,7 @@ async fn database_errors_end_the_list_actions() {
 /// `get_default_post_to_edit( 'post', true )` and the user option the Quick
 /// Draft form keeps it in (`actions-dashboard.php`).
 async fn auto_draft(w: &mut Write<'_>, ctx: &Context) -> Result<u64> {
-    let id = get_default_post_to_edit(w, ctx).await?;
+    let id = get_default_post_to_edit(w, ctx, "post").await?;
     let key = "wp_dashboard_quick_press_last_post_id";
     let option = Value::Int(id.cast_signed());
     crate::options::update_metadata(w, Meta::User, 1, key, &option, &Value::Null).await?;
@@ -2239,7 +2274,7 @@ async fn auto_drafts_match_php() {
     check("admin-quick-press-stale", stale, again).await;
     let format = rolled_back(async |w, ctx| {
         set(w, "default_post_format", b"aside").await?;
-        get_default_post_to_edit(w, ctx).await
+        get_default_post_to_edit(w, ctx, "post").await
     })
     .await;
     assert!(unported(format));

@@ -11,7 +11,6 @@
 	/?p=1152	term-ties
 	/?p=1163	shortcode
 	/?p=1177	loading,shortcode
-	/?p=1781	oembed
 	/?p=1782	oembed,rss,shortcode,term-ties
 	/?page_id=1133	loading,shortcode
 	/?attachment_id=611	attachment-redirect
@@ -163,7 +162,6 @@ wp_attachment_pages_enabled=1	/?attachment_id=1692	attachment-pages
 	/?tag=captions-2	loading,shortcode
 	/?tag=content-2	loading,shortcode
 	/?tag=css	loading,shortcode
-	/?tag=embeds-2	oembed
 	/?tag=gallery	loading,shortcode
 	/?tag=image	loading,shortcode
 	/?tag=jetpack-2	loading,shortcode

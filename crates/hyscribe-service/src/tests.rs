@@ -8,10 +8,11 @@ const SHORT: Duration = Duration::from_millis(300);
 const LONG: Duration = Duration::from_secs(30);
 const HOME_VAR: &str = "HYSCRIBE_FAKE_SERVER_HOME";
 const IGNORE_VAR: &str = "HYSCRIBE_FAKE_SERVER_IGNORE";
+const DEAF_VAR: &str = "HYSCRIBE_FAKE_SERVER_DEAF";
 
 /// When started by [`fake_spawn`], this test binary acts as the server:
-/// it catches signals, holds the pid file and waits. Run normally, it does
-/// nothing.
+/// it catches signals, holds the pid file, says it listens (unless
+/// [`DEAF_VAR`] is set) and waits. Run normally, it does nothing.
 #[test]
 fn fake_server() {
     let Ok(home) = std::env::var(HOME_VAR) else {
@@ -19,6 +20,9 @@ fn fake_server() {
     };
     let mut ignore: u32 = std::env::var(IGNORE_VAR).unwrap().parse().unwrap();
     let (mut shutdown, lock) = claim(&Paths::new(home)).unwrap();
+    if std::env::var_os(DEAF_VAR).is_none() {
+        lock.listening();
+    }
     println!("ready");
     loop {
         let signal = shutdown.wait();
@@ -131,10 +135,10 @@ fn lifecycle() {
         Started::Now(pid) => pid,
         other => panic!("{other:?}"),
     };
-    assert_eq!(status(&paths).unwrap(), Status::Running(Some(pid)));
+    assert_eq!(status(&paths).unwrap(), Status::Running(pid));
     assert_eq!(
         start(&paths, &fake_spawn(home.path(), 0), LONG).unwrap(),
-        Started::Already(Some(pid))
+        Started::Already(Status::Running(pid))
     );
     wait_for_log(&paths, "ready");
 
@@ -197,7 +201,15 @@ fn hold_is_exclusive() {
     let lock = hold(&paths).unwrap();
     assert!(format!("{lock:?}").starts_with("PidLock"));
     let pid = std::process::id();
-    assert_eq!(status(&paths).unwrap(), Status::Running(Some(pid)));
+    assert_eq!(status(&paths).unwrap(), Status::Starting(Some(pid)));
+    assert!(matches!(hold(&paths), Err(Error::AlreadyRunning(Some(p))) if p == pid));
+    lock.listening();
+    lock.listening();
+    assert_eq!(
+        std::fs::read_to_string(paths.pid_file()).unwrap(),
+        format!("{pid}\nlistening\n")
+    );
+    assert_eq!(status(&paths).unwrap(), Status::Running(pid));
     assert!(matches!(hold(&paths), Err(Error::AlreadyRunning(Some(p))) if p == pid));
     drop(lock);
     wait_for_stopped(&paths);
@@ -211,14 +223,59 @@ fn hold_is_exclusive() {
 fn a_starting_server_has_no_pid_yet() {
     let home = tempfile::tempdir().unwrap();
     let paths = Paths::new(home.path());
-    let _lock = fake_lock(&paths, "");
-    assert_eq!(status(&paths).unwrap(), Status::Running(None));
+    let lock = fake_lock(&paths, "");
+    assert_eq!(status(&paths).unwrap(), Status::Starting(None));
     assert!(matches!(hold(&paths), Err(Error::AlreadyRunning(None))));
     assert!(matches!(stop(&paths, SHORT), Err(Error::Starting)));
     assert_eq!(
         start(&paths, &program("/bin/true", &[]), SHORT).unwrap(),
-        Started::Already(None)
+        Started::Already(Status::Starting(None))
     );
+    // A second line other than `listening` is still starting.
+    drop(lock);
+    let _lock = fake_lock(&paths, "7\nconnecting\n");
+    assert_eq!(status(&paths).unwrap(), Status::Starting(Some(7)));
+}
+
+/// A server that holds the lock but never listens is reported with its
+/// log and stopped, and `stop` stops one while it starts.
+#[test]
+fn a_server_that_never_listens_times_out() {
+    let home = tempfile::tempdir().unwrap();
+    let paths = Paths::new(home.path());
+    let mut deaf = fake_spawn(home.path(), 0);
+    deaf.env.push((DEAF_VAR.to_string(), "1".to_string()));
+    let err = start(&paths, &deaf, Duration::from_secs(3)).unwrap_err();
+    // The test harness prints its own lines first.
+    assert!(
+        matches!(&err, Error::Timeout { tail } if tail.last().unwrap() == "ready"),
+        "{err}"
+    );
+    let text = err.to_string();
+    assert!(
+        text.starts_with("the server was not listening in time and was stopped; last log lines:\n")
+            && text.ends_with("\n  ready"),
+        "{text}"
+    );
+    wait_for_stopped(&paths);
+
+    let mut spawned = Command::new(&deaf.program)
+        .args(&deaf.args)
+        .envs(deaf.env.iter().map(|(k, v)| (k, v)))
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + LONG;
+    while status(&paths).unwrap() != Status::Starting(Some(spawned.id())) {
+        assert!(Instant::now() < deadline, "never held the lock");
+        sleep(POLL);
+    }
+    assert_eq!(
+        start(&paths, &deaf, SHORT).unwrap(),
+        Started::Already(Status::Starting(Some(spawned.id())))
+    );
+    assert_eq!(stop(&paths, LONG).unwrap(), Stopped::Stopped(spawned.id()));
+    spawned.wait().unwrap();
 }
 
 #[test]
@@ -290,10 +347,10 @@ fn start_reports_servers_that_fail() {
     );
 
     let err = start(&paths, &program("/bin/sleep", &["30"]), SHORT).unwrap_err();
-    assert!(matches!(err, Error::Timeout));
+    assert!(matches!(&err, Error::Timeout { tail } if tail.is_empty()));
     assert_eq!(
         err.to_string(),
-        "the server did not start in time and was stopped"
+        "the server was not listening in time and was stopped"
     );
 }
 
@@ -428,15 +485,19 @@ fn rotate_reports_errors() {
 
 #[test]
 fn messages_read_well() {
-    assert_eq!(Status::Running(Some(7)).to_string(), "running (pid 7)");
-    assert_eq!(Status::Running(None).to_string(), "starting");
+    assert_eq!(Status::Running(7).to_string(), "running (pid 7)");
+    assert_eq!(Status::Starting(Some(7)).to_string(), "starting (pid 7)");
+    assert_eq!(Status::Starting(None).to_string(), "starting");
     assert_eq!(Status::Stopped.to_string(), "not running");
     assert_eq!(Started::Now(7).to_string(), "started (pid 7)");
     assert_eq!(
-        Started::Already(Some(7)).to_string(),
+        Started::Already(Status::Running(7)).to_string(),
         "already running (pid 7)"
     );
-    assert_eq!(Started::Already(None).to_string(), "already starting");
+    assert_eq!(
+        Started::Already(Status::Starting(None)).to_string(),
+        "already starting"
+    );
     assert_eq!(Stopped::NotRunning.to_string(), "not running");
     assert_eq!(Stopped::Stopped(7).to_string(), "stopped (pid 7)");
     assert_eq!(
@@ -455,7 +516,7 @@ fn messages_read_well() {
         Error::Starting.to_string(),
         Error::AlreadyRunning(None).to_string()
     );
-    let err: Box<dyn std::error::Error> = Box::new(Error::Timeout);
+    let err: Box<dyn std::error::Error> = Box::new(Error::Timeout { tail: Vec::new() });
     assert!(err.source().is_none());
     assert_eq!(format!("{:?}", listen().unwrap()), "Shutdown");
 }

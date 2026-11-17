@@ -46,6 +46,7 @@ fn run_as(
         server,
         input: &mut std::io::empty(),
         terminal: None,
+        screen: false,
         out: &mut out,
         err: &mut err,
     });
@@ -179,6 +180,7 @@ fn closed_stdout_is_an_error() {
             server: (PathBuf::from("/bin/false"), Vec::new()),
             input: &mut std::io::empty(),
             terminal: None,
+            screen: false,
             out: &mut Closed,
             err: &mut err,
         });
@@ -207,6 +209,7 @@ fn child_server_main() {
         server: (PathBuf::from("/bin/false"), Vec::new()),
         input: &mut std::io::empty(),
         terminal: None,
+        screen: false,
         out: &mut std::io::stdout(),
         err: &mut std::io::stderr(),
     });
@@ -302,17 +305,13 @@ fn service_lifecycle() {
             .starts_with(&format!("already running (pid {pid})\n"))
     );
 
-    // The server's first line reaches the log once it is up.
+    // `service start` returns once the server listens, its lines logged.
     let running = format!(
         "hyscribe {} running (pid {pid}) in shadow (read only) mode, listening on http://127.0.0.1:{}",
         env!("CARGO_PKG_VERSION"),
         site_port(home)
     );
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    while !std::fs::read_to_string(&log).unwrap().contains(&running) {
-        assert!(std::time::Instant::now() < deadline, "server never logged");
-        std::thread::sleep(hyscribe_service::POLL);
-    }
+    assert!(std::fs::read_to_string(&log).unwrap().contains(&running));
     // The default install is served from the fixture database.
     let page = http_get(site_port(home), "/?p=1");
     assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
@@ -433,6 +432,7 @@ fn a_terminal_is_asked_where_to_set_up() {
         env: &env,
         euid: USER,
         server: &server,
+        screen: false,
     };
     let tty = pty();
     let ask = |answers: &str, tty: Option<std::os::fd::BorrowedFd<'_>>| {
@@ -491,6 +491,7 @@ fn a_terminal_is_asked_where_to_set_up() {
         env: &bogus,
         euid: USER,
         server: &server,
+        screen: false,
     };
     assert_eq!(
         server_config(&overridden, &mut term),
@@ -550,6 +551,27 @@ fn service_start_reports_a_failing_server() {
         output.err,
         "error: the server exited with code 1 while starting\n"
     );
+    // The real server's reason, from the log.
+    let mut env = site_env(home.path());
+    env.insert("DB_PORT".into(), "1".into());
+    let output = run_as(
+        &["service", "start"],
+        env,
+        home.path(),
+        USER,
+        child_server(),
+    );
+    assert_eq!(output.code, 1);
+    assert!(
+        output
+            .err
+            .starts_with("error: the server exited with code ")
+            && output
+                .err
+                .contains("\n  error: cannot connect to the database: "),
+        "{}",
+        output.err
+    );
 }
 
 #[test]
@@ -605,6 +627,7 @@ fn log_follow_reports_problems() {
         server: child_server(),
         input: &mut std::io::empty(),
         terminal: None,
+        screen: false,
         out: &mut Closed,
         err: &mut err,
     });
@@ -697,15 +720,6 @@ fn primary_mode_serves_a_login_screen() {
     };
     let started = run("start");
     assert_eq!(started.code, 0, "{}", started.err);
-    let log = home.join("logs/hyscribe.log");
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    while !std::fs::read_to_string(&log)
-        .unwrap_or_default()
-        .contains("in primary mode")
-    {
-        assert!(std::time::Instant::now() < deadline, "server never logged");
-        std::thread::sleep(hyscribe_service::POLL);
-    }
     let page = http_get(site_port(home), "/hs-login");
     assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
     assert!(!page.contains("read only"), "{page}");
@@ -822,8 +836,13 @@ fn setup_mode_hands_over_to_the_site() {
         let args = ["service", command];
         run_as(&args, env.clone(), &home, USER, child_server())
     };
-    let setup = "Setup mode: the address to open and the one-time setup secret are in the log \
-                 (./hyscribe service log)\n";
+    let secret_file = home.join("logs/setup-secret");
+    let setup = format!(
+        "Setup mode: the address to open and the one-time setup secret are in {} until setup \
+         mode ends\n",
+        secret_file.display()
+    );
+    let setup = setup.as_str();
     let fresh = || std::fs::remove_file(home.join("logs/hyscribe.log")).unwrap();
     // Written, `.env` still loses to an environment it does not override.
     let mut bogus = env.clone();
@@ -834,12 +853,36 @@ fn setup_mode_hands_over_to_the_site() {
     logged(&home, "error: MODE is invalid: must be shadow or primary");
     std::fs::remove_file(home.join(".env")).unwrap();
     fresh();
-    // Stopped in setup mode, as any server is.
-    let started = service("start", &env);
-    assert!(started.out.ends_with(setup), "{}", started.err);
-    logged(&home, "setup secret ");
+    assert!(!secret_file.exists());
+    // Stopped in setup mode, as any server is. A terminal is shown the
+    // secret, which is in the file until the stop and never in the log. A
+    // file a killed server left does not stop it.
+    std::fs::write(&secret_file, "stale\n").unwrap();
+    let mut out = Vec::new();
+    let code = run(Context {
+        args: ["hyscribe", "service", "start"]
+            .map(OsString::from)
+            .to_vec(),
+        env: env.clone(),
+        home: home.clone(),
+        euid: USER,
+        server: child_server(),
+        input: &mut std::io::empty(),
+        terminal: None,
+        screen: true,
+        out: &mut out,
+        err: &mut std::io::sink(),
+    });
+    assert_eq!(code, 0);
+    let out = String::from_utf8(out).unwrap();
+    let open = std::fs::read_to_string(&secret_file).unwrap();
+    assert!(out.ends_with(&format!("Setup mode: {open}")), "{out}");
+    let secret = between(&open, "setup secret ", '\n');
     assert_eq!(service("stop", &env).code, 0);
-    logged(&home, "stopped on signal 15");
+    let log = logged(&home, "stopped on signal 15");
+    assert!(log.contains("setup secret in "), "{log}");
+    assert!(!log.contains(secret), "{log}");
+    assert!(!secret_file.exists());
     fresh();
 
     let started = service("start", &env);
@@ -849,6 +892,7 @@ fn setup_mode_hands_over_to_the_site() {
         &home,
         &format!("in shadow (read only) mode, listening on http://127.0.0.1:{port}"),
     );
+    assert!(!secret_file.exists());
     let page = http_get(port, "/?p=1");
     assert!(page.contains("Hello world!"), "{page}");
     assert_eq!(service("stop", &env).code, 0);
@@ -857,11 +901,13 @@ fn setup_mode_hands_over_to_the_site() {
 /// Answers setup mode's pages in `home`, listening on `port`, for the site
 /// in `wordpress`.
 fn through_the_wizard(home: &std::path::Path, port: u16, wordpress: &std::path::Path) {
-    let secret = format!(
-        "Open http://127.0.0.1:{port}/installation/step-1 and enter the one-time setup secret "
-    );
-    let log = logged(home, &secret);
-    let secret = between(&log, &secret, '\n');
+    let open = std::fs::read_to_string(home.join("logs/setup-secret")).unwrap();
+    let secret = open
+        .strip_prefix(&format!(
+            "Open http://127.0.0.1:{port}/installation/step-1 and enter the one-time setup secret "
+        ))
+        .unwrap()
+        .trim_end();
     let page = http_get(port, "/installation/step-1");
     assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
     let token = between(&page, "name=\"_csrf\" value=\"", '"');

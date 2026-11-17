@@ -17,6 +17,10 @@ The wizard reads an existing site's wp-config.php and writes .env. It
 also runs in the terminal (./hyscribe setup), or copy .env.example to
 .env, chmod 600 it and fill in the database.
 
+The docs folder explains installing, configuration, the service,
+switching a site over and back, backups, upgrades and security; start
+with docs/README.md.
+
 HyScribe refuses to run as root. By default it listens on 127.0.0.1:8080
 and runs in shadow mode (read only).
 

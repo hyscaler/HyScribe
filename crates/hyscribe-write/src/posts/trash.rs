@@ -95,8 +95,12 @@ async fn reset_front_page(write: &mut Write<'_>, id: u64, kind: Kind) -> Result<
     unstick_post(write, id).await
 }
 
-/// `wp_trash_post( $id )`: whether the post went to the trash.
+/// `wp_trash_post( $id )`: whether the post went to the trash, or with
+/// `EMPTY_TRASH_DAYS` at 0 was deleted.
 pub async fn wp_trash_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Result<bool> {
+    if ctx.constants.empty_trash_days == 0 {
+        return Box::pin(wp_delete_post(write, ctx, id, true)).await;
+    }
     let Some(post) = write.post(id).await? else {
         return Ok(false);
     };
@@ -215,7 +219,7 @@ async fn delete_one(
         hooks::update_has_published_posts(write).await?;
     }
     write.delete_post(id).await?;
-    cron::clear(write, "publish_future_post", id).await?;
+    cron::wp_clear_scheduled_hook(write, "publish_future_post", id).await?;
     Ok(revisions)
 }
 

@@ -4,7 +4,11 @@
 //! as asked, normally the CPU count, each running one job at a time, and a
 //! queue of at most `queue` waiting jobs, so the memory in use stays the
 //! workers' count times one job's budget. A request's thread hands its job
-//! over and waits for the answer; it never resizes itself.
+//! over and waits for the answer; it never resizes itself. A job that
+//! panics ends only its own run, so no build may abort on a panic.
+
+#[cfg(panic = "abort")]
+compile_error!("the image pool catches a decoder's panic: build with panic = \"unwind\"");
 
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
@@ -48,7 +52,7 @@ impl Pool {
 }
 
 /// A worker: the next waiting job, run, until the pool is gone. A job that
-/// panics ends only its own run.
+/// panics ends only its own run; a stack overflow still aborts the process.
 fn work(waiting: &Mutex<Receiver<Job>>) {
     while let Ok(Ok(job)) = waiting.lock().map(|waiting| waiting.recv()) {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));

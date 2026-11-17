@@ -4,7 +4,7 @@
 //! only.
 
 use hyscribe_model::{Comment, CommentOrder, CommentQuery, CommentRow, Post};
-use hyscribe_phpser::{Key, Value, add_query_arg};
+use hyscribe_phpser::{Key, Value, add_query_arg, hash_equals};
 use hyscribe_render::date::{Zone, format_unix, stored_unix};
 use hyscribe_render::{front_comment_text, user_name};
 
@@ -255,7 +255,7 @@ fn can_access_password(context: &Context, params: &Params, post: &Post) -> bool 
         return true;
     }
     let password = params.text("password");
-    !Value::String(password.clone()).is_empty() && password == post.password
+    !Value::String(password.clone()).is_empty() && hash_equals(&post.password, &password)
 }
 
 /// `WP_REST_Posts_Controller::check_read_permission()`.

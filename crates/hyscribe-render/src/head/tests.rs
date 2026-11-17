@@ -363,6 +363,41 @@ fn inline_budget_is_inclusive() {
     assert_eq!(queue.iter().filter(|style| style.src.is_some()).count(), 1);
 }
 
+/// The theme's checkmark list style follows the list block's stylesheet,
+/// as PHP prints it on the Theme Test Data's pages with lists.
+#[test]
+fn block_style_css_follows_its_block_stylesheet() {
+    let theme = crate::theme::twentytwentyfive();
+    let assets = Assets {
+        styles: vec!["wp-block-list".into()],
+        ..Assets::default()
+    };
+    let head = wp_head(&theme, &oracle_site(), &Request::default(), &assets, b"T");
+    let php = "<style id=\"wp-block-list-inline-css\">\nol,ul{box-sizing:border-box}:root :where(.wp-block-list.has-background){padding:1.25em 2.375em}\n\n\t\t\t\tul.is-style-checkmark-list {\n\t\t\t\t\tlist-style-type: \"\\2713\";\n\t\t\t\t}\n\n\t\t\t\tul.is-style-checkmark-list li {\n\t\t\t\t\tpadding-inline-start: 1ch;\n\t\t\t\t}\n/*# sourceURL=wp-block-list-inline-css */\n</style>\n";
+    assert!(String::from_utf8(head).unwrap().contains(php));
+}
+
+/// A stylesheet left out of the inline budget links from the site's
+/// address when registered by its path, as `WP_Styles::_css_href()` does
+/// for the block library's common styles on the Theme Test Data's pages.
+#[test]
+fn stylesheet_paths_link_from_the_site() {
+    let link = |src| {
+        let style = Style::file("a", src, "", Some("1"));
+        String::from_utf8(style.print("http://example.test")).unwrap()
+    };
+    let html =
+        |href| format!("<link rel='stylesheet' id='a-css' href='{href}?ver=1' media='all' />\n");
+    assert_eq!(link("/a.css"), html("http://example.test/a.css"));
+    for src in [
+        "http://cdn.test/a.css",
+        "https://cdn.test/a.css",
+        "//cdn.test/a.css",
+    ] {
+        assert_eq!(link(src), html(src));
+    }
+}
+
 /// PHP's robots tag through its title for `path`, from
 /// `reference/loader/golden.sh`.
 fn loader_head(path: &str) -> String {
@@ -562,10 +597,10 @@ fn script_module_data_needs_the_interactivity_api() {
 #[test]
 fn the_admin_import_map() {
     let worker = "@wordpress/vips/worker".to_string();
-    let map = admin_import_map("http://h", &[worker.clone(), "x".into(), worker]);
+    let map = admin_script_modules("http://h", &[worker.clone(), "x".into(), worker], &[]);
     let map = String::from_utf8(map).unwrap();
     assert_eq!(map.matches("vips/worker").count(), 2, "{map}");
-    assert!(admin_import_map("http://h", &["x".into()]).is_empty());
+    assert!(admin_script_modules("http://h", &["x".into()], &[]).is_empty());
 }
 
 /// A module classic scripts import and one it imports are listed once.
@@ -575,14 +610,29 @@ fn the_admin_import_map_follows_imports() {
         "@wordpress/block-editor/utils/fit-text-frontend".to_string(),
         "@wordpress/interactivity".into(),
     ];
-    let one = String::from_utf8(admin_import_map("http://h", &ids[..1])).unwrap();
-    let both = String::from_utf8(admin_import_map("http://h", &ids)).unwrap();
+    let one = String::from_utf8(admin_script_modules("http://h", &ids[..1], &[])).unwrap();
+    let both = String::from_utf8(admin_script_modules("http://h", &ids, &[])).unwrap();
     assert_eq!(one, both);
     assert_eq!(
         one.matches("@wordpress/interactivity\"").count(),
         1,
         "{one}"
     );
+}
+
+/// An enqueued module prints after the import map, which holds what it
+/// imports, as the block editor's footer has the LaTeX loader; one the
+/// registry lacks prints nothing.
+#[test]
+fn the_admin_prints_enqueued_modules() {
+    let queue = [
+        "@wordpress/latex-to-mathml/loader".to_string(),
+        "nope".to_string(),
+    ];
+    let printed = String::from_utf8(admin_script_modules("http://h", &[], &queue)).unwrap();
+    let id = "id=\"@wordpress/latex-to-mathml/loader-js-module\"";
+    assert_eq!(printed.matches(id).count(), 1, "{printed}");
+    assert!(!printed.contains("nope"), "{printed}");
 }
 
 /// The admin's font faces: the theme's, then every style variation's, as

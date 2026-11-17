@@ -3,9 +3,11 @@
 //! Setup mode, the browser wizard (docs/SETUP_WIZARD.md): with no `.env`,
 //! `start` serves only these pages until `.env` is written. A stranger who
 //! reaches a fresh install cannot claim it: the pages need the one-time
-//! secret printed at start and then the session cookie it gives, every form
+//! secret given at start and then the session cookie it gives, every form
 //! carries a token of that session, and setup mode stops after
 //! [`SETUP_TIMEOUT`]. Answers stay on the server; no password is sent back.
+//! The secret goes to the terminal, or to its own file under `logs/` that
+//! setup mode deletes when it ends, never to the log.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -23,9 +25,7 @@ use hyscribe_config::{Server, wpconfig};
 use hyscribe_phpser::{hash_equals, urldecode};
 use tokio::sync::{Mutex, Notify, oneshot};
 
-use super::{
-    Choices, Content, Found, checked, from_file, from_text, manual, questions, uploads, write_env,
-};
+use super::{Choices, Content, Found, checked, from_file, from_text, manual, questions, write_env};
 use crate::failed;
 
 /// How long setup mode waits for `.env` before it stops.
@@ -68,15 +68,24 @@ pub(crate) enum Ended {
     Stopped(i32),
 }
 
+/// Where setup mode gives the secret, and what it calls once it listens.
+pub(crate) struct Start<'a> {
+    /// The file the secret goes to, `None` for `out`, a terminal.
+    pub secret_file: Option<&'a Path>,
+    /// Called once the wizard listens.
+    pub listening: &'a dyn Fn(),
+}
+
 /// Serves the wizard for the installation in `home` on the address `env`
 /// sets, until `.env` is written, `stopped` gives a signal or `timeout`
-/// passes. The address and secret go to `out`.
+/// passes. The address goes to `out`, and the secret as `start` says.
 pub(crate) async fn setup_mode(
     home: &Path,
     env: &HashMap<String, String>,
     out: &mut dyn Write,
     stopped: &mut oneshot::Receiver<i32>,
     timeout: Duration,
+    start: &Start<'_>,
 ) -> Result<Ended, String> {
     // One draw from the kernel, cut into the secret and the tokens.
     let (server, drawn) = hyscribe_config::server(env)
@@ -100,13 +109,22 @@ pub(crate) async fn setup_mode(
         .await
         .map_err(failed(format!("cannot listen on {address}")))?;
     let minutes = timeout.as_secs() / 60;
+    let open = format!("Open http://{address}{STEP_1} and enter the one-time setup secret");
+    // The file is removed when setup mode ends, however it ends.
+    let (_kept, given) = match start.secret_file {
+        Some(path) => (
+            Some(SecretFile::write(path, &format!("{open} {secret}\n"))?),
+            format!("{open} in {}", path.display()),
+        ),
+        None => (None, format!("{open} {secret}")),
+    };
     // Log lines are best effort, as the site's are.
     let _ = writeln!(
         out,
-        "No .env: setup mode. Open http://{address}{STEP_1} and enter the one-time \
-         setup secret {secret}\nSetup mode stops in {minutes} minutes unless setup finishes."
+        "No .env: setup mode. {given}\nSetup mode stops in {minutes} minutes unless setup finishes."
     );
     let _ = out.flush();
+    (start.listening)();
     let shared = Arc::new(Shared {
         wizard: Mutex::new(Wizard {
             home: home.to_path_buf(),
@@ -136,6 +154,38 @@ pub(crate) async fn setup_mode(
     let _ = stop.send(());
     let _ = serving.await;
     ended
+}
+
+/// The secret's own file, readable by its owner only, deleted on drop.
+struct SecretFile<'a>(&'a Path);
+
+impl<'a> SecretFile<'a> {
+    fn write(path: &'a Path, text: &str) -> Result<SecretFile<'a>, String> {
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        let parent = path.parent().unwrap_or(Path::new("."));
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(parent)
+            .and_then(|()| {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(path)
+            })
+            .and_then(|mut file| {
+                let kept = SecretFile(path);
+                file.write_all(text.as_bytes()).map(|()| kept)
+            })
+            .map_err(failed(format!("cannot write {}", path.display())))
+    }
+}
+
+impl Drop for SecretFile<'_> {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(self.0);
+    }
 }
 
 struct Shared {
@@ -428,8 +478,8 @@ fn expired(back: &str) -> Response {
 fn secret_page(wizard: &Wizard, status: StatusCode, error: &str) -> Response {
     let token = &wizard.tokens.form;
     let body = format!(
-        "{}<p>Enter the one-time setup secret HyScribe printed when it started, in the terminal \
-         or in <code>logs/hyscribe.log</code>.</p>\n\
+        "{}<p>Enter the one-time setup secret HyScribe gave when it started, in the terminal \
+         or in <code>logs/setup-secret</code>.</p>\n\
          <form method=\"post\" action=\"{STEP_1}\">\n{}{}<p><button>Continue</button></p>\n</form>\n",
         notice(error),
         hidden(token),
@@ -532,7 +582,7 @@ fn details_page(
         input(
             "UPLOADS_DIR",
             "The site's uploads folder (empty for hyscribe/uploads)",
-            &value("UPLOADS_DIR", &uploads(content.as_deref())),
+            &value("UPLOADS_DIR", &found.uploads(content.as_deref())),
             false
         ),
     );

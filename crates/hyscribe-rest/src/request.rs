@@ -9,7 +9,7 @@ use hyscribe_phpser::{Key, Value, absint, is_empty_string, php_trim, urldecode};
 use hyscribe_render::formatting::sanitize_text_field;
 
 use crate::Context;
-use crate::response::{RestError, object, text};
+use crate::response::{NOT_PORTED, RestError, object, text};
 use crate::schema::{Checked, Refusal, sanitize_value_from_schema, validate_value_from_schema};
 
 /// The parameters by where they come from.
@@ -107,6 +107,12 @@ pub(crate) enum Sanitize {
     /// The endpoint's own sanitizer, which reads the other parameters as
     /// they were before sanitizing.
     Params(fn(&Params, &Value) -> Checked<Value>),
+    /// A `validate_callback` returning false (`Invalid parameter.`) or the
+    /// value its `sanitize_callback` gives, reading the site.
+    Callback(fn(&Context, &Value) -> Option<Value>),
+    /// A `validate_callback` reading the site and the request, whose
+    /// error is the parameter's, then `rest_sanitize_request_arg()`.
+    Validated(fn(&Context, &Params, &Value) -> Result<(), RestError>),
 }
 
 /// A route's argument: its schema, whether `rest_validate_request_arg()`
@@ -132,9 +138,16 @@ pub(crate) fn defaults(args: &[Arg]) -> Vec<(Key, Value)> {
         .collect()
 }
 
-/// The invalid parameters and the errors each gives.
+/// The invalid parameters and the errors each gives, none for a
+/// `validate_callback` that returned false.
 #[derive(Default)]
-struct Invalid(Vec<(String, RestError)>);
+struct Invalid(Vec<(String, Option<RestError>)>);
+
+/// `rest_invalid_param` for `name`, as a `validate_callback` returning
+/// false gives it.
+pub(crate) fn invalid_param(name: &str) -> RestError {
+    Invalid(vec![(name.into(), None)]).error()
+}
 
 impl Invalid {
     /// `rest_invalid_param` of them all, if any.
@@ -142,26 +155,37 @@ impl Invalid {
         if self.0.is_empty() {
             return Ok(());
         }
+        Err(self.error())
+    }
+
+    /// `rest_invalid_param` of them all.
+    fn error(self) -> RestError {
         let key = |name: &str| Key::String(name.as_bytes().to_vec());
         let names: Vec<&str> = self.0.iter().map(|(name, _)| name.as_str()).collect();
+        let message = |error: &Option<RestError>| {
+            error
+                .as_ref()
+                .map_or("Invalid parameter.".into(), |error| error.message.clone())
+        };
         let params = self
             .0
             .iter()
-            .map(|(name, error)| (key(name), text(error.message.clone())))
+            .map(|(name, error)| (key(name), text(message(error))))
             .collect();
         let details = self
             .0
             .iter()
-            .map(|(name, error)| {
+            .filter_map(|(name, error)| {
+                let error = error.as_ref()?;
                 let detail = object([
                     ("code", text(error.code)),
                     ("message", text(error.message.clone())),
                     ("data", error.data.clone()),
                 ]);
-                (key(name), detail)
+                Some((key(name), detail))
             })
             .collect();
-        Err(RestError {
+        RestError {
             code: "rest_invalid_param",
             message: format!("Invalid parameter(s): {}", names.join(", ")),
             data: object([
@@ -169,7 +193,7 @@ impl Invalid {
                 ("params", Value::Array(params)),
                 ("details", Value::Array(details)),
             ]),
-        })
+        }
     }
 }
 
@@ -178,13 +202,21 @@ impl Invalid {
 /// its error.
 fn refused<T>(result: Result<T, Refusal>, name: &str, invalid: &mut Invalid) -> Option<T> {
     result
-        .map_err(|Refusal(error)| invalid.0.extend(error.map(|error| (name.into(), error))))
+        .map_err(|Refusal(error)| {
+            invalid
+                .0
+                .extend(error.map(|error| (name.into(), Some(error))))
+        })
         .ok()
 }
 
 /// `has_valid_params()`: every required argument is set, and each one set
-/// and validated checks out.
-pub(crate) fn has_valid_params(params: &Params, args: &[Arg]) -> Result<(), RestError> {
+/// and validated checks out; a callback's error that is not ported stops it.
+pub(crate) fn has_valid_params(
+    context: &Context,
+    params: &Params,
+    args: &[Arg],
+) -> Result<(), RestError> {
     let missing: Vec<&str> = args
         .iter()
         .filter(|arg| arg.schema.get_str("required") == Some(&Value::Bool(true)))
@@ -205,10 +237,16 @@ pub(crate) fn has_valid_params(params: &Params, args: &[Arg]) -> Result<(), Rest
     let mut invalid = Invalid::default();
     let set = args
         .iter()
-        .filter(|arg| arg.validate)
         .filter_map(|arg| params.get(arg.name).map(|value| (arg, value)));
     for (arg, value) in set {
-        let checked = validate_value_from_schema(value, &arg.schema, arg.name);
+        let checked = match arg.sanitize {
+            Sanitize::Validated(check) => match check(context, params, value) {
+                Err(error) if error.code == NOT_PORTED => return Err(error),
+                checked => checked.map_err(|error| Refusal(Some(error))),
+            },
+            _ if arg.validate => validate_value_from_schema(value, &arg.schema, arg.name),
+            _ => continue,
+        };
         refused(checked, arg.name, &mut invalid);
     }
     invalid.check()
@@ -251,7 +289,16 @@ pub(crate) fn sanitize_params(
                     validate_value_from_schema(value, &arg.schema, arg.name)
                         .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name))
                 }
-                Sanitize::Value => sanitize_value_from_schema(value, &arg.schema, arg.name),
+                Sanitize::Value | Sanitize::Validated(_) => {
+                    sanitize_value_from_schema(value, &arg.schema, arg.name)
+                }
+                Sanitize::Callback(check) => {
+                    let checked = check(context, value);
+                    if checked.is_none() {
+                        invalid.0.push((arg.name.into(), None));
+                    }
+                    checked.ok_or(Refusal(None))
+                }
             };
             if let Some(sanitized) = refused(sanitized, arg.name, &mut invalid) {
                 *value = sanitized;

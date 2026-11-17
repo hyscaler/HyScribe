@@ -36,6 +36,7 @@ fn defaults_are_safe() {
             database: Database {
                 host: "localhost".into(),
                 port: 3306,
+                socket: None,
                 name: "wordpress".into(),
                 user: "wp".into(),
                 password: Secret::new(""),
@@ -55,6 +56,7 @@ fn defaults_are_safe() {
             site_url: None,
             salts: Vec::new(),
             rest_public_users: true,
+            http_outbound: false,
             constants: Constants {
                 disallow_unfiltered_html: true,
                 allow_unfiltered_uploads: false,
@@ -65,8 +67,32 @@ fn defaults_are_safe() {
                 account: 10,
                 window: 900,
             },
+            disable_wp_cron: false,
+            alternate_wp_cron: false,
+            upload_max_size: 64 << 20,
         }
     );
+}
+
+/// The cron constants read as every yes or no key, false by default.
+#[test]
+fn reads_the_cron_constants() {
+    let cron = |pairs: &[(&str, &str)]| {
+        let config = from_map(&with(pairs))?;
+        Ok::<_, ConfigError>((config.disable_wp_cron, config.alternate_wp_cron))
+    };
+    let set = [("DISABLE_WP_CRON", "TRUE"), ("ALTERNATE_WP_CRON", "1")];
+    assert_eq!(cron(&set).unwrap(), (true, true));
+    let words = [("DISABLE_WP_CRON", "yes"), ("ALTERNATE_WP_CRON", "On")];
+    assert_eq!(cron(&words).unwrap(), (true, true));
+    let unset = [("DISABLE_WP_CRON", "0"), ("ALTERNATE_WP_CRON", "")];
+    assert_eq!(cron(&unset).unwrap(), (false, false));
+    for key in ["DISABLE_WP_CRON", "ALTERNATE_WP_CRON"] {
+        assert_eq!(
+            cron(&[(key, "maybe")]).unwrap_err().to_string(),
+            format!("{key} is invalid: must be true or false")
+        );
+    }
 }
 
 /// The capability constants as `define()` gives them, the safer value when
@@ -105,14 +131,14 @@ fn reads_the_capability_constants() {
         "DISALLOW_UNFILTERED_HTML",
         "ALLOW_UNFILTERED_UPLOADS",
     ] {
-        for value in ["yes", "no", "2", "'true'", " true"] {
+        for value in ["y", "2", "'true'", " true"] {
             assert_eq!(
                 constants(&[(key, value)]).unwrap_err().to_string(),
                 format!("{key} is invalid: must be true or false")
             );
         }
     }
-    for value in ["true", "TRUE", "1"] {
+    for value in ["true", "TRUE", "1", "Yes", "on"] {
         assert_eq!(
             constants(&[("MULTISITE", value)]).unwrap_err().to_string(),
             "MULTISITE is invalid: multisite networks are not supported"
@@ -140,10 +166,12 @@ fn reads_every_key() {
         ("AUTH_KEY", "a"),
         ("NONCE_SALT", "z"),
         ("REST_PUBLIC_USERS", "off"),
+        ("HTTP_OUTBOUND", "on"),
         ("EMPTY_TRASH_DAYS", "0"),
         ("LOGIN_LIMIT_ADDRESS", "1"),
         ("LOGIN_LIMIT_ACCOUNT", "1000"),
         ("LOGIN_LIMIT_WINDOW", "86400"),
+        ("UPLOAD_MAX_SIZE", "512k"),
     ]))
     .unwrap();
     assert_eq!(config.database.host, "db.internal");
@@ -171,6 +199,7 @@ fn reads_every_key() {
         ]
     );
     assert!(!config.rest_public_users);
+    assert!(config.http_outbound);
     assert_eq!(config.constants.empty_trash_days, 0);
     assert_eq!(server(&with(&[("PORT", "80")])).map(|s| s.port), Ok(80));
     let limits = LoginLimits {
@@ -179,8 +208,85 @@ fn reads_every_key() {
         window: 86_400,
     };
     assert_eq!(config.login_limits, limits);
-    let on = from_map(&with(&[("REST_PUBLIC_USERS", "on")])).unwrap();
+    assert_eq!(config.upload_max_size, 512 << 10);
+    let on = from_map(&with(&[
+        ("REST_PUBLIC_USERS", "on"),
+        ("HTTP_OUTBOUND", "off"),
+    ]))
+    .unwrap();
     assert!(on.rest_public_users);
+    assert!(!on.http_outbound);
+}
+
+/// A socket as `wp-config.php` gives one in `DB_HOST`, only for `localhost`.
+#[test]
+fn reads_a_socket_host() {
+    let database = |host| from_map(&with(&[("DB_HOST", host), ("DB_PORT", "3307")]));
+    let socket = database("localhost:/run/mysqld/mysqld.sock").unwrap();
+    assert_eq!(socket.database.host, "localhost");
+    assert_eq!(
+        socket.database.socket.as_deref(),
+        Some(Path::new("/run/mysqld/mysqld.sock"))
+    );
+    assert_eq!(
+        socket.database.address(),
+        "localhost:/run/mysqld/mysqld.sock"
+    );
+    let tcp = database("db.internal").unwrap();
+    assert_eq!(tcp.database.socket, None);
+    assert_eq!(tcp.database.address(), "db.internal:3307");
+    for host in ["127.0.0.1:/run/mysqld/mysqld.sock", ":/tmp/mysql.sock"] {
+        assert_eq!(
+            database(host).unwrap_err().to_string(),
+            "DB_HOST is invalid: a socket is given as localhost:/path/to/socket"
+        );
+    }
+}
+
+/// `UPLOAD_MAX_SIZE` in bytes or PHP's shorthand, and nothing else.
+#[test]
+fn reads_upload_sizes() {
+    let size = |value| from_map(&with(&[("UPLOAD_MAX_SIZE", value)])).map(|c| c.upload_max_size);
+    for (value, bytes) in [
+        ("1", 1),
+        ("2097152", 2 << 20),
+        ("1K", 1 << 10),
+        ("64M", 64 << 20),
+        ("64m", 64 << 20),
+        ("2G", 2 << 30),
+        ("2g", 2 << 30),
+        ("3k", 3 << 10),
+        ("8589934591G", 8_589_934_591 << 30),
+        ("9223372036854775807", i64::MAX.unsigned_abs()),
+    ] {
+        assert_eq!(size(value), Ok(bytes), "{value}");
+    }
+    for value in [
+        "0",
+        "0M",
+        "M",
+        "64 M",
+        "64MB",
+        "-1",
+        "+1",
+        "1.5M",
+        "64T",
+        "8589934592G",
+        "17179869184G",
+        "1k1",
+        "9223372036854775808",
+        "18446744073709551616",
+        "99999999999999999999",
+        " 64M",
+        "64M ",
+        "\u{ff11}M",
+    ] {
+        assert_eq!(
+            size(value).unwrap_err().to_string(),
+            "UPLOAD_MAX_SIZE is invalid: must be a size in bytes, or with a K, M or G suffix, such as 64M",
+            "{value}"
+        );
+    }
 }
 
 #[test]
@@ -204,7 +310,8 @@ fn rejects_bad_values() {
         ("BEHIND_PROXY", "maybe", "must be true or false"),
         ("DB_READ_PASSWORD", "hunter3", "is set without DB_READ_USER"),
         ("MODE", "write", "must be shadow or primary"),
-        ("REST_PUBLIC_USERS", "true", "must be on or off"),
+        ("REST_PUBLIC_USERS", "public", "must be true or false"),
+        ("HTTP_OUTBOUND", "enabled", "must be true or false"),
         (
             "EMPTY_TRASH_DAYS",
             "-1",
@@ -246,8 +353,41 @@ fn rejects_bad_values() {
         from_map(&map(&[("DB_NAME", "wordpress")])),
         Err(ConfigError::Missing("DB_USER"))
     );
-    for value in ["false", "0", "no", "1", "yes"] {
-        assert!(from_map(&with(&[("BEHIND_PROXY", value)])).is_ok());
+}
+
+/// Every yes or no key reads the same words, in any case, through one
+/// parser; missing or empty is the key's default.
+#[test]
+fn every_boolean_key_takes_the_same_values() {
+    let read = |key: &str, value: &str| {
+        let config = from_map(&with(&[(key, value)]))?;
+        Ok::<_, ConfigError>(match key {
+            "BEHIND_PROXY" => config.server.behind_proxy,
+            "REST_PUBLIC_USERS" => config.rest_public_users,
+            "HTTP_OUTBOUND" => config.http_outbound,
+            "DISALLOW_UNFILTERED_HTML" => config.constants.disallow_unfiltered_html,
+            _ => config.constants.allow_unfiltered_uploads,
+        })
+    };
+    let keys = [
+        ("BEHIND_PROXY", false),
+        ("REST_PUBLIC_USERS", true),
+        ("HTTP_OUTBOUND", false),
+        ("DISALLOW_UNFILTERED_HTML", true),
+        ("ALLOW_UNFILTERED_UPLOADS", false),
+    ];
+    for (key, default) in keys {
+        for value in ["true", "TRUE", "yes", "Yes", "on", "ON", "1"] {
+            assert_eq!(read(key, value), Ok(true), "{key}={value}");
+        }
+        for value in ["false", "False", "no", "NO", "off", "Off", "0"] {
+            assert_eq!(read(key, value), Ok(false), "{key}={value}");
+        }
+        assert_eq!(read(key, ""), Ok(default), "{key}");
+        assert_eq!(
+            read(key, "maybe").unwrap_err().to_string(),
+            format!("{key} is invalid: must be true or false")
+        );
     }
 }
 

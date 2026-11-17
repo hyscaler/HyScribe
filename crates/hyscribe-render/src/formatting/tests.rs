@@ -603,3 +603,44 @@ fn whitespace_normalizes_as_php() {
     assert_eq!(normalize_whitespace(b"a\n\tb"), b"a\n b");
     assert_eq!(normalize_whitespace(b"a  \n\nb"), b"a \nb");
 }
+
+/// `html_entity_decode()` leaves references to controls but tab and line
+/// ends as written, as `reference/url-details/parse-golden.php` shows, and
+/// a single quote's under `ENT_COMPAT` only.
+#[test]
+fn entity_decoding_leaves_controls_and_quotes_as_php_does() {
+    let text = b"&#1;&#9;&#10;&#13;&#31;&#32;&#126;&#127;&#159;&#160;&#39;&#x27;&quot;";
+    let kept = "&#1;\t\n\r&#31; ~&#127;&#159;\u{a0}";
+    assert_eq!(
+        String::from_utf8(html_entity_decode(text)).unwrap(),
+        format!("{kept}&#39;&#x27;\"")
+    );
+    assert_eq!(
+        String::from_utf8(html_entity_decode_quotes(text)).unwrap(),
+        format!("{kept}''\"")
+    );
+}
+
+/// Entity decoding is linear: a reference is read only up to its first
+/// byte that is neither a letter, a digit nor `#`, so a megabyte with no
+/// `;` decodes at once, where reading to the next `;` took minutes.
+#[test]
+fn entity_decoding_is_linear() {
+    let started = std::time::Instant::now();
+    let size = 1 << 20;
+    for text in [
+        b"a".repeat(size),
+        b"&".repeat(size),
+        b"&a".repeat(size / 2),
+        b"&#1".repeat(size / 3),
+    ] {
+        assert_eq!(html_entity_decode(&text), text);
+        assert_eq!(html_entity_decode_quotes(&text), text);
+        assert_eq!(ent2ncr(&text), text);
+    }
+    assert!(started.elapsed().as_secs() < 10, "{:?}", started.elapsed());
+    // A reference ends at its `;`; another byte before it leaves it as is.
+    let decoded = html_entity_decode(b"&amp;&am p;&a#mp;&#65;&#x;&");
+    assert_eq!(decoded, b"&&am p;&a#mp;A&#x;&");
+    assert_eq!(ent2ncr(b"&nbsp;x&nbsp"), b"&#160;x&nbsp");
+}

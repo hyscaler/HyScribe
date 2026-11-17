@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use super::*;
+use crate::tests::{SAVES, saves_with};
 use hyscribe_config::{Constants, Secret};
 use std::io::Cursor;
 use std::os::unix::fs::PermissionsExt;
@@ -270,6 +271,65 @@ fn literal_content_dirs_are_used() {
     assert!(!ran.out.contains("Warning"), "{}", ran.out);
 }
 
+/// `wp_config( extra )` with the fixture database's socket as `DB_HOST`.
+pub(crate) fn socket_wp_config(extra: &str) -> (String, PathBuf) {
+    let db = hyscribe_testkit::fixture_database();
+    let socket = hyscribe_testkit::fixture_socket();
+    let host = format!("'{}:{}'", db.host, db.port);
+    let text = wp_config(extra).replace(&host, &format!("':{}'", socket.display()));
+    (text, socket)
+}
+
+/// A socket host is copied, not asked for, and the wizard checks the
+/// database through it.
+#[test]
+fn a_socket_host_is_copied() {
+    let (text, socket) = socket_wp_config("");
+    let install = Install::new(Some(&text));
+    let ran = wizard(&install.home, DEFAULTS);
+    assert_eq!(ran.result, Ok(install.written()));
+    let connected = format!(
+        "  Connected to wordpress on localhost:{}, db_version 61833\n",
+        socket.display()
+    );
+    assert!(ran.out.ends_with(&connected), "{}", ran.out);
+    assert!(!ran.out.contains("Database host"), "{}", ran.out);
+    let database = install.config().database;
+    assert_eq!(database.host, "localhost");
+    assert_eq!(database.socket, Some(socket));
+}
+
+/// A literal `UPLOADS` gives the uploads folder in the WordPress folder,
+/// as `wp_upload_dir()` takes it; one PHP computes is noted.
+#[test]
+fn the_uploads_constant_gives_the_uploads_folder() {
+    let install = Install::new(Some(&wp_config("define( 'UPLOADS', 'files/media' );")));
+    std::fs::create_dir_all(install.site.join("files/media")).unwrap();
+    let ran = wizard(&install.home, DEFAULTS);
+    assert_eq!(ran.result, Ok(install.written()));
+    let site = install.site.display();
+    let asked = format!("(empty for hyscribe/uploads) [{site}/files/media]: ");
+    assert!(ran.out.contains(&asked), "{}", ran.out);
+    assert!(!ran.out.contains("Warning"), "{}", ran.out);
+    let uploads = install.config().uploads_dir;
+    assert_eq!(uploads, Some(install.site.join("files/media")));
+    let computed = "define( 'UPLOADS', 'wp-content/' . 'files' );";
+    let install = Install::new(Some(&wp_config(computed)));
+    let ran = wizard(&install.home, DEFAULTS);
+    for expected in [
+        "  Not a literal there, or missing: UPLOADS\n".to_string(),
+        "  UPLOADS is not a literal in a WordPress folder given, so it is not copied: \
+         give the site's uploads folder\n"
+            .into(),
+        format!(
+            "(empty for hyscribe/uploads) [{site}/wp-content/uploads]: ",
+            site = install.site.display()
+        ),
+    ] {
+        assert!(ran.out.contains(&expected), "{expected}\n{}", ran.out);
+    }
+}
+
 #[test]
 fn multisite_is_refused() {
     let install = Install::new(Some(&wp_config("define( 'MULTISITE', true );")));
@@ -365,40 +425,6 @@ fn unreachable_databases_are_reported() {
     let install = Install::new(Some(&config));
     let err = wizard(&install.home, DEFAULTS).result.unwrap_err();
     assert!(err.starts_with("cannot read db_version: "), "{err}");
-}
-
-/// `wordpress_saves`, the scratch database, is changed one test at a time.
-static SAVES: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// Loads the default install into `wordpress_saves` and runs `statements`.
-fn saves_with(statements: &[String]) {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    runtime.block_on(async {
-        use sqlx::Connection as _;
-        let db = hyscribe_config::Database {
-            name: "wordpress_saves".into(),
-            ..hyscribe_testkit::fixture_database()
-        };
-        hyscribe_testkit::writes::load_default_install(&db)
-            .await
-            .unwrap();
-        let options = sqlx::mysql::MySqlConnectOptions::new()
-            .host(&db.host)
-            .port(db.port)
-            .database(&db.name)
-            .username(&db.user)
-            .password(db.password.expose());
-        let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
-        for statement in statements {
-            sqlx::raw_sql(sqlx::AssertSqlSafe(statement.clone()))
-                .execute(&mut conn)
-                .await
-                .unwrap();
-        }
-    });
 }
 
 #[test]

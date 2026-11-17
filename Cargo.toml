@@ -17,10 +17,12 @@ hyscribe-assets = { path = "crates/hyscribe-assets" }
 hyscribe-auth = { path = "crates/hyscribe-auth" }
 hyscribe-config = { path = "crates/hyscribe-config" }
 hyscribe-db = { path = "crates/hyscribe-db" }
+hyscribe-fetch = { path = "crates/hyscribe-fetch" }
 hyscribe-html = { path = "crates/hyscribe-html" }
 hyscribe-http = { path = "crates/hyscribe-http" }
 hyscribe-image = { path = "crates/hyscribe-image" }
 hyscribe-kses = { path = "crates/hyscribe-kses" }
+hyscribe-mail = { path = "crates/hyscribe-mail" }
 hyscribe-model = { path = "crates/hyscribe-model" }
 hyscribe-service = { path = "crates/hyscribe-service" }
 hyscribe-phpser = { path = "crates/hyscribe-phpser" }
@@ -57,7 +59,8 @@ unimplemented = "deny"
 [profile.release]
 lto = true
 codegen-units = 1
-panic = "abort"
+# Unwind, so a decoder panic ends only its image job (hyscribe-image's pool).
+panic = "unwind"
 strip = true
 
 # bcrypt at cost 12 takes seconds unoptimized.

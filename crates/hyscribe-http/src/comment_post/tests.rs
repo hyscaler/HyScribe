@@ -343,14 +343,17 @@ async fn the_route_answers_as_php() {
 }
 
 /// `REMOTE_ADDR` is the connection's address, or behind a proxy the last
-/// of `X-Forwarded-For`, when it is one.
+/// entry of every `X-Forwarded-For` line, with or without a port; none,
+/// never the proxy's, where that entry names no address.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_client_is_the_proxy_s_last_hop() {
     let dir = tempfile::tempdir().unwrap();
     let (site, _) = logged_in("wordpress", dir.path()).await;
-    let asked = |forwarded: &str, peer: Option<IpAddr>| {
+    let asked = |lines: &[&[u8]], peer: Option<IpAddr>| {
         let mut headers = HeaderMap::new();
-        headers.insert("x-forwarded-for", HeaderValue::from_str(forwarded).unwrap());
+        for line in lines {
+            headers.append("x-forwarded-for", HeaderValue::from_bytes(line).unwrap());
+        }
         Asked {
             post: true,
             headers,
@@ -359,14 +362,34 @@ async fn the_client_is_the_proxy_s_last_hop() {
         }
     };
     let peer = Some([192, 0, 2, 1].into());
-    let direct = asked("198.51.100.7", peer);
+    let direct = asked(&[b"198.51.100.7"], peer);
     assert_eq!(remote_addr(&site, &direct), b"192.0.2.1");
-    assert_eq!(remote_addr(&site, &asked("", None)), b"");
+    assert_eq!(remote_addr(&site, &asked(&[], None)), b"");
     let site = Arc::try_unwrap(site).ok().unwrap().with_proxy(true);
     assert_eq!(remote_addr(&site, &direct), b"198.51.100.7");
-    let proxied = asked("203.0.113.9, 2001:db8::1 ", peer);
-    assert_eq!(remote_addr(&site, &proxied), b"2001:db8::1");
-    assert_eq!(remote_addr(&site, &asked("unknown", peer)), b"192.0.2.1");
+    assert_eq!(remote_addr(&site, &asked(&[], peer)), b"192.0.2.1");
+    let cases: [(&[&str], &str); 8] = [
+        (&["203.0.113.9, 2001:db8::1 "], "2001:db8::1"),
+        (
+            &["203.0.113.9", "198.51.100.2, 198.51.100.3"],
+            "198.51.100.3",
+        ),
+        (&["198.51.100.4:5678"], "198.51.100.4"),
+        (&["[2001:db8::2]"], "2001:db8::2"),
+        (&["x, [2001:db8::3]:443"], "2001:db8::3"),
+        (&["198.51.100.5", "unknown"], ""),
+        (&["198.51.100.6", ""], ""),
+        (&["[198.51.100.7"], ""),
+    ];
+    for (lines, client) in cases {
+        let lines: Vec<&[u8]> = lines.iter().map(|line| line.as_bytes()).collect();
+        let found = remote_addr(&site, &asked(&lines, peer));
+        assert_eq!(found, client.as_bytes(), "{lines:?}");
+    }
+    let not_text = asked(&[&b"198.51.100.8"[..], b"\xff"], peer);
+    assert_eq!(remote_addr(&site, &not_text), b"");
+    let unnamed = client_ip(&site, &asked(&[b"a, unknown "], peer).headers, peer);
+    assert_eq!(unnamed, Err(Unnamed("unknown".into())));
 }
 
 /// A content type no header can carry reads as none, and a body without a
@@ -404,6 +427,8 @@ async fn a_failed_read_is_the_database_error_page() {
         behind_proxy: false,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(crate::login::limits::Limiter::new(Default::default())),
+        install: crate::unconfigured(),
+        fetch: None,
     });
     let cookie = format!(
         "hyscribe_logged_in_{}=admin%7C9999999999%7Ctoken%7Chmac",

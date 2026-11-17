@@ -67,6 +67,14 @@ fn the_login_screen_is_php_s() {
     );
 }
 
+/// A session of user 7.
+fn seven() -> Account {
+    Account {
+        id: 7,
+        login: b"seven".to_vec(),
+    }
+}
+
 fn request<'a>(query: &'a Value, form: Option<&'a Value>, session: Session) -> Request<'a> {
     Request {
         query,
@@ -150,7 +158,7 @@ fn good_credentials_log_in() {
         (
             "redirect_to=%2Fx%22",
             "",
-            Session::User(7),
+            Session::User(seven()),
             false,
             7,
             false,
@@ -160,7 +168,7 @@ fn good_credentials_log_in() {
         (
             "",
             "log=admin&pwd=wrong",
-            Session::User(7),
+            Session::User(seven()),
             false,
             0,
             false,
@@ -170,7 +178,7 @@ fn good_credentials_log_in() {
         (
             "",
             "log=admin&pwd=",
-            Session::User(7),
+            Session::User(seven()),
             false,
             0,
             false,
@@ -218,6 +226,33 @@ fn good_credentials_log_in() {
         panic!("reauth logged in");
     };
     assert_eq!(page, unhex(reauth.rsplit('\t').next().unwrap()));
+}
+
+/// `wp_login` fires for the user the credentials or the session log in,
+/// as `wp_signon()` fires it, also where the screen then asks again.
+#[test]
+fn a_login_fires_wp_login() {
+    let oracle = Oracle::default();
+    let empty = Value::Array(Vec::new());
+    let form = parse_str(b"log=admin&pwd=reference-only-password");
+    let reauth = parse_str(b"reauth=1");
+    login(&oracle, &request(&empty, Some(&form), Session::None));
+    login(&oracle, &request(&reauth, Some(&form), Session::None));
+    login(&oracle, &request(&empty, None, Session::User(seven())));
+    let wrong = parse_str(b"log=admin&pwd=wrong");
+    login(
+        &oracle,
+        &request(&empty, Some(&wrong), Session::User(seven())),
+    );
+    assert_eq!(
+        *oracle.fired.borrow(),
+        [
+            "wp_login admin 1 admin",
+            "wp_login admin 1 admin",
+            "wp_login seven 7 seven",
+            "wp_login_failed admin [\"incorrect_password\"]",
+        ]
+    );
 }
 
 /// A site whose email lookup finds a `use_ssl` user for any address.
@@ -271,6 +306,12 @@ impl Site for AnyEmail {
     }
     fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
         self.0.site_icon(size)
+    }
+    fn wp_login_failed(&self, username: &[u8], error: &[Notice]) {
+        self.0.wp_login_failed(username, error);
+    }
+    fn wp_login(&self, user_login: &[u8], user: &Account) {
+        self.0.wp_login(user_login, user);
     }
 }
 

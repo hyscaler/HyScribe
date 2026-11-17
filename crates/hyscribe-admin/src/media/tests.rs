@@ -50,7 +50,7 @@ pub(super) fn nonces(page: &str) -> String {
     out
 }
 
-pub(super) fn sha256(text: &str) -> String {
+pub(crate) fn sha256(text: &str) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(text.as_bytes())
         .iter()
@@ -180,4 +180,33 @@ fn uploads_follow_the_device() {
     assert!(!can(b"iPhone; Mobile"));
     assert!(!can(b"iPhone; CPU OS 9_0 Mobile"));
     assert!(can(b"Macintosh; iPhone OS 5_1 like Mac OS X"));
+}
+
+/// `UPLOAD_MAX_SIZE`'s default, 64 MB, where PHP prints `wp_max_upload_size()`
+///: Add New Media's uploader, plupload's settings and the media
+/// templates.
+#[test]
+fn uploads_are_limited_to_the_configured_size() {
+    for role in ["administrator", "o31:administrator"] {
+        let (size, bytes) = match role {
+            "administrator" => ("2 MB", "2097152b"),
+            _ => ("64 MB", "67108864b"),
+        };
+        let line = format!("Maximum upload file size: {size}.");
+        let new = answer(role, "media-new.php", "");
+        assert!(new.contains(&format!("\t{line}</p>")), "{role}");
+        assert!(
+            new.contains(&format!("\"max_file_size\":\"{bytes}\"")),
+            "{role}"
+        );
+        let library = answer(role, "upload.php", "");
+        assert!(
+            library.contains(&format!("\t\t\t\t{line}\t\t\t\t</p>")),
+            "{role}"
+        );
+        assert!(
+            library.contains(&format!("\"max_file_size\":\"{bytes}\"")),
+            "{role}"
+        );
+    }
 }

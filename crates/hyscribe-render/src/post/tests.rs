@@ -231,6 +231,55 @@ fn term_archive_body_classes_match_php() {
     }
 }
 
+/// A page with a published child page is a parent, as on the Theme Test
+/// Data's page hierarchy (`reference/pages/golden.sh ttd`).
+#[test]
+fn pages_with_published_children_are_parents() {
+    struct Pages(Vec<Post>);
+    impl Site for Pages {
+        fn option(&self, _: &str) -> Option<Vec<u8>> {
+            None
+        }
+        fn home_url(&self) -> Vec<u8> {
+            Vec::new()
+        }
+        fn post(&self, _: u64) -> Option<Post> {
+            None
+        }
+        fn post_terms(&self, _: u64, _: &str) -> Vec<Term> {
+            Vec::new()
+        }
+        fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+            None
+        }
+        fn query(&self, query: &PostQuery) -> Vec<Post> {
+            crate::fixture::select(self.0.clone(), query, &|_, _| Vec::new())
+        }
+    }
+    let page = |id, parent, status: &str| Post {
+        id,
+        parent,
+        post_type: "page".into(),
+        status: status.into(),
+        ..Post::default()
+    };
+    let site = Pages(vec![
+        page(1, 0, "publish"),
+        page(2, 1, "publish"),
+        page(3, 2, "draft"),
+    ]);
+    let class = |page: &Post| {
+        let request = Request {
+            posts: vec![page.clone()],
+            singular: true,
+            ..Request::default()
+        };
+        String::from_utf8(body_class(&site, &request, "t")).unwrap()
+    };
+    assert!(class(&site.0[0]).contains(" page-id-1 page-parent "));
+    assert!(class(&site.0[1]).contains(" page-id-2 page-child parent-pageid-1 "));
+}
+
 /// The `body` cases of `reference/core-blocks/golden.sh`.
 #[test]
 fn body_classes_match_php() {

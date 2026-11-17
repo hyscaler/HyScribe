@@ -30,8 +30,8 @@ use hyscribe_write::posts::{
     wp_unique_post_slug, wp_update_post,
 };
 use hyscribe_write::terms::{
-    Deletion, Taxonomy, TermArgs, TermError, TermRef, wp_delete_term, wp_insert_term,
-    wp_set_object_terms, wp_update_term,
+    Deletion, Taxonomy, TermArgs, TermError, TermList, TermRef, wp_delete_term, wp_insert_term,
+    wp_set_object_terms, wp_set_post_terms, wp_update_term,
 };
 use hyscribe_write::users::{UserData, add_role, wp_delete_user, wp_insert_user, wp_update_user};
 use tokio::runtime::Handle;
@@ -459,6 +459,7 @@ async fn saved(write: &mut Write<'_>, save: &Save, ctx: &Context) -> Result<Outc
     let id = match saved {
         Ok(id) => id,
         Err(Error::Refused("empty_content")) => return Ok(Outcome::Refused("empty_content")),
+        Err(Error::InvalidText(last_error)) => return Ok(Outcome::InvalidText(last_error)),
         Err(err) => return Err(err),
     };
     match save.sticky {
@@ -467,11 +468,23 @@ async fn saved(write: &mut Write<'_>, save: &Save, ctx: &Context) -> Result<Outc
         None => {}
     }
     let any = Value::String(Vec::new());
-    if save.unset_thumbnail {
-        delete_metadata(write, Meta::Post, id, "_thumbnail_id", &any, false).await?;
+    match save.thumbnail {
+        Some(0) => {
+            delete_metadata(write, Meta::Post, id, "_thumbnail_id", &any, false).await?;
+        }
+        Some(image) => {
+            let image = Value::Int(image.cast_signed());
+            update_metadata(write, Meta::Post, id, "_thumbnail_id", &image, &any).await?;
+        }
+        None => {}
     }
-    if save.clear_template {
-        update_metadata(write, Meta::Post, id, "_wp_page_template", &any, &any).await?;
+    if let Some(format) = &save.format {
+        let format = TermList::Text(format);
+        wp_set_post_terms(write, id, format, Taxonomy::PostFormat, false).await?;
+    }
+    if let Some(template) = &save.template {
+        let template = Value::String(template.clone());
+        update_metadata(write, Meta::Post, id, "_wp_page_template", &template, &any).await?;
     }
     for (taxonomy, ids) in [
         (Taxonomy::Category, &save.categories),

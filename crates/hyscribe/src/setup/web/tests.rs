@@ -452,6 +452,50 @@ async fn step_3_checks_then_writes_env() {
     assert_eq!(answer.location(), STEP_1);
 }
 
+/// A socket host and a literal `UPLOADS` are copied in the browser too;
+/// pasted, `UPLOADS` has no WordPress folder to be in.
+#[tokio::test]
+async fn a_socket_host_and_uploads_are_copied() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("hyscribe");
+    let site = dir.path().join("site");
+    std::fs::create_dir(&home).unwrap();
+    std::fs::create_dir_all(site.join("files")).unwrap();
+    let (text, socket) = crate::setup::tests::socket_wp_config("define( 'UPLOADS', 'files' );");
+    std::fs::write(site.join("wp-config.php"), &text).unwrap();
+    let shared = shared(&home);
+    sign_in(&shared).await;
+    let csrf = ("_csrf", "csrf-token");
+    let pasted = [csrf, ("contents", text.as_str())];
+    ask(&shared, "POST", STEP_2, SIGNED_IN, &pasted).await;
+    let answer = ask(&shared, "GET", STEP_3, SIGNED_IN, &[]).await;
+    for shown in [
+        "  UPLOADS is not a literal in a WordPress folder given, so it is not copied: ",
+        "name=\"UPLOADS_DIR\" value=\"\"",
+    ] {
+        assert!(answer.body.contains(shown), "{shown}\n{}", answer.body);
+    }
+    let path = site.display().to_string();
+    ask(&shared, "POST", STEP_2, SIGNED_IN, &[csrf, ("path", &path)]).await;
+    let answer = ask(&shared, "GET", STEP_3, SIGNED_IN, &[]).await;
+    let uploads = format!("{path}/files");
+    let shown = format!("name=\"UPLOADS_DIR\" value=\"{uploads}\"");
+    assert!(answer.body.contains(&shown), "{}", answer.body);
+    assert!(!answer.body.contains("DB_HOST"), "{}", answer.body);
+    let accepted = [csrf, ("MODE", "shadow"), ("UPLOADS_DIR", &uploads)];
+    let answer = ask(&shared, "POST", STEP_3, SIGNED_IN, &accepted).await;
+    let connected = format!(
+        "  Connected to wordpress on localhost:{}, ",
+        socket.display()
+    );
+    assert!(answer.body.contains(&connected), "{}", answer.body);
+    let config = hyscribe_config::load(&home, &HashMap::new())
+        .unwrap()
+        .unwrap();
+    assert_eq!(config.database.socket, Some(socket));
+    assert_eq!(config.uploads_dir, Some(PathBuf::from(uploads)));
+}
+
 /// The wp-content answered is the one checked for an object cache.
 #[tokio::test]
 async fn the_wp_content_answered_is_used() {
@@ -562,6 +606,12 @@ fn free_port() -> String {
     listener.local_addr().unwrap().port().to_string()
 }
 
+/// Setup mode at a terminal: the secret goes to `out`.
+const AT_TERMINAL: Start<'static> = Start {
+    secret_file: None,
+    listening: &|| (),
+};
+
 #[tokio::test]
 async fn setup_mode_stops_on_a_signal_or_its_timeout() {
     let home = tempfile::tempdir().unwrap();
@@ -570,8 +620,22 @@ async fn setup_mode_stops_on_a_signal_or_its_timeout() {
     let (signal, mut stopped) = oneshot::channel();
     signal.send(15).unwrap();
     let mut out = Vec::new();
-    let ended = setup_mode(home.path(), &env, &mut out, &mut stopped, SETUP_TIMEOUT).await;
+    let listening = std::cell::Cell::new(false);
+    let start = Start {
+        listening: &|| listening.set(true),
+        ..AT_TERMINAL
+    };
+    let ended = setup_mode(
+        home.path(),
+        &env,
+        &mut out,
+        &mut stopped,
+        SETUP_TIMEOUT,
+        &start,
+    )
+    .await;
     assert_eq!(ended, Ok(Ended::Stopped(15)));
+    assert!(listening.get());
     let out = String::from_utf8(out).unwrap();
     let start = format!(
         "No .env: setup mode. Open http://127.0.0.1:{port}/installation/step-1 and enter the \
@@ -594,6 +658,7 @@ async fn setup_mode_stops_on_a_signal_or_its_timeout() {
         &mut out,
         &mut stopped,
         Duration::from_millis(50),
+        &AT_TERMINAL,
     )
     .await;
     assert_eq!(
@@ -604,15 +669,125 @@ async fn setup_mode_stops_on_a_signal_or_its_timeout() {
     assert!(std::net::TcpStream::connect(format!("127.0.0.1:{port}")).is_err());
 
     let bad = HashMap::from([("BIND_HOST".to_string(), "x".to_string())]);
-    let ended = setup_mode(home.path(), &bad, &mut out, &mut stopped, SETUP_TIMEOUT).await;
+    let ended = setup_mode(
+        home.path(),
+        &bad,
+        &mut out,
+        &mut stopped,
+        SETUP_TIMEOUT,
+        &AT_TERMINAL,
+    )
+    .await;
     assert_eq!(ended, Err("BIND_HOST is invalid: not an IP address".into()));
     let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = taken.local_addr().unwrap().port().to_string();
     let env = HashMap::from([("PORT".to_string(), port.clone())]);
-    let ended = setup_mode(home.path(), &env, &mut out, &mut stopped, SETUP_TIMEOUT).await;
+    let ended = setup_mode(
+        home.path(),
+        &env,
+        &mut out,
+        &mut stopped,
+        SETUP_TIMEOUT,
+        &AT_TERMINAL,
+    )
+    .await;
     assert!(
         ended
             .unwrap_err()
             .starts_with(&format!("cannot listen on 127.0.0.1:{port}: ")),
     );
+}
+
+/// Without a terminal the secret is in its own file, owner only, while
+/// setup mode listens, and never in the log; the file is gone once setup
+/// mode stops, on a signal or at its timeout.
+#[tokio::test]
+async fn the_secret_file_does_not_outlive_setup_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let file = home.path().join("logs/setup-secret");
+    let port = free_port();
+    let env = HashMap::from([("PORT".to_string(), port.clone())]);
+    let seen = std::cell::RefCell::new(Vec::new());
+    let look = || {
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        let text = std::fs::read_to_string(&file).unwrap();
+        seen.borrow_mut()
+            .push((text, mode(&file), mode(file.parent().unwrap())));
+    };
+    let start = Start {
+        secret_file: Some(&file),
+        listening: &look,
+    };
+    let open = format!(
+        "Open http://127.0.0.1:{port}/installation/step-1 and enter the one-time setup secret"
+    );
+
+    let (signal, mut stopped) = oneshot::channel();
+    signal.send(15).unwrap();
+    let mut log = Vec::new();
+    let ended = setup_mode(
+        home.path(),
+        &env,
+        &mut log,
+        &mut stopped,
+        SETUP_TIMEOUT,
+        &start,
+    )
+    .await;
+    assert_eq!(ended, Ok(Ended::Stopped(15)));
+    assert!(!file.exists());
+    let log = String::from_utf8(log).unwrap();
+    assert_eq!(
+        log,
+        format!(
+            "No .env: setup mode. {open} in {}\n\
+             Setup mode stops in 30 minutes unless setup finishes.\n",
+            file.display()
+        )
+    );
+    let (text, file_mode, dir_mode) = seen.borrow_mut().pop().unwrap();
+    let secret = text.strip_prefix(&format!("{open} ")).unwrap();
+    let secret = secret.strip_suffix('\n').unwrap();
+    assert_eq!(secret.len(), SECRET_LENGTH);
+    assert_eq!((file_mode, dir_mode), (0o600, 0o700));
+
+    let (_signal, mut stopped) = oneshot::channel();
+    let ended = setup_mode(
+        home.path(),
+        &env,
+        &mut Vec::new(),
+        &mut stopped,
+        Duration::from_millis(50),
+        &start,
+    )
+    .await;
+    assert!(
+        ended
+            .unwrap_err()
+            .starts_with("setup mode stopped after 0 minutes")
+    );
+    assert!(!file.exists());
+    // Each start draws a new secret.
+    let (again, _, _) = seen.borrow_mut().pop().unwrap();
+    assert_ne!(again, text);
+
+    // A file it cannot create stops setup mode before it listens.
+    std::fs::write(&file, "").unwrap();
+    let (_signal, mut stopped) = oneshot::channel();
+    let ended = setup_mode(
+        home.path(),
+        &env,
+        &mut Vec::new(),
+        &mut stopped,
+        SETUP_TIMEOUT,
+        &start,
+    )
+    .await;
+    assert!(
+        ended
+            .unwrap_err()
+            .starts_with(&format!("cannot write {}: ", file.display()))
+    );
+    assert!(seen.borrow().is_empty());
 }

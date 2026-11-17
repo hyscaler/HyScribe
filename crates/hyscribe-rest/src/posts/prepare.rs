@@ -4,7 +4,7 @@
 //! `get_available_actions()` of the posts controller.
 
 use hyscribe_model::Post;
-use hyscribe_phpser::{Key, Value, add_query_arg, php_trim};
+use hyscribe_phpser::{Key, Value, add_query_arg, hash_equals, php_trim};
 use hyscribe_render::date::{format_unix, site_zone, stored_unix};
 use hyscribe_render::permalinks::permalink;
 use hyscribe_render::post::{admin_title, post_class};
@@ -237,8 +237,14 @@ fn sample_permalink(context: &Context, post: &Post) -> (Vec<u8>, Vec<u8>) {
         "page" => b"%pagename%",
         _ => b"%postname%",
     };
+    // Drafts are faked as published and private posts are read in the edit
+    // context; a trashed post's link stays plain.
+    let status = match post.status.as_str() {
+        "trash" => "trash",
+        _ => "publish",
+    };
     let sample = Post {
-        status: "publish".into(),
+        status: status.into(),
         name: token.to_vec(),
         ..post.clone()
     };
@@ -366,8 +372,9 @@ fn prepared(
     // `post_password_required()`: with the `edit` context's filter, or the
     // password given, the content shows.
     let given = params.get("password").map(Value::to_php_string);
-    let unlocked =
-        post.password.is_empty() || edit || given.is_some_and(|given| given == post.password);
+    let unlocked = post.password.is_empty()
+        || edit
+        || given.is_some_and(|given| hash_equals(&post.password, &given));
     let open = Post {
         password: Vec::new(),
         ..post.clone()

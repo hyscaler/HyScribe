@@ -48,6 +48,8 @@ fn literals_are_copied() {
         define('DISALLOW_UNFILTERED_HTML', true);
         define('ALLOW_UNFILTERED_UPLOADS', false);
         define('MULTISITE', TRUE);
+        define('DISABLE_WP_CRON', true);
+        define('ALTERNATE_WP_CRON', false);
         define('EMPTY_TRASH_DAYS', 7);
         $table_prefix = 'site_';
     "#);
@@ -70,6 +72,8 @@ fn literals_are_copied() {
                 ("DISALLOW_UNFILTERED_HTML", "true"),
                 ("ALLOW_UNFILTERED_UPLOADS", "false"),
                 ("MULTISITE", "true"),
+                ("DISABLE_WP_CRON", "true"),
+                ("ALTERNATE_WP_CRON", "false"),
                 ("EMPTY_TRASH_DAYS", "7"),
             ]),
             unread: Vec::new(),
@@ -82,7 +86,7 @@ fn what_only_php_can_tell_is_left_to_ask() {
     let config = php(r#"
         define('DB_NAME', getenv('DB_NAME'));
         define('DB_PASSWORD', 42);
-        define('DB_HOST', 'localhost:/run/mysqld/mysqld.sock');
+        define('DB_HOST', getenv('DB_HOST'));
         define('DB_CHARSET', getenv('CHARSET'));
         define('AUTH_KEY', getenv('AUTH_KEY'));
         define('SECURE_AUTH_KEY', '');
@@ -91,6 +95,7 @@ fn what_only_php_can_tell_is_left_to_ask() {
         define('DISALLOW_UNFILTERED_HTML', 1);
         defined('MULTISITE') || define('MULTISITE', false);
         define('ALLOW_UNFILTERED_UPLOADS', getenv('UPLOADS') === 'on');
+        define('DISABLE_WP_CRON', getenv('CRON'));
         define('EMPTY_TRASH_DAYS', getenv('DAYS'));
         $table_prefix = getenv('PREFIX');
     "#);
@@ -110,6 +115,7 @@ fn what_only_php_can_tell_is_left_to_ask() {
                 "DISALLOW_UNFILTERED_HTML",
                 "ALLOW_UNFILTERED_UPLOADS",
                 "MULTISITE",
+                "DISABLE_WP_CRON",
                 "EMPTY_TRASH_DAYS",
             ],
         }
@@ -147,6 +153,35 @@ fn db_host_is_split_as_wordpress_splits_it() {
     assert_eq!(host("db:0"), (pairs(&[("DB_HOST", "db")]), false));
     assert_eq!(host("db:00"), (Vec::new(), true));
     assert_eq!(host("[]::1"), (Vec::new(), true));
+    // A socket is copied for `localhost`, which `mysqli` takes it for; the
+    // port is then not used. Another host is reached over TCP.
+    let socket = pairs(&[("DB_HOST", "localhost:/run/mysqld/mysqld.sock")]);
+    assert_eq!(
+        host("localhost:/run/mysqld/mysqld.sock"),
+        (socket.clone(), false)
+    );
+    assert_eq!(host(":/run/mysqld/mysqld.sock"), (socket.clone(), false));
+    assert_eq!(
+        host("localhost:99999:/run/mysqld/mysqld.sock"),
+        (socket, false)
+    );
+    assert_eq!(
+        host("db:3307:/run/mysqld/mysqld.sock"),
+        (pairs(&[("DB_HOST", "db"), ("DB_PORT", "3307")]), false)
+    );
+    // What is copied is what `.env` reads.
+    let values = import(&php("define('DB_NAME', 'n'); define('DB_USER', 'u'); \
+        define('DB_HOST', ':/run/mysqld/mysqld.sock');"))
+    .values;
+    let map = values
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect();
+    let database = crate::from_map(&map).unwrap().database;
+    assert_eq!(
+        database.socket.as_deref(),
+        Some(std::path::Path::new("/run/mysqld/mysqld.sock"))
+    );
 }
 
 #[test]

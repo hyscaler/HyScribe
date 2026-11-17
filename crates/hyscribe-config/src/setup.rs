@@ -14,12 +14,14 @@ use crate::{ENV_FILE, SALT_KEYS};
 /// `wp_salt()` treats as unset.
 const UNSET_SALT: &str = "put your unique phrase here";
 
-/// The capability constants the wizard copies when they are literal `true`
-/// or `false`.
-pub const CONSTANTS: [&str; 3] = [
+/// The constants the wizard copies when they are literal `true` or `false`:
+/// the capability constants and the cron ones (ADR 0017).
+pub const CONSTANTS: [&str; 5] = [
     "DISALLOW_UNFILTERED_HTML",
     "ALLOW_UNFILTERED_UPLOADS",
     "MULTISITE",
+    "DISABLE_WP_CRON",
+    "ALTERNATE_WP_CRON",
 ];
 
 /// How `wp-config.php` defines a constant.
@@ -69,17 +71,21 @@ pub fn import(config: &WpConfig) -> Import {
             _ => import.unread.push(key),
         }
     }
-    // A socket, or a port outside 1 to 65535, is not something `.env` holds.
+    // A port outside 1 to 65535 is not something `.env` holds. `mysqli`
+    // takes the socket for `localhost` only, else the host and port.
     let host = string("DB_HOST").ok().flatten().and_then(|host| {
-        let host = parse_db_host(&host).filter(|host| host.socket.is_none())?;
-        let port = match host.port {
-            Some(port) => Some(u16::try_from(port).ok().filter(|&port| port != 0)?),
-            None => None,
-        };
+        let host = parse_db_host(&host)?;
         let name = if host.host.is_empty() {
             "localhost".to_string()
         } else {
             host.host
+        };
+        if let Some(socket) = host.socket.filter(|_| name == "localhost") {
+            return Some((format!("{name}:{socket}"), None));
+        }
+        let port = match host.port {
+            Some(port) => Some(u16::try_from(port).ok().filter(|&port| port != 0)?),
+            None => None,
         };
         Some((name, port))
     });

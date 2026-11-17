@@ -61,6 +61,11 @@ impl<'a> Reads<'a> {
     }
 
     /// The query's result, or its type's default after an error.
+    /// `future` run to its end on the runtime.
+    pub(crate) fn block_on<T>(&self, future: impl Future<Output = T>) -> T {
+        self.handle.block_on(future)
+    }
+
     pub(crate) fn wait<T: Default>(&self, query: impl Future<Output = Result<T, DbError>>) -> T {
         self.handle.block_on(query).unwrap_or_else(|err| {
             self.error.borrow_mut().get_or_insert(err);
@@ -140,6 +145,10 @@ impl RenderSite for Reads<'_> {
         self.memo(&self.comments, post_id, || {
             self.wait(self.site.db.comments(post_id))
         })
+    }
+
+    fn older_comments(&self, post_id: u64, date_gmt: &str) -> u64 {
+        self.wait(self.site.db.older_comments(post_id, date_gmt))
     }
 
     fn cloud_terms(&self, taxonomy: &str, limit: u64) -> Vec<Term> {

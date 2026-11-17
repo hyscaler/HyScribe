@@ -13,12 +13,14 @@ use axum::http::{HeaderMap, HeaderValue, Method, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_auth::caps::{CapabilityData, User as Capabilities};
+use hyscribe_fetch::{Args, Error as FetchError, Fetched};
 use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, Term, TermQuery, User, UserQuery};
 use hyscribe_phpser::{Key, Value, addslashes, is_empty_string, parse_str};
 use hyscribe_render::link::rest_url;
 use hyscribe_render::permalinks::{Permalinks, author_posts_url, permalink};
 use hyscribe_render::site::Site as RenderSite;
-use hyscribe_rest::{Answer, Served};
+use hyscribe_rest::{Answer, Preloaded, Served, preload};
+use hyscribe_write::options::{expire_site_transient, set_site_transient};
 use tokio::runtime::Handle;
 
 use crate::login::{LoginReads, Names, cookie, cookies, joined};
@@ -101,6 +103,9 @@ impl hyscribe_rest::Site for Rest<'_> {
 
     fn public_users(&self) -> bool {
         self.site.public_users
+    }
+    fn uses_trash(&self) -> bool {
+        self.site.constants.empty_trash_days != 0
     }
 
     fn reads(&self) -> &dyn RenderSite {
@@ -192,6 +197,43 @@ impl hyscribe_rest::Site for Rest<'_> {
     fn revisions(&self, post: u64) -> Vec<u64> {
         self.reads.reads.wait(self.site.db.revisions(post))
     }
+
+    fn outbound(&self) -> bool {
+        self.site.fetch.is_some()
+    }
+
+    fn fetch(&self, url: &[u8], args: Args) -> Option<Result<Fetched, FetchError>> {
+        let home = self.site.home.as_bytes();
+        let reads = &self.reads.reads;
+        let fetch =
+            |client: &Arc<hyscribe_fetch::Client>| reads.block_on(client.get(url, home, args));
+        self.site.fetch.as_ref().map(fetch)
+    }
+
+    fn set_site_transient(&self, name: &str, value: &[u8], expiration: i64) {
+        let value = Value::String(value.to_vec());
+        // PHP goes on whether the cache is written or not; after a failed
+        // statement the commit fails too.
+        if let Some(writer) = &self.site.writer {
+            self.reads.reads.block_on(async {
+                for mut write in writer.begin().await.into_iter() {
+                    let _ = set_site_transient(&mut write, name, &value, expiration).await;
+                    let _ = write.commit().await;
+                }
+            });
+        }
+    }
+
+    fn expire_site_transient(&self, name: &str) {
+        if let Some(writer) = &self.site.writer {
+            self.reads.reads.block_on(async {
+                for mut write in writer.begin().await.into_iter() {
+                    let _ = expire_site_transient(&mut write, name).await;
+                    let _ = write.commit().await;
+                }
+            });
+        }
+    }
 }
 
 fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
@@ -253,6 +295,38 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             writes::answer(site, &request, *pending, (user, token, now, handle))
         }
     }
+}
+
+/// The block editor's preloads of `paths` as the admin's user reads them
+/// (`block_editor_rest_api_preload()`), over a read of the site of its own;
+/// `None` where one is not ported.
+pub(crate) fn preloads(
+    admin: &LoginReads,
+    (user, host): (u64, &str),
+    paths: &[(&'static str, String)],
+) -> Option<Value> {
+    let mut reads = LoginReads::new(admin.site, Handle::current(), admin.now);
+    reads.act_as(user, admin.session_token().to_vec());
+    let rest = Rest {
+        reads,
+        site: admin.site,
+        user,
+        caps: OnceCell::new(),
+    };
+    let answered = |method: &str, path: &str| match preload(
+        &rest,
+        (user, host.as_bytes(), admin.now),
+        method,
+        path.as_bytes(),
+    ) {
+        Preloaded::Kept(data, headers) => Some(Some((data, headers))),
+        Preloaded::Left => Some(None),
+        Preloaded::NotPorted => None,
+    };
+    let memo = hyscribe_admin::editor::page::preloaded(paths, &answered);
+    let Rest { reads, .. } = rest;
+    let finished = reads.reads.finish().is_ok();
+    memo.filter(|_| finished)
 }
 
 /// The answer the API served.

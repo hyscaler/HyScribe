@@ -570,6 +570,18 @@ async fn logged_in_users_are_let_in() {
     );
 }
 
+/// The fixture's installation, with the oracle's upload limit, 2 MB, which
+/// the goldens print.
+pub(crate) fn oracle_install() -> Install {
+    Install {
+        binary: "/srv/hyscribe/hyscribe".into(),
+        upload_max_size: 2 << 20,
+        database_user: "wordpress".into(),
+        database_name: "wordpress".into(),
+        charset: "utf8mb4".into(),
+    }
+}
+
 /// `database` seen from the oracle's address, with a login for `admin`:
 /// the site and its cookies.
 pub(crate) async fn logged_in(database: &str, dir: &std::path::Path) -> (Arc<Site>, String) {
@@ -580,6 +592,7 @@ pub(crate) async fn logged_in(database: &str, dir: &std::path::Path) -> (Arc<Sit
     let db = hyscribe_db::Db::connect(&config).await.unwrap();
     let url = Some("http://127.0.0.1:8081".to_string());
     let site = Site::load(db, url.clone(), url).await.unwrap();
+    let site = site.with_install(oracle_install());
     let site = Arc::new(salted(site).with_sessions(hyscribe_auth::sessions::Sessions::new(dir)));
     let login = axum::http::Request::builder()
         .method("POST")
@@ -799,7 +812,7 @@ pub(super) fn masked_nonces(page: &str) -> String {
     )
 }
 
-fn sha256(text: &str) -> String {
+pub(crate) fn sha256(text: &str) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(text.as_bytes())
         .iter()
@@ -867,31 +880,51 @@ pub(crate) fn with_values(golden: &str, page: &str) -> String {
     out
 }
 
-/// The site editor's refusals of `reference/site-editor/golden.sh`, whatever
-/// the arguments.
+/// The site editor of `reference/site-editor/golden.sh`: the other roles'
+/// refusals whatever the arguments, and the administrator's redirects and
+/// refusals.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_site_editor_s_refusals() {
-    let site = oracle_site().await;
+async fn the_site_editor_s_redirects_and_refusals() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
     let handle = Handle::current();
     let golden = include_str!("../../tests/golden/site-editor.tsv");
     for line in golden.lines() {
         let f: Vec<&str> = line.split('\t').collect();
-        let (site, handle, query) = (Arc::clone(&site), handle.clone(), f[0].to_string());
-        let response = tokio::task::spawn_blocking(move || {
-            let reads = LoginReads::new(&site, handle, now());
-            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
-            let path = "/hs-admin/site-editor";
-            let uri = format!("{path}{query}");
-            let url = format!("http://h{uri}");
-            screen(&admin, path, &uri, &url, "http://h", &Browser::default()).unwrap()
-        })
-        .await
-        .unwrap();
+        let path = format!("/hs-admin/site-editor{}", f[0]);
+        let response = if f[1] == "administrator" {
+            get(&site, &path, "127.0.0.1:8081", &cookies).await
+        } else {
+            let (site, handle) = (Arc::clone(&site), handle.clone());
+            tokio::task::spawn_blocking(move || {
+                let reads = LoginReads::new(&site, handle, now());
+                let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+                let url = format!("http://h{path}");
+                screen(
+                    &admin,
+                    "/hs-admin/site-editor",
+                    &path,
+                    &url,
+                    "http://h",
+                    &Browser::default(),
+                )
+                .unwrap()
+            })
+            .await
+            .unwrap()
+        };
         assert_eq!(response.status().as_str(), f[2], "{line}");
-        let php = String::from_utf8(hyscribe_testkit::unhex(f[3])).unwrap();
+        let ours = response.headers().get(header::LOCATION);
+        assert_eq!(
+            ours.map_or("", |to| to.to_str().unwrap()),
+            hs(f[3]),
+            "{}",
+            f[0]
+        );
+        let php = String::from_utf8(hyscribe_testkit::unhex(f[4])).unwrap();
         assert_eq!(page_of(response).await, php, "{}", f[0]);
     }
-    assert_eq!(golden.lines().count(), 12);
+    assert_eq!(golden.lines().count(), 44);
 }
 
 /// A user without the screen's capability gets `wp_die()`'s refusal.
@@ -2688,5 +2721,85 @@ async fn the_permalinks_screen_refreshes_the_rules() {
     assert!(rules().await.starts_with("a:94:{"));
 }
 
+/// `page` from the heading of section `id` to its table's end.
+fn health_section<'a>(page: &'a str, id: &str) -> &'a str {
+    let start = page
+        .find(&format!("<button id=\"health-check-section-{id}\""))
+        .unwrap();
+    let length = page.get(start..).unwrap().find("</table>").unwrap();
+    page.get(start..start + length).unwrap()
+}
+
+/// Site Health's Info tab: WordPress's section as PHP shows the
+/// fixture, the database server and HyScribe's own section as configured;
+/// another tab, an argument, or a theme the site does not have is not
+/// ported.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_site_health_info_tab() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let host = "127.0.0.1:8081";
+    let path = "/hs-admin/site-health?tab=debug";
+    let page = page_of(get(&site, path, host, &cookies).await).await;
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/site-health.tsv");
+    let row = golden.lines().next().unwrap();
+    let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+    assert_eq!(
+        health_section(&page, "wp-core"),
+        health_section(&php, "wp-core")
+    );
+    let copied = |page: &str| {
+        let start = page.find("### wp-core ###").unwrap();
+        let end = page.get(start..).unwrap().find("\n\n###").unwrap();
+        page.get(start..start + end).unwrap().to_string()
+    };
+    assert_eq!(copied(&page), copied(&php));
+    assert!(page.contains(
+        "href=\"http://127.0.0.1:8081/hs-admin/site-health?tab=debug\" class=\"health-check-tab active\""
+    ));
+    let (server, _) = site.db.server().await.unwrap();
+    let rows = [
+        format!("<tr><th scope=\"row\">Server version</th><td>{server}</td></tr>"),
+        "<tr><th scope=\"row\">Table prefix</th><td>wp_</td></tr>".into(),
+        "<tr><th scope=\"row\">Database username</th><td>wordpress</td></tr>".into(),
+        "<tr><th scope=\"row\">Binary location</th><td>/srv/hyscribe/hyscribe</td></tr>".into(),
+        "<tr><th scope=\"row\">Mode</th><td>Shadow (read only)</td></tr>".into(),
+        "(LOGIN_LIMIT_ADDRESS)</th><td>5</td></tr><tr><th scope=\"row\">Failed logins allowed per account (LOGIN_LIMIT_ACCOUNT)</th><td>10</td></tr><tr><th scope=\"row\">Login limit window (LOGIN_LIMIT_WINDOW)</th><td>900 seconds</td></tr>".into(),
+        "<tr><th scope=\"row\">Max effective file size</th><td>2 MB</td></tr>".into(),
+    ];
+    for row in rows {
+        assert!(page.contains(&row), "{row}");
+    }
+    for path in [
+        "/hs-admin/site-health",
+        "/hs-admin/site-health?tab=",
+        "/hs-admin/site-health?tab=status",
+        "/hs-admin/site-health?tab=debug&x=1",
+        "/hs-admin/site-health?tab[]=debug",
+    ] {
+        let response = get(&site, path, host, &cookies).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+    }
+    // `UPLOAD_MAX_SIZE`'s default, and primary mode's writer.
+    let mut configured = Arc::try_unwrap(site).ok().unwrap();
+    configured.install = crate::unconfigured();
+    let site = unwritable(Arc::new(configured), "wp_").await;
+    let page = page_of(get(&site, path, host, &cookies).await).await;
+    assert!(page.contains("<tr><th scope=\"row\">Max effective file size</th><td>64 MB</td></tr>"));
+    assert!(page.contains("<tr><th scope=\"row\">Mode</th><td>Primary</td></tr>"));
+    let mut gone = Arc::try_unwrap(site).ok().unwrap();
+    for name in ["stylesheet", "template"] {
+        gone.options.insert(name.into(), b"gone".to_vec());
+        let site = Arc::new(gone);
+        let response = get(&site, path, host, &cookies).await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{name}");
+        gone = Arc::try_unwrap(site).ok().unwrap();
+        gone.options
+            .insert("stylesheet".into(), b"twentytwentyfive".to_vec());
+    }
+}
+
+mod clean_urls;
 mod comment_saves;
 mod revisions;

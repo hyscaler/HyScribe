@@ -1,0 +1,52 @@
+# The rows PHP WordPress writes for the action editor-unschedule (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-17 04:49:16 to 2026-11-17 04:49:16 UTC.
+# %wp_posts:1% is 9601.
+# %wp_posts:2% is 9602.
+# %wp_posts:3% is 9603.
+# %wp_posts:4% is 9604.
+# %wp_posts:5% is 9605.
+# %wp_posts:6% is 9606.
+# %wp_posts:7% is 9607.
+# %wp_posts:8% is 9608.
+# %wp_posts:9% is 9609.
+# %wp_posts:10% is 9614.
+# %wp_postmeta:1% is 9601.
+# %wp_postmeta:2% is 9602.
+# %wp_postmeta:3% is 9603.
+# %wp_postmeta:4% is 9604.
+# %wp_postmeta:5% is 9605.
+# %wp_postmeta:6% is 9606.
+# %wp_terms:1% is 9601.
+# %wp_terms:2% is 9602.
+# %wp_terms:3% is 9603.
+# %wp_term_taxonomy:1% is 9601.
+# %wp_term_taxonomy:2% is 9602.
+# %wp_term_taxonomy:3% is 9603.
+wp_posts	%wp_posts:10%	+	ID	%wp_posts:10%
+wp_posts	%wp_posts:10%	+	comment_count	0
+wp_posts	%wp_posts:10%	+	comment_status	closed
+wp_posts	%wp_posts:10%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:10%
+wp_posts	%wp_posts:10%	+	menu_order	0
+wp_posts	%wp_posts:10%	+	ping_status	closed
+wp_posts	%wp_posts:10%	+	pinged	
+wp_posts	%wp_posts:10%	+	post_author	1
+wp_posts	%wp_posts:10%	+	post_content	<!-- wp:paragraph -->\n<p>Coming up.</p>\n<!-- /wp:paragraph -->
+wp_posts	%wp_posts:10%	+	post_content_filtered	
+wp_posts	%wp_posts:10%	+	post_date	%now%
+wp_posts	%wp_posts:10%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:10%	+	post_excerpt	
+wp_posts	%wp_posts:10%	+	post_mime_type	
+wp_posts	%wp_posts:10%	+	post_modified	%now%
+wp_posts	%wp_posts:10%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:10%	+	post_name	%wp_posts:4%-revision-v1
+wp_posts	%wp_posts:10%	+	post_parent	%wp_posts:4%
+wp_posts	%wp_posts:10%	+	post_password	
+wp_posts	%wp_posts:10%	+	post_status	inherit
+wp_posts	%wp_posts:10%	+	post_title	Coming up
+wp_posts	%wp_posts:10%	+	post_type	revision
+wp_posts	%wp_posts:10%	+	to_ping	
+wp_posts	%wp_posts:4%	~	post_date	2030-01-01 10:00:00	%now%
+wp_posts	%wp_posts:4%	~	post_date_gmt	2030-01-01 10:00:00	0000-00-00 00:00:00
+wp_posts	%wp_posts:4%	~	post_modified	2026-11-09 10:00:00	%now%
+wp_posts	%wp_posts:4%	~	post_modified_gmt	2026-11-09 10:00:00	%now%
+wp_posts	%wp_posts:4%	~	post_status	future	draft

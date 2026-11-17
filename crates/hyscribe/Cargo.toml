@@ -21,13 +21,16 @@ clap.workspace = true
 hyscribe-auth.workspace = true
 hyscribe-config.workspace = true
 hyscribe-db.workspace = true
+hyscribe-fetch.workspace = true
 hyscribe-http.workspace = true
 hyscribe-phpser.workspace = true
 hyscribe-service.workspace = true
+hyscribe-write.workspace = true
 rustix = { version = "1.1", default-features = false, features = ["std", "termios"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
 
 [dev-dependencies]
+hyscribe-phpser.workspace = true
 hyscribe-testkit.workspace = true
 rustix = { version = "1.1", default-features = false, features = ["std", "termios", "pty"] }
 sqlx = { version = "0.9", default-features = false, features = ["mysql", "runtime-tokio"] }

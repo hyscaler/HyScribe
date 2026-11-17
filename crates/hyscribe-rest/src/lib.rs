@@ -8,6 +8,7 @@
 //! ported write is answered in two steps: [`answer`] checks it and gives
 //! the [`Plan`] to write, and [`written`] answers once it is written.
 
+mod block_renderer;
 mod comments;
 mod editor;
 mod embed;
@@ -29,10 +30,17 @@ mod taxonomies;
 mod templates;
 mod terms;
 mod types;
+mod url_details;
 mod users;
+
+/// What the fuzz targets reach.
+pub mod fuzzing {
+    pub use crate::url_details::details;
+}
 
 use std::sync::OnceLock;
 
+use hyscribe_fetch::{Args, Error as FetchError, Fetched};
 use hyscribe_kses::esc_url_raw;
 use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, Term, TermQuery, User, UserQuery};
 use hyscribe_phpser::{
@@ -117,11 +125,31 @@ pub trait Site {
     /// Whether the public users endpoint answers visitors as WordPress
     /// does; off, a visitor sees no user as having published posts.
     fn public_users(&self) -> bool;
+    /// Whether `EMPTY_TRASH_DAYS` is not 0, WordPress's default of 30:
+    /// without the Trash, a delete must be forced.
+    fn uses_trash(&self) -> bool {
+        true
+    }
     /// The site's content as `hyscribe-render` reads it, for the post
     /// routes.
     fn reads(&self) -> &dyn Reads;
     /// The active theme, which renders posts' content.
     fn theme(&self) -> &Theme;
+    /// Whether outbound fetches are on (`HTTP_OUTBOUND`, ADR 0019).
+    fn outbound(&self) -> bool {
+        false
+    }
+    /// `wp_safe_remote_get( $url, $args )` through the outbound client,
+    /// `None` while fetches are off.
+    fn fetch(&self, _url: &[u8], _args: Args) -> Option<Result<Fetched, FetchError>> {
+        None
+    }
+    /// `set_site_transient( $name, $value, $expiration )`, where the site
+    /// writes.
+    fn set_site_transient(&self, _name: &str, _value: &[u8], _expiration: i64) {}
+    /// What `get_site_transient( $name )` writes for a transient past its
+    /// timeout, where the site writes: both its options deleted.
+    fn expire_site_transient(&self, _name: &str) {}
 }
 
 /// A request for the API.
@@ -328,6 +356,8 @@ fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         .or_else(|| navigation::endpoints(regex))
         .or_else(|| media::endpoints(regex))
         .or_else(|| revisions::endpoints(regex))
+        .or_else(|| block_renderer::endpoints(regex))
+        .or_else(|| url_details::endpoints(regex))
 }
 
 /// The ported write of the route `regex`'s endpoint `index`, if any.
@@ -401,6 +431,74 @@ pub fn written(site: &dyn Site, request: &Request, pending: Pending, outcome: Ou
     run(site, request, Some((pending, outcome)))
         .served()
         .unwrap_or_else(Served::not_ported)
+}
+
+/// What `rest_preload_api_request()` keeps of one path.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Preloaded {
+    /// A 200 answer: its data and its response's headers.
+    Kept(Value, Value),
+    /// Another answer, which is left out.
+    Left,
+    /// What is not ported.
+    NotPorted,
+}
+
+/// `rest_preload_api_request()`'s request of `path` (its query included)
+/// with `method`, as `user` on `host` at `now`: the data
+/// `response_to_data()` gives.
+pub fn preload(
+    site: &dyn Site,
+    (user, host, now): (u64, &[u8], i64),
+    method: &str,
+    path: &[u8],
+) -> Preloaded {
+    let (route, query) = match path.iter().position(|&b| b == b'?') {
+        Some(at) => (
+            path.get(..at).unwrap_or_default(),
+            path.get(at + 1..).unwrap_or_default(),
+        ),
+        None => (path, &b""[..]),
+    };
+    let get = hyscribe_phpser::parse_str(query);
+    let get = get.as_array().unwrap_or_default().to_vec();
+    let params = Params {
+        get: get.clone(),
+        ..Params::default()
+    };
+    let context = Context {
+        site,
+        user,
+        head: false,
+        uri: path,
+        parameters: false,
+        host,
+        now,
+        remote_addr: b"",
+        user_agent: None,
+    };
+    let response = match dispatch(&context, (method, route), (params, None), None) {
+        Ok(response) if response.status == 200 => response,
+        Ok(_) => return Preloaded::Left,
+        Err(_) => return Preloaded::NotPorted,
+    };
+    let headers = header_values(&response);
+    let embed = lookup(&get, "_embed").map(embed::relations);
+    let data = embed::to_data(&context, response, embed.as_ref());
+    data.map_or(Preloaded::NotPorted, |data| Preloaded::Kept(data, headers))
+}
+
+/// A response's headers as its data: the collections set their totals as
+/// integers.
+fn header_values(response: &Response) -> Value {
+    let header = |name: &String, value: &String| match name.as_str() {
+        "X-WP-Total" | "X-WP-TotalPages" => Value::Int(text(value.clone()).to_int()),
+        _ => text(value.clone()),
+    };
+    let headers = response.headers.iter();
+    let headers =
+        headers.map(|(name, value)| (Key::String(name.clone().into_bytes()), header(name, value)));
+    Value::Array(headers.collect())
 }
 
 /// A PHP array's entries.
@@ -567,25 +665,12 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
     let embed = get("_embed").map(embed::relations);
     let response = match get("_envelope") {
         Some(_) => {
-            // The collections set their totals as integers.
-            let header = |name: &String, value: &String| match name.as_str() {
-                "X-WP-Total" | "X-WP-TotalPages" => Value::Int(text(value.clone()).to_int()),
-                _ => text(value.clone()),
-            };
-            let headers = response
-                .headers
-                .iter()
-                .map(|(name, value)| (Key::String(name.clone().into_bytes()), header(name, value)))
-                .collect();
+            let headers = header_values(&response);
             let status = Value::Int(i64::from(response.status));
             let Ok(body) = embed::to_data(&context, response, embed.as_ref()) else {
                 return Answer::Served(Served::not_ported());
             };
-            let envelope = object([
-                ("body", body),
-                ("status", status),
-                ("headers", Value::Array(headers)),
-            ]);
+            let envelope = object([("body", body), ("status", status), ("headers", headers)]);
             Response::new(envelope, 200)
         }
         None => response,
@@ -782,6 +867,10 @@ fn dispatch(
         return Ok(RestError::status("rest_no_route", message, 404).into_response());
     };
     let (permissions, endpoint) = ported(&matched).ok_or(Halt::NotPorted)?;
+    // The link previews fetch, which waits on ADR 0019.
+    if matched.regex == url_details::ROUTE && !context.site.outbound() {
+        return Err(Halt::NotPorted);
+    }
     let (answered, params) = match resumed {
         Some((pending, outcome)) => {
             let mut params = pending.params;
@@ -907,7 +996,7 @@ fn checked(
         }
         args = (writing.args)(context, &params, args);
     }
-    let checked = has_valid_params(&params, &args)
+    let checked = has_valid_params(context, &params, &args)
         .and_then(|()| sanitize_params(context, &mut params, &args))
         .and_then(|()| (endpoint.permission)(context, &params));
     let answered = match (endpoint.callback, writing) {

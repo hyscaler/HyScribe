@@ -46,6 +46,8 @@ pub trait PostsSite: PageSite {
     fn clock(&self) -> (Zone, i64);
     /// `get_option( $name )`, as stored.
     fn option(&self, name: &str) -> Option<Vec<u8>>;
+    /// `wp_max_upload_size()`: `UPLOAD_MAX_SIZE`, in bytes.
+    fn max_upload_size(&self) -> u64;
     /// `get_post_class( $class, $post )` in the admin, joined by spaces.
     fn post_class(&self, class: &str, post: &Post) -> String;
     /// `get_the_terms( $post, $taxonomy )`.
@@ -83,6 +85,9 @@ pub trait PostsSite: PageSite {
     /// `get_page_templates( null, $post_type )`: each template's slug and
     /// title, by title.
     fn page_templates(&self, post_type: &str) -> Vec<(String, String)>;
+    /// Whether `EMPTY_TRASH_DAYS` is not 0: at 0, posts and comments are
+    /// deleted without the Trash.
+    fn uses_trash(&self) -> bool;
 }
 
 /// A post type the list shows, as `register_post_type()` labels it.
@@ -505,7 +510,8 @@ fn title_actions(site: &dyn PostsSite, post: &Post, excerpt: bool) -> String {
             let link = format!("post.php?post={id}&amp;action={action}&amp;_wpnonce={nonce}");
             BarSite::admin_url(site, &link)
         };
-        if post.status == "trash" {
+        let trashed = post.status == "trash";
+        if trashed {
             actions.push((
                 "untrash",
                 format!(
@@ -514,21 +520,23 @@ fn title_actions(site: &dyn PostsSite, post: &Post, excerpt: bool) -> String {
                     esc_attr(format!("Restore &#8220;{title}&#8221; from the Trash").as_bytes())
                 ),
             ));
-            actions.push((
-                "delete",
-                format!(
-                    "<a href=\"{}\" class=\"submitdelete\" aria-label=\"{}\">Delete Permanently</a>",
-                    link("delete"),
-                    esc_attr(format!("Delete &#8220;{title}&#8221; permanently").as_bytes())
-                ),
-            ));
-        } else {
+        } else if site.uses_trash() {
             actions.push((
                 "trash",
                 format!(
                     "<a href=\"{}\" class=\"submitdelete\" aria-label=\"{}\">Trash</a>",
                     link("trash"),
                     esc_attr(format!("Move &#8220;{title}&#8221; to the Trash").as_bytes())
+                ),
+            ));
+        }
+        if trashed || !site.uses_trash() {
+            actions.push((
+                "delete",
+                format!(
+                    "<a href=\"{}\" class=\"submitdelete\" aria-label=\"{}\">Delete Permanently</a>",
+                    link("delete"),
+                    esc_attr(format!("Delete &#8220;{title}&#8221; permanently").as_bytes())
                 ),
             ));
         }
@@ -1487,7 +1495,7 @@ fn tablenav(
     }];
     let kind = listing.kind;
     if site.can(&kind.cap("delete_posts")) {
-        actions.push(if listing.trash() {
+        actions.push(if listing.trash() || !site.uses_trash() {
             ("delete", "Delete permanently")
         } else {
             ("trash", "Move to Trash")

@@ -874,30 +874,49 @@ pub fn ent2ncr(text: &[u8]) -> Vec<u8> {
 /// and numeric references become characters, a single quote's excepted.
 pub fn html_entity_decode(text: &[u8]) -> Vec<u8> {
     references(text, |reference| {
+        entity(reference)
+            .filter(|&c| c != '\'')
+            .map(|c| c.to_string().into_bytes())
+    })
+}
+
+/// `html_entity_decode( $text, ENT_QUOTES )`: a single quote's too.
+pub fn html_entity_decode_quotes(text: &[u8]) -> Vec<u8> {
+    references(text, |reference| {
         entity(reference).map(|c| c.to_string().into_bytes())
     })
 }
 
-/// `text` with each `&reference;` that `replace` knows replaced.
+/// `text` with each `&reference;` that `replace` knows replaced. A
+/// reference is read as PHP's scanner reads it, letters, digits and `#` up
+/// to its `;`, so no byte is read more than twice: the time is linear.
 fn references(text: &[u8], replace: impl Fn(&[u8]) -> Option<Vec<u8>>) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut rest = text;
-    while let Some((&first, tail)) = rest.split_first() {
-        let reference = tail.split(|&b| b == b';').next().unwrap_or_default();
-        let replaced = (first == b'&' && reference.len() < tail.len())
-            .then(|| replace(reference))
-            .flatten();
+    while let Some(at) = rest.iter().position(|&b| b == b'&') {
+        let (before, from) = rest.split_at(at);
+        out.extend_from_slice(before);
+        let tail = from.get(1..).unwrap_or_default();
+        let length = tail
+            .iter()
+            .take_while(|&&b| b.is_ascii_alphanumeric() || b == b'#')
+            .count();
+        let (reference, after) = tail.split_at(length);
+        let replaced = after
+            .strip_prefix(b";")
+            .and_then(|after| Some((replace(reference)?, after)));
         rest = match replaced {
-            Some(replaced) => {
+            Some((replaced, after)) => {
                 out.extend_from_slice(&replaced);
-                tail.get(reference.len() + 1..).unwrap_or_default()
+                after
             }
             None => {
-                out.push(first);
+                out.push(b'&');
                 tail
             }
         };
     }
+    out.extend_from_slice(rest);
     out
 }
 
@@ -913,8 +932,10 @@ fn reference_number(digits: &[u8], radix: u32) -> Option<u32> {
     u32::try_from(value).ok().filter(|_| !digits.is_empty())
 }
 
-/// The character `&reference;` stands for under `ENT_COMPAT`: HTML 4.01
-/// has `ent2ncr()`'s names but its three older ones.
+/// The character `&reference;` stands for in HTML 4.01: `ent2ncr()`'s
+/// names but its three older ones, and the code points PHP's
+/// `unicode_cp_is_allowed()` allows a reference to, the controls but tab
+/// and line ends left as written.
 fn entity(reference: &[u8]) -> Option<char> {
     let code = match reference {
         b"brkbar" | b"die" | b"hibar" => return None,
@@ -922,7 +943,9 @@ fn entity(reference: &[u8]) -> Option<char> {
         [b'#', decimal @ ..] => reference_number(decimal, 10)?,
         name => entities::NAMED.iter().find(|(n, _)| *n == name)?.1,
     };
-    char::from_u32(code).filter(|&c| c != '\'')
+    let control =
+        !matches!(code, 0x09 | 0x0a | 0x0d) && (code < 0x20 || (0x7f..0xa0).contains(&code));
+    char::from_u32(code).filter(|_| !control)
 }
 
 /// `sanitize_title()`'s replacements in the save context, in order: what

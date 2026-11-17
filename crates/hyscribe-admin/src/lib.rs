@@ -20,6 +20,8 @@ pub mod profile;
 pub mod revisions;
 pub mod settings;
 pub mod settings_more;
+pub mod site_editor;
+pub mod site_health;
 pub mod terms;
 #[cfg(test)]
 mod tests;

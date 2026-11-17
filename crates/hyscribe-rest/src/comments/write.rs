@@ -310,6 +310,10 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
             previous,
         ));
     }
+    if !context.site.uses_trash() {
+        let message = "The comment does not support trashing. Set 'force=true' to delete.";
+        return Err(RestError::status("rest_trash_not_supported", message, 501));
+    }
     if row.approved == "trash" {
         let message = "The comment has already been trashed.";
         return Err(RestError::status("rest_already_trashed", message, 410));

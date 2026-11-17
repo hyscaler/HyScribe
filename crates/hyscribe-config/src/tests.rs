@@ -304,52 +304,6 @@ fn reads_upload_sizes() {
     }
 }
 
-/// `UPLOAD_MAX_SIZE` in bytes or PHP's shorthand, and nothing else.
-#[test]
-fn reads_upload_sizes() {
-    let size = |value| from_map(&with(&[("UPLOAD_MAX_SIZE", value)])).map(|c| c.upload_max_size);
-    for (value, bytes) in [
-        ("1", 1),
-        ("2097152", 2 << 20),
-        ("1K", 1 << 10),
-        ("64M", 64 << 20),
-        ("64m", 64 << 20),
-        ("2G", 2 << 30),
-        ("2g", 2 << 30),
-        ("3k", 3 << 10),
-        ("8589934591G", 8_589_934_591 << 30),
-        ("9223372036854775807", i64::MAX.unsigned_abs()),
-    ] {
-        assert_eq!(size(value), Ok(bytes), "{value}");
-    }
-    for value in [
-        "0",
-        "0M",
-        "M",
-        "64 M",
-        "64MB",
-        "-1",
-        "+1",
-        "1.5M",
-        "64T",
-        "8589934592G",
-        "17179869184G",
-        "1k1",
-        "9223372036854775808",
-        "18446744073709551616",
-        "99999999999999999999",
-        " 64M",
-        "64M ",
-        "\u{ff11}M",
-    ] {
-        assert_eq!(
-            size(value).unwrap_err().to_string(),
-            "UPLOAD_MAX_SIZE is invalid: must be a size in bytes, or with a K, M or G suffix, such as 64M",
-            "{value}"
-        );
-    }
-}
-
 #[test]
 fn empty_values_count_as_unset() {
     let config = from_map(&with(&[("DB_PREFIX", ""), ("MODE", "")])).unwrap();

@@ -154,3 +154,6 @@ pub const PART_AREAS: [Area; 4] = [
         tag: "div",
     },
 ];
+
+#[cfg(test)]
+mod tests;

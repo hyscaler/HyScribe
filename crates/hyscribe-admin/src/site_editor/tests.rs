@@ -69,7 +69,7 @@ fn custom_settings_are_php_s() {
         .filter_map(|line| line.strip_prefix("se-first\tsettings."))
         .filter_map(|line| line.split('\t').next())
         .skip_while(|key| *key != "siteUrl")
-        .take(keys.len())
+        .take_while(|key| *key != "__experimentalBlockBindingsSupportedAttributes")
         .collect();
     assert_eq!(keys, order);
 }

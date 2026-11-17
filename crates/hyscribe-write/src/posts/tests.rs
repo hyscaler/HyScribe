@@ -1013,6 +1013,40 @@ async fn what_php_refuses_is_refused() {
 /// active one, nothing in them refused, and deleting a part leaves its terms.
 #[tokio::test]
 async fn templates_take_their_terms() {
+    let one = ONE_AT_A_TIME.lock().await;
+    // A statement that fails stops a template's insert there, a slug taken
+    // in its theme, its terms or its meta.
+    let mut budget = 0;
+    loop {
+        let result = rolled_back(async |w, ctx| {
+            let template = || PostArgs {
+                post_type: "wp_template".into(),
+                status: "publish".into(),
+                name: Some(b"index".to_vec()),
+                title: b"Index".to_vec(),
+                tax_input: vec![(Taxonomy::Theme, b"twentytwentyfive".to_vec())],
+                meta_input: vec![("origin", Value::String(b"theme".to_vec()))],
+                ..PostArgs::default()
+            };
+            wp_insert_post(w, ctx, template()).await?;
+            w.fail_after(budget);
+            wp_insert_post(w, ctx, template()).await
+        })
+        .await;
+        match result {
+            Err(Error::Db(_)) => budget += 1,
+            done => {
+                done.unwrap();
+                break;
+            }
+        }
+    }
+    assert!(budget > 5);
+    drop(one);
+    templates_are_written().await;
+}
+
+async fn templates_are_written() {
     let _one = ONE_AT_A_TIME.lock().await;
     let found = rolled_back(async |w, ctx| {
         let template = |post_type: &str, theme: &str, area: Option<&str>| {

@@ -139,8 +139,9 @@ async fn autosaves_are_one_per_user() {
 }
 
 /// A statement that fails stops the autosave there, whichever it is: of a
-/// draft whose lock names its user in `_edit_last`, and of a post whose
-/// footnotes the new autosave copies.
+/// post whose footnotes the new autosave copies, then that autosave
+/// updated, of a draft whose lock names its user in `_edit_last`, and of
+/// the user's own draft.
 #[tokio::test]
 async fn a_failed_statement_stops_the_autosave() {
     let mut budget = 0;
@@ -159,6 +160,7 @@ async fn a_failed_statement_stops_the_autosave() {
                 .await
                 .unwrap();
             let draft = wp_insert_post(w, &ctx, post(2, "draft")).await.unwrap();
+            let own = wp_insert_post(w, &ctx, post(2, "draft")).await.unwrap();
             let notes = text("[]");
             for (id, key, value) in [
                 (published, "footnotes", notes),
@@ -169,14 +171,22 @@ async fn a_failed_statement_stops_the_autosave() {
                     .await
                     .unwrap();
             }
-            let fields = Revisioned {
-                title: Some(b"Changed".to_vec()),
+            let titled = |title: &str| Revisioned {
+                title: Some(title.as_bytes().to_vec()),
                 ..Revisioned::default()
             };
-            let change = |args: &mut PostArgs| fields.set(args);
             w.fail_after(budget);
             let mut saved = Vec::new();
-            for id in [published, draft] {
+            // A new autosave, the same updated, a locked draft's, and the
+            // user's own draft.
+            for (id, title) in [
+                (published, "Changed"),
+                (published, "Again"),
+                (draft, "Changed"),
+                (own, "Changed"),
+            ] {
+                let fields = titled(title);
+                let change = |args: &mut PostArgs| fields.set(args);
                 saved.push(wp_create_post_autosave(w, &ctx, id, &fields, &change).await);
             }
             done = saved.iter().all(Result::is_ok);

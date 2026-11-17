@@ -588,6 +588,19 @@ fn navigation_and_patterns_save_their_fields() {
         let closed = format!("a<!-- /wp:{wrapper} -->b<!-- wp:c /-->");
         assert_eq!(save.content, Some(closed.into_bytes()), "{post_type}");
     }
+    // A pattern's categories and sync status; its footnotes, revisioned
+    // with it, are not ported.
+    let body =
+        r#"{"title":"x","wp_pattern_category":[1],"meta":{"wp_pattern_sync_status":"partial"}}"#;
+    let save = plan("administrator", "POST", "/wp/v2/blocks", body);
+    assert_eq!(save.pattern_categories, Some(vec![1]));
+    assert_eq!(
+        save.meta,
+        vec![("wp_pattern_sync_status", text_value("partial"))]
+    );
+    let footnotes = r#"{"title":"x","meta":{"footnotes":""}}"#;
+    let served = answered("administrator", "POST", "/wp/v2/blocks", footnotes);
+    assert_eq!(served.status, 501);
     // Media and menu items are not written, and a format is checked
     // against its schema.
     for (method, target, body) in [

@@ -809,6 +809,12 @@ async fn written_answers_past_the_goldens() {
     let site = saves_site(dir.path()).await;
     let response = send(&site, request, meta).await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // A pattern, which is not viewable, has no preview link.
+    let pattern = r#"{"title":"Pattern autosaved"}"#;
+    let target = "/?rest_route=/wp/v2/blocks/853/autosaves";
+    let login = (cookie.clone(), nonce.clone());
+    let (status, text) = sent_as(&site, &login, ("POST", target, pattern)).await;
+    assert_eq!(status, StatusCode::OK, "{text}");
     fresh().await;
 }
 

@@ -123,6 +123,10 @@ fn paths_follow_the_folder_layout() {
         paths.log_file(),
         Path::new("/opt/hyscribe/logs/hyscribe.log")
     );
+    assert_eq!(
+        paths.setup_secret_file(),
+        Path::new("/opt/hyscribe/logs/setup-secret")
+    );
 }
 
 #[test]

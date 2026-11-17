@@ -420,9 +420,9 @@ async fn update(steps: &mut Steps<'_, '_, Error>, data: &UserData) -> Result<u64
 }
 
 /// `get_password_reset_key()` of the user `id`: a new key's fast hash
-/// stored after the time as its `user_activation_key`. The mail that
-/// would carry the key is not sent (MVP phase 8), so the key is dropped.
-pub async fn get_password_reset_key(write: &mut Write<'_>, id: u64) -> Result<(), Error> {
+/// stored after the time as its `user_activation_key`, and the key, which
+/// the mail carries.
+pub async fn get_password_reset_key(write: &mut Write<'_>, id: u64) -> Result<String, Error> {
     let mut steps = Steps::new(write);
     let key = steps.keep(generate_password(20, false).map_err(Error::Random));
     let hashed = format!("{}:{}", now(), wp_fast_hash(key.as_bytes()));
@@ -432,21 +432,22 @@ pub async fn get_password_reset_key(write: &mut Write<'_>, id: u64) -> Result<()
         ..UserData::default()
     };
     steps.run(async |w| wp_update_user(w, &data).await).await;
-    steps.finish(Ok(()))
+    steps.finish(Ok(key))
 }
 
 /// `send_confirmation_on_profile_email()`'s rows for the user `id` asking
 /// for `email`, valid and not its own, slashed as `$_POST` holds it: the
 /// change waits in `_new_email` under a random hash for its confirmation,
-/// or none waits when another user has the address. No mail is sent (MVP
-/// phase 8).
+/// or none waits when another user has the address. The hash waiting,
+/// which the confirmation mail carries.
 pub async fn request_email_change(
     write: &mut Write<'_>,
     id: u64,
     email: &[u8],
-) -> Result<(), Error> {
+) -> Result<Option<Vec<u8>>, Error> {
     let mut steps = Steps::new(write);
     let key = "_new_email";
+    let mut waiting = None;
     if step!(steps, user_id_by_email(php_trim(email))).is_some() {
         let none = &Value::Null;
         let deleted =
@@ -455,22 +456,21 @@ pub async fn request_email_change(
     } else {
         let random = steps.keep(generate_password(20, false).map_err(Error::Random));
         let seed = [email, now().to_string().as_bytes(), random.as_bytes()].concat();
+        let hash = md5(&seed).into_bytes();
         let change = Value::Array(vec![
-            (
-                Key::String(b"hash".to_vec()),
-                Value::String(md5(&seed).into_bytes()),
-            ),
+            (Key::String(b"hash".to_vec()), Value::String(hash.clone())),
             (
                 Key::String(b"newemail".to_vec()),
                 Value::String(email.to_vec()),
             ),
         ]);
+        waiting = Some(hash);
         let none = &Value::Null;
         let kept =
             async |w: &mut Write<'_>| update_metadata(w, Meta::User, id, key, &change, none).await;
         steps.run(kept).await;
     }
-    steps.finish(Ok(()))
+    steps.finish(Ok(waiting))
 }
 
 /// `wp_delete_user( $id, $reassign )`: the user and its meta, its posts and

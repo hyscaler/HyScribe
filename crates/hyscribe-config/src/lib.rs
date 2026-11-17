@@ -194,6 +194,39 @@ impl Default for LoginLimits {
     }
 }
 
+/// How the connection to the mail relay is encrypted (`SMTP_TLS`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SmtpTls {
+    /// `starttls`: STARTTLS, required.
+    StartTls,
+    /// `tls`: TLS from the first byte.
+    Tls,
+    /// `none`: plain text, to a relay on this machine only.
+    None,
+}
+
+/// The mail relay (ADR 0016).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Smtp {
+    /// `SMTP_HOST`.
+    pub host: String,
+    /// `SMTP_PORT`, default 587, 465 or 25 by `tls`.
+    pub port: u16,
+    /// `SMTP_TLS`, default `starttls`.
+    pub tls: SmtpTls,
+    /// `SMTP_USER` and `SMTP_PASSWORD`, for SMTP AUTH.
+    pub login: Option<(String, Secret)>,
+}
+
+/// The mail settings (ADR 0016).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Mail {
+    /// The relay; none while `SMTP_HOST` is unset, and no mail is sent.
+    pub smtp: Option<Smtp>,
+    /// `MAIL_FROM`; none for WordPress's default sender.
+    pub from: Option<String>,
+}
+
 /// `UPLOAD_MAX_SIZE`'s default, 64 MB.
 pub const DEFAULT_UPLOAD_MAX_SIZE: u64 = 64 << 20;
 
@@ -227,6 +260,8 @@ pub struct Config {
     /// `UPLOAD_MAX_SIZE`: the largest upload, in bytes, which the admin
     /// prints where PHP prints `wp_max_upload_size()`.
     pub upload_max_size: u64,
+    /// The mail transport.
+    pub mail: Mail,
 }
 
 /// Why configuration could not be loaded.
@@ -391,6 +426,8 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         })?,
     };
 
+    let mail = mail(&get)?;
+
     let salts = SALT_KEYS
         .iter()
         .filter_map(|&key| get(key).map(|value| (key, Secret::new(value))))
@@ -409,7 +446,85 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         constants,
         login_limits,
         upload_max_size,
+        mail,
     })
+}
+
+/// The `SMTP_*` keys and `MAIL_FROM`: credentials only with a relay and
+/// never in plain text, which only a relay on this machine is spoken to in.
+fn mail<'a>(get: &impl Fn(&str) -> Option<&'a str>) -> Result<Mail, ConfigError> {
+    let tls = match get("SMTP_TLS") {
+        None | Some("starttls") => SmtpTls::StartTls,
+        Some("tls") => SmtpTls::Tls,
+        Some("none") => SmtpTls::None,
+        Some(_) => return Err(invalid("SMTP_TLS", "must be starttls, tls or none")),
+    };
+    let default_port = match tls {
+        SmtpTls::StartTls => 587,
+        SmtpTls::Tls => 465,
+        SmtpTls::None => 25,
+    };
+    let port = port(get("SMTP_PORT"), "SMTP_PORT", default_port)?;
+    let user = get("SMTP_USER");
+    if get("SMTP_PASSWORD").is_some() && user.is_none() {
+        return Err(invalid("SMTP_PASSWORD", "is set without SMTP_USER"));
+    }
+    let login = user.map(|user| {
+        let password = Secret::new(get("SMTP_PASSWORD").unwrap_or_default());
+        (user.to_string(), password)
+    });
+    let smtp = match get("SMTP_HOST") {
+        None if login.is_some() => return Err(invalid("SMTP_USER", "is set without SMTP_HOST")),
+        None => None,
+        Some(host)
+            if !host
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b".-:".contains(&b)) =>
+        {
+            return Err(invalid("SMTP_HOST", "must be a host name or an IP address"));
+        }
+        Some(host) if tls == SmtpTls::None && !loopback(host) => {
+            return Err(invalid(
+                "SMTP_TLS",
+                "none is only for a relay on this machine (localhost, 127.0.0.1 or ::1)",
+            ));
+        }
+        Some(_) if tls == SmtpTls::None && login.is_some() => {
+            return Err(invalid(
+                "SMTP_TLS",
+                "none sends no credentials: SMTP_USER needs starttls or tls",
+            ));
+        }
+        Some(host) => Some(Smtp {
+            host: host.to_string(),
+            port,
+            tls,
+            login,
+        }),
+    };
+    let from = match get("MAIL_FROM") {
+        Some(from) if !address(from) => {
+            let reason = "must be one address, such as wordpress@example.com";
+            return Err(invalid("MAIL_FROM", reason));
+        }
+        from => from.map(String::from),
+    };
+    Ok(Mail { smtp, from })
+}
+
+/// A host on this machine.
+fn loopback(host: &str) -> bool {
+    host == "localhost" || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+/// One plain address: something, `@`, then a domain with a dot, and no
+/// space, control character or address punctuation.
+fn address(value: &str) -> bool {
+    let plain = value
+        .bytes()
+        .all(|b| b.is_ascii_graphic() && !b"<>,;\\\"()[]".contains(&b));
+    let parts = value.rsplit_once('@');
+    plain && parts.is_some_and(|(local, domain)| !local.is_empty() && domain.contains('.'))
 }
 
 /// The HTTP listener settings of `values`, which setup mode listens on too.

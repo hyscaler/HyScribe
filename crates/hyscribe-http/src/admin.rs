@@ -189,6 +189,8 @@ struct Admin<'a> {
     draft: Option<u64>,
     /// `show_welcome_panel` as this view's `?welcome=` saves it.
     welcome: Option<Vec<u8>>,
+    /// The mails of the action, sent once it commits (ADR 0016).
+    outbox: crate::mail::Outbox,
     /// `$GLOBALS['login_grace_period']`: the auth cookie expired within
     /// its grace.
     grace: bool,
@@ -210,6 +212,7 @@ impl<'a> Admin<'a> {
             draft: None,
             welcome: None,
             grace: false,
+            outbox: crate::mail::Outbox::new(Arc::clone(&site.mailer)),
         }
     }
 

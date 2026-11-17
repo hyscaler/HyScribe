@@ -41,12 +41,21 @@ impl Net for System {
 /// The host's certificate store, where OpenSSL finds it: its bundle file,
 /// else each file in its certificate directories. Empty without one.
 pub fn host_roots() -> RootCertStore {
+    let mut store = RootCertStore::empty();
+    store.add_parsable_certificates(host_certificates());
+    store
+}
+
+/// The certificates of [`host_roots`], each one a trust anchor, for a TLS
+/// client of its own, the mail transport's (ADR 0016).
+pub fn host_certificates() -> Vec<CertificateDer<'static>> {
     let probe = openssl_probe::probe();
     roots(probe.cert_file, probe.cert_dir)
 }
 
-/// The certificates of `file`, else of each file in `dirs`.
-fn roots(file: Option<PathBuf>, dirs: Vec<PathBuf>) -> RootCertStore {
+/// The certificates of `file`, else of each file in `dirs`, that are
+/// trust anchors.
+fn roots(file: Option<PathBuf>, dirs: Vec<PathBuf>) -> Vec<CertificateDer<'static>> {
     let files = match file {
         Some(file) => vec![file],
         None => dirs
@@ -55,12 +64,12 @@ fn roots(file: Option<PathBuf>, dirs: Vec<PathBuf>) -> RootCertStore {
             .map(|entry| entry.path())
             .collect(),
     };
-    let mut store = RootCertStore::empty();
-    for path in files {
-        let certificates = CertificateDer::pem_file_iter(&path).into_iter().flatten();
-        store.add_parsable_certificates(certificates.filter_map(Result::ok));
-    }
-    store
+    let certificates = files.iter().flat_map(|path| {
+        let found = CertificateDer::pem_file_iter(path).into_iter().flatten();
+        found.filter_map(Result::ok)
+    });
+    let anchor = |der: &CertificateDer<'static>| RootCertStore::empty().add(der.clone()).is_ok();
+    certificates.filter(anchor).collect()
 }
 
 #[cfg(test)]

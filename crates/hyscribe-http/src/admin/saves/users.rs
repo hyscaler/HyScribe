@@ -4,7 +4,7 @@
 
 use hyscribe_admin::actions::{Asked, user_ids};
 use hyscribe_admin::posts::Answer;
-use hyscribe_db::{DbError, Write};
+use hyscribe_db::{DbError, Meta, Write};
 use hyscribe_phpser::{
     Key, Maybe, Value, add_query_arg, is_empty_string, lookup, maybe_unserialize, php_trim,
     remove_query_arg, stripslashes,
@@ -14,7 +14,8 @@ use hyscribe_write::Error;
 use hyscribe_write::users::{get_password_reset_key, set_role, wp_delete_user};
 
 use super::dashboard::context;
-use super::{Acting, Saving, Stop, text};
+use super::{Acting, Mailed, Saving, Stop, text};
+use crate::mail::{MailSite, Queued};
 
 /// `$redirect`: the list's own `wp_http_referer` field, else the list.
 fn redirect(asked: &Asked) -> Result<Vec<u8>, Stop> {
@@ -138,11 +139,11 @@ pub(super) fn dodelete<'a>(
 }
 
 /// `resetpassword`: a password reset link for each user but the current
-/// one, the mails taken as sent; then the list with how many were.
+/// one; then the list with how many were mailed.
 pub(super) fn resetpassword<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
-    _: &'a dyn Acting,
+    site: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
         let redirect = redirect(asked)?;
@@ -154,7 +155,10 @@ pub(super) fn resetpassword<'a>(
         for id in user_ids(asked).into_iter().filter(|id| *id != me) {
             let user = write.user(u64::try_from(id).unwrap_or_default()).await?;
             let login = user.map(|(login, _)| login).unwrap_or_default();
-            if retrieve_password(write, &login).await?.is_none() {
+            if retrieve_password(write, &login, (asked, site))
+                .await?
+                .is_none()
+            {
                 count += 1;
             }
         }
@@ -167,12 +171,13 @@ pub(super) fn resetpassword<'a>(
     })
 }
 
-/// `retrieve_password( $user_login )`: the user's password reset key kept,
-/// the mail taken as sent (MVP phase 8 sends it); else the error PHP gives
-/// for no such user.
+/// `retrieve_password( $user_login )` by a logged in user: the user's
+/// password reset key kept and its mail queued, to be waited for once the
+/// action commits; else the error PHP gives for no such user.
 pub(super) async fn retrieve_password(
     write: &mut Write<'_>,
     login: &[u8],
+    (asked, site): (&Asked<'_>, &dyn Acting),
 ) -> Result<Option<&'static str>, Error> {
     let login = stripslashes(login);
     let login = php_trim(&login);
@@ -194,8 +199,44 @@ pub(super) async fn retrieve_password(
             "<strong>Error:</strong> There is no account with that username or email address.",
         ));
     };
-    get_password_reset_key(write, id).await?;
+    let key = get_password_reset_key(write, id).await?;
+    let user = write.user(id).await?;
+    let (login, email) = user
+        .map(|(login, user)| (login, user.email))
+        .unwrap_or_default();
+    // `get_user_locale()`: the user's, else the site's, else `en_US`.
+    let own = write.meta_value(Meta::User, id, "locale").await?;
+    let lang = write.option_value("WPLANG").await?;
+    let locale = [own, lang]
+        .into_iter()
+        .flatten()
+        .find(|locale| !is_empty_string(locale));
+    let locale = locale.unwrap_or_else(|| b"en_US".to_vec());
+    let mail_site = MailSite::read(write, asked.home).await?;
+    let user = hyscribe_mail::User {
+        login: &login,
+        email: &email,
+    };
+    let key = key.as_bytes();
+    let mail = hyscribe_mail::retrieve_password(&mail_site.site(), &user, key, &locale, None);
+    let address = text(asked.ip).parse().ok();
+    site.outbox().queue(Queued::Reset(mail, id, address));
     Ok(None)
+}
+
+/// The users list's password resets are the only mails a screen's action
+/// waits for: `reset_count` counts those mailed, as PHP counts them.
+impl Mailed for Answer {
+    fn mailed(self, waited: usize, sent: usize) -> Answer {
+        match self {
+            Answer::Redirect(to) if sent < waited => {
+                let count = sent.to_string();
+                let args: [(&[u8], Option<&[u8]>); 1] = [(b"reset_count", Some(count.as_bytes()))];
+                Answer::Redirect(text(&add_query_arg(&args, to.as_bytes())))
+            }
+            answer => answer,
+        }
+    }
 }
 
 /// `$wp_roles->role_objects[ $role ]->has_cap( 'promote_users' )`.

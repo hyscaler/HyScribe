@@ -2,13 +2,14 @@
 
 //! The Settings screens' saves: `options.php`'s, the Permalinks screen's
 //! and the Privacy screen's new policy page, with the hooks of the options
-//! they change. No mail is sent (MVP phase 8): neither the new admin
-//! email's confirmation nor the change notice to the old one.
+//! they change, and their mails: the new admin email's confirmation and
+//! the change notice to the old one (ADR 0016).
 
 use hyscribe_admin::actions::{Asked, option_page};
 use hyscribe_admin::menu::link;
 use hyscribe_admin::posts::Answer;
 use hyscribe_db::Write;
+use hyscribe_mail::admin_email_changed;
 use hyscribe_phpser::{
     Key, Value, add_query_arg, addslashes, hash_equals, lookup, md5, php_trim, stripslashes,
 };
@@ -22,6 +23,7 @@ use hyscribe_write::posts::{PostArgs, wp_insert_post};
 
 use super::dashboard::context;
 use super::{Acting, Saving, text};
+use crate::mail::{MailSite, Queued};
 use crate::redirect::wp_validate_redirect;
 use crate::rewrite::{Settings, rules};
 
@@ -372,7 +374,7 @@ fn posted(post: &[(Key, Value)], option: &str) -> Value {
 pub(super) fn update<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
-    _: &'a dyn Acting,
+    site: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
         let page = option_page(asked);
@@ -382,8 +384,10 @@ pub(super) fn update<'a>(
         let mut post = asked.post.to_vec();
         let mut errors = Errors::default();
         let options = allowed(write, &page).await?;
+        let mut pending = None;
         if page == b"general" {
             general(write, &mut post, &mut errors).await?;
+            pending = Some(get_option(write, "adminhash").await?);
         }
         if options.is_empty() {
             errors.add(
@@ -396,6 +400,9 @@ pub(super) fn update<'a>(
         for option in options {
             let value = posted(&post, option);
             save(write, option, value, &mut errors).await?;
+        }
+        if let Some(pending) = pending {
+            confirm_admin_email(write, (asked, site), &pending).await?;
         }
         if errors.0.is_empty() {
             errors.add("general", "settings_updated", "Settings saved.", "success");
@@ -410,11 +417,37 @@ pub(super) fn update<'a>(
     })
 }
 
-/// `options.php`'s confirmation of a pending admin email change by its key.
+/// `update_option_new_admin_email()`'s mail to the new address, when the
+/// save left a key other than the one `before` it.
+async fn confirm_admin_email(
+    write: &mut Write<'_>,
+    (asked, site): (&Asked<'_>, &dyn Acting),
+    before: &Value,
+) -> Result<(), Error> {
+    let after = get_option(write, "adminhash").await?;
+    let hash = after.get_str("hash").map(Value::to_php_string);
+    let (Some(hash), false) = (hash, after == *before) else {
+        return Ok(());
+    };
+    let email = after
+        .get_str("newemail")
+        .map(Value::to_php_string)
+        .unwrap_or_default();
+    let user = write.user(asked.user).await?;
+    let login = user.map(|(login, _)| login).unwrap_or_default();
+    let mail_site = MailSite::read(write, asked.home).await?;
+    let mail = hyscribe_mail::new_admin_email(&mail_site.site(), &login, &email, &hash);
+    site.outbox()
+        .queue(Queued::Background("update_option_new_admin_email", mail));
+    Ok(())
+}
+
+/// `options.php`'s confirmation of a pending admin email change by its key,
+/// and `wp_site_admin_email_change_notification()`'s mail to the old one.
 pub(super) fn adminhash<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
-    _: &'a dyn Acting,
+    site: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
         let pending = get_option(write, "adminhash").await?;
@@ -429,7 +462,16 @@ pub(super) fn adminhash<'a>(
             let email = pending.get_str("newemail").cloned().unwrap_or(Value::Null);
             if hash_equals(known, &addslashes(given)) && !email.is_empty() {
                 let mut errors = Errors::default();
+                let old = get_option(write, "admin_email").await?.to_php_string();
                 save(write, "admin_email", email, &mut errors).await?;
+                let new = get_option(write, "admin_email").await?.to_php_string();
+                let mail_site = MailSite::read(write, asked.home).await?;
+                let changed =
+                    (old != new).then(|| admin_email_changed(&mail_site.site(), &old, &new));
+                if let Some(mail) = changed.flatten() {
+                    let kind = "wp_site_admin_email_change_notification";
+                    site.outbox().queue(Queued::Background(kind, mail));
+                }
                 delete_option(write, "adminhash").await?;
                 delete_option(write, "new_admin_email").await?;
                 redirect = "options-general.php?updated=true";

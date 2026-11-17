@@ -68,8 +68,63 @@ fn defaults_are_safe() {
                 window: 900,
             },
             upload_max_size: 64 << 20,
+            mail: Mail::default(),
         }
     );
+}
+
+/// The relay and sender of ADR 0016: ports by TLS mode, a login only with
+/// encryption, plain text only to this machine.
+#[test]
+fn reads_the_mail_keys() {
+    let mail = |pairs: &[(&str, &str)]| from_map(&with(pairs)).map(|config| config.mail);
+    let relay = |host: &str, port, tls, login| Smtp {
+        host: host.into(),
+        port,
+        tls,
+        login,
+    };
+    let login = Some(("me".to_string(), Secret::new("pw")));
+    assert_eq!(
+        mail(&[
+            ("SMTP_HOST", "smtp.example.test"),
+            ("SMTP_USER", "me"),
+            ("SMTP_PASSWORD", "pw"),
+            ("MAIL_FROM", "site@example.test"),
+        ]),
+        Ok(Mail {
+            smtp: Some(relay(
+                "smtp.example.test",
+                587,
+                SmtpTls::StartTls,
+                login.clone()
+            )),
+            from: Some("site@example.test".into()),
+        })
+    );
+    let tls = [
+        ("SMTP_HOST", "10.0.0.1"),
+        ("SMTP_TLS", "tls"),
+        ("SMTP_USER", "me"),
+    ];
+    let no_password = Some(("me".to_string(), Secret::new("")));
+    let smtp = relay("10.0.0.1", 465, SmtpTls::Tls, no_password);
+    assert_eq!(mail(&tls).map(|mail| mail.smtp), Ok(Some(smtp)));
+    for host in ["localhost", "127.0.0.1", "::1"] {
+        let none = [
+            ("SMTP_HOST", host),
+            ("SMTP_TLS", "none"),
+            ("SMTP_PORT", "2525"),
+        ];
+        let smtp = relay(host, 2525, SmtpTls::None, None);
+        assert_eq!(mail(&none).map(|mail| mail.smtp), Ok(Some(smtp)));
+    }
+    let local = [("SMTP_HOST", "localhost"), ("SMTP_TLS", "none")];
+    let smtp = relay("localhost", 25, SmtpTls::None, None);
+    assert_eq!(mail(&local).map(|mail| mail.smtp), Ok(Some(smtp)));
+    // Without a relay the other keys are read but send nothing.
+    let off = [("SMTP_TLS", "tls"), ("SMTP_PORT", "2465")];
+    assert_eq!(mail(&off), Ok(Mail::default()));
 }
 
 /// The capability constants as `define()` gives them, the safer value when
@@ -277,6 +332,8 @@ fn empty_values_count_as_unset() {
     );
 }
 
+const MAIL_FROM: &str = "must be one address, such as wordpress@example.com";
+
 #[test]
 fn rejects_bad_values() {
     let cases: &[(&str, &str, &str)] = &[
@@ -289,6 +346,30 @@ fn rejects_bad_values() {
         ("MODE", "write", "must be shadow or primary"),
         ("REST_PUBLIC_USERS", "true", "must be on or off"),
         ("HTTP_OUTBOUND", "yes", "must be on or off"),
+        ("SMTP_TLS", "ssl", "must be starttls, tls or none"),
+        ("SMTP_PORT", "0", "must be a port number from 1 to 65535"),
+        ("SMTP_PASSWORD", "pw", "is set without SMTP_USER"),
+        ("SMTP_USER", "me", "is set without SMTP_HOST"),
+        (
+            "SMTP_HOST",
+            "smtp example",
+            "must be a host name or an IP address",
+        ),
+        (
+            "SMTP_HOST",
+            "smtp/x",
+            "must be a host name or an IP address",
+        ),
+        ("MAIL_FROM", "a b@example.test", MAIL_FROM),
+        ("MAIL_FROM", "Site <a@example.test>", MAIL_FROM),
+        ("MAIL_FROM", "a@example", MAIL_FROM),
+        ("MAIL_FROM", "@example.test", MAIL_FROM),
+        ("MAIL_FROM", "example.test", MAIL_FROM),
+        (
+            "MAIL_FROM",
+            "a@example.test\r\nBcc: b@example.test",
+            MAIL_FROM,
+        ),
         (
             "EMPTY_TRASH_DAYS",
             "-1",
@@ -320,6 +401,18 @@ fn rejects_bad_values() {
             "must be a whole number from 1 to 86400",
         ),
     ];
+    let plain = "none is only for a relay on this machine (localhost, 127.0.0.1 or ::1)";
+    let pairs = [("SMTP_HOST", "smtp.example.test"), ("SMTP_TLS", "none")];
+    let refused = from_map(&with(&pairs)).unwrap_err().to_string();
+    assert_eq!(refused, format!("SMTP_TLS is invalid: {plain}"));
+    let pairs = [
+        ("SMTP_HOST", "127.0.0.1"),
+        ("SMTP_TLS", "none"),
+        ("SMTP_USER", "me"),
+    ];
+    let refused = from_map(&with(&pairs)).unwrap_err().to_string();
+    let reason = "none sends no credentials: SMTP_USER needs starttls or tls";
+    assert_eq!(refused, format!("SMTP_TLS is invalid: {reason}"));
     for &(key, value, reason) in cases {
         assert_eq!(
             from_map(&with(&[(key, value)])).unwrap_err().to_string(),

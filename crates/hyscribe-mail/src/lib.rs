@@ -2,35 +2,42 @@
 
 //! The emails WordPress 7.1.3 sends, each built as its function hands it to
 //! `wp_mail()`: recipient, subject, body and headers, with every filter at
-//! its default, in English. Sending is the transport's (ADR 0016); the
-//! caller reads the site, the users and the capabilities, and makes the
-//! keys. PHP is the oracle: `reference/mail/golden.sh` records every message.
+//! its default, in English, and [`Mailer`], the one `wp_mail()` that sends
+//! them through the SMTP relay (ADR 0016). The caller reads the site, the
+//! users and the capabilities, and makes the keys. PHP is the oracle:
+//! `reference/mail/golden.sh` records every message.
 //!
-//! Where each one will be called, once the transport is decided:
+//! Where each one is sent from, once the action has committed:
 //! - [`retrieve_password`]: hs-admin's password reset for users (bulk and
-//!   Ajax, `hyscribe-http`'s `saves/users.rs` and `saves/user_edit.rs`) and
-//!   the lost password form (MVP 8.3)
+//!   Ajax, `hyscribe-http`'s `saves/users.rs` and `saves/user_edit.rs`),
+//!   waited for; the lost password form (MVP 8.3) is not ported yet
 //! - [`new_user_to_admin`], [`new_user_to_user`]: Add User
-//!   (`edit_user_created_user`) and registration (`register_new_user`)
+//!   (`edit_user_created_user`); registration (`register_new_user`) later
 //! - [`email_change_request`]: one's own profile save (`saves/user_edit.rs`)
-//! - [`new_admin_email`], [`admin_email_changed`]: the General settings save
-//!   (`saves/options.rs`) and the `adminhash` confirmation
-//! - [`password_changed`], [`email_changed`]: `wp_update_user()` of another
-//!   user's edit and of a confirmed email change; [`password_reset_to_admin`]:
-//!   `after_password_reset` (MVP 8.3)
+//! - [`new_admin_email`]: the General settings save (`saves/options.rs`)
 //! - [`notify_postauthor`], [`notify_moderator`]: a new comment
 //!   (`comment_post`) and a comment approved in the admin
 //!   (`comment_unapproved_to_approved`)
-//! - [`user_request`], [`request_confirmed`], [`erasure_fulfilled`],
-//!   [`export_ready`]: the personal data requests' screens and confirmation
+//! - not sent yet: [`admin_email_changed`] (the `adminhash` confirmation),
+//!   [`password_changed`] and [`email_changed`] (`wp_update_user()`),
+//!   [`password_reset_to_admin`] (MVP 8.3), and the personal data
+//!   requests' [`user_request`], [`request_confirmed`],
+//!   [`erasure_fulfilled`] and [`export_ready`]
 
 mod comments;
 mod decode;
+mod headers;
+mod hooks;
+mod mailer;
 mod privacy;
+mod transport;
 mod users;
 
 pub use comments::{Comment, Post, PostAuthor, notify_moderator, notify_postauthor};
 pub use decode::wp_specialchars_decode;
+pub use headers::{Headers, breaks_line, parse as parse_headers};
+pub use hooks::{Hooks, NoHooks};
+pub use mailer::{Mailer, Outgoing, Recipient};
 pub use privacy::{Action, erasure_fulfilled, export_ready, request_confirmed, user_request};
 pub use users::{
     User, admin_email_changed, email_change_request, email_changed, new_admin_email,
@@ -41,7 +48,7 @@ pub use users::{
 use hyscribe_kses::str_replace;
 
 /// One `wp_mail()` call's arguments.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Mail {
     /// The recipient's address.
     pub to: Vec<u8>,

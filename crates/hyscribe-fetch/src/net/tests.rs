@@ -16,6 +16,18 @@ fn roots_come_from_the_bundle_else_the_folders() {
     assert!(roots(Some(tls().join("missing.pem")), Vec::new()).is_empty());
     assert!(roots(None, Vec::new()).is_empty());
     assert!(!host_roots().is_empty());
+    assert_eq!(host_certificates().len(), host_roots().len());
+}
+
+#[test]
+fn a_certificate_that_is_no_trust_anchor_is_left_out() {
+    let dir = std::env::temp_dir().join(format!("hyscribe-fetch-roots-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let junk = dir.join("junk.pem");
+    let pem = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n";
+    std::fs::write(&junk, pem).unwrap();
+    assert!(roots(Some(junk), Vec::new()).is_empty());
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[tokio::test]

@@ -51,6 +51,7 @@ mod feed;
 mod files;
 mod loaders;
 mod login;
+mod mail;
 pub mod query;
 mod reads;
 mod redirect;
@@ -117,6 +118,14 @@ pub struct Site {
     install: Arc<Install>,
     /// The outbound client, when `HTTP_OUTBOUND` is on (ADR 0019).
     fetch: Option<Arc<hyscribe_fetch::Client>>,
+    /// The mail transport (ADR 0016), off until [`Site::with_mail`].
+    mailer: Arc<hyscribe_mail::Mailer>,
+}
+
+/// A transport that sends nothing.
+fn mail_off() -> hyscribe_mail::Mailer {
+    let off = hyscribe_config::Mail::default();
+    hyscribe_mail::Mailer::new(&off, b"", Arc::new(hyscribe_mail::NoHooks)).0
 }
 
 /// The address a connection comes from.
@@ -160,6 +169,7 @@ impl Site {
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
             install: unconfigured(),
             fetch: None,
+            mailer: Arc::new(mail_off()),
         };
         for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
             if let Some(url) = url {
@@ -202,6 +212,7 @@ impl Site {
             limiter: Arc::clone(&self.limiter),
             install: Arc::clone(&self.install),
             fetch: self.fetch.clone(),
+            mailer: Arc::clone(&self.mailer),
         };
         site.build_rewriter();
         Ok(site)
@@ -261,6 +272,18 @@ impl Site {
     pub fn with_fetch(self, fetch: Option<hyscribe_fetch::Client>) -> Site {
         let fetch = fetch.map(Arc::new);
         Site { fetch, ..self }
+    }
+
+    /// The site with the mail transport of `mail` and `hooks`, and what
+    /// the start log says of it (ADR 0016).
+    pub fn with_mail(
+        self,
+        mail: &hyscribe_config::Mail,
+        hooks: Arc<dyn hyscribe_mail::Hooks>,
+    ) -> (Site, String) {
+        let (mailer, line) = hyscribe_mail::Mailer::new(mail, self.home.as_bytes(), hooks);
+        let mailer = Arc::new(mailer);
+        (Site { mailer, ..self }, line)
     }
 
     /// The site with the writer `Writer::open` gave (none in shadow mode),

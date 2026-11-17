@@ -48,7 +48,7 @@ if [ "$TTD" = wordpress_ttd ]; then
   ids=$("$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; echo implode( " ", get_posts( array( "post_type" => "any", "post_status" => "any", "numberposts" => -1, "fields" => "ids" ) ) );')
 fi
 for id in $ids; do
-  actions="$actions trash-post_$id"
+  actions="$actions trash-post_$id delete-post_$id"
 done
 # shellcheck disable=SC2086
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 1 ); foreach ( array_slice( $argv, 1 ) as $action ) { echo wp_create_nonce( $action ), "\t", $action, "\n"; }' \
@@ -136,6 +136,13 @@ done
 for query in '?post_type=page&paged=2' '?post_type=page&paged=3' '?post_type=page&paged=4'; do
   record hidden administrator "$query"
 done
+# Without the Trash (EMPTY_TRASH_DAYS=0, the e0 variants of as-role.php):
+# Delete Permanently instead of Trash.
+for role in administrator author; do
+  record e0posts "$role"
+done
+record e0posts administrator '?post_status=trash'
+record e0posts administrator '?post_type=page'
 # The extended view, from the settings cookie or the request; last, as the
 # request's mode is saved in the user's settings.
 record excerpt administrator '' 'wp-settings-1=posts_list_mode%3Dexcerpt'

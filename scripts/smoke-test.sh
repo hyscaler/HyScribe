@@ -14,6 +14,9 @@ cd "$work"
 tar -xzf "$archive"
 cd hyscribe
 test -x hyscribe && test -f LICENSE && test -f README.txt && test -f .env.example
+for page in README install configuration service switching maintenance security not-supported; do
+  test -s "docs/$page.md"
+done
 
 ./hyscribe version | grep -q 'AGPL-3.0-or-later'
 port="${SMOKE_PORT:-18080}"
@@ -23,7 +26,9 @@ chmod 600 .env
 
 ./hyscribe service start | grep -q '^started (pid '
 ./hyscribe service status | grep -q '^running (pid '
-curl -fsS "http://127.0.0.1:$port/?p=1" | grep -q 'Hello world!'
+# Saved first: grep -q stops reading early, which fails curl under pipefail.
+curl -fsS "http://127.0.0.1:$port/?p=1" > page.html
+grep -q 'Hello world!' page.html
 ./hyscribe service stop | grep -q '^stopped (pid '
 status=0
 ./hyscribe service status > status.txt || status=$?

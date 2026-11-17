@@ -237,6 +237,17 @@ fn server_config(
         .and_then(|()| hyscribe_config::load(home, site.env).map_err(|err| err.to_string()))
 }
 
+/// The installation the admin describes: `binary`, and what `.env` sets.
+fn install(config: &Config, binary: &Path) -> hyscribe_http::Install {
+    hyscribe_http::Install {
+        binary: binary.display().to_string(),
+        upload_max_size: config.upload_max_size,
+        database_user: config.database.user.clone(),
+        database_name: config.database.name.clone(),
+        charset: config.database.charset.clone(),
+    }
+}
+
 /// `hyscribe start`: serves the site until SIGTERM or SIGINT, after setup
 /// mode when there is no configuration yet.
 fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, String> {
@@ -291,7 +302,11 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                         config.upload_max_size,
                         config.image_limits,
                     ))
+                    .with_install(install(&config, &site.server.0))
                     .with_writer(writer);
+            let fetch = config.http_outbound.then(outbound);
+            let fetching = outbound_line(fetch.as_ref());
+            let site = site.with_fetch(fetch);
             // Logging in needs primary mode.
             let site = match config.mode {
                 Mode::Primary => site.with_sessions(Sessions::new(sessions_dir)),
@@ -309,6 +324,7 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                 std::process::id(),
                 mode_name(config.mode),
             );
+            let _ = writeln!(out, "{fetching}");
             let _ = out.flush();
             hyscribe_http::serve(listener, std::sync::Arc::new(site), async move {
                 // The sender only goes away after sending.
@@ -350,6 +366,22 @@ async fn open_writer<W: Write + ?Sized>(
 }
 
 /// Formats an I/O failure with what was being done.
+/// The outbound client (ADR 0019) over the host's certificate store.
+fn outbound() -> hyscribe_fetch::Client {
+    let net = std::sync::Arc::new(hyscribe_fetch::System);
+    hyscribe_fetch::Client::new(hyscribe_fetch::host_roots(), net, std::sync::Arc::new(()))
+}
+
+/// What the start log says of outbound fetches: a host without a
+/// certificate store fetches nothing over HTTPS.
+fn outbound_line(client: Option<&hyscribe_fetch::Client>) -> &'static str {
+    match client {
+        None => "outbound fetches off",
+        Some(client) if client.has_roots() => "outbound fetches on",
+        Some(_) => "outbound fetches on over HTTP only: no certificate store was found",
+    }
+}
+
 fn failed(context: String) -> impl FnOnce(std::io::Error) -> String {
     move |err| format!("{context}: {err}")
 }
@@ -458,14 +490,13 @@ fn describe(config: &Config) -> String {
     };
     format!(
         "Configuration OK\n\
-         Database: {user}@{host}:{port}/{name} (password {password}, prefix {prefix}, charset {charset})\n\
+         Database: {user}@{address}/{name} (password {password}, prefix {prefix}, charset {charset})\n\
          Listen: {bind}:{http_port}{proxy}\n\
          Mode: {mode}\n\
          Uploads: {uploads}\n\
          Keys and salts: {salts} of 8 set\n",
         user = db.user,
-        host = db.host,
-        port = db.port,
+        address = db.address(),
         name = db.name,
         prefix = db.prefix.as_str(),
         charset = db.charset,

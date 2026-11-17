@@ -61,6 +61,8 @@ mod uploads;
 
 pub use uploads::Uploads;
 
+pub use hyscribe_admin::site_health::Install;
+
 /// Parsers of request input that only the fuzz targets in `fuzz/` call
 /// from outside.
 #[doc(hidden)]
@@ -118,11 +120,26 @@ pub struct Site {
     limiter: Arc<login::limits::Limiter>,
     /// The uploads folder, where uploads are written and served from.
     uploads: Option<Arc<Uploads>>,
+    /// The installation as configured, which the admin shows.
+    install: Arc<Install>,
+    /// The outbound client, when `HTTP_OUTBOUND` is on (ADR 0019).
+    fetch: Option<Arc<hyscribe_fetch::Client>>,
 }
 
 /// The address a connection comes from.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Peer(pub(crate) std::net::IpAddr);
+
+/// An installation before [`Site::with_install`]: `.env`'s defaults.
+pub(crate) fn unconfigured() -> Arc<Install> {
+    Arc::new(Install {
+        binary: String::new(),
+        upload_max_size: hyscribe_config::DEFAULT_UPLOAD_MAX_SIZE,
+        database_user: String::new(),
+        database_name: String::new(),
+        charset: String::new(),
+    })
+}
 
 impl Site {
     /// Loads the autoloaded options. `home` and `siteurl` override those
@@ -149,6 +166,8 @@ impl Site {
             constants: hyscribe_config::Constants::default(),
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
             uploads: None,
+            install: unconfigured(),
+            fetch: None,
         };
         for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
             if let Some(url) = url {
@@ -190,6 +209,8 @@ impl Site {
             constants: self.constants,
             limiter: Arc::clone(&self.limiter),
             uploads: self.uploads.clone(),
+            install: Arc::clone(&self.install),
+            fetch: self.fetch.clone(),
         };
         site.build_rewriter();
         Ok(site)
@@ -229,6 +250,14 @@ impl Site {
         }
     }
 
+    /// The site of the installation `install` describes.
+    pub fn with_install(self, install: Install) -> Site {
+        Site {
+            install: Arc::new(install),
+            ..self
+        }
+    }
+
     /// `UPLOAD_MAX_SIZE`, 0 without an uploads folder.
     fn upload_max(&self) -> u64 {
         self.uploads
@@ -250,6 +279,12 @@ impl Site {
             sessions: Some(Arc::new(sessions)),
             ..self
         }
+    }
+
+    /// The site with the outbound client, none while `HTTP_OUTBOUND` is off.
+    pub fn with_fetch(self, fetch: Option<hyscribe_fetch::Client>) -> Site {
+        let fetch = fetch.map(Arc::new);
+        Site { fetch, ..self }
     }
 
     /// The site with the writer `Writer::open` gave (none in shadow mode),

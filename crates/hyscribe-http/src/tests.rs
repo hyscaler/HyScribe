@@ -255,6 +255,8 @@ async fn database_errors_show_no_details() {
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
         uploads: None,
+        install: unconfigured(),
+        fetch: None,
     });
     // The 404 page fails while rendering, reading an option it has not loaded.
     for uri in [
@@ -892,6 +894,8 @@ async fn the_front_page_links_to_home() {
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
         uploads: None,
+        install: unconfigured(),
+        fetch: None,
     });
     // Search results list the front page with a link to it.
     let reply = request(&site, "GET", "/?s=sample").await;
@@ -1026,6 +1030,8 @@ async fn failed_reads_answer_defaults() {
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
         uploads: None,
+        install: unconfigured(),
+        fetch: None,
     });
     let handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {

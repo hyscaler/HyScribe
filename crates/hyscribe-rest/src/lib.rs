@@ -918,7 +918,7 @@ fn checked(
         }
         args = (writing.args)(context, &params, args);
     }
-    let checked = has_valid_params(&params, &args)
+    let checked = has_valid_params(context, &params, &args)
         .and_then(|()| sanitize_params(context, &mut params, &args))
         .and_then(|()| (endpoint.permission)(context, &params));
     let answered = match (endpoint.callback, writing) {

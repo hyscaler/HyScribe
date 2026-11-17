@@ -202,6 +202,19 @@ pub(crate) struct Template {
     pub(crate) date: Option<String>,
 }
 
+impl Template {
+    /// A custom template for `post_type`: one without post types is for
+    /// every type.
+    pub(crate) fn custom_for(&self, post_type: &[u8]) -> bool {
+        let listed = self.post_types.as_ref().is_none_or(|types| {
+            types
+                .iter()
+                .any(|listed| listed.as_bytes() == Some(post_type))
+        });
+        self.is_custom && listed
+    }
+}
+
 /// What `get_block_templates()` is asked for.
 #[derive(Default)]
 pub(crate) struct Query {
@@ -512,16 +525,8 @@ fn files_after(
     built: Vec<Template>,
     post_type: Option<&Vec<u8>>,
 ) -> Vec<Template> {
-    let for_type = |template: &Template| {
-        post_type.is_none_or(|post_type| {
-            let listed = template.post_types.as_ref().is_none_or(|types| {
-                types
-                    .iter()
-                    .any(|listed| listed.as_bytes() == Some(post_type.as_slice()))
-            });
-            template.is_custom && listed
-        })
-    };
+    let for_type =
+        |template: &Template| post_type.is_none_or(|post_type| template.custom_for(post_type));
     let mut found: Vec<Template> = built.into_iter().filter(for_type).collect();
     if query.wp_id.is_some() {
         return found;

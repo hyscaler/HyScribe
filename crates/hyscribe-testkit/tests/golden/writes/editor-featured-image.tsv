@@ -1,0 +1,66 @@
+# The rows PHP WordPress writes for the action editor-featured-image (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-17 02:51:17 to 2026-11-17 02:51:17 UTC.
+# %wp_posts:1% is 9601.
+# %wp_posts:2% is 9602.
+# %wp_posts:3% is 9603.
+# %wp_posts:4% is 9604.
+# %wp_posts:5% is 9605.
+# %wp_posts:6% is 9606.
+# %wp_posts:7% is 9607.
+# %wp_posts:8% is 9608.
+# %wp_posts:9% is 9609.
+# %wp_posts:10% is 9616.
+# %wp_postmeta:1% is 9601.
+# %wp_postmeta:2% is 9602.
+# %wp_postmeta:3% is 9603.
+# %wp_postmeta:4% is 9604.
+# %wp_postmeta:5% is 9605.
+# %wp_postmeta:6% is 9606.
+# %wp_postmeta:7% is 9612.
+# %wp_postmeta:8% is 9613.
+# %wp_postmeta:9% is 9614.
+# %wp_terms:1% is 9601.
+# %wp_terms:2% is 9602.
+# %wp_terms:3% is 9603.
+# %wp_term_taxonomy:1% is 9601.
+# %wp_term_taxonomy:2% is 9602.
+# %wp_term_taxonomy:3% is 9603.
+wp_options	cron	~	option_value	a:6:{i:1793088495;a:3:{s:32:"recovery_mode_clean_expired_keys";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:5:"daily";s:4:"args";a:0:{}s:8:"interval";i:86400;}}s:34:"wp_privacy_delete_old_export_files";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:6:"hourly";s:4:"args";a:0:{}s:8:"interval";i:3600;}}s:41:"wp_privacy_personal_data_cleanup_requests";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:5:"daily";s:4:"args";a:0:{}s:8:"interval";i:86400;}}}i:1793092095;a:1:{s:16:"wp_version_check";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:10:"twicedaily";s:4:"args";a:0:{}s:8:"interval";i:43200;}}}i:1793093895;a:1:{s:17:"wp_update_plugins";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:10:"twicedaily";s:4:"args";a:0:{}s:8:"interval";i:43200;}}}i:1793095695;a:1:{s:16:"wp_update_themes";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:10:"twicedaily";s:4:"args";a:0:{}s:8:"interval";i:43200;}}}i:1793174895;a:1:{s:30:"wp_site_health_scheduled_check";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:6:"weekly";s:4:"args";a:0:{}s:8:"interval";i:604800;}}}s:7:"version";i:2;}	a:7:{i:1793088495;a:3:{s:32:"recovery_mode_clean_expired_keys";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:5:"daily";s:4:"args";a:0:{}s:8:"interval";i:86400;}}s:34:"wp_privacy_delete_old_export_files";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:6:"hourly";s:4:"args";a:0:{}s:8:"interval";i:3600;}}s:41:"wp_privacy_personal_data_cleanup_requests";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:5:"daily";s:4:"args";a:0:{}s:8:"interval";i:86400;}}}i:1793092095;a:1:{s:16:"wp_version_check";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:10:"twicedaily";s:4:"args";a:0:{}s:8:"interval";i:43200;}}}i:1793093895;a:1:{s:17:"wp_update_plugins";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:10:"twicedaily";s:4:"args";a:0:{}s:8:"interval";i:43200;}}}i:1793095695;a:1:{s:16:"wp_update_themes";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:10:"twicedaily";s:4:"args";a:0:{}s:8:"interval";i:43200;}}}i:1793174895;a:1:{s:30:"wp_site_health_scheduled_check";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:6:"weekly";s:4:"args";a:0:{}s:8:"interval";i:604800;}}}i:%unix%;a:1:{s:8:"do_pings";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:2:{s:8:"schedule";b:0;s:4:"args";a:0:{}}}}s:7:"version";i:2;}
+wp_options	fresh_site	~	option_value	1	0
+wp_postmeta	%wp_postmeta:7%	+	meta_id	%wp_postmeta:7%
+wp_postmeta	%wp_postmeta:7%	+	meta_key	_pingme
+wp_postmeta	%wp_postmeta:7%	+	meta_value	1
+wp_postmeta	%wp_postmeta:7%	+	post_id	1
+wp_postmeta	%wp_postmeta:8%	+	meta_id	%wp_postmeta:8%
+wp_postmeta	%wp_postmeta:8%	+	meta_key	_encloseme
+wp_postmeta	%wp_postmeta:8%	+	meta_value	1
+wp_postmeta	%wp_postmeta:8%	+	post_id	1
+wp_postmeta	%wp_postmeta:9%	+	meta_id	%wp_postmeta:9%
+wp_postmeta	%wp_postmeta:9%	+	meta_key	_thumbnail_id
+wp_postmeta	%wp_postmeta:9%	+	meta_value	9605
+wp_postmeta	%wp_postmeta:9%	+	post_id	1
+wp_posts	%wp_posts:10%	+	ID	%wp_posts:10%
+wp_posts	%wp_posts:10%	+	comment_count	0
+wp_posts	%wp_posts:10%	+	comment_status	closed
+wp_posts	%wp_posts:10%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:10%
+wp_posts	%wp_posts:10%	+	menu_order	0
+wp_posts	%wp_posts:10%	+	ping_status	closed
+wp_posts	%wp_posts:10%	+	pinged	
+wp_posts	%wp_posts:10%	+	post_author	1
+wp_posts	%wp_posts:10%	+	post_content	<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->
+wp_posts	%wp_posts:10%	+	post_content_filtered	
+wp_posts	%wp_posts:10%	+	post_date	%now%
+wp_posts	%wp_posts:10%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:10%	+	post_excerpt	
+wp_posts	%wp_posts:10%	+	post_mime_type	
+wp_posts	%wp_posts:10%	+	post_modified	%now%
+wp_posts	%wp_posts:10%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:10%	+	post_name	1-revision-v1
+wp_posts	%wp_posts:10%	+	post_parent	1
+wp_posts	%wp_posts:10%	+	post_password	
+wp_posts	%wp_posts:10%	+	post_status	inherit
+wp_posts	%wp_posts:10%	+	post_title	Hello world!
+wp_posts	%wp_posts:10%	+	post_type	revision
+wp_posts	%wp_posts:10%	+	to_ping	
+wp_posts	1	~	post_modified	2026-10-27 08:08:15	%now%
+wp_posts	1	~	post_modified_gmt	2026-10-27 08:08:15	%now%

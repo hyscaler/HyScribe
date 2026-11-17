@@ -1,0 +1,25 @@
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- The state reference/rest/golden.sh records reference/rest/editor-saves.list
+-- over, in mysqldump's form so the tests and reference/writes/actions-editor.php
+-- read it too: the default install with the auto-drafts post-new.php leaves
+-- for a post and a page by the administrator and a post by the contributor,
+-- a draft, a scheduled post, a password protected post in the aside format
+-- with an image as its featured image, a page with the theme's page-no-title
+-- template, a PDF, and a tag and a category on no post. The navigation menu PHP's
+-- fallback creates on php.sh's first page view is taken out; db.sh
+-- resets the database after.
+DELETE FROM wp_posts WHERE ID = 4 AND post_type = 'wp_navigation';
+INSERT INTO `wp_posts` VALUES (9601,1,'2026-11-10 10:00:00','0000-00-00 00:00:00','','Auto Draft','','auto-draft','open','open','','','','','2026-11-10 10:00:00','0000-00-00 00:00:00','',0,'http://127.0.0.1:8081/?p=9601',0,'post','',0),(9602,1,'2026-11-10 10:05:00','0000-00-00 00:00:00','','Auto Draft','','auto-draft','closed','closed','','','','','2026-11-10 10:05:00','0000-00-00 00:00:00','',0,'http://127.0.0.1:8081/?page_id=9602',0,'page','',0),(9603,1,'2026-11-09 09:00:00','0000-00-00 00:00:00','<!-- wp:paragraph -->\n<p>Still a draft.</p>\n<!-- /wp:paragraph -->','A draft','','draft','open','open','','','','','2026-11-09 09:00:00','0000-00-00 00:00:00','',0,'http://127.0.0.1:8081/?p=9603',0,'post','',0),(9604,1,'2030-01-01 10:00:00','2030-01-01 10:00:00','<!-- wp:paragraph -->\n<p>Coming up.</p>\n<!-- /wp:paragraph -->','Coming up','','future','open','open','','coming-up','','','2026-11-09 10:00:00','2026-11-09 10:00:00','',0,'http://127.0.0.1:8081/?p=9604',0,'post','',0),(9605,1,'2026-11-08 10:00:00','2026-11-08 10:00:00','','Photo','','inherit','open','closed','','photo','','','2026-11-08 10:00:00','2026-11-08 10:00:00','',0,'http://127.0.0.1:8081/wp-content/uploads/2026/11/photo.jpg',0,'attachment','image/jpeg',0),(9606,1,'2026-11-07 10:00:00','2026-11-07 10:00:00','<!-- wp:paragraph -->\n<p>For friends.</p>\n<!-- /wp:paragraph -->','Protected','','publish','open','open','pw','protected','','','2026-11-07 10:00:00','2026-11-07 10:00:00','',0,'http://127.0.0.1:8081/?p=9606',0,'post','',0),(9607,1,'2026-11-06 10:00:00','2026-11-06 10:00:00','<!-- wp:paragraph -->\n<p>Above the others.</p>\n<!-- /wp:paragraph -->','Parent page','','publish','closed','closed','','parent-page','','','2026-11-06 10:00:00','2026-11-06 10:00:00','',0,'http://127.0.0.1:8081/?page_id=9607',0,'page','',0),(9608,703,'2026-11-10 10:10:00','0000-00-00 00:00:00','','Auto Draft','','auto-draft','open','open','','','','','2026-11-10 10:10:00','0000-00-00 00:00:00','',0,'http://127.0.0.1:8081/?p=9608',0,'post','',0),(9609,1,'2026-11-08 11:00:00','2026-11-08 11:00:00','','Manual','','inherit','open','closed','','manual','','','2026-11-08 11:00:00','2026-11-08 11:00:00','',0,'http://127.0.0.1:8081/wp-content/uploads/2026/11/manual.pdf',0,'attachment','application/pdf',0);
+INSERT INTO `wp_postmeta` VALUES (9601,9605,'_wp_attached_file','2026/11/photo.jpg'),(9602,9605,'_wp_attachment_metadata','a:6:{s:5:\"width\";i:1200;s:6:\"height\";i:800;s:4:\"file\";s:17:\"2026/11/photo.jpg\";s:8:\"filesize\";i:345678;s:5:\"sizes\";a:2:{s:6:\"medium\";a:5:{s:4:\"file\";s:17:\"photo-300x200.jpg\";s:5:\"width\";i:300;s:6:\"height\";i:200;s:9:\"mime-type\";s:10:\"image/jpeg\";s:8:\"filesize\";i:12345;}s:9:\"thumbnail\";a:5:{s:4:\"file\";s:17:\"photo-150x150.jpg\";s:5:\"width\";i:150;s:6:\"height\";i:150;s:9:\"mime-type\";s:10:\"image/jpeg\";s:8:\"filesize\";i:5432;}}s:10:\"image_meta\";a:12:{s:8:\"aperture\";s:1:\"0\";s:6:\"credit\";s:0:\"\";s:6:\"camera\";s:0:\"\";s:7:\"caption\";s:0:\"\";s:17:\"created_timestamp\";s:1:\"0\";s:9:\"copyright\";s:0:\"\";s:12:\"focal_length\";s:1:\"0\";s:3:\"iso\";s:1:\"0\";s:13:\"shutter_speed\";s:1:\"0\";s:5:\"title\";s:0:\"\";s:11:\"orientation\";s:1:\"0\";s:8:\"keywords\";a:0:{}}}'),(9603,9606,'_thumbnail_id','9605'),(9604,9607,'_wp_page_template','page-no-title'),(9605,9609,'_wp_attached_file','2026/11/manual.pdf'),(9606,9609,'_wp_attachment_metadata','a:1:{s:8:\"filesize\";i:2048;}');
+INSERT INTO `wp_terms` VALUES (9601,'Foo','foo',0),(9602,'News','news',0),(9603,'post-format-aside','post-format-aside',0);
+INSERT INTO `wp_term_taxonomy` VALUES (9601,9601,'post_tag','',0,0),(9602,9602,'category','',0,0),(9603,9603,'post_format','',0,1);
+INSERT INTO `wp_term_relationships` VALUES (9606,1,0),(9606,9603,0),(9603,1,0),(9604,1,0);
+UPDATE wp_term_taxonomy SET count = 2 WHERE term_taxonomy_id = 1;
+-- cleanup
+DELETE FROM wp_posts WHERE ID BETWEEN 9601 AND 9699;
+DELETE FROM wp_postmeta WHERE meta_id BETWEEN 9601 AND 9699;
+DELETE FROM wp_terms WHERE term_id BETWEEN 9601 AND 9699;
+DELETE FROM wp_term_taxonomy WHERE term_taxonomy_id BETWEEN 9601 AND 9699;
+DELETE FROM wp_term_relationships WHERE object_id BETWEEN 9601 AND 9699;
+UPDATE wp_term_taxonomy SET count = 1 WHERE term_taxonomy_id = 1;

@@ -262,8 +262,8 @@ fn a_create_plans_its_fields() {
             comment_status: Some("closed".into()),
             ping_status: Some("open".into()),
             sticky: Some(false),
-            unset_thumbnail: true,
-            clear_template: true,
+            thumbnail: Some(0),
+            template: Some(Vec::new()),
             categories: Some(vec![1]),
             tags: Some(Vec::new()),
             ..Save::default()
@@ -519,22 +519,58 @@ fn parents_are_checked() {
     }
 }
 
-/// A featured image that is an attachment is not ported; any other post
-/// or none clears it, an ID with no post leaves it.
+/// A post that is not an image `wp_get_attachment_image()` shows, an
+/// attachment without a file included, or none clears the featured image;
+/// an ID with no post leaves it.
 #[test]
 fn featured_images_are_cleared() {
     let featured = |media: &str| {
         let body = format!(r#"{{"featured_media":{media}}}"#);
-        plan("administrator", "POST", "/wp/v2/posts/1", &body).unset_thumbnail
+        plan("administrator", "POST", "/wp/v2/posts/1", &body).thumbnail
     };
-    assert!(featured("2") && featured("-2") && !featured("12345"));
-    let served = answered(
-        "administrator",
-        "POST",
-        "/wp/v2/posts/1",
-        r#"{"featured_media":97}"#,
-    );
-    assert_eq!(served.status, 501);
+    for media in ["0", "2", "-2", "97"] {
+        assert_eq!(featured(media), Some(0), "{media}");
+    }
+    assert_eq!(featured("12345"), None);
+}
+
+/// A post format is set as its term's slug, `standard` as none, and a page
+/// has none to set.
+#[test]
+fn formats_are_terms() {
+    let format = |route: &str, format: &str| {
+        let body = format!(r#"{{"format":"{format}"}}"#);
+        plan("administrator", "POST", route, &body).format
+    };
+    let aside = Some(b"post-format-aside".to_vec());
+    assert_eq!(format("/wp/v2/posts/1", "aside"), aside);
+    assert_eq!(format("/wp/v2/posts/1", "standard"), Some(Vec::new()));
+    assert_eq!(format("/wp/v2/posts/1", ""), None);
+    assert_eq!(format("/wp/v2/pages/2", "aside"), None);
+}
+
+/// `check_template()`: none, the post's own or the theme's custom
+/// templates for its type pass; a list is not ported.
+#[test]
+fn templates_are_checked() {
+    let template = |route: &str, template: &str| {
+        let body = format!(r#"{{"template":{template}}}"#);
+        answered("administrator", "POST", route, &body)
+    };
+    for (route, value) in [
+        ("/wp/v2/pages/2", r#""page-no-title""#),
+        ("/wp/v2/pages", r#""page-no-title""#),
+        ("/wp/v2/posts/1", r#""0""#),
+        ("/wp/v2/posts/1", "[]"),
+    ] {
+        let status = template(route, value).status;
+        assert!(matches!(status, 200 | 201), "{route} {value}");
+    }
+    let refused = template("/wp/v2/posts/1", r#""page-no-title""#);
+    assert!(text_of(&refused).contains(r#""template is not one of .""#));
+    let refused = template("/wp/v2/navigation", r#""page-no-title""#);
+    assert!(text_of(&refused).contains(r#""template is not one of .""#));
+    assert_eq!(template("/wp/v2/posts/1", r#"["x"]"#).status, 501);
 }
 
 /// Navigation menus and synced patterns save the fields their schemas

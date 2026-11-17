@@ -33,6 +33,8 @@ pub enum Taxonomy {
     Category,
     /// `post_tag`.
     PostTag,
+    /// `post_format`, whose terms `set_post_format()` names.
+    PostFormat,
 }
 
 impl Taxonomy {
@@ -41,6 +43,7 @@ impl Taxonomy {
         match self {
             Taxonomy::Category => "category",
             Taxonomy::PostTag => "post_tag",
+            Taxonomy::PostFormat => "post_format",
         }
     }
 

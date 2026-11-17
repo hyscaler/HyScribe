@@ -487,7 +487,126 @@ async fn keeps_a_password_reset_key() {
     };
     check("admin-send-password-reset", setup, async |write, id| {
         let key = get_password_reset_key(write, id).await.unwrap();
-        assert!(key.len() == 20 && key.bytes().all(|b| b.is_ascii_alphanumeric()));
+        assert!(key.key.len() == 20 && key.key.bytes().all(|b| b.is_ascii_alphanumeric()));
+    })
+    .await;
+}
+
+/// The lost password form keeps a key as PHP keeps it, whose hash the
+/// stored key holds, for a user found by their login and one found by
+/// their email with spaces around it, and none for a login no user has
+/// (the oracle's `login-lostpassword`).
+#[tokio::test]
+async fn keeps_the_lost_password_form_s_keys() {
+    let setup = async |write: &mut Write<'_>| {
+        let lost = setup_user(write, new_user("oracle-lost")).await;
+        (lost, setup_user(write, new_user("oracle-mail")).await)
+    };
+    check("login-lostpassword", setup, async |write, (lost, mail)| {
+        let found = retrieve_password(write, b"oracle-lost")
+            .await
+            .unwrap()
+            .unwrap();
+        let (login, email) = (
+            b"oracle-lost".to_vec(),
+            b"oracle-lost@example.test".to_vec(),
+        );
+        assert_eq!((found.id, found.login, found.email), (lost, login, email));
+        let (_, user) = write.user(lost).await.unwrap().unwrap();
+        let hash = user.activation_key.split_once(':').unwrap().1;
+        assert!(hyscribe_auth::wp_verify_fast_hash(
+            found.key.as_bytes(),
+            hash.as_bytes()
+        ));
+        let found = retrieve_password(write, b" oracle-mail@example.test ").await;
+        assert_eq!(found.unwrap().unwrap().id, mail);
+        let refused = retrieve_password(write, b"nobody").await.unwrap();
+        assert_eq!(refused.unwrap_err().code, "invalidcombo");
+    })
+    .await;
+}
+
+/// The lost password form's errors: an empty login, an address no user
+/// has, and a login starting with `@`, which is looked up as a login.
+#[tokio::test]
+async fn refuses_what_the_lost_password_form_refuses() {
+    rolled_back(async |write| {
+        let at = UserData {
+            user_email: some("at@example.test"),
+            ..new_user("@at")
+        };
+        let at = insert_ok(write, at).await;
+        let mail = UserData {
+            user_email: some("other@example.test"),
+            ..new_user("mail@login.test")
+        };
+        let mail = insert_ok(write, mail).await;
+        for (login, code) in [
+            (&b""[..], "empty_username"),
+            (b" 0 ", "empty_username"),
+            (b"nobody@example.test", "invalid_email"),
+            (b"@at@example.test", "invalidcombo"),
+        ] {
+            let refused = retrieve_password(write, login).await.unwrap();
+            assert_eq!(refused.unwrap_err().code, code, "{login:?}");
+        }
+        // A login that is an address no user has as their email.
+        let found = retrieve_password(write, b"mail@login.test").await.unwrap();
+        assert_eq!(found.unwrap().id, mail);
+        let found = retrieve_password(write, b"@at").await.unwrap();
+        assert_eq!(found.unwrap().id, at);
+    })
+    .await;
+}
+
+/// A reset stores the slashed password's hash, clears the reset key and
+/// empties the default password nag, added where the user had none (the
+/// oracle's `login-resetpass`).
+#[tokio::test]
+async fn resets_a_password() {
+    let setup = async |write: &mut Write<'_>| {
+        let nagged = UserData {
+            user_activation_key: some("1:key"),
+            ..new_user("oracle-nagged")
+        };
+        let nagged = setup_user(write, nagged).await;
+        let nag = (Value::Bool(true), Value::Null);
+        let meta = update_metadata(
+            write,
+            Meta::User,
+            nagged,
+            "default_password_nag",
+            &nag.0,
+            &nag.1,
+        );
+        meta.await.unwrap();
+        (nagged, setup_user(write, new_user("oracle-plain")).await)
+    };
+    check("login-resetpass", setup, async |write, (nagged, plain)| {
+        for (id, login) in [(nagged, "oracle-nagged"), (plain, "oracle-plain")] {
+            let user = reset_password(write, id, b" It\\'s new ").await.unwrap();
+            let email = format!("{login}@example.test").into_bytes();
+            assert_eq!(user, (login.as_bytes().to_vec(), email));
+            let (_, user) = write.user(id).await.unwrap().unwrap();
+            assert!(check_password(b"It\\'s new", user.pass.as_bytes()));
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn lost_passwords_return_each_database_error() {
+    let setup = async |write: &mut Write<'_>| insert_ok(write, new_user("oracle-lost")).await;
+    fails_at_each_step(setup, async |write, id| {
+        retrieve_password(write, b"oracle-lost@example.test")
+            .await?
+            .unwrap();
+        retrieve_password(write, b"oracle-lost@other.test")
+            .await?
+            .unwrap_err();
+        retrieve_password(write, b"oracle-lost").await?.unwrap();
+        reset_password(write, id, b"new").await?;
+        Ok(())
     })
     .await;
 }

@@ -8,6 +8,12 @@ pub(crate) fn corpus(name: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|err| panic!("{path}: {err}"))
 }
 
+/// A hostile case (`reference/uploads/hostile.py`), also a fuzz seed.
+pub(crate) fn hostile(name: &str) -> Vec<u8> {
+    let path = format!("{}/tests/hostile/{name}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read(&path).unwrap_or_else(|err| panic!("{path}: {err}"))
+}
+
 /// The `kind` lines of `uploads.tsv` (`reference/uploads/golden.sh`): each
 /// corpus file and PHP's serialized answer.
 pub(crate) fn golden(kind: &str) -> Vec<(String, Vec<u8>)> {

@@ -24,6 +24,7 @@ fn main() -> ExitCode {
         server: (exe, vec!["start".into()]),
         input: &mut stdin.lock(),
         terminal: Some(std::os::fd::AsFd::as_fd(&stdin)),
+        screen: std::io::IsTerminal::is_terminal(&std::io::stdout()),
         out: &mut std::io::stdout(),
         err: &mut std::io::stderr(),
     }))

@@ -4,7 +4,10 @@
 # Builds the release archives for one target (ADR 0005):
 #   scripts/package.sh <x86_64|aarch64>-unknown-linux-musl <out-dir>
 # Writes hyscribe_<version>_linux_<arch>.tar.gz and the hyscribe-latest alias.
-# The build is reproducible: same commit, same toolchain, same bytes.
+# The build is reproducible: same commit, same toolchains, same bytes.
+# Needs the Rust target and clang: `ring` (rustls's crypto provider, ADR 0019)
+# compiles C and assembly, and clang builds it for either target without a
+# musl cross toolchain. CC_<target> and AR_<target> override the choice.
 set -euo pipefail
 
 target=${1:?target}
@@ -15,11 +18,21 @@ case "$target" in
   x86_64-unknown-linux-musl) arch=amd64 ;;
   aarch64-unknown-linux-musl)
     arch=arm64
-    # No C code is linked, so Rust's own linker is enough to cross-compile.
+    # ring's objects are static and need no C library, so Rust's own linker
+    # cross-links them with Rust's bundled musl.
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld
     ;;
   *) echo "unsupported target: $target" >&2; exit 2 ;;
 esac
+
+# cc-rs reads CC_<target> with the target's dashes as underscores.
+var="${target//-/_}"
+cc_var="CC_$var"
+export "$cc_var=${!cc_var:-clang}"
+if ! command -v "${!cc_var}" > /dev/null; then
+  echo "${!cc_var} not found: install clang, or set $cc_var to a C compiler for $target" >&2
+  exit 2
+fi
 
 version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/Cargo.toml" | head -n 1)"
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$root" log -1 --format=%ct)}"

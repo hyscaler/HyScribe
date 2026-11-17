@@ -237,8 +237,14 @@ fn sample_permalink(context: &Context, post: &Post) -> (Vec<u8>, Vec<u8>) {
         "page" => b"%pagename%",
         _ => b"%postname%",
     };
+    // Drafts are faked as published and private posts are read in the edit
+    // context; a trashed post's link stays plain.
+    let status = match post.status.as_str() {
+        "trash" => "trash",
+        _ => "publish",
+    };
     let sample = Post {
-        status: "publish".into(),
+        status: status.into(),
         name: token.to_vec(),
         ..post.clone()
     };

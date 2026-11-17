@@ -755,6 +755,7 @@ dependencies = [
  "hyscribe-phpser",
  "hyscribe-service",
  "hyscribe-testkit",
+ "hyscribe-write",
  "rustix",
  "sqlx",
  "tempfile",

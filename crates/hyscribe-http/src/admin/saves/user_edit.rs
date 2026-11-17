@@ -24,9 +24,9 @@ use hyscribe_write::users::{
 };
 
 use super::screen::update_user_meta;
-use super::users::{can_promote, retrieve_password};
+use super::users::{can_promote, retrieve_password_mail};
 use super::{Acting, Ajax, Mailed, Saving, Stop, id_of, text};
-use crate::mail::{MailSite, Queued};
+use crate::mail::{EMAIL_FAILURE, MailSite, Queued};
 use hyscribe_mail::email_change_request;
 
 /// What PHP cannot go on with, or shows again: not ported.
@@ -235,8 +235,9 @@ pub(super) fn create<'a>(
         site.outbox()
             .queue(Queued::Background("wp_new_user_notification", mail));
         if lookup(asked.post, "send_user_notification").is_some() {
-            let key = get_password_reset_key(write, id).await?;
-            let mail = hyscribe_mail::new_user_to_user(&mail_site.site(), &user, key.as_bytes());
+            let reset = get_password_reset_key(write, id).await?;
+            let mail =
+                hyscribe_mail::new_user_to_user(&mail_site.site(), &user, reset.key.as_bytes());
             site.outbox()
                 .queue(Queued::Background("wp_new_user_notification", mail));
         }
@@ -392,23 +393,16 @@ pub(super) fn password_reset<'a>(
         let (login, name) =
             user.map_or_else(Default::default, |(login, user)| (login, user.display_name));
         Ok(
-            match retrieve_password(write, &login, (asked, site)).await? {
-                None => {
+            match retrieve_password_mail(write, &login, (asked, site)).await? {
+                Ok(_) => {
                     let message = [&b"A password reset link was emailed to "[..], &name, b"."];
                     json(true, Value::String(message.concat()))
                 }
-                Some(error) => json(false, Value::String(error.into())),
+                Err(refusal) => json(false, Value::String(refusal.message.into())),
             },
         )
     })
 }
-
-/// `retrieve_password()`'s error when `wp_mail()` fails.
-const EMAIL_FAILURE: &str = concat!(
-    "<strong>Error:</strong> The email could not be sent. Your site may not be correctly ",
-    "configured to send emails. <a href=\"https://wordpress.org/documentation/article/",
-    "reset-your-password/\">Get support for resetting your password</a>."
-);
 
 /// `send-password-reset` is the only Ajax action that waits for its mail:
 /// the error PHP sends when it was not sent.

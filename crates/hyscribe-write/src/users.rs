@@ -7,9 +7,12 @@
 use hyscribe_auth::{generate_password, hash_password, wp_fast_hash};
 use hyscribe_db::{Meta, UserFields, Write};
 use hyscribe_kses::{esc_url_raw, wp_strip_all_tags};
+use hyscribe_model::hooks::{apply_filters, do_action};
 use hyscribe_phpser::{Key, Value, addslashes, is_empty_string, md5, php_trim, stripslashes};
 use hyscribe_render::date::{format_unix, site_zone};
-use hyscribe_render::formatting::{sanitize_email, sanitize_title, sanitize_user_strict};
+use hyscribe_render::formatting::{
+    sanitize_email, sanitize_title, sanitize_user, sanitize_user_strict,
+};
 use hyscribe_render::kses::{wp_kses_data, wp_kses_user_description};
 
 use crate::options::{
@@ -419,12 +422,42 @@ async fn update(steps: &mut Steps<'_, '_, Error>, data: &UserData) -> Result<u64
     insert(steps, &merged, Pass::Hashed(pass)).await
 }
 
+/// A password reset key kept for a user, for the mail that carries it.
+#[derive(Debug)]
+pub struct ResetKey {
+    /// The user's ID.
+    pub id: u64,
+    /// `user_login`.
+    pub login: Vec<u8>,
+    /// `user_email`.
+    pub email: Vec<u8>,
+    /// The key, whose fast hash is stored.
+    pub key: String,
+}
+
+/// A `WP_Error` of `retrieve_password()`: its code and message.
+#[derive(Debug)]
+pub struct Refusal {
+    /// The error code.
+    pub code: &'static str,
+    /// The message, as markup.
+    pub message: &'static str,
+}
+
+/// The message of a login or address no user has.
+const NO_ACCOUNT: &str =
+    "<strong>Error:</strong> There is no account with that username or email address.";
+
 /// `get_password_reset_key()` of the user `id`: a new key's fast hash
-/// stored after the time as its `user_activation_key`, and the key, which
-/// the mail carries.
-pub async fn get_password_reset_key(write: &mut Write<'_>, id: u64) -> Result<String, Error> {
+/// stored after the time as its `user_activation_key`, with the actions
+/// `retrieve_password` and `retrieve_password_key`.
+pub async fn get_password_reset_key(write: &mut Write<'_>, id: u64) -> Result<ResetKey, Error> {
     let mut steps = Steps::new(write);
+    let (login, user) = step!(steps, user(id)).unwrap_or_default();
+    do_action("retreive_password", &[&login]);
+    do_action("retrieve_password", &[&login]);
     let key = steps.keep(generate_password(20, false).map_err(Error::Random));
+    do_action("retrieve_password_key", &[&login, &key]);
     let hashed = format!("{}:{}", now(), wp_fast_hash(key.as_bytes()));
     let data = UserData {
         id,
@@ -432,7 +465,86 @@ pub async fn get_password_reset_key(write: &mut Write<'_>, id: u64) -> Result<St
         ..UserData::default()
     };
     steps.run(async |w| wp_update_user(w, &data).await).await;
-    steps.finish(Ok(key))
+    let email = user.email;
+    steps.finish(Ok(ResetKey {
+        id,
+        login,
+        email,
+        key,
+    }))
+}
+
+/// `retrieve_password( $user_login )` up to its mail, the login slashed as
+/// `$_POST` holds it: the user's new reset key, by their email when the
+/// login has an `@` past its first character, else the error PHP gives.
+pub async fn retrieve_password(
+    write: &mut Write<'_>,
+    login: &[u8],
+) -> Result<Result<ResetKey, Refusal>, Error> {
+    let login = stripslashes(login);
+    let login = php_trim(&login);
+    let (mut user, mut errors) = (None, None);
+    let by_login =
+        async |write: &mut Write<'_>| write.user_id_by_login(&sanitize_user(login)).await;
+    if is_empty_string(login) {
+        errors = Some(Refusal {
+            code: "empty_username",
+            message: "<strong>Error:</strong> Please enter a username or email address.",
+        });
+    } else if login
+        .iter()
+        .position(|&b| b == b'@')
+        .is_some_and(|at| at > 0)
+    {
+        user = write.user_id_by_email(login).await?;
+        if user.is_none() {
+            user = by_login(write).await?;
+        }
+        if user.is_none() {
+            errors = Some(Refusal {
+                code: "invalid_email",
+                message: NO_ACCOUNT,
+            });
+        }
+    } else {
+        user = by_login(write).await?;
+    }
+    let user = apply_filters("lostpassword_user_data", user, &[&errors]);
+    do_action("lostpassword_post", &[&errors, &user]);
+    let errors = apply_filters("lostpassword_errors", errors, &[&user]);
+    match (errors, user) {
+        (Some(refusal), _) => Ok(Err(refusal)),
+        (None, None) => Ok(Err(Refusal {
+            code: "invalidcombo",
+            message: NO_ACCOUNT,
+        })),
+        (None, Some(id)) => get_password_reset_key(write, id).await.map(Ok),
+    }
+}
+
+/// `reset_password()` of the user `id` with a slashed password: the hash set,
+/// the key cleared and the nag emptied; the login and email, for the notice.
+pub async fn reset_password(
+    write: &mut Write<'_>,
+    id: u64,
+    password: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>), Error> {
+    // The hooks get the password as PHP gives it, slashed.
+    let new_pass = password.to_vec();
+    do_action("password_reset", &[&id, &new_pass]);
+    let mut steps = Steps::new(write);
+    let (login, mut user) = step!(steps, user(id)).unwrap_or_default();
+    user.pass = steps.keep(hash_password(password).map_err(Error::Random));
+    user.activation_key.clear();
+    step!(steps, update_user(id, &user));
+    do_action("wp_set_password", &[&new_pass, &id]);
+    let (nag, none) = (Value::Bool(false), Value::Null);
+    let meta = async |w: &mut Write<'_>| {
+        update_metadata(w, Meta::User, id, "default_password_nag", &nag, &none).await
+    };
+    steps.run(meta).await;
+    do_action("after_password_reset", &[&id, &new_pass]);
+    steps.finish(Ok((login, user.email)))
 }
 
 /// `send_confirmation_on_profile_email()`'s rows for the user `id` asking

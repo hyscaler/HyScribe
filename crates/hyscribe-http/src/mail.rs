@@ -14,6 +14,13 @@ use hyscribe_mail::{Comment, Mail, Mailer, Post, PostAuthor, notify_moderator, n
 use hyscribe_phpser::Value;
 use hyscribe_write::caps::Caps;
 
+/// `retrieve_password()`'s error when `wp_mail()` fails.
+pub(crate) const EMAIL_FAILURE: &str = concat!(
+    "<strong>Error:</strong> The email could not be sent. Your site may not be correctly ",
+    "configured to send emails. <a href=\"https://wordpress.org/documentation/article/",
+    "reset-your-password/\">Get support for resetting your password</a>."
+);
+
 /// A mail an action sends once it commits.
 #[derive(Debug, PartialEq)]
 pub(crate) enum Queued {

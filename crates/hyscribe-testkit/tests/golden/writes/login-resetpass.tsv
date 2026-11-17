@@ -1,0 +1,40 @@
+# The rows PHP WordPress writes for the action login-resetpass (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-17 00:37:30 to 2026-11-17 00:37:31 UTC.
+# %wp_users:1% is 4.
+# %wp_users:2% is 5.
+# %wp_usermeta:1% is 45.
+# %wp_usermeta:2% is 46.
+# %wp_usermeta:3% is 47.
+# %wp_usermeta:4% is 48.
+# %wp_usermeta:5% is 49.
+# %wp_usermeta:6% is 50.
+# %wp_usermeta:7% is 51.
+# %wp_usermeta:8% is 52.
+# %wp_usermeta:9% is 53.
+# %wp_usermeta:10% is 54.
+# %wp_usermeta:11% is 55.
+# %wp_usermeta:12% is 56.
+# %wp_usermeta:13% is 57.
+# %wp_usermeta:14% is 58.
+# %wp_usermeta:15% is 59.
+# %wp_usermeta:16% is 60.
+# %wp_usermeta:17% is 61.
+# %wp_usermeta:18% is 62.
+# %wp_usermeta:19% is 63.
+# %wp_usermeta:20% is 64.
+# %wp_usermeta:21% is 65.
+# %wp_usermeta:22% is 66.
+# %wp_usermeta:23% is 67.
+# %wp_usermeta:24% is 68.
+# %wp_usermeta:25% is 69.
+# %wp_usermeta:26% is 70.
+# %wp_usermeta:27% is 71.
+# %wp_usermeta:28% is 72.
+# %wp_usermeta:29% is 73.
+# %wp_usermeta:30% is 74.
+wp_usermeta	%wp_usermeta:15%	~	meta_value	1	
+wp_usermeta	%wp_usermeta:30%	+	meta_key	default_password_nag
+wp_usermeta	%wp_usermeta:30%	+	meta_value	
+wp_usermeta	%wp_usermeta:30%	+	umeta_id	%wp_usermeta:30%
+wp_usermeta	%wp_usermeta:30%	+	user_id	%wp_users:2%
+wp_users	%wp_users:1%	~	user_activation_key	1:key	

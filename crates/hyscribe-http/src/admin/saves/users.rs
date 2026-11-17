@@ -6,12 +6,10 @@ use hyscribe_admin::actions::{Asked, user_ids};
 use hyscribe_admin::posts::Answer;
 use hyscribe_db::{DbError, Meta, Write};
 use hyscribe_phpser::{
-    Key, Maybe, Value, add_query_arg, is_empty_string, lookup, maybe_unserialize, php_trim,
-    remove_query_arg, stripslashes,
+    Key, Maybe, Value, add_query_arg, is_empty_string, lookup, maybe_unserialize, remove_query_arg,
 };
-use hyscribe_render::formatting::sanitize_user;
 use hyscribe_write::Error;
-use hyscribe_write::users::{get_password_reset_key, set_role, wp_delete_user};
+use hyscribe_write::users::{Refusal, retrieve_password, set_role, wp_delete_user};
 
 use super::dashboard::context;
 use super::{Acting, Mailed, Saving, Stop, text};
@@ -155,9 +153,9 @@ pub(super) fn resetpassword<'a>(
         for id in user_ids(asked).into_iter().filter(|id| *id != me) {
             let user = write.user(u64::try_from(id).unwrap_or_default()).await?;
             let login = user.map(|(login, _)| login).unwrap_or_default();
-            if retrieve_password(write, &login, (asked, site))
+            if retrieve_password_mail(write, &login, (asked, site))
                 .await?
-                .is_none()
+                .is_ok()
             {
                 count += 1;
             }
@@ -173,39 +171,18 @@ pub(super) fn resetpassword<'a>(
 
 /// `retrieve_password( $user_login )` by a logged in user: the user's
 /// password reset key kept and its mail queued, to be waited for once the
-/// action commits; else the error PHP gives for no such user.
-pub(super) async fn retrieve_password(
+/// action commits; else the error PHP gives.
+pub(super) async fn retrieve_password_mail(
     write: &mut Write<'_>,
     login: &[u8],
     (asked, site): (&Asked<'_>, &dyn Acting),
-) -> Result<Option<&'static str>, Error> {
-    let login = stripslashes(login);
-    let login = php_trim(&login);
-    if is_empty_string(login) {
-        return Ok(Some(
-            "<strong>Error:</strong> Please enter a username or email address.",
-        ));
-    }
-    let mut found = None;
-    // `strpos( $user_login, '@' )`, true past the first character.
-    if login.get(1..).is_some_and(|rest| rest.contains(&b'@')) {
-        found = write.user_id_by_email(login).await?;
-    }
-    if found.is_none() {
-        found = write.user_id_by_login(&sanitize_user(login)).await?;
-    }
-    let Some(id) = found else {
-        return Ok(Some(
-            "<strong>Error:</strong> There is no account with that username or email address.",
-        ));
+) -> Result<Result<(), Refusal>, Error> {
+    let reset = match retrieve_password(write, login).await? {
+        Ok(reset) => reset,
+        Err(refusal) => return Ok(Err(refusal)),
     };
-    let key = get_password_reset_key(write, id).await?;
-    let user = write.user(id).await?;
-    let (login, email) = user
-        .map(|(login, user)| (login, user.email))
-        .unwrap_or_default();
     // `get_user_locale()`: the user's, else the site's, else `en_US`.
-    let own = write.meta_value(Meta::User, id, "locale").await?;
+    let own = write.meta_value(Meta::User, reset.id, "locale").await?;
     let lang = write.option_value("WPLANG").await?;
     let locale = [own, lang]
         .into_iter()
@@ -214,14 +191,14 @@ pub(super) async fn retrieve_password(
     let locale = locale.unwrap_or_else(|| b"en_US".to_vec());
     let mail_site = MailSite::read(write, asked.home).await?;
     let user = hyscribe_mail::User {
-        login: &login,
-        email: &email,
+        login: &reset.login,
+        email: &reset.email,
     };
-    let key = key.as_bytes();
+    let key = reset.key.as_bytes();
     let mail = hyscribe_mail::retrieve_password(&mail_site.site(), &user, key, &locale, None);
     let address = text(asked.ip).parse().ok();
-    site.outbox().queue(Queued::Reset(mail, id, address));
-    Ok(None)
+    site.outbox().queue(Queued::Reset(mail, reset.id, address));
+    Ok(Ok(()))
 }
 
 /// The users list's password resets are the only mails a screen's action

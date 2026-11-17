@@ -1014,8 +1014,8 @@ async fn what_php_refuses_is_refused() {
 #[tokio::test]
 async fn templates_take_their_terms() {
     let one = ONE_AT_A_TIME.lock().await;
-    // A statement that fails stops a template's insert there, a slug taken
-    // in its theme, its terms or its meta.
+    // A statement that fails stops a template's update or insert there,
+    // its slug checked in its theme, its terms or its meta.
     let mut budget = 0;
     loop {
         let result = rolled_back(async |w, ctx| {
@@ -1028,8 +1028,11 @@ async fn templates_take_their_terms() {
                 meta_input: vec![("origin", Value::String(b"theme".to_vec()))],
                 ..PostArgs::default()
             };
-            wp_insert_post(w, ctx, template()).await?;
+            let first = wp_insert_post(w, ctx, template()).await?;
             w.fail_after(budget);
+            // Updated, its slug is checked within its own theme term.
+            let renamed = |args: &mut PostArgs| args.name = Some(b"index".to_vec());
+            wp_update_post(w, ctx, first, &renamed).await?;
             wp_insert_post(w, ctx, template()).await
         })
         .await;

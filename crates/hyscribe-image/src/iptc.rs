@@ -4,6 +4,8 @@
 //! `APP13` segment, written from the IPTC IIM specification and matched to
 //! PHP by `reference/uploads/iptc-golden.php`.
 
+use std::collections::HashMap;
+
 /// One dataset's key, value and the offset after it, from the tag marker
 /// at `at`.
 type Dataset<'a> = (String, &'a [u8], usize);
@@ -18,11 +20,16 @@ pub fn iptcparse(b: &[u8]) -> Option<Datasets<'_>> {
     // The first tag marker of record 1 or 2 starts the datasets.
     let mut at = b.windows(2).position(|w| matches!(w, [0x1C, 1 | 2]))?;
     let mut out: Datasets = Vec::new();
+    // Each key's place in `out`, so a file of distinct keys reads in linear time.
+    let mut places: HashMap<String, usize> = HashMap::new();
     while let Some((key, value, next)) = dataset(b, at) {
         at = next;
-        match out.iter_mut().find(|(known, _)| *known == key) {
+        match places.get(&key).and_then(|&place| out.get_mut(place)) {
             Some((_, values)) => values.push(value),
-            None => out.push((key, vec![value])),
+            None => {
+                places.insert(key.clone(), out.len());
+                out.push((key, vec![value]));
+            }
         }
     }
     (!out.is_empty()).then_some(out)

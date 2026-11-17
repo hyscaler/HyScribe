@@ -27,6 +27,7 @@ done
 "$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/comment-post-cases.list" < "$ROOT/reference/comment-post/cases.list"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/comment-post.tsv" < "$ROOT/crates/hyscribe-http/tests/golden/comment-post.tsv"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/site-writes.sql" < "$ROOT/reference/rest/site-writes.sql"
+"$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/editor-saves.sql" < "$ROOT/reference/rest/editor-saves.sql"
 mkdir -p "$OUT"
 if [ $# -eq 0 ]; then
   set -- $("$DOCKER" exec "$NAME" php "$DIR/run.php")

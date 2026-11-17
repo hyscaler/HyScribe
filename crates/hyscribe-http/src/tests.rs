@@ -781,9 +781,10 @@ fn date_parts_follow_wp_query() {
 #[tokio::test]
 async fn admin_and_login_urls_are_clean() {
     let site = fixture_site(Some("http://127.0.0.1:8080")).await;
-    let (temporary, permanent) = (
+    let (temporary, permanent, moved) = (
         StatusCode::TEMPORARY_REDIRECT,
         StatusCode::PERMANENT_REDIRECT,
+        StatusCode::MOVED_PERMANENTLY,
     );
     for (method, uri, status, expected) in [
         ("GET", "/wp-login.php", temporary, "/hs-login"),
@@ -825,10 +826,22 @@ async fn admin_and_login_urls_are_clean() {
         (
             "GET",
             "/hs-admin/edit.php?post_type=page",
-            permanent,
+            moved,
             "/hs-admin/edit?post_type=page",
         ),
-        ("GET", "/hs-admin/index.php", permanent, "/hs-admin/"),
+        (
+            "HEAD",
+            "/hs-admin/admin-ajax.php?action=x",
+            moved,
+            "/hs-admin/admin-ajax?action=x",
+        ),
+        (
+            "GET",
+            "/hs-admin/load-styles.php",
+            moved,
+            "/hs-admin/load-styles",
+        ),
+        ("GET", "/hs-admin/index.php", moved, "/hs-admin/"),
     ] {
         let reply = request(&site, method, uri).await;
         assert_eq!(reply.status, status, "{method} {uri}");
@@ -853,6 +866,51 @@ async fn admin_and_login_urls_are_clean() {
     for uri in ["/wp-adminx", "/wp-login.phpx", "/x/wp-admin/", "/hs-loginx"] {
         let status = request(&site, "GET", uri).await.status;
         assert!(status != temporary && status != permanent, "{uri}");
+    }
+    // Other methods are served in place, as the clean form would be, with
+    // the query kept: a redirect would drop the body.
+    for (php, clean) in [
+        (
+            "/hs-admin/edit.php?post_type=page",
+            "/hs-admin/edit?post_type=page",
+        ),
+        ("/hs-admin/index.php", "/hs-admin/index"),
+        (
+            "/hs-admin/load-styles.php?load%5Bchunk_0%5D=forms",
+            "/hs-admin/load-styles?load%5Bchunk_0%5D=forms",
+        ),
+        (
+            "/hs-admin/admin-ajax.php?action=x",
+            "/hs-admin/admin-ajax?action=x",
+        ),
+    ] {
+        for method in ["POST", "PUT"] {
+            let (old, new) = (
+                request(&site, method, php).await,
+                request(&site, method, clean).await,
+            );
+            assert_eq!(old.status, new.status, "{method} {clean}");
+            assert_ne!(old.status, moved, "{method} {clean}");
+            let location = |reply: &Reply| reply.headers.get("location").cloned();
+            assert_eq!(location(&old), location(&new), "{method} {clean}");
+            assert_eq!(old.body, new.body, "{method} {clean}");
+        }
+    }
+}
+
+#[test]
+fn hs_admin_php_urls_are_served_in_place() {
+    for (uri, served) in [
+        (
+            "/hs-admin/edit.php?post_type=page&a=%22",
+            "/hs-admin/edit?post_type=page&a=%22",
+        ),
+        ("/hs-admin/admin-post.php", "/hs-admin/admin-post"),
+        ("/hs-admin/edit", "/hs-admin/edit"),
+        ("/hs-admin/css/x.css", "/hs-admin/css/x.css"),
+        ("/wp-admin/edit.php", "/wp-admin/edit.php"),
+    ] {
+        assert_eq!(in_place(uri.parse().unwrap()), served, "{uri}");
     }
 }
 

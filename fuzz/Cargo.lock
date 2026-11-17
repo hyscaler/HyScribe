@@ -749,6 +749,7 @@ dependencies = [
  "hyscribe-db",
  "hyscribe-fetch",
  "hyscribe-kses",
+ "hyscribe-mail",
  "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-render",

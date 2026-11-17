@@ -6,6 +6,7 @@
 use blake2::Blake2bMac;
 use blake2::digest::consts::U30;
 use blake2::digest::{FixedOutput, KeyInit, Update};
+use hyscribe_phpser::hash_equals;
 
 /// The key `wp_fast_hash()` hashes with.
 const KEY: &[u8] = b"wp_fast_hash_6.8+";
@@ -23,9 +24,22 @@ pub fn wp_fast_hash(message: &[u8]) -> String {
         .unwrap_or_default()
 }
 
+/// `wp_verify_fast_hash( $message, $hash )`: `$generic$` hashes compared, else
+/// phpass as reset keys were stored before 6.8, then `crypt()`'s bcrypt.
+pub fn wp_verify_fast_hash(message: &[u8], hash: &[u8]) -> bool {
+    if hash.starts_with(b"$generic$") {
+        return hash_equals(hash, wp_fast_hash(message).as_bytes());
+    }
+    if message.len() > crate::MAX_PASSWORD {
+        return false;
+    }
+    let phpass = hash.starts_with(b"$P$") || hash.starts_with(b"$H$");
+    (phpass && crate::phpass(message, hash)) || crate::password_verify(message, hash)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::wp_fast_hash;
+    use super::{wp_fast_hash, wp_verify_fast_hash};
 
     /// Every case of `reference/auth/fast-hash-golden.php`.
     #[test]
@@ -36,5 +50,18 @@ mod tests {
             let message = hyscribe_testkit::unhex(message);
             assert_eq!(wp_fast_hash(&message), hash, "{line}");
         }
+    }
+
+    /// Every case of `reference/auth/verify-fast-hash-golden.php`.
+    #[test]
+    fn verified_fast_hashes_are_php_s() {
+        let golden = include_str!("../tests/golden/verify-fast-hash.tsv");
+        for line in golden.lines() {
+            let fields: Vec<&str> = line.split('\t').collect();
+            let message = hyscribe_testkit::unhex(fields[0]);
+            let verified = wp_verify_fast_hash(&message, fields[1].as_bytes());
+            assert_eq!(verified, fields[2] == "1", "{line:.80}");
+        }
+        assert_eq!(golden.lines().count(), 16);
     }
 }

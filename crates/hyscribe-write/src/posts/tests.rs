@@ -2152,7 +2152,7 @@ async fn database_errors_end_the_list_actions() {
 /// `get_default_post_to_edit( 'post', true )` and the user option the Quick
 /// Draft form keeps it in (`actions-dashboard.php`).
 async fn auto_draft(w: &mut Write<'_>, ctx: &Context) -> Result<u64> {
-    let id = get_default_post_to_edit(w, ctx).await?;
+    let id = get_default_post_to_edit(w, ctx, "post").await?;
     let key = "wp_dashboard_quick_press_last_post_id";
     let option = Value::Int(id.cast_signed());
     crate::options::update_metadata(w, Meta::User, 1, key, &option, &Value::Null).await?;
@@ -2179,7 +2179,7 @@ async fn auto_drafts_match_php() {
     check("admin-quick-press-stale", stale, again).await;
     let format = rolled_back(async |w, ctx| {
         set(w, "default_post_format", b"aside").await?;
-        get_default_post_to_edit(w, ctx).await
+        get_default_post_to_edit(w, ctx, "post").await
     })
     .await;
     assert!(unported(format));

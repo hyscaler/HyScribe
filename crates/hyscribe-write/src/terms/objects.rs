@@ -38,16 +38,16 @@ pub enum TermList<'a> {
     List(&'a [TermRef<'a>]),
 }
 
-/// `wp_update_term_count_now()` for the core taxonomies, which count
-/// published posts: `_update_post_term_count()`.
+/// `wp_update_term_count_now()` for the core taxonomies of `taxonomy`,
+/// which count published posts: `_update_post_term_count()`.
 pub(crate) async fn update_term_count(
     write: &mut Write<'_>,
     tt_ids: &[u64],
+    taxonomy: &str,
 ) -> Result<(), DbError> {
     for &tt_id in tt_ids {
-        let count = write
-            .term_post_count(tt_id, &["publish"], &["post"])
-            .await?;
+        let types = Taxonomy::counted(taxonomy);
+        let count = write.term_post_count(tt_id, &["publish"], types).await?;
         write.set_term_count(tt_id, count).await?;
     }
     Ok(())
@@ -97,7 +97,7 @@ pub(super) async fn set_object_terms(
         }
     }
     steps
-        .run(async |w| update_term_count(w, &added).await)
+        .run(async |w| update_term_count(w, &added, taxonomy.name()).await)
         .await;
     let gone = old.into_iter().filter(|(_, tt_id)| !tt_ids.contains(tt_id));
     let gone: Vec<TermRef<'_>> = gone.map(|(id, _)| TermRef::Id(id)).collect();
@@ -136,7 +136,7 @@ pub(super) async fn remove_object_terms(
     }
     let deleted = step!(steps, remove_relationships(object, &tt_ids));
     steps
-        .run(async |w| update_term_count(w, &tt_ids).await)
+        .run(async |w| update_term_count(w, &tt_ids, taxonomy.name()).await)
         .await;
     deleted > 0
 }

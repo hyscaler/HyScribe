@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! WordPress rows as plain data: what `hyscribe-db` reads and
-//! `hyscribe-render` renders (ADR 0009).
+//! `hyscribe-render` renders (ADR 0009), and the hook points every
+//! subsystem shares.
+
+pub mod hooks;
 
 /// A row of `{prefix}posts`, with the columns rendering needs.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

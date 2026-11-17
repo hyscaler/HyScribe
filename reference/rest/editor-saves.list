@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The block editor's saves (MVP 5.2) as its JavaScript sends them, which
+# reference/rest/golden.sh records as editor-saves.tsv over the default
+# install as editor-saves.sql leaves it: core-data's saveEntityRecord() of
+# savePost(), a POST with X-HTTP-Method-Override: PUT (flag put) to the REST
+# URL with _locale=user and the JSON of the post's ID, its edits and its
+# content; the move to the trash, deleteEntityRecord(), the same POST with
+# X-HTTP-Method-Override: DELETE and no body. Each as every identity, the
+# database put back after each: saving, publishing, scheduling and
+# submitting a draft, updating, redating, switching to draft, unscheduling,
+# private and password protected posts, sticky posts, featured images,
+# categories and tags, the slug, the excerpt, discussion, post formats, a
+# page's parent, template and order, and the trash; and a PDF as the
+# featured image and templates check_template() refuses or keeps.
+POST	/index.php?rest_route=/wp/v2/posts/9601&_locale=user	json,restore,put	{"id":9601,"title":"First draft","content":"<!-- wp:paragraph -->\n<p>Drafted in the editor.</p>\n<!-- /wp:paragraph -->","status":"draft"}
+POST	/index.php?rest_route=/wp/v2/posts/9601&_locale=user	json,restore,put	{"id":9601,"content":"<!-- wp:paragraph -->\n<p>Drafted in the editor.</p>\n<!-- /wp:paragraph -->","status":"draft","title":""}
+POST	/index.php?rest_route=/wp/v2/posts/9601&_locale=user	json,restore,put	{"id":9601,"title":"Published from the editor","content":"<!-- wp:paragraph -->\n<p>Drafted in the editor.</p>\n<!-- /wp:paragraph -->","status":"publish"}
+POST	/index.php?rest_route=/wp/v2/posts/9603&_locale=user	json,restore,put	{"id":9603,"content":"<!-- wp:paragraph -->\n<p>Still a draft.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>Now published.</p>\n<!-- /wp:paragraph -->","status":"publish"}
+POST	/index.php?rest_route=/wp/v2/posts/9601&_locale=user	json,restore,put	{"id":9601,"title":"Scheduled","content":"<!-- wp:paragraph -->\n<p>Drafted in the editor.</p>\n<!-- /wp:paragraph -->","date":"2030-06-01T09:30:00","status":"future"}
+POST	/index.php?rest_route=/wp/v2/posts/9608&_locale=user	json,restore,put	{"id":9608,"title":"For review","content":"<!-- wp:paragraph -->\n<p>Drafted in the editor.</p>\n<!-- /wp:paragraph -->","status":"pending"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"title":"Hello edited","content":"<!-- wp:paragraph -->\n<p>Edited in the editor.</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"date":"2026-11-01T08:00:00","content":"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"status":"draft","content":"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/9604&_locale=user	json,restore,put	{"id":9604,"status":"draft","date":null,"content":"<!-- wp:paragraph -->\n<p>Coming up.</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"status":"private","content":"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/9606&_locale=user	json,restore,put	{"id":9606,"status":"private","password":"","content":"<!-- wp:paragraph -->\n<p>For friends.</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"password":"secret","content":"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"sticky":true,"content":"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"featured_media":9605,"content":"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/9606&_locale=user	json,restore,put	{"id":9606,"featured_media":0,"content":"<!-- wp:paragraph -->\n<p>For friends.</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"categories":[1,9602],"content":"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"tags":[9601],"content":"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"slug":"hello-edited","content":"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"excerpt":"A short summary.","content":"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"comment_status":"closed","ping_status":"closed","content":"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"format":"gallery","content":"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/9606&_locale=user	json,restore,put	{"id":9606,"format":"standard","content":"<!-- wp:paragraph -->\n<p>For friends.</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/pages/9602&_locale=user	json,restore,put	{"id":9602,"title":"A new page","content":"<!-- wp:paragraph -->\n<p>Drafted in the editor.</p>\n<!-- /wp:paragraph -->","status":"publish"}
+POST	/index.php?rest_route=/wp/v2/pages/2&_locale=user	json,restore,put	{"id":2,"parent":9607,"content":"<!-- wp:paragraph -->\n<p>This is an example page. It's different from a blog post because it will stay in one place and will show up in your site navigation (in most themes). Most people start with an About page that introduces them to potential site visitors. It might say something like this:</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/pages/2&_locale=user	json,restore,put	{"id":2,"template":"page-no-title","content":"<!-- wp:paragraph -->\n<p>This is an example page. It's different from a blog post because it will stay in one place and will show up in your site navigation (in most themes). Most people start with an About page that introduces them to potential site visitors. It might say something like this:</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/pages/9607&_locale=user	json,restore,put	{"id":9607,"template":"","content":"<!-- wp:paragraph -->\n<p>Above the others.</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/pages/2&_locale=user	json,restore,put	{"id":2,"menu_order":4,"content":"<!-- wp:paragraph -->\n<p>This is an example page. It's different from a blog post because it will stay in one place and will show up in your site navigation (in most themes). Most people start with an About page that introduces them to potential site visitors. It might say something like this:</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/9606&_locale=user	json,restore,put	{"id":9606,"featured_media":9609,"content":"<!-- wp:paragraph -->\n<p>For friends.</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,put	{"id":1,"template":"page-no-title","content":"<!-- wp:paragraph -->\n<p>Welcome to WordPress. This is your first post. Edit or delete it, then start writing!</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/pages/2&_locale=user	json,restore,put	{"id":2,"template":"bogus","content":"<!-- wp:paragraph -->\n<p>This is an example page. It's different from a blog post because it will stay in one place and will show up in your site navigation (in most themes). Most people start with an About page that introduces them to potential site visitors. It might say something like this:</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/pages/9607&_locale=user	json,restore,put	{"id":9607,"template":"page-no-title","content":"<!-- wp:paragraph -->\n<p>Above the others.</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/1&_locale=user	json,restore,override
+POST	/index.php?rest_route=/wp/v2/pages/9607&_locale=user	json,restore,override

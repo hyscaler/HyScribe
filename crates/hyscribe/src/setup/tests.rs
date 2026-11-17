@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use super::*;
+use crate::tests::{SAVES, saves_with};
 use hyscribe_config::{Constants, Secret};
 use std::io::Cursor;
 use std::os::unix::fs::PermissionsExt;
@@ -424,40 +425,6 @@ fn unreachable_databases_are_reported() {
     let install = Install::new(Some(&config));
     let err = wizard(&install.home, DEFAULTS).result.unwrap_err();
     assert!(err.starts_with("cannot read db_version: "), "{err}");
-}
-
-/// `wordpress_saves`, the scratch database, is changed one test at a time.
-static SAVES: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// Loads the default install into `wordpress_saves` and runs `statements`.
-fn saves_with(statements: &[String]) {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    runtime.block_on(async {
-        use sqlx::Connection as _;
-        let db = hyscribe_config::Database {
-            name: "wordpress_saves".into(),
-            ..hyscribe_testkit::fixture_database()
-        };
-        hyscribe_testkit::writes::load_default_install(&db)
-            .await
-            .unwrap();
-        let options = sqlx::mysql::MySqlConnectOptions::new()
-            .host(&db.host)
-            .port(db.port)
-            .database(&db.name)
-            .username(&db.user)
-            .password(db.password.expose());
-        let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
-        for statement in statements {
-            sqlx::raw_sql(sqlx::AssertSqlSafe(statement.clone()))
-                .execute(&mut conn)
-                .await
-                .unwrap();
-        }
-    });
 }
 
 #[test]

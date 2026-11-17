@@ -104,7 +104,16 @@ async fn post_writes_match_php() {
 async fn site_writes_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/site-writes.tsv");
     let state = include_str!("../../../../../reference/rest/site-writes.sql");
-    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 20, 6 * 3));
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 20, 6 * 2));
+}
+
+/// PHP's answers to the block editor's saves as its JavaScript sends them,
+/// over `reference/rest/editor-saves.sql` (MVP 5.2).
+#[tokio::test(flavor = "multi_thread")]
+async fn editor_saves_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/editor-saves.tsv");
+    let state = include_str!("../../../../../reference/rest/editor-saves.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 34, 0));
 }
 
 /// The cases of `golden`, recorded over `state`, sent over HTTP as each
@@ -149,6 +158,11 @@ async fn writes_match_php(golden: &str, state: &str, unported: &[&str]) -> (usiz
         ] {
             if case.flag(flag) {
                 request = request.header(header::CONTENT_TYPE, kind);
+            }
+        }
+        for (flag, method) in [("override", "DELETE"), ("put", "PUT")] {
+            if case.flag(flag) {
+                request = request.header("x-http-method-override", method);
             }
         }
         let start = now();
@@ -261,6 +275,8 @@ async fn acted(
 /// and nothing when a statement fails part way.
 #[tokio::test(flavor = "multi_thread")]
 async fn post_writes_are_php_s() {
+    // The editor's saves write the same rows of the fixture.
+    let _saves = crate::admin::tests::SAVES.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let site = site(false, dir.path()).await;
     let writes = [
@@ -396,21 +412,35 @@ async fn site_writes_are_php_s() {
             "",
         ),
     ];
+    let bare = |golden: &str| golden.ends_with("-create");
+    oracle_writes(state, insert, bare, &writes).await;
+}
+
+/// Each of `writes` leaves the rows PHP's leaves, planned over
+/// `wordpress_saves` with `state` and written on the fixture after
+/// `setup`'s statements, but where `bare` says a write starts without them.
+async fn oracle_writes(
+    state: &str,
+    setup: &str,
+    bare: fn(&str) -> bool,
+    writes: &[(&str, &'static str, String, &str)],
+) {
     let _saves = crate::admin::tests::SAVES.lock().await;
     fresh_with(state).await;
     let dir = tempfile::tempdir().unwrap();
     let site = saves_site(dir.path()).await;
-    for (golden, method, target, body) in writes {
-        let pending = planned(&site, method, &target, body).await;
-        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+    for &(golden, method, ref target, body) in writes {
+        let pending = planned(&site, method, target, body).await;
         let setup = async |conn: &mut hyscribe_db::Connection| {
-            if !golden.ends_with("-create") {
-                let insert = sqlx::raw_sql(sqlx::AssertSqlSafe(insert));
-                insert.execute(&mut *conn).await.unwrap();
+            if !bare(golden) {
+                let setup = sqlx::raw_sql(sqlx::AssertSqlSafe(setup));
+                setup.execute(&mut *conn).await.unwrap();
             }
             Ok::<_, String>(())
         };
         let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            // Timed within the oracle's run, however long the plan took.
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
             let outcome = acted(conn, &pending.plan, &ctx).await;
             assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
             Ok(())
@@ -418,6 +448,96 @@ async fn site_writes_are_php_s() {
         let report = check_writes(&fixture_database(), golden, setup, action).await;
         report.unwrap();
     }
+}
+
+/// The block editor's saves leave the rows PHP's leave
+/// (`reference/writes/actions-editor.php`), each over
+/// `reference/rest/editor-saves.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn editor_saves_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/editor-saves.sql");
+    let setup = state.split("\n-- cleanup\n").next().unwrap();
+    let para =
+        |text: &str| format!(r#"<!-- wp:paragraph -->\n<p>{text}</p>\n<!-- /wp:paragraph -->"#);
+    let hello = para(
+        "Welcome to WordPress. This is your first post. Edit or delete it, then start writing!",
+    );
+    let (drafted, friends) = (para("Drafted in the editor."), para("For friends."));
+    let post = |id: u64| format!("/?rest_route=/wp/v2/posts/{id}");
+    let saves = [
+        (
+            "editor-save-draft",
+            post(9601),
+            format!(
+                r#"{{"id":9601,"title":"First draft","content":"{drafted}","status":"draft"}}"#
+            ),
+        ),
+        (
+            "editor-publish",
+            post(9601),
+            format!(
+                r#"{{"id":9601,"title":"Published from the editor","content":"{drafted}","status":"publish"}}"#
+            ),
+        ),
+        (
+            "editor-schedule",
+            post(9601),
+            format!(
+                r#"{{"id":9601,"title":"Scheduled","content":"{drafted}","date":"2030-06-01T09:30:00","status":"future"}}"#
+            ),
+        ),
+        (
+            "editor-update",
+            post(1),
+            format!(
+                r#"{{"id":1,"title":"Hello edited","content":"{}"}}"#,
+                para("Edited in the editor.")
+            ),
+        ),
+        (
+            "editor-unschedule",
+            post(9604),
+            format!(
+                r#"{{"id":9604,"status":"draft","date":null,"content":"{}"}}"#,
+                para("Coming up.")
+            ),
+        ),
+        (
+            "editor-private",
+            post(9606),
+            format!(r#"{{"id":9606,"status":"private","password":"","content":"{friends}"}}"#),
+        ),
+        (
+            "editor-featured-image",
+            post(1),
+            format!(r#"{{"id":1,"featured_media":9605,"content":"{hello}"}}"#),
+        ),
+        (
+            "editor-format",
+            post(1),
+            format!(r#"{{"id":1,"format":"gallery","content":"{hello}"}}"#),
+        ),
+        (
+            "editor-format-standard",
+            post(9606),
+            format!(r#"{{"id":9606,"format":"standard","content":"{friends}"}}"#),
+        ),
+        (
+            "editor-terms",
+            post(1),
+            format!(r#"{{"id":1,"categories":[1,9602],"tags":[9601],"content":"{hello}"}}"#),
+        ),
+        (
+            "editor-page-template",
+            "/?rest_route=/wp/v2/pages/2".into(),
+            r#"{"id":2,"template":"page-no-title","parent":9607}"#.into(),
+        ),
+    ];
+    let writes: Vec<_> = saves
+        .iter()
+        .map(|(golden, target, body)| (*golden, "PUT", target.clone(), body.as_str()))
+        .collect();
+    oracle_writes(state, setup, |_| false, &writes).await;
 }
 
 /// Without a writer, a write past its checks is refused as hs-admin

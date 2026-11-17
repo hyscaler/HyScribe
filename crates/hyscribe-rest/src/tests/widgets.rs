@@ -106,6 +106,30 @@ fn widgets_php_would_store_are_not_served() {
     let old = r#"a:1:{s:16:\"sidebars_widgets\";a:2:{s:4:\"time\";i:1;s:4:\"data\";a:0:{}}}"#;
     let mods = [WIDGETS_SQL, &option("theme_mods_twentytwentyfive", old)].concat();
     assert_eq!(status(with(&mods), sidebars), 501);
+    // The block widgets listed as `retrieve_widgets()` leaves them, but in
+    // another sidebar, with one that is no widget, missing some, or
+    // without their version.
+    let blocks = r#"i:0;s:7:\"block-2\";i:1;s:7:\"block-3\";i:2;s:7:\"block-4\";i:3;s:7:\"block-5\";i:4;s:7:\"block-6\";"#;
+    let version = r#"s:13:\"array_version\";i:3;"#;
+    for stored in [
+        format!(r#"a:2:{{s:9:\"sidebar-1\";a:5:{{{blocks}}}{version}}}"#),
+        format!(
+            r#"a:2:{{s:19:\"wp_inactive_widgets\";a:6:{{{blocks}i:5;s:8:\"block-99\";}}{version}}}"#
+        ),
+        format!(r#"a:2:{{s:19:\"wp_inactive_widgets\";a:1:{{i:0;s:7:\"block-2\";}}{version}}}"#),
+        format!(r#"a:1:{{s:19:\"wp_inactive_widgets\";a:5:{{{blocks}}}}}"#),
+    ] {
+        assert_eq!(
+            status(with(&option("sidebars_widgets", &stored)), sidebars),
+            501,
+            "{stored}"
+        );
+    }
+    let stored = format!(r#"a:2:{{s:19:\"wp_inactive_widgets\";a:5:{{{blocks}}}{version}}}"#);
+    assert_eq!(
+        status(with(&option("sidebars_widgets", &stored)), sidebars),
+        200
+    );
 }
 
 /// `get_settings()` stores a widget's settings that are missing, `false`
@@ -130,6 +154,18 @@ fn widget_settings_php_would_store_are_not_served() {
         ..Content::default()
     }));
     assert_eq!(status(missing, sidebars), 501);
+}
+
+/// The form alone, or the instance alone, as `_fields` asks for them.
+#[test]
+fn a_widget_s_form_or_instance_is_served_alone() {
+    let target = "/?rest_route=/wp/v2/widgets/block-2&context=edit&_fields=";
+    for field in ["rendered_form", "instance"] {
+        let served = get(retrieved(), "administrator", &format!("{target}{field}"));
+        let data = hyscribe_phpser::json_decode(&served.body).unwrap();
+        let value = data.get_str(field).cloned().unwrap_or_default();
+        assert!(!matches!(value, Value::Null), "{field}");
+    }
 }
 
 /// Only the block widget's form and instance are ported, with content

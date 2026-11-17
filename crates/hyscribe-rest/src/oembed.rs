@@ -32,14 +32,11 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     let width = |schema| arg("maxwidth", schema, false, Sanitize::Absint);
     match regex {
         EMBED => Some(vec![Endpoint {
+            // `wp_oembed_ensure_format()` gives `xml` for `xml` alone, which
+            // is all the XML is served for, so the format is kept as given.
             args: vec![
                 url_arg(),
-                arg(
-                    "format",
-                    r#"{"default":"json"}"#,
-                    false,
-                    Sanitize::Callback(ensure_format),
-                ),
+                arg("format", r#"{"default":"json"}"#, false, Sanitize::Endpoint),
                 width(r#"{"default":600}"#),
             ],
             permission: |_, _| Ok(()),
@@ -66,12 +63,6 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         }]),
         _ => None,
     }
-}
-
-/// `wp_oembed_ensure_format()`: `json` but for `xml`.
-fn ensure_format(_: &Context, format: &Value) -> Option<Value> {
-    let xml = *format == text("xml");
-    Some(text(if xml { "xml" } else { "json" }))
 }
 
 /// `oembed_invalid_url`.
@@ -183,7 +174,7 @@ fn url_to_postid(context: &Context, url: &[u8]) -> Result<u64, RestError> {
         let page = context
             .option("page_on_front")
             .map_or(0, |page| absint(&unserialized(&page)));
-        if page != 0 && context.site.post(page).is_some() {
+        if context.site.post(page).is_some() {
             return Ok(page);
         }
     }
@@ -367,10 +358,8 @@ pub(crate) fn xml_text(escaped: &[u8]) -> Option<Vec<u8>> {
     xml_chars(parts.next().unwrap_or_default(), &mut out)?;
     for part in parts {
         let (entity, after) = part.split_once(';')?;
+        // `&amp;`, `&lt;` and `&gt;` are written back as they are read.
         let named = match entity {
-            "amp" => Some('&'),
-            "lt" => Some('<'),
-            "gt" => Some('>'),
             "quot" => Some('"'),
             "apos" => Some('\''),
             _ => None,

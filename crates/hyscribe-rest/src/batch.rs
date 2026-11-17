@@ -11,11 +11,11 @@ use hyscribe_kses::wp_parse_url;
 use hyscribe_phpser::{Key, Value, parse_str};
 
 use crate::posts::write::{Finish, Outcome, Writing};
-use crate::request::{Params, defaults, typed};
+use crate::request::{Params, typed};
 use crate::response::{NOT_PORTED, Response, RestError, list, object, text};
 use crate::{
     Context, Endpoint, Halt, Pending, Permission, Plan, finish, gives_parameters, hooks, ported,
-    responded, routes, validated, widgets,
+    responded, routes, validated, widgets, with_route,
 };
 
 /// The route's regex.
@@ -148,14 +148,12 @@ fn parsed(context: &Context, request: &Value) -> Result<Sub, Halt> {
         return Err(Halt::NotPorted);
     }
     let parameters = gives_parameters(&post) || gives_parameters(&get);
-    let params = Params {
-        route: matched.regex,
-        url: matched.params.clone(),
+    let given = Params {
         post,
         get,
-        defaults: defaults(&endpoint.args),
         ..Params::default()
     };
+    let params = with_route(&matched, &endpoint, given);
     let routed = |params, writing, checked| Routed {
         method: method.clone(),
         path: path.clone(),

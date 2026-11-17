@@ -54,7 +54,28 @@ fn requests_not_ported_answer_the_batch_501() {
         content::default_install_with(include_str!("../../../../reference/rest/widgets.sql"))
     });
     let delete = r#"{"path":"/wp/v2/posts","body":{"title":"x"}},{"method":"DELETE","path":"/wp/v2/widgets/block-2"}"#;
-    assert_eq!(batch(retrieved, "administrator", delete).status, 501);
+    // Answered before the post is planned, let alone written.
+    let body = format!(r#"{{"requests":[{delete}]}}"#);
+    let request = Request {
+        method: "POST",
+        route: b"/batch/v1",
+        uri: b"/",
+        get: &[],
+        post: &[],
+        cookie_user: 1,
+        origin: None,
+        nonce: Some(b"%nonce%"),
+        method_override: None,
+        content_type: Some(b"application/json"),
+        body: body.as_bytes(),
+        host: None,
+        now: 0,
+    };
+    let oracle = Oracle::over(retrieved, false);
+    let answered = answer(&oracle, &request)
+        .served()
+        .map(|served| served.status);
+    assert_eq!(answered, Some(501));
     let refused = batch(retrieved, "visitor", delete);
     assert_eq!(refused.status, 207);
     let body = String::from_utf8_lossy(&refused.body).into_owned();

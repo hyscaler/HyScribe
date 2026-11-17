@@ -150,13 +150,9 @@ pub trait Site {
     /// timeout, where the site writes: both its options deleted.
     fn expire_site_transient(&self, _name: &str) {}
     /// `wp_hash( $data )`, `None` without the salts it signs with.
-    fn wp_hash(&self, data: &[u8]) -> Option<String> {
-        self.reads().wp_hash(data)
-    }
+    fn wp_hash(&self, data: &[u8]) -> Option<String>;
     /// `wp_generate_password( 10, false )`, an oEmbed answer's secret.
-    fn embed_secret(&self) -> String {
-        hyscribe_render::head::embed_secret()
-    }
+    fn embed_secret(&self) -> String;
 }
 
 /// A request for the API.
@@ -949,12 +945,7 @@ fn checked(
     params: Params,
     refused: Option<Option<JsonError>>,
 ) -> Result<Checked, Halt> {
-    let params = Params {
-        route: matched.regex,
-        url: matched.params.clone(),
-        defaults: defaults(&endpoint.args),
-        ..params
-    };
+    let params = with_route(matched, endpoint, params);
     match refused {
         Some(Some(error)) => return Ok((params, None, Err(invalid_json(error)))),
         Some(None) => return Err(Halt::NotPorted),
@@ -963,6 +954,17 @@ fn checked(
     let (params, writing, checked) = validated(context, matched, endpoint, params)?;
     let checked = checked.and_then(|()| (endpoint.permission)(context, &params));
     Ok((params, writing, checked))
+}
+
+/// `params` with the matched route's own: its URL parameters, and its
+/// endpoint's arguments' defaults.
+pub(crate) fn with_route(matched: &routes::Matched, endpoint: &Endpoint, params: Params) -> Params {
+    Params {
+        route: matched.regex,
+        url: matched.params.clone(),
+        defaults: defaults(&endpoint.args),
+        ..params
+    }
 }
 
 /// A request's parameters, the write its endpoint makes, and whether its

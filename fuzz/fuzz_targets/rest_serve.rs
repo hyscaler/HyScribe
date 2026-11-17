@@ -145,6 +145,12 @@ impl Site for Fuzzed<'_> {
     fn public_users(&self) -> bool {
         self.content.len() % 2 == 0
     }
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        (data.len() % 2 == 0).then(|| hyscribe_phpser::md5(data))
+    }
+    fn embed_secret(&self) -> String {
+        "0123456789".into()
+    }
     fn reads(&self) -> &dyn hyscribe_render::site::Site {
         self
     }

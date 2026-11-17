@@ -41,6 +41,12 @@ struct Changed {
 }
 
 impl Site for Changed {
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        self.oracle.wp_hash(data)
+    }
+    fn embed_secret(&self) -> String {
+        self.oracle.embed_secret()
+    }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         let changed = self.options.iter().find(|(known, _)| *known == name);
         changed.map_or_else(

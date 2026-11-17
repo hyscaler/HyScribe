@@ -637,3 +637,28 @@ fn the_admin_font_faces() {
         "font-style:italic;font-weight:900;font-display:fallback;src:url('http://h/wp-content/themes/twentytwentyfive/assets/fonts/fira-sans/FiraSans-BlackItalic.woff2') format('woff2');}\n</style>"
     ));
 }
+
+/// An embed's secret is ten letters and digits, `wp_generate_password()`'s
+/// alphabet, drawn afresh each time.
+#[test]
+fn embed_secrets_are_drawn_from_letters_and_digits() {
+    let secrets: Vec<String> = (0..200).map(|_| embed_secret()).collect();
+    for secret in &secrets {
+        assert_eq!(secret.len(), 10, "{secret}");
+        assert!(
+            secret.bytes().all(|b| b.is_ascii_alphanumeric()),
+            "{secret}"
+        );
+        let first = secret.bytes().next();
+        assert!(secret.bytes().any(|b| Some(b) != first), "{secret}");
+    }
+    let all = secrets.concat();
+    let kinds: [fn(&u8) -> bool; 3] = [
+        u8::is_ascii_digit,
+        u8::is_ascii_lowercase,
+        u8::is_ascii_uppercase,
+    ];
+    for kind in kinds {
+        assert!(all.as_bytes().iter().any(kind));
+    }
+}

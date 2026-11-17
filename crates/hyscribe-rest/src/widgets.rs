@@ -147,8 +147,8 @@ fn registered(context: &Context) -> Option<Vec<Registered>> {
     Some(widgets)
 }
 
-/// `get_settings()` of the widget `base`, without `_multiwidget` and
-/// `__i__`; `None` where it would store them.
+/// `get_settings()` of the widget `base`, whose numbered entries are its
+/// instances; `None` where it would store them, missing or in the old form.
 fn settings(context: &Context, base: &str) -> Option<Vec<(Key, Value)>> {
     let stored = context.option(&format!("widget_{base}"))?;
     let settings = match unserialized(&stored) {
@@ -156,22 +156,19 @@ fn settings(context: &Context, base: &str) -> Option<Vec<(Key, Value)>> {
         Value::Array(settings) => settings,
         _ => Vec::new(),
     };
-    let named = |name: &[u8]| {
-        let name = Key::String(name.to_vec());
-        move |(key, _): &(Key, Value)| *key == name
-    };
-    if !settings.is_empty() && !settings.iter().any(named(b"_multiwidget")) {
+    let multi = Key::String(b"_multiwidget".to_vec());
+    if !settings.is_empty() && !settings.iter().any(|(key, _)| *key == multi) {
         return None;
     }
-    let kept = settings
-        .into_iter()
-        .filter(|entry| !named(b"_multiwidget")(entry) && !named(b"__i__")(entry));
-    Some(kept.collect())
+    Some(settings)
 }
 
 /// The sidebars' widgets `retrieve_widgets()` leaves under a block theme,
 /// as `wp_get_sidebars_widgets()` then reads them: `None` where it would
-/// store them changed, or restore the theme's widgets from before.
+/// store them or restore the theme's widgets from before. With no sidebar
+/// registered it maps every sidebar's registered widgets to the inactive
+/// one and adds the widgets numbered from 2 that no sidebar lists, so it
+/// stores nothing only where they are stored that way already.
 fn retrieved(context: &Context) -> Option<Vec<(Key, Value)>> {
     let registered = registered(context)?;
     let stylesheet = context.option("stylesheet").unwrap_or_default();
@@ -183,65 +180,32 @@ fn retrieved(context: &Context) -> Option<Vec<(Key, Value)>> {
     let stored = context
         .option("sidebars_widgets")
         .map_or(Value::Array(Vec::new()), |stored| unserialized(&stored));
-    let Value::Array(mut sidebars) = stored.clone() else {
+    let Value::Array(sidebars) = &stored else {
         return stored.is_empty().then(Vec::new);
     };
-    sidebars.retain(|(key, _)| *key != Key::String(b"array_version".to_vec()));
-    if sidebars.is_empty() {
-        return Some(sidebars);
-    }
-    let is_registered = |id: &Value| {
-        registered
-            .iter()
-            .any(|widget| widget.id == id.to_php_string())
+    let version = Key::String(b"array_version".to_vec());
+    let listed: Vec<&(Key, Value)> = sidebars.iter().filter(|(key, _)| *key != version).collect();
+    let [(sidebar, ids)] = listed.as_slice() else {
+        return listed.is_empty().then(Vec::new);
     };
-    let ids = |widgets: &Value| -> Option<Vec<Value>> {
-        let Value::Array(entries) = widgets else {
-            return Some(
-                vec![widgets.clone()]
-                    .into_iter()
-                    .filter(|id| *id != Value::Null)
-                    .collect(),
-            );
-        };
-        // A list keyed by name would keep its keys in `array_merge()`.
-        if entries.iter().any(|(key, _)| matches!(key, Key::String(_))) {
-            return None;
-        }
-        Some(
-            entries
-                .iter()
-                .map(|(_, id)| id.clone())
-                .filter(&is_registered)
-                .collect(),
-        )
-    };
-    // `wp_map_sidebars_widgets()` with no sidebar registered: the inactive
-    // and orphaned widgets, then those of every other sidebar.
-    let mut inactive = Vec::new();
-    let mut others = Vec::new();
-    for (sidebar, widgets) in &sidebars {
-        let name = sidebar.to_php_string();
-        if name == INACTIVE.as_bytes() || name.starts_with(b"orphaned_widgets") {
-            inactive.extend(ids(widgets)?);
-        } else if let Value::Array(_) = widgets {
-            others.extend(ids(widgets)?);
-        }
-    }
-    inactive.extend(others);
-    let shown = |id: &[u8]| inactive.iter().any(|known| known.to_php_string() == id);
-    // The lost widgets: registered, in no sidebar and numbered from 2.
-    let lost = registered
+    let ids = ids.as_array().unwrap_or_default();
+    let id_of = |widget: &Registered| Value::String(widget.id.clone());
+    let all_registered = ids
         .iter()
-        .filter(|widget| !shown(&widget.id) && Value::String(widget.number.clone()).to_int() >= 2);
-    let mut widgets: Vec<Value> = lost
-        .map(|widget| Value::String(widget.id.clone()))
-        .collect();
-    widgets.extend(inactive);
-    let retrieved = vec![(Key::String(INACTIVE.as_bytes().to_vec()), list(widgets))];
+        .all(|(_, id)| registered.iter().any(|w| id_of(w) == *id));
+    let lost = registered.iter().any(|widget| {
+        let numbered = Value::String(widget.number.clone()).to_int() >= 2;
+        numbered && !ids.iter().any(|(_, id)| *id == id_of(widget))
+    });
+    let retrieved = vec![(
+        sidebar.clone(),
+        list(ids.iter().map(|(_, id)| id.clone()).collect()),
+    )];
     let mut written = retrieved.clone();
-    written.push((Key::String(b"array_version".to_vec()), Value::Int(3)));
-    (encode(&Value::Array(written)) == encode(&stored)).then_some(retrieved)
+    written.push((version, Value::Int(3)));
+    let unchanged = encode(&Value::Array(written)) == encode(&stored);
+    let inactive = *sidebar == Key::String(INACTIVE.as_bytes().to_vec());
+    (inactive && all_registered && !lost && unchanged).then_some(retrieved)
 }
 
 /// The widgets the retrieved sidebars list: [`would_write`] answered 501
@@ -366,26 +330,22 @@ fn prepare_widget(
     sidebar: &[u8],
 ) -> Result<Response, RestError> {
     let fields = fields_for_response(params, WIDGET_PROPERTIES);
+    // Either field asked for, `_fields` leaves the other out.
+    let wanted = |field| is_field_included(field, &fields);
+    let (form, instance) = if wanted("rendered_form") || wanted("instance") {
+        block_widget(context, widget).ok_or_else(RestError::not_ported)?
+    } else {
+        (Value::Null, Value::Null)
+    };
     // An inactive widget renders nothing.
-    let mut data = vec![
+    let data = [
         ("id", Value::String(widget.id.clone())),
         ("id_base", text(widget.base)),
         ("sidebar", Value::String(sidebar.to_vec())),
         ("rendered", text("")),
-        ("rendered_form", Value::Null),
-        ("instance", Value::Null),
+        ("rendered_form", form),
+        ("instance", instance),
     ];
-    let wanted = |field| is_field_included(field, &fields);
-    if wanted("rendered_form") || wanted("instance") {
-        let (form, instance) = block_widget(context, widget).ok_or_else(RestError::not_ported)?;
-        for (name, value) in &mut data {
-            match *name {
-                "rendered_form" if wanted(name) => *value = form.clone(),
-                "instance" if wanted(name) => *value = instance.clone(),
-                _ => {}
-            }
-        }
-    }
     let data = data
         .into_iter()
         .map(|(name, value)| (Key::String(name.as_bytes().to_vec()), value))
@@ -479,7 +439,8 @@ fn prepare_type(context: &Context, params: &Params, widget: &Value) -> Response 
         .iter()
         .filter(|(key, _)| {
             let key = String::from_utf8_lossy(&key.to_php_string()).into_owned();
-            key == "id" || is_field_included(&key, &fields)
+            // PHP keeps the ID whatever is asked for, and `_fields` takes it out.
+            is_field_included(&key, &fields)
         });
     let data = filter_by_context(
         entries.cloned().collect(),

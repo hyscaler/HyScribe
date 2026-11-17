@@ -10,7 +10,7 @@ pub fn base64_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let bytes = [0, 1, 2].map(|i| u32::from(chunk.get(i).copied().unwrap_or_default()));
-        let bits = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
+        let bits = (bytes[0] << 16) + (bytes[1] << 8) + bytes[2];
         for i in 0..4 {
             let sextet = usize::try_from((bits >> (18 - 6 * i)) & 63).unwrap_or_default();
             let digit = ALPHABET.get(sextet).filter(|_| i <= chunk.len());

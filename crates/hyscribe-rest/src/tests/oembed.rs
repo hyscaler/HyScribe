@@ -63,6 +63,23 @@ fn the_front_page_is_its_page() {
         embed(content::default_install(), "http://127.0.0.1:8081/").status,
         404
     );
+    // Another URL is not the front page's; under pretty permalinks the
+    // rewrite rules would read it, and a front page that is not there.
+    assert_eq!(embed(front, "http://127.0.0.1:8081/other/").status, 404);
+    let pretty = |content, url: &str| {
+        let case = RestCase {
+            who: "visitor".into(),
+            method: "GET".into(),
+            target: format!("/wp-json/oembed/1.0/embed?url={url}"),
+            flags: "pretty".into(),
+            status: 0,
+            headers: Vec::new(),
+            body: Vec::new(),
+            sent: Vec::new(),
+        };
+        serve_over(content, &case).status
+    };
+    assert_eq!(pretty(gone, "http://127.0.0.1:8081/"), 501);
 }
 
 /// An attachment, whose thumbnail is the image itself, and a post with a
@@ -94,6 +111,11 @@ fn thumbnails_and_embed_paths_are_not_served() {
     };
     assert_eq!(pretty(named), 501);
     assert_eq!(pretty(content::default_install()), 200);
+    // A synced pattern is no public post type's.
+    let pattern = with(
+        "INSERT INTO `wp_posts` VALUES (961,1,'2026-11-01 10:00:00','2026-11-01 10:00:00','','Embed','','publish','closed','closed','','embed','','','2026-11-01 10:00:00','2026-11-01 10:00:00','',0,'http://127.0.0.1:8081/?p=961',0,'wp_block','',0);",
+    );
+    assert_eq!(pretty(pattern), 200);
 }
 
 /// A proxy answer PHP cached for the same arguments is not ported.
@@ -146,8 +168,11 @@ fn the_first_id_with_digits_is_read() {
 /// to match the home URL.
 #[test]
 fn urls_take_the_home_url_s_scheme_and_www() {
-    let cases: [(&str, &str, &str); 5] = [
+    let cases: [(&str, &str, &str); 7] = [
         ("//x.test/a?b#c", "https://x.test", "https://x.test/a"),
+        // `#^\w+://#` wants a scheme before its `://`.
+        ("://x.test/a", "https://x.test", "://x.test/a"),
+        ("ab/c", "https://x.test", "ab/c"),
         (
             "http://x.test/a/",
             "https://www.x.test",

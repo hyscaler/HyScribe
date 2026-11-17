@@ -218,6 +218,26 @@ async fn uploads_are_written_by_month_with_unique_names() {
     assert_eq!(handled.unwrap().file, "c.jpg");
     // The hooks attached by default change nothing.
     uploads.added(1);
+    // `wp_handle_upload` sees the file written, and cannot move it.
+    let moves = Arc::new(Moves::default());
+    let hooked = self::uploads(dir.path()).with_hooks(Arc::clone(&moves) as _);
+    let handled = hooked.handle(&flat, sent("d.jpg", corpus("small.jpg")), time, false);
+    assert_eq!(handled.unwrap().file, "d.jpg");
+    assert_eq!(*moves.0.lock().unwrap(), "d.jpg");
+}
+
+/// Hooks whose `wp_handle_upload` keeps the file it is given and moves it.
+#[derive(Default)]
+struct Moves(std::sync::Mutex<String>);
+
+impl hyscribe_image::hooks::Hooks for Moves {}
+
+impl UploadHooks for Moves {
+    fn wp_handle_upload(&self, upload: Handled, _context: &str) -> Handled {
+        upload.file.clone_into(&mut self.0.lock().unwrap());
+        let file = "../moved.jpg".into();
+        Handled { file, ..upload }
+    }
 }
 
 /// An image with XMP PHP would read in a way not ported.

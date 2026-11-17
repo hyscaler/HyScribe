@@ -617,7 +617,7 @@ async fn logged_in_users_go_where_they_may() {
         let reader = |cap: &str| cap == "read";
         let nothing = |_: &str| false;
         let https = "https://127.0.0.1:8081/hs-admin/";
-        let cases: [(&Can, bool, &str, &str); 11] = [
+        let cases: [(&Can, bool, &str, &str); 12] = [
             // Past the admin email's lifespan, an administrator confirms it.
             (&everything, false, admin, "http://127.0.0.1:8081/hs-login?redirect_to=http%3A%2F%2F127.0.0.1%3A8081%2Fhs-admin%2F&action=confirm_admin_email&wp_lang=en_US"),
             (&everything, false, "", "http://127.0.0.1:8081/hs-login?action=confirm_admin_email&wp_lang=en_US"),
@@ -630,6 +630,8 @@ async fn logged_in_users_go_where_they_may() {
             (&nothing, false, "http://example.test/x", admin),
             (&nothing, true, "http://example.test/x", https),
             (&nothing, false, "/hs-admin/edit?post_type=page", "/hs-admin/edit?post_type=page"),
+            // Into hs-admin by its clean URLs (ADR 0008).
+            (&nothing, false, "/hs-admin/edit.php?post_type=page", "/hs-admin/edit?post_type=page"),
         ];
         for (can, secure, to, expected) in cases {
             assert_eq!(location(&reads, can, (1, secure), to.as_bytes()), expected, "{to}");

@@ -2688,5 +2688,6 @@ async fn the_permalinks_screen_refreshes_the_rules() {
     assert!(rules().await.starts_with("a:94:{"));
 }
 
+mod clean_urls;
 mod comment_saves;
 mod revisions;

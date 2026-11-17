@@ -146,9 +146,11 @@ fn not_ported() -> Response {
     response(StatusCode::NOT_IMPLEMENTED, nocache(), Vec::new())
 }
 
-/// A `302` to `location`, as `wp_redirect()` sends it.
+/// A `302` to `location`, as `wp_redirect()` sends it, naming hs-admin's
+/// screens without `.php` (ADR 0008).
 fn redirect(mut headers: Vec<(header::HeaderName, String)>, location: &[u8]) -> Response {
-    let location = String::from_utf8_lossy(&wp_sanitize_redirect(location)).into_owned();
+    let location = wp_sanitize_redirect(location);
+    let location = hyscribe_admin::menu::clean_links(&String::from_utf8_lossy(&location));
     headers.push((
         header::HeaderName::from_static("x-redirect-by"),
         "WordPress".into(),

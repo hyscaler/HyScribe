@@ -71,11 +71,6 @@ pub trait Hooks {
         html
     }
 
-    /// `oembed_ttl`: how long a cached embed counts as recent.
-    fn oembed_ttl(&self, ttl: i64, _url: &[u8], _attr: Size, _post: u64) -> i64 {
-        ttl
-    }
-
     /// `wp_feed_cache_transient_lifetime`, given the feed's URL by
     /// `fetch_feed()` and the cache's name by the transient cache.
     fn wp_feed_cache_transient_lifetime(&self, lifetime: i64, _url_or_name: &[u8]) -> i64 {
@@ -105,4 +100,5 @@ pub(crate) fn get_site_transient(site: &dyn Site, name: &str, now: i64) -> Optio
 }
 
 #[cfg(test)]
+#[path = "tests/outbound.rs"]
 pub(crate) mod testing;

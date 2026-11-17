@@ -273,7 +273,7 @@ static HTML: LazyLock<HashMap<&'static [u8], u32>> = LazyLock::new(|| {
 });
 
 /// A name with its namespace resolved: empty for none.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Name {
     /// The namespace URI.
     pub namespace: Vec<u8>,

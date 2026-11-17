@@ -24,7 +24,7 @@ fn name(namespace: &[u8], local: &[u8]) -> Name {
 
 #[test]
 fn reads_namespaces_text_and_references() {
-    let xml = b"\xEF\xBB\xBF<?xml version=\"1.0\"?>\n<!DOCTYPE r>\n<!-- c --><r xmlns=\"u:a\" xmlns:p=\"u:p\" p:x=\"1\r\n2\" y='&#x41;&lt;'><p:e xml:lang=\"en\"/><![CDATA[<raw>\r\n]]>a&amp;b&#233;\r\nc</r>\n";
+    let xml = b"\xEF\xBB\xBF<?xml version=\"1.0\"?>\n<!DOCTYPE r>\n<!-- c --><r xmlns=\"u:a\" xmlns:p=\"u:p\" p:x=\"1\r\n2\" y='&#x41;&lt;'><p:e xml:lang=\"en\"/><![CDATA[<raw>\r\n]]>a&amp;&quot;b&#233;\r\nc</r>\n";
     let found = events(xml, false).unwrap();
     assert_eq!(
         found,
@@ -43,7 +43,7 @@ fn reads_namespaces_text_and_references() {
             },
             Event::End,
             Event::Text(b"<raw>\n".to_vec()),
-            Event::Text("a&b\u{e9}\nc".as_bytes().to_vec()),
+            Event::Text("a&\"b\u{e9}\nc".as_bytes().to_vec()),
             Event::End,
         ]
     );

@@ -202,7 +202,7 @@ fn matches_php() {
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(golden.lines().count(), 32);
+    assert_eq!(golden.lines().count(), 35);
 }
 
 /// While fetches are off, an uncached URL stays and nothing is written,
@@ -216,11 +216,16 @@ fn fetches_off_leave_urls() {
         post: Some(1),
         ..Request::default()
     };
-    let url = b"http://pages.test:8080/oembed/rich.html";
-    let ours = Renderer::new(&theme, &site, &request).autoembed(url);
-    assert_eq!(ours, url);
+    // A page to discover, and a provider's URL, asked of nobody.
+    for url in [
+        &b"http://pages.test:8080/oembed/rich.html"[..],
+        b"https://www.youtube.com/watch?v=x",
+    ] {
+        let ours = Renderer::new(&theme, &site, &request).autoembed(url);
+        assert_eq!(ours, url);
+    }
     assert!(site.meta.borrow().is_empty());
-    assert_eq!(site.asked.borrow().len(), 1);
+    assert_eq!(site.asked.borrow().len(), 2);
 }
 
 /// What is not ported fetches nothing: no post, the site's own host and

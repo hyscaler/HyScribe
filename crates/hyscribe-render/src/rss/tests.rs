@@ -209,5 +209,119 @@ fn matches_php() {
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(golden.lines().count(), 18);
+    assert_eq!(golden.lines().count(), 23);
+}
+
+/// A site with nothing but what every site must give.
+struct Bare;
+
+impl Site for Bare {
+    fn option(&self, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn home_url(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    fn post(&self, _: u64) -> Option<Post> {
+        None
+    }
+
+    fn post_terms(&self, _: u64, _: &str) -> Vec<Term> {
+        Vec::new()
+    }
+
+    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn query(&self, _: &PostQuery) -> Vec<Post> {
+        Vec::new()
+    }
+}
+
+/// Sites fetch, write and filter nothing unless they say so.
+#[test]
+fn sites_fetch_and_write_nothing_by_default() {
+    let site = Bare;
+    assert!(
+        site.remote_get(b"http://a.test/", &Get::new(&site))
+            .is_none()
+    );
+    assert!(site.feed_hosts().is_empty());
+    site.update_post_meta(1, "k", b"v");
+    site.set_site_transient("t", b"v", 1);
+    site.delete_site_transient("t");
+    let hooks = site.hooks();
+    let size = crate::outbound::Size {
+        width: 1,
+        height: 2,
+    };
+    assert_eq!(hooks.oembed_fetch_url(b"p".to_vec(), b"u", size), b"p");
+    assert_eq!(hooks.oembed_result(None, b"u", size), None);
+    assert_eq!(hooks.embed_oembed_html(b"h".to_vec(), b"u", size, 1), b"h");
+    assert_eq!(hooks.wp_feed_cache_transient_lifetime(5, b"u"), 5);
+}
+
+/// A transient as `get_site_transient()` reads it: a plain value as is,
+/// one that does not unserialize as nothing.
+#[test]
+fn reads_plain_and_broken_transients() {
+    let site = Feeds::new();
+    site.set("_site_transient_plain", b"text");
+    site.set("_site_transient_broken", b"a:1:{x}");
+    let read = |name| crate::outbound::get_site_transient(&site, name, NOW);
+    assert_eq!(read("plain"), Some(Value::String(b"text".to_vec())));
+    assert_eq!(read("broken"), None);
+}
+
+/// The feed's host must be allowed, fetches on, and the fetch made; a
+/// feed that is not UTF-8 reads as ISO-8859-1, SimplePie's last try.
+#[test]
+fn unreachable_feeds_render_as_php_renders_them() {
+    let theme = twentytwentyfive();
+    let request = Request::default();
+    let block = br#"<!-- wp:rss {"feedURL":"http://pages.test:8080/feed/rss2.xml"} /-->"#;
+    let unreachable = "<strong>RSS Error:</strong> WP HTTP Error: A valid URL was not provided.";
+    let mut off = Feeds::new();
+    off.fetches = false;
+    let mut elsewhere = Feeds::new();
+    elsewhere.hosts = vec![b"other.test".to_vec()];
+    for site in [off, elsewhere] {
+        let html = Renderer::new(&theme, &site, &request).render(block);
+        assert!(String::from_utf8_lossy(&html).contains(unreachable));
+        assert!(site.options.borrow().is_empty());
+    }
+    let mut refused = Feeds::new();
+    refused.hosts = vec![b"nowhere.test".to_vec()];
+    let block = br#"<!-- wp:rss {"feedURL":"http://nowhere.test/feed"} /-->"#;
+    let html = Renderer::new(&theme, &refused, &request).render(block);
+    assert!(String::from_utf8_lossy(&html).contains(unreachable));
+    let latin = br#"<!-- wp:rss {"feedURL":"http://pages.test:8080/feed/latin.xml"} /-->"#;
+    let html = Renderer::new(&theme, &Feeds::new(), &request).render(latin);
+    assert!(String::from_utf8_lossy(&html).contains("Caf\u{e9}"));
+}
+
+#[test]
+fn sniffs_feeds_as_the_locator_does() {
+    for (kind, body, feed) in [
+        (&b"application/atom+xml; charset=utf-8"[..], &b""[..], true),
+        (b"text/xml", b"", true),
+        (b"image/svg+xml", b"<rss", false),
+        (
+            b"text/html",
+            b"\xEF\xBB\xBF <!-- c --> <!DOCTYPE x> <?xml ?>\n<rdf:RDF",
+            true,
+        ),
+        (b"text/html", b"<feed", true),
+        (b"text/html", b"<html><rss>", false),
+        (b"text/html", b"text", false),
+        (b"text/html", b"<!-- open", false),
+        (b"text/html", b"<!x", false),
+        (b"text/html", b"<?x", false),
+        (b"", b" ", false),
+    ] {
+        assert_eq!(super::is_feed(kind, body), feed, "{kind:?} {body:?}");
+    }
 }

@@ -82,3 +82,17 @@ fn reads_xml_answers() {
     assert!(parse_json(b" [1] ").is_none());
     assert!(parse_json(b"{}").is_none());
 }
+
+#[test]
+fn only_known_types_make_html() {
+    let site = Embeds::new();
+    let data = |json: &str| parse_json(json.as_bytes()).unwrap();
+    assert_eq!(
+        data2html(&site, &data(r#"{"type":1,"html":"x"}"#), b"u"),
+        None
+    );
+    assert_eq!(
+        data2html(&site, &data(r#"{"type":"other","html":"x"}"#), b"u"),
+        None
+    );
+}

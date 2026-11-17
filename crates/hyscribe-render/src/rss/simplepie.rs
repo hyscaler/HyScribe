@@ -81,18 +81,15 @@ impl Node {
     }
 
     fn adopt(&mut self, name: &Name, child: Value) {
-        let at = match self.child.iter().position(|(ns, _)| *ns == name.namespace) {
-            Some(at) => at,
-            None => {
-                self.child.push((name.namespace.clone(), Vec::new()));
-                self.child.len() - 1
-            }
+        let group = self.child.iter_mut().find(|(ns, _)| *ns == name.namespace);
+        let Some((_, locals)) = group else {
+            let locals = vec![(name.local.clone(), vec![child])];
+            self.child.push((name.namespace.clone(), locals));
+            return;
         };
-        if let Some((_, locals)) = self.child.get_mut(at) {
-            match locals.iter_mut().find(|(local, _)| *local == name.local) {
-                Some((_, list)) => list.push(child),
-                None => locals.push((name.local.clone(), vec![child])),
-            }
+        match locals.iter_mut().find(|(local, _)| *local == name.local) {
+            Some((_, list)) => list.push(child),
+            None => locals.push((name.local.clone(), vec![child])),
         }
     }
 }
@@ -264,9 +261,8 @@ pub(crate) fn parse(xml: &[u8]) -> Result<Value, Error> {
                 }
             }
             Event::End => {
-                let Some((name, opened, ..)) = stack.pop() else {
-                    continue;
-                };
+                // The reader ends only elements it opened.
+                let (name, opened, ..) = stack.pop().unwrap_or_default();
                 if construct >= 0 {
                     construct -= 1;
                     const VOID: [&[u8]; 13] = [
@@ -301,10 +297,8 @@ pub(crate) fn parse(xml: &[u8]) -> Result<Value, Error> {
             }
         }
     }
-    Ok(match root.child.is_empty() {
-        true => Value::Array(Vec::new()),
-        false => Value::Array(vec![(key(b"child"), children(root.child))]),
-    })
+    // A well formed document has a root element.
+    Ok(Value::Array(vec![(key(b"child"), children(root.child))]))
 }
 
 /// `$value[ $key ]` for a string or integer key.
@@ -508,12 +502,8 @@ impl Feed<'_> {
         }
         let mut keyed: Vec<(Option<i64>, Item<'_>)> =
             items.into_iter().map(|item| (item.date(), item)).collect();
-        keyed.sort_by(|(a, _), (b, _)| match (a, b) {
-            (Some(a), Some(b)) => b.cmp(a),
-            (Some(_), None) => std::cmp::Ordering::Greater,
-            (None, Some(_)) => std::cmp::Ordering::Less,
-            (None, None) => std::cmp::Ordering::Equal,
-        });
+        // Undated first (`None` sorts low), then newest first; a stable sort.
+        keyed.sort_by_key(|(date, _)| date.map(std::cmp::Reverse));
         keyed.into_iter().map(|(_, item)| item).collect()
     }
 }
@@ -613,7 +603,7 @@ impl Item<'_> {
         ];
         construct.into_iter().find_map(|(ns, kind)| {
             let element = self.tags(ns, b"title")?;
-            let kind = kind.unwrap_or_else(|| construct_type(element, ns, false));
+            let kind = kind.unwrap_or_else(|| construct_type(element, ns));
             let base = if matches!(kind, TEXT) && (ns == DC_11 || ns == DC_10) {
                 Vec::new()
             } else {
@@ -646,7 +636,7 @@ impl Item<'_> {
             .chain(content.iter())
             .find_map(|&(ns, tag, kind)| {
                 let element = self.tags(ns, tag)?;
-                let kind = kind.unwrap_or_else(|| construct_type(element, ns, tag == b"content"));
+                let kind = kind.unwrap_or_else(|| construct_type(element, ns));
                 let sanitized = sanitize(&data(element), kind, &self.base(element));
                 (!hyscribe_phpser::is_empty_string(&sanitized)).then_some(sanitized)
             })
@@ -734,7 +724,7 @@ impl Item<'_> {
 }
 
 /// `Misc::atom_10_construct_type()` and its Atom 0.3 and content kin.
-fn construct_type(element: &Value, ns: &[u8], content: bool) -> u8 {
+fn construct_type(element: &Value, ns: &[u8]) -> u8 {
     let attribute = |name: &[u8]| {
         attribute(element, name).map(|v| php_trim(&v.to_php_string()).to_ascii_lowercase())
     };
@@ -751,7 +741,6 @@ fn construct_type(element: &Value, ns: &[u8], content: bool) -> u8 {
         None | Some(b"text") => TEXT,
         Some(b"html") => HTML,
         Some(b"xhtml") => XHTML_CONSTRUCT,
-        _ if content => 0,
         _ => 0,
     }
 }

@@ -73,6 +73,9 @@ $cases = array(
 	array( 'cached', "{$p}gone", array( key_of( "{$p}gone" ) => '<b>Cached</b> <blockquote class="wp-embedded-content">q</blockquote>' ) ),
 	array( 'cached-unknown', "{$p}rich.html", array( key_of( "{$p}rich.html" ) => '{{unknown}}' ) ),
 	array( 'expired', "{$p}gone", array( key_of( "{$p}gone" ) => '<i>Old</i>', 'time_' . key_of( "{$p}gone" ) => '1' ) ),
+	array( 'n501', "{$p}n501.html" ),
+	array( 'mixed', "{$p}mixed.html" ),
+	array( 'p-only', "<p>{$p}link.html</p><P class='a'>  {$p}photo.html\t</p><pre>{$p}link.html</pre><p>{$p}link.html x</p>" ),
 	array( 'content', $block( "{$p}rich.html" ), null, 'content' ),
 	array( 'content-failed', $block( "{$p}gone" ), null, 'content' ),
 );

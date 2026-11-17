@@ -62,3 +62,10 @@
 /feed/page.html	200	feed-html.html
 /feed/gone	404	-
 /feed/redirect	301	/feed/rss2.xml
+/oembed/n501.html	200	oembed-n501.html
+/oembed/n501.json	501	-
+/oembed/mixed.html	200	oembed-mixed.html
+/feed/notfeed.xml	200	feed-notfeed.xml
+/feed/quotes.xml	200	feed-quotes.xml
+/feed/rss-quotes.xml	200	feed-rss-quotes.xml
+/feed/latin.xml	200	feed-latin.xml

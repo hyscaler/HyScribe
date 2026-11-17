@@ -33,15 +33,13 @@ static PROVIDERS: LazyLock<Vec<Provider>> = LazyLock::new(|| {
         let regex = std::str::from_utf8(regex).ok()?;
         // `#...#` or `#...#i`.
         let (body, flags) = regex.strip_prefix('#')?.rsplit_once('#')?;
+        let endpoint = entry.get_str("1")?.as_bytes()?;
+        let endpoint = String::from_utf8_lossy(endpoint).into_owned();
         let pattern = match flags {
             "i" => Pattern::caseless(body),
             _ => Pattern::new(body),
-        }?;
-        let endpoint = entry.get_str("1")?.as_bytes()?;
-        Some(Provider {
-            pattern,
-            endpoint: String::from_utf8_lossy(endpoint).into_owned(),
-        })
+        };
+        pattern.map(|pattern| Provider { pattern, endpoint })
     };
     entries
         .as_array()

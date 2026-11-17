@@ -816,6 +816,10 @@ async fn refused_writes_are_answered_as_php_answers_them() {
             "rest_invalid_param",
         ),
         (
+            ("DELETE", "/?rest_route=/wp/v2/posts/1&force=maybe", ""),
+            "rest_invalid_param",
+        ),
+        (
             ("DELETE", "/?rest_route=/wp/v2/comments/1&force=maybe", ""),
             "rest_invalid_param",
         ),
@@ -1068,13 +1072,23 @@ async fn shadow_mode_refuses_writes() {
     let dir = tempfile::tempdir().unwrap();
     let site = site(false, dir.path()).await;
     let (cookie, nonce) = log_in(&site).await;
-    let request = axum::http::Request::builder()
-        .method("POST")
-        .uri("/?rest_route=/wp/v2/posts")
-        .header(header::COOKIE, cookie)
-        .header("x-wp-nonce", nonce)
-        .header(header::CONTENT_TYPE, "application/json");
-    let response = send(&site, request, r#"{"title":"Kept out"}"#).await;
+    let ask = |target: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(target)
+            .header(header::COOKIE, &cookie)
+            .header("x-wp-nonce", &nonce)
+            .header(header::CONTENT_TYPE, "application/json")
+    };
+    // A settings update giving none writes nothing, so it is answered.
+    let none = send(&site, ask("/?rest_route=/wp/v2/settings"), "{}").await;
+    assert_eq!(none.status(), StatusCode::OK);
+    let response = send(
+        &site,
+        ask("/?rest_route=/wp/v2/posts"),
+        r#"{"title":"Kept out"}"#,
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let message = hyscribe_admin::login::READ_ONLY;
     let json = format!(

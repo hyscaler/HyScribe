@@ -67,6 +67,10 @@ impl Site for WithComments {
             .cloned()
             .collect()
     }
+    fn older_comments(&self, post_id: u64, date_gmt: &str) -> u64 {
+        let older = |c: &&Comment| c.post_id == post_id && c.parent == 0 && *c.date_gmt < *date_gmt;
+        self.comments.iter().filter(older).count() as u64
+    }
     fn comment(&self, id: u64) -> Option<Comment> {
         self.comments.iter().find(|c| c.id == id).cloned()
     }
@@ -144,7 +148,7 @@ fn matches_php() {
         failures.len(),
         failures[..failures.len().min(3)].join("\n")
     );
-    assert_eq!(golden.lines().count(), 2292);
+    assert_eq!(golden.lines().count(), 2310);
 }
 
 /// A held comment shows only to its author, from the link
@@ -156,6 +160,91 @@ fn held_comments_preview_as_php() {
     let failures = differences(golden);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert_eq!(golden.lines().count(), 67);
+}
+
+/// A site without notes counts its comments' top level ones from before
+/// a date, as `get_page_of_comment()` does.
+#[test]
+fn older_comments_count_the_top_level() {
+    let site = DefaultInstall {
+        home: b"http://127.0.0.1:8081".to_vec(),
+    };
+    // The fixture's one comment is from 2026-10-27 08:08:15.
+    assert_eq!(site.older_comments(1, "2026-10-27 08:08:16"), 1);
+    assert_eq!(site.older_comments(1, "2026-10-27 08:08:15"), 0);
+}
+
+/// On paged comments, a reply whose thread has no top, as its parent is
+/// missing or the parents loop, links to no page, where PHP fails.
+#[test]
+fn comments_without_a_thread_top_link_to_no_page() {
+    let comment = |id, parent| Comment {
+        id,
+        post_id: 1,
+        parent,
+        ..Comment::default()
+    };
+    let comments = vec![comment(10, 11), comment(11, 10), comment(12, 99)];
+    let site = linked_site(b"page_comments=1&comments_per_page=1", comments);
+    for (id, parent) in [(10, 11), (12, 99)] {
+        assert_eq!(
+            link_of(&site, &comment(id, parent)),
+            format!("http://127.0.0.1:8081/?p=1#comment-{id}")
+        );
+    }
+}
+
+/// With threads one deep, a reply's page is its own, from its date; under
+/// pretty permalinks a link without a page is the post's, as in PHP.
+#[test]
+fn comment_links_on_shallow_threads_and_pretty_links() {
+    let comment = |id, parent, date: &str| Comment {
+        id,
+        post_id: 1,
+        parent,
+        date_gmt: date.into(),
+        ..Comment::default()
+    };
+    let (a, b, c) = (
+        comment(10, 0, "2026-10-27 09:01:00"),
+        comment(11, 10, "2026-10-27 09:03:00"),
+        comment(12, 0, "2026-10-27 09:02:00"),
+    );
+    let options = b"page_comments=1&comments_per_page=1&thread_comments_depth=1";
+    let site = linked_site(options, vec![a.clone(), b.clone(), c]);
+    assert_eq!(
+        link_of(&site, &b),
+        "http://127.0.0.1:8081/?p=1&cpage=3#comment-11"
+    );
+    let site = linked_site(b"permalink_structure=/%postname%/", vec![a.clone()]);
+    assert_eq!(
+        link_of(&site, &a),
+        "http://127.0.0.1:8081/hello-world/#comment-10"
+    );
+}
+
+/// The fixture with `options` and `comments`, all approved.
+fn linked_site(options: &[u8], comments: Vec<Comment>) -> WithComments {
+    WithComments {
+        base: DefaultInstall {
+            home: b"http://127.0.0.1:8081".to_vec(),
+        },
+        options: parse_str(options),
+        comments,
+        users: Vec::new(),
+        password: false,
+        closed: false,
+        siteurl: b"http://127.0.0.1:8081".to_vec(),
+        held: Vec::new(),
+        hashes: Value::Null,
+    }
+}
+
+/// `get_comment_link( $comment )` on `site`.
+fn link_of(site: &WithComments, comment: &Comment) -> String {
+    let (theme, request) = (twentytwentyfive(), Request::default());
+    let renderer = Renderer::new(&theme, site, &request);
+    String::from_utf8(crate::core_blocks::comment_link(&renderer.context, comment)).unwrap()
 }
 
 /// Where a golden's cases differ from the renderer's.

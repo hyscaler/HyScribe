@@ -43,6 +43,17 @@ pub trait Site {
         vec![]
     }
 
+    /// How many approved top level comments of every type, notes too,
+    /// `post_id` has from before `date_gmt`: `get_page_of_comment()`'s
+    /// count. Sites without notes count their comments.
+    fn older_comments(&self, post_id: u64, date_gmt: &str) -> u64 {
+        let comments = self.comments(post_id);
+        let older = comments
+            .iter()
+            .filter(|c| c.parent == 0 && c.date_gmt.as_str() < date_gmt);
+        older.count() as u64
+    }
+
     /// The approved comments on published posts, newest first, `limit` of
     /// them. Sites without comment data have none.
     fn recent_comments(&self, _limit: u64) -> Vec<Comment> {

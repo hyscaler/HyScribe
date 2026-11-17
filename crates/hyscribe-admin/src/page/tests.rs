@@ -168,7 +168,7 @@ fn an_unknown_scheme_is_the_default() {
 fn the_title_the_head_script_and_the_body() {
     let html = render(&site(), &page(&[], "", "page"));
     assert!(html.contains("<title>Tools &#8212; WordPress</title>"));
-    assert!(html.contains("var ajaxurl = '/wp/hs-admin/admin-ajax.php',"));
+    assert!(html.contains("var ajaxurl = '/wp/hs-admin/admin-ajax',"));
     assert!(html.contains("pagenow = 'x\\'y',\n\ttypenow = 'page',"));
     assert!(html.contains("tools-php auto-fold admin-bar post-type-page branch-"));
     assert!(html.contains(" wp-theme-ab\">"));

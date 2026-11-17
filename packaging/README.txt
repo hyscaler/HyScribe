@@ -7,8 +7,9 @@ installation: everything HyScribe writes stays inside it.
 Start
 -----
 
-  ./hyscribe service start      without .env, starts the setup wizard
-  ./hyscribe service log        shows the wizard's address and secret
+  ./hyscribe service start      without .env, starts the setup wizard and
+                                prints its address and one-time secret
+                                (or puts them in logs/setup-secret)
   ./hyscribe service status
   ./hyscribe service log -f
   ./hyscribe service stop

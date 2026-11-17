@@ -5,7 +5,8 @@
 // nonces of argv[2] and the time masked, hex encoded. With argv[3] set,
 // a Theme Test Data page, whose content is not ours to commit, it prints
 // hashes instead, of the page under hs-admin's URLs (as hs_admin_page() of
-// hyscribe-testkit puts it, the oracle showing no update notice) with every
+// hyscribe-testkit put it before ADR 0008's 2026-11-17 amendment, keeping
+// relative form actions' `.php`; the oracle shows no update notice) with every
 // nonce as %nonce%: sha256 of its screen meta and content, a tab, and
 // sha256 of all of it. A list sorted
 // by author or parent, whose ties the database breaks as it goes, is

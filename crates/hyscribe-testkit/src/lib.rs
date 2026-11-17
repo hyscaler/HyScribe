@@ -197,9 +197,9 @@ fn decoded(text: &str) -> String {
     out
 }
 
-/// `page` with each `wp-admin` path after `from` put under `to`, without
-/// `.php` before the first of `stops`.
-fn admin_paths(page: &str, from: &str, to: &str, stops: &[char]) -> String {
+/// `page` with each `from` as `to`, and without the `.php` of the `wp-admin`
+/// file named right after it (`edit.php?x`, `edit.php%3Fx`, `edit.php"`).
+fn admin_paths(page: &str, from: &str, to: &str) -> String {
     let mut out = String::new();
     let mut rest = page;
     while let Some(at) = rest.find(from) {
@@ -207,49 +207,46 @@ fn admin_paths(page: &str, from: &str, to: &str, stops: &[char]) -> String {
         out.push_str(head);
         out.push_str(to);
         let tail = tail.get(from.len()..).unwrap_or_default();
-        let end = tail.find(stops).unwrap_or(tail.len());
+        let named = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+        let end = tail.find(|c: char| !named(c)).unwrap_or(tail.len());
         let (file, tail) = tail.split_at(end);
-        out.push_str(file.strip_suffix(".php").unwrap_or(file));
-        rest = tail;
+        out.push_str(file);
+        rest = match tail.strip_prefix(".php") {
+            Some(after)
+                if !file.is_empty() && !after.starts_with(|c| named(c) || c == '.' || c == '/') =>
+            {
+                after
+            }
+            _ => tail,
+        };
     }
     out.push_str(rest);
     out
 }
 
 /// The PHP oracle's page under hs-admin's URLs, without the update notice
-/// hs-admin leaves out until an open question is decided.
+/// hs-admin leaves out until an open question is decided: `wp-admin/<file>.php` is
+/// `hs-admin/<file>`, plain, JSON-escaped and URL-encoded, and relative
+/// links name the file without `.php` (ADR 0008).
 pub fn hs_admin_page(page: &str) -> String {
     let nag = "<div class=\"notice notice-warning update-nag inline\">";
-    let page = match page.split_once(nag) {
+    let mut page = match page.split_once(nag) {
         Some((head, tail)) => format!(
             "{head}{}",
             tail.split_once("</div>").map_or("", |(_, rest)| rest)
         ),
         None => page.to_string(),
     };
-    // Paths plain and URL-encoded, as a `wp_http_referer` carries them.
-    let page = admin_paths(&page, "/wp-admin/", "/hs-admin/", &['\'', '?', '"']);
-    let encoded = admin_paths(
-        &page,
-        "%2Fwp-admin%2F",
-        "%2Fhs-admin%2F",
-        &['%', '\'', '"', '&'],
-    );
-    let mut page = encoded.replace("/wp-login.php", "/hs-login");
-    for prefix in ["href='", "href=\"", "\"url\":\""] {
-        let mut out = String::new();
-        let mut rest = page.as_str();
-        while let Some(at) = rest.find(prefix) {
-            let (head, tail) = rest.split_at(at + prefix.len());
-            out.push_str(head);
-            let end = tail.find(['\'', '?', '"']).unwrap_or(tail.len());
-            let (file, tail) = tail.split_at(end);
-            let local = file.strip_suffix(".php").filter(|f| !f.contains('/'));
-            out.push_str(local.unwrap_or(file));
-            rest = tail;
-        }
-        out.push_str(rest);
-        page = out;
+    for (from, to) in [
+        ("/wp-admin/", "/hs-admin/"),
+        ("\\/wp-admin\\/", "\\/hs-admin\\/"),
+        ("%2Fwp-admin%2F", "%2Fhs-admin%2F"),
+    ] {
+        page = admin_paths(&page, from, to);
+    }
+    page = page.replace("/wp-login.php", "/hs-login");
+    for prefix in ["href='", "href=\"", "action='", "action=\"", "\"url\":\""] {
+        page = admin_paths(&page, prefix, prefix);
     }
     page
 }
@@ -426,6 +423,40 @@ mod tests {
             hs_admin_page("r=%2Fwp-admin%2Fedit-tags.php%3Ft r=%2Fwp-admin%2Fx.php"),
             "r=%2Fhs-admin%2Fedit-tags%3Ft r=%2Fhs-admin%2Fx"
         );
+        // ADR 0008's 2026-11-17 amendment: every `wp-admin/<file>.php`.
+        for (php, hs) in [
+            (
+                "redirect_to=http%3A%2F%2Fh%2Fwp-admin%2Fedit.php&amp;x",
+                "redirect_to=http%3A%2F%2Fh%2Fhs-admin%2Fedit&amp;x",
+            ),
+            (
+                "/wp-admin/edit.php%3Fpost_type",
+                "/hs-admin/edit%3Fpost_type",
+            ),
+            (
+                "/wp-admin/post.php#x /wp-admin/a.php&b",
+                "/hs-admin/post#x /hs-admin/a&b",
+            ),
+            (
+                "\"http:\\/\\/h\\/wp-admin\\/admin-ajax.php\"",
+                "\"http:\\/\\/h\\/hs-admin\\/admin-ajax\"",
+            ),
+            (
+                "<form action=\"options.php\"><form action='comment.php?x'>",
+                "<form action=\"options\"><form action='comment?x'>",
+            ),
+            (
+                "/wp-admin/.php /wp-admin/a.phpx /wp-admin/a.php.b /wp-admin/a.php/b /wp-admin/a.php-",
+                "/hs-admin/.php /hs-admin/a.phpx /hs-admin/a.php.b /hs-admin/a.php/b /hs-admin/a.php-",
+            ),
+            ("/wp-admin/a.php", "/hs-admin/a"),
+            (
+                "/wp-comments-post.php /xmlrpc.php action=\"/wp-cron.php\"",
+                "/wp-comments-post.php /xmlrpc.php action=\"/wp-cron.php\"",
+            ),
+        ] {
+            assert_eq!(hs_admin_page(php), hs, "{php}");
+        }
     }
 
     /// The socket is where `db.sh up` binds it for the fixture's port.

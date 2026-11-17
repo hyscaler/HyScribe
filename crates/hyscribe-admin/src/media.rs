@@ -281,4 +281,4 @@ pub(crate) fn enqueue_media(
 #[cfg(test)]
 pub(crate) mod content;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

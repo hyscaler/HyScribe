@@ -338,29 +338,20 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         Some(_) => return Err(invalid("MODE", "must be shadow or primary")),
     };
 
-    let rest_public_users = match get("REST_PUBLIC_USERS") {
-        None | Some("on") => true,
-        Some("off") => false,
-        Some(_) => return Err(invalid("REST_PUBLIC_USERS", "must be on or off")),
-    };
+    let rest_public_users = boolean(get("REST_PUBLIC_USERS"), "REST_PUBLIC_USERS", true)?;
+    let http_outbound = boolean(get("HTTP_OUTBOUND"), "HTTP_OUTBOUND", false)?;
 
-    let http_outbound = match get("HTTP_OUTBOUND") {
-        None | Some("off") => false,
-        Some("on") => true,
-        Some(_) => return Err(invalid("HTTP_OUTBOUND", "must be on or off")),
-    };
-
-    if constant(get("MULTISITE"), "MULTISITE", false)? {
+    if boolean(get("MULTISITE"), "MULTISITE", false)? {
         return Err(invalid("MULTISITE", "multisite networks are not supported"));
     }
     let safer = Constants::default();
     let constants = Constants {
-        disallow_unfiltered_html: constant(
+        disallow_unfiltered_html: boolean(
             get("DISALLOW_UNFILTERED_HTML"),
             "DISALLOW_UNFILTERED_HTML",
             safer.disallow_unfiltered_html,
         )?,
-        allow_unfiltered_uploads: constant(
+        allow_unfiltered_uploads: boolean(
             get("ALLOW_UNFILTERED_UPLOADS"),
             "ALLOW_UNFILTERED_UPLOADS",
             safer.allow_unfiltered_uploads,
@@ -429,7 +420,7 @@ pub fn server(values: &HashMap<String, String>) -> Result<Server, ConfigError> {
     Ok(Server {
         bind_host,
         port: port(get("PORT"), "PORT", 8080)?,
-        behind_proxy: boolean(get("BEHIND_PROXY"), "BEHIND_PROXY")?,
+        behind_proxy: boolean(get("BEHIND_PROXY"), "BEHIND_PROXY", false)?,
     })
 }
 
@@ -503,21 +494,13 @@ fn size(value: &str) -> Option<u64> {
         .then_some(bytes)
 }
 
-fn boolean(value: Option<&str>, key: &'static str) -> Result<bool, ConfigError> {
-    match value.map(str::to_ascii_lowercase).as_deref() {
-        None | Some("false" | "0" | "no") => Ok(false),
-        Some("true" | "1" | "yes") => Ok(true),
-        Some(_) => Err(invalid(key, "must be true or false")),
-    }
-}
-
-/// A constant the setup wizard copies from a literal `true` or `false`
-/// `define()`; 1 and 0 are read too.
-fn constant(value: Option<&str>, key: &'static str, default: bool) -> Result<bool, ConfigError> {
+/// Every yes or no key, `default` when missing or empty: `true`, `yes`,
+/// `on` or `1`, and `false`, `no`, `off` or `0`, in any case.
+fn boolean(value: Option<&str>, key: &'static str, default: bool) -> Result<bool, ConfigError> {
     match value.map(str::to_ascii_lowercase).as_deref() {
         None => Ok(default),
-        Some("true" | "1") => Ok(true),
-        Some("false" | "0") => Ok(false),
+        Some("true" | "yes" | "on" | "1") => Ok(true),
+        Some("false" | "no" | "off" | "0") => Ok(false),
         Some(_) => Err(invalid(key, "must be true or false")),
     }
 }

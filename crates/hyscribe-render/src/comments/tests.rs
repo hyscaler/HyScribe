@@ -184,28 +184,67 @@ fn comments_without_a_thread_top_link_to_no_page() {
         parent,
         ..Comment::default()
     };
-    let site = WithComments {
+    let comments = vec![comment(10, 11), comment(11, 10), comment(12, 99)];
+    let site = linked_site(b"page_comments=1&comments_per_page=1", comments);
+    for (id, parent) in [(10, 11), (12, 99)] {
+        assert_eq!(
+            link_of(&site, &comment(id, parent)),
+            format!("http://127.0.0.1:8081/?p=1#comment-{id}")
+        );
+    }
+}
+
+/// With threads one deep, a reply's page is its own, from its date; under
+/// pretty permalinks a link without a page is the post's, as in PHP.
+#[test]
+fn comment_links_on_shallow_threads_and_pretty_links() {
+    let comment = |id, parent, date: &str| Comment {
+        id,
+        post_id: 1,
+        parent,
+        date_gmt: date.into(),
+        ..Comment::default()
+    };
+    let (a, b, c) = (
+        comment(10, 0, "2026-10-27 09:01:00"),
+        comment(11, 10, "2026-10-27 09:03:00"),
+        comment(12, 0, "2026-10-27 09:02:00"),
+    );
+    let options = b"page_comments=1&comments_per_page=1&thread_comments_depth=1";
+    let site = linked_site(options, vec![a.clone(), b.clone(), c]);
+    assert_eq!(
+        link_of(&site, &b),
+        "http://127.0.0.1:8081/?p=1&cpage=3#comment-11"
+    );
+    let site = linked_site(b"permalink_structure=/%postname%/", vec![a.clone()]);
+    assert_eq!(
+        link_of(&site, &a),
+        "http://127.0.0.1:8081/hello-world/#comment-10"
+    );
+}
+
+/// The fixture with `options` and `comments`, all approved.
+fn linked_site(options: &[u8], comments: Vec<Comment>) -> WithComments {
+    WithComments {
         base: DefaultInstall {
             home: b"http://127.0.0.1:8081".to_vec(),
         },
-        options: parse_str(b"page_comments=1&comments_per_page=1"),
-        comments: vec![comment(10, 11), comment(11, 10), comment(12, 99)],
+        options: parse_str(options),
+        comments,
         users: Vec::new(),
         password: false,
         closed: false,
         siteurl: b"http://127.0.0.1:8081".to_vec(),
         held: Vec::new(),
         hashes: Value::Null,
-    };
-    let (theme, request) = (twentytwentyfive(), Request::default());
-    let renderer = Renderer::new(&theme, &site, &request);
-    for (id, parent) in [(10, 11), (12, 99)] {
-        let link = crate::core_blocks::comment_link(&renderer.context, &comment(id, parent));
-        assert_eq!(
-            link,
-            format!("http://127.0.0.1:8081/?p=1#comment-{id}").into_bytes()
-        );
     }
+}
+
+/// `get_comment_link( $comment )` on `site`.
+fn link_of(site: &WithComments, comment: &Comment) -> String {
+    let (theme, request) = (twentytwentyfive(), Request::default());
+    let renderer = Renderer::new(&theme, site, &request);
+    String::from_utf8(crate::core_blocks::comment_link(&renderer.context, comment)).unwrap()
 }
 
 /// Where a golden's cases differ from the renderer's.

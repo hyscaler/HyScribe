@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Writes crates/hyscribe-phpser/tests/golden/cast.tsv: PHP's empty(),
-// is_numeric(), (float), (int) and (string) of each value, the oracle for
+// is_numeric(), (float), (int) and (string) of each value, and each string
+// plus 0 (null for the TypeError of one holding no number), the oracle for
 // hyscribe-phpser's cast module. Each line is
 //   kind<TAB>hex(serialize(value))<TAB>hex(serialize(result))
 //
@@ -28,7 +29,7 @@ $values = array(
 	array(), array( 0 ), array( 'a' => 1 ), array( array() ),
 );
 
-foreach ( array( 'empty', 'is_numeric', 'float', 'int', 'string' ) as $kind ) {
+foreach ( array( 'empty', 'is_numeric', 'float', 'int', 'string', 'plus' ) as $kind ) {
 	foreach ( $values as $value ) {
 		switch ( $kind ) {
 			case 'empty':
@@ -42,6 +43,16 @@ foreach ( array( 'empty', 'is_numeric', 'float', 'int', 'string' ) as $kind ) {
 				break;
 			case 'int':
 				$result = (int) $value;
+				break;
+			case 'plus':
+				if ( ! is_string( $value ) ) {
+					continue 2;
+				}
+				try {
+					$result = @( $value + 0 );
+				} catch ( TypeError $e ) {
+					$result = null;
+				}
 				break;
 			default:
 				// Arrays print "Array" with a warning.

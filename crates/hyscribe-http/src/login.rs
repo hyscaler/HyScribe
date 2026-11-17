@@ -571,8 +571,15 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             }
             outcome
         }
+        "lostpassword" | "retrievepassword" if asked.post => {
+            // The transport sends the mail once wired (ADR 0016).
+            let (answer, _mail) = reset::lost_password(&reads, &request, &action, &mut headers);
+            return finished(site, reads, Some(answer), headers);
+        }
         // What the other actions' forms post is not ported.
-        _ if asked.post => return response(StatusCode::NOT_IMPLEMENTED, headers, Vec::new()),
+        _ if asked.post && action != "resetpass" && action != "rp" => {
+            return response(StatusCode::NOT_IMPLEMENTED, headers, Vec::new());
+        }
         _ => {
             let answer = other_action(&reads, &names, &request, asked, &mut headers);
             return finished(site, reads, Some(answer), headers);
@@ -626,8 +633,9 @@ fn finished(
     }
 }
 
-/// A GET of an action other than logging in or out; the reset password
-/// cookie goes to the login screen's path only.
+/// A GET of an action other than logging in or out, or the reset password
+/// form posted; the reset password cookie goes to the login screen's path
+/// only.
 fn other_action(
     reads: &LoginReads,
     names: &Names,
@@ -641,7 +649,7 @@ fn other_action(
         .map_or(String::new(), |q| format!("?{q}"));
     let uri = addslashes(format!("{PATH}{query}").as_bytes());
     let secure = is_ssl(reads.site);
-    match actions::action(reads, request, &request.action(), &uri) {
+    match actions::action(reads, request, &request.action(), (&uri, reads.now)) {
         Action::Page(page) => (StatusCode::OK, page),
         Action::Died(page) => (StatusCode::INTERNAL_SERVER_ERROR, page),
         Action::Redirect(to, reset) => {
@@ -663,6 +671,12 @@ fn other_action(
                 "WordPress".into(),
             ));
             (StatusCode::FOUND, Vec::new())
+        }
+        Action::ResetPassword(id, password) => {
+            // The transport sends the notice once wired (ADR 0016).
+            let (answer, _notice) =
+                reset::reset(reads, request, &request.action(), (id, &password));
+            answer
         }
         Action::NotPorted => (StatusCode::NOT_IMPLEMENTED, Vec::new()),
     }
@@ -907,6 +921,7 @@ fn location(
 }
 
 pub(crate) mod limits;
+mod reset;
 
 #[cfg(test)]
 mod tests;

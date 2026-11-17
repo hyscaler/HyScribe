@@ -22,11 +22,12 @@ use hyscribe_write::Error;
 use hyscribe_write::caps::Caps;
 use hyscribe_write::options::{add_metadata, get_metadata};
 use hyscribe_write::users::{
-    UserData, get_password_reset_key, request_email_change, wp_insert_user, wp_update_user,
+    UserData, get_password_reset_key, request_email_change, retrieve_password, wp_insert_user,
+    wp_update_user,
 };
 
 use super::screen::update_user_meta;
-use super::users::{can_promote, retrieve_password};
+use super::users::can_promote;
 use super::{Acting, Ajax, Saving, Stop, id_of, text};
 
 /// What PHP cannot go on with, or shows again: not ported.
@@ -369,11 +370,11 @@ pub(super) fn password_reset<'a>(
         let (login, name) =
             user.map_or_else(Default::default, |(login, user)| (login, user.display_name));
         Ok(match retrieve_password(write, &login).await? {
-            None => {
+            Ok(_) => {
                 let message = [&b"A password reset link was emailed to "[..], &name, b"."];
                 json(true, Value::String(message.concat()))
             }
-            Some(error) => json(false, Value::String(error.into())),
+            Err(refusal) => json(false, Value::String(refusal.message.into())),
         })
     })
 }

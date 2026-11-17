@@ -464,6 +464,8 @@ struct Frame<'a> {
     /// `login_header()`'s `$message`, as markup.
     message: &'a str,
     errors: &'a [Notice],
+    /// The scripts the action enqueues before `login_header()`.
+    head_scripts: &'a [&'a str],
     /// The scripts the action enqueues after `login_header()`.
     scripts: &'a [&'a str],
     /// The action's markup between the notices and `login_footer()`.
@@ -476,6 +478,9 @@ impl Frame<'_> {
     fn render(&self, site: &dyn Site) -> Vec<u8> {
         let mut assets = Assets::new(true);
         assets.enqueue_style("login");
+        for script in self.head_scripts {
+            assets.enqueue_script(script);
+        }
         if self.customize {
             assets.enqueue_script("customize-base");
         }
@@ -600,6 +605,7 @@ impl Screen<'_> {
             loggedout: self.loggedout,
             message: "",
             errors: self.errors,
+            head_scripts: &[],
             scripts: &["user-profile", "wp-tooltip"],
             body: &body,
             input_id: "",

@@ -132,6 +132,12 @@ pub fn string_to_float(text: &[u8]) -> f64 {
     numeric_prefix(text).map_or(0.0, |(number, _)| number)
 }
 
+/// The number PHP 8's arithmetic takes of `text`: the one at its start,
+/// `None` for the `TypeError` of a string without one.
+pub fn string_to_number(text: &[u8]) -> Option<f64> {
+    numeric_prefix(text).map(|(number, _)| number)
+}
+
 /// `(string) $float`, with PHP's default `precision` of 14.
 pub fn float_to_string(value: f64) -> String {
     if value.is_nan() {
@@ -238,6 +244,12 @@ mod tests {
                 "is_numeric" => Value::Bool(value.is_numeric()),
                 "float" => Value::Float(crate::Float::from_f64(value.to_float())),
                 "int" => Value::Int(value.to_int()),
+                "plus" => {
+                    let number = string_to_number(value.as_bytes().unwrap());
+                    let php = (!matches!(expected, Value::Null)).then(|| expected.to_float());
+                    assert_eq!(number, php, "{value:?}");
+                    continue;
+                }
                 _ => Value::String(value.to_php_string()),
             };
             assert_eq!(ours, expected, "{kind} {value:?}");

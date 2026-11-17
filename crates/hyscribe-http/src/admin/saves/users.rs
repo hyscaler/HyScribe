@@ -6,12 +6,10 @@ use hyscribe_admin::actions::{Asked, user_ids};
 use hyscribe_admin::posts::Answer;
 use hyscribe_db::{DbError, Write};
 use hyscribe_phpser::{
-    Key, Maybe, Value, add_query_arg, is_empty_string, lookup, maybe_unserialize, php_trim,
-    remove_query_arg, stripslashes,
+    Key, Maybe, Value, add_query_arg, lookup, maybe_unserialize, remove_query_arg,
 };
-use hyscribe_render::formatting::sanitize_user;
 use hyscribe_write::Error;
-use hyscribe_write::users::{get_password_reset_key, set_role, wp_delete_user};
+use hyscribe_write::users::{retrieve_password, set_role, wp_delete_user};
 
 use super::dashboard::context;
 use super::{Acting, Saving, Stop, text};
@@ -154,7 +152,7 @@ pub(super) fn resetpassword<'a>(
         for id in user_ids(asked).into_iter().filter(|id| *id != me) {
             let user = write.user(u64::try_from(id).unwrap_or_default()).await?;
             let login = user.map(|(login, _)| login).unwrap_or_default();
-            if retrieve_password(write, &login).await?.is_none() {
+            if retrieve_password(write, &login).await?.is_ok() {
                 count += 1;
             }
         }
@@ -165,37 +163,6 @@ pub(super) fn resetpassword<'a>(
         ];
         Ok(Answer::Redirect(text(&add_query_arg(&args, &redirect))))
     })
-}
-
-/// `retrieve_password( $user_login )`: the user's password reset key kept,
-/// the mail taken as sent (MVP phase 8 sends it); else the error PHP gives
-/// for no such user.
-pub(super) async fn retrieve_password(
-    write: &mut Write<'_>,
-    login: &[u8],
-) -> Result<Option<&'static str>, Error> {
-    let login = stripslashes(login);
-    let login = php_trim(&login);
-    if is_empty_string(login) {
-        return Ok(Some(
-            "<strong>Error:</strong> Please enter a username or email address.",
-        ));
-    }
-    let mut found = None;
-    // `strpos( $user_login, '@' )`, true past the first character.
-    if login.get(1..).is_some_and(|rest| rest.contains(&b'@')) {
-        found = write.user_id_by_email(login).await?;
-    }
-    if found.is_none() {
-        found = write.user_id_by_login(&sanitize_user(login)).await?;
-    }
-    let Some(id) = found else {
-        return Ok(Some(
-            "<strong>Error:</strong> There is no account with that username or email address.",
-        ));
-    };
-    get_password_reset_key(write, id).await?;
-    Ok(None)
 }
 
 /// `$wp_roles->role_objects[ $role ]->has_cap( 'promote_users' )`.

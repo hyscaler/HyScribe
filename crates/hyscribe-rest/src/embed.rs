@@ -140,7 +140,7 @@ pub(crate) fn serve(context: &Context, href: &[u8]) -> Result<Value, NotPorted> 
         get,
         ..Params::default()
     };
-    let response = dispatch(context, ("GET", route), (params, true), None)?;
+    let response = dispatch(context, ("GET", route), (params, None), None)?;
     Ok(response.into_data())
 }
 

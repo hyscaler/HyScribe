@@ -38,6 +38,14 @@ fn core(name: &str) -> &'static [(Key, Value)] {
     data.and_then(Value::as_array).unwrap_or_default()
 }
 
+/// Whether core registers the block `name` with a render callback.
+pub(crate) fn is_dynamic(name: &str) -> bool {
+    core("block_types").iter().any(|(_, block)| {
+        block.get_str("name").and_then(Value::as_bytes) == Some(name.as_bytes())
+            && block.get_str("is_dynamic") == Some(&Value::Bool(true))
+    })
+}
+
 /// The list `name` of what the active theme registers.
 fn theme(name: &str) -> &'static [(Key, Value)] {
     static THEME_DATA: OnceLock<Value> = OnceLock::new();

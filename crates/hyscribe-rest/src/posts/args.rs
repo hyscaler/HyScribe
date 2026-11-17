@@ -144,10 +144,10 @@ pub(crate) fn id() -> Arg {
     typed("id", r#"{"type":"integer"}"#)
 }
 
-/// The arguments of a post's or page's create and update,
-/// `get_endpoint_args_for_item_schema()`, none for the other types, whose
-/// writes are not ported. `title`, `content` and `excerpt` are neither
-/// validated nor sanitized, and `meta` is not ported; `status` is validated by
+/// The arguments of a create and update, `get_endpoint_args_for_item_schema()`,
+/// for the types whose writes are ported, as each type's supports give them.
+/// `title`, `content` and `excerpt` are neither validated nor sanitized, and
+/// `meta` and the pattern categories are not ported; `status` is validated by
 /// `check_status()` (`write::status_args`), `template` by
 /// `check_template()`, which the empty template alone passes unported.
 pub(super) fn save(kind: Kind) -> Vec<Arg> {
@@ -155,9 +155,11 @@ pub(super) fn save(kind: Kind) -> Vec<Arg> {
     const DATE: &str = r#"{"type":["string","null"],"format":"date-time"}"#;
     const OPEN: &str = r#"{"type":"string","enum":["open","closed"]}"#;
     const RAW: &str = r#"{"type":"object","properties":{"raw":{"type":"string"}}}"#;
-    if !matches!(kind, Kind::Post | Kind::Page) {
+    const IDS: &str = r#"{"type":"array","items":{"type":"integer"}}"#;
+    if !kind.writes() {
         return Vec::new();
     }
+    let content = matches!(kind, Kind::Post | Kind::Page);
     let value = |name, schema| arg(name, schema, true, Sanitize::Value);
     let given = |name| arg(name, RAW, false, Sanitize::Endpoint);
     let slug = |_: &Context, slug: &Value| Ok(text(sanitize_title(&slug.to_php_string())));
@@ -174,23 +176,31 @@ pub(super) fn save(kind: Kind) -> Vec<Arg> {
     if kind == Kind::Page {
         args.push(value("parent", INTEGER));
     }
-    args.extend([
-        given("title"),
-        given("content"),
-        value("author", INTEGER),
-        given("excerpt"),
-        value("featured_media", INTEGER),
-        value("comment_status", OPEN),
-        value("ping_status", OPEN),
-    ]);
-    args.push(match kind {
-        Kind::Page => value("menu_order", INTEGER),
-        _ => value(
+    args.extend([given("title"), given("content")]);
+    if content {
+        args.push(value("author", INTEGER));
+    }
+    if kind != Kind::Navigation {
+        args.push(given("excerpt"));
+    }
+    if content {
+        args.extend([
+            value("featured_media", INTEGER),
+            value("comment_status", OPEN),
+            value("ping_status", OPEN),
+        ]);
+    }
+    match kind {
+        Kind::Page => args.push(value("menu_order", INTEGER)),
+        Kind::Post => args.push(value(
             "format",
             r#"{"type":"string","enum":["standard","aside","chat","gallery","link","image","quote","status","video","audio"]}"#,
-        ),
-    });
-    args.push(arg("meta", RAW, false, Sanitize::NotPorted));
+        )),
+        _ => {}
+    }
+    if kind != Kind::Navigation {
+        args.push(arg("meta", RAW, false, Sanitize::NotPorted));
+    }
     if kind == Kind::Post {
         args.push(value("sticky", r#"{"type":"boolean"}"#));
     }
@@ -200,14 +210,15 @@ pub(super) fn save(kind: Kind) -> Vec<Arg> {
         false,
         Sanitize::Value,
     ));
-    if kind == Kind::Post {
-        let ids = r#"{"type":"array","items":{"type":"integer"}}"#;
-        args.extend([value("categories", ids), value("tags", ids)]);
+    match kind {
+        Kind::Post => args.extend([value("categories", IDS), value("tags", IDS)]),
+        Kind::Block => args.push(arg("wp_pattern_category", IDS, true, Sanitize::NotPorted)),
+        _ => {}
     }
     args
 }
 
-/// A post's or page's delete: `force`, false unless given.
+/// A delete: `force`, false unless given.
 pub(super) fn delete() -> Vec<Arg> {
     vec![
         id(),

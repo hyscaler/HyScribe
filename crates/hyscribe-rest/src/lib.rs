@@ -8,10 +8,12 @@
 //! ported write is answered in two steps: [`answer`] checks it and gives
 //! the [`Plan`] to write, and [`written`] answers once it is written.
 
+mod block_renderer;
 mod comments;
 mod editor;
 mod embed;
 mod fields;
+mod hooks;
 mod index;
 mod media;
 mod navigation;
@@ -28,14 +30,21 @@ mod taxonomies;
 mod templates;
 mod terms;
 mod types;
+mod url_details;
 mod users;
+
+/// What the fuzz targets reach.
+pub mod fuzzing {
+    pub use crate::url_details::details;
+}
 
 use std::sync::OnceLock;
 
+use hyscribe_fetch::{Args, Error as FetchError, Fetched};
 use hyscribe_kses::esc_url_raw;
 use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, Term, TermQuery, User, UserQuery};
 use hyscribe_phpser::{
-    Key, Value, is_empty_string, json_decode, json_encode, json_encode_pretty, lookup,
+    JsonError, Key, Value, is_empty_string, json_decode, json_encode, json_encode_pretty, lookup,
 };
 use hyscribe_render::site::Site as Reads;
 use hyscribe_render::theme::Theme;
@@ -112,11 +121,31 @@ pub trait Site {
     /// Whether the public users endpoint answers visitors as WordPress
     /// does; off, a visitor sees no user as having published posts.
     fn public_users(&self) -> bool;
+    /// Whether `EMPTY_TRASH_DAYS` is not 0, WordPress's default of 30:
+    /// without the Trash, a delete must be forced.
+    fn uses_trash(&self) -> bool {
+        true
+    }
     /// The site's content as `hyscribe-render` reads it, for the post
     /// routes.
     fn reads(&self) -> &dyn Reads;
     /// The active theme, which renders posts' content.
     fn theme(&self) -> &Theme;
+    /// Whether outbound fetches are on (`HTTP_OUTBOUND`, ADR 0019).
+    fn outbound(&self) -> bool {
+        false
+    }
+    /// `wp_safe_remote_get( $url, $args )` through the outbound client,
+    /// `None` while fetches are off.
+    fn fetch(&self, _url: &[u8], _args: Args) -> Option<Result<Fetched, FetchError>> {
+        None
+    }
+    /// `set_site_transient( $name, $value, $expiration )`, where the site
+    /// writes.
+    fn set_site_transient(&self, _name: &str, _value: &[u8], _expiration: i64) {}
+    /// What `get_site_transient( $name )` writes for a transient past its
+    /// timeout, where the site writes: both its options deleted.
+    fn expire_site_transient(&self, _name: &str) {}
 }
 
 /// A request for the API.
@@ -268,6 +297,19 @@ impl Context<'_> {
     }
 
     /// `wp_timezone()`.
+    /// `get_option( 'gmt_offset' )`: `wp_timezone_override_offset()`'s
+    /// offset now for a named zone, else the stored one.
+    pub(crate) fn gmt_offset(&self) -> Value {
+        let zone = self.option("timezone_string").unwrap_or_default();
+        hyscribe_render::date::override_offset(&zone, self.now).map_or_else(
+            || {
+                let stored = self.option("gmt_offset");
+                stored.map_or(Value::Bool(false), |stored| unserialized(&stored))
+            },
+            |hours| Value::Float(hyscribe_phpser::Float::from_f64(hours)),
+        )
+    }
+
     pub(crate) fn zone(&self) -> hyscribe_render::date::Zone {
         let option = |name| self.option(name).unwrap_or_default();
         hyscribe_render::date::site_zone(&option("timezone_string"), &option("gmt_offset"))
@@ -302,6 +344,8 @@ fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         .or_else(|| navigation::endpoints(regex))
         .or_else(|| media::endpoints(regex))
         .or_else(|| revisions::endpoints(regex))
+        .or_else(|| block_renderer::endpoints(regex))
+        .or_else(|| url_details::endpoints(regex))
 }
 
 /// `maybe_unserialize()` of a stored option or meta value: `false` where
@@ -371,10 +415,13 @@ pub fn written(site: &dyn Site, request: &Request, pending: Pending, outcome: Ou
 /// A PHP array's entries.
 type Entries = Vec<(Key, Value)>;
 
+/// The JSON body's parameters, or why there are none: JSON PHP refuses
+/// with its error, `None` for a multipart form, which only PHP reads.
+type Json = Result<Entries, Option<JsonError>>;
+
 /// The request's body as `get_parameter_order()` reads it: the JSON body's
-/// parameters, `None` for JSON PHP refuses or a multipart form, which only
-/// PHP reads, and a form body's, which a method other than POST reads itself.
-fn body_params(request: &Request, method: &str) -> (Option<Entries>, Entries) {
+/// parameters, and a form body's, which a method other than POST reads itself.
+fn body_params(request: &Request, method: &str) -> (Json, Entries) {
     let entries = |value: Value| match value {
         Value::Array(entries) => entries,
         _ => Vec::new(),
@@ -386,11 +433,13 @@ fn body_params(request: &Request, method: &str) -> (Option<Entries>, Entries) {
         && !request.body.is_empty()
         && kind.as_deref() == Some(b"multipart/form-data");
     let json = match &kind {
-        _ if multipart => None,
+        _ if multipart => Err(None),
         Some(kind) if request::is_json(kind) && !empty => {
-            hyscribe_phpser::json_decode(request.body).map(entries)
+            hyscribe_phpser::json_decode_checked(request.body)
+                .map(entries)
+                .map_err(Some)
         }
-        _ => Some(Vec::new()),
+        _ => Ok(Vec::new()),
     };
     let form = kind
         .as_deref()
@@ -505,8 +554,17 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
             if verified.is_some() {
                 served.send("X-WP-Nonce", site.create_nonce());
             }
-            let readable = json.is_some();
-            match dispatch(&context, (&method, route), (params, readable), resumed) {
+            // `rest_pre_dispatch`, given the request's method and route: a
+            // result it gives is the answer.
+            let route_bytes = route.to_vec();
+            let request_line: [&dyn std::any::Any; 2] = [&method, &route_bytes];
+            let early: Option<Response> =
+                hooks::apply_filters("rest_pre_dispatch", None, &request_line);
+            let dispatched = early.map_or_else(
+                || dispatch(&context, (&method, route), (params, json.err()), resumed),
+                Ok,
+            );
+            match dispatched {
                 Ok(response) => response,
                 Err(Halt::NotPorted) => return Answer::Served(Served::not_ported()),
                 Err(Halt::Write(pending)) => return Answer::Write(pending),
@@ -697,7 +755,7 @@ pub(crate) fn self_link_with(
 fn dispatch(
     context: &Context,
     (method, route): (&str, &[u8]),
-    (params, readable): (Params, bool),
+    (params, refused): (Params, Option<Option<JsonError>>),
     resumed: Option<(Pending, Outcome)>,
 ) -> Result<Response, Halt> {
     if method == "OPTIONS" {
@@ -731,13 +789,17 @@ fn dispatch(
         return Ok(RestError::status("rest_no_route", message, 404).into_response());
     };
     let (permissions, endpoint) = ported(&matched).ok_or(Halt::NotPorted)?;
+    // The link previews fetch, which waits on ADR 0019.
+    if matched.regex == url_details::ROUTE && !context.site.outbound() {
+        return Err(Halt::NotPorted);
+    }
     let (answered, params) = match resumed {
         Some((pending, outcome)) => {
             let mut params = pending.params;
             let answered = (pending.finish)(context, &mut params, pending.plan, outcome);
             (answered, params)
         }
-        None => checked(context, &matched, endpoint, params, readable)?,
+        None => checked(context, &matched, endpoint, params, refused)?,
     };
     if answered
         .as_ref()
@@ -802,32 +864,49 @@ pub(crate) fn placed(value: Value, placeholder: &[u8], url: &dyn Fn(&str) -> Str
     }
 }
 
+/// `parse_json_params()`'s `rest_invalid_json`, with PHP's JSON error.
+fn invalid_json(error: JsonError) -> RestError {
+    RestError {
+        data: object([
+            ("status", Value::Int(400)),
+            ("json_error_code", Value::Int(error.0.into())),
+            ("json_error_message", text(error.message())),
+        ]),
+        ..RestError::status("rest_invalid_json", "Invalid JSON body passed.", 400)
+    }
+}
+
 /// The request checked by the matched endpoint's arguments and permission,
 /// then its callback's answer, or the write a ported write plans. A body
-/// not `readable`, a multipart form or JSON PHP refuses
-/// (`rest_invalid_json`), is not ported.
+/// `refused`, JSON PHP refuses, is answered `rest_invalid_json` before any
+/// check; a multipart form is not ported.
 fn checked(
     context: &Context,
     matched: &routes::Matched,
     endpoint: Endpoint,
     params: Params,
-    readable: bool,
+    refused: Option<Option<JsonError>>,
 ) -> Result<(Result<Response, RestError>, Params), Halt> {
-    let writing = match endpoint.callback {
-        Some(_) => None,
-        None => posts::write::writing(matched.regex, matched.endpoint),
-    };
-    // The arguments of a write not ported are not ported either: one given
-    // any is not answered, and one given none is checked, then answered 501.
-    if endpoint.callback.is_none() && writing.is_none() && context.parameters || !readable {
-        return Err(Halt::NotPorted);
-    }
     let mut params = Params {
         route: matched.regex,
         url: matched.params.clone(),
         defaults: defaults(&endpoint.args),
         ..params
     };
+    match refused {
+        Some(Some(error)) => return Ok((Err(invalid_json(error)), params)),
+        Some(None) => return Err(Halt::NotPorted),
+        None => {}
+    }
+    let writing = match endpoint.callback {
+        Some(_) => None,
+        None => posts::write::writing(matched.regex, matched.endpoint),
+    };
+    // The arguments of a write not ported are not ported either: one given
+    // any is not answered, and one given none is checked, then answered 501.
+    if endpoint.callback.is_none() && writing.is_none() && context.parameters {
+        return Err(Halt::NotPorted);
+    }
     let mut args = endpoint.args;
     let unported = |arg: &Arg| matches!(arg.sanitize, Sanitize::NotPorted) && params.has(arg.name);
     if args.iter().any(unported) {

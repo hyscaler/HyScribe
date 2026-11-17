@@ -1,0 +1,33 @@
+# The link previews (MVP 4.4, ADR 0019) for reference/url-details/golden.sh, which serves the test site
+# http://pages.test:8080 from reference/url-details inside the oracle container (method, target, flags).
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/page.html	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/page.html/	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/quotes.html	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/nohead.html	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/bodyonly.html	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/entities.html	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/zero.html	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/big.html	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/agent	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/empty	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/gone	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/nope	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/redirect	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/redirect-twice	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/redirect-metadata	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/loop	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/cached	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/expired	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/page.html&_fields=title	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url[]=http://pages.test:8080/page.html	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=ftp://pages.test/	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=pages.test/page.html	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://user:pass@pages.test:8080/page.html	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:9999/	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://10.0.0.1/	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://169.254.169.254/latest/meta-data/	restore
+GET	/?rest_route=/wp-block-editor/v1/url-details&url=http://unresolvable.test/	restore,skip=visitor+subscriber
+POST	/?rest_route=/wp-block-editor/v1/url-details&url=http://pages.test:8080/page.html	restore
+OPTIONS	/?rest_route=/wp-block-editor/v1/url-details	restore

@@ -150,6 +150,11 @@ impl Limiter {
         }
     }
 
+    /// The limits as configured.
+    pub(crate) fn limits(&self) -> LoginLimits {
+        self.limits
+    }
+
     /// The counts, also after a panic elsewhere left the lock poisoned.
     fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)

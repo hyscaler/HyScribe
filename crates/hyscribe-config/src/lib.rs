@@ -96,6 +96,9 @@ pub struct Database {
     pub host: String,
     /// `DB_PORT`, default 3306.
     pub port: u16,
+    /// The Unix socket of a `DB_HOST` given as `localhost:/path/to/socket`,
+    /// as in `wp-config.php`; the port is then not used.
+    pub socket: Option<PathBuf>,
     /// `DB_NAME`, required.
     pub name: String,
     /// `DB_USER`, required.
@@ -111,6 +114,16 @@ pub struct Database {
     pub prefix: Prefix,
     /// `DB_CHARSET`, default `utf8mb4`.
     pub charset: String,
+}
+
+impl Database {
+    /// Where the server is: the host and its socket or port.
+    pub fn address(&self) -> String {
+        match &self.socket {
+            Some(socket) => format!("{}:{}", self.host, socket.display()),
+            None => format!("{}:{}", self.host, self.port),
+        }
+    }
 }
 
 /// HTTP listener settings.
@@ -181,6 +194,9 @@ impl Default for LoginLimits {
     }
 }
 
+/// `UPLOAD_MAX_SIZE`'s default, 64 MB.
+pub const DEFAULT_UPLOAD_MAX_SIZE: u64 = 64 << 20;
+
 /// The complete configuration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
@@ -201,10 +217,16 @@ pub struct Config {
     /// `REST_PUBLIC_USERS`: `on` (default) answers visitors' REST users
     /// requests as WordPress does, `off` as if no user had published posts.
     pub rest_public_users: bool,
+    /// `HTTP_OUTBOUND`: `on` lets the server fetch from other sites through
+    /// the outbound client (ADR 0019); `off` (default) fetches nothing.
+    pub http_outbound: bool,
     /// The capability constants.
     pub constants: Constants,
     /// The login rate limits.
     pub login_limits: LoginLimits,
+    /// `UPLOAD_MAX_SIZE`: the largest upload, in bytes, which the admin
+    /// prints where PHP prints `wp_max_upload_size()`.
+    pub upload_max_size: u64,
 }
 
 /// Why configuration could not be loaded.
@@ -294,9 +316,11 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
     if get("DB_READ_PASSWORD").is_some() && get("DB_READ_USER").is_none() {
         return Err(invalid("DB_READ_PASSWORD", "is set without DB_READ_USER"));
     }
+    let (host, socket) = db_host(get("DB_HOST").unwrap_or("localhost"))?;
     let database = Database {
-        host: get("DB_HOST").unwrap_or("localhost").to_string(),
+        host,
         port: port(get("DB_PORT"), "DB_PORT", 3306)?,
+        socket,
         name: required("DB_NAME")?,
         user: required("DB_USER")?,
         password: Secret::new(get("DB_PASSWORD").unwrap_or_default()),
@@ -318,6 +342,12 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         None | Some("on") => true,
         Some("off") => false,
         Some(_) => return Err(invalid("REST_PUBLIC_USERS", "must be on or off")),
+    };
+
+    let http_outbound = match get("HTTP_OUTBOUND") {
+        None | Some("off") => false,
+        Some("on") => true,
+        Some(_) => return Err(invalid("HTTP_OUTBOUND", "must be on or off")),
     };
 
     if constant(get("MULTISITE"), "MULTISITE", false)? {
@@ -351,6 +381,16 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         window: limit("LOGIN_LIMIT_WINDOW", limits.window, 86_400)?,
     };
 
+    let upload_max_size = match get("UPLOAD_MAX_SIZE") {
+        None => DEFAULT_UPLOAD_MAX_SIZE,
+        Some(value) => size(value).ok_or_else(|| {
+            invalid(
+                "UPLOAD_MAX_SIZE",
+                "must be a size in bytes, or with a K, M or G suffix, such as 64M",
+            )
+        })?,
+    };
+
     let salts = SALT_KEYS
         .iter()
         .filter_map(|&key| get(key).map(|value| (key, Secret::new(value))))
@@ -365,8 +405,10 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         site_url: get("WP_SITEURL").map(String::from),
         salts,
         rest_public_users,
+        http_outbound,
         constants,
         login_limits,
+        upload_max_size,
     })
 }
 
@@ -389,6 +431,19 @@ pub fn server(values: &HashMap<String, String>) -> Result<Server, ConfigError> {
         port: port(get("PORT"), "PORT", 8080)?,
         behind_proxy: boolean(get("BEHIND_PROXY"), "BEHIND_PROXY")?,
     })
+}
+
+/// `DB_HOST` and its socket: `localhost:/path/to/socket` connects through the
+/// socket, as `wpdb` splits it; as for `mysqli`, only `localhost` takes one.
+fn db_host(value: &str) -> Result<(String, Option<PathBuf>), ConfigError> {
+    match value.split_once(":/") {
+        None => Ok((value.to_string(), None)),
+        Some(("localhost", path)) => Ok(("localhost".into(), Some(format!("/{path}").into()))),
+        Some(_) => Err(invalid(
+            "DB_HOST",
+            "a socket is given as localhost:/path/to/socket",
+        )),
+    }
 }
 
 fn invalid(key: &'static str, reason: &str) -> ConfigError {
@@ -424,6 +479,28 @@ fn number(
             .filter(|number| (1..=max).contains(number))
             .ok_or_else(|| invalid(key, &format!("must be a whole number from 1 to {max}"))),
     }
+}
+
+/// A size as PHP's shorthand writes it: digits, then `K`, `M` or `G` in
+/// either case; at least a byte, and within `i64`.
+fn size(value: &str) -> Option<u64> {
+    let (digits, shift) = match value.as_bytes().split_last() {
+        Some((b'K' | b'k', head)) => (head, 10),
+        Some((b'M' | b'm', head)) => (head, 20),
+        Some((b'G' | b'g', head)) => (head, 30),
+        _ => (value.as_bytes(), 0),
+    };
+    if digits.is_empty() {
+        return None;
+    }
+    let number = digits.iter().try_fold(0u64, |number, &digit| {
+        digit.is_ascii_digit().then_some(())?;
+        number.checked_mul(10)?.checked_add(u64::from(digit - b'0'))
+    })?;
+    let bytes = number.checked_mul(1 << shift)?;
+    (1..=i64::MAX.unsigned_abs())
+        .contains(&bytes)
+        .then_some(bytes)
 }
 
 fn boolean(value: Option<&str>, key: &'static str) -> Result<bool, ConfigError> {

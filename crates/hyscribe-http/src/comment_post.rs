@@ -262,10 +262,9 @@ fn save<'w>(
         };
         let committed = write.commit().await;
         // Mailed once the comment is kept.
-        if committed.is_ok() {
-            for (kind, mail) in notices {
-                reads.site.mailer.wp_mail(mail, kind, false).await;
-            }
+        let kept = committed.is_ok().then_some(notices).unwrap_or_default();
+        for (kind, mail) in kept {
+            reads.site.mailer.wp_mail(mail, kind, false).await;
         }
         committed.map(|()| Ok(saved)).map_err(Into::into)
     })

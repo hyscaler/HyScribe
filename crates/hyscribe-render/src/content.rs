@@ -35,6 +35,10 @@ impl Renderer<'_> {
         };
         self.open_posts.push(id);
         let mut content = get_the_content(self, &post, true);
+        // The password form's button, in a block theme.
+        if !post.password.is_empty() {
+            self.assets.enqueue_style("wp-block-button");
+        }
         // has_block( 'core/nextpage' ): page links for a post in pages.
         if contains(&post.content, b"<!-- wp:nextpage ") {
             content.extend(wp_link_pages(self, &post));

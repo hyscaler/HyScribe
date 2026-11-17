@@ -222,6 +222,26 @@ fn post_content_needs_a_post() {
     );
 }
 
+/// A protected post's password form, in a block theme, enqueues the button
+/// block's stylesheet, as PHP's does on the Theme Test Data's pages.
+#[test]
+fn password_forms_enqueue_the_button_style() {
+    let theme = twentytwentyfive();
+    for (password, enqueued) in [("enter", true), ("", false)] {
+        let row = format!(
+            r#"{{"ID":5,"post_title":"T","post_content":"<p>x</p>","post_password":"{password}"}}"#
+        );
+        let (site, request) = case(
+            br#"{"singular":true,"home":"","siteurl":""}"#,
+            row.as_bytes(),
+        );
+        let mut renderer = Renderer::new(&theme, &site, &request);
+        renderer.render(b"<!-- wp:post-content /-->");
+        let styles = &renderer.assets.styles;
+        assert_eq!(styles.iter().any(|s| s == "wp-block-button"), enqueued);
+    }
+}
+
 #[test]
 fn empty_paragraphs_stay_empty() {
     let theme = twentytwentyfive();

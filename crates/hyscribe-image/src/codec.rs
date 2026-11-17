@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Decoding and encoding with the codec crates (ADR 0015), SIMD off, each
-//! decoder held to the [`Limits`] before it allocates: `zune-jpeg`, `png`,
-//! `gif` and `image-webp` in, `jpeg-encoder`, `png`, `gif` (through
-//! `color_quant`) and `image-webp`'s lossless encoder out.
+//! decoder's own reading of the size held to the header's and the
+//! [`Limits`] before a pixel buffer is allocated: `zune-jpeg`, `png`, `gif`
+//! and `image-webp` in, `jpeg-encoder`, `png`, `gif` (through `color_quant`)
+//! and `image-webp`'s lossless encoder out.
 
 use std::io::Cursor;
-use std::num::NonZeroU64;
 
 use color_quant::NeuQuant;
 use zune_jpeg::JpegDecoder;
@@ -54,7 +54,9 @@ impl Limits {
         width <= self.width
             && height <= self.height
             && area <= self.area
-            && area * (depth + WORKING) <= self.memory
+            && area
+                .checked_mul(depth + WORKING)
+                .is_some_and(|bytes| bytes <= self.memory)
     }
 }
 
@@ -62,6 +64,10 @@ impl Limits {
 /// and the copy kept while a size is made (8), a point sampled reduction
 /// (under 2.8 times the area, 12), and a filter pass in floats (16).
 pub const WORKING: u64 = 36;
+
+/// What a PNG decoder may allocate itself, its metadata (`iCCP`, `zTXt`,
+/// `iTXt`) inflated and a row, apart from the pixels' memory: 16 MiB.
+pub const METADATA: usize = 16 << 20;
 
 /// Why an image is not edited.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,18 +106,22 @@ pub fn decode(bytes: &[u8], kind: ImageType, limits: &Limits) -> Result<Decoded,
         return Err(Error::TooLarge);
     }
     let size = crate::header::getimagesize(bytes).ok_or(Error::Undecodable)?;
-    // The source's bytes a pixel: 16 bit PNGs' twice, a GIF's index one.
+    // The decoded source's bytes a pixel: 16 bit PNGs' twice, a GIF's RGBA.
     let depth = match kind {
         ImageType::Png => 8,
-        ImageType::Gif => 1,
         _ => 4,
     };
     check(limits, size.width, size.height, depth)?;
+    let header = Header {
+        limits,
+        size: (size.width, size.height),
+        depth,
+    };
     match kind {
-        ImageType::Jpeg => jpeg(bytes, limits, (size.width, size.height)),
-        ImageType::Png => png(bytes, limits),
-        ImageType::Gif => gif(bytes, limits),
-        ImageType::Webp => webp(bytes, limits),
+        ImageType::Jpeg => jpeg(bytes, &header),
+        ImageType::Png => png(bytes, &header),
+        ImageType::Gif => gif(bytes, &header),
+        ImageType::Webp => webp(bytes, &header),
         _ => Err(Error::Undecodable),
     }
 }
@@ -123,13 +133,40 @@ fn check(limits: &Limits, width: u32, height: u32, depth: u64) -> Result<(), Err
         .ok_or(Error::TooLarge)
 }
 
-fn jpeg(bytes: &[u8], limits: &Limits, (width, height): (u32, u32)) -> Result<Decoded, Error> {
+/// The header's size, checked, which a decoder's reading must match.
+struct Header<'a> {
+    limits: &'a Limits,
+    size: (u32, u32),
+    depth: u64,
+}
+
+impl Header<'_> {
+    /// The size a decoder reads, held to the limits, then refused unless
+    /// it is the header's: two parsers that disagree are not trusted.
+    fn agrees(&self, (width, height): (u32, u32)) -> Result<(), Error> {
+        check(self.limits, width, height, self.depth)?;
+        (self.size == (width, height))
+            .then_some(())
+            .ok_or(Error::Undecodable)
+    }
+}
+
+fn jpeg(bytes: &[u8], header: &Header) -> Result<Decoded, Error> {
     let options = DecoderOptions::default()
-        .set_max_width(limits.width as usize)
-        .set_max_height(limits.height as usize);
+        .set_max_width(header.limits.width as usize)
+        .set_max_height(header.limits.height as usize);
     let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
     decoder.set_options(options.jpeg_set_out_colorspace(ColorSpace::RGB));
-    let data = decoder.decode().map_err(|_| Error::Undecodable)?;
+    let data = decoder
+        .decode_headers()
+        .map_err(|_| Error::Undecodable)
+        .and_then(|()| {
+            // Each side is a u16 in the frame header.
+            let (width, height) = decoder.dimensions().unwrap_or_default();
+            header.agrees((width as u32, height as u32))
+        })
+        .and_then(|()| decoder.decode().ok().ok_or(Error::Undecodable))?;
+    let (width, height) = header.size;
     let icc = decoder.icc_profile();
     // A grey JPEG stays grey: one of the three equal samples.
     let (channels, data) = match decoder.input_colorspace() {
@@ -150,13 +187,18 @@ fn jpeg(bytes: &[u8], limits: &Limits, (width, height): (u32, u32)) -> Result<De
     })
 }
 
-fn png(bytes: &[u8], limits: &Limits) -> Result<Decoded, Error> {
-    let png_limits = png::Limits {
-        bytes: usize::try_from(limits.memory).unwrap_or(usize::MAX),
-    };
+fn png(bytes: &[u8], header: &Header) -> Result<Decoded, Error> {
+    // The pixels' buffer is allocated here, once its size agrees.
+    let png_limits = png::Limits { bytes: METADATA };
     let mut decoder = png::Decoder::new_with_limits(Cursor::new(bytes), png_limits);
     decoder.set_transformations(png::Transformations::normalize_to_color8());
-    let mut reader = decoder.read_info().map_err(|_| Error::Undecodable)?;
+    let mut reader = decoder
+        .read_info()
+        .map_err(|_| Error::Undecodable)
+        .and_then(|reader| {
+            let size = (reader.info().width, reader.info().height);
+            header.agrees(size).map(|()| reader)
+        })?;
     let indexed = reader.info().color_type == png::ColorType::Indexed;
     let icc = reader.info().icc_profile.as_ref().map(|icc| icc.to_vec());
     let mut data = vec![0; reader.output_buffer_size().unwrap_or(0)];
@@ -176,25 +218,31 @@ fn png(bytes: &[u8], limits: &Limits) -> Result<Decoded, Error> {
     })
 }
 
-fn gif(bytes: &[u8], limits: &Limits) -> Result<Decoded, Error> {
+fn gif(bytes: &[u8], header: &Header) -> Result<Decoded, Error> {
     let mut options = gif::DecodeOptions::new();
     options.set_color_output(gif::ColorOutput::RGBA);
-    // A frame may be larger than the screen the header gives: its RGBA
-    // buffer is held to the pixels the memory allows (at least one).
-    let pixels = (limits.memory / (4 + WORKING)).min(limits.area);
-    let memory = NonZeroU64::MIN.saturating_add((pixels * 4).saturating_sub(1));
-    options.set_memory_limit(gif::MemoryLimit::Bytes(memory));
     let mut decoder = options
         .read_info(Cursor::new(bytes))
-        .map_err(|_| Error::Undecodable)?;
-    let frame = decoder
-        .read_next_frame()
+        .map_err(|_| Error::Undecodable)
+        .and_then(|decoder| {
+            let screen = (u32::from(decoder.width()), u32::from(decoder.height()));
+            header.agrees(screen).map(|()| decoder)
+        })?;
+    // A frame may be larger than the screen: its RGBA buffer is checked
+    // before it is allocated.
+    let (width, height) = decoder
+        .next_frame_info()
         .ok()
         .flatten()
-        .ok_or(Error::Undecodable)?;
-    let (width, height) = (u32::from(frame.width), u32::from(frame.height));
-    check(limits, width, height, 4)?;
-    let data = frame.buffer.to_vec();
+        .map(|frame| (u32::from(frame.width), u32::from(frame.height)))
+        .ok_or(Error::Undecodable)
+        .and_then(|(width, height)| {
+            check(header.limits, width, height, header.depth).map(|()| (width, height))
+        })?;
+    let mut data = vec![0; decoder.buffer_size()];
+    decoder
+        .read_into_buffer(&mut data)
+        .map_err(|_| Error::Undecodable)?;
     Ok(Decoded {
         pixels: Pixels {
             width,
@@ -206,10 +254,11 @@ fn gif(bytes: &[u8], limits: &Limits) -> Result<Decoded, Error> {
     })
 }
 
-fn webp(bytes: &[u8], limits: &Limits) -> Result<Decoded, Error> {
-    let mut decoder =
-        image_webp::WebPDecoder::new(Cursor::new(bytes)).map_err(|_| Error::Undecodable)?;
-    decoder.set_memory_limit(usize::try_from(limits.memory).unwrap_or(usize::MAX));
+fn webp(bytes: &[u8], header: &Header) -> Result<Decoded, Error> {
+    let mut decoder = image_webp::WebPDecoder::new(Cursor::new(bytes))
+        .map_err(|_| Error::Undecodable)
+        .and_then(|decoder| header.agrees(decoder.dimensions()).map(|()| decoder))?;
+    decoder.set_memory_limit(usize::try_from(header.limits.memory).unwrap_or(usize::MAX));
     let (width, height) = decoder.dimensions();
     let icc = decoder.icc_profile().ok().flatten();
     let mut data = vec![0; decoder.output_buffer_size().unwrap_or(0)];

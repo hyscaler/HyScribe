@@ -182,5 +182,8 @@ jobs:
         working-directory: fuzz
         run: |
           for target in $(cargo +nightly fuzz list); do
-            cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" -- -max_total_time=60
+            # The image targets start from the review's hostile cases too.
+            seeds=()
+            case $target in image_*) mkdir -p "corpus/$target"; seeds=("corpus/$target" ../crates/hyscribe-image/tests/hostile) ;; esac
+            cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" "${seeds[@]}" -- -max_total_time=60
           done

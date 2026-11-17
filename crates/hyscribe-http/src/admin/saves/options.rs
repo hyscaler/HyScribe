@@ -468,10 +468,11 @@ pub(super) fn adminhash<'a>(
                 let mail_site = MailSite::read(write, asked.home).await?;
                 let changed =
                     (old != new).then(|| admin_email_changed(&mail_site.site(), &old, &new));
-                if let Some(mail) = changed.flatten() {
-                    let kind = "wp_site_admin_email_change_notification";
-                    site.outbox().queue(Queued::Background(kind, mail));
-                }
+                let kind = "wp_site_admin_email_change_notification";
+                let queued = changed.flatten().map(|mail| Queued::Background(kind, mail));
+                queued
+                    .into_iter()
+                    .for_each(|mail| site.outbox().queue(mail));
                 delete_option(write, "adminhash").await?;
                 delete_option(write, "new_admin_email").await?;
                 redirect = "options-general.php?updated=true";

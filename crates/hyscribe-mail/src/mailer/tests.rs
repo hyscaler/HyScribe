@@ -627,6 +627,10 @@ async fn header_injection_is_refused() {
     }
     let bad_reply_to = mail(b"a@example.test", b"Hi", b"Reply-To: \xff\n");
     assert!(!mailer.wp_mail(bad_reply_to, "test", true).await);
+    let no_reply_to = mail(b"a@example.test", b"Hi", b"Reply-To: not an address\n");
+    assert!(!mailer.wp_mail(no_reply_to, "test", true).await);
+    let why = "wp_mail_failed refused: an address the parser refuses";
+    assert_eq!(hooks.calls().last().unwrap(), why);
     let no_recipient = mail(b"", b"Hi", b"");
     assert!(!mailer.wp_mail(no_recipient, "test", true).await);
     assert!(told.lock().unwrap().data.is_empty());
@@ -748,6 +752,9 @@ async fn relay_errors_are_logged_by_code_and_kind() {
     let mut relay = Relay::new(&smtp(port, SmtpTls::None, false), "", &[], "example.test").unwrap();
     relay.limit = Duration::from_millis(100);
     assert_eq!(relay.deliver(&message).await, Err("timed out".into()));
+    let roots = [b"junk".to_vec()];
+    let starttls = Relay::new(&smtp(port, SmtpTls::StartTls, false), "x", &roots, "x");
+    assert!(starttls.is_err());
     let junk = Relay::new(
         &smtp(port, SmtpTls::Tls, false),
         "pages.test",

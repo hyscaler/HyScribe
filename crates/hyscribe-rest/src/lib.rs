@@ -424,6 +424,72 @@ pub fn written(site: &dyn Site, request: &Request, pending: Pending, outcome: Ou
     run(site, request, Some((pending, outcome)))
 }
 
+/// What `rest_preload_api_request()` keeps of one path.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Preloaded {
+    /// A 200 answer: its data and its response's headers.
+    Kept(Value, Value),
+    /// Another answer, which is left out.
+    Left,
+    /// What is not ported.
+    NotPorted,
+}
+
+/// `rest_preload_api_request()`'s request of `path` (its query included)
+/// with `method`, as `user` on `host` at `now`: the data
+/// `response_to_data()` gives.
+pub fn preload(
+    site: &dyn Site,
+    (user, host, now): (u64, &[u8], i64),
+    method: &str,
+    path: &[u8],
+) -> Preloaded {
+    let (route, query) = match path.iter().position(|&b| b == b'?') {
+        Some(at) => (
+            path.get(..at).unwrap_or_default(),
+            path.get(at + 1..).unwrap_or_default(),
+        ),
+        None => (path, &b""[..]),
+    };
+    let get = hyscribe_phpser::parse_str(query);
+    let get = get.as_array().unwrap_or_default().to_vec();
+    let params = Params {
+        get: get.clone(),
+        ..Params::default()
+    };
+    let context = Context {
+        site,
+        user,
+        head: false,
+        uri: path,
+        parameters: false,
+        host,
+        now,
+    };
+    let response = match dispatch(&context, (method, route), (params, None), None) {
+        Ok(response) if response.status == 200 => response,
+        Ok(_) => return Preloaded::Left,
+        Err(_) => return Preloaded::NotPorted,
+    };
+    let headers = header_values(&response);
+    let embed = lookup(&get, "_embed").map(embed::relations);
+    let data = embed::to_data(&context, response, embed.as_ref());
+    data.map_or(Preloaded::NotPorted, |data| Preloaded::Kept(data, headers))
+}
+
+/// A response's headers as its data: the collections set their totals as
+/// integers.
+fn header_values(response: &Response) -> Value {
+    let header = |name: &String, value: &String| match name.as_str() {
+        "X-WP-Total" | "X-WP-TotalPages" => Value::Int(text(value.clone()).to_int()),
+        _ => text(value.clone()),
+    };
+    let headers = response.headers.iter();
+    let headers =
+        headers.map(|(name, value)| (Key::String(name.clone().into_bytes()), header(name, value)));
+    Value::Array(headers.collect())
+}
+
 /// A PHP array's entries.
 type Entries = Vec<(Key, Value)>;
 
@@ -582,25 +648,12 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
     let embed = get("_embed").map(embed::relations);
     let response = match get("_envelope") {
         Some(_) => {
-            // The collections set their totals as integers.
-            let header = |name: &String, value: &String| match name.as_str() {
-                "X-WP-Total" | "X-WP-TotalPages" => Value::Int(text(value.clone()).to_int()),
-                _ => text(value.clone()),
-            };
-            let headers = response
-                .headers
-                .iter()
-                .map(|(name, value)| (Key::String(name.clone().into_bytes()), header(name, value)))
-                .collect();
+            let headers = header_values(&response);
             let status = Value::Int(i64::from(response.status));
             let Ok(body) = embed::to_data(&context, response, embed.as_ref()) else {
                 return Answer::Served(Served::not_ported());
             };
-            let envelope = object([
-                ("body", body),
-                ("status", status),
-                ("headers", Value::Array(headers)),
-            ]);
+            let envelope = object([("body", body), ("status", status), ("headers", headers)]);
             Response::new(envelope, 200)
         }
         None => response,
@@ -1002,7 +1055,7 @@ pub(crate) fn validated(
         }
         args = (writing.args)(context, &params, args);
     }
-    let checked = has_valid_params(&params, &args)
+    let checked = has_valid_params(context, &params, &args)
         .and_then(|()| sanitize_params(context, &mut params, &args));
     Ok((params, writing, checked))
 }

@@ -50,7 +50,7 @@ pub(super) fn nonces(page: &str) -> String {
     out
 }
 
-pub(super) fn sha256(text: &str) -> String {
+pub(crate) fn sha256(text: &str) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(text.as_bytes())
         .iter()

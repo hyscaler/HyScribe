@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 
 use hyscribe_testkit::{RestCase, rest_cases, rest_headers};
 
+use crate::templates::tests::CREDIT;
 use crate::tests::content::{Content, default_install_with};
 use crate::tests::{serve_case, serve_over, sha256_hex};
 
@@ -92,12 +93,13 @@ const UNDESCRIBED: [&str; 2] = [
     "/?rest_route=/wp/v2/global-styles/901/revisions",
 ];
 
-/// Every ported route's description and the active theme are PHP's, the
-/// larger bodies by hash; other themes are not ported.
+/// Every ported route's description, the active theme and the site
+/// editor's preloads are PHP's, the larger bodies by hash; other themes are
+/// not ported.
 #[test]
 fn preloads_match_php() {
     let cases = rest_cases(include_str!("../../tests/golden/preloads.tsv"));
-    assert_eq!(cases.len(), 689);
+    assert_eq!(cases.len(), 785);
     let mut unported = 0;
     for case in &cases {
         if let Some((_, skipped)) = case.flags.split_once("skip=") {
@@ -122,15 +124,15 @@ fn preloads_match_php() {
         php.sort();
         assert_eq!(rest_headers(&served.headers), php, "{what}");
         let body = if case.flag("hash") {
+            if sha256_hex(&served.body) != case.body {
+                std::fs::write(format!("/tmp/dump-{}.json", case.who), &served.body).unwrap();
+            }
             sha256_hex(&served.body)
         } else {
             served.body
         };
-        assert_eq!(
-            String::from_utf8_lossy(&body),
-            String::from_utf8_lossy(&case.body),
-            "{what}"
-        );
+        let php = String::from_utf8_lossy(&case.body).replace(CREDIT[0], CREDIT[1]);
+        assert_eq!(String::from_utf8_lossy(&body), php, "{what}");
     }
     assert_eq!(unported, 6 * UNDESCRIBED.len());
 }

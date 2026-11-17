@@ -887,26 +887,36 @@ pub fn html_entity_decode_quotes(text: &[u8]) -> Vec<u8> {
     })
 }
 
-/// `text` with each `&reference;` that `replace` knows replaced.
+/// `text` with each `&reference;` that `replace` knows replaced. A
+/// reference is read as PHP's scanner reads it, letters, digits and `#` up
+/// to its `;`, so no byte is read more than twice: the time is linear.
 fn references(text: &[u8], replace: impl Fn(&[u8]) -> Option<Vec<u8>>) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut rest = text;
-    while let Some((&first, tail)) = rest.split_first() {
-        let reference = tail.split(|&b| b == b';').next().unwrap_or_default();
-        let replaced = (first == b'&' && reference.len() < tail.len())
-            .then(|| replace(reference))
-            .flatten();
+    while let Some(at) = rest.iter().position(|&b| b == b'&') {
+        let (before, from) = rest.split_at(at);
+        out.extend_from_slice(before);
+        let tail = from.get(1..).unwrap_or_default();
+        let length = tail
+            .iter()
+            .take_while(|&&b| b.is_ascii_alphanumeric() || b == b'#')
+            .count();
+        let (reference, after) = tail.split_at(length);
+        let replaced = after
+            .strip_prefix(b";")
+            .and_then(|after| Some((replace(reference)?, after)));
         rest = match replaced {
-            Some(replaced) => {
+            Some((replaced, after)) => {
                 out.extend_from_slice(&replaced);
-                tail.get(reference.len() + 1..).unwrap_or_default()
+                after
             }
             None => {
-                out.push(first);
+                out.push(b'&');
                 tail
             }
         };
     }
+    out.extend_from_slice(rest);
     out
 }
 

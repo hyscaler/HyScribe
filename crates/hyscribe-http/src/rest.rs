@@ -19,7 +19,7 @@ use hyscribe_phpser::{Key, Value, addslashes, is_empty_string, parse_str};
 use hyscribe_render::link::rest_url;
 use hyscribe_render::permalinks::{Permalinks, author_posts_url, permalink};
 use hyscribe_render::site::Site as RenderSite;
-use hyscribe_rest::{Answer, Served};
+use hyscribe_rest::{Answer, Preloaded, Served, preload};
 use hyscribe_write::options::{expire_site_transient, set_site_transient};
 use tokio::runtime::Handle;
 
@@ -293,6 +293,38 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             writes::answer(site, &request, *pending, (user, token, now, handle))
         }
     }
+}
+
+/// The block editor's preloads of `paths` as the admin's user reads them
+/// (`block_editor_rest_api_preload()`), over a read of the site of its own;
+/// `None` where one is not ported.
+pub(crate) fn preloads(
+    admin: &LoginReads,
+    (user, host): (u64, &str),
+    paths: &[(&'static str, String)],
+) -> Option<Value> {
+    let mut reads = LoginReads::new(admin.site, Handle::current(), admin.now);
+    reads.act_as(user, admin.session_token().to_vec());
+    let rest = Rest {
+        reads,
+        site: admin.site,
+        user,
+        caps: OnceCell::new(),
+    };
+    let answered = |method: &str, path: &str| match preload(
+        &rest,
+        (user, host.as_bytes(), admin.now),
+        method,
+        path.as_bytes(),
+    ) {
+        Preloaded::Kept(data, headers) => Some(Some((data, headers))),
+        Preloaded::Left => Some(None),
+        Preloaded::NotPorted => None,
+    };
+    let memo = hyscribe_admin::editor::page::preloaded(paths, &answered);
+    let Rest { reads, .. } = rest;
+    let finished = reads.reads.finish().is_ok();
+    memo.filter(|_| finished)
 }
 
 /// The answer the API served.

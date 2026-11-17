@@ -19,7 +19,7 @@ use hyscribe_service::{Paths, Spawn, Status};
 /// Source code location, offered to every user as AGPL section 13 requires.
 pub const SOURCE_URL: &str = "https://github.com/hyscaler/HyScribe";
 
-/// How long `service start` waits for the server to come up.
+/// How long `service start` waits for the server to listen.
 pub const START_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long `service stop` waits after SIGTERM before SIGKILL.
 pub const STOP_GRACE: Duration = Duration::from_secs(15);
@@ -53,6 +53,18 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
+    /// WP-Cron, for DISABLE_WP_CRON sites whose system cron runs it.
+    Cron {
+        #[command(subcommand)]
+        command: CronCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CronCommand {
+    /// Run the due events of the hooks HyScribe runs once, as
+    /// wp-cron.php does, then exit.
+    Run,
 }
 
 #[derive(Debug, Subcommand)]
@@ -105,6 +117,9 @@ pub struct Context<'a> {
     /// Standard input's terminal, if it is one: the wizard turns its echo
     /// off for passwords.
     pub terminal: Option<BorrowedFd<'a>>,
+    /// Whether standard output is a terminal, which may be shown the setup
+    /// secret.
+    pub screen: bool,
     /// Standard output.
     pub out: &'a mut dyn Write,
     /// Standard error.
@@ -121,6 +136,7 @@ pub fn run(ctx: Context<'_>) -> u8 {
         server,
         input,
         terminal,
+        screen,
         out,
         err: err_out,
     } = ctx;
@@ -138,6 +154,7 @@ pub fn run(ctx: Context<'_>) -> u8 {
         env: &env,
         euid,
         server: &server,
+        screen,
     };
     let mut term = setup::Terminal {
         input,
@@ -155,6 +172,15 @@ pub fn run(ctx: Context<'_>) -> u8 {
             refuse_root(euid).and_then(|()| setup::command(&home, &mut term).map(Reply::text))
         }
         Command::Service { command } => service(command, &site, &mut term),
+        Command::Cron {
+            command: CronCommand::Run,
+        } => refuse_root(euid)
+            .and_then(|()| hyscribe_config::load(&home, &env).map_err(|err| err.to_string()))
+            .and_then(|config| {
+                config.ok_or_else(|| "no configuration: run ./hyscribe setup".to_string())
+            })
+            .and_then(|config| cron::run(&config, &home, &mut *term.out))
+            .map(Reply::text),
     };
     let written = result.and_then(|reply| {
         out.write_all(reply.text.as_bytes())
@@ -176,6 +202,7 @@ struct Site<'a> {
     env: &'a HashMap<String, String>,
     euid: u32,
     server: &'a (PathBuf, Vec<OsString>),
+    screen: bool,
 }
 
 /// Text for standard output and the exit code.
@@ -255,6 +282,13 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
     let out = &mut *term.out;
     let (mut shutdown, lock) =
         hyscribe_service::claim(&site.paths).map_err(|err| err.to_string())?;
+    // A secret a killed server left behind; setup mode makes a new one.
+    let secret_file = site.paths.setup_secret_file();
+    let _ = std::fs::remove_file(&secret_file);
+    let setup_start = setup::web::Start {
+        secret_file: (!site.screen).then_some(secret_file.as_path()),
+        listening: &|| lock.listening(),
+    };
     // The blocking signal wait runs on its own thread and wakes the server.
     let (stop, stopped) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
@@ -263,6 +297,7 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
     let signal = std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0));
     let seen = signal.clone();
     let sessions_dir = site.paths.home().join("sessions");
+    let site_paths = &site.paths;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -273,7 +308,16 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
             let mut stopped = stopped;
             let config = match config {
                 Some(config) => config,
-                None => match setup_mode(home, site.env, out, &mut stopped, SETUP_TIMEOUT).await? {
+                None => match setup_mode(
+                    home,
+                    site.env,
+                    out,
+                    &mut stopped,
+                    SETUP_TIMEOUT,
+                    &setup_start,
+                )
+                .await?
+                {
                     // An `.env` gone again since is no configuration.
                     Ended::Written => hyscribe_config::load(home, site.env)
                         .and_then(|config| config.ok_or(ConfigError::Missing("DB_NAME")))
@@ -307,6 +351,7 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                 Mode::Primary => site.with_sessions(Sessions::new(sessions_dir)),
                 Mode::Shadow => site,
             };
+            let site = std::sync::Arc::new(site);
             let address = std::net::SocketAddr::new(config.server.bind_host, config.server.port);
             let listener = tokio::net::TcpListener::bind(address)
                 .await
@@ -320,13 +365,28 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                 mode_name(config.mode),
             );
             let _ = writeln!(out, "{fetching}");
+            let (lines, cron) = cron::service(&config, site_paths.home());
+            for line in lines {
+                let _ = writeln!(out, "{line}");
+            }
             let _ = out.flush();
-            hyscribe_http::serve(listener, std::sync::Arc::new(site), async move {
+            // After the log lines, so `service start` returns with them logged.
+            lock.listening();
+            let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+            let stopping = stop.clone();
+            let server = hyscribe_http::serve(listener, site.clone(), async move {
                 // The sender only goes away after sending.
                 let number = stopped.await.unwrap_or(0);
                 seen.store(number, std::sync::atomic::Ordering::SeqCst);
-            })
-            .await;
+                stopping.notify_one();
+            });
+            match (cron, site.writer()) {
+                (Some(cron), Some(writer)) => {
+                    let task = cron::task(&writer, &cron, (cron::EVERY, &stop), out);
+                    tokio::join!(server, task);
+                }
+                _ => server.await,
+            }
             Ok(())
         })
     })?;
@@ -389,14 +449,7 @@ fn service(
     let paths = &site.paths;
     let error = |err: hyscribe_service::Error| err.to_string();
     let start = |term: &mut setup::Terminal<'_>| -> Result<String, String> {
-        // Without a configuration the server starts in setup mode.
-        let setup = match server_config(site, term)? {
-            Some(_) => "",
-            None => {
-                "Setup mode: the address to open and the one-time setup secret are in the log \
-                     (./hyscribe service log)\n"
-            }
-        };
+        let setup = server_config(site, term)?.is_none();
         let spawn = Spawn {
             program: site.server.0.clone(),
             args: site.server.1.clone(),
@@ -407,10 +460,21 @@ fn service(
                 .collect(),
         };
         let started = hyscribe_service::start(paths, &spawn, START_TIMEOUT).map_err(error)?;
-        Ok(format!(
-            "{started}\nlogs: {}\n{setup}",
-            paths.log_file().display()
-        ))
+        let mut text = format!("{started}\nlogs: {}\n", paths.log_file().display());
+        // Without a configuration the server is in setup mode, its secret
+        // in a file that only a terminal is shown.
+        if setup {
+            let file = paths.setup_secret_file();
+            match std::fs::read_to_string(&file) {
+                Ok(open) if site.screen => text.push_str(&format!("Setup mode: {open}")),
+                _ => text.push_str(&format!(
+                    "Setup mode: the address to open and the one-time setup secret are in {} \
+                     until setup mode ends\n",
+                    file.display()
+                )),
+            }
+        }
+        Ok(text)
     };
     let stop = || {
         hyscribe_service::stop(paths, STOP_GRACE)
@@ -501,6 +565,7 @@ fn describe(config: &Config) -> String {
     )
 }
 
+mod cron;
 mod setup;
 
 use setup::web::{Ended, SETUP_TIMEOUT, setup_mode};

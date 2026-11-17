@@ -30,7 +30,9 @@ mod value;
 mod wp;
 
 pub use base64::{base64_decode, base64_encode};
-pub use cast::{absint, float_to_string, is_empty_string, isset, string_to_float};
+pub use cast::{
+    absint, float_to_string, is_empty_string, isset, string_to_float, string_to_number,
+};
 pub use decode::{MAX_DEPTH, decode, unserialize};
 pub use encode::encode;
 pub use error::{Error, ErrorKind};

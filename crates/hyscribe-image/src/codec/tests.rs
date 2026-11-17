@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use super::*;
-use crate::tests::corpus;
+use crate::tests::{corpus, hostile};
 
 fn pixels(width: u32, height: u32, channels: usize) -> Pixels {
     let data = (0..width as usize * height as usize * channels)
@@ -49,11 +49,45 @@ fn limits_default_to_the_oracle_policy() {
 }
 
 #[test]
+fn never_overflows_counting_memory() {
+    let unbounded = Limits {
+        bytes: u64::MAX,
+        width: u32::MAX,
+        height: u32::MAX,
+        area: u64::MAX,
+        memory: u64::MAX,
+    };
+    assert!(!unbounded.allows(u32::MAX, u32::MAX, 8));
+    assert!(unbounded.allows(1 << 16, 1 << 16, 8));
+}
+
+#[test]
+fn refuses_a_jpeg_its_decoder_reads_at_another_size() {
+    // zune-jpeg reads a 2000x2000 frame past `FF 00`; the header, 16x16.
+    let jpeg = hostile("jpeg-ff00.jpg");
+    let size = crate::header::getimagesize(&jpeg).unwrap();
+    assert_eq!((size.width, size.height), (16, 16));
+    assert_eq!(
+        decode(&jpeg, ImageType::Jpeg, &Limits::default()),
+        Err(Error::Undecodable)
+    );
+    // The decoder's size is held to the limits before it allocates.
+    let header = Limits {
+        memory: 16 * 16 * (4 + WORKING),
+        ..Limits::default()
+    };
+    assert_eq!(
+        decode(&jpeg, ImageType::Jpeg, &header),
+        Err(Error::TooLarge)
+    );
+}
+
+#[test]
 fn holds_each_format_to_its_depth_and_the_file_size() {
     let area = 400 * 300;
     for (name, depth) in [
         ("rgb.png", 8),
-        ("still.gif", 1),
+        ("still.gif", 4),
         ("lossy.webp", 4),
         ("photo.bmp", 4),
     ] {
@@ -107,15 +141,12 @@ fn holds_a_gif_frame_larger_than_its_screen_to_the_limits() {
         ..Limits::default()
     };
     assert_eq!(decode(&gif, ImageType::Gif, &narrow), Err(Error::TooLarge));
-    // Its buffer is refused by the decoder past the memory's pixels.
+    // Its buffer is refused past the memory's pixels before it is allocated.
     let small = Limits {
         memory: 30 * (4 + WORKING),
         ..Limits::default()
     };
-    assert_eq!(
-        decode(&gif, ImageType::Gif, &small),
-        Err(Error::Undecodable)
-    );
+    assert_eq!(decode(&gif, ImageType::Gif, &small), Err(Error::TooLarge));
     let mut twenty = Vec::new();
     let mut encoder = gif::Encoder::new(&mut twenty, 1, 1, &[0, 0, 0, 255, 255, 255]).unwrap();
     let frame = gif::Frame {
@@ -132,10 +163,7 @@ fn holds_a_gif_frame_larger_than_its_screen_to_the_limits() {
         area: 10,
         ..Limits::default()
     };
-    assert_eq!(
-        decode(&twenty, ImageType::Gif, &few),
-        Err(Error::Undecodable)
-    );
+    assert_eq!(decode(&twenty, ImageType::Gif, &few), Err(Error::TooLarge));
 }
 
 /// The transparent index of a GIF's first frame.
@@ -335,6 +363,37 @@ fn carries_a_png_profile() {
     let with = [&png[..33], &iccp, &png[33..]].concat();
     let decoded = decode(&with, ImageType::Png, &Limits::default()).unwrap();
     assert_eq!(decoded.kept.icc.as_deref(), Some(profile.as_slice()));
+}
+
+/// A 1x1 PNG with a `bytes` long ICC profile.
+fn with_profile(bytes: usize) -> Vec<u8> {
+    let mut info = png::Info::with_size(1, 1);
+    info.color_type = png::ColorType::Rgb;
+    info.icc_profile = Some(vec![7; bytes].into());
+    let mut out = Vec::new();
+    let mut writer = png::Encoder::with_info(&mut out, info)
+        .unwrap()
+        .write_header()
+        .unwrap();
+    writer.write_image_data(&[0, 0, 0]).unwrap();
+    writer.finish().unwrap();
+    out
+}
+
+#[test]
+fn holds_png_metadata_to_its_own_limit() {
+    // A profile that inflates past the metadata limit is dropped.
+    let bomb = hostile("png-iccp.png");
+    let decoded = decode(&bomb, ImageType::Png, &Limits::default()).unwrap();
+    assert_eq!(decoded.kept.icc.map(|icc| icc.len()), None);
+    assert_eq!((decoded.pixels.width, decoded.pixels.height), (1, 1));
+    // One within it is carried, whatever the pixels' budget.
+    let pixel = Limits {
+        memory: 8 + WORKING,
+        ..Limits::default()
+    };
+    let decoded = decode(&with_profile(1 << 20), ImageType::Png, &pixel).unwrap();
+    assert_eq!(decoded.kept.icc.map(|icc| icc.len()), Some(1 << 20));
 }
 
 #[test]

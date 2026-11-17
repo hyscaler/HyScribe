@@ -12,7 +12,7 @@ use hyscribe_db::Write;
 use hyscribe_phpser::Value;
 use hyscribe_render::date::{Zone, format_unix, stored_unix};
 
-use super::{Result, clear, schedule};
+use super::{Result, wp_clear_scheduled_hook, wp_schedule_single_event};
 use crate::comments::{self, delete_comment};
 use crate::options::{Meta, delete_metadata};
 use crate::posts::{Context, wp_delete_post, wp_publish_post, wp_update_post};
@@ -35,8 +35,9 @@ pub async fn check_and_publish_future_post(
     }
     let time = stored_unix(&post.date_gmt, Zone::Utc);
     if time > ctx.now {
-        clear(write, "publish_future_post", id).await?;
-        return schedule(write, (ctx.now, time), "publish_future_post", Some(id)).await;
+        wp_clear_scheduled_hook(write, "publish_future_post", id).await?;
+        return wp_schedule_single_event(write, (ctx.now, time), "publish_future_post", Some(id))
+            .await;
     }
     wp_publish_post(write, ctx, id).await
 }
@@ -76,12 +77,6 @@ pub async fn wp_scheduled_delete(write: &mut Write<'_>, ctx: &Context) -> Result
             }
         }
     }
-    Ok(())
-}
-
-/// `delete_expired_transients()` with no persistent object cache.
-pub async fn delete_expired_transients(write: &mut Write<'_>, now: i64) -> Result<()> {
-    write.delete_expired_transients(now).await?;
     Ok(())
 }
 

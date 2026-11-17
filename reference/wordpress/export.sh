@@ -9,7 +9,7 @@
 #   wordpress/wp-includes/blocks/registered.json    their block.json, in registration order
 #   wordpress/wp-includes/kses-post.json            wp_kses_allowed_html( 'post' )
 #   wordpress/wp-includes/kses-data.json            wp_kses_allowed_html( 'data' )
-#   wordpress/wp-includes/mime-types.json           get_allowed_mime_types() for a visitor
+#   wordpress/wp-includes/mime-types.json           get_allowed_mime_types() for a visitor, by extensions
 #   wordpress/wp-includes/wp-mime-types.json        wp_get_mime_types(), keyed by extension pattern
 #   wordpress/wp-includes/capabilities.json         the post types', taxonomies' and statuses' capability data
 #   wordpress/wp-includes/rest-routes.json          the REST API's namespaces and routes, with each endpoint's methods
@@ -63,7 +63,7 @@ mkdir -p "$OUT"
 # The MIME types a visitor may upload, which Atom enclosures are checked
 # against.
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; $out = array(); foreach ( WP_Icons_Registry::get_instance()->get_registered_icons() as $icon ) { $out[ $icon["name"] ] = $icon["content"]; } ksort( $out ); echo wp_json_encode( $out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );' > "$OUT/wp-includes/icons.json"
-"$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 0 ); echo wp_json_encode( array_values( get_allowed_mime_types() ), JSON_UNESCAPED_SLASHES ), "\n";' > "$OUT/wp-includes/mime-types.json"
+"$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 0 ); echo wp_json_encode( get_allowed_mime_types(), JSON_UNESCAPED_SLASHES ), "\n";' > "$OUT/wp-includes/mime-types.json"
 # wp_get_mime_types(): each extension pattern and its type, which uploads
 # are checked and named against.
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; echo wp_json_encode( wp_get_mime_types(), JSON_UNESCAPED_SLASHES ), "\n";' > "$OUT/wp-includes/wp-mime-types.json"

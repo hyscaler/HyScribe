@@ -9,6 +9,16 @@ const FILES: &[(&str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/wp_inc
 /// The files by path under `wp-admin/`, its CSS, scripts and images.
 const ADMIN_FILES: &[(&str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/wp_admin.rs"));
 
+/// The files under `wp-includes/` that PHP reads but that are not served.
+const READ: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/read.rs"));
+
+/// A file under `wp-includes/` that PHP reads though it is not served.
+pub fn wp_includes_read(path: &str) -> Option<&'static [u8]> {
+    READ.iter()
+        .find(|(name, _)| *name == path)
+        .map(|(_, bytes)| *bytes)
+}
+
 /// Every file served from the release, by path under `wordpress/`, with
 /// its modification time and SHA-256 in hex.
 const RELEASE: &[(&str, u64, &str)] = include!(concat!(env!("OUT_DIR"), "/release.rs"));
@@ -47,7 +57,7 @@ fn lookup(
 
 #[cfg(test)]
 mod tests {
-    use super::{release_file, wp_includes};
+    use super::{release_file, wp_includes, wp_includes_read};
 
     #[test]
     fn release_dates_and_digests() {
@@ -73,5 +83,17 @@ mod tests {
         for missing in ["js/jquery/jquery.js", "version.php", "nope.js", ""] {
             assert!(wp_includes(missing).is_none(), "{missing}");
         }
+    }
+
+    /// The default editor styles, which `get_default_block_editor_settings()`
+    /// reads though no URL serves them.
+    #[test]
+    fn files_php_reads() {
+        let css = wp_includes_read("css/dist/block-editor/default-editor-styles.css");
+        let css = css.unwrap_or_default();
+        assert_eq!(css.len(), 1310);
+        assert!(css.starts_with(b"/**\n * SCSS Variables."));
+        assert!(wp_includes("css/dist/block-editor/default-editor-styles.css").is_none());
+        assert!(wp_includes_read("css/dist/block-editor/content.css").is_none());
     }
 }

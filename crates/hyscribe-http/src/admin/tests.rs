@@ -880,31 +880,51 @@ pub(crate) fn with_values(golden: &str, page: &str) -> String {
     out
 }
 
-/// The site editor's refusals of `reference/site-editor/golden.sh`, whatever
-/// the arguments.
+/// The site editor of `reference/site-editor/golden.sh`: the other roles'
+/// refusals whatever the arguments, and the administrator's redirects and
+/// refusals.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_site_editor_s_refusals() {
-    let site = oracle_site().await;
+async fn the_site_editor_s_redirects_and_refusals() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
     let handle = Handle::current();
     let golden = include_str!("../../tests/golden/site-editor.tsv");
     for line in golden.lines() {
         let f: Vec<&str> = line.split('\t').collect();
-        let (site, handle, query) = (Arc::clone(&site), handle.clone(), f[0].to_string());
-        let response = tokio::task::spawn_blocking(move || {
-            let reads = LoginReads::new(&site, handle, now());
-            let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
-            let path = "/hs-admin/site-editor";
-            let uri = format!("{path}{query}");
-            let url = format!("http://h{uri}");
-            screen(&admin, path, &uri, &url, "http://h", &Browser::default()).unwrap()
-        })
-        .await
-        .unwrap();
+        let path = format!("/hs-admin/site-editor{}", f[0]);
+        let response = if f[1] == "administrator" {
+            get(&site, &path, "127.0.0.1:8081", &cookies).await
+        } else {
+            let (site, handle) = (Arc::clone(&site), handle.clone());
+            tokio::task::spawn_blocking(move || {
+                let reads = LoginReads::new(&site, handle, now());
+                let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+                let url = format!("http://h{path}");
+                screen(
+                    &admin,
+                    "/hs-admin/site-editor",
+                    &path,
+                    &url,
+                    "http://h",
+                    &Browser::default(),
+                )
+                .unwrap()
+            })
+            .await
+            .unwrap()
+        };
         assert_eq!(response.status().as_str(), f[2], "{line}");
-        let php = String::from_utf8(hyscribe_testkit::unhex(f[3])).unwrap();
+        let ours = response.headers().get(header::LOCATION);
+        assert_eq!(
+            ours.map_or("", |to| to.to_str().unwrap()),
+            hs(f[3]),
+            "{}",
+            f[0]
+        );
+        let php = String::from_utf8(hyscribe_testkit::unhex(f[4])).unwrap();
         assert_eq!(page_of(response).await, php, "{}", f[0]);
     }
-    assert_eq!(golden.lines().count(), 12);
+    assert_eq!(golden.lines().count(), 44);
 }
 
 /// A user without the screen's capability gets `wp_die()`'s refusal.

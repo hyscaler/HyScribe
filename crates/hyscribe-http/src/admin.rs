@@ -189,6 +189,9 @@ struct Admin<'a> {
     post_comments: RefCell<HashMap<u64, Vec<(hyscribe_model::Comment, String)>>>,
     /// The Quick Draft form's auto-draft this view wrote, if it did.
     draft: Option<u64>,
+    /// The block editor's post and global styles post this view wrote its
+    /// edit lock and first view for, and the lock.
+    edited: Option<(u64, u64, String)>,
     /// `show_welcome_panel` as this view's `?welcome=` saves it.
     welcome: Option<Vec<u8>>,
     /// `$GLOBALS['login_grace_period']`: the auth cookie expired within
@@ -210,6 +213,7 @@ impl<'a> Admin<'a> {
             uri: String::new(),
             post_comments: RefCell::default(),
             draft: None,
+            edited: None,
             welcome: None,
             grace: false,
         }
@@ -1225,6 +1229,44 @@ pub(crate) fn site_icon(reads: &LoginReads, size: i64) -> Option<Vec<u8>> {
 }
 
 /// The screen at `path` for `admin`, `None` for one not ported yet.
+/// The block editor's page of the post the view wrote its edit lock for,
+/// once every preload is answered; `None` before.
+fn block_editor(admin: &Admin, request: &Request) -> Option<Answer> {
+    block_editor_with(admin, request, &|paths| {
+        let host = request.origin.rsplit("//").next().unwrap_or_default();
+        crate::rest::preloads(admin.reads, (admin.user.id, host), paths)
+    })
+}
+
+/// What answers the block editor's preloads, `None` where one is not
+/// ported.
+pub(super) type Preloads<'a> = dyn Fn(&[(&'static str, String)]) -> Option<Value> + 'a;
+
+/// [`block_editor`] with the preloads `preloads` answers.
+fn block_editor_with(admin: &Admin, request: &Request, preloads: &Preloads) -> Option<Answer> {
+    let (id, styles, lock) = admin.edited.as_ref()?;
+    let post = admin.full_post(*id)?;
+    let stylesheet = admin.site.option("stylesheet");
+    let edit_theme = admin.can("edit_theme_options");
+    let paths =
+        hyscribe_admin::editor::page::preload_paths(&post, *styles, edit_theme, &stylesheet);
+    let preloads = preloads(&paths)?;
+    let editing = hyscribe_admin::editor::form::Editing {
+        post: &post,
+        lock,
+        browser: request.browser,
+        uri: request.uri,
+    };
+    let page = hyscribe_admin::editor::page::editor_page(admin, &editing, &preloads, request);
+    Some(Answer::from_page(page))
+}
+
+impl hyscribe_admin::editor::EditorSite for Admin<'_> {
+    fn theme(&self) -> &hyscribe_render::theme::Theme {
+        &self.site.theme
+    }
+}
+
 fn screen(
     admin: &Admin,
     path: &str,
@@ -1304,9 +1346,10 @@ fn screen(
         // only the refusals.
         "/hs-admin/post" => {
             let args = AttachmentArgs::parse(query, admin.referer.clone())?;
-            attachment_edit(admin, &args, &request)?
+            attachment_edit(admin, &args, &request).or_else(|| block_editor(admin, &request))?
         }
-        "/hs-admin/post-new" => hyscribe_admin::editor::post_new(admin, query)?,
+        "/hs-admin/post-new" => hyscribe_admin::editor::post_new(admin, query)
+            .or_else(|| block_editor(admin, &request))?,
         "/hs-admin/revision" => hyscribe_admin::revisions::revision(admin, query, &request)?,
         // Its page prints the PHP and web server details HyScribe has no
         // equivalent for: refused as PHP refuses, else not ported.
@@ -1323,9 +1366,9 @@ fn screen(
             }
             Answer::from_page(info(admin, &request))
         }
-        // Its page preloads REST responses not served yet, and its first view
-        // writes the theme's `wp_global_styles` post.
         "/hs-admin/site-editor" if !admin.can("edit_theme_options") => Answer::from_page(None),
+        // Its redirects and refusals; the editor's page is not ported.
+        "/hs-admin/site-editor" => hyscribe_admin::site_editor::site_editor(query, request_uri)?,
         // HTTPS offers application passwords, whose list is not ported.
         "/hs-admin/profile" => {
             let args = edit_args(query).filter(|_| !origin.starts_with("https://"))?;
@@ -1475,10 +1518,10 @@ const HTML: &str = "text/html; charset=UTF-8";
 const JSON: &str = "application/json; charset=UTF-8";
 
 /// The answer to a write function's error: 501 for what is not ported,
-/// else the database error page.
+/// text `wpdb` refuses among it, else the database error page.
 fn failed(admin: &Admin, err: hyscribe_write::Error) -> Response {
     match err {
-        hyscribe_write::Error::Unported(_) => not_ported(),
+        hyscribe_write::Error::Unported(_) | hyscribe_write::Error::InvalidText(_) => not_ported(),
         err => crate::html(crate::database_error(admin.site, &format!("{err:?}"))),
     }
 }
@@ -1514,7 +1557,7 @@ fn quick_draft(
     };
     let view = views::quick_press(admin);
     let uri = String::from_utf8_lossy(asked.uri).into_owned();
-    views::viewed(admin, writer, view, |admin| {
+    views::viewed(admin, writer, view, &|admin| {
         let form = hyscribe_admin::dashboard::quick_press(admin, &uri, Some(notice));
         response(StatusCode::OK, screen_headers(), form.into_bytes())
     })
@@ -1700,8 +1743,18 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 };
                 match &site.writer {
                     Some(writer) => {
-                        let view = views::plan(&mut admin, &cookies, uri.path(), &get, now);
-                        views::viewed(&mut admin, writer, view, render)
+                        let view = views::plan(
+                            &mut admin,
+                            &cookies,
+                            (
+                                uri.path(),
+                                uri.query().unwrap_or_default(),
+                                &String::from_utf8_lossy(host),
+                            ),
+                            &get,
+                            now,
+                        );
+                        views::viewed(&mut admin, writer, view, &render)
                     }
                     None => render(&admin),
                 }

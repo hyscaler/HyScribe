@@ -277,13 +277,9 @@ fn sidebar(context: &Context, params: &Params) -> Result<Response, RestError> {
 /// `prepare_item_for_response()` of the inactive sidebar listing `widgets`.
 fn prepare_sidebar(context: &Context, params: &Params, widgets: &Value) -> Response {
     let fields = fields_for_response(params, SIDEBAR_PROPERTIES);
-    // The retrieved widgets are all registered; the schema's default
-    // stands for them where they are not asked for.
-    let widgets = if is_field_included("widgets", &fields) {
-        widgets.clone()
-    } else {
-        Value::Array(Vec::new())
-    };
+    // The retrieved widgets are all registered; where they are not asked
+    // for, `_fields` leaves them out.
+    let widgets = widgets.clone();
     let data = object([
         ("id", text(INACTIVE)),
         ("name", text("Inactive widgets")),
@@ -326,13 +322,14 @@ fn widgets(context: &Context, params: &Params) -> Result<Response, RestError> {
         {
             continue;
         }
-        for (_, id) in ids.as_array().unwrap_or_default() {
-            let found = registered
+        let ids = ids.as_array().unwrap_or_default().iter();
+        let widgets = ids.filter_map(|(_, id)| {
+            registered
                 .iter()
-                .find(|widget| widget.id == id.to_php_string());
-            if let Some(widget) = found {
-                data.push(prepare_widget(context, params, widget, &sidebar)?.into_data());
-            }
+                .find(|widget| widget.id == id.to_php_string())
+        });
+        for widget in widgets {
+            data.push(prepare_widget(context, params, widget, &sidebar)?.into_data());
         }
     }
     Ok(Response::new(list(data), 200))

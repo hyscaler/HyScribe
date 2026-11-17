@@ -229,7 +229,7 @@ pub(crate) fn normalized(url: &[u8], home: &[u8]) -> Vec<u8> {
 /// through `absint()`.
 fn id_argument(url: &[u8]) -> Option<u64> {
     (0..url.len()).find_map(|at| {
-        let rest = url.get(at..)?;
+        let rest = url.get(at..).unwrap_or_default();
         let rest = rest
             .strip_prefix(b"?")
             .or_else(|| rest.strip_prefix(b"&"))?;
@@ -363,49 +363,50 @@ fn children(entries: &[(Key, Value)], out: &mut Vec<u8>) -> Option<()> {
 pub(crate) fn xml_text(escaped: &[u8]) -> Option<Vec<u8>> {
     let text = std::str::from_utf8(escaped).ok()?;
     let mut out = Vec::new();
-    let mut rest = text;
-    while let Some(c) = rest.chars().next() {
-        let (decoded, len) = if c == '&' {
-            let end = rest.find(';')?;
-            let entity = rest.get(1..end)?;
-            let named = match entity {
-                "amp" => Some('&'),
-                "lt" => Some('<'),
-                "gt" => Some('>'),
-                "quot" => Some('"'),
-                "apos" => Some('\''),
-                _ => None,
-            };
-            let numeric = || {
-                let number = entity.strip_prefix('#')?;
-                let code = match number.strip_prefix(['x', 'X']) {
-                    Some(hex) => u32::from_str_radix(hex, 16).ok(),
-                    None => number.parse().ok(),
-                };
-                code.and_then(char::from_u32)
-            };
-            match named.or_else(numeric) {
-                Some(c) => (c, end + 1),
-                None if entity.bytes().all(|b| b.is_ascii_alphanumeric()) && !entity.is_empty() => {
-                    out.extend_from_slice(rest.get(..=end)?.as_bytes());
-                    rest = rest.get(end + 1..)?;
-                    continue;
-                }
-                None => return None,
-            }
-        } else {
-            (c, c.len_utf8())
+    let mut parts = text.split('&');
+    xml_chars(parts.next().unwrap_or_default(), &mut out)?;
+    for part in parts {
+        let (entity, after) = part.split_once(';')?;
+        let named = match entity {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            _ => None,
         };
-        match decoded {
+        let numeric = || {
+            let number = entity.strip_prefix('#')?;
+            let code = match number.strip_prefix(['x', 'X']) {
+                Some(hex) => u32::from_str_radix(hex, 16).ok(),
+                None => number.parse().ok(),
+            };
+            code.and_then(char::from_u32)
+        };
+        match named.or_else(numeric) {
+            Some(c) => xml_chars(c.encode_utf8(&mut [0; 4]), &mut out)?,
+            None if !entity.is_empty() && entity.bytes().all(|b| b.is_ascii_alphanumeric()) => {
+                out.extend_from_slice(format!("&{entity};").as_bytes());
+            }
+            None => return None,
+        }
+        xml_chars(after, &mut out)?;
+    }
+    Some(out)
+}
+
+/// `text`'s characters as `asXML()` writes them; `None` for a control.
+fn xml_chars(text: &str, out: &mut Vec<u8>) -> Option<()> {
+    for c in text.chars() {
+        match c {
             '&' => out.extend_from_slice(b"&amp;"),
             '<' => out.extend_from_slice(b"&lt;"),
             '>' => out.extend_from_slice(b"&gt;"),
-            '\t' | '\n' => out.push(decoded as u8),
+            '\t' | '\n' => out.push(c as u8),
             c if u32::from(c) < 0x20 && c != '\r' => return None,
             c if c.is_ascii() && c != '\r' => out.push(c as u8),
             c => out.extend_from_slice(format!("&#x{:X};", u32::from(c)).as_bytes()),
         }
-        rest = rest.get(len..)?;
     }
-    Some(out)
+    Some(())
 }

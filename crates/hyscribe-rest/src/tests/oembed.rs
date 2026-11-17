@@ -113,6 +113,33 @@ fn cached_proxy_answers_are_not_served() {
         "INSERT INTO `wp_options` VALUES (9941,'_transient_oembed_{key}','x','off');"
     ));
     assert_eq!(get(cached, "author", target).status, 501);
+    // A URL that is none of this site's posts, which PHP would fetch, and
+    // one the rewrite rules would match.
+    let missing = "/?rest_route=/oembed/1.0/proxy&url=%2F%3Fp%3D999";
+    assert_eq!(
+        get(content::default_install(), "author", missing).status,
+        501
+    );
+    let case = RestCase {
+        who: "author".into(),
+        method: "GET".into(),
+        target: "/wp-json/oembed/1.0/proxy?url=%2Fhello-world%2F".into(),
+        flags: "pretty".into(),
+        status: 0,
+        headers: Vec::new(),
+        body: Vec::new(),
+        sent: Vec::new(),
+    };
+    assert_eq!(serve_over(content::default_install(), &case).status, 501);
+}
+
+/// `url_to_postid()` reads the first of `p`, `page_id` and
+/// `attachment_id` given digits.
+#[test]
+fn the_first_id_with_digits_is_read() {
+    let served = embed(content::default_install(), "%2F%3Fp%3D%26page_id%3D2");
+    let data = hyscribe_phpser::json_decode(&served.body).unwrap();
+    assert_eq!(data.get_str("title"), Some(&text("Sample Page")));
 }
 
 /// `set_url_scheme()` and the `www.` `url_to_postid()` adds or takes away
@@ -150,7 +177,16 @@ fn xml_text_is_written_as_simplexml_writes_it() {
         written("a&amp;b &lt;c&gt; &quot;q&quot; &apos;&#039;s&#x41;&#X42; &nbsp; é \r\t\n"),
         Some("a&amp;b &lt;c&gt; \"q\" ''sAB &nbsp; &#xE9; &#xD;\t\n".into())
     );
-    for refused in ["a & b", "&#0;", "&#xD800;", "&#xZ;", "&;", "&a-b;", "\u{1}"] {
+    for refused in [
+        "a & b",
+        "&#0;",
+        "&#xD800;",
+        "&#xZ;",
+        "&;",
+        "&a-b;",
+        "\u{1}",
+        "&amp;\u{1}",
+    ] {
         assert_eq!(written(refused), None, "{refused:?}");
     }
     assert_eq!(xml_text(b"\xff"), None);
@@ -160,6 +196,8 @@ fn xml_text_is_written_as_simplexml_writes_it() {
         b"<?xml version=\"1.0\"?>\n<oembed><a/><oembed>x</oembed></oembed>\n"
     );
     assert_eq!(create_xml(&object([("a", text("\u{1}"))])), None);
+    let nested = object([("a", object([("b", text("\u{1}"))]))]);
+    assert_eq!(create_xml(&nested), None);
     assert_eq!(create_xml(&Value::Array(Vec::new())), None);
 }
 

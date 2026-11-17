@@ -94,6 +94,7 @@ fn widgets_php_would_store_are_not_served() {
     for stored in [
         r#"s:1:\"x\";"#,
         r#"a:2:{s:19:\"wp_inactive_widgets\";a:1:{s:1:\"k\";s:7:\"block-2\";}s:13:\"array_version\";i:3;}"#,
+        r#"a:2:{s:9:\"sidebar-1\";a:1:{s:1:\"k\";s:7:\"block-2\";}s:13:\"array_version\";i:3;}"#,
         r#"a:6:{s:19:\"wp_inactive_widgets\";s:7:\"block-2\";s:18:\"orphaned_widgets_1\";a:1:{i:0;s:7:\"block-3\";}s:18:\"orphaned_widgets_2\";N;s:9:\"sidebar-1\";a:2:{i:0;s:7:\"block-4\";i:1;s:8:\"block-99\";}s:9:\"sidebar-2\";s:1:\"x\";s:13:\"array_version\";i:3;}"#,
     ] {
         assert_eq!(

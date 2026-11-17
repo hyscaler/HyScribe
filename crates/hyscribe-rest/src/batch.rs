@@ -180,12 +180,9 @@ fn parsed(context: &Context, request: &Value) -> Result<Sub, Halt> {
 /// Whether the route `regex`'s endpoint `index` allows batching, as its
 /// exported description says.
 fn allows_batch(regex: &str, index: usize) -> bool {
-    let description = crate::descriptions().get_str(regex);
-    let endpoint = description.and_then(|description| {
-        let endpoints = description.get_str("endpoints")?.as_array()?;
-        endpoints.get(index).map(|(_, endpoint)| endpoint)
-    });
-    let allowed = endpoint.and_then(|endpoint| endpoint.get_path(&["allow_batch", "v1"]));
+    let index = index.to_string();
+    let path = [regex, "endpoints", &index, "allow_batch", "v1"];
+    let allowed = crate::descriptions().get_path(&path);
     allowed.is_some_and(|allowed| !allowed.is_empty())
 }
 

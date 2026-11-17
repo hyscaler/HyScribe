@@ -26,7 +26,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
             callback: Some(index),
         }]);
     }
-    let namespace = regex.strip_prefix('/')?;
+    let namespace = regex.trim_start_matches('/');
     routes::namespace_routes(namespace.as_bytes())?;
     let default = |name, value: &str| Arg {
         name,

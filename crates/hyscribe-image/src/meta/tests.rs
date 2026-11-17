@@ -242,5 +242,12 @@ fn reads_exif_as_wp_read_image_metadata_does() {
 #[test]
 fn reads_exif_only_within_its_segment() {
     // The description's offset points past the APP1, where PHP reads nothing.
-    assert_eq!(read(&hostile("exif-past-app1.jpg")), Err(Unported));
+    let past = hostile("exif-past-app1.jpg");
+    assert_eq!(read(&past), Err(Unported));
+    // Wherever the APP1 starts: here after an APP0.
+    let app0 = [b"\xFF\xE0\x00\x10JFIF\0".as_slice(), &[0; 9]].concat();
+    assert_eq!(
+        read(&[&past[..2], &app0, &past[2..]].concat()),
+        Err(Unported)
+    );
 }

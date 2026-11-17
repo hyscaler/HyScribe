@@ -81,8 +81,8 @@ pub fn embed_page(
     .concat();
     out.extend(head.robots());
     out.extend(head.canonical(false));
-    out.extend(Style::inline("wp-emoji-styles", EMOJI_CSS).print());
-    out.extend(Style::inline("wp-embed-template", TEMPLATE_CSS).print());
+    out.extend(Style::inline("wp-emoji-styles", EMOJI_CSS).print(siteurl));
+    out.extend(Style::inline("wp-embed-template", TEMPLATE_CSS).print(siteurl));
     out.extend_from_slice(b"</head>\n<body class=\"");
     out.extend(body_class(site, request, theme.slug()));
     out.extend_from_slice(b"\">\n");
@@ -93,7 +93,7 @@ pub fn embed_page(
     out.extend(file_script(siteurl, "wp-embed-template", TEMPLATE_JS));
     // wp_print_footer_scripts(): the styles rendering the excerpt enqueued.
     for handle in &renderer.assets.styles {
-        out.extend(block_style(handle, siteurl).print());
+        out.extend(block_style(handle, siteurl).print(siteurl));
     }
     out.extend(emoji_detection_script(siteurl));
     out.extend_from_slice(b"</body>\n</html>\n");

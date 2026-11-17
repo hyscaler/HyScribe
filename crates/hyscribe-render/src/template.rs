@@ -24,6 +24,7 @@ use crate::media::Loading;
 use crate::registry::block_type;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
+use crate::template_types::PART_AREAS;
 use crate::theme::Theme;
 use crate::variations::variation_class;
 
@@ -647,11 +648,10 @@ impl Renderer<'_> {
 
 /// The tag `get_allowed_block_template_part_areas()` gives an area.
 fn area_tag(area: &[u8]) -> &'static [u8] {
-    match area {
-        b"header" => b"header",
-        b"footer" => b"footer",
-        _ => b"div",
-    }
+    let known = PART_AREAS
+        .iter()
+        .find(|known| known.area.as_bytes() == area);
+    known.map_or(b"div", |known| known.tag.as_bytes())
 }
 
 /// What survives `tag_escape()` unchanged: lower case letters, digits,

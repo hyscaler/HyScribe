@@ -67,9 +67,30 @@ fn defaults_are_safe() {
                 account: 10,
                 window: 900,
             },
+            disable_wp_cron: false,
+            alternate_wp_cron: false,
             upload_max_size: 64 << 20,
         }
     );
+}
+
+/// The cron constants read as the capability constants, false by default.
+#[test]
+fn reads_the_cron_constants() {
+    let cron = |pairs: &[(&str, &str)]| {
+        let config = from_map(&with(pairs))?;
+        Ok::<_, ConfigError>((config.disable_wp_cron, config.alternate_wp_cron))
+    };
+    let set = [("DISABLE_WP_CRON", "TRUE"), ("ALTERNATE_WP_CRON", "1")];
+    assert_eq!(cron(&set).unwrap(), (true, true));
+    let unset = [("DISABLE_WP_CRON", "0"), ("ALTERNATE_WP_CRON", "")];
+    assert_eq!(cron(&unset).unwrap(), (false, false));
+    for key in ["DISABLE_WP_CRON", "ALTERNATE_WP_CRON"] {
+        assert_eq!(
+            cron(&[(key, "yes")]).unwrap_err().to_string(),
+            format!("{key} is invalid: must be true or false")
+        );
+    }
 }
 
 /// The capability constants as `define()` gives them, the safer value when
@@ -108,14 +129,14 @@ fn reads_the_capability_constants() {
         "DISALLOW_UNFILTERED_HTML",
         "ALLOW_UNFILTERED_UPLOADS",
     ] {
-        for value in ["yes", "no", "2", "'true'", " true"] {
+        for value in ["y", "2", "'true'", " true"] {
             assert_eq!(
                 constants(&[(key, value)]).unwrap_err().to_string(),
                 format!("{key} is invalid: must be true or false")
             );
         }
     }
-    for value in ["true", "TRUE", "1"] {
+    for value in ["true", "TRUE", "1", "Yes", "on"] {
         assert_eq!(
             constants(&[("MULTISITE", value)]).unwrap_err().to_string(),
             "MULTISITE is invalid: multisite networks are not supported"
@@ -287,8 +308,8 @@ fn rejects_bad_values() {
         ("BEHIND_PROXY", "maybe", "must be true or false"),
         ("DB_READ_PASSWORD", "hunter3", "is set without DB_READ_USER"),
         ("MODE", "write", "must be shadow or primary"),
-        ("REST_PUBLIC_USERS", "true", "must be on or off"),
-        ("HTTP_OUTBOUND", "yes", "must be on or off"),
+        ("REST_PUBLIC_USERS", "public", "must be true or false"),
+        ("HTTP_OUTBOUND", "enabled", "must be true or false"),
         (
             "EMPTY_TRASH_DAYS",
             "-1",
@@ -330,8 +351,41 @@ fn rejects_bad_values() {
         from_map(&map(&[("DB_NAME", "wordpress")])),
         Err(ConfigError::Missing("DB_USER"))
     );
-    for value in ["false", "0", "no", "1", "yes"] {
-        assert!(from_map(&with(&[("BEHIND_PROXY", value)])).is_ok());
+}
+
+/// Every yes or no key reads the same words, in any case, through one
+/// parser; missing or empty is the key's default.
+#[test]
+fn every_boolean_key_takes_the_same_values() {
+    let read = |key: &str, value: &str| {
+        let config = from_map(&with(&[(key, value)]))?;
+        Ok::<_, ConfigError>(match key {
+            "BEHIND_PROXY" => config.server.behind_proxy,
+            "REST_PUBLIC_USERS" => config.rest_public_users,
+            "HTTP_OUTBOUND" => config.http_outbound,
+            "DISALLOW_UNFILTERED_HTML" => config.constants.disallow_unfiltered_html,
+            _ => config.constants.allow_unfiltered_uploads,
+        })
+    };
+    let keys = [
+        ("BEHIND_PROXY", false),
+        ("REST_PUBLIC_USERS", true),
+        ("HTTP_OUTBOUND", false),
+        ("DISALLOW_UNFILTERED_HTML", true),
+        ("ALLOW_UNFILTERED_UPLOADS", false),
+    ];
+    for (key, default) in keys {
+        for value in ["true", "TRUE", "yes", "Yes", "on", "ON", "1"] {
+            assert_eq!(read(key, value), Ok(true), "{key}={value}");
+        }
+        for value in ["false", "False", "no", "NO", "off", "Off", "0"] {
+            assert_eq!(read(key, value), Ok(false), "{key}={value}");
+        }
+        assert_eq!(read(key, ""), Ok(default), "{key}");
+        assert_eq!(
+            read(key, "maybe").unwrap_err().to_string(),
+            format!("{key} is invalid: must be true or false")
+        );
     }
 }
 

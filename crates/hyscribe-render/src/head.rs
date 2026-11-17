@@ -133,8 +133,9 @@ pub fn wp_head(
     out.extend([&b"<title>"[..], title, b"</title>\n"].concat());
     out.extend(head.feed_links());
     out.extend(head.oembed_links());
+    let siteurl = head.siteurl();
     for style in head.styles(assets) {
-        out.extend(style.print());
+        out.extend(style.print(&siteurl));
     }
     out.extend(head.rest_links());
     // wp_generator(), with HyScribe's name and version.
@@ -307,7 +308,15 @@ impl Head<'_> {
             "img:is([sizes=auto i],[sizes^=\"auto,\" i]){contain-intrinsic-size:3000px 1500px}",
         )];
         for handle in &assets.styles {
-            queue.push(block_style(handle, &siteurl));
+            let mut style = block_style(handle, &siteurl);
+            // enqueue_block_styles_assets(): the theme's block styles' CSS
+            // follows their block's stylesheet.
+            for (block, css) in &self.theme.inline_block_styles {
+                if *handle == format!("wp-block-{}", block.trim_start_matches("core/")) {
+                    style.after.push(css.clone());
+                }
+            }
+            queue.push(style);
         }
         let on_page = |name: &str| {
             let handle = format!("wp-block-{}", name.trim_start_matches("core/"));
@@ -788,13 +797,18 @@ impl Style {
         }
     }
 
-    /// `WP_Styles::do_item()`.
-    fn print(&self) -> Vec<u8> {
+    /// `WP_Styles::do_item()`, a stylesheet's path linked from `base`, the
+    /// site's address.
+    fn print(&self, base: &str) -> Vec<u8> {
         let mut out = Vec::new();
         if let Some(src) = &self.src {
             let version = self.version.as_deref().unwrap_or(WP_VERSION.trim());
+            let absolute = ["http://", "https://", "//"]
+                .iter()
+                .any(|scheme| src.starts_with(scheme));
+            let base = if absolute { "" } else { base };
             let href = format!(
-                "{src}?ver={}",
+                "{base}{src}?ver={}",
                 String::from_utf8_lossy(&hyscribe_phpser::rawurlencode(version.as_bytes()))
             );
             out.extend(

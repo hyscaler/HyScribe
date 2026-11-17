@@ -123,6 +123,9 @@ pub struct Theme {
     /// The style handles each core block's `block.json` names, which
     /// rendering the block enqueues.
     pub(crate) style_handles: HashMap<String, Vec<String>>,
+    /// The `inline_style` of each block style the theme registers, by
+    /// block, which `enqueue_block_styles_assets()` adds to its stylesheet.
+    pub(crate) inline_block_styles: Vec<(String, String)>,
     /// `style.min.css`, which the theme enqueues.
     pub(crate) stylesheet: &'static str,
     /// The `Version` header of `style.css`.
@@ -143,8 +146,17 @@ pub(crate) fn twentytwentyfive_with(user: &[u8], styles: &[(String, String)]) ->
 
 fn with_user_styles(user: Option<&[u8]>, styles: &[(String, String)]) -> Theme {
     let blocks = registered_blocks(REGISTERED_BLOCKS);
-    let mut block_styles = block_styles(REGISTERED);
+    let registered = block_styles(REGISTERED);
+    let mut block_styles: Vec<(String, String)> = registered
+        .iter()
+        .map(|(block, name, _)| (block.clone(), name.clone()))
+        .collect();
     block_styles.extend_from_slice(styles);
+    let inline_block_styles = registered
+        .into_iter()
+        .filter(|(_, _, css)| !css.is_empty())
+        .map(|(block, _, css)| (block, css))
+        .collect();
     Theme {
         slug: "twentytwentyfive",
         templates: TEMPLATES.into_iter().collect(),
@@ -168,6 +180,7 @@ fn with_user_styles(user: Option<&[u8]>, styles: &[(String, String)]) -> Theme {
                 )
             })
             .collect(),
+        inline_block_styles,
         stylesheet: STYLE_MIN_CSS,
         version: header(STYLE_CSS, "Version"),
     }
@@ -294,8 +307,8 @@ fn registered_blocks(json: &[u8]) -> Vec<Metadata> {
 }
 
 /// `registered.json`'s `block_styles`: the block styles registered with
-/// the theme, by block and style name.
-fn block_styles(json: &[u8]) -> Vec<(String, String)> {
+/// the theme, by block and style name, with their `inline_style`.
+fn block_styles(json: &[u8]) -> Vec<(String, String, String)> {
     let root = json_decode(json).unwrap_or_default();
     let text = |value: Option<&Value>| {
         let bytes = value.and_then(Value::as_bytes)?;
@@ -307,10 +320,9 @@ fn block_styles(json: &[u8]) -> Vec<(String, String)> {
         .iter()
         .filter_map(|(_, entry)| {
             let block = text(entry.get(&Key::Int(0)))?;
-            let style = entry
-                .get(&Key::Int(1))
-                .and_then(|style| text(style.get_str("name")))?;
-            Some((block, style))
+            let style = entry.get(&Key::Int(1))?;
+            let css = text(style.get_str("inline_style")).unwrap_or_default();
+            Some((block, text(style.get_str("name"))?, css))
         })
         .collect()
 }

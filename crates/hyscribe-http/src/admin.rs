@@ -1323,9 +1323,9 @@ fn screen(
             }
             Answer::from_page(info(admin, &request))
         }
-        // Its page preloads REST responses not served yet, and its first view
-        // writes the theme's `wp_global_styles` post.
         "/hs-admin/site-editor" if !admin.can("edit_theme_options") => Answer::from_page(None),
+        // Its redirects and refusals; the editor's page is not ported.
+        "/hs-admin/site-editor" => hyscribe_admin::site_editor::site_editor(query, request_uri)?,
         // HTTPS offers application passwords, whose list is not ported.
         "/hs-admin/profile" => {
             let args = edit_args(query).filter(|_| !origin.starts_with("https://"))?;

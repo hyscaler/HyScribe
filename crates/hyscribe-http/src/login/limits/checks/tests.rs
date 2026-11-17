@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::thread;
 
 use super::*;
@@ -12,19 +12,43 @@ fn epoch() -> Instant {
     *EPOCH.get_or_init(Instant::now)
 }
 
-/// A clock that only moves when the test moves it.
+/// Clocks that only move when their test moves them, by milliseconds.
 static MOVED: AtomicU64 = AtomicU64::new(0);
+static LATE: AtomicU64 = AtomicU64::new(0);
 
 fn moved() -> Instant {
     epoch() + Duration::from_millis(MOVED.load(Ordering::SeqCst))
 }
 
-/// A clock that runs back an hour each time it is read, so that a check
-/// waits until another ends.
-fn receding() -> Instant {
-    static READS: AtomicU64 = AtomicU64::new(0);
-    let hours = 1_000_000 - READS.fetch_add(1, Ordering::SeqCst);
-    epoch() + Duration::from_secs(3600 * hours)
+fn late() -> Instant {
+    epoch() + Duration::from_millis(LATE.load(Ordering::SeqCst))
+}
+
+/// Sets its flag when dropped, also by a failing test.
+struct Done<'a>(&'a AtomicBool);
+
+impl Drop for Done<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Once `patience` is over, and after the test until no check waits (ten
+/// seconds at most), moves `clock` past every wait: a broken line fails.
+fn watchdog(checks: &Checks, clock: &AtomicU64, done: &AtomicBool, patience: Duration) {
+    let start = Instant::now();
+    let mut ended = None;
+    while ended.is_none_or(|end: Instant| checks.line().waiting > 0 && end.elapsed().as_secs() < 10)
+    {
+        if done.load(Ordering::SeqCst) {
+            ended = ended.or(Some(Instant::now()));
+        }
+        if ended.is_some() || start.elapsed() > patience {
+            clock.fetch_add(3_600_000, Ordering::SeqCst);
+            checks.freed.notify_all();
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
 }
 
 /// Until `ready` holds of the line, for at most a minute.
@@ -41,9 +65,12 @@ fn until(checks: &Checks, ready: impl Fn(&Line) -> bool) {
 #[test]
 fn many_logins_at_once_wait_their_turn_then_give_up() {
     let checks = Checks::new(2, moved);
-    let held = [checks.start(), checks.start()];
-    assert!(held.iter().all(Option::is_some));
-    let started = thread::scope(|scope| {
+    let done = AtomicBool::new(false);
+    thread::scope(|scope| {
+        scope.spawn(|| watchdog(&checks, &MOVED, &done, Duration::from_secs(60)));
+        let _done = Done(&done);
+        let held = [checks.start(), checks.start()];
+        assert!(held.iter().all(Option::is_some));
         let logins: Vec<_> = (0..40)
             .map(|_| scope.spawn(|| checks.start().is_some()))
             .collect();
@@ -57,22 +84,25 @@ fn many_logins_at_once_wait_their_turn_then_give_up() {
         assert!(checks.start().is_none());
         MOVED.fetch_add(WAIT.as_millis() as u64, Ordering::SeqCst);
         checks.freed.notify_all();
-        let joined = logins.into_iter().map(|login| login.join().unwrap());
-        joined.filter(|started| *started).count()
+        assert!(logins.into_iter().all(|login| !login.join().unwrap()));
+        assert_eq!(checks.line().waiting, 0);
+        drop(held);
+        assert_eq!(checks.line().running, 0);
     });
-    assert_eq!(started, 0);
-    assert_eq!(checks.line().waiting, 0);
-    drop(held);
-    assert_eq!(checks.line().running, 0);
 }
 
-/// Waiting logins run as checks end, never more than the cap at once.
+/// Waiting logins run as checks end, at once, never more than the cap.
 #[test]
 fn waiting_logins_run_as_checks_end() {
-    let checks = Checks::new(3, receding);
-    let held: Vec<_> = (0..3).map(|_| checks.start()).collect();
+    let checks = Checks::new(3, late);
     let (running, most) = (AtomicUsize::new(0), AtomicUsize::new(0));
+    let done = AtomicBool::new(false);
     thread::scope(|scope| {
+        // Woken as checks end, they are done long before; else they give up.
+        scope.spawn(|| watchdog(&checks, &LATE, &done, Duration::from_secs(5)));
+        let _done = Done(&done);
+        let held: Vec<_> = (0..3).map(|_| checks.start()).collect();
+        assert!(held.iter().all(Option::is_some));
         let logins: Vec<_> = (0..24)
             .map(|_| {
                 scope.spawn(|| {

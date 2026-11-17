@@ -804,6 +804,14 @@ async fn refused_writes_are_answered_as_php_answers_them() {
             "rest_user_invalid_slug",
         ),
         (
+            (
+                "DELETE",
+                "/?rest_route=/wp/v2/users/me&force=true&reassign=1&id=x",
+                "",
+            ),
+            "rest_user_invalid_reassign",
+        ),
+        (
             ("DELETE", "/?rest_route=/wp/v2/tags/2&force=maybe", ""),
             "rest_invalid_param",
         ),
@@ -849,6 +857,13 @@ async fn refused_writes_are_answered_as_php_answers_them() {
         let body = as_admin(&site, asked, (b"", None), served).await;
         assert!(body.contains(code), "{body}");
     }
+    // A slug no other user has is planned.
+    let slug = (
+        "PATCH",
+        "/?rest_route=/wp/v2/users/702",
+        r#"{"slug":"fresh-slug"}"#,
+    );
+    as_admin(&site, slug, (b"", None), plan_of).await;
     // One's own role may be a role that edits users.
     let roles = (
         "POST",

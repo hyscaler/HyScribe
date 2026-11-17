@@ -43,6 +43,8 @@ pub struct Oracle {
     pub register: bool,
     /// Admin's `user_activation_key`.
     pub activation_key: &'static [u8],
+    /// The users of `reference/lost-password/content.sql` are there too.
+    pub lost: bool,
     /// The ID of a `user_request` post.
     pub user_request: Option<u64>,
     /// The variant of the test site whose site icon the site has.
@@ -66,6 +68,19 @@ impl Urls for Oracle {
             .replace("%site_url%", SITE)
             .replace("%user_id%", "0")
     }
+}
+
+/// The users of `reference/lost-password/content.sql`: their IDs, logins
+/// and stored reset keys.
+pub fn lost_users() -> Vec<(u64, String, String)> {
+    let sql = include_str!("../../../reference/lost-password/content.sql");
+    let rows = sql.split("\n  (").skip(1);
+    rows.map(|row| {
+        let fields: Vec<&str> = row.split('\'').collect();
+        let id = fields[0].trim_end_matches(", ").parse().unwrap();
+        (id, fields[1].to_string(), fields[13].to_string())
+    })
+    .collect()
 }
 
 /// The fixture's administrator, `admin`, whose password is
@@ -104,7 +119,15 @@ impl Site for Oracle {
         format!("{SITE}/wp-login.php{query}")
     }
     fn user_by_login(&self, login: &[u8]) -> Option<User> {
-        login.eq_ignore_ascii_case(b"admin").then(|| admin(self))
+        let lost = lost_users().into_iter().filter(|_| self.lost);
+        let mut lost = lost.filter(|(_, name, _)| login.eq_ignore_ascii_case(name.as_bytes()));
+        let lost = lost.next().map(|(id, _, key)| User {
+            id,
+            pass: Vec::new(),
+            use_ssl: false,
+            activation_key: key.into_bytes(),
+        });
+        lost.or_else(|| login.eq_ignore_ascii_case(b"admin").then(|| admin(self)))
     }
     fn user_by_email(&self, email: &[u8]) -> Option<User> {
         email

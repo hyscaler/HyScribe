@@ -39,13 +39,19 @@ async fn login_site(dir: Option<&std::path::Path>) -> Arc<Site> {
     })
 }
 
-struct Reply {
-    status: StatusCode,
-    headers: HeaderMap,
-    body: String,
+pub(super) struct Reply {
+    pub(super) status: StatusCode,
+    pub(super) headers: HeaderMap,
+    pub(super) body: String,
 }
 
-async fn send(site: &Arc<Site>, method: &str, uri: &str, cookie: &str, form: &str) -> Reply {
+pub(super) async fn send(
+    site: &Arc<Site>,
+    method: &str,
+    uri: &str,
+    cookie: &str,
+    form: &str,
+) -> Reply {
     let mut request = axum::http::Request::builder().method(method).uri(uri);
     if !cookie.is_empty() {
         request = request.header(header::COOKIE, cookie);
@@ -89,7 +95,7 @@ async fn reply(site: &Arc<Site>, request: axum::http::Request<Body>) -> Reply {
     }
 }
 
-fn all(headers: &HeaderMap, name: header::HeaderName) -> Vec<String> {
+pub(super) fn all(headers: &HeaderMap, name: header::HeaderName) -> Vec<String> {
     headers
         .get_all(name)
         .iter()
@@ -106,15 +112,19 @@ fn golden_page(method: &str, body: &str, state: &str, nonce: &str) -> String {
         .find(|line| line.starts_with(&format!("{method}\t\t{body}\t{state}\t")))
         .unwrap();
     let page = String::from_utf8(unhex(line.rsplit('\t').next().unwrap())).unwrap();
+    hs_login(&page).replace("%nonce:reset-password-for-user%", nonce)
+}
+
+/// A PHP login page under HyScribe's URLs.
+pub(super) fn hs_login(page: &str) -> String {
     page.replace("/wp-login.php", "/hs-login")
         .replace("/wp-admin/load-styles.php", "/hs-admin/load-styles")
         .replace("/wp-admin/load-scripts.php", "/hs-admin/load-scripts")
         .replace("/wp-admin/admin-ajax.php", "/hs-admin/admin-ajax")
         .replace("/wp-admin/", "/hs-admin/")
-        .replace("%nonce:reset-password-for-user%", nonce)
 }
 
-fn nonce(page: &str) -> String {
+pub(super) fn nonce(page: &str) -> String {
     let at = page.find("\"nonce\":\"").unwrap() + 9;
     page.get(at..at + 10).unwrap().to_string()
 }
@@ -543,9 +553,9 @@ async fn other_actions_show_their_forms_and_links() {
         })
         .collect();
     assert!(cookies.iter().any(|c| dates.iter().any(|d| c.contains(d))));
-    // What the forms post, and the post password form, are not ported.
+    // The registration and post password forms are not ported.
     for (method, uri) in [
-        ("POST", "/hs-login?action=lostpassword"),
+        ("POST", "/hs-login?action=register"),
         ("GET", "/hs-login?action=postpass"),
     ] {
         let reply = send(&site, method, uri, "", "user_login=admin").await;

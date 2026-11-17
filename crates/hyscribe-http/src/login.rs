@@ -617,8 +617,15 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             return response(status, headers, body);
         }
         "login" | "entered_recovery_mode" => login::login(&reads, &request),
+        "lostpassword" | "retrievepassword" if asked.post => {
+            // The transport sends the mail once wired (ADR 0016).
+            let (answer, _mail) = reset::lost_password(&reads, &request, &action, &mut headers);
+            return finished(site, reads, Some(answer), headers);
+        }
         // What the other actions' forms post is not ported.
-        _ if asked.post => return response(StatusCode::NOT_IMPLEMENTED, headers, Vec::new()),
+        _ if asked.post && action != "resetpass" && action != "rp" => {
+            return response(StatusCode::NOT_IMPLEMENTED, headers, Vec::new());
+        }
         _ => {
             let answer = other_action(&reads, &names, &request, asked, &mut headers);
             return finished(site, reads, Some(answer), headers);
@@ -646,15 +653,23 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             if hyscribe_phpser::is_empty_string(location.as_bytes()) {
                 return (StatusCode::OK, Vec::new());
             }
-            headers.push((header::LOCATION, location));
-            headers.push((
-                header::HeaderName::from_static("x-redirect-by"),
-                "WordPress".into(),
-            ));
-            (StatusCode::FOUND, Vec::new())
+            redirected(&mut headers, location)
         }),
     };
     finished(site, reads, answer, headers)
+}
+
+/// `wp_redirect( $location )`'s 302.
+pub(crate) fn redirected(
+    headers: &mut Vec<(header::HeaderName, String)>,
+    location: String,
+) -> (StatusCode, Vec<u8>) {
+    headers.push((header::LOCATION, location));
+    headers.push((
+        header::HeaderName::from_static("x-redirect-by"),
+        "WordPress".into(),
+    ));
+    (StatusCode::FOUND, Vec::new())
 }
 
 /// The response once the reads are done: the database's error page if one
@@ -672,8 +687,9 @@ fn finished(
     }
 }
 
-/// A GET of an action other than logging in or out; the reset password
-/// cookie goes to the login screen's path only.
+/// A GET of an action other than logging in or out, or the reset password
+/// form posted; the reset password cookie goes to the login screen's path
+/// only.
 fn other_action(
     reads: &LoginReads,
     names: &Names,
@@ -687,7 +703,7 @@ fn other_action(
         .map_or(String::new(), |q| format!("?{q}"));
     let uri = addslashes(format!("{PATH}{query}").as_bytes());
     let secure = is_ssl(reads.site);
-    match actions::action(reads, request, &request.action(), &uri) {
+    match actions::action(reads, request, &request.action(), (&uri, reads.now)) {
         Action::Page(page) => (StatusCode::OK, page),
         Action::Died(page) => (StatusCode::INTERNAL_SERVER_ERROR, page),
         Action::Redirect(to, reset) => {
@@ -703,12 +719,13 @@ fn other_action(
             let host = hyscribe_kses::url_host(reads.site.home.as_bytes()).unwrap_or_default();
             let fallback = reads.admin_url("");
             let to = wp_validate_redirect(&wp_sanitize_redirect(&to), &host, fallback.as_bytes());
-            headers.push((header::LOCATION, String::from_utf8_lossy(&to).into_owned()));
-            headers.push((
-                header::HeaderName::from_static("x-redirect-by"),
-                "WordPress".into(),
-            ));
-            (StatusCode::FOUND, Vec::new())
+            redirected(headers, String::from_utf8_lossy(&to).into_owned())
+        }
+        Action::ResetPassword(id, password) => {
+            // The transport sends the notice once wired (ADR 0016).
+            let (answer, _notice) =
+                reset::reset(reads, request, &request.action(), (id, &password));
+            answer
         }
         Action::NotPorted => (StatusCode::NOT_IMPLEMENTED, Vec::new()),
     }
@@ -764,12 +781,7 @@ fn logout(
         }
     };
     let location = wp_safe_redirect(reads.site, &redirect_to, &reads.admin_url(""));
-    headers.push((header::LOCATION, location));
-    headers.push((
-        header::HeaderName::from_static("x-redirect-by"),
-        "WordPress".into(),
-    ));
-    (StatusCode::FOUND, Vec::new())
+    redirected(headers, location)
 }
 
 /// When a login's cookies and session expire: in two weeks when remembered,
@@ -945,6 +957,7 @@ fn location(
 }
 
 pub(crate) mod limits;
+mod reset;
 
 #[cfg(test)]
 mod tests;

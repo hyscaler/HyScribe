@@ -209,7 +209,12 @@ async fn writes_match_php(golden: &str, state: &str, unported: &[&str]) -> (usiz
 
 /// `target` asked of `site` by user 1 with the JSON `body`, past its
 /// checks: the write it plans.
-async fn planned(site: &Arc<Site>, method: &'static str, target: &str, body: &str) -> Pending {
+pub(super) async fn planned(
+    site: &Arc<Site>,
+    method: &'static str,
+    target: &str,
+    body: &str,
+) -> Pending {
     let (site, handle) = (Arc::clone(site), Handle::current());
     let (target, body) = (target.to_string(), body.to_string());
     tokio::task::spawn_blocking(move || {
@@ -577,16 +582,6 @@ async fn shadow_mode_refuses_writes() {
 /// past writes nothing: each leaves the database as it was.
 #[tokio::test(flavor = "multi_thread")]
 async fn writes_stop_short() {
-    // An upload's plan is written by `rest::uploads`, never by `act()`.
-    {
-        let dir = tempfile::tempdir().unwrap();
-        let site = saves_site(dir.path()).await;
-        let upload = planned(&site, "POST", "/?rest_route=/wp/v2/media", "{}").await;
-        let ctx = crate::rest::writes::context(&site, &upload.plan, now());
-        let writer = site.writer.as_ref().unwrap();
-        let outcome = crate::rest::writes::act(writer.begin().await, &upload.plan, &ctx).await;
-        assert!(matches!(outcome, Err(hyscribe_write::Error::Unported(_))));
-    }
     let _saves = crate::admin::tests::SAVES.lock().await;
     fresh().await;
     let dir = tempfile::tempdir().unwrap();

@@ -15,7 +15,7 @@ use hyscribe_render::date::{Zone, format_unix};
 use hyscribe_testkit::unhex;
 use sqlx::Connection as _;
 
-use super::writes::{fresh, now_masked, saves_site};
+use super::writes::{fresh, now_masked, planned, saves_site};
 use super::*;
 use crate::Uploads;
 
@@ -438,6 +438,18 @@ async fn upload_routes_match_php() {
         }
     }
     assert_eq!((matched, unported), (6 * 34 - 3 * 2, 3 * 2));
+}
+
+/// An upload's plan is written by `rest::uploads`, never by `act()`.
+#[tokio::test(flavor = "multi_thread")]
+async fn upload_plans_are_never_acted() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let upload = planned(&site, "POST", "/?rest_route=/wp/v2/media", "{}").await;
+    let ctx = crate::rest::writes::context(&site, &upload.plan, now());
+    let writer = site.writer.as_ref().unwrap();
+    let outcome = crate::rest::writes::act(writer.begin().await, &upload.plan, &ctx).await;
+    assert!(matches!(outcome, Err(hyscribe_write::Error::Unported(_))));
 }
 
 /// Hooks that lock `0`, the folder of the month, once an attachment is

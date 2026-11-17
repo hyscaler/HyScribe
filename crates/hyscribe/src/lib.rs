@@ -301,7 +301,9 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                     .with_writer(writer);
             let fetch = config.http_outbound.then(outbound);
             let fetching = outbound_line(fetch.as_ref());
-            let site = site.with_fetch(fetch);
+            let site = site
+                .with_fetch(fetch)
+                .with_feed_hosts(&config.rss_allowed_hosts);
             // Logging in needs primary mode.
             let site = match config.mode {
                 Mode::Primary => site.with_sessions(Sessions::new(sessions_dir)),

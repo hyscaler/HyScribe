@@ -49,6 +49,7 @@ mod feed;
 mod files;
 mod loaders;
 mod login;
+mod outbound;
 pub mod query;
 mod reads;
 mod redirect;
@@ -115,6 +116,8 @@ pub struct Site {
     install: Arc<Install>,
     /// The outbound client, when `HTTP_OUTBOUND` is on (ADR 0019).
     fetch: Option<Arc<hyscribe_fetch::Client>>,
+    /// The hosts the RSS block may fetch from (`RSS_ALLOWED_HOSTS`).
+    feed_hosts: Arc<Vec<Vec<u8>>>,
 }
 
 /// The address a connection comes from.
@@ -158,6 +161,7 @@ impl Site {
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
             install: unconfigured(),
             fetch: None,
+            feed_hosts: Arc::default(),
         };
         for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
             if let Some(url) = url {
@@ -200,6 +204,7 @@ impl Site {
             limiter: Arc::clone(&self.limiter),
             install: Arc::clone(&self.install),
             fetch: self.fetch.clone(),
+            feed_hosts: Arc::clone(&self.feed_hosts),
         };
         site.build_rewriter();
         Ok(site)
@@ -259,6 +264,15 @@ impl Site {
     pub fn with_fetch(self, fetch: Option<hyscribe_fetch::Client>) -> Site {
         let fetch = fetch.map(Arc::new);
         Site { fetch, ..self }
+    }
+
+    /// The site with the hosts the RSS block may fetch from.
+    pub fn with_feed_hosts(self, hosts: &[String]) -> Site {
+        let hosts = hosts.iter().map(|host| host.as_bytes().to_vec()).collect();
+        Site {
+            feed_hosts: Arc::new(hosts),
+            ..self
+        }
     }
 
     /// The site with the writer `Writer::open` gave (none in shadow mode),

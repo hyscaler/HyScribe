@@ -250,3 +250,90 @@ async fn previews_are_not_ported_while_fetches_are_off() {
     let response = send(&site, request, "").await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
 }
+
+/// What rendering fetches and caches goes through the site's client and,
+/// in primary mode only, its writer: an embed's meta and a feed's
+/// transients, as `Reads` hands them to `hyscribe-write`.
+#[tokio::test(flavor = "multi_thread")]
+async fn rendering_fetches_and_caches_through_the_site() {
+    use hyscribe_render::outbound::Get;
+    use hyscribe_render::site::Site as _;
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh().await;
+    let dir = tempfile::tempdir().unwrap();
+    for writes in [true, false] {
+        let site = previews(dir.path(), Arc::new(Pages::default()), writes).await;
+        let site = Arc::new(
+            Arc::into_inner(site)
+                .unwrap()
+                .with_feed_hosts(&["pages.test".to_string()]),
+        );
+        let handle = tokio::runtime::Handle::current();
+        let checked = Arc::clone(&site);
+        tokio::task::spawn_blocking(move || {
+            let reads = crate::reads::Reads::new(&checked, handle);
+            assert_eq!(reads.feed_hosts(), [b"pages.test".to_vec()]);
+            let get = Get::new(&reads);
+            let page = reads.remote_get(b"http://pages.test:8080/page.html", &get);
+            let page = page.unwrap().unwrap();
+            assert_eq!(page.status, 200);
+            assert!(page.headers.iter().any(|(name, _)| name == "content-type"));
+            let refused = reads.remote_get(b"http://nowhere.test/", &get).unwrap();
+            assert_eq!(refused.unwrap_err(), b"A valid URL was not provided.");
+            reads.update_post_meta(1, "_oembed_x", b"<b>embed</b>");
+            assert_eq!(reads.post_meta(1, "_oembed_x").is_some(), writes);
+            reads.set_site_transient("feed_x", b"a:1:{i:0;s:1:\"a\";}", 60);
+            let stored = reads.option("_site_transient_feed_x");
+            assert_eq!(stored.is_some(), writes);
+            reads.delete_site_transient("feed_x");
+            assert_eq!(reads.option("_site_transient_feed_x"), None);
+            reads.finish().unwrap();
+        })
+        .await
+        .unwrap();
+        run("DELETE FROM wp_postmeta WHERE meta_key = '_oembed_x'").await;
+    }
+    let off = Site::load(
+        crate::Db::connect(&saves()).await.unwrap(),
+        Some("http://127.0.0.1:8081".into()),
+        None,
+    )
+    .await
+    .unwrap();
+    let handle = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let reads = crate::reads::Reads::new(&off, handle);
+        assert!(
+            reads
+                .remote_get(b"http://pages.test:8080/", &Get::new(&reads))
+                .is_none()
+        );
+    })
+    .await
+    .unwrap();
+}
+
+#[test]
+fn failures_read_as_wordpress_words_them() {
+    use hyscribe_fetch::Kind;
+    let messages: Vec<&[u8]> = [
+        Kind::Invalid,
+        Kind::Refused,
+        Kind::Resolve,
+        Kind::Connect,
+        Kind::Tls,
+        Kind::Timeout,
+        Kind::Redirects,
+        Kind::Protocol,
+    ]
+    .into_iter()
+    .map(crate::outbound::message)
+    .collect();
+    assert_eq!(messages[..3], [&b"A valid URL was not provided."[..]; 3]);
+    assert_eq!(messages[6], b"Too many redirects.");
+    assert!(
+        messages[3..]
+            .iter()
+            .all(|m| m.starts_with(b"cURL error") || m.starts_with(b"Too"))
+    );
+}

@@ -83,6 +83,8 @@ impl Renderer<'_> {
     /// The `the_content` filters on `content`, `]]>` escaped first.
     fn content_filtered(&mut self, content: &[u8]) -> Vec<u8> {
         let content = replace(content, b"]]>", b"]]&gt;");
+        // `WP_Embed::autoembed()` runs before `do_blocks()`.
+        let content = self.autoembed(&content);
         let outer = self.context.loading.in_the_content;
         self.context.loading.in_the_content = true;
         let rendered = self.render_top_level(&content);

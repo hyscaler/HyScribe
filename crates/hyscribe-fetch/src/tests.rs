@@ -104,6 +104,13 @@ async fn fetches_pages_and_follows_redirects() {
     let page = get(&client, "http://pages.test/agent").await.unwrap();
     assert_eq!(page.status, 200);
     assert_eq!(
+        page.headers.first(),
+        Some(&(
+            "content-type".to_string(),
+            b"text/html;charset=UTF-8".to_vec()
+        ))
+    );
+    assert_eq!(
         page.body,
         b"<html><head><title>Tester</title></head></html>\n"
     );
@@ -316,6 +323,7 @@ impl Filters for Hooks {
         (url == b"http://answered.test/").then(|| {
             Ok(Fetched {
                 status: 204,
+                headers: Vec::new(),
                 body: Vec::new(),
             })
         })

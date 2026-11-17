@@ -323,3 +323,10 @@ path = "fuzz_targets/upload_name.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "xml_reader"
+path = "fuzz_targets/xml_reader.rs"
+test = false
+doc = false
+bench = false

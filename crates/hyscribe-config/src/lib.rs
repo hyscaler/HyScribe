@@ -220,6 +220,10 @@ pub struct Config {
     /// `HTTP_OUTBOUND`: `on` lets the server fetch from other sites through
     /// the outbound client (ADR 0019); `off` (default) fetches nothing.
     pub http_outbound: bool,
+    /// `RSS_ALLOWED_HOSTS`: the hosts the RSS block may fetch feeds from,
+    /// comma separated, lower case; none by default (the decision
+    /// of 2026-11-10).
+    pub rss_allowed_hosts: Vec<String>,
     /// The capability constants.
     pub constants: Constants,
     /// The login rate limits.
@@ -350,6 +354,23 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         Some(_) => return Err(invalid("HTTP_OUTBOUND", "must be on or off")),
     };
 
+    let mut rss_allowed_hosts = Vec::new();
+    for host in get("RSS_ALLOWED_HOSTS").unwrap_or_default().split(',') {
+        let host = host.trim().to_ascii_lowercase();
+        let plain = host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_'));
+        if !plain {
+            return Err(invalid(
+                "RSS_ALLOWED_HOSTS",
+                "must be host names separated by commas, without schemes, ports or paths",
+            ));
+        }
+        if !host.is_empty() && !rss_allowed_hosts.contains(&host) {
+            rss_allowed_hosts.push(host);
+        }
+    }
+
     if constant(get("MULTISITE"), "MULTISITE", false)? {
         return Err(invalid("MULTISITE", "multisite networks are not supported"));
     }
@@ -406,6 +427,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         salts,
         rest_public_users,
         http_outbound,
+        rss_allowed_hosts,
         constants,
         login_limits,
         upload_max_size,

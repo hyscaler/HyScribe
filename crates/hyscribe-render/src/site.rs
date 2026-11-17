@@ -7,6 +7,8 @@ use hyscribe_model::{
 };
 use hyscribe_phpser::Value;
 
+pub use crate::outbound::{Get, Hooks, Response};
+
 /// The site's data, as blocks read it while rendering.
 pub trait Site {
     /// `get_option( $name )` as stored, `None` when the option is missing.
@@ -129,6 +131,36 @@ pub trait Site {
         _terms: Option<(&str, &[u64])>,
     ) -> Option<Post> {
         None
+    }
+
+    /// `wp_safe_remote_get( $url, $args )` through the outbound client
+    /// (ADR 0019): the response, or `WP_Error`'s message. `None` while
+    /// `HTTP_OUTBOUND` is off, as sites without a client fetch nothing.
+    fn remote_get(&self, _url: &[u8], _args: &Get) -> Option<Result<Response, Vec<u8>>> {
+        None
+    }
+
+    /// The hosts the RSS block may fetch from (`RSS_ALLOWED_HOSTS`), lower
+    /// case; none by default.
+    fn feed_hosts(&self) -> Vec<Vec<u8>> {
+        Vec::new()
+    }
+
+    /// `update_post_meta( $post_id, $key, $value )`, which a page view
+    /// writes in primary mode only: shadow mode and tests write nothing.
+    fn update_post_meta(&self, _post_id: u64, _key: &str, _value: &[u8]) {}
+
+    /// `set_site_transient( $name, $value, $expiration )`, the value
+    /// serialized; written in primary mode only.
+    fn set_site_transient(&self, _name: &str, _value: &[u8], _expiration: i64) {}
+
+    /// `delete_site_transient( $name )`; written in primary mode only.
+    fn delete_site_transient(&self, _name: &str) {}
+
+    /// The filters the embeds and the RSS block run, under WordPress's
+    /// names; none attached by default.
+    fn hooks(&self) -> &dyn Hooks {
+        &()
     }
 }
 

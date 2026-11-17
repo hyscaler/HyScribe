@@ -170,7 +170,7 @@ pub(super) async fn transition(
         for taxonomy in kind.taxonomies() {
             let terms = write.object_terms(id, taxonomy).await?;
             let tt_ids: Vec<u64> = terms.into_iter().map(|(_, tt_id)| tt_id).collect();
-            crate::terms::update_term_count(write, &tt_ids).await?;
+            crate::terms::update_term_count(write, &tt_ids, taxonomy).await?;
         }
     }
     // _wp_auto_add_pages_to_menu().

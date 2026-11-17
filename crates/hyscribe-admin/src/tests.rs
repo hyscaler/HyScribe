@@ -872,7 +872,11 @@ impl PageSite for Role {
                 b"a:2:{s:4:\"side\";s:19:\"authordiv,submitdiv\";s:6:\"normal\";s:7:\"slugdiv\";}"
             }
             ("a8locknorich", "rich_editing") => b"false",
-            (variant, "rich_editing") if variant.starts_with("a8") || self.j9_media() => b"true",
+            (variant, "rich_editing")
+                if variant.starts_with("a8") || variant == "e5" || self.j9_media() =>
+            {
+                b"true"
+            }
             _ => b"",
         };
         if !edit.is_empty() {

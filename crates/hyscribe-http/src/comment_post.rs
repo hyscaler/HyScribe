@@ -304,21 +304,46 @@ fn remote_addr(site: &Site, asked: &Asked) -> Vec<u8> {
     client_addr(site, &asked.headers, asked.peer)
 }
 
-/// [`remote_addr`] of a request's `headers` and connection `peer`.
+/// [`remote_addr`] of a request's `headers` and connection `peer`: none
+/// where the proxy's entry names no address.
 pub(crate) fn client_addr(site: &Site, headers: &HeaderMap, peer: Option<IpAddr>) -> Vec<u8> {
-    client_ip(site, headers, peer).map_or_else(Vec::new, |ip| ip.to_string().into_bytes())
+    let ip = client_ip(site, headers, peer).ok().flatten();
+    ip.map_or_else(Vec::new, |ip| ip.to_string().into_bytes())
 }
 
-/// The client's address as [`client_addr`] finds it.
-pub(crate) fn client_ip(site: &Site, headers: &HeaderMap, peer: Option<IpAddr>) -> Option<IpAddr> {
-    let forwarded = site
-        .behind_proxy
-        .then(|| headers.get("x-forwarded-for"))
-        .flatten()
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.rsplit(',').next())
-        .and_then(|last| last.trim().parse::<IpAddr>().ok());
-    forwarded.or(peer)
+/// Behind a proxy, the last `X-Forwarded-For` entry where it names no
+/// address, as sent.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Unnamed(pub(crate) String);
+
+/// The client's address as [`client_addr`] finds it. Behind a proxy, the
+/// `X-Forwarded-For` lines are one list in order, whose last entry is the
+/// one the proxy appended; never the proxy's own address, which every
+/// client would share.
+pub(crate) fn client_ip(
+    site: &Site,
+    headers: &HeaderMap,
+    peer: Option<IpAddr>,
+) -> Result<Option<IpAddr>, Unnamed> {
+    let mut lines = headers.get_all("x-forwarded-for").iter();
+    let Some(last) = lines.next_back().filter(|_| site.behind_proxy) else {
+        return Ok(peer);
+    };
+    let entry = String::from_utf8_lossy(last.as_bytes());
+    let entry = entry.rsplit(',').next().unwrap_or_default().trim();
+    address(entry)
+        .map(Some)
+        .ok_or_else(|| Unnamed(entry.into()))
+}
+
+/// The address of an `X-Forwarded-For` entry: `ip`, `ip:port`, `[ipv6]` or
+/// `[ipv6]:port`.
+fn address(entry: &str) -> Option<IpAddr> {
+    let bare = entry
+        .strip_prefix('[')
+        .and_then(|entry| entry.strip_suffix(']'));
+    let with_port = || entry.parse::<std::net::SocketAddr>().ok().map(|at| at.ip());
+    bare.unwrap_or(entry).parse().ok().or_else(with_port)
 }
 
 /// The redirect after a saved comment, with the commenter cookies of a

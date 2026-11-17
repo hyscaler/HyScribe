@@ -172,8 +172,9 @@ pub(crate) struct LoginReads<'a> {
     /// A post as a writer action reads it, which capability checks see in
     /// place of the site's.
     pub(crate) action_post: Option<CapPost>,
-    /// The client's address, which the login limits count.
-    client: Option<IpAddr>,
+    /// The client's address, which the login limits count; behind a proxy
+    /// whose entry names none, no password is checked.
+    client: Result<Option<IpAddr>, crate::comment_post::Unnamed>,
     /// The accounts whose password was checked, and whether it matched.
     checked: RefCell<Vec<(u64, bool)>>,
     /// The request guesses a password: a non-blank one.
@@ -185,6 +186,12 @@ pub(crate) struct LoginReads<'a> {
 }
 
 impl<'a> LoginReads<'a> {
+    /// The address the login limits count, which a proxy entry that names
+    /// none never reaches: such a guess takes no turn.
+    fn address(&self) -> Option<IpAddr> {
+        self.client.as_ref().ok().copied().flatten()
+    }
+
     pub(crate) fn new(site: &'a Site, handle: Handle, now: i64) -> LoginReads<'a> {
         LoginReads {
             reads: Reads::new(site, handle),
@@ -194,7 +201,7 @@ impl<'a> LoginReads<'a> {
             current: (0, Vec::new()),
             profile_user: 0,
             action_post: None,
-            client: None,
+            client: Ok(None),
             checked: RefCell::default(),
             guess: Cell::default(),
             turn: RefCell::default(),
@@ -400,7 +407,7 @@ impl LoginSite for LoginReads<'_> {
     /// account or with no free check in time, a wrong password, unhashed.
     fn check_password(&self, user: &User, password: &[u8]) -> bool {
         let limiter = &self.site.limiter;
-        if self.turn.borrow().is_none() || !limiter.allows(self.client, user.id, self.now) {
+        if self.turn.borrow().is_none() || !limiter.allows(self.address(), user.id, self.now) {
             return false;
         }
         let Some(_check) = limiter.checks.start() else {
@@ -432,7 +439,14 @@ impl LoginSite for LoginReads<'_> {
         let limits = move |user, _: &[u8], password: &[u8]| {
             if !hyscribe_phpser::is_empty_string(password) {
                 self.guess.set(true);
-                *self.turn.borrow_mut() = self.site.limiter.turn(self.client);
+                match &self.client {
+                    Ok(client) => *self.turn.borrow_mut() = self.site.limiter.turn(*client),
+                    // No turn: refused for this request alone, never as the proxy.
+                    Err(unnamed) => eprintln!(
+                        "login refused: the proxy's last X-Forwarded-For entry {:?} names no address",
+                        unnamed.0
+                    ),
+                }
             }
             user
         };
@@ -441,16 +455,16 @@ impl LoginSite for LoginReads<'_> {
 
     /// A failed guess counts for its address and the accounts checked.
     fn wp_login_failed(&self, _: &[u8], _: &[Notice]) {
-        if self.guess.get() && !self.capped.get() {
+        if self.guess.get() && !self.capped.get() && self.client.is_ok() {
             let checked = self.checked.borrow();
-            self.site.limiter.record(self.client, &checked, self.now);
+            self.site.limiter.record(self.address(), &checked, self.now);
         }
     }
 
     /// A login trusts its address for its account.
     fn wp_login(&self, _: &[u8], user: &Account) {
         let login = [(user.id, true)];
-        self.site.limiter.record(self.client, &login, self.now);
+        self.site.limiter.record(self.address(), &login, self.now);
     }
 }
 

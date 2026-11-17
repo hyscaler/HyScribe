@@ -190,7 +190,7 @@ async fn the_mails_carry_the_key_and_a_reset_ends_the_sessions() {
     let (handle, shared) = (Handle::current(), Arc::clone(&site));
     let (fatal, mails) = tokio::task::spawn_blocking(move || {
         let mut reads = LoginReads::new(&shared, handle, crate::now());
-        reads.client = Some("192.0.2.1".parse().unwrap());
+        reads.client = Ok(Some("192.0.2.1".parse().unwrap()));
         let lost = |reads: &LoginReads, form| {
             lost_password(
                 reads,

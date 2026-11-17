@@ -98,6 +98,15 @@ async fn post_writes_match_php() {
     assert_eq!(writes_match_php(golden, "", &[meta]).await, (6 * 31, 6));
 }
 
+/// Form posts whose text is not valid UTF-8 are refused as PHP's `wpdb`
+/// refuses them, and an `id` below 1 is not found
+/// (`reference/rest/invalid-input.list`).
+#[tokio::test(flavor = "multi_thread")]
+async fn invalid_input_is_refused_as_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/invalid-input.tsv");
+    assert_eq!(writes_match_php(golden, "", &[]).await, (6 * 10, 0));
+}
+
 /// PHP's answers to the navigation menus' and synced patterns' writes, over
 /// `reference/rest/site-writes.sql`, those flagged `refused` answered 501.
 #[tokio::test(flavor = "multi_thread")]
@@ -337,9 +346,10 @@ async fn post_writes_are_php_s() {
     ];
     for (golden, method, target, body) in writes {
         let pending = planned(&site, method, target, body).await;
-        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
         let nothing = async |_: &mut hyscribe_db::Connection| Ok::<_, String>(());
         let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            // The clock is read once the oracle's has started, as `%now%` counts from it.
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
             let outcome = acted(conn, &pending.plan, &ctx).await;
             assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
             Ok(())

@@ -64,7 +64,7 @@ fn reset_mail(reads: &LoginReads, key: &ResetKey) -> Mail {
         email: &key.email,
     };
     let visitor = reads.current.0 == 0;
-    let requester = reads.client.filter(|_| visitor).map(|ip| ip.to_string());
+    let requester = reads.address().filter(|_| visitor).map(|ip| ip.to_string());
     hyscribe_mail::retrieve_password(
         &mail_site(&texts),
         &user,

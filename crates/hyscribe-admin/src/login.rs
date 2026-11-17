@@ -155,7 +155,8 @@ impl Request<'_> {
             .or_else(|| self.query.get_str(key))
     }
 
-    fn posted(&self, key: &str) -> Option<&Value> {
+    /// `$_POST[ $key ]`, none for a GET.
+    pub fn posted(&self, key: &str) -> Option<&Value> {
         self.form.and_then(|form| form.get_str(key))
     }
 

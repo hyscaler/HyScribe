@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! WordPress's hooks at their points, under their names and with their
-//! arguments in WordPress's order (docs/EXTENSIONS.md): plain calls until
-//! the extension runtime (M6), so nothing attaches yet and a filter gives
-//! its value back, which the checks still take.
+//! WordPress's hooks under their names and argument order (docs/EXTENSIONS.md):
+//! plain calls until the extension runtime, so a filter gives its value back.
 
 use std::any::Any;
 

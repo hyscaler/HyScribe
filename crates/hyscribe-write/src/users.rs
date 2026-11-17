@@ -436,7 +436,7 @@ pub struct ResetKey {
 }
 
 /// A `WP_Error` of `retrieve_password()`: its code and message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Refusal {
     /// The error code.
     pub code: &'static str,
@@ -522,10 +522,8 @@ pub async fn retrieve_password(
     }
 }
 
-/// `reset_password( $user, $new_pass )` of the user `id`, the password
-/// slashed as `$_POST` holds it: `wp_set_password()`'s hash with the reset
-/// key cleared, and `default_password_nag` emptied. The user's login and
-/// email, for `after_password_reset`'s notice.
+/// `reset_password()` of the user `id` with a slashed password: the hash set,
+/// the key cleared and the nag emptied; the login and email, for the notice.
 pub async fn reset_password(
     write: &mut Write<'_>,
     id: u64,

@@ -24,9 +24,8 @@ pub fn wp_fast_hash(message: &[u8]) -> String {
         .unwrap_or_default()
 }
 
-/// `wp_verify_fast_hash( $message, $hash )`: a `$generic$` hash compared
-/// with the message's, else phpass's portable check, as reset keys were
-/// stored before WordPress 6.8, with `crypt()`'s bcrypt after it.
+/// `wp_verify_fast_hash( $message, $hash )`: `$generic$` hashes compared, else
+/// phpass as reset keys were stored before 6.8, then `crypt()`'s bcrypt.
 pub fn wp_verify_fast_hash(message: &[u8], hash: &[u8]) -> bool {
     if hash.starts_with(b"$generic$") {
         return hash_equals(hash, wp_fast_hash(message).as_bytes());

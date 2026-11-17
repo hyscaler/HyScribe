@@ -182,7 +182,7 @@ fn register(site: &dyn Site, request: &Request) -> Action {
 fn split(text: &[u8]) -> Option<(&[u8], &[u8])> {
     let at = text.iter().position(|&b| b == b':')?;
     let (first, rest) = text.split_at(at);
-    Some((first, rest.get(1..).unwrap_or_default()))
+    rest.split_first().map(|(_, rest)| (first, rest))
 }
 
 /// What `check_password_reset_key()` finds.
@@ -252,9 +252,8 @@ fn trimmed(request: &Request, key: &str) -> Option<Vec<u8>> {
     }
 }
 
-/// The reset password link and form: the link's key and login go to the
-/// cookie, a cookie without a good key back to the lost password form, and
-/// a new password that passes PHP's checks to `reset_password()`.
+/// The reset password link, to the cookie, and form: a bad or expired key
+/// goes back to the lost password form, a good form to `reset_password()`.
 fn reset_password(
     site: &dyn Site,
     request: &Request,

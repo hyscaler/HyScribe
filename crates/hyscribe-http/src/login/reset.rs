@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The lost password and reset password forms' writes (MVP 8.3):
-//! `retrieve_password()` and `reset_password()`, each in one writer action,
-//! with the mails they hand `wp_mail()`, which the transport sends once it
-//! is wired (ADR 0016); until then they are taken as sent, as hs-admin's
-//! password reset links are.
+//! The lost and reset password forms' writes (MVP 8.3), each one writer
+//! action, with their mails taken as sent until the transport (ADR 0016).
 
 use axum::http::{StatusCode, header};
 use hyscribe_admin::assets::Urls;
@@ -14,7 +11,7 @@ use hyscribe_mail::{Mail, User};
 use hyscribe_phpser::{Value, addslashes, is_empty_string};
 use hyscribe_write::users::{ResetKey, reset_password, retrieve_password};
 
-use super::{LoginReads, PATH};
+use super::{LoginReads, PATH, redirected};
 use crate::redirect::wp_safe_redirect;
 
 /// A form's status and page, and the mails it hands `wp_mail()`.
@@ -89,7 +86,7 @@ pub(super) fn lost_password(
         return read_only(reads);
     };
     // `$_POST['user_login']` when a string, slashed.
-    let login = match request.form.and_then(|form| form.get_str("user_login")) {
+    let login = match request.posted("user_login") {
         Some(Value::String(login)) => addslashes(login),
         _ => Vec::new(),
     };
@@ -121,24 +118,12 @@ pub(super) fn lost_password(
         // Relative, as PHP's `wp-login.php?checkemail=confirm`.
         _ => format!("{}?checkemail=confirm", PATH.trim_start_matches('/')).into_bytes(),
     };
-    let fallback = reads.admin_url("");
-    headers.push((
-        header::LOCATION,
-        wp_safe_redirect(reads.site, &to, &fallback),
-    ));
-    headers.push((
-        header::HeaderName::from_static("x-redirect-by"),
-        "WordPress".into(),
-    ));
-    (
-        (StatusCode::FOUND, Vec::new()),
-        vec![reset_mail(reads, &key)],
-    )
+    let location = wp_safe_redirect(reads.site, &to, &reads.admin_url(""));
+    (redirected(headers, location), vec![reset_mail(reads, &key)])
 }
 
-/// A reset password form whose key and passwords passed: `reset_password()`
-/// of the user `id` with `password`, slashed, their sessions ended, then
-/// PHP's page; `after_password_reset`'s notice goes to the site's admin.
+/// A reset password form that passed: `reset_password()`, the user's
+/// sessions ended, PHP's page, and the notice to the site's admin.
 pub(super) fn reset(
     reads: &LoginReads,
     request: &Request,

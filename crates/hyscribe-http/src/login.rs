@@ -607,15 +607,23 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             if hyscribe_phpser::is_empty_string(location.as_bytes()) {
                 return (StatusCode::OK, Vec::new());
             }
-            headers.push((header::LOCATION, location));
-            headers.push((
-                header::HeaderName::from_static("x-redirect-by"),
-                "WordPress".into(),
-            ));
-            (StatusCode::FOUND, Vec::new())
+            redirected(&mut headers, location)
         }),
     };
     finished(site, reads, answer, headers)
+}
+
+/// `wp_redirect( $location )`'s 302.
+pub(crate) fn redirected(
+    headers: &mut Vec<(header::HeaderName, String)>,
+    location: String,
+) -> (StatusCode, Vec<u8>) {
+    headers.push((header::LOCATION, location));
+    headers.push((
+        header::HeaderName::from_static("x-redirect-by"),
+        "WordPress".into(),
+    ));
+    (StatusCode::FOUND, Vec::new())
 }
 
 /// The response once the reads are done: the database's error page if one
@@ -665,12 +673,7 @@ fn other_action(
             let host = hyscribe_kses::url_host(reads.site.home.as_bytes()).unwrap_or_default();
             let fallback = reads.admin_url("");
             let to = wp_validate_redirect(&wp_sanitize_redirect(&to), &host, fallback.as_bytes());
-            headers.push((header::LOCATION, String::from_utf8_lossy(&to).into_owned()));
-            headers.push((
-                header::HeaderName::from_static("x-redirect-by"),
-                "WordPress".into(),
-            ));
-            (StatusCode::FOUND, Vec::new())
+            redirected(headers, String::from_utf8_lossy(&to).into_owned())
         }
         Action::ResetPassword(id, password) => {
             // The transport sends the notice once wired (ADR 0016).
@@ -732,12 +735,7 @@ fn logout(
         }
     };
     let location = wp_safe_redirect(reads.site, &redirect_to, &reads.admin_url(""));
-    headers.push((header::LOCATION, location));
-    headers.push((
-        header::HeaderName::from_static("x-redirect-by"),
-        "WordPress".into(),
-    ));
-    (StatusCode::FOUND, Vec::new())
+    redirected(headers, location)
 }
 
 /// When a login's cookies and session expire: in two weeks when remembered,

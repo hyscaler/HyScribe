@@ -7,7 +7,6 @@
 use hyscribe_admin::actions::Asked;
 use hyscribe_admin::posts::Answer;
 use hyscribe_auth::sessions::Sessions;
-use hyscribe_config::Constants;
 use hyscribe_db::{Meta, Write};
 use hyscribe_kses::{ALLOWED_PROTOCOLS, esc_url_raw, sanitize_key};
 use hyscribe_phpser::{
@@ -285,13 +284,13 @@ async fn updated(
             .map(|(login, user)| (login, user.email))
             .unwrap_or_default();
         if email.as_deref() != Some(&own[..]) {
-            if let Some(new) = email.as_deref().filter(|email| is_email(email)) {
-                if let Some(hash) = request_email_change(write, id, new).await? {
-                    let mail_site = MailSite::read(write, asked.home).await?;
-                    let mail = email_change_request(&mail_site.site(), &login, new, &hash);
-                    let kind = "send_confirmation_on_profile_email";
-                    site.outbox().queue(Queued::Background(kind, mail));
-                }
+            if let Some(new) = email.as_deref().filter(|email| is_email(email))
+                && let Some(hash) = request_email_change(write, id, new).await?
+            {
+                let mail_site = MailSite::read(write, asked.home).await?;
+                let mail = email_change_request(&mail_site.site(), &login, new, &hash);
+                let kind = "send_confirmation_on_profile_email";
+                site.outbox().queue(Queued::Background(kind, mail));
             }
             email = Some(own);
         }

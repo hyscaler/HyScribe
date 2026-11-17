@@ -363,6 +363,8 @@ fn rejects_bad_values() {
         ("MAIL_FROM", "a b@example.test", MAIL_FROM),
         ("MAIL_FROM", "Site <a@example.test>", MAIL_FROM),
         ("MAIL_FROM", "a@example", MAIL_FROM),
+        ("MAIL_FROM", "a\"b@example.test", MAIL_FROM),
+        ("MAIL_FROM", "a\\b@example.test", MAIL_FROM),
         ("MAIL_FROM", "@example.test", MAIL_FROM),
         ("MAIL_FROM", "example.test", MAIL_FROM),
         (

@@ -406,6 +406,7 @@ async fn a_failed_read_is_the_database_error_page() {
         limiter: Arc::new(crate::login::limits::Limiter::new(Default::default())),
         install: crate::unconfigured(),
         fetch: None,
+        mailer: Arc::new(crate::mail_off()),
     });
     let cookie = format!(
         "hyscribe_logged_in_{}=admin%7C9999999999%7Ctoken%7Chmac",

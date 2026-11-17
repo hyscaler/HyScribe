@@ -14,12 +14,12 @@
 //! - [`new_user_to_admin`], [`new_user_to_user`]: Add User
 //!   (`edit_user_created_user`); registration (`register_new_user`) later
 //! - [`email_change_request`]: one's own profile save (`saves/user_edit.rs`)
-//! - [`new_admin_email`]: the General settings save (`saves/options.rs`)
-//! - [`notify_postauthor`], [`notify_moderator`]: a new comment
-//!   (`comment_post`) and a comment approved in the admin
-//!   (`comment_unapproved_to_approved`)
-//! - not sent yet: [`admin_email_changed`] (the `adminhash` confirmation),
-//!   [`password_changed`] and [`email_changed`] (`wp_update_user()`),
+//! - [`new_admin_email`]: the General settings save, [`admin_email_changed`]:
+//!   the `adminhash` confirmation (`saves/options.rs`)
+//! - [`notify_postauthor`], [`notify_moderator`]: `comment_post` of the
+//!   comment form (`comment_post.rs`); hs-admin's replies send none yet
+//! - not sent yet: [`password_changed`] and [`email_changed`]
+//!   (`wp_update_user()` of another user's edit),
 //!   [`password_reset_to_admin`] (MVP 8.3), and the personal data
 //!   requests' [`user_request`], [`request_confirmed`],
 //!   [`erasure_fulfilled`] and [`export_ready`]

@@ -29,6 +29,9 @@ allow = [
 confidence-threshold = 0.9
 # The allow list is the policy, not an inventory of what is in use today.
 unused-allowed-license = "allow"
+# Mozilla's root certificates as data, which lettre's rustls build check
+# requires though the mail transport passes the host's roots (ADR 0016).
+exceptions = [{ allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" }]
 
 [bans]
 multiple-versions = "warn"

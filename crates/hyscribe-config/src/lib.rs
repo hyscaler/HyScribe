@@ -522,7 +522,8 @@ fn loopback(host: &str) -> bool {
 fn address(value: &str) -> bool {
     let plain = value
         .bytes()
-        .all(|b| b.is_ascii_graphic() && !b"<>,;\\\"()[]".contains(&b));
+        // 0x22 is the double quote, kept out of the loader's string literals.
+        .all(|b| b.is_ascii_graphic() && b != 0x22 && !b"<>,;()[]\\".contains(&b));
     let parts = value.rsplit_once('@');
     plain && parts.is_some_and(|(local, domain)| !local.is_empty() && domain.contains('.'))
 }

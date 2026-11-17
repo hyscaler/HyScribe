@@ -516,7 +516,9 @@ async fn an_email_change_waits_for_its_confirmation() {
     .await;
     let setup = async |_: &mut Write<'_>| {};
     fails_at_each_step(setup, async |write, ()| {
-        request_email_change(write, 1, b"new@example.test").await
+        request_email_change(write, 1, b"new@example.test")
+            .await
+            .map(|_| ())
     })
     .await;
 }

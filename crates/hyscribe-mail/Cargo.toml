@@ -15,8 +15,10 @@ hyscribe-fetch.workspace = true
 hyscribe-kses.workspace = true
 hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true
-# The transport only (ADR 0016): no `hostname` or `native-tls`, so no FFI.
-lettre = { version = "0.11.23", default-features = false, features = ["builder", "ring", "smtp-transport", "tokio1", "tokio1-rustls"] }
+# The transport only (ADR 0016): no `hostname` or `native-tls`, so no FFI;
+# `webpki-roots` only satisfies lettre's build check (rustls-native-certs
+# would pull macOS and Windows crates), the host's roots are passed in.
+lettre = { version = "0.11.23", default-features = false, features = ["builder", "ring", "webpki-roots", "smtp-transport", "tokio1", "tokio1-rustls"] }
 tokio = { version = "1", features = ["rt", "sync", "time"] }
 
 [dev-dependencies]

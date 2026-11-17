@@ -32,7 +32,7 @@ thread_local! {
     static RECORDED: (Arc<Recorder>, &'static Outbox) = {
         let recorder = Arc::new(Recorder::default());
         let off = hyscribe_config::Mail::default();
-        let (mailer, _) = Mailer::new(&off, b"", recorder.clone());
+        let (mailer, _) = Mailer::new(&off, b"http://example.test", recorder.clone());
         (recorder, Box::leak(Box::new(Outbox::new(Arc::new(mailer)))))
     };
 }
@@ -104,7 +104,7 @@ async fn comment_notices_follow_the_status_and_the_options() {
         .password(db.password.expose());
     let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
     let mut tx = conn.begin().await.unwrap();
-    let mut notices = async |sql: &str| {
+    let mut notices = async |sql: &'static str| {
         if !sql.is_empty() {
             sqlx::query(sql).execute(&mut *tx).await.unwrap();
         }
@@ -141,7 +141,7 @@ async fn comment_notices_follow_the_status_and_the_options() {
     let held = "UPDATE wp_comments SET comment_approved = '0' WHERE comment_ID = 1";
     let moderate =
         format!("wp_notify_moderator {admin} {title} Please moderate: \"Hello world!\" true");
-    assert_eq!(notices(held).await, [moderate.clone()]);
+    assert_eq!(notices(held).await, std::slice::from_ref(&moderate));
     // Without its author the post's moderator is the admin email alone.
     let orphan = "UPDATE wp_posts SET post_author = 999 WHERE ID = 1";
     assert_eq!(notices(orphan).await, [moderate]);
@@ -149,5 +149,25 @@ async fn comment_notices_follow_the_status_and_the_options() {
     assert!(notices(off).await.is_empty());
     let spam = "UPDATE wp_comments SET comment_approved = 'spam' WHERE comment_ID = 1";
     assert!(notices(spam).await.is_empty());
+    // `WP_SITEURL` wins over the option, untrailingslashed.
+    let urls = vec![("siteurl", "https://configured.test/".to_string())];
+    let writer = writer.with_urls(urls);
+    let mut write = writer.begin_on(&mut tx).await.unwrap();
+    let site = MailSite::read(&mut write, "https://home.test")
+        .await
+        .unwrap();
+    let site = site.site();
+    assert_eq!(
+        (site.site, site.admin),
+        (
+            &b"https://configured.test"[..],
+            &b"https://configured.test/hs-admin/"[..]
+        )
+    );
+    assert_eq!(
+        (site.home, site.name),
+        (&b"https://home.test"[..], &b"HyScribe Default Install"[..])
+    );
+    drop(write);
     tx.rollback().await.unwrap();
 }

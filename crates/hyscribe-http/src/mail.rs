@@ -213,4 +213,4 @@ pub(crate) async fn comment_notices(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -243,14 +243,14 @@ fn save<'w>(
         let link = comment_link(&mut write, permalink.clone(), id).await?;
         let mail_site = MailSite::read(&mut write, &reads.site.home).await?;
         let permalink = permalink.unwrap_or_default();
-        let comment = Commented {
+        let commented = Commented {
             id,
             user: saving.user,
             permalink: &permalink,
             link: link.as_bytes(),
         };
         let constants = reads.site.constants;
-        let notices = comment_notices(&mut write, &mail_site, &comment, constants).await?;
+        let notices = comment_notices(&mut write, &mail_site, &commented, constants).await?;
         let saved = Saved {
             id,
             author: comment.author,

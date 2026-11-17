@@ -124,10 +124,14 @@ impl Mailer {
         home: &[u8],
         hooks: Arc<dyn Hooks>,
     ) -> (Mailer, String) {
-        let roots: Vec<Vec<u8>> = hyscribe_fetch::host_certificates()
-            .iter()
-            .map(|der| der.to_vec())
-            .collect();
+        // The store is read only for a relay.
+        let roots: Vec<Vec<u8>> = match mail.smtp {
+            Some(_) => hyscribe_fetch::host_certificates()
+                .iter()
+                .map(|der| der.to_vec())
+                .collect(),
+            None => Vec::new(),
+        };
         Mailer::start(mail, home, hooks, &roots, LIMITS)
     }
 
@@ -373,10 +377,10 @@ fn log(kind: &str, domain: &str, outcome: &str, started: Instant) {
 async fn work(mut jobs: mpsc::Receiver<Job>, relay: Relay, hooks: Arc<dyn Hooks>, limits: Limits) {
     let mut recent: VecDeque<Instant> = VecDeque::new();
     while let Some(job) = jobs.recv().await {
-        if recent.len() >= limits.per_window {
-            if let Some(first) = recent.pop_front() {
-                tokio::time::sleep_until(first + limits.window).await;
-            }
+        if recent.len() >= limits.per_window
+            && let Some(first) = recent.pop_front()
+        {
+            tokio::time::sleep_until(first + limits.window).await;
         }
         let outcome = if job.done.as_ref().is_some_and(oneshot::Sender::is_closed) {
             Err("not sent in time".to_string())

@@ -504,10 +504,8 @@ fn filter_oembed_result(site: &dyn Site, html: Vec<u8>, url: &[u8]) -> Option<Ve
     // `|(<blockquote>.*?</blockquote>)?.*(<iframe.*?></iframe>)|ms`
     // The greedy `.*` takes the last `<iframe` a `></iframe>` follows.
     let last_close = html.windows(10).rposition(|w| w == b"></iframe>")?;
-    let start = html
-        .windows(7)
-        .take(last_close.checked_sub(6)?)
-        .rposition(|w| w == b"<iframe")?;
+    let before = html.get(..last_close).unwrap_or_default();
+    let start = before.windows(7).rposition(|w| w == b"<iframe")?;
     let after = html.get(start + 7..).unwrap_or_default();
     // The last `></iframe>` follows, so a first one does.
     let close = start + 7 + find(after, b"></iframe>").unwrap_or_default();

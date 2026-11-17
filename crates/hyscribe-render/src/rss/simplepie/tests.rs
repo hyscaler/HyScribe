@@ -120,6 +120,7 @@ fn reads_what_feeds_leave_out() {
     assert_eq!(first(Some(&Value::Int(1))), None);
     assert_eq!(absolutize(b"y", b"svn+ssh://h/x"), b"svn+ssh://h/y");
     assert_eq!(absolutize(b"y", b"a.b-c://h/x"), b"a.b-c://h/y");
+    assert_eq!(absolutize(b"y", b"a_b://h/x"), b"y");
     let items = |xml: &[u8]| {
         let data = Value::Array(parse(xml).unwrap());
         let feed = Feed { data: &data };
@@ -167,6 +168,12 @@ fn reads_what_feeds_leave_out() {
     assert_eq!(found[0].1, Some(b"http://f.test/one".to_vec()));
     assert_eq!(found[0].2, None);
     assert_eq!(found[2].2, Some(b"D".to_vec()));
-    let old_atom = br#"<feed xmlns="http://purl.org/atom/ns#"><entry><title>Plain &amp; text</title></entry></feed>"#;
-    assert_eq!(items(old_atom)[0].0, Some(b"Plain &amp; text".to_vec()));
+    let old_atom = br#"<feed xmlns="http://purl.org/atom/ns#"><entry><title>Plain &amp; text</title></entry><entry><title type="x/y">&lt;i&gt;</title></entry></feed>"#;
+    let found = items(old_atom);
+    assert_eq!(found[0].0, Some(b"Plain &amp; text".to_vec()));
+    assert_eq!(found[1].0, Some(b"<i>".to_vec()));
+    // Elements of no namespace in an RSS title give their text only.
+    let nested =
+        items(b"<rss version='2.0'><channel><item><title>a<b>c</b></title></item></channel></rss>");
+    assert_eq!(nested[0].0, Some(b"ac".to_vec()));
 }

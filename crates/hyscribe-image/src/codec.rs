@@ -17,8 +17,8 @@ use zune_jpeg::zune_core::options::DecoderOptions;
 use crate::header::ImageType;
 use crate::pixels::Pixels;
 
-/// The limits an image is held to (ADR 0015), the `.env` settings of the
-/// same names; the defaults are the oracle's ImageMagick policy.
+/// The limits an image is held to (ADR 0015), the oracle's ImageMagick policy by
+/// default; the names are `.env` keys planned with uploads (MVP phase 6), not read yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     /// `IMAGE_MAX_BYTES`: the largest file decoded.

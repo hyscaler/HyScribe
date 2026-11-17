@@ -19,7 +19,7 @@ use hyscribe_service::{Paths, Spawn, Status};
 /// Source code location, offered to every user as AGPL section 13 requires.
 pub const SOURCE_URL: &str = "https://github.com/hyscaler/HyScribe";
 
-/// How long `service start` waits for the server to come up.
+/// How long `service start` waits for the server to listen.
 pub const START_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long `service stop` waits after SIGTERM before SIGKILL.
 pub const STOP_GRACE: Duration = Duration::from_secs(15);
@@ -105,6 +105,9 @@ pub struct Context<'a> {
     /// Standard input's terminal, if it is one: the wizard turns its echo
     /// off for passwords.
     pub terminal: Option<BorrowedFd<'a>>,
+    /// Whether standard output is a terminal, which may be shown the setup
+    /// secret.
+    pub screen: bool,
     /// Standard output.
     pub out: &'a mut dyn Write,
     /// Standard error.
@@ -121,6 +124,7 @@ pub fn run(ctx: Context<'_>) -> u8 {
         server,
         input,
         terminal,
+        screen,
         out,
         err: err_out,
     } = ctx;
@@ -138,6 +142,7 @@ pub fn run(ctx: Context<'_>) -> u8 {
         env: &env,
         euid,
         server: &server,
+        screen,
     };
     let mut term = setup::Terminal {
         input,
@@ -176,6 +181,7 @@ struct Site<'a> {
     env: &'a HashMap<String, String>,
     euid: u32,
     server: &'a (PathBuf, Vec<OsString>),
+    screen: bool,
 }
 
 /// Text for standard output and the exit code.
@@ -255,6 +261,13 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
     let out = &mut *term.out;
     let (mut shutdown, lock) =
         hyscribe_service::claim(&site.paths).map_err(|err| err.to_string())?;
+    // A secret a killed server left behind; setup mode makes a new one.
+    let secret_file = site.paths.setup_secret_file();
+    let _ = std::fs::remove_file(&secret_file);
+    let setup_start = setup::web::Start {
+        secret_file: (!site.screen).then_some(secret_file.as_path()),
+        listening: &|| lock.listening(),
+    };
     // The blocking signal wait runs on its own thread and wakes the server.
     let (stop, stopped) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
@@ -273,7 +286,16 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
             let mut stopped = stopped;
             let config = match config {
                 Some(config) => config,
-                None => match setup_mode(home, site.env, out, &mut stopped, SETUP_TIMEOUT).await? {
+                None => match setup_mode(
+                    home,
+                    site.env,
+                    out,
+                    &mut stopped,
+                    SETUP_TIMEOUT,
+                    &setup_start,
+                )
+                .await?
+                {
                     // An `.env` gone again since is no configuration.
                     Ended::Written => hyscribe_config::load(home, site.env)
                         .and_then(|config| config.ok_or(ConfigError::Missing("DB_NAME")))
@@ -321,6 +343,8 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
             );
             let _ = writeln!(out, "{fetching}");
             let _ = out.flush();
+            // After the log lines, so `service start` returns with them logged.
+            lock.listening();
             hyscribe_http::serve(listener, std::sync::Arc::new(site), async move {
                 // The sender only goes away after sending.
                 let number = stopped.await.unwrap_or(0);
@@ -389,14 +413,7 @@ fn service(
     let paths = &site.paths;
     let error = |err: hyscribe_service::Error| err.to_string();
     let start = |term: &mut setup::Terminal<'_>| -> Result<String, String> {
-        // Without a configuration the server starts in setup mode.
-        let setup = match server_config(site, term)? {
-            Some(_) => "",
-            None => {
-                "Setup mode: the address to open and the one-time setup secret are in the log \
-                     (./hyscribe service log)\n"
-            }
-        };
+        let setup = server_config(site, term)?.is_none();
         let spawn = Spawn {
             program: site.server.0.clone(),
             args: site.server.1.clone(),
@@ -407,10 +424,21 @@ fn service(
                 .collect(),
         };
         let started = hyscribe_service::start(paths, &spawn, START_TIMEOUT).map_err(error)?;
-        Ok(format!(
-            "{started}\nlogs: {}\n{setup}",
-            paths.log_file().display()
-        ))
+        let mut text = format!("{started}\nlogs: {}\n", paths.log_file().display());
+        // Without a configuration the server is in setup mode, its secret
+        // in a file that only a terminal is shown.
+        if setup {
+            let file = paths.setup_secret_file();
+            match std::fs::read_to_string(&file) {
+                Ok(open) if site.screen => text.push_str(&format!("Setup mode: {open}")),
+                _ => text.push_str(&format!(
+                    "Setup mode: the address to open and the one-time setup secret are in {} \
+                     until setup mode ends\n",
+                    file.display()
+                )),
+            }
+        }
+        Ok(text)
     };
     let stop = || {
         hyscribe_service::stop(paths, STOP_GRACE)

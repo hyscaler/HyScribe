@@ -36,6 +36,7 @@ fn defaults_are_safe() {
             database: Database {
                 host: "localhost".into(),
                 port: 3306,
+                socket: None,
                 name: "wordpress".into(),
                 user: "wp".into(),
                 password: Secret::new(""),
@@ -55,6 +56,7 @@ fn defaults_are_safe() {
             site_url: None,
             salts: Vec::new(),
             rest_public_users: true,
+            http_outbound: false,
             constants: Constants {
                 disallow_unfiltered_html: true,
                 allow_unfiltered_uploads: false,
@@ -65,6 +67,7 @@ fn defaults_are_safe() {
                 account: 10,
                 window: 900,
             },
+            upload_max_size: 64 << 20,
         }
     );
 }
@@ -140,10 +143,12 @@ fn reads_every_key() {
         ("AUTH_KEY", "a"),
         ("NONCE_SALT", "z"),
         ("REST_PUBLIC_USERS", "off"),
+        ("HTTP_OUTBOUND", "on"),
         ("EMPTY_TRASH_DAYS", "0"),
         ("LOGIN_LIMIT_ADDRESS", "1"),
         ("LOGIN_LIMIT_ACCOUNT", "1000"),
         ("LOGIN_LIMIT_WINDOW", "86400"),
+        ("UPLOAD_MAX_SIZE", "512k"),
     ]))
     .unwrap();
     assert_eq!(config.database.host, "db.internal");
@@ -171,6 +176,7 @@ fn reads_every_key() {
         ]
     );
     assert!(!config.rest_public_users);
+    assert!(config.http_outbound);
     assert_eq!(config.constants.empty_trash_days, 0);
     assert_eq!(server(&with(&[("PORT", "80")])).map(|s| s.port), Ok(80));
     let limits = LoginLimits {
@@ -179,8 +185,85 @@ fn reads_every_key() {
         window: 86_400,
     };
     assert_eq!(config.login_limits, limits);
-    let on = from_map(&with(&[("REST_PUBLIC_USERS", "on")])).unwrap();
+    assert_eq!(config.upload_max_size, 512 << 10);
+    let on = from_map(&with(&[
+        ("REST_PUBLIC_USERS", "on"),
+        ("HTTP_OUTBOUND", "off"),
+    ]))
+    .unwrap();
     assert!(on.rest_public_users);
+    assert!(!on.http_outbound);
+}
+
+/// A socket as `wp-config.php` gives one in `DB_HOST`, only for `localhost`.
+#[test]
+fn reads_a_socket_host() {
+    let database = |host| from_map(&with(&[("DB_HOST", host), ("DB_PORT", "3307")]));
+    let socket = database("localhost:/run/mysqld/mysqld.sock").unwrap();
+    assert_eq!(socket.database.host, "localhost");
+    assert_eq!(
+        socket.database.socket.as_deref(),
+        Some(Path::new("/run/mysqld/mysqld.sock"))
+    );
+    assert_eq!(
+        socket.database.address(),
+        "localhost:/run/mysqld/mysqld.sock"
+    );
+    let tcp = database("db.internal").unwrap();
+    assert_eq!(tcp.database.socket, None);
+    assert_eq!(tcp.database.address(), "db.internal:3307");
+    for host in ["127.0.0.1:/run/mysqld/mysqld.sock", ":/tmp/mysql.sock"] {
+        assert_eq!(
+            database(host).unwrap_err().to_string(),
+            "DB_HOST is invalid: a socket is given as localhost:/path/to/socket"
+        );
+    }
+}
+
+/// `UPLOAD_MAX_SIZE` in bytes or PHP's shorthand, and nothing else.
+#[test]
+fn reads_upload_sizes() {
+    let size = |value| from_map(&with(&[("UPLOAD_MAX_SIZE", value)])).map(|c| c.upload_max_size);
+    for (value, bytes) in [
+        ("1", 1),
+        ("2097152", 2 << 20),
+        ("1K", 1 << 10),
+        ("64M", 64 << 20),
+        ("64m", 64 << 20),
+        ("2G", 2 << 30),
+        ("2g", 2 << 30),
+        ("3k", 3 << 10),
+        ("8589934591G", 8_589_934_591 << 30),
+        ("9223372036854775807", i64::MAX.unsigned_abs()),
+    ] {
+        assert_eq!(size(value), Ok(bytes), "{value}");
+    }
+    for value in [
+        "0",
+        "0M",
+        "M",
+        "64 M",
+        "64MB",
+        "-1",
+        "+1",
+        "1.5M",
+        "64T",
+        "8589934592G",
+        "17179869184G",
+        "1k1",
+        "9223372036854775808",
+        "18446744073709551616",
+        "99999999999999999999",
+        " 64M",
+        "64M ",
+        "\u{ff11}M",
+    ] {
+        assert_eq!(
+            size(value).unwrap_err().to_string(),
+            "UPLOAD_MAX_SIZE is invalid: must be a size in bytes, or with a K, M or G suffix, such as 64M",
+            "{value}"
+        );
+    }
 }
 
 #[test]
@@ -205,6 +288,7 @@ fn rejects_bad_values() {
         ("DB_READ_PASSWORD", "hunter3", "is set without DB_READ_USER"),
         ("MODE", "write", "must be shadow or primary"),
         ("REST_PUBLIC_USERS", "true", "must be on or off"),
+        ("HTTP_OUTBOUND", "yes", "must be on or off"),
         (
             "EMPTY_TRASH_DAYS",
             "-1",

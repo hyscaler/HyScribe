@@ -101,6 +101,12 @@ for query in s=example 's=127.0.0.1&mode=detail' s=zzz s=0 s=100%25 s=Pat%27s co
   record content administrator "?$query"
 done
 record content author '?comment_status=trash'
+# Without the Trash (EMPTY_TRASH_DAYS=0, the e0 variants of as-role.php): no
+# Trash view, and Delete Permanently instead.
+for view in '' '?comment_status=spam' '?comment_status=trash'; do
+  record e0comments administrator "$view"
+done
+record e0comments editor ''
 record paged administrator ''
 for page in 2 4 -2 0 9; do
   record paged administrator "?paged=$page"

@@ -522,7 +522,7 @@ pub(crate) fn as_stored(
 }
 
 /// `delete_item()` up to its write: `force` deletes, else the post goes
-/// to the trash, which keeps it for `EMPTY_TRASH_DAYS`.
+/// to the trash, which keeps it for `EMPTY_TRASH_DAYS` unless that is 0.
 fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
     let kind = Kind::of(params.route);
     // The permission check found the post.
@@ -535,6 +535,9 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
             Write::Delete(post.id),
             Some((post.clone(), prepared(context, &edit, kind, &post)?.data)),
         )
+    } else if !context.site.uses_trash() {
+        let message = "The post does not support trashing. Set 'force=true' to delete.";
+        return Err(RestError::status("rest_trash_not_supported", message, 501));
     } else if post.status == "trash" {
         let message = "The post has already been deleted.";
         return Err(RestError::status("rest_already_trashed", message, 410));

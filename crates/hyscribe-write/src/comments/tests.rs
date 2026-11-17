@@ -583,6 +583,15 @@ async fn trash_and_delete() {
         assert!(delete_comment(write, no_trash, reply, false).await.unwrap());
     })
     .await;
+    // So does `wp_trash_comment()`, which then calls it forced.
+    check("delete-comment", replied, async |write, reply| {
+        let no_trash = Context {
+            empty_trash_days: 0,
+            ..context()
+        };
+        assert!(trash_comment(write, no_trash, reply).await.unwrap());
+    })
+    .await;
     check("delete-comment-to-trash", nothing, async |write, ()| {
         assert!(delete_comment(write, context(), 1, false).await.unwrap());
     })

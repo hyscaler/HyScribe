@@ -124,7 +124,15 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                     callback: Some(item),
                 },
                 write(edit_permission),
-                write(delete_permission),
+                Endpoint {
+                    args: vec![
+                        id(),
+                        typed("force", r#"{"type":"boolean","default":false}"#),
+                        string_arg("password"),
+                    ],
+                    permission: delete_permission,
+                    callback: Some(delete),
+                },
             ])
         }
         _ => None,
@@ -379,6 +387,17 @@ fn delete_permission(context: &Context, params: &Params) -> Result<(), RestError
     }
     let message = "Sorry, you are not allowed to delete this comment.";
     Err(context.forbidden("rest_cannot_delete", message))
+}
+
+/// `delete_item()` as far as it refuses without writing: without the Trash,
+/// only a forced delete; the deletes themselves are not ported.
+fn delete(context: &Context, params: &Params) -> Result<Response, RestError> {
+    let force = params.get("force").is_some_and(|force| !force.is_empty());
+    if force || context.site.uses_trash() {
+        return Err(RestError::not_ported());
+    }
+    let message = "The comment does not support trashing. Set 'force=true' to delete.";
+    Err(RestError::status("rest_trash_not_supported", message, 501))
 }
 
 fn no_post() -> RestError {

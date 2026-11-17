@@ -18,6 +18,7 @@ mod index;
 mod media;
 mod people;
 mod posts;
+mod previews;
 mod search;
 mod site;
 mod writes;
@@ -27,11 +28,12 @@ use content::Content;
 const SITE: &str = "http://127.0.0.1:8081";
 
 /// The oracle over `content` and its fixture, under plain or pretty
-/// permalinks, with the public users endpoint on or off.
+/// permalinks, with the public users endpoint and the Trash on or off.
 struct Oracle {
     content: &'static Content,
     fixture: site::Fixture,
     public_users: bool,
+    trash: bool,
 }
 
 impl Oracle {
@@ -48,6 +50,7 @@ impl Oracle {
                 |fixtures| fixtures[usize::from(pretty)],
             ),
             public_users: true,
+            trash: true,
         }
     }
 }
@@ -151,6 +154,9 @@ impl Site for Oracle {
     }
     fn public_users(&self) -> bool {
         self.public_users
+    }
+    fn uses_trash(&self) -> bool {
+        self.trash
     }
     fn theme(&self) -> &Theme {
         static THEME: std::sync::OnceLock<Theme> = std::sync::OnceLock::new();
@@ -431,6 +437,7 @@ fn mismatches(
         for case in rest_cases(golden) {
             let oracle = Oracle {
                 public_users,
+                trash: !case.flag("notrash"),
                 ..Oracle::over(content, case.flag("pretty"))
             };
             let served = serve_with(&oracle, &case);
@@ -439,7 +446,8 @@ fn mismatches(
                 case.who, case.method, case.target, case.flags
             );
             let write = case.method != "GET" && case.method != "HEAD";
-            if served.status == 501 {
+            // PHP answers 501 too where a type does not support the Trash.
+            if served.status == 501 && case.status != 501 {
                 if !(write && case.status < 400 || unported(&case)) || !served.body.is_empty() {
                     failures.push(format!("{what}: 501"));
                 }
@@ -517,6 +525,17 @@ fn writes_are_checked_as_php_checks_them() {
         .filter(|case| case.body == b"hyscribe-accepted")
         .count();
     assert_eq!(not_served, accepted);
+}
+
+/// With `EMPTY_TRASH_DAYS` at 0, deletes without `force` are refused as PHP
+/// refuses them (`reference/rest/trash-off.list`).
+#[test]
+fn deletes_without_the_trash_are_refused() {
+    let golden = include_str!("../tests/golden/trash-off.tsv");
+    let goldens = [(content::default_install(), golden, false)];
+    let (failures, not_served) = mismatches(&goldens, true, &|_| false);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!((rest_cases(golden).len(), not_served), (6 * 7, 0));
 }
 
 /// The arguments of every ported route use only keywords `hyscribe_rest`

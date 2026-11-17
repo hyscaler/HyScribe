@@ -273,7 +273,7 @@ impl Role {
     /// A variant of `reference/posts-list/golden.sh`, over its content.
     fn listing(&self) -> bool {
         [
-            "posts", "hidden", "excerpt", "front", "h9locks", "h9home", "h9host",
+            "posts", "hidden", "excerpt", "front", "h9locks", "h9home", "h9host", "e0posts",
         ]
         .contains(&self.variant())
     }
@@ -513,6 +513,7 @@ impl Role {
             "g9cpages",
             "g9coldest",
             "g9attach",
+            "e0comments",
         ]
         .contains(&self.variant())
     }
@@ -787,7 +788,7 @@ impl MenuUser for Role {
 impl Urls for Role {
     /// The site URL, HTTPS in the `h9ssl` variant.
     fn site_url(&self) -> String {
-        if self.variant() == "h9ssl" {
+        if self.variant() == "h9ssl" || self.variant().starts_with("o35") {
             return SITE.replace("http:", "https:");
         }
         SITE.into()
@@ -832,6 +833,7 @@ impl PageSite for Role {
             return Some(edit.to_vec());
         }
         match (self.variant(), name) {
+            ("o35zone", "locale") => return Some(b"fr_FR".to_vec()),
             ("m4list" | "m4ttdlist", "media_library_mode") => return Some(b"list".to_vec()),
             ("m4ttdpaged", "upload_per_page") => return Some(b"5".to_vec()),
             ("m4ttdhidden", "manageuploadcolumnshidden") => {
@@ -1214,6 +1216,16 @@ impl crate::profile::ProfileSite for Role {
     }
 }
 
+/// The comment edit screen's site: the fixture's comment, no referer.
+impl crate::comments::CommentEditSite for Role {
+    fn comment_to_edit(&self, id: u64) -> Option<crate::dashboard::RecentComment> {
+        (id == 1).then(|| crate::dashboard::tests::hello_comment(true))
+    }
+    fn referer(&self) -> Option<Vec<u8>> {
+        None
+    }
+}
+
 impl crate::comments::CommentsSite for Role {
     /// `comment_rows()` as `query` filters them.
     fn list_comments(
@@ -1555,6 +1567,13 @@ impl crate::posts::PostsSite for Role {
         };
         format!("{home}/?{query}={}", post.id)
     }
+    /// The oracle's 2 MB, `UPLOAD_MAX_SIZE`'s default in the `o31` variants.
+    fn max_upload_size(&self) -> u64 {
+        if self.variant().starts_with("o31") {
+            return 64 << 20;
+        }
+        2 << 20
+    }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         if name == "sticky_posts" && (self.listing() || self.variant() == "empty") {
             return Some(b"a:2:{i:0;i:304;i:1;i:306;}".to_vec());
@@ -1593,6 +1612,13 @@ impl crate::posts::PostsSite for Role {
             ("m4ttdstates", "theme_mods_twentytwentyfive") => {
                 return Some(b"a:1:{s:11:\"custom_logo\";i:1692;}".to_vec());
             }
+            ("o35", "users_can_register" | "gmt_offset") => return Some(b"1".to_vec()),
+            ("o35", "blog_public") => return Some(b"0".to_vec()),
+            ("o35", "default_comment_status") => return Some(b"closed".to_vec()),
+            ("o35", "permalink_structure") => return Some(b"/%postname%/".to_vec()),
+            ("o35", "WPLANG") => return Some(b"de_DE".to_vec()),
+            ("o35", "user_count") => return None,
+            ("o35zone", "timezone_string") => return Some(b"Europe/Berlin".to_vec()),
             _ => {}
         }
         if name == "category_children" && self.variant() == "stale" {
@@ -1832,11 +1858,48 @@ impl crate::posts::PostsSite for Role {
         }
         vec![("page-no-title".into(), "Page No Title".into())]
     }
+    /// `EMPTY_TRASH_DAYS` is 0 in the `e0` variants, as the
+    /// `hyscribe_empty_trash` cookie asks PHP.
+    fn uses_trash(&self) -> bool {
+        !self.variant().starts_with("e0")
+    }
     fn post_formats(&self) -> &'static [&'static str] {
         static THEME: OnceLock<hyscribe_render::theme::Theme> = OnceLock::new();
         THEME
             .get_or_init(hyscribe_render::theme::twentytwentyfive)
             .post_formats()
+    }
+}
+
+/// The oracle's database, and in the `o35` variants an installation in
+/// primary mode over HTTPS with limits of its own.
+impl crate::site_health::HealthSite for Role {
+    fn install(&self) -> crate::site_health::Install {
+        crate::site_health::Install {
+            binary: "/srv/hyscribe/hyscribe".into(),
+            upload_max_size: crate::posts::PostsSite::max_upload_size(self),
+            database_user: "wordpress".into(),
+            database_name: "wordpress".into(),
+            charset: "utf8mb4".into(),
+        }
+    }
+    fn primary(&self) -> bool {
+        self.variant().starts_with("o35")
+    }
+    fn login_limits(&self) -> [u32; 3] {
+        if self.variant().starts_with("o35") {
+            return [3, 20, 60];
+        }
+        [5, 10, 900]
+    }
+    fn table_prefix(&self) -> String {
+        "wp_".into()
+    }
+    fn database_server(&self) -> (String, String) {
+        (
+            "11.8.9-MariaDB-ubu2404".into(),
+            "utf8mb4_unicode_520_ci".into(),
+        )
     }
 }
 

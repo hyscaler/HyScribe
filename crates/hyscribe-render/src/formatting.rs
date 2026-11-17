@@ -874,6 +874,15 @@ pub fn ent2ncr(text: &[u8]) -> Vec<u8> {
 /// and numeric references become characters, a single quote's excepted.
 pub fn html_entity_decode(text: &[u8]) -> Vec<u8> {
     references(text, |reference| {
+        entity(reference)
+            .filter(|&c| c != '\'')
+            .map(|c| c.to_string().into_bytes())
+    })
+}
+
+/// `html_entity_decode( $text, ENT_QUOTES )`: a single quote's too.
+pub fn html_entity_decode_quotes(text: &[u8]) -> Vec<u8> {
+    references(text, |reference| {
         entity(reference).map(|c| c.to_string().into_bytes())
     })
 }
@@ -913,8 +922,10 @@ fn reference_number(digits: &[u8], radix: u32) -> Option<u32> {
     u32::try_from(value).ok().filter(|_| !digits.is_empty())
 }
 
-/// The character `&reference;` stands for under `ENT_COMPAT`: HTML 4.01
-/// has `ent2ncr()`'s names but its three older ones.
+/// The character `&reference;` stands for in HTML 4.01: `ent2ncr()`'s
+/// names but its three older ones, and the code points PHP's
+/// `unicode_cp_is_allowed()` allows a reference to, the controls but tab
+/// and line ends left as written.
 fn entity(reference: &[u8]) -> Option<char> {
     let code = match reference {
         b"brkbar" | b"die" | b"hibar" => return None,
@@ -922,7 +933,9 @@ fn entity(reference: &[u8]) -> Option<char> {
         [b'#', decimal @ ..] => reference_number(decimal, 10)?,
         name => entities::NAMED.iter().find(|(n, _)| *n == name)?.1,
     };
-    char::from_u32(code).filter(|&c| c != '\'')
+    let control =
+        !matches!(code, 0x09 | 0x0a | 0x0d) && (code < 0x20 || (0x7f..0xa0).contains(&code));
+    char::from_u32(code).filter(|_| !control)
 }
 
 /// `sanitize_title()`'s replacements in the save context, in order: what

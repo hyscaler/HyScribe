@@ -107,6 +107,9 @@ pub(crate) enum Sanitize {
     /// The endpoint's own sanitizer, which reads the other parameters as
     /// they were before sanitizing.
     Params(fn(&Params, &Value) -> Checked<Value>),
+    /// A `validate_callback` returning false (`Invalid parameter.`) or the
+    /// value its `sanitize_callback` gives, reading the site.
+    Callback(fn(&Context, &Value) -> Option<Value>),
 }
 
 /// A route's argument: its schema, whether `rest_validate_request_arg()`
@@ -132,10 +135,16 @@ pub(crate) fn defaults(args: &[Arg]) -> Vec<(Key, Value)> {
         .collect()
 }
 
-/// The invalid parameters and the errors each gives, none for a validate
-/// callback's `false`.
+/// The invalid parameters and the errors each gives, none for a
+/// `validate_callback` that returned false.
 #[derive(Default)]
 struct Invalid(Vec<(String, Option<RestError>)>);
+
+/// `rest_invalid_param` for `name`, as a `validate_callback` returning
+/// false gives it.
+pub(crate) fn invalid_param(name: &str) -> RestError {
+    Invalid(vec![(name.into(), None)]).error()
+}
 
 impl Invalid {
     /// `rest_invalid_param` of them all, if any.
@@ -143,30 +152,37 @@ impl Invalid {
         if self.0.is_empty() {
             return Ok(());
         }
+        Err(self.error())
+    }
+
+    /// `rest_invalid_param` of them all.
+    fn error(self) -> RestError {
         let key = |name: &str| Key::String(name.as_bytes().to_vec());
         let names: Vec<&str> = self.0.iter().map(|(name, _)| name.as_str()).collect();
+        let message = |error: &Option<RestError>| {
+            error
+                .as_ref()
+                .map_or("Invalid parameter.".into(), |error| error.message.clone())
+        };
         let params = self
             .0
             .iter()
-            .map(|(name, error)| {
-                let message = error.as_ref().map(|error| error.message.as_str());
-                (key(name), text(message.unwrap_or("Invalid parameter.")))
-            })
+            .map(|(name, error)| (key(name), text(message(error))))
             .collect();
         let details = self
             .0
             .iter()
-            .filter_map(|(name, error)| error.as_ref().map(|error| (name, error)))
-            .map(|(name, error)| {
+            .filter_map(|(name, error)| {
+                let error = error.as_ref()?;
                 let detail = object([
                     ("code", text(error.code)),
                     ("message", text(error.message.clone())),
                     ("data", error.data.clone()),
                 ]);
-                (key(name), detail)
+                Some((key(name), detail))
             })
             .collect();
-        Err(RestError {
+        RestError {
             code: "rest_invalid_param",
             message: format!("Invalid parameter(s): {}", names.join(", ")),
             data: object([
@@ -174,7 +190,7 @@ impl Invalid {
                 ("params", Value::Array(params)),
                 ("details", Value::Array(details)),
             ]),
-        })
+        }
     }
 }
 
@@ -264,6 +280,13 @@ pub(crate) fn sanitize_params(
                 Sanitize::Schema => validate_value_from_schema(value, &arg.schema, arg.name)
                     .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name)),
                 Sanitize::Value => sanitize_value_from_schema(value, &arg.schema, arg.name),
+                Sanitize::Callback(check) => {
+                    let checked = check(context, value);
+                    if checked.is_none() {
+                        invalid.0.push((arg.name.into(), None));
+                    }
+                    checked.ok_or(Refusal(None))
+                }
             };
             if let Some(sanitized) = refused(sanitized, arg.name, &mut invalid) {
                 *value = sanitized;

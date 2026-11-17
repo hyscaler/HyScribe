@@ -290,6 +290,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "url_details"
+path = "fuzz_targets/url_details.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "image_header"
 path = "fuzz_targets/image_header.rs"
 test = false

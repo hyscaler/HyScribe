@@ -64,6 +64,13 @@ async fn comment_saves_are_php_s() {
             .unwrap()
             .with_writer(writer.unwrap()),
     );
+    // The e0 cases' site has no Trash (`EMPTY_TRASH_DAYS=0`).
+    let (off, off_cookies) = logged_in(&db.name, dir.path()).await;
+    let constants = hyscribe_config::Constants {
+        empty_trash_days: 0,
+        ..hyscribe_config::Constants::default()
+    };
+    let off = Arc::new(Arc::try_unwrap(off).ok().unwrap().with_constants(constants));
     let golden = include_str!("../../../../hyscribe-admin/tests/golden/admin-views-comments.tsv");
     let cases = include_str!("../../../../../reference/admin-views/comments.list");
     let cases = cases.lines().filter(|line| !line.starts_with('#'));
@@ -71,9 +78,15 @@ async fn comment_saves_are_php_s() {
         let [case, status, php_location, _, body] = row.split('\t').collect::<Vec<_>>()[..] else {
             panic!("{row}");
         };
-        let [_, method, target, data, action, field, _] = line.split('\t').collect::<Vec<_>>()[..]
+        let [_, method, target, data, action, field, cookie] =
+            line.split('\t').collect::<Vec<_>>()[..]
         else {
             panic!("{line}");
+        };
+        let (site, cookies) = if cookie.contains("=e0") {
+            (&off, &off_cookies)
+        } else {
+            (&site, &cookies)
         };
         // A second apart, as the golden's requests, which the list sorts by.
         if case.starts_with("reply") {
@@ -84,12 +97,12 @@ async fn comment_saves_are_php_s() {
             .method(method)
             .uri(&uri)
             .header(header::HOST, "127.0.0.1:8081")
-            .header(header::COOKIE, &cookies)
+            .header(header::COOKIE, cookies)
             .extension(crate::Peer(IP.parse().unwrap()));
         let form = if method == "POST" {
             let nonce = match action {
                 "-" => "bad".to_string(),
-                action => session_nonce(&site, &cookies, action).await,
+                action => session_nonce(site, cookies, action).await,
             };
             let data = data
                 .replace("%2Fwp-admin%2F", "%2Fhs-admin%2F")
@@ -100,7 +113,7 @@ async fn comment_saves_are_php_s() {
             String::new()
         };
         let request = request.body(Body::from(form)).unwrap();
-        let response = crate::live(Arc::clone(&site))
+        let response = crate::live(Arc::clone(site))
             .oneshot(request)
             .await
             .unwrap();
@@ -140,7 +153,7 @@ async fn comment_saves_are_php_s() {
             around(&page)
         );
     }
-    assert_eq!(golden.lines().count(), 34);
+    assert_eq!(golden.lines().count(), 35);
     // A phone's browser is not sent to the author's name, as `wp_is_mobile()`.
     let phone = axum::http::Request::builder()
         .uri("/hs-admin/comment?action=editcomment&c=1")

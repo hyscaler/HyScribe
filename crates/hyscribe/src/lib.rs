@@ -237,6 +237,17 @@ fn server_config(
         .and_then(|()| hyscribe_config::load(home, site.env).map_err(|err| err.to_string()))
 }
 
+/// The installation the admin describes: `binary`, and what `.env` sets.
+fn install(config: &Config, binary: &Path) -> hyscribe_http::Install {
+    hyscribe_http::Install {
+        binary: binary.display().to_string(),
+        upload_max_size: config.upload_max_size,
+        database_user: config.database.user.clone(),
+        database_name: config.database.name.clone(),
+        charset: config.database.charset.clone(),
+    }
+}
+
 /// `hyscribe start`: serves the site until SIGTERM or SIGINT, after setup
 /// mode when there is no configuration yet.
 fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, String> {
@@ -286,6 +297,7 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                     .with_constants(config.constants)
                     .with_proxy(config.server.behind_proxy)
                     .with_login_limits(config.login_limits)
+                    .with_install(install(&config, &site.server.0))
                     .with_writer(writer);
             let fetch = config.http_outbound.then(outbound);
             let fetching = outbound_line(fetch.as_ref());

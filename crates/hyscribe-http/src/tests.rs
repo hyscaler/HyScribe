@@ -254,6 +254,7 @@ async fn database_errors_show_no_details() {
         behind_proxy: false,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
+        install: unconfigured(),
         fetch: None,
     });
     // The 404 page fails while rendering, reading an option it has not loaded.
@@ -891,6 +892,7 @@ async fn the_front_page_links_to_home() {
         behind_proxy: false,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
+        install: unconfigured(),
         fetch: None,
     });
     // Search results list the front page with a link to it.
@@ -1025,6 +1027,7 @@ async fn failed_reads_answer_defaults() {
         behind_proxy: false,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
+        install: unconfigured(),
         fetch: None,
     });
     let handle = tokio::runtime::Handle::current();

@@ -67,6 +67,7 @@ fn defaults_are_safe() {
                 account: 10,
                 window: 900,
             },
+            upload_max_size: 64 << 20,
         }
     );
 }
@@ -147,6 +148,7 @@ fn reads_every_key() {
         ("LOGIN_LIMIT_ADDRESS", "1"),
         ("LOGIN_LIMIT_ACCOUNT", "1000"),
         ("LOGIN_LIMIT_WINDOW", "86400"),
+        ("UPLOAD_MAX_SIZE", "512k"),
     ]))
     .unwrap();
     assert_eq!(config.database.host, "db.internal");
@@ -183,6 +185,7 @@ fn reads_every_key() {
         window: 86_400,
     };
     assert_eq!(config.login_limits, limits);
+    assert_eq!(config.upload_max_size, 512 << 10);
     let on = from_map(&with(&[
         ("REST_PUBLIC_USERS", "on"),
         ("HTTP_OUTBOUND", "off"),
@@ -213,6 +216,52 @@ fn reads_a_socket_host() {
         assert_eq!(
             database(host).unwrap_err().to_string(),
             "DB_HOST is invalid: a socket is given as localhost:/path/to/socket"
+        );
+    }
+}
+
+/// `UPLOAD_MAX_SIZE` in bytes or PHP's shorthand, and nothing else.
+#[test]
+fn reads_upload_sizes() {
+    let size = |value| from_map(&with(&[("UPLOAD_MAX_SIZE", value)])).map(|c| c.upload_max_size);
+    for (value, bytes) in [
+        ("1", 1),
+        ("2097152", 2 << 20),
+        ("1K", 1 << 10),
+        ("64M", 64 << 20),
+        ("64m", 64 << 20),
+        ("2G", 2 << 30),
+        ("2g", 2 << 30),
+        ("3k", 3 << 10),
+        ("8589934591G", 8_589_934_591 << 30),
+        ("9223372036854775807", i64::MAX.unsigned_abs()),
+    ] {
+        assert_eq!(size(value), Ok(bytes), "{value}");
+    }
+    for value in [
+        "0",
+        "0M",
+        "M",
+        "64 M",
+        "64MB",
+        "-1",
+        "+1",
+        "1.5M",
+        "64T",
+        "8589934592G",
+        "17179869184G",
+        "1k1",
+        "9223372036854775808",
+        "18446744073709551616",
+        "99999999999999999999",
+        " 64M",
+        "64M ",
+        "\u{ff11}M",
+    ] {
+        assert_eq!(
+            size(value).unwrap_err().to_string(),
+            "UPLOAD_MAX_SIZE is invalid: must be a size in bytes, or with a K, M or G suffix, such as 64M",
+            "{value}"
         );
     }
 }

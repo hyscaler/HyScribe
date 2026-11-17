@@ -1310,6 +1310,18 @@ impl Db {
         self.prefix.as_str()
     }
 
+    /// The server's `VERSION()` and the connection's collation, as Site
+    /// Health's Info tab shows them.
+    pub async fn server(&self) -> Result<(String, String), DbError> {
+        let row = sqlx::query("SELECT VERSION() AS version, @@collation_connection AS collation")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_error)?;
+        let mut c = Columns::new(&row);
+        let server = (c.text("version"), c.text("collation"));
+        c.finish(server)
+    }
+
     /// The terms of `slugs`, `(taxonomy, slug)` pairs, and the categories
     /// with `category_ids`, each with its taxonomy.
     pub async fn find_terms(

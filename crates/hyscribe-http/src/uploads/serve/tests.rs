@@ -60,6 +60,7 @@ async fn uploads_are_served_never_run() {
     let etag = headers[header::ETAG].to_str().unwrap();
     let again = get(&site, "/wp-content/uploads/2026/11/a%20b+c.jpg", Some(etag)).await;
     assert_eq!(again.status(), StatusCode::NOT_MODIFIED);
+    assert!(!again.headers().contains_key(header::CONTENT_TYPE));
     let text = get(&site, "/wp-content/uploads/2026/11/notes.txt", None).await;
     assert_eq!(text.headers()[header::CONTENT_TYPE], "text/plain");
     for download in ["page.html", "run.php", "image.svg"] {
@@ -86,6 +87,19 @@ async fn uploads_are_served_never_run() {
             StatusCode::NOT_FOUND,
             "{missing}"
         );
+    }
+    // Only a GET or a HEAD is given the file.
+    for method in ["POST", "PUT"] {
+        let request = Request::builder()
+            .method(method)
+            .uri("/wp-content/uploads/2026/11/a%20b+c.jpg")
+            .body(Body::empty())
+            .unwrap();
+        let response = crate::router(Arc::clone(&site))
+            .oneshot(request)
+            .await
+            .unwrap();
+        assert!(!response.headers().contains_key(header::ETAG), "{method}");
     }
     // Other paths are not the uploads'.
     let other = get(&site, "/wp-content/other.txt", None).await;

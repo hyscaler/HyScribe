@@ -529,6 +529,15 @@ async fn uploads_stop_short() {
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{line}");
         assert!(files(uploads.path()).is_empty(), "{line}");
     }
+    // A GET is the screen, not an upload.
+    let screen = axum::http::Request::builder()
+        .uri("/hs-admin/media-new")
+        .header(header::HOST, "127.0.0.1:8081")
+        .header(header::COOKIE, &admin.0)
+        .body(Body::empty())
+        .unwrap();
+    let response = router(Arc::clone(&site)).oneshot(screen).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
     let disposition = format!("{rest}\traw,type=image/jpeg,baddisposition\tsmall.jpg\t-");
     let (status, refused) = sent_case(&site, &disposition, admin).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);

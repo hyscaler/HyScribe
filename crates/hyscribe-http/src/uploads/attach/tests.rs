@@ -252,16 +252,23 @@ async fn actions_stop_whole() {
     let mut outer = conn.begin().await.unwrap();
     let ctx = context();
     let mut budget = 0;
-    let id = loop {
+    loop {
         let mut write = writer.begin_on(&mut outer).await.unwrap();
         write.fail_after(budget);
         match inserted(Ok(write), &ctx, &prepared).await {
-            Ok(id) => break id,
+            Ok(_) => break,
             Err(hyscribe_write::Error::Db(_)) => budget += 1,
             Err(err) => panic!("{err:?}"),
         }
-    };
-    let generated = uploads.generate(&site, &prepared.handled, id).unwrap();
+    }
+    // A scaled image's attached file is saved with its metadata.
+    let big = uploads.media_handle_upload(&site, sent("big.jpg", "big.jpg"), 0, (&time, WHO));
+    let big = big.unwrap();
+    let id = inserted(writer.begin_on(&mut outer).await, &ctx, &big)
+        .await
+        .unwrap();
+    let generated = uploads.generate(&site, &big.handled, id).unwrap();
+    assert!(generated.attached_file.is_some());
     for budget in 0.. {
         let mut write = writer.begin_on(&mut outer).await.unwrap();
         write.fail_after(budget);

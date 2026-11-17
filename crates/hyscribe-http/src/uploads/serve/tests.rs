@@ -87,6 +87,9 @@ async fn uploads_are_served_never_run() {
             "{missing}"
         );
     }
+    // Other paths are not the uploads'.
+    let other = get(&site, "/wp-content/other.txt", None).await;
+    assert_eq!(other.status(), StatusCode::NOT_FOUND);
     // An uploads folder not made yet has nothing to serve.
     let missing = serving(&dir.path().join("missing")).await;
     let path = "/wp-content/uploads/2026/11/notes.txt";

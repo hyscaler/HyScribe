@@ -229,8 +229,7 @@ pub(crate) async fn inserted(
 ) -> Result<u64, hyscribe_write::Error> {
     let mut write = write?;
     let id = attach(&mut write, ctx, prepared).await?;
-    write.commit().await?;
-    Ok(id)
+    write.commit().await.map(|()| id).map_err(Into::into)
 }
 
 /// What `generate()` made of the attachment `id` saved as one action, once
@@ -242,8 +241,7 @@ pub(crate) async fn saved(
 ) -> Result<(), hyscribe_write::Error> {
     let mut write = write?;
     save(&mut write, id, generated).await?;
-    write.commit().await?;
-    Ok(())
+    write.commit().await.map_err(Into::into)
 }
 
 /// `wp_insert_attachment()` of `prepared` in `write`, then its alt text:

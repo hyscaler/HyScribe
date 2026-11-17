@@ -97,8 +97,10 @@ fuzz_target!(|data: &[u8]| {
         referer: Some(referer),
         uri: query,
         home: "http://example.test",
-        site_url: "http://example.test",
         user: 1,
+        now: 1_700_000_000,
+        ip: b"127.0.0.1",
+        agent: b"",
     };
     let screen = SCREENS[usize::from(screen.first().copied().unwrap_or(0)) % SCREENS.len()];
     let _ = admin(&Open, screen, &asked, !body.is_empty());

@@ -570,6 +570,7 @@ async fn every_query() -> Vec<DbError> {
         db.revisions(1).await.unwrap_err(),
         db.user_post_counts(&[1], true, 1).await.unwrap_err(),
         db.comments(1).await.unwrap_err(),
+        db.older_comments(1, "").await.unwrap_err(),
         db.comment(1).await.unwrap_err(),
         db.adjacent_post(&Post::default(), true, None)
             .await
@@ -669,6 +670,18 @@ async fn errors_are_reported() {
     assert!(!message.contains("hunter2"));
     let err: Box<dyn std::error::Error> = Box::new(err);
     assert!(err.source().is_none());
+}
+
+/// The server's version and the connection's collation; an error once the
+/// connections are closed.
+#[tokio::test]
+async fn the_server_names_itself() {
+    let db = fixture().await;
+    let (version, collation) = db.server().await.unwrap();
+    assert!(version.contains("MariaDB"), "{version}");
+    assert!(collation.starts_with("utf8mb4_"), "{collation}");
+    db.pool.close().await;
+    assert!(db.server().await.is_err());
 }
 
 #[tokio::test]
@@ -955,6 +968,19 @@ async fn options_meta_and_terms() {
     );
     assert!(comments[0].content.starts_with(b"Hi, this is a comment."));
     assert!(db.comments(2).await.unwrap().is_empty());
+    // The fixture's comment is from 2026-10-27 08:08:15.
+    assert_eq!(
+        db.older_comments(1, "2026-10-27 08:08:16").await.unwrap(),
+        1
+    );
+    assert_eq!(
+        db.older_comments(1, "2026-10-27 08:08:15").await.unwrap(),
+        0
+    );
+    assert_eq!(
+        db.older_comments(2, "2027-01-01 00:00:00").await.unwrap(),
+        0
+    );
     assert_eq!(
         db.post_meta(2, "_wp_page_template").await.unwrap(),
         Some(b"default".to_vec())

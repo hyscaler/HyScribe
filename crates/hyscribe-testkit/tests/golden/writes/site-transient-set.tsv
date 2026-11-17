@@ -1,0 +1,22 @@
+# The rows PHP WordPress writes for the action site-transient-set (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-16 19:12:11 to 2026-11-16 19:12:11 UTC.
+# %wp_options:1% is 130.
+# %wp_options:2% is 131.
+# %wp_options:3% is 132.
+# %wp_options:4% is 133.
+# %wp_options:5% is 134.
+# %wp_options:6% is 135.
+wp_options	_site_transient_oracle_kept	~	option_value	one	two
+wp_options	_site_transient_oracle_lasting	~	option_value	one	two
+wp_options	_site_transient_oracle_new	+	autoload	off
+wp_options	_site_transient_oracle_new	+	option_id	%wp_options:5%
+wp_options	_site_transient_oracle_new	+	option_name	_site_transient_oracle_new
+wp_options	_site_transient_oracle_new	+	option_value	<html>a page</html>
+wp_options	_site_transient_oracle_plain	+	autoload	off
+wp_options	_site_transient_oracle_plain	+	option_id	%wp_options:6%
+wp_options	_site_transient_oracle_plain	+	option_name	_site_transient_oracle_plain
+wp_options	_site_transient_oracle_plain	+	option_value	s:14:"a:1:{i:0;i:1;}";
+wp_options	_site_transient_timeout_oracle_new	+	autoload	off
+wp_options	_site_transient_timeout_oracle_new	+	option_id	%wp_options:4%
+wp_options	_site_transient_timeout_oracle_new	+	option_name	_site_transient_timeout_oracle_new
+wp_options	_site_transient_timeout_oracle_new	+	option_value	%expiry%

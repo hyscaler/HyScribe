@@ -33,6 +33,9 @@ trap 'rm -rf "$stage"' EXIT
 mkdir -m 0755 "$stage/hyscribe"
 install -m 0755 "$root/target/$target/release/hyscribe" "$stage/hyscribe/hyscribe"
 install -m 0644 "$root/LICENSE" "$root/packaging/README.txt" "$root/.env.example" "$stage/hyscribe/"
+# The operator documentation (MVP 9.3), as hyscribe/docs/.
+install -d -m 0755 "$stage/hyscribe/docs"
+install -m 0644 "$root"/docs/operators/*.md "$stage/hyscribe/docs/"
 
 mkdir -p "$out"
 archive="$out/hyscribe_${version}_linux_$arch.tar.gz"

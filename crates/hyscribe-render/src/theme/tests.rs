@@ -70,8 +70,11 @@ fn malformed_theme_data_is_skipped() {
     assert!(registered_blocks(b"[[\"core/x\"]]").is_empty());
     assert_eq!(style_partials(b"{\"0\": \"x\", \"a.json\": 3}"), []);
     assert_eq!(
-        block_styles(br#"{"block_styles": [1, ["core/x"], ["core/x", {}], ["core/list", {"name": "checkmark-list"}]]}"#),
-        [("core/list".to_string(), "checkmark-list".to_string())]
+        block_styles(br#"{"block_styles": [1, ["core/x"], ["core/x", {}], ["core/list", {"name": "checkmark-list"}], ["core/quote", {"name": "q", "inline_style": "q{}"}]]}"#),
+        [
+            ("core/list".into(), "checkmark-list".into(), String::new()),
+            ("core/quote".into(), "q".into(), "q{}".into())
+        ]
     );
 }
 

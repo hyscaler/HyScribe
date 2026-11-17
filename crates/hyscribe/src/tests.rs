@@ -860,6 +860,19 @@ fn cron_run_runs_the_due_events_once() {
     assert_eq!(invalid.err, "error: DB_USER is not set\n");
 }
 
+#[test]
+fn the_start_log_says_whether_fetches_are_on() {
+    assert_eq!(outbound_line(None), "outbound fetches off");
+    assert_eq!(outbound_line(Some(&outbound())), "outbound fetches on");
+    let net = std::sync::Arc::new(hyscribe_fetch::System);
+    let bare = hyscribe_fetch::Client::new(
+        hyscribe_fetch::RootCertStore::empty(),
+        net,
+        std::sync::Arc::new(()),
+    );
+    assert!(outbound_line(Some(&bare)).ends_with("no certificate store was found"));
+}
+
 /// A raw HTTP/1.1 request to the local server, returning the raw response.
 fn http(port: u16, request: &str) -> String {
     use std::io::{Read, Write};

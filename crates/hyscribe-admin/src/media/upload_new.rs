@@ -6,7 +6,7 @@
 use hyscribe_kses::esc_url;
 use hyscribe_phpser::{Value, is_empty_string, remove_query_arg};
 
-use super::{MAX_UPLOAD, MediaSite, can_upload, single_file};
+use super::{MediaSite, can_upload, max_file_size, max_upload_line, single_file};
 use crate::admin_bar::BarSite;
 use crate::list_table::fill;
 use crate::menu::Screen;
@@ -76,7 +76,10 @@ fn uploader(site: &dyn MediaSite, post_id: i64, request: &Request) -> String {
         ("drop_element", text("drag-drop-area")),
         ("file_data_name", text("async-upload")),
         ("url", text(&BarSite::admin_url(site, "async-upload.php"))),
-        ("filters", object(vec![("max_file_size", text(MAX_UPLOAD))])),
+        (
+            "filters",
+            object(vec![("max_file_size", max_file_size(site))]),
+        ),
         (
             "multipart_params",
             object(vec![
@@ -97,6 +100,7 @@ fn uploader(site: &dyn MediaSite, post_id: i64, request: &Request) -> String {
             ("height", large_size(site, "large_size_h")),
             ("width", large_size(site, "large_size_w")),
             ("init", json(&object(init))),
+            ("max_upload", max_upload_line(site)),
         ],
     )
 }

@@ -194,6 +194,9 @@ impl Default for LoginLimits {
     }
 }
 
+/// `UPLOAD_MAX_SIZE`'s default, 64 MB.
+pub const DEFAULT_UPLOAD_MAX_SIZE: u64 = 64 << 20;
+
 /// The complete configuration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
@@ -214,6 +217,9 @@ pub struct Config {
     /// `REST_PUBLIC_USERS`: `on` (default) answers visitors' REST users
     /// requests as WordPress does, `off` as if no user had published posts.
     pub rest_public_users: bool,
+    /// `HTTP_OUTBOUND`: `on` lets the server fetch from other sites through
+    /// the outbound client (ADR 0019); `off` (default) fetches nothing.
+    pub http_outbound: bool,
     /// The capability constants.
     pub constants: Constants,
     /// The login rate limits.
@@ -223,6 +229,9 @@ pub struct Config {
     pub disable_wp_cron: bool,
     /// `ALTERNATE_WP_CRON`: accepted and ignored, with a line in the log.
     pub alternate_wp_cron: bool,
+    /// `UPLOAD_MAX_SIZE`: the largest upload, in bytes, which the admin
+    /// prints where PHP prints `wp_max_upload_size()`.
+    pub upload_max_size: u64,
 }
 
 /// Why configuration could not be loaded.
@@ -340,6 +349,12 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         Some(_) => return Err(invalid("REST_PUBLIC_USERS", "must be on or off")),
     };
 
+    let http_outbound = match get("HTTP_OUTBOUND") {
+        None | Some("off") => false,
+        Some("on") => true,
+        Some(_) => return Err(invalid("HTTP_OUTBOUND", "must be on or off")),
+    };
+
     if constant(get("MULTISITE"), "MULTISITE", false)? {
         return Err(invalid("MULTISITE", "multisite networks are not supported"));
     }
@@ -371,6 +386,16 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         window: limit("LOGIN_LIMIT_WINDOW", limits.window, 86_400)?,
     };
 
+    let upload_max_size = match get("UPLOAD_MAX_SIZE") {
+        None => DEFAULT_UPLOAD_MAX_SIZE,
+        Some(value) => size(value).ok_or_else(|| {
+            invalid(
+                "UPLOAD_MAX_SIZE",
+                "must be a size in bytes, or with a K, M or G suffix, such as 64M",
+            )
+        })?,
+    };
+
     let salts = SALT_KEYS
         .iter()
         .filter_map(|&key| get(key).map(|value| (key, Secret::new(value))))
@@ -385,10 +410,12 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         site_url: get("WP_SITEURL").map(String::from),
         salts,
         rest_public_users,
+        http_outbound,
         constants,
         login_limits,
         disable_wp_cron: constant(get("DISABLE_WP_CRON"), "DISABLE_WP_CRON", false)?,
         alternate_wp_cron: constant(get("ALTERNATE_WP_CRON"), "ALTERNATE_WP_CRON", false)?,
+        upload_max_size,
     })
 }
 
@@ -459,6 +486,28 @@ fn number(
             .filter(|number| (1..=max).contains(number))
             .ok_or_else(|| invalid(key, &format!("must be a whole number from 1 to {max}"))),
     }
+}
+
+/// A size as PHP's shorthand writes it: digits, then `K`, `M` or `G` in
+/// either case; at least a byte, and within `i64`.
+fn size(value: &str) -> Option<u64> {
+    let (digits, shift) = match value.as_bytes().split_last() {
+        Some((b'K' | b'k', head)) => (head, 10),
+        Some((b'M' | b'm', head)) => (head, 20),
+        Some((b'G' | b'g', head)) => (head, 30),
+        _ => (value.as_bytes(), 0),
+    };
+    if digits.is_empty() {
+        return None;
+    }
+    let number = digits.iter().try_fold(0u64, |number, &digit| {
+        digit.is_ascii_digit().then_some(())?;
+        number.checked_mul(10)?.checked_add(u64::from(digit - b'0'))
+    })?;
+    let bytes = number.checked_mul(1 << shift)?;
+    (1..=i64::MAX.unsigned_abs())
+        .contains(&bytes)
+        .then_some(bytes)
 }
 
 fn boolean(value: Option<&str>, key: &'static str) -> Result<bool, ConfigError> {

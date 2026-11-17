@@ -1038,7 +1038,13 @@ fn uploads_plan_their_fields() {
             "{parent}"
         );
     }
-    for body in [r#"{"status":"private"}"#, r#"{"generate_sub_sizes":false}"#] {
+    for body in [
+        r#"{"status":"private"}"#,
+        r#"{"generate_sub_sizes":false}"#,
+        r#"{"title":{"raw":5}}"#,
+        r#"{"caption":{"raw":5}}"#,
+        r#"{"description":{"raw":5}}"#,
+    ] {
         let served = answered("administrator", "POST", "/wp/v2/media", body);
         assert_eq!(served.status, 501, "{body}");
     }

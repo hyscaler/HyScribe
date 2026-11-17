@@ -367,22 +367,23 @@ fn prepare_for_js(admin: &Admin, id: u64) -> Value {
         .and_then(|meta| meta.get_str("filesize"))
         .filter(|size| size.is_numeric() && size.to_int() > 0)
         .map(Value::to_int);
-    if let Some(bytes) = bytes {
-        data.push(("filesizeInBytes", Value::Int(bytes)));
-        data.push((
-            "filesizeHumanReadable",
-            text(hyscribe_admin::media::size_format(bytes)),
-        ));
-    }
+    data.extend(bytes.into_iter().flat_map(|bytes| {
+        let readable = text(hyscribe_admin::media::size_format(bytes));
+        [
+            ("filesizeInBytes", Value::Int(bytes)),
+            ("filesizeHumanReadable", readable),
+        ]
+    }));
     let context = PostsSite::meta(admin, &post, "_wp_attachment_context");
     data.push(("context", text(context.unwrap_or_default())));
     let mut data: Vec<(Key, Value)> = data
         .into_iter()
         .map(|(key, value)| (Key::String(key.into()), value))
         .collect();
-    if let Some(meta) = meta.filter(|_| kind == "image") {
-        image_fields(admin, &mut data, (&meta, &url, &base_url));
-    }
+    let image = meta.filter(|_| kind == "image");
+    image
+        .iter()
+        .for_each(|meta| image_fields(admin, &mut data, (meta, &url, &base_url)));
     data.push((
         Key::String(b"compat".to_vec()),
         object(vec![("item", text("")), ("meta", text(""))]),
@@ -444,11 +445,14 @@ fn image_fields(
     }
     let side = |key| meta.get_str(key).map(Value::to_int);
     let mut full = vec![("url", text(hyscribe_kses::esc_url_raw(url)))];
-    if let (Some(width), Some(height)) = (side("width"), side("height")) {
-        full.push(("height", Value::Int(height)));
-        full.push(("width", Value::Int(width)));
-        full.push(("orientation", orientation(width, height)));
-    }
+    let dimensions = side("width").zip(side("height"));
+    full.extend(dimensions.into_iter().flat_map(|(width, height)| {
+        [
+            ("height", Value::Int(height)),
+            ("width", Value::Int(width)),
+            ("orientation", orientation(width, height)),
+        ]
+    }));
     // array_merge(): `url` is there already, the rest comes after.
     for (key, value) in full.iter().skip(1) {
         push(key, value.clone());

@@ -271,8 +271,10 @@ fn place(folder: &Path, name: &str, bytes: &[u8], replace: bool) -> std::io::Res
 fn folder(base: &Path, subdir: &str) -> Option<PathBuf> {
     let folder = base.join(subdir.trim_start_matches('/'));
     std::fs::create_dir_all(&folder).ok()?;
-    let (base, folder) = (base.canonicalize().ok()?, folder.canonicalize().ok()?);
-    folder.starts_with(&base).then_some(folder)
+    match (base.canonicalize(), folder.canonicalize()) {
+        (Ok(base), Ok(folder)) if folder.starts_with(&base) => Some(folder),
+        _ => None,
+    }
 }
 
 impl Uploads {

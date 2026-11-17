@@ -111,11 +111,10 @@ pub(super) fn answer(
             unfiltered_html: pending.plan.unfiltered_html,
             unfiltered_upload,
         };
-        let parent = match upload.post {
-            0 => Ok(None),
-            id => Handle::current().block_on(site.db.post(id)),
-        };
-        let parent = parent.map_err(|err| Refused::Failed(err.to_string()))?;
+        // A database that fails here fails the insert after it.
+        let parent =
+            (upload.post != 0).then(|| Handle::current().block_on(site.db.post(upload.post)));
+        let parent = parent.and_then(Result::ok).flatten();
         let time = upload_time(site, parent, now);
         let prepared = uploads.rest_upload(site, (sent, form), upload, (&time, who));
         let code = match form {

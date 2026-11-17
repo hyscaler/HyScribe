@@ -87,6 +87,13 @@ async fn uploads_are_served_never_run() {
             "{missing}"
         );
     }
+    // An uploads folder not made yet has nothing to serve.
+    let missing = serving(&dir.path().join("missing")).await;
+    let path = "/wp-content/uploads/2026/11/notes.txt";
+    assert_eq!(
+        get(&missing, path, None).await.status(),
+        StatusCode::NOT_FOUND
+    );
     // Without an uploads folder, nothing is served from one.
     let bare = crate::tests::oracle_site().await;
     let path = "/wp-content/uploads/2026/11/notes.txt";

@@ -219,3 +219,63 @@ async fn uploads_are_filed_by_their_post_s_date() {
         assert_eq!(upload_time(&site, parent, 86_400), "1970-01-02 00:00:00");
     }
 }
+
+/// Each action stops whole at any statement that fails, and at a writer
+/// that refuses to begin, on the fixture inside a transaction rolled back.
+#[tokio::test(flavor = "multi_thread")]
+async fn actions_stop_whole() {
+    use sqlx::Connection as _;
+    let site = crate::tests::oracle_site().await;
+    let dir = tempfile::tempdir().unwrap();
+    let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
+    let upload = Upload {
+        alt_text: Some(b"Alt".to_vec()),
+        ..Upload::default()
+    };
+    let time = upload_time(&site, None, now());
+    let photo = (sent("photo.jpg", "photo.jpg"), false);
+    let prepared = uploads
+        .rest_upload(&site, photo, &upload, (&time, WHO))
+        .unwrap();
+    let writer = hyscribe_db::Writer::open(&fixture_database(), Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    let db = fixture_database();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = Connection::connect_with(&options).await.unwrap();
+    let mut outer = conn.begin().await.unwrap();
+    let ctx = context();
+    let mut budget = 0;
+    let id = loop {
+        let mut write = writer.begin_on(&mut outer).await.unwrap();
+        write.fail_after(budget);
+        match inserted(Ok(write), &ctx, &prepared).await {
+            Ok(id) => break id,
+            Err(hyscribe_write::Error::Db(_)) => budget += 1,
+            Err(err) => panic!("{err:?}"),
+        }
+    };
+    let generated = uploads.generate(&site, &prepared.handled, id).unwrap();
+    for budget in 0.. {
+        let mut write = writer.begin_on(&mut outer).await.unwrap();
+        write.fail_after(budget);
+        if saved(Ok(write), id, &generated).await.is_ok() {
+            break;
+        }
+    }
+    // A database whose version the writer does not support.
+    sqlx::query("UPDATE wp_options SET option_value = '1' WHERE option_name = 'db_version'")
+        .execute(&mut *outer)
+        .await
+        .unwrap();
+    let refused = writer.begin_on(&mut outer).await;
+    assert!(inserted(refused, &ctx, &prepared).await.is_err());
+    let refused = writer.begin_on(&mut outer).await;
+    assert!(saved(refused, id, &generated).await.is_err());
+}

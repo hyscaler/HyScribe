@@ -44,7 +44,7 @@ fn forms_give_fields_and_files() {
         &b"preamble\r\n"[..],
         &part("Content-Disposition: form-data; name=\"action\"", b"upload-attachment"),
         &part(
-            "content-disposition: form-data; name=\"async-upload\"; filename=\"C:\\\\dir\\\\a b.jpg\"\r\nContent-Type: image/jpeg\r\nX-Other: 1\r\nNo colon",
+            "content-disposition: form-data; name=\"async-upload\"; filename=\"C:\\\\dir\\\\a b.jpg\"; size=3\r\nContent-Type: image/jpeg\r\nX-Other: 1\r\nNo colon",
             b"\xff\xd8bytes\r\n--C",
         ),
         &part(

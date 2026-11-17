@@ -47,7 +47,11 @@ impl Form<'_> {
 
 /// The boundary of a `multipart/form-data` `Content-Type`, quoted or not.
 pub fn boundary(content_type: &[u8]) -> Option<&[u8]> {
-    let kind = content_type.split(|&b| b == b';').next()?.trim_ascii();
+    let kind = content_type
+        .split(|&b| b == b';')
+        .next()
+        .unwrap_or_default();
+    let kind = kind.trim_ascii();
     if !kind.eq_ignore_ascii_case(b"multipart/form-data") {
         return None;
     }
@@ -60,8 +64,8 @@ pub fn boundary(content_type: &[u8]) -> Option<&[u8]> {
 /// What comes before and after the first `needle` in `haystack`, if there.
 fn split<'a>(haystack: &'a [u8], needle: &[u8]) -> Option<(&'a [u8], &'a [u8])> {
     let at = haystack.windows(needle.len()).position(|w| w == needle)?;
-    let (before, after) = haystack.split_at_checked(at)?;
-    Some((before, after.get(needle.len()..)?))
+    let (before, after) = haystack.split_at(at);
+    Some((before, after.get(needle.len()..).unwrap_or_default()))
 }
 
 /// The `name=value` parameters after a header value's first `;`, each

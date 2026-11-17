@@ -7,7 +7,7 @@
 //! between them on the worker pool, as PHP writes the rows before it
 //! makes the sizes.
 
-use hyscribe_db::{Meta, Write, Writer};
+use hyscribe_db::{DbError, Meta, Write, Writer};
 use hyscribe_image::header::{ImageType, getimagesize};
 use hyscribe_image::meta::wp_read_image_metadata;
 use hyscribe_image::subsizes::Generated;
@@ -146,9 +146,11 @@ impl Uploads {
         let given = |value: &Option<Vec<u8>>| value.clone().filter(|value| !is_empty_string(value));
         let [meta_title, meta_caption, alt] = image_fields(meta.as_deref());
         // A form's name as sent without its extension, else the file's.
+        let dot = name.iter().rposition(|&b| b == b'.');
+        let stem = dot.and_then(|at| name.get(..at));
         let sent_stem = || {
-            let at = name.iter().rposition(|&b| b == b'.')?;
-            Some(name.get(..at)?.to_vec()).filter(|stem| form && !stem.is_empty())
+            stem.filter(|stem| form && !stem.is_empty())
+                .map(<[u8]>::to_vec)
         };
         let title = given(&upload.title).or(meta_title).or_else(sent_stem);
         let title = title.unwrap_or_else(|| {
@@ -186,12 +188,8 @@ impl Uploads {
         prepared: &Prepared,
     ) -> Result<u64, Refused> {
         let handle = Handle::current();
-        let inserted = handle.block_on(async {
-            let mut write = writer.begin().await?;
-            let id = attach(&mut write, ctx, prepared).await?;
-            write.commit().await?;
-            Ok::<_, hyscribe_write::Error>(id)
-        });
+        let inserted =
+            handle.block_on(async { inserted(writer.begin().await, ctx, prepared).await });
         let id = inserted.map_err(|err| {
             self.discard(&prepared.handled);
             Refused::from(err)
@@ -200,11 +198,7 @@ impl Uploads {
         let generated = self
             .generate(site, &prepared.handled, id)
             .map_err(|err| Refused::Failed(err.to_string()))?;
-        let saved = handle.block_on(async {
-            let mut write = writer.begin().await?;
-            save(&mut write, id, &generated).await?;
-            write.commit().await.map_err(hyscribe_write::Error::from)
-        });
+        let saved = handle.block_on(async { saved(writer.begin().await, id, &generated).await });
         saved.map_err(Refused::from)?;
         Ok(id)
     }
@@ -225,6 +219,31 @@ fn makes_copy(uploads: &Uploads, handled: &Handled, meta: Option<&[(Key, Value)]
         let over = threshold > 0 && i64::from(size.width.max(size.height)) > threshold;
         over || size.kind == ImageType::Jpeg && turned
     })
+}
+
+/// The attachment of `prepared` inserted as one action, once begun.
+pub(crate) async fn inserted(
+    write: Result<Write<'_>, DbError>,
+    ctx: &Context,
+    prepared: &Prepared,
+) -> Result<u64, hyscribe_write::Error> {
+    let mut write = write?;
+    let id = attach(&mut write, ctx, prepared).await?;
+    write.commit().await?;
+    Ok(id)
+}
+
+/// What `generate()` made of the attachment `id` saved as one action, once
+/// begun.
+pub(crate) async fn saved(
+    write: Result<Write<'_>, DbError>,
+    id: u64,
+    generated: &Generated,
+) -> Result<(), hyscribe_write::Error> {
+    let mut write = write?;
+    save(&mut write, id, generated).await?;
+    write.commit().await?;
+    Ok(())
 }
 
 /// `wp_insert_attachment()` of `prepared` in `write`, then its alt text:

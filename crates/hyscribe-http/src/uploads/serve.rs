@@ -48,12 +48,11 @@ pub(crate) fn serve(site: &Site, path: &str, headers: &HeaderMap, now: u64) -> O
         .ok()
         .filter(|_| file.starts_with(&dir))?;
     let bytes = std::fs::read(&file).ok().filter(|_| meta.is_file())?;
-    let modified = meta
+    let since = meta
         .modified()
-        .ok()?
-        .duration_since(UNIX_EPOCH)
-        .ok()?
-        .as_secs();
+        .ok()
+        .and_then(|at| at.duration_since(UNIX_EPOCH).ok());
+    let modified = since.unwrap_or_default().as_secs();
     let etag = format!("\"{:x}-{:x}\"", meta.len(), modified);
     let name = decoded.rsplit('/').next().unwrap_or_default();
     let kind = shown(name);

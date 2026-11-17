@@ -592,6 +592,14 @@ async fn uploads_stop_short() {
         std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
         emptied(uploads.path());
     }
+    // An upload to a private post links as the user may read it.
+    run("UPDATE wp_posts SET post_status = 'private' WHERE ID = 1").await;
+    let private =
+        format!("{async_upload}\tform,nonce\tsmall.jpg\taction=upload-attachment&post_id=1");
+    let (status, json) = sent_case(&site, &private, admin).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(json.contains("\"uploadedTo\":1"), "{json}");
+    emptied(uploads.path());
     // The author's nickname, without a display name.
     run("UPDATE wp_users SET display_name = '' WHERE ID = 1").await;
     let site = uploading(sessions.path(), uploads.path()).await;

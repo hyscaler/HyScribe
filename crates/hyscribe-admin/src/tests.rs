@@ -121,8 +121,9 @@ impl Site for Oracle {
     fn user_by_login(&self, login: &[u8]) -> Option<User> {
         let lost = lost_users().into_iter().filter(|_| self.lost);
         let mut lost = lost.filter(|(_, name, _)| login.eq_ignore_ascii_case(name.as_bytes()));
-        let lost = lost.next().map(|(id, _, key)| User {
+        let lost = lost.next().map(|(id, name, key)| User {
             id,
+            login: name.as_bytes().to_vec(),
             pass: Vec::new(),
             use_ssl: false,
             activation_key: key.into_bytes(),

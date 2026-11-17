@@ -241,7 +241,6 @@ async fn comment_saved(
             content: text(&save.content),
             date,
             date_gmt: Some(date_gmt),
-            comment_type: save.comment_type.clone(),
             ..NewComment::default()
         };
         let commenter = Commenter {

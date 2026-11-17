@@ -44,8 +44,6 @@ pub struct CommentSave {
     /// `comment_date` and `comment_date_gmt`; a new comment's are now
     /// where none is given.
     pub date: Option<(String, String)>,
-    /// A new comment's `comment_type`, empty for none.
-    pub comment_type: String,
     /// `handle_status_param()` of this status after the write.
     pub status: Option<Vec<u8>>,
     /// Whether the comment's user has `moderate_comments`, which approves
@@ -226,8 +224,8 @@ fn plan_create(context: &Context, params: &Params) -> Result<Plan, RestError> {
         let message = "Cannot create a comment with that type.";
         return Err(invalid("rest_invalid_comment_type", message));
     }
+    // Its type, none or `comment`, is stored as `comment`.
     let mut save = prepared(context, params)?;
-    save.comment_type = String::from_utf8_lossy(&kind).into_owned();
     save.content = Some(save.content.unwrap_or_default());
     content_allowed(&save)?;
     let empty = |field: &Option<Vec<u8>>| {

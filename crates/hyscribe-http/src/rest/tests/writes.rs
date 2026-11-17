@@ -31,17 +31,29 @@ async fn fresh() {
     fresh_with("").await;
 }
 
-/// [`fresh`] with a list's `state`, its statements before `-- cleanup`.
-async fn fresh_with(state: &str) {
+/// A connection to `wordpress_saves`.
+async fn saves_conn() -> sqlx::MySqlConnection {
     let db = saves();
-    load_default_install(&db).await.unwrap();
     let options = sqlx::mysql::MySqlConnectOptions::new()
         .host(&db.host)
         .port(db.port)
         .database(&db.name)
         .username(&db.user)
         .password(db.password.expose());
-    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    sqlx::MySqlConnection::connect_with(&options).await.unwrap()
+}
+
+/// The one value `sql` selects from `wordpress_saves`.
+async fn stored(sql: &'static str, id: u64) -> String {
+    let query = sqlx::query_scalar::<_, Vec<u8>>(sql).bind(id);
+    let value = query.fetch_one(&mut saves_conn().await).await.unwrap();
+    String::from_utf8(value).unwrap()
+}
+
+/// [`fresh`] with a list's `state`, its statements before `-- cleanup`.
+async fn fresh_with(state: &str) {
+    load_default_install(&saves()).await.unwrap();
+    let mut conn = saves_conn().await;
     let users = include_str!("../../../../../reference/rest/users.sql");
     let state = state.split("\n-- cleanup\n").next().unwrap();
     sqlx::raw_sql(sqlx::AssertSqlSafe([users, state].concat()))
@@ -969,11 +981,68 @@ async fn writes_refused_past_their_checks() {
     let Outcome::Written(id) = act(comment(0, "trash")).await else {
         panic!("not written")
     };
-    for status in [
-        "untrash", "spam", "unspam", "approved", "approved", "approve", "bogus",
+    let approved = "SELECT comment_approved FROM wp_comments WHERE comment_ID = ?";
+    assert_eq!(stored(approved, id).await, "trash");
+    for (status, now) in [
+        ("untrash", "0"),
+        ("spam", "spam"),
+        ("unspam", "0"),
+        ("approved", "1"),
+        ("approved", "1"),
+        ("hold", "0"),
+        ("approve", "1"),
+        ("trash", "trash"),
+        ("bogus", "trash"),
     ] {
         assert_eq!(act(comment(id, status)).await, Outcome::Written(id));
+        assert_eq!(stored(approved, id).await, now, "{status}");
     }
+    // An update's agent, parent and author, and a new comment's dates.
+    let edit = hyscribe_rest::CommentSave {
+        id,
+        parent: Some(1),
+        user_id: Some(704),
+        agent: Some(b"Agent/3.0".to_vec()),
+        ..hyscribe_rest::CommentSave::default()
+    };
+    act(hyscribe_rest::Write::Comment(Box::new(edit))).await;
+    let row = "SELECT CONCAT_WS('|', comment_agent, comment_parent, user_id) FROM wp_comments WHERE comment_ID = ?";
+    assert_eq!(stored(row, id).await, "Agent/3.0|1|704");
+    let dated = hyscribe_rest::CommentSave {
+        post_id: Some(1),
+        author: Some(b"Dated".to_vec()),
+        author_email: Some(b"dated@example.test".to_vec()),
+        content: Some(b"Dated".to_vec()),
+        date: Some(("2026-01-02 05:04:05".into(), "2026-01-02 03:04:05".into())),
+        skip_flood: true,
+        ..hyscribe_rest::CommentSave::default()
+    };
+    let Outcome::Written(dated) = act(hyscribe_rest::Write::Comment(Box::new(dated))).await else {
+        panic!("not written")
+    };
+    let dates = "SELECT CONCAT_WS('|', comment_date, comment_date_gmt) FROM wp_comments WHERE comment_ID = ?";
+    assert_eq!(
+        stored(dates, dated).await,
+        "2026-01-02 05:04:05|2026-01-02 03:04:05"
+    );
+    // A user's password and locale.
+    let user = hyscribe_rest::UserSave {
+        id: 704,
+        pass: Some(b"new-secret".to_vec()),
+        locale: Some(b"en_US".to_vec()),
+        ..hyscribe_rest::UserSave::default()
+    };
+    assert_eq!(
+        act(hyscribe_rest::Write::User(Box::new(user))).await,
+        Outcome::Written(704)
+    );
+    let pass = stored("SELECT user_pass FROM wp_users WHERE ID = ?", 704).await;
+    assert!(hyscribe_auth::check_password(
+        b"new-secret",
+        pass.as_bytes()
+    ));
+    let locale = "SELECT meta_value FROM wp_usermeta WHERE user_id = ? AND meta_key = 'locale'";
+    assert_eq!(stored(locale, 704).await, "en_US");
     let flood = Outcome::Refused("comment_flood");
     assert_eq!(act(comment(0, "hold")).await, flood);
     // A text setting given an array, which sanitize_option() does not port.

@@ -331,7 +331,7 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
     if slug && matches!(slugged, Some("draft" | "pending")) {
         save.unique_slug = Some(save.parent.unwrap_or_default());
     }
-    after_save(context, params, kind, &mut save)?;
+    after_save(context, params, kind, &mut save);
     let hook = format!("rest_pre_insert_{}", kind.name());
     let save = crate::hooks::apply_filters(&hook, save, &[params]);
     let unfiltered_html = context.can("unfiltered_html");
@@ -401,12 +401,7 @@ fn protection(
 /// What `create_item()` and `update_item()` do once the post is saved:
 /// stickiness (a create always), the featured image, the template and the
 /// terms.
-fn after_save(
-    context: &Context,
-    params: &Params,
-    kind: Kind,
-    save: &mut Save,
-) -> Result<(), RestError> {
+fn after_save(context: &Context, params: &Params, kind: Kind, save: &mut Save) {
     if kind == Kind::Post {
         let sticky = params.get("sticky").map(|sticky| !sticky.is_empty());
         save.sticky = sticky.or((save.id == 0).then_some(false));
@@ -447,7 +442,6 @@ fn after_save(
             });
     }
     save.template = params.get("template").map(Value::to_php_string);
-    Ok(())
 }
 
 /// `check_template()`: no template, the post's own, or one of

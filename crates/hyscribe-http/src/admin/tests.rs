@@ -2780,5 +2780,6 @@ async fn the_site_health_info_tab() {
     }
 }
 
+mod clean_urls;
 mod comment_saves;
 mod revisions;

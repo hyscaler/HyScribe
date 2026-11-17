@@ -903,7 +903,8 @@ fn location(
     } else {
         reads.home_url().into_bytes()
     };
-    String::from_utf8_lossy(&wp_sanitize_redirect(&location)).into_owned()
+    // Into hs-admin by its screens' clean URLs (ADR 0008).
+    hyscribe_admin::menu::clean_links(&String::from_utf8_lossy(&wp_sanitize_redirect(&location)))
 }
 
 pub(crate) mod limits;

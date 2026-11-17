@@ -658,9 +658,11 @@ async fn page(
     body: axum::body::Bytes,
 ) -> Response {
     // Before the method check, so a login form's POST is redirected too.
-    if let Some((status, location)) = admin_redirect(&site, uri.path(), uri.query()) {
+    let read = method == Method::GET || method == Method::HEAD;
+    if let Some((status, location)) = admin_redirect(&site, uri.path(), uri.query(), read) {
         return (status, [(header::LOCATION, location)]).into_response();
     }
+    let uri = in_place(uri);
     let (head, post) = (method == Method::HEAD, method == Method::POST);
     let page_method = method == Method::GET || head || post;
     let file = files::static_file(uri.path(), &headers, now() as u64);
@@ -1356,11 +1358,13 @@ fn canonical_path(site: &Site, path: &str, raw_query: Option<&str>) -> Option<St
 ///
 /// Those redirects are 307: browsers do not cache them, so a site switched
 /// back to PHP WordPress gets its own admin back, and a POST stays a POST.
-/// HyScribe's own URLs with `.php` get a permanent 308 to the clean form.
+/// `/hs-login.php` gets a permanent 308; `/hs-admin/<screen>.php` a 301 when
+/// `read` (GET or HEAD), else it is served [`in_place`].
 fn admin_redirect(
     site: &Site,
     path: &str,
     raw_query: Option<&str>,
+    read: bool,
 ) -> Option<(StatusCode, String)> {
     let (status, target) = match path {
         "/wp-login.php" => (StatusCode::TEMPORARY_REDIRECT, "/hs-login".to_string()),
@@ -1372,8 +1376,8 @@ fn admin_redirect(
                 path.strip_prefix("/hs-admin/"),
             ) {
                 (Some(screen), _) => (StatusCode::TEMPORARY_REDIRECT, screen),
-                (None, Some(screen)) if screen.ends_with(".php") => {
-                    (StatusCode::PERMANENT_REDIRECT, screen)
+                (None, Some(screen)) if read && screen.ends_with(".php") => {
+                    (StatusCode::MOVED_PERMANENTLY, screen)
                 }
                 _ => return None,
             };
@@ -1384,6 +1388,20 @@ fn admin_redirect(
     };
     let query = raw_query.map(|q| format!("?{q}")).unwrap_or_default();
     Some((status, format!("{}{target}{query}", site.home)))
+}
+
+/// `uri` with `/hs-admin/<screen>.php` as `/hs-admin/<screen>`: a request
+/// other than a GET or HEAD is served there, as a redirect would drop its body.
+fn in_place(uri: Uri) -> Uri {
+    let Some(screen) = uri
+        .path()
+        .strip_prefix("/hs-admin/")
+        .and_then(|screen| screen.strip_suffix(".php"))
+    else {
+        return uri;
+    };
+    let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
+    format!("/hs-admin/{screen}{query}").parse().unwrap_or(uri)
 }
 
 /// Paths no canonical redirect touches: the static trees, the login screen

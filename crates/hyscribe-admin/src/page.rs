@@ -14,7 +14,7 @@ use hyscribe_render::post::sanitize_html_class;
 
 use crate::admin_bar::{BarSite, Browser, admin_bar};
 use crate::assets::{Assets, Urls, cookie_path, site_icon_tags};
-use crate::menu::{Look, Screen, admin_menu, commands};
+use crate::menu::{Look, Screen, admin_menu, clean_links, commands};
 
 /// `wp_removable_query_args()`: what the canonical admin URL leaves out.
 pub const REMOVABLE: [&[u8]; 28] = [
@@ -440,7 +440,7 @@ pub fn admin_page(site: &dyn PageSite, page: &Page, browser: &Browser) -> Option
     html.push_str(&screen_meta(page));
     html.push_str(page.content);
     html.push_str(&footer(site, page, &mut assets));
-    Some(html)
+    Some(clean_links(&html))
 }
 
 /// `admin_enqueue_scripts`: what every screen enqueues, with this

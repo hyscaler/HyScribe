@@ -160,6 +160,22 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     }
 }
 
+/// The block templates `get_post_templates()` gives `post_type`: for a
+/// public type, the custom ones of `get_block_templates()`, by slug.
+pub(crate) fn post_templates(
+    context: &Context,
+    post_type: &[u8],
+) -> Result<Vec<Vec<u8>>, RestError> {
+    if !matches!(post_type, b"post" | b"page" | b"attachment") {
+        return Ok(Vec::new());
+    }
+    let all = templates(context, &Query::default(), Kind::Template)?;
+    let custom = all
+        .into_iter()
+        .filter(|template| template.custom_for(post_type));
+    Ok(custom.map(|template| template.slug).collect())
+}
+
 fn cannot_manage(context: &Context) -> RestError {
     let message = "Sorry, you are not allowed to access the templates on this site.";
     context.forbidden("rest_cannot_manage_templates", message)

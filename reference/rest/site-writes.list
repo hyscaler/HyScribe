@@ -6,12 +6,12 @@
 # body as every identity, the database put back after each. Creates,
 # updates, trashes and deletes, the fields a type's schema does not have
 # left alone, a synced pattern's empty content, and what HyScribe does not
-# port (meta, pattern categories, a template), flagged refused.
+# port (meta, pattern categories), flagged refused.
 POST	/?rest_route=/wp/v2/navigation	json,restore	{"title":"Footer","content":"<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"http://127.0.0.1:8081/\",\"kind\":\"custom\"} /-->","status":"publish"}
 POST	/?rest_route=/wp/v2/navigation	json,restore	{"title":"Draft nav","status":"draft","slug":"header"}
 POST	/?rest_route=/wp/v2/navigation	json,restore	{}
 POST	/?rest_route=/wp/v2/navigation	json,restore	{"title":"Ignored","excerpt":"Not kept","author":702,"featured_media":2,"comment_status":"open","date":"2026-01-02T03:04:05"}
-POST	/?rest_route=/wp/v2/navigation	json,restore,refused	{"title":"Templated","template":"page-no-title"}
+POST	/?rest_route=/wp/v2/navigation	json,restore	{"title":"Templated","template":"page-no-title"}
 POST	/?rest_route=/wp/v2/navigation/851	json,restore	{"title":"Header renamed","content":"<!-- wp:navigation-link {\"label\":\"Only\",\"url\":\"https://example.test/\",\"kind\":\"custom\"} /-->"}
 PUT	/?rest_route=/wp/v2/navigation/852	json,restore	{"status":"publish","slug":"header"}
 POST	/?rest_route=/wp/v2/navigation/999	json,restore	{"title":"Gone"}

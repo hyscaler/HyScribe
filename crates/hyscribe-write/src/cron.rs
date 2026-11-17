@@ -23,7 +23,7 @@ use jobs::{
     check_and_publish_future_post, wp_delete_auto_drafts, wp_privacy_delete_old_export_files,
     wp_privacy_personal_data_cleanup_requests, wp_scheduled_delete,
 };
-pub use wp_cron::{Ran, microtime, wp_cron};
+pub use wp_cron::{Begun, Ran, begun, microtime, wp_cron};
 
 type Result<T> = std::result::Result<T, Error>;
 

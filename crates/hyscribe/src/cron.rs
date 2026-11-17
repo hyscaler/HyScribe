@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use hyscribe_config::{Config, Mode};
 use hyscribe_db::Writer;
-use hyscribe_write::cron::{Ran, microtime, wp_cron};
+use hyscribe_write::cron::{Ran, begun, microtime, wp_cron};
 
 /// `WP_CRON_LOCK_TIMEOUT`: how often the task looks for due events.
 pub(crate) const EVERY: Duration = Duration::from_secs(60);
@@ -73,7 +73,7 @@ async fn once(
     out: &mut dyn Write,
 ) {
     let run = (settings.constants, settings.uploads.as_path());
-    let ran = wp_cron(async || writer.begin().await, run, clock, failed).await;
+    let ran = wp_cron(&|| begun(writer.begin()), run, clock, failed).await;
     let lines = match ran {
         Ok(Ran::Idle) => Vec::new(),
         Ok(Ran::Locked) => vec!["cron: another process holds the lock; waiting".to_string()],

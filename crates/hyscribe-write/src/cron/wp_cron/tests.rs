@@ -68,7 +68,7 @@ async fn next(writer: &Writer, hook: &str) -> Option<i64> {
 /// A run at `time` with nothing failed before.
 async fn at(writer: &Writer, time: f64, uploads: &Path) -> Ran {
     wp_cron(
-        async || writer.begin().await,
+        &|| begun(writer.begin()),
         (Constants::default(), uploads),
         &|| time,
         &mut Vec::new(),
@@ -236,7 +236,7 @@ async fn a_failing_job_keeps_its_event_and_its_hook_waits() {
     let mut failed = Vec::new();
     let settings = (Constants::default(), uploads.as_path());
     let clock = || now as f64;
-    let ran = wp_cron(async || writer.begin().await, settings, &clock, &mut failed)
+    let ran = wp_cron(&|| begun(writer.begin()), settings, &clock, &mut failed)
         .await
         .unwrap();
     let Ran::Done { events, stolen } = &ran else {
@@ -266,7 +266,7 @@ async fn a_failing_job_keeps_its_event_and_its_hook_waits() {
     assert_eq!(posts, [args(Some(1)), args(Some(2))]);
     drop(write);
     // A later run leaves the hook, so nothing is due for it.
-    let ran = wp_cron(async || writer.begin().await, settings, &clock, &mut failed)
+    let ran = wp_cron(&|| begun(writer.begin()), settings, &clock, &mut failed)
         .await
         .unwrap();
     assert!(matches!(ran, Ran::Idle));
@@ -281,18 +281,21 @@ async fn a_lock_taken_at_the_end_is_left() {
         saves(&["DELETE FROM wp_options WHERE option_name = '_transient_doing_cron'"]).await;
     let count = std::cell::Cell::new(0);
     // The run's seventh action is its last: due, lock, and two events' run and check.
-    let begin = async || {
-        if count.replace(count.get() + 1) == 6 {
-            let mut write = writer.begin().await?;
-            write
-                .update_option("_transient_doing_cron", b"theirs")
-                .await?;
-            write.commit().await?;
-        }
-        writer.begin().await
+    let begin = || {
+        let (n, writer) = (count.replace(count.get() + 1), &writer);
+        begun(async move {
+            if n == 6 {
+                let mut write = writer.begin().await?;
+                write
+                    .update_option("_transient_doing_cron", b"theirs")
+                    .await?;
+                write.commit().await?;
+            }
+            writer.begin().await
+        })
     };
     let settings = (Constants::default(), uploads.as_path());
-    let ran = wp_cron(begin, settings, &|| PHP_TIME + 60.0, &mut Vec::new()).await;
+    let ran = wp_cron(&begin, settings, &|| PHP_TIME + 60.0, &mut Vec::new()).await;
     assert!(!done(ran.unwrap()).1);
     assert_eq!(count.get(), 7);
     let lock = option(&writer, "_transient_doing_cron").await;
@@ -316,27 +319,30 @@ async fn database_errors_stop_a_run() {
         .unwrap();
     let no_lock = "DELETE FROM wp_options WHERE option_name = '_transient_doing_cron'";
     // A run begins seven actions: the eighth "failure" is never reached.
-    let mut begun = 0;
+    let mut started = 0;
     for action in 0..8 {
         let mut worked = false;
         for budget in std::iter::once(None).chain((0..16).map(Some)) {
             let writer = saves(&[no_lock]).await;
             let count = std::cell::Cell::new(0);
-            let begin = async || {
+            let begin = || {
                 let n = count.replace(count.get() + 1);
-                match budget {
-                    None if n == action => refused.begin().await,
-                    Some(budget) if n == action => {
-                        let mut write = writer.begin().await?;
-                        write.fail_after(budget);
-                        Ok(write)
+                let (writer, refused) = (&writer, &refused);
+                begun(async move {
+                    match budget {
+                        None if n == action => refused.begin().await,
+                        Some(budget) if n == action => {
+                            let mut write = writer.begin().await?;
+                            write.fail_after(budget);
+                            Ok(write)
+                        }
+                        _ => writer.begin().await,
                     }
-                    _ => writer.begin().await,
-                }
+                })
             };
             let settings = (Constants::default(), uploads.as_path());
-            let ran = wp_cron(begin, settings, &|| PHP_TIME + 60.0, &mut Vec::new()).await;
-            begun = count.get();
+            let ran = wp_cron(&begin, settings, &|| PHP_TIME + 60.0, &mut Vec::new()).await;
+            started = count.get();
             match ran {
                 Err(err) => assert!(matches!(err, crate::Error::Db(_)), "{err:?}"),
                 Ok(_) => {
@@ -347,5 +353,5 @@ async fn database_errors_stop_a_run() {
         }
         assert!(worked, "action {action}");
     }
-    assert_eq!(begun, 7);
+    assert_eq!(started, 7);
 }

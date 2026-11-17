@@ -4,7 +4,9 @@
 //! hooks HyScribe runs, behind the `doing_cron` transient PHP takes, so a
 //! PHP WordPress on the same database never runs the list at the same time.
 
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
 
 use hyscribe_config::Constants;
 use hyscribe_db::{DbError, Write};
@@ -32,6 +34,17 @@ pub enum Ran {
         /// Whether the lock was taken from it.
         stolen: bool,
     },
+}
+
+/// An action being started, as `Writer::begin` starts one.
+pub type Begun<'a, 'w> =
+    Pin<Box<dyn Future<Output = std::result::Result<Write<'w>, DbError>> + 'a>>;
+
+/// `begin` as a [`Begun`], so [`wp_cron`] takes any way to start an action.
+pub fn begun<'a, 'w>(
+    begin: impl Future<Output = std::result::Result<Write<'w>, DbError>> + 'a,
+) -> Begun<'a, 'w> {
+    Box::pin(begin)
 }
 
 /// PHP's `microtime( true )`: seconds and microseconds.
@@ -91,8 +104,8 @@ async fn context(write: &mut Write<'_>, constants: Constants, now: i64) -> Resul
 /// action `begin` starts: the due events of HyScribe's hooks behind the
 /// lock. A job that fails keeps its event and joins `failed`, whose hooks
 /// are not run again; `uploads` holds the personal data exports.
-pub async fn wp_cron<'w>(
-    begin: impl AsyncFn() -> std::result::Result<Write<'w>, DbError>,
+pub async fn wp_cron<'a, 'w>(
+    begin: &'a dyn Fn() -> Begun<'a, 'w>,
     (constants, uploads): (Constants, &Path),
     clock: &dyn Fn() -> f64,
     failed: &mut Vec<Job>,

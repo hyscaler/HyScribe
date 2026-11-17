@@ -13,12 +13,13 @@ use hyscribe_admin::dashboard::DashboardSite;
 use hyscribe_admin::editor::page::preload_paths;
 use hyscribe_admin::editor::{Target, target};
 use hyscribe_admin::menu::MenuUser;
+use hyscribe_admin::site_editor;
 use hyscribe_db::{DbError, Write, Writer};
 use hyscribe_model::Post;
 use hyscribe_phpser::Value;
 use hyscribe_write::Error;
 use hyscribe_write::options::settings_errors_shown;
-use hyscribe_write::posts::{Context, Edited, block_editor_view};
+use hyscribe_write::posts::{Context, Edited, block_editor_view, site_editor_view};
 use tokio::runtime::Handle;
 
 use super::saves::dashboard::{context, quick_press_draft, welcome};
@@ -40,6 +41,8 @@ pub(super) struct View {
     rules: bool,
     /// The block editor's post, for a page whose preloads are all answered.
     editor: Option<Target>,
+    /// Whether the view is the site editor's page, its preloads answered.
+    site_editor: bool,
 }
 
 /// The Settings screens, whose `options-head.php` shows a save's notices.
@@ -97,24 +100,46 @@ pub(super) fn plan(
         _ => None,
     };
     let editor = screen.and_then(|screen| target(&*admin, screen, query));
+    let preloads = |paths: &[_]| crate::rest::preloads(admin.reads, (admin.user.id, host), paths);
     View {
         synced,
         welcome,
         draft: dashboard && needs_draft(admin),
         settings: updated && SETTINGS.contains(&path),
         rules: path == "/hs-admin/options-permalink",
-        editor: editor.filter(|target| {
-            let preloads =
-                |paths: &[_]| crate::rest::preloads(admin.reads, (admin.user.id, host), paths);
-            answered_before(admin, target, &preloads)
-        }),
+        editor: editor.filter(|target| answered_before(admin, target, &preloads)),
+        site_editor: path == "/hs-admin/site-editor" && site_editor_before(admin, query, &preloads),
     }
 }
 
+/// Whether `paths` but those naming the theme's global styles post, which
+/// an editor's view may write first, are all answered by `preloads`.
+fn unwritten_answered(mut paths: Vec<(&'static str, String)>, preloads: &Preloads) -> bool {
+    // The active theme's route links the global styles post.
+    let named = ["/wp/v2/global-styles/0", "/wp/v2/themes?"];
+    paths.retain(|(_, path)| !named.iter().any(|name| path.contains(name)));
+    preloads(&paths).is_some()
+}
+
+/// Whether `query` asks for the site editor's page, past its redirects and
+/// refusals, with a post that is ported and every preload its view does
+/// not write answered: only then does the view write.
+fn site_editor_before(admin: &Admin, query: &str, preloads: &Preloads) -> bool {
+    if !admin.can("edit_theme_options") || site_editor::site_editor(query, "").is_some() {
+        return false;
+    }
+    let Some(post) = site_editor::context_post(admin, query) else {
+        return false;
+    };
+    let stylesheet = admin.site.option("stylesheet");
+    let paths = site_editor::preload_paths(post.as_ref(), 0, &stylesheet);
+    unwritten_answered(paths, preloads)
+}
+
 /// Whether the block editor's preloads that do not name the theme's global
-/// styles post, which its view may write first, are all answered: only
-/// then does the view write. A new post's routes, of ID 0 until the view
-/// writes it, answer as a missing post's. `preloads` answers the paths.
+/// styles post are all answered: only then does the view write. A new
+/// post's routes, of ID 0 until the view writes it, answer as a missing
+/// post's. `preloads` answers the paths.
 fn answered_before(admin: &Admin, target: &Target, preloads: &Preloads) -> bool {
     let post = match target {
         Target::Edit(post) => (**post).clone(),
@@ -126,11 +151,8 @@ fn answered_before(admin: &Admin, target: &Target, preloads: &Preloads) -> bool 
     };
     let stylesheet = admin.site.option("stylesheet");
     let edit_theme = admin.can("edit_theme_options");
-    let mut paths = preload_paths(&post, 0, edit_theme, &stylesheet);
-    // The active theme's route links the global styles post.
-    let named = ["/wp/v2/global-styles/0", "/wp/v2/themes?"];
-    paths.retain(|(_, path)| !named.iter().any(|name| path.contains(name)));
-    preloads(&paths).is_some()
+    let paths = preload_paths(&post, 0, edit_theme, &stylesheet);
+    unwritten_answered(paths, preloads)
 }
 
 /// Whether the Quick Draft form needs a new auto-draft: the user may
@@ -149,6 +171,7 @@ pub(super) fn quick_press(admin: &Admin) -> View {
         settings: false,
         rules: false,
         editor: None,
+        site_editor: false,
     }
 }
 
@@ -198,6 +221,18 @@ async fn editor_written(
     write.commit().await.map(|()| ids).map_err(Error::from)
 }
 
+/// The site editor's view, written from `write` and committed: the theme's
+/// global styles post's ID.
+async fn site_editor_written(
+    write: Result<Write<'_>, DbError>,
+    ctx: &Context,
+    theme: (&str, &str),
+) -> Result<u64, Error> {
+    let mut write = write?;
+    let styles = site_editor_view(&mut write, ctx, theme).await?;
+    write.commit().await.map(|()| styles).map_err(Error::from)
+}
+
 /// The page `render` answers with the view's writes: the dashboard's
 /// first, as the page shows its auto-draft, the others' after it.
 pub(super) fn viewed(
@@ -216,16 +251,24 @@ pub(super) fn viewed(
             admin.site.constants,
         )
     };
-    // The block editor's view writes before its page reads what it wrote.
+    // The editors' views write before their pages read what they wrote.
+    let theme = (admin.site.option("stylesheet"), admin.site.theme.name());
+    let theme = (theme.0.as_str(), theme.1.as_str());
     if let Some(target) = &view.editor {
-        let theme = (admin.site.option("stylesheet"), admin.site.theme.name());
-        let theme = (theme.0.as_str(), theme.1.as_str());
         let viewed = handle
             .block_on(async { editor_written(writer.begin().await, &ctx, target, theme).await });
         match viewed {
             Ok((id, styles)) => {
                 admin.edited = Some((id, styles, format!("{}:{}", ctx.now, ctx.user)));
             }
+            Err(err) => return failed(admin, err),
+        }
+    }
+    if view.site_editor {
+        let viewed =
+            handle.block_on(async { site_editor_written(writer.begin().await, &ctx, theme).await });
+        match viewed {
+            Ok(styles) => admin.styles = Some(styles),
             Err(err) => return failed(admin, err),
         }
     }

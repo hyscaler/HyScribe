@@ -1,10 +1,12 @@
 <?php
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Run by reference/post-edit/editor-golden.sh, with plain PHP: prints the
-// golden rows of one block editor page (its path, the nonces file of the
-// request's user, the case's name). The JSON values are kept as the page
-// prints them, never decoded and encoded again.
+// Run by reference/post-edit/editor-golden.sh and
+// reference/site-editor/page-golden.sh, with plain PHP: prints the golden
+// rows of one block editor or site editor page (its path, the nonces file
+// of the request's user, the case's name, and a directory to keep the
+// masked page in, if any). The JSON values are kept as the page prints
+// them, never decoded and encoded again.
 
 list( , $path, $nonces, $case ) = $argv;
 $page = file_get_contents( $path );
@@ -74,23 +76,41 @@ function row( $case, $part, $value ) {
 	echo "$case\t$part\t$value\n";
 }
 
-preg_match( '/initializeEditor\( \'editor\', "([a-z_]+)", (\d+), /', $page, $start );
-row( $case, 'post', "$start[1] $start[2]" );
-$settings = json_after( $page, $start[0] );
+// The site editor's settings, else the block editor's post and settings.
+$site_marker = 'wp.editSite.initializeEditor( "site-editor", ';
+$site        = false !== strpos( $page, $site_marker );
+if ( $site ) {
+	$settings = json_after( $page, $site_marker );
+} else {
+	preg_match( '/initializeEditor\( \'editor\', "([a-z_]+)", (\d+), /', $page, $start );
+	row( $case, 'post', "$start[1] $start[2]" );
+	$settings = json_after( $page, $start[0] );
+}
 foreach ( members( $settings ) as $key => $value ) {
 	row( $case, "settings.$key", $value );
 }
-$at = strpos( $page, $start[0] ) + strlen( $start[0] ) + strlen( $settings ) + 2;
-row( $case, 'edits', substr( $page, $at, json_end( $page, $at ) - $at ) );
-row( $case, 'categories', json_after( $page, 'wp.blocks.setCategories( ' ) );
-row( $case, 'bindings', json_after( $page, 'for ( const source of ' ) );
-row( $case, 'blocks', json_after( $page, 'wp.blocks.unstable__bootstrapServerSideBlockDefinitions(' ) );
-$from = strpos( $page, '<div class="block-editor">' );
-$to   = strpos( $page, '<div class="clear"></div></div><!-- wpbody-content -->' );
-row( $case, 'body', bin2hex( substr( $page, $from, $to - $from ) ) );
+if ( ! $site ) {
+	$at = strpos( $page, $start[0] ) + strlen( $start[0] ) + strlen( $settings ) + 2;
+	row( $case, 'edits', substr( $page, $at, json_end( $page, $at ) - $at ) );
+}
+$parts = array(
+	'categories' => 'wp.blocks.setCategories( ',
+	'bindings'   => 'for ( const source of ',
+	'blocks'     => 'wp.blocks.unstable__bootstrapServerSideBlockDefinitions(',
+);
+foreach ( $parts as $part => $marker ) {
+	$parts[ $part ] = array( $marker, json_after( $page, $marker ) );
+	row( $case, $part, $parts[ $part ][1] );
+}
+if ( ! $site ) {
+	$from = strpos( $page, '<div class="block-editor">' );
+	$to   = strpos( $page, '<div class="clear"></div></div><!-- wpbody-content -->' );
+	row( $case, 'body', bin2hex( substr( $page, $from, $to - $from ) ) );
+}
 
-// The preloaded responses, which depend on the moment, by path; the page
-// with them left out, kept in the directory $argv[4] names if any.
+// The preloaded responses, which the REST goldens hold, by path; the page
+// with them left out, and the site editor's also without the settings and
+// the parts above.
 $marker   = 'wp.apiFetch.createPreloadingMiddleware( ';
 $preloads = json_after( $page, $marker );
 $keys     = array();
@@ -99,6 +119,12 @@ foreach ( members( $preloads ) as $key => $value ) {
 }
 row( $case, 'preloads', implode( ' ', $keys ) );
 $whole = str_replace( $marker . $preloads, $marker . '%preloads%', $page );
+if ( $site ) {
+	$whole = str_replace( $settings, '%settings%', $whole );
+	foreach ( $parts as $part => list( $marker, $value ) ) {
+		$whole = str_replace( $marker . $value, "$marker%$part%", $whole );
+	}
+}
 row( $case, 'html', bin2hex( $whole ) );
 if ( isset( $argv[4] ) ) {
 	file_put_contents( "$argv[4]/$case.masked.html", $whole );

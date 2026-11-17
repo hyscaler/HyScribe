@@ -1,16 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `site-editor.php` for a user who may edit theme options: its redirects
-//! from older addresses and its refusal of an unknown post type; the
-//! editor's page is not ported.
+//! from older addresses, its refusal of an unknown post type, and its page.
 
 use hyscribe_auth::caps::post_type_exists;
+use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, add_query_arg, is_empty_string, remove_query_arg};
 use hyscribe_render::post::POST_FORMATS;
-use hyscribe_render::template_types::{DEFAULT_TYPES, PART_AREAS, default_type};
+use hyscribe_render::template_types::{DEFAULT_TYPES, default_type};
 
-use crate::page::{object, query_strings, text as page_text};
-use crate::posts::Answer;
+use crate::assets::{Assets, Urls};
+use crate::editor::EditorSite;
+use crate::editor::form::block_scripts;
+use crate::editor::page::{INDEX_FIELDS, editor_assets};
+use crate::editor::settings::{Editor, Settings, get_block_editor_settings};
+use crate::media::{MEDIA_SCRIPTS, MEDIA_STYLES};
+use crate::menu::Screen;
+use crate::page::{
+    Extras, Page, Request, admin_page_with, json as page_json, object, query_strings,
+    text as page_text,
+};
+use crate::posts::{Answer, PostsSite};
 use crate::text;
 
 /// `site-editor.php` with the query `query`, requested as `uri`
@@ -100,19 +110,6 @@ fn template_types() -> Value {
     list(types)
 }
 
-/// `get_allowed_block_template_part_areas()` as PHP lists it.
-fn part_areas() -> Value {
-    list(PART_AREAS.iter().map(|area| {
-        object(vec![
-            ("area", page_text(area.area)),
-            ("label", page_text(area.label)),
-            ("description", page_text(area.description)),
-            ("icon", page_text(area.icon)),
-            ("area_tag", page_text(area.tag)),
-        ])
-    }))
-}
-
 fn list(items: impl Iterator<Item = Value>) -> Value {
     Value::Array((0..).map(Key::Int).zip(items).collect())
 }
@@ -126,7 +123,10 @@ pub fn custom_settings(site_url: &str, posts_per_page: Vec<u8>) -> Vec<(&'static
         ("postsPerPage", Value::String(posts_per_page)),
         ("styles", Value::Null),
         ("defaultTemplateTypes", template_types()),
-        ("defaultTemplatePartAreas", part_areas()),
+        (
+            "defaultTemplatePartAreas",
+            crate::editor::form::part_areas(),
+        ),
         ("supportsLayout", Value::Bool(true)),
         ("supportsTemplatePartsMode", Value::Bool(false)),
         // Patterns and categories registered after `init`: none.
@@ -139,6 +139,184 @@ pub fn custom_settings(site_url: &str, posts_per_page: Vec<u8>) -> Vec<(&'static
             Value::Array(Vec::new()),
         ),
     ]
+}
+
+/// The post the page's arguments name, `postId` else `p`'s page: `Some(None)`
+/// for none or a missing one; `None` for arguments that are not strings
+/// and a post neither a post nor a page, which are not ported.
+pub fn context_post(site: &dyn PostsSite, query: &str) -> Option<Option<Post>> {
+    let args = query_strings(query)?;
+    let get = |name: &str| {
+        args.iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, v)| Value::String(v.clone().into_bytes()))
+    };
+    let id = match (get("postId"), get("p")) {
+        (Some(id), _) if !id.is_empty() && id.is_numeric() => Some(id.to_int()),
+        (_, Some(path)) => page_of(&path.to_php_string()),
+        _ => None,
+    };
+    let post = id
+        .and_then(|id| u64::try_from(id).ok())
+        .and_then(|id| site.post(id));
+    match post {
+        Some(post) if !["post", "page"].contains(&post.post_type.as_str()) => None,
+        post => Some(post),
+    }
+}
+
+/// The ID `preg_match( '/^\/page\/(\d+)$/', $path )` takes from `path`,
+/// whose `$` also matches before a last line break.
+fn page_of(path: &[u8]) -> Option<i64> {
+    let path = path.strip_suffix(b"\n").unwrap_or(path);
+    let digits = path.strip_prefix(b"/page/")?;
+    let numeric = !digits.is_empty() && digits.iter().all(u8::is_ascii_digit);
+    numeric.then(|| Value::String(digits.to_vec()).to_int())
+}
+
+/// `site-editor.php`'s `$preload_paths` with `post`, the post it names:
+/// each method and path. `styles` is the theme's global styles post.
+pub fn preload_paths(
+    post: Option<&Post>,
+    styles: u64,
+    stylesheet: &str,
+) -> Vec<(&'static str, String)> {
+    let get = |path: &str| ("GET", path.to_string());
+    let options = |path: &str| ("OPTIONS", path.to_string());
+    let mut paths = vec![
+        options("/wp/v2/media"),
+        options("/wp/v2/pages"),
+        get("/wp/v2/types?context=view"),
+        get("/wp/v2/types/wp_template?context=edit"),
+        get("/wp/v2/types/wp_template_part?context=edit"),
+        get("/wp/v2/templates?context=edit&per_page=-1"),
+        get("/wp/v2/template-parts?context=edit&per_page=-1"),
+        get("/wp/v2/themes?context=edit&status=active"),
+        get(&format!("/wp/v2/global-styles/{styles}?context=edit")),
+        options(&format!("/wp/v2/global-styles/{styles}")),
+        get(&format!(
+            "/wp/v2/global-styles/themes/{stylesheet}?context=view"
+        )),
+        get(&format!(
+            "/wp/v2/global-styles/themes/{stylesheet}/variations?context=view"
+        )),
+        options("/wp/v2/navigation"),
+        get(
+            "/wp/v2/navigation?context=edit&per_page=100&order=desc&orderby=date&status[0]=publish&status[1]=draft",
+        ),
+        get("/wp/v2/settings"),
+        options("/wp/v2/settings"),
+        get("/wp/v2/block-patterns/categories"),
+        get(&format!("/?_fields={INDEX_FIELDS}")),
+    ];
+    match post {
+        Some(post) if post.post_type == "page" => {
+            paths.push(get(&format!("/wp/v2/pages/{}?context=edit", post.id)));
+            let slug = match post.name.is_empty() {
+                true => "page".into(),
+                false => format!("page-{}", String::from_utf8_lossy(&post.name)),
+            };
+            paths.push(get(&format!("/wp/v2/templates/lookup?slug={slug}")));
+        }
+        Some(post) => paths.push(get(&format!("/wp/v2/posts/{}?context=edit", post.id))),
+        None => {
+            paths.push(get("/wp/v2/templates/lookup?slug=front-page"));
+            paths.push(get("/wp/v2/templates/lookup?slug=home"));
+        }
+    }
+    paths
+}
+
+/// The styles the page enqueues before `admin-header.php`.
+const STYLES: [&str; 6] = [
+    "wp-edit-site",
+    "wp-format-library",
+    MEDIA_STYLES[0],
+    MEDIA_STYLES[1],
+    "wp-block-directory",
+    "global-styles-css-custom-properties",
+];
+
+/// The scripts the page enqueues before `admin-header.php`.
+const SCRIPTS: [&str; 8] = [
+    "wp-edit-site",
+    "wp-format-library",
+    MEDIA_SCRIPTS[0],
+    MEDIA_SCRIPTS[1],
+    MEDIA_SCRIPTS[2],
+    MEDIA_SCRIPTS[3],
+    "wp-block-styles",
+    "wp-block-directory",
+];
+
+/// The page's markup.
+const CONTENT: &str = "\n<div class=\"edit-site\" id=\"site-editor\">\n\t\t<div class=\"wrap hide-if-js site-editor-no-js\">\n\t\t<h1 class=\"wp-heading-inline\">Edit Site</h1>\n\t\t<div class=\"notice notice-error hide-if-js\"><p>The site editor requires JavaScript. Please enable JavaScript in your browser settings.</p></div>\t</div>\n</div>\n\n";
+
+/// The site editor's page with `post`, the post its arguments name, and
+/// `preloads`, the memo `preloaded()` gives; `None` for a user the menu
+/// turns away.
+pub fn site_editor_page(
+    site: &dyn EditorSite,
+    post: Option<&Post>,
+    preloads: &Value,
+    request: &Request,
+) -> Option<String> {
+    let site_url = Urls::site_url(site);
+    let per_page = site.option("posts_per_page").unwrap_or_default();
+    let mut custom = Settings::default();
+    for (key, value) in custom_settings(&site_url, per_page) {
+        custom.set(key, value);
+    }
+    let settings = get_block_editor_settings(site, custom, Editor::Site(post));
+    let [categories, definitions, bindings] = block_scripts();
+    let edit_site = format!(
+        "wp.domReady( function() {{\n\t\t\twp.editSite.initializeEditor( \"site-editor\", {} );\n\t\t}} );",
+        page_json(&settings)
+    );
+    let (templates, media) = crate::media::enqueue_media(site, request.browser, None);
+    let more = |assets: &mut Assets| {
+        editor_assets(site, assets, preloads);
+        for script in [definitions.as_str(), &bindings, &categories] {
+            assets.add_inline_script("wp-blocks", "after", script);
+        }
+        assets.add_inline_script("wp-edit-site", "after", &edit_site);
+    };
+    let modules = ["@wordpress/latex-to-mathml/loader".to_string()];
+    let extras = Extras {
+        body_class: " is-fullscreen-mode",
+        block_editor: true,
+        modules: &modules,
+        assets: Some(&more),
+        footer: None,
+    };
+    let page = Page {
+        screen: Screen {
+            pagenow: "site-editor.php",
+            typenow: "",
+            taxonomy: "",
+            parent_file: Some("themes.php"),
+            submenu_file: None,
+        },
+        id: "site-editor",
+        title: "Editor",
+        help: &[],
+        sidebar: "",
+        screen_options: "",
+        styles: &STYLES,
+        scripts: &SCRIPTS,
+        late_scripts: &[],
+        script_data: &media,
+        script_after: &[],
+        late_styles: &[],
+        admin_head: "",
+        admin_footer: &templates,
+        footer_scripts: "",
+        content: CONTENT,
+        canonical: request.canonical,
+        origin: request.origin,
+        view: None,
+    };
+    admin_page_with(site, &page, request.browser, &extras)
 }
 
 #[cfg(test)]

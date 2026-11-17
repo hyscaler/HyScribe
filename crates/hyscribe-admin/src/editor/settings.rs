@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `get_block_editor_settings()` for the post editor, over the bundled
-//! block theme and what a default install hooks to it.
+//! `get_block_editor_settings()` for the post and site editors, over the
+//! bundled block theme and what a default install hooks to it.
 
 use std::sync::OnceLock;
 
@@ -371,10 +371,19 @@ fn first_block<'b>(blocks: &'b [Block], name: &str) -> Option<&'b Block> {
     })
 }
 
-/// `get_block_editor_settings( $custom, $context )` for the post editor of
-/// `post`: the defaults, then `custom`, then what the theme's data and the
-/// site's options give.
-pub fn get_block_editor_settings(site: &dyn EditorSite, custom: Settings, post: &Post) -> Value {
+/// The editor `get_block_editor_settings()` is for: its context.
+#[derive(Clone, Copy)]
+pub enum Editor<'p> {
+    /// `core/edit-post` of a post.
+    Post(&'p Post),
+    /// `core/edit-site`, of the post its arguments name, if any.
+    Site(Option<&'p Post>),
+}
+
+/// `get_block_editor_settings( $custom, $context )` for `editor`: the
+/// defaults, then `custom`, then what the theme's data and the site's
+/// options give.
+pub fn get_block_editor_settings(site: &dyn EditorSite, custom: Settings, editor: Editor) -> Value {
     let mut settings = defaults(site);
     for (key, value) in custom.0 {
         settings.set(&String::from_utf8_lossy(&key.to_php_string()), value);
@@ -451,15 +460,20 @@ pub fn get_block_editor_settings(site: &dyn EditorSite, custom: Settings, post: 
         ("avatarURL", Value::String(avatar)),
     ]);
     settings.set("__experimentalDiscussionSettings", discussion);
-    let attributes = post_content_attributes(site, post);
-    attributes
-        .into_iter()
-        .for_each(|value| settings.set("postContentAttributes", value));
-    // The `edit_block_binding` capability maps to `edit_post` of the post.
-    settings.set(
-        "canUpdateBlockBindings",
-        Value::Bool(site.can_post("edit_post", post)),
-    );
+    // Only the post editor sets `$post_ID`.
+    if let Editor::Post(post) = editor {
+        let attributes = post_content_attributes(site, post);
+        attributes
+            .into_iter()
+            .for_each(|value| settings.set("postContentAttributes", value));
+    }
+    // `edit_block_binding` maps to `edit_post` of the context's post, else
+    // in the site editor to `edit_theme_options`.
+    let bindings = match editor {
+        Editor::Post(post) | Editor::Site(Some(post)) => site.can_post("edit_post", post),
+        Editor::Site(None) => site.can("edit_theme_options"),
+    };
+    settings.set("canUpdateBlockBindings", Value::Bool(bindings));
     // `edit_css` maps to `unfiltered_html` on a single site.
     settings.set("canEditCSS", Value::Bool(site.can("unfiltered_html")));
     Value::Array(settings.0)

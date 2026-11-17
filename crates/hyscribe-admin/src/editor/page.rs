@@ -21,7 +21,7 @@ const THEME_REGISTERED: &[u8] =
     include_bytes!("../../../../themes/twentytwentyfive/registered.json");
 
 /// The fields of the REST index the editor's site entity reads, in its order.
-const INDEX_FIELDS: &str = "description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front";
+pub(crate) const INDEX_FIELDS: &str = "description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front";
 
 /// `rest_get_route_for_post_type_items()` of the post types the page names.
 fn items_route(post_type: &str) -> &'static str {
@@ -176,6 +176,34 @@ fn block_styles_script() -> &'static str {
     })
 }
 
+/// What both editors' pages add to `assets`: the global stylesheet's
+/// variables, the theme's block styles, and `preloads`, the memo
+/// [`preloaded`] gives.
+pub(crate) fn editor_assets(site: &dyn EditorSite, assets: &mut Assets, preloads: &Value) {
+    let variables = site.theme().global_styles().stylesheet_of("variables");
+    assets.set_style_data(
+        "global-styles-css-custom-properties",
+        "after",
+        Value::Array(vec![(Key::Int(0), crate::page::text(&variables))]),
+    );
+    // Added again as the editor's canvas collects its assets.
+    let css = super::assets::block_style_css()
+        .iter()
+        .map(|(_, css)| css.clone());
+    let css = css
+        .clone()
+        .chain(css)
+        .zip(0..)
+        .map(|(css, i)| (Key::Int(i), css));
+    assets.set_style_data("wp-block-library", "after", Value::Array(css.collect()));
+    let preload = format!(
+        "wp.apiFetch.use( wp.apiFetch.createPreloadingMiddleware( {} ) );",
+        String::from_utf8_lossy(&json_hex_tag(preloads))
+    );
+    assets.add_inline_script("wp-api-fetch", "after", &preload);
+    assets.add_inline_script("wp-block-styles", "after", block_styles_script());
+}
+
 /// `wp_tinymce_inline_scripts()`'s settings for the classic block.
 const TINYMCE: &str = "window.wpEditorL10n = {\n\t\ttinymce: {\n\t\t\tbaseURL: \"%site_url%/wp-includes/js/tinymce\",\n\t\t\tsuffix: \".min\",\n\t\t\tsettings: {plugins:\"charmap,colorpicker,hr,lists,media,paste,tabfocus,textcolor,fullscreen,wordpress,wpautoresize,wpeditimage,wpemoji,wpgallery,wplink,wpdialogs,wptextpattern,wpview\",toolbar1:\"formatselect,bold,italic,bullist,numlist,blockquote,alignleft,aligncenter,alignright,link,unlink,wp_more,spellchecker,wp_add_media,wp_adv\",toolbar2:\"strikethrough,hr,forecolor,pastetext,removeformat,charmap,outdent,indent,undo,redo,wp_help\",toolbar3:\"\",toolbar4:\"\",external_plugins:[],classic_block_editor:true},\n\t\t}\n\t}";
 
@@ -195,8 +223,8 @@ pub fn editor_page(
     request: &Request,
 ) -> Option<String> {
     let post = editing.post;
-    let settings =
-        settings::get_block_editor_settings(site, form::custom_settings(site, editing), post);
+    let custom = form::custom_settings(site, editing);
+    let settings = settings::get_block_editor_settings(site, custom, settings::Editor::Post(post));
     let edits = form::initial_edits(post);
     let after = form::scripts_after(&settings, &edits, post);
     let (templates, media) =
@@ -239,29 +267,8 @@ pub fn editor_page(
         ))))
     ));
     let site_url = Urls::site_url(site);
-    let variables = site.theme().global_styles().stylesheet_of("variables");
-    let preload = format!(
-        "wp.apiFetch.use( wp.apiFetch.createPreloadingMiddleware( {} ) );",
-        String::from_utf8_lossy(&json_hex_tag(preloads))
-    );
     let more = |assets: &mut Assets| {
-        assets.set_style_data(
-            "global-styles-css-custom-properties",
-            "after",
-            Value::Array(vec![(Key::Int(0), crate::page::text(&variables))]),
-        );
-        // Added again as the editor's canvas collects its assets.
-        let css = super::assets::block_style_css()
-            .iter()
-            .map(|(_, css)| css.clone());
-        let css = css
-            .clone()
-            .chain(css)
-            .zip(0..)
-            .map(|(css, i)| (Key::Int(i), css));
-        let css = Value::Array(css.collect());
-        assets.set_style_data("wp-block-library", "after", css);
-        assets.add_inline_script("wp-api-fetch", "after", &preload);
+        editor_assets(site, assets, preloads);
         assets.add_inline_script(
             "wp-block-library",
             "before",
@@ -272,7 +279,6 @@ pub fn editor_page(
             "before",
             &String::from_utf8_lossy(&meta_boxes.to_php_string()),
         );
-        assets.add_inline_script("wp-block-styles", "after", block_styles_script());
         for (handle, script) in &after {
             assets.add_inline_script(handle, "after", script);
         }

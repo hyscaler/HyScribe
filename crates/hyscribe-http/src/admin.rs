@@ -192,6 +192,8 @@ struct Admin<'a> {
     /// The block editor's post and global styles post this view wrote its
     /// edit lock and first view for, and the lock.
     edited: Option<(u64, u64, String)>,
+    /// The theme's global styles post the site editor's view wrote or found.
+    styles: Option<u64>,
     /// `show_welcome_panel` as this view's `?welcome=` saves it.
     welcome: Option<Vec<u8>>,
     /// `$GLOBALS['login_grace_period']`: the auth cookie expired within
@@ -214,6 +216,7 @@ impl<'a> Admin<'a> {
             post_comments: RefCell::default(),
             draft: None,
             edited: None,
+            styles: None,
             welcome: None,
             grace: false,
         }
@@ -1261,6 +1264,21 @@ fn block_editor_with(admin: &Admin, request: &Request, preloads: &Preloads) -> O
     Some(Answer::from_page(page))
 }
 
+/// The site editor's page `query` asks for, once its view found or wrote
+/// the theme's global styles post and every preload is answered; `None`
+/// before.
+fn site_editor_page(admin: &Admin, query: &str, request: &Request) -> Option<Answer> {
+    use hyscribe_admin::site_editor::{context_post, preload_paths, site_editor_page};
+    let styles = admin.styles?;
+    let post = context_post(admin, query)?;
+    let stylesheet = admin.site.option("stylesheet");
+    let paths = preload_paths(post.as_ref(), styles, &stylesheet);
+    let host = request.origin.rsplit("//").next().unwrap_or_default();
+    let preloads = crate::rest::preloads(admin.reads, (admin.user.id, host), &paths)?;
+    let page = site_editor_page(admin, post.as_ref(), &preloads, request);
+    Some(Answer::from_page(page))
+}
+
 impl hyscribe_admin::editor::EditorSite for Admin<'_> {
     fn theme(&self) -> &hyscribe_render::theme::Theme {
         &self.site.theme
@@ -1367,8 +1385,8 @@ fn screen(
             Answer::from_page(info(admin, &request))
         }
         "/hs-admin/site-editor" if !admin.can("edit_theme_options") => Answer::from_page(None),
-        // Its redirects and refusals; the editor's page is not ported.
-        "/hs-admin/site-editor" => hyscribe_admin::site_editor::site_editor(query, request_uri)?,
+        "/hs-admin/site-editor" => hyscribe_admin::site_editor::site_editor(query, request_uri)
+            .or_else(|| site_editor_page(admin, query, &request))?,
         // HTTPS offers application passwords, whose list is not ported.
         "/hs-admin/profile" => {
             let args = edit_args(query).filter(|_| !origin.starts_with("https://"))?;

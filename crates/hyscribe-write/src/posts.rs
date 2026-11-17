@@ -146,8 +146,6 @@ enum Kind {
     Template,
     /// `wp_template_part`.
     TemplatePart,
-    /// `wp_global_styles`, a theme's styles the site editor saved.
-    GlobalStyles,
 }
 
 impl Kind {
@@ -161,7 +159,6 @@ impl Kind {
             "wp_block" => Ok(Kind::Block),
             "wp_template" => Ok(Kind::Template),
             "wp_template_part" => Ok(Kind::TemplatePart),
-            "wp_global_styles" => Ok(Kind::GlobalStyles),
             _ => Err(Error::Unported("a post type other than post and page")),
         }
     }
@@ -175,7 +172,7 @@ impl Kind {
         match self {
             Kind::Post => &["category", "post_tag", "post_format"],
             Kind::Block => &["wp_pattern_category"],
-            Kind::Template | Kind::GlobalStyles => &["wp_theme"],
+            Kind::Template => &["wp_theme"],
             Kind::TemplatePart => &["wp_theme", "wp_template_part_area"],
             Kind::Page | Kind::Revision | Kind::UserRequest | Kind::Navigation => &[],
         }

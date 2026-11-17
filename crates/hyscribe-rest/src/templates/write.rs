@@ -119,15 +119,13 @@ fn area(area: &[u8]) -> Vec<u8> {
     if allowed { area } else { b"uncategorized" }.to_vec()
 }
 
-/// `$request[ $name ]` of a string, or of an array's `raw`, for the title
+/// A content or title given: a string, or an array's `raw`, for the title
 /// only when not empty (`! empty()`).
-fn raw(params: &Params, name: &str) -> Option<Vec<u8>> {
-    match params.get(name)? {
-        Value::Array(parts) => {
-            let raw = lookup(parts, "raw").filter(|raw| **raw != Value::Null)?;
-            let empty = name == "title" && raw.is_empty();
-            (!empty).then(|| raw.to_php_string())
-        }
+fn raw(given: &Value, title: bool) -> Option<Vec<u8>> {
+    match given {
+        Value::Array(parts) => lookup(parts, "raw")
+            .filter(|raw| **raw != Value::Null && !(title && raw.is_empty()))
+            .map(Value::to_php_string),
         // Validated as an object or a string.
         given => Some(given.to_php_string()),
     }
@@ -167,11 +165,11 @@ fn changes(
     }
     let from_file = |field: fn(&Template) -> &Vec<u8>| file.map(|file| field(file).clone());
     save.content = match params.get("content") {
-        Some(_) => raw(params, "content"),
+        Some(given) => raw(given, false),
         None => from_file(|file| &file.content),
     };
     save.title = match params.get("title") {
-        Some(_) => raw(params, "title"),
+        Some(given) => raw(given, true),
         None => from_file(|file| &file.title),
     };
     save.excerpt = match params.get("description") {
@@ -352,26 +350,21 @@ fn finish_create(
         wp_id: Some(Value::Int(id.cast_signed())),
         ..Query::default()
     };
-    let posts = query::templates(context, &query, kind)?;
-    let Some(template) = posts.into_iter().next() else {
+    // `get_block_template()` of the ID found gives the same template.
+    let found = query::templates(context, &query, kind).and_then(|posts| {
         let message = "No templates exist with that id.";
-        return Err(RestError::status(
-            "rest_template_insert_error",
-            message,
-            400,
-        ));
-    };
-    let template = query::template(context, &template.id, kind)?.unwrap_or(template);
-    after_insert(context, params, kind, (id, true));
-    let location = format!(
-        "/wp/v2/{}/{}",
-        base(kind),
-        String::from_utf8_lossy(&template.id)
-    );
-    prepare(context, params, &template, kind).map(|mut response| {
-        response.status = 201;
-        response.header("Location", &context.rest_url(&location));
-        response
+        let found = posts.into_iter().next();
+        found.ok_or_else(|| RestError::status("rest_template_insert_error", message, 400))
+    });
+    found.and_then(|template| {
+        after_insert(context, params, kind, (id, true));
+        let id = String::from_utf8_lossy(&template.id);
+        let location = context.rest_url(&format!("/wp/v2/{}/{id}", base(kind)));
+        prepare(context, params, &template, kind).map(|mut response| {
+            response.status = 201;
+            response.header("Location", &location);
+            response
+        })
     })
 }
 
@@ -385,11 +378,12 @@ fn finish_update(
     let kind = kind_of(params);
     let id = refused(outcome)?;
     params.set("context", text("edit"));
-    let template = found(context, params, kind)?;
-    if let Write::Save(_) = plan.write {
-        after_insert(context, params, kind, (id, false));
-    }
-    prepare(context, params, &template, kind)
+    found(context, params, kind).and_then(|template| {
+        if let Write::Save(_) = plan.write {
+            after_insert(context, params, kind, (id, false));
+        }
+        prepare(context, params, &template, kind)
+    })
 }
 
 /// The deleted template's answer as it was, or the trashed one's.

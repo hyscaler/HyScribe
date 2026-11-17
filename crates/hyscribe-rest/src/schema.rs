@@ -215,7 +215,7 @@ const FORMATS: [&[u8]; 3] = [b"date-time", b"email", b"uri"];
 /// A `pattern` the byte matcher reads as PCRE's `u` mode does: literals
 /// and classes of ASCII, with no anchor or Unicode-aware escape.
 fn pattern(schema: &Value) -> Option<Pattern> {
-    let pattern = schema.get_str("pattern")?.as_bytes()?;
+    let pattern = schema.get_str("pattern").and_then(Value::as_bytes)?;
     let simple = pattern.is_ascii()
         && !pattern
             .windows(2)

@@ -124,8 +124,13 @@ async fn written(write: &mut Write<'_>, plan: &Plan, ctx: &Context) -> Result<Ou
         false => Outcome::Refused("rest_cannot_delete"),
     };
     match &plan.write {
-        hyscribe_rest::Write::Save(save) => saved(write, save, ctx).await,
-        hyscribe_rest::Write::Autosave(save) => autosaved(write, save, ctx).await,
+        hyscribe_rest::Write::Save(save) | hyscribe_rest::Write::Autosave(save) => {
+            let slug = slug(write, save).await?;
+            match plan.write {
+                hyscribe_rest::Write::Save(_) => saved(write, save, slug, ctx).await,
+                _ => autosaved(write, save, slug, ctx).await,
+            }
+        }
         hyscribe_rest::Write::Trash(id) => Ok(done(wp_trash_post(write, ctx, *id).await?, *id)),
         hyscribe_rest::Write::Delete(id) => {
             Ok(done(wp_delete_post(write, ctx, *id, true).await?, *id))
@@ -188,8 +193,12 @@ async fn slug(write: &mut Write<'_>, save: &Save) -> Result<Option<Vec<u8>>, Err
 }
 
 /// The autosaves controller's `create_item()` from its write on.
-async fn autosaved(write: &mut Write<'_>, save: &Save, ctx: &Context) -> Result<Outcome, Error> {
-    let slug = slug(write, save).await?;
+async fn autosaved(
+    write: &mut Write<'_>,
+    save: &Save,
+    slug: Option<Vec<u8>>,
+    ctx: &Context,
+) -> Result<Outcome, Error> {
     let revisioned = Revisioned {
         title: save.title.clone(),
         content: save.content.clone(),
@@ -204,8 +213,12 @@ async fn autosaved(write: &mut Write<'_>, save: &Save, ctx: &Context) -> Result<
 }
 
 /// `create_item()` or `update_item()` from `wp_insert_post()` on.
-async fn saved(write: &mut Write<'_>, save: &Save, ctx: &Context) -> Result<Outcome, Error> {
-    let slug = slug(write, save).await?;
+async fn saved(
+    write: &mut Write<'_>,
+    save: &Save,
+    slug: Option<Vec<u8>>,
+    ctx: &Context,
+) -> Result<Outcome, Error> {
     let saved = if save.id == 0 {
         let mut args = PostArgs {
             post_type: save.post_type.clone(),

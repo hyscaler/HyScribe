@@ -91,12 +91,17 @@ async fn autosaves_are_one_per_user() {
         let ctx = other();
         let post = PostArgs {
             title: b"Published".to_vec(),
-            content: b"Words".to_vec(),
+            content: b"First words".to_vec(),
             status: "publish".into(),
             author: Some(1),
             ..PostArgs::default()
         };
         let id = wp_insert_post(w, &admin(), post).await.unwrap();
+        // A revision of the post, which is no one's autosave.
+        let edited = |args: &mut PostArgs| args.content = b"Words".to_vec();
+        crate::posts::wp_update_post(w, &admin(), id, &edited)
+            .await
+            .unwrap();
         let notes = text(r#"[{"content":"A note","id":"1"}]"#);
         add_metadata(w, Meta::Post, id, "footnotes", &notes, false)
             .await
@@ -131,4 +136,59 @@ async fn autosaves_are_one_per_user() {
         assert_eq!(copied.unwrap(), vec![notes]);
     })
     .await;
+}
+
+/// A statement that fails stops the autosave there, whichever it is: of a
+/// draft whose lock names its user in `_edit_last`, and of a post whose
+/// footnotes the new autosave copies.
+#[tokio::test]
+async fn a_failed_statement_stops_the_autosave() {
+    let mut budget = 0;
+    loop {
+        let mut done = false;
+        rolled_back(async |w| {
+            let ctx = other();
+            let post = |author: u64, status: &str| PostArgs {
+                title: b"Post".to_vec(),
+                content: b"Words".to_vec(),
+                status: status.into(),
+                author: Some(author),
+                ..PostArgs::default()
+            };
+            let published = wp_insert_post(w, &admin(), post(1, "publish"))
+                .await
+                .unwrap();
+            let draft = wp_insert_post(w, &ctx, post(2, "draft")).await.unwrap();
+            let notes = text("[]");
+            for (id, key, value) in [
+                (published, "footnotes", notes),
+                (draft, "_edit_lock", text(&NOW.to_string())),
+                (draft, "_edit_last", text("1")),
+            ] {
+                add_metadata(w, Meta::Post, id, key, &value, false)
+                    .await
+                    .unwrap();
+            }
+            let fields = Revisioned {
+                title: Some(b"Changed".to_vec()),
+                ..Revisioned::default()
+            };
+            let change = |args: &mut PostArgs| fields.set(args);
+            w.fail_after(budget);
+            let mut saved = Vec::new();
+            for id in [published, draft] {
+                saved.push(wp_create_post_autosave(w, &ctx, id, &fields, &change).await);
+            }
+            done = saved.iter().all(Result::is_ok);
+            if !done {
+                assert!(saved.iter().any(|saved| matches!(saved, Err(Error::Db(_)))));
+            }
+        })
+        .await;
+        if done {
+            break;
+        }
+        budget += 1;
+    }
+    assert!(budget > 10);
 }

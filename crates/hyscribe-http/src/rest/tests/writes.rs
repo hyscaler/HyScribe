@@ -788,6 +788,126 @@ async fn written_answers_past_the_goldens() {
     fresh().await;
 }
 
+/// The administrator's `method target` with the JSON `body` sent to
+/// `site`, logged in as the cookie and nonce say: its status and body.
+async fn sent_as(
+    site: &Arc<Site>,
+    (cookie, nonce): &(String, String),
+    (method, target, sent): (&str, &str, &str),
+) -> (StatusCode, String) {
+    let request = axum::http::Request::builder()
+        .method(method)
+        .uri(target)
+        .header(header::COOKIE, cookie)
+        .header("x-wp-nonce", nonce)
+        .header(header::CONTENT_TYPE, "application/json");
+    let response = send(site, request, sent).await;
+    let status = response.status();
+    (status, body(response).await)
+}
+
+/// Templates past the goldens, over `reference/rest/templates-custom.sql`
+/// with a template its slug would title, which reads 501, and one naming a
+/// pattern the theme does not have: what PHP answers with its errors, and
+/// what is not ported, 501, before anything is written.
+#[tokio::test(flavor = "multi_thread")]
+async fn template_writes_past_the_goldens() {
+    let state = include_str!("../../../../../reference/rest/template-writes.sql");
+    let more = "INSERT INTO wp_posts (ID, post_author, post_content, post_title, post_excerpt, \
+        post_status, post_name, post_type, to_ping, pinged, post_content_filtered) VALUES \
+        (760, 1, 'x', '', '', 'publish', 'single-post-hello-world', 'wp_template', '', '', ''), \
+        (761, 1, '<!-- wp:pattern {\"slug\":\"other/x\"} /-->', 'Odd', '', 'publish', 'my-odd', \
+        'wp_template', '', '', ''); \
+        INSERT INTO wp_term_relationships VALUES (760, 711, 0), (761, 711, 0);\n-- cleanup\n";
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with(&format!(
+        "{}{more}",
+        state.split("\n-- cleanup\n").next().unwrap()
+    ))
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let login = log_in(&site).await;
+    let at = |path: &str| format!("/?rest_route=/wp/v2/{path}");
+    let foreign = r#"{"content":"<!-- wp:pattern {\"slug\":\"other/x\"} /-->"}"#;
+    let cases = [
+        (
+            "POST",
+            at("templates/twentytwentyfive//single-post-hello-world"),
+            r#"{"title":"x"}"#,
+            501,
+        ),
+        (
+            "DELETE",
+            at("templates/twentytwentyfive//single-post-hello-world"),
+            "",
+            501,
+        ),
+        (
+            "DELETE",
+            at("templates/twentytwentyfive//my-odd&force=true"),
+            "",
+            501,
+        ),
+        (
+            "POST",
+            at("templates/twentytwentyfive//my-custom"),
+            foreign,
+            501,
+        ),
+        (
+            "PATCH",
+            at("templates/twentytwentyfive//my-custom"),
+            r#"{"author":999}"#,
+            400,
+        ),
+        (
+            "POST",
+            at("templates/twentytwentyfive//my-custom"),
+            r#"{"content":{}}"#,
+            200,
+        ),
+        (
+            "PATCH",
+            at("template-parts/twentytwentyfive//header"),
+            r#"{"title":"Head"}"#,
+            200,
+        ),
+    ];
+    for (method, target, body, status) in cases {
+        let (found, text) = sent_as(&site, &login, (method, &target, body)).await;
+        assert_eq!(found.as_u16(), status, "{method} {target} {body}: {text}");
+    }
+    fresh().await;
+}
+
+/// Autosaves past the goldens: a template, which an autosave does not
+/// port, and the author's draft emptied, which PHP refuses with an error of
+/// no status; an empty template is no template.
+#[tokio::test(flavor = "multi_thread")]
+async fn autosaves_past_the_goldens() {
+    let state = include_str!("../../../../../reference/rest/autosaves.sql");
+    let unlocked = format!(
+        "{}\nDELETE FROM wp_postmeta WHERE post_id = 866;\n-- cleanup\n",
+        state.split("\n-- cleanup\n").next().unwrap()
+    );
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with(&unlocked).await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let login = log_in(&site).await;
+    let autosaves = "/?rest_route=/wp/v2/posts/866/autosaves";
+    for (body, status) in [
+        (r#"{"template":"single"}"#, 501),
+        (r#"{"title":""}"#, 501),
+        (r#"{"template":"","title":"Kept"}"#, 200),
+    ] {
+        let (found, text) = sent_as(&site, &login, ("POST", autosaves, body)).await;
+        assert_eq!(found.as_u16(), status, "{body}: {text}");
+    }
+    fresh().await;
+}
+
 /// Without a writer, a write past its checks is refused as hs-admin
 /// refuses one.
 #[tokio::test(flavor = "multi_thread")]

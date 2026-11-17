@@ -319,17 +319,13 @@ fn prepare(
     kind: Kind,
 ) -> Result<Response, RestError> {
     let response = if context.head {
-        Response::new(Value::Array(Vec::new()), 200)
+        Ok(Response::new(Value::Array(Vec::new()), 200))
     } else {
-        let content = resolve_patterns(&template.content)?;
-        prepare_resolved(context, params, template, kind, &content)?
+        resolve_patterns(&template.content)
+            .and_then(|content| prepare_resolved(context, params, template, kind, &content))
     };
     let hook = format!("rest_prepare_{}", kind.name());
-    Ok(crate::hooks::apply_filters(
-        &hook,
-        response,
-        &[template, params],
-    ))
+    response.map(|response| crate::hooks::apply_filters(&hook, response, &[template, params]))
 }
 
 /// [`prepare`] of a template whose patterns are resolved in `content`.

@@ -636,12 +636,10 @@ fn finish_autosave(
     params.set("context", text("edit"));
     let parent = get_parent(context, params, "id").unwrap_or_default();
     let autosave = context.site.post(id).unwrap_or_default();
-    let response = single(context, params, &autosave, Some(&parent))?;
+    let response = single(context, params, &autosave, Some(&parent));
     let args: [&dyn std::any::Any; 2] = [&autosave, params];
-    let response = crate::hooks::apply_filters("rest_prepare_revision", response, &args);
-    Ok(crate::hooks::apply_filters(
-        "rest_prepare_autosave",
-        response,
-        &args,
-    ))
+    response.map(|response| {
+        let response = crate::hooks::apply_filters("rest_prepare_revision", response, &args);
+        crate::hooks::apply_filters("rest_prepare_autosave", response, &args)
+    })
 }

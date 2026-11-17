@@ -73,7 +73,11 @@ fn split<'a>(haystack: &'a [u8], needle: &[u8]) -> Option<(&'a [u8], &'a [u8])> 
 fn params(value: &[u8]) -> Vec<(&[u8], &[u8])> {
     let mut out = Vec::new();
     let mut rest = value;
-    while let Some((_, after)) = split(rest, b";") {
+    // Each parameter takes at least its `;` and `=`, which bounds the loop.
+    for _ in 0..value.len() {
+        let Some((_, after)) = split(rest, b";") else {
+            break;
+        };
         let Some((key, after)) = split(after, b"=") else {
             break;
         };

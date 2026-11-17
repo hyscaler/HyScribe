@@ -264,8 +264,9 @@ pub async fn get_default_post_to_edit(write: &mut Write<'_>, ctx: &Context) -> R
         return Err(Error::Unported("a default post format"));
     }
     const HOOK: &str = "wp_scheduled_auto_draft_delete";
-    if !cron::scheduled(write, HOOK).await? {
-        cron::schedule_daily(write, ctx.now, HOOK).await?;
+    let none = Value::Array(Vec::new());
+    if cron::wp_next_scheduled(write, HOOK, &none).await?.is_none() {
+        cron::wp_schedule_event(write, ctx.now, "daily", HOOK, &none).await?;
     }
     Ok(id)
 }

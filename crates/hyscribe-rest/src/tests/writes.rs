@@ -793,6 +793,39 @@ fn deletes_trash_unless_forced() {
     );
 }
 
+/// A trashed post's sample permalink is plain under pretty permalinks, as
+/// `get_sample_permalink()` fakes only drafts as published (found by the
+/// switch-back suite, its `rest-trash` case).
+#[test]
+fn trashed_posts_have_plain_templates() {
+    let trashed = Post {
+        status: "trash".into(),
+        ..oracle("", &[]).post(1).unwrap()
+    };
+    let target = "/wp/v2/posts/1&context=edit&_fields=permalink_template";
+    let asked = Asked::new("administrator", "GET", target, "");
+    let template = |posts| {
+        let plain = oracle("administrator", &[]);
+        let fixture = site::Fixture {
+            pretty: true,
+            ..plain.fixture
+        };
+        let site = Changed {
+            oracle: Oracle { fixture, ..plain },
+            ..changed(Vec::new(), posts)
+        };
+        text_of(&on(&site, &asked, Outcome::Written(1)).1)
+    };
+    assert_eq!(
+        template(Vec::new()),
+        r#"{"permalink_template":"http:\/\/127.0.0.1:8081\/%postname%\/"}"#
+    );
+    assert_eq!(
+        template(vec![trashed]),
+        r#"{"permalink_template":"http:\/\/127.0.0.1:8081\/?p=1"}"#
+    );
+}
+
 /// With `EMPTY_TRASH_DAYS` at 0, a delete is planned only when forced, of
 /// a trashed post too (`reference/rest/trash-off.list` has the refusals).
 #[test]

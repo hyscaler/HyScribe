@@ -129,6 +129,110 @@ if ( get_option( 'permalink_structure' ) && ! $wp_rewrite->wp_rewrite_rules() ) 
 	$failures[] = 'no rewrite rules under a permalink structure';
 }
 
+// Nothing a deletion left behind: rows of an object that is gone.
+$orphans = array(
+	'postmeta'           => "SELECT COUNT(*) FROM $wpdb->postmeta m LEFT JOIN $wpdb->posts p ON p.ID = m.post_id WHERE p.ID IS NULL",
+	'commentmeta'        => "SELECT COUNT(*) FROM $wpdb->commentmeta m LEFT JOIN $wpdb->comments c ON c.comment_ID = m.comment_id WHERE c.comment_ID IS NULL",
+	'usermeta'           => "SELECT COUNT(*) FROM $wpdb->usermeta m LEFT JOIN $wpdb->users u ON u.ID = m.user_id WHERE u.ID IS NULL",
+	'termmeta'           => "SELECT COUNT(*) FROM $wpdb->termmeta m LEFT JOIN $wpdb->terms t ON t.term_id = m.term_id WHERE t.term_id IS NULL",
+	'term_taxonomy'      => "SELECT COUNT(*) FROM $wpdb->term_taxonomy x LEFT JOIN $wpdb->terms t ON t.term_id = x.term_id WHERE t.term_id IS NULL",
+	'term_relationships' => "SELECT COUNT(*) FROM $wpdb->term_relationships r JOIN $wpdb->term_taxonomy x USING (term_taxonomy_id) LEFT JOIN $wpdb->posts p ON p.ID = r.object_id WHERE x.taxonomy <> 'link_category' AND p.ID IS NULL",
+	'comments'           => "SELECT COUNT(*) FROM $wpdb->comments c LEFT JOIN $wpdb->posts p ON p.ID = c.comment_post_ID WHERE p.ID IS NULL",
+	'posts (parent)'     => "SELECT COUNT(*) FROM $wpdb->posts c LEFT JOIN $wpdb->posts p ON p.ID = c.post_parent WHERE c.post_parent <> 0 AND c.post_type <> 'attachment' AND p.ID IS NULL",
+	'posts (author)'     => "SELECT COUNT(*) FROM $wpdb->posts p LEFT JOIN $wpdb->users u ON u.ID = p.post_author WHERE p.post_author <> 0 AND u.ID IS NULL",
+);
+foreach ( $orphans as $table => $sql ) {
+	$count = (int) $wpdb->get_var( $sql );
+	if ( $count ) {
+		$failures[] = "$table has $count rows of objects that are gone";
+	}
+}
+
+// What was deleted for good: from the Trash, with the Trash off, emptied.
+foreach ( array( 'Scratch A', 'Scratch C', 'Scratch D', 'Scratch E', 'Deleted over REST', 'REST draft menu' ) as $title ) {
+	if ( $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_title = %s", $title ) ) ) {
+		$failures[] = "the deleted post $title is still there";
+	}
+}
+foreach ( array( 3, 7, 8, 9, 10 ) as $id ) {
+	if ( get_comment( $id ) ) {
+		$failures[] = "the deleted comment $id is still there";
+	}
+}
+foreach ( array( 6, 7, 9 ) as $id ) {
+	if ( get_term( $id ) ) {
+		$failures[] = "the deleted term $id is still there";
+	}
+}
+
+// The cron events HyScribe scheduled, as wp-cron.php reads them.
+foreach ( _get_cron_array() as $timestamp => $hooks ) {
+	foreach ( $hooks as $hook => $events ) {
+		foreach ( $events as $key => $event ) {
+			if ( ! is_int( $timestamp ) || md5( serialize( $event['args'] ) ) !== $key
+				|| ( $event['schedule'] && ! wp_get_schedule( $hook, $event['args'] ) ) ) {
+				$failures[] = "cron event $hook at $timestamp is not as wp_schedule_event() stores it";
+			}
+		}
+	}
+}
+
+// Each object HyScribe's REST API wrote, read with PHP's REST API by user 1
+// in the edit context: the same as HyScribe's last answer for it, or gone
+// where that answer was a deletion. Objects created for admin actions to
+// change after (cases named scratch-) are not compared.
+wp_set_current_user( 1 );
+$answers = array();
+foreach ( file( '/tmp/hyscribe-rest.tsv', FILE_IGNORE_NEW_LINES ) as $line ) {
+	list( $case, $path, $body ) = explode( "\t", $line, 3 );
+	if ( str_starts_with( $case, 'scratch-' ) ) {
+		continue;
+	}
+	parse_str( (string) parse_url( $path, PHP_URL_QUERY ), $query );
+	$base   = preg_replace( '#/\d+$#', '', $query['rest_route'] );
+	$answer = json_decode( $body, true );
+	if ( isset( $answer['deleted'] ) ) {
+		$answers[ "$base/{$answer['previous']['id']}" ] = null;
+	} else {
+		$answers[ "$base/{$answer['id']}" ] = $answer;
+	}
+}
+// Where PHP's and HyScribe's answers differ, as paths of keys.
+function switch_back_diff( $php, $hyscribe, $at = '' ) {
+	if ( ! is_array( $php ) || ! is_array( $hyscribe ) ) {
+		return $php === $hyscribe ? array() : array( "$at: " . wp_json_encode( $hyscribe ) . ' in HyScribe, ' . wp_json_encode( $php ) . ' in PHP' );
+	}
+	$diff = array();
+	foreach ( array_unique( array_merge( array_keys( $php ), array_keys( $hyscribe ) ) ) as $key ) {
+		$diff = array_merge( $diff, switch_back_diff( $php[ $key ] ?? null, $hyscribe[ $key ] ?? null, "$at/$key" ) );
+	}
+	if ( ! $diff && array_keys( $php ) !== array_keys( $hyscribe ) ) {
+		$diff[] = "$at: the keys in another order";
+	}
+	return $diff;
+}
+foreach ( $answers as $route => $answer ) {
+	$request = new WP_REST_Request( 'GET', $route );
+	$request->set_param( 'context', 'edit' );
+	$response = rest_do_request( $request );
+	if ( null === $answer ) {
+		if ( 404 !== $response->get_status() ) {
+			$failures[] = "REST $route was deleted by HyScribe, PHP answers {$response->get_status()}";
+		}
+		continue;
+	}
+	$read = json_decode( wp_json_encode( rest_get_server()->response_to_data( $response, false ) ), true );
+	// A GET in the edit context passes a post's password check for good
+	// (get_item_permissions_check()), a write's answer does not.
+	$at = array_search( 'post-password-protected', $read['class_list'] ?? array(), true );
+	if ( false !== $at && in_array( 'post-password-required', $answer['class_list'], true ) ) {
+		$read['class_list'][ $at ] = 'post-password-required';
+	}
+	foreach ( array_slice( switch_back_diff( $read, $answer ), 0, 5 ) as $diff ) {
+		$failures[] = "REST $route differs at $diff";
+	}
+}
+
 foreach ( $failures as $failure ) {
 	echo "FAIL $failure\n";
 }

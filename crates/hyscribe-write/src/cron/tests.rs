@@ -106,6 +106,7 @@ fn removing_an_event_drops_what_it_leaves_empty() {
     crons.push(both);
     assert!(remove(
         &mut crons,
+        None,
         "publish_future_post",
         &key(&args(Some(7)))
     ));
@@ -118,6 +119,7 @@ fn removing_an_event_drops_what_it_leaves_empty() {
     assert_eq!(crons, expected);
     assert!(!remove(
         &mut crons,
+        None,
         "publish_future_post",
         &key(&args(Some(7)))
     ));
@@ -152,6 +154,7 @@ fn removing_leaves_other_hooks_with_the_same_arguments() {
     )];
     assert!(remove(
         &mut crons,
+        None,
         "publish_future_post",
         &key(&args(Some(7)))
     ));
@@ -160,7 +163,7 @@ fn removing_leaves_other_hooks_with_the_same_arguments() {
 
 /// A recurring event of `job` at `at`, without arguments.
 fn recurring(job: Job, at: i64, every: (&'static str, i64)) -> Event {
-    let (args, recurrence) = (args(None), Some(every));
+    let (args, recurrence) = (args(None), Some((every.0.to_string(), every.1)));
     Event {
         at,
         job,
@@ -212,6 +215,11 @@ fn a_recurring_event_moves_to_its_next_step_after_now() {
     );
 }
 
+/// [`unschedule`] of `event`.
+fn unschedule_event(crons: &mut Crons, event: &Event) {
+    remove(crons, Some(event.at), event.job.hook(), &key(&event.args));
+}
+
 #[test]
 fn unscheduling_takes_the_event_from_its_timestamp_only() {
     let mut crons = vec![
@@ -232,8 +240,8 @@ fn unscheduling_takes_the_event_from_its_timestamp_only() {
         hooks.extend(extra.clone());
     }
     let event = |at| recurring(Job::ScheduledDelete, at, ("daily", 86_400));
-    unschedule(&mut crons, &event(1));
-    unschedule(&mut crons, &event(3));
+    unschedule_event(&mut crons, &event(1));
+    unschedule_event(&mut crons, &event(3));
     let mut expected = vec![
         at(Key::Int(1), &[("other", None)]),
         at(Key::Int(2), &[("wp_scheduled_delete", None)]),
@@ -245,7 +253,7 @@ fn unscheduling_takes_the_event_from_its_timestamp_only() {
     }
     assert_eq!(crons, expected);
     // A timestamp left empty goes, and another key of the hook stays.
-    unschedule(&mut crons, &event(2));
+    unschedule_event(&mut crons, &event(2));
     assert_eq!(crons.len(), 3);
     let mut two = vec![at(Key::Int(2), &[("publish_future_post", Some(7))])];
     let post = Event {
@@ -257,7 +265,7 @@ fn unscheduling_takes_the_event_from_its_timestamp_only() {
         job: Job::PublishFuturePost,
         ..post
     };
-    unschedule(&mut two, &post);
+    unschedule_event(&mut two, &post);
     assert_eq!(two, [at(Key::Int(2), &[("publish_future_post", Some(7))])]);
 }
 
@@ -335,13 +343,16 @@ async fn due_events_are_those_of_hooks_hyscribe_runs_in_php_s_order() {
         publish,
     ];
     rolled_back(async |w| {
-        set_crons(w, crons).await.unwrap();
-        assert_eq!(due(w, NOW).await.unwrap(), expected);
+        _set_cron_array(w, crons).await.unwrap();
+        assert_eq!(wp_get_ready_cron_jobs(w, NOW).await.unwrap(), expected);
         // A key that is not a timestamp ends the due ones.
-        set_crons(w, later).await.unwrap();
-        assert_eq!(due(w, NOW).await.unwrap(), expected[..1]);
+        _set_cron_array(w, later).await.unwrap();
+        assert_eq!(wp_get_ready_cron_jobs(w, NOW).await.unwrap(), expected[..1]);
         w.fail_after(0);
-        assert!(matches!(due(w, NOW).await, Err(Error::Db(_))));
+        assert!(matches!(
+            wp_get_ready_cron_jobs(w, NOW).await,
+            Err(Error::Db(_))
+        ));
     })
     .await;
 }
@@ -355,11 +366,13 @@ fn no_uploads() -> std::path::PathBuf {
 async fn the_loop_runs_hyscribe_s_hooks_and_leaves_the_rest_as_php_does() {
     let _one = ONE_AT_A_TIME.lock().await;
     let writer = &writer().await;
+    // One second for both, as PHP's run had: the loop's events are due at the setup's time.
+    let now = crate::now();
     let setup = async |conn: &mut Connection| {
         let id = missed(writer, conn).await?;
         trash(writer, conn).await?;
         transients(writer, conn).await?;
-        act(writer, conn, &admin(), async |w, ctx| {
+        act(writer, conn, &Context { now, ..admin() }, async |w, ctx| {
             let mut crons = Vec::new();
             for (hook, every) in [
                 ("wp_scheduled_delete", ("daily", 86_400)),
@@ -386,13 +399,13 @@ async fn the_loop_runs_hyscribe_s_hooks_and_leaves_the_rest_as_php_does() {
                 key(&args),
                 single,
             );
-            set_crons(w, crons).await
+            _set_cron_array(w, crons).await.map(drop)
         })
         .await
     };
     let action = async |conn: &mut Connection, ()| {
-        act(writer, conn, &cron(), async |w, ctx| {
-            for event in due(w, ctx.now).await? {
+        act(writer, conn, &Context { now, ..cron() }, async |w, ctx| {
+            for event in wp_get_ready_cron_jobs(w, ctx.now).await? {
                 run(w, ctx, &no_uploads(), &event).await?;
             }
             Ok(())
@@ -417,8 +430,8 @@ async fn running_an_event_stops_at_a_database_error() {
                     ("daily", 86_400),
                 );
             }
-            set_crons(w, crons).await.unwrap();
-            due(w, ctx.now).await.unwrap()
+            _set_cron_array(w, crons).await.unwrap();
+            wp_get_ready_cron_jobs(w, ctx.now).await.unwrap()
         },
         async |w, due| {
             for event in &due {
@@ -427,5 +440,96 @@ async fn running_an_event_stops_at_a_database_error() {
             Ok(())
         },
     )
+    .await;
+}
+
+#[test]
+fn schedules_are_core_s_after_the_filter_s() {
+    let named = |list: &[(&str, i64)]| -> Vec<Schedule> {
+        list.iter().map(|(n, i)| (n.to_string(), *i)).collect()
+    };
+    let core = [
+        ("hourly", 3_600),
+        ("twicedaily", 43_200),
+        ("daily", 86_400),
+        ("weekly", 604_800),
+    ];
+    assert_eq!(wp_get_schedules(), named(&core));
+    let added = named(&[("often", 60), ("daily", 5)]);
+    assert_eq!(cron_schedules(added.clone()), added);
+    let expected = [
+        ("often", 60),
+        ("daily", 86_400),
+        ("hourly", 3_600),
+        ("twicedaily", 43_200),
+        ("weekly", 604_800),
+    ];
+    assert_eq!(with_core_schedules(added), named(&expected));
+}
+
+#[tokio::test]
+async fn events_are_scheduled_found_and_unscheduled_by_name() {
+    let none = Value::Array(Vec::new());
+    let post = args(Some(7));
+    rolled_back(async |w| {
+        _set_cron_array(w, Vec::new()).await.unwrap();
+        // A timestamp below 1, or an unknown recurrence, schedules nothing.
+        for (at, every) in [(0, "daily"), (NOW, "often")] {
+            assert!(!wp_schedule_event(w, at, every, "h", &none).await.unwrap());
+        }
+        assert_eq!(wp_next_scheduled(w, "h", &none).await.unwrap(), None);
+        assert!(
+            wp_schedule_event(w, NOW + 9, "hourly", "h", &post)
+                .await
+                .unwrap()
+        );
+        assert!(
+            wp_schedule_event(w, NOW, "weekly", "h", &post)
+                .await
+                .unwrap()
+        );
+        // The same event again changes nothing.
+        assert!(
+            !wp_schedule_event(w, NOW, "weekly", "h", &post)
+                .await
+                .unwrap()
+        );
+        assert_eq!(wp_next_scheduled(w, "h", &post).await.unwrap(), Some(NOW));
+        assert_eq!(wp_next_scheduled(w, "h", &none).await.unwrap(), None);
+        let event = _get_cron_array(w).await.unwrap()[0]
+            .1
+            .get_path(&["h"])
+            .cloned();
+        let stored = Value::Array(vec![(
+            key(&post),
+            Value::Array(vec![
+                (name("schedule"), text("weekly")),
+                (name("args"), post.clone()),
+                (name("interval"), Value::Int(604_800)),
+            ]),
+        )]);
+        assert_eq!(event, Some(stored));
+        assert!(!wp_unschedule_event(w, 0, "h", &post).await.unwrap());
+        assert!(wp_unschedule_event(w, NOW, "h", &post).await.unwrap());
+        assert!(!wp_unschedule_event(w, NOW, "h", &post).await.unwrap());
+        assert_eq!(
+            wp_next_scheduled(w, "h", &post).await.unwrap(),
+            Some(NOW + 9)
+        );
+        // An event at timestamp 0 is none, as `! $next` reads it.
+        _set_cron_array(w, vec![at(Key::Int(0), &[("h", None)])])
+            .await
+            .unwrap();
+        assert_eq!(wp_next_scheduled(w, "h", &none).await.unwrap(), None);
+        w.fail_after(0);
+        for result in [
+            wp_schedule_event(w, NOW, "daily", "h", &none).await,
+            wp_unschedule_event(w, NOW, "h", &none).await,
+        ] {
+            assert!(matches!(result, Err(Error::Db(_))));
+        }
+        let next = wp_next_scheduled(w, "h", &none).await;
+        assert!(matches!(next, Err(Error::Db(_))));
+    })
     .await;
 }

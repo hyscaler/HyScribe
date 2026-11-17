@@ -619,6 +619,50 @@ pub fn link(file: &str) -> String {
     }
 }
 
+/// What comes before an hs-admin screen's name in a link: the folder plain,
+/// JSON-escaped or URL-encoded, or the attribute of a relative link.
+const BEFORE_SCREEN: [&str; 7] = [
+    "/hs-admin/",
+    "\\/hs-admin\\/",
+    "%2Fhs-admin%2F",
+    "href=\"",
+    "href='",
+    "action=\"",
+    "action='",
+];
+
+/// `html` with its links to hs-admin's screens as [`link`] makes them,
+/// literal markup copied from `wp-admin` included: `edit.php?x` is `edit?x`.
+pub fn clean_links(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(at) = rest.find(['/', '\\', '%', 'h', 'a']) {
+        let (head, tail) = rest.split_at(at);
+        out.push_str(head);
+        let Some(marker) = BEFORE_SCREEN.iter().find(|m| tail.starts_with(*m)) else {
+            // The character found is ASCII.
+            let (found, tail) = tail.split_at(1);
+            out.push_str(found);
+            rest = tail;
+            continue;
+        };
+        let (marker, tail) = tail.split_at(marker.len());
+        out.push_str(marker);
+        let end = tail
+            .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_')))
+            .unwrap_or(tail.len());
+        let (name, tail) = tail.split_at(end);
+        out.push_str(name);
+        let after = tail.strip_prefix(".php").filter(|after| {
+            !name.is_empty()
+                && !after.starts_with(|c: char| c.is_ascii_alphanumeric() || "-_./".contains(c))
+        });
+        rest = after.unwrap_or(tail);
+    }
+    out.push_str(rest);
+    out
+}
+
 /// `wp_enqueue_command_palette_assets()`'s menu commands: label, hs-admin
 /// URL and name of each menu item the user may reach and its submenu.
 pub fn commands(user: &dyn MenuUser, look: Look) -> Vec<(String, String, String)> {

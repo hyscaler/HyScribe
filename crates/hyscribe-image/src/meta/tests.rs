@@ -4,7 +4,7 @@ use hyscribe_phpser::encode;
 
 use super::*;
 use crate::header::getimagesize;
-use crate::tests::{corpus, golden};
+use crate::tests::{corpus, golden, hostile};
 
 #[test]
 fn matches_wp_read_image_metadata() {
@@ -237,4 +237,17 @@ fn reads_exif_as_wp_read_image_metadata_does() {
     );
     assert_eq!(utf8(b"Caf\xE9".to_vec()), "Caf\u{e9}".as_bytes());
     assert_eq!(timestamp(b"\xFF"), Err(Unported));
+}
+
+#[test]
+fn reads_exif_only_within_its_segment() {
+    // The description's offset points past the APP1, where PHP reads nothing.
+    let past = hostile("exif-past-app1.jpg");
+    assert_eq!(read(&past), Err(Unported));
+    // Wherever the APP1 starts: here after an APP0.
+    let app0 = [b"\xFF\xE0\x00\x10JFIF\0".as_slice(), &[0; 9]].concat();
+    assert_eq!(
+        read(&[&past[..2], &app0, &past[2..]].concat()),
+        Err(Unported)
+    );
 }

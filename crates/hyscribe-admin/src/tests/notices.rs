@@ -229,6 +229,6 @@ fn edit_user_links_back_to_users() {
     }
     let others = "<p><a href=\"/hs-admin/user-newer\">&larr; Go to Users</a></p>";
     assert_eq!(link("%2Fhs-admin%2Fuser-newer"), others);
-    let relative = "<p><a href=\"/hs-admin/users.php?role=editor\">&larr; Go to Users</a></p>";
+    let relative = "<p><a href=\"/hs-admin/users?role=editor\">&larr; Go to Users</a></p>";
     assert_eq!(link("users.php%3Frole%3Deditor"), relative);
 }

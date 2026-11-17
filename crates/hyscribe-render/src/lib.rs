@@ -58,6 +58,7 @@ pub mod style;
 pub mod supports;
 mod tabs;
 pub mod template;
+pub mod template_types;
 pub mod term_template;
 pub mod text_diff;
 pub mod theme;

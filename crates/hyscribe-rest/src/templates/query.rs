@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, absint, is_empty_string};
 use hyscribe_render::formatting::sanitize_title_for_query;
-use hyscribe_render::post::POST_FORMATS;
+use hyscribe_render::template_types::{PART_AREAS, default_type};
 use hyscribe_render::theme::{Theme, twentytwentyfive};
 
 use super::content::hooked;
@@ -37,94 +37,6 @@ pub(super) const PART_FILES: [&str; 7] = [
     "vertical-header",
     "footer",
     "header-large-title",
-];
-
-/// `get_allowed_block_template_part_areas()`.
-const AREAS: [&str; 4] = ["uncategorized", "header", "footer", "navigation-overlay"];
-
-/// `get_default_block_template_types()` but the post formats': each slug,
-/// title and description.
-const DEFAULT_TYPES: [(&str, &str, &str); 16] = [
-    (
-        "index",
-        "Index",
-        "Used as a fallback template for all pages when a more specific template is not defined.",
-    ),
-    (
-        "home",
-        "Blog Home",
-        "Displays the latest posts as either the site homepage or as the \"Posts page\" as defined under reading settings. If it exists, the Front Page template overrides this template when posts are shown on the homepage.",
-    ),
-    (
-        "front-page",
-        "Front Page",
-        "Displays your site's homepage, whether it is set to display latest posts or a static page. The Front Page template takes precedence over all templates.",
-    ),
-    (
-        "singular",
-        "Single Entries",
-        "Displays any single entry, such as a post or a page. This template will serve as a fallback when a more specific template (e.g. Single Post, Page, or Attachment) cannot be found.",
-    ),
-    (
-        "single",
-        "Single Posts",
-        "Displays a single post on your website unless a custom template has been applied to that post or a dedicated template exists.",
-    ),
-    (
-        "page",
-        "Pages",
-        "Displays a static page unless a custom template has been applied to that page or a dedicated template exists.",
-    ),
-    (
-        "archive",
-        "All Archives",
-        "Displays any archive, including posts by a single author, category, tag, taxonomy, custom post type, and date. This template will serve as a fallback when more specific templates (e.g. Category or Tag) cannot be found.",
-    ),
-    (
-        "author",
-        "Author Archives",
-        "Displays a single author's post archive. This template will serve as a fallback when a more specific template (e.g. Author: Admin) cannot be found.",
-    ),
-    (
-        "category",
-        "Category Archives",
-        "Displays a post category archive. This template will serve as a fallback when a more specific template (e.g. Category: Recipes) cannot be found.",
-    ),
-    (
-        "taxonomy",
-        "Taxonomy",
-        "Displays a custom taxonomy archive. Like categories and tags, taxonomies have terms which you use to classify things. For example: a taxonomy named \"Art\" can have multiple terms, such as \"Modern\" and \"18th Century.\" This template will serve as a fallback when a more specific template (e.g. Taxonomy: Art) cannot be found.",
-    ),
-    (
-        "date",
-        "Date Archives",
-        "Displays a post archive when a specific date is visited (e.g., example.com/2023/).",
-    ),
-    (
-        "tag",
-        "Tag Archives",
-        "Displays a post tag archive. This template will serve as a fallback when a more specific template (e.g. Tag: Pizza) cannot be found.",
-    ),
-    (
-        "attachment",
-        "Attachment Pages",
-        "Displays when a visitor views the dedicated page that exists for any media attachment.",
-    ),
-    (
-        "search",
-        "Search Results",
-        "Displays when a visitor performs a search on your website.",
-    ),
-    (
-        "privacy-policy",
-        "Privacy Policy",
-        "Displays your site's Privacy Policy page.",
-    ),
-    (
-        "404",
-        "Page: 404",
-        "Displays when a visitor views a non-existent page, such as a dead link or a mistyped URL.",
-    ),
 ];
 
 /// The post types and taxonomies a default install registers, in order.
@@ -281,10 +193,10 @@ fn file(kind: Kind, slug: &[u8]) -> Option<File> {
         Kind::Part => {
             let part = theme_entry("templateParts", slug);
             let area = field(&part, "area");
-            let area = AREAS
-                .into_iter()
-                .find(|known| known.as_bytes() == area)
-                .unwrap_or("uncategorized");
+            let area = PART_AREAS
+                .iter()
+                .find(|known| known.area.as_bytes() == area)
+                .map_or("uncategorized", |known| known.area);
             File {
                 slug,
                 title: field(&part, "title"),
@@ -292,26 +204,6 @@ fn file(kind: Kind, slug: &[u8]) -> Option<File> {
                 area: Some(area.as_bytes().to_vec()),
             }
         }
-    })
-}
-
-/// `get_default_block_template_types()`'s title and description of `slug`.
-fn default_type(slug: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
-    let found = DEFAULT_TYPES
-        .iter()
-        .find(|(name, _, _)| name.as_bytes() == slug)
-        .map(|(_, title, description)| {
-            (title.as_bytes().to_vec(), description.as_bytes().to_vec())
-        });
-    found.or_else(|| {
-        let format = slug.strip_prefix(b"taxonomy-post_format-post-format-")?;
-        let (_, name) = POST_FORMATS
-            .iter()
-            .find(|(format_slug, _)| format_slug.as_bytes() == format)?;
-        Some((
-            format!("Post Format: {name}").into_bytes(),
-            format!("Displays the {name} post format archive.").into_bytes(),
-        ))
     })
 }
 

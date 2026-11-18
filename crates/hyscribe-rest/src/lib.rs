@@ -180,6 +180,8 @@ pub struct Request<'a> {
     pub nonce: Option<&'a [u8]>,
     /// `$_SERVER['REMOTE_ADDR']`, empty for none.
     pub remote_addr: &'a [u8],
+    /// A `wp-postpass_` cookie was sent.
+    pub postpass: bool,
     /// The `User-Agent` header.
     pub user_agent: Option<&'a [u8]>,
     /// The `X-HTTP-Method-Override` header.
@@ -282,6 +284,8 @@ pub(crate) struct Context<'a> {
     pub(crate) parameters: bool,
     /// `$_SERVER['REMOTE_ADDR']`, empty for none.
     pub(crate) remote_addr: &'a [u8],
+    /// A `wp-postpass_` cookie was sent.
+    pub(crate) postpass: bool,
     /// The `User-Agent` header.
     pub(crate) user_agent: Option<&'a [u8]>,
     /// `$_SERVER['HTTP_HOST']`.
@@ -490,6 +494,7 @@ pub fn preload(
         host,
         now,
         remote_addr: b"",
+        postpass: false,
         user_agent: None,
     };
     let response = match dispatch(&context, (method, route), (params, None), None) {
@@ -645,6 +650,7 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
             .into_iter()
             .any(|source| gives_parameters(source)),
         remote_addr: request.remote_addr,
+        postpass: request.postpass,
         user_agent: request.user_agent,
         host: request.host.unwrap_or_default(),
         now: request.now,

@@ -146,7 +146,7 @@ pub(crate) fn id() -> Arg {
 /// The arguments of a create and update, `get_endpoint_args_for_item_schema()`,
 /// for the types whose writes are ported, as each type's supports give them.
 /// `title`, `content` and `excerpt` are neither validated nor sanitized, and
-/// `meta` is ported for synced patterns alone; `status` is validated by
+/// `meta` is ported for the keys core registers; `status` is validated by
 /// `check_status()` (`write::status_args`), `template` by `check_template()`.
 pub(crate) fn save(kind: Kind) -> Vec<Arg> {
     const INTEGER: &str = r#"{"type":"integer"}"#;
@@ -155,6 +155,8 @@ pub(crate) fn save(kind: Kind) -> Vec<Arg> {
     const RAW: &str = r#"{"type":"object","properties":{"raw":{"type":"string"}}}"#;
     const IDS: &str = r#"{"type":"array","items":{"type":"integer"}}"#;
     const PATTERN_META: &str = r#"{"type":"object","properties":{"footnotes":{"type":"string"},"wp_pattern_sync_status":{"type":"string","enum":["partial","unsynced"]}}}"#;
+    const FOOTNOTES_META: &str =
+        r#"{"type":"object","properties":{"footnotes":{"type":"string"}}}"#;
     if !kind.writes() {
         return Vec::new();
     }
@@ -199,7 +201,7 @@ pub(crate) fn save(kind: Kind) -> Vec<Arg> {
     match kind {
         Kind::Block => args.push(arg("meta", PATTERN_META, true, Sanitize::IsArray)),
         Kind::Navigation => {}
-        _ => args.push(arg("meta", RAW, false, Sanitize::NotPorted)),
+        _ => args.push(arg("meta", FOOTNOTES_META, true, Sanitize::IsArray)),
     }
     if kind == Kind::Post {
         args.push(value("sticky", r#"{"type":"boolean"}"#));

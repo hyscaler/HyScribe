@@ -118,15 +118,11 @@ fn preview_masked(body: &str) -> String {
 /// PHP's answers to the posts' and pages' writes, for a visitor and every
 /// role: those that write leave the rows PHP leaves (the write oracle
 /// tests below), so the next request starts from the database afresh. The
-/// body PHP takes with `meta` HyScribe answers 501.
+/// body PHP takes with `meta` is planned like any other.
 #[tokio::test(flavor = "multi_thread")]
 async fn post_writes_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/post-writes.tsv");
-    let meta = r#"{"title":"Meta","meta":{"footnotes":""}}"#;
-    assert_eq!(
-        writes_match_php(golden, "", &[(meta, &[])]).await,
-        (6 * 31, 6)
-    );
+    assert_eq!(writes_match_php(golden, "", &[]).await, (6 * 31, 0));
 }
 
 /// Form posts whose text is not valid UTF-8 are refused as PHP's `wpdb`
@@ -144,17 +140,16 @@ async fn invalid_input_is_refused_as_php() {
 async fn site_writes_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/site-writes.tsv");
     let state = include_str!("../../../../../reference/rest/site-writes.sql");
-    // Meta PHP refuses only after the write, or `footnotes`, to those who
-    // may edit the pattern.
+    // Meta PHP refuses only after the write, to those who may edit the
+    // pattern.
     let editors: &[&str] = &["administrator", "editor"];
     let unported = [
         (r#"{"meta":{"wp_pattern_sync_status":"bogus"}}"#, editors),
         (r#"{"meta":{"wp_pattern_sync_status":null}}"#, editors),
-        (r#"{"meta":{"footnotes":""}}"#, editors),
     ];
     assert_eq!(
         writes_match_php(golden, state, &unported).await,
-        (6 * 30, 2 * 3)
+        (6 * 30, 2 * 2)
     );
 }
 
@@ -187,7 +182,7 @@ async fn batches_match_php() {
 /// The cases of `golden`, recorded over `state`, sent over HTTP as each
 /// identity: how many there are and how many answered 501, as those
 /// flagged `refused` and the bodies of `unported` must, to the identities
-/// listed with them or to all for none.
+/// listed with them or to all for none; a body may have the request's target before it.
 async fn writes_match_php(
     golden: &str,
     state: &str,
@@ -214,7 +209,9 @@ async fn writes_match_php(
         let mut request = axum::http::Request::builder()
             .method(case.method.as_str())
             .uri(case.target.as_str())
-            .header(header::HOST, "127.0.0.1:8081");
+            .header(header::HOST, "127.0.0.1:8081")
+            // PHP's requests come from 127.0.0.1, as the oracle's plugin says.
+            .extension(crate::Peer([127, 0, 0, 1].into()));
         let login = logins.iter().find(|(who, _)| *who == case.who);
         let nonce = match login {
             Some((_, (cookie, nonce))) => {
@@ -241,8 +238,11 @@ async fn writes_match_php(
         let start = now();
         let response = send(&site, request, &sent).await;
         let what = format!("{} {} {} {sent}", case.who, case.method, case.target);
+        // A body alone, or with the target of the request before it.
+        let with_target = format!("{} {sent}", case.target);
         let unported = unported.iter().any(|(body, whos)| {
-            *body == sent && (whos.is_empty() || whos.contains(&case.who.as_str()))
+            (*body == sent || *body == with_target)
+                && (whos.is_empty() || whos.contains(&case.who.as_str()))
         });
         if case.flag("refused") || unported {
             assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{what}");
@@ -322,6 +322,7 @@ async fn as_user<T: Send + 'static>(
             host: None,
             now: 0,
             remote_addr: client.0,
+            postpass: false,
             user_agent: client.1,
             method_override: None,
             content_type: Some(b"application/json"),
@@ -606,7 +607,7 @@ async fn term_writes_match_php() {
     let unported = [(r#"{"name":"Meta","meta":{}}"#, &[][..])];
     assert_eq!(
         writes_match_php(golden, state, &unported).await,
-        (6 * 31, 6)
+        (6 * 42, 6)
     );
 }
 
@@ -616,16 +617,163 @@ async fn term_writes_match_php() {
 async fn comment_writes_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/comment-writes.tsv");
     let state = include_str!("../../../../../reference/rest/comment-writes.sql");
-    let unported = [
-        r#"{"post":1,"content":"Note","type":"note"}"#,
-        r#"{"post":1,"content":"Addressed","author_ip":"10.0.0.1"}"#,
-        r#"{"post":1,"content":"Meta","meta":{"_wp_note_status":"resolved"}}"#,
-    ];
-    let unported = unported.map(|body| (body, &[][..]));
+    // Meta PHP refuses once the comment is written, to those who may not
+    // edit it.
+    let meta = r#"{"post":1,"content":"Meta","meta":{"_wp_note_status":"resolved"}}"#;
+    let unported = [(meta, &["author", "contributor", "subscriber"][..])];
     assert_eq!(
         writes_match_php(golden, state, &unported).await,
-        (6 * 37, 18)
+        (6 * 54, 3)
     );
+}
+
+/// PHP's answers to the notes and the comment meta
+/// (`reference/rest/comment-notes.list`), as [`post_writes_match_php`]
+/// replays them: a `_wp_note_status` PHP refuses once the comment is written
+/// answers 501 to those who may edit the comment.
+#[tokio::test(flavor = "multi_thread")]
+async fn comment_notes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/comment-notes.tsv");
+    let state = include_str!("../../../../../reference/rest/comment-notes.sql");
+    let editors: &[&str] = &["administrator", "editor"];
+    let others: &[&str] = &["author", "contributor", "subscriber"];
+    let everyone: Vec<&str> = [editors, others].concat();
+    // Some bodies are sent to more than one comment: with the target first.
+    let bogus = r#"/?rest_route=/wp/v2/comments/11 {"meta":{"_wp_note_status":"bogus"}}"#;
+    let reset = r#"/?rest_route=/wp/v2/comments/11 {"meta":{"_wp_note_status":null}}"#;
+    let plain = r#"/?rest_route=/wp/v2/comments/10 {"meta":{"_wp_note_status":null}}"#;
+    let unported = [
+        (
+            r#"{"post":1,"content":"Bogus","type":"note","meta":{"_wp_note_status":"bogus"}}"#,
+            editors,
+        ),
+        (
+            r#"{"post":1,"content":"Number","type":"note","meta":{"_wp_note_status":5}}"#,
+            editors,
+        ),
+        (
+            r#"{"post":1,"content":"Null","type":"note","meta":{"_wp_note_status":null}}"#,
+            editors,
+        ),
+        (
+            r#"{"post":1,"content":"Plain with meta","meta":{"_wp_note_status":"resolved"}}"#,
+            others,
+        ),
+        (
+            r#"{"post":1,"content":"Plain with null","meta":{"_wp_note_status":null}}"#,
+            &everyone[..],
+        ),
+        (
+            r#"{"post":1,"content":"Plain bogus","meta":{"_wp_note_status":"bogus"}}"#,
+            &everyone[..],
+        ),
+        (bogus, editors),
+        (reset, editors),
+        (plain, editors),
+    ];
+    assert_eq!(
+        writes_match_php(golden, state, &unported).await,
+        (6 * 49, 3 * 2 + 3 + 5 + 5 + 3 * 2)
+    );
+}
+
+/// The notes and the comment meta leave the rows PHP's leave
+/// (`reference/writes/actions-rest.php`), each over
+/// `reference/rest/comment-notes.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn comment_notes_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/comment-notes.sql");
+    let setup = state.split("\n-- cleanup\n").next().unwrap();
+    let comments = "/?rest_route=/wp/v2/comments";
+    let note = |rest: &str| format!(r#"{{"post":1,{rest},"type":"note"}}"#);
+    let writes = [
+        (
+            "rest-notes-create",
+            "POST",
+            comments.to_string(),
+            r#"{"post":1,"content":"A new note","type":"note"}"#.to_string(),
+        ),
+        (
+            "rest-notes-reply",
+            "POST",
+            comments.to_string(),
+            note(r#""parent":11,"content":"A reply","status":"approved""#),
+        ),
+        (
+            "rest-notes-resolve",
+            "POST",
+            comments.to_string(),
+            note(r#""parent":11,"content":"","meta":{"_wp_note_status":"resolved"}"#),
+        ),
+        (
+            "rest-notes-held",
+            "POST",
+            comments.to_string(),
+            note(r#""content":"Held","status":"hold""#),
+        ),
+        (
+            "rest-notes-named",
+            "POST",
+            comments.to_string(),
+            note(
+                r#""content":"Named <b>one</b>","author_name":"Noter <i>x</i>","author_email":"noter@example.test","author_url":"https://noter.example.test/","author_ip":"10.0.0.9","date":"2026-01-02T03:04:05""#,
+            ),
+        ),
+        (
+            "rest-notes-update",
+            "POST",
+            format!("{comments}/11"),
+            r#"{"content":"A note, edited"}"#.to_string(),
+        ),
+        (
+            "rest-notes-meta",
+            "POST",
+            format!("{comments}/11"),
+            r#"{"meta":{"_wp_note_status":"resolved"}}"#.to_string(),
+        ),
+        (
+            "rest-notes-meta-reset",
+            "POST",
+            format!("{comments}/12"),
+            r#"{"meta":{"_wp_note_status":null}}"#.to_string(),
+        ),
+        (
+            "rest-notes-meta-same",
+            "POST",
+            format!("{comments}/12"),
+            r#"{"meta":{"_wp_note_status":"resolved"}}"#.to_string(),
+        ),
+        (
+            "rest-notes-trash",
+            "DELETE",
+            format!("{comments}/11"),
+            String::new(),
+        ),
+        (
+            "rest-notes-delete",
+            "DELETE",
+            format!("{comments}/11&force=true"),
+            String::new(),
+        ),
+        (
+            "rest-comments-meta",
+            "POST",
+            comments.to_string(),
+            r#"{"post":1,"content":"Plain with meta","meta":{"_wp_note_status":"resolved"}}"#
+                .to_string(),
+        ),
+        (
+            "rest-comments-meta-update",
+            "POST",
+            format!("{comments}/10"),
+            r#"{"meta":{"_wp_note_status":"resolved"}}"#.to_string(),
+        ),
+    ];
+    let writes: Vec<_> = writes
+        .iter()
+        .map(|(golden, method, target, body)| (*golden, *method, target.clone(), body.as_str()))
+        .collect();
+    oracle_writes(state, setup, |_| false, &writes).await;
 }
 
 /// PHP's answers to the users' writes, as [`post_writes_match_php`]
@@ -1391,6 +1539,156 @@ async fn editor_saves_are_php_s() {
     oracle_writes(state, setup, |_| false, &writes).await;
 }
 
+/// PHP's answers to the block editor's saves with `meta` and of password
+/// protected and sticky posts, over `reference/rest/editor-meta.sql`: what
+/// PHP refuses of a footnotes value once the post is written answers 501 to
+/// those who may edit the post.
+#[tokio::test(flavor = "multi_thread")]
+async fn editor_meta_saves_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/editor-meta.tsv");
+    let state = include_str!("../../../../../reference/rest/editor-meta.sql");
+    let editors: &[&str] = &["administrator", "editor"];
+    let unported = [
+        (r#"{"id":9702,"meta":{"footnotes":5}}"#, editors),
+        (r#"{"id":9702,"meta":{"footnotes":["x"]}}"#, editors),
+        (r#"{"id":9702,"meta":{"footnotes":true}}"#, editors),
+        (
+            r#"{"id":9702,"meta":{"footnotes":"[{\"content\":[\"x\"],\"id\":\"a\"}]"}}"#,
+            editors,
+        ),
+    ];
+    assert_eq!(
+        writes_match_php(golden, state, &unported).await,
+        (6 * 42, 4 * 2)
+    );
+}
+
+/// A post password cookie, which would let a protected post be sticky, is
+/// not read: the save answers 501.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_post_password_cookie_is_not_ported() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let state = include_str!("../../../../../reference/rest/editor-meta.sql");
+    fresh_with(state).await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let (cookie, nonce) = log_in_as(&site, "admin", 1).await;
+    let hash = crate::login::Names::new(&site).hash;
+    let cookie = format!("{cookie}; wp-postpass_{hash}=%24P%24Bwhatever");
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/index.php?rest_route=/wp/v2/posts/9705&_locale=user")
+        .header(header::HOST, "127.0.0.1:8081")
+        .header(header::COOKIE, cookie)
+        .header("x-wp-nonce", nonce)
+        .header("x-http-method-override", "PUT")
+        .header(header::CONTENT_TYPE, "application/json");
+    let response = send(&site, request, r#"{"id":9705,"sticky":true}"#).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+}
+
+/// The footnotes saves leave the rows PHP's leave, with the revisions they
+/// make (`reference/writes/actions-editor.php`), each over
+/// `reference/rest/editor-meta.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn editor_meta_saves_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/editor-meta.sql");
+    let setup = state.split("\n-- cleanup\n").next().unwrap();
+    let meta = |footnotes: &str| format!(r#""meta":{{"footnotes":{footnotes}}}"#);
+    let note = |id: &str, content: &str| {
+        meta(&format!(
+            r#""[{{\"content\":\"{content}\",\"id\":\"{id}\"}}]""#
+        ))
+    };
+    let noted = r#"<!-- wp:paragraph -->\n<p>Noted again.</p>\n<!-- /wp:paragraph -->"#;
+    let kses = meta(
+        r#""[{\"content\":\"Bad <script>x()</script><em>ok</em> caf\\u00e9 / <a href=\\\"https://x.test/\\\" onclick=\\\"y()\\\">l</a>\",\"id\":\"AB 12!\"},{\"content\":\"\",\"id\":\"e\"},{\"content\":\"no id\"},{\"id\":\"no-content\"},{\"content\":\"kept\",\"id\":7}]""#,
+    );
+    let post = |id: u64| format!("/?rest_route=/wp/v2/posts/{id}");
+    let saves = [
+        (
+            "editor-meta-footnotes",
+            post(9701),
+            format!(
+                r#"{{"content":"<!-- wp:paragraph -->\n<p>Noted now.</p>\n<!-- /wp:paragraph -->",{}}}"#,
+                note("n1", "A <b>note</b>")
+            ),
+        ),
+        (
+            "editor-meta-first",
+            post(9701),
+            format!("{{{}}}", note("n1", "First")),
+        ),
+        ("editor-meta-kses", post(9701), format!("{{{kses}}}")),
+        (
+            "editor-meta-changed",
+            post(9702),
+            format!("{{{}}}", note("a1", "New")),
+        ),
+        (
+            "editor-meta-same",
+            post(9702),
+            format!("{{{}}}", note("a1", "Old")),
+        ),
+        (
+            "editor-meta-content",
+            post(9702),
+            format!(r#"{{"content":"{noted}",{}}}"#, note("a1", "Newer")),
+        ),
+        (
+            "editor-meta-reset",
+            post(9702),
+            format!("{{{}}}", meta("null")),
+        ),
+        (
+            "editor-meta-empty",
+            post(9702),
+            format!("{{{}}}", meta(r#""""#)),
+        ),
+        (
+            "editor-meta-page",
+            "/?rest_route=/wp/v2/pages/9704".into(),
+            format!("{{{}}}", note("g1", "On a page")),
+        ),
+        (
+            "editor-meta-create",
+            "/?rest_route=/wp/v2/posts".into(),
+            format!(
+                r#"{{"title":"Created","status":"draft",{}}}"#,
+                note("b1", "Born")
+            ),
+        ),
+        (
+            "editor-meta-create-page",
+            "/?rest_route=/wp/v2/pages".into(),
+            format!(
+                r#"{{"title":"A page","status":"draft",{}}}"#,
+                note("c1", "Page born")
+            ),
+        ),
+        (
+            "editor-meta-pattern",
+            "/?rest_route=/wp/v2/blocks/9707".into(),
+            format!("{{{}}}", note("p1", "Pattern new")),
+        ),
+        (
+            "editor-meta-pattern-reset",
+            "/?rest_route=/wp/v2/blocks/9707".into(),
+            r#"{"meta":{"footnotes":null,"wp_pattern_sync_status":"unsynced"}}"#.into(),
+        ),
+        (
+            "editor-meta-create-pattern",
+            "/?rest_route=/wp/v2/blocks".into(),
+            r#"{"title":"Fresh pattern","status":"publish","meta":{"footnotes":"[{\"content\":\"Fresh\",\"id\":\"f1\"}]","wp_pattern_sync_status":"unsynced"}}"#.into(),
+        ),
+    ];
+    let writes: Vec<_> = saves
+        .iter()
+        .map(|(golden, target, body)| (*golden, "POST", target.clone(), body.as_str()))
+        .collect();
+    oracle_writes(state, setup, |_| false, &writes).await;
+}
+
 /// PHP's answers to the autosaves, over `reference/rest/autosaves.sql`,
 /// with `meta`, not ported for posts, answered 501.
 #[tokio::test(flavor = "multi_thread")]
@@ -1409,10 +1707,16 @@ async fn template_writes_match_php() {
     // A template its slug would title after the page it names, which the
     // read path does not port.
     let titled = r#"{"slug":"page-about-us","title":"page-about-us","content":"x"}"#;
-    let unported: [(&str, &[&str]); 1] = [(titled, &["administrator"])];
+    let single = r#"{"slug":"single-post-hello-world","title":"single-post-hello-world","status":"publish","is_wp_suggestion":true}"#;
+    let archive = r#"{"slug":"category-uncategorized","title":"","description":"","status":"publish","is_wp_suggestion":true,"content":"x"}"#;
+    let unported: [(&str, &[&str]); 3] = [
+        (titled, &["administrator"]),
+        (single, &["administrator"]),
+        (archive, &["administrator"]),
+    ];
     assert_eq!(
         writes_match_php(golden, state, &unported).await,
-        (6 * 32, 1)
+        (6 * 47, 3)
     );
 }
 

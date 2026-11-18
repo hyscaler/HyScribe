@@ -286,6 +286,7 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
         false => Some(&b"application/x-www-form-urlencoded"[..]),
     };
     let remote = crate::comment_post::client_addr(site, &asked.headers, asked.peer);
+    let postpass = cookie(&cookies, &format!("wp-postpass_{}", Names::new(site).hash)).is_some();
     let request = hyscribe_rest::Request {
         method: asked.method.as_str(),
         route: &asked.route,
@@ -299,6 +300,7 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
         origin: header("origin"),
         nonce: header("x-wp-nonce"),
         remote_addr: &remote,
+        postpass,
         user_agent: header("user-agent"),
         method_override: header("x-http-method-override"),
         content_type,

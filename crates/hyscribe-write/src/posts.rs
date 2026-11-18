@@ -211,6 +211,14 @@ pub async fn wp_insert_post(write: &mut Write<'_>, ctx: &Context, args: PostArgs
     Ok(id)
 }
 
+/// `wp_after_insert_post( $post, true, ... )` of a post already updated: the
+/// revision `wp_save_post_revision_on_insert()` makes where the post differs
+/// from its last, footnotes included.
+pub async fn wp_after_insert_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Result<()> {
+    let post = existing(write, id).await?;
+    hooks::save_revision(write, ctx, Kind::of(&post.post_type)?, id).await
+}
+
 /// `wp_update_post( $postarr )`: `change` sets the fields to change on the
 /// post's own, as the keys of `$postarr` would.
 pub async fn wp_update_post(
@@ -221,6 +229,19 @@ pub async fn wp_update_post(
 ) -> Result<u64> {
     let args = update_args(write, ctx, id, change).await?;
     wp_insert_post(write, ctx, args).await
+}
+
+/// `wp_update_post( $postarr, true, false )`: the post updated without its
+/// after hooks, which the caller fires with [`wp_after_insert_post`].
+pub async fn wp_update_post_quietly(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    id: u64,
+    change: &dyn Fn(&mut PostArgs),
+) -> Result<u64> {
+    let args = update_args(write, ctx, id, change).await?;
+    let (id, ..) = insert(write, ctx, args, None).await?;
+    Ok(id)
 }
 
 /// `wp_update_post()`'s arguments for `wp_insert_post()`: the post's own,

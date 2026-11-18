@@ -5,7 +5,8 @@
 //! `delete_item()`. A request whose checks pass gives the [`Plan`]
 //! `hyscribe-http` writes in one action, then its answer is made from the
 //! site as the write left it, as PHP prepares the post it has just written.
-//! What is not ported answers 501 before anything is written: `meta`,
+//! What is not ported answers 501 before anything is written: `meta` that PHP
+//! refuses once the post is written,
 //! pattern categories, a template that is a list, and content whose answer
 //! would be 501.
 
@@ -511,8 +512,8 @@ fn dates(context: &Context, params: &Params, existing: Option<&Post>, save: &mut
 }
 
 /// The password and stickiness checks of `prepare_item_for_database()`.
-/// A password protected post made sticky is not ported:
-/// `post_password_required()` reads the post password cookie.
+/// A password protected post made sticky is refused unless a post password
+/// cookie was sent, which `post_password_required()` would check: not ported.
 fn protection(
     context: &Context,
     params: &Params,
@@ -531,12 +532,19 @@ fn protection(
         }
         save.password = Some(password);
     }
-    let protected = context
-        .site
-        .post(id)
-        .is_some_and(|post| !post.password.is_empty());
-    if sticky && protected {
-        return Err(RestError::not_ported());
+    if sticky && id != 0 {
+        let post = context.site.post(id);
+        let protected = post
+            .as_ref()
+            .is_some_and(|post| !is_empty_string(&post.password));
+        if protected && context.postpass {
+            return Err(RestError::not_ported());
+        }
+        let args: [&dyn std::any::Any; 1] = [&post];
+        if crate::hooks::apply_filters("post_password_required", protected, &args) {
+            let message = "A password protected post can not be set to sticky.";
+            return Err(invalid("rest_invalid_field", message));
+        }
     }
     Ok(())
 }
@@ -570,8 +578,8 @@ fn after_save(
     }
     if kind == Kind::Block {
         save.pattern_categories = ids("wp_pattern_category", "wp_pattern_category");
-        save.meta = pattern_meta(params)?;
     }
+    save.meta = super::meta::updates(context, params, kind)?;
     // `set_post_thumbnail()` keeps an image `wp_get_attachment_image()`
     // shows and deletes the meta for any other post, as
     // `delete_post_thumbnail()` does for none.
@@ -644,24 +652,6 @@ pub(super) fn check_template(
         message: format!("template is not one of {}.", names.join(", ")),
         data: Value::Null,
     })
-}
-
-/// `update_value()` of a synced pattern's `meta`, an array: its
-/// `wp_pattern_sync_status` where it is one of the enum's strings. PHP
-/// checks the meta after the post is written, so a value it refuses, or
-/// resets (`null`), and `footnotes`, revisioned with the post, are not
-/// ported.
-fn pattern_meta(params: &Params) -> Result<Vec<(&'static str, Value)>, RestError> {
-    let meta = params.get("meta").and_then(Value::as_array);
-    let given = |key| meta.and_then(|meta| lookup(meta, key));
-    match given("wp_pattern_sync_status") {
-        _ if given("footnotes").is_some() => Err(RestError::not_ported()),
-        None => Ok(Vec::new()),
-        Some(status @ Value::String(text)) if text == b"partial" || text == b"unsynced" => {
-            Ok(vec![("wp_pattern_sync_status", status.clone())])
-        }
-        Some(_) => Err(RestError::not_ported()),
-    }
 }
 
 /// The answer after the save renders the content as stored, for the

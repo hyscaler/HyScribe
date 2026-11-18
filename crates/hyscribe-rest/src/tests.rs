@@ -354,6 +354,7 @@ pub(super) fn serve_with(site: &dyn Site, case: &RestCase) -> Served {
         },
         nonce: (user != 0 && !flag("nononce")).then_some(b"%nonce%"),
         remote_addr: b"",
+        postpass: false,
         user_agent: None,
         method_override: flag("override").then_some(b"DELETE"),
         content_type: if flag("json") {
@@ -688,6 +689,7 @@ fn links_are_served_as_from_url_reads_them() {
         uri: b"/",
         parameters: false,
         remote_addr: b"",
+        postpass: false,
         user_agent: None,
         host: b"",
         now: 0,
@@ -847,6 +849,7 @@ fn self_links_hint_what_their_route_allows() {
         uri: b"/",
         parameters: false,
         remote_addr: b"",
+        postpass: false,
         user_agent: None,
         host: b"",
         now: 0,

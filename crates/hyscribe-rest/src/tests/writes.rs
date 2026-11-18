@@ -165,6 +165,7 @@ struct Asked {
     kind: Option<&'static [u8]>,
     post: Vec<(Key, Value)>,
     user: u64,
+    postpass: bool,
 }
 
 impl Asked {
@@ -179,6 +180,7 @@ impl Asked {
             kind: Some(b"application/json"),
             post: Vec::new(),
             user: super::role(who).1,
+            postpass: false,
         }
     }
 
@@ -193,6 +195,7 @@ impl Asked {
             origin: None,
             nonce: (self.user != 0).then_some(b"%nonce%"),
             remote_addr: b"",
+            postpass: self.postpass,
             user_agent: None,
             method_override: None,
             content_type: self.kind,
@@ -445,8 +448,8 @@ fn authors_are_checked() {
     }
 }
 
-/// A sticky post takes no password, nor a protected post stickiness, which
-/// reads the post password cookie and is not ported.
+/// A sticky post takes no password, nor a protected post stickiness, unless
+/// a post password cookie was sent, which is not ported.
 #[test]
 fn sticky_posts_have_no_password() {
     let sticky = changed(vec![("sticky_posts", b"a:1:{i:0;i:1;}")], Vec::new());
@@ -486,7 +489,19 @@ fn sticky_posts_have_no_password() {
         "/wp/v2/posts/1",
         r#"{"sticky":true}"#,
     );
-    assert_eq!(on(&site, &asked, Outcome::Written(1)).1.status, 501);
+    let served = on(&site, &asked, Outcome::Written(1)).1;
+    assert_eq!(served.status, 400);
+    assert!(text_of(&served).contains("A password protected post can not be set to sticky."));
+    let with_cookie = Asked {
+        postpass: true,
+        ..Asked::new(
+            "administrator",
+            "POST",
+            "/wp/v2/posts/1",
+            r#"{"sticky":true}"#,
+        )
+    };
+    assert_eq!(on(&site, &with_cookie, Outcome::Written(1)).1.status, 501);
     let asked = Asked::new(
         "administrator",
         "POST",
@@ -511,6 +526,52 @@ fn sticky_posts_have_no_password() {
         (save.password, save.sticky),
         (Some(Vec::new()), Some(false))
     );
+}
+
+/// The `footnotes` of a post's `meta` are kept as
+/// `_wp_filter_post_meta_footnotes()` leaves them, whole for a user who may
+/// post unfiltered HTML; `null` deletes them; a value PHP refuses once the
+/// post is written is not ported.
+#[test]
+fn footnotes_are_planned() {
+    let meta = |footnotes: &str| format!(r#"{{"meta":{{"footnotes":{footnotes}}}}}"#);
+    let notes = r#""[{\"content\":\"A <b>note</b><script>x()</script>\",\"id\":\"AB 12!\"},{\"content\":\"\",\"id\":\"e\"},\"text\",{\"id\":\"no-content\"},{\"content\":\"kept\",\"id\":7}]""#;
+    let save = plan("administrator", "POST", "/wp/v2/posts/1", &meta(notes));
+    let kept = r#"[{"id":"ab12","content":"A <b>note<\/b>x()"},{"id":"7","content":"kept"}]"#;
+    assert_eq!(save.meta, vec![("footnotes", text_value(kept))]);
+    let save = plan(
+        "administrator",
+        "POST",
+        "/wp/v2/pages/2",
+        &meta(r#""nope""#),
+    );
+    assert_eq!(save.meta, vec![("footnotes", text_value(""))]);
+    let save = plan("administrator", "POST", "/wp/v2/posts/1", &meta("null"));
+    assert_eq!(save.meta, vec![("footnotes", Value::Null)]);
+    let other = r#"{"meta":{"other":"x"}}"#;
+    assert!(
+        plan("administrator", "POST", "/wp/v2/posts/1", other)
+            .meta
+            .is_empty()
+    );
+    let unfiltered = oracle("administrator", &["DISALLOW_UNFILTERED_HTML"]);
+    let asked = Asked::new("administrator", "POST", "/wp/v2/posts/1", &meta(notes));
+    let (plan, _) = on(&unfiltered, &asked, Outcome::Written(1));
+    let Some(Write::Save(save)) = plan.map(|plan| plan.write) else {
+        panic!("not planned");
+    };
+    let raw = r#"[{"content":"A <b>note</b><script>x()</script>","id":"AB 12!"},{"content":"","id":"e"},"text",{"id":"no-content"},{"content":"kept","id":7}]"#;
+    assert_eq!(save.meta, vec![("footnotes", text_value(raw))]);
+    for refused in [
+        "5",
+        "true",
+        r#"["x"]"#,
+        r#""[{\"content\":[\"x\"],\"id\":\"a\"}]""#,
+        r#""[{\"content\":\"x\",\"id\":[\"a\"]}]""#,
+    ] {
+        let served = answered("administrator", "POST", "/wp/v2/posts/1", &meta(refused));
+        assert_eq!(served.status, 501, "{refused}");
+    }
 }
 
 /// A page's parent must exist; none is 0.
@@ -703,7 +764,7 @@ fn navigation_and_patterns_save_their_fields() {
         assert_eq!(save.content, Some(closed.into_bytes()), "{post_type}");
     }
     // A pattern's categories, but term 1, a category, and its sync status;
-    // its footnotes, revisioned with it, are not ported.
+    // its footnotes are planned as well.
     let body =
         r#"{"title":"x","wp_pattern_category":[1],"meta":{"wp_pattern_sync_status":"partial"}}"#;
     let save = plan("administrator", "POST", "/wp/v2/blocks", body);
@@ -717,8 +778,8 @@ fn navigation_and_patterns_save_their_fields() {
     let refused = answered("administrator", "POST", "/wp/v2/blocks", string);
     assert_eq!(refused.status, 400);
     assert!(text_of(&refused).contains(r#""params":{"meta":"Invalid parameter."},"details":[]"#));
-    let footnotes = r#"{"title":"x","meta":{"footnotes":""}}"#;
-    let served = answered("administrator", "POST", "/wp/v2/blocks", footnotes);
+    let status = r#"{"title":"x","meta":{"wp_pattern_sync_status":"bogus"}}"#;
+    let served = answered("administrator", "POST", "/wp/v2/blocks", status);
     assert_eq!(served.status, 501);
     // An autosave is planned for the types written, a revision's delete
     // never: its permission check refuses everyone first.
@@ -794,7 +855,7 @@ fn unported_writes_are_not_planned() {
     let meta = r#"{"meta":null}"#;
     assert_eq!(
         answered("administrator", "POST", "/wp/v2/posts/1", meta).status,
-        501
+        200
     );
     let mut site = changed(Vec::new(), Vec::new());
     site.meta

@@ -14,6 +14,7 @@ use super::super::tests::{
 };
 use super::super::{Ajax, ajax_handler};
 use super::*;
+use crate::mail::tests::{failing, mailed};
 
 fn request<'q>(screen: &'q str, action: &'q [u8], post: &'q str) -> Request<'q> {
     Request {
@@ -96,6 +97,20 @@ async fn new_users_are_php_s() {
             assert_eq!(to, php);
             assert!(password_is(&writer, conn, id.parse().unwrap(), password).await);
         }
+        // The admin is told of each new user, a user only when asked to be.
+        let mails = mailed();
+        let to: Vec<&[u8]> = mails.iter().map(|mail| &mail.to[..]).collect();
+        let admin = &b"admin@default-install.test"[..];
+        assert_eq!(to, [admin, b"oracle-new@example.test", admin]);
+        let subjects: Vec<&[u8]> = mails.iter().map(|mail| &mail.subject[..]).collect();
+        let registered = &b"[HyScribe Default Install] New User Registration"[..];
+        let login_details = &b"[HyScribe Default Install] Login Details"[..];
+        assert_eq!(subjects, [registered, login_details, registered]);
+        let message = String::from_utf8(mails[1].message.clone()).unwrap();
+        assert!(
+            message.contains("/wp-login.php?login=oracle-new&key="),
+            "{message}"
+        );
         Ok(())
     };
     let nothing = async |_: &mut Connection| Ok::<_, String>(());
@@ -218,9 +233,21 @@ async fn profiles_are_php_s() {
         let post = "user_id=1&email=new-admin%40example.test&url=&nickname=admin&display_name=admin\
                     &admin_color=fresh&role=editor&admin_bar_front=1&locale=\
                     &pass1=Another+pass&pass2=Another+pass";
+        mailed();
         let to = redirected(&writer, conn, &request("profile", b"update", post)).await;
         assert_eq!(to, php_answer("profile-password").1);
         assert!(password_is(&writer, conn, 1, b"Another pass").await);
+        // The new address is asked to confirm the change.
+        let mails = mailed();
+        assert_eq!(mails.len(), 1);
+        assert_eq!(mails[0].to, b"new-admin@example.test");
+        let subject = &b"[HyScribe Default Install] Email Change Request"[..];
+        assert_eq!(mails[0].subject, subject);
+        let message = String::from_utf8(mails[0].message.clone()).unwrap();
+        assert!(
+            message.contains("/hs-admin/profile.php?newuseremail="),
+            "{message}"
+        );
         Ok(())
     };
     let nothing = async |_: &mut Connection| Ok::<_, String>(());
@@ -263,6 +290,16 @@ async fn password_reset_links_are_php_s() {
         let json = ajax(&writer, conn, b"send-password-reset", &post).await;
         let php = php_answer("send-password-reset").2;
         assert_eq!(json, Ajax::Json(php.replace("other", "oracle-link")));
+        let mails = mailed();
+        assert_eq!(mails.len(), 1);
+        assert_eq!(mails[0].to, b"oracle-link@example.test");
+        // A mail not sent is PHP's error.
+        failing(true);
+        let json = ajax(&writer, conn, b"send-password-reset", &post).await;
+        failing(false);
+        let failed = json_body(false, Value::String(EMAIL_FAILURE.into()));
+        assert_eq!(json, Ajax::Json(text(&failed)));
+        assert!(text(&failed).contains("The email could not be sent."));
         Ok(())
     };
     let golden = "admin-send-password-reset";

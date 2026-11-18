@@ -51,6 +51,7 @@ mod feed;
 mod files;
 mod loaders;
 mod login;
+mod mail;
 pub mod query;
 mod reads;
 mod redirect;
@@ -117,6 +118,14 @@ pub struct Site {
     install: Arc<Install>,
     /// The outbound client, when `HTTP_OUTBOUND` is on (ADR 0019).
     fetch: Option<Arc<hyscribe_fetch::Client>>,
+    /// The mail transport (ADR 0016), off until [`Site::with_mail`].
+    mailer: Arc<hyscribe_mail::Mailer>,
+}
+
+/// A transport that sends nothing.
+fn mail_off() -> hyscribe_mail::Mailer {
+    let off = hyscribe_config::Mail::default();
+    hyscribe_mail::Mailer::new(&off, b"", Arc::new(hyscribe_mail::NoHooks)).0
 }
 
 /// The address a connection comes from.
@@ -160,6 +169,7 @@ impl Site {
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
             install: unconfigured(),
             fetch: None,
+            mailer: Arc::new(mail_off()),
         };
         for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
             if let Some(url) = url {
@@ -202,6 +212,7 @@ impl Site {
             limiter: Arc::clone(&self.limiter),
             install: Arc::clone(&self.install),
             fetch: self.fetch.clone(),
+            mailer: Arc::clone(&self.mailer),
         };
         site.build_rewriter();
         Ok(site)
@@ -261,6 +272,18 @@ impl Site {
     pub fn with_fetch(self, fetch: Option<hyscribe_fetch::Client>) -> Site {
         let fetch = fetch.map(Arc::new);
         Site { fetch, ..self }
+    }
+
+    /// The site with the mail transport of `mail` and `hooks`, and what
+    /// the start log says of it (ADR 0016).
+    pub fn with_mail(
+        self,
+        mail: &hyscribe_config::Mail,
+        hooks: Arc<dyn hyscribe_mail::Hooks>,
+    ) -> (Site, String) {
+        let (mailer, line) = hyscribe_mail::Mailer::new(mail, self.home.as_bytes(), hooks);
+        let mailer = Arc::new(mailer);
+        (Site { mailer, ..self }, line)
     }
 
     /// The site with the writer `Writer::open` gave (none in shadow mode),
@@ -635,7 +658,7 @@ async fn page(
     method: axum::http::Method,
     uri: Uri,
     headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
+    Query(mut query): Query<HashMap<String, String>>,
     peer: Option<axum::Extension<Peer>>,
     body: axum::body::Bytes,
 ) -> Response {
@@ -694,6 +717,11 @@ async fn page(
     }
     // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.
     let original = uri.clone();
+    // `WP_Query::parse_query()` empties a search given as an array, still a search.
+    let get = parse_str(uri.query().unwrap_or_default().as_bytes());
+    if get.get_str("s").is_some_and(|s| s.as_array().is_some()) {
+        query.insert("s".into(), String::new());
+    }
     let (uri, query) = match pretty_request(&site, uri, query).await {
         Ok(request) => request,
         Err(err) => return html(database_error(&site, &err)),
@@ -1443,17 +1471,16 @@ async fn route(
     let flag = |name| query.get(name).is_some_and(|v| !v.is_empty() && v != "0");
     let redirect = (query.get("feed").map(String::as_str) == Some("rss"))
         .then(|| rss2_location(site, path, raw_query));
-    let format = match query
-        .get("feed")
-        .map(|f| f.replace("comments-", ""))
-        .as_deref()
-    {
-        Some("rss2" | "feed") => Some(feed::Format::Rss2),
-        Some("atom") => Some(feed::Format::Atom),
-        Some("rdf") => Some(feed::Format::Rdf),
-        Some("rss") => Some(feed::Format::Rss092),
-        _ => None,
-    };
+    // `do_feed()`'s feed, without the pad of underscores; any other is refused.
+    let format = query.get("feed").filter(|f| !f.is_empty()).map(|f| {
+        match f.replace("comments-", "").trim_start_matches('_') {
+            "" | "rss2" | "feed" => feed::Format::Rss2,
+            "atom" => feed::Format::Atom,
+            "rdf" => feed::Format::Rdf,
+            "rss" => feed::Format::Rss092,
+            _ => feed::Format::Invalid,
+        }
+    });
     let bad = bad_p(query, raw_query);
     // A feed of the 404 page, with no var naming a post but a bad `p`, is
     // the posts feed of the query without that `p`, under the 404 page's

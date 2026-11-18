@@ -192,8 +192,12 @@ struct Admin<'a> {
     /// The block editor's post and global styles post this view wrote its
     /// edit lock and first view for, and the lock.
     edited: Option<(u64, u64, String)>,
+    /// The theme's global styles post the site editor's view wrote or found.
+    styles: Option<u64>,
     /// `show_welcome_panel` as this view's `?welcome=` saves it.
     welcome: Option<Vec<u8>>,
+    /// The mails of the action, sent once it commits (ADR 0016).
+    outbox: crate::mail::Outbox,
     /// `$GLOBALS['login_grace_period']`: the auth cookie expired within
     /// its grace.
     grace: bool,
@@ -214,8 +218,10 @@ impl<'a> Admin<'a> {
             post_comments: RefCell::default(),
             draft: None,
             edited: None,
+            styles: None,
             welcome: None,
             grace: false,
+            outbox: crate::mail::Outbox::new(Arc::clone(&site.mailer)),
         }
     }
 
@@ -1232,15 +1238,20 @@ pub(crate) fn site_icon(reads: &LoginReads, size: i64) -> Option<Vec<u8>> {
 /// The block editor's page of the post the view wrote its edit lock for,
 /// once every preload is answered; `None` before.
 fn block_editor(admin: &Admin, request: &Request) -> Option<Answer> {
-    block_editor_with(admin, request, &|paths| {
-        let host = request.origin.rsplit("//").next().unwrap_or_default();
-        crate::rest::preloads(admin.reads, (admin.user.id, host), paths)
-    })
+    block_editor_with(admin, request, &rest_preloads(admin, request))
 }
 
-/// What answers the block editor's preloads, `None` where one is not
-/// ported.
+/// What answers the editors' preloads, `None` where one is not ported.
 pub(super) type Preloads<'a> = dyn Fn(&[(&'static str, String)]) -> Option<Value> + 'a;
+
+/// The REST API's answers to the editors' preloads for `admin`.
+fn rest_preloads<'a>(
+    admin: &'a Admin,
+    request: &'a Request,
+) -> impl Fn(&[(&'static str, String)]) -> Option<Value> + 'a {
+    let host = request.origin.rsplit("//").next().unwrap_or_default();
+    move |paths| crate::rest::preloads(admin.reads, (admin.user.id, host), paths)
+}
 
 /// [`block_editor`] with the preloads `preloads` answers.
 fn block_editor_with(admin: &Admin, request: &Request, preloads: &Preloads) -> Option<Answer> {
@@ -1258,6 +1269,30 @@ fn block_editor_with(admin: &Admin, request: &Request, preloads: &Preloads) -> O
         uri: request.uri,
     };
     let page = hyscribe_admin::editor::page::editor_page(admin, &editing, &preloads, request);
+    Some(Answer::from_page(page))
+}
+
+/// The site editor's page `query` asks for, once its view found or wrote
+/// the theme's global styles post and every preload is answered; `None`
+/// before.
+fn site_editor_page(admin: &Admin, query: &str, request: &Request) -> Option<Answer> {
+    site_editor_with(admin, query, request, &rest_preloads(admin, request))
+}
+
+/// [`site_editor_page`] with the preloads `preloads` answers.
+fn site_editor_with(
+    admin: &Admin,
+    query: &str,
+    request: &Request,
+    preloads: &Preloads,
+) -> Option<Answer> {
+    use hyscribe_admin::site_editor::{context_post, preload_paths, site_editor_page};
+    let styles = admin.styles?;
+    let post = context_post(admin, query)?;
+    let stylesheet = admin.site.option("stylesheet");
+    let paths = preload_paths(post.as_ref(), styles, &stylesheet);
+    let preloads = preloads(&paths)?;
+    let page = site_editor_page(admin, post.as_ref(), &preloads, request);
     Some(Answer::from_page(page))
 }
 
@@ -1367,8 +1402,8 @@ fn screen(
             Answer::from_page(info(admin, &request))
         }
         "/hs-admin/site-editor" if !admin.can("edit_theme_options") => Answer::from_page(None),
-        // Its redirects and refusals; the editor's page is not ported.
-        "/hs-admin/site-editor" => hyscribe_admin::site_editor::site_editor(query, request_uri)?,
+        "/hs-admin/site-editor" => hyscribe_admin::site_editor::site_editor(query, request_uri)
+            .or_else(|| site_editor_page(admin, query, &request))?,
         // HTTPS offers application passwords, whose list is not ported.
         "/hs-admin/profile" => {
             let args = edit_args(query).filter(|_| !origin.starts_with("https://"))?;

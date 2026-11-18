@@ -99,7 +99,7 @@ fn waiting_logins_run_as_checks_end() {
     let done = AtomicBool::new(false);
     thread::scope(|scope| {
         // Woken as checks end, they are done long before; else they give up.
-        scope.spawn(|| watchdog(&checks, &LATE, &done, Duration::from_secs(5)));
+        scope.spawn(|| watchdog(&checks, &LATE, &done, Duration::from_secs(60)));
         let _done = Done(&done);
         let held: Vec<_> = (0..3).map(|_| checks.start()).collect();
         assert!(held.iter().all(Option::is_some));

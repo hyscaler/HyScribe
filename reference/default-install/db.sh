@@ -39,8 +39,13 @@ case "${1:-}" in
       "$DOCKER" run --rm -v "$SOCKETS:/run/mysqld" --entrypoint rm "$IMAGE" -f \
         /run/mysqld/mysqld.sock /run/mysqld/mysqld.sock.lock /run/mysqld/mysqld.pid
     fi
+    # The data lives in memory (HYSCRIBE_DB_TMPFS, a size or "off"): every test
+    # run reloads the fixture, so nothing is lost, and writing tests no longer
+    # wait on the disk.
+    data=()
+    [ "${HYSCRIBE_DB_TMPFS:-4g}" = off ] || data=(--tmpfs "/var/lib/mysql:rw,size=${HYSCRIBE_DB_TMPFS:-4g}")
     "$DOCKER" run -d --name "$NAME" --network "$NETWORK" --network-alias db -p "127.0.0.1:$PORT:3306" \
-      -v "$SOCKETS:/run/mysqld" \
+      -v "$SOCKETS:/run/mysqld" "${data[@]}" \
       -e MARIADB_ROOT_PASSWORD=reference-only -e MARIADB_DATABASE=wordpress \
       -e MARIADB_USER=wordpress -e MARIADB_PASSWORD=reference-only "$IMAGE" >/dev/null
     # Over TCP: the image's first, initialising server listens on the socket only.

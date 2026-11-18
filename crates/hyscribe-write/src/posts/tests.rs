@@ -1576,7 +1576,31 @@ async fn attachment_trashes_and_deletes_are_not_ported() {
         };
         Ok(w.insert_post(&fields).await?)
     };
+    // A post of a type that is not ported at all.
+    let menu_item = async |w: &mut Write<'_>| -> Result<u64> {
+        let post = existing(w, 1).await?;
+        let fields = PostFields {
+            post_type: "nav_menu_item".into(),
+            ..post
+        };
+        Ok(w.insert_post(&fields).await?)
+    };
     let refused = [
+        rolled_back(async |w, ctx| {
+            let id = menu_item(w).await?;
+            wp_update_post(w, ctx, id, &|_| ()).await.map(drop)
+        })
+        .await,
+        rolled_back(async |w, ctx| {
+            let id = menu_item(w).await?;
+            wp_trash_post(w, ctx, id).await.map(drop)
+        })
+        .await,
+        rolled_back(async |w, ctx| {
+            let id = menu_item(w).await?;
+            wp_delete_post(w, ctx, id, true).await.map(drop)
+        })
+        .await,
         rolled_back(async |w, ctx| {
             let id = attachment(w, "inherit").await?;
             wp_trash_post(w, ctx, id).await.map(drop)

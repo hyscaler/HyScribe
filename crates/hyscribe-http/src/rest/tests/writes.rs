@@ -452,6 +452,28 @@ async fn media_writes_are_php_s() {
     }
 }
 
+/// A themes read whose links name the global styles post writes the rows
+/// PHP's does (`rest-themes-global-styles`), and nothing when a statement
+/// fails part way.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_themes_read_creates_the_styles_post_as_php() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh().await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let pending = planned(&site, "GET", "/?rest_route=/wp/v2/themes&status=active", "").await;
+    let nothing = async |_: &mut hyscribe_db::Connection| Ok::<_, String>(());
+    let action = async |conn: &mut hyscribe_db::Connection, ()| {
+        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+        let outcome = acted(conn, &pending.plan, &ctx).await;
+        assert!(matches!(outcome, Outcome::Written(_)));
+        Ok(())
+    };
+    let golden = "rest-themes-global-styles";
+    let report = check_writes(&fixture_database(), golden, nothing, action).await;
+    report.unwrap();
+}
+
 /// The administrator's `method target` sent to `site` with their cookie.
 async fn as_administrator(site: &Arc<Site>, method: &str, target: &str) -> StatusCode {
     let (cookie, nonce) = log_in_as(site, "admin", 1).await;

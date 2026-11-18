@@ -1402,6 +1402,11 @@ fn what_a_media_update_does_not_port_is_refused_before_it_writes() {
             "{body}"
         );
     }
+    // A description or caption whose `raw` is no text.
+    for body in [r#"{"description":{"raw":5}}"#, r#"{"caption":{"raw":[]}}"#] {
+        let (plan, served) = sent(body);
+        assert!(plan.is_none() && served.status == 501, "{body}");
+    }
     // A parent that is an attachment.
     let (plan, served) = sent(r#"{"post":9132}"#);
     assert!(plan.is_none() && served.status == 400, "{served:?}");

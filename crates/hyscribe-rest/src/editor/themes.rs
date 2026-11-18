@@ -205,7 +205,8 @@ fn prepared(context: &Context, params: &Params) -> Result<Response, RestError> {
     });
     let mut response = Response::new(Value::Array(data.collect()), 200);
     if links_wanted(&fields) {
-        let id = styles_post(context).ok_or_else(RestError::not_ported)?;
+        // The plan made the post, if the site had none.
+        let id = styles_post(context).unwrap_or_default();
         self_link(
             context,
             &mut response,

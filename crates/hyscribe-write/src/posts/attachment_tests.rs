@@ -335,6 +335,10 @@ fn files_are_those_php_deletes_in_its_order() {
     let odd = stored(r#"a:2:{s:5:"sizes";s:1:"x";s:14:"original_image";s:0:"";}"#);
     let files = attachment_files(b"a.jpg", &odd, &stored("s:1:\"x\";")).unwrap();
     assert_eq!(paths(files), [pair("a.jpg", "")]);
+    // A bare file whose size has no name is the empty path, which PHP skips.
+    let nameless = stored(r#"a:1:{s:5:"sizes";a:1:{s:1:"x";a:0:{}}}"#);
+    let files = attachment_files(b"a.jpg", &nameless, &none).unwrap();
+    assert_eq!(paths(files), [pair("a.jpg", "")]);
     // No file stored: nothing to delete.
     assert!(attachment_files(b"", &meta, &backups).unwrap().is_empty());
     // An absolute path, or the thumb of WordPress 2.6, is not ported.

@@ -44,6 +44,7 @@ fn posts_per_page_as_wp_query_reads_it() {
     let per_page = |value: Value| asked("administrator", &[("posts_per_page", value)]);
     let (query, ten) = asked("administrator", &[]).unwrap();
     assert_eq!((query.limit, ten), (10, 10));
+    assert_eq!(query.post_types, ["attachment"]);
     assert_eq!(per_page(text("0")).unwrap().1, 10);
     assert_eq!(per_page(text("-5")).unwrap().1, 5);
     let (all, minus) = per_page(text("-1")).unwrap();
@@ -55,6 +56,11 @@ fn posts_per_page_as_wp_query_reads_it() {
         &[("posts_per_page", text("3")), ("paged", text("4"))],
     );
     assert_eq!(paged.unwrap().0.offset, 9);
+    let single = asked(
+        "administrator",
+        &[("posts_per_page", text("1")), ("paged", text("3"))],
+    );
+    assert_eq!(single.unwrap().0.offset, 2);
     let listed = asked("administrator", &[("paged", list(&[text("4")]))]);
     assert_eq!(listed.unwrap().0.offset, 0);
     // What a page of this size or offset cannot hold is not ported.
@@ -118,6 +124,7 @@ fn filters_as_wp_query_reads_them() {
     let both = both.unwrap().0;
     assert_eq!((both.include, both.exclude), (Some(vec![5, 4]), vec![]));
     assert_eq!(one("monthnum", text("13")), None);
+    assert_eq!(one("monthnum", text("12")).unwrap().0.month, Some(12));
     let dated = asked(
         "administrator",
         &[("year", text("2026")), ("monthnum", list(&[]))],

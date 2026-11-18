@@ -952,6 +952,7 @@ fn media_bulk_actions_are_checked_as_php_checks_them() {
         ("action=delete&media[]=804", 501),
         ("action=delete&media[]=999", 500),
         ("action=delete&ids=804,801", 501),
+        ("action=delete&ids=999,804", 500),
         ("action=delete&ids[]=804", 501),
         ("action=attach&found_post_id=1&media[]=804", 501),
     ] {
@@ -1003,4 +1004,54 @@ fn deleting_a_post_by_ajax_is_checked_as_php_checks_it() {
     assert_eq!(sent(804, "_ajax_nonce=%nonce:delete-post_804%"), Some(501));
     assert_eq!(sent(804, "_ajax_nonce=wrong"), Some(403));
     assert_eq!(sent(999, "_ajax_nonce=%nonce:delete-post_999%"), Some(200));
+}
+
+/// What `current_action()` makes of the media list's arguments: attaching,
+/// detaching and emptying the Trash, from either button.
+#[test]
+fn the_media_lists_actions_are_named_as_php_names_them() {
+    let named = |query: &str| {
+        let get = fields(query);
+        let asked = Asked {
+            get: &get,
+            post: &[],
+            referer: None,
+            uri: b"/wp-admin/upload.php",
+            home: HOME,
+            user: 1,
+            now: 0,
+            ip: b"",
+            agent: b"",
+        };
+        media_action(&asked).map(|action| action.to_php_string())
+    };
+    let some = |name: &str| Some(name.as_bytes().to_vec());
+    assert_eq!(named("media[]=1&found_post_id=2"), some("attach"));
+    assert_eq!(named("media[]=1&parent_post_id=2"), some("detach"));
+    assert_eq!(named("delete_all=1"), some("delete_all"));
+    assert_eq!(named("delete_all2=1"), some("delete_all"));
+    assert_eq!(named("action=trash"), some("trash"));
+    assert_eq!(named("found_post_id=2"), None);
+}
+
+/// `wp_ajax_save_attachment()` answers an error before it saves, for a
+/// request without what it needs, a nonce, or a post that is no attachment.
+#[test]
+fn attachment_saves_that_php_answers_an_error_are_refused() {
+    let site = role("administrator");
+    let sent = |body: &str| outcome(&site, "admin-ajax.php", Some(body));
+    let nonce = "nonce=%nonce:update-post_804%";
+    let saved = format!("action=save-attachment&id=804&changes[title]=x&{nonce}");
+    assert_eq!(sent(&saved), Some(501));
+    let unchanged = format!("action=save-attachment&id=804&{nonce}");
+    assert_eq!(sent(&unchanged), Some(200));
+    assert_eq!(sent("action=save-attachment&changes[title]=x"), Some(200));
+    assert_eq!(
+        sent("action=save-attachment&id=0&changes[title]=x"),
+        Some(200)
+    );
+    let wrong = "action=save-attachment&id=804&changes[title]=x&nonce=wrong";
+    assert_eq!(sent(wrong), Some(403));
+    let post = "action=save-attachment&id=1&changes[title]=x&nonce=%nonce:update-post_1%";
+    assert_eq!(sent(post), Some(200));
 }

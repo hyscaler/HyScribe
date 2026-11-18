@@ -47,6 +47,7 @@ impl Tree<'_> {
     fn with_menu<'b>(base: &'b DefaultInstall, content: &[u8]) -> Tree<'b> {
         let menu = Post {
             id: 900,
+            title: b"Menu".to_vec(),
             content: content.to_vec(),
             post_type: "wp_navigation".into(),
             status: "publish".into(),
@@ -71,8 +72,20 @@ impl Site for Tree<'_> {
         self.base.home_url()
     }
     fn post(&self, id: u64) -> Option<Post> {
-        let page = self.pages.iter().find(|page| page.id == id);
-        page.cloned().or_else(|| self.base.post(id))
+        // The menu, and a draft of it as 901.
+        let draft = self.menu.iter().map(|menu| Post {
+            id: 901,
+            status: "draft".into(),
+            ..menu.clone()
+        });
+        let menus = self.menu.iter().cloned().chain(draft);
+        let page = self
+            .pages
+            .iter()
+            .cloned()
+            .chain(menus)
+            .find(|post| post.id == id);
+        page.or_else(|| self.base.post(id))
     }
     fn post_terms(&self, post_id: u64, taxonomy: &str) -> Vec<Term> {
         self.base.post_terms(post_id, taxonomy)

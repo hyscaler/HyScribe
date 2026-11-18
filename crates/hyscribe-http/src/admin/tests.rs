@@ -452,6 +452,7 @@ async fn logged_in_users_are_let_in() {
         "/hs-admin/user-edit?user_id=1&x=1",
         "/hs-admin/user-edit?user_id[]=1",
         "/hs-admin/user-edit?user_id=%FF",
+        "/hs-admin/profile?x=1",
         "/hs-admin/user-new?update=add&x=1",
         "/hs-admin/user-new?update[]=add",
         "/hs-admin/user-new?update=%FF",

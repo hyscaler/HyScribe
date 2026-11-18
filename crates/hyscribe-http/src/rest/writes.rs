@@ -27,8 +27,9 @@ use hyscribe_write::options::{
     update_option,
 };
 use hyscribe_write::posts::{
-    Context, PostArgs, Revisioned, stick_post, unstick_post, wp_create_post_autosave,
-    wp_delete_post, wp_insert_post, wp_trash_post, wp_unique_post_slug, wp_update_post,
+    Context, PostArgs, Revisioned, get_user_global_styles_post_id, stick_post, unstick_post,
+    wp_create_post_autosave, wp_delete_attachment, wp_delete_post, wp_insert_post, wp_trash_post,
+    wp_unique_post_slug, wp_update_post,
 };
 use hyscribe_write::terms::{
     Deletion, Taxonomy, TermArgs, TermError, TermList, TermRef, wp_delete_term, wp_insert_term,
@@ -82,7 +83,21 @@ fn made(
 ) -> Result<Outcome, Error> {
     let ctx = context(site, plan, now);
     let outbox = Outbox::new(Arc::clone(&site.mailer));
-    handle.block_on(async { act(writer.begin().await, plan, &ctx, &outbox).await })
+    let deleting = matches!(plan.write, hyscribe_rest::Write::DeleteAttachment(_));
+    // The files PHP deletes with an attachment are the uploads folder's.
+    let uploads = site.uploads.as_ref();
+    if deleting && uploads.is_none() {
+        return Err(Error::Unported("an attachment without an uploads folder"));
+    }
+    let done = handle.block_on(async { act(writer.begin().await, plan, &ctx, &outbox).await })?;
+    // Only once the rows are committed: a file never goes with a row that stays.
+    match (done, uploads) {
+        (Outcome::Deleted(id, files), Some(uploads)) => {
+            uploads.remove(&files);
+            Ok(Outcome::Written(id))
+        }
+        (done, _) => Ok(done),
+    }
 }
 
 /// The answer to a write that came to `outcome`: made from the site
@@ -171,13 +186,13 @@ pub(super) async fn act(
 ) -> Result<Outcome, Error> {
     let mut write = write?;
     let outcome = match written(&mut write, plan, ctx, outbox).await {
-        Ok(outcome @ (Outcome::Written(_) | Outcome::Cached(_))) => {
+        Ok(outcome @ (Outcome::Written(_) | Outcome::Cached(_) | Outcome::Deleted(..))) => {
             write.commit().await.map(|()| outcome).map_err(Into::into)
         }
         outcome => outcome,
     };
     match outcome {
-        Ok(Outcome::Written(_) | Outcome::Cached(_)) => {
+        Ok(Outcome::Written(_) | Outcome::Cached(_) | Outcome::Deleted(..)) => {
             outbox.send().await;
         }
         _ => outbox.clear(),
@@ -209,6 +224,15 @@ async fn written(
         hyscribe_rest::Write::Delete(id) => {
             Ok(done(wp_delete_post(write, ctx, *id, true).await?, *id))
         }
+        hyscribe_rest::Write::DeleteAttachment(id) => {
+            let files = wp_delete_attachment(write, ctx, *id).await?;
+            Ok(
+                files.map_or(Outcome::Refused("rest_cannot_delete"), |files| {
+                    let files = files.into_iter().map(|file| (file.path, file.within));
+                    Outcome::Deleted(*id, files.collect())
+                }),
+            )
+        }
         // Its file is written first, by `rest::uploads`.
         hyscribe_rest::Write::Upload(_) => Err(Error::Unported("an upload's file")),
         hyscribe_rest::Write::Term(save) => term_saved(write, save).await,
@@ -229,6 +253,11 @@ async fn written(
         hyscribe_rest::Write::User(save) => user_saved(write, save, ctx, outbox).await,
         hyscribe_rest::Write::DeleteUser(id, reassign) => {
             Ok(done(wp_delete_user(write, *id, *reassign, ctx).await?, *id))
+        }
+        hyscribe_rest::Write::StylesPost(stylesheet) => {
+            let stylesheet = stylesheet.as_deref().unwrap_or_default();
+            let id = get_user_global_styles_post_id(write, ctx, stylesheet).await?;
+            Ok(Outcome::Written(id))
         }
     }
 }
@@ -612,6 +641,18 @@ async fn saved(
     }
     for (key, value) in &save.meta {
         update_metadata(write, Meta::Post, id, key, value, &Value::Null).await?;
+    }
+    if let Some(alt) = &save.alt_text {
+        let alt = Value::String(alt.clone());
+        update_metadata(
+            write,
+            Meta::Post,
+            id,
+            "_wp_attachment_image_alt",
+            &alt,
+            &any,
+        )
+        .await?;
     }
     Ok(Outcome::Written(id))
 }

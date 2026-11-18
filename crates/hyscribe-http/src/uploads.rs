@@ -113,6 +113,29 @@ impl Uploads {
         self.max_size
     }
 
+    /// `wp_delete_file_from_directory()` of each `(file, folder)`, both as
+    /// paths under the uploads folder: a file is deleted only when it
+    /// really is within the folder, links followed, and then it is the
+    /// path that goes, a link included. What is missing is left.
+    pub(crate) fn remove(&self, files: &[(Vec<u8>, Vec<u8>)]) {
+        let under = |path: &[u8]| {
+            let path = std::str::from_utf8(path).ok()?;
+            Some(self.dir.join(path))
+        };
+        for (file, folder) in files {
+            let (Some(file), Some(folder)) = (under(file), under(folder)) else {
+                continue;
+            };
+            let (Ok(real), Ok(within)) = (file.canonicalize(), folder.canonicalize()) else {
+                continue;
+            };
+            if real != within && real.starts_with(&within) {
+                // `wp_delete_file()` is `@unlink()`: a failure is not an error.
+                let _ = std::fs::remove_file(&file);
+            }
+        }
+    }
+
     /// The uploads with `hooks` attached, as a test attaches them until
     /// the extension runtime does.
     #[cfg(test)]

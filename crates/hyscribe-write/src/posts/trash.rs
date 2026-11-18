@@ -107,6 +107,9 @@ pub async fn wp_trash_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Res
     if post.status == "trash" {
         return Ok(false);
     }
+    if post.post_type == "attachment" {
+        return Err(Error::Unported("trashing an attachment"));
+    }
     reset_front_page(write, id, Kind::of(&post.post_type)?).await?;
     let status = Value::String(post.status.into_bytes());
     add_metadata(write, Meta::Post, id, TRASH_STATUS, &status, false).await?;
@@ -144,6 +147,9 @@ pub async fn wp_untrash_post(
     };
     if post.status != "trash" {
         return Ok(false);
+    }
+    if post.post_type == "attachment" {
+        return Err(Error::Unported("restoring an attachment"));
     }
     let status = if previous {
         let stored = get_metadata(write, Meta::Post, id, TRASH_STATUS).await?;
@@ -235,6 +241,10 @@ pub async fn wp_delete_post(
         return Ok(false);
     };
     let kind = Kind::of(&post.post_type)?;
+    // An attachment's files go with it: see `wp_delete_attachment()`.
+    if kind == Kind::Attachment {
+        return Err(Error::Unported("an attachment through wp_delete_post()"));
+    }
     let to_trash = !force && ctx.constants.empty_trash_days != 0;
     if to_trash && matches!(kind, Kind::Post | Kind::Page) && post.status != "trash" {
         return wp_trash_post(write, ctx, id).await;
@@ -258,4 +268,150 @@ pub async fn wp_delete_post(
         queue.extend(revisions.into_iter().map(|id| (id, Kind::Revision)));
     }
     Ok(true)
+}
+
+/// A file `wp_delete_attachment_files()` deletes once the attachment's rows
+/// are gone: its path under the uploads folder, and the folder under it
+/// that the file must really be within (`wp_delete_file_from_directory()`'s
+/// `$directory`), empty for the uploads folder itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttachmentFile {
+    /// The file's path under the uploads folder.
+    pub path: Vec<u8>,
+    /// The folder under it the file must be within.
+    pub within: Vec<u8>,
+}
+
+/// `dirname()` of a relative path: `.` for a bare name.
+fn dirname(path: &[u8]) -> Vec<u8> {
+    match path.iter().rposition(|&b| b == b'/') {
+        Some(at) => path.get(..at).unwrap_or_default().to_vec(),
+        None => b".".to_vec(),
+    }
+}
+
+/// The files of an attachment stored at `file` with metadata `meta` and
+/// backup sizes `backups`, in the order `wp_delete_attachment_files()`
+/// deletes them: its sizes, the original image, the backups, the file.
+pub(super) fn attachment_files(
+    file: &[u8],
+    meta: &Value,
+    backups: &Value,
+) -> Result<Vec<AttachmentFile>> {
+    // An absolute path, or WordPress 2.6's `thumb`, which another
+    // attachment may share.
+    if file.first() == Some(&b'/') || meta.get_str("thumb").is_some_and(|t| !t.is_empty()) {
+        return Err(Error::Unported("an attachment's file by its absolute path"));
+    }
+    if file.is_empty() {
+        return Ok(Vec::new());
+    }
+    let name = hyscribe_phpser::wp_basename(file);
+    let folder = dirname(file);
+    let beside = |other: &[u8]| hyscribe_render::template::replace(file, &name, other);
+    let mut files = Vec::new();
+    let mut keep = |path: Vec<u8>, within: &[u8]| {
+        // `! empty( $path )`.
+        if !path.is_empty() {
+            files.push(AttachmentFile {
+                path,
+                within: within.to_vec(),
+            });
+        }
+    };
+    let sizes = meta.get_str("sizes").and_then(Value::as_array);
+    for (_, size) in sizes.unwrap_or_default() {
+        let sized = size.get_str("file").map(Value::to_php_string);
+        keep(beside(&sized.unwrap_or_default()), &folder);
+    }
+    if let Some(original) = meta.get_str("original_image").filter(|o| !o.is_empty()) {
+        keep(beside(&original.to_php_string()), &folder);
+    }
+    if let Some(backups) = backups.as_array() {
+        let stored = meta.get_str("file").map(Value::to_php_string);
+        let folder = dirname(&stored.unwrap_or_default());
+        for (_, backup) in backups {
+            let backup = backup.get_str("file").map(Value::to_php_string);
+            let joined = [&folder[..], b"/", &backup.unwrap_or_default()].concat();
+            keep(joined, &folder);
+        }
+    }
+    keep(file.to_vec(), b"");
+    Ok(files)
+}
+
+/// What `_delete_attachment_theme_mod()` and `WP_Site_Icon` leave alone: the
+/// attachment is no logo or site icon, and no header or background image is
+/// set, whichever it is.
+async fn theme_mods_kept(write: &mut Write<'_>, id: u64) -> Result<bool> {
+    let stylesheet = write.option_value("stylesheet").await?.unwrap_or_default();
+    let name = format!("theme_mods_{}", String::from_utf8_lossy(&stylesheet));
+    let mods = write.option_value(&name).await?.unwrap_or_default();
+    let mods = unserialize(&mods).unwrap_or_default();
+    let set = |key| mods.get_str(key).filter(|value| !value.is_empty());
+    let logo = set("custom_logo").is_some_and(|logo| logo.to_int() == id.cast_signed());
+    let images = set("header_image").is_some() || set("background_image").is_some();
+    let site = site::option_int(write, "site_logo").await? == id
+        || site::option_int(write, "site_icon").await? == id;
+    Ok(!logo && !images && !site)
+}
+
+/// `wp_delete_attachment( $id, true )`: the files to delete once the
+/// transaction commits, or `None` where PHP returns false, for a post that
+/// is missing or no attachment.
+pub async fn wp_delete_attachment(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    id: u64,
+) -> Result<Option<Vec<AttachmentFile>>> {
+    let post = write.post(id).await?;
+    if !post.is_some_and(|post| post.post_type == "attachment") {
+        return Ok(None);
+    }
+    delete_post_meta(write, id, TRASH_STATUS).await?;
+    delete_post_meta(write, id, TRASH_TIME).await?;
+    let mut stored = Vec::new();
+    for key in [
+        "_wp_attachment_metadata",
+        "_wp_attachment_backup_sizes",
+        "_wp_attached_file",
+    ] {
+        let values = get_metadata(write, Meta::Post, id, key).await?;
+        stored.push(values.into_iter().next().unwrap_or_default());
+    }
+    let mut stored = stored.into_iter();
+    let (meta, backups) = (
+        stored.next().unwrap_or_default(),
+        stored.next().unwrap_or_default(),
+    );
+    let file = stored.next().unwrap_or_default().to_php_string();
+    let files = attachment_files(&file, &meta, &backups)?;
+    // delete_attachment: _delete_attachment_theme_mod().
+    if !theme_mods_kept(write, id).await? {
+        return Err(Error::Unported("an attachment the theme or site uses"));
+    }
+    // delete_post: _wp_delete_post_menu_item().
+    let item = id.to_string().into_bytes();
+    let key = "_menu_item_object_id";
+    if !write
+        .meta_ids_of_key_valued(Meta::Post, key, &item)
+        .await?
+        .is_empty()
+    {
+        return Err(Error::Unported("an attachment in a classic menu"));
+    }
+    site::delete_object_terms(write, id, &["category", "post_tag"]).await?;
+    let thumbnail = Value::String(item);
+    delete_metadata(write, Meta::Post, 0, "_thumbnail_id", &thumbnail, true).await?;
+    let comments = crate::comments::Context {
+        now: ctx.now,
+        home: &ctx.home,
+        empty_trash_days: ctx.constants.empty_trash_days,
+    };
+    for comment in write.post_comment_ids(id).await? {
+        crate::comments::delete_comment(write, comments, comment, true).await?;
+    }
+    delete_object_meta(write, Meta::Post, id).await?;
+    write.delete_post(id).await?;
+    Ok(Some(files))
 }

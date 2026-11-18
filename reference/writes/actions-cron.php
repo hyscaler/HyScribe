@@ -189,6 +189,33 @@ $cron_loop = function () use ( $cron_missed, $cron_trash, $cron_transients ) {
 	_set_cron_array( $crons );
 };
 
+// The events a page view schedules that HyScribe's cron runs: init's two
+// privacy events, then admin.php's, in that order.
+$cron_view_events = array(
+	'wp_privacy_delete_old_export_files',
+	'wp_privacy_personal_data_cleanup_requests',
+	'wp_scheduled_delete',
+	'delete_expired_transients',
+);
+
+$cron_unscheduled = function ( $hooks ) {
+	foreach ( $hooks as $hook ) {
+		wp_clear_scheduled_hook( $hook );
+	}
+};
+
+// wp-settings.php's init callbacks, then wp-admin/admin.php after auth_redirect().
+$cron_view = function () {
+	wp_schedule_delete_old_privacy_export_files();
+	wp_schedule_personal_data_cleanup_requests();
+	if ( ! wp_next_scheduled( 'wp_scheduled_delete' ) && ! wp_installing() ) {
+		wp_schedule_event( time(), 'daily', 'wp_scheduled_delete' );
+	}
+	if ( ! wp_next_scheduled( 'delete_expired_transients' ) && ! wp_installing() ) {
+		wp_schedule_event( time(), 'daily', 'delete_expired_transients' );
+	}
+};
+
 // A hook's callbacks, as cron runs them: with no user.
 $cron_run = function ( $hook, $args = array() ) {
 	wp_set_current_user( 0 );
@@ -259,6 +286,31 @@ return array(
 	'cron-privacy-requests'   => array(
 		'setup'  => $cron_requests,
 		'action' => fn() => $cron_run( 'wp_privacy_personal_data_cleanup_requests' ),
+	),
+	// An admin request on a site whose cron option has none of the four.
+	'cron-schedule-events'         => array(
+		'setup'  => fn() => $cron_unscheduled( $cron_view_events ),
+		'action' => $cron_view,
+	),
+	// The default install as it is: init's events scheduled by a page view of the front end, admin.php's not.
+	'cron-schedule-events-fixture' => array(
+		'action' => $cron_view,
+	),
+	// One already scheduled, the others not.
+	'cron-schedule-events-some'    => array(
+		'setup'  => function () use ( $cron_unscheduled, $cron_view_events ) {
+			$cron_unscheduled( $cron_view_events );
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'delete_expired_transients' );
+		},
+		'action' => $cron_view,
+	),
+	// All four scheduled: the option stays as it is.
+	'cron-schedule-events-present' => array(
+		'setup'  => function () use ( $cron_unscheduled, $cron_view_events, $cron_view ) {
+			$cron_unscheduled( $cron_view_events );
+			$cron_view();
+		},
+		'action' => $cron_view,
 	),
 	// wp-cron.php's loop, which leaves the events of other hooks as they are.
 	'cron-loop'               => array(

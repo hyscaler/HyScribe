@@ -475,3 +475,69 @@ async fn the_site_editor_s_view_waits_for_its_preloads() {
     .await
     .unwrap();
 }
+
+/// An admin request's scheduling as the write oracle's `cron-schedule-events-fixture`
+/// has it on the default install, whose first admin request this is, and a
+/// `cron` option older than version 2 left as it is (PHP upgrades it).
+#[tokio::test]
+async fn an_admin_request_schedules_the_cron_events_as_php_does() {
+    let writer = writer().await;
+    let action = async |conn: &mut Connection, ()| {
+        settled(async |budget| {
+            let mut write = writer.begin_on(conn).await;
+            if let Ok(write) = &mut write {
+                write.fail_after(budget);
+            }
+            schedule(write, crate::now()).await
+        })
+        .await
+        .map_err(|err| format!("{err:?}"))
+    };
+    let setup = async |_: &mut Connection| Ok::<_, String>(());
+    let golden = "cron-schedule-events-fixture";
+    check_writes(&fixture_database(), golden, setup, action)
+        .await
+        .unwrap();
+    let mut write = writer.begin().await.unwrap();
+    let old = Value::Array(Vec::new());
+    update_option(&mut write, "cron", &old, None).await.unwrap();
+    assert!(schedule(Ok(write), 0).await.is_ok());
+}
+
+/// A logged in request to any admin screen, the page served or not,
+/// schedules the events before it; one without a login does not.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_admin_screen_schedules_the_cron_events_first() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_database()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = crate::admin::tests::logged_in(&db.name, dir.path()).await;
+    let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary)
+        .await
+        .unwrap();
+    let site = std::sync::Arc::new(
+        std::sync::Arc::try_unwrap(site)
+            .ok()
+            .unwrap()
+            .with_writer(writer),
+    );
+    let events = async || {
+        let cron = site.db.option("cron").await.unwrap().unwrap();
+        let cron = String::from_utf8(cron).unwrap();
+        ["wp_scheduled_delete", "delete_expired_transients"].map(|hook| cron.contains(hook))
+    };
+    assert_eq!(events().await, [false, false]);
+    let send = crate::admin::tests::send;
+    let anonymous = send(&site, "GET", "/hs-admin/profile", "", None).await;
+    assert_eq!(anonymous.status(), StatusCode::FOUND);
+    assert_eq!(events().await, [false, false]);
+    let nowhere = send(&site, "GET", "/hs-admin/nowhere", &cookies, None).await;
+    assert_eq!(nowhere.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(events().await, [true, true]);
+}

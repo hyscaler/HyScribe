@@ -59,6 +59,8 @@ admin	/wp-admin/edit-tags.php?taxonomy=post_tag	200	Bulk tag
 admin	/wp-admin/upload.php?mode=list	200	REST image
 admin	/wp-admin/upload.php?mode=list	200	REST png
 admin	/wp-admin/upload.php?mode=list	200	orient-6
+admin	/wp-admin/upload.php?mode=list	200	Edited by REST
+admin	/wp-admin/post.php?post=%rest-media-edit%&action=edit	200	Alt after
 admin	/wp-admin/post.php?post=%rest-media%&action=edit	200	A wide REST picture
 admin	/wp-admin/post.php?post=%async-plain%&action=edit	200	small
 visitor	/a-rest-post/rest-image/	301	-

@@ -1,0 +1,8 @@
+# The rows PHP WordPress writes for the action rest-media-update-alt (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-18 20:31:35 to 2026-11-18 20:31:35 UTC.
+# %wp_posts:1% is 9301.
+# %wp_postmeta:1% is 13.
+# %wp_postmeta:2% is 14.
+# %wp_postmeta:3% is 15.
+# %wp_postmeta:4% is 16.
+wp_postmeta	%wp_postmeta:3%	~	meta_value	Old alt	

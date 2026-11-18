@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The media writes reference/rest/golden.sh records as media-writes.tsv over
+# media-writes.sql's attachments: updates and deletes of /wp/v2/media/<id>,
+# each sent with its body as every identity and the database put back after
+# each. A delete without force answers 501 as MEDIA_TRASH is off; a body that
+# names `featured_media` or `meta` is not ported.
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"title":"<b>Renamed</b> <script>x()</script>","caption":"A <em>caption</em><iframe src=\"https://example.test/\"></iframe>","description":{"raw":"<p onclick=\"y()\">Described</p>"},"alt_text":"  A <b>new</b>\talt  ","post":2,"slug":"renamed picture","comment_status":"closed","ping_status":"closed","template":""}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"title":"A title"}
+PATCH	/?rest_route=/wp/v2/media/9301	json,restore	{"status":"private","post":0,"date":"2026-01-02T03:04:05"}
+PUT	/?rest_route=/wp/v2/media/9301	json,restore	{"alt_text":""}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"status":"publish"}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"status":"draft","slug":"a-draft-slug","author":1}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"slug":"author-picture"}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"description":"A plain description","caption":{"raw":""}}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"caption":{"text":"no raw"},"description":5}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"title":"Kept","password":"secret","content":"ignored","excerpt":"ignored"}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"post":9302}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"post":99999}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"post":2,"title":"With a parent"}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"post":"x"}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"comment_status":"bogus"}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"alt_text":["x"]}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"status":"bogus"}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"template":"nope"}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"author":702}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"author":99999}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"date_gmt":"2026-02-03T04:05:06Z","date":null}
+POST	/?rest_route=/wp/v2/media/9301	form,restore	title=A+form+title&alt_text=Form+alt&post=2
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"featured_media":1}
+POST	/?rest_route=/wp/v2/media/9301	json,restore	{"meta":{"x":1}}
+POST	/?rest_route=/wp/v2/media/9302	json,restore	{"title":"By the author","alt_text":"Author alt"}
+POST	/?rest_route=/wp/v2/media/9302	json,restore	{"author":1}
+POST	/?rest_route=/wp/v2/media/9303	json,restore	{"title":"Renamed in the trash"}
+POST	/?rest_route=/wp/v2/media/9304	json,restore	{"title":"Renamed private","status":"inherit"}
+POST	/?rest_route=/wp/v2/media/99999	json,restore	{"title":"None"}
+POST	/?rest_route=/wp/v2/media/1	json,restore	{"title":"A post"}
+DELETE	/?rest_route=/wp/v2/media/9301	restore
+DELETE	/?rest_route=/wp/v2/media/9301&force=true	restore
+DELETE	/?rest_route=/wp/v2/media/9301&force=1&_fields=deleted	restore
+DELETE	/?rest_route=/wp/v2/media/9302&force=true	restore
+DELETE	/?rest_route=/wp/v2/media/9303&force=true	restore
+DELETE	/?rest_route=/wp/v2/media/9304&force=true	restore
+DELETE	/?rest_route=/wp/v2/media/99999&force=true	restore
+DELETE	/?rest_route=/wp/v2/media/1&force=true	restore

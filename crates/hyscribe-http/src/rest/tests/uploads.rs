@@ -15,7 +15,7 @@ use hyscribe_render::date::{Zone, format_unix};
 use hyscribe_testkit::unhex;
 use sqlx::Connection as _;
 
-use super::writes::{fresh, now_masked, planned, saves_site};
+use super::writes::{fresh, now_masked, planned, saves_site, uploading};
 use super::*;
 use crate::Uploads;
 
@@ -229,14 +229,6 @@ fn files(dir: &Path) -> Vec<String> {
     }
     found.sort();
     found
-}
-
-/// The site the golden replays on: `wordpress_saves` with a writer and
-/// uploads into `uploads`.
-async fn uploading(sessions: &Path, uploads: &Path) -> Arc<Site> {
-    let site = Arc::into_inner(saves_site(sessions).await).unwrap();
-    let limits = hyscribe_config::ImageLimits::default();
-    Arc::new(site.with_uploads(Uploads::new(uploads.into(), 2 << 20, limits)))
 }
 
 /// `wordpress_saves` as the golden was recorded over: [`fresh`], and

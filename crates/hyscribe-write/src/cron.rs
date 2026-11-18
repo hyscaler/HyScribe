@@ -314,6 +314,37 @@ pub async fn wp_schedule_event(
     _set_cron_array(write, crons).await
 }
 
+/// `if ( ! wp_next_scheduled( $hook ) ) wp_schedule_event( $now, $recurrence, $hook )`:
+/// how WordPress schedules each of its recurring jobs once.
+pub(crate) async fn schedule_unless_scheduled(
+    write: &mut Write<'_>,
+    now: i64,
+    recurrence: &str,
+    hook: &str,
+) -> Result<()> {
+    let none = Value::Array(Vec::new());
+    if wp_next_scheduled(write, hook, &none).await?.is_none() {
+        wp_schedule_event(write, now, recurrence, hook, &none).await?;
+    }
+    Ok(())
+}
+
+/// The events a page view of the admin schedules that HyScribe's cron
+/// runs, in PHP's order: `init`'s (`wp_schedule_delete_old_privacy_export_files()`
+/// and `wp_schedule_personal_data_cleanup_requests()`), then those
+/// `wp-admin/admin.php` schedules once the user is logged in.
+pub async fn schedule_admin_events(write: &mut Write<'_>, now: i64) -> Result<()> {
+    for (recurrence, job) in [
+        ("hourly", Job::DeleteOldExportFiles),
+        ("daily", Job::CleanupRequests),
+        ("daily", Job::ScheduledDelete),
+        ("daily", Job::DeleteExpiredTransients),
+    ] {
+        schedule_unless_scheduled(write, now, recurrence, job.hook()).await?;
+    }
+    Ok(())
+}
+
 /// `wp_unschedule_event( $at, $hook, $args )`: false for a timestamp
 /// below 1, else whether the option changed.
 pub async fn wp_unschedule_event(

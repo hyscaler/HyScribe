@@ -1,0 +1,11 @@
+# The rows PHP WordPress writes for the action rest-media-update-private (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-18 20:31:34 to 2026-11-18 20:31:34 UTC.
+# %wp_posts:1% is 9301.
+# %wp_postmeta:1% is 9.
+# %wp_postmeta:2% is 10.
+# %wp_postmeta:3% is 11.
+# %wp_postmeta:4% is 12.
+wp_posts	%wp_posts:1%	~	post_date	%now%	2026-01-02 03:04:05
+wp_posts	%wp_posts:1%	~	post_date_gmt	%now%	2026-01-02 03:04:05
+wp_posts	%wp_posts:1%	~	post_parent	1	0
+wp_posts	%wp_posts:1%	~	post_status	inherit	private

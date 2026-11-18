@@ -1,0 +1,24 @@
+# The rows PHP WordPress writes for the action rest-media-update (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-18 20:31:34 to 2026-11-18 20:31:34 UTC.
+# %wp_posts:1% is 9301.
+# %wp_postmeta:1% is 3.
+# %wp_postmeta:2% is 4.
+# %wp_postmeta:3% is 5.
+# %wp_postmeta:4% is 6.
+# %wp_postmeta:5% is 7.
+# %wp_postmeta:6% is 8.
+wp_postmeta	%wp_postmeta:3%	~	meta_value	Old alt	A new alt
+wp_postmeta	%wp_postmeta:5%	+	meta_id	%wp_postmeta:5%
+wp_postmeta	%wp_postmeta:5%	+	meta_key	_wp_old_slug
+wp_postmeta	%wp_postmeta:5%	+	meta_value	a-write-oracle-picture
+wp_postmeta	%wp_postmeta:5%	+	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:6%	+	meta_id	%wp_postmeta:6%
+wp_postmeta	%wp_postmeta:6%	+	meta_key	_wp_page_template
+wp_postmeta	%wp_postmeta:6%	+	meta_value	
+wp_postmeta	%wp_postmeta:6%	+	post_id	%wp_posts:1%
+wp_posts	%wp_posts:1%	~	comment_status	open	closed
+wp_posts	%wp_posts:1%	~	post_content	Its description	<p>Described</p>
+wp_posts	%wp_posts:1%	~	post_excerpt	Its caption	A <em>caption</em>
+wp_posts	%wp_posts:1%	~	post_name	a-write-oracle-picture	renamed-picture
+wp_posts	%wp_posts:1%	~	post_parent	1	2
+wp_posts	%wp_posts:1%	~	post_title	A write oracle picture	<b>New</b> x()title

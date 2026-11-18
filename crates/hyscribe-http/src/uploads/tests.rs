@@ -316,3 +316,36 @@ async fn bodies_are_refused_past_their_limits() {
     assert_eq!(status("/", (2 << 20) + 1).await, large);
     assert_ne!(status("/", 2 << 20).await, large);
 }
+
+#[test]
+fn files_are_removed_only_from_within_their_folder() {
+    let (dir, outside) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let folder = dir.path().join("2026/11");
+    std::fs::create_dir_all(&folder).unwrap();
+    let write = |path: &Path| std::fs::write(path, "x").unwrap();
+    let (kept, gone) = (folder.join("kept.jpg"), folder.join("gone.jpg"));
+    let (root, linked) = (dir.path().join("root.jpg"), folder.join("linked.jpg"));
+    for path in [&kept, &gone, &root] {
+        write(path);
+    }
+    write(&outside.path().join("outside.jpg"));
+    std::os::unix::fs::symlink(outside.path().join("outside.jpg"), &linked).unwrap();
+    let pair = |file: &str, within: &str| (file.as_bytes().to_vec(), within.as_bytes().to_vec());
+    uploads(dir.path()).remove(&[
+        // Not within its folder: another folder's file, the folder itself,
+        // a link out of it, and what is missing or no text.
+        pair("2026/11/kept.jpg", "2026/12"),
+        pair("2026/11", "2026/11"),
+        pair("2026/11/linked.jpg", "2026/11"),
+        pair("2026/11/missing.jpg", "2026/11"),
+        pair("2026/11/kept.jpg", "2026/missing"),
+        (b"2026/11/\xff.jpg".to_vec(), b"2026/11".to_vec()),
+        (b"2026/11/kept.jpg".to_vec(), b"\xff".to_vec()),
+        // Within it, and the uploads folder's own file.
+        pair("2026/11/gone.jpg", "2026/11"),
+        pair("root.jpg", ""),
+    ]);
+    assert!(kept.exists() && linked.is_symlink() && folder.exists());
+    assert!(!gone.exists() && !root.exists());
+    assert!(outside.path().join("outside.jpg").exists());
+}

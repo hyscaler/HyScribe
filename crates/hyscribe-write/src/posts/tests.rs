@@ -1565,7 +1565,7 @@ async fn database_errors_end_every_function() {
 }
 
 #[tokio::test]
-async fn attachments_are_not_ported() {
+async fn attachment_trashes_and_deletes_are_not_ported() {
     let _one = ONE_AT_A_TIME.lock().await;
     let attachment = async |w: &mut Write<'_>, status: &str| -> Result<u64> {
         let post = existing(w, 1).await?;
@@ -1577,11 +1577,6 @@ async fn attachments_are_not_ported() {
         Ok(w.insert_post(&fields).await?)
     };
     let refused = [
-        rolled_back(async |w, ctx| {
-            let id = attachment(w, "inherit").await?;
-            wp_update_post(w, ctx, id, &|_| ()).await.map(drop)
-        })
-        .await,
         rolled_back(async |w, ctx| {
             let id = attachment(w, "inherit").await?;
             wp_trash_post(w, ctx, id).await.map(drop)

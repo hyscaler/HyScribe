@@ -8,7 +8,7 @@
 mod block_types;
 pub(crate) mod global_styles;
 mod patterns;
-mod themes;
+pub(crate) mod themes;
 
 use std::sync::OnceLock;
 

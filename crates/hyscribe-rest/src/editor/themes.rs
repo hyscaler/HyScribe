@@ -4,12 +4,13 @@
 //! `/wp/v2/themes/<stylesheet>`, served for the active theme, the bundled
 //! Twenty Twenty-Five, as `reference/rest/registered.php` exports it. Its
 //! links name its `wp_global_styles` post, which reading them creates when
-//! there is none: such a read is not ported, nor are the other
-//! themes, which HyScribe does not have.
+//! there is none, as a write plan the answer is made after; the
+//! other themes, which HyScribe does not have, are not ported.
 
 use hyscribe_phpser::{Key, Value};
 
 use crate::fields::{is_field_included, links_wanted, narrowed};
+use crate::posts::write::{Outcome, Plan, Write, Writing};
 use crate::request::{Arg, Params, Sanitize};
 use crate::response::{Response, RestError, list, object, text};
 use crate::types::can_edit_any;
@@ -37,21 +38,59 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                 sanitize: Sanitize::Schema,
             }],
             permission: items_permission,
-            callback: Some(items),
+            callback: None,
         }]),
-        "/wp/v2/themes/(?P<stylesheet>[^\\/:<>\\*\\?\"\\|]+(?:\\/[^\\/:<>\\*\\?\"\\|]+)?)" => {
-            Some(vec![Endpoint {
-                args: vec![Arg {
-                    name: "stylesheet",
-                    schema: object([("type", text("string"))]),
-                    validate: false,
-                    sanitize: Sanitize::Urldecode,
-                }],
-                permission: item_permission,
-                callback: Some(item),
-            }])
-        }
+        ITEM_ROUTE => Some(vec![Endpoint {
+            args: vec![Arg {
+                name: "stylesheet",
+                schema: object([("type", text("string"))]),
+                validate: false,
+                sanitize: Sanitize::Urldecode,
+            }],
+            permission: item_permission,
+            callback: None,
+        }]),
         _ => None,
+    }
+}
+
+/// The route of a single theme.
+const ITEM_ROUTE: &str =
+    "/wp/v2/themes/(?P<stylesheet>[^\\/:<>\\*\\?\"\\|]+(?:\\/[^\\/:<>\\*\\?\"\\|]+)?)";
+
+/// The reads of themes, which write the active theme's global styles post
+/// when their links need one: [`endpoints`] leaves their answers to it.
+pub(crate) fn writing(regex: &str, _: usize) -> Option<Writing> {
+    (regex == "/wp/v2/themes" || regex == ITEM_ROUTE).then_some(Writing::plain(plan, finish))
+}
+
+/// The plan of a read: the post it creates, for the bundled active theme
+/// when its links are wanted and the site has none, else nothing.
+fn plan(context: &Context, params: &Params) -> Result<Plan, RestError> {
+    let active = [(Key::Int(0), text("active"))];
+    let asked = match params.route == ITEM_ROUTE {
+        true => params.text("stylesheet") == STYLESHEET.as_bytes(),
+        false => params.get("status") == Some(&Value::Array(active.to_vec())),
+    };
+    let creates = asked
+        && bundled(context)
+        && links_wanted(&narrowed(params, Vec::new()))
+        && styles_post(context).is_none();
+    let write = Write::StylesPost(creates.then(|| STYLESHEET.to_string()));
+    Ok(Plan::new(context, write, Value::Null))
+}
+
+/// The answer once the post is there: [`items`] or [`item`], as the
+/// callbacks of other reads give it.
+fn finish(
+    context: &Context,
+    params: &mut Params,
+    _: Plan,
+    _: Outcome,
+) -> Result<Response, RestError> {
+    match params.route == ITEM_ROUTE {
+        true => item(context, params),
+        false => items(context, params),
     }
 }
 

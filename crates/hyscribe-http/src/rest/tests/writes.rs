@@ -63,6 +63,13 @@ async fn fresh_with(state: &str) {
         .unwrap();
 }
 
+/// [`saves_site`] with uploads into `uploads`, which a media delete needs.
+pub(super) async fn uploading(dir: &std::path::Path, uploads: &std::path::Path) -> Arc<Site> {
+    let site = Arc::into_inner(saves_site(dir).await).unwrap();
+    let limits = hyscribe_config::ImageLimits::default();
+    Arc::new(site.with_uploads(crate::Uploads::new(uploads.into(), 2 << 20, limits)))
+}
+
 /// The oracle's site over `wordpress_saves`, with sessions in `dir` and a
 /// writer.
 pub(super) async fn saves_site(dir: &std::path::Path) -> Arc<Site> {
@@ -167,6 +174,363 @@ async fn editor_saves_match_php() {
     assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 34, 0));
 }
 
+/// PHP's answers to the themes reads whose links create the active theme's
+/// global styles post (`reference/rest/theme-writes.list`), for a visitor and
+/// every role, the post made by the first read that needs it.
+#[tokio::test(flavor = "multi_thread")]
+async fn theme_reads_create_the_styles_post_as_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/theme-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/theme-writes.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 9, 0));
+}
+
+/// PHP's answers to the media's updates and deletes
+/// (`reference/rest/media-writes.list`) for a visitor and every role, over
+/// `reference/rest/media-writes.sql`: a body that names `featured_media` or
+/// `meta` is not ported.
+#[tokio::test(flavor = "multi_thread")]
+async fn media_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/media-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/media-writes.sql");
+    let unported = [
+        (r#"{"featured_media":1}"#, &[][..]),
+        (r#"{"meta":{"x":1}}"#, &[][..]),
+    ];
+    assert_eq!(
+        writes_match_php(golden, state, &unported).await,
+        (6 * 38, 12)
+    );
+}
+
+/// `serialize()` of the metadata the oracle's attachment has.
+const ORACLE_METADATA: &[u8] = br#"a:6:{s:5:"width";i:1200;s:6:"height";i:800;s:4:"file";s:18:"2026/11/oracle.jpg";s:8:"filesize";i:345678;s:5:"sizes";a:2:{s:6:"medium";a:5:{s:4:"file";s:18:"oracle-300x200.jpg";s:5:"width";i:300;s:6:"height";i:200;s:9:"mime-type";s:10:"image/jpeg";s:8:"filesize";i:12345;}s:9:"thumbnail";a:5:{s:4:"file";s:18:"oracle-150x150.jpg";s:5:"width";i:150;s:6:"height";i:150;s:9:"mime-type";s:10:"image/jpeg";s:8:"filesize";i:5432;}}s:10:"image_meta";a:12:{s:8:"aperture";s:1:"0";s:6:"credit";s:0:"";s:6:"camera";s:0:"";s:7:"caption";s:0:"";s:17:"created_timestamp";s:1:"0";s:9:"copyright";s:0:"";s:12:"focal_length";s:1:"0";s:3:"iso";s:1:"0";s:13:"shutter_speed";s:1:"0";s:5:"title";s:0:"";s:11:"orientation";s:1:"0";s:8:"keywords";a:0:{}}}"#;
+
+/// What an oracle attachment is made with, besides the rows of its own.
+#[derive(Clone, Copy, PartialEq)]
+enum Extras {
+    /// Nothing.
+    None,
+    /// A comment, and the image as post 1's featured image.
+    Used,
+    /// [`Extras::Used`], in the trash with its trash meta.
+    UsedTrashed,
+    /// Only in the trash.
+    Trashed,
+}
+
+/// The oracle's `$media_attachment( $args, $parent )` as attachment `id`
+/// (`reference/writes/actions-media-rest.php`), with `extras`.
+async fn oracle_attachment(
+    write: &mut hyscribe_db::Write<'_>,
+    ctx: &hyscribe_write::posts::Context,
+    (id, parent, name): (u64, u64, Option<&str>),
+    extras: Extras,
+) -> Result<(), hyscribe_write::Error> {
+    use hyscribe_write::options::{Meta, add_metadata, update_metadata};
+    let args = hyscribe_write::posts::PostArgs {
+        import_id: id,
+        title: b"A write oracle picture".to_vec(),
+        content: b"Its description".to_vec(),
+        excerpt: b"Its caption".to_vec(),
+        mime_type: "image/jpeg".into(),
+        author: Some(1),
+        parent,
+        name: name.map(|name| name.as_bytes().to_vec()),
+        ..hyscribe_write::posts::PostArgs::default()
+    };
+    let id =
+        hyscribe_write::posts::wp_insert_attachment(write, ctx, args, "2026/11/oracle.jpg").await?;
+    let any = Value::String(Vec::new());
+    let metadata = hyscribe_phpser::unserialize(ORACLE_METADATA).unwrap();
+    let backups = hyscribe_phpser::unserialize(
+        br#"a:1:{s:9:"full-orig";a:3:{s:5:"width";i:1200;s:6:"height";i:800;s:4:"file";s:15:"oracle-orig.jpg";}}"#,
+    )
+    .unwrap();
+    let alt = Value::String(b"Old alt".to_vec());
+    for (key, value) in [
+        ("_wp_attachment_metadata", &metadata),
+        ("_wp_attachment_image_alt", &alt),
+        ("_wp_attachment_backup_sizes", &backups),
+    ] {
+        update_metadata(write, Meta::Post, id, key, value, &any).await?;
+    }
+    if extras == Extras::None {
+        return Ok(());
+    }
+    if matches!(extras, Extras::Used | Extras::UsedTrashed) {
+        let comment = hyscribe_db::CommentFields {
+            post_id: id,
+            author: b"A reader".to_vec(),
+            date: "2026-01-01 00:00:00".into(),
+            date_gmt: "2026-01-01 00:00:00".into(),
+            content: b"A comment.".to_vec(),
+            approved: "1".into(),
+            comment_type: "comment".into(),
+            ..hyscribe_db::CommentFields::default()
+        };
+        write.insert_comment(&comment).await?;
+        let image = Value::Int(i64::try_from(id).unwrap());
+        add_metadata(write, Meta::Post, 1, "_thumbnail_id", &image, false).await?;
+    }
+    if extras == Extras::UsedTrashed {
+        let status = Value::String(b"inherit".to_vec());
+        add_metadata(
+            write,
+            Meta::Post,
+            id,
+            "_wp_trash_meta_status",
+            &status,
+            false,
+        )
+        .await?;
+        let time = Value::Int(ctx.now);
+        add_metadata(write, Meta::Post, id, "_wp_trash_meta_time", &time, false).await?;
+    }
+    Ok(())
+}
+
+/// What an update of the oracle's attachment is sent as.
+const UPDATE: &str = r#"{"title":"<b>New</b> <script>x()</script>title","caption":"A <em>caption</em><iframe src=\"https://example.test/\"></iframe>","description":{"raw":"<p onclick=\"y()\">Described</p>"},"alt_text":"  A <b>new</b>\talt  ","post":2,"slug":"renamed picture","comment_status":"closed","ping_status":"closed","template":""}"#;
+
+/// Each media update and delete leaves the rows PHP's leave
+/// (`reference/writes/actions-media-rest.php`), and a delete the files
+/// `wp_delete_attachment_files()` names, each on an attachment of its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn media_writes_are_php_s() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let media = |id: u64| format!("/?rest_route=/wp/v2/media/{id}");
+    let force = |id: u64, force: &str| format!("/?rest_route=/wp/v2/media/{id}&force={force}");
+    let (taken, id) = (9300, 9301);
+    let cases: Vec<(&str, &'static str, String, &str, Extras, bool)> = vec![
+        (
+            "rest-media-update",
+            "POST",
+            media(id),
+            UPDATE,
+            Extras::None,
+            false,
+        ),
+        (
+            "rest-media-update-private",
+            "PATCH",
+            media(id),
+            r#"{"status":"private","post":0,"date":"2026-01-02T03:04:05"}"#,
+            Extras::None,
+            false,
+        ),
+        (
+            "rest-media-update-alt",
+            "PUT",
+            media(id),
+            r#"{"alt_text":""}"#,
+            Extras::None,
+            false,
+        ),
+        (
+            "rest-media-update-slug",
+            "POST",
+            media(id),
+            r#"{"slug":"taken-slug"}"#,
+            Extras::None,
+            true,
+        ),
+        (
+            "rest-media-update-draft",
+            "POST",
+            media(id),
+            r#"{"status":"draft","slug":"a-draft-slug","author":1}"#,
+            Extras::None,
+            false,
+        ),
+        (
+            "rest-media-update-trashed",
+            "POST",
+            media(id),
+            r#"{"title":"Renamed in the trash"}"#,
+            Extras::Trashed,
+            false,
+        ),
+        (
+            "rest-media-delete",
+            "DELETE",
+            force(id, "true"),
+            "",
+            Extras::Used,
+            false,
+        ),
+        (
+            "rest-media-delete-trashed",
+            "DELETE",
+            force(id, "1"),
+            "",
+            Extras::UsedTrashed,
+            false,
+        ),
+        (
+            "rest-media-delete-unattached",
+            "DELETE",
+            force(id, "true"),
+            "",
+            Extras::None,
+            false,
+        ),
+    ];
+    for (golden, method, target, body, extras, taken_name) in cases {
+        fresh_with("").await;
+        let dir = tempfile::tempdir().unwrap();
+        let site = saves_site(dir.path()).await;
+        let unattached = golden.ends_with("unattached");
+        let parent = u64::from(!unattached);
+        let trash = matches!(extras, Extras::Trashed | Extras::UsedTrashed);
+        let attachments = async |conn: &mut hyscribe_db::Connection, writer: &Writer| {
+            let ctx = hyscribe_write::posts::Context {
+                user: 1,
+                can_publish: true,
+                home: b"http://127.0.0.1:8081".to_vec(),
+                upload_host: b"127.0.0.1:8081".to_vec(),
+                unfiltered_html: false,
+                constants: hyscribe_config::Constants::default(),
+                now: now(),
+            };
+            let shown = |err: hyscribe_write::Error| format!("{err:?}");
+            let mut write = writer
+                .begin_on(conn)
+                .await
+                .map_err(|err| format!("{err:?}"))?;
+            if taken_name {
+                let named = (taken, parent, Some("taken-slug"));
+                let first = oracle_attachment(&mut write, &ctx, named, Extras::None);
+                first.await.map_err(shown)?;
+            }
+            let oracle = (id, parent, None);
+            let second = oracle_attachment(&mut write, &ctx, oracle, extras);
+            second.await.map_err(shown)?;
+            write.commit().await.map_err(|err| format!("{err:?}"))?;
+            if trash {
+                let sql = "UPDATE wp_posts SET post_status = 'trash' WHERE ID = ?";
+                let trashed = sqlx::query(sql).bind(id).execute(&mut *conn).await;
+                trashed.map_err(|err| format!("{err:?}"))?;
+            }
+            Ok::<_, String>(())
+        };
+        let saves_writer = Writer::open(&saves(), Mode::Primary)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut conn = saves_conn().await;
+        attachments(&mut conn, &saves_writer).await.unwrap();
+        let pending = planned(&site, method, &target, body).await;
+        let setup = async |conn: &mut hyscribe_db::Connection| {
+            let writer = Writer::open(&fixture_database(), Mode::Primary)
+                .await
+                .unwrap()
+                .unwrap();
+            attachments(conn, &writer).await
+        };
+        let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+            let outcome = acted(conn, &pending.plan, &ctx).await;
+            match outcome {
+                Outcome::Written(_) => {}
+                Outcome::Deleted(deleted, files) => {
+                    assert_eq!(deleted, id, "{golden}");
+                    let own = |path: &str, within: &str| (path.into(), within.into());
+                    let names: Vec<(Vec<u8>, Vec<u8>)> = vec![
+                        own("2026/11/oracle-300x200.jpg", "2026/11"),
+                        own("2026/11/oracle-150x150.jpg", "2026/11"),
+                        own("2026/11/oracle-orig.jpg", "2026/11"),
+                        own("2026/11/oracle.jpg", ""),
+                    ];
+                    assert_eq!(files, names, "{golden}");
+                }
+                other => panic!("{golden}: {other:?}"),
+            }
+            Ok(())
+        };
+        let report = check_writes(&fixture_database(), golden, setup, action).await;
+        report.unwrap();
+    }
+}
+
+/// The administrator's `method target` sent to `site` with their cookie.
+async fn as_administrator(site: &Arc<Site>, method: &str, target: &str) -> StatusCode {
+    let (cookie, nonce) = log_in_as(site, "admin", 1).await;
+    let request = axum::http::Request::builder()
+        .method(method)
+        .uri(target)
+        .header(header::HOST, "127.0.0.1:8081")
+        .header(header::COOKIE, cookie)
+        .header("x-wp-nonce", nonce);
+    send(site, request, "").await.status()
+}
+
+/// How many posts of `wordpress_saves` have the ID `id`.
+async fn posts_with(id: u64) -> i64 {
+    let sql = "SELECT COUNT(*) FROM wp_posts WHERE ID = ?";
+    let count = sqlx::query_scalar::<_, i64>(sql).bind(id);
+    count.fetch_one(&mut saves_conn().await).await.unwrap()
+}
+
+/// A media delete's files go once its rows are committed, those of the
+/// attachment and not a link out of its folder or another file; without an
+/// uploads folder it is not ported and writes nothing; and with MEDIA_TRASH
+/// on, only a forced one is.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_media_delete_removes_its_files_once_it_commits() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let state = include_str!("../../../../../reference/rest/media-writes.sql");
+    fresh_with(state).await;
+    let (sessions, uploads, outside) = (
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+    );
+    let folder = uploads.path().join("2026/11");
+    std::fs::create_dir_all(&folder).unwrap();
+    let names = [
+        "oracle-one.jpg",
+        "oracle-one-300x200.jpg",
+        "oracle-one-orig.jpg",
+        "unrelated.jpg",
+    ];
+    for name in names {
+        std::fs::write(folder.join(name), name).unwrap();
+    }
+    // The 150 by 150 size is a link to a file outside the uploads.
+    std::fs::write(outside.path().join("kept.jpg"), "kept").unwrap();
+    let link = folder.join("oracle-one-150x150.jpg");
+    std::os::unix::fs::symlink(outside.path().join("kept.jpg"), &link).unwrap();
+    let target = "/?rest_route=/wp/v2/media/9301&force=true";
+    // No uploads folder: not ported, and nothing written.
+    let plain = saves_site(sessions.path()).await;
+    let status = as_administrator(&plain, "DELETE", target).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(posts_with(9301).await, 1);
+    assert!(folder.join("oracle-one.jpg").exists());
+    // MEDIA_TRASH on: a delete that is not forced is not ported.
+    let site = uploading(sessions.path(), uploads.path()).await;
+    let constants = hyscribe_config::Constants {
+        media_trash: true,
+        ..hyscribe_config::Constants::default()
+    };
+    let trashing = Arc::new(Arc::into_inner(site).unwrap().with_constants(constants));
+    let status = as_administrator(&trashing, "DELETE", "/?rest_route=/wp/v2/media/9301").await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(posts_with(9301).await, 1);
+    // Forced, it deletes the rows and then the files.
+    let site = uploading(sessions.path(), uploads.path()).await;
+    assert_eq!(
+        as_administrator(&site, "DELETE", target).await,
+        StatusCode::OK
+    );
+    assert_eq!(posts_with(9301).await, 0);
+    for name in &names[..3] {
+        assert!(!folder.join(name).exists(), "{name}");
+    }
+    assert!(folder.join("unrelated.jpg").exists());
+    assert!(link.is_symlink() && outside.path().join("kept.jpg").exists());
+}
+
 /// PHP's answers to batches (`reference/rest/batch.list`) as a visitor, an
 /// author and the administrator, their writes made one after the other,
 /// those flagged `refused` answered 501; `hyscribe-rest` replays every role.
@@ -196,7 +560,8 @@ async fn writes_match_php(
     let _saves = crate::admin::tests::SAVES.lock().await;
     fresh_with(state).await;
     let dir = tempfile::tempdir().unwrap();
-    let mut site = saves_site(dir.path()).await;
+    let uploads = tempfile::tempdir().unwrap();
+    let mut site = uploading(dir.path(), uploads.path()).await;
     let mut logins = Vec::new();
     for (who, login, id) in [
         ("administrator", "admin", 1),
@@ -268,7 +633,7 @@ async fn writes_match_php(
         // refuse them (1412), so the site connects afresh too.
         if status.is_success() {
             fresh_with(state).await;
-            site = saves_site(dir.path()).await;
+            site = uploading(dir.path(), uploads.path()).await;
         }
     }
     (cases.len(), refused)

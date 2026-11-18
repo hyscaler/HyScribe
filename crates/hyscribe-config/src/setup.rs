@@ -15,10 +15,12 @@ use crate::{ENV_FILE, SALT_KEYS};
 const UNSET_SALT: &str = "put your unique phrase here";
 
 /// The constants the wizard copies when they are literal `true` or `false`:
-/// the capability constants and the cron ones (ADR 0017).
-pub const CONSTANTS: [&str; 5] = [
+/// the capability constants, `MEDIA_TRASH` and the cron ones
+/// (ADR 0017).
+pub const CONSTANTS: [&str; 6] = [
     "DISALLOW_UNFILTERED_HTML",
     "ALLOW_UNFILTERED_UPLOADS",
+    "MEDIA_TRASH",
     "MULTISITE",
     "DISABLE_WP_CRON",
     "ALTERNATE_WP_CRON",
@@ -56,8 +58,8 @@ pub struct Import {
 }
 
 /// The `.env` keys `config` gives: the database details, the table prefix,
-/// the keys and salts, `WP_HOME`, `WP_SITEURL`, the capability constants and
-/// `EMPTY_TRASH_DAYS` when it is a whole number of days.
+/// the keys and salts, `WP_HOME`, `WP_SITEURL`, the constants of
+/// [`CONSTANTS`] and `EMPTY_TRASH_DAYS` when it is a whole number of days.
 pub fn import(config: &WpConfig) -> Import {
     let mut import = Import::default();
     let string = |name: &str| match setting(config, name) {

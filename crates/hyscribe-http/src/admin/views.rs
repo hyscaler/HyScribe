@@ -18,6 +18,7 @@ use hyscribe_db::{DbError, Write, Writer};
 use hyscribe_model::Post;
 use hyscribe_phpser::Value;
 use hyscribe_write::Error;
+use hyscribe_write::cron::schedule_admin_events;
 use hyscribe_write::options::settings_errors_shown;
 use hyscribe_write::posts::{Context, Edited, block_editor_view, site_editor_view};
 use tokio::runtime::Handle;
@@ -202,6 +203,28 @@ pub(super) async fn written<'w>(
         settings_errors_shown(&mut write, ctx.now).await?;
     }
     Ok((write, draft))
+}
+
+/// What `wp-admin/admin.php` and `init` schedule once a user is logged in,
+/// in an action of its own before the screen: the cron events HyScribe runs
+/// (ADR 0017). As in PHP, where a failed `update_option()` goes on, a
+/// database error is only printed, and a `cron` option older than version 2,
+/// which PHP upgrades, is left as it is.
+pub(super) fn scheduled(writer: &Writer, now: i64) {
+    let done = Handle::current().block_on(async { schedule(writer.begin().await, now).await });
+    if let Err(err) = done {
+        eprintln!("cron events not scheduled: {err:?}");
+    }
+}
+
+/// [`scheduled`] in the action `write`, once begun.
+async fn schedule(write: Result<Write<'_>, DbError>, now: i64) -> Result<(), Error> {
+    let mut write = write?;
+    match schedule_admin_events(&mut write, now).await {
+        Ok(()) => write.commit().await.map_err(Error::from),
+        Err(Error::Unported(_)) => Ok(()),
+        Err(err) => Err(err),
+    }
 }
 
 /// The block editor's first view of `target`, written from `write` and

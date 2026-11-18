@@ -287,6 +287,11 @@ foreach ( file( '/tmp/hyscribe-rest.tsv', FILE_IGNORE_NEW_LINES ) as $line ) {
 	}
 	if ( isset( $answer['deleted'] ) ) {
 		$answers[ "$base/{$answer['previous']['id']}" ] = null;
+		// The files of a media item go with it.
+		$file = '/wp/v2/media' === $base ? ( $answer['previous']['media_details']['file'] ?? '' ) : '';
+		if ( $file && file_exists( wp_get_upload_dir()['basedir'] . "/$file" ) ) {
+			$failures[] = "the file $file of the deleted media item is still there";
+		}
 	} else {
 		$answers[ "$base/{$answer['id']}" ] = $answer;
 	}

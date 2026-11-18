@@ -133,6 +133,11 @@ pub trait Site {
     fn uses_trash(&self) -> bool {
         true
     }
+    /// Whether `MEDIA_TRASH` is true as well as `EMPTY_TRASH_DAYS` not 0:
+    /// only then do media go to the trash before they are deleted.
+    fn uses_media_trash(&self) -> bool {
+        false
+    }
     /// The site's content as `hyscribe-render` reads it, for the post
     /// routes.
     fn reads(&self) -> &dyn Reads;
@@ -383,6 +388,7 @@ fn writing(regex: &str, index: usize) -> Option<posts::write::Writing> {
         .or_else(|| templates::writing(regex, index))
         .or_else(|| revisions::writing(regex, index))
         .or_else(|| editor::global_styles::writing(regex, index))
+        .or_else(|| editor::themes::writing(regex, index))
 }
 
 /// `maybe_unserialize()` of a stored option or meta value: `false` where

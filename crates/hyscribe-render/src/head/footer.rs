@@ -24,6 +24,7 @@ pub fn wp_footer(site: &dyn Site, assets: &Assets) -> Vec<u8> {
     let siteurl = String::from_utf8_lossy(&site.option("siteurl").unwrap_or_default()).into_owned();
     let registry = registered_modules(&siteurl);
     let mut out = speculation_rules(site, &siteurl);
+    out.extend_from_slice(&assets.footer);
     let modules = Modules {
         registry: &registry,
         queue: &assets.modules,

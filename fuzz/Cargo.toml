@@ -365,3 +365,10 @@ path = "fuzz_targets/xml_reader.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "duotone_color"
+path = "fuzz_targets/duotone_color.rs"
+test = false
+doc = false
+bench = false

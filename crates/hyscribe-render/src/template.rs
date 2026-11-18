@@ -67,6 +67,10 @@ pub fn render_template(
     // `get_the_block_template_html()` autoembeds before `do_blocks()`.
     let embedded = renderer.autoembed(template);
     let rendered = renderer.render(&embedded);
+    // `wp_enqueue_scripts` and `wp_footer` after the template rendered.
+    renderer.assets.rules.extend(renderer.duotone.rules());
+    renderer.assets.global_presets = renderer.duotone.global_styles();
+    renderer.assets.footer = renderer.duotone.footer();
     let content = site_smilies(site, &wptexturize(&rendered, &CORE_SHORTCODE_TAGS));
     let html = [
         b"<div class=\"wp-site-blocks\">".as_slice(),
@@ -203,6 +207,8 @@ pub(crate) struct Renderer<'a> {
     pub(crate) parent_layout: Option<Value>,
     /// The last number `wp_unique_id()` gave out.
     pub(crate) unique_id: u64,
+    /// What the duotone support collected.
+    pub(crate) duotone: crate::duotone::Duotone,
     /// `wp_unique_prefixed_id( 'wp-elements-' )`'s counter.
     pub(crate) elements_id: u64,
     /// How often each navigation name has been seen, for unique labels.
@@ -281,6 +287,7 @@ impl<'a> Renderer<'a> {
             gallery_instances: 0,
             parent_layout: None,
             unique_id: 0,
+            duotone: Default::default(),
             elements_id: 0,
             navigation_names: HashMap::new(),
             navigation: None,
@@ -480,6 +487,7 @@ impl Renderer<'_> {
         let html = elements_class(html, block);
         let html = self.layout(block, html);
         let html = crate::dimensions::dimensions(html, block);
+        let html = self.duotone(block, html);
         // The block visibility support hides a block set not to show.
         let hidden = types.is_some() && !visible(block);
         let html = if hidden { Vec::new() } else { html };

@@ -704,6 +704,15 @@ async fn a_confirmation_mails_the_admin_once() {
         request_state(&db, 951).await,
         ("request-confirmed".into(), false)
     );
+    // A database that refuses only the note that the admin was told: the
+    // request stays confirmed and the page is the error page.
+    let trigger = "CREATE TRIGGER no_told BEFORE INSERT ON wp_postmeta FOR EACH ROW \
+                   SET NEW.post_id = IF(NEW.meta_key = '_wp_admin_notified', NULL, NEW.post_id)";
+    let db = loaded(&format!("{REQUESTS}\n{trigger}")).await;
+    let refusing = site(&db, dir.path(), true).await;
+    let reply = send(&refusing, "GET", &link(951), "", "").await;
+    assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(request_state(&db, 951).await.0, "request-confirmed");
     // Shadow mode, then a table the write needs gone.
     for (primary, sql) in [
         (false, "DROP TABLE wp_postmeta"),

@@ -270,11 +270,7 @@ fn what_php_refuses_is_php_s_or_not_ported() {
         user_request: Some(7),
         ..Oracle::default()
     };
-    for (query, name) in [
-        ("key%5B%5D=x&login=admin", "rp"),
-        ("request_id=-7&confirm_key=x", "confirmaction"),
-        ("", "postpass"),
-    ] {
+    for (query, name) in [("key%5B%5D=x&login=admin", "rp"), ("", "postpass")] {
         let query = parse_str(query.as_bytes());
         assert_eq!(
             action(&oracle, &request(&query, None), name, (b"/", NOW)),
@@ -295,4 +291,28 @@ fn a_zero_redirect_is_none() {
         page("action=lostpassword&redirect_to=0"),
         page("action=lostpassword")
     );
+}
+
+/// The confirmed page words each action as PHP does, and an action it has
+/// no words for gets the general ones.
+#[test]
+fn the_confirmed_page_names_the_action() {
+    let oracle = Oracle::default();
+    let query = parse_str(b"");
+    for (name, text) in [
+        (
+            &b"export_personal_data"[..],
+            "Thanks for confirming your export request.",
+        ),
+        (
+            b"remove_personal_data",
+            "Thanks for confirming your erasure request.",
+        ),
+        (b"other", "Action has been confirmed."),
+    ] {
+        let page = request_confirmed(&oracle, &request(&query, None), name);
+        let page = String::from_utf8(page).unwrap();
+        let paragraph = format!("<p class=\"success\">{text}</p>");
+        assert!(page.contains(&paragraph), "{text}");
+    }
 }

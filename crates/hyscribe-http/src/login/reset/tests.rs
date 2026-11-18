@@ -15,10 +15,10 @@ use hyscribe_testkit::unhex;
 use sqlx::{Connection as _, Executor as _};
 use tokio::runtime::Handle;
 
-use super::super::tests::{all, hs_login, send};
+use super::super::tests::{all, hs_login, hurried, send};
 use super::*;
 use crate::Site;
-use hyscribe_admin::login::{Session, Site as _};
+use hyscribe_admin::login::Session;
 
 const URL: &str = "http://127.0.0.1:8081";
 
@@ -394,4 +394,329 @@ async fn a_reset_mail_not_sent_is_php_s_error() {
     assert!(page.contains("The email could not be sent."), "{page}");
     let (_, key) = stored(&db, 1).await;
     assert!(!key.is_empty());
+}
+
+/// `site`, a site anyone may register on, or not.
+fn registering(site: Arc<Site>, open: bool) -> Arc<Site> {
+    let mut site = Arc::try_unwrap(site).unwrap();
+    let on = if open { b"1".to_vec() } else { b"0".to_vec() };
+    site.options.insert("users_can_register".into(), on);
+    Arc::new(site)
+}
+
+/// Every registration form of `reference/register/golden.sh`, in order,
+/// answers as PHP's: the form with its errors, or the redirect, the users
+/// made being the write oracle's `login-register`.
+#[tokio::test(flavor = "multi_thread")]
+async fn registrations_are_php_s() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let db = loaded("").await;
+    let dir = tempfile::tempdir().unwrap();
+    let golden = include_str!("../../../../hyscribe-admin/tests/golden/register.tsv");
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let site = registering(site(&db, dir.path(), true).await, f[1] == "register");
+        let uri = format!("/hs-login?{}", f[0]);
+        let reply = send(&site, "POST", &uri, "", f[2]).await;
+        assert_eq!(reply.status.as_str(), f[3], "{line:.100}");
+        let location = reply.headers.get(header::LOCATION);
+        let location = location.map_or("", |to| to.to_str().unwrap());
+        assert_eq!(location, hs_login(f[4]), "{line:.100}");
+        let php = hs_login(&String::from_utf8(unhex(f[6])).unwrap());
+        assert!(reply.body == php, "{line:.100}");
+        // The test cookie is all a form sets.
+        assert_eq!(f[5], "", "{line:.100}");
+    }
+    assert_eq!(golden.lines().count(), 23);
+}
+
+/// A registration's mails go to the admin and to the new user, with the
+/// key whose hash the user keeps, and the user is a subscriber with the
+/// password nag; a form as an array in `redirect_to` is not committed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_registration_mails_the_admin_and_the_user() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let db = loaded("").await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = registering(site(&db, dir.path(), true).await, true);
+    let (handle, shared) = (Handle::current(), Arc::clone(&site));
+    let (answers, mails) = tokio::task::spawn_blocking(move || {
+        let mut reads = LoginReads::new(&shared, handle, crate::now());
+        reads.client = Ok(Some("192.0.2.1".parse().unwrap()));
+        let query = parse_str(b"");
+        let post = |form: &[u8]| {
+            let form = parse_str(form);
+            register(&reads, &posted(&query, &form), &mut Vec::new())
+        };
+        let fatal = post(b"user_login=reg-fatal&user_email=fatal@example.test&redirect_to[]=x");
+        let ((status, _), mails) = post(b"user_login=reg-mail&user_email=reg-mail@example.test");
+        ((fatal, status), mails)
+    })
+    .await
+    .unwrap();
+    let ((fatal, status), mails) = (answers, mails);
+    assert_eq!(
+        fatal,
+        ((StatusCode::NOT_IMPLEMENTED, Vec::new()), Vec::new())
+    );
+    assert_eq!(status, StatusCode::FOUND);
+    let texts = [
+        "HyScribe Default Install".to_string(),
+        URL.into(),
+        URL.into(),
+        format!("{URL}/hs-admin/"),
+        "admin@default-install.test".into(),
+    ];
+    let user = User {
+        login: b"reg-mail",
+        email: b"reg-mail@example.test",
+    };
+    let to_admin = hyscribe_mail::new_user_to_admin(&mail_site(&texts), &user);
+    assert_eq!(mails[0], to_admin);
+    let message = String::from_utf8(mails[1].message.clone()).unwrap();
+    let key = message
+        .split("&key=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
+    let to_user = hyscribe_mail::new_user_to_user(&mail_site(&texts), &user, key.as_bytes());
+    assert_eq!((mails.len(), &mails[1]), (2, &to_user));
+    let writer = Writer::open(&db, Mode::Primary).await.unwrap().unwrap();
+    let mut write = writer.begin().await.unwrap();
+    let id = write.user_id_by_login(b"reg-mail").await.unwrap().unwrap();
+    let (_, row) = write.user(id).await.unwrap().unwrap();
+    assert!(wp_verify_fast_hash(
+        key.as_bytes(),
+        row.activation_key.split_once(':').unwrap().1.as_bytes()
+    ));
+    assert!(
+        write
+            .user_id_by_login(b"reg-fatal")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+/// Past its turn or its place under the site wide cap, or with no client
+/// named, a registration is refused as a failure to register, with nothing
+/// written; shadow mode and a failing database answer as for every write.
+#[tokio::test(flavor = "multi_thread")]
+async fn registrations_are_held_to_the_login_limits() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let db = loaded("").await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut open = Arc::try_unwrap(site(&db, dir.path(), true).await).unwrap();
+    let limiter = Arc::get_mut(&mut open.limiter).unwrap();
+    limiter.checks = crate::login::limits::checks::Checks::new(1, hurried);
+    let limited = registering(Arc::new(open), true);
+    let client: std::net::IpAddr = "192.0.2.7".parse().unwrap();
+    let (handle, shared) = (Handle::current(), Arc::clone(&limited));
+    let answers = tokio::task::spawn_blocking(move || {
+        let form = parse_str(b"user_login=reg-held&user_email=reg-held@example.test");
+        let query = parse_str(b"");
+        let ask = |client| {
+            let mut reads = LoginReads::new(&shared, handle.clone(), crate::now());
+            reads.client = client;
+            register(&reads, &posted(&query, &form), &mut Vec::new())
+        };
+        let turn = shared.limiter.turn(Some(client));
+        let busy = ask(Ok(Some(client)));
+        drop(turn);
+        let unnamed = ask(Err(crate::comment_post::Unnamed("unknown".into())));
+        let held = shared.limiter.checks.start();
+        let capped = ask(Ok(Some(client)));
+        drop(held);
+        [busy, unnamed, capped]
+    })
+    .await
+    .unwrap();
+    for ((status, page), mails) in answers {
+        let page = String::from_utf8(page).unwrap();
+        assert_eq!((status, mails.len()), (StatusCode::OK, 0));
+        assert!(page.contains("Could not register you"), "{page}");
+        assert!(page.contains("value=\"reg-held\""), "{page}");
+    }
+    let writer = Writer::open(&db, Mode::Primary).await.unwrap().unwrap();
+    let mut write = writer.begin().await.unwrap();
+    assert!(write.user_id_by_login(b"reg-held").await.unwrap().is_none());
+    // Its open transaction would hold the tables the next fixtures drop.
+    drop(write);
+    // Shadow mode, then a table the write needs gone.
+    for (primary, sql) in [
+        (false, "DROP TABLE wp_usermeta"),
+        (true, "DROP TABLE wp_usermeta"),
+    ] {
+        let db = loaded(sql).await;
+        let site = registering(site(&db, dir.path(), primary).await, true);
+        let handle = Handle::current();
+        let (status, page) = tokio::task::spawn_blocking(move || {
+            let reads = LoginReads::new(&site, handle, crate::now());
+            let form = parse_str(b"user_login=reg-late&user_email=reg-late@example.test");
+            let query = parse_str(b"");
+            register(&reads, &posted(&query, &form), &mut Vec::new()).0
+        })
+        .await
+        .unwrap();
+        let page = String::from_utf8(page).unwrap();
+        let (code, text) = match primary {
+            true => (StatusCode::INTERNAL_SERVER_ERROR, "Error establishing"),
+            false => (StatusCode::FORBIDDEN, READ_ONLY),
+        };
+        assert_eq!(status, code, "{primary}");
+        assert!(page.contains(text), "{primary}");
+    }
+}
+
+const REQUESTS: &str = include_str!("../../../../../reference/confirm-action/content.sql");
+
+/// The status and `_wp_admin_notified` meta of the request `id`.
+async fn request_state(db: &Database, id: u64) -> (String, bool) {
+    let writer = Writer::open(db, Mode::Primary).await.unwrap().unwrap();
+    let mut write = writer.begin().await.unwrap();
+    let post = write.post(id).await.unwrap().unwrap();
+    let key = "_wp_admin_notified";
+    let meta = hyscribe_write::options::get_metadata(&mut write, hyscribe_db::Meta::Post, id, key);
+    (post.status, !meta.await.unwrap().is_empty())
+}
+
+/// Every link of `reference/confirm-action/golden.sh`, in order, answers
+/// as PHP's, and confirms what PHP confirms: a pending or failed request
+/// becomes confirmed, and the admin's mail is noted as sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn confirmation_links_are_php_s() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let db = loaded(REQUESTS).await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(&db, dir.path(), true).await;
+    let golden = include_str!("../../../../hyscribe-admin/tests/golden/confirm-action.tsv");
+    for line in golden.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let reply = send(&site, "GET", &format!("/hs-login?{}", f[0]), "", "").await;
+        assert_eq!(reply.status.as_str(), f[1], "{line:.100}");
+        let php = hs_login(&String::from_utf8(unhex(f[2])).unwrap());
+        assert!(reply.body == php, "{line:.100}");
+    }
+    assert_eq!(golden.lines().count(), 21);
+    for (id, state) in [
+        (951, ("request-confirmed", true)),
+        (952, ("request-confirmed", true)),
+        (953, ("request-confirmed", true)),
+        (954, ("request-pending", false)),
+        (955, ("request-confirmed", false)),
+        (956, ("request-completed", false)),
+        (959, ("request-confirmed", true)),
+        (960, ("request-pending", false)),
+    ] {
+        assert_eq!(
+            request_state(&db, id).await,
+            (state.0.into(), state.1),
+            "{id}"
+        );
+    }
+}
+
+/// The admin is mailed once, in PHP's words for the request's action, and
+/// a request of another action is not confirmed (its mail is not ported);
+/// without a transport the mail is not sent and the admin is not noted as
+/// told; shadow mode and a failing database answer as for every write.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_confirmation_mails_the_admin_once() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let db = loaded(REQUESTS).await;
+    let dir = tempfile::tempdir().unwrap();
+    let live = site(&db, dir.path(), true).await;
+    let link = |id: u64| {
+        format!("/hs-login?action=confirmaction&request_id={id}&confirm_key=freshkey0123456789AB")
+    };
+    let other = send(&live, "GET", &link(960), "", "").await;
+    assert_eq!(other.status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(request_state(&db, 960).await.0, "request-pending");
+    let (handle, shared) = (Handle::current(), Arc::clone(&live));
+    let mails = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&shared, handle, crate::now());
+        let query = parse_str(b"");
+        let found = |id, name: &[u8]| UserRequest {
+            id,
+            email: b"eraser@example.test".to_vec(),
+            action_name: name.to_vec(),
+            status: "request-pending".into(),
+            confirm_key: Vec::new(),
+            modified: 0,
+        };
+        let mut mails = Vec::new();
+        for (id, name) in [
+            (952, &b"remove_personal_data"[..]),
+            (951, b"export_personal_data"),
+        ] {
+            let form = parse_str(b"");
+            let request = posted(&query, &form);
+            let ((status, page), sent) =
+                confirm(&reads, &request, (&found(id, name), id.cast_signed()));
+            assert_eq!(status, StatusCode::OK);
+            assert!(
+                String::from_utf8(page)
+                    .unwrap()
+                    .contains("Thanks for confirming your")
+            );
+            mails.extend(sent);
+        }
+        // The admin was told of both: confirming again mails nobody.
+        let form = parse_str(b"");
+        let request = posted(&query, &form);
+        let again = confirm(
+            &reads,
+            &request,
+            (&found(952, b"remove_personal_data"), 952),
+        );
+        assert!(again.1.is_empty());
+        mails
+    })
+    .await
+    .unwrap();
+    let texts = [
+        "HyScribe Default Install".to_string(),
+        URL.into(),
+        URL.into(),
+        format!("{URL}/hs-admin/"),
+        "admin@default-install.test".into(),
+    ];
+    let site_texts = mail_site(&texts);
+    let erase =
+        hyscribe_mail::request_confirmed(&site_texts, b"eraser@example.test", PrivacyAction::Erase);
+    let export = hyscribe_mail::request_confirmed(
+        &site_texts,
+        b"reader@example.test",
+        PrivacyAction::Export,
+    );
+    assert_eq!(mails, [erase, export]);
+    // No transport: the mail is not sent, so the admin is not told.
+    let db = loaded(REQUESTS).await;
+    let connected = hyscribe_db::Db::connect(&db).await.unwrap();
+    let silent = Site::load(connected, Some(URL.into()), Some(URL.into()));
+    let writer = Writer::open(&db, Mode::Primary).await.unwrap();
+    let silent = Arc::new(silent.await.unwrap().with_writer(writer));
+    let reply = send(&silent, "GET", &link(951), "", "").await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(
+        request_state(&db, 951).await,
+        ("request-confirmed".into(), false)
+    );
+    // Shadow mode, then a table the write needs gone.
+    for (primary, sql) in [
+        (false, "DROP TABLE wp_postmeta"),
+        (true, "DROP TABLE wp_postmeta"),
+    ] {
+        let db = loaded(&format!("{REQUESTS}\n{sql}")).await;
+        let site = site(&db, dir.path(), primary).await;
+        let reply = send(&site, "GET", &link(951), "", "").await;
+        let (code, text) = match primary {
+            true => (StatusCode::INTERNAL_SERVER_ERROR, "Error establishing"),
+            false => (StatusCode::FORBIDDEN, READ_ONLY),
+        };
+        assert_eq!(reply.status, code, "{primary}");
+        assert!(reply.body.contains(text), "{primary}");
+    }
 }

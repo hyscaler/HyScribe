@@ -403,7 +403,7 @@ async fn a_limited_guess_never_reaches_the_hash() {
 
 /// A clock that moves on by the whole wait each time it is read, so that a
 /// check waits for none.
-fn hurried() -> std::time::Instant {
+pub(super) fn hurried() -> std::time::Instant {
     static READS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
     let reads = READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -482,10 +482,10 @@ async fn shadow_mode_shows_the_screen_but_logs_nobody_in() {
     assert!(reply.body.contains("<p>Please log in again.</p>"));
 }
 
-/// A site anyone may register on shows the form; a request's post type
-/// is read from the database.
+/// A site anyone may register on shows the form; a post that is no personal
+/// data request is none.
 #[tokio::test(flavor = "multi_thread")]
-async fn registration_and_post_types_are_read() {
+async fn registration_and_user_requests_are_read() {
     let mut site = Arc::try_unwrap(login_site(None).await).unwrap();
     site.options
         .insert("users_can_register".into(), b"1".to_vec());
@@ -496,11 +496,11 @@ async fn registration_and_post_types_are_read() {
     let handle = Handle::current();
     let types = tokio::task::spawn_blocking(move || {
         let reads = LoginReads::new(&site, handle, now());
-        (reads.post_type(1), reads.post_type(999))
+        (reads.user_request(1), reads.user_request(999))
     })
     .await
     .unwrap();
-    assert_eq!(types, (Some("post".into()), None));
+    assert_eq!(types, (None, None));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -578,9 +578,23 @@ async fn other_actions_show_their_forms_and_links() {
         })
         .collect();
     assert!(cookies.iter().any(|c| dates.iter().any(|d| c.contains(d))));
-    // The registration and post password forms are not ported.
+    // A registration nobody may make is turned away as when asked for; the
+    // post password form is not ported.
+    let disabled = send(
+        &site,
+        "POST",
+        "/hs-login?action=register",
+        "",
+        "user_login=a",
+    )
+    .await;
+    assert_eq!(disabled.status, StatusCode::FOUND);
+    assert_eq!(
+        disabled.headers[header::LOCATION],
+        "http://127.0.0.1:8081/hs-login?registration=disabled"
+    );
     for (method, uri) in [
-        ("POST", "/hs-login?action=register"),
+        ("POST", "/hs-login?action=postpass"),
         ("GET", "/hs-login?action=postpass"),
     ] {
         let reply = send(&site, method, uri, "", "user_login=admin").await;

@@ -14,7 +14,7 @@ use hyscribe_testkit::SqlValue;
 use crate::admin_bar::Browser;
 use crate::assets::{Urls, admin_links};
 use crate::login::authenticate::Account;
-use crate::login::{Notice, Site, User};
+use crate::login::{Notice, Site, User, UserRequest};
 use crate::menu::{MenuUser, link};
 use crate::page::{PageSite, Request};
 
@@ -141,8 +141,15 @@ impl Site for Oracle {
     fn can_register(&self) -> bool {
         self.register
     }
-    fn post_type(&self, id: u64) -> Option<String> {
-        (Some(id) == self.user_request).then(|| "user_request".into())
+    fn user_request(&self, id: u64) -> Option<UserRequest> {
+        (Some(id) == self.user_request).then(|| UserRequest {
+            id,
+            email: b"reader@example.test".to_vec(),
+            action_name: b"export_personal_data".to_vec(),
+            status: "request-pending".into(),
+            confirm_key: Vec::new(),
+            modified: 0,
+        })
     }
     fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
         crate::media::site_icon_url(&Role(self.icon?), size)

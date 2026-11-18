@@ -60,6 +60,24 @@ pub struct User {
     pub activation_key: Vec<u8>,
 }
 
+/// A personal data request, `WP_User_Request`'s fields the confirmation
+/// link reads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UserRequest {
+    /// `ID`.
+    pub id: u64,
+    /// `email`.
+    pub email: Vec<u8>,
+    /// `action_name`.
+    pub action_name: Vec<u8>,
+    /// `status`.
+    pub status: String,
+    /// `confirm_key`: the fast hash of the key mailed, or none.
+    pub confirm_key: Vec<u8>,
+    /// `modified_timestamp`, or 0 for none.
+    pub modified: i64,
+}
+
 /// The site the screen is for.
 pub trait Site: Urls {
     /// `get_bloginfo( 'name', 'display' )`.
@@ -83,8 +101,8 @@ pub trait Site: Urls {
     fn check_password(&self, user: &User, password: &[u8]) -> bool;
     /// `get_option( 'users_can_register' )`.
     fn can_register(&self) -> bool;
-    /// `get_post( $id )->post_type`, none for no post.
-    fn post_type(&self, id: u64) -> Option<String>;
+    /// `wp_get_user_request( $id )`, none for no personal data request.
+    fn user_request(&self, id: u64) -> Option<UserRequest>;
     /// `get_site_icon_url( $size )`, `None` for no icon.
     fn site_icon(&self, size: i64) -> Option<Vec<u8>>;
     /// The site's own `authenticate` callbacks, added to core's or

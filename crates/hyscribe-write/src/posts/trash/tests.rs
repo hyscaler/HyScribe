@@ -36,6 +36,17 @@ fn every_file_of_the_attachment() {
     assert_eq!(files("a.gif", "b:0;", "s:0:\"\";"), [pair("a.gif", "")]);
 }
 
+/// A source or video that is no string is left, an original that is none is
+/// taken as PHP's `Array`.
+#[test]
+fn files_that_are_no_string_are_taken_as_php_takes_them() {
+    let meta = "a:3:{s:4:\"file\";s:13:\"2026/05/a.gif\";s:14:\"original_image\";a:1:{i:0;s:1:\"x\";}s:12:\"source_image\";a:1:{i:0;s:1:\"y\";}}";
+    assert_eq!(
+        files("2026/05/a.gif", meta, "b:0;"),
+        [pair("2026/05/Array", "2026/05"), pair("2026/05/a.gif", "")]
+    );
+}
+
 /// A file by its absolute path, or with WordPress 2.6's thumbnail, is not
 /// ported.
 #[test]

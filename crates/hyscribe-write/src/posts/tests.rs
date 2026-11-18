@@ -1021,6 +1021,65 @@ async fn attachment_deletes_stop_as_php() {
     assert!(unported(absolute));
 }
 
+/// An attachment is trashed only with `MEDIA_TRASH` and a Trash that is kept,
+/// and never by a forced delete.
+#[tokio::test]
+async fn attachments_are_trashed_by_the_constants() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let deleted = async |media_trash: bool, empty_trash_days: u32, force: bool| {
+        let kept = rolled_back(async |w, ctx| {
+            let args = PostArgs {
+                title: b"A file".to_vec(),
+                mime_type: "image/png".into(),
+                ..PostArgs::default()
+            };
+            let id = wp_insert_attachment(w, ctx, args, "2026/05/a.png").await?;
+            let constants = hyscribe_config::Constants {
+                media_trash,
+                empty_trash_days,
+                ..ctx.constants
+            };
+            let ctx = Context {
+                constants,
+                ..ctx.clone()
+            };
+            let done = wp_delete_attachment(w, &ctx, id, force).await?;
+            Ok(done.map(|done| matches!(done, AttachmentDeleted::Trashed)))
+        });
+        kept.await.unwrap()
+    };
+    assert_eq!(deleted(true, 30, false).await, Some(true));
+    assert_eq!(deleted(false, 30, false).await, Some(false));
+    assert_eq!(deleted(true, 0, false).await, Some(false));
+    assert_eq!(deleted(true, 30, true).await, Some(false));
+}
+
+/// An attachment that inherits keeps its old slug when it is renamed, one of
+/// another status does not.
+#[tokio::test]
+async fn attachments_keep_their_old_slugs_while_they_inherit() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let old_slugs = async |status: &'static str| {
+        let slugs = rolled_back(async |w, ctx| {
+            let args = PostArgs {
+                title: b"A file".to_vec(),
+                mime_type: "image/png".into(),
+                ..PostArgs::default()
+            };
+            let id = wp_insert_attachment(w, ctx, args, "2026/05/a.png").await?;
+            wp_update_post(w, ctx, id, &|args| {
+                args.name = Some(b"renamed".to_vec());
+                args.status = status.into();
+            })
+            .await?;
+            Ok(crate::options::get_metadata(w, Meta::Post, id, "_wp_old_slug").await?)
+        });
+        slugs.await.unwrap()
+    };
+    assert_eq!(old_slugs("inherit").await.len(), 1);
+    assert!(old_slugs("private").await.is_empty());
+}
+
 /// What no ported function takes, a post of a type other than the ported
 /// ones, is refused by each of them.
 #[tokio::test]

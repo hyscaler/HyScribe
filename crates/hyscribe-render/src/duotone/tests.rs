@@ -67,7 +67,7 @@ fn matches_php() {
         failures.len(),
         failures[..failures.len().min(10)].join("\n")
     );
-    assert_eq!(cases, 132);
+    assert_eq!(cases, 135);
 }
 
 /// Channels as colord reads them, the ones the golden's tables show: hex of

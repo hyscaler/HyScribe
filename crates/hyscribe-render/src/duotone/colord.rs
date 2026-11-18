@@ -288,18 +288,14 @@ fn hsla_string(input: &[u8]) -> Option<Rgba> {
         b"rad" => 360.0 / (std::f64::consts::PI * 2.0),
         _ => 1.0,
     };
-    // `colord_clamp_hue()`: `%` truncates to an integer.
+    // `colord_clamp_hue()`: `%` truncates to an integer, and the hue is that
+    // many degrees round the circle: 360 is 0 to the formulas after it.
     let [hue_number, saturation_number, lightness_number] = values.numbers;
     let degrees = hue_number * factor;
-    let degrees = if degrees.is_finite() {
-        (degrees as i64 % 360) as f64
+    let hue = if degrees.is_finite() {
+        (degrees as i64).rem_euclid(360) as f64
     } else {
         0.0
-    };
-    let hue = if degrees > 0.0 {
-        degrees
-    } else {
-        degrees + 360.0
     };
     let saturation = clamp(saturation_number, 0.0, 100.0);
     let lightness = clamp(lightness_number, 0.0, 100.0);

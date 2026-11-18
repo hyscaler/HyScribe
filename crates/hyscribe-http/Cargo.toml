@@ -27,7 +27,7 @@ hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true
 hyscribe-rest.workspace = true
 hyscribe-write.workspace = true
-tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 
 [dev-dependencies]
 hyscribe-testkit.workspace = true

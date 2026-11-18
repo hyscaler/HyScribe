@@ -16,7 +16,7 @@ use crate::media::Loading;
 use crate::site::Site;
 
 /// The extensions `wp_get_audio_extensions()` gives, with their types.
-const AUDIO: [(&str, &str); 5] = [
+pub(crate) const AUDIO: [(&str, &str); 5] = [
     ("mp3", "audio/mpeg"),
     ("ogg", "audio/ogg"),
     ("flac", "audio/flac"),
@@ -25,7 +25,7 @@ const AUDIO: [(&str, &str); 5] = [
 ];
 
 /// `wp_get_video_extensions()`, with the types `wp_check_filetype()` gives.
-const VIDEO_TYPES: [(&str, &str); 5] = [
+pub(crate) const VIDEO_TYPES: [(&str, &str); 5] = [
     ("mp4", "video/mp4"),
     ("m4v", "video/mp4"),
     ("webm", "video/webm"),
@@ -59,7 +59,7 @@ fn file_is(file: &[u8], mime: &str, kind: &str, extensions: &[&str]) -> bool {
 
 /// The extension of a file or URL, in lower case, as
 /// `wp_check_filetype()` finds it and its caller lowers it.
-fn extension(file: &[u8]) -> String {
+pub(crate) fn extension(file: &[u8]) -> String {
     let (_, extension) = split_name(file);
     String::from_utf8_lossy(&extension).to_ascii_lowercase()
 }

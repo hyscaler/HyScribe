@@ -244,6 +244,12 @@ pub(crate) struct Renderer<'a> {
     pub(crate) attachment: Option<hyscribe_model::Post>,
     /// `wp_audio_shortcode()`'s `static $instance`.
     pub(crate) audio_instances: std::cell::Cell<u64>,
+    /// `wp_video_shortcode()`'s `static $instance`.
+    pub(crate) video_instances: u64,
+    /// `wp_unique_prefixed_id()`'s counters, by prefix.
+    pub(crate) prefixed_ids: HashMap<Vec<u8>, u64>,
+    /// The shortcodes being run inside one another.
+    pub(crate) shortcode_depth: usize,
     /// `_restore_wpautop_hook()` has added `wpautop()` back after content
     /// with blocks, last of its priority, after `prepend_attachment()`.
     pub(crate) autop_restored: bool,
@@ -300,6 +306,9 @@ impl<'a> Renderer<'a> {
             depth: 0,
             attachment: None,
             audio_instances: std::cell::Cell::new(0),
+            video_instances: 0,
+            prefixed_ids: HashMap::new(),
+            shortcode_depth: 0,
             autop_restored: false,
         }
     }

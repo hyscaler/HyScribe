@@ -251,9 +251,10 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     };
     let entries = |value: Value| value.as_array().unwrap_or_default().to_vec();
     let get = entries(parse_str(asked.uri.query().unwrap_or_default().as_bytes()));
-    // An upload's form is `$_POST` and `$_FILES`, as PHP reads it.
+    // An upload's form is `$_POST` and `$_FILES`, as PHP reads it; the REST
+    // API reads no body of a GET, so only the route decides.
     let max = site.upload_max();
-    let upload = (post && crate::uploads::takes_upload(&asked.uri))
+    let upload = crate::uploads::takes_upload(&asked.uri)
         .then(|| crate::uploads::form(&asked.headers, &asked.body, max))
         .flatten();
     let (form, files) = match upload {

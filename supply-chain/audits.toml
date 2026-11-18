@@ -43,6 +43,12 @@ criteria = "safe-to-deploy"
 version = "0.4.2"
 notes = "#![forbid(unsafe_code)]. RFC 2047 encoded words, RFC 2231 parameters, quoted strings and the base64 and quoted-printable body encoders lettre writes headers and bodies with, over a fmt::Write that folds lines at 76 characters; truncation is at char boundaries. No build script, proc macros, or filesystem, network, process or environment access. Depends on base64 0.23 and memchr."
 
+[[audits.email-encoding]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.2 -> 0.4.3"
+notes = "Changes to the body encoding chooser and the RFC 2231 and header writers, plus version and licence metadata. Still #![forbid(unsafe_code)]; no build script, proc macros, or filesystem, network, process or environment access added; dependencies unchanged."
+
 [[audits.email_address]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
@@ -102,6 +108,12 @@ who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
 version = "0.11.23"
 notes = "Reviewed the modules HyScribe builds with default features off and builder, smtp-transport, tokio1, tokio1-rustls, ring and webpki-roots: message (builder, headers, mailbox parsing and Display, MIME parts and body encodings), address (email_address and idna checks), and transport/smtp (client, async connection and net, tls, authentication, commands, extension, response parser, error, connection URL). #![forbid(unsafe_code)] and no build script or proc macros of its own. Network access is the SMTP connection to the host the caller names; TLS goes through tokio-rustls with only the root certificates the caller adds (CertificateStore::None, so the webpki-roots feature, which its build check requires, loads nothing), and the dangerous_accept_invalid_* switches stay off. Tls::Required fails when the server does not offer STARTTLS. Header values with CR or LF cannot be written: the quoted string writer returns fmt::Error for them, and the encoder RFC 2047 encodes other control characters. The response parser (nom) bounds every read; with the tracing feature off nothing is logged, so credentials and messages are not. The sendmail and file transports, which run a process and write files, and the hostname, native-tls, boring-tls, dkim, pool and serde features are compiled out."
+
+[[audits.lettre]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.11.23 -> 0.11.24"
+notes = "The RUSTSEC-2026-0565 fix: SMTP replies are read line by line into a buffer capped at MAX_RESPONSE_BYTES (100,000) through a new ResponseParser, so a line that never ends cannot take memory without bound. Also: bytes already buffered after the STARTTLS reply end the connection instead of being read as if they came over TLS; DATA and the message end must get replies of the expected class; NOOP needs a 250; an opt-in for partially rejected recipients (off by default). Still #![forbid(unsafe_code)]; no build script, proc macros, or new filesystem, process or environment access; dependency changes are only minimum version bumps of existing ones."
 
 [[audits.mutate_once]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"

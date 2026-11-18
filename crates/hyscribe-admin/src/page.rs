@@ -418,7 +418,7 @@ pub fn admin_page_with(
         .find(|scheme| scheme.name.as_bytes() == color)
         .unwrap_or(&SCHEMES[0]);
     let mut assets = Assets::new(true);
-    enqueue(&mut assets, site, page, scheme, look);
+    enqueue(&mut assets, site, page, (scheme, browser), look);
     for (handle, data) in page.script_data {
         assets.set_script_data(handle, "data", Value::String(data.as_bytes().to_vec()));
     }
@@ -479,7 +479,13 @@ pub fn admin_page_with(
 
 /// `admin_enqueue_scripts`: what every screen enqueues, with this
 /// request's data.
-fn enqueue(assets: &mut Assets, site: &dyn PageSite, page: &Page, scheme: &Scheme, look: Look) {
+fn enqueue(
+    assets: &mut Assets,
+    site: &dyn PageSite,
+    page: &Page,
+    (scheme, browser): (&Scheme, &Browser),
+    look: Look,
+) {
     // `admin.php` enqueues the admin bar's, the screen its own, then
     // `admin-header.php` and its hooks the rest.
     assets.enqueue_style("admin-bar");
@@ -530,12 +536,18 @@ fn enqueue(assets: &mut Assets, site: &dyn PageSite, page: &Page, scheme: &Schem
         let url = BarSite::admin_url(site, &format!("css/colors/{}/colors.min.css", scheme.name));
         assets.set_color_scheme(Some(url));
     }
+    let secure_site = Urls::site_url(site).starts_with("https://");
+    // `wp_set_client_side_media_processing_flag()`, `admin_init`'s: in a
+    // secure context, and under isolation for Chromium 137 and later.
+    if secure_site || localhost(page.origin) {
+        let mut flags = vec!["window.__clientSideMediaProcessing = true;".to_string()];
+        if chromium_version(browser.user_agent).is_some_and(|version| version >= 137) {
+            flags.push("window.__documentIsolationPolicy = true;".into());
+        }
+        assets.set_script_data("wp-block-editor", "before", list(flags));
+    }
     let user_id = site.user_id();
-    let secure = if Urls::site_url(site).starts_with("https://") {
-        "1"
-    } else {
-        ""
-    };
+    let secure = if secure_site { "1" } else { "" };
     let settings = object(vec![
         ("url", text(&cookie_path(&Urls::site_url(site)))),
         ("uid", text(&user_id.to_string())),
@@ -602,6 +614,32 @@ fn enqueue(assets: &mut Assets, site: &dyn PageSite, page: &Page, scheme: &Schem
             json(&palette)
         )]),
     );
+}
+
+/// The host of `origin` is `localhost` or under it, a secure context.
+fn localhost(origin: &str) -> bool {
+    let host = origin.rsplit("//").next().unwrap_or_default();
+    let host = host.to_ascii_lowercase();
+    // `strtok( $host, ':' )` skips the separators before its token.
+    let host = host.split(':').find(|part| !part.is_empty());
+    let host = host.unwrap_or_default();
+    host == "localhost" || host.ends_with(".localhost")
+}
+
+/// `wp_get_chromium_major_version()`: the digits after the first `Chrome/`
+/// that has any, as PHP casts them (saturating).
+pub fn chromium_version(user_agent: &[u8]) -> Option<i64> {
+    let mut starts = user_agent.windows(7).enumerate();
+    starts.find_map(|(at, window)| {
+        let digits = user_agent.get(at + 7..).filter(|_| window == b"Chrome/")?;
+        let digits = digits.iter().take_while(|byte| byte.is_ascii_digit());
+        let version = digits.clone().fold(0i64, |version, digit| {
+            version
+                .saturating_mul(10)
+                .saturating_add(i64::from(digit - b'0'))
+        });
+        (digits.count() > 0).then_some(version)
+    })
 }
 
 /// The emoji styles `wp_enqueue_emoji_styles()` adds inline.

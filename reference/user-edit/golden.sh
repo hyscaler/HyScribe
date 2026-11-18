@@ -39,7 +39,9 @@ done
   $actions > "$NONCES"
 record() {
   : > "$TMP"
-  status=$(curl -s -o "$TMP" -D "$TMP.head" -w '%{http_code}' -b "hyscribe_role=$2; hyscribe_variant=$1" "$BASE/wp-admin/$3")
+  proto=http
+  case "$1" in u3ssl*) proto=https ;; esac
+  status=$(curl -s -o "$TMP" -D "$TMP.head" -w '%{http_code}' -H "X-Forwarded-Proto: $proto" -b "hyscribe_role=$2; hyscribe_variant=$1" "$BASE/wp-admin/$3")
   case "$status" in
     200) ;;
     302) printf '302\t%s' "$(grep -i '^location:' "$TMP.head" | cut -d' ' -f2 | tr -d '\r')" > "$TMP" ;;
@@ -96,5 +98,21 @@ record u3default administrator user-new.php
 for variant in u3nocreate u3nopromote; do
   record "$variant" administrator "user-edit.php?user_id=601"
   record "$variant" administrator user-new.php
+done
+# Over HTTPS, application passwords are on offer.
+for role in administrator editor; do
+  record u3ssl "$role" 'user-edit.php?user_id=601'
+done
+for query in 'user_id=1' 'user_id=603' 'user_id=999'; do
+  record u3ssl administrator "user-edit.php?$query"
+done
+record u3ssl administrator 'profile.php?user_id=601'
+record u3ssl subscriber profile.php
+record u3ssl administrator user-new.php
+for variant in u3sslapps; do
+  record "$variant" administrator 'user-edit.php?user_id=601'
+  record "$variant" administrator 'user-edit.php?user_id=1'
+  record "$variant" administrator 'profile.php'
+  record "$variant" administrator 'profile.php?user_id=601'
 done
 wc -l "$OUT"

@@ -846,6 +846,9 @@ impl ProfileSite for Admin<'_> {
         let host = hyscribe_kses::url_host(self.site.home.as_bytes()).unwrap_or_default();
         crate::redirect::wp_validate_redirect(location, &host, fallback.as_bytes())
     }
+    fn application_passwords(&self, id: u64) -> Option<Vec<u8>> {
+        self.reads.user_meta(id, "_application_passwords")
+    }
 }
 
 impl ToolsSite for Admin<'_> {
@@ -1405,8 +1408,11 @@ fn screen(
         "/hs-admin/post-new" => hyscribe_admin::editor::post_new(admin, query)
             .or_else(|| block_editor(admin, &request))?,
         "/hs-admin/revision" => hyscribe_admin::revisions::revision(admin, query, &request)?,
-        // Its page prints the PHP and web server details HyScribe has no
-        // equivalent for: refused as PHP refuses, else not ported.
+        // Nobody may update here (the updates are HyScribe's releases, an open question;
+        // `update_core` is never granted): refused as PHP refuses the menu.
+        "/hs-admin/update-core" => Answer::from_page(None),
+        // Refused as PHP refuses, else not ported: its help names the plugins
+        // folder.
         "/hs-admin/plugins" if !admin.can("activate_plugins") => Answer::from_page(None),
         "/hs-admin/site-health" if !admin.can("view_site_health_checks") => Answer::from_page(None),
         // The Info tab of the bundled theme; the Status tab's checks
@@ -1423,15 +1429,8 @@ fn screen(
         "/hs-admin/site-editor" if !admin.can("edit_theme_options") => Answer::from_page(None),
         "/hs-admin/site-editor" => hyscribe_admin::site_editor::site_editor(query, request_uri)
             .or_else(|| site_editor_page(admin, query, &request))?,
-        // HTTPS offers application passwords, whose list is not ported.
-        "/hs-admin/profile" => {
-            let args = edit_args(query).filter(|_| !origin.starts_with("https://"))?;
-            profile(admin, &args, &request)
-        }
-        "/hs-admin/user-edit" => {
-            let args = edit_args(query).filter(|_| !origin.starts_with("https://"))?;
-            user_edit(admin, &args, &request)
-        }
+        "/hs-admin/profile" => profile(admin, &edit_args(query)?, &request)?,
+        "/hs-admin/user-edit" => user_edit(admin, &edit_args(query)?, &request)?,
         "/hs-admin/user-new" => {
             let (mut update, mut user_id) = (None, None);
             for (key, value) in query_strings(query)? {

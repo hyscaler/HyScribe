@@ -165,11 +165,14 @@ fn reads_what_feeds_leave_out() {
 <link rel="self" href="http://f.test/self"/><link rel="alternate" href="http://f.test/"/>
 <entry><title>A</title><link rel="edit" href="e"/><link href="one"/><author><email>e@x</email></author></entry>
 <entry><title>B</title><author><uri>http://u.test/</uri></author><author/></entry>
+<author><name>Feed</name></author>
 <entry><title>C</title><dc:creator>D</dc:creator><dc:creator>D</dc:creator></entry>
 </feed>"#;
     let found = items(atom);
     assert_eq!(found[0].1, Some(b"http://f.test/one".to_vec()));
     assert_eq!(found[0].2, None);
+    // An author with only a link is the item's, not the feed's.
+    assert_eq!(found[1].2, None);
     assert_eq!(found[2].2, Some(b"D".to_vec()));
     let old_atom = br#"<feed xmlns="http://purl.org/atom/ns#"><entry><title>Plain &amp; text</title></entry><entry><title type="x/y">&lt;i&gt;</title></entry></feed>"#;
     let found = items(old_atom);
@@ -215,6 +218,10 @@ fn sanitizes_each_construct_type() {
     assert_eq!(
         absolutize(b"g#s", b"http://a.test/b/c"),
         b"http://a.test/b/g#s"
+    );
+    assert_eq!(
+        absolutize(b"g?x/../y", b"http://a.test/b/c"),
+        b"http://a.test/b/g?x/../y"
     );
 }
 

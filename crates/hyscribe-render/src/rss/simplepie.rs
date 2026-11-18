@@ -736,10 +736,8 @@ fn sanitize(data: &[u8], kind: u8, base: &[u8]) -> Vec<u8> {
     if kind & HTML != 0 || kind & XHTML_CONSTRUCT != 0 {
         return wp_kses_post(data, b"");
     }
-    let data = match kind & IRI != 0 {
-        true => absolutize(data, base),
-        false => data.to_vec(),
-    };
+    // Only IRIs have a base; without one `absolutize()` keeps the data.
+    let data = absolutize(data, base);
     match kind & TEXT != 0 || kind & IRI != 0 {
         true => specialchars(&data, false),
         false => data,

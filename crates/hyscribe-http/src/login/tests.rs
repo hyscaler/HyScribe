@@ -595,6 +595,11 @@ async fn other_actions_show_their_forms_and_links() {
     );
     for (method, uri) in [
         ("POST", "/hs-login?action=postpass"),
+        ("POST", "/hs-login?action=checkemail&checkemail=confirm"),
+        (
+            "POST",
+            "/hs-login?action=confirmaction&request_id=1&confirm_key=x",
+        ),
         ("GET", "/hs-login?action=postpass"),
     ] {
         let reply = send(&site, method, uri, "", "user_login=admin").await;

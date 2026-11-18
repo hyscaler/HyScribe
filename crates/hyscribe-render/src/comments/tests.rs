@@ -172,6 +172,15 @@ fn held_comments_preview_as_php() {
     assert_eq!(golden.lines().count(), 641);
 }
 
+/// A site without comment data has no held comments for anyone.
+#[test]
+fn a_site_without_comments_holds_none() {
+    let site = DefaultInstall {
+        home: b"http://127.0.0.1:8081".to_vec(),
+    };
+    assert!(site.held_comments(1, b"held@example.test", None).is_empty());
+}
+
 /// A site without notes counts its comments' top level ones from before
 /// a date, as `get_page_of_comment()` does.
 #[test]

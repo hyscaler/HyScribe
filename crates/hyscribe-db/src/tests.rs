@@ -574,6 +574,7 @@ async fn every_query() -> Vec<DbError> {
         db.user_post_counts(&[1], true, 1).await.unwrap_err(),
         db.comments(1).await.unwrap_err(),
         db.older_comments(1, "").await.unwrap_err(),
+        db.held_comments(1, b"e", None).await.unwrap_err(),
         db.comment(1).await.unwrap_err(),
         db.adjacent_post(&Post::default(), true, None)
             .await

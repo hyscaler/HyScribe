@@ -182,9 +182,6 @@ fn answer<'w>(
             let body = page_with_back_link(site.public(), "Comment Submission Failure", &message);
             response(status, html_headers(), body)
         }
-        Err(hyscribe_write::Error::Unported(_)) => {
-            response(StatusCode::NOT_IMPLEMENTED, nocache(), Vec::new())
-        }
         Err(err) => crate::html(crate::database_error(site, &format!("{err:?}"))),
     };
     match reads.reads.finish() {
@@ -326,10 +323,10 @@ async fn comment_link(
     ];
     let [paged, per_page, structure, default_page, threaded, depth] =
         submit::options(write, names).await?;
+    // The link reads these two options and no other.
     let option = |name: &str| match name {
         "permalink_structure" => structure.clone(),
-        "default_comments_page" => default_page.clone(),
-        _ => Vec::new(),
+        _ => default_page.clone(),
     };
     // `empty( $per_page )` leaves the page 0.
     let mut page = None;

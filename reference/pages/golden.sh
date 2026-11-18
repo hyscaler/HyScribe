@@ -10,7 +10,11 @@
 # SHA-256 of the page without its RSD link, with the page itself in
 # target/pages/ttd.tsv for reading differences.
 #   default: reference/default-install/php.sh up
-#   ttd:     HYSCRIBE_PHP_DB=wordpress_ttd reference/default-install/php.sh up
+#   ttd:     HYSCRIBE_PHP_DB=wordpress_saves HYSCRIBE_PHP_UPLOADS=ttd reference/default-install/php.sh up
+#   over the Theme Test Data fixture loaded into wordpress_saves with
+#   reference/pages/ttd-ties.sql, which tells apart the terms of one name
+#   that MariaDB would order differently from run to run (the Rust test
+#   loads the same, see hyscribe_testkit::writes::load_theme_test_data)
 #   site-edits: reference/default-install/php.sh up, over the site editor's
 #   saves in reference/site-edits/content.sql, which it adds
 # Page views write: the wp_navigation post php.sh up wrote is
@@ -23,7 +27,7 @@ DOCKER="${DOCKER:-docker}"
 NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
 DB="${HYSCRIBE_DB_CONTAINER:-hyscribe-default-install-db}"
 DATABASE=wordpress
-[ "$LIST" = ttd ] && DATABASE=wordpress_ttd
+[ "$LIST" = ttd ] && DATABASE=wordpress_saves
 BASE="${HYSCRIBE_PHP_BASE:-http://127.0.0.1:8081}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/crates/hyscribe-http/tests/golden/pages-$LIST.tsv"
@@ -38,6 +42,10 @@ cleanup() {
 trap cleanup EXIT
 "$DOCKER" exec "$NAME" mkdir -p "$MU"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-options.php" < "$ROOT/reference/pages/options.php"
+if [ "$LIST" = ttd ]; then
+  cat "$ROOT/target/fixtures/theme-test-data/7.1.3/database.sql" "$ROOT/reference/pages/ttd-ties.sql" |
+    "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "$DATABASE"
+fi
 if [ "$LIST" = site-edits ]; then
   "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "$DATABASE" < "$ROOT/reference/site-edits/content.sql"
 else

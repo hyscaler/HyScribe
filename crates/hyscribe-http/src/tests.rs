@@ -3067,17 +3067,26 @@ async fn listed_pages_match_php() {
 /// which `reference/pages/ttd-list.sh` builds from its database: every
 /// post, page, attachment and archive, searches, feeds, comment pages and
 /// both kinds of front page, by hash, as the fixture's content is not ours
-/// to commit. The known differences name what is not ported: attachment
-/// pages and their redirect to the file, core's shortcodes, duotone, oEmbed,
-/// the RSS block, a post's later enclosures, image loading priorities, the
-/// navigation fallback from a classic menu; and terms of the same name,
-/// whose order MariaDB leaves open (`term-ties`).
+/// to commit, loaded into `wordpress_saves` with the terms of one name told
+/// apart (`reference/pages/ttd-ties.sql`), as MariaDB orders them
+/// differently from run to run. The known differences name what is not
+/// ported: attachment pages and their redirect to the file, duotone, oEmbed,
+/// the RSS block, image loading priorities, the navigation fallback from a
+/// classic menu; and galleries `orderby="rand"`, which no two runs repeat.
 #[tokio::test(flavor = "multi_thread")]
 async fn theme_test_data_pages_match_php() {
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_theme_test_data(&db)
+        .await
+        .unwrap();
     let golden = include_str!("../tests/golden/pages-ttd.tsv");
     let known = include_str!("../tests/golden/pages-ttd-known.tsv");
     assert_eq!(
-        assert_listed_pages("wordpress_ttd", golden, true, known).await,
+        assert_listed_pages("wordpress_saves", golden, true, known).await,
         10
     );
     assert_eq!(golden.lines().count(), 747);

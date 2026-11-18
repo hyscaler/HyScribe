@@ -9,7 +9,9 @@
 # WP_HOME and WP_SITEURL point at the local address, so WordPress does not
 # redirect to the fixture's http://default-install.test. Read only use: the
 # differential tests only send GET requests. HYSCRIBE_PHP_DB=wordpress_ttd
-# runs it on the Theme Test Data fixture instead, with its uploads.
+# runs it on the Theme Test Data fixture instead, with its uploads;
+# HYSCRIBE_PHP_UPLOADS=ttd gives another database those uploads (the page
+# goldens load the fixture into wordpress_saves, reference/pages/golden.sh).
 set -euo pipefail
 
 DOCKER="${DOCKER:-docker}"
@@ -20,7 +22,7 @@ NETWORK="${HYSCRIBE_REF_NETWORK:-hyscribe-ref}"
 DB_NAME="${HYSCRIBE_PHP_DB:-wordpress}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 UPLOADS=()
-if [ "$DB_NAME" = wordpress_ttd ]; then
+if [ "$DB_NAME" = wordpress_ttd ] || [ "${HYSCRIBE_PHP_UPLOADS:-}" = ttd ]; then
   UPLOADS=(-v "$ROOT/target/fixtures/theme-test-data/${HYSCRIBE_WP_VERSION:-7.1.3}/uploads:/var/www/html/wp-content/uploads:ro")
 fi
 

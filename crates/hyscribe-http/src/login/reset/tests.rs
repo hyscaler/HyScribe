@@ -548,6 +548,10 @@ async fn registrations_are_held_to_the_login_limits() {
     for (primary, sql) in [
         (false, "DROP TABLE wp_usermeta"),
         (true, "DROP TABLE wp_usermeta"),
+        (
+            true,
+            "UPDATE wp_options SET option_value = '1' WHERE option_name = 'db_version'",
+        ),
     ] {
         let db = loaded(sql).await;
         let site = registering(site(&db, dir.path(), primary).await, true);
@@ -713,10 +717,22 @@ async fn a_confirmation_mails_the_admin_once() {
     let reply = send(&refusing, "GET", &link(951), "", "").await;
     assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(request_state(&db, 951).await.0, "request-confirmed");
+    // A database that stops taking writes once the request is confirmed: the
+    // admin's note cannot begin.
+    let trigger = "CREATE TRIGGER stale AFTER UPDATE ON wp_posts FOR EACH ROW \
+                   UPDATE wp_options SET option_value = '1' WHERE option_name = 'db_version'";
+    let db = loaded(&format!("{REQUESTS}\n{trigger}")).await;
+    let stopping = site(&db, dir.path(), true).await;
+    let reply = send(&stopping, "GET", &link(951), "", "").await;
+    assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
     // Shadow mode, then a table the write needs gone.
     for (primary, sql) in [
         (false, "DROP TABLE wp_postmeta"),
         (true, "DROP TABLE wp_postmeta"),
+        (
+            true,
+            "UPDATE wp_options SET option_value = '1' WHERE option_name = 'db_version'",
+        ),
     ] {
         let db = loaded(&format!("{REQUESTS}\n{sql}")).await;
         let site = site(&db, dir.path(), primary).await;

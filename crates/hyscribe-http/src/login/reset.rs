@@ -168,7 +168,7 @@ pub(super) fn register(
     let place = turn.as_ref().and_then(|_| limiter.checks.start());
     if place.is_none() {
         let refused = [registration_failed(texts[4].as_bytes())];
-        let refused = [(refused[0].code, &refused[0].message[..])];
+        let refused = [(refused[0].code, refused[0].message.as_str())];
         return refusal(reads, request, &refused, (&login, &email));
     }
     let redirect_to = request.posted("redirect_to");
@@ -188,7 +188,10 @@ pub(super) fn register(
         Ok(Ok(_)) if fatal => return ((StatusCode::NOT_IMPLEMENTED, Vec::new()), Vec::new()),
         Ok(Ok(key)) => key,
         Ok(Err(refused)) => {
-            let refused: Vec<_> = refused.iter().map(|e| (e.code, &e.message[..])).collect();
+            let refused: Vec<_> = refused
+                .iter()
+                .map(|e| (e.code, e.message.as_str()))
+                .collect();
             return refusal(reads, request, &refused, (&login, &email));
         }
         Err(err) => return failed(reads, &err),

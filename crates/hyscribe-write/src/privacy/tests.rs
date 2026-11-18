@@ -78,7 +78,8 @@ async fn confirms_requests_as_php_does() {
                 }
                 Ok(asked)
             });
-            told.lock().unwrap().push(asked.await?);
+            let asked = asked.await?;
+            told.lock().unwrap().push(asked);
         }
         Ok(())
     })

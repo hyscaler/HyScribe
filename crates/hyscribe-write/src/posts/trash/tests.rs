@@ -45,6 +45,11 @@ fn files_that_are_no_string_are_taken_as_php_takes_them() {
         files("2026/05/a.gif", meta, "b:0;"),
         [pair("2026/05/Array", "2026/05"), pair("2026/05/a.gif", "")]
     );
+    let source = "a:3:{s:4:\"file\";s:13:\"2026/05/a.gif\";s:14:\"original_image\";s:5:\"o.gif\";s:12:\"source_image\";a:1:{i:0;s:1:\"y\";}}";
+    assert_eq!(
+        files("2026/05/a.gif", source, "b:0;"),
+        [pair("2026/05/o.gif", "2026/05"), pair("2026/05/a.gif", "")]
+    );
 }
 
 /// A file by its absolute path, or with WordPress 2.6's thumbnail, is not

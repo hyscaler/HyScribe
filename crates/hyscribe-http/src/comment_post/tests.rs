@@ -283,8 +283,8 @@ async fn connect() -> sqlx::MySqlConnection {
 }
 
 /// A statement that fails part way keeps nothing and shows the database
-/// error page: a visitor's reply and an administrator's comment, under
-/// every budget short of success.
+/// error page: a visitor's reply, on paged comments too, and an
+/// administrator's comment, under every budget short of success.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_statement_keeps_nothing() {
     let _writes = WRITES.lock().await;
@@ -295,9 +295,21 @@ async fn a_failed_statement_keeps_nothing() {
     let held =
         "comment_post_ID=1&author=Ann&email=ann%40example.test&comment=A+reply.&comment_parent=1";
     let admin = "comment_post_ID=1&comment=An+administrator%27s+comment.";
-    for (body, cookie) in [(held, ""), (admin, logged_in.as_str())] {
+    let paged = [
+        "UPDATE wp_options SET option_value = '1' WHERE option_name = 'page_comments'",
+        "UPDATE wp_options SET option_value = '2' WHERE option_name = 'comments_per_page'",
+    ];
+    let posts = [
+        (held, "", false),
+        (admin, logged_in.as_str(), false),
+        (held, "", true),
+    ];
+    for (body, cookie, on) in posts {
         let mut conn = connect().await;
         let mut tx = conn.begin().await.unwrap();
+        for sql in paged.iter().filter(|_| on) {
+            sqlx::query(*sql).execute(&mut *tx).await.unwrap();
+        }
         let before = comment_count(&mut tx).await;
         let mut budget = 0;
         loop {

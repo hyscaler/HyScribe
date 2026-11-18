@@ -511,7 +511,8 @@ async fn keeps_a_password_reset_key() {
         setup_user(write, user).await
     };
     check("admin-send-password-reset", setup, async |write, id| {
-        get_password_reset_key(write, id).await.unwrap();
+        let key = get_password_reset_key(write, id).await.unwrap();
+        assert!(key.key.len() == 20 && key.key.bytes().all(|b| b.is_ascii_alphanumeric()));
     })
     .await;
 }
@@ -641,24 +642,27 @@ async fn lost_passwords_return_each_database_error() {
 async fn an_email_change_waits_for_its_confirmation() {
     rolled_back(async |write| {
         let new = b"new\\'s@example.test";
-        request_email_change(write, 1, new).await.unwrap();
+        let hash = request_email_change(write, 1, new).await.unwrap();
         let waiting = get_metadata(write, Meta::User, 1, "_new_email").await;
         let waiting = waiting.unwrap();
         let [Value::Array(change)] = &waiting[..] else {
             panic!("{waiting:?}");
         };
+        assert_eq!(change[0].1.as_bytes(), hash.as_deref());
         let hash = change[0].1.as_bytes().unwrap();
         assert!(hash.len() == 32 && hash.iter().all(u8::is_ascii_hexdigit));
         assert_eq!(change[1].1.as_bytes(), Some(&b"new's@example.test"[..]));
         let own = b" admin@default-install.test";
-        request_email_change(write, 1, own).await.unwrap();
+        assert_eq!(request_email_change(write, 1, own).await.unwrap(), None);
         let gone = get_metadata(write, Meta::User, 1, "_new_email").await;
         assert!(gone.unwrap().is_empty());
     })
     .await;
     let setup = async |_: &mut Write<'_>| {};
     fails_at_each_step(setup, async |write, ()| {
-        request_email_change(write, 1, b"new@example.test").await
+        request_email_change(write, 1, b"new@example.test")
+            .await
+            .map(|_| ())
     })
     .await;
 }

@@ -19,7 +19,7 @@ fn posted(post: &[(Key, Value)]) -> Asked<'_> {
 }
 
 /// `handler` over the POST `query`, as [`acted`].
-pub(in crate::admin::saves) async fn answered<T>(
+pub(in crate::admin::saves) async fn answered<T: super::super::Mailed>(
     writer: &Writer,
     conn: &mut Connection,
     handler: Handler<T>,

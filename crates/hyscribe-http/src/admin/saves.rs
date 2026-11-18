@@ -16,6 +16,7 @@ use hyscribe_phpser::{Value, lookup};
 use tokio::runtime::Handle;
 
 use crate::login::LoginReads;
+use crate::mail::Outbox;
 use hyscribe_admin::terms::{Added, Taxonomy, saved_row, term_added};
 use hyscribe_config::Constants;
 use hyscribe_db::{DbError, Write};
@@ -78,6 +79,15 @@ pub(super) trait Acting: ActionSite {
     fn nonce_state(&self, nonce: &[u8], action: &str) -> u8;
     /// `is_user_logged_in()` past the auth cookie's grace period.
     fn logged_in(&self) -> bool;
+    /// The mails the action sends once it commits (ADR 0016).
+    fn outbox(&self) -> &Outbox;
+}
+
+/// An answer once the action's mails were sent: changed only by mails it
+/// waited for, `waited` of them, `sent` sent.
+pub(super) trait Mailed {
+    /// The answer PHP gives when `wp_mail()` returned what it did.
+    fn mailed(self, waited: usize, sent: usize) -> Self;
 }
 
 impl Acting for Admin<'_> {
@@ -102,6 +112,9 @@ impl Acting for Admin<'_> {
     }
     fn logged_in(&self) -> bool {
         !self.grace
+    }
+    fn outbox(&self) -> &Outbox {
+        &self.outbox
     }
 }
 
@@ -243,19 +256,24 @@ fn text(bytes: &[u8]) -> String {
 }
 
 /// Runs `handler` as one action in `write`, once begun: committed when
-/// the handler answers, rolled back when it dies or fails.
-pub(super) async fn act<'w, T>(
+/// the handler answers, then its mails sent; rolled back, its mails
+/// dropped, when it dies or fails.
+pub(super) async fn act<'w, T: Mailed>(
     write: Result<Write<'w>, DbError>,
     handler: Handler<T>,
     asked: &Asked<'_>,
     site: &dyn Acting,
 ) -> Result<T, hyscribe_write::Error> {
     let mut write = write?;
-    match handler(&mut write, asked, site).await {
+    let answer = match handler(&mut write, asked, site).await {
         Ok(answer) => write.commit().await.map(|()| answer).map_err(Into::into),
-        Err(Stop::Died(answer)) => Ok(answer),
+        // Nothing the action queued is sent: the outbox is the request's.
+        Err(Stop::Died(answer)) => return Ok(answer),
         Err(Stop::Failed(err)) => Err(err),
-    }
+    };
+    let answer = answer.inspect_err(|_| site.outbox().clear())?;
+    let (waited, sent) = site.outbox().send().await;
+    Ok(answer.mailed(waited, sent))
 }
 
 #[cfg(test)]

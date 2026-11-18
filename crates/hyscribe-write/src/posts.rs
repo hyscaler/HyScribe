@@ -216,7 +216,9 @@ pub async fn wp_insert_post(write: &mut Write<'_>, ctx: &Context, args: PostArgs
 /// from its last, footnotes included.
 pub async fn wp_after_insert_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Result<()> {
     let post = existing(write, id).await?;
-    hooks::save_revision(write, ctx, Kind::of(&post.post_type)?, id).await
+    // The post was just written, so `insert()` took its type.
+    let kind = Kind::of(&post.post_type).unwrap_or(Kind::Post);
+    hooks::save_revision(write, ctx, kind, id).await
 }
 
 /// `wp_update_post( $postarr )`: `change` sets the fields to change on the

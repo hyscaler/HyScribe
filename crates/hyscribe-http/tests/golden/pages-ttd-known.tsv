@@ -1,8 +1,8 @@
-	/	duotone,loading,oembed,rss,shortcode,term-ties
+	/	loading,oembed,rss,shortcode,term-ties
 	/?paged=2	loading,oembed,rss,shortcode,term-ties
 	/?paged=3	loading,shortcode
 	/?paged=6	term-ties
-	/?p=21	duotone,loading,shortcode
+	/?p=21	loading,shortcode
 	/?p=34	oembed,rss,term-ties
 	/?p=555	loading,shortcode
 	/?p=568	loading,shortcode
@@ -13,86 +13,13 @@
 	/?p=1177	loading,shortcode
 	/?p=1782	oembed,rss,shortcode,term-ties
 	/?page_id=1133	loading,shortcode
-	/?attachment_id=611	attachment-redirect
-	/?attachment_id=616	attachment-redirect
-	/?attachment_id=617	attachment-redirect
-	/?attachment_id=754	attachment-redirect
-	/?attachment_id=755	attachment-redirect
-	/?attachment_id=756	attachment-redirect
-	/?attachment_id=757	attachment-redirect
-	/?attachment_id=758	attachment-redirect
-	/?attachment_id=759	attachment-redirect
-	/?attachment_id=760	attachment-redirect
-	/?attachment_id=761	attachment-redirect
-	/?attachment_id=762	attachment-redirect
-	/?attachment_id=764	attachment-redirect
-	/?attachment_id=765	attachment-redirect
-	/?attachment_id=766	attachment-redirect
-	/?attachment_id=767	attachment-redirect
-	/?attachment_id=768	attachment-redirect
-	/?attachment_id=769	attachment-redirect
-	/?attachment_id=770	attachment-redirect
-	/?attachment_id=771	attachment-redirect
-	/?attachment_id=807	attachment-redirect
-	/?attachment_id=821	attachment-redirect
-	/?attachment_id=827	attachment-redirect
-	/?attachment_id=967	attachment-redirect
-	/?attachment_id=968	attachment-redirect
-	/?attachment_id=1022	attachment-redirect
-	/?attachment_id=1023	attachment-redirect
-	/?attachment_id=1025	attachment-redirect
-	/?attachment_id=1027	attachment-redirect
-	/?attachment_id=1029	attachment-redirect
-	/?attachment_id=1045	attachment-redirect
-	/?attachment_id=1628	attachment-redirect
-	/?attachment_id=1686	attachment-redirect
-	/?attachment_id=1687	attachment-redirect
-	/?attachment_id=1690	attachment-redirect
-	/?attachment_id=1691	attachment-redirect
-	/?attachment_id=1692	attachment-redirect
-wp_attachment_pages_enabled=1	/?attachment_id=611	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=616	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=617	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=754	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=755	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=756	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=757	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=758	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=759	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=760	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=761	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=762	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=764	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=765	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=766	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=767	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=768	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=769	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=770	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=771	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=807	attachment-pages
 wp_attachment_pages_enabled=1	/?attachment_id=821	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=827	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=967	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=968	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=1022	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=1023	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=1025	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=1027	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=1029	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=1045	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=1628	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=1686	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=1687	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=1690	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=1691	attachment-pages
-wp_attachment_pages_enabled=1	/?attachment_id=1692	attachment-pages
-	/?cat=2	duotone,loading,oembed,rss,shortcode,term-ties
+	/?cat=2	loading,oembed,rss,shortcode,term-ties
 	/?cat=3	term-ties
 	/?cat=4	term-ties
 	/?cat=5	term-ties
 	/?cat=6	term-ties
-	/?cat=7	duotone,loading,oembed,rss,shortcode,term-ties
+	/?cat=7	loading,oembed,rss,shortcode,term-ties
 	/?cat=7&paged=2	loading,oembed,rss,shortcode,term-ties
 	/?cat=9	term-ties
 	/?cat=10	term-ties
@@ -180,14 +107,14 @@ wp_attachment_pages_enabled=1	/?attachment_id=1692	attachment-pages
 	/?m=2010	loading,shortcode
 	/?m=2013	loading,shortcode
 	/?m=2018	loading,oembed,rss,shortcode,term-ties
-	/?m=2023	duotone,loading,oembed,rss,shortcode,term-ties
+	/?m=2023	loading,oembed,rss,shortcode,term-ties
 	/?m=200907	term-ties
 	/?m=201007	shortcode
 	/?m=201008	loading,shortcode
 	/?m=201009	loading,shortcode
 	/?m=201301	loading,shortcode
 	/?m=201811	loading,oembed,rss,shortcode,term-ties
-	/?m=202301	duotone,loading,oembed,rss,shortcode,term-ties
+	/?m=202301	loading,oembed,rss,shortcode,term-ties
 	/?m=20090702	term-ties
 	/?m=20100702	shortcode
 	/?m=20100806	loading,shortcode
@@ -196,26 +123,26 @@ wp_attachment_pages_enabled=1	/?attachment_id=1692	attachment-pages
 	/?m=20100910	loading,shortcode
 	/?m=20130110	loading,shortcode
 	/?m=20181101	loading,oembed,rss,shortcode,term-ties
-	/?m=20230113	duotone,loading,oembed,rss,shortcode,term-ties
-	/?s=image	duotone,loading,shortcode
+	/?m=20230113	loading,oembed,rss,shortcode,term-ties
+	/?s=image	loading,shortcode
 	/?s=post+format	loading,shortcode
-	/?s=a	duotone,loading,oembed,rss,shortcode,term-ties
+	/?s=a	loading,oembed,rss,shortcode,term-ties
 	/?s=a&paged=2	loading,oembed,rss,shortcode,term-ties
-	/?feed=rss2	duotone,enclosures,loading,oembed,rss,term-ties
-	/?feed=atom	duotone,enclosures,loading,oembed,rss,term-ties
-	/?feed=rdf	duotone,loading,oembed,rss,term-ties
+	/?feed=rss2	enclosures,oembed,rss,term-ties
+	/?feed=atom	enclosures,oembed,rss,term-ties
+	/?feed=rdf	oembed,rss,term-ties
 	/?tag=content&feed=atom	enclosures,loading,oembed,rss,shortcode,term-ties
 	/?s=lorem&feed=rss2	loading,shortcode
-	/no/such/path/	duotone,loading,oembed,rss,shortcode,term-ties
-show_on_front=page&page_on_front=701&page_for_posts=703	/?page_id=703	duotone,loading,oembed,rss,shortcode,term-ties
+	/no/such/path/	loading,oembed,rss,shortcode,term-ties
+show_on_front=page&page_on_front=701&page_for_posts=703	/?page_id=703	loading,oembed,rss,shortcode,term-ties
 show_on_front=page&page_on_front=701&page_for_posts=703	/?page_id=703&paged=2	loading,oembed,rss,shortcode,term-ties
-show_on_front=page&page_on_front=701&page_for_posts=703	/?feed=rss2	duotone,enclosures,loading,oembed,rss,term-ties
-show_on_front=page&page_on_front=701	/?feed=rss2	duotone,enclosures,loading,oembed,rss,term-ties
-show_on_front=page&page_for_posts=703	/	duotone,loading,oembed,rss,shortcode,term-ties
+show_on_front=page&page_on_front=701&page_for_posts=703	/?feed=rss2	enclosures,oembed,rss,term-ties
+show_on_front=page&page_on_front=701	/?feed=rss2	enclosures,oembed,rss,term-ties
+show_on_front=page&page_for_posts=703	/	loading,oembed,rss,shortcode,term-ties
 show_on_front=page&page_for_posts=703	/?paged=2	loading,oembed,rss,shortcode,term-ties
-show_on_front=page&page_for_posts=703	/?page_id=703	duotone,loading,oembed,rss,shortcode,term-ties
+show_on_front=page&page_for_posts=703	/?page_id=703	loading,oembed,rss,shortcode,term-ties
 show_on_front=page&page_for_posts=703	/?page_id=703&paged=2	loading,oembed,rss,shortcode,term-ties
-show_on_front=page&page_for_posts=703	/?feed=rss2	duotone,enclosures,loading,oembed,rss,term-ties
+show_on_front=page&page_for_posts=703	/?feed=rss2	enclosures,oembed,rss,term-ties
 _fallback=1	/	fallback
 _fallback=1	/?p=1241	fallback
 _fallback=1	/?page_id=701	fallback

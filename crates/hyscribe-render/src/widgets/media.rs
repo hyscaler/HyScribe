@@ -23,7 +23,6 @@ use super::{Args, titled, widget_title};
 use crate::attachment::{
     ImageOptions, Size, attachment_image, attachment_is_image, attachment_url, metadata,
 };
-use crate::kses::wp_kses_post;
 use crate::media::{Filter, Given, Loading};
 use crate::shortcodes::{given, set_att, set_key, wp_parse_id_list};
 use crate::site::Site;

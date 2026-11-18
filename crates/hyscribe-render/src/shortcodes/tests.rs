@@ -161,7 +161,7 @@ fn shortcodes_match_php() {
     ]
     .concat();
     assert_eq!(sha256(&printed), assets);
-    assert_eq!(cases, 114);
+    assert_eq!(cases, 118);
 }
 
 /// A plugin that changes everything it may, with `library` for the players'.

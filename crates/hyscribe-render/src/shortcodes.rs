@@ -264,8 +264,8 @@ fn split_image(content: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
             end = after + 4;
         }
         return Some((
-            content.get(start..end)?.to_vec(),
-            content.get(end..)?.to_vec(),
+            content.get(start..end).unwrap_or_default().to_vec(),
+            content.get(end..).unwrap_or_default().to_vec(),
         ));
     }
     None

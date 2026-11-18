@@ -21,6 +21,25 @@ async fn the_default_install_loads_afresh() {
     assert!(load_default_install(&closed).await.is_err());
 }
 
+/// The same for the Theme Test Data, with the terms of one name told apart.
+#[tokio::test]
+async fn the_theme_test_data_loads_afresh() {
+    let saves = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..crate::fixture_database()
+    };
+    let dump = std::fs::read_to_string(THEME_TEST_DATA).unwrap();
+    load_theme_test_data(&saves, &dump).await.unwrap();
+    let read_only = hyscribe_config::Database {
+        user: "wordpress_read".into(),
+        name: "wordpress".into(),
+        ..saves.clone()
+    };
+    assert!(load_theme_test_data(&read_only, &dump).await.is_err());
+    let closed = hyscribe_config::Database { port: 1, ..saves };
+    assert!(load_theme_test_data(&closed, &dump).await.is_err());
+}
+
 async fn run(conn: &mut MySqlConnection, sql: &'static str) -> Result<(), String> {
     sqlx::raw_sql(sql)
         .execute(conn)

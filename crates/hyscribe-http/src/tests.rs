@@ -3080,7 +3080,8 @@ async fn theme_test_data_pages_match_php() {
         name: "wordpress_saves".into(),
         ..fixture_config()
     };
-    hyscribe_testkit::writes::load_theme_test_data(&db)
+    let dump = std::fs::read_to_string(hyscribe_testkit::writes::THEME_TEST_DATA).unwrap();
+    hyscribe_testkit::writes::load_theme_test_data(&db, &dump)
         .await
         .unwrap();
     let golden = include_str!("../tests/golden/pages-ttd.tsv");

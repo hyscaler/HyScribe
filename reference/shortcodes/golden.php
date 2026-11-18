@@ -54,6 +54,9 @@ $cases = array(
 	array( 555, '[caption width="30" width="40" caption="dup"]' . $img . '[/caption]' ),
 	array( 555, '[caption 0="1" width="30" caption="zero" "quoted" \'single\' bare]' . $img . '[/caption]' ),
 	array( 555, '[caption width="0" caption="x"]' . $img . '[/caption]' ),
+	array( 555, '[caption width="9"]<img src="a.png"[/caption]' ),
+	array( 555, '[caption width="9"]<a href="x">text</a> <img src="a.png" />cap [i][/caption]' ),
+	array( 555, '[caption width="9"]<a >x</a><a href="y">  <img src="b.png" /> </a> after[/caption]' ),
 	array( 555, '[caption width="30" caption="0"]' . $img . '[/caption]' ),
 	array( 555, '[captions]x[/captions] [caption-foo] [CAPTION width=1] [caption' ),
 	array( 555, '[caption width="30" caption="x" ]' . $img . '[/caption ]' ),
@@ -129,6 +132,7 @@ $cases = array(
 	array( 555, '[video src="https://a.vimeo.com/123/456"]' ),
 	array( 555, '[video src="http://x.test/v.mov"]' ),
 	array( 555, '[video]' ),
+	array( 555, '[video src="/v.mp4"]' ),
 	array( 555, '[video src="http://x.test/v.mp4"] text [/video]' ),
 	array( 555, '[video src="http://x.test/v.mp4"]line1' . "\n" . 'line2' . "\t" . '3[/video]' ),
 	array( 555, '[video src="http://x.test/v.mp4" width="0"]' ),
@@ -175,7 +179,7 @@ $atts = array(
 	'a="1" a="2"', 'Ab-C="x"', '1="x" 2=y z', '0="zero" k=v 5', 'a="<b>"', 'a="<b"', 'a="x<y>z<"', 'a=b"c', 'a="b" "c',
 	"\xff", "a=\u{a0}b\u{200b}\u{200b}c=d", 'a="\\x41\\101\\n\\\\\\q\\x\\xg\\"', '"" \'\' x', 'a=""', "a=''", "a=\"x\"\nb=\"y\"",
 	"a=1\tb=2\r\nc=3\x0bd=4\x0ce=5", '-a=b a_b=c', 'a=b=c', 'a=\'', 'a="b"\'c\' "d"e', 'x y z', 'a= b', 'a ="b" c= d',
-	'"a" "a" 0 "0" 007 "1"', '-5="x" y', '-a=b -5=c d', 'a="\\7\\12\\400\\18"', "a=\"<a\\x3e<\"", 'caption="a<b>c</b>d" x="<"',
+	'"a" "a" 0 "0" 007 "1"', '-5="x" y', '-a=b -5=c d', 'a="\\a\\b\\f\\r\\v\\t\\n"', 'a="\\7\\12\\400\\18"', "a=\"<a\\x3e<\"", 'caption="a<b>c</b>d" x="<"',
 );
 foreach ( $atts as $text ) {
 	echo "atts\t", bin2hex( $text ), "\t", bin2hex( serialize( shortcode_parse_atts( $text ) ) ), "\n";

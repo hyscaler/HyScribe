@@ -88,12 +88,14 @@ impl<'a> Scanner<'a> {
         list.get(list.partition_point(|&at| at < from)).copied()
     }
 
-    /// The tags `(?:tag1|tag2)(?![\w-])` can take at `at`, in order.
-    fn tags_at(&self, at: usize) -> impl Iterator<Item = usize> + '_ {
+    /// The tags `(?:tag1|tag2)(?![\w-])` can take at `at`, in order, each
+    /// with the offset after its name.
+    fn tags_at(&self, at: usize) -> impl Iterator<Item = (usize, usize)> + '_ {
         let rest = self.text.get(at..).unwrap_or_default();
         self.tags.iter().enumerate().filter_map(move |(i, tag)| {
-            let after = rest.get(tag.len()).copied();
-            (rest.starts_with(tag) && !after.is_some_and(|b| is_word(b) || b == b'-')).then_some(i)
+            let next = rest.get(tag.len()).copied();
+            let whole = rest.starts_with(tag) && !next.is_some_and(|b| is_word(b) || b == b'-');
+            whole.then_some((i, at + tag.len()))
         })
     }
 
@@ -101,7 +103,8 @@ impl<'a> Scanner<'a> {
     /// its attributes end, and whether it closes itself, `/]`.
     fn opening(&self, at: usize) -> Option<(usize, bool)> {
         let close = Self::after(&self.closers, at)?;
-        let slash = close > at && self.text.get(close - 1) == Some(&b'/');
+        // A `/` before a tag's name ends cannot belong to the name.
+        let slash = self.text.get(close - 1) == Some(&b'/');
         Some((if slash { close - 1 } else { close }, slash))
     }
 
@@ -109,9 +112,8 @@ impl<'a> Scanner<'a> {
     fn matches(&self, i: usize) -> Option<Shortcode<'a>> {
         let open = self.text.get(i + 1) == Some(&b'[');
         let name = i + 1 + usize::from(open);
-        for tag_index in self.tags_at(name) {
+        for (tag_index, after) in self.tags_at(name) {
             let tag = self.tags.get(tag_index).copied().unwrap_or_default();
-            let after = name + tag.len();
             let Some((attributes_end, self_closing)) = self.opening(after) else {
                 continue;
             };
@@ -193,9 +195,7 @@ fn names_in(content: &[u8]) -> Vec<&[u8]> {
                 !matches!(b, b'<' | b'>' | b'&' | b'/' | b'[' | b']' | b'=' | 0..=0x20)
             })
             .count();
-        if len > 0 {
-            names.push(rest.get(..len).unwrap_or_default());
-        }
+        names.extend(rest.get(..len).filter(|name| !name.is_empty()));
         at = open + 1;
     }
     names
@@ -353,16 +353,15 @@ fn unwrapped_in_paragraph<'a>(scanner: &Scanner<'a>, open: usize) -> Option<(&'a
             .is_some_and(|rest| rest.starts_with(b"</p>"))
             .then_some(end + 4)
     };
-    for tag_index in scanner.tags_at(bracket + 1) {
+    for (tag_index, after) in scanner.tags_at(bracket + 1) {
         let tag = scanner.tags.get(tag_index).copied().unwrap_or_default();
-        let after = bracket + 1 + tag.len();
         let Some((attributes_end, self_closing)) = scanner.opening(after) else {
             continue;
         };
         if self_closing {
             let shortcode_end = attributes_end + 2;
             if let Some(end) = paragraph_end(shortcode_end) {
-                return Some((text.get(bracket..shortcode_end)?, end));
+                return Some((text.get(bracket..shortcode_end).unwrap_or_default(), end));
             }
             continue;
         }
@@ -376,7 +375,7 @@ fn unwrapped_in_paragraph<'a>(scanner: &Scanner<'a>, open: usize) -> Option<(&'a
             .map(|closing| closing + tag.len() + 3);
         for shortcode_end in closing.into_iter().chain([body]) {
             if let Some(end) = paragraph_end(shortcode_end) {
-                return Some((text.get(bracket..shortcode_end)?, end));
+                return Some((text.get(bracket..shortcode_end).unwrap_or_default(), end));
             }
         }
     }
@@ -415,8 +414,10 @@ pub fn shortcode_parse_atts(text: &[u8]) -> Vec<(Key, Value)> {
         }
     }
     for (_, value) in &mut atts {
-        let Value::String(text) = value else { continue };
-        if text.contains(&b'<') && !balanced_angle_brackets(text) {
+        if let Value::String(text) = value
+            && text.contains(&b'<')
+            && !balanced_angle_brackets(text)
+        {
             text.clear();
         }
     }
@@ -477,7 +478,7 @@ fn attribute_at(text: &[u8], at: usize) -> Option<(Token<'_>, usize)> {
         .take_while(|&&b| is_word(b) || b == b'-')
         .count();
     if name_len > 0 {
-        let name = text.get(at..at + name_len)?;
+        let name = text.get(at..at + name_len).unwrap_or_default();
         let equals = skip(at + name_len);
         if byte(equals) == Some(b'=') {
             let start = skip(equals + 1);
@@ -486,7 +487,8 @@ fn attribute_at(text: &[u8], at: usize) -> Option<(Token<'_>, usize)> {
                     && let Some(close) = find(text, start + 1, &[quote])
                     && let Some(end) = end_after(close + 1)
                 {
-                    return Some((Token::Named(name, text.get(start + 1..close)?), end));
+                    let value = text.get(start + 1..close).unwrap_or_default();
+                    return Some((Token::Named(name, value), end));
                 }
             }
             let len = text
@@ -498,7 +500,8 @@ fn attribute_at(text: &[u8], at: usize) -> Option<(Token<'_>, usize)> {
             if len > 0
                 && let Some(end) = end_after(start + len)
             {
-                return Some((Token::Named(name, text.get(start..start + len)?), end));
+                let value = text.get(start..start + len).unwrap_or_default();
+                return Some((Token::Named(name, value), end));
             }
         }
     }
@@ -507,7 +510,8 @@ fn attribute_at(text: &[u8], at: usize) -> Option<(Token<'_>, usize)> {
             && let Some(close) = find(text, at + 1, &[quote])
             && let Some(end) = end_after(close + 1)
         {
-            return Some((Token::Positional(text.get(at + 1..close)?), end));
+            let value = text.get(at + 1..close).unwrap_or_default();
+            return Some((Token::Positional(value), end));
         }
     }
     let len = text

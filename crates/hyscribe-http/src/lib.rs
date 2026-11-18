@@ -36,7 +36,7 @@ use hyscribe_render::formatting::{
 use hyscribe_render::head::{Share, embed_page, wp_footer, wp_head};
 use hyscribe_render::link;
 use hyscribe_render::permalinks::{self, Permalinks, home_path};
-use hyscribe_render::post::body_class;
+use hyscribe_render::post::{body_class, is_privacy_policy};
 use hyscribe_render::site::{Archive, Request, Taxonomy};
 use hyscribe_render::site_templates::{block_template, with_page_template};
 use hyscribe_render::template::render_template;
@@ -2007,6 +2007,10 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
             "index".into(),
         ]
     };
+    let policy = site.option("wp_page_for_privacy_policy");
+    if is_privacy_policy(policy.as_bytes(), &post) {
+        candidates.insert(0, "privacy-policy".into());
+    }
     if front {
         candidates.insert(0, "front-page".into());
     }

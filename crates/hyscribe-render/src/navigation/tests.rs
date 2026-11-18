@@ -141,9 +141,11 @@ fn matches_php() {
                 ));
             }
         }
+        // With `menu-global`, the menu is the global post.
+        request.post = (pages == "menu-global").then_some(900);
         let tree = match pages {
             "tree" => Some(Tree::new(&site)),
-            "menu-links" => Some(Tree::with_menu(
+            "menu-links" | "menu-global" => Some(Tree::with_menu(
                 &site,
                 b"\n\n<!-- wp:navigation-link {\"label\":\"Menu link\",\"url\":\"/m\"} /-->\n\n",
             )),

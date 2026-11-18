@@ -196,10 +196,7 @@ fn styles_post(context: &Context) -> Option<u64> {
     let mut published = posts.filter(|post| post.status == "publish");
     let found = published.find(|post| {
         let terms = context.site.post_terms(post.id, "wp_theme");
-        let name = STYLESHEET.as_bytes();
-        terms
-            .iter()
-            .any(|term| term.name.eq_ignore_ascii_case(name))
+        hyscribe_render::site_templates::names_term(&terms, STYLESHEET.as_bytes())
     });
     found.map(|post| post.id)
 }

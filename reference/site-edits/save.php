@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // The site editor's saves, as its JavaScript sends them to the REST API,
-// made by PHP WordPress as user 1 for reference/site-edits/golden.sh save:
+// made by PHP WordPress as user 1 for reference/site-edits/save.sh:
 // the theme's global styles post the editor's first view writes, then
 // edited global styles, a navigation menu, the header part naming it, an
 // edited footer part and home and single templates, a custom template
 // given to the Hello world post, the archive template emptied, an empty
-// custom template given to a new page, and a template for the sample page.
+// custom template given to a new page, templates for the sample page and
+// the privacy policy page.
 // Run in the PHP container: php /dev/stdin < save.php. As on HyScribe,
 // which defines it, DISALLOW_UNFILTERED_HTML has the saves filtered.
 
@@ -164,5 +165,16 @@ $send(
 		'description'      => 'Template for Sample Page',
 		'is_wp_suggestion' => true,
 		'content'          => $paragraph( 'Only the sample page' ) . "\n\n<!-- wp:post-content /-->\n\n" . '<!-- wp:template-part {"slug":"footer","theme":"twentytwentyfive"} /-->',
+	)
+);
+
+// The privacy policy page's template, which comes before a page's own.
+$send(
+	'POST',
+	'/wp/v2/templates',
+	array(
+		'slug'    => 'privacy-policy',
+		'title'   => 'Privacy Policy',
+		'content' => $paragraph( 'Our policy' ) . "\n\n<!-- wp:post-content /-->",
 	)
 );

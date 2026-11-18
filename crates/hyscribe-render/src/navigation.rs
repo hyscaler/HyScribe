@@ -667,10 +667,12 @@ impl Renderer<'_> {
             && kind_matches
     }
 
-    /// The post a `ref` names; 0, the global post in PHP, finds none.
+    /// `get_post( $ref )`: 0 is the global post.
     fn menu_post(&self, id: &Value) -> Option<Post> {
-        let id = u64::try_from(id.to_int()).ok()?;
-        self.context.site.post(id)
+        match u64::try_from(id.to_int()).ok()? {
+            0 => self.context.global_post(),
+            id => self.context.site.post(id),
+        }
     }
 
     /// The menu `id` names, if it is published.

@@ -6,3 +6,7 @@
 	/?p=999
 	/?m=2026
 	/?page_id=15
+wp_page_for_privacy_policy=2	/?page_id=2
+wp_page_for_privacy_policy=sample-page	/?page_id=2
+wp_page_for_privacy_policy=Sample%20Page	/?page_id=2
+wp_page_for_privacy_policy=2&show_on_front=page&page_on_front=2	/

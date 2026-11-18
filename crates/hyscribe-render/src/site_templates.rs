@@ -3,7 +3,7 @@
 //! The site editor's `wp_template` and `wp_template_part` posts, used in
 //! place of the theme's files, their content as saved (no hooked blocks).
 
-use hyscribe_model::{Post, PostQuery};
+use hyscribe_model::{Post, PostQuery, Term};
 use hyscribe_phpser::is_empty_string;
 
 use crate::formatting::sanitize_title_for_query;
@@ -25,15 +25,16 @@ fn theme_posts(site: &dyn Site, theme: &Theme, post_type: &str, names: &[&[u8]])
         ..PostQuery::default()
     });
     let slug = theme.slug().as_bytes();
-    posts
-        .into_iter()
-        .filter(|post| {
-            let themes = site.post_terms(post.id, "wp_theme");
-            themes
-                .iter()
-                .any(|term| term.name.eq_ignore_ascii_case(slug))
-        })
-        .collect()
+    let of_theme = |post: &Post| names_term(&site.post_terms(post.id, "wp_theme"), slug);
+    posts.into_iter().filter(of_theme).collect()
+}
+
+/// Whether one of `terms` is named `name`, as the database's collation
+/// compares names: how a taxonomy query on `wp_theme` by name finds posts.
+pub fn names_term(terms: &[Term], name: &[u8]) -> bool {
+    terms
+        .iter()
+        .any(|term| term.name.eq_ignore_ascii_case(name))
 }
 
 /// `resolve_block_template()`'s template's content for a visitor, as
@@ -89,14 +90,17 @@ pub(crate) fn template_part(
 }
 
 /// `candidates` with the `_wp_page_template` template first of its type's
-/// own (after `front-page`), unless they repeat it (`array_flip()`).
+/// own (after `front-page` and `privacy-policy`), unless they repeat it.
 pub fn with_page_template(
     site: &dyn Site,
     request: &Request,
     candidates: &[String],
 ) -> Vec<String> {
     let mut candidates = candidates.to_vec();
-    let at = usize::from(request.front_page);
+    let at = candidates
+        .iter()
+        .take_while(|slug| matches!(slug.as_str(), "front-page" | "privacy-policy"))
+        .count();
     let own = candidates.get(at..candidates.len().saturating_sub(2));
     if let Some(slug) =
         page_template(site, request).filter(|slug| own.is_some_and(|own| !own.contains(slug)))

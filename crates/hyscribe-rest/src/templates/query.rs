@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, absint, is_empty_string};
 use hyscribe_render::formatting::sanitize_title_for_query;
+use hyscribe_render::site_templates::names_term;
 use hyscribe_render::template_types::{PART_AREAS, default_type};
 use hyscribe_render::theme::{Theme, twentytwentyfive};
 
@@ -348,10 +349,7 @@ fn from_post(context: &Context, post: &Post) -> Result<Template, RestError> {
 /// Whether `post` has a term of `taxonomy` named `name`, compared as the
 /// database collation compares names.
 fn has_term(context: &Context, post: &Post, taxonomy: &str, name: &[u8]) -> bool {
-    let terms = context.site.post_terms(post.id, taxonomy);
-    terms
-        .iter()
-        .any(|term| term.name.eq_ignore_ascii_case(name))
+    names_term(&context.site.post_terms(post.id, taxonomy), name)
 }
 
 /// The posts of `kind` with the theme term `theme`, newest first.

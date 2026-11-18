@@ -3057,7 +3057,7 @@ async fn listed_pages_match_php() {
         assert_listed_pages("wordpress", golden, false, known).await,
         0
     );
-    assert_eq!(golden.lines().count(), 98);
+    assert_eq!(golden.lines().count(), 99);
 }
 
 /// The Theme Test Data fixture's requests of `reference/pages/ttd.list`,
@@ -3112,7 +3112,18 @@ async fn edited_site_pages_match_php() {
         assert_listed_pages("wordpress_saves", golden, false, "").await,
         0
     );
-    assert_eq!(golden.lines().count(), 8);
+    assert_eq!(golden.lines().count(), 12);
+    // Options without posts: the global styles post cannot be read.
+    let broken = "CREATE TABLE broken_options AS SELECT * FROM wp_options";
+    sqlx::raw_sql(broken).execute(&mut conn).await.unwrap();
+    let config = Database {
+        prefix: hyscribe_config::Prefix::new("broken_").unwrap(),
+        ..db
+    };
+    let site = Site::load(Db::connect(&config).await.unwrap(), None, None).await;
+    let drop = "DROP TABLE broken_options";
+    sqlx::raw_sql(drop).execute(&mut conn).await.unwrap();
+    assert!(site.is_err());
 }
 
 /// Every case of `reference/term-template/golden.sh` over the Theme Test

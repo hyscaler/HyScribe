@@ -5,7 +5,7 @@
 //! `addslashes()` and the `wp_unslash()` that comes before the insert.
 
 use hyscribe_html::TagProcessor;
-use hyscribe_kses::{esc_url_raw, wp_strip_all_tags};
+use hyscribe_kses::{esc_attr, esc_url_raw, wp_strip_all_tags};
 use hyscribe_phpser::{addslashes, php_trim, stripslashes};
 use hyscribe_render::balance::force_balance_tags;
 use hyscribe_render::formatting::sanitize_email;
@@ -31,13 +31,8 @@ impl Fields<'_> {
             *field = stripslashes(&filters(addslashes(field)));
         };
         slashed(self.author, &|name| name_filters(&name));
-        slashed(self.email, &|email| {
-            wp_filter_kses(&sanitize_email(php_trim(&email)), wp_kses_data)
-        });
-        slashed(self.url, &|url| {
-            let url = esc_url_raw(&wp_strip_all_tags(&url, false));
-            wp_filter_kses(&url, wp_kses_data)
-        });
+        slashed(self.email, &|email| email_filters(&email));
+        slashed(self.url, &|url| url_filters(&url));
         slashed(self.content, &|content| {
             let mut content = convert_invalid_entities(&content);
             if kses {
@@ -47,6 +42,43 @@ impl Fields<'_> {
             let content = addslashes(&wp_rel_ugc(&stripslashes(&content), home));
             balance_tags(&content, balance)
         });
+    }
+}
+
+/// The default `pre_comment_author_email` filters of a slashed email:
+/// `trim()`, `sanitize_email()` and `wp_filter_kses()`.
+fn email_filters(email: &[u8]) -> Vec<u8> {
+    wp_filter_kses(&sanitize_email(php_trim(email)), wp_kses_data)
+}
+
+/// The default `pre_comment_author_url` filters of a slashed URL:
+/// `wp_strip_all_tags()`, `sanitize_url()` and `wp_filter_kses()`.
+fn url_filters(url: &[u8]) -> Vec<u8> {
+    let url = esc_url_raw(&wp_strip_all_tags(url, false));
+    wp_filter_kses(&url, wp_kses_data)
+}
+
+/// A commenter cookie.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommentCookie {
+    /// `comment_author_{COOKIEHASH}`.
+    Author,
+    /// `comment_author_email_{COOKIEHASH}`.
+    Email,
+    /// `comment_author_url_{COOKIEHASH}`.
+    Url,
+}
+
+/// `sanitize_comment_cookies()` of one cookie's value: what `$_COOKIE`
+/// holds for it from then on. PHP slashes the value first, as
+/// `wp_magic_quotes()` does, and the name and email are escaped for
+/// attributes after the filters.
+pub fn sanitize_comment_cookie(cookie: CommentCookie, value: &[u8]) -> Vec<u8> {
+    let slashed = addslashes(value);
+    match cookie {
+        CommentCookie::Author => esc_attr(&stripslashes(&name_filters(&slashed))).into_bytes(),
+        CommentCookie::Email => esc_attr(&stripslashes(&email_filters(&slashed))).into_bytes(),
+        CommentCookie::Url => stripslashes(&url_filters(&slashed)),
     }
 }
 

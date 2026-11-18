@@ -574,6 +574,7 @@ async fn every_query() -> Vec<DbError> {
         db.user_post_counts(&[1], true, 1).await.unwrap_err(),
         db.comments(1).await.unwrap_err(),
         db.older_comments(1, "").await.unwrap_err(),
+        db.held_comments(1, b"e", None).await.unwrap_err(),
         db.comment(1).await.unwrap_err(),
         db.adjacent_post(&Post::default(), true, None)
             .await
@@ -983,6 +984,19 @@ async fn options_meta_and_terms() {
     assert_eq!(
         db.older_comments(2, "2027-01-01 00:00:00").await.unwrap(),
         0
+    );
+    // Nothing is held in the default install.
+    assert!(
+        db.held_comments(1, b"wapuu@wordpress.example", None)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        db.held_comments(1, b"x", Some(-1))
+            .await
+            .unwrap()
+            .is_empty()
     );
     assert_eq!(
         db.post_meta(2, "_wp_page_template").await.unwrap(),

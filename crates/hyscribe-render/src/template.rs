@@ -266,6 +266,7 @@ impl<'a> Renderer<'a> {
                 query: None,
                 comment: None,
                 comment_depth: 0,
+                comment_held: false,
                 terms: Default::default(),
                 loading: Loading::in_the_loop(request.singular),
             },

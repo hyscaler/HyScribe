@@ -4,7 +4,10 @@
 # Records the comment blocks from the PHP WordPress
 # oracle (reference/default-install/php.sh up) into
 # crates/hyscribe-render/tests/golden/comments.tsv, and as the author of a
-# held comment previews them into held-comments.tsv. Its inserts are rolled back.
+# held comment previews them into held-comments.tsv, with the commenter
+# cookies too, and records what sanitize_comment_cookies() leaves of cookie
+# values in crates/hyscribe-write/tests/golden/comment-cookies.tsv. Its
+# inserts are rolled back.
 set -euo pipefail
 
 DOCKER="${DOCKER:-docker}"
@@ -16,3 +19,5 @@ OUT="$ROOT/crates/hyscribe-render/tests/golden/comments.tsv"
 wc -l "$OUT"
 "$DOCKER" exec -i "$NAME" php < "$ROOT/reference/comments/held-golden.php" > "${OUT%/*}/held-comments.tsv"
 wc -l "${OUT%/*}/held-comments.tsv"
+"$DOCKER" exec -i "$NAME" php < "$ROOT/reference/comments/cookies-golden.php" > "$ROOT/crates/hyscribe-write/tests/golden/comment-cookies.tsv"
+wc -l "$ROOT/crates/hyscribe-write/tests/golden/comment-cookies.tsv"

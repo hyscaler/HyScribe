@@ -11,7 +11,7 @@ use hyscribe_phpser::{Key, Value, add_query_arg, is_empty_string, isset, php_tri
 use crate::autop::wpautop;
 use crate::balance::force_balance_tags;
 use crate::clickable::make_clickable;
-use crate::comments::held_preview;
+use crate::comments::unapproved;
 use crate::date::{self, Zone};
 use crate::excerpt::wp_trim_words;
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, convert_chars, wptexturize};
@@ -43,6 +43,8 @@ pub(crate) struct Context<'a> {
     /// How deep that comment is in its thread, 1 for a top-level comment,
     /// as `get_comment_reply_link()` counts it through its parents.
     pub(crate) comment_depth: usize,
+    /// Whether that comment is held for moderation, shown to its author.
+    pub(crate) comment_held: bool,
     /// The loop and image counts images' loading attributes depend on.
     pub(crate) loading: Loading,
     /// The terms query block's context and the term template's.
@@ -253,9 +255,16 @@ fn comment_content(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     }
     let mut text = comment_text(context.site, &comment.content);
     let mut note: &[u8] = b"";
-    if held(context, comment) {
-        note = b"<p><em class=\"comment-awaiting-moderation\">Your comment is awaiting moderation. This is a preview; your comment will be visible after it has been approved.</em></p>";
-        text = wp_kses_no_tags(&text);
+    if context.comment_held {
+        let commenter = &context.request.commenter;
+        note = if is_empty_string(&commenter.email) {
+            b"<p><em class=\"comment-awaiting-moderation\">Your comment is awaiting moderation. This is a preview; your comment will be visible after it has been approved.</em></p>"
+        } else {
+            b"<p><em class=\"comment-awaiting-moderation\">Your comment is awaiting moderation.</em></p>"
+        };
+        if is_empty_string(&commenter.author) {
+            text = wp_kses_no_tags(&text);
+        }
     }
     [
         format!(
@@ -268,11 +277,6 @@ fn comment_content(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         b"</div>",
     ]
     .concat()
-}
-
-/// Whether `comment` is the held comment the request previews.
-fn held(context: &Context<'_>, comment: &Comment) -> bool {
-    held_preview(context.site, context.request).is_some_and(|held| held.id == comment.id)
 }
 
 /// The `comment_text` filters over a comment's content.
@@ -391,8 +395,7 @@ pub(crate) fn comment_link(context: &Context<'_>, comment: &Comment) -> Vec<u8> 
 
 /// `get_page_of_comment()` as `get_comment_link()` asks it: 0 when comments
 /// are not paged, else the page of the comment's thread among the post's
-/// top level comments, oldest first. Not ported: a held comment's author
-/// counting their own held comments.
+/// top level comments, oldest first, with the held ones of the commenter.
 fn page_of_comment(context: &Context<'_>, comment: &Comment) -> i64 {
     let option = |name| context.site.option(name).unwrap_or_default();
     let per_page = option("comments_per_page");
@@ -409,13 +412,21 @@ fn page_of_comment(context: &Context<'_>, comment: &Comment) -> i64 {
         // A loop of parents, which PHP recurses on until it fails, has no page.
         let mut seen = std::collections::HashSet::from([top.id]);
         while top.parent != 0 {
-            match context.site.comment(top.parent) {
+            match context.site.any_comment(top.parent) {
                 Some(parent) if seen.insert(parent.id) => top = parent,
                 _ => return 0,
             }
         }
     }
-    let older = context.site.older_comments(top.post_id, &top.date_gmt);
+    let site = context.site;
+    let held = unapproved(site, context.request)
+        .map(|who| site.held_comments(top.post_id, &who.email, who.only))
+        .unwrap_or_default();
+    let held = held
+        .iter()
+        .filter(|c| c.parent == 0 && c.date_gmt < top.date_gmt)
+        .count();
+    let older = site.older_comments(top.post_id, &top.date_gmt) + held as u64;
     i64::try_from(older).unwrap_or(i64::MAX) / per_page + 1
 }
 
@@ -505,7 +516,7 @@ fn comment_author_name(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         ]
         .concat();
     }
-    if held(context, comment) {
+    if context.comment_held && is_empty_string(&context.request.commenter.author) {
         name = wp_kses_no_tags(&name);
     }
     [

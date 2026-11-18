@@ -960,6 +960,7 @@ async fn page(
         Outcome::Page(mut page) => {
             let embed = embeds(&query, &uri, page.request.singular);
             page.request.embed = embed;
+            page.request.commenter = comment_post::commenter(&site, &headers);
             let mut response = html(render(&site, requested(*page, &original, &uri)).await);
             if embed {
                 response

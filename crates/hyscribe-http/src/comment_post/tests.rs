@@ -13,12 +13,17 @@ use sqlx::Connection as _;
 use tower::ServiceExt;
 
 use super::*;
-use crate::admin::tests::{logged_in, page_of, send, session_nonce, unwritable};
+use crate::admin::tests::{logged_in, page_of, salted, send, session_nonce, unwritable};
 use crate::{Peer, router};
+
+/// The tests that insert comments take turns: the cases that set comment IDs
+/// and the ones that leave the database to number them lock each other out.
+static WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 const GOLDEN: &str = include_str!("../../tests/golden/comment-post.tsv");
 const CASES: &str = include_str!("../../../../reference/comment-post/cases.list");
 const FORM: &str = "application/x-www-form-urlencoded";
+const BOUNDARY: &str = "----HyScribeBoundary";
 
 /// A case of `cases.list`.
 struct Case {
@@ -63,6 +68,35 @@ fn php(case: &str) -> (u16, String, String, Vec<u8>) {
     };
     let body = hyscribe_testkit::unhex(body);
     (status.parse().unwrap(), to.into(), cookies.into(), body)
+}
+
+/// The body of a `MULTIPART` case: its pairs as `multipart/form-data`
+/// parts, a name starting with `@` a file.
+fn multipart(body: &str) -> String {
+    let mut out = String::new();
+    for pair in body.split('&') {
+        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let decode = |text: &str| String::from_utf8(hyscribe_phpser::urldecode(text.as_bytes()));
+        let (name, value) = (decode(name).unwrap(), decode(value).unwrap());
+        let disposition = match name.strip_prefix('@') {
+            Some(file) => {
+                format!("name=\"{file}\"; filename=\"picture.txt\"\r\nContent-Type: text/plain")
+            }
+            None => format!("name=\"{name}\""),
+        };
+        out += &format!(
+            "--{BOUNDARY}\r\nContent-Disposition: form-data; {disposition}\r\n\r\n{value}\r\n"
+        );
+    }
+    out + &format!("--{BOUNDARY}--\r\n")
+}
+
+/// The content type of a body made by [`multipart`] or a form.
+fn kind_of(body: &str) -> String {
+    match body.starts_with("--") {
+        true => format!("multipart/form-data; boundary={BOUNDARY}"),
+        false => FORM.into(),
+    }
 }
 
 /// A body with `%aN%` as N letters a and `%nonce%` as `nonce`.
@@ -118,7 +152,8 @@ async fn post(
     budget: Option<usize>,
 ) -> Response {
     let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(FORM));
+    let kind = kind_of(body);
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_str(&kind).unwrap());
     headers.insert(
         header::USER_AGENT,
         HeaderValue::from_static("HyScribe oracle"),
@@ -130,7 +165,7 @@ async fn post(
         body: body.to_string().into(),
         peer: Some([192, 0, 2, 1].into()),
     };
-    let form = read_form(FORM.as_bytes(), body.as_bytes()).unwrap();
+    let form = read_form(kind.as_bytes(), body.as_bytes()).unwrap();
     tokio::task::block_in_place(|| {
         let begin: Begin<'_> = Box::pin(async move {
             let mut write = writer.begin_on(conn).await?;
@@ -157,20 +192,31 @@ async fn comment_count(conn: &mut Connection) -> i64 {
 }
 
 /// Every POST of `cases.list` answers as PHP answered it, and writes the
-/// rows PHP wrote, from the state its setup SQL and first body leave; but
-/// the page of a comment on paged comments, which is not ported.
+/// rows PHP wrote, from the state its setup SQL and first body leave, the
+/// page of a comment on paged comments and a multipart body included.
 #[tokio::test(flavor = "multi_thread")]
 async fn posts_answer_and_write_as_php() {
     // The admin saves' content shares the users' meta rows, which deadlock.
     let _turn = crate::admin::saves::tests::turn().await;
+    let _writes = WRITES.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let (site, logged_in) = logged_in("wordpress", dir.path()).await;
     let nonce = session_nonce(&site, &logged_in, "unfiltered-html-comment_1").await;
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
     let writer = writer.unwrap().unwrap();
-    let on = (&*site, &writer);
+    let mut pretty = salted(Arc::into_inner(crate::tests::oracle_site().await).unwrap());
+    // The site reads its options once, so a case that sets the permalink
+    // structure is served by a site that has it set.
+    pretty
+        .options
+        .insert("permalink_structure".into(), b"/%postname%/".to_vec());
+    pretty.build_rewriter();
     let mut failures = Vec::new();
-    for case in cases().iter().filter(|case| case.method == "POST") {
+    for case in cases().iter().filter(|case| case.method != "GET") {
+        let on = match case.setup.contains("permalink_structure") {
+            true => (&pretty, &writer),
+            false => (&*site, &writer),
+        };
         let mut cookie: Vec<&str> = Vec::new();
         if case.admin {
             cookie.push(&logged_in);
@@ -179,7 +225,10 @@ async fn posts_answer_and_write_as_php() {
             cookie.push(case.cookie);
         }
         let cookie = cookie.join("; ");
-        let body = expand(case.body, &nonce);
+        let mut body = expand(case.body, &nonce);
+        if case.method == "MULTIPART" {
+            body = multipart(&body);
+        }
         let setup = async |conn: &mut Connection| {
             for query in case.setup.split("; ").filter(|_| case.setup != "-") {
                 sqlx::query(query).execute(&mut *conn).await.unwrap();
@@ -203,7 +252,7 @@ async fn posts_answer_and_write_as_php() {
             }
             Ok(())
         };
-        if php.0 == 302 && case.name != "page-comments" {
+        if php.0 == 302 {
             let golden = format!("comment-post-{}", case.name);
             let rows = check_writes(&fixture_database(), &golden, setup, action).await;
             if let Err(rows) = rows {
@@ -211,17 +260,12 @@ async fn posts_answer_and_write_as_php() {
             }
             continue;
         }
-        // A refusal writes nothing; so does the page of a comment, not ported.
+        // A refusal writes nothing.
         let mut conn = connect().await;
         let mut tx = conn.begin().await.unwrap();
         setup(&mut tx).await.unwrap();
         let before = comment_count(&mut tx).await;
-        if case.name == "page-comments" {
-            let response = post(on, &mut tx, (&body, &cookie), None).await;
-            assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
-        } else {
-            action(&mut tx, ()).await.unwrap();
-        }
+        action(&mut tx, ()).await.unwrap();
         assert_eq!(comment_count(&mut tx).await, before, "{}", case.name);
         tx.rollback().await.unwrap();
     }
@@ -241,10 +285,11 @@ async fn connect() -> sqlx::MySqlConnection {
 }
 
 /// A statement that fails part way keeps nothing and shows the database
-/// error page: a visitor's reply and an administrator's comment, under
-/// every budget short of success.
+/// error page: a visitor's reply, on paged comments too, and an
+/// administrator's comment, under every budget short of success.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_statement_keeps_nothing() {
+    let _writes = WRITES.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let (site, logged_in) = logged_in("wordpress", dir.path()).await;
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
@@ -252,9 +297,21 @@ async fn a_failed_statement_keeps_nothing() {
     let held =
         "comment_post_ID=1&author=Ann&email=ann%40example.test&comment=A+reply.&comment_parent=1";
     let admin = "comment_post_ID=1&comment=An+administrator%27s+comment.";
-    for (body, cookie) in [(held, ""), (admin, logged_in.as_str())] {
+    let paged = [
+        "UPDATE wp_options SET option_value = '1' WHERE option_name = 'page_comments'",
+        "UPDATE wp_options SET option_value = '2' WHERE option_name = 'comments_per_page'",
+    ];
+    let posts = [
+        (held, "", false),
+        (admin, logged_in.as_str(), false),
+        (held, "", true),
+    ];
+    for (body, cookie, on) in posts {
         let mut conn = connect().await;
         let mut tx = conn.begin().await.unwrap();
+        for sql in paged.iter().filter(|_| on) {
+            sqlx::query(*sql).execute(&mut *tx).await.unwrap();
+        }
         let before = comment_count(&mut tx).await;
         let mut budget = 0;
         loop {
@@ -315,13 +372,13 @@ async fn the_route_answers_as_php() {
             .contains("no-store")
     );
     assert_eq!(page_of(response).await.into_bytes(), body);
-    let multipart = "multipart/form-data; boundary=x";
+    let multipart_kind = "multipart/form-data; boundary=x";
     // `get_post( -1 )` finds nothing, and PHP exits.
     let negative = "comment_post_ID=-1&author=Ann&email=ann%40example.test&comment=Hi.";
     let response = send(&site, "POST", PATH, "", Some((FORM, negative))).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(page_of(response).await, "");
-    for (body, kind) in [("--x--", multipart), ("redirect_to[]=x", FORM)] {
+    for (body, kind) in [("garbage", multipart_kind), ("redirect_to[]=x", FORM)] {
         let response = send(&site, "POST", PATH, "", Some((kind, body))).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{body}");
     }
@@ -473,6 +530,7 @@ async fn only_a_held_comment_is_previewed() {
 /// year; a `redirect_to` of `0` is empty, so the comment's link is used.
 #[tokio::test(flavor = "multi_thread")]
 async fn cookies_last_a_year_or_go() {
+    let _writes = WRITES.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let (site, _) = logged_in("wordpress", dir.path()).await;
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
@@ -539,6 +597,7 @@ async fn held_comments_are_read() {
 /// pretty permalink structure that has one.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_comment_links_to_its_post() {
+    let _writes = WRITES.lock().await;
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
     let writer = writer.unwrap().unwrap();
     let mut conn = connect().await;
@@ -546,15 +605,49 @@ async fn a_comment_links_to_its_post() {
     let sql = "UPDATE wp_options SET option_value = '/%postname%/' WHERE option_name = 'permalink_structure'";
     sqlx::query(sql).execute(&mut *tx).await.unwrap();
     let mut write = writer.begin_on(&mut tx).await.unwrap();
-    let permalink = Some(b"http://127.0.0.1:8081/hello-world".to_vec());
-    let link = comment_link(&mut write, permalink, 5).await.unwrap();
+    let permalink = b"http://127.0.0.1:8081/hello-world";
+    let link = comment_link(&mut write, permalink, 5, None).await.unwrap();
     assert_eq!(link, "http://127.0.0.1:8081/hello-world/#comment-5");
+}
+
+/// A comment whose thread has no top, as it or a parent is missing, has no
+/// page, as PHP's `get_page_of_comment()` finds none; a page size below 1
+/// puts every comment on page 1.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_comment_without_a_thread_top_has_no_page() {
+    let _writes = WRITES.lock().await;
+    let writer = Writer::open(&fixture_database(), Mode::Primary).await;
+    let writer = writer.unwrap().unwrap();
+    let mut conn = connect().await;
+    let mut tx = conn.begin().await.unwrap();
+    let mut write = writer.begin_on(&mut tx).await.unwrap();
+    let orphan = hyscribe_db::CommentFields {
+        post_id: 1,
+        parent: 999_999,
+        date: "2026-10-27 09:00:00".into(),
+        date_gmt: "2026-10-27 09:00:00".into(),
+        approved: "1".into(),
+        comment_type: "comment".into(),
+        ..Default::default()
+    };
+    let id = write.insert_comment(&orphan).await.unwrap();
+    let mut page = async |id, size, threaded| {
+        page_of_comment(&mut write, id, (size, threaded), None)
+            .await
+            .unwrap()
+    };
+    assert_eq!(page(999_998, 2, true).await, None);
+    assert_eq!(page(id, 2, true).await, None);
+    // Unthreaded, the orphan counts from its own date: one older comment.
+    assert_eq!(page(id, 1, false).await, Some(2));
+    assert_eq!(page(id, 0, true).await, Some(1));
 }
 
 /// Once saved, a held comment is mailed to its moderator and an approved
 /// one to the post's author (ADR 0016).
 #[tokio::test(flavor = "multi_thread")]
 async fn saved_comments_are_mailed() {
+    let _writes = WRITES.lock().await;
     let db = hyscribe_db::Db::connect(&fixture_database()).await.unwrap();
     let home = Some("http://127.0.0.1:8081".to_string());
     let site = Site::load(db, home.clone(), home).await.unwrap();

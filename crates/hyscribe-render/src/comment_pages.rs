@@ -198,7 +198,7 @@ impl Renderer<'_> {
         let all = self
             .context
             .post_id
-            .map(|id| post_comments(site, self.context.request, id))
+            .map(|id| post_comments(site, self.context.request, id).0)
             .unwrap_or_default();
         paging(site, self.context.request, listed(site, &all).len())
     }

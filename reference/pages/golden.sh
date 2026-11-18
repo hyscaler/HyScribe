@@ -13,12 +13,15 @@
 #   ttd:     HYSCRIBE_PHP_DB=wordpress_ttd reference/default-install/php.sh up
 #   site-edits: reference/default-install/php.sh up, over the site editor's
 #   saves in reference/site-edits/content.sql, which it adds
+#   comments: reference/default-install/php.sh up, over the comments of
+#   reference/pages/comments.sql, which it adds, with the commenter cookies
+#   an option named _cookie sends (urlencoded, `name=value; name=value`)
 # Page views write: the wp_navigation post php.sh up wrote is
 # deleted first (site-edits: replaced), so start from a fresh db.sh up and
 # reset it after.
 set -euo pipefail
 
-LIST="${1:?usage: $0 default|ttd|site-edits}"
+LIST="${1:?usage: $0 default|ttd|site-edits|comments}"
 DOCKER="${DOCKER:-docker}"
 NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
 DB="${HYSCRIBE_DB_CONTAINER:-hyscribe-default-install-db}"
@@ -40,6 +43,9 @@ trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-options.php" < "$ROOT/reference/pages/options.php"
 if [ "$LIST" = site-edits ]; then
   "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "$DATABASE" < "$ROOT/reference/site-edits/content.sql"
+elif [ "$LIST" = comments ]; then
+  "$DOCKER" exec "$DB" mariadb -uroot -preference-only "$DATABASE" -e "DELETE FROM wp_posts WHERE post_type = 'wp_navigation'"
+  "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "$DATABASE" < "$ROOT/reference/pages/comments.sql"
 else
   "$DOCKER" exec "$DB" mariadb -uroot -preference-only "$DATABASE" -e "DELETE FROM wp_posts WHERE post_type = 'wp_navigation'"
 fi
@@ -52,7 +58,8 @@ while IFS= read -r line; do
   # Not by `read`, which drops a leading tab, and so empty options.
   options=${line%%$'\t'*}
   path=${line#*$'\t'}
-  curl -g -s -D "$HEADERS" -o "$TMP" -H "X-HyScribe-Options: $options" "$BASE$path" > /dev/null
+  cookie=$(python3 -I -c 'import sys, urllib.parse as u; print(u.parse_qs(sys.argv[1], keep_blank_values=True).get("_cookie", [""])[0], end="")' "$options")
+  curl -g -s -D "$HEADERS" -o "$TMP" -H "X-HyScribe-Options: $options" ${cookie:+-b "$cookie"} "$BASE$path" > /dev/null
   status=$(head -n 1 "$HEADERS" | cut -d ' ' -f 2)
   location=$(grep -i '^location:' "$HEADERS" | cut -d ' ' -f 2 | tr -d '\r' || true)
   key=$(printf '%s' "$path" | xxd -p | tr -d '\n')

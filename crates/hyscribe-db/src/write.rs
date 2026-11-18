@@ -568,6 +568,42 @@ impl<'w> Write<'w> {
         Ok(row.map(|row| CommentFields::read(&row)))
     }
 
+    /// `get_page_of_comment()`'s count: the top level comments of every
+    /// type on `post` from before `date_gmt` that are approved, or held and
+    /// `unapproved`'s: written by that user, or by the author with that
+    /// email.
+    pub async fn comments_before(
+        &mut self,
+        post: u64,
+        date_gmt: &str,
+        unapproved: Option<Unapproved<'_>>,
+    ) -> Result<u64, DbError> {
+        let query = match unapproved {
+            None => self.sql(
+                "SELECT COUNT(*) FROM {prefix}comments WHERE comment_post_ID = ? \
+                 AND comment_parent = 0 AND comment_date_gmt < ? AND comment_approved = '1'",
+            ),
+            Some(Unapproved::User(_)) => self.sql(
+                "SELECT COUNT(*) FROM {prefix}comments WHERE comment_post_ID = ? \
+                 AND comment_parent = 0 AND comment_date_gmt < ? \
+                 AND ( comment_approved = '1' OR ( user_id = ? AND comment_approved = '0' ) )",
+            ),
+            Some(Unapproved::Email(_)) => self.sql(
+                "SELECT COUNT(*) FROM {prefix}comments WHERE comment_post_ID = ? \
+                 AND comment_parent = 0 AND comment_date_gmt < ? \
+                 AND ( comment_approved = '1' \
+                 OR ( comment_author_email = ? AND comment_approved = '0' ) )",
+            ),
+        };
+        let query = query.bind(post).bind(date_gmt);
+        self.count(match unapproved {
+            None => query,
+            Some(Unapproved::User(user)) => query.bind(user),
+            Some(Unapproved::Email(email)) => query.bind(email),
+        })
+        .await
+    }
+
     /// `wp_allow_comment()`'s duplicate: a comment not in the trash with
     /// the same post, parent, author, email (unless `email` is `None`) and
     /// content.
@@ -948,6 +984,15 @@ pub struct PostFields {
     pub mime_type: String,
     /// `guid`.
     pub guid: Vec<u8>,
+}
+
+/// Whose held comments a comment query adds to the approved ones.
+#[derive(Clone, Copy, Debug)]
+pub enum Unapproved<'a> {
+    /// The comments of this user.
+    User(u64),
+    /// The comments of the author with this email.
+    Email(&'a [u8]),
 }
 
 impl PostFields {

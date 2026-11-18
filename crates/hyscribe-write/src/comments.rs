@@ -20,6 +20,7 @@ use crate::steps::{Steps, step};
 use crate::{MYSQL, wp_timezone};
 
 pub use allow::Refused;
+pub use filter::{CommentCookie, sanitize_comment_cookie};
 
 /// What the comment functions take from outside the database.
 #[derive(Clone, Copy, Debug)]

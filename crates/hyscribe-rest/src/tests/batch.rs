@@ -68,6 +68,8 @@ fn requests_not_ported_answer_the_batch_501() {
         method_override: None,
         content_type: Some(b"application/json"),
         body: body.as_bytes(),
+        remote_addr: b"",
+        user_agent: None,
         host: None,
         now: 0,
     };

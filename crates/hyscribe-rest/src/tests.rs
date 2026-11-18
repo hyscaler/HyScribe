@@ -353,6 +353,8 @@ pub(super) fn serve_with(site: &dyn Site, case: &RestCase) -> Served {
             None
         },
         nonce: (user != 0 && !flag("nononce")).then_some(b"%nonce%"),
+        remote_addr: b"",
+        user_agent: None,
         method_override: flag("override").then_some(b"DELETE"),
         content_type: if flag("json") {
             Some(b"application/json")
@@ -534,7 +536,17 @@ fn content_answers_match_php() {
 /// permission check lets them through (`reference/rest/writes.list`).
 #[test]
 fn writes_are_checked_as_php_checks_them() {
-    let golden = include_str!("../tests/golden/writes.tsv");
+    // A settings update giving none writes nothing, so it is answered at
+    // once, as `reference/rest/settings-writes.list` checks.
+    let golden: String = include_str!("../tests/golden/writes.tsv")
+        .lines()
+        .filter(|line| {
+            let case = &rest_cases(line)[0];
+            case.target != "/?rest_route=/wp/v2/settings" || case.status >= 400
+        })
+        .map(|line| format!("{line}\n"))
+        .collect();
+    let golden = golden.as_str();
     let goldens = [(content::default_install(), golden, false)];
     let (failures, not_served) = mismatches(&goldens, true, &|_| false);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
@@ -668,6 +680,8 @@ fn links_are_served_as_from_url_reads_them() {
         head: false,
         uri: b"/",
         parameters: false,
+        remote_addr: b"",
+        user_agent: None,
         host: b"",
         now: 0,
     };
@@ -825,6 +839,8 @@ fn self_links_hint_what_their_route_allows() {
         head: false,
         uri: b"/",
         parameters: false,
+        remote_addr: b"",
+        user_agent: None,
         host: b"",
         now: 0,
     };

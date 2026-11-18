@@ -1,0 +1,18 @@
+# The rows PHP WordPress writes for the action rest-comments-delete (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-16 15:19:58 to 2026-11-16 15:19:58 UTC.
+wp_comments	1	-	comment_ID	1
+wp_comments	1	-	comment_agent	
+wp_comments	1	-	comment_approved	1
+wp_comments	1	-	comment_author	A WordPress Commenter
+wp_comments	1	-	comment_author_IP	
+wp_comments	1	-	comment_author_email	wapuu@wordpress.example
+wp_comments	1	-	comment_author_url	https://wordpress.org/
+wp_comments	1	-	comment_content	Hi, this is a comment.\nTo get started with moderating, editing, and deleting comments, please visit the Comments screen in the dashboard.\nCommenter avatars come from <a href="https://gravatar.com/">Gravatar</a>.
+wp_comments	1	-	comment_date	2026-10-27 08:08:15
+wp_comments	1	-	comment_date_gmt	2026-10-27 08:08:15
+wp_comments	1	-	comment_karma	0
+wp_comments	1	-	comment_parent	0
+wp_comments	1	-	comment_post_ID	1
+wp_comments	1	-	comment_type	comment
+wp_comments	1	-	user_id	0
+wp_posts	1	~	comment_count	1	0

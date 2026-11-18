@@ -85,6 +85,18 @@ pub(super) fn level(key: &Key) -> Option<i64> {
     }
 }
 
+/// `WP_User::add_role( $role )`: `role` beside the user's roles, unless it
+/// is empty or one of them.
+pub async fn add_role(write: &mut Write<'_>, id: u64, role: &[u8]) -> Result<(), DbError> {
+    let mut user = User::load(write, id).await?;
+    let role = Key::from_php_string(role.to_vec());
+    if is_empty_string(&role.to_php_string()) || user.roles().contains(&role) {
+        return Ok(());
+    }
+    user.grant(role);
+    user.save(write).await
+}
+
 /// `WP_User::set_role( $role )`: the user's roles give way to `role`, or to
 /// none when it is empty.
 pub async fn set_role(write: &mut Write<'_>, id: u64, role: &[u8]) -> Result<(), DbError> {

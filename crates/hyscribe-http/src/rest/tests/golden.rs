@@ -194,6 +194,8 @@ fn serve_case(site: &Site, handle: &Handle, case: &RestCase) -> hyscribe_rest::S
         cookie_user: user,
         origin: case.flag("origin").then_some(b"http://example.test"),
         nonce: (user != 0).then_some(b"%nonce%"),
+        remote_addr: b"",
+        user_agent: None,
         method_override: None,
         content_type: case.flag("json").then_some(b"application/json"),
         body: &case.sent,

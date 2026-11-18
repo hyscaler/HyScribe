@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# The spike's guest (ADR 0020): built by build.sh into tests/spike.wasm,
+# outside the workspace, for wasm32-wasip2.
+[package]
+name = "hyscribe-ext-spike-guest"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "=0.57.1", default-features = false, features = ["macros", "realloc"] }
+dlmalloc = { version = "=0.2.14", features = ["global"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[workspace]

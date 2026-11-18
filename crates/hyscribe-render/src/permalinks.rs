@@ -498,17 +498,25 @@ pub fn feed_link(site: &dyn Site, feed: &str) -> Vec<u8> {
 /// `get_post_comments_feed_link( $post, $feed )` on `site`.
 pub fn post_comments_feed_link(site: &dyn Site, post: &Post, feed: &str) -> Vec<u8> {
     let links = Permalinks::of(site);
+    let unattached = post.post_type == "attachment" && post.parent == 0;
+    let id = post.id.to_string();
     if !links.pretty() {
-        let key: &[u8] = if post.post_type == "page" {
-            b"page_id"
-        } else {
-            b"p"
+        let key: &[u8] = match post.post_type.as_str() {
+            _ if unattached => b"attachment_id",
+            "page" => b"page_id",
+            _ => b"p",
         };
-        let id = post.id.to_string();
         return hyscribe_phpser::add_query_arg(
             &[(b"feed", Some(feed.as_bytes())), (key, Some(id.as_bytes()))],
             &[&site.home_url()[..], b"/"].concat(),
         );
+    }
+    if unattached {
+        let mut url = [&site.home_url()[..], b"/feed/"].concat();
+        if feed != "rss2" {
+            url.extend_from_slice(format!("{feed}/").as_bytes());
+        }
+        return hyscribe_phpser::add_query_arg(&[(b"attachment_id", Some(id.as_bytes()))], &url);
     }
     // `_get_page_link()` gives the page on the front its own link here.
     let link = link_with_front(site, post, None);

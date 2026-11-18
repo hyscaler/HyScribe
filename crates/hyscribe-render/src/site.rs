@@ -207,6 +207,9 @@ pub struct Request {
     pub search_query: Vec<u8>,
     /// `is_singular()`: the main query's one post is the queried object.
     pub singular: bool,
+    /// `is_attachment()`: an attachment asked for as one, or one without a
+    /// parent; an attached one found by `name` is only a single post.
+    pub attachment: bool,
     /// `is_404()`
     pub not_found: bool,
     /// `is_preview()`

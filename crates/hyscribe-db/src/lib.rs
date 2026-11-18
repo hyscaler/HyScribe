@@ -331,6 +331,17 @@ impl Db {
         self.select(sql).await.map(|posts| posts.into_iter().next())
     }
 
+    /// The attachment named `name`, of any status, the latest first as a
+    /// single post query takes it.
+    pub async fn attachment_by_name(&self, name: &str) -> Result<Option<Post>, DbError> {
+        let mut sql = select_posts(" FROM {prefix}posts WHERE ");
+        sql.push(
+            "post_name = ? AND post_type = 'attachment' ORDER BY post_date DESC, ID DESC LIMIT 1",
+        );
+        sql.bind(Bind::Text(name.to_string()));
+        self.select(sql).await.map(|posts| posts.into_iter().next())
+    }
+
     /// `get_page_by_path()`'s candidates: the pages and attachments of any
     /// status named one of `names`.
     pub async fn named_pages(&self, names: &[Vec<u8>]) -> Result<Vec<Post>, DbError> {

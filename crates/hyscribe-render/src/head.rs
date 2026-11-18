@@ -70,6 +70,10 @@ pub struct Assets {
     pub(crate) state: Vec<(Key, Value)>,
     /// The template was empty, so no skip link is enqueued.
     pub(crate) no_template: bool,
+    /// The duotone presets' custom properties, added to the global styles.
+    pub(crate) global_presets: String,
+    /// What `wp_footer()` prints first of the blocks': duotone filters.
+    pub(crate) footer: Vec<u8>,
 }
 
 impl Assets {
@@ -331,7 +335,10 @@ impl Head<'_> {
             COMMON_CSS,
             None,
         );
-        let global = Style::inline("global-styles", &global);
+        let mut global = Style::inline("global-styles", &global);
+        if !assets.global_presets.is_empty() {
+            global.after.push(assets.global_presets.clone());
+        }
         let emoji = Style::inline("wp-emoji-styles", EMOJI_CSS);
         if assets.variations.is_empty() {
             queue.extend([emoji, library, global]);
@@ -376,7 +383,7 @@ impl Head<'_> {
         };
         let mut out = Vec::new();
         // wp_get_canonical_url()
-        if post.status == "publish" {
+        if crate::attachment::post_status(self.site, post) == "publish" {
             let mut url = self.context.permalink(post);
             if self.request.page >= 2 {
                 url = permalinks::paged(self.site, &url, self.request.page);

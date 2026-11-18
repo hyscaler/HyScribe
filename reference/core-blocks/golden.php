@@ -658,6 +658,23 @@ foreach ( array( array( 1, '' ), array( 2, '' ), array( 1001, '' ), array( 1004,
 		remove_filter( 'wp_get_object_terms', $force_terms );
 	}
 }
+// An attachment page: its previous link goes to its parent, and `get_post( 0 )`
+// is the attachment itself; asked for by name it is no attachment page.
+foreach ( array( 1030 => 1, 1031 => 0, 1032 => 99998, 1033 => 2 ) as $id => $parent ) {
+	wp_cache_set( $id, (object) array( 'ID' => $id, 'post_author' => '1', 'post_date' => '2026-01-01 00:00:00', 'post_date_gmt' => '2026-01-01 00:00:00', 'post_content' => '', 'post_title' => 'Attachment ' . $id, 'post_excerpt' => '', 'post_status' => 'inherit', 'comment_status' => 'closed', 'ping_status' => 'closed', 'post_password' => '', 'post_name' => 'attachment-' . $id, 'to_ping' => '', 'pinged' => '', 'post_modified' => '2026-01-01 00:00:00', 'post_modified_gmt' => '2026-01-01 00:00:00', 'post_content_filtered' => '', 'post_parent' => $parent, 'guid' => '', 'menu_order' => 0, 'post_type' => 'attachment', 'post_mime_type' => 'image/png', 'comment_count' => '0', 'filter' => 'raw' ), 'posts' );
+	foreach ( array( true, false ) as $is_attachment ) {
+		wp_cache_flush_group( 'post-queries' );
+		$GLOBALS['wp_query']                = new WP_Query();
+		$GLOBALS['wp_query']->is_singular   = true;
+		$GLOBALS['wp_query']->is_attachment = $is_attachment;
+		$GLOBALS['post']                    = get_post( $id );
+		foreach ( array_slice( $navigation_blocks, 0, 4 ) as $markup ) {
+			$block = new WP_Block( parse_blocks( $markup )[0], array( 'postId' => $id, 'postType' => 'attachment' ) );
+			$state = array( 'singular' => true, 'attachment' => $is_attachment, 'home' => home_url(), 'date_format' => get_option( 'date_format' ), 'forced' => null );
+			echo 'adjacent', "\t", bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( wp_json_encode( get_post( $id, ARRAY_A ) ) ), "\t", bin2hex( $block->render() ), "\n";
+		}
+	}
+}
 wp_cache_flush_group( 'post-queries' );
 // wp() works on $wp_the_query, which $wp_query must point at again.
 $GLOBALS['wp_query'] = $GLOBALS['wp_the_query'];

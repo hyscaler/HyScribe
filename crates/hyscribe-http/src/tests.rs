@@ -3067,11 +3067,12 @@ async fn listed_pages_match_php() {
 /// which `reference/pages/ttd-list.sh` builds from its database: every
 /// post, page, attachment and archive, searches, feeds, comment pages and
 /// both kinds of front page, by hash, as the fixture's content is not ours
-/// to commit. The known differences name what is not ported: attachment
-/// pages and their redirect to the file, core's shortcodes, duotone, oEmbed,
-/// the RSS block, a post's later enclosures, image loading priorities, the
-/// navigation fallback from a classic menu; and terms of the same name,
-/// whose order MariaDB leaves open (`term-ties`).
+/// to commit. The known differences name what is not ported: core's
+/// shortcodes, oEmbed, the RSS block, a post's later enclosures, the image
+/// loading priorities that follow from shortcodes' images, the player of an
+/// attachment page for audio, the navigation fallback from a classic menu;
+/// and terms of the same name, whose order MariaDB leaves open
+/// (`term-ties`).
 #[tokio::test(flavor = "multi_thread")]
 async fn theme_test_data_pages_match_php() {
     let golden = include_str!("../tests/golden/pages-ttd.tsv");
@@ -3127,6 +3128,49 @@ async fn edited_site_pages_match_php() {
     let drop = "DROP TABLE broken_options";
     sqlx::raw_sql(drop).execute(&mut conn).await.unwrap();
     assert!(site.is_err());
+}
+
+/// The pages of `reference/attachment-page/golden.sh`: attachments by ID
+/// and by name, with attachment pages off and on, over the default install
+/// with the attachments of `reference/attachment-edit/content.sql` and
+/// `reference/attachment-page/extra.sql`, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn attachment_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    for rows in [
+        include_str!("../../../reference/attachment-edit/content.sql"),
+        include_str!("../../../reference/attachment-page/extra.sql"),
+    ] {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(rows))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    let golden = include_str!("../tests/golden/attachment-pages.tsv");
+    // The players of audio and video files need MediaElement.js.
+    let known = ["817", "818", "821", "825"]
+        .map(|id| format!("wp_attachment_pages_enabled=1\t/?attachment_id={id}\tmediaelement\n"))
+        .concat();
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, false, &known).await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 108);
 }
 
 /// Every case of `reference/term-template/golden.sh` over the Theme Test

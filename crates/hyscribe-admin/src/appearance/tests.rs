@@ -182,3 +182,12 @@ fn plugin_paths_are_validated_as_php_s() {
         assert!(!invalid_path(file), "{file}");
     }
 }
+
+/// An `active_plugins` PHP would write back leaves the screen unported.
+#[test]
+fn a_screen_with_plugins_to_repair_is_not_ported() {
+    let canonical = format!("{SITE}/hs-admin/plugins");
+    let request = request(&canonical, "/hs-admin/plugins", &BROWSER);
+    let site = Role("o36bad:administrator");
+    assert_eq!(plugins(&site, "/plugins", &request), None);
+}

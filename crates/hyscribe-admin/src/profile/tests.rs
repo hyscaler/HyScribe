@@ -214,6 +214,9 @@ fn application_passwords_are_read_as_php_s() {
         one(&[name, uuid, "s:7:\"created\";s:1:\"5\";", used, ip]),
         one(&[name, uuid, created, "s:9:\"last_used\";d:1;", ip]),
         one(&[name, uuid, created, used, "s:7:\"last_ip\";i:5;"]),
+        // No creation time, no address.
+        one(&[name, uuid, used, ip]),
+        one(&[name, uuid, created, used]),
         "a:1:{i:0;s:1:\"x\";}".to_string(),
     ] {
         assert!(items(stored.as_bytes()).is_none(), "{stored}");

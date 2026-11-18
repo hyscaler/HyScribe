@@ -419,6 +419,7 @@ impl Role {
             ("h9iconpdf", "site_icon") => b"953",
             ("h9iconnone", "site_icon") => b"954",
             ("h9iconbig", "site_icon") => b"955",
+            ("o36bad", "active_plugins") => b"s:3:\"abc\";",
             ("o36one", "active_plugins") => b"a:1:{i:0;s:19:\"missing/missing.php\";}",
             ("o36two", "active_plugins") => b"a:2:{i:0;s:11:\"one/one.php\";i:1;s:7:\"two.php\";}",
             ("o36path", "active_plugins") => b"a:1:{i:0;s:11:\"../evil.php\";}",

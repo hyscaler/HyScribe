@@ -102,6 +102,8 @@ pub(crate) enum Sanitize {
     Endpoint,
     /// Not ported: a request that has it is answered 501 before its checks.
     NotPorted,
+    /// `check_meta_is_array()` validates it, and it is left as given.
+    IsArray,
     /// The endpoint's own sanitizer, which reads the site.
     Site(fn(&Context, &Value) -> Checked<Value>),
     /// The endpoint's own sanitizer, which reads the other parameters as
@@ -240,6 +242,12 @@ pub(crate) fn has_valid_params(
         .filter_map(|arg| params.get(arg.name).map(|value| (arg, value)));
     for (arg, value) in set {
         let checked = match arg.sanitize {
+            Sanitize::IsArray => {
+                if !matches!(value, Value::Array(_)) {
+                    invalid.0.push((arg.name.into(), None));
+                }
+                continue;
+            }
             Sanitize::Validated(check) => match check(context, params, value) {
                 Err(error) if error.code == NOT_PORTED => return Err(error),
                 checked => checked.map_err(|error| Refusal(Some(error))),
@@ -281,7 +289,7 @@ pub(crate) fn sanitize_params(
                 }
                 Sanitize::TextField => Ok(text(sanitize_text_field(&value.to_php_string()))),
                 Sanitize::Urldecode => Ok(text(urldecode(&value.to_php_string()))),
-                Sanitize::Endpoint | Sanitize::NotPorted => Ok(value.clone()),
+                Sanitize::Endpoint | Sanitize::NotPorted | Sanitize::IsArray => Ok(value.clone()),
                 Sanitize::Nullable if *value == Value::Null => Ok(Value::Null),
                 Sanitize::Site(sanitize) => sanitize(context, value),
                 Sanitize::Params(sanitize) => sanitize(&given, value),

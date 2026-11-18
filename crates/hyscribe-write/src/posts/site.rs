@@ -30,7 +30,9 @@ pub(super) async fn default_status(
         | Kind::GlobalStyles
         | Kind::UserRequest
         | Kind::Navigation
-        | Kind::Block => false,
+        | Kind::Block
+        | Kind::Template
+        | Kind::TemplatePart => false,
     };
     if !supported {
         return Ok("closed".into());
@@ -40,8 +42,7 @@ pub(super) async fn default_status(
 }
 
 /// `wp_delete_object_term_relationships( $object, $taxonomies )`. The
-/// terms port has no post formats or pattern categories, so a post with one
-/// is refused.
+/// terms port has no post formats, so a post with one is refused.
 pub(super) async fn delete_object_terms(
     write: &mut Write<'_>,
     object: u64,
@@ -50,11 +51,10 @@ pub(super) async fn delete_object_terms(
     for &name in taxonomies {
         let terms = write.object_terms(object, name).await?;
         let terms: Vec<TermRef<'_>> = terms.iter().map(|&(id, _)| TermRef::Id(id)).collect();
-        let taxonomy = match name {
-            "category" => Taxonomy::Category,
-            "post_tag" => Taxonomy::PostTag,
-            _ if terms.is_empty() => continue,
-            _ => {
+        let taxonomy = match Taxonomy::named(name) {
+            Some(taxonomy) => taxonomy,
+            None if terms.is_empty() => continue,
+            None => {
                 return Err(Error::Unported(
                     "a post with terms of a taxonomy not ported",
                 ));

@@ -94,6 +94,26 @@ impl Write<'_> {
         Ok(self.count(query).await? > 0)
     }
 
+    /// `wp_filter_wp_template_unique_post_slug()`'s query: whether another
+    /// published or private post of `post_type` in the `wp_theme` term
+    /// named `theme` has the name.
+    pub async fn template_name_used(
+        &mut self,
+        name: &[u8],
+        (post_type, theme): (&str, &[u8]),
+        id: u64,
+    ) -> Result<bool, DbError> {
+        let query = self.sql(
+            "SELECT COUNT(*) FROM {prefix}posts AS p INNER JOIN {prefix}term_relationships AS tr \
+             ON tr.object_id = p.ID INNER JOIN {prefix}term_taxonomy AS tt \
+             ON tt.term_taxonomy_id = tr.term_taxonomy_id INNER JOIN {prefix}terms AS t \
+             ON t.term_id = tt.term_id WHERE p.post_name = ? AND p.post_type = ? AND p.ID != ? \
+             AND p.post_status IN ('publish', 'private') AND tt.taxonomy = 'wp_theme' AND t.name = ?",
+        );
+        let query = query.bind(name).bind(post_type).bind(id).bind(theme);
+        Ok(self.count(query).await? > 0)
+    }
+
     /// `wp_unique_post_slug()` for an attachment: whether another post of
     /// any type has the name.
     pub async fn any_post_name_used(&mut self, name: &[u8], id: u64) -> Result<bool, DbError> {

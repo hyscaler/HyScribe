@@ -37,6 +37,10 @@ pub enum Taxonomy {
     PostFormat,
     /// `wp_theme`, the theme a template or global styles post belongs to.
     WpTheme,
+    /// `wp_pattern_category`, the synced patterns' categories.
+    PatternCategory,
+    /// `wp_template_part_area`.
+    TemplatePartArea,
 }
 
 impl Taxonomy {
@@ -47,7 +51,23 @@ impl Taxonomy {
             Taxonomy::PostTag => "post_tag",
             Taxonomy::PostFormat => "post_format",
             Taxonomy::WpTheme => "wp_theme",
+            Taxonomy::PatternCategory => "wp_pattern_category",
+            Taxonomy::TemplatePartArea => "wp_template_part_area",
         }
+    }
+
+    /// The taxonomy named `name`, if its terms are written as they are;
+    /// post formats are not.
+    pub fn named(name: &str) -> Option<Taxonomy> {
+        [
+            Taxonomy::Category,
+            Taxonomy::PostTag,
+            Taxonomy::WpTheme,
+            Taxonomy::PatternCategory,
+            Taxonomy::TemplatePartArea,
+        ]
+        .into_iter()
+        .find(|taxonomy| taxonomy.name() == name)
     }
 
     /// The post types `_update_post_term_count()` counts of the taxonomy
@@ -55,6 +75,8 @@ impl Taxonomy {
     pub(crate) fn counted(name: &str) -> &'static [&'static str] {
         match name {
             "wp_theme" => &["wp_template", "wp_template_part", "wp_global_styles"],
+            "wp_pattern_category" => &["wp_block"],
+            "wp_template_part_area" => &["wp_template_part"],
             _ => &["post"],
         }
     }

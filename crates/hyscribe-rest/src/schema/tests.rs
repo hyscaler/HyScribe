@@ -39,7 +39,9 @@ fn values_are_checked_as_php_checks_them() {
 #[test]
 fn keywords_not_ported_are_refused() {
     for keyword in UNPORTED {
-        let schema = object([("type", text("string")), (keyword, text("x"))]);
+        // A pattern the byte matcher would read otherwise than PCRE's `u`.
+        let value = if keyword == "pattern" { r"\w" } else { "x" };
+        let schema = object([("type", text("string")), (keyword, text(value))]);
         assert_eq!(
             validate_value_from_schema(&text("a"), &schema, "p"),
             Err(Refusal(None))

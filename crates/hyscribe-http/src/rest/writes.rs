@@ -27,8 +27,8 @@ use hyscribe_write::options::{
     update_option,
 };
 use hyscribe_write::posts::{
-    Context, PostArgs, stick_post, unstick_post, wp_delete_post, wp_insert_post, wp_trash_post,
-    wp_unique_post_slug, wp_update_post,
+    Context, PostArgs, Revisioned, stick_post, unstick_post, wp_create_post_autosave,
+    wp_delete_post, wp_insert_post, wp_trash_post, wp_unique_post_slug, wp_update_post,
 };
 use hyscribe_write::terms::{
     Deletion, Taxonomy, TermArgs, TermError, TermList, TermRef, wp_delete_term, wp_insert_term,
@@ -198,7 +198,13 @@ async fn written(
         false => Outcome::Refused("rest_cannot_delete"),
     };
     match &plan.write {
-        hyscribe_rest::Write::Save(save) => saved(write, save, ctx).await,
+        hyscribe_rest::Write::Save(save) | hyscribe_rest::Write::Autosave(save) => {
+            let slug = slug(write, save).await?;
+            match plan.write {
+                hyscribe_rest::Write::Save(_) => saved(write, save, slug, ctx).await,
+                _ => autosaved(write, save, slug, ctx).await,
+            }
+        }
         hyscribe_rest::Write::Trash(id) => Ok(done(wp_trash_post(write, ctx, *id).await?, *id)),
         hyscribe_rest::Write::Delete(id) => {
             Ok(done(wp_delete_post(write, ctx, *id, true).await?, *id))
@@ -501,10 +507,16 @@ fn fields(save: &Save, slug: Option<&Vec<u8>>, args: &mut PostArgs) {
     args.author = save.author.or(args.author);
     args.parent = save.parent.unwrap_or(args.parent);
     args.menu_order = save.menu_order.unwrap_or(args.menu_order);
+    // Only flat taxonomies are given by name, which `Taxonomy` ports.
+    let tax_input = save.tax_input.iter().filter_map(|(taxonomy, terms)| {
+        Taxonomy::named(taxonomy).map(|taxonomy| (taxonomy, terms.clone()))
+    });
+    args.tax_input = tax_input.collect();
+    args.meta_input.clone_from(&save.meta_input);
 }
 
-/// `create_item()` or `update_item()` from `wp_insert_post()` on.
-async fn saved(write: &mut Write<'_>, save: &Save, ctx: &Context) -> Result<Outcome, Error> {
+/// The slug `save` gives, made unique where the controller does.
+async fn slug(write: &mut Write<'_>, save: &Save) -> Result<Option<Vec<u8>>, Error> {
     let mut slug = save.slug.clone();
     if let (Some(parent), Some(name)) = (save.unique_slug, &slug) {
         let unique = wp_unique_post_slug(
@@ -516,6 +528,37 @@ async fn saved(write: &mut Write<'_>, save: &Save, ctx: &Context) -> Result<Outc
         );
         slug = Some(unique.await?);
     }
+    Ok(slug)
+}
+
+/// The autosaves controller's `create_item()` from its write on.
+async fn autosaved(
+    write: &mut Write<'_>,
+    save: &Save,
+    slug: Option<Vec<u8>>,
+    ctx: &Context,
+) -> Result<Outcome, Error> {
+    let revisioned = Revisioned {
+        title: save.title.clone(),
+        content: save.content.clone(),
+        excerpt: save.excerpt.clone(),
+    };
+    let change = |args: &mut PostArgs| fields(save, slug.as_ref(), args);
+    match wp_create_post_autosave(write, ctx, save.id, &revisioned, &change).await {
+        Ok(id) => Ok(Outcome::Written(id)),
+        Err(Error::Refused("empty_content")) => Ok(Outcome::Refused("empty_content")),
+        Err(Error::InvalidText(last_error)) => Ok(Outcome::InvalidText(last_error)),
+        Err(err) => Err(err),
+    }
+}
+
+/// `create_item()` or `update_item()` from `wp_insert_post()` on.
+async fn saved(
+    write: &mut Write<'_>,
+    save: &Save,
+    slug: Option<Vec<u8>>,
+    ctx: &Context,
+) -> Result<Outcome, Error> {
     let saved = if save.id == 0 {
         let mut args = PostArgs {
             post_type: save.post_type.clone(),
@@ -560,11 +603,15 @@ async fn saved(write: &mut Write<'_>, save: &Save, ctx: &Context) -> Result<Outc
     for (taxonomy, ids) in [
         (Taxonomy::Category, &save.categories),
         (Taxonomy::PostTag, &save.tags),
+        (Taxonomy::PatternCategory, &save.pattern_categories),
     ] {
         if let Some(ids) = ids {
             let terms: Vec<TermRef> = ids.iter().map(|&id| TermRef::Id(id)).collect();
             wp_set_object_terms(write, id, &terms, taxonomy, false).await?;
         }
+    }
+    for (key, value) in &save.meta {
+        update_metadata(write, Meta::Post, id, key, value, &Value::Null).await?;
     }
     Ok(Outcome::Written(id))
 }

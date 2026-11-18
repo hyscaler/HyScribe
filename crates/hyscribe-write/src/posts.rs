@@ -18,6 +18,7 @@ use crate::terms::{
 };
 use crate::{Error, cron};
 
+mod autosave;
 mod date;
 mod hooks;
 mod link;
@@ -25,6 +26,7 @@ mod site;
 mod slug;
 mod trash;
 
+pub use autosave::{Revisioned, wp_create_post_autosave};
 pub use date::checkdate as wp_checkdate;
 pub use trash::{stick_post, unstick_post, wp_delete_post, wp_trash_post, wp_untrash_post};
 
@@ -101,6 +103,12 @@ pub struct PostArgs {
     /// `page_template`: `default`, or empty for none given; the theme's own
     /// templates are not ported.
     pub page_template: Vec<u8>,
+    /// `tax_input`: the terms of a flat taxonomy as `wp_set_post_terms()`
+    /// takes them, slashed; the caller passes only taxonomies whose terms
+    /// the user may assign.
+    pub tax_input: Vec<(Taxonomy, Vec<u8>)>,
+    /// `meta_input`: meta values `update_post_meta()` writes, slashed.
+    pub meta_input: Vec<(&'static str, Value)>,
     /// `guid`: a new attachment's URL; other posts' is their permalink.
     pub guid: Vec<u8>,
 }
@@ -138,6 +146,10 @@ enum Kind {
     Navigation,
     /// `wp_block`, a synced pattern.
     Block,
+    /// `wp_template`, a template the site editor saved.
+    Template,
+    /// `wp_template_part`.
+    TemplatePart,
     /// A new attachment, which only [`wp_insert_attachment`] makes.
     Attachment,
 }
@@ -152,6 +164,8 @@ impl Kind {
             "user_request" => Ok(Kind::UserRequest),
             "wp_navigation" => Ok(Kind::Navigation),
             "wp_block" => Ok(Kind::Block),
+            "wp_template" => Ok(Kind::Template),
+            "wp_template_part" => Ok(Kind::TemplatePart),
             _ => Err(Error::Unported("a post type other than post and page")),
         }
     }
@@ -164,8 +178,9 @@ impl Kind {
     fn taxonomies(self) -> &'static [&'static str] {
         match self {
             Kind::Post => &["category", "post_tag", "post_format"],
-            Kind::GlobalStyles => &["wp_theme"],
             Kind::Block => &["wp_pattern_category"],
+            Kind::Template | Kind::GlobalStyles => &["wp_theme"],
+            Kind::TemplatePart => &["wp_theme", "wp_template_part_area"],
             Kind::Page
             | Kind::Revision
             | Kind::UserRequest
@@ -204,6 +219,18 @@ pub async fn wp_update_post(
     id: u64,
     change: &dyn Fn(&mut PostArgs),
 ) -> Result<u64> {
+    let args = update_args(write, ctx, id, change).await?;
+    wp_insert_post(write, ctx, args).await
+}
+
+/// `wp_update_post()`'s arguments for `wp_insert_post()`: the post's own,
+/// changed by `change`.
+async fn update_args(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    id: u64,
+    change: &dyn Fn(&mut PostArgs),
+) -> Result<PostArgs> {
     let post = existing(write, id).await?;
     let category = if Kind::of(&post.post_type)? == Kind::Post {
         let terms = write.object_terms(id, "category").await?;
@@ -236,6 +263,8 @@ pub async fn wp_update_post(
         import_id: 0,
         edit_date: false,
         page_template: Vec::new(),
+        tax_input: Vec::new(),
+        meta_input: Vec::new(),
         guid: Vec::new(),
     };
     change(&mut args);
@@ -248,7 +277,7 @@ pub async fn wp_update_post(
         args.date = date::Dates::read(write, ctx.now).await?.local_now();
         args.date_gmt = String::new();
     }
-    wp_insert_post(write, ctx, args).await
+    Ok(args)
 }
 
 /// `wp_insert_attachment( $args, $file )` of a new attachment for the file
@@ -624,8 +653,10 @@ async fn insert(
         None => Kind::of(&post_type)?,
     };
     // The types that support the editor, a title and an excerpt.
-    if matches!(kind, Kind::Post | Kind::Block)
-        && !truthy(&args.content)
+    if matches!(
+        kind,
+        Kind::Post | Kind::Block | Kind::Template | Kind::TemplatePart
+    ) && !truthy(&args.content)
         && !truthy(&args.title)
         && !truthy(&args.excerpt)
     {
@@ -759,6 +790,12 @@ async fn insert(
     if kind == Kind::Post {
         let terms: Vec<TermRef<'_>> = category.iter().map(|&term| TermRef::Id(term)).collect();
         wp_set_post_categories(write, id, &terms, false).await?;
+    }
+    for (taxonomy, terms) in &args.tax_input {
+        wp_set_post_terms(write, id, TermList::Text(terms), *taxonomy, false).await?;
+    }
+    for (key, value) in &args.meta_input {
+        update_metadata(write, Meta::Post, id, key, value, &Value::Null).await?;
     }
     if before.is_none() && fields.guid.is_empty() {
         let guid = link::permalink(write, ctx, id, &fields).await?;

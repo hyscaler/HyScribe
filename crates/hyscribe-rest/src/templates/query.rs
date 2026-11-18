@@ -91,7 +91,7 @@ impl Kind {
 }
 
 /// A `WP_Block_Template`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Template {
     pub(crate) id: Vec<u8>,
     pub(crate) theme: Vec<u8>,
@@ -207,7 +207,7 @@ fn file(kind: Kind, slug: &[u8]) -> Option<File> {
     })
 }
 
-fn stylesheet(context: &Context) -> Vec<u8> {
+pub(super) fn stylesheet(context: &Context) -> Vec<u8> {
     context.option("stylesheet").unwrap_or_default()
 }
 
@@ -261,7 +261,7 @@ fn from_file(context: &Context, file: File, kind: Kind) -> Template {
 }
 
 /// `preg_match( '/(author|page|single|tag|category|taxonomy)-(.+)/' )`.
-fn names_an_entity(slug: &[u8]) -> bool {
+pub(super) fn names_an_entity(slug: &[u8]) -> bool {
     (0..slug.len()).any(|at| {
         let rest = slug.get(at..).unwrap_or_default();
         ["author", "page", "single", "tag", "category", "taxonomy"]
@@ -390,12 +390,19 @@ pub(crate) fn templates(
         &["publish"]
     };
     let theme = stylesheet(context);
-    let posts = theme_posts(context, kind, &theme)
+    // A query of one post (`p`) is singular, which `WP_Query` gives no
+    // taxonomy query.
+    let single = id.is_some_and(|id| id != 0);
+    let posts = context.site.posts_of_type(kind.name()).into_iter();
+    let posts = posts
+        .filter(|post| single || has_term(context, post, "wp_theme", &theme))
         .filter(|post| statuses.contains(&post.status.as_str()))
         .filter(|post| names.is_empty() || names.contains(&post.name))
-        .filter(|post| id.is_none_or(|id| id == 0 || post.id == id))
+        .filter(|post| !single || id == Some(post.id))
         .filter(|post| match (&query.area, kind) {
-            (Some(area), Kind::Part) => has_term(context, post, "wp_template_part_area", area),
+            (Some(area), Kind::Part) if !single => {
+                has_term(context, post, "wp_template_part_area", area)
+            }
             _ => true,
         })
         .take(limit);

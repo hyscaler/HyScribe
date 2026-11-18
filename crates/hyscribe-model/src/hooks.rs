@@ -10,5 +10,16 @@ pub fn apply_filters<T>(_hook: &str, value: T, _args: &[&dyn Any]) -> T {
     value
 }
 
+/// The actions fired, by name, for tests to read.
+#[cfg(feature = "hook-log")]
+pub static FIRED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
 /// `do_action( $hook, ...$args )`.
-pub fn do_action(_hook: &str, _args: &[&dyn Any]) {}
+#[cfg_attr(not(feature = "hook-log"), allow(unused_variables))]
+pub fn do_action(hook: &str, _args: &[&dyn Any]) {
+    #[cfg(feature = "hook-log")]
+    FIRED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(hook.to_string());
+}

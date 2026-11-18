@@ -167,10 +167,10 @@ pub(super) async fn transition(
     let crosses_publish = new != old && (new == "publish") != (old == "publish");
     // _update_term_count_on_transition_post_status().
     if crosses_publish {
-        for taxonomy in kind.taxonomies() {
-            let terms = write.object_terms(id, taxonomy).await?;
+        for name in kind.taxonomies() {
+            let terms = write.object_terms(id, name).await?;
             let tt_ids: Vec<u64> = terms.into_iter().map(|(_, tt_id)| tt_id).collect();
-            crate::terms::update_term_count(write, &tt_ids, taxonomy).await?;
+            crate::terms::update_term_count(write, &tt_ids, name).await?;
         }
     }
     // _wp_auto_add_pages_to_menu().

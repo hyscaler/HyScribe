@@ -1,0 +1,63 @@
+# The rows PHP WordPress writes for the action rest-templates-update (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-18 17:23:18 to 2026-11-18 17:23:18 UTC.
+# %wp_posts:1% is 711.
+# %wp_posts:2% is 712.
+# %wp_posts:3% is 713.
+# %wp_posts:4% is 714.
+# %wp_posts:5% is 715.
+# %wp_posts:6% is 716.
+# %wp_posts:7% is 717.
+# %wp_posts:8% is 718.
+# %wp_posts:9% is 719.
+# %wp_posts:10% is 721.
+# %wp_posts:11% is 722.
+# %wp_posts:12% is 723.
+# %wp_posts:13% is 724.
+# %wp_posts:14% is 725.
+# %wp_posts:15% is 731.
+# %wp_posts:16% is 732.
+# %wp_posts:17% is 741.
+# %wp_posts:18% is 742.
+# %wp_posts:19% is 743.
+# %wp_posts:20% is 751.
+# %wp_posts:21% is 760.
+# %wp_posts:22% is 768.
+# %wp_postmeta:1% is 711.
+# %wp_postmeta:2% is 712.
+# %wp_terms:1% is 711.
+# %wp_terms:2% is 712.
+# %wp_terms:3% is 713.
+# %wp_terms:4% is 714.
+# %wp_terms:5% is 715.
+# %wp_term_taxonomy:1% is 711.
+# %wp_term_taxonomy:2% is 712.
+# %wp_term_taxonomy:3% is 713.
+# %wp_term_taxonomy:4% is 714.
+# %wp_term_taxonomy:5% is 715.
+wp_posts	%wp_posts:1%	~	post_content	<!-- wp:template-part {"slug":"header"} /-->\n\n<!-- wp:paragraph -->\n<p>Custom index -- with "quotes" &amp; <em>tags</em></p>\n<!-- /wp:paragraph -->\n\n<!-- wp:pattern {"slug":"twentytwentyfive/hidden-404"} /-->\n\n<!-- wp:template-part {"slug":"footer","theme":"twentytwentyfive"} /-->	<!-- wp:paragraph -->\n<p>Changed</p>\n<!-- /wp:paragraph -->
+wp_posts	%wp_posts:1%	~	post_modified	2026-11-03 11:00:00	%now%
+wp_posts	%wp_posts:1%	~	post_modified_gmt	2026-11-03 11:00:00	%now%
+wp_posts	%wp_posts:1%	~	post_title	Index	Index again
+wp_posts	%wp_posts:22%	+	ID	%wp_posts:22%
+wp_posts	%wp_posts:22%	+	comment_count	0
+wp_posts	%wp_posts:22%	+	comment_status	closed
+wp_posts	%wp_posts:22%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:22%
+wp_posts	%wp_posts:22%	+	menu_order	0
+wp_posts	%wp_posts:22%	+	ping_status	closed
+wp_posts	%wp_posts:22%	+	pinged	
+wp_posts	%wp_posts:22%	+	post_author	1
+wp_posts	%wp_posts:22%	+	post_content	<!-- wp:paragraph -->\n<p>Changed</p>\n<!-- /wp:paragraph -->
+wp_posts	%wp_posts:22%	+	post_content_filtered	
+wp_posts	%wp_posts:22%	+	post_date	%now%
+wp_posts	%wp_posts:22%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:22%	+	post_excerpt	My index
+wp_posts	%wp_posts:22%	+	post_mime_type	
+wp_posts	%wp_posts:22%	+	post_modified	%now%
+wp_posts	%wp_posts:22%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:22%	+	post_name	%wp_posts:1%-revision-v1
+wp_posts	%wp_posts:22%	+	post_parent	%wp_posts:1%
+wp_posts	%wp_posts:22%	+	post_password	
+wp_posts	%wp_posts:22%	+	post_status	inherit
+wp_posts	%wp_posts:22%	+	post_title	Index again
+wp_posts	%wp_posts:22%	+	post_type	revision
+wp_posts	%wp_posts:22%	+	to_ping	

@@ -38,6 +38,8 @@ $cases = array(
 	array( array( 'type' => 'string', 'minLength' => 2 ), array( 'a', 'ab', 'é' ) ),
 	array( array( 'type' => 'string', 'minLength' => 1 ), array( '' ) ),
 	array( array( 'type' => 'string', 'maxLength' => 2 ), array( 'abc', 'éé', 'ééé' ) ),
+	array( array( 'type' => 'string', 'minLength' => 1, 'pattern' => '[a-zA-Z0-9_\%-]+' ), array( 'index', 'bad slug', '!!!', '', 'é', "\xff1", 'a%b', 5 ) ),
+	array( array( 'type' => 'string', 'pattern' => 'b[0-9]c|zz' ), array( 'ab1c', 'b1', 'xzzy', 'B1C' ) ),
 	array( array( 'type' => 'string', 'maxLength' => 1 ), array( 'ab' ) ),
 	array( array( 'type' => 'array' ), array( array( 1, 2 ), array( 'a' => 1 ), 'a,b c', '', 5, null, true ) ),
 	array( array( 'type' => 'array', 'items' => array( 'type' => 'integer' ) ), array( array( '1', '2' ), array( '1', 'x' ), '3, 4', array( 5 => '7' ) ) ),

@@ -401,6 +401,21 @@ impl Uploads {
         Ok(generated)
     }
 
+    /// `wp_getimagesize()` of the file `file` within the uploads folder,
+    /// read up to the image byte limit: `None` for a file that is missing,
+    /// unreadable or not an image.
+    pub(crate) fn image_size(&self, file: &str) -> Option<(u32, u32)> {
+        use std::io::Read as _;
+        let mut bytes = Vec::new();
+        let opened = std::fs::File::open(self.dir.join(file)).ok()?;
+        opened
+            .take(self.limits.bytes)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        let size = hyscribe_image::header::getimagesize(&bytes)?;
+        Some((size.width, size.height))
+    }
+
     /// `add_attachment`, once the attachment's action is committed.
     pub(crate) fn added(&self, id: u64) {
         self.hooks.add_attachment(id);

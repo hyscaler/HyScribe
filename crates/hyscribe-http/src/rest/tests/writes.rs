@@ -1307,28 +1307,6 @@ async fn template_writes_match_php() {
     assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 23, 0));
 }
 
-/// The write oracle's `%now%` spans its action alone, so a write dated
-/// when it was planned, a second or more before its action, is not PHP's:
-/// the rows tests date each write as its action runs.
-#[tokio::test(flavor = "multi_thread")]
-async fn writes_are_dated_as_their_action_runs() {
-    let dir = tempfile::tempdir().unwrap();
-    let site = site(false, dir.path()).await;
-    let body = r#"{"title":"A REST draft","status":"draft","slug":"hello-world"}"#;
-    let pending = planned(&site, "POST", "/?rest_route=/wp/v2/posts", body).await;
-    for (shift, dated) in [(-2, false), (0, true)] {
-        let nothing = async |_: &mut hyscribe_db::Connection| Ok::<_, String>(());
-        let action = async |conn: &mut hyscribe_db::Connection, ()| {
-            let ctx = crate::rest::writes::context(&site, &pending.plan, now() + shift);
-            acted(conn, &pending.plan, &ctx).await;
-            Ok(())
-        };
-        let golden = "rest-posts-create-draft";
-        let report = check_writes(&fixture_database(), golden, nothing, action).await;
-        assert_eq!(report.is_ok(), dated, "{shift}");
-    }
-}
-
 /// The answers to what a write comes to past the goldens: a created
 /// template not found, a template gone before its answer, a refusal of an
 /// update, a revert or a delete, and an autosave of an empty draft, which

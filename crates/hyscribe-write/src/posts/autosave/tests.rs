@@ -102,6 +102,14 @@ async fn autosaves_are_one_per_user() {
         crate::posts::wp_update_post(w, &admin(), id, &edited)
             .await
             .unwrap();
+        // The administrator's own autosave, which is not user 2's.
+        let theirs = Revisioned {
+            title: Some(b"Theirs".to_vec()),
+            ..Revisioned::default()
+        };
+        let change = |args: &mut PostArgs| theirs.set(args);
+        let theirs = wp_create_post_autosave(w, &admin(), id, &theirs, &change).await;
+        let theirs = theirs.unwrap();
         let notes = text(r#"[{"content":"A note","id":"1"}]"#);
         add_metadata(w, Meta::Post, id, "footnotes", &notes, false)
             .await
@@ -118,7 +126,7 @@ async fn autosaves_are_one_per_user() {
                 .unwrap()
         };
         let autosave = save("Published", Some("Words")).await;
-        assert_ne!(autosave, id);
+        assert!(autosave != id && autosave != theirs);
         assert_eq!(save("Published", Some("  Words ")).await, autosave);
         assert_eq!(save("Published", None).await, autosave);
         assert_eq!(save("Renamed", None).await, autosave);

@@ -9,7 +9,7 @@
 # refuses them by default), updates and status changes, trashes and
 # deletes, with the checks of the permission checks, create_item(),
 # update_item() and wp_allow_comment(), and the arguments HyScribe does not
-# port (author_ip, notes, meta).
+# port (none: author_ip, notes and meta are in comment-notes.list).
 POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"A REST comment"}
 POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"<p onclick=\"x()\">Hi</p> <a href=\"https://example.test/\">link</a>","author_name":"Named <b>one</b>","author_email":"named@example.test","author_url":"https://named.example.test/","date":"2026-01-02T03:04:05","parent":1}
 POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Held","status":"hold","date_gmt":"2026-01-02T03:04:05Z"}
@@ -25,6 +25,19 @@ POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Hi, this is 
 POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Typed","type":"pingback"}
 POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Note","type":"note"}
 POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Addressed","author_ip":"10.0.0.1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Same address","author_ip":"127.0.0.1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Six","author_ip":"2001:db8::1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Mapped","author_ip":"::ffff:10.0.0.1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Not an address","author_ip":"10.0.0"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Not an address","author_ip":"999.1.1.1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Padded","author_ip":"010.001.1.1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Empty","author_ip":""}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Listed","author_ip":["10.0.0.1"]}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Long six","author_ip":"2001:0db8:0000:0000:0000:0000:0000:0001"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Bad six","author_ip":"2001:db8:::1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Bad six","author_ip":"12345::1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Whole","author_ip":"::"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Spaced","author_ip":" 10.0.0.1"}
 POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Bad email","author_email":"not-an-email"}
 POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":{"raw":"Raw content"},"author_name":"","author_email":""}
 POST	/?rest_route=/wp/v2/comments	form,restore	post=1&content=Form+comment
@@ -37,6 +50,10 @@ PATCH	/?rest_route=/wp/v2/comments/1	json,restore	{"post":2,"author_url":"https:
 PATCH	/?rest_route=/wp/v2/comments/1	json,restore	{"post":999}
 POST	/?rest_route=/wp/v2/comments/1	json,restore	{"author":702,"date":"2026-03-04T05:06:07"}
 POST	/?rest_route=/wp/v2/comments/1	json,restore	{"type":"note"}
+POST	/?rest_route=/wp/v2/comments/1	json,restore	{"author_ip":"10.0.0.2"}
+POST	/?rest_route=/wp/v2/comments/1	json,restore	{"author_ip":"127.0.0.1","content":"Same"}
+POST	/?rest_route=/wp/v2/comments/1	json,restore	{"author_ip":"nope"}
+POST	/?rest_route=/wp/v2/comments/2	json,restore	{"author_ip":"10.0.0.3","status":"approve"}
 POST	/?rest_route=/wp/v2/comments/1	json,restore	{"content":""}
 POST	/?rest_route=/wp/v2/comments/1	json,restore	{}
 POST	/?rest_route=/wp/v2/comments/2	json,restore	{"status":"approve"}

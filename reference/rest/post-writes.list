@@ -5,8 +5,8 @@
 # post-writes.sql leaves it: each request sent with its body as every
 # identity, the database put back after each. Creates, updates (POST, PUT,
 # PATCH, a form, `_method`), trashes and deletes, with the checks of
-# prepare_item_for_database(), a JSON body PHP refuses, and the arguments a
-# client sends that HyScribe does not port (meta).
+# prepare_item_for_database(), a JSON body PHP refuses, and `meta`; the
+# editor-meta list has the footnotes saves.
 POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"A REST draft","content":"<!-- wp:paragraph -->\n<p>Drafted</p>\n<!-- /wp:paragraph -->","status":"draft"}
 POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Published","status":"publish","excerpt":"Short","slug":"rest slug","comment_status":"closed","ping_status":"closed","categories":[1],"tags":[],"date":"2026-01-02T03:04:05"}
 POST	/?rest_route=/wp/v2/posts	json,restore	{}

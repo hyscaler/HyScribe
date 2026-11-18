@@ -1,0 +1,44 @@
+# The rows PHP WordPress writes for the action editor-meta-pattern (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-18 19:48:49 to 2026-11-18 19:48:49 UTC.
+# %wp_posts:1% is 9701.
+# %wp_posts:2% is 9702.
+# %wp_posts:3% is 9703.
+# %wp_posts:4% is 9704.
+# %wp_posts:5% is 9705.
+# %wp_posts:6% is 9706.
+# %wp_posts:7% is 9707.
+# %wp_posts:8% is 9718.
+# %wp_postmeta:1% is 9701.
+# %wp_postmeta:2% is 9702.
+# %wp_postmeta:3% is 9703.
+# %wp_postmeta:4% is 9733.
+wp_postmeta	%wp_postmeta:3%	~	meta_value	[{"id":"p1","content":"Pattern note"}]	[{"id":"p1","content":"Pattern new"}]
+wp_postmeta	%wp_postmeta:4%	+	meta_id	%wp_postmeta:4%
+wp_postmeta	%wp_postmeta:4%	+	meta_key	footnotes
+wp_postmeta	%wp_postmeta:4%	+	meta_value	[{"id":"p1","content":"Pattern new"}]
+wp_postmeta	%wp_postmeta:4%	+	post_id	%wp_posts:8%
+wp_posts	%wp_posts:7%	~	post_modified	2026-11-10 15:00:00	%now%
+wp_posts	%wp_posts:7%	~	post_modified_gmt	2026-11-10 15:00:00	%now%
+wp_posts	%wp_posts:8%	+	ID	%wp_posts:8%
+wp_posts	%wp_posts:8%	+	comment_count	0
+wp_posts	%wp_posts:8%	+	comment_status	closed
+wp_posts	%wp_posts:8%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:8%
+wp_posts	%wp_posts:8%	+	menu_order	0
+wp_posts	%wp_posts:8%	+	ping_status	closed
+wp_posts	%wp_posts:8%	+	pinged	
+wp_posts	%wp_posts:8%	+	post_author	1
+wp_posts	%wp_posts:8%	+	post_content	<!-- wp:paragraph -->\n<p>Reusable.</p>\n<!-- /wp:paragraph -->
+wp_posts	%wp_posts:8%	+	post_content_filtered	
+wp_posts	%wp_posts:8%	+	post_date	%now%
+wp_posts	%wp_posts:8%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:8%	+	post_excerpt	
+wp_posts	%wp_posts:8%	+	post_mime_type	
+wp_posts	%wp_posts:8%	+	post_modified	%now%
+wp_posts	%wp_posts:8%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:8%	+	post_name	%wp_posts:7%-revision-v1
+wp_posts	%wp_posts:8%	+	post_parent	%wp_posts:7%
+wp_posts	%wp_posts:8%	+	post_password	
+wp_posts	%wp_posts:8%	+	post_status	inherit
+wp_posts	%wp_posts:8%	+	post_title	Reusable
+wp_posts	%wp_posts:8%	+	post_type	revision
+wp_posts	%wp_posts:8%	+	to_ping	

@@ -1,0 +1,24 @@
+# The rows PHP WordPress writes for the action rest-notes-create (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-18 19:49:25 to 2026-11-18 19:49:25 UTC.
+# %wp_comments:1% is 10.
+# %wp_comments:2% is 11.
+# %wp_comments:3% is 12.
+# %wp_comments:4% is 13.
+# %wp_comments:5% is 14.
+# %wp_commentmeta:1% is 10.
+wp_comments	%wp_comments:5%	+	comment_ID	%wp_comments:5%
+wp_comments	%wp_comments:5%	+	comment_agent	
+wp_comments	%wp_comments:5%	+	comment_approved	1
+wp_comments	%wp_comments:5%	+	comment_author	admin
+wp_comments	%wp_comments:5%	+	comment_author_IP	127.0.0.1
+wp_comments	%wp_comments:5%	+	comment_author_email	admin@default-install.test
+wp_comments	%wp_comments:5%	+	comment_author_url	http://default-install.test
+wp_comments	%wp_comments:5%	+	comment_content	A new note
+wp_comments	%wp_comments:5%	+	comment_date	%now%
+wp_comments	%wp_comments:5%	+	comment_date_gmt	%now%
+wp_comments	%wp_comments:5%	+	comment_karma	0
+wp_comments	%wp_comments:5%	+	comment_parent	0
+wp_comments	%wp_comments:5%	+	comment_post_ID	1
+wp_comments	%wp_comments:5%	+	comment_type	note
+wp_comments	%wp_comments:5%	+	user_id	1
+wp_posts	1	~	comment_count	1	2

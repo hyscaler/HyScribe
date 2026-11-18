@@ -331,3 +331,34 @@ fn screen_options_without_help() {
     assert!(html.contains("id=\"show-settings-link\""));
     assert!(!html.contains("id=\"contextual-help-link\""));
 }
+
+/// Chromium's version is the digits after the first `Chrome/` with any,
+/// cast as PHP casts them.
+#[test]
+fn chromium_versions_are_php_s() {
+    let version = |agent: &str| chromium_version(agent.as_bytes());
+    assert_eq!(
+        version("Mozilla/5.0 Chrome/137.0.0.0 Safari/537.36"),
+        Some(137)
+    );
+    assert_eq!(version("Chrome/x Chrome/140.1"), Some(140));
+    assert_eq!(version("Chrome/ Chrome/"), None);
+    assert_eq!(version("Chrome/"), None);
+    assert_eq!(version("Chromium/137"), None);
+    assert_eq!(version(""), None);
+    assert_eq!(version("Chrome/007"), Some(7));
+    assert_eq!(version("Chrome/99999999999999999999999"), Some(i64::MAX));
+}
+
+/// A host of `localhost` or under it is a secure context, whatever its
+/// port or case; a name only containing it is not.
+#[test]
+fn localhost_is_a_secure_context() {
+    assert!(localhost("http://localhost:8081"));
+    assert!(localhost("http://LOCALHOST"));
+    assert!(localhost("http://site.localhost:80"));
+    assert!(localhost("http://:localhost"));
+    assert!(!localhost("http://localhost.example.test"));
+    assert!(!localhost("http://127.0.0.1:8081"));
+    assert!(!localhost("http://"));
+}

@@ -376,6 +376,23 @@ async fn logged_in_users_are_let_in() {
         let response = get(&site, path, "127.0.0.1:8081", &auth).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
     }
+    // Updates is refused as PHP refuses it where no one may update, with or
+    // without an action.
+    for path in [
+        "/hs-admin/update-core",
+        "/hs-admin/update-core?action=upgrade-core",
+    ] {
+        let response = get(&site, path, "127.0.0.1:8081", &cookies).await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
+        let page = page_of(response).await;
+        let row = list
+            .lines()
+            .find(|l| l.starts_with("default\tupdate-core.php\tadministrator\t"))
+            .unwrap();
+        let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+        let php = String::from_utf8(php).unwrap();
+        assert_eq!(page, php.strip_prefix("403\t").unwrap(), "{path}");
+    }
     // Add User, as PHP showed it.
     let page = page_of(get(&site, "/hs-admin/user-new", "127.0.0.1:8081", &cookies).await).await;
     let php = edit_golden("u3\tuser-new.php\tadministrator\t");
@@ -1017,7 +1034,7 @@ async fn refusals() {
     .unwrap()
     .unwrap();
     assert_eq!(users.status(), StatusCode::FORBIDDEN);
-    // Over HTTPS the profile offers application passwords, not ported.
+    // Over HTTPS the profile is served as over HTTP.
     let profile = tokio::task::spawn_blocking({
         let (site, handle) = (Arc::clone(&site), handle.clone());
         move || {
@@ -1035,8 +1052,9 @@ async fn refusals() {
         }
     })
     .await
+    .unwrap()
     .unwrap();
-    assert!(profile.is_none());
+    assert_eq!(profile.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let profile = tokio::task::spawn_blocking({
         let (site, handle) = (Arc::clone(&site), handle.clone());
         move || {
@@ -1090,15 +1108,25 @@ async fn refusals() {
     .await
     .unwrap();
     assert_eq!(conflict, StatusCode::CONFLICT);
-    // Editing a user needs `edit_users`, adding one `create_users`; over
-    // HTTPS the form offers application passwords.
+    // Editing a user needs `edit_users`, adding one `create_users`; the
+    // Updates screen is for those who may update, which no user may.
     for (path, https, status) in [
         (
             "/hs-admin/user-edit?user_id=1",
             false,
             Some(StatusCode::INTERNAL_SERVER_ERROR),
         ),
-        ("/hs-admin/user-edit?user_id=1", true, None),
+        (
+            "/hs-admin/user-edit?user_id=1",
+            true,
+            Some(StatusCode::INTERNAL_SERVER_ERROR),
+        ),
+        ("/hs-admin/update-core", false, Some(StatusCode::FORBIDDEN)),
+        (
+            "/hs-admin/update-core?action=upgrade-core",
+            false,
+            Some(StatusCode::FORBIDDEN),
+        ),
         ("/hs-admin/user-new", false, Some(StatusCode::FORBIDDEN)),
         ("/hs-admin/user-new?update[]=add", false, None),
         ("/hs-admin/themes?broken[]=1", false, None),

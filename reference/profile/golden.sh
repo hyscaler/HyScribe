@@ -6,7 +6,7 @@
 # crates/hyscribe-admin/tests/golden/profile.tsv, the generated password
 # masked as %password%:
 #   variant?query<TAB>role<TAB>hex(page)
-# A refusal is kept as 403<TAB>page and a redirect as 302<TAB>location. Masks
+# The ssl variants are served with X-Forwarded-Proto: https. A refusal is kept as 403<TAB>page and a redirect as 302<TAB>location. Masks
 # as reference/admin-page/golden.sh. Start from a fresh db.sh up, then
 # php.sh up, and take both down after.
 set -euo pipefail
@@ -16,6 +16,8 @@ BASE="${HYSCRIBE_PHP_URL:-http://127.0.0.1:8081}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/crates/hyscribe-admin/tests/golden/profile.tsv"
 MU=/var/www/html/wp-content/mu-plugins
+CHROME='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
+CHROME136='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
 TMP=$(mktemp)
 NONCES=$(mktemp)
 cleanup() {
@@ -31,7 +33,16 @@ actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts update-user
   $actions > "$NONCES"
 record() {
   : > "$TMP"
-  status=$(curl -s -o "$TMP" -D "$TMP.head" -w '%{http_code}' -b "hyscribe_role=$2; hyscribe_variant=${1%%\?*}" "$BASE/wp-admin/profile.php$3")
+  # The `ssl` variants arrive as if through a TLS proxy.
+  proto=http
+  case "$1" in ssl*) proto=https ;; esac
+  # The chrome variants send Chromium 137's User-Agent, chrome136 the one
+  # before isolation, and the localhost variants the Host of a secure context.
+  agent='curl/8'
+  case "$1" in *chrome136) agent="$CHROME136" ;; *chrome) agent="$CHROME" ;; esac
+  host="127.0.0.1:8081"
+  case "$1" in localhost*) host="localhost:8081" ;; esac
+  status=$(curl -s -o "$TMP" -D "$TMP.head" -w '%{http_code}' -A "$agent" -H "Host: $host" -H "X-Forwarded-Proto: $proto" -b "hyscribe_role=$2; hyscribe_variant=${1%%\?*}" "$BASE/wp-admin/profile.php$3")
   case "$status" in
     200) ;;
     302) printf '302\t%s' "$(grep -i '^location:' "$TMP.head" | cut -d' ' -f2 | tr -d '\r')" > "$TMP" ;;
@@ -57,5 +68,16 @@ for variant in options pending caps sessions1 sessions2 noavatars; do
   record "$variant" administrator ''
 done
 record options subscriber ''
+# Over HTTPS, application passwords are on offer.
+for role in administrator editor author contributor subscriber; do
+  record ssl "$role" ''
+done
+for variant in sslapps1 sslapps3 sslhidden sslhiddenall sslhiddenempty sslsessions2; do
+  record "$variant" administrator ''
+done
+record sslapps3 subscriber ''
+for variant in sslchrome sslchrome136 localhost localhostchrome; do
+  record "$variant" administrator ''
+done
 rm -f "$TMP.head"
 wc -l "$OUT"

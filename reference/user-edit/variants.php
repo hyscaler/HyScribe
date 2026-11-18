@@ -40,6 +40,45 @@ $hyscribe_meta = array(
 		606 => array( 'wp_capabilities' => array( 'administrator' => true ) ),
 	),
 );
+// The u3ssl variants are served over HTTPS, which offers application
+// passwords: user 601 has two, user 1 has one.
+$hyscribe_meta['u3sslapps'] = array(
+	601 => array(
+		'_application_passwords' => array(
+			array(
+				'uuid'      => '55555555-5555-4555-8555-555555555555',
+				'app_id'    => '',
+				'name'      => 'Tablet',
+				'password'  => 'x',
+				'created'   => 1700000000,
+				'last_used' => 1732000000,
+				'last_ip'   => '2001:db8::1',
+			),
+			array(
+				'uuid'      => '66666666-6666-4666-8666-666666666666',
+				'app_id'    => '',
+				'name'      => 'Script',
+				'password'  => 'y',
+				'created'   => 1731974400,
+				'last_used' => null,
+				'last_ip'   => null,
+			),
+		),
+	),
+	1   => array(
+		'_application_passwords' => array(
+			array(
+				'uuid'      => '77777777-7777-4777-8777-777777777777',
+				'app_id'    => '',
+				'name'      => 'Admin app',
+				'password'  => 'z',
+				'created'   => 1700000000,
+				'last_used' => null,
+				'last_ip'   => null,
+			),
+		),
+	),
+);
 $hyscribe_variant = $_COOKIE['hyscribe_variant'] ?? '';
 add_filter(
 	'user_has_cap',

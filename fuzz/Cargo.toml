@@ -262,6 +262,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "chromium_version"
+path = "fuzz_targets/chromium_version.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "admin_actions"
 path = "fuzz_targets/admin_actions.rs"
 test = false

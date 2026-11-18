@@ -437,7 +437,7 @@ async fn upload_routes_match_php() {
             site = uploading(sessions.path(), uploads.path()).await;
         }
     }
-    assert_eq!((matched, unported), (6 * 34 - 3 * 2, 3 * 2));
+    assert_eq!((matched, unported), (6 * 49 - 3 * 2, 3 * 2));
 }
 
 /// An upload's plan is written by `rest::uploads`, never by `act()`.
@@ -551,8 +551,8 @@ async fn uploads_stop_short() {
         format!("{rest}\traw,type=image/jpeg,md5\tsmall.jpg\t-"),
         format!("{rest}\trestfile,part=other\tsmall.jpg\t-"),
         format!("{rest}\trestfile,kind=image/x-unknown\tsmall.jpg\t-"),
-        format!("{rest}\traw,type=image/jpeg\tbig.jpg\t-"),
-        format!("{rest}\traw,type=image/jpeg\torient-6.jpg\t-"),
+        format!("{rest}\traw,type=text/plain\tnotes.txt\t-"),
+        format!("{rest}\traw,type=image/jpeg\tfake.jpg\t-"),
         format!("{async_upload}\tform,nonce\tnotes.txt\tshort=1"),
         format!("{media_new}\tform,nonce\tnotes.txt\thtml-upload=Upload"),
     ] {
@@ -608,6 +608,29 @@ async fn uploads_stop_short() {
     let (status, refused) = sent_case(&shadow, &raw, admin).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(refused.contains("\"code\":\"wp_die\""), "{refused}");
+    // A scaled image's missing sizes read its original from the uploads: a
+    // site without an uploads folder cannot.
+    let scaled = format!("{rest}\traw,type=image/jpeg\tbig.jpg\t-");
+    let (status, json) = sent_case(&site, &scaled, admin).await;
+    assert_eq!(status, StatusCode::CREATED, "{json}");
+    let id = json.split_once("\"id\":").unwrap().1;
+    let id = id.split(',').next().unwrap();
+    let route = format!("/?rest_route=/wp/v2/media/{id}&context=edit&_fields=missing_image_sizes");
+    let missing = |site: &Arc<Site>| {
+        let request = axum::http::Request::builder()
+            .uri(&route)
+            .header(header::HOST, "127.0.0.1:8081")
+            .header(header::COOKIE, &admin.0)
+            .header("x-wp-nonce", &admin.1.0)
+            .body(Body::empty())
+            .unwrap();
+        router(Arc::clone(site)).oneshot(request)
+    };
+    assert_eq!(missing(&site).await.unwrap().status(), StatusCode::OK);
+    let without = missing(&bare).await.unwrap();
+    assert_eq!(without.status(), StatusCode::NOT_IMPLEMENTED);
+    emptied(uploads.path());
+    reset().await;
     // An insert, then the metadata, that the database refuses.
     let refuse = |table: &str, what: &str| {
         format!(

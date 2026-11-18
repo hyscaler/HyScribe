@@ -134,6 +134,21 @@ async fn uploads_write_php_s_rows() {
             ("orient-6.jpg", "orient-6.jpg"),
             How::Media(0),
         ),
+        (
+            "upload-async-scaled-rotated",
+            ("big-orient-6.jpg", "big-orient-6.jpg"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-scaled-png",
+            ("big.png", "big.png"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-edge",
+            ("edge-2560.jpg", "edge-2560.jpg"),
+            How::Media(0),
+        ),
         ("upload-async-iptc", ("iptc.jpg", "iptc.jpg"), How::Media(0)),
         ("upload-async-gif", ("anim.gif", "anim.gif"), How::Media(0)),
         (
@@ -150,6 +165,32 @@ async fn uploads_write_php_s_rows() {
             "upload-rest-raw",
             ("photo.jpg", "photo.jpg"),
             How::Rest(false, Upload::default()),
+        ),
+        (
+            "upload-rest-scaled",
+            ("big.jpg", "big.jpg"),
+            How::Rest(false, Upload::default()),
+        ),
+        (
+            "upload-rest-rotated",
+            ("orient-6.jpg", "orient-6.jpg"),
+            How::Rest(false, Upload::default()),
+        ),
+        (
+            "upload-rest-scaled-rotated",
+            ("big-orient-3.jpg", "big-orient-3.jpg"),
+            How::Rest(false, Upload::default()),
+        ),
+        (
+            "upload-rest-form-scaled",
+            ("big-rgba.png", "big-rgba.png"),
+            How::Rest(
+                true,
+                Upload {
+                    title: Some(b"Big form".to_vec()),
+                    ..Upload::default()
+                },
+            ),
         ),
         (
             "upload-rest-raw-given",

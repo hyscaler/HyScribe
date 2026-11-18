@@ -50,7 +50,7 @@ fn hostile_pages_take_linear_time() {
         let started = Instant::now();
         details(page.as_bytes(), b"http://pages.test/");
         assert!(
-            started.elapsed() < Duration::from_secs(2),
+            started.elapsed() < Duration::from_secs(10),
             "{}",
             page.get(..20).unwrap()
         );

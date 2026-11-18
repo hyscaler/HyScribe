@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use hyscribe_phpser::bin2hex;
+use hyscribe_testkit::{hs_admin_page, unhex};
+
 use super::*;
+use crate::editor::blocks::{bindings_sources, block_categories, server_block_settings};
+use crate::tests::first_difference;
 
 /// The administrator's redirects and refusals of
 /// `reference/site-editor/golden.sh`, as PHP answered them; the HTTP route
@@ -25,9 +30,47 @@ fn redirects_and_refusals_are_php_s() {
     assert_eq!(cases, 31);
 }
 
-/// The editor's page, and arguments that are not strings, are not ported.
+/// The post the arguments name: a numeric, non-empty `postId` before `p`'s
+/// page; only posts and pages are ported.
 #[test]
-fn the_page_is_not_ported() {
+fn context_posts() {
+    let site = crate::tests::Role("default:administrator");
+    let id = |query: &str| context_post(&site, query).map(|post| post.map(|post| post.id));
+    for (query, expected) in [
+        ("postId=0&p=/page/2", Some(Some(2))),
+        ("postId=x&p=/page/2", Some(Some(2))),
+        ("postId=%202", Some(Some(2))),
+        ("postId=1.9", Some(Some(1))),
+        ("postId=-1", Some(None)),
+        ("p=/page/2%0A", Some(Some(2))),
+        ("p=/page/2x", Some(None)),
+        ("p=/page/", Some(None)),
+        ("p=/pages/2", Some(None)),
+        ("postId[]=2", None),
+    ] {
+        assert_eq!(id(query), expected, "{query}");
+    }
+    let templates = crate::tests::Role("m4ttdtemplate:administrator");
+    assert_eq!(context_post(&templates, "postId=9999"), None);
+}
+
+/// A page without a name looks its template up as `page`.
+#[test]
+fn a_nameless_page_s_lookup() {
+    let page = Post {
+        id: 7,
+        post_type: "page".into(),
+        ..Post::default()
+    };
+    let paths = preload_paths(Some(&page), 4, "twentytwentyfive");
+    let last = paths.last().map(|(_, path)| path.as_str());
+    assert_eq!(last, Some("/wp/v2/templates/lookup?slug=page"));
+}
+
+/// The editor's page, and arguments that are not strings, are left to
+/// the page, which answers only once its view wrote.
+#[test]
+fn the_page_is_not_a_redirect() {
     for query in [
         "",
         "p=/",
@@ -41,6 +84,141 @@ fn the_page_is_not_ported() {
             "{query}"
         );
     }
+}
+
+/// The page golden's cases, each with its parts.
+fn golden_cases() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
+    let golden = include_str!("../../tests/golden/site-editor.tsv");
+    let mut cases: Vec<(&str, Vec<(&str, &str)>)> = Vec::new();
+    for line in golden.lines() {
+        let f: Vec<&str> = line.splitn(3, '\t').collect();
+        match cases.last_mut() {
+            Some((case, parts)) if *case == f[0] => parts.push((f[1], f[2])),
+            _ => cases.push((f[0], vec![(f[1], f[2])])),
+        }
+    }
+    cases
+}
+
+/// The query of each case of `reference/site-editor/page-golden.sh`.
+fn query_of(case: &str) -> &'static str {
+    match case {
+        "se-page" => "p=%2Fpage",
+        "se-page-2" => "p=/page/2&canvas=edit",
+        "se-page-gone" => "p=/page/99",
+        "se-draft" => "p=/&postId=3",
+        "se-post" => "p=/&postId=1&postType=post",
+        "se-styles" => "p=/styles&postType=wp_global_styles",
+        "se-template" => "p=/wp_template/twentytwentyfive//index&canvas=edit",
+        _ => "",
+    }
+}
+
+/// A golden value: as PHP printed it, or its hash over 2000 bytes, taken
+/// of the oracle's URL of its one admin file.
+fn kept(value: &str) -> String {
+    if value.len() > 2000 {
+        let php = value.replace("/hs-admin/load-scripts?", "/wp-admin/load-scripts.php?");
+        return format!("sha256:{} {}", crate::media::tests::sha256(&php), php.len());
+    }
+    value.into()
+}
+
+/// Each case's page, settings, block scripts and preloaded paths are PHP's.
+#[test]
+fn the_pages_are_php_s() {
+    let site = crate::tests::Role("default:administrator");
+    let browser = &crate::tests::BROWSER;
+    let mut failures = Vec::new();
+    let cases = golden_cases();
+    for (case, php) in &cases {
+        let query = query_of(case);
+        let post = context_post(&site, query).unwrap();
+        let uri = format!("/hs-admin/site-editor?{query}");
+        let uri = uri.strip_suffix('?').unwrap_or(&uri);
+        // `remove_query_arg()` builds the canonical URL's query again.
+        let canonical = format!("{}{uri}", crate::tests::SITE);
+        let canonical = remove_query_arg(&[b"message"], canonical.as_bytes());
+        let canonical = String::from_utf8(canonical).unwrap();
+        let request = crate::tests::request(&canonical, uri, browser);
+        let page = site_editor_page(&site, post.as_ref(), &Value::Null, &request).unwrap();
+        let mut masked = page.replace(
+            "createPreloadingMiddleware( null )",
+            "createPreloadingMiddleware( %preloads% )",
+        );
+        // The values the page prints, each masked as `parts.php` masks it.
+        let mut custom = Settings::default();
+        for (key, value) in custom_settings(crate::tests::SITE, b"10".to_vec()) {
+            custom.set(key, value);
+        }
+        let settings = get_block_editor_settings(&site, custom, Editor::Site(post.as_ref()));
+        let mut ours: Vec<(String, String)> = Vec::new();
+        for (key, value) in settings.as_array().unwrap() {
+            let key = String::from_utf8_lossy(&key.to_php_string()).into_owned();
+            ours.push((format!("settings.{key}"), kept(&crate::page::json(value))));
+        }
+        let marker = "initializeEditor( \"site-editor\", ";
+        let json = crate::page::json(&settings);
+        masked = masked.replace(&format!("{marker}{json}"), &format!("{marker}%settings%"));
+        let pieces = [
+            (
+                "categories",
+                "wp.blocks.setCategories( ",
+                block_categories(),
+            ),
+            ("bindings", "for ( const source of ", bindings_sources()),
+            (
+                "blocks",
+                "wp.blocks.unstable__bootstrapServerSideBlockDefinitions(",
+                server_block_settings(),
+            ),
+        ];
+        for (part, marker, value) in pieces {
+            let json = crate::page::json(&value);
+            ours.push((part.into(), kept(&json)));
+            masked = masked.replace(&format!("{marker}{json}"), &format!("{marker}%{part}%"));
+        }
+        let paths = preload_paths(post.as_ref(), 4, "twentytwentyfive");
+        let paths: Vec<String> = paths.iter().map(|(m, p)| format!("{m} {p}")).collect();
+        let mut sorted: Vec<String> = paths.clone();
+        // PHP's memo lists the `OPTIONS` paths first, at the first's place.
+        sorted.sort_by_key(|path| !path.starts_with("OPTIONS"));
+        ours.push(("preloads".into(), sorted.join(" ")));
+        ours.push(("html".into(), bin2hex(masked.as_bytes())));
+        for (part, value) in php {
+            let value = match *part {
+                "html" => {
+                    let html = String::from_utf8(unhex(value)).unwrap();
+                    bin2hex(hs_admin_page(&html).as_bytes())
+                }
+                _ => hs_admin_page(value),
+            };
+            match ours.iter().find(|(p, _)| p == part) {
+                Some((_, v)) if *v == value => {}
+                Some((_, v)) if *part == "html" => {
+                    let (php, ours) = (unhex(&value), unhex(v));
+                    let difference = first_difference(
+                        &String::from_utf8_lossy(&php),
+                        &String::from_utf8_lossy(&ours),
+                    );
+                    failures.push(format!("{case} html: {difference}"));
+                }
+                Some((_, v)) => failures.push(format!(
+                    "{case} {part}:\n  PHP  {}\n  ours {}",
+                    value.get(..300).unwrap_or(&value),
+                    v.get(..300).unwrap_or(v)
+                )),
+                None => failures.push(format!("{case} {part}: missing")),
+            }
+        }
+        let php_parts: Vec<&str> = php.iter().map(|(part, _)| *part).collect();
+        let our_parts: Vec<&str> = ours.iter().map(|(part, _)| part.as_str()).collect();
+        if our_parts != php_parts {
+            failures.push(format!("{case}: parts {our_parts:?}, PHP {php_parts:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(cases.len(), 9);
 }
 
 /// The settings `site-editor.php` adds are PHP's, in its order.

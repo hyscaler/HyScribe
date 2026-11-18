@@ -60,7 +60,12 @@ async fn site(db: &Database, dir: &std::path::Path, primary: bool) -> Arc<Site> 
         true => Writer::open(db, Mode::Primary).await.unwrap(),
         false => None,
     };
-    Arc::new(site.with_writer(writer))
+    // A transport that sends, so the flows answer as PHP's with mail.
+    let recorder = Arc::new(crate::mail::tests::Recorder::default());
+    let (site, _) = site
+        .with_writer(writer)
+        .with_mail(&Default::default(), recorder);
+    Arc::new(site)
 }
 
 /// The user `id`'s stored password hash and reset key.
@@ -114,7 +119,6 @@ async fn the_lost_and_reset_password_flows_are_php_s() {
     let _saves = crate::admin::tests::SAVES.lock().await;
     let db = loaded("").await;
     let dir = tempfile::tempdir().unwrap();
-    let site = site(&db, dir.path(), true).await;
     let hash = md5(URL.as_bytes());
     let golden = include_str!("../../../../hyscribe-admin/tests/golden/lost-password.tsv");
     for line in golden.lines() {
@@ -124,6 +128,9 @@ async fn the_lost_and_reset_password_flows_are_php_s() {
             "" => String::new(),
             value => format!("hyscribe-resetpass-{hash}={value}"),
         };
+        // A transport of its own, as the golden asks for more reset mails to
+        // one account than an hour's limit.
+        let site = site(&db, dir.path(), true).await;
         let reply = send(&site, f[0], &uri, &cookie, f[3]).await;
         assert_eq!(reply.status.as_str(), f[4], "{line:.100}");
         let location = reply.headers.get(header::LOCATION);
@@ -312,4 +319,30 @@ async fn shadow_mode_and_failed_writes_write_nothing() {
         }
         assert_eq!(keys, (Vec::new(), RESET_KEY.to_vec()), "{sql}");
     }
+}
+
+/// Without a transport the reset mail is not sent: the key is kept, and
+/// the form answers PHP's `retrieve_password_email_failure`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reset_mail_not_sent_is_php_s_error() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let db = loaded("").await;
+    let connected = hyscribe_db::Db::connect(&db).await.unwrap();
+    let site = Site::load(connected, Some(URL.into()), Some(URL.into()));
+    let writer = Writer::open(&db, Mode::Primary).await.unwrap();
+    let site = Arc::new(site.await.unwrap().with_writer(writer));
+    let (query, form) = (parse_str(b""), parse_str(b"user_login=admin"));
+    let handle = Handle::current();
+    let ((status, page), mails) = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, crate::now());
+        let request = posted(&query, &form);
+        lost_password(&reads, &request, "lostpassword", &mut Vec::new())
+    })
+    .await
+    .unwrap();
+    let page = String::from_utf8(page).unwrap();
+    assert_eq!((status, mails.len()), (StatusCode::OK, 1));
+    assert!(page.contains("The email could not be sent."), "{page}");
+    let (_, key) = stored(&db, 1).await;
+    assert!(!key.is_empty());
 }

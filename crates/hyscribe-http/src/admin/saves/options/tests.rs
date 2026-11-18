@@ -13,6 +13,7 @@ use super::super::tests::unread::Unread;
 use super::super::tests::{ANSWERS, CASES, SITE, acted, case_row, hs, settled, writer};
 use super::super::{Handler, Stop, handler};
 use super::*;
+use crate::mail::tests::mailed;
 
 /// The fixture's home URL, which the write oracle's site keeps.
 const HOME: &str = "http://default-install.test";
@@ -176,6 +177,17 @@ async fn saves_write_php_s_rows() {
         &back("general"),
     )
     .await;
+    // The new admin email is asked to confirm, by its key.
+    let mails = mailed();
+    assert_eq!(mails.len(), 1);
+    assert!(mails[0].to.eq_ignore_ascii_case(b"oracle@example.test"));
+    assert!(mails[0].subject.ends_with(b"] New Admin Email Address"));
+    let message = String::from_utf8(mails[0].message.clone()).unwrap();
+    assert!(
+        message.contains("/hs-admin/options.php?adminhash="),
+        "{message}"
+    );
+    assert!(message.contains("(admin)"), "{message}");
     let post = page_form(
         "general",
         &[
@@ -192,6 +204,7 @@ async fn saves_write_php_s_rows() {
     );
     let golden = "admin-options-general-errors";
     check(golden, migrating, options, &[], &post, &back("general")).await;
+    assert!(mailed().is_empty());
     let post = page_form(
         "writing",
         &[
@@ -308,6 +321,11 @@ async fn saves_write_php_s_rows() {
         &general,
     )
     .await;
+    // The old address is told of the change.
+    let mails = mailed();
+    let to: Vec<&[u8]> = mails.iter().map(|mail| &mail.to[..]).collect();
+    assert_eq!(to, [&b"admin@default-install.test"[..]]);
+    assert!(mails[0].subject.ends_with(b"] Admin Email Changed"));
     let get = form(&[("dismiss", "new_admin_email")]);
     check(
         "admin-options-dismiss",
@@ -318,6 +336,7 @@ async fn saves_write_php_s_rows() {
         &general,
     )
     .await;
+    assert!(mailed().is_empty());
 }
 
 /// The new privacy policy page, whose ID the editor link carries.

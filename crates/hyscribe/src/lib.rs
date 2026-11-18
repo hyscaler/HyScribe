@@ -346,6 +346,8 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
             let fetch = config.http_outbound.then(outbound);
             let fetching = outbound_line(fetch.as_ref());
             let site = site.with_fetch(fetch);
+            let hooks = std::sync::Arc::new(hyscribe_mail::NoHooks);
+            let (site, mailing) = site.with_mail(&config.mail, hooks);
             // Logging in needs primary mode.
             let site = match config.mode {
                 Mode::Primary => site.with_sessions(Sessions::new(sessions_dir)),
@@ -365,6 +367,7 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                 mode_name(config.mode),
             );
             let _ = writeln!(out, "{fetching}");
+            let _ = writeln!(out, "{mailing}");
             let (lines, cron) = cron::service(&config, site_paths.home());
             for line in lines {
                 let _ = writeln!(out, "{line}");

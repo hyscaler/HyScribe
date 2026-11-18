@@ -119,9 +119,11 @@ pub(super) fn lost_password(
     };
     let mail = reset_mail(reads, &key);
     let mailer = &reads.site.mailer;
-    let sent = reads
-        .reads
-        .block_on(mailer.retrieve_password(mail.clone(), key.id, reads.client));
+    let sent = reads.reads.block_on(mailer.retrieve_password(
+        mail.clone(),
+        key.id,
+        reads.client.as_ref().ok().copied().flatten(),
+    ));
     if !sent {
         // The key is kept, as PHP keeps it when its mail fails.
         let refused = Some(("retrieve_password_email_failure", EMAIL_FAILURE));

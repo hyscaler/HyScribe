@@ -262,7 +262,7 @@ fn save<'w>(
         };
         let committed = write.commit().await;
         // Mailed once the comment is kept.
-        let kept = committed.is_ok().then_some(notices).unwrap_or_default();
+        let kept = notices.into_iter().filter(|_| committed.is_ok());
         for (kind, mail) in kept {
             reads.site.mailer.wp_mail(mail, kind, false).await;
         }

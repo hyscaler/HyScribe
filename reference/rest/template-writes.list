@@ -2,10 +2,12 @@
 #
 # The site editor's templates' and template parts' writes (MVP 4.3) that
 # reference/rest/golden.sh records as template-writes.tsv, over
-# templates-custom.sql (template-writes.sql links to it): each request
-# sent with its body as every identity, the database put back after each.
+# template-writes.sql: each request sent with its body as every identity,
+# the database put back after each.
 # Creates, theme files customised, customised templates updated, reverted
-# (`source` theme), trashed and deleted, and the checks PHP makes first.
+# (`source` theme), trashed and deleted, the checks PHP makes first, the
+# arguments of each type, templates named after a page, a part's area kept
+# on an update, and a template part found by its ID in any area.
 POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"my-template","title":"My template","content":"<!-- wp:paragraph -->\n<p>Mine</p>\n<!-- /wp:paragraph -->","description":"Made here"}
 POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"page-about","title":{"raw":"About"},"content":{"raw":"<!-- wp:post-content /-->"},"status":"draft","author":702,"is_wp_suggestion":true}
 POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"my-custom","title":"Again","content":"<!-- wp:post-title /-->"}
@@ -29,3 +31,12 @@ DELETE	/?rest_route=/wp/v2/templates/twentytwentyfive//my-custom&force=true	rest
 DELETE	/?rest_route=/wp/v2/templates/twentytwentyfive//page	restore
 DELETE	/?rest_route=/wp/v2/templates/twentytwentyfive//archive	restore
 DELETE	/?rest_route=/wp/v2/template-parts/twentytwentyfive//header&force=1	restore
+POST	/?rest_route=/wp/v2/template-parts	json,restore	{"slug":"bad-area","title":"Bad","area":5}
+POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"with-area","title":"With area","area":[]}
+POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"page-about-us","title":"About","content":"x"}
+POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"page-about-us","description":"About a page","content":"x"}
+POST	/?rest_route=/wp/v2/templates	json,restore	{"slug":"page-about-us","title":"page-about-us","content":"x"}
+POST	/?rest_route=/wp/v2/template-parts	json,restore	{"slug":"page-about-us","content":"x"}
+PATCH	/?rest_route=/wp/v2/template-parts/twentytwentyfive//header	json,restore	{"title":"Head"}
+PATCH	/?rest_route=/wp/v2/template-parts/twentytwentyfive//side-part	json,restore	{"title":"Side"}
+GET	/?rest_route=/wp/v2/template-parts&wp_id=721&area=footer&_fields=id,area

@@ -1530,6 +1530,24 @@ async fn template_writes_past_the_goldens() {
         let (found, text) = sent_as(&site, &login, (method, &target, body)).await;
         assert_eq!(found.as_u16(), status, "{method} {target} {body}: {text}");
     }
+    // `rest_after_insert_{$post_type}` fires once a template or part is
+    // written, as the write tests one at a time leave it alone.
+    let fired = || {
+        let fired = hyscribe_model::hooks::FIRED.lock().unwrap();
+        fired
+            .iter()
+            .filter(|hook| hook.starts_with("rest_after_insert_wp_template"))
+            .count()
+    };
+    let before = fired();
+    let parts = at("template-parts");
+    let created = (
+        "POST",
+        parts.as_str(),
+        r#"{"slug":"fired","title":"Fired"}"#,
+    );
+    assert_eq!(sent_as(&site, &login, created).await.0, StatusCode::CREATED);
+    assert_eq!(fired(), before + 1);
     fresh().await;
 }
 

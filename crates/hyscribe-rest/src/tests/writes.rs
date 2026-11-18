@@ -701,6 +701,32 @@ fn navigation_and_patterns_save_their_fields() {
     let footnotes = r#"{"title":"x","meta":{"footnotes":""}}"#;
     let served = answered("administrator", "POST", "/wp/v2/blocks", footnotes);
     assert_eq!(served.status, 501);
+    // An autosave is planned for the types written, a revision's delete
+    // never: its permission check refuses everyone first.
+    let revisions = "/wp/v2/posts/(?P<parent>[\\d]+)/revisions/(?P<id>[\\d]+)";
+    assert!(crate::revisions::writing(revisions, 1).is_none());
+    let autosaves = |base: &str| format!("/wp/v2/{base}/(?P<id>[\\d]+)/autosaves");
+    assert!(crate::revisions::writing(&autosaves("posts"), 1).is_some());
+    assert!(crate::revisions::writing(&autosaves("menu-items"), 1).is_none());
+    // A navigation menu has no meta, as PHP's description of its writes
+    // says; the other types written do.
+    let descriptions = include_bytes!("../../../../wordpress/wp-includes/rest-descriptions.json");
+    let descriptions = hyscribe_phpser::json_decode(descriptions).unwrap();
+    for (kind, base) in [
+        (crate::posts::Kind::Post, "posts"),
+        (crate::posts::Kind::Page, "pages"),
+        (crate::posts::Kind::Block, "blocks"),
+        (crate::posts::Kind::Navigation, "navigation"),
+    ] {
+        let endpoints = descriptions.get_path(&[&format!("/wp/v2/{base}"), "endpoints"]);
+        let endpoints = endpoints.and_then(Value::as_array).unwrap();
+        let (_, post) = endpoints.get(1).unwrap();
+        let php = post.get_path(&["args", "meta"]).is_some();
+        let ours = crate::posts::args::save(kind)
+            .iter()
+            .any(|arg| arg.name == "meta");
+        assert_eq!(ours, php, "{base}");
+    }
     // Media and menu items are not written, and a format is checked
     // against its schema.
     for (method, target, body) in [

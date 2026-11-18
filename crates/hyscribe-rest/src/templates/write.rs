@@ -124,7 +124,8 @@ fn area(area: &[u8]) -> Vec<u8> {
 fn raw(given: &Value, title: bool) -> Option<Vec<u8>> {
     match given {
         Value::Array(parts) => lookup(parts, "raw")
-            .filter(|raw| **raw != Value::Null && !(title && raw.is_empty()))
+            // Validated as a string.
+            .filter(|raw| !(title && raw.is_empty()))
             .map(Value::to_php_string),
         // Validated as an object or a string.
         given => Some(given.to_php_string()),

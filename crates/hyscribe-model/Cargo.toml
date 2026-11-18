@@ -9,5 +9,9 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# Tests read the actions fired from `hooks::FIRED`.
+hook-log = []
+
 [lints]
 workspace = true

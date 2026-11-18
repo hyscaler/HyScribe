@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The lost and reset password forms' writes (MVP 8.3), each one writer
-//! action, with their mails taken as sent until the transport (ADR 0016).
+//! action, and their mails, sent once it commits (ADR 0016).
 
 use axum::http::{StatusCode, header};
 use hyscribe_admin::assets::Urls;
@@ -12,6 +12,7 @@ use hyscribe_phpser::{Value, addslashes, is_empty_string};
 use hyscribe_write::users::{ResetKey, reset_password, retrieve_password};
 
 use super::{LoginReads, PATH, redirected};
+use crate::mail::EMAIL_FAILURE;
 use crate::redirect::wp_safe_redirect;
 
 /// A form's status and page, and the mails it hands `wp_mail()`.
@@ -116,8 +117,21 @@ pub(super) fn lost_password(
         // Relative, as PHP's `wp-login.php?checkemail=confirm`.
         _ => format!("{}?checkemail=confirm", PATH.trim_start_matches('/')).into_bytes(),
     };
+    let mail = reset_mail(reads, &key);
+    let mailer = &reads.site.mailer;
+    let sent = reads.reads.block_on(mailer.retrieve_password(
+        mail.clone(),
+        key.id,
+        reads.client.as_ref().ok().copied().flatten(),
+    ));
+    if !sent {
+        // The key is kept, as PHP keeps it when its mail fails.
+        let refused = Some(("retrieve_password_email_failure", EMAIL_FAILURE));
+        let page = lost_password_page(reads, request, action, refused);
+        return ((StatusCode::OK, page), vec![mail]);
+    }
     let location = wp_safe_redirect(reads.site, &to, &reads.admin_url(""));
-    (redirected(headers, location), vec![reset_mail(reads, &key)])
+    (redirected(headers, location), vec![mail])
 }
 
 /// A reset password form that passed: `reset_password()`, the user's
@@ -149,6 +163,12 @@ pub(super) fn reset(
         email: &email,
     };
     let mails = hyscribe_mail::password_reset_to_admin(&mail_site(&texts), &user);
+    if let Some(mail) = mails.clone() {
+        let kind = "wp_password_change_notification";
+        reads
+            .reads
+            .block_on(reads.site.mailer.wp_mail(mail, kind, false));
+    }
     let page = password_reset(reads, request, action);
     ((StatusCode::OK, page), mails.into_iter().collect())
 }

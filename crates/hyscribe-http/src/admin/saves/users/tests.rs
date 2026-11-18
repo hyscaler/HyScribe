@@ -13,6 +13,7 @@ use super::super::tests::{
     Request, SITE, answered, new_user, php_answer, redirected, turn, writer,
 };
 use super::*;
+use crate::mail::tests::{failing, mailed};
 
 fn dodelete(post: &str) -> Request<'_> {
     Request {
@@ -128,9 +129,30 @@ async fn password_reset_links_are_php_s() {
         };
         let unported = answered(&writer, conn, &array).await;
         assert!(matches!(unported, Err(Error::Unported(_))));
-        let to = redirected(&writer, conn, &request).await;
         let php = php_answer("users-resetpassword").1;
+        // A mail not sent is not counted, as `retrieve_password()` fails.
+        failing(true);
+        let to = redirected(&writer, conn, &request).await;
+        assert_eq!(to, php.replace("reset_count=1", "reset_count=0"));
+        failing(false);
+        assert_eq!(mailed().len(), 2);
+        let to = redirected(&writer, conn, &request).await;
         assert_eq!(to, php.replace("reset_count=1", "reset_count=2"));
+        let mails = mailed();
+        let to: Vec<&[u8]> = mails.iter().map(|mail| &mail.to[..]).collect();
+        assert_eq!(
+            to,
+            [&b"oracle-reset@example.test"[..], b"oracle@reset.test"]
+        );
+        for (mail, login) in mails.iter().zip(["oracle-reset", "oracle%40reset.test"]) {
+            assert_eq!(mail.subject, b"[HyScribe Default Install] Password Reset");
+            let link = format!("/wp-login.php?login={login}&key=");
+            let message = String::from_utf8(mail.message.clone()).unwrap();
+            assert!(
+                message.contains(&link) && message.contains("&wp_lang=en_US"),
+                "{message}"
+            );
+        }
         Ok(())
     };
     let golden = "admin-users-resetpassword";

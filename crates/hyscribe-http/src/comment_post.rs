@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `wp-comments-post.php`: a comment saved in one writer action (ADR 0010),
-//! refused in shadow mode; no mail is sent until mail exists (MVP 8.2).
+//! refused in shadow mode; its notices are mailed once it commits (ADR 0016).
 
 pub(crate) mod submit;
 
@@ -26,6 +26,7 @@ use tokio::runtime::Handle;
 use crate::login::{
     LoginReads, Names, YEAR, cookie, cookies, joined, nocache, response, set_cookie,
 };
+use crate::mail::{Commented, MailSite, comment_notices};
 use crate::redirect::wp_safe_redirect;
 use crate::{Site, now, trackback};
 use submit::{Failure, Fields, Poster};
@@ -239,7 +240,17 @@ fn save<'w>(
         };
         // Its row as saved, which the action has just written.
         let comment = write.comment(id).await?.unwrap_or_default();
-        let link = comment_link(&mut write, permalink, id).await?;
+        let link = comment_link(&mut write, permalink.clone(), id).await?;
+        let mail_site = MailSite::read(&mut write, &reads.site.home).await?;
+        let permalink = permalink.unwrap_or_default();
+        let commented = Commented {
+            id,
+            user: saving.user,
+            permalink: &permalink,
+            link: link.as_bytes(),
+        };
+        let constants = reads.site.constants;
+        let notices = comment_notices(&mut write, &mail_site, &commented, constants).await?;
         let saved = Saved {
             id,
             author: comment.author,
@@ -249,7 +260,13 @@ fn save<'w>(
             date_gmt: comment.date_gmt,
             link,
         };
-        write.commit().await.map(|()| Ok(saved)).map_err(Into::into)
+        let committed = write.commit().await;
+        // Mailed once the comment is kept.
+        let kept = notices.into_iter().filter(|_| committed.is_ok());
+        for (kind, mail) in kept {
+            reads.site.mailer.wp_mail(mail, kind, false).await;
+        }
+        committed.map(|()| Ok(saved)).map_err(Into::into)
     })
 }
 

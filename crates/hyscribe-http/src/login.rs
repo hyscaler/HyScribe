@@ -640,7 +640,6 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
         }
         "login" | "entered_recovery_mode" => login::login(&reads, &request),
         "lostpassword" | "retrievepassword" if asked.post => {
-            // The transport sends the mail once wired (ADR 0016).
             let (answer, _mail) = reset::lost_password(&reads, &request, &action, &mut headers);
             return finished(site, reads, Some(answer), headers);
         }
@@ -744,7 +743,6 @@ fn other_action(
             redirected(headers, String::from_utf8_lossy(&to).into_owned())
         }
         Action::ResetPassword(id, password) => {
-            // The transport sends the notice once wired (ADR 0016).
             let (answer, _notice) =
                 reset::reset(reads, request, &request.action(), (id, &password));
             answer

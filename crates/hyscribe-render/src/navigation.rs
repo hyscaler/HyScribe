@@ -71,9 +71,7 @@ impl Renderer<'_> {
                 .filter(|(k, _)| *k != key);
             attributes = Value::Array(kept.cloned().collect());
         }
-        // Inner blocks get the block's own attributes as context, a menu
-        // post's and the fallback the attributes as render() changed them.
-        // `navigationMenuId`, the name older blocks were saved with, wins.
+        // `navigationMenuId`, the older name, wins over `ref`.
         let menu = ["navigationMenuId", "ref"]
             .into_iter()
             .find_map(|key| attributes.get_str(key))
@@ -669,7 +667,7 @@ impl Renderer<'_> {
             && kind_matches
     }
 
-    /// The post `id` names, the `wp_navigation` post of a `ref`.
+    /// The post a `ref` names; 0, the global post in PHP, finds none.
     fn menu_post(&self, id: &Value) -> Option<Post> {
         let id = u64::try_from(id.to_int()).ok()?;
         self.context.site.post(id)
@@ -680,9 +678,8 @@ impl Renderer<'_> {
         self.menu_post(id).filter(|post| post.status == "publish")
     }
 
-    /// `get_inner_blocks_from_navigation_post()`: the blocks of the post
-    /// `id` names, none where there is no such post, and `None` for the
-    /// fallback where it is not published.
+    /// `get_inner_blocks_from_navigation_post()`: none for a missing post,
+    /// `None` (the fallback) for one not published.
     fn ref_blocks(&self, id: &Value) -> Option<Vec<Block>> {
         match self.menu_post(id) {
             None => Some(Vec::new()),

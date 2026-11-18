@@ -48,8 +48,7 @@ pub(crate) fn smilies(option: &dyn Fn(&str) -> Option<Vec<u8>>, text: &[u8]) -> 
 }
 
 /// `get_the_block_template_html()`: the template's blocks rendered, the
-/// template filters run, inside `.wp-site-blocks`, with the skip link;
-/// nothing for an empty template, which enqueues no skip link either.
+/// template filters run, inside `.wp-site-blocks`, with the skip link.
 /// Images are not yet given `wp_filter_content_tags()`' attributes.
 pub fn render_template(
     theme: &Theme,

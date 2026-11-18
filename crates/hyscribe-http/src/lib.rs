@@ -218,8 +218,7 @@ impl Site {
         Ok(site)
     }
 
-    /// The active theme with the site's global styles: the content of its
-    /// newest published `wp_global_styles` post, as
+    /// The theme with its newest published `wp_global_styles` post, as
     /// `WP_Theme_JSON_Resolver::get_user_data()` reads it.
     async fn styled_theme(&self) -> Result<Arc<Theme>, DbError> {
         let slug = self.theme.slug();

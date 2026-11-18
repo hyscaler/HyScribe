@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The site's own templates and template parts: the `wp_template` and
-//! `wp_template_part` posts the site editor saves for the active theme,
-//! which take the place of its files, as `resolve_block_template()` and
-//! `render_block_core_template_part()` find them. Their content is used as
-//! saved: with no hooked blocks, `apply_block_hooks_to_content()` changes
-//! nothing a page shows.
+//! The site editor's `wp_template` and `wp_template_part` posts, used in
+//! place of the theme's files, their content as saved (no hooked blocks).
 
 use hyscribe_model::{Post, PostQuery};
 use hyscribe_phpser::is_empty_string;
@@ -40,10 +36,8 @@ fn theme_posts(site: &dyn Site, theme: &Theme, post_type: &str, names: &[&[u8]])
         .collect()
 }
 
-/// `get_block_templates( array( 'slug__in' => $candidates ) )`, ordered by
-/// the candidates as `resolve_block_template()` orders them, and the
-/// content `locate_block_template()` renders of the first for a visitor:
-/// a customised template emptied shows its theme file, if it has one.
+/// `resolve_block_template()`'s template's content for a visitor, as
+/// `locate_block_template()` takes it: an emptied one shows its file.
 pub fn block_template(theme: &Theme, site: &dyn Site, candidates: &[String]) -> Option<Vec<u8>> {
     let slugs: Vec<&[u8]> = candidates.iter().map(String::as_bytes).collect();
     let mut unique = slugs.clone();
@@ -94,10 +88,8 @@ pub(crate) fn template_part(
     Some((post.content, area))
 }
 
-/// `candidates` with the template a singular post's `_wp_page_template`
-/// names first among its type's own: after `front-page` on the front page,
-/// before `singular` and `index`, which end the list. Its type's templates
-/// keep their place when one repeats it, as `array_flip()` keeps the last.
+/// `candidates` with the `_wp_page_template` template first of its type's
+/// own (after `front-page`), unless they repeat it (`array_flip()`).
 pub fn with_page_template(
     site: &dyn Site,
     request: &Request,
@@ -114,10 +106,8 @@ pub fn with_page_template(
     candidates
 }
 
-/// The template a singular post's `_wp_page_template` names, which
-/// `get_page_template()` and `get_single_template()` try first: none for a
-/// path `validate_file()` refuses, and without a `.php` or `.html` suffix
-/// (`_strip_template_file_suffix()`).
+/// The template a singular post's `_wp_page_template` names, if
+/// `validate_file()` takes it, without its `.php` or `.html` suffix.
 fn page_template(site: &dyn Site, request: &Request) -> Option<String> {
     let post = request.posts.first().filter(|_| request.singular)?;
     if post.post_type == "attachment" {

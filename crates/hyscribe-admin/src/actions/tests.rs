@@ -273,6 +273,9 @@ fn actions_are_named_as_php_names_them() {
         ("options", "adminhash=x&action=update", "adminhash"),
         ("options", "adminhash=&dismiss=new_admin_email", "dismiss"),
         ("options", "dismiss=x&action=update", "update"),
+        // The names of the checked arguments' handlers are never asked for.
+        ("options", "action=dismiss", ""),
+        ("options", "action=adminhash", ""),
         ("options-privacy", "action=create-privacy-page", ""),
         ("edit-tags", "action=delete&delete_tags[]=2", "bulk-delete"),
         ("edit-tags", "action=-1", ""),

@@ -4,7 +4,7 @@
 //! (`reference/writes/actions-comments.php`), as user 1 unless noted.
 
 use super::*;
-use crate::tests::{MISSING, check, fails_at_each_step, nothing};
+use crate::tests::{MISSING, check, fails_at_each_step, nothing, rolled_back};
 
 /// The oracle's `home_url()`.
 const HOME: &[u8] = b"http://127.0.0.1:8081";
@@ -78,6 +78,27 @@ fn option(name: &'static str, value: &'static [u8]) -> impl AsyncFnOnce(&mut Wri
     async move |write: &mut Write<'_>| {
         write.update_option(name, value).await.unwrap();
     }
+}
+
+/// With the trash off, a disallowed word sends a comment to spam, as
+/// `wp_check_comment_data()` decides by `EMPTY_TRASH_DAYS`.
+#[tokio::test]
+async fn disallowed_words_are_spam_without_the_trash() {
+    rolled_back(async |write| {
+        write
+            .update_option("disallowed_keys", b"badword")
+            .await
+            .unwrap();
+        let context = Context {
+            empty_trash_days: 0,
+            ..context()
+        };
+        let comment = known(b"A badword.");
+        let id = new_comment(write, context, comment, Commenter::default());
+        let id = id.await.unwrap().unwrap();
+        assert_eq!(write.comment(id).await.unwrap().unwrap().approved, "spam");
+    })
+    .await;
 }
 
 #[tokio::test]

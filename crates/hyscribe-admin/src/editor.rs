@@ -19,7 +19,7 @@ use crate::admin_bar::BarSite;
 use crate::media::attachment::{AttachmentArgs, AttachmentSite};
 use crate::menu::{Look, Screen, admin_menu};
 use crate::page::query_strings;
-use crate::posts::{Answer, PostsSite};
+use crate::posts::{Answer, PostsSite, lock_holder};
 
 /// The post the block editor's page is of, once PHP's refusals pass.
 #[derive(Debug, PartialEq)]
@@ -37,8 +37,12 @@ pub fn target(site: &dyn AttachmentSite, screen: &str, query: &str) -> Option<Ta
         if post_new(site, query).is_some() {
             return None;
         }
+        // `post_new()` passes other arguments unchecked, as not ported.
         let mut kind = "post".to_string();
-        for (_, value) in query_strings(query)? {
+        for (key, value) in query_strings(query)? {
+            if key != "post_type" {
+                return None;
+            }
             kind = value;
         }
         return ["post", "page"]
@@ -48,9 +52,11 @@ pub fn target(site: &dyn AttachmentSite, screen: &str, query: &str) -> Option<Ta
     let args = AttachmentArgs::parse(query, None).filter(|args| args.message.is_none())?;
     let id = Value::String(args.post.into_bytes()).to_int();
     let post = u64::try_from(id).ok().and_then(|id| site.post(id))?;
+    // Another user's fresh lock shows PHP's locked dialog, not ported.
     let editable = ["post", "page"].contains(&post.post_type.as_str())
         && site.can_post("edit_post", &post)
-        && post.status != "trash";
+        && post.status != "trash"
+        && lock_holder(site, &post).is_none();
     editable.then(|| Target::Edit(Box::new(post)))
 }
 

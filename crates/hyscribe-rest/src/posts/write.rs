@@ -521,18 +521,23 @@ fn after_save(context: &Context, params: &Params, kind: Kind, save: &mut Save) {
     if kind == Kind::Post {
         let sticky = params.get("sticky").map(|sticky| !sticky.is_empty());
         save.sticky = sticky.or((save.id == 0).then_some(false));
-        let ids = |name| {
+        let ids = |name, taxonomy| {
             let ids = params
                 .get(name)
                 .and_then(Value::as_array)
                 .unwrap_or_default();
-            // The terms check refused 0, which no user may assign.
+            // The terms check refused 0, which no user may assign; the
+            // write skips a missing term and one set already.
+            let mut seen = std::collections::HashSet::new();
             let ids = ids.iter();
             ids.filter_map(|(_, id)| u64::try_from(id.to_int()).ok())
+                .filter(|&id| seen.insert(id) && context.site.reads().term(id, taxonomy).is_some())
                 .collect()
         };
-        save.categories = params.get("categories").map(|_| ids("categories"));
-        save.tags = params.get("tags").map(|_| ids("tags"));
+        save.categories = params
+            .get("categories")
+            .map(|_| ids("categories", "category"));
+        save.tags = params.get("tags").map(|_| ids("tags", "post_tag"));
     }
     // `set_post_thumbnail()` keeps an image `wp_get_attachment_image()`
     // shows and deletes the meta for any other post, as

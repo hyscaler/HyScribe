@@ -70,7 +70,7 @@ pub use hyscribe_admin::site_health::Install;
 /// from outside.
 #[doc(hidden)]
 pub mod fuzzing {
-    pub use crate::comment_post::read_form;
+    pub use crate::comment_post::{address as forwarded_address, read_form};
     pub use crate::files::http_date;
     pub use crate::login::cookies;
     pub use crate::multipart::{
@@ -618,6 +618,30 @@ const MAX_CONNECTIONS: usize = 1024;
 /// keeps it only with a timer, which `axum::serve` does not give it.
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long a client has to send a request's body once its headers are in,
+/// so slow clients cannot hold connections open; Apache's `RequestReadTimeout`
+/// also answers 408.
+const BODY_READ_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The largest body read: above every route's own limit (axum's 2 MB, the
+/// setup form's 3 MiB), which still applies.
+const MAX_BODY: usize = 4 << 20;
+
+/// Reads a request's whole body within [`BODY_READ_TIMEOUT`] before it is
+/// served.
+async fn body_deadline(request: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let (parts, body) = request.into_parts();
+    let read = tokio::time::timeout(BODY_READ_TIMEOUT, axum::body::to_bytes(body, MAX_BODY));
+    match read.await {
+        Ok(Ok(body)) => {
+            next.run(axum::extract::Request::from_parts(parts, body.into()))
+                .await
+        }
+        Ok(Err(_)) => StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+        Err(_) => (StatusCode::REQUEST_TIMEOUT, [(header::CONNECTION, "close")]).into_response(),
+    }
+}
+
 /// Serves `site` on `listener` until `shutdown` completes, then finishes the
 /// requests in flight.
 pub async fn serve(
@@ -648,6 +672,7 @@ async fn serve_connections(
     let mut http = http1::Builder::new();
     http.timer(TokioTimer::new())
         .header_read_timeout(HEADER_READ_TIMEOUT);
+    let app = app.layer(axum::middleware::from_fn(body_deadline));
     let permits = Arc::new(Semaphore::new(limit));
     let graceful = GracefulShutdown::new();
     let mut shutdown = std::pin::pin!(shutdown);

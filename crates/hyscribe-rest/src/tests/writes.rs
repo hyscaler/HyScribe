@@ -285,6 +285,18 @@ fn a_create_plans_its_fields() {
     assert_eq!(location.map(|(_, value)| value.as_str()), Some(posts));
 }
 
+/// Each term is set once and only terms that exist, which leaves the rows
+/// `wp_set_object_terms()` leaves, so a long list costs the write nothing.
+#[test]
+fn terms_are_set_once_each() {
+    let body = r#"{"title":"T","categories":[1,1,999,1],"tags":[999,999]}"#;
+    let save = plan("administrator", "POST", "/wp/v2/posts", body);
+    assert_eq!(
+        (save.categories, save.tags),
+        (Some(vec![1]), Some(Vec::new()))
+    );
+}
+
 /// The dates as `rest_get_date_with_gmt()` reads them: with a zone of
 /// their own, or the site's, and a null resetting both.
 #[test]
@@ -1248,4 +1260,17 @@ fn uploads_plan_their_fields() {
     }
     let asked = Asked::new("administrator", "POST", "/wp/v2/media&slug=a", "");
     assert_eq!(on(&site, &asked, Outcome::Written(95)).1.status, 501);
+}
+
+/// A role given twice is added once, as `add_role()` skips a role the user
+/// has.
+#[test]
+fn roles_are_added_once_each() {
+    let roles = r#"{"roles":["administrator","administrator"]}"#;
+    let asked = Asked::new("administrator", "POST", "/wp/v2/users/1", roles);
+    let (plan, _) = on(&oracle("administrator", &[]), &asked, Outcome::Written(1));
+    let Some(Write::User(save)) = plan.map(|plan| plan.write) else {
+        panic!("not planned");
+    };
+    assert_eq!(save.roles, Some(vec![b"administrator".to_vec()]));
 }

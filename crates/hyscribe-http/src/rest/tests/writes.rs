@@ -949,9 +949,26 @@ async fn refused_writes_are_answered_as_php_answers_them() {
     let roles = (
         "POST",
         "/?rest_route=/wp/v2/users/1",
-        r#"{"roles":["administrator"]}"#,
+        r#"{"roles":["administrator","administrator"]}"#,
     );
-    as_admin(&site, roles, (b"", None), plan_of).await;
+    let write = as_admin(&site, roles, (b"", None), plan_of).await;
+    let administrator = Some(vec![b"administrator".to_vec()]);
+    assert!(matches!(write, hyscribe_rest::Write::User(save) if save.roles == administrator));
+    // `/users/me` is the current user's, whatever ID a body gives.
+    let me = (
+        "POST",
+        "/?rest_route=/wp/v2/users/me",
+        r#"{"id":702,"first_name":"x"}"#,
+    );
+    let write = as_admin(&site, me, (b"", None), plan_of).await;
+    assert!(matches!(write, hyscribe_rest::Write::User(save) if save.id == 1));
+    let me = (
+        "DELETE",
+        "/?rest_route=/wp/v2/users/me&force=true&reassign=702",
+        r#"{"id":704}"#,
+    );
+    let write = as_admin(&site, me, (b"", None), plan_of).await;
+    assert_eq!(write, hyscribe_rest::Write::DeleteUser(1, Some(702)));
     // An author URL as long as its column takes is planned.
     let url = format!(r#"{{"author_url":"https://x.test/{}"}}"#, "a".repeat(185));
     let long = ("POST", "/?rest_route=/wp/v2/comments/1", url.as_str());

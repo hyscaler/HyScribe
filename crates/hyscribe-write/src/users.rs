@@ -551,6 +551,32 @@ pub async fn retrieve_password(
     }
 }
 
+/// `wp_set_password( $password, $user_id )`: the password's hash stored and
+/// the reset key cleared; the user's new hash.
+pub async fn wp_set_password(
+    write: &mut Write<'_>,
+    password: &[u8],
+    id: u64,
+) -> Result<String, Error> {
+    let mut steps = Steps::new(write);
+    let (_, user) = set_password(&mut steps, password, id).await;
+    steps.finish(Ok(user.pass))
+}
+
+/// [`wp_set_password`]'s steps; the user's login and row as written.
+async fn set_password(
+    steps: &mut Steps<'_, '_, Error>,
+    password: &[u8],
+    id: u64,
+) -> (Vec<u8>, UserFields) {
+    let (login, mut user) = step!(steps, user(id)).unwrap_or_default();
+    user.pass = steps.keep(hash_password(password).map_err(Error::Random));
+    user.activation_key.clear();
+    step!(steps, update_user(id, &user));
+    do_action("wp_set_password", &[&password.to_vec(), &id]);
+    (login, user)
+}
+
 /// `reset_password()` of the user `id` with a slashed password: the hash set,
 /// the key cleared and the nag emptied; the login and email, for the notice.
 pub async fn reset_password(
@@ -562,11 +588,7 @@ pub async fn reset_password(
     let new_pass = password.to_vec();
     do_action("password_reset", &[&id, &new_pass]);
     let mut steps = Steps::new(write);
-    let (login, mut user) = step!(steps, user(id)).unwrap_or_default();
-    user.pass = steps.keep(hash_password(password).map_err(Error::Random));
-    user.activation_key.clear();
-    step!(steps, update_user(id, &user));
-    do_action("wp_set_password", &[&new_pass, &id]);
+    let (login, user) = set_password(&mut steps, password, id).await;
     let (nag, none) = (Value::Bool(false), Value::Null);
     let meta = async |w: &mut Write<'_>| {
         update_metadata(w, Meta::User, id, "default_password_nag", &nag, &none).await

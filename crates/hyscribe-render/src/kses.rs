@@ -659,16 +659,16 @@ fn collapse_dashes(content: &[u8]) -> Vec<u8> {
 }
 
 /// One attribute from `wp_kses_hair()`.
-struct Hair {
-    name: Vec<u8>,
-    value: Vec<u8>,
-    whole: Vec<u8>,
+pub(crate) struct Hair {
+    pub(crate) name: Vec<u8>,
+    pub(crate) value: Vec<u8>,
+    pub(crate) whole: Vec<u8>,
     valueless: bool,
 }
 
 /// `wp_kses_hair()`: the attributes as the HTML API reads them, URLs
 /// through `wp_kses_bad_protocol()`, values encoded again.
-fn wp_kses_hair(attributes: &[u8]) -> Vec<Hair> {
+pub(crate) fn wp_kses_hair(attributes: &[u8]) -> Vec<Hair> {
     let mut processor = TagProcessor::new(&[&b"<wp "[..], attributes, b">"].concat());
     processor.next_tag(None, None);
     let names = processor

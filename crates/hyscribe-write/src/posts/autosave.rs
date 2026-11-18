@@ -102,7 +102,7 @@ pub async fn wp_create_post_autosave(
     if draft && post.author == ctx.user && !locked(write, ctx, id).await? {
         let args = update_args(write, ctx, id, change).await?;
         // `wp_save_post_revision()` does nothing while `DOING_AUTOSAVE`.
-        return insert(write, ctx, args).await.map(|(id, ..)| id);
+        return insert(write, ctx, args, None).await.map(|(id, ..)| id);
     }
     let different = fields.fields().iter().any(|(value, of)| {
         value
@@ -138,11 +138,11 @@ pub async fn wp_create_post_autosave(
                 kept.date_gmt = String::new();
             };
             let args = update_args(write, ctx, old, &change).await?;
-            insert(write, ctx, args).await.map(|(id, ..)| id)
+            insert(write, ctx, args, None).await.map(|(id, ..)| id)
         }
         None => {
             fields.set(&mut args);
-            let (revision, ..) = insert(write, ctx, args).await?;
+            let (revision, ..) = insert(write, ctx, args, None).await?;
             // `_wp_put_post_revision`: wp_save_revisioned_meta_fields().
             for value in get_metadata(write, Meta::Post, id, "footnotes").await? {
                 let value = hooks::slash(value);

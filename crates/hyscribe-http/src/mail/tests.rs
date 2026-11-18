@@ -59,6 +59,37 @@ pub(crate) fn failing(failing: bool) {
     RECORDED.with(|(recorder, _)| recorder.failing.store(failing, Ordering::Relaxed));
 }
 
+/// `mails` as `reference/mail/run.php` prints those of its save `case`,
+/// a line each, or `case/plain\t-` for none.
+pub(crate) fn printed(case: &str, mails: &[Mail]) -> Vec<String> {
+    let label = format!("{case}/plain");
+    let escaped = |field: &[u8]| {
+        let field = String::from_utf8_lossy(field).replace('\\', "\\\\");
+        let field = field.replace('\t', "\\t").replace('\n', "\\n");
+        field.replace('\r', "\\r")
+    };
+    let line = |mail: &Mail| {
+        let fields = [&mail.to, &mail.subject, &mail.message, &mail.headers];
+        let fields: Vec<String> = fields.into_iter().map(|field| escaped(field)).collect();
+        format!("{label}\t{}", fields.join("\t"))
+    };
+    match mails {
+        [] => vec![format!("{label}\t-")],
+        mails => mails.iter().map(line).collect(),
+    }
+}
+
+/// What PHP's save `case` hands `wp_mail()`, as `reference/mail/golden.sh`
+/// recorded it.
+pub(crate) fn php_mails(case: &str) -> Vec<String> {
+    let label = format!("{case}/plain\t");
+    include_str!("../../tests/golden/mail-flows.tsv")
+        .lines()
+        .filter(|line| line.starts_with(&label))
+        .map(str::to_string)
+        .collect()
+}
+
 fn mail(subject: &[u8]) -> Mail {
     Mail {
         to: b"a@example.test".to_vec(),

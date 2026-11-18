@@ -33,12 +33,31 @@ case "${1:-}" in
     "$DOCKER" network inspect "$NETWORK" >/dev/null 2>&1 || "$DOCKER" network create "$NETWORK" >/dev/null
     # The server's Unix socket, for the tests of a socket DB_HOST.
     mkdir -p "$SOCKETS"
+    # A killed container's socket and lock stop the next server; the image's
+    # user owns them, so the image removes them.
+    if [ -n "$(ls -A "$SOCKETS")" ]; then
+      "$DOCKER" run --rm -v "$SOCKETS:/run/mysqld" --entrypoint rm "$IMAGE" -f \
+        /run/mysqld/mysqld.sock /run/mysqld/mysqld.sock.lock /run/mysqld/mysqld.pid
+    fi
+    # The data lives in memory (HYSCRIBE_DB_TMPFS, a size or "off"): every test
+    # run reloads the fixture, so nothing is lost, and writing tests no longer
+    # wait on the disk.
+    data=()
+    [ "${HYSCRIBE_DB_TMPFS:-4g}" = off ] || data=(--tmpfs "/var/lib/mysql:rw,size=${HYSCRIBE_DB_TMPFS:-4g}")
     "$DOCKER" run -d --name "$NAME" --network "$NETWORK" --network-alias db -p "127.0.0.1:$PORT:3306" \
-      -v "$SOCKETS:/run/mysqld" \
+      -v "$SOCKETS:/run/mysqld" "${data[@]}" \
       -e MARIADB_ROOT_PASSWORD=reference-only -e MARIADB_DATABASE=wordpress \
       -e MARIADB_USER=wordpress -e MARIADB_PASSWORD=reference-only "$IMAGE" >/dev/null
     # Over TCP: the image's first, initialising server listens on the socket only.
+    # Five minutes at most, then the server's log says why it did not start.
+    tries=0
     until "$DOCKER" exec "$NAME" mariadb --protocol=tcp -h127.0.0.1 -uroot -preference-only -e 'SELECT 1' >/dev/null 2>&1; do
+      tries=$((tries + 1))
+      if [ "$tries" -ge 300 ]; then
+        "$DOCKER" logs --tail 20 "$NAME" >&2 || true
+        echo "$NAME did not start within 300 seconds" >&2
+        exit 1
+      fi
       sleep 1
     done
     "$DOCKER" exec -i "$NAME" mariadb -uroot -preference-only wordpress < "$dump"

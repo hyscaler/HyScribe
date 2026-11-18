@@ -26,7 +26,7 @@ use hyscribe_write::users::{
 use super::screen::update_user_meta;
 use super::users::{can_promote, retrieve_password_mail};
 use super::{Acting, Ajax, Mailed, Saving, Stop, id_of, text};
-use crate::mail::{EMAIL_FAILURE, MailSite, Queued};
+use crate::mail::{EMAIL_FAILURE, MailSite, Queued, queue_changes};
 use hyscribe_mail::email_change_request;
 
 /// What PHP cannot go on with, or shows again: not ported.
@@ -97,11 +97,12 @@ fn user_url(url: &[u8]) -> Vec<u8> {
 }
 
 /// `edit_user( $user_id )` by `current`: the user `id`, 0 for a new one,
-/// from `$_POST`, its email the one `email` (unslashed) leaves. The user's
-/// ID; a form with errors, which PHP shows again, is not ported.
+/// from `$_POST`, its email the one `email` (unslashed) leaves, and an
+/// update's notices to the user queued. The user's ID; a form with errors,
+/// which PHP shows again, is not ported.
 async fn edit_user(
     write: &mut Write<'_>,
-    asked: &Asked<'_>,
+    (asked, site): (&Asked<'_>, &dyn Acting),
     (id, current): (u64, &Caps),
     email: Option<Vec<u8>>,
 ) -> Result<u64, Stop> {
@@ -198,11 +199,12 @@ async fn edit_user(
     if wrong {
         return Err(unported("the user form shown again with its errors"));
     }
-    if update {
-        wp_update_user(write, &user).await.map_err(refused)
-    } else {
-        wp_insert_user(write, &user).await.map_err(refused)
+    if !update {
+        return wp_insert_user(write, &user).await.map_err(refused);
     }
+    let updated = wp_update_user(write, &user).await.map_err(refused)?;
+    queue_changes(write, asked.home, &updated, site.outbox()).await?;
+    Ok(updated.id)
 }
 
 /// `user-new.php`'s `createuser`: the new user, past `user_register`'s
@@ -219,7 +221,7 @@ pub(super) fn create<'a>(
         let current = Caps::load(write, asked.user, None, site.constants()).await?;
         arrays_refused(asked)?;
         let email = posted(asked, "email").map(|email| stripslashes(&email));
-        let id = edit_user(write, asked, (0, &current), email).await?;
+        let id = edit_user(write, (asked, site), (0, &current), email).await?;
         let none = Value::String(Vec::new());
         add_metadata(write, Meta::User, id, "dismissed_wp_pointers", &none, false).await?;
         let mail_site = MailSite::read(write, asked.home).await?;
@@ -298,7 +300,7 @@ async fn updated(
     }
     let current = Caps::load(write, asked.user, None, site.constants()).await?;
     let email = email.map(|email| stripslashes(&email));
-    edit_user(write, asked, (id, &current), email).await?;
+    edit_user(write, (asked, site), (id, &current), email).await?;
     let link = if id == asked.user {
         format!("{}/hs-admin/profile", asked.home)
     } else {

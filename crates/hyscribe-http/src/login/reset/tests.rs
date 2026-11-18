@@ -321,6 +321,55 @@ async fn shadow_mode_and_failed_writes_write_nothing() {
     }
 }
 
+/// A login hashes a password stored in an old format again and clears a
+/// pending reset key, as `wp_signon()` does, and its cookies are signed for
+/// the new hash; a write the database refuses logs nobody in.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_login_rehashes_old_passwords_and_clears_reset_keys() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let login = async |db: &Database, form: &str| {
+        let site = site(db, dir.path(), true).await;
+        let reply = send(&site, "POST", "/hs-login", "hyscribe_test_cookie=1", form).await;
+        (site, reply)
+    };
+    let db = loaded("UPDATE wp_users SET user_pass = MD5('old-format') WHERE ID = 706").await;
+    let (site, reply) = login(&db, "log=lost-reset&pwd=old-format").await;
+    assert_eq!(reply.status, StatusCode::FOUND);
+    let (pass, key) = stored(&db, 706).await;
+    assert!(pass.starts_with("$wp$2y$12$") && check_password(b"old-format", pass.as_bytes()));
+    assert_eq!(key, "");
+    let cookies = all(&reply.headers, axum::http::header::SET_COOKIE);
+    let auth = cookies[1].split(';').next().unwrap();
+    let again = send(&site, "GET", "/hs-login?redirect_to=%2Fx", auth, "").await;
+    assert_eq!(again.status, StatusCode::FOUND);
+    // A current hash: only the key is cleared.
+    let admin = "log=admin&pwd=reference-only-password";
+    let keyed = "UPDATE wp_users SET user_activation_key = 'k' WHERE ID = 1";
+    let db = loaded(keyed).await;
+    let current = stored(&db, 1).await.0;
+    assert_eq!(login(&db, admin).await.1.status, StatusCode::FOUND);
+    assert_eq!(stored(&db, 1).await, (current, String::new()));
+    // Writes refused at an unsupported database version, and a write the
+    // database fails.
+    let version = "UPDATE wp_options SET option_value = '1' WHERE option_name = 'db_version'";
+    for broken in [version, "DROP TABLE wp_usermeta"] {
+        let db = loaded(&format!("{keyed}; {broken}")).await;
+        let (site, refused) = login(&db, admin).await;
+        assert_eq!(
+            refused.status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{broken}"
+        );
+        let handle = Handle::current();
+        let key = tokio::task::spawn_blocking(move || {
+            let reads = LoginReads::new(&site, handle, crate::now());
+            reads.user_by_login(b"admin").unwrap().activation_key
+        });
+        assert_eq!(key.await.unwrap(), b"k", "{broken}");
+    }
+}
+
 /// Without a transport the reset mail is not sent: the key is kept, and
 /// the form answers PHP's `retrieve_password_email_failure`.
 #[tokio::test(flavor = "multi_thread")]

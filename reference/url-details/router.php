@@ -14,6 +14,10 @@ foreach ( file( __DIR__ . '/routes.tsv', FILE_IGNORE_NEW_LINES ) as $line ) {
 	}
 }
 header_remove( 'X-Powered-By' );
+// A route naming a query answers that query only, before the path alone.
+if ( isset( $routes[ $_SERVER['REQUEST_URI'] ] ) ) {
+	$path = $_SERVER['REQUEST_URI'];
+}
 if ( ! isset( $routes[ $path ] ) ) {
 	http_response_code( 404 );
 	echo 'Not Found';

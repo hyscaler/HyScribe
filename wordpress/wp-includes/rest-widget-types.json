@@ -1,0 +1,128 @@
+[
+    {
+        "id": "archives",
+        "name": "Archives",
+        "description": "A monthly archive of your site’s Posts.",
+        "is_multi": true,
+        "classname": "widget_archive"
+    },
+    {
+        "id": "block",
+        "name": "Block",
+        "description": "A widget containing a block.",
+        "is_multi": true,
+        "classname": "widget_block"
+    },
+    {
+        "id": "calendar",
+        "name": "Calendar",
+        "description": "A calendar of your site’s posts.",
+        "is_multi": true,
+        "classname": "widget_calendar"
+    },
+    {
+        "id": "categories",
+        "name": "Categories",
+        "description": "A list or dropdown of categories.",
+        "is_multi": true,
+        "classname": "widget_categories"
+    },
+    {
+        "id": "custom_html",
+        "name": "Custom HTML",
+        "description": "Arbitrary HTML code.",
+        "is_multi": true,
+        "classname": "widget_custom_html"
+    },
+    {
+        "id": "media_audio",
+        "name": "Audio",
+        "description": "Displays an audio player.",
+        "is_multi": true,
+        "classname": "widget_media_audio"
+    },
+    {
+        "id": "media_gallery",
+        "name": "Gallery",
+        "description": "Displays an image gallery.",
+        "is_multi": true,
+        "classname": "widget_media_gallery"
+    },
+    {
+        "id": "media_image",
+        "name": "Image",
+        "description": "Displays an image.",
+        "is_multi": true,
+        "classname": "widget_media_image"
+    },
+    {
+        "id": "media_video",
+        "name": "Video",
+        "description": "Displays a video from the media library or from YouTube, Vimeo, or another provider.",
+        "is_multi": true,
+        "classname": "widget_media_video"
+    },
+    {
+        "id": "meta",
+        "name": "Meta",
+        "description": "Login, RSS, & WordPress.org links.",
+        "is_multi": true,
+        "classname": "widget_meta"
+    },
+    {
+        "id": "nav_menu",
+        "name": "Navigation Menu",
+        "description": "Add a navigation menu to your sidebar.",
+        "is_multi": true,
+        "classname": "widget_nav_menu"
+    },
+    {
+        "id": "pages",
+        "name": "Pages",
+        "description": "A list of your site’s Pages.",
+        "is_multi": true,
+        "classname": "widget_pages"
+    },
+    {
+        "id": "recent-comments",
+        "name": "Recent Comments",
+        "description": "Your site’s most recent comments.",
+        "is_multi": true,
+        "classname": "widget_recent_comments"
+    },
+    {
+        "id": "recent-posts",
+        "name": "Recent Posts",
+        "description": "Your site’s most recent Posts.",
+        "is_multi": true,
+        "classname": "widget_recent_entries"
+    },
+    {
+        "id": "rss",
+        "name": "RSS",
+        "description": "Entries from any RSS or Atom feed.",
+        "is_multi": true,
+        "classname": "widget_rss"
+    },
+    {
+        "id": "search",
+        "name": "Search",
+        "description": "A search form for your site.",
+        "is_multi": true,
+        "classname": "widget_search"
+    },
+    {
+        "id": "tag_cloud",
+        "name": "Tag Cloud",
+        "description": "A cloud of your most used tags.",
+        "is_multi": true,
+        "classname": "widget_tag_cloud"
+    },
+    {
+        "id": "text",
+        "name": "Text",
+        "description": "Arbitrary text.",
+        "is_multi": true,
+        "classname": "widget_text"
+    }
+]

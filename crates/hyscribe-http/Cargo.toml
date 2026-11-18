@@ -20,6 +20,7 @@ hyscribe-auth.workspace = true
 hyscribe-config.workspace = true
 hyscribe-db.workspace = true
 hyscribe-fetch.workspace = true
+hyscribe-image.workspace = true
 hyscribe-kses.workspace = true
 hyscribe-mail.workspace = true
 hyscribe-model.workspace = true
@@ -27,7 +28,7 @@ hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true
 hyscribe-rest.workspace = true
 hyscribe-write.workspace = true
-tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 
 [dev-dependencies]
 hyscribe-model = { workspace = true, features = ["hook-log"] }

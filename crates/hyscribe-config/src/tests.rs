@@ -57,6 +57,7 @@ fn defaults_are_safe() {
             salts: Vec::new(),
             rest_public_users: true,
             http_outbound: false,
+            rss_allowed_hosts: Vec::new(),
             constants: Constants {
                 disallow_unfiltered_html: true,
                 allow_unfiltered_uploads: false,
@@ -71,6 +72,13 @@ fn defaults_are_safe() {
             alternate_wp_cron: false,
             upload_max_size: 64 << 20,
             mail: Mail::default(),
+            image_limits: ImageLimits {
+                bytes: 64 << 20,
+                width: 32_000,
+                height: 32_000,
+                area: 256_000_000,
+                memory: 1 << 30,
+            },
         }
     );
 }
@@ -127,6 +135,37 @@ fn reads_the_mail_keys() {
     // Without a relay the other keys are read but send nothing.
     let off = [("SMTP_TLS", "tls"), ("SMTP_PORT", "2465")];
     assert_eq!(mail(&off), Ok(Mail::default()));
+}
+
+/// The image limits as set, each a size or a whole number.
+#[test]
+fn reads_image_limits() {
+    let limits = |pairs: &[(&str, &str)]| from_map(&with(pairs)).map(|c| c.image_limits);
+    let set = limits(&[
+        ("IMAGE_MAX_BYTES", "1M"),
+        ("IMAGE_MAX_WIDTH", "100"),
+        ("IMAGE_MAX_HEIGHT", "4294967295"),
+        ("IMAGE_MAX_AREA", "5000"),
+        ("IMAGE_MAX_MEMORY", "2G"),
+    ]);
+    let expected = ImageLimits {
+        bytes: 1 << 20,
+        width: 100,
+        height: u32::MAX,
+        area: 5000,
+        memory: 2 << 30,
+    };
+    assert_eq!(set, Ok(expected));
+    for key in ["IMAGE_MAX_BYTES", "IMAGE_MAX_AREA", "IMAGE_MAX_MEMORY"] {
+        let refused = limits(&[(key, "0")]).unwrap_err().to_string();
+        assert!(refused.starts_with(&format!("{key} is invalid: must be a size")));
+    }
+    for key in ["IMAGE_MAX_WIDTH", "IMAGE_MAX_HEIGHT"] {
+        assert_eq!(
+            limits(&[(key, "0")]).unwrap_err().to_string(),
+            format!("{key} is invalid: must be a whole number from 1 to 4294967295")
+        );
+    }
 }
 
 /// The cron constants read as every yes or no key, false by default.
@@ -222,6 +261,10 @@ fn reads_every_key() {
         ("NONCE_SALT", "z"),
         ("REST_PUBLIC_USERS", "off"),
         ("HTTP_OUTBOUND", "on"),
+        (
+            "RSS_ALLOWED_HOSTS",
+            " Feeds.Example.org,,news.test , feeds.example.org",
+        ),
         ("EMPTY_TRASH_DAYS", "0"),
         ("LOGIN_LIMIT_ADDRESS", "1"),
         ("LOGIN_LIMIT_ACCOUNT", "1000"),
@@ -255,6 +298,7 @@ fn reads_every_key() {
     );
     assert!(!config.rest_public_users);
     assert!(config.http_outbound);
+    assert_eq!(config.rss_allowed_hosts, ["feeds.example.org", "news.test"]);
     assert_eq!(config.constants.empty_trash_days, 0);
     assert_eq!(server(&with(&[("PORT", "80")])).map(|s| s.port), Ok(80));
     let limits = LoginLimits {
@@ -395,6 +439,11 @@ fn rejects_bad_values() {
         ),
         ("REST_PUBLIC_USERS", "public", "must be true or false"),
         ("HTTP_OUTBOUND", "enabled", "must be true or false"),
+        (
+            "RSS_ALLOWED_HOSTS",
+            "https://feeds.example.org/",
+            "must be host names separated by commas, without schemes, ports or paths",
+        ),
         (
             "EMPTY_TRASH_DAYS",
             "-1",

@@ -14,10 +14,12 @@ use hyscribe_db::DbError;
 use hyscribe_model::{
     CalendarMonth, Comment, DateCount, Period, Post, PostQuery, Term, TermQuery, User,
 };
+use hyscribe_render::outbound::{Get, Response};
 use hyscribe_render::site::Site as RenderSite;
 use tokio::runtime::Handle;
 
 use crate::Site;
+use crate::outbound::{Write, remote_get, write};
 
 /// A memo of reads keyed by post and name.
 type ByPost<V> = RefCell<HashMap<(u64, String), V>>;
@@ -89,7 +91,44 @@ impl<'a> Reads<'a> {
     }
 }
 
+impl Reads<'_> {
+    /// Drops the memo of a transient just written.
+    fn forget_transient(&self, name: &str) {
+        let mut options = self.options.borrow_mut();
+        options.remove(&format!("_site_transient_{name}"));
+        options.remove(&format!("_site_transient_timeout_{name}"));
+    }
+}
+
 impl RenderSite for Reads<'_> {
+    fn remote_get(&self, url: &[u8], get: &Get) -> Option<Result<Response, Vec<u8>>> {
+        remote_get(self.site, self, url, get)
+    }
+
+    fn feed_allowed(&self, host: &[u8]) -> bool {
+        self.site.feed_hosts.iter().any(|allowed| allowed == host)
+    }
+
+    fn update_post_meta(&self, post_id: u64, key: &str, value: &[u8]) {
+        write(self.site, self, Write::Meta(post_id, key, value));
+        if self.site.writer.is_some() {
+            let written = Some(value.to_vec());
+            self.meta
+                .borrow_mut()
+                .insert((post_id, key.to_string()), written);
+        }
+    }
+
+    fn set_site_transient(&self, name: &str, value: &[u8], expiration: i64) {
+        write(self.site, self, Write::Transient(name, value, expiration));
+        self.forget_transient(name);
+    }
+
+    fn delete_site_transient(&self, name: &str) {
+        write(self.site, self, Write::Expire(name));
+        self.forget_transient(name);
+    }
+
     fn wp_hash(&self, data: &[u8]) -> Option<String> {
         let salt = self.site.salt("auth", |name| self.option(name))?;
         Some(hyscribe_phpser::hash_hmac_md5(data, &salt))

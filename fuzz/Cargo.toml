@@ -330,3 +330,38 @@ path = "fuzz_targets/upload_name.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "multipart_form"
+path = "fuzz_targets/multipart_form.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "upload_filetype"
+path = "fuzz_targets/upload_filetype.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "auth_cookie"
+path = "fuzz_targets/auth_cookie.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "forwarded_for"
+path = "fuzz_targets/forwarded_for.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "xml_reader"
+path = "fuzz_targets/xml_reader.rs"
+test = false
+doc = false
+bench = false

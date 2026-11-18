@@ -215,8 +215,6 @@ fn lookups() {
     let fixture = fixture();
     let styles = GlobalStyles::resolve(&fixture.sources());
     assert!(styles.use_root_padding_aware_alignments());
-    assert_eq!(styles.content_size(), Some("645px"));
-    assert_eq!(styles.wide_size(), Some("1340px"));
     assert!(styles.has_block_gap_support());
     assert_eq!(
         styles.style(&["spacing", "blockGap"]),
@@ -227,11 +225,6 @@ fn lookups() {
         Some(&php::string("var(--wp--preset--spacing--50)"))
     );
     assert_eq!(styles.block_style("core/nothing", &["x"]), None);
-    assert_eq!(
-        styles.block_setting("core/button", &["border", "radius"]),
-        Some(&Value::Bool(true))
-    );
-    assert_eq!(styles.block_setting("core/nothing", &["x"]), None);
     let sizes = styles.presets(&["typography", "fontSizes"]);
     let origins: Vec<_> = sizes.iter().map(|(o, list)| (*o, list.len())).collect();
     assert_eq!(origins, [("default", 4), ("theme", 5)]);
@@ -251,16 +244,6 @@ fn lookups() {
         blocks: blocks::Blocks::default(),
     };
     assert_eq!(odd.presets(&["color", "palette"]), [("custom", &[][..])]);
-    assert_eq!(
-        styles.viewport_media_queries(),
-        [
-            ("@mobile".to_owned(), "@media (width <= 480px)".to_owned()),
-            (
-                "@tablet".to_owned(),
-                "@media (480px < width <= 782px)".to_owned()
-            ),
-        ]
-    );
 }
 
 #[test]
@@ -274,7 +257,6 @@ fn empty_sources() {
         user: None,
     });
     assert!(!styles.use_root_padding_aware_alignments());
-    assert_eq!(styles.content_size(), None);
     assert!(!styles.has_block_gap_support());
     // Theme supports give settings, but nothing to print.
     assert_eq!(

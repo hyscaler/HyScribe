@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+<channel>
+	<title>Test &amp; Feed</title>
+	<link>http://pages.test:8080/</link>
+	<description>A test feed</description>
+	<item>
+		<title>Second post</title>
+		<link>http://pages.test:8080/second?a=1&amp;b=2</link>
+		<pubDate>Tue, 03 Nov 2026 10:20:30 +0000</pubDate>
+		<dc:creator><![CDATA[Ann <b>Author</b>]]></dc:creator>
+		<description><![CDATA[<p>Second <strong>post</strong> body with <script>alert(1)</script> and <a href="/rel" onclick="x()">a link</a>. One two three four five six seven eight nine ten eleven twelve.</p>]]></description>
+	</item>
+	<item>
+		<title>First &lt;em&gt;post&lt;/em&gt; &amp;amp; more&#8230;</title>
+		<link>http://pages.test:8080/first</link>
+		<pubDate>Mon, 02 Nov 2026 08:00:00 -0500</pubDate>
+		<author>first@example.com (First Author)</author>
+		<description>Plain &amp;nbsp;text&nbsp;description [...]</description>
+	</item>
+	<item>
+		<guid>http://pages.test:8080/guid-only</guid>
+		<pubDate>Wed, 04 Nov 2026 12:00:00 GMT</pubDate>
+		<description>Untitled item</description>
+	</item>
+	<item>
+		<title>   </title>
+		<guid isPermaLink="false">not-a-link</guid>
+		<pubDate>not a date</pubDate>
+		<content:encoded><![CDATA[<p>Only content</p>]]></content:encoded>
+	</item>
+	<item>
+		<title>Javascript link</title>
+		<link>javascript:alert(1)</link>
+		<pubDate>Sun, 01 Nov 2026 00:00:00 +0100</pubDate>
+	</item>
+</channel>
+</rss>

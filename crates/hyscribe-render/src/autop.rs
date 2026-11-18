@@ -572,7 +572,7 @@ fn paragraphs(text: &[u8]) -> Vec<&[u8]> {
 
 /// `wp_replace_in_html_tags( $text, array( $needle => $with ) )`: the
 /// replacement inside the elements `wp_html_split()` finds.
-fn replace_in_html_tags(text: &[u8], needle: &[u8], with: &[u8]) -> Vec<u8> {
+pub(crate) fn replace_in_html_tags(text: &[u8], needle: &[u8], with: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut comments = Next::new(text, b"-->");
     let mut cdata = Next::new(text, b"]]>");

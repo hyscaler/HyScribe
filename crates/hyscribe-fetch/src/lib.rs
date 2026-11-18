@@ -65,11 +65,13 @@ impl Args {
     }
 }
 
-/// A response: its status and its body, cut at the limit.
+/// A response: its status, its headers and its body, cut at the limit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fetched {
     /// The status code.
     pub status: u16,
+    /// The headers, names in lower case, in the order sent.
+    pub headers: Vec<(String, Vec<u8>)>,
     /// The body.
     pub body: Vec<u8>,
 }
@@ -277,6 +279,11 @@ where
     if let Some(location) = response.headers().get("location").filter(|_| redirect) {
         return Ok(Hop::Redirect(location.as_bytes().to_vec()));
     }
+    let headers = response
+        .headers()
+        .iter()
+        .map(|(name, value)| (name.as_str().to_string(), value.as_bytes().to_vec()))
+        .collect();
     let mut body = response.into_body();
     let mut read = Vec::new();
     while read.len() < limit {
@@ -287,7 +294,11 @@ where
         }
     }
     read.truncate(limit);
-    Ok(Hop::Done(Fetched { status, body: read }))
+    Ok(Hop::Done(Fetched {
+        status,
+        headers,
+        body: read,
+    }))
 }
 
 #[cfg(test)]

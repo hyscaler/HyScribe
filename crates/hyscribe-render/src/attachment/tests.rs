@@ -413,3 +413,15 @@ fn php_paths() {
     // The fixture site's own siteurl comes later, so this one is found first.
     assert_eq!(base(slashed), "http://t.test/files");
 }
+
+/// A named size constrains an image as the editor shows it, by the size's
+/// options, core's fixed sizes, or not at all for a size it does not know.
+#[test]
+fn sizes_are_constrained_for_the_editor() {
+    let site = site(vec![("medium_size_w", "300"), ("medium_size_h", "300")]);
+    let constrained = |size| image_constrain_size_for_editor(&site, (2000, 1000), size);
+    assert_eq!(constrained("medium"), (300, 150));
+    assert_eq!(constrained("thumbnail"), (128, 64));
+    assert_eq!(constrained("1536x1536"), (1536, 768));
+    assert_eq!(constrained("full"), (2000, 1000));
+}

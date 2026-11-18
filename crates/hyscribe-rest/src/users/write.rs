@@ -177,7 +177,10 @@ fn reassign_param(_: &Context, value: &Value) -> Checked<Value> {
 /// The roles the request gives, as strings.
 fn roles(params: &Params) -> Option<Vec<Vec<u8>>> {
     let roles = params.get("roles")?.as_array().unwrap_or_default();
-    Some(roles.iter().map(|(_, role)| role.to_php_string()).collect())
+    // Each once: `add_role()` skips a role the user has.
+    let mut seen = std::collections::HashSet::new();
+    let roles = roles.iter().map(|(_, role)| role.to_php_string());
+    Some(roles.filter(|role| seen.insert(role.clone())).collect())
 }
 
 /// `check_role_update()`: each role exists, and one's own roles keep

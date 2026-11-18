@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Sidebars, widgets and widget types for reference/rest/golden.sh (method,
+# target, flags), as a block theme answers them, over reference/rest/widgets.sql.
+GET	/?rest_route=/wp/v2/sidebars
+GET	/?rest_route=/wp/v2/sidebars&context=edit
+GET	/?rest_route=/wp/v2/sidebars&context=embed
+GET	/?rest_route=/wp/v2/sidebars&context=bogus
+GET	/?rest_route=/wp/v2/sidebars/wp_inactive_widgets
+GET	/?rest_route=/wp/v2/sidebars/wp_inactive_widgets&context=edit
+GET	/?rest_route=/wp/v2/sidebars/sidebar-1
+GET	/?rest_route=/wp/v2/sidebars/nope
+GET	/?rest_route=/wp/v2/sidebars&_fields=id,widgets
+GET	/?rest_route=/wp/v2/sidebars&_embed
+GET	/?rest_route=/wp/v2/widgets
+GET	/?rest_route=/wp/v2/widgets&context=edit
+GET	/?rest_route=/wp/v2/widgets&context=embed
+GET	/?rest_route=/wp/v2/widgets&sidebar=wp_inactive_widgets
+GET	/?rest_route=/wp/v2/widgets&sidebar=sidebar-1
+GET	/?rest_route=/wp/v2/widgets&sidebar[]=x
+GET	/?rest_route=/wp/v2/widgets/block-2
+GET	/?rest_route=/wp/v2/widgets/block-3&context=edit
+GET	/?rest_route=/wp/v2/widgets/block-99
+GET	/?rest_route=/wp/v2/widgets/pages-1
+GET	/?rest_route=/wp/v2/widgets/nope
+GET	/?rest_route=/wp/v2/widgets&_fields=id,instance.raw
+GET	/?rest_route=/wp/v2/widgets&_embed
+GET	/?rest_route=/wp/v2/widget-types
+GET	/?rest_route=/wp/v2/widget-types&context=edit
+GET	/?rest_route=/wp/v2/widget-types&context=embed
+GET	/?rest_route=/wp/v2/widget-types/block
+GET	/?rest_route=/wp/v2/widget-types/text&context=edit
+GET	/?rest_route=/wp/v2/widget-types/recent-posts&context=embed
+GET	/?rest_route=/wp/v2/widget-types/nope
+GET	/?rest_route=/wp/v2/widget-types&_fields=id,name
+OPTIONS	/?rest_route=/wp/v2/sidebars
+OPTIONS	/?rest_route=/wp/v2/widgets/block-2
+OPTIONS	/?rest_route=/wp/v2/widget-types
+HEAD	/?rest_route=/wp/v2/widgets

@@ -32,11 +32,12 @@ pub fn page_server() -> Option<SocketAddr> {
     })
 }
 
-/// The status, `Location` and body of the route of `path`, for the user
-/// agent `agent`: 404 for a path with no route.
-fn route(path: &str, agent: &str) -> (u16, Option<String>, Vec<u8>) {
+/// The status, `Location` and body of the route of `uri`, for the user
+/// agent `agent`: a route naming its query first, then its path alone; 404
+/// for a path with no route.
+fn route(uri: &str, agent: &str) -> (u16, Option<String>, Vec<u8>) {
     let routes = std::fs::read_to_string(folder().join("routes.tsv")).unwrap_or_default();
-    let found =
+    let of = |path: &str| {
         routes.lines().find_map(
             |line| match line.split('\t').collect::<Vec<_>>().as_slice() {
                 [route, status, what] if *route == path => {
@@ -44,14 +45,25 @@ fn route(path: &str, agent: &str) -> (u16, Option<String>, Vec<u8>) {
                 }
                 _ => None,
             },
-        );
+        )
+    };
+    let path = uri.split('?').next().unwrap_or_default();
+    let found = of(uri).or_else(|| of(path));
     match found {
         None => (404, None, b"Not Found".to_vec()),
         Some((status, what)) if (300..400).contains(&status) => (status, Some(what), Vec::new()),
         Some((status, file)) => {
             let page = std::fs::read(folder().join("pages").join(file)).unwrap_or_default();
-            let page = String::from_utf8_lossy(&page).replace("%agent%", agent);
-            (status, None, page.into_bytes())
+            // Bytes, not text: a page may be in another encoding.
+            let mut served = Vec::new();
+            let mut rest = page.as_slice();
+            while let Some(at) = rest.windows(7).position(|w| w == b"%agent%") {
+                served.extend(rest.iter().take(at));
+                served.extend(agent.as_bytes());
+                rest = rest.get(at + 7..).unwrap_or_default();
+            }
+            served.extend(rest);
+            (status, None, served)
         }
     }
 }
@@ -68,7 +80,7 @@ fn answer(mut stream: TcpStream) {
         request.extend(buffer.iter().take(read));
     }
     let request = String::from_utf8_lossy(&request).into_owned();
-    let path = request.split([' ', '?']).nth(1).unwrap_or_default();
+    let uri = request.split(' ').nth(1).unwrap_or_default();
     let agent = request
         .lines()
         .find_map(|line| {
@@ -76,12 +88,12 @@ fn answer(mut stream: TcpStream) {
             name.eq_ignore_ascii_case("user-agent").then_some(value)
         })
         .unwrap_or_default();
-    let (status, location, body) = route(path, agent);
+    let (status, location, body) = route(uri, agent);
     let location = location
         .map(|to| format!("Location: {to}\r\n"))
         .unwrap_or_default();
     let head = format!(
-        "HTTP/1.1 {status} Test\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n{location}\r\n",
+        "HTTP/1.1 {status} Test\r\nContent-Type: text/html;charset=UTF-8\r\nContent-Length: {}\r\nConnection: close\r\n{location}\r\n",
         body.len()
     );
     let _ = stream.write_all(&[head.into_bytes(), body].concat());
@@ -110,6 +122,9 @@ mod tests {
             page.ends_with("<title>Tester</title></head></html>\n"),
             "{page}"
         );
+        let xml = "/oembed/doctype.xml?maxwidth=500&maxheight=750&url=http%3A%2F%2Fpages.test%3A8080%2Foembed%2Fdoctype.html&dnt=1&format=";
+        assert!(get(&format!("GET {xml}json HTTP/1.1\r\n\r\n")).starts_with("HTTP/1.1 501 "));
+        assert!(get(&format!("GET {xml}xml HTTP/1.1\r\n\r\n")).ends_with("</oembed>\n"));
         let moved = get("GET /redirect HTTP/1.1\r\n\r\n");
         assert!(moved.contains("302 Test") && moved.contains("Location: /page.html\r\n"));
         assert!(

@@ -56,7 +56,9 @@ pub fn render_template(
     template: &[u8],
 ) -> (Vec<u8>, Assets) {
     let mut renderer = Renderer::new(theme, site, request);
-    let rendered = renderer.render(template);
+    // `get_the_block_template_html()` autoembeds before `do_blocks()`.
+    let embedded = renderer.autoembed(template);
+    let rendered = renderer.render(&embedded);
     let content = site_smilies(site, &wptexturize(&rendered, &CORE_SHORTCODE_TAGS));
     let html = [
         b"<div class=\"wp-site-blocks\">".as_slice(),
@@ -395,6 +397,7 @@ impl Renderer<'_> {
             Some("core/search") => self.search(block),
             Some("core/archives") => self.archives(block),
             Some("core/latest-posts") => self.latest_posts(block),
+            Some("core/rss") => self.rss(block),
             Some("core/categories") => self.categories(block),
             Some("core/navigation-link") => self.navigation_link(block),
             Some("core/navigation-submenu") => self.navigation_submenu(block),
@@ -607,7 +610,8 @@ impl Renderer<'_> {
             return Vec::new();
         }
         self.open_patterns.push(slug.to_vec());
-        let html = self.render_top_level(content);
+        let embedded = self.autoembed(content);
+        let html = self.render_top_level(&embedded);
         self.open_patterns.pop();
         html
     }
@@ -639,7 +643,8 @@ impl Renderer<'_> {
         // normalizing of older formats never reaches.
         let content = prepared("core/block", parsed).get_str("content").cloned();
         let outer = std::mem::replace(&mut self.pattern_overrides, content);
-        let html = self.render(&pattern.content);
+        let embedded = self.autoembed(&pattern.content);
+        let html = self.render(&embedded);
         self.pattern_overrides = outer;
         self.open_refs.pop();
         html

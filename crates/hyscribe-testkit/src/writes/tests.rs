@@ -165,6 +165,25 @@ async fn raw_writes_match_php_goldens() {
     .unwrap();
 }
 
+/// A time from five seconds before the run, such as one a test read
+/// before connecting, is the run's.
+#[tokio::test]
+async fn times_from_five_seconds_before_the_run_are_masked() {
+    let mut conn = MySqlConnection::connect_with(&options(&crate::fixture_database()))
+        .await
+        .unwrap();
+    let earlier = then(&[
+        "UPDATE wp_posts SET post_modified = UTC_TIMESTAMP() - INTERVAL 5 SECOND, \
+         comment_count = UNIX_TIMESTAMP() - 5 WHERE ID = 1",
+    ]);
+    let lines = changed_rows(&mut conn, steps(&[]), earlier).await.unwrap();
+    let values: Vec<&[u8]> = lines
+        .iter()
+        .map(|line| line.rsplit(|&b| b == b'\t').next().unwrap())
+        .collect();
+    assert_eq!(values, [&b"%now%"[..], b"%unix%"]);
+}
+
 #[tokio::test]
 async fn reports_differences_by_table_and_column() {
     let wrong = then(&[
@@ -301,7 +320,7 @@ fn masks_password_hashes_and_transient_expiries() {
 fn masks_times_and_new_ids() {
     let new = NewIds::from([(("wp_posts", b"12".to_vec()), b"%wp_posts:1%".to_vec())]);
     let masks = Masks {
-        start: (1_794_000_000, b"2026-11-14 10:00:00".to_vec()),
+        start: (1_793_999_995, b"2026-11-14 09:59:55".to_vec()),
         end: (1_794_000_002, b"2026-11-14 10:00:02".to_vec()),
         new,
     };
@@ -309,15 +328,15 @@ fn masks_times_and_new_ids() {
     let mask = |column: &str, value: &str| {
         String::from_utf8(masks.mask(posts, column, value.as_bytes())).unwrap()
     };
-    assert_eq!(mask("post_date", "2026-11-14 10:00:00"), "%now%");
+    assert_eq!(mask("post_date", "2026-11-14 09:59:55"), "%now%");
     assert_eq!(mask("post_date", "2026-11-14 10:00:02"), "%now%");
     assert_eq!(
         mask("post_date", "2026-11-14 10:00:03"),
         "2026-11-14 10:00:03"
     );
     assert_eq!(
-        mask("post_date", "2026-11-14 09:59:59"),
-        "2026-11-14 09:59:59"
+        mask("post_date", "2026-11-14 09:59:54"),
+        "2026-11-14 09:59:54"
     );
     assert_eq!(
         mask("post_date", "2026-11-14 10:00:011"),
@@ -477,7 +496,7 @@ fn masks_admin_email_keys_and_a_new_policy_page() {
 #[test]
 fn masks_the_times_events_are_rescheduled_to() {
     let masks = Masks {
-        start: (1_794_000_000, Vec::new()),
+        start: (1_793_999_995, Vec::new()),
         end: (1_794_000_002, Vec::new()),
         new: NewIds::new(),
     };

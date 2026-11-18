@@ -233,8 +233,9 @@ async fn writes_match_php(
         let unported = unported.iter().any(|(body, whos)| {
             *body == sent && (whos.is_empty() || whos.contains(&case.who.as_str()))
         });
-        // A request refused past its permission check is PHP's before it.
-        if response.status() == StatusCode::NOT_IMPLEMENTED {
+        // A request refused past its permission check is PHP's before it,
+        // unless PHP answers 501 too (a trash its type does not support).
+        if response.status() == StatusCode::NOT_IMPLEMENTED && case.status != 501 {
             assert!(case.flag("refused") || unported, "{what}");
             refused += 1;
             continue;

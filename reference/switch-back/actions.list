@@ -167,7 +167,7 @@ se-doomed	admin	POST	/?rest_route=/wp/v2/templates	{"slug":"doomed-template","th
 se-doomed-delete	admin	DELETE	/?rest_route=/wp/v2/templates/twentytwentyfive//doomed-template&force=true	-	wp_rest	X-WP-Nonce	200
 se-page	admin	POST	/?rest_route=/wp/v2/pages	{"title":"Templated page","status":"publish","template":"switch-back-template","content":"<!-- wp:paragraph -->\n<p>A page in the new template.</p>\n<!-- /wp:paragraph -->"}	wp_rest	X-WP-Nonce	201
 # The Trash off (EMPTY_TRASH_DAYS=0 in .env): trashing deletes for good.
-trash-off	-	RESTART	EMPTY_TRASH_DAYS=0	-	-	-	-
+trash-off	-	RESTART	EMPTY_TRASH_DAYS=0 DISABLE_WP_CRON=true	-	-	-	-
 scratch-d	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Scratch D","status":"publish"}	wp_rest	X-WP-Nonce	201
 scratch-e	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Scratch E","status":"draft"}	wp_rest	X-WP-Nonce	201
 trash-off-post	admin	GET	/hs-admin/post?post=%scratch-d%&action=trash	-	trash-post_%scratch-d%	_wpnonce	302

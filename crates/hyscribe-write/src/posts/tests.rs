@@ -2375,7 +2375,7 @@ async fn list_actions_match_php() {
         (b"hello-world-2".to_vec(), b"hello-world".to_vec())
     );
     let other = rolled_back(async |w, _| {
-        wp_unique_post_slug(w, b"x".to_vec(), (0, "publish"), "attachment", 0).await
+        wp_unique_post_slug(w, b"x".to_vec(), (0, "publish"), "nav_menu_item", 0).await
     })
     .await;
     assert!(unported(other));

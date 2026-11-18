@@ -263,7 +263,8 @@ fn attributes(text: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
             Some((value, end)) => {
                 let key = rest.get(..name).unwrap_or_default().to_ascii_lowercase();
                 found.push((key, value.to_vec()));
-                at += name + end + 1;
+                // The white space after it is skipped as a positional value would be.
+                at += name + end;
             }
             None => {
                 // A positional value: up to the next white space.

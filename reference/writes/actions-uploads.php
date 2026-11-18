@@ -105,11 +105,18 @@ return array(
 	'upload-async-again'    => $uploads_case( $uploads_handle( 'small.jpg', 'small.jpg' ), $uploads_handle( 'small.jpg', 'small.jpg' ) ),
 	'upload-async-scaled'   => $uploads_case( $uploads_handle( 'big.jpg', 'big.jpg' ) ),
 	'upload-async-rotated'  => $uploads_case( $uploads_handle( 'orient-6.jpg', 'orient-6.jpg' ) ),
+	'upload-async-scaled-rotated' => $uploads_case( $uploads_handle( 'big-orient-6.jpg', 'big-orient-6.jpg' ) ),
+	'upload-async-scaled-png' => $uploads_case( $uploads_handle( 'big.png', 'big.png' ) ),
+	'upload-async-edge'     => $uploads_case( $uploads_handle( 'edge-2560.jpg', 'edge-2560.jpg' ) ),
 	'upload-async-iptc'     => $uploads_case( $uploads_handle( 'iptc.jpg', 'iptc.jpg' ) ),
 	'upload-async-gif'      => $uploads_case( $uploads_handle( 'anim.gif', 'anim.gif' ) ),
 	'upload-async-webp'     => $uploads_case( $uploads_handle( 'lossy.webp', 'lossy.webp' ) ),
 	'upload-async-avif'     => $uploads_case( $uploads_handle( 'photo.avif', 'photo.avif' ) ),
 	'upload-rest-raw'       => $uploads_case( $uploads_rest( 'photo.jpg', 'photo.jpg', array(), false ) ),
+	'upload-rest-scaled'    => $uploads_case( $uploads_rest( 'big.jpg', 'big.jpg', array(), false ) ),
+	'upload-rest-rotated'   => $uploads_case( $uploads_rest( 'orient-6.jpg', 'orient-6.jpg', array(), false ) ),
+	'upload-rest-scaled-rotated' => $uploads_case( $uploads_rest( 'big-orient-3.jpg', 'big-orient-3.jpg', array(), false ) ),
+	'upload-rest-form-scaled' => $uploads_case( $uploads_rest( 'big-rgba.png', 'big-rgba.png', array( 'title' => 'Big form' ), true ) ),
 	'upload-rest-raw-given' => $uploads_case(
 		$uploads_rest(
 			'small.jpg',

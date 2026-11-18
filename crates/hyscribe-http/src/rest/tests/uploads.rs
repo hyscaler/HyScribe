@@ -437,7 +437,7 @@ async fn upload_routes_match_php() {
             site = uploading(sessions.path(), uploads.path()).await;
         }
     }
-    assert_eq!((matched, unported), (6 * 34 - 3 * 2, 3 * 2));
+    assert_eq!((matched, unported), (6 * 49 - 3 * 2, 3 * 2));
 }
 
 /// An upload's plan is written by `rest::uploads`, never by `act()`.
@@ -551,8 +551,6 @@ async fn uploads_stop_short() {
         format!("{rest}\traw,type=image/jpeg,md5\tsmall.jpg\t-"),
         format!("{rest}\trestfile,part=other\tsmall.jpg\t-"),
         format!("{rest}\trestfile,kind=image/x-unknown\tsmall.jpg\t-"),
-        format!("{rest}\traw,type=image/jpeg\tbig.jpg\t-"),
-        format!("{rest}\traw,type=image/jpeg\torient-6.jpg\t-"),
         format!("{async_upload}\tform,nonce\tnotes.txt\tshort=1"),
         format!("{media_new}\tform,nonce\tnotes.txt\thtml-upload=Upload"),
     ] {

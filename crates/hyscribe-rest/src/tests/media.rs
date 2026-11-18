@@ -6,6 +6,7 @@
 
 use hyscribe_image::subsizes::Crop;
 use hyscribe_model::Post;
+use hyscribe_phpser::{Key, Value};
 
 use super::posts::{Oracle, replay};
 use super::site;
@@ -160,15 +161,10 @@ fn revisions_routes_are_their_own() {
     assert!(crate::revisions::endpoints("/wp/v2/users").is_none());
 }
 
-/// What only those who may edit them see and is not ported: a scaled
-/// image's missing sizes, which PHP reads from its original file, a
-/// video player, a file size missing from the metadata, and a revision
-/// with a gallery shortcode.
-const UNPORTED: [(&str, &str); 17] = [
-    (
-        "administrator",
-        "/?rest_route=/wp/v2/media/9139&context=edit",
-    ),
+/// What only those who may edit them see and is not ported: a video
+/// player, a file size missing from the metadata, and a revision with a
+/// gallery shortcode.
+const UNPORTED: [(&str, &str); 15] = [
     ("administrator", "/?rest_route=/wp/v2/media/9140"),
     (
         "administrator",
@@ -185,7 +181,6 @@ const UNPORTED: [(&str, &str); 17] = [
     ),
     ("administrator", "/?rest_route=/wp/v2/media/9157"),
     ("administrator", "/?rest_route=/wp/v2/posts/9106/revisions"),
-    ("editor", "/?rest_route=/wp/v2/media/9139&context=edit"),
     ("editor", "/?rest_route=/wp/v2/media/9140"),
     ("editor", "/?rest_route=/wp/v2/media/9140&_fields=caption"),
     ("editor", "/?rest_route=/wp/v2/media/9141"),
@@ -217,4 +212,85 @@ fn theme_test_data_media_match_php() {
         6 * 16,
         &[],
     );
+}
+
+/// The scaled image 9139's `missing_image_sizes` as the administrator
+/// gets them over an uploads folder as `deny` names it.
+fn missing_of_scaled(deny: &'static [&'static str]) -> (u16, String) {
+    let oracle = Oracle {
+        deny,
+        ..oracle(false)
+    };
+    let get = hyscribe_phpser::parse_str(b"context=edit&_fields=missing_image_sizes");
+    let request = crate::Request {
+        method: "GET",
+        route: b"/wp/v2/media/9139",
+        uri: b"/",
+        get: get.as_array().unwrap_or_default(),
+        post: &[],
+        cookie_user: 1,
+        origin: None,
+        nonce: Some(b"%nonce%"),
+        remote_addr: b"",
+        user_agent: None,
+        method_override: None,
+        content_type: None,
+        body: b"",
+        host: None,
+        now: 0,
+    };
+    let served = crate::serve(&oracle, &request);
+    (served.status, String::from_utf8(served.body).unwrap())
+}
+
+/// The original image's size, as PHP reads it from the file, is the full
+/// size the missing sizes are made of: the scaled copy's metadata says
+/// 2560 by 1600, an original of 1000 by 600 leaves out the larger sizes.
+/// A site that does not read its uploads answers 501, and so does a name
+/// that leaves the attachment's folder.
+#[test]
+fn missing_sizes_follow_the_original_image() {
+    let (status, body) = missing_of_scaled(&[]);
+    assert_eq!(status, 200);
+    assert!(body.contains("\"large\""), "{body}");
+    let (status, body) = missing_of_scaled(&["small_originals"]);
+    assert_eq!(status, 200);
+    assert!(!body.contains("\"large\""), "{body}");
+    assert!(body.contains("\"medium_large\""), "{body}");
+    assert_eq!(missing_of_scaled(&["no_uploads"]).0, 501);
+    let oracle = Oracle {
+        deny: &["small_originals"],
+        ..oracle(false)
+    };
+    let join = crate::media::original_path;
+    assert_eq!(
+        join("2026/10/a-scaled.jpg", "a.jpg").unwrap(),
+        "2026/10/a.jpg"
+    );
+    assert_eq!(join("a-scaled.jpg", "a.jpg").unwrap(), "a.jpg");
+    for (attached, original) in [
+        ("2026/10/a-scaled.jpg", "../a.jpg"),
+        ("2026/10/a-scaled.jpg", "x/../../a.jpg"),
+        ("2026/10/a-scaled.jpg", "/etc/a.jpg"),
+        ("/etc/a-scaled.jpg", "a.jpg"),
+        ("a-scaled.jpg", "../a.jpg"),
+    ] {
+        assert_eq!(join(attached, original), None, "{attached} {original}");
+    }
+    let escaping = Value::Array(vec![(
+        Key::String(b"original_image".to_vec()),
+        Value::String(b"../big.jpg".to_vec()),
+    )]);
+    let found = crate::media::original_image_size(&context(&oracle), 9139, &escaping);
+    assert!(found.is_err());
+    // A name beside the attached file, or none, is read or skipped.
+    let beside = Value::Array(vec![(
+        Key::String(b"original_image".to_vec()),
+        Value::String(b"big.jpg".to_vec()),
+    )]);
+    let found = crate::media::original_image_size(&context(&oracle), 9139, &beside);
+    assert_eq!(found.unwrap(), Some((1000, 600)));
+    let none = Value::Array(Vec::new());
+    let found = crate::media::original_image_size(&context(&oracle), 9139, &none);
+    assert_eq!(found.unwrap(), None);
 }

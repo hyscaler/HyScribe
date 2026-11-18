@@ -31,6 +31,9 @@ fn slug_of_an_attribute() {
             "grayscale",
         ),
         ("var:preset|duotone|a var(--wp--preset--duotone--b)", "a"),
+        // A form with no slug leaves the other its turn.
+        ("var:preset|duotone| var(--wp--preset--duotone--b)", "b"),
+        ("var(--wp--preset--duotone--) var:preset|duotone|a", "a"),
         ("unset", ""),
         ("", ""),
     ] {

@@ -2,7 +2,6 @@
 	/?paged=2	loading,oembed,rss,shortcode,term-ties
 	/?paged=3	loading,shortcode
 	/?paged=6	term-ties
-	/?p=21	loading,shortcode
 	/?p=34	oembed,rss,term-ties
 	/?p=555	loading,shortcode
 	/?p=568	loading,shortcode
@@ -132,7 +131,6 @@ wp_attachment_pages_enabled=1	/?attachment_id=821	attachment-pages
 	/?feed=atom	enclosures,oembed,rss,term-ties
 	/?feed=rdf	oembed,rss,term-ties
 	/?tag=content&feed=atom	enclosures,loading,oembed,rss,shortcode,term-ties
-	/?s=lorem&feed=rss2	loading,shortcode
 	/no/such/path/	loading,oembed,rss,shortcode,term-ties
 show_on_front=page&page_on_front=701&page_for_posts=703	/?page_id=703	loading,oembed,rss,shortcode,term-ties
 show_on_front=page&page_on_front=701&page_for_posts=703	/?page_id=703&paged=2	loading,oembed,rss,shortcode,term-ties

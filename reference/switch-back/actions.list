@@ -139,6 +139,29 @@ admin-email	admin	POST	/hs-admin/options	option_page=general&action=update&_wp_h
 general-notices	admin	GET	/hs-admin/options-general?settings-updated=true	-	-	-	200
 dismiss-email	admin	GET	/hs-admin/options?dismiss=new_admin_email	-	dismiss-1-new_admin_email	_wpnonce	302
 admin-email-again	admin	POST	/hs-admin/options	option_page=general&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-general.php&blogname=Switch+Back+Site&blogdescription=Saved+by+HyScribe&site_icon=0&new_admin_email=new-admin%40example.test&default_role=subscriber&WPLANG=&timezone_string=UTC%2B0&date_format=F+j%2C+Y&date_format_custom=F+j%2C+Y&time_format=g%3Ai+a&time_format_custom=g%3Ai+a&start_of_week=1	general-options	_wpnonce	302
+# Uploads: images over REST (one attached to the REST post and made its featured image) and
+# through async-upload (a plain upload and the media modal's), changed and deleted.
+rest-media	admin	POST	/?rest_route=/wp/v2/media	upload:file:wide.jpg:title=REST+image&alt_text=A+wide+REST+picture&caption=REST+caption&post=%rest-post%	wp_rest	X-WP-Nonce	201
+rest-media-png	admin	POST	/?rest_route=/wp/v2/media	upload:file:large.png:title=REST+png&status=publish	wp_rest	X-WP-Nonce	201
+rest-featured	admin	POST	/?rest_route=/wp/v2/posts/%rest-post%	{"featured_media":%rest-media%}	wp_rest	X-WP-Nonce	200
+async-plain	admin	POST	/hs-admin/async-upload	upload:async-upload:small.jpg:short=1&post_id=%rest-page%	media-form	_wpnonce	200
+async-modal	admin	POST	/hs-admin/async-upload	upload:async-upload:orient-6.jpg:action=upload-attachment&name=orient-6.jpg	media-form	_wpnonce	200
+async-gif	admin	POST	/hs-admin/async-upload	upload:async-upload:still.gif:action=upload-attachment&name=still.gif&post_id=%rest-post%	media-form	_wpnonce	200
+# The site editor's saves over REST: global styles, a template and a template part
+# of the theme customised, a new template and part, one deleted, then a page using
+# the new template.
+se-single	admin	POST	/?rest_route=/wp/v2/templates	{"slug":"single","theme":"twentytwentyfive","title":"Single Posts","description":"Customised in HyScribe","content":"<!-- wp:template-part {\"slug\":\"header\",\"tagName\":\"header\"} /-->\n\n<!-- wp:paragraph -->\n<p>Single template saved from HyScribe.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:post-featured-image /-->\n\n<!-- wp:post-title /-->\n\n<!-- wp:post-content /-->\n\n<!-- wp:comments -->\n<div class=\"wp-block-comments\"><!-- wp:comment-template -->\n<!-- wp:comment-content /-->\n<!-- /wp:comment-template --></div>\n<!-- /wp:comments -->\n\n<!-- wp:template-part {\"slug\":\"footer\",\"tagName\":\"footer\"} /-->","status":"publish"}	wp_rest	X-WP-Nonce	201
+se-footer	admin	POST	/?rest_route=/wp/v2/template-parts	{"slug":"footer","theme":"twentytwentyfive","area":"footer","title":"Footer","content":"<!-- wp:paragraph -->\n<p>Footer saved from HyScribe.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+se-part	admin	POST	/?rest_route=/wp/v2/template-parts	{"slug":"switch-back-part","theme":"twentytwentyfive","area":"uncategorized","title":"Switch back part","content":"<!-- wp:paragraph -->\n<p>A part made in HyScribe.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+# The global styles post PHP's site editor makes on its first view (HyScribe only saves
+# into it), added as PHP stores it; the guid carries the site's address.
+se-seed	-	SQL	INSERT INTO wp_posts (post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt, post_status, comment_status, ping_status, post_password, post_name, to_ping, pinged, post_modified, post_modified_gmt, post_content_filtered, post_parent, guid, menu_order, post_type, post_mime_type, comment_count) VALUES (1, UTC_TIMESTAMP(), UTC_TIMESTAMP(), '{"version":3,"isGlobalStylesUserThemeJSON":true}', 'Custom Styles', '', 'publish', 'closed', 'closed', '', 'wp-global-styles-twentytwentyfive', '', '', UTC_TIMESTAMP(), UTC_TIMESTAMP(), '', 0, '', 0, 'wp_global_styles', '', 0); SET @gs = LAST_INSERT_ID(); UPDATE wp_posts SET guid = CONCAT('http://127.0.0.1:%port%/?p=', @gs) WHERE ID = @gs; INSERT INTO wp_term_relationships (object_id, term_taxonomy_id, term_order) SELECT @gs, tt.term_taxonomy_id, 0 FROM wp_term_taxonomy tt JOIN wp_terms t USING (term_id) WHERE tt.taxonomy = 'wp_theme' AND t.slug = 'twentytwentyfive'; UPDATE wp_term_taxonomy tt JOIN wp_terms t USING (term_id) SET tt.count = tt.count + 1 WHERE tt.taxonomy = 'wp_theme' AND t.slug = 'twentytwentyfive'; SELECT @gs	-	-	-	-
+se-styles	admin	POST	/?rest_route=/wp/v2/global-styles/%se-seed%	{"styles":{"color":{"background":"#fdf2d0","text":"#1b1b1b"},"typography":{"fontSize":"19px"}},"settings":{"color":{"custom":false}}}	wp_rest	X-WP-Nonce	200
+se-custom	admin	POST	/?rest_route=/wp/v2/templates	{"slug":"switch-back-template","theme":"twentytwentyfive","title":"Switch back template","description":"A template made in HyScribe","content":"<!-- wp:template-part {\"slug\":\"header\",\"tagName\":\"header\"} /-->\n\n<!-- wp:paragraph -->\n<p>Custom template saved from HyScribe.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:template-part {\"slug\":\"switch-back-part\"} /-->\n\n<!-- wp:post-content /-->","status":"publish"}	wp_rest	X-WP-Nonce	201
+se-custom-update	admin	POST	/?rest_route=/wp/v2/templates/twentytwentyfive//switch-back-template	{"title":"Switch back template, renamed"}	wp_rest	X-WP-Nonce	200
+se-doomed	admin	POST	/?rest_route=/wp/v2/templates	{"slug":"doomed-template","theme":"twentytwentyfive","title":"Doomed template","content":"<!-- wp:paragraph -->\n<p>Gone soon.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+se-doomed-delete	admin	DELETE	/?rest_route=/wp/v2/templates/twentytwentyfive//doomed-template&force=true	-	wp_rest	X-WP-Nonce	200
+se-page	admin	POST	/?rest_route=/wp/v2/pages	{"title":"Templated page","status":"publish","template":"switch-back-template","content":"<!-- wp:paragraph -->\n<p>A page in the new template.</p>\n<!-- /wp:paragraph -->"}	wp_rest	X-WP-Nonce	201
 # The Trash off (EMPTY_TRASH_DAYS=0 in .env): trashing deletes for good.
 trash-off	-	RESTART	EMPTY_TRASH_DAYS=0	-	-	-	-
 scratch-d	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Scratch D","status":"publish"}	wp_rest	X-WP-Nonce	201
@@ -149,3 +172,17 @@ comment-9	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Trash+off%2
 comment-10	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Trash+off%2C+deleted+with+Ajax.	-	-	302
 trash-off-comment	admin	GET	/hs-admin/comment?action=trashcomment&c=9	-	delete-comment_9	_wpnonce	302
 trash-off-ajax	admin	POST	/hs-admin/admin-ajax	action=delete-comment&id=10&trash=1	delete-comment_10	_ajax_nonce	200
+# Cron (DISABLE_WP_CRON, so only hyscribe cron run works): a post scheduled 65 seconds ahead
+# (PHP publishes a date within the current minute at once) published, a post and a comment
+# trashed 40 days ago deleted.
+cron-restart	-	RESTART	EMPTY_TRASH_DAYS=30 DISABLE_WP_CRON=true	-	-	-	-
+# The daily wp_scheduled_delete event PHP schedules on a wp-admin request, which the fixture has not had.
+cron-schedule	-	SQL	UPDATE wp_options SET option_value = CONCAT('a:', SUBSTRING_INDEX(SUBSTRING_INDEX(option_value, ':', 2), ':', -1) + 1, ':{i:1000000000;a:1:{s:19:"wp_scheduled_delete";a:1:{s:32:"40cd750bba9870f18aada2478b24840a";a:3:{s:8:"schedule";s:5:"daily";s:4:"args";a:0:{}s:8:"interval";i:86400;}}}', SUBSTRING(option_value, LOCATE('{', option_value) + 1)) WHERE option_name = 'cron'	-	-	-	-
+scratch-cron-future	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A cron scheduled post","content":"<!-- wp:paragraph -->\n<p>Published by HyScribe cron.</p>\n<!-- /wp:paragraph -->","status":"future","date_gmt":"%now+65%"}	wp_rest	X-WP-Nonce	201
+scratch-cron-old	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A cron trashed post","status":"publish"}	wp_rest	X-WP-Nonce	201
+scratch-cron-old-trash	admin	DELETE	/?rest_route=/wp/v2/posts/%scratch-cron-old%	-	wp_rest	X-WP-Nonce	200
+comment-11	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Trashed+and+forgotten.	-	-	302
+trash-comment-11	admin	GET	/hs-admin/comment?action=trashcomment&c=11	-	delete-comment_11	_wpnonce	302
+age-trash	-	SQL	UPDATE wp_postmeta SET meta_value = CAST(meta_value AS UNSIGNED) - 3456000 WHERE meta_key = '_wp_trash_meta_time' AND post_id = %scratch-cron-old%; UPDATE wp_commentmeta SET meta_value = CAST(meta_value AS UNSIGNED) - 3456000 WHERE meta_key = '_wp_trash_meta_time' AND comment_id = 11	-	-	-	-
+wait-for-future	-	SLEEP	67	-	-	-	-
+cron-run	-	CRON	-	-	-	-	-

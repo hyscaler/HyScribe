@@ -36,6 +36,10 @@ fn host() -> String {
     format!("127.0.0.1:{port}")
 }
 
+fn host_port() -> String {
+    host().split_once(':').unwrap().1.to_string()
+}
+
 struct Answer {
     status: u16,
     headers: Vec<(String, String)>,
@@ -43,13 +47,15 @@ struct Answer {
 }
 
 /// One HTTP/1.1 request to `port` with `headers`, read to the end of the
-/// connection: a body starting with `{` is sent as JSON, else as a form.
+/// connection: a body starting with `{` is sent as JSON, else as a form,
+/// unless `kind` names its content type (a multipart upload).
 fn send(
     port: u16,
     method: &str,
     path: &str,
     headers: &[(&str, &str)],
-    body: Option<&str>,
+    body: Option<&[u8]>,
+    kind: Option<&str>,
 ) -> Answer {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
     stream
@@ -65,18 +71,18 @@ fn send(
     }
     let body = body.unwrap_or_default();
     if ["POST", "PUT", "PATCH"].contains(&method) {
-        let kind = match body.starts_with('{') {
+        let kind = kind.unwrap_or(match body.starts_with(b"{") {
             true => "application/json",
             false => "application/x-www-form-urlencoded",
-        };
+        });
         request.push_str(&format!(
             "Content-Type: {kind}\r\nContent-Length: {}\r\n",
             body.len()
         ));
     }
     request.push_str("\r\n");
-    request.push_str(body);
     stream.write_all(request.as_bytes()).unwrap();
+    stream.write_all(body).unwrap();
     let mut raw = Vec::new();
     stream.read_to_end(&mut raw).unwrap();
     let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
@@ -165,9 +171,15 @@ impl Server {
             .unwrap()
             .port();
         let db_port = std::env::var("HYSCRIBE_TEST_DB_PORT").unwrap_or_else(|_| "33061".into());
+        let db_name = std::env::var("HYSCRIBE_TEST_DB_NAME").unwrap_or_else(|_| "wordpress".into());
+        // The uploads folder PHP WordPress serves afterwards, kept across restarts.
+        let uploads = std::env::var("HYSCRIBE_SWITCH_BACK_OUT")
+            .map(|out| format!("UPLOADS_DIR={out}/uploads\n"))
+            .unwrap_or_default();
+        let extra = format!("{uploads}{extra}");
         let url = format!("http://{}", host());
         let mut env = format!(
-            "DB_HOST=127.0.0.1\nDB_PORT={db_port}\nDB_NAME=wordpress\nDB_USER=wordpress\n\
+            "DB_HOST=127.0.0.1\nDB_PORT={db_port}\nDB_NAME={db_name}\nDB_USER=wordpress\n\
              DB_PASSWORD=reference-only\nPORT={port}\nMODE=primary\nWP_HOME={url}\n\
              WP_SITEURL={url}\n{extra}"
         );
@@ -192,6 +204,16 @@ impl Server {
             std::thread::sleep(Duration::from_millis(100));
         }
         panic!("the server did not start");
+    }
+
+    /// `hyscribe cron run`: the due events once, the lines it prints.
+    fn cron(&self) -> String {
+        let output = Command::new(self.home.join("hyscribe"))
+            .env_clear()
+            .args(["cron", "run"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&[output.stdout, output.stderr].concat()).into_owned()
     }
 
     fn service(&self, verb: &str) -> String {
@@ -221,7 +243,8 @@ fn log_in(port: u16) -> (String, String) {
         "POST",
         "/hs-login",
         &[],
-        Some("log=admin&pwd=reference-only-password"),
+        Some(b"log=admin&pwd=reference-only-password"),
+        None,
     );
     assert_eq!(answer.status, 302, "login: {}", answer.body);
     let cookies: Vec<String> = answer
@@ -262,6 +285,92 @@ fn first_id(body: &str) -> Option<String> {
     (!digits.is_empty()).then_some(digits)
 }
 
+/// The ID an answer gives: a REST object's, the user global styles post a
+/// theme's links name, or the bare number an async upload answers.
+fn answered_id(body: &str) -> Option<String> {
+    let plain = body.trim();
+    if !plain.is_empty() && plain.chars().all(|c| c.is_ascii_digit()) {
+        return Some(plain.to_string());
+    }
+    let unescaped = body.replace('\\', "");
+    if let Some((_, rest)) = unescaped.split_once("wp/v2/global-styles/") {
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        if !digits.is_empty() {
+            return Some(digits);
+        }
+    }
+    first_id(body)
+}
+
+/// The text with each `%now+N%` the time N seconds from now, as REST's
+/// `date_gmt` takes it.
+fn timed(text: &str) -> String {
+    let Some((head, rest)) = text.split_once("%now+") else {
+        return text.to_string();
+    };
+    let (seconds, tail) = rest.split_once('%').unwrap();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + seconds.parse::<u64>().unwrap();
+    let (days, secs) = (i64::try_from(now / 86400).unwrap(), now % 86400);
+    // Civil date from the day count (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    let stamp = format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}",
+        secs / 3600,
+        secs % 3600 / 60,
+        secs % 60
+    );
+    timed(&format!("{head}{stamp}{tail}"))
+}
+
+/// A multipart form of the fields `k=v&k=v` and a file of the image corpus
+/// as `part`, and its content type.
+fn multipart(part: &str, file: &str, fields: &str) -> (Vec<u8>, String) {
+    let boundary = "----switchback7e1c";
+    let mut body = Vec::new();
+    for pair in fields.split('&').filter(|pair| !pair.is_empty()) {
+        let (name, value) = pair.split_once('=').unwrap();
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{}\r\n",
+                value.replace('+', " ")
+            )
+            .as_bytes(),
+        );
+    }
+    let corpus = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../hyscribe-image/tests/corpus/"
+    );
+    let bytes = std::fs::read(format!("{corpus}{file}")).unwrap();
+    let kind = match file.rsplit_once('.').unwrap().1 {
+        "png" => "image/png",
+        "gif" => "image/gif",
+        _ => "image/jpeg",
+    };
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"{part}\"; filename=\"{file}\"\r\n\
+             Content-Type: {kind}\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(&bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    (body, format!("multipart/form-data; boundary={boundary}"))
+}
+
 /// What no answer of HyScribe's may show.
 const BROKEN: [&str; 4] = ["database error", "Fatal error", "Warning:", "Notice:"];
 
@@ -270,7 +379,10 @@ const BROKEN: [&str; 4] = ["database error", "Fatal error", "Warning:", "Notice:
 fn writes_for_php_to_read() {
     let mut server = Server::start("");
     let (mut cookies, mut token) = log_in(server.port);
-    let list = include_str!("../../../reference/switch-back/actions.list");
+    let list = match std::env::var("HYSCRIBE_SWITCH_BACK_LIST") {
+        Ok(path) => std::fs::read_to_string(path).unwrap(),
+        Err(_) => include_str!("../../../reference/switch-back/actions.list").to_string(),
+    };
     let mut failures = Vec::new();
     // The REST writes' answers, for check.php to compare with PHP's reads.
     let mut rest = String::new();
@@ -289,8 +401,47 @@ fn writes_for_php_to_read() {
                 text.replace(&format!("%{case}%"), id)
             })
         };
-        let (path, body, action) = (named(path), named(body), named(action));
+        let (path, body, action) = (named(path), timed(&named(body)), named(action));
         let (path, body, action) = (path.as_str(), body.as_str(), action.as_str());
+        match method {
+            "SLEEP" => {
+                std::thread::sleep(Duration::from_secs(path.parse().unwrap()));
+                continue;
+            }
+            // The system's cron: the due events once, as `hyscribe cron run`.
+            "CRON" => {
+                let out = server.cron();
+                eprintln!("{case}\t{}", out.trim());
+                if !out.contains("cron: ") {
+                    failures.push(format!("{case}: cron said {out:?}"));
+                }
+                continue;
+            }
+            // Time a day count cannot wait for: SQL run in the fixture database.
+            "SQL" => {
+                let docker = std::env::var("DOCKER").unwrap_or_else(|_| "docker".into());
+                let container = std::env::var("HYSCRIBE_DB_CONTAINER")
+                    .unwrap_or_else(|_| "hyscribe-default-install-db".into());
+                let db =
+                    std::env::var("HYSCRIBE_TEST_DB_NAME").unwrap_or_else(|_| "wordpress".into());
+                let out = Command::new(docker)
+                    .args(["exec", &container, "mariadb", "-uroot", "-preference-only"])
+                    .args(["-N", "-B", &db, "-e", &path.replace("%port%", &host_port())])
+                    .output()
+                    .unwrap();
+                let shown = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                eprintln!("{case}\t{}\t{shown}", out.status);
+                // A last line that is a number names an ID, as an answer's would.
+                if let Some(id) = shown.lines().last().and_then(answered_id) {
+                    ids.push((case.to_string(), id));
+                }
+                if !out.status.success() {
+                    failures.push(format!("{case}: {}", String::from_utf8_lossy(&out.stderr)));
+                }
+                continue;
+            }
+            _ => {}
+        }
         if method == "RESTART" {
             server.service("stop");
             server = Server::start(&format!("{}\n", path.replace(' ', "\n")));
@@ -320,6 +471,17 @@ fn writes_for_php_to_read() {
             }
             _ => (path.to_string(), Some(signed(body))),
         };
+        // `upload:<part>:<corpus file>:<fields>` is a multipart form.
+        let (body, kind) = match body.as_deref().and_then(|b| b.strip_prefix("upload:")) {
+            Some(spec) => {
+                let [part, file, fields] = spec.splitn(3, ':').collect::<Vec<_>>()[..] else {
+                    panic!("bad upload: {line}");
+                };
+                let (bytes, kind) = multipart(part, file, fields);
+                (Some(bytes), Some(kind))
+            }
+            None => (body.map(String::into_bytes), None),
+        };
         let mut headers = vec![(
             "Cookie",
             if user == "admin" {
@@ -331,12 +493,20 @@ fn writes_for_php_to_read() {
         if let Some(nonce) = nonce.as_deref().filter(|_| header) {
             headers.push((field, nonce));
         }
-        let answer = send(server.port, method, &path, &headers, body.as_deref());
-        if path.contains("rest_route=") && [200, 201].contains(&answer.status) {
-            if let Some(id) = first_id(&answer.body) {
+        let answer = send(
+            server.port,
+            method,
+            &path,
+            &headers,
+            body.as_deref(),
+            kind.as_deref(),
+        );
+        let uploaded = path.contains("async-upload");
+        if (path.contains("rest_route=") || uploaded) && [200, 201].contains(&answer.status) {
+            if let Some(id) = answered_id(&answer.body) {
                 ids.push((case.to_string(), id));
             }
-            if method != "GET" {
+            if method != "GET" && !uploaded {
                 rest.push_str(&format!("{case}\t{path}\t{}\n", answer.body));
             }
         }
@@ -365,6 +535,9 @@ fn writes_for_php_to_read() {
     }
     if let Ok(out) = std::env::var("HYSCRIBE_SWITCH_BACK_OUT") {
         std::fs::write(format!("{out}/rest.tsv"), rest).unwrap();
+        // The IDs of each case, which run.sh names in pages.list as `%case%`.
+        let table: String = ids.iter().map(|(c, id)| format!("{c}\t{id}\n")).collect();
+        std::fs::write(format!("{out}/ids.tsv"), table).unwrap();
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

@@ -53,7 +53,7 @@ use request::{Arg, Params, Sanitize, defaults, has_valid_params, sanitize_params
 use response::{Response, RestError, object, text};
 
 pub use comments::write::CommentSave;
-pub use posts::write::{Outcome, Plan, Save, Write};
+pub use posts::write::{Outcome, Plan, Save, Upload, Write};
 pub use settings::{Setting, SettingsSave};
 pub use terms::write::TermSave;
 pub use users::write::UserSave;

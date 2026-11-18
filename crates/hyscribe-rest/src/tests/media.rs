@@ -4,6 +4,7 @@
 //! `media-ttd.tsv`, replayed for a visitor and each role over the dumps
 //! with `reference/rest/media.sql`, and what the goldens cannot show.
 
+use hyscribe_image::subsizes::Crop;
 use hyscribe_model::Post;
 
 use super::posts::{Oracle, replay};
@@ -89,6 +90,17 @@ fn attachment_links_stay_plain() {
 fn image_sizes_are_registered() {
     let oracle = oracle(false);
     let sizes = crate::media::registered_sizes(&context(&oracle));
+    let sizes: Vec<_> = sizes
+        .iter()
+        .map(|size| {
+            (
+                size.name.as_str(),
+                size.width,
+                size.height,
+                size.crop != Crop::No,
+            )
+        })
+        .collect();
     assert_eq!(
         sizes,
         [

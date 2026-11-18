@@ -8,13 +8,13 @@
 
 use std::sync::LazyLock;
 
+use hyscribe_image::subsizes::{
+    SubSize, image_resize_dimensions, wp_get_registered_image_subsizes,
+};
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, is_empty_string, json_decode, wp_basename};
 use hyscribe_render::attachment::prepend::plays_video;
-use hyscribe_render::attachment::{
-    attachment_url, constrain_dimensions, image_downsize, is_image, metadata,
-};
-use hyscribe_render::permalinks::{Permalinks, permalink};
+use hyscribe_render::attachment::{attachment_url, image_downsize, is_image, metadata};
 use hyscribe_render::rest::Rendering;
 
 use crate::posts::args::id;
@@ -139,108 +139,19 @@ pub(crate) fn create_permission(context: &Context, params: &Params) -> Result<()
 /// `get_post_status()` of an attachment: its parent's, or published without
 /// one, or a trashed parent's status before.
 pub(crate) fn post_status(context: &Context, post: &Post) -> String {
-    let mut seen = vec![post.id];
-    let mut post = post.clone();
-    while post.status == "inherit" {
-        let parent = (!seen.contains(&post.parent))
-            .then(|| context.site.post(post.parent))
-            .flatten();
-        let Some(parent) = parent else {
-            return "publish".into();
-        };
-        if parent.status == "trash" {
-            let before = context.site.post_meta(parent.id, "_wp_trash_meta_status");
-            let before = before.filter(|status| !is_empty_string(status));
-            return before.map_or("publish".into(), |status| {
-                String::from_utf8_lossy(&status).into_owned()
-            });
-        }
-        seen.push(parent.id);
-        post = parent;
-    }
-    match post.status.as_str() {
-        "private" | "trash" | "auto-draft" => post.status,
-        _ if post.post_type == "attachment" => "publish".into(),
-        _ => post.status,
-    }
+    hyscribe_render::attachment::post_status(context.site.reads(), post)
 }
 
 /// `get_attachment_link()`, with `%postname%` left in the link of a
 /// `sample` one.
 pub(crate) fn attachment_link(context: &Context, post: &Post, sample: bool) -> Vec<u8> {
-    let reads = context.site.reads();
-    let links = Permalinks::of(reads);
-    let home = String::from_utf8_lossy(&reads.home_url()).into_owned();
-    let plain = || format!("{home}/?attachment_id={}", post.id).into_bytes();
-    // `wp_force_plain_post_permalink()`.
-    let status = post_status(context, post);
-    let shown = status == "publish"
-        || status == "private" && context.can_for("read_post", post.id)
-        || sample;
-    let parent = parent(context, post);
-    let viewable = |parent: &Post| {
-        parent.id != post.id && ["post", "page", "attachment"].contains(&parent.post_type.as_str())
-    };
-    if !shown || post.parent != 0 && !parent.as_ref().is_some_and(viewable) {
-        return plain();
-    }
-    let parent_link =
-        parent.map(|parent| String::from_utf8_lossy(&permalink(reads, &parent)).into_owned());
-    links
-        .attachment_link(&home, post, parent_link.as_deref(), sample)
-        .map_or_else(plain, String::into_bytes)
+    let can_read = |id| context.can_for("read_post", id);
+    hyscribe_render::attachment::attachment_link(context.site.reads(), post, sample, &can_read)
 }
 
-/// The attachment's parent, if it has one that is there.
-fn parent(context: &Context, post: &Post) -> Option<Post> {
-    (post.parent != 0)
-        .then(|| context.site.post(post.parent))
-        .flatten()
-}
-
-/// `wp_get_registered_image_subsizes()`: each size's name, width, height
-/// and whether it is cropped, those with a width or height.
-pub(crate) fn registered_sizes(context: &Context) -> Vec<(&'static str, i64, i64, bool)> {
-    let option = |name: String| Value::String(context.option(&name).unwrap_or_default());
-    let defaults = ["thumbnail", "medium", "medium_large", "large"].map(|size| {
-        let dimension = |side| option(format!("{size}_size_{side}")).to_int();
-        let crop = !option(format!("{size}_crop")).is_empty();
-        (size, dimension("w"), dimension("h"), crop)
-    });
-    // The sizes core adds with `add_image_size()`.
-    let added = [
-        ("1536x1536", 1536, 1536, false),
-        ("2048x2048", 2048, 2048, false),
-    ];
-    defaults
-        .into_iter()
-        .chain(added)
-        .filter(|(_, width, height, _)| (*width, *height) != (0, 0))
-        .collect()
-}
-
-/// Whether `image_resize_dimensions()` resizes an image of `width` by
-/// `height` to a size.
-fn resizes(width: i64, height: i64, (size_width, size_height, crop): (i64, i64, bool)) -> bool {
-    // A size larger than the image leaves it as it is, and a registered
-    // size has a width or a height.
-    if width <= 0 || height <= 0 {
-        return false;
-    }
-    let (new_width, new_height) = if crop {
-        let ratio = width as f64 / height as f64;
-        let new_width = size_width.min(width);
-        let new_height = size_height.min(height);
-        match (new_width, new_height) {
-            (0, h) => ((h as f64 * ratio).round() as i64, h),
-            (w, 0) => (w, (w as f64 / ratio).round() as i64),
-            sized => sized,
-        }
-    } else {
-        constrain_dimensions(width, height, size_width, size_height)
-    };
-    // `wp_fuzzy_number_match()`: the same size is no resize.
-    (new_width - width).abs() > 1 || (new_height - height).abs() > 1
+/// `wp_get_registered_image_subsizes()` of the site's options.
+pub(crate) fn registered_sizes(context: &Context) -> Vec<SubSize> {
+    wp_get_registered_image_subsizes(&|name| context.option(name).unwrap_or_default())
 }
 
 /// `missing_image_sizes`: the sizes an image, or a PDF's fallbacks, could
@@ -264,12 +175,14 @@ fn missing_sizes(
         let fallback = ["thumbnail", "medium", "large"];
         let missing = registered
             .iter()
-            .map(|(name, ..)| *name)
+            .map(|size| size.name.as_str())
             .filter(|name| fallback.contains(name) && !has(name));
         return Ok(names(missing.collect()));
     }
     let Some(meta) = meta else {
-        return Ok(names(registered.iter().map(|(name, ..)| *name).collect()));
+        return Ok(names(
+            registered.iter().map(|size| size.name.as_str()).collect(),
+        ));
     };
     if meta
         .get_str("original_image")
@@ -277,12 +190,14 @@ fn missing_sizes(
     {
         return Err(RestError::not_ported());
     }
-    let side = |key| meta.get_str(key).map_or(0, Value::to_int);
-    let (width, height) = (side("width"), side("height"));
+    let side = |key| u32::try_from(meta.get_str(key).map_or(0, Value::to_int)).unwrap_or(0);
+    let full = (side("width"), side("height"));
     let missing = registered
         .iter()
-        .filter(|(_, w, h, crop)| resizes(width, height, (*w, *h, *crop)))
-        .map(|(name, ..)| *name)
+        .filter(|size| {
+            image_resize_dimensions(full, (size.width, size.height), &size.crop).is_some()
+        })
+        .map(|size| size.name.as_str())
         .filter(|name| !has(name));
     Ok(names(missing.collect()))
 }
@@ -459,7 +374,8 @@ pub(crate) fn attached_to(
     post: &Post,
     response: &mut crate::response::Response,
 ) {
-    let Some(parent) = parent(context, post) else {
+    let parent = (post.parent != 0).then(|| context.site.post(post.parent));
+    let Some(parent) = parent.flatten() else {
         return;
     };
     let route = crate::types::items_route(&parent.post_type)
@@ -473,24 +389,4 @@ pub(crate) fn attached_to(
             ("id", int(parent.id)),
         ],
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::resizes;
-
-    /// `image_resize_dimensions()` of sizes no fixture registers, a crop of
-    /// one side, and of an image without dimensions.
-    #[test]
-    fn resizes_as_php_does() {
-        assert!(resizes(300, 200, (150, 0, true)));
-        assert!(resizes(300, 200, (0, 150, true)));
-        assert!(!resizes(300, 200, (300, 0, true)));
-        assert!(!resizes(300, 200, (0, 200, true)));
-        assert!(!resizes(0, 200, (150, 150, true)));
-        assert!(!resizes(100, 100, (150, 150, true)));
-        assert!(!resizes(301, 200, (300, 300, false)));
-        assert!(resizes(150, 400, (150, 150, true)));
-        assert!(!resizes(150, 151, (150, 150, true)));
-    }
 }

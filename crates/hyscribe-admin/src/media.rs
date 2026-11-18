@@ -19,7 +19,7 @@ mod library;
 mod upload_new;
 
 pub use attachment::{AttachmentArgs, AttachmentSite, attachment_edit};
-pub use image::site_icon_url;
+pub use image::{icon_name, site_icon_url};
 pub use library::{LibraryArgs, upload};
 pub use upload_new::{NewArgs, media_new};
 
@@ -58,7 +58,7 @@ fn extensions(site: &dyn PostsSite) -> String {
 
 /// `size_format( $bytes )`, from bytes to exabytes, as far as `i64` goes,
 /// comparing as PHP does, in floats.
-pub(crate) fn size_format(bytes: i64) -> String {
+pub fn size_format(bytes: i64) -> String {
     let units = [
         ("EB", 1i64 << 60),
         ("PB", 1 << 50),

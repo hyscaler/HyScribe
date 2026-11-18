@@ -330,3 +330,10 @@ path = "fuzz_targets/upload_name.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "multipart_form"
+path = "fuzz_targets/multipart_form.rs"
+test = false
+doc = false
+bench = false

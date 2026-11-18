@@ -116,6 +116,12 @@ require '/var/www/html/wp-load.php';
 		if ( null === $value ) {
 			return null;
 		}
+		// An upload's folder of the month, and its sizes in bytes, which
+		// differ by image encoder (ADR 0015).
+		if ( ( 'wp_posts' === $table && 'guid' === $column ) || ( 'wp_postmeta' === $table && 'meta_value' === $column ) ) {
+			$value = str_replace( gmdate( 'Y/m/', $start ), '%ym%/', $value );
+			$value = preg_replace( '/s:8:"filesize";i:\d+;/', 's:8:"filesize";i:%filesize%;', $value );
+		}
 		// A password hash: bcrypt salts are random.
 		if ( preg_match( '/\A\$wp\$2y\$12\$[.\/A-Za-z0-9]{53}\z/', $value ) ) {
 			return '%password%';

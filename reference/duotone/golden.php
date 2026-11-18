@@ -41,6 +41,7 @@ $cases = array(
 	duotone_cover( duotone( array( 'hsl(200deg 40% 70%)', 'hsl(3.14rad 10% 90% / 20%)' ) ) ),
 	duotone_cover( duotone( array( 'hsl(400, 100%, 50%)', 'hsl(-30, 20%, 20%)', 'hsl(1grad, 0%, 100%)' ) ) ),
 	duotone_cover( duotone( array( 'HSL(10DEG, 50%, 50%)', 'RGB(1,2,3)', '#ABCDEF' ) ) ),
+	duotone_cover( duotone( array( 'hsl(10, 50%, 0%)', 'hsl(10, 0%, 50%)', 'hsl(33, 33%, 33%)', 'hsl(200, 77%, 49%)', 'hsl(200, 77%, 51%)' ) ) ),
 	duotone_cover( duotone( array( 'hsl(100grad, 100%, 50%)', 'hsl(123456789012345678, 50%, 50%)', 'hsl(' . str_repeat( '9', 400 ) . ', 50%, 50%)', 'hsl(-360, 100%, 50%)', 'hsl(0, 100%, 50%)' ) ) ),
 	duotone_cover( duotone( array( 'red', '#12', '#123456789', 'rgb(1,2)', 'rgb(1%, 2, 3)', '#fcff41' ) ) ),
 	duotone_cover( duotone( array( '#8c00b7' ) ) ),

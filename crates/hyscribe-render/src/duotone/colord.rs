@@ -301,13 +301,7 @@ fn hsla_string(input: &[u8]) -> Option<Rgba> {
     let lightness = clamp(lightness_number, 0.0, 100.0);
     let alpha = clamp(alpha(&values), 0.0, 1.0);
     // `colord_hsla_to_hsva()` and `colord_hsva_to_rgba()`.
-    let scaled = saturation
-        * (if lightness < 50.0 {
-            lightness
-        } else {
-            100.0 - lightness
-        })
-        / 100.0;
+    let scaled = saturation * (lightness.min(100.0 - lightness) / 100.0);
     let s = if scaled > 0.0 {
         ((2.0 * scaled) / (lightness + scaled)) * 100.0
     } else {

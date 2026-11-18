@@ -16,7 +16,7 @@ use hyscribe_render::rest::Rendering;
 use crate::fields::{Properties, fields_for_response, filter_by_context, is_field_included};
 use crate::posts::args::id;
 use crate::posts::prepare::{UNSET, properties, rfc3339, writes_or_unported};
-use crate::posts::write::{Outcome, Plan, Save, Write, Writing, planned_save, status_args};
+use crate::posts::write::{Outcome, Plan, Write, Writing, planned_save, status_args};
 use crate::posts::{self, Kind, ids, render_request};
 use crate::request::{Arg, Params, Sanitize, arg, typed};
 use crate::response::{Response, RestError, int, object, paginate, text};
@@ -606,20 +606,9 @@ fn plan_autosave(context: &Context, params: &Params) -> Result<Plan, RestError> 
     if params.get("meta").is_some() {
         return Err(RestError::not_ported());
     }
-    planned_save(context, params, |save| {
-        // What the controller does after the save.
-        Write::Autosave(Box::new(Save {
-            sticky: None,
-            thumbnail: None,
-            format: None,
-            template: None,
-            categories: None,
-            tags: None,
-            pattern_categories: None,
-            meta: Vec::new(),
-            ..save
-        }))
-    })
+    // The autosave writes the fields alone, never what the controller
+    // does after a save.
+    planned_save(context, params, |save| Write::Autosave(Box::new(save)))
 }
 
 /// The autosave, or the post it updated, in the `edit` context, through

@@ -550,30 +550,26 @@ fn after_save(
     kind: Kind,
     save: &mut Save,
 ) -> Result<(), RestError> {
-    let ids = |name, taxonomy: Option<&str>| {
+    let ids = |name, taxonomy| {
         let ids = params.get(name)?.as_array().unwrap_or_default();
-        // The terms check refused 0, which no user may assign; the write
-        // skips a missing category or tag and one set already.
+        // The terms check refused 0, which no user may assign; the
+        // write skips a missing term and one set already.
         let mut seen = std::collections::HashSet::new();
         let ids = ids.iter();
         Some(
             ids.filter_map(|(_, id)| u64::try_from(id.to_int()).ok())
-                .filter(|&id| {
-                    taxonomy.is_none_or(|t| {
-                        seen.insert(id) && context.site.reads().term(id, t).is_some()
-                    })
-                })
+                .filter(|&id| seen.insert(id) && context.site.reads().term(id, taxonomy).is_some())
                 .collect(),
         )
     };
     if kind == Kind::Post {
         let sticky = params.get("sticky").map(|sticky| !sticky.is_empty());
         save.sticky = sticky.or((save.id == 0).then_some(false));
-        save.categories = ids("categories", Some("category"));
-        save.tags = ids("tags", Some("post_tag"));
+        save.categories = ids("categories", "category");
+        save.tags = ids("tags", "post_tag");
     }
     if kind == Kind::Block {
-        save.pattern_categories = ids("wp_pattern_category", None);
+        save.pattern_categories = ids("wp_pattern_category", "wp_pattern_category");
         save.meta = pattern_meta(params)?;
     }
     // `set_post_thumbnail()` keeps an image `wp_get_attachment_image()`

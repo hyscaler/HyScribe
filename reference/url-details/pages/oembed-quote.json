@@ -1,0 +1,1 @@
+{"type":"rich","version":"1.0","html":"<blockquote class=\"x\" data-x=\"1\"><a href=\"https://quote.test/p\" onclick=\"x()\">Quoted</a></blockquote>\n<iframe src='https://quote.test/embed' width=\"600\" height=\"338\" frameborder=\"0\" marginwidth=\"0\" marginheight=\"0\" scrolling=\"no\"></iframe>"}

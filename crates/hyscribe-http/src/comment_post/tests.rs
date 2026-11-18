@@ -434,6 +434,7 @@ async fn a_failed_read_is_the_database_error_page() {
         uploads: None,
         install: crate::unconfigured(),
         fetch: None,
+        feed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
     });
     let cookie = format!(

@@ -31,6 +31,7 @@ hyscribe-write.workspace = true
 tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 
 [dev-dependencies]
+hyscribe-model = { workspace = true, features = ["hook-log"] }
 hyscribe-testkit.workspace = true
 sha2.workspace = true
 sqlx = { version = "0.9", default-features = false, features = ["mysql", "runtime-tokio"] }

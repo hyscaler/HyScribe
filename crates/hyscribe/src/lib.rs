@@ -350,7 +350,9 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                     .with_writer(writer);
             let fetch = config.http_outbound.then(outbound);
             let fetching = outbound_line(fetch.as_ref());
-            let site = site.with_fetch(fetch);
+            let site = site
+                .with_fetch(fetch)
+                .with_feed_hosts(&config.rss_allowed_hosts);
             let hooks = std::sync::Arc::new(hyscribe_mail::NoHooks);
             let (site, mailing) = site.with_mail(&config.mail, hooks);
             // Logging in needs primary mode.

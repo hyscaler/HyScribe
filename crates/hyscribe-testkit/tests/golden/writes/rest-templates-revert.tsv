@@ -1,5 +1,5 @@
 # The rows PHP WordPress writes for the action rest-templates-revert (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-16 22:06:19 to 2026-11-16 22:06:19 UTC.
+# %now% and %unix% stand for times from 2026-11-18 17:23:19 to 2026-11-18 17:23:19 UTC.
 # %wp_posts:1% is 711.
 # %wp_posts:2% is 712.
 # %wp_posts:3% is 713.
@@ -20,16 +20,19 @@
 # %wp_posts:18% is 742.
 # %wp_posts:19% is 743.
 # %wp_posts:20% is 751.
+# %wp_posts:21% is 760.
 # %wp_postmeta:1% is 711.
 # %wp_postmeta:2% is 712.
 # %wp_terms:1% is 711.
 # %wp_terms:2% is 712.
 # %wp_terms:3% is 713.
 # %wp_terms:4% is 714.
+# %wp_terms:5% is 715.
 # %wp_term_taxonomy:1% is 711.
 # %wp_term_taxonomy:2% is 712.
 # %wp_term_taxonomy:3% is 713.
 # %wp_term_taxonomy:4% is 714.
+# %wp_term_taxonomy:5% is 715.
 wp_posts	%wp_posts:7%	-	ID	%wp_posts:7%
 wp_posts	%wp_posts:7%	-	comment_count	0
 wp_posts	%wp_posts:7%	-	comment_status	closed
@@ -56,4 +59,4 @@ wp_posts	%wp_posts:7%	-	to_ping
 wp_term_relationships	%wp_posts:7%,%wp_term_taxonomy:1%	-	object_id	%wp_posts:7%
 wp_term_relationships	%wp_posts:7%,%wp_term_taxonomy:1%	-	term_order	0
 wp_term_relationships	%wp_posts:7%,%wp_term_taxonomy:1%	-	term_taxonomy_id	%wp_term_taxonomy:1%
-wp_term_taxonomy	%wp_term_taxonomy:1%	~	count	10	12
+wp_term_taxonomy	%wp_term_taxonomy:1%	~	count	10	13

@@ -1394,9 +1394,9 @@ fn screen(
         "/hs-admin/post-new" => hyscribe_admin::editor::post_new(admin, query)
             .or_else(|| block_editor(admin, &request))?,
         "/hs-admin/revision" => hyscribe_admin::revisions::revision(admin, query, &request)?,
-        // Nobody may update here (the updates are HyScribe's releases, an open question):
-        // refused as PHP refuses a user without `update_core`.
-        "/hs-admin/update-core" if !admin.can("update_core") => Answer::from_page(None),
+        // Nobody may update here (the updates are HyScribe's releases, an open question;
+        // `update_core` is never granted): refused as PHP refuses the menu.
+        "/hs-admin/update-core" => Answer::from_page(None),
         // Refused as PHP refuses, else not ported: its help names the plugins
         // folder.
         "/hs-admin/plugins" if !admin.can("activate_plugins") => Answer::from_page(None),

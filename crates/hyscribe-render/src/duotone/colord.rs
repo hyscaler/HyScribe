@@ -20,15 +20,9 @@ pub(super) fn parse(input: &[u8]) -> Option<Rgba> {
         .or_else(|| hsla_string(input))
 }
 
-/// `colord_clamp()`.
+/// `colord_clamp()`; no number here is NaN, which `f64::clamp()` keeps.
 fn clamp(number: f64, min: f64, max: f64) -> f64 {
-    if number > max {
-        max
-    } else if number > min {
-        number
-    } else {
-        min
-    }
+    number.clamp(min, max)
 }
 
 /// One hexadecimal pair or digit pair as `base_convert()` reads it.
@@ -44,7 +38,7 @@ fn hex(input: &[u8]) -> Option<Rgba> {
     // `$` also matches before a final newline.
     let digits = input.strip_prefix(b"#")?;
     let digits = digits.strip_suffix(b"\n").unwrap_or(digits);
-    if !(3..=8).contains(&digits.len()) || !digits.iter().all(u8::is_ascii_hexdigit) {
+    if !digits.iter().all(u8::is_ascii_hexdigit) {
         return None;
     }
     // `round( $alpha / 255, 2 )`; no quotient is a tie, so rounding is exact.

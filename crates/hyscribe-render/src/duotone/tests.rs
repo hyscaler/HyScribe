@@ -69,3 +69,37 @@ fn matches_php() {
     );
     assert_eq!(cases, 86);
 }
+
+/// Channels as colord reads them, the ones the golden's tables show: hex of
+/// three to eight digits, `rgb()` and `hsl()`, and what is no color.
+#[test]
+fn parses_colors() {
+    assert_eq!(parse_color(b"#8c00b7"), Some([140.0, 0.0, 183.0, 1.0]));
+    assert_eq!(parse_color(b"#fff8"), Some([255.0, 255.0, 255.0, 0.53]));
+    assert_eq!(parse_color(b"#00000080"), Some([0.0, 0.0, 0.0, 0.5]));
+    assert_eq!(
+        parse_color(b"rgb(10%, 20%, 30%)"),
+        Some([25.5, 51.0, 76.5, 1.0])
+    );
+    assert_eq!(
+        parse_color(b"rgb(1 2 3 / 25%)"),
+        Some([1.0, 2.0, 3.0, 0.25])
+    );
+    assert_eq!(
+        parse_color(b"hsl(120, 100%, 25%)"),
+        Some([0.0, 127.5, 0.0, 1.0])
+    );
+    for no_color in [
+        "red",
+        "#12",
+        "#123456789",
+        "#12g456",
+        "#12345",
+        "#",
+        "rgb(1,2)",
+        "rgb(1%, 2, 3)",
+        "",
+    ] {
+        assert_eq!(parse_color(no_color.as_bytes()), None, "{no_color}");
+    }
+}

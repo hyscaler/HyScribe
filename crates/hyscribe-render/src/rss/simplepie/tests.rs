@@ -54,6 +54,9 @@ fn finds_each_feed_type() {
         assert_eq!(kind(&format!("<rss version=' {version} '/>")), expected);
     }
     assert_eq!(kind("<html/>"), 0);
+    // A cached tree carries its type.
+    let cached = [(key(b"type"), Value::Int(TYPE_ATOM_10))];
+    assert_eq!(Feed::kind(&cached), TYPE_ATOM_10);
 }
 
 #[test]

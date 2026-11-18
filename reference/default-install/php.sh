@@ -10,6 +10,7 @@
 # redirect to the fixture's http://default-install.test. Read only use: the
 # differential tests only send GET requests. HYSCRIBE_PHP_DB=wordpress_ttd
 # runs it on the Theme Test Data fixture instead, with its uploads.
+# HYSCRIBE_PHP_UPLOADS=<folder> serves that folder as the uploads.
 set -euo pipefail
 
 DOCKER="${DOCKER:-docker}"
@@ -22,6 +23,10 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 UPLOADS=()
 if [ "$DB_NAME" = wordpress_ttd ]; then
   UPLOADS=(-v "$ROOT/target/fixtures/theme-test-data/${HYSCRIBE_WP_VERSION:-7.1.3}/uploads:/var/www/html/wp-content/uploads:ro")
+fi
+# HYSCRIBE_PHP_UPLOADS: a folder of uploads to serve, writable (the switch-back suite's).
+if [ -n "${HYSCRIBE_PHP_UPLOADS:-}" ]; then
+  UPLOADS=(-v "$HYSCRIBE_PHP_UPLOADS:/var/www/html/wp-content/uploads")
 fi
 
 case "${1:-}" in

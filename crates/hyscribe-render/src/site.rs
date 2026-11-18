@@ -151,10 +151,10 @@ pub trait Site {
         None
     }
 
-    /// The hosts the RSS block may fetch from (`RSS_ALLOWED_HOSTS`), lower
-    /// case; none by default.
-    fn feed_hosts(&self) -> Vec<Vec<u8>> {
-        Vec::new()
+    /// Whether the RSS block may fetch from `host`, in lower case: whether
+    /// `RSS_ALLOWED_HOSTS` names it. None may by default.
+    fn feed_allowed(&self, _host: &[u8]) -> bool {
+        false
     }
 
     /// `update_post_meta( $post_id, $key, $value )`, which a page view

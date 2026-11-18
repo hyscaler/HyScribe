@@ -151,10 +151,11 @@ fn rfc2822(date: &[u8]) -> Option<i64> {
     };
     let zone = match rest.first().map(|z| z.to_ascii_uppercase()) {
         None => 0,
-        Some(zone) if zone.starts_with(['+', '-']) && zone.len() == 5 => {
-            let hours: i64 = zone.get(1..3).unwrap_or_default().parse().ok()?;
-            let minutes: i64 = zone.get(3..5).unwrap_or_default().parse().ok()?;
-            let offset = hours * 3600 + minutes * 60;
+        Some(zone) if matches!(zone.as_bytes(), [b'+' | b'-', _, _, _, _]) => {
+            let digits = zone.get(1..).unwrap_or_default();
+            let all = digits.bytes().all(|b| b.is_ascii_digit());
+            let value: i64 = digits.parse().ok().filter(|_| all)?;
+            let offset = value / 100 * 3600 + value % 100 * 60;
             if zone.starts_with('-') {
                 -offset
             } else {

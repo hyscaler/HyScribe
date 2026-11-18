@@ -272,7 +272,8 @@ async fn rendering_fetches_and_caches_through_the_site() {
         let checked = Arc::clone(&site);
         tokio::task::spawn_blocking(move || {
             let reads = crate::reads::Reads::new(&checked, handle);
-            assert_eq!(reads.feed_hosts(), [b"pages.test".to_vec()]);
+            assert!(reads.feed_allowed(b"pages.test"));
+            assert!(!reads.feed_allowed(b"other.test"));
             let get = Get::new(&reads);
             let page = reads.remote_get(b"http://pages.test:8080/page.html", &get);
             let page = page.unwrap().unwrap();

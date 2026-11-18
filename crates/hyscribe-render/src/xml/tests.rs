@@ -167,3 +167,33 @@ fn reads_the_apostrophe() {
     let found = events(b"<a>&apos;</a>", false).unwrap();
     assert_eq!(found.get(1), Some(&Event::Text(b"'".to_vec())));
 }
+
+#[test]
+fn places_errors_and_reads_references() {
+    let error = |xml: &[u8]| {
+        let error = events(xml, false).unwrap_err();
+        (error.message, error.line, error.column)
+    };
+    assert_eq!(error(b"<a>&x</a>"), ("EntityRef: expecting ';'", 1, 5));
+    assert_eq!(
+        error(b"<a>&#0;</a>"),
+        ("xmlParseCharRef: invalid xmlChar value", 1, 5)
+    );
+    assert_eq!(error(b"<a>&q;</a>"), ("Undeclared entity", 1, 5));
+    assert_eq!(error(b"<a></a  x>"), ("expected '>'", 1, 9));
+    assert_eq!(error(b"<a/ >").0, "attributes construct error");
+    let spaced = events(b"<r><a></a ><b c = '1'/></r>", false).unwrap();
+    assert_eq!(spaced.len(), 6);
+    assert_eq!(
+        spaced.get(3),
+        Some(&Event::Start {
+            name: name(b"", b"b"),
+            attributes: vec![(name(b"", b"c"), b"1".to_vec())],
+        })
+    );
+    let text = events(b"<a>&#9;&#xA;&#xD;&#x10000;</a>", false).unwrap();
+    assert_eq!(
+        text.get(1),
+        Some(&Event::Text("\t\n\r\u{10000}".as_bytes().to_vec()))
+    );
+}

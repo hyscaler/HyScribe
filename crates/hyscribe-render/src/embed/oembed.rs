@@ -147,24 +147,26 @@ fn remote_get(site: &dyn Site, url: &[u8], limit: Option<usize>) -> Option<Respo
 /// `WP_oEmbed::discover()`: the page's oEmbed endpoint, JSON first.
 fn discover(site: &dyn Site, url: &[u8]) -> Option<Option<Vec<u8>>> {
     let html = remote_get(site, url, Some(153_600))?.body;
+    Some(discovered(&html))
+}
+
+/// The oEmbed endpoint a page's head links, JSON first.
+fn discovered(html: &[u8]) -> Option<Vec<u8>> {
     let lower = html.to_ascii_lowercase();
     // `stripos()` found at 0 counts as not found.
     let head = match find(&lower, b"</head>") {
         Some(end) if end > 0 => html.get(..end).unwrap_or_default(),
-        _ => &html,
+        _ => html,
     };
-    let lower = head.to_ascii_lowercase();
     let types: [(&[u8], &str); 3] = [
         (b"application/json+oembed", "json"),
         (b"text/xml+oembed", "xml"),
         (b"application/xml+oembed", "xml"),
     ];
-    let tagged = types
-        .iter()
-        .any(|(kind, _)| find(&lower, kind).is_some_and(|at| at > 0));
+    // PHP first looks for a type anywhere, which only saves work.
     let mut json = None;
     let mut xml = None;
-    for link in links(head).into_iter().filter(|_| tagged) {
+    for link in links(head) {
         let atts = attributes(link);
         let get = |name: &[u8]| atts.iter().find(|(key, _)| key == name).map(|(_, v)| v);
         let format = get(b"type").and_then(|kind| types.iter().find(|(t, _)| t == kind));
@@ -178,7 +180,7 @@ fn discover(site: &dyn Site, url: &[u8]) -> Option<Option<Vec<u8>>> {
             xml = href;
         }
     }
-    Some(json.or(xml))
+    json.or(xml)
 }
 
 /// The first position of `needle` in `text`.
@@ -209,7 +211,6 @@ fn links(html: &[u8]) -> Vec<&[u8]> {
             .unwrap_or(inner);
         if !inner.is_empty() {
             found.push(inner);
-            at = start + end + 1;
         }
     }
     found
@@ -226,8 +227,7 @@ fn attributes(text: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
     let space = |b: &u8| super::is_space(*b);
     let mut found = Vec::new();
     let mut at = 0;
-    while at < text.len() {
-        let rest = text.get(at..).unwrap_or_default();
+    while let Some(rest) = text.get(at..).filter(|rest| !rest.is_empty()) {
         let name = rest.iter().take_while(|b| word(b)).count();
         let after = rest.get(name..).unwrap_or_default();
         let gap = after.iter().take_while(|b| space(b)).count();
@@ -287,8 +287,7 @@ fn htmlspecialchars_decode(text: &[u8]) -> Vec<u8> {
     ];
     let mut out = Vec::with_capacity(text.len());
     let mut at = 0;
-    while at < text.len() {
-        let rest = text.get(at..).unwrap_or_default();
+    while let Some(rest) = text.get(at..).filter(|rest| !rest.is_empty()) {
         match entities.iter().find(|(entity, _)| rest.starts_with(entity)) {
             Some((entity, plain)) => {
                 out.extend_from_slice(plain);
@@ -478,8 +477,7 @@ fn iframe_title(html: Vec<u8>, data: &Data) -> Vec<u8> {
 fn ireplace(text: &[u8], needle: &[u8], with: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut at = 0;
-    while at < text.len() {
-        let rest = text.get(at..).unwrap_or_default();
+    while let Some(rest) = text.get(at..).filter(|rest| !rest.is_empty()) {
         if rest
             .get(..needle.len())
             .is_some_and(|w| w.eq_ignore_ascii_case(needle))

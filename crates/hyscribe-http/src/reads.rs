@@ -105,8 +105,8 @@ impl RenderSite for Reads<'_> {
         remote_get(self.site, self, url, get)
     }
 
-    fn feed_hosts(&self) -> Vec<Vec<u8>> {
-        self.site.feed_hosts.to_vec()
+    fn feed_allowed(&self, host: &[u8]) -> bool {
+        self.site.feed_hosts.iter().any(|allowed| allowed == host)
     }
 
     fn update_post_meta(&self, post_id: u64, key: &str, value: &[u8]) {

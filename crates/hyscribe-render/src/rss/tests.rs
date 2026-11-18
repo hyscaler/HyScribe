@@ -86,8 +86,8 @@ impl Site for Feeds {
         self.fetches.then(|| testing::get(url, args.limit))
     }
 
-    fn feed_hosts(&self) -> Vec<Vec<u8>> {
-        self.hosts.clone()
+    fn feed_allowed(&self, host: &[u8]) -> bool {
+        self.hosts.iter().any(|allowed| allowed == host)
     }
 
     fn set_site_transient(&self, name: &str, value: &[u8], expiration: i64) {
@@ -249,7 +249,7 @@ fn sites_fetch_and_write_nothing_by_default() {
         site.remote_get(b"http://a.test/", &Get::new(&site))
             .is_none()
     );
-    assert!(site.feed_hosts().is_empty());
+    assert!(!site.feed_allowed(b"a.test"));
     site.update_post_meta(1, "k", b"v");
     site.set_site_transient("t", b"v", 1);
     site.delete_site_transient("t");
@@ -324,4 +324,63 @@ fn sniffs_feeds_as_the_locator_does() {
     ] {
         assert_eq!(super::is_feed(kind, body), feed, "{kind:?} {body:?}");
     }
+}
+
+/// The site's offset shifts the dates shown, as `date_i18n()` does.
+#[test]
+fn shows_dates_in_the_site_offset() {
+    let theme = twentytwentyfive();
+    let site = Feeds::new();
+    site.set("gmt_offset", b"2");
+    let block = br#"<!-- wp:rss {"feedURL":"http://pages.test:8080/feed/rss2.xml","displayDate":true,"itemsToShow":3} /-->"#;
+    let html = Renderer::new(&theme, &site, &Request::default()).render(block);
+    let html = String::from_utf8_lossy(&html);
+    assert!(
+        html.contains("<time datetime=\"2026-11-03T12:20:30+02:00\""),
+        "{html}"
+    );
+}
+
+/// A cache written by the feed locator is not read; the times written
+/// are the clock's, a lifetime ahead; a timeout at the clock still holds.
+#[test]
+fn keeps_feed_caches_as_simplepie_does() {
+    let theme = twentytwentyfive();
+    let site = Feeds::new();
+    let request = Request {
+        now: NOW,
+        ..Request::default()
+    };
+    let rss2 = br#"<!-- wp:rss {"feedURL":"http://pages.test:8080/feed/rss2.xml"} /-->"#;
+    Renderer::new(&theme, &site, &request).render(rss2);
+    let name = hyscribe_phpser::md5(b"http://pages.test:8080/feed/rss2.xml");
+    let stored = site
+        .option(&format!("_site_transient_feed_{name}"))
+        .unwrap();
+    let Ok(Value::Array(mut entries)) = decode(&stored) else {
+        panic!("not cached");
+    };
+    let time =
+        |key: &str| super::simplepie::at(&Value::Array(entries.clone()), key.as_bytes()).cloned();
+    assert_eq!(
+        time("cache_expiration_time"),
+        Some(Value::Int(NOW + 43_200))
+    );
+    assert_eq!(
+        time("__cache_expiration_time"),
+        Some(Value::Int(NOW + 43_200))
+    );
+    entries.push((Key::String(b"url".to_vec()), Value::String(b"x".to_vec())));
+    let gone = hyscribe_phpser::md5(b"http://pages.test:8080/feed/gone");
+    site.set(
+        &format!("_site_transient_feed_{gone}"),
+        &encode(&Value::Array(entries)),
+    );
+    let block = br#"<!-- wp:rss {"feedURL":"http://pages.test:8080/feed/gone"} /-->"#;
+    let html = Renderer::new(&theme, &site, &request).render(block);
+    assert!(String::from_utf8_lossy(&html).contains("unsupported status code"));
+    site.set("_site_transient_timeout_held", NOW.to_string().as_bytes());
+    site.set("_site_transient_held", b"kept");
+    let held = crate::outbound::get_site_transient(&site, "held", NOW);
+    assert_eq!(held, Some(Value::String(b"kept".to_vec())));
 }

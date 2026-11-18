@@ -20,6 +20,7 @@ pub(crate) struct Embeds {
     pub(crate) fetches: bool,
     pub(crate) hooks: Box<dyn Hooks>,
     pub(crate) asked: RefCell<Vec<Vec<u8>>>,
+    pub(crate) limits: RefCell<Vec<Option<usize>>>,
 }
 
 impl Embeds {
@@ -33,6 +34,7 @@ impl Embeds {
             fetches: true,
             hooks: Box::new(()),
             asked: RefCell::new(Vec::new()),
+            limits: RefCell::new(Vec::new()),
         }
     }
 
@@ -83,6 +85,7 @@ impl Site for Embeds {
 
     fn remote_get(&self, url: &[u8], args: &Get) -> Option<Result<Response, Vec<u8>>> {
         self.asked.borrow_mut().push(url.to_vec());
+        self.limits.borrow_mut().push(args.limit);
         assert!(
             args.user_agent
                 .starts_with(b"WordPress/7.1.3; http://127.0.0.1:8081")
@@ -280,4 +283,28 @@ fn leaves_urls_that_are_not_alone() {
     );
     assert_eq!(super::youtube_id(b"https://youtube.com/embed/"), None);
     assert_eq!(super::youtube_id(b"http://www.youtube.com/watch"), None);
+}
+
+#[test]
+fn finds_embedded_quotes_and_media() {
+    for (html, quoted) in [
+        (&b"<blockquote class=\"wp-embedded-content\">"[..], true),
+        (b"<blockquote\twp-embedded-content>", true),
+        (b"<blockquotex class=\"wp-embedded-content\">", false),
+        (b"<blockquote>wp-embedded-content", false),
+        (b"<blockquote class=\"x\">wp-embedded-content", false),
+    ] {
+        assert_eq!(super::embedded_quote(html), quoted, "{html:?}");
+    }
+    let theme = twentytwentyfive();
+    let site = Embeds::new();
+    let request = Request {
+        post: Some(1),
+        ..Request::default()
+    };
+    // A media handler needs a name before its extension.
+    for (url, asked) in [(&b"http://a.test/a.mp3"[..], 0), (b"http://.mp3", 1)] {
+        Renderer::new(&theme, &site, &request).autoembed(url);
+        assert_eq!(site.asked.borrow().len(), asked);
+    }
 }

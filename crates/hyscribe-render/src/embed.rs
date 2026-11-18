@@ -79,7 +79,8 @@ fn spaces(text: &[u8], at: usize) -> usize {
 /// `|^(\s*)(https?://[^\s<>"]+)(\s*)$|im` at `start`, a line's start: the
 /// ends of the leading space, the URL and the match.
 fn alone(text: &[u8], start: usize) -> Found {
-    let line = start == 0 || text.get(start - 1) == Some(&b'\n');
+    let before = start.checked_sub(1).and_then(|before| text.get(before));
+    let line = before.is_none_or(|&b| b == b'\n');
     let lead = spaces(text, start);
     let url = url_end(text, lead).filter(|_| line)?;
     let trail = spaces(text, url);
@@ -162,15 +163,7 @@ impl Renderer<'_> {
     pub(crate) fn autoembed(&mut self, content: &[u8]) -> Vec<u8> {
         const BREAK: &[u8] = b"<!-- wp-line-break -->";
         let content = replace_in_html_tags(content, b"\n", BREAK);
-        // `#(^|\s|>)https?://#i`
-        let found = (0..content.len()).any(|at| {
-            let before = at.checked_sub(1).and_then(|before| content.get(before));
-            before.is_none_or(|&b| is_space(b) || b == b'>')
-                && scheme(content.get(at..).unwrap_or_default()).is_some()
-        });
-        if !found {
-            return replace(&content, BREAK, b"\n");
-        }
+        // PHP first looks for `#(^|\s|>)https?://#i`, which only saves work.
         let lines = self.each(&content, alone);
         let paragraphs = self.each(&lines, paragraph);
         replace(&paragraphs, BREAK, b"\n")
@@ -181,17 +174,12 @@ impl Renderer<'_> {
     fn each(&mut self, text: &[u8], matcher: fn(&[u8], usize) -> Found) -> Vec<u8> {
         let mut out = Vec::with_capacity(text.len());
         let mut copied = 0;
-        let mut at = 0;
-        while at < text.len() {
-            let Some((lead, url, end)) = matcher(text, at) else {
-                at += 1;
-                continue;
-            };
+        // A match ends past its URL, so the next search starts later.
+        while let Some((lead, url, end)) = (copied..text.len()).find_map(|at| matcher(text, at)) {
             out.extend(text.get(copied..lead).unwrap_or_default());
             out.extend(self.embed(text.get(lead..url).unwrap_or_default()));
             out.extend(text.get(url..end).unwrap_or_default());
             copied = end;
-            at = end.max(at + 1);
         }
         out.extend(text.get(copied..).unwrap_or_default());
         out

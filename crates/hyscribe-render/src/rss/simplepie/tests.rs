@@ -177,3 +177,50 @@ fn reads_what_feeds_leave_out() {
         items(b"<rss version='2.0'><channel><item><title>a<b>c</b></title></item></channel></rss>");
     assert_eq!(nested[0].0, Some(b"ac".to_vec()));
 }
+
+#[test]
+fn sanitizes_each_construct_type() {
+    let title = |ns: &str, kind: &str, title: &str| {
+        let xml = format!("<feed xmlns='{ns}'><entry><title{kind}>{title}</title></entry></feed>");
+        let data = Value::Array(parse(xml.as_bytes()).unwrap());
+        let feed = Feed { data: &data };
+        feed.items()[0].title().unwrap()
+    };
+    let (atom, old) = ("http://www.w3.org/2005/Atom", "http://purl.org/atom/ns#");
+    let script = "<div xmlns='http://www.w3.org/1999/xhtml'><script>s</script></div>";
+    for (ns, kind, text, expected) in [
+        (atom, "", "a &amp; b", &b"a &amp; b"[..]),
+        (atom, " type='text'", "a &lt;", b"a &lt;"),
+        (atom, " type='html'", "a &amp; b", b"a &amp; b"),
+        (atom, " type='html'", "a &amp;amp b", b"a &amp;amp b"),
+        (atom, " type='xhtml'", script, b"<div>s</div>"),
+        (atom, " type='other'", "a &amp; b", b"a & b"),
+        (old, "", "a &lt;", b"a &lt;"),
+        (old, " type='text/html'", "a &amp; b", b"a &amp; b"),
+        (
+            old,
+            " type='application/xhtml+xml' mode='xml'",
+            script,
+            b"<div>s</div>",
+        ),
+        (old, " type='other'", "a &amp; b", b"a & b"),
+    ] {
+        assert_eq!(title(ns, kind, text), expected, "{ns} {kind} {text}");
+    }
+    assert!(!looks_like_html(b"a</ b>"));
+    assert!(!looks_like_html(b"a</b"));
+    assert_eq!(
+        absolutize(b"g#s", b"http://a.test/b/c"),
+        b"http://a.test/b/g#s"
+    );
+}
+
+#[test]
+fn reads_feed_links_and_authors() {
+    let atom = br#"<feed xmlns="http://www.w3.org/2005/Atom"><link rel="self" href="http://f.test/x/self"/><link href="http://f.test/"/><entry><link href="one"/><author><name>Only</name></author></entry></feed>"#;
+    let data = Value::Array(parse(atom).unwrap());
+    let feed = Feed { data: &data };
+    let item = &feed.items()[0];
+    assert_eq!(item.link(), Some(b"http://f.test/one".to_vec()));
+    assert_eq!(item.author().and_then(|a| a.name), Some(b"Only".to_vec()));
+}

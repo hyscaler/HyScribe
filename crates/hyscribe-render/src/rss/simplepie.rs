@@ -33,11 +33,9 @@ const TYPE_RSS_093: i64 = 16;
 const TYPE_RSS_094: i64 = 32;
 const TYPE_RSS_10: i64 = 64;
 const TYPE_RSS_20: i64 = 128;
-const TYPE_RSS_SYNDICATION: i64 = 190;
 const TYPE_RSS_ALL: i64 = 255;
 const TYPE_ATOM_03: i64 = 256;
 const TYPE_ATOM_10: i64 = 512;
-const TYPE_ATOM_ALL: i64 = 768;
 const TYPE_ALL: i64 = 1023;
 
 /// The sanitizer's constructs.
@@ -396,46 +394,36 @@ impl Feed<'_> {
         kind
     }
 
-    /// `get_feed_tags( $ns, $tag )`.
-    fn feed_tags(&self, ns: &[u8], tag: &[u8]) -> Option<&Value> {
-        let kind = Feed::kind(self.data.as_array().unwrap_or_default());
-        let root = |root_ns: &[u8], root: &[u8]| first(tags(self.data, root_ns, root));
-        let element = if kind & TYPE_ATOM_10 != 0 {
-            root(ATOM_10, b"feed")
-        } else if kind & TYPE_ATOM_03 != 0 {
-            root(ATOM_03, b"feed")
-        } else if kind & (TYPE_RSS_10 | TYPE_RSS_090) != 0 {
-            root(RDF, b"RDF")
-        } else if kind & TYPE_RSS_SYNDICATION != 0 {
-            root(RSS_20, b"rss")
-        } else {
-            None
-        };
-        tags(element?, ns, tag)
+    /// The root element and its namespace, in SimplePie's order of types.
+    fn root(&self) -> Option<(&'static [u8], &Value)> {
+        let roots: [(&'static [u8], &[u8]); 4] = [
+            (ATOM_10, b"feed"),
+            (ATOM_03, b"feed"),
+            (RDF, b"RDF"),
+            (RSS_20, b"rss"),
+        ];
+        roots
+            .into_iter()
+            .find_map(|(ns, tag)| Some((ns, first(tags(self.data, ns, tag))?)))
     }
 
-    /// `get_channel_tags( $ns, $tag )`.
+    /// `get_feed_tags( $ns, $tag )`.
+    fn feed_tags(&self, ns: &[u8], tag: &[u8]) -> Option<&Value> {
+        tags(self.root()?.1, ns, tag)
+    }
+
+    /// `get_channel_tags( $ns, $tag )`: an Atom feed's own, else its
+    /// channel's (RSS 1.0 and 0.90 in RDF, RSS 2.0 and the 0.9x in `rss`).
     fn channel_tags(&self, ns: &[u8], tag: &[u8]) -> Option<&Value> {
-        let kind = Feed::kind(self.data.as_array().unwrap_or_default());
-        if kind & TYPE_ATOM_ALL != 0
-            && let Some(found) = self.feed_tags(ns, tag)
-        {
-            return Some(found);
-        }
-        let channel = |channel_ns: &[u8]| first(self.feed_tags(channel_ns, b"channel"));
-        (kind & TYPE_RSS_10 != 0)
-            .then(|| tags(channel(RSS_10)?, ns, tag))
-            .flatten()
-            .or_else(|| {
-                (kind & TYPE_RSS_090 != 0)
-                    .then(|| tags(channel(RSS_090)?, ns, tag))
-                    .flatten()
-            })
-            .or_else(|| {
-                (kind & TYPE_RSS_SYNDICATION != 0)
-                    .then(|| tags(channel(RSS_20)?, ns, tag))
-                    .flatten()
-            })
+        let channels: &[&[u8]] = match self.root()?.0 {
+            ATOM_10 | ATOM_03 => return self.feed_tags(ns, tag),
+            RDF => &[RSS_10, RSS_090],
+            _ => &[RSS_20],
+        };
+        channels.iter().find_map(|channel| {
+            let channel = first(self.feed_tags(channel, b"channel"))?;
+            tags(channel, ns, tag)
+        })
     }
 
     /// `get_link()`: the feed's first alternate link.
@@ -462,13 +450,6 @@ impl Feed<'_> {
             }
         }
         None
-    }
-
-    /// `get_base( $element )`.
-    fn base(&self, element: &Value) -> Vec<u8> {
-        explicit_base(element)
-            .or_else(|| self.link())
-            .unwrap_or_default()
     }
 
     /// `get_authors()` of the feed.
@@ -593,13 +574,6 @@ impl Item<'_> {
         first(tags(self.element, ns, tag))
     }
 
-    /// `get_base( $element )`.
-    fn base(&self, element: &Value) -> Vec<u8> {
-        explicit_base(element)
-            .or_else(|| self.link())
-            .unwrap_or_else(|| self.feed.base(element))
-    }
-
     /// `get_title()`.
     pub(crate) fn title(&self) -> Option<Vec<u8>> {
         let construct = [
@@ -614,12 +588,8 @@ impl Item<'_> {
         construct.into_iter().find_map(|(ns, kind)| {
             let element = self.tags(ns, b"title")?;
             let kind = kind.unwrap_or_else(|| construct_type(element, ns));
-            let base = if matches!(kind, TEXT) && (ns == DC_11 || ns == DC_10) {
-                Vec::new()
-            } else {
-                self.base(element)
-            };
-            Some(sanitize(&data(element), kind, &base))
+            // The base only matters to IRIs, which a title is not.
+            Some(sanitize(&data(element), kind, b""))
         })
     }
 
@@ -647,7 +617,7 @@ impl Item<'_> {
             .find_map(|&(ns, tag, kind)| {
                 let element = self.tags(ns, tag)?;
                 let kind = kind.unwrap_or_else(|| construct_type(element, ns));
-                let sanitized = sanitize(&data(element), kind, &self.base(element));
+                let sanitized = sanitize(&data(element), kind, b"");
                 (!hyscribe_phpser::is_empty_string(&sanitized)).then_some(sanitized)
             })
     }
@@ -763,17 +733,14 @@ fn sanitize(data: &[u8], kind: u8, base: &[u8]) -> Vec<u8> {
     if kind & MAYBE_HTML != 0 {
         kind |= if looks_like_html(data) { HTML } else { TEXT };
     }
-    if kind & (HTML | XHTML_CONSTRUCT) != 0 {
+    if kind & HTML != 0 || kind & XHTML_CONSTRUCT != 0 {
         return wp_kses_post(data, b"");
-    }
-    if data.is_empty() && kind & IRI == 0 {
-        return Vec::new();
     }
     let data = match kind & IRI != 0 {
         true => absolutize(data, base),
         false => data.to_vec(),
     };
-    match kind & (TEXT | IRI) != 0 {
+    match kind & TEXT != 0 || kind & IRI != 0 {
         true => specialchars(&data, false),
         false => data,
     }

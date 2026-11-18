@@ -78,12 +78,12 @@ impl Renderer<'_> {
             );
         }
         let shown = attribute("itemsToShow").to_int();
-        let shown = match shown {
-            0 => items.len(),
-            n if n < 0 => items
-                .len()
-                .saturating_sub(usize::try_from(n.unsigned_abs()).unwrap_or(usize::MAX)),
-            n => usize::try_from(n).unwrap_or(usize::MAX),
+        // `array_slice( $items, 0, $n )`, where 0 is every item.
+        let length = usize::try_from(shown.unsigned_abs()).unwrap_or(usize::MAX);
+        let shown = match shown.cmp(&0) {
+            std::cmp::Ordering::Equal => items.len(),
+            std::cmp::Ordering::Less => items.len().saturating_sub(length),
+            std::cmp::Ordering::Greater => length,
         };
         let mut links = String::new();
         if !attribute("openInNewTab").is_empty() {
@@ -193,7 +193,7 @@ fn fetch_feed(site: &dyn Site, url: &[u8], now: i64) -> Result<Value, Vec<u8>> {
         return Ok(Value::Array(Vec::new()));
     }
     let host = url_host(url).map(|host| host.to_ascii_lowercase());
-    if !host.is_some_and(|host| site.feed_hosts().contains(&host)) {
+    if !host.is_some_and(|host| site.feed_allowed(&host)) {
         return Err(UNREACHABLE.to_vec());
     }
     let hooks = site.hooks();

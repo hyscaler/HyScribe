@@ -8,7 +8,14 @@ struct Dropping;
 
 impl crate::outbound::Hooks for Dropping {
     fn oembed_result(&self, html: Option<Vec<u8>>, url: &[u8], _: Size) -> Option<Vec<u8>> {
-        html.filter(|_| !url.ends_with(b"link.html"))
+        // An empty embed fails as `false` does.
+        html.map(|html| {
+            if url.ends_with(b"link.html") {
+                Vec::new()
+            } else {
+                html
+            }
+        })
     }
 
     fn embed_oembed_html(&self, html: Vec<u8>, _: &[u8], _: Size, post: u64) -> Vec<u8> {
@@ -122,4 +129,68 @@ fn incomplete_answers_make_no_html() {
     for html in [&b" src=x"[..], b" src=\"abc", b" src=\"a\nb\""] {
         assert_eq!(source(html), None);
     }
+}
+
+#[test]
+fn matches_providers_as_their_patterns_say() {
+    let site = Embeds::new();
+    assert!(get_provider(&site, b"https://WWW.YOUTUBE.COM/watch?v=x").is_some());
+    assert!(get_provider(&site, b"https://VIDEOPRESS.com/v/x").is_none());
+    let videopress = get_provider(&site, b"https://videopress.com/v/x").unwrap();
+    assert!(videopress.ends_with(b"?for=http%3A%2F%2F127.0.0.1%3A8081"));
+    let page = b"http://pages.test:8080/oembed/rich.html";
+    assert!(matches!(
+        wp_oembed_get(&site, page, crate::embed::DEFAULTS),
+        Got::Html(_)
+    ));
+    assert_eq!(*site.limits.borrow(), [Some(153_600), None]);
+}
+
+#[test]
+fn discovers_links_as_php_does() {
+    let link = br#"<link type="application/json+oembed" href="x&amp;y">"#;
+    // `</head>` at the start counts as not found, so the whole page is read.
+    assert_eq!(
+        discovered(&[&b"</head>"[..], link].concat()),
+        Some(b"x&y".to_vec())
+    );
+    assert_eq!(discovered(&[&b"<p></head>"[..], link].concat()), None);
+    let data = parse_json(br#"{"type":"link","title":""}"#).unwrap();
+    assert_eq!(data2html(&Embeds::new(), &data, b"u"), None);
+    for (text, expected) in [
+        (&b" =x a=1"[..], vec![(&b"a"[..], &b"1"[..])]),
+        (b"a=", vec![]),
+        (b"ab=cd e=f", vec![(b"ab", b"cd"), (b"e", b"f")]),
+        (b"'q'r=1", vec![]),
+        (b"a=1x=2", vec![(b"a", b"1x=2")]),
+    ] {
+        let atts = attributes(text);
+        let found: Vec<_> = atts
+            .iter()
+            .map(|(k, v)| (k.as_slice(), v.as_slice()))
+            .collect();
+        assert_eq!(found, expected, "{text:?}");
+    }
+}
+
+#[test]
+fn titles_frames_and_keeps_secrets() {
+    let data = parse_json(br#"{"title":"D"}"#).unwrap();
+    let titled = iframe_title(
+        br#"<p>x</p><iframe title="A" src="y"></iframe>"#.to_vec(),
+        &data,
+    );
+    assert_eq!(titled, br#"<p>x</p><iframe title="A" src="y"></iframe>"#);
+    let only = iframe_title(br#"<iframe title="A"></iframe>"#.to_vec(), &data);
+    assert_eq!(only, br#"<iframe title="A" ></iframe>"#);
+    let found = source(b" src=\"https://a\" x").unwrap();
+    assert_eq!(
+        found,
+        (b" src=\"https://a\"".to_vec(), b'"', b"https://a".to_vec())
+    );
+    let secret = secret();
+    assert_eq!(secret.len(), 10);
+    assert!(secret.bytes().all(|b| b.is_ascii_alphanumeric()));
+    let distinct: std::collections::HashSet<char> = secret.chars().collect();
+    assert!(distinct.len() > 3, "{secret}");
 }

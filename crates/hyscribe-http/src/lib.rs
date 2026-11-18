@@ -222,23 +222,9 @@ impl Site {
     /// newest published `wp_global_styles` post, as
     /// `WP_Theme_JSON_Resolver::get_user_data()` reads it.
     async fn styled_theme(&self) -> Result<Arc<Theme>, DbError> {
-        let query = PostQuery {
-            post_types: vec!["wp_global_styles".into()],
-            limit: u32::MAX,
-            ..PostQuery::default()
-        };
-        let mut user = None;
-        for post in self.db.posts(&query).await? {
-            let themes = self.db.post_terms(post.id, "wp_theme").await?;
-            let slug = self.theme.slug().as_bytes();
-            if themes
-                .iter()
-                .any(|term| term.name.eq_ignore_ascii_case(slug))
-            {
-                user = Some(post.content);
-                break;
-            }
-        }
+        let slug = self.theme.slug();
+        let posts = self.db.theme_posts("wp_global_styles", slug).await?;
+        let user = posts.into_iter().next().map(|post| post.content);
         let mut styled = self.styled.lock().await;
         if styled.0 != user {
             let theme = Arc::new(twentytwentyfive_for(user.as_deref()));

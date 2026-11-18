@@ -1072,7 +1072,8 @@ async fn routes_give_the_request_state() {
     assert!(missing.request.not_found && missing.request.now > recent);
 }
 
-/// A read that fails answers its type's default and keeps the error.
+/// A read that fails answers its type's default and keeps the error; the
+/// site's global styles fail to load.
 #[tokio::test(flavor = "multi_thread")]
 async fn failed_reads_answer_defaults() {
     use hyscribe_render::site::Site as _;
@@ -1100,6 +1101,8 @@ async fn failed_reads_answer_defaults() {
         install: unconfigured(),
         fetch: None,
     });
+    // The site's global styles, read on each reload.
+    assert!(site.styled_theme().await.is_err());
     let handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
         let reads = Reads::new(&site, handle);

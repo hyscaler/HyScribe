@@ -1147,6 +1147,22 @@ impl Db {
         self.select(sql).await
     }
 
+    /// The published posts of `post_type` with the `wp_theme` term named
+    /// `theme`, newest first, as `WP_Query` finds them by a taxonomy query.
+    pub async fn theme_posts(&self, post_type: &str, theme: &str) -> Result<Vec<Post>, DbError> {
+        let mut sql = select_posts(" FROM {prefix}posts WHERE ");
+        sql.push(
+            "post_type = ? AND post_status = 'publish' AND ID IN (SELECT tr.object_id \
+             FROM {prefix}term_relationships tr JOIN {prefix}term_taxonomy tt \
+             ON tt.term_taxonomy_id = tr.term_taxonomy_id JOIN {prefix}terms t \
+             ON t.term_id = tt.term_id WHERE tt.taxonomy = 'wp_theme' AND t.name = ?) \
+             ORDER BY post_date DESC",
+        );
+        sql.bind(Bind::Text(post_type.to_string()));
+        sql.bind(Bind::Text(theme.to_string()));
+        self.select(sql).await
+    }
+
     /// The IDs of `post`'s revisions, newest first, as
     /// `wp_get_latest_revision_id_and_total_count()` reads them.
     pub async fn revisions(&self, post: u64) -> Result<Vec<u64>, DbError> {

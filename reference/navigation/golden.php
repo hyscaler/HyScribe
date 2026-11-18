@@ -194,7 +194,7 @@ foreach ( array_keys( $menus ) as $menu ) {
 	$add( $fallback, '', $menu );
 }
 // Menus named by `ref` (or `navigationMenuId`, as older blocks are saved):
-// the post 900, a draft 901, which falls back, and a missing 999.
+// the post 900, a draft 901, which falls back, and a missing 999 or -1.
 foreach ( array( 'ref', 'navigationMenuId' ) as $key ) {
 	$add( nav( $never + array( $key => 900 ) ), '', 'menu-links' );
 }
@@ -203,6 +203,7 @@ $add( nav( $never + array( 'ref' => 900, 'ariaLabel' => 'Named' ) ), '', 'menu-l
 $add( nav( $never + array( 'ref' => 900 ) ), '', 'menu-blank' );
 $add( nav( $never + array( 'ref' => 901 ) ), '', 'menu-links' );
 $add( nav( $never + array( 'ref' => 999 ) ), '', 'menu-links' );
+$add( nav( $never + array( 'ref' => -1 ) ), '', 'menu-links' );
 
 $renderer = new ReflectionClass( 'WP_Navigation_Block_Renderer' );
 foreach ( $cases as list( $markup, $queried, $pages ) ) {

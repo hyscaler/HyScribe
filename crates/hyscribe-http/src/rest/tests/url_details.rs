@@ -279,6 +279,13 @@ async fn rendering_fetches_and_caches_through_the_site() {
             let page = page.unwrap().unwrap();
             assert_eq!(page.status, 200);
             assert!(page.headers.iter().any(|(name, _)| name == "content-type"));
+            // The size limit reaches the client: the body is cut there.
+            let small = Get {
+                limit: Some(10),
+                ..get.clone()
+            };
+            let cut = reads.remote_get(b"http://pages.test:8080/page.html", &small);
+            assert_eq!(cut.unwrap().unwrap().body, page.body[..10]);
             let refused = reads.remote_get(b"http://nowhere.test/", &get).unwrap();
             assert_eq!(refused.unwrap_err(), b"A valid URL was not provided.");
             reads.update_post_meta(1, "_oembed_x", b"<b>embed</b>");

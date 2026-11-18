@@ -1401,12 +1401,19 @@ async fn autosaves_match_php() {
 }
 
 /// PHP's answers to the templates' and template parts' writes, over
-/// `reference/rest/templates-custom.sql`.
+/// `reference/rest/template-writes.sql`.
 #[tokio::test(flavor = "multi_thread")]
 async fn template_writes_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/template-writes.tsv");
     let state = include_str!("../../../../../reference/rest/template-writes.sql");
-    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 23, 0));
+    // A template its slug would title after the page it names, which the
+    // read path does not port.
+    let titled = r#"{"slug":"page-about-us","title":"page-about-us","content":"x"}"#;
+    let unported: [(&str, &[&str]); 1] = [(titled, &["administrator"])];
+    assert_eq!(
+        writes_match_php(golden, state, &unported).await,
+        (6 * 32, 1)
+    );
 }
 
 /// The answers to what a write comes to past the goldens: a created
@@ -1560,7 +1567,7 @@ async fn sent_as(
     (status, body(response).await)
 }
 
-/// Templates past the goldens, over `reference/rest/templates-custom.sql`
+/// Templates past the goldens, over `reference/rest/template-writes.sql`
 /// with a template its slug would title, which reads 501, and one naming a
 /// pattern the theme does not have: what PHP answers with its errors, and
 /// what is not ported, 501, before anything is written.
@@ -1569,10 +1576,10 @@ async fn template_writes_past_the_goldens() {
     let state = include_str!("../../../../../reference/rest/template-writes.sql");
     let more = "INSERT INTO wp_posts (ID, post_author, post_content, post_title, post_excerpt, \
         post_status, post_name, post_type, to_ping, pinged, post_content_filtered) VALUES \
-        (760, 1, 'x', '', '', 'publish', 'single-post-hello-world', 'wp_template', '', '', ''), \
-        (761, 1, '<!-- wp:pattern {\"slug\":\"other/x\"} /-->', 'Odd', '', 'publish', 'my-odd', \
+        (770, 1, 'x', '', '', 'publish', 'single-post-hello-world', 'wp_template', '', '', ''), \
+        (771, 1, '<!-- wp:pattern {\"slug\":\"other/x\"} /-->', 'Odd', '', 'publish', 'my-odd', \
         'wp_template', '', '', ''); \
-        INSERT INTO wp_term_relationships VALUES (760, 711, 0), (761, 711, 0);\n-- cleanup\n";
+        INSERT INTO wp_term_relationships VALUES (770, 711, 0), (771, 711, 0);\n-- cleanup\n";
     let _saves = crate::admin::tests::SAVES.lock().await;
     fresh_with(&format!(
         "{}{more}",
@@ -1737,7 +1744,7 @@ async fn pattern_writes_are_php_s() {
 }
 
 /// The templates' and parts' writes leave the rows PHP's leave, over
-/// `reference/rest/templates-custom.sql`.
+/// `reference/rest/template-writes.sql`.
 #[tokio::test(flavor = "multi_thread")]
 async fn template_writes_are_php_s() {
     let state = include_str!("../../../../../reference/rest/template-writes.sql");

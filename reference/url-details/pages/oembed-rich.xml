@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<oembed>
+  <version>1.0</version>
+  <type>rich</type>
+  <title>From &amp; XML</title>
+  <html>&lt;iframe src="https://xml.test/embed" width="500"&gt;&lt;/iframe&gt;</html>
+  <extra><nested>ignored</nested></extra>
+</oembed>

@@ -257,6 +257,7 @@ async fn database_errors_show_no_details() {
         uploads: None,
         install: unconfigured(),
         fetch: None,
+        feed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
     });
     // The 404 page fails while rendering, reading an option it has not loaded.
@@ -995,6 +996,7 @@ async fn the_front_page_links_to_home() {
         uploads: None,
         install: unconfigured(),
         fetch: None,
+        feed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
     });
     // Search results list the front page with a link to it.
@@ -1132,6 +1134,7 @@ async fn failed_reads_answer_defaults() {
         uploads: None,
         install: unconfigured(),
         fetch: None,
+        feed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
     });
     let handle = tokio::runtime::Handle::current();

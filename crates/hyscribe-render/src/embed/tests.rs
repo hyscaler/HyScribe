@@ -1,0 +1,310 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+use std::cell::RefCell;
+
+use hyscribe_model::{Post, PostQuery, Term};
+use hyscribe_testkit::unhex;
+
+use crate::fixture::DefaultInstall;
+use crate::outbound::{Get, Hooks, Response, Size, testing};
+use crate::site::{Request, Site};
+use crate::template::Renderer;
+use crate::theme::twentytwentyfive;
+
+/// The default install fetching from the test site, with post 1's meta
+/// kept in memory as written, and post 1's content given.
+pub(crate) struct Embeds {
+    pub(crate) install: DefaultInstall,
+    pub(crate) meta: RefCell<Vec<(u64, String, Vec<u8>)>>,
+    pub(crate) content: Option<Vec<u8>>,
+    pub(crate) fetches: bool,
+    pub(crate) hooks: Box<dyn Hooks>,
+    pub(crate) asked: RefCell<Vec<Vec<u8>>>,
+    pub(crate) limits: RefCell<Vec<Option<usize>>>,
+}
+
+impl Embeds {
+    pub(crate) fn new() -> Embeds {
+        Embeds {
+            install: DefaultInstall {
+                home: b"http://127.0.0.1:8081".to_vec(),
+            },
+            meta: RefCell::new(Vec::new()),
+            content: None,
+            fetches: true,
+            hooks: Box::new(()),
+            asked: RefCell::new(Vec::new()),
+            limits: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// The meta as "key=value" lines, in the order written.
+    fn rows(&self) -> String {
+        self.meta
+            .borrow()
+            .iter()
+            .map(|(_, key, value)| format!("{key}={}\n", String::from_utf8_lossy(value)))
+            .collect()
+    }
+}
+
+impl Site for Embeds {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        self.install.option(name)
+    }
+
+    fn home_url(&self) -> Vec<u8> {
+        self.install.home_url()
+    }
+
+    fn post(&self, id: u64) -> Option<Post> {
+        let mut post = self.install.post(id)?;
+        if let Some(content) = self.content.clone().filter(|_| id == 1) {
+            post.content = content;
+        }
+        Some(post)
+    }
+
+    fn post_terms(&self, post_id: u64, taxonomy: &str) -> Vec<Term> {
+        self.install.post_terms(post_id, taxonomy)
+    }
+
+    fn post_meta(&self, post_id: u64, key: &str) -> Option<Vec<u8>> {
+        let meta = self.meta.borrow();
+        let found = meta.iter().find(|(id, k, _)| *id == post_id && k == key);
+        match found {
+            Some((_, _, value)) => Some(value.clone()),
+            None if key.starts_with("_oembed") => None,
+            None => self.install.post_meta(post_id, key),
+        }
+    }
+
+    fn query(&self, query: &PostQuery) -> Vec<Post> {
+        self.install.query(query)
+    }
+
+    fn remote_get(&self, url: &[u8], args: &Get) -> Option<Result<Response, Vec<u8>>> {
+        self.asked.borrow_mut().push(url.to_vec());
+        self.limits.borrow_mut().push(args.limit);
+        assert!(
+            args.user_agent
+                .starts_with(b"WordPress/7.1.3; http://127.0.0.1:8081")
+        );
+        self.fetches.then(|| testing::get(url, args.limit))
+    }
+
+    fn update_post_meta(&self, post_id: u64, key: &str, value: &[u8]) {
+        let mut meta = self.meta.borrow_mut();
+        match meta
+            .iter_mut()
+            .find(|(id, k, _)| *id == post_id && k == key)
+        {
+            Some((_, _, old)) => *old = value.to_vec(),
+            None => meta.push((post_id, key.to_string(), value.to_vec())),
+        }
+    }
+
+    fn hooks(&self) -> &dyn Hooks {
+        self.hooks.as_ref()
+    }
+}
+
+/// The golden script's plugin: the YouTube provider pointed at the test site.
+struct TestSite;
+
+impl Hooks for TestSite {
+    fn oembed_fetch_url(&self, provider: Vec<u8>, url: &[u8], args: Size) -> Vec<u8> {
+        assert_eq!((args.width, args.height), (500, 750));
+        assert!(url.starts_with(b"https://youtu.be/"));
+        let text = String::from_utf8_lossy(&provider).into_owned();
+        match text.strip_prefix("https://www.youtube.com/oembed?") {
+            Some(query) => {
+                format!("http://pages.test:8080/oembed/trusted.json?{query}").into_bytes()
+            }
+            None => provider,
+        }
+    }
+}
+
+/// `html` with the secret `wp_filter_oembed_result()` drew masked.
+pub(crate) fn masked(html: &[u8]) -> String {
+    let mut text = String::from_utf8_lossy(html).into_owned();
+    for marker in ["secret=", "data-secret=\"", "data-secret='"] {
+        let mut at = 0;
+        while let Some(found) = text.get(at..).and_then(|rest| rest.find(marker)) {
+            let start = at + found + marker.len();
+            let end = start + 10;
+            if text
+                .get(start..end)
+                .is_some_and(|s| s.bytes().all(|b| b.is_ascii_alphanumeric()))
+            {
+                text.replace_range(start..end, "%secret%");
+            }
+            at = start;
+        }
+    }
+    text
+}
+
+/// Every case of `reference/oembed/golden.sh`: the HTML, the meta written
+/// (times as `%now%`) and whether `wp-embed` was enqueued.
+#[test]
+fn matches_php() {
+    let theme = twentytwentyfive();
+    let golden = include_str!("../../tests/golden/oembed.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let cells: Vec<&str> = line.split('\t').collect();
+        let [name, content, html, meta, enqueued] = cells.as_slice() else {
+            panic!("{line}");
+        };
+        let (content, html, meta) = (unhex(content), unhex(html), unhex(meta));
+        let mut site = Embeds::new();
+        let cached = name.starts_with("cached") || *name == "expired";
+        if cached {
+            for row in String::from_utf8_lossy(&meta).lines() {
+                let (key, value) = row.split_once('=').unwrap();
+                site.update_post_meta(1, key, value.as_bytes());
+            }
+        }
+        if *name == "trusted" {
+            site.hooks = Box::new(TestSite);
+        }
+        let request = Request {
+            post: Some(1),
+            now: 1_800_000_000,
+            ..Request::default()
+        };
+        let content_mode = name.starts_with("content");
+        if content_mode {
+            site.content = Some(content.clone());
+        }
+        let mut renderer = Renderer::new(&theme, &site, &request);
+        let ours = match content_mode {
+            true => {
+                let post = site.post(1).unwrap();
+                renderer.the_content(&post)
+            }
+            false => renderer.autoembed(&content),
+        };
+        let queued = renderer.assets.scripts.iter().any(|s| s == "wp-embed");
+        let rows = site.rows().replace("=1800000000\n", "=%now%\n");
+        let ours = (masked(&ours), masked(rows.as_bytes()), queued);
+        let php = (
+            String::from_utf8_lossy(&html).into_owned(),
+            String::from_utf8_lossy(&meta).into_owned(),
+            *enqueued == "1",
+        );
+        if ours != php {
+            failures.push(format!("{name}\n  php:  {php:?}\n  ours: {ours:?}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differ:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert_eq!(golden.lines().count(), 35);
+}
+
+/// While fetches are off, an uncached URL stays and nothing is written,
+/// where a cached one still shows.
+#[test]
+fn fetches_off_leave_urls() {
+    let theme = twentytwentyfive();
+    let mut site = Embeds::new();
+    site.fetches = false;
+    let request = Request {
+        post: Some(1),
+        ..Request::default()
+    };
+    // A page to discover, and a provider's URL, asked of nobody.
+    for url in [
+        &b"http://pages.test:8080/oembed/rich.html"[..],
+        b"https://www.youtube.com/watch?v=x",
+    ] {
+        let ours = Renderer::new(&theme, &site, &request).autoembed(url);
+        assert_eq!(ours, url);
+    }
+    assert!(site.meta.borrow().is_empty());
+    assert_eq!(site.asked.borrow().len(), 2);
+}
+
+/// What is not ported fetches nothing: no post, the site's own host and
+/// media files.
+#[test]
+fn unported_embeds_fetch_nothing() {
+    let theme = twentytwentyfive();
+    let site = Embeds::new();
+    for (url, post) in [
+        (&b"http://pages.test:8080/oembed/rich.html"[..], None),
+        (b"http://127.0.0.1:8081/?p=1", Some(1)),
+        (b"http://pages.test:8080/a.MP3", Some(1)),
+        (b"http://pages.test:8080/v.webm", Some(1)),
+    ] {
+        let request = Request {
+            post,
+            ..Request::default()
+        };
+        let ours = Renderer::new(&theme, &site, &request).autoembed(url);
+        assert_eq!(ours, url);
+    }
+    assert!(site.asked.borrow().is_empty());
+    assert!(site.meta.borrow().is_empty());
+}
+
+/// What autoembed's patterns leave alone, and the YouTube handler's IDs.
+#[test]
+fn leaves_urls_that_are_not_alone() {
+    let theme = twentytwentyfive();
+    let site = Embeds::new();
+    let request = Request {
+        post: Some(1),
+        ..Request::default()
+    };
+    let link = "http://pages.test:8080/oembed/link.html";
+    for content in [
+        format!("{link} here"),
+        "x http://a.test/ <p".to_string(),
+        "x http://a.test/ <p class".to_string(),
+        format!("<p>{link}"),
+    ] {
+        let ours = Renderer::new(&theme, &site, &request).autoembed(content.as_bytes());
+        assert_eq!(ours, content.as_bytes());
+    }
+    assert_eq!(
+        super::youtube_id(b"http://www.youtube.com/v/ID/x"),
+        Some(&b"ID"[..])
+    );
+    assert_eq!(
+        super::youtube_id(b"xhttp://wwwXyoutube.com/EMBED/a"),
+        Some(&b"a"[..])
+    );
+    assert_eq!(super::youtube_id(b"https://youtube.com/embed/"), None);
+    assert_eq!(super::youtube_id(b"http://www.youtube.com/watch"), None);
+}
+
+#[test]
+fn finds_embedded_quotes_and_media() {
+    for (html, quoted) in [
+        (&b"<blockquote class=\"wp-embedded-content\">"[..], true),
+        (b"<blockquote\twp-embedded-content>", true),
+        (b"<blockquotex class=\"wp-embedded-content\">", false),
+        (b"<blockquote>wp-embedded-content", false),
+        (b"<blockquote class=\"x\">wp-embedded-content", false),
+    ] {
+        assert_eq!(super::embedded_quote(html), quoted, "{html:?}");
+    }
+    let theme = twentytwentyfive();
+    let site = Embeds::new();
+    let request = Request {
+        post: Some(1),
+        ..Request::default()
+    };
+    // A media handler needs a name before its extension.
+    for (url, asked) in [(&b"http://a.test/a.mp3"[..], 0), (b"http://.mp3", 1)] {
+        Renderer::new(&theme, &site, &request).autoembed(url);
+        assert_eq!(site.asked.borrow().len(), asked);
+    }
+}

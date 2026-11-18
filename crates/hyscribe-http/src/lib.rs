@@ -53,6 +53,7 @@ mod loaders;
 mod login;
 mod mail;
 mod multipart;
+mod outbound;
 pub mod query;
 mod reads;
 mod redirect;
@@ -127,6 +128,8 @@ pub struct Site {
     install: Arc<Install>,
     /// The outbound client, when `HTTP_OUTBOUND` is on (ADR 0019).
     fetch: Option<Arc<hyscribe_fetch::Client>>,
+    /// The hosts the RSS block may fetch from (`RSS_ALLOWED_HOSTS`).
+    feed_hosts: Arc<Vec<Vec<u8>>>,
     /// The mail transport (ADR 0016), off until [`Site::with_mail`].
     mailer: Arc<hyscribe_mail::Mailer>,
 }
@@ -179,6 +182,7 @@ impl Site {
             uploads: None,
             install: unconfigured(),
             fetch: None,
+            feed_hosts: Arc::default(),
             mailer: Arc::new(mail_off()),
         };
         for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
@@ -223,6 +227,7 @@ impl Site {
             uploads: self.uploads.clone(),
             install: Arc::clone(&self.install),
             fetch: self.fetch.clone(),
+            feed_hosts: Arc::clone(&self.feed_hosts),
             mailer: Arc::clone(&self.mailer),
         };
         site.build_rewriter();
@@ -298,6 +303,15 @@ impl Site {
     pub fn with_fetch(self, fetch: Option<hyscribe_fetch::Client>) -> Site {
         let fetch = fetch.map(Arc::new);
         Site { fetch, ..self }
+    }
+
+    /// The site with the hosts the RSS block may fetch from.
+    pub fn with_feed_hosts(self, hosts: &[String]) -> Site {
+        let hosts = hosts.iter().map(|host| host.as_bytes().to_vec()).collect();
+        Site {
+            feed_hosts: Arc::new(hosts),
+            ..self
+        }
     }
 
     /// The site with the mail transport of `mail` and `hooks`, and what

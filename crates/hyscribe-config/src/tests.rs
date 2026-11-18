@@ -57,6 +57,7 @@ fn defaults_are_safe() {
             salts: Vec::new(),
             rest_public_users: true,
             http_outbound: false,
+            rss_allowed_hosts: Vec::new(),
             constants: Constants {
                 disallow_unfiltered_html: true,
                 allow_unfiltered_uploads: false,
@@ -260,6 +261,10 @@ fn reads_every_key() {
         ("NONCE_SALT", "z"),
         ("REST_PUBLIC_USERS", "off"),
         ("HTTP_OUTBOUND", "on"),
+        (
+            "RSS_ALLOWED_HOSTS",
+            " Feeds.Example.org,,news.test , feeds.example.org",
+        ),
         ("EMPTY_TRASH_DAYS", "0"),
         ("LOGIN_LIMIT_ADDRESS", "1"),
         ("LOGIN_LIMIT_ACCOUNT", "1000"),
@@ -293,6 +298,7 @@ fn reads_every_key() {
     );
     assert!(!config.rest_public_users);
     assert!(config.http_outbound);
+    assert_eq!(config.rss_allowed_hosts, ["feeds.example.org", "news.test"]);
     assert_eq!(config.constants.empty_trash_days, 0);
     assert_eq!(server(&with(&[("PORT", "80")])).map(|s| s.port), Ok(80));
     let limits = LoginLimits {
@@ -433,6 +439,11 @@ fn rejects_bad_values() {
         ),
         ("REST_PUBLIC_USERS", "public", "must be true or false"),
         ("HTTP_OUTBOUND", "enabled", "must be true or false"),
+        (
+            "RSS_ALLOWED_HOSTS",
+            "https://feeds.example.org/",
+            "must be host names separated by commas, without schemes, ports or paths",
+        ),
         (
             "EMPTY_TRASH_DAYS",
             "-1",

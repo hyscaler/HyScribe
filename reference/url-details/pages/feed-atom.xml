@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:base="http://pages.test:8080/atom/">
+	<title type="text">Atom feed</title>
+	<id>urn:feed</id>
+	<updated>2026-11-05T00:00:00Z</updated>
+	<author><name>Feed Author</name></author>
+	<entry>
+		<title type="html">Atom &lt;b&gt;one&lt;/b&gt;</title>
+		<link rel="alternate" href="entry/one"/>
+		<link rel="edit" href="http://pages.test:8080/edit/one"/>
+		<id>urn:one</id>
+		<published>2026-11-04T09:30:00+02:00</published>
+		<updated>2026-11-04T10:00:00Z</updated>
+		<author><name>Entry &amp; Author</name><email>e@example.com</email></author>
+		<summary type="html">&lt;p&gt;Atom summary &lt;img src=x onerror=alert(1)&gt;&lt;/p&gt;</summary>
+	</entry>
+	<entry>
+		<title type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">Atom <em>two</em> &amp; more</div></title>
+		<link href="http://pages.test:8080/atom/two"/>
+		<id>urn:two</id>
+		<updated>2026-11-05T11:00:00.5Z</updated>
+		<content type="text">Text content &lt;not a tag&gt;</content>
+	</entry>
+	<entry>
+		<title>Atom three</title>
+		<id>urn:three</id>
+		<updated>2026-11-01</updated>
+	</entry>
+</feed>

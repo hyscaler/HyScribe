@@ -73,7 +73,7 @@ fn editor_parts(case: &str, post: &Post) -> Vec<(String, String)> {
         uri: &uri,
     };
     let custom = form::custom_settings(&site, &editing);
-    let settings = settings::get_block_editor_settings(&site, custom, post);
+    let settings = settings::get_block_editor_settings(&site, custom, settings::Editor::Post(post));
     let mut parts = vec![(
         "post".to_string(),
         format!("{} {}", post.post_type, post.id),

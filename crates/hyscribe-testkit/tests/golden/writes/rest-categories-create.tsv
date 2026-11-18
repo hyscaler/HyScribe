@@ -1,0 +1,19 @@
+# The rows PHP WordPress writes for the action rest-categories-create (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-16 15:19:55 to 2026-11-16 15:19:55 UTC.
+# %wp_terms:1% is 2.
+# %wp_term_taxonomy:1% is 2.
+# %wp_options:1% is 131.
+wp_options	category_children	+	autoload	auto
+wp_options	category_children	+	option_id	%wp_options:1%
+wp_options	category_children	+	option_name	category_children
+wp_options	category_children	+	option_value	a:1:{i:1;a:1:{i:0;i:%wp_terms:1%;}}
+wp_term_taxonomy	%wp_term_taxonomy:1%	+	count	0
+wp_term_taxonomy	%wp_term_taxonomy:1%	+	description	<b>Fresh</b> x()
+wp_term_taxonomy	%wp_term_taxonomy:1%	+	parent	1
+wp_term_taxonomy	%wp_term_taxonomy:1%	+	taxonomy	category
+wp_term_taxonomy	%wp_term_taxonomy:1%	+	term_id	%wp_terms:1%
+wp_term_taxonomy	%wp_term_taxonomy:1%	+	term_taxonomy_id	%wp_term_taxonomy:1%
+wp_terms	%wp_terms:1%	+	name	News
+wp_terms	%wp_terms:1%	+	slug	the-news
+wp_terms	%wp_terms:1%	+	term_group	0
+wp_terms	%wp_terms:1%	+	term_id	%wp_terms:1%

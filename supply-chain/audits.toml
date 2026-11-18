@@ -1,6 +1,18 @@
 
 # cargo-vet audits file
 
+[[audits.async-trait]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.1.92"
+notes = "Proc macro only: rewrites async fns in traits and impls into methods returning Pin<Box<dyn Future + Send + 'a>>, through syn, quote and proc-macro2. No unsafe code (the word appears only as a parsed token), no build script, and no filesystem, network, process or environment access at expansion time; the code it emits is ordinary boxing of the future. lettre's async transport traits use it."
+
+[[audits.base64]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.23.1"
+notes = 'Reviewed the scalar engine, the decoders and the new SIMD engine, which the default simd-unsafe feature turns on (lettre takes the defaults, for SMTP AUTH). Without that feature the crate is #![forbid(unsafe_code)]. The unsafe code is engine/simd.rs: AVX2 and NEON kernels behind #[target_feature], reached only after is_x86_feature_detected!("avx2") or is_aarch64_feature_detected!("neon") selected the backend at construction (the *_unchecked constructors are unsafe fns HyScribe never calls). Each loop is guarded so every unaligned 32 or 16 byte load stays inside the input (decode stops at the complete non-terminal quads length, which decode_helper derives from the input) and every store inside the output; an invalid block falls back to the scalar decoder. No build script, proc macros, or filesystem, network, process or environment access.'
+
 [[audits.blake2]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
@@ -24,6 +36,24 @@ who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
 delta = "0.4.4 -> 0.5.2"
 notes = "Trait restructuring for 0.5 (block and mode backends, tweakable ciphers, stream wrapper behind a feature). The crate now declares #![forbid(unsafe_code)], removing the two unsafe blocks 0.4.4 had. No build script, proc macros, or I/O; include_bytes appears only in feature gated test macros."
+
+[[audits.email-encoding]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.4.2"
+notes = "#![forbid(unsafe_code)]. RFC 2047 encoded words, RFC 2231 parameters, quoted strings and the base64 and quoted-printable body encoders lettre writes headers and bodies with, over a fmt::Write that folds lines at 76 characters; truncation is at char boundaries. No build script, proc macros, or filesystem, network, process or environment access. Depends on base64 0.23 and memchr."
+
+[[audits.email_address]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.2.9"
+notes = "RFC 5321 and 5322 address parser and validator, with unsafe_code among its warned lints and no unsafe code. Pure string handling with length limits on the local part and domain; no build script, proc macros, or filesystem, network, process or environment access. serde stays an optional feature lettre does not enable."
+
+[[audits.fastrand]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "2.5.0"
+notes = "#![forbid(unsafe_code)]. The wyrand generator; the thread local global generator is seeded from a DefaultHasher of Instant::now() and the thread ID (getrandom only on wasm with the js feature). Not cryptographic and documented as such: lettre uses it for MIME boundaries only. No build script, proc macros, or filesystem, network, process or environment access. Replaces the safe-to-run exemption now that it ships through lettre's builder."
 
 [[audits.getrandom]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
@@ -67,11 +97,23 @@ criteria = "safe-to-deploy"
 version = "0.6.2"
 notes = "Exif parser for TIFF, JPEG, HEIF, PNG and WebP over a caller supplied BufRead. One unsafe block in value.rs casts &Value to &UIntValue, a repr(transparent) wrapper, after checking the variant is Byte, Short or Long: sound. Entry counts use checked_mul and are checked against the remaining data before value buffers are allocated, lengths are read through take(len), IFD chains are capped at 8. Depends on mutate_once. No build script, filesystem, network, process or environment access outside tests and docs."
 
+[[audits.lettre]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.11.23"
+notes = "Reviewed the modules HyScribe builds with default features off and builder, smtp-transport, tokio1, tokio1-rustls, ring and webpki-roots: message (builder, headers, mailbox parsing and Display, MIME parts and body encodings), address (email_address and idna checks), and transport/smtp (client, async connection and net, tls, authentication, commands, extension, response parser, error, connection URL). #![forbid(unsafe_code)] and no build script or proc macros of its own. Network access is the SMTP connection to the host the caller names; TLS goes through tokio-rustls with only the root certificates the caller adds (CertificateStore::None, so the webpki-roots feature, which its build check requires, loads nothing), and the dangerous_accept_invalid_* switches stay off. Tls::Required fails when the server does not offer STARTTLS. Header values with CR or LF cannot be written: the quoted string writer returns fmt::Error for them, and the encoder RFC 2047 encodes other control characters. The response parser (nom) bounds every read; with the tracing feature off nothing is logged, so credentials and messages are not. The sendmail and file transports, which run a process and write files, and the hostname, native-tls, boring-tls, dkim, pool and serde features are compiled out."
+
 [[audits.mutate_once]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
 version = "0.1.2"
 notes = "A write once, read many interior mutability cell. Three unsafe blocks turn its UnsafeCell into a reference; a Cell state machine panics on a second mutable borrow, refuses mutation once a shared reference is out and resets in the guard's Drop, so they are sound, and the type is not Sync. No dependencies, build script or I/O."
+
+[[audits.nom]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "8.0.0"
+notes = "Parser combinators. No build script, proc macros, or filesystem, network, process or environment access. The unsafe code is in traits.rs: get_unchecked on &str at an index find() returned or at the string's end, both char boundaries, so sound. Depends on memchr. lettre parses SMTP replies with it."
 
 [[audits.png]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
@@ -85,11 +127,23 @@ criteria = "safe-to-deploy"
 version = "2.0.1"
 notes = "A single macro_rules! macro generating error enums with Display, Error and From implementations. No unsafe code, build script, proc macros, dependencies or I/O; std::fs and std::env appear only in doc comments and examples."
 
+[[audits.quoted_printable]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.5.2"
+notes = "#![forbid(unsafe_code)] and no dependencies. Quoted-printable encode and decode (RFC 2045) over byte slices with Strict and Robust decode modes and line wrapping at 76; pure functions returning owned buffers. No build script, proc macros, or filesystem, network, process or environment access."
+
 [[audits.rustls-webpki]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
 delta = "0.103.16 -> 0.103.17"
 notes = "Adds a certificate transparency SCT list parser (src/sct.rs) over untrusted::Reader with bounds checked reads and no unsafe code, records the SCT extension instead of treating it as unknown, and adds spki_for_anchor and VerifiedPath::issuer_spki, which rewrap the anchor's SubjectPublicKeyInfo. No new dependencies, build script, I/O or unsafe code."
+
+[[audits.webpki-roots]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "1.0.11"
+notes = "Data only: src/lib.rs is #![no_std] and #![forbid(unsafe_code)], and holds one const, TLS_SERVER_ROOTS, a slice of rustls-pki-types TrustAnchor values (subject, public key info, name constraints as byte strings) generated from Mozilla's root store, each commented with its PEM. No functions, build script, proc macros or I/O. Depends on rustls-pki-types only. lettre's rustls build check requires the feature; the mail transport passes CertificateStore::None, so these roots are never loaded (ADR 0016)."
 
 [[audits.weezl]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"

@@ -5,7 +5,9 @@ use hyscribe_phpser::Key;
 
 use super::*;
 use crate::options::delete_option;
-use crate::tests::{admin, check, connection, fails_at_each_step, rolled_back, text, writer};
+use crate::tests::{
+    admin, check, connection, fails_at_each_step, nothing, rolled_back, text, writer,
+};
 
 fn some(text: &str) -> Option<Vec<u8>> {
     Some(text.as_bytes().to_vec())
@@ -221,6 +223,28 @@ async fn sets_a_role() {
     .await;
 }
 
+/// The REST API's create: no role, then each role added, the second time
+/// as one the user has.
+#[tokio::test]
+async fn adds_roles() {
+    check("rest-users-create", nothing, async |write, ()| {
+        let data = UserData {
+            display_name: some("New Bie"),
+            first_name: some("New"),
+            description: some("<b>Hi</b><script>x()</script>"),
+            user_nicename: some("New Bie"),
+            user_pass: some("secret-pass"),
+            role: some(""),
+            ..new_user("newbie")
+        };
+        let id = insert_ok(write, data).await;
+        for role in ["editor", "author", "editor", ""] {
+            add_role(write, id, role.as_bytes()).await.unwrap();
+        }
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn keeps_an_unknown_role_as_a_capability() {
     let setup = async |write: &mut Write<'_>| setup_user(write, new_user("oracle-ghost")).await;
@@ -422,7 +446,8 @@ async fn new_users_return_each_database_error() {
             ..new_user("jane.doe")
         };
         wp_insert_user(write, &jane).await?;
-        wp_insert_user(write, &new_user("oracle-default")).await?;
+        let id = wp_insert_user(write, &new_user("oracle-default")).await?;
+        add_role(write, id, b"author").await?;
         Ok(())
     })
     .await;
@@ -486,7 +511,8 @@ async fn keeps_a_password_reset_key() {
         setup_user(write, user).await
     };
     check("admin-send-password-reset", setup, async |write, id| {
-        get_password_reset_key(write, id).await.unwrap();
+        let key = get_password_reset_key(write, id).await.unwrap();
+        assert!(key.key.len() == 20 && key.key.bytes().all(|b| b.is_ascii_alphanumeric()));
     })
     .await;
 }
@@ -616,24 +642,27 @@ async fn lost_passwords_return_each_database_error() {
 async fn an_email_change_waits_for_its_confirmation() {
     rolled_back(async |write| {
         let new = b"new\\'s@example.test";
-        request_email_change(write, 1, new).await.unwrap();
+        let hash = request_email_change(write, 1, new).await.unwrap();
         let waiting = get_metadata(write, Meta::User, 1, "_new_email").await;
         let waiting = waiting.unwrap();
         let [Value::Array(change)] = &waiting[..] else {
             panic!("{waiting:?}");
         };
+        assert_eq!(change[0].1.as_bytes(), hash.as_deref());
         let hash = change[0].1.as_bytes().unwrap();
         assert!(hash.len() == 32 && hash.iter().all(u8::is_ascii_hexdigit));
         assert_eq!(change[1].1.as_bytes(), Some(&b"new's@example.test"[..]));
         let own = b" admin@default-install.test";
-        request_email_change(write, 1, own).await.unwrap();
+        assert_eq!(request_email_change(write, 1, own).await.unwrap(), None);
         let gone = get_metadata(write, Meta::User, 1, "_new_email").await;
         assert!(gone.unwrap().is_empty());
     })
     .await;
     let setup = async |_: &mut Write<'_>| {};
     fails_at_each_step(setup, async |write, ()| {
-        request_email_change(write, 1, b"new@example.test").await
+        request_email_change(write, 1, b"new@example.test")
+            .await
+            .map(|_| ())
     })
     .await;
 }

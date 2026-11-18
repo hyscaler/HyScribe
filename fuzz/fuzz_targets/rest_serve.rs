@@ -215,6 +215,8 @@ fuzz_target!(|data: &[u8]| {
         cookie_user: u64::from(header.first().copied().unwrap_or(0) % 3),
         origin: header.get(1..).filter(|origin| !origin.is_empty()),
         nonce: header.get(..1),
+        remote_addr: header.get(1..).unwrap_or_default(),
+        user_agent: Some(header),
         method_override: None,
         content_type,
         body,
@@ -224,8 +226,18 @@ fuzz_target!(|data: &[u8]| {
     let site = Fuzzed { content };
     let served = match answer(&site, &request) {
         Answer::Served(served) => served,
-        // The write made, the post written is the fuzzed one.
-        Answer::Write(pending) => written(&site, &request, *pending, Outcome::Written(4)),
+        // The write made, the item written is the fuzzed one, or refused.
+        Answer::Write(pending) => {
+            let outcomes = [
+                Outcome::Written(4),
+                Outcome::Refused("rest_cannot_delete"),
+                Outcome::Exists(1),
+                Outcome::Duplicate(content.to_vec()),
+                Outcome::Cached(vec![("blogname".into(), Value::String(content.to_vec()))]),
+            ];
+            let at = usize::from(verb.get(2).copied().unwrap_or(0)) % outcomes.len();
+            written(&site, &request, *pending, outcomes[at].clone())
+        }
     };
     assert!((200..600).contains(&served.status));
 });

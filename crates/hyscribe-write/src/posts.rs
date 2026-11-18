@@ -448,6 +448,18 @@ pub async fn block_editor_view(
     Ok((id, styles))
 }
 
+/// What a view of the site editor writes, in PHP's order: the custom CSS
+/// lookup of its settings, then the theme's global styles post its
+/// preloads name, whose ID it gives. `theme` is as for [`block_editor_view`].
+pub async fn site_editor_view(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    (stylesheet, name): (&str, &str),
+) -> Result<u64> {
+    custom_css_post_lookup(write, stylesheet, name).await?;
+    get_user_global_styles_post_id(write, ctx, stylesheet).await
+}
+
 /// `wp_restore_post_revision( $revision )` of a revision: its post given
 /// the revision's title, content, excerpt and footnotes.
 pub async fn wp_restore_post_revision(

@@ -2,13 +2,11 @@
 
 //! The saves of Add User, Edit User and the profile (`user-new.php`,
 //! `user-edit.php` and `profile.php`, through `edit_user()`), and the
-//! user's Ajax writes. Mail is phase 8: PHP's mails are not sent, and the
-//! answers are those PHP gives once they are.
+//! user's Ajax writes, with the mails PHP sends of them (ADR 0016).
 
 use hyscribe_admin::actions::Asked;
 use hyscribe_admin::posts::Answer;
 use hyscribe_auth::sessions::Sessions;
-use hyscribe_config::Constants;
 use hyscribe_db::{Meta, Write};
 use hyscribe_kses::{ALLOWED_PROTOCOLS, esc_url_raw, sanitize_key};
 use hyscribe_phpser::{
@@ -22,13 +20,14 @@ use hyscribe_write::Error;
 use hyscribe_write::caps::Caps;
 use hyscribe_write::options::{add_metadata, get_metadata};
 use hyscribe_write::users::{
-    UserData, get_password_reset_key, request_email_change, retrieve_password, wp_insert_user,
-    wp_update_user,
+    UserData, get_password_reset_key, request_email_change, wp_insert_user, wp_update_user,
 };
 
 use super::screen::update_user_meta;
-use super::users::can_promote;
-use super::{Acting, Ajax, Saving, Stop, id_of, text};
+use super::users::{can_promote, retrieve_password_mail};
+use super::{Acting, Ajax, Mailed, Saving, Stop, id_of, text};
+use crate::mail::{EMAIL_FAILURE, MailSite, Queued};
+use hyscribe_mail::email_change_request;
 
 /// What PHP cannot go on with, or shows again: not ported.
 fn unported(what: &'static str) -> Stop {
@@ -207,8 +206,9 @@ async fn edit_user(
 }
 
 /// `user-new.php`'s `createuser`: the new user, past `user_register`'s
-/// admin hook, their password reset key kept when they are to be told of
-/// the account; then the users list, or the form for one who may not list
+/// admin hook, and `wp_new_user_notification()`'s mails: the admin's, and
+/// the user's with a password reset key when they are to be told of the
+/// account; then the users list, or the form for one who may not list
 /// users.
 pub(super) fn create<'a>(
     write: &'a mut Write<'_>,
@@ -222,8 +222,24 @@ pub(super) fn create<'a>(
         let id = edit_user(write, asked, (0, &current), email).await?;
         let none = Value::String(Vec::new());
         add_metadata(write, Meta::User, id, "dismissed_wp_pointers", &none, false).await?;
+        let mail_site = MailSite::read(write, asked.home).await?;
+        let user = write.user(id).await?;
+        let (login, email) = user
+            .map(|(login, user)| (login, user.email))
+            .unwrap_or_default();
+        let user = hyscribe_mail::User {
+            login: &login,
+            email: &email,
+        };
+        let mail = hyscribe_mail::new_user_to_admin(&mail_site.site(), &user);
+        site.outbox()
+            .queue(Queued::Background("wp_new_user_notification", mail));
         if lookup(asked.post, "send_user_notification").is_some() {
-            get_password_reset_key(write, id).await?;
+            let reset = get_password_reset_key(write, id).await?;
+            let mail =
+                hyscribe_mail::new_user_to_user(&mail_site.site(), &user, reset.key.as_bytes());
+            site.outbox()
+                .queue(Queued::Background("wp_new_user_notification", mail));
         }
         Ok(Answer::Redirect(if current.can("list_users", &[]) {
             format!("users?update=add&id={id}")
@@ -241,13 +257,13 @@ pub(super) fn update<'a>(
     asked: &'a Asked<'a>,
     site: &'a dyn Acting,
 ) -> Saving<'a> {
-    Box::pin(updated(write, asked, site.constants()))
+    Box::pin(updated(write, asked, site))
 }
 
 async fn updated(
     write: &mut Write<'_>,
     asked: &Asked<'_>,
-    constants: Constants,
+    site: &dyn Acting,
 ) -> Result<Answer, Stop> {
     let given = asked
         .request("user_id")
@@ -264,16 +280,23 @@ async fn updated(
     // `send_confirmation_on_profile_email()` of one's own save, the only
     // one it acts on (and always on the profile page).
     if id == asked.user {
-        let own = write.user(id).await?.map(|(_, user)| user.email);
-        let own = own.unwrap_or_default();
+        let user = write.user(id).await?;
+        let (login, own) = user
+            .map(|(login, user)| (login, user.email))
+            .unwrap_or_default();
         if email.as_deref() != Some(&own[..]) {
-            if let Some(new) = email.as_deref().filter(|email| is_email(email)) {
-                request_email_change(write, id, new).await?;
+            if let Some(new) = email.as_deref().filter(|email| is_email(email))
+                && let Some(hash) = request_email_change(write, id, new).await?
+            {
+                let mail_site = MailSite::read(write, asked.home).await?;
+                let mail = email_change_request(&mail_site.site(), &login, new, &hash);
+                let kind = "send_confirmation_on_profile_email";
+                site.outbox().queue(Queued::Background(kind, mail));
             }
             email = Some(own);
         }
     }
-    let current = Caps::load(write, asked.user, None, constants).await?;
+    let current = Caps::load(write, asked.user, None, site.constants()).await?;
     let email = email.map(|email| stripslashes(&email));
     edit_user(write, asked, (id, &current), email).await?;
     let link = if id == asked.user {
@@ -358,25 +381,39 @@ pub(in crate::admin) fn destroy_sessions(
 }
 
 /// `admin-ajax.php`'s `send-password-reset` for a user the current one may
-/// edit, as the checks found: `retrieve_password()`'s key kept, the mail
-/// taken as sent.
+/// edit, as the checks found: `retrieve_password()`'s key kept and its
+/// mail sent.
 pub(super) fn password_reset<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
-    _: &'a dyn Acting,
+    site: &'a dyn Acting,
 ) -> Saving<'a, Ajax> {
     Box::pin(async move {
         let user = write.user(id_of(lookup(asked.post, "user_id"))).await?;
         let (login, name) =
             user.map_or_else(Default::default, |(login, user)| (login, user.display_name));
-        Ok(match retrieve_password(write, &login).await? {
-            Ok(_) => {
-                let message = [&b"A password reset link was emailed to "[..], &name, b"."];
-                json(true, Value::String(message.concat()))
-            }
-            Err(refusal) => json(false, Value::String(refusal.message.into())),
-        })
+        Ok(
+            match retrieve_password_mail(write, &login, (asked, site)).await? {
+                Ok(_) => {
+                    let message = [&b"A password reset link was emailed to "[..], &name, b"."];
+                    json(true, Value::String(message.concat()))
+                }
+                Err(refusal) => json(false, Value::String(refusal.message.into())),
+            },
+        )
     })
+}
+
+/// `send-password-reset` is the only Ajax action that waits for its mail:
+/// the error PHP sends when it was not sent.
+impl Mailed for Ajax {
+    fn mailed(self, waited: usize, sent: usize) -> Ajax {
+        if sent < waited {
+            json(false, Value::String(EMAIL_FAILURE.into()))
+        } else {
+            self
+        }
+    }
 }
 
 #[cfg(test)]

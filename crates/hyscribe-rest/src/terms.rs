@@ -15,6 +15,8 @@ use crate::taxonomies::{field, shown};
 use crate::types::{context_arg, items_route};
 use crate::{Context, Endpoint};
 
+pub(crate) mod write;
+
 /// The schema's properties and their contexts; `parent` only for a
 /// hierarchical taxonomy.
 const PROPERTIES: &Properties = &[
@@ -120,15 +122,17 @@ pub(crate) fn taxonomy_endpoints(taxonomy: &'static str, single: bool) -> Vec<En
                 callback: Some(items),
             },
             Endpoint {
-                args: vec![crate::request::required("name")],
+                args: write::save_args(taxonomy, true),
                 permission: create_permission,
                 callback: None,
             },
         ];
     }
     let id = || typed("id", r#"{"type":"integer"}"#);
-    let write = |permission| Endpoint {
-        args: vec![id()],
+    let mut update = vec![id()];
+    update.extend(write::save_args(taxonomy, false));
+    let writer = |args, permission| Endpoint {
+        args,
         permission,
         callback: None,
     };
@@ -138,8 +142,8 @@ pub(crate) fn taxonomy_endpoints(taxonomy: &'static str, single: bool) -> Vec<En
             permission: item_permission,
             callback: Some(item),
         },
-        write(update_permission),
-        write(delete_permission),
+        writer(update, update_permission),
+        writer(write::delete_args(), delete_permission),
     ]
 }
 

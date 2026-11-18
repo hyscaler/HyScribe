@@ -14,7 +14,7 @@ use super::{base, prepare, template_id};
 use crate::Context;
 use crate::posts::write::{Outcome, Plan, Save, Write, Writing, as_stored};
 use crate::request::{Arg, Params, Sanitize, arg};
-use crate::response::{Response, RestError, object, text};
+use crate::response::{Response, RestError, text};
 
 /// The areas `get_allowed_block_template_part_areas()` gives.
 const AREAS: [&[u8]; 4] = [
@@ -241,14 +241,9 @@ fn answerable(
 
 /// A plan of `write`, by a user who passed `manage`.
 fn plan(context: &Context, write: Write, template: Option<Template>) -> Plan {
-    Plan {
-        user: context.user,
-        can_publish: true,
-        unfiltered_html: context.can("unfiltered_html"),
-        write,
-        previous: None,
-        template: template.map(Box::new),
-    }
+    let mut plan = Plan::new(context, write, Value::Null);
+    plan.template = template.map(Box::new);
+    plan
 }
 
 /// `create_item()` up to its write.
@@ -300,7 +295,7 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
         edit.set("context", text("edit"));
         let previous = prepare(context, &edit, &template, kind)?.data;
         let mut plan = plan(context, Write::Delete(id), None);
-        plan.previous = Some((hyscribe_model::Post::default(), previous));
+        plan.previous = previous;
         return Ok(plan);
     }
     if template.status == "trash" {
@@ -329,7 +324,8 @@ fn refused(outcome: Outcome) -> Result<u64, RestError> {
             let message = "The template cannot be deleted.";
             Err(RestError::status("rest_cannot_delete", message, 500))
         }
-        Outcome::InvalidText(_) => Err(RestError::not_ported()),
+        // Text `wpdb` refuses; a template writes no term, setting or the like.
+        _ => Err(RestError::not_ported()),
     }
 }
 
@@ -393,18 +389,14 @@ fn finish_update(
 fn finish_delete(
     context: &Context,
     params: &mut Params,
-    plan: Plan,
+    mut plan: Plan,
     outcome: Outcome,
 ) -> Result<Response, RestError> {
     let kind = kind_of(params);
     refused(outcome)?;
     params.set("context", text("edit"));
-    match (plan.template, plan.previous) {
-        (Some(template), _) => prepare(context, params, &template, kind),
-        (None, previous) => {
-            let previous = previous.map(|(_, previous)| previous).unwrap_or_default();
-            let deleted = object([("deleted", Value::Bool(true)), ("previous", previous)]);
-            Ok(Response::new(deleted, 200))
-        }
+    match plan.template.take() {
+        Some(template) => prepare(context, params, &template, kind),
+        None => Ok(plan.deleted()),
     }
 }

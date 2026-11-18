@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `WP_Theme_JSON::remove_insecure_properties( $theme_json, 'custom' )` for
-//! a user without `edit_css`, which no HyScribe user has: every value that
-//! `safecss_filter_attr()` refuses goes, and with it all custom CSS.
+//! `WP_Theme_JSON::remove_insecure_properties( $theme_json, 'custom' )`,
+//! run only for users without `unfiltered_html`, so without `edit_css`:
+//! every value `safecss_filter_attr()` refuses goes, with all custom CSS.
 
 use hyscribe_kses::{esc_attr, esc_html, sanitize_html_class};
 use hyscribe_phpser::Value;
@@ -100,6 +100,18 @@ impl Remover<'_> {
         }
     }
 
+    /// The viewport states of an element or inner block, with `pseudo`.
+    fn state_styles(&self, input: &Value, output: &mut Value, pseudo: &[&str]) {
+        for state in &self.states {
+            if php::isset(php::get(input, &[state])) {
+                let state_input = at(input, &[state]);
+                let mut state_output = self.styles(&state_input);
+                self.pseudo(&state_input, &mut state_output, pseudo);
+                php::set(output, &[state], state_output);
+            }
+        }
+    }
+
     /// `remove_insecure_element_styles( $elements, $queries )`.
     fn elements(&self, elements: &Value) -> Value {
         let mut sanitized = php::array();
@@ -110,18 +122,7 @@ impl Remover<'_> {
             }
             let mut output = self.styles(&input);
             self.pseudo(&input, &mut output, lookup(&ELEMENT_PSEUDO, name));
-            for state in &self.states {
-                if php::isset(php::get(&input, &[state])) {
-                    let state_input = at(&input, &[state]);
-                    let mut state_output = self.styles(&state_input);
-                    self.pseudo(
-                        &state_input,
-                        &mut state_output,
-                        lookup(&ELEMENT_PSEUDO, name),
-                    );
-                    php::set(&mut output, &[state], state_output);
-                }
-            }
+            self.state_styles(&input, &mut output, lookup(&ELEMENT_PSEUDO, name));
             php::set(&mut sanitized, &[name], output);
         }
         sanitized
@@ -140,18 +141,7 @@ impl Remover<'_> {
                     self.elements(&at(input, &["elements"])),
                 );
             }
-            for state in &self.states {
-                if php::isset(php::get(input, &[state])) {
-                    let state_input = at(input, &[state]);
-                    let mut state_output = self.styles(&state_input);
-                    self.pseudo(
-                        &state_input,
-                        &mut state_output,
-                        lookup(&BLOCK_PSEUDO, &name),
-                    );
-                    php::set(&mut output, &[state], state_output);
-                }
-            }
+            self.state_styles(input, &mut output, lookup(&BLOCK_PSEUDO, &name));
             php::set(&mut sanitized, &[&name], output);
         }
         sanitized

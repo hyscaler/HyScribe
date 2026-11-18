@@ -107,7 +107,7 @@ impl GlobalStyles {
 
     /// `WP_Theme_JSON::remove_insecure_properties( $config, 'custom' )`
     /// for a user without `edit_css`.
-    pub fn remove_insecure_properties(&self, config: Value) -> Value {
+    pub(crate) fn remove_insecure_properties(&self, config: Value) -> Value {
         insecure::remove_insecure_properties(config, &self.blocks, self.settings())
     }
 
@@ -127,7 +127,8 @@ impl GlobalStyles {
             &["isGlobalStylesUserThemeJSON"],
             Value::Bool(true),
         );
-        hyscribe_phpser::json_encode_hex_amp(&config)
+        // A failed wp_json_encode() leaves wp_slash( false ): nothing.
+        Some(hyscribe_phpser::json_encode_hex_amp(&config).unwrap_or_default())
     }
 
     /// A global setting, e.g. `["layout", "contentSize"]`; `None` where it

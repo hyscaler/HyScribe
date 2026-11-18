@@ -10,7 +10,7 @@
 # SHA-256 of the page without its RSD link, with the page itself in
 # target/pages/ttd.tsv for reading differences.
 #   default: reference/default-install/php.sh up
-#   ttd:     HYSCRIBE_PHP_DB=wordpress_saves HYSCRIBE_PHP_UPLOADS=ttd reference/default-install/php.sh up
+#   ttd:     HYSCRIBE_PHP_DB=wordpress_saves HYSCRIBE_PHP_UPLOADS=$PWD/target/fixtures/theme-test-data/7.1.3/uploads reference/default-install/php.sh up
 #   over the Theme Test Data fixture loaded into wordpress_saves with
 #   reference/pages/ttd-ties.sql, which tells apart the terms of one name
 #   that MariaDB would order differently from run to run (the Rust test

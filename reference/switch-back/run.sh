@@ -26,6 +26,13 @@
 # HYSCRIBE_TEST_DB_PORT for the test (the same port); HYSCRIBE_PHP_CONTAINER
 # and HYSCRIBE_PHP_PORT as php.sh, the port also the site's address that
 # HyScribe writes.
+# HYSCRIBE_SWITCH_BACK_FIXTURE=ttd runs the suite over the Theme Test Data
+# database (wordpress_ttd, built by reference/theme-test-data/build.sh)
+# with actions-ttd.list and pages-ttd.list. HyScribe's uploads folder is
+# $OUT/uploads (a copy of the fixture's for ttd), which PHP serves from.
+# A "%case%" in pages.list is the ID that case's answer gave (ids.tsv), and
+# "%ym%" the year and month folder of today's uploads; the text "-" asks for
+# no text.
 set -euo pipefail
 DOCKER="${DOCKER:-docker}"
 CARGO="${CARGO:-cargo}"
@@ -37,11 +44,26 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HERE="$ROOT/reference/switch-back"
 OUT="${1:-$ROOT/target/switch-back}"
 export HYSCRIBE_TEST_DB_PORT="${HYSCRIBE_TEST_DB_PORT:-${HYSCRIBE_DB_PORT:-33061}}"
+FIXTURE="${HYSCRIBE_SWITCH_BACK_FIXTURE:-default}"
+case "$FIXTURE" in
+  default) DBNAME=wordpress; SUFFIX="" ;;
+  ttd) DBNAME=wordpress_ttd; SUFFIX="-ttd" ;;
+  *) echo "HYSCRIBE_SWITCH_BACK_FIXTURE is default or ttd" >&2; exit 2 ;;
+esac
+export HYSCRIBE_TEST_DB_NAME="$DBNAME" HYSCRIBE_PHP_DB="$DBNAME" HYSCRIBE_DB_CONTAINER="$DB"
+export HYSCRIBE_SWITCH_BACK_LIST="$HERE/actions$SUFFIX.list"
 WP=/var/www/html
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
 export HYSCRIBE_SWITCH_BACK_OUT="$OUT"
-rm -f "$OUT"/*.log "$OUT"/*.html "$OUT"/*.jar "$OUT"/rest.tsv
+rm -rf "$OUT"/*.log "$OUT"/*.html "$OUT"/*.jar "$OUT"/rest.tsv "$OUT"/ids.tsv "$OUT/uploads"
+mkdir -p "$OUT/uploads"
+if [ "$FIXTURE" = ttd ]; then
+  cp -r "$ROOT/target/fixtures/theme-test-data/${HYSCRIBE_WP_VERSION:-7.1.3}/uploads/." "$OUT/uploads/"
+fi
+# PHP reads the uploads HyScribe wrote: its container mounts the folder.
+chmod -R a+rX "$OUT/uploads"
+export HYSCRIBE_PHP_UPLOADS="$OUT/uploads"
 
 "$ROOT/reference/default-install/db.sh" up
 reset() { "$ROOT/reference/default-install/db.sh" down; "$ROOT/reference/default-install/db.sh" up; }
@@ -54,9 +76,10 @@ if ! "$CARGO" test -p hyscribe --test switch_back -- --ignored --nocapture > "$O
   exit 1
 fi
 # The rules as HyScribe left them, which PHP's first request regenerates if empty.
-"$DOCKER" exec "$DB" mariadb -uroot -preference-only -N -B -r wordpress \
+"$DOCKER" exec "$DB" mariadb -uroot -preference-only -N -B -r "$DBNAME" \
   -e "SELECT option_value FROM wp_options WHERE option_name = 'rewrite_rules'" | head -c -1 > "$OUT/rewrite_rules.txt"
-"$DOCKER" exec "$DB" mariadb-dump -uroot -preference-only wordpress > "$OUT/hyscribe.sql"
+"$DOCKER" exec "$DB" mariadb-dump -uroot -preference-only "$DBNAME" > "$OUT/hyscribe.sql"
+chmod -R a+rX "$OUT/uploads"
 
 # PHP WordPress up on the database, checked, and down again.
 php_side() {
@@ -80,7 +103,7 @@ php_checks() {
   "$DOCKER" exec -i "$NAME" sh -c 'cat > /tmp/hyscribe-rest.tsv' < "$OUT/rest.tsv" || return 1
 
   echo "WordPress's checks (log: $OUT/check.log)"
-  "$DOCKER" exec -i "$NAME" php < "$HERE/check.php" > "$OUT/check.log" 2>&1 || failed=1
+  "$DOCKER" exec -i -e HYSCRIBE_SB_FIXTURE="$FIXTURE" "$NAME" php < "$HERE/check.php" > "$OUT/check.log" 2>&1 || failed=1
   grep '^FAIL' "$OUT/check.log" >&2 || true
 
   # Logins through wp-login.php, the second with the password HyScribe hashed.
@@ -91,26 +114,33 @@ php_checks() {
     [ "$status" = 302 ] || { echo "FAIL login as $1: $status" >&2; return 1; }
   }
   log_in admin reference-only-password || failed=1
-  log_in switchback 'Switch back 1!' || failed=1
+  [ "$FIXTURE" != default ] || log_in switchback 'Switch back 1!' || failed=1
 
   echo "Screens and pages (pages in $OUT)"
-  local n=0 user path status text jar got
+  local n=0 user path status text jar got id ym
+  ym=$(date +%Y/%m)
   while IFS=$'\t' read -r user path status text; do
     case "$user" in '#'*|'') continue ;; esac
     n=$((n + 1))
+    path="${path//\%ym\%/$ym}"
+    text="${text//\%ym\%/$ym}"
+    while IFS=$'\t' read -r case_name id; do
+      path="${path//\%$case_name\%/$id}"
+      text="${text//\%$case_name\%/$id}"
+    done < "$OUT/ids.tsv"
     jar=()
     [ "$user" = visitor ] || jar=(-b "$OUT/$user.jar")
     got=$(curl -g -s -o "$OUT/page-$n.html" -w '%{http_code}' "${jar[@]}" "$BASE$path")
     if [ "$got" != "$status" ]; then
       echo "FAIL $user $path: $got, not $status (page-$n.html)" >&2; failed=1
     fi
-    if ! grep -qF -- "$text" "$OUT/page-$n.html"; then
+    if [ "$text" != - ] && ! grep -aqF -- "$text" "$OUT/page-$n.html"; then
       echo "FAIL $user $path does not show: $text (page-$n.html)" >&2; failed=1
     fi
     if grep -qiE 'database error|Fatal error|<b>(Warning|Notice|Deprecated)</b>' "$OUT/page-$n.html"; then
       echo "FAIL $user $path shows an error (page-$n.html)" >&2; failed=1
     fi
-  done < "$HERE/pages.list"
+  done < "$HERE/pages$SUFFIX.list"
   echo "$n pages"
 
   "$DOCKER" exec "$NAME" sh -c "cat $WP/wp-content/debug.log 2>/dev/null || true" > "$OUT/debug.log"

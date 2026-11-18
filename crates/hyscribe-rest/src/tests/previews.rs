@@ -74,6 +74,8 @@ fn cached_pages_last_until_their_timeout() {
         parameters: false,
         host: b"",
         now,
+        remote_addr: b"",
+        user_agent: None,
     };
     let page = crate::url_details::cached(&at(4_102_444_800), key);
     assert!(page.unwrap().starts_with(b"<html><head><title>Cached"));

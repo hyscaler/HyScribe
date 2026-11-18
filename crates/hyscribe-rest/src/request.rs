@@ -93,6 +93,8 @@ pub(crate) enum Sanitize {
     Schema,
     /// `rest_sanitize_request_arg()`: sanitized by its schema.
     Value,
+    /// A setting's: null as given, else as [`Sanitize::Schema`].
+    Nullable,
     /// `urldecode()` of a URL parameter, a string.
     Urldecode,
     /// Left as given, for the endpoint to check: a schema whose keywords
@@ -280,10 +282,13 @@ pub(crate) fn sanitize_params(
                 Sanitize::TextField => Ok(text(sanitize_text_field(&value.to_php_string()))),
                 Sanitize::Urldecode => Ok(text(urldecode(&value.to_php_string()))),
                 Sanitize::Endpoint | Sanitize::NotPorted => Ok(value.clone()),
+                Sanitize::Nullable if *value == Value::Null => Ok(Value::Null),
                 Sanitize::Site(sanitize) => sanitize(context, value),
                 Sanitize::Params(sanitize) => sanitize(&given, value),
-                Sanitize::Schema => validate_value_from_schema(value, &arg.schema, arg.name)
-                    .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name)),
+                Sanitize::Schema | Sanitize::Nullable => {
+                    validate_value_from_schema(value, &arg.schema, arg.name)
+                        .and_then(|()| sanitize_value_from_schema(&*value, &arg.schema, arg.name))
+                }
                 Sanitize::Value | Sanitize::Validated(_) => {
                     sanitize_value_from_schema(value, &arg.schema, arg.name)
                 }
@@ -328,6 +333,18 @@ pub(crate) fn string_arg(name: &'static str) -> Arg {
 /// arguments is not ported.
 pub(crate) fn required(name: &'static str) -> Arg {
     arg(name, r#"{"required":true}"#, false, Sanitize::Endpoint)
+}
+
+/// `sanitize_title()` of a slug, as the controllers' `sanitize_slug()`.
+pub(crate) fn slug(_: &Context, slug: &Value) -> Checked<Value> {
+    Ok(text(hyscribe_render::formatting::sanitize_title(
+        &slug.to_php_string(),
+    )))
+}
+
+/// A delete's `force`, false unless given.
+pub(crate) fn force_arg() -> Arg {
+    typed("force", r#"{"type":"boolean","default":false}"#)
 }
 
 /// `get_collection_params()`: the context, the page, its size and the

@@ -242,14 +242,15 @@ fn a_starting_server_has_no_pid_yet() {
 }
 
 /// A server that holds the lock but never listens is reported with its
-/// log and stopped, and `stop` stops one while it starts.
+/// log and stopped, and `stop` stops one while it starts. The wait leaves a
+/// loaded hosts time to start the fake server and log `ready`.
 #[test]
 fn a_server_that_never_listens_times_out() {
     let home = tempfile::tempdir().unwrap();
     let paths = Paths::new(home.path());
     let mut deaf = fake_spawn(home.path(), 0);
     deaf.env.push((DEAF_VAR.to_string(), "1".to_string()));
-    let err = start(&paths, &deaf, Duration::from_secs(3)).unwrap_err();
+    let err = start(&paths, &deaf, Duration::from_secs(10)).unwrap_err();
     // The test harness prints its own lines first.
     assert!(
         matches!(&err, Error::Timeout { tail } if tail.last().unwrap() == "ready"),

@@ -1,0 +1,10 @@
+# The rows PHP WordPress writes for the action rest-categories-update (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-16 15:19:55 to 2026-11-16 15:19:55 UTC.
+# %wp_options:1% is 132.
+wp_options	category_children	+	autoload	auto
+wp_options	category_children	+	option_id	%wp_options:1%
+wp_options	category_children	+	option_name	category_children
+wp_options	category_children	+	option_value	a:0:{}
+wp_term_taxonomy	1	~	description		Desc
+wp_terms	1	~	name	Uncategorized	Renamed
+wp_terms	1	~	slug	uncategorized	renamed

@@ -17,7 +17,7 @@ use hyscribe_render::feed::{atom, atom_comments, rdf, rss2, rss2_comments, rss09
 
 use crate::query::absint;
 use crate::reads::Reads;
-use crate::{Outcome, Page, Rendered, Site, finished, html};
+use crate::{Outcome, Page, Rendered, Site, finished, html, login};
 
 /// The months of an HTTP date.
 const MONTHS: [&str; 12] = [
@@ -45,18 +45,33 @@ pub(crate) enum Format {
     Atom,
     Rdf,
     Rss092,
+    /// One no `do_feed_{$feed}` action serves, which `do_feed()` refuses.
+    Invalid,
 }
 
 impl Format {
-    /// `feed_content_type()`'s subtype.
-    fn kind(self) -> &'static str {
+    /// `feed_content_type()`.
+    fn content_type(self) -> &'static str {
         match self {
-            Format::Rss2 | Format::Rss092 => "rss",
-            Format::Atom => "atom",
-            Format::Rdf => "rdf",
+            Format::Rss2 | Format::Rss092 => "application/rss+xml",
+            Format::Atom => "application/atom+xml",
+            Format::Rdf => "application/rdf+xml",
+            Format::Invalid => "application/octet-stream",
         }
     }
 }
+
+/// `wp_die()`'s XML for `do_feed()`'s refusal, as `_xml_wp_die_handler()`
+/// prints it.
+const INVALID: &str = "<error>
+    <code>wp_die</code>
+    <title><![CDATA[WordPress &amp;rsaquo; Error]]></title>
+    <message><![CDATA[&lt;strong&gt;Error:&lt;/strong&gt; This is not a valid feed template.]]></message>
+    <data>
+        <status>404</status>
+    </data>
+</error>
+";
 
 /// A comment feed's comments, newest first.
 pub(crate) struct Comments {
@@ -185,14 +200,20 @@ pub(crate) async fn respond(
     if not_modified(headers, &last_modified, &etag) {
         return (StatusCode::NOT_MODIFIED, cache).into_response();
     }
-    let kind = feed.format.kind();
-    let content_type = format!("application/{kind}+xml; charset={charset}");
+    let content_type = format!("{}; charset={charset}", feed.format.content_type());
     if let Some(location) = feed.redirect {
         let headers = [
             (header::CONTENT_TYPE, content_type),
             (header::LOCATION, location),
         ];
         return (StatusCode::MOVED_PERMANENTLY, headers, cache).into_response();
+    }
+    if let Format::Invalid = feed.format {
+        // `nocache_headers()` takes back the `Last-Modified`.
+        let mut headers = login::nocache();
+        headers.push((header::ETAG, etag));
+        headers.push((header::CONTENT_TYPE, format!("text/xml; charset={charset}")));
+        return login::response(StatusCode::NOT_FOUND, headers, INVALID.into());
     }
     let rendering = Arc::clone(&site);
     let Page { request, title, .. } = page;
@@ -217,7 +238,8 @@ pub(crate) async fn respond(
             (Format::Atom, None) => atom(theme, &reads, &request, title, last),
             (Format::Rss2, None) => rss2(theme, &reads, &request, title, last),
             (Format::Rdf, _) => rdf(theme, &reads, &request, title, last),
-            (Format::Rss092, _) => rss092(theme, &reads, &request, title, last),
+            // An invalid feed was refused above.
+            (Format::Rss092 | Format::Invalid, _) => rss092(theme, &reads, &request, title, last),
         };
         reads.finish().map(|()| made)
     })

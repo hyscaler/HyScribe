@@ -658,7 +658,7 @@ async fn page(
     method: axum::http::Method,
     uri: Uri,
     headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
+    Query(mut query): Query<HashMap<String, String>>,
     peer: Option<axum::Extension<Peer>>,
     body: axum::body::Bytes,
 ) -> Response {
@@ -717,6 +717,11 @@ async fn page(
     }
     // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.
     let original = uri.clone();
+    // `WP_Query::parse_query()` empties a search given as an array, still a search.
+    let get = parse_str(uri.query().unwrap_or_default().as_bytes());
+    if get.get_str("s").is_some_and(|s| s.as_array().is_some()) {
+        query.insert("s".into(), String::new());
+    }
     let (uri, query) = match pretty_request(&site, uri, query).await {
         Ok(request) => request,
         Err(err) => return html(database_error(&site, &err)),
@@ -1478,17 +1483,16 @@ async fn route(
     let flag = |name| query.get(name).is_some_and(|v| !v.is_empty() && v != "0");
     let redirect = (query.get("feed").map(String::as_str) == Some("rss"))
         .then(|| rss2_location(site, path, raw_query));
-    let format = match query
-        .get("feed")
-        .map(|f| f.replace("comments-", ""))
-        .as_deref()
-    {
-        Some("rss2" | "feed") => Some(feed::Format::Rss2),
-        Some("atom") => Some(feed::Format::Atom),
-        Some("rdf") => Some(feed::Format::Rdf),
-        Some("rss") => Some(feed::Format::Rss092),
-        _ => None,
-    };
+    // `do_feed()`'s feed, without the pad of underscores; any other is refused.
+    let format = query.get("feed").filter(|f| !f.is_empty()).map(|f| {
+        match f.replace("comments-", "").trim_start_matches('_') {
+            "" | "rss2" | "feed" => feed::Format::Rss2,
+            "atom" => feed::Format::Atom,
+            "rdf" => feed::Format::Rdf,
+            "rss" => feed::Format::Rss092,
+            _ => feed::Format::Invalid,
+        }
+    });
     let bad = bad_p(query, raw_query);
     // A feed of the 404 page, with no var naming a post but a bad `p`, is
     // the posts feed of the query without that `p`, under the 404 page's

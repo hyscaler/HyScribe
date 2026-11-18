@@ -45,6 +45,13 @@ pub(crate) struct ThemeTestData {
     pub(crate) home: Vec<u8>,
 }
 
+impl ThemeTestData {
+    /// Every `wp_posts` row of the dump, whatever its status and type.
+    pub(crate) fn posts(&self) -> Vec<Post> {
+        self.dump().table("wp_posts").map(post).collect()
+    }
+}
+
 impl Source for ThemeTestData {
     fn dump(&self) -> &'static Dump {
         static DUMP: OnceLock<Dump> = OnceLock::new();
@@ -280,10 +287,15 @@ impl<T: Source> Site for T {
     }
 
     fn post_meta(&self, post_id: u64, key: &str) -> Option<Vec<u8>> {
+        self.post_meta_all(post_id, key).into_iter().next()
+    }
+
+    fn post_meta_all(&self, post_id: u64, key: &str) -> Vec<Vec<u8>> {
         self.dump()
             .table("wp_postmeta")
-            .find(|row| number(&row[1]) == post_id && text(&row[2]) == key.as_bytes())
+            .filter(|row| number(&row[1]) == post_id && text(&row[2]) == key.as_bytes())
             .map(|row| text(&row[3]))
+            .collect()
     }
 
     /// The dump's published posts grouped as `wp_get_archives()` groups

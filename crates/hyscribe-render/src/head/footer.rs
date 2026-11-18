@@ -46,7 +46,94 @@ pub fn wp_footer(site: &dyn Site, assets: &Assets) -> Vec<u8> {
             None,
         ));
     }
+    out.extend(mediaelement_scripts(&siteurl, &assets.scripts));
     out.extend(emoji_detection_script(&siteurl));
+    out
+}
+
+/// MediaElement's `mejsL10n` for locale en_US, as `wp_default_scripts()`
+/// builds it.
+const MEJS_L10N: &str = include_str!("mejs-l10n.js");
+
+/// What MediaElement's scripts depend on and `wp_print_head_scripts()`
+/// prints: jQuery, which a script enqueued while the template rendered, as
+/// a block theme's are, finds the head still to print.
+pub(crate) fn head_scripts(siteurl: &str, scripts: &[String]) -> Vec<u8> {
+    if !scripts
+        .iter()
+        .any(|h| h == "wp-mediaelement" || h == "mediaelement-vimeo")
+    {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (id, path, version) in [
+        ("jquery-core", "jquery.min.js", "3.7.1"),
+        ("jquery-migrate", "jquery-migrate.min.js", "3.4.1"),
+    ] {
+        let url = format!("{siteurl}/wp-includes/js/jquery/{path}?ver={version}");
+        let src = esc_url_raw(url.as_bytes());
+        let id = format!("{id}-js");
+        out.extend(tag(
+            b"script",
+            &[(b"id", Some(id.as_bytes())), (b"src", Some(&src))],
+            None,
+        ));
+    }
+    out
+}
+
+/// The MediaElement scripts `wp_audio_shortcode()` and `wp_video_shortcode()`
+/// enqueue, in the order they were enqueued, after what they depend on.
+pub(crate) fn mediaelement_scripts(siteurl: &str, scripts: &[String]) -> Vec<u8> {
+    let script = |id: &str, path: &str, version: &str| {
+        let url = format!("{siteurl}/wp-includes/js/mediaelement/{path}?ver={version}");
+        let src = esc_url_raw(url.as_bytes());
+        let id = format!("{id}-js");
+        tag(
+            b"script",
+            &[(b"id", Some(id.as_bytes())), (b"src", Some(&src))],
+            None,
+        )
+    };
+    let inline = |id: &str, data: &str| {
+        let text = inline_script(format!("{data}\n//# sourceURL={id}").as_bytes());
+        tag(b"script", &[(b"id", Some(id.as_bytes()))], Some(&text))
+    };
+    let version = WP_VERSION.trim();
+    let mut out = Vec::new();
+    for handle in scripts {
+        let own = match handle.as_str() {
+            "wp-mediaelement" => script("wp-mediaelement", "wp-mediaelement.min.js", version),
+            "mediaelement-vimeo" => {
+                script("mediaelement-vimeo", "renderers/vimeo.min.js", "4.2.17")
+            }
+            _ => continue,
+        };
+        if out.is_empty() {
+            out.extend(inline("mediaelement-core-js-before", MEJS_L10N));
+            out.extend(script(
+                "mediaelement-core",
+                "mediaelement-and-player.min.js",
+                "4.2.17",
+            ));
+            out.extend(script(
+                "mediaelement-migrate",
+                "mediaelement-migrate.min.js",
+                version,
+            ));
+            let path = hyscribe_kses::wp_parse_url(siteurl.as_bytes())
+                .and_then(|parts| parts.path)
+                .unwrap_or_default();
+            let path = String::from_utf8_lossy(&path)
+                .trim_end_matches('/')
+                .to_owned();
+            let settings = format!(
+                "var _wpmejsSettings = {{\"pluginPath\":\"{path}/wp-includes/js/mediaelement/\",\"classPrefix\":\"mejs-\",\"stretching\":\"responsive\",\"audioShortcodeLibrary\":\"mediaelement\",\"videoShortcodeLibrary\":\"mediaelement\"}};"
+            );
+            out.extend(inline("mediaelement-js-extra", &settings));
+        }
+        out.extend(own);
+    }
     out
 }
 

@@ -6,8 +6,8 @@
 //!
 //! The generator names HyScribe, as the page head does. Not ported
 //! yet: the Atom, RDF and RSS 0.92 feeds, comment feeds of searches and
-//! archives, comment links to a later comment page, a post's second and
-//! later enclosures, `wp_staticize_emoji()` and oEmbed in feed content.
+//! archives, comment links to a later comment page, `wp_staticize_emoji()` and
+//! oEmbed in feed content.
 
 use std::sync::OnceLock;
 
@@ -778,15 +778,20 @@ fn entry(renderer: &mut Renderer<'_>, post: &Post) -> Vec<u8> {
     .concat()
 }
 
-/// `atom_enclosure()` for the post's first `enclosure` field: the URL,
-/// then a numeric length and an allowed type in either order.
+/// `atom_enclosure()`: a link for each `enclosure` field of the post.
 fn atom_enclosure(site: &dyn Site, post: &Post) -> Vec<u8> {
     if !post.password.is_empty() {
         return Vec::new();
     }
-    let Some(field) = site.post_meta(post.id, "enclosure") else {
-        return Vec::new();
-    };
+    let hooks = site.hooks();
+    let fields = site.post_meta_all(post.id, "enclosure");
+    let links = fields.iter().map(|field| atom_enclosure_link(field));
+    links.flat_map(|link| hooks.atom_enclosure(link)).collect()
+}
+
+/// One `enclosure` field's link: the URL, then a numeric length and an
+/// allowed type in either order.
+fn atom_enclosure_link(field: &[u8]) -> Vec<u8> {
     static TYPES: OnceLock<Value> = OnceLock::new();
     let types = TYPES.get_or_init(|| hyscribe_phpser::json_decode(MIME_TYPES).unwrap_or_default());
     let allowed = |line: &[u8]| {
@@ -943,15 +948,22 @@ fn category_names(site: &dyn Site, post: &Post, filter: fn(&[u8]) -> Vec<u8>) ->
     names
 }
 
-/// `rss_enclosure()` for the post's first `enclosure` field: URL, length
-/// and type on lines of their own.
+/// `rss_enclosure()`: an element for each `enclosure` field of the post.
 fn enclosure(site: &dyn Site, post: &Post) -> Vec<u8> {
     if !post.password.is_empty() {
         return Vec::new();
     }
-    let Some(field) = site.post_meta(post.id, "enclosure") else {
-        return Vec::new();
-    };
+    let hooks = site.hooks();
+    let fields = site.post_meta_all(post.id, "enclosure");
+    let elements = fields.iter().map(|field| enclosure_element(field));
+    elements
+        .flat_map(|element| hooks.rss_enclosure(element))
+        .collect()
+}
+
+/// One `enclosure` field's element: URL, length and type on lines of their
+/// own; none for a field with fewer than three.
+fn enclosure_element(field: &[u8]) -> Vec<u8> {
     let lines: Vec<&[u8]> = field.split(|&b| b == b'\n').collect();
     let [url, length, kind, ..] = lines.as_slice() else {
         return Vec::new();

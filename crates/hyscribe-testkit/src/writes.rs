@@ -712,5 +712,28 @@ pub async fn load_default_install(db: &hyscribe_config::Database) -> Result<(), 
     Ok(())
 }
 
+/// Where `reference/theme-test-data/build.sh` leaves the Theme Test Data
+/// fixture's dump (its data is not ours to commit).
+pub const THEME_TEST_DATA: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../target/fixtures/theme-test-data/7.1.3/database.sql"
+);
+
+/// Loads the Theme Test Data fixture's `dump` afresh into `db`, as
+/// `wordpress_saves`, with the terms of one name told apart
+/// (`reference/pages/ttd-ties.sql`): the page goldens of
+/// `reference/pages/golden.sh ttd` are recorded over the same.
+pub async fn load_theme_test_data(
+    db: &hyscribe_config::Database,
+    dump: &str,
+) -> Result<(), sqlx::Error> {
+    let ties = include_str!("../../../reference/pages/ttd-ties.sql");
+    let mut conn = MySqlConnection::connect_with(&options(db)).await?;
+    sqlx::raw_sql(sqlx::AssertSqlSafe([dump, ties].concat()))
+        .execute(&mut conn)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;

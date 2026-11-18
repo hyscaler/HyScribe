@@ -545,6 +545,7 @@ async fn every_query() -> Vec<DbError> {
         db.count_terms_with_posts("category").await.unwrap_err(),
         db.option("blogname").await.unwrap_err(),
         db.post_meta(1, "x").await.unwrap_err(),
+        db.post_meta_all(1, "x").await.unwrap_err(),
         db.post_terms(1, "category").await.unwrap_err(),
         db.term(1, "category").await.unwrap_err(),
         db.term_taxonomy(1).await.unwrap_err(),
@@ -1003,6 +1004,16 @@ async fn options_meta_and_terms() {
         Some(b"default".to_vec())
     );
     assert_eq!(db.post_meta(1, "_thumbnail_id").await.unwrap(), None);
+    assert_eq!(
+        db.post_meta_all(2, "_wp_page_template").await.unwrap(),
+        [b"default".to_vec()]
+    );
+    assert!(
+        db.post_meta_all(1, "_thumbnail_id")
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let terms = db.post_terms(1, "category").await.unwrap();
     assert_eq!(
         terms,

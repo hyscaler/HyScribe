@@ -26,6 +26,11 @@ pub trait Site {
     /// `get_post_meta( $post_id, $key, true )`, `None` when unset.
     fn post_meta(&self, post_id: u64, key: &str) -> Option<Vec<u8>>;
 
+    /// `get_post_meta( $post_id, $key )`: every value, in the order stored.
+    fn post_meta_all(&self, post_id: u64, key: &str) -> Vec<Vec<u8>> {
+        self.post_meta(post_id, key).into_iter().collect()
+    }
+
     /// The published posts a `WP_Query` with `query`'s arguments finds.
     fn query(&self, query: &PostQuery) -> Vec<Post>;
 

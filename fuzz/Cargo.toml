@@ -169,6 +169,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "shortcodes"
+path = "fuzz_targets/shortcodes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "wpautop"
 path = "fuzz_targets/wpautop.rs"
 test = false

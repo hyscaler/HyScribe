@@ -55,6 +55,8 @@ pub mod registry;
 pub mod rest;
 mod rss;
 mod search;
+pub mod shortcode;
+mod shortcodes;
 pub mod site;
 pub mod site_templates;
 pub mod sitemap;

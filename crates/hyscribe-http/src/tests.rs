@@ -2967,14 +2967,17 @@ const TTD_PAGES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/pages
 /// Each request of a `reference/pages/golden.sh` list over `database`,
 /// served with the options it names, against PHP's status, location and
 /// page, or with `hashed` the page's hash, the page itself in `TTD_PAGES`.
-/// The requests of `known`, `options<TAB>path<TAB>why` lines, still differ.
+/// The requests of `known`, `options<TAB>path<TAB>why` lines, still differ;
+/// those whose `why` says `rand` show a gallery in random order, which may
+/// match by chance and which no golden can pin.
 /// Author archives are off (docs/SECURITY_MODEL.md): their count is returned.
 async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: &str) -> usize {
-    let known: Vec<(&str, &str)> = known
+    let known: Vec<(&str, &str, &str)> = known
         .lines()
         .map(|line| {
             let mut fields = line.split('\t');
-            (fields.next().unwrap(), fields.next().unwrap())
+            let (options, path) = (fields.next().unwrap(), fields.next().unwrap());
+            (options, path, fields.next().unwrap_or_default())
         })
         .collect();
     let mut sites: HashMap<String, Arc<Site>> = HashMap::new();
@@ -3030,8 +3033,11 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
             php(fields[4]) == reply.body
         };
         let same = same && reply.status.as_str() == fields[2] && location == fields[3];
-        if known.contains(&(fields[0], path.as_str())) {
-            if same {
+        let listed = known
+            .iter()
+            .find(|(options, listed, _)| *options == fields[0] && *listed == path);
+        if let Some((.., why)) = listed {
+            if same && !why.contains("rand") {
                 failures.push(format!("{} {path} matches: no longer known", fields[0]));
             }
         } else if !same {
@@ -3084,17 +3090,27 @@ async fn listed_pages_match_php() {
 /// which `reference/pages/ttd-list.sh` builds from its database: every
 /// post, page, attachment and archive, searches, feeds, comment pages and
 /// both kinds of front page, by hash, as the fixture's content is not ours
-/// to commit. The known differences name what is not ported: attachment
-/// pages and their redirect to the file, core's shortcodes, duotone, oEmbed,
-/// the RSS block, a post's later enclosures, image loading priorities, the
-/// navigation fallback from a classic menu; and terms of the same name,
-/// whose order MariaDB leaves open (`term-ties`).
+/// to commit, loaded into `wordpress_saves` with the terms of one name told
+/// apart (`reference/pages/ttd-ties.sql`), as MariaDB orders them
+/// differently from run to run. The known differences name what is not
+/// ported: attachment pages and their redirect to the file, duotone, oEmbed,
+/// the RSS block, image loading priorities, the navigation fallback from a
+/// classic menu; and galleries `orderby="rand"`, which no two runs repeat.
 #[tokio::test(flavor = "multi_thread")]
 async fn theme_test_data_pages_match_php() {
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    let dump = std::fs::read_to_string(hyscribe_testkit::writes::THEME_TEST_DATA).unwrap();
+    hyscribe_testkit::writes::load_theme_test_data(&db, &dump)
+        .await
+        .unwrap();
     let golden = include_str!("../tests/golden/pages-ttd.tsv");
     let known = include_str!("../tests/golden/pages-ttd-known.tsv");
     assert_eq!(
-        assert_listed_pages("wordpress_ttd", golden, true, known).await,
+        assert_listed_pages("wordpress_saves", golden, true, known).await,
         10
     );
     assert_eq!(golden.lines().count(), 747);

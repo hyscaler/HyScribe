@@ -710,3 +710,145 @@ async fn a_set_password_stores_its_hash() {
     })
     .await;
 }
+
+const LOGIN_URL: &str = "http://127.0.0.1:8081/wp-login.php";
+
+fn codes(refused: &[Rejected]) -> Vec<&str> {
+    refused.iter().map(|error| error.code).collect()
+}
+
+/// The registration form's users and refusals (the oracle's
+/// `login-register`): a new user with the default role, a reset key and the
+/// password nag, and nothing written for a login with a space before it, a
+/// taken login or address, a login too long or an empty form.
+#[tokio::test]
+async fn registers_users_as_php_does() {
+    let setup = async |write: &mut Write<'_>| {
+        insert_ok(write, new_user("oracle-taken")).await;
+    };
+    check("login-register", setup, async |write, ()| {
+        let cases: [(&[u8], &[u8], Option<&str>); 6] = [
+            (b"oracle-new", b"oracle-new@example.test", None),
+            (b" 10", b"ten@example.test", Some("invalid_username")),
+            (
+                b"oracle-taken",
+                b"free@example.test",
+                Some("username_exists"),
+            ),
+            (
+                b"oracle-fresh",
+                b"oracle-taken@example.test",
+                Some("email_exists"),
+            ),
+            (&[b'a'; 61], b"long@example.test", Some("registerfail")),
+            (b"", b"", Some("empty_username")),
+        ];
+        for (login, email, code) in cases {
+            let registered = register_new_user(write, (login, email), LOGIN_URL).await;
+            match (registered.unwrap(), code) {
+                (Ok(key), None) => {
+                    assert_eq!((&key.login[..], &key.email[..]), (login, email));
+                    assert!(key.key.len() == 20 && key.id > 1);
+                }
+                (Err(refused), Some(code)) => assert_eq!(refused[0].code, code),
+                (other, code) => panic!("{other:?} {code:?}"),
+            }
+        }
+    })
+    .await;
+}
+
+fn rejected_as(code: &'static str, message: &str) -> Rejected {
+    Rejected {
+        code,
+        message: message.into(),
+    }
+}
+
+/// Each error with its message, in the order the form adds them: the
+/// username's, then the address's.
+#[tokio::test]
+async fn registration_errors_read_as_php_s() {
+    rolled_back(async |write| {
+        insert_ok(write, new_user("taken")).await;
+        let admin = write.user(1).await.unwrap().unwrap().1.email;
+        let cases: [(&[u8], &[u8], &[&str]); 9] = [
+            (b"", b"", &["empty_username", "empty_email"]),
+            (b"0", b"x", &["invalid_username", "invalid_email"]),
+            (b"<b>", b"a@b", &["empty_username", "invalid_email"]),
+            (b"a/b", b"a@b.test", &["invalid_username"]),
+            (b" taken", b"a@b.test", &["invalid_username"]),
+            (b"taken", b"a@b.test", &["username_exists"]),
+            (b"Taken", b"a@b.test", &["username_exists"]),
+            (b"fine", b"taken@example.test", &["email_exists"]),
+            (b"fine", b"a@b.test", &[]),
+        ];
+        for (login, email, expected) in cases {
+            let registered = register_new_user(write, (login, email), LOGIN_URL).await;
+            match registered.unwrap() {
+                Ok(_) => assert!(expected.is_empty(), "{login:?}"),
+                Err(refused) => assert_eq!(codes(&refused), expected, "{login:?}"),
+            }
+        }
+        let refused = register_new_user(write, (b"taken", b""), LOGIN_URL).await;
+        let used = "<strong>Error:</strong> This username is already registered. Please choose another one.";
+        let empty = "<strong>Error:</strong> Please type your email address.";
+        assert_eq!(
+            refused.unwrap().unwrap_err(),
+            [
+                rejected_as("username_exists", used),
+                rejected_as("empty_email", empty)
+            ]
+        );
+        let refused = register_new_user(write, (b"fine2", b"taken@example.test"), LOGIN_URL)
+            .await
+            .unwrap()
+            .unwrap_err();
+        let link = "<strong>Error:</strong> This email address is already registered. <a href=\"http://127.0.0.1:8081/wp-login.php\">Log in</a> with this address or choose another one.";
+        assert_eq!(refused, [rejected_as("email_exists", link)]);
+        let refused = register_new_user(write, (&[b'a'; 61], b"long@example.test"), LOGIN_URL)
+            .await
+            .unwrap()
+            .unwrap_err();
+        let admin = String::from_utf8(admin).unwrap();
+        let fail = format!(
+            "<strong>Error:</strong> Could not register you&hellip; please contact the <a href=\"mailto:{admin}\">site admin</a>!"
+        );
+        assert_eq!(refused, [rejected_as("registerfail", &fail)]);
+        let invalid = register_new_user(write, (b"a/b", b"new@example.test"), LOGIN_URL).await;
+        let message = "<strong>Error:</strong> This username is invalid because it uses illegal characters. Please enter a valid username.";
+        assert_eq!(
+            invalid.unwrap().unwrap_err(),
+            [rejected_as("invalid_username", message)]
+        );
+        let wrong = register_new_user(write, (b"fine3", b"a@b"), LOGIN_URL).await;
+        let message = "<strong>Error:</strong> The email address is not correct.";
+        assert_eq!(
+            wrong.unwrap().unwrap_err(),
+            [rejected_as("invalid_email", message)]
+        );
+    })
+    .await;
+}
+
+/// Every failed statement of a registration, passing or refused, fails it.
+#[tokio::test]
+async fn registrations_return_each_database_error() {
+    let setup = async |write: &mut Write<'_>| insert_ok(write, new_user("taken")).await;
+    fails_at_each_step(setup, async |write, _| {
+        register_new_user(write, (b"fresh", b"fresh@example.test"), LOGIN_URL)
+            .await?
+            .unwrap();
+        register_new_user(write, (b"taken", b"other@example.test"), LOGIN_URL)
+            .await?
+            .unwrap_err();
+        register_new_user(write, (b"other", b"taken@example.test"), LOGIN_URL)
+            .await?
+            .unwrap_err();
+        register_new_user(write, (&[b'a'; 61], b"long@example.test"), LOGIN_URL)
+            .await?
+            .unwrap_err();
+        Ok(())
+    })
+    .await;
+}

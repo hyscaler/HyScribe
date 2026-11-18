@@ -257,8 +257,10 @@ async fn actions_stop_whole() {
         write.fail_after(budget);
         match inserted(Ok(write), &ctx, &prepared).await {
             Ok(_) => break,
-            Err(hyscribe_write::Error::Db(_)) => budget += 1,
-            Err(err) => panic!("{err:?}"),
+            Err(err) => {
+                assert!(spent(&err), "{err:?}");
+                budget += 1;
+            }
         }
     }
     // A scaled image's attached file is saved with its metadata.
@@ -272,8 +274,9 @@ async fn actions_stop_whole() {
     for budget in 0.. {
         let mut write = writer.begin_on(&mut outer).await.unwrap();
         write.fail_after(budget);
-        if saved(Ok(write), id, &generated).await.is_ok() {
-            break;
+        match saved(Ok(write), id, &generated).await {
+            Ok(()) => break,
+            Err(err) => assert!(spent(&err), "{err:?}"),
         }
     }
     // A database whose version the writer does not support.
@@ -285,4 +288,10 @@ async fn actions_stop_whole() {
     assert!(inserted(refused, &ctx, &prepared).await.is_err());
     let refused = writer.begin_on(&mut outer).await;
     assert!(saved(refused, id, &generated).await.is_err());
+}
+
+/// Whether `err` is the test's statement budget running out: only that may
+/// stop a write a budget loop retries, so one that always fails ends it.
+fn spent(err: &hyscribe_write::Error) -> bool {
+    matches!(err, hyscribe_write::Error::Db(db) if db.to_string().contains("budget is spent"))
 }

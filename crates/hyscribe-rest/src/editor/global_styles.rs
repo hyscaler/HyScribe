@@ -281,10 +281,10 @@ fn update_args() -> Vec<Arg> {
     ]
 }
 
-/// The update of a global styles post, which [`endpoints`] leaves to the
-/// writer.
-pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
-    (regex == POST_ROUTE && index == 1).then_some(Writing {
+/// The update of a global styles post, the route's one endpoint without a
+/// callback, which [`endpoints`] leaves to the writer.
+pub(crate) fn writing(regex: &str, _: usize) -> Option<Writing> {
+    (regex == POST_ROUTE).then_some(Writing {
         unported: |_| false,
         args: |_, _, args| args,
         plan: plan_update,
@@ -341,7 +341,6 @@ fn plan_update(context: &Context, params: &Params) -> Result<Plan, RestError> {
     let given = |name| params.get(name).filter(|value| **value != Value::Null);
     let mut save = Save {
         id: post.id,
-        post_type: "wp_global_styles".into(),
         ..Save::default()
     };
     if given("styles").is_some() || given("settings").is_some() {

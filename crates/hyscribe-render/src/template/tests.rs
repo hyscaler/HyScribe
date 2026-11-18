@@ -503,3 +503,21 @@ fn synced_patterns_match_php() {
     }
     assert_eq!(cases.len(), 13);
 }
+
+/// An empty template renders nothing and enqueues no skip link, as the
+/// blank page of `reference/pages/golden.sh site-edits` shows.
+#[test]
+fn empty_templates_render_nothing() {
+    let theme = twentytwentyfive();
+    let site = crate::fixture::DefaultInstall { home: Vec::new() };
+    let request = Request::default();
+    for template in [&b""[..], b"0"] {
+        let (html, assets) = render_template(&theme, &site, &request, template);
+        assert!(html.is_empty());
+        let head = crate::head::wp_head(&theme, &site, &request, &assets, b"T");
+        assert!(!String::from_utf8(head).unwrap().contains("skip-link"));
+    }
+    let (_, assets) = render_template(&theme, &site, &request, b"<p>x</p>");
+    let head = crate::head::wp_head(&theme, &site, &request, &assets, b"T");
+    assert!(String::from_utf8(head).unwrap().contains("skip-link"));
+}

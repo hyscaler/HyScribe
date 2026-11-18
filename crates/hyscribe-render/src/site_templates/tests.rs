@@ -9,15 +9,19 @@ use crate::post::body_class;
 use crate::theme::twentytwentyfive;
 
 /// The default install with post 1's and page 2's `_wp_page_template` as
-/// given, `None` for none.
+/// given, `None` for none, and the privacy policy page option as given.
 struct Templated {
     base: DefaultInstall,
     template: Option<Vec<u8>>,
+    policy: Option<Vec<u8>>,
 }
 
 impl Site for Templated {
     fn option(&self, name: &str) -> Option<Vec<u8>> {
-        self.base.option(name)
+        match name {
+            "wp_page_for_privacy_policy" => self.policy.clone(),
+            _ => self.base.option(name),
+        }
     }
     fn home_url(&self) -> Vec<u8> {
         self.base.home_url()
@@ -52,6 +56,7 @@ fn page_templates_match_php() {
                 home: b"http://127.0.0.1:8081".to_vec(),
             },
             template: (fields[0] != "-").then(|| unhex(fields[0])),
+            policy: None,
         };
         let request = site.base.request(match fields[1] {
             "1" => "p=1",
@@ -90,6 +95,7 @@ fn attachments_have_no_page_template() {
     let site = Templated {
         base: DefaultInstall { home: Vec::new() },
         template: Some(b"wp-custom-template-landing".to_vec()),
+        policy: None,
     };
     let mut request = site.base.request("p=1");
     request.posts[0].post_type = "attachment".into();
@@ -245,4 +251,42 @@ fn saved_parts_take_the_place_of_files() {
     let (file, area) = theme.part(b"footer").unwrap();
     assert_eq!(part(b"footer"), Some((file.to_vec(), area.to_vec())));
     assert_eq!(part(b"nothing"), None);
+}
+
+/// The privacy policy page's body class, the option naming page 2 by ID,
+/// name or title, as `reference/pages/golden.sh site-edits` recorded it;
+/// none where it names another page.
+#[test]
+fn privacy_policy_pages_match_php() {
+    let golden = include_str!("../../../hyscribe-http/tests/golden/pages-site-edits.tsv");
+    let class = |policy: &[u8]| {
+        let site = Templated {
+            base: DefaultInstall { home: Vec::new() },
+            template: Some(b"default".to_vec()),
+            policy: Some(policy.to_vec()),
+        };
+        let request = site.base.request("page_id=2");
+        String::from_utf8(body_class(&site, &request, "twentytwentyfive")).unwrap()
+    };
+    let mut count = 0;
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let Some(policy) = fields[0].strip_prefix("wp_page_for_privacy_policy=") else {
+            continue;
+        };
+        if policy.contains('&') {
+            continue;
+        }
+        let page = String::from_utf8(unhex(fields[4])).unwrap();
+        let php = page.split("<body class=\"").nth(1).unwrap();
+        let php = php.split('"').next().unwrap();
+        assert_eq!(
+            class(&hyscribe_phpser::urldecode(policy.as_bytes())),
+            php,
+            "{policy}"
+        );
+        count += 1;
+    }
+    assert_eq!(count, 3);
+    assert!(!class(b"3").contains("privacy-policy"));
 }
